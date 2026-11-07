@@ -15150,7 +15150,7 @@ static struct coop_award {
 static int coop_aw_n;
 static int coop_audits;                     /* the game's audit add is hooked */
 static unsigned long coop_turn_ms;          /* when the turn up began */
-static struct { char words[28], who[24]; unsigned long long value; } coop_won[COOP_AWARDS];
+static struct { char words[28], who[24]; unsigned long long value; unsigned mask; } coop_won[COOP_AWARDS];   /* mask: the winners, a bit a teammate (1 << t-1) */
 static int coop_won_n;
 static unsigned coop_won_game;              /* the game they are of (chg_game_now()) */
 
@@ -15259,6 +15259,8 @@ static void coop_awards_end(unsigned n)
         for (k = 0; k + 1 < sizeof coop_won[0].words && a->words[k]; k++) coop_won[coop_won_n].words[k] = a->words[k];
         coop_won[coop_won_n].words[k] = 0;
         coop_won[coop_won_n].value = top;
+        for (coop_won[coop_won_n].mask = 0, k = 0; k < n; k++)
+            if (a->got[k] == top) coop_won[coop_won_n].mask |= 1u << k;
         coop_won_n++;
     }
     if (coop_aw_n)
@@ -15764,6 +15766,79 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     }
 }
 
+/* ---- PAD-1028 round 2: the awards on the winners' character cards at the game's end ----------------------------
+ * DoomWalrus666: "I want the players selected Godzilla character portrait to be shown next to their awards at the end
+ * of the game". A card with co-op characters (PAD-1031) carries an award card per character in the HUD scene beside
+ * the pick's screens (`PadCoopAward_<n>`: its portrait and name; its words line `PadCoopAward_<n>_Words` is the
+ * runtime's). When the co-op game is over (inside the game's player change, on its own thread, before its match and
+ * high scores) the game's end waits while each award is shown on each winner's card in turn - the words say the award,
+ * the teammate and the count - COOP_CARD_MS each, COOP_CARDS_MAX_MS in all, the game's own process sleeping a tick at
+ * a time (`site proc_sleep`, as PAD-622's hold). A winner with no character, or no card found, is left out here; the
+ * attract mode's champion pages show every award as before. coop.cfg: `award_cards on`. */
+#define COOP_CARD_MS       3500ul
+#define COOP_CARDS_MAX_MS 42000ul
+static int coop_cards_on;                   /* coop.cfg asks for them */
+static void *coop_card[COOP_CHARS], *coop_card_words[COOP_CHARS];
+static int coop_cards_found;
+
+/* the cards, found once the HUD scene is up (with the pick's screens), all hidden */
+static void coop_cards_find(void)
+{
+    int i, got = 0;
+    char name[40];
+    if (!coop_cards_on || coop_cards_found || !coop_scr_scene[0]) return;
+    for (i = 0; i < coop_ch_n; i++) {
+        pm_snprintf(name, sizeof name, "PadCoopAward_%d", i + 1);
+        if (!coop_card[i]) coop_card[i] = pm_node(coop_scr_scene, name);
+        pm_snprintf(name, sizeof name, "PadCoopAward_%d.PadCoopAward_%d_Words", i + 1, i + 1);
+        if (!coop_card_words[i]) coop_card_words[i] = pm_text(coop_scr_scene, name);
+        got += coop_card[i] != 0;
+    }
+    if (!got) return;
+    for (i = 0; i < coop_ch_n; i++) if (coop_card[i]) pm_show(coop_card[i], 0);
+    coop_cards_found = 1;
+    say("co-op awards: %d of the characters' %d award cards found in %s - hidden until the game's end", got, coop_ch_n,
+        coop_scr_scene);
+}
+
+/* an award card's words: "MOST POINTS  PLAYER 2  9,982,980" (tests lift it verbatim) */
+static void coop_card_words_of(char *out, unsigned cap, const char *award, unsigned t, unsigned long long value)
+{
+    char num[32];
+    pm_commas(num, sizeof num, value);
+    pm_snprintf(out, cap, "%s  PLAYER %u  %s", award, t, num);
+}
+
+/* the game is over (coop_change_wrap, the game's thread): each award on each winner's card in turn */
+static void coop_cards_show(unsigned n)
+{
+    unsigned long t0 = pm_ms(), at;
+    int i, shown = 0;
+    unsigned t;
+    char words[64];
+    if (!coop_cards_on || !coop_won_n) return;
+    coop_cards_find();
+    if (!coop_cards_found || !fn("proc_sleep")) {
+        say("co-op awards: no award card to show them on (%s) - the attract mode's pages show them",
+            !coop_cards_found ? "none found in the HUD scene" : "the port names no proc_sleep");
+        return;
+    }
+    for (i = 0; i < coop_won_n && pm_ms() - t0 < COOP_CARDS_MAX_MS; i++)
+        for (t = 1; t <= n && t <= 4 && pm_ms() - t0 < COOP_CARDS_MAX_MS; t++) {
+            int c = coop_pick_of[t];
+            if (!(coop_won[i].mask & (1u << (t - 1))) || c < 0 || c >= coop_ch_n || !coop_card[c]) continue;
+            coop_card_words_of(words, sizeof words, coop_won[i].words, t, coop_won[i].value);
+            if (coop_card_words[c]) pm_set_text(coop_card_words[c], words);
+            pm_show(coop_card[c], 1);
+            say("co-op awards: %s on %s's card", words, coop_ch[c].name);
+            for (at = pm_ms(); pm_ms() - at < COOP_CARD_MS; )
+                ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+            pm_show(coop_card[c], 0);
+            shown++;
+        }
+    say("co-op awards: %d shown on the winners' cards in %lu ms - then the game's end goes on", shown, pm_ms() - t0);
+}
+
 /* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown */
 static void coop_screens_tick(void)
 {
@@ -15783,6 +15858,7 @@ static void coop_screens_tick(void)
         for (i = 0; i <= coop_ch_n; i++) if (coop_scr[i]) pm_show(coop_scr[i], 0);
         coop_scr_found = 1;
         coop_scr_shown = -1;
+        coop_cards_find();                                    /* PAD-1028 round 2: the award cards, hidden with them */
         say("co-op characters: %d of the pick's %d screens found in %s - hidden until the pick is on one", got,
             coop_ch_n + 1, coop_scr_scene);
     }
@@ -16221,6 +16297,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
         say("co-op: the game's end counts %u player(s): one match draw and one high score for the team",
             *coop_players_byte);
         coop_awards_end(n);                                   /* PAD-1028 */
+        coop_cards_show(n);                                   /* PAD-1028 round 2: on the winners' character cards */
     }
     return ret;
 }
@@ -16233,6 +16310,7 @@ static void coop_line(const char *s)
     if (!*s || *s == '#') return;
     if (str_starts(s, "coop on")) { coop.on = 1; return; }
     if (str_starts(s, "award ")) { coop_award_line(s + 6); return; }      /* PAD-1028 */
+    if (str_starts(s, "award_cards on")) { coop_cards_on = 1; return; }  /* PAD-1028 round 2 */
     if (str_starts(s, "character ")) { coop_char_line(s + 10); return; }  /* PAD-1031 */
     if (str_starts(s, "pick on")) { coop_pick_on = 1; return; }
     if (str_starts(s, "screens ")) {                                      /* PAD-1031: the pick's own screens */

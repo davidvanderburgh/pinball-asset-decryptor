@@ -33,6 +33,7 @@ static void coop_pick_open(unsigned t) { (void)t; }
 static void coop_chars_begin(void) {}
 static void coop_chars_turn(void) {}
 static void coop_cache_let_go(void) {}
+static void coop_cards_show(unsigned n) { (void)n; }    /* PAD-1028 round 2: the awards on the characters' cards */
 static int coop_switched_on(void) { return 1; }          /* round 2: CO-OP PLAY says On (test_pad1017_coop_lines.py) */
 /* the framework's own, modelled */
 static unsigned game_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)

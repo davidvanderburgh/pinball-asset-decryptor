@@ -9641,7 +9641,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 if _line.startswith("co-op play: "):         # PAD-1017: and co-op's, not "Random clips"
                     log("Co-op play: %s." % _line[len("co-op play: "):].rstrip("."), "info")
                     continue
-                if _line.startswith("co-op awards "):       # PAD-1028's line too
+                if _line.startswith(("co-op awards ", "co-op characters")):   # PAD-1028's and PAD-1031's lines too
                     log("Co-op play: %s." % _line.rstrip("."), "info")
                     continue
                 log("%s: %s." % ("Modes" if _modes_on else "Random clips",

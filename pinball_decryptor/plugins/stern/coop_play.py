@@ -1103,3 +1103,115 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     a = out[..., 3:4].astype(np.uint16)
     out[..., :3] = (out[..., :3].astype(np.uint16) * a // 255).astype(np.uint8)
     return out
+
+
+# ---- PAD-1028 round 2: the awards on the winners' character cards ---------------------------------------------------
+# DoomWalrus666: "I want the players selected Godzilla character portrait to be shown next to their awards at the end
+# of the game". A card with characters gets an award card per character beside the pick's screens: the pick card's
+# look, its portrait in the lit frame and its name, and a words line the runtime fills at the game's end with the award,
+# the teammate and the count (pad_mode_runtime.c "the awards on the winners' character cards"). coop.cfg: award_cards.
+
+#: an award card's node: ``PadCoopAward_<n>`` (1-based, the character's place)
+AWARD_NODE = "PadCoopAward_%d"
+#: where an award card sits on the 1360x768 glass, and its size: the middle, above the score panels
+AWARD_AT = (240, 110)
+AWARD_SIZE = (880, 460)
+#: the band at the card's foot the runtime's words line goes in (its top, from the card's top). The game's text fits
+#: itself to its box and centres in it (Godzilla's FlashyText), and its middle sits at the box's y: the box is the
+#: card's width less a margin (words_scale), centred, its y the band's middle (emulator, Godzilla LE 1.16)
+AWARD_WORDS_Y = 404
+AWARD_WORDS_SCALE = 0.93
+AWARD_WORDS_X = round(AWARD_SIZE[0] * (1 - AWARD_WORDS_SCALE) / 2, 1)
+AWARD_TITLE = "CO-OP AWARD"
+
+
+def award_card(project, characters, index, theme=None, scale=2):
+    """Character *index*'s award card as an RGBA array of :data:`AWARD_SIZE`: the header, its portrait in a lit
+    frame, its name, and an empty band at the foot for the runtime's words."""
+    import math
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    chars = [dict(c) for c in _characters(characters)["list"]]
+    for c_ in chars:
+        c_["tag"] = tag_of(c_["name"], [x["name"] for x in chars])
+    c = chars[index]
+    th = theme_of(theme)
+    A, A2 = _hex(th["accent"]), _hex(th["accent2"])
+    S = scale
+    W, H = AWARD_SIZE[0] * S, AWARD_SIZE[1] * S
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    body = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(body)
+    for y in range(H):
+        t = y / H
+        bd.line([(0, y), (W, y)], fill=(int(10 + 16 * t), int(12 + 6 * t), int(20 + 10 * (1 - t)), 255))
+    for x in range(0, W, 28 * S):
+        bd.line([(x, 0), (x, H)], fill=(30, 34, 48, 255), width=S)
+    for y in range(0, H, 28 * S):
+        bd.line([(0, y), (W, y)], fill=(30, 34, 48, 255), width=S)
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=26 * S, fill=255)
+    img.paste(body, (0, 0), mask)
+    img = _glow(img, (4 * S, 4 * S, W - 5 * S, H - 5 * S), 24 * S, A[:3] + (200,), 6 * S, 4 * S)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((3 * S, 3 * S, W - 4 * S, H - 4 * S), radius=25 * S, outline=A[:3] + (255,), width=3 * S)
+    # the header: CO-OP AWARD, a rule, a star
+    hf = _fit(d, AWARD_TITLE, _DISPLAY_FONTS, W * 0.6, 44 * S)
+    d.text((40 * S, 42 * S), AWARD_TITLE, font=hf, fill=(255, 255, 255, 255), anchor="lm")
+    tw = d.textlength(AWARD_TITLE, font=hf)
+    d.line([(40 * S + tw + 18 * S, 42 * S), (W - 90 * S, 42 * S)], fill=A[:3] + (150,), width=2 * S)
+    cx, cy, r1, r2 = W - 58 * S, 42 * S, 22 * S, 9 * S
+    d.polygon([(cx + (r1 if k % 2 == 0 else r2) * math.sin(k * math.pi / 5),
+                cy - (r1 if k % 2 == 0 else r2) * math.cos(k * math.pi / 5)) for k in range(10)], fill=A[:3] + (255,))
+    # the portrait, in a lit frame
+    px, py, pw, ph = 40 * S, 80 * S, 340 * S, 300 * S
+    img = _glow(img, (px - 4 * S, py - 4 * S, px + pw + 4 * S, py + ph + 4 * S), 16 * S, A[:3] + (230,), 10 * S, 6 * S)
+    por = _portrait(project, c, pw, ph, th["accent"], th["accent2"])
+    pm = Image.new("L", (pw, ph), 0)
+    ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=14 * S, fill=255)
+    img.paste(por, (px, py), pm)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=14 * S, outline=A[:3] + (255,), width=3 * S)
+    # the name, big, with its tag faint behind it
+    ix, iw = px + pw + 40 * S, W - (px + pw + 40 * S) - 40 * S
+    wm = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    wf = _fit(ImageDraw.Draw(wm), c["tag"], _DISPLAY_FONTS, iw * 0.9, 240 * S, 60 * S)
+    ImageDraw.Draw(wm).text((W - 50 * S, 240 * S), c["tag"], font=wf, fill=A[:3] + (18,), anchor="rm")
+    img = Image.alpha_composite(img, wm)
+    d = ImageDraw.Draw(img)
+    nf = _fit(d, c["name"], _DISPLAY_FONTS, iw, 84 * S, 28 * S)
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).text((ix + 4 * S, 200 * S + 5 * S), c["name"], font=nf, fill=(0, 0, 0, 220), anchor="ls")
+    img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(4 * S)))
+    d = ImageDraw.Draw(img)
+    d.text((ix, 200 * S), c["name"], font=nf, fill=(255, 255, 255, 255), anchor="ls", stroke_width=max(1, S),
+           stroke_fill=(0, 0, 0, 255))
+    nw = min(iw - 40 * S, d.textlength(c["name"], font=nf))
+    d.rectangle((ix, 214 * S, ix + nw, 220 * S), fill=A[:3] + (255,))
+    d.rectangle((ix + nw + 8 * S, 214 * S, ix + nw + 40 * S, 220 * S), fill=A2[:3] + (255,))
+    # the band the runtime's words go in
+    by = AWARD_WORDS_Y * S
+    d.rounded_rectangle((24 * S, by - 6 * S, W - 25 * S, H - 18 * S), radius=14 * S, fill=(6, 8, 14, 255),
+                        outline=A2[:3] + (200,), width=2 * S)
+    base = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    base.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
+    img = Image.alpha_composite(base, img)
+    out = np.asarray(img.resize(AWARD_SIZE, Image.LANCZOS), dtype=np.uint8).copy()
+    a = out[..., 3:4].astype(np.uint16)                          # premultiplied, as the pick card (the game blends so)
+    out[..., :3] = (out[..., :3].astype(np.uint16) * a // 255).astype(np.uint8)
+    return out
+
+
+def award_screens(project, characters=None):
+    """The award cards for :func:`.scene_write.add_screens`, one per character (``PadCoopAward_1`` ...); ``[]`` when
+    the project's characters have no pick. Their words line starts empty: the runtime writes it."""
+    chars = _characters(characters if characters is not None else load_characters(project))
+    if not chars["pick"] or not chars["list"]:
+        return []
+    out = []
+    for i in range(len(chars["list"])):
+        name = AWARD_NODE % (i + 1)
+        out.append(dict(name=name, art_rgba=award_card(project, chars, i, chars.get("theme")), words=" ",
+                        words_name=name + "_Words", x=float(AWARD_AT[0]), y=float(AWARD_AT[1]),
+                        words_at=(AWARD_WORDS_X, float(AWARD_WORDS_Y + 16)), words_scale=AWARD_WORDS_SCALE))
+    return out

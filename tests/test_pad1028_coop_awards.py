@@ -282,6 +282,70 @@ def test_the_modes_tab_awards_dialog(tmp_path, monkeypatch):
     assert 'call("modes.coop_award_set", r.key, v, null)' in js and 'call("modes.coop_awards_defaults")' in js
 
 
+def test_each_character_has_an_award_card_with_its_portrait(tmp_path):
+    """Round 2 (DoomWalrus666: the players' character portraits next to their awards): an award card per character,
+    the pick card's look, its picture in the portrait frame, and an empty words line the runtime fills."""
+    from PIL import Image
+    project = str(tmp_path)
+    CP.save(project, True)
+    CP.save_characters(project, {"pick": True, "list": [{"name": "GODZILLA 1954", "ability": "longer_save"},
+                                                        {"name": "SHIN GODZILLA", "ability": ""}]})
+    pic = tmp_path / "shin.png"
+    Image.new("RGBA", (300, 200), (10, 120, 10, 255)).save(pic)
+    CP.save_picture(project, 1, str(pic))
+    cards = CP.award_screens(project)
+    assert [c["name"] for c in cards] == ["PadCoopAward_1", "PadCoopAward_2"]
+    for c in cards:
+        assert c["art_rgba"].shape == (CP.AWARD_SIZE[1], CP.AWARD_SIZE[0], 4) and c["words"] == " "
+        assert c["words_name"] == c["name"] + "_Words" and (c["x"], c["y"]) == CP.AWARD_AT
+        assert c["words_at"][1] > CP.AWARD_WORDS_Y                   # the words in the band at the foot
+    px, py = 40 + 170, 80 + 150                                        # the portrait's middle: card 2's picture
+    assert tuple(cards[1]["art_rgba"][py, px][:3]) == (10, 120, 10)
+    assert tuple(cards[0]["art_rgba"][py, px][:3]) != (10, 120, 10)    # card 1 has no picture: the monogram plate
+    CP.save_characters(project, {"pick": False, "list": [{"name": "A"}]})
+    assert CP.award_screens(project) == []
+
+
+def test_the_awards_show_on_the_winners_cards_at_the_games_end(tmp_path):
+    src = RUNTIME.read_text(encoding="utf-8")
+    change = R._lift(src, "static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    assert change.index("coop_awards_end(n);") < change.index("coop_cards_show(n);")
+    show = R._lift(src, "static void coop_cards_show(unsigned n)")
+    assert "coop_won[i].mask & (1u << (t - 1))" in show and "coop_pick_of[t]" in show
+    assert 'fn("proc_sleep")' in show and "COOP_CARDS_MAX_MS" in show
+    assert '"award_cards on"' in R._lift(src, "static void coop_line(const char *s)")
+    assert "coop_cards_find();" in R._lift(src, "static void coop_screens_tick(void)")
+    find = R._lift(src, "static void coop_cards_find(void)")
+    assert '"PadCoopAward_%d"' in find and '"PadCoopAward_%d.PadCoopAward_%d_Words"' in find
+    end = R._lift(src, "static void coop_awards_end(unsigned n)\n{")
+    assert "coop_won[coop_won_n].mask |= 1u << k;" in end
+    words = R._lift(src, "static void coop_card_words_of(char *out, unsigned cap, const char *award, unsigned t, "
+                         "unsigned long long value)")
+    main = r"""
+#include <stdio.h>
+#include <stdint.h>
+#define pm_snprintf snprintf
+static void pm_commas(char *out, unsigned cap, uint64_t v)
+{
+    char t[32];
+    int n = snprintf(t, sizeof t, "%llu", (unsigned long long)v), i, o = 0;
+    for (i = 0; i < n && o + 2 < (int)cap; i++) { if (i && (n - i) % 3 == 0) out[o++] = ','; out[o++] = t[i]; }
+    out[o] = 0;
+}
+@FN@
+int main(void)
+{
+    char w[64];
+    coop_card_words_of(w, sizeof w, "MOST POINTS", 2, 9982980ull);
+    printf("[%s]", w);
+    coop_card_words_of(w, sizeof w, "MOST RAMPS", 1, 12ull);
+    printf("[%s]", w);
+    return 0;
+}
+""".replace("@FN@", words)
+    assert R._host_run(tmp_path, main) == "[MOST POINTS  PLAYER 2  9,982,980][MOST RAMPS  PLAYER 1  12]"
+
+
 def test_short_words():
     assert CP.short_words("JET FIGHTER CHAMPION") == "JET FIGHTER CHAMPION"
     assert CP.short_words("GODZILLA, MOTHRA, AND RODAN VS. KING GHIDORAH CHAMPION") == "GODZILLA, MOTHRA, AND RODAN"

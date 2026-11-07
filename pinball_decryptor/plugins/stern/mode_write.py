@@ -1026,7 +1026,8 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
             screens = False
         else:
             try:
-                hud = SW.add_screens(stock_hud, CP.pick_screens(project, words_for=CP.words_for()),
+                hud = SW.add_screens(stock_hud, CP.pick_screens(project, words_for=CP.words_for())
+                                     + CP.award_screens(project),             # PAD-1028 round 2
                                      font_source=stock_font or None)[0]
             except SW.SceneWriteError as e:
                 raise ModeWriteError("the co-op pick's screens: %s" % e) from None
@@ -1041,6 +1042,7 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
                            CP.port_sites(result.profile), CP.port_values(result.profile), setting=setting, only=only)
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
+            text += "award_cards on\n"            # PAD-1028 round 2: the awards on the winners' cards
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)

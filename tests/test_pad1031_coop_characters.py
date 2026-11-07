@@ -47,6 +47,7 @@ static unsigned fn(const char *name) { (void)name; return 0; }
 static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
 static void *pm_node(const char *where, const char *path) { (void)where; (void)path; return 0; }
 static void pm_show(void *node, int on) { (void)node; (void)on; }
+static void coop_cards_find(void) {}                     /* PAD-1028 round 2: the award cards (test_pad1028) */
 struct pm_stock_rule;
 static struct pm_stock_rule *pm_stock_rule(unsigned id) { (void)id; return 0; }
 static int pm_stock_active(struct pm_stock_rule *r) { (void)r; return 0; }
@@ -376,11 +377,11 @@ def test_co_op_alone_puts_the_pick_screens_in_the_hud_and_names_the_scene(tmp_pa
                                                                       and hud + b"+screens", []))
     result = MW.ModePlan(project=project, profile=Prof(), port="", build=None)
     MW.coop_into(result, b"", str(tmp_path / "scratch"), stock_hud=b"HUD", stock_font=b"")
-    assert got["names"] == ["PadCoop_1", "PadCoop_Random"]
+    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopAward_1"]   # PAD-1028: + the award card
     (card, src), = result.replaced
     assert card == "godzilla_le/godzilla_le/assets/lcd/auto_loaded/32e6ae28/scene.radium"
     assert open(src, "rb").read() == b"HUD+screens"
-    assert open(result.coop_file).read().endswith("screens 32e6ae28\n")
+    assert open(result.coop_file).read().endswith("screens 32e6ae28\naward_cards on\n")
 
 
 def test_the_runtime_shows_the_picks_screen_and_reads_where_they_are():

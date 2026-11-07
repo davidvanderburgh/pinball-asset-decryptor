@@ -104,6 +104,9 @@ def test_a_level_holds_from_the_players_first_ball():
     rec = R._lift(_src(), "static void hand_records(unsigned p, int lv)")
     assert "own = hand_adj_game(hand_cache[i].id);" in rec                            # from the operator's, never twice
     assert "a = hand_cache[i].obj + p * 4u + hand_cache[i].at;" in rec
+    # a level that leaves a record be gives it back the operator's (the game copied it at the level the pick opened at)
+    assert "v = k < n ? hand_value(own, c[k].op, c[k].v, c[k].lo, c[k].hi) : own;" in rec
+    assert "if (!lv" not in rec                                                        # level 0 too
     arm = R._lift(_src(), "static void hand_arm(void)")
     assert "!words_match(&probe) || !hook(probe.addr, seen[i])" in arm                 # a record's method checked first
 

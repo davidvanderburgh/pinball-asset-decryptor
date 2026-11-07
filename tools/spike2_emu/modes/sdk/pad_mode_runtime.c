@@ -15870,25 +15870,28 @@ static void hand_cache_seen(int i, unsigned *r)
 HAND_SEEN(0) HAND_SEEN(1) HAND_SEEN(2) HAND_SEEN(3) HAND_SEEN(4) HAND_SEEN(5) HAND_SEEN(6) HAND_SEEN(7)
 HAND_SEEN(8) HAND_SEEN(9) HAND_SEEN(10) HAND_SEEN(11) HAND_SEEN(12) HAND_SEEN(13) HAND_SEEN(14) HAND_SEEN(15)
 
-/* the pick taken for player p: each record of theirs gets what their level makes of it (not in a co-op game: there the
- * game's one player record is the team's) */
+/* the pick taken for player p: each record of theirs gets what their level makes of the operator's value - or the
+ * operator's value itself when the level leaves it be: the game copied it at the ball's start with the level the pick
+ * opened at, which may have been another (not in a co-op game: there the game's one player record is the team's) */
 static void hand_records(unsigned p, int lv)
 {
     const struct hand_change *c = hand_lv[lv + HAND_LEVEL_MAX];
+    unsigned n = lv ? hand_lv_n[lv + HAND_LEVEL_MAX] : 0u;
     int i;
-    unsigned k, a, own, was;
-    if (!lv || (coop.on && coop_teammates())) return;
+    unsigned k, a, own, was, v;
+    if (coop.on && coop_teammates()) return;
     for (i = 0; i < hand_cache_n; i++) {
         if (hand_cache[i].obj < 0x10000u) continue;          /* not seen yet, or its method not hooked */
-        for (k = 0; k < hand_lv_n[lv + HAND_LEVEL_MAX] && c[k].id != hand_cache[i].id; k++) ;
-        if (k == hand_lv_n[lv + HAND_LEVEL_MAX]) continue;
+        for (k = 0; k < n && c[k].id != hand_cache[i].id; k++) ;
         a = hand_cache[i].obj + p * 4u + hand_cache[i].at;
         if (!maps_has(a, 4, MAP_R)) continue;
         was = *(volatile unsigned *)(unsigned long)a;
-        own = hand_adj_game(hand_cache[i].id);           /* the operator's: the record may hold the level's already */
-        *(volatile unsigned *)(unsigned long)a = hand_value(own, c[k].op, c[k].v, c[k].lo, c[k].hi);
+        own = hand_adj_game(hand_cache[i].id);           /* the operator's: the record may hold a level's already */
+        v = k < n ? hand_value(own, c[k].op, c[k].v, c[k].lo, c[k].hi) : own;
+        if (v == was) continue;
+        *(volatile unsigned *)(unsigned long)a = v;
         say("handicap: player %u at %+d - adjustment %u's record %u (it held %u; the operator's %u)", p, lv,
-            hand_cache[i].id, *(volatile unsigned *)(unsigned long)a, was, own);
+            hand_cache[i].id, v, was, own);
     }
 }
 

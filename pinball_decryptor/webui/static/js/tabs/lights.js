@@ -31,8 +31,8 @@ const TIP = {
   fx: "The pattern this step paints over the lane's lights.",
   ms: "How long this step lasts, ms.",
   blend: "The step blends in from the one before over its first ms (0: at once). The first step blends up from dark.",
-  a: "Its first colour: the band, the dots, the lit lights.",
-  b: "Its second colour: the ground, the trail, the lights the pattern is not on.",
+  a: "Its first color: the band, the dots, the lit lights.",
+  b: "Its second color: the ground, the trail, the lights the pattern is not on.",
   rate: "The pattern's pace, ms: how fast a strobe, pulse, chase or rainbow moves (0: its usual).",
   stepUp: "Move this step earlier", stepDown: "Move this step later", stepDup: "A copy of this step after it",
   stepDel: "Take this step out",
@@ -186,8 +186,8 @@ function StepCard({ s, show, sel, edit }) {
       <span class="lbl" ...${tip(TIP.ms)}>Lasts</span>
       <span class="row xl-inl"><${NumBox} value=${st.ms} min=${(lim.ms || [20])[0]} max=${(lim.ms || [0, 600000])[1]} title=${TIP.ms} onChange=${(v) => setK("ms", v)} /><span class="small muted">ms</span>
         <span class="small muted" ...${tip(TIP.blend)}>· blends in over</span><${NumBox} value=${st.blend || 0} min=${0} max=${st.ms} title=${TIP.blend} onChange=${(v) => setK("blend", v)} /><span class="small muted">ms</span></span>
-      ${uses.includes("a") ? html`<span class="lbl" ...${tip(TIP.a)}>Colour</span><${ColorBox} value=${st.a} title=${TIP.a} onChange=${(v) => setK("a", v)} />` : null}
-      ${uses.includes("b") ? html`<span class="lbl" ...${tip(TIP.b)}>Second colour</span><${ColorBox} value=${st.b} title=${TIP.b} onChange=${(v) => setK("b", v)} />` : null}
+      ${uses.includes("a") ? html`<span class="lbl" ...${tip(TIP.a)}>Color</span><${ColorBox} value=${st.a} title=${TIP.a} onChange=${(v) => setK("a", v)} />` : null}
+      ${uses.includes("b") ? html`<span class="lbl" ...${tip(TIP.b)}>Second color</span><${ColorBox} value=${st.b} title=${TIP.b} onChange=${(v) => setK("b", v)} />` : null}
       ${uses.includes("r") ? html`<span class="lbl" ...${tip(TIP.rate)}>Pace</span>
         <span class="row xl-inl"><${NumBox} value=${st.rate ?? 0} min=${0} max=${lim.rate || 5000} title=${TIP.rate} onChange=${(v) => setK("rate", v)} /><span class="small muted">ms</span></span>` : null}
     </div>

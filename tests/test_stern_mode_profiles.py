@@ -47,15 +47,15 @@ PORTS = {
     "led_zeppelin_le-1.22": (31, 32, True, set(), ("callout", "screens", "clips", "own-sound")),
     "led_zeppelin_pro-1.22": (30, 32, True, set(), ("callout", "screens", "clips", "own-sound")),
     "metallica_spike-1.03": (40, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
-    "metallica_spike-1.04": (40, 64, True, set(), ("callout", "screens", "clips", "own-sound")),   # PAD-306: drafted from 1.03, proven in the emulator
+    "metallica_spike-1.04": (40, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),   # PAD-306: drafted from 1.03, proven in the emulator
     "munsters_le-1.28": (27, 32, True, set(), ("callout", "screens", "clips", "own-sound")),
     "rush_le-1.18": (38, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "star_wars_elg-1.10": (30, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "star_wars_le-1.30": (42, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
-    "uncanny_xmen_le-0.98": (33, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
+    "uncanny_xmen_le-0.98": (33, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
     "jaws_le-1.02": (27, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
     "stranger_things_le-1.12": (39, 64, True, set(), ("callout", "screens", "clips", "own-sound")),   # item 165: its inserts lit
-    "king_kong_le-0.97": (55, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
+    "king_kong_le-0.97": (55, 64, True, set(), ("callout", "screens", "clips", "own-sound", "messages")),
     "james_bond_le-1.06": (44, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "jurassic_park_le-1.16": (38, 64, True, set(), ("callout", "screens", "clips", "own-sound")),
     "guardians_le-1.14": (34, 64, True, set(), ("callout", "screens", "clips", "own-sound")),

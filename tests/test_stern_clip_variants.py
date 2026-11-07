@@ -629,18 +629,72 @@ def test_random_clips_go_on_beside_an_edit_of_the_hud_scene(monkeypatch, tmp_pat
     engine._rmtree_grow_plan(plan)
 
 
-def test_modes_with_a_screen_still_refuse_an_edit_of_the_hud_scene(monkeypatch, tmp_path,
-                                                                   preview_modes_on):
-    """The other side of PAD-469: a mode's screen rewrites the HUD whole from the stock one,
-    which would drop the edit, so that Write still stops and says why."""
-    from tests.test_stern_audio_grow import _capture
+def test_modes_with_a_screen_build_on_the_projects_edit_of_the_hud_scene(monkeypatch, tmp_path,
+                                                                         preview_modes_on):
+    """PAD-1035 (DoomWalrus666, co-op characters on a card whose HUD he had edited): a mode's
+    screen rewrites the HUD whole. It used to be built from the card's own HUD, so the Write
+    stopped ("another edit in this project changes the HUD scene"); now the screens go into the
+    HUD with the project's in-place edit on, and that edit is not also patched in place."""
+    from pinball_decryptor.plugins.stern import engine
+    from tests.test_stern_audio_grow import _capture, _said
     from tests.test_stern_mode_write_engine import _mode_card
     card, _staged, project, _enc, _h = _mode_card(monkeypatch, tmp_path, with_sound=False)
     _hud_colour_edit(monkeypatch, card)
+    msgs, log = _capture()
+    writes, _counts, plan, _mode, _vp = _compute(str(project), log)
+    assert (card.DISK["hud"] + 0x10, b"RED") not in writes
+    hud = bytearray(card.data["hud"])
+    hud[0x10:0x13] = b"RED"
+    src = dict(plan["jobs"])[card.rel["hud"]]
+    assert open(src, "rb").read() == bytes(hud) + b"+screens"
+    assert _said(msgs, "Modes: this project's own edits of %s go on in the scene they are built "
+                       "into" % card.rel["hud"])
+    engine._rmtree_grow_plan(plan)
+
+
+def test_a_growing_hud_edit_that_cannot_go_over_the_screens_still_refuses(monkeypatch, tmp_path,
+                                                                           preview_modes_on):
+    """The other side of PAD-1035: an edit that re-serialises the HUD (Scenes window, longer
+    text, a resized picture) is applied over the modes' screens; when it cannot be, the Write
+    stops and says why rather than dropping it."""
+    from pinball_decryptor.plugins.stern import engine
+    from tests.test_stern_audio_grow import _capture
+    from tests.test_stern_mode_write_engine import _mode_card
+    card, _staged, project, _enc, _h = _mode_card(monkeypatch, tmp_path, with_sound=False)
+    hud = card.nodes["hud"]
+    grown = str(tmp_path / "grown_hud.radium")
+    open(grown, "wb").write(card.data["hud"] + b"+grown")
+
+    def stage(reader, grown_radium, overlays, grow_dir, log, tree_ops=None, assets_dir=None):
+        return [(card.rel["hud"], grown)], {bytes(hud["i_block"]): grown}
+    monkeypatch.setattr(engine, "_scene_tree_plan", lambda *a, **k: (
+        [], 1, {"/" + card.rel["hud"]: (hud, ([{"op": "move", "node": 1, "dx": 1, "dy": 0}], {}, ""))}))
+    monkeypatch.setattr(engine, "_stage_grown_radiums", stage)
+    monkeypatch.setattr(engine, "_regrow_over_modes", lambda *a, **k: False)
+    from pinball_decryptor.plugins.stern import scene_edit
+    monkeypatch.setattr(scene_edit, "load", lambda a: {"/" + card.rel["hud"]: [{"op": "move"}]})
     _msgs, log = _capture()
     with pytest.raises(RuntimeError, match=r"^Modes: another edit in this project changes the "
                                            r"HUD scene \(%s\)" % re.escape(card.rel["hud"])):
         _compute(str(project), log)
+
+
+def test_root_layer_indices_count_past_the_modes_screens(monkeypatch):
+    """PAD-1035: a picture the person put on top of the HUD's own layers stays just over the
+    last of them when the modes' screens were added among them, and a re-order of a stock
+    layer counts the same way; ops inside a group are left alone."""
+    from types import SimpleNamespace as NS
+    from pinball_decryptor.plugins.stern import engine, scene_tree
+    trees = {b"stock": [1, 2, 3], b"built": [1, 2, 90, 91, 3]}
+    monkeypatch.setattr(scene_tree, "parse", lambda d: NS(root={"kids": [NS(id=i) for i in trees[d]]}))
+    ops = [{"op": "add_picture", "parent": None, "index": 3, "id": 500},
+           {"op": "order", "node": 1, "index": 2},
+           {"op": "order", "node": 500, "index": 0},
+           {"op": "add_text", "parent": 7, "index": 1, "id": 502},
+           {"op": "move", "node": 2, "dx": 1, "dy": 0}]
+    got = engine._root_indices_past_modes(ops, b"stock", b"built")
+    assert [op.get("index") for op in got] == [5, 4, 0, 1, None]
+    assert ops[0]["index"] == 3                         # the project's own list is not changed
 
 
 def test_random_clips_are_left_out_of_a_direct_sd_write_with_the_reason(monkeypatch, tmp_path):

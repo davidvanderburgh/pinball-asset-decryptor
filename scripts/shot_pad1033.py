@@ -1,6 +1,6 @@
 """PAD-1033 proof shot: the Modes tab's Handicap per player tick (under the mode list, after Co-op play).
 
-    python scripts/shot_pad1033.py <repo> <out.png> [--tick] [--open]
+    python scripts/shot_pad1033.py <repo> <out.png> [--tick] [--open] [--custom]
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card (its
 .extract_source.json names it) and shows the Modes tab. Before (main) there is no handicap row; after there is
@@ -69,9 +69,13 @@ def main():
             if tick:
                 webui_shot.api(url, "modes.set_handicap", True)
                 time.sleep(20)          # the levels are read off the card's program (cached after)
+            if "--custom" in sys.argv[3:]:   # round 2: two cells of the owner's (+1 ball save 15, -1 the game's own)
+                webui_shot.api(url, "modes.handicap_cell", "+1", "AD_BALL_SAVE_TIME", "15")
+                webui_shot.api(url, "modes.handicap_cell", "-1", "AD_LIGHT_BATTLE_DIFFICULTY", "own")
             if unfold:
                 page.click("text=Levels…")
                 page.wait_for_selector(".modes-hand-row", timeout=120000)
+                page.mouse.move(5, 995)
                 time.sleep(1)
             page.screenshot(path=out)
             print("shot", out, flush=True)

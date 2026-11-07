@@ -173,7 +173,7 @@ export function HandicapLevelsDialog({ s, onClose }) {
   const levels = lv.levels || [];
   useEffect(() => { call("modes.handicap_levels_refresh"); }, []);
   // a cell: the app's default (its words), the game's own value, or any value the game's own setting offers
-  const opts = (r, c) => [{ value: "", label: `PAD: ${c.default}` }, { value: "own", label: "game's own" },
+  const opts = (r, c) => [{ value: "", label: `app: ${c.default}` }, { value: "own", label: "game's own" },
     ...Array.from({ length: r.hi - r.lo + 1 }, (_, k) => ({ value: String(r.lo + k), label: String(r.lo + k) }))];
   const ink = (l) => (l.startsWith("-") ? "warn-ink" : "ok-ink");
   return html`<${Modal} title="Handicap levels" icon="list" xwide onClose=${onClose}
@@ -182,10 +182,9 @@ export function HandicapLevelsDialog({ s, onClose }) {
       <${Button} size="sm" kind="ghost" disabled=${!lv.changed} onClick=${() => call("modes.handicap_defaults")}
         title="Every level as the app worked it out for this game again.">Defaults<//>
       <${Button} onClick=${onClose}>Close<//>`}>
-    <div class="small dim wrap">Each column is a level, each row one of the game's own difficulty settings. PAD: is the app's
-      choice; pick the game's own value or any value the setting offers in the service menu. 0 is always the game's own settings.</div>
+    <div class="small dim wrap">Each column is a level, each row one of the game's own difficulty settings. "app:" is the app's choice; pick the game's own value or any value the setting offers in the service menu instead. Level 0 is always the game's own settings.</div>
     ${lv.why ? html`<${Note} kind="info">${lv.why}<//>` : null}
-    ${grid.length ? html`<div class="modes-hand-grid" style=${`grid-template-columns: minmax(200px, 1fr) repeat(${levels.length}, 128px)`}>
+    ${grid.length ? html`<div class="modes-hand-grid" style=${`grid-template-columns: minmax(170px, 1fr) repeat(${levels.length}, 136px)`}>
       <span></span>${levels.map((l) => html`<b key=${l} class=${cx("modes-hand-lv", ink(l))}>${l}</b>`)}
       ${grid.map((r) => html`
         <span class="small wrap modes-hand-name" key=${r.name} title=${`${r.name}: ${r.lo} to ${r.hi}`}>${r.label}</span>

@@ -240,10 +240,12 @@ def test_mode_write_puts_handicap_cfg_beside_the_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(HC._SMo, "flipper_buttons", lambda elf: [60, 59])
     prof = next(p for p in MP.profiles().values() if MP.port_path(p).endswith("godzilla_le-1.16.port"))
     plan = MW.ModePlan(project=str(tmp_path), profile=prof, port=MP.port_path(prof), build=None)
+    HC.save_custom(str(tmp_path), "+2", "AD_BALL_SAVE_TIME", 15)                 # round 2: the owner's cell rides
     MW.handicap_into(plan, b"", str(tmp_path / "scratch"), setting=0x7d2000, only=True)
     text = pathlib.Path(plan.handicap_file).read_text(encoding="utf-8")
     assert "handicap on" in text and "setting 0x007d2000" in text and "only" in text.split()
     assert any(x.startswith("handicap +3: ball save +6 s") for x in plan.lines)
+    assert "level +2 adj:94=15" in text.splitlines() and any(x == "handicap +2: ball save 15 s" for x in plan.lines)
     assert any("switched in the service menu (HANDICAP)" in x for x in plan.lines)
 
 

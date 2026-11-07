@@ -321,14 +321,14 @@ def change_words(name, op, n):
 
 
 def short_words(name, op, n):
-    """A change in a few words, the setting's name left out (a Levels dialog cell): "+2 s", "easier by 2", "x0.6"."""
+    """A change in a few words, the setting's name left out (a Levels dialog cell): "+2 s", "easier 2", "x0.6"."""
     if name == BALL_SAVE and op != "=":
         return "off" if op == "-" and n >= 15 else "%s%d s" % (op, n)
     if op == "x":
         return "x%s" % ("%.2f" % (n / 100.0)).rstrip("0").rstrip(".")
     if op == "=":
         return str(n)
-    return ("easier" if op == "-" else "harder") + (" by %d" % n if n > 1 else "")
+    return ("easier" if op == "-" else "harder") + (" %d" % n if n > 1 else "")
 
 
 def describe_levels(lv):
@@ -392,7 +392,7 @@ def grid(fx, custom=None):
             d = fx["defaults"].get(key, {}).get(name)
             mine = (custom.get(key) or {}).get(name)
             cells.append({"level": key, "value": "" if mine is None else str(mine), "custom": mine is not None,
-                          "default": short_words(name, d[0], d[1]) if d else "game's own"})
+                          "default": short_words(name, d[0], d[1]) if d else "none"})
         rows.append({"name": name, "label": "Ball Save Time" if name == BALL_SAVE else _words(name), "lo": lo,
                      "hi": hi, "cells": cells})
     return rows

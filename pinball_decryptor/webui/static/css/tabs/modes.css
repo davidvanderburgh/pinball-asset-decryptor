@@ -680,6 +680,6 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .modes-hand-levels { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .modes-hand-row { display: grid; grid-template-columns: 2.5em 1fr; align-items: baseline; gap: 8px; }
 /* PAD-1033 round 2: the levels customized - a row a setting, a column a level */
-.modes-hand-grid { display: grid; gap: 4px 6px; align-items: center; max-height: min(52vh, 480px); overflow-y: auto; margin-top: 8px; }
+.modes-hand-grid { display: grid; gap: 4px 6px; align-items: center; max-height: min(52vh, 480px); overflow: auto; margin-top: 8px; }
 .modes-hand-grid .modes-hand-lv { text-align: center; position: sticky; top: 0; background: var(--panel); }
-.modes-hand-custom select { border-color: var(--accent); }
+.modes-hand-custom { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }

@@ -6223,6 +6223,7 @@ plays one player for the team, so nothing per player is copied: an ability chang
 (the Modes tab's **Characters…** under **Co-op play**):
 
     pick on                                   each teammate picks at their first ball
+    pick_time 30                              the seconds to pick (30 when not given; 0: no limit)
     left 60                                   the left flipper button (the right is `button`)
     action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
     character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE
@@ -6243,8 +6244,16 @@ Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comm
 
 The pick says itself on the game's top line (PAD-1017's borrow of `BALL %d`): `PLAYER 2 PICK: <name>`, then what it
 does, every 1.5 s; the flippers walk (a character another teammate has is skipped; RANDOM after the last), Action
-takes it, 20 s takes the one shown. RANDOM takes one nobody has. `mode.log`:
+takes it, and when `pick_time` runs out the one shown is taken. RANDOM takes one nobody has. PAD-1044: the seconds
+left count down on the top line (`PLAYER 2 PICK  17`) and on the pick's screen (its `_Words` line, in a box the card
+draws in its header); the one taken stays on the glass 2.5 s saying PICKED (the top line `PLAYER 2 PICKED`, or
+`PLAYER 2 IS <name>` on a title with no screens). While `pm_in_game()` is 0 with a player up (a menu over the game)
+the pick and its clock wait; it was dropped there once, leaving that teammate with no character for the turn.
+`mode.log`:
 
+    co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one, 30 s
+    co-op: teammate 2's pick waits - the game is busy (24 s left)
+    co-op: teammate 2's pick goes on (24 s left)
     co-op: teammate 1 is GODZILLA 1954 (LONGER BALL SAVE) - Action took it
     co-op: GODZILLA 1954 - the game reads adjustment 94: 15 (its own 12)
 

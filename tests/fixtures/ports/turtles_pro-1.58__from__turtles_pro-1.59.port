@@ -14,6 +14,8 @@ site shot_dispatch    0x0012945c 0xe92d43f8 0xe1a09001
 site ball_end         0x001291f0 0xe92d4038 0xe59f401c
 #   sound_lookup: located (strict)
 site sound_lookup     0x00348550 0xe92d4038 0xe1a05000
+#   sound_resolve: located (strict)
+site sound_resolve    0x002ad67c 0xe92d41f0 0xe1a05820
 #   score_add: located (strict)
 site score_add        0x00353504 0xe30615c2 0xe3401061
 #   callout: located (strict)
@@ -101,5 +103,459 @@ shot 0x200000    Right top lane
 #   scene video_bank: derived: the target code loads it (derived from 1 places, e.g. 0x60b04+0x4)
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+callout countdown           441
+value countdown_first 1
+
+# ---- sound sites, played in the emulator 2026-09-24 (item 163): drafted from Godzilla LE 1.16's
+#   sound_play: located (strict)
+site sound_play       0x002ae830 0xe92d4010 0xe303e3f8
+#   sound_nth: located (strict)
+site sound_nth        0x002ae9e4 0xe92d4010 0xe303e3f8
+#   sound_active: located (strict)
+site sound_active     0x002aefa4 0xe59f3034 0xe2831e62
+#   sound_stop: located (strict)
+site sound_stop       0x002af0fc 0xe92d40f8 0xe1a06000
+#   sound_worker: located (strict)
+site sound_worker     0x002ade1c 0xe92d4ff0 0xe2507000
+#   sound_channels: derived from 2 places, e.g. 0x34af90+0x50
+data sound_channels         0x006c3504
+#   sound_queue: derived from 2 places, e.g. 0x34be98+0xc
+data sound_queue            0x006c3d78
+#   sound_requests: derived from 2 places, e.g. 0x34b42c+0x34
+data sound_requests         0x005efb58
+#   sound_request_count: derived from 2 places, e.g. 0x34b42c+0x14
+data sound_request_count    0x004f6a80
+value sound_channel_count       8
+value sound_channel_size        196
+value sound_channel_request     184
+value sound_channel_voices      188
+value sound_channel_bus         189
+value sound_channel_voice_ptrs  92
+value sound_voice_volume        48
+
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+#   surface_find: placed through 3 callers, e.g. the bl at 0x60bbc
+site surface_find     0x00477f00 0xe92d4070 0xe24dd008
+#   surface_set_video: placed through 3 callers, e.g. the bl at 0x1d788
+site surface_set_video 0x0046f794 0xe5d03238 0xe92d4ff0
+#   surface_play: placed through 3 callers, e.g. the bl at 0x1d908
+site surface_play     0x0046cf34 0xe5d03238 0xe92d43f0
+#   surface_stop: placed through 3 callers, e.g. the bl at 0x863ec
+site surface_stop     0x0046c700 0xe5d03238 0xe92d40f0
+#   surface_seek: located (loose)
+site surface_seek     0x0046d0f0 0xe92d43f0 0xe1a07003
+# site surface_duration NOT PLACED: not unique in the reference; only 1 caller lined up
+#   candidate: the reference surface_duration calls 0x4a9490, which is 0x47ce08 in the target - prove what it does before using it
+#   candidate: the reference surface_duration calls 0x4ecc7c, which is 0x4c0044 in the target - prove what it does before using it
+#   surface_position: placed through 3 callers, e.g. the bl at 0x8664c
+site surface_position 0x0046cbd4 0xe5d03238 0xe92d40f0
+value backdrop_surface 1
+value surface_playing       2
+value scene_player_scene    0x10
+
 # ---- examples a template mode can use on this game ------------------------------------------------
 text example_start_shot     Center loop
+
+# ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
+#   hook_dispatch: located (loose)
+site hook_dispatch    0x00183e08 0xe35000bf 0xe92d4038
+# event game_start     0x4d   <- left out: this build's event bus numbers its events differently (its ids end at 191, the reference's at 207)
+# event ball_start     0x25   <- left out: this build's event bus numbers its events differently (its ids end at 191, the reference's at 207)
+# event ball_end       0x34   <- left out: this build's event bus numbers its events differently (its ids end at 191, the reference's at 207)
+# event bonus_start    0x27   <- left out: this build's event bus numbers its events differently (its ids end at 191, the reference's at 207)
+# event bonus_end      0x28   <- left out: this build's event bus numbers its events differently (its ids end at 191, the reference's at 207)
+# event tilt_warning   0xc8   <- left out: this build's event bus numbers its events differently (its ids end at 191, the reference's at 207)
+# event tilt           0xc6   <- left out: this build's event bus numbers its events differently (its ids end at 191, the reference's at 207)
+
+# ---- named inserts (item 164): framework lamp layers, derived from this build's program
+#   lamp_layers: derived from 2 places, e.g. 0x199a48+0x8
+data lamp_layers            0x0067a13c
+#   light_count: derived from 2 places, e.g. 0x16ed94+0x4
+data light_count            0x006782d8
+value lamp_slot_size       40
+value lamp_slot_level      2
+value lamp_slot_alpha      3
+value lamp_slot_fade       8
+value lamp_slot_used       36
+value lamp_group_prio      4
+value lamp_group_next      20
+value lamp_fade            3
+# ---- lamps: lamp <light ids R,G,B | one> <shot mask> <name> - read by lamp_map.py ----
+# lamp 1            0              BACKBOX GI   left out: the target names no insert BACKBOX GI (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 2            0              QR SCANNER BACKLIGHT left out: the target names no insert QR SCANNER BACKLIGHT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 6,7,8        0              LOCKDOWN BUTTON left out: the target names no insert LOCKDOWN BUTTON (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 10,11,12     0x40000        LEFT RETURN LANE LEFT left out: the target names no insert LEFT RETURN LANE LEFT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 14,15,16     0x80000        RIGHT RETURN LANE left out: the target names no insert RIGHT RETURN LANE (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 99,100,101   0              ROCKSTEADY   left out: the target names no insert ROCKSTEADY (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 103,104,105  0              RIGHT ORBIT WEAPON left out: the target names no insert RIGHT ORBIT WEAPON (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 18,19,20     0              TEAM UP      left out: the target names no insert TEAM UP (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 92,93,94     0              KRANG        left out: the target names no insert KRANG (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 82,83,84     0              DONATELLO    left out: the target names no insert DONATELLO (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 87,88,89     0              WEAPON       left out: the target names no insert WEAPON (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 96,97,98     0              MONDO JACKPOT left out: the target names no insert MONDO JACKPOT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 4            0              START BUTTON left out: the target names no insert START BUTTON (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 108          0              COIN DOOR GI left out: the target names no insert COIN DOOR GI (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 5            0              TOURNAMENT START left out: the target names no insert TOURNAMENT START (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 109          0              BOTTOM GI-RED(X6) left out: the target names no insert BOTTOM GI-RED(X6) (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 110          0              BOTTOM GI-WHT(X11) left out: the target names no insert BOTTOM GI-WHT(X11) (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 111          0              BOTTOM GI-GRN(X6) left out: the target names no insert BOTTOM GI-GRN(X6) (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 9            0              LEFT OUTLANE left out: the target names no insert LEFT OUTLANE (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 127          0              LAIR FLASH   left out: the target names no insert LAIR FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 17           0              RIGHT OUTLANE left out: the target names no insert RIGHT OUTLANE (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 23           0              EPISODE 2    left out: the target names no insert EPISODE 2 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 128          0              UPPER FLIPPER FLASH left out: the target names no insert UPPER FLIPPER FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 22           0              EPISODE 6    left out: the target names no insert EPISODE 6 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 21           0              SHOOT AGAIN  left out: the target names no insert SHOOT AGAIN (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 129          0              RIGHT SLING FLASH left out: the target names no insert RIGHT SLING FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 24           0              EPISODE 4    left out: the target names no insert EPISODE 4 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 25           0              EPISODE 3    left out: the target names no insert EPISODE 3 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 26           0              EPISODE 1    left out: the target names no insert EPISODE 1 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 27           0              EPISODE 8    left out: the target names no insert EPISODE 8 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 43,44,45     0              SHREDDER     left out: the target names no insert SHREDDER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 46           0              FOOT COMBO 1 left out: the target names no insert FOOT COMBO 1 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 47           0              TURTLE POWER MULTIBALL left out: the target names no insert TURTLE POWER MULTIBALL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 125          0              PIZZA FLASH RIGHT left out: the target names no insert PIZZA FLASH RIGHT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 126          0              COWABUNGA DUDE FLASH left out: the target names no insert COWABUNGA DUDE FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 29           0              EPISODE 7    left out: the target names no insert EPISODE 7 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 48,49,50     0              APRIL        left out: the target names no insert APRIL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 55           0              APRI(L)      left out: the target names no insert APRI(L) (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 54           0              APR(I)L      left out: the target names no insert APR(I)L (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 53           0              AP(R)IL      left out: the target names no insert AP(R)IL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 52           0              A(P)RIL      left out: the target names no insert A(P)RIL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 51           0              (A)PRIL      left out: the target names no insert (A)PRIL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 102          0              RIGHT ORBIT TRAINING left out: the target names no insert RIGHT ORBIT TRAINING (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 120          0              RIGHT RAMP FLASH left out: the target names no insert RIGHT RAMP FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 56           0              TURTLE LEONARDO left out: the target names no insert TURTLE LEONARDO (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 57           0              TURTLE DONATELLO left out: the target names no insert TURTLE DONATELLO (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 58           0              TURTLE RAPHEAL left out: the target names no insert TURTLE RAPHEAL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 59           0              TURTLE MICHEALANGELO left out: the target names no insert TURTLE MICHEALANGELO (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 123          0              RIGHT ORBIT FLASH left out: the target names no insert RIGHT ORBIT FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 112          0              TOP GI-RED(X7) left out: the target names no insert TOP GI-RED(X7) (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 113          0              TOP GI-WHT(X15) left out: the target names no insert TOP GI-WHT(X15) (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 114          0              TOP GI-GRN(X5) left out: the target names no insert TOP GI-GRN(X5) (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 115          0              LEFT POP BUMPER left out: the target names no insert LEFT POP BUMPER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 116          0              RIGHT POP BUMPER left out: the target names no insert RIGHT POP BUMPER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 117          0              BOTTOM POP BUMPER left out: the target names no insert BOTTOM POP BUMPER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 76           0              PIZZA TOPPING left out: the target names no insert PIZZA TOPPING (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 118          0              POP FLASH    left out: the target names no insert POP FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 38,39,40     0              LEONARDO     left out: the target names no insert LEONARDO (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 42           0              JACKPOTO GRANDE left out: the target names no insert JACKPOTO GRANDE (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 41           0              TRAINING     left out: the target names no insert TRAINING (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 31,32,33     0              SPLINTER     left out: the target names no insert SPLINTER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 34           0              (L)AIR       left out: the target names no insert (L)AIR (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 35           0              L(A)IR       left out: the target names no insert L(A)IR (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 36           0              LA(I)R       left out: the target names no insert LA(I)R (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 37           0              LAI(R)       left out: the target names no insert LAI(R) (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 13           0x1000         LEFT RETURN LANE RIGHT left out: the target names no insert LEFT RETURN LANE RIGHT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 122          0              LEFT ORBIT FLASH left out: the target names no insert LEFT ORBIT FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 119          0              LEFT RAMP FLASH left out: the target names no insert LEFT RAMP FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 121          0              VAN FLASH    left out: the target names no insert VAN FLASH (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 124          0              PIZZA FLASH LEFT left out: the target names no insert PIZZA FLASH LEFT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 60,61,62     0              BEBOP        left out: the target names no insert BEBOP (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 63           0x8            LEFT ORBIT TRAINING left out: the target names no insert LEFT ORBIT TRAINING (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 64,65,66     0              LEFT ORBIT WEAPON left out: the target names no insert LEFT ORBIT WEAPON (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 67           0x8010         LEFT RAMP LEFT X left out: the target names no insert LEFT RAMP LEFT X (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 68           0x10000        LEFT RAMP RIGHT X left out: the target names no insert LEFT RAMP RIGHT X (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 78,79,80     0              START EPISODE left out: the target names no insert START EPISODE (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 81           0              2X PLAYFIELD left out: the target names no insert 2X PLAYFIELD (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 85           0              FOOT COMBO 2 left out: the target names no insert FOOT COMBO 2 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 86           0              FOOT COMBO 3 left out: the target names no insert FOOT COMBO 3 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 90           0              PIZZA SLICE  left out: the target names no insert PIZZA SLICE (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 91           0              ADD TIME     left out: the target names no insert ADD TIME (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 95           0              FOOT COMBO 2 LOOP left out: the target names no insert FOOT COMBO 2 LOOP (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 69,70,71     0              RAPHAEL      left out: the target names no insert RAPHAEL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 28           0              EPISODE 5    left out: the target names no insert EPISODE 5 (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 30           0              FINAL BATTLE left out: the target names no insert FINAL BATTLE (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 72,73,74     0              MICHAEL      left out: the target names no insert MICHAEL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 75           0              EXTRA BALL   left out: the target names no insert EXTRA BALL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 77           0              NINJA PIZZA PARLOR left out: the target names no insert NINJA PIZZA PARLOR (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 106          0x100000       TOP LANE LEFT left out: the target names no insert TOP LANE LEFT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 107          0x200000       TOP LANE RIGHT left out: the target names no insert TOP LANE RIGHT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 130          0              LEFT RAMP TRAINING left out: the target names no insert LEFT RAMP TRAINING (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 131          0x200          RIGHT RAMP TRAINING left out: the target names no insert RIGHT RAMP TRAINING (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 132          0              TOPPER BACK LEFT OUTER left out: the target names no insert TOPPER BACK LEFT OUTER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 133          0              TOPPER BACK LEFT INNER left out: the target names no insert TOPPER BACK LEFT INNER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 134          0              TOPPER BUILDINGL LEFT OUTER left out: the target names no insert TOPPER BUILDINGL LEFT OUTER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 135          0              TOPPER BUILDING LEFT INNER left out: the target names no insert TOPPER BUILDING LEFT INNER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 136          0              TOPPER MICHALENGELO left out: the target names no insert TOPPER MICHALENGELO (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 137          0              TOPPER TECHNODOME LEFT left out: the target names no insert TOPPER TECHNODOME LEFT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 138          0              TOPPER LEONARDO left out: the target names no insert TOPPER LEONARDO (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 139          0              TOPPER BACK RIGHT OUTER left out: the target names no insert TOPPER BACK RIGHT OUTER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 140          0              TOPPER BACK RIGHT INNER left out: the target names no insert TOPPER BACK RIGHT INNER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 141          0              TOPPER BUILDING RIGHT OUTER left out: the target names no insert TOPPER BUILDING RIGHT OUTER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 142          0              TOPPER BUILDING RIGHT INNER left out: the target names no insert TOPPER BUILDING RIGHT INNER (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 143          0              TOPPER RAPHAEL left out: the target names no insert TOPPER RAPHAEL (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 144          0              TOPPER TECHNODOME RIGHT left out: the target names no insert TOPPER TECHNODOME RIGHT (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+# lamp 145          0              TOPPER DONATELLO left out: the target names no insert TOPPER DONATELLO (C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-development-pad-triage-work-tickets-PAD-1049/899ff492-3433-473f-a097-16fea8593ccf/scratchpad/elfs\turtles_pro-1.58.0.elf: no light table found (no accessor whose lights resolve to LED devices))
+
+# ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
+#   stock_mode_table: derived from 2 places, e.g. 0x129bf8+0x4
+data stock_mode_table       0x005b6a3c
+value stock_mode_count      54
+value stock_slot_active     45
+value stock_slot_start      39
+#   typeinfo_cmode: derived from 2 places, e.g. 0x12a0ec+0x34
+data typeinfo_cmode         0x00507614
+#   typeinfo_cmode_mball: derived from 2 places, e.g. 0x12a5c4+0x54
+data typeinfo_cmode_mball   0x0050bb20
+# data typeinfo_vmi           NOT PLACED: no code that loads it could be lined up
+
+# ---- a mode's own screen (item 164): the scene lookup's typed finders (find_node casts to Radium::Sprite,
+#   find_node: placed through 3 callers, e.g. the bl at 0x2b1e8
+site find_node        0x00477c0c 0xe92d4070 0xe24dd008
+#   find_text: placed through 3 callers, e.g. the bl at 0x1d7c0
+site find_text        0x004776a8 0xe92d4070 0xe24dd008
+#   agent_header: located (strict)
+site agent_header     0x004c46a0 0xe92d40f8 0xe2505000
+#   agent_begin: located (strict)
+site agent_begin      0x004ceffc 0xe590c004 0xe1a00001
+value node_visible_vfn      0xa8
+
+# ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
+#   scene hud: COPIED, unverified (derived an address, but it holds no 40-hex id; the target program names the same id)
+scene hud                  297053bbcfae2550c2caeee5a28b70634acf9126/dbfc32cef3a745637ee4e6f03a7461a7f63df3ed
+
+# ---- the framework's count of the balls in play (The Beatles 1.29 0x1fd194, found here by its code,
+#   balls_in_play: placed through 3 callers, e.g. the bl at 0xd2080
+site balls_in_play    0x00186978 0xe92d4010 0xe30449d0
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+#   multiball_serve: located (strict)
+site multiball_serve  0x00186af4 0xe92d41f0 0xe306e5c2
+
+
+# ---- PAD-420: held coils by their board address (generation C)
+#   proc_exists: located (strict)
+site proc_exists      0x00273fbc 0xe30c26d8 0xe3402067
+#   proc_create: located (strict)
+site proc_create      0x0027396c 0xe30cc6d8 0xe340c067
+#   proc_sleep: located (strict)
+site proc_sleep       0x00273abc 0xe30c36d8 0xe3403067
+#   adjustment: through the handler of hook 0x3, as in the reference
+site adjustment       0x001649e8 0xe92d40f0 0xe2504000
+#   coil_fire: placed through 3 callers, e.g. the bl at 0xc6fe4
+site coil_fire        0x0025ce88 0xe92d47f0 0xe1a0a001
+#   coil_count: derived from 2 places, e.g. 0x1fe39c+0x8
+data coil_count             0x006371e8
+# data coil_table             NOT PLACED: no code that loads it could be lined up
+value magnet_proc          13185
+text pizza_magnet_label   Pizza magnet
+text pizza_magnet_drive   9 6 255 1200 128
+text held_coils            pizza_magnet
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+#   lamp_free_owner: located (strict)
+site lamp_free_owner  0x0026ef68 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xd0
+value proc_exit_slots      4
+#   event_cancel: located (strict)
+site event_cancel     0x00273c0c 0xe92d40f8 0xe30c66d8
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+value show_proc            13201
+#   show_1: located (loose)
+site show_1           0x000e610c 0xe92d41f0 0xe24dd018
+text show_name_1          Wide cyan and white strobe
+text show_kind_1          flashy
+value show_secs_1         8
+#   show_2: located (loose)
+site show_2           0x000cc1cc 0xe92d41f0 0xe24dd018
+text show_name_2          Wide white strobe
+text show_kind_2          flashy
+value show_secs_2         8
+#   show_3: located (strict)
+site show_3           0x0014fd38 0xe92d47f0 0xe3a00004
+text show_name_3          Wide fast white strobe
+text show_kind_3          flashy
+value show_secs_3         5
+#   show_4: located (strict)
+site show_4           0x000e651c 0xe92d41f0 0xe3a00018
+text show_name_4          Wide blue glow
+text show_kind_4          flashy
+value show_secs_4         5
+#   show_5: located (loose)
+site show_5           0x00096bd8 0xe92d4038 0xeb024ea4
+text show_name_5          Wide orange strobe
+text show_kind_5          flashy
+value show_secs_5         4
+#   show_6: located (loose)
+site show_6           0x0015bf28 0xe92d4038 0xe30c36dc
+text show_name_6          Wide cyan and blue strobe
+text show_kind_6          flashy
+value show_secs_6         3
+# site show_7           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_7 calls 0x5f96c, which is 0x5f838 in the target - prove what it does before using it
+#   candidate: the reference show_7 calls 0x147450, which is 0x1470b8 in the target - prove what it does before using it
+#   candidate: the reference show_7 calls 0x428570, which is 0x1649e8 in the target - prove what it does before using it
+text show_name_7          Green and cyan strobe
+text show_kind_7          flashy
+value show_secs_7         8
+#   show_8: located (loose)
+site show_8           0x00112658 0xe92d4038 0xeb0a6122
+text show_name_8          Fast green strobe
+text show_kind_8          flashy
+value show_secs_8         8
+# site show_9           NOT PLACED: not unique in the reference; no caller could be lined up
+#   candidate: the reference show_9 calls 0x26bca0, which is 0x3aaaec in the target - prove what it does before using it
+#   candidate: the reference show_9 calls 0x3e7aac, which is 0x1736b0 in the target - prove what it does before using it
+#   candidate: the reference show_9 calls 0x3e749c, which is 0x1730a0 in the target - prove what it does before using it
+text show_name_9          White strobe
+text show_kind_9          flashy
+value show_secs_9         4
+#   show_10: located (strict)
+site show_10          0x00119fcc 0xe92d41f0 0xe3a0000b
+text show_name_10         Small slow fade
+text show_kind_10         subdued
+value show_secs_10        8
+#   show_11: located (loose)
+site show_11          0x000e634c 0xe92d4ff0 0xe24dd01c
+text show_name_11         Fast white strobe
+text show_kind_11         accent
+value show_secs_11        1
+#   show_12: located (loose)
+site show_12          0x001121a4 0xe92d4038 0xeb0a624f
+text show_name_12         Small fast strobe
+text show_kind_12         accent
+value show_secs_12        1
+
+# ---- PAD-474: the shaker motor, read by shaker_lines.py from the game's own shake routine ----------
+#   shake: located (loose)
+site shake            0x0013fcac 0xe92d4030 0xe1a04000
+# site drive_left       NOT PLACED: absent in the target (the function changed); only 1 caller lined up
+value shake_adj            163
+value shake_drive          7
+text shake_call            ms force
+text shake_max_ms          1536 0 0 0
+text shake_setting_ms      0 200 334 1024 2048
+text shake_tap              0:80:0
+text shake_short            0:200:0
+text shake_medium           0:484:0
+text shake_long             0:1536:0
+
+# ---- PAD-473: the game's own mini-wizards (MODE_SDK.md "The game's own mini-wizards on the other titles"): each one's
+# data wizard_obj_1           NOT PLACED: no code that loads it could be lined up
+# data wizard_ready_1         NOT PLACED: no code that loads it could be lined up
+text wizard_name_1   Team-Up Multiball
+text wizard_film_1   any four episodes
+text wizard_shot      Left ramp
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+#   game_flags: derived from 2 places, e.g. 0x3f044c+0x4
+data game_flags             0x006c7164
+value game_flags_at       4
+#   game_flag_count: derived from 2 places, e.g. 0x3f044c+0x40
+data game_flag_count        0x004de2b0
+
+# ---- PAD-645: the framework's switch drain, for the flipper buttons' sounds in attract (portswitch.py; no `switch` lines: the shots keep their own route) ----
+# site switch_edge      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+# site switch_drain     NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference switch_drain calls 0x32e6b8, which is 0x27387c in the target - prove what it does before using it
+# data switch_records         NOT PLACED: no code that loads it could be lined up
+# data switch_count           NOT PLACED: disagreement: 0x6c4aec x3, 0x4f6a7c x1, 0x4f73a8 x1
+value switch_drain_size     384
+value switch_record_size    32
+value switch_level_at       24
+value switch_desc_via       8
+value switch_flags_at       26
+value switch_polarity_at    28
+value switch_edge_shots     0
+
+# ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
+
+# ---- PAD-663: the game's champions for a mode's challenge game, read off this build's own code (portchallenge.py) ----
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+
+
+
+
+
+# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
+#   coil_frame: located (strict)
+site coil_frame       0x004a2a9c 0xe5d13000 0xe3530008
+#   coil_off: located (loose)
+site coil_off         0x0049eb5c 0xe3510008 0xe1a02001
+# data sw_struct              NOT PLACED: no code that loads it could be lined up
+
+# ---- PAD-1017: co-op play (portcoop.py, read off this build's program) ----
+
+# ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
+
+# PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
+# game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.
+site block_start_0      0x00150100 0xe92d4010 0xe1a04000
+data block_obj_0        0x0060ec38
+text block_name_0       Training Level Two
+site block_start_1      0x00153ab0 0xe92d4070 0xe1a05000
+data block_obj_1        0x0060ecd4
+text block_name_1       Training Level Three
+site block_start_2      0x00158368 0xe92d4070 0xe1a05000
+data block_obj_2        0x0060ed70
+text block_name_2       Training Level Four
+site block_start_18     0x0001e45c 0xe92d40d0 0xe1a04000
+data block_obj_18       0x0060eac8
+text block_name_18      April Hurry Up
+site block_start_21     0x001432c8 0xe92d4038 0xe1a05000
+data block_obj_21       0x0060f348
+text block_name_21      Team Up Hurry Up
+site block_start_23     0x0010eed0 0xe92d40f8 0xe3015288
+data block_obj_23       0x0060f4c4
+text block_name_23      Team Up Ready
+site block_start_25     0x000f1d80 0xe92d41f0 0xe3015288
+data block_obj_25       0x0060f968
+text block_name_25      Final Battle Ready
+site block_start_26     0x0008bed8 0xe92d4010 0xe1a04000
+data block_obj_26       0x0060f9e8
+text block_name_26      Final Battle Bebop Hurry Up
+site block_start_27     0x0008c58c 0xe92d4010 0xe1a04000
+data block_obj_27       0x0060faa0
+text block_name_27      Final Battle Rocksteady Hurry Up
+site block_start_28     0x00064e5c 0xe92d4070 0xe1a04000
+data block_obj_28       0x00610010
+text block_name_28      Episode One
+site block_start_29     0x00068b64 0xe92d41f0 0xe1a04000
+data block_obj_29       0x006100f0
+text block_name_29      Episode Two
+site block_start_30     0x0006c4a0 0xe92d41f0 0xe1a04000
+data block_obj_30       0x006101d8
+text block_name_30      Episode Three
+site block_start_31     0x00070770 0xe92d47f0 0xe1a06000
+data block_obj_31       0x006102b8
+text block_name_31      Episode Four
+site block_start_32     0x0007459c 0xe92d41f0 0xe1a04000
+data block_obj_32       0x00610428
+text block_name_32      Episode Five
+site block_start_33     0x0007aef0 0xe92d41f0 0xe1a04000
+data block_obj_33       0x00610520
+text block_name_33      Episode Six
+site block_start_34     0x00080c9c 0xe92d41f0 0xe1a04000
+data block_obj_34       0x00610648
+text block_name_34      Episode Seven
+site block_start_35     0x000852dc 0xe92d41f0 0xe1a04000
+data block_obj_35       0x00610730
+text block_name_35      Episode Eight
+site block_start_36     0x000f22f0 0xe92d4010 0xe1a04000
+data block_obj_36       0x00610830
+text block_name_36      Episode Seven Hurry Up
+site block_start_38     0x0015e5d4 0xe92d40f8 0xe1a04000
+data block_obj_38       0x0060e9a8
+text block_name_38      Weapon Hurry Up
+site block_start_44     0x000cf554 0xe92d4010 0xe1a04000
+data block_obj_44       0x0060f220
+text block_name_44      All Turtle Challenge
+site block_start_46     0x000ddf4c 0xe92d4038 0xe3015288
+data block_obj_46       0x0060fcd8
+text block_name_46      Cowabunga Ready
+site block_start_47     0x000dce6c 0xe92d4010 0xe1a04000
+data block_obj_47       0x0060fd58
+text block_name_47      Cowabunga Hurry Up
+site block_start_48     0x00100e00 0xe92d47f0 0xe3015288
+data block_obj_48       0x0060fdf8
+text block_name_48      Pizza Eating Contest
+site block_start_51     0x00120b5c 0xe92d47f0 0xe24dd010
+data block_obj_51       0x0060ee68
+text block_name_51      Neutrinos
+site block_start_53     0x00110450 0xe92d4010 0xe1a04000
+data block_obj_53       0x0060ff78
+text block_name_53      Test

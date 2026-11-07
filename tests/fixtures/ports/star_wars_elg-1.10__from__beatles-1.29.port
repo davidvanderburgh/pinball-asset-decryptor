@@ -14,6 +14,8 @@ site ball_end         0x00136a54 0xe92d4070 0xe1a06000
 value ball_end_event       0x34
 #   sound_lookup: located (strict)
 site sound_lookup     0x002867c0 0xe92d4038 0xe1a05000
+#   sound_resolve: located (strict)
+site sound_resolve    0x001ec69c 0xe92d41f0 0xe1a05820
 #   score_add32: located (strict)
 site score_add32      0x00287078 0xe30b376a 0xe3a02000
 #   callout: located (strict)
@@ -128,11 +130,32 @@ site switch_hit2      0x002c8fdc 0xe92d4010 0xe2504000
 # switch 49          0x2000000000    Left return lane   <- beatles's, not this title's
 # switch 50          0x4000000000    Right return lane   <- beatles's, not this title's
 # switch 51          0x8000000000    Right outlane   <- beatles's, not this title's
+# switch 71          0x10000000000   Top magnet opto   <- beatles's, not this title's
 
 # ---- callouts by role, scenes by role -------------------------------------------------------------
-# callout countdown           385   <- beatles's, not this title's
 #   scene video_bank: COPIED, unverified (derived an address, but it holds no 40-hex id; the target program names the same id)
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
+# ---- callouts, heard in the emulator 2026-09-24 (item 163): the runtime's callout / callout_nth
+# callout countdown           385   <- beatles's, not this title's
+
+# ---- clip v2 (item 164): the video bank scene's VideoSurface, played on the surface itself - the
+#   surface_find: placed through 2 callers, e.g. the bl at 0x1608b8
+site surface_find     0x0043bdf0 0xe92d4070 0xe24dd008
+#   surface_set_video: located (strict)
+site surface_set_video 0x004334d4 0xe5d030d4 0xe92d4ff0
+#   surface_play: placed through 3 callers, e.g. the bl at 0x82eb4
+site surface_play     0x004312e0 0xe5d030d4 0xe92d43f0
+#   surface_stop: placed through 3 callers, e.g. the bl at 0x20861c
+site surface_stop     0x00430a90 0xe5d030d4 0xe92d40f0
+#   surface_seek: located (strict)
+site surface_seek     0x00430f74 0xe92d43f0 0xe1a07003
+# site surface_duration NOT PLACED: not unique in the reference; only 1 caller lined up
+#   candidate: the reference surface_duration calls 0x432910, which is 0x440cf8 in the target - prove what it does before using it
+#   candidate: the reference surface_duration calls 0x47614c, which is 0x4844e4 in the target - prove what it does before using it
+#   surface_position: placed through 2 callers, e.g. the bl at 0x203c00
+site surface_position 0x00430dd0 0xe5d030d4 0xe92d40f0
+value backdrop_surface 1
 
 # ---- examples a template mode can use on this game ------------------------------------------------
 # text example_start_shot     Left orbit target   <- beatles's, not this title's
@@ -296,3 +319,230 @@ value lamp_fade             3
 # lamp 7                 0              SHOOT AGAIN  # lamp 91, I/O group 7 index 61, at 155,584   <- another title's insert
 # lamp 8                 0              RIGHT INLANE  # lamp 92, I/O group 7 index 62, at 250,464   <- another title's insert
 # lamp 9                 0              RIGHT OUTLANE  # lamp 93, I/O group 7 index 63, at 269,531   <- another title's insert
+
+# ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
+#   balls_in_play: located (strict)
+site balls_in_play    0x00105bcc 0xe92d4010 0xe30b4a9c
+#   agent_header: located (strict)
+site agent_header     0x00488b40 0xe92d40f8 0xe2505000
+#   agent_begin: located (strict)
+site agent_begin      0x004934ac 0xe590c004 0xe1a00001
+
+# ---- a mode's own screen goes in this scene: drawn every frame of a game (item 164, the RadiumScene census)
+# scene hud                  NOT PLACED: the target program never names 9d578751 (no code that loads it could be lined up)
+#   candidate: 10e68ebe9cc3a8e44d86b89b0c63d5a51824ceb7, the first id after "NetScoreFrameOverlay" in the target, as in the reference - prove it holds this role
+
+
+# ---- a multiball of the mode's own (item 167): the framework's start-a-multiball (The Beatles 1.29
+#   multiball_serve: located (strict)
+site multiball_serve  0x00105d48 0xe92d41f0 0xe30be76a
+
+
+# ---- PAD-420: held coils by their board address (generation C)
+#   proc_exists: located (strict)
+site proc_exists      0x0015c5b4 0xe30d24d8 0xe3402058
+#   proc_create: located (strict)
+site proc_create      0x0015bf64 0xe30dc4d8 0xe340c058
+#   proc_sleep: located (strict)
+site proc_sleep       0x0015c0b4 0xe30d34d8 0xe3403058
+#   adjustment: located (strict)
+site adjustment       0x00311778 0xe92d40f0 0xe2504000
+#   coil_fire: located (strict)
+site coil_fire        0x00300f80 0xe3500000 0xe52de004
+#   coil_count: derived from 2 places, e.g. 0x8d820+0x4
+data coil_count             0x00603d1c
+#   coil_table: derived from 2 places, e.g. 0xc7900+0x2c
+data coil_table             0x005ffbf0
+# value magnet_proc          13185   <- beatles's, not this title's
+# text magnet_top_label     Magnet top   <- beatles's, not this title's
+# text magnet_top_drive     9 6 190 1000 22   <- beatles's, not this title's
+# text held_coils            magnet_top   <- beatles's, not this title's
+# text magnet_coil           magnet_top   <- beatles's, not this title's
+# value magnet_shot          0x10000000000   <- beatles's, not this title's
+
+# ---- PAD-420: the game's own clean-up of a show's lamp groups (pad_mode_runtime.c show_exit_hook): the
+#   lamp_free_owner: located (strict)
+site lamp_free_owner  0x001b2434 0xe92d4010 0xe1a04000
+value proc_exit_hooks      0xf0
+value proc_exit_slots      4
+#   event_cancel: located (strict)
+site event_cancel     0x0015c204 0xe92d40f8 0xe30d64d8
+
+# ---- PAD-420: the game's own light shows (pad_mode_runtime.c "the game's own light shows", PAD-411's
+value show_proc            13201
+# site show_1           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_1 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_1 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_1 calls 0x23f87c, which is 0x1ed86c in the target - prove what it does before using it
+# text show_name_1          Wide yellow and white strobe   <- beatles's, not this title's
+# text show_kind_1          flashy   <- beatles's, not this title's
+value show_secs_1         8
+# site show_2           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_2 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_2 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_2 calls 0x35a9c, which is 0x5b080 in the target - prove what it does before using it
+# text show_name_2          Wide fast yellow and white strobe   <- beatles's, not this title's
+# text show_kind_2          flashy   <- beatles's, not this title's
+value show_secs_2         4
+# site show_3           NOT PLACED: not unique in the reference; no caller could be lined up
+#   candidate: the reference show_3 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_3 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_3 calls 0xa2100, which is 0x17f75c in the target - prove what it does before using it
+# text show_name_3          Wide white strobe   <- beatles's, not this title's
+# text show_kind_3          flashy   <- beatles's, not this title's
+value show_secs_3         5
+# site show_4           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_4 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_4 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_4 calls 0x1a7f28, which is 0x311778 in the target - prove what it does before using it
+# text show_name_4          Wide blue and pink strobe   <- beatles's, not this title's
+# text show_kind_4          flashy   <- beatles's, not this title's
+value show_secs_4         8
+# site show_5           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_5 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_5 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_5 calls 0x1abb98, which is 0x15c0b4 in the target - prove what it does before using it
+# text show_name_5          Yellow strobe   <- beatles's, not this title's
+# text show_kind_5          flashy   <- beatles's, not this title's
+value show_secs_5         8
+# site show_6           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_6 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_6 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_6 calls 0x139f24, which is 0x28a314 in the target - prove what it does before using it
+# text show_name_6          Yellow glow   <- beatles's, not this title's
+# text show_kind_6          flashy   <- beatles's, not this title's
+value show_secs_6         8
+# site show_7           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_7 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_7 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_7 calls 0xa2568, which is 0x17fbc4 in the target - prove what it does before using it
+# text show_name_7          Small yellow glow   <- beatles's, not this title's
+# text show_kind_7          flashy   <- beatles's, not this title's
+value show_secs_7         8
+# site show_8           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_8 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_8 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_8 calls 0xa2328, which is 0x17f984 in the target - prove what it does before using it
+# text show_name_8          Small slow yellow fade   <- beatles's, not this title's
+# text show_kind_8          subdued   <- beatles's, not this title's
+value show_secs_8         8
+# site show_9           NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_9 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_9 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_9 calls 0xa2328, which is 0x17f984 in the target - prove what it does before using it
+# text show_name_9          Small slow blue and pink fade   <- beatles's, not this title's
+# text show_kind_9          subdued   <- beatles's, not this title's
+value show_secs_9         8
+# site show_10          NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_10 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_10 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_10 calls 0xa1a98, which is 0x17f0f4 in the target - prove what it does before using it
+# text show_name_10         Small slow yellow and green fade   <- beatles's, not this title's
+# text show_kind_10         subdued   <- beatles's, not this title's
+value show_secs_10        8
+# site show_11          NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_11 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_11 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+#   candidate: the reference show_11 calls 0x35a9c, which is 0x5b080 in the target - prove what it does before using it
+# text show_name_11         Wide fast blue strobe   <- beatles's, not this title's
+# text show_kind_11         accent   <- beatles's, not this title's
+value show_secs_11        2
+# site show_12          NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference show_12 calls 0x41c3ec, which is 0x42a7d4 in the target - prove what it does before using it
+#   candidate: the reference show_12 calls 0x11e8e8, which is 0x13557c in the target - prove what it does before using it
+#   candidate: the reference show_12 calls 0xa269c, which is 0x17fcf8 in the target - prove what it does before using it
+# text show_name_12         Fast yellow strobe   <- beatles's, not this title's
+# text show_kind_12         accent   <- beatles's, not this title's
+value show_secs_12        2
+
+# ---- PAD-474: the shaker motor, read by shaker_lines.py from the game's own shake routine ----------
+# site shake            NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference shake calls 0x1a7f28, which is 0x311778 in the target - prove what it does before using it
+#   drive_left: located (strict)
+site drive_left       0x00300ed4 0xe3500000 0xe92d4038
+value shake_adj            232
+value shake_drive          7
+value shake_power          42
+# text shake_call            drive   <- beatles's, not this title's
+# text shake_max_ms          1024 0 0 0   <- beatles's, not this title's
+# text shake_setting_ms      0 1024 1024 1024   <- beatles's, not this title's
+# text shake_short            0:200:0   <- beatles's, not this title's
+# text shake_medium           0:384:0   <- beatles's, not this title's
+# text shake_long             0:1024:0   <- beatles's, not this title's
+
+# ---- PAD-473: the game's own mini-wizards on the plain-C titles (MODE_SDK.md "The game's own
+#   game_flags: derived from 2 places, e.g. 0x139d14+0x4
+data game_flags             0x005929cc
+#   game_flag_count: derived from 2 places, e.g. 0x12e640+0x10
+data game_flag_count        0x004a7b00
+value game_flags_at          4
+# site wizard_go_1      NOT PLACED: absent in the target (the function changed); no caller could be lined up
+#   candidate: the reference wizard_go_1 calls 0x62910, which is 0x79c58 in the target - prove what it does before using it
+#   candidate: the reference wizard_go_1 calls 0x159b90, which is 0x3453f8 in the target - prove what it does before using it
+#   candidate: the reference wizard_go_1 calls 0x1fd194, which is 0x105bcc in the target - prove what it does before using it
+value wizard_arg_1       1
+value wizard_flag_1      81    # FG_MAIN_MULTIBALL_ACTIVE
+# text wizard_name_1      Beatlemania Multiball   <- beatles's, not this title's
+# text wizard_film_1      level 3 in all five modes   <- beatles's, not this title's
+
+# ---- PAD-619: the game's Challenge list and start menu, read off this build's own code (portchallenge.py) ----
+
+# ---- PAD-645: the framework's switch drain, for the flipper buttons' sounds in attract (portswitch.py; no `switch` lines: the shots keep their own route) ----
+#   switch_edge: located (strict)
+site switch_edge      0x0036e994 0xe30330e4 0xe3403059
+#   switch_drain: located (strict)
+site switch_drain     0x0036f674 0xe92d4ff0 0xe3039cbc
+#   switch_records: derived from 2 places, e.g. 0x1f7e0c+0x1c
+data switch_records         0x00601cc4
+#   switch_count: derived from 2 places, e.g. 0x97ae8+0x4
+data switch_count           0x005930e4
+value switch_drain_size     384
+value switch_record_size    32
+value switch_level_at       24
+value switch_desc_via       8
+value switch_flags_at       26
+value switch_polarity_at    28
+value switch_edge_shots     0
+
+# ---- PAD-643: a mode's challenge ball launched for the player, and the game's ball-start work that skips a challenge game run in a mode's (portchallenge.py) ----
+
+# ---- PAD-663: the game's champions for a mode's challenge game, read off this build's own code (portchallenge.py) ----
+
+# ---- PAD-641: the game's end-of-game high scores (it runs until a new high score's initials are in) ----
+
+
+# text done_name_0                  Drop Bank 1   <- beatles's, not this title's
+value done_flag_0                  51
+# text done_name_1                  Drop Bank 2   <- beatles's, not this title's
+value done_flag_1                  52
+# text done_name_2                  Drop Bank 3   <- beatles's, not this title's
+value done_flag_2                  53
+# text done_name_3                  Drop Bank Fab   <- beatles's, not this title's
+value done_flag_3                  54
+# text done_name_4                  Drop Bank Four   <- beatles's, not this title's
+value done_flag_4                  55
+
+
+
+
+# ---- PAD-826: spare switch inputs and driver outputs (modes/spare_io.py --write, from this build's binary;
+#   coil_frame: located (strict)
+site coil_frame       0x004669ac 0xe5d13000 0xe3530008
+#   coil_off: located (strict)
+site coil_off         0x00462a98 0xe3510008 0xe1a02001
+#   sw_struct: derived from 2 places, e.g. 0x1f7e0c+0x1c
+data sw_struct              0x00601cc4
+
+# ---- PAD-1017: co-op play (portcoop.py, read off this build's program) ----
+
+# ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
+value coop_ball_msg          1255
+
+# PAD-714: the game's own modes, the same title's port's, each found on this build by the function that counts
+# its STARTED audit (mode_framework.plain_starts)
+site block_start_0     0x0006bcc0 0xe92d4038 0xebfff7ce
+text block_name_0      Inner Loop
+site block_start_1     0x0006ad3c 0xe92d4038 0xebfffbaf
+text block_name_1      Orbits
+site block_start_2     0x0005eff0 0xe92d4010 0xeb002b02
+text block_name_2      Ramps

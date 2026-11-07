@@ -6390,3 +6390,38 @@ Port lines (one set per build):
 
 plus `adjustment`, `score_add` and `cur_player`. `idle_test_mode.c` is the rig instrument: it starts the mission
 whose song is playing and logs its clock each second.
+
+## Prolonged Competition (PAD-1041)
+
+Venom and Dungeons & Dragons offer **COMPETITION GAME PLAY UNTIL POWERED OFF** on their start menu (CHOOSE YOUR MODE OF
+PLAY, both flipper buttons held in attract): picked once, every game is a Competition game until the machine is
+switched off. Every other Spike 2 build has only the one-game **COMPETITION** entry, and on every latest build that
+entry sets `FG_PLAYER_COMPETITION_MODE_ACTIVE` (17) and nothing else. The runtime gives those games the prolonged one;
+there is nothing for a mode to call. The Modes tab's **Prolonged Competition** puts `comp.cfg` beside the runtime:
+
+    comp on
+    flag 17            FG_PLAYER_COMPETITION_MODE_ACTIVE, read off the card's own flag names
+    caption 1919       the menu's COMPETITION caption (the message after CHOOSE YOUR MODE OF PLAY's)
+    caption_end 1914   the menu's STANDARD caption
+    only               the card has no modes: armed with nothing else (scores stay on Insider Connected)
+
+- The entry is appended through the challenges' start-menu lines (`site challenge_menu`, `site challenge_menu_pick`,
+  `value challenge_menu_list_at` / `_count_at` or `_count_reg` / `_cap` / `_entry` and the layout values): COMPETITION
+  over `UNTIL POWERED OFF`, and once it is on, STANDARD over `ENDS PROLONGED COMPETITION`. Its kind is 0x200 until the
+  pick, which plays it as Standard (kind 0: r3 on the kind-jump menus, the entry itself where the port says
+  `challenge_menu_pick_back`).
+- The next `game_start` on the event bus (`site hook_dispatch`) turns it on or off. While on, the flag is set at every
+  game's start, before the game's handlers, and again at a `ball_start` that finds it clear; turned off, it is cleared
+  at that game's start. It is the runtime's memory only: switching the machine off ends it.
+- The log says each game: `prolonged competition: game 2 plays as Competition (flag 17 was 0)` - the game itself
+  starts every game after the first with the flag clear - and `game 2 over (flag 17 is 1; prolonged on)`.
+- The menus of game-mode table INDICES (Godzilla, Jaws, John Wick, Metallica, King Kong, X-Men) take it through `site
+  comp_menu_frame` (hook_full; `value comp_menu_frame_list_at` / `_count_at` / `_count_last` / `_cap` / `_cursor_reg`
+  / `_buttons_reg`, `comp_menu_index` / `_index_msg` / `comp_menu_end_index` / `_end_msg`): Competition's index again
+  (Standard's once on), its name message lettered UNTIL POWERED OFF from the frame the cursor arrives on. Bond 60th's
+  menu object takes it through `site comp_menu_obj_built` / `comp_menu_obj_pick` / `comp_menu_obj_add_fn` and
+  `value comp_menu_obj_*`: the game's own add called once more with Competition's kind and flag and our name.
+  `prolonged_comp.frame_lines` writes the index-menu lines from a program.
+
+Proven (emulator, Deadpool Pro 1.16): picked, two Competition games, picked again, off; the sweep over the latest builds
+is in docs/plans/pad1041_prolonged_comp.md.

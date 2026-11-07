@@ -405,6 +405,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.set(hand_on=False, hand_note="", hand_note_kind="", hand_shown=False,   # PAD-1033
                  hand_levels={"why": "", "rows": []},
                  hand_tip=self.HAND_TIP)
+        self.set(comp_on=False, comp_note="", comp_note_kind="", comp_shown=False,   # PAD-1041
+                 comp_tip=self.COMP_TIP)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -671,6 +673,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._publish_coop(project)                          # PAD-1017
         self._publish_idle(project)                          # PAD-1022
         self._publish_handicap(project)                      # PAD-1033
+        self._publish_comp(project)                          # PAD-1041
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
         if select_game is not None and select_game in game:
@@ -1071,6 +1074,45 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._say("inactivity pauses timers: %s" % ("the card gets it at the next Write" if on
                                                     else "not on the card"))
         self._publish_idle(project)
+        return True
+
+    #: PAD-1041: Prolonged Competition on the start menu (plugins/stern/prolonged_comp.py), as Venom and Dungeons &
+    #: Dragons have it: every game a Competition game until the machine is switched off. It runs on the mode runtime and,
+    #: like the game's own Competition, keeps the card on Insider Connected
+    COMP_TIP = (
+        "Adds PROLONGED COMPETITION to the game's start menu (hold both flipper buttons in attract), as Venom and "
+        "Dungeons & Dragons have it. Picked, every game is a Competition game (all randomness removed) until the "
+        "machine is switched off; picked again, it ends. Write puts it on the card.")
+
+    def _publish_comp(self, project):
+        """PAD-1041: the Prolonged Competition tick, shown for a game whose start menu the app knows (and that has none
+        of its own), and under it what the card does, or in red why it cannot."""
+        from ...plugins.stern import prolonged_comp as _PCo
+        prof = _PCo.project_title(project) if project else None
+        shown = bool(project) and prof is not None and not _PCo.title_refusal(prof)
+        on = bool(project) and _PCo.load(project)
+        note, kind = "", ""
+        if on:
+            why = _PCo.title_refusal(prof)
+            if why:
+                note, kind = why, "err"
+            else:
+                note = _PCo.NOTE
+        self.set(comp_shown=shown or on, comp_on=on, comp_note=note, comp_note_kind=kind)
+
+    @rpc
+    def set_prolonged_comp(self, on):
+        """Tick or untick Prolonged Competition for this project (PAD-1041)."""
+        from ...core import history_log
+        from ...plugins.stern import prolonged_comp as _PCo
+        project = self.project()
+        if not project:
+            return False
+        was = _PCo.save(project, bool(on))
+        hist = history_log.diff_scalar("modes  prolonged competition", "on" if was else "off", "on" if on else "off")
+        history_log.record(project, [hist] if hist else [])
+        self._say("prolonged competition: %s" % ("the card gets it at the next Write" if on else "not on the card"))
+        self._publish_comp(project)
         return True
 
     #: PAD-1033: a handicap for each player (plugins/stern/handicap.py): the game's own settings read easier or harder

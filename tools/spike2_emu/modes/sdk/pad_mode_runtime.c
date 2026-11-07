@@ -15525,6 +15525,11 @@ static void coop_turn_show(void)
 #define COOP_PICK_DONE_MS 2500ul
 #define COOP_PICK_FLIP_MS 1500ul
 #define COOP_SAVE_TAP_MS 600ul
+/* PAD-1045: Godzilla's Action button is also its ball launch. A quick second press at a launch was the double press,
+ * so the ball's save went at the shooter lane and the real double press later did nothing (emulator, LE 1.16 ball 2;
+ * ball 1 hid it: the pick takes those presses). So the presses count once the turn's ball has left the shooter lane
+ * (`lane <id>`), none while a ball waits there, and none this long after one leaves it. */
+#define COOP_LAUNCH_MS 1500ul
 static struct coop_char {
     char name[28], does[28];
     unsigned n_adj;
@@ -15546,6 +15551,11 @@ static struct { int on, c; unsigned who; unsigned long at; } coop_done;   /* PAD
 static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
 static volatile int coop_save_ask;          /* a double press: the tick gives the save */
 static int coop_save_used;                  /* this ball's is given */
+static unsigned coop_lane;                  /* PAD-1045: the shooter lane switch (0: not known, every press counts) */
+static volatile int coop_lane_in;           /* a ball waits in the shooter lane */
+static volatile int coop_ball_out;          /* the turn's ball has left the shooter lane */
+static volatile unsigned long coop_lane_left_ms;
+static volatile unsigned coop_launch_taps;  /* Action presses at a launch, not counted (the tick says so) */
 static unsigned (*coop_adj_game)(unsigned);
 static unsigned coop_rng;
 static char coop_scr_scene[96];             /* `screens <scene>`: "" none */
@@ -15885,6 +15895,14 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
 {
     unsigned closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
     unsigned long now;
+    if (coop_lane && id == coop_lane) {                       /* PAD-1045: a ball arrives in the lane, or leaves it */
+        coop_lane_in = (level & 1u) == closed;
+        if (!coop_lane_in) {
+            coop_lane_left_ms = pm_ms();
+            coop_ball_out = 1;
+        }
+        return;
+    }
     if ((level & 1u) != closed || !coop_teammates()) return;
     if (pk.open) {
         if (id == coop_left) pk.walk--;
@@ -15894,6 +15912,11 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     }
     if (id != coop_action) return;
     now = pm_ms();
+    if (coop_lane && (!coop_ball_out || coop_lane_in || now - coop_lane_left_ms < COOP_LAUNCH_MS)) {
+        coop_tap_ms = 0;                                      /* the launch's press: not half of a double press */
+        coop_launch_taps++;
+        return;
+    }
     if (coop_tap_ms && now - coop_tap_ms <= COOP_SAVE_TAP_MS) {
         coop_save_ask = 1;
         coop_tap_ms = 0;
@@ -16198,6 +16221,11 @@ static void coop_chars_tick(void)
         }
     }
     coop_rules_watch();
+    if (coop_launch_taps) {
+        say("co-op: %u Action press(es) at a launch (the ball in the shooter lane, or just out of it) - not the save's",
+            coop_launch_taps);
+        coop_launch_taps = 0;
+    }
     if (coop_save_ask && (c = coop_char_up()) && c->spot && !coop_save_used) {
         coop_save_ask = 0;
         if (coop_spot(c)) coop_save_used = 1;
@@ -16206,9 +16234,9 @@ static void coop_chars_tick(void)
         coop_save_ask = 0;
         c = coop_char_up();
         if (c && c->save_s && !coop_save_used) {
-            coop_save_used = 1;
             say("co-op: %s's Action button ball save (%u s, teammate %u)", c->name, c->save_s, coop.turn);
-            pm_ball_save(c->save_s);
+            if (pm_ball_save(c->save_s)) coop_save_used = 1;  /* PAD-1045: a refused one is still the ball's */
+            else say("co-op: the game did not take it - %s's save is still there this ball", c->name);
         }
     }
 }
@@ -16222,6 +16250,7 @@ static void coop_chars_begin(void)
     pk.open = 0;
     coop_done.on = 0;
     coop_save_used = 0;
+    coop_ball_out = 1;                       /* PAD-1045: the team forms in ball 1; a ball in the lane still waits */
     coop_adj_said = 0;
 }
 
@@ -16230,6 +16259,7 @@ static void coop_chars_turn(void)
 {
     coop_save_used = 0;
     coop_tap_ms = 0;
+    coop_ball_out = 0;                       /* PAD-1045: the next ball is not served yet: it counts once out */
     if (pk.open && pk.who != coop.turn) coop_pick_close("their turn ended");
     coop_pick_open(coop.turn);
     coop_cache_hold();
@@ -16416,6 +16446,11 @@ static void coop_chars_arm(struct site *e)
         say("co-op characters: the pick walks with %s and takes with %s", coop_left ? "both flippers" : "the right flipper",
             coop_action ? "Action" : "the time alone (coop.cfg names no Action button)");
     if (save && !coop_action) say("co-op characters: no Action button in coop.cfg - the save ability is off");
+    if (save && coop_action && coop_lane)                     /* PAD-1045 */
+        say("co-op characters: Action x2 counts once the ball is %lu ms out of the shooter lane (switch %u)",
+            COOP_LAUNCH_MS, coop_lane);
+    else if (save && coop_action)
+        say("co-op characters: coop.cfg names no shooter lane - every Action press counts toward x2, a launch's too");
     coop_live = 1;
     for (i = 0; i < coop_ch_n; i++) {
         char how[96];
@@ -16648,6 +16683,7 @@ static void coop_line(const char *s)
     }
     if (str_starts(s, "left ")) { p = s + 5; coop_left = (unsigned)number(&p, &ok); if (!ok) coop_left = 0; return; }
     if (str_starts(s, "action ")) { p = s + 7; coop_action = (unsigned)number(&p, &ok); if (!ok) coop_action = 0; return; }
+    if (str_starts(s, "lane ")) { p = s + 5; coop_lane = (unsigned)number(&p, &ok); if (!ok) coop_lane = 0; return; }
     if (str_starts(s, "button ")) {
         p = s + 7;
         coop.button = (unsigned)number(&p, &ok);

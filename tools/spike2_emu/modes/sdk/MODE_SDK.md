@@ -6260,6 +6260,7 @@ plays one player for the team, so nothing per player is copied: an ability chang
     pick_time 30                              the seconds to pick (30 when not given; 0: no limit)
     left 60                                   the left flipper button (the right is `button`)
     action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
+    lane 62                                   the shooter lane (SHOOTER LANE): the save's presses wait for the ball
     character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE
     character save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE
     character adj:195x50:4:30 GODZILLA GMK|EASIER HEAT RAY
@@ -6274,7 +6275,10 @@ Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comm
 - `bs:<id>`: `<id>` is the ball save time, read when a ball is served: a pick made with the teammate's ball already
   out gives that ball the save now (`pm_ball_save` of what the getter answers).
 - `save:<s>`: two presses of the Action button within 0.6 s give an `s` second ball save, once a ball (one press is
-  the game's: Godzilla's heat ray is a hold).
+  the game's: Godzilla's heat ray is a hold). With `lane`, the presses count only once the turn's ball is out of the
+  shooter lane: none while a ball waits there and none for 1.5 s after one leaves it, since Godzilla's Action button
+  is also its launch and a quick second press at a launch spent the ball's save there (PAD-1045, ball 2 on). A save
+  the game refuses is not spent.
 
 The pick says itself on the game's top line (PAD-1017's borrow of `BALL %d`): `PLAYER 2 PICK: <name>`, then what it
 does, every 1.5 s; the flippers walk (a character another teammate has is skipped; RANDOM after the last), Action

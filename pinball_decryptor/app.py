@@ -6053,17 +6053,12 @@ class App:
         the first part of the wait.  Best effort: the restart never waits
         on it."""
         tr = None
-        center = None
         ctx = getattr(self, "ctx", None)
         try:
             tr = translator(ctx.store.get("shell", "lang"))
         except Exception:                                   # noqa: BLE001
             pass
-        try:
-            center = ctx.host.window_center()
-        except Exception:                                   # noqa: BLE001
-            pass
-        ok, info = update_splash.start_splash(version, center=center, tr=tr)
+        ok, info = update_splash.start_splash(version, tr=tr)
         if not ok:
             log.debug("no update splash: %s", info)
 

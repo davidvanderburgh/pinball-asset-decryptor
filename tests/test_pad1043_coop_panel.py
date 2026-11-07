@@ -91,7 +91,7 @@ MAIN = r"""
 #include <stdio.h>
 static int in_game;
 static unsigned teammates;
-static struct { unsigned turn; } coop;
+static struct { unsigned turn; int teams; } coop;
 static int pm_in_game(void) { return in_game; }
 static unsigned coop_teammates(void) { return teammates; }
 static unsigned game_getter(unsigned a, unsigned b, unsigned c, unsigned d) { return 1; }   /* the game plays player 1 */
@@ -104,7 +104,9 @@ int main(void)
     printf("one-player %u\n", coop_panel_wrap(0, 0, 0, 0));
     teammates = 3;
     for (coop.turn = 1; coop.turn <= 3; coop.turn++) printf("teammate %u lit %u\n", coop.turn, coop_panel_wrap(0, 0, 0, 0));
-    coop.turn = 2; in_game = 0;
+    coop.turn = 3; coop.teams = 1;                     /* PAD-1042 Team 2v2: the game's own player up is the team */
+    printf("team game %u\n", coop_panel_wrap(0, 0, 0, 0));
+    coop.teams = 0; coop.turn = 2; in_game = 0;
     printf("over %u\n", coop_panel_wrap(0, 0, 0, 0));
     return 0;
 }
@@ -117,7 +119,8 @@ def test_the_panel_lights_the_teammate_up(tmp_path):
         "static unsigned coop_panel_box(unsigned n, unsigned turn, unsigned game)",
         "static unsigned coop_panel_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)"))
     out = R._host_run(tmp_path, MAIN.replace("@FNS@", fns)).splitlines()
-    assert out == ["plain 1", "one-player 1", "teammate 1 lit 1", "teammate 2 lit 2", "teammate 3 lit 3", "over 1"]
+    assert out == ["plain 1", "one-player 1", "teammate 1 lit 1", "teammate 2 lit 2", "teammate 3 lit 3", "team game 1",
+                   "over 1"]
 
 
 def test_the_runtime_arms_the_panel_with_co_op():

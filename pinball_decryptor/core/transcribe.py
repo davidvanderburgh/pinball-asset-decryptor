@@ -1073,6 +1073,17 @@ class CalloutsFile:
                     "columns: folder, file, seconds, classification, text)."
                     % (CALLOUTS_CSV, want))
 
+    @classmethod
+    def empty(cls, path):
+        """A new callouts.csv at *path* with no rows yet, in the columns and
+        encoding Auto-name writes (PAD-1048: a project named by hand)."""
+        self = cls.__new__(cls)
+        self.path = path
+        self.encoding, self.delimiter = "utf-8", ","
+        self.fields = ["folder", "file", "seconds", "classification", "text"]
+        self.rows = []
+        return self
+
     def key(self, name):
         for f in self.fields:
             if (f or "").strip().lower() == name:

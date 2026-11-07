@@ -407,7 +407,12 @@ HELP_CONTENT = {
          "callouts.csv (by hand or in a spreadsheet), save it, then **More > "
          "Rename from callouts.csv…** renames every sound to its corrected text. "
          "Characters a file name can't hold become _, and the names are "
-         "remembered like a rename in Properties."),
+         "remembered like a rename in Properties.\n\n"
+         "The other way round: a rename in Properties also updates that "
+         "sound's row in callouts.csv, and **More > Update callouts.csv from "
+         "the names…** writes every sound's name as it is now into the CSV "
+         "(adding rows for named sounds it doesn't list), so your names are "
+         "kept there too."),
         ("Blip-free callouts (always on)",
          "Every replaced sound plays your audio all the way through, with no "
          "scrap of the original inside it. There is nothing to switch on.\n\n"

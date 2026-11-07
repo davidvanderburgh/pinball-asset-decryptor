@@ -45,7 +45,7 @@ NO_BUTTON = "The game program names no flipper buttons, so a player could not pi
 NOTHING = "%s has no ball save or difficulty setting a handicap could change."
 #: the service menu's row (menu_settings.HANDICAP): Off/On, On to start with
 MENU_VALUES = 2
-MENU_HELP = "On: each player picks -3 to +3 with the flippers at their ball 1"
+MENU_HELP = "On: each player picks -3 to +3 at their first ball (flippers)"
 #: how a player picks, for the tab and the log
 HOW = ("at each player's first ball the top of the screen shows P1 HANDICAP 0: the left flipper button makes it "
        "harder, the right easier (-3 to +3), and the ball's first score takes it")

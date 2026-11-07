@@ -6206,6 +6206,15 @@ its match and high scores) the game's end waits while each award is shown on eac
 
 A winner with no character (no pick) is left out there; the attract pages still show every award.
 
+**Over the bonus's own loop (round 3).** DoomWalrus666: the cards "play over what seems to be active gameplay"; show
+them "over the end of ball bonus loop videos". By the player change the bonus screen is gone and the main play is back
+on the glass. The cards cannot go into the bonus screen itself: the game does not draw the HUD scene while its bonus
+is up (a hold at the bus's `bonus_end` kept TOTAL SCORE on the glass 10 s and no card showed), and the bonus's own
+scene is not one the app can write. So the cards stay at the game's end and the backdrop (the clip behind the HUD, in
+the city's place) plays the bonus's own loop under them: the game's own looped clip and crop as the bonus ends
+(`event bonus_end`; on Godzilla `EndOfBallBonus_BackgroundLoop`, `SquareCrop`), given back when the cards are done. A
+port without the event, or a bonus with no looped clip, keeps the main play under them.
+
 ### Co-op characters (PAD-1031)
 
 Each teammate picks a character at the start of their first ball (teammate 1 when the team forms; each join opens

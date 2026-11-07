@@ -17,6 +17,8 @@ runs is watched too, and these bring the run nearer their card (any mix):
                        SUMO holds the right return up post with its clock waiting); PROOF_START=<slug> picks one
     PROOF_FORMS=1      and their four Movie Wizard form modes, a clip each
     PROOF_SHOTSTART=1  started by its start shot (three right ramp enters), not Start mode now
+    PROOF_MODES_ZIP=<zip>  the owner's own modes file (Save every mode to a file) instead of made-up modes;
+                       PROOF_START picks the one Start mode now starts (diamond_death_threat by default)
 """
 
 import json
@@ -208,7 +210,11 @@ def main():
         json.dump({"input_path": CARD, "input_name": os.path.basename(CARD), "card_version": "1.06"}, f)
     prof = MP.profile_for_card("james_bond_le", "1.06")
     shots = [n for n, _m in prof.shots]
-    if os.environ.get("PROOF_MULTI") == "1":
+    if os.environ.get("PROOF_MODES_ZIP"):              # the owner's own modes file (round 2: the real case)
+        MP.import_modes(os.environ["PROOF_MODES_ZIP"], project)
+        slug = os.environ.get("PROOF_START") or "diamond_death_threat"
+        print("modes from", os.environ["PROOF_MODES_ZIP"], flush=True)
+    elif os.environ.get("PROOF_MULTI") == "1":
         slug = os.environ.get("PROOF_START") or "diamond_death_threat"
         multi_card(BM, MP, project, shots, slug)
     else:
@@ -302,7 +308,7 @@ def main():
             f.write(log)
         print("mode.log (own assets and the mode):", flush=True)
         for line in log.splitlines():
-            if "DIAMOND" in line or "own " in line or "diamond" in line:
+            if "DIAMOND" in line or "own " in line or "diamond" in line or "backdrop" in line:
                 print("   ", line[:220], flush=True)
     finally:
         try:

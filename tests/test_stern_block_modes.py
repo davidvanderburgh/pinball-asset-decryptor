@@ -709,6 +709,35 @@ def test_a_clip_past_the_limit_stops_the_build_instead_of_going_missing(tmp_path
         MA.build(project, "", "", str(tmp_path / "out"), code=code)
 
 
+def test_a_build_carries_the_clips_an_older_app_left_out_of_assets_json(tmp_path):
+    """PAD-1030 round 2: the owner's modes file (v1.351.1, "still the circles"): blocks.json had 13 clips, the loop
+    behind the HUD last, but assets.json - written only at a save, and their last save was on v1.351.0 - still held
+    the 12 it kept then, so Try it and Write built every mode without its loop. A build's refresh brings assets.json
+    up to the blocks as it brings the C; an assets.json already up to date is not written again."""
+    project = _card(tmp_path)
+    slug, _path = BM.new_blocks_mode(project, "Diamond Death Threat", shots=SHOTS)
+    p = _media_prog()
+    p["clips"] = [{"name": "crem%d" % i, "file": "crem%d.mp4" % i} for i in range(11, 23)]
+    p["clips"].append({"name": "background2", "file": "background2.mp4"})
+    BM.save(project, slug, p)
+    path = os.path.join(MP.mode_folder(project, slug), CM.ASSETS_FILE)
+    with open(path, encoding="utf-8") as f:
+        old = json.load(f)
+    old["clips"] = dict(list(old["clips"].items())[:12])     # as v1.351.0 wrote it
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(old, f, indent=2)
+    assert "background2" not in CM.load(project, slug).clips
+    code = dict(MT.code_modes_with_assets(project))          # what Try it and Write build from
+    assert code[slug].clips["background2"] == "background2.mp4" and len(code[slug].clips) == 13
+    with open(path, "rb") as f:
+        now = f.read()
+    stamp = os.stat(path).st_mtime_ns
+    assert BM.refresh(project) == []
+    with open(path, "rb") as f:
+        assert f.read() == now
+    assert os.stat(path).st_mtime_ns == stamp
+
+
 def test_the_clip_limit_is_the_runtimes_and_its_file_fits_the_read():
     """PAD-1030: MAX_CLIPS is pad_mode_assets.h's PA_CLIPS_MAX, and a mode's .assets file with every clip, call,
     bed and swap at its longest still fits the buffer pa_load reads it into (PA_FILE_MAX, its 0 included)."""

@@ -12870,5 +12870,8 @@
 "On this game the topper accessory unlocks a feature a cabinet without one cannot reach. Tick this and the next Build makes the game treat the topper as installed, so the feature is available anyway. It is a change to the game itself, so it works on a machine that is already set up.": "Bei diesem Spiel schaltet das Topper-Zubehör eine Funktion frei, die ein Automat ohne Topper nicht erreichen kann. Haken Sie dies an, und der nächste Build lässt das Spiel den Topper als installiert behandeln, sodass die Funktion trotzdem verfügbar ist. Es ist eine Änderung am Spiel selbst, also funktioniert es auf einer bereits eingerichteten Maschine.",
 "A cabinet with no topper drives nothing extra and shows no error; the feature just stops waiting for the topper. The box only appears on games checked to work this way.": "Ein Automat ohne Topper steuert nichts Zusätzliches an und zeigt keinen Fehler; die Funktion wartet nur nicht mehr auf den Topper. Das Feld erscheint nur bei Spielen, die darauf geprüft wurden.",
 "{} of {} songs in all": "{} von {} Songs insgesamt",
-"Every pool's songs count toward the most the jukebox takes": "Die Songs aller Pools zählen zusammen zur Höchstzahl der Jukebox"
+"Every pool's songs count toward the most the jukebox takes": "Die Songs aller Pools zählen zusammen zur Höchstzahl der Jukebox",
+"Updating to v{}…": "Aktualisierung auf v{}…",
+"Still updating… the new version opens by itself when it is ready.": "Wird noch aktualisiert… die neue Version öffnet sich von selbst, sobald sie bereit ist.",
+"This is taking longer than usual. If the app has not opened, start it from its shortcut.": "Das dauert länger als üblich. Wenn sich die App nicht geöffnet hat, starten Sie sie über ihre Verknüpfung."
 }

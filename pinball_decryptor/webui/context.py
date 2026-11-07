@@ -35,6 +35,15 @@ class Context:
     def state_snapshot(self):
         """The page's starting point: the event number and the state as of
         that number (events after it are replayed on top)."""
+        if not self.page_seen.is_set():
+            # the first page of this run is up: a Restart to update's
+            # splash, if this is the version it waited for, is done
+            # (core/update_splash, PAD-1036); a FindWindow when there is none
+            try:
+                from ..core import update_splash
+                update_splash.dismiss()
+            except Exception:                           # noqa: BLE001
+                pass
         self.page_seen.set()
         window = self.window
         seq = self.bus.last_seq

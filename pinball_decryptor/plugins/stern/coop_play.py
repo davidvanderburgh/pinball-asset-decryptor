@@ -444,11 +444,12 @@ NO_ACTION = "%s has no Action button."
 NO_SITE = "The app does not know where %s keeps this yet."
 
 _ACTION = re.compile(r"^(LOCKDOWN|ACTION) BUTTON( \(OPTIONAL\))?$")
+#: PAD-1045: the plunger's lane (not an upper one): the Action button launches from it on Godzilla, so the save's double
+#: press counts once the ball is out
+_LANE = re.compile(r"^SHOOTER LANE( OPTO)?$")
 
 
-def action_button(game_elf):
-    """The switch id of the Action button (the lockdown bar's: LOCKDOWN BUTTON, ACTION BUTTON) in the game program
-    *game_elf* (bytes), or None."""
+def _switch_named(game_elf, pattern):
     from . import portgen as G
     from . import portswitch as PS
     try:
@@ -456,9 +457,21 @@ def action_button(game_elf):
     except (G.PortgenError, ValueError, struct.error, IndexError):
         return None
     for sw in sws:
-        if _ACTION.match(" ".join(str(sw["name"]).upper().split())):
+        if pattern.match(" ".join(str(sw["name"]).upper().split())):
             return int(sw["id"])
     return None
+
+
+def action_button(game_elf):
+    """The switch id of the Action button (the lockdown bar's: LOCKDOWN BUTTON, ACTION BUTTON) in the game program
+    *game_elf* (bytes), or None."""
+    return _switch_named(game_elf, _ACTION)
+
+
+def shooter_lane(game_elf):
+    """The switch id of the shooter lane (SHOOTER LANE, SHOOTER LANE OPTO) in the game program *game_elf* (bytes), or
+    None."""
+    return _switch_named(game_elf, _LANE)
 
 
 def abilities(game_elf, label="This game", sites=(), values=None):
@@ -575,7 +588,8 @@ def save_characters(project, characters):
 
 
 def character_lines(game_elf, characters=None, sites=(), values=None):
-    """coop.cfg's character lines: ``pick on``, ``left``/``action`` (the buttons the pick and the save use) and
+    """coop.cfg's character lines: ``pick on``, ``left``/``action`` (the buttons the pick and the save use), ``lane``
+    (the shooter lane: the save's presses count once the ball is out of it, PAD-1045) and
     ``character <abilities> <name>|<what it does>`` for each character, an ability the card cannot have left out
     (``-``). None when *characters* has no pick or no characters."""
     chars = _characters(characters)
@@ -589,6 +603,9 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
     action = action_button(game_elf)
     if action is not None:
         out.append("action %d" % action)
+        lane = shooter_lane(game_elf)
+        if lane is not None:
+            out.append("lane %d" % lane)
     for c in chars["list"]:
         a = by_key.get(c["ability"]) or {}
         out.append("character %s %s|%s" % (a.get("cfg") or "-", c["name"], a["words"] if a.get("cfg") else ""))

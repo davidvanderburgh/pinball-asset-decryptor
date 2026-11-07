@@ -429,3 +429,71 @@ def test_stock_extract_found_for_an_old_extract_off_a_modified_card(tmp_path):
         w.call("ui.set", "modpack", "oldstock", "")
         w.drain()
         assert w.window.transfer_oldstock_var.get() == ""
+
+
+# ---- PAD-1050: a file of modes picked on the Mod Pack tab --------------------------
+def _modes_zip(path):
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("pad_modes.json", json.dumps({
+            "format": 1, "kind": "pad-modes", "modes": ["kiryu"],
+            "from": {"label": "Godzilla Premium/LE 1.16"}}))
+        zf.writestr("modes/kiryu/assets.json", json.dumps({"name": "SUPER X2"}))
+    return str(path)
+
+
+def _gz_extract(tmp_path):
+    from pinball_decryptor.core.checksums import generate_checksums
+    dst = tmp_path / "gz"
+    (dst / "audio").mkdir(parents=True)
+    (dst / "audio" / "idx0000.wav").write_bytes(b"stock")
+    (dst / ".extract_source.json").write_text(json.dumps(
+        {"input_name": "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"}), encoding="utf-8")
+    generate_checksums(str(dst))
+    return dst
+
+
+def _loads(w, monkeypatch):
+    got = []
+    modes = w.window.service("modes")
+    monkeypatch.setattr(modes, "_visible", True, raising=False)
+    monkeypatch.setattr(modes, "load_file", lambda path=None, **k: got.append(path))
+    return got
+
+
+@pytest.mark.parametrize("answer", ["yes", "no"])
+def test_import_of_a_file_of_modes_offers_the_modes_tab(tmp_path, monkeypatch, answer):
+    dst = _gz_extract(tmp_path)
+    z = _modes_zip(tmp_path / "Godzilla modes v38 - Premium-LE 1.16 mod pack.zip")
+    with web_app(tmp_path, mfr="stern") as w:
+        got = _loads(w, monkeypatch)
+        _set_project(w, str(dst))
+        w.answers.extend([z, answer])
+        w.call("modpack.import_pack")
+        ask = _wait_for(w, "Import Mod Pack")
+        assert "file of modes, not a mod pack" in ask["message"]
+        assert "SUPER X2" in ask["message"] and "Godzilla Premium/LE 1.16" in ask["message"]
+        assert "Nothing to Import" not in _titles(w)
+        w.drain()
+        assert got == ([z] if answer == "yes" else [])
+        if answer == "yes":
+            assert w.state("shell")["tab"] == "modes"
+    assert sorted(os.listdir(dst / "audio")) == ["idx0000.wav"]
+
+
+def test_transfer_from_an_unzipped_file_of_modes_offers_the_modes_tab(tmp_path, monkeypatch):
+    dst = _gz_extract(tmp_path)
+    folder = tmp_path / "Godzilla modes v38 - Premium-LE 1.16 mod pack"
+    with zipfile.ZipFile(_modes_zip(tmp_path / "m.zip")) as zf:
+        zf.extractall(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        got = _loads(w, monkeypatch)
+        w.call("ui.set", "modpack", "src", str(folder))
+        w.call("ui.set", "modpack", "dst", str(dst))
+        w.answers.append("yes")
+        w.call("modpack.transfer")
+        ask = _wait_for(w, "Transfer Mods")
+        assert "folder holds a file of modes, unzipped" in ask["message"]
+        w.drain()
+        assert len(got) == 1 and got[0].endswith(".zip")
+        with zipfile.ZipFile(got[0]) as zf:
+            assert sorted(zf.namelist()) == ["modes/kiryu/assets.json", "pad_modes.json"]

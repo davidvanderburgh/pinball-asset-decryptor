@@ -581,3 +581,60 @@ def test_unpacked_card_files_never_list_as_slots(tmp_path):
 
     checksums.generate_checksums(str(proj))
     assert sorted(checksums.read_baseline_any(str(proj))) == ["images/real.png"]
+
+
+# ---- PAD-1050: a file of modes is not a mod pack ------------------------------------
+def _modes_file(path):
+    """A file of modes the way the Modes tab's Save to a file... writes one."""
+    import json
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("pad_modes.json", json.dumps({
+            "format": 1, "kind": "pad-modes", "modes": ["anguirus_assist", "kiryu", "bare"],
+            "from": {"title": "godzilla_le_1_16", "label": "Godzilla Premium/LE 1.16"}}))
+        zf.writestr("modes/anguirus_assist/assets.json", json.dumps({"name": "JET JAGUAR"}))
+        zf.writestr("modes/anguirus_assist/music.wav", b"RIFF")
+        zf.writestr("modes/kiryu/mode.json", json.dumps({"name": "SUPER X2"}))
+        zf.writestr("modes/bare/blocks.json", "{}")
+    return str(path)
+
+
+def test_a_file_of_modes_is_told_apart_from_a_mod_pack(tmp_path):
+    z = _modes_file(tmp_path / "modes v38.zip")
+    about = modpack.modes_file_about(z)
+    assert about == {"names": ["JET JAGUAR", "SUPER X2", "bare"],
+                     "made_for": "Godzilla Premium/LE 1.16", "folder": ""}
+    assert modpack.modes_file_words(about) == (
+        "It holds 3 modes: JET JAGUAR, SUPER X2, bare (made for Godzilla Premium/LE 1.16).")
+    pack = tmp_path / "pack.zip"
+    with zipfile.ZipFile(pack, "w") as zf:
+        zf.writestr("audio/a.wav", b"x")
+    assert modpack.modes_file_about(str(pack)) is None
+    assert modpack.modes_file_about(str(tmp_path / "nope.zip")) is None
+    assert modpack.modes_file_about(str(tmp_path)) is None       # a plain folder
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_an_unzipped_file_of_modes_is_found_and_zipped_back(tmp_path, nested):
+    z = _modes_file(tmp_path / "modes v38.zip")
+    folder = tmp_path / "Godzilla modes v38 - mod pack"
+    top = folder / "modes v38" if nested else folder
+    with zipfile.ZipFile(z) as zf:
+        zf.extractall(top)
+    about = modpack.modes_file_about(str(folder))
+    assert about["names"] == ["JET JAGUAR", "SUPER X2", "bare"]
+    assert about["folder"] == str(top)
+    back = modpack.zip_modes_folder(about["folder"], str(tmp_path / "back.zip"))
+    with zipfile.ZipFile(z) as a, zipfile.ZipFile(back) as b:
+        assert sorted(a.namelist()) == sorted(b.namelist())
+    assert modpack.modes_file_about(back)["folder"] == ""
+
+
+def test_import_of_a_file_of_modes_says_what_it_is(tmp_path):
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    _write(dest / "a.wav", b"orig")
+    (dest / ".checksums.md5").write_text(f"a.wav\t{_md5(b'orig')}\n", encoding="utf-8")
+    z = _modes_file(tmp_path / "modes.zip")
+    with pytest.raises(ValueError, match="file of modes, not a mod pack.*Modes tab"):
+        modpack.import_mod_pack(z, str(dest))
+    assert sorted(os.listdir(dest)) == [".checksums.md5", "a.wav"]

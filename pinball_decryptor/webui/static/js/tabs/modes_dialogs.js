@@ -166,6 +166,23 @@ export function PlayButton({ path, label = "Play" }) {
 // ------------------------------------------------------------------ co-op awards (PAD-1028)
 // What the machine shows after a co-op game: one award a row, ticked or not, its words as the page's title.
 // Python reads the rows off the project's card (modes.coop_aw) and keeps the choices in the project.
+/* PAD-1033: what each handicap level does on the card's game (read off its program) */
+export function HandicapLevelsDialog({ s, onClose }) {
+  const lv = s.hand_levels || {};
+  const rows = lv.rows || [];
+  useEffect(() => { call("modes.handicap_levels_refresh"); }, []);
+  return html`<${Modal} title="Handicap levels" icon="list" wide onClose=${onClose}
+    footer=${html`<span class="grow"></span><${Button} onClick=${onClose}>Close<//>`}>
+    <div class="small dim wrap">${s.hand_tip}</div>
+    ${lv.why ? html`<${Note} kind="info">${lv.why}<//>` : null}
+    ${rows.length ? html`<div class="modes-hand-levels" style="max-height:min(56vh, 520px)">
+      ${rows.map((r) => html`<div class="modes-hand-row" key=${r.level}>
+        <b class=${r.level.startsWith("-") ? "warn-ink" : r.level.startsWith("+") ? "ok-ink" : ""}>${r.level}</b>
+        <span class=${cx("small wrap", r.level === "0" && "dim")}>${r.words}</span></div>`)}
+    </div>` : lv.why ? null : html`<div class="small muted">Reading the game program on the card…</div>`}
+  <//>`;
+}
+
 export function CoopAwardsDialog({ s, onClose }) {
   const aw = s.coop_aw || {};
   const rows = aw.rows || [];

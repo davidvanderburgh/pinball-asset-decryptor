@@ -400,7 +400,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  coop_tip=self.COOP_TIP)
         self.set(idle_on=False, idle_note="", idle_note_kind="", idle_shown=False,   # PAD-1022
                  idle_tip=self.IDLE_TIP)
-        self.set(hand_on=False, hand_note="", hand_note_kind="", hand_shown=False, hand_levels=[],   # PAD-1033
+        self.set(hand_on=False, hand_note="", hand_note_kind="", hand_shown=False,   # PAD-1033
+                 hand_levels={"why": "", "rows": []},
                  hand_tip=self.HAND_TIP)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
@@ -893,19 +894,27 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import handicap as _HC
         prof = _HC.project_title(project) if project else None
         on = bool(project) and _HC.load(project)
-        note, kind, levels = "", "", []
+        note, kind = "", ""
         why = _HC.title_refusal(prof) if project else ""
         if on:
             if why:
                 note, kind = why, "err"
             else:
-                bad, said = _HC.project_levels(project)
                 note = _HC.NOTE
-                if bad:
-                    note += " " + bad
-                levels = [{"level": "%+d" % lv, "words": "; ".join(words)} for lv, words in said]
-        self.set(hand_shown=bool(project) and (on or not why), hand_on=on, hand_note=note, hand_note_kind=kind,
-                 hand_levels=levels)
+        self.set(hand_shown=bool(project) and (on or not why), hand_on=on, hand_note=note, hand_note_kind=kind)
+
+    @rpc
+    def handicap_levels_refresh(self):
+        """PAD-1033: the Levels dialog's rows, worked out of the project's card's game program (cached)."""
+        from ...plugins.stern import handicap as _HC
+        project = self.project()
+        why, said = _HC.project_levels(project) if project else (_HC.NO_CARD, [])
+        rows = [{"level": "%+d" % lv, "words": "; ".join(words)} for lv, words in reversed(said)]
+        if rows:                                            # easiest first, the game's own between
+            rows.insert(sum(1 for r in rows if r["level"].startswith("+")),
+                        {"level": "0", "words": "The game's own settings, as the operator set them."})
+        self.set(hand_levels={"why": why, "rows": rows})
+        return True
 
     @rpc
     def set_handicap(self, on):

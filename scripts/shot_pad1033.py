@@ -1,11 +1,11 @@
 """PAD-1033 proof shot: the Modes tab's Handicap per player tick (under the mode list, after Co-op play).
 
-    python scripts/shot_pad1033.py <repo> <out.png> [--tick]
+    python scripts/shot_pad1033.py <repo> <out.png> [--tick] [--open]
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card (its
 .extract_source.json names it) and shows the Modes tab. Before (main) there is no handicap row; after there is
 "Handicap per player" and, with --tick, the note under it (the HANDICAP row in the service menu, how a player picks)
-and what each level from -3 to +3 does on this card.
+and (--open) the Levels dialog: what each level from -3 to +3 does on this card.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
 """
@@ -35,6 +35,7 @@ def main():
     repo = os.path.abspath(sys.argv[1])
     out = os.path.abspath(sys.argv[2])
     tick = "--tick" in sys.argv[3:]
+    unfold = "--open" in sys.argv[3:]
     scratch = tempfile.mkdtemp(prefix="pad1033-")
     project = os.path.join(scratch, "project")
     os.makedirs(project)
@@ -68,6 +69,10 @@ def main():
             if tick:
                 webui_shot.api(url, "modes.set_handicap", True)
                 time.sleep(20)          # the levels are read off the card's program (cached after)
+            if unfold:
+                page.click("text=Levels…")
+                page.wait_for_selector(".modes-hand-row", timeout=120000)
+                time.sleep(1)
             page.screenshot(path=out)
             print("shot", out, flush=True)
             browser.close()

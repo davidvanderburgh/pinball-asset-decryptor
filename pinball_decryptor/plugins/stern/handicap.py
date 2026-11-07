@@ -51,8 +51,8 @@ HOW = ("at each player's first ball the top of the screen shows P1 HANDICAP 0: t
        "harder, the right easier (-3 to +3), and the ball's first score takes it")
 
 #: the Modes tab's line under the tick
-NOTE = ("On the card: each player picks -3 to +3 at their first ball (left flipper harder, right easier). HANDICAP in "
-        "the service menu (Attract Mode, or the end of Standard Adjustments) switches it, On to start with.")
+NOTE = ("On the card: each player picks -3 to +3 at their first ball with the flippers. HANDICAP in the service menu "
+        "switches it, On to start with.")
 
 #: Godzilla (Pro, Premium/LE): the reporter's levels - battles first, then the heat ray and Building Multiball, then
 #: tanks, the bridge, the powerline and the jets; harder the same way round. ``(adjustment, (level -> change))`` where a

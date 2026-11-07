@@ -237,3 +237,30 @@ def test_mode_write_puts_handicap_cfg_beside_the_runtime(tmp_path, monkeypatch):
     assert "handicap on" in text and "setting 0x007d2000" in text and "only" in text.split()
     assert any(x.startswith("handicap +3: ball save +6 s") for x in plan.lines)
     assert any("switched in the service menu (HANDICAP)" in x for x in plan.lines)
+
+
+def test_the_modes_tab_tick_and_its_levels(tmp_path, monkeypatch):
+    from pinball_decryptor.core import staged_changes
+    from pinball_decryptor.plugins.stern import handicap as HC
+    from pinball_decryptor.webui.tabs import modes as M
+    svc = M.ModesTab.__new__(M.ModesTab)
+    state = {}
+    monkeypatch.setattr(svc, "set", lambda **kw: state.update(kw), raising=False)
+    monkeypatch.setattr(svc, "project", lambda: str(tmp_path), raising=False)
+    monkeypatch.setattr(svc, "_say", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(HC, "project_title", lambda project, probe=False: object())
+    monkeypatch.setattr(HC, "title_refusal", lambda prof: "")
+    monkeypatch.setattr(HC, "project_levels", lambda project: ("", [(-1, ["ball save -1 s"]), (1, ["ball save +2 s"])]))
+    staged_changes.save(str(tmp_path), {"audio": {"x": "y"}})
+    assert svc.set_handicap(True) is True
+    assert staged_changes.load(str(tmp_path))[HC.STAGED_KEY] == {"on": True}
+    assert state["hand_shown"] is True and state["hand_on"] is True and state["hand_note"] == HC.NOTE
+    assert svc.handicap_levels_refresh() is True
+    assert [r["level"] for r in state["hand_levels"]["rows"]] == ["+1", "0", "-1"]       # easiest first, 0 between
+    monkeypatch.setattr(HC, "title_refusal", lambda prof: "no port")
+    svc._publish_handicap(str(tmp_path))
+    assert state["hand_note_kind"] == "err" and state["hand_shown"] is True              # ticked: shown, in red
+    assert svc.set_handicap(False) is True and HC.STAGED_KEY not in staged_changes.load(str(tmp_path))
+    assert state["hand_shown"] is False                                                  # a game that cannot: hidden
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
+    assert 'call("modes.set_handicap", v)' in js and "HandicapLevelsDialog" in js

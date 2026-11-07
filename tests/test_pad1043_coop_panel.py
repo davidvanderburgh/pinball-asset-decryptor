@@ -62,6 +62,7 @@ def test_two_panels_of_the_shape_name_none(monkeypatch):
 PANELS = {
     "godzilla_le-1_16_0_spike2.elf": ["0x001ae4e0", "0x001ae3a4"],
     "godzilla_pro-1_16_0_spike2.elf": ["0x001aa084", "0x001a9f48"],
+    "godzilla_pro-1_15_0.elf": ["0x001aa084", "0x001a9f48"],          # an older build (no co-op in its port)
     "avengers_infinity_le-1_10_0.elf": ["0x00160e9c", "0x00160d38"],
     "avengers_infinity_pro-1_10_0.elf": ["0x0015f86c", "0x0015f708"],
     "jurassic_park_the_pin-1_05_0.elf": ["0x0009fd90", "0x0009fb2c"],

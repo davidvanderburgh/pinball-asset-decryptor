@@ -49,14 +49,16 @@ def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
     src = _src()
     assert re.search(r'static const char \*const s\[\] = \{ "agent_header", "agent_begin", 0 \};', src)
     # the gate comes right after the port gate, and a missing gate hooks nothing. Only PAD-446's
-    # clip variants, PAD-494's music modes, PAD-537's picture settings and PAD-1022's inactivity
-    # pausing the timers arm between them (none scores anything), and a card with only those stops
-    # there - unless it also carries PAD-782's attract items or PAD-1017's co-op play, which take the
-    # whole gate (attract_wanted, coop_wanted)
+    # clip variants, PAD-494's music modes, PAD-537's picture settings, PAD-1022's inactivity
+    # pausing the timers and PAD-1033's handicaps arm between them (none scores anything), and a card
+    # with only those stops there (a card of handicaps hooking the tick for its pick) - unless it also
+    # carries PAD-782's attract items or PAD-1017's co-op play, which take the whole gate
+    # (attract_wanted, coop_wanted)
     assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*clipv_arm\(\);[^\n]*\n\s*sndm_arm\(\);[^\n]*\n"
-                     r"\s*pic_arm\(\);[^\n]*\n\s*idle_arm\(\);[^\n]*\n"
-                     r"\s*if \(\(clipv_only \|\| sndm_only \|\| pic_only \|\| idle_only\) && !attract_wanted\(\)"
-                     r" && !coop_wanted\(\)\) \{[^{}]*?return;"
+                     r"\s*pic_arm\(\);[^\n]*\n\s*idle_arm\(\);[^\n]*\n\s*hand_arm\(\);[^\n]*\n"
+                     r"\s*if \(\(clipv_only \|\| sndm_only \|\| pic_only \|\| idle_only \|\| hand_cfg_only\(\)\)"
+                     r" && !attract_wanted\(\) && !coop_wanted\(\)\) \{[^{}]*?"
+                     r"if \(hand\.on && !hook\(fn\(\"tick\"\), on_hand_tick\)\) \{[^{}]*\}\s*return;"
                      r"\s*\}\s*\n\s*if \(!insider_arm\(\)\) return;",
                      src)
     assert 'hook(fn("agent_header"), on_agent_header)' in src

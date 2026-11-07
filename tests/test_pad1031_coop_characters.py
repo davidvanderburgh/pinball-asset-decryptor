@@ -55,6 +55,9 @@ static uint64_t pm_stock_lit(struct pm_stock_rule *r) { (void)r; return 0; }
 static unsigned more_state(unsigned slot) { (void)slot; return 0; }
 static unsigned long data(const char *name) { (void)name; return 0; }
 @DECL@
+static unsigned coop_adj_answer(unsigned id, unsigned own);
+/* PAD-1033: the runtime's one getter wrap answers a handicap, then the character; here no handicap */
+static unsigned adj_chain(unsigned id) { return coop_adj_answer(id, coop_adj_game(id)); }
 @FNS@
 static void press(unsigned id) { coop_edge(id, 1, 0x800, 0); }
 int main(void)
@@ -72,17 +75,17 @@ int main(void)
                coop_ch[i].n_adj, coop_ch[i].save_s, coop_ch[i].boost, coop_ch[i].gift);
     coop.n = 3; coop.turn = 1;
     coop_chars_begin();
-    printf("before a pick: %u\n", coop_adj_wrap(94));
+    printf("before a pick: %u\n", coop_adj_answer(94, own_adj(94)));
     coop_pick_open(1);
     printf("open [%s]\n", shown);
     now_ms += 1600; coop_chars_tick(); printf("flip [%s]\n", shown);
     press(34); coop_chars_tick();
-    printf("t1 %d [%s] reads 94: %u 195: %u\n", coop_pick_of[1], shown, coop_adj_wrap(94), coop_adj_wrap(195));
+    printf("t1 %d [%s] reads 94: %u 195: %u\n", coop_pick_of[1], shown, coop_adj_answer(94, own_adj(94)), coop_adj_answer(195, own_adj(195)));
     printf("ball out: %u\n", saved_s); saved_s = 0;
     coop.turn = 2; coop_chars_turn();
     printf("open2 [%s]\n", shown);
     press(34); coop_chars_tick();
-    printf("t2 %d reads 94: %u\n", coop_pick_of[2], coop_adj_wrap(94));
+    printf("t2 %d reads 94: %u\n", coop_pick_of[2], coop_adj_answer(94, own_adj(94)));
     printf("no ball out: %u\n", saved_s);
     now_ms += 5000; press(34); now_ms += 300; press(34); coop_chars_tick();
     printf("save %u\n", saved_s); saved_s = 0;
@@ -93,7 +96,7 @@ int main(void)
     press(60); coop_chars_tick(); printf("left [%s]\n", shown);
     press(59); coop_chars_tick(); printf("right [%s]\n", shown);
     press(34); coop_chars_tick();
-    printf("t3 %d reads 195: %u 173: %u 94: %u\n", coop_pick_of[3], coop_adj_wrap(195), coop_adj_wrap(173), coop_adj_wrap(94));
+    printf("t3 %d reads 195: %u 173: %u 94: %u\n", coop_pick_of[3], coop_adj_answer(195, own_adj(195)), coop_adj_answer(173, own_adj(173)), coop_adj_answer(94, own_adj(94)));
     coop.turn = 1; coop_chars_turn();
     printf("t1 again: open %d save used %d\n", pk.open, coop_save_used);
     /* a new game: a 4th teammate's RANDOM never takes one a teammate has */
@@ -113,7 +116,7 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static unsigned coop_adj_value(unsigned own, unsigned op, unsigned v, unsigned lo, unsigned hi)",
        "static unsigned coop_taken(unsigned except)",
        "static const struct coop_char *coop_char_up(void)",
-       "static unsigned coop_adj_wrap(unsigned id)",
+       "static unsigned coop_adj_answer(unsigned id, unsigned own)",
        "static void coop_cache_hold(void)",
        "static void coop_gift(const struct coop_char *c)",
        "static void coop_counts_give(const struct coop_char *c)",
@@ -207,7 +210,7 @@ def test_the_runtime_asks_for_a_pick_at_each_first_ball_and_reads_the_lines():
     assert "coop_chars_tick();" in R._lift(src, "static void coop_tick(void)\n{")
     assert "if (coop_live) coop_edge(id, level, flags, pol);" in R._lift(src, "static void on_switch_edge(unsigned *r)")
     arm = R._lift(src, "static void coop_chars_arm(struct site *e)")
-    assert 'hook_wrap(fn("adjustment")' in arm
+    assert "adj_wrap_arm()" in arm and "adj_coop_on = 1;" in arm      # PAD-1033: the one wrap, answered in turn
 
 
 def test_character_lines_need_a_pick_and_characters():
@@ -411,7 +414,7 @@ def test_spot_and_unlock_read_from_coop_cfg():
     src = RUNTIME.read_text(encoding="utf-8")
     line = R._lift(src, "static void coop_char_line(const char *s)")
     assert 'str_starts(p, "spot:")' in line and 'str_starts(p, "unlock:")' in line
-    wrap = R._lift(src, "static unsigned coop_adj_wrap(unsigned id)")
+    wrap = R._lift(src, "static unsigned coop_adj_answer(unsigned id, unsigned own)\n{")
     assert "c->unlock_adj == id && (coop_started[coop.turn] & c->unlock_rules)" in wrap
     spot = R._lift(src, "static int coop_spot(const struct coop_char *c)")
     assert 'fn("shot_dispatch")' in spot and "lit & (~lit + 1)" in spot

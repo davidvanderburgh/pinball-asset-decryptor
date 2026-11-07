@@ -123,7 +123,7 @@ case "$cmd" in
         # have a later stock run take THOSE out.
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
-              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/gamecheck.on \
+              "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/gamecheck.on \
               "$DUMP"/census.mark
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
@@ -164,6 +164,10 @@ case "$cmd" in
         # PAD-1022: inactivity pausing the game's timers, read beside the mode files
         if [ -f "$S/idle.cfg" ]; then
             put "$S/idle.cfg" "$DUMP/idle.cfg" || die "could not copy idle.cfg"
+        fi
+        # PAD-1033: a handicap for each player, read beside the mode files
+        if [ -f "$S/handicap.cfg" ]; then
+            put "$S/handicap.cfg" "$DUMP/handicap.cfg" || die "could not copy handicap.cfg"
         fi
         a=0
         for f in "$S"/*.assets; do       # a code mode's own assets (the build's carriers)

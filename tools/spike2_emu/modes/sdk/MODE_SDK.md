@@ -6283,6 +6283,62 @@ giving a drain back, one ramp lighting a battle (BATTLE READY) for the easy team
 record 0/0/0 -> 0/0/1, a power-up counted twice (the meter's two segments), TANKS 7/10 after 4 given and 3 shot down,
 the jets count 4. Pro 1.16 carries the same lines (its sites matched to LE's code, not run).
 
+## Handicaps (PAD-1033)
+
+Each player of a game picks a handicap, -3 (hardest) to +3 (easiest), and while they are up the game reads its own
+adjustments easier or harder: the adjustment getter (`site adjustment`) is wrapped and answers the player's level's
+values. NVRAM never changes, and a level never reaches another player. Nothing for a mode to call: the Modes tab's
+**Handicap per player** puts `handicap.cfg` beside the runtime (`plugins/stern/handicap.py` works the levels out of the
+card's own program):
+
+    handicap on
+    left 60                          the flipper buttons: the pick walks with them (left harder, right easier)
+    right 59
+    setting 0x007d1234               the service menu's HANDICAP row's live value (Off/On, On to start with); absent:
+                                     always on (no spare setting was left for the row)
+    only                             the card has no modes: the runtime arms this before the score gate and nothing
+                                     else, so the scores stay on Insider Connected (it is the operator's settings)
+    record 173 0x0012406c 0xe92d40f8 0xe1a04000 0x10
+                                     adjustment 173 is kept in each player's own record by the method at 0x12406c
+                                     (its first two words, checked before it is hooked): this + player x 4 + 0x10
+    level -3 adj:94-15:0:15,adj:173+2:0:2,...
+    level +1 adj:94+2:0:15,adj:173-1:0:2
+
+A change is `adj:<id>=<v>`, `adj:<id>+<n>:<lo>:<hi>`, `adj:<id>-<n>:<lo>:<hi>` or `adj:<id>x<pct>:<lo>:<hi>` (the
+operator's value set, raised, lowered or scaled, held to the adjustment's own range); up to 24 a level.
+
+**The levels.** Godzilla's follow the reporter's list (+1 battles and a longer ball save, +2 the heat ray and
+Building Multiball too, +3 tanks, the bridge, the powerline, the jets and Mechagodzilla too; the harder ones the same
+way round, -3 with no ball save). Any other game's are worked out of its program: the ball save 2 s a level (none at
+-3), and every adjustment it names `..._DIFFICULTY` with at most 10 steps (each game's menu has the easiest lowest)
+in by thirds - level 1 the first third a step, level 2 two thirds two steps, level 3 all of them three steps.
+
+**The pick.** At each player's first ball (the ball byte is 1, the player's pick not yet shown this game) the game's
+top line ("BALL %d", co-op's borrow) reads `P2 HANDICAP 0`; the flippers walk it, starting at what that player had
+last game (0 at power-up); the ball's first score takes it. The player's level holds from the game's first read of an
+adjustment in their first ball: the game reads the ball save time as it serves the ball, before the pick shows, so
+ball 1's save is the level the pick opened at and every later ball's the one taken. Before their first ball the
+getter answers the operator's own values: nothing the game reads for every player before then carries anyone's
+level. In a co-op game each teammate picks.
+
+**Records.** Godzilla reads its battle, building, tank, bridge, powerline, jet and Mechagodzilla difficulties once,
+at a player's first ball, and keeps each in the player's own record of its rule (`str adj, [this + player x 4 + at]`,
+player 1-based), which play then raises (a battle notch each battle). The getter's later answers never reach those,
+so `handicap.py` finds each such method in the card's program by its shape - `mov r0, #id`, `bl adjustment`, `mov rV,
+r0`, a call to the function that only answers the player byte (`data coop_player`), `add rD, <this>, r0, lsl #2`,
+`str rV, [rD, #off]` - and handicap.cfg names it; the runtime hooks it to learn the rule and at the pick writes the
+player's record with what the level makes of the operator's value (Godzilla LE 1.16: 0x12406c battles +0x10,
+0x12e168 building +0x4, 0x180e44 tanks, 0x1349c4 bridge, 0x1685a4 powerline, 0x158ba0 jets, 0x15c7a8 Mechagodzilla
+spins +0x14 and shield +0x4; the battle and building ones are PAD-1031's hand-found lines). Of the other 51 latest
+builds the finder sees such records on Avengers, Foo Fighters, Jaws and Rush; elsewhere the game reads its
+difficulties as it plays, and the getter's answer is what plays.
+
+**Proof** (Godzilla LE 1.16, rig kit `C:\tmp\PAD-1033\rig`, `/dump/handlog.on` logs the first read of each
+adjustment by each player on each ball): two players, player 1 -1 and player 2 +3 with the flippers; their records
+written at the pick (battles 2 / 0, the operator's 1), the heat ray read 8 (its own 20) in player 2's turns and 20 in
+player 1's, the ball save 11 / 15 (the operator's 12) from ball 2; a second game, both players' ball 1 save at their
+kept level.
+
 ## Inactivity pauses the timers (PAD-1022)
 
 Every Spike 2 framework offers the operator **ALLOW INACTIVITY TO PAUSE TIMERS** (`AD_INACTIVE_TIMER`, 0..1, on by

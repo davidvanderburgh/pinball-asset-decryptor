@@ -676,3 +676,6 @@ html.bp-1100 .modes-coop-ch-row { grid-template-columns: 24px 1fr 1fr auto; }
 html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .modes-coop-ch-pv { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
 .modes-coop-ch-pv img { width: 460px; height: auto; border: 1px solid var(--line); border-radius: 6px; flex: none; }
+/* PAD-1033: what each handicap level does (the Levels dialog) */
+.modes-hand-levels { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.modes-hand-row { display: grid; grid-template-columns: 2.5em 1fr; align-items: baseline; gap: 8px; }

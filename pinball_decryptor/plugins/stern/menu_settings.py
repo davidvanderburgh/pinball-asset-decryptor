@@ -463,7 +463,24 @@ def onoff_kind(table):
     return kind
 
 
-def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff=False):
+#: PAD-1042: a row of numbers from 0 (CO-OP PLAY's 0 Off, 1 Co-op, 2 Team 2v2) shows its value the way the game's own
+#: GAME ID does: a plain number (kind 2 on every latest build); the help line names what each number is
+NUMBER_ROW = "AD_GAME_ID"
+
+
+def number_kind(table):
+    """The display kind of the game's own plain-number row (GAME ID), or raise :class:`MenuSettingError`."""
+    if table.elem != 44 or NUMBER_ROW not in table.by_name:
+        raise MenuSettingError("the game has no numbered setting to show this one like")
+    i = table.by_name[NUMBER_ROW]
+    desc = table._off(table.table_va + i * table.elem)
+    kind = struct.unpack_from("<I", table.data, desc + OFF_KIND)[0]
+    if not 0 < kind < 64:
+        raise MenuSettingError("the game's own numbered setting reads kind %d" % kind)
+    return kind
+
+
+def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff=False, from_zero=False):
     """``(MenuSetting, {file offset: bytes}, CategoryTable or None)``: the same-size writes that
     make setting *key* (values 1..*values*, its help naming *names*), and the category table to
     give one more record (:func:`table_writes`) - ``None`` when a previous Write already did. Raises
@@ -471,7 +488,9 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     PAD-537: *ad* is the adjustment to take over (a picture setting's, :func:`plan_many` picks
     one), *default* the value a fresh store starts at, *help_text* a help line of the setting's
     own in place of the names. PAD-1017: *onoff* shows the two values as Off and On, the way the game's own CUSTOM
-    MESSAGE does (stored 0 and 1; *default* still counts from 1: 1 Off, 2 On)."""
+    MESSAGE does (stored 0 and 1; *default* still counts from 1: 1 Off, 2 On). PAD-1042: *from_zero* stores and shows
+    the values as plain numbers from 0 (the help line says what each is; *default* still counts from 1), so a row that
+    was Off/On (0 and 1) keeps an operator's pick when it grows a value."""
     from . import menu_visibility as MV
     if key not in SETTINGS:
         raise MenuSettingError("no such setting: %s" % key)
@@ -487,8 +506,8 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
         raise MenuSettingError("a default of %s is not one of the values 1 to %d" % (default, values))
     if onoff and values != 2:
         raise MenuSettingError("an Off/On setting has two values, not %d" % values)
-    kind = onoff_kind(table) if onoff else 0
-    low = 0 if onoff else 1
+    kind = onoff_kind(table) if onoff else number_kind(table) if from_zero else 0
+    low = 0 if onoff or from_zero else 1
     if ad not in table.by_name:
         raise MenuSettingError("the game has no %s to take over" % ad)
     i = table.by_name[ad]
@@ -634,7 +653,7 @@ def check(raw, setting):
                                                           setting.values - 1 + setting.low, 1):
         bad.append("its range reads %d..%d" % (e["min"], e["max"]))
     if setting.kind and struct.unpack_from("<I", raw, desc + OFF_KIND)[0] != setting.kind:
-        bad.append("it does not show Off and On")
+        bad.append("it does not show its values as written")
     if menu_label(t, setting.id) != SETTINGS[setting.key][1]:
         bad.append("its caption reads \"%s\"" % menu_label(t, setting.id))
     if row is None or row[1] != setting.caption:

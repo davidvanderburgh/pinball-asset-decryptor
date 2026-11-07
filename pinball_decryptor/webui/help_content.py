@@ -1514,7 +1514,7 @@ HELP_CONTENT = {
          "bars, and the song's quiet, building and loud parts. Every step starts on a bar line, every pattern "
          "moves in time with the beat (pulses, chases, strobes, side to side), a loud part that hits after a "
          "quiet one opens with a white flash, and the lights fade up at the start and out at the end. Pick a "
-         "style: **Punchy (rock)**, **Smooth** or **Colourful (party)**. It replaces the show's steps; change "
+         "style: **Punchy (rock)**, **Smooth** or **Colorful (party)**. It replaces the show's steps; change "
          "any of them after."),
         ("Insider Connected",
          "The shows change only the cabinet's lights, not the game or its scores: a card that carries only "

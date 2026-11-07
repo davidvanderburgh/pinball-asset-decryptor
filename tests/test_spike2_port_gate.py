@@ -61,6 +61,7 @@ _GATE = r"""
 static const char *PORT_FILES[1] = { "" };
 static void event_line(const char *s) { (void)s; }
 static void lamp_line(const char *s) { (void)s; }
+static void cab_line(const char *s) { (void)s; }       /* PAD-1040's cabinet lights: not this test's */
 static void rule_line(const char *s) { (void)s; }      /* item 160's stock rules: not this test's */
 static void say(const char *fmt, ...)
 {
@@ -270,6 +271,7 @@ static volatile long chg_game_tid;
 static void chg_end_ball_now(const char *from) {}
 @SWITCHES@
 @DISPATCH@
+static void coop_bonus_end(void) {}                  /* PAD-1028's, not under test here */
 int main(void)
 {
     unsigned r[6] = { 73, 0, 0, 0, 0, 0 };

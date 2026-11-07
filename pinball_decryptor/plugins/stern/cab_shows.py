@@ -55,10 +55,10 @@ FX = {
     "center_out": ("From the middle", "Sweeps", "ab"),
     "center_in": ("To the middle", "Sweeps", "ab"),
     "alternate": ("Left / right", "Flashes", "abr"),
-    "rainbow": ("Rainbow", "Colour", "r"),
-    "sparkle": ("Sparkle", "Colour", "ab"),
-    "fire": ("Fire", "Colour", "ab"),
-    "meter": ("Level meter", "Colour", "abr"),
+    "rainbow": ("Rainbow", "Color", "r"),
+    "sparkle": ("Sparkle", "Color", "ab"),
+    "fire": ("Fire", "Color", "ab"),
+    "meter": ("Level meter", "Color", "abr"),
 }
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 #: the page's word for a game whose cabinet has no expression lights

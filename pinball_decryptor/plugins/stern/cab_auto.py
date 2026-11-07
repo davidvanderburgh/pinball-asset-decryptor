@@ -35,7 +35,7 @@ STYLES = {
                {"quiet": [("crossfade", 0), ("pulse", 2.0)],
                 "build": [("center_out", 0), ("pulse", 1.0), ("center_in", 0)],
                 "loud": [("sweep_up", 0), ("pulse", 0.5), ("sweep_down", 0), ("alternate", 2.0)]}),
-    "party": ("Colourful (party)", ["#ff0000", "#ffd000", "#00ff60", "#00a0ff", "#a040ff", "#ff40a0"],
+    "party": ("Colorful (party)", ["#ff0000", "#ffd000", "#00ff60", "#00a0ff", "#a040ff", "#ff40a0"],
               {"quiet": [("rainbow", 2.0), ("pulse", 1.0)],
                "build": [("chase_up", 0.5), ("rainbow", 1.0), ("chase_down", 0.5)],
                "loud": [("strobe", 0.25), ("rainbow", 0.5), ("alternate", 0.5), ("sparkle", 0)]}),

@@ -6144,6 +6144,14 @@ player change, which puts it back up, so the next teammate plays the same ball. 
 down; it is put back up and the same teammate shoots again. For t = n the game's change runs as it is (the next ball,
 or the game's end). So the game ends after the last teammate's last ball.
 
+- **Each teammate's ball 1 is not a first ball (PAD-1046):** the framework's ball start tells a player's first ball
+  by its ball getter reading 1, and on one resets the player's lamps and flags and calls every rule's first-ball
+  hook: the rules' per-player setup (Godzilla: a battle back to not started, LIGHT BATTLE's ramps to make again).
+  Every teammate plays ball 1, so teammates 2..n set the team's ball-1 progress back to a new game's (DoomWalrus666:
+  Gigan's 7 shots on ball 1 gone, both ramps again to light battle; a battle started on ball 2 carried over). That
+  one call (`site coop_first_ball`, wrapped where it is made) reads 2 while teammate 2..n is up on ball 1, so the
+  setup runs once a game, at teammate 1's, as in a one-player game; the ball byte and its other reads stay the game's.
+
 - **Whose turn:** the game's own top line `BALL %d` (found in the message table by its English words) reads
   `PLAYER 2  BALL %d` while teammate 2 is up. It goes back to the game's own words when the co-op game is over. The
   bonus count keeps the game's head (PLAYER 1, the team): borrowing its `PLAYER %d` for the teammate blanked the
@@ -6168,6 +6176,7 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
     site  coop_add_player     add a player (wrapped)
     data  coop_player         the player up's byte; the ball in play is the next one
     data  coop_players        the count of players' byte
+    site  coop_first_ball     the ball start's call of the ball getter that tells a first ball (PAD-1046)
     site  coop_panel_lit      (PAD-1043) the score panel's frame update's call of the player-up getter (hook_call)
     site  coop_panel_up[_n]   (PAD-1043) its "player changed" checks' calls (hook_call; _2 .. _4 for more than one)
 

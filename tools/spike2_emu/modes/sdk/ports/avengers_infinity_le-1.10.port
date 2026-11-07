@@ -681,6 +681,7 @@ site  coop_player_change 0x00413b74 0xe92d41f0 0xe24dd008
 site  coop_add_player    0x004139b4 0xe92d4038 0xe3a00051
 data  coop_player        0x006adb98
 data  coop_players       0x0075eaa4
+site  coop_first_ball    0x0034c1a4 0xeb031e3f 0xe1a04000
 
 # ---- PAD-1043: co-op play - the score panel's calls of the player-up getter (portcoop.py) ----
 site  coop_panel_lit         0x00160e9c 0xeb0acadc 0xe5953000

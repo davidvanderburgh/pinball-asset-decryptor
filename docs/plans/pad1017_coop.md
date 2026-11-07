@@ -36,6 +36,7 @@ The framework's player code has the same shape on all 53 shipped builds (`pinbal
 | `site coop_add_player` | add a player (Start in the first ball; AD_MAX_PLAYERS_PER_GAME, hooks, `strbne` the count) | 0x338790 |
 | `data coop_player` | the player up's byte; the ball in play is the NEXT byte | 0x713b94 (= the port's `cur_player`) |
 | `data coop_players` | the count of players | 0x7d116c |
+| `site coop_first_ball` | (PAD-1046) the ball start's call of the ball getter: ball 1 = a first ball, the rules' first-ball setup | 0x2a7714 |
 
 The player change (Godzilla LE, read in the disassembly): extra ball taken -> same player, same ball. Otherwise
 `next = player + 1`; when `next > players`: if `balls_per_game(player) > ball` then ball++ and player 1, else game over.

@@ -1070,3 +1070,9 @@ value comp_menu_index            3   # COMPETITION
 value comp_menu_index_msg        1920
 value comp_menu_end_index        1   # STANDARD
 value comp_menu_end_msg          1915
+# copies BRIDGE ATTACK DIFFICULTY (176) into the bridge rule's record (hooked: the rule's object), as 173/168
+site coop_cache_176       0x001316a0 0xe92d41f0 0xe1a04000
+value coop_cache_176_at   0x4
+# the tank rule's "in the Maser phase" check ((this) -> 1 once this wave's tanks reach the level's count): a
+# character's yes:maser answers 1 while they are up, so the Maser is lit for the whole of Tank Attack
+site coop_yes_maser       0x001064e8 0xe92d4038 0xe1a04000

@@ -395,8 +395,9 @@ PRESET_DIR = "coop_presets"
 #: ("cache", adjustment name, "min" | ...): an adjustment the game copies into a player's record at the game's start
 #: (the port's ``coop_cache_<id>`` names the copy), ("boost", pct): the port's ``coop_boost`` call adds pct %,
 #: ("gift", adjustment name): the game's own one-shot feature at the pick (the port's ``coop_adj_changed``),
-#: ("count", name, n): a rule's count for the player raised by n at the pick (the port's ``coop_count_<name>``), or
-#: ("save", seconds)
+#: ("count", name, n): a rule's count for the player raised by n at the pick (the port's ``coop_count_<name>``),
+#: ("save", seconds), ("addball", n): Action twice in regular play serves n more balls, ("yes", name): a check of the
+#: game's answers yes (the port's ``coop_yes_<name>``), or ("many", [parts]): several of the above at once
 ABILITIES = (
     ("longer_save", "LONGER BALL SAVE",
      "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top).",
@@ -420,6 +421,13 @@ ABILITIES = (
     ("tier2", "TIER 2 AFTER A BATTLE", "Once a tier-1 battle has started on their turn, every battle on the selection "
      "screen is open while they are up, tier 2 included (the game's UNLOCK ALL MONSTER BATTLES).",
      ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", "coop_tier1_rules")),
+    ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
+     "once a ball.", ("addball", 1)),
+    ("maser", "MASER ALWAYS LIT", "In Tank Attack the Maser cannon is lit from the start, not after the tanks "
+     "(the game's own Maser phase check says yes).", ("yes", "maser")),
+    ("bridge", "EASIER BRIDGE, DOUBLE TANKS AND JETS", "The bridge falls as on the game's easiest BRIDGE ATTACK "
+     "DIFFICULTY, and every tank or jet destroyed counts as two.",
+     ("many", [("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min"), ("double", "tanks"), ("double", "jets")])),
     ("tanks", "STARTS WITH 4 TANKS", "Four tanks count as destroyed when they pick: the city map's TANKS n/10 starts "
      "at 4.", ("count", "tanks", 4)),
 )
@@ -436,6 +444,9 @@ CARD_LINES = {
     "tanks": "Starts with 4 tanks destroyed.",
     "spot": "Press Action twice in a battle to hit its next shot, once a ball.",
     "tier2": "Starting a tier 1 battle opens tier 2.",
+    "addball": "Press Action twice in regular play to add a ball, once a ball.",
+    "maser": "The Maser cannon is lit for the whole of Tank Attack.",
+    "bridge": "The bridge falls faster. Tanks and jets count two at a time.",
 }
 
 #: why an ability is not offered on a card
@@ -489,11 +500,31 @@ def abilities(game_elf, label="This game", sites=(), values=None):
     action = action_button(game_elf)
     out = []
     for key, words, does, how in ABILITIES:
-        cfg, why = "", ""
+        cfg, why = _ability_part(how, table, action, sites, values, label)
+        out.append({"key": key, "words": words, "does": does, "cfg": cfg, "why": why})
+    return out
+
+
+def _ability_part(how, table, action, sites, values, label):
+    """One ``how`` of :data:`ABILITIES` as the runtime's text and why not: ``(cfg, why)``."""
+    cfg, why = "", ""
+    if how[0] == "many":
+        parts = [_ability_part(h, table, action, sites, values, label) for h in how[1]]
+        bad = [w for c, w in parts if not c]
+        return ("" if bad else ",".join(c for c, w in parts)), (bad[0] if bad else "")
+    if True:
         if how[0] == "save":
             cfg, why = ("save:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
         elif how[0] == "boost":
             cfg, why = ("boost:%d" % how[1], "") if "coop_boost" in sites else ("", NO_SITE % label)
+        elif how[0] == "addball":
+            cfg, why = ("addball:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
+        elif how[0] == "yes":
+            cfg, why = ("yes:%s" % how[1], "") if "coop_yes_%s" % how[1] in sites else ("", NO_SITE % label)
+        elif how[0] == "double":
+            cfg, why = (("double:%s" % how[1], "")
+                        if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
+                        else ("", NO_SITE % label))
         elif how[0] == "spot":
             rules = values.get(how[1])
             cfg, why = (("spot:0x%x" % rules, "") if rules and action is not None and "shot_dispatch" in sites
@@ -524,8 +555,7 @@ def abilities(game_elf, label="This game", sites=(), values=None):
                     cfg = "adj:%d%s:%d:%d" % (idx, how[2], lo, hi)
                 if how[1] == "AD_BALL_SAVE_TIME":                  # read when a ball is served: the ball-1 pick's
                     cfg += ",bs:%d" % idx                          # ball gets it at the pick
-        out.append({"key": key, "words": words, "does": does, "cfg": cfg, "why": why})
-    return out
+    return cfg, why
 
 
 def clean_name(name):

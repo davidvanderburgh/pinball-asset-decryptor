@@ -10,13 +10,13 @@
     {"name": "GODZILLA 1954", "ability": "longer_save"},
     {"name": "GODZILLA 2000", "ability": "action_save"},
     {"name": "GODZILLA GMK", "ability": "heat_ray"},
-    {"name": "GODZILLA 1985", "ability": "battles"},
+    {"name": "GODZILLA 1985", "ability": "addball"},
     {"name": "DESTROY ALL MONSTERS", "ability": "ally"},
     {"name": "BURNING GODZILLA", "ability": "spot"},
     {"name": "KING KONG VS GODZILLA", "ability": "powerups"},
     {"name": "MOTHRA VS GODZILLA", "ability": "building"},
-    {"name": "GODZILLA VS BIOLLANTE", "ability": "jets"},
-    {"name": "GODZILLA VS MECHAGODZILLA", "ability": "tanks"},
+    {"name": "GODZILLA VS BIOLLANTE", "ability": "maser"},
+    {"name": "GODZILLA VS MECHAGODZILLA", "ability": "bridge"},
     {"name": "SHIN GODZILLA", "ability": "tier2"}
   ]
 }

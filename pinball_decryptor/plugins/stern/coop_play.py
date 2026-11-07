@@ -1116,8 +1116,12 @@ AWARD_NODE = "PadCoopAward_%d"
 #: where an award card sits on the 1360x768 glass, and its size: the middle, above the score panels
 AWARD_AT = (240, 110)
 AWARD_SIZE = (880, 460)
-#: the band at the card's foot the runtime's words line goes in (its top, from the card's top)
+#: the band at the card's foot the runtime's words line goes in (its top, from the card's top). The game's text fits
+#: itself to its box and centres in it (Godzilla's FlashyText), and its middle sits at the box's y: the box is the
+#: card's width less a margin (words_scale), centred, its y the band's middle (emulator, Godzilla LE 1.16)
 AWARD_WORDS_Y = 404
+AWARD_WORDS_SCALE = 0.93
+AWARD_WORDS_X = round(AWARD_SIZE[0] * (1 - AWARD_WORDS_SCALE) / 2, 1)
 AWARD_TITLE = "CO-OP AWARD"
 
 
@@ -1209,5 +1213,5 @@ def award_screens(project, characters=None):
         name = AWARD_NODE % (i + 1)
         out.append(dict(name=name, art_rgba=award_card(project, chars, i, chars.get("theme")), words=" ",
                         words_name=name + "_Words", x=float(AWARD_AT[0]), y=float(AWARD_AT[1]),
-                        words_at=(24.0, float(AWARD_WORDS_Y + 40))))
+                        words_at=(AWARD_WORDS_X, float(AWARD_WORDS_Y + 16)), words_scale=AWARD_WORDS_SCALE))
     return out

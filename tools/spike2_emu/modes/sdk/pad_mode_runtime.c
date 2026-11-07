@@ -3327,6 +3327,7 @@ static struct {
     unsigned plays, frames;
 } bd;
 static const struct pm_mode *bd_owner;    /* PAD-658: the mode that asked for it (running, or showing a note) */
+static char bd_crop_next[32];              /* PAD-1028: the crop the next play uses ("" the port's); pm_backdrop clears it */
 static int bd_lingers;                     /* PAD-658: kept behind its mode's ending (pm_end_holding) */
 static const struct pm_mode *block_owner; /* PAD-658: the mode keeping the game's modes from starting (the block section) */
 
@@ -3456,7 +3457,7 @@ static int bd_place_ok(unsigned e)
 static void bd_play(unsigned e)
 {
     const char *name = bd.once[0] ? bd.once : bd.loop;
-    const char *crop = pm_port_text("backdrop_crop");
+    const char *crop = bd_crop_next[0] ? bd_crop_next : pm_port_text("backdrop_crop");
     int once = name == bd.once;
     char was[96];
     unsigned i;
@@ -3763,6 +3764,7 @@ int pm_backdrop(const char *name)
     if (!(can & PM_CAN_BACKDROP)) return 0;
     if (running && running != current) return 0;     /* PAD-658: another of ours runs - the backdrop is its */
     bd_lingers = 0;
+    bd_crop_next[0] = 0;                              /* PAD-1028: a mode's backdrop plays at the port's crop */
     if (!name || !*name) {
         bd_owner = 0;
         if (!bd_v2 && bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
@@ -14504,6 +14506,9 @@ const char *pm_event_name(unsigned id)
  * 0x34 handler, called from inside this dispatch. -1: the ball_end site is the end of a ball. */
 static int ball_end_event = -1;
 
+static int coop_bonus_id;                   /* PAD-1028 round 3, the co-op section */
+static void coop_bonus_end(void);
+
 static void on_event_dispatch(unsigned *r)
 {
     static volatile int said;
@@ -14511,6 +14516,7 @@ static void on_event_dispatch(unsigned *r)
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
+    if (coop_bonus_id >= 0 && r[0] == (unsigned)coop_bonus_id) coop_bonus_end();   /* PAD-1028: the cards on its screen */
     /* PAD-663: from a process of the game's - a bus call on the game-logic thread only: the bus is called from other
      * threads too, and John Wick 1.02's logic stopped for good when the ball was ended from one of those */
     if (chg_end_owed && chg_game_tid && syscall(SYS_GETTID) == chg_game_tid) chg_end_ball_now("the game's bus call");
@@ -15811,6 +15817,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
 static int coop_cards_on;                   /* coop.cfg asks for them */
 static void *coop_card[COOP_CHARS], *coop_card_words[COOP_CHARS];
 static int coop_cards_found;
+static unsigned coop_cards_game;            /* round 3: the game (chg_game_now() + 1) whose cards have been shown */
 
 /* the cards, found once the HUD scene is up (with the pick's screens), all hidden */
 static void coop_cards_find(void)
@@ -15840,20 +15847,25 @@ static void coop_card_words_of(char *out, unsigned cap, const char *award, unsig
     pm_snprintf(out, cap, "%s  PLAYER %u  %s", award, t, num);
 }
 
+static char coop_bonus_clip[96];             /* round 3, below: the bonus's own loop */
+static int coop_cards_backdrop(const char *name);
+
 /* the game is over (coop_change_wrap, the game's thread): each award on each winner's card in turn */
 static void coop_cards_show(unsigned n)
 {
     unsigned long t0 = pm_ms(), at;
-    int i, shown = 0;
+    int i, shown = 0, backdrop;
     unsigned t;
     char words[64];
-    if (!coop_cards_on || !coop_won_n) return;
+    if (!coop_cards_on || !coop_won_n || coop_cards_game == chg_game_now() + 1) return;
+    coop_cards_game = chg_game_now() + 1;
     coop_cards_find();
     if (!coop_cards_found || !fn("proc_sleep")) {
         say("co-op awards: no award card to show them on (%s) - the attract mode's pages show them",
             !coop_cards_found ? "none found in the HUD scene" : "the port names no proc_sleep");
         return;
     }
+    backdrop = coop_bonus_clip[0] && coop_cards_backdrop(coop_bonus_clip);   /* round 3: the bonus's loop under them */
     for (i = 0; i < coop_won_n && pm_ms() - t0 < COOP_CARDS_MAX_MS; i++)
         for (t = 1; t <= n && t <= 4 && pm_ms() - t0 < COOP_CARDS_MAX_MS; t++) {
             int c = coop_pick_of[t];
@@ -15867,7 +15879,63 @@ static void coop_cards_show(unsigned n)
             pm_show(coop_card[c], 0);
             shown++;
         }
+    if (backdrop) coop_cards_backdrop(0);
     say("co-op awards: %d shown on the winners' cards in %lu ms - then the game's end goes on", shown, pm_ms() - t0);
+}
+
+/* ---- PAD-1028 round 3: the cards over the bonus's own loop -----------------------------------------------------
+ * DoomWalrus666: "Awards play over what seems to be active gameplay although it is not ... Recommend that the awards
+ * play over the end of ball bonus loop videos". By the player change the bonus screen is gone and the main play is
+ * back (emulator, Godzilla LE 1.16: the city, BRIDGE 100% LIT). The cards cannot go IN the bonus screen: the game does
+ * not draw the HUD scene while its bonus is up (a hold at the bonus's end kept TOTAL SCORE on the glass for 10 s and no
+ * card showed), and the bonus's own scene is one this app cannot write. So the cards stay at the game's end and the
+ * backdrop (the runtime's clip behind the HUD, in the city's place) plays the bonus's own loop under them: the game's
+ * own looped clip and crop seen when its bonus ends (`event bonus_end`; the backdrop's record of the game's last own
+ * loop - Godzilla's EndOfBallBonus_BackgroundLoop, SquareCrop), given back when the cards are done. A port without the
+ * event, or a bonus with no looped clip of its own, keeps the main play under them. */
+static int coop_bonus_id = -1;              /* `event bonus_end`, -1: none */
+static char coop_bonus_clip[96], coop_bonus_crop[32];
+
+/* the bus's bonus_end: the loop the game's bonus plays, for the cards (tests lift it verbatim) */
+static void coop_bonus_end(void)
+{
+    unsigned k;
+    if (!coop_cards_on || !coop_teammates() || !gbg.name[0]) return;
+    for (k = 0; gbg.name[k] && k + 1 < sizeof coop_bonus_clip; k++) coop_bonus_clip[k] = gbg.name[k];
+    coop_bonus_clip[k] = 0;
+    for (k = 0; gbg.crop[k] && k + 1 < sizeof coop_bonus_crop; k++) coop_bonus_crop[k] = gbg.crop[k];
+    coop_bonus_crop[k] = 0;
+}
+
+static void coop_bonus_arm(void)
+{
+    coop_bonus_id = pm_event("bonus_end");
+    if (coop_bonus_id >= 0 && (can & PM_CAN_BACKDROP))
+        say("co-op awards: the cards show over the bonus's own loop (bonus_end %d; the backdrop behind the HUD)",
+            coop_bonus_id);
+    else
+        say("co-op awards: the cards show over the main play - this port names no %s",
+            coop_bonus_id < 0 ? "bonus_end event" : "backdrop");
+}
+
+/* the cards' backdrop: the bonus's loop behind the HUD (1 = up); 0 with an empty name: given back */
+static int coop_cards_backdrop(const char *name)
+{
+    unsigned long t0 = pm_ms();
+    unsigned k;
+    if (!name || !name[0]) {
+        pm_backdrop(0);
+        bd_crop_next[0] = 0;
+        return 0;
+    }
+    if (!(can & PM_CAN_BACKDROP) || !pm_backdrop(name)) return 0;
+    for (k = 0; coop_bonus_crop[k] && k + 1 < sizeof bd_crop_next; k++) bd_crop_next[k] = coop_bonus_crop[k];
+    bd_crop_next[k] = 0;
+    while (!pm_backdrop_showing() && pm_ms() - t0 < 1500ul)      /* the display's next draw plays it */
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    say("co-op awards: \"%s\" (crop %s) %s behind the cards", name, bd_crop_next[0] ? bd_crop_next : "the port's",
+        pm_backdrop_showing() ? "plays" : "was asked for");
+    return 1;
 }
 
 /* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown */
@@ -16467,6 +16535,7 @@ static void coop_arm(void)
         say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08x, now %s)", coop.setting,
             coop_switched_on() ? "On" : "Off");
     coop_awards_arm();                                        /* PAD-1028 */
+    if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),

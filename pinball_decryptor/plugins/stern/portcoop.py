@@ -28,6 +28,9 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
   site  coop_add_player     add a player (wrapped)
   data  coop_player         the player up's byte (the ball's is the next)
   data  coop_players        the count of players' byte
+  site  coop_first_ball     (PAD-1046) the ball start's `bl <ball getter>` that tells a player's first ball (wrapped
+                            where it is made: a later teammate's ball 1 is not a first ball, so the team's progress
+                            holds)
 
   data  message_table         the game's message table (portchallenge.message_table), and
   value coop_ball_msg         its "BALL %d" line, which says whose turn it is in a co-op game
@@ -130,6 +133,48 @@ def add_player(e, players):
     return hits[0] if len(hits) == 1 else None
 
 
+def ball_getters(e, player):
+    """The vas of the framework's "ball in play" getters: movw/movt rN, <player> ; ldrb r0, [rN, #1] ; bx lr."""
+    w, base = e.words, e.text_va
+    out = []
+    for k in range(len(w) - 3):
+        if w[k + 3] != 0xE12FFF1E or w[k + 2] & 0xFFF0FFFF != 0xE5D00001:
+            continue
+        pair = _movw_movt(w, k, k + 2)
+        if len(pair) == 1 and pair[0][2] == player and (w[k + 2] >> 16) & 0xF == pair[0][1]:
+            out.append(base + 4 * k)
+    return out
+
+
+def first_ball(e, player):
+    """PAD-1046: the va of the ball start's `bl <ball getter>` that tells a player's first ball, or None (not once).
+
+    The framework's ball start (TMNT, the symbol build: FUN_001f4dec; Godzilla LE 1.16 0x2a76f0) opens
+    proc_kill(0, 0x80) ; ball = <getter> ; ... first = ball == 1 && !<shoot again>, and on a first ball resets the
+    player's lamps and flags and calls every rule's first-ball hook (Hook::call(0x37) on TMNT, 0x3e on Godzilla: the
+    rules' per-player setup, a battle back to not started). The word after the call is plain (`mov rN, r0`), so the
+    runtime can wrap the call where it is made (hook_call)."""
+    getters = set(ball_getters(e, player))
+    if not getters:
+        return None
+    w, base = e.words, e.text_va
+    hits = []
+    for k in range(3, len(w) - 1):
+        if bl_target(base + 4 * k, w[k]) not in getters or w[k - 1] >> 24 != 0xEB:
+            continue
+        if not {0xE3A01080, 0xE3A00000} <= {w[k - 2], w[k - 3]}:          # mov r1, #0x80 ; mov r0, #0 (either order)
+            continue
+        regs = {0}
+        for q in range(k + 1, min(k + 9, len(w))):                       # cmp r0 (or where it was moved), #1
+            x = w[q]
+            if x & 0xFFFF0FF0 == 0xE1A00000 and x & 0xF in regs:           # mov rD, rS
+                regs.add((x >> 12) & 0xF)
+            if x & 0xFFF0FFFF == 0xE3500001 and (x >> 16) & 0xF in regs:
+                hits.append(base + 4 * k)
+                break
+    return hits[0] if len(hits) == 1 else None
+
+
 def lines(elf):
     """(lines, notes): the co-op port lines of `elf` (the game program's bytes or its path), and what was not found."""
     e = Elf(elf)
@@ -144,6 +189,10 @@ def lines(elf):
            "site  coop_add_player    0x%08x 0x%08x 0x%08x" % (add, e.word(add), e.word(add + 4)),
            "data  coop_player        0x%08x" % player,
            "data  coop_players       0x%08x" % players]
+    # PAD-1046: the ball start's read of the ball that tells a first ball (a later teammate's ball 1 is not one)
+    first = first_ball(e, player)
+    if first is not None:
+        out.append("site  coop_first_ball    0x%08x 0x%08x 0x%08x" % (first, e.word(first), e.word(first + 4)))
     # the team's own high score boards go through the game's end-of-game high scores (PAD-640/663's lines); a build
     # with no challenge list (X-Men) has none of them in its port otherwise. The caller drops what the port has.
     from .portchallenge import message_table, message_text, scores_lines, screen_lines

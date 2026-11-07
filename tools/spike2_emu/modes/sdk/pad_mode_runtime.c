@@ -16336,6 +16336,32 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     return ret;
 }
 
+/* PAD-1046 (DoomWalrus666, Godzilla: "Player 1 Ball 1 started Gigan and successfully completed 7 shots. Player 2 ...
+ * had to hit both ramps in order to light battle ... None of the Kaiju battles appeared to have been started"): the
+ * framework's ball start tells a player's FIRST ball by the ball getter reading 1 (`site coop_first_ball`, the call in
+ * the ball start: TMNT FUN_001f4dec, Godzilla LE 1.16 0x2a7714), and on one resets the player's lamps and flags and
+ * calls every rule's first-ball hook - the rules' per-player setup: a battle back to not started, LIGHT BATTLE's ramps
+ * to make again. Each teammate plays ball 1, so teammates 2..n set the team's ball-1 progress back to a new game's;
+ * from ball 2 on it held. The call is answered 2 while teammate 2..n is up on ball 1, so the game's first-ball setup
+ * runs once, at teammate 1's, as in a one-player game; the ball byte, and every other read of it, stays the game's. */
+static unsigned (*coop_ball_game)(unsigned, unsigned, unsigned, unsigned);
+
+/* what the ball start's read answers: the ball, or 2 for a later teammate's ball 1 (tests lift it verbatim) */
+static unsigned coop_first_ball_answer(unsigned n, unsigned turn, unsigned ball)
+{
+    return n && turn > 1 && ball == 1 ? 2u : ball;
+}
+
+static unsigned coop_first_ball_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned ball = coop_ball_game(r0, r1, r2, r3), n = coop_teammates();
+    unsigned said = coop_first_ball_answer(n, coop.turn, ball);
+    if (said != ball)
+        say("co-op: teammate %u's ball 1 - the game's first-ball setup ran at teammate 1's, so the team's progress holds",
+            coop.turn);
+    return said;
+}
+
 static void coop_line(const char *s)
 {
     const char *p;
@@ -16456,6 +16482,14 @@ static void coop_arm(void)
         return;
     }
     coop.on = 1;
+    {
+        struct site *fb = site("coop_first_ball");   /* PAD-1046: the ball start's read of the ball */
+        unsigned at = fn("coop_first_ball"), to = at ? hook_call(at, (void *)coop_first_ball_wrap) : 0;
+        coop_ball_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)to;
+        if (!to)
+            say("co-op: the ball start's first-ball read is %s - each teammate's ball 1 sets the team's ball-1 progress "
+                "back", !fb ? "not in the port" : !fb->ok ? "not this build's" : "not wrapped");
+    }
     coop_ball_find();
     if (coop_ball_msg < 0) say("co-op: the game's \"BALL %%d\" line was not found - the screen does not say whose turn it is");
     if (!chg_scores_on) chg_scores_arm();                     /* the team's own boards (PAD-640/663) */

@@ -555,6 +555,7 @@ site  coop_player_change 0x00220448 0xe92d41f0 0xe24dd008
 site  coop_add_player    0x00220288 0xe92d4038 0xe3a00051
 data  coop_player        0x00641bd4
 data  coop_players       0x0072c3f4
+site  coop_first_ball    0x0026e648 0xebfec74b 0xe1a04000
 
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 value coop_ball_msg          1255

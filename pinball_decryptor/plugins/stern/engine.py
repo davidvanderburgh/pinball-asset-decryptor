@@ -5115,6 +5115,89 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
     return jobs, grown_files
 
 
+def _scene_with_overlay(reader, node, overlays):
+    """PAD-1035: the card's bytes of the scene at *node* with this Write's own in-place edits of
+    it (*overlays*, ``{i_block: (node, {file_off: bytes})}``: colours, same-length text,
+    same-size pictures) applied - what the modes' screens and clips are built into, so a scene
+    they rewrite whole keeps the project's edits instead of going back to the card's."""
+    buf = bytearray(reader.read_file_bytes(node))
+    ov = (overlays or {}).get(bytes(node["i_block"]))
+    for off, b in (ov[1] if ov else {}).items():
+        buf[off:off + len(b)] = b
+    return bytes(buf)
+
+
+def _regrow_over_modes(src, start, card_path, entry, tree_ops, grow_dir, assets_dir, log):
+    """PAD-1035: the project's own edits of a scene that GROW it (longer text, resized pictures,
+    the Scenes window's edits; *entry* is its ``grown_radium`` one, *tree_ops* its
+    ``(ops, names, assets_dir)`` or None) applied on top of the scene the modes rewrote whole
+    (*src*, built from *start*), rewriting *src*. A resized picture is found again in the
+    modes' scene by its stock bytes. False = they could not all go on; *src* is untouched."""
+    with open(_lp(src), "rb") as f:
+        built = f.read()
+    images = {}
+    for off, val in (entry[2] if len(entry) > 2 else {}).items():
+        key = start[off:off + 64]
+        at = built.find(key)
+        if len(key) < 64 or at < 0 or built.find(key, at + 1) >= 0:
+            return False
+        images[at] = val
+    if tree_ops:
+        tree_ops = (_root_indices_past_modes(tree_ops[0], start, built),) + tuple(tree_ops[1:])
+
+    class _Built:
+        @staticmethod
+        def read_file_bytes(_node):
+            return built
+
+    work = os.path.join(grow_dir, "over_modes")
+    os.makedirs(_lp(work), exist_ok=True)
+    jobs, _files = _stage_grown_radiums(
+        _Built(), {card_path: (entry[0], entry[1], images)}, {}, work, log,
+        tree_ops={card_path: tree_ops} if tree_ops else None, assets_dir=assets_dir)
+    if not jobs:
+        return False
+    shutil.copyfile(_lp(jobs[0][1]), _lp(src))
+    return True
+
+
+def _root_indices_past_modes(ops, start, built):
+    """*ops* with each layer index among the scene's top-level nodes (an added picture or text,
+    a re-order, a move into the root) counted past the modes' own screens in *built*, so a node
+    the person put over, say, the last slide-out stays over it rather than landing among the
+    screens (which the runtime hides until they show)."""
+    from . import scene_tree as _scene_tree
+    try:
+        stock = [k.id for k in _scene_tree.parse(start).root["kids"]]
+        kids = [k.id for k in _scene_tree.parse(built).root["kids"]]
+    except _scene_tree.SceneTreeError:
+        return ops
+    own = set(stock)
+    at = [i for i, k in enumerate(kids) if k in own]     # where each stock node is now
+
+    def moved(i):
+        i = max(0, int(i))
+        if i < len(at):
+            return at[i]
+        return (at[-1] + 1 if at else 0) + (i - len(at))     # just after the last stock node
+    root = set(stock)
+    out = []
+    for op in ops:
+        op = dict(op)
+        if op["op"] in ("add_picture", "add_text") and op.get("parent") is None:
+            if op.get("index") is not None:
+                op["index"] = moved(op["index"])
+            if op.get("id"):
+                root.add(int(op["id"]))
+        elif op["op"] == "parent" and op.get("parent") is None:
+            op["index"] = moved(op["index"])
+            root.add(int(op["node"]))
+        elif op["op"] == "order" and op.get("node") in root:
+            op["index"] = moved(op["index"])
+        out.append(op)
+    return out
+
+
 def _apply_tree_ops(data, card_path, ops, names, assets_dir, log):
     """*data* (a scene) with the Scenes window's tree edits applied: ``(bytes, n applied)``.
     A scene that does not read as a tree, or an edit whose node this card does not have, is
@@ -9467,6 +9550,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             grown_radium.setdefault(cp, (node, {}, {}))[2].update(imgs)
         for cp, (node, _plan) in tree_whole.items():
             grown_radium.setdefault(cp, (node, {}, {}))
+        # PAD-1035: a grown scene's in-place edits as they were before staging took them, for a
+        # scene the modes then rewrite whole (built from the card's bytes with these on)
+        grown_overlays = {ib: (n, dict(ov)) for ib, (n, ov) in radium_overlays.items()}
         if grown_radium:
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             radium_grow_jobs, grown_files = _stage_grown_radiums(
@@ -9526,6 +9612,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Attract items" if _attract_on
                 else "Co-op play" if _coop_on
                 else "Inactivity pauses timers")
+        _who_hud = _who
         if _modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on:
             t0 = time.monotonic()
             if progress:
@@ -9565,6 +9652,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     raise _MW.ModeWriteError("the card's game program was not "
                                              "found")
                 _hud_rel, _bank_rel = _MW.scene_rels(_mprof)
+                # PAD-1035: a build whose HUD rewrite is the co-op pick's screens says so in its words
+                _who_hud = "Co-op play" if _coop_hud and not _modes_on else _who
                 if not _modes_on:
                     if not _coop_hud:    # PAD-1031: the co-op pick's screens are in the HUD
                         _hud_rel = ""    # PAD-446: random clips change the bank only
@@ -9588,8 +9677,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 from . import attract_items as _AIS     # PAD-782: a clip v2 title's attract scene
                 mode_plan = _MW.plan(
                     assets_dir,
-                    reader.read_file_bytes(_mnodes[_hud_rel]) if _hud_rel else b"",
-                    reader.read_file_bytes(_mnodes[_bank_rel]) if _bank_rel else b"",
+                    _scene_with_overlay(reader, _mnodes[_hud_rel], grown_overlays) if _hud_rel else b"",
+                    _scene_with_overlay(reader, _mnodes[_bank_rel], grown_overlays) if _bank_rel else b"",
                     bytes(reader.read_file_bytes(fw_node)),
                     os.path.join(grow_work, "modes"), log=log,
                     end_sound=mode_sound_used, own_sounds=mode_own_used,
@@ -9616,6 +9705,34 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 if mode_plan is None:
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")
+                # PAD-1035: the project's own edits of a scene the modes rewrite whole (the co-op
+                # pick's screens in Godzilla's HUD, a mode's screen, random clips in the bank) go
+                # on in the rewritten scene: in-place ones were in the bytes it was built from,
+                # growing ones are applied on top of it. Only what cannot is refused below.
+                _tree_ops = {cp: plan for cp, (_n, plan) in tree_whole.items()}
+                _grown_rels = {r.lstrip("/") for r, _s in radium_grow_jobs}
+                for _rel, _src in mode_plan.replaced:
+                    _rel = _rel.lstrip("/")
+                    _node = next((n for r, n in _mnodes.items() if r and r.lstrip("/") == _rel), None)
+                    if _node is None:
+                        continue
+                    if _rel in _grown_rels:
+                        _cp = next((c for c in grown_radium if c.lstrip("/") == _rel), None)
+                        if _cp is None or not _regrow_over_modes(
+                                _src, _scene_with_overlay(reader, _node, grown_overlays), _cp,
+                                grown_radium[_cp], _tree_ops.get(_cp), grow_work, assets_dir, log):
+                            continue                    # still a grow job: refused below
+                        radium_grow_jobs = [j for j in radium_grow_jobs if j[0].lstrip("/") != _rel]
+                        log("%s: this project's own edits of %s go on in the scene they are built "
+                            "into." % (_who_hud, _rel), "info")
+                    elif radium_overlays.pop(bytes(_node["i_block"]), None) is not None:
+                        text_writes = _drop_writes_in(text_writes, reader, _node)
+                        color_writes = _drop_writes_in(color_writes, reader, _node)
+                        layout_writes = _drop_writes_in(layout_writes, reader, _node)
+                        tree_writes = _drop_writes_in(tree_writes, reader, _node)
+                        radimg_writes = _drop_writes_in(radimg_writes, reader, _node)
+                        log("%s: this project's own edits of %s go on in the scene they are built "
+                            "into." % (_who_hud, _rel), "info")
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
                           for p, _i, n in reader.iter_regular_files(
                               min_size=1, max_depth=20)}
@@ -9632,8 +9749,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 mode_payload = _MW.p2_payload(
                     mode_plan, os.path.join(grow_work, "modes", "p2"), project=assets_dir)
             except _MW.ModeWriteError as e:
-                raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
-                    from None
+                # PAD-1035: what the HUD is refused for is said under the name of what rewrites it
+                raise RuntimeError("%s: %s. Nothing was written." % (
+                    _who_hud if "HUD scene" in str(e) or str(e).startswith("the co-op pick's")
+                    else _who, e)) from None
             for _line in mode_plan.lines:
                 if _line.startswith("attract items: "):      # PAD-782: said under their own name
                     log("Attract items: %s." % _line[len("attract items: "):], "info")

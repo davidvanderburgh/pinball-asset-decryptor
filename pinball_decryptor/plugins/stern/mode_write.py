@@ -1492,7 +1492,9 @@ def conflicts(result, touched_rels=(), audio_idx=(), sound_idx=None):
 
     PAD-469: only a scene this build copies whole (``result.replaced``) counts. Random clips
     alone, or modes with no screen, leave the HUD as the card has it, so the project's own
-    HUD edits go on beside them."""
+    HUD edits go on beside them. PAD-1035: a scene the build DOES rewrite is built from the
+    card's bytes with the project's in-place edits on, and its growing edits are applied over
+    it (engine), so *touched_rels* only names what could not be carried."""
     out = []
     hud, bank = scene_rels(result.profile)
     touched = {r.lstrip("/") for r in touched_rels}

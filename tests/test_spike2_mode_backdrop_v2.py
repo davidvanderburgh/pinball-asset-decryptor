@@ -52,6 +52,8 @@ static void bd_field(unsigned obj, unsigned v) { printf("FIELD written\n"); }
 static struct { int ours, due; } gbg;              /* PAD-658: Godzilla's route (the game's own background clip back) */
 static int disp_clip_ours;
 static int bd_v2 = 1;
+static int bd_lingers;                                           /* PAD-658: a mode's backdrop kept behind its ending */
+static char bd_crop_next[32];                                    /* PAD-1028: the co-op cards' crop for the next play */
 static int ck_ours, ck_last_ours;                                /* PAD-530: our own asks of the surface */
 static unsigned ck_game_display(void) { return 0; }              /* PAD-639: no display of the game's over the TV */
 #define CK_LOOP_MS 3000                                           /* PAD-725: a loop of the game's: one pass */

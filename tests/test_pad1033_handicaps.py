@@ -80,7 +80,7 @@ def test_a_level_change_reads_and_holds_to_its_range(tmp_path):
 def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     src = _src()
     assert src.index("hand_arm();") < src.index("if (!insider_arm()) return;")
-    assert ("(clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only()) && !attract_wanted() "
+    assert ("(clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only()) && !attract_wanted() "
             "&& !coop_wanted()") in src
     assert "if (hand.on && !hook(fn(\"tick\"), on_hand_tick))" in src       # a card of only this has a tick of its own
     assert "    hand_tick();" in R._lift(src, "static void on_tick(unsigned *r)")

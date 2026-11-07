@@ -405,6 +405,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.set(hand_on=False, hand_note="", hand_note_kind="", hand_shown=False,   # PAD-1033
                  hand_levels={"why": "", "rows": []},
                  hand_tip=self.HAND_TIP)
+        self.set(comp_on=False, comp_note="", comp_note_kind="", comp_shown=False,   # PAD-1041
+                 comp_tip=self.COMP_TIP)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -671,6 +673,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._publish_coop(project)                          # PAD-1017
         self._publish_idle(project)                          # PAD-1022
         self._publish_handicap(project)                      # PAD-1033
+        self._publish_comp(project)                          # PAD-1041
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
         if select_game is not None and select_game in game:
@@ -725,9 +728,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             if why:
                 note, kind = why, "err"
             elif menu:
-                note = ("On the card: CO-OP PLAY in the game's service menu (%s), Off to start with. Turning it On "
-                        "disables most Insider Connected features (scores, high scores and achievements stay on the "
-                        "machine) and lets the right flipper button + Start add a teammate; Off, the game plays and reports as it always has%s."
+                note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. 1 (Co-op) "
+                        "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 2 a "
+                        "team against players 3 and 4, each Start adding the next player. 1 or 2 disables most "
+                        "Insider Connected features (scores, high scores and achievements stay on the machine); at 0 "
+                        "the game plays and reports as it always has%s."
                         % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
                            else " (this project's modes keep the card's scores off Insider Connected anyway)"))
             else:
@@ -740,9 +745,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
     COOP_MENU_TIP = (
-        "Adds CO-OP PLAY to the game's own service menu, Off or On. On disables most Insider Connected features "
-        "(the card's scores, high scores and achievements stay on the machine) and teammates join with the right "
-        "flipper button and Start. Off: the game plays and "
+        "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Co-op, 2 Team 2v2. At 1 teammates join with the "
+        "right flipper button and Start. At 2 players 1 and 2 play as a team against players 3 and 4, each team "
+        "with its own score and progress, taking turns. 1 or 2 disables most Insider Connected features (the "
+        "card's scores, high scores and achievements stay on the machine). At 0 the game plays and "
         "reports to Insider Connected as it always has. A card that also carries modes keeps its scores off Insider "
         "Connected either way.")
 
@@ -828,8 +834,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     COOP_CHARS_TIP = (
         "Each teammate picks a character at the start of their first ball: the machine shows its picture, its name "
         "and what it does, the flippers move to the next one (one another teammate has is skipped), the Action button "
-        "takes it, and after 20 seconds the one shown is taken. RANDOM picks one nobody has. Its ability holds while "
-        "that teammate is up.")
+        "takes it, and when the time to pick runs out (the seconds count down on the machine) the one shown is taken. "
+        "RANDOM picks one nobody has. Its ability holds while that teammate is up.")
 
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP
@@ -849,6 +855,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             "%d of them ask for an ability this game has not got yet; they have none on the card." % lost if lost
             else "")
         self.set(coop_ch={"why": why, "note": note.strip(), "pick": chars["pick"], "rows": rows,
+                          "time": chars["time"], "times": list(_CP.PICK_TIMES),                 # PAD-1044
                           "abilities": [{"key": a["key"], "words": a["words"], "does": a["does"], "ok": bool(a["cfg"]),
                                          "why": a["why"]} for a in abil],
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
@@ -955,6 +962,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         was = chars["pick"]
         chars["pick"] = bool(on)
         return self._save_coop_chars(project, chars, "pick", "on" if was else "off", "on" if on else "off")
+
+    @rpc
+    def coop_chars_time(self, seconds):
+        """PAD-1044: the seconds each teammate has to pick (0: no limit, the Action button takes one)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        chars = _CP.load_characters(project)
+        was = chars["time"]
+        chars["time"] = _CP.pick_time(seconds)
+        name = lambda t: "%d s" % t if t else "no limit"                                   # noqa: E731
+        return self._save_coop_chars(project, chars, "time to pick", name(was), name(chars["time"]))
 
     @rpc
     def coop_char_set(self, i, name=None, ability=None):
@@ -1071,6 +1091,45 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._say("inactivity pauses timers: %s" % ("the card gets it at the next Write" if on
                                                     else "not on the card"))
         self._publish_idle(project)
+        return True
+
+    #: PAD-1041: Prolonged Competition on the start menu (plugins/stern/prolonged_comp.py), as Venom and Dungeons &
+    #: Dragons have it: every game a Competition game until the machine is switched off. It runs on the mode runtime and,
+    #: like the game's own Competition, keeps the card on Insider Connected
+    COMP_TIP = (
+        "Adds PROLONGED COMPETITION to the game's start menu (hold both flipper buttons in attract), as Venom and "
+        "Dungeons & Dragons have it. Picked, every game is a Competition game (all randomness removed) until the "
+        "machine is switched off; picked again, it ends. Write puts it on the card.")
+
+    def _publish_comp(self, project):
+        """PAD-1041: the Prolonged Competition tick, shown for a game whose start menu the app knows (and that has none
+        of its own), and under it what the card does, or in red why it cannot."""
+        from ...plugins.stern import prolonged_comp as _PCo
+        prof = _PCo.project_title(project) if project else None
+        shown = bool(project) and prof is not None and not _PCo.title_refusal(prof)
+        on = bool(project) and _PCo.load(project)
+        note, kind = "", ""
+        if on:
+            why = _PCo.title_refusal(prof)
+            if why:
+                note, kind = why, "err"
+            else:
+                note = _PCo.NOTE
+        self.set(comp_shown=shown or on, comp_on=on, comp_note=note, comp_note_kind=kind)
+
+    @rpc
+    def set_prolonged_comp(self, on):
+        """Tick or untick Prolonged Competition for this project (PAD-1041)."""
+        from ...core import history_log
+        from ...plugins.stern import prolonged_comp as _PCo
+        project = self.project()
+        if not project:
+            return False
+        was = _PCo.save(project, bool(on))
+        hist = history_log.diff_scalar("modes  prolonged competition", "on" if was else "off", "on" if on else "off")
+        history_log.record(project, [hist] if hist else [])
+        self._say("prolonged competition: %s" % ("the card gets it at the next Write" if on else "not on the card"))
+        self._publish_comp(project)
         return True
 
     #: PAD-1033: a handicap for each player (plugins/stern/handicap.py): the game's own settings read easier or harder

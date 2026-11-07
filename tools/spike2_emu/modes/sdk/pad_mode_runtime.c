@@ -3327,6 +3327,7 @@ static struct {
     unsigned plays, frames;
 } bd;
 static const struct pm_mode *bd_owner;    /* PAD-658: the mode that asked for it (running, or showing a note) */
+static char bd_crop_next[32];              /* PAD-1028: the crop the next play uses ("" the port's); pm_backdrop clears it */
 static int bd_lingers;                     /* PAD-658: kept behind its mode's ending (pm_end_holding) */
 static const struct pm_mode *block_owner; /* PAD-658: the mode keeping the game's modes from starting (the block section) */
 
@@ -3456,7 +3457,7 @@ static int bd_place_ok(unsigned e)
 static void bd_play(unsigned e)
 {
     const char *name = bd.once[0] ? bd.once : bd.loop;
-    const char *crop = pm_port_text("backdrop_crop");
+    const char *crop = bd_crop_next[0] ? bd_crop_next : pm_port_text("backdrop_crop");
     int once = name == bd.once;
     char was[96];
     unsigned i;
@@ -3763,6 +3764,7 @@ int pm_backdrop(const char *name)
     if (!(can & PM_CAN_BACKDROP)) return 0;
     if (running && running != current) return 0;     /* PAD-658: another of ours runs - the backdrop is its */
     bd_lingers = 0;
+    bd_crop_next[0] = 0;                              /* PAD-1028: a mode's backdrop plays at the port's crop */
     if (!name || !*name) {
         bd_owner = 0;
         if (!bd_v2 && bd.on && !clip.on && bd.obj && bd_surface_state() == (unsigned)pm_port_value("surface_playing", 2))
@@ -14504,6 +14506,9 @@ const char *pm_event_name(unsigned id)
  * 0x34 handler, called from inside this dispatch. -1: the ball_end site is the end of a ball. */
 static int ball_end_event = -1;
 
+static int coop_bonus_id;                   /* PAD-1028 round 3, the co-op section */
+static void coop_bonus_end(void);
+
 static void on_event_dispatch(unsigned *r)
 {
     static volatile int said;
@@ -14511,6 +14516,7 @@ static void on_event_dispatch(unsigned *r)
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
+    if (coop_bonus_id >= 0 && r[0] == (unsigned)coop_bonus_id) coop_bonus_end();   /* PAD-1028: the cards on its screen */
     /* PAD-663: from a process of the game's - a bus call on the game-logic thread only: the bus is called from other
      * threads too, and John Wick 1.02's logic stopped for good when the ball was ended from one of those */
     if (chg_end_owed && chg_game_tid && syscall(SYS_GETTID) == chg_game_tid) chg_end_ball_now("the game's bus call");
@@ -15026,7 +15032,19 @@ static void switches_arm(void)
  * At a ball's end with teammate t of n up: t < n - the ball's byte one down before the game's change, which puts it
  * back up (the same ball, the next teammate); an extra ball taken leaves it down - put back, the same teammate. t = n -
  * the game's change as it is: the next ball (or the game's end) and teammate 1. So the game ends after the last
- * teammate's last ball. */
+ * teammate's last ball.
+ * PAD-1042 (DoomWalrus666): TEAM 2V2 - players 1 and 2 against players 3 and 4, each team sharing its score and its
+ * progress. The game plays TWO players, a team each (the game's own player 1 and player 2: two score panels, two sets
+ * of progress, its own player change between them), and the runtime takes each team's players in turn:
+ *   teams on                  (coop.cfg) every game of two or more is a team game; or
+ *   setting <address> reading 2   the service menu's CO-OP PLAY says Team 2v2 (0 Off, 1 Co-op, 2 Team 2v2)
+ * In a team game every Start in the first ball adds the next player, no button held: player 2 joins team 1 (the
+ * game's add runs - credits, its hooks - and its count is put back to 1), player 3 is team 2 (the game's own player
+ * 2), player 4 joins team 2 (its count back to 2). The turns alternate the teams, a round of them a ball: P1, P3, P2,
+ * P4, then ball 2. The last team of a round that is not the ball's last puts the ball's byte one down before the game's
+ * change, as co-op does, so the game goes back to its player 1 on the same ball. A team of one (three players) plays
+ * both of its team's turns, so each team has as many balls. The top line says "TEAM 2 P3  BALL 1"; the game's
+ * end is the game's own for its two players, filed on the runtime's TEAM PLAY board (the higher team's score). */
 static const char *const COOP_FILES[] = { "/usr/local/padmode/coop.cfg", "/dump/coop.cfg" };
 static struct {
     int on;                              /* coop.cfg says so and the sites are hooked */
@@ -15034,6 +15052,10 @@ static struct {
     unsigned game;                       /* the game (chg_game_now() + 1) the teammates belong to; 0: none */
     unsigned n, turn;                    /* teammates (2-4) and the one up (1..n) */
     unsigned setting;                    /* round 2: the CO-OP PLAY row's live value (0: none - always on) */
+    int teams_always;                    /* PAD-1042: coop.cfg `teams on` */
+    unsigned teams;                      /* PAD-1042: this game is a team game (coop.n players, turn = the player up) */
+    unsigned team_n[3];                  /* PAD-1042: players in team 1 and team 2 */
+    unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
 } coop;
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
 static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
@@ -15054,8 +15076,38 @@ static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsig
 /* round 2: the service menu's CO-OP PLAY says On (or the card has no such row: co-op is always on) */
 static int coop_switched_on(void)
 {
+    if (coop.teams_always) return 0;
     if (!coop.setting) return 1;
     return *(volatile const unsigned *)(unsigned long)coop.setting == 1u;
+}
+
+/* PAD-1042: a game of two or more is a team game (coop.cfg `teams on`, or CO-OP PLAY says Team 2v2) */
+static int coop_teams_switched_on(void)
+{
+    if (coop.teams_always) return 1;
+    return coop.setting && *(volatile const unsigned *)(unsigned long)coop.setting == 2u;
+}
+
+/* PAD-1042: the player (1-4) of team `team`'s turn in round `round` with `size` players in it: team 1 is players 1
+ * and 2, team 2 players 3 and 4; a team of one plays every round (tests lift it verbatim) */
+static unsigned coop_team_player(unsigned team, unsigned size, unsigned round)
+{
+    if (team < 1 || team > 2 || size < 1 || round < 1) return 0;
+    return (team - 1u) * 2u + (round - 1u) % size + 1u;
+}
+
+/* PAD-1042: the round after a team game's ball end: (game players, the game's player before its change and after it,
+ * the ball byte before and after it, how far it was put down, the round, the rounds a ball) -> the next round. The
+ * game's player and ball where they were (less what was put down): an extra ball, the same round; the ball put down
+ * (another round on this ball): the next round; the last team's turn of the ball's last round: round 1 of the next
+ * ball; else (team 1 to team 2): the same round (tests lift it verbatim) */
+static unsigned coop_team_round(unsigned g, unsigned p, unsigned p_after, unsigned before, unsigned after,
+                                unsigned down, unsigned round, unsigned rounds)
+{
+    (void)rounds;
+    if (p_after == p && after == before - down) return round;
+    if (down) return round + 1u;
+    return p >= g ? 1u : round;
 }
 
 /* this game's co-op teammates (0 when it is not a co-op game) */
@@ -15095,9 +15147,11 @@ static int switch_held(unsigned id)
  * attract mode shows each board that has a champion after the game's own (chg_page_names). */
 static void coop_board_name(char *out, unsigned n)
 {
-    pm_snprintf(out, 40, "%u-PLAYER CO-OP", n);
+    if (!n) pm_snprintf(out, 40, "TEAM PLAY");                /* PAD-1042: a team game's board (n 0) */
+    else pm_snprintf(out, 40, "%u-PLAYER CO-OP", n);
 }
 
+/* n: the team's size, 0 a team game (PAD-1042: its two teams' scores meet on one board, the higher one its champion) */
 static void coop_scores_mark(unsigned n)
 {
     char words[40];
@@ -15116,8 +15170,8 @@ static int coop_page_names(char names[][40], int n, int cap)
     int i, k;
     char w[40], words[40];
     if (!coop.on || !coop_scores) return n;
-    for (t = 2; t <= 4 && n < cap; t++) {
-        coop_board_name(words, t);
+    for (t = 2; t <= 5 && n < cap; t++) {                     /* 5: PAD-1042's TEAM PLAY */
+        coop_board_name(words, t % 5);
         challenge_words(w, words);
         for (i = 0; i < n && !str_eq(names[i], w); i++) ;
         if (i < n) continue;
@@ -15153,7 +15207,7 @@ static struct coop_award {
     int kind;
     unsigned ids[COOP_AWARD_IDS], n_ids;    /* the audit ids, or the champion category */
     char words[28];
-    unsigned long long last;                /* the team's count at the last read */
+    unsigned long long last[4];             /* the team's count at the last read (PAD-1042: a game player each) */
     unsigned long long got[4];              /* each teammate's */
 } coop_aw[COOP_AWARDS];
 static int coop_aw_n;
@@ -15163,21 +15217,22 @@ static struct { char words[28], who[24]; unsigned long long value; unsigned mask
 static int coop_won_n;
 static unsigned coop_won_game;              /* the game they are of (chg_game_now()) */
 
-/* the team's count now: its points, or a champion category's value for player 1 (the team) */
-static unsigned long long coop_award_now(const struct coop_award *a)
+/* the team's count now: its points, or a champion category's value for game player p (co-op: 1, the team; PAD-1042: a
+ * team game's team up) */
+static unsigned long long coop_award_now(const struct coop_award *a, unsigned p)
 {
     unsigned table, get;
     if (a->kind == COOP_AW_SCORE) {
         unsigned s32 = data("scores32"), s64 = data("scores");
-        if (s32) return *(volatile unsigned *)(unsigned long)s32;
-        return s64 ? *(volatile uint64_t *)(unsigned long)s64 : 0;
+        if (s32) return ((volatile unsigned *)(unsigned long)s32)[p - 1];
+        return s64 ? ((volatile uint64_t *)(unsigned long)s64)[p - 1] : 0;
     }
     if (a->kind != COOP_AW_CHAMPION) return 0;
     table = data("challenge_scores_table");
     if (!table || !maps_has(table + 36u * a->ids[0] + 4u, 4, MAP_R)) return 0;
     get = *(const unsigned *)(unsigned long)(table + 36u * a->ids[0] + 4u);
     if (!maps_has(get, 4, MAP_R | MAP_GAME)) return 0;
-    return ((unsigned long long (*)(unsigned))(unsigned long)get)(1u);
+    return ((unsigned long long (*)(unsigned))(unsigned long)get)(p);
 }
 
 /* a read at the end of a teammate's turn: the rise since the last read is theirs; a count that went down (the game
@@ -15188,16 +15243,16 @@ static void coop_award_credit(unsigned long long *last, unsigned long long now, 
     *last = now;
 }
 
-/* the end of teammate t's turn */
-static void coop_awards_read(unsigned t)
+/* the end of teammate t's turn, the game's player p up (co-op: 1) */
+static void coop_awards_read(unsigned t, unsigned p)
 {
     int i;
     unsigned long secs = (pm_ms() - coop_turn_ms) / 1000ul;
-    if (t < 1 || t > 4) return;
+    if (t < 1 || t > 4 || p < 1 || p > 4) return;
     for (i = 0; i < coop_aw_n; i++) {
         struct coop_award *a = &coop_aw[i];
         if (a->kind == COOP_AW_SCORE || a->kind == COOP_AW_CHAMPION)
-            coop_award_credit(&a->last, coop_award_now(a), &a->got[t - 1]);
+            coop_award_credit(&a->last[p - 1], coop_award_now(a, p), &a->got[t - 1]);
         else if (a->kind == COOP_AW_TIME && secs > a->got[t - 1])
             a->got[t - 1] = secs;
     }
@@ -15208,10 +15263,8 @@ static void coop_awards_read(unsigned t)
 static void coop_awards_begin(void)
 {
     int i, k;
-    for (i = 0; i < coop_aw_n; i++) {
-        coop_aw[i].last = 0;
-        for (k = 0; k < 4; k++) coop_aw[i].got[k] = 0;
-    }
+    for (i = 0; i < coop_aw_n; i++)
+        for (k = 0; k < 4; k++) coop_aw[i].got[k] = coop_aw[i].last[k] = 0;
     coop_won_n = 0;
     coop_turn_ms = pm_ms();
 }
@@ -15412,7 +15465,8 @@ static void coop_turn_show(void)
 {
     char words[40];
     if (coop_ball_msg < 0) return;
-    pm_snprintf(words, sizeof words, "PLAYER %u  BALL %%d", coop.turn);
+    if (coop.teams) pm_snprintf(words, sizeof words, "TEAM %u P%u  BALL %%d", (coop.turn + 1u) / 2u, coop.turn);   /* 19 fit */
+    else pm_snprintf(words, sizeof words, "PLAYER %u  BALL %%d", coop.turn);
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
 }
 
@@ -15422,6 +15476,7 @@ static void coop_turn_show(void)
  * daveyvandy: "a generic entry point for customization". The game plays ONE player for the team, so a character is
  * what holds while its teammate is up. coop.cfg:
  *   pick on                          each teammate picks at their first ball; RANDOM is offered after the last
+ *   pick_time <s>                    the pick's time (COOP_PICK_MS when not given; 0: no limit, Action takes one)
  *   left <switch id>                 the left flipper button (the right is `button`): the pick walks with them
  *   action <switch id>               the Action button: takes the one shown; the `save` ability's button
  *   character <abilities> <name>|<what it does>
@@ -15457,10 +15512,17 @@ static void coop_turn_show(void)
  * The getter (`site adjustment`) is wrapped: only what the game READS changes, never what NVRAM holds, and only in a
  * co-op game while that teammate is up (a pick not yet made: nothing). The pick says itself on the game's top line
  * (PAD-1017's borrow of "BALL %d"): its name, then what it does, in turn; the flippers walk (a character another
- * teammate has is skipped), Action takes it, and after COOP_PICK_MS the one shown is taken. */
+ * teammate has is skipped), Action takes it, and when the pick's time is out the one shown is taken.
+ * PAD-1044 (DoomWalrus666: "how long the player has to select the character is unclear ... if a player doesn't
+ * choose a character in time they may not be assigned one"): the seconds left count down on the top line and on the
+ * pick's screen (its words line, a box the card draws in its header); the one taken stays on the glass
+ * COOP_PICK_DONE_MS saying PICKED; while the game is busy (pm_in_game() 0: a menu over the game) the pick and its
+ * clock wait, where they were once dropped with no character for that teammate's whole turn. */
 #define COOP_CHARS 16
 #define COOP_CHAR_ADJ 6
-#define COOP_PICK_MS 20000ul
+#define COOP_PICK_MS 30000ul
+#define COOP_PICK_MAX_S 600u
+#define COOP_PICK_DONE_MS 2500ul
 #define COOP_PICK_FLIP_MS 1500ul
 #define COOP_SAVE_TAP_MS 600ul
 /* PAD-1045: Godzilla's Action button is also its ball launch. A quick second press at a launch was the double press,
@@ -15477,9 +15539,15 @@ static struct coop_char {
     struct { char name[12]; unsigned n; } count[2];
 } coop_ch[COOP_CHARS];
 static int coop_ch_n, coop_pick_on;
+static unsigned long coop_pick_ms = COOP_PICK_MS;   /* coop.cfg `pick_time`; 0: no limit */
 static unsigned coop_left, coop_action;
 static int coop_pick_of[5];                 /* teammate (1-4) -> character, -1 none yet */
-static struct { int open; unsigned who; int at; unsigned long since, said_ms; int phase; volatile int walk, take; } pk;
+static struct {
+    int open; unsigned who; int at; unsigned long said_ms; int phase; volatile int walk, take;
+    unsigned long left, clock_ms;           /* PAD-1044: the time left, counted only while the game is in play */
+    int held;                               /* the game is busy: the pick waits */
+} pk;
+static struct { int on, c; unsigned who; unsigned long at; } coop_done;   /* PAD-1044: the one taken, on the glass */
 static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
 static volatile int coop_save_ask;          /* a double press: the tick gives the save */
 static int coop_save_used;                  /* this ball's is given */
@@ -15492,6 +15560,8 @@ static unsigned (*coop_adj_game)(unsigned);
 static unsigned coop_rng;
 static char coop_scr_scene[96];             /* `screens <scene>`: "" none */
 static void *coop_scr[COOP_CHARS + 1];      /* PadCoop_1.., PadCoop_Random */
+static void *coop_scr_words[COOP_CHARS + 1];/* PAD-1044: each one's words line: the seconds left, then PICKED */
+static char coop_scr_said[16];              /* what the shown one's words line says */
 static int coop_scr_found, coop_scr_shown = -1;
 static unsigned long coop_scr_try;
 static int coop_adj_said;                   /* the log's adjustment reads, the first 32 */
@@ -15724,13 +15794,27 @@ static void coop_gift(const struct coop_char *c)
     coop_gift_now = 0;
 }
 
+/* PAD-1044: the pick's time left after `el` ms more of play (tests lift it verbatim) */
+static unsigned long coop_pick_left(unsigned long left, unsigned long el)
+{
+    return el >= left ? 0ul : left - el;
+}
+
+/* PAD-1044: the whole seconds a countdown shows for `left` ms: 30 at the start, 1 in the last second (tests lift it) */
+static unsigned coop_pick_secs(unsigned long left)
+{
+    return (unsigned)((left + 999ul) / 1000ul);
+}
+
 static void coop_pick_say(void)
 {
-    char words[64];
+    char words[64], t[12];
     if (coop_ball_msg < 0) return;
-    if (coop_scr_found) pm_snprintf(words, sizeof words, "PLAYER %u PICK", pk.who);   /* the screens say the rest */
-    else if (pk.at >= coop_ch_n) pm_snprintf(words, sizeof words, "PLAYER %u PICK: RANDOM", pk.who);
-    else if (!pk.phase || !coop_ch[pk.at].does[0]) pm_snprintf(words, sizeof words, "PLAYER %u PICK: %s", pk.who, coop_ch[pk.at].name);
+    t[0] = 0;
+    if (coop_pick_ms) pm_snprintf(t, sizeof t, "  %u", coop_pick_secs(pk.left));      /* PAD-1044: the time left */
+    if (coop_scr_found) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s", pk.who, t);   /* the screens say the rest */
+    else if (pk.at >= coop_ch_n) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: RANDOM", pk.who, t);
+    else if (!pk.phase || !coop_ch[pk.at].does[0]) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: %s", pk.who, t, coop_ch[pk.at].name);
     else pm_snprintf(words, sizeof words, "%s", coop_ch[pk.at].does);
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
 }
@@ -15740,11 +15824,19 @@ static void coop_pick_open(unsigned t)
     if (!coop_pick_on || !coop_ch_n || t < 1 || t > 4 || coop_pick_of[t] >= 0) return;
     pk.who = t;
     pk.at = coop_pick_step(coop_ch_n, coop_ch_n, 1, coop_taken(t));   /* the first one free */
-    pk.since = pk.said_ms = pm_ms();
+    pk.said_ms = pk.clock_ms = pm_ms();
+    pk.left = coop_pick_ms;
+    pk.held = 0;
     pk.phase = 0;
     pk.walk = pk.take = 0;
     pk.open = 1;
-    say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one", t, coop_ch_n);
+    coop_done.on = 0;
+    if (coop_pick_ms)
+        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one, %u s", t,
+            coop_ch_n, coop_pick_secs(coop_pick_ms));
+    else
+        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one, no time limit",
+            t, coop_ch_n);
     coop_pick_say();
 }
 
@@ -15767,7 +15859,20 @@ static void coop_pick_close(const char *how)
             pk.at >= coop_ch_n ? ", at random" : "", how);
     else
         say("co-op: teammate %u has no character - every one is taken", pk.who);
-    coop_turn_show();
+    /* PAD-1044: the one taken stays on the glass a moment saying so (RANDOM's draw shows whom it drew); a turn that
+     * ended under the pick goes straight to the next */
+    coop_done.on = c >= 0 && pk.who == coop.turn;
+    coop_done.c = c;
+    coop_done.who = pk.who;
+    coop_done.at = pm_ms();
+    if (coop_done.on && coop_ball_msg >= 0) {
+        char words[64];
+        if (coop_scr_found) pm_snprintf(words, sizeof words, "PLAYER %u PICKED", pk.who);
+        else pm_snprintf(words, sizeof words, "PLAYER %u IS %s", pk.who, coop_ch[c].name);
+        coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+    } else {
+        coop_turn_show();
+    }
     if (c >= 0) coop_gift(&coop_ch[c]);
     if (c >= 0) coop_counts_give(&coop_ch[c]);
     if (c >= 0 && coop_ch[c].unlock_adj && fn("roster_slot_state") && data("rule_battle")) {   /* before any battle */
@@ -15834,6 +15939,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
 static int coop_cards_on;                   /* coop.cfg asks for them */
 static void *coop_card[COOP_CHARS], *coop_card_words[COOP_CHARS];
 static int coop_cards_found;
+static unsigned coop_cards_game;            /* round 3: the game (chg_game_now() + 1) whose cards have been shown */
 
 /* the cards, found once the HUD scene is up (with the pick's screens), all hidden */
 static void coop_cards_find(void)
@@ -15863,20 +15969,25 @@ static void coop_card_words_of(char *out, unsigned cap, const char *award, unsig
     pm_snprintf(out, cap, "%s  PLAYER %u  %s", award, t, num);
 }
 
+static char coop_bonus_clip[96];             /* round 3, below: the bonus's own loop */
+static int coop_cards_backdrop(const char *name);
+
 /* the game is over (coop_change_wrap, the game's thread): each award on each winner's card in turn */
 static void coop_cards_show(unsigned n)
 {
     unsigned long t0 = pm_ms(), at;
-    int i, shown = 0;
+    int i, shown = 0, backdrop;
     unsigned t;
     char words[64];
-    if (!coop_cards_on || !coop_won_n) return;
+    if (!coop_cards_on || !coop_won_n || coop_cards_game == chg_game_now() + 1) return;
+    coop_cards_game = chg_game_now() + 1;
     coop_cards_find();
     if (!coop_cards_found || !fn("proc_sleep")) {
         say("co-op awards: no award card to show them on (%s) - the attract mode's pages show them",
             !coop_cards_found ? "none found in the HUD scene" : "the port names no proc_sleep");
         return;
     }
+    backdrop = coop_bonus_clip[0] && coop_cards_backdrop(coop_bonus_clip);   /* round 3: the bonus's loop under them */
     for (i = 0; i < coop_won_n && pm_ms() - t0 < COOP_CARDS_MAX_MS; i++)
         for (t = 1; t <= n && t <= 4 && pm_ms() - t0 < COOP_CARDS_MAX_MS; t++) {
             int c = coop_pick_of[t];
@@ -15890,14 +16001,71 @@ static void coop_cards_show(unsigned n)
             pm_show(coop_card[c], 0);
             shown++;
         }
+    if (backdrop) coop_cards_backdrop(0);
     say("co-op awards: %d shown on the winners' cards in %lu ms - then the game's end goes on", shown, pm_ms() - t0);
 }
 
-/* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown */
+/* ---- PAD-1028 round 3: the cards over the bonus's own loop -----------------------------------------------------
+ * DoomWalrus666: "Awards play over what seems to be active gameplay although it is not ... Recommend that the awards
+ * play over the end of ball bonus loop videos". By the player change the bonus screen is gone and the main play is
+ * back (emulator, Godzilla LE 1.16: the city, BRIDGE 100% LIT). The cards cannot go IN the bonus screen: the game does
+ * not draw the HUD scene while its bonus is up (a hold at the bonus's end kept TOTAL SCORE on the glass for 10 s and no
+ * card showed), and the bonus's own scene is one this app cannot write. So the cards stay at the game's end and the
+ * backdrop (the runtime's clip behind the HUD, in the city's place) plays the bonus's own loop under them: the game's
+ * own looped clip and crop seen when its bonus ends (`event bonus_end`; the backdrop's record of the game's last own
+ * loop - Godzilla's EndOfBallBonus_BackgroundLoop, SquareCrop), given back when the cards are done. A port without the
+ * event, or a bonus with no looped clip of its own, keeps the main play under them. */
+static int coop_bonus_id = -1;              /* `event bonus_end`, -1: none */
+static char coop_bonus_clip[96], coop_bonus_crop[32];
+
+/* the bus's bonus_end: the loop the game's bonus plays, for the cards (tests lift it verbatim) */
+static void coop_bonus_end(void)
+{
+    unsigned k;
+    if (!coop_cards_on || !coop_teammates() || !gbg.name[0]) return;
+    for (k = 0; gbg.name[k] && k + 1 < sizeof coop_bonus_clip; k++) coop_bonus_clip[k] = gbg.name[k];
+    coop_bonus_clip[k] = 0;
+    for (k = 0; gbg.crop[k] && k + 1 < sizeof coop_bonus_crop; k++) coop_bonus_crop[k] = gbg.crop[k];
+    coop_bonus_crop[k] = 0;
+}
+
+static void coop_bonus_arm(void)
+{
+    coop_bonus_id = pm_event("bonus_end");
+    if (coop_bonus_id >= 0 && (can & PM_CAN_BACKDROP))
+        say("co-op awards: the cards show over the bonus's own loop (bonus_end %d; the backdrop behind the HUD)",
+            coop_bonus_id);
+    else
+        say("co-op awards: the cards show over the main play - this port names no %s",
+            coop_bonus_id < 0 ? "bonus_end event" : "backdrop");
+}
+
+/* the cards' backdrop: the bonus's loop behind the HUD (1 = up); 0 with an empty name: given back */
+static int coop_cards_backdrop(const char *name)
+{
+    unsigned long t0 = pm_ms();
+    unsigned k;
+    if (!name || !name[0]) {
+        pm_backdrop(0);
+        bd_crop_next[0] = 0;
+        return 0;
+    }
+    if (!(can & PM_CAN_BACKDROP) || !pm_backdrop(name)) return 0;
+    for (k = 0; coop_bonus_crop[k] && k + 1 < sizeof bd_crop_next; k++) bd_crop_next[k] = coop_bonus_crop[k];
+    bd_crop_next[k] = 0;
+    while (!pm_backdrop_showing() && pm_ms() - t0 < 1500ul)      /* the display's next draw plays it */
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    say("co-op awards: \"%s\" (crop %s) %s behind the cards", name, bd_crop_next[0] ? bd_crop_next : "the port's",
+        pm_backdrop_showing() ? "plays" : "was asked for");
+    return 1;
+}
+
+/* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown - with
+ * the seconds left on its words line, and PAD-1044's PICKED on the one taken */
 static void coop_screens_tick(void)
 {
     int i, want, got = 0;
-    char name[32];
+    char name[32], key[40], words[16];
     if (!coop_scr_scene[0]) return;
     if (!coop_scr_found) {
         if (pm_ms() - coop_scr_try < 1000ul) return;
@@ -15906,6 +16074,8 @@ static void coop_screens_tick(void)
             if (i < coop_ch_n) pm_snprintf(name, sizeof name, "PadCoop_%d", i + 1);
             else pm_snprintf(name, sizeof name, "PadCoop_Random");
             if (!coop_scr[i]) coop_scr[i] = pm_node(coop_scr_scene, name);
+            pm_snprintf(key, sizeof key, "%s.%s_Words", name, name);
+            if (!coop_scr_words[i]) coop_scr_words[i] = pm_text(coop_scr_scene, key);
             got += coop_scr[i] != 0;
         }
         if (!got) return;
@@ -15916,11 +16086,23 @@ static void coop_screens_tick(void)
         say("co-op characters: %d of the pick's %d screens found in %s - hidden until the pick is on one", got,
             coop_ch_n + 1, coop_scr_scene);
     }
-    want = pk.open && coop_teammates() && pm_in_game() ? pk.at : -1;
-    if (want == coop_scr_shown) return;
-    if (coop_scr_shown >= 0 && coop_scr_shown <= coop_ch_n && coop_scr[coop_scr_shown])
-        pm_show(coop_scr[coop_scr_shown], 0);
-    if (want >= 0 && want <= coop_ch_n && coop_scr[want]) pm_show(coop_scr[want], 1);
+    want = !coop_teammates() || !pm_in_game() ? -1 : pk.open ? pk.at : coop_done.on ? coop_done.c : -1;
+    words[0] = 0;
+    if (want >= 0 && pk.open) {
+        if (coop_pick_ms) pm_snprintf(words, sizeof words, "%u", coop_pick_secs(pk.left));
+    } else if (want >= 0) {
+        pm_snprintf(words, sizeof words, "PICKED");
+    }
+    if (want != coop_scr_shown) {
+        if (coop_scr_shown >= 0 && coop_scr_shown <= coop_ch_n && coop_scr[coop_scr_shown])
+            pm_show(coop_scr[coop_scr_shown], 0);
+        coop_scr_said[0] = 1;                                  /* a screen shown afresh: its words said again */
+    }
+    if (want >= 0 && want <= coop_ch_n && coop_scr_words[want] && !str_eq(words, coop_scr_said)) {
+        pm_set_text(coop_scr_words[want], words[0] ? words : " ");
+        str_copy(coop_scr_said, sizeof coop_scr_said, words, sizeof coop_scr_said);
+    }
+    if (want != coop_scr_shown && want >= 0 && want <= coop_ch_n && coop_scr[want]) pm_show(coop_scr[want], 1);
     coop_scr_shown = want;
 }
 
@@ -15991,12 +16173,34 @@ static void coop_chars_tick(void)
     int w;
     if (!coop_ch_n) return;
     coop_screens_tick();                                      /* the shown one follows the last tick's pick */
-    if (!coop_teammates() || !pm_in_game()) {
+    if (!coop_teammates() || !pm_player()) {
         pk.open = 0;
+        coop_done.on = 0;
         coop_save_ask = 0;
         return;
     }
+    if (!pm_in_game()) {                                      /* PAD-1044: busy (a menu over the game): it waits */
+        if (pk.open && !pk.held) {
+            pk.held = 1;
+            say("co-op: teammate %u's pick waits - the game is busy (%u s left)", pk.who, coop_pick_secs(pk.left));
+        }
+        pk.clock_ms = pm_ms();
+        coop_done.at = pm_ms();
+        coop_save_ask = 0;
+        return;
+    }
+    if (coop_done.on && !pk.open && pm_ms() - coop_done.at >= COOP_PICK_DONE_MS) {
+        coop_done.on = 0;                                     /* PAD-1044: the one taken has been seen */
+        coop_turn_show();
+    }
     if (pk.open) {
+        unsigned secs = coop_pick_secs(pk.left);
+        if (pk.held) {
+            pk.held = 0;
+            say("co-op: teammate %u's pick goes on (%u s left)", pk.who, secs);
+        }
+        if (coop_pick_ms) pk.left = coop_pick_left(pk.left, pm_ms() - pk.clock_ms);
+        pk.clock_ms = pm_ms();
         if ((w = pk.walk) != 0) {
             __sync_fetch_and_sub(&pk.walk, w);
             for (; w > 0; w--) pk.at = coop_pick_step(coop_ch_n, pk.at, 1, coop_taken(pk.who));
@@ -16007,11 +16211,13 @@ static void coop_chars_tick(void)
             coop_pick_say();
         }
         if (pk.take) coop_pick_close("Action took it");
-        else if (pm_ms() - pk.since >= COOP_PICK_MS) coop_pick_close("the time ran out");
+        else if (coop_pick_ms && !pk.left) coop_pick_close("the time ran out");
         else if (pm_ms() - pk.said_ms >= COOP_PICK_FLIP_MS) {
             pk.phase ^= 1;
             pk.said_ms = pm_ms();
             coop_pick_say();
+        } else if (coop_pick_ms && coop_pick_secs(pk.left) != secs) {
+            coop_pick_say();                                  /* PAD-1044: each second the top line counts down */
         }
     }
     coop_rules_watch();
@@ -16042,6 +16248,7 @@ static void coop_chars_begin(void)
     for (t = 0; t <= 4; t++) coop_pick_of[t] = -1, coop_started[t] = 0;
     for (t = 0; t < coop_cache_n; t++) coop_cache[t].held = 0;
     pk.open = 0;
+    coop_done.on = 0;
     coop_save_used = 0;
     coop_ball_out = 1;                       /* PAD-1045: the team forms in ball 1; a ball in the lane still waits */
     coop_adj_said = 0;
@@ -16268,8 +16475,9 @@ static void coop_chars_arm(struct site *e)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sgift %u", o ? ", " : "", coop_ch[i].gift);
         say("co-op character %d: %s (%s) - %s", i + 1, coop_ch[i].name, coop_ch[i].does, o ? how : "no ability");
     }
-    say("co-op characters: %d; %s", coop_ch_n, coop_pick_on ? "each teammate picks one at their first ball"
-        : "no pick (coop.cfg has no `pick on`)");
+    say("co-op characters: %d; %s, %u s to pick (0: no limit)", coop_ch_n,
+        coop_pick_on ? "each teammate picks one at their first ball" : "no pick (coop.cfg has no `pick on`)",
+        (unsigned)(coop_pick_ms / 1000ul));
 }
 
 /* from the tick: the game's own words back once its co-op game is over */
@@ -16277,7 +16485,7 @@ static void coop_scores_same(unsigned n);
 static void coop_tick(void)
 {
     unsigned n = coop_teammates();
-    if (n && pm_in_game()) coop_scores_same(n);
+    if (n && !coop.teams && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the game's own */
     coop_chars_tick();                                        /* PAD-1031 */
     if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
         coop_won_n = 0;
@@ -16303,9 +16511,48 @@ static void coop_scores_same(unsigned n)
     }
 }
 
+/* PAD-1042: Start in a team game's first ball (or the second Start that makes one): the next player joins */
+static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned n = coop_teammates(), h = n ? n : 1u, team, g, ret;
+    if (h >= 4) {
+        say("teams: Start - both teams are full (4 players)");
+        return 0;
+    }
+    team = h + 1u <= 2u ? 1u : 2u;
+    g = *coop_players_byte;
+    ret = coop_add_game(r0, r1, r2, r3);
+    if (!ret) {
+        say("teams: Start - the game added no one (credits, or the most players it allows)");
+        return ret;
+    }
+    if (!n) {
+        coop.game = chg_game_now() + 1;
+        coop.teams = 1;
+        coop.team_n[1] = 1;
+        coop.team_n[2] = 0;
+        coop.turn = 1;
+        coop.round = 1;
+        coop_awards_begin();                                  /* PAD-1028 */
+        coop_chars_begin();                                   /* PAD-1031 */
+        coop_scores_mark(0);
+    }
+    coop.n = h + 1u;
+    coop.team_n[team]++;
+    if (team == 1 || coop.team_n[2] > 1) *coop_players_byte = (unsigned char)g;   /* a teammate: not a game player */
+    say("teams: player %u joins team %u (team 1: %u, team 2: %u; the game plays %u player(s), a team each)", coop.n,
+        team, coop.team_n[1], coop.team_n[2], *coop_players_byte);
+    if (pk.open && pk.who == 1) pk.open = 0;                  /* PAD-1031: the joiner's flipper walked player 1's pick */
+    coop_turn_show();
+    coop_pick_open(1);
+    return ret;
+}
+
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     unsigned n = coop_teammates(), ret;
+    if (n ? coop.teams : *coop_players_byte == 1 && coop_teams_switched_on())
+        return coop_team_add(r0, r1, r2, r3);                /* PAD-1042 */
     if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_button_held()))
         return coop_add_game(r0, r1, r2, r3);
     if (n >= 4) {
@@ -16319,6 +16566,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     }
     if (!n) {
         coop.game = chg_game_now() + 1;
+        coop.teams = 0;                                       /* PAD-1042: a co-op game, not a team one */
         coop.turn = 1;
         n = 1;
         coop_awards_begin();                                  /* PAD-1028 */
@@ -16337,12 +16585,47 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     return ret;
 }
 
+/* PAD-1042: a team game's ball end: the game's own change between its two players (the teams), the ball held back
+ * while another round of turns is left on it */
+static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    static const struct coop_award score_of = { .kind = COOP_AW_SCORE };   /* a team's points, for the log */
+    unsigned g = *coop_players_byte, p = coop_ball_byte[-1], rounds, before, down, ret, p_after, round, was = coop.turn;
+    rounds = coop.team_n[1] > coop.team_n[2] ? coop.team_n[1] : coop.team_n[2];
+    coop_awards_read(coop.turn, p >= 1 && p <= 2 ? p : 1u);   /* PAD-1028: the turn's counts are its player's */
+    coop_cache_let_go();                                      /* PAD-1031: the team's records back before the change */
+    before = *coop_ball_byte;
+    down = p >= g && coop.round < rounds && before > 0;
+    if (down) *coop_ball_byte = (unsigned char)(before - 1);
+    ret = coop_change_game(r0, r1, r2, r3);
+    p_after = coop_ball_byte[-1];
+    round = coop_team_round(g, p, p_after, before, *coop_ball_byte, down, coop.round, rounds);
+    if (down && p_after == p && *coop_ball_byte == before - 1) *coop_ball_byte = (unsigned char)before;  /* extra ball */
+    if (!(ret & 0xff)) {
+        say("teams: ball %u, team %u player %u done - the game is over (team 1 %llu, team 2 %llu)", before,
+            (was + 1u) / 2u, was, coop_award_now(&score_of, 1), g > 1 ? coop_award_now(&score_of, 2) : 0ull);
+        coop_awards_end(coop.n);                              /* PAD-1028 */
+        coop_cards_show(coop.n);                              /* PAD-1028 round 2 */
+        return ret;
+    }
+    coop.round = round;
+    if (p_after >= 1 && p_after <= 2) coop.turn = coop_team_player(p_after, coop.team_n[p_after], round);
+    say("teams: ball %u, team %u player %u done - %s: team %u player %u, ball %u", before, (was + 1u) / 2u, was,
+        p_after == p && *coop_ball_byte == before ? "an extra ball" : down ? "the next round on this ball"
+        : *coop_ball_byte != before ? "the next ball" : "the other team", (coop.turn + 1u) / 2u, coop.turn,
+        *coop_ball_byte);
+    coop_turn_show();
+    coop_chars_turn();                                        /* PAD-1031: a first ball's pick */
+    return ret;
+}
+
 static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     unsigned n = coop_teammates(), before, down, ret, next, players;
     if (!n) return coop_change_game(r0, r1, r2, r3);
+    if (coop.teams) return coop_team_change(r0, r1, r2, r3);   /* PAD-1042 */
     coop_scores_same(n);                                      /* the ball's bonus is in: before the game's end reads them */
-    coop_awards_read(coop.turn);                              /* PAD-1028: the turn's counts, bonus in, are its teammate's */
+    coop_awards_read(coop.turn, 1);                           /* PAD-1028: the turn's counts, bonus in, are its teammate's */
     coop_cache_let_go();                                      /* PAD-1031: the team's records back before the change */
     before = *coop_ball_byte;
     down = coop.turn < n && before > 0;
@@ -16363,6 +16646,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
         coop_turn_show();
         coop_chars_turn();                                    /* PAD-1031: a first ball's pick */
     } else {
+        pk.open = coop_done.on = 0;                           /* PAD-1044: a pick the game's end cut short */
         say("co-op: the game's end counts %u player(s): one match draw and one high score for the team",
             *coop_players_byte);
         coop_awards_end(n);                                   /* PAD-1028 */
@@ -16378,10 +16662,18 @@ static void coop_line(const char *s)
     while (*s == ' ' || *s == '\t') s++;
     if (!*s || *s == '#') return;
     if (str_starts(s, "coop on")) { coop.on = 1; return; }
+    if (str_starts(s, "teams on")) { coop.teams_always = 1; return; }   /* PAD-1042 */
     if (str_starts(s, "award ")) { coop_award_line(s + 6); return; }      /* PAD-1028 */
     if (str_starts(s, "award_cards on")) { coop_cards_on = 1; return; }  /* PAD-1028 round 2 */
     if (str_starts(s, "character ")) { coop_char_line(s + 10); return; }  /* PAD-1031 */
     if (str_starts(s, "pick on")) { coop_pick_on = 1; return; }
+    if (str_starts(s, "pick_time ")) {                                    /* PAD-1044: the pick's seconds, 0 none */
+        unsigned v;
+        p = s + 10;
+        v = (unsigned)number(&p, &ok);
+        if (ok) coop_pick_ms = (v > COOP_PICK_MAX_S ? COOP_PICK_MAX_S : v) * 1000ul;
+        return;
+    }
     if (str_starts(s, "screens ")) {                                      /* PAD-1031: the pick's own screens */
         for (p = s + 8; *p == ' '; p++) ;
         str_copy(coop_scr_scene, sizeof coop_scr_scene, p, sizeof coop_scr_scene);
@@ -16501,8 +16793,11 @@ static void coop_arm(void)
             "score goes on the game's boards");
     if (coop.setting)
         say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08x, now %s)", coop.setting,
-            coop_switched_on() ? "On" : "Off");
+            coop_teams_switched_on() ? "Team 2v2" : coop_switched_on() ? "On" : "Off");
+    if (coop.teams_always)
+        say("teams: every game of two or more is a team game (coop.cfg `teams on`): players 1+2 against 3+4");
     coop_awards_arm();                                        /* PAD-1028 */
+    if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
@@ -17167,6 +17462,338 @@ static void idle_arm(void)
         ? "the song clocks" : "the hurry-ups", fn("score_add"), songs ? ", song tracker" : "", check ? ", check" : "");
 }
 
+/* ---- PAD-1041: Prolonged Competition on the start menu -------------------------------------------------------------
+ * Joe_Blasi: "can the prolonged comp (in player menu) be added to all games?" Venom and Dungeons & Dragons offer it on
+ * CHOOSE YOUR MODE OF PLAY: COMPETITION GAME PLAY UNTIL POWERED OFF - picked once, every game after it plays as
+ * Competition until the machine is switched off, and picked again it ends. Every Spike 2 build's own COMPETITION entry
+ * sets one flag, FG_PLAYER_COMPETITION_MODE_ACTIVE (17 on every latest build), and nothing else, so a competition game
+ * is that flag set as the game starts. The runtime adds the entry to the start menu (the same sites as the challenges'
+ * menu: `site challenge_menu`, `site challenge_menu_pick` and their values) and keeps the flag set:
+ *   - the entry: the game's own COMPETITION caption over UNTIL POWERED OFF; once on, its STANDARD caption over ENDS
+ *     PROLONGED COMPETITION. Picked, the game plays it as Standard (kind 0 on every menu of this shape), and the next
+ *     game's start turns it on (or off);
+ *   - while on: the flag set at every game's start and again at a ball's start that finds it clear (the event bus's
+ *     dispatch, before the game's handlers). Off again: cleared at that game's start. It lives in the runtime's
+ *     memory only, so switching the machine off ends it, as on Venom.
+ * comp.cfg (beside the runtime, or /dump for a rig), written by the Modes tab's tick (plugins/stern/prolonged_comp.py):
+ *   flag <id>            FG_PLAYER_COMPETITION_MODE_ACTIVE, read off the card's own flag names
+ *   caption <msg>        the menu's COMPETITION caption (message id)
+ *   caption_end <msg>    the menu's STANDARD caption, for the entry that ends it
+ *   only                 the card carries no modes: armed before the score gate with nothing else (the scores stay on
+ *                        Insider Connected, as the game's own Competition keeps them)
+ * It scores nothing, so it arms before the score gate. */
+static const char *const COMP_FILES[] = { "/usr/local/padmode/comp.cfg", "/dump/comp.cfg" };
+#define COMP_KIND 0x200u                         /* the entry's kind until a pick makes it the game's */
+static struct {
+    int armed, only, on, pending, said_game;
+    unsigned flag, caption, caption_end, game_id, ball_id, over_id, games;
+} comp;
+static char comp_name_on[40] = "UNTIL POWERED OFF", comp_name_off[40] = "ENDS PROLONGED COMPETITION";
+
+/* Whether the next game is prolonged, from the flags alone (tests lift it verbatim): on = prolonged now, picked = the
+ * entry was the menu's pick */
+static int comp_next(int on, int picked)
+{
+    return picked ? !on : on;
+}
+
+static const char *comp_name(void)
+{
+    return comp.on ? comp_name_off : comp_name_on;
+}
+
+/* the entry is ours: by its kind, or - once a pick wrote the game's kind into it - by the name it points to */
+static int comp_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
+{
+    unsigned name = *(const unsigned *)(ent + nat);
+    return *(const unsigned *)(ent + kat) == COMP_KIND || name == (unsigned)(unsigned long)comp_name_on
+        || name == (unsigned)(unsigned long)comp_name_off;
+}
+
+static void comp_menu_built(unsigned *r)
+{
+    long creg = pm_port_value("challenge_menu_count_reg", -1);
+    unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp */
+    unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
+    unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), es = (unsigned)pm_port_value("challenge_menu_entry", 12);
+    unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
+    unsigned short caption = (unsigned short)(comp.on ? comp.caption_end : comp.caption);
+    unsigned i, k, n0 = *count, tmpl = 0;
+    static int room_said, said;
+    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
+        return;                                            /* not the list this hook knows: leave it alone */
+    for (i = 0; i < n0; i++) {
+        if (comp_entry_at(list + es * i, kat, nat)) {       /* an every-frame site: there already - say what it is now */
+            *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)comp_name();
+            *(unsigned short *)(list + es * i + cat) = caption;
+            return;
+        }
+        if (!*(unsigned *)(list + es * i + kat)) tmpl = i;  /* Standard's: the entry ours plays as */
+    }
+    if (n0 >= cap) {
+        if (!room_said++) say("prolonged competition: no room on the start menu - the game's menu holds %u entries", cap);
+        return;
+    }
+    i = n0;
+    if (!plain)                                            /* another layout - start from the game's entry */
+        for (k = 0; k < es; k++) list[es * i + k] = list[es * tmpl + k];
+    else if (es == 16)                                     /* the fourth word: as Standard's */
+        *(unsigned *)(list + es * i + 12) = *(unsigned *)(list + es * tmpl + 12);
+    *(unsigned *)(list + es * i + kat) = COMP_KIND;
+    *(unsigned short *)(list + es * i + cat) = caption;
+    if (plain) *(unsigned short *)(list + es * i + 6) = 0;
+    else if (pm_port_value("challenge_menu_caption2_at", -1) >= 0)     /* TMNT keeps the caption twice */
+        *(unsigned short *)(list + es * i + (unsigned)pm_port_value("challenge_menu_caption2_at", 0)) = caption;
+    *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)comp_name();
+    *count = i + 1;
+    if (!said++) {
+        char kinds[120];
+        unsigned at = 0;
+        kinds[0] = 0;
+        for (k = 0; k < *count && at < sizeof kinds - 8; k++)     /* the menu's order, for whoever steps it */
+            at += (unsigned)pm_snprintf(kinds + at, sizeof kinds - at, " %u", *(unsigned *)(list + es * k + kat));
+        say("prolonged competition: on the start menu as entry %u of %u (%s) - kinds%s", i + 1, i + 1, comp_name(), kinds);
+    }
+}
+
+static void comp_menu_picked(unsigned *r)
+{
+    long back = pm_port_value("challenge_menu_pick_back", 0);
+    unsigned char *e8 = back > 0 ? (unsigned char *)(unsigned long)(r[3] - (unsigned)back) - MENU_KIND_AT : 0;
+    int was = comp.pending;       /* the game runs this on every frame of the menu: say only a change */
+    comp.pending = back > 0 ? comp_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : r[3] == COMP_KIND;
+    if (comp.pending) {                                     /* the game plays it as Standard */
+        if (back > 0) *(unsigned *)(e8 + MENU_KIND_AT) = 0;
+        else r[3] = 0;
+    }
+    if (comp.pending != was)
+        say("prolonged competition: %s %s on the menu", comp_name(), comp.pending ? "picked" : "no longer picked");
+}
+
+
+/* Round 2: the menus of game-mode table INDICES (Godzilla, Jaws, John Wick, King Kong, Metallica, X-Men; prolonged_comp
+ * .frame_lines): u32 indices on the menu function's stack, the cursor and the buttons in registers, the index under
+ * the cursor applied live every frame and drawn by its caption and name messages. At the frame point (`site
+ * comp_menu_frame`, hook_full) the entry is Competition's index a second time (`value comp_menu_index`; once on,
+ * Standard's: `comp_menu_end_index`), so the game itself makes the pick a Competition (or Standard) game; while the
+ * cursor is on it, that index's name message (`comp_menu_index_msg` ALL RANDOMNESS REMOVED, `comp_menu_end_msg`
+ * NORMAL PLAY) letters UNTIL POWERED OFF (ENDS PROLONGED COMPETITION), and the game's words come back as it leaves or
+ * a game starts. The count slot is the count, or the last index (`value comp_menu_frame_count_last 1`, Metallica). */
+static unsigned long comp_frame_sp;              /* the menu frame we appended to (a new menu: a new list) */
+static unsigned comp_frame_at, comp_frame_msg;   /* our entry's place in the list; the message we lettered (0: none) */
+
+static void comp_frame_restore(void)
+{
+    if (comp_frame_msg) pm_message_restore(comp_frame_msg);
+    comp_frame_msg = 0;
+}
+
+/* Where the cursor ends this frame, from the frame's state alone (tests lift it verbatim): `n` entries, `left` /
+ * `right` this frame's flipper presses (left first, as the games test them) */
+static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, unsigned right)
+{
+    if (!n) return cursor;
+    if (left) cursor = cursor ? cursor - 1 : n - 1;
+    if (right) cursor = cursor + 1 >= n ? 0 : cursor + 1;
+    return cursor;
+}
+
+static void comp_menu_frame(unsigned *r)
+{
+    unsigned char *sp = (unsigned char *)(r + 14);
+    unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
+    unsigned *count = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_count_at", 0));
+    unsigned last = pm_port_value("comp_menu_frame_count_last", 0) ? 1u : 0u;
+    unsigned cap = (unsigned)pm_port_value("comp_menu_frame_cap", 0);
+    unsigned creg = (unsigned)pm_port_value("comp_menu_frame_cursor_reg", 13);
+    unsigned breg = (unsigned)pm_port_value("comp_menu_frame_buttons_reg", 13);
+    unsigned idx = (unsigned)pm_port_value(comp.on ? "comp_menu_end_index" : "comp_menu_index", 0);
+    unsigned msg = (unsigned)pm_port_value(comp.on ? "comp_menu_end_msg" : "comp_menu_index_msg", 0);
+    unsigned n = *count + last;
+    static int room_said;
+    int was = comp.pending;
+    if (creg > 12 || breg > 12 || !idx || !msg || n > cap) return;
+    if ((unsigned long)sp != comp_frame_sp || comp_frame_at >= n || list[comp_frame_at] != idx) {   /* a new menu */
+        comp_frame_sp = (unsigned long)sp;
+        comp_frame_restore();
+        if (n >= cap) {
+            if (!room_said++) say("prolonged competition: no room on the start menu - its list holds %u indices", cap);
+            return;
+        }
+        comp_frame_at = n;
+        list[n] = idx;
+        *count += 1;
+        say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s; cursor %u)", n + 1,
+            n + 1, idx, comp_name(), r[creg]);
+    }
+    /* the cursor this frame draws: the press read just now moves it after this point (left back, right on, both
+     * wrapping), and the game letters the name as the cursor ARRIVES - so the message is ours from that frame */
+    comp.pending = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u) == comp_frame_at;
+    if (comp.pending) {
+        pm_message_set(msg, comp_name());              /* the index's name: ours while the cursor is on our entry */
+        comp_frame_msg = msg;
+    } else {
+        comp_frame_restore();
+    }
+    if (comp.pending != was)
+        say("prolonged competition: %s %s on the menu", comp_name(), comp.pending ? "picked" : "no longer picked");
+}
+
+/* Round 2: Bond 60th's start menu, an OBJECT: a vector of 24-byte entries (`value comp_menu_obj_vec` +0x204 its begin,
+ * +4 its end) and the selected index (`comp_menu_obj_index` +0x210), filled by the game's own add function (`site
+ * comp_menu_obj_add_fn`: add(menu, enabled, kind, flag, flag2, caption message, const char *name)). Just after the
+ * builder's last add (`site comp_menu_obj_built`, the menu in `value comp_menu_obj_reg`) the runtime calls it once more:
+ * Competition's kind and flag (`comp_menu_obj_kind`, the flag) under the COMPETITION caption, or once on Standard's
+ * (`comp_menu_obj_end_kind`, no flag) under STANDARD, named UNTIL POWERED OFF / ENDS PROLONGED COMPETITION. Start
+ * the menu shows the selected index and runs its entry's callback every frame (`site comp_menu_obj_pick`, the menu in
+ * `comp_menu_obj_pick_reg`): the game plays our entry as the Competition (Standard) it copies, and the runtime notes
+ * which entry is shown for the game's start. */
+static unsigned long comp_obj_menu;              /* the menu object our entry went into */
+static unsigned comp_obj_at;                     /* its place in the vector */
+
+static void comp_menu_obj_built(unsigned *r)
+{
+    unsigned reg = (unsigned)pm_port_value("comp_menu_obj_reg", 13), vec = (unsigned)pm_port_value("comp_menu_obj_vec", 0);
+    unsigned (*add)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned)
+        = (unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)
+          fn("comp_menu_obj_add_fn");
+    unsigned char *menu;
+    unsigned n;
+    if (reg > 12 || !vec || !add) return;
+    menu = (unsigned char *)(unsigned long)r[reg];
+    n = (*(unsigned *)(menu + vec + 4) - *(unsigned *)(menu + vec)) / 24u;
+    add(r[reg], 1u, (unsigned)pm_port_value(comp.on ? "comp_menu_obj_end_kind" : "comp_menu_obj_kind", 0),
+        comp.on ? 0u : comp.flag, 0u, comp.on ? comp.caption_end : comp.caption, (unsigned)(unsigned long)comp_name());
+    if ((*(unsigned *)(menu + vec + 4) - *(unsigned *)(menu + vec)) / 24u != n + 1) {
+        say("prolonged competition: the start menu's add did not take the entry");
+        return;
+    }
+    comp_obj_menu = (unsigned long)menu;
+    comp_obj_at = n;
+    say("prolonged competition: on the start menu as entry %u of %u (%s)", n + 1, n + 1, comp_name());
+}
+
+static void comp_menu_obj_pick(unsigned *r)
+{
+    unsigned reg = (unsigned)pm_port_value("comp_menu_obj_pick_reg", 13);
+    unsigned at = (unsigned)pm_port_value("comp_menu_obj_index", 0);
+    if (reg > 12 || !at) return;
+    int was = comp.pending;      /* the game runs this every frame of the menu: say only a change */
+    comp.pending = (unsigned long)r[reg] == comp_obj_menu
+        && *(const unsigned *)(unsigned long)(r[reg] + at) == comp_obj_at;
+    if (comp.pending != was)
+        say("prolonged competition: %s %s on the menu", comp_name(), comp.pending ? "picked" : "no longer picked");
+}
+
+static void comp_game_start(void)
+{
+    int was = comp.on, flag = game_flag(comp.flag);
+    comp_frame_restore();                               /* the menu's words back as it ends in a game */
+    comp.on = comp_next(comp.on, comp.pending);
+    comp.pending = 0;
+    comp.games++;
+    comp.said_game = 0;
+    if (comp.on) game_flag_set(comp.flag);
+    else if (was) game_flag_clear(comp.flag);
+    if (comp.on != was)
+        say("prolonged competition: %s - game %u %s (flag %u was %d)", comp.on ? "ON until the machine is switched off"
+            : "OFF", comp.games, comp.on ? "plays as Competition" : "plays as the menu picked", comp.flag, flag);
+    else
+        say("prolonged competition: game %u %s (flag %u was %d)", comp.games,
+            comp.on ? "plays as Competition" : "starts (prolonged is off)", comp.flag, flag);
+}
+
+static void on_comp_dispatch(unsigned *r)
+{
+    if (r[0] == comp.game_id) comp_game_start();
+    else if (r[0] == comp.over_id && comp.games)            /* for the log: what the game ended as */
+        say("prolonged competition: game %u over (flag %u is %d; prolonged %s)", comp.games, comp.flag,
+            game_flag(comp.flag), comp.on ? "on" : "off");
+    else if (r[0] == comp.ball_id && comp.on && game_flag(comp.flag) == 0) {
+        game_flag_set(comp.flag);                           /* the game's start work cleared it: again */
+        if (!comp.said_game++)
+            say("prolonged competition: game %u's ball start found flag %u clear - set again", comp.games, comp.flag);
+    }
+}
+
+static int comp_cfg_only(void)
+{
+    return comp.armed && comp.only;
+}
+
+static void comp_arm(void)
+{
+    static char raw[512];
+    struct site *bus = site("hook_dispatch");
+    long n = -1, i;
+    int game = event_bus_id("game_start"), ball = event_bus_id("ball_start"), ok, frame, objm;
+    unsigned k;
+    const char *p;
+    for (k = 0; k < sizeof COMP_FILES / sizeof COMP_FILES[0] && n < 0; k++)
+        n = pm_read_file(COMP_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i < n; i++) {
+        if (i && raw[i - 1] != '\n') continue;
+        if (str_starts(raw + i, "only")) comp.only = 1;
+        else if (str_starts(raw + i, "flag ")) { p = raw + i + 5; comp.flag = (unsigned)number(&p, &ok); if (!ok) comp.flag = 0; }
+        else if (str_starts(raw + i, "caption_end ")) {
+            p = raw + i + 12; comp.caption_end = (unsigned)number(&p, &ok); if (!ok) comp.caption_end = 0;
+        } else if (str_starts(raw + i, "caption ")) {
+            p = raw + i + 8; comp.caption = (unsigned)number(&p, &ok); if (!ok) comp.caption = 0;
+        }
+    }
+    if (!comp.flag || !comp.caption || !comp.caption_end || !data("game_flags")) {
+        say("prolonged competition: off - %s", !data("game_flags") ? "the port names no game flags"
+            : "comp.cfg names no flag or captions");
+        return;
+    }
+    objm = site("comp_menu_obj_built") && site("comp_menu_obj_pick") && fn("comp_menu_obj_add_fn")
+        && pm_port_value("comp_menu_obj_vec", 0) > 0 && pm_port_value("comp_menu_obj_index", 0) > 0
+        && pm_port_value("comp_menu_obj_kind", 0) > 0 && pm_port_value("comp_menu_obj_end_kind", 0) > 0;
+    frame = !objm && site("comp_menu_frame") && pm_port_value("comp_menu_frame_cap", 0) > 0
+        && pm_port_value("comp_menu_frame_list_at", 0) > 0 && pm_port_value("comp_menu_frame_count_at", 0) > 0
+        && pm_port_value("comp_menu_index", 0) > 0 && pm_port_value("comp_menu_index_msg", 0) > 0
+        && pm_port_value("comp_menu_end_index", 0) > 0 && pm_port_value("comp_menu_end_msg", 0) > 0;
+    if (!objm && !frame && (!site("challenge_menu") || !site("challenge_menu_pick") || pm_port_value("challenge_menu_cap", 0) <= 0
+        || pm_port_value("challenge_menu_list_at", 0) <= 0
+        || (pm_port_value("challenge_menu_count_at", 0) <= 0 && pm_port_value("challenge_menu_count_reg", -1) < 4))) {
+        say("prolonged competition: off - the port does not know this game's start menu");
+        return;
+    }
+    if (!bus || !bus->ok || game < 0 || ball < 0) {
+        say("prolonged competition: off - %s", !bus || !bus->ok ? "the port's hook_dispatch is missing or wrong"
+            : "the port names no game_start / ball_start event");
+        return;
+    }
+    if (frame) {                  /* the index menus letter our entry through the game's messages, on a card of only this */
+        static const char *const msg_d[] = { "message_count", "message_remap", "message_table", 0 };
+        if (!have_data(msg_d)) {
+            say("prolonged competition: off - the port names no message table to letter the menu's entry with");
+            return;
+        }
+        can |= PM_CAN_MESSAGES;
+    }
+    comp.game_id = (unsigned)game;
+    comp.ball_id = (unsigned)ball;
+    comp.over_id = event_bus_id("game_over") >= 0 ? (unsigned)event_bus_id("game_over") : ~0u;
+    if ((objm ? !hook_full(fn("comp_menu_obj_built"), comp_menu_obj_built)
+                || !hook_full(fn("comp_menu_obj_pick"), comp_menu_obj_pick)
+          : frame ? !hook_full(fn("comp_menu_frame"), comp_menu_frame)
+               : !(pm_port_value("challenge_menu_count_reg", -1) >= 0 ? hook_full(fn("challenge_menu"), comp_menu_built)
+                                                                      : hook(fn("challenge_menu"), comp_menu_built))
+                 || !hook(fn("challenge_menu_pick"), comp_menu_picked))
+        || !hook(bus->addr, on_comp_dispatch)) {
+        say("prolonged competition: off - the start menu or the event bus could not be hooked");
+        return;
+    }
+    comp.armed = 1;
+    say("prolonged competition: armed - on the start menu at 0x%08x (captions %u / %u), flag %u kept set from every "
+        "game's start (bus 0x%x, ball start 0x%x) while it is on%s", fn(objm ? "comp_menu_obj_built" : frame ? "comp_menu_frame" : "challenge_menu"), comp.caption,
+        comp.caption_end, comp.flag, comp.game_id, comp.ball_id, comp.only ? " (comp.cfg: only)" : "");
+}
+
 /* Which sites and data each capability needs; all must be present and verified. */
 static int have_sites(const char *const *names)
 {
@@ -17434,14 +18061,14 @@ static void on_agent_header(unsigned *r)
 }
 
 /* round 2 (PAD-1017, DoomWalrus666): on a card of co-op and nothing else, the gate holds back only while the service
- * menu's CO-OP PLAY says On (the word at insider_while is 2): Off, the card's Insider Connected is the game's own -
+ * menu's CO-OP PLAY says On or Team 2v2 (the word at insider_while is 1 or 2, PAD-1042): Off, the card's Insider Connected is the game's own -
  * the game plays stock then. 0: the whole gate, always (a card with modes). */
 static unsigned insider_while;
 
 /* 1 when the gate holds back now (tests lift it verbatim) */
 static int insider_holding(unsigned while_at, unsigned value)
 {
-    return !while_at || value == 1u;
+    return !while_at || value == 1u || value == 2u;          /* PAD-1042: Co-op or Team 2v2 */
 }
 
 static int on_agent_begin(unsigned *r)
@@ -17507,7 +18134,7 @@ static int insider_arm(void)
             insider_while = at;
             say("insider: a card of co-op and nothing else - all of that only while the service menu's CO-OP PLAY "
                 "says On (value at 0x%08x, now %s); Off, Insider Connected is the game's own",
-                at, *(volatile const unsigned *)(unsigned long)at == 2u ? "On" : "Off");
+                at, insider_holding(at, *(volatile const unsigned *)(unsigned long)at) ? "On" : "Off");
         }
     }
     return 1;
@@ -19901,12 +20528,14 @@ static void pad_mode_start(void)
     pic_arm();                                /* PAD-537: nor do the picture settings */
     idle_arm();                               /* PAD-1022: nor does inactivity pausing the timers */
     hand_arm();                               /* PAD-1033: nor does a player's handicap (the operator's settings) */
-    if ((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only()) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
-        say("armed: %s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
+    comp_arm();                               /* PAD-1041: nor does Prolonged Competition (the game's own Competition) */
+    if ((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only()) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
+        say("armed: %s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             idle_only ? "inactivity pausing timers " : "", hand_cfg_only() ? "handicaps " : "",
+            comp_cfg_only() ? "prolonged competition " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : idle_only ? "idle.cfg"
-            : "handicap.cfg");
+            : hand_cfg_only() ? "handicap.cfg" : "comp.cfg");
         if (hand.on && !hook(fn("tick"), on_hand_tick)) {
             hand.on = 0;
             say("handicap: off - the game's tick could not be hooked");

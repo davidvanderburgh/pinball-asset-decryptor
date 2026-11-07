@@ -27,7 +27,9 @@ static void say(const char *f, ...) { va_list a; va_start(a, f); vprintf(f, a); 
 #define pm_snprintf snprintf
 static unsigned long now_ms = 1000;
 static unsigned long pm_ms(void) { return now_ms; }
-static int pm_in_game(void) { return 1; }
+static int in_game = 1;                                  /* PAD-1044: 0 is busy (a menu over the game) */
+static int pm_in_game(void) { return in_game; }
+static unsigned pm_player(void) { return 1; }
 static struct { int on; unsigned button, game, n, turn; } coop;
 static unsigned coop_teammates(void) { return coop.n; }
 static int str_starts(const char *s, const char *p) { return !strncmp(s, p, strlen(p)); }
@@ -47,6 +49,9 @@ static int maps_has(unsigned long a, unsigned n, unsigned f) { (void)a; (void)n;
 static unsigned fn(const char *name) { (void)name; return 0; }
 static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
 static void *pm_node(const char *where, const char *path) { (void)where; (void)path; return 0; }
+static void *pm_text(const char *where, const char *path) { (void)where; (void)path; return 0; }
+static void pm_set_text(void *t, const char *w) { (void)t; (void)w; }
+static void str_copy(char *d, unsigned cap, const char *s, unsigned n) { (void)n; snprintf(d, cap, "%s", s); }
 static void pm_show(void *node, int on) { (void)node; (void)on; }
 static void coop_cards_find(void) {}                     /* PAD-1028 round 2: the award cards (test_pad1028) */
 struct pm_stock_rule;
@@ -107,12 +112,29 @@ int main(void)
     press(34); coop_chars_tick(); printf("t4 %d\n", coop_pick_of[4]);
     /* the time runs out: the one shown */
     coop_chars_begin(); coop.turn = 1; coop_chars_turn(); press(59); coop_chars_tick();
-    now_ms += 20000; coop_chars_tick(); printf("timed %d open %d\n", coop_pick_of[1], pk.open);
+    now_ms += 20000; coop_chars_tick(); printf("at 20 s: open %d left %u\n", pk.open, coop_pick_secs(pk.left));
+    now_ms += 10000; coop_chars_tick(); printf("timed %d open %d [%s]\n", coop_pick_of[1], pk.open, shown);
+    now_ms += 2600; coop_chars_tick(); printf("then [%s]\n", shown);
+    /* PAD-1044: busy under the pick (a menu over the game): it waits, its clock stopped, and goes on after */
+    coop_chars_begin(); coop.turn = 2; coop_chars_turn();
+    now_ms += 10000; coop_chars_tick();
+    in_game = 0; now_ms += 1000; coop_chars_tick(); now_ms += 60000; coop_chars_tick();
+    printf("busy: open %d who %u pick %d\n", pk.open, pk.who, coop_pick_of[2]);
+    in_game = 1; now_ms += 1000; coop_chars_tick(); printf("back: open %d [%s]\n", pk.open, shown);
+    now_ms += 18500; coop_chars_tick(); printf("back +18.5 s: open %d\n", pk.open);
+    now_ms += 1000; coop_chars_tick(); printf("back timed %d\n", coop_pick_of[2]);
+    /* no time limit: only Action takes one */
+    coop_pick_ms = 0; coop_chars_begin(); coop.turn = 3; coop_chars_turn();
+    printf("unlimited [%s]\n", shown);
+    now_ms += 600000; coop_chars_tick(); printf("unlimited 10 min: open %d\n", pk.open);
+    press(34); coop_chars_tick(); printf("unlimited took %d\n", coop_pick_of[3]);
     return 0;
 }
 """
 
 FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
+       "static unsigned long coop_pick_left(unsigned long left, unsigned long el)",
+       "static unsigned coop_pick_secs(unsigned long left)",
        "static volatile unsigned *coop_cache_field(const struct coop_cache *k)",
        "static unsigned coop_adj_value(unsigned own, unsigned op, unsigned v, unsigned lo, unsigned hi)",
        "static unsigned coop_taken(unsigned except)",
@@ -161,25 +183,37 @@ def test_each_teammate_picks_one_nobody_else_has_and_its_ability_holds_while_the
     assert "char 4 [NO ABILITY] [] adj 0 save 0 boost 0 gift 0" in out
     assert "char 5 [KING KONG] [DOUBLE POWER-UPS] adj 0 save 0 boost 200 gift 311" in out             # an ability it cannot read: none
     assert "before a pick: 5" in out                                # no character yet: the game's own value
-    assert "open [PLAYER 1 PICK: GODZILLA 1954]" in out
+    assert "open [PLAYER 1 PICK  30: GODZILLA 1954]" in out          # PAD-1044: the seconds left with it
     assert "flip [LONGER BALL SAVE]" in out                         # then what it does, in turn
-    # teammate 1's: the save time doubled (5 -> 10, at most 15); the heat ray is not theirs
-    assert "t1 0 [PLAYER 1  BALL %d] reads 94: 10 195: 20" in out
-    assert "open2 [PLAYER 2 PICK: GODZILLA 2000]" in out            # 1954 is taken: the first one free
+    # teammate 1's: the save time doubled (5 -> 10, at most 15); the heat ray is not theirs; the top line says whom
+    # they took (PAD-1044)
+    assert "t1 0 [PLAYER 1 IS GODZILLA 1954] reads 94: 10 195: 20" in out
+    assert "open2 [PLAYER 2 PICK  30: GODZILLA 2000]" in out        # 1954 is taken: the first one free
     assert "ball out: 10" in out                                    # the ball served before the pick: its save now
     assert "no ball out: 0" in out                                  # 2000 has no bs: nothing at its pick
     assert "t2 1 reads 94: 5" in out                               # teammate 2 up: the game's own save time
     assert "save 10" in out                                         # Action twice within 0.6 s
     assert "again 0" in out                                         # once a ball
-    assert "open3 [PLAYER 3 PICK: GODZILLA GMK]" in out
-    assert "left [PLAYER 3 PICK: RANDOM]" in out                    # left past 2000 and 1954 (taken) to RANDOM
-    assert "right [PLAYER 3 PICK: GODZILLA 1954]" not in out
-    assert "right [PLAYER 3 PICK: GODZILLA GMK]" in out             # and back, past them again
+    assert "open3 [PLAYER 3 PICK  30: GODZILLA GMK]" in out
+    assert "left [PLAYER 3 PICK  30: RANDOM]" in out                # left past 2000 and 1954 (taken) to RANDOM
+    assert "right [PLAYER 3 PICK  30: GODZILLA 1954]" not in out
+    assert "right [PLAYER 3 PICK  30: GODZILLA GMK]" in out         # and back, past them again
     assert "t3 2 reads 195: 10 173: 0 94: 5" in out                 # half the spins (20 -> 10), held to 4..30
     assert "t1 again: open 0 save used 0" in out                    # a picked teammate is not asked again
-    assert "open4 [PLAYER 4 PICK: RANDOM]" in out
+    assert "open4 [PLAYER 4 PICK  30: RANDOM]" in out
     assert "t4 2" in out or "t4 4" in out                           # RANDOM: GMK or NO ABILITY, the free ones
-    assert "timed 1 open 0" in out                                  # the time ran out on the one shown
+    # PAD-1044: 30 s, counted down; then the one shown, said on the top line a moment, then the ball's line
+    assert "at 20 s: open 1 left 10" in out
+    assert "timed 1 open 0 [PLAYER 1 IS GODZILLA 2000]" in out
+    assert "then [PLAYER 1  BALL %d]" in out
+    # busy under the pick: kept open with no character, its clock stopped; 20 s left after, not dropped
+    assert "busy: open 1 who 2 pick -1" in out
+    assert "back: open 1 [PLAYER 2 PICK  19: GODZILLA 1954]" in out
+    assert "back +18.5 s: open 1" in out
+    assert "back timed 0" in out
+    assert "unlimited [PLAYER 3 PICK: GODZILLA 1954]" in out        # no time limit: no seconds
+    assert "unlimited 10 min: open 1" in out
+    assert "unlimited took 0" in out
 
 
 
@@ -257,7 +291,7 @@ def test_coop_cfg_names_the_shooter_lane_beside_the_action_button():
     elf = open(GZ_ELF, "rb").read()
     assert CP.shooter_lane(elf) == 62
     lines = CP.character_lines(elf, {"pick": True, "list": [{"name": "A", "ability": "action_save"}]})
-    assert lines[:4] == ["pick on", "left 60", "action 34", "lane 62"]
+    assert lines[:5] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62"]
 
 def test_the_pick_step_skips_the_taken_and_wraps_through_random(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
@@ -309,12 +343,13 @@ def test_the_project_keeps_its_characters_beside_its_awards(tmp_path):
     CP.save_award(project, "score", on=False)
     chars = CP.save_characters(project, {"pick": True, "list": [{"name": "godzilla 1954", "ability": "longer_save"},
                                                                 {"name": ""}, "junk"]})
-    assert chars == {"pick": True, "list": [{"name": "GODZILLA 1954", "ability": "longer_save", "picture": ""}]}
+    assert chars == {"pick": True, "time": CP.PICK_TIME,
+                     "list": [{"name": "GODZILLA 1954", "ability": "longer_save", "picture": ""}]}
     CP.save(project, False)                                          # unticked: the choices stay
     assert CP.load_characters(project) == chars
     assert CP.load_awards(project) == {"score": {"on": False}}
     CP.save_characters(project, {"pick": False, "list": []})
-    assert CP.load_characters(project) == {"pick": False, "list": []}
+    assert CP.load_characters(project) == {"pick": False, "time": CP.PICK_TIME, "list": []}
 
 
 def test_the_godzilla_customization_file_ships_beside_the_module():
@@ -346,7 +381,7 @@ def test_godzillas_abilities_and_lines_read_off_its_program():
     assert got["heat_ray"]["cfg"] == "adj:195x50:4:30"
     assert CP.action_button(elf) == 34
     lines = CP.character_lines(elf, CP.read_preset(CP.presets()["godzilla"])["characters"])
-    assert lines[:5] == ["pick on", "left 60", "action 34", "lane 62",
+    assert lines[:6] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62",
                          "character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE"]
     text = CP.cfg_text(elf, None, {"pick": True, "list": [{"name": "A", "ability": "heat_ray"}]})
     assert text.endswith("character adj:195x50:4:30 A|EASIER HEAT RAY\n")

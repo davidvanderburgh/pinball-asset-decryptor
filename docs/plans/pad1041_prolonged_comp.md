@@ -85,5 +85,17 @@ port knows the start menu, which is also every older build PAD-619 ported (49 po
   adds it, and `port_ready` now needs it.
 - Recipes rebuilt for the 14 ports changed.
 
+Proof, round 2 (emulator, hidden, muted; rig kit `C:/tmp/PAD-1041/rig`, batches r9-r23): all twelve show the entry,
+take the pick and start game 1 as Competition (flag 17 already set by the game's own applying of the index):
+Godzilla LE/Pro 1.16, Jaws LE/Pro 1.02, John Wick LE/Pro 1.02, King Kong LE/Pro 0.97 (Competition is index 2),
+Metallica 1.04, X-Men LE/Pro 0.98, Bond 60th LE 1.11. Lettered UNTIL POWERED OFF / ENDS PROLONGED COMPETITION (shots in
+`artifacts/PAD-1041` before/after_index_menu). Two Competition games under it: Jaws Pro, Bond 60th (game 2 began with
+the flag clear, the runtime set it). Turned off again (STANDARD / ENDS PROLONGED COMPETITION picked, `OFF - game 2 ...
+flag 17 was 0`): Jaws Pro, Bond 60th. Found on the way: the lettering needs the runtime's messages armed on a card of
+only this (as Handicap does) and must be set the frame the cursor arrives; King Kong LE crashed once at boot (pc in the
+game's own code under the dispatch) and passed twice after it, so it is the emulator's, not the runtime's. Job-only
+failures (X-Men's credits page, Guided Setup, high-score initials, Bond 60th's after-game MATCH page) were the job's
+stepping and are handled there.
+
 Not offered: Venom, D&D (their own), and the three older builds outside the latest-versions scope (Godzilla Pro 1.15,
 John Wick LE 1.01, Metallica 1.03).

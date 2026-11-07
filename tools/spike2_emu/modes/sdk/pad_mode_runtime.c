@@ -17280,7 +17280,7 @@ static void comp_menu_frame(unsigned *r)
     unsigned idx = (unsigned)pm_port_value(comp.on ? "comp_menu_end_index" : "comp_menu_index", 0);
     unsigned msg = (unsigned)pm_port_value(comp.on ? "comp_menu_end_msg" : "comp_menu_index_msg", 0);
     unsigned n = *count + last;
-    static int room_said, said;
+    static int room_said;
     int was = comp.pending;
     if (creg > 12 || breg > 12 || !idx || !msg || n > cap) return;
     if ((unsigned long)sp != comp_frame_sp || comp_frame_at >= n || list[comp_frame_at] != idx) {   /* a new menu */
@@ -17293,8 +17293,8 @@ static void comp_menu_frame(unsigned *r)
         comp_frame_at = n;
         list[n] = idx;
         *count += 1;
-        if (!said++) say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s)", n + 1,
-                         n + 1, idx, comp_name());
+        say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s; cursor %u)", n + 1,
+            n + 1, idx, comp_name(), r[creg]);
     }
     /* the cursor this frame draws: the press read just now moves it after this point (left back, right on, both
      * wrapping), and the game letters the name as the cursor ARRIVES - so the message is ours from that frame */
@@ -17329,7 +17329,6 @@ static void comp_menu_obj_built(unsigned *r)
           fn("comp_menu_obj_add_fn");
     unsigned char *menu;
     unsigned n;
-    static int said;
     if (reg > 12 || !vec || !add) return;
     menu = (unsigned char *)(unsigned long)r[reg];
     n = (*(unsigned *)(menu + vec + 4) - *(unsigned *)(menu + vec)) / 24u;
@@ -17341,7 +17340,7 @@ static void comp_menu_obj_built(unsigned *r)
     }
     comp_obj_menu = (unsigned long)menu;
     comp_obj_at = n;
-    if (!said++) say("prolonged competition: on the start menu as entry %u of %u (%s)", n + 1, n + 1, comp_name());
+    say("prolonged competition: on the start menu as entry %u of %u (%s)", n + 1, n + 1, comp_name());
 }
 
 static void comp_menu_obj_pick(unsigned *r)

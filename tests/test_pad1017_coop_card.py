@@ -154,9 +154,9 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
     s = settings[0]
     # PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2 (Off/On's 0 and 1 keep their meaning), shown as a number the way GAME ID
     # is, Off to start with
-    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", 3, 0, 0, M.number_kind(AdjustmentTable(elf)))
+    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", 4, 0, 0, M.number_kind(AdjustmentTable(elf)))
     assert s.kind == 2 and len(CP.MENU_HELP) <= 63
-    assert CP.MENU_HELP.startswith("0 Off, 1 Co-op, 2 Team 2v2") and "disable most Insider Connected" in CP.MENU_HELP
+    assert CP.MENU_HELP.startswith("0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1") and "Insider mostly off" in CP.MENU_HELP
     assert s.help == CP.MENU_HELP and s.where == "Adjustments > Machine Settings > Attract Mode"
     raw = bytearray(elf)
     for off, data in writes.items():
@@ -189,7 +189,7 @@ def test_a_spare_the_program_cannot_give_is_passed_over():
     from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
     with open(elf, "rb") as f:
         t = AdjustmentTable(f.read())
-    settings, _w, _c, refused = M.plan_many(t, [(M.COOP_PLAY, 3, (), {"help_text": CP.MENU_HELP, "from_zero": True})])
+    settings, _w, _c, refused = M.plan_many(t, [(M.COOP_PLAY, 4, (), {"help_text": CP.MENU_HELP, "from_zero": True})])
     assert not refused and settings[0].key == M.COOP_PLAY
 
 
@@ -226,7 +226,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     from tests import test_spike2_mode_roster as R
     src = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c"))
     body = R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)")
-    assert "return !while_at || value == 1u || value == 2u;" in body           # no row: always; a row: 1 or 2
+    assert "return !while_at || (value >= 1u && value <= 3u);" in body         # no row: always; a row: 1-3
     gate = R._lift(src, "static int on_agent_begin(unsigned *r)")
     assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")

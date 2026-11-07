@@ -44,17 +44,20 @@ OWN = "%s has co-op play of its own, so the app does not add another."
 NO_PORT = ("The app does not know where %s keeps its players yet, so it cannot give it co-op play.")
 NO_BUTTON = "The game program names no right flipper button, so a teammate could not join."
 #: round 2: the service menu's row (menu_settings.COOP_PLAY): its values, and its help line in the game's own menu.
-#: PAD-1042: three, 0 Off, 1 Co-op, 2 Team 2v2 (the row shows the number; Off/On had 0 and 1, so a pick is kept)
-MENU_VALUES = 3
-MENU_OFF, MENU_COOP, MENU_TEAMS = 0, 1, 2
+#: PAD-1042: four, 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1 (daveyvandy: "a designated option for 2V1"; the row shows
+#: the number; Off/On had 0 and 1 and v1.360.0's row 0-2, so a pick is kept)
+MENU_VALUES = 4
+MENU_OFF, MENU_COOP, MENU_TEAMS, MENU_TEAMS_2V1 = 0, 1, 2, 3
 #: the help names the values and says what they cost (63 characters: the spare help lines' room)
-MENU_HELP = "0 Off, 1 Co-op, 2 Team 2v2; 1-2 disable most Insider Connected"
+MENU_HELP = "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1. 1-3: Insider mostly off"
 #: how a teammate joins, for the tab and the log
 HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
        "a plain Start adds a competing player as always")
 #: PAD-1042: how a team game is played, for the tab and the log
 TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), each Start in the first ball adds the next player: players 1 and 2 "
-             "against players 3 and 4, each team with its own score and progress, the teams taking turns")
+             "against players 3 and 4, each team with its own score and progress, the teams taking turns; at 3 "
+             "(Team 2v1) the same with three players, players 1 and 2 against player 3, who plays both of team 2's "
+             "turns")
 
 
 class CoopError(ValueError):

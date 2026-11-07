@@ -3487,6 +3487,9 @@ PREVIEW_HELP = {
                 "board of its own. Characters work as in co-op: each player picks one at their first ball, "
                 "no two the same. With three players the lone player on team 2 plays both of its turns. "
                 "Insider Connected is off as with 1.\n"
+                "- **3 (Team 2v1):** the same team game for three players: players 1 and 2 against player 3, "
+                "who plays both of team 2's turns each ball so both teams get the same number of balls. A "
+                "fourth Start adds no one, and the higher team score goes on a **TEAM 2V1** board of its own.\n"
                 "- **0 (Off):** the game plays and reports to Insider Connected as it always has, on a card "
                 "with no modes. A card that also carries modes keeps its scores off Insider Connected "
                 "either way.",

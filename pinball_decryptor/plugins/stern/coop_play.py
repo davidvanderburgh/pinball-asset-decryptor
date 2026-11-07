@@ -384,6 +384,10 @@ def _apply(choices, chosen):
 MAX_CHARACTERS = 16
 #: the longest name, and the longest words for what one does, the game's top line shows (the runtime's 28-byte fields)
 MAX_NAME = 27
+#: PAD-1044: the seconds a teammate has to pick (the runtime's COOP_PICK_MS when coop.cfg names none), and the
+#: choices the Characters dialog offers; 0 is no time limit (the Action button takes one)
+PICK_TIME = 30
+PICK_TIMES = (15, 20, 30, 45, 60, 90, 0)
 #: the presets beside this module: ``coop_presets/<title stem>.json`` (the customization file per game)
 PRESET_DIR = "coop_presets"
 
@@ -518,28 +522,38 @@ def clean_name(name):
 
 
 def load_characters(project):
-    """The project's characters: ``{"pick": bool, "list": [{"name", "ability", "picture"}]}`` (``ability`` a key of
-    :data:`ABILITIES` or ``""``; ``picture`` the owner's file, for the pick screens that show one)."""
+    """The project's characters: ``{"pick": bool, "time": seconds, "list": [{"name", "ability", "picture"}]}``
+    (``ability`` a key of :data:`ABILITIES` or ``""``; ``picture`` the owner's file, for the pick screens that show
+    one; ``time`` one of :data:`PICK_TIMES`)."""
     if not project:
-        return {"pick": False, "list": []}
+        return {"pick": False, "time": PICK_TIME, "list": []}
     from ...core import staged_changes
     try:
         raw = staged_changes.load(project).get(STAGED_KEY)
     except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
-        return {"pick": False, "list": []}
+        return {"pick": False, "time": PICK_TIME, "list": []}
     return _characters(raw.get("characters") if isinstance(raw, dict) else None)
+
+
+def pick_time(got):
+    """PAD-1044: the pick's seconds *got* asks for, one of :data:`PICK_TIMES` (:data:`PICK_TIME` when it is none)."""
+    try:
+        t = int(got)
+    except (TypeError, ValueError):
+        return PICK_TIME
+    return t if t in PICK_TIMES else PICK_TIME
 
 
 def _characters(got):
     if not isinstance(got, dict):
-        return {"pick": False, "list": []}
+        return {"pick": False, "time": PICK_TIME, "list": []}
     out = []
     for c in got.get("list") or []:
         if isinstance(c, dict) and clean_name(c.get("name")):
             out.append({"name": clean_name(c.get("name")), "ability": str(c.get("ability") or ""),
                         "picture": str(c.get("picture") or "")})
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
-    out = {"pick": bool(got.get("pick")), "list": out[:MAX_CHARACTERS]}
+    out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
     if theme:
         out["theme"] = {k: str(v) for k, v in theme.items() if k in ("title", "accent", "accent2") and v}
     return out
@@ -568,7 +582,7 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
     if not chars["pick"] or not chars["list"]:
         return []
     by_key = {a["key"]: a for a in abilities(game_elf, sites=sites, values=values)}
-    out = ["pick on"]
+    out = ["pick on", "pick_time %d" % chars["time"]]
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) == 2:
         out.append("left %d" % buttons[0])
@@ -736,11 +750,12 @@ def pick_screens(project, characters=None, words_for=None):
     del MA
     out = []
     n = len(chars["list"])
-    for i in range(n + 1):                    # every word is on the card: the screen's own line stays empty
+    for i in range(n + 1):                    # every word is on the card but the runtime's: the seconds left, PICKED
         out.append(dict(name=SCREEN_NODE % ("Random" if i == n else i + 1),
                         art_rgba=pick_card(project, chars, i, words_for, chars.get("theme")),
                         words=" ", words_name=(SCREEN_NODE % ("Random" if i == n else i + 1)) + "_Words",
-                        x=float(CARD_AT[0]), y=float(CARD_AT[1]), words_at=(20.0, float(CARD_SIZE[1] - 30))))
+                        x=float(CARD_AT[0]), y=float(CARD_AT[1]), words_at=TIMER_WORDS_AT,
+                        words_scale=TIMER_WORDS_SCALE))
     return out
 
 
@@ -813,12 +828,18 @@ def preview(project, characters=None, words_for=None, index=0):
     from PIL import ImageDraw
     d = ImageDraw.Draw(glass)
     d.rounded_rectangle((470, -20, 890, 76), radius=18, fill=(30, 30, 36, 255))     # the game's top bar
-    d.text((680, 30), "PLAYER 1 PICK", fill=(255, 255, 255, 255), anchor="mm", font=MA._font(26))
+    secs = chars["time"]
+    d.text((680, 30), "PLAYER 1 PICK  %d" % secs if secs else "PLAYER 1 PICK", fill=(255, 255, 255, 255),
+           anchor="mm", font=MA._font(26))
     for k in range(4):                                                            # its score panels
         d.rounded_rectangle((30 + k * 330, 612, 330 + k * 330, 760), radius=14, fill=(26, 26, 30, 255))
-    del MA
     art = Image.fromarray(np.asarray(s["art_rgba"], dtype=np.uint8), "RGBA")
     glass.alpha_composite(art, (int(s["x"]), int(s["y"])))
+    if secs:                                    # PAD-1044: the runtime's countdown, where its words line puts it
+        d = ImageDraw.Draw(glass)
+        d.text((int(s["x"]) + TIMER_TEXT_X, int(s["y"]) + TIMER_WORDS_AT[1]), str(secs), fill=(255, 255, 255, 255),
+               anchor="mm", font=MA._font(30))
+    del MA
     buf = io.BytesIO()
     glass.convert("RGB").save(buf, "PNG")
     return buf.getvalue()
@@ -833,6 +854,16 @@ def preview(project, characters=None, words_for=None, index=0):
 #: where the card sits on the 1360x768 glass: under the top bar, above the score panels
 CARD_AT = (40, 86)
 CARD_SIZE = (1280, 516)
+#: PAD-1044: the box in the card's header (card pixels) the runtime's words line counts down in, then says PICKED; a
+#: clock at its left. The game centres the line on its words box (scene_write.screen: (0, -40) .. (card width, 48),
+#: scaled about words_at) with its middle at words_at's y, and draws a short line at about 32 px capitals per unit of
+#: scale (emulator, Godzilla LE 1.16: "16" 52 px tall and PICKED 345 px wide at 1.6): at 0.8 the seconds are about
+#: 26 px tall and PICKED about 172 px wide, inside the box beside the clock
+TIMER_BOX = (880, 20, 1120, 68)
+TIMER_TEXT_X = 1025
+TIMER_WORDS_SCALE = 0.8
+TIMER_WORDS_AT = (round(TIMER_TEXT_X - CARD_SIZE[0] / 2 * TIMER_WORDS_SCALE, 1),
+                  float((TIMER_BOX[1] + TIMER_BOX[3]) // 2))
 #: the default look; a preset may give its own ("theme": {"title", "accent", "accent2"})
 THEME = {"title": "CHOOSE YOUR CHARACTER", "accent": "#ffb400", "accent2": "#ff5a1f"}
 _DISPLAY_FONTS = (r"C:\Windows\Fonts\impact.ttf", "/System/Library/Fonts/Supplemental/Impact.ttf",
@@ -974,6 +1005,7 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     """The pick's card for character *index* (``len(list)`` = RANDOM) as an RGBA array of :data:`CARD_SIZE`."""
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
+    timed = bool(_characters(characters)["time"])
     chars = [dict(c) for c in _characters(characters)["list"]]
     for c_ in chars:
         c_["tag"] = tag_of(c_["name"], [x["name"] for x in chars])
@@ -1012,7 +1044,17 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     hf = _fit(d, th["title"], _DISPLAY_FONTS, W * 0.62, 46 * S)
     d.text((40 * S, 44 * S), th["title"], font=hf, fill=(255, 255, 255, 255), anchor="lm")
     tw = d.textlength(th["title"], font=hf)
-    d.line([(40 * S + tw + 18 * S, 44 * S), (W - 190 * S, 44 * S)], fill=A[:3] + (150,), width=2 * S)
+    rule_end = (TIMER_BOX[0] - 18) * S if timed else W - 190 * S
+    if rule_end > 40 * S + tw + 18 * S:
+        d.line([(40 * S + tw + 18 * S, 44 * S), (rule_end, 44 * S)], fill=A[:3] + (150,), width=2 * S)
+    if timed:                       # PAD-1044: the box the runtime counts the seconds down in, a clock at its left
+        x0, y0, x1, y1 = (v * S for v in TIMER_BOX)
+        d.rounded_rectangle((x0, y0, x1, y1), radius=(y1 - y0) // 2, fill=(6, 8, 14, 255), outline=A2[:3] + (255,),
+                            width=3 * S)
+        cx, cy, r = x0 + 30 * S, (y0 + y1) // 2, 13 * S
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(255, 255, 255, 230), width=3 * S)
+        d.line([(cx, cy), (cx, cy - 8 * S)], fill=(255, 255, 255, 230), width=3 * S)
+        d.line([(cx, cy), (cx + 6 * S, cy + 3 * S)], fill=(255, 255, 255, 230), width=3 * S)
     count = "?? / %02d" % n if rnd else "%02d / %02d" % (index + 1, n)
     cf = _face(_DISPLAY_FONTS, 34 * S)
     d.text((W - 40 * S, 44 * S), count, font=cf, fill=A[:3] + (255,), anchor="rm")

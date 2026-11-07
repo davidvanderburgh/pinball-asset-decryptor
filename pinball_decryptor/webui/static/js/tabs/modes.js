@@ -302,6 +302,11 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, 
         ${s.hand_on && s.hand_note_kind !== "err" ? html`<${Button} size="sm" icon="list" onClick=${onHandLevels}
           title="What each level, -3 to +3, does on this card's game.">Levels…<//>` : null}
       </div>` : null}
+      ${s.comp_shown ? html`<div class="stack modes-coop">
+        <${Check} checked=${s.comp_on} wrap label="Prolonged Competition" title=${s.comp_tip}
+          onChange=${(v) => call("modes.set_prolonged_comp", v)} />
+        ${s.comp_note ? html`<span class=${cx("small", s.comp_note_kind === "err" ? "err-ink" : "muted")}>${s.comp_note}</span>` : null}
+      </div>` : null}
       ${s.idle_shown ? html`<div class="stack modes-coop">
         <${Check} checked=${s.idle_on} wrap label="Inactivity pauses timers" title=${s.idle_tip}
           onChange=${(v) => call("modes.set_idle_pause", v)} />

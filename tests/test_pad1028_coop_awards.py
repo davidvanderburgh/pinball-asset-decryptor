@@ -347,6 +347,26 @@ int main(void)
     assert R._host_run(tmp_path, main) == "[MOST POINTS  PLAYER 2  9,982,980][MOST RAMPS  PLAYER 1  12]"
 
 
+def test_the_cards_show_over_the_bonuss_own_loop():
+    """Round 3 (DoomWalrus666: the awards looked like they were over play; show them over the end-of-ball bonus loop):
+    the game does not draw the HUD during its bonus, so the cards stay at the game's end and the backdrop plays the
+    loop the game's bonus played (recorded at the bus's bonus_end) behind them, at its own crop, given back after."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    disp = R._lift(src, "static void on_event_dispatch(unsigned *r)")
+    assert "r[0] == (unsigned)coop_bonus_id) coop_bonus_end();" in disp
+    bonus = R._lift(src, "static void coop_bonus_end(void)\n{")
+    assert "gbg.name[k]" in bonus and "gbg.crop[k]" in bonus      # the game's own last loop: the bonus's
+    show = R._lift(src, "static void coop_cards_show(unsigned n)")
+    assert show.index("coop_cards_backdrop(coop_bonus_clip)") < show.index("pm_show(coop_card[c], 1);") \
+        < show.index("coop_cards_backdrop(0);")
+    assert "coop_cards_game == chg_game_now() + 1" in show          # once a game
+    back = R._lift(src, "static int coop_cards_backdrop(const char *name)\n{")
+    assert "pm_backdrop(name)" in back and "bd_crop_next" in back and "pm_backdrop(0);" in back
+    assert "bd_crop_next[0] ? bd_crop_next" in R._lift(src, "static void bd_play(unsigned e)")
+    assert "bd_crop_next[0] = 0;" in R._lift(src, "int pm_backdrop(const char *name)")   # a mode's: the port's crop
+    assert "coop_bonus_arm();" in R._lift(src, "static void coop_arm(void)")
+
+
 def test_short_words():
     assert CP.short_words("JET FIGHTER CHAMPION") == "JET FIGHTER CHAMPION"
     assert CP.short_words("GODZILLA, MOTHRA, AND RODAN VS. KING GHIDORAH CHAMPION") == "GODZILLA, MOTHRA, AND RODAN"

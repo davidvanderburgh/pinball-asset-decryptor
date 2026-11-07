@@ -595,6 +595,8 @@ class ModePlan:
     handicap_file: str = ""
     #: PAD-1022: ``idle.cfg`` beside the mode files, inactivity pausing the timers ("" = none)
     idle_file: str = ""
+    #: PAD-1041: ``comp.cfg`` beside the mode files, Prolonged Competition on the start menu ("" = none)
+    comp_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -810,7 +812,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
-         idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0):
+         idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, comp=False, comp_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -846,7 +848,10 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-1033: *handicap* puts ``handicap.cfg`` beside the mode files (a handicap for each player, its levels worked out
     of *game_elf*); with nothing else it is a plan of its own, for *handicap_prof*. *handicap_setting* is the live value
-    of the service menu's HANDICAP row the engine added (0: none, always on)."""
+    of the service menu's HANDICAP row the engine added (0: none, always on).
+
+    PAD-1041: *comp* puts ``comp.cfg`` beside the mode files (Prolonged Competition on the start menu, its flag and
+    captions read off *game_elf*); with nothing else it is a plan of its own, for *comp_prof*."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -887,6 +892,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 result = handicap_plan(project, game_elf, handicap_prof or idle_prof or coop_prof or attract_prof
                                        or variants_prof or sound_modes_prof or picture_prof)
             handicap_into(result, game_elf, scratch, handicap_setting, only=True)
+        if comp:                                     # PAD-1041: Prolonged Competition, alone or with the above
+            if result is None:
+                result = comp_plan(project, game_elf, comp_prof or handicap_prof or idle_prof or coop_prof
+                                   or attract_prof or variants_prof or sound_modes_prof or picture_prof)
+            comp_into(result, game_elf, scratch, only=True)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -972,6 +982,44 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         idle_into(result, scratch, only=False)
     if handicap:                                     # PAD-1033
         handicap_into(result, game_elf, scratch, handicap_setting, only=False)
+    if comp:                                         # PAD-1041
+        comp_into(result, game_elf, scratch, only=False)
+    return result
+
+
+# ---- PAD-1041: Prolonged Competition on the start menu -------------------------------------------
+def comp_plan(project, game_elf, prof):
+    """A plan carrying only Prolonged Competition: no mode, no scene; the runtime and the title's port on p2 with
+    ``comp.cfg`` (:func:`comp_into`)."""
+    from . import prolonged_comp as PCo
+    why = PCo.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows the start menu of"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def comp_into(result, game_elf, scratch, only):
+    """``comp.cfg`` for *result*'s card: the Competition flag and the menu's captions read off *game_elf*; *only* when
+    the card carries no modes (the runtime then arms this alone)."""
+    from . import prolonged_comp as PCo
+    why = PCo.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        text = PCo.cfg_text(game_elf, only)
+    except PCo.CompError as e:
+        raise ModeWriteError(str(e)) from None
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, PCo.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.comp_file = path
+    result.lines.append("prolonged competition: %s" % PCo.HOW)
     return result
 
 
@@ -1738,6 +1786,11 @@ def p2_payload(result, out_dir, project=None):
             from . import handicap as HC
             dst = os.path.join(out_dir, HC.CFG_NAME)
             shutil.copyfile(result.handicap_file, dst)
+            extras.append(dst)
+        if getattr(result, "comp_file", ""):           # PAD-1041: comp.cfg, Prolonged Competition
+            from . import prolonged_comp as PCo
+            dst = os.path.join(out_dir, PCo.CFG_NAME)
+            shutil.copyfile(result.comp_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

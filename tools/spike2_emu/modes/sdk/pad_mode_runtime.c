@@ -15408,6 +15408,43 @@ static void coop_ball_find(void)
     coop_ball_msg = coop_msg_find("BALL %d");
 }
 
+/* PAD-1043 (DoomWalrus666, Godzilla: "Player one's score is highlighted in yellow regardless of which players turn it
+ * is"): the game plays player 1, so its score panel lit player 1's box all game. The panel's own calls of the
+ * player-up getter (portcoop.py: `site coop_panel_lit`, the frame update's - its box lit gold, the others grey - and
+ * `site coop_panel_up[_n]`, its "player changed" check, which turns the panel to that player's box) are wrapped where
+ * they are made (hook_call), so the panel alone hears the teammate up; every other caller still hears player 1. */
+static const char *const COOP_PANEL_SITES[] = { "coop_panel_lit", "coop_panel_up", "coop_panel_up_2", "coop_panel_up_3",
+                                                "coop_panel_up_4", 0 };
+static unsigned (*coop_panel_game)(unsigned, unsigned, unsigned, unsigned);
+
+/* the box the panel lights: the teammate up in a co-op game (tests lift it verbatim) */
+static unsigned coop_panel_box(unsigned n, unsigned turn, unsigned game)
+{
+    return n >= 2 && turn >= 1 && turn <= n ? turn : game;
+}
+
+static unsigned coop_panel_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned game = coop_panel_game(r0, r1, r2, r3);
+    return coop_panel_box(pm_in_game() ? coop_teammates() : 0, coop.turn, game);
+}
+
+static void coop_panel_arm(void)
+{
+    int i, armed = 0;
+    unsigned at;
+    for (i = 0; COOP_PANEL_SITES[i]; i++) {
+        if (!site(COOP_PANEL_SITES[i])) continue;
+        if (!fn(COOP_PANEL_SITES[i]) || !(at = hook_call(fn(COOP_PANEL_SITES[i]), (void *)coop_panel_wrap))) {
+            say("co-op: the score panel's %s could not be wrapped - it lights player 1's box", COOP_PANEL_SITES[i]);
+            continue;
+        }
+        coop_panel_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
+        armed++;
+    }
+    if (armed) say("co-op: the score panel lights the teammate up's box (%d call%s)", armed, armed == 1 ? "" : "s");
+}
+
 static void coop_turn_show(void)
 {
     char words[40];
@@ -16456,6 +16493,7 @@ static void coop_arm(void)
         return;
     }
     coop.on = 1;
+    coop_panel_arm();                                         /* PAD-1043 */
     coop_ball_find();
     if (coop_ball_msg < 0) say("co-op: the game's \"BALL %%d\" line was not found - the screen does not say whose turn it is");
     if (!chg_scores_on) chg_scores_arm();                     /* the team's own boards (PAD-640/663) */

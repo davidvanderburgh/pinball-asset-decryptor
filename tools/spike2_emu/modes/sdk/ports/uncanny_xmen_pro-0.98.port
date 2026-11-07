@@ -537,6 +537,11 @@ site  coop_add_player    0x0019d764 0xe92d4038 0xe3a00051
 data  coop_player        0x005ed404
 data  coop_players       0x0065efd0
 
+# ---- PAD-1043: co-op play - the score panel's calls of the player-up getter (portcoop.py) ----
+site  coop_panel_lit         0x00107b28 0xeb025725 0xe3a04001
+site  coop_panel_up          0x001075f0 0xeb025873 0xe5d43065
+site  coop_panel_up_2        0x0010af84 0xeb024a0e 0xe5d43065
+
 # ---- PAD-1017: the end-of-game high scores, for co-op play's own boards (portchallenge.scores_lines) ----
 site  challenge_scores       0x0035601c 0xe92d4ff0 0xe24dd0bc
 site  challenge_score_entry  0x00355550 0xe1a03000 0xe3090404

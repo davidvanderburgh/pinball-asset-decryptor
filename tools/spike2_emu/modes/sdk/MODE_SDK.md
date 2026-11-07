@@ -6150,6 +6150,14 @@ or the game's end). So the game ends after the last teammate's last ball.
   challenge game keeps its own (PAD-640/663: the record in `/dump/pad_challenge_scores`, HIGHEST SCORES' first entry
   pointed at it for the game's end, the game's own records shut for that game). The attract champion pages show
   each board that has a champion.
+- **The lit score box (PAD-1043, DoomWalrus666):** the game lights and enlarges the player up's score box, so with
+  the game playing player 1 it lit player 1's box all game. The score panel's own calls of the framework's player-up
+  getter (`movw/movt ; ldrb r0, [<player>] ; bx lr`) are wrapped where they are made (`hook_call`) and answer the
+  teammate up during a co-op game; every other caller still hears player 1. The panel that lights one box of four
+  this way (Godzilla, Avengers, Jurassic Park The Pin, X-Men) is found by its frame update - the getter, then a
+  loop to 5 testing `box == up` (`rsb ; clz ; lsr #5`) and setting a Text colour (vtable +0x40) - and its "player
+  changed" checks (the getter, then `ldrb rA, [this, #count + 1] ; cmp rA, r0`; X-Men has two). No other title's
+  program has a panel of this shape, and those get no lines.
 
 Port lines (portcoop.py; one framework shape on every Spike 2 build, the older ones' count at +0x50 of a struct):
 
@@ -6157,6 +6165,8 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
     site  coop_add_player     add a player (wrapped)
     data  coop_player         the player up's byte; the ball in play is the next one
     data  coop_players        the count of players' byte
+    site  coop_panel_lit      (PAD-1043) the score panel's frame update's call of the player-up getter (hook_call)
+    site  coop_panel_up[_n]   (PAD-1043) its "player changed" checks' calls (hook_call; _2 .. _4 for more than one)
 
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).

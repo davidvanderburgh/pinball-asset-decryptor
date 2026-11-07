@@ -682,6 +682,10 @@ site  coop_add_player    0x004139b4 0xe92d4038 0xe3a00051
 data  coop_player        0x006adb98
 data  coop_players       0x0075eaa4
 
+# ---- PAD-1043: co-op play - the score panel's calls of the player-up getter (portcoop.py) ----
+site  coop_panel_lit         0x00160e9c 0xeb0acadc 0xe5953000
+site  coop_panel_up          0x00160d38 0xeb0acb35 0xe5d43349
+
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 data  message_table          0x006e3a30
 value coop_ball_msg          1255

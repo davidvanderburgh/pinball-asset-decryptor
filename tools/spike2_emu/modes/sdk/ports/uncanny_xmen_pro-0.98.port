@@ -556,3 +556,15 @@ site  challenge_pages_0     0x00050f28 0xe92d4ff0 0xe1a05003
 
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 value coop_ball_msg          1255
+# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
+site  comp_menu_frame        0x000473dc 0xe0833105 0xe513317c
+value comp_menu_frame_list_at    300
+value comp_menu_frame_count_at   68
+value comp_menu_frame_count_last 0
+value comp_menu_frame_cap        5   # the game-mode table's entries
+value comp_menu_frame_cursor_reg 5
+value comp_menu_frame_buttons_reg 6
+value comp_menu_index            3   # COMPETITION
+value comp_menu_index_msg        1920
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1915

@@ -807,7 +807,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          log=None, end_sound="choose", own_sounds=None, progress=None, stock_font=b"", hud_font=b"", stock_select=b"",
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
-         attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, idle=False,
+         attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
@@ -836,7 +836,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     *attract_prof*.
 
     PAD-1017: *coop* puts co-op play's ``coop.cfg`` beside the mode files (the right flipper button read off
-    *game_elf*); with nothing else it is a plan of its own, for *coop_prof*.
+    *game_elf*); with nothing else it is a plan of its own, for *coop_prof*. *coop_setting* (round 2) is the live
+    value of the service menu's CO-OP PLAY row the engine added, when the menu switches co-op.
 
     PAD-1022: *idle* puts ``idle.cfg`` beside the mode files (inactivity pauses the game's timers); with nothing
     else it is a plan of its own, for *idle_prof*, and the file says the card has no modes."""
@@ -869,7 +870,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             if result is None:
                 result = coop_plan(project, game_elf, coop_prof or attract_prof or variants_prof
                                    or sound_modes_prof or picture_prof)
-            coop_into(result, game_elf, scratch, stock_hud=stock_hud, stock_font=stock_font)
+            coop_into(result, game_elf, scratch, coop_setting, only=True, stock_hud=stock_hud, stock_font=stock_font)
         if idle:                                     # PAD-1022: inactivity pausing the timers, alone or with the above
             if result is None:
                 result = idle_plan(project, game_elf, idle_prof or coop_prof or attract_prof or variants_prof
@@ -955,7 +956,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     result.sounds_file = sound_modes or ""
     result.picture_file = picture or ""
     if coop:                                         # PAD-1017
-        coop_into(result, game_elf, scratch)          # PAD-1031: the pick's screens went in with the modes' build
+        coop_into(result, game_elf, scratch, coop_setting)   # PAD-1031: the pick's screens went in with the modes' build
     if idle:                                         # PAD-1022
         idle_into(result, scratch, only=False)
     return result
@@ -1008,10 +1009,11 @@ def coop_plan(project, game_elf, prof):
     return ModePlan(project=project, profile=prof, port=port, build=None)
 
 
-def coop_into(result, game_elf, scratch, stock_hud=b"", stock_font=b""):
-    """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*. PAD-1031: the pick's
-    screens go into the HUD scene - with the modes' own when *result* built them (mode_assets.build), else here from
-    *stock_hud* - and coop.cfg names the scene."""
+def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", stock_font=b""):
+    """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*, and (round 2) the
+    service menu's CO-OP PLAY value *setting* when it switches co-op. PAD-1031: the pick's screens go into the HUD
+    scene - with the modes' own when *result* built them (mode_assets.build), else here from *stock_hud* - and
+    coop.cfg names the scene."""
     from . import coop_play as CP
     from . import scene_write as SW
     why = CP.title_refusal(result.profile)
@@ -1036,7 +1038,7 @@ def coop_into(result, game_elf, scratch, stock_hud=b"", stock_font=b""):
             result.replaced.append(("%s/%s" % (result.profile.game_dir, rel), src))
     try:
         text = CP.cfg_text(game_elf, CP.load_awards(project), CP.load_characters(project),     # PAD-1028/1031
-                           CP.port_sites(result.profile), CP.port_values(result.profile))
+                           CP.port_sites(result.profile), CP.port_values(result.profile), setting=setting, only=only)
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
     except CP.CoopError as e:
@@ -1047,6 +1049,10 @@ def coop_into(result, game_elf, scratch, stock_hud=b"", stock_font=b""):
         f.write(text)
     result.coop_file = path
     result.lines.append("co-op play: %s" % CP.HOW)
+    if setting:
+        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY); %s" % (
+            "Insider Connected is off only while it is On" if only
+            else "the card's modes keep its scores off Insider Connected either way"))
     got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
     result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))
     got = [line.split(" ", 2)[2].split("|")[0] for line in text.splitlines() if line.startswith("character ")]

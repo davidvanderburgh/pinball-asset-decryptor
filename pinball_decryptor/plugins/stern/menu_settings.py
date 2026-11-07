@@ -66,6 +66,8 @@ EDITION = "edition"
 BRIGHTNESS = "brightness"
 CONTRAST = "contrast"
 SATURATION = "saturation"
+#: PAD-1017 round 2: co-op play switched in the service menu (:mod:`.coop_play`): Off/On (stored 0, 1)
+COOP_PLAY = "coop_play"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
 #: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
 #: BOOT SCREEN and 70TH BOOT SCREEN, which is where an operator already picks how the game looks.
@@ -77,6 +79,7 @@ SETTINGS = {
     BRIGHTNESS: (None, "BRIGHTNESS", "Brightness", 11),
     CONTRAST: (None, "CONTRAST", "Contrast", 11),
     SATURATION: (None, "SATURATION", "Saturation", 11),
+    COOP_PLAY: (None, "CO-OP PLAY", "Co-op Play", 16),
 }
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
@@ -106,6 +109,8 @@ class MenuSetting:
     category: int           # the page that lists it
     default: int = 1        # the value a fresh store starts at
     where: str = ""         # PAD-724: where the operator finds it ("Adjustments > ...")
+    low: int = 1            # PAD-1017: the lowest value stored (0 for an Off/On one: 0 Off, 1 On)
+    kind: int = 0           # PAD-1017: the display kind written (an Off/On one's), 0 when left as it was
 
 
 @dataclass(frozen=True)
@@ -241,6 +246,8 @@ ANY_MENU_PATH = {
                 "Adjustments on a game whose Adjustments have that page",
     EDITION: "Adjustments > Machine Settings > Attract Mode, or at the end of Standard "
              "Adjustments on a game whose Adjustments have that page",
+    COOP_PLAY: "Adjustments > Machine Settings > Attract Mode, or at the end of Standard "
+               "Adjustments on a game whose Adjustments have that page",
 }
 
 
@@ -433,14 +440,33 @@ def spare(table, taken=()):
     return out
 
 
-def plan(table, key, values, names=(), ad=None, default=1, help_text=None):
+#: PAD-1017: the descriptor word saying how the menu shows a value (2 a number, 9 Yes/No, 1 Off/On - CUSTOM MESSAGE's,
+#: values 0 and 1, on every latest build); only the 44-byte descriptors have it
+OFF_KIND = 0x24
+ONOFF_ROW = "AD_CUSTOM_MESSAGE"
+
+
+def onoff_kind(table):
+    """The display kind of the game's own Off/On row (CUSTOM MESSAGE), or raise :class:`MenuSettingError`."""
+    if table.elem != 44 or ONOFF_ROW not in table.by_name:
+        raise MenuSettingError("the game has no Off/On setting to show this one like")
+    i = table.by_name[ONOFF_ROW]
+    desc = table._off(table.table_va + i * table.elem)
+    low, high, kind = (struct.unpack_from("<I", table.data, desc + o)[0] for o in (OFF_MIN, OFF_MAX, OFF_KIND))
+    if (low, high) != (0, 1) or not 0 < kind < 64:
+        raise MenuSettingError("the game's own Off/On setting reads %d..%d, kind %d" % (low, high, kind))
+    return kind
+
+
+def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff=False):
     """``(MenuSetting, {file offset: bytes}, CategoryTable or None)``: the same-size writes that
     make setting *key* (values 1..*values*, its help naming *names*), and the category table to
     give one more record (:func:`table_writes`) - ``None`` when a previous Write already did. Raises
     :class:`MenuSettingError` when this program cannot take it (the reason is the message).
     PAD-537: *ad* is the adjustment to take over (a picture setting's, :func:`plan_many` picks
     one), *default* the value a fresh store starts at, *help_text* a help line of the setting's
-    own in place of the names."""
+    own in place of the names. PAD-1017: *onoff* shows the two values as Off and On, the way the game's own CUSTOM
+    MESSAGE does (stored 0 and 1; *default* still counts from 1: 1 Off, 2 On)."""
     from . import menu_visibility as MV
     if key not in SETTINGS:
         raise MenuSettingError("no such setting: %s" % key)
@@ -454,6 +480,10 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None):
         raise MenuSettingError("a setting of ours offers 2 to %d values, not %d" % (ceiling, values))
     if not 1 <= int(default) <= values:
         raise MenuSettingError("a default of %s is not one of the values 1 to %d" % (default, values))
+    if onoff and values != 2:
+        raise MenuSettingError("an Off/On setting has two values, not %d" % values)
+    kind = onoff_kind(table) if onoff else 0
+    low = 0 if onoff else 1
     if ad not in table.by_name:
         raise MenuSettingError("the game has no %s to take over" % ad)
     i = table.by_name[ad]
@@ -503,9 +533,11 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None):
         row[0]: row_caption.encode("ascii") + b"\x00" * (row_room + 1 - len(row_caption)),
         table._off(help_va): text.encode("ascii", "replace") + b"\x00" * (help_room + 1 - len(text)),
     }
-    for off, v in ((OFF_DEFAULT, int(default)), (OFF_MIN, 1), (OFF_MAX, values), (OFF_STEP, 1)):
+    for off, v in ((OFF_DEFAULT, int(default) - 1 + low), (OFF_MIN, low), (OFF_MAX, values - 1 + low),
+                   (OFF_STEP, 1)) + (((OFF_KIND, kind),) if kind else ()):
         writes[desc + off] = struct.pack("<i", v)
-    setting = MenuSetting(key, i, row_caption, text, values, live, category, int(default), cat.where(category))
+    setting = MenuSetting(key, i, row_caption, text, values, live, category, int(default) - 1 + low,
+                          cat.where(category), low, kind)
     return setting, writes, (None if cat.has(category, i) else cat)
 
 
@@ -541,12 +573,19 @@ def plan_many(table, wanted):
                 refused[key] = ("the game has no spare setting left for %s (the card's other menu "
                                 "settings of ours use them)" % caption)
                 continue
-            ad = free[0]
-        try:
-            setting, w, c = plan(table, key, values, names, ad=ad, **opts)
-        except MenuSettingError as e:
-            refused[key] = str(e)
+        # PAD-1017: a spare one this program cannot give (Iron Maiden Pro 1.18's first shares its row caption) is passed
+        # over for the next
+        tries = free if row in pooled else [None]
+        setting = None
+        for ad in tries:
+            try:
+                setting, w, c = plan(table, key, values, names, ad=ad, **opts)
+                break
+            except MenuSettingError as e:
+                refused[key] = str(e)
+        if setting is None:
             continue
+        refused.pop(key, None)
         taken.add(setting.id)
         settings.append(setting)
         writes.update(w)
@@ -586,8 +625,11 @@ def check(raw, setting):
         row = _row_caption_line(t, setting.id)
     except Exception as ex:                                   # noqa: BLE001
         return ["the program does not read back (%s)" % ex]
-    if (e["default"], e["min"], e["max"], e["step"]) != (setting.default, 1, setting.values, 1):
+    if (e["default"], e["min"], e["max"], e["step"]) != (setting.default, setting.low,
+                                                          setting.values - 1 + setting.low, 1):
         bad.append("its range reads %d..%d" % (e["min"], e["max"]))
+    if setting.kind and struct.unpack_from("<I", raw, desc + OFF_KIND)[0] != setting.kind:
+        bad.append("it does not show Off and On")
     if menu_label(t, setting.id) != SETTINGS[setting.key][1]:
         bad.append("its caption reads \"%s\"" % menu_label(t, setting.id))
     if row is None or row[1] != setting.caption:

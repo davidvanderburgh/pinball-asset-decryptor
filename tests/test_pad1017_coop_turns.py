@@ -27,6 +27,13 @@ static void coop_scores_same(unsigned n) { (void)n; }
 static void coop_awards_begin(void) {}                /* PAD-1028: the awards (test_pad1028_coop_awards.py) */
 static void coop_awards_read(unsigned t) { (void)t; }
 static void coop_awards_end(unsigned n) { (void)n; }
+static struct { int open; unsigned who; } pk;               /* PAD-1031: the characters' pick (test_pad1031_coop_characters.py) */
+static void coop_pick_say(void) {}
+static void coop_pick_open(unsigned t) { (void)t; }
+static void coop_chars_begin(void) {}
+static void coop_chars_turn(void) {}
+static void coop_cache_let_go(void) {}
+static int coop_switched_on(void) { return 1; }          /* round 2: CO-OP PLAY says On (test_pad1017_coop_lines.py) */
 /* the framework's own, modelled */
 static unsigned game_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {

@@ -629,6 +629,13 @@ class App:
             pass
 
     def _on_close(self):
+        # ONCE.  An update's quit runs this itself and then closes the window
+        # (_close_for_update), and the window's own close runs it again; a
+        # second emulator shutdown would go through wsl.exe and boot the VM
+        # the first one has just shut down.
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         # THE SESSION'S STATE IS WRITTEN FIRST, BEFORE ANYTHING THAT BLOCKS.
         # It used to be written after the emulator shutdown below, and that
         # shutdown runs through wsl.exe and is bounded in TENS of seconds - so
@@ -673,6 +680,24 @@ class App:
             self._restart_wsl_for_update()
         # A question still open on the page must not hold the loop.
         self.ctx.dialogs.cancel_all()
+
+    def _close_for_update(self):
+        """An update's quit: close down as the window's X does, then end the
+        process, which the update is waiting for.
+
+        PAD-1032 (David: "Trying to restart my pad app after update locally
+        and it never does").  In the web UI :meth:`_on_close` is what the
+        window's close RUNS - it does not close the window.  The old in-app
+        update never noticed, because its installer force-closes the app
+        (/FORCECLOSEAPPLICATIONS); Restart to update's swap helper only waits
+        for this process to exit, so the app sat there with its window up
+        and the helper gave up after three minutes.  Same for the macOS swap,
+        which waits for the pid with no limit at all."""
+        self._on_close()
+        host = getattr(getattr(self, "ctx", None), "host", None)
+        quit_ = getattr(host, "quit_for_update", None)
+        if quit_ is not None:
+            quit_()
 
     # ------------------------------------------------------------------
     # Queue polling — bridge background threads to the UI loop.
@@ -6010,7 +6035,7 @@ class App:
             f"Restarting into v{version} - the app will close and reopen "
             "updated.", "info")
         self._restart_wsl_on_close = True
-        self._on_close()
+        self._close_for_update()
         return True
 
     def _install_update(self, version, installer):
@@ -6144,7 +6169,7 @@ class App:
             return
         self.window.append_log(
             f"Installing v{version} and restarting…", "success")
-        self._on_close()
+        self._close_for_update()
 
     def _finish_appimage_update(self, dialog, path, version, ask=True):
         """Linux: the download IS the new app — make it runnable and offer
@@ -6201,7 +6226,7 @@ class App:
             return
         self.window.append_log(f"Started v{version} — closing this window.",
                                "info")
-        self._on_close()
+        self._close_for_update()
 
     def _freshest_update(self, version, installer):
         """``(version, installer)`` to actually install, re-checked now.
@@ -6298,7 +6323,7 @@ class App:
             f"Installing v{version} — the app will close and reopen "
             f"updated.", "info")
         self._restart_wsl_on_close = True
-        self._on_close()
+        self._close_for_update()
 
     def _restart_wsl_for_update(self):
         """Quit-time half of an in-app update: shut WSL down so the updated

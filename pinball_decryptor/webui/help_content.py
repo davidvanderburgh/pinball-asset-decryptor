@@ -3421,14 +3421,23 @@ PREVIEW_HELP = {
                 "name and what it does, the flippers move to the next one (one another teammate has is "
                 "skipped), the Action button takes it, and after 20 seconds the one shown is taken. "
                 "RANDOM picks one nobody has. **Picture…** gives a character a picture of your own "
-                "(without one it gets a panel with its name), and the dialog previews what the machine "
-                "shows. A character's ability holds while its teammate is up: on every game a longer "
-                "ball save and a ball save on two quick presses of the Action button; on Godzilla also "
-                "an easier heat ray, easier battles, easier Building Multiball, double power-ups, an "
-                "ally lit at the pick, 4 jets or 4 tanks destroyed at the pick, a battle shot spotted "
-                "with two quick Action presses, and tier 2 open once a tier-1 battle has started. Only "
-                "the abilities the game can have are offered. On Godzilla, **Load Godzilla's set** puts "
-                "in eleven characters, one for each ability; rename them as you like.",
+                "(without one it gets a panel with its name), **Pictures from folder…** takes a whole "
+                "set at once, and the dialog previews what the machine shows. A character's ability "
+                "holds while its teammate is up: on every game a longer ball save and a ball save on two "
+                "quick presses of the Action button; on Godzilla also an easier heat ray, easier battles, "
+                "easier Building Multiball, double power-ups, an ally lit at the pick, 4 jets or 4 tanks "
+                "destroyed at the pick, a battle shot spotted with two quick Action presses, and tier 2 "
+                "open once a tier-1 battle has started. Only the abilities the game can have are offered. "
+                "On Godzilla, **Load Godzilla's set** puts in eleven characters, one for each ability; "
+                "rename them as you like.",
+                "**Switch it on and off in the service menu**, under the tick, gives the game's own "
+                "menu a **CO-OP PLAY** row instead (Adjustments > Machine Settings > Attract Mode, or "
+                "at the end of Standard Adjustments), Off to start with:\n\n"
+                "- **On:** teammates join as above, and most Insider Connected features are off: the "
+                "card's scores, high scores and achievements stay on the machine.\n"
+                "- **Off:** the game plays and reports to Insider Connected as it always has, on a card "
+                "with no modes. A card that also carries modes keeps its scores off Insider Connected "
+                "either way.",
             ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "

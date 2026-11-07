@@ -326,7 +326,7 @@ def make_clips(jobs, ffmpeg, workers=CLIP_WORKERS, progress=None):
     lock = threading.Lock()
 
     def one(item):
-        job, path = item
+        job, path, alike = item
         tmp = "%s.%d.%d.tmp.mp4" % (path[:-4], os.getpid(), threading.get_ident())
         try:
             _encode_clip(job, tmp, ffmpeg)
@@ -338,22 +338,30 @@ def make_clips(jobs, ffmpeg, workers=CLIP_WORKERS, progress=None):
                 except OSError:
                     pass
         with lock:
-            done[0] += 1
+            done[0] += alike
             if progress is not None:
                 progress(done[0], len(jobs), "Making the modes' clips (%d of %d)..."
                          % (done[0], len(jobs)))
         return path
 
+    # PAD-1030: two clips of the same content (one video under two names, or two files alike) share a cache path;
+    # it is made once, or the two encodes race to rename onto it and Windows refuses the second ("Access is denied")
+    by_path = {}
+    for job, path in todo:
+        by_path.setdefault(path, []).append(job)
     if todo:
-        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo)))) as pool:
-            futures = [(job, pool.submit(one, (job, path))) for job, path in todo]
+        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(by_path)))) as pool:
+            futures = [(alike, pool.submit(one, (alike[0], path, len(alike)))) for path, alike in by_path.items()]
             first_error = None
-            for job, fut in futures:
+            for alike, fut in futures:
                 try:
-                    made[job] = fut.result()
+                    path = fut.result()
                 except Exception as e:                      # noqa: BLE001
                     if first_error is None:
                         first_error = e
+                    continue
+                for job in alike:
+                    made[job] = path
         if first_error is not None:
             if scratch:
                 shutil.rmtree(scratch, ignore_errors=True)

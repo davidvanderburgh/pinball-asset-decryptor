@@ -797,7 +797,10 @@ def refresh(project):
     """Every blocks mode's C brought up to what its blocks make NOW, before a build compiles it: the C is written
     only when the blocks are saved, so a mode saved by an older app kept that app's translation (PAD-457: the claim
     of the game's mini-wizards a mode hands out). Only a C that differs is written; the blocks are not touched, and
-    one that cannot be read is left for the build to report. Returns the slugs written."""
+    one that cannot be read is left for the build to report. Returns the slugs written.
+    PAD-1030: its assets.json too (:func:`_sync_assets`, written only when it differs) - the clips and sounds the build
+    carries. A Bond owner's two modes, saved by v1.351.0 (which kept 12 clips), still held 12 there after the update:
+    the 13th, each mode's loop behind the HUD, was never put on the card, and the game's own video showed instead."""
     from . import code_modes as CM
     out = []
     for slug in CM.code_slugs(project) if project else []:
@@ -808,6 +811,10 @@ def refresh(project):
             text = to_c(program, slug)
         except Exception:                               # noqa: BLE001 - never a build broken by this
             continue
+        try:
+            _sync_assets(project, slug, program)
+        except Exception:                               # noqa: BLE001 - the build reports an assets.json it cannot read
+            pass
         folder = MP.mode_folder(project, slug)
         src = os.path.join(folder, slug + ".c")
         if program["hud"]["on"]:

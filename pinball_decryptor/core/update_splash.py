@@ -232,16 +232,18 @@ $S.scoreBlock = $score; $S.score = 0; $S.scoreShown = -1
 # fixed walls: the outlane guides down to the flippers and the slingshots
 $S.segs = @(
   (Seg 1 112 110 186 0), (Seg 399 112 290 186 0),
-  (Seg 62 104 92 162 6), (Seg 338 104 308 162 6),
-  (Seg 62 104 62 150 0), (Seg 62 150 92 162 0),
-  (Seg 338 104 338 150 0), (Seg 338 150 308 162 0))
+  (Seg 66 86 94 144 6), (Seg 334 86 306 144 6),
+  (Seg 66 86 66 130 0), (Seg 66 130 94 144 0),
+  (Seg 334 86 334 130 0), (Seg 334 130 306 144 0))
 foreach ($g in $S.segs[0..1]) {
   $ln = New-Object System.Windows.Shapes.Line
   $ln.X1 = $g.x1; $ln.Y1 = $g.y1; $ln.X2 = $g.x2; $ln.Y2 = $g.y2
   $ln.Stroke = (Brush '#3B5A8C'); $ln.StrokeThickness = 3; $ln.StrokeStartLineCap = 'Round'; $ln.StrokeEndLineCap = 'Round'
   Add-Shape $ln 2
 }
-$slingPts = @(@(@(62, 104), @(62, 150), @(92, 162)), @(@(338, 104), @(338, 150), @(308, 162)))
+# clear of the guide rails by a ball and a half: the lane under a sling
+# must let the ball down to the flipper (David: it pocketed there)
+$slingPts = @(@(@(66, 86), @(66, 130), @(94, 144)), @(@(334, 86), @(334, 130), @(306, 144)))
 for ($i = 0; $i -lt 2; $i++) {
   $sl = New-Object System.Windows.Shapes.Polygon
   $sl.Points = Pts $slingPts[$i]
@@ -337,6 +339,7 @@ Add-Shape $ball 8
 $S.ball = $ball
 $S.rnd = New-Object System.Random
 $S.x = 380.0; $S.y = 14.0; $S.vx = -2.5; $S.vy = 0.5; $S.r = 7.0; $S.wait = 0; $S.slow = 0
+$S.markX = 0.0; $S.markY = 0.0; $S.markT = 0
 
 function Plunge {
   $S.x = 380.0; $S.y = 14.0; $S.vx = -(2.0 + 2.5 * $S.rnd.NextDouble()); $S.vy = 0.3; $S.slow = 0
@@ -431,6 +434,13 @@ function Step {
     $sp = [Math]::Sqrt($S.vx * $S.vx + $S.vy * $S.vy)
     if ($sp -lt 0.6) { $S.slow++ } else { $S.slow = 0 }
     if ($S.slow -gt 50) { $S.vy = $S.vy - 4; $S.vx = $S.vx + ($S.rnd.NextDouble() - 0.5) * 3; $S.slow = 0 }
+    # a ball that has gone nowhere for 3 s is pocketed somewhere: plunge again
+    $S.markT++
+    if ($S.markT -ge 180) {
+      $dx = $S.x - $S.markX; $dy = $S.y - $S.markY
+      if ($dx * $dx + $dy * $dy -lt 400) { $S.wait = 20; $S.y = 400; $S.history.Clear() }
+      $S.markX = $S.x; $S.markY = $S.y; $S.markT = 0
+    }
     if ($S.y -gt 234) { $S.wait = 30; $S.y = 400; $S.history.Clear() }
   }
   # the lights

@@ -3215,6 +3215,14 @@ class App:
 
     def _import_inspect_worker(self, zip_path, assets_dir):
         """Worker: work out what the pack would do here, then ask."""
+        # PAD-1050: a file of modes (the Modes tab's Save to a file...) is not a
+        # mod pack: judged as one, none of its files "belong to this extract"
+        # and the box blamed the card
+        about = modpack.modes_file_about(zip_path)
+        if about is not None:
+            self.root.after(0, lambda: self._offer_modes_file(
+                zip_path, about, "Import Mod Pack"))
+            return
         try:
             plan = modpack.inspect_mod_pack(zip_path, assets_dir)
         except Exception as e:
@@ -3224,6 +3232,39 @@ class App:
             return
         self.root.after(0, lambda: self._confirm_import(
             zip_path, assets_dir, plan))
+
+    def _offer_modes_file(self, path, about, where):
+        """PAD-1050, main thread: ``path`` (a zip, or a folder one was unzipped
+        into: :func:`modpack.modes_file_about`) is a file of modes picked on
+        the Mod Pack tab. Say so, and load it on the Modes tab when asked."""
+        is_zip = not about.get("folder")
+        what = ("This zip is a file of modes, not a mod pack." if is_zip else
+                "This folder holds a file of modes, unzipped, not an extract.")
+        modes = None
+        if hasattr(self.window, "service"):
+            modes = self.window.service("modes")
+            if modes is not None and not getattr(modes, "_visible", False):
+                modes = None
+        text = "%s %s\n\nModes are loaded on the Modes tab, with Load from a file..." % (
+            what, modpack.modes_file_words(about))
+        if modes is None:
+            messagebox.showinfo(where, text)
+            return
+        if not messagebox.askyesno(where, text + "\n\nLoad them into this project now?"):
+            return
+        src = path
+        if not is_zip:
+            import tempfile
+            src = os.path.join(tempfile.mkdtemp(prefix="pad-modes-"),
+                               os.path.basename(os.path.normpath(path)) + ".zip")
+            try:
+                modpack.zip_modes_folder(about["folder"], src)
+            except OSError as e:
+                messagebox.showerror(where, "Could not read the modes in %s: %s"
+                                     % (path, e))
+                return
+        self.window.select_tab("modes")
+        modes.load_file(src)
 
     def _confirm_import(self, zip_path, assets_dir, plan):
         """Main thread: the import confirmation, spelling out the mismatch."""
@@ -3374,6 +3415,13 @@ class App:
             return
         source_dir = os.path.normpath(source_dir)
         target_dir = os.path.normpath(target_dir)
+        # PAD-1050: an unzipped file of modes is no extract; compared as one it
+        # carried nothing and said only that nothing differed
+        for folder in (source_dir, target_dir):
+            about = modpack.modes_file_about(folder)
+            if about is not None:
+                self._offer_modes_file(folder, about, "Transfer Mods")
+                return
         if os.path.normcase(source_dir) == os.path.normcase(target_dir):
             messagebox.showwarning(
                 "Same folder",

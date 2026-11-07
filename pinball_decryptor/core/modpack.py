@@ -707,6 +707,93 @@ def export_mod_pack(assets_folder, zip_path, log_cb=None, progress_cb=None):
     return len(changed), zip_path
 
 
+#: PAD-1050: the manifest and kind of a file of modes the Modes tab's Save to a file...
+#: writes (plugins/stern/mode_project's SHARE_MANIFEST / SHARE_KIND). Not a mod pack: none
+#: of its files are an extract's, so judged as one it "belongs to another card".
+MODES_FILE_MANIFEST = "pad_modes.json"
+MODES_FILE_KIND = "pad-modes"
+
+
+def _modes_about(head, read):
+    """``{"names", "made_for"}`` of a :data:`MODES_FILE_MANIFEST` ``head``; ``read(rel)``
+    gives a file of it as bytes (raises KeyError / OSError when it has none)."""
+    names = []
+    for slug in head.get("modes") or ():
+        if not isinstance(slug, str):
+            continue
+        name = ""
+        for leaf in ("mode.json", "assets.json"):
+            try:
+                name = json.loads(read("modes/%s/%s" % (slug, leaf)).decode("utf-8")).get("name")
+            except (KeyError, OSError, ValueError, AttributeError):
+                name = ""
+            if isinstance(name, str) and name.strip():
+                break
+        names.append(name.strip() if isinstance(name, str) and name.strip() else slug)
+    made_for = head.get("from") if isinstance(head.get("from"), dict) else {}
+    return {"names": names, "made_for": str(made_for.get("label") or "")}
+
+
+def modes_file_about(path):
+    """PAD-1050: is ``path`` a file of modes (a zip the Modes tab saved, or the folder one
+    was unzipped into) rather than a mod pack or an extract? ``{"names": [each mode's name],
+    "made_for": "Godzilla Premium/LE 1.16" or "", "folder": the folder holding its manifest,
+    or "" for a zip}`` when it is, else None."""
+    if not path:
+        return None
+    if os.path.isdir(path):
+        tops = [path]
+        try:                         # unzipped into a folder of its own name, one level down
+            subs = [os.path.join(path, n) for n in os.listdir(path)
+                    if os.path.isdir(os.path.join(path, n))]
+        except OSError:
+            subs = []
+        if len(subs) == 1:
+            tops.append(subs[0])
+        for top in tops:
+            try:
+                with open(os.path.join(top, MODES_FILE_MANIFEST), encoding="utf-8") as f:
+                    head = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(head, dict) and head.get("kind") == MODES_FILE_KIND:
+                def read(rel, top=top):
+                    with open(os.path.join(top, *rel.split("/")), "rb") as f:
+                        return f.read()
+                return dict(_modes_about(head, read), folder=top)
+        return None
+    try:
+        with zipfile.ZipFile(path) as zf:
+            head = json.loads(zf.read(MODES_FILE_MANIFEST).decode("utf-8"))
+            if not isinstance(head, dict) or head.get("kind") != MODES_FILE_KIND:
+                return None
+            return dict(_modes_about(head, zf.read), folder="")
+    except (OSError, zipfile.BadZipFile, KeyError, ValueError, UnicodeDecodeError):
+        return None
+
+
+def modes_file_words(about):
+    """PAD-1050: one sentence naming what :func:`modes_file_about` found."""
+    names = about.get("names") or []
+    shown = ", ".join(names[:6]) + (" and %d more" % (len(names) - 6) if len(names) > 6 else "")
+    return "It holds %d mode%s%s%s." % (
+        len(names), "" if len(names) == 1 else "s", ": %s" % shown if shown else "",
+        " (made for %s)" % about["made_for"] if about.get("made_for") else "")
+
+
+def zip_modes_folder(folder, zip_path):
+    """PAD-1050: put a file of modes back in a zip from the folder it was unzipped into
+    (``modes_file_about(...)["folder"]``), so the Modes tab can load it."""
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(os.path.join(folder, MODES_FILE_MANIFEST), MODES_FILE_MANIFEST)
+        top = os.path.join(folder, "modes")
+        for root, _dirs, names in os.walk(top):
+            for name in sorted(names):
+                p = os.path.join(root, name)
+                zf.write(p, os.path.relpath(p, folder).replace(os.sep, "/"))
+    return zip_path
+
+
 def inspect_mod_pack(zip_path, assets_folder):
     """What importing *zip_path* into *assets_folder* would actually do.
 
@@ -1011,6 +1098,11 @@ def import_mod_pack(zip_path, assets_folder, log_cb=None, progress_cb=None,
             log_cb("  skipped %s — %s" % (name, why), "warning")
         log_cb("Importing %d file(s)..." % len(applicable), "info")
     if not applicable and not modes_only:
+        about = modes_file_about(zip_path)
+        if about is not None:                                   # PAD-1050
+            raise ValueError(
+                "This zip is a file of modes, not a mod pack. %s Load it on the "
+                "Modes tab with Load from a file..." % modes_file_words(about))
         raise ValueError(
             "None of this pack's %d file(s) belong to this extract, so there "
             "is nothing to import.\n\nThe pack was built from %s and this "

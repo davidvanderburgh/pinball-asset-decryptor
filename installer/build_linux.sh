@@ -267,6 +267,7 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/coop_presets:pinball_decryptor/plugins/stern/coop_presets" \
     --hidden-import "pinball_decryptor.plugins.stern.portcoop" \
     --hidden-import "pinball_decryptor.plugins.stern.idle_pause" \
+    --hidden-import "pinball_decryptor.plugins.stern.handicap" \
     --hidden-import "pinball_decryptor.plugins.stern.dds" \
     --hidden-import "pinball_decryptor.plugins.stern.spine" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2" \

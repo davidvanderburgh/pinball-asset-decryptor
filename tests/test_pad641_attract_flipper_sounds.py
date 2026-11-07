@@ -120,8 +120,9 @@ def test_the_runtime_reads_the_lines_and_hooks_the_drain_and_the_lookup_once():
     # the record lookup takes the playing file's key first; the drain's edges reach it as well as the shots
     assert "if (att_live && r[1] && att_lookup(r)) return;" in c
     assert "if (att_live) att_edge(id, level, flags, pol, mask);" in c
-    # (PAD-945: the sounds on the shots of the game's own modes hook it the same once-only way)
-    assert c.count("hook(e->addr, on_switch_edge)") == 3 and c.count("edge_hooked = hook(e->addr") == 3
+    # (PAD-945: the sounds on the shots of the game's own modes hook it the same once-only way;
+    # PAD-1031: so does the co-op characters' pick)
+    assert c.count("hook(e->addr, on_switch_edge)") == 4 and c.count("edge_hooked = hook(e->addr") == 4
     # only in attract (the mode mask's attract bit, no game), not while the last one still plays
     assert "if (!(mask & att.attract_bit) || pm_in_game()) return;" in c
     assert "if (att.plays && (long)(att.until - now) > 0) return;" in c

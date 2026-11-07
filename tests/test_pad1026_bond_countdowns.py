@@ -107,11 +107,14 @@ static void say(const char *f, ...) { said++; }
 int main(void)
 {
     unsigned r[6] = {0};
+    int b0, b1, b2;
     printf("idle %d\n", on_rule_gate(r, 1));                         /* nothing of ours blocks */
     live = 1;
     printf("attract %d\n", on_rule_gate(r, 1));                      /* not in a game */
     in_game = 1;
-    printf("blocks %d %d %d said %d\n", on_rule_gate(r, 0), on_rule_gate(r, 1), on_rule_gate(r, 2), said);
+    /* called before the printf: gcc reads its arguments right to left, so `said` would be read first */
+    b0 = on_rule_gate(r, 0); b1 = on_rule_gate(r, 1); b2 = on_rule_gate(r, 2);
+    printf("blocks %d %d %d said %d\n", b0, b1, b2, said);
     block_rules_keep = 1u << 1;                                       /* the mode keeps the DB5 countdown counting */
     printf("kept %d %d\n", on_rule_gate(r, 1), on_rule_gate(r, 2));
     printf("range %d\n", on_rule_gate(r, 40));

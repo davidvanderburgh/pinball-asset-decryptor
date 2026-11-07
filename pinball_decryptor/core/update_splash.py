@@ -90,7 +90,7 @@ $S = @{}
 $S.title = %(title_q)s
 $S.heading = %(heading_q)s; $S.status = %(status_q)s
 $S.hint = %(hint_q)s; $S.giveUp = %(give_up_q)s; $S.closeLabel = %(close_q)s
-$S.cx = %(cx)d; $S.cy = %(cy)d; $S.placed = %(placed)s; $S.offscreen = %(offscreen)s
+$S.offscreen = %(offscreen)s
 $S.hintAfter = %(hint_after)d; $S.giveUpAfter = %(give_up_after)d; $S.closeAfter = %(close_after)d
 $S.hinted = $false; $S.gaveUp = $false
 
@@ -164,21 +164,15 @@ $win.Add_MouseLeftButtonDown({ try { $win.DragMove() } catch {} })
 if ($S.offscreen) {
   # the proof shots: off every screen, read back with PrintWindow
   $win.WindowStartupLocation = 'Manual'; $win.Left = -5000; $win.Top = 100
-} elseif ($S.placed) {
-  # centred on the app's window (its centre in device pixels), kept on the
-  # desktop; a window with no place yet is centred on the main screen
+} else {
+  # the middle of the primary monitor, exactly (PAD-1039: it used to sit
+  # over the app's window, wherever that was; CenterScreen picks the screen
+  # under the mouse and its work area, a little high of the taskbar).  The
+  # primary monitor's top left is the desktop's 0,0, and these sizes are in
+  # the window's own units
   $win.WindowStartupLocation = 'Manual'
-  $win.Add_SourceInitialized({
-    try {
-      $src = [System.Windows.PresentationSource]::FromVisual($win)
-      $pt = $src.CompositionTarget.TransformFromDevice.Transform((New-Object System.Windows.Point($S.cx, $S.cy)))
-      $l = $pt.X - $win.Width / 2; $t = $pt.Y - $win.Height / 2
-      $vl = [System.Windows.SystemParameters]::VirtualScreenLeft; $vt = [System.Windows.SystemParameters]::VirtualScreenTop
-      $vr = $vl + [System.Windows.SystemParameters]::VirtualScreenWidth; $vb = $vt + [System.Windows.SystemParameters]::VirtualScreenHeight
-      $win.Left = [Math]::Max($vl, [Math]::Min($l, $vr - $win.Width))
-      $win.Top = [Math]::Max($vt, [Math]::Min($t, $vb - $win.Height))
-    } catch {}
-  })
+  $win.Left = ([System.Windows.SystemParameters]::PrimaryScreenWidth - $win.Width) / 2
+  $win.Top = ([System.Windows.SystemParameters]::PrimaryScreenHeight - $win.Height) / 2
 }
 
 # ---------------------------------------------------------------- the table
@@ -495,26 +489,22 @@ exit 0
 """
 
 
-def splash_script(version, center=None, tr=None, title=SPLASH_TITLE,
+def splash_script(version, tr=None, title=SPLASH_TITLE,
                   hint_after=HINT_AFTER, give_up_after=GIVE_UP_AFTER,
                   close_after=CLOSE_AFTER, offscreen=False):
-    """The PowerShell text of the splash window (see module docstring).
-    *center* is the app window's centre in device pixels, or None for the
-    middle of the main screen."""
+    """The PowerShell text of the splash window (see module docstring),
+    placed in the middle of the primary monitor."""
     words = _texts(version, tr)
-    cx, cy = center if center else (0, 0)
     return _SPLASH_SCRIPT % {
         "title_q": _psq(title), "heading_q": _psq(words["heading"]),
         "status_q": _psq(words["status"]), "hint_q": _psq(words["hint"]),
         "give_up_q": _psq(words["give_up"]), "close_q": _psq(words["close"]),
-        "cx": int(cx), "cy": int(cy),
-        "placed": "$true" if center else "$false",
         "offscreen": "$true" if offscreen else "$false",
         "hint_after": int(hint_after), "give_up_after": int(give_up_after),
         "close_after": int(close_after)}
 
 
-def start_splash(version, center=None, tr=None, title=SPLASH_TITLE,
+def start_splash(version, tr=None, title=SPLASH_TITLE,
                  popen=None, platform=None, **timing):
     """Open the splash for an update to *version*.  Returns ``(True,
     process)`` or ``(False, reason)``; never raises.
@@ -536,7 +526,7 @@ def start_splash(version, center=None, tr=None, title=SPLASH_TITLE,
                                   dir=tmp)
     try:
         with os.fdopen(fd, "w", encoding="utf-8-sig", newline="\r\n") as f:
-            f.write(splash_script(version, center=center, tr=tr, title=title,
+            f.write(splash_script(version, tr=tr, title=title,
                                   **timing))
         flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
                  | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))

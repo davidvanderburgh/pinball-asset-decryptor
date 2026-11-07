@@ -273,6 +273,11 @@ export function CoopCharsDialog({ s, onClose }) {
       <${Check} checked=${ch.pick} label="Each teammate picks a character at their first ball"
         disabled=${!rows.length} title="Off: the card plays co-op as before, with no characters."
         onChange=${(v) => call("modes.coop_chars_pick", v)} />
+      <span class="small dim" style="margin-left:16px">Time to pick</span>
+      <${Select} sm value=${String(ch.time ?? 30)} width=${130} disabled=${!rows.length || !ch.pick}
+        options=${(ch.times || [30]).map((t) => ({ value: String(t), label: t ? `${t} seconds` : "No time limit" }))}
+        title="How long each teammate has to pick; the machine counts the seconds down, and when they run out the one shown is taken. No time limit: the pick waits for the Action button."
+        onChange=${(v) => call("modes.coop_chars_time", Number(v))} />
     </div>
     ${ch.preview ? html`<div class="modes-coop-ch-pv">
       <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />

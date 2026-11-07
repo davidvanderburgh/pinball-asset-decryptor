@@ -13,12 +13,12 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 RUNTIME = T.RUNTIME
 
 MAIN = T.PRELUDE + r"""
-static void team_game(unsigned humans, int extra_at)
+static void team_game(unsigned humans, int extra_at, int mode)
 {
     unsigned k, balls = 0;
     memset(&coop, 0, sizeof coop);
     bytes[0] = 1; bytes[1] = 1; players = 1; extra = 0; game_no++; board = 99;
-    teams_on = 1; button = 0;                            /* CO-OP PLAY at 2: plain Start, no button */
+    teams_on = mode; button = 0;                         /* CO-OP PLAY at 2 (1 here) or 3: plain Start, no button */
     for (k = 1; k < humans; k++) coop_add_wrap(0, 0, 0, 0);
     printf("teams %u: %u+%u game players %u board %u\n", coop.n, coop.team_n[1], coop.team_n[2], players, board);
     for (;;) {
@@ -34,7 +34,9 @@ int main(int argc, char **argv)
 {
     unsigned humans = (unsigned)(argv[1][0] - '0');
     int extra_at = argc > 2 ? argv[2][0] - '0' : 0;
-    team_game(humans, extra_at);
+    int mode = argc > 3 ? argv[3][0] - '0' : 1;          /* 1: Team 2v2, 3: Team 2v1 */
+    team_game(humans, extra_at, mode);
+    if (mode == 3) printf("fourth %u players %u\n", coop_add_wrap(0, 0, 0, 0), players);   /* 2v1 is full at 3 */
     if (humans == 4) {
         printf("fifth %u\n", coop_add_wrap(0, 0, 0, 0));    /* both teams full */
         /* the next game, CO-OP PLAY back at 1: a co-op game, not a team one */
@@ -49,10 +51,10 @@ int main(int argc, char **argv)
 """
 
 
-def _game(tmp_path, humans, extra_at=0):
-    sub = tmp_path / ("g%d_%d" % (humans, extra_at))
+def _game(tmp_path, humans, extra_at=0, mode=1):
+    sub = tmp_path / ("g%d_%d_%d" % (humans, extra_at, mode))
     sub.mkdir()
-    args = (str(humans),) + ((str(extra_at),) if extra_at else ())
+    args = (str(humans), str(extra_at), str(mode))
     out = R._host_run(sub, MAIN.replace("@FNS@", T.lifted()), args=args).splitlines()
     assert not any(l.startswith("SCREEN SAYS") for l in out)     # the top line names the player up, every ball
     return out
@@ -98,6 +100,34 @@ def test_two_players_are_one_team(tmp_path):
     assert _over(out) == "over after 6 balls, the game's end sees 1 player(s)"
 
 
+def test_team_2v1_is_its_own_choice_full_at_three(tmp_path):
+    """daveyvandy: "There should be a designated option for 2V1" - CO-OP PLAY 3."""
+    out = _game(tmp_path, 3, mode=3)
+    assert _head(out) == "teams 3: 2+1 game players 2 board 1"                # the TEAM 2V1 board
+    assert _ups(out) == sum((_round(b, (1, 3, 2, 3)) for b in (1, 2, 3)), [])
+    assert _over(out) == "over after 12 balls, the game's end sees 2 player(s)"
+    assert "fourth 0 players 2" in out                                     # a fourth Start adds no one
+    assert "teams: Start - both teams are full (3 players, Team 2v1)" in out
+    out = _game(tmp_path, 2, mode=3)                                       # two players: one team, as in 2v2
+    assert _head(out) == "teams 2: 2+0 game players 1 board 1"
+
+
+def test_the_choice_reads_the_row(tmp_path):
+    src = RUNTIME.read_text(encoding="utf-8")
+    fn = R._lift(src, "static unsigned coop_teams_size(unsigned always, unsigned setting_value, int has_setting)")
+    main = "#include <stdio.h>\n" + fn + r"""
+int main(void)
+{
+    unsigned v;
+    for (v = 0; v <= 4; v++) printf("%u", coop_teams_size(0, v, 1));
+    printf(" %u %u %u %u\n", coop_teams_size(0, 2, 0), coop_teams_size(4, 0, 1), coop_teams_size(3, 1, 1),
+           coop_teams_size(0, 3, 0));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, main).strip() == "00430 0 4 3 0"                # 2: 2v2 (4), 3: 2v1 (3)
+
+
 def test_one_start_is_the_games_own_one_player_game(tmp_path):
     out = _game(tmp_path, 1)
     assert _head(out).startswith("teams 0: 0+0 game players 1")
@@ -118,15 +148,15 @@ def test_the_top_line_board_and_gate_know_team_play():
     src = RUNTIME.read_text(encoding="utf-8")
     show = R._lift(src, "static void coop_turn_show(void)")
     assert '"TEAM %u P%u  BALL %%d", (coop.turn + 1u) / 2u, coop.turn' in show
-    assert 'pm_snprintf(out, 40, "TEAM PLAY")' in R._lift(src, "static void coop_board_name(char *out, unsigned n)")
-    assert "for (t = 2; t <= 5 && n < cap; t++)" in R._lift(
+    board = R._lift(src, "static void coop_board_name(char *out, unsigned n)")
+    assert 'pm_snprintf(out, 40, "TEAM PLAY")' in board and 'pm_snprintf(out, 40, "TEAM 2V1")' in board
+    assert "for (t = 1; t <= 5 && n < cap; t++)" in R._lift(
         src, "static int coop_page_names(char names[][40], int n, int cap)\n{")
     tick = R._lift(src, "static void coop_tick(void)\n{")
     assert "if (n && !coop.teams && pm_in_game()) coop_scores_same(n);" in tick   # a team's score is the game's own
-    assert "return coop.setting && *(volatile const unsigned *)(unsigned long)coop.setting == 2u;" in R._lift(
-        src, "static int coop_teams_switched_on(void)")
-    assert '"teams on"' in R._lift(src, "static void coop_line(const char *s)")
-    assert "return !while_at || value == 1u || value == 2u;" in R._lift(
+    line = R._lift(src, "static void coop_line(const char *s)")
+    assert '"teams on")) { coop.teams_always = 4;' in line and '"teams 2v1")) { coop.teams_always = 3;' in line
+    assert "return !while_at || (value >= 1u && value <= 3u);" in R._lift(
         src, "static int insider_holding(unsigned while_at, unsigned value)")
 
 
@@ -135,19 +165,20 @@ def test_the_service_menu_row_has_team_2v2_and_the_tab_says_how_to_play_it(tmp_p
     from pinball_decryptor.plugins.stern import engine as E
     from pinball_decryptor.webui import help_content
     key, values, names, opts = E._CoopMenu(lambda *a: None).wanted()
-    assert (values, names, opts) == (3, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True})
+    assert (values, names, opts) == (4, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True})
     assert (CP.MENU_OFF, CP.MENU_COOP, CP.MENU_TEAMS) == (0, 1, 2)
-    assert len(CP.MENU_HELP) <= 63 and "2 Team 2v2" in CP.MENU_HELP
+    assert len(CP.MENU_HELP) <= 63 and "2 Team 2v2, 3 Team 2v1" in CP.MENU_HELP
     text = str(help_content.__dict__)
+    assert CP.MENU_TEAMS_2V1 == 3 and "**3 (Team 2v1):** the same team game for three players" in text
     assert "**2 (Team 2v2):** players 1 and 2 play against players 3 and 4" in text
     from pinball_decryptor.webui.tabs import modes as M
-    assert "0 Off, 1 Co-op, 2 Team 2v2" in M.ModesTab.COOP_MENU_TIP
+    assert "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1" in M.ModesTab.COOP_MENU_TIP
 
 
 GZ_ELFS = ("C:/tmp/PAD-1010/elfs/godzilla_le-1_16_0_spike2.elf", "C:/tmp/PAD-1033/elfs/godzilla_le-1_16_0.elf")
 
 
-def test_the_row_is_three_numbers_from_zero_on_godzilla():
+def test_the_row_is_four_numbers_from_zero_on_godzilla():
     import pytest
     from pinball_decryptor.plugins.stern import coop_play as CP
     from pinball_decryptor.plugins.stern import engine as E
@@ -162,11 +193,11 @@ def test_the_row_is_three_numbers_from_zero_on_godzilla():
     settings, writes, _cat, refused = M.plan_many(t, [E._CoopMenu(lambda *a: None).wanted()])
     assert not refused
     s = settings[0]
-    assert (s.values, s.low, s.default, s.kind, s.help) == (3, 0, 0, M.number_kind(t), CP.MENU_HELP)
+    assert (s.values, s.low, s.default, s.kind, s.help) == (4, 0, 0, M.number_kind(t), CP.MENU_HELP)
     assert M.number_kind(t) == 2 and t.entry(t.by_name["AD_GAME_ID"])["max"] == 9999
     out = bytearray(raw)
     for off, data in writes.items():
         out[off:off + len(data)] = data
     e = AdjustmentTable(bytes(out)).entry(s.id)
-    assert (e["min"], e["max"], e["default"]) == (0, 2, 0)                  # an Off/On row's 0 and 1 mean the same
+    assert (e["min"], e["max"], e["default"]) == (0, 3, 0)                  # an Off/On row's 0 and 1 mean the same
     assert M.check(bytes(out), s) in ([], ["no menu page lists it"])         # the page record is placed by the Write

@@ -6124,9 +6124,10 @@ tab's **Co-op play**):
 
     coop on
     button 59        the switch held at Start to add a teammate (the right flipper button; the build reads its id)
-    setting 0x...    (round 2) the live value of the game's own CO-OP PLAY row (0 Off, 1 Co-op, 2 Team 2v2): co-op only
-                     while it is 1, a team game while it is 2 (PAD-1042)
-    teams on         (PAD-1042) every game of two or more players is a team game, no menu row needed
+    setting 0x...    (round 2) the live value of the game's own CO-OP PLAY row (0 Off, 1 Co-op, 2 Team 2v2, 3 Team
+                     2v1): co-op only while it is 1, a team game while it is 2 or 3 (PAD-1042)
+    teams on         (PAD-1042) every game of two or more players is a Team 2v2 game, no menu row needed
+    teams 2v1        (PAD-1042) ... a Team 2v1 game
 
 Round 2 (DoomWalrus666): the Modes tab's "Switch it on and off in the service menu" puts a CO-OP PLAY row in the game's
 own menu (menu_settings.COOP_PLAY, on a spare setting, Off to start with) and its live value in coop.cfg. Teammates join
@@ -6207,6 +6208,10 @@ own player change goes between them. The runtime takes each team's players in tu
 - **The game's end** is the game's own for its two players (one match draw each); the scores go on a `TEAM PLAY`
   board of the runtime's own (PAD-640/663's one-entry filing: the higher team score is the one that can take it),
   never on the game's own boards.
+- **Team 2v1** (daveyvandy: "There should be a designated option for 2V1"): CO-OP PLAY 3 (or `teams 2v1`) is the
+  same team game for three players at most - players 1 and 2 against player 3, who plays both of team 2's turns each
+  ball (P1, P3, P2, P3), a fourth Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
+  `team_max`). Its scores go on a `TEAM 2V1` board of their own, so a 2v1 champion never sits on the 2v2 board.
 
 Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1042/rig`: job.sh, team.cfg; tryset.py builds a Write
 override set with the row defaulting to 2): 4 players through the game's own CO-OP PLAY row at 2 (read live at Start;

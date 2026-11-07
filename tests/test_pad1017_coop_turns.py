@@ -18,7 +18,7 @@ static unsigned bpg = 3, game_no = 1, button = 0, max_players = 4;
 static void say(const char *f, ...) { va_list a; va_start(a, f); vprintf(f, a); va_end(a); printf("\n"); }
 static unsigned chg_game_now(void) { return game_no; }
 static int coop_button_held(void) { return button; }
-static struct { int on; unsigned button, game, n, turn; int teams_always; unsigned teams, team_n[3], round; } coop;
+static struct { int on; unsigned button, game, n, turn; unsigned teams_always; unsigned teams, team_n[3], team_max, round; } coop;
 static volatile unsigned char *coop_ball_byte = &bytes[1], *coop_players_byte = &players;
 static unsigned shown_turn, board;                   /* what the screen and the board were told last */
 static void coop_scores_mark(unsigned n) { board = n; }
@@ -39,8 +39,8 @@ static void coop_chars_turn(void) {}
 static void coop_cache_let_go(void) {}
 static void coop_cards_show(unsigned n) { (void)n; }    /* PAD-1028 round 2: the awards on the characters' cards */
 static int coop_switched_on(void) { return 1; }          /* round 2: CO-OP PLAY says On (test_pad1017_coop_lines.py) */
-static int teams_on;                                      /* PAD-1042: CO-OP PLAY says Team 2v2 (test_pad1042_team_play.py) */
-static int coop_teams_switched_on(void) { return teams_on; }
+static int teams_on;                                      /* PAD-1042: CO-OP PLAY says Team 2v2 (1) or 2v1 (3) (test_pad1042_team_play.py) */
+static unsigned coop_teams_switched_on(void) { return teams_on == 1 ? 4u : (unsigned)teams_on; }   /* the most players */
 /* the framework's own, modelled */
 static unsigned game_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {

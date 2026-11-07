@@ -4412,6 +4412,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                                         "Rename failed:\n%s" % e)
             return False
         self._repoint_baseline({rel: new_rel})
+        self._callouts_follow({rel: new_rel})
         self._sel = [new_rel]
         self._refresh_type_filter()
         self._refresh_list()
@@ -4500,14 +4501,11 @@ class AudioTab(FindOriginalsMixin, TabService):
     # ------------------------------------------------------------------
     # More > Rename from callouts.csv (PAD-894)
     # ------------------------------------------------------------------
-    def _callout_renames(self, callouts):
-        """``(plan, unmatched, fixed)`` for *callouts*: plan is
-        ``[(rel, label, row)]`` for every row whose text names a scanned
-        decode sound something other than what it is called now.  A row finds
-        its sound by folder + file, or, when that name has changed since the
-        CSV was written, by its idx number in the same folder.  *unmatched*
-        counts rows with text whose sound is not here; *fixed* the sounds whose
-        names cannot change (not idx-numbered)."""
+    def _callout_finder(self, callouts):
+        """A function giving the scanned sound a *callouts* row is about, or
+        None: by folder + file, or, when that name has changed since the CSV
+        was written (a rename in Audio Properties), by its idx number in the
+        same folder."""
         from ...core import name_memory
         by_stem = {}
         for rel in self._by_rel:
@@ -4515,22 +4513,39 @@ class AudioTab(FindOriginalsMixin, TabService):
             if parts:
                 stem = parts[0].rpartition(" - ")[2].lower()
                 by_stem[(rel.rpartition("/")[0].lower(), stem)] = rel
+
+        def find(row):
+            fname = callouts.get(row, "file")
+            if not fname:
+                return None
+            folder = callouts.get(row, "folder").replace("\\", "/").strip("/")
+            rel = (folder + "/" + fname) if folder else fname
+            if rel in self._by_rel:
+                return rel
+            parts = name_memory.split_decode_name(fname)
+            stem = parts[0].rpartition(" - ")[2].lower() if parts else None
+            return by_stem.get((folder.lower(), stem))
+        return find
+
+    def _callout_renames(self, callouts):
+        """``(plan, unmatched, fixed)`` for *callouts*: plan is
+        ``[(rel, label, row)]`` for every row whose text names a scanned
+        decode sound something other than what it is called now (rows find
+        their sound by :meth:`_callout_finder`).  *unmatched* counts rows with
+        text whose sound is not here; *fixed* the sounds whose names cannot
+        change (not idx-numbered)."""
+        from ...core import name_memory
+        find = self._callout_finder(callouts)
         plan, seen = [], set()
         unmatched = fixed = 0
         for row in callouts.rows:
             text = callouts.get(row, "text")
-            fname = callouts.get(row, "file")
-            if not text or not fname:
+            if not text or not callouts.get(row, "file"):
                 continue
-            folder = callouts.get(row, "folder").replace("\\", "/").strip("/")
-            rel = (folder + "/" + fname) if folder else fname
-            if rel not in self._by_rel:
-                parts = name_memory.split_decode_name(fname)
-                stem = parts[0].rpartition(" - ")[2].lower() if parts else None
-                rel = by_stem.get((folder.lower(), stem))
-                if rel is None:
-                    unmatched += 1
-                    continue
+            rel = find(row)
+            if rel is None:
+                unmatched += 1
+                continue
             if rel in seen:
                 continue
             seen.add(rel)
@@ -4633,6 +4648,133 @@ class AudioTab(FindOriginalsMixin, TabService):
                 + ("\n…" if len(failed) > 10 else "")))
         compat.messagebox.showinfo(title, msg + "".join("\n\n" + n
                                                         for n in notes))
+        return True
+
+    # ------------------------------------------------------------------
+    # More > Update callouts.csv from the names (PAD-1048)
+    # ------------------------------------------------------------------
+    def _callouts_from_names(self, callouts, rels=None):
+        """Bring *callouts* in step with the names the sounds have now (all
+        scanned sounds, or only *rels*): a row whose sound was renamed since
+        the CSV was written gets its file and, unless its words already make
+        that name, its text; with *rels* None a named sound with no row gets
+        one.  Returns ``(updated, added)``; nothing is saved here."""
+        from ...core import name_memory
+        find = self._callout_finder(callouts)
+        want = set(self._by_rel if rels is None else rels)
+        keys = {k: callouts.key(k) for k in
+                ("folder", "file", "seconds", "classification", "text")}
+        updated = added = 0
+        seen = set()
+        for row in callouts.rows:
+            rel = find(row)
+            if rel is None or rel in seen:
+                continue
+            seen.add(rel)
+            if rel not in want:
+                continue
+            fname = rel.rpartition("/")[2]
+            parts = name_memory.split_decode_name(fname)
+            if parts is None:
+                continue
+            label, text = parts[1], callouts.get(row, "text")
+            changed = callouts.get(row, "file") != fname
+            row[keys["file"]] = fname
+            # the words win while they still make this name ("Kaiju award:
+            # 2x" files as "Kaiju award_ 2x"); a blank name keeps them
+            if label and name_memory.sanitize_label(text) != label:
+                row[keys["text"]] = label
+                changed = True
+            updated += changed
+        if rels is not None:
+            return updated, added
+        kinds = {"callouts": "speech", "music": "music"}
+        for rel in sorted(want - seen, key=str.lower):
+            parts = name_memory.split_decode_name(rel.rpartition("/")[2])
+            if not parts or not parts[1]:
+                continue
+            slot = self._by_rel[rel]
+            row = {keys["file"]: rel.rpartition("/")[2],
+                   keys["text"]: parts[1]}
+            if keys["folder"]:
+                row[keys["folder"]] = rel.rpartition("/")[0]
+            if keys["seconds"]:
+                row[keys["seconds"]] = ("%.3f" % slot.duration
+                                        if slot.duration else "")
+            if keys["classification"]:
+                row[keys["classification"]] = kinds.get(
+                    self._cats.get(rel), "non-speech")
+            callouts.rows.append(row)
+            added += 1
+        return updated, added
+
+    def _callouts_follow(self, renames):
+        """A rename in Audio Properties: the project's callouts.csv rows for
+        the renamed sounds follow (*renames* is ``{old_rel: new_rel}``), so
+        the CSV never names a file that is gone.  Quiet when there is no CSV;
+        an unreadable one is left alone and logged."""
+        from ...core.transcribe import CALLOUTS_CSV, CalloutsFile
+        if not renames or not self._scan_dir:
+            return
+        path = os.path.join(self._scan_dir, CALLOUTS_CSV)
+        if not os.path.isfile(path):
+            return
+        try:
+            callouts = CalloutsFile(path)
+            if self._callouts_from_names(callouts, renames.values())[0]:
+                callouts.save()
+        except (OSError, ValueError, csv.Error) as e:
+            self.log("Replace Audio: renamed the sound, but couldn't update "
+                     "%s (%s)." % (CALLOUTS_CSV, e), "error")
+
+    @rpc
+    def update_callouts(self):
+        """More > Update callouts.csv from the names…: write the names the
+        sounds have now (renamed in Audio Properties, or by Rename from
+        callouts.csv) into the project's callouts.csv, the reverse of Rename
+        from callouts.csv, so the work survives a fresh extract or a share.
+        A row for a sound that is gone stays as it was; a named sound with no
+        row gets one; the file is made when the project has none."""
+        from ...core.transcribe import CALLOUTS_CSV, CalloutsFile
+        title = "Update callouts.csv"
+        if self._running():
+            return False
+        if not self._slots or not self._scan_dir:
+            compat.messagebox.showinfo(
+                title, "Scan an assets folder first — the audio table is "
+                       "empty.")
+            return False
+        path = os.path.join(self._scan_dir, CALLOUTS_CSV)
+        try:
+            callouts = (CalloutsFile(path) if os.path.isfile(path)
+                        else CalloutsFile.empty(path))
+        except (OSError, ValueError, csv.Error) as e:
+            compat.messagebox.showerror(title, "Couldn't read %s:\n%s"
+                                        % (CALLOUTS_CSV, e))
+            return False
+        updated, added = self._callouts_from_names(callouts)
+        if not updated and not added:
+            compat.messagebox.showinfo(
+                title, "%s already has every sound's name." % CALLOUTS_CSV)
+            return True
+        if not compat.messagebox.askyesno(
+                title, "Write the names the sounds have now into %s?\n\n"
+                       "%d row(s) get their sound's new name and %d named "
+                       "sound(s) get a row. Rows for sounds this project "
+                       "doesn't have are kept as they are."
+                       % (CALLOUTS_CSV, updated, added)):
+            return False
+        try:
+            callouts.save()
+        except OSError as e:
+            compat.messagebox.showerror(title, "Couldn't write %s:\n%s"
+                                        % (CALLOUTS_CSV, e))
+            return False
+        self.log("Replace Audio: %s: %d row(s) updated, %d added."
+                 % (CALLOUTS_CSV, updated, added), "success")
+        compat.messagebox.showinfo(
+            title, "Updated %d row(s) and added %d.\n\n%s" % (
+                updated, added, os.path.normpath(path)))
         return True
 
     # ------------------------------------------------------------------

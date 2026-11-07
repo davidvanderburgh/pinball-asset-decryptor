@@ -11293,7 +11293,8 @@ def _comp_for_build(assets_dir, dest_is_device, log, ext4_available=None):
 
 
 class _HandicapMenu(_MusicModeMenu):
-    """PAD-1033: HANDICAP in the game's own service menu, Off/On (On to start with), on a spare setting: the players
+    """PAD-1033: HANDICAP in the game's own service menu, Off/On (Off to start with: DoomWalrus666), on a spare
+    setting: the players
     pick a handicap only while it says On. With no spare setting left the handicaps are always on."""
 
     KEY = "handicap"
@@ -11304,12 +11305,12 @@ class _HandicapMenu(_MusicModeMenu):
 
     def wanted(self):
         from . import handicap as _HC
-        return self.KEY, _HC.MENU_VALUES, (), {"default": 2, "help_text": _HC.MENU_HELP, "onoff": True}
+        return self.KEY, _HC.MENU_VALUES, (), {"default": 1, "help_text": _HC.MENU_HELP, "onoff": True}
 
     def done(self):
         self.ok = True
-        self.log("Handicaps: HANDICAP is in the operator menu (%s), On to start with: set it to Off and no player "
-                 "is asked for a handicap." % self.setting.where, "info")
+        self.log("Handicaps: HANDICAP is in the operator menu (%s), Off to start with: set it to On and each player "
+                 "picks a handicap at their first ball." % self.setting.where, "info")
 
     def fail(self, why):
         if self.why or self.ok:

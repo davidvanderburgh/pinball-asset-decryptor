@@ -47,7 +47,7 @@ NO_TITLE = "The app cannot tell which game this project is for, so it cannot giv
 NO_PORT = "The app does not know where %s keeps its players and settings yet, so it cannot give it handicaps."
 NO_BUTTON = "The game program names no flipper buttons, so a player could not pick a handicap."
 NOTHING = "%s has no ball save or difficulty setting a handicap could change."
-#: the service menu's row (menu_settings.HANDICAP): Off/On, On to start with
+#: the service menu's row (menu_settings.HANDICAP): Off/On, Off to start with (DoomWalrus666)
 MENU_VALUES = 2
 MENU_HELP = "On: each player picks -3 to +3 at their first ball (flippers)"
 #: how a player picks, for the tab and the log
@@ -55,8 +55,8 @@ HOW = ("at each player's first ball the top of the screen shows P1 HANDICAP 0: t
        "harder, the right easier (-3 to +3), and the ball's first score takes it")
 
 #: the Modes tab's line under the tick
-NOTE = ("On the card: each player picks -3 to +3 at their first ball with the flippers. HANDICAP in the service menu "
-        "switches it, On to start with.")
+NOTE = ("On the card: each player picks -3 to +3 at their first ball with the flippers, while HANDICAP in the "
+        "service menu is On (it starts Off).")
 
 #: Godzilla (Pro, Premium/LE): the reporter's levels - battles first, then the heat ray and Building Multiball, then
 #: tanks, the bridge, the powerline and the jets; harder the same way round. ``(adjustment, (level -> change))`` where a
@@ -292,11 +292,25 @@ def cfg_text(game_elf, title_key="", setting=0, only=False, port=None, custom=No
             recs = records(game_elf, site[0], data, ids)
         except (G.PortgenError, ValueError, IndexError):
             recs = {}                                   # the getter's answer is what plays
+    start = start_button(game_elf)
     return ("# PAD-1033: a handicap for each player\nhandicap on\nleft %d\nright %d\n" % tuple(buttons)
+            + ("start %d\n" % start if start else "")
             + ("setting 0x%08x\n" % setting if setting else "") + ("only\n" if only else "")
             + "".join("record %d 0x%08x 0x%08x 0x%08x 0x%x\n" % ((i,) + recs[i])
                       for i in sorted(recs)[:MAX_RECORDS])
             + "".join(level_line(k, lv[k]) + "\n" for k in LEVELS if lv[k]))
+
+
+def start_button(game_elf):
+    """The switch id of the Start button in the game program *game_elf* (bytes), or None. Round 3: Start held with
+    the left flipper ends the game (DoomWalrus666), and that left flipper must not walk an open pick."""
+    from . import portgen as G
+    from . import portswitch as PS
+    try:
+        sws = PS.switches(G.Elf(bytes(game_elf)))
+    except (G.PortgenError, ValueError, struct.error, IndexError):
+        return None
+    return next((int(sw["id"]) for sw in sws if " ".join(str(sw["name"]).upper().split()) == "START BUTTON"), None)
 
 
 def _words(name):

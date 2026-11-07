@@ -1141,8 +1141,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "takes it. 0 is the game's own settings. A level makes the game's own settings (ball save time, how hard its "
         "modes and multiballs are to light) easier or harder for that player only, the way the operator could in the "
         "service menu, so the card stays on Insider Connected. Levels... shows what each level changes, and each "
-        "can be set to any value the game's own setting offers. The service menu gets a HANDICAP row (On to start "
-        "with) to switch it off. Write puts it on the card.")
+        "can be set to any value the game's own setting offers. The service menu gets a HANDICAP row, Off to start "
+        "with: set it On to play with handicaps. Write puts it on the card.")
 
     def _publish_handicap(self, project):
         """PAD-1033: the Handicap per player tick, and under it what each level does, or in red why this game cannot

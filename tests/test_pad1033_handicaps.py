@@ -105,6 +105,12 @@ def test_a_level_holds_from_the_players_first_ball():
     assert "hand.picked = hand.asked = 0;" in R._lift(_src(), "static void hand_game_check(void)")
     assert "if (ball != 1u || !pm_in_game()) return;" in tick                          # the pick: the first ball
     assert 'hand_close("the ball scored")' in tick
+    assert "if (hand.start && switch_held(hand.start)) {" in tick          # round 3: Start + L ends a game
+    # round 3: a new game is the game's own game_start (Start + L ends a game inside player 1's first ball)
+    check = R._lift(_src(), "static void hand_game_check(void)\n{")
+    assert "fresh = g != hand.game;" in check and "hand_line_back();" in check
+    arm = R._lift(_src(), "static void hand_arm(void)")
+    assert arm.index("events_arm();") < arm.index('pm_event("game_start")')
     assert tick.index("if (hand_waits_for_coop()) {") < tick.index("hand.asked |= 1u << p;")   # a character pick first
     rec = R._lift(_src(), "static void hand_records(unsigned p, int lv)")
     assert "own = hand_adj_game(hand_cache[i].id);" in rec                            # from the operator's, never twice
@@ -167,9 +173,10 @@ def test_handicap_cfg(monkeypatch):
     from pinball_decryptor.plugins.stern import handicap as HC
     monkeypatch.setattr(HC, "_ranges", lambda elf: {"AD_BALL_SAVE_TIME": (94, 0, 15)})
     monkeypatch.setattr(HC._SMo, "flipper_buttons", lambda elf: [60, 59])
+    monkeypatch.setattr(HC, "start_button", lambda elf: 36)
     text = HC.cfg_text(b"", "x-1.0", setting=0x7d2000, only=True)
-    assert text.splitlines()[1:6] == ["handicap on", "left 60", "right 59", "setting 0x007d2000", "only"]
-    assert text.splitlines()[6] == "level -3 adj:94-15:0:15" and text.splitlines()[-1] == "level +3 adj:94+6:0:15"
+    assert text.splitlines()[1:7] == ["handicap on", "left 60", "right 59", "start 36", "setting 0x007d2000", "only"]
+    assert text.splitlines()[7] == "level -3 adj:94-15:0:15" and text.splitlines()[-1] == "level +3 adj:94+6:0:15"
     assert "setting" not in HC.cfg_text(b"", "x-1.0") and "only" not in HC.cfg_text(b"", "x-1.0")
     monkeypatch.setattr(HC._SMo, "flipper_buttons", lambda elf: [])
     with pytest.raises(HC.HandicapError):
@@ -189,7 +196,7 @@ def test_godzillas_levels_follow_the_reporters_list():
     assert lv[-3]["AD_BALL_SAVE_TIME"] == ("-", 15, 0, 15) and set(lv[-1]) == set(lv[1])
     said = dict(HC.describe(elf, "godzilla_le-1.16"))
     assert said[1] == ["ball save +2 s", "Light Battle Difficulty easier"] and said[-3][0] == "ball save off"
-    assert HC._SMo.flipper_buttons(elf) == [60, 59]
+    assert HC._SMo.flipper_buttons(elf) == [60, 59] and HC.start_button(elf) == 36
 
 
 @pytest.mark.skipif(not os.path.isfile(GZ["le"]), reason="no Godzilla LE 1.16 program here")
@@ -202,7 +209,8 @@ def test_the_handicap_row_takes_a_spare_setting_beside_co_op_play():
                                                   E._HandicapMenu(lambda *a: None).wanted()])
     assert not refused
     hand = next(s for s in settings if s.key == M.HANDICAP)
-    assert (hand.caption, hand.values, hand.low, hand.default, hand.kind) == ("Handicap", 2, 0, 1, M.onoff_kind(t))
+    # round 3 (DoomWalrus666): Off to start with
+    assert (hand.caption, hand.values, hand.low, hand.default, hand.kind) == ("Handicap", 2, 0, 0, M.onoff_kind(t))
     assert len({s.id for s in settings}) == 2
 
 

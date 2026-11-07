@@ -14590,9 +14590,12 @@ static void event_census(void)
 
 static void events_arm(void)
 {
+    static int done;                             /* PAD-1033: the handicaps may have armed it already */
     struct site *bus = site("hook_dispatch");
     int i, bus_names = 0, armed = 0, bus_hooked = 0;
     unsigned id;
+    if (done) return;
+    done = 1;
     if (!n_event_names && !bus) return;
     for (id = 0; id < N_EVENT_IDS; id++) event_delivered[id] = event_fired[id];
     for (i = 0; i < n_event_names; i++) bus_names += !event_names[i].site[0];
@@ -16920,11 +16923,13 @@ static struct hand_change { unsigned id, op, v, lo, hi; } hand_lv[2 * HAND_LEVEL
 static unsigned hand_lv_n[2 * HAND_LEVEL_MAX + 1];
 static struct {
     int on, only;
-    unsigned setting, left, right;
+    unsigned setting, left, right, start;    /* start: the Start button (held: the flippers are not the pick's) */
     int level[5];                            /* player (1-4) -> the level picked (kept for the next game) */
     unsigned picked;                         /* a bit per player: their level holds (their first ball began) */
     unsigned asked;                          /* a bit per player: their pick has shown this game */
     unsigned last_up;                        /* the player and ball last seen (player x 256 + ball) */
+    unsigned game;                           /* the game's own game starts counted (event game_start) at the last look */
+    int game_event;                          /* the port's game_start is counted (else player 1's first ball tells) */
     unsigned open;                           /* the player picking now (0: none) */
     int was_left, was_right;
     uint64_t score_at_open;
@@ -16986,6 +16991,12 @@ static void hand_line(const char *s)
     if (!*s || *s == '#') return;
     if (str_starts(s, "handicap on")) { hand.on = 1; return; }
     if (str_starts(s, "only")) { hand.only = 1; return; }
+    if (str_starts(s, "start ")) {
+        p = s + 6;
+        hand.start = (unsigned)number(&p, &ok);
+        if (!ok) hand.start = 0;
+        return;
+    }
     if (str_starts(s, "setting ") || str_starts(s, "left ") || str_starts(s, "right ")) {
         unsigned *at = s[0] == 's' ? &hand.setting : s[0] == 'l' ? &hand.left : &hand.right;
         p = s + (s[0] == 's' ? 8 : s[0] == 'l' ? 5 : 6);
@@ -17054,9 +17065,24 @@ static int hand_new_game(unsigned *last_up, unsigned player, unsigned ball)
     return now == 256u + 1u && was != now;
 }
 
+static void hand_line_back(void);            /* below */
+
+/* a new game: the game's own game_start (round 3, DoomWalrus666: "after a start+L flipper reset the handicap was no
+ * longer accessible" - Start held with the left flipper ends the game, and the next one is player 1's first ball
+ * again, which the player and ball bytes never left); without the event, player 1's first ball after anything else */
 static void hand_game_check(void)
 {
-    if (!hand_new_game(&hand.last_up, pm_player(), hand_ball())) return;
+    unsigned g = hand.game_event ? chg_game_now() : 0;
+    int fresh = hand_new_game(&hand.last_up, pm_player(), hand_ball());
+    if (hand.game_event) {
+        fresh = g != hand.game;
+        hand.game = g;
+    }
+    if (!fresh) return;
+    if (hand.open) {                             /* the last game's pick, never taken */
+        hand.open = 0;
+        hand_line_back();
+    }
     if (hand.picked && hand.census) __builtin_memset(hand_seen, 0, sizeof hand_seen);
     hand.picked = hand.asked = 0;
     hand.said = 0;
@@ -17229,6 +17255,11 @@ static void hand_tick(void)
     if (pm_score(pm_player()) != hand.score_at_open) { hand_close("the ball scored"); return; }
     l = switch_held(hand.left);
     r = switch_held(hand.right);
+    if (hand.start && switch_held(hand.start)) {      /* Start held with a flipper ends the game: not a pick */
+        hand.was_left = l;
+        hand.was_right = r;
+        return;
+    }
     if ((l && !hand.was_left && hand.level[p] > -HAND_LEVEL_MAX) || (r && !hand.was_right
                                                                      && hand.level[p] < HAND_LEVEL_MAX)) {
         hand.level[p] += l && !hand.was_left ? -1 : 1;
@@ -17300,6 +17331,13 @@ static void hand_arm(void)
     }
     hand_adj_game = adj_game;                    /* the operator's own values (the records' base) */
     adj_hand_on = 1;
+    events_arm();                                /* counting only: nothing is scored, Insider Connected untouched */
+    if (pm_event("game_start") >= 0) {
+        hand.game_event = 1;
+        hand.game = chg_game_now();
+    }
+    if (!hand.game_event)
+        say("handicap: the game's game_start is not counted - a new game is player 1's first ball after anything else");
     hand.on = 1;
     if (pm_trigger("handlog.on")) hand.census = 1;
     for (i = 0; i < hand_cache_n; i++) {                     /* each record's method, hooked once */

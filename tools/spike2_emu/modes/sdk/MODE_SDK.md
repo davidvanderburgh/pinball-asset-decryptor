@@ -6370,7 +6370,7 @@ card's own program):
     handicap on
     left 60                          the flipper buttons: the pick walks with them (left harder, right easier)
     right 59
-    setting 0x007d1234               the service menu's HANDICAP row's live value (Off/On, On to start with); absent:
+    setting 0x007d1234               the service menu's HANDICAP row's live value (Off/On, Off to start with); absent:
                                      always on (no spare setting was left for the row)
     only                             the card has no modes: the runtime arms this before the score gate and nothing
                                      else, so the scores stay on Insider Connected (it is the operator's settings)

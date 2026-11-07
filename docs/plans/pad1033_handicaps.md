@@ -18,7 +18,7 @@ difficulty handicap setting, I just gave some examples".
   build has 3 DEPRECATED adjustments (Iron Maiden Pro 2), shared with MUSIC MODE, EDITION, the picture settings and
   CO-OP PLAY. So the game's top line (`BALL %d`, PAD-1017's borrow) reads `P2 HANDICAP 0`, the flipper buttons walk
   it (left harder, right easier, -3..+3, starting at that player's last game's level), the ball's first score takes
-  it. One spare setting is a HANDICAP row (Off/On, On to start with) to switch the pick off.
+  it. One spare setting is a HANDICAP row (Off/On; round 3: Off to start with, the reporter's ask) switches the pick.
 - **The levels are the app's** (`plugins/stern/handicap.py`): Godzilla's after the reporter's list; any other game's
   worked out of its program - ball save 2 s a level (none at -3) and its `..._DIFFICULTY` adjustments (<= 10 steps,
   the lowest the easiest, as every menu has them) in by thirds.

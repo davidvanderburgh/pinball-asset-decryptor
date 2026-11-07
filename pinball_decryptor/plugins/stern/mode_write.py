@@ -1044,7 +1044,7 @@ def handicap_into(result, game_elf, scratch, setting=0, only=False):
         f.write(text)
     result.handicap_file = path
     result.lines.append("handicaps: %s" % HC.HOW)
-    result.lines.append("handicaps: %s" % ("switched in the service menu (HANDICAP), On to start with" if setting
+    result.lines.append("handicaps: %s" % ("switched in the service menu (HANDICAP), Off to start with" if setting
                                            else "always on (no HANDICAP row in the service menu)"))
     for lv, words in said:
         result.lines.append("handicap %+d: %s" % (lv, "; ".join(words)))

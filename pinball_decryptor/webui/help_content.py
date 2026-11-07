@@ -3466,8 +3466,9 @@ PREVIEW_HELP = {
                 "- The machine's settings are never changed: the game reads the player's level while they "
                 "are up.\n"
                 "- The service menu gets a **HANDICAP** row (Adjustments > Machine Settings > Attract Mode, "
-                "or at the end of Standard Adjustments), On to start with. Off: no player is asked and the "
-                "game plays as it always has. A game with no spare row left for it has handicaps always on.\n"
+                "or at the end of Standard Adjustments), Off to start with: set it to **On** to play with "
+                "handicaps. Off: no player is asked and the game plays as it always has. A game with no spare "
+                "row left for it has handicaps always on.\n"
                 "- Like the operator's own settings, handicaps keep the card on Insider Connected. With "
                 "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
                 "- In a co-op game each teammate picks one at their first ball.",

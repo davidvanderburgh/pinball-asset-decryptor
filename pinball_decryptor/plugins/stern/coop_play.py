@@ -15,7 +15,13 @@ attract item) the Insider Connected gate holds back only while it says On - Off,
 Connected.
 
 PAD-1031: ``coop_play: {"characters": ...}`` gives the team characters to pick from (the pick, their abilities and
-their select cards: the second half of this module)."""
+their select cards: the second half of this module).
+
+PAD-1042 (DoomWalrus666): the CO-OP PLAY row has a third value, Team 2v2 (stored 0 Off, 1 Co-op, 2 Team 2v2, shown as
+those numbers with the names in its help line; an Off/On row's 0 and 1 keep their meaning). Set to 2, each Start in the
+first ball adds the next player: players 1 and 2 are one team, 3 and 4 the other, each team with its own score and its
+own progress (the game plays two players, a team each) and the turns alternating the teams (pad_mode_runtime.c "TEAM
+2V2"). The characters' pick works as in co-op: each player picks at their first ball, no two the same."""
 import re
 import struct
 
@@ -37,13 +43,18 @@ NO_TITLE = ("The app cannot tell which game this project is for, so it cannot gi
 OWN = "%s has co-op play of its own, so the app does not add another."
 NO_PORT = ("The app does not know where %s keeps its players yet, so it cannot give it co-op play.")
 NO_BUTTON = "The game program names no right flipper button, so a teammate could not join."
-#: round 2: the service menu's row (menu_settings.COOP_PLAY): its values, and its help line in the game's own menu
-MENU_VALUES = 2
-#: (David) the row shows Off/On; the help says what On costs first (63 characters: the spare help lines' room)
-MENU_HELP = "On disables most Insider Connected features; R flip+Start joins"
+#: round 2: the service menu's row (menu_settings.COOP_PLAY): its values, and its help line in the game's own menu.
+#: PAD-1042: three, 0 Off, 1 Co-op, 2 Team 2v2 (the row shows the number; Off/On had 0 and 1, so a pick is kept)
+MENU_VALUES = 3
+MENU_OFF, MENU_COOP, MENU_TEAMS = 0, 1, 2
+#: the help names the values and says what they cost (63 characters: the spare help lines' room)
+MENU_HELP = "0 Off, 1 Co-op, 2 Team 2v2; 1-2 disable most Insider Connected"
 #: how a teammate joins, for the tab and the log
 HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
        "a plain Start adds a competing player as always")
+#: PAD-1042: how a team game is played, for the tab and the log
+TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), each Start in the first ball adds the next player: players 1 and 2 "
+             "against players 3 and 4, each team with its own score and progress, the teams taking turns")
 
 
 class CoopError(ValueError):

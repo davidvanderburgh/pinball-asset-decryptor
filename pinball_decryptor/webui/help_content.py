@@ -3437,10 +3437,18 @@ PREVIEW_HELP = {
                 "rename them as you like.",
                 "**Switch it on and off in the service menu**, under the tick, gives the game's own "
                 "menu a **CO-OP PLAY** row instead (Adjustments > Machine Settings > Attract Mode, or "
-                "at the end of Standard Adjustments), Off to start with:\n\n"
-                "- **On:** teammates join as above, and most Insider Connected features are off: the "
+                "at the end of Standard Adjustments), 0 to start with:\n\n"
+                "- **1 (Co-op):** teammates join as above, and most Insider Connected features are off: the "
                 "card's scores, high scores and achievements stay on the machine.\n"
-                "- **Off:** the game plays and reports to Insider Connected as it always has, on a card "
+                "- **2 (Team 2v2):** players 1 and 2 play against players 3 and 4. Each Start in the first "
+                "ball adds the next player, no flipper button needed. Each team has one score and its own "
+                "progress, and the teams take turns: player 1, player 3, player 2, player 4, then the next "
+                "ball. The top of the screen says whose turn it is (**TEAM 2 P3** while player 3 is up), the first two "
+                "score panels are team 1's and team 2's, and the higher team score goes on a **TEAM PLAY** "
+                "board of its own. Characters work as in co-op: each player picks one at their first ball, "
+                "no two the same. With three players the lone player on team 2 plays both of its turns. "
+                "Insider Connected is off as with 1.\n"
+                "- **0 (Off):** the game plays and reports to Insider Connected as it always has, on a card "
                 "with no modes. A card that also carries modes keeps its scores off Insider Connected "
                 "either way.",
             ]),

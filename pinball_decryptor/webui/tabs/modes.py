@@ -728,9 +728,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             if why:
                 note, kind = why, "err"
             elif menu:
-                note = ("On the card: CO-OP PLAY in the game's service menu (%s), Off to start with. Turning it On "
-                        "disables most Insider Connected features (scores, high scores and achievements stay on the "
-                        "machine) and lets the right flipper button + Start add a teammate; Off, the game plays and reports as it always has%s."
+                note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. 1 (Co-op) "
+                        "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 2 a "
+                        "team against players 3 and 4, each Start adding the next player. 1 or 2 disables most "
+                        "Insider Connected features (scores, high scores and achievements stay on the machine); at 0 "
+                        "the game plays and reports as it always has%s."
                         % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
                            else " (this project's modes keep the card's scores off Insider Connected anyway)"))
             else:
@@ -743,9 +745,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
     COOP_MENU_TIP = (
-        "Adds CO-OP PLAY to the game's own service menu, Off or On. On disables most Insider Connected features "
-        "(the card's scores, high scores and achievements stay on the machine) and teammates join with the right "
-        "flipper button and Start. Off: the game plays and "
+        "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Co-op, 2 Team 2v2. At 1 teammates join with the "
+        "right flipper button and Start. At 2 players 1 and 2 play as a team against players 3 and 4, each team "
+        "with its own score and progress, taking turns. 1 or 2 disables most Insider Connected features (the "
+        "card's scores, high scores and achievements stay on the machine). At 0 the game plays and "
         "reports to Insider Connected as it always has. A card that also carries modes keeps its scores off Insider "
         "Connected either way.")
 

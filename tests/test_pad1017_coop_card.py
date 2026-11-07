@@ -152,9 +152,11 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
         AdjustmentTable(elf), [__import__("pinball_decryptor.plugins.stern.engine", fromlist=["_"])._CoopMenu(lambda *a: None).wanted()])
     assert not refused and len(settings) == 1
     s = settings[0]
-    # (David) Off/On like the game's CUSTOM MESSAGE (stored 0 and 1), Off to start with
-    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", 2, 0, 0, M.onoff_kind(AdjustmentTable(elf)))
-    assert s.kind == 1 and "disables most Insider Connected features" in CP.MENU_HELP and len(CP.MENU_HELP) <= 63
+    # PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2 (Off/On's 0 and 1 keep their meaning), shown as a number the way GAME ID
+    # is, Off to start with
+    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", 3, 0, 0, M.number_kind(AdjustmentTable(elf)))
+    assert s.kind == 2 and len(CP.MENU_HELP) <= 63
+    assert CP.MENU_HELP.startswith("0 Off, 1 Co-op, 2 Team 2v2") and "disable most Insider Connected" in CP.MENU_HELP
     assert s.help == CP.MENU_HELP and s.where == "Adjustments > Machine Settings > Attract Mode"
     raw = bytearray(elf)
     for off, data in writes.items():
@@ -187,7 +189,7 @@ def test_a_spare_the_program_cannot_give_is_passed_over():
     from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
     with open(elf, "rb") as f:
         t = AdjustmentTable(f.read())
-    settings, _w, _c, refused = M.plan_many(t, [(M.COOP_PLAY, 2, (), {"help_text": CP.MENU_HELP, "onoff": True})])
+    settings, _w, _c, refused = M.plan_many(t, [(M.COOP_PLAY, 3, (), {"help_text": CP.MENU_HELP, "from_zero": True})])
     assert not refused and settings[0].key == M.COOP_PLAY
 
 
@@ -205,7 +207,8 @@ def test_the_modes_tab_sub_tick_switches_it_in_the_service_menu(tmp_path, monkey
     assert svc.set_coop_menu(True) is True
     assert state["coop_on"] is True and state["coop_menu"] is True
     assert "CO-OP PLAY in the game's service menu" in state["coop_note"]
-    assert "Off, the game plays and reports as it always has" in state["coop_note"]
+    assert "2 (Team 2v2) makes players 1 and 2 a team against players 3 and 4" in state["coop_note"]
+    assert "at 0 the game plays and reports as it always has" in state["coop_note"]
     assert svc.set_coop_menu(False) is True and state["coop_menu"] is False
     assert state["coop_note"].endswith("Its scores stay off Insider Connected.")
     js = _read(os.path.join(REPO, "pinball_decryptor", "webui", "static", "js", "tabs", "modes.js"))
@@ -223,7 +226,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     from tests import test_spike2_mode_roster as R
     src = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c"))
     body = R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)")
-    assert "return !while_at || value == 1u;" in body                          # no row: always; a row: On (1)
+    assert "return !while_at || value == 1u || value == 2u;" in body           # no row: always; a row: 1 or 2
     gate = R._lift(src, "static int on_agent_begin(unsigned *r)")
     assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")
@@ -247,7 +250,7 @@ static char insider_endpoint[INSIDER_ENDPOINT_MAX];
 static unsigned insider_dropped[4];
 static int insider_achq = 28;
 static unsigned insider_achq_held;
-static unsigned coop_value = 0;                       /* the CO-OP PLAY row's live value (0 Off, 1 On) */
+static unsigned coop_value = 0;                       /* the CO-OP PLAY row's live value (0 Off, 1 Co-op, 2 Team 2v2) */
 @BLOCKED@
 @FNS@
 static int ask(const char *endpoint, unsigned type)
@@ -266,6 +269,9 @@ int main(void)
     coop_value = 1;
     printf("on %d %d %d %d %d\n", ask("/api/v3/game/session_end", 5), ask("/api/v1/game/high_score_events", 5),
            ask("/ingest/v1/game/game_events", 5), ask("", 28), ask("/api/v1/player/properties", 5));
+    coop_value = 2;                                      /* PAD-1042: Team 2v2 holds back as co-op does */
+    printf("teams %d %d %d %d\n", ask("/api/v3/game/session_end", 5), ask("/api/v1/game/high_score_events", 5),
+           ask("/ingest/v1/game/game_events", 5), ask("", 28));
     insider_while = 0;                                   /* a card with modes: the whole gate */
     coop_value = 0;
     printf("modes %d %d\n", ask("/api/v3/game/session_start", 5), ask("", 28));
@@ -288,4 +294,5 @@ def test_the_gate_holds_back_only_while_co_op_play_is_on(tmp_path):
                       flags=("-no-pie",)).splitlines()
     assert out == ["off 0 0 0 0",            # CO-OP PLAY Off: the session, high scores, events and query all go out
                    "on 1 1 1 1 0",           # On: all held back; the rest of Insider Connected still goes
+                   "teams 1 1 1 1",          # PAD-1042: Team 2v2 holds back the same
                    "modes 1 1"]              # a card with modes: always held back

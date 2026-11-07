@@ -6188,6 +6188,13 @@ own player change goes between them. The runtime takes each team's players in tu
   board of the runtime's own (PAD-640/663's one-entry filing: the higher team score is the one that can take it),
   never on the game's own boards.
 
+Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1042/rig`: job.sh, team.cfg; tryset.py builds a Write
+override set with the row defaulting to 2): 4 players through the game's own CO-OP PLAY row at 2 (read live at Start;
+the arm-time log reads the store before the game has loaded it) - turns P1 P3 P2 P4 for balls 1-3, two team panels
+with their own scores (11,717,290 / 12,465,960), each player's own character pick, team 2's score on TEAM PLAY with
+its initials and the attract mode's TEAM PLAY CHAMPION page, the game's own champions untouched; 3 players (`teams
+on`): player 3 played both of team 2's turns each ball; no faults.
+
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

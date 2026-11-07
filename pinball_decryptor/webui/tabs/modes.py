@@ -880,6 +880,27 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return True
 
     @rpc
+    def coop_chars_pictures(self):
+        """PAD-1031: Pictures from folder...: every picture in a folder named after a character becomes its picture
+        (the set a game's owners share: godzilla_1954.png ...)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project or not _CP.load_characters(project)["list"]:
+            return False
+        folder = self.window.ask_folder("modes_file", "Choose the folder of character pictures")
+        if not folder:
+            return False
+        try:
+            found, missing = _CP.pictures_from_folder(project, folder)
+        except _CP.CoopError as e:
+            self._say(str(e))
+            return False
+        self._say("co-op characters: %d picture(s) from %s%s" % (found, os.path.basename(folder) or folder,
+                  "; none for " + ", ".join(missing) if missing else ""))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
     def coop_chars_refresh(self):
         """PAD-1031: the Co-op characters dialog's rows and the abilities read off the project's card (cached)."""
         self._publish_coop_chars(self.project())

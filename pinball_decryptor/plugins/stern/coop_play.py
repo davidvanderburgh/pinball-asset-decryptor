@@ -700,6 +700,35 @@ def pick_screens(project, characters=None, words_for=None):
     return out
 
 
+def picture_file_name(name):
+    """The file name a character's picture has in a folder of them: ``godzilla_1954`` for GODZILLA 1954."""
+    return "_".join("".join(ch for ch in str(name).lower() if ch.isalnum() or ch == " ").split())
+
+
+def pictures_from_folder(project, folder):
+    """Every picture in *folder* named after one of the project's characters (:func:`picture_file_name`, any
+    picture extension) copied in as its picture; returns ``(found, [names without one])``."""
+    import os
+    chars = load_characters(project)
+    files = {}
+    try:
+        for f in os.listdir(folder):
+            stem, ext = os.path.splitext(f)
+            if ext.lower() in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+                files[stem.lower()] = os.path.join(folder, f)
+    except OSError as e:
+        raise CoopError("The folder could not be read: %s" % e) from None
+    found, missing = 0, []
+    for i, c in enumerate(chars["list"]):
+        src = files.get(picture_file_name(c["name"]))
+        if src:
+            save_picture(project, i, src)
+            found += 1
+        else:
+            missing.append(c["name"])
+    return found, missing
+
+
 def save_picture(project, index, source):
     """Copy *source* (a picture file) into the project for character *index* and name it there; returns the
     characters as stored. Raises :class:`CoopError` when the file is not a picture."""
@@ -824,7 +853,7 @@ def _cover(img, w, h):
     from PIL import Image
     s = max(w / img.width, h / img.height)
     im = img.resize((max(1, round(img.width * s)), max(1, round(img.height * s))), Image.LANCZOS)
-    x, y = (im.width - w) // 2, (im.height - h) // 4          # keep heads: crop more from the bottom
+    x, y = (im.width - w) // 2, int((im.height - h) * 0.12)   # keep heads: nearly all the crop off the foot
     return im.crop((x, y, x + w, y + h))
 
 
@@ -868,7 +897,8 @@ def _portrait(project, character, w, h, accent, accent2):
     path = picture_path(project, character) if character else ""
     if path:
         with Image.open(path) as im:
-            pic = _cover(im.convert("RGBA"), w, h)
+            src = im.convert("RGBA")
+        pic = _cover(src, w, h)                                  # fills the frame; a tall still keeps its head
         shade = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         sd = ImageDraw.Draw(shade)
         for i in range(h // 3):                                  # a dark fade at the foot, as a poster's

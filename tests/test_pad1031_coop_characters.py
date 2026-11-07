@@ -424,3 +424,25 @@ def test_tags_name_what_sets_a_character_apart():
     preset = CP.read_preset(CP.presets()["godzilla"])["characters"]
     assert preset["theme"]["title"] == "CHOOSE YOUR GODZILLA"
     assert set(CP.CARD_LINES) == {a[0] for a in CP.ABILITIES}         # every ability has the player's words
+
+
+def test_a_folder_of_pictures_named_after_the_characters_fills_them_in(tmp_path):
+    """The set a game's owners share (the Discord bundle): godzilla_1954.png ... one per character."""
+    from PIL import Image
+    project = str(tmp_path / "p")
+    os.makedirs(project)
+    CP.save_characters(project, {"pick": True, "list": [{"name": "GODZILLA 1954", "ability": ""},
+                                                        {"name": "KING KONG VS GODZILLA", "ability": ""},
+                                                        {"name": "SHIN GODZILLA", "ability": ""}]})
+    folder = tmp_path / "pics"
+    folder.mkdir()
+    Image.new("RGB", (40, 60), (200, 10, 10)).save(folder / "godzilla_1954.png")
+    Image.new("RGB", (40, 60), (10, 200, 10)).save(folder / "King_Kong_vs_Godzilla.JPG")
+    (folder / "notes.txt").write_text("x")
+    assert CP.picture_file_name("KING KONG VS GODZILLA") == "king_kong_vs_godzilla"
+    assert CP.pictures_from_folder(project, str(folder)) == (2, ["SHIN GODZILLA"])
+    got = CP.load_characters(project)["list"]
+    assert got[0]["picture"] == "coop/character_1.png" and got[1]["picture"] == "coop/character_2.jpg"
+    assert not got[2]["picture"]
+    with pytest.raises(CP.CoopError):
+        CP.pictures_from_folder(project, str(tmp_path / "missing"))

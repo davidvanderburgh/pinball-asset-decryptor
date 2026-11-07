@@ -71,6 +71,14 @@ def main():
                 page.wait_for_selector("text=Co-op characters", timeout=180000)
                 webui_shot.api(url, "modes.coop_chars_preset")
                 page.wait_for_selector(".modes-coop-ch-row", timeout=180000)
+                pics = os.path.join(os.path.dirname(HERE), "..", "..", "artifacts", "PAD-1031", "discord", "godzilla_characters")
+                pics = os.environ.get("PAD1031_PICTURES", os.path.normpath(pics))
+                if os.path.isdir(pics):             # the Discord bundle of his stills, when it is beside the worktree
+                    sys.path.insert(0, repo)
+                    from pinball_decryptor.plugins.stern import coop_play as CP
+                    CP.pictures_from_folder(project, pics)
+                    webui_shot.api(url, "modes.coop_chars_refresh")
+                    time.sleep(2)
                 page.mouse.move(5, 990)
                 time.sleep(2)
             page.screenshot(path=out)

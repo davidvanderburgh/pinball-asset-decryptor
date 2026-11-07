@@ -201,3 +201,16 @@ process; guestmem.py takes the first `game` on the box), job4.sh (proof job), jo
 
 All eleven abilities on Godzilla LE 1.16 and Pro 1.16, the generic pick (every co-op game), its screens, the
 Characters dialog and Godzilla's customization file. Pro 1.15 has no co-op.
+
+## The cards and the Discord bundle (2026-11-06, David)
+
+David: "production quality" and "render the character selects with the examples he provided in discord ... bundle
+those assets on the discord chat on release (not bundle them in the app)". coop_play.pick_card draws one finished
+select card per character (header, lit portrait frame, name, ability badge + CARD_LINES, roster strip, controls; 2x,
+flattened over an opaque body and premultiplied: ImageDraw replaces pixels and the game blends premultiplied). The
+eleven stills are cut from his collage (artifacts\PAD-1031\mail, 8x4 tiles: 0 1954, 3 KingGoji, 8 DAM, 10 MosuGoji,
+16 1985, 17 BioGoji, 19 1993, 21 Burning, 22 2000, 23 GMK, 31 Shin minus the watermark) into
+artifacts\PAD-1031\discord\godzilla_characters (+ .zip, README): NEVER in the repo (Toho stills). The dialog's
+Pictures from folder... (coop_play.pictures_from_folder: files named picture_file_name(name)) installs the bundle in
+one click. Emulator rc4: the cards with his stills on Godzilla LE 1.16, 12 of 12 found. On release: attach the zip to
+the Discord thread.

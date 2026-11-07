@@ -229,6 +229,8 @@ export function CoopCharsDialog({ s, onClose }) {
     footer=${html`<span class="small muted">${ch.note}</span><span class="grow"></span>
       ${ch.preset ? html`<${Button} size="sm" kind="ghost" onClick=${() => call("modes.coop_chars_preset")}
         title=${`The app's set for ${ch.preset}, in place of these: a character for each ability, named after the game's eras. Rename them as you like.`}>Load ${ch.preset}'s set<//>` : null}
+      ${rows.length ? html`<${Button} size="sm" kind="ghost" icon="image" onClick=${() => call("modes.coop_chars_pictures")}
+        title="A folder of pictures, one per character, named after it (godzilla_1954.png): each becomes that character's picture.">Pictures from folder…<//>` : null}
       <${Button} size="sm" icon="plus" disabled=${rows.length >= (ch.max || 16)} onClick=${() => call("modes.coop_char_add")}
         title=${`One more character (up to ${ch.max || 16}).`}>Add<//>
       <${Button} onClick=${onClose}>Close<//>`}>

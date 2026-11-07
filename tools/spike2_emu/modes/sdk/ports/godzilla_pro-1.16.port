@@ -1005,3 +1005,26 @@ value coop_ball_msg          1255
 
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x00409454 0xe92d43f0 0xe2505000
+# PAD-1031: co-op characters (pad_mode_runtime.c "co-op characters")
+# the adjustment-changed handler ({u16 id}): LIGHT ALLY's one-shot (a gift)
+site coop_adj_changed     0x000595b8 0xe92d4070 0xe1a05000
+# the power-up add (this, n): a boost scales n
+site coop_boost           0x00149654 0xe92d4030 0xe24dd014
+# copies LIGHT BATTLE DIFFICULTY into the battle rule's record (hooked: the rule's object)
+site coop_cache_173       0x0012175c 0xe92d40f8 0xe1a04000
+value coop_cache_173_at   0x10
+# copies BUILDING DIFFICULTY into the building rule's record (hooked: the rule's object)
+site coop_cache_168       0x0012b7a4 0xe92d40f8 0xe1a07000
+value coop_cache_168_at   0x4
+# the jets rule (rule 0x15 of the game's rule table): JET FIGHTER CHAMPION's and the bonus's jets destroyed at
+# rule + player x 4 + 0xa8
+data  coop_count_jets_rule 0x007a8444
+value coop_count_jets_at   0xa8
+# the tank rule's game-start method; the city map's TANKS n/10 at this + (player - 1) x 4 + 0x48
+site coop_count_tanks     0x0017d46c 0xe92d43f0 0xe1a04000
+value coop_count_tanks_at 0x44
+# the battles' rules (ids 12-18: the seven places of the selection screen) and the tier-1 ones (12-15): a character's
+# spot sends one of a running battle's lit shots; its unlock reads UNLOCK ALL MONSTER BATTLES (334) as 1 once a
+# tier-1 battle has started on its turn (the selection screen's slot state reads it live: Premium/LE 0x122ae8)
+value coop_battle_rules    0x7f000
+value coop_tier1_rules     0xf000

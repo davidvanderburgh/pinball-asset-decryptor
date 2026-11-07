@@ -1,0 +1,216 @@
+# PAD-1031: co-op characters - each teammate picks one, each one plays differently
+
+DoomWalrus666 (Godzilla): at the start of each player's ball 1 the battle selection screen comes up with versions of
+Godzilla (1954, GMK, 2000, 1985, Destroy All Monsters, Burning ...) in its tiles and portrait; each player picks one
+(or Random), no two the same, and each has its own ability:
+
+    longer ball save                       easier to light battles          starts with 4 jets destroyed
+    ball save on the Action button         starts with a random ally        starts with 4 tanks destroyed
+    easier to light the heat ray           spot a shot in a battle (Action) Tier 2 unlocked by STARTING a Tier 1 battle
+    easier power-ups                       easier to start Building Multiball
+
+daveyvandy: a customization of PAD-1017's co-op, Godzilla-specific, "but the user needs the ability to customize
+co-op mode like this for other games as well ... a generic entry point ... deliver the co-op customization file
+adjacently".
+
+## The shape
+
+Co-op plays ONE player for the team (PAD-1017): the progress is shared, the runtime knows whose turn it is. So a
+character is a set of abilities that hold **while its teammate is up**, and a one-time gift at its teammate's first
+ball. Nothing per player has to be copied.
+
+- **coop.cfg** (generic; the Write tab writes it from the project's sidecar `coop_play.characters`):
+
+      pick on                                  each teammate picks at their first ball (RANDOM is offered last)
+      left 60                                  the left flipper button (the pick walks with both flippers)
+      action 34                                the Action button (the pick; the ball save ability)
+      character adj:94=15 GODZILLA 1954|LONGER BALL SAVE
+      character save:10 GODZILLA 2000|ACTION BALL SAVE
+      character adj:195=4 GODZILLA GMK|EASIER HEAT RAY
+
+  `adj:<id>=<v>`: the game's adjustment `id` reads `v` while the teammate is up (the getter, `site adjustment`, is
+  wrapped; NVRAM is never written). `save:<s>`: a double press of the Action button gives an `s` second ball save,
+  once a ball. Godzilla's own (run 2): `gift:<id>` one of the game's own one-shot feature adjustments fired at the
+  teammate's first ball (the adjustment-changed handler 0x595b8 on Pro 1.16: LIGHT ALLY 311, ADD 1 POWERUP 312,
+  LIGHT SELECT CITY 310 ...), `jets:<n>`, `tanks:<n>`, `spot`, `tier2`.
+- **The pick** (generic): the game's top line ("BALL %d", PAD-1017's borrow) reads `PLAYER 2 PICK: GODZILLA 1954`
+  and then what it does, in turn; the flippers walk (taken ones skipped), Action takes it, 20 s takes the one shown.
+  RANDOM takes one nobody has.
+- **Godzilla's look** (run 3): the battle selection screen (PAD-707's tiles, portraits and cursor walk) dressed with
+  the characters' pictures while a teammate picks.
+- **The customization file**: `coop_presets/<title stem>.json` beside coop_play.py (Godzilla's: the eleven abilities,
+  names after the reporter's list; pictures are the owner's), loaded in the Modes tab's Characters... dialog; any
+  game gets the generic abilities its program's adjustments allow.
+
+## Godzilla's adjustments (Pro 1.16 / LE 1.16 ids)
+
+| ability | how | id |
+|---|---|---|
+| longer ball save | AD_BALL_SAVE_TIME at its max (15) | 94 |
+| easier heat ray | AD_HEAT_RAY_SPINS_PER_LEVEL at its min (4) | 195 |
+| easier battles | AD_LIGHT_BATTLE_DIFFICULTY at its min (0) | 173 |
+| easier Building Multiball | AD_BUILDING_DIFFICULTY at its min (0) | 168 |
+| random ally | gift: LIGHT ALLY (0x11f318 on the ally object) | 311 |
+| easier power-ups | run 2: the power-up add (0x149654(obj, n)) counts double while up | - |
+
+## Runs
+
+1. Generic: coop.cfg lines, the runtime's pick and abilities (adj, save), coop_play.py's catalog and cfg lines,
+   tests, emulator proof on Godzilla LE 1.16 (the pick walk, the adjustment read while up, the Action save).
+2. Godzilla's own: gift, power-ups, jets, tanks, spot a shot, tier 2 (RE in the emulator).
+3. The Modes tab's Characters... dialog and the preset; Godzilla's battle selection screen as the pick; docs.
+
+## Run 1 (2026-11-06): done, emulator-proven
+
+Godzilla LE 1.16, 3 teammates, rig kit `C:\tmp\PAD-1031\rig` (job.sh, gz.cfg, go.sh l1.txt <out> as root):
+teammate 1 picked GODZILLA 1954 with Action (each join re-opens teammate 1's pick: the joiner's held right flipper had
+walked it to the 2nd character in the first run); the ball out got its save at the pick (`ball save: 15 s`); the
+getter answered 94 -> 15 (its own 12) at each later save; teammate 2 picked 2000 and two Action presses gave a 10 s
+save that gave a drain back; teammate 3's left walked past 2000 and 1954 (taken) to RANDOM, right back to GMK, and the
+heat ray read 195 -> 10 (its own 20) at every spin. No faults. The Modes tab's Characters... dialog and Load
+Godzilla's set work (shots in artifacts\PAD-1031).
+
+Learned: the game's top line ("BALL %d") is small on Godzilla and a long name runs into CREDITS - the pick needs a
+display of its own (run 3). LIGHT BATTLE DIFFICULTY and BUILDING DIFFICULTY are copied into the player's record at the
+game's start (Pro 1.16 0x12175c / 0x12b7a4: `str adj, [this + player*4 + 0x10]` / `+4`), so the getter alone does not
+change them: run 2 writes the record while the teammate is up. The one-shot "feature" adjustments 309-334 (LIGHT ALLY,
+ADD 1 POWERUP, LIGHT SELECT CITY ...) are acted on by the adjustment-changed handler (Pro 1.16 0x595b8, `{u16 id}` in
+r0), which then sets them back to 0: run 2 calls it with the getter answering 1.
+
+## Left
+
+2. Godzilla's own: battles + building (the player record), random ally (LIGHT ALLY through 0x595b8), easier power-ups
+   (the power-up add 0x149654 counts double while up), 4 jets / 4 tanks destroyed at the first ball, spot a shot in a
+   battle on Action, tier 2 after STARTING a tier 1 battle. Ports: Pro 1.16, LE 1.16, Pro 1.15.
+3. The pick's look. David (2026-11-06): the design is open-ended, so DoomWalrus666 approves it - better, he can iterate
+   it on his side without blocking a release. So: each character's picture (his own files, never bundled) in the
+   Characters dialog, a still preview of the pick screen there (battle_select.preview's way), and on Godzilla the
+   battle selection screen dressed with them (PAD-707's tiles/portraits/cursor walk) while a teammate picks; any other
+   game a screen of the runtime's own (the build's mode-screen node) in place of the top line.
+
+## Run 2 (2026-11-06): Godzilla's ally, battles, building, power-ups - mechanics emulator-proven
+
+Runtime kinds: `boost:<pct>` (`site coop_boost`, the title's add-n call, n scaled while up), `gift:<id>` (`site
+coop_adj_changed`, called with {u16 id} at the pick while the getter answers 1 once) and the record holds (`site
+coop_cache_<id>` hooked to learn the rule's object, `value coop_cache_<id>_at`; held at what the getter would answer
+while up, given back as the harder of the team's own and what play made of it). Port lines on LE 1.16 and Pro 1.16
+(Pro 1.15 has no co-op: none). LE 1.16 / Pro 1.16: adj-changed 0x598b4 / 0x595b8, power-up add 0x14cb3c / 0x149654,
+battle record 0x12406c / 0x12175c (+0x10), building record 0x12e168 / 0x12b7a4 (+0x4).
+
+Rig run r3 (job2.sh, gz2.cfg, 4 teammates): the battle rule at 0x7b0c70 and building rule at 0x7b1d10 seen at the
+game's start; DESTROY ALL MONSTERS' gift: "the game's own feature 311 given (it read it)"; GODZILLA 1985: the battle
+record held 0 (team's 1) in each of its turns, back to 1 at their end; MOTHRA: building held 0 (team's 0); no fault.
+No power-up was earned in that play, so the boost never fired.
+
+## Left (run 3+)
+
+- Visible proofs: an ally lit after the gift (lamps/ally state), a battle lit by ONE ramp while GODZILLA 1985 is up
+  (two for the others), a power-up counted twice (a play that earns one, or the ADD 1 POWERUP gift `gift:312` with
+  `boost:200` in a test cfg: "the game adds 1, 2 with the boost").
+- Jets / tanks at the first ball: JET FIGHTER count = rule 0x15 (manager 0x7b0ce4 lookup 0xd3fa0) + p*4 + 0xa8 (LE),
+  a bonus/champion count; the TANKS n/10 qualify is the tank rule's record (init 0x180e44 on LE: +4 qualify difficulty,
+  +(p-1)*4+0x18 cleared) - find the kill increment and what qualifies, then a `count:` kind (record += n at the pick).
+- Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle (PAD-706's battle progression code).
+- The pick's screen (run 1's note) and the Characters dialog's pictures/preview.
+
+## Run 3 (2026-11-06): visible proofs; jets/tanks not yet
+
+Rig kit additions: `rig/memrd.py <dump> <addr>...` reads THIS slot's game memory (guest at +0x10000 in the host
+process; guestmem.py takes the first `game` on the box), job4.sh (proof job), job5/6.sh (counts).
+- Ally (run gz_run4, mem.txt): LIGHT ALLY's object 0x7b2e28 (LE), ally vector at +0x1c, 16-byte entries, word
+  (player - 1): before the pick 0/0/0, after the gift 0/0/1 - it lights the next unlit ally in the game's own order
+  (0x121c28), not a random one (the ability says so).
+- Easier battles: battle rule 0x7b0c70 (+0x14 difficulty, +0x24/+0x34 left/right ramp still needed, player 1): the
+  control teammate's one left ramp left 1/1 and the map said SHOOT RAMPS TO LIGHT BATTLE; GODZILLA 1985 (held 0):
+  one left ramp -> 0/0 and the map said BATTLE READY; the next teammate: difficulty back to 1. Proof frames in
+  artifacts\PAD-1031\proof_*.png.
+- Double power-ups (gz_run3): ADD 1 POWERUP through the gift path, boosted: "the game adds 1, 2 with the boost" and
+  the power-up meter filled two segments.
+- Building: same mechanism as battles (held 0, given back); the rig's BUILDING DIFFICULTY is already 0, so no visible
+  difference to show.
+- `count:<name>+<n>` is in the runtime (site coop_count_<name> = the rule's game-start method, hooked; value
+  coop_count_<name>_at = this + player x 4 + at). NOT in any port yet: jets at the method 0x15c7a8 (LE; Pro
+  0x159084) +0xa4 wrote 4, but the bonus (0x197260: rule 0x15 + p*4 + 0xa8) and the champion getter (0x6425c: via
+  0x3386e0(player)) index the player differently - prove which slot is read (the PAD-1028 champion award's count, or
+  the bonus page) before shipping. Tanks: 0x180e44 (Pro 0x17d46c) +0x14 is NOT the map's TANKS n/10 (it stayed 0/10);
+  no rig press killed a tank (scoop, Godzilla target, left ramp) - find what does, then diff the rule (job6.sh).
+
+## Left (run 4+)
+
+- Jets and tanks fields (above), then their port lines on LE 1.16 and Pro 1.16.
+- Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle.
+- The pick's screen, and the Characters dialog's pictures/preview (David: DoomWalrus666 iterates the look himself).
+
+## Run 4 (2026-11-06): jets and tanks
+
+- Tanks: a diff of the tank rule (0x7b0d68 on LE) across 64 shots: +0x48 went 0 -> 1 with the map's TANKS 1/10, so the
+  count is this + (player - 1) x 4 + 0x48 (port `value coop_count_tanks_at 0x44`; +0x18 was wrong). gz_run9: 4 at the
+  pick, three tanks killed by shots, the map read TANKS 7/10 (proof_tanks_4_plus_3.png). The count is the game's per
+  ball/city one: it was 0/10 again in teammate 2's turn, as the game resets it.
+- Jets: the game's readers (JET FIGHTER CHAMPION's getter 0x6425c, the bonus 0x197260) use rule_table[0x15] (LE table
+  0x7b4aa8, Pro 0x7a83f0; 0x3386e0 only checks the player is 1-4) + player x 4 + 0xa8. The hooked method 0x15c7a8 is
+  another rule's. The runtime takes `data coop_count_<name>_rule` (where the game keeps the rule's pointer: LE
+  0x7b4afc, Pro 0x7a8444). gz_run9: rule 0x7b5b20, 0x7b5bcc = 4 after the pick.
+- Pro 1.16 lines: tank method 0x17d46c (+0x18 / +0x48 stores matched), jets getter 0x63de4 (rule 0x15, +0xa8).
+
+## Left (run 5+)
+
+- Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle (the game unlocks tier 2 on a WON city:
+  CBattle::stop's bookkeeping, MODE_SDK "A monster in the roster").
+- The pick's screen: per character a screen (picture + words) in the HUD scene, as a mode's own (scene_write.
+  add_screens via mode_assets.build), shown by the runtime while that character is the pick's; coop_plan has no
+  build today (build=None) - a co-op card with characters needs one. Pictures are the owner's (Characters dialog),
+  with a preview there so DoomWalrus666 can iterate the look himself.
+
+## Run 5 (2026-11-06): the pick's own screens
+
+- Build: one screen per character (`PadCoop_<n>`) and `PadCoop_Random` in the HUD scene (scene_write.add_screens, as a
+  mode's own screen): the owner's picture (Characters dialog, Picture...; copied to `<project>/coop/`) or a generated
+  panel with the name; the words "<NAME> - <WHAT IT DOES>". With modes they go into mode_assets.build's pass; co-op
+  alone, coop_into rewrites the HUD from the stock one (the engine now reads the HUD for a co-op pick: fixed the bank
+  path it cleared with it, found by the end-to-end build). coop.cfg `screens <scene>`.
+- Runtime: finds the 12 nodes once the scene is up, hides them, shows the one the pick is on; the top line then says
+  only PLAYER n PICK (it overflowed into CREDITS with names and abilities).
+- Proof: engine.write_overrides on a scratch project (Write's own path; C:\tmp\PAD-1031\tryset2.py -> ovr2), rig
+  jobpick.sh with PAD_OVERRIDE_DIR: "12 of the pick's 12 screens found ... hidden"; the stand-in picture with GODZILLA
+  1954 - LONGER BALL SAVE; right -> the GODZILLA 2000 panel; left x2 -> RANDOM; Action -> gone. artifacts
+  before_/after_pick_screen.png, proof_pick_*.png.
+- Dialog: Picture... / clear / preview (coop_play.preview: the screen on a dark glass) per character.
+
+## Left (run 6+)
+
+- Spot a shot in a battle on Action; tier 2 after STARTING a tier-1 battle.
+- MODE_SDK.md / help: the new kinds (boost, gift, count, caches, screens) and the pick screens.
+
+## Run 6 (2026-11-06): spot a shot, tier 2, docs
+
+- Spot: `spot:<rules>`: two Action presses during a running battle (rules 12-18, `pm_stock_active`) send its lowest
+  lit shot through Godzilla's own shot dispatch (0xd3e2c LE: a static walk of every rule's v[15] with the mask in
+  r2:r3 and a factor on the stack), once a ball. gz_spot3: rule 15's lit 0x800 -> spotted -> lit 0x0.
+- Tier 2: the selection screen's slot state (LE 0x122ae8) reads UNLOCK ALL MONSTER BATTLES (334) live; `unlock:334@
+  0xf000` answers 1 once a tier-1 battle has started on the teammate's turn. gz_spot3: places at the pick 0 0 0 0 1 1 1
+  (tier 2 locked), after rule 15 started 0 0 0 0 0 0 0.
+- MODE_SDK.md (every kind, the screens, the proofs), help text, the Characters dialog's shot.
+
+- Pro 1.16 (gz_pro4, rig kit C:/tmp/PAD-1031/rig jobpro2.sh / gzpro2.cfg: one test character with every
+  port-dependent kind, all in teammate 1's turn - the Pro rig's drains never ended a ball): the boost (1 -> 2), the
+  ADD 1 POWERUP and LIGHT ALLY gifts read, tanks and jets +4, both difficulty records held 0 (team's 1), places 0 0 0 0
+  1 1 1 -> all 0 after Ebirah started, the spot sent Ebirah's 0x200. No fault.
+
+## Done
+
+All eleven abilities on Godzilla LE 1.16 and Pro 1.16, the generic pick (every co-op game), its screens, the
+Characters dialog and Godzilla's customization file. Pro 1.15 has no co-op.
+
+## The cards and the Discord bundle (2026-11-06, David)
+
+David: "production quality" and "render the character selects with the examples he provided in discord ... bundle
+those assets on the discord chat on release (not bundle them in the app)". coop_play.pick_card draws one finished
+select card per character (header, lit portrait frame, name, ability badge + CARD_LINES, roster strip, controls; 2x,
+flattened over an opaque body and premultiplied: ImageDraw replaces pixels and the game blends premultiplied). The
+eleven stills are cut from his collage (artifacts\PAD-1031\mail, 8x4 tiles: 0 1954, 3 KingGoji, 8 DAM, 10 MosuGoji,
+16 1985, 17 BioGoji, 19 1993, 21 Burning, 22 2000, 23 GMK, 31 Shin minus the watermark) into
+artifacts\PAD-1031\discord\godzilla_characters (+ .zip, README): NEVER in the repo (Toho stills). The dialog's
+Pictures from folder... (coop_play.pictures_from_folder: files named picture_file_name(name)) installs the bundle in
+one click. Emulator rc4: the cards with his stills on Godzilla LE 1.16, 12 of 12 found. On release: attach the zip to
+the Discord thread.

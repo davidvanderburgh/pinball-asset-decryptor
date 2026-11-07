@@ -93,7 +93,7 @@ def _serve(repo, scratch, project):
 
 def _modal_text(page):
     try:
-        return page.locator("[role=dialog]").last.inner_text(timeout=2000)
+        return page.locator(".modal").last.inner_text(timeout=2000)
     except Exception:                                       # noqa: BLE001
         return ""
 
@@ -101,7 +101,7 @@ def _modal_text(page):
 def _wait_modal(page, limit=60):
     deadline = time.time() + limit
     while time.time() < deadline:
-        if page.locator("[role=dialog]").count():
+        if page.locator(".modal").count():
             time.sleep(1)
             return _modal_text(page)
         time.sleep(0.5)
@@ -110,7 +110,7 @@ def _wait_modal(page, limit=60):
 
 def _close(page, *names):
     for name in names:
-        b = page.locator("[role=dialog]").last.get_by_role("button", name=name, exact=True)
+        b = page.locator(".modal").last.get_by_role("button", name=name, exact=True)
         if b.count():
             b.first.click()
             time.sleep(1)

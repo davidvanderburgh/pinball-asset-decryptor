@@ -169,17 +169,33 @@ export function PlayButton({ path, label = "Play" }) {
 /* PAD-1033: what each handicap level does on the card's game (read off its program) */
 export function HandicapLevelsDialog({ s, onClose }) {
   const lv = s.hand_levels || {};
-  const rows = lv.rows || [];
+  const grid = lv.grid || [];
+  const levels = lv.levels || [];
   useEffect(() => { call("modes.handicap_levels_refresh"); }, []);
-  return html`<${Modal} title="Handicap levels" icon="list" wide onClose=${onClose}
-    footer=${html`<span class="grow"></span><${Button} onClick=${onClose}>Close<//>`}>
-    <div class="small dim wrap">${s.hand_tip}</div>
+  // a cell: the app's default (its words), the game's own value, or any value the game's own setting offers
+  const opts = (r, c) => [{ value: "", label: `app: ${c.default}` }, { value: "own", label: "game's own" },
+    ...Array.from({ length: r.hi - r.lo + 1 }, (_, k) => ({ value: String(r.lo + k), label: String(r.lo + k) }))];
+  const ink = (l) => (l.startsWith("-") ? "warn-ink" : "ok-ink");
+  return html`<${Modal} title="Handicap levels" icon="list" xwide onClose=${onClose}
+    footer=${html`<span class="small muted">${lv.changed ? `${lv.changed} setting(s) changed from the app's.` : "Every level as the app worked it out."}</span>
+      <span class="grow"></span>
+      <${Button} size="sm" kind="ghost" disabled=${!lv.changed} onClick=${() => call("modes.handicap_defaults")}
+        title="Every level as the app worked it out for this game again.">Defaults<//>
+      <${Button} onClick=${onClose}>Close<//>`}>
+    <div class="small dim wrap">Each column is a level, each row one of the game's own difficulty settings. "app:" is the app's choice; pick the game's own value or any value the setting offers in the service menu instead. Level 0 is always the game's own settings.</div>
     ${lv.why ? html`<${Note} kind="info">${lv.why}<//>` : null}
-    ${rows.length ? html`<div class="modes-hand-levels" style="max-height:min(56vh, 520px)">
-      ${rows.map((r) => html`<div class="modes-hand-row" key=${r.level}>
-        <b class=${r.level.startsWith("-") ? "warn-ink" : r.level.startsWith("+") ? "ok-ink" : ""}>${r.level}</b>
-        <span class=${cx("small wrap", r.level === "0" && "dim")}>${r.words}</span></div>`)}
+    ${grid.length ? html`<div class="modes-hand-grid" style=${`grid-template-columns: minmax(170px, 1fr) repeat(${levels.length}, 136px)`}>
+      <span></span>${levels.map((l) => html`<b key=${l} class=${cx("modes-hand-lv", ink(l))}>${l}</b>`)}
+      ${grid.map((r) => html`
+        <span class="small wrap modes-hand-name" key=${r.name} title=${`${r.name}: ${r.lo} to ${r.hi}`}>${r.label}</span>
+        ${r.cells.map((c) => html`<${Select} key=${r.name + c.level} sm value=${c.value} options=${opts(r, c)}
+          cls=${cx(c.custom && "modes-hand-custom")} title=${`${r.label} at ${c.level}: the app's choice is ${c.default}`}
+          onChange=${(v) => call("modes.handicap_cell", c.level, r.name, v)} />`)}`)}
     </div>` : lv.why ? null : html`<div class="small muted">Reading the game program on the card…</div>`}
+    ${(lv.said || []).length ? html`<div class="modes-hand-levels">
+      ${lv.said.map((r) => html`<div class="modes-hand-row" key=${r.level}><b class=${ink(r.level)}>${r.level}</b>
+        <span class="small wrap">${r.words}</span></div>`)}
+    </div>` : null}
   <//>`;
 }
 

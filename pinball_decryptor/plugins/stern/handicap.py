@@ -29,8 +29,12 @@ PORT_SITES = ("adjustment",)
 PORT_DATA = ("coop_player", "cur_player")
 #: the levels, hardest to easiest; 0 is the operator's own settings
 LEVELS = (-3, -2, -1, 1, 2, 3)
+#: the same, as the customization keys them
+LEVEL_KEYS = tuple("%+d" % lv for lv in LEVELS)
 #: the runtime's most changes a level (HAND_CHANGES)
-MAX_CHANGES = 24
+MAX_CHANGES = 48
+#: the most values a setting may offer to be customized per level (a timer's seconds, a difficulty's steps)
+MAX_CHOICES = 61
 #: the most steps a difficulty adjustment may have to be one of the game's levels, not a count
 MAX_STEPS = 10
 
@@ -92,16 +96,68 @@ def load(project):
 
 
 def save(project, on):
-    """Ask (or stop asking) for handicaps; returns what it was before."""
+    """Ask (or stop asking) for handicaps; returns what it was before. The levels' customization stays, for when it
+    is ticked again."""
     from ...core import staged_changes
     data = staged_changes.load(project)
-    was = bool(isinstance(data.get(STAGED_KEY), dict) and data[STAGED_KEY].get("on"))
-    if on:
-        data[STAGED_KEY] = {"on": True}
+    raw = data.get(STAGED_KEY) if isinstance(data.get(STAGED_KEY), dict) else {}
+    was = bool(raw.get("on"))
+    keep = {k: v for k, v in raw.items() if k == "custom" and v}
+    if on or keep:
+        data[STAGED_KEY] = dict(keep, on=bool(on))
     else:
         data.pop(STAGED_KEY, None)
     staged_changes.save(project, data)
     return was
+
+
+#: a customized cell's value that keeps the game's own setting for that level
+OWN = "own"
+
+
+def load_custom(project):
+    """The owner's customization of the levels (DoomWalrus666: "customize the settings per handicap level within the
+    scope of what the game difficulty settings already offers"): ``{"+1": {adjustment name: value or "own"}}``, only
+    the cells they changed; every other cell is the app's own (:func:`levels`)."""
+    if not project:
+        return {}
+    from ...core import staged_changes
+    try:
+        raw = staged_changes.load(project).get(STAGED_KEY)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
+        return {}
+    got = raw.get("custom") if isinstance(raw, dict) else None
+    out = {}
+    for lv, cells in (got or {}).items() if isinstance(got, dict) else ():
+        if lv in LEVEL_KEYS and isinstance(cells, dict):
+            out[lv] = {str(k): v for k, v in cells.items()
+                       if v == OWN or (isinstance(v, int) and not isinstance(v, bool))}
+    return {k: v for k, v in out.items() if v}
+
+
+def save_custom(project, level, name, value):
+    """Set one cell: level ``"+1"``, adjustment *name*, *value* an int (the setting reads it for that level), ``"own"``
+    (the game's own) or None (back to the app's). *level* None with *name* None: every cell back to the app's."""
+    from ...core import staged_changes
+    data = staged_changes.load(project)
+    raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
+    custom = load_custom(project) if level is not None else {}
+    if level is not None:
+        if level not in LEVEL_KEYS:
+            raise HandicapError("no such level: %s" % level)
+        cells = dict(custom.get(level) or {})
+        if value is None:
+            cells.pop(name, None)
+        else:
+            cells[name] = value if value == OWN else int(value)
+        custom[level] = cells
+    custom = {k: v for k, v in custom.items() if v}
+    if custom:
+        raw["custom"] = custom
+    else:
+        raw.pop("custom", None)
+    data[STAGED_KEY] = raw
+    staged_changes.save(project, data)
 
 
 def title_refusal(prof):
@@ -155,30 +211,62 @@ def _worked_out(ranges):
     return tuple(rows)
 
 
-def levels(game_elf, title_key=""):
-    """``{level: [(adjustment name, id, op, n, lo, hi), ...]}`` for the levels -3..3 but 0: what each level reads, from
-    the title's preset (:data:`PRESETS`) or worked out of the program; only adjustments this program has, each held to
-    its own range. Raises :class:`HandicapError` when there is nothing to change."""
+def facts(game_elf, title_key=""):
+    """What the levels are made of, read off the program (JSON-able, cached by the Modes tab): ``{"cands": [[name, id,
+    lo, hi], ...], "defaults": {"+1": {name: [op, n]}}}``. The candidates are the settings a level may change - the
+    preset's or worked-out ones, the ball save and every ``..._DIFFICULTY`` and ball save timer the game has with at
+    most :data:`MAX_CHOICES` values - in the game's own order."""
     ranges = _ranges(game_elf)
     rows = next((p for stem, p in PRESETS.items() if title_key.startswith(stem)), None) or _worked_out(ranges)
-    out = {lv: [] for lv in LEVELS}
+    ok = {n for n, (_i, lo, hi) in ranges.items() if 0 <= lo < hi and hi - lo < MAX_CHOICES}
+    want = {name for name, _per in rows} | {
+        n for n in ok if n == BALL_SAVE or n.endswith(("_DIFFICULTY", "_BALL_SAVE_TIME", "_BALL_SAVE_TIMER"))}
+    cands = [[n, ranges[n][0], ranges[n][1], ranges[n][2]] for n in sorted(want & ok, key=lambda n: ranges[n][0])]
+    defaults = {k: {} for k in LEVEL_KEYS}
     for name, per in rows:
-        if name not in ranges:
-            continue
-        i, lo, hi = ranges[name]
-        if lo < 0 or hi <= lo:
-            continue
-        for lv, (op, n) in per.items():
+        if name in ok:
+            for lv, (op, n) in per.items():
+                defaults["%+d" % lv][name] = [op, int(n)]
+    return {"cands": cands, "defaults": defaults}
+
+
+def levels_from(fx, custom=None):
+    """``{level: [(adjustment name, id, op, n, lo, hi), ...]}`` from :func:`facts` and the owner's customization
+    (:func:`load_custom`): a customized cell reads its value (op ``=``) or is left out (``own``), any other the app's
+    default; at most :data:`MAX_CHANGES` a level."""
+    out = {lv: [] for lv in LEVELS}
+    for lv in LEVELS:
+        key = "%+d" % lv
+        mine = (custom or {}).get(key) or {}
+        for name, i, lo, hi in fx["cands"]:
+            if name in mine:
+                v = mine[name]
+                if v == OWN or not lo <= int(v) <= hi:
+                    continue
+                change = ("=", int(v))
+            elif name in fx["defaults"].get(key, {}):
+                change = tuple(fx["defaults"][key][name])
+            else:
+                continue
             if len(out[lv]) < MAX_CHANGES:
-                out[lv].append((name, i, op, int(n), lo, hi))
-    if not any(out.values()):
+                out[lv].append((name, i, change[0], int(change[1]), lo, hi))
+    return out
+
+
+def levels(game_elf, title_key="", custom=None):
+    """``{level: [(adjustment name, id, op, n, lo, hi), ...]}`` for the levels -3..3 but 0: what each level reads, from
+    the title's preset (:data:`PRESETS`) or worked out of the program, then the owner's customization; only
+    adjustments this program has, each held to its own range. Raises :class:`HandicapError` when there is nothing to
+    change."""
+    out = levels_from(facts(game_elf, title_key), custom)
+    if not any(out.values()) and not custom:
         raise HandicapError(NOTHING % (title_key or "This game"))
     return out
 
 
 def level_line(lv, changes):
     """The ``level`` line of handicap.cfg for one level (the runtime's adj: changes)."""
-    return "level %+d %s" % (lv, ",".join("adj:%d%s%d:%d:%d" % (i, op, n, lo, hi)
+    return "level %+d %s" % (lv, ",".join("adj:%d=%d" % (i, n) if op == "=" else "adj:%d%s%d:%d:%d" % (i, op, n, lo, hi)
                                           for _name, i, op, n, lo, hi in changes))
 
 
@@ -186,15 +274,15 @@ def level_line(lv, changes):
 MAX_RECORDS = 16
 
 
-def cfg_text(game_elf, title_key="", setting=0, only=False, port=None):
+def cfg_text(game_elf, title_key="", setting=0, only=False, port=None, custom=None):
     """``handicap.cfg`` for the card whose game program is *game_elf* (bytes): the flipper buttons, *setting* (the
     service menu's HANDICAP row's live value, 0 none: always on), *only* when the card carries no modes, a ``record``
     line for each of the levels' adjustments the game keeps in a player's own record (:func:`records`, with *port*'s
-    getter and player byte) and a line for each level."""
+    getter and player byte) and a line for each level (*custom*: the owner's customization, :func:`load_custom`)."""
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) != 2:
         raise HandicapError(NO_BUTTON)
-    lv = levels(game_elf, title_key)
+    lv = levels(game_elf, title_key, custom)
     recs = {}
     site, data = (port or {}).get("site", {}).get("adjustment"), (port or {}).get("data", {}).get("coop_player")
     if site and data:
@@ -216,20 +304,38 @@ def _words(name):
     return " ".join(w.split("_")).title()
 
 
-def describe(game_elf, title_key=""):
-    """``[(level, [words, ...]), ...]``: what each level does, for the Modes tab (hardest first)."""
+def describe(game_elf, title_key="", custom=None):
+    """``[(level, [words, ...]), ...]``: what each level does, for Write's log (hardest first)."""
+    return describe_levels(levels(game_elf, title_key, custom))
+
+
+def change_words(name, op, n):
+    """One change in words: "ball save +2 s", "Light Battle Difficulty easier", "Light Battle Difficulty 0"."""
+    if op == "=":
+        return ("ball save %d s" % n) if name == BALL_SAVE else "%s %d" % (_words(name), n)
+    if name == BALL_SAVE:
+        return "ball save %s" % ("off" if op == "-" and n >= 15 else "%s%d s" % (op, n))
+    if op == "x":
+        return "%s x%s" % (_words(name), ("%.2f" % (n / 100.0)).rstrip("0").rstrip("."))
+    return "%s %s" % (_words(name), "easier" if op == "-" else "harder") + (" by %d" % n if n > 1 else "")
+
+
+def short_words(name, op, n):
+    """A change in a few words, the setting's name left out (a Levels dialog cell): "+2 s", "easier 2", "x0.6"."""
+    if name == BALL_SAVE and op != "=":
+        return "off" if op == "-" and n >= 15 else "%s%d s" % (op, n)
+    if op == "x":
+        return "x%s" % ("%.2f" % (n / 100.0)).rstrip("0").rstrip(".")
+    if op == "=":
+        return str(n)
+    return ("easier" if op == "-" else "harder") + (" %d" % n if n > 1 else "")
+
+
+def describe_levels(lv):
+    """:func:`describe` of levels already worked out."""
     out = []
-    for lv, changes in sorted(levels(game_elf, title_key).items()):
-        said = []
-        for name, _i, op, n, _lo, _hi in changes:
-            if name == BALL_SAVE:
-                said.append("ball save %s" % ("off" if op == "-" and n >= 15 else "%s%d s" % (op, n)))
-            elif op == "x":
-                said.append("%s x%s" % (_words(name), ("%.2f" % (n / 100.0)).rstrip("0").rstrip(".")))
-            else:
-                said.append("%s %s" % (_words(name), "easier" if op == "-" else "harder")
-                            + (" by %d" % n if n > 1 else ""))
-        out.append((lv, said))
+    for level, changes in sorted(lv.items()):
+        out.append((level, [change_words(name, op, n) for name, _i, op, n, _lo, _hi in changes]))
     return out
 
 
@@ -238,9 +344,9 @@ NO_CARD = ("The app works the levels out of the game program on the card, and th
            "this computer. Write works them out of the card it writes.")
 
 
-def project_levels(project):
-    """``(why, [(level, [words, ...]), ...])`` for the Modes tab: :func:`describe` of the project's card's game program,
-    cached per card; ``why`` says why there are none ("" when there are)."""
+def project_facts(project):
+    """``(why, facts)`` for the Modes tab: :func:`facts` of the project's card's game program, cached per card; ``why``
+    says why there are none ("" when there are)."""
     import hashlib
     import json
     import os
@@ -249,30 +355,55 @@ def project_levels(project):
     got = MP.project_card(project) if project else None
     card = getattr(got, "image", "") if got is not None else ""
     if not card or not os.path.isfile(card):
-        return NO_CARD, []
-    prof = project_title(project)
-    title = _SMo.title_key(prof)
+        return NO_CARD, None
+    title = _SMo.title_key(project_title(project))
     key = "%s|%d|%d|%s" % (card, os.path.getsize(card), int(os.path.getmtime(card)), title)
     cache = os.path.join(TR.cache_dir("handicap_levels"), hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
     try:
         with open(cache, encoding="utf-8") as f:
             raw = json.load(f)
-        if raw.get("key") == key and raw.get("v") == 1:
-            return "", [(lv, list(words)) for lv, words in raw["levels"]]
+        if raw.get("key") == key and raw.get("v") == 2:
+            return "", raw["facts"]
     except (OSError, ValueError, KeyError, TypeError):
         pass
     try:
-        said = describe(TR.game_program(card)[2], title)
+        fx = facts(TR.game_program(card)[2], title)
     except HandicapError as e:
-        return str(e), []
+        return str(e), None
     except Exception as e:                              # noqa: BLE001 - an unreadable card: say so
-        return "The game program could not be read from the card: %s" % e, []
+        return "The game program could not be read from the card: %s" % e, None
     try:
         with open(cache, "w", encoding="utf-8") as f:
-            json.dump({"v": 1, "key": key, "levels": said}, f)
+            json.dump({"v": 2, "key": key, "facts": fx}, f)
     except OSError:
         pass
-    return "", said
+    return "", fx
+
+
+def grid(fx, custom=None):
+    """The Levels dialog's table: a row a setting a level may change, a cell a level (easiest first):
+    ``[{"name", "label", "lo", "hi", "cells": [{"level", "value", "custom", "default"}]}]``. ``value`` is ``""`` for
+    the app's default, ``"own"`` for the game's own, else the number; ``default`` says what the app's does."""
+    custom = custom or {}
+    rows = []
+    for name, _i, lo, hi in fx["cands"]:
+        cells = []
+        for key in reversed(LEVEL_KEYS):
+            d = fx["defaults"].get(key, {}).get(name)
+            mine = (custom.get(key) or {}).get(name)
+            cells.append({"level": key, "value": "" if mine is None else str(mine), "custom": mine is not None,
+                          "default": short_words(name, d[0], d[1]) if d else "none"})
+        rows.append({"name": name, "label": "Ball Save Time" if name == BALL_SAVE else _words(name), "lo": lo,
+                     "hi": hi, "cells": cells})
+    return rows
+
+
+def project_levels(project):
+    """``(why, [(level, [words, ...]), ...])``: what each level does on the project's card, customization in."""
+    why, fx = project_facts(project)
+    if fx is None:
+        return why, []
+    return "", describe_levels(levels_from(fx, load_custom(project)))
 
 
 # ---- the records a game copies an adjustment into, one a player ------------------------------------------------------

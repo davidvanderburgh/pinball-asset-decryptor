@@ -27,22 +27,26 @@ from tests.webui_harness import web_app
 
 # ------------------------------------------------------------ the script
 def test_the_script_carries_the_words_and_the_waits():
-    text = sp.splash_script("9.9.9", center=(640, 400), hint_after=7,
+    text = sp.splash_script("9.9.9", hint_after=7,
                             give_up_after=8, close_after=9)
     assert "'Pinball Asset Decryptor - updating'" in text
     assert "Updating to v9.9.9…" in text
     assert "the new version opens by itself" in text
     assert "start it from its shortcut" in text
-    assert "$S.cx = 640; $S.cy = 400; $S.placed = $true" in text
     assert "$S.hintAfter = 7; $S.giveUpAfter = 8; $S.closeAfter = 9" in text
     assert "Add_KeyDown" in text and "Escape" in text      # never traps
     assert "Remove-Item -LiteralPath $PSCommandPath" in text
 
 
-def test_no_centre_means_the_main_screen():
+def test_it_sits_in_the_middle_of_the_primary_monitor():
+    # PAD-1039: never over the app's window (wherever that was), never
+    # CenterScreen (the screen under the mouse, its work area)
     text = sp.splash_script("9.9.9")
-    assert "$S.placed = $false" in text
-    assert 'WindowStartupLocation="CenterScreen"' in text
+    assert ("$win.Left = ([System.Windows.SystemParameters]::"
+            "PrimaryScreenWidth - $win.Width) / 2") in text
+    assert ("$win.Top = ([System.Windows.SystemParameters]::"
+            "PrimaryScreenHeight - $win.Height) / 2") in text
+    assert "$S.placed" not in text and "$S.cx" not in text
 
 
 def test_the_words_follow_the_app_language():

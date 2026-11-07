@@ -591,6 +591,8 @@ class ModePlan:
     attract_file: str = ""
     #: PAD-1017: ``coop.cfg`` beside the mode files, co-op play ("" = none)
     coop_file: str = ""
+    #: PAD-1033: ``handicap.cfg`` beside the mode files, a handicap for each player ("" = none)
+    handicap_file: str = ""
     #: PAD-1022: ``idle.cfg`` beside the mode files, inactivity pausing the timers ("" = none)
     idle_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
@@ -808,7 +810,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
-         idle_prof=None):
+         idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -840,7 +842,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     value of the service menu's CO-OP PLAY row the engine added, when the menu switches co-op.
 
     PAD-1022: *idle* puts ``idle.cfg`` beside the mode files (inactivity pauses the game's timers); with nothing
-    else it is a plan of its own, for *idle_prof*, and the file says the card has no modes."""
+    else it is a plan of its own, for *idle_prof*, and the file says the card has no modes.
+
+    PAD-1033: *handicap* puts ``handicap.cfg`` beside the mode files (a handicap for each player, its levels worked out
+    of *game_elf*); with nothing else it is a plan of its own, for *handicap_prof*. *handicap_setting* is the live value
+    of the service menu's HANDICAP row the engine added (0: none, always on)."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -876,6 +882,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 result = idle_plan(project, game_elf, idle_prof or coop_prof or attract_prof or variants_prof
                                    or sound_modes_prof or picture_prof)
             idle_into(result, scratch, only=True)
+        if handicap:                                 # PAD-1033: the players' handicaps, alone or with the above
+            if result is None:
+                result = handicap_plan(project, game_elf, handicap_prof or idle_prof or coop_prof or attract_prof
+                                       or variants_prof or sound_modes_prof or picture_prof)
+            handicap_into(result, game_elf, scratch, handicap_setting, only=True)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -959,6 +970,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         coop_into(result, game_elf, scratch, coop_setting)   # PAD-1031: the pick's screens went in with the modes' build
     if idle:                                         # PAD-1022
         idle_into(result, scratch, only=False)
+    if handicap:                                     # PAD-1033
+        handicap_into(result, game_elf, scratch, handicap_setting, only=False)
     return result
 
 
@@ -990,6 +1003,50 @@ def idle_into(result, scratch, only):
         f.write(IP.cfg_text(only))
     result.idle_file = path
     result.lines.append("inactivity pauses timers: %s" % IP.HOW)
+    return result
+
+
+# ---- PAD-1033: a handicap for each player ------------------------------------------------------
+def handicap_plan(project, game_elf, prof):
+    """A plan carrying only the players' handicaps: no mode, no scene; the runtime and the title's port on p2 with
+    ``handicap.cfg`` (:func:`handicap_into`)."""
+    from . import handicap as HC
+    why = HC.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to give handicaps to"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def handicap_into(result, game_elf, scratch, setting=0, only=False):
+    """``handicap.cfg`` for *result*'s card: the flipper buttons and each level's changes read off *game_elf*, the
+    service menu's HANDICAP value *setting* when it switches them, *only* when the card carries no modes."""
+    from . import handicap as HC
+    from . import sound_modes as SMo
+    why = HC.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    key = SMo.title_key(result.profile)
+    try:
+        port = MP.read_port(result.port) if result.port and os.path.isfile(result.port) else None
+        text = HC.cfg_text(game_elf, key, setting=setting, only=only, port=port)
+        said = HC.describe(game_elf, key)
+    except (HC.HandicapError, MP.ModeProjectError, OSError, ValueError) as e:
+        raise ModeWriteError(str(e)) from None
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, HC.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.handicap_file = path
+    result.lines.append("handicaps: %s" % HC.HOW)
+    result.lines.append("handicaps: %s" % ("switched in the service menu (HANDICAP), On to start with" if setting
+                                           else "always on (no HANDICAP row in the service menu)"))
+    for lv, words in said:
+        result.lines.append("handicap %+d: %s" % (lv, "; ".join(words)))
     return result
 
 
@@ -1672,6 +1729,11 @@ def p2_payload(result, out_dir, project=None):
             from . import idle_pause as IP
             dst = os.path.join(out_dir, IP.CFG_NAME)
             shutil.copyfile(result.idle_file, dst)
+            extras.append(dst)
+        if getattr(result, "handicap_file", ""):       # PAD-1033: handicap.cfg, a handicap for each player
+            from . import handicap as HC
+            dst = os.path.join(out_dir, HC.CFG_NAME)
+            shutil.copyfile(result.handicap_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

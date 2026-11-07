@@ -10211,6 +10211,7 @@ static void launch_tick(void);            /* PAD-643 */
 static void chg_pages_tick(void);         /* PAD-663 */
 
 static void coop_tick(void);                /* PAD-1017, below */
+static void hand_tick(void);                /* PAD-1033, below */
 static void on_tick(unsigned *r)
 {
     static int started, said;
@@ -10239,6 +10240,7 @@ static void on_tick(unsigned *r)
     stock_balls_tick();                      /* PAD-687: how long two balls have been in play */
     dto_tick();                               /* PAD-733: dead flippers until the balls drain to one */
     coop_tick();                              /* PAD-1017: the game's own "BALL %d" back after a co-op game */
+    hand_tick();                              /* PAD-1033: a player's handicap pick */
     EACH_MODE(m) if (m->tick) { current = m; m->tick(); }
     current = 0;
     magnet_tick();                            /* PAD-381: after the modes, so a grab's deadline is checked the tick it passes */
@@ -15064,13 +15066,20 @@ static unsigned coop_teammates(void)
 }
 
 /* the button held now: the switch's level byte from its record, closed as its descriptor says */
+static int switch_held(unsigned id);
 static int coop_button_held(void)
 {
+    return switch_held(coop.button);
+}
+
+/* PAD-1033: switch `id` held now (a flipper button, polled from the tick) */
+static int switch_held(unsigned id)
+{
     unsigned base, rec, st, desc, pol, level;
-    if (!coop.button || !edge.records || coop.button >= N_SWITCH_IDS) return 0;
+    if (!id || !edge.records || id >= N_SWITCH_IDS) return 0;
     base = *(const unsigned *)(unsigned long)edge.records;
     if (!base) return 0;
-    rec = base + coop.button * (unsigned)edge.size;
+    rec = base + id * (unsigned)edge.size;
     st = edge.level_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.level_via) : rec;
     desc = edge.desc_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.desc_via) : rec;
     if (st < 0x10000u || desc < 0x10000u) return 0;
@@ -15490,6 +15499,28 @@ static struct { char name[12]; unsigned at, obj, ptr; } coop_count[COOP_COUNTS];
 static int coop_count_n;
 static unsigned coop_started[5];            /* per teammate: the unlock rules seen running on their turns, this game */
 
+/* PAD-1033: the game's adjustment getter is wrapped ONCE (hook_wrap cannot wrap a function twice) and each of ours
+ * answers in turn: a player's handicap level on the game's own value, then a co-op character's ability on that */
+static unsigned (*adj_game)(unsigned);       /* the game's own getter (the wrap's trampoline) */
+static int adj_hand_on, adj_coop_on;
+static unsigned hand_adj_answer(unsigned id, unsigned own);   /* PAD-1033, below */
+static unsigned coop_adj_answer(unsigned id, unsigned own);   /* PAD-1031, below */
+static unsigned adj_chain(unsigned id)
+{
+    unsigned v = adj_game(id);
+    if (adj_hand_on) v = hand_adj_answer(id, v);
+    if (adj_coop_on) v = coop_adj_answer(id, v);
+    return v;
+}
+
+/* the getter wrapped (once): 1 when it is */
+static int adj_wrap_arm(void)
+{
+    if (!adj_game && fn("adjustment"))
+        adj_game = (unsigned (*)(unsigned))hook_wrap(fn("adjustment"), (void *)adj_chain);
+    return adj_game != 0;
+}
+
 /* the next character from `at` in `dir` (+1/-1) over n characters and RANDOM (index n), skipping the ones `taken`
  * (a bit each); `at` itself when nothing else is free (tests lift it verbatim) */
 static int coop_pick_step(int n, int at, int dir, unsigned taken)
@@ -15530,9 +15561,9 @@ static const struct coop_char *coop_char_up(void)
 }
 
 /* the game's adjustment getter (wrapped when a character has an adj ability) */
-static unsigned coop_adj_wrap(unsigned id)
+static unsigned coop_adj_answer(unsigned id, unsigned own)
 {
-    unsigned own = coop_adj_game(id), k;
+    unsigned k;
     const struct coop_char *c = coop_char_up();
     if (coop_gift_now && id == coop_gift_now) {
         coop_gift_now = 0;
@@ -15738,7 +15769,7 @@ static void coop_pick_close(const char *how)
     }
     if (c >= 0 && pk.who == coop.turn) coop_cache_hold();
     if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game) {   /* the ball out was served before it */
-        unsigned v = coop_adj_wrap(coop_ch[c].bs_adj);
+        unsigned v = adj_chain(coop_ch[c].bs_adj);           /* what the game reads: a handicap, then theirs */
         say("co-op: %s - the ball in play gets its ball save now (%u s)", coop_ch[c].name, v);
         if (v) pm_ball_save(v);
     }
@@ -16105,8 +16136,11 @@ static void coop_chars_arm(struct site *e)
         boost |= coop_ch[i].boost != 0;
         gift |= coop_ch[i].gift != 0;
     }
-    if (adj && !(fn("adjustment") && (coop_adj_game = (unsigned (*)(unsigned))hook_wrap(fn("adjustment"),
-                                                                                         (void *)coop_adj_wrap)))) {
+    if (adj && adj_wrap_arm()) {                                  /* PAD-1033: the one wrap, answered in turn */
+        coop_adj_game = adj_game;
+        adj_coop_on = 1;
+    }
+    if (adj && !coop_adj_game) {
         say("co-op characters: the adjustment abilities are off - the port names no adjustment getter, or it could "
             "not be wrapped");
         for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_adj = coop_ch[i].gift = 0;
@@ -16437,6 +16471,456 @@ static void coop_arm(void)
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
         data("coop_player"), data("coop_player") + 1, data("coop_players"));
+}
+
+/* ---- PAD-1033: a handicap for each player (MODE_SDK.md "Handicaps"; docs/plans/pad1033_handicaps.md) ----------------
+ * DoomWalrus666 (Godzilla): "select a handicap level on single player or multiplayer. 0 = standard settings, 1 =
+ * qualify battle is easy, ballsave slightly longer, 2 = ... 3 = ... -1 = harder ... -3 = hardest ... player one could be
+ * set to zero, but player two could be set to 2", and the levels are the app's to work out. A game's adjustments are
+ * the operator's, one value for every player, and the game reads them through one getter (`site adjustment`) - so a
+ * handicap is the getter answering a player's level's values while that player is up: only what the game READS changes,
+ * never what NVRAM holds. handicap.cfg (the Modes tab's tick writes it, handicap.py works the levels out):
+ *   handicap on
+ *   setting <address>                  the service menu's HANDICAP row's live value (0 Off, 1 On; absent: always on)
+ *   only                               the card carries no modes (the runtime arms this before the score gate and
+ *                                      nothing else: a handicap is the operator's settings, so the scores stay on
+ *                                      Insider Connected, as with any setting the operator changes)
+ *   left <switch id> / right <switch id>   the flipper buttons: the pick walks with them (left harder, right easier)
+ *   record <id> <method> <w0> <w1> <at>    adjustment <id> is kept in each player's own record by <method> (its first
+ *                                      two words w0 w1, checked before it is hooked to learn the rule's object): this
+ *                                      + player x 4 + at, the player 1-based (handicap.py finds them in the program)
+ *   level <-3..3> <changes>            what the level reads, comma-separated:
+ *      adj:<id>=<v>                    adjustment <id> reads v
+ *      adj:<id>+<n>:<lo>:<hi>          ... its own value + n, held to lo..hi (the adjustment's own range)
+ *      adj:<id>-<n>:<lo>:<hi>          ... its own value - n
+ *      adj:<id>x<pct>:<lo>:<hi>        ... its own value x pct / 100
+ * THE PICK: at each player's first ball the game's top line ("BALL %d", PAD-1017's borrow) reads "P2 HANDICAP +1";
+ * the flippers walk it from -3 to +3 (it starts at what that player had last game, 0 at power-up), and the ball's first
+ * score takes it. The level holds from the game's first read of an adjustment in that player's first ball (the ball
+ * save time is read as the ball is served, before the pick shows: ball 1's save is the level the pick opened at) until
+ * the game's end; before it the getter answers the operator's own values, so nothing the game reads for every player
+ * before their first ball carries anyone's level. In a co-op game (PAD-1017) each teammate picks one.
+ * An adjustment the game copies into the player's own record at their first ball (Godzilla: its battle, building,
+ * tank, bridge, powerline, jet and Mechagodzilla difficulties) reads the same through the getter afterwards but plays
+ * as the record says: handicap.cfg's `record` lines name the methods, hooked to learn the rule's object, and at the
+ * pick the player's record gets what the level makes of the operator's value. */
+#define HAND_LEVEL_MAX 3
+#define HAND_CHANGES 24
+#define HAND_CACHES 16
+#define HAND_MSG_ID 0xC0091u             /* our borrow of the top line (COOP_MSG_ID + 1) */
+static const char *const HAND_FILES[] = { "/usr/local/padmode/handicap.cfg", "/dump/handicap.cfg" };
+static struct hand_change { unsigned id, op, v, lo, hi; } hand_lv[2 * HAND_LEVEL_MAX + 1][HAND_CHANGES];
+static unsigned hand_lv_n[2 * HAND_LEVEL_MAX + 1];
+static struct {
+    int on, only;
+    unsigned setting, left, right;
+    int level[5];                            /* player (1-4) -> the level picked (kept for the next game) */
+    unsigned picked;                         /* a bit per player: their level holds (their first ball began) */
+    unsigned asked;                          /* a bit per player: their pick has shown this game */
+    unsigned last_up;                        /* the player and ball last seen (player x 256 + ball) */
+    unsigned open;                           /* the player picking now (0: none) */
+    int was_left, was_right;
+    uint64_t score_at_open;
+    int line_held;
+    int said;
+    int census;                              /* /dump/handlog.on: the reads are logged */
+} hand;
+static unsigned (*hand_adj_game)(unsigned);
+#define HAND_CENSUS_IDS 1024u
+static unsigned char hand_seen[HAND_CENSUS_IDS][8];   /* the census: the ball + 1 each id was last logged at, a player */
+static struct { unsigned id, at, obj, addr, w0, w1; } hand_cache[HAND_CACHES];
+static int hand_cache_n;
+
+/* the value a change makes of the operator's own (tests lift it verbatim): op 0 = v, 1 + v, 2 - v, 3 x v% */
+static unsigned hand_value(unsigned own, unsigned op, unsigned v, unsigned lo, unsigned hi)
+{
+    long long x;
+    if (op == 0) return v;
+    x = op == 1 ? (long long)own + v : op == 2 ? (long long)own - v : ((long long)own * v + 50) / 100;
+    if (x < (long long)lo) x = lo;
+    if (x > (long long)hi) x = hi;
+    return (unsigned)x;
+}
+
+/* one `adj:` change of a level line (tests lift it verbatim): 1 when it reads */
+static int hand_change_parse(const char *s, struct hand_change *c)
+{
+    const char *p = s;
+    int ok;
+    if (!str_starts(p, "adj:")) return 0;
+    p += 4;
+    c->id = (unsigned)number(&p, &ok);
+    if (!ok || !c->id) return 0;
+    c->op = *p == '=' ? 0 : *p == '+' ? 1 : *p == '-' ? 2 : *p == 'x' ? 3 : 9;
+    if (c->op == 9) return 0;
+    p++;
+    if (*p == '-' || *p == '+') return 0;    /* the sign is the op's */
+    c->v = (unsigned)number(&p, &ok);
+    if (!ok) return 0;
+    c->lo = 0;
+    c->hi = 0xffffffffu;
+    if (c->op && *p == ':') {
+        p++;
+        c->lo = (unsigned)number(&p, &ok);
+        if (!ok || *p != ':') return 0;
+        p++;
+        c->hi = (unsigned)number(&p, &ok);
+        if (!ok || c->hi < c->lo) return 0;
+    }
+    return *p == 0 || *p == ',' || *p == ' ';
+}
+
+static void hand_line(const char *s)
+{
+    const char *p;
+    int ok;
+    long lv;
+    while (*s == ' ' || *s == '\t') s++;
+    if (!*s || *s == '#') return;
+    if (str_starts(s, "handicap on")) { hand.on = 1; return; }
+    if (str_starts(s, "only")) { hand.only = 1; return; }
+    if (str_starts(s, "setting ") || str_starts(s, "left ") || str_starts(s, "right ")) {
+        unsigned *at = s[0] == 's' ? &hand.setting : s[0] == 'l' ? &hand.left : &hand.right;
+        p = s + (s[0] == 's' ? 8 : s[0] == 'l' ? 5 : 6);
+        *at = (unsigned)number(&p, &ok);
+        if (!ok) *at = 0;
+        return;
+    }
+    if (str_starts(s, "record ")) {
+        unsigned v[5], k;
+        p = s + 7;
+        for (k = 0; k < 5; k++) {
+            v[k] = (unsigned)number(&p, &ok);
+            if (!ok) return;
+        }
+        if (hand_cache_n < HAND_CACHES && v[0] && v[4] <= 0x1000u) {
+            hand_cache[hand_cache_n].id = v[0];
+            hand_cache[hand_cache_n].addr = v[1];
+            hand_cache[hand_cache_n].w0 = v[2];
+            hand_cache[hand_cache_n].w1 = v[3];
+            hand_cache[hand_cache_n].at = v[4];
+            hand_cache_n++;
+        }
+        return;
+    }
+    if (!str_starts(s, "level ")) return;
+    p = s + 6;
+    while (*p == ' ') p++;
+    if (*p == '+') p++;                      /* number() takes a minus, not a plus */
+    lv = (long)(int64_t)number(&p, &ok);
+    if (!ok || lv < -HAND_LEVEL_MAX || lv > HAND_LEVEL_MAX || !lv) return;
+    while (*p) {
+        struct hand_change c;
+        unsigned k = (unsigned)(lv + HAND_LEVEL_MAX);
+        while (*p == ' ' || *p == ',') p++;
+        if (!*p) break;
+        if (hand_change_parse(p, &c) && hand_lv_n[k] < HAND_CHANGES) hand_lv[k][hand_lv_n[k]++] = c;
+        while (*p && *p != ',') p++;
+    }
+}
+
+/* the service menu's HANDICAP says On (or the card has no such row: always on) */
+static int hand_switched_on(void)
+{
+    return !hand.setting || *(volatile const unsigned *)(unsigned long)hand.setting == 1u;
+}
+
+/* the player the handicap is of now: a co-op teammate in their turn, else the game's player up (0: none) */
+static unsigned hand_player(void)
+{
+    if (coop.on && coop_teammates() && coop.turn >= 1 && coop.turn <= 4) return coop.turn;
+    return pm_player();
+}
+
+/* the ball byte (1: the player's first) */
+static unsigned hand_ball(void)
+{
+    return *(volatile const unsigned char *)(unsigned long)(data("coop_player") + 1);
+}
+
+/* a new game: player 1's first ball after anything else (the game's player byte keeps the last game's player in
+ * attract, rig: Godzilla LE 1.16) - nobody's level holds and every pick shows again (tests lift it verbatim) */
+static int hand_new_game(unsigned *last_up, unsigned player, unsigned ball)
+{
+    unsigned now = player * 256u + ball, was = *last_up;
+    *last_up = now;
+    return now == 256u + 1u && was != now;
+}
+
+static void hand_game_check(void)
+{
+    if (!hand_new_game(&hand.last_up, pm_player(), hand_ball())) return;
+    if (hand.picked && hand.census) __builtin_memset(hand_seen, 0, sizeof hand_seen);
+    hand.picked = hand.asked = 0;
+    hand.said = 0;
+}
+
+/* the level that holds for the player up: theirs from the game's first read in their first ball, else 0 */
+static int hand_level_up(void)
+{
+    unsigned p;
+    if (!hand.on) return 0;
+    hand_game_check();
+    p = hand_player();
+    if (!p || p > 4 || !hand_switched_on()) return 0;
+    if (!(hand.picked & (1u << p))) {
+        if (hand_ball() != 1u || !pm_in_game()) return 0;
+        hand.picked |= 1u << p;                  /* the player's first ball has begun: their level from now on */
+    }
+    return hand.level[p];
+}
+
+/* the game's adjustment getter, wrapped */
+static unsigned hand_adj_answer(unsigned id, unsigned own)
+{
+    unsigned k, v;
+    int lv = hand_level_up();
+    const struct hand_change *c;
+    if (hand.census && pm_player() && id < HAND_CENSUS_IDS) {   /* /dump/handlog.on: who reads what when (the proof) */
+        unsigned p = hand_player() & 7u, b = hand_ball();
+        if (hand_seen[id][p] != (unsigned char)(b + 1)) {         /* each id once a player and ball */
+            hand_seen[id][p] = (unsigned char)(b + 1);
+            say("handicap census: adjustment %u read %u (player %u up, ball %u, level %+d)", id, own, p, b, lv);
+        }
+    }
+    if (!lv || !pm_in_game()) return own;
+    c = hand_lv[lv + HAND_LEVEL_MAX];
+    for (k = 0; k < hand_lv_n[lv + HAND_LEVEL_MAX]; k++)
+        if (c[k].id == id) {
+            v = hand_value(own, c[k].op, c[k].v, c[k].lo, c[k].hi);
+            if (hand.said < 48) {
+                hand.said++;
+                say("handicap: player %u at %+d - the game reads adjustment %u: %u (its own %u)", hand_player(), lv,
+                    id, v, own);
+            }
+            return v;
+        }
+    return own;
+}
+
+/* the methods that copy an adjustment into each player's record at the game's start: hooked to learn the object */
+static void hand_cache_seen(int i, unsigned *r)
+{
+    static int calls;
+    int k;
+    if (i >= hand_cache_n) return;
+    for (k = 0; k < hand_cache_n; k++) {
+        if (hand_cache[k].addr != hand_cache[i].addr) continue;
+        if (calls < 48) {
+            calls++;
+            say("handicap: the game copies adjustment %u into the rule at 0x%08x (player %u up, ball %u)",
+                hand_cache[k].id, r[0], pm_player(), hand_ball());
+        }
+        hand_cache[k].obj = r[0];
+    }
+}
+#define HAND_SEEN(n) static void hand_cache_seen##n(unsigned *r) { hand_cache_seen(n, r); }
+HAND_SEEN(0) HAND_SEEN(1) HAND_SEEN(2) HAND_SEEN(3) HAND_SEEN(4) HAND_SEEN(5) HAND_SEEN(6) HAND_SEEN(7)
+HAND_SEEN(8) HAND_SEEN(9) HAND_SEEN(10) HAND_SEEN(11) HAND_SEEN(12) HAND_SEEN(13) HAND_SEEN(14) HAND_SEEN(15)
+
+/* the pick taken for player p: each record of theirs gets what their level makes of the operator's value - or the
+ * operator's value itself when the level leaves it be: the game copied it at the ball's start with the level the pick
+ * opened at, which may have been another (not in a co-op game: there the game's one player record is the team's) */
+static void hand_records(unsigned p, int lv)
+{
+    const struct hand_change *c = hand_lv[lv + HAND_LEVEL_MAX];
+    unsigned n = lv ? hand_lv_n[lv + HAND_LEVEL_MAX] : 0u;
+    int i;
+    unsigned k, a, own, was, v;
+    if (coop.on && coop_teammates()) return;
+    for (i = 0; i < hand_cache_n; i++) {
+        if (hand_cache[i].obj < 0x10000u) continue;          /* not seen yet, or its method not hooked */
+        for (k = 0; k < n && c[k].id != hand_cache[i].id; k++) ;
+        a = hand_cache[i].obj + p * 4u + hand_cache[i].at;
+        if (!maps_has(a, 4, MAP_R)) continue;
+        was = *(volatile unsigned *)(unsigned long)a;
+        own = hand_adj_game(hand_cache[i].id);           /* the operator's: the record may hold a level's already */
+        v = k < n ? hand_value(own, c[k].op, c[k].v, c[k].lo, c[k].hi) : own;
+        if (v == was) continue;
+        *(volatile unsigned *)(unsigned long)a = v;
+        say("handicap: player %u at %+d - adjustment %u's record %u (it held %u; the operator's %u)", p, lv,
+            hand_cache[i].id, v, was, own);
+    }
+}
+
+/* the top line while a pick is open */
+static void hand_line_show(unsigned p)
+{
+    char words[40];
+    if (coop_ball_msg < 0) return;
+    pm_snprintf(words, sizeof words, hand.level[p] ? "P%u HANDICAP %+d" : "P%u HANDICAP %d", p, hand.level[p]);
+    hand.line_held = message_borrow(coop.on && coop_teammates() ? COOP_MSG_ID : HAND_MSG_ID,
+                                    (unsigned)coop_ball_msg, words);
+}
+
+static void hand_line_back(void)
+{
+    if (!hand.line_held) return;
+    hand.line_held = 0;
+    if (coop.on && coop_teammates()) coop_turn_show();     /* co-op's own words: PLAYER n  BALL %d */
+    else pm_message_restore(HAND_MSG_ID);
+}
+
+static void hand_close(const char *why)
+{
+    unsigned p = hand.open;
+    hand.open = 0;
+    hand_line_back();
+    say("handicap: player %u takes %+d (%s)", p, hand.level[p], why);
+    hand_records(p, hand.level[p]);
+}
+
+/* PAD-1031's co-op character pick is open, or still to come, for the teammate up: the flippers are its, so the
+ * handicap's pick waits for it */
+static int hand_waits_for_coop(void)
+{
+    if (!coop.on || !coop_teammates() || !coop_pick_on || !coop_ch_n) return 0;
+    return pk.open || (coop.turn >= 1 && coop.turn <= 4 && coop_pick_of[coop.turn] < 0);
+}
+
+/* from the tick */
+static void hand_tick(void)
+{
+    unsigned p, ball;
+    int l, r;
+    if (!hand.on) return;
+    if (!pm_player() || !pm_in_game()) {                 /* attract, a ball's end: no pick open */
+        if (hand.open && !pm_player()) hand_close("the game ended");
+        if (!pm_player()) return;
+    }
+    if (hand.open && hand_ball() != 1u) hand_close("the next ball");
+    hand_game_check();
+    if (!hand_switched_on()) {
+        if (hand.open) hand_close("the service menu's HANDICAP is Off");
+        return;
+    }
+    if (hand_waits_for_coop()) {
+        if (hand.open) {                                 /* it opened first: it shows again after the character's */
+            hand.asked &= ~(1u << hand.open);
+            hand.open = 0;
+            hand_line_back();
+        }
+        return;
+    }
+    p = hand_player();
+    if (hand.open && hand.open != p) hand_close("the next player is up");
+    if (!hand.open && p >= 1 && p <= 4 && !(hand.asked & (1u << p))) {
+        ball = hand_ball();
+        if (ball != 1u || !pm_in_game()) return;
+        hand.picked |= 1u << p;
+        hand.asked |= 1u << p;
+        hand.open = p;
+        hand.score_at_open = pm_score(pm_player());
+        hand.was_left = switch_held(hand.left);
+        hand.was_right = switch_held(hand.right);
+        say("handicap: player %u's pick is open at %+d (left flipper harder, right easier; the ball's first score "
+            "takes it)", p, hand.level[p]);
+        hand_line_show(p);
+        return;
+    }
+    if (!hand.open) return;
+    if (pm_score(pm_player()) != hand.score_at_open) { hand_close("the ball scored"); return; }
+    l = switch_held(hand.left);
+    r = switch_held(hand.right);
+    if ((l && !hand.was_left && hand.level[p] > -HAND_LEVEL_MAX) || (r && !hand.was_right
+                                                                     && hand.level[p] < HAND_LEVEL_MAX)) {
+        hand.level[p] += l && !hand.was_left ? -1 : 1;
+        say("handicap: player %u's pick %+d", p, hand.level[p]);
+        hand_line_show(p);
+    }
+    hand.was_left = l;
+    hand.was_right = r;
+}
+
+/* the tick of a card of handicaps and nothing else (on_tick calls hand_tick on any other) */
+static void on_hand_tick(unsigned *r)
+{
+    (void)r;
+    hand_tick();
+}
+
+/* handicap.cfg's `only` (read before the gate) */
+static int hand_cfg_only(void)
+{
+    return hand.on && hand.only;
+}
+
+static void hand_arm(void)
+{
+    static char raw[8192];
+    static const hook_fn seen[HAND_CACHES] = {
+        hand_cache_seen0, hand_cache_seen1, hand_cache_seen2, hand_cache_seen3, hand_cache_seen4, hand_cache_seen5,
+        hand_cache_seen6, hand_cache_seen7, hand_cache_seen8, hand_cache_seen9, hand_cache_seen10, hand_cache_seen11,
+        hand_cache_seen12, hand_cache_seen13, hand_cache_seen14, hand_cache_seen15 };
+    static const char *const msg_d[] = { "message_count", "message_remap", "message_table", 0 };
+    long n = -1, i, start = 0;
+    unsigned k, lv, changes = 0;
+    const char *why = 0;
+    for (k = 0; k < sizeof HAND_FILES / sizeof HAND_FILES[0] && n < 0; k++)
+        n = pm_read_file(HAND_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i <= n; i++)
+        if (i == n || raw[i] == '\n' || raw[i] == '\r') {
+            raw[i] = 0;
+            hand_line(raw + start);
+            start = i + 1;
+        }
+    if (!hand.on) return;
+    hand.on = 0;
+    for (lv = 0; lv < 2 * HAND_LEVEL_MAX + 1; lv++) changes += hand_lv_n[lv];
+    if (!changes) { say("handicap: off - handicap.cfg names no level's changes"); return; }
+    if (!fn("adjustment") || !data("cur_player") || !data("coop_player")) {
+        say("handicap: off - the port does not name this build's adjustment getter and player bytes");
+        return;
+    }
+    if (!maps_has(data("cur_player"), 1, MAP_R) || !maps_has(data("coop_player"), 2, MAP_R)) {
+        say("handicap: off - the player bytes are not mapped");
+        return;
+    }
+    if (hand.setting && !maps_has(hand.setting, 4, MAP_R)) {
+        say("handicap: off - the HANDICAP setting's value 0x%08x is not mapped", hand.setting);
+        return;
+    }
+    if (!hand.left || !hand.right || !edge_arm(&why)) {
+        say("handicap: off - the flipper buttons cannot be read (%s)", !hand.left || !hand.right
+            ? "handicap.cfg names no flipper buttons" : why ? why : "?");
+        return;
+    }
+    if (!adj_wrap_arm()) {
+        say("handicap: off - the adjustment getter could not be wrapped");
+        return;
+    }
+    hand_adj_game = adj_game;                    /* the operator's own values (the records' base) */
+    adj_hand_on = 1;
+    hand.on = 1;
+    if (pm_trigger("handlog.on")) hand.census = 1;
+    for (i = 0; i < hand_cache_n; i++) {                     /* each record's method, hooked once */
+        struct site probe;
+        long j;
+        int first = 1, hooked = 0;
+        for (j = 0; j < i; j++)
+            if (hand_cache[j].addr == hand_cache[i].addr) { first = 0; hooked = hand_cache[j].obj != 1u; }
+        if (!first) {
+            if (!hooked) hand_cache[i].obj = 1u;                 /* its method could not be hooked: never written */
+            continue;
+        }
+        probe.addr = hand_cache[i].addr;
+        probe.w0 = hand_cache[i].w0;
+        probe.w1 = hand_cache[i].w1;
+        if (!maps_has(probe.addr, 8, MAP_R | MAP_X | MAP_GAME) || !words_match(&probe) || !hook(probe.addr, seen[i])) {
+            say("handicap: adjustment %u's record is left to the getter - its method 0x%08x %s", hand_cache[i].id,
+                probe.addr, !maps_has(probe.addr, 8, MAP_R | MAP_X | MAP_GAME) || !words_match(&probe)
+                ? "does not read as handicap.cfg says" : "could not be hooked");
+            hand_cache[i].obj = 1u;
+        }
+    }
+    if (have_data(msg_d)) can |= PM_CAN_MESSAGES;            /* the top line, before the gate on a card of only this */
+    if (coop_ball_msg < 0) coop_ball_find();
+    if (coop_ball_msg < 0) say("handicap: the game's \"BALL %%d\" line was not found - the pick does not show itself");
+    say("handicap: armed - %u change(s) over the levels, %d record(s) the game copies at its start; each player picks "
+        "at their first ball with the flippers (switches %u and %u)%s", changes, hand_cache_n, hand.left, hand.right,
+        hand.setting ? ", while the service menu's HANDICAP is On" : "");
 }
 
 /* ---- PAD-1022: inactivity pauses the game's timers ------------------------------------------------------------------
@@ -19380,11 +19864,17 @@ static void pad_mode_start(void)
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */
     idle_arm();                               /* PAD-1022: nor does inactivity pausing the timers */
-    if ((clipv_only || sndm_only || pic_only || idle_only) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
-        say("armed: %s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
+    hand_arm();                               /* PAD-1033: nor does a player's handicap (the operator's settings) */
+    if ((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only()) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
+        say("armed: %s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
-            idle_only ? "inactivity pausing timers " : "",
-            clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : "idle.cfg");
+            idle_only ? "inactivity pausing timers " : "", hand_cfg_only() ? "handicaps " : "",
+            clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : idle_only ? "idle.cfg"
+            : "handicap.cfg");
+        if (hand.on && !hook(fn("tick"), on_hand_tick)) {
+            hand.on = 0;
+            say("handicap: off - the game's tick could not be hooked");
+        }
         return;
     }
     if (!insider_arm()) return;               /* no score gate, no modes: see insider_arm */

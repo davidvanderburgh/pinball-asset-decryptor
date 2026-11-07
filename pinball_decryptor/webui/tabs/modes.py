@@ -728,9 +728,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             if why:
                 note, kind = why, "err"
             elif menu:
-                note = ("On the card: CO-OP PLAY in the game's service menu (%s), Off to start with. Turning it On "
-                        "disables most Insider Connected features (scores, high scores and achievements stay on the "
-                        "machine) and lets the right flipper button + Start add a teammate; Off, the game plays and reports as it always has%s."
+                note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. 1 (Co-op) "
+                        "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 2 a "
+                        "team against players 3 and 4, each Start adding the next player. 1 or 2 disables most "
+                        "Insider Connected features (scores, high scores and achievements stay on the machine); at 0 "
+                        "the game plays and reports as it always has%s."
                         % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
                            else " (this project's modes keep the card's scores off Insider Connected anyway)"))
             else:
@@ -743,9 +745,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
     COOP_MENU_TIP = (
-        "Adds CO-OP PLAY to the game's own service menu, Off or On. On disables most Insider Connected features "
-        "(the card's scores, high scores and achievements stay on the machine) and teammates join with the right "
-        "flipper button and Start. Off: the game plays and "
+        "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Co-op, 2 Team 2v2. At 1 teammates join with the "
+        "right flipper button and Start. At 2 players 1 and 2 play as a team against players 3 and 4, each team "
+        "with its own score and progress, taking turns. 1 or 2 disables most Insider Connected features (the "
+        "card's scores, high scores and achievements stay on the machine). At 0 the game plays and "
         "reports to Insider Connected as it always has. A card that also carries modes keeps its scores off Insider "
         "Connected either way.")
 
@@ -831,8 +834,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     COOP_CHARS_TIP = (
         "Each teammate picks a character at the start of their first ball: the machine shows its picture, its name "
         "and what it does, the flippers move to the next one (one another teammate has is skipped), the Action button "
-        "takes it, and after 20 seconds the one shown is taken. RANDOM picks one nobody has. Its ability holds while "
-        "that teammate is up.")
+        "takes it, and when the time to pick runs out (the seconds count down on the machine) the one shown is taken. "
+        "RANDOM picks one nobody has. Its ability holds while that teammate is up.")
 
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP
@@ -852,6 +855,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             "%d of them ask for an ability this game has not got yet; they have none on the card." % lost if lost
             else "")
         self.set(coop_ch={"why": why, "note": note.strip(), "pick": chars["pick"], "rows": rows,
+                          "time": chars["time"], "times": list(_CP.PICK_TIMES),                 # PAD-1044
                           "abilities": [{"key": a["key"], "words": a["words"], "does": a["does"], "ok": bool(a["cfg"]),
                                          "why": a["why"]} for a in abil],
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
@@ -958,6 +962,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         was = chars["pick"]
         chars["pick"] = bool(on)
         return self._save_coop_chars(project, chars, "pick", "on" if was else "off", "on" if on else "off")
+
+    @rpc
+    def coop_chars_time(self, seconds):
+        """PAD-1044: the seconds each teammate has to pick (0: no limit, the Action button takes one)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        chars = _CP.load_characters(project)
+        was = chars["time"]
+        chars["time"] = _CP.pick_time(seconds)
+        name = lambda t: "%d s" % t if t else "no limit"                                   # noqa: E731
+        return self._save_coop_chars(project, chars, "time to pick", name(was), name(chars["time"]))
 
     @rpc
     def coop_char_set(self, i, name=None, ability=None):

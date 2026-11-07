@@ -21,37 +21,40 @@ from tests import test_spike2_mode_roster as R
 
 RUNTIME = T.RUNTIME
 
-# the framework's ball start as the program has it, modelled: its first-ball setup (the rules' per-player starts)
-# runs when the ball getter's call in it reads 1
-MAIN = T.MAIN.split("static void play(")[0].replace("@FNS@", r"""
+# the framework's ball start as the program has it, modelled: its first-ball setup (the rules' per-player starts, for
+# the game player up) runs when the ball getter's call in it reads 1
+MAIN = T.PRELUDE.replace("@FNS@", r"""
 static unsigned game_ball(unsigned r0, unsigned r1, unsigned r2, unsigned r3) { return bytes[1]; }
 static unsigned (*coop_ball_game)(unsigned, unsigned, unsigned, unsigned) = game_ball;
 @FNS@
-static unsigned setups;                                   /* the first-ball setups the game ran */
+static unsigned setups[5];                                /* the first-ball setups the game ran, by its player */
 static void ball_start(void)
 {
     unsigned ball = coop_first_ball_wrap(0, 0, 0, 0);
-    if (ball == 1) setups++;
-    printf("start ball %u teammate %u: the game reads %u%s\n", bytes[1], coop.turn ? coop.turn : 1, ball,
-           ball == 1 ? " - FIRST BALL SETUP" : "");
+    if (ball == 1) setups[bytes[0]]++;
+    printf("start ball %u turn %u game player %u: the game reads %u%s\n", bytes[1], coop.turn ? coop.turn : 1,
+           bytes[0], ball, ball == 1 ? " - FIRST BALL SETUP" : "");
 }
-static void play(unsigned team)
+static void play(unsigned humans, int teams)
 {
     unsigned k;
     memset(&coop, 0, sizeof coop);
-    bytes[0] = 1; bytes[1] = 1; players = 1; extra = 0; game_no++; setups = 0;
-    button = 1;
-    for (k = 1; k < team; k++) coop_add_wrap(0, 0, 0, 0);
+    memset(setups, 0, sizeof setups);
+    bytes[0] = 1; bytes[1] = 1; players = 1; extra = 0; game_no++;
+    teams_on = teams; button = !teams;
+    for (k = 1; k < humans; k++) coop_add_wrap(0, 0, 0, 0);
     button = 0;
-    printf("team %u\n", team);
+    printf("%s %u\n", teams ? "teams" : "team", humans);
     do ball_start(); while (coop_change_wrap(0, 0, 0, 0));
-    printf("setups %u\n", setups);
+    printf("setups %u %u\n", setups[1], setups[2]);
 }
 int main(void)
 {
-    play(1);          /* no team: the game's own one-player game */
-    play(2);
-    play(4);
+    play(1, 0);       /* no team: the game's own one-player game */
+    play(2, 0);
+    play(4, 0);
+    play(4, 1);       /* PAD-1042 Team 2v2: two game players, a team each */
+    play(3, 1);
     return 0;
 }
 """)
@@ -59,18 +62,14 @@ int main(void)
 
 def _run(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
-    fns = "\n".join(R._lift(src, sig) for sig in (
-        "static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsigned after, unsigned down)",
-        "static unsigned coop_teammates(void)",
-        "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
-        "static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
-        "static unsigned coop_first_ball_answer(unsigned n, unsigned turn, unsigned ball)",
+    fns = T.lifted() + "\n" + "\n".join(R._lift(src, sig) for sig in (
+        "static unsigned coop_first_ball_answer(unsigned n, unsigned later, unsigned ball)",
         "static unsigned coop_first_ball_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)"))
     return R._host_run(tmp_path, MAIN.replace("@FNS@", fns)).splitlines()
 
 
-def _game(out, team):
-    start = out.index("team %d" % team)
+def _game(out, head):
+    start = out.index(head)
     end = next(i for i in range(start, len(out)) if out[i].startswith("setups "))
     return [l for l in out[start:end] if l.startswith("start ")], out[end]
 
@@ -78,16 +77,30 @@ def _game(out, team):
 def test_the_first_ball_setup_runs_once_a_game_however_many_teammates(tmp_path):
     out = _run(tmp_path)
     for team in (1, 2, 4):
-        starts, setups = _game(out, team)
-        assert setups == "setups 1", (team, starts)
-        assert starts[0] == "start ball 1 teammate 1: the game reads 1 - FIRST BALL SETUP"
-    starts, _ = _game(out, 2)
-    assert starts[1] == "start ball 1 teammate 2: the game reads 2"
-    assert starts[2:] == ["start ball %d teammate %d: the game reads %d" % (b, t, b) for b in (2, 3) for t in (1, 2)]
-    starts, _ = _game(out, 4)
-    assert starts[1:4] == ["start ball 1 teammate %d: the game reads 2" % t for t in (2, 3, 4)]
+        starts, setups = _game(out, "team %d" % team)
+        assert setups == "setups 1 0", (team, starts)
+        assert starts[0] == "start ball 1 turn 1 game player 1: the game reads 1 - FIRST BALL SETUP"
+    starts, _ = _game(out, "team 2")
+    assert starts[1] == "start ball 1 turn 2 game player 1: the game reads 2"
+    assert starts[2:] == ["start ball %d turn %d game player 1: the game reads %d" % (b, t, b)
+                          for b in (2, 3) for t in (1, 2)]
+    starts, _ = _game(out, "team 4")
+    assert starts[1:4] == ["start ball 1 turn %d game player 1: the game reads 2" % t for t in (2, 3, 4)]
     assert "co-op: teammate 2's ball 1 - the game's first-ball setup ran at teammate 1's, so the team's progress holds" \
         in out
+
+
+def test_a_team_game_gives_each_team_one_first_ball(tmp_path):
+    """PAD-1042's Team 2v2 plays two game players: round 1 of ball 1 is each team's own first ball (its setup must run),
+    a later round on ball 1 - the team's next player - is not."""
+    out = _run(tmp_path)
+    for humans in (4, 3):
+        starts, setups = _game(out, "teams %d" % humans)
+        assert setups == "setups 1 1", (humans, starts)
+        ball1 = [l for l in starts if l.startswith("start ball 1 ")]
+        assert [l.endswith("FIRST BALL SETUP") for l in ball1] == [True, True, False, False], ball1
+        assert ball1[0].startswith("start ball 1 turn 1 game player 1") and \
+            " game player 2: " in ball1[1]
 
 
 def test_coop_arms_the_call_where_the_ball_start_makes_it():

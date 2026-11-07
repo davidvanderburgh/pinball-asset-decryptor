@@ -6124,7 +6124,9 @@ tab's **Co-op play**):
 
     coop on
     button 59        the switch held at Start to add a teammate (the right flipper button; the build reads its id)
-    setting 0x...    (round 2) the live value of the game's own CO-OP PLAY row (Off/On, stored 0 and 1): co-op only while On
+    setting 0x...    (round 2) the live value of the game's own CO-OP PLAY row (0 Off, 1 Co-op, 2 Team 2v2): co-op only
+                     while it is 1, a team game while it is 2 (PAD-1042)
+    teams on         (PAD-1042) every game of two or more players is a team game, no menu row needed
 
 Round 2 (DoomWalrus666): the Modes tab's "Switch it on and off in the service menu" puts a CO-OP PLAY row in the game's
 own menu (menu_settings.COOP_PLAY, on a spare setting, Off to start with) and its live value in coop.cfg. Teammates join
@@ -6169,6 +6171,38 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
 
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).
+
+### Team 2v2 (PAD-1042)
+
+DoomWalrus666: "a team 2v2 mode. Player 1 and player 2 are on one team against Player 3 and Player 4 ... Scores are
+shared within a team, as well as game progression. Character Select should still be available ... the Service Menu
+setting for Co-Op mode should now also have a choice for Team 2v2". The CO-OP PLAY row has three values (stored 0 Off,
+1 Co-op, 2 Team 2v2, shown as those numbers - the game's own GAME ID kind - with the names in its help line; the row
+was Off/On with 0 and 1, so an operator's pick is kept). The game plays TWO players, a team each: its own player 1 is
+team 1, its player 2 team 2, so each team has a score panel, a score and a set of progress of its own and the game's
+own player change goes between them. The runtime takes each team's players in turn:
+
+- **Joining:** in a team game every Start in the first ball adds the next player, no button held. Player 2 joins team
+  1 (the game's add runs - credits, its hooks - and its count is put back to 1), player 3 is team 2 (the game's own
+  player 2), player 4 joins team 2 (its count back to 2). One Start alone is the game's own one-player game.
+- **Turns:** the teams alternate, a round of turns a ball: P1, P3, P2, P4, then ball 2. The last team's turn of a round
+  that is not the ball's last puts the ball's byte one down before the game's change, as co-op does, so the game goes
+  back to its player 1 on the same ball. An extra ball keeps the player who earned it. With three players team 2's
+  lone player plays both of its turns, so each team plays as many balls (`coop_team_player`, `coop_team_round`).
+- **Whose turn:** the top line reads `TEAM 2 P3  BALL %d` (Godzilla LE 1.16: `TEAM 2 PLAYER 3  BALL` ran into the
+  game's credits after 19 characters).
+- **Characters, awards, handicaps** go by the player up (1-4), as in co-op: each player picks a character at their
+  first ball, no two the same; a character's record holds (`coop_cache_*`) are the team's game player's.
+- **The game's end** is the game's own for its two players (one match draw each); the scores go on a `TEAM PLAY`
+  board of the runtime's own (PAD-640/663's one-entry filing: the higher team score is the one that can take it),
+  never on the game's own boards.
+
+Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1042/rig`: job.sh, team.cfg; tryset.py builds a Write
+override set with the row defaulting to 2): 4 players through the game's own CO-OP PLAY row at 2 (read live at Start;
+the arm-time log reads the store before the game has loaded it) - turns P1 P3 P2 P4 for balls 1-3, two team panels
+with their own scores (11,717,290 / 12,465,960), each player's own character pick, team 2's score on TEAM PLAY with
+its initials and the attract mode's TEAM PLAY CHAMPION page, the game's own champions untouched; 3 players (`teams
+on`): player 3 played both of team 2's turns each ball; no faults.
 
 ### Co-op awards (PAD-1028)
 
@@ -6215,6 +6249,15 @@ its match and high scores) the game's end waits while each award is shown on eac
 
 A winner with no character (no pick) is left out there; the attract pages still show every award.
 
+**Over the bonus's own loop (round 3).** DoomWalrus666: the cards "play over what seems to be active gameplay"; show
+them "over the end of ball bonus loop videos". By the player change the bonus screen is gone and the main play is back
+on the glass. The cards cannot go into the bonus screen itself: the game does not draw the HUD scene while its bonus
+is up (a hold at the bus's `bonus_end` kept TOTAL SCORE on the glass 10 s and no card showed), and the bonus's own
+scene is not one the app can write. So the cards stay at the game's end and the backdrop (the clip behind the HUD, in
+the city's place) plays the bonus's own loop under them: the game's own looped clip and crop as the bonus ends
+(`event bonus_end`; on Godzilla `EndOfBallBonus_BackgroundLoop`, `SquareCrop`), given back when the cards are done. A
+port without the event, or a bonus with no looped clip, keeps the main play under them.
+
 ### Co-op characters (PAD-1031)
 
 Each teammate picks a character at the start of their first ball (teammate 1 when the team forms; each join opens
@@ -6223,6 +6266,7 @@ plays one player for the team, so nothing per player is copied: an ability chang
 (the Modes tab's **Characters…** under **Co-op play**):
 
     pick on                                   each teammate picks at their first ball
+    pick_time 30                              the seconds to pick (30 when not given; 0: no limit)
     left 60                                   the left flipper button (the right is `button`)
     action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
     character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE
@@ -6243,8 +6287,16 @@ Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comm
 
 The pick says itself on the game's top line (PAD-1017's borrow of `BALL %d`): `PLAYER 2 PICK: <name>`, then what it
 does, every 1.5 s; the flippers walk (a character another teammate has is skipped; RANDOM after the last), Action
-takes it, 20 s takes the one shown. RANDOM takes one nobody has. `mode.log`:
+takes it, and when `pick_time` runs out the one shown is taken. RANDOM takes one nobody has. PAD-1044: the seconds
+left count down on the top line (`PLAYER 2 PICK  17`) and on the pick's screen (its `_Words` line, in a box the card
+draws in its header); the one taken stays on the glass 2.5 s saying PICKED (the top line `PLAYER 2 PICKED`, or
+`PLAYER 2 IS <name>` on a title with no screens). While `pm_in_game()` is 0 with a player up (a menu over the game)
+the pick and its clock wait; it was dropped there once, leaving that teammate with no character for the turn.
+`mode.log`:
 
+    co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one, 30 s
+    co-op: teammate 2's pick waits - the game is busy (24 s left)
+    co-op: teammate 2's pick goes on (24 s left)
     co-op: teammate 1 is GODZILLA 1954 (LONGER BALL SAVE) - Action took it
     co-op: GODZILLA 1954 - the game reads adjustment 94: 15 (its own 12)
 

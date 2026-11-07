@@ -103,6 +103,10 @@ encryption. The app opens all three; you get the game's asset tree.
   text you corrected in the CSV, the same way Properties renames one. A
   blank row keeps its name, and it reports how many were renamed or
   unmatched.
+- **Audio > More > Update callouts.csv from the names** goes the other
+  way: it writes the names you gave in Audio into the CSV, adding rows for
+  named sounds and keeping rows for sounds the project lacks. A rename in
+  Properties also updates that sound's row.
 - **Auto-name now** names the sounds in an existing project without
   extracting again. A clip that failed for lack of memory shows as `error`
   in the CSV, not `non-speech`.

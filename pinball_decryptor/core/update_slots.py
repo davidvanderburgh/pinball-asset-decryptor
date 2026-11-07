@@ -478,7 +478,8 @@ def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
         UNINSTALL_KEY,
         UNINSTALL_KEY.replace("SOFTWARE\\", "SOFTWARE\\WOW6432Node\\", 1)))
     import hashlib
-    tag = hashlib.sha1(os.path.normcase(os.path.abspath(app_dir))
+    import ntpath       # a Windows path, whatever host builds the text
+    tag = hashlib.sha1(ntpath.normcase(ntpath.abspath(app_dir))
                        .encode("utf-8")).hexdigest()[:12]
     return _SWAP_SCRIPT % {
         "log": _psq(log_path), "app": _psq(app_dir), "tag_q": _psq(tag),

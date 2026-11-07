@@ -1033,8 +1033,9 @@ def handicap_into(result, game_elf, scratch, setting=0, only=False):
     key = SMo.title_key(result.profile)
     try:
         port = MP.read_port(result.port) if result.port and os.path.isfile(result.port) else None
-        text = HC.cfg_text(game_elf, key, setting=setting, only=only, port=port)
-        said = HC.describe(game_elf, key)
+        custom = HC.load_custom(getattr(result, "project", ""))   # the owner's levels (the Levels dialog)
+        text = HC.cfg_text(game_elf, key, setting=setting, only=only, port=port, custom=custom)
+        said = HC.describe(game_elf, key, custom)
     except (HC.HandicapError, MP.ModeProjectError, OSError, ValueError) as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)

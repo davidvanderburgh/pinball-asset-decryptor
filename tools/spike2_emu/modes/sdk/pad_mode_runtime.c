@@ -16505,7 +16505,7 @@ static void coop_arm(void)
  * as the record says: handicap.cfg's `record` lines name the methods, hooked to learn the rule's object, and at the
  * pick the player's record gets what the level makes of the operator's value. */
 #define HAND_LEVEL_MAX 3
-#define HAND_CHANGES 24
+#define HAND_CHANGES 48                     /* handicap.py MAX_CHANGES: the owner may customize a level */
 #define HAND_CACHES 16
 #define HAND_MSG_ID 0xC0091u             /* our borrow of the top line (COOP_MSG_ID + 1) */
 static const char *const HAND_FILES[] = { "/usr/local/padmode/handicap.cfg", "/dump/handicap.cfg" };
@@ -16847,7 +16847,7 @@ static int hand_cfg_only(void)
 
 static void hand_arm(void)
 {
-    static char raw[8192];
+    static char raw[16384];                  /* six levels of up to 48 changes, and the records */
     static const hook_fn seen[HAND_CACHES] = {
         hand_cache_seen0, hand_cache_seen1, hand_cache_seen2, hand_cache_seen3, hand_cache_seen4, hand_cache_seen5,
         hand_cache_seen6, hand_cache_seen7, hand_cache_seen8, hand_cache_seen9, hand_cache_seen10, hand_cache_seen11,

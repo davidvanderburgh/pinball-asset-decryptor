@@ -1081,7 +1081,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "shows P1 HANDICAP 0, the left flipper button makes it harder, the right easier, and the ball's first score "
         "takes it. 0 is the game's own settings. A level makes the game's own settings (ball save time, how hard its "
         "modes and multiballs are to light) easier or harder for that player only, the way the operator could in the "
-        "service menu, so the card stays on Insider Connected. The service menu gets a HANDICAP row (On to start "
+        "service menu, so the card stays on Insider Connected. Levels... shows what each level changes, and each "
+        "can be set to any value the game's own setting offers. The service menu gets a HANDICAP row (On to start "
         "with) to switch it off. Write puts it on the card.")
 
     def _publish_handicap(self, project):
@@ -1104,13 +1105,46 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         """PAD-1033: the Levels dialog's rows, worked out of the project's card's game program (cached)."""
         from ...plugins.stern import handicap as _HC
         project = self.project()
-        why, said = _HC.project_levels(project) if project else (_HC.NO_CARD, [])
-        rows = [{"level": "%+d" % lv, "words": "; ".join(words)} for lv, words in reversed(said)]
-        if rows:                                            # easiest first, the game's own between
-            rows.insert(sum(1 for r in rows if r["level"].startswith("+")),
-                        {"level": "0", "words": "The game's own settings, as the operator set them."})
-        self.set(hand_levels={"why": why, "rows": rows})
+        why, fx = _HC.project_facts(project) if project else (_HC.NO_CARD, None)
+        custom = _HC.load_custom(project) if project else {}
+        grid = _HC.grid(fx, custom) if fx else []
+        said = _HC.describe_levels(_HC.levels_from(fx, custom)) if fx else []
+        self.set(hand_levels={"why": why, "grid": grid, "levels": list(reversed(_HC.LEVEL_KEYS)),
+                              "said": [{"level": "%+d" % lv, "words": "; ".join(words) or "the game's own"}
+                                       for lv, words in reversed(said)],
+                              "changed": sum(len(v) for v in custom.values())})
         return True
+
+    @rpc
+    def handicap_cell(self, level, name, value):
+        """PAD-1033: one cell of the Levels dialog: *value* "" the app's own, "own" the game's own, else a number in
+        the setting's range (DoomWalrus666: "customize the settings per handicap level within the scope of what the
+        game difficulty settings already offers")."""
+        from ...core import history_log
+        from ...plugins.stern import handicap as _HC
+        project = self.project()
+        if not project or level not in _HC.LEVEL_KEYS or not name:
+            return False
+        was = (_HC.load_custom(project).get(level) or {}).get(name)
+        v = None if value in ("", None) else _HC.OWN if value == _HC.OWN else int(value)
+        _HC.save_custom(project, level, name, v)
+        hist = history_log.diff_scalar("modes  handicap %s %s" % (level, name), "app's" if was is None else str(was),
+                                       "app's" if v is None else str(v))
+        history_log.record(project, [hist] if hist else [])
+        return self.handicap_levels_refresh()
+
+    @rpc
+    def handicap_defaults(self):
+        """PAD-1033: every level as the app worked it out again."""
+        from ...core import history_log
+        from ...plugins.stern import handicap as _HC
+        project = self.project()
+        if not project:
+            return False
+        _HC.save_custom(project, None, None, None)
+        hist = history_log.diff_scalar("modes  handicap levels", "customized", "the app's")
+        history_log.record(project, [hist] if hist else [])
+        return self.handicap_levels_refresh()
 
     @rpc
     def set_handicap(self, on):

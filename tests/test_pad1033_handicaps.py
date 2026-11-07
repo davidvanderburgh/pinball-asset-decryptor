@@ -258,13 +258,28 @@ def test_the_modes_tab_tick_and_its_levels(tmp_path, monkeypatch):
     monkeypatch.setattr(svc, "_say", lambda *a, **k: None, raising=False)
     monkeypatch.setattr(HC, "project_title", lambda project, probe=False: object())
     monkeypatch.setattr(HC, "title_refusal", lambda prof: "")
-    monkeypatch.setattr(HC, "project_levels", lambda project: ("", [(-1, ["ball save -1 s"]), (1, ["ball save +2 s"])]))
+    fx = {"cands": [["AD_BALL_SAVE_TIME", 94, 0, 15]],
+          "defaults": {"+1": {"AD_BALL_SAVE_TIME": ["+", 2]}, "-1": {"AD_BALL_SAVE_TIME": ["-", 1]}}}
+    monkeypatch.setattr(HC, "project_facts", lambda project: ("", fx))
     staged_changes.save(str(tmp_path), {"audio": {"x": "y"}})
     assert svc.set_handicap(True) is True
     assert staged_changes.load(str(tmp_path))[HC.STAGED_KEY] == {"on": True}
     assert state["hand_shown"] is True and state["hand_on"] is True and state["hand_note"] == HC.NOTE
     assert svc.handicap_levels_refresh() is True
-    assert [r["level"] for r in state["hand_levels"]["rows"]] == ["+1", "0", "-1"]       # easiest first, 0 between
+    lv = state["hand_levels"]
+    assert lv["levels"] == ["+3", "+2", "+1", "-1", "-2", "-3"] and lv["changed"] == 0     # easiest first
+    row = lv["grid"][0]
+    assert (row["label"], row["lo"], row["hi"]) == ("Ball Save Time", 0, 15)
+    assert [c["default"] for c in row["cells"]][2:4] == ["+2 s", "-1 s"]
+    # one cell set to a value of the setting's own range, another to the game's own; Defaults clears both
+    assert svc.handicap_cell("+1", "AD_BALL_SAVE_TIME", "15") is True
+    assert svc.handicap_cell("-1", "AD_BALL_SAVE_TIME", "own") is True
+    assert HC.load_custom(str(tmp_path)) == {"+1": {"AD_BALL_SAVE_TIME": 15}, "-1": {"AD_BALL_SAVE_TIME": "own"}}
+    assert state["hand_levels"]["changed"] == 2 and state["hand_levels"]["grid"][0]["cells"][2]["custom"] is True
+    assert [r["words"] for r in state["hand_levels"]["said"]][2:4] == ["ball save 15 s", "the game's own"]
+    assert svc.handicap_cell("+1", "AD_BALL_SAVE_TIME", "") is True                      # back to the app's
+    assert HC.load_custom(str(tmp_path)) == {"-1": {"AD_BALL_SAVE_TIME": "own"}}
+    assert svc.handicap_defaults() is True and HC.load_custom(str(tmp_path)) == {}
     monkeypatch.setattr(HC, "title_refusal", lambda prof: "no port")
     svc._publish_handicap(str(tmp_path))
     assert state["hand_note_kind"] == "err" and state["hand_shown"] is True              # ticked: shown, in red
@@ -272,3 +287,31 @@ def test_the_modes_tab_tick_and_its_levels(tmp_path, monkeypatch):
     assert state["hand_shown"] is False                                                  # a game that cannot: hidden
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
     assert 'call("modes.set_handicap", v)' in js and "HandicapLevelsDialog" in js
+
+
+def test_the_owners_levels(tmp_path, monkeypatch):
+    """DoomWalrus666: "customize the settings per handicap level within the scope of what the game difficulty settings
+    already offers": a cell reads a value of the setting's own range, or the game's own; the rest stay the app's."""
+    from pinball_decryptor.plugins.stern import handicap as HC
+    ranges = {"AD_BALL_SAVE_TIME": (94, 0, 15), "AD_A_DIFFICULTY": (180, 0, 2), "AD_X_BALL_SAVE_TIMER": (200, 5, 30),
+              "AD_BIG_SCORE": (300, 0, 1000000)}
+    monkeypatch.setattr(HC, "_ranges", lambda elf: ranges)
+    fx = HC.facts(b"", "mando_le-1.45")
+    assert [c[0] for c in fx["cands"]] == ["AD_BALL_SAVE_TIME", "AD_A_DIFFICULTY", "AD_X_BALL_SAVE_TIMER"]
+    custom = {"+1": {"AD_A_DIFFICULTY": 0, "AD_X_BALL_SAVE_TIMER": 30, "AD_BALL_SAVE_TIME": "own"},
+              "-2": {"AD_A_DIFFICULTY": 9}}                                    # out of its range: left out
+    lv = HC.levels_from(fx, custom)
+    assert HC.level_line(1, lv[1]) == "level +1 adj:180=0,adj:200=30"         # the runtime's `=`: no range after it
+    assert HC.level_line(-2, lv[-2]) == "level -2 adj:94-2:0:15"
+    assert dict(HC.describe_levels(lv))[1] == ["A Difficulty 0", "X Ball Save Timer 30"]
+    # the project keeps only the cells changed; the tick keeps them when it is unticked
+    assert HC.save(str(tmp_path), True) is False
+    HC.save_custom(str(tmp_path), "+1", "AD_A_DIFFICULTY", 0)
+    HC.save_custom(str(tmp_path), "+1", "AD_BALL_SAVE_TIME", HC.OWN)
+    assert HC.load_custom(str(tmp_path)) == {"+1": {"AD_A_DIFFICULTY": 0, "AD_BALL_SAVE_TIME": "own"}}
+    HC.save(str(tmp_path), False)
+    assert not HC.load(str(tmp_path)) and HC.load_custom(str(tmp_path))["+1"]["AD_A_DIFFICULTY"] == 0
+    with pytest.raises(HC.HandicapError):
+        HC.save_custom(str(tmp_path), "+4", "AD_A_DIFFICULTY", 0)
+    HC.save_custom(str(tmp_path), None, None, None)
+    assert HC.load_custom(str(tmp_path)) == {}

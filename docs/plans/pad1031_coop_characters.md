@@ -215,3 +215,17 @@ artifacts\PAD-1031\discord\godzilla_characters (+ .zip, README): NEVER in the re
 Pictures from folder... (coop_play.pictures_from_folder: files named picture_file_name(name)) installs the bundle in
 one click. Emulator rc4: the cards with his stills on Godzilla LE 1.16, 12 of 12 found. On release: attach the zip to
 the Discord thread.
+
+## Round 2 (2026-11-07, DoomWalrus666 on the thread)
+
+Three abilities in place of three of the set (and offered to everyone in the builder): ADD A BALL (`addball:1`:
+Action x2 in regular play, pm_multiball_add through the game's serve; proven: "2 balls asked for (2 in play now) ...
+the game serves it"), MASER ALWAYS LIT (`yes:maser`: the tank rule's "in the Maser phase" check, LE 0x108d20 / Pro
+0x1064e8, used by its lit-shot query 0x10953c and its handler 0x10a058, answers 1 while up), EASIER BRIDGE + TANKS/JETS
+x2 (`adj:176=0` through a record hold, cache site LE 0x1349c4 / Pro 0x1316a0 at +4, proven held; `double:tanks,jets`:
+each rise of one the game makes gets one more from the tick; proven 4 -> 6 -> 8 -> 10 -> 12).
+Open: Tank Attack did not start at 10 or 12 in the rig (neither organic nor doubled) - the goal check is not in the
+tank rule's own code (the reads of +0x48 with a `cmp #9` are the bridge rule's); the Maser proof needs Tank Attack.
+Godzilla's set: GODZILLA 1985 -> addball, GODZILLA VS BIOLLANTE -> maser, GODZILLA VS MECHAGODZILLA -> bridge; the
+old three stay in the builder. The eleven stills zip must sit at the TOP of artifacts\PAD-1031 (pad_bot posts a
+top-level <name>.zip after the reply; in discord\ it was never seen).

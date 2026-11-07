@@ -6346,6 +6346,12 @@ what it needs):
 - `spot:<rules>`: two Action presses within 0.6 s while one of the game's rules in the mask runs (`pm_stock_active`):
   its lowest lit shot (`pm_stock_lit`, not 0x1) goes through the game's own `site shot_dispatch`, once a ball
   (Godzilla `value coop_battle_rules 0x7f000`: the seven battles, ids 12-18).
+- `addball:<n>`: two Action presses within 0.6 s in regular play (none of the game's modes runs) serve `n` more balls
+  through the game's own serve (`pm_multiball_add`), once a ball.
+- `yes:<name>`: a check of the game's (`site coop_yes_<name>`, `(this) -> 0/1`) answers 1 while the teammate is up
+  (Godzilla: the tank rule's "in the Maser phase", LE 0x108d20 / Pro 0x1064e8: the Maser lit for all of Tank Attack).
+- `double:<name>`: a rule's count (found as `count:` is) rises two at a time while the teammate is up: each rise of
+  one the game makes gets one more from the tick (Godzilla: its tanks and jets).
 - `unlock:<id>@<rules>`: once one of the rules has STARTED on the teammate's turn this game, adjustment `<id>` reads 1
   while they are up (Godzilla: UNLOCK ALL MONSTER BATTLES 334, which the selection screen's slot state reads live,
   after a tier-1 battle, `value coop_tier1_rules 0xf000`: tier 2 opens).

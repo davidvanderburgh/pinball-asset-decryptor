@@ -57,6 +57,10 @@ static void coop_cards_find(void) {}                     /* PAD-1028 round 2: th
 struct pm_stock_rule;
 static struct pm_stock_rule *pm_stock_rule(unsigned id) { (void)id; return 0; }
 static int pm_stock_active(struct pm_stock_rule *r) { (void)r; return 0; }
+#define PM_STOCK_ANY 0xffu
+static int pm_stock_mode_running(unsigned kinds) { (void)kinds; return 0; }
+static unsigned added_balls;
+static int pm_multiball_add(unsigned n, unsigned s) { (void)s; added_balls += n; return 1; }
 static uint64_t pm_stock_lit(struct pm_stock_rule *r) { (void)r; return 0; }
 static unsigned more_state(unsigned slot) { (void)slot; return 0; }
 static unsigned long data(const char *name) { (void)name; return 0; }
@@ -143,6 +147,8 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static void coop_cache_hold(void)",
        "static void coop_gift(const struct coop_char *c)",
        "static void coop_counts_give(const struct coop_char *c)",
+       "static volatile unsigned *coop_count_field(int i)",
+       "static void coop_double_tick(void)",
        "static void coop_pick_say(void)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
@@ -160,7 +166,7 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
 def _decl(src):
     """The character section's declarations, verbatim: from its #defines to the last of its globals."""
     start = src.index("#define COOP_CHARS 16")
-    end = src.index("static unsigned coop_started[5];", start)
+    end = src.index("static int coop_dbl_armed;", start)
     return src[start:src.index("\n", end) + 1]
 
 
@@ -520,8 +526,11 @@ def test_godzilla_offers_all_eleven_abilities_from_its_ports():
                                                          port["value"])}
         assert all(got.values()), (key, [k for k, v in got.items() if not v])
         assert got["spot"] == "spot:0x7f000" and got["tier2"] == "unlock:334@0xf000"
+        assert got["addball"] == "addball:1" and got["maser"] == "yes:maser"
+        assert got["bridge"] == "adj:176=0,double:tanks,double:jets"
     keys = {c["ability"] for c in CP.read_preset(CP.presets()["godzilla"])["characters"]["list"]}
-    assert keys == {a[0] for a in CP.ABILITIES}                      # the preset uses every ability once
+    assert len(keys) == 11 and keys <= {a[0] for a in CP.ABILITIES}   # eleven different abilities
+    assert {"addball", "maser", "bridge"} <= keys                      # round 2: the three he asked for instead
 
 
 def test_spot_and_unlock_read_from_coop_cfg():
@@ -564,3 +573,18 @@ def test_a_folder_of_pictures_named_after_the_characters_fills_them_in(tmp_path)
     assert not got[2]["picture"]
     with pytest.raises(CP.CoopError):
         CP.pictures_from_folder(project, str(tmp_path / "missing"))
+
+
+def test_round_two_kinds_read_from_coop_cfg(tmp_path):
+    """addball:<n>, yes:<name>, double:<name> (DoomWalrus666's second list): parsed, and a doubled count gets one more
+    for each rise of one the game makes while its character is up."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    line = R._lift(src, "static void coop_char_line(const char *s)")
+    for w in ('"addball:"', '"yes:"', '"double:"'):
+        assert w in line
+    assert "coop_double_tick();" in R._lift(src, "static void coop_chars_tick(void)")
+    assert 'pm_multiball_add(c->addball, 0)' in R._lift(src, "static void coop_chars_tick(void)")
+    arm = R._lift(src, "static void coop_chars_arm(struct site *e)")
+    assert '"coop_yes_%s"' in arm and "the %s count is doubled" in arm
+    tick = R._lift(src, "static void coop_double_tick(void)")
+    assert "now == coop_dbl_last[i] + 1u" in tick and "*f = now + 1u;" in tick

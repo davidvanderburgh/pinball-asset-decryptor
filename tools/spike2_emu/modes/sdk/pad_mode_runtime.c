@@ -16093,6 +16093,12 @@ static void coop_turn_show(void)
  *   unlock:<id>@<rules>              once one of the rules in <rules> has STARTED on the teammate's turn this game, the
  *                                    game's adjustment <id> reads 1 while they are up (Godzilla: UNLOCK ALL MONSTER
  *                                    BATTLES after a tier-1 battle, rules 12-15: tier 2 opens on the selection screen)
+ *   addball:<n>                      two Action presses within 0.6 s in regular play (none of the game's modes runs)
+ *                                    serve n more balls through the game's own serve (pm_multiball_add), once a ball
+ *   yes:<name>                       a check of the game's (`site coop_yes_<name>`, (this) -> 0/1) answers 1 while the
+ *                                    teammate is up (Godzilla: the tank rule's "in the Maser phase": the Maser lit)
+ *   double:<name>                    a rule's count (as count:, by `coop_count_<name>` / `_rule` and `_at`) rises two
+ *                                    at a time while the teammate is up: each rise of one the game makes gets one more
  *   gift:<id>                        at the teammate's pick, the game's own one-shot feature adjustment <id> (Godzilla:
  *                                    LIGHT ALLY): the game's adjustment-changed handler (`site coop_adj_changed`, given
  *                                    {u16 id}) is called with the getter answering 1 for it, once
@@ -16126,7 +16132,8 @@ static struct coop_char {
     char name[28], does[28];
     unsigned n_adj;
     struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v% held to lo..hi */
-    unsigned save_s, bs_adj, boost, gift, spot, unlock_adj, unlock_rules;
+    unsigned save_s, bs_adj, boost, gift, spot, unlock_adj, unlock_rules, addball, n_yes, n_double;
+    char yes[2][12], dbl[2][12];
     unsigned n_count;
     struct { char name[12]; unsigned n; } count[2];
 } coop_ch[COOP_CHARS];
@@ -16170,6 +16177,11 @@ static volatile unsigned coop_gift_now;     /* the getter answers 1 for this adj
 static struct { char name[12]; unsigned at, obj, ptr; } coop_count[COOP_COUNTS];
 static int coop_count_n;
 static unsigned coop_started[5];            /* per teammate: the unlock rules seen running on their turns, this game */
+#define COOP_YES 4
+static struct { char name[12]; unsigned (*game)(unsigned); } coop_yes[COOP_YES];   /* the checks wrapped */
+static int coop_yes_n;
+static unsigned coop_dbl_last[COOP_COUNTS];  /* double: each count's last seen value, for the player up */
+static int coop_dbl_armed;
 
 /* PAD-1033: the game's adjustment getter is wrapped ONCE (hook_wrap cannot wrap a function twice) and each of ours
  * answers in turn: a player's handicap level on the game's own value, then a co-op character's ability on that */
@@ -16336,6 +16348,63 @@ static unsigned coop_boost_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
     return coop_boost_game(r0, r1, r2, r3);
 }
 
+/* a check of the game's answers 1 while the teammate's character says so (yes:<name>) */
+static unsigned coop_yes_wrap(int i, unsigned r0)
+{
+    const struct coop_char *c = coop_char_up();
+    unsigned k, own = coop_yes[i].game(r0);
+    if (c && pm_in_game())
+        for (k = 0; k < c->n_yes; k++)
+            if (str_eq(c->yes[k], coop_yes[i].name)) {
+                if (!own && coop_adj_said < 32) {
+                    coop_adj_said++;
+                    say("co-op: %s - the game's %s check answers yes (its own no)", c->name, coop_yes[i].name);
+                }
+                return 1u;
+            }
+    return own;
+}
+static unsigned coop_yes_wrap0(unsigned r0) { return coop_yes_wrap(0, r0); }
+static unsigned coop_yes_wrap1(unsigned r0) { return coop_yes_wrap(1, r0); }
+static unsigned coop_yes_wrap2(unsigned r0) { return coop_yes_wrap(2, r0); }
+static unsigned coop_yes_wrap3(unsigned r0) { return coop_yes_wrap(3, r0); }
+
+/* the count's field for the player up, as coop_counts_give reads it (0 when the rule is not seen) */
+static volatile unsigned *coop_count_field(int i)
+{
+    unsigned p = coop_ball_byte ? coop_ball_byte[-1] : 1u, a;
+    if (i >= coop_count_n || p < 1 || p > 4) return 0;
+    if (coop_count[i].ptr && maps_has(coop_count[i].ptr, 4, MAP_R))
+        coop_count[i].obj = *(const unsigned *)(unsigned long)coop_count[i].ptr;
+    if (!coop_count[i].obj) return 0;
+    a = coop_count[i].obj + p * 4u + coop_count[i].at;
+    return maps_has(a, 4, MAP_R) ? (volatile unsigned *)(unsigned long)a : 0;
+}
+
+/* from the tick: a doubled count that rose by one since the last tick (the game's own kill) gets one more */
+static void coop_double_tick(void)
+{
+    const struct coop_char *c = coop_char_up();
+    volatile unsigned *f;
+    unsigned k, now;
+    int i;
+    if (!c || !c->n_double || !pm_in_game()) { coop_dbl_armed = 0; return; }
+    for (i = 0; i < coop_count_n; i++) {
+        if (!(f = coop_count_field(i))) continue;
+        now = *f;
+        if (coop_dbl_armed) {
+            for (k = 0; k < c->n_double; k++)
+                if (str_eq(c->dbl[k], coop_count[i].name) && now == coop_dbl_last[i] + 1u) {
+                    *f = now + 1u;
+                    now += 1u;
+                    say("co-op: %s - the %s count rose by one, now %u (two at a time)", c->name, coop_count[i].name, now);
+                }
+        }
+        coop_dbl_last[i] = now;
+    }
+    coop_dbl_armed = 1;
+}
+
 /* the methods that clear a count at the game's start: hooked before they run, to learn the rule's object */
 static void coop_count_seen(int i, unsigned *r)
 {
@@ -16348,6 +16417,8 @@ static void coop_count_seen0(unsigned *r) { coop_count_seen(0, r); }
 static void coop_count_seen1(unsigned *r) { coop_count_seen(1, r); }
 static void coop_count_seen2(unsigned *r) { coop_count_seen(2, r); }
 static void coop_count_seen3(unsigned *r) { coop_count_seen(3, r); }
+static void (*const cseen_fns[COOP_COUNTS])(unsigned *) = { coop_count_seen0, coop_count_seen1, coop_count_seen2,
+                                                           coop_count_seen3 };
 
 /* a character's counts at its pick: the team's count raised */
 static void coop_counts_give(const struct coop_char *c)
@@ -16467,6 +16538,7 @@ static void coop_pick_close(const char *how)
     }
     if (c >= 0) coop_gift(&coop_ch[c]);
     if (c >= 0) coop_counts_give(&coop_ch[c]);
+    coop_dbl_armed = 0;
     if (c >= 0 && coop_ch[c].unlock_adj && fn("roster_slot_state") && data("rule_battle")) {   /* before any battle */
         char st[48];
         unsigned k, o = 0;
@@ -16818,6 +16890,14 @@ static void coop_chars_tick(void)
             coop_launch_taps);
         coop_launch_taps = 0;
     }
+    coop_double_tick();
+    if (coop_save_ask && (c = coop_char_up()) && c->addball && !coop_save_used
+        && pm_stock_mode_running(PM_STOCK_ANY) <= 0) {
+        coop_save_ask = 0;
+        coop_save_used = 1;
+        say("co-op: %s's Action button add-a-ball (%u more, teammate %u): %s", c->name, c->addball, coop.turn,
+            pm_multiball_add(c->addball, 0) ? "the game serves it" : "the game refused");
+    }
     if (coop_save_ask && (c = coop_char_up()) && c->spot && !coop_save_used) {
         coop_save_ask = 0;
         if (coop_spot(c)) coop_save_used = 1;
@@ -16855,6 +16935,7 @@ static void coop_chars_turn(void)
     if (pk.open && pk.who != coop.turn) coop_pick_close("their turn ended");
     coop_pick_open(coop.turn);
     coop_cache_hold();
+    coop_dbl_armed = 0;
 }
 
 /* coop.cfg: character <abilities> <name>|<what it does> */
@@ -16869,6 +16950,7 @@ static void coop_char_line(const char *s)
     c = &coop_ch[coop_ch_n];
     c->n_adj = 0;
     c->save_s = c->bs_adj = c->boost = c->gift = c->n_count = c->spot = c->unlock_adj = c->unlock_rules = 0;
+    c->addball = c->n_yes = c->n_double = 0;
     for (k = 0; k + 1 < sizeof tok && s[k] && s[k] != ' '; k++) tok[k] = s[k];   /* number() eats the space after */
     tok[k] = 0;
     s += k;
@@ -16923,6 +17005,17 @@ static void coop_char_line(const char *s)
                 c->unlock_rules = (unsigned)number(&p, &ok);
             }
             if (!ok || !c->unlock_rules) c->unlock_adj = c->unlock_rules = 0;
+        } else if (str_starts(p, "addball:")) {
+            p += 8;
+            c->addball = (unsigned)number(&p, &ok);
+            if (!ok || c->addball > 3) c->addball = 0;
+        } else if ((str_starts(p, "yes:") && c->n_yes < 2) || (str_starts(p, "double:") && c->n_double < 2)) {
+            char *dst = str_starts(p, "yes:") ? c->yes[c->n_yes] : c->dbl[c->n_double];
+            p += str_starts(p, "yes:") ? 4 : 7;
+            for (k = 0; k + 1 < 12 && *p && *p != ','; k++) dst[k] = *p++;
+            dst[k] = 0;
+            if (k && dst == c->yes[c->n_yes]) c->n_yes++;
+            else if (k) c->n_double++;
         } else if (str_starts(p, "gift:")) {
             p += 5;
             c->gift = (unsigned)number(&p, &ok);
@@ -16960,7 +17053,7 @@ static void coop_chars_arm(struct site *e)
     if (!coop_ch_n) return;
     for (i = 0; i < coop_ch_n; i++) {
         adj |= coop_ch[i].n_adj != 0 || coop_ch[i].gift != 0 || coop_ch[i].unlock_adj != 0;
-        save |= coop_ch[i].spot != 0;
+        save |= coop_ch[i].spot != 0 || coop_ch[i].addball != 0;
         save |= coop_ch[i].save_s != 0;
         boost |= coop_ch[i].boost != 0;
         gift |= coop_ch[i].gift != 0;
@@ -17000,8 +17093,6 @@ static void coop_chars_arm(struct site *e)
     }
     for (i = 0; i < coop_ch_n; i++)                              /* the rules whose counts a character raises */
         for (k = 0; k < coop_ch[i].n_count && coop_count_n < COOP_COUNTS; k++) {
-            static void (*const cseen[COOP_COUNTS])(unsigned *) = { coop_count_seen0, coop_count_seen1,
-                                                                      coop_count_seen2, coop_count_seen3 };
             int j;
             for (j = 0; j < coop_count_n && !str_eq(coop_count[j].name, coop_ch[i].count[k].name); j++) ;
             if (j < coop_count_n) continue;
@@ -17011,7 +17102,7 @@ static void coop_chars_arm(struct site *e)
             coop_count[coop_count_n].ptr = data(name);
             coop_count[coop_count_n].obj = 0;
             pm_snprintf(name, sizeof name, "coop_count_%s", coop_ch[i].count[k].name);
-            if (!coop_count[coop_count_n].ptr && (!site(name) || !fn(name) || !hook(fn(name), cseen[coop_count_n]))) {
+            if (!coop_count[coop_count_n].ptr && (!site(name) || !fn(name) || !hook(fn(name), cseen_fns[coop_count_n]))) {
                 say("co-op characters: the %s count is off - the port names no %s", coop_ch[i].count[k].name, name);
                 continue;
             }
@@ -17023,6 +17114,46 @@ static void coop_chars_arm(struct site *e)
             else
                 say("co-op characters: the %s count is cleared by 0x%08x (this + player x 4 + 0x%x)",
                     coop_count[coop_count_n].name, fn(name), coop_count[coop_count_n].at);
+            coop_count_n++;
+        }
+    for (i = 0; i < coop_ch_n; i++)                              /* the checks a character answers yes to */
+        for (k = 0; k < coop_ch[i].n_yes && coop_yes_n < COOP_YES; k++) {
+            static unsigned (*const yw[COOP_YES])(unsigned) = { coop_yes_wrap0, coop_yes_wrap1, coop_yes_wrap2,
+                                                                 coop_yes_wrap3 };
+            int j;
+            for (j = 0; j < coop_yes_n && !str_eq(coop_yes[j].name, coop_ch[i].yes[k]); j++) ;
+            if (j < coop_yes_n) continue;
+            pm_snprintf(name, sizeof name, "coop_yes_%s", coop_ch[i].yes[k]);
+            if (!site(name) || !fn(name)
+                || !(coop_yes[coop_yes_n].game = (unsigned (*)(unsigned))hook_wrap(fn(name), (void *)yw[coop_yes_n]))) {
+                say("co-op characters: the %s check is off - the port names no %s, or it could not be wrapped",
+                    coop_ch[i].yes[k], name);
+                continue;
+            }
+            str_copy(coop_yes[coop_yes_n].name, 12, coop_ch[i].yes[k], 12);
+            say("co-op characters: the game's %s check (0x%08x) answers yes while its character is up",
+                coop_yes[coop_yes_n].name, fn(name));
+            coop_yes_n++;
+        }
+    for (i = 0; i < coop_ch_n; i++)                              /* a doubled count needs its rule, as count: does */
+        for (k = 0; k < coop_ch[i].n_double && coop_count_n < COOP_COUNTS; k++) {
+            int j;
+            for (j = 0; j < coop_count_n && !str_eq(coop_count[j].name, coop_ch[i].dbl[k]); j++) ;
+            if (j < coop_count_n) continue;
+            pm_snprintf(name, sizeof name, "coop_count_%s_at", coop_ch[i].dbl[k]);
+            coop_count[coop_count_n].at = (unsigned)pm_port_value(name, 0);
+            pm_snprintf(name, sizeof name, "coop_count_%s_rule", coop_ch[i].dbl[k]);
+            coop_count[coop_count_n].ptr = data(name);
+            coop_count[coop_count_n].obj = 0;
+            pm_snprintf(name, sizeof name, "coop_count_%s", coop_ch[i].dbl[k]);
+            if (!coop_count[coop_count_n].ptr && (!site(name) || !fn(name)
+                                                  || !hook(fn(name), cseen_fns[coop_count_n]))) {
+                say("co-op characters: the %s count is off - the port names no %s", coop_ch[i].dbl[k], name);
+                continue;
+            }
+            str_copy(coop_count[coop_count_n].name, sizeof coop_count[0].name, coop_ch[i].dbl[k],
+                     sizeof coop_count[0].name);
+            say("co-op characters: the %s count is doubled while its character is up", coop_count[coop_count_n].name);
             coop_count_n++;
         }
     if (gift && !fn("coop_adj_changed")) {
@@ -17058,6 +17189,12 @@ static void coop_chars_arm(struct site *e)
         for (k = 0; k < coop_ch[i].n_count && o + 24 < sizeof how; k++)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s +%u", o ? ", " : "", coop_ch[i].count[k].name,
                                        coop_ch[i].count[k].n);
+        if (coop_ch[i].addball && o + 24 < sizeof how)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sAction x2: +%u ball", o ? ", " : "", coop_ch[i].addball);
+        for (k = 0; k < coop_ch[i].n_yes && o + 24 < sizeof how; k++)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s: yes", o ? ", " : "", coop_ch[i].yes[k]);
+        for (k = 0; k < coop_ch[i].n_double && o + 24 < sizeof how; k++)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s x2", o ? ", " : "", coop_ch[i].dbl[k]);
         if (coop_ch[i].spot && o + 24 < sizeof how)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sspot (rules 0x%x)", o ? ", " : "", coop_ch[i].spot);
         if (coop_ch[i].unlock_adj && o + 24 < sizeof how)

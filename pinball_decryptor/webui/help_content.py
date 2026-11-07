@@ -3468,8 +3468,10 @@ PREVIEW_HELP = {
                 "holds while its teammate is up: on every game a longer ball save and a ball save on two "
                 "quick presses of the Action button; on Godzilla also an easier heat ray, easier battles, "
                 "easier Building Multiball, double power-ups, an ally lit at the pick, 4 jets or 4 tanks "
-                "destroyed at the pick, a battle shot spotted with two quick Action presses, and tier 2 "
-                "open once a tier-1 battle has started. Only the abilities the game can have are offered. "
+                "destroyed at the pick, a battle shot spotted with two quick Action presses, tier 2 open "
+                "once a tier-1 battle has started, a second ball added with two quick Action presses in "
+                "regular play, the Maser lit for the whole of Tank Attack, and an easier bridge with tanks "
+                "and jets counting two at a time. Only the abilities the game can have are offered. "
                 "On Godzilla, **Load Godzilla's set** puts in eleven characters, one for each ability; "
                 "rename them as you like.",
                 "**Switch it on and off in the service menu**, under the tick, gives the game's own "

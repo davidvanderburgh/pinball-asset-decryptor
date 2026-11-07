@@ -45,8 +45,9 @@ static unsigned chg_rec_check_at = 88, chg_rec_score_at = 72, chg_rec_score_size
 @DECL@
 /* the team's counts: its points and a champion category's, as the game keeps them for its one player */
 static unsigned long long team_points, team_jets;
-static unsigned long long coop_award_now(const struct coop_award *a)
+static unsigned long long coop_award_now(const struct coop_award *a, unsigned p)
 {
+    (void)p;                                      /* co-op: the game's player 1, the team (PAD-1042: a team's) */
     return a->kind == COOP_AW_SCORE ? team_points : a->kind == COOP_AW_CHAMPION ? team_jets : 0;
 }
 @FNS@
@@ -76,7 +77,7 @@ int main(void)
             if (t == 3) { team_points += 1000; team_jets += 2; audit(116, 1); audit(168, 1); audit(169, 1); }
             audit(999, 1);                                            /* an audit no award counts */
             now_ms += 30000;
-            coop_awards_read(t);
+            coop_awards_read(t, 1);
         }
     game_no++;
     coop_awards_end(3);
@@ -96,7 +97,7 @@ FNS = ("static unsigned short chg_rec_check(const unsigned char *rec)",
        "static unsigned long long chg_rec_score(const unsigned char *rec)",
        "static void chg_rec_fresh(unsigned char *rec, const char *initials)",
        "static void coop_award_credit(unsigned long long *last, unsigned long long now, unsigned long long *got)",
-       "static void coop_awards_read(unsigned t)",
+       "static void coop_awards_read(unsigned t, unsigned p)",
        "static void coop_awards_begin(void)",
        "static void coop_audit_seen(unsigned *r)",
        "static unsigned long long coop_award_winner(const unsigned long long *got, unsigned n, char *who)",
@@ -164,7 +165,7 @@ int main(void)
 def test_the_runtime_reads_each_turn_before_the_games_change_and_ends_with_the_game():
     src = RUNTIME.read_text(encoding="utf-8")
     change = R._lift(src, "static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
-    assert change.index("coop_awards_read(coop.turn);") < change.index("ret = coop_change_game(r0, r1, r2, r3);")
+    assert change.index("coop_awards_read(coop.turn, 1);") < change.index("ret = coop_change_game(r0, r1, r2, r3);")
     assert change.index("coop_awards_end(n);") > change.index("ret = coop_change_game(r0, r1, r2, r3);")
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop_awards_begin();" in add

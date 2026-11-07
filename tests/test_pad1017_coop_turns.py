@@ -9,7 +9,7 @@ from tests import test_spike2_mode_roster as R
 
 RUNTIME = pathlib.Path(__file__).resolve().parents[1] / "tools" / "spike2_emu" / "modes" / "sdk" / "pad_mode_runtime.c"
 
-MAIN = r"""
+PRELUDE = r"""
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -18,14 +18,17 @@ static unsigned bpg = 3, game_no = 1, button = 0, max_players = 4;
 static void say(const char *f, ...) { va_list a; va_start(a, f); vprintf(f, a); va_end(a); printf("\n"); }
 static unsigned chg_game_now(void) { return game_no; }
 static int coop_button_held(void) { return button; }
-static struct { int on; unsigned button, game, n, turn; } coop;
+static struct { int on; unsigned button, game, n, turn; int teams_always; unsigned teams, team_n[3], round; } coop;
 static volatile unsigned char *coop_ball_byte = &bytes[1], *coop_players_byte = &players;
 static unsigned shown_turn, board;                   /* what the screen and the board were told last */
 static void coop_scores_mark(unsigned n) { board = n; }
 static void coop_turn_show(void) { shown_turn = coop.turn; }
 static void coop_scores_same(unsigned n) { (void)n; }
 static void coop_awards_begin(void) {}                /* PAD-1028: the awards (test_pad1028_coop_awards.py) */
-static void coop_awards_read(unsigned t) { (void)t; }
+static void coop_awards_read(unsigned t, unsigned p) { (void)t; (void)p; }
+enum { COOP_AW_SCORE = 1 };                           /* PAD-1042: a team's points, for the game-over line */
+struct coop_award { int kind; };
+static unsigned long long coop_award_now(const struct coop_award *a, unsigned p) { (void)a; (void)p; return 0; }
 static void coop_awards_end(unsigned n) { (void)n; }
 static struct { int open; unsigned who; } pk;               /* PAD-1031: the characters' pick (test_pad1031_coop_characters.py) */
 static void coop_pick_say(void) {}
@@ -35,6 +38,8 @@ static void coop_chars_turn(void) {}
 static void coop_cache_let_go(void) {}
 static void coop_cards_show(unsigned n) { (void)n; }    /* PAD-1028 round 2: the awards on the characters' cards */
 static int coop_switched_on(void) { return 1; }          /* round 2: CO-OP PLAY says On (test_pad1017_coop_lines.py) */
+static int teams_on;                                      /* PAD-1042: CO-OP PLAY says Team 2v2 (test_pad1042_team_play.py) */
+static int coop_teams_switched_on(void) { return teams_on; }
 /* the framework's own, modelled */
 static unsigned game_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
@@ -56,6 +61,9 @@ static unsigned game_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned) = game_change;
 static unsigned (*coop_add_game)(unsigned, unsigned, unsigned, unsigned) = game_add;
 @FNS@
+"""
+
+MAIN = PRELUDE + r"""
 static void play(unsigned team, int extra_at)
 {
     unsigned k, balls = 0;
@@ -96,14 +104,25 @@ int main(void)
 """
 
 
-def _run(tmp_path):
+#: the wraps and what they call, lifted in this order (PAD-1042's team game too: test_pad1042_team_play.py)
+SIGS = (
+    "static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsigned after, unsigned down)",
+    "static unsigned coop_team_player(unsigned team, unsigned size, unsigned round)",
+    "static unsigned coop_team_round(unsigned g, unsigned p, unsigned p_after, unsigned before, unsigned after,",
+    "static unsigned coop_teammates(void)",
+    "static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
+    "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
+    "static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
+    "static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+
+
+def lifted():
     src = RUNTIME.read_text(encoding="utf-8")
-    fns = "\n".join(R._lift(src, sig) for sig in (
-        "static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsigned after, unsigned down)",
-        "static unsigned coop_teammates(void)",
-        "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
-        "static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)"))
-    return R._host_run(tmp_path, MAIN.replace("@FNS@", fns)).splitlines()
+    return "\n".join(R._lift(src, sig) for sig in SIGS)
+
+
+def _run(tmp_path):
+    return R._host_run(tmp_path, MAIN.replace("@FNS@", lifted())).splitlines()
 
 
 def _turns(out, team):

@@ -6014,6 +6014,11 @@ class App:
         done) when the staged copy is not usable any more, so the caller
         runs the installer instead."""
         version = bg["version"]
+        if getattr(self, "_swap_started", False):
+            # PAD-1034: a second click while the app closes must not start a
+            # second helper - two renaming the same folders lost the install
+            self._close_for_update()
+            return True
         if bg["how"] == "windows":
             app_dir = update_slots.installed_app_dir()
             if not app_dir or not update_slots.staged_install_ok(app_dir,
@@ -6031,6 +6036,7 @@ class App:
                 f"Couldn't switch to v{version} in place ({info}) - running "
                 "its installer instead.", "warning")
             return False
+        self._swap_started = True
         self.window.append_log(
             f"Restarting into v{version} - the app will close and reopen "
             "updated.", "info")

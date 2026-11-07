@@ -6194,6 +6194,95 @@ games, co-op boards and times. A category's value is what the game keeps for its
 FIGHTER CHAMPION, GODZILLA POWERUP CHAMPION) or a best score (GODZILLA MULTIBALL CHAMPION), so those are offered
 unticked, for the owner to pick per game.
 
+**On the winners' character cards (round 2).** DoomWalrus666: "the players selected Godzilla character portrait ...
+next to their awards at the end of the game". A card with co-op characters (below) also carries an award card per
+character in the HUD scene beside the pick's screens: `PadCoopAward_<n>` (1-based, the character's place), the pick
+card's look with the character's portrait and name, and a words line `PadCoopAward_<n>_Words` the runtime writes.
+coop.cfg says `award_cards on`. When the co-op game is over (inside the game's player change, on its thread, before
+its match and high scores) the game's end waits while each award is shown on each winner's card in turn, 3.5 s each,
+42 s in all, the game's process sleeping a tick at a time (`site proc_sleep`, as the end-of-ball hold):
+
+    MOST POINTS  PLAYER 2  9,982,980
+
+A winner with no character (no pick) is left out there; the attract pages still show every award.
+
+### Co-op characters (PAD-1031)
+
+Each teammate picks a character at the start of their first ball (teammate 1 when the team forms; each join opens
+it again, since the joiner's held right flipper walked it), and its ability holds while that teammate is up. The game
+plays one player for the team, so nothing per player is copied: an ability changes what the game READS. `coop.cfg`
+(the Modes tab's **Characters…** under **Co-op play**):
+
+    pick on                                   each teammate picks at their first ball
+    left 60                                   the left flipper button (the right is `button`)
+    action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
+    character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE
+    character save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE
+    character adj:195x50:4:30 GODZILLA GMK|EASIER HEAT RAY
+
+Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
+
+- `adj:<id>=<v>` / `adj:<id>x<pct>:<lo>:<hi>`: the game's adjustment `<id>` reads `v`, or its own value x pct / 100
+  held to lo..hi, while the teammate is up. The getter (`site adjustment`, on every co-op port) is wrapped; NVRAM is
+  never written. Only an adjustment the game reads LIVE changes play: Godzilla reads BALL SAVE TIME (94) when a save
+  starts and HEAT RAY SPINS PER LEVEL (195) at each spin; it copies LIGHT BATTLE DIFFICULTY (173) and BUILDING
+  DIFFICULTY (168) into the player's record at the game's start, so those need more than the getter.
+- `bs:<id>`: `<id>` is the ball save time, read when a ball is served: a pick made with the teammate's ball already
+  out gives that ball the save now (`pm_ball_save` of what the getter answers).
+- `save:<s>`: two presses of the Action button within 0.6 s give an `s` second ball save, once a ball (one press is
+  the game's: Godzilla's heat ray is a hold).
+
+The pick says itself on the game's top line (PAD-1017's borrow of `BALL %d`): `PLAYER 2 PICK: <name>`, then what it
+does, every 1.5 s; the flippers walk (a character another teammate has is skipped; RANDOM after the last), Action
+takes it, 20 s takes the one shown. RANDOM takes one nobody has. `mode.log`:
+
+    co-op: teammate 1 is GODZILLA 1954 (LONGER BALL SAVE) - Action took it
+    co-op: GODZILLA 1954 - the game reads adjustment 94: 15 (its own 12)
+
+The app offers each ability where the card's program has what it needs (`coop_play.ABILITIES`, by adjustment name);
+`coop_presets/<title stem>.json` beside `coop_play.py` is a game's customization file (Godzilla's: eleven characters,
+one per ability the reporter asked for). Plan and the proof runs: `docs/plans/pad1031_coop_characters.md`.
+
+The rest of the kinds, each needing its port lines (the app offers an ability only where the build's port names
+what it needs):
+
+- `boost:<pct>`: the title's "add n of something" call (`site coop_boost`; Godzilla: its power-up add, `(this, n)`)
+  adds n x pct / 100 while the teammate is up.
+- `gift:<id>`: at the teammate's pick, the game's own one-shot feature adjustment `<id>` (Godzilla: LIGHT ALLY 311,
+  which lights the next of Mothra, Rodan and Anguirus): the game's adjustment-changed handler (`site
+  coop_adj_changed`, given `{u16 id}`) is called while the getter answers 1 for it, once.
+- An `adj:` the game copies into a player's record at the game's start reads the same through the getter but plays
+  as the record says. `site coop_cache_<id>` is the method that copies it (hooked to learn the rule's object) and
+  `value coop_cache_<id>_at` where (this + player x 4 + at): held at what the getter would answer while the teammate
+  is up, given back as the harder of the team's own and what play made of it (Godzilla's LIGHT BATTLE DIFFICULTY 173
+  at +0x10 of the battle rule, BUILDING DIFFICULTY 168 at +0x4 of the building rule; each battle or building raises
+  its record a notch).
+- `count:<name>+<n>`: at the pick, a rule's count for the player raised by n. The rule is found by `site
+  coop_count_<name>` (its game-start method, hooked) or `data coop_count_<name>_rule` (where the game keeps its
+  pointer); `value coop_count_<name>_at` where (rule + player x 4 + at). Godzilla: `jets` (rule 0x15 of the rule
+  table, +0xa8: what JET FIGHTER CHAMPION and the bonus read), `tanks` (the tank rule, +(player - 1) x 4 + 0x48: the
+  city map's TANKS n/10).
+- `spot:<rules>`: two Action presses within 0.6 s while one of the game's rules in the mask runs (`pm_stock_active`):
+  its lowest lit shot (`pm_stock_lit`, not 0x1) goes through the game's own `site shot_dispatch`, once a ball
+  (Godzilla `value coop_battle_rules 0x7f000`: the seven battles, ids 12-18).
+- `unlock:<id>@<rules>`: once one of the rules has STARTED on the teammate's turn this game, adjustment `<id>` reads 1
+  while they are up (Godzilla: UNLOCK ALL MONSTER BATTLES 334, which the selection screen's slot state reads live,
+  after a tier-1 battle, `value coop_tier1_rules 0xf000`: tier 2 opens).
+
+**The pick's own screens.** The top line is small (on Godzilla a long name ran into CREDITS), so a card with a pick
+gets a screen per character in the HUD scene, as a mode's own screen: `PadCoop_<n>` (1-based) and `PadCoop_Random`,
+each the owner's picture (the Characters dialog's Picture..., copied to `<project>/coop/`) or a generated panel with
+the name, and `<NAME> - <WHAT IT DOES>` under it. coop.cfg `screens <scene>` names the scene; the runtime finds them
+once the scene is up, keeps them hidden, shows the one the pick is on, and the top line then says only `PLAYER 2
+PICK`. With modes they go in the modes' own HUD pass (mode_assets.build); co-op alone, Write rewrites the HUD itself.
+
+Emulator-proven on Godzilla LE 1.16: the pick (Action, the flipper walk past taken ones, RANDOM, the time), the
+screens (12 of 12 found and hidden, the shown one's picture and words, a set built by Write's own override path), the
+save time 15 instead of 12 and the heat ray's 10 spins instead of 20 while the right teammate is up, the Action save
+giving a drain back, one ramp lighting a battle (BATTLE READY) for the easy teammate and not for another, the ally
+record 0/0/0 -> 0/0/1, a power-up counted twice (the meter's two segments), TANKS 7/10 after 4 given and 3 shot down,
+the jets count 4. Pro 1.16 carries the same lines (its sites matched to LE's code, not run).
+
 ## Handicaps (PAD-1033)
 
 Each player of a game picks a handicap, -3 (hardest) to +3 (easiest), and while they are up the game reads its own

@@ -538,6 +538,10 @@ def build(project, stock_hud, stock_bank, out_dir, ffmpeg=None, only=None, code=
     screens = [with_layout(form_screen(project, slug, spec), spec.screen_layout)
                for slug, spec in own if spec.screen and prof.can("screen")]
     screens += _code_screens(project, code, prof)
+    from . import coop_play as CP                      # PAD-1031: the co-op pick's screens, in the same pass
+    if CP.wants_screens(project, prof):
+        screens += CP.pick_screens(project, words_for=CP.words_for())
+        screens += CP.award_screens(project)          # PAD-1028 round 2: the awards on the characters
     huds = _code_huds(project, code, prof, hud_font)
     select = _more_scene(project, own, code, prof, stock_select)     # PAD-707: the new monsters' tiles
     if select is not None:

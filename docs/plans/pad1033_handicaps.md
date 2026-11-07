@@ -43,5 +43,6 @@ Rig kit `C:\tmp\PAD-1033\rig` (job.sh PLAYERS / GAMES / BALLS / PICKS / PICKS2, 
 
 - The other games' difficulties are read in play (the getter's answer plays) or kept in a shape the finder does not
   know: an emulator census per title would say which. Not needed for the reporter's game.
-- Merging with PAD-1031 (co-op characters, unmerged): both wrap the adjustment getter with `hook_wrap`, which cannot
-  wrap a function twice; whichever merges second chains its answer through the other's wrapper.
+- PAD-1031's co-op characters (merged first) also answer the adjustment getter. hook_wrap cannot wrap a function
+  twice, so the runtime wraps it once (`adj_chain`): a player's handicap on the game's own value, then a co-op
+  character's ability on that; the co-op ball-save-at-the-pick reads the chain too.

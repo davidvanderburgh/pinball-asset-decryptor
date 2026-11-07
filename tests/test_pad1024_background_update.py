@@ -461,6 +461,98 @@ def test_swap_script_says_what_it_does():
     assert "if ($true)" not in quiet
 
 
+
+def test_swap_script_runs_alone_and_keeps_the_old_one_until_sure():
+    """PAD-1034 (DoomWalrus666: "New style of update/restart appears to have
+    bricked PAD", "i may have clicked update more than once"): one helper at
+    a time, a later one on a finished swap does nothing, and the old version
+    is only deleted once the new folder can start."""
+    s = us.swap_script("C:\\a", "9.9.9", "C:\\s.exe", 1, "l")
+    assert "Global\\PinballAssetDecryptorUpdateSwap" in s
+    assert "already on v9.9.9 - nothing to switch" in s
+    assert "if ($whole) { Remove-Item -LiteralPath $old" in s
+    assert "Test-Path -LiteralPath 'C:\\s.exe'" in s
+
+
+def _swap_logs_done(logs, timeout=60):
+    end = time.time() + timeout
+    done = ("swapped in", "swap not done", "already switching", "nothing to")
+    while time.time() < end:
+        texts = [p.read_text(encoding="utf-8-sig") if p.exists() else ""
+                 for p in logs]
+        if all(any(d in t for d in done) for t in texts):
+            return texts
+        time.sleep(0.25)
+    return texts
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the swap helper is PowerShell")
+@pytest.mark.parametrize("clicks", [2, 3])
+def test_more_than_one_restart_click_swaps_once(tmp_path, clicks):
+    """The real helper, twice or three times over the same folders, as
+    repeat Restart to update clicks started it: before PAD-1034 the second
+    renamed the version just swapped in to .old - which the first deletes -
+    and ran the installer over the top."""
+    import subprocess
+    import sys
+    app = tmp_path / "Pinball Asset Decryptor"
+    _tree(app, "1.0.0")
+    nxt = _tree(tmp_path / "Pinball Asset Decryptor.next", "9.9.9")
+    (nxt / us.MARKER).write_text('{"version": "9.9.9"}', encoding="utf-8")
+    holder = subprocess.Popen([sys.executable, "-c",
+                               "import time; time.sleep(3)"])
+    logs = [tmp_path / ("swap%d.log" % i) for i in range(clicks)]
+    try:
+        for log in logs:
+            ok, _ = us.start_swap(str(app), "9.9.9", "", pid=holder.pid,
+                                  launch=False, register=False,
+                                  log_path=str(log))
+            assert ok
+        texts = _swap_logs_done(logs)
+    finally:
+        holder.kill()
+    assert sum("swapped in v9.9.9" in t for t in texts) == 1, texts
+    assert sum("already switching" in t for t in texts) == clicks - 1, texts
+    assert not any("swap not done" in t for t in texts), texts
+    assert us.tree_version(str(app)) == "9.9.9"
+    assert (app / "launcher.vbs").is_file()
+    assert not nxt.exists()
+    # and a click after the swap finished finds nothing to do
+    late = tmp_path / "late.log"
+    ok, _ = us.start_swap(str(app), "9.9.9", "", pid=holder.pid,
+                          launch=False, register=False, log_path=str(late))
+    assert ok
+    assert "nothing to switch" in _swap_logs_done([late])[0]
+    assert us.tree_version(str(app)) == "9.9.9"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the swap helper is PowerShell")
+def test_a_new_folder_without_launcher_keeps_the_old_one(tmp_path):
+    """An antivirus that takes launcher.vbs out of the new folder must not
+    leave the shortcuts nothing to start: it is copied over from the old
+    version, which is deleted only then."""
+    import subprocess
+    import sys
+    app = tmp_path / "Pinball Asset Decryptor"
+    _tree(app, "1.0.0")
+    nxt = _tree(tmp_path / "Pinball Asset Decryptor.next", "9.9.9")
+    (nxt / us.MARKER).write_text('{"version": "9.9.9"}', encoding="utf-8")
+    (nxt / "launcher.vbs").unlink()
+    holder = subprocess.Popen([sys.executable, "-c", "pass"])
+    holder.wait()
+    log = tmp_path / "swap.log"
+    us.start_swap(str(app), "9.9.9", "", pid=holder.pid, launch=False,
+                  register=False, log_path=str(log))
+    text = _swap_logs_done([log])[0]
+    end = time.time() + 30
+    while time.time() < end and "copied over" not in log.read_text(
+            encoding="utf-8-sig"):
+        time.sleep(0.25)
+    assert "launcher.vbs copied over" in log.read_text(encoding="utf-8-sig")
+    assert us.tree_version(str(app)) == "9.9.9", text
+    assert (app / "launcher.vbs").is_file()
+
+
 # ------------------------------------------------------------ app: staging
 @pytest.fixture
 def slots(tmp_path, staged, monkeypatch):
@@ -523,6 +615,21 @@ def test_installed_copy_installs_in_background_then_swaps(tmp_path, slots):
         assert slots["launched"] == []          # no installer: just the swap
         assert slots["saved"] > saved           # state written before it
         assert w.app._restart_wsl_on_close
+
+
+
+def test_a_second_restart_click_starts_no_second_swap(tmp_path, slots):
+    """PAD-1034: two helpers renaming the same folders lost the install."""
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.app._offer_update, "9.9.9", "u", _installer())
+        assert _until(w, lambda: _ready(w))
+        w.call("ui.banner_action", "update", "install")
+        assert _until(w, lambda: slots["closed"])
+        w.run(w.app._swap_in_staged, w.app._bg_update)
+        w.call("ui.banner_action", "update", "install")
+        time.sleep(0.5)
+        assert len(slots["swaps"]) == 1
+        assert slots["launched"] == []
 
 
 def test_the_installing_banner(tmp_path):

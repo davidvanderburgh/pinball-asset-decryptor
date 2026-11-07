@@ -668,6 +668,14 @@ html.bp-1100 .rs-side { flex-basis: auto; width: 100%; max-height: 40vh; }
 /* PAD-1028: the co-op awards dialog - a row an award: its tick, its words, what it counts */
 .modes-coop-aw { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .modes-coop-aw-row { display: grid; grid-template-columns: auto 260px 1fr; align-items: center; gap: 8px; min-height: 28px; }
+/* PAD-1031: the co-op characters dialog - a row a character: its name, its ability, what that does, remove */
+.modes-coop-btns { gap: 6px; flex-wrap: wrap; }
+.modes-coop-ch { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.modes-coop-ch-row { display: grid; grid-template-columns: 24px 210px 200px 1fr auto; align-items: center; gap: 8px; min-height: 30px; flex: none; }
+html.bp-1100 .modes-coop-ch-row { grid-template-columns: 24px 1fr 1fr auto; }
+html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
+.modes-coop-ch-pv { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.modes-coop-ch-pv img { width: 460px; height: auto; border: 1px solid var(--line); border-radius: 6px; flex: none; }
 /* PAD-1033: what each handicap level does (the Levels dialog) */
 .modes-hand-levels { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .modes-hand-row { display: grid; grid-template-columns: 2.5em 1fr; align-items: baseline; gap: 8px; }

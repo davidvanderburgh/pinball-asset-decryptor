@@ -388,13 +388,29 @@ $ErrorActionPreference = 'Stop'
 $log = %(log)s
 function Say($m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format s) + ' ' + $m) } catch {} }
 $app = %(app)s; $next = %(next)s; $old = %(old)s
+# ONE HELPER AT A TIME (PAD-1034): a second Restart to update click starts a
+# second helper, which renamed the version the first had just swapped in to
+# .old - the folder the first deletes - and ran the installer on top
+$lock = New-Object System.Threading.Mutex($false, 'Global\PinballAssetDecryptorUpdateSwap')
+try { $owned = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) { Say 'another Restart to update is already switching versions - leaving it to that one'; exit 0 }
+function AppVersion {
+  try { $m = Select-String -LiteralPath (Join-Path $app 'pinball_decryptor\__init__.py') -Pattern '^__version__\s*=\s*["'']([^"'']+)' | Select-Object -First 1
+        if ($m) { return $m.Matches[0].Groups[1].Value } } catch {}
+  return ''
+}
 function Fallback($why) {
   Say ('swap not done: ' + $why + ' - running the installer instead')
-  if (%(setup)s) { Start-Process -FilePath %(setup)s -ArgumentList %(setup_args)s }
+  if (%(setup)s -and (Test-Path -LiteralPath %(setup)s)) { Start-Process -FilePath %(setup)s -ArgumentList %(setup_args)s }
+  else { Say 'the installer is not there to run' }
   exit 1
 }
 Say 'waiting for the app (pid %(pid)d) to close'
 try { Wait-Process -Id %(pid)d -Timeout 180 -ErrorAction SilentlyContinue } catch {}
+if (-not (Test-Path -LiteralPath (Join-Path $next %(marker)s)) -and ((AppVersion) -eq %(version_q)s)) {
+  Say 'already on v%(version)s - nothing to switch'
+  exit 0
+}
 if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
 if (Test-Path -LiteralPath $old) { Fallback ($old + ' is still there') }
 if (-not (Test-Path -LiteralPath (Join-Path $next %(marker)s))) { Fallback 'the new version is not staged' }
@@ -406,8 +422,13 @@ for ($i = 0; $i -lt 30 -and -not $moved; $i++) {
 if (-not $moved) { Fallback 'a file in the app folder is still in use' }
 try { Rename-Item -LiteralPath $next -NewName (Split-Path $app -Leaf) }
 catch {
-  try { Rename-Item -LiteralPath $old -NewName (Split-Path $app -Leaf) } catch {}
-  Fallback ('the new folder would not move: ' + $_)
+  $why = [string]$_
+  # put the running version back, however long whatever holds .old takes:
+  # leaving no folder at all is the one outcome that starts nothing
+  for ($i = 0; $i -lt 60 -and -not (Test-Path -LiteralPath $app); $i++) {
+    try { Rename-Item -LiteralPath $old -NewName (Split-Path $app -Leaf) } catch { Start-Sleep -Milliseconds 500 }
+  }
+  Fallback ('the new folder would not move: ' + $why)
 }
 Remove-Item -LiteralPath (Join-Path $app %(marker)s) -Force -ErrorAction SilentlyContinue
 Say 'swapped in v%(version)s'
@@ -430,11 +451,18 @@ if (%(register)s) {
     }
   } catch { Say ('Visual Pinball controller not registered: ' + $_) }
 }
+# the shortcuts start launcher.vbs: never delete the old version while the
+# new one has none (an antivirus may have taken it from the new folder)
+$whole = Test-Path -LiteralPath (Join-Path $app 'launcher.vbs')
+if (-not $whole -and (Test-Path -LiteralPath (Join-Path $old 'launcher.vbs'))) {
+  try { Copy-Item -LiteralPath (Join-Path $old 'launcher.vbs') -Destination $app; $whole = $true; Say 'launcher.vbs copied over from the old version' } catch {}
+}
+if (-not $whole) { Say 'the new version has no launcher.vbs - the old one is kept in .old' }
 if (%(launch)s) {
   Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + (Join-Path $app 'launcher.vbs') + '"') -WorkingDirectory $app
   Say 'started the new version'
 }
-Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
+if ($whole) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
 if (Test-Path -LiteralPath $old) { Say ($old + ' is left for the next start to delete') }
 Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """

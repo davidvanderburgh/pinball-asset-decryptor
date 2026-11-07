@@ -85,7 +85,11 @@ def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     assert "if (hand.on && !hook(fn(\"tick\"), on_hand_tick))" in src       # a card of only this has a tick of its own
     assert "    hand_tick();" in R._lift(src, "static void on_tick(unsigned *r)")
     arm = R._lift(src, "static void hand_arm(void)")
-    assert 'hook_wrap(fn("adjustment"), (void *)hand_adj_wrap)' in arm
+    assert "if (!adj_wrap_arm()) {" in arm and "adj_hand_on = 1;" in arm
+    # the getter is wrapped once and each of ours answers in turn (PAD-1031's co-op characters wrap it too)
+    chain = R._lift(src, "static unsigned adj_chain(unsigned id)")
+    assert chain.index("hand_adj_answer(id, v)") < chain.index("coop_adj_answer(id, v)")
+    assert src.count('hook_wrap(fn("adjustment")') == 1
     assert 'str_starts(s, "record ")' in R._lift(_src(), "static void hand_line(const char *s)")
 
 
@@ -101,6 +105,7 @@ def test_a_level_holds_from_the_players_first_ball():
     assert "hand.picked = hand.asked = 0;" in R._lift(_src(), "static void hand_game_check(void)")
     assert "if (ball != 1u || !pm_in_game()) return;" in tick                          # the pick: the first ball
     assert 'hand_close("the ball scored")' in tick
+    assert tick.index("if (hand_waits_for_coop()) {") < tick.index("hand.asked |= 1u << p;")   # a character pick first
     rec = R._lift(_src(), "static void hand_records(unsigned p, int lv)")
     assert "own = hand_adj_game(hand_cache[i].id);" in rec                            # from the operator's, never twice
     assert "a = hand_cache[i].obj + p * 4u + hand_cache[i].at;" in rec

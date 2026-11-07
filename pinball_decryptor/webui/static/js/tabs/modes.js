@@ -13,7 +13,8 @@
 import { html, useEffect, useRef, useState, Button, Field, Select, Check, Radio, Chip, Note, Empty,
          InfoBadge, Icon, Progress, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { StockDialog, FilmDialog, ClipDialog, PlayButton, CoopAwardsDialog, HandicapLevelsDialog } from "./modes_dialogs.js";
+import { StockDialog, FilmDialog, ClipDialog, PlayButton, CoopAwardsDialog, CoopCharsDialog,
+         HandicapLevelsDialog } from "./modes_dialogs.js";
 import { NewModeWizard, KindTiles } from "./modes_new.js";
 import { BlocksEditor, BlocksCode, ProgramBar, useModeProgram } from "./modes_blocks.js";
 import { PlayfieldView } from "./modes_playfield.js";
@@ -237,7 +238,7 @@ function ListRow({ r, i, selIdx, isSel }) {
 // GAME_FOLD_AT of them (a person's choice to open or fold them is kept in this browser).
 const GAME_FOLD_AT = 6;
 
-function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onHandLevels }) {
+function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, onHandLevels }) {
   const [fold, setFold] = useStored("pad.modes.game_fold2", "auto");
   const sel = s.sel || {};
   const allGame = s.game_rows || [];
@@ -289,7 +290,10 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onHandLevels 
         ${s.coop_on ? html`<${Check} checked=${s.coop_menu} wrap label="Switch it on and off in the service menu"
           title=${s.coop_menu_tip} onChange=${(v) => call("modes.set_coop_menu", v)} />` : null}
         ${s.coop_note ? html`<span class=${cx("small", s.coop_note_kind === "err" ? "err-ink" : "muted")}>${s.coop_note}</span>` : null}
-        ${s.coop_awards_ok ? html`<${Button} size="sm" icon="star" onClick=${onCoopAwards} title=${s.coop_awards_tip}>Awards…<//>` : null}
+        ${s.coop_awards_ok ? html`<div class="row modes-coop-btns">
+          <${Button} size="sm" icon="star" onClick=${onCoopAwards} title=${s.coop_awards_tip}>Awards…<//>
+          <${Button} size="sm" icon="list" onClick=${onCoopChars} title=${s.coop_chars_tip}>Characters…<//>
+        </div>` : null}
       </div>` : null}
       ${s.hand_shown ? html`<div class="stack modes-coop">
         <${Check} checked=${s.hand_on} wrap label="Handicap per player" title=${s.hand_tip}
@@ -1330,6 +1334,7 @@ export default function ModesTab() {
   if (s.spin) SPIN = s.spin;
   const [stock, setStock] = useState(false);
   const [coopAw, setCoopAw] = useState(false);                                // PAD-1028
+  const [coopCh, setCoopCh] = useState(false);                                // PAD-1031
   const [handLv, setHandLv] = useState(false);                                // PAD-1033
   const [sheet, setSheet] = useState(false);        // PAD-664: the rules sheet dialog
   const [newMode, setNewMode] = useState(null);      // the wizard: { kind: "" | "blocks" | "c" | "form" }
@@ -1346,6 +1351,7 @@ export default function ModesTab() {
     <div class="modes-body">
       <${ModeList} s=${s} onNew=${(k) => setNewMode({ kind: k })} onAllNumbers=${() => setStock(true)}
         onSheet=${() => { setSheet(true); call("modes.sheet_open"); }} onCoopAwards=${() => setCoopAw(true)}
+        onCoopChars=${() => setCoopCh(true)}
         onHandLevels=${() => setHandLv(true)} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`
         : s.code && s.code.blocks ? html`<${BlocksPane} s=${withClip} />`
@@ -1361,6 +1367,7 @@ export default function ModesTab() {
     <${TryFooter} s=${s} />
     ${stock ? html`<${StockDialog} s=${s} onClose=${() => setStock(false)} />` : null}
     ${coopAw ? html`<${CoopAwardsDialog} s=${s} onClose=${() => setCoopAw(false)} />` : null}
+    ${coopCh ? html`<${CoopCharsDialog} s=${s} onClose=${() => setCoopCh(false)} />` : null}
     ${handLv ? html`<${HandicapLevelsDialog} s=${s} onClose=${() => setHandLv(false)} />` : null}
     ${sheet && s.sheet ? html`<${RulesSheetDialog} s=${s} onClose=${() => setSheet(false)} />` : null}
     ${s.film ? html`<${FilmDialog} film=${s.film} key=${s.film.seq} />` : null}

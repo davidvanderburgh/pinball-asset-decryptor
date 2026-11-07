@@ -597,6 +597,8 @@ class ModePlan:
     idle_file: str = ""
     #: PAD-1040: ``cabshow.cfg`` beside the mode files, the card's expression light shows ("" = none)
     cabshow_file: str = ""
+    #: PAD-1041: ``comp.cfg`` beside the mode files, Prolonged Competition on the start menu ("" = none)
+    comp_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -813,7 +815,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
-         cabs_sids=None):
+         cabs_sids=None, comp=False, comp_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -853,7 +855,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-1040: *cabs* (the project's expression light shows) puts ``cabshow.cfg`` beside the mode files, each show
     with the sound ids that start its song on this card (*cabs_sids*, ``{slot: [sid, ...]}``); with nothing else it is
-    a plan of its own, for *cabs_prof*, and the file says the card has no modes."""
+    a plan of its own, for *cabs_prof*, and the file says the card has no modes.
+
+
+    PAD-1041: *comp* puts ``comp.cfg`` beside the mode files (Prolonged Competition on the start menu, its flag and
+    captions read off *game_elf*); with nothing else it is a plan of its own, for *comp_prof*."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -899,6 +905,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 result = cabs_plan(project, game_elf, cabs_prof or handicap_prof or idle_prof or coop_prof
                                    or attract_prof or variants_prof or sound_modes_prof or picture_prof)
             cabs_into(result, scratch, cabs, cabs_sids or {}, only=True, log=log)
+        if comp:                                     # PAD-1041: Prolonged Competition, alone or with the above
+            if result is None:
+                result = comp_plan(project, game_elf, comp_prof or handicap_prof or idle_prof or coop_prof
+                                   or attract_prof or variants_prof or sound_modes_prof or picture_prof)
+            comp_into(result, game_elf, scratch, only=True)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -986,6 +997,44 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         handicap_into(result, game_elf, scratch, handicap_setting, only=False)
     if cabs:                                         # PAD-1040
         cabs_into(result, scratch, cabs, cabs_sids or {}, only=False, log=log)
+    if comp:                                         # PAD-1041
+        comp_into(result, game_elf, scratch, only=False)
+    return result
+
+
+# ---- PAD-1041: Prolonged Competition on the start menu -------------------------------------------
+def comp_plan(project, game_elf, prof):
+    """A plan carrying only Prolonged Competition: no mode, no scene; the runtime and the title's port on p2 with
+    ``comp.cfg`` (:func:`comp_into`)."""
+    from . import prolonged_comp as PCo
+    why = PCo.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows the start menu of"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def comp_into(result, game_elf, scratch, only):
+    """``comp.cfg`` for *result*'s card: the Competition flag and the menu's captions read off *game_elf*; *only* when
+    the card carries no modes (the runtime then arms this alone)."""
+    from . import prolonged_comp as PCo
+    why = PCo.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        text = PCo.cfg_text(game_elf, only)
+    except PCo.CompError as e:
+        raise ModeWriteError(str(e)) from None
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, PCo.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.comp_file = path
+    result.lines.append("prolonged competition: %s" % PCo.HOW)
     return result
 
 
@@ -1163,9 +1212,10 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
     result.coop_file = path
     result.lines.append("co-op play: %s" % CP.HOW)
     if setting:
-        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY); %s" % (
-            "Insider Connected is off only while it is On" if only
+        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Co-op, 2 Team 2v2); %s" % (
+            "Insider Connected is off only while it is 1 or 2" if only
             else "the card's modes keep its scores off Insider Connected either way"))
+        result.lines.append("co-op play: Team 2v2: %s" % CP.TEAMS_HOW)    # PAD-1042
     got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
     result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))
     got = [line.split(" ", 2)[2].split("|")[0] for line in text.splitlines() if line.startswith("character ")]
@@ -1795,6 +1845,11 @@ def p2_payload(result, out_dir, project=None):
             from . import cab_shows as CS
             dst = os.path.join(out_dir, CS.CFG_NAME)
             shutil.copyfile(result.cabshow_file, dst)
+            extras.append(dst)
+        if getattr(result, "comp_file", ""):           # PAD-1041: comp.cfg, Prolonged Competition
+            from . import prolonged_comp as PCo
+            dst = os.path.join(out_dir, PCo.CFG_NAME)
+            shutil.copyfile(result.comp_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

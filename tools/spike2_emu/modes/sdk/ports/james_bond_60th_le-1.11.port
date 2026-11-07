@@ -582,6 +582,22 @@ site  coop_player_change 0x00373f34 0xe92d41f0 0xe24dd008
 site  coop_add_player    0x00373d74 0xe92d4038 0xe3a00051
 data  coop_player        0x0059fa14
 data  coop_players       0x00626f6c
+site  coop_first_ball    0x0034324c 0xeb00c305 0xe1a04000
 
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x0039e3ac 0xe92d43f0 0xe2505000
+# PAD-1041: the game's flags (Prolonged Competition sets FG_PLAYER_COMPETITION_MODE_ACTIVE)
+data  game_flags          0x00626cdc
+value game_flags_at       4
+data  game_flag_count     0x004f6ad4
+# PAD-1041: the start menu is an object (a vector of 24-byte entries); Prolonged Competition's entry is
+# added by the game's own add after its last one, and Start's pick of it is noted
+site  comp_menu_obj_built    0x0005d0dc 0xe5953204 0xe5952208   # after the builder's last add (the menu in r5)
+site  comp_menu_obj_pick     0x0005c4a8 0xe5943210 0xe5942204   # Start: the selected entry's callback (the menu in r4)
+site  comp_menu_obj_add_fn   0x0005cdd4 0xe92d47f0 0xe24dd020   # add(menu, enabled, kind, flag, flag2, caption, name)
+value comp_menu_obj_reg      5
+value comp_menu_obj_pick_reg 4
+value comp_menu_obj_vec      516   # +0x204: the entries' begin, +0x208 their end
+value comp_menu_obj_index    528   # +0x210: the selected entry
+value comp_menu_obj_kind     2     # COMPETITION's kind (flag 17)
+value comp_menu_obj_end_kind 1     # STANDARD's

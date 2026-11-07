@@ -769,6 +769,7 @@ site  coop_player_change 0x0025bb2c 0xe92d41f0 0xe24dd008
 site  coop_add_player    0x0025b96c 0xe92d4038 0xe3a00051
 data  coop_player        0x0068d165
 data  coop_players       0x007588cc
+site  coop_first_ball    0x003835c8 0xebfb6124 0xe1a04000
 
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x003ea3f8 0xe92d43f0 0xe2505000

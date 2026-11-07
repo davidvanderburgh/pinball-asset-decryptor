@@ -1134,6 +1134,11 @@ site  coop_player_change 0x00338950 0xe92d41f0 0xe24dd008
 site  coop_add_player    0x00338790 0xe92d4038 0xe3a00051
 data  coop_player        0x00713b94
 data  coop_players       0x007d116c
+site  coop_first_ball    0x002a7714 0xeb02445a 0xe1a04000
+
+# ---- PAD-1043: co-op play - the score panel's calls of the player-up getter (portcoop.py) ----
+site  coop_panel_lit         0x001ae4e0 0xeb0628c2 0xe5943070
+site  coop_panel_up          0x001ae3a4 0xeb062911 0xe5d431b5
 
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 value coop_ball_msg          1255
@@ -1163,3 +1168,15 @@ value coop_count_tanks_at 0x44
 # tier-1 battle has started on its turn (the selection screen's slot state reads it live: Premium/LE 0x122ae8)
 value coop_battle_rules    0x7f000
 value coop_tier1_rules     0xf000
+# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
+site  comp_menu_frame        0x000603d8 0xe0833106 0xe51330d4
+value comp_menu_frame_list_at    300
+value comp_menu_frame_count_at   64
+value comp_menu_frame_count_last 0
+value comp_menu_frame_cap        9   # the game-mode table's entries
+value comp_menu_frame_cursor_reg 6
+value comp_menu_frame_buttons_reg 5
+value comp_menu_index            3   # COMPETITION
+value comp_menu_index_msg        1920
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1915

@@ -750,6 +750,12 @@ site  coop_player_change 0x0042feac 0xe92d41f0 0xe24dd008
 site  coop_add_player    0x0042fcec 0xe92d4038 0xe3a00051
 data  coop_player        0x005fec18
 data  coop_players       0x006c7ec0
+site  coop_first_ball    0x001a47b8 0xeb0a2d88 0xe1a04000
+
+# ---- PAD-1043: co-op play - the score panel's calls of the player-up getter (portcoop.py) ----
+site  coop_panel_lit         0x0010caa8 0xeb0c8ca7 0xe3a04001
+site  coop_panel_up          0x0010c570 0xeb0c8df5 0xe5d43065
+site  coop_panel_up_2        0x0010ff04 0xeb0c7f90 0xe5d43065
 
 # ---- PAD-1017: the end-of-game high scores, for co-op play's own boards (portchallenge.scores_lines) ----
 site  challenge_scores       0x0014e370 0xe92d4ff0 0xe24dd0bc
@@ -766,3 +772,22 @@ site  challenge_pages_0     0x0005447c 0xe92d4ff0 0xe1a05003
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 data  message_table          0x00615478
 value coop_ball_msg          1255
+# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
+site  comp_menu_frame        0x0004a930 0xe0833105 0xe513317c
+value comp_menu_frame_list_at    300
+value comp_menu_frame_count_at   68
+value comp_menu_frame_count_last 0
+value comp_menu_frame_cap        5   # the game-mode table's entries
+value comp_menu_frame_cursor_reg 5
+value comp_menu_frame_buttons_reg 6
+value comp_menu_index            3   # COMPETITION
+value comp_menu_index_msg        1920
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1915
+# PAD-1041: the game's flags (Prolonged Competition sets FG_PLAYER_COMPETITION_MODE_ACTIVE)
+data  game_flags          0x00659e64
+value game_flags_at       4
+data  game_flag_count     0x00538c2c
+# PAD-1041: the game's messages (the start menu's entry is lettered through them; port_tool's draft)
+data message_count          0x005394f0
+data message_remap          0x00662d88

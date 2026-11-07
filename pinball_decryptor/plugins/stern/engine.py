@@ -8173,6 +8173,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1040: the cabinet's expression light shows - cabshow.cfg beside the runtime (the modes' delivery)
     cabs_prof, cabs_shows = _cabs_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _cabs_on = cabs_prof is not None
+    # PAD-1041: Prolonged Competition on the start menu - comp.cfg beside the runtime (the modes' delivery)
+    comp_prof = _comp_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _comp_on = comp_prof is not None
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -8181,7 +8184,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
-            and not _hand_on and not _cabs_on
+            and not _hand_on and not _cabs_on and not _comp_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -9626,10 +9629,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Co-op play" if _coop_on
                 else "Inactivity pauses timers" if _idle_on
                 else "Handicaps" if _hand_on
-                else "Expression lights")
+                else "Expression lights" if _cabs_on
+                else "Prolonged Competition")
         _who_hud = _who
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on):
+                or _hand_on or _cabs_on or _comp_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -9641,7 +9645,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _attract_on else "Adding co-op play..."
                          if _coop_on else "Adding inactivity pausing the timers..."
                          if _idle_on else "Adding the handicaps..."
-                         if _hand_on else "Adding the expression light shows...")
+                         if _hand_on else "Adding the expression light shows..."
+                         if _cabs_on else "Adding Prolonged Competition...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -9653,7 +9658,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
                     _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
-                              or idle_prof or hand_prof or cabs_prof)
+                              or idle_prof or hand_prof or cabs_prof or comp_prof)
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -9722,6 +9727,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     handicap_setting=hand_setting,
                     cabs=cabs_shows if _cabs_on else None, cabs_prof=cabs_prof,   # PAD-1040
                     cabs_sids=_cabs_sids,
+                    comp=_comp_on, comp_prof=comp_prof,               # PAD-1041
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -9792,6 +9798,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     log("Inactivity pauses timers: %s." % _line[len("inactivity pauses timers: "):].rstrip("."),
                         "info")
                     continue
+                if _line.startswith("prolonged competition: "):   # PAD-1041: its own name too
+                    log("Prolonged Competition: %s." % _line[len("prolonged competition: "):].rstrip("."), "info")
+                    continue
                 if _line.startswith(("handicaps: ", "handicap ")):   # PAD-1033: and the handicaps' (each level)
                     log("Handicaps: %s." % (_line[len("handicaps: "):] if _line.startswith("handicaps: ")
                                             else _line[len("handicap "):]).rstrip("."), "info")
@@ -9808,7 +9817,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               else "adding the picture settings" if picture_cfg
                               else "adding the attract items" if _attract_on
                               else "adding co-op play" if _coop_on
-                              else "adding inactivity pausing the timers"), t0)
+                              else "adding inactivity pausing the timers" if _idle_on
+                              else "adding the handicaps" if _hand_on
+                              else "adding Prolonged Competition"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
         # modes just rewrote when they did.  The program part already landed
@@ -10106,6 +10117,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "handicap": bool(getattr(mode_plan, "handicap_file", "")),
                 # PAD-1040: the card's expression light shows
                 "cabs": bool(getattr(mode_plan, "cabshow_file", "")),
+                # PAD-1041: Prolonged Competition on the start menu
+                "comp": bool(getattr(mode_plan, "comp_file", "")),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -11316,6 +11329,35 @@ def _handicap_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     return prof
 
 
+def _comp_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1041: the title of the card Prolonged Competition goes on, or ``None`` when the project does not ask for it
+    or it is left out (one warning says why). The modes' gate, as co-op play's."""
+    from . import prolonged_comp as _PCo
+    from . import mode_write as _MW
+    if not _PCo.load(assets_dir):
+        return None
+    if dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry it"
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _PCo.project_title(assets_dir, probe=True)
+        why = _PCo.title_refusal(prof)
+    if why:
+        log("Prolonged Competition: left out of this build: %s." % why.rstrip("."), "warning")
+        return None
+    log("Prolonged Competition: %s." % _PCo.HOW, "info")
+    return prof
+
+
 class _HandicapMenu(_MusicModeMenu):
     """PAD-1033: HANDICAP in the game's own service menu, Off/On (On to start with), on a spare setting: the players
     pick a handicap only while it says On. With no spare setting left the handicaps are always on."""
@@ -11344,8 +11386,8 @@ class _HandicapMenu(_MusicModeMenu):
 
 
 class _CoopMenu(_MusicModeMenu):
-    """PAD-1017 round 2 (DoomWalrus666): CO-OP PLAY in the game's own service menu, Off/On, on a spare setting;
-    co-op (and, on a card of nothing else, the Insider Connected gate) only while it says On."""
+    """PAD-1017 round 2 (DoomWalrus666): CO-OP PLAY in the game's own service menu, on a spare setting; co-op (and, on
+    a card of nothing else, the Insider Connected gate) only while it says On. PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2."""
 
     KEY = "coop_play"
 
@@ -11355,14 +11397,14 @@ class _CoopMenu(_MusicModeMenu):
 
     def wanted(self):
         from . import coop_play as _CP
-        return self.KEY, _CP.MENU_VALUES, (), {"default": 1, "help_text": _CP.MENU_HELP, "onoff": True}
+        return self.KEY, _CP.MENU_VALUES, (), {"default": 1, "help_text": _CP.MENU_HELP, "from_zero": True}
 
     def done(self):
         self.ok = True
-        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), Off to start with: set it to On to play "
-                 "co-op. While it is On most Insider Connected features are off; Off, the card reports as it always "
-                 "has (with no modes on it)." % self.setting.where,
-                 "info")
+        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 to play "
+                 "co-op, or 2 for Team 2v2 (players 1 and 2 against 3 and 4). While it is 1 or 2 most Insider "
+                 "Connected features are off; at 0 the card reports as it always has (with no modes on it)."
+                 % self.setting.where, "info")
 
     def fail(self, why):
         if self.why or self.ok:
@@ -12613,13 +12655,14 @@ def _install_modes(output_path, modes, landed, planned, log):
     who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                                  or modes.get("picture") or modes.get("attract")
                                                  or modes.get("coop") or modes.get("idle")
-                                                 or modes.get("handicap"))
+                                                 or modes.get("handicap") or modes.get("comp"))
            else "Random clips" if modes.get("variants") else "Music modes"
            if modes.get("music_modes") else "Picture settings" if modes.get("picture")
            else "Attract items" if modes.get("attract")   # PAD-782
            else "Co-op play" if modes.get("coop")         # PAD-1017
            else "Inactivity pauses timers" if modes.get("idle")   # PAD-1022
-           else "Handicaps")                              # PAD-1033
+           else "Handicaps" if modes.get("handicap")      # PAD-1033
+           else "Prolonged Competition")                  # PAD-1041
     if who == "Music modes" and all(t.endswith(" in attract") for t in modes["music_modes"]):
         who = "Attract flipper sounds"   # PAD-641: the same program, its own words
     elif who == "Music modes" and all(t.endswith((" in turn)", " in attract"))
@@ -12705,9 +12748,13 @@ def _install_modes(output_path, modes, landed, planned, log):
         from . import handicap as _HC
         log("Handicaps on the card: %s. Like the operator's own settings, handicaps keep the card on Insider "
             "Connected." % _HC.HOW, "success")
+    if modes.get("comp"):                     # PAD-1041
+        from . import prolonged_comp as _PCo
+        log("Prolonged Competition on the card: %s. Like the game's own Competition, it keeps the card on Insider "
+            "Connected." % _PCo.HOW, "success")
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                   or modes.get("picture") or modes.get("attract") or modes.get("coop")
-                                  or modes.get("idle") or modes.get("handicap")):
+                                  or modes.get("idle") or modes.get("handicap") or modes.get("comp")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")

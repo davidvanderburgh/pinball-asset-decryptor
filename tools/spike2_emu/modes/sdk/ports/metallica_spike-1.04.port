@@ -839,7 +839,23 @@ site  coop_player_change 0x00448320 0xe92d41f0 0xe24dd008
 site  coop_add_player    0x00448160 0xe92d4038 0xe3a00051
 data  coop_player        0x06f6838c
 data  coop_players       0x070460e0
+site  coop_first_ball    0x0027ad00 0xeb073553 0xe1a04000
 
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 data  message_table          0x06f7f294
 value coop_ball_msg          1255
+# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
+site  comp_menu_frame        0x000ed55c 0xe083310a 0xe5133154
+value comp_menu_frame_list_at    652
+value comp_menu_frame_count_at   28
+value comp_menu_frame_count_last 1   # the count slot holds the last index
+value comp_menu_frame_cap        17   # the game-mode table's entries
+value comp_menu_frame_cursor_reg 10
+value comp_menu_frame_buttons_reg 5
+value comp_menu_index            3   # COMPETITION
+value comp_menu_index_msg        1920
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1915
+# PAD-1041: the game's messages (the start menu's entry is lettered through them; port_tool's draft)
+data message_count          0x0056c2cc
+data message_remap          0x06ff919c

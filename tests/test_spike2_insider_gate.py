@@ -55,8 +55,8 @@ def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
     # those stops there (handicaps and light shows hooking the tick) - unless it also carries PAD-782's
     # attract items or PAD-1017's co-op play, which take the whole gate (attract_wanted, coop_wanted)
     assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*clipv_arm\(\);[^\n]*\n\s*sndm_arm\(\);[^\n]*\n"
-                     r"\s*pic_arm\(\);[^\n]*\n\s*idle_arm\(\);[^\n]*\n\s*hand_arm\(\);[^\n]*\n\s*cabs_arm\(\);[^\n]*\n"
-                     r"\s*if \(\(clipv_only \|\| sndm_only \|\| pic_only \|\| idle_only \|\| hand_cfg_only\(\)"
+                     r"\s*pic_arm\(\);[^\n]*\n\s*idle_arm\(\);[^\n]*\n\s*hand_arm\(\);[^\n]*\n\s*comp_arm\(\);[^\n]*\n\s*cabs_arm\(\);[^\n]*\n"
+                     r"\s*if \(\(clipv_only \|\| sndm_only \|\| pic_only \|\| idle_only \|\| hand_cfg_only\(\) \|\| comp_cfg_only\(\)"
                      r" \|\| \(cabs_only && n_cabs\)\)\s*&& !attract_wanted\(\) && !coop_wanted\(\)\) \{.*?"
                      r"if \(\(hand\.on \|\| n_cabs\) && !hook\(fn\(\"tick\"\), on_hand_tick\)\) \{[^{}]*\}\s*return;"
                      r"\s*\}\s*\n\s*if \(!insider_arm\(\)\) return;",

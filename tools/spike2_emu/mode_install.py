@@ -86,14 +86,16 @@ EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 64))
 #: PAD-1022: idle.cfg, inactivity pausing the game's timers (pad_mode_runtime.c) - a whole install too.
 #: PAD-1033: handicap.cfg, a handicap for each player (pad_mode_runtime.c) - a whole install too.
 #: PAD-1040: cabshow.cfg, the card's expression light shows (pad_mode_runtime.c "SONG SHOWS") - a whole install too.
+#: PAD-1041: comp.cfg, Prolonged Competition on the start menu (pad_mode_runtime.c) - a whole install too.
 EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 0o100644),
                ("picture.cfg", 0o100644), ("attract.cfg", 0o100644), ("coop.cfg", 0o100644),
-               ("idle.cfg", 0o100644), ("handicap.cfg", 0o100644), ("cabshow.cfg", 0o100644))
+               ("idle.cfg", 0o100644), ("handicap.cfg", 0o100644), ("cabshow.cfg", 0o100644),
+               ("comp.cfg", 0o100644))
 #: the extra file that is enough for an install without a mode (PAD-446)
 CLIPS_FILE = "clips.cfg"
 #: the extra files that are each enough for an install without a mode (PAD-446, PAD-494, PAD-537)
 STANDALONE_FILES = (CLIPS_FILE, "sounds.cfg", "picture.cfg", "attract.cfg", "coop.cfg", "idle.cfg", "handicap.cfg",
-                    "cabshow.cfg")
+                    "cabshow.cfg", "comp.cfg")
 #: PAD-432: the project's modes as the Modes tab saves them to a file (sources, pictures, clips and
 #: sounds), so another project can load them straight from this card. The runtime never reads it;
 #: placed when the install is given one (--bundle) and it fits, taken off when it is not
@@ -216,7 +218,8 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
                          % (1 + len(EXTRA_CFGS)))
     if not cfg_path and not assets and not set(STANDALONE_FILES) & {os.path.basename(x) for x in extras}:
         raise mk.Refused("no mode file, no code mode's assets, no clips.cfg, no sounds.cfg, no "
-                         "picture.cfg, no attract.cfg, no coop.cfg, no idle.cfg, no handicap.cfg and no cabshow.cfg - "
+                         "picture.cfg, no attract.cfg, no coop.cfg, no idle.cfg, no handicap.cfg, no comp.cfg and no "
+                         "cabshow.cfg - "
                          "nothing has been written")
     if extra_cfgs and not cfg_path:
         raise mk.Refused("slot files without a mode.cfg - nothing has been written")
@@ -385,8 +388,9 @@ def main(argv=None):
                         "sounds.cfg, the music modes (PAD-494), picture.cfg, the picture "
                         "settings (PAD-537), attract.cfg, the attract items (PAD-782), coop.cfg, "
                         "co-op play (PAD-1017), idle.cfg, inactivity pausing the timers (PAD-1022), "
-                        "handicap.cfg, a handicap for each player (PAD-1033), or cabshow.cfg, the card's "
-                        "expression light shows (PAD-1040)")
+                        "handicap.cfg, a handicap for each player (PAD-1033), cabshow.cfg, the card's "
+                        "expression light shows (PAD-1040), or comp.cfg, Prolonged "
+                        "Competition on the start menu (PAD-1041)")
     p.add_argument("--port", help="the SDK runtime's port file for this game (item 134)")
     p.add_argument("--bundle", help="the project's modes file (PAD-432), for another project to "
                                     "load them from this card; left off when p2 has no room")

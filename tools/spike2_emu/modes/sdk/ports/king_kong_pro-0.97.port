@@ -765,6 +765,19 @@ site  coop_player_change 0x0047742c 0xe92d41f0 0xe24dd008
 site  coop_add_player    0x0047726c 0xe92d4038 0xe3a00051
 data  coop_player        0x0080dc08
 data  coop_players       0x008e2dc4
+site  coop_first_ball    0x002eef10 0xeb062112 0xe1a04000
 
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x0047d50c 0xe92d43f0 0xe2505000
+# PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
+site  comp_menu_frame        0x0008a734 0xe0833105 0xe513316c
+value comp_menu_frame_list_at    340
+value comp_menu_frame_count_at   56
+value comp_menu_frame_count_last 0
+value comp_menu_frame_cap        9   # the game-mode table's entries
+value comp_menu_frame_cursor_reg 5
+value comp_menu_frame_buttons_reg 6
+value comp_menu_index            2   # COMPETITION
+value comp_menu_index_msg        1920
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1915

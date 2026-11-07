@@ -6529,10 +6529,19 @@ the inserts (from index 256, up to 160): `pm_lamp_count` and every insert call s
     blades <fx> <ms> <a> <b> <rate> <blend>    a step of the blades' lane (colours 0xRRGGBB)
     speakers <fx> <ms> <a> <b> <rate> <blend>  a step of the speaker lights' lane
 
-Up to 32 shows, 128 steps a lane, 8 sound ids a show. The lanes run side by side from the request's start; a lane with
-no steps leaves its lights to the game, one whose steps ran out holds them dark. The show ends when its steps are
-over (loop 0) or `sound_active` says the request stopped (asked twice a second from 600 ms on); the lights are the
-game's again. The patterns (the runtime's `CAB FX` slice, mirrored by the app's `cabfx.js` and held equal by
+Up to 32 shows, 128 steps a lane, 8 sound ids a show. A lane with no steps leaves its lights to the game, one whose
+steps ran out holds them dark.
+
+**In step with the song, not a clock.** A show's time is where its song IS: the played-sample count of the voice of
+the channel playing its request (voice `+12`, `value sound_voice_played`, 44,100 a second; the channel and voice layout
+is the framework's, the same on all 68 ports; measured on Led Zeppelin LE 1.22 and Rush LE 1.19). A re-used voice shows
+its last sound's count for a tick or two, so the show takes the count once it has moved off its first reading and
+advances with the game's clock; until then (and on a port without the channel lines) it runs on its own clock from the
+request. So the lights hold while the song is held, start over when the game starts it over or loops it, and follow the
+mixer's own cursor whatever the game does with the song; a song the game starts part-way would be followed from where
+its voice starts (not yet seen on a machine of ours). No channel playing the request for 250 ms ends the show and the
+lights are the game's again. The speaker lights are two rings, left and right (a title that numbers 1-23 with no side:
+the first half round the left speaker), each counted from its top, and `alternate` swaps them. The patterns (the runtime's `CAB FX` slice, mirrored by the app's `cabfx.js` and held equal by
 `tests/test_pad1040_cab_shows.py`): solid, fade_in, fade_out, crossfade, pulse, strobe, sweep_up, sweep_down,
 fill_up, fill_down, chase_up, chase_down, bounce, center_out, center_in, alternate, rainbow, sparkle, fire, meter.
 `rate` is a pattern's pace in ms; sparkle, fire and meter are a hash of the time and the light, so a show plays the
@@ -6542,3 +6551,8 @@ same every time.
 took all 96 blade pixels magenta and all 23 speaker lights cyan over the game's own show, then a green sweep up the
 blades over dim blue with a red chase round the speakers, then a yellow fill rising from the bottom; after 10,000 ms
 every light was the game's again and its own show came back.
+
+In step with the song (C:/tmp/PAD-1040/probe/sync_probe.c, a show whose speakers change colour every second of its
+song): the colour matched the song's second in every frame away from a second's edge while it played (73 of 79), while
+the probe held the song's count for 3 s (25 of 25: the lights held), after it let go (16 of 16: the mixer's own cursor,
+13 s, and the lights jumped to it), and from the replay on; the probe's stop handed the lights back 251 ms later.

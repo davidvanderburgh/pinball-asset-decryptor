@@ -17,7 +17,8 @@
 /* the cabinet */
 .xl-cab { display: block; width: 100%; height: auto; max-height: 440px; background: #08080b; border-radius: 10px; }
 .xl-box, .xl-body { fill: #121219; stroke: #2c2c38; stroke-width: 2; }
-.xl-glass { fill: #050507; stroke: #23232d; }
+.xl-grille { fill: #0b0b10; stroke: #26262f; stroke-width: 1.5; }
+.xl-cone { fill: #141419; stroke: #202028; }
 .xl-led { fill: #1b1b22; stroke: #2a2a33; stroke-width: .6; }
 .xl-led.lit { stroke: none; filter: drop-shadow(0 0 3px currentColor); }
 .xl-led.game { fill: #24242c; stroke: #3a3a46; stroke-dasharray: 1.5 1.5; }

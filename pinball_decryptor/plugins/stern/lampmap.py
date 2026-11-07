@@ -390,7 +390,7 @@ _SPEAKER = re.compile(r"^(?:(LEFT|RIGHT) )?SPEAKER (\d+)$")
 #: to CAB_BLADE_TOP, the speaker ring(s) in the backbox above them
 CAB_BLADE_X = {"L": 12, "R": 288}
 CAB_BLADE_TOP, CAB_BLADE_BOTTOM = 140, 600
-CAB_RING = {"": (150, 70, 50), "L": (95, 70, 40), "R": (205, 70, 40)}
+CAB_RING = {"": (150, 70, 50), "L": (95, 70, 42), "R": (205, 70, 42)}
 
 
 def cabinet_role(name):
@@ -519,6 +519,12 @@ def place_cabinet(out):
         half = max(c["n"] for c in blades) // 2
         for c in blades:
             c["side"] = "L" if c["n"] <= half else "R"
+    # the backbox's two speakers, a ring of lights round each: a title that numbers them 1..23 with no side has the
+    # first half round the left speaker and the rest round the right (Batman 66 names LEFT / RIGHT itself)
+    speakers = sorted((c for c in out if c["role"] == "speaker"), key=lambda c: c["n"])
+    if len(speakers) > 1 and not any(c["side"] for c in speakers):
+        for i, c in enumerate(speakers):
+            c["side"] = "L" if i < (len(speakers) + 1) // 2 else "R"
     for role in ("blade", "speaker"):
         for side in ("", "L", "R"):
             row = sorted((c for c in out if c["role"] == role and c["side"] == side), key=lambda c: c["n"])

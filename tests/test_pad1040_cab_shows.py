@@ -58,8 +58,13 @@ def test_each_cabinet_light_has_its_place_on_the_drawing_and_along_its_strip():
     assert (l1["x"], r49["x"]) == (LM.CAB_BLADE_X["L"], LM.CAB_BLADE_X["R"])
     assert l1["y"] > l48["y"] >= LM.CAB_BLADE_TOP and l1["u"] < 30 and l48["u"] > 970      # pixel 1 at the bottom
     assert l1["lights"] == sorted(l1["lights"])                                        # R, G, B in that order
-    s1, s12 = by["SPEAKER 1"], by["SPEAKER 12"]
-    assert s1["y"] < LM.CAB_BLADE_TOP and s1["y"] < s12["y"] and s1["u"] < s12["u"]   # the ring, from the top round
+    s1, s12, s13, s23 = by["SPEAKER 1"], by["SPEAKER 12"], by["SPEAKER 13"], by["SPEAKER 23"]
+    # two speakers, a ring round each (David: "two speaker light circles"): 1-12 the left, 13-23 the right, each from
+    # its top round
+    assert {c["side"] for c in cab if c["role"] == "speaker" and c["n"] <= 12} == {"L"}
+    assert {c["side"] for c in cab if c["role"] == "speaker" and c["n"] > 12} == {"R"}
+    assert s1["x"] < 150 < s13["x"] and s1["y"] < LM.CAB_BLADE_TOP and s13["y"] < LM.CAB_BLADE_TOP
+    assert s1["u"] < 100 and s12["u"] > 900 and s13["u"] < 100 and s23["u"] > 900
     line = LM.cabinet_line(l1)
     assert line.split()[:3] == ["cablamp", ",".join(map(str, l1["lights"])), str(l1["u"])]
     assert "at %d,%d" % (l1["x"], l1["y"]) in line and line.endswith("blade L")
@@ -292,3 +297,23 @@ def test_the_tab_is_in_the_rail_for_spike_2_and_not_behind_the_mode_makers_previ
     eng = _read(os.path.join(ROOT, "pinball_decryptor", "plugins", "stern", "engine.py"))
     gate = eng[eng.index("def _cabs_for_build"):eng.index("def _cab_sids_for_build")]
     assert "preview_on" not in gate
+
+
+def test_a_show_keeps_time_by_where_its_song_is_not_by_a_clock():
+    """The show's time is the played-sample count of the voice playing its request (voice +12 at 44.1 kHz, the same
+    channel layout on every port); it ends when no channel has played it for CAB_GONE_MS (emulator-proven: held,
+    let go, stopped and played again, C:/tmp/PAD-1040/probe/sync_probe.c)."""
+    rt = _read(os.path.join(SDK, "pad_mode_runtime.c"))
+    tick = rt[rt.index("static void cabs_tick(void)"):]
+    tick = tick[:tick.index("\n}\n")]
+    assert "if ((at = cab_song_ms()) < 0) {" in tick and "el = (unsigned long)at;" in tick
+    count = rt[rt.index("static long cab_voice_count(unsigned request)"):]
+    assert 'pm_port_value("sound_voice_played", 12)' in count[:count.index("\n}\n")]
+    song = rt[rt.index("static long cab_song_ms(void)"):]
+    song = song[:song.index("\n}\n")]
+    assert "cab_run.first" in song and "ds * 2 >= dt" in song and "CAB_GONE_MS" in song
+    for name in os.listdir(os.path.join(SDK, "ports")):
+        if name.endswith(".port"):
+            text = _read(os.path.join(SDK, "ports", name))
+            if "value sound_channel_voice_ptrs" in text:
+                assert "value sound_channel_voice_ptrs  92" in text and "value sound_channel_size        196" in text, name

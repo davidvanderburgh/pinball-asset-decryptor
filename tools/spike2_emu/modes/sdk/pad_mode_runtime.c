@@ -2459,7 +2459,8 @@ static int lamps_checked(void)
 /* ---- CAB FX BEGIN: PAD-1040, the expression lights' patterns. A pure slice (no runtime state): the app's preview
  * (webui/static/js/cabfx.js) is its mirror, integer for integer, and tests/test_pad1040_cab_shows.py compiles this
  * slice and runs both over every pattern. A light is its place along its strip u (0..999: a blade bottom up, a
- * speaker ring from the top round), its side (-1 the left blade, 1 the right, 0 a speaker) and its number k. */
+ * speaker ring from the top round), its side (-1 the left blade or speaker, 1 the right, 0 one ring alone) and its
+ * number k. */
 enum { CX_SOLID, CX_FADE_IN, CX_FADE_OUT, CX_CROSSFADE, CX_PULSE, CX_STROBE, CX_SWEEP_UP, CX_SWEEP_DOWN, CX_FILL_UP,
        CX_FILL_DOWN, CX_CHASE_UP, CX_CHASE_DOWN, CX_BOUNCE, CX_CENTER_OUT, CX_CENTER_IN, CX_ALTERNATE, CX_RAINBOW,
        CX_SPARKLE, CX_FIRE, CX_METER, CX_N };
@@ -2596,10 +2597,19 @@ static unsigned cx_blend(const struct cx_step *st, const struct cx_step *prev, i
  *   speakers <fx> <ms> <a> <b> <rate> <blend>   a step of the speaker lights' lane
  *
  * The sound's requests are every request whose sound list names it (the request table, read once the game has it).
- * The sound worker tells the tick which request started; the show runs from its first step, each lane on its own,
- * every cabinet light of a lane with steps held on the top layer (a mode's own cabinet hold still covers it, and gives
- * it back), until the steps are over (loop 0) or the sound stops; then the lights are the game's again. A lane with no
- * steps leaves its lights to the game; one whose steps ran out holds them dark until the show ends. */
+ * The sound worker tells the tick which request started; the show runs, each lane on its own, every cabinet light of a
+ * lane with steps held on the top layer (a mode's own cabinet hold still covers it, and gives it back), until the
+ * steps are over (loop 0) or the sound stops; then the lights are the game's again. A lane with no steps leaves its
+ * lights to the game; one whose steps ran out holds them dark until the show ends.
+ *
+ * IN STEP WITH THE SONG, NOT THE CLOCK: the show's time is where its song IS. A voice of the channel playing the
+ * request counts the samples it has played (voice + `sound_voice_played`, 44,100 a second; the channels and voices are
+ * the framework's, one layout on every port). Read every tick, it holds while the game holds the song, starts again when
+ * the game starts it again or loops it, and starts where the song does when the game resumes it part-way (a player's
+ * turn, a mode handing the music back). A voice the game re-uses still shows its last sound's count for a tick or two,
+ * so the show takes the count only once it has moved off its first reading and advances with the game's clock (until
+ * then, and on a port without the channel lines, its own clock from the request). No channel playing the request for
+ * CAB_GONE_MS ends the show. */
 static int str_starts(const char *s, const char *prefix);   /* below */
 #define CABS_MAX     32
 #define CAB_STEPS    128
@@ -2613,7 +2623,71 @@ static unsigned char cab_of_req[CABS_REQS];          /* 1 + the show a request p
 static int cab_side[N_CAB], cab_lane[N_CAB];         /* -1 left blade, 1 right, 0 a speaker; lane 0 blades, 1 speakers */
 static volatile unsigned cabs_pending;               /* the request the worker took last (0 = none since) */
 static const struct pm_mode cab_owner = { "the card's expression light show", 0, 0, 0, 0, 0 };
-static struct { int on, show, said; unsigned request; unsigned long t0; } cab_run;
+#define CAB_GONE_MS  250
+#define CAB_RATE     44100u
+static struct {
+    int on, show, said, seen, locked;
+    unsigned request, first, last;                   /* the voice's first count, its count the tick before */
+    unsigned long t0, last_t, seen_t;                /* the request's start; the tick before; a channel last seen */
+} cab_run;
+
+/* the played-sample count of a voice of the channel playing `request`, or -1 (none plays it, or no channel lines) */
+static long cab_voice_count(unsigned request)
+{
+    long o_req = pm_port_value("sound_channel_request", -1), o_voices = pm_port_value("sound_channel_voices", -1),
+         o_vp = pm_port_value("sound_channel_voice_ptrs", -1), o_pos = pm_port_value("sound_voice_played", 12),
+         n_ch = pm_port_value("sound_channel_count", 8);
+    int i, b;
+    if (!sound_channel(0) || o_req < 0 || o_voices < 0 || o_vp < 0 || o_pos < 0) return -2;
+    for (i = 0; i < n_ch; i++) {
+        unsigned char *c = sound_channel(i);
+        unsigned bits;
+        if (!c || !(bits = c[o_voices]) || *(unsigned short *)(c + o_req) != request) continue;
+        for (b = 0; b < 8; b++) {
+            unsigned char *v;
+            if (!(bits >> b & 1u)) continue;
+            v = (unsigned char *)(unsigned long)*(unsigned *)(c + o_vp + 4 * b);
+            if (v && maps_has((unsigned)(unsigned long)v + (unsigned)o_pos, 4, MAP_R))
+                return (long)(*(volatile unsigned *)(v + o_pos) & 0x7fffffffu);
+        }
+    }
+    return -1;
+}
+
+/* the show's time now, ms into its song; -1 = its song stopped */
+static long cab_song_ms(void)
+{
+    unsigned long now = pm_ms(), el = now - cab_run.t0;
+    long got;
+    if (!cab_run.request) return (long)el;               /* by name: its own clock */
+    got = cab_voice_count(cab_run.request);
+    if (got == -2) {                                     /* no channel lines: the clock, and the game's answer */
+        if (el > 600 && (now / 500) != ((now - 17) / 500) && !pm_sound_active(cab_run.request)) return -1;
+        return (long)el;
+    }
+    if (got < 0) {
+        if (cab_run.seen ? now - cab_run.seen_t > CAB_GONE_MS : el > 1500) return -1;
+        return cab_run.locked ? (long)((unsigned long long)cab_run.last * 1000u / CAB_RATE) : (long)el;
+    }
+    if (!cab_run.seen) {
+        cab_run.seen = 1;
+        cab_run.first = (unsigned)got;
+    } else if (!cab_run.locked && (unsigned)got != cab_run.first && (unsigned)got > cab_run.last) {
+        /* moving off its first reading, as fast as the game's clock goes (a half to twice: the mixer feeds blocks) */
+        unsigned long dt = now - cab_run.last_t, ds = (unsigned long)((unsigned)got - cab_run.last) * 1000u / CAB_RATE;
+        if (dt && ds * 2 >= dt && ds <= dt * 2 + 50) {
+            cab_run.locked = 1;
+            if (cab_run.said < 60 && ++cab_run.said)
+                say("expression lights: show \"%s\" follows its song from %lu.%02lu s in (%lu ms after the request)",
+                    cabs[cab_run.show].name, (unsigned long)got / CAB_RATE, (unsigned long)got % CAB_RATE * 100 / CAB_RATE,
+                    el);
+        }
+    }
+    cab_run.seen_t = now;
+    cab_run.last = (unsigned)got;
+    cab_run.last_t = now;
+    return cab_run.locked ? (long)((unsigned long long)(unsigned)got * 1000u / CAB_RATE) : (long)el;
+}
 
 /* a lane's step at `el` ms into the show: its index (n = over), and the ms into it */
 static int cab_step_at(const struct cab_show *c, int lane, unsigned long el, unsigned *t, int *over)
@@ -2661,7 +2735,9 @@ static void cabs_start(int show, unsigned request)
     cab_run.on = 1;
     cab_run.show = show;
     cab_run.request = request;
-    cab_run.t0 = pm_ms();
+    cab_run.t0 = cab_run.last_t = pm_ms();
+    cab_run.seen = cab_run.locked = 0;
+    cab_run.first = cab_run.last = 0;
     if (cab_run.said < 60 && ++cab_run.said)
         say("expression lights: show \"%s\" (%d blade step(s), %d speaker step(s)%s) %s", cabs[show].name,
             cabs[show].n[0], cabs[show].n[1], cabs[show].loop ? ", over and over" : "",
@@ -2711,6 +2787,7 @@ static void cabs_tick(void)
     static unsigned ticks;
     const struct cab_show *c;
     unsigned long el;
+    long at;
     unsigned pend;
     int k, lane, over[2], idx[2];
     unsigned t[2] = { 0, 0 };
@@ -2723,12 +2800,11 @@ static void cabs_tick(void)
     }
     if (!cab_run.on) return;
     c = &cabs[cab_run.show];
-    el = pm_ms() - cab_run.t0;
-    /* the sound it plays with stopped (asked twice a second, once its channel has had time to start) */
-    if (cab_run.request && el > 600 && ticks % 30 == 0 && !pm_sound_active(cab_run.request)) {
+    if ((at = cab_song_ms()) < 0) {                      /* its song stopped */
         cabs_stop("its sound stopped");
         return;
     }
+    el = (unsigned long)at;
     for (lane = 0; lane < 2; lane++) idx[lane] = cab_step_at(c, lane, el, &t[lane], &over[lane]);
     if ((idx[0] < 0 || over[0]) && (idx[1] < 0 || over[1])) {
         cabs_stop("its steps are over");
@@ -2833,7 +2909,7 @@ static void cabs_arm(void)
     for (k = 0; k < (unsigned)n_cab; k++) {
         const struct lamp *x = &lamps[CAB0 + k];
         cab_lane[k] = x->y >= 0 && x->y < 140;          /* the backbox's speaker ring(s), above the blades */
-        cab_side[k] = cab_lane[k] ? 0 : x->x < 150 ? -1 : 1;
+        cab_side[k] = x->x < 0 ? 0 : x->x < 150 ? -1 : x->x > 150 ? 1 : 0;   /* a blade's or a speaker's side */
     }
     if (!n_cabs) return;
     if (!n_cab) {

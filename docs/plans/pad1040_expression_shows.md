@@ -48,5 +48,10 @@ David (2026-11-07): "We should have an expression light show creator just like t
 - [x] emulator proofs (Led Zeppelin LE 1.22): a mode's show over the game's own on all 96 blades and 23 speaker
       lights (proof 2); the game's own sound 307 starting the card's show on a card with no modes and its end handing
       the lights back (proof 3); the build mapping that song's slot 156 to sound 307 (C:/tmp/PAD-1040/sids_check.py)
+- [x] in step with the song (David: "how are we ensuring it is synchronized ... interruptions, song or mode changes"):
+      the show's time is the song voice's played-sample count (voice +12, 44.1 kHz, every port's layout; probed on
+      LZ LE 1.22 and Rush LE 1.19); proven held / let go / stopped / replayed (C:/tmp/PAD-1040/probe/sync_probe.c,
+      job_sync.sh). Not seen: a song the game itself resumes part-way (followed from where its voice starts)
+- [x] two speaker rings, left and right (David), in the ports, the runtime's sides and the editor's drawing
 - [ ] (not done) recording the game's own cabinet show into a show: the emulator's playfield window already shows it
       live (PAD-500)

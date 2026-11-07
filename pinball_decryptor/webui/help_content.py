@@ -1493,7 +1493,8 @@ HELP_CONTENT = {
         ("What it's for",
          "Stern Spike 2. Light shows of your own for the cabinet's expression lights: the blades down the "
          "cabinet's sides and the speaker lights in the backbox. Each show goes with a song: the game starts it "
-         "whenever it plays that song, from the song's start, so a song you replaced gets lights that follow it "
+         "whenever it plays that song and keeps it in step with where the song is (held when the song is held, from the "
+         "start again when it starts again), so a song you replaced gets lights that follow it "
          "instead of the old song's.\n\n"
          "- **New show**: blank, or from a ready-made one (rock pulse, rainbow, fire, level meter, sweeps, slow "
          "fade).\n"

@@ -184,13 +184,13 @@ def cfg_text(shows, sids_of, only):
 
 def layout(game_elf):
     """The cabinet drawing for the preview: ``[{name, lane, side, u, x, y}]`` of the card's expression lights (lane 0
-    the blades, 1 the speakers; side -1 the left blade, 1 the right, 0 a speaker), as the port's ``cablamp`` lines
+    the blades, 1 the speakers; side -1 the left blade or speaker, 1 the right, 0 one ring alone), as the port's ``cablamp`` lines
     give the runtime; [] for a title with none."""
     elf = _LM.Elf(game_elf, "the game program") if isinstance(game_elf, (bytes, bytearray)) else game_elf
     out = []
     for c in _LM.cabinet(elf):
         lane = 1 if c["role"] == "speaker" else 0
-        out.append({"name": c["name"], "lane": lane, "side": 0 if lane else (-1 if c["side"] == "L" else 1),
+        out.append({"name": c["name"], "lane": lane, "side": -1 if c["side"] == "L" else 1 if c["side"] == "R" else 0,
                     "u": c["u"], "x": c["x"], "y": c["y"]})
     return out
 

@@ -29,6 +29,8 @@ INSIDER = ("These shows change only the cabinet's lights, not the game or its sc
 #: the shortest sound the song list offers (audio_categories' music length)
 SONG_MIN_SECONDS = 20.0
 PEAKS = 600
+#: the cached cabinet layout's version (2: the two speaker rings)
+LAYOUT_V = 2
 
 
 def _songs(audio):
@@ -400,7 +402,7 @@ def project_layout(project):
     try:
         with open(cache, encoding="utf-8") as f:
             raw = json.load(f)
-        if raw.get("key") == key and raw.get("v") == 1:
+        if raw.get("key") == key and raw.get("v") == LAYOUT_V:
             lights = raw["lights"]
             return ("" if lights else CS.NO_LIGHTS), lights
     except (OSError, ValueError, KeyError, TypeError):
@@ -408,7 +410,7 @@ def project_layout(project):
     lights = CS.layout(TR.game_program(card)[2])
     try:
         with open(cache, "w", encoding="utf-8") as f:
-            json.dump({"v": 1, "key": key, "lights": lights}, f)
+            json.dump({"v": LAYOUT_V, "key": key, "lights": lights}, f)
     except OSError:
         pass
     return ("" if lights else CS.NO_LIGHTS), lights

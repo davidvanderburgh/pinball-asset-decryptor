@@ -503,29 +503,29 @@ lamp 59           0              LEFT RAMP 2  # lamp 116, I/O group 8 index 78, 
 lamp 60           0              LEFT RAMP 3  # lamp 117, I/O group 8 index 79, at 111,368
 # ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
 # 96 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
-cablamp 139,140,141  21  SPEAKER 1  # lamp 118, I/O group 6 index 1, at 150,20, speaker
-cablamp 142,143,144  65  SPEAKER 2  # lamp 119, I/O group 6 index 4, at 163,22, speaker
-cablamp 145,146,147  108 SPEAKER 3  # lamp 120, I/O group 6 index 7, at 176,27, speaker
-cablamp 148,149,150  152 SPEAKER 4  # lamp 121, I/O group 6 index 10, at 187,36, speaker
-cablamp 151,152,153  195 SPEAKER 5  # lamp 122, I/O group 6 index 13, at 194,47, speaker
-cablamp 154,155,156  239 SPEAKER 6  # lamp 123, I/O group 6 index 16, at 199,60, speaker
-cablamp 157,158,159  282 SPEAKER 7  # lamp 124, I/O group 6 index 19, at 200,73, speaker
-cablamp 160,161,162  326 SPEAKER 8  # lamp 125, I/O group 6 index 22, at 197,87, speaker
-cablamp 163,164,165  369 SPEAKER 9  # lamp 126, I/O group 6 index 25, at 191,99, speaker
-cablamp 166,167,168  413 SPEAKER 10  # lamp 127, I/O group 6 index 28, at 182,109, speaker
-cablamp 169,170,171  456 SPEAKER 11  # lamp 128, I/O group 6 index 31, at 170,116, speaker
-cablamp 172,173,174  500 SPEAKER 12  # lamp 129, I/O group 6 index 34, at 157,120, speaker
-cablamp 175,176,177  543 SPEAKER 13  # lamp 130, I/O group 6 index 37, at 143,120, speaker
-cablamp 178,179,180  586 SPEAKER 14  # lamp 131, I/O group 6 index 40, at 130,116, speaker
-cablamp 181,182,183  630 SPEAKER 15  # lamp 132, I/O group 6 index 43, at 118,109, speaker
-cablamp 184,185,186  673 SPEAKER 16  # lamp 133, I/O group 6 index 46, at 109,99, speaker
-cablamp 187,188,189  717 SPEAKER 17  # lamp 134, I/O group 6 index 49, at 103,87, speaker
-cablamp 190,191,192  760 SPEAKER 18  # lamp 135, I/O group 6 index 52, at 100,73, speaker
-cablamp 193,194,195  804 SPEAKER 19  # lamp 136, I/O group 6 index 55, at 101,60, speaker
-cablamp 196,197,198  847 SPEAKER 20  # lamp 137, I/O group 6 index 58, at 106,47, speaker
-cablamp 199,200,201  891 SPEAKER 21  # lamp 138, I/O group 6 index 61, at 113,36, speaker
-cablamp 202,203,204  934 SPEAKER 22  # lamp 139, I/O group 6 index 64, at 124,27, speaker
-cablamp 205,206,207  978 SPEAKER 23  # lamp 140, I/O group 6 index 67, at 137,22, speaker
+cablamp 139,140,141  41  SPEAKER 1  # lamp 118, I/O group 6 index 1, at 95,28, speaker L
+cablamp 142,143,144  125 SPEAKER 2  # lamp 119, I/O group 6 index 4, at 116,34, speaker L
+cablamp 145,146,147  208 SPEAKER 3  # lamp 120, I/O group 6 index 7, at 131,49, speaker L
+cablamp 148,149,150  291 SPEAKER 4  # lamp 121, I/O group 6 index 10, at 137,70, speaker L
+cablamp 151,152,153  375 SPEAKER 5  # lamp 122, I/O group 6 index 13, at 131,91, speaker L
+cablamp 154,155,156  458 SPEAKER 6  # lamp 123, I/O group 6 index 16, at 116,106, speaker L
+cablamp 157,158,159  541 SPEAKER 7  # lamp 124, I/O group 6 index 19, at 95,112, speaker L
+cablamp 160,161,162  625 SPEAKER 8  # lamp 125, I/O group 6 index 22, at 74,106, speaker L
+cablamp 163,164,165  708 SPEAKER 9  # lamp 126, I/O group 6 index 25, at 59,91, speaker L
+cablamp 166,167,168  791 SPEAKER 10  # lamp 127, I/O group 6 index 28, at 53,70, speaker L
+cablamp 169,170,171  875 SPEAKER 11  # lamp 128, I/O group 6 index 31, at 59,49, speaker L
+cablamp 172,173,174  958 SPEAKER 12  # lamp 129, I/O group 6 index 34, at 74,34, speaker L
+cablamp 175,176,177  45  SPEAKER 13  # lamp 130, I/O group 6 index 37, at 205,28, speaker R
+cablamp 178,179,180  136 SPEAKER 14  # lamp 131, I/O group 6 index 40, at 228,35, speaker R
+cablamp 181,182,183  227 SPEAKER 15  # lamp 132, I/O group 6 index 43, at 243,53, speaker R
+cablamp 184,185,186  318 SPEAKER 16  # lamp 133, I/O group 6 index 46, at 247,76, speaker R
+cablamp 187,188,189  409 SPEAKER 17  # lamp 134, I/O group 6 index 49, at 237,98, speaker R
+cablamp 190,191,192  500 SPEAKER 18  # lamp 135, I/O group 6 index 52, at 217,110, speaker R
+cablamp 193,194,195  590 SPEAKER 19  # lamp 136, I/O group 6 index 55, at 193,110, speaker R
+cablamp 196,197,198  681 SPEAKER 20  # lamp 137, I/O group 6 index 58, at 173,98, speaker R
+cablamp 199,200,201  772 SPEAKER 21  # lamp 138, I/O group 6 index 61, at 163,76, speaker R
+cablamp 202,203,204  863 SPEAKER 22  # lamp 139, I/O group 6 index 64, at 167,53, speaker R
+cablamp 205,206,207  954 SPEAKER 23  # lamp 140, I/O group 6 index 67, at 182,35, speaker R
 cablamp 208,209,210  10  EXPRESSIVE LIGHTING L 1  # lamp 141, I/O group 1 index 1, at 12,595, blade L
 cablamp 211,212,213  31  EXPRESSIVE LIGHTING L 2  # lamp 142, I/O group 1 index 4, at 12,586, blade L
 cablamp 214,215,216  52  EXPRESSIVE LIGHTING L 3  # lamp 143, I/O group 1 index 7, at 12,576, blade L

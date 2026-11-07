@@ -90,11 +90,19 @@ function Cabinet({ lights, show, t }) {
   const cols = showColours(lights, lanes, !!show.loop, Math.floor(t));
   const ring = lights.filter((l) => l.lane === 1);
   const blade = lights.filter((l) => l.lane === 0);
+  // the backbox's speakers: a grille under each ring of lights (left and right), centred on its lights
+  const grilles = [-1, 0, 1].map((side) => {
+    const r = ring.filter((l) => l.side === side);
+    if (!r.length) return null;
+    const x = r.reduce((a, l) => a + l.x, 0) / r.length, y = r.reduce((a, l) => a + l.y, 0) / r.length;
+    return { side, x, y, r: Math.max(14, Math.max(...r.map((l) => Math.hypot(l.x - x, l.y - y))) - 7) };
+  }).filter(Boolean);
   const pitch = blade.length > 1 ? Math.max(4, Math.min(12, (600 - 140) / (blade.length / 2) - 1.5)) : 9;
   return html`<svg class="xl-cab" viewBox="0 0 300 610" role="img" aria-label="The cabinet's expression lights, playing the show">
     <rect class="xl-box" x="40" y="2" width="220" height="132" rx="10" />
     <path class="xl-body" d="M28 150 L272 150 L262 606 L38 606 Z" />
-    <rect class="xl-glass" x="70" y="22" width="160" height="92" rx="4" />
+    ${grilles.map((g) => html`<g key=${g.side}><circle class="xl-grille" cx=${g.x} cy=${g.y} r=${g.r} />
+      <circle class="xl-cone" cx=${g.x} cy=${g.y} r=${g.r * 0.45} /></g>`)}
     ${lights.map((l, k) => {
       const c = cols[k];
       const style = c ? { fill: hexOf(c), color: hexOf(c) } : null;

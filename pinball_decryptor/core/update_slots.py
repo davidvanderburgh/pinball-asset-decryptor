@@ -390,8 +390,10 @@ function Say($m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format
 $app = %(app)s; $next = %(next)s; $old = %(old)s
 # ONE HELPER AT A TIME (PAD-1034): a second Restart to update click starts a
 # second helper, which renamed the version the first had just swapped in to
-# .old - the folder the first deletes - and ran the installer on top
-$lock = New-Object System.Threading.Mutex($false, 'Global\PinballAssetDecryptorUpdateSwap')
+# .old - the folder the first deletes - and ran the installer on top.  Per
+# install folder (PAD-1036): two helpers on different folders never swap
+# the same thing, and were refusing each other
+$lock = New-Object System.Threading.Mutex($false, ('Global\PinballAssetDecryptorUpdateSwap-' + %(tag_q)s))
 try { $owned = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
 if (-not $owned) { Say 'another Restart to update is already switching versions - leaving it to that one'; exit 0 }
 function AppVersion {
@@ -475,8 +477,11 @@ def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
     keys = ", ".join(_psq("HKLM:\\" + k) for k in (
         UNINSTALL_KEY,
         UNINSTALL_KEY.replace("SOFTWARE\\", "SOFTWARE\\WOW6432Node\\", 1)))
+    import hashlib
+    tag = hashlib.sha1(os.path.normcase(os.path.abspath(app_dir))
+                       .encode("utf-8")).hexdigest()[:12]
     return _SWAP_SCRIPT % {
-        "log": _psq(log_path), "app": _psq(app_dir),
+        "log": _psq(log_path), "app": _psq(app_dir), "tag_q": _psq(tag),
         "next": _psq(next_dir(app_dir)), "old": _psq(old_dir(app_dir)),
         "setup": _psq(setup_path or ""),
         "setup_args": _psq(setup_args if setup_args is not None

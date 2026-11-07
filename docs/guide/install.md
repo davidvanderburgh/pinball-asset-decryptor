@@ -233,6 +233,12 @@ seconds:
 - **Linux**: the downloaded AppImage *is* the new version, so Restart to
   update starts it.
 
+On Windows a small window with a pinball table playing itself stays on
+screen from the click until the new version's window opens, so the restart
+never looks like the app just vanished. It closes by itself (Escape closes
+it early); if the new version has not opened after a few minutes it says so
+and offers Close.
+
 **Restart to update always lands on the newest release.** The click first
 asks for anything released since the ready update was found. If there is,
 the app gets that one ready instead and restarts into it by itself when it

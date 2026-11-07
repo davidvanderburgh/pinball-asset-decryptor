@@ -17,6 +17,7 @@ launch are stand-ins, and the files land in ``tmp_path``.
 import hashlib
 import json
 import os
+import re
 import time
 
 import pytest
@@ -469,6 +470,14 @@ def test_swap_script_runs_alone_and_keeps_the_old_one_until_sure():
     is only deleted once the new folder can start."""
     s = us.swap_script("C:\\a", "9.9.9", "C:\\s.exe", 1, "l")
     assert "Global\\PinballAssetDecryptorUpdateSwap" in s
+    # one lock per install folder (PAD-1036): the same folder shares it,
+    # another folder's helper is no reason to refuse
+    same = us.swap_script("c:\\A\\", "9.9.9", "C:\\s.exe", 2, "l")
+    other = us.swap_script("C:\\b", "9.9.9", "C:\\s.exe", 1, "l")
+
+    def lock(text):
+        return re.search(r"UpdateSwap-' \+ '([0-9a-f]+)'", text).group(1)
+    assert lock(s) == lock(same) != lock(other)
     assert "already on v9.9.9 - nothing to switch" in s
     assert "if ($whole) { Remove-Item -LiteralPath $old" in s
     assert "Test-Path -LiteralPath 'C:\\s.exe'" in s

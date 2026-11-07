@@ -88,6 +88,12 @@ def web_app(tmp_path, mfr=None, era=None, settings=None):
         os.environ[k] = "1"
     old_messagebox = app_module.messagebox
     old_filedialog = app_module.filedialog
+    # Restart to update's splash is a real window on the desktop (a
+    # PowerShell/WPF process, PAD-1036): never from a test.  A test that
+    # wants to see it asked for patches start_splash inside the with.
+    splash_module = app_module.update_splash
+    old_start_splash = splash_module.start_splash
+    splash_module.start_splash = lambda version, **kw: (False, "test run")
 
     # Tk tests in the same process leave destroyed Tk interpreters in
     # garbage cycles.  If the collector finds them on the UI loop's thread,
@@ -135,6 +141,7 @@ def web_app(tmp_path, mfr=None, era=None, settings=None):
         compat.uninstall()
         app_module.messagebox = old_messagebox
         app_module.filedialog = old_filedialog
+        splash_module.start_splash = old_start_splash
         session_log.LOG_DIR_OVERRIDE = old_log_dir
         session_log._project_dir = old_project_dir
         for k, v in old_env.items():

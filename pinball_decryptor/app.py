@@ -10,7 +10,7 @@ import threading
 import time
 
 from . import __version__
-from .core import build_output, desktop, modpack, update_slots
+from .core import build_output, desktop, modpack, update_slots, update_splash
 from .core.atomic_file import write_json_atomic
 from .core.config import APP_NAME, SETTINGS_FILE
 from .core.extract_source import write_extract_source
@@ -25,6 +25,7 @@ from .core.updater import (AUTO_DOWNLOAD_DEFAULT, AUTO_DOWNLOAD_KEY,
                            stage_update_macos, staged_update_ok)
 from .webui import compat
 from .webui.compat import filedialog, messagebox
+from .webui.i18n import translator
 
 log = logging.getLogger(__name__)
 
@@ -6041,8 +6042,30 @@ class App:
             f"Restarting into v{version} - the app will close and reopen "
             "updated.", "info")
         self._restart_wsl_on_close = True
+        self._show_update_splash(version)
         self._close_for_update()
         return True
+
+    def _show_update_splash(self, version):
+        """PAD-1036: the window the user watches from the Restart click to
+        the new version's window (core/update_splash), opened BEFORE the
+        app closes down - the emulator and WSL shutdowns in _on_close are
+        the first part of the wait.  Best effort: the restart never waits
+        on it."""
+        tr = None
+        center = None
+        ctx = getattr(self, "ctx", None)
+        try:
+            tr = translator(ctx.store.get("shell", "lang"))
+        except Exception:                                   # noqa: BLE001
+            pass
+        try:
+            center = ctx.host.window_center()
+        except Exception:                                   # noqa: BLE001
+            pass
+        ok, info = update_splash.start_splash(version, center=center, tr=tr)
+        if not ok:
+            log.debug("no update splash: %s", info)
 
     def _install_update(self, version, installer):
         """Banner/gear "Install update" / "Download update" click.
@@ -6329,6 +6352,7 @@ class App:
             f"Installing v{version} — the app will close and reopen "
             f"updated.", "info")
         self._restart_wsl_on_close = True
+        self._show_update_splash(version)
         self._close_for_update()
 
     def _restart_wsl_for_update(self):

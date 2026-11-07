@@ -84,6 +84,18 @@ class Host:
     def is_maximized(self):
         return self._maximized
 
+    def window_center(self):
+        """The window's centre in device pixels (the units the screens are
+        read in), or None without a window: where the update's splash goes
+        (PAD-1036)."""
+        win = self.window
+        if win is None:
+            return None
+        try:
+            return (int(win.x + win.width / 2), int(win.y + win.height / 2))
+        except Exception:                               # noqa: BLE001
+            return None
+
     def maximize(self):
         win = self.window
         if win is not None:

@@ -34,7 +34,8 @@ ball. Nothing per player has to be copied.
   teammate's first ball (the adjustment-changed handler 0x595b8 on Pro 1.16: LIGHT ALLY 311, ADD 1 POWERUP 312,
   LIGHT SELECT CITY 310 ...), `jets:<n>`, `tanks:<n>`, `spot`, `tier2`.
 - **The pick** (generic): the game's top line ("BALL %d", PAD-1017's borrow) reads `PLAYER 2 PICK: GODZILLA 1954`
-  and then what it does, in turn; the flippers walk (taken ones skipped), Action takes it, 20 s takes the one shown.
+  and then what it does, in turn; the flippers walk (taken ones skipped), Action takes it, 20 s takes the one shown
+  (PAD-1044: 30 s by default, `pick_time`, counted down on the glass).
   RANDOM takes one nobody has.
 - **Godzilla's look** (run 3): the battle selection screen (PAD-707's tiles, portraits and cursor walk) dressed with
   the characters' pictures while a teammate picks.

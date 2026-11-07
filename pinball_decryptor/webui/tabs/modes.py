@@ -828,8 +828,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     COOP_CHARS_TIP = (
         "Each teammate picks a character at the start of their first ball: the machine shows its picture, its name "
         "and what it does, the flippers move to the next one (one another teammate has is skipped), the Action button "
-        "takes it, and after 20 seconds the one shown is taken. RANDOM picks one nobody has. Its ability holds while "
-        "that teammate is up.")
+        "takes it, and when the time to pick runs out (the seconds count down on the machine) the one shown is taken. "
+        "RANDOM picks one nobody has. Its ability holds while that teammate is up.")
 
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP
@@ -849,6 +849,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             "%d of them ask for an ability this game has not got yet; they have none on the card." % lost if lost
             else "")
         self.set(coop_ch={"why": why, "note": note.strip(), "pick": chars["pick"], "rows": rows,
+                          "time": chars["time"], "times": list(_CP.PICK_TIMES),                 # PAD-1044
                           "abilities": [{"key": a["key"], "words": a["words"], "does": a["does"], "ok": bool(a["cfg"]),
                                          "why": a["why"]} for a in abil],
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
@@ -955,6 +956,19 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         was = chars["pick"]
         chars["pick"] = bool(on)
         return self._save_coop_chars(project, chars, "pick", "on" if was else "off", "on" if on else "off")
+
+    @rpc
+    def coop_chars_time(self, seconds):
+        """PAD-1044: the seconds each teammate has to pick (0: no limit, the Action button takes one)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        chars = _CP.load_characters(project)
+        was = chars["time"]
+        chars["time"] = _CP.pick_time(seconds)
+        name = lambda t: "%d s" % t if t else "no limit"                                   # noqa: E731
+        return self._save_coop_chars(project, chars, "time to pick", name(was), name(chars["time"]))
 
     @rpc
     def coop_char_set(self, i, name=None, ability=None):

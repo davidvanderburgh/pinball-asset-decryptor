@@ -3425,6 +3425,33 @@ PREVIEW_HELP = {
                 "with no modes. A card that also carries modes keeps its scores off Insider Connected "
                 "either way.",
             ]),
+            ("Handicap per player", [
+                "**Handicap per player**, under the list, lets each player of a game pick a handicap from "
+                "**-3** (hardest) to **+3** (easiest), so players of different skill can play one game. Tick "
+                "it, then Write. On the machine:\n\n"
+                "1. Start a game and add players as usual.\n"
+                "2. At each player's first ball the top of the screen shows **P1 HANDICAP 0** (P2 for "
+                "player 2, and so on). The **left flipper button** makes it harder, the **right** easier. "
+                "It starts at what that player had in the last game.\n"
+                "3. Plunge: the ball's first score takes the handicap, and it holds for that player until "
+                "the game ends.\n\n"
+                "- **0** is the game's own settings, as the operator set them.\n"
+                "- A level reads the game's own settings easier or harder for that player only: a longer or "
+                "shorter ball save, and the game's difficulty settings (how hard its modes and multiballs "
+                "are to light) a step at a time, more of them at each level. **What each level does**, "
+                "under the tick, lists them for the card's game. On Godzilla: +1 lights battles easier "
+                "with a longer ball save, +2 adds an easier heat ray and Building Multiball, +3 easier "
+                "tanks, bridge, powerline and jets as well; -1 to -3 the same the other way, and -3 has no "
+                "ball save.\n"
+                "- The machine's settings are never changed: the game reads the player's level while they "
+                "are up.\n"
+                "- The service menu gets a **HANDICAP** row (Adjustments > Machine Settings > Attract Mode, "
+                "or at the end of Standard Adjustments), On to start with. Off: no player is asked and the "
+                "game plays as it always has. A game with no spare row left for it has handicaps always on.\n"
+                "- Like the operator's own settings, handicaps keep the card on Insider Connected. With "
+                "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
+                "- In a co-op game each teammate picks one at their first ball.",
+            ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "
                 "LE, 1.15). Its operator menu has the setting **ALLOW INACTIVITY TO PAUSE TIMERS** like every "

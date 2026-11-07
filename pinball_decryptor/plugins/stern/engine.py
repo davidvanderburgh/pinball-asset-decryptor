@@ -8084,6 +8084,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1022: inactivity pauses the timers - idle.cfg beside the runtime (the modes' delivery)
     idle_prof = _idle_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _idle_on = idle_prof is not None
+    # PAD-1033: a handicap for each player - handicap.cfg beside the runtime (the modes' delivery)
+    hand_prof = _handicap_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _hand_on = hand_prof is not None
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -8092,6 +8095,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
+            and not _hand_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -9262,11 +9266,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         from . import coop_play as _CP_m
         # PAD-1017 round 2: CO-OP PLAY, when the service menu switches co-op
         coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
-        menu_job = (_MenuJobs(music_menu, edition_menu, *picture_menus, coop_menu)
+        # PAD-1033: HANDICAP, the row that switches the players' handicaps (the last spare setting it takes)
+        hand_menu = _HandicapMenu(log) if _hand_on else None
+        menu_job = (_MenuJobs(music_menu, edition_menu, *picture_menus, coop_menu, hand_menu)
                     if music_menu is not None or edition_menu is not None
-                    or picture_menus or coop_menu is not None else None)
+                    or picture_menus or coop_menu is not None or hand_menu is not None else None)
         picture_cfg = ""
         coop_setting = 0
+        hand_setting = 0
         if (text_edits or shader_prof is not None or clip_job is not None
                 or menu_job is not None):
             if progress:
@@ -9289,6 +9296,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _coop_on = False
             elif coop_menu is not None:
                 coop_setting = coop_menu.setting.live
+            if hand_menu is not None and hand_menu.ok:
+                # PAD-1033: no HANDICAP row (no spare setting left): the handicaps are always on
+                hand_setting = hand_menu.setting.live
             # PAD-537: the rows that went in, and the runtime's table for them
             picture_cfg = _picture_cfg(picture_menus, grown_text,
                                        not (mode_list or code_list),
@@ -9525,8 +9535,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Picture settings" if picture_cfg
                 else "Attract items" if _attract_on
                 else "Co-op play" if _coop_on
-                else "Inactivity pauses timers")
-        if _modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on:
+                else "Inactivity pauses timers" if _idle_on
+                else "Handicaps")
+        if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
+                or _hand_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -9536,7 +9548,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if sound_modes_cfg else "Adding the picture settings..."
                          if picture_cfg else "Adding the attract items..."
                          if _attract_on else "Adding co-op play..."
-                         if _coop_on else "Adding inactivity pausing the timers...")
+                         if _coop_on else "Adding inactivity pausing the timers..."
+                         if _idle_on else "Adding the handicaps...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -9548,7 +9561,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
                     _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
-                              or idle_prof)
+                              or idle_prof or hand_prof)
                 _mnodes = {"": None}
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel or (not _modes_on and (
@@ -9605,6 +9618,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     coop=_coop_on, coop_prof=coop_prof,               # PAD-1017
                     coop_setting=coop_setting,                         # PAD-1017 round 2
                     idle=_idle_on, idle_prof=idle_prof,               # PAD-1022
+                    handicap=_hand_on, handicap_prof=hand_prof,       # PAD-1033
+                    handicap_setting=hand_setting,
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -9640,6 +9655,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     continue
                 if _line.startswith("co-op awards "):       # PAD-1028's line too
                     log("Co-op play: %s." % _line.rstrip("."), "info")
+                    continue
+                if _line.startswith("inactivity pauses timers: "):   # PAD-1022: its own name too
+                    log("Inactivity pauses timers: %s." % _line[len("inactivity pauses timers: "):].rstrip("."),
+                        "info")
+                    continue
+                if _line.startswith(("handicaps: ", "handicap ")):   # PAD-1033: and the handicaps' (each level)
+                    log("Handicaps: %s." % (_line[len("handicaps: "):] if _line.startswith("handicaps: ")
+                                            else _line[len("handicap "):]).rstrip("."), "info")
                     continue
                 log("%s: %s." % ("Modes" if _modes_on else "Random clips",
                                  _line[len("random clips: "):]
@@ -9947,6 +9970,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "coop": bool(getattr(mode_plan, "coop_file", "")),
                 # PAD-1022: inactivity pauses the timers
                 "idle": bool(getattr(mode_plan, "idle_file", "")),
+                # PAD-1033: a handicap for each player
+                "handicap": bool(getattr(mode_plan, "handicap_file", "")),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -11072,6 +11097,62 @@ def _idle_for_build(assets_dir, dest_is_device, log, ext4_available=None):
         return None
     log("Inactivity pauses timers: %s." % _IP.HOW, "info")
     return prof
+
+
+def _handicap_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1033: the title of the card the players' handicaps go on, or ``None`` when the project does not ask for them
+    or they are left out (one warning says why). The modes' gate, as co-op play's."""
+    from . import handicap as _HC
+    from . import mode_write as _MW
+    if not _HC.load(assets_dir):
+        return None
+    if dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry it"
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _HC.project_title(assets_dir, probe=True)
+        why = _HC.title_refusal(prof)
+    if why:
+        log("Handicaps: left out of this build: %s." % why.rstrip("."), "warning")
+        return None
+    log("Handicaps: %s." % _HC.HOW, "info")
+    return prof
+
+
+class _HandicapMenu(_MusicModeMenu):
+    """PAD-1033: HANDICAP in the game's own service menu, Off/On (On to start with), on a spare setting: the players
+    pick a handicap only while it says On. With no spare setting left the handicaps are always on."""
+
+    KEY = "handicap"
+
+    def __init__(self, log):
+        from . import handicap as _HC
+        super().__init__(_HC.MENU_VALUES, (), log)
+
+    def wanted(self):
+        from . import handicap as _HC
+        return self.KEY, _HC.MENU_VALUES, (), {"default": 2, "help_text": _HC.MENU_HELP, "onoff": True}
+
+    def done(self):
+        self.ok = True
+        self.log("Handicaps: HANDICAP is in the operator menu (%s), On to start with: set it to Off and no player "
+                 "is asked for a handicap." % self.setting.where, "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Handicaps: HANDICAP could not be added to the operator menu (%s), so the handicaps are always on "
+                 "on this card." % self.why, "info")
 
 
 class _CoopMenu(_MusicModeMenu):
@@ -12343,12 +12424,14 @@ def _install_modes(output_path, modes, landed, planned, log):
     # PAD-537: of picture settings only
     who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                                  or modes.get("picture") or modes.get("attract")
-                                                 or modes.get("coop") or modes.get("idle"))
+                                                 or modes.get("coop") or modes.get("idle")
+                                                 or modes.get("handicap"))
            else "Random clips" if modes.get("variants") else "Music modes"
            if modes.get("music_modes") else "Picture settings" if modes.get("picture")
            else "Attract items" if modes.get("attract")   # PAD-782
            else "Co-op play" if modes.get("coop")         # PAD-1017
-           else "Inactivity pauses timers")               # PAD-1022
+           else "Inactivity pauses timers" if modes.get("idle")   # PAD-1022
+           else "Handicaps")                              # PAD-1033
     if who == "Music modes" and all(t.endswith(" in attract") for t in modes["music_modes"]):
         who = "Attract flipper sounds"   # PAD-641: the same program, its own words
     elif who == "Music modes" and all(t.endswith((" in turn)", " in attract"))
@@ -12430,9 +12513,13 @@ def _install_modes(output_path, modes, landed, planned, log):
     if modes.get("idle"):                     # PAD-1022
         from . import idle_pause as _IP
         log("Inactivity pauses timers on the card: %s." % _IP.HOW, "success")
+    if modes.get("handicap"):                 # PAD-1033
+        from . import handicap as _HC
+        log("Handicaps on the card: %s. Like the operator's own settings, handicaps keep the card on Insider "
+            "Connected." % _HC.HOW, "success")
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                   or modes.get("picture") or modes.get("attract") or modes.get("coop")
-                                  or modes.get("idle")):
+                                  or modes.get("idle") or modes.get("handicap")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")

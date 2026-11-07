@@ -291,6 +291,15 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards }) {
         ${s.coop_note ? html`<span class=${cx("small", s.coop_note_kind === "err" ? "err-ink" : "muted")}>${s.coop_note}</span>` : null}
         ${s.coop_awards_ok ? html`<${Button} size="sm" icon="star" onClick=${onCoopAwards} title=${s.coop_awards_tip}>Awards…<//>` : null}
       </div>` : null}
+      ${s.hand_shown ? html`<div class="stack modes-coop">
+        <${Check} checked=${s.hand_on} wrap label="Handicap per player" title=${s.hand_tip}
+          onChange=${(v) => call("modes.set_handicap", v)} />
+        ${s.hand_note ? html`<span class=${cx("small", s.hand_note_kind === "err" ? "err-ink" : "muted")}>${s.hand_note}</span>` : null}
+        ${(s.hand_levels || []).length ? html`<details class="small muted modes-hand-levels">
+          <summary>What each level does</summary>
+          ${s.hand_levels.map((l) => html`<div key=${l.level}><b>${l.level}</b> ${l.words}</div>`)}
+        </details>` : null}
+      </div>` : null}
       ${s.idle_shown ? html`<div class="stack modes-coop">
         <${Check} checked=${s.idle_on} wrap label="Inactivity pauses timers" title=${s.idle_tip}
           onChange=${(v) => call("modes.set_idle_pause", v)} />

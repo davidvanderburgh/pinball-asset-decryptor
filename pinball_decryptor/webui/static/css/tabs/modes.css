@@ -668,3 +668,7 @@ html.bp-1100 .rs-side { flex-basis: auto; width: 100%; max-height: 40vh; }
 /* PAD-1028: the co-op awards dialog - a row an award: its tick, its words, what it counts */
 .modes-coop-aw { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .modes-coop-aw-row { display: grid; grid-template-columns: auto 260px 1fr; align-items: center; gap: 8px; min-height: 28px; }
+/* PAD-1033: what each handicap level does, under its tick */
+.modes-hand-levels > div { margin-top: 2px; }
+.modes-hand-levels summary { cursor: pointer; }
+.modes-hand-levels b { display: inline-block; min-width: 2.2em; }

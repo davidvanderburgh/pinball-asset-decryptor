@@ -400,6 +400,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  coop_tip=self.COOP_TIP)
         self.set(idle_on=False, idle_note="", idle_note_kind="", idle_shown=False,   # PAD-1022
                  idle_tip=self.IDLE_TIP)
+        self.set(hand_on=False, hand_note="", hand_note_kind="", hand_shown=False, hand_levels=[],   # PAD-1033
+                 hand_tip=self.HAND_TIP)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -665,6 +667,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._show_cap(project, len(found))
         self._publish_coop(project)                          # PAD-1017
         self._publish_idle(project)                          # PAD-1022
+        self._publish_handicap(project)                      # PAD-1033
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
         if select_game is not None and select_game in game:
@@ -871,6 +874,52 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._say("inactivity pauses timers: %s" % ("the card gets it at the next Write" if on
                                                     else "not on the card"))
         self._publish_idle(project)
+        return True
+
+    #: PAD-1033: a handicap for each player (plugins/stern/handicap.py): the game's own settings read easier or harder
+    #: while that player is up. It runs on the mode runtime and, like the operator's own settings, keeps the card on
+    #: Insider Connected
+    HAND_TIP = (
+        "Each player picks a handicap from -3 (hardest) to +3 (easiest) at their first ball: the top of the screen "
+        "shows P1 HANDICAP 0, the left flipper button makes it harder, the right easier, and the ball's first score "
+        "takes it. 0 is the game's own settings. A level makes the game's own settings (ball save time, how hard its "
+        "modes and multiballs are to light) easier or harder for that player only, the way the operator could in the "
+        "service menu, so the card stays on Insider Connected. The service menu gets a HANDICAP row (On to start "
+        "with) to switch it off. Write puts it on the card.")
+
+    def _publish_handicap(self, project):
+        """PAD-1033: the Handicap per player tick, and under it what each level does, or in red why this game cannot
+        have it."""
+        from ...plugins.stern import handicap as _HC
+        prof = _HC.project_title(project) if project else None
+        on = bool(project) and _HC.load(project)
+        note, kind, levels = "", "", []
+        why = _HC.title_refusal(prof) if project else ""
+        if on:
+            if why:
+                note, kind = why, "err"
+            else:
+                bad, said = _HC.project_levels(project)
+                note = _HC.NOTE
+                if bad:
+                    note += " " + bad
+                levels = [{"level": "%+d" % lv, "words": "; ".join(words)} for lv, words in said]
+        self.set(hand_shown=bool(project) and (on or not why), hand_on=on, hand_note=note, hand_note_kind=kind,
+                 hand_levels=levels)
+
+    @rpc
+    def set_handicap(self, on):
+        """Tick or untick a handicap for each player for this project (PAD-1033)."""
+        from ...core import history_log
+        from ...plugins.stern import handicap as _HC
+        project = self.project()
+        if not project:
+            return False
+        was = _HC.save(project, bool(on))
+        hist = history_log.diff_scalar("modes  handicap per player", "on" if was else "off", "on" if on else "off")
+        history_log.record(project, [hist] if hist else [])
+        self._say("handicap per player: %s" % ("the card gets it at the next Write" if on else "not on the card"))
+        self._publish_handicap(project)
         return True
 
     def _no_modes_words(self):

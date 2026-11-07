@@ -3417,12 +3417,15 @@ PREVIEW_HELP = {
                 "in attract until the next game starts. Untick an award to leave it out, or type new "
                 "words for its name; Defaults puts the game's back. With characters (below), each award "
                 "is also shown at the game's end on the winner's character card: their picture and name, "
-                "the award, PLAYER 2 and the count, a few seconds each before the match.\n\n"
+                "the award, PLAYER 2 and the count, a few seconds each over the bonus's own background "
+                "video, before the match.\n\n"
                 "**Characters…**, beside it, gives the team characters to pick from. Each teammate picks "
                 "one at the start of their first ball: the machine shows the character's picture, its "
                 "name and what it does, the flippers move to the next one (one another teammate has is "
-                "skipped), the Action button takes it, and after 20 seconds the one shown is taken. "
-                "RANDOM picks one nobody has. **Picture…** gives a character a picture of your own "
+                "skipped), the Action button takes it, and when the time to pick runs out the one shown is "
+                "taken. The seconds left count down on the machine, and the one taken stays on the glass a "
+                "moment saying PICKED. **Time to pick** sets how long (30 seconds unless you change it, or "
+                "no time limit). RANDOM picks one nobody has. **Picture…** gives a character a picture of your own "
                 "(without one it gets a panel with its name), **Pictures from folder…** takes a whole "
                 "set at once, and the dialog previews what the machine shows. A character's ability "
                 "holds while its teammate is up: on every game a longer ball save and a ball save on two "
@@ -3472,6 +3475,19 @@ PREVIEW_HELP = {
                 "- Like the operator's own settings, handicaps keep the card on Insider Connected. With "
                 "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
                 "- In a co-op game each teammate picks one at their first ball.",
+            ]),
+            ("Prolonged Competition", [
+                "**Prolonged Competition**, under the list, adds the start menu entry Venom and Dungeons & "
+                "Dragons have to any other game whose start menu the app knows. Tick it, then Write:\n\n"
+                "- Hold both flipper buttons in attract to open **CHOOSE YOUR MODE OF PLAY**. The last entry "
+                "reads **COMPETITION / UNTIL POWERED OFF**: pick it with Start and that game and every game "
+                "after it is a Competition game (all randomness removed), exactly as the game's own "
+                "COMPETITION entry makes one game.\n"
+                "- It lasts until the machine is switched off. To end it sooner, pick the same entry again: "
+                "it now reads **STANDARD / ENDS PROLONGED COMPETITION**.\n"
+                "- The machine's settings are never changed.\n"
+                "- On its own it keeps the card on Insider Connected, as the game's own Competition does. With "
+                "modes or co-op play on the same card, the scores stay on the machine as those always do.",
             ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "

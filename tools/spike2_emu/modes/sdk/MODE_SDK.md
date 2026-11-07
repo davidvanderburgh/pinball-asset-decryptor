@@ -6206,6 +6206,15 @@ its match and high scores) the game's end waits while each award is shown on eac
 
 A winner with no character (no pick) is left out there; the attract pages still show every award.
 
+**Over the bonus's own loop (round 3).** DoomWalrus666: the cards "play over what seems to be active gameplay"; show
+them "over the end of ball bonus loop videos". By the player change the bonus screen is gone and the main play is back
+on the glass. The cards cannot go into the bonus screen itself: the game does not draw the HUD scene while its bonus
+is up (a hold at the bus's `bonus_end` kept TOTAL SCORE on the glass 10 s and no card showed), and the bonus's own
+scene is not one the app can write. So the cards stay at the game's end and the backdrop (the clip behind the HUD, in
+the city's place) plays the bonus's own loop under them: the game's own looped clip and crop as the bonus ends
+(`event bonus_end`; on Godzilla `EndOfBallBonus_BackgroundLoop`, `SquareCrop`), given back when the cards are done. A
+port without the event, or a bonus with no looped clip, keeps the main play under them.
+
 ### Co-op characters (PAD-1031)
 
 Each teammate picks a character at the start of their first ball (teammate 1 when the team forms; each join opens
@@ -6214,6 +6223,7 @@ plays one player for the team, so nothing per player is copied: an ability chang
 (the Modes tab's **Characters…** under **Co-op play**):
 
     pick on                                   each teammate picks at their first ball
+    pick_time 30                              the seconds to pick (30 when not given; 0: no limit)
     left 60                                   the left flipper button (the right is `button`)
     action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
     character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE
@@ -6234,8 +6244,16 @@ Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comm
 
 The pick says itself on the game's top line (PAD-1017's borrow of `BALL %d`): `PLAYER 2 PICK: <name>`, then what it
 does, every 1.5 s; the flippers walk (a character another teammate has is skipped; RANDOM after the last), Action
-takes it, 20 s takes the one shown. RANDOM takes one nobody has. `mode.log`:
+takes it, and when `pick_time` runs out the one shown is taken. RANDOM takes one nobody has. PAD-1044: the seconds
+left count down on the top line (`PLAYER 2 PICK  17`) and on the pick's screen (its `_Words` line, in a box the card
+draws in its header); the one taken stays on the glass 2.5 s saying PICKED (the top line `PLAYER 2 PICKED`, or
+`PLAYER 2 IS <name>` on a title with no screens). While `pm_in_game()` is 0 with a player up (a menu over the game)
+the pick and its clock wait; it was dropped there once, leaving that teammate with no character for the turn.
+`mode.log`:
 
+    co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one, 30 s
+    co-op: teammate 2's pick waits - the game is busy (24 s left)
+    co-op: teammate 2's pick goes on (24 s left)
     co-op: teammate 1 is GODZILLA 1954 (LONGER BALL SAVE) - Action took it
     co-op: GODZILLA 1954 - the game reads adjustment 94: 15 (its own 12)
 
@@ -6381,3 +6399,38 @@ Port lines (one set per build):
 
 plus `adjustment`, `score_add` and `cur_player`. `idle_test_mode.c` is the rig instrument: it starts the mission
 whose song is playing and logs its clock each second.
+
+## Prolonged Competition (PAD-1041)
+
+Venom and Dungeons & Dragons offer **COMPETITION GAME PLAY UNTIL POWERED OFF** on their start menu (CHOOSE YOUR MODE OF
+PLAY, both flipper buttons held in attract): picked once, every game is a Competition game until the machine is
+switched off. Every other Spike 2 build has only the one-game **COMPETITION** entry, and on every latest build that
+entry sets `FG_PLAYER_COMPETITION_MODE_ACTIVE` (17) and nothing else. The runtime gives those games the prolonged one;
+there is nothing for a mode to call. The Modes tab's **Prolonged Competition** puts `comp.cfg` beside the runtime:
+
+    comp on
+    flag 17            FG_PLAYER_COMPETITION_MODE_ACTIVE, read off the card's own flag names
+    caption 1919       the menu's COMPETITION caption (the message after CHOOSE YOUR MODE OF PLAY's)
+    caption_end 1914   the menu's STANDARD caption
+    only               the card has no modes: armed with nothing else (scores stay on Insider Connected)
+
+- The entry is appended through the challenges' start-menu lines (`site challenge_menu`, `site challenge_menu_pick`,
+  `value challenge_menu_list_at` / `_count_at` or `_count_reg` / `_cap` / `_entry` and the layout values): COMPETITION
+  over `UNTIL POWERED OFF`, and once it is on, STANDARD over `ENDS PROLONGED COMPETITION`. Its kind is 0x200 until the
+  pick, which plays it as Standard (kind 0: r3 on the kind-jump menus, the entry itself where the port says
+  `challenge_menu_pick_back`).
+- The next `game_start` on the event bus (`site hook_dispatch`) turns it on or off. While on, the flag is set at every
+  game's start, before the game's handlers, and again at a `ball_start` that finds it clear; turned off, it is cleared
+  at that game's start. It is the runtime's memory only: switching the machine off ends it.
+- The log says each game: `prolonged competition: game 2 plays as Competition (flag 17 was 0)` - the game itself
+  starts every game after the first with the flag clear - and `game 2 over (flag 17 is 1; prolonged on)`.
+- The menus of game-mode table INDICES (Godzilla, Jaws, John Wick, Metallica, King Kong, X-Men) take it through `site
+  comp_menu_frame` (hook_full; `value comp_menu_frame_list_at` / `_count_at` / `_count_last` / `_cap` / `_cursor_reg`
+  / `_buttons_reg`, `comp_menu_index` / `_index_msg` / `comp_menu_end_index` / `_end_msg`): Competition's index again
+  (Standard's once on), its name message lettered UNTIL POWERED OFF from the frame the cursor arrives on. Bond 60th's
+  menu object takes it through `site comp_menu_obj_built` / `comp_menu_obj_pick` / `comp_menu_obj_add_fn` and
+  `value comp_menu_obj_*`: the game's own add called once more with Competition's kind and flag and our name.
+  `prolonged_comp.frame_lines` writes the index-menu lines from a program.
+
+Proven (emulator, Deadpool Pro 1.16): picked, two Competition games, picked again, off; the sweep over the latest builds
+is in docs/plans/pad1041_prolonged_comp.md.

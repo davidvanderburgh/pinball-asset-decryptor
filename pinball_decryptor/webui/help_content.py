@@ -3472,6 +3472,19 @@ PREVIEW_HELP = {
                 "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
                 "- In a co-op game each teammate picks one at their first ball.",
             ]),
+            ("Prolonged Competition", [
+                "**Prolonged Competition**, under the list, adds the start menu entry Venom and Dungeons & "
+                "Dragons have to any other game whose start menu the app knows. Tick it, then Write:\n\n"
+                "- Hold both flipper buttons in attract to open **CHOOSE YOUR MODE OF PLAY**. The last entry "
+                "reads **COMPETITION / UNTIL POWERED OFF**: pick it with Start and that game and every game "
+                "after it is a Competition game (all randomness removed), exactly as the game's own "
+                "COMPETITION entry makes one game.\n"
+                "- It lasts until the machine is switched off. To end it sooner, pick the same entry again: "
+                "it now reads **STANDARD / ENDS PROLONGED COMPETITION**.\n"
+                "- The machine's settings are never changed.\n"
+                "- On its own it keeps the card on Insider Connected, as the game's own Competition does. With "
+                "modes or co-op play on the same card, the scores stay on the machine as those always do.",
+            ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "
                 "LE, 1.15). Its operator menu has the setting **ALLOW INACTIVITY TO PAUSE TIMERS** like every "

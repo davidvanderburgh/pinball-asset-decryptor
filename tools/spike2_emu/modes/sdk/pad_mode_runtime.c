@@ -17131,6 +17131,203 @@ static void idle_arm(void)
         ? "the song clocks" : "the hurry-ups", fn("score_add"), songs ? ", song tracker" : "", check ? ", check" : "");
 }
 
+/* ---- PAD-1041: Prolonged Competition on the start menu -------------------------------------------------------------
+ * Joe_Blasi: "can the prolonged comp (in player menu) be added to all games?" Venom and Dungeons & Dragons offer it on
+ * CHOOSE YOUR MODE OF PLAY: COMPETITION GAME PLAY UNTIL POWERED OFF - picked once, every game after it plays as
+ * Competition until the machine is switched off, and picked again it ends. Every Spike 2 build's own COMPETITION entry
+ * sets one flag, FG_PLAYER_COMPETITION_MODE_ACTIVE (17 on every latest build), and nothing else, so a competition game
+ * is that flag set as the game starts. The runtime adds the entry to the start menu (the same sites as the challenges'
+ * menu: `site challenge_menu`, `site challenge_menu_pick` and their values) and keeps the flag set:
+ *   - the entry: the game's own COMPETITION caption over UNTIL POWERED OFF; once on, its STANDARD caption over ENDS
+ *     PROLONGED COMPETITION. Picked, the game plays it as Standard (kind 0 on every menu of this shape), and the next
+ *     game's start turns it on (or off);
+ *   - while on: the flag set at every game's start and again at a ball's start that finds it clear (the event bus's
+ *     dispatch, before the game's handlers). Off again: cleared at that game's start. It lives in the runtime's
+ *     memory only, so switching the machine off ends it, as on Venom.
+ * comp.cfg (beside the runtime, or /dump for a rig), written by the Modes tab's tick (plugins/stern/prolonged_comp.py):
+ *   flag <id>            FG_PLAYER_COMPETITION_MODE_ACTIVE, read off the card's own flag names
+ *   caption <msg>        the menu's COMPETITION caption (message id)
+ *   caption_end <msg>    the menu's STANDARD caption, for the entry that ends it
+ *   only                 the card carries no modes: armed before the score gate with nothing else (the scores stay on
+ *                        Insider Connected, as the game's own Competition keeps them)
+ * It scores nothing, so it arms before the score gate. */
+static const char *const COMP_FILES[] = { "/usr/local/padmode/comp.cfg", "/dump/comp.cfg" };
+#define COMP_KIND 0x200u                         /* the entry's kind until a pick makes it the game's */
+static struct {
+    int armed, only, on, pending, said_game;
+    unsigned flag, caption, caption_end, game_id, ball_id, over_id, games;
+} comp;
+static char comp_name_on[40] = "UNTIL POWERED OFF", comp_name_off[40] = "ENDS PROLONGED COMPETITION";
+
+/* Whether the next game is prolonged, from the flags alone (tests lift it verbatim): on = prolonged now, picked = the
+ * entry was the menu's pick */
+static int comp_next(int on, int picked)
+{
+    return picked ? !on : on;
+}
+
+static const char *comp_name(void)
+{
+    return comp.on ? comp_name_off : comp_name_on;
+}
+
+/* the entry is ours: by its kind, or - once a pick wrote the game's kind into it - by the name it points to */
+static int comp_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
+{
+    unsigned name = *(const unsigned *)(ent + nat);
+    return *(const unsigned *)(ent + kat) == COMP_KIND || name == (unsigned)(unsigned long)comp_name_on
+        || name == (unsigned)(unsigned long)comp_name_off;
+}
+
+static void comp_menu_built(unsigned *r)
+{
+    long creg = pm_port_value("challenge_menu_count_reg", -1);
+    unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp */
+    unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
+    unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), es = (unsigned)pm_port_value("challenge_menu_entry", 12);
+    unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
+    unsigned short caption = (unsigned short)(comp.on ? comp.caption_end : comp.caption);
+    unsigned i, k, n0 = *count, tmpl = 0;
+    static int room_said, said;
+    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
+        return;                                            /* not the list this hook knows: leave it alone */
+    for (i = 0; i < n0; i++) {
+        if (comp_entry_at(list + es * i, kat, nat)) {       /* an every-frame site: there already - say what it is now */
+            *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)comp_name();
+            *(unsigned short *)(list + es * i + cat) = caption;
+            return;
+        }
+        if (!*(unsigned *)(list + es * i + kat)) tmpl = i;  /* Standard's: the entry ours plays as */
+    }
+    if (n0 >= cap) {
+        if (!room_said++) say("prolonged competition: no room on the start menu - the game's menu holds %u entries", cap);
+        return;
+    }
+    i = n0;
+    if (!plain)                                            /* another layout - start from the game's entry */
+        for (k = 0; k < es; k++) list[es * i + k] = list[es * tmpl + k];
+    else if (es == 16)                                     /* the fourth word: as Standard's */
+        *(unsigned *)(list + es * i + 12) = *(unsigned *)(list + es * tmpl + 12);
+    *(unsigned *)(list + es * i + kat) = COMP_KIND;
+    *(unsigned short *)(list + es * i + cat) = caption;
+    if (plain) *(unsigned short *)(list + es * i + 6) = 0;
+    else if (pm_port_value("challenge_menu_caption2_at", -1) >= 0)     /* TMNT keeps the caption twice */
+        *(unsigned short *)(list + es * i + (unsigned)pm_port_value("challenge_menu_caption2_at", 0)) = caption;
+    *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)comp_name();
+    *count = i + 1;
+    if (!said++) {
+        char kinds[120];
+        unsigned at = 0;
+        kinds[0] = 0;
+        for (k = 0; k < *count && at < sizeof kinds - 8; k++)     /* the menu's order, for whoever steps it */
+            at += (unsigned)pm_snprintf(kinds + at, sizeof kinds - at, " %u", *(unsigned *)(list + es * k + kat));
+        say("prolonged competition: on the start menu as entry %u of %u (%s) - kinds%s", i + 1, i + 1, comp_name(), kinds);
+    }
+}
+
+static void comp_menu_picked(unsigned *r)
+{
+    long back = pm_port_value("challenge_menu_pick_back", 0);
+    unsigned char *e8 = back > 0 ? (unsigned char *)(unsigned long)(r[3] - (unsigned)back) - MENU_KIND_AT : 0;
+    int was = comp.pending;       /* the game runs this on every frame of the menu: say only a change */
+    comp.pending = back > 0 ? comp_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : r[3] == COMP_KIND;
+    if (comp.pending) {                                     /* the game plays it as Standard */
+        if (back > 0) *(unsigned *)(e8 + MENU_KIND_AT) = 0;
+        else r[3] = 0;
+    }
+    if (comp.pending != was)
+        say("prolonged competition: %s %s on the menu", comp_name(), comp.pending ? "picked" : "no longer picked");
+}
+
+static void comp_game_start(void)
+{
+    int was = comp.on, flag = game_flag(comp.flag);
+    comp.on = comp_next(comp.on, comp.pending);
+    comp.pending = 0;
+    comp.games++;
+    comp.said_game = 0;
+    if (comp.on) game_flag_set(comp.flag);
+    else if (was) game_flag_clear(comp.flag);
+    if (comp.on != was)
+        say("prolonged competition: %s - game %u %s (flag %u was %d)", comp.on ? "ON until the machine is switched off"
+            : "OFF", comp.games, comp.on ? "plays as Competition" : "plays as the menu picked", comp.flag, flag);
+    else
+        say("prolonged competition: game %u %s (flag %u was %d)", comp.games,
+            comp.on ? "plays as Competition" : "starts (prolonged is off)", comp.flag, flag);
+}
+
+static void on_comp_dispatch(unsigned *r)
+{
+    if (r[0] == comp.game_id) comp_game_start();
+    else if (r[0] == comp.over_id && comp.games)            /* for the log: what the game ended as */
+        say("prolonged competition: game %u over (flag %u is %d; prolonged %s)", comp.games, comp.flag,
+            game_flag(comp.flag), comp.on ? "on" : "off");
+    else if (r[0] == comp.ball_id && comp.on && game_flag(comp.flag) == 0) {
+        game_flag_set(comp.flag);                           /* the game's start work cleared it: again */
+        if (!comp.said_game++)
+            say("prolonged competition: game %u's ball start found flag %u clear - set again", comp.games, comp.flag);
+    }
+}
+
+static int comp_cfg_only(void)
+{
+    return comp.armed && comp.only;
+}
+
+static void comp_arm(void)
+{
+    static char raw[512];
+    struct site *bus = site("hook_dispatch");
+    long n = -1, i;
+    int game = event_bus_id("game_start"), ball = event_bus_id("ball_start"), ok;
+    unsigned k;
+    const char *p;
+    for (k = 0; k < sizeof COMP_FILES / sizeof COMP_FILES[0] && n < 0; k++)
+        n = pm_read_file(COMP_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i < n; i++) {
+        if (i && raw[i - 1] != '\n') continue;
+        if (str_starts(raw + i, "only")) comp.only = 1;
+        else if (str_starts(raw + i, "flag ")) { p = raw + i + 5; comp.flag = (unsigned)number(&p, &ok); if (!ok) comp.flag = 0; }
+        else if (str_starts(raw + i, "caption_end ")) {
+            p = raw + i + 12; comp.caption_end = (unsigned)number(&p, &ok); if (!ok) comp.caption_end = 0;
+        } else if (str_starts(raw + i, "caption ")) {
+            p = raw + i + 8; comp.caption = (unsigned)number(&p, &ok); if (!ok) comp.caption = 0;
+        }
+    }
+    if (!comp.flag || !comp.caption || !comp.caption_end || !data("game_flags")) {
+        say("prolonged competition: off - %s", !data("game_flags") ? "the port names no game flags"
+            : "comp.cfg names no flag or captions");
+        return;
+    }
+    if (!site("challenge_menu") || !site("challenge_menu_pick") || pm_port_value("challenge_menu_cap", 0) <= 0
+        || pm_port_value("challenge_menu_list_at", 0) <= 0
+        || (pm_port_value("challenge_menu_count_at", 0) <= 0 && pm_port_value("challenge_menu_count_reg", -1) < 4)) {
+        say("prolonged competition: off - the port does not know this game's start menu");
+        return;
+    }
+    if (!bus || !bus->ok || game < 0 || ball < 0) {
+        say("prolonged competition: off - %s", !bus || !bus->ok ? "the port's hook_dispatch is missing or wrong"
+            : "the port names no game_start / ball_start event");
+        return;
+    }
+    comp.game_id = (unsigned)game;
+    comp.ball_id = (unsigned)ball;
+    comp.over_id = event_bus_id("game_over") >= 0 ? (unsigned)event_bus_id("game_over") : ~0u;
+    if (!(pm_port_value("challenge_menu_count_reg", -1) >= 0 ? hook_full(fn("challenge_menu"), comp_menu_built)
+                                                             : hook(fn("challenge_menu"), comp_menu_built))
+        || !hook(fn("challenge_menu_pick"), comp_menu_picked) || !hook(bus->addr, on_comp_dispatch)) {
+        say("prolonged competition: off - the start menu or the event bus could not be hooked");
+        return;
+    }
+    comp.armed = 1;
+    say("prolonged competition: armed - on the start menu at 0x%08x (captions %u / %u), flag %u kept set from every "
+        "game's start (bus 0x%x, ball start 0x%x) while it is on%s", fn("challenge_menu"), comp.caption,
+        comp.caption_end, comp.flag, comp.game_id, comp.ball_id, comp.only ? " (comp.cfg: only)" : "");
+}
+
 /* Which sites and data each capability needs; all must be present and verified. */
 static int have_sites(const char *const *names)
 {
@@ -19865,12 +20062,14 @@ static void pad_mode_start(void)
     pic_arm();                                /* PAD-537: nor do the picture settings */
     idle_arm();                               /* PAD-1022: nor does inactivity pausing the timers */
     hand_arm();                               /* PAD-1033: nor does a player's handicap (the operator's settings) */
-    if ((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only()) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
-        say("armed: %s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
+    comp_arm();                               /* PAD-1041: nor does Prolonged Competition (the game's own Competition) */
+    if ((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only()) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
+        say("armed: %s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             idle_only ? "inactivity pausing timers " : "", hand_cfg_only() ? "handicaps " : "",
+            comp_cfg_only() ? "prolonged competition " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : idle_only ? "idle.cfg"
-            : "handicap.cfg");
+            : hand_cfg_only() ? "handicap.cfg" : "comp.cfg");
         if (hand.on && !hook(fn("tick"), on_hand_tick)) {
             hand.on = 0;
             say("handicap: off - the game's tick could not be hooked");

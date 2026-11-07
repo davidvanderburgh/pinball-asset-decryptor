@@ -67,8 +67,7 @@ def test_the_index_menus_letter_our_name_as_the_cursor_arrives(tmp_path):
 def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     src = _src()
     assert src.index("comp_arm();") < src.index("if (!insider_arm()) return;")
-    assert ("(clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only()) "
-            "&& !attract_wanted() && !coop_wanted()") in src
+    assert "(clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))" in src
     arm = R._lift(src, "static void comp_arm(void)")
     # the start menu's two sites (the challenges' menu lines) and the event bus, each a hook of its own
     assert 'hook(fn("challenge_menu_pick"), comp_menu_picked)' in arm and "hook(bus->addr, on_comp_dispatch)" in arm

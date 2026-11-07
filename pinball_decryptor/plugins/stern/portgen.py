@@ -44,7 +44,8 @@ import numpy as np
 #: 8: the build's own game modes kept in a derived port (they were dropped as unplaced), and the game's mode framework
 #: read off an older build that reads the player up inline (data mode_player_at), PAD-714
 #: 9: the attract mode's page table (PAD-782, portattract.py)
-REVISION = 9
+#: 10: the cabinet's expression lights (`cablamp` lines, PAD-1040) off the target's own tables
+REVISION = 10
 RECIPE_FORMAT = 1
 
 CORE_SITES = ("tick", "shot_dispatch", "ball_end", "score_add")
@@ -1307,6 +1308,19 @@ class Target:
 
 
 # ---- lamps -------------------------------------------------------------------------------------
+def cabinet_draft(target):
+    """PAD-1040: the target's `cablamp` lines (its blades and speaker lights), read off its own tables; [] when it
+    has none or its tables are not read here."""
+    from . import lampmap
+    b = getattr(target, "b", None)
+    if not b:                           # a stand-in target (a test's): no program to read
+        return []
+    try:
+        return lampmap.cabinet_lines(lampmap.Elf(b, getattr(target, "path", "the game program")))
+    except SystemExit:
+        return []
+
+
 def lamp_draft(rest, target, other_title, report, cache):
     """One `lamp` line for the target (item mode-leds), placed by the insert's name in the target's own
     tables (lampmap), with the target's own shot tie where its shot table was read; or a comment."""
@@ -1557,6 +1571,8 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
             report["event copied"] += 1
         elif key == "lamp":
             out.append(lamp_draft(rest, tgt, title_of(target_game) != title_of(ref_game), report, lamp_cache))
+        elif key == "cablamp":
+            continue                    # PAD-1040: the reference's light ids; the target's own are read below
         elif (key in ("shot", "callout", "text", "switch") or (key == "value" and parts and parts[0] in TITLE_VALUES)) \
                 and title_of(target_game) != title_of(ref_game):
             # shot bits, switch ids, sound ids, rule ids and example names belong to the reference TITLE
@@ -1573,6 +1589,10 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
         else:
             out.append("%s %s" % (key, rest))
     _score_pair(out, placed, tgt, hows)
+    cab = cabinet_draft(tgt)            # PAD-1040: the cabinet's expression lights, off the target's own tables
+    if cab:
+        out += [""] + cab
+        report["cabinet lights placed"] += sum(1 for c in cab if c.startswith("cablamp "))
     stock_rules = any(k == "rule" for k, _r in entries)
     if stock_rules:
         _stock_slots(out, tgt)

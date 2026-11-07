@@ -98,6 +98,8 @@ struct mode_cfg {
     char show_start[40], show_end[40];   /* PAD-418 `show_start <name>` / `show_end <name>`: the game's own light
                                        * show (the port's `text show_name_<n>`) at its start / its end; "" = none */
     char show_hit[40];                /* PAD-642 `show_hit <name>`: ... and on each hit of a shot that scores */
+    char cab_show[32];                /* PAD-1040 `cab_show <name>`: one of the card's expression light shows
+                                       * (cabshow.cfg) over the cabinet's lights while it runs; "" = none */
     char wizard[40];                  /* PAD-436 `game_wizard light|start <name>`: when it starts, the game's own
                                        * mini-wizard (the port's `text wizard_name_<n>`) instead; "" = none */
     int wizard_start;                 /* ... started at once (1), or lit for the game's start shot (0) */
@@ -2141,6 +2143,7 @@ static void cfg_line(struct slot *M, const char *line)
     TEXT("show_start", show_start)          /* PAD-418 */
     TEXT("show_end", show_end)              /* PAD-418 */
     TEXT("show_hit", show_hit)              /* PAD-642 */
+    TEXT("cab_show", cab_show)              /* PAD-1040 */
     if ((a = key_is(line, "game_wizard")) != 0) {   /* PAD-436 */
         const char *b;
         if ((b = key_is(a, "start")) != 0) cfg.wizard_start = 1;
@@ -2273,6 +2276,9 @@ static void cfg_parse(struct slot *M, const char *buf, long len)
     if (cfg.show_start[0] || cfg.show_end[0])   /* PAD-418 */
         pm_log("\"%s\": the game's light show \"%s\" at its start, \"%s\" at its end%s", cfg.name, cfg.show_start,
                cfg.show_end, pm_can(PM_CAN_GAME_SHOWS) ? "" : " - this game's port names no light shows: none plays");
+    if (cfg.cab_show[0])                     /* PAD-1040 */
+        pm_log("\"%s\": the card's expression light show \"%s\" while it runs%s", cfg.name, cfg.cab_show,
+               pm_cab_count() ? "" : " - this game's port names no cabinet lights: none plays");
     if (cfg.show_hit[0])                     /* PAD-642 */
         pm_log("\"%s\": the game's light show \"%s\" on each shot that scores%s", cfg.name, cfg.show_hit,
                pm_can(PM_CAN_GAME_SHOWS) ? "" : " - this game's port names no light shows: none plays");
@@ -2543,6 +2549,9 @@ static void mode_start(struct slot *M, const char *why)
     if (cfg.light_on[0]) pm_log("lights on: %s", lights(M, cfg.light_on) ? "ran under a live show" : "did not run (no live show, or no lights on this game)");
     if (cfg.clip_start[0] && !clip_after_shot(cfg.clip_start, "mode start", why)) clip_now(cfg.clip_start, "mode start");
     game_show(M, cfg.show_start, "its start");          /* PAD-418 */
+    if (cfg.cab_show[0])                                 /* PAD-1040 */
+        pm_log("%s: the card's expression light show \"%s\" - %s", cfg.name, cfg.cab_show,
+               pm_cab_show(cfg.cab_show) ? "playing" : "not played (no show of that name, or no cabinet lights)");
     if (!own_screen(M) && cfg.title_msg) pm_award_screen(cfg.screen_type, cfg.title_msg, cfg.award);
     starts_count(M, why);
     pm_log("%s START (%s): slot %u, player %u, %u s, score %llu", cfg.name, why, M->index,
@@ -2579,6 +2588,8 @@ static void mode_end(const char *why)
         pm_place_over(name_is(why, "end shot") || (!cfg.end_shot_bits && name_is(why, "time ran out")));
     own_sounds_end(M);
     own_lights_end(M);                       /* item mode-leds: the game has its inserts back */
+    if (cfg.cab_show[0] && pm_cab_show_stop())           /* PAD-1040: the cabinet's lights are the game's again */
+        pm_log("%s: its expression light show ends with it", cfg.name);
     if (cfg.light_off[0]) lights(M, cfg.light_off);
     if (cfg.clip_end[0] && !clip_after_shot(cfg.clip_end, "mode end", why)) clip_now(cfg.clip_end, "mode end");
     if (!name_is(why, "ball ended")) game_show(M, cfg.show_end, "its end");   /* PAD-418: none as the ball ends */

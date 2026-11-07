@@ -483,6 +483,31 @@ lamp 44           0x10           DB5 UNDER  # lamp 96, I/O group 7 index 2, at 3
 lamp 75           0x20           TANK HOOD  # lamp 97, I/O group 7 index 6, at 248,227; tie: Tank hood target
 lamp 111          0              LEFT SLING FLASH  # lamp 106, I/O group 7 index 24, at 104,715
 lamp 112          0              RIGHT SLING FLASH  # lamp 107, I/O group 7 index 25, at 317,715
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 0 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 446,447,448  41  SPEAKER 1  # lamp 213, I/O group 6 index 1, at 95,28, speaker L
+cablamp 449,450,451  125 SPEAKER 2  # lamp 214, I/O group 6 index 4, at 116,34, speaker L
+cablamp 452,453,454  208 SPEAKER 3  # lamp 215, I/O group 6 index 7, at 131,49, speaker L
+cablamp 455,456,457  291 SPEAKER 4  # lamp 216, I/O group 6 index 10, at 137,70, speaker L
+cablamp 458,459,460  375 SPEAKER 5  # lamp 217, I/O group 6 index 13, at 131,91, speaker L
+cablamp 461,462,463  458 SPEAKER 6  # lamp 218, I/O group 6 index 16, at 116,106, speaker L
+cablamp 464,465,466  541 SPEAKER 7  # lamp 219, I/O group 6 index 19, at 95,112, speaker L
+cablamp 467,468,469  625 SPEAKER 8  # lamp 220, I/O group 6 index 22, at 74,106, speaker L
+cablamp 470,471,472  708 SPEAKER 9  # lamp 221, I/O group 6 index 25, at 59,91, speaker L
+cablamp 473,474,475  791 SPEAKER 10  # lamp 222, I/O group 6 index 28, at 53,70, speaker L
+cablamp 476,477,478  875 SPEAKER 11  # lamp 223, I/O group 6 index 31, at 59,49, speaker L
+cablamp 479,480,481  958 SPEAKER 12  # lamp 224, I/O group 6 index 34, at 74,34, speaker L
+cablamp 482,483,484  45  SPEAKER 13  # lamp 225, I/O group 6 index 37, at 205,28, speaker R
+cablamp 485,486,487  136 SPEAKER 14  # lamp 226, I/O group 6 index 40, at 228,35, speaker R
+cablamp 488,489,490  227 SPEAKER 15  # lamp 227, I/O group 6 index 43, at 243,53, speaker R
+cablamp 491,492,493  318 SPEAKER 16  # lamp 228, I/O group 6 index 46, at 247,76, speaker R
+cablamp 494,495,496  409 SPEAKER 17  # lamp 229, I/O group 6 index 49, at 237,98, speaker R
+cablamp 497,498,499  500 SPEAKER 18  # lamp 230, I/O group 6 index 52, at 217,110, speaker R
+cablamp 500,501,502  590 SPEAKER 19  # lamp 231, I/O group 6 index 55, at 193,110, speaker R
+cablamp 503,504,505  681 SPEAKER 20  # lamp 232, I/O group 6 index 58, at 173,98, speaker R
+cablamp 506,507,508  772 SPEAKER 21  # lamp 233, I/O group 6 index 61, at 163,76, speaker R
+cablamp 509,510,511  863 SPEAKER 22  # lamp 234, I/O group 6 index 64, at 167,53, speaker R
+cablamp 512,513,514  954 SPEAKER 23  # lamp 235, I/O group 6 index 67, at 182,35, speaker R
 
 # ---- events: the framework's event bus, each seen firing in the emulator 2026-09-24 ----
 event game_start     0x4d

@@ -213,6 +213,7 @@ static void rest(const char *s, char *out, unsigned cap)
 
 static void event_line(const char *s);        /* `event <name> <id>`: the events section below */
 static void lamp_line(const char *s);         /* `lamp <lights> <shots> <name>`: the lights section */
+static void cab_line(const char *s);          /* PAD-1040: `cablamp <lights> <u> <name>`: the cabinet's lights */
 static void rule_line(const char *s);         /* `rule <id> <vtable> <label>`: the stock rules section (item 160) */
 
 static void port_line(const char *s)
@@ -283,6 +284,7 @@ static void port_line(const char *s)
     }
     if (str_eq(key, "event")) { event_line(s); return; }
     if (str_eq(key, "lamp")) { lamp_line(s); return; }
+    if (str_eq(key, "cablamp")) { cab_line(s); return; }   /* PAD-1040 */
     if (str_eq(key, "rule")) { rule_line(s); return; }
     /* an unknown key is skipped: a newer port must not break an older runtime */
 }
@@ -1360,10 +1362,13 @@ static volatile int blist_live;
 static void blist_play(unsigned request);
 static void att_worker(unsigned request);
 static volatile int att_live;               /* PAD-641 (defined with the lookup's hooks below) */
+static void cabs_worker(unsigned request);
+static volatile int cabs_live;              /* PAD-1040 (defined with the song shows below) */
 
 static void on_sound_worker(unsigned *r)
 {
     if (worker_log) say("sound %u %u", r[0], r[2]);
+    if (cabs_live) cabs_worker(r[0]);         /* PAD-1040: a song with an expression light show of the card's */
     if (att_live) att_worker(r[0]);           /* PAD-645: the game's own sound at an attract press */
     if (blist_live) blist_play(r[0]);
 }
@@ -1606,8 +1611,17 @@ int pm_lights_as(unsigned owner, const char *command)
 
 struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; int x, y;      /* x, y: -1 = not placed */
               int grp, gidx; };     /* PAD-658: the comment's "I/O group G index I", -1 = not given */
-static struct lamp lamps[N_LAMPS];
-static int n_lamps;
+/* PAD-1040: the cabinet's expression lights (the port's `cablamp` lines) follow the inserts, from CAB0: every
+ * insert call (pm_lamp_count, a name, a shot, every insert) sees only [0, n_lamps); what holds, writes, checks and
+ * lets go of a light walks both ranges (LAMP_FIRST / LAMP_NEXT / LAMP_END) */
+#define N_CAB        160          /* Led Zeppelin: 96 blade pixels and 23 speaker lights */
+#define CAB0         N_LAMPS
+#define N_LAMP_ALL   (N_LAMPS + N_CAB)
+static struct lamp lamps[N_LAMP_ALL];
+static int n_lamps, n_cab;
+#define LAMP_FIRST   (n_lamps ? 0 : CAB0)
+#define LAMP_NEXT(k) ((k) + 1 == n_lamps ? CAB0 : (k) + 1)
+#define LAMP_END     (CAB0 + n_cab)
 
 struct lamp_held {
     const struct pm_mode *owner;    /* 0 = the game has it */
@@ -1621,15 +1635,15 @@ struct lamp_held {
     unsigned flash_rgb;
     int flash_only;                 /* held for the strobe alone: handed back to the game when it ends */
 };
-static struct lamp_held lamp_held[N_LAMPS];
+static struct lamp_held lamp_held[N_LAMP_ALL];
 /* PAD-601: the holds an insert was taken from, the latest last. A mode lighting an insert another of ours holds
  * takes it, as before; the one it took it from is kept here, and when the mode on top lets go the latest one still
  * under it has the insert back (its pattern, colour and layer), not the game. A mode letting go of an insert it is
  * under leaves this list; the game leaving play empties it. */
 #define LAMP_UNDER   4
 struct lamp_under { const struct pm_mode *owner; unsigned rgb, period, chase_i, chase_n, on_ms; int pattern, layer; };
-static struct lamp_under lamp_under[N_LAMPS][LAMP_UNDER];
-static int lamp_n_under[N_LAMPS];
+static struct lamp_under lamp_under[N_LAMP_ALL][LAMP_UNDER];
+static int lamp_n_under[N_LAMP_ALL];
 static unsigned lamp_hold_on_ms;   /* the on time the next hold takes (set around a call, runtime-internal) */
 static struct { unsigned prio; unsigned char *group; unsigned misses; } lamp_layer[LAMP_LAYERS];
 static int n_lamp_layers;
@@ -1649,24 +1663,21 @@ static void lamp_say(const char *fmt, ...)
 
 /* `lamp <R,G,B light ids | one light id> <shot mask> <name>`: a 0 in the R,G,B list is a colour
  * the fixture does not have; ONE id is a single-colour insert (lit at the colour's brightest part) */
-static void lamp_line(const char *s)
+static int lamp_parse(const char *s, struct lamp *x)
 {
-    struct lamp *x;
     int k, ok = 0, n = 0;
     unsigned i;
-    if (n_lamps >= N_LAMPS) return;
-    x = &lamps[n_lamps];
     x->light[0] = x->light[1] = x->light[2] = 0;
     for (k = 0; k < 3; k++) {
         x->light[k] = (unsigned)number(&s, &ok);
-        if (!ok) return;
+        if (!ok) return 0;
         n++;
         if (*s != ',') break;
         s++;
     }
     x->mono = n == 1;
     x->shot = number(&s, &ok);
-    if (!ok) return;
+    if (!ok) return 0;
     rest(s, x->name, sizeof x->name);
     x->x = x->y = -1;
     x->grp = x->gidx = -1;
@@ -1698,7 +1709,26 @@ static void lamp_line(const char *s)
             x->name[i] = 0;
             break;
         }
-    if (x->name[0] && (x->light[0] || x->light[1] || x->light[2])) n_lamps++;
+    return x->name[0] && (x->light[0] || x->light[1] || x->light[2]);
+}
+
+static void lamp_line(const char *s)
+{
+    if (n_lamps < N_LAMPS && lamp_parse(s, &lamps[n_lamps])) n_lamps++;
+}
+
+/* PAD-1040: `cablamp <R,G,B light ids> <u> <name>  # ..., at X,Y` - a cabinet expression light: u its place along
+ * its strip (0..999: a blade's from the bottom up, a speaker ring's from the top round clockwise), X,Y its place on
+ * the cabinet drawing (pad_mode.h pm_cab_xy) */
+static unsigned cab_u[N_CAB];
+
+static void cab_line(const char *s)
+{
+    if (n_cab < N_CAB && lamp_parse(s, &lamps[CAB0 + n_cab])) {
+        cab_u[n_cab] = lamps[CAB0 + n_cab].shot < 1000 ? (unsigned)lamps[CAB0 + n_cab].shot : 999u;
+        lamps[CAB0 + n_cab].shot = 0;
+        n_cab++;
+    }
 }
 
 static int lamp_upper(int c) { return c >= 'a' && c <= 'z' ? c - 32 : c; }
@@ -2031,23 +2061,22 @@ static int lamp_hold(const int *list, int n, unsigned rgb, int pattern, unsigned
 
 /* hud-layers: ONE insert held solid in `rgb`, quietly - a light show paints every insert every tick,
  * and only a level that changed reaches the game (lamp_write). 0 black is still held (dark). */
-int pm_lamp_paint(int k, unsigned rgb)
+static int lamp_paint_as(int k, unsigned rgb, const struct pm_mode *me, unsigned prio)
 {
     struct lamp_held *h;
     int layer;
-    if (!(can & PM_CAN_LAMPS) || k < 0 || k >= n_lamps) return 0;
     h = &lamp_held[k];
-    if (h->owner == (current ? current : (const struct pm_mode *)&lamps) && h->pattern == PM_LAMP_SOLID) {
+    if (h->owner == me && h->pattern == PM_LAMP_SOLID) {
         h->rgb = rgb;
         return 1;
     }
-    layer = lamp_layer_for(lamp_prio_of(current));
+    layer = lamp_layer_for(prio);
     if (layer < 0) return 0;
-    if (h->owner && h->owner != (current ? current : (const struct pm_mode *)&lamps))
+    if (h->owner && h->owner != me)
         lamp_under_push(k);                     /* PAD-601: a show over another mode's light gives it back */
-    lamp_under_drop(k, current ? current : (const struct pm_mode *)&lamps);
+    lamp_under_drop(k, me);
     if (h->owner && h->layer != layer) lamp_let_go(k);
-    h->owner = current ? current : (const struct pm_mode *)&lamps;
+    h->owner = me;
     h->rgb = rgb;
     h->pattern = PM_LAMP_SOLID;
     h->period = 150u;
@@ -2058,6 +2087,39 @@ int pm_lamp_paint(int k, unsigned rgb)
     h->last[0] = h->last[1] = h->last[2] = -1;
     h->on_ms = 0;
     return 1;
+}
+
+static int lamp_paint(int k, unsigned rgb)
+{
+    return lamp_paint_as(k, rgb, current ? current : (const struct pm_mode *)&lamps, lamp_prio_of(current));
+}
+
+int pm_lamp_paint(int k, unsigned rgb)
+{
+    if (!(can & PM_CAN_LAMPS) || k < 0 || k >= n_lamps) return 0;
+    return lamp_paint(k, rgb);
+}
+
+/* ---- PAD-1040: the cabinet's expression lights (pad_mode.h pm_cab_*) */
+int pm_cab_count(void) { return (can & PM_CAN_LAMPS) ? n_cab : 0; }
+
+const char *pm_cab_at(int i)
+{
+    return (can & PM_CAN_LAMPS) && i >= 0 && i < n_cab ? lamps[CAB0 + i].name : 0;
+}
+
+int pm_cab_xy(int i, int *x, int *y)
+{
+    if (!(can & PM_CAN_LAMPS) || i < 0 || i >= n_cab || lamps[CAB0 + i].x < 0) return 0;
+    if (x) *x = lamps[CAB0 + i].x;
+    if (y) *y = lamps[CAB0 + i].y;
+    return 1;
+}
+
+int pm_cab_paint(int i, unsigned rgb)
+{
+    if (!(can & PM_CAN_LAMPS) || i < 0 || i >= n_cab) return 0;
+    return lamp_paint(CAB0 + i, rgb);
 }
 
 /* the lamps a comma-separated list names, in its order; unknown names are said once */
@@ -2154,15 +2216,22 @@ int pm_lamp_release_shot(uint64_t shots)
     return lamp_release_list(list, n, "a shot's inserts");
 }
 
-int pm_lamp_release_all(void)
+/* every light of [from, to) the mode holds (PAD-1040: the inserts' range, the cabinet's, or both) */
+static int lamp_release_range(int from, int to, const char *what)
 {
-    int list[N_LAMPS], n = 0, k;
+    int list[N_LAMP_ALL], n = 0, k;
     if (!(can & PM_CAN_LAMPS)) return 0;
-    for (k = 0; k < n_lamps; k++)
+    for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k)) {
+        if (k < from || k >= to) continue;
         if (lamp_held[k].owner && (!current || lamp_held[k].owner == current)) list[n++] = k;
         else if (current) lamp_under_drop(k, current);     /* PAD-601: the ones it is under too */
-    return lamp_release_list(list, n, "all of the mode's");
+    }
+    return lamp_release_list(list, n, what);
 }
+
+int pm_lamp_release_all(void) { return lamp_release_range(0, N_LAMP_ALL, "all of the mode's"); }
+int pm_lamp_release_inserts(void) { return lamp_release_range(0, CAB0, "the mode's inserts"); }
+int pm_cab_release_all(void) { return lamp_release_range(CAB0, N_LAMP_ALL, "the mode's cabinet lights"); }
 
 /* PAD-415: a hit's strobe (pad_mode.h) */
 int pm_lamp_flash(uint64_t shots, unsigned rgb, unsigned ms)
@@ -2219,7 +2288,7 @@ int pm_lamp_priority(unsigned priority)
     if (lamp_mode_prio[i].prio == priority) return (int)priority;
     lamp_mode_prio[i].prio = priority;
     layer = -1;
-    for (k = 0; k < n_lamps; k++) {
+    for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k)) {
         struct lamp_held *h = &lamp_held[k];
         if (!h->owner || h->owner != current) continue;
         if (layer < 0 && (layer = lamp_layer_for(priority)) < 0) break;
@@ -2232,7 +2301,7 @@ int pm_lamp_priority(unsigned priority)
         h->layer = layer;
         h->last[0] = h->last[1] = h->last[2] = -1;
     }
-    for (k = 0; k < n_lamps; k++) {             /* PAD-601: a hold of its under another mode's comes back there */
+    for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k)) {   /* PAD-601: a hold of its under another mode's comes back there */
         int j;
         for (j = 0; j < lamp_n_under[k]; j++)
             if (lamp_under[k][j].owner == current && (layer >= 0 || (layer = lamp_layer_for(priority)) >= 0))
@@ -2276,7 +2345,7 @@ static void lamp_layers_check(void)
         lamp_say("lamps: our layer at priority %u is gone from the game's list - a new one", lamp_layer[k].prio);
         lamp_layer[k].group = lamp_group_new(lamp_layer[k].prio);
         lamp_layer[k].misses = 0;
-        for (j = 0; j < n_lamps; j++)
+        for (j = LAMP_FIRST; j < LAMP_END; j = LAMP_NEXT(j))
             if (lamp_held[j].owner && lamp_held[j].layer == k)
                 lamp_held[j].last[0] = lamp_held[j].last[1] = lamp_held[j].last[2] = -1;
     }
@@ -2296,18 +2365,18 @@ static void lamps_tick(void)
     in = pm_in_game();
     if (was_in && !in) {
         int n = 0;
-        for (k = 0; k < n_lamps; k++) {
+        for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k)) {
             lamp_n_under[k] = 0;
             if (lamp_held[k].owner) { lamp_let_go(k); n++; }
         }
         if (n) lamp_say("lamps: the game left play - %d insert(s) handed back", n);
     }
     was_in = in;
-    for (k = 0; k < n_lamps && !held; k++) held = lamp_held[k].owner != 0;
+    for (k = LAMP_FIRST; k < LAMP_END && !held; k = LAMP_NEXT(k)) held = lamp_held[k].owner != 0;
     if (!held) return;
     if (ticks % 30 == 0) lamp_layers_check();
     now = pm_ms();
-    for (k = 0; k < n_lamps; k++) {
+    for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k)) {
         struct lamp_held *h = &lamp_held[k];
         int f;
         if (!h->owner) continue;
@@ -2338,18 +2407,18 @@ static void lamps_arm(void)
     static const char *const lamp_d[] = { "lamp_layers", "light_count", 0 };
     int k, shots = 0;
     struct site *g = site("lamp_group");
-    if (!n_lamps) return;
+    if (!n_lamps && !n_cab) return;
     if (!g || !g->ok || !have_data(lamp_d) || !have_values(lamp_v)) {
         say("lamps: %d named inserts, but the port lacks the lamp layer (lamp_group, lamp_layers, light_count, lamp_slot_*)", n_lamps);
         return;
     }
-    for (k = 0; k < n_lamps; k++) {
+    for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k)) {
         lamp_held[k].layer = -1;
         shots += lamps[k].shot != 0;
     }
     can |= PM_CAN_LAMPS;
-    say("lamps: %d named inserts (%d tied to a shot); their light ids are checked once the game counts its lights",
-        n_lamps, shots);
+    say("lamps: %d named inserts (%d tied to a shot), %d cabinet lights; their light ids are checked once the game "
+        "counts its lights", n_lamps, shots, n_cab);
 }
 
 /* The game counts its lights only once its main() has run (0 at load, measured on Premium 1.16), so
@@ -2362,21 +2431,21 @@ static int lamps_checked(void)
     if (done) return done > 0;
     n = count ? *(unsigned *)(unsigned long)count : 0;
     if (!n) return 1;
-    for (k = 0; k < n_lamps; k++)
+    for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k))
         for (c = 0; c < 3; c++)
             if (lamps[k].light[c] >= n) bad++;
     /* item 165: a FEW ids past the count are the light table's tail this build does not count (Batman 66's
      * static table has 186 records and the game counts 179: the last seven are lights the model lacks), so
      * only those lines are dropped and the rest hold; MANY past it are another build's lines, and none hold. */
-    if (bad && bad * 4 > n_lamps * 3) {
+    if (bad && bad * 4 > (n_lamps + n_cab) * 3) {
         say("lamps: %d light id(s) are past this game's %u lights - the lamp lines are another build's; no lamps", bad, n);
-        for (k = 0; k < n_lamps; k++) lamp_let_go(k);
+        for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k)) lamp_let_go(k);
         can &= ~PM_CAN_LAMPS;
         done = -1;
         return 0;
     }
     if (bad) {
-        for (k = 0; k < n_lamps; k++)
+        for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k))
             for (c = 0; c < 3; c++)
                 if (lamps[k].light[c] >= n) lamps[k].light[c] = 0;     /* never written (lamp_write skips a 0) */
         say("lamps: the game counts %u lights; %d light id(s) past them are dropped, the other lamp lines hold", n, bad);
@@ -2387,6 +2456,473 @@ static int lamps_checked(void)
     return 1;
 }
 /* ---- LAMPS END */
+/* ---- CAB FX BEGIN: PAD-1040, the expression lights' patterns. A pure slice (no runtime state): the app's preview
+ * (webui/static/js/cabfx.js) is its mirror, integer for integer, and tests/test_pad1040_cab_shows.py compiles this
+ * slice and runs both over every pattern. A light is its place along its strip u (0..999: a blade bottom up, a
+ * speaker ring from the top round), its side (-1 the left blade or speaker, 1 the right, 0 one ring alone) and its
+ * number k. */
+enum { CX_SOLID, CX_FADE_IN, CX_FADE_OUT, CX_CROSSFADE, CX_PULSE, CX_STROBE, CX_SWEEP_UP, CX_SWEEP_DOWN, CX_FILL_UP,
+       CX_FILL_DOWN, CX_CHASE_UP, CX_CHASE_DOWN, CX_BOUNCE, CX_CENTER_OUT, CX_CENTER_IN, CX_ALTERNATE, CX_RAINBOW,
+       CX_SPARKLE, CX_FIRE, CX_METER, CX_N };
+static const char *const CX_NAMES[CX_N] = { "solid", "fade_in", "fade_out", "crossfade", "pulse", "strobe",
+    "sweep_up", "sweep_down", "fill_up", "fill_down", "chase_up", "chase_down", "bounce", "center_out", "center_in",
+    "alternate", "rainbow", "sparkle", "fire", "meter" };
+struct cx_step { int fx; unsigned ms, a, b, rate, blend; };
+
+static unsigned cx_mix(unsigned a, unsigned b, int f256)        /* a..b by f/256 */
+{
+    int k, out = 0;
+    if (f256 < 0) f256 = 0;
+    if (f256 > 256) f256 = 256;
+    for (k = 0; k < 3; k++) {
+        int ca = (int)((a >> (16 - 8 * k)) & 255u), cb = (int)((b >> (16 - 8 * k)) & 255u);
+        out |= ((ca + (cb - ca) * f256 / 256) & 255) << (16 - 8 * k);
+    }
+    return (unsigned)out;
+}
+
+static unsigned cx_scale(unsigned c, int f256) { return cx_mix(0, c, f256); }
+
+static unsigned cx_hue(int h)              /* 0..1535 round the colour wheel, full brightness */
+{
+    int s = ((h % 1536) + 1536) % 1536, i = s / 256, f = s % 256;
+    switch (i) {
+    case 0: return (255u << 16) | ((unsigned)f << 8);
+    case 1: return ((unsigned)(255 - f) << 16) | (255u << 8);
+    case 2: return (255u << 8) | (unsigned)f;
+    case 3: return ((unsigned)(255 - f) << 8) | 255u;
+    case 4: return ((unsigned)f << 16) | 255u;
+    default: return (255u << 16) | (unsigned)(255 - f);
+    }
+}
+
+static unsigned cx_hash(unsigned v)        /* the same light at the same moment: the same sparkle, so a scrub repeats */
+{
+    v ^= v >> 16;
+    v *= 0x7feb352du;
+    v ^= v >> 15;
+    v *= 0x846ca68bu;
+    v ^= v >> 16;
+    return v;
+}
+
+static unsigned cx_band(unsigned a, unsigned b, int w, int head, int trail)     /* a band's head, its trail into b */
+{
+    if (w < 0) return b;
+    if (w < head) return a;
+    if (w < head + trail) return cx_mix(a, b, (w - head) * 256 / trail);
+    return b;
+}
+
+/* the colour of a light for step st at `t` ms into it */
+static unsigned cx_colour(const struct cx_step *st, int side, unsigned u, unsigned k, unsigned t)
+{
+    unsigned rate = st->rate ? st->rate : 100;
+    int f = st->ms ? (int)(t >= st->ms ? 256u : t * 256u / st->ms) : 256;   /* 0..256 through the step */
+    int p, d, v, up = (int)u, down = 999 - (int)u;
+    switch (st->fx) {
+    case CX_SOLID: return st->a;
+    case CX_FADE_IN: return cx_scale(st->a, f);
+    case CX_FADE_OUT: return cx_scale(st->a, 256 - f);
+    case CX_CROSSFADE: return cx_mix(st->a, st->b, f);
+    case CX_PULSE:
+        v = (int)((t % (rate * 2u)) * 512u / (rate * 2u));
+        return cx_mix(st->b, st->a, v < 256 ? v : 512 - v);
+    case CX_STROBE: return (t / rate) % 2u ? st->b : st->a;
+    case CX_SWEEP_UP:
+    case CX_SWEEP_DOWN:                    /* a band from one end to past the other over the step, its trail behind */
+        p = f * 1500 / 256 - 100;
+        return cx_band(st->a, st->b, p - (st->fx == CX_SWEEP_UP ? up : down), 120, 300);
+    case CX_FILL_UP:
+    case CX_FILL_DOWN:
+        return (st->fx == CX_FILL_UP ? up : down) < f * 1000 / 256 ? st->a : st->b;
+    case CX_CHASE_UP:
+    case CX_CHASE_DOWN:                    /* a dot every 125, each moving one gap every `rate` ms */
+        v = (int)((t * 125u / rate) % 125u);
+        d = st->fx == CX_CHASE_UP ? (up - v + 125) % 125 : (up + v) % 125;
+        return d < 40 ? st->a : st->b;
+    case CX_BOUNCE:                        /* a band up and back down over the step */
+        p = (f < 128 ? f * 2 : (256 - f) * 2) * 1000 / 256;
+        d = up - p;
+        if (d < 0) d = -d;
+        if (d < 100) return st->a;
+        if (d < 300) return cx_mix(st->a, st->b, (d - 100) * 256 / 200);
+        return st->b;
+    case CX_CENTER_OUT:
+    case CX_CENTER_IN:                     /* from the strip's middle to its ends, or back */
+        d = up - 500;
+        if (d < 0) d = -d;
+        if (st->fx == CX_CENTER_OUT) return cx_band(st->a, st->b, f * 800 / 256 - 60 - d, 60, 200);
+        return cx_band(st->a, st->b, d - ((256 - f) * 800 / 256 - 60), 60, 200);
+    case CX_ALTERNATE:                     /* the blades swap colours every `rate` ms; a ring's lights every other */
+        v = (int)((t / rate) % 2u);
+        d = side ? side < 0 : (int)(k % 2u);
+        return d == v ? st->a : st->b;
+    case CX_RAINBOW:
+        return cx_hue((int)(u * 1536u / 1000u) + (int)(t * 1536u / (rate * 10u)));
+    case CX_SPARKLE:
+        return cx_hash(k * 7919u + (t / 60u) * 104729u) % 100u < 18u ? st->a : st->b;
+    case CX_FIRE:                          /* flicker, hottest at the bottom */
+        v = (int)(cx_hash(k * 7919u + (t / 50u) * 104729u) % 90u);
+        return cx_scale(cx_mix(st->b, st->a, down * 256 / 1000 + v - 45), 150 + v);
+    case CX_METER:                         /* a level that jumps every `rate` ms, its top in b */
+        p = 250 + (int)(cx_hash((t / rate) * 2654435761u + (unsigned)(side + 1)) % 750u);
+        if (up >= p) return 0;
+        return up > p - 90 ? st->b : st->a;
+    }
+    return 0;
+}
+
+/* the colour for the step on, blending in from the step before (`prev`, 0 = from dark) over its first `blend` ms */
+static unsigned cx_blend(const struct cx_step *st, const struct cx_step *prev, int side, unsigned u, unsigned k,
+                         unsigned t)
+{
+    unsigned c = cx_colour(st, side, u, k, t);
+    if (st->blend && t < st->blend)
+        c = cx_mix(prev ? cx_colour(prev, side, u, k, prev->ms) : 0u, c, (int)(t * 256u / st->blend));
+    return c;
+}
+/* ---- CAB FX END */
+
+/* ★ SONG SHOWS: THE CABINET'S EXPRESSION LIGHTS PLAYING A SHOW OF THE CARD'S WITH A SOUND (PAD-1040).
+ *
+ * Led Zeppelin's ExpressionLights picks the cabinet's show by the sound it plays, so a song replaced on the card plays
+ * under the OLD song's show. cabshow.cfg (beside the runtime, or /dump for a rig) gives the card shows of its own:
+ *
+ *   only                                     the card carries no modes (read before the gate)
+ *   show <sound ids> <loop 0|1> <name>       a show, played whenever the game plays one of those sounds (a,b,c: the
+ *                                            ids that start the song; 0: by name only, pm_cab_show); loop 1 = over
+ *                                            and over while the sound plays
+ *   blades <fx> <ms> <a> <b> <rate> <blend>  a step of the blades' lane (fx: CX_NAMES; colours 0xRRGGBB)
+ *   speakers <fx> <ms> <a> <b> <rate> <blend>   a step of the speaker lights' lane
+ *
+ * The sound's requests are every request whose sound list names it (the request table, read once the game has it).
+ * The sound worker tells the tick which request started; the show runs, each lane on its own, every cabinet light of a
+ * lane with steps held on the top layer (a mode's own cabinet hold still covers it, and gives it back), until the
+ * steps are over (loop 0) or the sound stops; then the lights are the game's again. A lane with no steps leaves its
+ * lights to the game; one whose steps ran out holds them dark until the show ends.
+ *
+ * IN STEP WITH THE SONG, NOT THE CLOCK: the show's time is where its song IS. A voice of the channel playing the
+ * request counts the samples it has played (voice + `sound_voice_played`, 44,100 a second; the channels and voices are
+ * the framework's, one layout on every port). Read every tick, it holds while the game holds the song, starts again when
+ * the game starts it again or loops it, and starts where the song does when the game resumes it part-way (a player's
+ * turn, a mode handing the music back). A voice the game re-uses still shows its last sound's count for a tick or two,
+ * so the show takes the count only once it has moved off its first reading and advances with the game's clock (until
+ * then, and on a port without the channel lines, its own clock from the request). No channel playing the request for
+ * CAB_GONE_MS ends the show. */
+static int str_starts(const char *s, const char *prefix);   /* below */
+#define CABS_MAX     32
+#define CAB_STEPS    128
+#define CABS_REQS    8192
+static const char *const CABS_FILES[] = { "/usr/local/padmode/cabshow.cfg", "/dump/cabshow.cfg" };
+#define CAB_SIDS     8
+struct cab_show { char name[32]; unsigned sid[CAB_SIDS]; int n_sid, loop, n[2]; struct cx_step st[2][CAB_STEPS]; };
+static struct cab_show cabs[CABS_MAX];
+static int n_cabs, cabs_only, cabs_reqs_done;
+static unsigned char cab_of_req[CABS_REQS];          /* 1 + the show a request plays, 0 = none */
+static int cab_side[N_CAB], cab_lane[N_CAB];         /* -1 left blade, 1 right, 0 a speaker; lane 0 blades, 1 speakers */
+static volatile unsigned cabs_pending;               /* the request the worker took last (0 = none since) */
+static const struct pm_mode cab_owner = { "the card's expression light show", 0, 0, 0, 0, 0 };
+#define CAB_GONE_MS  250
+#define CAB_RATE     44100u
+static struct {
+    int on, show, said, seen, locked;
+    unsigned request, first, last;                   /* the voice's first count, its count the tick before */
+    unsigned long t0, last_t, seen_t;                /* the request's start; the tick before; a channel last seen */
+} cab_run;
+
+/* the played-sample count of a voice of the channel playing `request`, or -1 (none plays it, or no channel lines) */
+static long cab_voice_count(unsigned request)
+{
+    long o_req = pm_port_value("sound_channel_request", -1), o_voices = pm_port_value("sound_channel_voices", -1),
+         o_vp = pm_port_value("sound_channel_voice_ptrs", -1), o_pos = pm_port_value("sound_voice_played", 12),
+         n_ch = pm_port_value("sound_channel_count", 8);
+    int i, b;
+    if (!sound_channel(0) || o_req < 0 || o_voices < 0 || o_vp < 0 || o_pos < 0) return -2;
+    for (i = 0; i < n_ch; i++) {
+        unsigned char *c = sound_channel(i);
+        unsigned bits;
+        if (!c || !(bits = c[o_voices]) || *(unsigned short *)(c + o_req) != request) continue;
+        for (b = 0; b < 8; b++) {
+            unsigned char *v;
+            if (!(bits >> b & 1u)) continue;
+            v = (unsigned char *)(unsigned long)*(unsigned *)(c + o_vp + 4 * b);
+            if (v && maps_has((unsigned)(unsigned long)v + (unsigned)o_pos, 4, MAP_R))
+                return (long)(*(volatile unsigned *)(v + o_pos) & 0x7fffffffu);
+        }
+    }
+    return -1;
+}
+
+/* the show's time now, ms into its song; -1 = its song stopped */
+static long cab_song_ms(void)
+{
+    unsigned long now = pm_ms(), el = now - cab_run.t0;
+    long got;
+    if (!cab_run.request) return (long)el;               /* by name: its own clock */
+    got = cab_voice_count(cab_run.request);
+    if (got == -2) {                                     /* no channel lines: the clock, and the game's answer */
+        if (el > 600 && (now / 500) != ((now - 17) / 500) && !pm_sound_active(cab_run.request)) return -1;
+        return (long)el;
+    }
+    if (got < 0) {
+        if (cab_run.seen ? now - cab_run.seen_t > CAB_GONE_MS : el > 1500) return -1;
+        return cab_run.locked ? (long)((unsigned long long)cab_run.last * 1000u / CAB_RATE) : (long)el;
+    }
+    if (!cab_run.seen) {
+        cab_run.seen = 1;
+        cab_run.first = (unsigned)got;
+    } else if (!cab_run.locked && (unsigned)got != cab_run.first && (unsigned)got > cab_run.last) {
+        /* moving off its first reading, as fast as the game's clock goes (a half to twice: the mixer feeds blocks) */
+        unsigned long dt = now - cab_run.last_t, ds = (unsigned long)((unsigned)got - cab_run.last) * 1000u / CAB_RATE;
+        if (dt && ds * 2 >= dt && ds <= dt * 2 + 50) {
+            cab_run.locked = 1;
+            if (cab_run.said < 60 && ++cab_run.said)
+                say("expression lights: show \"%s\" follows its song from %lu.%02lu s in (%lu ms after the request)",
+                    cabs[cab_run.show].name, (unsigned long)got / CAB_RATE, (unsigned long)got % CAB_RATE * 100 / CAB_RATE,
+                    el);
+        }
+    }
+    cab_run.seen_t = now;
+    cab_run.last = (unsigned)got;
+    cab_run.last_t = now;
+    return cab_run.locked ? (long)((unsigned long long)(unsigned)got * 1000u / CAB_RATE) : (long)el;
+}
+
+/* a lane's step at `el` ms into the show: its index (n = over), and the ms into it */
+static int cab_step_at(const struct cab_show *c, int lane, unsigned long el, unsigned *t, int *over)
+{
+    unsigned long total = 0, at;
+    int i, n = c->n[lane];
+    for (i = 0; i < n; i++) total += c->st[lane][i].ms ? c->st[lane][i].ms : 1;
+    *over = 0;
+    if (!n) return -1;
+    if (el >= total) {
+        if (!c->loop) { *over = 1; return n; }
+        el %= total;
+    }
+    for (i = 0, at = 0; i < n; i++) {
+        unsigned ms = c->st[lane][i].ms ? c->st[lane][i].ms : 1;
+        if (el < at + ms) { *t = (unsigned)(el - at); return i; }
+        at += ms;
+    }
+    *over = 1;
+    return n;
+}
+
+static void cabs_release(void)
+{
+    int k, n = 0;
+    for (k = CAB0; k < LAMP_END; k++) {
+        lamp_under_drop(k, &cab_owner);
+        if (lamp_held[k].owner == &cab_owner) { lamp_hand_down(k); n++; }
+    }
+    if (n) lamp_say("expression lights: %d light(s) the game's again", n);
+}
+
+static void cabs_stop(const char *why)
+{
+    if (!cab_run.on) return;
+    cab_run.on = 0;
+    cabs_release();
+    say("expression lights: show \"%s\" over (%s) after %lu ms", cabs[cab_run.show].name, why, pm_ms() - cab_run.t0);
+}
+
+static void cabs_start(int show, unsigned request)
+{
+    if (show < 0 || show >= n_cabs || !(can & PM_CAN_LAMPS) || !n_cab) return;
+    if (cab_run.on) cabs_release();
+    cab_run.on = 1;
+    cab_run.show = show;
+    cab_run.request = request;
+    cab_run.t0 = cab_run.last_t = pm_ms();
+    cab_run.seen = cab_run.locked = 0;
+    cab_run.first = cab_run.last = 0;
+    if (cab_run.said < 60 && ++cab_run.said)
+        say("expression lights: show \"%s\" (%d blade step(s), %d speaker step(s)%s) %s", cabs[show].name,
+            cabs[show].n[0], cabs[show].n[1], cabs[show].loop ? ", over and over" : "",
+            request ? "with its sound" : "by name");
+}
+
+/* the sound worker's thread: only a note for the tick */
+static void cabs_worker(unsigned request)
+{
+    if (request && request < CABS_REQS && cab_of_req[request]) cabs_pending = request;
+}
+
+/* the requests that play each show's sound, once the game has its request table */
+static void cabs_requests(void)
+{
+    unsigned table = data("sound_requests"), count = data("sound_request_count"), n, r, i, hits = 0;
+    int c;
+    if (cabs_reqs_done) return;
+    if (!table || !count || !maps_has(count, 4, MAP_R) || !(n = *(volatile const unsigned *)(unsigned long)count))
+        return;
+    cabs_reqs_done = 1;
+    for (r = 1; r < n && r < CABS_REQS; r++) {
+        unsigned char *rec = (unsigned char *)(unsigned long)(table + r * 20);
+        const unsigned *ids = (const unsigned *)(unsigned long)*(volatile unsigned *)(rec + 8);
+        if (!ids || !maps_has((unsigned)(unsigned long)ids, 4, MAP_R)) continue;
+        for (i = 0; i < 64 && ids[i]; i++)
+            for (c = 0; c < n_cabs; c++) {
+                int j;
+                for (j = 0; j < cabs[c].n_sid; j++)
+                    if (ids[i] == cabs[c].sid[j] && !cab_of_req[r]) { cab_of_req[r] = (unsigned char)(c + 1); hits++; }
+            }
+    }
+    for (c = 0; c < n_cabs; c++) {
+        unsigned k = 0;
+        for (r = 1; r < n && r < CABS_REQS; r++) k += cab_of_req[r] == c + 1;
+        if (cabs[c].n_sid)
+            say("expression lights: show \"%s\" plays with sound %u%s (%u request(s))%s", cabs[c].name, cabs[c].sid[0],
+                cabs[c].n_sid > 1 ? " and the others that start it" : "", k,
+                k ? "" : " - no request plays that sound on this build");
+    }
+    cabs_live = hits > 0;
+}
+
+/* every tick: a show a song started, its lanes painted, its end */
+static void cabs_tick(void)
+{
+    static unsigned ticks;
+    const struct cab_show *c;
+    unsigned long el;
+    long at;
+    unsigned pend;
+    int k, lane, over[2], idx[2];
+    unsigned t[2] = { 0, 0 };
+    if (!n_cabs || !(can & PM_CAN_LAMPS) || !lamps_checked()) return;
+    ticks++;
+    if (!cabs_reqs_done && ticks % 30 == 1) cabs_requests();
+    if ((pend = cabs_pending)) {
+        cabs_pending = 0;
+        cabs_start(cab_of_req[pend] - 1, pend);
+    }
+    if (!cab_run.on) return;
+    c = &cabs[cab_run.show];
+    if ((at = cab_song_ms()) < 0) {                      /* its song stopped */
+        cabs_stop("its sound stopped");
+        return;
+    }
+    el = (unsigned long)at;
+    for (lane = 0; lane < 2; lane++) idx[lane] = cab_step_at(c, lane, el, &t[lane], &over[lane]);
+    if ((idx[0] < 0 || over[0]) && (idx[1] < 0 || over[1])) {
+        cabs_stop("its steps are over");
+        return;
+    }
+    for (k = 0; k < n_cab; k++) {
+        int L = cab_lane[k], i = idx[L];
+        const struct cx_step *st;
+        if (i < 0) continue;                            /* a lane with no steps: the game's */
+        if (over[L]) {
+            lamp_paint_as(CAB0 + k, 0, &cab_owner, 255);
+            continue;
+        }
+        st = &c->st[L][i];
+        lamp_paint_as(CAB0 + k, cx_blend(st, i ? &c->st[L][i - 1] : 0, cab_side[k], cab_u[k], (unsigned)k, t[L]),
+                      &cab_owner, 255);
+    }
+}
+
+/* a show of the card's by its name, from a mode (pad_mode.h pm_cab_show): 1 = it runs */
+int pm_cab_show(const char *name)
+{
+    int c;
+    for (c = 0; c < n_cabs; c++)
+        if (str_eq(cabs[c].name, name)) {
+            cabs_start(c, 0);
+            return cab_run.on;
+        }
+    return 0;
+}
+
+int pm_cab_show_stop(void)
+{
+    int was = cab_run.on;
+    cabs_stop("a mode stopped it");
+    return was;
+}
+
+/* cabshow.cfg, read before the gate; the lights' sides and lanes from their places */
+static void cabs_arm(void)
+{
+    static char raw[65536];
+    long n = -1, i, start = 0;
+    unsigned k;
+    int c = -1;
+    for (k = 0; k < sizeof CABS_FILES / sizeof CABS_FILES[0] && n < 0; k++)
+        n = pm_read_file(CABS_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i <= n; i++) {
+        const char *s, *e;
+        if (i < n && raw[i] != '\n') continue;
+        raw[i] = 0;
+        s = raw + start;
+        start = i + 1;
+        while (*s == ' ' || *s == '\t') s++;
+        if (str_starts(s, "only")) { cabs_only = 1; continue; }
+        if (str_starts(s, "show ") && n_cabs < CABS_MAX) {
+            int ok1 = 0, ok2 = 0;
+            struct cab_show *x = &cabs[n_cabs];
+            unsigned sid;
+            s += 5;
+            x->n_sid = 0;
+            for (;;) {
+                sid = (unsigned)number(&s, &ok1);
+                if (!ok1) break;
+                if (sid && x->n_sid < CAB_SIDS) x->sid[x->n_sid++] = sid;
+                if (*s != ',') break;
+                s++;
+            }
+            x->loop = (int)number(&s, &ok2) != 0;
+            if (!ok1 || !ok2) continue;
+            for (e = s; *e && *e != '\r' && *e != '#'; e++) ;
+            while (e > s && (e[-1] == ' ' || e[-1] == '\t')) e--;
+            str_copy(x->name, sizeof x->name, s, (unsigned)(e - s));
+            x->n[0] = x->n[1] = 0;
+            c = n_cabs++;
+            continue;
+        }
+        if (c >= 0 && (str_starts(s, "blades ") || str_starts(s, "speakers "))) {
+            int lane = s[0] == 's', f, ok[5];
+            struct cx_step st;
+            s += lane ? 9 : 7;
+            while (*s == ' ') s++;
+            for (f = 0; f < CX_N; f++) {
+                const char *a = CX_NAMES[f], *b = s;
+                while (*a && *a == *b) { a++; b++; }
+                if (!*a && (*b == ' ' || *b == '\t')) { s = b; break; }
+            }
+            if (f == CX_N || cabs[c].n[lane] >= CAB_STEPS) continue;
+            st.fx = f;
+            st.ms = (unsigned)number(&s, &ok[0]);
+            st.a = (unsigned)number(&s, &ok[1]) & 0xffffffu;
+            st.b = (unsigned)number(&s, &ok[2]) & 0xffffffu;
+            st.rate = (unsigned)number(&s, &ok[3]);
+            st.blend = (unsigned)number(&s, &ok[4]);
+            if (!ok[0] || !ok[1] || !ok[2] || !ok[3] || !ok[4] || !st.ms) continue;
+            if (st.blend > st.ms) st.blend = st.ms;
+            cabs[c].st[lane][cabs[c].n[lane]++] = st;
+        }
+    }
+    for (k = 0; k < (unsigned)n_cab; k++) {
+        const struct lamp *x = &lamps[CAB0 + k];
+        cab_lane[k] = x->y >= 0 && x->y < 140;          /* the backbox's speaker ring(s), above the blades */
+        cab_side[k] = x->x < 0 ? 0 : x->x < 150 ? -1 : x->x > 150 ? 1 : 0;   /* a blade's or a speaker's side */
+    }
+    if (!n_cabs) return;
+    if (!n_cab) {
+        say("expression lights: off - cabshow.cfg has %d show(s), but the port names no cabinet lights", n_cabs);
+        n_cabs = 0;
+        return;
+    }
+    if (!fn("sound_worker") || !(worker_hooked || (worker_hooked = hook(fn("sound_worker"), on_sound_worker))))
+        say("expression lights: no sound_worker on this port - the %d show(s) play by name only", n_cabs);
+    say("expression lights: %d show(s) of the card's over %d cabinet light(s)%s", n_cabs, n_cab,
+        cabs_only ? " (only)" : "");
+}
+
 
 /* ---- the display ---------------------------------------------------------------------------
  * Scenes by id through the resource manager, then the TYPED node finder (it returns 0 for
@@ -10263,6 +10799,7 @@ static void on_tick(unsigned *r)
     done_tick();                              /* PAD-747: the game's modes completed: STOPs hooked, flags watched */
     stock_generic_tick();                     /* item 164: the game's base play, for the mode table route */
     stock_tick();                             /* item 160: the game's own rules' counts-as (after the modes: a probe wraps first) */
+    cabs_tick();                              /* PAD-1040: a song's expression light show (before the writes) */
     lamps_tick();                             /* named inserts: their patterns (lights section) */
 }
 
@@ -17274,7 +17811,9 @@ static void hand_tick(void)
 static void on_hand_tick(unsigned *r)
 {
     (void)r;
-    hand_tick();
+    if (hand.on) hand_tick();
+    cabs_tick();                                /* PAD-1040: an "only" card's expression light shows */
+    lamps_tick();
 }
 
 /* handicap.cfg's `only` (read before the gate) */
@@ -20643,16 +21182,20 @@ static void pad_mode_start(void)
     idle_arm();                               /* PAD-1022: nor does inactivity pausing the timers */
     hand_arm();                               /* PAD-1033: nor does a player's handicap (the operator's settings) */
     comp_arm();                               /* PAD-1041: nor does Prolonged Competition (the game's own Competition) */
-    if ((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only()) && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
-        say("armed: %s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
+    cabs_arm();                               /* PAD-1040: nor do the card's expression light shows */
+    if ((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))
+        && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
+        say("armed: %s%s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             idle_only ? "inactivity pausing timers " : "", hand_cfg_only() ? "handicaps " : "",
-            comp_cfg_only() ? "prolonged competition " : "",
+            comp_cfg_only() ? "prolonged competition " : "", cabs_only && n_cabs ? "expression light shows " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : idle_only ? "idle.cfg"
-            : hand_cfg_only() ? "handicap.cfg" : "comp.cfg");
-        if (hand.on && !hook(fn("tick"), on_hand_tick)) {
+            : hand_cfg_only() ? "handicap.cfg" : comp_cfg_only() ? "comp.cfg" : "cabshow.cfg");
+        if (n_cabs) lamps_arm();              /* PAD-1040: the shows hold the cabinet's lights on the lamp layer */
+        if ((hand.on || n_cabs) && !hook(fn("tick"), on_hand_tick)) {
             hand.on = 0;
-            say("handicap: off - the game's tick could not be hooked");
+            n_cabs = 0;
+            say("handicap / expression lights: off - the game's tick could not be hooked");
         }
         return;
     }

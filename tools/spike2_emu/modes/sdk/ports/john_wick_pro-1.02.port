@@ -340,92 +340,127 @@ lamp 51           0              LEFT ORBIT 3  # lamp 113, I/O group 8 index 73,
 lamp 58           0              LEFT RAMP 1  # lamp 114, I/O group 8 index 77, at 102,359
 lamp 59           0              LEFT RAMP 2  # lamp 115, I/O group 8 index 78, at 115,356
 lamp 60           0              LEFT RAMP 3  # lamp 116, I/O group 8 index 79, at 111,368
-lamp 207,208,209  0              EXPRESSIVE LIGHTING L 1  # lamp 140, I/O group 1 index 1, at 14,546
-lamp 210,211,212  0              EXPRESSIVE LIGHTING L 2  # lamp 141, I/O group 1 index 4, at 14,527
-lamp 213,214,215  0              EXPRESSIVE LIGHTING L 3  # lamp 142, I/O group 1 index 7, at 14,508
-lamp 216,217,218  0              EXPRESSIVE LIGHTING L 4  # lamp 143, I/O group 1 index 10, at 14,489
-lamp 219,220,221  0              EXPRESSIVE LIGHTING L 5  # lamp 144, I/O group 1 index 13, at 14,471
-lamp 222,223,224  0              EXPRESSIVE LIGHTING L 6  # lamp 145, I/O group 1 index 16, at 14,452
-lamp 225,226,227  0              EXPRESSIVE LIGHTING L 7  # lamp 146, I/O group 1 index 19, at 14,433
-lamp 228,229,230  0              EXPRESSIVE LIGHTING L 8  # lamp 147, I/O group 1 index 22, at 14,414
-lamp 231,232,233  0              EXPRESSIVE LIGHTING L 9  # lamp 148, I/O group 1 index 25, at 14,395
-lamp 234,235,236  0              EXPRESSIVE LIGHTING L 10  # lamp 149, I/O group 1 index 28, at 14,376
-lamp 237,238,239  0              EXPRESSIVE LIGHTING L 11  # lamp 150, I/O group 1 index 31, at 14,357
-lamp 240,241,242  0              EXPRESSIVE LIGHTING L 12  # lamp 151, I/O group 1 index 34, at 14,338
-lamp 243,244,245  0              EXPRESSIVE LIGHTING L 13  # lamp 152, I/O group 1 index 37, at 14,320
-lamp 246,247,248  0              EXPRESSIVE LIGHTING L 14  # lamp 153, I/O group 1 index 40, at 14,301
-lamp 249,250,251  0              EXPRESSIVE LIGHTING L 15  # lamp 154, I/O group 1 index 43, at 14,282
-lamp 252,253,254  0              EXPRESSIVE LIGHTING L 16  # lamp 155, I/O group 1 index 46, at 14,263
-lamp 255,256,257  0              EXPRESSIVE LIGHTING L 17  # lamp 156, I/O group 1 index 49, at 14,244
-lamp 258,259,260  0              EXPRESSIVE LIGHTING L 18  # lamp 157, I/O group 1 index 52, at 14,225
-lamp 261,262,263  0              EXPRESSIVE LIGHTING L 19  # lamp 158, I/O group 1 index 55, at 14,206
-lamp 264,265,266  0              EXPRESSIVE LIGHTING L 20  # lamp 159, I/O group 1 index 58, at 14,187
-lamp 267,268,269  0              EXPRESSIVE LIGHTING L 21  # lamp 160, I/O group 1 index 61, at 14,169
-lamp 270,271,272  0              EXPRESSIVE LIGHTING L 22  # lamp 161, I/O group 1 index 64, at 14,150
-lamp 273,274,275  0              EXPRESSIVE LIGHTING L 23  # lamp 162, I/O group 1 index 67, at 14,131
-lamp 276,277,278  0              EXPRESSIVE LIGHTING L 24  # lamp 163, I/O group 1 index 70, at 14,112
-lamp 279,280,281  0              EXPRESSIVE LIGHTING L 25  # lamp 164, I/O group 1 index 73, at 14,546
-lamp 282,283,284  0              EXPRESSIVE LIGHTING L 26  # lamp 165, I/O group 1 index 76, at 14,527
-lamp 285,286,287  0              EXPRESSIVE LIGHTING L 27  # lamp 166, I/O group 1 index 79, at 14,508
-lamp 288,289,290  0              EXPRESSIVE LIGHTING L 28  # lamp 167, I/O group 1 index 82, at 14,489
-lamp 291,292,293  0              EXPRESSIVE LIGHTING L 29  # lamp 168, I/O group 1 index 85, at 14,471
-lamp 294,295,296  0              EXPRESSIVE LIGHTING L 30  # lamp 169, I/O group 1 index 88, at 14,452
-lamp 297,298,299  0              EXPRESSIVE LIGHTING L 31  # lamp 170, I/O group 1 index 91, at 14,433
-lamp 300,301,302  0              EXPRESSIVE LIGHTING L 32  # lamp 171, I/O group 1 index 94, at 14,414
-lamp 303,304,305  0              EXPRESSIVE LIGHTING L 33  # lamp 172, I/O group 1 index 97, at 14,395
-lamp 306,307,308  0              EXPRESSIVE LIGHTING L 34  # lamp 173, I/O group 1 index 100, at 14,376
-lamp 309,310,311  0              EXPRESSIVE LIGHTING L 35  # lamp 174, I/O group 1 index 103, at 14,357
-lamp 312,313,314  0              EXPRESSIVE LIGHTING L 36  # lamp 175, I/O group 1 index 106, at 14,338
-lamp 315,316,317  0              EXPRESSIVE LIGHTING L 37  # lamp 176, I/O group 1 index 109, at 14,320
-lamp 318,319,320  0              EXPRESSIVE LIGHTING L 38  # lamp 177, I/O group 1 index 112, at 14,301
-lamp 321,322,323  0              EXPRESSIVE LIGHTING L 39  # lamp 178, I/O group 1 index 115, at 14,282
-lamp 324,325,326  0              EXPRESSIVE LIGHTING L 40  # lamp 179, I/O group 1 index 118, at 14,263
-lamp 327,328,329  0              EXPRESSIVE LIGHTING L 41  # lamp 180, I/O group 1 index 121, at 14,244
-lamp 330,331,332  0              EXPRESSIVE LIGHTING L 42  # lamp 181, I/O group 1 index 124, at 14,225
-lamp 333,334,335  0              EXPRESSIVE LIGHTING L 43  # lamp 182, I/O group 1 index 127, at 14,206
-lamp 336,337,338  0              EXPRESSIVE LIGHTING L 44  # lamp 183, I/O group 1 index 130, at 14,187
-lamp 339,340,341  0              EXPRESSIVE LIGHTING L 45  # lamp 184, I/O group 1 index 133, at 14,169
-lamp 342,343,344  0              EXPRESSIVE LIGHTING L 46  # lamp 185, I/O group 1 index 136, at 14,150
-lamp 345,346,347  0              EXPRESSIVE LIGHTING L 47  # lamp 186, I/O group 1 index 139, at 14,131
-lamp 348,349,350  0              EXPRESSIVE LIGHTING L 48  # lamp 187, I/O group 1 index 142, at 14,112
-lamp 351,352,353  0              EXPRESSIVE LIGHTING R 49  # lamp 188, I/O group 1 index 145, at 305,546
-lamp 354,355,356  0              EXPRESSIVE LIGHTING R 50  # lamp 189, I/O group 1 index 148, at 305,527
-lamp 357,358,359  0              EXPRESSIVE LIGHTING R 51  # lamp 190, I/O group 1 index 151, at 305,508
-lamp 360,361,362  0              EXPRESSIVE LIGHTING R 52  # lamp 191, I/O group 1 index 154, at 305,489
-lamp 363,364,365  0              EXPRESSIVE LIGHTING R 53  # lamp 192, I/O group 1 index 157, at 305,471
-lamp 366,367,368  0              EXPRESSIVE LIGHTING R 54  # lamp 193, I/O group 1 index 160, at 305,452
-lamp 369,370,371  0              EXPRESSIVE LIGHTING R 55  # lamp 194, I/O group 1 index 163, at 305,433
-lamp 372,373,374  0              EXPRESSIVE LIGHTING R 56  # lamp 195, I/O group 1 index 166, at 305,414
-lamp 375,376,377  0              EXPRESSIVE LIGHTING R 57  # lamp 196, I/O group 1 index 169, at 305,395
-lamp 378,379,380  0              EXPRESSIVE LIGHTING R 58  # lamp 197, I/O group 1 index 172, at 305,376
-lamp 381,382,383  0              EXPRESSIVE LIGHTING R 59  # lamp 198, I/O group 1 index 175, at 305,357
-lamp 384,385,386  0              EXPRESSIVE LIGHTING R 60  # lamp 199, I/O group 1 index 178, at 305,338
-lamp 387,388,389  0              EXPRESSIVE LIGHTING R 61  # lamp 200, I/O group 1 index 181, at 305,320
-lamp 390,391,392  0              EXPRESSIVE LIGHTING R 62  # lamp 201, I/O group 1 index 184, at 305,301
-lamp 393,394,395  0              EXPRESSIVE LIGHTING R 63  # lamp 202, I/O group 1 index 187, at 305,282
-lamp 396,397,398  0              EXPRESSIVE LIGHTING R 64  # lamp 203, I/O group 1 index 190, at 305,263
-lamp 399,400,401  0              EXPRESSIVE LIGHTING R 65  # lamp 204, I/O group 1 index 193, at 305,244
-lamp 402,403,404  0              EXPRESSIVE LIGHTING R 66  # lamp 205, I/O group 1 index 196, at 305,225
-lamp 405,406,407  0              EXPRESSIVE LIGHTING R 67  # lamp 206, I/O group 1 index 199, at 305,206
-lamp 408,409,410  0              EXPRESSIVE LIGHTING R 68  # lamp 207, I/O group 1 index 202, at 305,187
-lamp 411,412,413  0              EXPRESSIVE LIGHTING R 69  # lamp 208, I/O group 1 index 205, at 305,169
-lamp 414,415,416  0              EXPRESSIVE LIGHTING R 70  # lamp 209, I/O group 1 index 208, at 305,150
-lamp 417,418,419  0              EXPRESSIVE LIGHTING R 71  # lamp 210, I/O group 1 index 211, at 305,131
-lamp 420,421,422  0              EXPRESSIVE LIGHTING R 72  # lamp 211, I/O group 1 index 214, at 305,112
-lamp 423,424,425  0              EXPRESSIVE LIGHTING R 73  # lamp 212, I/O group 1 index 217, at 305,546
-lamp 426,427,428  0              EXPRESSIVE LIGHTING R 74  # lamp 213, I/O group 1 index 220, at 305,527
-lamp 429,430,431  0              EXPRESSIVE LIGHTING R 75  # lamp 214, I/O group 1 index 223, at 305,508
-lamp 432,433,434  0              EXPRESSIVE LIGHTING R 76  # lamp 215, I/O group 1 index 226, at 305,489
-lamp 435,436,437  0              EXPRESSIVE LIGHTING R 77  # lamp 216, I/O group 1 index 229, at 305,471
-lamp 438,439,440  0              EXPRESSIVE LIGHTING R 78  # lamp 217, I/O group 1 index 232, at 305,452
-lamp 441,442,443  0              EXPRESSIVE LIGHTING R 79  # lamp 218, I/O group 1 index 235, at 305,433
-lamp 444,445,446  0              EXPRESSIVE LIGHTING R 80  # lamp 219, I/O group 1 index 238, at 305,414
-lamp 447,448,449  0              EXPRESSIVE LIGHTING R 81  # lamp 220, I/O group 1 index 241, at 305,395
-lamp 450,451,452  0              EXPRESSIVE LIGHTING R 82  # lamp 221, I/O group 1 index 244, at 305,376
-lamp 453,454,455  0              EXPRESSIVE LIGHTING R 83  # lamp 222, I/O group 1 index 247, at 305,357
-lamp 456,457,458  0              EXPRESSIVE LIGHTING R 84  # lamp 223, I/O group 1 index 250, at 305,338
-lamp 459,460,461  0              EXPRESSIVE LIGHTING R 85  # lamp 224, I/O group 1 index 253, at 305,320
-lamp 462,463,464  0              EXPRESSIVE LIGHTING R 86  # lamp 225, I/O group 1 index 256, at 305,301
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 96 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 138,139,140  41  SPEAKER 1  # lamp 117, I/O group 6 index 1, at 95,28, speaker L
+cablamp 141,142,143  125 SPEAKER 2  # lamp 118, I/O group 6 index 4, at 116,34, speaker L
+cablamp 144,145,146  208 SPEAKER 3  # lamp 119, I/O group 6 index 7, at 131,49, speaker L
+cablamp 147,148,149  291 SPEAKER 4  # lamp 120, I/O group 6 index 10, at 137,70, speaker L
+cablamp 150,151,152  375 SPEAKER 5  # lamp 121, I/O group 6 index 13, at 131,91, speaker L
+cablamp 153,154,155  458 SPEAKER 6  # lamp 122, I/O group 6 index 16, at 116,106, speaker L
+cablamp 156,157,158  541 SPEAKER 7  # lamp 123, I/O group 6 index 19, at 95,112, speaker L
+cablamp 159,160,161  625 SPEAKER 8  # lamp 124, I/O group 6 index 22, at 74,106, speaker L
+cablamp 162,163,164  708 SPEAKER 9  # lamp 125, I/O group 6 index 25, at 59,91, speaker L
+cablamp 165,166,167  791 SPEAKER 10  # lamp 126, I/O group 6 index 28, at 53,70, speaker L
+cablamp 168,169,170  875 SPEAKER 11  # lamp 127, I/O group 6 index 31, at 59,49, speaker L
+cablamp 171,172,173  958 SPEAKER 12  # lamp 128, I/O group 6 index 34, at 74,34, speaker L
+cablamp 174,175,176  45  SPEAKER 13  # lamp 129, I/O group 6 index 37, at 205,28, speaker R
+cablamp 177,178,179  136 SPEAKER 14  # lamp 130, I/O group 6 index 40, at 228,35, speaker R
+cablamp 180,181,182  227 SPEAKER 15  # lamp 131, I/O group 6 index 43, at 243,53, speaker R
+cablamp 183,184,185  318 SPEAKER 16  # lamp 132, I/O group 6 index 46, at 247,76, speaker R
+cablamp 186,187,188  409 SPEAKER 17  # lamp 133, I/O group 6 index 49, at 237,98, speaker R
+cablamp 189,190,191  500 SPEAKER 18  # lamp 134, I/O group 6 index 52, at 217,110, speaker R
+cablamp 192,193,194  590 SPEAKER 19  # lamp 135, I/O group 6 index 55, at 193,110, speaker R
+cablamp 195,196,197  681 SPEAKER 20  # lamp 136, I/O group 6 index 58, at 173,98, speaker R
+cablamp 198,199,200  772 SPEAKER 21  # lamp 137, I/O group 6 index 61, at 163,76, speaker R
+cablamp 201,202,203  863 SPEAKER 22  # lamp 138, I/O group 6 index 64, at 167,53, speaker R
+cablamp 204,205,206  954 SPEAKER 23  # lamp 139, I/O group 6 index 67, at 182,35, speaker R
+cablamp 207,208,209  10  EXPRESSIVE LIGHTING L 1  # lamp 140, I/O group 1 index 1, at 12,595, blade L
+cablamp 210,211,212  31  EXPRESSIVE LIGHTING L 2  # lamp 141, I/O group 1 index 4, at 12,586, blade L
+cablamp 213,214,215  52  EXPRESSIVE LIGHTING L 3  # lamp 142, I/O group 1 index 7, at 12,576, blade L
+cablamp 216,217,218  72  EXPRESSIVE LIGHTING L 4  # lamp 143, I/O group 1 index 10, at 12,566, blade L
+cablamp 219,220,221  93  EXPRESSIVE LIGHTING L 5  # lamp 144, I/O group 1 index 13, at 12,557, blade L
+cablamp 222,223,224  114 EXPRESSIVE LIGHTING L 6  # lamp 145, I/O group 1 index 16, at 12,547, blade L
+cablamp 225,226,227  135 EXPRESSIVE LIGHTING L 7  # lamp 146, I/O group 1 index 19, at 12,538, blade L
+cablamp 228,229,230  156 EXPRESSIVE LIGHTING L 8  # lamp 147, I/O group 1 index 22, at 12,528, blade L
+cablamp 231,232,233  177 EXPRESSIVE LIGHTING L 9  # lamp 148, I/O group 1 index 25, at 12,519, blade L
+cablamp 234,235,236  197 EXPRESSIVE LIGHTING L 10  # lamp 149, I/O group 1 index 28, at 12,509, blade L
+cablamp 237,238,239  218 EXPRESSIVE LIGHTING L 11  # lamp 150, I/O group 1 index 31, at 12,499, blade L
+cablamp 240,241,242  239 EXPRESSIVE LIGHTING L 12  # lamp 151, I/O group 1 index 34, at 12,490, blade L
+cablamp 243,244,245  260 EXPRESSIVE LIGHTING L 13  # lamp 152, I/O group 1 index 37, at 12,480, blade L
+cablamp 246,247,248  281 EXPRESSIVE LIGHTING L 14  # lamp 153, I/O group 1 index 40, at 12,471, blade L
+cablamp 249,250,251  302 EXPRESSIVE LIGHTING L 15  # lamp 154, I/O group 1 index 43, at 12,461, blade L
+cablamp 252,253,254  322 EXPRESSIVE LIGHTING L 16  # lamp 155, I/O group 1 index 46, at 12,451, blade L
+cablamp 255,256,257  343 EXPRESSIVE LIGHTING L 17  # lamp 156, I/O group 1 index 49, at 12,442, blade L
+cablamp 258,259,260  364 EXPRESSIVE LIGHTING L 18  # lamp 157, I/O group 1 index 52, at 12,432, blade L
+cablamp 261,262,263  385 EXPRESSIVE LIGHTING L 19  # lamp 158, I/O group 1 index 55, at 12,423, blade L
+cablamp 264,265,266  406 EXPRESSIVE LIGHTING L 20  # lamp 159, I/O group 1 index 58, at 12,413, blade L
+cablamp 267,268,269  427 EXPRESSIVE LIGHTING L 21  # lamp 160, I/O group 1 index 61, at 12,404, blade L
+cablamp 270,271,272  447 EXPRESSIVE LIGHTING L 22  # lamp 161, I/O group 1 index 64, at 12,394, blade L
+cablamp 273,274,275  468 EXPRESSIVE LIGHTING L 23  # lamp 162, I/O group 1 index 67, at 12,384, blade L
+cablamp 276,277,278  489 EXPRESSIVE LIGHTING L 24  # lamp 163, I/O group 1 index 70, at 12,375, blade L
+cablamp 279,280,281  510 EXPRESSIVE LIGHTING L 25  # lamp 164, I/O group 1 index 73, at 12,365, blade L
+cablamp 282,283,284  531 EXPRESSIVE LIGHTING L 26  # lamp 165, I/O group 1 index 76, at 12,356, blade L
+cablamp 285,286,287  552 EXPRESSIVE LIGHTING L 27  # lamp 166, I/O group 1 index 79, at 12,346, blade L
+cablamp 288,289,290  572 EXPRESSIVE LIGHTING L 28  # lamp 167, I/O group 1 index 82, at 12,336, blade L
+cablamp 291,292,293  593 EXPRESSIVE LIGHTING L 29  # lamp 168, I/O group 1 index 85, at 12,327, blade L
+cablamp 294,295,296  614 EXPRESSIVE LIGHTING L 30  # lamp 169, I/O group 1 index 88, at 12,317, blade L
+cablamp 297,298,299  635 EXPRESSIVE LIGHTING L 31  # lamp 170, I/O group 1 index 91, at 12,308, blade L
+cablamp 300,301,302  656 EXPRESSIVE LIGHTING L 32  # lamp 171, I/O group 1 index 94, at 12,298, blade L
+cablamp 303,304,305  677 EXPRESSIVE LIGHTING L 33  # lamp 172, I/O group 1 index 97, at 12,289, blade L
+cablamp 306,307,308  697 EXPRESSIVE LIGHTING L 34  # lamp 173, I/O group 1 index 100, at 12,279, blade L
+cablamp 309,310,311  718 EXPRESSIVE LIGHTING L 35  # lamp 174, I/O group 1 index 103, at 12,269, blade L
+cablamp 312,313,314  739 EXPRESSIVE LIGHTING L 36  # lamp 175, I/O group 1 index 106, at 12,260, blade L
+cablamp 315,316,317  760 EXPRESSIVE LIGHTING L 37  # lamp 176, I/O group 1 index 109, at 12,250, blade L
+cablamp 318,319,320  781 EXPRESSIVE LIGHTING L 38  # lamp 177, I/O group 1 index 112, at 12,241, blade L
+cablamp 321,322,323  802 EXPRESSIVE LIGHTING L 39  # lamp 178, I/O group 1 index 115, at 12,231, blade L
+cablamp 324,325,326  822 EXPRESSIVE LIGHTING L 40  # lamp 179, I/O group 1 index 118, at 12,221, blade L
+cablamp 327,328,329  843 EXPRESSIVE LIGHTING L 41  # lamp 180, I/O group 1 index 121, at 12,212, blade L
+cablamp 330,331,332  864 EXPRESSIVE LIGHTING L 42  # lamp 181, I/O group 1 index 124, at 12,202, blade L
+cablamp 333,334,335  885 EXPRESSIVE LIGHTING L 43  # lamp 182, I/O group 1 index 127, at 12,193, blade L
+cablamp 336,337,338  906 EXPRESSIVE LIGHTING L 44  # lamp 183, I/O group 1 index 130, at 12,183, blade L
+cablamp 339,340,341  927 EXPRESSIVE LIGHTING L 45  # lamp 184, I/O group 1 index 133, at 12,174, blade L
+cablamp 342,343,344  947 EXPRESSIVE LIGHTING L 46  # lamp 185, I/O group 1 index 136, at 12,164, blade L
+cablamp 345,346,347  968 EXPRESSIVE LIGHTING L 47  # lamp 186, I/O group 1 index 139, at 12,154, blade L
+cablamp 348,349,350  989 EXPRESSIVE LIGHTING L 48  # lamp 187, I/O group 1 index 142, at 12,145, blade L
+cablamp 351,352,353  10  EXPRESSIVE LIGHTING R 49  # lamp 188, I/O group 1 index 145, at 288,595, blade R
+cablamp 354,355,356  31  EXPRESSIVE LIGHTING R 50  # lamp 189, I/O group 1 index 148, at 288,586, blade R
+cablamp 357,358,359  52  EXPRESSIVE LIGHTING R 51  # lamp 190, I/O group 1 index 151, at 288,576, blade R
+cablamp 360,361,362  72  EXPRESSIVE LIGHTING R 52  # lamp 191, I/O group 1 index 154, at 288,566, blade R
+cablamp 363,364,365  93  EXPRESSIVE LIGHTING R 53  # lamp 192, I/O group 1 index 157, at 288,557, blade R
+cablamp 366,367,368  114 EXPRESSIVE LIGHTING R 54  # lamp 193, I/O group 1 index 160, at 288,547, blade R
+cablamp 369,370,371  135 EXPRESSIVE LIGHTING R 55  # lamp 194, I/O group 1 index 163, at 288,538, blade R
+cablamp 372,373,374  156 EXPRESSIVE LIGHTING R 56  # lamp 195, I/O group 1 index 166, at 288,528, blade R
+cablamp 375,376,377  177 EXPRESSIVE LIGHTING R 57  # lamp 196, I/O group 1 index 169, at 288,519, blade R
+cablamp 378,379,380  197 EXPRESSIVE LIGHTING R 58  # lamp 197, I/O group 1 index 172, at 288,509, blade R
+cablamp 381,382,383  218 EXPRESSIVE LIGHTING R 59  # lamp 198, I/O group 1 index 175, at 288,499, blade R
+cablamp 384,385,386  239 EXPRESSIVE LIGHTING R 60  # lamp 199, I/O group 1 index 178, at 288,490, blade R
+cablamp 387,388,389  260 EXPRESSIVE LIGHTING R 61  # lamp 200, I/O group 1 index 181, at 288,480, blade R
+cablamp 390,391,392  281 EXPRESSIVE LIGHTING R 62  # lamp 201, I/O group 1 index 184, at 288,471, blade R
+cablamp 393,394,395  302 EXPRESSIVE LIGHTING R 63  # lamp 202, I/O group 1 index 187, at 288,461, blade R
+cablamp 396,397,398  322 EXPRESSIVE LIGHTING R 64  # lamp 203, I/O group 1 index 190, at 288,451, blade R
+cablamp 399,400,401  343 EXPRESSIVE LIGHTING R 65  # lamp 204, I/O group 1 index 193, at 288,442, blade R
+cablamp 402,403,404  364 EXPRESSIVE LIGHTING R 66  # lamp 205, I/O group 1 index 196, at 288,432, blade R
+cablamp 405,406,407  385 EXPRESSIVE LIGHTING R 67  # lamp 206, I/O group 1 index 199, at 288,423, blade R
+cablamp 408,409,410  406 EXPRESSIVE LIGHTING R 68  # lamp 207, I/O group 1 index 202, at 288,413, blade R
+cablamp 411,412,413  427 EXPRESSIVE LIGHTING R 69  # lamp 208, I/O group 1 index 205, at 288,404, blade R
+cablamp 414,415,416  447 EXPRESSIVE LIGHTING R 70  # lamp 209, I/O group 1 index 208, at 288,394, blade R
+cablamp 417,418,419  468 EXPRESSIVE LIGHTING R 71  # lamp 210, I/O group 1 index 211, at 288,384, blade R
+cablamp 420,421,422  489 EXPRESSIVE LIGHTING R 72  # lamp 211, I/O group 1 index 214, at 288,375, blade R
+cablamp 423,424,425  510 EXPRESSIVE LIGHTING R 73  # lamp 212, I/O group 1 index 217, at 288,365, blade R
+cablamp 426,427,428  531 EXPRESSIVE LIGHTING R 74  # lamp 213, I/O group 1 index 220, at 288,356, blade R
+cablamp 429,430,431  552 EXPRESSIVE LIGHTING R 75  # lamp 214, I/O group 1 index 223, at 288,346, blade R
+cablamp 432,433,434  572 EXPRESSIVE LIGHTING R 76  # lamp 215, I/O group 1 index 226, at 288,336, blade R
+cablamp 435,436,437  593 EXPRESSIVE LIGHTING R 77  # lamp 216, I/O group 1 index 229, at 288,327, blade R
+cablamp 438,439,440  614 EXPRESSIVE LIGHTING R 78  # lamp 217, I/O group 1 index 232, at 288,317, blade R
+cablamp 441,442,443  635 EXPRESSIVE LIGHTING R 79  # lamp 218, I/O group 1 index 235, at 288,308, blade R
+cablamp 444,445,446  656 EXPRESSIVE LIGHTING R 80  # lamp 219, I/O group 1 index 238, at 288,298, blade R
+cablamp 447,448,449  677 EXPRESSIVE LIGHTING R 81  # lamp 220, I/O group 1 index 241, at 288,289, blade R
+cablamp 450,451,452  697 EXPRESSIVE LIGHTING R 82  # lamp 221, I/O group 1 index 244, at 288,279, blade R
+cablamp 453,454,455  718 EXPRESSIVE LIGHTING R 83  # lamp 222, I/O group 1 index 247, at 288,269, blade R
+cablamp 456,457,458  739 EXPRESSIVE LIGHTING R 84  # lamp 223, I/O group 1 index 250, at 288,260, blade R
+cablamp 459,460,461  760 EXPRESSIVE LIGHTING R 85  # lamp 224, I/O group 1 index 253, at 288,250, blade R
+cablamp 462,463,464  781 EXPRESSIVE LIGHTING R 86  # lamp 225, I/O group 1 index 256, at 288,241, blade R
+cablamp 465,466,467  802 EXPRESSIVE LIGHTING R 87  # lamp 226, I/O group 1 index 259, at 288,231, blade R
+cablamp 468,469,470  822 EXPRESSIVE LIGHTING R 88  # lamp 227, I/O group 1 index 262, at 288,221, blade R
+cablamp 471,472,473  843 EXPRESSIVE LIGHTING R 89  # lamp 228, I/O group 1 index 265, at 288,212, blade R
+cablamp 474,475,476  864 EXPRESSIVE LIGHTING R 90  # lamp 229, I/O group 1 index 268, at 288,202, blade R
+cablamp 477,478,479  885 EXPRESSIVE LIGHTING R 91  # lamp 230, I/O group 1 index 271, at 288,193, blade R
+cablamp 480,481,482  906 EXPRESSIVE LIGHTING R 92  # lamp 231, I/O group 1 index 274, at 288,183, blade R
+cablamp 483,484,485  927 EXPRESSIVE LIGHTING R 93  # lamp 232, I/O group 1 index 277, at 288,174, blade R
+cablamp 486,487,488  947 EXPRESSIVE LIGHTING R 94  # lamp 233, I/O group 1 index 280, at 288,164, blade R
+cablamp 489,490,491  968 EXPRESSIVE LIGHTING R 95  # lamp 234, I/O group 1 index 283, at 288,154, blade R
+cablamp 492,493,494  989 EXPRESSIVE LIGHTING R 96  # lamp 235, I/O group 1 index 286, at 288,145, blade R
 
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.

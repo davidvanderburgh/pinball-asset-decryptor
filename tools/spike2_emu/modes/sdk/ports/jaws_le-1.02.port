@@ -340,6 +340,31 @@ lamp 160          0x80000000000  BOAT FLASH  # lamp 125, I/O group 7 index 66, a
 lamp 161          0xc0000        FISHING REEL FLASH  # lamp 126, I/O group 7 index 55, at 237,137
 lamp 165          0              UPPER PF FLASH  # lamp 130, I/O group 8 index 88, at 105,160
 lamp 166          0              UPPER PF SHIP WHEEL FLASH  # lamp 131, I/O group 8 index 87, at 82,66
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 0 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 167,168,169  41  SPEAKER 1  # lamp 132, I/O group 6 index 1, at 95,28, speaker L
+cablamp 170,171,172  125 SPEAKER 2  # lamp 133, I/O group 6 index 4, at 116,34, speaker L
+cablamp 173,174,175  208 SPEAKER 3  # lamp 134, I/O group 6 index 7, at 131,49, speaker L
+cablamp 176,177,178  291 SPEAKER 4  # lamp 135, I/O group 6 index 10, at 137,70, speaker L
+cablamp 179,180,181  375 SPEAKER 5  # lamp 136, I/O group 6 index 13, at 131,91, speaker L
+cablamp 182,183,184  458 SPEAKER 6  # lamp 137, I/O group 6 index 16, at 116,106, speaker L
+cablamp 185,186,187  541 SPEAKER 7  # lamp 138, I/O group 6 index 19, at 95,112, speaker L
+cablamp 188,189,190  625 SPEAKER 8  # lamp 139, I/O group 6 index 22, at 74,106, speaker L
+cablamp 191,192,193  708 SPEAKER 9  # lamp 140, I/O group 6 index 25, at 59,91, speaker L
+cablamp 194,195,196  791 SPEAKER 10  # lamp 141, I/O group 6 index 28, at 53,70, speaker L
+cablamp 197,198,199  875 SPEAKER 11  # lamp 142, I/O group 6 index 31, at 59,49, speaker L
+cablamp 200,201,202  958 SPEAKER 12  # lamp 143, I/O group 6 index 34, at 74,34, speaker L
+cablamp 203,204,205  45  SPEAKER 13  # lamp 144, I/O group 6 index 37, at 205,28, speaker R
+cablamp 206,207,208  136 SPEAKER 14  # lamp 145, I/O group 6 index 40, at 228,35, speaker R
+cablamp 209,210,211  227 SPEAKER 15  # lamp 146, I/O group 6 index 43, at 243,53, speaker R
+cablamp 212,213,214  318 SPEAKER 16  # lamp 147, I/O group 6 index 46, at 247,76, speaker R
+cablamp 215,216,217  409 SPEAKER 17  # lamp 148, I/O group 6 index 49, at 237,98, speaker R
+cablamp 218,219,220  500 SPEAKER 18  # lamp 149, I/O group 6 index 52, at 217,110, speaker R
+cablamp 221,222,223  590 SPEAKER 19  # lamp 150, I/O group 6 index 55, at 193,110, speaker R
+cablamp 224,225,226  681 SPEAKER 20  # lamp 151, I/O group 6 index 58, at 173,98, speaker R
+cablamp 227,228,229  772 SPEAKER 21  # lamp 152, I/O group 6 index 61, at 163,76, speaker R
+cablamp 230,231,232  863 SPEAKER 22  # lamp 153, I/O group 6 index 64, at 167,53, speaker R
+cablamp 233,234,235  954 SPEAKER 23  # lamp 154, I/O group 6 index 67, at 182,35, speaker R
 
 # ---- the game's own modes (item 164): its mode TABLE, walked by the runtime (MODE_SDK.md "The game's own
 # modes"): the array the get-mode-by-id accessor reads, the cmode class's ACTIVE slot (Godzilla's 14, shifted

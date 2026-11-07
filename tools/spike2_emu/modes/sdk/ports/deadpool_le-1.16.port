@@ -244,6 +244,31 @@ lamp 381          0              TRUCK FLASH  # lamp 183, I/O group 7 index 30, 
 lamp 382          0              POP BUMPER FLASH  # lamp 184, I/O group 8 index 40, at 214,146
 lamp 383          0              DISCO BALL FLASH (X2)  # lamp 185, I/O group 8 index 26, at 58,177
 lamp 389          0              EJECT FLASH  # lamp 191, I/O group 8 index 41, at 112,168
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 0 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 408,409,410  41  SPEAKER 1  # lamp 207, I/O group 6 index 1, at 95,28, speaker L
+cablamp 411,412,413  125 SPEAKER 2  # lamp 208, I/O group 6 index 4, at 116,34, speaker L
+cablamp 414,415,416  208 SPEAKER 3  # lamp 209, I/O group 6 index 7, at 131,49, speaker L
+cablamp 417,418,419  291 SPEAKER 4  # lamp 210, I/O group 6 index 10, at 137,70, speaker L
+cablamp 420,421,422  375 SPEAKER 5  # lamp 211, I/O group 6 index 13, at 131,91, speaker L
+cablamp 423,424,425  458 SPEAKER 6  # lamp 212, I/O group 6 index 16, at 116,106, speaker L
+cablamp 426,427,428  541 SPEAKER 7  # lamp 213, I/O group 6 index 19, at 95,112, speaker L
+cablamp 429,430,431  625 SPEAKER 8  # lamp 214, I/O group 6 index 22, at 74,106, speaker L
+cablamp 432,433,434  708 SPEAKER 9  # lamp 215, I/O group 6 index 25, at 59,91, speaker L
+cablamp 435,436,437  791 SPEAKER 10  # lamp 216, I/O group 6 index 28, at 53,70, speaker L
+cablamp 438,439,440  875 SPEAKER 11  # lamp 217, I/O group 6 index 31, at 59,49, speaker L
+cablamp 441,442,443  958 SPEAKER 12  # lamp 218, I/O group 6 index 34, at 74,34, speaker L
+cablamp 444,445,446  45  SPEAKER 13  # lamp 219, I/O group 6 index 37, at 205,28, speaker R
+cablamp 447,448,449  136 SPEAKER 14  # lamp 220, I/O group 6 index 40, at 228,35, speaker R
+cablamp 450,451,452  227 SPEAKER 15  # lamp 221, I/O group 6 index 43, at 243,53, speaker R
+cablamp 453,454,455  318 SPEAKER 16  # lamp 222, I/O group 6 index 46, at 247,76, speaker R
+cablamp 456,457,458  409 SPEAKER 17  # lamp 223, I/O group 6 index 49, at 237,98, speaker R
+cablamp 459,460,461  500 SPEAKER 18  # lamp 224, I/O group 6 index 52, at 217,110, speaker R
+cablamp 462,463,464  590 SPEAKER 19  # lamp 225, I/O group 6 index 55, at 193,110, speaker R
+cablamp 465,466,467  681 SPEAKER 20  # lamp 226, I/O group 6 index 58, at 173,98, speaker R
+cablamp 468,469,470  772 SPEAKER 21  # lamp 227, I/O group 6 index 61, at 163,76, speaker R
+cablamp 471,472,473  863 SPEAKER 22  # lamp 228, I/O group 6 index 64, at 167,53, speaker R
+cablamp 474,475,476  954 SPEAKER 23  # lamp 229, I/O group 6 index 67, at 182,35, speaker R
 
 # PAD-363: the game's own modes a mode of ours may keep from starting (game_mode_blocks.py, from the
 # game program: each mode's start = its vtable + 8 + 4 * the title's start slot). Never a multiball.

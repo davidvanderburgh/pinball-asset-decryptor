@@ -502,29 +502,31 @@ lamp 426          0              TOPPER GARGOYLE RIGHT 4  # lamp 216, I/O group 
 lamp 427          0              TOPPER GARGOYLE RIGHT 5  # lamp 217, I/O group 9 index 14, at 0,0
 lamp 428          0              TOPPER SKULL RIGHT EYES (X2)  # lamp 218, I/O group 9 index 15, at 0,0
 lamp 429          0              TOPPER LID GI  # lamp 219, I/O group 9 index 0, at 0,0
-lamp 430,431,432  0              SPEAKER 1  # lamp 220, I/O group 6 index 1, at 0,0
-lamp 433,434,435  0              SPEAKER 2  # lamp 221, I/O group 6 index 4, at 0,0
-lamp 436,437,438  0              SPEAKER 3  # lamp 222, I/O group 6 index 7, at 0,0
-lamp 439,440,441  0              SPEAKER 4  # lamp 223, I/O group 6 index 10, at 0,0
-lamp 442,443,444  0              SPEAKER 5  # lamp 224, I/O group 6 index 13, at 0,0
-lamp 445,446,447  0              SPEAKER 6  # lamp 225, I/O group 6 index 16, at 0,0
-lamp 448,449,450  0              SPEAKER 7  # lamp 226, I/O group 6 index 19, at 0,0
-lamp 451,452,453  0              SPEAKER 8  # lamp 227, I/O group 6 index 22, at 0,0
-lamp 454,455,456  0              SPEAKER 9  # lamp 228, I/O group 6 index 25, at 0,0
-lamp 457,458,459  0              SPEAKER 10  # lamp 229, I/O group 6 index 28, at 0,0
-lamp 460,461,462  0              SPEAKER 11  # lamp 230, I/O group 6 index 31, at 0,0
-lamp 463,464,465  0              SPEAKER 12  # lamp 231, I/O group 6 index 34, at 0,0
-lamp 466,467,468  0              SPEAKER 13  # lamp 232, I/O group 6 index 37, at 0,0
-lamp 469,470,471  0              SPEAKER 14  # lamp 233, I/O group 6 index 40, at 0,0
-lamp 472,473,474  0              SPEAKER 15  # lamp 234, I/O group 6 index 43, at 0,0
-lamp 475,476,477  0              SPEAKER 16  # lamp 235, I/O group 6 index 46, at 0,0
-lamp 478,479,480  0              SPEAKER 17  # lamp 236, I/O group 6 index 49, at 0,0
-lamp 481,482,483  0              SPEAKER 18  # lamp 237, I/O group 6 index 52, at 0,0
-lamp 484,485,486  0              SPEAKER 19  # lamp 238, I/O group 6 index 55, at 0,0
-lamp 487,488,489  0              SPEAKER 20  # lamp 239, I/O group 6 index 58, at 0,0
-lamp 490,491,492  0              SPEAKER 21  # lamp 240, I/O group 6 index 61, at 0,0
-lamp 493,494,495  0              SPEAKER 22  # lamp 241, I/O group 6 index 64, at 0,0
-lamp 496,497,498  0              SPEAKER 23  # lamp 242, I/O group 6 index 67, at 0,0
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 0 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 430,431,432  41  SPEAKER 1  # lamp 220, I/O group 6 index 1, at 95,28, speaker L
+cablamp 433,434,435  125 SPEAKER 2  # lamp 221, I/O group 6 index 4, at 116,34, speaker L
+cablamp 436,437,438  208 SPEAKER 3  # lamp 222, I/O group 6 index 7, at 131,49, speaker L
+cablamp 439,440,441  291 SPEAKER 4  # lamp 223, I/O group 6 index 10, at 137,70, speaker L
+cablamp 442,443,444  375 SPEAKER 5  # lamp 224, I/O group 6 index 13, at 131,91, speaker L
+cablamp 445,446,447  458 SPEAKER 6  # lamp 225, I/O group 6 index 16, at 116,106, speaker L
+cablamp 448,449,450  541 SPEAKER 7  # lamp 226, I/O group 6 index 19, at 95,112, speaker L
+cablamp 451,452,453  625 SPEAKER 8  # lamp 227, I/O group 6 index 22, at 74,106, speaker L
+cablamp 454,455,456  708 SPEAKER 9  # lamp 228, I/O group 6 index 25, at 59,91, speaker L
+cablamp 457,458,459  791 SPEAKER 10  # lamp 229, I/O group 6 index 28, at 53,70, speaker L
+cablamp 460,461,462  875 SPEAKER 11  # lamp 230, I/O group 6 index 31, at 59,49, speaker L
+cablamp 463,464,465  958 SPEAKER 12  # lamp 231, I/O group 6 index 34, at 74,34, speaker L
+cablamp 466,467,468  45  SPEAKER 13  # lamp 232, I/O group 6 index 37, at 205,28, speaker R
+cablamp 469,470,471  136 SPEAKER 14  # lamp 233, I/O group 6 index 40, at 228,35, speaker R
+cablamp 472,473,474  227 SPEAKER 15  # lamp 234, I/O group 6 index 43, at 243,53, speaker R
+cablamp 475,476,477  318 SPEAKER 16  # lamp 235, I/O group 6 index 46, at 247,76, speaker R
+cablamp 478,479,480  409 SPEAKER 17  # lamp 236, I/O group 6 index 49, at 237,98, speaker R
+cablamp 481,482,483  500 SPEAKER 18  # lamp 237, I/O group 6 index 52, at 217,110, speaker R
+cablamp 484,485,486  590 SPEAKER 19  # lamp 238, I/O group 6 index 55, at 193,110, speaker R
+cablamp 487,488,489  681 SPEAKER 20  # lamp 239, I/O group 6 index 58, at 173,98, speaker R
+cablamp 490,491,492  772 SPEAKER 21  # lamp 240, I/O group 6 index 61, at 163,76, speaker R
+cablamp 493,494,495  863 SPEAKER 22  # lamp 241, I/O group 6 index 64, at 167,53, speaker R
+cablamp 496,497,498  954 SPEAKER 23  # lamp 242, I/O group 6 index 67, at 182,35, speaker R
 
 # ---- the game's own multiballs (item 164): the framework's count of the balls in play (The Beatles 1.29
 # 0x1fd194, found here by its code); two or more is a multiball

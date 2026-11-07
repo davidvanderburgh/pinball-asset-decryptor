@@ -33,6 +33,8 @@ TABS = (
      "defaults"),
     # PAD-782: the attract mode editor (Stern Spike 2)
     ("attract", "attract", "Attract", "Attract", "Make", "film"),
+    # PAD-1040: the cabinet's expression light shows (Stern Spike 2)
+    ("lights", "lights", "Expression Lights", "Expression lights", "Make", "lights"),
     ("write", "write", "Write", "Write", "Build", "write"),
     ("multiboot", "multiboot", "Multi-boot", "Multi-boot", "Build",
      "multiboot"),

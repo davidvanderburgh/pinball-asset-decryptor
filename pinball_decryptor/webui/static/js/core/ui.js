@@ -101,6 +101,8 @@ const P = {
   // PAD-370: the board and its paint dots apart, so a colored palette can be filled in
   palette: ["M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z",
     "M7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01M17 11h.01"],
+  // PAD-1040: the cabinet's two blades, lit
+  lights: "M7 3v18M17 3v18M3 6l2 1.5M3 18l2-1.5M21 6l-2 1.5M21 18l-2-1.5M12 9v6",
   scenes: "M12 3l9 4.5-9 4.5-9-4.5zM3 12l9 4.5 9-4.5M3 16.5L12 21l9-4.5",
   more: "M5 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM19 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2z",
   eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",

@@ -236,7 +236,22 @@ int pm_lamp_shot(uint64_t shots, unsigned rgb, int pattern, unsigned period_ms);
 int pm_lamp_all(unsigned rgb, int pattern, unsigned period_ms);      /* every insert the port names */
 int pm_lamp_release(const char *names);
 int pm_lamp_release_shot(uint64_t shots);
-int pm_lamp_release_all(void);                             /* every insert THIS mode holds */
+int pm_lamp_release_all(void);                             /* every insert THIS mode holds (its cabinet lights too) */
+/* PAD-1040: the cabinet's EXPRESSION LIGHTS - the blades down the cabinet's sides and the backbox speaker lights
+ * (Led Zeppelin, Rush, Foo Fighters...), the port's `cablamp` lines. They are lights of the game's own light table, held
+ * on the mode's lamp layer exactly as inserts are, so a mode's cabinet light show covers the game's own while it runs.
+ * Each has a place on the CABINET drawing (the same 0-300 x 0-600 a light show's patterns run over: the left blade
+ * down x 12, the right down x 288, bottom up; the speaker ring at the top), so a show's patterns play on it too. */
+int pm_cab_count(void);                                    /* how many cabinet lights the port names (0: none) */
+const char *pm_cab_at(int i);                              /* the i-th one's name ("EXPRESSIVE LIGHTING L 1") */
+int pm_cab_xy(int i, int *x, int *y);                      /* its place on the cabinet drawing; 0 = not placed */
+int pm_cab_paint(int i, unsigned rgb);                     /* hold it solid in rgb, quietly (as pm_lamp_paint) */
+int pm_cab_release_all(void);                              /* every cabinet light THIS mode holds: the game's again */
+int pm_lamp_release_inserts(void);                         /* every insert THIS mode holds, its cabinet lights kept */
+/* PAD-1040: one of the card's own expression light shows (cabshow.cfg) by its name, over the cabinet's lights at once
+ * (the game's sound plays it too); 1 = it runs. pm_cab_show_stop ends it: the lights are the game's again. */
+int pm_cab_show(const char *name);
+int pm_cab_show_stop(void);
 /* PAD-415: a hit answers at once. The inserts of `shots` strobe in `rgb` (60 ms on, 60 off) for `ms` (0 = 480; at
  * most 2000) over whatever the mode holds them in, then show it again; one the mode does not hold is held for the
  * strobe only and handed back to the game after it, and one the mode releases while it strobes finishes the strobe

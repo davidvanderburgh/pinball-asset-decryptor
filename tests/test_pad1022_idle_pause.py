@@ -130,7 +130,7 @@ def test_the_wrap_calls_a_moved_bl_itself_and_comes_back():
 def test_it_arms_before_the_score_gate_and_alone_on_a_card_with_no_modes():
     src = RUNTIME.read_text(encoding="utf-8")
     assert src.index("idle_arm();") < src.index("if (!insider_arm()) return;")
-    assert "(clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only()) && !attract_wanted() && !coop_wanted()" in src
+    assert "(clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))" in src
     arm = R._lift(src, "static void idle_arm(void)")
     assert 'hook(fn("score_add"), on_idle_score)' in arm
     assert 'hook_wrap(fn("song_track")' in arm and 'hook_wrap(fn("timers_paused")' in arm

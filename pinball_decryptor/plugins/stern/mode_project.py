@@ -2374,6 +2374,7 @@ def read_port(path):
     out = dict(game="", version="", site={}, data={}, value={}, callout={}, shot=[],
                scene={}, text={}, header=[], event=[])
     out["lamp"] = []                      # item mode-leds: [(name, (r, g, b) light ids, shot mask)]
+    out["cablamp"] = []                   # PAD-1040: the cabinet's expression lights [(name, (r, g, b), u)]
     out["switch"] = []                    # shots from switches: [(switch id, shot mask, name)]
     body = False
     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -2415,6 +2416,10 @@ def read_port(path):
                     lamp = _port_lamp(rest)
                     if lamp:
                         out["lamp"].append(lamp)
+                elif key == "cablamp":            # PAD-1040: `cablamp <R,G,B> <u> <name>`, as the runtime's cab_line
+                    lamp = _port_lamp(rest)
+                    if lamp:
+                        out["cablamp"].append(lamp)
                 elif key == "switch":             # `switch <id> <shot mask> <name>`: a switch's hit is a shot
                     sw, mask, name = rest.split(None, 2)
                     sw, mask, name = _port_number(sw), _port_number(mask), name.strip()

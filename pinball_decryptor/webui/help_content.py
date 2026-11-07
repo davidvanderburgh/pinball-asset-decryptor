@@ -1488,6 +1488,42 @@ HELP_CONTENT = {
          "- Not on TMNT 1.58 (Pro or LE) or Venom LE 1.06 yet; the menu says why.\n"
          "- Needs an image build, not a direct SD write."),
     ],
+    # PAD-1040: the cabinet's expression light shows
+    "Expression Lights": [
+        ("What it's for",
+         "Stern Spike 2. Light shows of your own for the cabinet's expression lights: the blades down the "
+         "cabinet's sides and the speaker lights in the backbox. Each show goes with a song: the game starts it "
+         "whenever it plays that song, from the song's start, so a song you replaced gets lights that follow it "
+         "instead of the old song's.\n\n"
+         "- **New show**: blank, or from a ready-made one (rock pulse, rainbow, fire, level meter, sweeps, slow "
+         "fade).\n"
+         "- **Plays with**: the song. A song you replaced on the Audio page plays here as you replaced it.\n"
+         "- The middle of the page is this game's cabinet, read off its card, playing the show with its song: "
+         "**Play**, **Stop**, and the slider to go to any moment.\n"
+         "- Two lanes of steps, the blades and the speaker lights, over the song's waveform. Press a step to set "
+         "its pattern, how long it lasts, its two colors, its pace and how it blends in. **+** adds a step; "
+         "**Split at the playhead** cuts the step under the playhead in two, to start a new one on a beat.\n"
+         "- A lane with no steps leaves those lights to the game. After the last step the game's own lights "
+         "come back, unless **Start again when its steps are over** is ticked.\n"
+         "- **Run in emulator** starts the emulator with this project's changes: play a game and watch the "
+         "cabinet's lights in the playfield window.\n"
+         "- Needs an image build, not a direct SD write."),
+        ("Make it from the song",
+         "**Make it from the song** listens to the song and makes the show for you: it finds the beat and the "
+         "bars, and the song's quiet, building and loud parts. Every step starts on a bar line, every pattern "
+         "moves in time with the beat (pulses, chases, strobes, side to side), a loud part that hits after a "
+         "quiet one opens with a white flash, and the lights fade up at the start and out at the end. Pick a "
+         "style: **Punchy (rock)**, **Smooth** or **Colourful (party)**. It replaces the show's steps; change "
+         "any of them after."),
+        ("Insider Connected",
+         "The shows change only the cabinet's lights, not the game or its scores: a card that carries only "
+         "these shows stays on Insider Connected."),
+        ("Which games",
+         "Blades and speaker lights: Led Zeppelin, Rush, Foo Fighters LE, John Wick, King Kong and Metallica. "
+         "Speaker lights: Batman 66, Deadpool, Dungeons & Dragons, Elvira's House of Horrors, Foo Fighters Pro, "
+         "Godzilla, James Bond 007, Jaws, Jurassic Park, Star Wars, Uncanny X-Men and Venom. On the other games "
+         "the page says why not."),
+    ],
     "Write": [
         ("What a build does",
          "**Build** copies the untouched original and puts in every file that differs "

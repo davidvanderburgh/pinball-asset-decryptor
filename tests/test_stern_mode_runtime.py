@@ -241,6 +241,8 @@ static const char *PORT_FILES[2];
 static int events, lamps, rules;
 static void event_line(const char *s) { events++; }
 static void lamp_line(const char *s) { lamps++; }
+static int cabs;
+static void cab_line(const char *s) { cabs++; }   /* PAD-1040: `cablamp` lines, the cabinet's lights */
 static void rule_line(const char *s) { rules++; }      /* item 160: `rule` lines, the stock rules section */
 @HELPERS@
 @SECTION@

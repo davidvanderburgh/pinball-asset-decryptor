@@ -684,6 +684,9 @@ def merge(drafts, refs, tgt, game, version, family):
         body += events
     if lamps:
         body += [""] + lamps
+    cab = portgen.cabinet_draft(tgt)    # PAD-1040: the cabinet's expression lights, off this build's own tables
+    if cab:
+        body += [""] + cab
     if own:
         body += ["", "# ---- the game's own modes and rules (PAD-363, game_mode_blocks.py): read off this build's "
                      "program ----"] + own

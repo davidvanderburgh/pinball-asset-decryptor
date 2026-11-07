@@ -1,0 +1,58 @@
+/* Expression Lights tab (js/tabs/lights.js): the shows, the cabinet playing one with its song, its two lanes. */
+
+.xl-page { gap: 14px; }
+.xl-cols { display: grid; grid-template-columns: minmax(200px, 240px) minmax(220px, 300px) minmax(0, 1fr); gap: 14px;
+  align-items: start; min-width: 0; }
+@media (max-width: 1100px) { .xl-cols { grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); }
+  .xl-edit { grid-column: 1 / -1; } }
+
+/* the shows */
+.xl-list .list { display: flex; flex-direction: column; gap: 3px; max-height: 520px; overflow: auto; }
+.xl-li { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 10px; border-radius: 8px;
+  text-align: left; min-width: 0; }
+.xl-li-name { font-weight: 600; max-width: 100%; }
+.xl-li.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.xl-list-acts { margin-top: 10px; gap: 6px; flex-wrap: wrap; }
+
+/* the cabinet */
+.xl-cab { display: block; width: 100%; height: auto; max-height: 440px; background: #08080b; border-radius: 10px; }
+.xl-box, .xl-body { fill: #121219; stroke: #2c2c38; stroke-width: 2; }
+.xl-glass { fill: #050507; stroke: #23232d; }
+.xl-led { fill: #1b1b22; stroke: #2a2a33; stroke-width: .6; }
+.xl-led.lit { stroke: none; filter: drop-shadow(0 0 3px currentColor); }
+.xl-led.game { fill: #24242c; stroke: #3a3a46; stroke-dasharray: 1.5 1.5; }
+.xl-none { fill: #5a5a68; font-size: 11px; }
+.xl-transport { margin-top: 10px; gap: 8px; align-items: center; flex-wrap: wrap; }
+.xl-scrub { flex: 1 1 100%; order: 3; min-width: 60px; accent-color: var(--accent); }
+.xl-clock { margin-left: auto; text-align: right; white-space: nowrap; }
+
+/* the show: its fields */
+.xl-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.xl-grid .lbl { color: var(--ink-2); font-size: 12px; }
+.xl-inl { gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* the timeline: the waveform, the two lanes over it */
+.xl-tl { margin: 14px 0 12px; display: grid; gap: 6px; }
+.xl-tl-wave { margin-left: 104px; margin-right: 34px; height: 38px; background: var(--panel-2); border-radius: 6px; overflow: hidden; }
+.xl-wave { width: 100%; height: 100%; display: block; }
+.xl-wave path { stroke: var(--accent); stroke-width: 1; opacity: .75; vector-effect: non-scaling-stroke; }
+.xl-tl-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 26px; gap: 8px; align-items: center; }
+.xl-tl-lbl { color: var(--ink-2); text-align: right; }
+.xl-lane { position: relative; height: 40px; background: var(--panel-2); border-radius: 7px; cursor: pointer; overflow: hidden; }
+.xl-lane-empty { position: absolute; left: 10px; top: 11px; }
+.xl-bar { position: absolute; top: 3px; bottom: 3px; border: 2px solid transparent; border-radius: 6px; padding: 0;
+  cursor: pointer; min-width: 4px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+.xl-bar:hover { border-color: var(--ink-3); }
+.xl-bar.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); z-index: 1; }
+.xl-bar-n { position: absolute; left: 4px; top: 2px; font-size: 10px; color: #fff; text-shadow: 0 0 3px #000; }
+.xl-head { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 4px #000; pointer-events: none; z-index: 2; }
+.xl-tl-acts { gap: 10px; align-items: center; }
+
+/* the step picked */
+.xl-step { border-top: 1px solid var(--line); padding-top: 12px; }
+.xl-step-hd { margin-bottom: 10px; gap: 4px; }
+.xl-color { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.xl-color input[type="color"] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
+.xl-swatches { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.xl-swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,.25); padding: 0; cursor: pointer; }
+.xl-swatch.on { outline: 2px solid var(--accent); outline-offset: 1px; }

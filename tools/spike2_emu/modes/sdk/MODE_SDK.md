@@ -6381,3 +6381,53 @@ Port lines (one set per build):
 
 plus `adjustment`, `score_add` and `cur_player`. `idle_test_mode.c` is the rig instrument: it starts the mission
 whose song is playing and logs its clock each second.
+
+## Expression light shows (PAD-1040)
+
+BEN (Led Zeppelin): "if songs are swapped out, the expression lighting is no longer in sync with the replaced audio
+track". The cabinet's **expression lights** are the blades down its sides (`EXPRESSIVE LIGHTING L 1`..`R 96`: Led
+Zeppelin, Rush, Foo Fighters LE, John Wick, King Kong, Metallica) and the backbox speaker lights (`SPEAKER 1`..`23`,
+nearly every title; Batman 66's `LEFT` / `RIGHT SPEAKER n`). They are lights of the game's own light table, so the
+mode's lamp layer holds them exactly as it holds an insert: on Led Zeppelin LE 1.22 the game's own cabinet show plays
+under them until they are handed back. Led Zeppelin's `ExpressionLights` picks its show by the sound it plays, which is
+why a replaced song plays under the old song's show.
+
+**The port** names them on `cablamp` lines (`lamp_map.py --port` writes them after the `lamp` lines; the `lamp` lines
+no longer list them, whatever picture a title draws them on):
+
+    cablamp <R,G,B light ids> <u> <name>  # lamp N, I/O group G index I, at X,Y, blade L
+
+`u` is the light's place along its strip, 0..999 (a blade from the bottom up, a speaker ring from the top round
+clockwise); `X,Y` its place on the CABINET drawing, the same 0-300 x 0-600 a light show runs over (the left blade down
+x 12, the right down x 288, from y 600 up to 140; the speaker ring centred at 150,70). The runtime keeps them after
+the inserts (from index 256, up to 160): `pm_lamp_count` and every insert call still see only the inserts.
+
+| To... | Call |
+|---|---|
+| list them | `pm_cab_count()`, `pm_cab_at(i)`, `pm_cab_xy(i, &x, &y)` |
+| hold one solid (a show paints them all every tick) | `pm_cab_paint(i, rgb)` |
+| hand them back | `pm_cab_release_all()`; `pm_lamp_release_all()` takes them with the inserts, `pm_lamp_release_inserts()` leaves them |
+| run one of the card's shows by name, and stop it | `pm_cab_show(name)`, `pm_cab_show_stop()`; a mode file's `cab_show <name>` runs it while the mode runs |
+
+**The card's shows** (`cabshow.cfg`, beside the runtime or in `/dump`; the app's Expression lights tab writes it):
+
+    only                                       the card carries no modes: armed before the score gate, so a card
+                                               of light shows alone stays on Insider Connected
+    show <sound ids a,b,c> <loop 0|1> <name>   a show, started whenever the game's sound worker takes a request
+                                               whose sound list names one of the ids (0: by name only)
+    blades <fx> <ms> <a> <b> <rate> <blend>    a step of the blades' lane (colours 0xRRGGBB)
+    speakers <fx> <ms> <a> <b> <rate> <blend>  a step of the speaker lights' lane
+
+Up to 32 shows, 128 steps a lane, 8 sound ids a show. The lanes run side by side from the request's start; a lane with
+no steps leaves its lights to the game, one whose steps ran out holds them dark. The show ends when its steps are
+over (loop 0) or `sound_active` says the request stopped (asked twice a second from 600 ms on); the lights are the
+game's again. The patterns (the runtime's `CAB FX` slice, mirrored by the app's `cabfx.js` and held equal by
+`tests/test_pad1040_cab_shows.py`): solid, fade_in, fade_out, crossfade, pulse, strobe, sweep_up, sweep_down,
+fill_up, fill_down, chase_up, chase_down, bounce, center_out, center_in, alternate, rainbow, sparkle, fire, meter.
+`rate` is a pattern's pace in ms; sparkle, fire and meter are a hash of the time and the light, so a show plays the
+same every time.
+
+**Emulator-proven** (Led Zeppelin LE 1.22, padled node 2 / node 7, C:/tmp/PAD-1040/emu): a mode's `cab_show PROOF`
+took all 96 blade pixels magenta and all 23 speaker lights cyan over the game's own show, then a green sweep up the
+blades over dim blue with a red chase round the speakers, then a yellow fill rising from the bottom; after 10,000 ms
+every light was the game's again and its own show came back.

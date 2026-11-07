@@ -285,6 +285,24 @@ lamp 117          0              CRANE POS.#1 HOME  # lamp 153, I/O group 6 inde
 lamp 118          0              POP BUMPER FLASH  # lamp 154, I/O group 6 index 60, at 231,172
 lamp 120          0              CRANE FLASH  # lamp 156, I/O group 7 index 6, at 222,241
 lamp 121          0              TURNTABLE REACTOR FLASH  # lamp 157, I/O group 8 index 11, at 113,132
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 0 blade pixel(s), 16 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 132          62  LEFT SPEAKER 1  # lamp 97, I/O group 9 index 17, at 95,30, speaker L
+cablamp 133          312 LEFT SPEAKER 2  # lamp 98, I/O group 9 index 18, at 135,70, speaker L
+cablamp 134          562 LEFT SPEAKER 3  # lamp 99, I/O group 9 index 19, at 95,110, speaker L
+cablamp 135          812 LEFT SPEAKER 4  # lamp 100, I/O group 9 index 20, at 55,70, speaker L
+cablamp 137          62  RIGHT SPEAKER 1  # lamp 102, I/O group 9 index 24, at 205,30, speaker R
+cablamp 138          312 RIGHT SPEAKER 2  # lamp 103, I/O group 9 index 25, at 245,70, speaker R
+cablamp 139          562 RIGHT SPEAKER 3  # lamp 104, I/O group 9 index 26, at 205,110, speaker R
+cablamp 140          812 RIGHT SPEAKER 4  # lamp 105, I/O group 9 index 27, at 165,70, speaker R
+cablamp 170          187 LEFT SPEAKER 1  # lamp 135, I/O group 10 index 33, at 123,42, speaker L
+cablamp 171          437 LEFT SPEAKER 2  # lamp 136, I/O group 10 index 34, at 123,98, speaker L
+cablamp 172          687 LEFT SPEAKER 3  # lamp 137, I/O group 10 index 35, at 67,98, speaker L
+cablamp 173          937 LEFT SPEAKER 4  # lamp 138, I/O group 10 index 36, at 67,42, speaker L
+cablamp 175          187 RIGHT SPEAKER 1  # lamp 140, I/O group 10 index 40, at 233,42, speaker R
+cablamp 176          437 RIGHT SPEAKER 2  # lamp 141, I/O group 10 index 41, at 233,98, speaker R
+cablamp 177          687 RIGHT SPEAKER 3  # lamp 142, I/O group 10 index 42, at 177,98, speaker R
+cablamp 178          937 RIGHT SPEAKER 4  # lamp 143, I/O group 10 index 43, at 177,42, speaker R
 
 # ---- PAD-420: placed by port_tool.py from batman-1.13.port (the same title), unverified ----
 

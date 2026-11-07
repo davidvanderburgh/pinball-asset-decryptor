@@ -613,6 +613,31 @@ switch 59   0x4000000000000000 Right flipper button
 # the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
 # a mode that lights its shots lights the button
 lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 0 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 516,517,518  21  SPEAKER 1  # lamp 237, I/O group 9 index 1, at 150,20, speaker
+cablamp 519,520,521  65  SPEAKER 2  # lamp 238, I/O group 9 index 4, at 163,22, speaker
+cablamp 522,523,524  108 SPEAKER 3  # lamp 239, I/O group 9 index 7, at 176,27, speaker
+cablamp 525,526,527  152 SPEAKER 4  # lamp 240, I/O group 9 index 10, at 187,36, speaker
+cablamp 528,529,530  195 SPEAKER 5  # lamp 241, I/O group 9 index 13, at 194,47, speaker
+cablamp 531,532,533  239 SPEAKER 6  # lamp 242, I/O group 9 index 16, at 199,60, speaker
+cablamp 534,535,536  282 SPEAKER 7  # lamp 243, I/O group 9 index 19, at 200,73, speaker
+cablamp 537,538,539  326 SPEAKER 8  # lamp 244, I/O group 9 index 22, at 197,87, speaker
+cablamp 540,541,542  369 SPEAKER 9  # lamp 245, I/O group 9 index 25, at 191,99, speaker
+cablamp 543,544,545  413 SPEAKER 10  # lamp 246, I/O group 9 index 28, at 182,109, speaker
+cablamp 546,547,548  456 SPEAKER 11  # lamp 247, I/O group 9 index 31, at 170,116, speaker
+cablamp 549,550,551  500 SPEAKER 12  # lamp 248, I/O group 9 index 34, at 157,120, speaker
+cablamp 552,553,554  543 SPEAKER 13  # lamp 249, I/O group 9 index 37, at 143,120, speaker
+cablamp 555,556,557  586 SPEAKER 14  # lamp 250, I/O group 9 index 40, at 130,116, speaker
+cablamp 558,559,560  630 SPEAKER 15  # lamp 251, I/O group 9 index 43, at 118,109, speaker
+cablamp 561,562,563  673 SPEAKER 16  # lamp 252, I/O group 9 index 46, at 109,99, speaker
+cablamp 564,565,566  717 SPEAKER 17  # lamp 253, I/O group 9 index 49, at 103,87, speaker
+cablamp 567,568,569  760 SPEAKER 18  # lamp 254, I/O group 9 index 52, at 100,73, speaker
+cablamp 570,571,572  804 SPEAKER 19  # lamp 255, I/O group 9 index 55, at 101,60, speaker
+cablamp 573,574,575  847 SPEAKER 20  # lamp 256, I/O group 9 index 58, at 106,47, speaker
+cablamp 576,577,578  891 SPEAKER 21  # lamp 257, I/O group 9 index 61, at 113,36, speaker
+cablamp 579,580,581  934 SPEAKER 22  # lamp 258, I/O group 9 index 64, at 124,27, speaker
+cablamp 582,583,584  978 SPEAKER 23  # lamp 259, I/O group 9 index 67, at 137,22, speaker
 
 # The battle rule's shot handler, RuleBattle::v[25] (vtable 0x631ea8 + 8 + 100; shot mask in r2:r3): a lit
 # ramp counts toward a battle (0x100000 Left ramp, 0x200000 Right ramp), a lit scoop (hi 0x20) opens the

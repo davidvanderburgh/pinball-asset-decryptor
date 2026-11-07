@@ -8170,6 +8170,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1033: a handicap for each player - handicap.cfg beside the runtime (the modes' delivery)
     hand_prof = _handicap_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _hand_on = hand_prof is not None
+    # PAD-1040: the cabinet's expression light shows - cabshow.cfg beside the runtime (the modes' delivery)
+    cabs_prof, cabs_shows = _cabs_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _cabs_on = cabs_prof is not None
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -8178,7 +8181,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
-            and not _hand_on
+            and not _hand_on and not _cabs_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -9622,10 +9625,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Attract items" if _attract_on
                 else "Co-op play" if _coop_on
                 else "Inactivity pauses timers" if _idle_on
-                else "Handicaps")
+                else "Handicaps" if _hand_on
+                else "Expression lights")
         _who_hud = _who
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on):
+                or _hand_on or _cabs_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -9636,7 +9640,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if picture_cfg else "Adding the attract items..."
                          if _attract_on else "Adding co-op play..."
                          if _coop_on else "Adding inactivity pausing the timers..."
-                         if _idle_on else "Adding the handicaps...")
+                         if _idle_on else "Adding the handicaps..."
+                         if _hand_on else "Adding the expression light shows...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -9648,7 +9653,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
                     _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
-                              or idle_prof or hand_prof)
+                              or idle_prof or hand_prof or cabs_prof)
+                # PAD-1040: each show's song, as the sound ids that start it on this card
+                _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
+                              if _cabs_on else {})
                 _mnodes = {"": None}
                 from . import coop_play as _CPS          # PAD-1031: the co-op pick's screens go in the HUD
                 _coop_hud = _coop_on and _CPS.wants_screens(assets_dir, _mprof)
@@ -9712,6 +9720,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     idle=_idle_on, idle_prof=idle_prof,               # PAD-1022
                     handicap=_hand_on, handicap_prof=hand_prof,       # PAD-1033
                     handicap_setting=hand_setting,
+                    cabs=cabs_shows if _cabs_on else None, cabs_prof=cabs_prof,   # PAD-1040
+                    cabs_sids=_cabs_sids,
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -10094,6 +10104,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "idle": bool(getattr(mode_plan, "idle_file", "")),
                 # PAD-1033: a handicap for each player
                 "handicap": bool(getattr(mode_plan, "handicap_file", "")),
+                # PAD-1040: the card's expression light shows
+                "cabs": bool(getattr(mode_plan, "cabshow_file", "")),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -11190,6 +11202,60 @@ def _coop_for_build(assets_dir, dest_is_device, log, ext4_available=None):
         return None
     log("Co-op play: %s." % _CP.HOW, "info")
     return prof
+
+
+def _cabs_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1040: ``(title, shows)`` of the card the expression light shows go on, or ``(None, [])`` when the project
+    has none or they are left out (one warning says why). The modes' gate, as inactivity pausing the timers': not a
+    part of the mode maker, and a card of them alone stays on Insider Connected."""
+    from . import cab_shows as _CS
+    from . import mode_write as _MW
+    shows = _CS.load(assets_dir)
+    if not shows:
+        return None, []
+    if dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry them"
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _CS.project_title(assets_dir, probe=True)
+        why = _CS.title_refusal(prof)
+    if why:
+        log("Expression lights: left out of this build: %s." % why.rstrip("."), "warning")
+        return None, []
+    log("Expression lights: %d show(s) of the project's, each with its song. %s" % (len(shows), _CS.INSIDER_WORDS),
+        "info")
+    return prof, shows
+
+
+def _cab_sids_for_build(disk_f, parts, work, log, gr_path, img_path, shows):
+    """PAD-1040: ``{slot: [sound id, ...]}`` - the game's sound ids that start each show's song on this card, off its
+    play tables (read here when this build read no sound: a card whose only change is its light shows)."""
+    from . import cab_shows as _CS
+    slots = sorted({s["slot"] for s in shows if s.get("slot") is not None})
+    if not slots:
+        return {}
+    try:
+        if gr_path is None or img_path is None:
+            cwork = os.path.join(work, "cabs")
+            os.makedirs(cwork, exist_ok=True)
+            gr_path, img_path, _r, _fw, _img = _extract_inputs_kept(disk_f, parts, cwork, log)
+        params = _params_for(gr_path, img_path, log, None)
+        sites = _card_descriptor_sites(gr_path, img_path, log, card_key=_card_sites_key(disk_f, gr_path, img_path))
+        plays = _sound_id_plays(params, sites, _desc_key_mask(params, sites))
+    except Exception as e:                              # noqa: BLE001 - the shows go by name only; said
+        log("Expression lights: the game's play tables could not be read (%s): no show starts with its song." % e,
+            "warning")
+        return {}
+    return {slot: _CS.sids_for_slot(plays, slot) for slot in slots}
 
 
 def _idle_for_build(assets_dir, dest_is_device, log, ext4_available=None):

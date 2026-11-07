@@ -875,6 +875,31 @@ text internal_shots        Trough
 # the Action button's RGB light (lamp 97, I/O group 5 index 5/4/7, on the cabinet front), tied to its shot:
 # a mode that lights its shots lights the button
 lamp 282,283,284  0x1000000000000000 ACTION BUTTON  # lamp 97, I/O group 5 index 5, the cabinet front
+# ---- cabinet: cablamp <light ids R,G,B | one> <u> <name> - the expression lights, read by lamp_map.py ----
+# 0 blade pixel(s), 23 speaker light(s), placed on the cabinet drawing (PAD-1040)
+cablamp 523,524,525  21  SPEAKER 1  # lamp 244, I/O group 10 index 1, at 150,20, speaker
+cablamp 526,527,528  65  SPEAKER 2  # lamp 245, I/O group 10 index 4, at 163,22, speaker
+cablamp 529,530,531  108 SPEAKER 3  # lamp 246, I/O group 10 index 7, at 176,27, speaker
+cablamp 532,533,534  152 SPEAKER 4  # lamp 247, I/O group 10 index 10, at 187,36, speaker
+cablamp 535,536,537  195 SPEAKER 5  # lamp 248, I/O group 10 index 13, at 194,47, speaker
+cablamp 538,539,540  239 SPEAKER 6  # lamp 249, I/O group 10 index 16, at 199,60, speaker
+cablamp 541,542,543  282 SPEAKER 7  # lamp 250, I/O group 10 index 19, at 200,73, speaker
+cablamp 544,545,546  326 SPEAKER 8  # lamp 251, I/O group 10 index 22, at 197,87, speaker
+cablamp 547,548,549  369 SPEAKER 9  # lamp 252, I/O group 10 index 25, at 191,99, speaker
+cablamp 550,551,552  413 SPEAKER 10  # lamp 253, I/O group 10 index 28, at 182,109, speaker
+cablamp 553,554,555  456 SPEAKER 11  # lamp 254, I/O group 10 index 31, at 170,116, speaker
+cablamp 556,557,558  500 SPEAKER 12  # lamp 255, I/O group 10 index 34, at 157,120, speaker
+cablamp 559,560,561  543 SPEAKER 13  # lamp 256, I/O group 10 index 37, at 143,120, speaker
+cablamp 562,563,564  586 SPEAKER 14  # lamp 257, I/O group 10 index 40, at 130,116, speaker
+cablamp 565,566,567  630 SPEAKER 15  # lamp 258, I/O group 10 index 43, at 118,109, speaker
+cablamp 568,569,570  673 SPEAKER 16  # lamp 259, I/O group 10 index 46, at 109,99, speaker
+cablamp 571,572,573  717 SPEAKER 17  # lamp 260, I/O group 10 index 49, at 103,87, speaker
+cablamp 574,575,576  760 SPEAKER 18  # lamp 261, I/O group 10 index 52, at 100,73, speaker
+cablamp 577,578,579  804 SPEAKER 19  # lamp 262, I/O group 10 index 55, at 101,60, speaker
+cablamp 580,581,582  847 SPEAKER 20  # lamp 263, I/O group 10 index 58, at 106,47, speaker
+cablamp 583,584,585  891 SPEAKER 21  # lamp 264, I/O group 10 index 61, at 113,36, speaker
+cablamp 586,587,588  934 SPEAKER 22  # lamp 265, I/O group 10 index 64, at 124,27, speaker
+cablamp 589,590,591  978 SPEAKER 23  # lamp 266, I/O group 10 index 67, at 137,22, speaker
 
 # The battle rule's shot handler, RuleBattle::v[25] (vtable 0x642690 + 8 + 100; shot mask in r2:r3): a lit
 # ramp counts toward a battle (0x100000 Left ramp, 0x200000 Right ramp), a lit scoop (hi 0x20) opens the

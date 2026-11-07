@@ -595,6 +595,8 @@ class ModePlan:
     handicap_file: str = ""
     #: PAD-1022: ``idle.cfg`` beside the mode files, inactivity pausing the timers ("" = none)
     idle_file: str = ""
+    #: PAD-1040: ``cabshow.cfg`` beside the mode files, the card's expression light shows ("" = none)
+    cabshow_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -810,7 +812,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          modes_on=True, variants=False, variants_prof=None, cancel=None, sound_modes="",
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
-         idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0):
+         idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
+         cabs_sids=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -846,7 +849,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-1033: *handicap* puts ``handicap.cfg`` beside the mode files (a handicap for each player, its levels worked out
     of *game_elf*); with nothing else it is a plan of its own, for *handicap_prof*. *handicap_setting* is the live value
-    of the service menu's HANDICAP row the engine added (0: none, always on)."""
+    of the service menu's HANDICAP row the engine added (0: none, always on).
+
+    PAD-1040: *cabs* (the project's expression light shows) puts ``cabshow.cfg`` beside the mode files, each show
+    with the sound ids that start its song on this card (*cabs_sids*, ``{slot: [sid, ...]}``); with nothing else it is
+    a plan of its own, for *cabs_prof*, and the file says the card has no modes."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -887,6 +894,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 result = handicap_plan(project, game_elf, handicap_prof or idle_prof or coop_prof or attract_prof
                                        or variants_prof or sound_modes_prof or picture_prof)
             handicap_into(result, game_elf, scratch, handicap_setting, only=True)
+        if cabs:                                     # PAD-1040: the expression light shows, alone or with the above
+            if result is None:
+                result = cabs_plan(project, game_elf, cabs_prof or handicap_prof or idle_prof or coop_prof
+                                   or attract_prof or variants_prof or sound_modes_prof or picture_prof)
+            cabs_into(result, scratch, cabs, cabs_sids or {}, only=True, log=log)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -972,6 +984,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         idle_into(result, scratch, only=False)
     if handicap:                                     # PAD-1033
         handicap_into(result, game_elf, scratch, handicap_setting, only=False)
+    if cabs:                                         # PAD-1040
+        cabs_into(result, scratch, cabs, cabs_sids or {}, only=False, log=log)
     return result
 
 
@@ -1003,6 +1017,45 @@ def idle_into(result, scratch, only):
         f.write(IP.cfg_text(only))
     result.idle_file = path
     result.lines.append("inactivity pauses timers: %s" % IP.HOW)
+    return result
+
+
+# ---- PAD-1040: the cabinet's expression light shows ----------------------------------------------
+def cabs_plan(project, game_elf, prof):
+    """A plan carrying only the expression light shows: no mode, no scene; the runtime and the title's port on p2
+    with ``cabshow.cfg`` (:func:`cabs_into`)."""
+    from . import cab_shows as CS
+    why = CS.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows the cabinet lights of"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def cabs_into(result, scratch, shows, sids_of, only, log=None):
+    """``cabshow.cfg`` for *result*'s card; *only* when the card carries no modes (the runtime then arms the shows
+    alone, before the score gate: the card stays on Insider Connected)."""
+    from . import cab_shows as CS
+    why = CS.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    text, skipped = CS.cfg_text(shows, sids_of, only)
+    for name in skipped:
+        if log:
+            log("Expression lights: the show \"%s\" is left out: it has no song this game plays, or no steps."
+                % name, "warning")
+    if len(skipped) == len(shows):
+        return result
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, CS.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.cabshow_file = path
+    result.lines.append("expression lights: %d show(s), each played with its song" % (len(shows) - len(skipped)))
     return result
 
 
@@ -1737,6 +1790,11 @@ def p2_payload(result, out_dir, project=None):
             from . import handicap as HC
             dst = os.path.join(out_dir, HC.CFG_NAME)
             shutil.copyfile(result.handicap_file, dst)
+            extras.append(dst)
+        if getattr(result, "cabshow_file", ""):        # PAD-1040: cabshow.cfg, the card's expression light shows
+            from . import cab_shows as CS
+            dst = os.path.join(out_dir, CS.CFG_NAME)
+            shutil.copyfile(result.cabshow_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

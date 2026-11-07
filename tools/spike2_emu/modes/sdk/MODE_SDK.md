@@ -6160,6 +6160,15 @@ or the game's end). So the game ends after the last teammate's last ball.
   challenge game keeps its own (PAD-640/663: the record in `/dump/pad_challenge_scores`, HIGHEST SCORES' first entry
   pointed at it for the game's end, the game's own records shut for that game). The attract champion pages show
   each board that has a champion.
+- **The lit score box (PAD-1043, DoomWalrus666):** the game lights and enlarges the player up's score box, so with
+  the game playing player 1 it lit player 1's box all game. The score panel's own calls of the framework's player-up
+  getter (`movw/movt ; ldrb r0, [<player>] ; bx lr`) are wrapped where they are made (`hook_call`) and answer the
+  teammate up during a co-op game; every other caller still hears player 1. The panel that lights one box of four
+  this way (Godzilla, Avengers, Jurassic Park The Pin, X-Men) is found by its frame update - the getter, then a
+  loop to 5 testing `box == up` (`rsb ; clz ; lsr #5`) and setting a Text colour (vtable +0x40) - and its "player
+  changed" checks (the getter, then `ldrb rA, [this, #count + 1] ; cmp rA, r0`; X-Men has two). No other title's
+  program has a panel of this shape, and those get no lines. A Team 2v2 game (below) is left the game's own: it
+  plays a game player per team, so its own player up already lights the team's box.
 
 Port lines (portcoop.py; one framework shape on every Spike 2 build, the older ones' count at +0x50 of a struct):
 
@@ -6168,6 +6177,8 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
     data  coop_player         the player up's byte; the ball in play is the next one
     data  coop_players        the count of players' byte
     site  coop_first_ball     the ball start's call of the ball getter that tells a first ball (PAD-1046)
+    site  coop_panel_lit      (PAD-1043) the score panel's frame update's call of the player-up getter (hook_call)
+    site  coop_panel_up[_n]   (PAD-1043) its "player changed" checks' calls (hook_call; _2 .. _4 for more than one)
 
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).
@@ -6269,6 +6280,7 @@ plays one player for the team, so nothing per player is copied: an ability chang
     pick_time 30                              the seconds to pick (30 when not given; 0: no limit)
     left 60                                   the left flipper button (the right is `button`)
     action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
+    lane 62                                   the shooter lane (SHOOTER LANE): the save's presses wait for the ball
     character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE
     character save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE
     character adj:195x50:4:30 GODZILLA GMK|EASIER HEAT RAY
@@ -6283,7 +6295,10 @@ Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comm
 - `bs:<id>`: `<id>` is the ball save time, read when a ball is served: a pick made with the teammate's ball already
   out gives that ball the save now (`pm_ball_save` of what the getter answers).
 - `save:<s>`: two presses of the Action button within 0.6 s give an `s` second ball save, once a ball (one press is
-  the game's: Godzilla's heat ray is a hold).
+  the game's: Godzilla's heat ray is a hold). With `lane`, the presses count only once the turn's ball is out of the
+  shooter lane: none while a ball waits there and none for 1.5 s after one leaves it, since Godzilla's Action button
+  is also its launch and a quick second press at a launch spent the ball's save there (PAD-1045, ball 2 on). A save
+  the game refuses is not spent.
 
 The pick says itself on the game's top line (PAD-1017's borrow of `BALL %d`): `PLAYER 2 PICK: <name>`, then what it
 does, every 1.5 s; the flippers walk (a character another teammate has is skipped; RANDOM after the last), Action

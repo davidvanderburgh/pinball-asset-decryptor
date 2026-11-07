@@ -39,7 +39,8 @@ static char shown[96];
 static int message_borrow(unsigned id, unsigned idx, const char *w) { (void)id; (void)idx; strcpy(shown, w); return 1; }
 static void coop_turn_show(void) { sprintf(shown, "PLAYER %u  BALL %%d", coop.turn); }
 static unsigned saved_s;
-static int pm_ball_save(unsigned s) { saved_s = s; return 1; }
+static int refuse;                                      /* PAD-1045: the game does not take a save */
+static int pm_ball_save(unsigned s) { if (refuse) return 0; saved_s = s; return 1; }
 static unsigned own_adj(unsigned id) { return id == 94 ? 5 : id == 195 ? 20 : 1; }
 #define COOP_MSG_ID 0xC0090u
 #define MAP_R 1u
@@ -163,12 +164,12 @@ def _decl(src):
     return src[start:src.index("\n", end) + 1]
 
 
-def _run(tmp_path):
+def _run(tmp_path, main=MAIN):
     src = RUNTIME.read_text(encoding="utf-8")
     fns = "\n".join(R._lift(src, sig + "\n{") for sig in FNS)
     number = "\n".join(R._lift(src, sig + "\n{") for sig in ("static int hexval(int c)",   # the runtime's own: it eats
                                                             "static uint64_t number(const char **p, int *ok)"))
-    main = MAIN.replace("@NUMBER@", number)                                      # the space after a number
+    main = main.replace("@NUMBER@", number)                                      # the space after a number
     return R._host_run(tmp_path, main.replace("@DECL@", _decl(src)).replace("@FNS@", fns)).splitlines()
 
 
@@ -214,6 +215,83 @@ def test_each_teammate_picks_one_nobody_else_has_and_its_ability_holds_while_the
     assert "unlimited 10 min: open 1" in out
     assert "unlimited took 0" in out
 
+
+
+LANE_MAIN = r"""
+static void lane(int in) { coop_edge(62, in ? 1 : 0, 0x800, 0); }        /* closed: a ball waits in the lane */
+static void twice(const char *what)
+{
+    saved_s = 0;
+    press(34); now_ms += 300; press(34); coop_chars_tick();
+    printf("%s %u used %d\n", what, saved_s, coop_save_used);
+}
+static void launch(const char *what)                 /* Action launches; a second press 0.4 s on, as a player does */
+{
+    saved_s = 0;
+    lane(1); now_ms += 3000; press(34); now_ms += 40; lane(0); now_ms += 360; press(34); coop_chars_tick();
+    printf("%s %u used %d\n", what, saved_s, coop_save_used);
+}
+int main(void)
+{
+    coop_char_line("save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE");
+    coop_char_line("- OTHER|");
+    coop_pick_on = 1; coop.button = 59; coop_left = 60; coop_action = 34; coop_lane = 62;
+    coop.n = 2; coop.turn = 1;
+    lane(1);                                         /* ball 1 is in the lane when the team forms */
+    coop_chars_begin(); coop_pick_open(1); press(34); coop_chars_tick();
+    printf("t1 %d\n", coop_pick_of[1]);
+    now_ms += 1000; press(34); now_ms += 40; lane(0); now_ms += 360; press(34); coop_chars_tick();
+    printf("ball 1 launch %u used %d\n", saved_s, coop_save_used);
+    now_ms += 5000; twice("ball 1 in play");
+    now_ms += 5000; twice("ball 1 again");
+    coop.turn = 2; coop_chars_turn(); press(34); coop_chars_tick();
+    coop.turn = 1; coop_chars_turn();                /* ball 2: teammate 1 again */
+    now_ms += 2000; twice("ball 2 not served");
+    now_ms += 2000; launch("ball 2 launch");
+    now_ms += 5000; twice("ball 2 in play");
+    coop.turn = 2; coop_chars_turn(); coop.turn = 1; coop_chars_turn();
+    now_ms += 2000; launch("ball 3 launch");
+    refuse = 1; now_ms += 5000; twice("ball 3 refused");
+    refuse = 0; now_ms += 5000; twice("ball 3 taken");
+    coop_lane = 0; coop.turn = 2; coop_chars_turn(); coop.turn = 1; coop_chars_turn();
+    now_ms += 2000; launch("no lane known");
+    return 0;
+}
+"""
+
+
+def test_a_launch_is_not_the_saves_double_press_on_any_ball(tmp_path):
+    """PAD-1045 (DoomWalrus666): "If the player has a 1x per ball ability, it is not able to be used after ball one".
+    Godzilla's Action button is also its launch: a quick second press at ball 2's launch was the double press, so the
+    save went at the shooter lane (emulator, LE 1.16) and the real one later did nothing; ball 1's pick took those
+    presses. With `lane`, the presses count once the turn's ball is out of the lane, and a refused save is not spent."""
+    main = MAIN[:MAIN.index("int main(void)")] + LANE_MAIN
+    out = _run(tmp_path, main)
+    assert "t1 0" in out
+    assert "ball 1 launch 0 used 0" in out
+    assert "ball 1 in play 10 used 1" in out
+    assert "ball 1 again 0 used 1" in out                           # once a ball
+    assert "ball 2 not served 0 used 0" in out                      # the turn's ball is not out yet
+    assert "ball 2 launch 0 used 0" in out                          # the bug: this spent ball 2's save
+    assert "ball 2 in play 10 used 1" in out
+    assert "ball 3 launch 0 used 0" in out
+    assert "ball 3 refused 0 used 0" in out                         # the game did not take it: still the ball's
+    assert "ball 3 taken 10 used 1" in out
+    assert "no lane known 10 used 1" in out                         # no lane in coop.cfg: as before, every press
+    assert any("at a launch" in line and "not the save's" in line for line in out)
+
+
+def test_coop_cfg_reads_the_shooter_lane():
+    src = RUNTIME.read_text(encoding="utf-8")
+    assert '"lane "' in R._lift(src, "static void coop_line(const char *s)")
+
+
+@pytest.mark.skipif(not os.path.isfile(GZ_ELF), reason="no Godzilla LE 1.16 program here")
+def test_coop_cfg_names_the_shooter_lane_beside_the_action_button():
+    elf = open(GZ_ELF, "rb").read()
+    assert CP.shooter_lane(elf) == 62
+    lines = CP.character_lines(elf, {"pick": True, "list": [{"name": "A", "ability": "action_save"}]})
+    assert lines[:5] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62"]
 
 def test_the_pick_step_skips_the_taken_and_wraps_through_random(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
@@ -303,7 +381,7 @@ def test_godzillas_abilities_and_lines_read_off_its_program():
     assert got["heat_ray"]["cfg"] == "adj:195x50:4:30"
     assert CP.action_button(elf) == 34
     lines = CP.character_lines(elf, CP.read_preset(CP.presets()["godzilla"])["characters"])
-    assert lines[:5] == ["pick on", "pick_time 30", "left 60", "action 34",
+    assert lines[:6] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62",
                          "character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE"]
     text = CP.cfg_text(elf, None, {"pick": True, "list": [{"name": "A", "ability": "heat_ray"}]})
     assert text.endswith("character adj:195x50:4:30 A|EASIER HEAT RAY\n")

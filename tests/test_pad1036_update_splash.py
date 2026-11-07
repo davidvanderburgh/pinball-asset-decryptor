@@ -114,15 +114,17 @@ def test_a_launch_that_fails_says_so_and_leaves_no_script(monkeypatch):
 
 
 # ------------------------------------------------------------ the app
-def _record_splash(monkeypatch, shown, result=(True, None), order=None):
-    """A stand-in start_splash that records.  Inside the ``with web_app``:
-    the harness stubs the real one on enter and puts it back on exit."""
+def _record_splash(shown, result=(True, None), order=None):
+    """A stand-in start_splash that records.  Inside the ``with web_app``,
+    and set directly, not through monkeypatch: the harness stubs the real
+    one on enter and puts it back on exit, and a monkeypatch undone after
+    that would put the harness's stub back for the rest of the worker."""
     def _start(version, **kw):
         if order is not None:
             order.append("splash")
         shown.append((version, kw))
         return result
-    monkeypatch.setattr(sp, "start_splash", _start)
+    sp.start_splash = _start
 
 
 def test_restart_to_update_opens_the_splash_before_closing(tmp_path, slots,
@@ -135,7 +137,7 @@ def test_restart_to_update_opens_the_splash_before_closing(tmp_path, slots,
     monkeypatch.setattr(app_mod.App, "_on_close",
                         lambda self: order.append("close") or real_close(self))
     with web_app(tmp_path, mfr="stern") as w:
-        _record_splash(monkeypatch, shown, order=order)
+        _record_splash(shown, order=order)
         w.run(w.app._offer_update, "9.9.9", "u", _installer())
         assert _until(w, lambda: "is ready" in (_banner(w) or {}).get(
             "text", ""))
@@ -150,7 +152,7 @@ def test_the_installer_route_opens_it_too(tmp_path, slots, monkeypatch):
     slots["stage_ok"] = False
     shown = []
     with web_app(tmp_path, mfr="stern") as w:
-        _record_splash(monkeypatch, shown)
+        _record_splash(shown)
         w.run(w.app._offer_update, "9.9.9", "u", _installer())
         assert _until(w, lambda: "is ready" in (_banner(w) or {}).get(
             "text", ""))
@@ -165,7 +167,7 @@ def test_a_second_restart_click_opens_no_second_one(tmp_path, slots,
     """PAD-1034's second click goes straight to the close: no new splash."""
     shown = []
     with web_app(tmp_path, mfr="stern") as w:
-        _record_splash(monkeypatch, shown)
+        _record_splash(shown)
         w.run(w.app._offer_update, "9.9.9", "u", _installer())
         assert _until(w, lambda: "is ready" in (_banner(w) or {}).get(
             "text", ""))
@@ -179,7 +181,7 @@ def test_a_second_restart_click_opens_no_second_one(tmp_path, slots,
 def test_a_failed_splash_never_stops_the_restart(tmp_path, slots,
                                                  monkeypatch):
     with web_app(tmp_path, mfr="stern") as w:
-        _record_splash(monkeypatch, [], result=(False, "no powershell"))
+        _record_splash([], result=(False, "no powershell"))
         w.run(w.app._offer_update, "9.9.9", "u", _installer())
         assert _until(w, lambda: "is ready" in (_banner(w) or {}).get(
             "text", ""))

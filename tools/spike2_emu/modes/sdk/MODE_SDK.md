@@ -6406,8 +6406,13 @@ there is nothing for a mode to call. The Modes tab's **Prolonged Competition** p
   at that game's start. It is the runtime's memory only: switching the machine off ends it.
 - The log says each game: `prolonged competition: game 2 plays as Competition (flag 17 was 0)` - the game itself
   starts every game after the first with the flag clear - and `game 2 over (flag 17 is 1; prolonged on)`.
-- Not on the menus of game-mode table indices (Godzilla, Jaws, John Wick, Metallica, King Kong, X-Men) or Bond 60th's
-  object list yet: their ports have no `challenge_menu` lines, and the tick is not offered there.
+- The menus of game-mode table INDICES (Godzilla, Jaws, John Wick, Metallica, King Kong, X-Men) take it through `site
+  comp_menu_frame` (hook_full; `value comp_menu_frame_list_at` / `_count_at` / `_count_last` / `_cap` / `_cursor_reg`
+  / `_buttons_reg`, `comp_menu_index` / `_index_msg` / `comp_menu_end_index` / `_end_msg`): Competition's index again
+  (Standard's once on), its name message lettered UNTIL POWERED OFF from the frame the cursor arrives on. Bond 60th's
+  menu object takes it through `site comp_menu_obj_built` / `comp_menu_obj_pick` / `comp_menu_obj_add_fn` and
+  `value comp_menu_obj_*`: the game's own add called once more with Competition's kind and flag and our name.
+  `prolonged_comp.frame_lines` writes the index-menu lines from a program.
 
 Proven (emulator, Deadpool Pro 1.16): picked, two Competition games, picked again, off; the sweep over the latest builds
 is in docs/plans/pad1041_prolonged_comp.md.

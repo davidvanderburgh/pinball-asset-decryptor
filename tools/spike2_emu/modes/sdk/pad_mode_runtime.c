@@ -17240,9 +17240,126 @@ static void comp_menu_picked(unsigned *r)
         say("prolonged competition: %s %s on the menu", comp_name(), comp.pending ? "picked" : "no longer picked");
 }
 
+
+/* Round 2: the menus of game-mode table INDICES (Godzilla, Jaws, John Wick, King Kong, Metallica, X-Men; prolonged_comp
+ * .frame_lines): u32 indices on the menu function's stack, the cursor and the buttons in registers, the index under
+ * the cursor applied live every frame and drawn by its caption and name messages. At the frame point (`site
+ * comp_menu_frame`, hook_full) the entry is Competition's index a second time (`value comp_menu_index`; once on,
+ * Standard's: `comp_menu_end_index`), so the game itself makes the pick a Competition (or Standard) game; while the
+ * cursor is on it, that index's name message (`comp_menu_index_msg` ALL RANDOMNESS REMOVED, `comp_menu_end_msg`
+ * NORMAL PLAY) letters UNTIL POWERED OFF (ENDS PROLONGED COMPETITION), and the game's words come back as it leaves or
+ * a game starts. The count slot is the count, or the last index (`value comp_menu_frame_count_last 1`, Metallica). */
+static unsigned long comp_frame_sp;              /* the menu frame we appended to (a new menu: a new list) */
+static unsigned comp_frame_at, comp_frame_msg;   /* our entry's place in the list; the message we lettered (0: none) */
+
+static void comp_frame_restore(void)
+{
+    if (comp_frame_msg) pm_message_restore(comp_frame_msg);
+    comp_frame_msg = 0;
+}
+
+/* Where the cursor ends this frame, from the frame's state alone (tests lift it verbatim): `n` entries, `left` /
+ * `right` this frame's flipper presses (left first, as the games test them) */
+static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, unsigned right)
+{
+    if (!n) return cursor;
+    if (left) cursor = cursor ? cursor - 1 : n - 1;
+    if (right) cursor = cursor + 1 >= n ? 0 : cursor + 1;
+    return cursor;
+}
+
+static void comp_menu_frame(unsigned *r)
+{
+    unsigned char *sp = (unsigned char *)(r + 14);
+    unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
+    unsigned *count = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_count_at", 0));
+    unsigned last = pm_port_value("comp_menu_frame_count_last", 0) ? 1u : 0u;
+    unsigned cap = (unsigned)pm_port_value("comp_menu_frame_cap", 0);
+    unsigned creg = (unsigned)pm_port_value("comp_menu_frame_cursor_reg", 13);
+    unsigned breg = (unsigned)pm_port_value("comp_menu_frame_buttons_reg", 13);
+    unsigned idx = (unsigned)pm_port_value(comp.on ? "comp_menu_end_index" : "comp_menu_index", 0);
+    unsigned msg = (unsigned)pm_port_value(comp.on ? "comp_menu_end_msg" : "comp_menu_index_msg", 0);
+    unsigned n = *count + last;
+    static int room_said, said;
+    int was = comp.pending;
+    if (creg > 12 || breg > 12 || !idx || !msg || n > cap) return;
+    if ((unsigned long)sp != comp_frame_sp || comp_frame_at >= n || list[comp_frame_at] != idx) {   /* a new menu */
+        comp_frame_sp = (unsigned long)sp;
+        comp_frame_restore();
+        if (n >= cap) {
+            if (!room_said++) say("prolonged competition: no room on the start menu - its list holds %u indices", cap);
+            return;
+        }
+        comp_frame_at = n;
+        list[n] = idx;
+        *count += 1;
+        if (!said++) say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s)", n + 1,
+                         n + 1, idx, comp_name());
+    }
+    /* the cursor this frame draws: the press read just now moves it after this point (left back, right on, both
+     * wrapping), and the game letters the name as the cursor ARRIVES - so the message is ours from that frame */
+    comp.pending = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u) == comp_frame_at;
+    if (comp.pending) {
+        pm_message_set(msg, comp_name());              /* the index's name: ours while the cursor is on our entry */
+        comp_frame_msg = msg;
+    } else {
+        comp_frame_restore();
+    }
+    if (comp.pending != was)
+        say("prolonged competition: %s %s on the menu", comp_name(), comp.pending ? "picked" : "no longer picked");
+}
+
+/* Round 2: Bond 60th's start menu, an OBJECT: a vector of 24-byte entries (`value comp_menu_obj_vec` +0x204 its begin,
+ * +4 its end) and the selected index (`comp_menu_obj_index` +0x210), filled by the game's own add function (`site
+ * comp_menu_obj_add_fn`: add(menu, enabled, kind, flag, flag2, caption message, const char *name)). Just after the
+ * builder's last add (`site comp_menu_obj_built`, the menu in `value comp_menu_obj_reg`) the runtime calls it once more:
+ * Competition's kind and flag (`comp_menu_obj_kind`, the flag) under the COMPETITION caption, or once on Standard's
+ * (`comp_menu_obj_end_kind`, no flag) under STANDARD, named UNTIL POWERED OFF / ENDS PROLONGED COMPETITION. Start
+ * the menu shows the selected index and runs its entry's callback every frame (`site comp_menu_obj_pick`, the menu in
+ * `comp_menu_obj_pick_reg`): the game plays our entry as the Competition (Standard) it copies, and the runtime notes
+ * which entry is shown for the game's start. */
+static unsigned long comp_obj_menu;              /* the menu object our entry went into */
+static unsigned comp_obj_at;                     /* its place in the vector */
+
+static void comp_menu_obj_built(unsigned *r)
+{
+    unsigned reg = (unsigned)pm_port_value("comp_menu_obj_reg", 13), vec = (unsigned)pm_port_value("comp_menu_obj_vec", 0);
+    unsigned (*add)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned)
+        = (unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)
+          fn("comp_menu_obj_add_fn");
+    unsigned char *menu;
+    unsigned n;
+    static int said;
+    if (reg > 12 || !vec || !add) return;
+    menu = (unsigned char *)(unsigned long)r[reg];
+    n = (*(unsigned *)(menu + vec + 4) - *(unsigned *)(menu + vec)) / 24u;
+    add(r[reg], 1u, (unsigned)pm_port_value(comp.on ? "comp_menu_obj_end_kind" : "comp_menu_obj_kind", 0),
+        comp.on ? 0u : comp.flag, 0u, comp.on ? comp.caption_end : comp.caption, (unsigned)(unsigned long)comp_name());
+    if ((*(unsigned *)(menu + vec + 4) - *(unsigned *)(menu + vec)) / 24u != n + 1) {
+        say("prolonged competition: the start menu's add did not take the entry");
+        return;
+    }
+    comp_obj_menu = (unsigned long)menu;
+    comp_obj_at = n;
+    if (!said++) say("prolonged competition: on the start menu as entry %u of %u (%s)", n + 1, n + 1, comp_name());
+}
+
+static void comp_menu_obj_pick(unsigned *r)
+{
+    unsigned reg = (unsigned)pm_port_value("comp_menu_obj_pick_reg", 13);
+    unsigned at = (unsigned)pm_port_value("comp_menu_obj_index", 0);
+    if (reg > 12 || !at) return;
+    int was = comp.pending;      /* the game runs this every frame of the menu: say only a change */
+    comp.pending = (unsigned long)r[reg] == comp_obj_menu
+        && *(const unsigned *)(unsigned long)(r[reg] + at) == comp_obj_at;
+    if (comp.pending != was)
+        say("prolonged competition: %s %s on the menu", comp_name(), comp.pending ? "picked" : "no longer picked");
+}
+
 static void comp_game_start(void)
 {
     int was = comp.on, flag = game_flag(comp.flag);
+    comp_frame_restore();                               /* the menu's words back as it ends in a game */
     comp.on = comp_next(comp.on, comp.pending);
     comp.pending = 0;
     comp.games++;
@@ -17280,7 +17397,7 @@ static void comp_arm(void)
     static char raw[512];
     struct site *bus = site("hook_dispatch");
     long n = -1, i;
-    int game = event_bus_id("game_start"), ball = event_bus_id("ball_start"), ok;
+    int game = event_bus_id("game_start"), ball = event_bus_id("ball_start"), ok, frame, objm;
     unsigned k;
     const char *p;
     for (k = 0; k < sizeof COMP_FILES / sizeof COMP_FILES[0] && n < 0; k++)
@@ -17302,9 +17419,16 @@ static void comp_arm(void)
             : "comp.cfg names no flag or captions");
         return;
     }
-    if (!site("challenge_menu") || !site("challenge_menu_pick") || pm_port_value("challenge_menu_cap", 0) <= 0
+    objm = site("comp_menu_obj_built") && site("comp_menu_obj_pick") && fn("comp_menu_obj_add_fn")
+        && pm_port_value("comp_menu_obj_vec", 0) > 0 && pm_port_value("comp_menu_obj_index", 0) > 0
+        && pm_port_value("comp_menu_obj_kind", 0) > 0 && pm_port_value("comp_menu_obj_end_kind", 0) > 0;
+    frame = !objm && site("comp_menu_frame") && pm_port_value("comp_menu_frame_cap", 0) > 0
+        && pm_port_value("comp_menu_frame_list_at", 0) > 0 && pm_port_value("comp_menu_frame_count_at", 0) > 0
+        && pm_port_value("comp_menu_index", 0) > 0 && pm_port_value("comp_menu_index_msg", 0) > 0
+        && pm_port_value("comp_menu_end_index", 0) > 0 && pm_port_value("comp_menu_end_msg", 0) > 0;
+    if (!objm && !frame && (!site("challenge_menu") || !site("challenge_menu_pick") || pm_port_value("challenge_menu_cap", 0) <= 0
         || pm_port_value("challenge_menu_list_at", 0) <= 0
-        || (pm_port_value("challenge_menu_count_at", 0) <= 0 && pm_port_value("challenge_menu_count_reg", -1) < 4)) {
+        || (pm_port_value("challenge_menu_count_at", 0) <= 0 && pm_port_value("challenge_menu_count_reg", -1) < 4))) {
         say("prolonged competition: off - the port does not know this game's start menu");
         return;
     }
@@ -17313,18 +17437,30 @@ static void comp_arm(void)
             : "the port names no game_start / ball_start event");
         return;
     }
+    if (frame) {                  /* the index menus letter our entry through the game's messages, on a card of only this */
+        static const char *const msg_d[] = { "message_count", "message_remap", "message_table", 0 };
+        if (!have_data(msg_d)) {
+            say("prolonged competition: off - the port names no message table to letter the menu's entry with");
+            return;
+        }
+        can |= PM_CAN_MESSAGES;
+    }
     comp.game_id = (unsigned)game;
     comp.ball_id = (unsigned)ball;
     comp.over_id = event_bus_id("game_over") >= 0 ? (unsigned)event_bus_id("game_over") : ~0u;
-    if (!(pm_port_value("challenge_menu_count_reg", -1) >= 0 ? hook_full(fn("challenge_menu"), comp_menu_built)
-                                                             : hook(fn("challenge_menu"), comp_menu_built))
-        || !hook(fn("challenge_menu_pick"), comp_menu_picked) || !hook(bus->addr, on_comp_dispatch)) {
+    if ((objm ? !hook_full(fn("comp_menu_obj_built"), comp_menu_obj_built)
+                || !hook_full(fn("comp_menu_obj_pick"), comp_menu_obj_pick)
+          : frame ? !hook_full(fn("comp_menu_frame"), comp_menu_frame)
+               : !(pm_port_value("challenge_menu_count_reg", -1) >= 0 ? hook_full(fn("challenge_menu"), comp_menu_built)
+                                                                      : hook(fn("challenge_menu"), comp_menu_built))
+                 || !hook(fn("challenge_menu_pick"), comp_menu_picked))
+        || !hook(bus->addr, on_comp_dispatch)) {
         say("prolonged competition: off - the start menu or the event bus could not be hooked");
         return;
     }
     comp.armed = 1;
     say("prolonged competition: armed - on the start menu at 0x%08x (captions %u / %u), flag %u kept set from every "
-        "game's start (bus 0x%x, ball start 0x%x) while it is on%s", fn("challenge_menu"), comp.caption,
+        "game's start (bus 0x%x, ball start 0x%x) while it is on%s", fn(objm ? "comp_menu_obj_built" : frame ? "comp_menu_frame" : "challenge_menu"), comp.caption,
         comp.caption_end, comp.flag, comp.game_id, comp.ball_id, comp.only ? " (comp.cfg: only)" : "");
 }
 

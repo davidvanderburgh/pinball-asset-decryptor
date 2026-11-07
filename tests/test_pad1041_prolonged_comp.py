@@ -45,6 +45,25 @@ def test_picked_once_every_game_is_competition_until_picked_again(tmp_path):
     assert out == ["game 1 1", "game 2 1", "game 3 1", "game 4 0", "game 5 0"]
 
 
+FRAME_MAIN = r"""
+#include <stdio.h>
+@FNS@
+int main(void)
+{
+    /* a menu of 5: right from 3 arrives on 4 (the last, ours), right from 4 wraps to 0, left from 0 wraps to 4,
+       no press stays, an empty menu stays */
+    printf("%u %u %u %u %u\n", comp_frame_cursor(3, 5, 0, 2), comp_frame_cursor(4, 5, 0, 2),
+           comp_frame_cursor(0, 5, 4, 0), comp_frame_cursor(2, 5, 0, 0), comp_frame_cursor(1, 0, 4, 0));
+    return 0;
+}
+"""
+
+
+def test_the_index_menus_letter_our_name_as_the_cursor_arrives(tmp_path):
+    fns = R._lift(_src(), "static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, unsigned right)")
+    assert R._host_run(tmp_path, FRAME_MAIN.replace("@FNS@", fns)).split() == ["4", "0", "4", "2", "1"]
+
+
 def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     src = _src()
     assert src.index("comp_arm();") < src.index("if (!insider_arm()) return;")
@@ -70,12 +89,56 @@ def test_every_build_whose_start_menu_the_app_knows_is_offered_it():
     from pinball_decryptor.plugins.stern import mode_project as MP
     from pinball_decryptor.plugins.stern import prolonged_comp as PCo
     offered = {k for k, p in MP.profiles().items() if not PCo.title_refusal(p)}
-    menus = {k for k, p in MP.profiles().items()
-             if "challenge_menu" in MP.read_port(MP.port_path(p))["site"]}
-    assert offered == menus and len(offered) == 49
+    # every port but Venom's and D&D's (theirs) and three older builds (latest versions only, as co-op)
+    assert sorted(set(MP.profiles()) - offered) == [
+        "dungeons_and_dragons_le_1_00", "dungeons_and_dragons_le_1_10", "dungeons_and_dragons_pro_1_10",
+        "godzilla_pro_1_15", "john_wick_le_1_01", "metallica_spike_1_03", "venom_le_1_07", "venom_pro_1_07"]
     for key in ("deadpool_pro_1_16", "james_bond_le_1_06", "star_wars_pro_1_31", "turtles_pro_1_59",
-                "elvira3_1_13", "mando_pro_1_45", "foo_fighters_le_1_04"):
+                "elvira3_1_13", "mando_pro_1_45", "foo_fighters_le_1_04",            # the menus of entries
+                "godzilla_le_1_16", "jaws_pro_1_02", "john_wick_le_1_02", "king_kong_le_0_97",
+                "metallica_spike_1_04", "uncanny_xmen_le_0_98",                     # round 2: menus of indices
+                "james_bond_60th_le_1_11"):                                          # round 2: Bond 60th's object
         assert key in offered, key
+
+
+def test_a_port_without_the_flags_is_not_offered_it():
+    from pinball_decryptor.plugins.stern import prolonged_comp as PCo
+    port = _port("king_kong_le-0.97.port")
+    assert PCo.port_ready(port)
+    port["data"].pop("game_flags")
+    assert not PCo.port_ready(port)
+
+
+def test_the_index_menus_ports_say_competition_and_standard():
+    from pinball_decryptor.plugins.stern import prolonged_comp as PCo
+    for name, comp in (("godzilla_le-1.16.port", 3), ("king_kong_pro-0.97.port", 2), ("metallica_spike-1.04.port", 3)):
+        v = _port(name)["value"]
+        assert PCo.FRAME_SITE in _port(name)["site"], name
+        assert (v["comp_menu_index"], v["comp_menu_index_msg"], v["comp_menu_end_index"], v["comp_menu_end_msg"])             == (comp, 1920, 1, 1915), name
+    assert _port("metallica_spike-1.04.port")["value"]["comp_menu_frame_count_last"] == 1   # its slot: the last index
+    # Godzilla LE's frame is PAD-686's own hand-found menu
+    gz = _port("godzilla_le-1.16.port")
+    assert gz["site"][PCo.FRAME_SITE] == gz["site"]["challenge_menu_frame"]
+    assert gz["value"]["comp_menu_frame_list_at"] == 300 and gz["value"]["comp_menu_frame_cap"] == 9
+
+
+def test_bond_60th_menu_object_lines():
+    from pinball_decryptor.plugins.stern import prolonged_comp as PCo
+    port = _port("james_bond_60th_le-1.11.port")
+    assert all(s in port["site"] for s in PCo.OBJ_SITES)
+    v = port["value"]
+    assert (v["comp_menu_obj_vec"], v["comp_menu_obj_index"], v["comp_menu_obj_kind"], v["comp_menu_obj_end_kind"])         == (0x204, 0x210, 2, 1)
+
+
+def test_the_runtime_takes_each_kind_of_menu():
+    src = _src()
+    arm = R._lift(src, "static void comp_arm(void)")
+    assert 'hook_full(fn("comp_menu_frame"), comp_menu_frame)' in arm
+    assert 'hook_full(fn("comp_menu_obj_built"), comp_menu_obj_built)' in arm
+    assert 'hook_full(fn("comp_menu_obj_pick"), comp_menu_obj_pick)' in arm
+    frame = R._lift(src, "static void comp_menu_frame(unsigned *r)")
+    assert "unsigned n = *count + last;" in frame and "pm_message_set(msg, comp_name());" in frame
+    assert "comp_frame_restore();" in R._lift(src, "static void comp_game_start(void)")
 
 
 def test_venom_and_dnd_keep_their_own():
@@ -83,7 +146,7 @@ def test_venom_and_dnd_keep_their_own():
     from pinball_decryptor.plugins.stern import prolonged_comp as PCo
     for key in ("venom_pro_1_07", "venom_le_1_07", "dungeons_and_dragons_pro_1_10"):
         assert "already" in PCo.title_refusal(MP.profile(key)), key
-    assert "start menu yet" in PCo.title_refusal(MP.profile("godzilla_le_1_16"))
+    assert "start menu yet" in PCo.title_refusal(MP.profile("godzilla_pro_1_15"))   # an older build
     assert PCo.title_refusal(None) == PCo.NO_TITLE
 
 
@@ -109,6 +172,17 @@ def test_comp_cfg_rides_with_the_runtime():
 
 ELFS = sorted(p for d in os.environ.get("PAD_GAME_ELFS", "C:/tmp/PAD-1041/elfs;C:/tmp/PAD-1010/elfs").split(";")
               for p in glob.glob(os.path.join(d, "*.elf")))
+
+
+@pytest.mark.skipif(not ELFS, reason="no shipped game programs here (PAD_GAME_ELFS)")
+def test_every_index_menu_program_has_one_frame():
+    from pinball_decryptor.plugins.stern import prolonged_comp as PCo
+    found = {os.path.basename(p): PCo.frame_lines(open(p, "rb").read()) for p in ELFS}
+    want = [k for k in found if k.startswith(("godzilla_", "jaws_", "john_wick_", "king_kong_", "metallica_",
+                                              "uncanny_xmen_"))]
+    assert want and all(found[k] for k in want)
+    # the other titles' menus are lists of entries (or their own Prolonged Competition): no frame of this shape
+    assert not any(v for k, v in found.items() if k not in want)
 
 
 @pytest.mark.skipif(not ELFS, reason="no shipped game programs here (PAD_GAME_ELFS)")

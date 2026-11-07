@@ -60,14 +60,30 @@ port knows the start menu, which is also every older build PAD-619 ported (49 po
 - Shots: `artifacts/PAD-1041` before/after_start_menu (stock last entry COMPETITION / ALL RANDOMNESS REMOVED; ours
   COMPETITION / UNTIL POWERED OFF), the Modes tab tick.
 
-## Left (round 2)
+## Round 2: the other menus (every latest build but Venom and D&D)
 
-The menus PAD-619 does not hook as a list yet, so the tick is not offered there:
+- **Menus of game-mode table indices** (Godzilla LE/Pro 1.16, Jaws LE/Pro 1.02, John Wick LE/Pro 1.02, King Kong LE/Pro
+  0.97, Metallica 1.04, X-Men LE/Pro 0.98): the list is u32 game-mode indices on the menu function's stack; every frame
+  the loop reads the buttons, moves the cursor (r5/r6/r10), applies the index under it live and letters its caption
+  and name. `prolonged_comp.frame_lines` finds the frame by one shape on all eleven (`add r3, sp, #T ; add r3, r3, rC,
+  lsl #2 ; ldr r3, [r3, #-back]` then `tst rB, #4` / `tst rB, #2` and the count `ldr [sp, #C]`; Metallica's slot holds
+  the LAST index, `comp_menu_frame_count_last 1`), room = the game-mode table's entries (Godzilla's own 32-byte table:
+  9; the GamePlayModes table: Jaws 14, John Wick 10, King Kong 9, Metallica 17, X-Men 5), and Competition's and
+  Standard's indices with their name messages from the table (Competition 3, King Kong 2; name 1920 ALL RANDOMNESS
+  REMOVED; Standard 1, 1915 NORMAL PLAY). Godzilla LE's matches PAD-686's hand-found frame. Port lines `site
+  comp_menu_frame`, `value comp_menu_frame_*`, `comp_menu_index[_msg]`, `comp_menu_end_index` / `_end_msg` (their own
+  names, so PAD-686's MODE CHALLENGE stepping does not switch on with them). The runtime appends the index a second
+  time (Standard's once on), so the game itself plays the pick as Competition; the name message is ours from the
+  frame the cursor ARRIVES on (the press read at the frame point moves it afterwards, and the games letter the name
+  as it arrives: set later, the game's words stayed), and the game's again as it leaves or a game starts.
+- **Bond 60th LE 1.11**: the menu is an object, a vector of 24-byte entries (+0x204, +0x208) and the selected index
+  (+0x210), filled by add(menu, enabled, kind, flag, flag2, caption, const char *name) at 0x5cdd4. After the builder's
+  last add (0x5d0dc, the menu in r5) the runtime calls add once more: COMPETITION's kind 2 and flag 17 under its
+  caption, named UNTIL POWERED OFF (once on, STANDARD's kind 1); the per-frame point that runs the selected entry's
+  callback (0x5c4a8, the menu in r4) says which is shown. Hand-written lines, as PAD-686's for Godzilla LE.
+- King Kong LE 0.97, X-Men LE 0.98 and Bond 60th had no `data game_flags` (the flag bitmap): `portchallenge.flag_lines`
+  adds it, and `port_ready` now needs it.
+- Recipes rebuilt for the 14 ports changed.
 
-1. Godzilla (LE/Pro 1.16): the menu of game-mode table indices (`site challenge_menu_frame`, PAD-686, LE only); the
-   way in is Competition's index a second time with its subtitle message said as UNTIL POWERED OFF while the cursor is
-   on it (as PAD-686's MODE CHALLENGE entry steps through the modes' own).
-2. Jaws, John Wick, Metallica, King Kong, X-Men: the GamePlayModes index menus (`portchallenge.gpm_lines`): no menu
-   sites in their ports; their start menus' frames are to be found first.
-3. Bond 60th LE 1.11: its start menu is an object list built by calls (fn 0x5cf38, `0x5cef0(list, kind, ?, flag,
-   caption, text)`), so the entry is one more call after the builder.
+Not offered: Venom, D&D (their own), and the three older builds outside the latest-versions scope (Godzilla Pro 1.15,
+John Wick LE 1.01, Metallica 1.03).

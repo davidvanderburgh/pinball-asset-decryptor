@@ -6194,6 +6194,18 @@ games, co-op boards and times. A category's value is what the game keeps for its
 FIGHTER CHAMPION, GODZILLA POWERUP CHAMPION) or a best score (GODZILLA MULTIBALL CHAMPION), so those are offered
 unticked, for the owner to pick per game.
 
+**On the winners' character cards (round 2).** DoomWalrus666: "the players selected Godzilla character portrait ...
+next to their awards at the end of the game". A card with co-op characters (below) also carries an award card per
+character in the HUD scene beside the pick's screens: `PadCoopAward_<n>` (1-based, the character's place), the pick
+card's look with the character's portrait and name, and a words line `PadCoopAward_<n>_Words` the runtime writes.
+coop.cfg says `award_cards on`. When the co-op game is over (inside the game's player change, on its thread, before
+its match and high scores) the game's end waits while each award is shown on each winner's card in turn, 3.5 s each,
+42 s in all, the game's process sleeping a tick at a time (`site proc_sleep`, as the end-of-ball hold):
+
+    MOST POINTS  PLAYER 2  9,982,980
+
+A winner with no character (no pick) is left out there; the attract pages still show every award.
+
 ### Co-op characters (PAD-1031)
 
 Each teammate picks a character at the start of their first ball (teammate 1 when the team forms; each join opens

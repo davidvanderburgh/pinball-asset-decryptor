@@ -244,3 +244,7 @@ hit in regular play (proof_maser_regular_play.png). AN ALLY EVERY BALL: coop_cha
 turn of the teammate (gift:311 -> LIGHT ALLY). TIER 2 ALWAYS OPEN: `unlock:<id>` without @rules reads 1 whenever the
 teammate is up (UNLOCK ALL MONSTER BATTLES 334, read live by the selection screen's slot state), so every battle,
 tier 2 included, is open at any battle select of theirs. Words in the dialog, help and SDK follow.
+Proven on LE with two teammates: LIGHT ALLY given at the pick and again when teammate 1 came back for ball 2 (the
+ally list went 0 0 1 -> 1 0 1), and all seven battle places open at the pick. The LE rig ends a ball on a drain only
+once the ball has been played a while (plunge, a minute of switch hits, then the trough): a drain straight after the
+pick, or 20 s after the plunge, is ignored (run 6's "no pick for teammate 2" was the same).

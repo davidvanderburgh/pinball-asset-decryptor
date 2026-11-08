@@ -5,10 +5,10 @@
 Serves <repo> on a scratch Stern project made here (sounds named the way a
 tester's Venom LE project names them), selects "... - ONE", presses F2, types
 "One" and presses OK.  Then it clears a second sound's name while switching
-its Type and presses OK.  Writes, under the same name before and after:
+its Type, presses OK and scans again.  Writes, under the same name before and after:
 
 - <before_|after_>audio_case_rename.png   right after OK on "ONE" -> "One"
-- <before_|after_>audio_clear_name.png    right after OK on the cleared name
+- <before_|after_>audio_clear_name.png    the cleared name after a rescan
 
 and prints the audio folder's file names at the end.
 
@@ -112,6 +112,11 @@ def main():
                 cur = sel.first.input_value()
                 sel.first.select_option("sfx" if cur != "sfx" else "music")
             page.get_by_role("button", name="OK").first.click()
+            time.sleep(1.5)
+            # the lost Type showed only once the list was read again
+            webui_shot.api(url, "audio.scan")
+            time.sleep(1)
+            S._wait_scan(state)
             time.sleep(1.5)
             page.screenshot(path=out("audio_clear_name.png"))
             print("shot", out("audio_clear_name.png"), flush=True)

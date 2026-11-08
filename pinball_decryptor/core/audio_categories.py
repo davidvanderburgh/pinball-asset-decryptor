@@ -161,9 +161,17 @@ def _load_renamed_cats(assets_dir):
         if cat not in (MUSIC, SFX, CALLOUTS, OTHER):
             continue
         parts = name_memory.split_decode_name(rel.rpartition("/")[2])
-        if parts and parts[1] == labels.get(md5):
+        # a Type kept with a cleared name (PAD-1060) holds while it is bare
+        if parts and parts[1] == labels.get(md5, ""):
             out[rel] = cat
     return out
+
+
+def derived(assets_dir, rel):
+    """The Type *rel* gets from its name and the project's CSVs alone, as if
+    the user had never picked one."""
+    return _classify_one(rel, _load_callouts(assets_dir),
+                         _load_music_titles(assets_dir))
 
 
 def _classify_one(rel, callouts, titled):

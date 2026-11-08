@@ -70,6 +70,20 @@ def sanitize_label(text):
     return cleaned.rstrip(". ")
 
 
+def clashes(src, dst):
+    """True when *dst* names an existing file that is not *src*.
+
+    A rename that only changes the case ("ONE" -> "One") finds *dst* already
+    there on a case-insensitive disk (Windows, a default macOS volume): it is
+    the same file, not a clash (PAD-1060)."""
+    if not os.path.exists(dst):
+        return False
+    try:
+        return not os.path.samefile(src, dst)
+    except OSError:
+        return True
+
+
 def _load_raw():
     """Raw store — values are either a bare label string (v0.63.0) or a
     ``{"label":..., "cat":...}`` dict (v0.63.1, so a rename keeps its Type
@@ -95,12 +109,15 @@ def _load_raw():
             if cat:
                 entry["cat"] = cat
             out[str(k).lower()] = entry
+        elif cat:
+            # PAD-1060: a Type kept for a slot whose name was cleared
+            out[str(k).lower()] = {"cat": cat}
     return out
 
 
 def load():
     """``{md5: label}`` — ``{}`` on missing/corrupt/foreign."""
-    return {k: v["label"] for k, v in _load_raw().items()}
+    return {k: v["label"] for k, v in _load_raw().items() if "label" in v}
 
 
 def load_categories():
@@ -121,15 +138,16 @@ def _save(data):
 
 def remember(md5, label, category=None):
     """Store *label* (and optionally the slot's Type *category*) for content
-    *md5*; a blank label forgets the entry."""
+    *md5*; a blank label forgets the name, keeping only a *category* given
+    with it (PAD-1060: a cleared name with a new Type kept the old Type)."""
     if not md5:
         return
     md5 = str(md5).lower()
     label = sanitize_label(label)
     data = _load_raw()
-    if label:
-        entry = {"label": label}
-        cat = str(category or "").strip().lower()
+    cat = str(category or "").strip().lower()
+    if label or cat:
+        entry = {"label": label} if label else {}
         if cat:
             entry["cat"] = cat
         if data.get(md5) == entry:
@@ -201,7 +219,7 @@ def apply_saved_names(assets_dir, log=None):
         new_base = "%s - %s%s" % (prefix, label, ext)
         new_rel = (folder + "/" + new_base) if folder else new_base
         dst = os.path.join(assets_dir, *new_rel.split("/"))
-        if os.path.exists(dst):
+        if clashes(src, dst):
             if log:
                 log("  skip saved name for %s: target exists" % rel, "info")
             continue

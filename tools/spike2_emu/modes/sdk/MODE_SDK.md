@@ -6314,11 +6314,13 @@ draws in its header); the one taken stays on the glass 2.5 s saying PICKED (the 
 the pick and its clock wait; it was dropped there once, leaving that teammate with no character for the turn.
 PAD-1051 (DoomWalrus666): the game's own PLAYER LANGUAGE SELECT (Godzilla's adjustment 14, `USE FLIPPERS TO SELECT
 LANGUAGE:`) walked on the same flippers at the same ball start, and the Action press that took a character launched
-the ball. With `lane` in coop.cfg, while the pick is open and its ball waits in the lane the game does not see the
-pick's buttons (the left flipper, `button`, `action`): the drain hook clears their descriptors' handler bits (0x400 /
-0x800) at a press and puts them back at the first press after the pick, so the game gets whole presses only. Action
-takes the character, then the flippers are the language select's and Action launches; a launch (the lane opening)
-takes the one shown. Co-op, Team 2v2 and Team 2v1 share the pick. With no lane, or the ball out, as before.
+the ball. While the pick is open and its ball waits in the plunger - the game's own flags, the port's
+`ball_launch_flag` / `ball_launch_wait_flag` (PAD-643's) - the game does not see the pick's buttons (the left flipper,
+`button`, `action`): at a press the drain hook leaves the switch's level byte reading released (Godzilla polls it: its
+flippers and Action have no handler) and clears its descriptor's handler bits (0x400 / 0x800); the switch is given
+back at its first press, or release, after the pick, so the game gets whole presses only. Action takes the character,
+then the flippers are the language select's and Action launches; a launch (the flag clearing) takes the one shown.
+Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
 `mode.log`:
 
     co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one (a launch the one shown), 30 s

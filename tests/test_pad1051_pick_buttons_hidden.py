@@ -9,8 +9,8 @@ at the same ball start, and Godzilla's Action button launches from the lane.
 - The runtime's drain hook (on_switch_edge, edge_hide_press), lifted verbatim over test_spike2_switch_drain's fake
   tables: a wanted switch's handler bits are cleared at a press and come back at its first press once nothing wants
   it - never a release without its press; a shared descriptor and the untraced generation are left alone.
-- The co-op rule (coop_hides, coop_edge, coop_chars_tick), lifted over test_pad1031's model game: only while a pick is
-  open with the ball in the lane, and a launch takes the one shown.
+- The co-op rule (coop_hides, coop_chars_tick), lifted over test_pad1031's model game: only while a pick is open and
+  its ball waits in the plunger (the game's own flags), and a launch (the flag clearing) takes the one shown.
 - With the Godzilla LE 1.16 program present: its drain reads the bits after switch_edge returns.
 """
 import os
@@ -26,7 +26,7 @@ static void bits(const char *what, unsigned id)
 {
     unsigned short f;
     if (edge.desc_via >= 0) memcpy(&f, descs_b[id] + 0x1a, 2); else memcpy(&f, recs_a[id] + 0x1e, 2);
-    printf("%s 0x%04x\n", what, f);
+    printf("%s 0x%04x level %u\n", what, f, edge.desc_via >= 0 ? recs_b[id][0x18] : state_a[id][1]);
 }
 int main(int argc, char **argv)
 {
@@ -46,11 +46,11 @@ int main(int argc, char **argv)
     edge.polarity_at = gen_a ? 0x20 : 0x1c;
     edge_shots = 1;
     coop_live = 1;
-    if (gen_a) { sw_a(6, 0x3800, 0); sw_a(3, 0x800, 0); }
+    if (gen_a) { sw_a(6, 0x3800, 4); sw_a(3, 0x800, 4); }
     else {
         unsigned i;
         for (i = 1; i < 12; i++) sw_b(i, 0x2000, 0);              /* every switch its own descriptor */
-        sw_b(6, 0x3800, 0); sw_b(3, 0x800, 0);
+        sw_b(6, 0x3800, 4); sw_b(3, 0x800, 4);                    /* active high: level 1 is a press */
         put32(recs_b[4] + 8, (unsigned long)descs_b[3]);           /* 3 and 4 share one */
     }
     hide_id = 6;
@@ -81,46 +81,48 @@ def _drain(tmp_path, gen):
 
 def test_a_hidden_switch_is_hidden_from_a_press_through_its_release(tmp_path):
     out = _drain(tmp_path, "B")
-    assert "pressed 0x3000" in out                                  # its handler bits held back at the press
-    assert "released 0x3000" in out
-    assert "pressed again 0x3000" in out
-    assert "released, nothing wants it 0x3000" in out              # a release alone is never shown
-    assert "the next press 0x3800" in out                           # the game sees this press, and its release
-    assert "its release 0x3800" in out
-    assert "a shared descriptor 0x0800" in out                      # hiding 3 would hide 4 too: left alone
+    assert "pressed 0x3000 level 0" in out                          # its handler bits held back, it reads released
+    assert "released 0x3000 level 0" in out
+    assert "pressed again 0x3000 level 0" in out
+    assert "released, nothing wants it 0x3800 level 0" in out      # given back at the release: open, as it is
+    assert "the next press 0x3800 level 1" in out                   # the game sees this press, and its release
+    assert "its release 0x3800 level 0" in out
+    assert "a shared descriptor 0x0800 level 1" in out              # hiding 3 would hide 4 too: left alone
     assert "modes saw 3" in out                                     # the runtime's own shots still see every press
 
 
 def test_the_other_generation_hides_nothing(tmp_path):
     out = _drain(tmp_path, "A")                                      # its drain is not traced
-    assert "pressed 0x3800" in out and "the next press 0x3800" in out
+    assert any(line.startswith("pressed 0x3800") for line in out)                   # nothing held back
+    assert any(line.startswith("the next press 0x3800") for line in out)
 
 
 LANE_MAIN = r"""
-static void lane(int in) { coop_edge(62, in ? 1 : 0, 0x800, 0); }
 static void hides(const char *what) { printf("%s %d%d%d%d\n", what, coop_hides(60), coop_hides(59), coop_hides(34), coop_hides(36)); }
 int main(void)
 {
     coop_char_line("- GODZILLA 1954|");
     coop_char_line("- GODZILLA 2000|");
-    coop_pick_on = 1; coop.button = 59; coop_left = 60; coop_action = 34; coop_lane = 62; coop_live = 1;
+    coop_pick_on = 1; coop.button = 59; coop_left = 60; coop_action = 34; coop_live = 1; coop_flag_in = 12;
     coop.n = 2; coop.turn = 1;
-    coop_chars_begin(); coop_pick_open(1);
-    hides("served, not in the lane");
-    lane(1); hides("in the lane");
+    ball_waits = 0; coop_chars_begin(); coop_pick_open(1);
+    hides("served, not in the plunger");
+    ball_waits = 1; coop_chars_tick(); hides("in the plunger");
     press(34); hides("taken, before the tick");
     coop_chars_tick(); hides("picked"); printf("t1 %d\n", coop_pick_of[1]);
-    coop.turn = 2; coop_chars_turn(); lane(1);
-    press(59); coop_chars_tick(); hides("t2 walking");
-    now_ms += 1000; lane(0); coop_chars_tick();
+    coop.turn = 2; ball_waits = 0; coop_chars_turn(); coop_chars_tick();
+    ball_waits = 1; press(59); coop_chars_tick(); hides("t2 walking");
+    now_ms += 1000; ball_waits = 0; coop_chars_tick();
     printf("t2 %d open %d\n", coop_pick_of[2], pk.open);
-    coop_chars_begin(); coop.turn = 1; coop_chars_turn(); lane(1); coop_lane = 0; hides("no lane known");
+    coop_chars_begin(); coop.turn = 1; coop_chars_turn(); now_ms += 1000; coop_chars_tick();
+    printf("never waited: open %d\n", pk.open);
+    ball_waits = -1; coop_flag_in = 0; coop_chars_tick(); hides("no plunger flags");
     return 0;
 }
 """
 
 
-def test_the_pick_hides_its_buttons_only_with_the_ball_in_the_lane_and_a_launch_takes_the_one_shown(tmp_path):
+def test_the_pick_hides_its_buttons_only_while_its_ball_waits_and_a_launch_takes_the_one_shown(tmp_path):
     src = C.RUNTIME.read_text(encoding="utf-8")
     main = C.MAIN[:C.MAIN.index("@DECL@")] + "static int coop_live;\n@DECL@" + C.MAIN[C.MAIN.index("@DECL@") + 6:]
     main = main[:main.index("int main(void)")] + LANE_MAIN
@@ -132,14 +134,15 @@ def test_the_pick_hides_its_buttons_only_with_the_ball_in_the_lane_and_a_launch_
                                                               "static uint64_t number(const char **p, int *ok)"))
     out = C.R._host_run(tmp_path, main.replace("@NUMBER@", number).replace("@DECL@", C._decl(src))
                         .replace("@FNS@", lifted)).splitlines()
-    assert "served, not in the lane 0000" in out                     # the ball not in the lane yet: the game's
-    assert "in the lane 1110" in out                                 # flippers and Action; never Start
+    assert "served, not in the plunger 0000" in out                  # no ball waiting yet: the game's
+    assert "in the plunger 1110" in out                              # flippers and Action; never Start
     assert "taken, before the tick 1110" in out                      # the taking press's release stays the pick's
     assert "picked 0000" in out and "t1 0" in out                    # then the language select and the launch
     assert "t2 walking 1110" in out
     assert "t2 1 open 0" in out                                      # launched with RANDOM shown: the one free
     assert any("the ball was launched with it shown" in line for line in out)
-    assert "no lane known 0000" in out                               # as before PAD-1051
+    assert "never waited: open 1" in out                             # no flag seen set: no launch to take it
+    assert "no plunger flags 0000" in out                            # as before PAD-1051
 
 
 #: the Godzilla LE 1.16 program: test_pad1031's, PAD_GZ_ELF, or a rig override's copy (its own patches lie elsewhere)

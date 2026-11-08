@@ -54,6 +54,8 @@ static void pm_set_text(void *t, const char *w) { (void)t; (void)w; }
 static void str_copy(char *d, unsigned cap, const char *s, unsigned n) { (void)n; snprintf(d, cap, "%s", s); }
 static void pm_show(void *node, int on) { (void)node; (void)on; }
 static void coop_cards_find(void) {}                     /* PAD-1028 round 2: the award cards (test_pad1028) */
+static int ball_waits = -1;                              /* PAD-1051: the game's plunger flags (-1: the port has none) */
+static int coop_ball_waits(void) { return ball_waits; }
 struct pm_stock_rule;
 static struct pm_stock_rule *pm_stock_rule(unsigned id) { (void)id; return 0; }
 static int pm_stock_active(struct pm_stock_rule *r) { (void)r; return 0; }

@@ -116,6 +116,9 @@ int main(void)
     printf("t2 %d open %d\n", coop_pick_of[2], pk.open);
     coop_chars_begin(); coop.turn = 1; coop_chars_turn(); now_ms += 1000; coop_chars_tick();
     printf("never waited: open %d\n", pk.open);
+    coop_lane = 62; ball_waits = 1; coop_chars_tick(); hides("waiting again");
+    coop_edge(62, 1, 0, 0x20); hides("the ball landing");          /* its lane edge 0.0 s on: still waiting */
+    now_ms += 2000; coop_edge(62, 0, 0, 0x20); hides("the lane moved");   /* launched, whatever the flags say */
     ball_waits = -1; coop_flag_in = 0; coop_chars_tick(); hides("no plunger flags");
     return 0;
 }
@@ -142,6 +145,9 @@ def test_the_pick_hides_its_buttons_only_while_its_ball_waits_and_a_launch_takes
     assert "t2 1 open 0" in out                                      # launched with RANDOM shown: the one free
     assert any("the ball was launched with it shown" in line for line in out)
     assert "never waited: open 1" in out                             # no flag seen set: no launch to take it
+    assert "waiting again 1110" in out
+    assert "the ball landing 1110" in out
+    assert "the lane moved 0000" in out                              # never held from a ball in play
     assert "no plunger flags 0000" in out                            # as before PAD-1051
 
 

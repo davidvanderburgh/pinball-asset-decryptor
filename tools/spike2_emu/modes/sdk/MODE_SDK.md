@@ -6319,7 +6319,9 @@ the ball. While the pick is open and its ball waits in the plunger - the game's 
 `button`, `action`): at a press the drain hook leaves the switch's level byte reading released (Godzilla polls it: its
 flippers and Action have no handler) and clears its descriptor's handler bits (0x400 / 0x800); the switch is given
 back at its first press, or release, after the pick, so the game gets whole presses only. Action takes the character,
-then the flippers are the language select's and Action launches; a launch (the flag clearing) takes the one shown.
+then the flippers are the language select's and Action launches; a launch (the flag clearing) takes the one shown. Hiding
+also stops at the first `lane` switch edge 1 s or more after the ball began to wait (a launch, whatever the flags
+say; either direction, as the lane's sense varies), so the flippers are never held from a ball in play.
 Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and

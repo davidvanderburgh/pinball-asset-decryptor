@@ -16219,6 +16219,7 @@ static void coop_turn_show(void)
  * ball 1 hid it: the pick takes those presses). So the presses count once the turn's ball has left the shooter lane
  * (`lane <id>`), none while a ball waits there, and none this long after one leaves it. */
 #define COOP_LAUNCH_MS 1500ul
+#define COOP_SETTLE_MS 1000ul   /* PAD-1051: a lane edge this soon after the ball began to wait is it landing */
 static struct coop_char {
     char name[28], does[28];
     unsigned n_adj;
@@ -16237,6 +16238,8 @@ static struct {
     unsigned long left, clock_ms;           /* PAD-1044: the time left, counted only while the game is in play */
     int held;                               /* the game is busy: the pick waits */
     int waited;                             /* PAD-1051: its ball has waited in the plunger since it opened */
+    volatile int moved;                     /* ... and the lane switch has moved since: no more hiding */
+    unsigned long waited_ms;                /* when it began to wait */
 } pk;
 static struct { int on, c; unsigned who; unsigned long at; } coop_done;   /* PAD-1044: the one taken, on the glass */
 static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
@@ -16585,7 +16588,7 @@ static void coop_pick_open(unsigned t)
     pk.said_ms = pk.clock_ms = pm_ms();
     pk.left = coop_pick_ms;
     pk.held = 0;
-    pk.waited = 0;
+    pk.waited = pk.moved = 0;
     pk.phase = 0;
     pk.walk = pk.take = 0;
     pk.open = 1;
@@ -16661,10 +16664,12 @@ static int coop_ball_waits(void)
 
 /* PAD-1051: the pick's buttons are the pick's alone while its ball waits in the plunger - the game's own language
  * select has the flippers once a character is taken, and the Action press that takes one launches nothing (the next
- * one does). With the ball out, or a port with no plunger flags, the game sees them as before. */
+ * one does). With the ball out, or a port with no plunger flags, the game sees them as before; and once the lane
+ * switch (`lane`) has moved after the ball began to wait, whatever the flags say, so the flippers are never held
+ * from a ball in play. */
 static int coop_hides(unsigned id)
 {
-    return coop_live && pk.open && id && (id == coop_left || id == coop.button || id == coop_action)
+    return coop_live && pk.open && !pk.moved && id && (id == coop_left || id == coop.button || id == coop_action)
            && coop_ball_waits() == 1;
 }
 
@@ -16690,6 +16695,8 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     unsigned closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
     unsigned long now;
     if (coop_lane && id == coop_lane) {                       /* PAD-1045: a ball arrives in the lane, or leaves it */
+        if (pk.open && pk.waited && pm_ms() - pk.waited_ms >= COOP_SETTLE_MS)   /* PAD-1051: either way - its sense */
+            pk.moved = 1;                                     /* varies by switch; not the ball landing */
         coop_lane_in = (level & 1u) == closed;
         if (!coop_lane_in) {
             coop_lane_left_ms = pm_ms();
@@ -17008,7 +17015,10 @@ static void coop_chars_tick(void)
             pk.said_ms = pm_ms();
             coop_pick_say();
         }
-        if ((w = coop_ball_waits()) == 1) pk.waited = 1;      /* PAD-1051: a launch takes the one shown */
+        if ((w = coop_ball_waits()) == 1 && !pk.waited) {     /* PAD-1051: a launch takes the one shown */
+            pk.waited = 1;
+            pk.waited_ms = pm_ms();
+        }
         else if (!w && pk.waited && !pk.take) pk.take = 2;
         if (pk.take) coop_pick_close(pk.take > 1 ? "the ball was launched with it shown" : "Action took it");
         else if (coop_pick_ms && !pk.left) coop_pick_close("the time ran out");

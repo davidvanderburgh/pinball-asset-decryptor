@@ -3478,7 +3478,12 @@ PREVIEW_HELP = {
                 "regular play, the Maser lit for the whole of Tank Attack, and an easier bridge with tanks "
                 "and jets counting two at a time. Only the abilities the game can have are offered. "
                 "On Godzilla, **Load Godzilla's set** puts in eleven characters, one for each ability; "
-                "rename them as you like.",
+                "rename them as you like.\n\n"
+                "**Save…**, beside them, keeps every co-op setting of the project in one zip: co-op on, "
+                "the service menu switch, the awards, the characters with their abilities and time to "
+                "pick, and each character's picture (save a .json instead to leave the pictures out). "
+                "**Load…** puts a saved file into any project in place of its co-op settings, and also "
+                "takes a characters file of the kind Load Godzilla's set reads.",
                 "**Switch it on and off in the service menu**, under the tick, gives the game's own "
                 "menu a **CO-OP PLAY** row instead (Adjustments > Machine Settings > Attract Mode, or "
                 "at the end of Standard Adjustments), 0 to start with:\n\n"

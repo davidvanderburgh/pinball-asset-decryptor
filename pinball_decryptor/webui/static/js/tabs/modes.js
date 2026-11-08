@@ -285,7 +285,7 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, 
     </div>
     <div class="ft modes-list-ft">
       ${s.coop_shown ? html`<div class="stack modes-coop">
-        <${Check} checked=${s.coop_on} wrap label="Co-op play" title=${s.coop_tip}
+        <${Check} checked=${s.coop_on} disabled=${s.coop_locked} wrap label="Co-op play" title=${s.coop_tip}
           onChange=${(v) => call("modes.set_coop", v)} />
         ${s.coop_on ? html`<${Check} checked=${s.coop_menu} wrap label="Switch it on and off in the service menu"
           title=${s.coop_menu_tip} onChange=${(v) => call("modes.set_coop_menu", v)} />` : null}

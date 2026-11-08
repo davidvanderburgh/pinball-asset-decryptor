@@ -102,13 +102,50 @@ def test_the_modes_tab_tick_saves_the_choice_and_says_how_teammates_join(tmp_pat
     assert state["coop_note_kind"] == "err"
     assert svc.set_coop(False) is True
     assert CP.STAGED_KEY not in staged_changes.load(str(tmp_path))
-    assert state["coop_on"] is False and state["coop_note"] == ""
+    assert state["coop_on"] is False and state["coop_locked"] is True    # PAD-1062: greyed out, why under it
+    assert state["coop_note"] == "Venom LE 1.07 has co-op play of its own." and state["coop_note_kind"] == ""
     # the Write tab has no co-op tick any more
     assert not hasattr(W.WriteTab, "set_coop")
     js = _read(os.path.join(REPO, "pinball_decryptor", "webui", "static", "js", "tabs", "write.js"))
     assert "coop" not in js
     assert 'call("modes.set_coop", v)' in _read(os.path.join(REPO, "pinball_decryptor", "webui", "static", "js",
                                                               "tabs", "modes.js"))
+
+
+def test_a_game_with_its_own_coop_greys_the_tick_out(tmp_path, monkeypatch):
+    """Peanutsfr (PAD-1062): the Co-op play tick is greyed out on a game with co-op of its own, with why under it,
+    and cannot be ticked there; a project ticked before still unticks; a game the app can give co-op is untouched."""
+    from pinball_decryptor.webui.tabs import modes as M
+    from pinball_decryptor.core import staged_changes
+
+    svc = M.ModesTab.__new__(M.ModesTab)
+    state = {}
+    monkeypatch.setattr(svc, "set", lambda **kw: state.update(kw), raising=False)
+    monkeypatch.setattr(svc, "get", lambda k: state.get(k), raising=False)
+    monkeypatch.setattr(svc, "project", lambda: str(tmp_path), raising=False)
+    monkeypatch.setattr(svc, "_say", lambda *a, **k: None, raising=False)
+    latest = {SMo.title_key(p): p for p in _latest()}
+    own = next(p for k, p in latest.items() if k.startswith("jaws_"))
+    gz = next(p for k, p in latest.items() if k.startswith("godzilla_") and not CP.title_refusal(p))
+    title = {"prof": own}
+    monkeypatch.setattr(CP, "project_title", lambda project, probe=False: title["prof"])
+    svc._publish_coop(str(tmp_path))
+    assert state["coop_locked"] is True and state["coop_on"] is False
+    assert state["coop_note"] == CP.OWN % own.label and state["coop_note_kind"] == ""
+    assert svc.set_coop(True) is False
+    assert CP.STAGED_KEY not in staged_changes.load(str(tmp_path))
+    # ticked before this release: still shown on, in red, and can be unticked
+    CP.save(str(tmp_path), True)
+    svc._publish_coop(str(tmp_path))
+    assert state["coop_locked"] is False and state["coop_on"] is True and state["coop_note_kind"] == "err"
+    assert svc.set_coop(False) is True and state["coop_locked"] is True
+    # a game the app can give co-op, and an unread title, keep the tick
+    for prof in (gz, None):
+        title["prof"] = prof
+        svc._publish_coop(str(tmp_path))
+        assert state["coop_locked"] is False and state["coop_note"] == ""
+    assert "disabled=${s.coop_locked}" in _read(os.path.join(REPO, "pinball_decryptor", "webui", "static", "js",
+                                                             "tabs", "modes.js"))
 
 
 def test_the_public_help_and_guide_do_not_name_it():
@@ -207,7 +244,7 @@ def test_the_modes_tab_sub_tick_switches_it_in_the_service_menu(tmp_path, monkey
     assert svc.set_coop_menu(True) is True
     assert state["coop_on"] is True and state["coop_menu"] is True
     assert "CO-OP PLAY in the game's service menu" in state["coop_note"]
-    assert "2 (Team 2v2) makes players 1 and 2 a team against players 3 and 4" in state["coop_note"]
+    assert "2 (Team 2v2) makes players 1 and 3 a team against players 2 and 4, picked as TEAM PLAY 2 VS 2" in state["coop_note"]
     assert "at 0 the game plays and reports as it always has" in state["coop_note"]
     assert svc.set_coop_menu(False) is True and state["coop_menu"] is False
     assert state["coop_note"].endswith("Its scores stay off Insider Connected.")

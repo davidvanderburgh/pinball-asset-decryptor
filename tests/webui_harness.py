@@ -71,6 +71,11 @@ def web_app(tmp_path, mfr=None, era=None, settings=None):
     old_app_settings = app_module.SETTINGS_FILE
     config.SETTINGS_FILE = str(settings_file)
     app_module.SETTINGS_FILE = str(settings_file)
+    # the Audio Properties name / Type memory lives beside the settings: a
+    # test's renames must not land in the real audio_names.json
+    from pinball_decryptor.core import name_memory
+    old_audio_names = name_memory.AUDIO_NAMES_FILE
+    name_memory.AUDIO_NAMES_FILE = str(cfg / "audio_names.json")
     old_log_dir = session_log.LOG_DIR_OVERRIDE
     session_log.LOG_DIR_OVERRIDE = str(tmp_path / "logs")
     # a per-project log mirror left on by an earlier test must not leak in
@@ -138,6 +143,7 @@ def web_app(tmp_path, mfr=None, era=None, settings=None):
         ctx.bus.close()
         config.SETTINGS_FILE = old_settings
         app_module.SETTINGS_FILE = old_app_settings
+        name_memory.AUDIO_NAMES_FILE = old_audio_names
         compat.uninstall()
         app_module.messagebox = old_messagebox
         app_module.filedialog = old_filedialog

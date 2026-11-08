@@ -62,6 +62,29 @@ def test_remember_with_category(tmp_path, monkeypatch):
     assert NM.load_categories() == {}
 
 
+def test_remember_category_without_a_name(tmp_path, monkeypatch):
+    """PAD-1061: the Type given a sound with no name is stored on its own:
+    no label, so it renames nothing; a later name replaces it."""
+    monkeypatch.setattr(NM, "AUDIO_NAMES_FILE",
+                        str(tmp_path / "audio_names.json"))
+    md5 = "e" * 32
+    NM.remember_category(md5, "sfx")
+    assert NM.load() == {}
+    assert NM.load_categories() == {md5: "sfx"}
+    assets = tmp_path / "assets"
+    (assets / "audio").mkdir(parents=True)
+    (assets / "audio" / "idx0005.wav").write_bytes(b"five")
+    _write_baseline(str(assets), {"audio/idx0005.wav": md5})
+    assert NM.apply_saved_names(str(assets)) == 0
+    assert os.listdir(assets / "audio") == ["idx0005.wav"]
+    NM.remember(md5, "Swoosh", category="music")
+    assert NM.load() == {md5: "Swoosh"}
+    assert NM.load_categories() == {md5: "music"}
+    # a blank name forgets the entry, Type and all
+    NM.remember(md5, "")
+    assert NM.load_categories() == {}
+
+
 def _write_baseline(assets, entries):
     with open(os.path.join(assets, CHECKSUMS_FILE), "w",
               encoding="utf-8") as f:

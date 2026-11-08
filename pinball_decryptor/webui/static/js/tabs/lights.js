@@ -281,6 +281,7 @@ export default function LightsTab() {
   const songMs = song ? Math.round(song.seconds * 1000) : 0;
   const total = Math.max(1000, songMs, show ? Math.max(laneLen(show.blades), laneLen(show.speakers)) : 0);
   const src = song ? mediaUrl(song.path) : "";
+  const missingWhy = show && show.slot != null ? (s.song_missing || {})[String(show.slot)] || "" : "";   // PAD-1068
   const clock = useClock(total, audioRef, src);
 
   const edit = (fn, nextSel) => {
@@ -369,7 +370,7 @@ export default function LightsTab() {
             onInput=${(e) => clock.seek(Number(e.target.value))} />
           <span class="mono small xl-clock">${secs(clock.t)} / ${secs(total)}</span>
         </div>
-        ${!song ? html`<span class="small muted">Pick the show's song to hear it with the lights.</span>` : null}
+        ${!song ? html`<span class="small muted">${(gameShow && missingWhy) || "Pick the show's song to hear it with the lights."}</span>` : null}
       <//>
       ${gameShow ? html`<${Card} title="The game's own show" cls="xl-edit">
         <div class="xl-grid">

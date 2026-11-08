@@ -37,10 +37,11 @@ LAYOUT_V = 2
 STOCK_V = 1
 
 
-def _songs(audio):
+def _songs(audio, keep=(), seen=None):
     """The project's songs, from the Audio tab's scan: ``[{slot, rel, name, seconds, path, replaced}]`` - every sound
     of a sound-bank record at least :data:`SONG_MIN_SECONDS` long (its replacement's length and file when it has
-    one)."""
+    one), and the records in *keep* however long (PAD-1068: the songs of the game's own shows). *seen*, a set, gets
+    every record the scan has a file for."""
     from ...core import audio as _A
     from ...plugins.stern import sound_modes as SM
     if audio is None:
@@ -51,6 +52,8 @@ def _songs(audio):
         slot = SM.slot_idx(s.rel_path)
         if slot is None:
             continue
+        if seen is not None:
+            seen.add(slot)
         path, secs, repl = s.abs_path, s.duration, assign.get(s.rel_path)
         if s.info is None:                              # the scan reads no headers: this one's length, now
             try:
@@ -66,7 +69,7 @@ def _songs(audio):
             except Exception:                           # noqa: BLE001 - its own length unknown: the slot's
                 pass
             path = repl
-        if max(secs, own) < SONG_MIN_SECONDS:
+        if max(secs, own) < SONG_MIN_SECONDS and slot not in keep:
             continue
         name = os.path.splitext(os.path.basename(s.rel_path))[0]
         out.append({"slot": slot, "rel": s.rel_path, "name": name, "seconds": round(secs, 3), "path": path,
@@ -120,7 +123,7 @@ class LightsTab(TabService):
         from ...plugins.stern import cab_shows as CS
         self.set(project="", available=False, why="", reading=False, lights=[], songs=[], shows=[], intro=INTRO,
                  insider=INSIDER, running=False, peaks={}, problems=[], max=CS.SHOWS_MAX, making=False, auto_note="",
-                 stock=[], stock_meta={}, stock_why="",
+                 stock=[], stock_meta={}, stock_why="", song_missing={},
                  fx=[{"key": k, "label": v[0], "group": v[1], "uses": v[2]} for k, v in CS.FX.items()],
                  presets=[{"key": p[0], "label": p[1]} for p in CS.PRESETS],
                  styles=[{"key": k, "label": v[0]} for k, v in _auto_styles().items()],
@@ -171,19 +174,26 @@ class LightsTab(TabService):
         audio = self.window.service("audio")
         self._songs_id += 1
         sid = self._songs_id
+        keep = {x.get("slot") for x in self.get("stock") or []} - {None}
+        scanned = audio is not None and not getattr(audio, "_scanning", False)             and getattr(audio, "_scan_dir", "") == self._folder()
 
         def work():
+            seen = set()
             try:
-                songs = _songs(audio)
+                songs = _songs(audio, keep, seen)
             except Exception:                           # noqa: BLE001 - a scan replaced under it: the next one's
                 return
-            self.ctx.loop.post(lambda: self._songs_done(sid, songs))
+            # PAD-1068: why a game's show has no song here, said on the page (not a bare "not one of its songs")
+            missing = {} if not scanned else {
+                str(k): ("The project's audio folder has no file for idx%04d: extract the card's audio into this "
+                         "project to hear it with the lights." % k) for k in keep if k not in seen}
+            self.ctx.loop.post(lambda: self._songs_done(sid, songs, missing))
         threading.Thread(target=work, daemon=True, name="lights-songs").start()
 
-    def _songs_done(self, sid, songs):
+    def _songs_done(self, sid, songs, missing=None):
         if sid != self._songs_id:
             return
-        self.set(songs=songs)
+        self.set(songs=songs, song_missing=missing or {})
         self._paint(songs)
 
     def _read(self):
@@ -241,6 +251,7 @@ class LightsTab(TabService):
                              "rows": {str(x["req"]): {"period": x["period"], "frames": x["frames"]}
                                       for x in stock["songs"]}})
         self._paint()
+        self._songs_now()                               # PAD-1068: their songs are kept however short
 
     def _paint(self, songs=None):
         from ...plugins.stern import cab_shows as CS

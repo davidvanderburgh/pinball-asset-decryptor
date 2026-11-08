@@ -6353,7 +6353,9 @@ what it needs):
   (Godzilla: the tank rule's "in the Maser phase", LE 0x108d20 / Pro 0x1064e8: the Maser lit for all of Tank Attack).
 - `keep:<name>=<v>`: a word of the game's (`value coop_keep_<name>_obj` + player x `_stride` + `_at`, `_width` 4 or 1)
   is written v every tick while the teammate is up (Godzilla: MAGNA GRAB lit - the word its MAGNA GRAB LIT AT GAME
-  START adjustment sets at game start, 0x7b1d4c LE / 0x7a5714 Pro + 0x14 + 4 x player). A count may also be one byte
+  START adjustment sets at game start, 0x7b1d4c LE / 0x7a5714 Pro + 0x14 + 4 x player). `keep:<name>>=<v>` writes it
+  only while it is below v (Godzilla's Destruction Jackpot multiplier step, 0x7b1c78 / 0x7a5640 + 0xc + 4 x player,
+  0 = 1X: never below 2X for the power-ups character). A count may also be one byte
   (`value coop_count_<name>_width 1`) or one word for every player (`_stride 0`).
 - `steps:<name>`: a rule's steps come two a shot: `value coop_steps_<name>_obj` is the rule (one object), `_at` its
   vector of `_n` step words, each a percent byte per player (100 = done; Godzilla's building keeps its six stability

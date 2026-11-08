@@ -16105,6 +16105,7 @@ static void coop_turn_show(void)
  *                                    gets <mask> OR-ed in every tick, and loses it at the turn's end (Godzilla: the
  *                                    Maser target's bit in the base-play rule that pays the Maser cannon)
  *   keep:<name>=<v>                  a word of the game's (`value coop_keep_<name>_obj` + player x `_stride` + `_at`,
+ *   keep:<name>>=<v>                 ... (or, with >=, only while it is below v: Godzilla's Destruction Jackpot multiplier step)
  *                                    `_width` 4 or 1) is written v every tick while the teammate is up (Godzilla:
  *                                    MAGNA GRAB lit, the word its MAGNA GRAB LIT AT GAME START sets)
  *   steps:<name>                     a rule's steps come two a shot: `value coop_steps_<name>_obj` is the rule, `_at`
@@ -16150,7 +16151,7 @@ static struct coop_char {
     struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v%; 2: + v; 3: - v; 1-3 held to lo..hi */
     unsigned save_s, bs_adj, boost, gift, spot, unlock_adj, unlock_rules, addball, n_yes, n_double, n_lit;
     char yes[2][12], dbl[2][12], lit_name[2][12], steps[2][12], keep[2][12];
-    unsigned n_steps, n_keep, keep_v[2];
+    unsigned n_steps, n_keep, keep_v[2], keep_floor[2];        /* keep_floor: written only while below v */
     uint64_t lit_mask[2];
     unsigned n_count;
     struct { char name[12]; unsigned n, set; } count[2];     /* set: the word is made n, not raised by n */
@@ -16505,14 +16506,16 @@ static void coop_keep_tick(void)
             if (str_eq(c->keep[k], coop_keep[i].name)) {
                 unsigned a = coop_keep[i].obj + p * coop_keep[i].stride + coop_keep[i].at;
                 if (!maps_has(a, 4, MAP_R)) break;
-                if (coop_keep[i].width == 1) {
-                    if (*(volatile unsigned char *)(unsigned long)a != (unsigned char)c->keep_v[k]) {
-                        *(volatile unsigned char *)(unsigned long)a = (unsigned char)c->keep_v[k];
-                        say("co-op: %s - %s kept at %u", c->name, coop_keep[i].name, c->keep_v[k]);
+                {
+                    unsigned now = coop_keep[i].width == 1 ? *(volatile unsigned char *)(unsigned long)a
+                                                           : *(volatile unsigned *)(unsigned long)a;
+                    int write = c->keep_floor[k] ? now < c->keep_v[k] : now != c->keep_v[k];
+                    if (write) {
+                        if (coop_keep[i].width == 1) *(volatile unsigned char *)(unsigned long)a = (unsigned char)c->keep_v[k];
+                        else *(volatile unsigned *)(unsigned long)a = c->keep_v[k];
+                        say("co-op: %s - %s kept at %s%u", c->name, coop_keep[i].name, c->keep_floor[k] ? "least " : "",
+                            c->keep_v[k]);
                     }
-                } else if (*(volatile unsigned *)(unsigned long)a != c->keep_v[k]) {
-                    *(volatile unsigned *)(unsigned long)a = c->keep_v[k];
-                    say("co-op: %s - %s kept at %u", c->name, coop_keep[i].name, c->keep_v[k]);
                 }
                 break;
             }
@@ -17214,8 +17217,10 @@ static void coop_char_line(const char *s)
             if (!ok) c->unlock_adj = c->unlock_rules = 0;
         } else if (str_starts(p, "keep:") && c->n_keep < 2) {
             p += 5;
-            for (k = 0; k + 1 < 12 && *p && *p != '=' && *p != ','; k++) c->keep[c->n_keep][k] = *p++;
+            for (k = 0; k + 1 < 12 && *p && *p != '=' && *p != '>' && *p != ','; k++) c->keep[c->n_keep][k] = *p++;
             c->keep[c->n_keep][k] = 0;
+            c->keep_floor[c->n_keep] = *p == '>';            /* keep:<name>>=<v>: at least v */
+            if (*p == '>') p++;
             if (k && *p == '=') {
                 p++;
                 c->keep_v[c->n_keep] = (unsigned)number(&p, &ok);

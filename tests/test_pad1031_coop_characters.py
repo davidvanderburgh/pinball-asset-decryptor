@@ -401,7 +401,7 @@ def test_godzillas_abilities_and_lines_read_off_its_program():
         str(RUNTIME.parent / "ports" / "godzilla_le-1.16.port"))
     full = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", port["site"], port["value"])}
     assert full["heat_ray"] == "adj:195x50:4:30,count:heatlevel=3,count:heatspins=9"
-    assert full["powerups"] == "boost:200,double:saucer,double:rampage"
+    assert full["powerups"] == "boost:200,double:saucer,double:rampage,keep:djmult>=1"
     assert full["maser"] == "lit:maser=0x8000000,yes:maser,keep:magna=1,steps:powerline"
     assert full["building"] == "adj:168=0,steps:building,double:spins,double:shield"
     assert CP.action_button(elf) == 34

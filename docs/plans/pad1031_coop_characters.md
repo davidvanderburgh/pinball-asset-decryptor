@@ -332,3 +332,15 @@ super spinner, the heat ray's fire from the Action hold on the rig (3 s and 6 s 
 Next run: trains (315 + candidate shots 50/51/56/84 with dumps of 0x7b2d54), the jackpot (why 0x7b1d88 & 1 is clear
 on the rig; then its timer and multiplier words), Rage Combo (no adjustment; find its rule through the RAGE insert's
 shot), Mothra (the allies list at *(0x7b2e28 + 0x1c)), then Pro proofs, the reply.
+
+## Round 4, batch 4 (2026-11-07 night)
+
+The Destruction Jackpot multiplier step (0x7b1c78 / 0x7a5640 + 0xc + 4p, 0 = 1X, raised at each light) is kept at
+least 1 for the power-ups character (`keep:djmult>=1`, a floor form of keep); proven on LE with 309 given at the pick
+(lit byte 1, step 1 for the whole ball). No countdown runs while the jackpot sits lit (38 dumps a second apart), so
+its timer is a later phase (open). Trains: the award (0x1886fc, two per-player words +4 and +0x2c) is only reached
+through the mystery award path in the code I can see; the loop and the Mecha lane did not award one with LIGHT TRAIN
+given (open). Rage Combo, Mothra saving either outlane and the 4X super spinner remain open; the heat ray's fire from
+the Action hold does not happen on the rig (the game's own switch handling).
+Rig: slot 1 is wedged (killgame hangs on two leftovers; a WSL restart clears it) - hold it with a park label
+(riglock.sh take --slot 1 PAD-1031-park ...) before launching so rigbatch takes the next slot.

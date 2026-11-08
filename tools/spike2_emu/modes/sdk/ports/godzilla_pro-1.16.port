@@ -1132,3 +1132,7 @@ value coop_count_rampage_width  1
 # double:train collects two at a time
 value coop_count_train_obj    0x007a668c
 value coop_count_train_at     0x2c
+# the Destruction Jackpot rule (LIGHT LIGHT DESTRUCTION JACKPOT 309's handler): lit byte at +0xb + player, the
+# multiplier step (0 = 1X, 1 = 2X ...) at this + (player - 1) x 4 + 0x10, raised with each light - keep:djmult>=1
+value coop_keep_djmult_obj    0x007a5640
+value coop_keep_djmult_at     0xc

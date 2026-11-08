@@ -395,7 +395,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._init_check()
         self._init_reading()
         self._init_sheet()
-        self.set(coop_on=False, coop_note="", coop_note_kind="", coop_shown=False, coop_awards_ok=False,   # PAD-1017
+        self.set(coop_on=False, coop_locked=False, coop_note="", coop_note_kind="", coop_shown=False,   # PAD-1017
+                 coop_awards_ok=False,
                  coop_aw={"why": "", "note": "", "rows": [], "max_words": 27}, coop_awards_tip="",   # PAD-1028
                  coop_ch={"why": "", "note": "", "pick": False, "rows": [], "abilities": [], "preset": "",
                           "max_name": 27, "max": 16}, coop_chars_tip="",                      # PAD-1031
@@ -718,13 +719,16 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "with modes, its scores and achievements stay off Insider Connected. Write puts it on the card.")
 
     def _publish_coop(self, project):
-        """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this game cannot have it."""
+        """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this game cannot have it.
+        PAD-1062: a game that has co-op of its own (or no port to add it) greys the tick out, with why under it; an
+        unread title (NO_TITLE) leaves it as it was, as Write may still find the card."""
         from ...plugins.stern import coop_play as _CP
         on = bool(project) and _CP.load(project)
         menu = on and _CP.menu_asked(project)
-        note, kind = "", ""
+        why = _CP.title_refusal(_CP.project_title(project)) if project else ""
+        locked = self._coop_locked(why) and not on
+        note, kind = (why, "") if locked else ("", "")
         if on:
-            why = _CP.title_refusal(_CP.project_title(project))
             if why:
                 note, kind = why, "err"
             elif menu:
@@ -740,11 +744,18 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                            else " (this project's modes keep the card's scores off Insider Connected anyway)"))
             else:
                 note = "On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". Its scores stay off Insider Connected."
-        self.set(coop_shown=bool(project), coop_on=on, coop_menu=menu, coop_note=note, coop_note_kind=kind,
+        self.set(coop_shown=bool(project), coop_on=on, coop_locked=locked, coop_menu=menu, coop_note=note,
+                 coop_note_kind=kind,
                  coop_menu_tip=self.COOP_MENU_TIP,
                  coop_awards_ok=on and kind != "err", coop_awards_tip=self.COOP_AWARDS_TIP,   # PAD-1028
                  coop_chars_tip=self.COOP_CHARS_TIP,                                            # PAD-1031
                  coop_save_tip=self.COOP_SAVE_TIP, coop_load_tip=self.COOP_LOAD_TIP)            # PAD-1053
+
+    @staticmethod
+    def _coop_locked(why):
+        """PAD-1062: whether :func:`coop_play.title_refusal`'s *why* greys the Co-op play tick out."""
+        from ...plugins.stern import coop_play as _CP
+        return bool(why) and why != _CP.NO_TITLE
 
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
@@ -1056,6 +1067,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import coop_play as _CP
         project = self.project()
         if not project:
+            return False
+        if on and self._coop_locked(_CP.title_refusal(_CP.project_title(project))):   # PAD-1062: co-op of its own
+            self._publish_coop(project)
             return False
         was = _CP.save(project, bool(on))
         hist = history_log.diff_scalar("modes  co-op play", "on" if was else "off", "on" if on else "off")

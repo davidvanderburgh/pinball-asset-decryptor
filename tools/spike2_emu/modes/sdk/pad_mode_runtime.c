@@ -16304,7 +16304,10 @@ static void coop_join_show(void)
  * choose a character in time they may not be assigned one"): the seconds left count down on the top line and on the
  * pick's screen (its words line, a box the card draws in its header); the one taken stays on the glass
  * COOP_PICK_DONE_MS saying PICKED; while the game is busy (pm_in_game() 0: a menu over the game) the pick and its
- * clock wait, where they were once dropped with no character for that teammate's whole turn. */
+ * clock wait, where they were once dropped with no character for that teammate's whole turn. PAD-1066
+ * (DoomWalrus666: "the character selection timer should reset when a flipper button is pressed ... The timer should
+ * never be able to force a player to continue"): each flipper press under the pick starts its time again, so the time
+ * only runs out on a player who has left the buttons alone that long. */
 #define COOP_CHARS 16
 #define COOP_CHAR_ADJ 12
 #define COOP_PICK_MS 30000ul
@@ -16340,6 +16343,7 @@ static struct {
     int waited;                             /* PAD-1051: its ball has waited in the plunger since it opened */
     volatile int moved;                     /* ... and the lane switch has moved since: no more hiding */
     unsigned long waited_ms;                /* when it began to wait */
+    volatile int flips;                     /* PAD-1066: flipper presses since the last tick: the clock starts again */
 } pk;
 static struct { int on, c; unsigned who; unsigned long at; } coop_done;   /* PAD-1044: the one taken, on the glass */
 static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
@@ -16873,6 +16877,7 @@ static void coop_pick_open(unsigned t)
     pk.waited = pk.moved = 0;
     pk.phase = 0;
     pk.walk = pk.take = 0;
+    pk.flips = 0;
     pk.open = 1;
     coop_done.on = 0;
     if (coop_pick_ms)
@@ -16988,8 +16993,8 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     }
     if ((level & 1u) != closed || !coop_teammates()) return;
     if (pk.open) {
-        if (id == coop_left) pk.walk--;
-        else if (id == coop.button) pk.walk++;
+        if (id == coop_left) pk.walk--, pk.flips++;
+        else if (id == coop.button) pk.walk++, pk.flips++;
         else if (id == coop_action) pk.take = 1;
         return;
     }
@@ -17288,6 +17293,13 @@ static void coop_chars_tick(void)
         }
         if (coop_pick_ms) pk.left = coop_pick_left(pk.left, pm_ms() - pk.clock_ms);
         pk.clock_ms = pm_ms();
+        if (pk.flips) {                                       /* PAD-1066: a flipper press gives the whole time again */
+            __sync_fetch_and_sub(&pk.flips, pk.flips);
+            if (coop_pick_ms && pk.left) {
+                pk.left = coop_pick_ms;
+                coop_pick_say();
+            }
+        }
         if ((w = pk.walk) != 0) {
             __sync_fetch_and_sub(&pk.walk, w);
             for (; w > 0; w--) pk.at = coop_pick_step(coop_ch_n, pk.at, 1, coop_taken(pk.who));

@@ -6,11 +6,16 @@
 // The shows down the left; THIS game's cabinet in the middle (its lights read off the card's program) PLAYING the
 // show with its song, painted by the runtime's own arithmetic (cabfx.js); on the right the show's song, its two lanes
 // of steps over the song's waveform, and the step picked. Python half: webui/tabs/lights.py.
+//
+// PAD-1063 (BEN: "does the existing Stern expression lighting patterns show up?"): under the project's shows, the
+// game's own - a show for each of its songs, Original and Remix, read off its program - played here from their frames
+// as the game plays them; "Make it a show of mine" makes one a show of the project's (a step of the game's show a
+// lane, to cut, move, start later or mix with patterns of your own).
 
 import { html, useEffect, useRef, useState, PageHead, Card, Button, Field, Select, Check, Chip, Note, Empty, Spinner,
          tip, cx, call, openMenu, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
-import { compileStep, showColours } from "./cabfx.js";
+import { compileStep, showColours, gameColour, srcOf } from "./cabfx.js";
 
 export const css = true;
 
@@ -39,7 +44,15 @@ const TIP = {
   auto: "Listen to the song and make the show from it: its beat, its bars and its loud and quiet parts, every step on a bar line and every pattern in time with the beat. This show's steps are replaced (Undo in the history brings them back).",
   tryit: "Start the emulator with this project's changes, these shows among them: play a game and watch the cabinet's lights.",
   game: "The game's own lights (this lane has no steps).",
+  stock: "The game's own show for this song, as it plays on the machine: press to watch it with its song.",
+  stockSet: { original: "The show the game plays with EXPRESSION LIGHTS MODE on ORIGINAL SHOWS (as shipped).",
+              remix: "The other show the game has for this song: EXPRESSION LIGHTS MODE on REMIX SHOWS." },
+  fromStock: "A show of your own that starts as this one: the game's show on both lanes, to cut, move, start later or mix with patterns of your own. Then pick the song it plays with.",
+  gameSong: "Which of the game's shows this step plays: the game's show for that song.",
+  gameSet: "The game's Original show for the song, or its Remix.",
+  gameFrom: "Where in the game's show this step starts, ms: 0 from its start. The step then plays on from there for as long as it lasts.",
 };
+const SET_WORD = { original: "Original", remix: "Remix" };
 const SWATCHES = ["#ffffff", "#ffd000", "#ffb000", "#ff7800", "#ff3000", "#ff0000", "#ff40a0", "#a040ff", "#4000a0",
   "#0050ff", "#00a0ff", "#00e0ff", "#00c040", "#00ff60", "#000000"];
 const LANES = ["blades", "speakers"];
@@ -51,6 +64,33 @@ const secs = (ms) => {
 };
 const hexOf = (c) => "#" + (c >>> 0).toString(16).padStart(6, "0");
 const laneLen = (steps) => (steps || []).reduce((a, s) => a + (Number(s.ms) || 0), 0);
+const stockName = (s, x) => {
+  const g = x && (s.songs || []).find((y) => y.slot === x.slot);
+  if (g) return g.name;
+  return !x ? "?" : x.slot != null ? `idx${String(x.slot).padStart(4, "0")}` : `Song ${x.req}`;   // the Audio tab's name
+};
+
+// ------------------------------------------------------------------ the game's own shows' frames (PAD-1063)
+// Each show's frames are a file the app wrote beside its cache: fetched once, when a show plays it.
+function useFrames(stock) {
+  const got = useRef({});
+  const [, bump] = useState(0);
+  const get = (req, set) => {
+    const key = `${req}:${set}`;
+    const have = got.current[key];
+    if (have !== undefined) return have;
+    const x = (stock || []).find((y) => y.req === req);
+    const path = x && x.files ? x.files[set] : "";
+    got.current[key] = null;
+    if (path) {
+      fetch(mediaUrl(path)).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => {
+        if (b) { got.current[key] = new Uint8Array(b); bump((n) => n + 1); }
+      }).catch(() => {});
+    }
+    return null;
+  };
+  return get;
+}
 
 // ------------------------------------------------------------------ the clock: the song's, or its own
 function useClock(total, audioRef, src) {
@@ -85,9 +125,10 @@ function useClock(total, audioRef, src) {
 }
 
 // ------------------------------------------------------------------ the cabinet, playing the show
-function Cabinet({ lights, show, t }) {
+function Cabinet({ lights, show, t, meta, frames }) {
   const lanes = LANES.map((k) => (show[k] || []).map(compileStep));
-  const cols = showColours(lights, lanes, !!show.loop, Math.floor(t));
+  const game = (st, L, at) => gameColour(st, srcOf(L.name), at, meta, frames(st.a, st.b ? "remix" : "original"));
+  const cols = showColours(lights, lanes, !!show.loop, Math.floor(t), game);
   const ring = lights.filter((l) => l.lane === 1);
   const blade = lights.filter((l) => l.lane === 0);
   // the backbox's speakers: a grille under each ring of lights (left and right), centred on its lights
@@ -125,7 +166,7 @@ function Wave({ peaks }) {
   return html`<svg class="xl-wave" viewBox=${`0 0 ${n} 64`} preserveAspectRatio="none" aria-hidden="true"><path d=${d} /></svg>`;
 }
 
-function Lane({ lane, steps, total, sel, onSel, onSeek, t }) {
+function Lane({ s, lane, steps, total, sel, onSel, onSeek, t }) {
   const ref = useRef(null);
   const seekAt = (e) => {
     if (!ref.current || e.target.closest(".xl-bar")) return;
@@ -137,9 +178,12 @@ function Lane({ lane, steps, total, sel, onSel, onSeek, t }) {
     ${steps.map((st, i) => {
       const left = (at / total) * 100, w = ((Number(st.ms) || 0) / total) * 100;
       at += Number(st.ms) || 0;
-      return html`<button type="button" key=${i} class=${cx("xl-bar", sel && sel.lane === lane && sel.i === i && "sel")}
-        style=${{ left: `${left}%`, width: `${w}%`, background: `linear-gradient(90deg, ${st.a}, ${st.b})` }}
-        onClick=${() => onSel({ lane, i })} ...${tip({ head: `${i + 1}. ${st.fx.replace(/_/g, " ")}`, lines: [secs(st.ms)] })}>
+      const g = st.fx === "game";
+      const head = g ? `${i + 1}. the game's show: ${stockName(s, (s.stock || []).find((x) => x.req === st.req))} (${SET_WORD[st.set] || ""})`
+        : `${i + 1}. ${st.fx.replace(/_/g, " ")}`;
+      return html`<button type="button" key=${i} class=${cx("xl-bar", g && "xl-bar-game", sel && sel.lane === lane && sel.i === i && "sel")}
+        style=${{ left: `${left}%`, width: `${w}%`, background: g ? undefined : `linear-gradient(90deg, ${st.a}, ${st.b})` }}
+        onClick=${() => onSel({ lane, i })} ...${tip({ head, lines: [g ? `${secs(st.ms)}, from ${secs(st.from || 0)} into it` : secs(st.ms)] })}>
         <span class="xl-bar-n">${i + 1}</span></button>`;
     })}
     ${!steps.length ? html`<span class="xl-lane-empty small muted">the game's own</span>` : null}
@@ -167,8 +211,18 @@ function StepCard({ s, show, sel, edit }) {
   const n = steps.length, lim = s.limits || {};
   const groups = [...new Set((s.fx || []).map((f) => f.group))];
   const fxOpts = groups.flatMap((g) => (s.fx || []).filter((f) => f.group === g).map((f) => ({ value: f.key, label: f.label, group: g })));
-  const uses = ((s.fx || []).find((f) => f.key === st.fx) || {}).uses || "a";
+  const uses = ((s.fx || []).find((f) => f.key === st.fx) || {}).uses ?? "a";
   const setK = (k, v) => edit((d) => { d[LANES[sel.lane]][sel.i][k] = v; });
+  // PAD-1063: a step of the game's own show names its song, its set and where in it it starts
+  const stock = s.stock || [];
+  const setFx = (v) => edit((d) => {
+    const x = d[LANES[sel.lane]][sel.i];
+    x.fx = v;
+    if (v === "game" && !stock.some((y) => y.req === x.req) && stock.length) {
+      const own = stock.find((y) => y.slot === show.slot) || stock[0];
+      Object.assign(x, { req: own.req, set: "original", from: 0 });
+    }
+  });
   const move = (dir) => edit((d) => { const l = d[LANES[sel.lane]]; const [x] = l.splice(sel.i, 1); l.splice(sel.i + dir, 0, x); }, { lane: sel.lane, i: sel.i + dir });
   return html`<div class="xl-step">
     <div class="row xl-step-hd">
@@ -182,10 +236,19 @@ function StepCard({ s, show, sel, edit }) {
     </div>
     <div class="xl-grid">
       <span class="lbl" ...${tip(TIP.fx)}>Pattern</span>
-      <${Select} sm value=${st.fx} options=${fxOpts} width=${190} onChange=${(v) => setK("fx", v)} />
+      <${Select} sm value=${st.fx} options=${stock.length ? fxOpts : fxOpts.filter((o) => o.value !== "game")} width=${190} onChange=${setFx} />
       <span class="lbl" ...${tip(TIP.ms)}>Lasts</span>
       <span class="row xl-inl"><${NumBox} value=${st.ms} min=${(lim.ms || [20])[0]} max=${(lim.ms || [0, 600000])[1]} title=${TIP.ms} onChange=${(v) => setK("ms", v)} /><span class="small muted">ms</span>
         <span class="small muted" ...${tip(TIP.blend)}>· blends in over</span><${NumBox} value=${st.blend || 0} min=${0} max=${st.ms} title=${TIP.blend} onChange=${(v) => setK("blend", v)} /><span class="small muted">ms</span></span>
+      ${st.fx === "game" ? html`<span class="lbl" ...${tip(TIP.gameSong)}>Song</span>
+        <${Select} sm value=${String(st.req)} width=${260} title=${TIP.gameSong}
+          options=${stock.map((x) => ({ value: String(x.req), label: `${stockName(s, x)} (${secs(x.ms)})` }))}
+          onChange=${(v) => setK("req", Number(v))} />
+        <span class="lbl" ...${tip(TIP.gameSet)}>Show</span>
+        <${Select} sm value=${st.set || "original"} width=${140} title=${TIP.gameSet}
+          options=${[{ value: "original", label: "Original" }, { value: "remix", label: "Remix" }]} onChange=${(v) => setK("set", v)} />
+        <span class="lbl" ...${tip(TIP.gameFrom)}>Starts at</span>
+        <span class="row xl-inl"><${NumBox} value=${st.from || 0} min=${0} max=${1200000} title=${TIP.gameFrom} onChange=${(v) => setK("from", v)} /><span class="small muted">ms into the game's show</span></span>` : null}
       ${uses.includes("a") ? html`<span class="lbl" ...${tip(TIP.a)}>Color</span><${ColorBox} value=${st.a} title=${TIP.a} onChange=${(v) => setK("a", v)} />` : null}
       ${uses.includes("b") ? html`<span class="lbl" ...${tip(TIP.b)}>Second color</span><${ColorBox} value=${st.b} title=${TIP.b} onChange=${(v) => setK("b", v)} />` : null}
       ${uses.includes("r") ? html`<span class="lbl" ...${tip(TIP.rate)}>Pace</span>
@@ -199,13 +262,19 @@ export default function LightsTab() {
   const s = useNs("lights");
   const shows = s.shows || [];
   const [pick, setPick] = useState(0);
+  const [stockPick, setStockPick] = useState(null);   // PAD-1063: { req, set } - a show of the game's on the stage
+  const frames = useFrames(s.stock);
   const [sel, setSel] = useState(null);
   const [draft, setDraft] = useState(null);           // the show being edited, saved a moment after each change
   const timer = useRef(0);
   const audioRef = useRef(null);
   const si = Math.min(pick, Math.max(0, shows.length - 1));
   const saved = shows[si] || null;
-  const show = draft && draft.si === si ? draft.show : saved;
+  const stockShow = stockPick && (s.stock || []).find((x) => x.req === stockPick.req);
+  const gameShow = stockShow ? { name: stockName(s, stockShow), slot: stockShow.slot, loop: false,
+    blades: [{ fx: "game", ms: stockShow.ms, req: stockShow.req, set: stockPick.set, from: 0, blend: 0 }],
+    speakers: [{ fx: "game", ms: stockShow.ms, req: stockShow.req, set: stockPick.set, from: 0, blend: 0 }] } : null;
+  const show = gameShow || (draft && draft.si === si ? draft.show : saved);
   useEffect(() => { setDraft(null); setSel(null); }, [si, shows.length]);
   const song = show && (s.songs || []).find((x) => x.slot === show.slot);
   useEffect(() => { if (song) call("lights.song_peaks", song.slot); }, [song && song.slot, song && song.path]);
@@ -266,7 +335,7 @@ export default function LightsTab() {
           ${shows.map((x, i) => {
             const sg = (s.songs || []).find((g) => g.slot === x.slot);
             return html`<button type="button" key=${i} role="option" aria-selected=${i === si} class=${cx("li xl-li", i === si && "sel")}
-              onClick=${() => { setPick(i); clock.stop(); }}>
+              onClick=${() => { setPick(i); setStockPick(null); clock.stop(); }}>
               <span class="xl-li-name ellip">${x.name}</span>
               <span class="small muted ellip">${sg ? sg.name : "no song"} · ${secs(x.length || 0)}</span>
               ${((s.problems || [])[i] || []).length ? html`<span class="warn-ink small">!</span>` : null}
@@ -274,14 +343,23 @@ export default function LightsTab() {
           })}
           ${!shows.length ? html`<div class="small muted">No shows yet. New show… makes one: pick its song, then its steps.</div>` : null}
         </div>
+        ${(s.stock || []).length ? html`<div class="xl-stock-hd small muted">The game's own</div>
+          <div class="list xl-stock" role="listbox" aria-label="The game's own expression light shows">
+            ${s.stock.map((x) => html`<button type="button" key=${x.req} role="option" aria-selected=${!!stockPick && stockPick.req === x.req}
+              class=${cx("li xl-li xl-li-game", stockPick && stockPick.req === x.req && "sel")} ...${tip(TIP.stock)}
+              onClick=${() => { setStockPick({ req: x.req, set: (stockPick && stockPick.set) || "original" }); setSel(null); clock.stop(); }}>
+              <span class="xl-li-name ellip">${stockName(s, x)}</span>
+              <span class="small muted ellip">the game's · ${secs(x.ms)}</span>
+            </button>`)}
+          </div>` : s.stock_why ? html`<div class="small muted xl-stock-hd">${s.stock_why}</div>` : null}
         <div class="row xl-list-acts">
           <${Button} size="sm" kind="primary" icon="plus" iconRight="down" disabled=${shows.length >= s.max} title=${TIP.newShow} onClick=${newMenu}>New show<//>
-          <${Button} size="sm" disabled=${!show} title=${TIP.dup} onClick=${() => call("lights.duplicate", si).then((i) => { if (i >= 0) setPick(i); })}>Duplicate<//>
-          <${Button} size="sm" kind="ghost" icon="trash" disabled=${!show} title=${TIP.del} onClick=${() => call("lights.delete", si)} />
+          <${Button} size="sm" disabled=${!saved || !!gameShow} title=${TIP.dup} onClick=${() => call("lights.duplicate", si).then((i) => { if (i >= 0) setPick(i); })}>Duplicate<//>
+          <${Button} size="sm" kind="ghost" icon="trash" disabled=${!saved || !!gameShow} title=${TIP.del} onClick=${() => call("lights.delete", si)} />
         </div>
       <//>
       ${show ? html`<${Card} title="The cabinet" cls="xl-stage">
-        <${Cabinet} lights=${s.lights || []} show=${show} t=${clock.t} />
+        <${Cabinet} lights=${s.lights || []} show=${show} t=${clock.t} meta=${s.stock_meta} frames=${frames} />
         <audio ref=${audioRef} src=${src || undefined} preload="auto" />
         <div class="row xl-transport">
           <${Button} size="sm" kind="primary" icon=${clock.playing ? "pause" : "play"} title=${TIP.play}
@@ -293,7 +371,26 @@ export default function LightsTab() {
         </div>
         ${!song ? html`<span class="small muted">Pick the show's song to hear it with the lights.</span>` : null}
       <//>
-      <${Card} title="Show" cls="xl-edit">
+      ${gameShow ? html`<${Card} title="The game's own show" cls="xl-edit">
+        <div class="xl-grid">
+          <span class="lbl">Song</span><span>${gameShow.name}${song ? "" : html` <span class="small muted">(not one of this project's songs)</span>`}</span>
+          <span class="lbl">Show</span>
+          <span class="row xl-inl">${["original", "remix"].map((k) => html`<${Button} key=${k} size="sm" kind=${stockPick.set === k ? "primary" : ""}
+            title=${TIP.stockSet[k]} onClick=${() => setStockPick({ req: stockPick.req, set: k })}>${SET_WORD[k]}<//>`)}</span>
+          <span class="lbl">Lasts</span><span>${secs(stockShow.ms)}</span>
+          <span class="lbl"></span>
+          <span class="row xl-inl"><${Button} size="sm" kind="primary" icon="plus" disabled=${shows.length >= s.max} title=${TIP.fromStock}
+            onClick=${() => call("lights.from_stock", stockPick.req, stockPick.set).then((i) => { if (i >= 0) { setStockPick(null); setPick(i); clock.stop(); } })}>Make it a show of mine<//></span>
+        </div>
+        <${Note}>This is the game's own show, as the machine plays it with this song. It cannot be changed here: make it a show of yours to cut it, start it later, put it with another song or mix it with patterns of your own.<//>
+        <div class="xl-tl">
+          <div class="xl-tl-wave"><${Wave} peaks=${song && ((s.peaks || {})[String(song.slot)] || {}).v} /></div>
+          ${LANES.map((k, lane) => html`<div key=${k} class="xl-tl-row">
+            <span class="xl-tl-lbl small">${LANE_WORD[lane]}</span>
+            <${Lane} s=${s} lane=${lane} steps=${show[k] || []} total=${total} sel=${null} t=${clock.t} onSel=${() => {}} onSeek=${clock.seek} />
+          </div>`)}
+        </div>
+      <//>` : html`<${Card} title="Show" cls="xl-edit">
         <div class="xl-grid">
           <span class="lbl" ...${tip(TIP.name)}>Name</span>
           <${Field} sm value=${show.name} title=${TIP.name} onCommit=${(v) => edit((d) => { d.name = String(v).slice(0, (s.limits || {}).name || 31); })} />
@@ -319,7 +416,7 @@ export default function LightsTab() {
           <div class="xl-tl-wave"><${Wave} peaks=${song && ((s.peaks || {})[String(song.slot)] || {}).v} /></div>
           ${LANES.map((k, lane) => html`<div key=${k} class="xl-tl-row">
             <span class="xl-tl-lbl small">${LANE_WORD[lane]}</span>
-            <${Lane} lane=${lane} steps=${show[k] || []} total=${total} sel=${sel} t=${clock.t}
+            <${Lane} s=${s} lane=${lane} steps=${show[k] || []} total=${total} sel=${sel} t=${clock.t}
               onSel=${(x) => { setSel(x); }} onSeek=${clock.seek} />
             <${Button} size="xs" kind="ghost" icon="plus" title=${TIP.addStep}
               disabled=${(show[k] || []).length >= (s.limits || {}).steps} onClick=${() => addStep(lane)} />
@@ -331,7 +428,7 @@ export default function LightsTab() {
         </div>
         ${sel ? html`<${StepCard} s=${s} show=${show} sel=${sel} edit=${edit} />`
           : html`<span class="small muted">Press a step to change it, or + to add one.</span>`}
-      <//>` : html`<${Card} title="The cabinet" cls="xl-stage"><${Cabinet} lights=${s.lights || []} show=${{ blades: [], speakers: [] }} t=${0} /><//>`}
+      <//>`}` : html`<${Card} title="The cabinet" cls="xl-stage"><${Cabinet} lights=${s.lights || []} show=${{ blades: [], speakers: [] }} t=${0} meta=${s.stock_meta} frames=${frames} /><//>`}
     </div>
   </div>`;
 }

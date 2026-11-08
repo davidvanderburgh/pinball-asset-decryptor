@@ -53,5 +53,7 @@ David (2026-11-07): "We should have an expression light show creator just like t
       LZ LE 1.22 and Rush LE 1.19); proven held / let go / stopped / replayed (C:/tmp/PAD-1040/probe/sync_probe.c,
       job_sync.sh). Not seen: a song the game itself resumes part-way (followed from where its voice starts)
 - [x] two speaker rings, left and right (David), in the ports, the runtime's sides and the editor's drawing
-- [ ] (not done) recording the game's own cabinet show into a show: the emulator's playfield window already shows it
-      live (PAD-500)
+- [x] the game's own shows (PAD-1063, BEN: "does the existing Stern expression lighting patterns show up?"): not
+      recorded but READ - Led Zeppelin and Rush keep each song's show as frames in the program (cab_stock.py); the
+      tab lists them, plays them and makes one a show of the project's, whose `game` steps the runtime plays from the
+      game's memory (MODE_SDK.md "The game's own shows")

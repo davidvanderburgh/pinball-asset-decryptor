@@ -59,7 +59,12 @@ FX = {
     "sparkle": ("Sparkle", "Color", "ab"),
     "fire": ("Fire", "Color", "ab"),
     "meter": ("Level meter", "Color", "abr"),
+    # PAD-1063: the game's own show of one of its songs (cab_stock): req, set and from, no colours
+    "game": ("The game's own show", "The game's", ""),
 }
+GAME = "game"
+#: where in the game's show a step may start: its longest is under nine minutes
+FROM_MAX = 1200000
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 #: the page's word for a game whose cabinet has no expression lights
 NO_LIGHTS = "This game's cabinet has no expression lights: no blades and no speaker lights the app can light."
@@ -112,10 +117,24 @@ def norm_step(st):
     st = st if isinstance(st, dict) else {}
     fx = st.get("fx") if st.get("fx") in FX else "solid"
     ms = _int(st.get("ms"), STEP_MS_MIN, STEP_MS_MAX, 1000)
-    return {"fx": fx, "ms": ms,
-            "a": st.get("a") if COLOR_RE.match(str(st.get("a") or "")) else "#ffffff",
-            "b": st.get("b") if COLOR_RE.match(str(st.get("b") or "")) else "#000000",
-            "rate": _int(st.get("rate"), 0, RATE_MAX, 0), "blend": _int(st.get("blend"), 0, ms, 0)}
+    out = {"fx": fx, "ms": ms,
+           "a": st.get("a") if COLOR_RE.match(str(st.get("a") or "")) else "#ffffff",
+           "b": st.get("b") if COLOR_RE.match(str(st.get("b") or "")) else "#000000",
+           "rate": _int(st.get("rate"), 0, RATE_MAX, 0), "blend": _int(st.get("blend"), 0, ms, 0)}
+    if fx == GAME:                                      # PAD-1063: which of the game's shows, and from where in it
+        out.update(req=_int(st.get("req"), 0, 65535, 0), set=st.get("set") if st.get("set") == "remix" else "original",
+                   **{"from": _int(st.get("from"), 0, FROM_MAX, 0)})
+    return out
+
+
+def game_step(req, ms, which="original", start=0):
+    """PAD-1063: a step playing the game's own show of the song request *req* (``set`` *which*) from *start* ms."""
+    return norm_step({"fx": GAME, "ms": ms, "req": req, "set": which, "from": start})
+
+
+def uses_game(show):
+    """1 when a step of *show* plays one of the game's own shows."""
+    return any(st["fx"] == GAME for lane in LANES for st in show.get(lane) or [])
 
 
 def norm_show(s):
@@ -140,8 +159,9 @@ def length_ms(show):
     return max([sum(st["ms"] for st in show.get(lane) or []) for lane in LANES] + [0])
 
 
-def problems(show, slots=None):
-    """What stops a show playing as the user means it, in words (``slots``: the project's song slots, or None)."""
+def problems(show, slots=None, requests=None):
+    """What stops a show playing as the user means it, in words (``slots``: the project's song slots, or None;
+    ``requests``: the song requests the game keeps shows for, or None when unknown)."""
     out = []
     if not show["blades"] and not show["speakers"]:
         out.append("It has no steps: the game's own show plays.")
@@ -149,6 +169,12 @@ def problems(show, slots=None):
         out.append("It plays with no song: pick the song it goes with.")
     elif slots is not None and show["slot"] not in slots:
         out.append("Its song is not one of this project's sounds any more.")
+    if uses_game(show) and requests is not None:
+        if not requests:
+            out.append("A step plays the game's own show, but this game keeps none the app can read: the card "
+                       "leaves the show out.")
+        elif any(st["fx"] == GAME and st["req"] not in requests for lane in LANES for st in show[lane]):
+            out.append("A step plays a show of the game's this game does not have: pick its song again.")
     return out
 
 
@@ -162,21 +188,36 @@ def _hex(c):
     return "0x" + c[1:].lower()
 
 
-def cfg_text(shows, sids_of, only):
+def cfg_text(shows, sids_of, only, stock=None):
     """``cabshow.cfg``: each show with a song this build plays (*sids_of*: ``{slot: [sid, ...]}``), its two lanes.
-    *only*: the card carries no modes (the runtime arms the shows and nothing else). Returns (text, [skipped names])."""
+    *only*: the card carries no modes (the runtime arms the shows and nothing else). *stock*: the game's own shows on
+    this build (:func:`.cab_stock.read`), for a step that plays one (``songs`` / ``songspk``: the runtime reads their
+    frames from the game's memory); a show with such a step on a build without them is left out. Returns (text,
+    [skipped names])."""
     lines = ["# PAD-1040: the card's expression light shows (pad_mode_runtime.c \"SONG SHOWS\")"]
     if only:
         lines.append("only")
-    skipped = []
+    reqs = {r["request"] for r in (stock or {}).get("rows", ())}
+    keep, skipped = [], []
     for s in shows:
         sids = list(sids_of.get(s["slot"], ())) if s["slot"] is not None else []
-        if not sids or not (s["blades"] or s["speakers"]):
+        game_ok = all(st["req"] in reqs for lane in LANES for st in s[lane] if st["fx"] == GAME)
+        if not sids or not (s["blades"] or s["speakers"]) or not game_ok:
             skipped.append(s["name"])
             continue
+        keep.append((s, sids))
+    if any(uses_game(s) for s, _sids in keep):
+        lines.append("songs 0x%x %d %d" % (stock["table"], len(stock["rows"]), stock["pixels"]))
+        if stock.get("speakers"):
+            lines.append("songspk %s" % " ".join(",".join(str(p) for p in g) for g in stock["speakers"]))
+    for s, sids in keep:
         lines.append("show %s %d %s" % (",".join(str(x) for x in sids), 1 if s["loop"] else 0, s["name"]))
         for lane in LANES:
             for st in s[lane]:
+                if st["fx"] == GAME:
+                    lines.append("%s game %d %d %d %d %d" % (lane, st["ms"], st["req"], 1 if st["set"] == "remix"
+                                                             else 0, st["from"], st["blend"]))
+                    continue
                 lines.append("%s %s %d %s %s %d %d" % (lane, st["fx"], st["ms"], _hex(st["a"]), _hex(st["b"]),
                                                        st["rate"], st["blend"]))
     return "\n".join(lines) + "\n", skipped

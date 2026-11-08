@@ -741,7 +741,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.set(coop_shown=bool(project), coop_on=on, coop_menu=menu, coop_note=note, coop_note_kind=kind,
                  coop_menu_tip=self.COOP_MENU_TIP,
                  coop_awards_ok=on and kind != "err", coop_awards_tip=self.COOP_AWARDS_TIP,   # PAD-1028
-                 coop_chars_tip=self.COOP_CHARS_TIP)                                            # PAD-1031
+                 coop_chars_tip=self.COOP_CHARS_TIP,                                            # PAD-1031
+                 coop_save_tip=self.COOP_SAVE_TIP, coop_load_tip=self.COOP_LOAD_TIP)            # PAD-1053
 
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
@@ -1053,6 +1054,83 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._say("co-op play: %s" % ("the card gets co-op play at the next Write" if on else "no co-op play on the card"))
         self._publish_coop(project)
         return True
+
+    #: PAD-1053 (DoomWalrus666): the co-op settings file (plugins/stern/coop_play.py "the co-op settings file")
+    COOP_SAVE_TIP = ("Saves every co-op setting of this project to one file: co-op on, the service menu switch, the "
+                     "awards, the characters with their abilities and time to pick, and each character's picture. "
+                     "Load... puts them into any project.")
+    COOP_LOAD_TIP = ("Loads a co-op settings file Save... wrote (or a characters file) in place of this project's "
+                     "co-op settings, pictures included.")
+
+    @rpc
+    def coop_settings_save(self, path=None):
+        """PAD-1053: Save... - the project's co-op settings to a zip (pictures included) or a .json. Returns the
+        file's path, or None."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project or not _CP.settings_saved(project):
+            return None
+        if not path:
+            prof = _CP.project_title(project)
+            stem = re.sub(r'[\\/:*?"<>|]+', "_", "%s co-op" % (prof.label if prof is not None else
+                          os.path.basename(os.path.normpath(project)))).strip()
+            path = self.window.ask_save("modes_file", "Save the co-op settings to a file", initialfile=stem + ".zip",
+                                        filetypes=[("PAD co-op settings", "*.zip"), ("Without pictures", "*.json")],
+                                        defaultextension=".zip")
+        if not path:
+            return None
+        try:
+            got = _CP.export_settings(project, path)
+        except _CP.CoopError as e:
+            compat.messagebox.showinfo("Save co-op settings", str(e))
+            return None
+        self._say("co-op settings saved to %s: %d character(s), %d picture(s)%s" % (
+            path, got["characters"], got["pictures"],
+            "; a .json carries no pictures, %d left out (save a .zip to keep them)" % got["left_out"]
+            if got["left_out"] else ""))
+        return path
+
+    @rpc
+    def coop_settings_load(self, path=None, _sure=False):
+        """PAD-1053: Load... - a co-op settings file in place of the project's co-op settings, asked first when it
+        has some. Returns what came in (:func:`coop_play.import_settings`), or None."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return None
+        if not path:
+            path = self.window.ask_open("modes_file", "Load co-op settings from a file",
+                                        [("PAD co-op settings", "*.zip *.json"), ("All files", "*.*")])
+        if not path:
+            return None
+        if not _sure and _CP.settings_saved(project) and not compat.messagebox.askyesno(
+                "Load co-op settings", "Load %s in place of this project's co-op settings?"
+                % os.path.basename(path)):
+            return None
+        try:
+            got = _CP.import_settings(project, path)
+        except _CP.CoopError as e:
+            compat.messagebox.showinfo("Load co-op settings", str(e))
+            return None
+        hist = history_log.diff_scalar("modes  co-op settings", "", "loaded from %s" % os.path.basename(path))
+        history_log.record(project, [hist] if hist else [])
+        prof = _CP.project_title(project)
+        other = got["made_for"] and prof is not None and got["made_for"] != prof.label
+        pics = " with %d picture(s)" % got["pictures"] if got["pictures"] else ""
+        if got["preset"]:
+            text = "Loaded %d character(s) from %s." % (got["characters"], os.path.basename(path))
+        else:
+            text = "Loaded the co-op settings in %s: co-op play %s, %d character(s)%s, and the awards." % (
+                os.path.basename(path), "on" if _CP.load(project) else "off", got["characters"], pics)
+        if other:
+            text += ("\n\nThey were made for %s. An ability or award this game has not got is left off the card."
+                     % got["made_for"])
+        self._say(text.replace("\n\n", " "))
+        self.set(coop_ch_at=0)
+        self._publish_coop(project)                     # the dialogs read the rest when they open
+        compat.messagebox.showinfo("Load co-op settings", text)
+        return got
 
     #: PAD-1022: inactivity pausing the timers (plugins/stern/idle_pause.py), offered on the games whose own timers
     #: ignore their ALLOW INACTIVITY TO PAUSE TIMERS setting (Guardians of the Galaxy). It runs on the mode runtime; a
@@ -3212,6 +3290,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                         filetypes=[("PAD modes", "*.zip"), ("All files", "*.*")])
         if not path:
             return None
+        from ...plugins.stern import coop_play as _CP
+        if not _from and _CP.file_about(path) is not None:                 # PAD-1053: co-op settings, not modes
+            return self.coop_settings_load(path)
         shown = os.path.basename(_from or path)
         # PAD-402 (DragonRR): a mode of the file named as one here with other contents is a
         # collaborator's version of it: asked about, each one replacing or not, mine saved first

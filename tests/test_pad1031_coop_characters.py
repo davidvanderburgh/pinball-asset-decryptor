@@ -63,6 +63,7 @@ static int pm_stock_active(struct pm_stock_rule *r) { (void)r; return 0; }
 static int pm_stock_mode_running(unsigned kinds) { (void)kinds; return 0; }
 static unsigned added_balls;
 static int pm_multiball_add(unsigned n, unsigned s) { (void)s; added_balls += n; return 1; }
+static long pm_port_value(const char *n, long f) { (void)n; return f; }
 static uint64_t pm_stock_lit(struct pm_stock_rule *r) { (void)r; return 0; }
 static unsigned more_state(unsigned slot) { (void)slot; return 0; }
 static unsigned long data(const char *name) { (void)name; return 0; }
@@ -151,6 +152,8 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static void coop_counts_give(const struct coop_char *c)",
        "static volatile unsigned *coop_count_field(int i)",
        "static void coop_double_tick(void)",
+       "static volatile unsigned *coop_lit_field(int i)",
+       "static void coop_lit_tick(void)",
        "static void coop_pick_say(void)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
@@ -528,8 +531,8 @@ def test_godzilla_offers_all_eleven_abilities_from_its_ports():
         got = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", set(port["site"]) | set(port["data"]),
                                                          port["value"])}
         assert all(got.values()), (key, [k for k, v in got.items() if not v])
-        assert got["spot"] == "spot:0x7f000" and got["tier2"] == "unlock:334@0xf000"
-        assert got["addball"] == "addball:1" and got["maser"] == "yes:maser"
+        assert got["spot"] == "spot:0x7f000" and got["tier2"] == "unlock:334"
+        assert got["addball"] == "addball:1" and got["maser"] == "lit:maser=0x8000000,yes:maser"
         assert got["bridge"] == "adj:176=0,double:tanks,double:jets"
     keys = {c["ability"] for c in CP.read_preset(CP.presets()["godzilla"])["characters"]["list"]}
     assert len(keys) == 11 and keys <= {a[0] for a in CP.ABILITIES}   # eleven different abilities
@@ -541,7 +544,9 @@ def test_spot_and_unlock_read_from_coop_cfg():
     line = R._lift(src, "static void coop_char_line(const char *s)")
     assert 'str_starts(p, "spot:")' in line and 'str_starts(p, "unlock:")' in line
     wrap = R._lift(src, "static unsigned coop_adj_answer(unsigned id, unsigned own)\n{")
-    assert "c->unlock_adj == id && (coop_started[coop.turn] & c->unlock_rules)" in wrap
+    assert "c->unlock_adj == id && pm_in_game() && (!c->unlock_rules || (coop_started[coop.turn] & c->unlock_rules))" in wrap
+    turn = R._lift(src, "static void coop_chars_turn(void)")
+    assert "coop_gift(&coop_ch[coop_pick_of[coop.turn]]);" in turn            # round 3: an ally at every turn
     spot = R._lift(src, "static int coop_spot(const struct coop_char *c)")
     assert 'fn("shot_dispatch")' in spot and "lit & (~lit + 1)" in spot
 
@@ -583,9 +588,12 @@ def test_round_two_kinds_read_from_coop_cfg(tmp_path):
     for each rise of one the game makes while its character is up."""
     src = RUNTIME.read_text(encoding="utf-8")
     line = R._lift(src, "static void coop_char_line(const char *s)")
-    for w in ('"addball:"', '"yes:"', '"double:"'):
+    for w in ('"addball:"', '"yes:"', '"double:"', '"lit:"'):
         assert w in line
     assert "coop_double_tick();" in R._lift(src, "static void coop_chars_tick(void)")
+    assert "coop_lit_tick();" in R._lift(src, "static void coop_chars_tick(void)")
+    lit = R._lift(src, "static void coop_lit_tick(void)")
+    assert "f[0] = (unsigned)(have | m);" in lit and "have &= ~coop_lit[i].mask;" in lit
     assert 'pm_multiball_add(c->addball, 0)' in R._lift(src, "static void coop_chars_tick(void)")
     arm = R._lift(src, "static void coop_chars_arm(struct site *e)")
     assert '"coop_yes_%s"' in arm and "the %s count is doubled" in arm

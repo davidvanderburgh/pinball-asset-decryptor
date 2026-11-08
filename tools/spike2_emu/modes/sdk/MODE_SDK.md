@@ -6344,9 +6344,10 @@ what it needs):
 
 - `boost:<pct>`: the title's "add n of something" call (`site coop_boost`; Godzilla: its power-up add, `(this, n)`)
   adds n x pct / 100 while the teammate is up.
-- `gift:<id>`: at the teammate's pick, the game's own one-shot feature adjustment `<id>` (Godzilla: LIGHT ALLY 311,
-  which lights the next of Mothra, Rodan and Anguirus): the game's adjustment-changed handler (`site
-  coop_adj_changed`, given `{u16 id}`) is called while the getter answers 1 for it, once.
+- `gift:<id>`: at the teammate's pick and at each of their later turns, the game's own one-shot feature adjustment
+  `<id>` (Godzilla: LIGHT ALLY 311, which lights the next of Mothra, Rodan and Anguirus): the game's
+  adjustment-changed handler (`site coop_adj_changed`, given `{u16 id}`) is called while the getter answers 1 for it,
+  once per turn.
 - An `adj:` the game copies into a player's record at the game's start reads the same through the getter but plays
   as the record says. `site coop_cache_<id>` is the method that copies it (hooked to learn the rule's object) and
   `value coop_cache_<id>_at` where (this + player x 4 + at): held at what the getter would answer while the teammate
@@ -6365,11 +6366,16 @@ what it needs):
   through the game's own serve (`pm_multiball_add`), once a ball.
 - `yes:<name>`: a check of the game's (`site coop_yes_<name>`, `(this) -> 0/1`) answers 1 while the teammate is up
   (Godzilla: the tank rule's "in the Maser phase", LE 0x108d20 / Pro 0x1064e8: the Maser lit for all of Tank Attack).
+- `lit:<name>=<mask>`: a shot held lit in one of the game's base-play rules while the teammate is up: `site
+  coop_lit_<name>` is the rule's shot handler (hooked to learn the object; Godzilla LE 0x1645ac / Pro 0x160bd8, the
+  rule that pays the MASER CANNON AWARD), and `<mask>` is OR-ed into its lit mask (the framework's u64 at this +
+  stock_field + 8 x player) every tick, and taken out at the turn's end. With `yes:maser` the Maser is lit the whole
+  time the teammate is up.
 - `double:<name>`: a rule's count (found as `count:` is) rises two at a time while the teammate is up: each rise of
   one the game makes gets one more from the tick (Godzilla: its tanks and jets).
-- `unlock:<id>@<rules>`: once one of the rules has STARTED on the teammate's turn this game, adjustment `<id>` reads 1
-  while they are up (Godzilla: UNLOCK ALL MONSTER BATTLES 334, which the selection screen's slot state reads live,
-  after a tier-1 battle, `value coop_tier1_rules 0xf000`: tier 2 opens).
+- `unlock:<id>` / `unlock:<id>@<rules>`: adjustment `<id>` reads 1 while the teammate is up - always, or once one of
+  the rules has STARTED on their turn this game (Godzilla: UNLOCK ALL MONSTER BATTLES 334, which the selection
+  screen's slot state reads live: every battle open, tier 2 included; DoomWalrus666 asked for always).
 
 **The pick's own screens.** The top line is small (on Godzilla a long name ran into CREDITS), so a card with a pick
 gets a screen per character in the HUD scene, as a mode's own screen: `PadCoop_<n>` (1-based) and `PadCoop_Random`,

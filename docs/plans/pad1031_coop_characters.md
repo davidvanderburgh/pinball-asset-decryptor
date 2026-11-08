@@ -344,3 +344,13 @@ given (open). Rage Combo, Mothra saving either outlane and the 4X super spinner 
 the Action hold does not happen on the rig (the game's own switch handling).
 Rig: slot 1 is wedged (killgame hangs on two leftovers; a WSL restart clears it) - hold it with a park label
 (riglock.sh take --slot 1 PAD-1031-park ...) before launching so rigbatch takes the next slot.
+
+## Round 5 (2026-11-08, the thread's long message)
+
+Done: battle timers + 10 s (was + 5; bounds 30..80 / 30..100), the spot ONE a battle started (the running battle
+changing clears it; proven: first spot sent, the next two refused). Help, words, tests follow; the harness stubs
+coop_classic (PAD-1065 came in with the merge).
+Asked and not done (each needs game internals not yet found): a 5 s ball save on the first drain during a battle (1x a
+turn), Tail Whip lit at each turn start and every tail whip super, Anguirus adding 2 balls, Mothra's left outlane saving
+twice, loops x2 for the heat ray character, and the earlier five (trains x2, Destruction Jackpot timer, Rage Combo lit,
+Mothra either outlane, 4X super spinner).

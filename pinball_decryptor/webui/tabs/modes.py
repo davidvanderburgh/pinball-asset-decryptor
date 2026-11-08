@@ -41,6 +41,7 @@ from ..modes_stock_remap import StockRemapMixin
 from ..modes_stock_rewrite import StockRewriteMixin   # item 161
 from ..modes_check import GameCheckMixin
 from ..modes_sheet import RulesSheetMixin     # PAD-664
+from ..modes_how import HowItWorksMixin       # PAD-1064
 from ..modes_tryit import TryItMixin
 from .base import TabService, rpc
 
@@ -201,7 +202,7 @@ def fix_chip(problems):
 
 
 class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin, RulesSheetMixin,
-               TabService):
+               HowItWorksMixin, TabService):
     ns = "modes"
     key = "Modes"
     label = "Modes"
@@ -395,6 +396,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._init_check()
         self._init_reading()
         self._init_sheet()
+        self._init_how()
         self.set(coop_on=False, coop_locked=False, coop_note="", coop_note_kind="", coop_shown=False,   # PAD-1017
                  coop_awards_ok=False,
                  coop_aw={"why": "", "note": "", "rows": [], "max_words": 27}, coop_awards_tip="",   # PAD-1028
@@ -4762,6 +4764,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if mode_id in self._port_rule_ids():     # its Shots and Advanced sections
             self.refresh_stock_remap()
             self.refresh_stock_rewrite()
+        self._how_kick()                         # PAD-1064: its clips and sounds, off the card
         self._publish_game_mode()
         self._publish_rows()
 
@@ -4795,6 +4798,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             "id": mid, "name": build.mode_name(mid), "rows": rows, "rule": rule,
             "build": MP.title_label(build.game, build.version),
             "about": about, "starts": list(getattr(mode, "starts", []) or [])[:3],
+            "how": self._how_for(build, mid),
             "note": keep_note if note is None else note,
             "n_changed": sum(1 for r in rows if r["changed"])})
 

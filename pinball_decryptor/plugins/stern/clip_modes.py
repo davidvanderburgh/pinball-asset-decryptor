@@ -441,11 +441,15 @@ def analyse(elf, names, ctx=None):
         anchors = _anchors(S, prog, model, modes, layers)
         owners = _Owners(S, prog, anchors, _inits(S, prog))
         out.refs = clip_refs(prog, elf, names, owners)
+        if ctx is not None:
+            ctx["owners"] = owners      # PAD-1064: whose code each sound call is (:mod:`.clip_sounds`)
     if not any(r.mode for rs in out.refs.values() for r in rs):
         # PAD-634: no mode class's code names a clip (a plain-C title, Deadpool): by file
         from . import clip_files
         files, labels = clip_files.owners(S, prog, model, modes, anchors)
         if files is not None:
+            if ctx is not None:
+                ctx["owners"], ctx["labels"] = files, labels
             if out.refs:
                 own(prog, out.refs, files)
             else:
@@ -459,6 +463,8 @@ def analyse(elf, names, ctx=None):
         for r in rs:
             if r.mode and r.mode not in out.labels:
                 out.labels[r.mode] = mode_label(r.mode)
+    if ctx is not None:
+        ctx["labels"] = {m: out.labels.get(m) or mode_label(m) for m in modes}
     return out
 
 

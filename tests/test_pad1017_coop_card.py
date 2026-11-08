@@ -207,7 +207,7 @@ def test_the_modes_tab_sub_tick_switches_it_in_the_service_menu(tmp_path, monkey
     assert svc.set_coop_menu(True) is True
     assert state["coop_on"] is True and state["coop_menu"] is True
     assert "CO-OP PLAY in the game's service menu" in state["coop_note"]
-    assert "2 (Team 2v2) makes players 1 and 2 a team against players 3 and 4" in state["coop_note"]
+    assert "2 (Team 2v2) makes players 1 and 3 a team against players 2 and 4, a second Start adding" in state["coop_note"]
     assert "at 0 the game plays and reports as it always has" in state["coop_note"]
     assert svc.set_coop_menu(False) is True and state["coop_menu"] is False
     assert state["coop_note"].endswith("Its scores stay off Insider Connected.")

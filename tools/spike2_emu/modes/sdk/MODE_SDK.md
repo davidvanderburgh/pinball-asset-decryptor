@@ -6192,16 +6192,23 @@ setting for Co-Op mode should now also have a choice for Team 2v2". The CO-OP PL
 1 Co-op, 2 Team 2v2, shown as those numbers - the game's own GAME ID kind - with the names in its help line; the row
 was Off/On with 0 and 1, so an operator's pick is kept). The game plays TWO players, a team each: its own player 1 is
 team 1, its player 2 team 2, so each team has a score panel, a score and a set of progress of its own and the game's
-own player change goes between them. The runtime takes each team's players in turn:
+own player change goes between them. The runtime takes each team's players in turn.
 
-- **Joining:** in a team game every Start in the first ball adds the next player, no button held. Player 2 joins team
-  1 (the game's add runs - credits, its hooks - and its count is put back to 1), player 3 is team 2 (the game's own
-  player 2), player 4 joins team 2 (its count back to 2). One Start alone is the game's own one-player game.
-- **Turns:** the teams alternate, a round of turns a ball: P1, P3, P2, P4, then ball 2. The last team's turn of a round
+PAD-1052 (DoomWalrus666: "you must press the start button 4 times. It would be more clear if you pressed the start
+button one time and it said 4 players added: Team 1: Player 1 and Player 3, Team 2: Player 2 and Player 4"): the
+players are numbered in the order they play, team 1 the odd ones (`coop_team_of`), and a second Start adds the rest
+of them at once (then "you still want to be able to play 1 player": one Start is still the game's own one-player game).
+
+- **Joining:** Start in the first ball of a one-player team game calls the game's own add for each next player until
+  the teams are full (`coop_team_fill`, inside the wrapped add, on the game's thread). Player 2 is team 2 (the game's own player 2), player 3 joins team 1 (the
+  game's add runs - credits, its hooks - and its count is put back to 2), player 4 joins team 2 (back to 2). Short of
+  credits the game's add refuses and the fill stops there; each later Start in the first ball adds the next player. The top line then reads, `COOP_JOIN_MS` (2 s) each, `4 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2: P2 AND
+  P4` (`coop_join_words`), and player 1's character pick opens after them.
+- **Turns:** the teams alternate, a round of turns a ball: P1, P2, P3, P4, then ball 2. The last team's turn of a round
   that is not the ball's last puts the ball's byte one down before the game's change, as co-op does, so the game goes
   back to its player 1 on the same ball. An extra ball keeps the player who earned it. With three players team 2's
   lone player plays both of its turns, so each team plays as many balls (`coop_team_player`, `coop_team_round`).
-- **Whose turn:** the top line reads `TEAM 2 P3  BALL %d` (Godzilla LE 1.16: `TEAM 2 PLAYER 3  BALL` ran into the
+- **Whose turn:** the top line reads `TEAM 1 P3  BALL %d` (Godzilla LE 1.16: `TEAM 2 PLAYER 3  BALL` ran into the
   game's credits after 19 characters).
 - **Characters, awards, handicaps** go by the player up (1-4), as in co-op: each player picks a character at their
   first ball, no two the same; a character's record holds (`coop_cache_*`) are the team's game player's.
@@ -6209,8 +6216,9 @@ own player change goes between them. The runtime takes each team's players in tu
   board of the runtime's own (PAD-640/663's one-entry filing: the higher team score is the one that can take it),
   never on the game's own boards.
 - **Team 2v1** (daveyvandy: "There should be a designated option for 2V1"): CO-OP PLAY 3 (or `teams 2v1`) is the
-  same team game for three players at most - players 1 and 2 against player 3, who plays both of team 2's turns each
-  ball (P1, P3, P2, P3), a fourth Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
+  same team game for three players at most - players 1 and 3 against player 2, who plays both of team 2's turns each
+  ball (P1, P2, P3, P2); the second Start adds two (`3 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2: P2`), a third
+  Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
   `team_max`). Its scores go on a `TEAM 2V1` board of their own, so a 2v1 champion never sits on the 2v2 board.
 
 Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1042/rig`: job.sh, team.cfg; tryset.py builds a Write

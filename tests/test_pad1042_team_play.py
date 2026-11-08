@@ -1,4 +1,5 @@
-"""PAD-1042: Team 2v2 - players 1 and 2 against players 3 and 4 (pad_mode_runtime.c "TEAM 2V2").
+"""PAD-1042: Team 2v2 - two teams of two (pad_mode_runtime.c "TEAM 2V2"); PAD-1052: players 1 and 3 against players
+2 and 4, all added by a second Start (one Start is still the game's own one-player game).
 
 The runtime's wraps are lifted verbatim and run against PAD-1017's model of the framework's own player change and add
 player (test_pad1017_coop_turns.py): the game plays two players, a team each, and the runtime takes each team's
@@ -13,13 +14,25 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 RUNTIME = T.RUNTIME
 
 MAIN = T.PRELUDE + r"""
-static void team_game(unsigned humans, int extra_at, int mode)
+static void team_game(unsigned humans, int extra_at, int mode, int later)
 {
     unsigned k, balls = 0;
+    char words[40];
     memset(&coop, 0, sizeof coop);
-    bytes[0] = 1; bytes[1] = 1; players = 1; extra = 0; game_no++; board = 99;
+    bytes[0] = 1; bytes[1] = 1; players = 1; extra = 0; game_no++; board = 99; join_shown = 0;
     teams_on = mode; button = 0;                         /* CO-OP PLAY at 2 (1 here) or 3: plain Start, no button */
-    for (k = 1; k < humans; k++) coop_add_wrap(0, 0, 0, 0);
+    credits = humans - 1;                                /* PAD-1052: the credits for as many more as `humans` */
+    if (humans > 1) {                                    /* PAD-1052: the second Start adds them all */
+        printf("second start %u\n", coop_add_wrap(0, 0, 0, 0));
+        for (k = 0; coop_join_words(coop.join_n, k, words, sizeof words); k++) printf("SAYS %s\n", words);
+        printf("shown %u\n", join_shown);
+    }
+    if (later) {                                         /* ... a credit more, and another Start: the next player */
+        credits = (unsigned)later;
+        k = coop_add_wrap(0, 0, 0, 0);
+        printf("later start %u n %u join %u\n", k, coop.n, coop.join_n);
+    }
+    credits = 99;
     printf("teams %u: %u+%u game players %u board %u\n", coop.n, coop.team_n[1], coop.team_n[2], players, board);
     for (;;) {
         printf("up ball %u player %u game player %u\n", bytes[1], coop.turn, bytes[0]);
@@ -35,7 +48,8 @@ int main(int argc, char **argv)
     unsigned humans = (unsigned)(argv[1][0] - '0');
     int extra_at = argc > 2 ? argv[2][0] - '0' : 0;
     int mode = argc > 3 ? argv[3][0] - '0' : 1;          /* 1: Team 2v2, 3: Team 2v1 */
-    team_game(humans, extra_at, mode);
+    int later = argc > 4 ? argv[4][0] - '0' : 0;         /* PAD-1052: credits for a later Start */
+    team_game(humans, extra_at, mode, later);
     if (mode == 3) printf("fourth %u players %u\n", coop_add_wrap(0, 0, 0, 0), players);   /* 2v1 is full at 3 */
     if (humans == 4) {
         printf("fifth %u\n", coop_add_wrap(0, 0, 0, 0));    /* both teams full */
@@ -51,10 +65,10 @@ int main(int argc, char **argv)
 """
 
 
-def _game(tmp_path, humans, extra_at=0, mode=1):
-    sub = tmp_path / ("g%d_%d_%d" % (humans, extra_at, mode))
+def _game(tmp_path, humans, extra_at=0, mode=1, later=0):
+    sub = tmp_path / ("g%d_%d_%d_%d" % (humans, extra_at, mode, later))
     sub.mkdir()
-    args = (str(humans), str(extra_at), str(mode))
+    args = (str(humans), str(extra_at), str(mode), str(later))
     out = R._host_run(sub, MAIN.replace("@FNS@", T.lifted()), args=args).splitlines()
     assert not any(l.startswith("SCREEN SAYS") for l in out)     # the top line names the player up, every ball
     return out
@@ -73,43 +87,48 @@ def _ups(out):
 
 
 def _round(ball, order):
-    return ["ball %d player %d game player %d" % (ball, p, 1 if p <= 2 else 2) for p in order]
+    return ["ball %d player %d game player %d" % (ball, p, 1 if p % 2 else 2) for p in order]
+
+
+def _says(out):
+    return [l[len("SAYS "):] for l in out if l.startswith("SAYS ")]
 
 
 def test_two_against_two_alternate_the_teams_each_ball(tmp_path):
     out = _game(tmp_path, 4)
-    # team 1 is the game's player 1, team 2 its player 2: two score panels, two sets of progress; the TEAM PLAY board
+    # team 1 (players 1, 3) is the game's player 1, team 2 (players 2, 4) its player 2: two score panels, two sets of
+    # progress; the TEAM PLAY board. PAD-1052: so the turns go in the players' order
     assert _head(out) == "teams 4: 2+2 game players 2 board 0"
-    assert _ups(out) == sum((_round(b, (1, 3, 2, 4)) for b in (1, 2, 3)), [])
+    assert _ups(out) == sum((_round(b, (1, 2, 3, 4)) for b in (1, 2, 3)), [])
     assert _over(out) == "over after 12 balls, the game's end sees 2 player(s)"   # both teams' scores at its end
     assert "fifth 0" in out
     assert "co-op after teams: n 2 teams 0 players 2" in out              # the next game is the game's own again
 
 
 def test_three_players_the_lone_one_plays_both_of_its_teams_turns(tmp_path):
-    out = _game(tmp_path, 3)
+    out = _game(tmp_path, 3)                                # credits for two more: the second Start adds both
     assert _head(out) == "teams 3: 2+1 game players 2 board 0"
-    assert _ups(out) == sum((_round(b, (1, 3, 2, 3)) for b in (1, 2, 3)), [])
+    assert _ups(out) == sum((_round(b, (1, 2, 3, 2)) for b in (1, 2, 3)), [])
     assert _over(out) == "over after 12 balls, the game's end sees 2 player(s)"
 
 
-def test_two_players_are_one_team(tmp_path):
+def test_two_players_are_a_team_each(tmp_path):
     out = _game(tmp_path, 2)
-    assert _head(out) == "teams 2: 2+0 game players 1 board 0"
+    assert _head(out) == "teams 2: 1+1 game players 2 board 0"
     assert _ups(out) == sum((_round(b, (1, 2)) for b in (1, 2, 3)), [])
-    assert _over(out) == "over after 6 balls, the game's end sees 1 player(s)"
+    assert _over(out) == "over after 6 balls, the game's end sees 2 player(s)"
 
 
 def test_team_2v1_is_its_own_choice_full_at_three(tmp_path):
     """daveyvandy: "There should be a designated option for 2V1" - CO-OP PLAY 3."""
     out = _game(tmp_path, 3, mode=3)
     assert _head(out) == "teams 3: 2+1 game players 2 board 1"                # the TEAM 2V1 board
-    assert _ups(out) == sum((_round(b, (1, 3, 2, 3)) for b in (1, 2, 3)), [])
+    assert _ups(out) == sum((_round(b, (1, 2, 3, 2)) for b in (1, 2, 3)), [])
     assert _over(out) == "over after 12 balls, the game's end sees 2 player(s)"
-    assert "fourth 0 players 2" in out                                     # a fourth Start adds no one
+    assert "fourth 0 players 2" in out                                     # a third Start adds no one
     assert "teams: Start - both teams are full (3 players, Team 2v1)" in out
-    out = _game(tmp_path, 2, mode=3)                                       # two players: one team, as in 2v2
-    assert _head(out) == "teams 2: 2+0 game players 1 board 1"
+    out = _game(tmp_path, 2, mode=3)                                       # two players: a team each, as in 2v2
+    assert _head(out) == "teams 2: 1+1 game players 2 board 1"
 
 
 def test_the_choice_reads_the_row(tmp_path):
@@ -135,19 +154,19 @@ def test_one_start_is_the_games_own_one_player_game(tmp_path):
 
 
 def test_an_extra_ball_stays_with_the_player_who_earned_it(tmp_path):
-    for at, who in ((2, 3), (4, 4)):                        # player 3 (team 2, round 1); player 4 (the ball's last)
+    for at, who in ((2, 2), (4, 4)):                        # player 2 (team 2, round 1); player 4 (the ball's last)
         out = _game(tmp_path, 4, at)
         ups = _ups(out)
         assert ups[at - 1] == ups[at] and ups[at].startswith("ball 1 player %d " % who)
         rest = ups[:at] + ups[at + 1:]
-        assert rest == sum((_round(b, (1, 3, 2, 4)) for b in (1, 2, 3)), [])
+        assert rest == sum((_round(b, (1, 2, 3, 4)) for b in (1, 2, 3)), [])
         assert _over(out) == "over after 13 balls, the game's end sees 2 player(s)"
 
 
 def test_the_top_line_board_and_gate_know_team_play():
     src = RUNTIME.read_text(encoding="utf-8")
     show = R._lift(src, "static void coop_turn_show(void)")
-    assert '"TEAM %u P%u  BALL %%d", (coop.turn + 1u) / 2u, coop.turn' in show
+    assert '"TEAM %u P%u  BALL %%d", coop_team_of(coop.turn), coop.turn' in show
     board = R._lift(src, "static void coop_board_name(char *out, unsigned n)")
     assert 'pm_snprintf(out, 40, "TEAM PLAY")' in board and 'pm_snprintf(out, 40, "TEAM 2V1")' in board
     assert "for (t = 1; t <= 5 && n < cap; t++)" in R._lift(
@@ -170,9 +189,54 @@ def test_the_service_menu_row_has_team_2v2_and_the_tab_says_how_to_play_it(tmp_p
     assert len(CP.MENU_HELP) <= 63 and "2 Team 2v2, 3 Team 2v1" in CP.MENU_HELP
     text = str(help_content.__dict__)
     assert CP.MENU_TEAMS_2V1 == 3 and "**3 (Team 2v1):** the same team game for three players" in text
-    assert "**2 (Team 2v2):** players 1 and 2 play against players 3 and 4" in text
+    assert "**2 (Team 2v2):** players 1 and 3 play against players 2 and 4" in text
+    assert "press it a second time in the first ball and it adds the other three players at once" in text
     from pinball_decryptor.webui.tabs import modes as M
     assert "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1" in M.ModesTab.COOP_MENU_TIP
+
+
+def test_the_second_start_adds_all_four_and_says_the_teams(tmp_path):
+    """DoomWalrus666: "you must press the start button 4 times ... it said 4 players added: Team 1: Player 1 and
+    Player 3, Team 2: Player 2 and Player 4"; then "you still want to be able to play 1 player" - so one Start is the
+    game's own one-player game (test_one_start_is_the_games_own_one_player_game) and the second adds the rest."""
+    out = _game(tmp_path, 4)
+    assert "second start 1" in out
+    assert "teams: Start - 4 players added at once (team 1: 2, team 2: 2)" in out
+    assert _says(out) == ["4 PLAYERS ADDED", "TEAM 1: P1 AND P3", "TEAM 2: P2 AND P4"]
+    assert "shown 1" in out                                               # the first line now; the tick shows the rest
+    assert sum(l.startswith("teams: player ") for l in out) == 3          # the game's own add, once a player
+
+
+def test_the_second_start_in_2v1_adds_two(tmp_path):
+    """DoomWalrus666: "3 players added: Team 1: Player 1 and Player 3, Team 2: Player 2"."""
+    out = _game(tmp_path, 4, mode=3)                                       # credits for four: 2v1 stops at 3
+    assert "teams: Start - 3 players added at once (team 1: 2, team 2: 1)" in out
+    assert _says(out) == ["3 PLAYERS ADDED", "TEAM 1: P1 AND P3", "TEAM 2: P2"]
+    assert _head(out) == "teams 3: 2+1 game players 2 board 1"
+    assert _ups(out) == sum((_round(b, (1, 2, 3, 2)) for b in (1, 2, 3)), [])
+
+
+def test_short_of_credits_the_second_start_adds_what_they_buy_and_a_later_one_the_next(tmp_path):
+    out = _game(tmp_path, 2)                                               # one credit: one more player
+    assert "teams: Start - 2 players added at once (team 1: 1, team 2: 1)" in out
+    assert _says(out) == ["2 PLAYERS ADDED", "TEAM 1: P1", "TEAM 2: P2"]
+    out = _game(tmp_path, 3, later=1)                                       # two, then a credit and Start: player 4
+    assert "later start 1 n 4 join 0" in out                               # its own turn line and pick, as before
+    assert "teams: player 4 joins team 2 (team 1: 2, team 2: 2; the game plays 2 player(s), a team each)" in out
+    assert _head(out) == "teams 4: 2+2 game players 2 board 0"
+    assert _ups(out) == sum((_round(b, (1, 2, 3, 4)) for b in (1, 2, 3)), [])
+
+
+def test_the_fill_says_its_lines_from_the_tick():
+    src = RUNTIME.read_text(encoding="utf-8")
+    tick = R._lift(src, "static void coop_join_tick(void)\n{")
+    assert "else if (pm_ms() - coop.join_at >= COOP_JOIN_MS) {" in tick
+    assert "coop_pick_open(1);" in tick                                    # player 1's pick once the lines are said
+    assert "coop_join_tick();" in R._lift(src, "static void coop_tick(void)\n{")
+    add = R._lift(src, "static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    assert "if (coop.filling) return ret;" in add
+    wrap = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    assert "if (!n && *coop_players_byte == 1 && coop_teams_switched_on()) return coop_team_fill(r0, r1, r2, r3);" in wrap
 
 
 GZ_ELFS = ("C:/tmp/PAD-1010/elfs/godzilla_le-1_16_0_spike2.elf", "C:/tmp/PAD-1033/elfs/godzilla_le-1_16_0.elf")

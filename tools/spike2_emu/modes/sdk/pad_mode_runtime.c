@@ -15573,21 +15573,29 @@ static void switches_arm(void)
  * back up (the same ball, the next teammate); an extra ball taken leaves it down - put back, the same teammate. t = n -
  * the game's change as it is: the next ball (or the game's end) and teammate 1. So the game ends after the last
  * teammate's last ball.
- * PAD-1042 (DoomWalrus666): TEAM 2V2 - players 1 and 2 against players 3 and 4, each team sharing its score and its
- * progress. The game plays TWO players, a team each (the game's own player 1 and player 2: two score panels, two sets
+ * PAD-1042 (DoomWalrus666): TEAM 2V2 - two teams of two, each team sharing its score and its progress. The game plays TWO players, a team each (the game's own player 1 and player 2: two score panels, two sets
  * of progress, its own player change between them), and the runtime takes each team's players in turn:
  *   teams on                  (coop.cfg) every game of two or more is a team game; or
  *   setting <address> reading 2   the service menu's CO-OP PLAY says Team 2v2 (0 Off, 1 Co-op, 2 Team 2v2)
- * In a team game every Start in the first ball adds the next player, no button held: player 2 joins team 1 (the
- * game's add runs - credits, its hooks - and its count is put back to 1), player 3 is team 2 (the game's own player
- * 2), player 4 joins team 2 (its count back to 2). The turns alternate the teams, a round of them a ball: P1, P3, P2,
- * P4, then ball 2. The last team of a round that is not the ball's last puts the ball's byte one down before the game's
- * change, as co-op does, so the game goes back to its player 1 on the same ball. A team of one (three players) plays
- * both of its team's turns, so each team has as many balls. The top line says "TEAM 2 P3  BALL 1"; the game's
- * end is the game's own for its two players, filed on the runtime's TEAM PLAY board (the higher team's score).
+ * PAD-1052 (DoomWalrus666: "you must press the start button 4 times. It would be more clear if you pressed the start
+ * button one time and it said 4 players added: Team 1: Player 1 and Player 3, Team 2: Player 2 and Player 4"): the
+ * players are numbered in the order they play - team 1 is players 1 and 3, team 2 players 2 and 4 - and Start pressed
+ * a second time adds them all (the reporter: "you still want to be able to play 1 player", so one Start is still the
+ * game's own one-player game): the Start in the first ball of a one-player game calls the game's own add for each next
+ * player until the teams are full (coop_team_fill; the game's add runs - credits, its hooks - so a game short of
+ * credits stops where they run out, and each later Start in the first ball adds the next player). Player 2 is team 2
+ * (the game's own player 2), player 3 joins team 1 (the game's count put back to 2), player 4 joins team 2 (back to
+ * 2). The top line then says, COOP_JOIN_MS each, "4 PLAYERS ADDED",
+ * "TEAM 1: P1 AND P3", "TEAM 2: P2 AND P4" before player 1's character pick opens. The turns alternate the teams, a
+ * round of them a ball: P1, P2, P3, P4, then ball 2. The last team of a round that is not the ball's last puts the
+ * ball's byte one down before the game's change, as co-op does, so the game goes back to its player 1 on the same
+ * ball. A team of one plays both of its team's turns, so each team has as many balls. The top line says "TEAM 1 P3
+ * BALL 1"; the game's end is the game's own for its two players, filed on the runtime's TEAM PLAY board (the higher
+ * team's score).
  * TEAM 2V1 (daveyvandy: "There should be a designated option for 2V1"): CO-OP PLAY reading 3 (or coop.cfg `teams 2v1`)
- * is the same team game with three players at most - players 1 and 2 against player 3, who plays both of team 2's
- * turns; a fourth Start adds no one; its scores go on a TEAM 2V1 board of their own. */
+ * is the same team game with three players at most - players 1 and 3 against player 2, who plays both of team 2's
+ * turns (P1, P2, P3, P2); the second Start adds two more ("3 PLAYERS ADDED", "TEAM 1: P1 AND P3", "TEAM 2: P2");
+ * a third Start adds no one; its scores go on a TEAM 2V1 board of their own. */
 static const char *const COOP_FILES[] = { "/usr/local/padmode/coop.cfg", "/dump/coop.cfg" };
 static struct {
     int on;                              /* coop.cfg says so and the sites are hooked */
@@ -15600,7 +15608,11 @@ static struct {
     unsigned team_n[3];                  /* PAD-1042: players in team 1 and team 2 */
     unsigned team_max;                   /* PAD-1042: the most players this team game takes (4: 2v2, 3: 2v1) */
     unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
+    int filling;                         /* PAD-1052: the fill is adding: each add says nothing, the fill says them all */
+    unsigned join_n, join_step;          /* ... the players the fill added, the top line's line of them shown */
+    unsigned long join_at;               /* ... when that line went up (join_n 0: none up) */
 } coop;
+#define COOP_JOIN_MS 2000ul              /* PAD-1052: each "PLAYERS ADDED" line on the top line */
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
 static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
 static int coop_ball_msg = -1;           /* the message table's line that says "BALL %d" (-1: none found) */
@@ -15640,12 +15652,34 @@ static unsigned coop_teams_switched_on(void)
                            coop.setting ? *(volatile const unsigned *)(unsigned long)coop.setting : 0u, coop.setting != 0);
 }
 
-/* PAD-1042: the player (1-4) of team `team`'s turn in round `round` with `size` players in it: team 1 is players 1
- * and 2, team 2 players 3 and 4; a team of one plays every round (tests lift it verbatim) */
+/* PAD-1042: the player (1-4) of team `team`'s turn in round `round` with `size` players in it: PAD-1052, team 1 is
+ * players 1 and 3, team 2 players 2 and 4; a team of one plays every round (tests lift it verbatim) */
 static unsigned coop_team_player(unsigned team, unsigned size, unsigned round)
 {
     if (team < 1 || team > 2 || size < 1 || round < 1) return 0;
-    return (team - 1u) * 2u + (round - 1u) % size + 1u;
+    return team + 2u * ((round - 1u) % size);
+}
+
+/* PAD-1052: the team (1, 2) of player `p` (1-4): the odd players are team 1 (tests lift it verbatim) */
+static unsigned coop_team_of(unsigned p)
+{
+    return p & 1u ? 1u : 2u;
+}
+
+/* PAD-1052: line `step` of what the fill says on the top line, `n` players added: "4 PLAYERS ADDED",
+ * "TEAM 1: P1 AND P3", "TEAM 2: P2 AND P4" (2v1: "TEAM 2: P2"); 0 past the last (tests lift it verbatim) */
+static int coop_join_words(unsigned n, unsigned step, char *out, unsigned cap)
+{
+    unsigned p;
+    int o;
+    if (n < 2 || n > 4 || step > 2) return 0;
+    if (!step) {
+        pm_snprintf(out, cap, "%u PLAYERS ADDED", n);
+        return 1;
+    }
+    o = pm_snprintf(out, cap, "TEAM %u: P%u", step, step);
+    for (p = step + 2u; p <= n; p += 2u) o += pm_snprintf(out + o, cap - (unsigned)o, " AND P%u", p);
+    return 1;
 }
 
 /* PAD-1042: the round after a team game's ball end: (game players, the game's player before its change and after it,
@@ -16057,8 +16091,16 @@ static void coop_turn_show(void)
 {
     char words[40];
     if (coop_ball_msg < 0) return;
-    if (coop.teams) pm_snprintf(words, sizeof words, "TEAM %u P%u  BALL %%d", (coop.turn + 1u) / 2u, coop.turn);   /* 19 fit */
+    if (coop.teams) pm_snprintf(words, sizeof words, "TEAM %u P%u  BALL %%d", coop_team_of(coop.turn), coop.turn);   /* 19 fit */
     else pm_snprintf(words, sizeof words, "PLAYER %u  BALL %%d", coop.turn);
+    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+}
+
+/* PAD-1052: the one-Start fill's line up now on the top line */
+static void coop_join_show(void)
+{
+    char words[40];
+    if (coop_ball_msg < 0 || !coop_join_words(coop.join_n, coop.join_step, words, sizeof words)) return;
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
 }
 
@@ -17209,12 +17251,14 @@ static void coop_chars_arm(struct site *e)
         (unsigned)(coop_pick_ms / 1000ul));
 }
 
+static void coop_join_tick(void);              /* PAD-1052, below */
 /* from the tick: the game's own words back once its co-op game is over */
 static void coop_scores_same(unsigned n);
 static void coop_tick(void)
 {
     unsigned n = coop_teammates();
     if (n && !coop.teams && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the game's own */
+    coop_join_tick();                                         /* PAD-1052 */
     coop_chars_tick();                                        /* PAD-1031 */
     if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
         coop_won_n = 0;
@@ -17248,7 +17292,7 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         say("teams: Start - both teams are full (%u players, Team %s)", most, most == 3u ? "2v1" : "2v2");
         return 0;
     }
-    team = h + 1u <= 2u ? 1u : 2u;
+    team = coop_team_of(h + 1u);                              /* PAD-1052: 2 is team 2, 3 team 1, 4 team 2 */
     g = *coop_players_byte;
     ret = coop_add_game(r0, r1, r2, r3);
     if (!ret) {
@@ -17272,17 +17316,59 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     if (team == 1 || coop.team_n[2] > 1) *coop_players_byte = (unsigned char)g;   /* a teammate: not a game player */
     say("teams: player %u joins team %u (team 1: %u, team 2: %u; the game plays %u player(s), a team each)", coop.n,
         team, coop.team_n[1], coop.team_n[2], *coop_players_byte);
+    if (coop.filling) return ret;                             /* PAD-1052: the fill says them all at once */
     if (pk.open && pk.who == 1) pk.open = 0;                  /* PAD-1031: the joiner's flipper walked player 1's pick */
+    coop.join_n = 0;
     coop_turn_show();
     coop_pick_open(1);
     return ret;
 }
 
+/* PAD-1052: the second Start of a team game adds every player left: the game's own add, called until the teams are
+ * full (or it adds no one: credits); then the top line says who is on which team (tests lift it verbatim) */
+static unsigned coop_team_fill(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    unsigned added = 0, ret = 0, r, most = coop_teams_switched_on();
+    coop.filling = 1;
+    while ((coop_teammates() ? coop_teammates() : 1u) < most && (r = coop_team_add(r0, r1, r2, r3)) != 0) {
+        if (!added++) ret = r;
+    }
+    coop.filling = 0;
+    if (!added) return 0;
+    say("teams: Start - %u players added at once (team 1: %u, team 2: %u)", coop.n, coop.team_n[1], coop.team_n[2]);
+    coop_turn_show();
+    coop.join_n = coop.n;
+    coop.join_step = 0;
+    coop.join_at = pm_ms();
+    coop_join_show();
+    return ret;
+}
+
+/* PAD-1052: from the tick: the fill's lines on the top line, one at a time, then player 1's pick */
+static void coop_join_tick(void)
+{
+    char words[40];
+    if (!coop.join_n) return;
+    if (!coop_teammates()) coop.join_n = 0;                   /* the game is over (or another) */
+    else if (!pm_in_game()) coop.join_at = pm_ms();           /* busy (a menu over the game): the line waits */
+    else if (pm_ms() - coop.join_at >= COOP_JOIN_MS) {
+        coop.join_step++;
+        coop.join_at = pm_ms();
+        if (coop_join_words(coop.join_n, coop.join_step, words, sizeof words)) {
+            coop_join_show();
+        } else {
+            coop.join_n = 0;
+            coop_turn_show();
+            coop_pick_open(1);
+        }
+    }
+}
+
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     unsigned n = coop_teammates(), ret;
-    if (n ? coop.teams : *coop_players_byte == 1 && coop_teams_switched_on())
-        return coop_team_add(r0, r1, r2, r3);                /* PAD-1042 */
+    if (n && coop.teams) return coop_team_add(r0, r1, r2, r3);                         /* PAD-1042 */
+    if (!n && *coop_players_byte == 1 && coop_teams_switched_on()) return coop_team_fill(r0, r1, r2, r3);   /* PAD-1052 */
     if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_button_held()))
         return coop_add_game(r0, r1, r2, r3);
     if (n >= 4) {
@@ -17333,16 +17419,17 @@ static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned
     if (down && p_after == p && *coop_ball_byte == before - 1) *coop_ball_byte = (unsigned char)before;  /* extra ball */
     if (!(ret & 0xff)) {
         say("teams: ball %u, team %u player %u done - the game is over (team 1 %llu, team 2 %llu)", before,
-            (was + 1u) / 2u, was, coop_award_now(&score_of, 1), g > 1 ? coop_award_now(&score_of, 2) : 0ull);
+            coop_team_of(was), was, coop_award_now(&score_of, 1), g > 1 ? coop_award_now(&score_of, 2) : 0ull);
         coop_awards_end(coop.n);                              /* PAD-1028 */
         coop_cards_show(coop.n);                              /* PAD-1028 round 2 */
         return ret;
     }
     coop.round = round;
+    coop.join_n = 0;                                          /* PAD-1052: the fill's lines give way to the next turn */
     if (p_after >= 1 && p_after <= 2) coop.turn = coop_team_player(p_after, coop.team_n[p_after], round);
-    say("teams: ball %u, team %u player %u done - %s: team %u player %u, ball %u", before, (was + 1u) / 2u, was,
+    say("teams: ball %u, team %u player %u done - %s: team %u player %u, ball %u", before, coop_team_of(was), was,
         p_after == p && *coop_ball_byte == before ? "an extra ball" : down ? "the next round on this ball"
-        : *coop_ball_byte != before ? "the next ball" : "the other team", (coop.turn + 1u) / 2u, coop.turn,
+        : *coop_ball_byte != before ? "the next ball" : "the other team", coop_team_of(coop.turn), coop.turn,
         *coop_ball_byte);
     coop_turn_show();
     coop_chars_turn();                                        /* PAD-1031: a first ball's pick */

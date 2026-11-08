@@ -18,10 +18,12 @@ PAD-1031: ``coop_play: {"characters": ...}`` gives the team characters to pick f
 their select cards: the second half of this module).
 
 PAD-1042 (DoomWalrus666): the CO-OP PLAY row has a third value, Team 2v2 (stored 0 Off, 1 Co-op, 2 Team 2v2, shown as
-those numbers with the names in its help line; an Off/On row's 0 and 1 keep their meaning). Set to 2, each Start in the
-first ball adds the next player: players 1 and 2 are one team, 3 and 4 the other, each team with its own score and its
-own progress (the game plays two players, a team each) and the turns alternating the teams (pad_mode_runtime.c "TEAM
-2V2"). The characters' pick works as in co-op: each player picks at their first ball, no two the same."""
+those numbers with the names in its help line; an Off/On row's 0 and 1 keep their meaning). Set to 2, a second Start in the
+first ball adds the other three players at once (PAD-1052, DoomWalrus666: before it each Start added the next; one
+Start is still a one-player game): players 1 and 3 are
+one team, 2 and 4 the other, each team with its own score and its own progress (the game plays two players, a team
+each) and the turns alternating the teams, P1 P2 P3 P4 (pad_mode_runtime.c "TEAM 2V2"). The characters' pick works as
+in co-op: each player picks at their first ball, no two the same."""
 import re
 import struct
 
@@ -54,10 +56,10 @@ MENU_HELP = "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1. 1-3: Insider mostly off"
 HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
        "a plain Start adds a competing player as always")
 #: PAD-1042: how a team game is played, for the tab and the log
-TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), each Start in the first ball adds the next player: players 1 and 2 "
-             "against players 3 and 4, each team with its own score and progress, the teams taking turns; at 3 "
-             "(Team 2v1) the same with three players, players 1 and 2 against player 3, who plays both of team 2's "
-             "turns")
+TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), a second Start in the first ball adds the other three players at "
+             "once: players 1 and 3 against players 2 "
+             "and 4, each team with its own score and progress, the teams taking turns; at 3 (Team 2v1) the same "
+             "with three players, players 1 and 3 against player 2, who plays both of team 2's turns")
 
 
 class CoopError(ValueError):

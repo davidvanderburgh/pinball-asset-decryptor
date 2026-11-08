@@ -913,6 +913,10 @@ class WebWindow:
     def stop_all_preview_playback(self):
         self._fan("stop_all_preview_playback")
 
+    def audio_scanned(self, folder):
+        """PAD-1068: the Audio tab's scan of *folder* is in (tabs that list its sounds read them again)."""
+        self._fan("on_audio_scanned", folder)
+
     def emulate_shutdown(self):
         self._fan("emulate_shutdown")
 

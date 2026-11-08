@@ -143,7 +143,9 @@ def _load_renamed_cats(assets_dir):
     name: the rename memory keys by factory content hash (baseline md5) and
     records the Type bucket the slot had when renamed.  Applied only while
     the on-disk label still equals the remembered one — a re-rename or an
-    auto-name pass takes the file back to the derived rules."""
+    auto-name pass takes the file back to the derived rules.  A Type the user
+    gave a sound with no name (an entry with no label, PAD-1061) holds
+    whatever the file is called."""
     from . import name_memory
     cats = name_memory.load_categories()
     if not cats:
@@ -159,6 +161,9 @@ def _load_renamed_cats(assets_dir):
         md5 = str(md5).lower()
         cat = cats.get(md5)
         if cat not in (MUSIC, SFX, CALLOUTS, OTHER):
+            continue
+        if md5 not in labels:
+            out[rel] = cat
             continue
         parts = name_memory.split_decode_name(rel.rpartition("/")[2])
         if parts and parts[1] == labels.get(md5):

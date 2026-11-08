@@ -293,6 +293,8 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, 
         ${s.coop_awards_ok ? html`<div class="row modes-coop-btns">
           <${Button} size="sm" icon="star" onClick=${onCoopAwards} title=${s.coop_awards_tip}>Awards…<//>
           <${Button} size="sm" icon="list" onClick=${onCoopChars} title=${s.coop_chars_tip}>Characters…<//>
+          <${Button} size="sm" icon="save" onClick=${() => call("modes.coop_settings_save")} title=${s.coop_save_tip}>Save…<//>
+          <${Button} size="sm" icon="folder" onClick=${() => call("modes.coop_settings_load")} title=${s.coop_load_tip}>Load…<//>
         </div>` : null}
       </div>` : null}
       ${s.hand_shown ? html`<div class="stack modes-coop">

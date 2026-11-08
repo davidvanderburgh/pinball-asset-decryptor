@@ -76,7 +76,9 @@ def test_every_ports_rule_lines_are_whole(port):
               if not m.group(1).startswith("block_rule_")}
     gates = set(re.findall(r"^value block_rule_gate_(\d+)\s+1\b", text, re.M))     # PAD-1026: a check, vetoed
     for n, addr, w0, w1 in sites:
-        assert addr not in others, addr                      # two hooks on one entry are not possible
+        # a plain hook chains onto another on its entry (hook() moves the jump: PAD-1031's Maser shot shares
+        # Godzilla's RuleMystery::v[25]); a gate's veto refuses an entry already hooked
+        assert n not in gates or addr not in others, addr
         ok = G.movable if n in gates else G.hookable
         assert ok((int(w0, 16), int(w1, 16))), addr
 

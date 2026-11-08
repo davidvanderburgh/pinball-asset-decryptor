@@ -3223,6 +3223,13 @@ class App:
             self.root.after(0, lambda: self._offer_modes_file(
                 zip_path, about, "Import Mod Pack"))
             return
+        # PAD-1053: nor is a file of co-op settings (the Modes tab's co-op Save...)
+        from .plugins.stern import coop_play
+        coop = coop_play.file_about(zip_path)
+        if coop is not None:
+            self.root.after(0, lambda: self._offer_modes_file(
+                zip_path, {"coop": coop}, "Import Mod Pack"))
+            return
         try:
             plan = modpack.inspect_mod_pack(zip_path, assets_dir)
         except Exception as e:
@@ -3236,7 +3243,9 @@ class App:
     def _offer_modes_file(self, path, about, where):
         """PAD-1050, main thread: ``path`` (a zip, or a folder one was unzipped
         into: :func:`modpack.modes_file_about`) is a file of modes picked on
-        the Mod Pack tab. Say so, and load it on the Modes tab when asked."""
+        the Mod Pack tab. Say so, and load it on the Modes tab when asked.
+        PAD-1053: ``about`` ``{"coop": coop_play.file_about(...)}`` is a zip of
+        co-op settings instead."""
         is_zip = not about.get("folder")
         what = ("This zip is a file of modes, not a mod pack." if is_zip else
                 "This folder holds a file of modes, unzipped, not an extract.")
@@ -3245,8 +3254,14 @@ class App:
             modes = self.window.service("modes")
             if modes is not None and not getattr(modes, "_visible", False):
                 modes = None
-        text = "%s %s\n\nModes are loaded on the Modes tab, with Load from a file..." % (
-            what, modpack.modes_file_words(about))
+        if about.get("coop") is not None:
+            from .plugins.stern import coop_play
+            text = ("This zip is a file of co-op settings, not a mod pack. %s\n\nCo-op settings are "
+                    "loaded on the Modes tab, with Load... under Co-op play."
+                    % coop_play.file_words(about["coop"]))
+        else:
+            text = "%s %s\n\nModes are loaded on the Modes tab, with Load from a file..." % (
+                what, modpack.modes_file_words(about))
         if modes is None:
             messagebox.showinfo(where, text)
             return

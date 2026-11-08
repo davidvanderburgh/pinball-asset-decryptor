@@ -6312,9 +6312,24 @@ left count down on the top line (`PLAYER 2 PICK  17`) and on the pick's screen (
 draws in its header); the one taken stays on the glass 2.5 s saying PICKED (the top line `PLAYER 2 PICKED`, or
 `PLAYER 2 IS <name>` on a title with no screens). While `pm_in_game()` is 0 with a player up (a menu over the game)
 the pick and its clock wait; it was dropped there once, leaving that teammate with no character for the turn.
+PAD-1051 (DoomWalrus666): the game's own PLAYER LANGUAGE SELECT (Godzilla's adjustment 14, `USE FLIPPERS TO SELECT
+LANGUAGE:`) walked on the same flippers at the same ball start, and the Action press that took a character launched
+the ball. While the pick is open and its ball waits in the plunger - the game's own flags, the port's
+`ball_launch_flag` / `ball_launch_wait_flag` (PAD-643's) - the game does not see the pick's buttons (the left flipper,
+`button`, `action`): at a press the drain hook leaves the switch's level byte reading released (Godzilla polls it: its
+flippers and Action have no handler) and clears its descriptor's handler bits (0x400 / 0x800); the switch is given
+back at its first press, or release, after the pick, so the game gets whole presses only. Action takes the character,
+then the flippers are the language select's and Action launches; a launch (the flag clearing) takes the one shown. Hiding
+also stops at the first `lane` switch edge 1 s or more after the ball began to wait (a launch, whatever the flags
+say; either direction, as the lane's sense varies), so the flippers are never held from a ball in play.
+Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
+PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
+LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and
+a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.
 `mode.log`:
 
-    co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one, 30 s
+    co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one (a launch the one shown), 30 s
+    switch 34: the game does not see it (its handler bits 0x0800 held back)
     co-op: teammate 2's pick waits - the game is busy (24 s left)
     co-op: teammate 2's pick goes on (24 s left)
     co-op: teammate 1 is GODZILLA 1954 (LONGER BALL SAVE) - Action took it

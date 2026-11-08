@@ -731,7 +731,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. 1 (Co-op) "
                         "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 2 a "
                         "team against players 3 and 4, each Start adding the next player; 3 (Team 2v1) makes players 1 and 2 a "
-                        "team against player 3. 1, 2 or 3 disables most "
+                        "team against player 3. With characters, at 1, 2 or 3 a player starting a game alone with the right "
+                        "flipper button held picks one too. 1, 2 or 3 disables most "
                         "Insider Connected features (scores, high scores and achievements stay on the machine); at 0 "
                         "the game plays and reports as it always has%s."
                         % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
@@ -838,7 +839,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "Each teammate picks a character at the start of their first ball: the machine shows its picture, its name "
         "and what it does, the flippers move to the next one (one another teammate has is skipped), the Action button "
         "takes it, and when the time to pick runs out (the seconds count down on the machine) the one shown is taken. "
-        "RANDOM picks one nobody has. Its ability holds while that teammate is up.")
+        "RANDOM picks one nobody has. Its ability holds while that teammate is up. A player alone picks one too by "
+        "holding the right flipper button while pressing Start to begin the game.")
 
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP

@@ -15587,7 +15587,14 @@ static void switches_arm(void)
  * end is the game's own for its two players, filed on the runtime's TEAM PLAY board (the higher team's score).
  * TEAM 2V1 (daveyvandy: "There should be a designated option for 2V1"): CO-OP PLAY reading 3 (or coop.cfg `teams 2v1`)
  * is the same team game with three players at most - players 1 and 2 against player 3, who plays both of team 2's
- * turns; a fourth Start adds no one; its scores go on a TEAM 2V1 board of their own. */
+ * turns; a fourth Start adds no one; its scores go on a TEAM 2V1 board of their own.
+ * PAD-1054 (DoomWalrus666: "If right flipper is held when start button is pressed, single player should be able to
+ * select a character with an ability as well ... As long as co-op or one of the team modes is active in the service
+ * menu"): a game started with the button held, CO-OP PLAY not Off and characters to pick, is a co-op game of ONE
+ * (coop.n 1): player 1 picks at once and the ability holds as a teammate's would. Its score goes on the game's own
+ * boards and no co-op awards follow it (one player, nobody to beat); the top line stays the game's own. Any later
+ * Start in its first ball adds a teammate (Team 2v2 / 2v1: the next team player), as in a co-op game - the game plays
+ * one player for the team, so a competing player could never be served. */
 static const char *const COOP_FILES[] = { "/usr/local/padmode/coop.cfg", "/dump/coop.cfg" };
 static struct {
     int on;                              /* coop.cfg says so and the sites are hooked */
@@ -15600,7 +15607,11 @@ static struct {
     unsigned team_n[3];                  /* PAD-1042: players in team 1 and team 2 */
     unsigned team_max;                   /* PAD-1042: the most players this team game takes (4: 2v2, 3: 2v1) */
     unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
+    unsigned started;                    /* PAD-1054: the game_start count last seen */
+    int solo_ask;                        /* PAD-1054: that game began with the button held: a team of one, once it plays */
+    unsigned long held_ms;               /* PAD-1054: pm_ms() the button was last seen held (0: never) */
 } coop;
+#define COOP_SOLO_MS 1500ul              /* PAD-1054: the button held this close before a game's start is "held at Start" */
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
 static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
 static int coop_ball_msg = -1;           /* the message table's line that says "BALL %d" (-1: none found) */
@@ -16057,6 +16068,11 @@ static void coop_turn_show(void)
 {
     char words[40];
     if (coop_ball_msg < 0) return;
+    if (coop.n == 1 && !coop.teams) {                         /* PAD-1054: one player - the game's own BALL n */
+        pm_message_restore(COOP_MSG_ID);                      /* the pick's words, or a handicap's on our id */
+        coop_ball_held = 0;
+        return;
+    }
     if (coop.teams) pm_snprintf(words, sizeof words, "TEAM %u P%u  BALL %%d", (coop.turn + 1u) / 2u, coop.turn);   /* 19 fit */
     else pm_snprintf(words, sizeof words, "PLAYER %u  BALL %%d", coop.turn);
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
@@ -17209,11 +17225,60 @@ static void coop_chars_arm(struct site *e)
         (unsigned)(coop_pick_ms / 1000ul));
 }
 
+/* PAD-1054: the button last seen held at `held` (pm_ms(), 0 never) when the game's start was seen at `start`: held
+ * at Start (tests lift it verbatim) */
+static int coop_solo_held(unsigned long held, unsigned long start)
+{
+    return held && start - held <= COOP_SOLO_MS;
+}
+
+/* PAD-1054: that game, now playing: a team of one with the game's one player, CO-OP PLAY (or a team mode) on and
+ * characters to pick (tests lift it verbatim) */
+static int coop_solo_takes(unsigned players, int switched_on, int chars)
+{
+    return players == 1u && switched_on && chars;
+}
+
+/* PAD-1054: from the tick - a game started with the button held gets player 1's character pick */
+static void coop_solo_check(void)
+{
+    unsigned g;
+    if (!coop.on || !coop_players_byte) return;
+    g = chg_game_now();
+    if (g != coop.started) {                                  /* before this tick's poll: the held time AT the start */
+        coop.started = g;
+        coop.solo_ask = g && coop_solo_held(coop.held_ms, pm_ms());
+    }
+    if (coop_button_held()) coop.held_ms = pm_ms() | 1ul;
+    if (!coop.solo_ask || !pm_in_game() || !pm_player()) return;
+    coop.solo_ask = 0;
+    if (coop_teammates()) return;                             /* the held Start made a team already */
+    if (!coop_solo_takes(*coop_players_byte, coop_switched_on() || coop_teams_switched_on() != 0,
+                         coop_ch_n && coop_pick_on)) {
+        say("co-op: the right flipper was held at Start - no character pick (%s)",
+            *coop_players_byte != 1 ? "not a one-player game" : !(coop_ch_n && coop_pick_on) ? "no characters to pick"
+            : "CO-OP PLAY is Off");
+        return;
+    }
+    coop.game = g + 1;
+    coop.teams = 0;
+    coop.n = 1;
+    coop.turn = 1;
+    coop.round = 1;
+    coop_awards_begin();                                      /* PAD-1028 */
+    coop_chars_begin();                                       /* PAD-1031 */
+    say("co-op: the right flipper was held at Start - one player with a character (the game's own boards; "
+        "a Start in ball 1 still adds a teammate)");
+    coop_pick_open(1);
+}
+
 /* from the tick: the game's own words back once its co-op game is over */
 static void coop_scores_same(unsigned n);
 static void coop_tick(void)
 {
-    unsigned n = coop_teammates();
+    unsigned n;
+    coop_solo_check();                                        /* PAD-1054 */
+    n = coop_teammates();
     if (n && !coop.teams && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the game's own */
     coop_chars_tick();                                        /* PAD-1031 */
     if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
@@ -17243,7 +17308,8 @@ static void coop_scores_same(unsigned n)
 /* PAD-1042: Start in a team game's first ball (or the second Start that makes one): the next player joins */
 static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
-    unsigned n = coop_teammates(), h = n ? n : 1u, team, g, ret, most = n ? coop.team_max : coop_teams_switched_on();
+    unsigned n = coop_teammates(), h = n ? n : 1u, team, g, ret, solo = n == 1u && !coop.teams;   /* PAD-1054 */
+    unsigned most = n && !solo ? coop.team_max : coop_teams_switched_on();
     if (h >= most) {
         say("teams: Start - both teams are full (%u players, Team %s)", most, most == 3u ? "2v1" : "2v2");
         return 0;
@@ -17255,7 +17321,7 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         say("teams: Start - the game added no one (credits, or the most players it allows)");
         return ret;
     }
-    if (!n) {
+    if (!n || solo) {                                         /* PAD-1054: a team of one keeps player 1's pick */
         coop.game = chg_game_now() + 1;
         coop.teams = 1;
         coop.team_max = most;
@@ -17263,8 +17329,10 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.team_n[2] = 0;
         coop.turn = 1;
         coop.round = 1;
-        coop_awards_begin();                                  /* PAD-1028 */
-        coop_chars_begin();                                   /* PAD-1031 */
+        if (!n) {
+            coop_awards_begin();                              /* PAD-1028 */
+            coop_chars_begin();                               /* PAD-1031 */
+        }
         coop_scores_mark(most == 3u ? 1u : 0u);
     }
     coop.n = h + 1u;
@@ -17280,8 +17348,10 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
 
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
-    unsigned n = coop_teammates(), ret;
-    if (n ? coop.teams : *coop_players_byte == 1 && coop_teams_switched_on())
+    unsigned n = coop_teammates(), ret, solo = n == 1u && !coop.teams;
+    /* PAD-1054: a team of one (the button held at the game's Start) takes a teammate at any Start, as co-op does, or
+     * with a team mode on starts the team game */
+    if (n && !solo ? coop.teams : *coop_players_byte == 1 && coop_teams_switched_on())
         return coop_team_add(r0, r1, r2, r3);                /* PAD-1042 */
     if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_button_held()))
         return coop_add_game(r0, r1, r2, r3);
@@ -17379,8 +17449,10 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
         pk.open = coop_done.on = 0;                           /* PAD-1044: a pick the game's end cut short */
         say("co-op: the game's end counts %u player(s): one match draw and one high score for the team",
             *coop_players_byte);
-        coop_awards_end(n);                                   /* PAD-1028 */
-        coop_cards_show(n);                                   /* PAD-1028 round 2: on the winners' character cards */
+        if (n >= 2) {                                         /* PAD-1054: one player has no one to beat */
+            coop_awards_end(n);                               /* PAD-1028 */
+            coop_cards_show(n);                               /* PAD-1028 round 2: on the winners' character cards */
+        }
     }
     return ret;
 }
@@ -17852,7 +17924,7 @@ static void hand_records(unsigned p, int lv)
     unsigned n = lv ? hand_lv_n[lv + HAND_LEVEL_MAX] : 0u;
     int i;
     unsigned k, a, own, was, v;
-    if (coop.on && coop_teammates()) return;
+    if (coop.on && coop_teammates() >= 2) return;            /* PAD-1054: a team of one plays its own record */
     for (i = 0; i < hand_cache_n; i++) {
         if (hand_cache[i].obj < 0x10000u) continue;          /* not seen yet, or its method not hooked */
         for (k = 0; k < n && c[k].id != hand_cache[i].id; k++) ;

@@ -6312,6 +6312,17 @@ left count down on the top line (`PLAYER 2 PICK  17`) and on the pick's screen (
 draws in its header); the one taken stays on the glass 2.5 s saying PICKED (the top line `PLAYER 2 PICKED`, or
 `PLAYER 2 IS <name>` on a title with no screens). While `pm_in_game()` is 0 with a player up (a menu over the game)
 the pick and its clock wait; it was dropped there once, leaving that teammate with no character for the turn.
+
+PAD-1054 (DoomWalrus666): a player alone picks too. A game whose start (`game_start`) comes with `button` held, or
+let go of at most 1.5 s before, is a co-op game of ONE when it plays one player, CO-OP PLAY is not Off (any of Co-op,
+Team 2v2, Team 2v1; always, with no `setting`) and there is a pick: player 1 picks at once and the ability holds as a
+teammate's. Its score goes on the game's own boards, no co-op awards follow it and the top line stays the game's own
+`BALL n`. A Start in its first ball still adds a teammate (any Start, button held or not, as in a co-op game), or with
+a team mode on begins the team game, player 1 keeping the character.
+
+    co-op: the right flipper was held at Start - one player with a character (the game's own boards; a Start in ball 1 still adds a teammate)
+    co-op: the right flipper was held at Start - no character pick (CO-OP PLAY is Off)
+
 `mode.log`:
 
     co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one, 30 s

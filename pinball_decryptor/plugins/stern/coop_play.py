@@ -52,7 +52,8 @@ MENU_OFF, MENU_COOP, MENU_TEAMS, MENU_TEAMS_2V1 = 0, 1, 2, 3
 MENU_HELP = "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1. 1-3: Insider mostly off"
 #: how a teammate joins, for the tab and the log
 HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
-       "a plain Start adds a competing player as always")
+       "a plain Start adds a competing player as always; with characters, a player starting a game alone with the "
+       "right flipper button held picks one")
 #: PAD-1042: how a team game is played, for the tab and the log
 TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), each Start in the first ball adds the next player: players 1 and 2 "
              "against players 3 and 4, each team with its own score and progress, the teams taking turns; at 3 "

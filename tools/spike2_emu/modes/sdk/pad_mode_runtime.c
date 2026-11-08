@@ -16248,6 +16248,8 @@ static volatile int coop_ball_out;          /* the turn's ball has left the shoo
 static volatile unsigned long coop_lane_left_ms;
 static volatile unsigned coop_launch_taps;  /* Action presses at a launch, not counted (the tick says so) */
 static unsigned coop_flag_in, coop_flag_wait;   /* PAD-1051: the game's "a ball waits in the plunger" flags (0: none) */
+static volatile int coop_turn_waited;       /* PAD-1051: the turn's ball has waited in the plunger (the flags say) */
+static volatile unsigned long coop_waited_ms;   /* ... and when they last said so */
 static unsigned (*coop_adj_game)(unsigned);
 static unsigned coop_rng;
 static char coop_scr_scene[96];             /* `screens <scene>`: "" none */
@@ -16666,6 +16668,22 @@ static int coop_hides(unsigned id)
            && coop_ball_waits() == 1;
 }
 
+/* PAD-1045: an Action press at a launch - the turn's ball not served yet, waiting, or just out - is the launch's, not
+ * half of the save's double press. PAD-1051: from the game's plunger flags where the port names them (Godzilla LE's
+ * shooter lane switch reads the opposite sense to its flippers, so its level said "out" while the ball waited), else
+ * from the lane switch (`lane` in coop.cfg) */
+static int coop_launch_press(unsigned long now)
+{
+    int w = coop_ball_waits();
+    if (w < 0) return coop_lane && (!coop_ball_out || coop_lane_in || now - coop_lane_left_ms < COOP_LAUNCH_MS);
+    if (w == 1) {
+        coop_turn_waited = 1;
+        coop_waited_ms = now;
+        return 1;
+    }
+    return !coop_turn_waited || now - coop_waited_ms < COOP_LAUNCH_MS;
+}
+
 /* every edge of the switch drain (the game's thread): the pick's flippers and Action, the save's double press */
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)
 {
@@ -16688,7 +16706,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     }
     if (id != coop_action) return;
     now = pm_ms();
-    if (coop_lane && (!coop_ball_out || coop_lane_in || now - coop_lane_left_ms < COOP_LAUNCH_MS)) {
+    if (coop_launch_press(now)) {
         coop_tap_ms = 0;                                      /* the launch's press: not half of a double press */
         coop_launch_taps++;
         return;
@@ -16955,6 +16973,10 @@ static void coop_chars_tick(void)
         coop_save_ask = 0;
         return;
     }
+    if (coop_ball_waits() == 1) {                             /* PAD-1051: the turn's ball waits (PAD-1045's launch) */
+        coop_turn_waited = 1;
+        coop_waited_ms = pm_ms();
+    }
     if (!pm_in_game()) {                                      /* PAD-1044: busy (a menu over the game): it waits */
         if (pk.open && !pk.held) {
             pk.held = 1;
@@ -17037,6 +17059,8 @@ static void coop_chars_begin(void)
     coop_done.on = 0;
     coop_save_used = 0;
     coop_ball_out = 1;                       /* PAD-1045: the team forms in ball 1; a ball in the lane still waits */
+    coop_turn_waited = 1;                    /* PAD-1051: ... as the flags say, once it is out */
+    coop_waited_ms = 0;
     coop_adj_said = 0;
 }
 
@@ -17046,6 +17070,7 @@ static void coop_chars_turn(void)
     coop_save_used = 0;
     coop_tap_ms = 0;
     coop_ball_out = 0;                       /* PAD-1045: the next ball is not served yet: it counts once out */
+    coop_turn_waited = 0;                    /* PAD-1051: the same, from the game's plunger flags */
     if (pk.open && pk.who != coop.turn) coop_pick_close("their turn ended");
     coop_pick_open(coop.turn);
     coop_cache_hold();
@@ -17291,7 +17316,10 @@ static void coop_chars_arm(struct site *e)
     else if (coop_pick_on)
         say("co-op characters: the port names no plunger flags (ball_launch_flag) - the game sees the pick's buttons too");
     if (save && !coop_action) say("co-op characters: no Action button in coop.cfg - the save ability is off");
-    if (save && coop_action && coop_lane)                     /* PAD-1045 */
+    if (save && coop_action && (coop_flag_in || coop_flag_wait))   /* PAD-1045, PAD-1051: the game's own flags */
+        say("co-op characters: Action x2 counts once the ball is %lu ms out of the plunger (game flags %u/%u)",
+            COOP_LAUNCH_MS, coop_flag_in, coop_flag_wait);
+    else if (save && coop_action && coop_lane)                /* PAD-1045 */
         say("co-op characters: Action x2 counts once the ball is %lu ms out of the shooter lane (switch %u)",
             COOP_LAUNCH_MS, coop_lane);
     else if (save && coop_action)

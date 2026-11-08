@@ -175,3 +175,43 @@ def test_godzillas_drain_reads_the_handler_bits_after_switch_edge_returns():
     assert word(0x3791e8) == 0xe594a008                              # ldr sl, [r4, #8]: the descriptor
     assert word(0x3791f0) == 0xe1dab1ba                              # ldrh fp, [sl, #0x1a]: its bits, read after
     assert word(0x225304) == 0xe3a0000e and bl_target(0x225308) == 0x2b3614   # the language select reads adj 14
+
+
+SAVE_MAIN = r"""
+static void twice(const char *what)
+{
+    saved_s = 0;
+    press(34); now_ms += 300; press(34); coop_chars_tick();
+    printf("%s %u\n", what, saved_s);
+}
+int main(void)
+{
+    coop_char_line("save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE");
+    coop_pick_on = 0; coop.button = 59; coop_left = 60; coop_action = 34; coop_lane = 62; coop_flag_in = 12;
+    coop.n = 2; coop.turn = 1; coop_pick_of[1] = 0; coop_pick_of[2] = 0;
+    coop.turn = 2; coop_chars_turn(); coop.turn = 1; coop_chars_turn();
+    ball_waits = 0; now_ms += 2000; twice("not served");
+    ball_waits = 1; coop_chars_tick(); now_ms += 3000; twice("waiting");
+    ball_waits = 0; now_ms += 400; twice("just out");
+    now_ms += 5000; twice("in play");
+    return 0;
+}
+"""
+
+
+def test_a_launch_press_is_told_from_the_games_plunger_flags(tmp_path):
+    """PAD-1045's guard (a launch's Action press is not half of the save's double press) read the shooter lane switch,
+    whose level on Godzilla LE says "out" while the ball waits (emulator: its press at the lane counted toward x2);
+    with the port's plunger flags it reads the game's own word. Without them it reads the lane as before (test_pad1031)."""
+    src = C.RUNTIME.read_text(encoding="utf-8")
+    main = C.MAIN[:C.MAIN.index("@DECL@")] + "static int coop_live;\n@DECL@" + C.MAIN[C.MAIN.index("@DECL@") + 6:]
+    main = main[:main.index("int main(void)")] + SAVE_MAIN
+    lifted = "\n".join(C.R._lift(src, sig + "\n{") for sig in C.FNS)
+    number = "\n".join(C.R._lift(src, sig + "\n{") for sig in ("static int hexval(int c)",
+                                                              "static uint64_t number(const char **p, int *ok)"))
+    out = C.R._host_run(tmp_path, main.replace("@NUMBER@", number).replace("@DECL@", C._decl(src))
+                        .replace("@FNS@", lifted)).splitlines()
+    assert "not served 0" in out                                     # the turn's ball is not served yet
+    assert "waiting 0" in out                                        # it waits in the plunger: the launch's presses
+    assert "just out 0" in out                                       # 0.4 s out: still the launch's
+    assert "in play 10" in out

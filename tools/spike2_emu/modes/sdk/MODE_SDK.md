@@ -6321,6 +6321,9 @@ flippers and Action have no handler) and clears its descriptor's handler bits (0
 back at its first press, or release, after the pick, so the game gets whole presses only. Action takes the character,
 then the flippers are the language select's and Action launches; a launch (the flag clearing) takes the one shown.
 Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
+PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
+LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and
+a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.
 `mode.log`:
 
     co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one (a launch the one shown), 30 s

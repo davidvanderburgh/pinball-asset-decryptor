@@ -17969,6 +17969,7 @@ static struct {
     int game_event;                          /* the port's game_start is counted (else player 1's first ball tells) */
     int reset_seen;                          /* round 4: Start held with the left flipper in this game */
     unsigned reset_up, reset_over;           /* the player and ball then, and the game's game_over count */
+    unsigned over_said;                      /* the game_over count the log last said */
     unsigned open;                           /* the player picking now (0: none) */
     int was_left, was_right;
     uint64_t score_at_open;
@@ -18280,6 +18281,10 @@ static void hand_tick(void)
     }
     if (hand.open && hand_ball() != 1u) hand_close("the next ball");
     hand_game_check();
+    if (pm_event("game_over") >= 0 && event_count(pm_event("game_over")) != hand.over_said) {
+        hand.over_said = event_count(pm_event("game_over"));
+        say("handicap: the game is over (its game_over, %u so far) - everyone keeps their level", hand.over_said);
+    }
     if (hand.start && !hand.reset_seen && pm_player() && switch_held(hand.start) && switch_held(hand.left)) {
         hand.reset_seen = 1;
         hand.reset_up = pm_player() * 256u + hand_ball();

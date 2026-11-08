@@ -239,6 +239,20 @@ _CAT_NAMES =(("music", "Music"), ("sfx", "Sound FX"),
               ("callouts", "Callouts"), ("other", "Other"))
 _CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
 
+# callouts.csv's classification for each Type (PAD-1060)
+_TYPE_KINDS = {"callouts": "speech", "music": "music", "sfx": "non-speech",
+               "other": "non-speech"}
+
+
+def _type_kind(cat, kind):
+    """The callouts.csv classification a sound of Type *cat* gets, its row
+    holding *kind* now: kept unless it is one the Type classifier reads and
+    says otherwise ("error" and the like stay; '' is a new row)."""
+    want = _TYPE_KINDS.get(cat)
+    if want is None or kind not in ("", "speech", "music", "non-speech"):
+        return kind or "non-speech"
+    return want
+
 _AUDIO_FILETYPES = [("Audio files",
                      "*.wav *.ogg *.mp3 *.flac *.m4a *.aac *.opus "
                      "*.wma *.aiff *.aif"),
@@ -4397,6 +4411,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                         "no baseline)")
             self.log("Replace Audio: %s Type → %s%s" % (rel, new_cat, note),
                      "info")
+            self._callouts_follow({rel: rel})
             self._refresh_type_filter()
             self._refresh_list()
             return True
@@ -4684,7 +4699,13 @@ class AudioTab(FindOriginalsMixin, TabService):
         scanned sounds, or only *rels*): a row whose sound was renamed since
         the CSV was written gets its file and, unless its words already make
         that name, its text; with *rels* None a named sound with no row gets
-        one.  Returns ``(updated, added)``; nothing is saved here."""
+        one.  PAD-1060: the row's classification follows the Type the sound
+        has now (a callout moved to Sound FX is no longer "speech"), and a
+        sound with no name that is not a callout loses its words, or Rename
+        from callouts.csv put the old name back (with *rels* None only as
+        its row stops being speech: the rows earlier Properties saves left
+        behind).  A cleared callout keeps them.  Returns ``(updated,
+        added)``; nothing is saved here."""
         from ...core import name_memory
         find = self._callout_finder(callouts)
         want = set(self._by_rel if rels is None else rels)
@@ -4706,6 +4727,15 @@ class AudioTab(FindOriginalsMixin, TabService):
             label, text = parts[1], callouts.get(row, "text")
             changed = callouts.get(row, "file") != fname
             row[keys["file"]] = fname
+            kind = (callouts.get(row, "classification") or "").strip().lower()
+            want_kind = _type_kind(self._cats.get(rel), kind)
+            if keys["classification"] and want_kind != kind:
+                row[keys["classification"]] = want_kind
+                changed = True
+            if not label and text and want_kind != "speech" and (
+                    rels is not None or kind == "speech"):
+                row[keys["text"]] = ""
+                changed = True
             # the words win while they still make this name ("Kaiju award:
             # 2x" files as "Kaiju award_ 2x"); a blank name keeps them
             if label and name_memory.sanitize_label(text) != label:
@@ -4714,7 +4744,6 @@ class AudioTab(FindOriginalsMixin, TabService):
             updated += changed
         if rels is not None:
             return updated, added
-        kinds = {"callouts": "speech", "music": "music"}
         for rel in sorted(want - seen, key=str.lower):
             parts = name_memory.split_decode_name(rel.rpartition("/")[2])
             if not parts or not parts[1]:
@@ -4728,8 +4757,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                 row[keys["seconds"]] = ("%.3f" % slot.duration
                                         if slot.duration else "")
             if keys["classification"]:
-                row[keys["classification"]] = kinds.get(
-                    self._cats.get(rel), "non-speech")
+                row[keys["classification"]] = _type_kind(
+                    self._cats.get(rel), "")
             callouts.rows.append(row)
             added += 1
         return updated, added

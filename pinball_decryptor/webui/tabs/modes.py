@@ -735,8 +735,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. 1 (Co-op) "
                         "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 2 a "
                         "team against players 3 and 4, each Start adding the next player; 3 (Team 2v1) makes players 1 and 2 a "
-                        "team against player 3. With characters, at 1, 2 or 3 a player starting a game alone with the right "
-                        "flipper button held picks one too. 1, 2 or 3 disables most "
+                        "team against player 3. 4, 5 and 6 are the same games Classic: the players pick characters, but "
+                        "none has a special ability. With characters, at 1 to 6 a player starting a game alone with the "
+                        "right flipper button held picks one too. 1 to 6 disables most "
                         "Insider Connected features (scores, high scores and achievements stay on the machine); at 0 "
                         "the game plays and reports as it always has%s."
                         % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
@@ -759,10 +760,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
     COOP_MENU_TIP = (
-        "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1. At 1 teammates "
+        "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1, and 4, 5 and 6 the "
+        "same three Classic (characters picked, no special abilities). At 1 teammates "
         "join with the right flipper button and Start. At 2 players 1 and 2 play as a team against players 3 and 4, "
         "each team with its own score and progress, taking turns. At 3 it is players 1 and 2 against player 3, who "
-        "plays both of team 2's turns. 1, 2 or 3 disables most Insider Connected features (the "
+        "plays both of team 2's turns. 1 to 6 disables most Insider Connected features (the "
         "card's scores, high scores and achievements stay on the machine). At 0 the game plays and "
         "reports to Insider Connected as it always has. A card that also carries modes keeps its scores off Insider "
         "Connected either way.")

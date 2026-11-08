@@ -6125,7 +6125,8 @@ tab's **Co-op play**):
     coop on
     button 59        the switch held at Start to add a teammate (the right flipper button; the build reads its id)
     setting 0x...    (round 2) the live value of the game's own CO-OP PLAY row (0 Off, 1 Co-op, 2 Team 2v2, 3 Team
-                     2v1): co-op only while it is 1, a team game while it is 2 or 3 (PAD-1042)
+                     2v1): co-op only while it is 1, a team game while it is 2 or 3 (PAD-1042); 4, 5 and 6 are 1, 2
+                     and 3 Classic, no character's ability (PAD-1065)
     teams on         (PAD-1042) every game of two or more players is a Team 2v2 game, no menu row needed
     teams 2v1        (PAD-1042) ... a Team 2v1 game
 
@@ -6212,6 +6213,14 @@ own player change goes between them. The runtime takes each team's players in tu
   same team game for three players at most - players 1 and 2 against player 3, who plays both of team 2's turns each
   ball (P1, P3, P2, P3), a fourth Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
   `team_max`). Its scores go on a `TEAM 2V1` board of their own, so a 2v1 champion never sits on the 2v2 board.
+- **Classic** (PAD-1065, DoomWalrus666: "play these modes without any special abilities. The players may select a
+  character but none of them will have any special abilities"): CO-OP PLAY 4, 5 and 6 are Co-op, Team 2v2 and Team
+  2v1 Classic, the same games as 1, 2 and 3 (now called Enhanced; `coop_menu_game`, `coop_teams_size`). The pick is
+  made as before, but `coop_char_up` answers no character, so no adjustment, record hold, count, gift, lit shot or
+  Action-button ability holds, and the pick's top line never says what one does. Each character with an ability gets
+  a `PadCoopClassic_<n>` patch in the HUD scene beside its pick screen (only when CO-OP PLAY is in the service menu):
+  its card as a character with no ability draws it (NO SPECIAL ABILITY, "Plays as the game always does."), cut to
+  where the two differ and placed over its card; the runtime shows it with the card while the row says 4-6.
 
 Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1042/rig`: job.sh, team.cfg; tryset.py builds a Write
 override set with the row defaulting to 2): 4 players through the game's own CO-OP PLAY row at 2 (read live at Start;

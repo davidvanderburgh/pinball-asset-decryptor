@@ -191,9 +191,9 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
     s = settings[0]
     # PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2 (Off/On's 0 and 1 keep their meaning), shown as a number the way GAME ID
     # is, Off to start with
-    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", 4, 0, 0, M.number_kind(AdjustmentTable(elf)))
+    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", 7, 0, 0, M.number_kind(AdjustmentTable(elf)))
     assert s.kind == 2 and len(CP.MENU_HELP) <= 63
-    assert CP.MENU_HELP.startswith("0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1") and "Insider mostly off" in CP.MENU_HELP
+    assert CP.MENU_HELP.startswith("0 Off. Enhanced 1 Co-op 2 2v2 3 2v1. 4-6 Classic") and "Insider off" in CP.MENU_HELP
     assert s.help == CP.MENU_HELP and s.where == "Adjustments > Machine Settings > Attract Mode"
     raw = bytearray(elf)
     for off, data in writes.items():
@@ -263,7 +263,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     from tests import test_spike2_mode_roster as R
     src = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c"))
     body = R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)")
-    assert "return !while_at || (value >= 1u && value <= 3u);" in body         # no row: always; a row: 1-3
+    assert "return !while_at || (value >= 1u && value <= 6u);" in body         # no row: always; a row: 1-6
     gate = R._lift(src, "static int on_agent_begin(unsigned *r)")
     assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")
@@ -271,7 +271,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     assert "return only ? v : 0;" in R._lift(src, "static unsigned coop_setting_wanted(void)\n{")   # ... the build says
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop_switched_on() && coop_button_held()" in add                   # Off: Start adds a competing player
-    assert "return *(volatile const unsigned *)(unsigned long)coop.setting == 1u;" in R._lift(
+    assert "return coop_menu_game(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;" in R._lift(
         src, "static int coop_switched_on(void)")
 
 

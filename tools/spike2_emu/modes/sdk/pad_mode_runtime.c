@@ -15681,7 +15681,13 @@ static void switches_arm(void)
  * (coop.n 1): player 1 picks at once and the ability holds as a teammate's would. Its score goes on the game's own
  * boards and no co-op awards follow it (one player, nobody to beat); the top line stays the game's own. Any later
  * Start in its first ball adds a teammate (Team 2v2 / 2v1: the next team player), as in a co-op game - the game plays
- * one player for the team, so a competing player could never be served. */
+ * one player for the team, so a competing player could never be served.
+ * PAD-1065 (DoomWalrus666: "an option in the service menu for Co-op, Teams 2v2, and Teams 3v1 to play these modes
+ * without any special abilities. The players may select a character but none of them will have any special
+ * abilities"): CO-OP PLAY 4, 5 and 6 are Co-op, Team 2v2 and Team 2v1 Classic - the same games as 1, 2 and 3 (now
+ * called Enhanced), the pick made as before, but no character's ability, gift or count holds; the pick shows each
+ * character's PadCoopClassic_<n> patch over its card (NO SPECIAL ABILITY), and the top line never says what one
+ * does. */
 static const char *const COOP_FILES[] = { "/usr/local/padmode/coop.cfg", "/dump/coop.cfg" };
 static struct {
     int on;                              /* coop.cfg says so and the sites are hooked */
@@ -15715,20 +15721,36 @@ static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsig
     return after == before ? turn : 1;                                /* the ball did not move: an extra ball */
 }
 
-/* round 2: the service menu's CO-OP PLAY says On (or the card has no such row: co-op is always on) */
+/* PAD-1065: the game a CO-OP PLAY value plays - 4, 5 and 6 (Classic) play 1, 2 and 3's (tests lift it verbatim) */
+static unsigned coop_menu_game(unsigned v)
+{
+    return v >= 4u && v <= 6u ? v - 3u : v;
+}
+
+/* round 2: the service menu's CO-OP PLAY says On (or the card has no such row: co-op is always on); PAD-1065: 1 or 4 */
 static int coop_switched_on(void)
 {
     if (coop.teams_always) return 0;
     if (!coop.setting) return 1;
-    return *(volatile const unsigned *)(unsigned long)coop.setting == 1u;
+    return coop_menu_game(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;
+}
+
+/* PAD-1065: CO-OP PLAY says Classic (4-6): the characters are picked but have no abilities */
+static int coop_classic(void)
+{
+    unsigned v;
+    if (!coop.setting) return 0;
+    v = *(volatile const unsigned *)(unsigned long)coop.setting;
+    return v >= 4u && v <= 6u;
 }
 
 /* PAD-1042: the most players a team game takes now - 4 (Team 2v2: coop.cfg `teams on`, CO-OP PLAY 2), 3 (Team 2v1:
- * `teams 2v1`, CO-OP PLAY 3) - or 0, no team game (tests lift it verbatim) */
+ * `teams 2v1`, CO-OP PLAY 3) - or 0, no team game; PAD-1065: 5 and 6 are 2 and 3 Classic (tests lift it verbatim) */
 static unsigned coop_teams_size(unsigned always, unsigned setting_value, int has_setting)
 {
     if (always) return always;
     if (!has_setting) return 0;
+    if (setting_value == 5u || setting_value == 6u) setting_value -= 3u;
     return setting_value == 2u ? 4u : setting_value == 3u ? 3u : 0u;
 }
 
@@ -16283,6 +16305,8 @@ static void *coop_scr[COOP_CHARS + 1];      /* PadCoop_1.., PadCoop_Random */
 static void *coop_scr_words[COOP_CHARS + 1];/* PAD-1044: each one's words line: the seconds left, then PICKED */
 static char coop_scr_said[16];              /* what the shown one's words line says */
 static int coop_scr_found, coop_scr_shown = -1;
+static void *coop_scr_classic[COOP_CHARS];  /* PAD-1065: PadCoopClassic_1..: NO SPECIAL ABILITY over each card */
+static int coop_scr_classic_shown = -1;
 static unsigned long coop_scr_try;
 static int coop_adj_said;                   /* the log's adjustment reads, the first 32 */
 #define COOP_CACHES 4
@@ -16360,10 +16384,11 @@ static unsigned coop_taken(unsigned except)
     return m;
 }
 
+/* the character of the teammate up, whose ability holds (PAD-1065: none in Classic) */
 static const struct coop_char *coop_char_up(void)
 {
     int c;
-    if (!coop_teammates() || coop.turn < 1 || coop.turn > 4) return 0;
+    if (!coop_teammates() || coop.turn < 1 || coop.turn > 4 || coop_classic()) return 0;
     c = coop_pick_of[coop.turn];
     return c >= 0 && c < coop_ch_n ? &coop_ch[c] : 0;
 }
@@ -16664,7 +16689,7 @@ static void coop_pick_say(void)
     if (coop_pick_ms) pm_snprintf(t, sizeof t, "  %u", coop_pick_secs(pk.left));      /* PAD-1044: the time left */
     if (coop_scr_found) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s", pk.who, t);   /* the screens say the rest */
     else if (pk.at >= coop_ch_n) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: RANDOM", pk.who, t);
-    else if (!pk.phase || !coop_ch[pk.at].does[0]) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: %s", pk.who, t, coop_ch[pk.at].name);
+    else if (!pk.phase || !coop_ch[pk.at].does[0] || coop_classic()) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: %s", pk.who, t, coop_ch[pk.at].name);
     else pm_snprintf(words, sizeof words, "%s", coop_ch[pk.at].does);
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
 }
@@ -16724,8 +16749,8 @@ static void coop_pick_close(const char *how)
     } else {
         coop_turn_show();
     }
-    if (c >= 0) coop_gift(&coop_ch[c]);
-    if (c >= 0) coop_counts_give(&coop_ch[c]);
+    if (c >= 0 && !coop_classic()) coop_gift(&coop_ch[c]);          /* PAD-1065: Classic, no ability */
+    if (c >= 0 && !coop_classic()) coop_counts_give(&coop_ch[c]);
     coop_dbl_armed = 0;
     if (c >= 0 && coop_ch[c].unlock_adj && fn("roster_slot_state") && data("rule_battle")) {   /* before any battle */
         char st[48];
@@ -16735,7 +16760,7 @@ static void coop_pick_close(const char *how)
         say("co-op: the selection screen's places at the pick (0 open, 2 won, else locked): %s", st);
     }
     if (c >= 0 && pk.who == coop.turn) coop_cache_hold();
-    if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game) {   /* the ball out was served before it */
+    if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game && !coop_classic()) {   /* the ball out was served before it */
         unsigned v = adj_chain(coop_ch[c].bs_adj);           /* what the game reads: a handicap, then theirs */
         say("co-op: %s - the ball in play gets its ball save now (%u s)", coop_ch[c].name, v);
         if (v) pm_ball_save(v);
@@ -16954,7 +16979,7 @@ static int coop_cards_backdrop(const char *name)
  * the seconds left on its words line, and PAD-1044's PICKED on the one taken */
 static void coop_screens_tick(void)
 {
-    int i, want, got = 0;
+    int i, k, want, want_classic, got = 0;
     char name[32], key[40], words[16];
     if (!coop_scr_scene[0]) return;
     if (!coop_scr_found) {
@@ -16970,11 +16995,16 @@ static void coop_screens_tick(void)
         }
         if (!got) return;
         for (i = 0; i <= coop_ch_n; i++) if (coop_scr[i]) pm_show(coop_scr[i], 0);
+        for (i = 0, k = 0; i < coop_ch_n; i++) {              /* PAD-1065: the Classic patches, where the card has them */
+            pm_snprintf(name, sizeof name, "PadCoopClassic_%d", i + 1);
+            if (!coop_scr_classic[i]) coop_scr_classic[i] = pm_node(coop_scr_scene, name);
+            if (coop_scr_classic[i]) pm_show(coop_scr_classic[i], 0), k++;
+        }
         coop_scr_found = 1;
-        coop_scr_shown = -1;
+        coop_scr_shown = coop_scr_classic_shown = -1;
         coop_cards_find();                                    /* PAD-1028 round 2: the award cards, hidden with them */
-        say("co-op characters: %d of the pick's %d screens found in %s - hidden until the pick is on one", got,
-            coop_ch_n + 1, coop_scr_scene);
+        say("co-op characters: %d of the pick's %d screens found in %s (%d Classic patches) - hidden until the pick is "
+            "on one", got, coop_ch_n + 1, coop_scr_scene, k);
     }
     want = !coop_teammates() || !pm_in_game() ? -1 : pk.open ? pk.at : coop_done.on ? coop_done.c : -1;
     words[0] = 0;
@@ -16994,6 +17024,13 @@ static void coop_screens_tick(void)
     }
     if (want != coop_scr_shown && want >= 0 && want <= coop_ch_n && coop_scr[want]) pm_show(coop_scr[want], 1);
     coop_scr_shown = want;
+    want_classic = want >= 0 && want < coop_ch_n && coop_classic() ? want : -1;   /* PAD-1065: over the card */
+    if (want_classic != coop_scr_classic_shown) {
+        if (coop_scr_classic_shown >= 0 && coop_scr_classic[coop_scr_classic_shown])
+            pm_show(coop_scr_classic[coop_scr_classic_shown], 0);
+        if (want_classic >= 0 && coop_scr_classic[want_classic]) pm_show(coop_scr_classic[want_classic], 1);
+        coop_scr_classic_shown = want_classic;
+    }
 }
 
 /* a rule of the game's that runs now (v[active] says 1), from the mask: its id + 1, or 0 */
@@ -17178,7 +17215,8 @@ static void coop_chars_turn(void)
     /* DoomWalrus666 (round 3): a gift (Godzilla's LIGHT ALLY) comes at EVERY turn of its teammate's, not their ball 1
      * alone - the pick gives the first, each later turn gives one more (the game lights the next unlit ally; none left:
      * nothing) */
-    if (coop.turn >= 1 && coop.turn <= 4 && coop_pick_of[coop.turn] >= 0 && coop_pick_of[coop.turn] < coop_ch_n)
+    if (coop.turn >= 1 && coop.turn <= 4 && coop_pick_of[coop.turn] >= 0 && coop_pick_of[coop.turn] < coop_ch_n
+        && !coop_classic())
         coop_gift(&coop_ch[coop_pick_of[coop.turn]]);
 }
 
@@ -17907,8 +17945,9 @@ static void coop_arm(void)
             "score goes on the game's boards");
     if (coop.setting)
         say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08x, now %s)", coop.setting,
-            coop_teams_switched_on() == 4u ? "Team 2v2" : coop_teams_switched_on() == 3u ? "Team 2v1"
-            : coop_switched_on() ? "On" : "Off");
+            coop_teams_switched_on() == 4u ? (coop_classic() ? "Team 2v2 Classic" : "Team 2v2")
+            : coop_teams_switched_on() == 3u ? (coop_classic() ? "Team 2v1 Classic" : "Team 2v1")
+            : coop_switched_on() ? (coop_classic() ? "Co-op Classic" : "On") : "Off");
     if (coop.teams_always)
         say("teams: every game of two or more is a team game (coop.cfg `teams %s`): players 1+2 against %s",
             coop.teams_always == 3u ? "2v1" : "on", coop.teams_always == 3u ? "3" : "3+4");
@@ -19253,7 +19292,7 @@ static unsigned insider_while;
 /* 1 when the gate holds back now (tests lift it verbatim) */
 static int insider_holding(unsigned while_at, unsigned value)
 {
-    return !while_at || (value >= 1u && value <= 3u);        /* PAD-1042: Co-op, Team 2v2 or Team 2v1 */
+    return !while_at || (value >= 1u && value <= 6u);        /* PAD-1042: Co-op, Team 2v2 or 2v1; PAD-1065: Classic */
 }
 
 static int on_agent_begin(unsigned *r)

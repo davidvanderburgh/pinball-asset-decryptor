@@ -248,3 +248,57 @@ Proven on LE with two teammates: LIGHT ALLY given at the pick and again when tea
 ally list went 0 0 1 -> 1 0 1), and all seven battle places open at the pick. The LE rig ends a ball on a drain only
 once the ball has been played a while (plunge, a minute of switch hits, then the trough): a drain straight after the
 pick, or 20 s after the plunge, is ignored (run 6's "no pick for teammate 2" was the same).
+
+## Round 4 (2026-11-07, DoomWalrus666 on the thread, seven messages)
+
+The reporter is designing the characters live: in one evening the ally-every-ball and tier-2-always asks (done in
+round 3), then the BUILDING ability doubling building damage and Mechagodzilla's spins and shield hits, the HEAT RAY
+ability ready at the start and a 4X super spinner, the LONGER BALL SAVE ability with 2x Oxygen Destroyer and
+Destruction Jackpot timers and +5 s on battles, SPOT A SHOT without the once-a-ball limit, the MASER ability with Magna
+Grab and Rage Combo lit and powerlines double, and the POWER-UPS ability with saucer double, a standing Destruction
+Jackpot multiplier, rampage letters and trains double. Found so far (Godzilla LE 1.16; Pro by xmatch):
+
+- Memory diffs on the rig (rig/memdump.py dumps 0x7a0000-0xa00000 between stimuli, rig/diffdumps.py) are the way to
+  find a count: a known number of switch pulses, then the words that rose by that much. swspin.py rips are too fast
+  for the game's spin counting (84 audit closures = 4 rule spins); swpoke pulses 25 ms every 0.15-0.5 s count 1:1.
+- The Mechagodzilla rule is one object (LE 0x7b29f8 / Pro 0x7a6360; its game-start copy LE 0x15c7a8 / Pro 0x159084
+  stores SHIELD DIFFICULTY at +4 + 4p and SPINS DIFFICULTY at +0x14 + 4p, p 1-based). Spins toward ONLINE at
+  +(p-1)*4 + 0x78 (goal at +0xd0: 20 on difficulty 1); after ONLINE the right spinner again raises the shield: the
+  u64 at +8p + 0x30 is 0x80000000 (shield up) with the hits LEFT in its high word (+0x3c for p=1; 3 on difficulty 1).
+  `double:spins` (proven: 10 pulses = 20, ONLINE) and `double:shield` (hits left fall two a hit; `_stride 8`).
+- The building rule is one object (LE 0x7b1d10 / Pro 0x7a56d8): +0x2c -> a vector of six words, a percent byte per
+  player (100 = the step done): the game's default BUILDING DIFFICULTY does a step a shot (STABILITY 83% after one), so
+  the old "easier building" ability changed nothing on a stock machine. Ramps fill words 0-3, building hits 4-5.
+  `steps:building` completes the step after each one the game completes.
+- The heat ray rule is one object (LE 0x7b2d68 / Pro 0x7a66d0): level at +0x14 + 4p, spins at +0x28 + 4p, needed =
+  HEAT RAY SPINS PER LEVEL + 8 x level; HEAT RAY READY sets the word at +4 + 4p to 1 (SPINNER MAXED, HOLD DOWN ACTION
+  BUTTON). `count:heatray=1` sets it at the pick (proven in memory); the Action hold did not fire the heat ray from
+  the set flag alone - the fire's own state is elsewhere (open).
+- The battle timers (212-218), O2 DESTROYER TIMER (193) and BALL SAVE TIME are read live through the adjustment
+  getter when the mode starts, so `adj:<id>+5` and `adj:<id>x200` (new + and - ops) cover them. The Destruction
+  Jackpot has a named timer but no adjustment; its countdown word was not found yet (gift:309 lit it; the shot that
+  collects it is not known - open).
+- Magna Grab: MAGNA GRAB LIT AT GAME START (194) is copied at game start by LE 0x155cdc into the word at +0x14 + 4p
+  of the object 0x7b1d4c (open: hold it at 1). Rage combo: messages 0xca4/0xcac, rule not found (open). Powerlines:
+  rule's game-start copy LE 0x1685a4 (QUALIFY DIFFICULTY 178 at +4 + 4p, DIFFICULTY 179 at +0x14 + 4p; targets 78/79/80)
+  - counts not found yet (open). Saucer, Destruction Jackpot multiplier, rampage letters, trains: not started.
+- The runtime's character line token was 128 bytes: a Godzilla character's abilities now run past 200 (raised to 384).
+
+Proven (LE and Pro, runs 8-9): two building steps a shot, Mecha spins and shield hits doubled, the heat ray READY word
+set at the pick, BALL SAVE TIME x2 and a battle timer + 5 read live. The runtime grew: 8 count slots, 12 adjustment
+slots, a 384-byte ability token, `_obj`/`_stride` count values, `double:` on falling counts and multi-step rises,
+`count:<name>=<n>`, `steps:`, `adj +/-`, spot without the once-a-ball flag. The dialog's and help's words follow.
+
+Next run (DoomWalrus666's remaining asks, all Godzilla):
+1. Heat ray: the fire on the Action hold with READY set at the pick (find the fire's own state next to the READY word;
+   the game's READY transition at 0x151d40 also sets a byte at +0x8a of another object). Then the 2X super spinner
+   after the heat ray at 4X (find the multiplier word with a dump after a real fire).
+2. Destruction Jackpot: which shot collects it once LIGHT DESTRUCTION JACKPOT (309) is given, its countdown word
+   (dumps a second apart), then a stretch of the countdown x2 for the longer-save character, and a standing +1x
+   multiplier for the power-ups character ("1X/2X DESTRUCTION JACKPOT" messages).
+3. Maser character: Magna Grab lit (hold the word at +0x14 + 4p of 0x7b1d4c, set from adjustment 194 at game start, at
+   1), Rage Combo lit (messages 0xca4/0xcac; find the rule), powerlines double (rule's game-start copy LE 0x1685a4;
+   targets 78/79/80; find the targets/sets count with dumps).
+4. Power-ups character: saucer shots double (the right scoop 53 / VUK 82?), rampage letters x2, two trains at a time
+   (find each count with dumps).
+5. Pro proofs for each, the dialog shot, the C harness and Windows tests, then the reply.

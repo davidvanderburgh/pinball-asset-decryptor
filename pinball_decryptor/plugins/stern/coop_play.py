@@ -402,17 +402,25 @@ PRESET_DIR = "coop_presets"
 #: ("save", seconds), ("addball", n): Action twice in regular play serves n more balls, ("yes", name): a check of the
 #: game's answers yes (the port's ``coop_yes_<name>``), or ("many", [parts]): several of the above at once
 ABILITIES = (
-    ("longer_save", "LONGER BALL SAVE",
-     "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top).",
-     ("adj", "AD_BALL_SAVE_TIME", "x200")),
+    ("longer_save", "LONGER BALL SAVE, LONGER TIMERS",
+     "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top); on Godzilla the "
+     "Oxygen Destroyer timer is twice its setting and every battle timer gets 5 seconds more.",
+     ("some", [("adj", "AD_BALL_SAVE_TIME", "x200"), ("adj", "AD_O2_DESTROYER_TIMER", "x200"),
+               ("adj", "AD_BATTLE_VS_EBIRAH_TIMER", "+5"), ("adj", "AD_BATTLE_VS_TITANOSAURUS_TIMER", "+5"),
+               ("adj", "AD_BATTLE_VS_GIGAN_TIMER", "+5"), ("adj", "AD_BATTLE_VS_MEGALON_TIMER", "+5"),
+               ("adj", "AD_BATTLE_VS_KING_GHIDORAH_TIMER", "+5"), ("adj", "AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", "+5")])),
     ("action_save", "ACTION BUTTON BALL SAVE",
      "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
-    ("heat_ray", "EASIER HEAT RAY", "The heat ray needs half the spinner spins a level (HEAT RAY SPINS PER LEVEL).",
-     ("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50")),
+    ("heat_ray", "HEAT RAY READY, EASIER HEAT RAY", "The heat ray is ready when they pick (HOLD DOWN ACTION BUTTON "
+     "from their first ball), and afterwards it charges in half the spinner spins a level (HEAT RAY SPINS PER LEVEL).",
+     ("many", [("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50"), ("set", "heatray", 1)])),
     ("battles", "EASIER BATTLES", "The ramps light a battle as on the game's easiest LIGHT BATTLE DIFFICULTY.",
      ("cache", "AD_LIGHT_BATTLE_DIFFICULTY", "min")),
-    ("building", "EASIER BUILDING MB", "Building Multiball is as easy to start as on the game's easiest BUILDING "
-     "DIFFICULTY.", ("cache", "AD_BUILDING_DIFFICULTY", "min")),
+    ("building", "BUILDING AND MECHA MULTIBALLS", "Every building or ramp shot takes two of the building's six "
+     "stability steps (on the game's easiest BUILDING DIFFICULTY), and toward Mechagodzilla Multiball every spin "
+     "counts twice and every shield target hit counts twice.",
+     ("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
+               ("double", "shield")])),
     ("powerups", "DOUBLE POWER-UPS", "Every Godzilla power-up the game gives counts twice.", ("boost", 200)),
     ("ally", "AN ALLY EVERY BALL", ("An ally is lit at each of their balls: the next of Mothra, Rodan and Anguirus in "
       "the game's own order (its LIGHT ALLY), at the pick and at every later turn."),
@@ -420,7 +428,7 @@ ABILITIES = (
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
      "the bonus count them).", ("count", "jets", 4)),
     ("spot", "SPOT A BATTLE SHOT", "Two quick presses of the Action button during a battle count as its next lit "
-     "shot, once a ball.", ("spot", "coop_battle_rules")),
+     "shot, as often as they like.", ("spot", "coop_battle_rules")),
     ("tier2", "TIER 2 ALWAYS OPEN", "Every battle on the selection screen is open while they are up, tier 2 included "
      "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).",
      ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
@@ -437,16 +445,16 @@ ABILITIES = (
 )
 #: what the pick's card says each ability does, in the player's words
 CARD_LINES = {
-    "longer_save": "Twice the ball save at the start of every ball.",
+    "longer_save": "Twice the ball save every ball. Longer Oxygen Destroyer and battle timers.",
     "action_save": "Press Action twice for a 10 second ball save, once a ball.",
-    "heat_ray": "The heat ray charges in half the spins.",
+    "heat_ray": "Heat ray ready from the start. Recharges in half the spins.",
     "battles": "One ramp lights a battle.",
-    "building": "Building Multiball is easier to start.",
+    "building": "Building damage two steps a shot. Mecha spins and shield hits count twice.",
     "powerups": "Every Godzilla power-up counts twice.",
     "ally": "An ally lit at every one of their balls.",
     "jets": "Starts with 4 jet fighters destroyed.",
     "tanks": "Starts with 4 tanks destroyed.",
-    "spot": "Press Action twice in a battle to hit its next shot, once a ball.",
+    "spot": "Press Action twice in a battle to hit its next shot, as often as you like.",
     "tier2": "Every battle is open to you, tier 2 included.",
     "addball": "Press Action twice in regular play to add a ball, once a ball.",
     "maser": "The Maser cannon is lit the whole time you are up.",
@@ -516,6 +524,11 @@ def _ability_part(how, table, action, sites, values, label):
         parts = [_ability_part(h, table, action, sites, values, label) for h in how[1]]
         bad = [w for c, w in parts if not c]
         return ("" if bad else ",".join(c for c, w in parts)), (bad[0] if bad else "")
+    if how[0] == "some":                       # the first part is the ability; the rest come along where the game has them
+        parts = [_ability_part(h, table, action, sites, values, label) for h in how[1]]
+        if not parts[0][0]:
+            return "", parts[0][1]
+        return ",".join(c for c, w in parts if c), ""
     if True:
         if how[0] == "save":
             cfg, why = ("save:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
@@ -532,14 +545,19 @@ def _ability_part(how, table, action, sites, values, label):
         elif how[0] == "double":
             cfg, why = (("double:%s" % how[1], "")
                         if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
+                        or "coop_count_%s_obj" % how[1] in values
                         else ("", NO_SITE % label))
         elif how[0] == "spot":
             rules = values.get(how[1])
             cfg, why = (("spot:0x%x" % rules, "") if rules and action is not None and "shot_dispatch" in sites
                         else ("", NO_ACTION % label if action is None else NO_SITE % label))
-        elif how[0] == "count":
-            cfg, why = (("count:%s+%d" % (how[1], how[2]), "")
+        elif how[0] in ("count", "set"):
+            cfg, why = (("count:%s%s%d" % (how[1], "=" if how[0] == "set" else "+", how[2]), "")
                         if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
+                        or "coop_count_%s_obj" % how[1] in values
+                        else ("", NO_SITE % label))
+        elif how[0] == "steps":
+            cfg, why = (("steps:%s" % how[1], "") if "coop_steps_%s_obj" % how[1] in values
                         else ("", NO_SITE % label))
         else:
             idx = table.by_name.get(how[1]) if table is not None else None

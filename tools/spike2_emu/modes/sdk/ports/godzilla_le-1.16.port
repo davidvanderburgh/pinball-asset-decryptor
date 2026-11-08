@@ -1193,3 +1193,20 @@ value coop_lit_maser_mask  0x8000000
 # ... and its award wants the player's charge word (this + 4 x player + 0x14) non-zero: kept at least 1
 value coop_lit_maser_at    0x14
 value coop_lit_maser_min   1
+# the Mechagodzilla rule (its game-start copy of the two difficulties; LE's object is 0x7b29f8): spins toward
+# ONLINE at this + (player - 1) x 4 + 0x78 (goal at +0xd0, 20 on difficulty 1) and, while the shield is up, the
+# hits LEFT in the high word of the u64 at this + player x 8 + 0x30 - a character's double:spins / double:shield
+site coop_count_spins     0x0015c7a8 0xe92d40f8 0xe1a04000
+value coop_count_spins_at  0x74
+site coop_count_shield    0x0015c7a8 0xe92d40f8 0xe1a04000
+value coop_count_shield_at 0x34
+value coop_count_shield_stride 8
+# the building rule (one object): its six damage steps are a vector at +0x2c of words, a percent byte per player
+# (100 = the step done; the game's default difficulty does one a shot) - a character's steps:building does two
+value coop_steps_building_obj 0x007b1d10
+value coop_steps_building_at  0x2c
+value coop_steps_building_n   6
+# the heat ray rule (one object): HEAT RAY READY is the word at this + player x 4 + 4 (1 = ready, the spinner
+# maxed, HOLD DOWN ACTION BUTTON) - a character's count:heatray=1 sets it at the pick (the game clears it on the fire)
+value coop_count_heatray_obj 0x007b2d68
+value coop_count_heatray_at  0x4

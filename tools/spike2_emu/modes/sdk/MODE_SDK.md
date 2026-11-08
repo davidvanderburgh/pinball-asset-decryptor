@@ -6351,6 +6351,19 @@ what it needs):
   through the game's own serve (`pm_multiball_add`), once a ball.
 - `yes:<name>`: a check of the game's (`site coop_yes_<name>`, `(this) -> 0/1`) answers 1 while the teammate is up
   (Godzilla: the tank rule's "in the Maser phase", LE 0x108d20 / Pro 0x1064e8: the Maser lit for all of Tank Attack).
+- `steps:<name>`: a rule's steps come two a shot: `value coop_steps_<name>_obj` is the rule (one object), `_at` its
+  vector of `_n` step words, each a percent byte per player (100 = done; Godzilla's building keeps its six stability
+  steps so, at 0x7b1d10 + 0x2c on LE, 0x7a56d8 on Pro). Each step the game completes while the teammate is up, the
+  one after it is completed too.
+- `count:<name>=<n>`: as `count:<name>+<n>`, but the word is made n at the pick (Godzilla: the heat ray rule's HEAT RAY
+  READY word at +4 + 4 x player, `value coop_count_heatray_obj` 0x7b2d68 LE / 0x7a66d0 Pro). A count's rule may be one
+  object (`value coop_count_<name>_obj`) instead of a hooked method or a pointer, and `value coop_count_<name>_stride`
+  (default 4) is the bytes between players' words (Godzilla's Mechagodzilla shield keeps its hits left in a u64 a
+  player: stride 8). `double:` also doubles a count that counts DOWN (the shield's hits left fall two a hit, to 0),
+  and a rise of several in one tick (a ripping spinner) is matched in full.
+- `adj:<id>+<n>:<lo>:<hi>` and `adj:<id>-<n>:<lo>:<hi>`: the adjustment reads its own value plus or minus n, held to
+  lo..hi (Godzilla: every BATTLE VS ... TIMER + 5; a timer read live through the getter when the mode starts needs no
+  record hold).
 - `lit:<name>=<mask>`: a shot held lit in one of the game's base-play rules while the teammate is up: `site
   coop_lit_<name>` is the rule's shot handler (hooked to learn the object; Godzilla LE 0x1645ac / Pro 0x160bd8, the
   rule that pays the MASER CANNON AWARD), and `<mask>` is OR-ed into its lit mask (the framework's u64 at this +

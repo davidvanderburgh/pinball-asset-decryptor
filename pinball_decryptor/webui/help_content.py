@@ -412,7 +412,13 @@ HELP_CONTENT = {
          "sound's row in callouts.csv, and **More > Update callouts.csv from "
          "the names…** writes every sound's name as it is now into the CSV "
          "(adding rows for named sounds it doesn't list), so your names are "
-         "kept there too."),
+         "kept there too.\n\n"
+         "Comments: the Comment box in Properties (any sound, F2 or "
+         "right-click) takes a note of your own, such as who says it, the mode "
+         "it belongs to or what plays it. It is kept in the comment column of "
+         "the project's callouts.csv, follows the sound through renames and "
+         "Auto-name, shows in a Comment column once a sound has one, is found "
+         "by the Search box, and goes out with Export CSV."),
         ("Blip-free callouts (always on)",
          "Every replaced sound plays your audio all the way through, with no "
          "scrap of the original inside it. There is nothing to switch on.\n\n"

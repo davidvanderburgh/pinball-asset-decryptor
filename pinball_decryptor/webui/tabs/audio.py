@@ -275,7 +275,7 @@ _SORT_CFG = (("#0", "Original Track", False), ("len", "Length", True),
              ("fmt", "Format", False), ("type", "Type", False),
              ("rep", "Replacement", False), ("loop", "Loop", True),
              ("keep", "Full", True), ("lvl", "Level", True),
-             ("rq", "Requests", True))
+             ("rq", "Requests", True), ("cm", "Comment", False))
 _SORT_DEFAULT_DESC = {c: d for c, _h, d in _SORT_CFG}
 
 # Keep in step with App._AUDIO_ADV_DEFAULTS (and the Tk dialog).
@@ -376,6 +376,8 @@ class AudioTab(FindOriginalsMixin, TabService):
 
         self._slots = []
         self._by_rel = {}
+        self._comments = {}         # PAD-1069: rel -> the user's comment (callouts.csv)
+        self._comments_sig = None
         self._reveal_rel = None     # a slot to show once the scan lands (reveal_audio_slot)
         self._assign = {}           # rel -> replacement path
         self._loop = {}             # rel -> bool (BOF)
@@ -1448,6 +1450,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             row["tn_tip"] = self._turns_words(rel)
             if rel in self._random or self._mode_random.get(rel):
                 row["tr"] = True
+        if rel in self._comments:
+            row["cm"] = self._comments[rel]
         uses = self._uses.get(rel) if self._uses else None
         if uses is not None:
             row["rq"] = len(uses)
@@ -1463,12 +1467,14 @@ class AudioTab(FindOriginalsMixin, TabService):
         type_key = _TYPE_KEYS.get(self.audio_type_var.get())
         change_ok = self._change_filter_pred()
         _cat_key = self._cat_key_fn()
+        comments = self._load_comments()
 
         def _cat_disp(s):
             return _CAT_DISP.get(_cat_key(s), "Other")
 
         def _passes(s):
-            if query and query not in s.rel_path.lower():
+            if query and query not in s.rel_path.lower() and query not in (
+                    comments.get(s.rel_path) or "").lower():
                 return False
             if change_ok is not None and not change_ok(s.rel_path):
                 return False
@@ -1503,6 +1509,11 @@ class AudioTab(FindOriginalsMixin, TabService):
                 return (-1 if uses is None else len(uses), s.rel_path.lower())
             if col == "type":
                 return (_cat_disp(s), s.rel_path.lower())
+            if col == "cm":
+                # the sounds with a comment first, A to Z
+                cm = comments.get(s.rel_path)
+                return (0 if cm else 1, (cm or "").lower(),
+                        s.rel_path.lower())
             return (s.rel_path.lower(),)
 
         rows, visible = [], []
@@ -1597,7 +1608,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         if sel != self._sel:
             self._sel = sel
         self.set(rows=rows, empty=hint, sel=list(self._sel),
-                 sort={"key": col, "desc": desc},
+                 sort={"key": col, "desc": desc}, comments=bool(comments),
                  dup_scanning=self._dup_scanning, attract=self._attract_state(),
                  jukebox=self._jukebox_state(), shots=self._shots_state())
         self._publish_status()
@@ -2790,8 +2801,11 @@ class AudioTab(FindOriginalsMixin, TabService):
                  {"label": "Choose replacement…", "action": "choose",
                   "icon": "file"}]
         if _nmem.split_decode_name(os.path.basename(rel)):
-            items.append({"label": "Properties…  (name / type)",
+            items.append({"label": "Properties…  (name / type / comment)",
                           "action": "props", "kbd": "F2", "icon": "edit"})
+        else:
+            items.append({"label": "Comment…", "action": "props",
+                          "kbd": "F2", "icon": "edit"})
         has_assignment = bool(self._assign.get(rel))
         is_built = rel in self._changed
         if has_assignment:
@@ -4363,12 +4377,15 @@ class AudioTab(FindOriginalsMixin, TabService):
         rel = rel or self._selected_rel()
         if rel is None or rel not in self._by_rel:
             return None
+        comment = self._load_comments().get(rel, "")
         parts = name_memory.split_decode_name(os.path.basename(rel))
         if parts is None:
-            return None
+            # PAD-1069: a sound whose name can't change still takes a comment
+            return {"rel": rel, "renamable": False, "comment": comment,
+                    "prompt": os.path.basename(rel)}
         prefix, label, ext = parts
         return {
-            "rel": rel,
+            "rel": rel, "renamable": True, "comment": comment,
             "prompt": ("Name for this sound — remembered for future extracts\n"
                        "(blank restores \"%s\" and forgets it):"
                        % (prefix + ext)),
@@ -4379,16 +4396,28 @@ class AudioTab(FindOriginalsMixin, TabService):
         }
 
     @rpc
-    def rename(self, rel, text, new_cat):
+    def rename(self, rel, text, new_cat, comment=None):
         """OK in Audio Properties: rename the file in place (keeping its
-        decode index), re-point the baseline, remember the name and Type."""
+        decode index), re-point the baseline, remember the name and Type;
+        then the sound's *comment* (None: left as it is) goes into
+        callouts.csv (PAD-1069)."""
+        new_rel = self._props_rename(rel, text, new_cat)
+        if new_rel is None:
+            return False
+        if comment is not None:
+            self.set_comment(new_rel, comment)
+        return True
+
+    def _props_rename(self, rel, text, new_cat):
+        """:meth:`rename` without the comment: the sound's path after it, or
+        None when it failed."""
         from ...core import name_memory
         slot = self._by_rel.get(rel)
         if slot is None:
-            return False
+            return None
         parts = name_memory.split_decode_name(os.path.basename(rel))
         if parts is None:
-            return False
+            return None
         prefix, label, ext = parts
         m = re.match(r"^#\d+\s+(.*)$", text or "")
         name = m.group(1) if m else (text or "")
@@ -4398,7 +4427,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         new_label = name_memory.sanitize_label(name)
         if new_label == label:
             if new_cat == cur_cat:
-                return True
+                return rel
             md5 = name_memory.baseline_md5(self._scan_dir, rel)
             if md5 is None and rel not in self._changed:
                 md5 = name_memory.file_md5(slot.abs_path)
@@ -4418,7 +4447,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._callouts_follow({rel: rel})
             self._refresh_type_filter()
             self._refresh_list()
-            return True
+            return rel
         new_base = ("%s - %s%s" % (prefix, new_label, ext) if new_label
                     else prefix + ext)
         if name_memory.clashes(slot.abs_path, os.path.join(
@@ -4426,14 +4455,14 @@ class AudioTab(FindOriginalsMixin, TabService):
             compat.messagebox.showerror(
                 "Audio Properties",
                 "A file named\n%s\nalready exists in that folder." % new_base)
-            return False
+            return None
         self._stop_playback()
         try:
             new_rel, md5 = self._rename_slot(rel, new_label, new_cat)
         except OSError as e:
             compat.messagebox.showerror("Audio Properties",
                                         "Rename failed:\n%s" % e)
-            return False
+            return None
         if md5 and not new_label and new_cat != cur_cat:
             # the name was cleared but the Type the user picked stays
             name_memory.remember_category(md5, new_cat)
@@ -4455,7 +4484,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         self.log("Replace Audio: renamed %s → %s%s" % (rel, new_base, note),
                  "info")
         self._save_staged_changes()
-        return True
+        return new_rel
 
     def _cat_to_remember(self, rel, label, cat):
         """The Type to remember with *label* for slot *rel*: always with a
@@ -4786,6 +4815,97 @@ class AudioTab(FindOriginalsMixin, TabService):
             self.log("Replace Audio: renamed the sound, but couldn't update "
                      "%s (%s)." % (CALLOUTS_CSV, e), "error")
 
+    # ------------------------------------------------------------------
+    # PAD-1069: comments on sounds, kept in callouts.csv
+    # ------------------------------------------------------------------
+    def _load_comments(self):
+        """``{rel: comment}`` from the comment column of the project's
+        callouts.csv (each row finds its sound by :meth:`_callout_finder`),
+        read again only when the file or the sounds have changed."""
+        from ...core.transcribe import CALLOUTS_CSV, COMMENT, CalloutsFile
+        path = os.path.join(self._scan_dir or "", CALLOUTS_CSV)
+        try:
+            st = os.stat(path) if self._scan_dir else None
+        except OSError:
+            st = None
+        sig = (path, st and st.st_mtime_ns, st and st.st_size,
+               hash(frozenset(self._by_rel)))
+        if sig == self._comments_sig:
+            return self._comments
+        self._comments_sig, self._comments = sig, {}
+        if st is None or not self._by_rel:
+            return self._comments
+        try:
+            callouts = CalloutsFile(path)
+        except (OSError, ValueError, csv.Error):
+            return self._comments
+        if callouts.key(COMMENT) is None:
+            return self._comments
+        find = self._callout_finder(callouts)
+        seen = set()
+        for row in callouts.rows:
+            rel = find(row)
+            if rel is None or rel in seen:
+                continue
+            seen.add(rel)
+            note = callouts.get(row, COMMENT)
+            if note:
+                self._comments[rel] = note
+        return self._comments
+
+    @rpc
+    def set_comment(self, rel, text):
+        """The comment on sound *rel* (Audio Properties): saved in the
+        comment column of the project's callouts.csv, the column added and
+        the sound given a row when it has none (the file made when the
+        project has none).  Blank clears it."""
+        from ...core import name_memory
+        from ...core.transcribe import CALLOUTS_CSV, COMMENT, CalloutsFile
+        slot = self._by_rel.get(rel)
+        if slot is None or not self._scan_dir:
+            return False
+        text = " ".join(str(text or "").split())
+        if text == self._load_comments().get(rel, ""):
+            return True
+        path = os.path.join(self._scan_dir, CALLOUTS_CSV)
+        try:
+            callouts = (CalloutsFile(path) if os.path.isfile(path)
+                        else CalloutsFile.empty(path))
+            if callouts.key(COMMENT) is None:
+                callouts.fields.append(COMMENT)
+            key = callouts.key(COMMENT)
+            find = self._callout_finder(callouts)
+            row = next((r for r in callouts.rows if find(r) == rel), None)
+            if row is None:
+                keys = {k: callouts.key(k) for k in
+                        ("folder", "file", "seconds", "classification",
+                         "text")}
+                folder, _, fname = rel.rpartition("/")
+                parts = name_memory.split_decode_name(fname)
+                row = {keys["file"]: fname,
+                       keys["text"]: parts[1] if parts else ""}
+                if keys["folder"]:
+                    row[keys["folder"]] = folder
+                if keys["seconds"]:
+                    row[keys["seconds"]] = ("%.3f" % slot.duration
+                                            if slot.duration else "")
+                if keys["classification"]:
+                    row[keys["classification"]] = _type_kind(
+                        self._cats.get(rel), "")
+                callouts.rows.append(row)
+            row[key] = text
+            callouts.save()
+        except (OSError, ValueError, csv.Error) as e:
+            compat.messagebox.showerror(
+                "Audio Properties",
+                "Couldn't save the comment in %s:\n%s" % (CALLOUTS_CSV, e))
+            return False
+        self.log("Replace Audio: %s %s (%s)" % (
+            rel, ("comment: " + text) if text else "comment cleared",
+            CALLOUTS_CSV), "info")
+        self._refresh_list()
+        return True
+
     @rpc
     def update_callouts(self):
         """More > Update callouts.csv from the names…: write the names the
@@ -4890,7 +5010,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                             "Replacement", "Changed On Disk", "Loop",
                             "Full Length", "Level dB"]
                            + (["Game Sound Requests"] if uses is not None
-                              else []))
+                              else []) + ["Comment"])
+                comments = self._load_comments()
                 for s in sorted(self._slots, key=lambda q: q.rel_path):
                     rel = s.rel_path
                     row = [
@@ -4906,6 +5027,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                         u = uses.get(rel)
                         row.append("" if u is None else " ".join(
                             "#%d" % r for r, _n in u) or "none")
+                    row.append(comments.get(rel, ""))
                     w.writerow(row)
         except OSError as e:
             compat.messagebox.showerror("Export CSV",
@@ -5009,7 +5131,7 @@ class AudioTab(FindOriginalsMixin, TabService):
     #: Each column's Tk ``minwidth`` (``_build_audio_tab``): a saved width
     #: never shows narrower than the Tk tree let it be dragged.
     _MIN_WIDTHS = {"#0": 80, "len": 66, "fmt": 104, "rep": 110, "loop": 40,
-                   "keep": 40, "type": 64, "lvl": 58}
+                   "keep": 40, "type": 64, "lvl": 58, "cm": 90}
 
     def _all_widths(self):
         s = getattr(self.app, "_settings", None) if self.app else None

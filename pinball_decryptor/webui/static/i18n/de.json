@@ -12882,5 +12882,12 @@
 "{} already has every sound's name.": "{} enthält bereits den Namen jedes Sounds.",
 "Write the names the sounds have now into {}?": "Die aktuellen Namen der Sounds in {} schreiben?",
 "{} row(s) get their sound's new name and {} named sound(s) get a row. Rows for sounds this project doesn't have are kept as they are.": "{} Zeile(n) erhalten den neuen Namen ihres Sounds und {} benannte(r) Sound(s) erhalten eine Zeile. Zeilen für Sounds, die dieses Projekt nicht hat, bleiben unverändert.",
-"Updated {} row(s) and added {}.": "{} Zeile(n) aktualisiert und {} hinzugefügt."
+"Updated {} row(s) and added {}.": "{} Zeile(n) aktualisiert und {} hinzugefügt.",
+"Comment:": "Kommentar:",
+"Comment": "Kommentar",
+"Comment…": "Kommentar…",
+"Properties…  (name / type / comment)": "Eigenschaften…  (Name / Typ / Kommentar)",
+"Who says it, the mode it belongs to, what plays it…": "Wer es sagt, zu welchem Modus es gehört, was es abspielt…",
+"Kept in this project's callouts.csv (comment column), so it stays with the sound when you extract again or share the file.": "Wird in der callouts.csv dieses Projekts gespeichert (Spalte comment), sodass er beim erneuten Extrahieren oder Weitergeben der Datei beim Sound bleibt.",
+"Comments: the Comment box in Properties (any sound, F2 or right-click) takes a note of your own, such as who says it, the mode it belongs to or what plays it. It is kept in the comment column of the project's callouts.csv, follows the sound through renames and Auto-name, shows in a Comment column once a sound has one, is found by the Search box, and goes out with Export CSV.": "Kommentare: Das Feld Kommentar in den Eigenschaften (jeder Sound, F2 oder Rechtsklick) nimmt eine eigene Notiz auf, etwa wer es sagt, zu welchem Modus es gehört oder was es abspielt. Er wird in der Spalte comment der callouts.csv des Projekts gespeichert, folgt dem Sound bei Umbenennungen und Auto-Benennung, erscheint in einer Spalte Kommentar, sobald ein Sound einen hat, wird vom Suchfeld gefunden und geht mit CSV exportieren mit."
 }

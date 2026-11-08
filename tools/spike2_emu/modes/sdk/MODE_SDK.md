@@ -6351,10 +6351,15 @@ what it needs):
   through the game's own serve (`pm_multiball_add`), once a ball.
 - `yes:<name>`: a check of the game's (`site coop_yes_<name>`, `(this) -> 0/1`) answers 1 while the teammate is up
   (Godzilla: the tank rule's "in the Maser phase", LE 0x108d20 / Pro 0x1064e8: the Maser lit for all of Tank Attack).
+- `keep:<name>=<v>`: a word of the game's (`value coop_keep_<name>_obj` + player x `_stride` + `_at`, `_width` 4 or 1)
+  is written v every tick while the teammate is up (Godzilla: MAGNA GRAB lit - the word its MAGNA GRAB LIT AT GAME
+  START adjustment sets at game start, 0x7b1d4c LE / 0x7a5714 Pro + 0x14 + 4 x player). A count may also be one byte
+  (`value coop_count_<name>_width 1`) or one word for every player (`_stride 0`).
 - `steps:<name>`: a rule's steps come two a shot: `value coop_steps_<name>_obj` is the rule (one object), `_at` its
   vector of `_n` step words, each a percent byte per player (100 = done; Godzilla's building keeps its six stability
   steps so, at 0x7b1d10 + 0x2c on LE, 0x7a56d8 on Pro). Each step the game completes while the teammate is up, the
-  one after it is completed too.
+  one after it is completed too. `_inline 1` when the steps are words in the rule itself, `_done` the value of a step
+  done and `_width 4` a word a player (Godzilla's three powerline targets at 0x7b0b90 + 0x38: each hit is two targets).
 - `count:<name>=<n>`: as `count:<name>+<n>`, but the word is made n at the pick (Godzilla: the heat ray rule's HEAT RAY
   READY word at +4 + 4 x player, `value coop_count_heatray_obj` 0x7b2d68 LE / 0x7a66d0 Pro). A count's rule may be one
   object (`value coop_count_<name>_obj`) instead of a hooked method or a pointer, and `value coop_count_<name>_stride`

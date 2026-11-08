@@ -405,15 +405,16 @@ ABILITIES = (
     ("longer_save", "LONGER BALL SAVE, LONGER TIMERS",
      "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top); on Godzilla the "
      "Oxygen Destroyer timer is twice its setting and every battle timer gets 5 seconds more.",
-     ("some", [("adj", "AD_BALL_SAVE_TIME", "x200"), ("adj", "AD_O2_DESTROYER_TIMER", "x200"),
+     ("some", [("adj", "AD_BALL_SAVE_TIME", "x200"), ("adj", "AD_O2_DESTROYER_TIMER", "x200:8:40"),
                ("adj", "AD_BATTLE_VS_EBIRAH_TIMER", "+5"), ("adj", "AD_BATTLE_VS_TITANOSAURUS_TIMER", "+5"),
                ("adj", "AD_BATTLE_VS_GIGAN_TIMER", "+5"), ("adj", "AD_BATTLE_VS_MEGALON_TIMER", "+5"),
                ("adj", "AD_BATTLE_VS_KING_GHIDORAH_TIMER", "+5"), ("adj", "AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", "+5")])),
     ("action_save", "ACTION BUTTON BALL SAVE",
      "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
-    ("heat_ray", "HEAT RAY READY, EASIER HEAT RAY", "The heat ray is ready when they pick (HOLD DOWN ACTION BUTTON "
-     "from their first ball), and afterwards it charges in half the spinner spins a level (HEAT RAY SPINS PER LEVEL).",
-     ("many", [("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50"), ("set", "heatray", 1)])),
+    ("heat_ray", "HEAT RAY READY, EASIER HEAT RAY", "The heat ray is one spin from ready when they pick (the first "
+     "spinner spin of their first ball lights HEAT RAY READY, the game's own way), and it charges in half the spinner "
+     "spins a level (HEAT RAY SPINS PER LEVEL).",
+     ("many", [("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50"), ("set", "heatlevel", 3), ("set", "heatspins", 9)])),
     ("battles", "EASIER BATTLES", "The ramps light a battle as on the game's easiest LIGHT BATTLE DIFFICULTY.",
      ("cache", "AD_LIGHT_BATTLE_DIFFICULTY", "min")),
     ("building", "BUILDING AND MECHA MULTIBALLS", "Every building or ramp shot takes two of the building's six "
@@ -421,10 +422,13 @@ ABILITIES = (
      "counts twice and every shield target hit counts twice.",
      ("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
                ("double", "shield")])),
-    ("powerups", "DOUBLE POWER-UPS", "Every Godzilla power-up the game gives counts twice.", ("boost", 200)),
-    ("ally", "AN ALLY EVERY BALL", ("An ally is lit at each of their balls: the next of Mothra, Rodan and Anguirus in "
-      "the game's own order (its LIGHT ALLY), at the pick and at every later turn."),
-     ("gift", "AD_LIGHT_ALLY")),
+    ("powerups", "DOUBLE POWER-UPS AND SAUCER", "Every Godzilla power-up the game gives counts twice, and every hit on "
+     "the saucer (the pop bumper) counts twice toward Saucer Attack.",
+     ("some", [("boost", 200), ("double", "saucer")])),
+    ("ally", "AN ALLY EVERY BALL, LONGER RODAN", ("An ally is lit at each of their balls: the next of Mothra, Rodan "
+      "and Anguirus in the game's own order (its LIGHT ALLY), at the pick and at every later turn; Rodan's playfield "
+      "multiplier runs twice its timer."),
+     ("some", [("gift", "AD_LIGHT_ALLY"), ("adj", "AD_RODAN_PLAYFIELD_MULTIPLIER_TIMER", "x200:40:120")])),
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
      "the bonus count them).", ("count", "jets", 4)),
     ("spot", "SPOT A BATTLE SHOT", "Two quick presses of the Action button during a battle count as its next lit "
@@ -434,9 +438,10 @@ ABILITIES = (
      ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
     ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
      "once a ball.", ("addball", 1)),
-    ("maser", "MASER ALWAYS LIT", "The Maser cannon target is lit the whole time they are up: in regular play (the "
-     "Maser shot held lit in the game's own rule) and for all of Tank Attack (its Maser phase check says yes).",
-     ("many", [("lit", "maser"), ("yes", "maser")])),
+    ("maser", "MASER AND MAGNA GRAB LIT, DOUBLE POWERLINES", "The Maser cannon target is lit the whole time they are "
+     "up (in regular play and for all of Tank Attack), Magna Grab is kept lit, and every powerline target hit counts "
+     "as two targets.",
+     ("some", [("many", [("lit", "maser"), ("yes", "maser")]), ("keep", "magna", 1), ("steps", "powerline")])),
     ("bridge", "EASIER BRIDGE, DOUBLE TANKS AND JETS", "The bridge falls as on the game's easiest BRIDGE ATTACK "
      "DIFFICULTY, and every tank or jet destroyed counts as two.",
      ("many", [("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min"), ("double", "tanks"), ("double", "jets")])),
@@ -447,17 +452,17 @@ ABILITIES = (
 CARD_LINES = {
     "longer_save": "Twice the ball save every ball. Longer Oxygen Destroyer and battle timers.",
     "action_save": "Press Action twice for a 10 second ball save, once a ball.",
-    "heat_ray": "Heat ray ready from the start. Recharges in half the spins.",
+    "heat_ray": "Heat ray ready at your first spin. Recharges in half the spins.",
     "battles": "One ramp lights a battle.",
     "building": "Building damage two steps a shot. Mecha spins and shield hits count twice.",
-    "powerups": "Every Godzilla power-up counts twice.",
-    "ally": "An ally lit at every one of their balls.",
+    "powerups": "Every power-up counts twice. Saucer hits count twice.",
+    "ally": "An ally lit at every one of your balls. Rodan lasts twice as long.",
     "jets": "Starts with 4 jet fighters destroyed.",
     "tanks": "Starts with 4 tanks destroyed.",
     "spot": "Press Action twice in a battle to hit its next shot, as often as you like.",
     "tier2": "Every battle is open to you, tier 2 included.",
     "addball": "Press Action twice in regular play to add a ball, once a ball.",
-    "maser": "The Maser cannon is lit the whole time you are up.",
+    "maser": "Maser and Magna Grab lit while you are up. Powerline hits count double.",
     "bridge": "The bridge falls faster. Tanks and jets count two at a time.",
 }
 
@@ -559,6 +564,9 @@ def _ability_part(how, table, action, sites, values, label):
         elif how[0] == "steps":
             cfg, why = (("steps:%s" % how[1], "") if "coop_steps_%s_obj" % how[1] in values
                         else ("", NO_SITE % label))
+        elif how[0] == "keep":
+            cfg, why = (("keep:%s=%d" % (how[1], how[2]), "") if "coop_keep_%s_obj" % how[1] in values
+                        else ("", NO_SITE % label))
         else:
             idx = table.by_name.get(how[1]) if table is not None else None
             if idx is None:
@@ -578,6 +586,8 @@ def _ability_part(how, table, action, sites, values, label):
                     cfg = "adj:%d=%d" % (idx, lo)
                 elif how[2] == "max":
                     cfg = "adj:%d=%d" % (idx, hi)
+                elif ":" in how[2]:                                # its own bounds: a timer past the setting's top
+                    cfg = "adj:%d%s" % (idx, how[2])
                 else:
                     cfg = "adj:%d%s:%d:%d" % (idx, how[2], lo, hi)
                 if how[1] == "AD_BALL_SAVE_TIME":                  # read when a ball is served: the ball-1 pick's

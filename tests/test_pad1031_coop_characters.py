@@ -139,6 +139,8 @@ int main(void)
 """
 
 FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
+       "static unsigned coop_count_get(int i, volatile unsigned *f)",
+       "static void coop_count_put(int i, volatile unsigned *f, unsigned v)",
        "static unsigned long coop_pick_left(unsigned long left, unsigned long el)",
        "static unsigned coop_pick_secs(unsigned long left)",
        "static volatile unsigned *coop_cache_field(const struct coop_cache *k)",
@@ -153,7 +155,11 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static void coop_double_tick(void)",
        "static volatile unsigned *coop_lit_field(int i)",
        "static void coop_lit_tick(void)",
+       "static unsigned coop_step_get(int i, volatile unsigned char *b, unsigned j, unsigned p)",
+       "static void coop_step_put(int i, volatile unsigned char *b, unsigned j, unsigned p, unsigned v)",
        "static void coop_steps_tick(void)",
+       "static void coop_keep_tick(void)",
+
        "static void coop_pick_say(void)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
@@ -387,24 +393,26 @@ def test_a_file_that_is_not_one_says_so(tmp_path):
 def test_godzillas_abilities_and_lines_read_off_its_program():
     elf = open(GZ_ELF, "rb").read()
     got = {a["key"]: a for a in CP.abilities(elf, "Godzilla")}
-    assert got["longer_save"]["cfg"] == ("adj:94x200:0:15,bs:94,adj:193x200:8:20,adj:212+5:30:70,adj:213+5:30:70,"
+    assert got["longer_save"]["cfg"] == ("adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:212+5:30:70,adj:213+5:30:70,"
                                          "adj:214+5:30:70,adj:215+5:30:70,adj:216+5:30:90,adj:218+5:30:90")
     assert got["action_save"]["cfg"] == "save:10"
     assert not got["heat_ray"]["cfg"] and got["heat_ray"]["why"]      # round 4: READY at the pick needs the port's object
     port = __import__("pinball_decryptor.plugins.stern.mode_project", fromlist=["read_port"]).read_port(
         str(RUNTIME.parent / "ports" / "godzilla_le-1.16.port"))
     full = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", port["site"], port["value"])}
-    assert full["heat_ray"] == "adj:195x50:4:30,count:heatray=1"
+    assert full["heat_ray"] == "adj:195x50:4:30,count:heatlevel=3,count:heatspins=9"
+    assert full["powerups"] == "boost:200,double:saucer"
+    assert full["maser"] == "lit:maser=0x8000000,yes:maser,keep:magna=1,steps:powerline"
     assert full["building"] == "adj:168=0,steps:building,double:spins,double:shield"
     assert CP.action_button(elf) == 34
     lines = CP.character_lines(elf, CP.read_preset(CP.presets()["godzilla"])["characters"])
     assert lines[:6] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62",
-                         "character adj:94x200:0:15,bs:94,adj:193x200:8:20,adj:212+5:30:70,adj:213+5:30:70,"
+                         "character adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:212+5:30:70,adj:213+5:30:70,"
                          "adj:214+5:30:70,adj:215+5:30:70,adj:216+5:30:90,adj:218+5:30:90 GODZILLA 1954|"
                          "LONGER BALL SAVE, LONGER TIMERS"]
     text = CP.cfg_text(elf, None, {"pick": True, "list": [{"name": "A", "ability": "heat_ray"}]},
                        sites=port["site"], values=port["value"])
-    assert text.endswith("character adj:195x50:4:30,count:heatray=1 A|HEAT RAY READY, EASIER HEAT RAY\n")
+    assert text.endswith("character adj:195x50:4:30,count:heatlevel=3,count:heatspins=9 A|HEAT RAY READY, EASIER HEAT RAY\n")
 
 
 def test_a_held_record_gives_back_the_harder_of_the_teams_and_plays(tmp_path):
@@ -433,7 +441,7 @@ def test_godzillas_own_abilities_need_their_port_sites():
     values = MP.read_port(str(RUNTIME.parent / "ports" / "godzilla_le-1.16.port"))["value"]
     got = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", sites, values)}
     assert got["battles"] == "adj:173=0" and got["building"].startswith("adj:168=0,steps:building")
-    assert got["powerups"] == "boost:200" and got["ally"] == "gift:311"
+    assert got["powerups"].startswith("boost:200") and got["ally"] == "gift:311,adj:199x200:40:120"
     bare = {a["key"]: a for a in CP.abilities(elf, "Godzilla")}         # a port without them: not offered, and why
     assert all(not bare[k]["cfg"] and bare[k]["why"] for k in ("battles", "building", "powerups", "ally"))
 
@@ -607,5 +615,5 @@ def test_round_two_kinds_read_from_coop_cfg(tmp_path):
     arm = R._lift(src, "static void coop_chars_arm(struct site *e)")
     assert '"coop_yes_%s"' in arm and "the %s count is doubled" in arm
     tick = R._lift(src, "static void coop_double_tick(void)")
-    assert "now > coop_dbl_last[i] && now - coop_dbl_last[i] <= 50u" in tick and "*f = now + rise;" in tick
-    assert "now < coop_dbl_last[i]" in tick and "*f = now;" in tick           # round 4: a count that counts DOWN
+    assert "now > coop_dbl_last[i] && now - coop_dbl_last[i] <= 50u" in tick and "coop_count_put(i, f, now + rise);" in tick
+    assert "now < coop_dbl_last[i]" in tick and "coop_count_put(i, f, now);" in tick   # round 4: a count that counts DOWN

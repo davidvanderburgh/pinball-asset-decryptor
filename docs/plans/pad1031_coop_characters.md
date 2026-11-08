@@ -302,3 +302,20 @@ Next run (DoomWalrus666's remaining asks, all Godzilla):
 4. Power-ups character: saucer shots double (the right scoop 53 / VUK 82?), rampage letters x2, two trains at a time
    (find each count with dumps).
 5. Pro proofs for each, the dialog shot, the C harness and Windows tests, then the reply.
+
+## Round 4, batch 2 (2026-11-07 late)
+
+Found and proven on LE (runs 10-13): the saucer is the pop bumper (rule 0x7b0de8, hits +4+4p; `double:saucer`), the
+powerline set's three targets are words in rule 0x7b0b90 at +0x38 (`steps:powerline` with `_inline 1 _done 1 _width 4`:
+each hit lights two targets, a set in two hits), MAGNA GRAB lit is the word 0x7b1d4c + 0x14 + 4p (`keep:magna=1`), and
+the heat ray's READY comes when its level word (+(p-1)*4+0x28) reaches 4: `count:heatlevel=3,count:heatspins=9` at the
+pick puts it one spin from READY and the game's own transition lights it. Pro objects are the LE ones - 0xc638 (saucer
+0x7a47b0, powerline 0x7a4558, magna 0x7a5714, heat ray 0x7a66d0), confirmed in the Pro disassembly (C:/tmp/PAD-1031/
+pro_all.txt). The game's rule table 0x7b4aa8 (Pro 0x7a83f0), 27 pointers named by the port's block_rule_name_N, holds
+the base-play rules; the per-player feature state lives in the feature objects found by memory diffs.
+New runtime: keep:<name>=<v>, steps _inline/_done/_width, count _width 1 and _stride 0, adj parts with their own
+bounds (a doubled timer past the setting's top: O2 x200:8:40, RODAN x200:40:120 for the ally character).
+Open: the heat ray's fire from the Action hold on the rig (the game's own; READY is reached the game's way) and the 4X
+super spinner after it; the Destruction Jackpot timer and a standing multiplier; Rage Combo lit; rampage letters and
+trains x2 (the inlane rollovers 56/57 and loops 84/74 did not move a count in run 11); Mothra saving either outlane
+(eighth message).

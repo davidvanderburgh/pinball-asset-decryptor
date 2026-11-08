@@ -6402,7 +6402,7 @@ in by thirds - level 1 the first third a step, level 2 two thirds two steps, lev
 
 **The pick.** At each player's first ball (the ball byte is 1, the player's pick not yet shown this game) the game's
 top line ("BALL %d", co-op's borrow) reads `P2 HANDICAP 0`; the flippers walk it, starting at what that player had
-last game (0 at power-up); the ball's first score takes it. The player's level holds from the game's first read of an
+last game (0 at power-up, and 0 for everyone after a game reset with Start + the left flipper: it ends without the game's own game_over); the ball's first score takes it. The player's level holds from the game's first read of an
 adjustment in their first ball: the game reads the ball save time as it serves the ball, before the pick shows, so
 ball 1's save is the level the pick opened at and every later ball's the one taken. Before their first ball the
 getter answers the operator's own values: nothing the game reads for every player before then carries anyone's

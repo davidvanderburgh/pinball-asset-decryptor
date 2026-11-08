@@ -6221,6 +6221,11 @@ own player change goes between them. The runtime takes each team's players in tu
   a `PadCoopClassic_<n>` patch in the HUD scene beside its pick screen (only when CO-OP PLAY is in the service menu):
   its card as a character with no ability draws it (NO SPECIAL ABILITY, "Plays as the game always does."), cut to
   where the two differ and placed over its card; the runtime shows it with the card while the row says 4-6.
+  Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1065`: tryset.py builds a Write override set whose row
+  defaults to a value - the `default` option is one-based with `from_zero`, so 6 for 5; rig/job.sh sets the slot's
+  NVRAM aside so the default shows, and needs 6 coins a player on fresh settings): Team 2v2 Classic (5) - 11 of 11
+  patches found, both players picked, GODZILLA 1954's card said NO SPECIAL ABILITY and the game read no adjustment of
+  its; the control at 2 read ball save 15 (its own 12) and saved the ball in play at the pick; no faults.
 
 Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1042/rig`: job.sh, team.cfg; tryset.py builds a Write
 override set with the row defaulting to 2): 4 players through the game's own CO-OP PLAY row at 2 (read live at Start;

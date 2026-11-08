@@ -343,14 +343,23 @@ function Loudness({ s, selRel }) {
 }
 
 // ---------------------------------------------------------------- dialogs
+// PAD-1069: a comment on any sound (who says it, the mode, what plays it), kept in the
+// project's callouts.csv; a sound whose name can't change gets only the comment
 function PropsModal({ data, onClose }) {
   const [name, setName] = useState(data.label || "");
   const [cat, setCat] = useState(data.category || "other");
-  const ok = () => { onClose(); call("audio.rename", data.rel, name, cat); };
+  const [note, setNote] = useState(data.comment || "");
+  const renamable = data.renamable !== false;
+  const ok = () => {
+    onClose();
+    if (renamable) call("audio.rename", data.rel, name, cat, note);
+    else call("audio.set_comment", data.rel, note);
+  };
   return html`<${Modal} title="Audio Properties" icon="edit" onClose=${onClose}
     footer=${html`<${Button} kind="danger" onClick=${onClose}>Cancel<//><${Button} kind="primary" onClick=${ok}>OK<//>`}>
     <div onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); ok(); } }} class="stack" style="gap:10px">
-      <div class="msg">${data.prompt}</div>
+      <div class=${cx("msg", !renamable && "mono")}>${data.prompt}</div>
+      ${renamable ? html`
       ${data.suggestions && data.suggestions.length ? html`<div class="small muted" style="font-style:italic">Pick one of the game's own Sound Test names, or type anything:</div>` : null}
       <${Field} value=${name} onChange=${setName} list="aud-sugg" autoFocus />
       <datalist id="aud-sugg">${(data.suggestions || []).map((x) => html`<option value=${x} />`)}</datalist>
@@ -358,7 +367,11 @@ function PropsModal({ data, onClose }) {
         <span class="lbl">Type:</span>
         <${Select} value=${cat} options=${data.cats} onChange=${setCat} width=${150} />
         <span class="small muted" style="font-style:italic">(the Type is remembered with the name)</span>
-      </div>
+      </div>` : null}
+      <label class="lbl" for="aud-note">Comment:</label>
+      <span class="field"><input id="aud-note" type="text" aria-label="Comment" value=${note} autoFocus=${!renamable}
+        placeholder="Who says it, the mode it belongs to, what plays it…" onInput=${(e) => setNote(e.target.value)} /></span>
+      <div class="small muted" style="font-style:italic">Kept in this project's callouts.csv (comment column), so it stays with the sound when you extract again or share the file.</div>
     </div>
   <//>`;
 }
@@ -421,7 +434,7 @@ By default every replacement is gained to the same loudness as the sound it repl
 // the Tk tree's own (settings.json column_widths.audio, shared with Tk).
 const FIXED = { play: 30, len: 96, fmt: 184, type: 92, rq: 88, loop: 58, keep: 58, lvl: 76 };
 const ROW_H = 32;
-const MIN_W = { "#0": 80, rep: 110 };    // the Tk columns' minwidth
+const MIN_W = { "#0": 80, rep: 110, cm: 90 };    // the Tk columns' minwidth (cm: PAD-1069's Comment)
 // A control inside a row: its second click of a double-click does nothing
 // (one picker, one play, one toggle), and the double-click never reaches the
 // row, whose double-click opens the replacement picker.
@@ -877,6 +890,9 @@ export default function AudioTab() {
         onClick=${once(() => call("audio.toggle_flag", r.k, col))}>${r[col] ? html`<${Icon} name="check" />` : null}</button>` }] : []),
     ...(col === "lvl" ? [{ key: "lvl", label: "Level", sort: "lvl", title: T.level, width: FIXED.lvl + "px", num: true,
       titleOf: () => T.level, render: (r) => r.lvl || "" }] : []),
+    // PAD-1069: the user's comments, once a sound has one (Audio Properties)
+    ...(s.comments ? [{ key: "cm", label: "Comment", sort: "cm", width: `minmax(${MIN_W.cm}px,0.8fr)`,
+      titleOf: (r) => r.cm || undefined, render: (r) => r.cm ? html`<span class="dim">${r.cm}</span>` : "" }] : []),
     { key: "rep", label: "Replacement", sort: "rep", width: `minmax(${MIN_W.rep}px,1fr)`, titleOf: (r) => r.rep,
       render: (r) => r.g ? html`<span class="muted">${r.rep}</span>`
         : html`<span class="aud-repcell"><button type="button" class=${cx("aud-rep", r.t === "picked" && "picked", r.t === "ondisk" && "ondisk", r.t === "stray" && "stray", !r.t && "choose")}

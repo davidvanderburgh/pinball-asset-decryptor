@@ -48,6 +48,8 @@ WHISPER_LOAD_HINT = (
 )
 
 CALLOUTS_CSV = "callouts.csv"
+#: PAD-1069: the column of callouts.csv holding the user's own note on a sound
+COMMENT = "comment"
 
 # Rough one-time download size per model (the GUI's quality choices), for
 # the "Downloading..." log line.  Approximate on purpose.
@@ -372,6 +374,9 @@ class TranscribePipeline(BasePipeline):
         # files that already carry a name, so keep what the last run wrote
         # about them; this run's rows win for the files it did transcribe.
         rows = _keep_earlier_rows(self.assets_dir, rows)
+        # PAD-1069: the comments the user gave sounds in the Audio tab stay
+        # with their sounds (a file this run renamed finds its by idx)
+        comment_of = earlier_comments(self.assets_dir)
         # folder + file split into their own columns and a numeric seconds
         # column (both plain sort keys in Excel — a tester: the combined
         # path drowned the filename, and the play length was only findable
@@ -379,14 +384,15 @@ class TranscribePipeline(BasePipeline):
         with open(out_path, "w", encoding="utf-8", newline="") as f:
             w = csv.writer(f)
             w.writerow(["folder", "file", "seconds", "classification",
-                        "text"])
+                        "text"] + ([COMMENT] if comment_of else []))
             for rel, kind, text in rows:
                 folder, _, fname = rel.rpartition("/")
                 secs = _wav_seconds(
                     os.path.join(self.assets_dir, *rel.split("/")))
                 w.writerow([folder, fname,
                             "" if secs is None else "%.3f" % secs,
-                            kind, text])
+                            kind, text]
+                           + ([comment_of(rel)] if comment_of else []))
 
         rename_summary = (
             f"\nRenamed {renamed_count} file(s) using transcripts."
@@ -1038,6 +1044,51 @@ def _keep_earlier_rows(assets_dir, rows):
     if not kept:
         return rows
     return sorted(list(rows) + kept, key=lambda r: r[0].lower())
+
+
+def decode_key(rel):
+    """``(folder, idx)`` naming the decoded sound *rel* (a ``folder/file``
+    path) whatever its name now, both lower case, or None when its file name
+    has no idx number: how a row finds its sound again after a rename."""
+    from .name_memory import split_decode_name
+    folder, _, fname = rel.rpartition("/")
+    parts = split_decode_name(fname)
+    if not parts:
+        return None
+    return folder.lower(), parts[0].rpartition(" - ")[2].lower()
+
+
+def earlier_comments(assets_dir):
+    """PAD-1069: a function giving the comment the ``callouts.csv`` in
+    *assets_dir* holds for a sound (``folder/file``; by its idx number in the
+    same folder when that file is not named there), or None when the CSV
+    has no comment column.  A comment is never lost to a re-run."""
+    path = os.path.join(assets_dir, CALLOUTS_CSV)
+    if not os.path.isfile(path):
+        return None
+    try:
+        cf = CalloutsFile(path)
+    except (OSError, ValueError, csv.Error):
+        return None
+    if cf.key(COMMENT) is None:
+        return None
+    by_rel, by_idx = {}, {}
+    for r in cf.rows:
+        note, fname = cf.get(r, COMMENT), cf.get(r, "file")
+        if not note or not fname:
+            continue
+        folder = cf.get(r, "folder").replace("\\", "/").strip("/")
+        rel = f"{folder}/{fname}" if folder else fname
+        by_rel.setdefault(rel, note)
+        key = decode_key(rel)
+        if key:
+            by_idx.setdefault(key, note)
+
+    def comment_of(rel):
+        if rel in by_rel:
+            return by_rel[rel]
+        return by_idx.get(decode_key(rel), "")
+    return comment_of
 
 
 class CalloutsFile:

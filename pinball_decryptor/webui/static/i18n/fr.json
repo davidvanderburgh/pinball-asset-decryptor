@@ -12882,5 +12882,12 @@
 "{} already has every sound's name.": "{} a déjà le nom de chaque son.",
 "Write the names the sounds have now into {}?": "Écrire dans {} les noms actuels des sons ?",
 "{} row(s) get their sound's new name and {} named sound(s) get a row. Rows for sounds this project doesn't have are kept as they are.": "{} ligne(s) reçoivent le nouveau nom de leur son et {} son(s) nommé(s) reçoivent une ligne. Les lignes des sons que ce projet n'a pas restent telles quelles.",
-"Updated {} row(s) and added {}.": "{} ligne(s) mise(s) à jour et {} ajoutée(s)."
+"Updated {} row(s) and added {}.": "{} ligne(s) mise(s) à jour et {} ajoutée(s).",
+"Comment:": "Commentaire :",
+"Comment": "Commentaire",
+"Comment…": "Commentaire…",
+"Properties…  (name / type / comment)": "Propriétés…  (nom / type / commentaire)",
+"Who says it, the mode it belongs to, what plays it…": "Qui le dit, le mode auquel il appartient, ce qui le joue…",
+"Kept in this project's callouts.csv (comment column), so it stays with the sound when you extract again or share the file.": "Conservé dans le callouts.csv de ce projet (colonne comment), il reste donc avec le son quand vous extrayez à nouveau ou partagez le fichier.",
+"Comments: the Comment box in Properties (any sound, F2 or right-click) takes a note of your own, such as who says it, the mode it belongs to or what plays it. It is kept in the comment column of the project's callouts.csv, follows the sound through renames and Auto-name, shows in a Comment column once a sound has one, is found by the Search box, and goes out with Export CSV.": "Commentaires : la case Commentaire des Propriétés (n'importe quel son, F2 ou clic droit) accueille une note personnelle, comme qui le dit, le mode auquel il appartient ou ce qui le joue. Elle est conservée dans la colonne comment du callouts.csv du projet, suit le son lors des renommages et de l'Auto-nommage, apparaît dans une colonne Commentaire dès qu'un son en a une, est trouvée par la case Rechercher et part avec Exporter CSV."
 }

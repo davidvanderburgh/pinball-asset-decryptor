@@ -261,7 +261,7 @@ def test_choose_stages_in_the_sidecar_and_feeds_the_write(tmp_path):
         assert "Remove replacement" in labels
         assert "Revert to original" not in labels
         assert "Play replacement" in labels
-        assert "Properties…  (name / type)" in labels
+        assert "Properties…  (name / type / comment)" in labels
         # Remove replacement
         w.call("audio.menu_action", "remove", rel, [rel])
         assert _sidecar(folder)["audio"] == {}
@@ -341,7 +341,7 @@ def test_export_csv(tmp_path):
         assert w.call("audio.export_csv") is True
         text = open(out, encoding="utf-8-sig").read().splitlines()
         assert text[0] == ("Original Track,Length,Format,Type,Replacement,"
-                           "Changed On Disk,Loop,Full Length,Level dB")
+                           "Changed On Disk,Loop,Full Length,Level dB,Comment")
         assert len(text) == 4
 
 

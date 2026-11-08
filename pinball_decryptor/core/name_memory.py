@@ -70,10 +70,26 @@ def sanitize_label(text):
     return cleaned.rstrip(". ")
 
 
+def clashes(src, dst):
+    """True when *dst* names an existing file that is not *src*.
+
+    A rename that only changes the case ("ONE" -> "One") finds *dst* already
+    there on a case-insensitive disk (Windows, a default macOS volume): it is
+    the same file, not a clash (PAD-1060)."""
+    if not os.path.exists(dst):
+        return False
+    try:
+        return not os.path.samefile(src, dst)
+    except OSError:
+        return True
+
+
 def _load_raw():
     """Raw store — values are either a bare label string (v0.63.0) or a
     ``{"label":..., "cat":...}`` dict (v0.63.1, so a rename keeps its Type
-    bucket — a tester renamed an SFX and watched it turn into a callout)."""
+    bucket — a tester renamed an SFX and watched it turn into a callout), or
+    ``{"cat":...}`` alone: the Type the user gave a sound with no name
+    (PAD-1061)."""
     try:
         with open(AUDIO_NAMES_FILE, encoding="utf-8") as f:
             data = json.load(f)
@@ -90,8 +106,8 @@ def _load_raw():
             cat = str(v.get("cat", "")).strip().lower() or None
         else:
             label, cat = sanitize_label(str(v)), None
-        if label:
-            entry = {"label": label}
+        if label or cat:
+            entry = {"label": label} if label else {}
             if cat:
                 entry["cat"] = cat
             out[str(k).lower()] = entry
@@ -100,7 +116,7 @@ def _load_raw():
 
 def load():
     """``{md5: label}`` — ``{}`` on missing/corrupt/foreign."""
-    return {k: v["label"] for k, v in _load_raw().items()}
+    return {k: v["label"] for k, v in _load_raw().items() if "label" in v}
 
 
 def load_categories():
@@ -121,15 +137,16 @@ def _save(data):
 
 def remember(md5, label, category=None):
     """Store *label* (and optionally the slot's Type *category*) for content
-    *md5*; a blank label forgets the entry."""
+    *md5*; a blank label forgets the name, keeping only a *category* given
+    with it (PAD-1060: a cleared name with a new Type kept the old Type)."""
     if not md5:
         return
     md5 = str(md5).lower()
     label = sanitize_label(label)
     data = _load_raw()
-    if label:
-        entry = {"label": label}
-        cat = str(category or "").strip().lower()
+    cat = str(category or "").strip().lower()
+    if label or cat:
+        entry = {"label": label} if label else {}
         if cat:
             entry["cat"] = cat
         if data.get(md5) == entry:
@@ -139,6 +156,26 @@ def remember(md5, label, category=None):
         del data[md5]
     else:
         return
+    _save(data)
+
+
+def remember_category(md5, category):
+    """Store the Type *category* the user gave content *md5* while it has no
+    name (PAD-1061: Audio Properties kept it for that session only, and a
+    callout moved to Sound FX was a callout again after a restart).  The
+    entry carries no label, so it renames nothing and holds whatever the
+    file is later called; a rename with a name replaces it."""
+    if not md5:
+        return
+    md5 = str(md5).lower()
+    cat = str(category or "").strip().lower()
+    if not cat:
+        return
+    data = _load_raw()
+    entry = {"cat": cat}
+    if data.get(md5) == entry:
+        return
+    data[md5] = entry
     _save(data)
 
 
@@ -201,7 +238,7 @@ def apply_saved_names(assets_dir, log=None):
         new_base = "%s - %s%s" % (prefix, label, ext)
         new_rel = (folder + "/" + new_base) if folder else new_base
         dst = os.path.join(assets_dir, *new_rel.split("/"))
-        if os.path.exists(dst):
+        if clashes(src, dst):
             if log:
                 log("  skip saved name for %s: target exists" % rel, "info")
             continue

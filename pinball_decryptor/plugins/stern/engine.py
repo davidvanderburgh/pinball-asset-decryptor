@@ -11403,8 +11403,8 @@ class _CoopMenu(_MusicModeMenu):
     def done(self):
         self.ok = True
         self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 to play "
-                 "co-op, 2 for Team 2v2 (players 1 and 2 against 3 and 4) or 3 for Team 2v1 (players 1 and 2 "
-                 "against 3). While it is 1, 2 or 3 most Insider "
+                 "co-op, 2 for Team 2v2 (players 1 and 3 against 2 and 4) or 3 for Team 2v1 (players 1 and 3 "
+                 "against 2), picked as TEAM PLAY on the start menu. While it is 1, 2 or 3 most Insider "
                  "Connected features are off; at 0 the card reports as it always has (with no modes on it)."
                  % self.setting.where, "info")
 

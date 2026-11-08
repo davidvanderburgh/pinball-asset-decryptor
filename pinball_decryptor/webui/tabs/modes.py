@@ -735,7 +735,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 note, kind = why, "err"
             elif menu:
                 note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. 1 (Co-op) "
-                        "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 3 a "
+                        "puts CO-OP PLAY on the game's start menu (each Start then adds a teammate), or the right "
+                        "flipper button + Start adds one; 2 (Team 2v2) makes players 1 and 3 a "
                         "team against players 2 and 4, picked as TEAM PLAY 2 VS 2 on the game's start menu (both flipper buttons "
                         "in attract), one Start adding all four; 3 (Team 2v1) makes players 1 and 3 a team against player "
                         "2 (TEAM PLAY 2 VS 1). 4, 5 and 6 are the same games Classic: the players pick characters, but "
@@ -764,7 +765,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
     COOP_MENU_TIP = (
         "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1, and 4, 5 and 6 the "
-        "same three Classic (characters picked, no special abilities). At 1 teammates "
+        "same three Classic (characters picked, no special abilities). At 1 CO-OP PLAY is on the game's start "
+        "menu (both flipper buttons in attract): picked, each Start in the first ball adds a teammate; or teammates "
         "join with the right flipper button and Start. At 2 players 1 and 3 play as a team against players 2 and 4, "
         "each team with its own score and progress, taking turns: TEAM PLAY 2 VS 2 on the game's start menu (both flipper buttons in attract), then one Start "
         "adds all four. At 3 it is players 1 and 3 against player 2, who plays both of team 2's turns (TEAM PLAY 2 VS "

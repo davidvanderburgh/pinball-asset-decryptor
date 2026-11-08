@@ -60,7 +60,8 @@ MENU_COOP_CLASSIC, MENU_TEAMS_CLASSIC, MENU_TEAMS_2V1_CLASSIC = 4, 5, 6
 #: the help names the values and says what they cost (63 characters: the spare help lines' room)
 MENU_HELP = "0 Off. Enhanced 1 Co-op 2 2v2 3 2v1. 4-6 Classic. Insider off"
 #: how a teammate joins, for the tab and the log
-HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
+HOW = ("pick CO-OP PLAY on the start menu (both flipper buttons in attract) and each Start in the first ball adds "
+       "a teammate, or hold the right flipper button and press Start to add one (2-4 players share one game); "
        "a plain Start adds a competing player as always; with characters, a player starting a game alone with the "
        "right flipper button held picks one")
 #: PAD-1042: how a team game is played, for the tab and the log

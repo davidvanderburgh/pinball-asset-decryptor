@@ -87,7 +87,9 @@ def clashes(src, dst):
 def _load_raw():
     """Raw store — values are either a bare label string (v0.63.0) or a
     ``{"label":..., "cat":...}`` dict (v0.63.1, so a rename keeps its Type
-    bucket — a tester renamed an SFX and watched it turn into a callout)."""
+    bucket — a tester renamed an SFX and watched it turn into a callout), or
+    ``{"cat":...}`` alone: the Type the user gave a sound with no name
+    (PAD-1061)."""
     try:
         with open(AUDIO_NAMES_FILE, encoding="utf-8") as f:
             data = json.load(f)
@@ -104,14 +106,11 @@ def _load_raw():
             cat = str(v.get("cat", "")).strip().lower() or None
         else:
             label, cat = sanitize_label(str(v)), None
-        if label:
-            entry = {"label": label}
+        if label or cat:
+            entry = {"label": label} if label else {}
             if cat:
                 entry["cat"] = cat
             out[str(k).lower()] = entry
-        elif cat:
-            # PAD-1060: a Type kept for a slot whose name was cleared
-            out[str(k).lower()] = {"cat": cat}
     return out
 
 
@@ -157,6 +156,26 @@ def remember(md5, label, category=None):
         del data[md5]
     else:
         return
+    _save(data)
+
+
+def remember_category(md5, category):
+    """Store the Type *category* the user gave content *md5* while it has no
+    name (PAD-1061: Audio Properties kept it for that session only, and a
+    callout moved to Sound FX was a callout again after a restart).  The
+    entry carries no label, so it renames nothing and holds whatever the
+    file is later called; a rename with a name replaces it."""
+    if not md5:
+        return
+    md5 = str(md5).lower()
+    cat = str(category or "").strip().lower()
+    if not cat:
+        return
+    data = _load_raw()
+    entry = {"cat": cat}
+    if data.get(md5) == entry:
+        return
+    data[md5] = entry
     _save(data)
 
 

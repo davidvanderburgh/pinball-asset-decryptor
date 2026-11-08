@@ -111,9 +111,10 @@ def test_clearing_the_name_on_its_own_still_forgets_it(tmp_path, boxes):
     bare = "audio/idx0001.wav"
     with web_app(tmp_path, mfr="stern") as w:
         _load(w, assets)
-        assert w.call("audio.rename", REL, "Uno", "sfx") is True
+        same = AC.derived(assets, bare)       # the Type is never changed
+        assert w.call("audio.rename", REL, "Uno", same) is True
         assert w.call("audio.rename", "audio/idx0001 - Uno.wav", "",
-                      AC.derived(assets, bare)) is True
+                      same) is True
     assert _names(assets) == ["idx0001.wav"]
     assert NM.load() == {} and NM.load_categories() == {}
 

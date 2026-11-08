@@ -4385,16 +4385,16 @@ class AudioTab(FindOriginalsMixin, TabService):
             if md5 is None and rel not in self._changed:
                 md5 = name_memory.file_md5(slot.abs_path)
             self._cats[rel] = new_cat
-            keep = self._cat_to_remember(rel, new_label, new_cat)
-            if md5 and keep:
-                name_memory.remember(md5, new_label, category=keep)
+            if md5:
+                # PAD-1061: a sound with no name keeps its Type too
+                if new_label:
+                    name_memory.remember(md5, new_label, category=new_cat)
+                else:
+                    name_memory.remember_category(md5, new_cat)
                 note = " (remembered)"
-            elif md5 and not new_label:
-                name_memory.remember(md5, "")
-                note = ""
             else:
-                note = (" (this session only — give the slot a name to "
-                        "remember its Type across extracts)")
+                note = (" (this session only: the slot is modded and has "
+                        "no baseline)")
             self.log("Replace Audio: %s Type → %s%s" % (rel, new_cat, note),
                      "info")
             self._refresh_type_filter()
@@ -4415,6 +4415,9 @@ class AudioTab(FindOriginalsMixin, TabService):
             compat.messagebox.showerror("Audio Properties",
                                         "Rename failed:\n%s" % e)
             return False
+        if md5 and not new_label and new_cat != cur_cat:
+            # the name was cleared but the Type the user picked stays
+            name_memory.remember_category(md5, new_cat)
         self._repoint_baseline({rel: new_rel})
         self._callouts_follow({rel: new_rel})
         self._sel = [new_rel]
@@ -4425,7 +4428,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             note = " (not remembered: the slot is modded and has no baseline)"
         elif new_label:
             note = " (remembered for future extracts)"
-        elif self._cat_to_remember(new_rel, "", new_cat):
+        elif (new_cat != cur_cat
+              or self._cat_to_remember(new_rel, "", new_cat)):
             note = " (name forgotten, Type %s remembered)" % new_cat
         else:
             note = " (forgotten)"

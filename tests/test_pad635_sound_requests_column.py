@@ -134,9 +134,9 @@ def test_the_audio_tab_shows_which_requests_play_each_sound(tmp_path):
         w.answers.append(out)
         assert w.call("audio.export_csv") is True
         text = open(out, encoding="utf-8-sig").read().splitlines()
-        assert text[0].endswith(",Level dB,Game Sound Requests")
-        assert text[1].endswith(",#4 #9") and text[2].endswith(",none")
-        assert text[3].endswith(",#12")
+        assert text[0].endswith(",Level dB,Game Sound Requests,Comment")   # PAD-1069: Comment last
+        assert text[1].endswith(",#4 #9,") and text[2].endswith(",none,")
+        assert text[3].endswith(",#12,")
 
 
 def test_a_renamed_sound_keeps_its_requests(tmp_path):

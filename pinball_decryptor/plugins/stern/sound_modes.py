@@ -242,7 +242,8 @@ NO_TITLE_SHOTS = ("The app cannot tell which game this project is for, so it can
                   "the shots of the game's modes.")
 NO_SHOTS = "Sounds on the shots of the game's modes are not offered on %s: %s."
 
-_IDX_RE = re.compile(r"(?:^|/)idx(\d+)")
+#: PAD-1068: or the Extract tab's Length-prefix names, ``audio/02m21s867 - idx0384 - music - ....wav``
+_IDX_RE = re.compile(r"(?:^|/)(?:\d+m\d+s\d+ - )?idx(\d+)")
 
 
 class SoundModeError(ValueError):
@@ -742,7 +743,8 @@ def load(project):
 
 
 def slot_idx(rel):
-    """The sound-bank record a slot's file is (``audio/idx2095 - music - ...wav`` -> 2095), or None."""
+    """The sound-bank record a slot's file is (``audio/idx2095 - music - ...wav`` or, with Length-prefix names,
+    ``audio/02m21s867 - idx2095.wav`` -> 2095), or None."""
     m = _IDX_RE.search(str(rel or "").replace("\\", "/"))
     return int(m.group(1)) if m else None
 

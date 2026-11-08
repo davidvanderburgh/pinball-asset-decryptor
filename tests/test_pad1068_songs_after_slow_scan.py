@@ -111,3 +111,39 @@ def test_every_finished_audio_scan_is_announced_to_the_tabs():
     assert seen == ["C:/proj"]
     src = inspect.getsource(AT.AudioTab._populate_after_scan)
     assert "audio_scanned" in src
+
+
+# ---- BEN, after the fix above shipped: "still no sound", with a 9 s scan ------------------------------------------
+def test_length_prefixed_sound_names_are_their_records():
+    from pinball_decryptor.plugins.stern import sound_modes as SM
+    assert SM.slot_idx("audio/02m21s867 - idx0384 - music - Led Zeppelin - Immigrant Song.wav") == 384
+    assert SM.slot_idx(r"audio\04m49s012 - idx0229.wav") == 229
+    assert SM.slot_idx("02m48s700 - idx0309.wav") == 309
+    assert SM.slot_idx("audio/idx0004.wav") == 4
+    assert SM.slot_idx("audio/my 02m21s867 - idx0384.wav") is None
+
+
+def test_a_length_prefixed_project_has_its_songs():
+    audio = _Audio()
+    audio._slots = [_slot("audio/04m49s012 - idx0229.wav", 289.0), _slot("audio/00m01s500 - idx0001.wav", 1.5)]
+    assert [s["slot"] for s in LT._songs(audio)] == [229]
+
+
+def test_a_game_shows_song_is_kept_however_short_and_a_missing_one_is_said():
+    win = _Win("C:/proj")
+    win.audio._slots = [_slot("audio/idx0013.wav", 12.0)]
+    win.audio._scan_dir, win.audio._scanning = "C:/proj", False
+    tab = LT.LightsTab(win)
+    tab.set(stock=[{"req": 62, "slot": 13}, {"req": 64, "slot": 309}])
+    tab._songs_now()
+    songs = _wait_songs(tab, 1)
+    assert [s["slot"] for s in songs] == [13]
+    why = tab.get("song_missing")
+    assert list(why) == ["309"] and "idx0309" in why["309"]
+
+
+def test_the_page_says_why_a_game_shows_song_is_missing():
+    import os
+    js = open(os.path.join(os.path.dirname(LT.__file__), "..", "static", "js", "tabs", "lights.js"),
+              encoding="utf-8").read()
+    assert "song_missing" in js and "missingWhy" in js

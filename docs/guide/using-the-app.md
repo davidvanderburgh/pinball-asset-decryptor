@@ -121,6 +121,9 @@ build.
   arrive named by the game itself (`idx0091 - SE FX MATCH.wav`).
 - **Rename** a slot (right-click > **Properties…**). The name follows the
   sound itself, so later extracts, even of a newer version, name it again.
+- **Comment** on any sound (right-click > **Properties…** or **Comment…**).
+  Comments are kept in the extract's `callouts.csv`, show in a Comment
+  column, and the search box finds them.
 
 ### Listening
 

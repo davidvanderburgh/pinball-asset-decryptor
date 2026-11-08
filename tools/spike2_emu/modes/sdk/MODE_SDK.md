@@ -6326,6 +6326,17 @@ Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ba
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and
 a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.
+
+PAD-1054 (DoomWalrus666): a player alone picks too. A game whose start (`game_start`) comes with `button` held, or
+let go of at most 1.5 s before, is a co-op game of ONE when it plays one player, CO-OP PLAY is not Off (any of Co-op,
+Team 2v2, Team 2v1; always, with no `setting`) and there is a pick: player 1 picks at once and the ability holds as a
+teammate's. Its score goes on the game's own boards, no co-op awards follow it and the top line stays the game's own
+`BALL n`. A Start in its first ball still adds a teammate (any Start, button held or not, as in a co-op game), or with
+a team mode on begins the team game, player 1 keeping the character.
+
+    co-op: the right flipper was held at Start - one player with a character (the game's own boards; a Start in ball 1 still adds a teammate)
+    co-op: the right flipper was held at Start - no character pick (CO-OP PLAY is Off)
+
 `mode.log`:
 
     co-op: teammate 1 picks a character (11, and RANDOM): the flippers walk, Action takes one (a launch the one shown), 30 s

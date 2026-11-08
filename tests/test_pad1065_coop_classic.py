@@ -32,8 +32,8 @@ int main(void)
     return 0;
 }
 """
-    # 4 Co-op Classic is co-op (no team game), 5 is 2v2 (4 players), 6 is 2v1 (3); Insider held back for 1-6
-    assert R._host_run(tmp_path, main).strip() == "01231237 04300430 01111110 1"
+    # 2 is Team 2v2 (4 players), 3 Team 2v1 (3); 4 Co-op Classic is co-op (no team game), 5 is 2v2, 6 is 2v1; Insider held back for 1-6
+    assert R._host_run(tmp_path, main).strip() == "01231237 00430430 01111110 1"
 
 
 CHAR_UP_MAIN = r"""

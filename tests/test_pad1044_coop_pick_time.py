@@ -70,3 +70,40 @@ def test_the_runtime_keeps_a_pick_through_a_busy_game_and_reads_the_line():
     assert "pk.open = 0" not in busy                                   # it waits: never dropped with no character
     assert 'str_starts(s, "pick_time ")' in src
     assert '"PICKED"' in src and "coop_scr_words" in src
+
+
+# PAD-1066 (DoomWalrus666: "the character selection timer should reset when a flipper button is pressed until the
+# selection has been completed. The timer should never be able to force a player to continue"): played through
+# test_pad1031's model game, the runtime's own pick code lifted verbatim.
+RESET_MAIN = r"""
+int main(void)
+{
+    static const char *const cfg[] = { "- GODZILLA 1954|LONGER BALL SAVE", "- SHIN GODZILLA|", 0 };
+    int i;
+    for (i = 0; cfg[i]; i++) coop_char_line(cfg[i]);
+    coop_pick_on = 1; coop.button = 59; coop_left = 60; coop_action = 34; coop_adj_game = own_adj;
+    coop.n = 2; coop.turn = 1; coop_chars_begin(); coop_chars_turn();
+    for (i = 0; i < 4; i++) { now_ms += 25000; coop_chars_tick(); press(i & 1 ? 60 : 59); coop_chars_tick(); }
+    printf("read 100 s: open %d left %u pick %d [%s]\n", pk.open, coop_pick_secs(pk.left), coop_pick_of[1], shown);
+    now_ms += 25000; press(60); press(59); coop_chars_tick();
+    printf("there and back: open %d left %u\n", pk.open, coop_pick_secs(pk.left));
+    now_ms += 29000; coop_chars_tick(); printf("left alone 29 s: open %d left %u\n", pk.open, coop_pick_secs(pk.left));
+    now_ms += 1000; coop_chars_tick(); printf("left alone 30 s: open %d pick %d\n", pk.open, coop_pick_of[1]);
+    coop_pick_ms = 0; coop.turn = 2; coop_chars_turn();
+    now_ms += 600000; press(59); coop_chars_tick(); printf("unlimited: open %d left %lu\n", pk.open, pk.left);
+    press(34); coop_chars_tick(); printf("unlimited took %d\n", coop_pick_of[2]);
+    return 0;
+}
+"""
+
+
+def test_a_flipper_press_starts_the_picks_time_again_so_reading_never_runs_it_out(tmp_path):
+    from tests import test_pad1031_coop_characters as T
+    out = T._run(tmp_path, T.MAIN[:T.MAIN.index("int main(void)")] + RESET_MAIN)
+    said = "\n".join(out)
+    assert "read 100 s: open 1 left 30 pick -1 [PLAYER 1 PICK  30: GODZILLA 1954]" in out, said
+    assert "there and back: open 1 left 30" in out, said          # the walk nets to nothing, the presses still count
+    assert "left alone 29 s: open 1 left 1" in out, said
+    assert "left alone 30 s: open 0 pick 0" in out, said          # left alone the whole time: the one shown is taken
+    assert "unlimited: open 1 left 0" in out and "unlimited took 1" in out, said
+    assert "the time ran out" in said

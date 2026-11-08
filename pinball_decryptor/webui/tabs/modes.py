@@ -41,6 +41,7 @@ from ..modes_stock_remap import StockRemapMixin
 from ..modes_stock_rewrite import StockRewriteMixin   # item 161
 from ..modes_check import GameCheckMixin
 from ..modes_sheet import RulesSheetMixin     # PAD-664
+from ..modes_how import HowItWorksMixin       # PAD-1064
 from ..modes_tryit import TryItMixin
 from .base import TabService, rpc
 
@@ -201,7 +202,7 @@ def fix_chip(problems):
 
 
 class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin, RulesSheetMixin,
-               TabService):
+               HowItWorksMixin, TabService):
     ns = "modes"
     key = "Modes"
     label = "Modes"
@@ -395,7 +396,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._init_check()
         self._init_reading()
         self._init_sheet()
-        self.set(coop_on=False, coop_note="", coop_note_kind="", coop_shown=False, coop_awards_ok=False,   # PAD-1017
+        self._init_how()
+        self.set(coop_on=False, coop_locked=False, coop_note="", coop_note_kind="", coop_shown=False,   # PAD-1017
+                 coop_awards_ok=False,
                  coop_aw={"why": "", "note": "", "rows": [], "max_words": 27}, coop_awards_tip="",   # PAD-1028
                  coop_ch={"why": "", "note": "", "pick": False, "rows": [], "abilities": [], "preset": "",
                           "max_name": 27, "max": 16}, coop_chars_tip="",                      # PAD-1031
@@ -718,40 +721,55 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "with modes, its scores and achievements stay off Insider Connected. Write puts it on the card.")
 
     def _publish_coop(self, project):
-        """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this game cannot have it."""
+        """PAD-1017: the Co-op play tick, and under it how a teammate joins, or in red why this game cannot have it.
+        PAD-1062: a game that has co-op of its own (or no port to add it) greys the tick out, with why under it; an
+        unread title (NO_TITLE) leaves it as it was, as Write may still find the card."""
         from ...plugins.stern import coop_play as _CP
         on = bool(project) and _CP.load(project)
         menu = on and _CP.menu_asked(project)
-        note, kind = "", ""
+        why = _CP.title_refusal(_CP.project_title(project)) if project else ""
+        locked = self._coop_locked(why) and not on
+        note, kind = (why, "") if locked else ("", "")
         if on:
-            why = _CP.title_refusal(_CP.project_title(project))
             if why:
                 note, kind = why, "err"
             elif menu:
                 note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. 1 (Co-op) "
-                        "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 2 a "
-                        "team against players 3 and 4, each Start adding the next player; 3 (Team 2v1) makes players 1 and 2 a "
-                        "team against player 3. With characters, at 1, 2 or 3 a player starting a game alone with the right "
-                        "flipper button held picks one too. 1, 2 or 3 disables most "
+                        "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 3 a "
+                        "team against players 2 and 4, picked as TEAM PLAY 2 VS 2 on the game's start menu (both flipper buttons "
+                        "in attract), one Start adding all four; 3 (Team 2v1) makes players 1 and 3 a team against player "
+                        "2 (TEAM PLAY 2 VS 1). 4, 5 and 6 are the same games Classic: the players pick characters, but "
+                        "none has a special ability. With characters, at 1 to 6 a player starting a game alone with the "
+                        "right flipper button held picks one too. 1 to 6 disables most "
                         "Insider Connected features (scores, high scores and achievements stay on the machine); at 0 "
                         "the game plays and reports as it always has%s."
                         % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
                            else " (this project's modes keep the card's scores off Insider Connected anyway)"))
             else:
                 note = "On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". Its scores stay off Insider Connected."
-        self.set(coop_shown=bool(project), coop_on=on, coop_menu=menu, coop_note=note, coop_note_kind=kind,
+        self.set(coop_shown=bool(project), coop_on=on, coop_locked=locked, coop_menu=menu, coop_note=note,
+                 coop_note_kind=kind,
                  coop_menu_tip=self.COOP_MENU_TIP,
                  coop_awards_ok=on and kind != "err", coop_awards_tip=self.COOP_AWARDS_TIP,   # PAD-1028
                  coop_chars_tip=self.COOP_CHARS_TIP,                                            # PAD-1031
                  coop_save_tip=self.COOP_SAVE_TIP, coop_load_tip=self.COOP_LOAD_TIP)            # PAD-1053
 
+    @staticmethod
+    def _coop_locked(why):
+        """PAD-1062: whether :func:`coop_play.title_refusal`'s *why* greys the Co-op play tick out."""
+        from ...plugins.stern import coop_play as _CP
+        return bool(why) and why != _CP.NO_TITLE
+
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
     COOP_MENU_TIP = (
-        "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1. At 1 teammates "
-        "join with the right flipper button and Start. At 2 players 1 and 2 play as a team against players 3 and 4, "
-        "each team with its own score and progress, taking turns. At 3 it is players 1 and 2 against player 3, who "
-        "plays both of team 2's turns. 1, 2 or 3 disables most Insider Connected features (the "
+        "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1, and 4, 5 and 6 the "
+        "same three Classic (characters picked, no special abilities). At 1 teammates "
+        "join with the right flipper button and Start. At 2 players 1 and 3 play as a team against players 2 and 4, "
+        "each team with its own score and progress, taking turns: TEAM PLAY 2 VS 2 on the game's start menu (both flipper buttons in attract), then one Start "
+        "adds all four. At 3 it is players 1 and 3 against player 2, who plays both of team 2's turns (TEAM PLAY 2 VS "
+        "1). A plain Start stays a one-player game. 1 to 6 disables most Insider "
+        "Connected features (the "
         "card's scores, high scores and achievements stay on the machine). At 0 the game plays and "
         "reports to Insider Connected as it always has. A card that also carries modes keeps its scores off Insider "
         "Connected either way.")
@@ -1053,6 +1071,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import coop_play as _CP
         project = self.project()
         if not project:
+            return False
+        if on and self._coop_locked(_CP.title_refusal(_CP.project_title(project))):   # PAD-1062: co-op of its own
+            self._publish_coop(project)
             return False
         was = _CP.save(project, bool(on))
         hist = history_log.diff_scalar("modes  co-op play", "on" if was else "off", "on" if on else "off")
@@ -4745,6 +4766,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if mode_id in self._port_rule_ids():     # its Shots and Advanced sections
             self.refresh_stock_remap()
             self.refresh_stock_rewrite()
+        self._how_kick()                         # PAD-1064: its clips and sounds, off the card
         self._publish_game_mode()
         self._publish_rows()
 
@@ -4778,6 +4800,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             "id": mid, "name": build.mode_name(mid), "rows": rows, "rule": rule,
             "build": MP.title_label(build.game, build.version),
             "about": about, "starts": list(getattr(mode, "starts", []) or [])[:3],
+            "how": self._how_for(build, mid),
             "note": keep_note if note is None else note,
             "n_changed": sum(1 for r in rows if r["changed"])})
 

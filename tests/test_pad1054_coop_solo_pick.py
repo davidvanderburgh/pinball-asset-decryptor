@@ -90,5 +90,6 @@ def test_a_start_in_its_first_ball_still_adds_a_teammate(tmp_path):
 
 def test_with_a_team_mode_on_the_start_begins_the_team_game(tmp_path):
     out = _run(tmp_path)
-    assert "teams: n 2 teams 1 team1 2 team2 0 max 4 players 1 board 0" in out   # player 2 joins team 1
-    assert "teams: n 3 team1 2 team2 1 players 2" in out                          # player 3 is team 2
+    # PAD-1052: the players are numbered in play order - team 1 is players 1 and 3, team 2 players 2 and 4
+    assert "teams: n 2 teams 1 team1 1 team2 1 max 4 players 2 board 0" in out   # player 2 is team 2
+    assert "teams: n 3 team1 2 team2 1 players 2" in out                          # player 3 joins team 1

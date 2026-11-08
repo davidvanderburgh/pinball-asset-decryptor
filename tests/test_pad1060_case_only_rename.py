@@ -17,6 +17,7 @@ from pinball_decryptor.core import audio_categories as AC
 from pinball_decryptor.core import audio_slots
 from pinball_decryptor.core import checksums
 from pinball_decryptor.core import name_memory as NM
+from pinball_decryptor.core.transcribe import CalloutsFile
 from pinball_decryptor.webui import compat
 from tests.test_gui_audio_rename import _load, _rows, _wait, _wav
 from tests.webui_harness import web_app
@@ -164,3 +165,77 @@ def test_rename_from_callouts_changes_only_the_case(tmp_path, boxes):
     assert "Renamed 2 sound(s)." in boxes[-1]
     assert _names(assets) == ["idx0001 - One.wav",
                               "idx0002 - Million plus pops.wav"]
+
+
+# The tester's reply on v1.372.0: a callout moved to Sound FX with its name
+# cleared kept "speech,Okay." in callouts.csv, so Rename from callouts.csv
+# named it "Okay" again.
+
+OKAY = "audio/00m00s798 - idx0891 - Okay.wav"
+BARE = "audio/00m00s798 - idx0891.wav"
+
+
+def _csv(assets, rows):
+    with open(os.path.join(assets, "callouts.csv"), "w", encoding="utf-8",
+              newline="") as f:
+        f.write("folder,file,seconds,classification,text\n")
+        for fname, kind, text in rows:
+            f.write("audio,%s,0.798,%s,%s\n" % (fname, kind, text))
+
+
+def _csv_rows(assets):
+    cf = CalloutsFile(os.path.join(assets, "callouts.csv"))
+    return [(cf.get(r, "file"), cf.get(r, "classification"), cf.get(r, "text"))
+            for r in cf.rows]
+
+
+def test_cleared_name_and_sound_fx_reach_callouts_csv(tmp_path, boxes):
+    assets = _folder(tmp_path, OKAY)
+    _csv(assets, [("00m00s798 - idx0891 - Okay.wav", "speech", "Okay.")])
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _load(w, assets)
+        assert svc._cats.get(OKAY) == "callouts"
+        assert w.call("audio.rename", OKAY, "", "sfx") is True
+        assert _csv_rows(assets) == [
+            ("00m00s798 - idx0891.wav", "non-speech", "")]
+        # nothing for Rename from callouts.csv to put back
+        assert w.call("audio.rename_from_callouts") is True
+        assert "already has the name" in boxes[-1]
+        _rescan(w)
+        assert _rows(w) == [BARE]
+        assert svc._cats.get(BARE) == "sfx"
+    assert _names(assets) == ["00m00s798 - idx0891.wav"]
+
+
+def test_a_type_change_alone_reaches_callouts_csv(tmp_path, boxes):
+    """Name kept, Callouts -> Sound FX: the row stops being speech and keeps
+    its words (they still make the file's name)."""
+    assets = _folder(tmp_path, OKAY)
+    _csv(assets, [("00m00s798 - idx0891 - Okay.wav", "speech", "Okay.")])
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _load(w, assets)
+        assert w.call("audio.rename", OKAY, "Okay", "sfx") is True
+        assert _csv_rows(assets) == [
+            ("00m00s798 - idx0891 - Okay.wav", "non-speech", "Okay.")]
+        _rescan(w)
+        assert svc._cats.get(OKAY) == "sfx"
+        # and back to Callouts: speech again
+        assert w.call("audio.rename", OKAY, "Okay", "callouts") is True
+        assert _csv_rows(assets)[0][1] == "speech"
+
+
+def test_update_callouts_mends_a_row_an_earlier_save_left(tmp_path, boxes):
+    """The tester's row as v1.372.0 left it: the file bare, Sound FX
+    remembered, the row still "speech,Okay.".  Update callouts.csv from the
+    names puts it in step; a bare callout's words are left alone."""
+    other = "audio/00m00s799 - idx0892.wav"
+    assets = _folder(tmp_path, BARE, other)
+    _csv(assets, [("00m00s798 - idx0891.wav", "speech", "Okay."),
+                  ("00m00s799 - idx0892.wav", "speech", "Hey.")])
+    NM.remember_category(NM.baseline_md5(assets, BARE), "sfx")
+    with web_app(tmp_path, mfr="stern") as w:
+        _load(w, assets)
+        assert w.call("audio.update_callouts") is True
+        assert _csv_rows(assets) == [
+            ("00m00s798 - idx0891.wav", "non-speech", ""),
+            ("00m00s799 - idx0892.wav", "speech", "Hey.")]

@@ -71,6 +71,11 @@ def start_words(build, mode):
     return out
 
 
+def _natural(name):
+    """A clip name's sort key: its numbers as numbers (``G_multiball2_2`` before ``G_multiball2_10``)."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t) for t in re.split(r"(\d+)", name.lower()) if t]
+
+
 class HowItWorksMixin:
     """Mixed into the Modes tab: ``self._how`` is the card's :class:`.clip_modes.CardClips` once read."""
 
@@ -188,7 +193,7 @@ class HowItWorksMixin:
         by_name = {}
         for rel, name in clips.name_of.items():
             by_name.setdefault(name, rel)
-        names = sorted((n for n in reading.refs if cls in reading.modes_of(n)), key=str.lower)
+        names = sorted((n for n in reading.refs if cls in reading.modes_of(n)), key=_natural)
         out["clips"] = [{"key": n, "text": n, "rel": by_name.get(n, ""),
                          "tip": {"head": n, "lines": [by_name[n]] if n in by_name else
                                  ["Not in this project's extract"]}} for n in names[:CLIPS_MAX]]

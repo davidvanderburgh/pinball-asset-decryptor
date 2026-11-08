@@ -176,6 +176,8 @@ html.bp-1280 .nmw-tiles.compact { grid-template-columns: minmax(0, 1fr); }
 .modes-how-k:first-child { margin-top: 0; }
 .modes-how-list { margin: 0; padding-left: 18px; }
 .modes-how-list li { overflow-wrap: anywhere; padding: 1px 0; }
+.modes-how-clips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.modes-how-clip { font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; overflow-wrap: anywhere; }
 .modes-gm { display: flex; flex-direction: column; gap: 0; }
 .modes-gm-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) max-content minmax(260px, 1.4fr); gap: 6px 18px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .modes-gm-row:last-child { border-bottom: 0; }

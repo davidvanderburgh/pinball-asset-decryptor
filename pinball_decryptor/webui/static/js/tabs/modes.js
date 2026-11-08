@@ -1171,7 +1171,7 @@ function HowSec({ h }) {
         : html`<div class="small muted">The app did not find what starts it in the game program.</div>`}
       ${h.unread ? html`<div class="small muted">${h.unread}</div>` : html`
         <div class="modes-how-k">Clips it plays <span class="muted">(${clips.length || "none found"})</span></div>
-        ${clips.length ? html`<ul class="modes-how-list">${clips.map((c) => html`<li key=${c.key} ...${tip(c.tip)}>${c.text}</li>`)}</ul>` : null}
+        ${clips.length ? html`<div class="modes-how-clips">${clips.map((c) => html`<span key=${c.key} class="modes-how-clip mono" ...${tip(c.tip)}>${c.text}</span>`)}</div>` : null}
         ${h.clips_more ? html`<div class="small muted">${h.clips_more}</div>` : null}
         <div class="modes-how-k">Sounds and callouts it plays <span class="muted">(${sounds.length || "none found"})</span></div>
         ${sounds.length ? html`<ul class="modes-how-list">${sounds.map((x) => html`<li key=${x.key} ...${tip(x.tip)}>

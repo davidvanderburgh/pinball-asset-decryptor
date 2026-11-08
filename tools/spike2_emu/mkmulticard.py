@@ -1236,15 +1236,50 @@ def make_store_plan(primary, extras, size_class=None, store_sectors=None, subdir
     if size_class == "content":
         grow = int(sum(unique[1:]) * (1 + STORE_META_SLACK)) + STORE_HEADROOM
         cnt = c3 + align_up((grow + SECTOR - 1) // SECTOR)
-    elif size_class is None:
-        _cls, cnt = store_class_for(P, XG, primary, list(extras), subs, need, work_sectors)
     else:
-        if size_class not in STERN_SIZES:
+        if size_class is not None and size_class not in STERN_SIZES:
             raise Refused("--size %r: one of %s" % (size_class, "/".join(STORE_SIZES)))
-        cnt = store_sectors_for_class(P, XG, primary, list(extras), subs, size_class, work_sectors)
-        if cnt * SECTOR < need:
-            raise Refused("--size %s: the images' unique content needs %s of p3 and the class leaves %s"
-                          % (size_class, _gb(need), _gb(cnt * SECTOR)))
+
+        def fit(need_, work_):
+            if size_class is None:
+                return store_class_for(P, XG, primary, list(extras), subs, need_, work_)
+            cnt_ = store_sectors_for_class(P, XG, primary, list(extras), subs, size_class, work_)
+            if cnt_ * SECTOR < need_:
+                raise Refused("--size %s: the images' unique content needs %s of p3 and the class leaves %s"
+                              % (size_class, _gb(need_), _gb(cnt_ * SECTOR)))
+            return size_class, cnt_
+        try:
+            cls, cnt = fit(need, work_sectors)
+            refused = None
+        except Refused as exc:
+            cls, cnt, refused = None, None, exc
+        # PAD-1055: THE DELTAS' WORK PARTITION CAN COST A CARD SIZE.  The store can never be
+        # smaller than the primary's own p3, and a stock 16G image's p3 fills the 16G class
+        # to the last sector - so the p7 the deltas need puts the card over, though the same
+        # files stored whole fit in that p3's free space with gigabytes to spare (an X-Men
+        # stock card + a custom variant: 32G with deltas, 16G without).  Plan it both ways
+        # and keep the deltas only when they do not make the card bigger (or refused).
+        if work_sectors:
+            whole = [{} for _m in mans]
+            w_unique, w_shared = ts.dedup_costs(mans, whole)
+            w_need = int((meta + sum(w_unique)) * (1 + STORE_META_SLACK)) + STORE_HEADROOM
+            try:
+                w_cls, w_cnt = fit(w_need, None)
+            except Refused:
+                w_cls = None
+            order = list(STERN_SIZES)
+            if w_cls is not None and (cls is None or order.index(w_cls) < order.index(cls)):
+                saved = sum(w_unique) - sum(unique)
+                say("deltas: skipped - the %s work partition they need %s; every file "
+                    "stored whole (%s more in p3) fits %s"
+                    % (_gb(work_sectors * SECTOR),
+                       ("puts the card over %s" % size_class) if size_class else
+                       ("needs a %s card" % cls) if cls else "puts the card past the biggest size",
+                       _gb(saved), w_cls))
+                deltas, work_sectors, unique, shared, need = whole, None, w_unique, w_shared, w_need
+                cls, cnt, refused = w_cls, w_cnt, None
+        if refused is not None:
+            raise refused
     plan = Plan(P, XG, primary, list(extras), "store", multi_subdirs=subs, store_sectors=cnt, work_sectors=work_sectors)
     plan.manifests = mans
     plan.store_unique = unique
@@ -5594,19 +5629,23 @@ def _update_locked(a, ts, card, dry):
         found = find_source_deltas(sources, [types.SimpleNamespace(tree=t) for t in ordered], a.cache_dir)
         update_deltas = {i: d for i, d in enumerate(found) if d}
         if update_deltas:
-            # the machine rebuilds a delta'd file into the card's WORK PARTITION; a card built
-            # before item 107 has none, and one built for a smaller file cannot hold a bigger
-            # one - either way the variant plays the base's songs on the machine, so say so
-            # here, where a rebuild is still the cheap answer
-            largest = max(ordered[i].files[rel].size for i, d in update_deltas.items() for rel in d
-                          if rel in ordered[i].files)
-            if plan.work_part is None:
-                u["notes"].append("%d file(s) would be stored as deltas but this card has no work partition (p7) "
-                                  "for the machine to rebuild them in: build a fresh card, or the variant plays the "
-                                  "base's songs on the machine" % sum(len(d) for d in update_deltas.values()))
-            elif largest > plan.work_part.count * SECTOR - WORK_HEADROOM:
-                u["notes"].append("a delta'd file of %s outgrows the work partition p7 (%s): build a fresh card"
-                                  % (_gb(largest), _gb(plan.work_part.count * SECTOR)))
+            # the machine rebuilds a delta'd file into the card's WORK PARTITION.  A card built
+            # before item 107 has none, nor does one whose deltas were skipped because their p7
+            # would have cost a card size (PAD-1055); one built for a smaller file cannot hold a
+            # bigger one.  A delta the card cannot rebuild would play the base's files on the
+            # machine, so such files are stored WHOLE instead (they cost their full size in p3).
+            room = (plan.work_part.count * SECTOR - WORK_HEADROOM) if plan.work_part is not None else 0
+            dropped = 0
+            for i in list(update_deltas):
+                keep = {rel: v for rel, v in update_deltas[i].items()
+                        if rel in ordered[i].files and ordered[i].files[rel].size <= room}
+                dropped += len(update_deltas[i]) - len(keep)
+                update_deltas[i] = keep
+            update_deltas = {i: d for i, d in update_deltas.items() if d}
+            if dropped:
+                u["notes"].append("%d file(s) stored whole rather than as deltas: %s" % (
+                    dropped, "this card has no work partition (p7) to rebuild them in" if plan.work_part is None
+                    else "they outgrow the card's work partition p7 (%s)" % _gb(plan.work_part.count * SECTOR)))
     # --bypass-validation: a tree whose validator is still armed - or half done (item 98:
     # the tick off, the grade restore live) - is patched through the mount even when
     # nothing else changed; its game and .sidx count as writes for the room and the rows

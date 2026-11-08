@@ -57,8 +57,8 @@ import struct
 from dataclasses import dataclass, field
 
 #: bumped when what :func:`analyse` reads changes (a cached :class:`.clip_modes.CardClips` is
-#: read again)
-READ_REV = 5
+#: read again; 6: the sounds each mode's own code asks for, :attr:`SoundReading.modes`, PAD-1064)
+READ_REV = 6
 #: the port sites that play a sound by request, its id in r0 (MODE_API.md)
 SOUND_SITES = ("sound_worker", "sound_play", "sound_nth", "callout", "callout_nth")
 #: how many wrappers deep the entries are followed past the seeds: a port names the game's own
@@ -785,6 +785,9 @@ class SoundReading:
     names: dict = field(default_factory=dict)     # request -> Sound Test name (paired ones)
     sids: dict = field(default_factory=dict)      # request -> [sid] (paired ones)
     note: str = ""            # why there is nothing, in words
+    #: PAD-1064: mode -> [[request, call VA, calls]], the sounds the mode's own code asks for by a fixed
+    #: number (:func:`mode_calls`), first call first; the Modes tab's How it works lists them
+    modes: dict = field(default_factory=dict)
 
     def sounds_of(self, clip):
         """``[{request, how, gap, at, name, sids}]`` for *clip*, best first."""
@@ -796,7 +799,8 @@ class SoundReading:
         return {"rev": READ_REV, "origin": self.origin, "port": self.port, "count": self.count,
                 "entries": {"%d" % k: v for k, v in self.entries.items()}, "calls": self.calls,
                 "pairs": self.pairs, "names": {"%d" % k: v for k, v in self.names.items()},
-                "sids": {"%d" % k: v for k, v in self.sids.items()}, "note": self.note}
+                "sids": {"%d" % k: v for k, v in self.sids.items()}, "note": self.note,
+                "modes": self.modes}
 
     @classmethod
     def from_json(cls, d):
@@ -807,7 +811,8 @@ class SoundReading:
                    {k: [list(p) for p in v] for k, v in (d.get("pairs") or {}).items()},
                    {int(k): v for k, v in (d.get("names") or {}).items()},
                    {int(k): list(v) for k, v in (d.get("sids") or {}).items()},
-                   d.get("note", ""))
+                   d.get("note", ""),
+                   {k: [list(p) for p in v] for k, v in (d.get("modes") or {}).items()})
 
 
 def analyse(elf, names, fragments, game="", version="", refs=None, ctx=None):
@@ -854,13 +859,34 @@ def analyse(elf, names, fragments, game="", version="", refs=None, ctx=None):
         base = base_clip(clip)
         if base in out.pairs and not any(p[1] in SURE for p in out.pairs.get(clip, ())):
             out.pairs[clip] = [list(p) for p in out.pairs[base]]
-    paired = sorted({p[0] for ps in out.pairs.values() for p in ps})
+    if ctx.get("owners") is not None:
+        out.modes = mode_calls(calls, ctx["owners"])
+    paired = sorted({p[0] for ps in out.pairs.values() for p in ps}
+                    | {p[0] for ps in out.modes.values() for p in ps})
     out.names = {r: menu[r] for r in paired if r in menu}
     out.sids = {r: list(lists[r]) for r in paired}
     if not out.pairs:
         out.note = ("the game's sound functions were not found in its program" if not entries
                     else "no clip's code asks for a sound by a fixed number")
     return out
+
+
+def mode_calls(calls, owners):
+    """``{mode: [[request, call VA, calls]]}``: each :class:`Call` given the mode whose code it is in by
+    *owners* (:class:`.clip_modes._Owners`, :class:`.clip_files.FileOwners`), one row per request in the
+    order the mode's code first asks for it, with how many calls ask for it. A call that is no one mode's
+    (main play, attract, code several modes share) is left out."""
+    out = {}
+    for c in calls:
+        mode = owners.of_code(c.at)[0]
+        if not mode:
+            continue
+        rows = out.setdefault(mode, {})
+        if c.request in rows:
+            rows[c.request][2] += 1
+        else:
+            rows[c.request] = [c.request, c.at, 1]
+    return {m: sorted(rows.values(), key=lambda r: r[1]) for m, rows in out.items()}
 
 
 # ---- a request's sounds ------------------------------------------------------------------------

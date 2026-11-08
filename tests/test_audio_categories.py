@@ -163,6 +163,28 @@ def test_renamed_slot_keeps_remembered_category(tmp_path, monkeypatch):
     assert AC.classify(assets, [rel2])[rel2] == AC.CALLOUTS
 
 
+def test_unnamed_slot_keeps_remembered_category(tmp_path, monkeypatch):
+    """PAD-1061: a callout with no name (a callouts.csv speech row) moved to
+    Sound FX stays there whatever the file is later called."""
+    from pinball_decryptor.core import name_memory as NM
+    monkeypatch.setattr(NM, "AUDIO_NAMES_FILE",
+                        str(tmp_path / "audio_names.json"))
+    assets = str(tmp_path)
+    _write_callouts(assets, [["audio", "idx0300.wav", "2.0", "speech", ""]])
+    rel = "audio/idx0300.wav"
+    with open(os.path.join(assets, ".checksums.md5"), "w",
+              encoding="utf-8") as f:
+        f.write("%s\t%s\n" % (rel, "f" * 32))
+    assert AC.classify(assets, [rel])[rel] == AC.CALLOUTS
+    NM.remember_category("f" * 32, "sfx")
+    assert AC.classify(assets, [rel])[rel] == AC.SFX
+    rel2 = "audio/idx0300 - Fire at will.wav"
+    with open(os.path.join(assets, ".checksums.md5"), "w",
+              encoding="utf-8") as f:
+        f.write("%s\t%s\n" % (rel2, "f" * 32))
+    assert AC.classify(assets, [rel2])[rel2] == AC.SFX
+
+
 def test_corrupt_csvs_are_ignored(tmp_path):
     assets = str(tmp_path)
     with open(os.path.join(assets, "callouts.csv"), "w",

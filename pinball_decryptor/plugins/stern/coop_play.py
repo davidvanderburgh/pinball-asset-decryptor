@@ -18,10 +18,12 @@ PAD-1031: ``coop_play: {"characters": ...}`` gives the team characters to pick f
 their select cards: the second half of this module).
 
 PAD-1042 (DoomWalrus666): the CO-OP PLAY row has a third value, Team 2v2 (stored 0 Off, 1 Co-op, 2 Team 2v2, shown as
-those numbers with the names in its help line; an Off/On row's 0 and 1 keep their meaning). Set to 2, each Start in the
-first ball adds the next player: players 1 and 2 are one team, 3 and 4 the other, each team with its own score and its
-own progress (the game plays two players, a team each) and the turns alternating the teams (pad_mode_runtime.c "TEAM
-2V2"). The characters' pick works as in co-op: each player picks at their first ball, no two the same.
+those numbers with the names in its help line; an Off/On row's 0 and 1 keep their meaning). Set to 2, the game's start menu
+offers TEAM PLAY 2 VS 2 and one Start adds all four players, as on Stern's own team games (PAD-1052: before it each
+Start in the first ball added the next; a plain Start is still a one-player game): players 1 and 3 are
+one team, 2 and 4 the other, each team with its own score and its own progress (the game plays two players, a team
+each) and the turns alternating the teams, P1 P2 P3 P4 (pad_mode_runtime.c "TEAM 2V2"). The characters' pick works as
+in co-op: each player picks at their first ball, no two the same.
 
 PAD-1065 (DoomWalrus666): Co-op, Team 2v2 and Team 2v1 without the characters' abilities. CO-OP PLAY 4, 5 and 6 are
 those games Classic (1, 2 and 3 are now called Enhanced): the players still pick a character, but none has an
@@ -62,10 +64,10 @@ HOW = ("hold the right flipper button and press Start to add a teammate (2-4 pla
        "a plain Start adds a competing player as always; with characters, a player starting a game alone with the "
        "right flipper button held picks one")
 #: PAD-1042: how a team game is played, for the tab and the log
-TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), each Start in the first ball adds the next player: players 1 and 2 "
-             "against players 3 and 4, each team with its own score and progress, the teams taking turns; at 3 "
-             "(Team 2v1) the same with three players, players 1 and 2 against player 3, who plays both of team 2's "
-             "turns")
+TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), pick TEAM PLAY 2 VS 2 on the start menu (both flipper buttons in "
+             "attract) and one Start adds all four players: players 1 and 3 against players 2 "
+             "and 4, each team with its own score and progress, the teams taking turns; at 3 (Team 2v1) the same "
+             "with three players, players 1 and 3 against player 2, who plays both of team 2's turns")
 #: PAD-1065: what Classic is, for the tab and the log
 CLASSIC_HOW = ("4, 5 and 6 (Classic) are Co-op, Team 2v2 and Team 2v1 with no special abilities: the players still "
                "pick a character, but none of them has its ability")
@@ -416,33 +418,47 @@ PRESET_DIR = "coop_presets"
 #: ("save", seconds), ("addball", n): Action twice in regular play serves n more balls, ("yes", name): a check of the
 #: game's answers yes (the port's ``coop_yes_<name>``), or ("many", [parts]): several of the above at once
 ABILITIES = (
-    ("longer_save", "LONGER BALL SAVE",
-     "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top).",
-     ("adj", "AD_BALL_SAVE_TIME", "x200")),
+    ("longer_save", "LONGER BALL SAVE, LONGER TIMERS",
+     "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top); on Godzilla the "
+     "Oxygen Destroyer timer is twice its setting and every battle timer gets 5 seconds more.",
+     ("some", [("adj", "AD_BALL_SAVE_TIME", "x200"), ("adj", "AD_O2_DESTROYER_TIMER", "x200:8:40"),
+               ("adj", "AD_BATTLE_VS_EBIRAH_TIMER", "+5"), ("adj", "AD_BATTLE_VS_TITANOSAURUS_TIMER", "+5"),
+               ("adj", "AD_BATTLE_VS_GIGAN_TIMER", "+5"), ("adj", "AD_BATTLE_VS_MEGALON_TIMER", "+5"),
+               ("adj", "AD_BATTLE_VS_KING_GHIDORAH_TIMER", "+5"), ("adj", "AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", "+5")])),
     ("action_save", "ACTION BUTTON BALL SAVE",
      "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
-    ("heat_ray", "EASIER HEAT RAY", "The heat ray needs half the spinner spins a level (HEAT RAY SPINS PER LEVEL).",
-     ("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50")),
+    ("heat_ray", "HEAT RAY READY, EASIER HEAT RAY", "The heat ray is one spin from ready when they pick (the first "
+     "spinner spin of their first ball lights HEAT RAY READY, the game's own way), and it charges in half the spinner "
+     "spins a level (HEAT RAY SPINS PER LEVEL).",
+     ("many", [("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50"), ("set", "heatlevel", 3), ("set", "heatspins", 9)])),
     ("battles", "EASIER BATTLES", "The ramps light a battle as on the game's easiest LIGHT BATTLE DIFFICULTY.",
      ("cache", "AD_LIGHT_BATTLE_DIFFICULTY", "min")),
-    ("building", "EASIER BUILDING MB", "Building Multiball is as easy to start as on the game's easiest BUILDING "
-     "DIFFICULTY.", ("cache", "AD_BUILDING_DIFFICULTY", "min")),
-    ("powerups", "DOUBLE POWER-UPS", "Every Godzilla power-up the game gives counts twice.", ("boost", 200)),
-    ("ally", "AN ALLY EVERY BALL", ("An ally is lit at each of their balls: the next of Mothra, Rodan and Anguirus in "
-      "the game's own order (its LIGHT ALLY), at the pick and at every later turn."),
-     ("gift", "AD_LIGHT_ALLY")),
+    ("building", "BUILDING AND MECHA MULTIBALLS", "Every building or ramp shot takes two of the building's six "
+     "stability steps (on the game's easiest BUILDING DIFFICULTY), and toward Mechagodzilla Multiball every spin "
+     "counts twice and every shield target hit counts twice.",
+     ("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
+               ("double", "shield")])),
+    ("powerups", "DOUBLE POWER-UPS, SAUCER, RAMPAGE, +1X JACKPOT", "Every Godzilla power-up the game gives counts "
+     "twice, every hit on the saucer (the pop bumper) counts twice toward Saucer Attack, every RAMPAGE letter collected "
+     "counts as two, and the Destruction Jackpot multiplier is never below 2X for them.",
+     ("some", [("boost", 200), ("double", "saucer"), ("double", "rampage"), ("floor", "djmult", 1)])),
+    ("ally", "AN ALLY EVERY BALL, LONGER RODAN", ("An ally is lit at each of their balls: the next of Mothra, Rodan "
+      "and Anguirus in the game's own order (its LIGHT ALLY), at the pick and at every later turn; Rodan's playfield "
+      "multiplier runs twice its timer."),
+     ("some", [("gift", "AD_LIGHT_ALLY"), ("adj", "AD_RODAN_PLAYFIELD_MULTIPLIER_TIMER", "x200:40:120")])),
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
      "the bonus count them).", ("count", "jets", 4)),
     ("spot", "SPOT A BATTLE SHOT", "Two quick presses of the Action button during a battle count as its next lit "
-     "shot, once a ball.", ("spot", "coop_battle_rules")),
+     "shot, as often as they like.", ("spot", "coop_battle_rules")),
     ("tier2", "TIER 2 ALWAYS OPEN", "Every battle on the selection screen is open while they are up, tier 2 included "
      "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).",
      ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
     ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
      "once a ball.", ("addball", 1)),
-    ("maser", "MASER ALWAYS LIT", "The Maser cannon target is lit the whole time they are up: in regular play (the "
-     "Maser shot held lit in the game's own rule) and for all of Tank Attack (its Maser phase check says yes).",
-     ("many", [("lit", "maser"), ("yes", "maser")])),
+    ("maser", "MASER AND MAGNA GRAB LIT, DOUBLE POWERLINES", "The Maser cannon target is lit the whole time they are "
+     "up (in regular play and for all of Tank Attack), Magna Grab is kept lit, and every powerline target hit counts "
+     "as two targets.",
+     ("some", [("many", [("lit", "maser"), ("yes", "maser")]), ("keep", "magna", 1), ("steps", "powerline")])),
     ("bridge", "EASIER BRIDGE, DOUBLE TANKS AND JETS", "The bridge falls as on the game's easiest BRIDGE ATTACK "
      "DIFFICULTY, and every tank or jet destroyed counts as two.",
      ("many", [("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min"), ("double", "tanks"), ("double", "jets")])),
@@ -451,19 +467,19 @@ ABILITIES = (
 )
 #: what the pick's card says each ability does, in the player's words
 CARD_LINES = {
-    "longer_save": "Twice the ball save at the start of every ball.",
+    "longer_save": "Twice the ball save every ball. Longer Oxygen Destroyer and battle timers.",
     "action_save": "Press Action twice for a 10 second ball save, once a ball.",
-    "heat_ray": "The heat ray charges in half the spins.",
+    "heat_ray": "Heat ray ready at your first spin. Recharges in half the spins.",
     "battles": "One ramp lights a battle.",
-    "building": "Building Multiball is easier to start.",
-    "powerups": "Every Godzilla power-up counts twice.",
-    "ally": "An ally lit at every one of their balls.",
+    "building": "Building damage two steps a shot. Mecha spins and shield hits count twice.",
+    "powerups": "Power-ups, saucer hits and rampage letters count twice. Destruction Jackpot at least 2X.",
+    "ally": "An ally lit at every one of your balls. Rodan lasts twice as long.",
     "jets": "Starts with 4 jet fighters destroyed.",
     "tanks": "Starts with 4 tanks destroyed.",
-    "spot": "Press Action twice in a battle to hit its next shot, once a ball.",
+    "spot": "Press Action twice in a battle to hit its next shot, as often as you like.",
     "tier2": "Every battle is open to you, tier 2 included.",
     "addball": "Press Action twice in regular play to add a ball, once a ball.",
-    "maser": "The Maser cannon is lit the whole time you are up.",
+    "maser": "Maser and Magna Grab lit while you are up. Powerline hits count double.",
     "bridge": "The bridge falls faster. Tanks and jets count two at a time.",
 }
 
@@ -530,6 +546,11 @@ def _ability_part(how, table, action, sites, values, label):
         parts = [_ability_part(h, table, action, sites, values, label) for h in how[1]]
         bad = [w for c, w in parts if not c]
         return ("" if bad else ",".join(c for c, w in parts)), (bad[0] if bad else "")
+    if how[0] == "some":                       # the first part is the ability; the rest come along where the game has them
+        parts = [_ability_part(h, table, action, sites, values, label) for h in how[1]]
+        if not parts[0][0]:
+            return "", parts[0][1]
+        return ",".join(c for c, w in parts if c), ""
     if True:
         if how[0] == "save":
             cfg, why = ("save:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
@@ -546,15 +567,23 @@ def _ability_part(how, table, action, sites, values, label):
         elif how[0] == "double":
             cfg, why = (("double:%s" % how[1], "")
                         if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
+                        or "coop_count_%s_obj" % how[1] in values
                         else ("", NO_SITE % label))
         elif how[0] == "spot":
             rules = values.get(how[1])
             cfg, why = (("spot:0x%x" % rules, "") if rules and action is not None and "shot_dispatch" in sites
                         else ("", NO_ACTION % label if action is None else NO_SITE % label))
-        elif how[0] == "count":
-            cfg, why = (("count:%s+%d" % (how[1], how[2]), "")
+        elif how[0] in ("count", "set"):
+            cfg, why = (("count:%s%s%d" % (how[1], "=" if how[0] == "set" else "+", how[2]), "")
                         if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
+                        or "coop_count_%s_obj" % how[1] in values
                         else ("", NO_SITE % label))
+        elif how[0] == "steps":
+            cfg, why = (("steps:%s" % how[1], "") if "coop_steps_%s_obj" % how[1] in values
+                        else ("", NO_SITE % label))
+        elif how[0] in ("keep", "floor"):
+            cfg, why = (("keep:%s%s=%d" % (how[1], ">" if how[0] == "floor" else "", how[2]), "")
+                        if "coop_keep_%s_obj" % how[1] in values else ("", NO_SITE % label))
         else:
             idx = table.by_name.get(how[1]) if table is not None else None
             if idx is None:
@@ -574,6 +603,8 @@ def _ability_part(how, table, action, sites, values, label):
                     cfg = "adj:%d=%d" % (idx, lo)
                 elif how[2] == "max":
                     cfg = "adj:%d=%d" % (idx, hi)
+                elif ":" in how[2]:                                # its own bounds: a timer past the setting's top
+                    cfg = "adj:%d%s" % (idx, how[2])
                 else:
                     cfg = "adj:%d%s:%d:%d" % (idx, how[2], lo, hi)
                 if how[1] == "AD_BALL_SAVE_TIME":                  # read when a ball is served: the ball-1 pick's

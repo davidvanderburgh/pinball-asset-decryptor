@@ -480,6 +480,41 @@ def test_properties_rename(tmp_path):
         assert w.state("audio")["sel"] == [new]
 
 
+def test_type_change_survives_reopening(tmp_path):
+    """PAD-1061: a sound moved from Callouts to Sound FX in Audio Properties
+    came back as a callout after closing and reopening the app.  A sound
+    with no name (a speech row in callouts.csv) kept its Type for that
+    session only; a named one already kept it."""
+    folder = _project(tmp_path, names=("audio/idx0001 - Jackpot.wav",
+                                       "audio/idx0002.wav"))
+    with open(os.path.join(folder, "callouts.csv"), "w",
+              encoding="utf-8") as f:
+        f.write("folder,file,seconds,classification,text\n"
+                "audio,idx0002.wav,0.3,speech,\n")
+    bare, named = "audio/idx0002.wav", "audio/idx0001 - Jackpot.wav"
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        rows = {r["k"]: r for r in w.state("audio")["rows"]}
+        assert rows[bare]["type"] == rows[named]["type"] == "Callouts"
+        assert w.call("audio.rename", bare, "", "sfx") is True
+        assert w.call("audio.rename", named, "Jackpot", "sfx") is True
+        rows = {r["k"]: r for r in w.state("audio")["rows"]}
+        assert rows[bare]["type"] == rows[named]["type"] == "Sound FX"
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        rows = {r["k"]: r for r in w.state("audio")["rows"]}
+        assert rows[named]["type"] == "Sound FX"
+        assert rows[bare]["type"] == "Sound FX"
+        # the file was not renamed: a Type change alone keeps the name
+        assert os.path.isfile(os.path.join(folder, "audio", "idx0002.wav"))
+        # and putting it back to Callouts sticks too
+        assert w.call("audio.rename", bare, "", "callouts") is True
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        rows = {r["k"]: r for r in w.state("audio")["rows"]}
+        assert rows[bare]["type"] == "Callouts"
+
+
 def test_sequential_play_steps_down_the_list(tmp_path):
     folder = _project(tmp_path)
     with web_app(tmp_path, mfr="ap") as w:

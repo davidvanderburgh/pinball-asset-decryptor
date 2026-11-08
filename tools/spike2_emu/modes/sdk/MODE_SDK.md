@@ -6193,16 +6193,35 @@ setting for Co-Op mode should now also have a choice for Team 2v2". The CO-OP PL
 1 Co-op, 2 Team 2v2, shown as those numbers - the game's own GAME ID kind - with the names in its help line; the row
 was Off/On with 0 and 1, so an operator's pick is kept). The game plays TWO players, a team each: its own player 1 is
 team 1, its player 2 team 2, so each team has a score panel, a score and a set of progress of its own and the game's
-own player change goes between them. The runtime takes each team's players in turn:
+own player change goes between them. The runtime takes each team's players in turn.
 
-- **Joining:** in a team game every Start in the first ball adds the next player, no button held. Player 2 joins team
-  1 (the game's add runs - credits, its hooks - and its count is put back to 1), player 3 is team 2 (the game's own
-  player 2), player 4 joins team 2 (its count back to 2). One Start alone is the game's own one-player game.
-- **Turns:** the teams alternate, a round of turns a ball: P1, P3, P2, P4, then ball 2. The last team's turn of a round
+PAD-1052 (DoomWalrus666: "you must press the start button 4 times. It would be more clear if you pressed the start
+button one time and it said 4 players added: Team 1: Player 1 and Player 3, Team 2: Player 2 and Player 4"): the
+players are numbered in the order they play, team 1 the odd ones (`coop_team_of`). Then "you still want to be able
+to play 1 player", and daveyvandy: "Make it work like stock Stern co-op 2v2 games work". Stock (TMNT 1.54's symbol
+build): TEAM PLAY 2 VS 2 is an entry of the start menu, and `start_button_start_game(credits, ..., players)` adds
+players 2..4 itself on the one Start; `team_play_get_player_score` makes players 1 and 3 one team, 2 and 4 the other.
+
+- **The pick:** with CO-OP PLAY at 2 (3, or coop.cfg `teams ...`) the start menu (both flipper buttons in attract)
+  gets TEAM PLAY 2 VS 2 (2 VS 1), at Prolonged Competition's sites and with its port lines (PAD-1041): on the entry
+  lists (`site challenge_menu` / `challenge_menu_pick`) a copy of Standard's entry with kind `TEAM_KIND` and our
+  name, played as Standard (kind 0) once picked; on the index menus (`site comp_menu_frame`) Standard's index again
+  (`value comp_menu_end_index`), lettered through Standard's name message (`comp_menu_end_msg`) while the cursor is on
+  it (`team_menu_*`). A plain Start is the game's own one-player game, and Start in its first ball adds a competing
+  player as stock does. A port that names neither menu: the second Start of a one-player game adds the teams.
+- **Joining:** a one-player game whose ball 1 starts within `TEAM_PICK_MS` (20 s) of the menu showing the entry is the team
+  game, and as its ball 1 starts (the event bus's dispatch of `ball_start`, `site hook_dispatch`: the game's thread,
+  before its handlers) the runtime calls the game's own add for each next player until the teams are full
+  (`on_team_dispatch`, `coop_team_fill`). Called from the tick instead, the game's add hung Iron Maiden LE 1.18. Player 2 is team 2 (the game's own player 2), player 3 joins team 1 (the
+  game's add runs - credits, its hooks - and its count is put back to 2), player 4 joins team 2 (back to 2). Short of
+  credits the game's add refuses and the fill stops there; each later Start in the first ball adds the next player. The top line then reads, `COOP_JOIN_MS` (2 s) each, `4 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2: P2 AND
+  P4` (`coop_join_words`), said three times over (`COOP_JOIN_ROUNDS`: Godzilla's game-start film hid about 10 s of them),
+  waiting while a display effect of the game's has the screen; player 1's character pick opens after them.
+- **Turns:** the teams alternate, a round of turns a ball: P1, P2, P3, P4, then ball 2. The last team's turn of a round
   that is not the ball's last puts the ball's byte one down before the game's change, as co-op does, so the game goes
   back to its player 1 on the same ball. An extra ball keeps the player who earned it. With three players team 2's
   lone player plays both of its turns, so each team plays as many balls (`coop_team_player`, `coop_team_round`).
-- **Whose turn:** the top line reads `TEAM 2 P3  BALL %d` (Godzilla LE 1.16: `TEAM 2 PLAYER 3  BALL` ran into the
+- **Whose turn:** the top line reads `TEAM 1 P3  BALL %d` (Godzilla LE 1.16: `TEAM 2 PLAYER 3  BALL` ran into the
   game's credits after 19 characters).
 - **Characters, awards, handicaps** go by the player up (1-4), as in co-op: each player picks a character at their
   first ball, no two the same; a character's record holds (`coop_cache_*`) are the team's game player's.
@@ -6210,8 +6229,9 @@ own player change goes between them. The runtime takes each team's players in tu
   board of the runtime's own (PAD-640/663's one-entry filing: the higher team score is the one that can take it),
   never on the game's own boards.
 - **Team 2v1** (daveyvandy: "There should be a designated option for 2V1"): CO-OP PLAY 3 (or `teams 2v1`) is the
-  same team game for three players at most - players 1 and 2 against player 3, who plays both of team 2's turns each
-  ball (P1, P3, P2, P3), a fourth Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
+  same team game for three players at most - players 1 and 3 against player 2, who plays both of team 2's turns each
+  ball (P1, P2, P3, P2); TEAM PLAY 2 VS 1 and one Start adds three (`3 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2:
+  P2`), a later Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
   `team_max`). Its scores go on a `TEAM 2V1` board of their own, so a 2v1 champion never sits on the 2v2 board.
 - **Classic** (PAD-1065, DoomWalrus666: "play these modes without any special abilities. The players may select a
   character but none of them will have any special abilities"): CO-OP PLAY 4, 5 and 6 are Co-op, Team 2v2 and Team
@@ -6296,7 +6316,8 @@ plays one player for the team, so nothing per player is copied: an ability chang
 (the Modes tab's **Characters…** under **Co-op play**):
 
     pick on                                   each teammate picks at their first ball
-    pick_time 30                              the seconds to pick (30 when not given; 0: no limit)
+    pick_time 30                              the seconds to pick (30 when not given; 0: no limit); a flipper
+                                              press starts them again
     left 60                                   the left flipper button (the right is `button`)
     action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
     lane 62                                   the shooter lane (SHOOTER LANE): the save's presses wait for the ball
@@ -6326,6 +6347,9 @@ left count down on the top line (`PLAYER 2 PICK  17`) and on the pick's screen (
 draws in its header); the one taken stays on the glass 2.5 s saying PICKED (the top line `PLAYER 2 PICKED`, or
 `PLAYER 2 IS <name>` on a title with no screens). While `pm_in_game()` is 0 with a player up (a menu over the game)
 the pick and its clock wait; it was dropped there once, leaving that teammate with no character for the turn.
+PAD-1066 (DoomWalrus666: "the timer should never be able to force a player to continue"): each flipper press under the
+pick starts `pick_time` again from the top, so a player walking the characters can read every one for as long as they
+like; the time only runs out on one who has left the flippers alone that long.
 PAD-1051 (DoomWalrus666): the game's own PLAYER LANGUAGE SELECT (Godzilla's adjustment 14, `USE FLIPPERS TO SELECT
 LANGUAGE:`) walked on the same flippers at the same ball start, and the Action press that took a character launched
 the ball. While the pick is open and its ball waits in the plunger - the game's own flags, the port's
@@ -6391,6 +6415,26 @@ what it needs):
   through the game's own serve (`pm_multiball_add`), once a ball.
 - `yes:<name>`: a check of the game's (`site coop_yes_<name>`, `(this) -> 0/1`) answers 1 while the teammate is up
   (Godzilla: the tank rule's "in the Maser phase", LE 0x108d20 / Pro 0x1064e8: the Maser lit for all of Tank Attack).
+- `keep:<name>=<v>`: a word of the game's (`value coop_keep_<name>_obj` + player x `_stride` + `_at`, `_width` 4 or 1)
+  is written v every tick while the teammate is up (Godzilla: MAGNA GRAB lit - the word its MAGNA GRAB LIT AT GAME
+  START adjustment sets at game start, 0x7b1d4c LE / 0x7a5714 Pro + 0x14 + 4 x player). `keep:<name>>=<v>` writes it
+  only while it is below v (Godzilla's Destruction Jackpot multiplier step, 0x7b1c78 / 0x7a5640 + 0xc + 4 x player,
+  0 = 1X: never below 2X for the power-ups character). A count may also be one byte
+  (`value coop_count_<name>_width 1`) or one word for every player (`_stride 0`).
+- `steps:<name>`: a rule's steps come two a shot: `value coop_steps_<name>_obj` is the rule (one object), `_at` its
+  vector of `_n` step words, each a percent byte per player (100 = done; Godzilla's building keeps its six stability
+  steps so, at 0x7b1d10 + 0x2c on LE, 0x7a56d8 on Pro). Each step the game completes while the teammate is up, the
+  one after it is completed too. `_inline 1` when the steps are words in the rule itself, `_done` the value of a step
+  done and `_width 4` a word a player (Godzilla's three powerline targets at 0x7b0b90 + 0x38: each hit is two targets).
+- `count:<name>=<n>`: as `count:<name>+<n>`, but the word is made n at the pick (Godzilla: the heat ray rule's HEAT RAY
+  READY word at +4 + 4 x player, `value coop_count_heatray_obj` 0x7b2d68 LE / 0x7a66d0 Pro). A count's rule may be one
+  object (`value coop_count_<name>_obj`) instead of a hooked method or a pointer, and `value coop_count_<name>_stride`
+  (default 4) is the bytes between players' words (Godzilla's Mechagodzilla shield keeps its hits left in a u64 a
+  player: stride 8). `double:` also doubles a count that counts DOWN (the shield's hits left fall two a hit, to 0),
+  and a rise of several in one tick (a ripping spinner) is matched in full.
+- `adj:<id>+<n>:<lo>:<hi>` and `adj:<id>-<n>:<lo>:<hi>`: the adjustment reads its own value plus or minus n, held to
+  lo..hi (Godzilla: every BATTLE VS ... TIMER + 5; a timer read live through the getter when the mode starts needs no
+  record hold).
 - `lit:<name>=<mask>`: a shot held lit in one of the game's base-play rules while the teammate is up: `site
   coop_lit_<name>` is the rule's shot handler (hooked to learn the object; Godzilla LE 0x1645ac / Pro 0x160bd8, the
   rule that pays the MASER CANNON AWARD), and `<mask>` is OR-ed into its lit mask (the framework's u64 at this +

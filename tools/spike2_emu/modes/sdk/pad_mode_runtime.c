@@ -16090,16 +16090,22 @@ static void coop_turn_show(void)
  *   spot:<rules>                     two Action presses within 0.6 s while one of the game's rules in the mask <rules>
  *                                    (a bit per rule id; Godzilla's battles 12-18) runs: its lowest lit shot is sent
  *                                    through the game's own shot dispatch (`site shot_dispatch`), once a ball
- *   unlock:<id>@<rules>              once one of the rules in <rules> has STARTED on the teammate's turn this game, the
- *                                    game's adjustment <id> reads 1 while they are up (Godzilla: UNLOCK ALL MONSTER
- *                                    BATTLES after a tier-1 battle, rules 12-15: tier 2 opens on the selection screen)
+ *   unlock:<id>[@<rules>]            the game's adjustment <id> reads 1 while the teammate is up - always, or once one
+ *                                    of the rules in <rules> has STARTED on their turn this game (Godzilla: UNLOCK ALL
+ *                                    MONSTER BATTLES: every battle on the selection screen open, tier 2 included)
  *   addball:<n>                      two Action presses within 0.6 s in regular play (none of the game's modes runs)
  *                                    serve n more balls through the game's own serve (pm_multiball_add), once a ball
  *   yes:<name>                       a check of the game's (`site coop_yes_<name>`, (this) -> 0/1) answers 1 while the
  *                                    teammate is up (Godzilla: the tank rule's "in the Maser phase": the Maser lit)
+ *   lit:<name>=<mask>                a shot held lit in one of the game's rules while the teammate is up: the rule is
+ *                                    found by `site coop_lit_<name>`, its shot handler (hooked to learn the object);
+ *                                    its lit mask for the player (the framework's u64 at this + stock_field + 8 x p)
+ *                                    gets <mask> OR-ed in every tick, and loses it at the turn's end (Godzilla: the
+ *                                    Maser target's bit in the base-play rule that pays the Maser cannon)
  *   double:<name>                    a rule's count (as count:, by `coop_count_<name>` / `_rule` and `_at`) rises two
  *                                    at a time while the teammate is up: each rise of one the game makes gets one more
- *   gift:<id>                        at the teammate's pick, the game's own one-shot feature adjustment <id> (Godzilla:
+ *   gift:<id>                        at the teammate's pick and at each of their later turns, the game's own one-shot
+ *                                    feature adjustment <id> (Godzilla:
  *                                    LIGHT ALLY): the game's adjustment-changed handler (`site coop_adj_changed`, given
  *                                    {u16 id}) is called with the getter answering 1 for it, once
  * An adjustment the game copies into a player's record when the game starts reads the same through the getter but
@@ -16132,8 +16138,9 @@ static struct coop_char {
     char name[28], does[28];
     unsigned n_adj;
     struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v% held to lo..hi */
-    unsigned save_s, bs_adj, boost, gift, spot, unlock_adj, unlock_rules, addball, n_yes, n_double;
-    char yes[2][12], dbl[2][12];
+    unsigned save_s, bs_adj, boost, gift, spot, unlock_adj, unlock_rules, addball, n_yes, n_double, n_lit;
+    char yes[2][12], dbl[2][12], lit_name[2][12];
+    uint64_t lit_mask[2];
     unsigned n_count;
     struct { char name[12]; unsigned n; } count[2];
 } coop_ch[COOP_CHARS];
@@ -16181,6 +16188,9 @@ static unsigned coop_started[5];            /* per teammate: the unlock rules se
 static struct { char name[12]; unsigned (*game)(unsigned); } coop_yes[COOP_YES];   /* the checks wrapped */
 static int coop_yes_n;
 static unsigned coop_dbl_last[COOP_COUNTS];  /* double: each count's last seen value, for the player up */
+#define COOP_LITS 4
+static struct { char name[12]; unsigned obj; int held; uint64_t mask; long at, min; } coop_lit[COOP_LITS];   /* the rules whose lit mask holds a bit; at/min: a word (this + 4 x p + at) kept at least min (Godzilla: the Maser's charge) */
+static int coop_lit_n;
 static int coop_dbl_armed;
 
 /* PAD-1033: the game's adjustment getter is wrapped ONCE (hook_wrap cannot wrap a function twice) and each of ours
@@ -16253,7 +16263,8 @@ static unsigned coop_adj_answer(unsigned id, unsigned own)
         coop_gift_now = 0;
         return 1u;
     }
-    if (c && c->unlock_adj == id && (coop_started[coop.turn] & c->unlock_rules) && pm_in_game()) return 1u;
+    if (c && c->unlock_adj == id && pm_in_game() && (!c->unlock_rules || (coop_started[coop.turn] & c->unlock_rules)))
+        return 1u;
     if (!c || !pm_in_game()) return own;
     for (k = 0; k < c->n_adj; k++)
         if (c->adj[k].id == id) {
@@ -16346,6 +16357,68 @@ static unsigned coop_boost_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
         r1 = n;
     }
     return coop_boost_game(r0, r1, r2, r3);
+}
+
+/* the shot handlers of the rules a lit: names: hooked before they run, to learn the rule's object */
+static void coop_lit_seen(int i, unsigned *r)
+{
+    if (i < coop_lit_n && coop_lit[i].obj != r[0]) {
+        coop_lit[i].obj = r[0];
+        say("co-op: the %s lit shot's rule is at 0x%08x", coop_lit[i].name, r[0]);
+    }
+}
+static void coop_lit_seen0(unsigned *r) { coop_lit_seen(0, r); }
+static void coop_lit_seen1(unsigned *r) { coop_lit_seen(1, r); }
+static void coop_lit_seen2(unsigned *r) { coop_lit_seen(2, r); }
+static void coop_lit_seen3(unsigned *r) { coop_lit_seen(3, r); }
+
+/* the rule's lit mask for the player up: the framework's u64 at this + stock_field + 8 x player */
+static volatile unsigned *coop_lit_field(int i)
+{
+    unsigned p = coop_ball_byte ? coop_ball_byte[-1] : 1u, a;
+    if (i >= coop_lit_n || !coop_lit[i].obj || p < 1 || p > 4) return 0;
+    a = coop_lit[i].obj + (unsigned)pm_port_value("stock_field", 0x18) + 8u * p;
+    return maps_has(a, 8, MAP_R) ? (volatile unsigned *)(unsigned long)a : 0;
+}
+
+/* from the tick: the held bits OR-ed in while the character is up; taken out once it is not */
+static void coop_lit_tick(void)
+{
+    const struct coop_char *c = coop_char_up();
+    volatile unsigned *f;
+    unsigned k;
+    int i, on;
+    for (i = 0; i < coop_lit_n; i++) {
+        on = 0;
+        if (c && pm_in_game())
+            for (k = 0; k < c->n_lit; k++)
+                if (str_eq(c->lit_name[k], coop_lit[i].name)) { on = 1; break; }
+        if (!(f = coop_lit_field(i))) continue;
+        if (on && coop_lit[i].at >= 0) {                      /* the rule's own gate: a word it wants non-zero */
+            unsigned p = coop_ball_byte ? coop_ball_byte[-1] : 1u;
+            unsigned a = coop_lit[i].obj + 4u * p + (unsigned)coop_lit[i].at;
+            if (maps_has(a, 4, MAP_R) && *(volatile unsigned *)(unsigned long)a < (unsigned)coop_lit[i].min)
+                *(volatile unsigned *)(unsigned long)a = (unsigned)coop_lit[i].min;
+        }
+        if (on) {
+            uint64_t m = c->lit_mask[k], have = (uint64_t)f[0] | (uint64_t)f[1] << 32;
+            if ((have & m) != m) {
+                f[0] = (unsigned)(have | m);
+                f[1] = (unsigned)((have | m) >> 32);
+                if (!coop_lit[i].held)
+                    say("co-op: %s - the %s shot held lit (0x%llx into the rule's 0x%llx)", c->name, coop_lit[i].name,
+                        (unsigned long long)m, (unsigned long long)have);
+                coop_lit[i].held = 1;
+            }
+        } else if (coop_lit[i].held) {
+            uint64_t have = (uint64_t)f[0] | (uint64_t)f[1] << 32;
+            have &= ~coop_lit[i].mask;
+            f[0] = (unsigned)have;
+            f[1] = (unsigned)(have >> 32);
+            coop_lit[i].held = 0;
+            say("co-op: the %s shot is the game's again", coop_lit[i].name);
+        }
+    }
 }
 
 /* a check of the game's answers 1 while the teammate's character says so (yes:<name>) */
@@ -16891,6 +16964,7 @@ static void coop_chars_tick(void)
         coop_launch_taps = 0;
     }
     coop_double_tick();
+    coop_lit_tick();
     if (coop_save_ask && (c = coop_char_up()) && c->addball && !coop_save_used
         && pm_stock_mode_running(PM_STOCK_ANY) <= 0) {
         coop_save_ask = 0;
@@ -16936,6 +17010,11 @@ static void coop_chars_turn(void)
     coop_pick_open(coop.turn);
     coop_cache_hold();
     coop_dbl_armed = 0;
+    /* DoomWalrus666 (round 3): a gift (Godzilla's LIGHT ALLY) comes at EVERY turn of its teammate's, not their ball 1
+     * alone - the pick gives the first, each later turn gives one more (the game lights the next unlit ally; none left:
+     * nothing) */
+    if (coop.turn >= 1 && coop.turn <= 4 && coop_pick_of[coop.turn] >= 0 && coop_pick_of[coop.turn] < coop_ch_n)
+        coop_gift(&coop_ch[coop_pick_of[coop.turn]]);
 }
 
 /* coop.cfg: character <abilities> <name>|<what it does> */
@@ -16950,7 +17029,7 @@ static void coop_char_line(const char *s)
     c = &coop_ch[coop_ch_n];
     c->n_adj = 0;
     c->save_s = c->bs_adj = c->boost = c->gift = c->n_count = c->spot = c->unlock_adj = c->unlock_rules = 0;
-    c->addball = c->n_yes = c->n_double = 0;
+    c->addball = c->n_yes = c->n_double = c->n_lit = 0;
     for (k = 0; k + 1 < sizeof tok && s[k] && s[k] != ' '; k++) tok[k] = s[k];   /* number() eats the space after */
     tok[k] = 0;
     s += k;
@@ -17004,7 +17083,16 @@ static void coop_char_line(const char *s)
                 p++;
                 c->unlock_rules = (unsigned)number(&p, &ok);
             }
-            if (!ok || !c->unlock_rules) c->unlock_adj = c->unlock_rules = 0;
+            if (!ok) c->unlock_adj = c->unlock_rules = 0;
+        } else if (str_starts(p, "lit:") && c->n_lit < 2) {
+            p += 4;
+            for (k = 0; k + 1 < 12 && *p && *p != '=' && *p != ','; k++) c->lit_name[c->n_lit][k] = *p++;
+            c->lit_name[c->n_lit][k] = 0;
+            if (k && *p == '=') {
+                p++;
+                c->lit_mask[c->n_lit] = number(&p, &ok);
+                if (ok && c->lit_mask[c->n_lit]) c->n_lit++;
+            }
         } else if (str_starts(p, "addball:")) {
             p += 8;
             c->addball = (unsigned)number(&p, &ok);
@@ -17135,6 +17223,29 @@ static void coop_chars_arm(struct site *e)
                 coop_yes[coop_yes_n].name, fn(name));
             coop_yes_n++;
         }
+    for (i = 0; i < coop_ch_n; i++)                              /* the rules whose lit mask holds a bit */
+        for (k = 0; k < coop_ch[i].n_lit && coop_lit_n < COOP_LITS; k++) {
+            static void (*const lseen[COOP_LITS])(unsigned *) = { coop_lit_seen0, coop_lit_seen1, coop_lit_seen2,
+                                                                   coop_lit_seen3 };
+            int j;
+            for (j = 0; j < coop_lit_n && !str_eq(coop_lit[j].name, coop_ch[i].lit_name[k]); j++) ;
+            if (j < coop_lit_n) continue;
+            pm_snprintf(name, sizeof name, "coop_lit_%s", coop_ch[i].lit_name[k]);
+            if (!site(name) || !fn(name) || !hook(fn(name), lseen[coop_lit_n])) {
+                say("co-op characters: the %s lit shot is off - the port names no %s", coop_ch[i].lit_name[k], name);
+                continue;
+            }
+            str_copy(coop_lit[coop_lit_n].name, 12, coop_ch[i].lit_name[k], 12);
+            coop_lit[coop_lit_n].mask = coop_ch[i].lit_mask[k];
+            pm_snprintf(name, sizeof name, "coop_lit_%s_at", coop_ch[i].lit_name[k]);
+            coop_lit[coop_lit_n].at = pm_port_value(name, -1);
+            pm_snprintf(name, sizeof name, "coop_lit_%s_min", coop_ch[i].lit_name[k]);
+            coop_lit[coop_lit_n].min = pm_port_value(name, 1);
+            pm_snprintf(name, sizeof name, "coop_lit_%s", coop_ch[i].lit_name[k]);
+            say("co-op characters: the %s shot (0x%llx) is held lit while its character is up (its rule's handler 0x%08x)",
+                coop_lit[coop_lit_n].name, (unsigned long long)coop_lit[coop_lit_n].mask, fn(name));
+            coop_lit_n++;
+        }
     for (i = 0; i < coop_ch_n; i++)                              /* a doubled count needs its rule, as count: does */
         for (k = 0; k < coop_ch[i].n_double && coop_count_n < COOP_COUNTS; k++) {
             int j;
@@ -17195,6 +17306,8 @@ static void coop_chars_arm(struct site *e)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s: yes", o ? ", " : "", coop_ch[i].yes[k]);
         for (k = 0; k < coop_ch[i].n_double && o + 24 < sizeof how; k++)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s x2", o ? ", " : "", coop_ch[i].dbl[k]);
+        for (k = 0; k < coop_ch[i].n_lit && o + 24 < sizeof how; k++)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s lit", o ? ", " : "", coop_ch[i].lit_name[k]);
         if (coop_ch[i].spot && o + 24 < sizeof how)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sspot (rules 0x%x)", o ? ", " : "", coop_ch[i].spot);
         if (coop_ch[i].unlock_adj && o + 24 < sizeof how)

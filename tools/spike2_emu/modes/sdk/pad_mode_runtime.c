@@ -16495,6 +16495,7 @@ static struct { int on, c; unsigned who; unsigned long at; } coop_done;   /* PAD
 static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
 static volatile int coop_save_ask;          /* a double press: the tick gives the save */
 static int coop_save_used;                  /* this ball's is given */
+static int coop_spot_used, coop_spot_battle; /* spot: one a battle started - the battle it was used in, cleared when another runs */
 static unsigned coop_lane;                  /* PAD-1045: the shooter lane switch (0: not known, every press counts) */
 static volatile int coop_lane_in;           /* a ball waits in the shooter lane */
 static volatile int coop_ball_out;          /* the turn's ball has left the shooter lane */
@@ -17502,9 +17503,14 @@ static void coop_chars_tick(void)
         say("co-op: %s's Action button add-a-ball (%u more, teammate %u): %s", c->name, c->addball, coop.turn,
             pm_multiball_add(c->addball, 0) ? "the game serves it" : "the game refused");
     }
-    if (coop_save_ask && (c = coop_char_up()) && c->spot) {        /* as often as they like (round 4) */
-        coop_save_ask = 0;
-        coop_spot(c);
+    if ((c = coop_char_up()) && c->spot) {                          /* one spot each time a battle begins (round 5) */
+        int running = coop_rule_running(c->spot);
+        if (running != coop_spot_battle) { coop_spot_battle = running; coop_spot_used = 0; }
+        if (coop_save_ask) {
+            coop_save_ask = 0;
+            if (coop_spot_used) say("co-op: %s's spot - one a battle, and this battle's is spent", c->name);
+            else if (coop_spot(c)) coop_spot_used = 1;
+        }
     }
     if (coop_save_ask) {
         coop_save_ask = 0;

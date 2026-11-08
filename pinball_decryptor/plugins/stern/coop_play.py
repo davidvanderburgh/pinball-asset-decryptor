@@ -421,11 +421,12 @@ PRESET_DIR = "coop_presets"
 ABILITIES = (
     ("longer_save", "LONGER BALL SAVE, LONGER TIMERS",
      "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top); on Godzilla the "
-     "Oxygen Destroyer timer is twice its setting and every battle timer gets 5 seconds more.",
+     "Oxygen Destroyer timer is twice its setting and every battle timer gets 10 seconds more.",
      ("some", [("adj", "AD_BALL_SAVE_TIME", "x200"), ("adj", "AD_O2_DESTROYER_TIMER", "x200:8:40"),
-               ("adj", "AD_BATTLE_VS_EBIRAH_TIMER", "+5"), ("adj", "AD_BATTLE_VS_TITANOSAURUS_TIMER", "+5"),
-               ("adj", "AD_BATTLE_VS_GIGAN_TIMER", "+5"), ("adj", "AD_BATTLE_VS_MEGALON_TIMER", "+5"),
-               ("adj", "AD_BATTLE_VS_KING_GHIDORAH_TIMER", "+5"), ("adj", "AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", "+5")])),
+               ("adj", "AD_BATTLE_VS_EBIRAH_TIMER", "+10:30:80"), ("adj", "AD_BATTLE_VS_TITANOSAURUS_TIMER", "+10:30:80"),
+               ("adj", "AD_BATTLE_VS_GIGAN_TIMER", "+10:30:80"), ("adj", "AD_BATTLE_VS_MEGALON_TIMER", "+10:30:80"),
+               ("adj", "AD_BATTLE_VS_KING_GHIDORAH_TIMER", "+10:30:100"),
+               ("adj", "AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", "+10:30:100")])),
     ("action_save", "ACTION BUTTON BALL SAVE",
      "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
     ("heat_ray", "HEAT RAY READY, EASIER HEAT RAY", "The heat ray is one spin from ready when they pick (the first "
@@ -450,7 +451,7 @@ ABILITIES = (
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
      "the bonus count them).", ("count", "jets", 4)),
     ("spot", "SPOT A BATTLE SHOT", "Two quick presses of the Action button during a battle count as its next lit "
-     "shot, as often as they like.", ("spot", "coop_battle_rules")),
+     "shot, once in each battle they start (every ball, every battle).", ("spot", "coop_battle_rules")),
     ("tier2", "TIER 2 ALWAYS OPEN", "Every battle on the selection screen is open while they are up, tier 2 included "
      "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).",
      ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
@@ -468,7 +469,7 @@ ABILITIES = (
 )
 #: what the pick's card says each ability does, in the player's words
 CARD_LINES = {
-    "longer_save": "Twice the ball save every ball. Longer Oxygen Destroyer and battle timers.",
+    "longer_save": "Twice the ball save every ball. Longer Oxygen Destroyer, 10 s more on battles.",
     "action_save": "Press Action twice for a 10 second ball save, once a ball.",
     "heat_ray": "Heat ray ready at your first spin. Recharges in half the spins.",
     "battles": "One ramp lights a battle.",
@@ -477,7 +478,7 @@ CARD_LINES = {
     "ally": "An ally lit at every one of your balls. Rodan lasts twice as long.",
     "jets": "Starts with 4 jet fighters destroyed.",
     "tanks": "Starts with 4 tanks destroyed.",
-    "spot": "Press Action twice in a battle to hit its next shot, as often as you like.",
+    "spot": "Press Action twice in a battle to hit its next shot, once per battle.",
     "tier2": "Every battle is open to you, tier 2 included.",
     "addball": "Press Action twice in regular play to add a ball, once a ball.",
     "maser": "Maser and Magna Grab lit while you are up. Powerline hits count double.",

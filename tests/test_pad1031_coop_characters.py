@@ -32,7 +32,6 @@ static int pm_in_game(void) { return in_game; }
 static unsigned pm_player(void) { return 1; }
 static struct { int on; unsigned button, game, n, turn; } coop;
 static unsigned coop_teammates(void) { return coop.n; }
-static int coop_classic(void) { return 0; }             /* PAD-1065: CO-OP PLAY Classic (4-6): abilities off; not here */
 static int str_starts(const char *s, const char *p) { return !strncmp(s, p, strlen(p)); }
 @NUMBER@
 static int coop_ball_msg = 5, coop_ball_held;
@@ -48,6 +47,7 @@ static unsigned own_adj(unsigned id) { return id == 94 ? 5 : id == 195 ? 20 : 1;
 static volatile unsigned char *coop_ball_byte;
 static int maps_has(unsigned long a, unsigned n, unsigned f) { (void)a; (void)n; (void)f; return 0; }
 static void maps_read(void) {}
+static int coop_classic(void) { return 0; }                /* PAD-1065: not the Classic (no-ability) pick */
 static unsigned fn(const char *name) { (void)name; return 0; }
 static int str_eq(const char *a, const char *b) { return !strcmp(a, b); }
 static void *pm_node(const char *where, const char *path) { (void)where; (void)path; return 0; }
@@ -397,8 +397,8 @@ def test_a_file_that_is_not_one_says_so(tmp_path):
 def test_godzillas_abilities_and_lines_read_off_its_program():
     elf = open(GZ_ELF, "rb").read()
     got = {a["key"]: a for a in CP.abilities(elf, "Godzilla")}
-    assert got["longer_save"]["cfg"] == ("adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:212+5:30:70,adj:213+5:30:70,"
-                                         "adj:214+5:30:70,adj:215+5:30:70,adj:216+5:30:90,adj:218+5:30:90")
+    assert got["longer_save"]["cfg"] == ("adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:212+10:30:80,adj:213+10:30:80,"
+                                         "adj:214+10:30:80,adj:215+10:30:80,adj:216+10:30:100,adj:218+10:30:100")
     assert got["action_save"]["cfg"] == "save:10"
     assert not got["heat_ray"]["cfg"] and got["heat_ray"]["why"]      # round 4: READY at the pick needs the port's object
     port = __import__("pinball_decryptor.plugins.stern.mode_project", fromlist=["read_port"]).read_port(
@@ -411,8 +411,8 @@ def test_godzillas_abilities_and_lines_read_off_its_program():
     assert CP.action_button(elf) == 34
     lines = CP.character_lines(elf, CP.read_preset(CP.presets()["godzilla"])["characters"])
     assert lines[:6] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62",
-                         "character adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:212+5:30:70,adj:213+5:30:70,"
-                         "adj:214+5:30:70,adj:215+5:30:70,adj:216+5:30:90,adj:218+5:30:90 GODZILLA 1954|"
+                         "character adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:212+10:30:80,adj:213+10:30:80,"
+                         "adj:214+10:30:80,adj:215+10:30:80,adj:216+10:30:100,adj:218+10:30:100 GODZILLA 1954|"
                          "LONGER BALL SAVE, LONGER TIMERS"]
     text = CP.cfg_text(elf, None, {"pick": True, "list": [{"name": "A", "ability": "heat_ray"}]},
                        sites=port["site"], values=port["value"])

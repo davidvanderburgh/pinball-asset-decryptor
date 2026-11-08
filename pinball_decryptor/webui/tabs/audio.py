@@ -981,6 +981,10 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._select_first_row()
         self._start_change_scan()
         self._probe_metadata_async(scan_id)
+        # PAD-1068: the Expression lights songs are this scan's; however long it took
+        announce = getattr(self.window, "audio_scanned", None)
+        if announce is not None:
+            announce(scan_dir)
 
     def _common_prefix(self):
         """The folder most slots share ("audio/" on a Stern extract), so the

@@ -45,9 +45,9 @@ def _songs(audio):
     from ...plugins.stern import sound_modes as SM
     if audio is None:
         return []
-    assign = getattr(audio, "_assign", {}) or {}
+    assign = dict(getattr(audio, "_assign", {}) or {})
     out = []
-    for s in getattr(audio, "_slots", ()) or ():
+    for s in list(getattr(audio, "_slots", ()) or ()):
         slot = SM.slot_idx(s.rel_path)
         if slot is None:
             continue
@@ -116,6 +116,7 @@ class LightsTab(TabService):
         self._project = ""
         self._shows = []
         self._read_id = 0
+        self._songs_id = 0
         from ...plugins.stern import cab_shows as CS
         self.set(project="", available=False, why="", reading=False, lights=[], songs=[], shows=[], intro=INTRO,
                  insider=INSIDER, running=False, peaks={}, problems=[], max=CS.SHOWS_MAX, making=False, auto_note="",
@@ -147,7 +148,8 @@ class LightsTab(TabService):
         self.set(running=bool(running))
 
     def _audio_ready(self):
-        """The songs are the Audio tab's scan of this project: start one when it has not read it."""
+        """The songs are the Audio tab's scan of this project: start one when it has not read it (the list comes in
+        when it is done, :meth:`on_audio_scanned`)."""
         audio = self.window.service("audio")
         folder = self._folder()
         if audio is None or not folder:
@@ -158,17 +160,29 @@ class LightsTab(TabService):
             except Exception:                           # noqa: BLE001 - the list just stays empty
                 pass
 
-        def wait():                                     # the song list once the scan is in
-            import time
-            for _ in range(240):
-                time.sleep(0.5)
-                if getattr(audio, "_scan_dir", "") == folder and not getattr(audio, "_scanning", False):
-                    break
-            self.ctx.loop.post(self._songs_now)
-        threading.Thread(target=wait, daemon=True, name="lights-songs").start()
+    def on_audio_scanned(self, folder):
+        """PAD-1068: an Audio scan is in, however long it took (BEN's ran past the two minutes this page used to wait,
+        and its songs never came: the game's own show played with no sound)."""
+        if folder and folder == self._folder():
+            self._songs_now()
 
     def _songs_now(self):
-        songs = _songs(self.window.service("audio"))
+        """The song list off the Audio tab's scan (a worker: it reads the length of each sound the scan has not)."""
+        audio = self.window.service("audio")
+        self._songs_id += 1
+        sid = self._songs_id
+
+        def work():
+            try:
+                songs = _songs(audio)
+            except Exception:                           # noqa: BLE001 - a scan replaced under it: the next one's
+                return
+            self.ctx.loop.post(lambda: self._songs_done(sid, songs))
+        threading.Thread(target=work, daemon=True, name="lights-songs").start()
+
+    def _songs_done(self, sid, songs):
+        if sid != self._songs_id:
+            return
         self.set(songs=songs)
         self._paint(songs)
 
@@ -211,6 +225,7 @@ class LightsTab(TabService):
         if rid != self._read_id:
             return
         self.set(reading=False, available=not why, why=why, lights=lights, stock=[], stock_meta={}, stock_why="")
+        self._paint()
         self._songs_now()
 
     def _stock_done(self, rid, why, stock):

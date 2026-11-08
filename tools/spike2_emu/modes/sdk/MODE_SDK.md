@@ -6282,7 +6282,8 @@ plays one player for the team, so nothing per player is copied: an ability chang
 (the Modes tab's **Characters…** under **Co-op play**):
 
     pick on                                   each teammate picks at their first ball
-    pick_time 30                              the seconds to pick (30 when not given; 0: no limit)
+    pick_time 30                              the seconds to pick (30 when not given; 0: no limit); a flipper
+                                              press starts them again
     left 60                                   the left flipper button (the right is `button`)
     action 34                                 the Action button (LOCKDOWN / ACTION BUTTON)
     lane 62                                   the shooter lane (SHOOTER LANE): the save's presses wait for the ball
@@ -6312,6 +6313,9 @@ left count down on the top line (`PLAYER 2 PICK  17`) and on the pick's screen (
 draws in its header); the one taken stays on the glass 2.5 s saying PICKED (the top line `PLAYER 2 PICKED`, or
 `PLAYER 2 IS <name>` on a title with no screens). While `pm_in_game()` is 0 with a player up (a menu over the game)
 the pick and its clock wait; it was dropped there once, leaving that teammate with no character for the turn.
+PAD-1066 (DoomWalrus666: "the timer should never be able to force a player to continue"): each flipper press under the
+pick starts `pick_time` again from the top, so a player walking the characters can read every one for as long as they
+like; the time only runs out on one who has left the flippers alone that long.
 PAD-1051 (DoomWalrus666): the game's own PLAYER LANGUAGE SELECT (Godzilla's adjustment 14, `USE FLIPPERS TO SELECT
 LANGUAGE:`) walked on the same flippers at the same ball start, and the Action press that took a character launched
 the ball. While the pick is open and its ball waits in the plunger - the game's own flags, the port's

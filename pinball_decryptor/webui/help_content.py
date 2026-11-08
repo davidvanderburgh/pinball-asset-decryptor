@@ -3469,7 +3469,7 @@ PREVIEW_HELP = {
                 "button to itself: the game's own language select (PLAYER LANGUAGE SELECT in its "
                 "adjustments) gets the flippers, and the Action button launches, only once the character "
                 "is taken. So: Action picks, the flippers choose the language, then the plunger or Action "
-                "launches; a ball launched before picking takes the one shown. The seconds left count down on the machine, and the one taken stays on the glass a "
+                "launches; a ball launched before picking takes the one shown. The seconds left count down on the machine, and every flipper press starts them again from the top (so a player can read each character as long as they like; the time only runs out when the flippers are left alone), and the one taken stays on the glass a "
                 "moment saying PICKED. A player on their own gets the pick too: hold the **right flipper button** "
                 "while pressing Start to begin the game (with CO-OP PLAY on, when it is in the service menu). The "
                 "score then goes on the game's own boards, and a Start in ball 1 still adds a teammate. "

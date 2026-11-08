@@ -7,7 +7,9 @@
 
 export const CX_NAMES = ["solid", "fade_in", "fade_out", "crossfade", "pulse", "strobe", "sweep_up", "sweep_down",
   "fill_up", "fill_down", "chase_up", "chase_down", "bounce", "center_out", "center_in", "alternate", "rainbow",
-  "sparkle", "fire", "meter"];
+  "sparkle", "fire", "meter", "game"];
+// "game" (PAD-1063): the game's own show of a song, painted from its frames (gameColour), not by this arithmetic
+export const CX_GAME = CX_NAMES.indexOf("game");
 
 const i32 = (v) => v | 0;
 const u32 = (v) => v >>> 0;
@@ -122,12 +124,43 @@ export function cxBlend(st, prev, side, u, k, t) {
   return c;
 }
 
+// ------------------------------------------------------------------ the game's own shows (PAD-1063)
+// The runtime's cab_src_of: a cabinet light's place in the game's frames by its name - a blade's pixel (n - 1), a
+// speaker's group as -2 - (n - 1), -1 none
+export function srcOf(name) {
+  let m = /^EXPRESSIVE LIGHTING (?:[LR] )?(\d+)$/.exec(name || "");
+  if (m) return Number(m[1]) >= 1 ? Number(m[1]) - 1 : -1;
+  m = /^(?:LEFT |RIGHT )?SPEAKER (\d+)$/.exec(name || "");
+  return m && Number(m[1]) >= 1 && Number(m[1]) <= 32 ? -2 - (Number(m[1]) - 1) : -1;
+}
+
+// The runtime's cab_game_colour: the colour the game's show of request st.a (set st.b) paints light `src` at
+// `t` ms into the step, which starts st.rate ms into the show. `meta` the page's stock_meta, `frames` that show's
+// frames (a Uint8Array; not loaded yet: dark).
+export function gameColour(st, src, t, meta, frames) {
+  const row = meta && meta.rows ? meta.rows[String(st.a)] : null;
+  const px = meta ? meta.pixels | 0 : 0;
+  if (!row || !frames || !px || src === -1) return 0;
+  const f = udiv(st.rate + t, row.period);
+  if (f >= row.frames) return 0;
+  const at = f * px * 3;
+  if (at + px * 3 > frames.length) return 0;
+  if (src >= 0) return src < px ? u32((frames[at + 3 * src] << 16) | (frames[at + 3 * src + 1] << 8) | frames[at + 3 * src + 2]) : 0;
+  const g = (meta.speakers || [])[-2 - src];
+  if (!g || !g.length) return 0;
+  const sum = [0, 0, 0];
+  for (const p of g) for (let c = 0; c < 3; c++) sum[c] += frames[at + 3 * p + c];
+  return u32((udiv(sum[0], g.length) << 16) | (udiv(sum[1], g.length) << 8) | udiv(sum[2], g.length));
+}
+
 // ------------------------------------------------------------------ a show, as the runtime plays it (cab_step_at)
-// A step as the runtime holds it: colours as numbers (the sidecar keeps "#rrggbb").
+// A step as the runtime holds it: colours as numbers (the sidecar keeps "#rrggbb"); a game step's song request,
+// set and start where the runtime keeps them (a, b, rate)
 export function compileStep(st) {
   const hex = (c) => parseInt(String(c || "#000000").slice(1), 16) >>> 0;
-  return { fx: CX_NAMES.indexOf(st.fx), ms: Math.max(1, st.ms | 0), a: hex(st.a), b: hex(st.b), rate: st.rate | 0,
-           blend: Math.min(st.blend | 0, Math.max(1, st.ms | 0)) };
+  const ms = Math.max(1, st.ms | 0), blend = Math.min(st.blend | 0, ms);
+  if (st.fx === "game") return { fx: CX_GAME, ms, a: st.req | 0, b: st.set === "remix" ? 1 : 0, rate: st.from | 0, blend };
+  return { fx: CX_NAMES.indexOf(st.fx), ms, a: hex(st.a), b: hex(st.b), rate: st.rate | 0, blend };
 }
 
 // One lane `el` ms into the show: { i: the step (-1: the lane has none), t: the ms into it, over: its steps ran out }
@@ -150,14 +183,18 @@ export function laneAt(steps, loop, el) {
 }
 
 // Every light's colour `el` ms into the show (`lanes`: [blade steps, speaker steps], compiled); null = the game's
-// (a lane with no steps), 0 = held dark (its steps ran out)
-export function showColours(lights, lanes, loop, el) {
+// (a lane with no steps), 0 = held dark (its steps ran out). `game(st, light, t)`: a game step's colour (PAD-1063,
+// gameColour; none given: dark), blended in as the runtime's cab_blend does.
+export function showColours(lights, lanes, loop, el, game) {
   const at = [laneAt(lanes[0], loop, el), laneAt(lanes[1], loop, el)];
+  const colour = (st, L, k, t) => (st.fx === CX_GAME ? (game ? game(st, L, t) : 0) : cxColour(st, L.side, L.u, k, t));
   return lights.map((L, k) => {
     const a = at[L.lane];
     if (a.i < 0) return null;
     if (a.over) return 0;
-    const steps = lanes[L.lane];
-    return cxBlend(steps[a.i], a.i ? steps[a.i - 1] : null, L.side, L.u, k, a.t);
+    const steps = lanes[L.lane], st = steps[a.i], prev = a.i ? steps[a.i - 1] : null;
+    let c = colour(st, L, k, a.t);
+    if (st.blend && a.t < st.blend) c = cxMix(prev ? colour(prev, L, k, prev.ms) : 0, c, udiv(a.t * 256, st.blend));
+    return c;
   });
 }

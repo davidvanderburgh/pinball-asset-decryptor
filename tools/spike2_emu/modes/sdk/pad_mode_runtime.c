@@ -2463,10 +2463,12 @@ static int lamps_checked(void)
  * number k. */
 enum { CX_SOLID, CX_FADE_IN, CX_FADE_OUT, CX_CROSSFADE, CX_PULSE, CX_STROBE, CX_SWEEP_UP, CX_SWEEP_DOWN, CX_FILL_UP,
        CX_FILL_DOWN, CX_CHASE_UP, CX_CHASE_DOWN, CX_BOUNCE, CX_CENTER_OUT, CX_CENTER_IN, CX_ALTERNATE, CX_RAINBOW,
-       CX_SPARKLE, CX_FIRE, CX_METER, CX_N };
+       CX_SPARKLE, CX_FIRE, CX_METER, CX_GAME, CX_N };
+/* CX_GAME (PAD-1063): the game's own show of a song, read from the game's memory - no arithmetic of this slice's
+ * (cx_colour gives 0); SONG SHOWS' cab_colour paints it */
 static const char *const CX_NAMES[CX_N] = { "solid", "fade_in", "fade_out", "crossfade", "pulse", "strobe",
     "sweep_up", "sweep_down", "fill_up", "fill_down", "chase_up", "chase_down", "bounce", "center_out", "center_in",
-    "alternate", "rainbow", "sparkle", "fire", "meter" };
+    "alternate", "rainbow", "sparkle", "fire", "meter", "game" };
 struct cx_step { int fx; unsigned ms, a, b, rate, blend; };
 
 static unsigned cx_mix(unsigned a, unsigned b, int f256)        /* a..b by f/256 */
@@ -2569,6 +2571,7 @@ static unsigned cx_colour(const struct cx_step *st, int side, unsigned u, unsign
         p = 250 + (int)(cx_hash((t / rate) * 2654435761u + (unsigned)(side + 1)) % 750u);
         if (up >= p) return 0;
         return up > p - 90 ? st->b : st->a;
+    case CX_GAME: break;                   /* PAD-1063: not this slice's arithmetic (cab_colour) */
     }
     return 0;
 }
@@ -2595,6 +2598,12 @@ static unsigned cx_blend(const struct cx_step *st, const struct cx_step *prev, i
  *                                            and over while the sound plays
  *   blades <fx> <ms> <a> <b> <rate> <blend>  a step of the blades' lane (fx: CX_NAMES; colours 0xRRGGBB)
  *   speakers <fx> <ms> <a> <b> <rate> <blend>   a step of the speaker lights' lane
+ *   songs <table> <rows> <pixels>            PAD-1063: the game's own song shows (cab_stock.py): rows of {u16
+ *                                            request, u16 0, u32 period ms, u32 frames, u32 ORIGINAL, u32 REMIX
+ *                                            frames}, a frame <pixels> RGB triples, blade n = pixel n - 1
+ *   songspk <p,p,p,p> ...                    speaker n's colour: the average of those pixels (the game's own)
+ *   blades game <ms> <request> <set> <from> <blend>   a step playing the game's show of that song request (set 0
+ *                                            ORIGINAL, 1 REMIX) from <from> ms into it, from the game's memory
  *
  * The sound's requests are every request whose sound list names it (the request table, read once the game has it).
  * The sound worker tells the tick which request started; the show runs, each lane on its own, every cabinet light of a
@@ -2621,6 +2630,13 @@ static struct cab_show cabs[CABS_MAX];
 static int n_cabs, cabs_only, cabs_reqs_done;
 static unsigned char cab_of_req[CABS_REQS];          /* 1 + the show a request plays, 0 = none */
 static int cab_side[N_CAB], cab_lane[N_CAB];         /* -1 left blade, 1 right, 0 a speaker; lane 0 blades, 1 speakers */
+/* PAD-1063: the game's own song shows (`songs`, `songspk`); each cabinet light's source in a frame: its pixel (a
+ * blade), -2 - n (speaker n + 1's group), -1 none */
+#define CAB_SPK_MAX  32
+#define CAB_SPK_PX   8
+static unsigned cab_songs, cab_songs_rows, cab_songs_px;
+static unsigned short cab_spk[CAB_SPK_MAX][CAB_SPK_PX];
+static int cab_spk_n[CAB_SPK_MAX], n_cab_spk, cab_src[N_CAB];
 static volatile unsigned cabs_pending;               /* the request the worker took last (0 = none since) */
 static const struct pm_mode cab_owner = { "the card's expression light show", 0, 0, 0, 0, 0 };
 #define CAB_GONE_MS  250
@@ -2687,6 +2703,78 @@ static long cab_song_ms(void)
     cab_run.last = (unsigned)got;
     cab_run.last_t = now;
     return cab_run.locked ? (long)((unsigned long long)(unsigned)got * 1000u / CAB_RATE) : (long)el;
+}
+
+/* PAD-1063: light k's colour in the game's own show for st (st->a the song's request, st->b the set, st->rate the
+ * ms into the show it starts from) at `t` ms into the step: the frame the game would paint then, out of its own
+ * table; 0 (dark) past the show's end, or when the table or the frame is not readable */
+static unsigned cab_game_colour(const struct cx_step *st, int k, unsigned t)
+{
+    const unsigned char *row = 0, *fr;
+    unsigned r, per, n, frames, f, at;
+    int src = k >= 0 && k < N_CAB ? cab_src[k] : -1, i, c, sum[3] = { 0, 0, 0 };
+    if (!cab_songs || !cab_songs_px || src == -1) return 0;
+    for (r = 0; r < cab_songs_rows; r++) {
+        const unsigned char *x = (const unsigned char *)(unsigned long)(cab_songs + r * 20u);
+        if (!maps_has((unsigned long)x, 20, MAP_R)) return 0;
+        if (*(const unsigned short *)x == st->a) { row = x; break; }
+    }
+    if (!row) return 0;
+    per = *(const unsigned *)(row + 4);
+    n = *(const unsigned *)(row + 8);
+    frames = *(const unsigned *)(row + (st->b ? 16 : 12));
+    if (!per || !frames) return 0;
+    f = (st->rate + t) / per;
+    if (f >= n) return 0;
+    fr = (const unsigned char *)(unsigned long)(frames + f * cab_songs_px * 3u);
+    if (!maps_has((unsigned long)fr, cab_songs_px * 3u, MAP_R)) return 0;
+    if (src >= 0)
+        return (unsigned)src < cab_songs_px ? (unsigned)fr[3 * src] << 16 | (unsigned)fr[3 * src + 1] << 8
+                                              | fr[3 * src + 2] : 0u;
+    i = -2 - src;
+    if (i >= n_cab_spk || !cab_spk_n[i]) return 0;
+    for (c = 0; c < cab_spk_n[i]; c++)
+        for (at = 0; at < 3; at++) sum[at] += fr[3 * cab_spk[i][c] + at];
+    for (at = 0; at < 3; at++) sum[at] /= cab_spk_n[i];     /* the game shifts a sum of 4 or 8: the same */
+    return (unsigned)sum[0] << 16 | (unsigned)sum[1] << 8 | (unsigned)sum[2];
+}
+
+static unsigned cab_colour(const struct cx_step *st, int k, unsigned t)
+{
+    return st->fx == CX_GAME ? cab_game_colour(st, k, t) : cx_colour(st, cab_side[k], cab_u[k], (unsigned)k, t);
+}
+
+/* cx_blend with the game's own shows among the steps */
+static unsigned cab_blend(const struct cx_step *st, const struct cx_step *prev, int k, unsigned t)
+{
+    unsigned c;
+    if (st->fx != CX_GAME && (!prev || prev->fx != CX_GAME))   /* the slice's own patterns: its own blend */
+        return cx_blend(st, prev, cab_side[k], cab_u[k], (unsigned)k, t);
+    c = cab_colour(st, k, t);
+    if (st->blend && t < st->blend)
+        c = cx_mix(prev ? cab_colour(prev, k, prev->ms) : 0u, c, (int)(t * 256u / st->blend));
+    return c;
+}
+
+/* a cabinet light's place in the game's frames, by its name: "EXPRESSIVE LIGHTING [L |R ]n" pixel n - 1, "[LEFT
+ * |RIGHT ]SPEAKER n" -2 - (n - 1), else -1 */
+static int cab_src_of(const char *name)
+{
+    const char *s = name;
+    int ok = 0;
+    long n;
+    if (str_starts(s, "EXPRESSIVE LIGHTING ")) {
+        s += 20;
+        if ((s[0] == 'L' || s[0] == 'R') && s[1] == ' ') s += 2;
+        n = (long)number(&s, &ok);
+        return ok && n >= 1 && !*s ? (int)n - 1 : -1;
+    }
+    if (str_starts(s, "LEFT ")) s += 5;
+    else if (str_starts(s, "RIGHT ")) s += 6;
+    if (!str_starts(s, "SPEAKER ")) return -1;
+    s += 8;
+    n = (long)number(&s, &ok);
+    return ok && n >= 1 && n <= CAB_SPK_MAX && !*s ? -2 - ((int)n - 1) : -1;
 }
 
 /* a lane's step at `el` ms into the show: its index (n = over), and the ms into it */
@@ -2819,8 +2907,7 @@ static void cabs_tick(void)
             continue;
         }
         st = &c->st[L][i];
-        lamp_paint_as(CAB0 + k, cx_blend(st, i ? &c->st[L][i - 1] : 0, cab_side[k], cab_u[k], (unsigned)k, t[L]),
-                      &cab_owner, 255);
+        lamp_paint_as(CAB0 + k, cab_blend(st, i ? &c->st[L][i - 1] : 0, k, t[L]), &cab_owner, 255);
     }
 }
 
@@ -2862,6 +2949,31 @@ static void cabs_arm(void)
         start = i + 1;
         while (*s == ' ' || *s == '\t') s++;
         if (str_starts(s, "only")) { cabs_only = 1; continue; }
+        if (str_starts(s, "songs ")) {                  /* PAD-1063: the game's own shows */
+            int ok1, ok2, ok3;
+            s += 6;
+            cab_songs = (unsigned)number(&s, &ok1);
+            cab_songs_rows = (unsigned)number(&s, &ok2);
+            cab_songs_px = (unsigned)number(&s, &ok3);
+            if (!ok1 || !ok2 || !ok3 || cab_songs_rows > 256 || cab_songs_px > 1024) cab_songs = 0;
+            continue;
+        }
+        if (str_starts(s, "songspk ")) {
+            s += 8;
+            for (n_cab_spk = 0; n_cab_spk < CAB_SPK_MAX && *s && *s != '\r' && *s != '#'; n_cab_spk++) {
+                int ok1 = 1, m = 0;
+                while (ok1) {
+                    unsigned p = (unsigned)number(&s, &ok1);
+                    if (!ok1) break;
+                    if (m < CAB_SPK_PX) cab_spk[n_cab_spk][m++] = (unsigned short)p;
+                    if (*s != ',') break;
+                    s++;
+                }
+                cab_spk_n[n_cab_spk] = m;
+                if (!m) break;
+            }
+            continue;
+        }
         if (str_starts(s, "show ") && n_cabs < CABS_MAX) {
             int ok1 = 0, ok2 = 0;
             struct cab_show *x = &cabs[n_cabs];
@@ -2910,6 +3022,7 @@ static void cabs_arm(void)
         const struct lamp *x = &lamps[CAB0 + k];
         cab_lane[k] = x->y >= 0 && x->y < 140;          /* the backbox's speaker ring(s), above the blades */
         cab_side[k] = x->x < 0 ? 0 : x->x < 150 ? -1 : x->x > 150 ? 1 : 0;   /* a blade's or a speaker's side */
+        cab_src[k] = cab_src_of(x->name);               /* PAD-1063 */
     }
     if (!n_cabs) return;
     if (!n_cab) {
@@ -2921,6 +3034,9 @@ static void cabs_arm(void)
         say("expression lights: no sound_worker on this port - the %d show(s) play by name only", n_cabs);
     say("expression lights: %d show(s) of the card's over %d cabinet light(s)%s", n_cabs, n_cab,
         cabs_only ? " (only)" : "");
+    if (cab_songs)
+        say("expression lights: the game's own shows: %u song(s) at 0x%x, %u pixel(s) a frame, %d speaker group(s)",
+            cab_songs_rows, cab_songs, cab_songs_px, n_cab_spk);
 }
 
 

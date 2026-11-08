@@ -6571,6 +6571,10 @@ the inserts (from index 256, up to 160): `pm_lamp_count` and every insert call s
                                                whose sound list names one of the ids (0: by name only)
     blades <fx> <ms> <a> <b> <rate> <blend>    a step of the blades' lane (colours 0xRRGGBB)
     speakers <fx> <ms> <a> <b> <rate> <blend>  a step of the speaker lights' lane
+    songs <table> <rows> <pixels>              PAD-1063: the game's own song shows (below)
+    songspk <p,p,p,p> <p,p,p,p> ...            speaker n's colour: the average of those blade pixels
+    blades game <ms> <request> <set> <from> <blend>   a step that plays the game's own show of that song request
+                                               (set 0 ORIGINAL, 1 REMIX) from <from> ms into it
 
 Up to 32 shows, 128 steps a lane, 8 sound ids a show. A lane with no steps leaves its lights to the game, one whose
 steps ran out holds them dark.
@@ -6586,9 +6590,29 @@ its voice starts (not yet seen on a machine of ours). No channel playing the req
 lights are the game's again. The speaker lights are two rings, left and right (a title that numbers 1-23 with no side:
 the first half round the left speaker), each counted from its top, and `alternate` swaps them. The patterns (the runtime's `CAB FX` slice, mirrored by the app's `cabfx.js` and held equal by
 `tests/test_pad1040_cab_shows.py`): solid, fade_in, fade_out, crossfade, pulse, strobe, sweep_up, sweep_down,
-fill_up, fill_down, chase_up, chase_down, bounce, center_out, center_in, alternate, rainbow, sparkle, fire, meter.
+fill_up, fill_down, chase_up, chase_down, bounce, center_out, center_in, alternate, rainbow, sparkle, fire, meter,
+and `game` (PAD-1063: the game's own show, not the slice's arithmetic: SONG SHOWS' `cab_colour` paints it).
 `rate` is a pattern's pace in ms; sparkle, fire and meter are a hash of the time and the light, so a show plays the
 same every time.
+
+**The game's own shows (PAD-1063).** Led Zeppelin (LE and Pro 1.22) and Rush (LE and Pro 1.19) keep a show for
+each song IN the game program: `ExpressionLights` looks up the request a channel is playing in a table of rows
+`{u16 request, u16 0, u32 period ms, u32 frames, u32 ORIGINAL frames, u32 REMIX frames}` (LZ LE 1.22: 20 rows at
+0x56952c, two requests a song, 25 ms a frame; Rush: 25 rows) and paints frame `song position / period`, a frame being
+an R,G,B byte triple for each blade pixel: `EXPRESSIVE LIGHTING n` shows pixel n - 1 (L 1-48, R 49-96). The speaker
+lights have no frames of their own: speaker n is the average of four (speaker 12: eight) blade pixels. The two
+pointers are zero in the file and a static initialiser fills them. The app's `cab_stock.py` finds the table by its
+shape, runs that initialiser under unicorn, takes the frame size from the gaps between the arrays and the speaker
+groups from the show's own code, and writes `songs` / `songspk`; the runtime (`cab_game_colour`) then reads the frames
+out of the game's memory, every read checked against the process's maps, and a cabinet light finds its pixel by its
+port name. The game dims its own show with its brightness settings (90% as shipped) before it lights the lamps; a
+card's step plays the frames at their own values, as the other patterns. No other title of the 53 keeps such a table.
+
+Emulator-proven (Led Zeppelin LE 1.22, C:/tmp/PAD-1063/verify_game.py): three snapshots of the game's own show
+during a game are its frames exactly at 90%, blades and speakers; a card's show on song request 70 stepping request
+66 REMIX from 60 s (`blades game 300000 66 1 60000 0`, both lanes) painted that show's frame byte for byte at the
+song's place in 202 of 330 snapshots, through the song held, stopped and played again (the rest: the probe's own log
+stale after its last line, the song stopped and the lights the game's again, the jump's instant).
 
 **Emulator-proven** (Led Zeppelin LE 1.22, padled node 2 / node 7, C:/tmp/PAD-1040/emu): a mode's `cab_show PROOF`
 took all 96 blade pixels magenta and all 23 speaker lights cyan over the game's own show, then a green sweep up the

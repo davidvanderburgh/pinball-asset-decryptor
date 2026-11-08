@@ -904,7 +904,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             if result is None:
                 result = cabs_plan(project, game_elf, cabs_prof or handicap_prof or idle_prof or coop_prof
                                    or attract_prof or variants_prof or sound_modes_prof or picture_prof)
-            cabs_into(result, scratch, cabs, cabs_sids or {}, only=True, log=log)
+            cabs_into(result, scratch, cabs, cabs_sids or {}, only=True, log=log, game_elf=game_elf)
         if comp:                                     # PAD-1041: Prolonged Competition, alone or with the above
             if result is None:
                 result = comp_plan(project, game_elf, comp_prof or handicap_prof or idle_prof or coop_prof
@@ -996,7 +996,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     if handicap:                                     # PAD-1033
         handicap_into(result, game_elf, scratch, handicap_setting, only=False)
     if cabs:                                         # PAD-1040
-        cabs_into(result, scratch, cabs, cabs_sids or {}, only=False, log=log)
+        cabs_into(result, scratch, cabs, cabs_sids or {}, only=False, log=log, game_elf=game_elf)
     if comp:                                         # PAD-1041
         comp_into(result, game_elf, scratch, only=False)
     return result
@@ -1085,18 +1085,27 @@ def cabs_plan(project, game_elf, prof):
     return ModePlan(project=project, profile=prof, port=port, build=None)
 
 
-def cabs_into(result, scratch, shows, sids_of, only, log=None):
+def cabs_into(result, scratch, shows, sids_of, only, log=None, game_elf=None):
     """``cabshow.cfg`` for *result*'s card; *only* when the card carries no modes (the runtime then arms the shows
-    alone, before the score gate: the card stays on Insider Connected)."""
+    alone, before the score gate: the card stays on Insider Connected). PAD-1063: a show with a step of the game's own
+    show needs *game_elf*'s show table (:func:`.cab_stock.read`); without it that show is left out."""
     from . import cab_shows as CS
     why = CS.title_refusal(result.profile)
     if why:
         raise ModeWriteError(why)
-    text, skipped = CS.cfg_text(shows, sids_of, only)
+    stock = None
+    if game_elf and any(CS.uses_game(s) for s in shows):
+        from . import cab_stock
+        try:
+            stock = cab_stock.read(game_elf)
+        except Exception as e:                          # noqa: BLE001 - those shows are left out, said below
+            if log:
+                log("Expression lights: the game's own shows could not be read (%s)." % e, "warning")
+    text, skipped = CS.cfg_text(shows, sids_of, only, stock=stock)
     for name in skipped:
         if log:
-            log("Expression lights: the show \"%s\" is left out: it has no song this game plays, or no steps."
-                % name, "warning")
+            log("Expression lights: the show \"%s\" is left out: it has no song this game plays, no steps, or a "
+                "step of the game's own show this card's program does not have." % name, "warning")
     if len(skipped) == len(shows):
         return result
     os.makedirs(scratch, exist_ok=True)

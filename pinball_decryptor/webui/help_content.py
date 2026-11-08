@@ -1514,6 +1514,23 @@ HELP_CONTENT = {
          "- **Run in emulator** starts the emulator with this project's changes: play a game and watch the "
          "cabinet's lights in the playfield window.\n"
          "- Needs an image build, not a direct SD write."),
+        # PAD-1063
+        ("The game's own shows",
+         "Led Zeppelin and Rush have an expression light show of their own for each of their songs, two in fact: "
+         "the game plays the **Original** one, or the **Remix** with the operator's EXPRESSION LIGHTS MODE set to "
+         "REMIX SHOWS (ALL SHOWS picks either). They are listed under **The game's own**, below your shows.\n\n"
+         "- Press one to watch it on the cabinet with its song, Original or Remix, as the machine plays it.\n"
+         "- **Make it a show of mine** makes a show of your own that starts as that one: a step of the game's show "
+         "on each lane, for the same song. Change its song to put the game's show with a song you replaced, cut "
+         "it with **Split at the playhead**, start a step later into the game's show (**Starts at**), or mix "
+         "steps of the game's show with patterns of your own.\n"
+         "- A step's pattern **The game's own show** picks any of the game's shows (**Song**, **Show**, **Starts "
+         "at**). The card plays it from the game's own program, so nothing of the game's is copied onto the "
+         "card.\n"
+         "- The game dims its own shows with its brightness settings (90% as shipped); a show of yours plays "
+         "them at their full brightness, like its other patterns.\n"
+         "- The other games keep no shows of their own the app can read: their cabinet lights are lit by the "
+         "game as it goes."),
         ("Make it from the song",
          "**Make it from the song** listens to the song and makes the show for you: it finds the beat and the "
          "bars, and the song's quiet, building and loud parts. Every step starts on a bar line, every pattern "

@@ -9,7 +9,9 @@ The page makes the card's own shows for the blades down the cabinet's sides and 
 down the left (new from a ready-made one or blank, duplicate, delete), a drawing of THIS game's cabinet in the middle
 PLAYING the show picked (its lights read off the card's game program, painted by the runtime's own arithmetic,
 static/js/tabs/cabfx.js) with the song it goes with playing under it, and on the right the show's song, its two lanes
-of steps on a timeline over the song's waveform, and the step picked. Everything is the project's (``cab_shows`` in
+of steps on a timeline over the song's waveform, and the step picked. PAD-1063: under the project's shows, the game's
+own (Led Zeppelin's and Rush's, a show for each song, Original and Remix: :mod:`...plugins.stern.cab_stock`), played
+here as the game plays them and made into a show of the project's in a press. Everything is the project's (``cab_shows`` in
 ``.staged_changes.json``, :mod:`...plugins.stern.cab_shows`); Write puts ``cabshow.cfg`` beside the mode runtime and
 the game plays each show whenever it plays its song. Not a part of the mode maker: a card carrying only these shows
 stays on Insider Connected (the runtime arms them before the score gate and never reaches it).
@@ -31,6 +33,8 @@ SONG_MIN_SECONDS = 20.0
 PEAKS = 600
 #: the cached cabinet layout's version (2: the two speaker rings)
 LAYOUT_V = 2
+#: the cached game's own shows' version (PAD-1063)
+STOCK_V = 1
 
 
 def _songs(audio):
@@ -115,6 +119,7 @@ class LightsTab(TabService):
         from ...plugins.stern import cab_shows as CS
         self.set(project="", available=False, why="", reading=False, lights=[], songs=[], shows=[], intro=INTRO,
                  insider=INSIDER, running=False, peaks={}, problems=[], max=CS.SHOWS_MAX, making=False, auto_note="",
+                 stock=[], stock_meta={}, stock_why="",
                  fx=[{"key": k, "label": v[0], "group": v[1], "uses": v[2]} for k, v in CS.FX.items()],
                  presets=[{"key": p[0], "label": p[1]} for p in CS.PRESETS],
                  styles=[{"key": k, "label": v[0]} for k, v in _auto_styles().items()],
@@ -193,19 +198,42 @@ class LightsTab(TabService):
             except Exception as e:                      # noqa: BLE001 - said on the page
                 why = "The game's cabinet lights could not be read: %s" % e
             self.ctx.loop.post(lambda: self._read_done(rid, lights, why))
+            if why:
+                return
+            try:                                        # PAD-1063: the game's own shows (seconds, once per card)
+                swhy, stock = project_stock(folder)
+            except Exception as e:                      # noqa: BLE001 - said on the page
+                swhy, stock = "The game's own shows could not be read: %s" % e, None
+            self.ctx.loop.post(lambda: self._stock_done(rid, swhy, stock))
         threading.Thread(target=work, daemon=True, name="lights-read").start()
 
     def _read_done(self, rid, lights, why):
         if rid != self._read_id:
             return
-        self.set(reading=False, available=not why, why=why, lights=lights)
+        self.set(reading=False, available=not why, why=why, lights=lights, stock=[], stock_meta={}, stock_why="")
         self._songs_now()
+
+    def _stock_done(self, rid, why, stock):
+        """PAD-1063: the game's own shows, a song at a time (``stock``: :func:`project_stock`'s, or None)."""
+        if rid != self._read_id:
+            return
+        if not stock:
+            self.set(stock=[], stock_meta={}, stock_why=why)
+            self._paint()
+            return
+        self.set(stock_why="", stock=[dict(x) for x in stock["songs"]],
+                 stock_meta={"pixels": stock["pixels"], "speakers": stock["speakers"],
+                             "rows": {str(x["req"]): {"period": x["period"], "frames": x["frames"]}
+                                      for x in stock["songs"]}})
+        self._paint()
 
     def _paint(self, songs=None):
         from ...plugins.stern import cab_shows as CS
         slots = {s["slot"] for s in (songs if songs is not None else self.get("songs") or [])}
+        reqs = ({x["req"] for x in self.get("stock") or []} if self.get("stock") or self.get("stock_why")
+                else None)
         self.set(shows=[dict(s, length=CS.length_ms(s)) for s in self._shows],
-                 problems=[CS.problems(s, slots if slots else None) for s in self._shows])
+                 problems=[CS.problems(s, slots if slots else None, reqs) for s in self._shows])
 
     def _save(self, what=""):
         from ...core import history_log, staged_changes
@@ -251,6 +279,32 @@ class LightsTab(TabService):
             n += 1
         self._shows.append(s)
         self._save("show \"%s\" added" % s["name"])
+        return len(self._shows) - 1
+
+    @rpc
+    def from_stock(self, req, which="original"):
+        """PAD-1063: a new show of the project's that is the game's own show of song request *req* (set *which*),
+        whole, on both lanes, for the same song: one step a lane to cut, move and colour round. Returns its index."""
+        from ...plugins.stern import cab_shows as CS
+        req = int(req)
+        got = next((x for x in self.get("stock") or [] if x["req"] == req), None)
+        if not self._project or got is None or len(self._shows) >= CS.SHOWS_MAX:
+            return -1
+        which = "remix" if which == "remix" else "original"
+        ms = max(CS.STEP_MS_MIN, min(CS.STEP_MS_MAX, int(got["ms"])))
+        song = next((x for x in self.get("songs") or [] if x["slot"] == got.get("slot")), None)
+        own = (song["name"].split(" - ")[-1] if song else "idx%04d" % got["slot"] if got.get("slot") is not None
+               else "Song %d" % req)
+        name = "%s (%s)" % (own, which)
+        s = CS.norm_show({"name": name[:CS.NAME_MAX], "slot": got.get("slot"), "loop": False,
+                          "blades": [CS.game_step(req, ms, which)], "speakers": [CS.game_step(req, ms, which)]})
+        names = {x["name"] for x in self._shows}
+        base, n = s["name"], 2
+        while s["name"] in names:
+            s["name"] = ("%s %d" % (base, n))[:CS.NAME_MAX]
+            n += 1
+        self._shows.append(s)
+        self._save("show \"%s\" added from the game's own" % s["name"])
         return len(self._shows) - 1
 
     @rpc
@@ -384,6 +438,63 @@ def _wav_for(path):
     subprocess.run([ff, "-y", "-v", "error", "-i", path, "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", out],
                    check=True, capture_output=True, timeout=300)
     return out
+
+
+def _card_key(card):
+    return "%s|%d|%d" % (card, os.path.getsize(card), int(os.path.getmtime(card)))
+
+
+#: the page's word for a game whose program keeps no shows of its own the app can read
+NO_STOCK = ("This game keeps no expression light shows of its own the app can read (Led Zeppelin and Rush do): "
+            "the shows here are the project's.")
+
+
+def project_stock(project):
+    """PAD-1063: ``(why, stock)``: the game's own shows of the card *project* was made from (:mod:`.cab_stock`):
+    ``{"pixels", "speakers", "songs": [{"req", "slot", "period", "frames", "ms", "files": {set: path}}]}``, every
+    show's frames written beside the cache for the page's preview; ``(why, None)`` when it keeps none. Cached per
+    card (reading it takes seconds: the song each request plays is off the card's sound tables)."""
+    from ...plugins.stern import cab_stock as ST
+    from ...plugins.stern import mode_project as MP
+    from ...plugins.stern import title_reader as TR
+    got = MP.project_card(project) if project else None
+    card = getattr(got, "image", "") if got is not None else ""
+    if not card or not os.path.isfile(card):
+        return "", None
+    key = _card_key(card)
+    base = os.path.join(TR.cache_dir("cab_stock"), hashlib.sha1(key.encode("utf-8")).hexdigest())
+    cache = base + ".json"
+    try:
+        with open(cache, encoding="utf-8") as f:
+            raw = json.load(f)
+        if raw.get("key") == key and raw.get("v") == STOCK_V:
+            stock = raw["stock"]
+            if stock is None or all(os.path.isfile(p) for x in stock["songs"] for p in x["files"].values()):
+                return ("" if stock else NO_STOCK), stock
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    elf = TR.game_program(card)[2]
+    found = ST.read(elf)
+    stock = None
+    if found:
+        songs = ST.songs(found)
+        slots = ST.request_slots(card, [x["req"] for x in songs])
+        row_of = {r["request"]: r["row"] for r in found["rows"]}
+        for x in songs:
+            x["slot"] = slots.get(x["req"])
+            x["files"] = {}
+            for which in ST.SETS:
+                path = "%s-%d-%s.bin" % (base, x["req"], which)
+                with open(path, "wb") as f:
+                    f.write(ST.frames(elf, found, row_of[x["req"]], which))
+                x["files"][which] = path
+        stock = {"pixels": found["pixels"], "speakers": found["speakers"], "songs": songs}
+    try:
+        with open(cache, "w", encoding="utf-8") as f:
+            json.dump({"v": STOCK_V, "key": key, "stock": stock}, f)
+    except OSError:
+        pass
+    return ("" if stock else NO_STOCK), stock
 
 
 def project_layout(project):

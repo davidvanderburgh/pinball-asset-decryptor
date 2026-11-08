@@ -17967,6 +17967,9 @@ static struct {
     unsigned last_up;                        /* the player and ball last seen (player x 256 + ball) */
     unsigned game;                           /* the game's own game starts counted (event game_start) at the last look */
     int game_event;                          /* the port's game_start is counted (else player 1's first ball tells) */
+    int reset_seen;                          /* round 4: Start held with the left flipper in this game */
+    unsigned reset_up, reset_over;           /* the player and ball then, and the game's game_over count */
+    unsigned over_said;                      /* the game_over count the log last said */
     unsigned open;                           /* the player picking now (0: none) */
     int was_left, was_right;
     uint64_t score_at_open;
@@ -18107,8 +18110,18 @@ static void hand_line_back(void);            /* below */
 /* a new game: the game's own game_start (round 3, DoomWalrus666: "after a start+L flipper reset the handicap was no
  * longer accessible" - Start held with the left flipper ends the game, and the next one is player 1's first ball
  * again, which the player and ball bytes never left); without the event, player 1's first ball after anything else */
+/* round 4 (DoomWalrus666: "When start+left flipper button is used to reset: handicap should automatically be reset
+ * to 0 for all players"): the last game saw Start held with the left flipper, and it ended without the game's own
+ * game_over (Godzilla LE 1.16 in the emulator: a game ended so fires none; a game played out does) - or the port
+ * names no game_over (-1) (tests lift it verbatim) */
+static int hand_was_reset(int seen, int over_then, int over_now)
+{
+    return seen && (over_now < 0 || over_now == over_then);
+}
+
 static void hand_game_check(void)
 {
+    int over, k;
     unsigned g = hand.game_event ? chg_game_now() : 0;
     int fresh = hand_new_game(&hand.last_up, pm_player(), hand_ball());
     if (hand.game_event) {
@@ -18116,6 +18129,14 @@ static void hand_game_check(void)
         hand.game = g;
     }
     if (!fresh) return;
+    over = pm_event("game_over") >= 0 ? (int)event_count(pm_event("game_over")) : -1;
+    say("handicap: a new game (the game's game_over seen %d time(s))", over);
+    if (hand_was_reset(hand.reset_seen, (int)hand.reset_over, over)) {
+        for (k = 1; k <= 4; k++) hand.level[k] = 0;
+        say("handicap: the last game was reset with Start + left flipper (player %u ball %u, no game over) - every "
+            "player's handicap back to 0", hand.reset_up >> 8, hand.reset_up & 0xffu);
+    }
+    hand.reset_seen = 0;
     if (hand.open) {                             /* the last game's pick, never taken */
         hand.open = 0;
         hand_line_back();
@@ -18260,6 +18281,17 @@ static void hand_tick(void)
     }
     if (hand.open && hand_ball() != 1u) hand_close("the next ball");
     hand_game_check();
+    if (pm_event("game_over") >= 0 && event_count(pm_event("game_over")) != hand.over_said) {
+        hand.over_said = event_count(pm_event("game_over"));
+        say("handicap: the game is over (its game_over, %u so far) - everyone keeps their level", hand.over_said);
+    }
+    if (hand.start && !hand.reset_seen && pm_player() && switch_held(hand.start) && switch_held(hand.left)) {
+        hand.reset_seen = 1;
+        hand.reset_up = pm_player() * 256u + hand_ball();
+        hand.reset_over = pm_event("game_over") >= 0 ? event_count(pm_event("game_over")) : 0u;   /* -1 below if none */
+        say("handicap: Start + left flipper held (player %u, ball %u, game_over %u)", pm_player(), hand_ball(),
+            hand.reset_over);
+    }
     if (!hand_switched_on()) {
         if (hand.open) hand_close("the service menu's HANDICAP is Off");
         return;

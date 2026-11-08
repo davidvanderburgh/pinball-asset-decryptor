@@ -732,7 +732,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                         "lets the right flipper button + Start add a teammate; 2 (Team 2v2) makes players 1 and 3 a "
                         "team against players 2 and 4, picked as TEAM PLAY 2 VS 2 on the game's start menu (both flipper buttons "
                         "in attract), one Start adding all four; 3 (Team 2v1) makes players 1 and 3 a team against player "
-                        "2 (TEAM PLAY 2 VS 1). 1, 2 or 3 disables most "
+                        "2 (TEAM PLAY 2 VS 1). With characters, at 1, 2 or 3 a player starting a game alone with the right "
+                        "flipper button held picks one too. 1, 2 or 3 disables most "
                         "Insider Connected features (scores, high scores and achievements stay on the machine); at 0 "
                         "the game plays and reports as it always has%s."
                         % (self.COOP_MENU_WHERE, "" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
@@ -742,7 +743,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.set(coop_shown=bool(project), coop_on=on, coop_menu=menu, coop_note=note, coop_note_kind=kind,
                  coop_menu_tip=self.COOP_MENU_TIP,
                  coop_awards_ok=on and kind != "err", coop_awards_tip=self.COOP_AWARDS_TIP,   # PAD-1028
-                 coop_chars_tip=self.COOP_CHARS_TIP)                                            # PAD-1031
+                 coop_chars_tip=self.COOP_CHARS_TIP,                                            # PAD-1031
+                 coop_save_tip=self.COOP_SAVE_TIP, coop_load_tip=self.COOP_LOAD_TIP)            # PAD-1053
 
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
@@ -840,7 +842,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         "Each teammate picks a character at the start of their first ball: the machine shows its picture, its name "
         "and what it does, the flippers move to the next one (one another teammate has is skipped), the Action button "
         "takes it, and when the time to pick runs out (the seconds count down on the machine) the one shown is taken. "
-        "RANDOM picks one nobody has. Its ability holds while that teammate is up.")
+        "RANDOM picks one nobody has. Its ability holds while that teammate is up. A player alone picks one too by "
+        "holding the right flipper button while pressing Start to begin the game.")
 
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP
@@ -852,7 +855,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         rows = []
         for c in chars["list"]:
             a = by_key.get(c["ability"])
-            rows.append({"name": c["name"], "ability": c["ability"] if a and a["cfg"] else "",
+            rows.append({"name": c["name"], "sub": c["sub"], "ability": c["ability"] if a and a["cfg"] else "",
                          "lost": bool(c["ability"]) and not (a and a["cfg"]),
                          "picture": bool(_CP.picture_path(project, c))})
         lost = sum(1 for r in rows if r["lost"])
@@ -865,7 +868,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                          "why": a["why"]} for a in abil],
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
-                          "max_name": _CP.MAX_NAME, "max": _CP.MAX_CHARACTERS})
+                          "max_name": _CP.MAX_NAME, "max_sub": _CP.MAX_SUB, "max": _CP.MAX_CHARACTERS})
 
     def _save_coop_chars(self, project, chars, what, was, now):
         from ...core import history_log
@@ -982,8 +985,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return self._save_coop_chars(project, chars, "time to pick", name(was), name(chars["time"]))
 
     @rpc
-    def coop_char_set(self, i, name=None, ability=None):
-        """PAD-1031: rename one character, or give it another ability ("" none)."""
+    def coop_char_set(self, i, name=None, ability=None, sub=None):
+        """PAD-1031: rename one character, or give it another ability ("" none); PAD-1056: or another sub header (the
+        smaller line under its name on its cards, "" none)."""
         from ...plugins.stern import coop_play as _CP
         project = self.project()
         chars = _CP.load_characters(project) if project else None
@@ -995,6 +999,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 return False
             was, c["name"] = c["name"], _CP.clean_name(name)
             return self._save_coop_chars(project, chars, "%d name" % (int(i) + 1), was, c["name"])
+        if sub is not None:
+            was, c["sub"] = c["sub"], _CP.clean_sub(sub)
+            return self._save_coop_chars(project, chars, "%s sub header" % c["name"], was or "none", c["sub"] or "none")
         was, c["ability"] = c["ability"], str(ability or "")
         return self._save_coop_chars(project, chars, "%s ability" % c["name"], was or "none", c["ability"] or "none")
 
@@ -1012,7 +1019,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         n = len(chars["list"]) + 1
         while "CHARACTER %d" % n in names:
             n += 1
-        chars["list"].append({"name": "CHARACTER %d" % n, "ability": "", "picture": ""})
+        chars["list"].append({"name": "CHARACTER %d" % n, "sub": "", "ability": "", "picture": ""})
         chars["pick"] = True
         return self._save_coop_chars(project, chars, "count", str(len(chars["list"]) - 1), str(len(chars["list"])))
 
@@ -1056,6 +1063,83 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._say("co-op play: %s" % ("the card gets co-op play at the next Write" if on else "no co-op play on the card"))
         self._publish_coop(project)
         return True
+
+    #: PAD-1053 (DoomWalrus666): the co-op settings file (plugins/stern/coop_play.py "the co-op settings file")
+    COOP_SAVE_TIP = ("Saves every co-op setting of this project to one file: co-op on, the service menu switch, the "
+                     "awards, the characters with their abilities and time to pick, and each character's picture. "
+                     "Load... puts them into any project.")
+    COOP_LOAD_TIP = ("Loads a co-op settings file Save... wrote (or a characters file) in place of this project's "
+                     "co-op settings, pictures included.")
+
+    @rpc
+    def coop_settings_save(self, path=None):
+        """PAD-1053: Save... - the project's co-op settings to a zip (pictures included) or a .json. Returns the
+        file's path, or None."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project or not _CP.settings_saved(project):
+            return None
+        if not path:
+            prof = _CP.project_title(project)
+            stem = re.sub(r'[\\/:*?"<>|]+', "_", "%s co-op" % (prof.label if prof is not None else
+                          os.path.basename(os.path.normpath(project)))).strip()
+            path = self.window.ask_save("modes_file", "Save the co-op settings to a file", initialfile=stem + ".zip",
+                                        filetypes=[("PAD co-op settings", "*.zip"), ("Without pictures", "*.json")],
+                                        defaultextension=".zip")
+        if not path:
+            return None
+        try:
+            got = _CP.export_settings(project, path)
+        except _CP.CoopError as e:
+            compat.messagebox.showinfo("Save co-op settings", str(e))
+            return None
+        self._say("co-op settings saved to %s: %d character(s), %d picture(s)%s" % (
+            path, got["characters"], got["pictures"],
+            "; a .json carries no pictures, %d left out (save a .zip to keep them)" % got["left_out"]
+            if got["left_out"] else ""))
+        return path
+
+    @rpc
+    def coop_settings_load(self, path=None, _sure=False):
+        """PAD-1053: Load... - a co-op settings file in place of the project's co-op settings, asked first when it
+        has some. Returns what came in (:func:`coop_play.import_settings`), or None."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return None
+        if not path:
+            path = self.window.ask_open("modes_file", "Load co-op settings from a file",
+                                        [("PAD co-op settings", "*.zip *.json"), ("All files", "*.*")])
+        if not path:
+            return None
+        if not _sure and _CP.settings_saved(project) and not compat.messagebox.askyesno(
+                "Load co-op settings", "Load %s in place of this project's co-op settings?"
+                % os.path.basename(path)):
+            return None
+        try:
+            got = _CP.import_settings(project, path)
+        except _CP.CoopError as e:
+            compat.messagebox.showinfo("Load co-op settings", str(e))
+            return None
+        hist = history_log.diff_scalar("modes  co-op settings", "", "loaded from %s" % os.path.basename(path))
+        history_log.record(project, [hist] if hist else [])
+        prof = _CP.project_title(project)
+        other = got["made_for"] and prof is not None and got["made_for"] != prof.label
+        pics = " with %d picture(s)" % got["pictures"] if got["pictures"] else ""
+        if got["preset"]:
+            text = "Loaded %d character(s) from %s." % (got["characters"], os.path.basename(path))
+        else:
+            text = "Loaded the co-op settings in %s: co-op play %s, %d character(s)%s, and the awards." % (
+                os.path.basename(path), "on" if _CP.load(project) else "off", got["characters"], pics)
+        if other:
+            text += ("\n\nThey were made for %s. An ability or award this game has not got is left off the card."
+                     % got["made_for"])
+        self._say(text.replace("\n\n", " "))
+        self.set(coop_ch_at=0)
+        self._publish_coop(project)                     # the dialogs read the rest when they open
+        compat.messagebox.showinfo("Load co-op settings", text)
+        return got
 
     #: PAD-1022: inactivity pausing the timers (plugins/stern/idle_pause.py), offered on the games whose own timers
     #: ignore their ALLOW INACTIVITY TO PAUSE TIMERS setting (Guardians of the Galaxy). It runs on the mode runtime; a
@@ -3215,6 +3299,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                         filetypes=[("PAD modes", "*.zip"), ("All files", "*.*")])
         if not path:
             return None
+        from ...plugins.stern import coop_play as _CP
+        if not _from and _CP.file_about(path) is not None:                 # PAD-1053: co-op settings, not modes
+            return self.coop_settings_load(path)
         shown = os.path.basename(_from or path)
         # PAD-402 (DragonRR): a mode of the file named as one here with other contents is a
         # collaborator's version of it: asked about, each one replacing or not, mine saved first

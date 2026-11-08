@@ -229,3 +229,22 @@ tank rule's own code (the reads of +0x48 with a `cmp #9` are the bridge rule's);
 Godzilla's set: GODZILLA 1985 -> addball, GODZILLA VS BIOLLANTE -> maser, GODZILLA VS MECHAGODZILLA -> bridge; the
 old three stay in the builder. The eleven stills zip must sit at the TOP of artifacts\PAD-1031 (pad_bot posts a
 top-level <name>.zip after the reply; in discord\ it was never seen).
+Later in round 2: Tank Attack LIGHTS at TANKS 10/10 (the tank rule's +0x18 goes 0 -> 1, a doubled count trips it
+too) and STARTS on the Godzilla target with the scoop held (+0x18 = 2); the Maser check is only asked while it runs
+(proof_tank_attack_doubled_maser.png).
+
+## Round 3 (2026-11-07, DoomWalrus666 on the thread)
+
+Three sharpenings. MASER AT ALL TIMES: `lit:maser=0x8000000` beside `yes:maser` - `site coop_lit_maser` is the
+base-play rule's shot handler (LE 0x1645ac / Pro 0x160bd8, the rule that pays MASER CANNON AWARD), hooked to learn
+the object; the tick ORs the Maser bit into its lit u64 (this + stock_field 0x18 + 8 x player) and keeps the player's
+charge word (+0x14 + 4 x player, `coop_lit_maser_at`/`_min`) at least 1, since the award wants it non-zero; taken
+out at the turn's end. Proven LE and Pro: lit lo = 0x8000000, charge 1, and on LE the Maser cannon fired on the target
+hit in regular play (proof_maser_regular_play.png). AN ALLY EVERY BALL: coop_chars_turn gifts again at each later
+turn of the teammate (gift:311 -> LIGHT ALLY). TIER 2 ALWAYS OPEN: `unlock:<id>` without @rules reads 1 whenever the
+teammate is up (UNLOCK ALL MONSTER BATTLES 334, read live by the selection screen's slot state), so every battle,
+tier 2 included, is open at any battle select of theirs. Words in the dialog, help and SDK follow.
+Proven on LE with two teammates: LIGHT ALLY given at the pick and again when teammate 1 came back for ball 2 (the
+ally list went 0 0 1 -> 1 0 1), and all seven battle places open at the pick. The LE rig ends a ball on a drain only
+once the ball has been played a while (plunge, a minute of switch hits, then the trough): a drain straight after the
+pick, or 20 s after the plunge, is ignored (run 6's "no pick for teammate 2" was the same).

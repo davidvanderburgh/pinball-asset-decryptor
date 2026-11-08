@@ -54,7 +54,8 @@ MENU_OFF, MENU_COOP, MENU_TEAMS, MENU_TEAMS_2V1 = 0, 1, 2, 3
 MENU_HELP = "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1. 1-3: Insider mostly off"
 #: how a teammate joins, for the tab and the log
 HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
-       "a plain Start adds a competing player as always")
+       "a plain Start adds a competing player as always; with characters, a player starting a game alone with the "
+       "right flipper button held picks one")
 #: PAD-1042: how a team game is played, for the tab and the log
 TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), pick TEAM PLAY 2 VS 2 on the start menu (both flipper buttons in "
              "attract) and one Start adds all four players: players 1 and 3 against players 2 "
@@ -389,6 +390,9 @@ def _apply(choices, chosen):
 MAX_CHARACTERS = 16
 #: the longest name, and the longest words for what one does, the game's top line shows (the runtime's 28-byte fields)
 MAX_NAME = 27
+#: PAD-1056: the longest sub header under a name on the pick and award cards (only the cards show it, never the game's
+#: top line, so it keeps the case it was typed in)
+MAX_SUB = 48
 #: PAD-1044: the seconds a teammate has to pick (the runtime's COOP_PICK_MS when coop.cfg names none), and the
 #: choices the Characters dialog offers; 0 is no time limit (the Action button takes one)
 PICK_TIME = 30
@@ -416,20 +420,21 @@ ABILITIES = (
     ("building", "EASIER BUILDING MB", "Building Multiball is as easy to start as on the game's easiest BUILDING "
      "DIFFICULTY.", ("cache", "AD_BUILDING_DIFFICULTY", "min")),
     ("powerups", "DOUBLE POWER-UPS", "Every Godzilla power-up the game gives counts twice.", ("boost", 200)),
-    ("ally", "STARTS WITH AN ALLY", ("An ally is lit when they pick: the next of Mothra, Rodan and Anguirus in the game's own order (its LIGHT "
-      "ALLY)."),
+    ("ally", "AN ALLY EVERY BALL", ("An ally is lit at each of their balls: the next of Mothra, Rodan and Anguirus in "
+      "the game's own order (its LIGHT ALLY), at the pick and at every later turn."),
      ("gift", "AD_LIGHT_ALLY")),
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
      "the bonus count them).", ("count", "jets", 4)),
     ("spot", "SPOT A BATTLE SHOT", "Two quick presses of the Action button during a battle count as its next lit "
      "shot, once a ball.", ("spot", "coop_battle_rules")),
-    ("tier2", "TIER 2 AFTER A BATTLE", "Once a tier-1 battle has started on their turn, every battle on the selection "
-     "screen is open while they are up, tier 2 included (the game's UNLOCK ALL MONSTER BATTLES).",
-     ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", "coop_tier1_rules")),
+    ("tier2", "TIER 2 ALWAYS OPEN", "Every battle on the selection screen is open while they are up, tier 2 included "
+     "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).",
+     ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
     ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
      "once a ball.", ("addball", 1)),
-    ("maser", "MASER ALWAYS LIT", "In Tank Attack the Maser cannon is lit from the start, not after the tanks "
-     "(the game's own Maser phase check says yes).", ("yes", "maser")),
+    ("maser", "MASER ALWAYS LIT", "The Maser cannon target is lit the whole time they are up: in regular play (the "
+     "Maser shot held lit in the game's own rule) and for all of Tank Attack (its Maser phase check says yes).",
+     ("many", [("lit", "maser"), ("yes", "maser")])),
     ("bridge", "EASIER BRIDGE, DOUBLE TANKS AND JETS", "The bridge falls as on the game's easiest BRIDGE ATTACK "
      "DIFFICULTY, and every tank or jet destroyed counts as two.",
      ("many", [("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min"), ("double", "tanks"), ("double", "jets")])),
@@ -444,13 +449,13 @@ CARD_LINES = {
     "battles": "One ramp lights a battle.",
     "building": "Building Multiball is easier to start.",
     "powerups": "Every Godzilla power-up counts twice.",
-    "ally": "Starts with an ally lit.",
+    "ally": "An ally lit at every one of their balls.",
     "jets": "Starts with 4 jet fighters destroyed.",
     "tanks": "Starts with 4 tanks destroyed.",
     "spot": "Press Action twice in a battle to hit its next shot, once a ball.",
-    "tier2": "Starting a tier 1 battle opens tier 2.",
+    "tier2": "Every battle is open to you, tier 2 included.",
     "addball": "Press Action twice in regular play to add a ball, once a ball.",
-    "maser": "The Maser cannon is lit for the whole of Tank Attack.",
+    "maser": "The Maser cannon is lit the whole time you are up.",
     "bridge": "The bridge falls faster. Tanks and jets count two at a time.",
 }
 
@@ -526,6 +531,10 @@ def _ability_part(how, table, action, sites, values, label):
             cfg, why = ("addball:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
         elif how[0] == "yes":
             cfg, why = ("yes:%s" % how[1], "") if "coop_yes_%s" % how[1] in sites else ("", NO_SITE % label)
+        elif how[0] == "lit":
+            mask = values.get("coop_lit_%s_mask" % how[1])
+            cfg, why = (("lit:%s=0x%x" % (how[1], mask), "") if mask and "coop_lit_%s" % how[1] in sites
+                        else ("", NO_SITE % label))
         elif how[0] == "double":
             cfg, why = (("double:%s" % how[1], "")
                         if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
@@ -543,8 +552,9 @@ def _ability_part(how, table, action, sites, values, label):
             if idx is None:
                 why = NO_ADJ % (label, how[1][3:].replace("_", " "))
             elif how[0] == "unlock":
-                rules = values.get(how[2])
-                cfg, why = ("unlock:%d@0x%x" % (idx, rules), "") if rules else ("", NO_SITE % label)
+                rules = values.get(how[2]) if how[2] else None
+                cfg, why = (("unlock:%d" % idx, "") if not how[2]
+                            else ("unlock:%d@0x%x" % (idx, rules), "") if rules else ("", NO_SITE % label))
             elif how[0] == "gift":
                 cfg, why = ("gift:%d" % idx, "") if "coop_adj_changed" in sites else ("", NO_SITE % label)
             elif how[0] == "cache" and "coop_cache_%d" % idx not in sites:
@@ -569,9 +579,16 @@ def clean_name(name):
     return " ".join(str(name or "").upper().replace("|", " ").split())[:MAX_NAME]
 
 
+def clean_sub(sub):
+    """PAD-1056: a character's sub header (GODZILLA VS BIOLLANTE's "Godzilla vs Biollante (1989)") as the cards show it:
+    one space between words, the case it was typed in, at most :data:`MAX_SUB`."""
+    return " ".join(str(sub or "").split())[:MAX_SUB]
+
+
 def load_characters(project):
-    """The project's characters: ``{"pick": bool, "time": seconds, "list": [{"name", "ability", "picture"}]}``
-    (``ability`` a key of :data:`ABILITIES` or ``""``; ``picture`` the owner's file, for the pick screens that show
+    """The project's characters: ``{"pick": bool, "time": seconds, "list": [{"name", "sub", "ability", "picture"}]}``
+    (``sub`` the line under the name on its cards, PAD-1056;
+    ``ability`` a key of :data:`ABILITIES` or ``""``; ``picture`` the owner's file, for the pick screens that show
     one; ``time`` one of :data:`PICK_TIMES`)."""
     if not project:
         return {"pick": False, "time": PICK_TIME, "list": []}
@@ -598,7 +615,8 @@ def _characters(got):
     out = []
     for c in got.get("list") or []:
         if isinstance(c, dict) and clean_name(c.get("name")):
-            out.append({"name": clean_name(c.get("name")), "ability": str(c.get("ability") or ""),
+            out.append({"name": clean_name(c.get("name")), "sub": clean_sub(c.get("sub")),
+                        "ability": str(c.get("ability") or ""),
                         "picture": str(c.get("picture") or "")})
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
@@ -1128,16 +1146,21 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     img = Image.alpha_composite(img, wm)
     d = ImageDraw.Draw(img)
     name = "RANDOM" if rnd else c["name"]
-    nf = _fit(d, name, _DISPLAY_FONTS, iw, 92 * S, 30 * S)
+    sub = "" if rnd else c.get("sub", "")
+    ny = (150 if sub else 166) * S                  # PAD-1056: a sub header under the name lifts the name a little
+    nf = _fit(d, name, _DISPLAY_FONTS, iw, (80 if sub else 92) * S, 30 * S)
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).text((ix + 4 * S, 166 * S + 5 * S), name, font=nf, fill=(0, 0, 0, 220), anchor="ls")
+    ImageDraw.Draw(shadow).text((ix + 4 * S, ny + 5 * S), name, font=nf, fill=(0, 0, 0, 220), anchor="ls")
     img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(4 * S)))
     d = ImageDraw.Draw(img)
-    d.text((ix, 166 * S), name, font=nf, fill=(255, 255, 255, 255), anchor="ls",
+    d.text((ix, ny), name, font=nf, fill=(255, 255, 255, 255), anchor="ls",
            stroke_width=max(1, S), stroke_fill=(0, 0, 0, 255))
     nw = min(iw - 40 * S, d.textlength(name, font=nf))
-    d.rectangle((ix, 180 * S, ix + nw, 186 * S), fill=A[:3] + (255,))
-    d.rectangle((ix + nw + 8 * S, 180 * S, ix + nw + 40 * S, 186 * S), fill=A2[:3] + (255,))
+    d.rectangle((ix, ny + 14 * S, ix + nw, ny + 20 * S), fill=A[:3] + (255,))
+    d.rectangle((ix + nw + 8 * S, ny + 14 * S, ix + nw + 40 * S, ny + 20 * S), fill=A2[:3] + (255,))
+    if sub:
+        d.text((ix, ny + 54 * S), sub, font=_fit(d, sub, _TEXT_FONTS, iw, 28 * S, 18 * S), fill=A[:3] + (255,),
+               anchor="ls")
     if rnd:
         label, does = "A SURPRISE", "The machine picks one of the characters nobody has taken yet."
     else:
@@ -1146,12 +1169,12 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
         does = CARD_LINES.get(c["ability"], "") if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
     bf = _face(_TEXT_FONTS, 24 * S)
     bw = d.textlength(label, font=bf) + 40 * S
-    by = 208 * S
+    by = (222 if sub else 208) * S
     d.rounded_rectangle((ix, by, ix + bw, by + 46 * S), radius=23 * S, fill=A[:3] + (255,))
     d.text((ix + bw / 2, by + 23 * S), label, font=bf, fill=(12, 12, 18, 255), anchor="mm")
     tf = _face(_TEXT_FONTS, 27 * S)
-    for k, line in enumerate(_wrap(d, does, tf, iw, 2)):
-        d.text((ix, by + 88 * S + k * 38 * S), line, font=tf, fill=(222, 228, 240, 255), anchor="ls")
+    for k, line in enumerate(_wrap(d, does, tf, iw, 2)):            # with a sub header: closer, clear of how to choose
+        d.text((ix, by + (76 if sub else 88) * S + k * 38 * S), line, font=tf, fill=(222, 228, 240, 255), anchor="ls")
     # how to choose
     hy = 372 * S
     hf2 = _face(_TEXT_FONTS, 20 * S)
@@ -1294,6 +1317,9 @@ def award_card(project, characters, index, theme=None, scale=2):
     nw = min(iw - 40 * S, d.textlength(c["name"], font=nf))
     d.rectangle((ix, 214 * S, ix + nw, 220 * S), fill=A[:3] + (255,))
     d.rectangle((ix + nw + 8 * S, 214 * S, ix + nw + 40 * S, 220 * S), fill=A2[:3] + (255,))
+    if c.get("sub"):                                             # PAD-1056: its sub header under the rule
+        d.text((ix, 262 * S), c["sub"], font=_fit(d, c["sub"], _TEXT_FONTS, iw, 30 * S, 18 * S), fill=A[:3] + (255,),
+               anchor="ls")
     # the band the runtime's words go in
     by = AWARD_WORDS_Y * S
     d.rounded_rectangle((24 * S, by - 6 * S, W - 25 * S, H - 18 * S), radius=14 * S, fill=(6, 8, 14, 255),
@@ -1320,3 +1346,207 @@ def award_screens(project, characters=None):
                         words_name=name + "_Words", x=float(AWARD_AT[0]), y=float(AWARD_AT[1]),
                         words_at=(AWARD_WORDS_X, float(AWARD_WORDS_Y + 16)), words_scale=AWARD_WORDS_SCALE))
     return out
+
+
+# ---- PAD-1053: the co-op settings file -----------------------------------------------------------------------------
+# DoomWalrus666: a file that keeps every co-op setting of a project (co-op on, the service menu switch, the awards,
+# the characters with their abilities, the pick's time and look, and each character's picture) to load into another
+# project or keep. A zip: :data:`FILE_MANIFEST` and the pictures under ``pictures/``; a .json is the manifest alone
+# (no pictures). Load also takes a characters file the owner made in :data:`PRESET_DIR`'s shape.
+
+#: the zip's manifest, and its kind
+FILE_MANIFEST = "pad_coop.json"
+FILE_KIND = "pad-coop"
+FILE_VERSION = 1
+#: the folder in the zip the pictures are in
+FILE_PICTURES = "pictures"
+_PICTURE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+
+
+def _sidecar(project):
+    from ...core import staged_changes
+    raw = staged_changes.load(project).get(STAGED_KEY)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def settings_saved(project):
+    """Whether *project* has any co-op settings to save."""
+    try:
+        return bool(project) and bool(_sidecar(project))
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
+        return False
+
+
+def export_settings(project, path):
+    """Write *project*'s co-op settings to *path* (a .zip with the pictures, or a .json without them); returns
+    ``{"characters", "pictures", "awards", "left_out"}`` (``left_out``: pictures a .json cannot carry). Raises
+    :class:`CoopError` when the project has none."""
+    import json
+    import os
+    import zipfile
+    raw = _sidecar(project)
+    if not raw:
+        raise CoopError("This project has no co-op settings to save. Tick Co-op play first.")
+    chars = _characters(raw.get("characters"))
+    awards = ({k: v for k, v in raw["awards"].items() if isinstance(v, dict)}
+              if isinstance(raw.get("awards"), dict) else {})
+    prof = project_title(project)
+    head = {"kind": FILE_KIND, "version": FILE_VERSION,
+            "from": {"label": prof.label if prof is not None else ""},
+            "on": bool(raw.get("on")), "menu": bool(raw.get("menu")), "awards": awards, "characters": chars}
+    as_zip = not path.lower().endswith(".json")
+    pictures, left_out = [], 0
+    for i, c in enumerate(chars["list"]):
+        src = picture_path(project, c)
+        c["picture"] = ""
+        if not src:
+            continue
+        if not as_zip:
+            left_out += 1
+            continue
+        rel = "%s/%d_%s%s" % (FILE_PICTURES, i + 1, picture_file_name(c["name"]) or "character",
+                              os.path.splitext(src)[1].lower() or ".png")
+        c["picture"] = rel
+        pictures.append((src, rel))
+    text = json.dumps(head, indent=2)
+    tmp = path + ".part"
+    try:
+        if as_zip:
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(FILE_MANIFEST, text)
+                for src, rel in pictures:
+                    zf.write(src, rel)
+        else:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(text)
+        os.replace(tmp, path)
+    except OSError as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise CoopError("The co-op settings could not be saved: %s" % e) from None
+    return {"characters": len(chars["list"]), "pictures": len(pictures),
+            "awards": sum(1 for a in awards.values() if a.get("on")), "left_out": left_out}
+
+
+def _read_file(path):
+    """``(head, read)`` of a co-op settings file: its manifest and ``read(rel)`` giving a picture in it as bytes
+    (None for a .json). A characters file in :data:`PRESET_DIR`'s shape comes back as one with ``"preset": True``.
+    Raises :class:`CoopError` when it is neither."""
+    import json
+    import zipfile
+    read = None
+    if zipfile.is_zipfile(path):
+        try:
+            with zipfile.ZipFile(path) as zf:
+                names = set(zf.namelist())
+                if FILE_MANIFEST not in names:
+                    raise CoopError("This zip is not a co-op settings file (it has no %s)." % FILE_MANIFEST)
+                head = json.loads(zf.read(FILE_MANIFEST).decode("utf-8"))
+                blobs = {n: zf.read(n) for n in names if n.startswith(FILE_PICTURES + "/") and not n.endswith("/")}
+        except (OSError, zipfile.BadZipFile, ValueError, UnicodeDecodeError) as e:
+            raise CoopError("The co-op settings file could not be read: %s" % e) from None
+        read = blobs.get
+    else:
+        try:
+            with open(path, encoding="utf-8") as f:
+                head = json.load(f)
+        except (OSError, ValueError) as e:
+            raise CoopError("The co-op settings file could not be read: %s" % e) from None
+    if not isinstance(head, dict):
+        raise CoopError("The file is not a co-op settings file.")
+    if head.get("kind") != FILE_KIND:
+        if isinstance(head.get("characters"), list):    # a characters file in PRESET_DIR's shape
+            return {"kind": FILE_KIND, "preset": True, "from": {"label": str(head.get("game") or "")},
+                    "characters": {"pick": True, "list": head["characters"], "theme": head.get("theme")}}, None
+        raise CoopError("The file is not a co-op settings file.")
+    return head, read
+
+
+def file_about(path):
+    """``{"made_for", "characters", "pictures", "awards"}`` of a co-op settings file, or None when *path* is not
+    one (the Mod Pack tab and the Modes tab's Load from a file... tell it from theirs)."""
+    try:
+        head, read = _read_file(path)
+    except CoopError:
+        return None
+    if head.get("preset"):
+        return None
+    chars = _characters(head.get("characters"))
+    awards = head.get("awards") if isinstance(head.get("awards"), dict) else {}
+    return {"made_for": str((head.get("from") or {}).get("label") or ""), "characters": len(chars["list"]),
+            "pictures": sum(1 for c in chars["list"] if c["picture"] and read and read(c["picture"])),
+            "awards": sum(1 for a in awards.values() if isinstance(a, dict) and a.get("on"))}
+
+
+def file_words(about):
+    """One sentence naming what :func:`file_about` (or :func:`import_settings`) found."""
+    parts = ["%d character%s" % (about["characters"], "" if about["characters"] == 1 else "s")]
+    if about["pictures"]:
+        parts.append("%d picture%s" % (about["pictures"], "" if about["pictures"] == 1 else "s"))
+    parts.append("the awards")
+    return "It holds co-op settings (%s)%s." % (", ".join(parts), ", made for %s" % about["made_for"]
+                                                if about.get("made_for") else "")
+
+
+def import_settings(project, path):
+    """Load a co-op settings file (:func:`export_settings`', or a characters file) into *project* in place of its
+    co-op settings: co-op on or off, the menu switch, the awards and the characters with their pictures (copied into
+    the project's :data:`PICTURE_DIR`). A characters file replaces the characters only. Returns ``{"made_for",
+    "characters", "pictures", "awards", "preset"}``. Raises :class:`CoopError` when it is not one."""
+    import io
+    import os
+    from PIL import Image
+    from ...core import staged_changes
+    head, read = _read_file(path)
+    chars = _characters(head.get("characters"))
+    folder = os.path.join(project, PICTURE_DIR)
+    pictures = 0
+    for i, c in enumerate(chars["list"]):
+        rel, c["picture"] = c["picture"], ""
+        blob = read(rel) if read and rel else None
+        ext = os.path.splitext(rel)[1].lower()
+        if not blob or ext not in _PICTURE_EXTS:
+            continue
+        try:
+            with Image.open(io.BytesIO(blob)) as im:
+                im.verify()
+        except Exception:                               # noqa: BLE001 - not a picture: the panel with its name
+            continue
+        os.makedirs(folder, exist_ok=True)
+        name = "character_%d%s" % (i + 1, ext)
+        with open(os.path.join(folder, name), "wb") as f:
+            f.write(blob)
+        c["picture"] = "%s/%s" % (PICTURE_DIR, name)
+        pictures += 1
+    data = staged_changes.load(project)
+    raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
+    awards = {}
+    if not head.get("preset"):
+        raw = {"on": bool(head.get("on"))}
+        if head.get("on") and head.get("menu"):
+            raw["menu"] = True
+        got = head.get("awards") if isinstance(head.get("awards"), dict) else {}
+        for k, v in got.items():
+            if isinstance(v, dict):
+                a = {}
+                if "on" in v:
+                    a["on"] = bool(v["on"])
+                if v.get("words"):
+                    a["words"] = clean_words(v["words"])
+                awards[str(k)] = a
+        if awards:
+            raw["awards"] = awards
+    if chars["list"] or chars["pick"]:
+        raw["characters"] = chars
+    else:
+        raw.pop("characters", None)
+    if raw.get("on") or len(raw) > 1:
+        data[STAGED_KEY] = raw
+    else:
+        data.pop(STAGED_KEY, None)
+    staged_changes.save(project, data)
+    return {"made_for": str((head.get("from") or {}).get("label") or ""), "characters": len(chars["list"]),
+            "pictures": pictures, "awards": sum(1 for a in awards.values() if a.get("on")),
+            "preset": bool(head.get("preset"))}

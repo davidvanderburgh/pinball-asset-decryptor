@@ -143,3 +143,36 @@ def test_selector_files_ship_materialize_py_as_optional(mk):
     name, (card, mode, required) = "materialize.py", mk.SELECTOR_FILES["materialize.py"]
     assert card == "materialize.py" and mode == 0o755 and required is False
     assert list(mk.SELECTOR_FILES) == ["codeselect", "select.sh", "font.ttf", "materialize.py"]
+
+
+def _store_plan_with(mk, monkeypatch, whole_extra):
+    """make_store_plan over a stock 8G primary + one extra with the reading faked: the
+    extra costs 0.5 GB stored as deltas (needing the Beatles work partition) and
+    `whole_extra` bytes stored whole."""
+    import types
+    ts = mk._treesync()
+    monkeypatch.setattr(mk.Geometry, "from_file", staticmethod(lambda p: stock_8g(mk) if p == "a.raw" else extra_8g(mk, p)))
+    monkeypatch.setattr(mk, "measure_sources", lambda paths, *a, **k: [types.SimpleNamespace(tree=None) for _p in paths])
+    monkeypatch.setattr(mk, "find_source_deltas", lambda paths, mans, *a, **k: [{}, {"t/image.bin": {"bytes": 1}}])
+    monkeypatch.setattr(mk, "work_sectors_for", lambda mans, deltas: BEATLES_WORK if any(deltas) else 0)
+    monkeypatch.setattr(mk, "_used_bytes_or_none", lambda *a, **k: None)
+    monkeypatch.setattr(ts, "dedup_costs", lambda mans, deltas=None:
+                        ([3_000_000_000, 500_000_000 if any(deltas or []) else whole_extra], 0))
+    return mk.make_store_plan("a.raw", ["x.raw"])
+
+
+def test_store_plan_skips_deltas_whose_work_partition_costs_a_card_size(mk, monkeypatch, capsys):
+    """PAD-1055: a stock card's p3 fills its class, so the deltas' p7 pushes the card a size
+    up - when the same files stored whole fit the smaller class, the deltas are dropped."""
+    plan = _store_plan_with(mk, monkeypatch, 1_500_000_000)
+    assert plan.work_part is None and plan.store_deltas == [{}, {}]
+    assert plan.store_unique == [3_000_000_000, 1_500_000_000]
+    assert plan.total * mk.SECTOR <= mk.STERN_SIZES["8G"]
+    assert "deltas: skipped" in capsys.readouterr().out
+
+
+def test_store_plan_keeps_deltas_when_whole_files_need_the_bigger_card_anyway(mk, monkeypatch, capsys):
+    plan = _store_plan_with(mk, monkeypatch, 5_000_000_000)
+    assert plan.work_part is not None and plan.store_deltas[1]
+    assert mk.STERN_SIZES["8G"] < plan.total * mk.SECTOR <= mk.STERN_SIZES["16G"]
+    assert "deltas: skipped" not in capsys.readouterr().out

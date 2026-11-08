@@ -1186,3 +1186,10 @@ value coop_cache_176_at   0x4
 # the tank rule's "in the Maser phase" check ((this) -> 1 once this wave's tanks reach the level's count): a
 # character's yes:maser answers 1 while they are up, so the Maser is lit for the whole of Tank Attack
 site coop_yes_maser       0x00108d20 0xe92d4038 0xe1a04000
+# the base-play rule that pays the MASER CANNON AWARD on the Maser target (its shot handler; its lit mask is the
+# framework's at +0x18 + 8 x player): a character's lit:maser holds the Maser bit in it while they are up
+site coop_lit_maser       0x001645ac 0xe92d4070 0xe1a04002
+value coop_lit_maser_mask  0x8000000
+# ... and its award wants the player's charge word (this + 4 x player + 0x14) non-zero: kept at least 1
+value coop_lit_maser_at    0x14
+value coop_lit_maser_min   1

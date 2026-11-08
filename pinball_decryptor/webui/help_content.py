@@ -3715,6 +3715,9 @@ PREVIEW_HELP = {
             ]),
             ("The game's own modes",
              "They are listed under yours. Pick one to see its page.\n\n"
+             "- **How it works** says what starts the mode, and lists the clips and the "
+             "sounds and callouts its own code plays, each sound with a Play button. It "
+             "is read-only.\n"
              "- **Timers and awards:** type a new value and press Set. Stock puts that "
              "number back to the game's own.\n"
              "- **Shots:** on a game whose port allows it, a shot that counts as one of "

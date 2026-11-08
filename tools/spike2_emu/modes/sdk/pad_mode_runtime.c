@@ -15437,6 +15437,88 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
 static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
 static int coop_live;                        /* PAD-1031: co-op characters watch the flippers and Action */
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
+static int coop_hides(unsigned id);
+
+/* ---- PAD-1051: a switch the game does not see for a while ----------------------------------------------------------
+ * DoomWalrus666 (Godzilla): the co-op pick's flippers also walked the game's own player language select ("USE FLIPPERS
+ * TO SELECT LANGUAGE:", adjustment 14), and the Action press that took a character also launched the ball. A game
+ * learns of a press two ways, and both are held back while a hider wants the switch (coop_hides):
+ * - its level byte, which the drain writes BEFORE it calls switch_edge and which the game polls (Godzilla LE 1.16's
+ *   flippers and Action have no handler at all: 0x378914 reads the byte, with the polarity's bit 2): a hidden press
+ *   leaves it reading released;
+ * - its descriptor's handler bits (0x400 / 0x800: the game's handler runs on that edge, edge_is_hit), which the drain
+ *   reads AFTER switch_edge returns (0x3791e8: `ldrh fp, [sl, #0x1a]` after the bl): cleared while hidden.
+ * A switch is taken at a press and given back at its first press once nothing wants it, or at a release then: the game
+ * sees a whole press or none of it, never a release without its press. That is the generation whose records point at
+ * their descriptors (switch_desc_via, level byte after the edge); the other is not traced and hides nothing. A
+ * descriptor another switch shares is never touched. The drain's thread writes these; switch_held reads `held` (the
+ * runtime's own "right flipper held" for a teammate's Start must still see it). */
+#define EDGE_HIDES 4
+static struct { volatile unsigned id; unsigned at; unsigned short bits; volatile unsigned char held; } edge_hid[EDGE_HIDES];
+static volatile int edge_hid_n;              /* the slots in use so far (a free one's id is 0) */
+
+static int edge_hidden(unsigned id)
+{
+    int k;
+    for (k = 0; k < edge_hid_n; k++)
+        if (edge_hid[k].id == id) return k;
+    return -1;
+}
+
+/* 1 when no other switch's record points at `desc` */
+static int edge_desc_own(unsigned id, unsigned base, unsigned desc)
+{
+    unsigned n = edge.count ? *(const unsigned *)(unsigned long)edge.count : N_SWITCH_IDS, i;
+    if (n > N_SWITCH_IDS) n = N_SWITCH_IDS;
+    for (i = 1; i < n; i++)
+        if (i != id && *(const unsigned *)(unsigned long)(base + i * (unsigned)edge.size + (unsigned)edge.desc_via) == desc)
+            return 0;
+    return 1;
+}
+
+static void edge_give_back(int k, const char *when)
+{
+    volatile unsigned short *f = (volatile unsigned short *)(unsigned long)edge_hid[k].at;
+    *f = (unsigned short)((*f & ~0xc00u) | edge_hid[k].bits);
+    say("switch %u: the game sees it again, %s", edge_hid[k].id, when);
+    edge_hid[k].id = 0;
+}
+
+/* an edge of switch `id` from the drain (`press`: to its pressed level `active`; `lv` its level byte, already the
+ * new level), before the drain picks the game's handler and before the game polls it: hide it, or give it back */
+static void edge_hide_edge(unsigned id, unsigned base, unsigned desc, volatile unsigned char *lv, unsigned active,
+                           int press)
+{
+    static int said;
+    int k = edge_hidden(id), want = coop_hides(id);
+    if (k < 0) {
+        volatile unsigned short *f = (volatile unsigned short *)(unsigned long)(desc + (unsigned)edge.flags_at);
+        if (!press || !want) return;
+        if (edge.desc_via < 0 || edge.level_before || !edge_desc_own(id, base, desc)) {
+            if (!said++)
+                say("switch %u: the game still sees it (%s)", id, edge.desc_via < 0 || edge.level_before
+                    ? "this framework generation's drain is not traced" : "its descriptor is shared");
+            return;
+        }
+        for (k = 0; k < edge_hid_n && edge_hid[k].id; k++) ;
+        if (k == EDGE_HIDES) return;
+        mprotect((void *)(unsigned long)((unsigned)(unsigned long)f & ~0xfffu), 0x2000, 7);
+        edge_hid[k].at = (unsigned)(unsigned long)f;
+        edge_hid[k].bits = (unsigned short)(*f & 0xc00u);
+        *f = (unsigned short)(*f & ~0xc00u);
+        edge_hid[k].held = 1;
+        edge_hid[k].id = id;
+        if (k == edge_hid_n) edge_hid_n = k + 1;
+        say("switch %u: the game does not see it (its handler bits 0x%04x held back, its level reads released)", id,
+            edge_hid[k].bits);
+    } else if (press && !want) {
+        edge_give_back(k, "from this press");
+        return;
+    }
+    edge_hid[k].held = (unsigned char)press;
+    if (press) *lv = (unsigned char)((*lv & ~1u) | (active ^ 1u));
+    else if (!want) edge_give_back(k, "released");
+}
 
 static void on_switch_edge(unsigned *r)
 {
@@ -15460,12 +15542,17 @@ static void on_switch_edge(unsigned *r)
     level = *(const unsigned char *)(unsigned long)(st + (unsigned)edge.level_at);
     if (edge.level_before) level ^= 1u;
     flags = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.flags_at);
+    if (edge_hid_n && (hit = edge_hidden(id)) >= 0)          /* PAD-1051: hidden from the game, its own bits to us */
+        flags = (flags & ~0xc00u) | edge_hid[hit].bits;
     pol = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.polarity_at);
     mask = edge.mode_mask ? *(const unsigned short *)(unsigned long)edge.mode_mask : 0u;
     hit = edge_is_hit(level, flags, pol, edge.mode_mask != 0, mask);
     if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
     if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
     if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
+    if (coop_live || edge_hid_n)                           /* PAD-1051: a press the game is not to see, or sees again */
+        edge_hide_edge(id, base, desc, (volatile unsigned char *)(unsigned long)(st + (unsigned)edge.level_at),
+                       (pol & 4u) ? 1u : 0u, (level & 1u) == ((pol & 4u) ? 1u : 0u));
     playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
     if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
         say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level & 1u,
@@ -15691,6 +15778,7 @@ static int coop_button_held(void)
 static int switch_held(unsigned id)
 {
     unsigned base, rec, st, desc, pol, level;
+    int k;
     if (!id || !edge.records || id >= N_SWITCH_IDS) return 0;
     base = *(const unsigned *)(unsigned long)edge.records;
     if (!base) return 0;
@@ -15698,6 +15786,7 @@ static int switch_held(unsigned id)
     st = edge.level_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.level_via) : rec;
     desc = edge.desc_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.desc_via) : rec;
     if (st < 0x10000u || desc < 0x10000u) return 0;
+    if (edge_hid_n && (k = edge_hidden(id)) >= 0) return edge_hid[k].held;   /* PAD-1051: the game reads it released */
     level = *(const unsigned char *)(unsigned long)(st + (unsigned)edge.level_at) & 1u;
     pol = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.polarity_at);
     return level == ((pol & 4u) ? 1u : 0u);
@@ -16106,16 +16195,22 @@ static void coop_turn_show(void)
  *   spot:<rules>                     two Action presses within 0.6 s while one of the game's rules in the mask <rules>
  *                                    (a bit per rule id; Godzilla's battles 12-18) runs: its lowest lit shot is sent
  *                                    through the game's own shot dispatch (`site shot_dispatch`), once a ball
- *   unlock:<id>@<rules>              once one of the rules in <rules> has STARTED on the teammate's turn this game, the
- *                                    game's adjustment <id> reads 1 while they are up (Godzilla: UNLOCK ALL MONSTER
- *                                    BATTLES after a tier-1 battle, rules 12-15: tier 2 opens on the selection screen)
+ *   unlock:<id>[@<rules>]            the game's adjustment <id> reads 1 while the teammate is up - always, or once one
+ *                                    of the rules in <rules> has STARTED on their turn this game (Godzilla: UNLOCK ALL
+ *                                    MONSTER BATTLES: every battle on the selection screen open, tier 2 included)
  *   addball:<n>                      two Action presses within 0.6 s in regular play (none of the game's modes runs)
  *                                    serve n more balls through the game's own serve (pm_multiball_add), once a ball
  *   yes:<name>                       a check of the game's (`site coop_yes_<name>`, (this) -> 0/1) answers 1 while the
  *                                    teammate is up (Godzilla: the tank rule's "in the Maser phase": the Maser lit)
+ *   lit:<name>=<mask>                a shot held lit in one of the game's rules while the teammate is up: the rule is
+ *                                    found by `site coop_lit_<name>`, its shot handler (hooked to learn the object);
+ *                                    its lit mask for the player (the framework's u64 at this + stock_field + 8 x p)
+ *                                    gets <mask> OR-ed in every tick, and loses it at the turn's end (Godzilla: the
+ *                                    Maser target's bit in the base-play rule that pays the Maser cannon)
  *   double:<name>                    a rule's count (as count:, by `coop_count_<name>` / `_rule` and `_at`) rises two
  *                                    at a time while the teammate is up: each rise of one the game makes gets one more
- *   gift:<id>                        at the teammate's pick, the game's own one-shot feature adjustment <id> (Godzilla:
+ *   gift:<id>                        at the teammate's pick and at each of their later turns, the game's own one-shot
+ *                                    feature adjustment <id> (Godzilla:
  *                                    LIGHT ALLY): the game's adjustment-changed handler (`site coop_adj_changed`, given
  *                                    {u16 id}) is called with the getter answering 1 for it, once
  * An adjustment the game copies into a player's record when the game starts reads the same through the getter but
@@ -16126,7 +16221,9 @@ static void coop_turn_show(void)
  * The getter (`site adjustment`) is wrapped: only what the game READS changes, never what NVRAM holds, and only in a
  * co-op game while that teammate is up (a pick not yet made: nothing). The pick says itself on the game's top line
  * (PAD-1017's borrow of "BALL %d"): its name, then what it does, in turn; the flippers walk (a character another
- * teammate has is skipped), Action takes it, and when the pick's time is out the one shown is taken.
+ * teammate has is skipped), Action takes it, and when the pick's time is out the one shown is taken. PAD-1051: while
+ * its ball waits in the plunger (the game's own flags) the game does not see the pick's buttons (coop_hides): its own
+ * language select has the flippers, and Action launches, once a character is taken; a launch takes the one shown.
  * PAD-1044 (DoomWalrus666: "how long the player has to select the character is unclear ... if a player doesn't
  * choose a character in time they may not be assigned one"): the seconds left count down on the top line and on the
  * pick's screen (its words line, a box the card draws in its header); the one taken stays on the glass
@@ -16144,12 +16241,14 @@ static void coop_turn_show(void)
  * ball 1 hid it: the pick takes those presses). So the presses count once the turn's ball has left the shooter lane
  * (`lane <id>`), none while a ball waits there, and none this long after one leaves it. */
 #define COOP_LAUNCH_MS 1500ul
+#define COOP_SETTLE_MS 1000ul   /* PAD-1051: a lane edge this soon after the ball began to wait is it landing */
 static struct coop_char {
     char name[28], does[28];
     unsigned n_adj;
     struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v% held to lo..hi */
-    unsigned save_s, bs_adj, boost, gift, spot, unlock_adj, unlock_rules, addball, n_yes, n_double;
-    char yes[2][12], dbl[2][12];
+    unsigned save_s, bs_adj, boost, gift, spot, unlock_adj, unlock_rules, addball, n_yes, n_double, n_lit;
+    char yes[2][12], dbl[2][12], lit_name[2][12];
+    uint64_t lit_mask[2];
     unsigned n_count;
     struct { char name[12]; unsigned n; } count[2];
 } coop_ch[COOP_CHARS];
@@ -16161,6 +16260,9 @@ static struct {
     int open; unsigned who; int at; unsigned long said_ms; int phase; volatile int walk, take;
     unsigned long left, clock_ms;           /* PAD-1044: the time left, counted only while the game is in play */
     int held;                               /* the game is busy: the pick waits */
+    int waited;                             /* PAD-1051: its ball has waited in the plunger since it opened */
+    volatile int moved;                     /* ... and the lane switch has moved since: no more hiding */
+    unsigned long waited_ms;                /* when it began to wait */
 } pk;
 static struct { int on, c; unsigned who; unsigned long at; } coop_done;   /* PAD-1044: the one taken, on the glass */
 static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
@@ -16171,6 +16273,9 @@ static volatile int coop_lane_in;           /* a ball waits in the shooter lane 
 static volatile int coop_ball_out;          /* the turn's ball has left the shooter lane */
 static volatile unsigned long coop_lane_left_ms;
 static volatile unsigned coop_launch_taps;  /* Action presses at a launch, not counted (the tick says so) */
+static unsigned coop_flag_in, coop_flag_wait;   /* PAD-1051: the game's "a ball waits in the plunger" flags (0: none) */
+static volatile int coop_turn_waited;       /* PAD-1051: the turn's ball has waited in the plunger (the flags say) */
+static volatile unsigned long coop_waited_ms;   /* ... and when they last said so */
 static unsigned (*coop_adj_game)(unsigned);
 static unsigned coop_rng;
 static char coop_scr_scene[96];             /* `screens <scene>`: "" none */
@@ -16197,6 +16302,9 @@ static unsigned coop_started[5];            /* per teammate: the unlock rules se
 static struct { char name[12]; unsigned (*game)(unsigned); } coop_yes[COOP_YES];   /* the checks wrapped */
 static int coop_yes_n;
 static unsigned coop_dbl_last[COOP_COUNTS];  /* double: each count's last seen value, for the player up */
+#define COOP_LITS 4
+static struct { char name[12]; unsigned obj; int held; uint64_t mask; long at, min; } coop_lit[COOP_LITS];   /* the rules whose lit mask holds a bit; at/min: a word (this + 4 x p + at) kept at least min (Godzilla: the Maser's charge) */
+static int coop_lit_n;
 static int coop_dbl_armed;
 
 /* PAD-1033: the game's adjustment getter is wrapped ONCE (hook_wrap cannot wrap a function twice) and each of ours
@@ -16269,7 +16377,8 @@ static unsigned coop_adj_answer(unsigned id, unsigned own)
         coop_gift_now = 0;
         return 1u;
     }
-    if (c && c->unlock_adj == id && (coop_started[coop.turn] & c->unlock_rules) && pm_in_game()) return 1u;
+    if (c && c->unlock_adj == id && pm_in_game() && (!c->unlock_rules || (coop_started[coop.turn] & c->unlock_rules)))
+        return 1u;
     if (!c || !pm_in_game()) return own;
     for (k = 0; k < c->n_adj; k++)
         if (c->adj[k].id == id) {
@@ -16362,6 +16471,68 @@ static unsigned coop_boost_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
         r1 = n;
     }
     return coop_boost_game(r0, r1, r2, r3);
+}
+
+/* the shot handlers of the rules a lit: names: hooked before they run, to learn the rule's object */
+static void coop_lit_seen(int i, unsigned *r)
+{
+    if (i < coop_lit_n && coop_lit[i].obj != r[0]) {
+        coop_lit[i].obj = r[0];
+        say("co-op: the %s lit shot's rule is at 0x%08x", coop_lit[i].name, r[0]);
+    }
+}
+static void coop_lit_seen0(unsigned *r) { coop_lit_seen(0, r); }
+static void coop_lit_seen1(unsigned *r) { coop_lit_seen(1, r); }
+static void coop_lit_seen2(unsigned *r) { coop_lit_seen(2, r); }
+static void coop_lit_seen3(unsigned *r) { coop_lit_seen(3, r); }
+
+/* the rule's lit mask for the player up: the framework's u64 at this + stock_field + 8 x player */
+static volatile unsigned *coop_lit_field(int i)
+{
+    unsigned p = coop_ball_byte ? coop_ball_byte[-1] : 1u, a;
+    if (i >= coop_lit_n || !coop_lit[i].obj || p < 1 || p > 4) return 0;
+    a = coop_lit[i].obj + (unsigned)pm_port_value("stock_field", 0x18) + 8u * p;
+    return maps_has(a, 8, MAP_R) ? (volatile unsigned *)(unsigned long)a : 0;
+}
+
+/* from the tick: the held bits OR-ed in while the character is up; taken out once it is not */
+static void coop_lit_tick(void)
+{
+    const struct coop_char *c = coop_char_up();
+    volatile unsigned *f;
+    unsigned k;
+    int i, on;
+    for (i = 0; i < coop_lit_n; i++) {
+        on = 0;
+        if (c && pm_in_game())
+            for (k = 0; k < c->n_lit; k++)
+                if (str_eq(c->lit_name[k], coop_lit[i].name)) { on = 1; break; }
+        if (!(f = coop_lit_field(i))) continue;
+        if (on && coop_lit[i].at >= 0) {                      /* the rule's own gate: a word it wants non-zero */
+            unsigned p = coop_ball_byte ? coop_ball_byte[-1] : 1u;
+            unsigned a = coop_lit[i].obj + 4u * p + (unsigned)coop_lit[i].at;
+            if (maps_has(a, 4, MAP_R) && *(volatile unsigned *)(unsigned long)a < (unsigned)coop_lit[i].min)
+                *(volatile unsigned *)(unsigned long)a = (unsigned)coop_lit[i].min;
+        }
+        if (on) {
+            uint64_t m = c->lit_mask[k], have = (uint64_t)f[0] | (uint64_t)f[1] << 32;
+            if ((have & m) != m) {
+                f[0] = (unsigned)(have | m);
+                f[1] = (unsigned)((have | m) >> 32);
+                if (!coop_lit[i].held)
+                    say("co-op: %s - the %s shot held lit (0x%llx into the rule's 0x%llx)", c->name, coop_lit[i].name,
+                        (unsigned long long)m, (unsigned long long)have);
+                coop_lit[i].held = 1;
+            }
+        } else if (coop_lit[i].held) {
+            uint64_t have = (uint64_t)f[0] | (uint64_t)f[1] << 32;
+            have &= ~coop_lit[i].mask;
+            f[0] = (unsigned)have;
+            f[1] = (unsigned)(have >> 32);
+            coop_lit[i].held = 0;
+            say("co-op: the %s shot is the game's again", coop_lit[i].name);
+        }
+    }
 }
 
 /* a check of the game's answers 1 while the teammate's character says so (yes:<name>) */
@@ -16506,16 +16677,17 @@ static void coop_pick_open(unsigned t)
     pk.said_ms = pk.clock_ms = pm_ms();
     pk.left = coop_pick_ms;
     pk.held = 0;
+    pk.waited = pk.moved = 0;
     pk.phase = 0;
     pk.walk = pk.take = 0;
     pk.open = 1;
     coop_done.on = 0;
     if (coop_pick_ms)
-        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one, %u s", t,
-            coop_ch_n, coop_pick_secs(coop_pick_ms));
+        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one%s, %u s", t,
+            coop_ch_n, coop_flag_in || coop_flag_wait ? " (a launch the one shown)" : "", coop_pick_secs(coop_pick_ms));
     else
-        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one, no time limit",
-            t, coop_ch_n);
+        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one%s, no time "
+            "limit", t, coop_ch_n, coop_flag_in || coop_flag_wait ? " (a launch the one shown)" : "");
     coop_pick_say();
 }
 
@@ -16570,12 +16742,50 @@ static void coop_pick_close(const char *how)
     }
 }
 
+/* PAD-1051: 1 while a ball waits in the plunger, as the game itself says (FG_MBDEV_AUTO_PLUNGER_BALL_IN_DEVICE /
+ * _PLAYER_CONTROL, the port's `value ball_launch_flag` / `ball_launch_wait_flag`, PAD-643's), 0 when none does, -1 when
+ * the port names neither. The game's own word, not the lane switch: its level byte's sense depends on the switch. */
+static int coop_ball_waits(void)
+{
+    int a = coop_flag_in ? game_flag(coop_flag_in) : -1, b = coop_flag_wait ? game_flag(coop_flag_wait) : -1;
+    return a == 1 || b == 1 ? 1 : a == 0 || b == 0 ? 0 : -1;
+}
+
+/* PAD-1051: the pick's buttons are the pick's alone while its ball waits in the plunger - the game's own language
+ * select has the flippers once a character is taken, and the Action press that takes one launches nothing (the next
+ * one does). With the ball out, or a port with no plunger flags, the game sees them as before; and once the lane
+ * switch (`lane`) has moved after the ball began to wait, whatever the flags say, so the flippers are never held
+ * from a ball in play. */
+static int coop_hides(unsigned id)
+{
+    return coop_live && pk.open && !pk.moved && id && (id == coop_left || id == coop.button || id == coop_action)
+           && coop_ball_waits() == 1;
+}
+
+/* PAD-1045: an Action press at a launch - the turn's ball not served yet, waiting, or just out - is the launch's, not
+ * half of the save's double press. PAD-1051: from the game's plunger flags where the port names them (Godzilla LE's
+ * shooter lane switch reads the opposite sense to its flippers, so its level said "out" while the ball waited), else
+ * from the lane switch (`lane` in coop.cfg) */
+static int coop_launch_press(unsigned long now)
+{
+    int w = coop_ball_waits();
+    if (w < 0) return coop_lane && (!coop_ball_out || coop_lane_in || now - coop_lane_left_ms < COOP_LAUNCH_MS);
+    if (w == 1) {
+        coop_turn_waited = 1;
+        coop_waited_ms = now;
+        return 1;
+    }
+    return !coop_turn_waited || now - coop_waited_ms < COOP_LAUNCH_MS;
+}
+
 /* every edge of the switch drain (the game's thread): the pick's flippers and Action, the save's double press */
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)
 {
     unsigned closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
     unsigned long now;
     if (coop_lane && id == coop_lane) {                       /* PAD-1045: a ball arrives in the lane, or leaves it */
+        if (pk.open && pk.waited && pm_ms() - pk.waited_ms >= COOP_SETTLE_MS)   /* PAD-1051: either way - its sense */
+            pk.moved = 1;                                     /* varies by switch; not the ball landing */
         coop_lane_in = (level & 1u) == closed;
         if (!coop_lane_in) {
             coop_lane_left_ms = pm_ms();
@@ -16592,7 +16802,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     }
     if (id != coop_action) return;
     now = pm_ms();
-    if (coop_lane && (!coop_ball_out || coop_lane_in || now - coop_lane_left_ms < COOP_LAUNCH_MS)) {
+    if (coop_launch_press(now)) {
         coop_tap_ms = 0;                                      /* the launch's press: not half of a double press */
         coop_launch_taps++;
         return;
@@ -16859,6 +17069,10 @@ static void coop_chars_tick(void)
         coop_save_ask = 0;
         return;
     }
+    if (coop_ball_waits() == 1) {                             /* PAD-1051: the turn's ball waits (PAD-1045's launch) */
+        coop_turn_waited = 1;
+        coop_waited_ms = pm_ms();
+    }
     if (!pm_in_game()) {                                      /* PAD-1044: busy (a menu over the game): it waits */
         if (pk.open && !pk.held) {
             pk.held = 1;
@@ -16890,7 +17104,12 @@ static void coop_chars_tick(void)
             pk.said_ms = pm_ms();
             coop_pick_say();
         }
-        if (pk.take) coop_pick_close("Action took it");
+        if ((w = coop_ball_waits()) == 1 && !pk.waited) {     /* PAD-1051: a launch takes the one shown */
+            pk.waited = 1;
+            pk.waited_ms = pm_ms();
+        }
+        else if (!w && pk.waited && !pk.take) pk.take = 2;
+        if (pk.take) coop_pick_close(pk.take > 1 ? "the ball was launched with it shown" : "Action took it");
         else if (coop_pick_ms && !pk.left) coop_pick_close("the time ran out");
         else if (pm_ms() - pk.said_ms >= COOP_PICK_FLIP_MS) {
             pk.phase ^= 1;
@@ -16907,6 +17126,7 @@ static void coop_chars_tick(void)
         coop_launch_taps = 0;
     }
     coop_double_tick();
+    coop_lit_tick();
     if (coop_save_ask && (c = coop_char_up()) && c->addball && !coop_save_used
         && pm_stock_mode_running(PM_STOCK_ANY) <= 0) {
         coop_save_ask = 0;
@@ -16939,6 +17159,8 @@ static void coop_chars_begin(void)
     coop_done.on = 0;
     coop_save_used = 0;
     coop_ball_out = 1;                       /* PAD-1045: the team forms in ball 1; a ball in the lane still waits */
+    coop_turn_waited = 1;                    /* PAD-1051: ... as the flags say, once it is out */
+    coop_waited_ms = 0;
     coop_adj_said = 0;
 }
 
@@ -16948,10 +17170,16 @@ static void coop_chars_turn(void)
     coop_save_used = 0;
     coop_tap_ms = 0;
     coop_ball_out = 0;                       /* PAD-1045: the next ball is not served yet: it counts once out */
+    coop_turn_waited = 0;                    /* PAD-1051: the same, from the game's plunger flags */
     if (pk.open && pk.who != coop.turn) coop_pick_close("their turn ended");
     coop_pick_open(coop.turn);
     coop_cache_hold();
     coop_dbl_armed = 0;
+    /* DoomWalrus666 (round 3): a gift (Godzilla's LIGHT ALLY) comes at EVERY turn of its teammate's, not their ball 1
+     * alone - the pick gives the first, each later turn gives one more (the game lights the next unlit ally; none left:
+     * nothing) */
+    if (coop.turn >= 1 && coop.turn <= 4 && coop_pick_of[coop.turn] >= 0 && coop_pick_of[coop.turn] < coop_ch_n)
+        coop_gift(&coop_ch[coop_pick_of[coop.turn]]);
 }
 
 /* coop.cfg: character <abilities> <name>|<what it does> */
@@ -16966,7 +17194,7 @@ static void coop_char_line(const char *s)
     c = &coop_ch[coop_ch_n];
     c->n_adj = 0;
     c->save_s = c->bs_adj = c->boost = c->gift = c->n_count = c->spot = c->unlock_adj = c->unlock_rules = 0;
-    c->addball = c->n_yes = c->n_double = 0;
+    c->addball = c->n_yes = c->n_double = c->n_lit = 0;
     for (k = 0; k + 1 < sizeof tok && s[k] && s[k] != ' '; k++) tok[k] = s[k];   /* number() eats the space after */
     tok[k] = 0;
     s += k;
@@ -17020,7 +17248,16 @@ static void coop_char_line(const char *s)
                 p++;
                 c->unlock_rules = (unsigned)number(&p, &ok);
             }
-            if (!ok || !c->unlock_rules) c->unlock_adj = c->unlock_rules = 0;
+            if (!ok) c->unlock_adj = c->unlock_rules = 0;
+        } else if (str_starts(p, "lit:") && c->n_lit < 2) {
+            p += 4;
+            for (k = 0; k + 1 < 12 && *p && *p != '=' && *p != ','; k++) c->lit_name[c->n_lit][k] = *p++;
+            c->lit_name[c->n_lit][k] = 0;
+            if (k && *p == '=') {
+                p++;
+                c->lit_mask[c->n_lit] = number(&p, &ok);
+                if (ok && c->lit_mask[c->n_lit]) c->n_lit++;
+            }
         } else if (str_starts(p, "addball:")) {
             p += 8;
             c->addball = (unsigned)number(&p, &ok);
@@ -17151,6 +17388,29 @@ static void coop_chars_arm(struct site *e)
                 coop_yes[coop_yes_n].name, fn(name));
             coop_yes_n++;
         }
+    for (i = 0; i < coop_ch_n; i++)                              /* the rules whose lit mask holds a bit */
+        for (k = 0; k < coop_ch[i].n_lit && coop_lit_n < COOP_LITS; k++) {
+            static void (*const lseen[COOP_LITS])(unsigned *) = { coop_lit_seen0, coop_lit_seen1, coop_lit_seen2,
+                                                                   coop_lit_seen3 };
+            int j;
+            for (j = 0; j < coop_lit_n && !str_eq(coop_lit[j].name, coop_ch[i].lit_name[k]); j++) ;
+            if (j < coop_lit_n) continue;
+            pm_snprintf(name, sizeof name, "coop_lit_%s", coop_ch[i].lit_name[k]);
+            if (!site(name) || !fn(name) || !hook(fn(name), lseen[coop_lit_n])) {
+                say("co-op characters: the %s lit shot is off - the port names no %s", coop_ch[i].lit_name[k], name);
+                continue;
+            }
+            str_copy(coop_lit[coop_lit_n].name, 12, coop_ch[i].lit_name[k], 12);
+            coop_lit[coop_lit_n].mask = coop_ch[i].lit_mask[k];
+            pm_snprintf(name, sizeof name, "coop_lit_%s_at", coop_ch[i].lit_name[k]);
+            coop_lit[coop_lit_n].at = pm_port_value(name, -1);
+            pm_snprintf(name, sizeof name, "coop_lit_%s_min", coop_ch[i].lit_name[k]);
+            coop_lit[coop_lit_n].min = pm_port_value(name, 1);
+            pm_snprintf(name, sizeof name, "coop_lit_%s", coop_ch[i].lit_name[k]);
+            say("co-op characters: the %s shot (0x%llx) is held lit while its character is up (its rule's handler 0x%08x)",
+                coop_lit[coop_lit_n].name, (unsigned long long)coop_lit[coop_lit_n].mask, fn(name));
+            coop_lit_n++;
+        }
     for (i = 0; i < coop_ch_n; i++)                              /* a doubled count needs its rule, as count: does */
         for (k = 0; k < coop_ch[i].n_double && coop_count_n < COOP_COUNTS; k++) {
             int j;
@@ -17184,8 +17444,19 @@ static void coop_chars_arm(struct site *e)
     if (coop_pick_on && (!coop_left || !coop_action))
         say("co-op characters: the pick walks with %s and takes with %s", coop_left ? "both flippers" : "the right flipper",
             coop_action ? "Action" : "the time alone (coop.cfg names no Action button)");
+    if (pm_port_value("ball_launch_flag", 0) > 0) coop_flag_in = (unsigned)pm_port_value("ball_launch_flag", 0);
+    if (pm_port_value("ball_launch_wait_flag", 0) > 0) coop_flag_wait = (unsigned)pm_port_value("ball_launch_wait_flag", 0);
+    if (coop_pick_on && (coop_flag_in || coop_flag_wait))     /* PAD-1051 */
+        say("co-op characters: while a pick is open with its ball waiting in the plunger (game flags %u/%u, now %d) "
+            "the game does not see its buttons - its own language select and launch have them once a character is "
+            "taken, and a launch takes the one shown", coop_flag_in, coop_flag_wait, coop_ball_waits());
+    else if (coop_pick_on)
+        say("co-op characters: the port names no plunger flags (ball_launch_flag) - the game sees the pick's buttons too");
     if (save && !coop_action) say("co-op characters: no Action button in coop.cfg - the save ability is off");
-    if (save && coop_action && coop_lane)                     /* PAD-1045 */
+    if (save && coop_action && (coop_flag_in || coop_flag_wait))   /* PAD-1045, PAD-1051: the game's own flags */
+        say("co-op characters: Action x2 counts once the ball is %lu ms out of the plunger (game flags %u/%u)",
+            COOP_LAUNCH_MS, coop_flag_in, coop_flag_wait);
+    else if (save && coop_action && coop_lane)                /* PAD-1045 */
         say("co-op characters: Action x2 counts once the ball is %lu ms out of the shooter lane (switch %u)",
             COOP_LAUNCH_MS, coop_lane);
     else if (save && coop_action)
@@ -17211,6 +17482,8 @@ static void coop_chars_arm(struct site *e)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s: yes", o ? ", " : "", coop_ch[i].yes[k]);
         for (k = 0; k < coop_ch[i].n_double && o + 24 < sizeof how; k++)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s x2", o ? ", " : "", coop_ch[i].dbl[k]);
+        for (k = 0; k < coop_ch[i].n_lit && o + 24 < sizeof how; k++)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%s%s lit", o ? ", " : "", coop_ch[i].lit_name[k]);
         if (coop_ch[i].spot && o + 24 < sizeof how)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sspot (rules 0x%x)", o ? ", " : "", coop_ch[i].spot);
         if (coop_ch[i].unlock_adj && o + 24 < sizeof how)

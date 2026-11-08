@@ -15046,6 +15046,9 @@ static int ball_end_event = -1;
 static int coop_bonus_id;                   /* PAD-1028 round 3, the co-op section */
 static void coop_bonus_end(void);
 
+static void on_team_dispatch(unsigned *r);       /* PAD-1052, the co-op section */
+static int events_bus_hooked;                    /* PAD-1052: events_arm hooked the bus (on_event_dispatch runs) */
+
 static void on_event_dispatch(unsigned *r)
 {
     static volatile int said;
@@ -15054,6 +15057,7 @@ static void on_event_dispatch(unsigned *r)
         say("event dispatch runs on thread %ld (first seen)", syscall(SYS_GETTID));
     if (ball_end_event >= 0 && r[0] == (unsigned)ball_end_event) on_ball_end(r);
     if (coop_bonus_id >= 0 && r[0] == (unsigned)coop_bonus_id) coop_bonus_end();   /* PAD-1028: the cards on its screen */
+    on_team_dispatch(r);                         /* PAD-1052: ball 1 of the start menu's TEAM PLAY */
     /* PAD-663: from a process of the game's - a bus call on the game-logic thread only: the bus is called from other
      * threads too, and John Wick 1.02's logic stopped for good when the ball was ended from one of those */
     if (chg_end_owed && chg_game_tid && syscall(SYS_GETTID) == chg_game_tid) chg_end_ball_now("the game's bus call");
@@ -15138,7 +15142,7 @@ static void events_arm(void)
     for (i = 0; i < n_event_names; i++) bus_names += !event_names[i].site[0];
     if (bus_names || ball_end_event >= 0) {
         if (!bus || !bus->ok) say("bus events off: %s", !bus ? "the port has no hook_dispatch" : "hook_dispatch does not match this build");
-        else if ((bus_hooked = hook(bus->addr, on_event_dispatch)) != 0) {
+        else if ((bus_hooked = events_bus_hooked = hook(bus->addr, on_event_dispatch)) != 0) {
             for (i = 0; i < n_event_names; i++)
                 if (!event_names[i].site[0]) { event_names[i].armed = 1; armed++; }
         }
@@ -15579,11 +15583,16 @@ static void switches_arm(void)
  *   setting <address> reading 2   the service menu's CO-OP PLAY says Team 2v2 (0 Off, 1 Co-op, 2 Team 2v2)
  * PAD-1052 (DoomWalrus666: "you must press the start button 4 times. It would be more clear if you pressed the start
  * button one time and it said 4 players added: Team 1: Player 1 and Player 3, Team 2: Player 2 and Player 4"): the
- * players are numbered in the order they play - team 1 is players 1 and 3, team 2 players 2 and 4 - and Start pressed
- * a second time adds them all (the reporter: "you still want to be able to play 1 player", so one Start is still the
- * game's own one-player game): the Start in the first ball of a one-player game calls the game's own add for each next
- * player until the teams are full (coop_team_fill; the game's add runs - credits, its hooks - so a game short of
- * credits stops where they run out, and each later Start in the first ball adds the next player). Player 2 is team 2
+ * players are numbered in the order they play - team 1 is players 1 and 3, team 2 players 2 and 4 - and the team game
+ * is picked as stock Stern's is (daveyvandy: "Make it work like stock Stern co-op 2v2 games work"; TMNT: TEAM PLAY 2
+ * VS 2 on CHOOSE YOUR MODE OF PLAY, and its start_button_start_game adds players 2..4 itself): with CO-OP PLAY at 2
+ * the game's start menu (both flipper buttons in attract) has a TEAM PLAY 2 VS 2 entry (at 3 TEAM PLAY 2 VS 1), which
+ * the game plays as Standard (team_menu_*: the same menu sites as PAD-1041's Prolonged Competition). A game started
+ * with it showing is a team game: as its ball 1 starts (the game's event dispatch, on its thread) the runtime calls the
+ * game's own add for each next player until the teams are full (coop_team_fill; the game's add runs - credits, its hooks - so a game
+ * short of credits stops where they run out, and each later Start in the first ball adds the next player). A plain
+ * Start is the game's own one-player game, and Start in its first ball adds a competing player as stock does. On a
+ * build whose start menu the port does not know, the second Start of a one-player game adds them all. Player 2 is team 2
  * (the game's own player 2), player 3 joins team 1 (the game's count put back to 2), player 4 joins team 2 (back to
  * 2). The top line then says, COOP_JOIN_MS each, "4 PLAYERS ADDED",
  * "TEAM 1: P1 AND P3", "TEAM 2: P2 AND P4" before player 1's character pick opens. The turns alternate the teams, a
@@ -15613,6 +15622,20 @@ static struct {
     unsigned long join_at;               /* ... when that line went up (join_n 0: none up) */
 } coop;
 #define COOP_JOIN_MS 2000ul              /* PAD-1052: each "PLAYERS ADDED" line on the top line */
+#define COOP_JOIN_ROUNDS 3u              /* ... said three times over: Godzilla LE 1.16's game-start film (not a display
+                                          * effect) hid the first five, about 10 s (emulator) */
+#define TEAM_PICK_MS 20000ul             /* PAD-1052: ball 1 starting this soon after the menu showed TEAM PLAY (its
+                                          * game-start intro between) is its team game */
+#define TEAM_KIND 0x300u                 /* PAD-1052: the TEAM PLAY entry's kind until a pick makes it Standard */
+static struct {
+    int armed, frame;                    /* on the start menu; by the index menus (else the entry lists) */
+    unsigned ball_id;                    /* the event bus's ball_start */
+    volatile int pending;                /* the menu shows our entry now */
+    volatile unsigned long seen_ms;      /* when it last did */
+} tm;
+static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1";
+static void team_frame_restore(void);
+static void on_team_dispatch(unsigned *r);
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
 static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
 static int coop_ball_msg = -1;           /* the message table's line that says "BALL %d" (-1: none found) */
@@ -16100,7 +16123,7 @@ static void coop_turn_show(void)
 static void coop_join_show(void)
 {
     char words[40];
-    if (coop_ball_msg < 0 || !coop_join_words(coop.join_n, coop.join_step, words, sizeof words)) return;
+    if (coop_ball_msg < 0 || !coop_join_words(coop.join_n, coop.join_step % 3u, words, sizeof words)) return;
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
 }
 
@@ -17254,6 +17277,7 @@ static void coop_chars_arm(struct site *e)
 static void coop_join_tick(void);              /* PAD-1052, below */
 /* from the tick: the game's own words back once its co-op game is over */
 static void coop_scores_same(unsigned n);
+static void team_menu_arm(void);              /* PAD-1052, with the start menu's other entries */
 static void coop_tick(void)
 {
     unsigned n = coop_teammates();
@@ -17344,17 +17368,59 @@ static unsigned coop_team_fill(unsigned r0, unsigned r1, unsigned r2, unsigned r
     return ret;
 }
 
-/* PAD-1052: from the tick: the fill's lines on the top line, one at a time, then player 1's pick */
+/* PAD-1052: whether a game whose ball 1 starts now is the start menu's TEAM PLAY pick: the menu showed the entry at
+ * most TEAM_PICK_MS before (a menu left without a game forgets it) (tests lift it verbatim) */
+static int team_pick_live(int pending, unsigned long seen, unsigned long now)
+{
+    return pending && now - seen < TEAM_PICK_MS;
+}
+
+/* PAD-1052: the game's own event dispatch (hook_dispatch, on the game's thread, before its handlers): ball 1's
+ * ball_start of a one-player game the start menu's TEAM PLAY began adds the players, as stock Stern's start adds them
+ * on the one Start. Its game_start is not the place: Godzilla LE 1.16's menu-started game never dispatches one
+ * (emulator), so the pick is kept, as MODE CHALLENGE's is, until that ball starts. From the tick the game's add hung
+ * Iron Maiden LE 1.18 (emulator: nothing logged again after the game began); here it runs where the game's own
+ * handlers would. It is called by the runtime's own bus hook (on_event_dispatch; team_menu_arm arms it): a second
+ * hook of the bus never ran on Godzilla LE 1.16 (emulator), so only a card whose events left the bus alone hooks it
+ * for this. */
+static void on_team_dispatch(unsigned *r)
+{
+    int want;
+    if (!tm.armed || r[0] != tm.ball_id || !tm.seen_ms) return;
+    if (coop_teammates() || *coop_players_byte != 1 || *coop_ball_byte != 1 || coop_ball_byte[-1] != 1) {
+        say("teams: a ball starts with %u player(s), ball %u, player %u up, %u teammates - no team fill now",
+            *coop_players_byte, *coop_ball_byte, coop_ball_byte[-1], coop_teammates());
+        return;
+    }
+    want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && coop_teams_switched_on();
+    if (!want)
+        say("teams: ball 1 of a one-player game - not the menu's TEAM PLAY (shown %d, %lu ms ago)", tm.pending,
+            pm_ms() - tm.seen_ms);
+    tm.pending = 0;
+    tm.seen_ms = 0;
+    team_frame_restore();                                     /* the menu's words back as it ends in a game */
+    if (!want) return;
+    say("teams: the game began as the start menu's %s", coop_teams_switched_on() == 3u ? team_name_2v1 : team_name_2v2);
+    if (!coop_team_fill(0, 0, 0, 0)) say("teams: TEAM PLAY - the game added no one (credits?) - a one-player game");
+}
+
+/* PAD-1052: from the tick: the fill's lines on the top line, one at a time, then player 1's pick. While the game's own
+ * display has the screen (an effect of the game's: Foo Fighters LE 1.04's song pick, emulator) the line waits; the
+ * three are said COOP_JOIN_ROUNDS times, since a film on the video surface (Godzilla LE 1.16's game start) is no effect
+ * and hid the first ten seconds of them */
 static void coop_join_tick(void)
 {
-    char words[40];
+    static int said;
     if (!coop.join_n) return;
     if (!coop_teammates()) coop.join_n = 0;                   /* the game is over (or another) */
     else if (!pm_in_game()) coop.join_at = pm_ms();           /* busy (a menu over the game): the line waits */
-    else if (pm_ms() - coop.join_at >= COOP_JOIN_MS) {
+    else if (disp_taken()) {
+        coop.join_at = pm_ms();
+        if (!said++) say("teams: the players-added lines wait - the game's own display has the screen");
+    } else if (pm_ms() - coop.join_at >= COOP_JOIN_MS) {
         coop.join_step++;
         coop.join_at = pm_ms();
-        if (coop_join_words(coop.join_n, coop.join_step, words, sizeof words)) {
+        if (coop.join_step < 3u * COOP_JOIN_ROUNDS) {
             coop_join_show();
         } else {
             coop.join_n = 0;
@@ -17368,7 +17434,8 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
 {
     unsigned n = coop_teammates(), ret;
     if (n && coop.teams) return coop_team_add(r0, r1, r2, r3);                         /* PAD-1042 */
-    if (!n && *coop_players_byte == 1 && coop_teams_switched_on()) return coop_team_fill(r0, r1, r2, r3);   /* PAD-1052 */
+    if (!n && *coop_players_byte == 1 && coop_teams_switched_on() && !tm.armed)
+        return coop_team_fill(r0, r1, r2, r3);                /* PAD-1052: no start menu to pick it on */
     if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_button_held()))
         return coop_add_game(r0, r1, r2, r3);
     if (n >= 4) {
@@ -17652,8 +17719,9 @@ static void coop_arm(void)
             coop_teams_switched_on() == 4u ? "Team 2v2" : coop_teams_switched_on() == 3u ? "Team 2v1"
             : coop_switched_on() ? "On" : "Off");
     if (coop.teams_always)
-        say("teams: every game of two or more is a team game (coop.cfg `teams %s`): players 1+3 against %s",
+        say("teams: team play is always on (coop.cfg `teams %s`): players 1+3 against %s",
             coop.teams_always == 3u ? "2v1" : "on", coop.teams_always == 3u ? "2" : "2+4");   /* PAD-1052 */
+    if (coop.teams_always || coop.setting) team_menu_arm();   /* PAD-1052: TEAM PLAY on the start menu */
     coop_awards_arm();                                        /* PAD-1028 */
     if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */
@@ -18687,6 +18755,162 @@ static void comp_arm(void)
     say("prolonged competition: armed - on the start menu at 0x%08x (captions %u / %u), flag %u kept set from every "
         "game's start (bus 0x%x, ball start 0x%x) while it is on%s", fn(objm ? "comp_menu_obj_built" : frame ? "comp_menu_frame" : "challenge_menu"), comp.caption,
         comp.caption_end, comp.flag, comp.game_id, comp.ball_id, comp.only ? " (comp.cfg: only)" : "");
+}
+
+/* ---- PAD-1052: TEAM PLAY on the start menu ------------------------------------------------------------------
+ * Stock Stern's team play (TMNT: TEAM PLAY 2 VS 2 "TWO PLAYERS PER TEAM", TEAM PLAY 2 VS 1) is an entry of CHOOSE YOUR
+ * MODE OF PLAY: picked, one Start makes the whole team game. With CO-OP PLAY at 2 (3) the runtime adds TEAM PLAY 2 VS
+ * 2 (2 VS 1) to the menu at Prolonged Competition's sites (PAD-1041, the same port lines): on the entry lists its kind
+ * is TEAM_KIND, and picked it is played as Standard (kind 0) under Standard's caption; on the index menus (`site
+ * comp_menu_frame`) it is Standard's index a second time (`value comp_menu_end_index`), lettered TEAM PLAY 2 VS 2
+ * through Standard's name message (`comp_menu_end_msg`) while the cursor is on it. The menu runs these every frame;
+ * tm.pending says the entry is showing, and a one-player game whose ball 1 starts within TEAM_PICK_MS of it is the
+ * team game (on_team_dispatch). The row is read live: the entry goes on the menu as it opens. */
+static const char *team_menu_name(void)
+{
+    return coop_teams_switched_on() == 3u ? team_name_2v1 : team_name_2v2;
+}
+
+static int team_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
+{
+    unsigned name = *(const unsigned *)(ent + nat);
+    return *(const unsigned *)(ent + kat) == TEAM_KIND || name == (unsigned)(unsigned long)team_name_2v2
+        || name == (unsigned)(unsigned long)team_name_2v1;
+}
+
+static void team_menu_built(unsigned *r)
+{
+    long creg = pm_port_value("challenge_menu_count_reg", -1);
+    unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp */
+    unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
+    unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), es = (unsigned)pm_port_value("challenge_menu_entry", 12);
+    unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
+    unsigned i, k, n0 = *count, tmpl = 0;
+    static int room_said, said;
+    if (!coop_teams_switched_on()) return;                 /* the row says Off or Co-op: no team entry */
+    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
+        return;
+    for (i = 0; i < n0; i++) {
+        if (team_entry_at(list + es * i, kat, nat)) {       /* an every-frame site: there already */
+            *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)team_menu_name();
+            return;
+        }
+        if (!*(unsigned *)(list + es * i + kat)) tmpl = i;  /* Standard's: the entry ours plays as */
+    }
+    if (n0 >= cap) {
+        if (!room_said++) say("teams: no room for TEAM PLAY on the start menu - the game's menu holds %u entries", cap);
+        return;
+    }
+    i = n0;
+    for (k = 0; k < es; k++) list[es * i + k] = list[es * tmpl + k];   /* Standard's entry: its caption, its words */
+    *(unsigned *)(list + es * i + kat) = TEAM_KIND;
+    *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)team_menu_name();
+    (void)plain;
+    *count = i + 1;
+    if (!said++) say("teams: %s on the start menu as entry %u of %u (Standard's caption)", team_menu_name(), i + 1, i + 1);
+}
+
+static void team_menu_picked(unsigned *r)
+{
+    long back = pm_port_value("challenge_menu_pick_back", 0);
+    unsigned char *e8 = back > 0 ? (unsigned char *)(unsigned long)(r[3] - (unsigned)back) - MENU_KIND_AT : 0;
+    int was = tm.pending;          /* the game runs this on every frame of the menu: say only a change */
+    tm.pending = back > 0 ? team_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : r[3] == TEAM_KIND;
+    if (tm.pending) {                                       /* the game plays it as Standard */
+        if (back > 0) *(unsigned *)(e8 + MENU_KIND_AT) = 0;
+        else r[3] = 0;
+        tm.seen_ms = pm_ms();
+    }
+    if (tm.pending != was) say("teams: %s %s on the start menu", team_menu_name(), tm.pending ? "picked" : "no longer picked");
+}
+
+static unsigned long team_frame_sp;              /* the menu frame we appended to (a new menu: a new list) */
+static unsigned team_frame_at, team_frame_msg;   /* our entry's place in the list; the message we lettered (0: none) */
+
+static void team_frame_restore(void)
+{
+    if (team_frame_msg) pm_message_restore(team_frame_msg);
+    team_frame_msg = 0;
+}
+
+static void team_menu_frame(unsigned *r)
+{
+    unsigned char *sp = (unsigned char *)(r + 14);
+    unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
+    unsigned *count = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_count_at", 0));
+    unsigned last = pm_port_value("comp_menu_frame_count_last", 0) ? 1u : 0u;
+    unsigned cap = (unsigned)pm_port_value("comp_menu_frame_cap", 0);
+    unsigned creg = (unsigned)pm_port_value("comp_menu_frame_cursor_reg", 13);
+    unsigned breg = (unsigned)pm_port_value("comp_menu_frame_buttons_reg", 13);
+    unsigned idx = (unsigned)pm_port_value("comp_menu_end_index", 0);
+    unsigned msg = (unsigned)pm_port_value("comp_menu_end_msg", 0);
+    unsigned n = *count + last;
+    static int room_said;
+    int was = tm.pending;
+    if (creg > 12 || breg > 12 || !idx || !msg || n > cap || !coop_teams_switched_on()) return;
+    if ((unsigned long)sp != team_frame_sp || team_frame_at >= n || list[team_frame_at] != idx) {   /* a new menu */
+        team_frame_sp = (unsigned long)sp;
+        team_frame_restore();
+        if (n >= cap) {
+            if (!room_said++) say("teams: no room for TEAM PLAY on the start menu - its list holds %u indices", cap);
+            return;
+        }
+        team_frame_at = n;
+        list[n] = idx;
+        *count += 1;
+        say("teams: %s on the start menu as entry %u of %u (Standard's game-mode index %u; cursor %u)", team_menu_name(),
+            n + 1, n + 1, idx, r[creg]);
+    }
+    /* as Prolonged Competition's: the press read just now moves the cursor after this point */
+    tm.pending = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u) == team_frame_at;
+    if (tm.pending) {
+        pm_message_set(msg, team_menu_name());          /* Standard's name: ours while the cursor is on our entry */
+        team_frame_msg = msg;
+        tm.seen_ms = pm_ms();
+    } else {
+        team_frame_restore();
+    }
+    if (tm.pending != was) say("teams: %s %s on the start menu", team_menu_name(), tm.pending ? "picked" : "no longer picked");
+}
+
+static void team_menu_arm(void)
+{
+    int frame = site("comp_menu_frame") && pm_port_value("comp_menu_frame_cap", 0) > 0
+        && pm_port_value("comp_menu_frame_list_at", 0) > 0 && pm_port_value("comp_menu_frame_count_at", 0) > 0
+        && pm_port_value("comp_menu_end_index", 0) > 0 && pm_port_value("comp_menu_end_msg", 0) > 0;
+    int list = !frame && site("challenge_menu") && site("challenge_menu_pick") && pm_port_value("challenge_menu_cap", 0) > 0
+        && pm_port_value("challenge_menu_list_at", 0) > 0
+        && (pm_port_value("challenge_menu_count_at", 0) > 0 || pm_port_value("challenge_menu_count_reg", -1) >= 4);
+    static const char *const msg_d[] = { "message_count", "message_remap", "message_table", 0 };
+    struct site *bus = site("hook_dispatch");
+    int ball = event_bus_id("ball_start");
+    if (!bus || !bus->ok || ball < 0) {
+        say("teams: no event bus (hook_dispatch, ball_start) - the second Start adds the teams");
+        return;
+    }
+    if (!frame && !list) {
+        say("teams: the port does not know this game's start menu - the second Start of a one-player game adds the teams");
+        return;
+    }
+    if (frame && !have_data(msg_d)) {
+        say("teams: no message table to letter the start menu's entry with - the second Start adds the teams");
+        return;
+    }
+    if (frame) can |= PM_CAN_MESSAGES;
+    if (frame ? !hook_full(fn("comp_menu_frame"), team_menu_frame)
+        : !(pm_port_value("challenge_menu_count_reg", -1) >= 0 ? hook_full(fn("challenge_menu"), team_menu_built)
+                                                                : hook(fn("challenge_menu"), team_menu_built))
+          || !hook(fn("challenge_menu_pick"), team_menu_picked)
+        || (events_arm(), !events_bus_hooked && !hook(bus->addr, on_team_dispatch))) {
+        say("teams: the start menu could not be hooked - the second Start adds the teams");
+        return;
+    }
+    tm.ball_id = (unsigned)ball;
+    tm.armed = 1;
+    tm.frame = frame;
+    say("teams: TEAM PLAY on the start menu at 0x%08x (%s): picked, one Start makes the team game",
+        fn(frame ? "comp_menu_frame" : "challenge_menu"), frame ? "an index menu" : "an entry list");
 }
 
 /* Which sites and data each capability needs; all must be present and verified. */

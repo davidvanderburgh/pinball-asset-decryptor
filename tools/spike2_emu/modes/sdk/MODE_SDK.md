@@ -6196,14 +6196,26 @@ own player change goes between them. The runtime takes each team's players in tu
 
 PAD-1052 (DoomWalrus666: "you must press the start button 4 times. It would be more clear if you pressed the start
 button one time and it said 4 players added: Team 1: Player 1 and Player 3, Team 2: Player 2 and Player 4"): the
-players are numbered in the order they play, team 1 the odd ones (`coop_team_of`), and a second Start adds the rest
-of them at once (then "you still want to be able to play 1 player": one Start is still the game's own one-player game).
+players are numbered in the order they play, team 1 the odd ones (`coop_team_of`). Then "you still want to be able
+to play 1 player", and daveyvandy: "Make it work like stock Stern co-op 2v2 games work". Stock (TMNT 1.54's symbol
+build): TEAM PLAY 2 VS 2 is an entry of the start menu, and `start_button_start_game(credits, ..., players)` adds
+players 2..4 itself on the one Start; `team_play_get_player_score` makes players 1 and 3 one team, 2 and 4 the other.
 
-- **Joining:** Start in the first ball of a one-player team game calls the game's own add for each next player until
-  the teams are full (`coop_team_fill`, inside the wrapped add, on the game's thread). Player 2 is team 2 (the game's own player 2), player 3 joins team 1 (the
+- **The pick:** with CO-OP PLAY at 2 (3, or coop.cfg `teams ...`) the start menu (both flipper buttons in attract)
+  gets TEAM PLAY 2 VS 2 (2 VS 1), at Prolonged Competition's sites and with its port lines (PAD-1041): on the entry
+  lists (`site challenge_menu` / `challenge_menu_pick`) a copy of Standard's entry with kind `TEAM_KIND` and our
+  name, played as Standard (kind 0) once picked; on the index menus (`site comp_menu_frame`) Standard's index again
+  (`value comp_menu_end_index`), lettered through Standard's name message (`comp_menu_end_msg`) while the cursor is on
+  it (`team_menu_*`). A plain Start is the game's own one-player game, and Start in its first ball adds a competing
+  player as stock does. A port that names neither menu: the second Start of a one-player game adds the teams.
+- **Joining:** a one-player game whose ball 1 starts within `TEAM_PICK_MS` (20 s) of the menu showing the entry is the team
+  game, and as its ball 1 starts (the event bus's dispatch of `ball_start`, `site hook_dispatch`: the game's thread,
+  before its handlers) the runtime calls the game's own add for each next player until the teams are full
+  (`on_team_dispatch`, `coop_team_fill`). Called from the tick instead, the game's add hung Iron Maiden LE 1.18. Player 2 is team 2 (the game's own player 2), player 3 joins team 1 (the
   game's add runs - credits, its hooks - and its count is put back to 2), player 4 joins team 2 (back to 2). Short of
   credits the game's add refuses and the fill stops there; each later Start in the first ball adds the next player. The top line then reads, `COOP_JOIN_MS` (2 s) each, `4 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2: P2 AND
-  P4` (`coop_join_words`), and player 1's character pick opens after them.
+  P4` (`coop_join_words`), said three times over (`COOP_JOIN_ROUNDS`: Godzilla's game-start film hid about 10 s of them),
+  waiting while a display effect of the game's has the screen; player 1's character pick opens after them.
 - **Turns:** the teams alternate, a round of turns a ball: P1, P2, P3, P4, then ball 2. The last team's turn of a round
   that is not the ball's last puts the ball's byte one down before the game's change, as co-op does, so the game goes
   back to its player 1 on the same ball. An extra ball keeps the player who earned it. With three players team 2's
@@ -6217,8 +6229,8 @@ of them at once (then "you still want to be able to play 1 player": one Start is
   never on the game's own boards.
 - **Team 2v1** (daveyvandy: "There should be a designated option for 2V1"): CO-OP PLAY 3 (or `teams 2v1`) is the
   same team game for three players at most - players 1 and 3 against player 2, who plays both of team 2's turns each
-  ball (P1, P2, P3, P2); the second Start adds two (`3 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2: P2`), a third
-  Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
+  ball (P1, P2, P3, P2); TEAM PLAY 2 VS 1 and one Start adds three (`3 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2:
+  P2`), a later Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
   `team_max`). Its scores go on a `TEAM 2V1` board of their own, so a 2v1 champion never sits on the 2v2 board.
 
 Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1042/rig`: job.sh, team.cfg; tryset.py builds a Write

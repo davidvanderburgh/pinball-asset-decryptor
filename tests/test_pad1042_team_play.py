@@ -1,5 +1,7 @@
 """PAD-1042: Team 2v2 - two teams of two (pad_mode_runtime.c "TEAM 2V2"); PAD-1052: players 1 and 3 against players
-2 and 4, all added by a second Start (one Start is still the game's own one-player game).
+2 and 4, all added by one Start once TEAM PLAY 2 VS 2 is picked on the start menu, as on stock Stern (a plain Start
+is still the game's own one-player game). The model runs the fill through the second Start, the route of a build whose
+start menu the port does not know; the same coop_team_fill fills the menu's pick from the tick.
 
 The runtime's wraps are lifted verbatim and run against PAD-1017's model of the framework's own player change and add
 player (test_pad1017_coop_turns.py): the game plays two players, a team each, and the runtime takes each team's
@@ -190,7 +192,7 @@ def test_the_service_menu_row_has_team_2v2_and_the_tab_says_how_to_play_it(tmp_p
     text = str(help_content.__dict__)
     assert CP.MENU_TEAMS_2V1 == 3 and "**3 (Team 2v1):** the same team game for three players" in text
     assert "**2 (Team 2v2):** players 1 and 3 play against players 2 and 4" in text
-    assert "press it a second time in the first ball and it adds the other three players at once" in text
+    assert "step to **TEAM PLAY 2 VS 2** and press **Start** once. The game starts with all four players" in text
     from pinball_decryptor.webui.tabs import modes as M
     assert "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1" in M.ModesTab.COOP_MENU_TIP
 
@@ -236,7 +238,41 @@ def test_the_fill_says_its_lines_from_the_tick():
     add = R._lift(src, "static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "if (coop.filling) return ret;" in add
     wrap = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
-    assert "if (!n && *coop_players_byte == 1 && coop_teams_switched_on()) return coop_team_fill(r0, r1, r2, r3);" in wrap
+    assert "if (!n && *coop_players_byte == 1 && coop_teams_switched_on() && !tm.armed)" in wrap   # no menu: 2nd Start
+
+
+def test_team_play_is_a_start_menu_pick_as_on_stock_stern(tmp_path):
+    """daveyvandy: "Make it work like stock Stern co-op 2v2 games work" - TMNT's TEAM PLAY 2 VS 2 is an entry of its
+    start menu, and one Start then makes the whole team game. The entry goes on at Prolonged Competition's sites,
+    played as Standard; a game starting while (or just after) the menu showed it is filled from the tick."""
+    src = RUNTIME.read_text(encoding="utf-8")
+    fn = R._lift(src, "static int team_pick_live(int pending, unsigned long seen, unsigned long now)")
+    main = "#include <stdio.h>\n#define TEAM_PICK_MS 20000ul\n" + fn + r"""
+int main(void)
+{
+    printf("%d %d %d %d\n", team_pick_live(1, 1000, 1200), team_pick_live(1, 1000, 20999), team_pick_live(1, 1000, 21000),
+           team_pick_live(0, 1000, 1200));
+    return 0;
+}
+"""
+    assert R._host_run(tmp_path, main).strip() == "1 1 0 0"      # shown just before the game; a menu left long ago
+    disp = R._lift(src, "static void on_team_dispatch(unsigned *r)\n{")   # the game's thread, not the tick's
+    assert "want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && coop_teams_switched_on();" in disp
+    assert "if (!tm.armed || r[0] != tm.ball_id || !tm.seen_ms) return;" in disp and "coop_team_fill(0, 0, 0, 0)" in disp
+    # through the runtime's own bus hook: a second hook of the bus never ran on Godzilla LE 1.16 (emulator)
+    assert "on_team_dispatch(r);" in R._lift(src, "static void on_event_dispatch(unsigned *r)\n{")
+    assert "COOP_JOIN_ROUNDS" in R._lift(src, "static void coop_join_tick(void)\n{")   # said twice: a film hid one
+    assert "coop_team_fill" not in R._lift(src, "static void coop_tick(void)\n{")
+    built = R._lift(src, "static void team_menu_built(unsigned *r)")
+    assert "*(unsigned *)(list + es * i + kat) = TEAM_KIND;" in built and "if (!coop_teams_switched_on()) return;" in built
+    picked = R._lift(src, "static void team_menu_picked(unsigned *r)")
+    assert "else r[3] = 0;" in picked                                  # the game plays it as Standard
+    frame = R._lift(src, "static void team_menu_frame(unsigned *r)")
+    assert 'pm_port_value("comp_menu_end_index", 0)' in frame and "pm_message_set(msg, team_menu_name());" in frame
+    arm = R._lift(src, "static void team_menu_arm(void)\n{")
+    assert 'hook_full(fn("comp_menu_frame"), team_menu_frame)' in arm
+    assert 'hook(fn("challenge_menu_pick"), team_menu_picked)' in arm
+    assert "if (coop.teams_always || coop.setting) team_menu_arm();" in R._lift(src, "static void coop_arm(void)")
 
 
 GZ_ELFS = ("C:/tmp/PAD-1010/elfs/godzilla_le-1_16_0_spike2.elf", "C:/tmp/PAD-1033/elfs/godzilla_le-1_16_0.elf")

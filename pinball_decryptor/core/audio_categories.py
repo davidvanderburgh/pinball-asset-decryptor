@@ -171,6 +171,13 @@ def _load_renamed_cats(assets_dir):
     return out
 
 
+def derived(assets_dir, rel):
+    """The Type *rel* gets from its name and the project's CSVs alone, as if
+    the user had never picked one."""
+    return _classify_one(rel, _load_callouts(assets_dir),
+                         _load_music_titles(assets_dir))
+
+
 def _classify_one(rel, callouts, titled):
     base = rel.rpartition("/")[2]
     stem = os.path.splitext(base)[0]

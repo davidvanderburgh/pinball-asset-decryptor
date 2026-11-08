@@ -4402,8 +4402,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             return True
         new_base = ("%s - %s%s" % (prefix, new_label, ext) if new_label
                     else prefix + ext)
-        if os.path.exists(os.path.join(os.path.dirname(slot.abs_path),
-                                       new_base)):
+        if name_memory.clashes(slot.abs_path, os.path.join(
+                os.path.dirname(slot.abs_path), new_base)):
             compat.messagebox.showerror(
                 "Audio Properties",
                 "A file named\n%s\nalready exists in that folder." % new_base)
@@ -4428,12 +4428,28 @@ class AudioTab(FindOriginalsMixin, TabService):
             note = " (not remembered: the slot is modded and has no baseline)"
         elif new_label:
             note = " (remembered for future extracts)"
+        elif (new_cat != cur_cat
+              or self._cat_to_remember(new_rel, "", new_cat)):
+            note = " (name forgotten, Type %s remembered)" % new_cat
         else:
             note = " (forgotten)"
         self.log("Replace Audio: renamed %s → %s%s" % (rel, new_base, note),
                  "info")
         self._save_staged_changes()
         return True
+
+    def _cat_to_remember(self, rel, label, cat):
+        """The Type to remember with *label* for slot *rel*: always with a
+        name; with a cleared one only when it is not the Type the slot gets
+        anyway (PAD-1060: a cleared name took the user's Type with it)."""
+        if label:
+            return cat
+        from ...core import audio_categories
+        try:
+            return None if cat == audio_categories.derived(
+                self._scan_dir, rel) else cat
+        except Exception:                               # noqa: BLE001
+            return cat
 
     def _rename_slot(self, rel, new_label, new_cat):
         """Rename decode slot *rel* on disk to ``<prefix> - <new_label>``
@@ -4453,7 +4469,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         folder = rel.rpartition("/")[0]
         new_rel = (folder + "/" + new_base) if folder else new_base
         dst = os.path.join(os.path.dirname(slot.abs_path), new_base)
-        if os.path.exists(dst):
+        if name_memory.clashes(slot.abs_path, dst):
             raise OSError("a file named %s already exists" % new_base)
         md5 = name_memory.baseline_md5(self._scan_dir, rel)
         if md5 is None and rel not in self._changed:
@@ -4461,7 +4477,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         replace_with_retry(slot.abs_path, dst)
         if md5:
             try:
-                name_memory.remember(md5, new_label, category=new_cat)
+                name_memory.remember(
+                    md5, new_label,
+                    category=self._cat_to_remember(new_rel, new_label,
+                                                   new_cat))
             except OSError as e:
                 self.log(
                     "Replace Audio: couldn't remember \"%s\" for future "

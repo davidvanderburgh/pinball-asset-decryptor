@@ -414,20 +414,21 @@ ABILITIES = (
     ("building", "EASIER BUILDING MB", "Building Multiball is as easy to start as on the game's easiest BUILDING "
      "DIFFICULTY.", ("cache", "AD_BUILDING_DIFFICULTY", "min")),
     ("powerups", "DOUBLE POWER-UPS", "Every Godzilla power-up the game gives counts twice.", ("boost", 200)),
-    ("ally", "STARTS WITH AN ALLY", ("An ally is lit when they pick: the next of Mothra, Rodan and Anguirus in the game's own order (its LIGHT "
-      "ALLY)."),
+    ("ally", "AN ALLY EVERY BALL", ("An ally is lit at each of their balls: the next of Mothra, Rodan and Anguirus in "
+      "the game's own order (its LIGHT ALLY), at the pick and at every later turn."),
      ("gift", "AD_LIGHT_ALLY")),
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
      "the bonus count them).", ("count", "jets", 4)),
     ("spot", "SPOT A BATTLE SHOT", "Two quick presses of the Action button during a battle count as its next lit "
      "shot, once a ball.", ("spot", "coop_battle_rules")),
-    ("tier2", "TIER 2 AFTER A BATTLE", "Once a tier-1 battle has started on their turn, every battle on the selection "
-     "screen is open while they are up, tier 2 included (the game's UNLOCK ALL MONSTER BATTLES).",
-     ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", "coop_tier1_rules")),
+    ("tier2", "TIER 2 ALWAYS OPEN", "Every battle on the selection screen is open while they are up, tier 2 included "
+     "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).",
+     ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
     ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
      "once a ball.", ("addball", 1)),
-    ("maser", "MASER ALWAYS LIT", "In Tank Attack the Maser cannon is lit from the start, not after the tanks "
-     "(the game's own Maser phase check says yes).", ("yes", "maser")),
+    ("maser", "MASER ALWAYS LIT", "The Maser cannon target is lit the whole time they are up: in regular play (the "
+     "Maser shot held lit in the game's own rule) and for all of Tank Attack (its Maser phase check says yes).",
+     ("many", [("lit", "maser"), ("yes", "maser")])),
     ("bridge", "EASIER BRIDGE, DOUBLE TANKS AND JETS", "The bridge falls as on the game's easiest BRIDGE ATTACK "
      "DIFFICULTY, and every tank or jet destroyed counts as two.",
      ("many", [("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min"), ("double", "tanks"), ("double", "jets")])),
@@ -442,13 +443,13 @@ CARD_LINES = {
     "battles": "One ramp lights a battle.",
     "building": "Building Multiball is easier to start.",
     "powerups": "Every Godzilla power-up counts twice.",
-    "ally": "Starts with an ally lit.",
+    "ally": "An ally lit at every one of their balls.",
     "jets": "Starts with 4 jet fighters destroyed.",
     "tanks": "Starts with 4 tanks destroyed.",
     "spot": "Press Action twice in a battle to hit its next shot, once a ball.",
-    "tier2": "Starting a tier 1 battle opens tier 2.",
+    "tier2": "Every battle is open to you, tier 2 included.",
     "addball": "Press Action twice in regular play to add a ball, once a ball.",
-    "maser": "The Maser cannon is lit for the whole of Tank Attack.",
+    "maser": "The Maser cannon is lit the whole time you are up.",
     "bridge": "The bridge falls faster. Tanks and jets count two at a time.",
 }
 
@@ -524,6 +525,10 @@ def _ability_part(how, table, action, sites, values, label):
             cfg, why = ("addball:%d" % how[1], "") if action is not None else ("", NO_ACTION % label)
         elif how[0] == "yes":
             cfg, why = ("yes:%s" % how[1], "") if "coop_yes_%s" % how[1] in sites else ("", NO_SITE % label)
+        elif how[0] == "lit":
+            mask = values.get("coop_lit_%s_mask" % how[1])
+            cfg, why = (("lit:%s=0x%x" % (how[1], mask), "") if mask and "coop_lit_%s" % how[1] in sites
+                        else ("", NO_SITE % label))
         elif how[0] == "double":
             cfg, why = (("double:%s" % how[1], "")
                         if {"coop_count_%s" % how[1], "coop_count_%s_rule" % how[1]} & sites
@@ -541,8 +546,9 @@ def _ability_part(how, table, action, sites, values, label):
             if idx is None:
                 why = NO_ADJ % (label, how[1][3:].replace("_", " "))
             elif how[0] == "unlock":
-                rules = values.get(how[2])
-                cfg, why = ("unlock:%d@0x%x" % (idx, rules), "") if rules else ("", NO_SITE % label)
+                rules = values.get(how[2]) if how[2] else None
+                cfg, why = (("unlock:%d" % idx, "") if not how[2]
+                            else ("unlock:%d@0x%x" % (idx, rules), "") if rules else ("", NO_SITE % label))
             elif how[0] == "gift":
                 cfg, why = ("gift:%d" % idx, "") if "coop_adj_changed" in sites else ("", NO_SITE % label)
             elif how[0] == "cache" and "coop_cache_%d" % idx not in sites:

@@ -231,7 +231,8 @@ export function CoopAwardsDialog({ s, onClose }) {
 
 // ------------------------------------------------------------------ co-op characters (PAD-1031)
 // Each teammate picks one at the start of their first ball; its ability holds while they are up. One row a character:
-// its name (the top line shows it), its ability (only the ones this game's program can have are offered), what that
+// its name (the top line shows it) with a smaller sub header under it on its cards (PAD-1056),
+// its ability (only the ones this game's program can have are offered), what that
 // does. Python reads the abilities off the project's card (modes.coop_ch) and keeps the characters in the project.
 export function CoopCharsDialog({ s, onClose }) {
   const ch = s.coop_ch || {};
@@ -243,9 +244,14 @@ export function CoopCharsDialog({ s, onClose }) {
   const does = (k) => { const a = abil.find((x) => x.key === k); return a ? a.does : "Plays as the game always does."; };
   const row = (r, i) => html`<div class="modes-coop-ch-row" key=${i + ":" + r.name}>
     <span class="small dim">${i + 1}</span>
+    <div class="modes-coop-ch-names">
     <${Field} value=${r.name} sm maxLength=${ch.max_name || 27} width=${210}
       title="Its name, as the machine's top line shows it at the pick."
       onCommit=${(v) => { if (v !== r.name) call("modes.coop_char_set", i, v, null); }} />
+    <${Field} value=${r.sub || ""} sm maxLength=${ch.max_sub || 48} width=${210} placeholder="Sub header (optional)"
+      title="A smaller line under its name on its pick and award cards, as typed (Godzilla vs Biollante (1989)). Empty: none."
+      onCommit=${(v) => { if (v !== (r.sub || "")) call("modes.coop_char_set", i, null, null, v); }} />
+    </div>
     <${Select} sm value=${r.ability} options=${opts} width=${200}
       title=${r.lost ? "The ability this character had is not one this game can have yet." : "What it does while its teammate is up."}
       onChange=${(v) => call("modes.coop_char_set", i, null, v)} />

@@ -356,7 +356,7 @@ def test_the_project_keeps_its_characters_beside_its_awards(tmp_path):
     chars = CP.save_characters(project, {"pick": True, "list": [{"name": "godzilla 1954", "ability": "longer_save"},
                                                                 {"name": ""}, "junk"]})
     assert chars == {"pick": True, "time": CP.PICK_TIME,
-                     "list": [{"name": "GODZILLA 1954", "ability": "longer_save", "picture": ""}]}
+                     "list": [{"name": "GODZILLA 1954", "sub": "", "ability": "longer_save", "picture": ""}]}
     CP.save(project, False)                                          # unticked: the choices stay
     assert CP.load_characters(project) == chars
     assert CP.load_awards(project) == {"score": {"on": False}}

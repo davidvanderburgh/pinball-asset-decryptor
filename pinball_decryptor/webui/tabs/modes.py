@@ -852,7 +852,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         rows = []
         for c in chars["list"]:
             a = by_key.get(c["ability"])
-            rows.append({"name": c["name"], "ability": c["ability"] if a and a["cfg"] else "",
+            rows.append({"name": c["name"], "sub": c["sub"], "ability": c["ability"] if a and a["cfg"] else "",
                          "lost": bool(c["ability"]) and not (a and a["cfg"]),
                          "picture": bool(_CP.picture_path(project, c))})
         lost = sum(1 for r in rows if r["lost"])
@@ -865,7 +865,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                          "why": a["why"]} for a in abil],
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
-                          "max_name": _CP.MAX_NAME, "max": _CP.MAX_CHARACTERS})
+                          "max_name": _CP.MAX_NAME, "max_sub": _CP.MAX_SUB, "max": _CP.MAX_CHARACTERS})
 
     def _save_coop_chars(self, project, chars, what, was, now):
         from ...core import history_log
@@ -982,8 +982,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return self._save_coop_chars(project, chars, "time to pick", name(was), name(chars["time"]))
 
     @rpc
-    def coop_char_set(self, i, name=None, ability=None):
-        """PAD-1031: rename one character, or give it another ability ("" none)."""
+    def coop_char_set(self, i, name=None, ability=None, sub=None):
+        """PAD-1031: rename one character, or give it another ability ("" none); PAD-1056: or another sub header (the
+        smaller line under its name on its cards, "" none)."""
         from ...plugins.stern import coop_play as _CP
         project = self.project()
         chars = _CP.load_characters(project) if project else None
@@ -995,6 +996,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 return False
             was, c["name"] = c["name"], _CP.clean_name(name)
             return self._save_coop_chars(project, chars, "%d name" % (int(i) + 1), was, c["name"])
+        if sub is not None:
+            was, c["sub"] = c["sub"], _CP.clean_sub(sub)
+            return self._save_coop_chars(project, chars, "%s sub header" % c["name"], was or "none", c["sub"] or "none")
         was, c["ability"] = c["ability"], str(ability or "")
         return self._save_coop_chars(project, chars, "%s ability" % c["name"], was or "none", c["ability"] or "none")
 
@@ -1012,7 +1016,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         n = len(chars["list"]) + 1
         while "CHARACTER %d" % n in names:
             n += 1
-        chars["list"].append({"name": "CHARACTER %d" % n, "ability": "", "picture": ""})
+        chars["list"].append({"name": "CHARACTER %d" % n, "sub": "", "ability": "", "picture": ""})
         chars["pick"] = True
         return self._save_coop_chars(project, chars, "count", str(len(chars["list"]) - 1), str(len(chars["list"])))
 

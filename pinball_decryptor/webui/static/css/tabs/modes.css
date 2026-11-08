@@ -170,6 +170,12 @@ html.bp-1280 .nmw-tiles.compact { grid-template-columns: minmax(0, 1fr); }
 .nmw-sdk { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; }
 
 /* one of the game's own modes: a row per number */
+/* PAD-1064: How it works on a game mode's page */
+.modes-how { display: flex; flex-direction: column; gap: 4px; }
+.modes-how-k { font-weight: 600; margin-top: 6px; }
+.modes-how-k:first-child { margin-top: 0; }
+.modes-how-list { margin: 0; padding-left: 18px; }
+.modes-how-list li { overflow-wrap: anywhere; padding: 1px 0; }
 .modes-gm { display: flex; flex-direction: column; gap: 0; }
 .modes-gm-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) max-content minmax(260px, 1.4fr); gap: 6px 18px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .modes-gm-row:last-child { border-bottom: 0; }

@@ -765,6 +765,7 @@ def read(prog, model=None, step=None, cancel=None):
 
     timer_slots = _timer_slots(prog, model)
     tmodel = _timer_object_model(prog, model, facts)
+    slot_of = {}                     # function -> "<class>::v[k]", built by starter_of on first use
 
     reading.engine = {"get_adjustment": get_adj, "award_add": award_add, "mode_getter": getter,
                       "start_slot": start_slot, "title_slot": title_slot}
@@ -809,8 +810,9 @@ def read(prog, model=None, step=None, cancel=None):
             m.add("title_msg", title[0], title[1], title[2], "word", "v[%d] returns it" % title_slot)
         for (rid, slot), vas in sorted(starts.items()):
             if rid == o["id"] and mid == o["id"] and slot == start_slot:
-                m.facts.append("start start: the mode getter(%d) at %s then v[%d]" % (
-                    rid, ",".join("0x%x" % v for v in vas[:4]), slot))
+                by = starter_of(prog, model, vas, slot_of)
+                m.facts.append("start start: the mode getter(%d) at %s then v[%d]%s" % (
+                    rid, ",".join("0x%x" % v for v in vas[:4]), slot, ", in %s" % by if by else ""))
         _mode_rows(prog, model, m, o, c, fs, roles, get_adj, adj, award_add, award_off,
                    timer_slots, tmodel, held, set(mode_classes), award_layout_)
         m.facts.append("# overrides: %s" % " ".join("v[%d]=0x%x" % (k, f) for k, f, _t, _c in fs))
@@ -822,6 +824,25 @@ def read(prog, model=None, step=None, cancel=None):
             "%s=%s" % (o["id"], o["class"]) for o in rules))
     say(1.0, "")
     return reading
+
+
+def starter_of(prog, model, vas, slot_of):
+    """``"<class>::v[k]"`` of the first of the start sites *vas* that is in a class's own virtual (the rule of the
+    game that starts the mode: ``RuleBuildingLocks::v[25]``), as the hand tables name it; "" when none is. A
+    site in a plain function is passed over: the one function that starts every mode (Godzilla 0x598b4) comes
+    first on several. *slot_of* caches the function -> slot map between the modes (PAD-1064)."""
+    if not vas:
+        return ""
+    if not slot_of:
+        for c in model:
+            for k, f in S.own_slots(prog, model, c)[1]:
+                slot_of.setdefault(f, "%s::v[%d]" % (c, k))
+        slot_of.setdefault(None, "")
+    for va in vas:
+        got = slot_of.get(prog.func_start(va))
+        if got:
+            return got
+    return ""
 
 
 def _timer_slots(prog, model):

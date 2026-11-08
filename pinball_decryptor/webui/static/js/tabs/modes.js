@@ -1160,6 +1160,28 @@ function RewriteSec({ s, g }) {
   <//>`;
 }
 
+// PAD-1064: what the app reads off the game program about one of its own modes - what starts it, the clips and the
+// sounds its own code plays - read-only (there is no source to show: the game's modes are compiled into it)
+function HowSec({ h }) {
+  const starts = h.starts || [], clips = h.clips || [], sounds = h.sounds || [];
+  return html`<${Sec} title="How it works" tipText=${h.note}>
+    <div class="modes-how">
+      <div class="modes-how-k">What starts it</div>
+      ${starts.length ? html`<ul class="modes-how-list">${starts.map((t) => html`<li key=${t}>${t}</li>`)}</ul>`
+        : html`<div class="small muted">The app did not find what starts it in the game program.</div>`}
+      ${h.unread ? html`<div class="small muted">${h.unread}</div>` : html`
+        <div class="modes-how-k">Clips it plays <span class="muted">(${clips.length || "none found"})</span></div>
+        ${clips.length ? html`<ul class="modes-how-list">${clips.map((c) => html`<li key=${c.key} ...${tip(c.tip)}>${c.text}</li>`)}</ul>` : null}
+        ${h.clips_more ? html`<div class="small muted">${h.clips_more}</div>` : null}
+        <div class="modes-how-k">Sounds and callouts it plays <span class="muted">(${sounds.length || "none found"})</span></div>
+        ${sounds.length ? html`<ul class="modes-how-list">${sounds.map((x) => html`<li key=${x.key} ...${tip(x.tip)}>
+          ${x.path ? html`<${PlayButton} path=${x.path} />` : null} <b>${x.text}</b>${x.name ? html` <span class="muted">${x.name}</span>` : null}</li>`)}</ul>` : null}
+        ${h.sounds_more ? html`<div class="small muted">${h.sounds_more}</div>` : null}
+        <div class="small muted wrap">${h.sounds_note}</div>`}
+    </div>
+  <//>`;
+}
+
 function GameModePage({ g, s }) {
   const rows = g.rows || [];
   return html`<section class="card modes-editor">
@@ -1171,6 +1193,7 @@ function GameModePage({ g, s }) {
     </div>
     <div class="modes-status info" role="status">${g.about}</div>
     <div class="bd modes-editor-bd">
+      ${g.how ? html`<${HowSec} h=${g.how} />` : null}
       <${Sec} title="Timers and awards">
         ${rows.length ? html`<div class="modes-gm">${rows.map((r) => html`<${GameRow} key=${r.key} r=${r} />`)}</div>`
           : html`<div class="small muted">No numbers to show.</div>`}

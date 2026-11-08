@@ -49,8 +49,9 @@ from dataclasses import dataclass
 #: Metallica 1.04 counted each mode's start in another mode's function, PAD-634; 4: a crule title's
 #: award record read by table and level - value, growth, cap - and editable, PAD-798; 5: a mode
 #: constructor that stores its vptr post-indexed, or is called a word before its push, is found -
-#: Jurassic Park LE/Pro 1.16 read 11 of their 24 modes, PAD-834)
-READER_REV = 5
+#: Jurassic Park LE/Pro 1.16 read 11 of their 24 modes, PAD-834; 6: a C++ title's start line names the
+#: class whose virtual starts the mode, as the hand tables do - the Modes tab's How it works, PAD-1064)
+READER_REV = 6
 
 #: game programs as Stern shipped them (sha1 -> "game version"), every build this app has seen
 KNOWN_STOCK = {

@@ -23,7 +23,12 @@ offers TEAM PLAY 2 VS 2 and one Start adds all four players, as on Stern's own t
 Start in the first ball added the next; a plain Start is still a one-player game): players 1 and 3 are
 one team, 2 and 4 the other, each team with its own score and its own progress (the game plays two players, a team
 each) and the turns alternating the teams, P1 P2 P3 P4 (pad_mode_runtime.c "TEAM 2V2"). The characters' pick works as
-in co-op: each player picks at their first ball, no two the same."""
+in co-op: each player picks at their first ball, no two the same.
+
+PAD-1065 (DoomWalrus666): Co-op, Team 2v2 and Team 2v1 without the characters' abilities. CO-OP PLAY 4, 5 and 6 are
+those games Classic (1, 2 and 3 are now called Enhanced): the players still pick a character, but none has an
+ability; the pick shows each card with a patch over its ability badge that says NO SPECIAL ABILITY
+(:func:`classic_patch`)."""
 import re
 import struct
 
@@ -47,11 +52,13 @@ NO_PORT = ("The app does not know where %s keeps its players yet, so it cannot g
 NO_BUTTON = "The game program names no right flipper button, so a teammate could not join."
 #: round 2: the service menu's row (menu_settings.COOP_PLAY): its values, and its help line in the game's own menu.
 #: PAD-1042: four, 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1 (daveyvandy: "a designated option for 2V1"; the row shows
-#: the number; Off/On had 0 and 1 and v1.360.0's row 0-2, so a pick is kept)
-MENU_VALUES = 4
+#: the number; Off/On had 0 and 1 and v1.360.0's row 0-2, so a pick is kept). PAD-1065: seven, 1-3 the Enhanced
+#: games (the characters' abilities hold) and 4-6 the same games Classic (a pick, no abilities)
+MENU_VALUES = 7
 MENU_OFF, MENU_COOP, MENU_TEAMS, MENU_TEAMS_2V1 = 0, 1, 2, 3
+MENU_COOP_CLASSIC, MENU_TEAMS_CLASSIC, MENU_TEAMS_2V1_CLASSIC = 4, 5, 6
 #: the help names the values and says what they cost (63 characters: the spare help lines' room)
-MENU_HELP = "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1. 1-3: Insider mostly off"
+MENU_HELP = "0 Off. Enhanced 1 Co-op 2 2v2 3 2v1. 4-6 Classic. Insider off"
 #: how a teammate joins, for the tab and the log
 HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
        "a plain Start adds a competing player as always; with characters, a player starting a game alone with the "
@@ -61,6 +68,9 @@ TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), pick TEAM PLAY 2 VS 2 on the star
              "attract) and one Start adds all four players: players 1 and 3 against players 2 "
              "and 4, each team with its own score and progress, the teams taking turns; at 3 (Team 2v1) the same "
              "with three players, players 1 and 3 against player 2, who plays both of team 2's turns")
+#: PAD-1065: what Classic is, for the tab and the log
+CLASSIC_HOW = ("4, 5 and 6 (Classic) are Co-op, Team 2v2 and Team 2v1 with no special abilities: the players still "
+               "pick a character, but none of them has its ability")
 
 
 class CoopError(ValueError):
@@ -811,6 +821,8 @@ def preset_for(prof):
 PICTURE_DIR = "coop"
 #: a screen's node: ``PadCoop_<n>`` (1-based) and ``PadCoop_Random``
 SCREEN_NODE = "PadCoop_%s"
+#: PAD-1065: a character's Classic patch over its card
+CLASSIC_NODE = "PadCoopClassic_%d"
 #: the generated panel's colours when a character has no picture of its own
 PANEL_COLOR, TITLE_COLOR = "#3a0a0a", "#ffb400"
 
@@ -838,10 +850,12 @@ def wants_screens(project, prof):
     return bool(chars["pick"] and chars["list"])
 
 
-def pick_screens(project, characters=None, words_for=None):
+def pick_screens(project, characters=None, words_for=None, classic=None):
     """The pick's screens for :func:`.scene_write.add_screens`: one per character (``PadCoop_1`` ...) and
     ``PadCoop_Random``; ``[]`` when the project's characters have no pick. *words_for* (key -> words) names what
-    each ability does, as the top line says it."""
+    each ability does, as the top line says it. PAD-1065: with *classic* (None: when CO-OP PLAY is in the service menu,
+    the only way to play Classic) each character with an ability also gets its :func:`classic_patch`
+    (``PadCoopClassic_1`` ...), after the cards so it draws over its own."""
     from . import mode_assets as MA
     chars = _characters(characters if characters is not None else load_characters(project))
     if not chars["pick"] or not chars["list"]:
@@ -855,7 +869,36 @@ def pick_screens(project, characters=None, words_for=None):
                         words=" ", words_name=(SCREEN_NODE % ("Random" if i == n else i + 1)) + "_Words",
                         x=float(CARD_AT[0]), y=float(CARD_AT[1]), words_at=TIMER_WORDS_AT,
                         words_scale=TIMER_WORDS_SCALE))
+    if classic is None:
+        classic = menu_asked(project)
+    for i in range(n if classic else 0):
+        got = classic_patch(project, chars, i, words_for, chars.get("theme"))
+        if got is not None:
+            (x, y), art = got
+            out.append(dict(name=CLASSIC_NODE % (i + 1), art_rgba=art, words=" ", x=float(CARD_AT[0] + x),
+                            y=float(CARD_AT[1] + y)))
     return out
+
+
+def classic_patch(project, characters, index, words_for=None, theme=None):
+    """PAD-1065: the part of character *index*'s pick card that Classic (CO-OP PLAY 4-6) draws differently: the
+    card as a character without an ability draws it (NO SPECIAL ABILITY, "Plays as the game always does."), cut to
+    the box where it differs from the card with its ability, out to multiples of 4. ``((x, y) in the card, RGBA)``,
+    or None when the character has no ability (its card says so already)."""
+    import numpy as np
+    chars = _characters(characters)
+    if not chars["list"][index]["ability"]:
+        return None
+    full = pick_card(project, chars, index, words_for, theme)
+    plain = pick_card(project, dict(chars, list=[dict(c, ability="") if k == index else c
+                                                 for k, c in enumerate(chars["list"])]), index, words_for, theme)
+    ys, xs = np.nonzero(np.any(full != plain, axis=2))
+    if not len(xs):
+        return None
+    h, w = plain.shape[:2]
+    x0, y0 = int(xs.min()) // 4 * 4, int(ys.min()) // 4 * 4
+    x1, y1 = min(w, -(-(int(xs.max()) + 1) // 4) * 4), min(h, -(-(int(ys.max()) + 1) // 4) * 4)
+    return (x0, y0), np.ascontiguousarray(plain[y0:y1, x0:x1])
 
 
 def picture_file_name(name):

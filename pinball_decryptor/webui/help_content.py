@@ -3520,6 +3520,10 @@ PREVIEW_HELP = {
                 "who plays both of team 2's turns each ball so both teams get the same number of balls. Pick "
                 "**TEAM PLAY 2 VS 1** on the start menu and one Start adds all three (**3 PLAYERS ADDED**, **TEAM 1: "
                 "P1 AND P3**, **TEAM 2: P2**); another Start adds no one, and the higher team score goes on a **TEAM 2V1** board of its own.\n"
+                "- **4, 5 and 6 (Classic):** Co-op, Team 2v2 and Team 2v1 as 1, 2 and 3 (the Enhanced games), "
+                "but without special abilities: each player still picks a character at their first ball, and its "
+                "card says **NO SPECIAL ABILITY**, but none of them changes the game. Insider Connected is off as "
+                "with 1.\n"
                 "- **0 (Off):** the game plays and reports to Insider Connected as it always has, on a card "
                 "with no modes. A card that also carries modes keeps its scores off Insider Connected "
                 "either way.",

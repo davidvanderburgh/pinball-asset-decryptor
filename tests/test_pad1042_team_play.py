@@ -177,7 +177,7 @@ def test_the_top_line_board_and_gate_know_team_play():
     assert "if (n && !coop.teams && pm_in_game()) coop_scores_same(n);" in tick   # a team's score is the game's own
     line = R._lift(src, "static void coop_line(const char *s)")
     assert '"teams on")) { coop.teams_always = 4;' in line and '"teams 2v1")) { coop.teams_always = 3;' in line
-    assert "return !while_at || (value >= 1u && value <= 3u);" in R._lift(
+    assert "return !while_at || (value >= 1u && value <= 6u);" in R._lift(
         src, "static int insider_holding(unsigned while_at, unsigned value)")
 
 
@@ -186,9 +186,9 @@ def test_the_service_menu_row_has_team_2v2_and_the_tab_says_how_to_play_it(tmp_p
     from pinball_decryptor.plugins.stern import engine as E
     from pinball_decryptor.webui import help_content
     key, values, names, opts = E._CoopMenu(lambda *a: None).wanted()
-    assert (values, names, opts) == (4, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True})
+    assert (values, names, opts) == (7, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True})
     assert (CP.MENU_OFF, CP.MENU_COOP, CP.MENU_TEAMS) == (0, 1, 2)
-    assert len(CP.MENU_HELP) <= 63 and "2 Team 2v2, 3 Team 2v1" in CP.MENU_HELP
+    assert len(CP.MENU_HELP) <= 63 and "1 Co-op 2 2v2 3 2v1" in CP.MENU_HELP          # PAD-1065: shorter, for 4-6
     text = str(help_content.__dict__)
     assert CP.MENU_TEAMS_2V1 == 3 and "**3 (Team 2v1):** the same team game for three players" in text
     assert "**2 (Team 2v2):** players 1 and 3 play against players 2 and 4" in text
@@ -293,11 +293,11 @@ def test_the_row_is_four_numbers_from_zero_on_godzilla():
     settings, writes, _cat, refused = M.plan_many(t, [E._CoopMenu(lambda *a: None).wanted()])
     assert not refused
     s = settings[0]
-    assert (s.values, s.low, s.default, s.kind, s.help) == (4, 0, 0, M.number_kind(t), CP.MENU_HELP)
+    assert (s.values, s.low, s.default, s.kind, s.help) == (7, 0, 0, M.number_kind(t), CP.MENU_HELP)
     assert M.number_kind(t) == 2 and t.entry(t.by_name["AD_GAME_ID"])["max"] == 9999
     out = bytearray(raw)
     for off, data in writes.items():
         out[off:off + len(data)] = data
     e = AdjustmentTable(bytes(out)).entry(s.id)
-    assert (e["min"], e["max"], e["default"]) == (0, 3, 0)                  # an Off/On row's 0 and 1 mean the same
+    assert (e["min"], e["max"], e["default"]) == (0, 6, 0)                  # an Off/On row's 0 and 1 mean the same
     assert M.check(bytes(out), s) in ([], ["no menu page lists it"])         # the page record is placed by the Write

@@ -1212,10 +1212,12 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
     result.coop_file = path
     result.lines.append("co-op play: %s" % CP.HOW)
     if setting:
-        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1); %s" % (
-            "Insider Connected is off only while it is 1, 2 or 3" if only
+        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1, "
+                            "4-6 the same Classic); %s" % (
+            "Insider Connected is off only while it is 1 to 6" if only
             else "the card's modes keep its scores off Insider Connected either way"))
         result.lines.append("co-op play: Team 2v2 and 2v1: %s" % CP.TEAMS_HOW)    # PAD-1042
+        result.lines.append("co-op play: %s" % CP.CLASSIC_HOW)                     # PAD-1065
     got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
     result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))
     got = [line.split(" ", 2)[2].split("|")[0] for line in text.splitlines() if line.startswith("character ")]

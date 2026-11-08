@@ -1193,3 +1193,56 @@ value coop_lit_maser_mask  0x8000000
 # ... and its award wants the player's charge word (this + 4 x player + 0x14) non-zero: kept at least 1
 value coop_lit_maser_at    0x14
 value coop_lit_maser_min   1
+# the Mechagodzilla rule (its game-start copy of the two difficulties; LE's object is 0x7b29f8): spins toward
+# ONLINE at this + (player - 1) x 4 + 0x78 (goal at +0xd0, 20 on difficulty 1) and, while the shield is up, the
+# hits LEFT in the high word of the u64 at this + player x 8 + 0x30 - a character's double:spins / double:shield
+site coop_count_spins     0x0015c7a8 0xe92d40f8 0xe1a04000
+value coop_count_spins_at  0x74
+site coop_count_shield    0x0015c7a8 0xe92d40f8 0xe1a04000
+value coop_count_shield_at 0x34
+value coop_count_shield_stride 8
+# the building rule (one object): its six damage steps are a vector at +0x2c of words, a percent byte per player
+# (100 = the step done; the game's default difficulty does one a shot) - a character's steps:building does two
+value coop_steps_building_obj 0x007b1d10
+value coop_steps_building_at  0x2c
+value coop_steps_building_n   6
+# the heat ray rule (one object): HEAT RAY READY is the word at this + player x 4 + 4 (1 = ready, the spinner
+# maxed, HOLD DOWN ACTION BUTTON) - a character's count:heatray=1 sets it at the pick (the game clears it on the fire)
+value coop_count_heatray_obj 0x007b2d68
+value coop_count_heatray_at  0x4
+# ... its level at this + (player - 1) x 4 + 0x28 (READY when it reaches 4) and its spins toward the next level at
+# this + player x 4 + 0x28: count:heatlevel=3,count:heatspins=9 at the pick puts the heat ray
+# one spin from READY (the halved HEAT RAY SPINS PER LEVEL is 10), so the game's own transition lights it
+value coop_count_heatspins_obj 0x007b2d68
+value coop_count_heatspins_at  0x28
+# the saucer (Godzilla's pop bumper) rule: pop hits toward Saucer Attack at this + player x 4 + 4 - double:saucer
+value coop_count_saucer_obj   0x007b0de8
+value coop_count_saucer_at    0x4
+# the powerlines rule: the three targets of a set are words at +0x38 (1 = hit; a set done clears them and counts at
+# +0x44) - steps:powerline makes each hit two targets
+value coop_steps_powerline_obj 0x007b0b90
+value coop_steps_powerline_at  0x38
+value coop_steps_powerline_n   3
+value coop_steps_powerline_inline 1
+value coop_steps_powerline_done 1
+value coop_steps_powerline_width 4
+# MAGNA GRAB lit: the word the game sets from MAGNA GRAB LIT AT GAME START (194) at game start (LE 0x155cdc),
+# this + player x 4 + 0x14 of the Mechagodzilla magnet rule - keep:magna=1 holds it lit
+value coop_keep_magna_obj     0x007b1d4c
+value coop_keep_magna_at      0x14
+value coop_count_heatlevel_obj 0x007b2d68
+value coop_count_heatlevel_at  0x24
+# the Monster Rampage rule: its letters are a byte a player at this + player + 0xb (RAMPAGE STARTING LETTERS at game
+# start, 12 to start at +0xf + player) - double:rampage makes each letter two
+value coop_count_rampage_obj    0x007b2cfc
+value coop_count_rampage_at     0xb
+value coop_count_rampage_stride 1
+value coop_count_rampage_width  1
+# the Train rule (LIGHT TRAIN's handler names it): trains collected at this + player x 4 + 0x2c, one a lit loop -
+# double:train collects two at a time
+value coop_count_train_obj    0x007b2d24
+value coop_count_train_at     0x2c
+# the Destruction Jackpot rule (LIGHT LIGHT DESTRUCTION JACKPOT 309's handler): lit byte at +0xb + player, the
+# multiplier step (0 = 1X, 1 = 2X ...) at this + (player - 1) x 4 + 0x10, raised with each light - keep:djmult>=1
+value coop_keep_djmult_obj    0x007b1c78
+value coop_keep_djmult_at     0xc

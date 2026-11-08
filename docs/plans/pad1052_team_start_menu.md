@@ -1,5 +1,10 @@
 # PAD-1052: team play picked on the game's start menu, as stock Stern does it
 
+**Done** (b1603afa4): the plan below was followed with two changes found in the emulator - the fill runs at ball 1's
+`ball_start` through the runtime's own bus hook (the tick hung Iron Maiden LE 1.18; Godzilla's menu-started game
+dispatches no `game_start`; a second bus hook never ran there), and the lines are said three times over (Godzilla's
+game-start film hid the first 10 s). Proven on Godzilla LE 1.16, Iron Maiden LE 1.18, Foo Fighters LE 1.04.
+
 ## The ask
 
 - DoomWalrus666: with CO-OP PLAY at Team 2v2 you press Start four times; one press should add all four and say

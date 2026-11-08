@@ -17652,8 +17652,8 @@ static void coop_arm(void)
             coop_teams_switched_on() == 4u ? "Team 2v2" : coop_teams_switched_on() == 3u ? "Team 2v1"
             : coop_switched_on() ? "On" : "Off");
     if (coop.teams_always)
-        say("teams: every game of two or more is a team game (coop.cfg `teams %s`): players 1+2 against %s",
-            coop.teams_always == 3u ? "2v1" : "on", coop.teams_always == 3u ? "3" : "3+4");
+        say("teams: every game of two or more is a team game (coop.cfg `teams %s`): players 1+3 against %s",
+            coop.teams_always == 3u ? "2v1" : "on", coop.teams_always == 3u ? "2" : "2+4");   /* PAD-1052 */
     coop_awards_arm();                                        /* PAD-1028 */
     if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */

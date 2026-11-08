@@ -15853,7 +15853,9 @@ static struct {
     volatile int pending;                /* the menu shows our entry now */
     volatile unsigned long seen_ms;      /* when it last did */
 } tm;
-static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1";
+static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";
+static unsigned team_menu_kind(void);
+static const char *team_menu_name(void);
 static void team_frame_restore(void);
 static void on_team_dispatch(unsigned *r);
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
@@ -15926,11 +15928,17 @@ static unsigned coop_team_of(unsigned p)
 }
 
 /* PAD-1052: line `step` of what the fill says on the top line, `n` players added: "4 PLAYERS ADDED",
- * "TEAM 1: P1 AND P3", "TEAM 2: P2 AND P4" (2v1: "TEAM 2: P2"); 0 past the last (tests lift it verbatim) */
+ * "TEAM 1: P1 AND P3", "TEAM 2: P2 AND P4" (2v1: "TEAM 2: P2"); n 1, the start menu's CO-OP PLAY: "CO-OP PLAY",
+ * "START ADDS PLAYERS", "UP TO 4 PLAYERS"; 0 past the last (tests lift it verbatim) */
 static int coop_join_words(unsigned n, unsigned step, char *out, unsigned cap)
 {
+    static const char *const coop_words[] = { "CO-OP PLAY", "START ADDS PLAYERS", "UP TO 4 PLAYERS" };
     unsigned p;
     int o;
+    if (n == 1 && step <= 2) {
+        pm_snprintf(out, cap, "%s", coop_words[step]);
+        return 1;
+    }
     if (n < 2 || n > 4 || step > 2) return 0;
     if (!step) {
         pm_snprintf(out, cap, "%u PLAYERS ADDED", n);
@@ -18119,15 +18127,31 @@ static void on_team_dispatch(unsigned *r)
             *coop_players_byte, *coop_ball_byte, coop_ball_byte[-1], coop_teammates());
         return;
     }
-    want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && coop_teams_switched_on();
+    want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && team_menu_kind();
     if (!want)
-        say("teams: ball 1 of a one-player game - not the menu's TEAM PLAY (shown %d, %lu ms ago)", tm.pending,
-            pm_ms() - tm.seen_ms);
+        say("teams: ball 1 of a one-player game - not the menu's %s (shown %d, %lu ms ago)", team_menu_name(),
+            tm.pending, pm_ms() - tm.seen_ms);
     tm.pending = 0;
     tm.seen_ms = 0;
     team_frame_restore();                                     /* the menu's words back as it ends in a game */
     if (!want) return;
-    say("teams: the game began as the start menu's %s", coop_teams_switched_on() == 3u ? team_name_2v1 : team_name_2v2);
+    say("teams: the game began as the start menu's %s", team_menu_name());
+    if (team_menu_kind() == 1u) {                             /* CO-OP PLAY: a co-op game, each Start a teammate */
+        if (coop_teammates()) return;                         /* PAD-1054's team of one is one already */
+        coop.game = chg_game_now() + 1;
+        coop.teams = 0;
+        coop.n = 1;
+        coop.turn = 1;
+        coop.round = 1;
+        coop_awards_begin();                                  /* PAD-1028 */
+        coop_chars_begin();                                   /* PAD-1031 */
+        say("co-op: CO-OP PLAY from the start menu - each Start in ball 1 adds a teammate, no button held");
+        coop.join_n = 1;                                      /* the top line says so, then player 1's pick */
+        coop.join_step = 0;
+        coop.join_at = pm_ms();
+        coop_join_show();
+        return;
+    }
     if (!coop_team_fill(0, 0, 0, 0)) say("teams: TEAM PLAY - the game added no one (credits?) - a one-player game");
 }
 
@@ -18190,6 +18214,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     say("co-op: teammate %u joins (%u in the team, one score panel each; the game plays one player for them all)",
         coop.n, coop.n);
     coop_scores_mark(coop.n);
+    coop.join_n = 0;                                          /* PAD-1052: the start menu's CO-OP PLAY lines end */
     /* PAD-1031: teammate 1 picks once there is a team; each join opens it again, since the one joining held the right
      * flipper for Start and walked it (emulator, Godzilla LE 1.16: teammate 1 got the second character) */
     if (pk.open && pk.who == 1) pk.open = 0;
@@ -18454,7 +18479,7 @@ static void coop_arm(void)
     if (coop.teams_always)
         say("teams: team play is always on (coop.cfg `teams %s`): players 1+3 against %s",
             coop.teams_always == 3u ? "2v1" : "on", coop.teams_always == 3u ? "2" : "2+4");   /* PAD-1052 */
-    if (coop.teams_always || coop.setting) team_menu_arm();   /* PAD-1052: TEAM PLAY on the start menu */
+    team_menu_arm();                                          /* PAD-1052: TEAM PLAY / CO-OP PLAY on the start menu */
     coop_awards_arm();                                        /* PAD-1028 */
     if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */
@@ -19531,16 +19556,26 @@ static void comp_arm(void)
  * through Standard's name message (`comp_menu_end_msg`) while the cursor is on it. The menu runs these every frame;
  * tm.pending says the entry is showing, and a one-player game whose ball 1 starts within TEAM_PICK_MS of it is the
  * team game (on_team_dispatch). The row is read live: the entry goes on the menu as it opens. */
+/* PAD-1052 (DoomWalrus666: "Can we please make Co-op mode work the same way?"): what the entry makes now - 4 TEAM
+ * PLAY 2 VS 2, 3 TEAM PLAY 2 VS 1 (CO-OP PLAY 2, 3, their Classic 5, 6), 1 CO-OP PLAY (CO-OP PLAY 1 or Classic 4, or
+ * a card of co-op with no such row), 0 none (Off) */
+static unsigned team_menu_kind(void)
+{
+    unsigned t = coop_teams_switched_on();
+    return t ? t : coop_switched_on() ? 1u : 0u;
+}
+
 static const char *team_menu_name(void)
 {
-    return coop_teams_switched_on() == 3u ? team_name_2v1 : team_name_2v2;
+    unsigned k = team_menu_kind();
+    return k == 1u ? team_name_coop : k == 3u ? team_name_2v1 : team_name_2v2;
 }
 
 static int team_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
 {
     unsigned name = *(const unsigned *)(ent + nat);
     return *(const unsigned *)(ent + kat) == TEAM_KIND || name == (unsigned)(unsigned long)team_name_2v2
-        || name == (unsigned)(unsigned long)team_name_2v1;
+        || name == (unsigned)(unsigned long)team_name_2v1 || name == (unsigned)(unsigned long)team_name_coop;
 }
 
 static void team_menu_built(unsigned *r)
@@ -19553,7 +19588,7 @@ static void team_menu_built(unsigned *r)
     unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
     unsigned i, k, n0 = *count, tmpl = 0;
     static int room_said, said;
-    if (!coop_teams_switched_on()) return;                 /* the row says Off or Co-op: no team entry */
+    if (!team_menu_kind()) return;                         /* the row says Off: no entry */
     if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
         return;
     for (i = 0; i < n0; i++) {
@@ -19613,7 +19648,7 @@ static void team_menu_frame(unsigned *r)
     unsigned n = *count + last;
     static int room_said;
     int was = tm.pending;
-    if (creg > 12 || breg > 12 || !idx || !msg || n > cap || !coop_teams_switched_on()) return;
+    if (creg > 12 || breg > 12 || !idx || !msg || n > cap || !team_menu_kind()) return;
     if ((unsigned long)sp != team_frame_sp || team_frame_at >= n || list[team_frame_at] != idx) {   /* a new menu */
         team_frame_sp = (unsigned long)sp;
         team_frame_restore();

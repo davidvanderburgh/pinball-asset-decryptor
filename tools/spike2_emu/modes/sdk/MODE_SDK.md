@@ -6185,6 +6185,8 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).
 
+**CO-OP PLAY on the start menu** (PAD-1052, DoomWalrus666: "Can we please make Co-op mode work the same way?"): with CO-OP PLAY at 1 (or Classic 4, or a card of co-op with no such row) the start menu gets a CO-OP PLAY entry at the TEAM PLAY entry's sites (`team_menu_kind` 1). Picked, ball 1's start makes a co-op game of one (coop.n 1, as PAD-1054's held-button start does) and the top line says `CO-OP PLAY`, `START ADDS PLAYERS`, `UP TO 4 PLAYERS`; each Start in that ball then adds a teammate with no button held, and the first join ends the lines. A co-op game has 2-4 players, so one Start cannot add them all as TEAM PLAY's does (stock TMNT's own start counts its logged-in Insider players, not its co-op pick). The right flipper button + Start still adds a teammate. Emulator-proven: Godzilla LE 1.16, Iron Maiden LE 1.18 (teammates 2 and 3 by plain Starts).
+
 ### Team 2v2 (PAD-1042)
 
 DoomWalrus666: "a team 2v2 mode. Player 1 and player 2 are on one team against Player 3 and Player 4 ... Scores are

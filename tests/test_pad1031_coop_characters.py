@@ -32,6 +32,7 @@ static int pm_in_game(void) { return in_game; }
 static unsigned pm_player(void) { return 1; }
 static struct { int on; unsigned button, game, n, turn; } coop;
 static unsigned coop_teammates(void) { return coop.n; }
+static int coop_classic(void) { return 0; }             /* PAD-1065: CO-OP PLAY Classic (4-6): abilities off; not here */
 static int str_starts(const char *s, const char *p) { return !strncmp(s, p, strlen(p)); }
 @NUMBER@
 static int coop_ball_msg = 5, coop_ball_held;

@@ -63,7 +63,7 @@ def test_the_plan_puts_coop_cfg_beside_the_runtime(tmp_path, monkeypatch):
                      coop=True, coop_prof=prof)
     assert result is not None and result.build is None
     assert _read(result.coop_file) == "coop on\nbutton 59\n"
-    assert any(line.startswith("co-op play: hold the right flipper button") for line in result.lines)
+    assert any(line.startswith("co-op play: pick CO-OP PLAY on the start menu") for line in result.lines)   # PAD-1052
 
 
 def test_the_card_install_and_the_emulator_carry_coop_cfg():
@@ -95,7 +95,8 @@ def test_the_modes_tab_tick_saves_the_choice_and_says_how_teammates_join(tmp_pat
     data = staged_changes.load(str(tmp_path))
     assert data[CP.STAGED_KEY] == {"on": True} and data["audio"] == {"x": "y"}
     assert state["coop_shown"] is True and state["coop_on"] is True
-    assert state["coop_note"].startswith("On the card: Hold the right flipper button and press Start")
+    assert state["coop_note"].startswith("On the card: Pick CO-OP PLAY on the start menu")   # PAD-1052
+    assert "or hold the right flipper button and press Start to add one" in state["coop_note"]
     assert state["coop_note"].endswith("Its scores stay off Insider Connected.")
     monkeypatch.setattr(CP, "title_refusal", lambda prof: "Venom LE 1.07 has co-op play of its own.")
     svc._publish_coop(str(tmp_path))

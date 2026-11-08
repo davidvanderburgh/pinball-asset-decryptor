@@ -422,9 +422,9 @@ ABILITIES = (
      "counts twice and every shield target hit counts twice.",
      ("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
                ("double", "shield")])),
-    ("powerups", "DOUBLE POWER-UPS AND SAUCER", "Every Godzilla power-up the game gives counts twice, and every hit on "
-     "the saucer (the pop bumper) counts twice toward Saucer Attack.",
-     ("some", [("boost", 200), ("double", "saucer")])),
+    ("powerups", "DOUBLE POWER-UPS, SAUCER AND RAMPAGE", "Every Godzilla power-up the game gives counts twice, every hit "
+     "on the saucer (the pop bumper) counts twice toward Saucer Attack, and every RAMPAGE letter collected counts as two.",
+     ("some", [("boost", 200), ("double", "saucer"), ("double", "rampage")])),
     ("ally", "AN ALLY EVERY BALL, LONGER RODAN", ("An ally is lit at each of their balls: the next of Mothra, Rodan "
       "and Anguirus in the game's own order (its LIGHT ALLY), at the pick and at every later turn; Rodan's playfield "
       "multiplier runs twice its timer."),
@@ -455,7 +455,7 @@ CARD_LINES = {
     "heat_ray": "Heat ray ready at your first spin. Recharges in half the spins.",
     "battles": "One ramp lights a battle.",
     "building": "Building damage two steps a shot. Mecha spins and shield hits count twice.",
-    "powerups": "Every power-up counts twice. Saucer hits count twice.",
+    "powerups": "Power-ups, saucer hits and rampage letters all count twice.",
     "ally": "An ally lit at every one of your balls. Rodan lasts twice as long.",
     "jets": "Starts with 4 jet fighters destroyed.",
     "tanks": "Starts with 4 tanks destroyed.",

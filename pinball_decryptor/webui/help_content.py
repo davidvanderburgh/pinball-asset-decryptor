@@ -3474,7 +3474,7 @@ PREVIEW_HELP = {
                 "quick presses of the Action button; on Godzilla the longer ball save also doubles the Oxygen "
                 "Destroyer timer and adds 5 seconds to every battle, and there are the heat ray one spin from ready "
                 "at the pick and charging in half the spins, easier battles, the building's damage two steps a shot "
-                "with Mechagodzilla's spins and shield hits counting twice, double power-ups with saucer hits counting "
+                "with Mechagodzilla's spins and shield hits counting twice, double power-ups with saucer hits and rampage letters counting "
                 "twice, an ally lit at each of their balls with Rodan's timer doubled, "
                 "4 jets or 4 tanks destroyed at the pick, a battle shot spotted with two quick Action presses "
                 "as often as they like, every battle on the selection screen open (tier 2 included), a second ball "

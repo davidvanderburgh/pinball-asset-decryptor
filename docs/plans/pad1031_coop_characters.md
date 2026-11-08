@@ -319,3 +319,16 @@ Open: the heat ray's fire from the Action hold on the rig (the game's own; READY
 super spinner after it; the Destruction Jackpot timer and a standing multiplier; Rage Combo lit; rampage letters and
 trains x2 (the inlane rollovers 56/57 and loops 84/74 did not move a count in run 11); Mothra saving either outlane
 (eighth message).
+
+## Round 4, batch 3 (2026-11-07 night)
+
+Rampage letters: a byte a player in the Monster Rampage rule (0x7b2cfc LE / 0x7a6664 Pro, +0xb + p), advanced by the
+skill shot while ADVANCE RAMPAGE is lit; `double:rampage` proven (2 -> 4 on one skill shot with 317 given). The
+power-ups character now has it. Found but not yet proven: the Train rule (0x7b2d24 / 0x7a668c, trains at +0x2c + 4p,
+incremented at LE 0x188640 - the loop did not award one even with LIGHT TRAIN given; find the lit train shot), the
+Destruction Jackpot rule (0x7b1c78 / 0x7a5640; 309's handler sets a lit byte at +0xb + p behind the flags word
+0x7b1d88 & 1 - the gift did not light it on the rig). Still open: Rage Combo, Mothra saving either outlane, the 4X
+super spinner, the heat ray's fire from the Action hold on the rig (3 s and 6 s holds left READY set).
+Next run: trains (315 + candidate shots 50/51/56/84 with dumps of 0x7b2d54), the jackpot (why 0x7b1d88 & 1 is clear
+on the rig; then its timer and multiplier words), Rage Combo (no adjustment; find its rule through the RAGE insert's
+shot), Mothra (the allies list at *(0x7b2e28 + 0x1c)), then Pro proofs, the reply.

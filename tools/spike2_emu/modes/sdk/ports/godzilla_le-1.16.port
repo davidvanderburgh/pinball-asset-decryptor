@@ -1232,3 +1232,13 @@ value coop_keep_magna_obj     0x007b1d4c
 value coop_keep_magna_at      0x14
 value coop_count_heatlevel_obj 0x007b2d68
 value coop_count_heatlevel_at  0x24
+# the Monster Rampage rule: its letters are a byte a player at this + player + 0xb (RAMPAGE STARTING LETTERS at game
+# start, 12 to start at +0xf + player) - double:rampage makes each letter two
+value coop_count_rampage_obj    0x007b2cfc
+value coop_count_rampage_at     0xb
+value coop_count_rampage_stride 1
+value coop_count_rampage_width  1
+# the Train rule (LIGHT TRAIN's handler names it): trains collected at this + player x 4 + 0x2c, one a lit loop -
+# double:train collects two at a time
+value coop_count_train_obj    0x007b2d24
+value coop_count_train_at     0x2c

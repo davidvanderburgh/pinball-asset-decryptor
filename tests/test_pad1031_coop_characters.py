@@ -55,6 +55,8 @@ static void pm_set_text(void *t, const char *w) { (void)t; (void)w; }
 static void str_copy(char *d, unsigned cap, const char *s, unsigned n) { (void)n; snprintf(d, cap, "%s", s); }
 static void pm_show(void *node, int on) { (void)node; (void)on; }
 static void coop_cards_find(void) {}                     /* PAD-1028 round 2: the award cards (test_pad1028) */
+static int ball_waits = -1;                              /* PAD-1051: the game's plunger flags (-1: the port has none) */
+static int coop_ball_waits(void) { return ball_waits; }
 struct pm_stock_rule;
 static struct pm_stock_rule *pm_stock_rule(unsigned id) { (void)id; return 0; }
 static int pm_stock_active(struct pm_stock_rule *r) { (void)r; return 0; }
@@ -163,6 +165,7 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static void coop_pick_say(void)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
+       "static int coop_launch_press(unsigned long now)",
        "static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)",
        "static int coop_rule_running(unsigned rules)",
        "static void coop_rules_watch(void)",
@@ -361,7 +364,7 @@ def test_the_project_keeps_its_characters_beside_its_awards(tmp_path):
     chars = CP.save_characters(project, {"pick": True, "list": [{"name": "godzilla 1954", "ability": "longer_save"},
                                                                 {"name": ""}, "junk"]})
     assert chars == {"pick": True, "time": CP.PICK_TIME,
-                     "list": [{"name": "GODZILLA 1954", "ability": "longer_save", "picture": ""}]}
+                     "list": [{"name": "GODZILLA 1954", "sub": "", "ability": "longer_save", "picture": ""}]}
     CP.save(project, False)                                          # unticked: the choices stay
     assert CP.load_characters(project) == chars
     assert CP.load_awards(project) == {"score": {"on": False}}

@@ -15437,6 +15437,88 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
 static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
 static int coop_live;                        /* PAD-1031: co-op characters watch the flippers and Action */
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity);
+static int coop_hides(unsigned id);
+
+/* ---- PAD-1051: a switch the game does not see for a while ----------------------------------------------------------
+ * DoomWalrus666 (Godzilla): the co-op pick's flippers also walked the game's own player language select ("USE FLIPPERS
+ * TO SELECT LANGUAGE:", adjustment 14), and the Action press that took a character also launched the ball. A game
+ * learns of a press two ways, and both are held back while a hider wants the switch (coop_hides):
+ * - its level byte, which the drain writes BEFORE it calls switch_edge and which the game polls (Godzilla LE 1.16's
+ *   flippers and Action have no handler at all: 0x378914 reads the byte, with the polarity's bit 2): a hidden press
+ *   leaves it reading released;
+ * - its descriptor's handler bits (0x400 / 0x800: the game's handler runs on that edge, edge_is_hit), which the drain
+ *   reads AFTER switch_edge returns (0x3791e8: `ldrh fp, [sl, #0x1a]` after the bl): cleared while hidden.
+ * A switch is taken at a press and given back at its first press once nothing wants it, or at a release then: the game
+ * sees a whole press or none of it, never a release without its press. That is the generation whose records point at
+ * their descriptors (switch_desc_via, level byte after the edge); the other is not traced and hides nothing. A
+ * descriptor another switch shares is never touched. The drain's thread writes these; switch_held reads `held` (the
+ * runtime's own "right flipper held" for a teammate's Start must still see it). */
+#define EDGE_HIDES 4
+static struct { volatile unsigned id; unsigned at; unsigned short bits; volatile unsigned char held; } edge_hid[EDGE_HIDES];
+static volatile int edge_hid_n;              /* the slots in use so far (a free one's id is 0) */
+
+static int edge_hidden(unsigned id)
+{
+    int k;
+    for (k = 0; k < edge_hid_n; k++)
+        if (edge_hid[k].id == id) return k;
+    return -1;
+}
+
+/* 1 when no other switch's record points at `desc` */
+static int edge_desc_own(unsigned id, unsigned base, unsigned desc)
+{
+    unsigned n = edge.count ? *(const unsigned *)(unsigned long)edge.count : N_SWITCH_IDS, i;
+    if (n > N_SWITCH_IDS) n = N_SWITCH_IDS;
+    for (i = 1; i < n; i++)
+        if (i != id && *(const unsigned *)(unsigned long)(base + i * (unsigned)edge.size + (unsigned)edge.desc_via) == desc)
+            return 0;
+    return 1;
+}
+
+static void edge_give_back(int k, const char *when)
+{
+    volatile unsigned short *f = (volatile unsigned short *)(unsigned long)edge_hid[k].at;
+    *f = (unsigned short)((*f & ~0xc00u) | edge_hid[k].bits);
+    say("switch %u: the game sees it again, %s", edge_hid[k].id, when);
+    edge_hid[k].id = 0;
+}
+
+/* an edge of switch `id` from the drain (`press`: to its pressed level `active`; `lv` its level byte, already the
+ * new level), before the drain picks the game's handler and before the game polls it: hide it, or give it back */
+static void edge_hide_edge(unsigned id, unsigned base, unsigned desc, volatile unsigned char *lv, unsigned active,
+                           int press)
+{
+    static int said;
+    int k = edge_hidden(id), want = coop_hides(id);
+    if (k < 0) {
+        volatile unsigned short *f = (volatile unsigned short *)(unsigned long)(desc + (unsigned)edge.flags_at);
+        if (!press || !want) return;
+        if (edge.desc_via < 0 || edge.level_before || !edge_desc_own(id, base, desc)) {
+            if (!said++)
+                say("switch %u: the game still sees it (%s)", id, edge.desc_via < 0 || edge.level_before
+                    ? "this framework generation's drain is not traced" : "its descriptor is shared");
+            return;
+        }
+        for (k = 0; k < edge_hid_n && edge_hid[k].id; k++) ;
+        if (k == EDGE_HIDES) return;
+        mprotect((void *)(unsigned long)((unsigned)(unsigned long)f & ~0xfffu), 0x2000, 7);
+        edge_hid[k].at = (unsigned)(unsigned long)f;
+        edge_hid[k].bits = (unsigned short)(*f & 0xc00u);
+        *f = (unsigned short)(*f & ~0xc00u);
+        edge_hid[k].held = 1;
+        edge_hid[k].id = id;
+        if (k == edge_hid_n) edge_hid_n = k + 1;
+        say("switch %u: the game does not see it (its handler bits 0x%04x held back, its level reads released)", id,
+            edge_hid[k].bits);
+    } else if (press && !want) {
+        edge_give_back(k, "from this press");
+        return;
+    }
+    edge_hid[k].held = (unsigned char)press;
+    if (press) *lv = (unsigned char)((*lv & ~1u) | (active ^ 1u));
+    else if (!want) edge_give_back(k, "released");
+}
 
 static void on_switch_edge(unsigned *r)
 {
@@ -15460,12 +15542,17 @@ static void on_switch_edge(unsigned *r)
     level = *(const unsigned char *)(unsigned long)(st + (unsigned)edge.level_at);
     if (edge.level_before) level ^= 1u;
     flags = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.flags_at);
+    if (edge_hid_n && (hit = edge_hidden(id)) >= 0)          /* PAD-1051: hidden from the game, its own bits to us */
+        flags = (flags & ~0xc00u) | edge_hid[hit].bits;
     pol = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.polarity_at);
     mask = edge.mode_mask ? *(const unsigned short *)(unsigned long)edge.mode_mask : 0u;
     hit = edge_is_hit(level, flags, pol, edge.mode_mask != 0, mask);
     if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
     if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
     if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
+    if (coop_live || edge_hid_n)                           /* PAD-1051: a press the game is not to see, or sees again */
+        edge_hide_edge(id, base, desc, (volatile unsigned char *)(unsigned long)(st + (unsigned)edge.level_at),
+                       (pol & 4u) ? 1u : 0u, (level & 1u) == ((pol & 4u) ? 1u : 0u));
     playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
     if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
         say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level & 1u,
@@ -15587,7 +15674,14 @@ static void switches_arm(void)
  * end is the game's own for its two players, filed on the runtime's TEAM PLAY board (the higher team's score).
  * TEAM 2V1 (daveyvandy: "There should be a designated option for 2V1"): CO-OP PLAY reading 3 (or coop.cfg `teams 2v1`)
  * is the same team game with three players at most - players 1 and 2 against player 3, who plays both of team 2's
- * turns; a fourth Start adds no one; its scores go on a TEAM 2V1 board of their own. */
+ * turns; a fourth Start adds no one; its scores go on a TEAM 2V1 board of their own.
+ * PAD-1054 (DoomWalrus666: "If right flipper is held when start button is pressed, single player should be able to
+ * select a character with an ability as well ... As long as co-op or one of the team modes is active in the service
+ * menu"): a game started with the button held, CO-OP PLAY not Off and characters to pick, is a co-op game of ONE
+ * (coop.n 1): player 1 picks at once and the ability holds as a teammate's would. Its score goes on the game's own
+ * boards and no co-op awards follow it (one player, nobody to beat); the top line stays the game's own. Any later
+ * Start in its first ball adds a teammate (Team 2v2 / 2v1: the next team player), as in a co-op game - the game plays
+ * one player for the team, so a competing player could never be served. */
 static const char *const COOP_FILES[] = { "/usr/local/padmode/coop.cfg", "/dump/coop.cfg" };
 static struct {
     int on;                              /* coop.cfg says so and the sites are hooked */
@@ -15600,7 +15694,11 @@ static struct {
     unsigned team_n[3];                  /* PAD-1042: players in team 1 and team 2 */
     unsigned team_max;                   /* PAD-1042: the most players this team game takes (4: 2v2, 3: 2v1) */
     unsigned round;                      /* PAD-1042: the round of turns on this ball (1..the larger team) */
+    unsigned started;                    /* PAD-1054: the game_start count last seen */
+    int solo_ask;                        /* PAD-1054: that game began with the button held: a team of one, once it plays */
+    unsigned long held_ms;               /* PAD-1054: pm_ms() the button was last seen held (0: never) */
 } coop;
+#define COOP_SOLO_MS 1500ul              /* PAD-1054: the button held this close before a game's start is "held at Start" */
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
 static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
 static int coop_ball_msg = -1;           /* the message table's line that says "BALL %d" (-1: none found) */
@@ -15680,6 +15778,7 @@ static int coop_button_held(void)
 static int switch_held(unsigned id)
 {
     unsigned base, rec, st, desc, pol, level;
+    int k;
     if (!id || !edge.records || id >= N_SWITCH_IDS) return 0;
     base = *(const unsigned *)(unsigned long)edge.records;
     if (!base) return 0;
@@ -15687,6 +15786,7 @@ static int switch_held(unsigned id)
     st = edge.level_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.level_via) : rec;
     desc = edge.desc_via >= 0 ? *(const unsigned *)(unsigned long)(rec + (unsigned)edge.desc_via) : rec;
     if (st < 0x10000u || desc < 0x10000u) return 0;
+    if (edge_hid_n && (k = edge_hidden(id)) >= 0) return edge_hid[k].held;   /* PAD-1051: the game reads it released */
     level = *(const unsigned char *)(unsigned long)(st + (unsigned)edge.level_at) & 1u;
     pol = *(const unsigned short *)(unsigned long)(desc + (unsigned)edge.polarity_at);
     return level == ((pol & 4u) ? 1u : 0u);
@@ -16057,6 +16157,11 @@ static void coop_turn_show(void)
 {
     char words[40];
     if (coop_ball_msg < 0) return;
+    if (coop.n == 1 && !coop.teams) {                         /* PAD-1054: one player - the game's own BALL n */
+        pm_message_restore(COOP_MSG_ID);                      /* the pick's words, or a handicap's on our id */
+        coop_ball_held = 0;
+        return;
+    }
     if (coop.teams) pm_snprintf(words, sizeof words, "TEAM %u P%u  BALL %%d", (coop.turn + 1u) / 2u, coop.turn);   /* 19 fit */
     else pm_snprintf(words, sizeof words, "PLAYER %u  BALL %%d", coop.turn);
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
@@ -16127,7 +16232,9 @@ static void coop_turn_show(void)
  * The getter (`site adjustment`) is wrapped: only what the game READS changes, never what NVRAM holds, and only in a
  * co-op game while that teammate is up (a pick not yet made: nothing). The pick says itself on the game's top line
  * (PAD-1017's borrow of "BALL %d"): its name, then what it does, in turn; the flippers walk (a character another
- * teammate has is skipped), Action takes it, and when the pick's time is out the one shown is taken.
+ * teammate has is skipped), Action takes it, and when the pick's time is out the one shown is taken. PAD-1051: while
+ * its ball waits in the plunger (the game's own flags) the game does not see the pick's buttons (coop_hides): its own
+ * language select has the flippers, and Action launches, once a character is taken; a launch takes the one shown.
  * PAD-1044 (DoomWalrus666: "how long the player has to select the character is unclear ... if a player doesn't
  * choose a character in time they may not be assigned one"): the seconds left count down on the top line and on the
  * pick's screen (its words line, a box the card draws in its header); the one taken stays on the glass
@@ -16145,6 +16252,7 @@ static void coop_turn_show(void)
  * ball 1 hid it: the pick takes those presses). So the presses count once the turn's ball has left the shooter lane
  * (`lane <id>`), none while a ball waits there, and none this long after one leaves it. */
 #define COOP_LAUNCH_MS 1500ul
+#define COOP_SETTLE_MS 1000ul   /* PAD-1051: a lane edge this soon after the ball began to wait is it landing */
 static struct coop_char {
     char name[28], does[28];
     unsigned n_adj;
@@ -16164,6 +16272,9 @@ static struct {
     int open; unsigned who; int at; unsigned long said_ms; int phase; volatile int walk, take;
     unsigned long left, clock_ms;           /* PAD-1044: the time left, counted only while the game is in play */
     int held;                               /* the game is busy: the pick waits */
+    int waited;                             /* PAD-1051: its ball has waited in the plunger since it opened */
+    volatile int moved;                     /* ... and the lane switch has moved since: no more hiding */
+    unsigned long waited_ms;                /* when it began to wait */
 } pk;
 static struct { int on, c; unsigned who; unsigned long at; } coop_done;   /* PAD-1044: the one taken, on the glass */
 static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
@@ -16174,6 +16285,9 @@ static volatile int coop_lane_in;           /* a ball waits in the shooter lane 
 static volatile int coop_ball_out;          /* the turn's ball has left the shooter lane */
 static volatile unsigned long coop_lane_left_ms;
 static volatile unsigned coop_launch_taps;  /* Action presses at a launch, not counted (the tick says so) */
+static unsigned coop_flag_in, coop_flag_wait;   /* PAD-1051: the game's "a ball waits in the plunger" flags (0: none) */
+static volatile int coop_turn_waited;       /* PAD-1051: the turn's ball has waited in the plunger (the flags say) */
+static volatile unsigned long coop_waited_ms;   /* ... and when they last said so */
 static unsigned (*coop_adj_game)(unsigned);
 static unsigned coop_rng;
 static char coop_scr_scene[96];             /* `screens <scene>`: "" none */
@@ -16691,16 +16805,17 @@ static void coop_pick_open(unsigned t)
     pk.said_ms = pk.clock_ms = pm_ms();
     pk.left = coop_pick_ms;
     pk.held = 0;
+    pk.waited = pk.moved = 0;
     pk.phase = 0;
     pk.walk = pk.take = 0;
     pk.open = 1;
     coop_done.on = 0;
     if (coop_pick_ms)
-        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one, %u s", t,
-            coop_ch_n, coop_pick_secs(coop_pick_ms));
+        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one%s, %u s", t,
+            coop_ch_n, coop_flag_in || coop_flag_wait ? " (a launch the one shown)" : "", coop_pick_secs(coop_pick_ms));
     else
-        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one, no time limit",
-            t, coop_ch_n);
+        say("co-op: teammate %u picks a character (%d, and RANDOM): the flippers walk, Action takes one%s, no time "
+            "limit", t, coop_ch_n, coop_flag_in || coop_flag_wait ? " (a launch the one shown)" : "");
     coop_pick_say();
 }
 
@@ -16755,12 +16870,50 @@ static void coop_pick_close(const char *how)
     }
 }
 
+/* PAD-1051: 1 while a ball waits in the plunger, as the game itself says (FG_MBDEV_AUTO_PLUNGER_BALL_IN_DEVICE /
+ * _PLAYER_CONTROL, the port's `value ball_launch_flag` / `ball_launch_wait_flag`, PAD-643's), 0 when none does, -1 when
+ * the port names neither. The game's own word, not the lane switch: its level byte's sense depends on the switch. */
+static int coop_ball_waits(void)
+{
+    int a = coop_flag_in ? game_flag(coop_flag_in) : -1, b = coop_flag_wait ? game_flag(coop_flag_wait) : -1;
+    return a == 1 || b == 1 ? 1 : a == 0 || b == 0 ? 0 : -1;
+}
+
+/* PAD-1051: the pick's buttons are the pick's alone while its ball waits in the plunger - the game's own language
+ * select has the flippers once a character is taken, and the Action press that takes one launches nothing (the next
+ * one does). With the ball out, or a port with no plunger flags, the game sees them as before; and once the lane
+ * switch (`lane`) has moved after the ball began to wait, whatever the flags say, so the flippers are never held
+ * from a ball in play. */
+static int coop_hides(unsigned id)
+{
+    return coop_live && pk.open && !pk.moved && id && (id == coop_left || id == coop.button || id == coop_action)
+           && coop_ball_waits() == 1;
+}
+
+/* PAD-1045: an Action press at a launch - the turn's ball not served yet, waiting, or just out - is the launch's, not
+ * half of the save's double press. PAD-1051: from the game's plunger flags where the port names them (Godzilla LE's
+ * shooter lane switch reads the opposite sense to its flippers, so its level said "out" while the ball waited), else
+ * from the lane switch (`lane` in coop.cfg) */
+static int coop_launch_press(unsigned long now)
+{
+    int w = coop_ball_waits();
+    if (w < 0) return coop_lane && (!coop_ball_out || coop_lane_in || now - coop_lane_left_ms < COOP_LAUNCH_MS);
+    if (w == 1) {
+        coop_turn_waited = 1;
+        coop_waited_ms = now;
+        return 1;
+    }
+    return !coop_turn_waited || now - coop_waited_ms < COOP_LAUNCH_MS;
+}
+
 /* every edge of the switch drain (the game's thread): the pick's flippers and Action, the save's double press */
 static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)
 {
     unsigned closed = (flags & 0xc00u) == 0x400u ? 0u : (flags & 0xc00u) == 0x800u ? 1u : (polarity & 4u) ? 1u : 0u;
     unsigned long now;
     if (coop_lane && id == coop_lane) {                       /* PAD-1045: a ball arrives in the lane, or leaves it */
+        if (pk.open && pk.waited && pm_ms() - pk.waited_ms >= COOP_SETTLE_MS)   /* PAD-1051: either way - its sense */
+            pk.moved = 1;                                     /* varies by switch; not the ball landing */
         coop_lane_in = (level & 1u) == closed;
         if (!coop_lane_in) {
             coop_lane_left_ms = pm_ms();
@@ -16777,7 +16930,7 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
     }
     if (id != coop_action) return;
     now = pm_ms();
-    if (coop_lane && (!coop_ball_out || coop_lane_in || now - coop_lane_left_ms < COOP_LAUNCH_MS)) {
+    if (coop_launch_press(now)) {
         coop_tap_ms = 0;                                      /* the launch's press: not half of a double press */
         coop_launch_taps++;
         return;
@@ -17044,6 +17197,10 @@ static void coop_chars_tick(void)
         coop_save_ask = 0;
         return;
     }
+    if (coop_ball_waits() == 1) {                             /* PAD-1051: the turn's ball waits (PAD-1045's launch) */
+        coop_turn_waited = 1;
+        coop_waited_ms = pm_ms();
+    }
     if (!pm_in_game()) {                                      /* PAD-1044: busy (a menu over the game): it waits */
         if (pk.open && !pk.held) {
             pk.held = 1;
@@ -17075,7 +17232,12 @@ static void coop_chars_tick(void)
             pk.said_ms = pm_ms();
             coop_pick_say();
         }
-        if (pk.take) coop_pick_close("Action took it");
+        if ((w = coop_ball_waits()) == 1 && !pk.waited) {     /* PAD-1051: a launch takes the one shown */
+            pk.waited = 1;
+            pk.waited_ms = pm_ms();
+        }
+        else if (!w && pk.waited && !pk.take) pk.take = 2;
+        if (pk.take) coop_pick_close(pk.take > 1 ? "the ball was launched with it shown" : "Action took it");
         else if (coop_pick_ms && !pk.left) coop_pick_close("the time ran out");
         else if (pm_ms() - pk.said_ms >= COOP_PICK_FLIP_MS) {
             pk.phase ^= 1;
@@ -17127,6 +17289,8 @@ static void coop_chars_begin(void)
     coop_done.on = 0;
     coop_save_used = 0;
     coop_ball_out = 1;                       /* PAD-1045: the team forms in ball 1; a ball in the lane still waits */
+    coop_turn_waited = 1;                    /* PAD-1051: ... as the flags say, once it is out */
+    coop_waited_ms = 0;
     coop_adj_said = 0;
 }
 
@@ -17136,6 +17300,7 @@ static void coop_chars_turn(void)
     coop_save_used = 0;
     coop_tap_ms = 0;
     coop_ball_out = 0;                       /* PAD-1045: the next ball is not served yet: it counts once out */
+    coop_turn_waited = 0;                    /* PAD-1051: the same, from the game's plunger flags */
     if (pk.open && pk.who != coop.turn) coop_pick_close("their turn ended");
     coop_pick_open(coop.turn);
     coop_cache_hold();
@@ -17493,8 +17658,19 @@ static void coop_chars_arm(struct site *e)
     if (coop_pick_on && (!coop_left || !coop_action))
         say("co-op characters: the pick walks with %s and takes with %s", coop_left ? "both flippers" : "the right flipper",
             coop_action ? "Action" : "the time alone (coop.cfg names no Action button)");
+    if (pm_port_value("ball_launch_flag", 0) > 0) coop_flag_in = (unsigned)pm_port_value("ball_launch_flag", 0);
+    if (pm_port_value("ball_launch_wait_flag", 0) > 0) coop_flag_wait = (unsigned)pm_port_value("ball_launch_wait_flag", 0);
+    if (coop_pick_on && (coop_flag_in || coop_flag_wait))     /* PAD-1051 */
+        say("co-op characters: while a pick is open with its ball waiting in the plunger (game flags %u/%u, now %d) "
+            "the game does not see its buttons - its own language select and launch have them once a character is "
+            "taken, and a launch takes the one shown", coop_flag_in, coop_flag_wait, coop_ball_waits());
+    else if (coop_pick_on)
+        say("co-op characters: the port names no plunger flags (ball_launch_flag) - the game sees the pick's buttons too");
     if (save && !coop_action) say("co-op characters: no Action button in coop.cfg - the save ability is off");
-    if (save && coop_action && coop_lane)                     /* PAD-1045 */
+    if (save && coop_action && (coop_flag_in || coop_flag_wait))   /* PAD-1045, PAD-1051: the game's own flags */
+        say("co-op characters: Action x2 counts once the ball is %lu ms out of the plunger (game flags %u/%u)",
+            COOP_LAUNCH_MS, coop_flag_in, coop_flag_wait);
+    else if (save && coop_action && coop_lane)                /* PAD-1045 */
         say("co-op characters: Action x2 counts once the ball is %lu ms out of the shooter lane (switch %u)",
             COOP_LAUNCH_MS, coop_lane);
     else if (save && coop_action)
@@ -17541,11 +17717,60 @@ static void coop_chars_arm(struct site *e)
         (unsigned)(coop_pick_ms / 1000ul));
 }
 
+/* PAD-1054: the button last seen held at `held` (pm_ms(), 0 never) when the game's start was seen at `start`: held
+ * at Start (tests lift it verbatim) */
+static int coop_solo_held(unsigned long held, unsigned long start)
+{
+    return held && start - held <= COOP_SOLO_MS;
+}
+
+/* PAD-1054: that game, now playing: a team of one with the game's one player, CO-OP PLAY (or a team mode) on and
+ * characters to pick (tests lift it verbatim) */
+static int coop_solo_takes(unsigned players, int switched_on, int chars)
+{
+    return players == 1u && switched_on && chars;
+}
+
+/* PAD-1054: from the tick - a game started with the button held gets player 1's character pick */
+static void coop_solo_check(void)
+{
+    unsigned g;
+    if (!coop.on || !coop_players_byte) return;
+    g = chg_game_now();
+    if (g != coop.started) {                                  /* before this tick's poll: the held time AT the start */
+        coop.started = g;
+        coop.solo_ask = g && coop_solo_held(coop.held_ms, pm_ms());
+    }
+    if (coop_button_held()) coop.held_ms = pm_ms() | 1ul;
+    if (!coop.solo_ask || !pm_in_game() || !pm_player()) return;
+    coop.solo_ask = 0;
+    if (coop_teammates()) return;                             /* the held Start made a team already */
+    if (!coop_solo_takes(*coop_players_byte, coop_switched_on() || coop_teams_switched_on() != 0,
+                         coop_ch_n && coop_pick_on)) {
+        say("co-op: the right flipper was held at Start - no character pick (%s)",
+            *coop_players_byte != 1 ? "not a one-player game" : !(coop_ch_n && coop_pick_on) ? "no characters to pick"
+            : "CO-OP PLAY is Off");
+        return;
+    }
+    coop.game = g + 1;
+    coop.teams = 0;
+    coop.n = 1;
+    coop.turn = 1;
+    coop.round = 1;
+    coop_awards_begin();                                      /* PAD-1028 */
+    coop_chars_begin();                                       /* PAD-1031 */
+    say("co-op: the right flipper was held at Start - one player with a character (the game's own boards; "
+        "a Start in ball 1 still adds a teammate)");
+    coop_pick_open(1);
+}
+
 /* from the tick: the game's own words back once its co-op game is over */
 static void coop_scores_same(unsigned n);
 static void coop_tick(void)
 {
-    unsigned n = coop_teammates();
+    unsigned n;
+    coop_solo_check();                                        /* PAD-1054 */
+    n = coop_teammates();
     if (n && !coop.teams && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the game's own */
     coop_chars_tick();                                        /* PAD-1031 */
     if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
@@ -17575,7 +17800,8 @@ static void coop_scores_same(unsigned n)
 /* PAD-1042: Start in a team game's first ball (or the second Start that makes one): the next player joins */
 static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
-    unsigned n = coop_teammates(), h = n ? n : 1u, team, g, ret, most = n ? coop.team_max : coop_teams_switched_on();
+    unsigned n = coop_teammates(), h = n ? n : 1u, team, g, ret, solo = n == 1u && !coop.teams;   /* PAD-1054 */
+    unsigned most = n && !solo ? coop.team_max : coop_teams_switched_on();
     if (h >= most) {
         say("teams: Start - both teams are full (%u players, Team %s)", most, most == 3u ? "2v1" : "2v2");
         return 0;
@@ -17587,7 +17813,7 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         say("teams: Start - the game added no one (credits, or the most players it allows)");
         return ret;
     }
-    if (!n) {
+    if (!n || solo) {                                         /* PAD-1054: a team of one keeps player 1's pick */
         coop.game = chg_game_now() + 1;
         coop.teams = 1;
         coop.team_max = most;
@@ -17595,8 +17821,10 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.team_n[2] = 0;
         coop.turn = 1;
         coop.round = 1;
-        coop_awards_begin();                                  /* PAD-1028 */
-        coop_chars_begin();                                   /* PAD-1031 */
+        if (!n) {
+            coop_awards_begin();                              /* PAD-1028 */
+            coop_chars_begin();                               /* PAD-1031 */
+        }
         coop_scores_mark(most == 3u ? 1u : 0u);
     }
     coop.n = h + 1u;
@@ -17612,8 +17840,10 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
 
 static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
-    unsigned n = coop_teammates(), ret;
-    if (n ? coop.teams : *coop_players_byte == 1 && coop_teams_switched_on())
+    unsigned n = coop_teammates(), ret, solo = n == 1u && !coop.teams;
+    /* PAD-1054: a team of one (the button held at the game's Start) takes a teammate at any Start, as co-op does, or
+     * with a team mode on starts the team game */
+    if (n && !solo ? coop.teams : *coop_players_byte == 1 && coop_teams_switched_on())
         return coop_team_add(r0, r1, r2, r3);                /* PAD-1042 */
     if (!n && !(*coop_players_byte == 1 && coop_switched_on() && coop_button_held()))
         return coop_add_game(r0, r1, r2, r3);
@@ -17711,8 +17941,10 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
         pk.open = coop_done.on = 0;                           /* PAD-1044: a pick the game's end cut short */
         say("co-op: the game's end counts %u player(s): one match draw and one high score for the team",
             *coop_players_byte);
-        coop_awards_end(n);                                   /* PAD-1028 */
-        coop_cards_show(n);                                   /* PAD-1028 round 2: on the winners' character cards */
+        if (n >= 2) {                                         /* PAD-1054: one player has no one to beat */
+            coop_awards_end(n);                               /* PAD-1028 */
+            coop_cards_show(n);                               /* PAD-1028 round 2: on the winners' character cards */
+        }
     }
     return ret;
 }
@@ -17954,6 +18186,9 @@ static struct {
     unsigned last_up;                        /* the player and ball last seen (player x 256 + ball) */
     unsigned game;                           /* the game's own game starts counted (event game_start) at the last look */
     int game_event;                          /* the port's game_start is counted (else player 1's first ball tells) */
+    int reset_seen;                          /* round 4: Start held with the left flipper in this game */
+    unsigned reset_up, reset_over;           /* the player and ball then, and the game's game_over count */
+    unsigned over_said;                      /* the game_over count the log last said */
     unsigned open;                           /* the player picking now (0: none) */
     int was_left, was_right;
     uint64_t score_at_open;
@@ -18094,8 +18329,18 @@ static void hand_line_back(void);            /* below */
 /* a new game: the game's own game_start (round 3, DoomWalrus666: "after a start+L flipper reset the handicap was no
  * longer accessible" - Start held with the left flipper ends the game, and the next one is player 1's first ball
  * again, which the player and ball bytes never left); without the event, player 1's first ball after anything else */
+/* round 4 (DoomWalrus666: "When start+left flipper button is used to reset: handicap should automatically be reset
+ * to 0 for all players"): the last game saw Start held with the left flipper, and it ended without the game's own
+ * game_over (Godzilla LE 1.16 in the emulator: a game ended so fires none; a game played out does) - or the port
+ * names no game_over (-1) (tests lift it verbatim) */
+static int hand_was_reset(int seen, int over_then, int over_now)
+{
+    return seen && (over_now < 0 || over_now == over_then);
+}
+
 static void hand_game_check(void)
 {
+    int over, k;
     unsigned g = hand.game_event ? chg_game_now() : 0;
     int fresh = hand_new_game(&hand.last_up, pm_player(), hand_ball());
     if (hand.game_event) {
@@ -18103,6 +18348,14 @@ static void hand_game_check(void)
         hand.game = g;
     }
     if (!fresh) return;
+    over = pm_event("game_over") >= 0 ? (int)event_count(pm_event("game_over")) : -1;
+    say("handicap: a new game (the game's game_over seen %d time(s))", over);
+    if (hand_was_reset(hand.reset_seen, (int)hand.reset_over, over)) {
+        for (k = 1; k <= 4; k++) hand.level[k] = 0;
+        say("handicap: the last game was reset with Start + left flipper (player %u ball %u, no game over) - every "
+            "player's handicap back to 0", hand.reset_up >> 8, hand.reset_up & 0xffu);
+    }
+    hand.reset_seen = 0;
     if (hand.open) {                             /* the last game's pick, never taken */
         hand.open = 0;
         hand_line_back();
@@ -18184,7 +18437,7 @@ static void hand_records(unsigned p, int lv)
     unsigned n = lv ? hand_lv_n[lv + HAND_LEVEL_MAX] : 0u;
     int i;
     unsigned k, a, own, was, v;
-    if (coop.on && coop_teammates()) return;
+    if (coop.on && coop_teammates() >= 2) return;            /* PAD-1054: a team of one plays its own record */
     for (i = 0; i < hand_cache_n; i++) {
         if (hand_cache[i].obj < 0x10000u) continue;          /* not seen yet, or its method not hooked */
         for (k = 0; k < n && c[k].id != hand_cache[i].id; k++) ;
@@ -18247,6 +18500,17 @@ static void hand_tick(void)
     }
     if (hand.open && hand_ball() != 1u) hand_close("the next ball");
     hand_game_check();
+    if (pm_event("game_over") >= 0 && event_count(pm_event("game_over")) != hand.over_said) {
+        hand.over_said = event_count(pm_event("game_over"));
+        say("handicap: the game is over (its game_over, %u so far) - everyone keeps their level", hand.over_said);
+    }
+    if (hand.start && !hand.reset_seen && pm_player() && switch_held(hand.start) && switch_held(hand.left)) {
+        hand.reset_seen = 1;
+        hand.reset_up = pm_player() * 256u + hand_ball();
+        hand.reset_over = pm_event("game_over") >= 0 ? event_count(pm_event("game_over")) : 0u;   /* -1 below if none */
+        say("handicap: Start + left flipper held (player %u, ball %u, game_over %u)", pm_player(), hand_ball(),
+            hand.reset_over);
+    }
     if (!hand_switched_on()) {
         if (hand.open) hand_close("the service menu's HANDICAP is Off");
         return;

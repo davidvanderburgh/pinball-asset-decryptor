@@ -52,7 +52,8 @@ MENU_OFF, MENU_COOP, MENU_TEAMS, MENU_TEAMS_2V1 = 0, 1, 2, 3
 MENU_HELP = "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1. 1-3: Insider mostly off"
 #: how a teammate joins, for the tab and the log
 HOW = ("hold the right flipper button and press Start to add a teammate (2-4 players share one game); "
-       "a plain Start adds a competing player as always")
+       "a plain Start adds a competing player as always; with characters, a player starting a game alone with the "
+       "right flipper button held picks one")
 #: PAD-1042: how a team game is played, for the tab and the log
 TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), each Start in the first ball adds the next player: players 1 and 2 "
              "against players 3 and 4, each team with its own score and progress, the teams taking turns; at 3 "
@@ -387,6 +388,9 @@ def _apply(choices, chosen):
 MAX_CHARACTERS = 16
 #: the longest name, and the longest words for what one does, the game's top line shows (the runtime's 28-byte fields)
 MAX_NAME = 27
+#: PAD-1056: the longest sub header under a name on the pick and award cards (only the cards show it, never the game's
+#: top line, so it keeps the case it was typed in)
+MAX_SUB = 48
 #: PAD-1044: the seconds a teammate has to pick (the runtime's COOP_PICK_MS when coop.cfg names none), and the
 #: choices the Characters dialog offers; 0 is no time limit (the Action button takes one)
 PICK_TIME = 30
@@ -602,9 +606,16 @@ def clean_name(name):
     return " ".join(str(name or "").upper().replace("|", " ").split())[:MAX_NAME]
 
 
+def clean_sub(sub):
+    """PAD-1056: a character's sub header (GODZILLA VS BIOLLANTE's "Godzilla vs Biollante (1989)") as the cards show it:
+    one space between words, the case it was typed in, at most :data:`MAX_SUB`."""
+    return " ".join(str(sub or "").split())[:MAX_SUB]
+
+
 def load_characters(project):
-    """The project's characters: ``{"pick": bool, "time": seconds, "list": [{"name", "ability", "picture"}]}``
-    (``ability`` a key of :data:`ABILITIES` or ``""``; ``picture`` the owner's file, for the pick screens that show
+    """The project's characters: ``{"pick": bool, "time": seconds, "list": [{"name", "sub", "ability", "picture"}]}``
+    (``sub`` the line under the name on its cards, PAD-1056;
+    ``ability`` a key of :data:`ABILITIES` or ``""``; ``picture`` the owner's file, for the pick screens that show
     one; ``time`` one of :data:`PICK_TIMES`)."""
     if not project:
         return {"pick": False, "time": PICK_TIME, "list": []}
@@ -631,7 +642,8 @@ def _characters(got):
     out = []
     for c in got.get("list") or []:
         if isinstance(c, dict) and clean_name(c.get("name")):
-            out.append({"name": clean_name(c.get("name")), "ability": str(c.get("ability") or ""),
+            out.append({"name": clean_name(c.get("name")), "sub": clean_sub(c.get("sub")),
+                        "ability": str(c.get("ability") or ""),
                         "picture": str(c.get("picture") or "")})
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
@@ -1161,16 +1173,21 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     img = Image.alpha_composite(img, wm)
     d = ImageDraw.Draw(img)
     name = "RANDOM" if rnd else c["name"]
-    nf = _fit(d, name, _DISPLAY_FONTS, iw, 92 * S, 30 * S)
+    sub = "" if rnd else c.get("sub", "")
+    ny = (150 if sub else 166) * S                  # PAD-1056: a sub header under the name lifts the name a little
+    nf = _fit(d, name, _DISPLAY_FONTS, iw, (80 if sub else 92) * S, 30 * S)
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).text((ix + 4 * S, 166 * S + 5 * S), name, font=nf, fill=(0, 0, 0, 220), anchor="ls")
+    ImageDraw.Draw(shadow).text((ix + 4 * S, ny + 5 * S), name, font=nf, fill=(0, 0, 0, 220), anchor="ls")
     img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(4 * S)))
     d = ImageDraw.Draw(img)
-    d.text((ix, 166 * S), name, font=nf, fill=(255, 255, 255, 255), anchor="ls",
+    d.text((ix, ny), name, font=nf, fill=(255, 255, 255, 255), anchor="ls",
            stroke_width=max(1, S), stroke_fill=(0, 0, 0, 255))
     nw = min(iw - 40 * S, d.textlength(name, font=nf))
-    d.rectangle((ix, 180 * S, ix + nw, 186 * S), fill=A[:3] + (255,))
-    d.rectangle((ix + nw + 8 * S, 180 * S, ix + nw + 40 * S, 186 * S), fill=A2[:3] + (255,))
+    d.rectangle((ix, ny + 14 * S, ix + nw, ny + 20 * S), fill=A[:3] + (255,))
+    d.rectangle((ix + nw + 8 * S, ny + 14 * S, ix + nw + 40 * S, ny + 20 * S), fill=A2[:3] + (255,))
+    if sub:
+        d.text((ix, ny + 54 * S), sub, font=_fit(d, sub, _TEXT_FONTS, iw, 28 * S, 18 * S), fill=A[:3] + (255,),
+               anchor="ls")
     if rnd:
         label, does = "A SURPRISE", "The machine picks one of the characters nobody has taken yet."
     else:
@@ -1179,12 +1196,12 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
         does = CARD_LINES.get(c["ability"], "") if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
     bf = _face(_TEXT_FONTS, 24 * S)
     bw = d.textlength(label, font=bf) + 40 * S
-    by = 208 * S
+    by = (222 if sub else 208) * S
     d.rounded_rectangle((ix, by, ix + bw, by + 46 * S), radius=23 * S, fill=A[:3] + (255,))
     d.text((ix + bw / 2, by + 23 * S), label, font=bf, fill=(12, 12, 18, 255), anchor="mm")
     tf = _face(_TEXT_FONTS, 27 * S)
-    for k, line in enumerate(_wrap(d, does, tf, iw, 2)):
-        d.text((ix, by + 88 * S + k * 38 * S), line, font=tf, fill=(222, 228, 240, 255), anchor="ls")
+    for k, line in enumerate(_wrap(d, does, tf, iw, 2)):            # with a sub header: closer, clear of how to choose
+        d.text((ix, by + (76 if sub else 88) * S + k * 38 * S), line, font=tf, fill=(222, 228, 240, 255), anchor="ls")
     # how to choose
     hy = 372 * S
     hf2 = _face(_TEXT_FONTS, 20 * S)
@@ -1327,6 +1344,9 @@ def award_card(project, characters, index, theme=None, scale=2):
     nw = min(iw - 40 * S, d.textlength(c["name"], font=nf))
     d.rectangle((ix, 214 * S, ix + nw, 220 * S), fill=A[:3] + (255,))
     d.rectangle((ix + nw + 8 * S, 214 * S, ix + nw + 40 * S, 220 * S), fill=A2[:3] + (255,))
+    if c.get("sub"):                                             # PAD-1056: its sub header under the rule
+        d.text((ix, 262 * S), c["sub"], font=_fit(d, c["sub"], _TEXT_FONTS, iw, 30 * S, 18 * S), fill=A[:3] + (255,),
+               anchor="ls")
     # the band the runtime's words go in
     by = AWARD_WORDS_Y * S
     d.rounded_rectangle((24 * S, by - 6 * S, W - 25 * S, H - 18 * S), radius=14 * S, fill=(6, 8, 14, 255),

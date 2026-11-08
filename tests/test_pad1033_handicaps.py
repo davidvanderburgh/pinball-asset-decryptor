@@ -35,6 +35,9 @@ int main(void)
     /* two players, three balls, then attract (the bytes stay 2 / 4), then the next game */
     static const unsigned seq[][2] = { {1, 1}, {1, 1}, {2, 1}, {1, 2}, {2, 2}, {1, 3}, {2, 3}, {2, 4}, {1, 1}, {1, 1},
                                        {2, 1} };
+    /* round 4: a game that saw Start + left flipper and no game_over since was reset; no game_over event: reset */
+    printf("reset %d %d %d %d\n", hand_was_reset(1, 3, 3), hand_was_reset(1, 3, 4), hand_was_reset(0, 3, 3),
+           hand_was_reset(1, 0, -1));
     printf("new");
     for (k = 0; k < sizeof seq / sizeof seq[0]; k++) printf(" %d", hand_new_game(&last, seq[k][0], seq[k][1]));
     printf("\n");
@@ -62,12 +65,14 @@ def _run(tmp_path):
         R._lift(src, "static unsigned hand_value(unsigned own, unsigned op, unsigned v, unsigned lo, unsigned hi)"),
         R._lift(src, "static int hand_change_parse(const char *s, struct hand_change *c)"),
         R._lift(src, "static int hand_new_game(unsigned *last_up, unsigned player, unsigned ball)"),
+        R._lift(src, "static int hand_was_reset(int seen, int over_then, int over_now)"),
     ])
     return R._host_run(tmp_path, MAIN.replace("@FNS@", fns)).splitlines()
 
 
 def test_a_level_change_reads_and_holds_to_its_range(tmp_path):
     out = _run(tmp_path)
+    assert out.pop(0) == "reset 1 0 0 1"                                    # round 4: Start + left flipper resets
     assert out.pop(0) == "new 1 0 0 0 0 0 0 0 1 0 0"                     # player 1's first ball after anything else
     assert out[:9] == [
         "adj:94+2:0:15 -> 94 1 2 0 15", "adj:173-1:0:2 -> 173 2 1 0 2", "adj:195x60:4:30 -> 195 3 60 4 30",
@@ -81,7 +86,8 @@ def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     src = _src()
     assert src.index("hand_arm();") < src.index("if (!insider_arm()) return;")
     assert "(clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))" in src
-    assert "if ((hand.on || n_cabs) && !hook(fn(\"tick\"), on_hand_tick))" in src   # a card of only this has a tick of its own
+    # a card of only this has a tick of its own
+    assert "if ((hand.on || n_cabs) && !hook(fn(\"tick\"), on_hand_tick))" in src
     assert "    hand_tick();" in R._lift(src, "static void on_tick(unsigned *r)")
     arm = R._lift(src, "static void hand_arm(void)")
     assert "if (!adj_wrap_arm()) {" in arm and "adj_hand_on = 1;" in arm
@@ -108,6 +114,8 @@ def test_a_level_holds_from_the_players_first_ball():
     # round 3: a new game is the game's own game_start (Start + L ends a game inside player 1's first ball)
     check = R._lift(_src(), "static void hand_game_check(void)\n{")
     assert "fresh = g != hand.game;" in check and "hand_line_back();" in check
+    assert "for (k = 1; k <= 4; k++) hand.level[k] = 0;" in check                     # round 4: a reset zeroes them all
+    assert "switch_held(hand.start) && switch_held(hand.left)" in tick
     arm = R._lift(_src(), "static void hand_arm(void)")
     assert arm.index("events_arm();") < arm.index('pm_event("game_start")')
     assert tick.index("if (hand_waits_for_coop()) {") < tick.index("hand.asked |= 1u << p;")   # a character pick first

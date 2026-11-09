@@ -889,7 +889,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             if result is None:
                 result = coop_plan(project, game_elf, coop_prof or attract_prof or variants_prof
                                    or sound_modes_prof or picture_prof)
-            coop_into(result, game_elf, scratch, coop_setting, only=True, stock_hud=stock_hud, stock_font=stock_font)
+            coop_into(result, game_elf, scratch, coop_setting, only=True, stock_hud=stock_hud, stock_font=stock_font,
+                      stock_bank=stock_bank, ffmpeg=ffmpeg, progress=progress)
         if idle:                                     # PAD-1022: inactivity pausing the timers, alone or with the above
             if result is None:
                 result = idle_plan(project, game_elf, idle_prof or coop_prof or attract_prof or variants_prof
@@ -990,7 +991,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     result.sounds_file = sound_modes or ""
     result.picture_file = picture or ""
     if coop:                                         # PAD-1017
-        coop_into(result, game_elf, scratch, coop_setting)   # PAD-1031: the pick's screens went in with the modes' build
+        coop_into(result, game_elf, scratch, coop_setting,   # PAD-1031: the pick's screens went in with the modes' build
+                  stock_bank=stock_bank, ffmpeg=ffmpeg, progress=progress)
     if idle:                                         # PAD-1022
         idle_into(result, scratch, only=False)
     if handicap:                                     # PAD-1033
@@ -1178,11 +1180,87 @@ def coop_plan(project, game_elf, prof):
     return ModePlan(project=project, profile=prof, port=port, build=None)
 
 
-def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", stock_font=b""):
+#: PAD-1079: the bank crop the characters' videos play at (the identity: the clip on the glass as made)
+CLIP_CROP = "Normal"
+_IDENTITY = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+
+
+def coop_clips_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
+    """PAD-1079: each co-op character's video, made into a clip of the bank's size with the picture where its card's
+    window is (coop_play.window_clip), added to the bank scene the build has so far (the modes' and attract items'
+    own, or the stock one). Returns ``[(character number, clip name)]`` for coop.cfg's ``char_clip`` lines ([] when no
+    character has one, or the title has no backdrop to play them in). They play at the bank's ``Normal`` crop (the
+    surface 1:1 on the glass, so the window lands where the card's is; Godzilla's backdrop_crop, ScoreFrame, scales it
+    1.065 and moves it -43,-98): a bank without one gets no videos."""
+    from . import clip_variants as CV
+    from . import coop_play as CP
+    from . import video_bank as VB
+    project = getattr(result, "project", "")
+    prof = result.profile
+    got = CP.clip_entries(project)
+    if not got or not CP.wants_screens(project, prof):
+        return []
+    if not CP.can_video(prof):
+        result.lines.append("co-op characters: their videos are left out - %s cannot play a clip behind its "
+                            "screens yet, so their pictures show" % prof.label)
+        return []
+    if not stock_bank:
+        raise ModeWriteError("the co-op characters' videos: the card's video bank was not read")
+    if not ffmpeg:
+        from ...core.audio import find_ffmpeg
+        ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise ModeWriteError("the co-op characters' videos need ffmpeg, and none was found")
+    bank_card = CV.bank_scene(prof)
+    bank_src = dict(result.replaced).get(bank_card, "")
+    if bank_src:
+        with open(bank_src, "rb") as f:
+            bank = f.read()
+    else:
+        bank = stock_bank
+    if VB.crop_transform(stock_bank, CLIP_CROP) != _IDENTITY:
+        result.lines.append("co-op characters: their videos are left out - %s's video bank has no %s crop that plays "
+                            "a clip 1:1 on the glass, so their pictures show" % (prof.label, CLIP_CROP))
+        return []
+    w, h = VB.clip_frame(stock_bank)
+    assets = bank_card[:-len("scene.radium")] + "scene.assets/"
+    folder = os.path.join(scratch, "coop_clips")
+    os.makedirs(folder, exist_ok=True)
+    out = []
+    for k, (i, name, src) in enumerate(got):
+        if progress is not None:
+            progress(k, len(got), "Making the co-op characters' videos (%d of %d)..." % (k + 1, len(got)))
+        made = os.path.join(folder, "%s.mp4" % name)
+        try:
+            CP.window_clip(src, made, w, h, ffmpeg)
+        except CP.CoopError as e:
+            raise ModeWriteError(str(e)) from None
+        try:
+            bank, info = VB.add_clip(bank, name, os.path.getsize(made))
+        except VB.VideoBankError as e:
+            raise ModeWriteError("the co-op characters' videos: %s could not be added to the video bank (%s)"
+                                 % (name, e)) from None
+        result.new.append((assets + info["path"], made))
+        out.append((i + 1, name))
+    if not bank_src:
+        bank_src = os.path.join(scratch, "coop_tree", *bank_card.split("/"))
+        os.makedirs(os.path.dirname(bank_src), exist_ok=True)
+        result.replaced.append((bank_card, bank_src))
+    with open(bank_src, "wb") as f:
+        f.write(bank)
+    names = {i: c["name"] for i, c in enumerate(CP.load_characters(project)["list"])}
+    result.lines.append("co-op characters: a video in the picture's place for %s"
+                        % ", ".join(names.get(n - 1, str(n)) for n, _name in out))
+    return out
+
+
+def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", stock_font=b"", stock_bank=b"",
+              ffmpeg=None, progress=None):
     """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*, and (round 2) the
     service menu's CO-OP PLAY value *setting* when it switches co-op. PAD-1031: the pick's screens go into the HUD
     scene - with the modes' own when *result* built them (mode_assets.build), else here from *stock_hud* - and
-    coop.cfg names the scene."""
+    coop.cfg names the scene. PAD-1079: the characters' videos go into the video bank (:func:`coop_clips_into`, from
+    *stock_bank*) and coop.cfg names each character's clip."""
     from . import coop_play as CP
     from . import scene_write as SW
     why = CP.title_refusal(result.profile)
@@ -1212,6 +1290,11 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
             text += "award_cards on\n"            # PAD-1028 round 2: the awards on the winners' cards
+            clips = coop_clips_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)
+            for n, name in clips:
+                text += "char_clip %d %s\n" % (n, name)             # PAD-1079: its video, behind its card
+            if clips:
+                text += "clip_crop %s\n" % CLIP_CROP
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)

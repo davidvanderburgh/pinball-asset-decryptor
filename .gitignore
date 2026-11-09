@@ -36,3 +36,10 @@ plans/*
 *preview_signing_key*
 pinball_decryptor_signing/
 installer/vpx_tables/
+
+# Spike 3 decryption keys NEVER belong in the repo (keep the "how" private).
+# A user points PAD at these; they are theirs, not shipped.
+*.padkeys.json
+*screen_timing*
+spike3_keyfile*
+*.spike3.key

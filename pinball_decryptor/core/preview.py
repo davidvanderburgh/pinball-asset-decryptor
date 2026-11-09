@@ -61,6 +61,9 @@ PUBLIC_KEYS = (
 #: The Visual Pinball tab (PAD-802): the Spike 2 emulator plays a Visual Pinball table.
 FEATURES = {
     "vpx": "Visual Pinball",
+    # Stern Spike 3 (Pi-4 secure-boot era): decrypt a secure SD image or a
+    # .spk package and extract its assets.  Behind a code while it is new.
+    "spike3": "Stern Spike 3",
 }
 #: Features that WERE previews and are now in every copy, switched on with no code
 #: (the mode maker, PAD-763). :func:`enabled` answers yes for them; a code that names

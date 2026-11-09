@@ -105,16 +105,19 @@ class SpksArchive:
         head = self._read(0, 20)
         if head[:4] != SPKS_MAGIC:
             raise SpksError("not an SPKS archive (magic %r)" % head[:4])
-        magic2, self.version, nsec = struct.unpack_from("<III", head, 8)
-        if magic2 != SPKS_MAGIC2:
-            raise SpksError("bad SPKS magic2 0x%x" % magic2)
-
-        pos = 20
-        for _ in range(nsec):
-            spk0 = self._find(_SPK0, pos, 64)
-            if spk0 < 0:
-                raise SpksError("SPK0 section header not found near %d" % pos)
-            pos = self._parse_section(spk0)
+        # The fixed header between "SPKS" and the first "SPK0" varies by title
+        # (some carry an extra magic2 + version word, some don't), so we don't
+        # trust its length or a section count: find the first SPK0 and walk
+        # sections until the next one is no longer there.
+        pos = self._find(_SPK0, 4, 64)
+        if pos < 0:
+            raise SpksError("no SPK0 section in the archive")
+        guard = 0
+        while 0 <= pos < self._size and self._read(pos, 4) == _SPK0:
+            pos = self._parse_section(pos)
+            guard += 1
+            if guard > 1024:                      # pathological / corrupt
+                break
         # stable, de-duplicated path -> file
         for fobj in self.files:
             self._by_path.setdefault(fobj.path, fobj)

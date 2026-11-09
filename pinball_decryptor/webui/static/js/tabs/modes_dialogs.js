@@ -234,14 +234,41 @@ export function CoopAwardsDialog({ s, onClose }) {
 // its name (the top line shows it) with a smaller sub header under it on its cards (PAD-1056),
 // its ability (only the ones this game's program can have are offered), what that
 // does. Python reads the abilities off the project's card (modes.coop_ch) and keeps the characters in the project.
+// Round 6 (David: the end user customizes the abilities in the app): a character is a list of powers, each one thing
+// the game does differently while its teammate is up; the row shows its badge (its powers' words, or a header of its
+// own) and Powers... opens the list, grouped, with a tick per power this game can have. The set abilities of before
+// are starting points (Start from...). Python composes the list and refuses what the runtime has no room for.
 export function CoopCharsDialog({ s, onClose }) {
   const ch = s.coop_ch || {};
   const rows = ch.rows || [];
   const abil = ch.abilities || [];
+  const powers = ch.powers || [];
+  const groups = ch.groups || [];
+  const [open, setOpen] = useState(-1);
   useEffect(() => { call("modes.coop_chars_refresh"); }, []);
-  const opts = [{ value: "", label: "No ability" }].concat(abil.map((a) => (
+  const opts = [{ value: "", label: "Start from..." }, { value: "-", label: "No powers" }].concat(abil.map((a) => (
     { value: a.key, label: a.ok ? a.words : `${a.words} (not on this game)`, disabled: !a.ok })));
-  const does = (k) => { const a = abil.find((x) => x.key === k); return a ? a.does : "Plays as the game always does."; };
+  const powerTitle = (p, has) => p.ok ? `${p.does}${has ? "" : " Tick to give this character the power."}`
+    : `${p.why} Not on this game: a character with it has it left off its card here.`;
+  const powersOf = (r, i) => html`<div class="modes-coop-ch-powers">
+    ${groups.map((g) => {
+      const list = powers.filter((p) => p.group === g);
+      return list.length ? html`<div class="modes-coop-ch-grp" key=${g}>
+        <div class="modes-list-grp">${g}</div>
+        ${list.map((p) => html`<${Check} key=${p.key} checked=${r.powers.includes(p.key)} disabled=${!p.ok && !r.powers.includes(p.key)}
+          label=${p.ok ? p.words : `${p.words} (not on this game)`} title=${powerTitle(p, r.powers.includes(p.key))}
+          onChange=${(v) => call("modes.coop_char_power", i, p.key, v)} />`)}
+      </div>` : null;
+    })}
+    <div class="row" style="gap:8px;margin-top:6px">
+      <${Field} value=${r.header || ""} sm maxLength=${ch.max_header || 96} width=${320} placeholder=${r.words || "Header: the badge's words (optional)"}
+        title="The badge on its cards. Empty: its powers' words (a set ability's name when the list is exactly one)."
+        onCommit=${(v) => { if (v !== (r.header || "")) call("modes.coop_char_set", i, null, null, null, v); }} />
+      <${Select} sm value="" options=${opts} width=${260}
+        title="Put one of the set abilities' powers on this character in place of its list, as a starting point (No powers: an empty list)."
+        onChange=${(v) => { if (v) call("modes.coop_char_set", i, null, v === "-" ? "" : v); }} />
+    </div>
+  </div>`;
   const row = (r, i) => html`<div class="modes-coop-ch-row" key=${i + ":" + r.name}>
     <span class="small dim">${i + 1}</span>
     <div class="modes-coop-ch-names">
@@ -252,10 +279,12 @@ export function CoopCharsDialog({ s, onClose }) {
       title="A smaller line under its name on its pick and award cards, as typed (Godzilla vs Biollante (1989)). Empty: none."
       onCommit=${(v) => { if (v !== (r.sub || "")) call("modes.coop_char_set", i, null, null, v); }} />
     </div>
-    <${Select} sm value=${r.ability} options=${opts} width=${200}
-      title=${r.lost ? "The ability this character had is not one this game can have yet." : "What it does while its teammate is up."}
-      onChange=${(v) => call("modes.coop_char_set", i, null, v)} />
-    <span class=${cx("small wrap modes-coop-ch-does", r.lost ? "warn-ink" : "dim")}>${r.lost ? "Its ability is not on this game yet: none on the card." : does(r.ability)}</span>
+    <${Button} size="sm" kind=${open === i ? "" : "ghost"} icon="list" onClick=${() => setOpen(open === i ? -1 : i)}
+      title=${r.lost ? "None of this character's powers is on this game yet." : "Its powers: what it does while its teammate is up. Click to tick them on and off."}>
+      ${r.powers.length ? `Powers (${r.powers.length})` : "Powers…"}<//>
+    <span class=${cx("small wrap modes-coop-ch-does", r.lost ? "warn-ink" : "dim")}>${r.lost ? "Its powers are not on this game yet: none on the card."
+      : r.powers.length ? html`<b>${r.words}</b> ${r.line}${r.missing.length ? html` <span class="warn-ink">(${r.missing.length} not on this game, left off the card)</span>` : null}`
+      : "Plays as the game always does."}</span>
     <span class="row" style="gap:4px">
       <${Button} size="xs" kind="ghost" icon="image" onClick=${() => call("modes.coop_char_picture", i, false)}
         title=${r.picture ? "Its picture on the pick screen: choose another." : "Choose a picture of your own for its pick screen (without one it gets a panel with its name)."}>${r.picture ? "Picture ✓" : "Picture…"}<//>
@@ -289,7 +318,8 @@ export function CoopCharsDialog({ s, onClose }) {
       <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />
       <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"}. Give each character a picture of your own with Picture... and see it here; Write puts the cards on the machine.</span>
     </div>` : null}
-    ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(40vh, 400px)">${rows.map(row)}</div>`
+    ${ch.refused ? html`<${Note} kind="warn">${ch.refused}<//>` : null}
+    ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(50vh, 520px)">${rows.map((r, i) => html`${row(r, i)}${open === i ? powersOf(r, i) : null}`)}</div>`
       : html`<div class="small muted" style="margin-top:8px">No characters yet: press Add${ch.preset ? `, or load ${ch.preset}'s set` : ""}.</div>`}
   <//>`;
 }

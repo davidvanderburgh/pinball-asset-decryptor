@@ -1179,10 +1179,10 @@ def classic_patch(project, characters, index, words_for=None, theme=None):
     or None when the character has no ability (its card says so already)."""
     import numpy as np
     chars = _characters(characters)
-    if not chars["list"][index]["ability"]:
+    if not chars["list"][index]["powers"]:                  # round 6: a list of powers (none: the card says so)
         return None
     full = pick_card(project, chars, index, words_for, theme)
-    plain = pick_card(project, dict(chars, list=[dict(c, ability="") if k == index else c
+    plain = pick_card(project, dict(chars, list=[dict(c, powers=[], header="") if k == index else c
                                                  for k, c in enumerate(chars["list"])]), index, words_for, theme)
     ys, xs = np.nonzero(np.any(full != plain, axis=2))
     if not len(xs):

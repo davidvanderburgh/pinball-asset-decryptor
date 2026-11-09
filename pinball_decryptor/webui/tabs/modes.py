@@ -865,27 +865,39 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     def _publish_coop_chars(self, project):
         from ...plugins.stern import coop_play as _CP
         why, abil = _CP.project_abilities(project) if project else ("", [])
+        _why, pw = _CP.project_powers(project) if project else ("", [])      # round 6: the powers a character is made of
         chars = _CP.load_characters(project)
-        by_key = {a["key"]: a for a in abil}
+        parts = {p["key"]: p for p in pw}
+        wf = {k: p["words"] for k, p in parts.items() if p["cfg"]}
         prof = _CP.project_title(project) if project else None
         preset = _CP.preset_for(prof)
         rows = []
         for c in chars["list"]:
-            a = by_key.get(c["ability"])
-            rows.append({"name": c["name"], "sub": c["sub"], "ability": c["ability"] if a and a["cfg"] else "",
-                         "lost": bool(c["ability"]) and not (a and a["cfg"]),
+            got = _CP.compose(c["powers"], parts) if pw else {"cfg": "", "line": "", "missing": list(c["powers"]),
+                                                             "over": []}
+            rows.append({"name": c["name"], "sub": c["sub"], "ability": c["ability"], "powers": list(c["powers"]),
+                         "header": c["header"], "words": _CP.character_words(c, wf if pw else None),
+                         "line": got["line"], "missing": got["missing"], "over": got["over"],
+                         "lost": bool(c["powers"]) and not got["cfg"],
                          "picture": bool(_CP.picture_path(project, c))})
         lost = sum(1 for r in rows if r["lost"])
+        partly = sum(1 for r in rows if r["missing"] and not r["lost"])
         note = ("%d character(s). " % len(rows) if rows else "") + (
-            "%d of them ask for an ability this game has not got yet; they have none on the card." % lost if lost
-            else "")
+            "%d of them ask only for powers this game has not got; they have none on the card. " % lost if lost
+            else "") + ("%d of them ask for a power this game has not got; it is left off their card." % partly
+                        if partly else "")
         self.set(coop_ch={"why": why, "note": note.strip(), "pick": chars["pick"], "rows": rows,
                           "time": chars["time"], "times": list(_CP.PICK_TIMES),                 # PAD-1044
                           "abilities": [{"key": a["key"], "words": a["words"], "does": a["does"], "ok": bool(a["cfg"]),
-                                         "why": a["why"]} for a in abil],
+                                         "why": a["why"], "powers": a.get("powers", [])} for a in abil],
+                          "powers": [{"key": p["key"], "group": p["group"], "words": p["words"], "line": p["line"],
+                                      "does": p["does"], "ok": bool(p["cfg"]), "why": p["why"]} for p in pw],
+                          "groups": list(_CP.POWER_GROUPS), "refused": getattr(self, "_coop_refused", ""),
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
-                          "max_name": _CP.MAX_NAME, "max_sub": _CP.MAX_SUB, "max": _CP.MAX_CHARACTERS})
+                          "max_name": _CP.MAX_NAME, "max_sub": _CP.MAX_SUB, "max_header": _CP.MAX_HEADER,
+                          "max": _CP.MAX_CHARACTERS})
+        self._coop_refused = ""
 
     def _save_coop_chars(self, project, chars, what, was, now):
         from ...core import history_log
@@ -1002,9 +1014,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return self._save_coop_chars(project, chars, "time to pick", name(was), name(chars["time"]))
 
     @rpc
-    def coop_char_set(self, i, name=None, ability=None, sub=None):
-        """PAD-1031: rename one character, or give it another ability ("" none); PAD-1056: or another sub header (the
-        smaller line under its name on its cards, "" none)."""
+    def coop_char_set(self, i, name=None, ability=None, sub=None, header=None):
+        """PAD-1031: rename one character, or start it from one of the set abilities ("" none: no powers); PAD-1056:
+        or another sub header (the smaller line under its name on its cards, "" none); round 6: or its own header
+        (the badge's words in place of its powers', "" the powers')."""
         from ...plugins.stern import coop_play as _CP
         project = self.project()
         chars = _CP.load_characters(project) if project else None
@@ -1019,8 +1032,42 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if sub is not None:
             was, c["sub"] = c["sub"], _CP.clean_sub(sub)
             return self._save_coop_chars(project, chars, "%s sub header" % c["name"], was or "none", c["sub"] or "none")
-        was, c["ability"] = c["ability"], str(ability or "")
-        return self._save_coop_chars(project, chars, "%s ability" % c["name"], was or "none", c["ability"] or "none")
+        if header is not None:
+            was, c["header"] = c["header"], _CP.clean_header(header)
+            return self._save_coop_chars(project, chars, "%s header" % c["name"], was or "its powers'",
+                                         c["header"] or "its powers'")
+        was = ", ".join(c["powers"]) or "none"
+        c["powers"] = list(_CP.ABILITY_POWERS.get(str(ability or ""), []))
+        c["ability"] = _CP.bundle_of(c["powers"])
+        return self._save_coop_chars(project, chars, "%s powers" % c["name"], was, ", ".join(c["powers"]) or "none")
+
+    @rpc
+    def coop_char_power(self, i, key, on):
+        """Round 6: one power on or off a character. Refused (False, and the dialog's note says so) when it would
+        ask the runtime for more of a kind than one character has room for (coop_play.LIMITS)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        chars = _CP.load_characters(project) if project else None
+        if not chars or not 0 <= int(i) < len(chars["list"]) or str(key) not in {p[0] for p in _CP.POWERS}:
+            return False
+        c = chars["list"][int(i)]
+        keys = [k for k in c["powers"] if k != key]
+        if on:
+            keys.append(str(key))
+            _why, pw = _CP.project_powers(project)
+            got = _CP.compose(keys, {p["key"]: p for p in pw})
+            if got["over"]:
+                self._coop_refused = ("%s cannot take %s too: one character has room for %s. Take a power off "
+                                      "first." % (c["name"], _CP.character_words({"powers": [key]}),
+                                                  ", ".join("%d %s parts" % (_CP.LIMITS[k], k) if k != "length"
+                                                            else "%d characters of abilities" % _CP.MAX_CFG
+                                                            for k in got["over"])))
+                self._publish_coop_chars(project)
+                return False
+        was = ", ".join(c["powers"]) or "none"
+        c["powers"] = keys
+        c["ability"] = _CP.bundle_of(keys)
+        return self._save_coop_chars(project, chars, "%s powers" % c["name"], was, ", ".join(keys) or "none")
 
     @rpc
     def coop_char_add(self):

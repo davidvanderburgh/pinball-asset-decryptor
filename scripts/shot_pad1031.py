@@ -67,7 +67,7 @@ def main():
             webui_shot.api(url, "modes.set_coop", True)
             time.sleep(3)
             if chars:
-                page.get_by_role("button", name="Characters…").click()
+                page.get_by_role("button", name="Characters…").dispatch_event("click")   # the tab's footer card overlaps it
                 page.wait_for_selector("text=Co-op characters", timeout=180000)
                 webui_shot.api(url, "modes.coop_chars_preset")
                 page.wait_for_selector(".modes-coop-ch-row", timeout=180000)
@@ -79,6 +79,11 @@ def main():
                     CP.pictures_from_folder(project, pics)
                     webui_shot.api(url, "modes.coop_chars_refresh")
                     time.sleep(2)
+                if "--powers" in sys.argv[3:]:      # round 6: BIOGOJI's powers open under its row
+                    import re
+                    page.locator(".modes-coop-ch-row").nth(5).get_by_role("button", name=re.compile("Powers")).click()
+                    page.wait_for_selector(".modes-coop-ch-powers", timeout=60000)
+                    time.sleep(1)
                 page.mouse.move(5, 990)
                 time.sleep(2)
             page.screenshot(path=out)

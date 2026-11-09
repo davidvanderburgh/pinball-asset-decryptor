@@ -74,8 +74,12 @@ class Spike3KeySource:
         specific ``"image:role"`` master-key entries.
     """
 
-    def __init__(self, otp_keyfile=None, master_keys=None, image_id=None):
+    def __init__(self, otp_keyfile=None, master_keys=None, image_id=None,
+                 spk_keyfile=None):
         self._otp = _as_32_bytes(otp_keyfile, "otp_keyfile")
+        # The fleet .spk update key ("screen_timing") that unlocks any title's
+        # .spk package keyslot.  Distinct from the SD-card OTP key above.
+        self._spk = _as_32_bytes(spk_keyfile, "spk_keyfile")
         self._mks = {}
         for k, v in (master_keys or {}).items():
             self._mks[k] = _as_32_bytes(v, "master_keys[%s]" % k)
@@ -96,8 +100,10 @@ class Spike3KeySource:
             return v
 
         otp = _resolve(doc.get("otp_keyfile"))
+        spk = _resolve(doc.get("spk_keyfile"))
         mks = {k: _resolve(v) for k, v in (doc.get("master_keys") or {}).items()}
-        return cls(otp_keyfile=otp, master_keys=mks, image_id=image_id)
+        return cls(otp_keyfile=otp, master_keys=mks, image_id=image_id,
+                   spk_keyfile=spk)
 
     @classmethod
     def discover(cls, image_path=None, image_id=None):
@@ -119,6 +125,19 @@ class Spike3KeySource:
 
     def has_any(self):
         return bool(self._otp or self._mks)
+
+    def has_spk(self):
+        return self._spk is not None
+
+    def spk_master_key(self, header):
+        """Unlock a ``.spk`` package's LUKS keyslot with the fleet update key
+        and return its master key (caller verifies against the digest)."""
+        if self._spk is None:
+            raise Spike3KeyError(
+                "no Spike 3 .spk key available. Put the fleet update keyfile at "
+                '"spk_keyfile" in a padkeys.json, or point $PAD_SPIKE3_KEYFILE '
+                "at one.")
+        return _lo().unlock_master_key(header, self._spk, area_bytes=header.raw)
 
     # -- resolution ----------------------------------------------------------
     def master_key(self, header, role=None, part=None):

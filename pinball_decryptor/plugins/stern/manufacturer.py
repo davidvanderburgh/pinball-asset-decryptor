@@ -39,7 +39,9 @@ from .pipeline import (SamExtractPipeline, SamExtractPlusCapturePipeline,
                        SternFlashImagePipeline, SternRevertPipeline,
                        SternWritePipeline)
 from . import spike3 as _spike3
+from . import spike3_spk as _spike3_spk
 from .spike3_extract import Spike3ExtractPipeline
+from .spike3_spk import Spike3SpkExtractPipeline
 from .spike3_games import SPIKE3_DB, spike3_key_for_path, spike3_display
 
 # Stern handles four hardware eras under one picker entry:
@@ -511,7 +513,7 @@ class SternManufacturer(Manufacturer):
     input_spec = InputSpec(
         label="Stern SD-card image (Spike 2 / Spike 1), SAM code update "
               "(.bin or .zip) or MAME ROM zip (Whitestar)",
-        extensions=(".img", ".bin", ".raw", ".iso", ".zip", ".ebi"),
+        extensions=(".img", ".bin", ".raw", ".iso", ".zip", ".ebi", ".spk"),
     )
     _SPIKE2_EXTRACT_PHASES = ("Detect", "Locate partitions", "Extract video",
                               "Extract images", "Decode audio", "Checksums")
@@ -863,6 +865,16 @@ class SternManufacturer(Manufacturer):
         # has no side effects (it's also called to probe other manufacturers)
         # — the era it reports on the Game is applied to the live
         # manufacturer by the GUI.
+        # Spike 3 .spk package (a .spk.zip Stern publishes) — checked before the
+        # Whitestar .zip branch so it isn't mistaken for a MAME ROM zip.  Behind
+        # the preview code.  A .spk works for ANY title (fleet key), so it is
+        # always "supported".
+        from ...core import preview
+        if preview.enabled("spike3") and _spike3_spk.is_spk_input(path):
+            key = spike3_key_for_path(path)
+            return Game(key=key, display=spike3_display(key, path),
+                        manufacturer_key="stern", era="spike3",
+                        notes="Spike 3 .spk package", supported=True)
         # SAM first: matched by the .bin's checksum, it is certain where
         # the Whitestar ROM-name score is a guess, and a .bin no bigger than
         # SAM's 128 MB ROM can't be a Spike card.
@@ -1172,6 +1184,12 @@ class SternManufacturer(Manufacturer):
                 done_cb, extract_categories=extract_categories,
                 duration_names=duration_names)
         if self._era == "spike3":
+            # A .spk package vs a secure SD-card image take different front
+            # ends (reconstruct+SPKS vs LUKS partition), same asset backend.
+            if _spike3_spk.is_spk_input(input_path):
+                return Spike3SpkExtractPipeline(
+                    input_path, output_dir, log_cb, phase_cb, progress_cb,
+                    done_cb, extract_categories=extract_categories)
             return Spike3ExtractPipeline(
                 input_path, output_dir, log_cb, phase_cb, progress_cb,
                 done_cb, extract_categories=extract_categories)

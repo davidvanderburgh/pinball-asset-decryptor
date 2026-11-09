@@ -292,3 +292,38 @@ def test_spks_roundtrip(use_64):
     assert got == files[1][1]
     wav = arc.get("mfs/sd/0001.wav")
     assert b"".join(arc.read_file(wav)) == files[0][1]
+
+
+# --------------------------------------------------------------------------
+# .spk package detection + routing
+# --------------------------------------------------------------------------
+def test_is_spk_input(tmp_path):
+    from pinball_decryptor.plugins.stern import spike3_spk as s3s
+    assert s3s.is_spk_input("pokemon_le-0_87_0_spike3.spk.zip")
+    assert s3s.is_spk_input("fallout_le-0_81_0_spike3.spk.006.000")
+    assert not s3s.is_spk_input("munsters_le-1_27_0.Release.8G.sdcard.raw")
+    # a raw .spk is sniffed by its LUKS2 magic
+    raw = tmp_path / "x.spk"
+    raw.write_bytes(b"LUKS\xba\xbe\x00\x02" + b"\x00" * 100)
+    assert s3s.is_spk_input(str(raw))
+    raw2 = tmp_path / "y.spk"
+    raw2.write_bytes(b"not luks")
+    assert not s3s.is_spk_input(str(raw2))
+
+
+def test_spk_detected_as_spike3_and_routed(monkeypatch):
+    from pinball_decryptor.core import preview
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+    m = SternManufacturer()
+    path = "pokemon_le-0_87_0_spike3.spk.zip"
+    monkeypatch.setattr(preview, "_active", set())
+    assert m.detect(path) is None                       # gated off
+    monkeypatch.setattr(preview, "_active", {"spike3"})
+    g = m.detect(path)
+    assert g is not None and g.era == "spike3" and g.supported   # any title OK
+    m.set_era("spike3")
+    from pinball_decryptor.plugins.stern.spike3_spk import Spike3SpkExtractPipeline
+    p = m.make_extract_pipeline(path, "/tmp/out",
+                                lambda *a: None, lambda *a: None,
+                                lambda *a: None, lambda *a: None)
+    assert isinstance(p, Spike3SpkExtractPipeline)

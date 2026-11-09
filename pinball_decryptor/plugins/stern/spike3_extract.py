@@ -32,8 +32,11 @@ from .spike3_keys import Spike3KeySource, Spike3KeyError
 from .formats import _title_from_filename
 
 
-PHASES = ("Detect", "Unlock card", "Extract video", "Extract images",
-          "Extract scenes")
+# Shared Spike 3 extract phases, used by both the SD-image and the .spk
+# pipelines so the GUI's phase indicator fits either run.  "Prepare" is unlock
+# for an SD image, and reconstruct+unlock+index for a .spk package.
+PHASES = ("Detect", "Prepare", "Extract video", "Extract images",
+          "Extract scenes", "Extract sounds")
 
 # (path extension or sniff) -> output category
 _QUICKTIME_TAGS = (b"ftyp", b"moov", b"mdat", b"wide", b"skip")
@@ -49,7 +52,8 @@ class Spike3ExtractPipeline(BasePipeline):
 
     PHASES = PHASES
     #: categories the GUI can toggle (all on by default)
-    CATEGORIES = (("video", "Video"), ("images", "Images"), ("scenes", "Scenes"))
+    CATEGORIES = (("video", "Video"), ("images", "Images"), ("scenes", "Scenes"),
+                  ("sounds", "Sounds"))
 
     def __init__(self, input_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
@@ -123,28 +127,32 @@ class Spike3ExtractPipeline(BasePipeline):
         self._done(True, summary)
 
     def _extract_tree(self, reader):
-        """Single walk of p6 -> bucket files into video/images/scenes."""
+        """Single walk of p6 -> bucket files into video/images/scenes/sounds."""
         want_video = self._want("video")
         want_images = self._want("images")
         want_scenes = self._want("scenes")
+        want_sounds = self._want("sounds")
 
         # Collect targets first (cheap: inode walk only), so progress has a
         # denominator and each phase can report n/total.
-        videos, images, scenes = [], [], []
+        videos, images, scenes, sounds = [], [], [], []
         self._log("Scanning asset tree...", "info")
         for path, ino, inode in reader.iter_regular_files(root_ino=2,
                                                           max_depth=12):
             ext = os.path.splitext(path)[1].lower()
+            base = os.path.basename(path).lower()
             if ext == ".png" and want_images:
                 images.append((path, inode))
             elif ext in (".radium", ".sidx") and want_scenes:
                 scenes.append((path, inode))
+            elif base == "image.bin" and want_sounds:
+                sounds.append((path, inode))
             elif ext == ".asset" and want_video and _is_quicktime(reader, inode):
                 videos.append((path, inode))
-        self._log("Found %d video, %d image, %d scene file(s)."
-                  % (len(videos), len(images), len(scenes)), "info")
+        self._log("Found %d video, %d image, %d scene, %d sound container(s)."
+                  % (len(videos), len(images), len(scenes), len(sounds)), "info")
 
-        counts = {"video": 0, "images": 0, "scenes": 0}
+        counts = {"video": 0, "images": 0, "scenes": 0, "sounds": 0}
         if want_video:
             self._set_phase(2)
             counts["video"] = self._copy_bucket(
@@ -155,6 +163,15 @@ class Spike3ExtractPipeline(BasePipeline):
         if want_scenes:
             self._set_phase(4)
             counts["scenes"] = self._copy_bucket(reader, scenes, "scenes")
+        if want_sounds:
+            self._set_phase(5)
+            # image.bin is the packed sound container; per-sound WAV decode
+            # needs the Spike 3 firmware codec (a separate step), so the
+            # container is copied out whole under sound/ for now.
+            counts["sounds"] = self._copy_bucket(reader, sounds, "sound")
+            if sounds:
+                self._log("image.bin copied under sound/ (per-sound WAV decode "
+                          "is a separate step).", "info")
         return counts
 
     def _copy_bucket(self, reader, items, subdir, rename_ext=None):
@@ -179,7 +196,8 @@ class Spike3ExtractPipeline(BasePipeline):
     def _summary(self, counts):
         bits = [("%d video" % counts["video"]) if counts["video"] else "",
                 ("%d image" % counts["images"]) if counts["images"] else "",
-                ("%d scene" % counts["scenes"]) if counts["scenes"] else ""]
+                ("%d scene" % counts["scenes"]) if counts["scenes"] else "",
+                ("%d sound container" % counts["sounds"]) if counts["sounds"] else ""]
         bits = [b for b in bits if b]
         got = ", ".join(bits) if bits else "no"
         return "Extracted %s file(s) to %s" % (got, self.output_dir)

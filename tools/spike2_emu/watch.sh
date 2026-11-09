@@ -2468,6 +2468,7 @@ launch_game() {
                PAD_PIVOT="${PAD_PIVOT:-}" PAD_SELECT="${PAD_SELECT:-0}" \
                PAD_SELECT_AUTO="${PAD_SELECT_AUTO:-0}" \
                PAD_MODE_SO="${PAD_MODE_SO:-}" PAD_CARD_MODES="${PAD_CARD_MODES:-}" \
+               PAD_SOUNDLOG="${PAD_SOUNDLOG:-}" PAD_SOUNDLOG_STAGE="${PAD_SOUNDLOG_STAGE:-}" \
                bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
     GAMEPG=$!
     if [ -n "${PAD_PIVOT:-}" ] && { [ -z "$GAMEOUTTAIL" ] || ! kill -0 "$GAMEOUTTAIL" 2>/dev/null; }; then

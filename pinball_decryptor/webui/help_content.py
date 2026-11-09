@@ -2712,6 +2712,27 @@ HELP_CONTENT = {
             "The bar also has **Restart game** (as on the Emulate tab), Volume and "
             "Mute.",
         ]),
+        ("Sound and video log", [
+            "**Open** beside it under **Windows the emulator opens** shows every sound "
+            "and clip the game starts, in order, as it starts them, in a window of its "
+            "own you can put anywhere.",
+            "- Each row has the time, **Sound** or **Clip**, its name and the sound's "
+            "request number or the switch made just before the clip. Hover a name for "
+            "the rest: a sound's Audio tab files, a clip's Video tab row.\n"
+            "- **▶** plays a sound in the log itself. **Open** (or a double-click) shows "
+            "the row on the Audio or Video tab, selected and playing.\n"
+            "- Untick **Sounds** or **Clips**, or type in the filter, to see only some. "
+            "**Follow** keeps the newest row in view; scrolling up to look turns it off.\n"
+            "- The list stays after Stop, even after the app is closed, until the next "
+            "Start.\n"
+            "- Sounds are named from the project's record of the game's sound requests. "
+            "A project extracted before that record existed lists them by number: "
+            "extract the card again to name them. A song from a music bank has no "
+            "Audio tab file and shows as **Unnamed sound**.\n"
+            "- It is read by the virtual playfield window, so it fills while that "
+            "window is open. Not on a Mac, where the playfield runs inside the "
+            "container.",
+        ]),
         ("Save states", [
             "**Save state** on the playfield window (Windows, Mac, and Linux when the app "
             "may run the emulator as root without a password) checkpoints the whole "

@@ -427,6 +427,12 @@ fi
 _cardmode_so=$(bash "$S/modes/cardmodes.sh" "${PAD_CARD:-}" | tail -1)
 [ -n "$_cardmode_so" ] && export PAD_MODE_SO="$_cardmode_so"
 unset _cardmode_so
+# PAD-1071: the Emulate tab's Sound and video log (PAD_SOUNDLOG=1): /dump/soundlog.on for the
+# runtime, and - for a boot with no runtime of its own - the tab's stage that hooks the sound worker
+# and nothing else (modes/soundlog.sh has the rules). Asked again after the menu below picks an image.
+_soundlog_so=$(bash "$S/modes/soundlog.sh" | tail -1)
+[ -n "$_soundlog_so" ] && export PAD_MODE_SO="$_soundlog_so"
+unset _soundlog_so
 
 # THE SHIM NEEDS THE TITLE BY NAME, not just the directory it is told to run
 # from, and until 2026-08-23 a CARD run never gave it one.
@@ -904,6 +910,8 @@ if [ -n "$SEL_DIRS" ]; then
     if [ -n "$SEL_CARDIDX" ] && [ "$SEL_CARDIDX" != 0 ] \
             && [ "${PAD_CARDMODES_OWN:-}" = 1 ] && [ -n "${PAD_CARD:-}" ]; then
         PAD_MODE_SO=$(PAD_MODE_SO= PAD_CARD_IMAGE="$SEL_CARDIDX" bash "$S/modes/cardmodes.sh" "$PAD_CARD" | tail -1)
+        _soundlog_so=$(bash "$S/modes/soundlog.sh" | tail -1)    # PAD-1071: and the sound log's
+        [ -n "$_soundlog_so" ] && PAD_MODE_SO="$_soundlog_so"
         export PAD_MODE_SO
     fi
     # ITS OWN HIGH SCORES: scores=<N>|<name> gives image N its own machine store,

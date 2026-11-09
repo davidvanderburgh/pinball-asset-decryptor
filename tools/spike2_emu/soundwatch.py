@@ -14,7 +14,10 @@ rule over \\\\wsl.localhost (a held handle reads a stale cache).
 
 WHAT IT WRITES, beside the Emulate tab's volume file (sounds_seen_<slot>.jsonl,
 emptied by the tab at each Start): one JSON line per sound,
-{"t": wall clock, "request": n, "n": 0|1}, and one when the runtime says
+{"t": wall clock, "request": n, "n": 0|1}, one per recording it played,
+{"t", "key": the record's 16 hex digits} (the record key the engine looked
+up just after; the app names the file from the project's sound_keys.tsv),
+and one when the runtime says
 whether this run's sounds are logged at all, {"t", "log": "on"|"off", "why"},
 so the window can say why a run lists no sounds. The tab names each request
 from the project (its Sound Test name and Audio tab file).
@@ -24,8 +27,12 @@ import re
 import time
 
 SOUND = re.compile(r"^\s*\d+ \[pad\] sound (\d+) (\d+)\s*$")
+#: the recording the request played (round 2): the record key the engine looked up next
+KEY = re.compile(r"^\s*\d+ \[pad\] sound key ([0-9a-f]{16})\s*$")
 #: the runtime's own words for the sound log, and for a port it will not use
 ON = re.compile(r"\[pad\] sound log: every request")
+#: round 2: this run's runtime logs the recording each request played (its key lines)
+KEYS = re.compile(r"\[pad\] sound log: and the recording each one played")
 OFF = re.compile(r"\[pad\] (?:sound log: off - (.*)|.*NOT THIS GAME'S PORT.*)$")
 #: how often the log is read (seconds)
 POLL_S = 0.25
@@ -96,8 +103,13 @@ def line_event(ln):
     m = SOUND.match(ln)
     if m:
         return {"request": int(m.group(1)), "n": int(m.group(2))}
+    m = KEY.match(ln)
+    if m:
+        return {"key": m.group(1)}
     if ON.search(ln):
         return {"log": "on"}
+    if KEYS.search(ln):
+        return {"log": "keys"}
     m = OFF.search(ln)
     if m:
         return {"log": "off", "why": (m.group(1) or "the port is not this game's").strip()}

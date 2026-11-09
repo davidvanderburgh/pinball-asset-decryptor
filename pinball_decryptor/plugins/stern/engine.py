@@ -2968,6 +2968,13 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                     "variants one after another." % n_var, "info")
         except Exception as e:
             log("The sound variants list couldn't be written (%s)." % e, "info")
+        # PAD-1071: each sound's record key, so the Emulate tab's Sound and video log can name the
+        # very recording a request played (the key the engine looks up)
+        try:
+            from . import clip_sounds as _cs
+            _cs.write_keys(output_dir, params)
+        except Exception as e:
+            log("The sound keys list couldn't be written (%s)." % e, "info")
         emu.close()
         emu = None   # decode runs in worker processes (or a fresh emu on fallback)
 

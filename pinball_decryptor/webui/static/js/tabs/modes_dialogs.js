@@ -260,20 +260,20 @@ function CoopLook({ look }) {
         onCommit=${(v) => { if (v !== look.title) call("modes.coop_chars_look", "title", v); }} />
       <span class="grow"></span>
       <${Button} size="sm" kind="ghost" onClick=${() => call("modes.coop_chars_look_default")}
-        title="The game's set's own title and colours again, and no background picture.">Default look<//>
+        title="The game's set's own title and colors again, and no background picture.">Default look<//>
     </div>
     <div class="modes-coop-look-grid">
       ${look.colours.map((c) => html`<span class="modes-coop-look-c" key=${c.key}>
         <${Well} value=${c.value} title=${`${c.label}${c.hint ? `: ${c.hint}` : ""}`}
           onPick=${(v) => call("modes.coop_chars_look", c.key, v)} />
         <span class="small">${c.label}</span>
-        ${c.own ? html`<${Button} size="xs" kind="ghost" icon="x" title="Its default colour again."
+        ${c.own ? html`<${Button} size="xs" kind="ghost" icon="x" title="Its default color again."
           onClick=${() => call("modes.coop_chars_look", c.key, "")} />` : null}
       </span>`)}
     </div>
     <div class="row" style="gap:8px">
       <${Button} size="sm" kind="ghost" icon="image" onClick=${() => call("modes.coop_chars_backdrop", false)}
-        title=${look.backdrop ? "The picture behind every pick card and award card: choose another." : "A picture of your own behind every pick card and award card, in place of the panel (the panel's colour then goes unused)."}>
+        title=${look.backdrop ? "The picture behind every pick card and award card: choose another." : "A picture of your own behind every pick card and award card, in place of the panel (the panel's color then goes unused)."}>
         ${look.backdrop ? "Background ✓" : "Background…"}<//>
       ${look.backdrop ? html`<${Button} size="xs" kind="ghost" icon="x" title="Back to the panel."
         onClick=${() => call("modes.coop_chars_backdrop", true)} />` : null}
@@ -336,9 +336,9 @@ export function CoopCharsDialog({ s, onClose }) {
       : "Plays as the game always does."}</span>
     <span class="modes-coop-ch-acts">
       <${Well} value=${r.colour || (ch.look ? ch.look.colours[0].value : "")}
-        title=${r.colour ? "Its own frame colour on its cards: pick another." : "The frame colour on its cards (the look's): pick one of its own."}
+        title=${r.colour ? "Its own frame color on its cards: pick another." : "The frame color on its cards (the look's): pick one of its own."}
         onPick=${(v) => call("modes.coop_char_colour", i, v)} />
-      ${r.colour ? html`<${Button} size="xs" kind="ghost" icon="x" title="The look's frame colour again." onClick=${() => call("modes.coop_char_colour", i, "")} />` : null}
+      ${r.colour ? html`<${Button} size="xs" kind="ghost" icon="x" title="The look's frame color again." onClick=${() => call("modes.coop_char_colour", i, "")} />` : null}
       <${Button} size="xs" kind="ghost" icon="image" onClick=${() => call("modes.coop_char_picture", i, false)}
         title=${r.picture ? "Its picture on the pick screen: choose another." : "Choose a picture of your own for its pick screen (without one it gets a panel with its name)."}>${r.picture ? "Picture ✓" : "Picture…"}<//>
       ${r.picture ? html`<${Button} size="xs" kind="ghost" icon="x" title="Back to the panel with its name." onClick=${() => call("modes.coop_char_picture", i, true)} />` : null}
@@ -371,13 +371,13 @@ export function CoopCharsDialog({ s, onClose }) {
         onChange=${(v) => call("modes.coop_chars_time", Number(v))} />
       <span class="grow"></span>
       <${Button} size="sm" kind=${looking ? "" : "ghost"} icon="image" disabled=${!rows.length || !ch.look}
-        title="The pick screen's look: its title, the colour of each of its words, a background picture."
+        title="The pick screen's look: its title, the color of each of its words, a background picture."
         onClick=${() => setLooking(!looking)}>Look…<//>
     </div>
     ${looking && ch.look ? html`<${CoopLook} look=${ch.look} />` : null}
     ${ch.preview ? html`<div class="modes-coop-ch-pv">
       <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />
-      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"}. Give each character a picture of your own with Picture... or a video with Video..., the screen colours and a background with Look..., and see it here; Write puts the cards on the machine.</span>
+      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"}. Give each character a picture of your own with Picture... or a video with Video..., the screen colors and a background with Look..., and see it here; Write puts the cards on the machine.</span>
     </div>` : null}
     ${ch.refused ? html`<${Note} kind="warn">${ch.refused}<//>` : null}
     ${ch.videos && rows.some((r) => r.video) ? html`<${Note} kind="info">${ch.videos}<//>` : null}

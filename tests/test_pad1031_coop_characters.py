@@ -42,6 +42,7 @@ static int coop_ball_msg = 5, coop_ball_held;
 static char shown[96];
 static int message_borrow(unsigned id, unsigned idx, const char *w) { (void)id; (void)idx; strcpy(shown, w); return 1; }
 static void coop_turn_show(void) { sprintf(shown, "PLAYER %u  BALL %%d", coop.turn); }
+static void coop_clip_show(int want) { (void)want; }    /* PAD-1079's character videos: test_pad1079_coop_pick_video */
 static unsigned saved_s;
 static int refuse;                                      /* PAD-1045: the game does not take a save */
 static int pm_ball_save(unsigned s) { if (refuse) return 0; saved_s = s; return 1; }

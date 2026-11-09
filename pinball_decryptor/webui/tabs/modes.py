@@ -913,7 +913,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         colours = [{"key": k, "label": label, "value": th[k] or (_CP.PANEL_STOCK if k == "panel" else th["accent"]),
                     "own": bool(own.get(k)), "follows": not th[k],
                     "hint": ("the stock dark panel until you pick one" if k == "panel"
-                             else "the frame's colour until you pick one") if not th[k] else ""}
+                             else "the frame's color until you pick one") if not th[k] else ""}
                    for k, label in _CP.COLOUR_ROLES]
         return {"title": th["title"], "colours": colours, "backdrop": bool(_CP.backdrop_path(project, th)),
                 "dim": th["dim"], "dims": list(_CP.DIMS)}
@@ -1098,7 +1098,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         c = chars["list"][int(i)]
         was, c["colour"] = c.get("colour") or "", _CP.clean_colour(colour)
         self.set(coop_ch_at=int(i))
-        return self._save_coop_chars(project, chars, "%s colour" % c["name"], was or "the look's",
+        return self._save_coop_chars(project, chars, "%s color" % c["name"], was or "the look's",
                                      c["colour"] or "the look's")
 
     @rpc

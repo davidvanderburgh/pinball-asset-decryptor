@@ -15589,9 +15589,9 @@ static int coop_hides(unsigned id);
  * descriptor another switch shares is never touched. The drain's thread writes these; switch_held reads `held` (the
  * runtime's own "right flipper held" for a teammate's Start must still see it).
  * PAD-1078: a switch already held when a hider comes to want it (the right flipper held through Start for the solo
- * pick, the language select armed at that same Start) is taken mid-press by edge_take_held: its level reads released
- * at once and its handler bits are held back, its release included - Godzilla LE's language select walked on that
- * release when it went to the game (emulator). Given back at its first press, or release, once nothing wants it. */
+ * pick) is taken mid-press by edge_take_held: its level reads released at once and its handler bits are held back,
+ * its release included; given back at its first press, or release, once nothing wants it. (Godzilla's language
+ * select hears the flipper BUTTONS another way, as the cabinet keys 137 / 139: coop_language_veto, below.) */
 #define EDGE_HIDES 4
 static struct { volatile unsigned id; unsigned at; unsigned short bits; volatile unsigned char held; } edge_hid[EDGE_HIDES];
 static volatile int edge_hid_n;              /* the slots in use so far (a free one's id is 0) */
@@ -17082,10 +17082,11 @@ static unsigned coop_pick_secs(unsigned long left)
     return (unsigned)((left + 999ul) / 1000ul);
 }
 
-/* PAD-1078: how to take one, a step of the top line's turn ("" with no Action button: the time takes it) */
+/* PAD-1078: how to take one, a step of the top line's turn ("" with no Action button: the time takes it). Short, and
+ * with no countdown: Godzilla LE's line shows 20 characters, then its own CREDITS text (emulator) */
 static const char *coop_pick_how(void)
 {
-    return !coop_action ? "" : coop_flag_in || coop_flag_wait ? "ACTION OR LAUNCH TO PICK" : "ACTION TO PICK";
+    return !coop_action ? "" : coop_flag_in || coop_flag_wait ? "ACTION/LAUNCH PICKS" : "ACTION PICKS";
 }
 
 /* the steps the top line turns through, 1.5 s each: the name, what it does (where it says), how to take one */
@@ -17102,7 +17103,7 @@ static void coop_pick_say(void)
     t[0] = 0;
     if (coop_pick_ms) pm_snprintf(t, sizeof t, "  %u", coop_pick_secs(pk.left));      /* PAD-1044: the time left */
     if (pk.phase && pk.phase == coop_pick_steps() - 1 && coop_pick_how()[0])
-        pm_snprintf(words, sizeof words, "%s%s", coop_pick_how(), t);                 /* PAD-1078: the last step */
+        pm_snprintf(words, sizeof words, "%s", coop_pick_how());                      /* PAD-1078: the last step */
     else if (coop_scr_found) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s", pk.who, t);   /* the screens say the rest */
     else if (pk.at >= coop_ch_n) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: RANDOM", pk.who, t);
     else if (!pk.phase || !coop_ch[pk.at].does[0] || coop_classic()) pm_snprintf(words, sizeof words, "PLAYER %u PICK%s: %s", pk.who, t, coop_ch[pk.at].name);
@@ -17213,6 +17214,30 @@ static int coop_hides(unsigned id)
         return 0;
     w = coop_ball_waits();
     return w == 1 || (w == 0 && coop_unserved());
+}
+
+/* PAD-1078: Godzilla's PLAYER LANGUAGE SELECT is RuleCities' switch method (`site language_keys`, LE 1.16 0x13f7d0,
+ * Pro 1.15/1.16 0x13c3b8; r1 the switch): it flips the player up between English and Japanese at each RELEASE of a
+ * flipper BUTTON, which reaches it as the cabinet input 137 / 139 (`value language_keys_left/right`), not as the
+ * playfield records 60 / 59 that coop_hides keeps from the game - so the pick's own presses walked it, and so did the
+ * release of a right flipper held through Start (emulator: the flag at RuleCities + 4 + 4 x player went 0 -> 1 the
+ * moment the button was let go, with switch 59's level already reading released). While the pick has that flipper, or
+ * still hides it, the method is not entered for its key (tests lift it verbatim). */
+static int coop_language_veto(unsigned sw, unsigned left_key, unsigned right_key)
+{
+    unsigned id = sw == left_key ? coop_left : sw == right_key ? coop.button : 0u;
+    return id && (coop_hides(id) || (edge_hid_n && edge_hidden(id) >= 0));
+}
+
+static int on_language_keys(unsigned *r)
+{
+    static int said;
+    if (!coop_language_veto(r[1], (unsigned)pm_port_value("language_keys_left", 137),
+                            (unsigned)pm_port_value("language_keys_right", 139)))
+        return 0;
+    if (said < 8 && ++said)
+        say("co-op: flipper key %u kept from the game's language select - the pick has that flipper", r[1]);
+    return 1;
 }
 
 /* PAD-1045: an Action press at a launch - the turn's ball not served yet, waiting, or just out - is the launch's, not
@@ -18024,6 +18049,14 @@ static void coop_chars_arm(struct site *e)
         say("co-op characters: off - the switch drain could not be hooked, so no pick could be made");
         coop_ch_n = 0;
         return;
+    }
+    if (coop_pick_on && fn("language_keys")) {               /* PAD-1078 */
+        static int lang_hooked;
+        if (!lang_hooked && (lang_hooked = hook_veto(fn("language_keys"), on_language_keys)) != 0)
+            say("co-op characters: the game's language select does not see the flippers while the pick has them");
+        else if (!lang_hooked)
+            say("co-op characters: the game's language select (language_keys) could not be hooked - it sees the "
+                "pick's flippers");
     }
     if (coop_pick_on && (!coop_left || !coop_action))
         say("co-op characters: the pick walks with %s and takes with %s", coop_left ? "both flippers" : "the right flipper",

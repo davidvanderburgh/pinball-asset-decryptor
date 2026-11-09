@@ -3521,7 +3521,7 @@ PREVIEW_HELP = {
                 "while pressing Start to begin the game (with CO-OP PLAY on, when it is in the service menu). The "
                 "right flipper held through that Start belongs to the pick, so it does not change the game's "
                 "language; let go of it and walk the characters as usual. The machine's top line also says how "
-                "to take one (ACTION OR LAUNCH TO PICK). The "
+                "to take one (ACTION/LAUNCH PICKS). The "
                 "score then goes on the game's own boards, and a Start in ball 1 still adds a teammate. "
                 "**Time to pick** sets how long (30 seconds unless you change it, or "
                 "no time limit). RANDOM picks one nobody has. The box under a character's name takes a smaller "

@@ -6380,14 +6380,19 @@ then the flippers are the language select's and Action launches; a launch (the f
 also stops at the first `lane` switch edge 1 s or more after the ball began to wait (a launch, whatever the flags
 say; either direction, as the lane's sense varies), so the flippers are never held from a ball in play.
 PAD-1078 (DoomWalrus666: "holding the right flipper and pressing start button also changes the language to
-Japanese"): Godzilla arms its language select in its game start (LE 1.16 0x2a78d4 -> 0x225330; on when adjustment 14
-is 1, 0x225300), and the right flipper held through that Start (PAD-1054's solo pick, a held-button join) was pressed
-before the pick wanted it, so the game kept reading it held. Now a pick button already held when the pick comes to
-want it is taken mid-press (`edge_take_held`, from the pick's tick): its level reads released at once and its handler
-bits are held back, its release included (the emulator: with the release let through, the select walked to Japanese
-on it); the game has it back at its first press, or release, once the pick is done. The pick also hides from a new game's start (`game_start`) until its first ball waits, at most 10 s
+Japanese", and in co-op "selecting a character is also changing the language"): Godzilla's PLAYER LANGUAGE SELECT
+(adjustment 14, armed in the game start, LE 1.16 0x2a78d4 -> 0x225330) is RuleCities' switch method (`site
+language_keys`, LE 1.16 0x13f7d0, Pro 1.15/1.16 0x13c3b8): it flips the player up between English and Japanese
+(RuleCities + 4 + 4 x player) at each RELEASE of a flipper BUTTON, which reaches it as the cabinet input 137 / 139
+(`value language_keys_left/right`), not as the playfield records 60 / 59 that PAD-1051 hides. So PAD-1051 never kept
+the pick's presses from it, and a right flipper held through Start and let go flipped it at once (emulator, main: the
+flag 0 -> 1 the moment the flipper was let go). The runtime vetoes the method (hook_veto) for a flipper's key while
+the pick has that flipper or still hides it (`coop_language_veto`): emulator, the flag stayed 0 through a short and a
+long hold and a pick walked with both flippers. Beside it, a pick button already held when the pick comes to want it
+is taken mid-press (`edge_take_held`: its level reads released, its handler bits held back through its release), and
+the pick also hides from a new game's start (`game_start`) until its first ball waits, at most 10 s
 (`COOP_FRESH_MS`): no ball is in play yet. A join in a ball in play is not a new game and stays as above. The top
-line's turn (name, what it does) ends with how to take one: `ACTION OR LAUNCH TO PICK` (`ACTION TO PICK` on a port
+line's turn (name, what it does) ends with how to take one: `ACTION/LAUNCH PICKS` (`ACTION PICKS` on a port
 with no plunger flags; nothing with no `action`).
 Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla

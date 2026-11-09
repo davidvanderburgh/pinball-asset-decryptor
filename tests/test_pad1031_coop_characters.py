@@ -221,7 +221,7 @@ def test_each_teammate_picks_one_nobody_else_has_and_its_ability_holds_while_the
     assert "before a pick: 5" in out                                # no character yet: the game's own value
     assert "open [PLAYER 1 PICK  30: GODZILLA 1954]" in out          # PAD-1044: the seconds left with it
     assert "flip [LONGER BALL SAVE]" in out                         # then what it does, in turn
-    assert "flip2 [ACTION TO PICK  27]" in out                      # PAD-1078: then how to take one (no plunger flags)
+    assert "flip2 [ACTION PICKS]" in out                            # PAD-1078: then how to take one (no plunger flags)
     assert "flip3 [PLAYER 1 PICK  26: GODZILLA 1954]" in out         # and round again
     # teammate 1's: the save time doubled (5 -> 10, at most 15); the heat ray is not theirs; the top line says whom
     # they took (PAD-1044)
@@ -246,7 +246,7 @@ def test_each_teammate_picks_one_nobody_else_has_and_its_ability_holds_while_the
     assert "then [PLAYER 1  BALL %d]" in out
     # busy under the pick: kept open with no character, its clock stopped; 20 s left after, not dropped
     assert "busy: open 1 who 2 pick -1" in out
-    assert "back: open 1 [ACTION TO PICK  19]" in out              # PAD-1078: the turn's third step
+    assert "back: open 1 [ACTION PICKS]" in out                    # PAD-1078: the turn's third step
     assert "back +18.5 s: open 1" in out
     assert "back timed 0" in out
     assert "unlimited [PLAYER 3 PICK: GODZILLA 1954]" in out        # no time limit: no seconds

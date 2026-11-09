@@ -181,7 +181,7 @@ def test_the_pick_hides_its_buttons_only_while_its_ball_waits_and_a_launch_takes
     assert "no plunger flags 0000" in out                            # as before PAD-1051
     assert "a turn's ball not served yet 0000" in out                # PAD-1078: a turn change: a ball may be in play
     assert "a new game, not served yet 1110" in out                  # the right flipper held through Start
-    assert "how [ACTION OR LAUNCH TO PICK  29]" in out               # the top line says how to take one
+    assert "how [ACTION/LAUNCH PICKS]" in out                        # the top line says how to take one
     assert "10 s on, never waited 0000" in out                       # COOP_FRESH_MS at most
     assert "its first ball waits 1110" in out and "then out 0000" in out
 

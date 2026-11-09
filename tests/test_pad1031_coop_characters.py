@@ -16,7 +16,11 @@ from pinball_decryptor.plugins.stern import coop_play as CP
 from tests import test_spike2_mode_roster as R
 
 RUNTIME = pathlib.Path(__file__).resolve().parents[1] / "tools" / "spike2_emu" / "modes" / "sdk" / "pad_mode_runtime.c"
-GZ_ELF = "C:/tmp/PAD-1010/elfs/godzilla_le-1_16_0_spike2.elf"
+#: PAD-1075: the longer-save ability on Godzilla: its ball save, O2 and every multiball's own save, doubled
+LONGER_SAVE = ("adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:203x200:10:60,adj:204x200:10:60,adj:206x200:13:40,adj:208x200:15:60,adj:210x200:20:60,adj:211x200:30:120,adj:217x200:28:80,adj:219x200:28:80,adj:221x200:14:50,adj:225x200:28:80,adj:227x200:28:80,adj:200x200:5:20")
+GZ_ELF = next((p for p in ("C:/tmp/PAD-1010/elfs/godzilla_le-1_16_0_spike2.elf",
+                            "C:/tmp/PAD-1031/elfs/godzilla_le-1_16_0_spike2.elf") if os.path.isfile(p)),
+              "C:/tmp/PAD-1010/elfs/godzilla_le-1_16_0_spike2.elf")
 
 MAIN = r"""
 #include <stdio.h>
@@ -80,14 +84,17 @@ int main(void)
     static const char *const cfg[] = {
         "adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE", "save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE",
         "adj:195x50:4:30,adj:173=0 GODZILLA GMK|EASIER HEAT RAY", "- SHIN GODZILLA|", "adj:oops NO ABILITY|",
-        "boost:200,gift:311 KING KONG|DOUBLE POWER-UPS", 0 };
+        "boost:200,gift:311,gift:319,gift:315,gift:309,gift:320 KING KONG|DOUBLE POWER-UPS", 0 };
     int i;
     for (i = 0; cfg[i]; i++) coop_char_line(cfg[i]);
     coop_pick_on = 1; coop.button = 59; coop_left = 60; coop_action = 34; coop_adj_game = own_adj;
     printf("chars %d\n", coop_ch_n);
     for (i = 0; i < coop_ch_n; i++)
         printf("char %d [%s] [%s] adj %u save %u boost %u gift %u\n", i, coop_ch[i].name, coop_ch[i].does,
-               coop_ch[i].n_adj, coop_ch[i].save_s, coop_ch[i].boost, coop_ch[i].gift);
+               coop_ch[i].n_adj, coop_ch[i].save_s, coop_ch[i].boost, coop_ch[i].n_gift ? coop_ch[i].gift[0] : 0u);
+    printf("gifts %u:", coop_ch[5].n_gift);                 /* PAD-1075: several, in order, COOP_GIFTS at most */
+    for (i = 0; i < (int)coop_ch[5].n_gift; i++) printf(" %u", coop_ch[5].gift[i]);
+    printf("\n");
     coop.n = 3; coop.turn = 1;
     coop_chars_begin();
     printf("before a pick: %u\n", coop_adj_answer(94, own_adj(94)));
@@ -203,6 +210,7 @@ def test_each_teammate_picks_one_nobody_else_has_and_its_ability_holds_while_the
     assert "char 3 [SHIN GODZILLA] [] adj 0 save 0 boost 0 gift 0" in out
     assert "char 4 [NO ABILITY] [] adj 0 save 0 boost 0 gift 0" in out
     assert "char 5 [KING KONG] [DOUBLE POWER-UPS] adj 0 save 0 boost 200 gift 311" in out             # an ability it cannot read: none
+    assert "gifts 4: 311 319 315 309" in out                        # PAD-1075: several gifts, the fifth past the room
     assert "before a pick: 5" in out                                # no character yet: the game's own value
     assert "open [PLAYER 1 PICK  30: GODZILLA 1954]" in out          # PAD-1044: the seconds left with it
     assert "flip [LONGER BALL SAVE]" in out                         # then what it does, in turn
@@ -381,7 +389,7 @@ def test_the_godzilla_customization_file_ships_beside_the_module():
     assert len(names) == 11 and len(set(names)) == 11               # the reporter's eleven abilities, one each
     assert all(len(n) <= CP.MAX_NAME for n in names)
     raw = json.load(open(path, encoding="utf-8"))
-    assert all(set(c) <= {"name", "ability", "picture"} for c in raw["characters"])
+    assert all(set(c) <= {"name", "sub", "ability", "picture"} for c in raw["characters"])
 
 
 def test_a_file_that_is_not_one_says_so(tmp_path):
@@ -397,26 +405,28 @@ def test_a_file_that_is_not_one_says_so(tmp_path):
 def test_godzillas_abilities_and_lines_read_off_its_program():
     elf = open(GZ_ELF, "rb").read()
     got = {a["key"]: a for a in CP.abilities(elf, "Godzilla")}
-    assert got["longer_save"]["cfg"] == ("adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:212+10:30:80,adj:213+10:30:80,"
-                                         "adj:214+10:30:80,adj:215+10:30:80,adj:216+10:30:100,adj:218+10:30:100")
+    assert got["longer_save"]["cfg"] == LONGER_SAVE                 # PAD-1075: the multiballs' saves, not the battles'
     assert got["action_save"]["cfg"] == "save:10"
     assert not got["heat_ray"]["cfg"] and got["heat_ray"]["why"]      # round 4: READY at the pick needs the port's object
     port = __import__("pinball_decryptor.plugins.stern.mode_project", fromlist=["read_port"]).read_port(
         str(RUNTIME.parent / "ports" / "godzilla_le-1.16.port"))
     full = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", port["site"], port["value"])}
-    assert full["heat_ray"] == "adj:195x50:4:30,count:heatlevel=3,count:heatspins=9"
+    assert full["heat_ray"] == "adj:195x50:4:30,count:heatlevel=3,count:heatspins=9,gift:315"   # PAD-1075: a train
     assert full["powerups"] == "boost:200,double:saucer,double:rampage,keep:djmult>=1"
-    assert full["maser"] == "lit:maser=0x8000000,yes:maser,keep:magna=1,steps:powerline"
-    assert full["building"] == "adj:168=0,steps:building,double:spins,double:shield"
+    assert full["maser"] == "lit:maser=0x8000000,yes:maser,keep:magna=1,steps:powerline,gift:309"
+    assert full["building"] == "adj:168=0,steps:building,double:spins,double:shield,double:saucer"
+    assert full["ally"] == "gift:311,adj:199x200:40:120,gift:319"                         # ... and Hedorah
+    assert full["spot"] == ("spot:0x7f000,adj:212+10:30:80,adj:213+10:30:80,adj:214+10:30:80,adj:215+10:30:80,"
+                            "adj:216+10:30:100,adj:218+10:30:100")
     assert CP.action_button(elf) == 34
     lines = CP.character_lines(elf, CP.read_preset(CP.presets()["godzilla"])["characters"])
     assert lines[:6] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62",
-                         "character adj:94x200:0:15,bs:94,adj:193x200:8:40,adj:212+10:30:80,adj:213+10:30:80,"
-                         "adj:214+10:30:80,adj:215+10:30:80,adj:216+10:30:100,adj:218+10:30:100 GODZILLA 1954|"
-                         "LONGER BALL SAVE, LONGER TIMERS"]
+                         "character %s SHODAIGOJI|LONGER BALL SAVE, LONGER TIMERS" % LONGER_SAVE]
+    assert all(len(ln.split(" ")[1]) < 384 for ln in lines if ln.startswith("character "))   # the runtime's token
     text = CP.cfg_text(elf, None, {"pick": True, "list": [{"name": "A", "ability": "heat_ray"}]},
                        sites=port["site"], values=port["value"])
-    assert text.endswith("character adj:195x50:4:30,count:heatlevel=3,count:heatspins=9 A|HEAT RAY READY, EASIER HEAT RAY\n")
+    assert text.endswith("character adj:195x50:4:30,count:heatlevel=3,count:heatspins=9,gift:315 "
+                         "A|HEAT RAY READY, EASIER HEAT RAY, TRAINS ALWAYS LIT\n")
 
 
 def test_a_held_record_gives_back_the_harder_of_the_teams_and_plays(tmp_path):
@@ -445,7 +455,7 @@ def test_godzillas_own_abilities_need_their_port_sites():
     values = MP.read_port(str(RUNTIME.parent / "ports" / "godzilla_le-1.16.port"))["value"]
     got = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", sites, values)}
     assert got["battles"] == "adj:173=0" and got["building"].startswith("adj:168=0,steps:building")
-    assert got["powerups"].startswith("boost:200") and got["ally"] == "gift:311,adj:199x200:40:120"
+    assert got["powerups"].startswith("boost:200") and got["ally"] == "gift:311,adj:199x200:40:120,gift:319"
     bare = {a["key"]: a for a in CP.abilities(elf, "Godzilla")}         # a port without them: not offered, and why
     assert all(not bare[k]["cfg"] and bare[k]["why"] for k in ("battles", "building", "powerups", "ally"))
 
@@ -552,12 +562,52 @@ def test_godzilla_offers_all_eleven_abilities_from_its_ports():
         got = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", set(port["site"]) | set(port["data"]),
                                                          port["value"])}
         assert all(got.values()), (key, [k for k, v in got.items() if not v])
-        assert got["spot"] == "spot:0x7f000" and got["tier2"] == "unlock:334"
-        assert got["addball"] == "addball:1" and got["maser"] == "lit:maser=0x8000000,yes:maser"
+        assert got["spot"].startswith("spot:0x7f000,adj:212+10") and got["tier2"] == "unlock:334"
+        assert got["addball"] == "addball:1" and got["maser"].startswith("lit:maser=0x8000000,yes:maser")
+        assert got["longer_save"] == LONGER_SAVE
         assert got["bridge"] == "adj:176=0,double:tanks,double:jets"
     keys = {c["ability"] for c in CP.read_preset(CP.presets()["godzilla"])["characters"]["list"]}
     assert len(keys) == 11 and keys <= {a[0] for a in CP.ABILITIES}   # eleven different abilities
     assert {"addball", "maser", "bridge"} <= keys                      # round 2: the three he asked for instead
+
+
+def test_godzillas_set_is_doomwalrus666s_list():
+    """PAD-1075: his spreadsheet - each character's name, its film under it and its ability, in his order."""
+    got = [(c["name"], c["sub"], c["ability"]) for c in CP.read_preset(CP.presets()["godzilla"])["characters"]["list"]]
+    assert got == [
+        ("SHODAIGOJI", "Godzilla (1954)", "longer_save"),
+        ("KINGOJI", "Godzilla vs King Kong (1962)", "powerups"),
+        ("SOSHINGEKI", "Destroy All Monsters (1968)", "ally"),
+        ("MEGAROGOJI", "Godzilla vs Mechagodzilla (1974)", "bridge"),
+        ("84GOJI", "Return of Godzilla (1984)", "addball"),
+        ("BIOGOJI", "Godzilla vs Biollante (1989)", "maser"),
+        ("BATOGOJI", "Godzilla and Mothra: The Battle for Peace (1992)", "building"),
+        ("DESUGOJI", "Godzilla vs. Destoroyah (1995)", "spot"),
+        ("MIREGOJI", "Godzilla 2000: Millennium (1999)", "action_save"),
+        ("SOKOGEKIGOJI", "Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack (2001)", "heat_ray"),
+        ("FINALGOJI", "Godzilla: Final Wars (2004)", "tier2")]
+    words = {a[0]: a[1] for a in CP.ABILITIES}
+    assert words["ally"] == "AN ALLY EVERY BALL, LONGER RODAN, HEDORAH STARTS"
+    assert words["maser"] == "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES"
+    assert words["building"] == "BUILDING, MECHA, AND SAUCER MULTIBALLS"
+    assert words["spot"] == "SPOT A BATTLE SHOT, LONGER BATTLE TIMERS"
+    assert words["heat_ray"] == "HEAT RAY READY, EASIER HEAT RAY, TRAINS ALWAYS LIT"
+
+
+def test_a_long_badge_and_line_stay_on_the_card():
+    """PAD-1075: the badge shrinks to the card's width, and a three-sentence line takes three smaller lines, not
+    two cut with ..."""
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new("RGBA", (10, 10)))
+    f, lines, step = CP._card_lines(d, CP.CARD_LINES["ally"], 760, 1)
+    assert lines and not lines[-1].endswith("...") and len(lines) <= 3
+    f2, short, _ = CP._card_lines(d, CP.CARD_LINES["tier2"], 760, 1)
+    assert len(short) == 1 and f2.size == 27
+    png = CP.preview(None, {"pick": True, "list": [{"name": "BIOGOJI", "sub": CP.clean_sub("x" * 90),
+                                                     "ability": "maser"}]},
+                     {"maser": dict((a[0], a[1]) for a in CP.ABILITIES)["maser"]}, 0)
+    assert png[:4] == b"\x89PNG"
+    assert len(CP.clean_sub("x" * 90)) == CP.MAX_SUB == 80
 
 
 def test_spot_and_unlock_read_from_coop_cfg():

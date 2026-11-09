@@ -412,9 +412,15 @@ class CapturePipeline(BasePipeline):
         start_byte -= start_byte % (ch * 2)
         end_byte -= end_byte % (ch * 2)
         slice_bytes = result.audio_pcm[start_byte:end_byte]
-        if not slice_bytes:
-            # No audio captured for this slice — emit a tiny silent WAV
-            slice_bytes = b"\x00\x00" * 32
+        # Pad with silence to the clip's full playing time (its frames at
+        # the clip fps).  The MP4 is muxed with -shortest, so a short WAV
+        # cut the picture: a clip past the end of the captured audio got
+        # an empty slice and came out as an MP4 with no video at all.
+        frame_bytes = ch * 2
+        need = int(len(clip) / _estimate_fps(clip) * sr) * frame_bytes
+        if len(slice_bytes) < need:
+            slice_bytes = bytes(slice_bytes) + b"\x00" * (
+                need - len(slice_bytes))
         with wave.open(wav_path, "wb") as w:
             w.setnchannels(ch)
             w.setsampwidth(2)

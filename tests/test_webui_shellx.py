@@ -69,7 +69,7 @@ def _mfr_keys():
 
 @pytest.mark.parametrize("mfr", ["stern", "jjp", "spooky", "pb", "williams",
                                  "cgc", "dp", "ap", "bof", "data_east",
-                                 "sega"])
+                                 "sega", "capcom"])
 def test_my_exports_exist_for_every_manufacturer(tmp_path, mfr):
     if mfr not in _mfr_keys():
         pytest.skip("no %s plugin" % mfr)

@@ -71,6 +71,16 @@ and [Multi-boot cards](multi-boot.md).
 - **Not round-tripped yet:** edited `.ogg` and `.ttf`/`.otf` files, and the
   compiled scripts and scenes. The build log says so.
 
+## Capcom
+
+- **Games:** 6 (Pinball Magic, Airborne, Breakshot, Flipper Football, Kingpin, Big Bang Bar), every version PinMAME runs
+- **Reads:** `.zip` (MAME ROM dumps; the zip can have any name, the version is read from the ROMs inside)
+- **Tabs:** Capture (Extract)
+
+The same as Data East: Extract runs the game in attract mode under PinMAME
+and records the DMD animations with their sound as one MP4 per scene.
+Needs libpinmame and ffmpeg; you supply the ROMs.
+
 ## Chicago Gaming Company
 
 - **Games:** 5 (Medieval Madness Remake, AFM Remake, MB Remake, Pulp Fiction, Cactus Canyon)
@@ -471,6 +481,7 @@ The full game lists live in the plugin sources:
 - [ap/games.py](../../pinball_decryptor/plugins/ap/games.py)
 - [bof/games.py](../../pinball_decryptor/plugins/bof/games.py)
 - [cgc/games.py](../../pinball_decryptor/plugins/cgc/games.py)
+- [pinmame_classic/capcom.py](../../pinball_decryptor/plugins/pinmame_classic/capcom.py) (Capcom)
 - [jjp/games.py](../../pinball_decryptor/plugins/jjp/games.py)
 - [pb/games.py](../../pinball_decryptor/plugins/pb/games.py)
 - [spooky/games.py](../../pinball_decryptor/plugins/spooky/games.py)

@@ -1,4 +1,5 @@
-"""PinMAME classic-DMD plugins (Data East / Sega / Stern Whitestar/SAM).
+"""PinMAME classic-DMD plugins (Data East / Sega / Capcom /
+Stern Whitestar/SAM).
 
 The registration lives in ``manufacturer.py`` (this one entry point
 registers several machines), so ``register`` is a thin forwarder rather

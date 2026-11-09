@@ -46,6 +46,9 @@ MFR_VISUALS = {
     # Sega Pinball (classic Whitestar DMD, 1995-1999) — a bright Sega blue,
     # distinct from BOF's darker blue and AP's navy.
     "sega": {"color": "#0089cf", "letter": "SEGA"},
+    # Capcom (1995-1996, PinMAME).  Its blue/yellow wordmark collides with
+    # Sega/BoF blue and PB gold, so a deep purple: no other card has one.
+    "capcom": {"color": "#6a1b9a", "letter": "CAP"},
 }
 
 

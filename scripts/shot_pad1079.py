@@ -1,12 +1,12 @@
 """PAD-1079 proof shots: the Co-op characters dialog with Godzilla's set loaded and its pick card, before and after the
 pick screen's look (colours, title, background) became the owner's to choose.
 
-    python scripts/shot_pad1079.py <repo> <out_dir> <before|after> <pictures folder> [<background picture>]
+    python scripts/shot_pad1079.py <repo> <out_dir> <before|after> <pictures folder> [<background picture> [<video>]]
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card, opens the
 Modes tab's Co-op characters dialog, loads Godzilla's set and the pictures named after its characters. After: opens
 the dialog's Look section and gives the pick a look of its own (a red frame, gold names, green words, its own title,
-a background picture, one character's own colour). Writes <out_dir>/<kind>_characters_dialog.png and
+a background picture, one character's own colour, the first character's video). Writes <out_dir>/<kind>_characters_dialog.png and
 <kind>_pick_card.png (the machine's still of the first character's pick screen).
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
@@ -41,6 +41,7 @@ def main():
     kind = sys.argv[3]
     folder = os.path.abspath(sys.argv[4])
     backdrop = os.path.abspath(sys.argv[5]) if len(sys.argv) > 5 else ""
+    video = os.path.abspath(sys.argv[6]) if len(sys.argv) > 6 else ""
     print("repo", repo, flush=True)
     scratch = tempfile.mkdtemp(prefix="pad1079-")
     project = os.path.join(scratch, "project")
@@ -86,6 +87,8 @@ def main():
                     webui_shot.api(url, "modes.coop_chars_look", key, value)
                 if backdrop:
                     CP.save_backdrop(project, backdrop)
+                if video:                                   # the first character plays a video in its frame
+                    CP.save_video(project, 0, video)
                 webui_shot.api(url, "modes.coop_char_colour", 1, "#7a3cff")
                 page.get_by_role("button", name="Look…").dispatch_event("click")
                 time.sleep(1)

@@ -334,7 +334,7 @@ export function CoopCharsDialog({ s, onClose }) {
     <span class=${cx("small wrap modes-coop-ch-does", r.lost ? "warn-ink" : "dim")}>${r.lost ? "Its powers are not on this game yet: none on the card."
       : r.powers.length ? html`<b>${r.words}</b> ${r.line}${r.missing.length ? html` <span class="warn-ink">(${r.missing.length} not on this game, left off the card)</span>` : null}`
       : "Plays as the game always does."}</span>
-    <span class="row" style="gap:4px">
+    <span class="modes-coop-ch-acts">
       <${Well} value=${r.colour || (ch.look ? ch.look.colours[0].value : "")}
         title=${r.colour ? "Its own frame colour on its cards: pick another." : "The frame colour on its cards (the look's): pick one of its own."}
         onPick=${(v) => call("modes.coop_char_colour", i, v)} />

@@ -23,12 +23,16 @@ so the window can say why a run lists no sounds. The tab names each request
 from the project (its Sound Test name and Audio tab file).
 """
 import json
+import os
 import re
 import time
+import zlib
 
 SOUND = re.compile(r"^\s*\d+ \[pad\] sound (\d+) (\d+)\s*$")
 #: the recording the request played (round 2): the record key the engine looked up next
 KEY = re.compile(r"^\s*\d+ \[pad\] sound key ([0-9a-f]{16})\s*$")
+#: round 4: a recording looked up later, with no request of its own - a song's next part
+NEXT = re.compile(r"^\s*\d+ \[pad\] sound next ([0-9a-f]{16})\s*$")
 #: the runtime's own words for the sound log, and for a port it will not use
 ON = re.compile(r"\[pad\] sound log: every request")
 #: round 2: this run's runtime logs the recording each request played (its key lines)
@@ -38,6 +42,12 @@ OFF = re.compile(r"\[pad\] (?:sound log: off - (.*)|.*NOT THIS GAME'S PORT.*)$")
 POLL_S = 0.25
 #: how much of the log's start tells one run's log from the next's
 HEAD = 64
+#: round 4: a log nothing wrote to this long before the window started is an EARLIER run's (the window
+#: opens beside a boot whose install has not cleared it yet): it is skipped until a new boot rewrites it
+STALE_S = 5.0
+#: the runtime's own clock at a line's start, which with the log's first bytes names the line for good
+#: (a window reopened mid-run reads the log again from the top; the app drops what it already has)
+MS = re.compile(r"^\s*(\d+) ")
 
 
 class SoundWatch:
@@ -50,6 +60,8 @@ class SoundWatch:
         self.head = b""
         self._next = 0.0
         self.count = 0
+        self.started = time.time()
+        self.boot = ""
 
     def poll(self, now):
         """Read what mode.log gained; how many sounds it held."""
@@ -64,7 +76,10 @@ class SoundWatch:
                 # a new boot's install took the old log out: shorter, or its first line is another
                 if end < self.pos or (self.head and head[:len(self.head)] != self.head):
                     self.pos, self.part = 0, ""
+                elif not self.head and os.fstat(f.fileno()).st_mtime < self.started - STALE_S:
+                    self.pos = end              # an earlier run's log: wait for this run's
                 self.head = head
+                self.boot = "%08x" % (zlib.crc32(head) & 0xffffffff)
                 f.seek(self.pos)
                 data = f.read()
                 self.pos = f.tell()
@@ -79,6 +94,9 @@ class SoundWatch:
         for ln in lines:
             ev = line_event(ln)
             if ev is not None:
+                m = MS.match(ln)
+                if m:
+                    ev["ms"], ev["boot"] = int(m.group(1)), self.boot
                 events.append(ev)
         self._record(events)
         n = sum(1 for ev in events if "request" in ev)
@@ -106,6 +124,9 @@ def line_event(ln):
     m = KEY.match(ln)
     if m:
         return {"key": m.group(1)}
+    m = NEXT.match(ln)
+    if m:
+        return {"next": m.group(1)}
     if ON.search(ln):
         return {"log": "on"}
     if KEYS.search(ln):

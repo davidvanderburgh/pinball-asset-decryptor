@@ -1389,14 +1389,28 @@ static void sound_say(unsigned request, unsigned n)
  * boot (17000 on Deadpool, before any request) and a song's later sections are not. */
 #define SOUND_KEY_MS 500
 static volatile unsigned long sound_last;
+/* PAD-1071 round 4: A SONG IN PARTS (Iron Maiden's song select: RUN's 7.5 s opening, then its body).
+ * The engine looks the next part up when the one before ends - 7.55 s after RUN's request, 9.1 s after
+ * another's, no request of its own - so a lookup past SOUND_KEY_MS is logged as "sound next <key>": the
+ * app hangs it under the song it continues. Not before the first request (the bank's index at boot),
+ * and at most SOUND_NEXT_MAX a second, so a burst of lookups that is not a song cannot fill the log. */
+#define SOUND_NEXT_MAX 20
+static unsigned long next_sec;
+static unsigned next_n;
 static void sound_key_say(const unsigned char *k)
 {
     char b[64];
-    int n;
-    if (log_fd < 0 || sound_lines >= SOUND_LINES_MAX || !sound_last || pm_ms() - sound_last > SOUND_KEY_MS) return;
+    int n, later;
+    unsigned long now = pm_ms();
+    if (log_fd < 0 || sound_lines >= SOUND_LINES_MAX || !sound_last) return;
+    later = now - sound_last > SOUND_KEY_MS;
+    if (later) {
+        if (now / 1000 != next_sec) { next_sec = now / 1000; next_n = 0; }
+        if (++next_n > SOUND_NEXT_MAX) return;
+    }
     sound_lines++;
-    n = pm_snprintf(b, sizeof b, "%8lu [pad] sound key %02x%02x%02x%02x%02x%02x%02x%02x\n", pm_ms(),
-                    k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
+    n = pm_snprintf(b, sizeof b, "%8lu [pad] sound %s %02x%02x%02x%02x%02x%02x%02x%02x\n", now,
+                    later ? "next" : "key", k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
     if (n > 0 && n < (int)sizeof b) write(log_fd, b, (unsigned long)n);
 }
 

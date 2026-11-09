@@ -14,3 +14,5 @@ body.elog-view #app { height: 100%; }
 .elog-foot { flex: 0 0 auto; }
 /* round 2: a sound the game asked for and did not play (no recording looked up): dimmed */
 .elog-unplayed > .c { opacity: 0.5; }
+/* round 4: a song's later part, under the song */
+.elog-part { padding-left: 12px; }

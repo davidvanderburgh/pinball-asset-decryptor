@@ -22,8 +22,8 @@ REPO_OF_RIG = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
-CARD = r"D:\Pinball\images\Stern\spike2\deadpool_pro-1_16_0.Release.8G.sdcard.raw"
-PROJECT = r"C:\tmp\Pinball\Deadpool Pro"
+CARD = os.environ.get("PAD1071_CARD") or r"D:\Pinball\images\Stern\spike2\deadpool_pro-1_16_0.Release.8G.sdcard.raw"
+PROJECT = os.environ.get("PAD1071_PROJECT") or r"C:\tmp\Pinball\Deadpool Pro"
 
 LAUNCHER = r'''
 import subprocess, sys, os
@@ -61,7 +61,7 @@ TYPED_CLIPS = [(1.2, "CloneMultiballStart"), (4.6, "CloneMultiball_ModeTotal")]
 
 def _project(scratch):
     """A copy of the parts of the project the tabs read (no audio/video bytes but the names)."""
-    dst = os.path.join(scratch, "Deadpool Pro")
+    dst = os.path.join(scratch, os.environ.get("PAD1071_NAME") or "Deadpool Pro")
     os.makedirs(os.path.join(dst, "audio"))
     os.makedirs(os.path.join(dst, "video"))
     for name in ("sound_requests.tsv", "sound_test_names.csv", ".extract_source.json"):

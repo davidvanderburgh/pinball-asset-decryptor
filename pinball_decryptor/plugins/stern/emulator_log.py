@@ -107,18 +107,26 @@ class Names:
         self._secs = {}
 
     def sound(self, request):
+        """``(name, rels, idxs, firsts)``: the request's Audio tab files, the ones it may start with
+        first (``firsts`` of them: one is picked), then its later parts (a song's body after its
+        opening, round 4)."""
         v = self._req.get(int(request))
         if not v:
-            return "", [], []
-        rels, idxs = [], []
-        for i in list(v["idx"]) + list(v["also"] or ()):
+            return "", [], [], 0
+        rels, idxs, firsts = [], [], 0
+        for n, i in enumerate(list(v["idx"]) + list(v["also"] or ())):
             if i in self._files and i not in idxs:
                 rels.append(self._files[i])
                 idxs.append(i)
-        return v["name"] or "", rels, idxs
+                firsts += n < len(v["idx"])
+        return v["name"] or "", rels, idxs, firsts
 
     def idx_of_key(self, key):
-        return self._keys.get(str(key or "").lower())
+        idx = self._keys.get(str(key or "").lower())
+        return idx if idx in self._files else None
+
+    def rel_of(self, idx):
+        return self._files.get(idx, "")
 
     def has_map(self):
         return bool(self._req)
@@ -182,6 +190,7 @@ class Log:
         self.pending = []          # rows read, not yet shown: a sound of several recordings waits for its key
         self.status, self.why = "", ""
         self.keyed = False         # this run's runtime logs the recording each request played
+        self.seen = set()          # round 4: (boot, runtime ms, line) of every sound line taken
 
     def reset(self):
         """A new run: the rows go, and the numbering goes on (a page sees ``first`` move)."""
@@ -190,6 +199,7 @@ class Log:
         self.pending = []
         self.status, self.why = "", ""
         self.keyed = False
+        self.seen = set()
 
     def poll(self, now=None):
         """Read what the files gained; True when anything a page shows changed."""
@@ -199,6 +209,7 @@ class Log:
         changed = bool(s_new or c_new)
         if changed:
             self.reset()
+        sev = self._new_only(sev)
         for ev in sev:
             if ev.get("log") == "keys":
                 self.keyed = True
@@ -207,7 +218,10 @@ class Log:
                 self.why = str(ev.get("why") or "")
                 changed = True
             elif "key" in ev:
-                self._played(ev)
+                if not self._played(ev):
+                    self._next(ev)
+            elif "next" in ev:
+                self._next(ev)
             else:
                 row = self._sound_row(ev)
                 if row is not None:
@@ -217,6 +231,20 @@ class Log:
             if row is not None:
                 self.pending.append(row)
         return self._release(now) or changed
+
+    def _new_only(self, events):
+        """Round 4: the sound lines not taken before. A playfield window reopened during a run reads
+        mode.log again from its first line; each line is named by the boot's first bytes and the
+        runtime's clock, so a second copy is dropped (lines from before round 4 carry neither)."""
+        out = []
+        for ev in events:
+            if "ms" in ev:
+                k = (ev.get("boot"), ev["ms"], ev.get("request"), ev.get("key"), ev.get("next"), ev.get("log"))
+                if k in self.seen:
+                    continue
+                self.seen.add(k)
+            out.append(ev)
+        return out
 
     def _played(self, ev):
         """A recording the engine looked up: the newest waiting row of a request that plays it."""
@@ -228,17 +256,56 @@ class Log:
         except (TypeError, ValueError):
             return
         for r in reversed(self.pending):
-            if r["kind"] == "sound" and r.get("played") is None and idx in r["idxs"] and t - r["t"] <= HOLD_S:
+            if (r["kind"] == "sound" and r.get("played") is None and idx in r["idxs"][:r["firsts"]]
+                    and t - r["t"] <= HOLD_S):
                 k = r["idxs"].index(idx)
                 r["played"] = k
                 r["rel"] = r["rels"][k]
                 if r.pop("named_by_file", False):
                     r["name"] = os.path.splitext(os.path.basename(r["rel"]))[0]
-                if len(r["rels"]) > 1:
-                    r["what"] += "  %d of %d" % (k + 1, len(r["rels"]))
+                if r["firsts"] > 1:
+                    r["what"] += "  %d of %d" % (k + 1, r["firsts"])
                     r["tip"] = [r["tip"][0]] + ["Played this time: %s (%d of its %d recordings)"
-                                                 % (os.path.basename(r["rel"]), k + 1, len(r["rels"]))] + r["tip"][1:]
-                return
+                                                 % (os.path.basename(r["rel"]), k + 1, r["firsts"])] + r["tip"][1:]
+                return True
+        return False
+
+    #: how far back a song's later part looks for the song it continues (a whole song can run 12 minutes)
+    PART_S = 3600.0
+
+    def _next(self, ev):
+        """Round 4: a recording the engine looked up with no request of its own - Iron Maiden's RUN
+        plays its 7.5 s opening, then (7.55 s later) its body: a row of its own under the song's
+        request, "part 2 of 3", with its file and length. A recording no song of this run names is
+        listed by its file. One the project does not hold (a music bank's) is not listed."""
+        idx = self.names.idx_of_key(ev.get("key") or ev.get("next"))
+        if idx is None:
+            return
+        try:
+            t = float(ev.get("t") or 0)
+        except (TypeError, ValueError):
+            return
+        song = None
+        for r in reversed(self.pending + self.rows[-400:]):
+            if r["kind"] == "sound" and not r.get("part") and idx in r["idxs"] and t - r["t"] <= self.PART_S:
+                song = r
+                break
+        rel = self.names.rel_of(idx)
+        if song is not None:
+            k = song["idxs"].index(idx)
+            req = song["what"].split()[0]
+            what = "%s  part %d of %d" % (req, k + 1, len(song["idxs"]))
+            name = song["name"]
+            tip = ["%s, part %d of %d: the game played it when the part before it ended (no request of "
+                   "its own)" % (song["tip"][0], k + 1, len(song["idxs"])),
+                   "Its file on the Audio tab: " + os.path.basename(rel)]
+        else:
+            what, name = "plays on", os.path.splitext(os.path.basename(rel))[0]
+            tip = ["A recording the game played with no request of its own: the next part of a sound "
+                   "started before this log's first row", "Its file on the Audio tab: " + os.path.basename(rel)]
+        self.pending.append({"t": t, "at": _clock(t), "kind": "sound", "name": name, "what": what, "rel": rel,
+                             "rels": [rel], "idxs": [idx], "firsts": 1, "played": 0, "part": True,
+                             "hold": False, "tip": tip})
 
     def _release(self, now):
         """The waiting rows in the order they started, up to the first still waiting for its key."""
@@ -274,15 +341,15 @@ class Log:
             t = float(ev.get("t") or 0)
         except (KeyError, TypeError, ValueError):
             return None
-        name, rels, idxs = self.names.sound(req)
+        name, rels, idxs, firsts = self.names.sound(req)
         what = "Sound request %d%s" % (req, " (a numbered variant)" if ev.get("n") else "")
         tip = [what]
         if name:
             tip.append("Sound Test name: " + name)
-        if len(rels) > 1:
+        if firsts > 1:
             tip.append("It plays one of %d recordings each time: %s" % (
-                len(rels), ", ".join(os.path.basename(r) for r in rels[:6])
-                + (" and %d more" % (len(rels) - 6) if len(rels) > 6 else "")))
+                firsts, ", ".join(os.path.basename(r) for r in rels[:firsts][:6])
+                + (" and %d more" % (firsts - 6) if firsts > 6 else "")))
             if not self.names.has_keys():
                 tip.append("Which one played is not known for this project, so the first is the one "
                            "played and opened. Extract the card into it again to see which one played.")
@@ -291,6 +358,15 @@ class Log:
                            "log named it), so the first is the one played and opened.")
         elif rels:
             tip.append("Its file on the Audio tab: " + os.path.basename(rels[0]))
+        if len(rels) > firsts:                             # round 4: a song's later parts
+            tip.append("Then its later parts, each listed as it starts: %s"
+                       % ", ".join(os.path.basename(r) for r in rels[firsts:][:6]))
+            if not (self.names.has_keys() and self.keyed):
+                tip.append("They are not listed for this %s, so this row is only the opening."
+                           % ("project (extract the card into it again)" if not self.names.has_keys()
+                              else "run (an emulator from before this log)"))
+        if rels:
+            pass
         elif self.names.has_map():
             tip.append("None of the Audio tab's files is this request's: it is most likely a song "
                        "from a music bank, or a sound this project does not hold.")
@@ -299,7 +375,7 @@ class Log:
                        "not named. Extract the card into it again to name them.")
         label = name or (os.path.splitext(os.path.basename(rels[0]))[0] if rels else "Unnamed sound")
         return {"t": t, "at": _clock(t), "kind": "sound", "name": label, "what": "#%d" % req,
-                "rel": rels[0] if rels else "", "rels": rels, "idxs": idxs, "played": None,
+                "rel": rels[0] if rels else "", "rels": rels, "idxs": idxs, "firsts": firsts, "played": None,
                 "hold": bool(rels) and self.names.has_keys() and self.keyed,
                 "named_by_file": not name and bool(rels),
                 "tip": tip}

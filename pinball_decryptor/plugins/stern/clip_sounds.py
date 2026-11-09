@@ -1024,6 +1024,43 @@ def sound_variants(project):
         return {}
 
 
+#: PAD-1071: each decoded sound's record key - the 8 bytes the game's engine looks a recording up by
+#: (a param's ``findkey``) - one ``idx<TAB>16 hex digits`` line each. The Emulate tab's Sound and video
+#: log reads the key the runtime saw looked up after a request and names the very file it played.
+KEYS_TSV = "sound_keys.tsv"
+
+
+def write_keys(project, params):
+    """Write :data:`KEYS_TSV` for *params* (the extract's records); how many it names."""
+    rows = sorted((int(p["idx"]), bytes(p["findkey"]).hex()) for p in params
+                  if p.get("findkey") is not None and p.get("idx") is not None)
+    path = os.path.join(project, KEYS_TSV)
+    if not rows:
+        return 0
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write("# Each sound's record key (what the game looks it up by): idx, 16 hex digits.\n"
+                "# Written by Extract; the Emulate tab's Sound and video log reads it.\n")
+        for idx, key in rows:
+            f.write("%d\t%s\n" % (idx, key))
+    os.replace(tmp, path)
+    return len(rows)
+
+
+def read_keys(project):
+    """``{16 hex digits: idx}`` from :data:`KEYS_TSV` (``{}`` when the extract predates it)."""
+    out = {}
+    try:
+        with open(os.path.join(project, KEYS_TSV), encoding="utf-8") as f:
+            for line in f:
+                cols = line.split("\t")
+                if len(cols) == 2 and cols[0].isdigit():
+                    out[cols[1].strip().lower()] = int(cols[0])
+    except OSError:
+        pass
+    return out
+
+
 def sound_uses(project):
     """``{idx: [(request, Sound Test name), ...]}`` of every request that plays each decoded
     sound, as the first sound of a sound id or a later part of one; a sound no request plays

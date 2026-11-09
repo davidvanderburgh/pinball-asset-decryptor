@@ -1380,9 +1380,32 @@ static void sound_say(unsigned request, unsigned n)
     if (k > 0 && k < (int)sizeof b) write(log_fd, b, (unsigned long)k);
 }
 
+/* PAD-1071 round 2: WHICH RECORDING a request played. Nearly half a title's requests play one of several
+ * (Deadpool Pro 1.16: 377 of 853 - a spinner's four, GAME START's eighteen), and the worker's line names
+ * the request, not the pick. The pick is the record the engine looks up next (sound_lookup's r1, the
+ * 8-byte key Extract writes beside each sound, sound_keys.tsv), 1-5 ms after the worker on the rig. So a
+ * lookup within SOUND_KEY_MS of the worker's last request is logged too ("<ms> [pad] sound key <16 hex>"),
+ * as the game asked for it, before any swap below re-points it; the lookups the bank's index makes at
+ * boot (17000 on Deadpool, before any request) and a song's later sections are not. */
+#define SOUND_KEY_MS 500
+static volatile unsigned long sound_last;
+static void sound_key_say(const unsigned char *k)
+{
+    char b[64];
+    int n;
+    if (log_fd < 0 || sound_lines >= SOUND_LINES_MAX || !sound_last || pm_ms() - sound_last > SOUND_KEY_MS) return;
+    sound_lines++;
+    n = pm_snprintf(b, sizeof b, "%8lu [pad] sound key %02x%02x%02x%02x%02x%02x%02x%02x\n", pm_ms(),
+                    k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
+    if (n > 0 && n < (int)sizeof b) write(log_fd, b, (unsigned long)n);
+}
+
 static void on_sound_worker(unsigned *r)
 {
-    if (worker_log) sound_say(r[0], r[2]);
+    if (worker_log) {
+        sound_say(r[0], r[2]);
+        sound_last = pm_ms() ? pm_ms() : 1;
+    }
     if (cabs_live) cabs_worker(r[0]);         /* PAD-1040: a song with an expression light show of the card's */
     if (att_live) att_worker(r[0]);           /* PAD-645: the game's own sound at an attract press */
     if (blist_live) blist_play(r[0]);
@@ -1534,6 +1557,7 @@ static volatile int gms_live;
 
 static void on_sound_lookup(unsigned *r)
 {
+    if (worker_log && r[1]) sound_key_say((const unsigned char *)(unsigned long)r[1]);   /* PAD-1071 */
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
@@ -22527,6 +22551,12 @@ static int soundlog_arm(void)
         else if (worker_hooked || (worker_hooked = hook(fn("sound_worker"), on_sound_worker))) {
             worker_log = 1;
             say("sound log: every request the sound worker takes (soundlog.on)");
+            /* and the record each one played (round 2): the lookup, when the port names it */
+            if (fn("sound_lookup") && (lookup_hooked || (lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))))
+                say("sound log: and the recording each one played (sound_lookup at 0x%08x)", fn("sound_lookup"));
+            else
+                say("sound log: the recording each request played is not logged - the port names no sound_lookup "
+                    "that can be hooked");
         } else
             say("sound log: off - the sound worker at 0x%08x could not be hooked", fn("sound_worker"));
     }

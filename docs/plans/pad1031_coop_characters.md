@@ -389,9 +389,9 @@ No code change; the answer and the spreadsheet (artifacts `discord/godzilla_abil
   at 0x16d37c, Destruction Jackpot +3 s 18 at 0x148614, battle timers 15/16/17, saucer 9/10, skill shot 2, jet
   fighters 24, multiball base jackpots 5/6). A character that starts owning one needs a new keep form that ORs a bit
   (`keep:` writes a value; `lit:` only works on a rule's shot mask) - listed as "next" for the reporter.
-- The builder's `gift:` is one adjustment (three LIGHT ALLY gifts need a change); `keep:` holds a byte or word a player
-  but every tick, so a once-a-ball Mothra/Anguirus flag needs a set-at-turn-start form.
-- Fresh setting-based ideas added to the sheet: add-a-ball save 10 s, tier 2 battle ball saves 40 s, wizard mode ball
-  saves, Rampage ball save never shrinks / extra ball sooner, KOTM time attack loops +10 s / 8 minutes, city combos
+- After the PAD-1075 merge a character takes up to four gifts in order, so three LIGHT ALLY gifts (all three allies lit)
+  are possible but untested; `keep:` holds a byte or word a player but every tick, so a once-a-ball Mothra/Anguirus
+  flag needs a set-at-turn-start form. PAD-1075's longer save already doubles the add-a-ball save (200).
+- Fresh setting-based ideas added to the sheet: Rampage ball save never shrinks / extra ball sooner, KOTM time attack loops +10 s / 8 minutes, city combos
   extra ball at 4, three wallop ball saves, shorter Hedorah, slower tanks, easier Ghidorah and Gigan, bigger
   Destruction Jackpots / annihilation bonuses, Planet X city unlocked, THEME MUSIC per character, MORE GOATS.

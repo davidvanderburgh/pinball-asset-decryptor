@@ -1038,6 +1038,8 @@ site  audit_add              0x00409454 0xe92d43f0 0xe2505000
 # PAD-1031: co-op characters (pad_mode_runtime.c "co-op characters")
 # the adjustment-changed handler ({u16 id}): LIGHT ALLY's one-shot (a gift)
 site coop_adj_changed     0x000595b8 0xe92d4070 0xe1a05000
+# round 6: the framework's award-extra-ball (LE 0x2b300c; the audit add call at 0x42e1cc counts 73): eb:<n>
+site coop_eb_award        0x0042e154 0xe92d4070 0xe1a06000
 # the power-up add (this, n): a boost scales n
 site coop_boost           0x00149654 0xe92d4030 0xe24dd014
 # copies LIGHT BATTLE DIFFICULTY into the battle rule's record (hooked: the rule's object)
@@ -1136,3 +1138,6 @@ value coop_count_train_at     0x2c
 # multiplier step (0 = 1X, 1 = 2X ...) at this + (player - 1) x 4 + 0x10, raised with each light - keep:djmult>=1
 value coop_keep_djmult_obj    0x007a5640
 value coop_keep_djmult_at     0xc
+# round 6: the power-ups a player owns (LE 0x7b2dd0; the Rodan summon's bit test at Pro 0x11ca04 names the object)
+value coop_keep_perks_obj     0x007a6738
+value coop_keep_perks_at      0x44

@@ -6443,7 +6443,18 @@ what it needs):
   START adjustment sets at game start, 0x7b1d4c LE / 0x7a5714 Pro + 0x14 + 4 x player). `keep:<name>>=<v>` writes it
   only while it is below v (Godzilla's Destruction Jackpot multiplier step, 0x7b1c78 / 0x7a5640 + 0xc + 4 x player,
   0 = 1X: never below 2X for the power-ups character). A count may also be one byte
-  (`value coop_count_<name>_width 1`) or one word for every player (`_stride 0`).
+  (`value coop_count_<name>_width 1`) or one word for every player (`_stride 0`). `keep:<name>|=<mask>` (round 6) keeps
+  the mask's bits set in it (Godzilla `perks`: the power-ups a player owns, the perks picked at the scoop, one bit each
+  in the word at 0x7b2dd0 LE / 0x7a6738 Pro + 0x44 + 4 x player; each rule tests its own bit, so a character starts
+  owning LOOP VALUE 2X (bit 8), RODAN TIMER +15 SECONDS (20), RAGE COMBO +3 SECONDS (11) and the rest; the app folds a
+  character's perks into one such part).
+- `eb:<n>` (round 6): as the character's teammate begins the game's ball n, the game's own award-extra-ball
+  (`site coop_eb_award`; Godzilla LE 0x2b300c / Pro 0x42e154, what the mystery's AWARD EXTRA BALL calls: the player's
+  extra ball count up, AUD_TOTAL_EXTRA_BALLS, SHOOT AGAIN) is called once a teammate a game; it answers 2 when the
+  game's extra balls are off or at their limit (it gives points instead), and the log says which.
+- Room on one character (round 6, the owner composes them in the app): COOP_CHAR_ADJ 24 `adj:` parts, COOP_GIFTS 6,
+  COOP_CH_N 4 each of count/keep/steps/lit/yes, COOP_CH_DBL 6 doubles, 767 characters of text; `coop_play.LIMITS`
+  mirrors them and the dialog refuses what the runtime would drop.
 - `steps:<name>`: a rule's steps come two a shot: `value coop_steps_<name>_obj` is the rule (one object), `_at` its
   vector of `_n` step words, each a percent byte per player (100 = done; Godzilla's building keeps its six stability
   steps so, at 0x7b1d10 + 0x2c on LE, 0x7a56d8 on Pro). Each step the game completes while the teammate is up, the

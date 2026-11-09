@@ -38,6 +38,9 @@ from .pipeline import (SamExtractPipeline, SamExtractPlusCapturePipeline,
                        SternDirectSsdWritePipeline, SternExtractPipeline,
                        SternFlashImagePipeline, SternRevertPipeline,
                        SternWritePipeline)
+from . import spike3 as _spike3
+from .spike3_extract import Spike3ExtractPipeline
+from .spike3_games import SPIKE3_DB, spike3_key_for_path, spike3_display
 
 # Stern handles four hardware eras under one picker entry:
 #   * "spike2"    — the modern SD-card games (image.bin audio + ext4 assets),
@@ -155,7 +158,25 @@ _SAM_GAMES = tuple(sorted(
           notes=f"SAM {v['year']}", era="sam")
      for k, v in _SAM_DB.items()),
     key=lambda g: g.display.lower()))
-_GAMES = _SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES + _SAM_GAMES
+_SPIKE3_GAMES = tuple(
+    Game(key=k, display=v["display"], manufacturer_key="stern",
+         notes="Spike 3", era="spike3",
+         supported=v.get("supported", True),
+         unsupported_reason=v.get("reason", ""))
+    for k, v in SPIKE3_DB.items())
+_GAMES = (_SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES + _SAM_GAMES
+          + _SPIKE3_GAMES)
+
+# Spike 3 (Pi-4 secure-boot era): the SD card's game partition is LUKS2-
+# encrypted, so Extract decrypts it on the fly and copies out the directly
+# usable assets — playable QuickTime videos, PNG images, and .radium/.sidx
+# scenes.  Extract-only for now: build/replace would re-encrypt + re-sign,
+# which this era doesn't do yet.  See spike3.py / spike3_extract.py.
+_SPIKE3_CAPS = Capabilities(
+    extract=True,
+    extract_categories=(("video", "Video"), ("images", "Images"),
+                        ("scenes", "Scenes")),
+)
 
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD
 # — you can't repack a MAME ROM; extraction is a libpinmame attract capture).
@@ -648,7 +669,7 @@ class SternManufacturer(Manufacturer):
         self._era = "spike2"
 
     def set_era(self, era):
-        self._era = era if era in ("whitestar", "sam", "spike1") \
+        self._era = era if era in ("whitestar", "sam", "spike1", "spike3") \
             else "spike2"
 
     @property
@@ -669,6 +690,8 @@ class SternManufacturer(Manufacturer):
             return _WHITESTAR_CAPS
         if self._era == "spike1":
             return _SPIKE1_CAPS
+        if self._era == "spike3":
+            return _SPIKE3_CAPS
         return self._SPIKE2_CAPS
 
     @property
@@ -680,6 +703,10 @@ class SternManufacturer(Manufacturer):
             return _WHITESTAR_PREREQS
         if self._era == "spike1":
             return _SPIKE1_PREREQS
+        if self._era == "spike3":
+            # LUKS decrypt is pure Python over the bundled crypto backend;
+            # videos copy out verbatim (no ffmpeg).  Nothing extra to install.
+            return ()
         return self._SPIKE2_PREREQS
 
     @property
@@ -690,6 +717,8 @@ class SternManufacturer(Manufacturer):
             return _wscapture.PHASES
         if self._era == "spike1":
             return self._SPIKE1_EXTRACT_PHASES
+        if self._era == "spike3":
+            return Spike3ExtractPipeline.PHASES
         return self._SPIKE2_EXTRACT_PHASES
 
     @property
@@ -719,6 +748,8 @@ class SternManufacturer(Manufacturer):
         # SAM: Stern's .bin code update, bare or in a zip.
         if self._era == "sam":
             return "Game file"
+        if self._era == "spike3":
+            return "Secure SD-card image"
         return "ROM zip" if self._era == "whitestar" else "Card image"
 
     def write_output_ext(self):
@@ -846,6 +877,16 @@ class SternManufacturer(Manufacturer):
         # the Image Info report reads better saying which it looked at.
         from ...core.rawdevice import is_device_path
         noun = "card" if is_device_path(path) else "card image"
+        # Spike 3 (secure SD image) before Spike 2: its boot/LUKS layout is
+        # distinct, and detect_game only matches the Spike 2 signature.
+        if _spike3.is_spike3_card(path):
+            key = spike3_key_for_path(path)
+            info = SPIKE3_DB.get(key, {})
+            return Game(key=key, display=spike3_display(key, path),
+                        manufacturer_key="stern", era="spike3",
+                        notes="Spike 3 %s" % noun,
+                        supported=info.get("supported", True),
+                        unsupported_reason=info.get("reason", ""))
         key = detect_game(path)
         if key is not None:
             return Game(key=key, display=display_for_key(key, path),
@@ -1118,6 +1159,10 @@ class SternManufacturer(Manufacturer):
                 input_path, output_dir, log_cb, phase_cb, progress_cb,
                 done_cb, extract_categories=extract_categories,
                 duration_names=duration_names)
+        if self._era == "spike3":
+            return Spike3ExtractPipeline(
+                input_path, output_dir, log_cb, phase_cb, progress_cb,
+                done_cb, extract_categories=extract_categories)
         return SternExtractPipeline(
             input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
             extract_categories=extract_categories,

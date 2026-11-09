@@ -104,6 +104,7 @@ class Names:
         self._req = read_requests(project) if ok else {}
         self._files = audio_files(project) if ok else {}
         self._keys = read_keys(project) if ok else {}
+        self._secs = {}
 
     def sound(self, request):
         v = self._req.get(int(request))
@@ -124,6 +125,31 @@ class Names:
 
     def has_keys(self):
         return bool(self._keys)
+
+    def seconds(self, rel):
+        """Round 3: how long the Audio tab file *rel* plays (its WAV header), or None."""
+        if rel in self._secs:
+            return self._secs[rel]
+        out = None
+        try:
+            import wave
+            with wave.open(os.path.join(self.project, rel), "rb") as w:
+                if w.getframerate() > 0:
+                    out = w.getnframes() / float(w.getframerate())
+        except Exception:                                  # noqa: BLE001 - not a WAV we can read
+            out = None
+        self._secs[rel] = out
+        return out
+
+
+def length_text(secs):
+    """Round 3: the Length column - "0.4 s", "12.0 s", "1:23"; "" when not known."""
+    if secs is None or secs < 0:
+        return ""
+    if secs < 60:
+        return "%.1f s" % secs
+    m, s = divmod(int(round(secs)), 60)
+    return "%d:%02d" % (m, s)
 
 
 def _clock(t):
@@ -230,6 +256,9 @@ class Log:
                                              "playing a sound it ranks higher, or this one already."] + r["tip"][1:]
             r.pop("hold", None)
             r.pop("named_by_file", None)
+            if r["kind"] == "sound":                       # round 3: the length of the recording named
+                r["secs"] = self.names.seconds(r["rel"]) if r["rel"] else None
+            r["len"] = length_text(r.get("secs"))
             r["i"] = self.first + len(self.rows)
             self.rows.append(r)
             out += 1
@@ -284,6 +313,10 @@ class Log:
         name = ev.get("name") or (os.path.splitext(os.path.basename(rel))[0] if rel else "") \
             or os.path.basename(str(ev.get("path") or "")) or "a clip"
         loop = bool(ev.get("loop"))
+        try:
+            secs = float(ev["dur"]) if ev.get("dur") else None    # round 3: frames / rate, clipwatch.py
+        except (TypeError, ValueError):
+            secs = None
         sw = str(ev.get("switch") or "")
         what = "loops" if loop else ("after " + sw if sw else "")
         tip = ["Clip %s%s" % (name, " (seen looping)" if loop else "")]
@@ -295,7 +328,7 @@ class Log:
             tip.append("Not one of this project's Video tab rows (the run's card is another "
                        "title's, or the project has no video folder).")
         return {"t": t, "at": _clock(t), "kind": "video", "name": name, "what": what,
-                "rel": rel, "rels": [rel] if rel else [], "tip": tip}
+                "rel": rel, "rels": [rel] if rel else [], "secs": secs, "tip": tip}
 
     def page(self, after=-1):
         """What a page needs to catch up: ``{"first", "rows", "status", "why", "counts"}`` - the

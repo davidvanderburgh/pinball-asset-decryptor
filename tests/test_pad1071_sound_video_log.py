@@ -404,3 +404,71 @@ def test_a_request_the_game_did_not_play_says_so(tmp_path):
     page = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "emulate_log.js"),
                 encoding="utf-8").read()
     assert 'r.unplayed && "elog-unplayed"' in page
+
+
+# ---- round 3: Length, and Open keeps the main window as it was ---------------------------------------------
+def _wav(path, secs, rate=8000):
+    import wave
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\0\0" * int(secs * rate))
+
+
+@pytest.mark.parametrize("secs, want", [(None, ""), (0.42, "0.4 s"), (12.0, "12.0 s"), (83.4, "1:23"), (600, "10:00")])
+def test_the_length_column_reads_like_a_player(secs, want):
+    assert EL.length_text(secs) == want
+
+
+def test_each_row_has_the_length_of_what_it_names(tmp_path):
+    ctl = str(tmp_path / "ctl")
+    p = _keyed(tmp_path)
+    _wav(os.path.join(p, "audio", "idx6305.wav"), 0.4)
+    _wav(os.path.join(p, "audio", "idx6154.wav"), 1.75)
+    _wav(os.path.join(p, "audio", "idx0024.wav"), 0.5)
+    _run(ctl, sounds=[{"log": "keys", "t": 9.0}, {"request": 363, "n": 0, "t": 10.0},
+                      {"key": "d4664161030080c3", "t": 10.0}, {"request": 151, "n": 0, "t": 10.1}],
+         clips=[{"path": "./a", "rel": "video/x.mov", "name": "x", "switch": "", "dur": 9.47, "t": 10.2},
+                {"path": "./a", "rel": "video/y.mov", "name": "y", "switch": "", "t": 10.3}])
+    lg = EL.Log(ctl, 0, p)
+    lg.poll(now=12.0)
+    got = [(r["what"], r["len"]) for r in lg.rows]
+    assert got == [("#363  4 of 4", "1.8 s"),          # the recording that played, not the first (0.4 s)
+                   ("#151", ""),                       # a music bank's song: no Audio tab file
+                   ("", "9.5 s"),                      # a clip: frames / rate, as clipwatch records it
+                   ("", "")]                            # a clip from before the length was recorded
+    page = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "emulate_log.js"),
+                encoding="utf-8").read()
+    assert '{ key: "len", label: "Length"' in page
+
+
+def test_the_clip_watch_records_each_clips_length(tmp_path):
+    import clipwatch as CW
+    log = tmp_path / "padvid.log"
+    log.write_text("[padvid   50.00] ch0 serving 1360x768 284 frames (acked 0.9 ms after notice) "
+                   "./assets/a/2.asset/0.asset  (30.000 fps)\n", encoding="utf-8")
+    cw = CW.ClipWatch(str(log), seen_path=str(tmp_path / "seen.jsonl"), names={})
+    cw.poll(1.0)
+    assert _lines(str(tmp_path / "seen.jsonl"))[0]["dur"] == 9.47
+
+
+def test_open_brings_the_windows_forward_without_restoring_them():
+    """Round 3 (Jim-Beam: Open "shrinked" the main window): restore() un-maximizes on Windows, so the
+    log never calls it - to_front only un-minimizes a minimized window (proven on a real maximized
+    window: 5136x1408 kept; the old restore() made it 216x239)."""
+    from pinball_decryptor.webui import emulate_log as ELW
+    src = open(ELW.__file__, encoding="utf-8").read()
+    assert ".restore" not in src.replace("SW_RESTORE", "")
+    assert "IsIconic" in src and "SetForegroundWindow" in src
+    shown = []
+
+    class Win:
+        native = None
+
+        def show(self):
+            shown.append(1)
+
+        def restore(self):
+            raise AssertionError("restore() un-maximizes the window")
+    assert ELW.to_front(Win()) is True and shown == [1]

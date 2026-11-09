@@ -227,7 +227,7 @@ class ClipWatch:
         self.last[ch] = clip
         self.now_path = path
         self._record({"path": path, "rel": clip.rel, "name": clip.name,
-                      "switch": switch})
+                      "switch": switch, "dur": round(dur, 2)})
         self.dirty = True
         return True
 

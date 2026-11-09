@@ -2717,7 +2717,8 @@ HELP_CONTENT = {
             "and clip the game starts, in order, as it starts them, in a window of its "
             "own you can put anywhere.",
             "- Each row has the time, **Sound** or **Clip**, its name and the sound's "
-            "request number or the switch made just before the clip. Hover a name for "
+            "request number or the switch made just before the clip, and its **Length** "
+            "(the recording that played; a clip's from its frames). Hover a name for "
             "the rest: a sound's Audio tab files, a clip's Video tab row.\n"
             "- **▶** plays a sound in the log itself; while it plays the button is **■**, "
             "and that, **Stop** in the bar or Esc stops it. **Open** (or a double-click) "

@@ -926,7 +926,8 @@ def _characters(got):
             out.append({"name": clean_name(c.get("name")), "sub": clean_sub(c.get("sub")),
                         "powers": keys, "header": clean_header(c.get("header")),
                         "ability": bundle_of(keys),         # the bundle these are, for the dialog's starting points
-                        "picture": str(c.get("picture") or ""), "colour": clean_colour(c.get("colour"))})
+                        "picture": str(c.get("picture") or ""), "colour": clean_colour(c.get("colour")),
+                        "video": str(c.get("video") or "")})
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
     if theme:
@@ -1143,14 +1144,18 @@ def wants_screens(project, prof):
     return bool(chars["pick"] and chars["list"])
 
 
-def pick_screens(project, characters=None, words_for=None, classic=None):
+def pick_screens(project, characters=None, words_for=None, classic=None, videos=None):
     """The pick's screens for :func:`.scene_write.add_screens`: one per character (``PadCoop_1`` ...) and
     ``PadCoop_Random``; ``[]`` when the project's characters have no pick. *words_for* (key -> words) names what
     each ability does, as the top line says it. PAD-1065: with *classic* (None: when CO-OP PLAY is in the service menu,
     the only way to play Classic) each character with an ability also gets its :func:`classic_patch`
-    (``PadCoopClassic_1`` ...), after the cards so it draws over its own."""
+    (``PadCoopClassic_1`` ...), after the cards so it draws over its own. PAD-1079: with *videos* (None: when the
+    project's title can play them, :func:`can_video`) a character with a video gets a see-through window in its card's
+    portrait frame, where its clip plays behind."""
     from . import mode_assets as MA
     chars = _characters(characters if characters is not None else load_characters(project))
+    if videos is None:
+        videos = bool(clip_entries(project, chars)) and can_video(project_title(project))
     if not chars["pick"] or not chars["list"]:
         return []
     del MA
@@ -1158,14 +1163,14 @@ def pick_screens(project, characters=None, words_for=None, classic=None):
     n = len(chars["list"])
     for i in range(n + 1):                    # every word is on the card but the runtime's: the seconds left, PICKED
         out.append(dict(name=SCREEN_NODE % ("Random" if i == n else i + 1),
-                        art_rgba=pick_card(project, chars, i, words_for, chars.get("theme")),
+                        art_rgba=pick_card(project, chars, i, words_for, chars.get("theme"), window=videos),
                         words=" ", words_name=(SCREEN_NODE % ("Random" if i == n else i + 1)) + "_Words",
                         x=float(CARD_AT[0]), y=float(CARD_AT[1]), words_at=TIMER_WORDS_AT,
                         words_scale=TIMER_WORDS_SCALE))
     if classic is None:
         classic = menu_asked(project)
     for i in range(n if classic else 0):
-        got = classic_patch(project, chars, i, words_for, chars.get("theme"))
+        got = classic_patch(project, chars, i, words_for, chars.get("theme"), window=videos)
         if got is not None:
             (x, y), art = got
             out.append(dict(name=CLASSIC_NODE % (i + 1), art_rgba=art, words=" ", x=float(CARD_AT[0] + x),
@@ -1173,7 +1178,7 @@ def pick_screens(project, characters=None, words_for=None, classic=None):
     return out
 
 
-def classic_patch(project, characters, index, words_for=None, theme=None):
+def classic_patch(project, characters, index, words_for=None, theme=None, window=False):
     """PAD-1065: the part of character *index*'s pick card that Classic (CO-OP PLAY 4-6) draws differently: the
     card as a character without an ability draws it (NO SPECIAL ABILITY, "Plays as the game always does."), cut to
     the box where it differs from the card with its ability, out to multiples of 4. ``((x, y) in the card, RGBA)``,
@@ -1182,9 +1187,10 @@ def classic_patch(project, characters, index, words_for=None, theme=None):
     chars = _characters(characters)
     if not chars["list"][index]["powers"]:                  # round 6: a list of powers (none: the card says so)
         return None
-    full = pick_card(project, chars, index, words_for, theme)
+    full = pick_card(project, chars, index, words_for, theme, window=window)
     plain = pick_card(project, dict(chars, list=[dict(c, powers=[], header="") if k == index else c
-                                                 for k, c in enumerate(chars["list"])]), index, words_for, theme)
+                                                 for k, c in enumerate(chars["list"])]), index, words_for, theme,
+                      window=window)
     ys, xs = np.nonzero(np.any(full != plain, axis=2))
     if not len(xs):
         return None
@@ -1221,6 +1227,136 @@ def pictures_from_folder(project, folder):
         else:
             missing.append(c["name"])
     return found, missing
+
+
+# ---- PAD-1079: a video per character -------------------------------------------------------------------------------
+# DoomWalrus666: "add videos". A character's video plays in its pick card's portrait frame: the card has a see-through
+# window there, and the runtime loops the character's clip behind the HUD (the backdrop, in the city's place) while
+# its card is on the glass. The clip is the owner's video placed where the window is on the glass, on black, at the
+# size the bank's own clips are (:func:`window_clip`); a title whose port has no backdrop keeps the picture.
+
+#: the video files a character's Video... takes
+VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".wmv", ".mpg", ".mpeg")
+#: a character's clip in the video bank (1-based)
+CLIP_NAME = "PadCoopClip%d"
+#: the portrait frame in the card (card pixels: x, y, w, h), where a video shows
+PORTRAIT = (40, 84, 380, 306)
+#: the glass the backdrop fills (the clip is stretched over it)
+GLASS = (1360, 768)
+
+
+def video_path(project, character):
+    """The absolute path of *character*'s video in *project* (``""`` when it has none, or it is gone)."""
+    return picture_path(project, {"picture": (character or {}).get("video") or ""})
+
+
+def save_video(project, index, source=None):
+    """Copy *source* (a video file) into the project as character *index*'s video, or with None forget it; returns
+    the characters as stored. Raises :class:`CoopError` when the file is not a video the app takes."""
+    import os
+    import shutil
+    chars = load_characters(project)
+    if not 0 <= int(index) < len(chars["list"]):
+        raise CoopError("There is no character %d." % (int(index) + 1))
+    c = chars["list"][int(index)]
+    if source is None:
+        c["video"] = ""
+        return save_characters(project, chars)
+    ext = os.path.splitext(source)[1].lower()
+    if ext not in VIDEO_EXTS or not os.path.isfile(source):
+        raise CoopError("That is not a video the app can take (%s)." % ", ".join(VIDEO_EXTS))
+    folder = os.path.join(project, PICTURE_DIR)
+    os.makedirs(folder, exist_ok=True)
+    stem = "character_%d_video" % (int(index) + 1)
+    for f in os.listdir(folder):                        # one video a character: another extension's goes
+        if os.path.splitext(f)[0] == stem and f != stem + ext:
+            os.remove(os.path.join(folder, f))
+    shutil.copyfile(source, os.path.join(folder, stem + ext))
+    c["video"] = "%s/%s%s" % (PICTURE_DIR, stem, ext)
+    return save_characters(project, chars)
+
+
+def can_video(prof):
+    """Whether *prof*'s port has the backdrop a character's video plays in (its ``backdrop_draw``)."""
+    from . import mode_project as MP
+    if prof is None or not getattr(prof, "port", None):
+        return False
+    try:
+        port = MP.read_port(MP.port_path(prof))
+    except (OSError, MP.ModeProjectError):
+        return False
+    return "backdrop_draw" in port["site"] and bool(port["data"].get("backdrop_city_vtable"))
+
+
+def window_box(w, h):
+    """The portrait window on a clip of w x h: ``(x, y, width, height)``, even numbers (the clip is stretched over
+    the :data:`GLASS`)."""
+    x, y, pw, ph = CARD_AT[0] + PORTRAIT[0], CARD_AT[1] + PORTRAIT[1], PORTRAIT[2], PORTRAIT[3]
+    sx, sy = w / GLASS[0], h / GLASS[1]
+    ev = lambda v: int(round(v / 2.0)) * 2                                    # noqa: E731
+    return ev(x * sx), ev(y * sy), max(2, ev(pw * sx)), max(2, ev(ph * sy))
+
+
+def window_clip(src, out, w, h, ffmpeg, max_seconds=None):
+    """*src* made into a character's clip at *out*: w x h, black but for the portrait window, where the video covers
+    it (cropped, never stretched), 30 fps, silent, no longer than a mode's clip."""
+    import subprocess
+    from . import mode_assets as MA
+    x, y, bw, bh = window_box(w, h)
+    head, tail = MA._encode_args(ffmpeg, out)
+    vf = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,pad=%d:%d:%d:%d:black,fps=%d"
+          % (bw, bh, bw, bh, w, h, x, y, MA.FPS))
+    cmd = head + ["-i", src, "-t", str(max_seconds or MA.MODE_CLIP_MAX_SECONDS), "-vf", vf] + tail
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if r.returncode != 0:
+        raise CoopError("ffmpeg could not make the clip of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
+    return out
+
+
+def clip_entries(project, characters=None):
+    """``[(index, bank name, video path)]`` of the characters with a video (in order)."""
+    chars = _characters(characters if characters is not None else load_characters(project))
+    out = []
+    for i, c in enumerate(chars["list"]):
+        path = video_path(project, c)
+        if path:
+            out.append((i, CLIP_NAME % (i + 1), path))
+    return out
+
+
+def video_still(project, character, ffmpeg=None):
+    """The first frame of *character*'s video (half a second in) as an RGBA PIL image - the dialog's preview - or
+    None."""
+    import os
+    import subprocess
+    import tempfile
+    from PIL import Image
+    path = video_path(project, character)
+    if not path:
+        return None
+    if ffmpeg is None:
+        from ...core.audio import find_ffmpeg
+        ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        return None
+    from . import mode_assets as MA
+    fd, png = tempfile.mkstemp(suffix=".png", prefix="spike2_coopvid_")
+    os.close(fd)
+    try:
+        for args in (["-ss", "0.5", "-i", path], ["-i", path]):            # a clip under half a second: its first
+            r = subprocess.run([ffmpeg, "-v", "error", "-y"] + args + ["-frames:v", "1", png],
+                               capture_output=True, creationflags=MA._NO_WINDOW)
+            if r.returncode == 0 and os.path.getsize(png):
+                with Image.open(png) as im:
+                    return im.convert("RGBA")
+        return None
+    except OSError:
+        return None
+    finally:
+        try:
+            os.remove(png)
+        except OSError:
+            pass
 
 
 def save_picture(project, index, source):
@@ -1309,9 +1445,10 @@ def save_backdrop(project, source=None):
     return save_characters(project, chars)
 
 
-def preview(project, characters=None, words_for=None, index=0):
+def preview(project, characters=None, words_for=None, index=0, videos=None):
     """A still of what the machine shows while the pick is on character *index* (RANDOM after the last): its
-    screen on a dark glass of the HUD's size, as PNG bytes - the Characters dialog's preview."""
+    screen on a dark glass of the HUD's size, as PNG bytes - the Characters dialog's preview. PAD-1079: a character
+    with a video shows its first frame in the window (*videos*: as :func:`pick_screens`)."""
     import io
 
     import numpy as np
@@ -1321,7 +1458,11 @@ def preview(project, characters=None, words_for=None, index=0):
     if not chars["list"]:
         return b""
     index = max(0, min(int(index), len(chars["list"])))           # only the one card: a click redraws in a moment
-    s = {"art_rgba": pick_card(project, chars, index, words_for, chars.get("theme")), "x": CARD_AT[0], "y": CARD_AT[1]}
+    c = chars["list"][index] if index < len(chars["list"]) else None
+    if videos is None:
+        videos = bool(c and video_path(project, c)) and can_video(project_title(project))
+    s = {"art_rgba": pick_card(project, chars, index, words_for, chars.get("theme"), window=videos),
+         "x": CARD_AT[0], "y": CARD_AT[1]}
     glass = Image.new("RGBA", (1360, 768), (40, 34, 58, 255))
     from PIL import ImageDraw
     d = ImageDraw.Draw(glass)
@@ -1331,8 +1472,18 @@ def preview(project, characters=None, words_for=None, index=0):
            anchor="mm", font=MA._font(26))
     for k in range(4):                                                            # its score panels
         d.rounded_rectangle((30 + k * 330, 612, 330 + k * 330, 760), radius=14, fill=(26, 26, 30, 255))
+    still = video_still(project, c) if videos and c else None
+    if still is not None:                       # PAD-1079: the clip behind the card, where its window is
+        x, y, bw, bh = window_box(*GLASS)
+        glass.paste(_cover(still, bw, bh).convert("RGBA"), (x, y))
     art = Image.fromarray(np.asarray(s["art_rgba"], dtype=np.uint8), "RGBA")
-    glass.alpha_composite(art, (int(s["x"]), int(s["y"])))
+    # the card is premultiplied (the game blends so): over the glass as the game draws it
+    under = np.asarray(glass, dtype=np.uint16)
+    a = np.asarray(art, dtype=np.uint16)
+    x0, y0 = int(s["x"]), int(s["y"])
+    region = under[y0:y0 + a.shape[0], x0:x0 + a.shape[1], :3]
+    region[...] = a[..., :3] + region * (255 - a[..., 3:4]) // 255
+    glass = Image.fromarray(under.astype(np.uint8), "RGBA")
     if secs:                                    # PAD-1044: the runtime's countdown, where its words line puts it
         d = ImageDraw.Draw(glass)
         d.text((int(s["x"]) + TIMER_TEXT_X, int(s["y"]) + TIMER_WORDS_AT[1]), str(secs), fill=(255, 255, 255, 255),
@@ -1581,8 +1732,10 @@ def _card_lines(draw, text, width, S):
             return f, got, int(size * 1.4) * S
 
 
-def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
-    """The pick's card for character *index* (``len(list)`` = RANDOM) as an RGBA array of :data:`CARD_SIZE`."""
+def pick_card(project, characters, index, words_for=None, theme=None, scale=2, window=False):
+    """The pick's card for character *index* (``len(list)`` = RANDOM) as an RGBA array of :data:`CARD_SIZE`. PAD-1079:
+    with *window*, a character with a video has its portrait frame see-through inside its lit edge (its clip plays
+    behind the HUD there)."""
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
     timed = bool(_characters(characters)["time"])
@@ -1728,6 +1881,10 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     base = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     base.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
     img = Image.alpha_composite(base, img)
+    if window and c is not None and video_path(project, c):     # PAD-1079: the video's window, inside the frame line
+        hole = Image.new("L", (pw - 6 * S, ph - 6 * S), 0)
+        ImageDraw.Draw(hole).rounded_rectangle((0, 0, pw - 6 * S - 1, ph - 6 * S - 1), radius=11 * S, fill=255)
+        img.paste((0, 0, 0, 0), (px + 3 * S, py + 3 * S), hole)
     out = np.asarray(img.resize(CARD_SIZE, Image.LANCZOS), dtype=np.uint8).copy()
     # the game blends its pictures PREMULTIPLIED (emulator: a white line at alpha 7 came out bright white, a body at
     # alpha 240 let the city through): the colour goes in already scaled by its alpha, so the glow and the rounded
@@ -1905,6 +2062,17 @@ def export_settings(project, path):
                               os.path.splitext(src)[1].lower() or ".png")
         c["picture"] = rel
         pictures.append((src, rel))
+    for i, c in enumerate(chars["list"]):                       # PAD-1079: each character's video
+        src = video_path(project, c)
+        c["video"] = ""
+        if not src:
+            continue
+        if not as_zip:
+            left_out += 1
+            continue
+        c["video"] = "%s/%d_%s_video%s" % (FILE_PICTURES, i + 1, picture_file_name(c["name"]) or "character",
+                                           os.path.splitext(src)[1].lower())
+        pictures.append((src, c["video"]))
     back = backdrop_path(project, chars.get("theme"))          # PAD-1079: the pick's background picture
     if back:
         if as_zip:
@@ -2027,6 +2195,18 @@ def import_settings(project, path):
         with open(os.path.join(folder, name), "wb") as f:
             f.write(blob)
         c["picture"] = "%s/%s" % (PICTURE_DIR, name)
+        pictures += 1
+    for i, c in enumerate(chars["list"]):                       # PAD-1079: each character's video
+        rel, c["video"] = c.get("video") or "", ""
+        blob = read(rel) if read and rel else None
+        ext = os.path.splitext(rel)[1].lower()
+        if not blob or ext not in VIDEO_EXTS:
+            continue
+        os.makedirs(folder, exist_ok=True)
+        name = "character_%d_video%s" % (i + 1, ext)
+        with open(os.path.join(folder, name), "wb") as f:
+            f.write(blob)
+        c["video"] = "%s/%s" % (PICTURE_DIR, name)
         pictures += 1
     theme = chars.get("theme") or {}                            # PAD-1079: the pick's background picture
     rel = theme.pop("backdrop", "")

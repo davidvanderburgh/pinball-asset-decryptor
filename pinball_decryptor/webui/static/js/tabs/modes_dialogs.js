@@ -342,6 +342,9 @@ export function CoopCharsDialog({ s, onClose }) {
       <${Button} size="xs" kind="ghost" icon="image" onClick=${() => call("modes.coop_char_picture", i, false)}
         title=${r.picture ? "Its picture on the pick screen: choose another." : "Choose a picture of your own for its pick screen (without one it gets a panel with its name)."}>${r.picture ? "Picture ✓" : "Picture…"}<//>
       ${r.picture ? html`<${Button} size="xs" kind="ghost" icon="x" title="Back to the panel with its name." onClick=${() => call("modes.coop_char_picture", i, true)} />` : null}
+      <${Button} size="xs" kind="ghost" icon="film" onClick=${() => call("modes.coop_char_video", i, false)}
+        title=${r.video ? "Its video, playing in its picture's frame on the pick screen: choose another." : "A video of your own, played over and over in its picture's frame while the pick is on it."}>${r.video ? "Video ✓" : "Video…"}<//>
+      ${r.video ? html`<${Button} size="xs" kind="ghost" icon="x" title="No video: its picture again." onClick=${() => call("modes.coop_char_video", i, true)} />` : null}
       <${Button} size="xs" kind="ghost" icon="eye" title="Show its pick screen in the preview below." onClick=${() => call("modes.coop_chars_show", i)} />
       <${Button} size="xs" kind="ghost" icon="trash" title="Take this character out." onClick=${() => call("modes.coop_char_remove", i)} />
     </span>
@@ -374,9 +377,10 @@ export function CoopCharsDialog({ s, onClose }) {
     ${looking && ch.look ? html`<${CoopLook} look=${ch.look} />` : null}
     ${ch.preview ? html`<div class="modes-coop-ch-pv">
       <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />
-      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"}. Give each character a picture of your own with Picture..., the screen colours and a background with Look..., and see it here; Write puts the cards on the machine.</span>
+      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"}. Give each character a picture of your own with Picture... or a video with Video..., the screen colours and a background with Look..., and see it here; Write puts the cards on the machine.</span>
     </div>` : null}
     ${ch.refused ? html`<${Note} kind="warn">${ch.refused}<//>` : null}
+    ${ch.videos && rows.some((r) => r.video) ? html`<${Note} kind="info">${ch.videos}<//>` : null}
     ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(50vh, 520px)">${rows.map((r, i) => html`${row(r, i)}${open === i ? powersOf(r, i) : null}`)}</div>`
       : html`<div class="small muted" style="margin-top:8px">No characters yet: press Add${ch.preset ? `, or load ${ch.preset}'s set` : ""}.</div>`}
   <//>`;

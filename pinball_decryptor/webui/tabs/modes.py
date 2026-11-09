@@ -879,7 +879,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                          "header": c["header"], "words": _CP.character_words(c, wf if pw else None),
                          "line": got["line"], "missing": got["missing"], "over": got["over"],
                          "lost": bool(c["powers"]) and not got["cfg"],
-                         "picture": bool(_CP.picture_path(project, c)), "colour": c.get("colour") or ""})
+                         "picture": bool(_CP.picture_path(project, c)), "colour": c.get("colour") or "",
+                         "video": bool(_CP.video_path(project, c))})                         # PAD-1079
         lost = sum(1 for r in rows if r["lost"])
         partly = sum(1 for r in rows if r["missing"] and not r["lost"])
         note = ("%d character(s). " % len(rows) if rows else "") + (
@@ -896,6 +897,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
                           "look": self._coop_look(project, chars),                              # PAD-1079
+                          "videos": "" if prof is None or _CP.can_video(prof) else (
+                              "%s cannot play a video behind its pick screen yet: a character's video is kept, and "
+                              "its picture shows." % prof.label),
                           "max_name": _CP.MAX_NAME, "max_sub": _CP.MAX_SUB, "max_header": _CP.MAX_HEADER,
                           "max": _CP.MAX_CHARACTERS})
         self._coop_refused = ""
@@ -972,6 +976,33 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._say(str(e))
                 return False
             self._say("co-op characters: %s's picture is %s" % (chars["list"][int(i)]["name"], os.path.basename(path)))
+        self.set(coop_ch_at=int(i))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_char_video(self, i, clear=False):
+        """PAD-1079: Video... on a character: a video of the owner's copied into the project (``coop/``), played in
+        its pick card's portrait frame; *clear* puts its picture back."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        chars = _CP.load_characters(project) if project else None
+        if not chars or not 0 <= int(i) < len(chars["list"]):
+            return False
+        name = chars["list"][int(i)]["name"]
+        if clear:
+            _CP.save_video(project, int(i), None)
+        else:
+            path = self.window.ask_open("modes_file", "Choose %s's video" % name,
+                                        [("Videos", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_video(project, int(i), path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op characters: %s's video is %s" % (name, os.path.basename(path)))
         self.set(coop_ch_at=int(i))
         self._publish_coop_chars(project)
         return True

@@ -16541,6 +16541,12 @@ static int coop_scr_found, coop_scr_shown = -1;
 static void *coop_scr_classic[COOP_CHARS];  /* PAD-1065: PadCoopClassic_1..: NO SPECIAL ABILITY over each card */
 static int coop_scr_classic_shown = -1;
 static unsigned long coop_scr_try;
+/* PAD-1079: a character's own video (coop.cfg `char_clip <n> <clip>`): its card has a see-through window in the
+ * portrait frame and the clip loops behind the HUD (the backdrop, in the city's place) while its card is on the glass;
+ * `clip_crop <crop>` the crop it plays at ("" the port's backdrop_crop) */
+static char coop_clip[COOP_CHARS][48];
+static char coop_clip_crop[32];
+static int coop_clip_on = -1;               /* the character whose clip plays, -1 none */
 static int coop_adj_said;                   /* the log's adjustment reads, the first 32 */
 #define COOP_CACHES 4
 static struct coop_cache {
@@ -17333,6 +17339,33 @@ static int coop_cards_backdrop(const char *name)
     return 1;
 }
 
+/* PAD-1079: the clip of the character whose card is shown (want: its index, -1 none) behind it; the one before given
+ * back. A port with no backdrop shows the city through the window (the app builds no window there). */
+static void coop_clip_show(int want)
+{
+    int c = want >= 0 && want < coop_ch_n && coop_clip[want][0] ? want : -1;
+    unsigned k;
+    if (c == coop_clip_on) return;
+    if (coop_clip_on >= 0) {
+        pm_backdrop(0);
+        bd_crop_next[0] = 0;
+        say("co-op characters: %s's video given back", coop_ch[coop_clip_on].name);
+    }
+    coop_clip_on = c;
+    if (c < 0) return;
+    if (!(can & PM_CAN_BACKDROP) || !pm_backdrop(coop_clip[c])) {
+        say("co-op characters: %s's video \"%s\" cannot play - %s", coop_ch[c].name, coop_clip[c],
+            (can & PM_CAN_BACKDROP) ? "another of the card's modes has the backdrop" : "this port has no backdrop");
+        coop_clip_on = -1;
+        coop_clip[c][0] = 0;                                  /* said once: its picture's window shows the city */
+        return;
+    }
+    for (k = 0; coop_clip_crop[k] && k + 1 < sizeof bd_crop_next; k++) bd_crop_next[k] = coop_clip_crop[k];
+    bd_crop_next[k] = 0;
+    say("co-op characters: %s's video \"%s\" plays behind its card (crop %s)", coop_ch[c].name, coop_clip[c],
+        bd_crop_next[0] ? bd_crop_next : "the port's");
+}
+
 /* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown - with
  * the seconds left on its words line, and PAD-1044's PICKED on the one taken */
 static void coop_screens_tick(void)
@@ -17382,6 +17415,7 @@ static void coop_screens_tick(void)
     }
     if (want != coop_scr_shown && want >= 0 && want <= coop_ch_n && coop_scr[want]) pm_show(coop_scr[want], 1);
     coop_scr_shown = want;
+    coop_clip_show(want >= 0 && want <= coop_ch_n && coop_scr[want] ? want : -1);     /* PAD-1079: its video */
     want_classic = want >= 0 && want < coop_ch_n && coop_classic() ? want : -1;   /* PAD-1065: over the card */
     if (want_classic != coop_scr_classic_shown) {
         if (coop_scr_classic_shown >= 0 && coop_scr_classic[coop_scr_classic_shown])
@@ -18404,6 +18438,25 @@ static void coop_line(const char *s)
     if (str_starts(s, "award_cards on")) { coop_cards_on = 1; return; }  /* PAD-1028 round 2 */
     if (str_starts(s, "character ")) { coop_char_line(s + 10); return; }  /* PAD-1031 */
     if (str_starts(s, "pick on")) { coop_pick_on = 1; return; }
+    if (str_starts(s, "char_clip ")) {                                    /* PAD-1079: a character's own video */
+        unsigned n;
+        p = s + 10;
+        n = (unsigned)number(&p, &ok);
+        while (*p == ' ') p++;
+        if (ok && n >= 1 && n <= COOP_CHARS) {
+            str_copy(coop_clip[n - 1], sizeof coop_clip[n - 1], p, sizeof coop_clip[n - 1]);
+            for (ok = 0; coop_clip[n - 1][ok] && coop_clip[n - 1][ok] != ' ' && coop_clip[n - 1][ok] != '\r'; ok++) ;
+            coop_clip[n - 1][ok] = 0;
+        }
+        return;
+    }
+    if (str_starts(s, "clip_crop ")) {                                    /* PAD-1079: the crop the videos play at */
+        for (p = s + 10; *p == ' '; p++) ;
+        str_copy(coop_clip_crop, sizeof coop_clip_crop, p, sizeof coop_clip_crop);
+        for (ok = 0; coop_clip_crop[ok] && coop_clip_crop[ok] != ' ' && coop_clip_crop[ok] != '\r'; ok++) ;
+        coop_clip_crop[ok] = 0;
+        return;
+    }
     if (str_starts(s, "pick_time ")) {                                    /* PAD-1044: the pick's seconds, 0 none */
         unsigned v;
         p = s + 10;

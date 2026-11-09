@@ -32,6 +32,7 @@
 .aud-pc { display: flex; align-items: center; justify-content: center; }
 .aud-rowplay { all: unset; display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 5px; color: var(--ink-3); cursor: pointer; }
 .aud-rowplay:hover, .aud-rowplay:focus-visible { background: var(--panel-3); color: var(--accent); }
+.aud-rowplay.on { color: var(--accent); }
 .aud-rowplay .i { width: 13px; height: 13px; fill: currentColor; }
 .aud-caret { display: inline-flex; color: var(--ink-3); }
 .aud-name .mono { font-size: 12px; }

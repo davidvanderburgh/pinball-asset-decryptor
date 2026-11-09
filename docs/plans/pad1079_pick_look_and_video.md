@@ -14,28 +14,27 @@ selection screen at my choice".
 - With no look set the 8 cards compared (pick 0/3/RANDOM + award, stock + Godzilla theme) are bit-identical.
 - Tests: tests/test_pad1079_coop_pick_look.py; shots: scripts/shot_pad1079.py.
 
-## Next (run 2): a video per character on its pick screen
+## Run 2: videos (built, committed; emulator proof pending)
 
-What the runtime already has (tools/spike2_emu/modes/sdk/pad_mode_runtime.c):
-- `pm_backdrop(name)` loops a clip (stock or build-added) in the city's place BEHIND the HUD, with a crop
-  (`bd_crop_next`, else the port's `backdrop_crop`, "ScoreFrame"); the co-op award cards already use it
-  (`coop_bonus_crop`, ~line 17320). `pm_clip` plays full-screen OVER the HUD (would hide the card).
-- `coop_screens_tick` shows `PadCoop_<n>` for `pk.at` while the pick is open.
+- coop_play: `video` per character (save_video, coop/character_<n>_video.<ext>), can_video (port has backdrop_draw),
+  window_box / window_clip (the video covering the portrait window's place on a black 1360x768 clip), clip_entries,
+  video_still (preview); pick_card(window=) cuts the frame see-through; pick_screens/preview cut it only when
+  can_video. Settings zip carries videos.
+- mode_write.coop_clips_into: clips into the bank as the build has it (PadCoopClip<n>), coop.cfg `char_clip <n>
+  <clip>` + `clip_crop Normal`. engine reads the bank for co-op-only cards with videos.
+- Crop: read off Godzilla LE 1.16's bank, the VideoSurface keyframe tracks are Normal = identity, ScoreFrame =
+  x1.065 and -43,-98 (the port's backdrop_crop). So the clips play at Normal.
+- Runtime: coop_clip_show (pm_backdrop of the shown card's clip, given back when it goes); prebuilt mode.so rebuilt.
+- Dialog: Video... per row (row buttons wrap), note when the title cannot play them; help + MODE_SDK.md.
 
-Plan:
-1. Owner side: a Video... button per character (and for RANDOM?) -> `coop/character_<n>.<ext>` + `"video"` key;
-   carried by the settings file like pictures.
-2. Card: a character with a video gets its portrait window cut to alpha 0 (premultiplied: rgb 0 too) so what
-   plays behind the HUD shows through; the frame + glow stay.
-3. Build: the clip goes into the card like a mode's own clip (mode_assets clip entries / video bank add), name
-   e.g. `pad_coop_<n>`; the app pre-composes it with ffmpeg so its picture lands in the window: scale/crop to
-   the window (380x306 card px at CARD_AT + (40, 84) on the 1360x768 glass) on black, at the geometry the
-   backdrop actually plays at on Godzilla (measure in the emulator: where ScoreFrame/the city element draws
-   and at what size the clip is stretched - PAD-562's lesson: bank Video size != clip size).
-4. Runtime: coop.cfg `character_clip <n> <name>`; when the pick moves onto n, `pm_backdrop(name)` (with the
-   crop that fills the glass), and `pm_backdrop(0)` when it moves off / closes, unless the award cards own it.
-   Needs PM_CAN_BACKDROP on the port (Godzilla LE + Pro have it).
-5. Proof: emulator, Godzilla LE 1.16 and Pro 1.16 (rig kit C:/tmp/PAD-1031/rig, PAD-1054's solo start: right
-   flipper held at Start), glshot frames of the pick on a character with a clip and one without, flipper
-   presses moving between them, and the clip stopping at the pick's close.
-6. Tests: card window alpha, cfg lines, settings file round trip; the shot script grows a Video... step.
+## Left: the emulator proof (WSL hung 2026-11-09 ~08:00, every wsl.exe timed out; needs `wsl --shutdown`)
+
+Kit ready in C:/tmp/PAD-1079: mkset.py built the override set (ovr/, ovr-modes/ with coop.cfg char_clip 1-2 +
+clip_crop Normal; test0.mp4 testsrc2 on SHODAIGOJI, test1.mp4 smptebars on KINGOJI). Launch:
+
+    wsl.exe -d PAD-Runtime -u root -e bash /mnt/c/tmp/PAD-1079/go.sh l1.txt r1
+
+(job.sh: one teammate added, shots v1 a/b on SHODAIGOJI 1 s apart = the video moves, v2 KINGOJI, v3 SOSHINGEKI
+picture, v4 back, v5 PICKED, v6 after = city again; out in C:/tmp/PAD-1079/out_gz_le_v1, mode.log lines "plays
+behind its card" / "given back"). Check the pattern fills the frame exactly; then Pro 1.16 (same list line with the
+pro card + key) and the after shots are done.

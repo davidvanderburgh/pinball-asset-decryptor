@@ -15820,7 +15820,13 @@ static void switches_arm(void)
  * abilities"): CO-OP PLAY 4, 5 and 6 are Co-op, Team 2v2 and Team 2v1 Classic - the same games as 1, 2 and 3 (now
  * called Enhanced), the pick made as before, but no character's ability, gift or count holds; the pick shows each
  * character's PadCoopClassic_<n> patch over its card (NO SPECIAL ABILITY), and the top line never says what one
- * does. */
+ * does.
+ * PAD-1073 (DoomWalrus666: "I would like for the service menu options to simply be Co-op/Team: Off, Classic,
+ * Enhanced"): CO-OP PLAY is 0 Off, 1 Classic, 2 Enhanced (coop_row_mode; an older row's 3 reads Enhanced, 4-6
+ * Classic), and the game is picked on the start menu alone: not Off, it has CO-OP PLAY, TEAM PLAY 2 VS 2 and TEAM PLAY
+ * 2 VS 1 all three (team_menu_kinds), the entry the cursor was on saying which (tm.kind) and the team fill's size
+ * (tm.size). The right flipper held at Start still makes a co-op game (or PAD-1054's team of one) at Classic or
+ * Enhanced; Off, Insider Connected is the game's own. */
 static const char *const COOP_FILES[] = { "/usr/local/padmode/coop.cfg", "/dump/coop.cfg" };
 static struct {
     int on;                              /* coop.cfg says so and the sites are hooked */
@@ -15846,16 +15852,19 @@ static struct {
                                           * effect) hid the first five, about 10 s (emulator) */
 #define TEAM_PICK_MS 20000ul             /* PAD-1052: ball 1 starting this soon after the menu showed TEAM PLAY (its
                                           * game-start intro between) is its team game */
-#define TEAM_KIND 0x300u                 /* PAD-1052: the TEAM PLAY entry's kind until a pick makes it Standard */
+#define TEAM_KIND 0x300u                 /* PAD-1052: the TEAM PLAY entry's kind until a pick makes it Standard;
+                                          * PAD-1073: plus what it makes (0x301 CO-OP PLAY, 0x304, 0x303) */
 static struct {
     int armed, frame;                    /* on the start menu; by the index menus (else the entry lists) */
     unsigned ball_id;                    /* the event bus's ball_start */
     volatile int pending;                /* the menu shows our entry now */
     volatile unsigned long seen_ms;      /* when it last did */
+    volatile unsigned kind;              /* PAD-1073: which of ours it shows (1 CO-OP PLAY, 4 2 VS 2, 3 2 VS 1) */
+    unsigned size;                       /* PAD-1073: the team game the pick is filling now (4, 3; 0: none) */
 } tm;
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";
-static unsigned team_menu_kind(void);
-static const char *team_menu_name(void);
+static unsigned team_menu_kinds(unsigned *kinds);
+static const char *team_kind_name(unsigned k);
 static void team_frame_restore(void);
 static void on_team_dispatch(unsigned *r);
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
@@ -15874,43 +15883,36 @@ static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsig
     return after == before ? turn : 1;                                /* the ball did not move: an extra ball */
 }
 
-/* PAD-1065: the game a CO-OP PLAY value plays - 4, 5 and 6 (Classic) play 1, 2 and 3's (tests lift it verbatim) */
-static unsigned coop_menu_game(unsigned v)
+/* PAD-1073 (DoomWalrus666: "the service menu options to simply be Co-op/Team: Off, Classic, Enhanced"): what a CO-OP
+ * PLAY value says - 0 Off, 1 Classic (a character picked, no special abilities), 2 Enhanced. The games are picked on
+ * the start menu. A store an older card's row left (1-3 Enhanced Co-op, 2v2, 2v1; 4-6 the same Classic) reads as near
+ * as it can: 3 Enhanced, 4-6 Classic, past that Off (tests lift it verbatim) */
+static unsigned coop_row_mode(unsigned v)
 {
-    return v >= 4u && v <= 6u ? v - 3u : v;
+    return v <= 2u ? v : v == 3u ? 2u : v <= 6u ? 1u : 0u;
 }
 
-/* round 2: the service menu's CO-OP PLAY says On (or the card has no such row: co-op is always on); PAD-1065: 1 or 4 */
+/* round 2: co-op can be played - the service menu's CO-OP PLAY is not Off (or the card has no such row: co-op is
+ * always on); a card of coop.cfg `teams` plays its team game only */
 static int coop_switched_on(void)
 {
     if (coop.teams_always) return 0;
     if (!coop.setting) return 1;
-    return coop_menu_game(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;
+    return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u;
 }
 
-/* PAD-1065: CO-OP PLAY says Classic (4-6): the characters are picked but have no abilities */
+/* PAD-1065: CO-OP PLAY says Classic: the characters are picked but have no abilities */
 static int coop_classic(void)
 {
-    unsigned v;
     if (!coop.setting) return 0;
-    v = *(volatile const unsigned *)(unsigned long)coop.setting;
-    return v >= 4u && v <= 6u;
+    return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;
 }
 
-/* PAD-1042: the most players a team game takes now - 4 (Team 2v2: coop.cfg `teams on`, CO-OP PLAY 2), 3 (Team 2v1:
- * `teams 2v1`, CO-OP PLAY 3) - or 0, no team game; PAD-1065: 5 and 6 are 2 and 3 Classic (tests lift it verbatim) */
-static unsigned coop_teams_size(unsigned always, unsigned setting_value, int has_setting)
-{
-    if (always) return always;
-    if (!has_setting) return 0;
-    if (setting_value == 5u || setting_value == 6u) setting_value -= 3u;
-    return setting_value == 2u ? 4u : setting_value == 3u ? 3u : 0u;
-}
-
+/* PAD-1042: the most players a team game takes now - 4 (Team 2v2), 3 (Team 2v1) or 0, no team game: coop.cfg's `teams
+ * on` (`teams 2v1`), else (PAD-1073) the start menu's TEAM PLAY pick being filled now (tm.size) */
 static unsigned coop_teams_switched_on(void)
 {
-    return coop_teams_size(coop.teams_always,
-                           coop.setting ? *(volatile const unsigned *)(unsigned long)coop.setting : 0u, coop.setting != 0);
+    return coop.teams_always ? coop.teams_always : tm.size;
 }
 
 /* PAD-1042: the player (1-4) of team `team`'s turn in round `round` with `size` players in it: PAD-1052, team 1 is
@@ -18126,6 +18128,7 @@ static int team_pick_live(int pending, unsigned long seen, unsigned long now)
 static void on_team_dispatch(unsigned *r)
 {
     int want;
+    unsigned kind, added;
     if (!tm.armed || r[0] != tm.ball_id || !tm.seen_ms) return;
     if ((coop_teammates() && !(coop_teammates() == 1u && !coop.teams))      /* PAD-1054's team of one: fill it too */
         || *coop_players_byte != 1 || *coop_ball_byte != 1 || coop_ball_byte[-1] != 1) {
@@ -18133,16 +18136,21 @@ static void on_team_dispatch(unsigned *r)
             *coop_players_byte, *coop_ball_byte, coop_ball_byte[-1], coop_teammates());
         return;
     }
-    want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && team_menu_kind();
+    {
+        unsigned kinds[3];
+        kind = tm.kind;                                       /* PAD-1073: the entry the cursor was on */
+        want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && kind && team_menu_kinds(kinds);
+    }
     if (!want)
-        say("teams: ball 1 of a one-player game - not the menu's %s (shown %d, %lu ms ago)", team_menu_name(),
+        say("teams: ball 1 of a one-player game - not the menu's %s (shown %d, %lu ms ago)", team_kind_name(kind),
             tm.pending, pm_ms() - tm.seen_ms);
     tm.pending = 0;
     tm.seen_ms = 0;
+    tm.kind = 0;
     team_frame_restore();                                     /* the menu's words back as it ends in a game */
     if (!want) return;
-    say("teams: the game began as the start menu's %s", team_menu_name());
-    if (team_menu_kind() == 1u) {                             /* CO-OP PLAY: a co-op game, each Start a teammate */
+    say("teams: the game began as the start menu's %s", team_kind_name(kind));
+    if (kind == 1u) {                                         /* CO-OP PLAY: a co-op game, each Start a teammate */
         if (coop_teammates()) return;                         /* PAD-1054's team of one is one already */
         coop.game = chg_game_now() + 1;
         coop.teams = 0;
@@ -18158,7 +18166,10 @@ static void on_team_dispatch(unsigned *r)
         coop_join_show();
         return;
     }
-    if (!coop_team_fill(0, 0, 0, 0)) say("teams: TEAM PLAY - the game added no one (credits?) - a one-player game");
+    tm.size = kind;                                           /* PAD-1073: 4 or 3 players, while the fill runs */
+    added = coop_team_fill(0, 0, 0, 0);
+    tm.size = 0;
+    if (!added) say("teams: TEAM PLAY - the game added no one (credits?) - a one-player game");
 }
 
 /* PAD-1052: from the tick: the fill's lines on the top line, one at a time, then player 1's pick. While the game's own
@@ -18479,9 +18490,7 @@ static void coop_arm(void)
             "score goes on the game's boards");
     if (coop.setting)
         say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08x, now %s)", coop.setting,
-            coop_teams_switched_on() == 4u ? (coop_classic() ? "Team 2v2 Classic" : "Team 2v2")
-            : coop_teams_switched_on() == 3u ? (coop_classic() ? "Team 2v1 Classic" : "Team 2v1")
-            : coop_switched_on() ? (coop_classic() ? "Co-op Classic" : "On") : "Off");
+            !coop_switched_on() ? "Off" : coop_classic() ? "Classic" : "Enhanced");
     if (coop.teams_always)
         say("teams: team play is always on (coop.cfg `teams %s`): players 1+3 against %s",
             coop.teams_always == 3u ? "2v1" : "on", coop.teams_always == 3u ? "2" : "2+4");   /* PAD-1052 */
@@ -19555,33 +19564,44 @@ static void comp_arm(void)
 
 /* ---- PAD-1052: TEAM PLAY on the start menu ------------------------------------------------------------------
  * Stock Stern's team play (TMNT: TEAM PLAY 2 VS 2 "TWO PLAYERS PER TEAM", TEAM PLAY 2 VS 1) is an entry of CHOOSE YOUR
- * MODE OF PLAY: picked, one Start makes the whole team game. With CO-OP PLAY at 2 (3) the runtime adds TEAM PLAY 2 VS
- * 2 (2 VS 1) to the menu at Prolonged Competition's sites (PAD-1041, the same port lines): on the entry lists its kind
- * is TEAM_KIND, and picked it is played as Standard (kind 0) under Standard's caption; on the index menus (`site
+ * MODE OF PLAY: picked, one Start makes the whole team game. With CO-OP PLAY not Off (PAD-1073; before, 2 or 3) the
+ * runtime adds CO-OP PLAY, TEAM PLAY 2 VS 2 and 2 VS 1 to the menu at Prolonged Competition's sites (PAD-1041, the same
+ * port lines): on the entry lists each one's kind is TEAM_KIND plus what it makes, and picked it is played as Standard (kind 0) under Standard's caption; on the index menus (`site
  * comp_menu_frame`) it is Standard's index a second time (`value comp_menu_end_index`), lettered TEAM PLAY 2 VS 2
  * through Standard's name message (`comp_menu_end_msg`) while the cursor is on it. The menu runs these every frame;
  * tm.pending says the entry is showing, and a one-player game whose ball 1 starts within TEAM_PICK_MS of it is the
  * team game (on_team_dispatch). The row is read live: the entry goes on the menu as it opens. */
-/* PAD-1052 (DoomWalrus666: "Can we please make Co-op mode work the same way?"): what the entry makes now - 4 TEAM
- * PLAY 2 VS 2, 3 TEAM PLAY 2 VS 1 (CO-OP PLAY 2, 3, their Classic 5, 6), 1 CO-OP PLAY (CO-OP PLAY 1 or Classic 4, or
- * a card of co-op with no such row), 0 none (Off) */
-static unsigned team_menu_kind(void)
+/* PAD-1052 (DoomWalrus666: "Can we please make Co-op mode work the same way?"); PAD-1073 (DoomWalrus666: "If Classic:
+ * co-op, 2v2, 3v1 all appear in the game menu"): the entries of ours, in the menu's order, into kinds[] - each what it
+ * makes: 1 CO-OP PLAY, 4 TEAM PLAY 2 VS 2, 3 TEAM PLAY 2 VS 1. CO-OP PLAY Classic or Enhanced: all three; coop.cfg
+ * `teams` its one team game; a card of co-op with no such row CO-OP PLAY; Off none. Returns how many (tests lift it
+ * verbatim) */
+static unsigned team_menu_kinds(unsigned *kinds)
 {
-    unsigned t = coop_teams_switched_on();
-    return t ? t : coop_switched_on() ? 1u : 0u;
+    if (coop.teams_always) {
+        kinds[0] = coop.teams_always;
+        return 1;
+    }
+    if (!coop_switched_on()) return 0;
+    kinds[0] = 1u;
+    if (!coop.setting) return 1;
+    kinds[1] = 4u;
+    kinds[2] = 3u;
+    return 3;
 }
 
-static const char *team_menu_name(void)
+static const char *team_kind_name(unsigned k)
 {
-    unsigned k = team_menu_kind();
-    return k == 1u ? team_name_coop : k == 3u ? team_name_2v1 : team_name_2v2;
+    return k == 1u ? team_name_coop : k == 3u ? team_name_2v1 : k == 4u ? team_name_2v2 : "TEAM PLAY";
 }
 
-static int team_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
+/* the kind (1, 4, 3) of the entry at ent when it is ours, else 0 */
+static unsigned team_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
 {
-    unsigned name = *(const unsigned *)(ent + nat);
-    return *(const unsigned *)(ent + kat) == TEAM_KIND || name == (unsigned)(unsigned long)team_name_2v2
-        || name == (unsigned)(unsigned long)team_name_2v1 || name == (unsigned)(unsigned long)team_name_coop;
+    unsigned name = *(const unsigned *)(ent + nat), kind = *(const unsigned *)(ent + kat);
+    if (kind == TEAM_KIND + 1u || kind == TEAM_KIND + 3u || kind == TEAM_KIND + 4u) return kind - TEAM_KIND;
+    return name == (unsigned)(unsigned long)team_name_2v2 ? 4u : name == (unsigned)(unsigned long)team_name_2v1 ? 3u
+        : name == (unsigned)(unsigned long)team_name_coop ? 1u : 0u;
 }
 
 static void team_menu_built(unsigned *r)
@@ -19591,30 +19611,29 @@ static void team_menu_built(unsigned *r)
     unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
     unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), es = (unsigned)pm_port_value("challenge_menu_entry", 12);
-    unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
-    unsigned i, k, n0 = *count, tmpl = 0;
+    unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT;
+    unsigned i, j, k, n0 = *count, tmpl = 0, kinds[3], nk = team_menu_kinds(kinds);
     static int room_said, said;
-    if (!team_menu_kind()) return;                         /* the row says Off: no entry */
+    if (!nk) return;                                       /* the row says Off: no entry */
     if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
         return;
     for (i = 0; i < n0; i++) {
-        if (team_entry_at(list + es * i, kat, nat)) {       /* an every-frame site: there already */
-            *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)team_menu_name();
-            return;
-        }
+        if (team_entry_at(list + es * i, kat, nat)) return;   /* an every-frame site: there already */
         if (!*(unsigned *)(list + es * i + kat)) tmpl = i;  /* Standard's: the entry ours plays as */
     }
-    if (n0 >= cap) {
-        if (!room_said++) say("teams: no room for TEAM PLAY on the start menu - the game's menu holds %u entries", cap);
-        return;
+    for (j = 0; j < nk && n0 + j < cap; j++) {
+        i = n0 + j;
+        for (k = 0; k < es; k++) list[es * i + k] = list[es * tmpl + k];   /* Standard's entry: its caption, its words */
+        *(unsigned *)(list + es * i + kat) = TEAM_KIND + kinds[j];
+        *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)team_kind_name(kinds[j]);
     }
-    i = n0;
-    for (k = 0; k < es; k++) list[es * i + k] = list[es * tmpl + k];   /* Standard's entry: its caption, its words */
-    *(unsigned *)(list + es * i + kat) = TEAM_KIND;
-    *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)team_menu_name();
-    (void)plain;
-    *count = i + 1;
-    if (!said++) say("teams: %s on the start menu as entry %u of %u (Standard's caption)", team_menu_name(), i + 1, i + 1);
+    if (j < nk && !room_said++)
+        say("teams: room for %u of our %u entries on the start menu - the game's menu holds %u", j, nk, cap);
+    if (!j) return;
+    *count = n0 + j;
+    if (!said++)
+        say("teams: %s%s%s on the start menu as entries %u-%u (Standard's caption)", team_kind_name(kinds[0]),
+            j > 1 ? ", " : "", j > 1 ? (j > 2 ? "TEAM PLAY 2 VS 2, 2 VS 1" : team_kind_name(kinds[1])) : "", n0 + 1, n0 + j);
 }
 
 static void team_menu_picked(unsigned *r)
@@ -19622,17 +19641,23 @@ static void team_menu_picked(unsigned *r)
     long back = pm_port_value("challenge_menu_pick_back", 0);
     unsigned char *e8 = back > 0 ? (unsigned char *)(unsigned long)(r[3] - (unsigned)back) - MENU_KIND_AT : 0;
     int was = tm.pending;          /* the game runs this on every frame of the menu: say only a change */
-    tm.pending = back > 0 ? team_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : r[3] == TEAM_KIND;
+    unsigned was_kind = tm.kind,
+        k = back > 0 ? team_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT)
+            : r[3] == TEAM_KIND + 1u || r[3] == TEAM_KIND + 3u || r[3] == TEAM_KIND + 4u ? r[3] - TEAM_KIND : 0u;
+    tm.pending = k != 0;
     if (tm.pending) {                                       /* the game plays it as Standard */
         if (back > 0) *(unsigned *)(e8 + MENU_KIND_AT) = 0;
         else r[3] = 0;
+        tm.kind = k;
         tm.seen_ms = pm_ms();
     }
-    if (tm.pending != was) say("teams: %s %s on the start menu", team_menu_name(), tm.pending ? "picked" : "no longer picked");
+    if (tm.pending != was || (tm.pending && k != was_kind))
+        say("teams: %s %s on the start menu", team_kind_name(tm.pending ? k : was_kind), tm.pending ? "picked" : "no longer picked");
 }
 
 static unsigned long team_frame_sp;              /* the menu frame we appended to (a new menu: a new list) */
-static unsigned team_frame_at, team_frame_msg;   /* our entry's place in the list; the message we lettered (0: none) */
+static unsigned team_frame_at, team_frame_msg;   /* our entries' place in the list; the message we lettered (0: none) */
+static unsigned team_frame_n, team_frame_kinds[3];   /* PAD-1073: how many of ours are there, and what each makes */
 
 static void team_frame_restore(void)
 {
@@ -19651,33 +19676,43 @@ static void team_menu_frame(unsigned *r)
     unsigned breg = (unsigned)pm_port_value("comp_menu_frame_buttons_reg", 13);
     unsigned idx = (unsigned)pm_port_value("comp_menu_end_index", 0);
     unsigned msg = (unsigned)pm_port_value("comp_menu_end_msg", 0);
-    unsigned n = *count + last;
+    unsigned n = *count + last, c, j, kinds[3], nk = team_menu_kinds(kinds), was_kind = tm.kind;
     static int room_said;
     int was = tm.pending;
-    if (creg > 12 || breg > 12 || !idx || !msg || n > cap || !team_menu_kind()) return;
-    if ((unsigned long)sp != team_frame_sp || team_frame_at >= n || list[team_frame_at] != idx) {   /* a new menu */
+    if (creg > 12 || breg > 12 || !idx || !msg || n > cap || !nk) return;
+    if ((unsigned long)sp != team_frame_sp || !team_frame_n || team_frame_at + team_frame_n > n
+        || list[team_frame_at] != idx) {                                        /* a new menu */
         team_frame_sp = (unsigned long)sp;
         team_frame_restore();
+        team_frame_n = 0;
         if (n >= cap) {
             if (!room_said++) say("teams: no room for TEAM PLAY on the start menu - its list holds %u indices", cap);
             return;
         }
         team_frame_at = n;
-        list[n] = idx;
-        *count += 1;
-        say("teams: %s on the start menu as entry %u of %u (Standard's game-mode index %u; cursor %u)", team_menu_name(),
-            n + 1, n + 1, idx, r[creg]);
+        for (j = 0; j < nk && n + j < cap; j++) {        /* PAD-1073: Standard's index once for each of ours */
+            list[n + j] = idx;
+            team_frame_kinds[j] = kinds[j];
+        }
+        team_frame_n = j;
+        *count += j;
+        say("teams: %s%s on the start menu as entries %u-%u (Standard's game-mode index %u; cursor %u)",
+            team_kind_name(kinds[0]), j > 1 ? " and TEAM PLAY" : "", n + 1, n + j, idx, r[creg]);
     }
     /* as Prolonged Competition's: the press read just now moves the cursor after this point */
-    tm.pending = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u) == team_frame_at;
+    c = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u);
+    tm.pending = c >= team_frame_at && c < team_frame_at + team_frame_n;
     if (tm.pending) {
-        pm_message_set(msg, team_menu_name());          /* Standard's name: ours while the cursor is on our entry */
+        tm.kind = team_frame_kinds[c - team_frame_at];
+        pm_message_set(msg, team_kind_name(tm.kind));   /* Standard's name: ours while the cursor is on our entry */
         team_frame_msg = msg;
         tm.seen_ms = pm_ms();
     } else {
         team_frame_restore();
     }
-    if (tm.pending != was) say("teams: %s %s on the start menu", team_menu_name(), tm.pending ? "picked" : "no longer picked");
+    if (tm.pending != was || (tm.pending && tm.kind != was_kind))
+        say("teams: %s %s on the start menu", team_kind_name(tm.pending ? tm.kind : was_kind),
+            tm.pending ? "picked" : "no longer picked");
 }
 
 static void team_menu_arm(void)
@@ -19986,14 +20021,14 @@ static void on_agent_header(unsigned *r)
 }
 
 /* round 2 (PAD-1017, DoomWalrus666): on a card of co-op and nothing else, the gate holds back only while the service
- * menu's CO-OP PLAY says On or Team 2v2 (the word at insider_while is 1 or 2, PAD-1042): Off, the card's Insider Connected is the game's own -
+ * menu's CO-OP PLAY is not Off (PAD-1073: Classic or Enhanced, the word at insider_while): Off, the card's Insider Connected is the game's own -
  * the game plays stock then. 0: the whole gate, always (a card with modes). */
 static unsigned insider_while;
 
 /* 1 when the gate holds back now (tests lift it verbatim) */
 static int insider_holding(unsigned while_at, unsigned value)
 {
-    return !while_at || (value >= 1u && value <= 6u);        /* PAD-1042: Co-op, Team 2v2 or 2v1; PAD-1065: Classic */
+    return !while_at || coop_row_mode(value) != 0u;          /* PAD-1073: Classic or Enhanced */
 }
 
 static int on_agent_begin(unsigned *r)

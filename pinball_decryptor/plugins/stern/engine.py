@@ -11388,7 +11388,8 @@ class _HandicapMenu(_MusicModeMenu):
 
 class _CoopMenu(_MusicModeMenu):
     """PAD-1017 round 2 (DoomWalrus666): CO-OP PLAY in the game's own service menu, on a spare setting; co-op (and, on
-    a card of nothing else, the Insider Connected gate) only while it says On. PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2."""
+    a card of nothing else, the Insider Connected gate) only while it says On. PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2.
+    PAD-1073: 0 Off, 1 Classic, 2 Enhanced; the game is the start menu's pick."""
 
     KEY = "coop_play"
 
@@ -11402,10 +11403,10 @@ class _CoopMenu(_MusicModeMenu):
 
     def done(self):
         self.ok = True
-        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 to play "
-                 "co-op, 2 for Team 2v2 (players 1 and 3 against 2 and 4) or 3 for Team 2v1 (players 1 and 3 "
-                 "against 2), picked as TEAM PLAY on the start menu, or 4, 5 or 6 for the same games Classic (a "
-                 "character each, no special abilities). While it is 1 to 6 most Insider "
+        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 "
+                 "(Classic: a character each, no special abilities) or 2 (Enhanced: with the abilities) and the "
+                 "start menu offers CO-OP PLAY, TEAM PLAY 2 VS 2 (players 1 and 3 against 2 and 4) and TEAM PLAY 2 "
+                 "VS 1 (players 1 and 3 against 2). While it is 1 or 2 most Insider "
                  "Connected features are off; at 0 the card reports as it always has (with no modes on it)."
                  % self.setting.where, "info")
 

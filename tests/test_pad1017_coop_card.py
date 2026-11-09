@@ -245,7 +245,8 @@ def test_the_modes_tab_sub_tick_switches_it_in_the_service_menu(tmp_path, monkey
     assert svc.set_coop_menu(True) is True
     assert state["coop_on"] is True and state["coop_menu"] is True
     assert "CO-OP PLAY in the game's service menu" in state["coop_note"]
-    assert "2 (Team 2v2) makes players 1 and 3 a team against players 2 and 4, picked as TEAM PLAY 2 VS 2" in state["coop_note"]
+    assert "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four)" in state["coop_note"]
+    assert "At 1 (Classic) or 2 (Enhanced) the game's start menu" in state["coop_note"]          # PAD-1073
     assert "at 0 the game plays and reports as it always has" in state["coop_note"]
     assert svc.set_coop_menu(False) is True and state["coop_menu"] is False
     assert state["coop_note"].endswith("Its scores stay off Insider Connected.")
@@ -264,7 +265,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     from tests import test_spike2_mode_roster as R
     src = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c"))
     body = R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)")
-    assert "return !while_at || (value >= 1u && value <= 6u);" in body         # no row: always; a row: 1-6
+    assert "return !while_at || coop_row_mode(value) != 0u;" in body          # no row: always; a row: not Off
     gate = R._lift(src, "static int on_agent_begin(unsigned *r)")
     assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")
@@ -272,7 +273,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     assert "return only ? v : 0;" in R._lift(src, "static unsigned coop_setting_wanted(void)\n{")   # ... the build says
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop_switched_on() && coop_button_held()" in add                   # Off: Start adds a competing player
-    assert "return coop_menu_game(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;" in R._lift(
+    assert "return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u;" in R._lift(
         src, "static int coop_switched_on(void)")
 
 
@@ -325,7 +326,7 @@ def test_the_gate_holds_back_only_while_co_op_play_is_on(tmp_path):
     blocked = blocked[:blocked.index("};") + 2]
     fns = "\n".join(R._lift(src[src.index(sig + "\n{"):], sig) for sig in (     # the bodies, not a declaration
         "static int str_starts(const char *s, const char *prefix)",
-        "static int insider_blocked(const char *endpoint)",
+        "static int insider_blocked(const char *endpoint)", "static unsigned coop_row_mode(unsigned v)",
         "static int insider_holding(unsigned while_at, unsigned value)")) + "\nstatic unsigned insider_while;\n" + \
         R._lift(src, "static int on_agent_begin(unsigned *r)")
     out = R._host_run(tmp_path, GATE_MAIN.replace("@BLOCKED@", blocked).replace("@FNS@", fns),

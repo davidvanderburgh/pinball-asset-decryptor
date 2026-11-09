@@ -28,7 +28,12 @@ in co-op: each player picks at their first ball, no two the same.
 PAD-1065 (DoomWalrus666): Co-op, Team 2v2 and Team 2v1 without the characters' abilities. CO-OP PLAY 4, 5 and 6 are
 those games Classic (1, 2 and 3 are now called Enhanced): the players still pick a character, but none has an
 ability; the pick shows each card with a patch over its ability badge that says NO SPECIAL ABILITY
-(:func:`classic_patch`)."""
+(:func:`classic_patch`).
+
+PAD-1073 (DoomWalrus666: "the service menu options to simply be Co-op/Team: Off, Classic, Enhanced"): CO-OP PLAY is
+0 Off, 1 Classic, 2 Enhanced, and the game is picked on the start menu alone: at 1 or 2 it offers CO-OP PLAY, TEAM
+PLAY 2 VS 2 and TEAM PLAY 2 VS 1 all three (pad_mode_runtime.c "PAD-1073"; a store an older row left reads 3 as
+Enhanced, 4-6 as Classic)."""
 import re
 import struct
 
@@ -53,25 +58,25 @@ NO_BUTTON = "The game program names no right flipper button, so a teammate could
 #: round 2: the service menu's row (menu_settings.COOP_PLAY): its values, and its help line in the game's own menu.
 #: PAD-1042: four, 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1 (daveyvandy: "a designated option for 2V1"; the row shows
 #: the number; Off/On had 0 and 1 and v1.360.0's row 0-2, so a pick is kept). PAD-1065: seven, 1-3 the Enhanced
-#: games (the characters' abilities hold) and 4-6 the same games Classic (a pick, no abilities)
-MENU_VALUES = 7
-MENU_OFF, MENU_COOP, MENU_TEAMS, MENU_TEAMS_2V1 = 0, 1, 2, 3
-MENU_COOP_CLASSIC, MENU_TEAMS_CLASSIC, MENU_TEAMS_2V1_CLASSIC = 4, 5, 6
+#: games (the characters' abilities hold) and 4-6 the same games Classic (a pick, no abilities). PAD-1073: three,
+#: 0 Off, 1 Classic, 2 Enhanced (DoomWalrus666); which game is the start menu's pick
+MENU_VALUES = 3
+MENU_OFF, MENU_CLASSIC, MENU_ENHANCED = 0, 1, 2
 #: the help names the values and says what they cost (63 characters: the spare help lines' room)
-MENU_HELP = "0 Off. Enhanced 1 Co-op 2 2v2 3 2v1. 4-6 Classic. Insider off"
+MENU_HELP = "0 Off. 1 Classic. 2 Enhanced. Games on start menu. Insider off"
 #: how a teammate joins, for the tab and the log
 HOW = ("pick CO-OP PLAY on the start menu (both flipper buttons in attract) and each Start in the first ball adds "
        "a teammate, or hold the right flipper button and press Start to add one (2-4 players share one game); "
        "a plain Start adds a competing player as always; with characters, a player starting a game alone with the "
        "right flipper button held picks one")
 #: PAD-1042: how a team game is played, for the tab and the log
-TEAMS_HOW = ("with CO-OP PLAY at 2 (Team 2v2), pick TEAM PLAY 2 VS 2 on the start menu (both flipper buttons in "
-             "attract) and one Start adds all four players: players 1 and 3 against players 2 "
-             "and 4, each team with its own score and progress, the teams taking turns; at 3 (Team 2v1) the same "
-             "with three players, players 1 and 3 against player 2, who plays both of team 2's turns")
-#: PAD-1065: what Classic is, for the tab and the log
-CLASSIC_HOW = ("4, 5 and 6 (Classic) are Co-op, Team 2v2 and Team 2v1 with no special abilities: the players still "
-               "pick a character, but none of them has its ability")
+TEAMS_HOW = ("pick TEAM PLAY 2 VS 2 on the start menu (both flipper buttons in attract) and one Start adds all "
+             "four players: players 1 and 3 against players 2 and 4, each team with its own score and progress, the "
+             "teams taking turns; TEAM PLAY 2 VS 1 is the same with three players, players 1 and 3 against player 2, "
+             "who plays both of team 2's turns")
+#: PAD-1065: what Classic is, for the tab and the log (PAD-1073: CO-OP PLAY 1)
+CLASSIC_HOW = ("1 (Classic) plays co-op and the team games with no special abilities: the players still pick a "
+               "character, but none of them has its ability; 2 (Enhanced) plays them with the abilities")
 
 
 class CoopError(ValueError):

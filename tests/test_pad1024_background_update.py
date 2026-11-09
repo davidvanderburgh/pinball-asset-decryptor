@@ -479,7 +479,7 @@ def test_swap_script_runs_alone_and_keeps_the_old_one_until_sure():
         return re.search(r"UpdateSwap-' \+ '([0-9a-f]+)'", text).group(1)
     assert lock(s) == lock(same) != lock(other)
     assert "already on v9.9.9 - nothing to switch" in s
-    assert "if ($whole) { Remove-Item -LiteralPath $old" in s
+    assert "if ($whole -and -not $stuck) { Remove-Item -LiteralPath $old" in s
     assert "Test-Path -LiteralPath 'C:\\s.exe'" in s
 
 
@@ -804,3 +804,83 @@ def test_the_publishing_wait_gives_up(tmp_path, staged, monkeypatch):
         assert staged["launched"] == [str(staged["dir"] / (WIN % "9.9.9"))]
         texts = [e["text"] for e in w.window.log_history()]
         assert any("still being published after" in t for t in texts)
+
+
+# ------------------------------------------- PAD-1081: the user's own files
+def _user_files(app):
+    """What a user keeps in the install folder (the app runs elevated, so
+    it can): a whole project, a loose file, and one inside a PAD folder."""
+    proj = app / "Sonic"
+    (proj / "graphics" / "Levels").mkdir(parents=True)
+    (proj / "graphics" / "Levels" / "GHZ_CP1_EASY.webm").write_bytes(b"mine")
+    (proj / ".pad_project.json").write_text("{}", encoding="utf-8")
+    (app / "notes.txt").write_text("my notes", encoding="utf-8")
+
+
+def _assert_user_files(app):
+    assert (app / "Sonic" / "graphics" / "Levels"
+            / "GHZ_CP1_EASY.webm").read_bytes() == b"mine"
+    assert (app / "Sonic" / ".pad_project.json").is_file()
+    assert (app / "notes.txt").read_text(encoding="utf-8") == "my notes"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the swap helper is PowerShell")
+def test_the_swap_keeps_a_project_kept_in_the_install_folder(tmp_path):
+    """PAD-1081 (a JJP Sonic project, "My entire project was deleted in this
+    past update"): the swap renamed the install folder to .old and deleted
+    it, and with it every folder the user had made inside - the old
+    over-the-top installer never touched those.  What the old folder has
+    and the new one lacks is moved across before .old goes."""
+    import subprocess
+    import sys
+    app = tmp_path / "Pinball Asset Decryptor"
+    _tree(app, "1.0.0")
+    _user_files(app)
+    nxt = _tree(tmp_path / "Pinball Asset Decryptor.next", "9.9.9")
+    (nxt / us.MARKER).write_text('{"version": "9.9.9"}', encoding="utf-8")
+    holder = subprocess.Popen([sys.executable, "-c", "pass"])
+    holder.wait()
+    log = tmp_path / "swap.log"
+    us.start_swap(str(app), "9.9.9", "", pid=holder.pid, launch=False,
+                  register=False, log_path=str(log))
+    text = _swap_logs_done([log])[0]
+    old = tmp_path / "Pinball Asset Decryptor.old"
+    end = time.time() + 30
+    while time.time() < end and old.exists():
+        time.sleep(0.25)
+    assert us.tree_version(str(app)) == "9.9.9", text
+    _assert_user_files(app)
+    assert not old.exists()
+    text = log.read_text(encoding="utf-8-sig")
+    assert "kept 2 of your own" in text, text
+
+
+def test_clear_leftovers_moves_your_files_back_first(tmp_path):
+    """An .old an earlier helper left behind still holds what the user kept
+    in the install folder: it goes back into the app folder, not to the
+    bin.  A name the new version has too is not overwritten."""
+    app = _tree(tmp_path / "PAD", "1.0.0")
+    old = _tree(tmp_path / "PAD.old", "0.9.0")
+    _user_files(old)
+    deleted, failed = us.clear_leftovers(str(app), "1.0.0")
+    assert not failed
+    assert deleted == [us.old_dir(str(app))]
+    _assert_user_files(app)
+    assert us.tree_version(str(app)) == "1.0.0"
+
+
+def test_clear_leftovers_keeps_old_when_a_file_cannot_move(tmp_path,
+                                                           monkeypatch):
+    """A move that fails leaves .old where it is: never delete what could
+    not be put back."""
+    app = _tree(tmp_path / "PAD", "1.0.0")
+    old = _tree(tmp_path / "PAD.old", "0.9.0")
+    _user_files(old)
+
+    def _no(src, dst):
+        raise PermissionError("in use")
+    monkeypatch.setattr(us.shutil, "move", _no)
+    deleted, failed = us.clear_leftovers(str(app), "1.0.0")
+    assert not deleted
+    assert failed and failed[0][0] == us.old_dir(str(app))
+    assert (old / "Sonic" / ".pad_project.json").is_file()

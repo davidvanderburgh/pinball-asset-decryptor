@@ -64,6 +64,18 @@ int main(int argc, char **argv)
     hide_id = 3;
     edge_at(3, 1, in); bits("a shared descriptor", 3);
     printf("modes saw %u\n", switch_fired[6]);
+    /* PAD-1078: held before anything wanted it (the right flipper through Start), then wanted: taken mid-press */
+    hide_id = 0;
+    edge_at(6, 1, in); bits("held, nothing wants it", 6);
+    hide_id = 6;
+    edge_take_held(6); bits("taken held", 6);
+    edge_at(6, 0, in); bits("its release is hidden too", 6);
+    edge_at(6, 1, in); bits("the next press is hidden", 6);
+    hide_id = 0;
+    edge_at(6, 0, in); bits("released, given back", 6);
+    hide_id = 6;
+    edge_take_held(6); bits("not held: nothing taken", 6);
+    printf("slot %d\n", edge_hidden(6));
     return 0;
 }
 """
@@ -89,12 +101,21 @@ def test_a_hidden_switch_is_hidden_from_a_press_through_its_release(tmp_path):
     assert "its release 0x3800 level 0" in out
     assert "a shared descriptor 0x0800 level 1" in out              # hiding 3 would hide 4 too: left alone
     assert "modes saw 3" in out                                     # the runtime's own shots still see every press
+    # PAD-1078: a switch held before a hider wanted it reads released at once, its handler bits held back through its
+    # release (Godzilla's language select walked on that release); from then on it is hidden as above
+    assert "held, nothing wants it 0x3800 level 1" in out
+    assert "taken held 0x3000 level 0" in out
+    assert "its release is hidden too 0x3000 level 0" in out
+    assert "the next press is hidden 0x3000 level 0" in out
+    assert "released, given back 0x3800 level 0" in out
+    assert "not held: nothing taken 0x3800 level 0" in out and "slot -1" in out
 
 
 def test_the_other_generation_hides_nothing(tmp_path):
     out = _drain(tmp_path, "A")                                      # its drain is not traced
     assert any(line.startswith("pressed 0x3800") for line in out)                   # nothing held back
     assert any(line.startswith("the next press 0x3800") for line in out)
+    assert any(line.startswith("taken held 0x3800") for line in out)              # PAD-1078: nor a held one
 
 
 LANE_MAIN = r"""
@@ -120,6 +141,15 @@ int main(void)
     coop_edge(62, 1, 0, 0x20); hides("the ball landing");          /* its lane edge 0.0 s on: still waiting */
     now_ms += 2000; coop_edge(62, 0, 0, 0x20); hides("the lane moved");   /* launched, whatever the flags say */
     ball_waits = -1; coop_flag_in = 0; coop_chars_tick(); hides("no plunger flags");
+    /* PAD-1078: from a new game's start until its first ball waits, no ball is in play: hidden too */
+    ball_waits = 0; coop_flag_in = 12; coop_lane = 0; coop_chars_begin(); coop.turn = 1; coop_chars_turn();
+    hides("a turn's ball not served yet");
+    coop_fresh_ms = now_ms | 1; hides("a new game, not served yet");
+    now_ms += 1600; coop_chars_tick(); printf("how [%s]\n", shown);
+    now_ms += 9000; hides("10 s on, never waited");
+    coop_chars_begin(); coop_chars_turn(); coop_fresh_ms = now_ms | 1;
+    ball_waits = 1; coop_chars_tick(); hides("its first ball waits");
+    ball_waits = 0; hides("then out");
     return 0;
 }
 """
@@ -130,7 +160,7 @@ def test_the_pick_hides_its_buttons_only_while_its_ball_waits_and_a_launch_takes
     main = C.MAIN[:C.MAIN.index("@DECL@")] + "static int coop_live;\n@DECL@" + C.MAIN[C.MAIN.index("@DECL@") + 6:]
     main = main[:main.index("int main(void)")] + LANE_MAIN
     fns = C.FNS[:C.FNS.index("static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)")] \
-        + ("static int coop_hides(unsigned id)",) \
+        + ("static int coop_unserved(void)", "static int coop_hides(unsigned id)") \
         + C.FNS[C.FNS.index("static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned polarity)"):]
     lifted = "\n".join(C.R._lift(src, sig + "\n{") for sig in fns)
     number = "\n".join(C.R._lift(src, sig + "\n{") for sig in ("static int hexval(int c)",
@@ -149,6 +179,11 @@ def test_the_pick_hides_its_buttons_only_while_its_ball_waits_and_a_launch_takes
     assert "the ball landing 1110" in out
     assert "the lane moved 0000" in out                              # never held from a ball in play
     assert "no plunger flags 0000" in out                            # as before PAD-1051
+    assert "a turn's ball not served yet 0000" in out                # PAD-1078: a turn change: a ball may be in play
+    assert "a new game, not served yet 1110" in out                  # the right flipper held through Start
+    assert "how [ACTION/LAUNCH PICKS]" in out                        # the top line says how to take one
+    assert "10 s on, never waited 0000" in out                       # COOP_FRESH_MS at most
+    assert "its first ball waits 1110" in out and "then out 0000" in out
 
 
 #: the Godzilla LE 1.16 program: test_pad1031's, PAD_GZ_ELF, or a rig override's copy (its own patches lie elsewhere)

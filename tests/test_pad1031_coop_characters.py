@@ -63,6 +63,7 @@ static void pm_show(void *node, int on) { (void)node; (void)on; }
 static void coop_cards_find(void) {}                     /* PAD-1028 round 2: the award cards (test_pad1028) */
 static int ball_waits = -1;                              /* PAD-1051: the game's plunger flags (-1: the port has none) */
 static int coop_ball_waits(void) { return ball_waits; }
+static void edge_take_held(unsigned id) { (void)id; }    /* PAD-1078: the drain section's (test_pad1051) */
 struct pm_stock_rule;
 static struct pm_stock_rule *pm_stock_rule(unsigned id) { (void)id; return 0; }
 static int pm_stock_active(struct pm_stock_rule *r) { (void)r; return 0; }
@@ -103,6 +104,8 @@ int main(void)
     coop_pick_open(1);
     printf("open [%s]\n", shown);
     now_ms += 1600; coop_chars_tick(); printf("flip [%s]\n", shown);
+    now_ms += 1600; coop_chars_tick(); printf("flip2 [%s]\n", shown);     /* PAD-1078: how to take one */
+    now_ms += 1600; coop_chars_tick(); printf("flip3 [%s]\n", shown);
     press(34); coop_chars_tick();
     printf("t1 %d [%s] reads 94: %u 195: %u\n", coop_pick_of[1], shown, coop_adj_answer(94, own_adj(94)), coop_adj_answer(195, own_adj(195)));
     printf("ball out: %u\n", saved_s); saved_s = 0;
@@ -172,6 +175,8 @@ FNS = ("static int coop_pick_step(int n, int at, int dir, unsigned taken)",
        "static void coop_steps_tick(void)",
        "static void coop_keep_tick(void)",
 
+       "static const char *coop_pick_how(void)",
+       "static int coop_pick_steps(void)",
        "static void coop_pick_say(void)",
        "static void coop_pick_open(unsigned t)",
        "static void coop_pick_close(const char *how)",
@@ -217,6 +222,8 @@ def test_each_teammate_picks_one_nobody_else_has_and_its_ability_holds_while_the
     assert "before a pick: 5" in out                                # no character yet: the game's own value
     assert "open [PLAYER 1 PICK  30: GODZILLA 1954]" in out          # PAD-1044: the seconds left with it
     assert "flip [LONGER BALL SAVE]" in out                         # then what it does, in turn
+    assert "flip2 [ACTION PICKS]" in out                            # PAD-1078: then how to take one (no plunger flags)
+    assert "flip3 [PLAYER 1 PICK  26: GODZILLA 1954]" in out         # and round again
     # teammate 1's: the save time doubled (5 -> 10, at most 15); the heat ray is not theirs; the top line says whom
     # they took (PAD-1044)
     assert "t1 0 [PLAYER 1 IS GODZILLA 1954] reads 94: 10 195: 20" in out
@@ -240,7 +247,7 @@ def test_each_teammate_picks_one_nobody_else_has_and_its_ability_holds_while_the
     assert "then [PLAYER 1  BALL %d]" in out
     # busy under the pick: kept open with no character, its clock stopped; 20 s left after, not dropped
     assert "busy: open 1 who 2 pick -1" in out
-    assert "back: open 1 [PLAYER 2 PICK  19: GODZILLA 1954]" in out
+    assert "back: open 1 [ACTION PICKS]" in out                    # PAD-1078: the turn's third step
     assert "back +18.5 s: open 1" in out
     assert "back timed 0" in out
     assert "unlimited [PLAYER 3 PICK: GODZILLA 1954]" in out        # no time limit: no seconds

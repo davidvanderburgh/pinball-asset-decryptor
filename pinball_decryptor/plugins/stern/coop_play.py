@@ -407,14 +407,31 @@ MAX_CHARACTERS = 16
 #: the longest name, and the longest words for what one does, the game's top line shows (the runtime's 28-byte fields)
 MAX_NAME = 27
 #: PAD-1056: the longest sub header under a name on the pick and award cards (only the cards show it, never the game's
-#: top line, so it keeps the case it was typed in)
-MAX_SUB = 48
+#: top line, so it keeps the case it was typed in); PAD-1075: GMK's film title runs to 72 (the card shrinks it)
+MAX_SUB = 80
 #: PAD-1044: the seconds a teammate has to pick (the runtime's COOP_PICK_MS when coop.cfg names none), and the
 #: choices the Characters dialog offers; 0 is no time limit (the Action button takes one)
 PICK_TIME = 30
 PICK_TIMES = (15, 20, 30, 45, 60, 90, 0)
 #: the presets beside this module: ``coop_presets/<title stem>.json`` (the customization file per game)
 PRESET_DIR = "coop_presets"
+
+#: PAD-1075: Godzilla's multiballs' own ball save timers and their bounds, each read when its multiball starts (the
+#: add-a-ball's too): the longer-save ability doubles them (its top doubled too)
+_MULTIBALL_SAVES = (
+    ("AD_GODZILLA_MULTIBALL_BALL_SAVE_TIMER", 10, 30),
+    ("AD_MECHAGODZILLA_MULTIBALL_BALL_SAVE_TIMER", 10, 30),
+    ("AD_BRIDGE_ATTACK_MULTIBALL_BALL_SAVE_TIMER", 13, 20),
+    ("AD_TANK_ATTACK_MULTIBALL_BALL_SAVE_TIMER", 15, 30),
+    ("AD_SAUCER_ATTACK_MULTIBALL_BALL_SAVE_TIMER", 20, 30),
+    ("AD_PLANET_X_MULTIBALL_BALL_SAVE_TIMER", 30, 60),
+    ("AD_BATTLE_VS_KING_GHIDORAH_BALL_SAVE_TIMER", 28, 40),
+    ("AD_BATTLE_VS_GHIDORAH_AND_GIGAN_BALL_SAVE_TIMER", 28, 40),
+    ("AD_BATTLE_VS_MEGALON_AND_GIGAN_MB_BALL_SAVE_TIMER", 14, 25),
+    ("AD_MONSTER_ZERO_BALL_SAVE_TIMER", 28, 40),
+    ("AD_KING_OF_THE_MONSTERS_MB_BALL_SAVE_TIMER", 28, 40),
+    ("AD_ADD_A_BALL_SAVE_TIMER", 5, 10),
+)
 
 #: (key, words the pick shows, what it does, how): how is ("adj", adjustment name, "x<pct>" | "min" | "max"),
 #: ("cache", adjustment name, "min" | ...): an adjustment the game copies into a player's record at the game's start
@@ -424,48 +441,61 @@ PRESET_DIR = "coop_presets"
 #: ("save", seconds), ("addball", n): Action twice in regular play serves n more balls, ("yes", name): a check of the
 #: game's answers yes (the port's ``coop_yes_<name>``), or ("many", [parts]): several of the above at once
 ABILITIES = (
+    # PAD-1075 (DoomWalrus666's list): the battle timers went to the spot ability; the multiballs' saves came here
     ("longer_save", "LONGER BALL SAVE, LONGER TIMERS",
      "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top); on Godzilla the "
-     "Oxygen Destroyer timer is twice its setting and every battle timer gets 10 seconds more.",
-     ("some", [("adj", "AD_BALL_SAVE_TIME", "x200"), ("adj", "AD_O2_DESTROYER_TIMER", "x200:8:40"),
-               ("adj", "AD_BATTLE_VS_EBIRAH_TIMER", "+10:30:80"), ("adj", "AD_BATTLE_VS_TITANOSAURUS_TIMER", "+10:30:80"),
-               ("adj", "AD_BATTLE_VS_GIGAN_TIMER", "+10:30:80"), ("adj", "AD_BATTLE_VS_MEGALON_TIMER", "+10:30:80"),
-               ("adj", "AD_BATTLE_VS_KING_GHIDORAH_TIMER", "+10:30:100"),
-               ("adj", "AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", "+10:30:100")])),
+     "Oxygen Destroyer timer is twice its setting and every multiball's ball save lasts twice its timer.",
+     ("some", [("adj", "AD_BALL_SAVE_TIME", "x200"), ("adj", "AD_O2_DESTROYER_TIMER", "x200:8:40")]
+      + [("adj", m, "x200:%d:%d" % (lo, 2 * hi)) for m, lo, hi in _MULTIBALL_SAVES])),
     ("action_save", "ACTION BUTTON BALL SAVE",
      "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
-    ("heat_ray", "HEAT RAY READY, EASIER HEAT RAY", "The heat ray is one spin from ready when they pick (the first "
-     "spinner spin of their first ball lights HEAT RAY READY, the game's own way), and it charges in half the spinner "
-     "spins a level (HEAT RAY SPINS PER LEVEL).",
-     ("many", [("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50"), ("set", "heatlevel", 3), ("set", "heatspins", 9)])),
+    ("heat_ray", "HEAT RAY READY, EASIER HEAT RAY, TRAINS ALWAYS LIT", "The heat ray is one spin from ready when they "
+     "pick (the first spinner spin of their first ball lights HEAT RAY READY, the game's own way), it charges in half "
+     "the spinner spins a level (HEAT RAY SPINS PER LEVEL), and a train is lit at each of their balls (the game's own "
+     "LIGHT TRAIN).",
+     ("some", [("many", [("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50"), ("set", "heatlevel", 3),
+                         ("set", "heatspins", 9)]),
+               ("gift", "AD_LIGHT_TRAIN")])),
     ("battles", "EASIER BATTLES", "The ramps light a battle as on the game's easiest LIGHT BATTLE DIFFICULTY.",
      ("cache", "AD_LIGHT_BATTLE_DIFFICULTY", "min")),
-    ("building", "BUILDING AND MECHA MULTIBALLS", "Every building or ramp shot takes two of the building's six "
-     "stability steps (on the game's easiest BUILDING DIFFICULTY), and toward Mechagodzilla Multiball every spin "
-     "counts twice and every shield target hit counts twice.",
-     ("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
-               ("double", "shield")])),
+    ("building", "BUILDING, MECHA, AND SAUCER MULTIBALLS", "Every building or ramp shot takes two of the building's "
+     "six stability steps (on the game's easiest BUILDING DIFFICULTY), toward Mechagodzilla Multiball every spin "
+     "counts twice and every shield target hit counts twice, and every pop bumper hit counts twice toward Saucer "
+     "Attack, so its multiball comes sooner.",
+     ("some", [("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
+                         ("double", "shield")]),
+               ("double", "saucer")])),
     ("powerups", "DOUBLE POWER-UPS, SAUCER, RAMPAGE, +1X JACKPOT", "Every Godzilla power-up the game gives counts "
      "twice, every hit on the saucer (the pop bumper) counts twice toward Saucer Attack, every RAMPAGE letter collected "
      "counts as two, and the Destruction Jackpot multiplier is never below 2X for them.",
      ("some", [("boost", 200), ("double", "saucer"), ("double", "rampage"), ("floor", "djmult", 1)])),
-    ("ally", "AN ALLY EVERY BALL, LONGER RODAN", ("An ally is lit at each of their balls: the next of Mothra, Rodan "
-      "and Anguirus in the game's own order (its LIGHT ALLY), at the pick and at every later turn; Rodan's playfield "
-      "multiplier runs twice its timer."),
-     ("some", [("gift", "AD_LIGHT_ALLY"), ("adj", "AD_RODAN_PLAYFIELD_MULTIPLIER_TIMER", "x200:40:120")])),
+    ("ally", "AN ALLY EVERY BALL, LONGER RODAN, HEDORAH STARTS", ("An ally is lit at each of their balls: the next "
+      "of Mothra, Rodan and Anguirus in the game's own order (its LIGHT ALLY), at the pick and at every later turn; "
+      "Rodan's playfield multiplier runs twice its timer; and Hedorah starts at each of their turns (the game's own "
+      "START HEDORAH)."),
+     ("some", [("gift", "AD_LIGHT_ALLY"), ("adj", "AD_RODAN_PLAYFIELD_MULTIPLIER_TIMER", "x200:40:120"),
+               ("gift", "AD_START_HEDORAH")])),
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
      "the bonus count them).", ("count", "jets", 4)),
-    ("spot", "SPOT A BATTLE SHOT", "Two quick presses of the Action button during a battle count as its next lit "
-     "shot, once in each battle they start (every ball, every battle).", ("spot", "coop_battle_rules")),
+    ("spot", "SPOT A BATTLE SHOT, LONGER BATTLE TIMERS", "Two quick presses of the Action button during a battle "
+     "count as its next lit shot, once in each battle they start (every ball, every battle); on Godzilla every battle "
+     "timer gets 10 seconds more.",
+     ("some", [("spot", "coop_battle_rules"),
+               ("adj", "AD_BATTLE_VS_EBIRAH_TIMER", "+10:30:80"), ("adj", "AD_BATTLE_VS_TITANOSAURUS_TIMER", "+10:30:80"),
+               ("adj", "AD_BATTLE_VS_GIGAN_TIMER", "+10:30:80"), ("adj", "AD_BATTLE_VS_MEGALON_TIMER", "+10:30:80"),
+               ("adj", "AD_BATTLE_VS_KING_GHIDORAH_TIMER", "+10:30:100"),
+               ("adj", "AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", "+10:30:100")])),
     ("tier2", "TIER 2 ALWAYS OPEN", "Every battle on the selection screen is open while they are up, tier 2 included "
      "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).",
      ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
     ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
      "once a ball.", ("addball", 1)),
-    ("maser", "MASER AND MAGNA GRAB LIT, DOUBLE POWERLINES", "The Maser cannon target is lit the whole time they are "
-     "up (in regular play and for all of Tank Attack), Magna Grab is kept lit, and every powerline target hit counts "
-     "as two targets.",
-     ("some", [("many", [("lit", "maser"), ("yes", "maser")]), ("keep", "magna", 1), ("steps", "powerline")])),
+    ("maser", "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES", "The Maser cannon target is lit "
+     "the whole time they are up (in regular play and for all of Tank Attack), Magna Grab is kept lit, every "
+     "powerline target hit counts as two targets, and the Destruction Jackpot is lit at each of their balls (the "
+     "game's own LIGHT DESTRUCTION JACKPOT).",
+     ("some", [("many", [("lit", "maser"), ("yes", "maser")]), ("keep", "magna", 1), ("steps", "powerline"),
+               ("gift", "AD_LIGHT_LIGHT_DESTRUCTION_JACKPOT")])),
     ("bridge", "EASIER BRIDGE, DOUBLE TANKS AND JETS", "The bridge falls as on the game's easiest BRIDGE ATTACK "
      "DIFFICULTY, and every tank or jet destroyed counts as two.",
      ("many", [("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min"), ("double", "tanks"), ("double", "jets")])),
@@ -474,19 +504,23 @@ ABILITIES = (
 )
 #: what the pick's card says each ability does, in the player's words
 CARD_LINES = {
-    "longer_save": "Twice the ball save every ball. Longer Oxygen Destroyer, 10 s more on battles.",
+    "longer_save": "Twice the ball save at the start of every ball. Longer Oxygen Destroyer. Twice the ball save in "
+                   "multiball modes.",
     "action_save": "Press Action twice for a 10 second ball save, once a ball.",
-    "heat_ray": "Heat ray ready at your first spin. Recharges in half the spins.",
+    "heat_ray": "Heat ray ready at your first spin. Recharges in half the spins. A train is lit at every one of your "
+                "balls.",
     "battles": "One ramp lights a battle.",
-    "building": "Building damage two steps a shot. Mecha spins and shield hits count twice.",
+    "building": "Building damage two steps a shot. Mecha spins and shield hits count twice. Pop hits count twice for "
+                "an earlier Saucer Attack Multiball.",
     "powerups": "Power-ups, saucer hits and rampage letters count twice. Destruction Jackpot at least 2X.",
-    "ally": "An ally lit at every one of your balls. Rodan lasts twice as long.",
+    "ally": "An ally lit at every one of your balls. Rodan lasts twice as long. Hedorah starts on each of your turns.",
     "jets": "Starts with 4 jet fighters destroyed.",
     "tanks": "Starts with 4 tanks destroyed.",
-    "spot": "Press Action twice in a battle to hit its next shot, once per battle.",
+    "spot": "Press Action twice in a battle to hit its next shot, once per battle. 10 seconds more on battle timers.",
     "tier2": "Every battle is open to you, tier 2 included.",
     "addball": "Press Action twice in regular play to add a ball, once a ball.",
-    "maser": "Maser and Magna Grab lit while you are up. Powerline hits count double.",
+    "maser": "Maser and Magna Grab lit while you are up. Powerline hits count double. Destruction Jackpot lit at "
+             "every one of your balls.",
     "bridge": "The bridge falls faster. Tanks and jets count two at a time.",
 }
 
@@ -1150,6 +1184,16 @@ def _portrait(project, character, w, h, accent, accent2):
     return plate
 
 
+def _card_lines(draw, text, width, S):
+    """PAD-1075: the pick card's words for what a character does: ``(font, lines, line step)``, two lines at 27 (or
+    24) px, else three at 21 px (DoomWalrus666's lines run to three sentences), the third cut with ... past that."""
+    for size, lines in ((27, 2), (24, 2), (21, 3)):
+        f = _face(_TEXT_FONTS, size * S)
+        got = _wrap(draw, text, f, width, lines)
+        if not got or not got[-1].endswith("...") or size == 21:
+            return f, got, int(size * 1.4) * S
+
+
 def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     """The pick's card for character *index* (``len(list)`` = RANDOM) as an RGBA array of :data:`CARD_SIZE`."""
     import numpy as np
@@ -1246,14 +1290,15 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
         label = (words_for or {}).get(c["ability"], "") if c["ability"] else ""
         label = label or "NO SPECIAL ABILITY"
         does = CARD_LINES.get(c["ability"], "") if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
-    bf = _face(_TEXT_FONTS, 24 * S)
+    bf = _fit(d, label, _TEXT_FONTS, iw - 40 * S, 24 * S, 14 * S)     # PAD-1075: a long badge shrinks to the card
     bw = d.textlength(label, font=bf) + 40 * S
     by = (222 if sub else 208) * S
     d.rounded_rectangle((ix, by, ix + bw, by + 46 * S), radius=23 * S, fill=A[:3] + (255,))
     d.text((ix + bw / 2, by + 23 * S), label, font=bf, fill=(12, 12, 18, 255), anchor="mm")
-    tf = _face(_TEXT_FONTS, 27 * S)
-    for k, line in enumerate(_wrap(d, does, tf, iw, 2)):            # with a sub header: closer, clear of how to choose
-        d.text((ix, by + (76 if sub else 88) * S + k * 38 * S), line, font=tf, fill=(222, 228, 240, 255), anchor="ls")
+    tf, lines, step = _card_lines(d, does, iw, S)
+    for k, line in enumerate(lines):                    # with a sub header: closer, clear of how to choose
+        d.text((ix, by + ((76 if sub else 88) - (27 * S - tf.size) // S) * S + k * step), line, font=tf,
+               fill=(222, 228, 240, 255), anchor="ls")
     # how to choose
     hy = 372 * S
     hf2 = _face(_TEXT_FONTS, 20 * S)

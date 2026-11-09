@@ -355,6 +355,19 @@ turn), Tail Whip lit at each turn start and every tail whip super, Anguirus addi
 twice, loops x2 for the heat ray character, and the earlier five (trains x2, Destruction Jackpot timer, Rage Combo lit,
 Mothra either outlane, 4X super spinner).
 
+## PAD-1075 (2026-11-08): DoomWalrus666's list is Godzilla's set
+
+His spreadsheet: eleven characters named after the films' suits (SHODAIGOJI ... FINALGOJI) with each film as the sub
+header, and six abilities reshaped. Longer save: the battle timers moved to the spot ability, every multiball's own
+BALL SAVE TIMER (203-211, 217-227, ADD A BALL 200) doubled instead (read through the getter as the multiball starts:
+emulator, SAUCER ATTACK 210 read 60, its own 30, LE and Pro). Ally + START HEDORAH 319, Maser + LIGHT LIGHT
+DESTRUCTION JACKPOT 309, heat ray + LIGHT TRAIN 315: gifts, now up to four a character (COOP_GIFTS), each at the pick
+and every later turn. Saucer Attack Multiball "after 4 saucers instead of 6": the game has no such count to change
+(POP HITS FOR SAUCER ATTACK builds a pop-hit ladder at game start, 0x70e5d4, +3 a level, and the level byte at
++0x37+p is capped at 4), so per his fallback the building character's pop hits count twice (double:saucer) for an
+earlier Saucer Attack Multiball. COOP_CHAR_ADJ 12 -> 16 (the longer save has 14). The pick card: the badge shrinks to
+the card, a long line takes three 21 px lines; MAX_SUB 80 (GMK's film title is 72).
+
 ## Round 6 (2026-11-08): the reporter asks about unused ally abilities and further ideas
 
 No code change; the answer and the spreadsheet (artifacts `discord/godzilla_abilities.csv`, built by

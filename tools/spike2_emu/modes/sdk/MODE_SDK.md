@@ -6379,6 +6379,16 @@ back at its first press, or release, after the pick, so the game gets whole pres
 then the flippers are the language select's and Action launches; a launch (the flag clearing) takes the one shown. Hiding
 also stops at the first `lane` switch edge 1 s or more after the ball began to wait (a launch, whatever the flags
 say; either direction, as the lane's sense varies), so the flippers are never held from a ball in play.
+PAD-1078 (DoomWalrus666: "holding the right flipper and pressing start button also changes the language to
+Japanese"): Godzilla arms its language select in its game start (LE 1.16 0x2a78d4 -> 0x225330; on when adjustment 14
+is 1, 0x225300), and the right flipper held through that Start (PAD-1054's solo pick, a held-button join) was pressed
+before the pick wanted it, so the game kept reading it held. Now a pick button already held when the pick comes to
+want it is taken mid-press (`edge_take_held`, from the pick's tick): its level reads released at once and its handler
+bits are held back, its release included (the emulator: with the release let through, the select walked to Japanese
+on it); the game has it back at its first press, or release, once the pick is done. The pick also hides from a new game's start (`game_start`) until its first ball waits, at most 10 s
+(`COOP_FRESH_MS`): no ball is in play yet. A join in a ball in play is not a new game and stays as above. The top
+line's turn (name, what it does) ends with how to take one: `ACTION OR LAUNCH TO PICK` (`ACTION TO PICK` on a port
+with no plunger flags; nothing with no `action`).
 Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and

@@ -1182,6 +1182,7 @@ def coop_plan(project, game_elf, prof):
 
 #: PAD-1079: the bank crop the characters' videos play at (the identity: the clip on the glass as made)
 CLIP_CROP = "Normal"
+_IDENTITY = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 
 
 def coop_clips_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
@@ -1217,9 +1218,9 @@ def coop_clips_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
             bank = f.read()
     else:
         bank = stock_bank
-    if CLIP_CROP not in dict(VB.parse(stock_bank).labels):
-        result.lines.append("co-op characters: their videos are left out - %s's video bank has no %s crop to play "
-                            "them at full size, so their pictures show" % (prof.label, CLIP_CROP))
+    if VB.crop_transform(stock_bank, CLIP_CROP) != _IDENTITY:
+        result.lines.append("co-op characters: their videos are left out - %s's video bank has no %s crop that plays "
+                            "a clip 1:1 on the glass, so their pictures show" % (prof.label, CLIP_CROP))
         return []
     w, h = VB.clip_frame(stock_bank)
     assets = bank_card[:-len("scene.radium")] + "scene.assets/"

@@ -27,14 +27,16 @@ selection screen at my choice".
 - Runtime: coop_clip_show (pm_backdrop of the shown card's clip, given back when it goes); prebuilt mode.so rebuilt.
 - Dialog: Video... per row (row buttons wrap), note when the title cannot play them; help + MODE_SDK.md.
 
-## Left: the emulator proof (WSL hung 2026-11-09 ~08:00, every wsl.exe timed out; needs `wsl --shutdown`)
+## Proven (run 3, 2026-11-09, after the PC restart)
 
-Kit ready in C:/tmp/PAD-1079: mkset.py built the override set (ovr/, ovr-modes/ with coop.cfg char_clip 1-2 +
-clip_crop Normal; test0.mp4 testsrc2 on SHODAIGOJI, test1.mp4 smptebars on KINGOJI). Launch:
+Emulator, rig kit C:/tmp/PAD-1079 (go.sh l1.txt / l2.txt), each 1 pass: Godzilla LE 1.16 and Pro 1.16. SHODAIGOJI's
+test pattern fills its card's frame exactly and moves (clip clock 3.8 s -> 5.4 s); the flipper to KINGOJI swaps to its
+clip; SOSHINGEKI (no video) shows its picture with the city round the card; PICKED keeps the clip; after the pick the
+city is back ("given back" each time, 3 plays / 3 given back, no faults). While a clip plays the glass round the card is
+the clip's black. Shots: artifacts/PAD-1079/proof_*.png. After the restart PAD-Runtime had lost the qemu-arm binfmt
+(the run "ended by itself at 4s", Exec format error): `cat /usr/lib/binfmt.d/qemu-arm.conf >
+/proc/sys/fs/binfmt_misc/register` as root.
 
-    wsl.exe -d PAD-Runtime -u root -e bash /mnt/c/tmp/PAD-1079/go.sh l1.txt r1
-
-(job.sh: one teammate added, shots v1 a/b on SHODAIGOJI 1 s apart = the video moves, v2 KINGOJI, v3 SOSHINGEKI
-picture, v4 back, v5 PICKED, v6 after = city again; out in C:/tmp/PAD-1079/out_gz_le_v1, mode.log lines "plays
-behind its card" / "given back"). Check the pattern fills the frame exactly; then Pro 1.16 (same list line with the
-pro card + key) and the after shots are done.
+The build now gates on the bank's Normal crop BEING the identity (video_bank.crop_transform). John Wick LE/Pro have a
+backdrop but on the bank's surface (clip v2, `backdrop_surface 1`, no city vtable): can_video is False there, the
+dialog says so and the pictures show.

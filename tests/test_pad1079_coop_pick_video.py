@@ -128,7 +128,7 @@ def test_the_build_adds_each_clip_and_names_it(tmp_path, monkeypatch):
     monkeypatch.setattr(CP, "wants_screens", lambda project, prof: True)
     monkeypatch.setattr(CP, "can_video", lambda prof: True)
     monkeypatch.setattr(VB, "clip_frame", lambda data: (1360, 768))
-    monkeypatch.setattr(VB, "parse", lambda data: types.SimpleNamespace(labels=[("Normal", 1), ("ScoreFrame", 2)]))
+    monkeypatch.setattr(VB, "crop_transform", lambda data, label: MW._IDENTITY if label == "Normal" else None)
     made = []
     monkeypatch.setattr(CP, "window_clip", lambda src, out, w, h, ff: made.append((src, w, h)) or
                         open(out, "wb").write(b"x" * 10))
@@ -150,10 +150,13 @@ def test_the_build_adds_each_clip_and_names_it(tmp_path, monkeypatch):
     assert MW.coop_clips_into(result3, b"BANK", str(tmp_path / "s3"), ffmpeg="ffmpeg") == []
     assert "left out" in result3.lines[-1] and not result3.replaced
     monkeypatch.setattr(CP, "can_video", lambda prof: True)            # a bank with no Normal crop: left out too
-    monkeypatch.setattr(VB, "parse", lambda data: types.SimpleNamespace(labels=[("ScoreFrame", 2)]))
+    monkeypatch.setattr(VB, "crop_transform", lambda data, label: None)
     result4 = types.SimpleNamespace(project=project, profile=prof, replaced=[], new=[], lines=[])
     assert MW.coop_clips_into(result4, b"BANK", str(tmp_path / "s4"), ffmpeg="ffmpeg") == []
     assert "no Normal crop" in result4.lines[-1]
+    monkeypatch.setattr(VB, "crop_transform", lambda data, label: (1.065,) + MW._IDENTITY[1:])   # not 1:1: left out
+    result5 = types.SimpleNamespace(project=project, profile=prof, replaced=[], new=[], lines=[])
+    assert MW.coop_clips_into(result5, b"BANK", str(tmp_path / "s5"), ffmpeg="ffmpeg") == []
 
 
 def test_godzillas_bank_plays_the_normal_crop_one_to_one():
@@ -177,6 +180,9 @@ def test_godzillas_bank_plays_the_normal_crop_one_to_one():
         p += 68
     assert tracks[frames["Normal"]] == (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
     assert tracks[frames["ScoreFrame"]][12:14] != (0, 0)
+    assert VB.crop_transform(data, "Normal") == tracks[frames["Normal"]]          # the reader the build gates on
+    assert VB.crop_transform(data, "ScoreFrame") == tracks[frames["ScoreFrame"]]
+    assert VB.crop_transform(data, "NoSuchCrop") is None
 
 
 def test_the_settings_file_carries_the_videos(tmp_path, monkeypatch):

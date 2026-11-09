@@ -1180,11 +1180,17 @@ def coop_plan(project, game_elf, prof):
     return ModePlan(project=project, profile=prof, port=port, build=None)
 
 
+#: PAD-1079: the bank crop the characters' videos play at (the identity: the clip on the glass as made)
+CLIP_CROP = "Normal"
+
+
 def coop_clips_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
     """PAD-1079: each co-op character's video, made into a clip of the bank's size with the picture where its card's
     window is (coop_play.window_clip), added to the bank scene the build has so far (the modes' and attract items'
     own, or the stock one). Returns ``[(character number, clip name)]`` for coop.cfg's ``char_clip`` lines ([] when no
-    character has one, or the title has no backdrop to play them in)."""
+    character has one, or the title has no backdrop to play them in). They play at the bank's ``Normal`` crop (the
+    surface 1:1 on the glass, so the window lands where the card's is; Godzilla's backdrop_crop, ScoreFrame, scales it
+    1.065 and moves it -43,-98): a bank without one gets no videos."""
     from . import clip_variants as CV
     from . import coop_play as CP
     from . import video_bank as VB
@@ -1211,6 +1217,10 @@ def coop_clips_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
             bank = f.read()
     else:
         bank = stock_bank
+    if CLIP_CROP not in dict(VB.parse(stock_bank).labels):
+        result.lines.append("co-op characters: their videos are left out - %s's video bank has no %s crop to play "
+                            "them at full size, so their pictures show" % (prof.label, CLIP_CROP))
+        return []
     w, h = VB.clip_frame(stock_bank)
     assets = bank_card[:-len("scene.radium")] + "scene.assets/"
     folder = os.path.join(scratch, "coop_clips")
@@ -1279,8 +1289,11 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
             text += "award_cards on\n"            # PAD-1028 round 2: the awards on the winners' cards
-            for n, name in coop_clips_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress):
+            clips = coop_clips_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)
+            for n, name in clips:
                 text += "char_clip %d %s\n" % (n, name)             # PAD-1079: its video, behind its card
+            if clips:
+                text += "clip_crop %s\n" % CLIP_CROP
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)

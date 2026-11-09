@@ -128,6 +128,7 @@ def test_the_build_adds_each_clip_and_names_it(tmp_path, monkeypatch):
     monkeypatch.setattr(CP, "wants_screens", lambda project, prof: True)
     monkeypatch.setattr(CP, "can_video", lambda prof: True)
     monkeypatch.setattr(VB, "clip_frame", lambda data: (1360, 768))
+    monkeypatch.setattr(VB, "parse", lambda data: types.SimpleNamespace(labels=[("Normal", 1), ("ScoreFrame", 2)]))
     made = []
     monkeypatch.setattr(CP, "window_clip", lambda src, out, w, h, ff: made.append((src, w, h)) or
                         open(out, "wb").write(b"x" * 10))
@@ -148,6 +149,34 @@ def test_the_build_adds_each_clip_and_names_it(tmp_path, monkeypatch):
     result3 = types.SimpleNamespace(project=project, profile=prof, replaced=[], new=[], lines=[])
     assert MW.coop_clips_into(result3, b"BANK", str(tmp_path / "s3"), ffmpeg="ffmpeg") == []
     assert "left out" in result3.lines[-1] and not result3.replaced
+    monkeypatch.setattr(CP, "can_video", lambda prof: True)            # a bank with no Normal crop: left out too
+    monkeypatch.setattr(VB, "parse", lambda data: types.SimpleNamespace(labels=[("ScoreFrame", 2)]))
+    result4 = types.SimpleNamespace(project=project, profile=prof, replaced=[], new=[], lines=[])
+    assert MW.coop_clips_into(result4, b"BANK", str(tmp_path / "s4"), ffmpeg="ffmpeg") == []
+    assert "no Normal crop" in result4.lines[-1]
+
+
+def test_godzillas_bank_plays_the_normal_crop_one_to_one():
+    """The crops are the VideoSurface's keyframes; Normal's track is the identity on Godzilla LE 1.16's bank (and
+    ScoreFrame, the backdrop's own, is not), read off a bank the rig built."""
+    import struct
+    path = pathlib.Path(r"C:/tmp/PAD-1079/ovr/godzilla_le/assets/lcd/auto_loaded/"
+                        r"60ed7e5036b8ce09d35a3e101ea6fc1380b37d97/scene.radium")
+    if not path.is_file():
+        pytest.skip("no Godzilla bank here")
+    from pinball_decryptor.plugins.stern import video_bank as VB
+    data = path.read_bytes()
+    bank = VB.parse(data)
+    frames = dict(bank.labels)
+    p = data.find(bank.surface_node.encode()) + len(bank.surface_node) + 4
+    n = struct.unpack_from("<Q", data, p)[0]
+    p += 8 + 5 * n + 8
+    tracks = {}
+    for _ in range(struct.unpack_from("<Q", data, p)[0]):
+        tracks[struct.unpack_from("<I", data, p + 8)[0]] = struct.unpack_from("<16f", data, p + 12)
+        p += 68
+    assert tracks[frames["Normal"]] == (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+    assert tracks[frames["ScoreFrame"]][12:14] != (0, 0)
 
 
 def test_the_settings_file_carries_the_videos(tmp_path, monkeypatch):

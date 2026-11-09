@@ -6344,7 +6344,8 @@ plays one player for the team, so nothing per player is copied: an ability chang
     character save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE
     character adj:195x50:4:30 GODZILLA GMK|EASIER HEAT RAY
     char_clip 1 PadCoopClip1                  PAD-1079: character 1's own video (a clip the build added)
-    clip_crop ScoreFrame                      the crop the videos play at (the port's backdrop_crop when not given)
+    clip_crop Normal                          the bank crop the videos play at (the app writes Normal: 1:1 on the glass;
+                                              not given, the port's backdrop_crop - Godzilla's ScoreFrame is x1.065, -43,-98)
 
 PAD-1079: a character with `char_clip` has a see-through window in its pick card's portrait frame (the app cuts it
 only on a title whose port has the backdrop, `backdrop_draw`). While its card is on the glass (the pick on it, then

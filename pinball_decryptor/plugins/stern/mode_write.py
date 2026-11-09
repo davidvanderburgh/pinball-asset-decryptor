@@ -1195,7 +1195,7 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
             screens = False
         else:
             try:
-                hud = SW.add_screens(stock_hud, CP.pick_screens(project, words_for=CP.words_for())
+                hud = SW.add_screens(stock_hud, CP.pick_screens(project, words_for=CP.words_for(project))
                                      + CP.award_screens(project),             # PAD-1028 round 2
                                      font_source=stock_font or None)[0]
             except SW.SceneWriteError as e:

@@ -108,7 +108,7 @@ def test_each_classic_patch_turns_its_card_into_no_special_ability():
         x, y = int(patch["x"]) - CP.CARD_AT[0], int(patch["y"]) - CP.CARD_AT[1]
         laid = CP.pick_card(None, chars, i, words, chars.get("theme")).copy()
         laid[y:y + h, x:x + w] = patch["art_rgba"]
-        plain = dict(chars, list=[dict(c, ability="") if k == i else c for k, c in enumerate(chars["list"])])
+        plain = dict(chars, list=[dict(c, powers=[], header="") if k == i else c for k, c in enumerate(chars["list"])])
         assert np.array_equal(laid, CP.pick_card(None, plain, i, words, chars.get("theme")))   # exactly that card
 
 
@@ -118,7 +118,7 @@ def test_no_patches_without_the_service_menu_row_or_an_ability():
                 if s["name"].startswith("PadCoopClassic_")]
     assert not [s for s in CP.pick_screens(None, chars, CP.words_for())                # no project: no menu row
                 if s["name"].startswith("PadCoopClassic_")]
-    none = dict(chars, list=[dict(c, ability="") for c in chars["list"]])
+    none = dict(chars, list=[dict(c, powers=[], header="") for c in chars["list"]])
     assert CP.classic_patch(None, none, 0) is None                                    # its card says so already
 
 

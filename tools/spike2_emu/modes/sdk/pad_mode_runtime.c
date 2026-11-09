@@ -16474,8 +16474,11 @@ static void coop_join_show(void)
  * never be able to force a player to continue"): each flipper press under the pick starts its time again, so the time
  * only runs out on a player who has left the buttons alone that long. */
 #define COOP_CHARS 16
-#define COOP_CHAR_ADJ 16                 /* PAD-1075: ball save, O2 and eleven multiball ball saves on one character */
-#define COOP_GIFTS 4
+#define COOP_CHAR_ADJ 24                 /* PAD-1075: ball save, O2 and eleven multiball ball saves on one character;
+                                          * round 6: the owner composes a character, so the battle timers fit beside them */
+#define COOP_GIFTS 6
+#define COOP_CH_N 4                      /* round 6: yes/lit/steps/keep/count parts a character takes */
+#define COOP_CH_DBL 6                    /* ... and doubles (Godzilla: spins, shield, saucer, rampage, tanks, jets) */
 #define COOP_PICK_MS 30000ul
 #define COOP_PICK_MAX_S 600u
 #define COOP_PICK_DONE_MS 2500ul
@@ -16493,11 +16496,13 @@ static struct coop_char {
     struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v%; 2: + v; 3: - v; 1-3 held to lo..hi */
     unsigned save_s, bs_adj, boost, spot, unlock_adj, unlock_rules, addball, n_yes, n_double, n_lit;
     unsigned n_gift, gift[COOP_GIFTS];
-    char yes[2][12], dbl[2][12], lit_name[2][12], steps[2][12], keep[2][12];
-    unsigned n_steps, n_keep, keep_v[2], keep_floor[2];        /* keep_floor: written only while below v */
-    uint64_t lit_mask[2];
+    char yes[COOP_CH_N][12], dbl[COOP_CH_DBL][12], lit_name[COOP_CH_N][12], steps[COOP_CH_N][12], keep[COOP_CH_N][12];
+    unsigned n_steps, n_keep, keep_v[COOP_CH_N], keep_floor[COOP_CH_N], keep_or[COOP_CH_N];   /* keep_floor: written only
+                                                     while below v; keep_or: v's bits set in it (round 6: a power-up owned) */
+    uint64_t lit_mask[COOP_CH_N];
     unsigned n_count;
-    struct { char name[12]; unsigned n, set; } count[2];     /* set: the word is made n, not raised by n */
+    struct { char name[12]; unsigned n, set; } count[COOP_CH_N];   /* set: the word is made n, not raised by n */
+    unsigned eb;                            /* round 6: eb:<n> - an extra ball as their ball n begins (0: none) */
 } coop_ch[COOP_CHARS];
 static int coop_ch_n, coop_pick_on;
 static unsigned long coop_pick_ms = COOP_PICK_MS;   /* coop.cfg `pick_time`; 0: no limit */
@@ -16517,6 +16522,7 @@ static volatile unsigned long coop_tap_ms;  /* the Action button's last press */
 static volatile int coop_save_ask;          /* a double press: the tick gives the save */
 static int coop_save_used;                  /* this ball's is given */
 static int coop_spot_used, coop_spot_battle; /* spot: one a battle started - the battle it was used in, cleared when another runs */
+static int coop_eb_given[5];                /* round 6: eb: - each teammate's extra ball given this game */
 static unsigned coop_lane;                  /* PAD-1045: the shooter lane switch (0: not known, every press counts) */
 static volatile int coop_lane_in;           /* a ball waits in the shooter lane */
 static volatile int coop_ball_out;          /* the turn's ball has left the shooter lane */
@@ -16545,7 +16551,7 @@ static struct coop_cache {
 static int coop_cache_n;
 static unsigned (*coop_boost_game)(unsigned, unsigned, unsigned, unsigned);
 static volatile unsigned coop_gift_now;     /* the getter answers 1 for this adjustment, once */
-#define COOP_COUNTS 8
+#define COOP_COUNTS 12
 static struct { char name[12]; unsigned at, obj, ptr, stride, width; } coop_count[COOP_COUNTS];   /* stride: bytes a player apart (4, 0 = one word for all); width 4 or 1 */
 static int coop_count_n;
 static unsigned coop_started[5];            /* per teammate: the unlock rules seen running on their turns, this game */
@@ -16559,7 +16565,7 @@ static int coop_lit_n;
 #define COOP_STEPS 4
 static struct { char name[12]; unsigned obj, at, n, seen, inl, done, width; unsigned was[16]; } coop_step[COOP_STEPS];   /* steps: a rule's steps (bytes of 100 in a vector, or words of 1 inline) */
 static int coop_step_n;
-#define COOP_KEEPS 4
+#define COOP_KEEPS 8
 static struct { char name[12]; unsigned obj, at, stride, width; } coop_keep[COOP_KEEPS];   /* keep: a word held at a value while up */
 static int coop_keep_n;
 static int coop_dbl_armed;
@@ -16863,12 +16869,18 @@ static void coop_keep_tick(void)
                 {
                     unsigned now = coop_keep[i].width == 1 ? *(volatile unsigned char *)(unsigned long)a
                                                            : *(volatile unsigned *)(unsigned long)a;
-                    int write = c->keep_floor[k] ? now < c->keep_v[k] : now != c->keep_v[k];
+                    int write = c->keep_or[k] ? (now & c->keep_v[k]) != c->keep_v[k]
+                                : c->keep_floor[k] ? now < c->keep_v[k] : now != c->keep_v[k];
+                    unsigned v = c->keep_or[k] ? now | c->keep_v[k] : c->keep_v[k];
                     if (write) {
-                        if (coop_keep[i].width == 1) *(volatile unsigned char *)(unsigned long)a = (unsigned char)c->keep_v[k];
-                        else *(volatile unsigned *)(unsigned long)a = c->keep_v[k];
-                        say("co-op: %s - %s kept at %s%u", c->name, coop_keep[i].name, c->keep_floor[k] ? "least " : "",
-                            c->keep_v[k]);
+                        if (coop_keep[i].width == 1) *(volatile unsigned char *)(unsigned long)a = (unsigned char)v;
+                        else *(volatile unsigned *)(unsigned long)a = v;
+                        if (c->keep_or[k])
+                            say("co-op: %s - %s has bits 0x%x set (0x%x -> 0x%x)", c->name, coop_keep[i].name, c->keep_v[k],
+                                now, v);
+                        else
+                            say("co-op: %s - %s kept at %s%u", c->name, coop_keep[i].name, c->keep_floor[k] ? "least " : "",
+                                c->keep_v[k]);
                     }
                 }
                 break;
@@ -17519,6 +17531,16 @@ static void coop_chars_tick(void)
     coop_lit_tick();
     coop_steps_tick();
     coop_keep_tick();
+    if ((c = coop_char_up()) && c->eb && coop_ball_byte && *coop_ball_byte == c->eb && !pk.open && !coop_done.on
+        && coop.turn >= 1 && coop.turn <= 4 && !coop_eb_given[coop.turn]) {   /* round 6: an extra ball as ball n begins */
+        coop_eb_given[coop.turn] = 1;
+        if (fn("coop_eb_award")) {                                /* the game's own award (the mystery's AWARD EXTRA BALL) */
+            unsigned got = ((unsigned (*)(void *))(unsigned long)fn("coop_eb_award"))(0);
+            say("co-op: %s - an extra ball as ball %u begins (teammate %u): %s", c->name, c->eb, coop.turn,
+                got == 1 ? "the game lit it" : got == 2 ? "the game gave points instead (its extra balls are off or at their limit)"
+                : "the game did not take it");
+        } else say("co-op: %s - no extra ball as ball %u begins: the port names no coop_eb_award", c->name, c->eb);
+    }
     if (coop_save_ask && (c = coop_char_up()) && c->addball && !coop_save_used
         && pm_stock_mode_running(PM_STOCK_ANY) <= 0) {
         coop_save_ask = 0;
@@ -17550,7 +17572,7 @@ static void coop_chars_tick(void)
 static void coop_chars_begin(void)
 {
     int t;
-    for (t = 0; t <= 4; t++) coop_pick_of[t] = -1, coop_started[t] = 0;
+    for (t = 0; t <= 4; t++) coop_pick_of[t] = -1, coop_started[t] = 0, coop_eb_given[t] = 0;
     for (t = 0; t < coop_cache_n; t++) coop_cache[t].held = 0;
     pk.open = 0;
     coop_done.on = 0;
@@ -17584,7 +17606,8 @@ static void coop_chars_turn(void)
 static void coop_char_line(const char *s)
 {
     struct coop_char *c;
-    char tok[384];                          /* a Godzilla character's abilities run past 200 characters (round 4) */
+    char tok[768];                          /* a Godzilla character's abilities run past 200 characters (round 4); a
+                                             * composed one with every multiball save and the battle timers past 384 */
     const char *p;
     unsigned k;
     int ok;
@@ -17625,7 +17648,7 @@ static void coop_char_line(const char *s)
             p += 6;
             c->boost = (unsigned)number(&p, &ok);
             if (!ok || c->boost > 1000) c->boost = 0;
-        } else if (str_starts(p, "count:") && c->n_count < 2) {
+        } else if (str_starts(p, "count:") && c->n_count < COOP_CH_N) {
             p += 6;
             for (k = 0; k + 1 < sizeof c->count[0].name && *p && *p != '+' && *p != '=' && *p != ','; k++)
                 c->count[c->n_count].name[k] = *p++;
@@ -17648,23 +17671,24 @@ static void coop_char_line(const char *s)
                 c->unlock_rules = (unsigned)number(&p, &ok);
             }
             if (!ok) c->unlock_adj = c->unlock_rules = 0;
-        } else if (str_starts(p, "keep:") && c->n_keep < 2) {
+        } else if (str_starts(p, "keep:") && c->n_keep < COOP_CH_N) {
             p += 5;
-            for (k = 0; k + 1 < 12 && *p && *p != '=' && *p != '>' && *p != ','; k++) c->keep[c->n_keep][k] = *p++;
+            for (k = 0; k + 1 < 12 && *p && *p != '=' && *p != '>' && *p != '|' && *p != ','; k++) c->keep[c->n_keep][k] = *p++;
             c->keep[c->n_keep][k] = 0;
             c->keep_floor[c->n_keep] = *p == '>';            /* keep:<name>>=<v>: at least v */
-            if (*p == '>') p++;
+            c->keep_or[c->n_keep] = *p == '|';               /* keep:<name>|=<mask>: these bits set (round 6: power-ups owned) */
+            if (*p == '>' || *p == '|') p++;
             if (k && *p == '=') {
                 p++;
                 c->keep_v[c->n_keep] = (unsigned)number(&p, &ok);
                 if (ok) c->n_keep++;
             }
-        } else if (str_starts(p, "steps:") && c->n_steps < 2) {
+        } else if (str_starts(p, "steps:") && c->n_steps < COOP_CH_N) {
             p += 6;
             for (k = 0; k + 1 < 12 && *p && *p != ','; k++) c->steps[c->n_steps][k] = *p++;
             c->steps[c->n_steps][k] = 0;
             if (k) c->n_steps++;
-        } else if (str_starts(p, "lit:") && c->n_lit < 2) {
+        } else if (str_starts(p, "lit:") && c->n_lit < COOP_CH_N) {
             p += 4;
             for (k = 0; k + 1 < 12 && *p && *p != '=' && *p != ','; k++) c->lit_name[c->n_lit][k] = *p++;
             c->lit_name[c->n_lit][k] = 0;
@@ -17677,7 +17701,7 @@ static void coop_char_line(const char *s)
             p += 8;
             c->addball = (unsigned)number(&p, &ok);
             if (!ok || c->addball > 3) c->addball = 0;
-        } else if ((str_starts(p, "yes:") && c->n_yes < 2) || (str_starts(p, "double:") && c->n_double < 2)) {
+        } else if ((str_starts(p, "yes:") && c->n_yes < COOP_CH_N) || (str_starts(p, "double:") && c->n_double < COOP_CH_DBL)) {
             char *dst = str_starts(p, "yes:") ? c->yes[c->n_yes] : c->dbl[c->n_double];
             p += str_starts(p, "yes:") ? 4 : 7;
             for (k = 0; k + 1 < 12 && *p && *p != ','; k++) dst[k] = *p++;
@@ -17692,6 +17716,10 @@ static void coop_char_line(const char *s)
             p += 3;
             c->bs_adj = (unsigned)number(&p, &ok);
             if (!ok) c->bs_adj = 0;
+        } else if (str_starts(p, "eb:")) {                   /* round 6: an extra ball as their ball n begins */
+            p += 3;
+            c->eb = (unsigned)number(&p, &ok);
+            if (!ok || c->eb > 9) c->eb = 0;
         }
         while (*p && *p != ',') p++;
         if (*p == ',') p++;

@@ -1148,6 +1148,10 @@ site  audit_add              0x00416040 0xe92d43f0 0xe2505000
 # PAD-1031: co-op characters (pad_mode_runtime.c "co-op characters")
 # the adjustment-changed handler ({u16 id}): LIGHT ALLY's one-shot (a gift)
 site coop_adj_changed     0x000598b4 0xe92d4070 0xe1a05000
+# round 6: the framework's award-extra-ball (the mystery's AWARD EXTRA BALL; counts AUD_TOTAL_EXTRA_BALLS 73, the
+# player's byte at 0x7ca5c8 + 8 + player - 1): eb:<n> calls it as the character's ball n begins. r0: a points
+# word for the consolation (0 fine); answers 1 lit, 2 points instead (extra balls off or at their limit).
+site coop_eb_award        0x002b300c 0xe92d4070 0xe1a06000
 # the power-up add (this, n): a boost scales n
 site coop_boost           0x0014cb3c 0xe92d4030 0xe24dd014
 # copies LIGHT BATTLE DIFFICULTY into the battle rule's record (hooked: the rule's object)
@@ -1246,3 +1250,9 @@ value coop_count_train_at     0x2c
 # multiplier step (0 = 1X, 1 = 2X ...) at this + (player - 1) x 4 + 0x10, raised with each light - keep:djmult>=1
 value coop_keep_djmult_obj    0x007b1c78
 value coop_keep_djmult_at     0xc
+# round 6: the Godzilla power-ups a player owns (the perks picked at the scoop), one bit each in the word at the
+# power-up rule's object + 0x44 + 4 x player; each rule tests its own bit (0x14e388(id)): 8 LOOP VALUE 2X, 11 RAGE
+# COMBO +3 S, 18 DESTRUCTION JACKPOT +3 S, 19 +2X, 20 RODAN TIMER +15 S, 21 MAGNA GRAB 2X, 22 SUPER SPINNER +2X ...
+# (the 31 names at 0x5fcac0, in reverse id order). keep:perks|=<mask> keeps the character's bits set.
+value coop_keep_perks_obj     0x007b2dd0
+value coop_keep_perks_at      0x44

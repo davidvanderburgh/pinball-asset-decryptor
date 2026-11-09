@@ -395,3 +395,36 @@ No code change; the answer and the spreadsheet (artifacts `discord/godzilla_abil
 - Fresh setting-based ideas added to the sheet: Rampage ball save never shrinks / extra ball sooner, KOTM time attack loops +10 s / 8 minutes, city combos
   extra ball at 4, three wallop ball saves, shorter Hedorah, slower tanks, easier Ghidorah and Gigan, bigger
   Destruction Jackpots / annihilation bonuses, Planet X city unlocked, THEME MUSIC per character, MORE GOATS.
+
+### Round 6, built (2026-11-08 evening): powers the owner composes; two new kinds; emulator-proven LE + Pro
+
+DoomWalrus666: "Add the longer ball save for Anguirus to the character with the Ally abilities", "Add Loop Value 2x
+to BioGoji", "Can a character automatically get an extra ball after Ball 3 as an ability? ... add this to the
+customizable character/ability builder interface"; daveyvandy: "We need to give the end user the flexibility to
+customize this themselves so that we don't have to hard code these edits. The customization needs to be done and
+available in the app itself."
+
+- coop_play.POWERS: 50 single things (the parts of the old abilities split out, the game's 17 lasting power-ups as
+  starting perks, an extra ball as ball 3 or 1 begins), each ("key", group, badge words, card line, does, how);
+  ABILITIES are bundles of them (ABILITY_POWERS); compose() joins a character's list (each token once, the perks folded
+  into one `keep:perks|=<mask>`), names the powers the card lacks ("missing") and the kinds past LIMITS ("over"). A
+  saved character: {"name", "sub", "powers", "header", "picture"} (an old "ability" maps to its bundle; "ability" is
+  kept as the bundle key when the list is exactly one). character_words(): the header, else the bundle's words when
+  the list is one, else the powers' words; character_line(): the powers' lines. words_for(project) = only the powers
+  the project's card has. The preset lists powers (BIOGOJI + perk_loop_2x, SOSHINGEKI + addball_save_x2).
+- Runtime: `keep:<name>|=<mask>` (bits set each tick), `eb:<n>` (the game's award-extra-ball through `site
+  coop_eb_award` as the teammate's ball n begins, once a teammate a game; answers 1 lit / 2 points instead); room per
+  character COOP_CHAR_ADJ 24, COOP_GIFTS 6, COOP_CH_N 4 (count/keep/steps/lit/yes), COOP_CH_DBL 6, tok[768]; COOP_COUNTS
+  12, COOP_KEEPS 8. Ports: coop_keep_perks_obj 0x7b2dd0 / 0x7a6738 (_at 0x44), coop_eb_award 0x2b300c / 0x42e154.
+- Dialog (modes.py + modes_dialogs.js): each row shows the composed badge and line, Powers (n)... opens the grouped
+  tick list under it with a header field and Start from... (a set ability's powers); coop_char_power refuses a power
+  past the room and the note says which kind is full; a power the game lacks is greyed and, on a character, named as
+  left off the card. Shot: after_coop_characters_powers.png (shot_pad1031.py --chars --powers; the Characters...
+  button is reached with dispatch_event("click"), the tab's footer card overlaps it).
+- Emulator (run r22, LE rig 3 211 s, Pro rig 4 289 s, no faults): LOOPS (keep:perks|=0x100,eb:1) taken at ball 1 -
+  the perks word 0x7b2e18 / 0x7a6780 went 0 -> 0x100 and held; LE's extra ball byte 0x7ca5d0 0 -> 1; the log: the
+  bits set, "an extra ball as ball 1 begins: the game lit it", at the drain "an extra ball: the same teammate shoots
+  again", at the next "the next teammate". proof_memory_reads.txt round 6; frames proof_round6_*.png.
+- Tests: test_pad1031 (32 with 1065), the C harness in WSL (gifts 6, keep |=, eb parse), the other co-op files (91).
+- Not built: three LIGHT ALLY gifts as one power (untested), Mothra/Anguirus once-a-ball flags, the asks still open
+  (tail whips, Anguirus two balls, Mothra outlanes, trains x2, battle-drain save).

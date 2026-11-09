@@ -433,95 +433,207 @@ _MULTIBALL_SAVES = (
     ("AD_ADD_A_BALL_SAVE_TIMER", 5, 10),
 )
 
-#: (key, words the pick shows, what it does, how): how is ("adj", adjustment name, "x<pct>" | "min" | "max"),
-#: ("cache", adjustment name, "min" | ...): an adjustment the game copies into a player's record at the game's start
-#: (the port's ``coop_cache_<id>`` names the copy), ("boost", pct): the port's ``coop_boost`` call adds pct %,
-#: ("gift", adjustment name): the game's own one-shot feature at the pick (the port's ``coop_adj_changed``),
-#: ("count", name, n): a rule's count for the player raised by n at the pick (the port's ``coop_count_<name>``),
-#: ("save", seconds), ("addball", n): Action twice in regular play serves n more balls, ("yes", name): a check of the
-#: game's answers yes (the port's ``coop_yes_<name>``), or ("many", [parts]): several of the above at once
+#: Round 6 (David, 2026-11-08: "give the end user the flexibility to customize this themselves ... available in the app
+#: itself"): a character carries a list of POWERS, each one thing the runtime does, composed in the Characters dialog;
+#: the old single abilities (:data:`ABILITIES`) are bundles of them. A power is (key, group, badge words, the card's
+#: line in the player's words, what it does, how); how is ("adj", adjustment name, "x<pct>" | "x<pct>:<lo>:<hi>" |
+#: "+<n>:<lo>:<hi>" | "min" | "max"), ("cache", adjustment name, "min"): an adjustment the game copies into a player's
+#: record at the game's start (the port's ``coop_cache_<id>`` names the copy), ("boost", pct): the port's ``coop_boost``
+#: call adds pct %, ("gift", adjustment name): the game's own one-shot feature at the pick and every turn (the port's
+#: ``coop_adj_changed``), ("count", name, n) / ("set", name, n): a rule's count for the player raised by n or made n at
+#: the pick (the port's ``coop_count_<name>``), ("double", name): that count rises two at a time, ("steps", name): a
+#: rule's steps come two a shot, ("keep", name, v) / ("floor", name, v): a word of the game's held at v / at least v,
+#: ("perk", id): one of the game's own power-ups owned from the pick (Godzilla: the perks picked at the scoop, one bit
+#: each in the word the port's ``coop_keep_perks_obj`` names; the rules test their own bits), ("eb", ball): an extra
+#: ball as the character's ball n begins (the game's own award, the port's ``coop_eb_award``), ("save", seconds),
+#: ("addball", n): Action twice in regular play serves n more balls, ("spot", rules value name), ("unlock", adjustment
+#: name, rules value name or None), ("lit", name) + ("yes", name): a shot held lit / a check of the game's answering
+#: yes (the port's ``coop_lit_<name>`` / ``coop_yes_<name>``), or ("many", [hows]): all of them or none.
+_MB_SAVES = tuple((m, lo, hi) for m, lo, hi in _MULTIBALL_SAVES if m != "AD_ADD_A_BALL_SAVE_TIMER")
+_BATTLE_TIMERS = (("AD_BATTLE_VS_EBIRAH_TIMER", 80), ("AD_BATTLE_VS_TITANOSAURUS_TIMER", 80),
+                  ("AD_BATTLE_VS_GIGAN_TIMER", 80), ("AD_BATTLE_VS_MEGALON_TIMER", 80),
+                  ("AD_BATTLE_VS_KING_GHIDORAH_TIMER", 100), ("AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", 100))
+POWERS = (
+    ("ball_save_x2", "Ball save", "LONGER BALL SAVE", "Twice the ball save at the start of every ball.",
+     "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top).",
+     ("adj", "AD_BALL_SAVE_TIME", "x200")),
+    ("multiball_saves_x2", "Ball save", "LONGER MULTIBALL SAVES", "Twice the ball save in multiball modes.",
+     "Every multiball's and wizard mode's own ball save lasts twice its timer (Godzilla: 13 of them, read through the "
+     "getter as each begins).", ("many", [("adj", m, "x200:%d:%d" % (lo, 2 * hi)) for m, lo, hi in _MB_SAVES])),
+    ("addball_save_x2", "Ball save", "LONGER SAVE AFTER AN ADDED BALL",
+     "Ten seconds of ball save after every added ball, Anguirus's included.",
+     "The ball save after any added ball (Anguirus's, a multiball's add-a-ball) lasts twice its ADD A BALL SAVE "
+     "TIMER: 5 to 10 seconds.", ("adj", "AD_ADD_A_BALL_SAVE_TIMER", "x200:5:20")),
+    ("o2_x2", "Ball save", "LONGER OXYGEN DESTROYER", "Longer Oxygen Destroyer.",
+     "The Oxygen Destroyer timer runs twice its setting.", ("adj", "AD_O2_DESTROYER_TIMER", "x200:8:40")),
+    ("action_save", "Action button", "ACTION BUTTON BALL SAVE", "Press Action twice for a 10 second ball save, once a ball.",
+     "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
+    ("addball", "Action button", "ADD A BALL", "Press Action twice in regular play to add a ball, once a ball.",
+     "Two quick presses of the Action button in regular play put a second ball in play, once a ball.", ("addball", 1)),
+    ("spot", "Action button", "SPOT A BATTLE SHOT", "Press Action twice in a battle to hit its next shot, once per battle.",
+     "Two quick presses of the Action button during a battle count as its next lit shot, once in each battle they start "
+     "(every ball, every battle).", ("spot", "coop_battle_rules")),
+    ("easy_battles", "Battles", "EASIER BATTLES", "One ramp lights a battle.",
+     "The ramps light a battle as on the game's easiest LIGHT BATTLE DIFFICULTY.", ("cache", "AD_LIGHT_BATTLE_DIFFICULTY", "min")),
+    ("battle_timers_10", "Battles", "LONGER BATTLE TIMERS", "10 seconds more on battle timers.",
+     "Every battle timer gets 10 seconds more.", ("many", [("adj", m, "+10:30:%d" % hi) for m, hi in _BATTLE_TIMERS])),
+    ("tier2", "Battles", "TIER 2 ALWAYS OPEN", "Every battle is open to you, tier 2 included.",
+     "Every battle on the selection screen is open while they are up, tier 2 included (the game's UNLOCK ALL MONSTER "
+     "BATTLES reads On for them).", ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
+    ("heat_ray", "Heat ray and trains", "HEAT RAY READY, EASIER HEAT RAY",
+     "Heat ray ready at your first spin. Recharges in half the spins.",
+     "The heat ray is one spin from ready when they pick (the first spinner spin of their first ball lights HEAT RAY "
+     "READY, the game's own way) and it charges in half the spinner spins a level (HEAT RAY SPINS PER LEVEL).",
+     ("many", [("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50"), ("set", "heatlevel", 3), ("set", "heatspins", 9)])),
+    ("train_lit", "Heat ray and trains", "TRAINS ALWAYS LIT", "A train is lit at every one of your balls.",
+     "A train is lit at each of their balls (the game's own LIGHT TRAIN).", ("gift", "AD_LIGHT_TRAIN")),
+    ("building_x2", "Multiballs", "BUILDING MULTIBALL", "Building damage two steps a shot.",
+     "Every building or ramp shot takes two of the building's six stability steps (on the game's easiest BUILDING "
+     "DIFFICULTY).", ("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building")])),
+    ("mecha_x2", "Multiballs", "MECHA MULTIBALL", "Mecha spins and shield hits count twice.",
+     "Toward Mechagodzilla Multiball every spin counts twice and every shield target hit counts twice.",
+     ("many", [("double", "spins"), ("double", "shield")])),
+    ("saucer_x2", "Multiballs", "SAUCER MULTIBALL", "Pop hits count twice for an earlier Saucer Attack Multiball.",
+     "Every pop bumper hit counts twice toward Saucer Attack, so its multiball comes sooner.", ("double", "saucer")),
+    ("easy_bridge", "Multiballs", "EASIER BRIDGE", "The bridge falls faster.",
+     "The bridge falls as on the game's easiest BRIDGE ATTACK DIFFICULTY.", ("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min")),
+    ("powerups_x2", "Power-ups", "DOUBLE POWER-UPS", "Power-ups count twice.",
+     "Every Godzilla power-up the game gives counts twice.", ("boost", 200)),
+    ("rampage_x2", "Power-ups", "DOUBLE RAMPAGE", "Rampage letters count twice.",
+     "Every RAMPAGE letter collected counts as two.", ("double", "rampage")),
+    ("dj_2x", "Power-ups", "+1X JACKPOT", "Destruction Jackpot at least 2X.",
+     "The Destruction Jackpot multiplier is never below 2X for them.", ("floor", "djmult", 1)),
+    ("dj_lit", "Power-ups", "DESTRUCTION JACKPOT LIT", "Destruction Jackpot lit at every one of your balls.",
+     "The Destruction Jackpot is lit at each of their balls (the game's own LIGHT DESTRUCTION JACKPOT).",
+     ("gift", "AD_LIGHT_LIGHT_DESTRUCTION_JACKPOT")),
+    ("ally_lit", "Allies", "AN ALLY EVERY BALL", "An ally lit at every one of your balls.",
+     "An ally is lit at each of their balls: the game's next unlit one of Mothra, Rodan and Anguirus (its LIGHT ALLY), "
+     "at the pick and at every later turn.", ("gift", "AD_LIGHT_ALLY")),
+    ("rodan_x2", "Allies", "LONGER RODAN", "Rodan lasts twice as long.",
+     "Rodan's playfield multiplier runs twice its timer.", ("adj", "AD_RODAN_PLAYFIELD_MULTIPLIER_TIMER", "x200:40:120")),
+    ("hedorah", "Allies", "HEDORAH STARTS", "Hedorah starts on each of your turns.",
+     "Hedorah starts at each of their turns (the game's own START HEDORAH).", ("gift", "AD_START_HEDORAH")),
+    ("maser_lit", "Maser", "MASER LIT", "Maser lit while you are up.",
+     "The Maser cannon target is lit the whole time they are up (in regular play and for all of Tank Attack).",
+     ("many", [("lit", "maser"), ("yes", "maser")])),
+    ("magna_grab", "Maser", "MAGNA GRAB LIT", "Magna Grab lit while you are up.", "Magna Grab is kept lit.",
+     ("keep", "magna", 1)),
+    ("powerlines_x2", "Maser", "DOUBLE POWERLINES", "Powerline hits count double.",
+     "Every powerline target hit counts as two targets.", ("steps", "powerline")),
+    ("jets_4", "Tanks and jets", "STARTS WITH 4 JETS", "Starts with 4 jet fighters destroyed.",
+     "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and the bonus count them).",
+     ("count", "jets", 4)),
+    ("tanks_4", "Tanks and jets", "STARTS WITH 4 TANKS", "Starts with 4 tanks destroyed.",
+     "Four tanks count as destroyed when they pick: the city map's TANKS n/10 starts at 4.", ("count", "tanks", 4)),
+    ("tanks_x2", "Tanks and jets", "DOUBLE TANKS", "Tanks count two at a time.",
+     "Every tank destroyed counts as two.", ("double", "tanks")),
+    ("jets_x2", "Tanks and jets", "DOUBLE JETS", "Jets count two at a time.",
+     "Every jet destroyed counts as two.", ("double", "jets")),
+    ("extra_ball_3", "Extra ball", "EXTRA BALL AFTER BALL 3", "An extra ball as your ball 3 begins.",
+     "As their ball 3 begins the game awards them an extra ball, its own way (SHOOT AGAIN lit; it counts in the "
+     "game's extra ball audit and limit; off or at the limit, the game gives its consolation points instead).",
+     ("eb", 3)),
+    ("extra_ball_1", "Extra ball", "EXTRA BALL AFTER BALL 1", "An extra ball as your ball 1 begins.",
+     "As their first ball begins the game awards them an extra ball, its own way.", ("eb", 1)),
+    # the game's own power-ups (Godzilla: the perks a player picks at the scoop), owned from the pick
+    ("perk_loop_2x", "Power-up perks", "LOOP VALUE 2X", "Every loop scores double.",
+     "They own the game's LOOP VALUE 2X power-up from the pick: every loop scores double.", ("perk", 8)),
+    ("perk_loop_250k", "Power-up perks", "LOOP VALUE +250K", "Every loop scores 250K more.",
+     "They own the game's LOOP VALUE +250K power-up from the pick.", ("perk", 7)),
+    ("perk_spinner_2x", "Power-up perks", "SUPER SPINNER +2X", "Super spinner at 2X more.",
+     "They own the game's SUPER SPINNER +2X power-up from the pick.", ("perk", 22)),
+    ("perk_magna_2x", "Power-up perks", "MAGNA GRAB 2X", "Magna Grab awards double.",
+     "They own the game's MAGNA GRAB 2X power-up from the pick.", ("perk", 21)),
+    ("perk_rodan_15", "Power-up perks", "RODAN +15 SECONDS", "Every Rodan runs 15 seconds longer.",
+     "They own the game's RODAN TIMER +15 SECONDS power-up from the pick: each Rodan summon adds 15 seconds.",
+     ("perk", 20)),
+    ("perk_dj_2x", "Power-up perks", "DESTRUCTION JACKPOT +2X", "Destruction Jackpot at +2X.",
+     "They own the game's DESTRUCTION JACKPOT +2X power-up from the pick.", ("perk", 19)),
+    ("perk_dj_3s", "Power-up perks", "DESTRUCTION JACKPOT +3 SECONDS", "Three more seconds on the Destruction Jackpot.",
+     "They own the game's DESTRUCTION JACKPOT +3 SECONDS power-up from the pick.", ("perk", 18)),
+    ("perk_rage_3s", "Power-up perks", "RAGE COMBO +3 SECONDS", "Three more seconds for Rage Combos.",
+     "They own the game's RAGE COMBO +3 SECONDS power-up from the pick.", ("perk", 11)),
+    ("perk_saucer_3s", "Power-up perks", "SAUCER ATTACK +3 SECONDS", "Three more seconds in Saucer Attack.",
+     "They own the game's SAUCER ATTACK +3 SECONDS power-up from the pick.", ("perk", 10)),
+    ("perk_saucer_500k", "Power-up perks", "SAUCER VALUE +500K", "Saucer hits score 500K more.",
+     "They own the game's SAUCER VALUE +500K power-up from the pick.", ("perk", 9)),
+    ("perk_tier1_20s", "Power-up perks", "TIER 1 BATTLE TIMERS +20 SECONDS", "Twenty more seconds in tier 1 battles.",
+     "They own the game's TIER 1 BATTLE TIMERS +20 SECONDS power-up from the pick.", ("perk", 15)),
+    ("perk_tier1_bonus_5x", "Power-up perks", "TIER 1 BATTLE TIME BONUS +5X", "Tier 1 battle time bonus at 5X.",
+     "They own the game's TIER 1 BATTLE TIME BONUS +5X power-up from the pick.", ("perk", 16)),
+    ("perk_tier2_20s", "Power-up perks", "TIER 2 BATTLE TIMERS +20 SECONDS", "Twenty more seconds in tier 2 battles.",
+     "They own the game's TIER 2 BATTLE TIMERS +20 SECONDS power-up from the pick.", ("perk", 17)),
+    ("perk_skill_1x", "Power-up perks", "SKILL SHOT +1X MULTIPLIER", "Every skill shot adds another 1X.",
+     "They own the game's SKILL SHOT +1X MULTIPLIER power-up from the pick.", ("perk", 2)),
+    ("perk_rampage_1x", "Power-up perks", "MONSTER RAMPAGE +1X", "Monster Rampage at +1X.",
+     "They own the game's MONSTER RAMPAGE +1X power-up from the pick.", ("perk", 25)),
+    ("perk_jets_250k", "Power-up perks", "JET FIGHTER ATTACK +250K", "Jet Fighter Attack shots score 250K more.",
+     "They own the game's JET FIGHTER ATTACK VALUES +250K power-up from the pick.", ("perk", 24)),
+    ("perk_gzmb_250k", "Power-up perks", "GODZILLA MULTIBALL JACKPOT +250K", "Godzilla Multiball jackpots start 250K higher.",
+     "They own the game's GODZILLA MULTIBALL BASE JACKPOT +250K power-up from the pick.", ("perk", 5)),
+    ("perk_mechamb_500k", "Power-up perks", "MECHA MULTIBALL JACKPOT +500K",
+     "Mechagodzilla Multiball jackpots start 500K higher.",
+     "They own the game's MECHAGODZILLA MULTIBALL BASE JACKPOT +500K power-up from the pick.", ("perk", 6)),
+)
+#: the dialog's groups, in order
+POWER_GROUPS = ("Ball save", "Action button", "Battles", "Heat ray and trains", "Multiballs", "Power-ups", "Allies",
+                "Maser", "Tanks and jets", "Extra ball", "Power-up perks")
+#: the single abilities of rounds 1-5 (PAD-1075: DoomWalrus666's list), now bundles of powers: (key, words the pick
+#: shows, what it does, [power keys]). A character saved with one of these gets its powers; the dialog offers each as
+#: a starting point.
 ABILITIES = (
-    # PAD-1075 (DoomWalrus666's list): the battle timers went to the spot ability; the multiballs' saves came here
     ("longer_save", "LONGER BALL SAVE, LONGER TIMERS",
      "The ball save at each of their balls lasts twice the game's BALL SAVE TIME (at most its top); on Godzilla the "
      "Oxygen Destroyer timer is twice its setting and every multiball's ball save lasts twice its timer.",
-     ("some", [("adj", "AD_BALL_SAVE_TIME", "x200"), ("adj", "AD_O2_DESTROYER_TIMER", "x200:8:40")]
-      + [("adj", m, "x200:%d:%d" % (lo, 2 * hi)) for m, lo, hi in _MULTIBALL_SAVES])),
+     ["ball_save_x2", "o2_x2", "multiball_saves_x2", "addball_save_x2"]),
     ("action_save", "ACTION BUTTON BALL SAVE",
-     "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
+     "A 10 second ball save when they press the Action button twice quickly, once a ball.", ["action_save"]),
     ("heat_ray", "HEAT RAY READY, EASIER HEAT RAY, TRAINS ALWAYS LIT", "The heat ray is one spin from ready when they "
      "pick (the first spinner spin of their first ball lights HEAT RAY READY, the game's own way), it charges in half "
      "the spinner spins a level (HEAT RAY SPINS PER LEVEL), and a train is lit at each of their balls (the game's own "
-     "LIGHT TRAIN).",
-     ("some", [("many", [("adj", "AD_HEAT_RAY_SPINS_PER_LEVEL", "x50"), ("set", "heatlevel", 3),
-                         ("set", "heatspins", 9)]),
-               ("gift", "AD_LIGHT_TRAIN")])),
+     "LIGHT TRAIN).", ["heat_ray", "train_lit"]),
     ("battles", "EASIER BATTLES", "The ramps light a battle as on the game's easiest LIGHT BATTLE DIFFICULTY.",
-     ("cache", "AD_LIGHT_BATTLE_DIFFICULTY", "min")),
-    # PAD-1075: DoomWalrus666 moved the double pop hits to the Maser ability (here they were a third double:, past the
-    # runtime's two a character, so never held)
+     ["easy_battles"]),
     ("building", "BUILDING AND MECHA MULTIBALLS", "Every building or ramp shot takes two of the building's six "
      "stability steps (on the game's easiest BUILDING DIFFICULTY), and toward Mechagodzilla Multiball every spin "
-     "counts twice and every shield target hit counts twice.",
-     ("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
-               ("double", "shield")])),
+     "counts twice and every shield target hit counts twice.", ["building_x2", "mecha_x2"]),
     ("powerups", "DOUBLE POWER-UPS, SAUCER, RAMPAGE, +1X JACKPOT", "Every Godzilla power-up the game gives counts "
      "twice, every hit on the saucer (the pop bumper) counts twice toward Saucer Attack, every RAMPAGE letter collected "
      "counts as two, and the Destruction Jackpot multiplier is never below 2X for them.",
-     ("some", [("boost", 200), ("double", "saucer"), ("double", "rampage"), ("floor", "djmult", 1)])),
-    ("ally", "AN ALLY EVERY BALL, LONGER RODAN, HEDORAH STARTS", ("An ally is lit at each of their balls: the next "
-      "of Mothra, Rodan and Anguirus in the game's own order (its LIGHT ALLY), at the pick and at every later turn; "
-      "Rodan's playfield multiplier runs twice its timer; and Hedorah starts at each of their turns (the game's own "
-      "START HEDORAH)."),
-     ("some", [("gift", "AD_LIGHT_ALLY"), ("adj", "AD_RODAN_PLAYFIELD_MULTIPLIER_TIMER", "x200:40:120"),
-               ("gift", "AD_START_HEDORAH")])),
+     ["powerups_x2", "saucer_x2", "rampage_x2", "dj_2x"]),
+    ("ally", "AN ALLY EVERY BALL, LONGER RODAN, HEDORAH STARTS", "An ally is lit at each of their balls: the game's "
+     "next unlit one of Mothra, Rodan and Anguirus (its LIGHT ALLY), at the pick and at every later turn; Rodan's "
+     "playfield multiplier runs twice its timer; Hedorah starts at each of their turns (the game's own START HEDORAH); "
+     "and the ball save after an added ball, Anguirus's included, lasts twice its timer (round 6).",
+     ["ally_lit", "rodan_x2", "hedorah", "addball_save_x2"]),
     ("jets", "STARTS WITH 4 JETS", "Four jet fighters count as destroyed when they pick (JET FIGHTER CHAMPION and "
-     "the bonus count them).", ("count", "jets", 4)),
+     "the bonus count them).", ["jets_4"]),
     ("spot", "SPOT A BATTLE SHOT, LONGER BATTLE TIMERS", "Two quick presses of the Action button during a battle "
      "count as its next lit shot, once in each battle they start (every ball, every battle); on Godzilla every battle "
-     "timer gets 10 seconds more.",
-     ("some", [("spot", "coop_battle_rules"),
-               ("adj", "AD_BATTLE_VS_EBIRAH_TIMER", "+10:30:80"), ("adj", "AD_BATTLE_VS_TITANOSAURUS_TIMER", "+10:30:80"),
-               ("adj", "AD_BATTLE_VS_GIGAN_TIMER", "+10:30:80"), ("adj", "AD_BATTLE_VS_MEGALON_TIMER", "+10:30:80"),
-               ("adj", "AD_BATTLE_VS_KING_GHIDORAH_TIMER", "+10:30:100"),
-               ("adj", "AD_BATTLE_VS_GHIDORAH_AND_GIGAN_TIMER", "+10:30:100")])),
+     "timer gets 10 seconds more.", ["spot", "battle_timers_10"]),
     ("tier2", "TIER 2 ALWAYS OPEN", "Every battle on the selection screen is open while they are up, tier 2 included "
-     "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).",
-     ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
+     "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).", ["tier2"]),
     ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
-     "once a ball.", ("addball", 1)),
+     "once a ball.", ["addball"]),
     ("maser", "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES AND POP HITS", "The Maser cannon "
      "target is lit the whole time they are up (in regular play and for all of Tank Attack), Magna Grab is kept lit, "
      "every powerline target hit counts as two targets, every pop bumper hit counts twice toward Saucer Attack, and "
      "the Destruction Jackpot is lit at each of their balls (the game's own LIGHT DESTRUCTION JACKPOT).",
-     ("some", [("many", [("lit", "maser"), ("yes", "maser")]), ("keep", "magna", 1), ("steps", "powerline"),
-               ("double", "saucer"), ("gift", "AD_LIGHT_LIGHT_DESTRUCTION_JACKPOT")])),
+     ["maser_lit", "magna_grab", "powerlines_x2", "saucer_x2", "dj_lit"]),
     ("bridge", "EASIER BRIDGE, DOUBLE TANKS AND JETS", "The bridge falls as on the game's easiest BRIDGE ATTACK "
-     "DIFFICULTY, and every tank or jet destroyed counts as two.",
-     ("many", [("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min"), ("double", "tanks"), ("double", "jets")])),
+     "DIFFICULTY, and every tank or jet destroyed counts as two.", ["easy_bridge", "tanks_x2", "jets_x2"]),
     ("tanks", "STARTS WITH 4 TANKS", "Four tanks count as destroyed when they pick: the city map's TANKS n/10 starts "
-     "at 4.", ("count", "tanks", 4)),
+     "at 4.", ["tanks_4"]),
 )
-#: what the pick's card says each ability does, in the player's words
-CARD_LINES = {
-    "longer_save": "Twice the ball save at the start of every ball. Longer Oxygen Destroyer. Twice the ball save in "
-                   "multiball modes.",
-    "action_save": "Press Action twice for a 10 second ball save, once a ball.",
-    "heat_ray": "Heat ray ready at your first spin. Recharges in half the spins. A train is lit at every one of your "
-                "balls.",
-    "battles": "One ramp lights a battle.",
-    "building": "Building damage two steps a shot. Mecha spins and shield hits count twice.",
-    "powerups": "Power-ups, saucer hits and rampage letters count twice. Destruction Jackpot at least 2X.",
-    "ally": "An ally lit at every one of your balls. Rodan lasts twice as long. Hedorah starts on each of your turns.",
-    "jets": "Starts with 4 jet fighters destroyed.",
-    "tanks": "Starts with 4 tanks destroyed.",
-    "spot": "Press Action twice in a battle to hit its next shot, once per battle. 10 seconds more on battle timers.",
-    "tier2": "Every battle is open to you, tier 2 included.",
-    "addball": "Press Action twice in regular play to add a ball, once a ball.",
-    "maser": "Maser and Magna Grab lit while you are up. Powerline and pop hits count double. Destruction Jackpot "
-             "lit at every one of your balls.",
-    "bridge": "The bridge falls faster. Tanks and jets count two at a time.",
-}
+_POWER = {p[0]: p for p in POWERS}
+#: what the pick's card says each bundle does, in the player's words: its powers' lines
+CARD_LINES = {key: " ".join(_POWER[k][3] for k in keys) for key, _w, _d, keys in ABILITIES}
+#: the most parts of each kind one character takes (the runtime's coop_char_line: COOP_CHAR_ADJ, COOP_GIFTS,
+#: COOP_CH_N for count/keep/steps/lit/yes, COOP_CH_DBL) and the longest abilities text (its tok[])
+LIMITS = {"adj": 24, "gift": 6, "count": 4, "keep": 4, "steps": 4, "lit": 4, "yes": 4, "double": 6}
+MAX_CFG = 767
+#: the longest badge the card shows (PAD-1075: a long one shrinks and takes three lines)
+MAX_HEADER = 96
 
 #: why an ability is not offered on a card
 NO_ADJ = "%s's game program has no %s setting."
@@ -572,11 +684,123 @@ def abilities(game_elf, label="This game", sites=(), values=None):
     except (ValueError, struct.error, IndexError):
         table = None
     action = action_button(game_elf)
+    parts = {p["key"]: p for p in powers(game_elf, label, sites, values, table=table, action=action)}
     out = []
-    for key, words, does, how in ABILITIES:
-        cfg, why = _ability_part(how, table, action, sites, values, label)
-        out.append({"key": key, "words": words, "does": does, "cfg": cfg, "why": why})
+    for key, words, does, keys in ABILITIES:
+        got = compose(keys, parts)
+        out.append({"key": key, "words": words, "does": does, "cfg": got["cfg"], "why": got["why"],
+                    "powers": list(keys)})
     return out
+
+
+def powers(game_elf, label="This game", sites=(), values=None, table=None, action=None):
+    """Round 6: every power, as the card *game_elf* (bytes) can have it: ``[{"key", "group", "words", "line", "does",
+    "cfg", "why"}]``; ``cfg`` the runtime's text for it (a perk's is ``perk:0x<bit>``, folded by :func:`compose`),
+    ``""`` with ``why`` when the card cannot have it. *sites* / *values* as for :func:`abilities`."""
+    sites = set(sites or ())
+    values = dict(values or {})
+    if table is None:
+        from .adjustments import AdjustmentTable
+        try:
+            table = AdjustmentTable(bytes(game_elf))
+        except (ValueError, struct.error, IndexError):
+            table = None
+    if action is None:
+        action = action_button(game_elf)
+    out = []
+    for key, group, words, line, does, how in POWERS:
+        cfg, why = _ability_part(how, table, action, sites, values, label)
+        out.append({"key": key, "group": group, "words": words, "line": line, "does": does, "cfg": cfg, "why": why})
+    return out
+
+
+def compose(keys, parts):
+    """Round 6: a character's powers *keys* (in order) as one ability for the runtime, from *parts* (:func:`powers`'
+    entries by key): ``{"cfg", "words", "line", "missing", "over", "why"}``. ``cfg`` is the tokens of the powers the
+    card has, each once, the perks folded into one ``keep:perks|=<mask>``; ``words`` the badge (their words, comma
+    separated) and ``line`` the card's line (their lines) for those; ``missing`` the keys the card cannot have (and
+    ``why`` the first one's reason, when the FIRST power is missing: none of the ability then, as a bundle's core);
+    ``over`` the kinds past :data:`LIMITS` (the runtime drops the rest of that kind without a word)."""
+    toks, words, lines, missing, why, perks = [], [], [], [], "", 0
+    for i, k in enumerate(keys):
+        p = parts.get(k)
+        if not p or not p["cfg"]:
+            missing.append(k)
+            if i == 0:
+                why = (p or {}).get("why") or NO_POWER % k
+            continue
+        for tok in p["cfg"].split(","):
+            if tok.startswith("perk:"):
+                perks |= int(tok[5:], 0)
+            elif tok not in toks:
+                toks.append(tok)
+        words.append(p["words"])
+        lines.append(p["line"])
+    if perks:
+        toks.append("keep:perks|=0x%x" % perks)
+    if why:
+        toks, words, lines = [], [], []
+    cfg = ",".join(toks)
+    counts = {}
+    for tok in toks:
+        kind = tok.split(":")[0]
+        counts[kind] = counts.get(kind, 0) + 1
+    over = sorted(k for k, n in counts.items() if n > LIMITS.get(k, 99))
+    if len(cfg) > MAX_CFG:
+        over.append("length")
+    return {"cfg": cfg, "words": ", ".join(words), "line": " ".join(lines), "missing": missing, "over": over, "why": why}
+
+
+#: why a power named in a file is not one
+NO_POWER = "There is no power called %s."
+#: round 6: a bundle's powers by its key
+ABILITY_POWERS = {key: list(keys) for key, _w, _d, keys in ABILITIES}
+
+
+def _powers_of(got):
+    """A saved character's powers: its ``powers`` list (the keys known, each once, in order), or its old single
+    ``ability``'s bundle."""
+    if isinstance(got.get("powers"), list):
+        out = []
+        for k in got["powers"]:
+            k = str(k)
+            if k in _POWER and k not in out:
+                out.append(k)
+        return out
+    return list(ABILITY_POWERS.get(str(got.get("ability") or ""), []))
+
+
+def bundle_of(keys):
+    """The bundle key whose powers are exactly *keys*, or ``""``."""
+    for key, _w, _d, want in ABILITIES:
+        if list(want) == list(keys):
+            return key
+    return ""
+
+
+def clean_header(header):
+    """A character's own badge words (round 6: in place of its powers' words): capitals, one space between words, no
+    ``|``, at most :data:`MAX_HEADER`."""
+    return " ".join(str(header or "").upper().replace("|", " ").split())[:MAX_HEADER]
+
+
+def character_words(character, words_for=None):
+    """The badge the pick's card shows for *character*: its own header, or its powers' words (*words_for*: key ->
+    words, :func:`words_for`; a power not in it is left out)."""
+    if character.get("header"):
+        return character["header"]
+    wf = words_for if words_for is not None else {p[0]: p[2] for p in POWERS}
+    keys = [k for k in character.get("powers") or [] if k in wf]
+    bundle = bundle_of(keys)                                # exactly one of the old abilities: its shorter badge
+    if bundle:
+        return dict((a[0], a[1]) for a in ABILITIES)[bundle]
+    return ", ".join(wf[k] for k in keys)
+
+
+def character_line(character, words_for=None):
+    """The card's line for *character*: its powers' lines in the player's words (the powers in *words_for*)."""
+    wf = words_for if words_for is not None else {p[0]: p[2] for p in POWERS}
+    return " ".join(_POWER[k][3] for k in character.get("powers") or [] if k in wf and k in _POWER)
 
 
 def _ability_part(how, table, action, sites, values, label):
@@ -624,6 +848,10 @@ def _ability_part(how, table, action, sites, values, label):
         elif how[0] in ("keep", "floor"):
             cfg, why = (("keep:%s%s=%d" % (how[1], ">" if how[0] == "floor" else "", how[2]), "")
                         if "coop_keep_%s_obj" % how[1] in values else ("", NO_SITE % label))
+        elif how[0] == "perk":                                  # round 6: compose() folds the perks into one keep:perks|=
+            cfg, why = (("perk:0x%x" % (1 << how[1]), "") if "coop_keep_perks_obj" in values else ("", NO_SITE % label))
+        elif how[0] == "eb":
+            cfg, why = ("eb:%d" % how[1], "") if "coop_eb_award" in sites else ("", NO_SITE % label)
         else:
             idx = table.by_name.get(how[1]) if table is not None else None
             if idx is None:
@@ -694,8 +922,10 @@ def _characters(got):
     out = []
     for c in got.get("list") or []:
         if isinstance(c, dict) and clean_name(c.get("name")):
+            keys = _powers_of(c)                            # round 6: a list of powers (an old ability: its bundle)
             out.append({"name": clean_name(c.get("name")), "sub": clean_sub(c.get("sub")),
-                        "ability": str(c.get("ability") or ""),
+                        "powers": keys, "header": clean_header(c.get("header")),
+                        "ability": bundle_of(keys),         # the bundle these are, for the dialog's starting points
                         "picture": str(c.get("picture") or "")})
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
@@ -727,7 +957,8 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
     chars = _characters(characters)
     if not chars["pick"] or not chars["list"]:
         return []
-    by_key = {a["key"]: a for a in abilities(game_elf, sites=sites, values=values)}
+    parts = {p["key"]: p for p in powers(game_elf, sites=sites, values=values)}
+    wf = {k: p["words"] for k, p in parts.items() if p["cfg"]}
     out = ["pick on", "pick_time %d" % chars["time"]]
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) == 2:
@@ -739,8 +970,9 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
         if lane is not None:
             out.append("lane %d" % lane)
     for c in chars["list"]:
-        a = by_key.get(c["ability"]) or {}
-        out.append("character %s %s|%s" % (a.get("cfg") or "-", c["name"], a["words"] if a.get("cfg") else ""))
+        got = compose(c["powers"], parts)
+        out.append("character %s %s|%s" % (got["cfg"] or "-", c["name"],
+                                           character_words(c, wf) if got["cfg"] else ""))
     return out
 
 
@@ -773,6 +1005,19 @@ def read_preset(path):
 def project_abilities(project):
     """``(why, abilities)`` for the Modes tab: :func:`abilities` read off the project's card's game program, cached per
     card; ``why`` says why there are none ("" when there are)."""
+    why, got = _project_catalog(project)
+    return why, got.get("abilities", [])
+
+
+def project_powers(project):
+    """Round 6: ``(why, powers)`` for the Characters dialog: :func:`powers` read off the project's card's game program
+    (cached with the abilities)."""
+    why, got = _project_catalog(project)
+    return why, got.get("powers", [])
+
+
+def _project_catalog(project):
+    """``(why, {"abilities", "powers"})`` read off the project's card, cached per card and catalog version."""
     import hashlib
     import json
     import os
@@ -781,35 +1026,38 @@ def project_abilities(project):
     got = MP.project_card(project) if project else None
     card = getattr(got, "image", "") if got is not None else ""
     if not card or not os.path.isfile(card):
-        return NO_CARD_CHARS, []
+        return NO_CARD_CHARS, {}
     prof = project_title(project)
     key = "%s|%d|%d|%s" % (card, os.path.getsize(card), int(os.path.getmtime(card)), ",".join(port_sites(prof)))
     cache = os.path.join(TR.cache_dir("coop_abilities"), hashlib.sha1(key.encode("utf-8")).hexdigest() + ".json")
     try:
         with open(cache, encoding="utf-8") as f:
             raw = json.load(f)
-        if raw.get("key") == key and raw.get("v") == _abilities_v():
-            return "", raw["abilities"]
+        if raw.get("key") == key and raw.get("v") == _abilities_v() and "powers" in raw:
+            return "", {"abilities": raw["abilities"], "powers": raw["powers"]}
     except (OSError, ValueError, KeyError, TypeError):
         pass
     prof = project_title(project)
     try:
-        got = abilities(TR.game_program(card)[2], prof.label if prof is not None else "This game", port_sites(prof),
-                        port_values(prof))
+        elf = TR.game_program(card)[2]
+        label = prof.label if prof is not None else "This game"
+        out = {"abilities": abilities(elf, label, port_sites(prof), port_values(prof)),
+               "powers": powers(elf, label, port_sites(prof), port_values(prof))}
     except Exception as e:                              # noqa: BLE001 - an unreadable card: say so
-        return "The game program could not be read from the card: %s" % e, []
+        return "The game program could not be read from the card: %s" % e, {}
     try:
         with open(cache, "w", encoding="utf-8") as f:
-            json.dump({"v": _abilities_v(), "key": key, "abilities": got}, f)
+            json.dump(dict(out, v=_abilities_v(), key=key), f)
     except OSError:
         pass
-    return "", got
+    return "", out
 
 
 def _abilities_v():
-    """The abilities cache's version: the catalog itself, so a changed word reads the card again."""
+    """The abilities cache's version: the catalog itself (round 6: the powers too), so a changed word reads the card
+    again."""
     import hashlib
-    return hashlib.sha1(repr(ABILITIES).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1((repr(ABILITIES) + repr(POWERS)).encode("utf-8")).hexdigest()[:12]
 
 
 def port_values(prof):
@@ -877,9 +1125,13 @@ def picture_path(project, character):
     return path if os.path.isfile(path) else ""
 
 
-def words_for():
-    """``{ability key: the words the pick shows for it}``."""
-    return {a[0]: a[1] for a in ABILITIES}
+def words_for(project=None):
+    """``{power key: the words the pick shows for it}`` - round 6: every power's, or with *project* only the powers
+    its card has (a power the game cannot have is not on the card)."""
+    if project is None:
+        return {p[0]: p[2] for p in POWERS}
+    _why, got = project_powers(project)
+    return {p["key"]: p["words"] for p in got if p["cfg"]}
 
 
 def wants_screens(project, prof):
@@ -927,10 +1179,10 @@ def classic_patch(project, characters, index, words_for=None, theme=None):
     or None when the character has no ability (its card says so already)."""
     import numpy as np
     chars = _characters(characters)
-    if not chars["list"][index]["ability"]:
+    if not chars["list"][index]["powers"]:                  # round 6: a list of powers (none: the card says so)
         return None
     full = pick_card(project, chars, index, words_for, theme)
-    plain = pick_card(project, dict(chars, list=[dict(c, ability="") if k == index else c
+    plain = pick_card(project, dict(chars, list=[dict(c, powers=[], header="") if k == index else c
                                                  for k, c in enumerate(chars["list"])]), index, words_for, theme)
     ys, xs = np.nonzero(np.any(full != plain, axis=2))
     if not len(xs):
@@ -1286,9 +1538,8 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     if rnd:
         label, does = "A SURPRISE", "The machine picks one of the characters nobody has taken yet."
     else:
-        label = (words_for or {}).get(c["ability"], "") if c["ability"] else ""
-        label = label or "NO SPECIAL ABILITY"
-        does = CARD_LINES.get(c["ability"], "") if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
+        label = character_words(c, words_for) or "NO SPECIAL ABILITY"      # round 6: its powers' words, or its own
+        does = character_line(c, words_for) if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
     bf = _fit(d, label, _TEXT_FONTS, iw - 40 * S, 24 * S, 14 * S)     # PAD-1075: a long badge shrinks to the card
     bw = d.textlength(label, font=bf) + 40 * S
     by = (222 if sub else 208) * S

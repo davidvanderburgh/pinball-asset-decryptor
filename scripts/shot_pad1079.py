@@ -23,7 +23,7 @@ import webui_shot  # noqa: E402
 
 CARD = r"D:\Pinball\images\Stern\spike2\godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
 LOOK = {"title": "PICK YOUR KAIJU", "accent": "#e0201c", "accent2": "#ffd400", "name": "#ffd400",
-        "does": "#a8ffb0", "help": "#ffd400", "dim": 50}
+        "does": "#a8ffb0", "help": "#ffd400", "dim": 60}
 LAUNCHER = r'''
 import sys
 sys.path.insert(0, %r)
@@ -86,7 +86,7 @@ def main():
                     webui_shot.api(url, "modes.coop_chars_look", key, value)
                 if backdrop:
                     CP.save_backdrop(project, backdrop)
-                webui_shot.api(url, "modes.coop_char_colour", 0, "#7a3cff")
+                webui_shot.api(url, "modes.coop_char_colour", 1, "#7a3cff")
                 page.get_by_role("button", name="Look…").dispatch_event("click")
                 time.sleep(1)
             webui_shot.api(url, "modes.coop_chars_show", 0)

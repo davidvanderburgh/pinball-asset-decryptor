@@ -179,7 +179,9 @@ def test_the_dialog_sets_the_look(tmp_path, monkeypatch):
     assert not svc.coop_chars_look("name", "gold") and "not a colour" in said[-1]
     look = state["coop_ch"]["look"]
     name = next(c for c in look["colours"] if c["key"] == "name")
-    assert name == {"key": "name", "label": "Name", "value": "#ffd400", "own": True, "follows": False}
+    assert name == {"key": "name", "label": "Name", "value": "#ffd400", "own": True, "follows": False, "hint": ""}
+    panel = next(c for c in look["colours"] if c["key"] == "panel")
+    assert panel["value"] == CP.PANEL_STOCK and "stock" in panel["hint"]      # not the frame's: the stock wash
     sub = next(c for c in look["colours"] if c["key"] == "sub")
     assert sub["follows"] and sub["value"] == CP.THEME["accent"]           # the frame's colour, shown as it draws
     _png(tmp_path / "bg.png", (0, 0, 250))

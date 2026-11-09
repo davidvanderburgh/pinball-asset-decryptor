@@ -906,8 +906,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import coop_play as _CP
         th = _CP.theme_of(chars.get("theme"))
         own = chars.get("theme") or {}
-        colours = [{"key": k, "label": label, "value": th[k] or th["accent"], "own": bool(own.get(k)),
-                    "follows": not th[k]} for k, label in _CP.COLOUR_ROLES]
+        colours = [{"key": k, "label": label, "value": th[k] or (_CP.PANEL_STOCK if k == "panel" else th["accent"]),
+                    "own": bool(own.get(k)), "follows": not th[k],
+                    "hint": ("the stock dark panel until you pick one" if k == "panel"
+                             else "the frame's colour until you pick one") if not th[k] else ""}
+                   for k, label in _CP.COLOUR_ROLES]
         return {"title": th["title"], "colours": colours, "backdrop": bool(_CP.backdrop_path(project, th)),
                 "dim": th["dim"], "dims": list(_CP.DIMS)}
 

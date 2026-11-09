@@ -264,7 +264,7 @@ function CoopLook({ look }) {
     </div>
     <div class="modes-coop-look-grid">
       ${look.colours.map((c) => html`<span class="modes-coop-look-c" key=${c.key}>
-        <${Well} value=${c.value} title=${`${c.label}${c.follows ? ": the frame's colour until you pick one" : ""}`}
+        <${Well} value=${c.value} title=${`${c.label}${c.hint ? `: ${c.hint}` : ""}`}
           onPick=${(v) => call("modes.coop_chars_look", c.key, v)} />
         <span class="small">${c.label}</span>
         ${c.own ? html`<${Button} size="xs" kind="ghost" icon="x" title="Its default colour again."

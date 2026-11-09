@@ -1374,6 +1374,8 @@ COLOUR_ROLES = (("accent", "Frame and lights"), ("accent2", "Corners and arrows"
                 ("count", "Count (01 / 11)"), ("name", "Name"), ("sub", "Sub header"), ("badge", "Ability badge"),
                 ("badge_text", "Badge words"), ("does", "What it does"), ("help", "How to choose"),
                 ("panel", "Panel"))
+#: the stock panel's colour as the Look shows it (the wash runs either side of it)
+PANEL_STOCK = "#141420"
 #: the background picture's darkening choices, percent
 DIMS = (0, 20, 40, 60, 80)
 #: the background picture's file in the project's PICTURE_DIR (its extension the source's)

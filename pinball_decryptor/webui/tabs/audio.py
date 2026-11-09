@@ -478,7 +478,8 @@ class AudioTab(FindOriginalsMixin, TabService):
     def _blank_pane(base, hint=""):
         return {"base": base, "name": "", "path": None, "dur": 0.0,
                 "limit": None, "grow_from": None, "gain": 0.0,
-                "hint": hint, "spec": None, "spec_state": "", "v": 0}
+                "hint": hint, "spec": None, "spec_state": "", "v": 0,
+                "rel": None}
 
     def _assets_var(self):
         return getattr(self.window, "write_assets_var", None)
@@ -1876,10 +1877,13 @@ class AudioTab(FindOriginalsMixin, TabService):
         self.set(panes=dict(self._panes))
 
     def _pane_load(self, side, path, dur=0.0, limit_fn=None, autoplay=False,
-                   label=None, gain_db=0.0, base=None):
+                   label=None, gain_db=0.0, base=None, rel=None):
         """Load *path* into pane *side*: the page's player gets the file at
         once; its length (ffprobe), the trim / grow marks and the strip
-        picture come from a worker and land when ready."""
+        picture come from a worker and land when ready.  *rel* names the
+        row whose own sound this is (PAD-1074: that row's play button turns
+        into a stop button while it plays); a mode's file, a jukebox song or
+        a picked file leaves it None."""
         self._pane_ids[side] += 1
         lid = self._pane_ids[side]
         pane = self._panes[side]
@@ -1893,7 +1897,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             "grow_from": None, "gain": float(gain_db or 0.0), "hint": "",
             "spec": None,
             "spec_state": "rendering" if have_ffmpeg else "noffmpeg",
-            "v": v}
+            "v": v, "rel": rel}
         self._pane_publish(side)
         if autoplay:
             self._publish("audio_play", pane=side, path=path, pos=0.0, v=v)
@@ -1997,7 +2001,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         if opath and os.path.isfile(opath):
             self._pane_load("orig", opath,
                             slot.duration if not snap_used else 0.0,
-                            autoplay=(autoplay == "orig"), base=base)
+                            autoplay=(autoplay == "orig"), base=base,
+                            rel=rel)
         else:
             self._pane_clear("orig", base=base)
         self._load_rep_pane(rel, autoplay=(autoplay == "rep"))
@@ -2027,7 +2032,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                     self._compute_preview_limit(r, d),
                     self._preview_grow_from(r, d)),
                 autoplay=autoplay, gain_db=self._level.get(rel, 0),
-                base="Replacement")
+                base="Replacement", rel=rel)
             return
         if rel and staged_originals.snapshot_path(self._scan_dir, rel):
             slot = self._by_rel.get(rel)
@@ -2037,7 +2042,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                     "rep", cur, slot.duration, autoplay=autoplay,
                     label=self._remembered_rep_name(rel) or None,
                     gain_db=self._level.get(rel, 0),
-                    base="Replacement (your file)")
+                    base="Replacement (your file)", rel=rel)
                 return
         self._pane_clear("rep", self._rep_pane_empty_text(
             rel, "no replacement assigned"), base="Replacement")

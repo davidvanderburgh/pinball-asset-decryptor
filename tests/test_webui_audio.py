@@ -535,6 +535,31 @@ def test_sequential_play_steps_down_the_list(tmp_path):
         assert w.window.service("audio").audio_play_through_var.get()
 
 
+def test_panes_name_the_row_they_hold(tmp_path):
+    """PAD-1074: each pane says which row's sound it holds, so that row's
+    own ▶ can turn into ■ while it plays; another file in the pane (a
+    mode's file, a jukebox song) names no row."""
+    folder = _project(tmp_path)
+    one, two = "audio/idx0001 - Jackpot.wav", "audio/idx0002.wav"
+    rep = str(tmp_path / "a.wav")
+    _wav(rep)
+    with web_app(tmp_path, mfr="ap") as w:
+        _open(w, folder)
+        panes = lambda: w.state("audio")["panes"]               # noqa: E731
+        assert panes()["orig"]["rel"] is None and panes()["rep"]["rel"] is None
+        w.call("audio.play_row", one)
+        assert _wait(w, lambda: panes()["orig"]["rel"] == one)
+        assert panes()["rep"]["rel"] is None      # nothing in it to play
+        w.answers.append(rep)
+        assert w.call("audio.choose", two) is True
+        w.call("audio.play_row", two)
+        assert _wait(w, lambda: panes()["rep"]["path"] == rep)
+        assert panes()["orig"]["rel"] == two and panes()["rep"]["rel"] == two
+        svc = _svc(w)
+        w.run(lambda: svc._pane_load("rep", rep, autoplay=False, label="Mode 1"))
+        assert _wait(w, lambda: panes()["rep"]["rel"] is None)
+
+
 def test_previous_next_step_through_the_shown_list(tmp_path):
     """PAD-701: a pane's ⏮ / ⏭ play the row above / below, in the list as
     the filters show it, and the Replacement pane's play replacements."""
@@ -920,8 +945,7 @@ def test_row_controls_never_fire_the_row_double_click():
     through the core Table."""
     src = open(_AUDIO_JS, encoding="utf-8").read()
     for cls in ("aud-rowplay", "aud-flag", "aud-rep"):
-        start = src.index('class="%s"' % cls if cls == "aud-rowplay"
-                          else '"%s"' % cls)
+        start = src.index('"%s"' % cls)
         tag = src[start:src.index("</button>", start)]
         assert "onDblClick=${noDbl}" in tag, cls
         assert "onClick=${once(" in tag, cls

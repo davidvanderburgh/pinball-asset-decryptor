@@ -450,6 +450,18 @@ function RowPlay({ path, title, onPlay }) {
     onClick=${() => { if (on) { stopPlayer(p); call("audio.stop"); } else onPlay(); }} />`;
 }
 
+// PAD-1074: the list's own ▶ turns into ■ while that row's sound plays in either pane (the pane
+// says which row it holds), and stops it as the pane's ■ does; a mode's file or a jukebox song
+// playing in the pane names no row, so every row keeps its ▶ then
+function TrackPlay({ r, panes, onPlay }) {
+  const po = usePlayer("orig"), pr = usePlayer("rep");
+  const live = (p, pane) => !!pane && pane.rel === r.k && !!p.path && p.path === pane.path && (p.playing || p.want);
+  const p = live(po, panes.orig) ? po : live(pr, panes.rep) ? pr : null;
+  const label = p ? "Stop" : "Play";
+  return html`<button type="button" class=${"aud-rowplay" + (p ? " on" : "")} aria-label=${label} ...${tip(label)} onDblClick=${noDbl}
+    onClick=${once(() => { if (p) { stopAll(); seekTo(p, 0); call("audio.stop"); } else onPlay(); })}><${Icon} name=${p ? "stop" : "play"} /></button>`;
+}
+
 // PAD-998: ▶ / ■ that plays a file right where it is, on a page with no Replacement pane (the Attract
 // page's flipper sounds: their ▶ played into the Audio tab's pane, which isn't mounted there, so it
 // played nothing): a player of its own, never one of the panes
@@ -869,8 +881,8 @@ export default function AudioTab() {
     { key: "play", label: "", width: FIXED.play + "px", cls: "aud-pc",
       render: (r) => r.g
         ? html`<span class="aud-caret"><${Icon} name=${r.open ? "down" : "right"} /></span>`
-        : html`<button type="button" class="aud-rowplay" aria-label="Play" ...${tip("Play")} onDblClick=${noDbl}
-            onClick=${once(() => { cursor.current = r.k; anchor.current = r.k; sentSel.current = JSON.stringify([r.k]); setSel([r.k]); call("audio.play_row", r.k); })}><${Icon} name="play" /></button>` },
+        : html`<${TrackPlay} r=${r} panes=${panes}
+            onPlay=${() => { cursor.current = r.k; anchor.current = r.k; sentSel.current = JSON.stringify([r.k]); setSel([r.k]); call("audio.play_row", r.k); }} />` },
     { key: "#0", label: "Original Track", sort: "#0", width: name0, titleOf: (r) => r.g ? r.label : r.k,
       render: (r) => html`<${NameCell} r=${r} prefix=${s.prefix} />` },
     { key: "len", label: "Length", sort: "len", width: FIXED.len + "px", num: true, render: (r) => r.len },

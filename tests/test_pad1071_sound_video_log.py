@@ -266,7 +266,10 @@ def test_the_runtime_arms_the_sound_log_right_after_the_port_gate_and_stops_ther
     assert "sound_key_say" in first and "worker_log" in first          # before any swap re-points r[1]
     assert "hook(fn(\"sound_lookup\"), on_sound_lookup)" in arm
     say = src[src.index("static void sound_key_say("):src.index("static void on_sound_worker(")]
-    assert "pm_ms() - sound_last > SOUND_KEY_MS" in say               # not the bank's index lookups at boot
+    assert "!sound_last" in say                                        # not the bank's index lookups at boot
+    # round 4: a later lookup (a song's next part) is "sound next", at most SOUND_NEXT_MAX a second
+    assert "later = now - sound_last > SOUND_KEY_MS" in say and '"next" : "key"' in say
+    assert "++next_n > SOUND_NEXT_MAX" in say
 
 
 def test_every_boot_asks_soundlog_sh_after_the_cards_modes_and_the_launch_carries_its_variables():
@@ -472,3 +475,76 @@ def test_open_brings_the_windows_forward_without_restoring_them():
         def restore(self):
             raise AssertionError("restore() un-maximizes the window")
     assert ELW.to_front(Win()) is True and shown == [1]
+
+
+# ---- round 4: a song in parts lists every part it plays ---------------------------------------------------
+def _maiden(tmp_path):
+    """Iron Maiden Pro 1.18's song select: RUN (552) = opening idx 775 then parts 882, 887; ICARUS (564) =
+    445 then 149; GAME START (367) one of several. Keys as the emulator saw them."""
+    p = tmp_path / "maiden"
+    (p / "audio").mkdir(parents=True)
+    (p / "sound_requests.tsv").write_text(
+        "request\tidx\tsids\tname\talso\n552\t775\t1\tMUSIC: RUN\t882,887\n564\t445\t2\tMUSIC: ICARUS\t149\n"
+        "367\t300,547\t3,4\tSPEECH: GAME START\t\n", encoding="utf-8")
+    for i, secs in ((775, 7.5), (882, 180.0), (887, 30.0), (445, 0.6), (149, 300.0), (300, 1.0), (547, 1.0)):
+        _wav(str(p / "audio" / ("idx%04d.wav" % i)), secs, rate=200)
+    (p / "sound_keys.tsv").write_text(
+        "775\ta9bcd9e70f0000c6\n882\ta71f1921050080e5\n887\t00000000000000c7\n445\t1111111111111111\n"
+        "149\t2222222222222222\n300\t3333333333333333\n547\t4444444444444444\n", encoding="utf-8")
+    return str(p)
+
+
+def test_a_song_in_parts_lists_each_part_as_it_starts(tmp_path):
+    ctl = str(tmp_path / "ctl")
+    _run(ctl, sounds=[{"log": "keys", "t": 60.0},
+                      {"request": 552, "n": 0, "t": 68.336}, {"key": "a9bcd9e70f0000c6", "t": 68.338},
+                      {"next": "a71f1921050080e5", "t": 75.886},           # the emulator: 7.55 s later
+                      {"next": "00000000000000c7", "t": 255.9},
+                      # ICARUS' opening is 0.6 s: its body comes as a "key" line, still a later part
+                      {"request": 564, "n": 0, "t": 300.0}, {"key": "1111111111111111", "t": 300.0},
+                      {"key": "2222222222222222", "t": 300.4},
+                      {"next": "5555555555555555", "t": 301.0}])           # a bank's song: not this project's
+    lg = EL.Log(ctl, 0, _maiden(tmp_path))
+    lg.poll(now=400.0)
+    got = [(r["name"], r["what"], r["len"], bool(r.get("part"))) for r in lg.rows]
+    assert got == [("MUSIC: RUN", "#552", "7.5 s", False),            # not "1 of 3": its parts are no picks
+                   ("MUSIC: RUN", "#552  part 2 of 3", "3:00", True),
+                   ("MUSIC: RUN", "#552  part 3 of 3", "30.0 s", True),
+                   ("MUSIC: ICARUS", "#564", "0.6 s", False),
+                   ("MUSIC: ICARUS", "#564  part 2 of 2", "5:00", True)]
+    assert lg.rows[1]["rel"] == "audio/idx0882.wav"
+    assert any("later parts" in t for t in lg.rows[0]["tip"])
+    page = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "emulate_log.js"),
+                encoding="utf-8").read()
+    assert 'r.part && "elog-part"' in page
+
+
+def test_the_reader_takes_the_next_part_lines():
+    assert SW.line_event("   75886 [pad] sound next a71f1921050080e5") == {"next": "a71f1921050080e5"}
+
+
+def test_an_earlier_runs_log_is_skipped_until_this_runs_boot_rewrites_it(tmp_path):
+    log, seen = tmp_path / "mode.log", tmp_path / "sounds_seen_0.jsonl"
+    _append(log, "       0 [pad] port /dump/game.port: iron_maiden_pro 1.18\n   20250 [pad] sound 113 0\n", "w")
+    old = os.path.getmtime(log) - 60
+    os.utime(log, (old, old))                                   # the run before: nothing new for a minute
+    w = SW.SoundWatch(str(log), str(seen))
+    assert w.poll(1.0) == 0 and _lines(str(seen)) == []
+    # this boot's install took it out and the runtime wrote its own
+    _append(log, "       1 [pad] port /dump/game.port: iron_maiden_pro 1.18, 140 sites\n   9000 [pad] sound 126 0\n", "w")
+    assert w.poll(2.0) == 1 and [e["request"] for e in _lines(str(seen)) if "request" in e] == [126]
+
+
+def test_a_window_reopened_mid_run_adds_no_second_copy(tmp_path):
+    log, ctl = tmp_path / "mode.log", str(tmp_path / "ctl")
+    os.makedirs(ctl)
+    seen = EL.sounds_file(ctl, 0)
+    _append(log, "       0 [pad] port x\n       0 [pad] sound log: every request the sound worker takes\n"
+                 "   20250 [pad] sound 113 0\n", "w")
+    SW.SoundWatch(str(log), seen).poll(1.0)
+    _append(log, "   30000 [pad] sound 126 0\n")
+    SW.SoundWatch(str(log), seen).poll(1.0)                    # the reopened window reads from the top
+    assert sum(1 for e in _lines(seen) if e.get("request") == 113) == 2
+    lg = EL.Log(ctl, 0, str(tmp_path))
+    lg.poll()
+    assert [r["what"] for r in lg.rows] == ["#113", "#126"]

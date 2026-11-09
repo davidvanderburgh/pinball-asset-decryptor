@@ -41,6 +41,7 @@ import time
 from ...core import config, rigdata, runtime, staging_work
 from .. import compat
 from .. import emulate_rig as rig
+from ..emulate_log import EmulateLogMixin
 from .base import TabService, rpc
 
 log = logging.getLogger(__name__)
@@ -202,7 +203,7 @@ def _state_kind(text):
     return "acc"
 
 
-class EmulateTab(TabService):
+class EmulateTab(EmulateLogMixin, TabService):
     ns = "emulate"
     key = "Emulate"
     label = "Emulate"
@@ -295,6 +296,7 @@ class EmulateTab(TabService):
         self._cache_sel = []
         self._pf_proc = None
         self._clip_merger = None          # PAD-827: the run's clip sightings, folded in
+        self._elog_init()                 # PAD-1071: the Sound and video log
         self._last_up = False
         self._last_info = None
         self._starting = False
@@ -2852,11 +2854,13 @@ class EmulateTab(TabService):
         named = clip_seen.write_names(clip_seen.names_file(d, n), project)
         self._clip_merger = (clip_seen.Merger(clip_seen.seen_file(d, n), project)
                              if named else None)
+        self._elog_new_run(project)       # PAD-1071: and the log lists this run's
 
     def _launch_env(self, src):
         # PAD_AUDIO=1: a rig is silent unless it is asked (PAD-253), and this
         # tab's run is the one that has a window and a Volume / Mute.
-        env = ["PAD_AUDIO=1", "PAD_AUDIO_DUMP=30",
+        # PAD_SOUNDLOG=1: the Sound and video log's sounds (PAD-1071, modes/soundlog.sh)
+        env = ["PAD_AUDIO=1", "PAD_AUDIO_DUMP=30", "PAD_SOUNDLOG=1",
                "PAD_AUDIO_CTL=" + audio_ctl_file()] + \
             list(src) + self._machine_env() + self._edition_env() + \
             self._screen_env()
@@ -3080,6 +3084,7 @@ class EmulateTab(TabService):
                     over()
                     return
                 env.extend(more)
+            env.extend(self._elog_stage_env(env, prepare_card))
             self.last_refusal = ""
             cmd = self._watch_cmd(env)
             self._log("[emulate] %s" % " ".join(str(c) for c in cmd))
@@ -3625,6 +3630,7 @@ class EmulateTab(TabService):
         (PAD-253, David: "when i close the dev pad app, it should not kill
         all rigs, only the emulation window it spawns (if done) itself").
         Its own playfield window closes either way."""
+        self._elog_win.shutdown()
         if not (self._launched() or self._started_here):
             self._close_playfield(grace=3)
             return

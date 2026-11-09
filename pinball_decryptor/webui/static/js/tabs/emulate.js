@@ -323,6 +323,17 @@ function WindowsCard({ s }) {
       ${game ? html`<b class="emu-wt mono">${game} - virtual playfield</b>` : html`<b class="emu-wt">The virtual playfield</b>`}
       <span class="small">Every switch by name, the key panel, Insert coin · Start · Plunge · Reset balls · Clear switch alerts, and Save state / Load state.</span>
     </div></div>`;
+  // PAD-1071: the Sound and video log, a window of its own the user opens (a browser session
+  // opens the page in a window of the browser's)
+  const openLog = async () => {
+    const r = await call("emulate.log_open");
+    if (r && r.url) window.open(r.url, "pad-sound-video-log", "width=760,height=640");
+  };
+  const logWin = html`<div class="note emu-win"><div class="row emu-win-row"><div class="stack">
+      <b class="emu-wt">Sound and video log</b>
+      <span class="small">Every sound and clip the game plays, in order, from Start to Stop. Play a sound from it, or open a sound or clip on its tab. Put it beside the game wherever you like.</span>
+    </div><${Button} size="sm" onClick=${openLog}
+      title="Open the Sound and video log, or bring it back in front">Open<//></div></div>`;
   let body;
   if (mac) {
     body = html`
@@ -332,7 +343,8 @@ function WindowsCard({ s }) {
       </div></div>`;
   } else {
     body = html`${gameWin}${playfield}
-      <span class="small muted">Both open by themselves at Start. Reset windows above puts them back on screen if one is lost.</span>`;
+      <span class="small muted">Both open by themselves at Start. Reset windows above puts them back on screen if one is lost.</span>
+      ${logWin}`;
   }
   return html`<${Card} title="Windows the emulator opens" cls="emu-wins">${body}<//>`;
 }

@@ -1365,9 +1365,24 @@ static volatile int att_live;               /* PAD-641 (defined with the lookup'
 static void cabs_worker(unsigned request);
 static volatile int cabs_live;              /* PAD-1040 (defined with the song shows below) */
 
+/* PAD-1071: the sound log's lines have an allowance of their own - the Emulate tab's Sound and video log
+ * reads them for as long as a session lasts, and mode.log's 40000 lines would end it (and every other
+ * line) an hour or two into a game. Same text as say()'s ("<ms> [pad] sound <request> <n>"). */
+#define SOUND_LINES_MAX 400000
+static unsigned sound_lines;
+static void sound_say(unsigned request, unsigned n)
+{
+    char b[64];
+    int k;
+    if (log_fd < 0 || sound_lines >= SOUND_LINES_MAX) return;
+    sound_lines++;
+    k = pm_snprintf(b, sizeof b, "%8lu [pad] sound %u %u\n", pm_ms(), request, n);
+    if (k > 0 && k < (int)sizeof b) write(log_fd, b, (unsigned long)k);
+}
+
 static void on_sound_worker(unsigned *r)
 {
-    if (worker_log) say("sound %u %u", r[0], r[2]);
+    if (worker_log) sound_say(r[0], r[2]);
     if (cabs_live) cabs_worker(r[0]);         /* PAD-1040: a song with an expression light show of the card's */
     if (att_live) att_worker(r[0]);           /* PAD-645: the game's own sound at an attract press */
     if (blist_live) blist_play(r[0]);
@@ -22428,6 +22443,28 @@ static void pic_arm(void)
         PIC_SYMS[0], PIC_SYMS[1], PIC_SYMS[2], PIC_SYMS[3]);
 }
 
+/* PAD-1071: the Emulate tab's Sound and video log. /dump/soundlog.on at the start logs every request the
+ * game's sound worker takes ("[pad] sound <request> <n>", n = 1 for a numbered variant), whatever else the
+ * card carries - armed here, before the gates below, which return early on a card of clip variants only,
+ * music modes only and the rest. /dump/soundlog.only with it is the tab's stage for a card with no runtime
+ * of its own: the sound worker is all that is hooked - no score gate, no Insider hold, no tick - and the
+ * game runs stock. Returns 1 when the start is to stop there. */
+static int soundlog_arm(void)
+{
+    int only = pm_trigger("soundlog.only");
+    if (pm_trigger("soundlog.on")) {
+        if (!fn("sound_worker"))
+            say("sound log: off - the port names no sound_worker");
+        else if (worker_hooked || (worker_hooked = hook(fn("sound_worker"), on_sound_worker))) {
+            worker_log = 1;
+            say("sound log: every request the sound worker takes (soundlog.on)");
+        } else
+            say("sound log: off - the sound worker at 0x%08x could not be hooked", fn("sound_worker"));
+    }
+    if (only) say("armed: sound log only (soundlog.only) - nothing else is hooked, the game runs stock");
+    return only;
+}
+
 __attribute__((constructor))
 static void pad_mode_start(void)
 {
@@ -22448,6 +22485,7 @@ static void pad_mode_start(void)
             port.dropped, port.n_site, N_SITES, port.n_data, N_DATA, port.n_value, N_VALUES, port.n_shot, N_SHOTS,
             port.n_switch, N_SWITCHES);
     if (!port_gate()) return;
+    if (soundlog_arm()) return;               /* PAD-1071: the sound log, and a stock card's stops there */
     clipv_arm();                              /* PAD-446: before the score gate - a clip variant scores nothing */
     sndm_arm();                               /* PAD-494: nor does a music mode */
     pic_arm();                                /* PAD-537: nor do the picture settings */

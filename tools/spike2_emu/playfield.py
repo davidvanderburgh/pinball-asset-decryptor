@@ -140,6 +140,7 @@ import ballmodel
 import bootprog
 import cablights
 import clipwatch
+import soundwatch
 import coilact
 import coilmap
 import devicexy
@@ -4493,6 +4494,19 @@ def clip_watch():
         os.path.join(ctl, "clip_names_%d.json" % n) if ctl else None,
         os.path.join(ctl, "clips_seen_%d.jsonl" % n) if ctl else None,
         game=GAME or "")
+
+
+def sound_watch():
+    """PAD-1071: the Sound and video log's sounds, read off the run's mode.log
+    and written beside the Emulate tab's volume file - or None where there is
+    no run to read, or no tab to read the record (a window started by hand)."""
+    d = padpath.dump()
+    if not d or not AUDIO_CTL:
+        return None
+    return soundwatch.SoundWatch(
+        os.path.join(d, "mode.log"),
+        os.path.join(os.path.dirname(AUDIO_CTL),
+                     "sounds_seen_%d.jsonl" % padpath.slot()))
 #: Restart game in flight (PAD-744): the button says Restarting… while the app
 #: has not taken the request (its poll) or the run has not taken dump/reboot.req
 #: (watch.sh), then until the old boot's log is gone (the new launch truncates
@@ -4722,6 +4736,8 @@ class Playfield:
         self.run = RunCtl(AUDIO_CTL)
         # PAD-827: which clip the game plays, and the switch made before it
         self.clips = clip_watch()
+        # PAD-1071: and which sounds, for the Emulate tab's Sound and video log
+        self.sounds = sound_watch()
         self._clip_mrg = None
         self._sw_names = {}
         self._sw_names_next = 0.0
@@ -5001,6 +5017,8 @@ class Playfield:
                                   if r.get("name")}
             cw.feed_switches(mrg, self._sw_names, now)
         cw.poll(now)
+        if self.sounds is not None:
+            self.sounds.poll(now)
         if cw.dirty:
             cw.dirty = False
             self.publish("clips", cw.dyn())

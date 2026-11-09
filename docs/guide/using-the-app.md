@@ -182,8 +182,12 @@ Audio Content.
 
 ### Play in turn and at random (Stern Spike 2)
 
-Right-click a sound > **Play in turn** > **Add a sound to play in turn…**
-(up to 15 more). Each time the game plays the sound, the next file plays.
+Right-click a sound > **Play in turn** > **Add sounds to play in turn…**
+(up to 15 more; pick several at once). Each time the game plays the sound, the next file plays.
+
+- **Loudness of all N sounds…** sets one loudness for all of them; each can still be set on its own.
+- Under **Music modes**, picking several files for a mode makes the first its song and the
+  rest its sounds in turn.
 
 - **At random** in the same menu picks one at random instead, never the
   same twice in a row.

@@ -240,7 +240,7 @@ def test_the_audio_tab_switches_a_slot_s_files_to_random_and_back(tmp_path, monk
 
     with web_app(tmp_path, mfr="stern", era="spike2") as w:
         _open(w, proj)
-        assert [s["label"] for s in entry(w)["submenu"]] == ["Add a sound to play in turn…"]
+        assert [s["label"] for s in entry(w)["submenu"]] == ["Add sounds to play in turn…"]
         assert w.call("audio.menu_action", "turn_order:1", rel) is False    # no files yet
         w.answers.append(b)
         assert w.call("audio.menu_action", "turn_add", rel) is True

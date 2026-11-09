@@ -67,32 +67,45 @@ For hardened boards the only proven route is the **DMA RAM dump** (what actually
 worked), which needs the hardware rig and is **out of scope** for a software-only
 self-extractor.
 
-## The one genuinely-open, non-DMA lead for hardened boards
+## Hardened-board non-DMA lead — CLOSED by rootfs recon (2026-11-09)
 
-A hardened board still runs Stern's **own signed OS** after `switch_root`. If that
-OS offers a **local login or shell** reachable with obtainable credentials, a user
-with just an HDMI display + USB keyboard could run `spike3_otp_probe.sh` and read
-the key — no DMA, no SD surgery, no signature break, secure boot fully intact.
-Candidates: a getty on tty1, the operator/service menu offering a shell-escape or
-command exec, or a local web UI.
+The one open hope was that the signed OS a hardened board runs after
+`switch_root` might offer a **local login or shell** reachable with obtainable
+credentials — a getty on tty1/serial, an operator/service-menu shell-escape, or a
+local web UI — letting a user run `spike3_otp_probe.sh` with just a display +
+keyboard, no DMA. In September this was gated on the encrypted rootfs; it is now
+decrypted (universal keyfile, held privately), so the question was settled by
+config review of the real p2 rootfs (star_wars LE 0.96 reference image, mounted
+read-only; OS-level and per handoff byte-identical across titles).
 
-In September these were **open questions gated on the encrypted rootfs**. They are
-now answerable **at a desk**, because the rootfs is decrypted (universal keyfile,
-held privately). The recommended next step is pure config review of the real
-rootfs:
+**Result: there is no software login surface. The lead is dead.** Evidence:
 
-- `/etc/passwd`, `/etc/shadow` — any account with a blank/default/weak or known
-  password, or a login shell.
-- getty / `serial-getty` / autologin units (systemd), and which tty they bind.
-- the app's service/diagnostic-menu code — any shell-out, command field, or
-  file-manager surface; any local web UI and whether it exposes exec.
-- `cmdline.txt` / `config.txt` console routing as actually booted.
+- **No getty runs, and no getty even exists.** `/etc/inittab` is BusyBox; both
+  getty lines are **commented out** (`#console::respawn:/sbin/getty … GENERIC_SERIAL`
+  and `#tty1::respawn:/sbin/getty … HDMI console`). And there is **no `/sbin/getty`
+  and no `/bin/login` binary** shipped at all — the login mechanism isn't just
+  disabled, it's absent.
+- **Root login is impossible by password.** No `/etc/shadow`; root's `/etc/passwd`
+  password field is `*` (locked — matches no password). Only root has a shell
+  (`/bin/sh`); every other account is `/bin/false`/`/bin/sync`. The `sshd` user is
+  a vestige with no daemon.
+- **No remote shell, no local web UI.** No sshd/dropbear/telnet/inetd binaries,
+  none enabled; no httpd/lighttpd/nginx. (Matches handoff §5: Insider/`conagent`
+  is outbound-only and never carries the key.)
+- **No runtime shell spawn.** `rcS` and every `init.d` script (`S55spike3`,
+  `S95game`, the monitors, `update`) were grepped for getty/login/`sh -i`/telnetd/
+  dropbear/httpd/`setsid sh` — zero matches. Init goes sysinit → rcS → game, no
+  interactive path. The only root-writable-then-executed path is `update` = the
+  `.spk`, which is LUKS under the fixed key (dead, handoff §5).
 
-This is configuration review on data we already hold — **not** exploit
-development. If the only way in turns out to be cracking a strong `/etc/shadow`
-hash or exploiting a daemon, it stops there and the board stays DMA-only. In
-particular the `conagent` memory-safety-bug lead is **explicitly out of scope**
-(flagged exploit-dev, safety-declined) and must not be pursued as a bypass.
+So a hardened board offers **no** credentialed local login, on any console. It is
+**DMA-only**, confirmed — short of exploit development, which is out of scope and
+safety-declined (the `conagent` memory-safety lead must not be pursued as a
+bypass).
+
+*(Recon was read-only config review of hardware the owner has; no password hashes
+were cracked, no key or decrypted data left the private workspace, nothing was
+written to the source image or this repo.)*
 
 ## Explicitly out of scope / do not re-explore
 - **OTP-HANG card as a software route** — it only *freezes the key resident in
@@ -129,17 +142,21 @@ the master key," and only the latter puts PAD in the trafficking seat.
 
 ## Verdict + open questions (recommended answers)
 **Verdict:** a software-only self-extractor is real and mostly-built for
-**un-enforced** boards (productize Method A); it is **impossible by software** for
-**hardened** boards (field-confirmed) short of DMA — unless the rootfs recon turns
-up a credentialed local login, which is the single cheap desk-work lead worth
-chasing before concluding hardened = DMA-only.
+**un-enforced** boards (productize Method A). For **hardened** boards it is
+**impossible by software** — field-confirmed walled at the boot layer, and now
+**rootfs-confirmed** to have no login surface either (no getty binary, root
+locked, no remote shell, no runtime shell spawn). Hardened = **DMA-only**,
+settled; no cheaper route remains short of out-of-scope exploit development. The
+recon lead is closed, so the remaining work is just the Method-A PAD step.
 
-- *Build the self-extractor now, or stop at scope?* → **Recommend: do the rootfs
-  local-login recon first (cheap, desk-only), then build the Method-A PAD step.**
-  Other option: build the Method-A PAD step immediately and file the recon
-  separately.
 - *Should the Method-A PAD step ship even though it only helps un-enforced
   boards?* → **Recommend: yes** — it's the honest accessible path for the boards
-  that allow it, and it gives every other user a clear, correct lock-state answer
-  instead of a mystery. Other option: hold until the recon settles whether a
-  hardened-board path exists.
+  that allow it, and it gives every other user a clear, correct "secure boot
+  enforced: software extraction not possible on this board; use DMA" answer
+  instead of a mystery. Other option: don't build, leave key acquisition entirely
+  manual.
+- *How should a hardened-board user be served?* → **Recommend:** the PAD step
+  detects the enforced result and points to the DMA route; since the key is
+  universal and already recovered, PAD can still **verify** a user-supplied key on
+  that board, it just can't **derive** one there. Nothing in PAD should imply a
+  software extraction is possible on an enforced board.

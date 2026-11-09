@@ -32,10 +32,22 @@ tools/
   luks_otp.py              offline LUKS2 verifier + AES-XTS decryptor (pure Python, no cryptsetup)
   build_extractor_card.py  build a boot image that dumps the OTP key to the FAT partition
   spike3_otp_probe.sh      read-only on-board probe: reports secure-boot enforcement + reads the OTP key (run on a board you own, over SSH/UART)
+  image_sound.py           decode an extracted image.bin to per-sound WAVs (pure Python, no keys)
   xcheck_setup.sh          reproduces the cryptsetup cross-validation of luks_otp.py
 tests/
   test_luks_otp.py         self-tests + end-to-end verify against a known-key LUKS2 fixture
+  test_image_sound.py      self-tests for the image.bin sound decoder (synthetic container)
   fixtures/                a synthesized (non-Stern) LUKS2 header with a known key
+```
+
+Once the `games` partition is decrypted and `image.bin` is pulled out, the audio
+needs no further keys: the sound master directory is plaintext and the bodies are
+raw 44100 Hz signed-16-bit PCM (mono or stereo). `tools/image_sound.py` reads the
+container and writes `idxNNNN.wav` per sound:
+
+```sh
+python tools/image_sound.py info    path/to/image.bin
+python tools/image_sound.py extract path/to/image.bin --out out/audio
 ```
 
 ## Quick start

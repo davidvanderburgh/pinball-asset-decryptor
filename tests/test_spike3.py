@@ -171,9 +171,12 @@ def test_spike3_display():
                              "night_rider-1_0.raw") == "Night Rider (Spike 3)"
 
 
-def test_only_one_supported_title():
-    supported = [k for k, v in s3g.SPIKE3_DB.items() if v.get("supported")]
-    assert supported == ["star_wars_2025_pro"]
+def test_all_titles_supported():
+    # The fleet OTP keyfile unlocks every Spike 3 card, so no title is greyed;
+    # the user still supplies the key via their own keyfile.
+    unsupported = [k for k, v in s3g.SPIKE3_DB.items() if not v.get("supported")]
+    assert unsupported == []
+    assert len(s3g.SPIKE3_DB) == 6
 
 
 # --------------------------------------------------------------------------

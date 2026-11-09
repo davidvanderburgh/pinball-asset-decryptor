@@ -58,8 +58,9 @@ Resolved from `$PAD_SPIKE3_KEYFILE` or a `<image>.padkeys.json` sidecar:
     { "otp_keyfile": "<64 hex / path>",
       "master_keys": { "games": "<64 hex>" } }
 
-A card whose key isn't in hand detects but reports "no key" cleanly, and in the
-picker the titles we can't yet decrypt are greyed with a reason.
+The fleet OTP keyfile is now in hand and unlocks **every** Spike 3 card, so all
+listed titles are decryptable once the user points PAD at their keyfile; none
+are greyed. A card run without a keyfile detects but reports "no key" cleanly.
 
 ## Scope
 

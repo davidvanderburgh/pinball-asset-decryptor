@@ -6,33 +6,34 @@ the display name is a prettified form of it.
 
 ``supported`` says whether PAD can decrypt this title **offline today**.  That
 turns on whether a key for it is in hand, not on the code: the extractor is the
-same for every Spike 3 card.  Only the title whose per-volume master keys were
-recovered is marked supported; the rest need the fleet customer-OTP unlock key
-(not yet captured), so the picker greys them with a reason instead of detecting
-a card it then can't open.
+same for every Spike 3 card.  The fleet customer-OTP unlock key is now in hand,
+and it unlocks the LUKS keyslot of **every** Spike 3 card's partitions — so
+every title below is decryptable.  The user still supplies that key through
+their own keyfile (``$PAD_SPIKE3_KEYFILE`` / a ``*.padkeys.json`` sidecar);
+nothing secret ships in the repo.  A title is greyed only if no key for it can
+exist, which is no longer the case for any Spike 3 card.
 """
 
 from __future__ import annotations
 
 import os
 
-_OTP_REASON = ("Offline decryption needs the Spike 3 unlock key, which isn't "
-               "available for this title yet.")
-
 # key (title stem) -> display / support.  Keep order = display order.
+# All Spike 3 titles are decryptable: the fleet OTP keyfile (user-supplied)
+# derives any card's master keys through its LUKS keyslots.
 SPIKE3_DB = {
     "star_wars_2025_pro":      {"display": "Star Wars 2025 PRO",
                                 "supported": True},
     "star_wars_2025_le":       {"display": "Star Wars 2025 LE",
-                                "supported": False, "reason": _OTP_REASON},
+                                "supported": True},
     "star_wars_elg":           {"display": "Star Wars (Elwin)",
-                                "supported": False, "reason": _OTP_REASON},
+                                "supported": True},
     "fallout_le":              {"display": "Fallout LE",
-                                "supported": False, "reason": _OTP_REASON},
+                                "supported": True},
     "pokemon_le":              {"display": "Pokemon LE",
-                                "supported": False, "reason": _OTP_REASON},
+                                "supported": True},
     "walking_dead_remastered_le": {"display": "Walking Dead Remastered LE",
-                                   "supported": False, "reason": _OTP_REASON},
+                                   "supported": True},
 }
 
 #: key used when a Spike 3 card's filename matches no known title.

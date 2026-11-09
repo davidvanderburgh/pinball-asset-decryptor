@@ -18,6 +18,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_OF_RIG = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
@@ -77,6 +78,19 @@ def _project(scratch):
                  "idx3753.wav", "idx1276.wav", "idx7739.wav", "idx4465.wav", "idx6128.wav", "idx7174.wav"):
         if os.path.isfile(os.path.join(PROJECT, "audio", name)):      # GAME START's recordings, playable
             shutil.copyfile(os.path.join(PROJECT, "audio", name), os.path.join(dst, "audio", name))
+    # round 3 (Length): the real recordings of every request the run's events name
+    src = os.environ.get("PAD1071_EVENTS")
+    if src and os.path.isfile(os.path.join(src, "sounds_seen_0.jsonl")):
+        sys.path.insert(0, REPO_OF_RIG)
+        from pinball_decryptor.plugins.stern.clip_sounds import audio_files, read_requests
+        reqs, files = read_requests(PROJECT), audio_files(PROJECT)
+        with open(os.path.join(src, "sounds_seen_0.jsonl"), encoding="utf-8") as f:
+            asked = {json.loads(ln).get("request") for ln in f if ln.strip()}
+        for r in asked:
+            v = reqs.get(r) if r is not None else None
+            for i in (list(v["idx"]) + list(v["also"] or ())) if v else ():
+                if i in files:
+                    shutil.copyfile(os.path.join(PROJECT, files[i]), os.path.join(dst, files[i]))
     for name in os.listdir(os.path.join(PROJECT, "video")):
         if name != "manifest.txt":
             open(os.path.join(dst, "video", name), "wb").close()

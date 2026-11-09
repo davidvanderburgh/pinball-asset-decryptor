@@ -112,6 +112,7 @@ function LogApp() {
     { key: "name", label: "Name", width: "minmax(0,1fr)",
       render: (r) => html`<span class="elog-name" ...${tip({ head: r.name, lines: r.tip })}>${r.name}</span>` },
     { key: "what", label: "Request / started by", width: "minmax(0,0.8fr)", cls: "dim elog-what" },
+    { key: "len", label: "Length", width: "62px", num: true, cls: "mono dim" },
     { key: "act", label: "", width: "118px",
       render: (r) => html`<span class="row elog-act">
         ${r.kind === "sound" ? (playing === r.i

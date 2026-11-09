@@ -15,6 +15,7 @@ way, :class:`.emulate_jjp_spike1view.ViewWindows`). Without a native main window
 import functools
 import logging
 import os
+import sys
 import threading
 from urllib.parse import quote, urlsplit
 
@@ -26,6 +27,38 @@ PAGE = "/static/js/tabs/emulate_log.html"
 TITLE = "Sound and video log"
 SIZE = (760, 640)
 MIN_SIZE = (420, 260)
+
+
+def to_front(win):
+    """Bring pywebview window *win* in front of the others, as it is: a minimized window comes back,
+    a maximized one stays maximized (round 3: Open went through ``restore()``, which on Windows
+    un-maximizes - Jim-Beam's main window "shrinked" at every Open). On Windows the window is put
+    topmost and back first, because SetForegroundWindow alone is refused while another program has
+    the focus (emulate_ap.raise_window's recipe); elsewhere ``show()``."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            from .winbrand import _hwnd
+            h = _hwnd(win)
+            if h:
+                u = ctypes.windll.user32
+                u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                           ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+                if u.IsIconic(wintypes.HWND(h)):
+                    u.ShowWindow(wintypes.HWND(h), 9)                     # SW_RESTORE: minimized only
+                flags = 0x0001 | 0x0002 | 0x0040                         # NOSIZE | NOMOVE | SHOWWINDOW
+                u.SetWindowPos(wintypes.HWND(h), wintypes.HWND(-1), 0, 0, 0, 0, flags)   # TOPMOST
+                u.SetWindowPos(wintypes.HWND(h), wintypes.HWND(-2), 0, 0, 0, 0, flags)   # NOTOPMOST
+                u.SetForegroundWindow(wintypes.HWND(h))
+                return True
+        except Exception:                                  # noqa: BLE001
+            pass
+    try:
+        win.show()
+        return True
+    except Exception:                                      # noqa: BLE001
+        return False
 
 
 class LogWindow:
@@ -112,11 +145,7 @@ class LogWindow:
     def _open_or_raise(self):
         win = self._win
         if win is not None:
-            for step in (win.restore, lambda: win.move(60, 60), win.show):
-                try:
-                    step()
-                except Exception:                          # noqa: BLE001
-                    pass
+            to_front(win)                 # where and as big as the user left it
             return
         import webview
         origin = self._origin()
@@ -273,10 +302,4 @@ class EmulateLogMixin:
         if win is None:
             return
 
-        def front():
-            for step in (win.restore, win.show):
-                try:
-                    step()
-                except Exception:                          # noqa: BLE001
-                    pass
-        threading.Thread(target=front, name="pad-log-front", daemon=True).start()
+        threading.Thread(target=to_front, args=(win,), name="pad-log-front", daemon=True).start()

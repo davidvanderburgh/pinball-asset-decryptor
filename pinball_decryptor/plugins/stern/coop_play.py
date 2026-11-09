@@ -458,13 +458,13 @@ ABILITIES = (
                ("gift", "AD_LIGHT_TRAIN")])),
     ("battles", "EASIER BATTLES", "The ramps light a battle as on the game's easiest LIGHT BATTLE DIFFICULTY.",
      ("cache", "AD_LIGHT_BATTLE_DIFFICULTY", "min")),
-    ("building", "BUILDING, MECHA, AND SAUCER MULTIBALLS", "Every building or ramp shot takes two of the building's "
-     "six stability steps (on the game's easiest BUILDING DIFFICULTY), toward Mechagodzilla Multiball every spin "
-     "counts twice and every shield target hit counts twice, and every pop bumper hit counts twice toward Saucer "
-     "Attack, so its multiball comes sooner.",
-     ("some", [("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
-                         ("double", "shield")]),
-               ("double", "saucer")])),
+    # PAD-1075: DoomWalrus666 moved the double pop hits to the Maser ability (here they were a third double:, past the
+    # runtime's two a character, so never held)
+    ("building", "BUILDING AND MECHA MULTIBALLS", "Every building or ramp shot takes two of the building's six "
+     "stability steps (on the game's easiest BUILDING DIFFICULTY), and toward Mechagodzilla Multiball every spin "
+     "counts twice and every shield target hit counts twice.",
+     ("many", [("cache", "AD_BUILDING_DIFFICULTY", "min"), ("steps", "building"), ("double", "spins"),
+               ("double", "shield")])),
     ("powerups", "DOUBLE POWER-UPS, SAUCER, RAMPAGE, +1X JACKPOT", "Every Godzilla power-up the game gives counts "
      "twice, every hit on the saucer (the pop bumper) counts twice toward Saucer Attack, every RAMPAGE letter collected "
      "counts as two, and the Destruction Jackpot multiplier is never below 2X for them.",
@@ -490,12 +490,12 @@ ABILITIES = (
      ("unlock", "AD_BATTLE_UNLOCK_ALL_MONSTER_BATTLES", None)),
     ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
      "once a ball.", ("addball", 1)),
-    ("maser", "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES", "The Maser cannon target is lit "
-     "the whole time they are up (in regular play and for all of Tank Attack), Magna Grab is kept lit, every "
-     "powerline target hit counts as two targets, and the Destruction Jackpot is lit at each of their balls (the "
-     "game's own LIGHT DESTRUCTION JACKPOT).",
+    ("maser", "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES AND POP HITS", "The Maser cannon "
+     "target is lit the whole time they are up (in regular play and for all of Tank Attack), Magna Grab is kept lit, "
+     "every powerline target hit counts as two targets, every pop bumper hit counts twice toward Saucer Attack, and "
+     "the Destruction Jackpot is lit at each of their balls (the game's own LIGHT DESTRUCTION JACKPOT).",
      ("some", [("many", [("lit", "maser"), ("yes", "maser")]), ("keep", "magna", 1), ("steps", "powerline"),
-               ("gift", "AD_LIGHT_LIGHT_DESTRUCTION_JACKPOT")])),
+               ("double", "saucer"), ("gift", "AD_LIGHT_LIGHT_DESTRUCTION_JACKPOT")])),
     ("bridge", "EASIER BRIDGE, DOUBLE TANKS AND JETS", "The bridge falls as on the game's easiest BRIDGE ATTACK "
      "DIFFICULTY, and every tank or jet destroyed counts as two.",
      ("many", [("cache", "AD_BRIDGE_ATTACK_DIFFICULTY", "min"), ("double", "tanks"), ("double", "jets")])),
@@ -510,8 +510,7 @@ CARD_LINES = {
     "heat_ray": "Heat ray ready at your first spin. Recharges in half the spins. A train is lit at every one of your "
                 "balls.",
     "battles": "One ramp lights a battle.",
-    "building": "Building damage two steps a shot. Mecha spins and shield hits count twice. Pop hits count twice for "
-                "an earlier Saucer Attack Multiball.",
+    "building": "Building damage two steps a shot. Mecha spins and shield hits count twice.",
     "powerups": "Power-ups, saucer hits and rampage letters count twice. Destruction Jackpot at least 2X.",
     "ally": "An ally lit at every one of your balls. Rodan lasts twice as long. Hedorah starts on each of your turns.",
     "jets": "Starts with 4 jet fighters destroyed.",
@@ -519,8 +518,8 @@ CARD_LINES = {
     "spot": "Press Action twice in a battle to hit its next shot, once per battle. 10 seconds more on battle timers.",
     "tier2": "Every battle is open to you, tier 2 included.",
     "addball": "Press Action twice in regular play to add a ball, once a ball.",
-    "maser": "Maser and Magna Grab lit while you are up. Powerline hits count double. Destruction Jackpot lit at "
-             "every one of your balls.",
+    "maser": "Maser and Magna Grab lit while you are up. Powerline and pop hits count double. Destruction Jackpot "
+             "lit at every one of your balls.",
     "bridge": "The bridge falls faster. Tanks and jets count two at a time.",
 }
 

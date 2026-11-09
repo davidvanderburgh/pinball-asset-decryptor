@@ -238,6 +238,54 @@ export function CoopAwardsDialog({ s, onClose }) {
 // the game does differently while its teammate is up; the row shows its badge (its powers' words, or a header of its
 // own) and Powers... opens the list, grouped, with a tick per power this game can have. The set abilities of before
 // are starting points (Start from...). Python composes the list and refuses what the runtime has no room for.
+// PAD-1079 (DoomWalrus666: change the colours of certain text, other customizations): Look... opens the pick screen's
+// look - its title, a colour for each text and the panel, a background picture behind every card - and each row has
+// a colour of its own for its card's frame. Python keeps them with the characters and redraws the preview.
+
+// a colour well that sends the colour once it is picked (the native picker's change, not every drag)
+function Well({ value, title, onPick }) {
+  const v = /^#[0-9a-fA-F]{6}$/.test(value || "") ? value : "#000000";
+  return html`<label class="modes-swatch" ...${tip(title)}>
+    <input type="color" value=${v} aria-label=${title} onChange=${(e) => onPick(e.target.value)} />
+    <span class="chip-c" style=${`background:${v}`}></span>
+  </label>`;
+}
+
+function CoopLook({ look }) {
+  return html`<div class="modes-coop-look">
+    <div class="row" style="gap:8px">
+      <span class="small dim">Title</span>
+      <${Field} value=${look.title} sm maxLength=${40} width=${300}
+        title="The words across the top of every pick card (capitals)."
+        onCommit=${(v) => { if (v !== look.title) call("modes.coop_chars_look", "title", v); }} />
+      <span class="grow"></span>
+      <${Button} size="sm" kind="ghost" onClick=${() => call("modes.coop_chars_look_default")}
+        title="The game's set's own title and colours again, and no background picture.">Default look<//>
+    </div>
+    <div class="modes-coop-look-grid">
+      ${look.colours.map((c) => html`<span class="modes-coop-look-c" key=${c.key}>
+        <${Well} value=${c.value} title=${`${c.label}${c.follows ? ": the frame's colour until you pick one" : ""}`}
+          onPick=${(v) => call("modes.coop_chars_look", c.key, v)} />
+        <span class="small">${c.label}</span>
+        ${c.own ? html`<${Button} size="xs" kind="ghost" icon="x" title="Its default colour again."
+          onClick=${() => call("modes.coop_chars_look", c.key, "")} />` : null}
+      </span>`)}
+    </div>
+    <div class="row" style="gap:8px">
+      <${Button} size="sm" kind="ghost" icon="image" onClick=${() => call("modes.coop_chars_backdrop", false)}
+        title=${look.backdrop ? "The picture behind every pick card and award card: choose another." : "A picture of your own behind every pick card and award card, in place of the panel (the panel's colour then goes unused)."}>
+        ${look.backdrop ? "Background ✓" : "Background…"}<//>
+      ${look.backdrop ? html`<${Button} size="xs" kind="ghost" icon="x" title="Back to the panel."
+        onClick=${() => call("modes.coop_chars_backdrop", true)} />` : null}
+      <span class="small dim" style="margin-left:8px">Darken it</span>
+      <${Select} sm value=${String(look.dim)} width=${110} disabled=${!look.backdrop}
+        options=${look.dims.map((d) => ({ value: String(d), label: d ? `${d}%` : "Not at all" }))}
+        title="How much darker the background picture is drawn, so the words over it stay easy to read."
+        onChange=${(v) => call("modes.coop_chars_look", "dim", v)} />
+    </div>
+  </div>`;
+}
+
 export function CoopCharsDialog({ s, onClose }) {
   const ch = s.coop_ch || {};
   const rows = ch.rows || [];
@@ -245,6 +293,7 @@ export function CoopCharsDialog({ s, onClose }) {
   const powers = ch.powers || [];
   const groups = ch.groups || [];
   const [open, setOpen] = useState(-1);
+  const [looking, setLooking] = useState(false);
   useEffect(() => { call("modes.coop_chars_refresh"); }, []);
   const opts = [{ value: "", label: "Start from..." }, { value: "-", label: "No powers" }].concat(abil.map((a) => (
     { value: a.key, label: a.ok ? a.words : `${a.words} (not on this game)`, disabled: !a.ok })));
@@ -286,6 +335,10 @@ export function CoopCharsDialog({ s, onClose }) {
       : r.powers.length ? html`<b>${r.words}</b> ${r.line}${r.missing.length ? html` <span class="warn-ink">(${r.missing.length} not on this game, left off the card)</span>` : null}`
       : "Plays as the game always does."}</span>
     <span class="row" style="gap:4px">
+      <${Well} value=${r.colour || (ch.look ? ch.look.colours[0].value : "")}
+        title=${r.colour ? "Its own frame colour on its cards: pick another." : "The frame colour on its cards (the look's): pick one of its own."}
+        onPick=${(v) => call("modes.coop_char_colour", i, v)} />
+      ${r.colour ? html`<${Button} size="xs" kind="ghost" icon="x" title="The look's frame colour again." onClick=${() => call("modes.coop_char_colour", i, "")} />` : null}
       <${Button} size="xs" kind="ghost" icon="image" onClick=${() => call("modes.coop_char_picture", i, false)}
         title=${r.picture ? "Its picture on the pick screen: choose another." : "Choose a picture of your own for its pick screen (without one it gets a panel with its name)."}>${r.picture ? "Picture ✓" : "Picture…"}<//>
       ${r.picture ? html`<${Button} size="xs" kind="ghost" icon="x" title="Back to the panel with its name." onClick=${() => call("modes.coop_char_picture", i, true)} />` : null}
@@ -313,10 +366,15 @@ export function CoopCharsDialog({ s, onClose }) {
         options=${(ch.times || [30]).map((t) => ({ value: String(t), label: t ? `${t} seconds` : "No time limit" }))}
         title="How long each teammate has to pick; the machine counts the seconds down, and when they run out the one shown is taken. No time limit: the pick waits for the Action button."
         onChange=${(v) => call("modes.coop_chars_time", Number(v))} />
+      <span class="grow"></span>
+      <${Button} size="sm" kind=${looking ? "" : "ghost"} icon="image" disabled=${!rows.length || !ch.look}
+        title="The pick screen's look: its title, the colour of each of its words, a background picture."
+        onClick=${() => setLooking(!looking)}>Look…<//>
     </div>
+    ${looking && ch.look ? html`<${CoopLook} look=${ch.look} />` : null}
     ${ch.preview ? html`<div class="modes-coop-ch-pv">
       <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />
-      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"}. Give each character a picture of your own with Picture... and see it here; Write puts the cards on the machine.</span>
+      <span class="small dim wrap">What the machine shows while the pick is on ${ch.preview.at < rows.length ? rows[ch.preview.at].name : "RANDOM"}. Give each character a picture of your own with Picture..., the screen colours and a background with Look..., and see it here; Write puts the cards on the machine.</span>
     </div>` : null}
     ${ch.refused ? html`<${Note} kind="warn">${ch.refused}<//>` : null}
     ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(50vh, 520px)">${rows.map((r, i) => html`${row(r, i)}${open === i ? powersOf(r, i) : null}`)}</div>`

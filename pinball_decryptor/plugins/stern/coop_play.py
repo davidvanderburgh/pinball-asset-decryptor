@@ -926,11 +926,12 @@ def _characters(got):
             out.append({"name": clean_name(c.get("name")), "sub": clean_sub(c.get("sub")),
                         "powers": keys, "header": clean_header(c.get("header")),
                         "ability": bundle_of(keys),         # the bundle these are, for the dialog's starting points
-                        "picture": str(c.get("picture") or "")})
+                        "picture": str(c.get("picture") or ""), "colour": clean_colour(c.get("colour"))})
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
     if theme:
-        out["theme"] = {k: str(v) for k, v in theme.items() if k in ("title", "accent", "accent2") and v}
+        out["theme"] = {k: (int(v) if k == "dim" and str(v).isdigit() else str(v)) for k, v in theme.items()
+                        if k in THEME and v is not None and v != ""}
     return out
 
 
@@ -1245,6 +1246,69 @@ def save_picture(project, index, source):
     return save_characters(project, chars)
 
 
+def save_look(project, key, value):
+    """PAD-1079: one part of the pick's look (a :data:`THEME` key but ``backdrop``: :func:`save_backdrop`) set to
+    *value* (``""`` or None: the default again); returns the characters as stored. Raises :class:`CoopError` on a
+    colour that is not ``#rrggbb`` or a key that is not one."""
+    if key not in THEME or key == "backdrop":
+        raise CoopError("The pick's look has no %s." % key)
+    chars = load_characters(project)
+    theme = dict(chars.get("theme") or {})
+    if value is None or value == "":
+        theme.pop(key, None)
+    elif key == "title":
+        theme[key] = clean_title(value)
+    elif key == "dim":
+        if str(value) not in {str(d) for d in DIMS}:
+            raise CoopError("The background can be darkened by %s percent." % ", ".join(str(d) for d in DIMS))
+        theme[key] = int(value)
+    elif clean_colour(value):
+        theme[key] = clean_colour(value)
+    else:
+        raise CoopError("%r is not a colour (#rrggbb)." % value)
+    chars["theme"] = {k: v for k, v in theme.items() if v not in (None, "")}
+    return save_characters(project, chars)
+
+
+def save_look_default(project):
+    """PAD-1079: the pick's look as the game's set (or the app's) has it: the owner's colours, title and background
+    forgotten; returns the characters as stored."""
+    chars = load_characters(project)
+    prof = project_title(project)
+    path = preset_for(prof)
+    chars["theme"] = dict(read_preset(path)["characters"].get("theme") or {}) if path else {}
+    return save_characters(project, chars)
+
+
+def save_backdrop(project, source=None):
+    """PAD-1079: copy *source* (a picture file) into the project as the pick's background picture (its cards and
+    the award cards), or with None forget it; returns the characters as stored. Raises :class:`CoopError` when the
+    file is not a picture."""
+    import os
+    import shutil
+    from PIL import Image
+    chars = load_characters(project)
+    theme = dict(chars.get("theme") or {})
+    if source is None:
+        theme.pop("backdrop", None)
+    else:
+        try:
+            with Image.open(source) as im:
+                im.verify()
+        except Exception as e:                          # noqa: BLE001 - say what the file is not
+            raise CoopError("That file is not a picture the app can read (%s)." % e) from None
+        folder = os.path.join(project, PICTURE_DIR)
+        os.makedirs(folder, exist_ok=True)
+        name = BACKDROP_FILE + (os.path.splitext(source)[1].lower() or ".png")
+        for f in os.listdir(folder):                    # one background: another extension's goes
+            if os.path.splitext(f)[0] == BACKDROP_FILE and f != name:
+                os.remove(os.path.join(folder, f))
+        shutil.copyfile(source, os.path.join(folder, name))
+        theme["backdrop"] = "%s/%s" % (PICTURE_DIR, name)
+    chars["theme"] = theme
+    return save_characters(project, chars)
+
+
 def preview(project, characters=None, words_for=None, index=0):
     """A still of what the machine shows while the pick is on character *index* (RANDOM after the last): its
     screen on a dark glass of the HUD's size, as PNG bytes - the Characters dialog's preview."""
@@ -1298,8 +1362,23 @@ TIMER_TEXT_X = 1025
 TIMER_WORDS_SCALE = 0.8
 TIMER_WORDS_AT = (round(TIMER_TEXT_X - CARD_SIZE[0] / 2 * TIMER_WORDS_SCALE, 1),
                   float((TIMER_BOX[1] + TIMER_BOX[3]) // 2))
-#: the default look; a preset may give its own ("theme": {"title", "accent", "accent2"})
-THEME = {"title": "CHOOSE YOUR CHARACTER", "accent": "#ffb400", "accent2": "#ff5a1f"}
+#: the default look; a preset may give its own ("theme": {"title", "accent", "accent2"}). PAD-1079 (DoomWalrus666: "change
+#: the colors of certain text ... other alterations"): the owner's Look in the Characters dialog, a colour for each
+#: text and the panel ("" for sub/badge/count: the frame's colour, for panel: the stock wash), a background picture
+#: (``backdrop``, the project's file) darkened by ``dim`` percent so the words stay readable
+THEME = {"title": "CHOOSE YOUR CHARACTER", "accent": "#ffb400", "accent2": "#ff5a1f", "heading": "#ffffff",
+         "name": "#ffffff", "sub": "", "badge": "", "badge_text": "#0c0c12", "does": "#dee4f0", "help": "#ffffff",
+         "count": "", "panel": "", "backdrop": "", "dim": 40}
+#: PAD-1079: the Look's colours, in the dialog's order: (theme key, what it colours)
+COLOUR_ROLES = (("accent", "Frame and lights"), ("accent2", "Corners and arrows"), ("heading", "Title"),
+                ("count", "Count (01 / 11)"), ("name", "Name"), ("sub", "Sub header"), ("badge", "Ability badge"),
+                ("badge_text", "Badge words"), ("does", "What it does"), ("help", "How to choose"),
+                ("panel", "Panel"))
+#: the background picture's darkening choices, percent
+DIMS = (0, 20, 40, 60, 80)
+#: the background picture's file in the project's PICTURE_DIR (its extension the source's)
+BACKDROP_FILE = "backdrop"
+_COLOUR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _DISPLAY_FONTS = (r"C:\Windows\Fonts\impact.ttf", "/System/Library/Fonts/Supplemental/Impact.ttf",
                   r"C:\Windows\Fonts\ariblk.ttf", "/System/Library/Fonts/Supplemental/Arial Black.ttf",
                   "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
@@ -1332,13 +1411,68 @@ def _hex(c, a=255):
     return (int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16), a)
 
 
+def clean_title(title):
+    """The pick's title as its cards show it: capitals, one space between words, at most 40."""
+    return " ".join(str(title or "").upper().split())[:40]
+
+
+def clean_colour(colour):
+    """``#rrggbb`` in lower case, or ``""`` when *colour* is not one."""
+    c = str(colour or "").strip()
+    return c.lower() if _COLOUR.match(c) else ""
+
+
 def theme_of(theme=None):
-    """The card's look: :data:`THEME` with a preset's own over it."""
+    """The card's look: :data:`THEME` with a preset's (or the owner's, PAD-1079) own over it; a colour that is not
+    ``#rrggbb`` and a darkening not in :data:`DIMS` are left at the default."""
     t = dict(THEME)
     for k, v in (theme or {}).items():
-        if k in THEME and v:
-            t[k] = " ".join(str(v).upper().split())[:40] if k == "title" else str(v)
+        if k not in THEME or v is None or v == "":
+            continue
+        if k == "title":
+            t[k] = clean_title(v) or THEME[k]
+        elif k == "backdrop":
+            t[k] = str(v)
+        elif k == "dim":
+            try:
+                t[k] = int(v) if int(v) in DIMS else THEME[k]
+            except (TypeError, ValueError):
+                pass
+        elif clean_colour(v):
+            t[k] = clean_colour(v)
     return t
+
+
+def backdrop_path(project, theme=None):
+    """PAD-1079: the absolute path of the pick's background picture in *project* (``""`` when it has none)."""
+    return picture_path(project, {"picture": theme_of(theme)["backdrop"]})
+
+
+def _body(project, th, W, H, S):
+    """The card's opaque body, W x H: the owner's background picture (covering it, darkened by ``dim``), else a wash
+    in the panel's colour (the stock one: cold to warm) with a fine grid a shade off it."""
+    from PIL import Image, ImageDraw
+    path = backdrop_path(project, th)
+    if path:
+        with Image.open(path) as im:
+            pic = _cover(im.convert("RGBA"), W, H)
+        body = Image.alpha_composite(Image.new("RGBA", (W, H), (0, 0, 0, 255)), pic)
+        if th["dim"]:
+            body = Image.alpha_composite(body, Image.new("RGBA", (W, H), (0, 0, 0, round(255 * th["dim"] / 100))))
+        return body
+    body = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(body)
+    p = _hex(th["panel"]) if th["panel"] else None
+    for y in range(H):
+        t = y / H
+        bd.line([(0, y), (W, y)], fill=(int(10 + 16 * t), int(12 + 6 * t), int(20 + 10 * (1 - t)), 255) if p is None
+                else tuple(int(v * (0.7 + 0.3 * t)) for v in p[:3]) + (255,))
+    grid = (30, 34, 48, 255) if p is None else tuple(min(255, v + 18) for v in p[:3]) + (255,)
+    for x in range(0, W, 28 * S):                                # the grid: drawn opaque, a shade off the body
+        bd.line([(x, 0), (x, H)], fill=grid, width=S)
+    for y in range(0, H, 28 * S):
+        bd.line([(0, y), (W, y)], fill=grid, width=S)
+    return body
 
 
 _TAG_SKIP = {"VS", "VS.", "AND", "THE", "OF", "&"}
@@ -1454,24 +1588,18 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     for c_ in chars:
         c_["tag"] = tag_of(c_["name"], [x["name"] for x in chars])
     th = theme_of(theme)
-    acc, acc2 = th["accent"], th["accent2"]
-    A, A2 = _hex(acc), _hex(acc2)
     S = scale
     W, H = CARD_SIZE[0] * S, CARD_SIZE[1] * S
     n = len(chars)
     rnd = index >= n
     c = None if rnd else chars[index]
+    acc, acc2 = (c or {}).get("colour") or th["accent"], th["accent2"]     # PAD-1079: a character's own frame colour
+    A, A2 = _hex(acc), _hex(acc2)
+    ink = {k: _hex(th[k] or acc) for k in ("heading", "count", "name", "sub", "badge", "badge_text", "does")}
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    # the panel: a near-black body with a cold-to-warm wash, a fine grid, a lit border and corner brackets
-    body = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    bd = ImageDraw.Draw(body)
-    for y in range(H):
-        t = y / H
-        bd.line([(0, y), (W, y)], fill=(int(10 + 16 * t), int(12 + 6 * t), int(20 + 10 * (1 - t)), 255))
-    for x in range(0, W, 28 * S):                                # the grid: drawn opaque, a shade off the body
-        bd.line([(x, 0), (x, H)], fill=(30, 34, 48, 255), width=S)
-    for y in range(0, H, 28 * S):
-        bd.line([(0, y), (W, y)], fill=(30, 34, 48, 255), width=S)
+    # the panel: a near-black body with a cold-to-warm wash, a fine grid (or the owner's background picture), a lit
+    # border and corner brackets
+    body = _body(project, th, W, H, S)
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=26 * S, fill=255)
     img.paste(body, (0, 0), mask)
@@ -1486,7 +1614,7 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
         d.line([(x, y), (x, y + dy * L)], fill=A2[:3] + (255,), width=5 * S)
     # the header: the title, a rule, and where in the roster this one is
     hf = _fit(d, th["title"], _DISPLAY_FONTS, W * 0.62, 46 * S)
-    d.text((40 * S, 44 * S), th["title"], font=hf, fill=(255, 255, 255, 255), anchor="lm")
+    d.text((40 * S, 44 * S), th["title"], font=hf, fill=ink["heading"], anchor="lm")
     tw = d.textlength(th["title"], font=hf)
     rule_end = (TIMER_BOX[0] - 18) * S if timed else W - 190 * S
     if rule_end > 40 * S + tw + 18 * S:
@@ -1501,7 +1629,7 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
         d.line([(cx, cy), (cx + 6 * S, cy + 3 * S)], fill=(255, 255, 255, 230), width=3 * S)
     count = "?? / %02d" % n if rnd else "%02d / %02d" % (index + 1, n)
     cf = _face(_DISPLAY_FONTS, 34 * S)
-    d.text((W - 40 * S, 44 * S), count, font=cf, fill=A[:3] + (255,), anchor="rm")
+    d.text((W - 40 * S, 44 * S), count, font=cf, fill=ink["count"], anchor="rm")
     # the portrait, in a lit frame
     px, py, pw, ph = 40 * S, 84 * S, 380 * S, 306 * S
     img = _glow(img, (px - 4 * S, py - 4 * S, px + pw + 4 * S, py + ph + 4 * S), 16 * S, A[:3] + (230,), 10 * S, 6 * S)
@@ -1527,13 +1655,13 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     ImageDraw.Draw(shadow).text((ix + 4 * S, ny + 5 * S), name, font=nf, fill=(0, 0, 0, 220), anchor="ls")
     img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(4 * S)))
     d = ImageDraw.Draw(img)
-    d.text((ix, ny), name, font=nf, fill=(255, 255, 255, 255), anchor="ls",
+    d.text((ix, ny), name, font=nf, fill=ink["name"], anchor="ls",
            stroke_width=max(1, S), stroke_fill=(0, 0, 0, 255))
     nw = min(iw - 40 * S, d.textlength(name, font=nf))
     d.rectangle((ix, ny + 14 * S, ix + nw, ny + 20 * S), fill=A[:3] + (255,))
     d.rectangle((ix + nw + 8 * S, ny + 14 * S, ix + nw + 40 * S, ny + 20 * S), fill=A2[:3] + (255,))
     if sub:
-        d.text((ix, ny + 54 * S), sub, font=_fit(d, sub, _TEXT_FONTS, iw, 28 * S, 18 * S), fill=A[:3] + (255,),
+        d.text((ix, ny + 54 * S), sub, font=_fit(d, sub, _TEXT_FONTS, iw, 28 * S, 18 * S), fill=ink["sub"],
                anchor="ls")
     if rnd:
         label, does = "A SURPRISE", "The machine picks one of the characters nobody has taken yet."
@@ -1543,12 +1671,12 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
     bf = _fit(d, label, _TEXT_FONTS, iw - 40 * S, 24 * S, 14 * S)     # PAD-1075: a long badge shrinks to the card
     bw = d.textlength(label, font=bf) + 40 * S
     by = (222 if sub else 208) * S
-    d.rounded_rectangle((ix, by, ix + bw, by + 46 * S), radius=23 * S, fill=A[:3] + (255,))
-    d.text((ix + bw / 2, by + 23 * S), label, font=bf, fill=(12, 12, 18, 255), anchor="mm")
+    d.rounded_rectangle((ix, by, ix + bw, by + 46 * S), radius=23 * S, fill=ink["badge"])
+    d.text((ix + bw / 2, by + 23 * S), label, font=bf, fill=ink["badge_text"], anchor="mm")
     tf, lines, step = _card_lines(d, does, iw, S)
     for k, line in enumerate(lines):                    # with a sub header: closer, clear of how to choose
         d.text((ix, by + ((76 if sub else 88) - (27 * S - tf.size) // S) * S + k * step), line, font=tf,
-               fill=(222, 228, 240, 255), anchor="ls")
+               fill=ink["does"], anchor="ls")
     # how to choose
     hy = 372 * S
     hf2 = _face(_TEXT_FONTS, 20 * S)
@@ -1561,7 +1689,7 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2):
         else:
             d.ellipse((x, hy - 11 * S, x + 22 * S, hy + 11 * S), fill=A2[:3] + (255,))
             x += 34 * S
-        d.text((x, hy), words, font=hf2, fill=(255, 255, 255, 220), anchor="lm")
+        d.text((x, hy), words, font=hf2, fill=_hex(th["help"], 220), anchor="lm")
         x += d.textlength(words, font=hf2) + 36 * S
     # the roster strip: every character and RANDOM, this one lit
     tiles = chars + [None]
@@ -1638,19 +1766,12 @@ def award_card(project, characters, index, theme=None, scale=2):
         c_["tag"] = tag_of(c_["name"], [x["name"] for x in chars])
     c = chars[index]
     th = theme_of(theme)
-    A, A2 = _hex(th["accent"]), _hex(th["accent2"])
+    acc = c.get("colour") or th["accent"]                       # PAD-1079: the pick card's look, its colours too
+    A, A2 = _hex(acc), _hex(th["accent2"])
     S = scale
     W, H = AWARD_SIZE[0] * S, AWARD_SIZE[1] * S
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    body = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    bd = ImageDraw.Draw(body)
-    for y in range(H):
-        t = y / H
-        bd.line([(0, y), (W, y)], fill=(int(10 + 16 * t), int(12 + 6 * t), int(20 + 10 * (1 - t)), 255))
-    for x in range(0, W, 28 * S):
-        bd.line([(x, 0), (x, H)], fill=(30, 34, 48, 255), width=S)
-    for y in range(0, H, 28 * S):
-        bd.line([(0, y), (W, y)], fill=(30, 34, 48, 255), width=S)
+    body = _body(project, th, W, H, S)
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=26 * S, fill=255)
     img.paste(body, (0, 0), mask)
@@ -1659,7 +1780,7 @@ def award_card(project, characters, index, theme=None, scale=2):
     d.rounded_rectangle((3 * S, 3 * S, W - 4 * S, H - 4 * S), radius=25 * S, outline=A[:3] + (255,), width=3 * S)
     # the header: CO-OP AWARD, a rule, a star
     hf = _fit(d, AWARD_TITLE, _DISPLAY_FONTS, W * 0.6, 44 * S)
-    d.text((40 * S, 42 * S), AWARD_TITLE, font=hf, fill=(255, 255, 255, 255), anchor="lm")
+    d.text((40 * S, 42 * S), AWARD_TITLE, font=hf, fill=_hex(th["heading"]), anchor="lm")
     tw = d.textlength(AWARD_TITLE, font=hf)
     d.line([(40 * S + tw + 18 * S, 42 * S), (W - 90 * S, 42 * S)], fill=A[:3] + (150,), width=2 * S)
     cx, cy, r1, r2 = W - 58 * S, 42 * S, 22 * S, 9 * S
@@ -1668,7 +1789,7 @@ def award_card(project, characters, index, theme=None, scale=2):
     # the portrait, in a lit frame
     px, py, pw, ph = 40 * S, 80 * S, 340 * S, 300 * S
     img = _glow(img, (px - 4 * S, py - 4 * S, px + pw + 4 * S, py + ph + 4 * S), 16 * S, A[:3] + (230,), 10 * S, 6 * S)
-    por = _portrait(project, c, pw, ph, th["accent"], th["accent2"])
+    por = _portrait(project, c, pw, ph, acc, th["accent2"])
     pm = Image.new("L", (pw, ph), 0)
     ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=14 * S, fill=255)
     img.paste(por, (px, py), pm)
@@ -1686,14 +1807,14 @@ def award_card(project, characters, index, theme=None, scale=2):
     ImageDraw.Draw(shadow).text((ix + 4 * S, 200 * S + 5 * S), c["name"], font=nf, fill=(0, 0, 0, 220), anchor="ls")
     img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(4 * S)))
     d = ImageDraw.Draw(img)
-    d.text((ix, 200 * S), c["name"], font=nf, fill=(255, 255, 255, 255), anchor="ls", stroke_width=max(1, S),
+    d.text((ix, 200 * S), c["name"], font=nf, fill=_hex(th["name"]), anchor="ls", stroke_width=max(1, S),
            stroke_fill=(0, 0, 0, 255))
     nw = min(iw - 40 * S, d.textlength(c["name"], font=nf))
     d.rectangle((ix, 214 * S, ix + nw, 220 * S), fill=A[:3] + (255,))
     d.rectangle((ix + nw + 8 * S, 214 * S, ix + nw + 40 * S, 220 * S), fill=A2[:3] + (255,))
     if c.get("sub"):                                             # PAD-1056: its sub header under the rule
-        d.text((ix, 262 * S), c["sub"], font=_fit(d, c["sub"], _TEXT_FONTS, iw, 30 * S, 18 * S), fill=A[:3] + (255,),
-               anchor="ls")
+        d.text((ix, 262 * S), c["sub"], font=_fit(d, c["sub"], _TEXT_FONTS, iw, 30 * S, 18 * S),
+               fill=_hex(th["sub"] or acc), anchor="ls")
     # the band the runtime's words go in
     by = AWARD_WORDS_Y * S
     d.rounded_rectangle((24 * S, by - 6 * S, W - 25 * S, H - 18 * S), radius=14 * S, fill=(6, 8, 14, 255),
@@ -1782,6 +1903,17 @@ def export_settings(project, path):
                               os.path.splitext(src)[1].lower() or ".png")
         c["picture"] = rel
         pictures.append((src, rel))
+    back = backdrop_path(project, chars.get("theme"))          # PAD-1079: the pick's background picture
+    if back:
+        if as_zip:
+            rel = "%s/%s%s" % (FILE_PICTURES, BACKDROP_FILE, os.path.splitext(back)[1].lower() or ".png")
+            chars["theme"]["backdrop"] = rel
+            pictures.append((back, rel))
+        else:
+            chars["theme"].pop("backdrop", None)
+            left_out += 1
+    elif "backdrop" in chars.get("theme", {}):
+        chars["theme"].pop("backdrop")
     text = json.dumps(head, indent=2)
     tmp = path + ".part"
     try:
@@ -1894,6 +2026,21 @@ def import_settings(project, path):
             f.write(blob)
         c["picture"] = "%s/%s" % (PICTURE_DIR, name)
         pictures += 1
+    theme = chars.get("theme") or {}                            # PAD-1079: the pick's background picture
+    rel = theme.pop("backdrop", "")
+    blob = read(rel) if read and rel else None
+    ext = os.path.splitext(rel)[1].lower()
+    if blob and ext in _PICTURE_EXTS:
+        try:
+            with Image.open(io.BytesIO(blob)) as im:
+                im.verify()
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, BACKDROP_FILE + ext), "wb") as f:
+                f.write(blob)
+            theme["backdrop"] = "%s/%s%s" % (PICTURE_DIR, BACKDROP_FILE, ext)
+            pictures += 1
+        except Exception:                               # noqa: BLE001 - not a picture: the stock panel
+            pass
     data = staged_changes.load(project)
     raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
     awards = {}

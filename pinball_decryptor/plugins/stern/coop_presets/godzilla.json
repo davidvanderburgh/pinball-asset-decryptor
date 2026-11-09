@@ -1,22 +1,22 @@
 {
   "game": "Godzilla",
-  "about": "PAD-1031: co-op characters for Godzilla (Pro and Premium/LE). Each teammate picks one at the start of their first ball; no two teammates have the same one; RANDOM picks one nobody has. Each ability holds while its teammate is up. Pictures are your own files: add them in the Modes tab's Characters dialog.",
+  "about": "PAD-1031: co-op characters (PAD-1075: DoomWalrus666's list) for Godzilla (Pro and Premium/LE). Each teammate picks one at the start of their first ball; no two teammates have the same one; RANDOM picks one nobody has. Each ability holds while its teammate is up. Pictures are your own files: add them in the Modes tab's Characters dialog.",
   "theme": {
     "title": "CHOOSE YOUR GODZILLA",
     "accent": "#38c8ff",
     "accent2": "#ff6a1a"
   },
   "characters": [
-    {"name": "GODZILLA 1954", "ability": "longer_save"},
-    {"name": "GODZILLA 2000", "ability": "action_save"},
-    {"name": "GODZILLA GMK", "ability": "heat_ray"},
-    {"name": "GODZILLA 1985", "ability": "addball"},
-    {"name": "DESTROY ALL MONSTERS", "ability": "ally"},
-    {"name": "BURNING GODZILLA", "ability": "spot"},
-    {"name": "KING KONG VS GODZILLA", "ability": "powerups"},
-    {"name": "MOTHRA VS GODZILLA", "ability": "building"},
-    {"name": "GODZILLA VS BIOLLANTE", "ability": "maser"},
-    {"name": "GODZILLA VS MECHAGODZILLA", "ability": "bridge"},
-    {"name": "SHIN GODZILLA", "ability": "tier2"}
+    {"name": "SHODAIGOJI", "sub": "Godzilla (1954)", "ability": "longer_save"},
+    {"name": "KINGOJI", "sub": "Godzilla vs King Kong (1962)", "ability": "powerups"},
+    {"name": "SOSHINGEKI", "sub": "Destroy All Monsters (1968)", "ability": "ally"},
+    {"name": "MEGAROGOJI", "sub": "Godzilla vs Mechagodzilla (1974)", "ability": "bridge"},
+    {"name": "84GOJI", "sub": "Return of Godzilla (1984)", "ability": "addball"},
+    {"name": "BIOGOJI", "sub": "Godzilla vs Biollante (1989)", "ability": "maser"},
+    {"name": "BATOGOJI", "sub": "Godzilla and Mothra: The Battle for Peace (1992)", "ability": "building"},
+    {"name": "DESUGOJI", "sub": "Godzilla vs. Destoroyah (1995)", "ability": "spot"},
+    {"name": "MIREGOJI", "sub": "Godzilla 2000: Millennium (1999)", "ability": "action_save"},
+    {"name": "SOKOGEKIGOJI", "sub": "Godzilla, Mothra and King Ghidorah: Giant Monsters All-Out Attack (2001)", "ability": "heat_ray"},
+    {"name": "FINALGOJI", "sub": "Godzilla: Final Wars (2004)", "ability": "tier2"}
   ]
 }

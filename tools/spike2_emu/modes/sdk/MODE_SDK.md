@@ -6398,7 +6398,11 @@ what it needs):
 - `gift:<id>`: at the teammate's pick and at each of their later turns, the game's own one-shot feature adjustment
   `<id>` (Godzilla: LIGHT ALLY 311, which lights the next of Mothra, Rodan and Anguirus): the game's
   adjustment-changed handler (`site coop_adj_changed`, given `{u16 id}`) is called while the getter answers 1 for it,
-  once per turn.
+  once per turn. PAD-1075: a character takes up to four, given in the order named (Godzilla: LIGHT ALLY 311 and START
+  HEDORAH 319; LIGHT TRAIN 315; LIGHT LIGHT DESTRUCTION JACKPOT 309). Emulator, LE and Pro 1.16: START HEDORAH at the
+  pick put up HEDORAH SMOG MONSTER FRENZY, and START SAUCER ATTACK MB 320 started the multiball, its ball save read
+  through the getter as it began (SAUCER ATTACK MULTIBALL BALL SAVE TIMER 210: 60, its own 30) - so the multiballs'
+  own save timers (203-227, 200) are `adj:` parts too.
 - An `adj:` the game copies into a player's record at the game's start reads the same through the getter but plays
   as the record says. `site coop_cache_<id>` is the method that copies it (hooked to learn the rule's object) and
   `value coop_cache_<id>_at` where (this + player x 4 + at): held at what the getter would answer while the teammate

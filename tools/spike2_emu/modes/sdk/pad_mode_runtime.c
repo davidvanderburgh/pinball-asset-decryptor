@@ -16449,7 +16449,9 @@ static void coop_join_show(void)
  *   gift:<id>                        at the teammate's pick and at each of their later turns, the game's own one-shot
  *                                    feature adjustment <id> (Godzilla:
  *                                    LIGHT ALLY): the game's adjustment-changed handler (`site coop_adj_changed`, given
- *                                    {u16 id}) is called with the getter answering 1 for it, once
+ *                                    {u16 id}) is called with the getter answering 1 for it, once; PAD-1075: up to
+ *                                    COOP_GIFTS of them, given in the order named (Godzilla: LIGHT ALLY and START
+ *                                    HEDORAH)
  * An adjustment the game copies into a player's record when the game starts reads the same through the getter but
  * plays as the record says (Godzilla: LIGHT BATTLE DIFFICULTY into the battle rule's, raised a notch by each battle):
  * the port names the method that copies it (`site coop_cache_<id>`, hooked to learn the rule's object) and where
@@ -16470,7 +16472,8 @@ static void coop_join_show(void)
  * never be able to force a player to continue"): each flipper press under the pick starts its time again, so the time
  * only runs out on a player who has left the buttons alone that long. */
 #define COOP_CHARS 16
-#define COOP_CHAR_ADJ 12
+#define COOP_CHAR_ADJ 16                 /* PAD-1075: ball save, O2 and eleven multiball ball saves on one character */
+#define COOP_GIFTS 4
 #define COOP_PICK_MS 30000ul
 #define COOP_PICK_MAX_S 600u
 #define COOP_PICK_DONE_MS 2500ul
@@ -16486,7 +16489,8 @@ static struct coop_char {
     char name[28], does[28];
     unsigned n_adj;
     struct { unsigned id, op, v, lo, hi; } adj[COOP_CHAR_ADJ];   /* op 0: = v; 1: x v%; 2: + v; 3: - v; 1-3 held to lo..hi */
-    unsigned save_s, bs_adj, boost, gift, spot, unlock_adj, unlock_rules, addball, n_yes, n_double, n_lit;
+    unsigned save_s, bs_adj, boost, spot, unlock_adj, unlock_rules, addball, n_yes, n_double, n_lit;
+    unsigned n_gift, gift[COOP_GIFTS];
     char yes[2][12], dbl[2][12], lit_name[2][12], steps[2][12], keep[2][12];
     unsigned n_steps, n_keep, keep_v[2], keep_floor[2];        /* keep_floor: written only while below v */
     uint64_t lit_mask[2];
@@ -16991,19 +16995,21 @@ static void coop_counts_give(const struct coop_char *c)
     }
 }
 
-/* a character's gift at its pick: the game's own one-shot feature, through its adjustment-changed handler */
+/* a character's gifts at its pick: the game's own one-shot features, through its adjustment-changed handler */
 static void coop_gift(const struct coop_char *c)
 {
     unsigned short ev[8];
-    unsigned k;
-    if (!c->gift || !fn("coop_adj_changed") || !coop_adj_game) return;
-    for (k = 0; k < 8; k++) ev[k] = 0;
-    ev[0] = (unsigned short)c->gift;
-    coop_gift_now = c->gift;
-    ((unsigned (*)(void *))(unsigned long)fn("coop_adj_changed"))(ev);
-    say("co-op: %s - the game's own feature %u given (%s)", c->name, c->gift,
-        coop_gift_now ? "it did not read it" : "it read it");
-    coop_gift_now = 0;
+    unsigned k, g;
+    if (!c->n_gift || !fn("coop_adj_changed") || !coop_adj_game) return;
+    for (g = 0; g < c->n_gift && g < COOP_GIFTS; g++) {
+        for (k = 0; k < 8; k++) ev[k] = 0;
+        ev[0] = (unsigned short)c->gift[g];
+        coop_gift_now = c->gift[g];
+        ((unsigned (*)(void *))(unsigned long)fn("coop_adj_changed"))(ev);
+        say("co-op: %s - the game's own feature %u given (%s)", c->name, c->gift[g],
+            coop_gift_now ? "it did not read it" : "it read it");
+        coop_gift_now = 0;
+    }
 }
 
 /* PAD-1044: the pick's time left after `el` ms more of play (tests lift it verbatim) */
@@ -17583,7 +17589,7 @@ static void coop_char_line(const char *s)
     if (coop_ch_n >= COOP_CHARS) return;
     c = &coop_ch[coop_ch_n];
     c->n_adj = 0;
-    c->save_s = c->bs_adj = c->boost = c->gift = c->n_count = c->spot = c->unlock_adj = c->unlock_rules = 0;
+    c->save_s = c->bs_adj = c->boost = c->n_gift = c->n_count = c->spot = c->unlock_adj = c->unlock_rules = 0;
     c->addball = c->n_yes = c->n_double = c->n_lit = c->n_steps = c->n_keep = 0;
     for (k = 0; k + 1 < sizeof tok && s[k] && s[k] != ' '; k++) tok[k] = s[k];   /* number() eats the space after */
     tok[k] = 0;
@@ -17678,8 +17684,8 @@ static void coop_char_line(const char *s)
             else if (k) c->n_double++;
         } else if (str_starts(p, "gift:")) {
             p += 5;
-            c->gift = (unsigned)number(&p, &ok);
-            if (!ok) c->gift = 0;
+            k = (unsigned)number(&p, &ok);
+            if (ok && k && c->n_gift < COOP_GIFTS) c->gift[c->n_gift++] = k;
         } else if (str_starts(p, "bs:")) {
             p += 3;
             c->bs_adj = (unsigned)number(&p, &ok);
@@ -17712,11 +17718,11 @@ static void coop_chars_arm(struct site *e)
     coop_chars_begin();
     if (!coop_ch_n) return;
     for (i = 0; i < coop_ch_n; i++) {
-        adj |= coop_ch[i].n_adj != 0 || coop_ch[i].gift != 0 || coop_ch[i].unlock_adj != 0;
+        adj |= coop_ch[i].n_adj != 0 || coop_ch[i].n_gift != 0 || coop_ch[i].unlock_adj != 0;
         save |= coop_ch[i].spot != 0 || coop_ch[i].addball != 0;
         save |= coop_ch[i].save_s != 0;
         boost |= coop_ch[i].boost != 0;
-        gift |= coop_ch[i].gift != 0;
+        gift |= coop_ch[i].n_gift != 0;
     }
     if (adj && adj_wrap_arm()) {                                  /* PAD-1033: the one wrap, answered in turn */
         coop_adj_game = adj_game;
@@ -17725,7 +17731,7 @@ static void coop_chars_arm(struct site *e)
     if (adj && !coop_adj_game) {
         say("co-op characters: the adjustment abilities are off - the port names no adjustment getter, or it could "
             "not be wrapped");
-        for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_adj = coop_ch[i].gift = 0;
+        for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_adj = coop_ch[i].n_gift = 0;
         gift = 0;
     }
     for (i = 0; coop_adj_game && i < coop_ch_n; i++)            /* the records an adjustment of theirs is copied into */
@@ -17908,7 +17914,7 @@ static void coop_chars_arm(struct site *e)
         }
     if (gift && !fn("coop_adj_changed")) {
         say("co-op characters: the gifts are off - the port names no coop_adj_changed");
-        for (i = 0; i < coop_ch_n; i++) coop_ch[i].gift = 0;
+        for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_gift = 0;
     }
     if ((coop_pick_on || save) && !(edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
         say("co-op characters: off - the switch drain could not be hooked, so no pick could be made");
@@ -17937,7 +17943,7 @@ static void coop_chars_arm(struct site *e)
         say("co-op characters: coop.cfg names no shooter lane - every Action press counts toward x2, a launch's too");
     coop_live = 1;
     for (i = 0; i < coop_ch_n; i++) {
-        char how[96];
+        char how[256];                       /* PAD-1075: thirteen adjustments and two gifts */
         unsigned o = 0;
         how[0] = 0;
         for (k = 0; k < coop_ch[i].n_adj && o + 24 < sizeof how; k++)
@@ -17968,8 +17974,8 @@ static void coop_chars_arm(struct site *e)
         if (coop_ch[i].unlock_adj && o + 24 < sizeof how)
             o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sadjustment %u after rules 0x%x", o ? ", " : "",
                                        coop_ch[i].unlock_adj, coop_ch[i].unlock_rules);
-        if (coop_ch[i].gift && o + 24 < sizeof how)
-            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sgift %u", o ? ", " : "", coop_ch[i].gift);
+        for (k = 0; k < coop_ch[i].n_gift && o + 24 < sizeof how; k++)
+            o += (unsigned)pm_snprintf(how + o, sizeof how - o, "%sgift %u", o ? ", " : "", coop_ch[i].gift[k]);
         say("co-op character %d: %s (%s) - %s", i + 1, coop_ch[i].name, coop_ch[i].does, o ? how : "no ability");
     }
     say("co-op characters: %d; %s, %u s to pick (0: no limit)", coop_ch_n,

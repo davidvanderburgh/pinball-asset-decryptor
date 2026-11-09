@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- The Emulate tab's Sound and video log (PAD-1071) in a window of its own: every sound and
+     clip the game started, in order. Opened by webui/emulate_log.py LogWindow (or as a browser
+     tab without a native window); drawn by mountLog() in emulate_log.js. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound and video log</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/css/tabs/emulate_log.css">
+<script type="module">
+  import { mountLog } from "/static/js/tabs/emulate_log.js";
+  mountLog(document.getElementById("app"));
+</script>
+</head>
+<body class="elog-body">
+<div id="app"></div>
+</body>
+</html>

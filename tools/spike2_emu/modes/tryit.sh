@@ -8,7 +8,7 @@
 #   tryit.sh install <stage dir>   before the run: <stage>/pad_mode.so -> $ROOT/lib/pad_mode.so
 #                                  (PAD_MODE_SO=/lib/pad_mode.so), <stage>/game.port ->
 #                                  $ROOT/dump/game.port, <stage>/gamecheck.on (Check this game,
-#                                  gamecheck.sh) -> $ROOT/dump, <stage>/mode*.cfg (and stock/clips/sounds/picture/attract/coop/idle/handicap/comp/cabshow.cfg) and each code mode's
+#                                  gamecheck.sh) and <stage>/soundlog.only (PAD-1071) -> $ROOT/dump, <stage>/mode*.cfg (and stock/clips/sounds/picture/attract/coop/idle/handicap/comp/cabshow.cfg) and each code mode's
 #                                  <stage>/<slug>.assets (sdk/pad_mode_assets.h) -> $ROOT/dump,
 #                                  after clearing the mode files, triggers and mode.log a
 #                                  previous run left there. cardmodes.sh calls this too, for
@@ -124,12 +124,17 @@ case "$cmd" in
         rm -f "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/mode.start "$DUMP"/mode[1-7].start \
               "$DUMP"/mode.stop "$DUMP"/mode.clip "$DUMP"/mode.log "$DUMP"/cardmodes.from \
               "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/gamecheck.on \
-              "$DUMP"/census.mark
+              "$DUMP"/census.mark "$DUMP"/soundlog.only
         put "$S/pad_mode.so" "$LIB/pad_mode.so" || die "could not copy the mode object into $LIB"
         put "$S/game.port" "$DUMP/game.port" || die "could not copy the port into $DUMP"
         # the Modes tab's Check this game: the object logs what the game sends (mode_file.c)
         if [ -f "$S/gamecheck.on" ]; then
             put "$S/gamecheck.on" "$DUMP/gamecheck.on" || die "could not copy gamecheck.on"
+        fi
+        # PAD-1071: the Emulate tab's stage for a boot with no runtime of its own - the object hooks the
+        # sound worker for the Sound and video log and nothing else (modes/soundlog.sh)
+        if [ -f "$S/soundlog.only" ]; then
+            put "$S/soundlog.only" "$DUMP/soundlog.only" || die "could not copy soundlog.only"
         fi
         n=0
         for f in "$S"/mode.cfg "$S"/mode[1-7].cfg; do
@@ -192,7 +197,7 @@ case "$cmd" in
         # game reads them as root), so it is said, not fatal.
         if [ "$(id -u)" = 0 ]; then
             given=("$LIB/pad_mode.so" "$DUMP/game.port")
-            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/gamecheck.on; do
+            for f in "$DUMP"/mode.cfg "$DUMP"/mode[1-7].cfg "$DUMP"/*.assets "$DUMP"/stock.cfg "$DUMP"/clips.cfg "$DUMP"/sounds.cfg "$DUMP"/picture.cfg "$DUMP"/attract.cfg "$DUMP"/coop.cfg "$DUMP"/idle.cfg "$DUMP"/handicap.cfg "$DUMP"/comp.cfg "$DUMP"/cabshow.cfg "$DUMP"/gamecheck.on "$DUMP"/soundlog.only; do
                 [ -f "$f" ] && given+=("$f")
             done
             pad_give_back "${given[@]}"

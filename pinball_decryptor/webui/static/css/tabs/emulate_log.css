@@ -1,0 +1,14 @@
+/* The Sound and video log (PAD-1071): its own window, emulate_log.html. The list fills the
+   window under a bar of filters. */
+html, body.elog-view { height: 100%; }
+body.elog-view { margin: 0; background: var(--bg); overflow: hidden; }
+body.elog-view #app { height: 100%; }
+.elog { height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; box-sizing: border-box; }
+.elog-bar { flex: 0 0 auto; gap: 8px 12px; align-items: center; }
+.elog-bar .sp { flex: 1 1 auto; }
+.elog-table { flex: 1 1 auto; min-height: 0; display: flex; }
+.elog-table > .tbl { flex: 1 1 auto; min-height: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.elog-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.elog-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.elog-act { gap: 4px; justify-content: flex-end; }
+.elog-foot { flex: 0 0 auto; }

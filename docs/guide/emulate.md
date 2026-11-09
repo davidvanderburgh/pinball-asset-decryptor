@@ -172,6 +172,7 @@ session.
   screen (an unplugged monitor) is skipped. **Reset windows** puts them all
   back at their defaults.
 - **Game display** picks the game window's monitor and whether it sits where you leave it, fills the screen or takes a set window, with or without a frame. A change reaches a running game within a second.
+- **Sound and video log** (**Open** under **Windows the emulator opens**) lists every sound and clip the game starts, in order, named from the project. Play a sound in place, or double-click a row to open it on the Audio or Video tab.
 - **Silence after the boot chime** usually means it is still at Tech
   Alerts.
 

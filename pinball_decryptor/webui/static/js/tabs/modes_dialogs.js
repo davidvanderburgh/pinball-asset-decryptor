@@ -311,7 +311,7 @@ export function CoopCharsDialog({ s, onClose }) {
     })}
     <div class="row" style="gap:8px;margin-top:6px">
       <${Field} value=${r.header || ""} sm maxLength=${ch.max_header || 96} width=${320} placeholder=${r.words || "Header: the badge's words (optional)"}
-        title="The badge on its cards. Empty: its powers' words (a set ability's name when the list is exactly one)."
+        title="The badge on its cards, in your own words. Empty: its powers' words (a set ability's name when the list is exactly one); words too long for the card are cut short there."
         onCommit=${(v) => { if (v !== (r.header || "")) call("modes.coop_char_set", i, null, null, null, v); }} />
       <${Select} sm value="" options=${opts} width=${260}
         title="Put one of the set abilities' powers on this character in place of its list, as a starting point (No powers: an empty list)."
@@ -333,7 +333,9 @@ export function CoopCharsDialog({ s, onClose }) {
       ${r.powers.length ? `Powers (${r.powers.length})` : "Powers…"}<//>
     <span class=${cx("small wrap modes-coop-ch-does", r.lost ? "warn-ink" : "dim")}>${r.lost ? "Its powers are not on this game yet: none on the card."
       : r.powers.length ? html`<b>${r.words}</b> ${r.line}${r.missing.length ? html` <span class="warn-ink">(${r.missing.length} not on this game, left off the card)</span>` : null}`
-      : "Plays as the game always does."}</span>
+      : "Plays as the game always does."}${r.badge_cut ? html` <span class="warn-ink">Too long for its card, which shows
+      "${r.badge_cut}". <a href="#" onClick=${(e) => { e.preventDefault(); setOpen(i); }}
+      title="Opens its powers, where the box under them takes the badge's own words.">Write shorter badge words</a>.</span>` : null}</span>
     <span class="modes-coop-ch-acts">
       <${Well} value=${r.colour || (ch.look ? ch.look.colours[0].value : "")}
         title=${r.colour ? "Its own frame color on its cards: pick another." : "The frame color on its cards (the look's): pick one of its own."}

@@ -875,8 +875,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         for c in chars["list"]:
             got = _CP.compose(c["powers"], parts) if pw else {"cfg": "", "line": "", "missing": list(c["powers"]),
                                                              "over": []}
+            shown, cut = _CP.badge_on_card(c, wf if pw else None)
             rows.append({"name": c["name"], "sub": c["sub"], "ability": c["ability"], "powers": list(c["powers"]),
                          "header": c["header"], "words": _CP.character_words(c, wf if pw else None),
+                         "badge_cut": shown if cut else "",       # PAD-1083: too long for its card: what shows
                          "line": got["line"], "missing": got["missing"], "over": got["over"],
                          "lost": bool(c["powers"]) and not got["cfg"],
                          "picture": bool(_CP.picture_path(project, c)), "colour": c.get("colour") or "",

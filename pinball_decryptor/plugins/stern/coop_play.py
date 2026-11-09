@@ -634,6 +634,10 @@ LIMITS = {"adj": 24, "gift": 6, "count": 4, "keep": 4, "steps": 4, "lit": 4, "ye
 MAX_CFG = 767
 #: the longest badge the card shows (PAD-1075: a long one shrinks and takes three lines)
 MAX_HEADER = 96
+#: PAD-1083: the badge's smallest size on the pick card (px at scale 1) and its words' room there: the card's words
+#: column (CARD_SIZE wide less the portrait and margins, pick_card's iw) less the pill's ends
+BADGE_LEAST = 14
+BADGE_ROOM = 1280 - (40 + 380 + 44) - 44 - 40
 
 #: why an ability is not offered on a card
 NO_ADJ = "%s's game program has no %s setting."
@@ -795,6 +799,41 @@ def character_words(character, words_for=None):
     if bundle:
         return dict((a[0], a[1]) for a in ABILITIES)[bundle]
     return ", ".join(wf[k] for k in keys)
+
+
+def badge_label(draw, character, label, words_for, room, S):
+    """PAD-1083: the badge *label* as the pick card shows it in *room* px at its smallest size (``BADGE_LEAST * S``):
+    ``(label, cut)``. A label that fits is as it is; past that, a character's powers' words keep as many whole powers
+    as fit and say how many more (``MASER LIT, MAGNA GRAB LIT +4 MORE``), and its own words (or one power's too long
+    alone) stop at the last whole word that fits, with ``...``. *cut* is True when it was shortened."""
+    f = _face(_TEXT_FONTS, BADGE_LEAST * S)
+    fits = lambda t: draw.textlength(t, font=f) <= room                      # noqa: E731
+    if fits(label):
+        return label, False
+    if not character.get("header"):
+        wf = words_for if words_for is not None else {p[0]: p[2] for p in POWERS}
+        words = [wf[k] for k in character.get("powers") or [] if k in wf]
+        if ", ".join(words) == label:                                       # its powers' words, one by one
+            for n in range(len(words) - 1, 0, -1):
+                t = "%s +%d MORE" % (", ".join(words[:n]), len(words) - n)
+                if fits(t):
+                    return t, True
+    words = label.split()
+    while len(words) > 1 and not fits(" ".join(words) + "..."):
+        words.pop()
+    t = " ".join(words)
+    while t and not fits(t + "..."):
+        t = t[:-1]
+    return t.rstrip(" ,") + "...", True
+
+
+def badge_on_card(character, words_for=None):
+    """PAD-1083: ``(label, cut)``, the badge the pick card shows for *character* (:func:`badge_label` at the card's
+    own size), for the Characters dialog to say when it is too long."""
+    from PIL import Image, ImageDraw
+    S = 2
+    label = character_words(character, words_for) or "NO SPECIAL ABILITY"
+    return badge_label(ImageDraw.Draw(Image.new("L", (1, 1))), character, label, words_for, BADGE_ROOM * S, S)
 
 
 def character_line(character, words_for=None):
@@ -1823,7 +1862,8 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
     else:
         label = character_words(c, words_for) or "NO SPECIAL ABILITY"      # round 6: its powers' words, or its own
         does = character_line(c, words_for) if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
-    bf = _fit(d, label, _TEXT_FONTS, iw - 40 * S, 24 * S, 14 * S)     # PAD-1075: a long badge shrinks to the card
+        label = badge_label(d, c, label, words_for, iw - 40 * S, S)[0]    # PAD-1083: never past the card's edge
+    bf = _fit(d, label, _TEXT_FONTS, iw - 40 * S, 24 * S, BADGE_LEAST * S)  # PAD-1075: a long badge shrinks to the card
     bw = d.textlength(label, font=bf) + 40 * S
     by = (222 if sub else 208) * S
     d.rounded_rectangle((ix, by, ix + bw, by + 46 * S), radius=23 * S, fill=ink["badge"])

@@ -6343,6 +6343,15 @@ plays one player for the team, so nothing per player is copied: an ability chang
     character adj:94x200:0:15,bs:94 GODZILLA 1954|LONGER BALL SAVE
     character save:10 GODZILLA 2000|ACTION BUTTON BALL SAVE
     character adj:195x50:4:30 GODZILLA GMK|EASIER HEAT RAY
+    char_clip 1 PadCoopClip1                  PAD-1079: character 1's own video (a clip the build added)
+    clip_crop Normal                          the bank crop the videos play at (the app writes Normal: 1:1 on the glass;
+                                              not given, the port's backdrop_crop - Godzilla's ScoreFrame is x1.065, -43,-98)
+
+PAD-1079: a character with `char_clip` has a see-through window in its pick card's portrait frame (the app cuts it
+only on a title whose port has the backdrop, `backdrop_draw`). While its card is on the glass (the pick on it, then
+PICKED) the runtime loops its clip as the backdrop, behind the HUD in the city's place, and gives the backdrop back
+when the card goes. The app makes the clip the bank's size with the owner's video where the window is on the glass, on
+black, so the backdrop stretched over the glass puts the video in the frame.
 
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 

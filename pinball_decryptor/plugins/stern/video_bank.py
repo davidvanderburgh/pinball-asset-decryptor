@@ -168,6 +168,29 @@ def _marked(r, ids):
                 r.string()
 
 
+def crop_transform(data, label, bank=None):
+    """PAD-1079: the VideoSurface's transform at the root's crop *label* (``Normal``, ``ScoreFrame`` ...): its keyframe
+    track's 16 floats (a 4x4 matrix, the move in [12:14]), or None when the scene has no such crop. Godzilla LE 1.16:
+    Normal is the identity, ScoreFrame x1.065 moved -43,-98."""
+    bank = bank or parse(data)
+    frame = dict(bank.labels).get(label)
+    name = bank.surface_node.encode("latin1") if bank.surface_node else b""
+    at = data.find(struct.pack("<Q", len(name)) + name) if name else -1
+    if frame is None or at < 0:
+        return None
+    p = at + 8 + len(name) + 4                       # name, u32 flag
+    try:
+        n = struct.unpack_from("<Q", data, p)[0]
+        p += 8 + 5 * n + 8                           # keyframes (u32, u8), u64 0
+        for _ in range(struct.unpack_from("<Q", data, p)[0]):
+            if struct.unpack_from("<I", data, p + 8)[0] == frame:
+                return struct.unpack_from("<16f", data, p + 12)
+            p += 68
+    except struct.error:
+        return None
+    return None
+
+
 def parse(data):
     """Walk a video bank scene. Raises VideoBankError unless it walks to its last byte."""
     r = _Reader(data)

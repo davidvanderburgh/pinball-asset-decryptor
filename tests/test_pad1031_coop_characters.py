@@ -376,7 +376,8 @@ def test_the_project_keeps_its_characters_beside_its_awards(tmp_path):
                                                                 {"name": ""}, "junk"]})
     assert chars == {"pick": True, "time": CP.PICK_TIME,                    # round 6: an old ability is its bundle's powers
                      "list": [{"name": "GODZILLA 1954", "sub": "", "powers": CP.ABILITY_POWERS["longer_save"],
-                               "header": "", "ability": "longer_save", "picture": ""}]}
+                               "header": "", "ability": "longer_save", "picture": "", "colour": "",
+                               "video": ""}]}
     CP.save(project, False)                                          # unticked: the choices stay
     assert CP.load_characters(project) == chars
     assert CP.load_awards(project) == {"score": {"on": False}}
@@ -666,8 +667,8 @@ def test_spot_and_unlock_read_from_coop_cfg():
 def test_tags_name_what_sets_a_character_apart():
     names = ["GODZILLA 1954", "GODZILLA GMK", "DESTROY ALL MONSTERS", "KING KONG VS GODZILLA", "GODZILLA VS MECHAGODZILLA"]
     assert [CP.tag_of(n, names) for n in names] == ["1954", "GMK", "DAM", "KK", "MECHA"]
-    assert CP.theme_of({"title": "choose your godzilla", "accent": "#38c8ff", "bogus": 1}) == {
-        "title": "CHOOSE YOUR GODZILLA", "accent": "#38c8ff", "accent2": CP.THEME["accent2"]}
+    assert CP.theme_of({"title": "choose your godzilla", "accent": "#38c8ff", "bogus": 1}) == dict(
+        CP.THEME, title="CHOOSE YOUR GODZILLA", accent="#38c8ff")                 # PAD-1079: the rest stock
     preset = CP.read_preset(CP.presets()["godzilla"])["characters"]
     assert preset["theme"]["title"] == "CHOOSE YOUR GODZILLA"
     assert set(CP.CARD_LINES) == {a[0] for a in CP.ABILITIES}         # every ability has the player's words

@@ -879,7 +879,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                          "header": c["header"], "words": _CP.character_words(c, wf if pw else None),
                          "line": got["line"], "missing": got["missing"], "over": got["over"],
                          "lost": bool(c["powers"]) and not got["cfg"],
-                         "picture": bool(_CP.picture_path(project, c))})
+                         "picture": bool(_CP.picture_path(project, c)), "colour": c.get("colour") or "",
+                         "video": bool(_CP.video_path(project, c))})                         # PAD-1079
         lost = sum(1 for r in rows if r["lost"])
         partly = sum(1 for r in rows if r["missing"] and not r["lost"])
         note = ("%d character(s). " % len(rows) if rows else "") + (
@@ -895,9 +896,27 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "groups": list(_CP.POWER_GROUPS), "refused": getattr(self, "_coop_refused", ""),
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
+                          "look": self._coop_look(project, chars),                              # PAD-1079
+                          "videos": "" if prof is None or _CP.can_video(prof) else (
+                              "%s cannot play a video behind its pick screen yet: a character's video is kept, and "
+                              "its picture shows." % prof.label),
                           "max_name": _CP.MAX_NAME, "max_sub": _CP.MAX_SUB, "max_header": _CP.MAX_HEADER,
                           "max": _CP.MAX_CHARACTERS})
         self._coop_refused = ""
+
+    def _coop_look(self, project, chars):
+        """PAD-1079: the pick's look for the dialog's Look section: the title, each colour as the cards draw it
+        (``own``: the owner set it), the background picture and how dark it is."""
+        from ...plugins.stern import coop_play as _CP
+        th = _CP.theme_of(chars.get("theme"))
+        own = chars.get("theme") or {}
+        colours = [{"key": k, "label": label, "value": th[k] or (_CP.PANEL_STOCK if k == "panel" else th["accent"]),
+                    "own": bool(own.get(k)), "follows": not th[k],
+                    "hint": ("the stock dark panel until you pick one" if k == "panel"
+                             else "the frame's colour until you pick one") if not th[k] else ""}
+                   for k, label in _CP.COLOUR_ROLES]
+        return {"title": th["title"], "colours": colours, "backdrop": bool(_CP.backdrop_path(project, th)),
+                "dim": th["dim"], "dims": list(_CP.DIMS)}
 
     def _save_coop_chars(self, project, chars, what, was, now):
         from ...core import history_log
@@ -962,6 +981,33 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return True
 
     @rpc
+    def coop_char_video(self, i, clear=False):
+        """PAD-1079: Video... on a character: a video of the owner's copied into the project (``coop/``), played in
+        its pick card's portrait frame; *clear* puts its picture back."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        chars = _CP.load_characters(project) if project else None
+        if not chars or not 0 <= int(i) < len(chars["list"]):
+            return False
+        name = chars["list"][int(i)]["name"]
+        if clear:
+            _CP.save_video(project, int(i), None)
+        else:
+            path = self.window.ask_open("modes_file", "Choose %s's video" % name,
+                                        [("Videos", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_video(project, int(i), path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op characters: %s's video is %s" % (name, os.path.basename(path)))
+        self.set(coop_ch_at=int(i))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
     def coop_chars_pictures(self):
         """PAD-1031: Pictures from folder...: every picture in a folder named after a character becomes its picture
         (the set a game's owners share: godzilla_1954.png ...)."""
@@ -981,6 +1027,79 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                   "; none for " + ", ".join(missing) if missing else ""))
         self._publish_coop_chars(project)
         return True
+
+    @rpc
+    def coop_chars_look(self, key, value=None):
+        """PAD-1079: one part of the pick's look: its title, a colour (``#rrggbb``; ``""`` the default again) or how
+        dark its background picture is drawn."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project or not _CP.load_characters(project)["list"]:
+            return False
+        was = _CP.theme_of(_CP.load_characters(project).get("theme")).get(key, "")
+        try:
+            chars = _CP.save_look(project, str(key), value)
+        except _CP.CoopError as e:
+            self._say(str(e))
+            return False
+        now = _CP.theme_of(chars.get("theme")).get(key, "")
+        hist = history_log.diff_scalar("modes  co-op pick look %s" % key, str(was) or "default", str(now) or "default")
+        history_log.record(project, [hist] if hist else [])
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_chars_look_default(self):
+        """PAD-1079: the pick's look as the game's set has it (the owner's title, colours and background gone)."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        _CP.save_look_default(project)
+        hist = history_log.diff_scalar("modes  co-op pick look", "changed", "default")
+        history_log.record(project, [hist] if hist else [])
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_chars_backdrop(self, clear=False):
+        """PAD-1079: Background...: a picture of the owner's behind every pick card (and award card); *clear* puts
+        the panel back."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project or not _CP.load_characters(project)["list"]:
+            return False
+        if clear:
+            _CP.save_backdrop(project, None)
+        else:
+            path = self.window.ask_open("modes_file", "Choose the pick screen's background picture",
+                                        [("Pictures", "*.png *.jpg *.jpeg")])
+            if not path:
+                return False
+            try:
+                _CP.save_backdrop(project, path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op characters: the pick's background is %s" % os.path.basename(path))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_char_colour(self, i, colour=""):
+        """PAD-1079: one character's own frame colour on its cards (``""``: the look's)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        chars = _CP.load_characters(project) if project else None
+        if not chars or not 0 <= int(i) < len(chars["list"]):
+            return False
+        c = chars["list"][int(i)]
+        was, c["colour"] = c.get("colour") or "", _CP.clean_colour(colour)
+        self.set(coop_ch_at=int(i))
+        return self._save_coop_chars(project, chars, "%s colour" % c["name"], was or "the look's",
+                                     c["colour"] or "the look's")
 
     @rpc
     def coop_chars_refresh(self):

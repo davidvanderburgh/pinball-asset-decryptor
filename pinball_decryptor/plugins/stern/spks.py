@@ -39,6 +39,8 @@ SPKS_MAGIC2 = 0x6A6F4697
 _SPK0 = b"SPK0"
 _STRS = b"STRS"
 _SIDX = b"SIDX"
+_FEND = b"FEND"
+_SDAT = b"SDAT"
 # Per-file index record.  Small sections use 32-bit ``FINF`` (60 bytes); the
 # game section, whose data region is >4 GB, uses 64-bit ``FI64`` (80 bytes).
 _FINF = b"FINF"
@@ -149,15 +151,20 @@ class SpksArchive:
                     break
                 fp += i
 
-        # skip the end-of-index / start-of-data markers (FEND/SDAT, or their
-        # 64-bit twins) -> data base.  Each is tag(4)+size(4).
+        # End-of-index / start-of-data markers, then the data region.
+        #   "FEND" tag(4)+size(4)            -- end of the index
+        #   "SDAT" tag(4)+size(4)            -- start of data
+        # When SDAT's size is the 0xffffffff sentinel (the 64-bit game
+        # section), an 8-byte data-region header (CRC + version) follows before
+        # the first file; when it is 0 (small sections) the data starts at once.
         data_base = fp
-        for _ in range(2):
-            t = self._read(data_base, 4)
-            if t[:2] in (b"FE", b"SD") and t not in (_FINF, _FI64):
+        if self._read(data_base, 4) == _FEND:
+            data_base += 8
+        if self._read(data_base, 4) == _SDAT:
+            sdat_sz = struct.unpack("<I", self._read(data_base + 4, 4))[0]
+            data_base += 8
+            if sdat_sz == 0xFFFFFFFF:
                 data_base += 8
-            else:
-                break
 
         total = 0
         for noff, ssz, doff, mode in records:

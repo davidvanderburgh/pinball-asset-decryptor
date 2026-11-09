@@ -413,8 +413,8 @@ def test_godzillas_abilities_and_lines_read_off_its_program():
     full = {a["key"]: a["cfg"] for a in CP.abilities(elf, "Godzilla", port["site"], port["value"])}
     assert full["heat_ray"] == "adj:195x50:4:30,count:heatlevel=3,count:heatspins=9,gift:315"   # PAD-1075: a train
     assert full["powerups"] == "boost:200,double:saucer,double:rampage,keep:djmult>=1"
-    assert full["maser"] == "lit:maser=0x8000000,yes:maser,keep:magna=1,steps:powerline,gift:309"
-    assert full["building"] == "adj:168=0,steps:building,double:spins,double:shield,double:saucer"
+    assert full["maser"] == "lit:maser=0x8000000,yes:maser,keep:magna=1,steps:powerline,double:saucer,gift:309"
+    assert full["building"] == "adj:168=0,steps:building,double:spins,double:shield"
     assert full["ally"] == "gift:311,adj:199x200:40:120,gift:319"                         # ... and Hedorah
     assert full["spot"] == ("spot:0x7f000,adj:212+10:30:80,adj:213+10:30:80,adj:214+10:30:80,adj:215+10:30:80,"
                             "adj:216+10:30:100,adj:218+10:30:100")
@@ -588,10 +588,33 @@ def test_godzillas_set_is_doomwalrus666s_list():
         ("FINALGOJI", "Godzilla: Final Wars (2004)", "tier2")]
     words = {a[0]: a[1] for a in CP.ABILITIES}
     assert words["ally"] == "AN ALLY EVERY BALL, LONGER RODAN, HEDORAH STARTS"
-    assert words["maser"] == "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES"
-    assert words["building"] == "BUILDING, MECHA, AND SAUCER MULTIBALLS"
+    assert words["maser"] == "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES AND POP HITS"
+    assert words["building"] == "BUILDING AND MECHA MULTIBALLS"                  # his later message: pops to BioGoji
     assert words["spot"] == "SPOT A BATTLE SHOT, LONGER BATTLE TIMERS"
     assert words["heat_ray"] == "HEAT RAY READY, EASIER HEAT RAY, TRAINS ALWAYS LIT"
+
+
+def test_no_character_asks_the_runtime_for_more_than_it_keeps():
+    """PAD-1075: coop_char_line keeps two of each of count/keep/steps/lit/yes/double, four gifts and COOP_CHAR_ADJ
+    adjustments, and drops the rest without a word - BatoGoji's third double: (saucer) was never held. Every ability
+    of the shipped set, on both Godzilla builds, fits."""
+    if not os.path.isfile(GZ_ELF):
+        pytest.skip("no Godzilla LE 1.16 program here")
+    import re
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    src = RUNTIME.read_text(encoding="utf-8")
+    line = R._lift(src, "static void coop_char_line(const char *s)")
+    caps = {k: int(n) for k, n in re.findall(r'str_starts\(p, "(\w+):"\) && c->n_\w+ < (\d+)', line)}
+    assert {"count", "keep", "steps", "lit", "yes", "double"} <= set(caps)
+    caps["gift"] = int(re.search(r"#define COOP_GIFTS (\d+)", src).group(1))
+    caps["adj"] = int(re.search(r"#define COOP_CHAR_ADJ (\d+)", src).group(1))
+    elf = open(GZ_ELF, "rb").read()
+    for key in ("godzilla_le-1.16", "godzilla_pro-1.16"):
+        port = MP.read_port(str(RUNTIME.parent / "ports" / (key + ".port")))
+        for a in CP.abilities(elf, "Godzilla", set(port["site"]) | set(port["data"]), port["value"]):
+            kinds = [part.split(":")[0] for part in a["cfg"].split(",") if part]
+            for kind, cap in caps.items():
+                assert kinds.count(kind) <= cap, (key, a["key"], kind, a["cfg"])
 
 
 def test_a_long_badge_and_line_stay_on_the_card():

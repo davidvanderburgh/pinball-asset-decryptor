@@ -192,9 +192,10 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
     s = settings[0]
     # PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2 (Off/On's 0 and 1 keep their meaning), shown as a number the way GAME ID
     # is, Off to start with
-    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", 7, 0, 0, M.number_kind(AdjustmentTable(elf)))
+    assert (s.caption, s.values, s.low, s.default, s.kind) == ("Co-op Play", CP.MENU_VALUES, 0, 0, M.number_kind(AdjustmentTable(elf)))
     assert s.kind == 2 and len(CP.MENU_HELP) <= 63
-    assert CP.MENU_HELP.startswith("0 Off. Enhanced 1 Co-op 2 2v2 3 2v1. 4-6 Classic") and "Insider off" in CP.MENU_HELP
+    assert CP.MENU_VALUES == 3                                # PAD-1073: 0 Off, 1 Classic, 2 Enhanced
+    assert CP.MENU_HELP.startswith("0 Off. 1 Classic. 2 Enhanced") and "Insider off" in CP.MENU_HELP
     assert s.help == CP.MENU_HELP and s.where == "Adjustments > Machine Settings > Attract Mode"
     raw = bytearray(elf)
     for off, data in writes.items():

@@ -367,3 +367,31 @@ and every later turn. Saucer Attack Multiball "after 4 saucers instead of 6": th
 +0x37+p is capped at 4), so per his fallback the building character's pop hits count twice (double:saucer) for an
 earlier Saucer Attack Multiball. COOP_CHAR_ADJ 12 -> 16 (the longer save has 14). The pick card: the badge shrinks to
 the card, a long line takes three 21 px lines; MAX_SUB 80 (GMK's film title is 72).
+
+## Round 6 (2026-11-08): the reporter asks about unused ally abilities and further ideas
+
+No code change; the answer and the spreadsheet (artifacts `discord/godzilla_abilities.csv`, built by
+`C:\tmp\PAD-1031\abilities_csv.py`) carry it. Read from the 1.16 LE program (Pro offsets as before):
+
+- Allies rule object 0x7b2e28: `+0x1c` a vector of three 16-byte entries (one word a player, 1-based), index 0 Mothra,
+  1 Rodan, 2 Anguirus; state 0 unlit, 1 lit, 2 summoned. "Light next ally" 0x121c28 starts at a random ally unless
+  adjustment 99 (competition) is 1, then takes the first unlit one; LIGHT ALLY (311) goes through it (0x59bac).
+  Summon 0x11f210(obj, k, score, ...): Mothra sets byte `+0x37 + p` (her save armed; consumed by 0x11ec64 which
+  counts `+0x3c + 4(p-1)` for her champion, then 0x11ec18 clears the flag and puts her state back to 0 - allies can
+  be lit again after use); Rodan reads AD_RODAN_PLAYFIELD_MULTIPLIER_TIMER and adds 15 s when the player owns the
+  "RODAN TIMER +15 SECONDS" power-up; Anguirus sets byte `+0x77 + p` (pending), a countdown on timer slot 0x1b of
+  0x7ae024 then 0x11ee68 clears it and a multiball (0xc5620) adds the ball. Both flag bytes clear at the ball's end
+  (0x11e5bc / 0x11e5ec). The ball save after any added ball is AD_ADD_A_BALL_SAVE_TIMER (200, 5..10 s, read by the
+  generic add-a-ball 0xd7174 when the rule does not override it).
+- Godzilla power-ups (the perks picked at the scoop): 31 names at 0x5fcac0.. (string order is the reverse of the ids;
+  "RODAN TIMER +15 SECONDS" is id 20), owned per player as bits of the word `0x7b2dd0 + 0x44 + 4p`; the rules test a
+  bit with 0x14e388(id) (loops 8 at 0x12b520, super spinner 22 at 0x152894, Magna Grab 21 at 0x156a9c, Rage Combo 11
+  at 0x16d37c, Destruction Jackpot +3 s 18 at 0x148614, battle timers 15/16/17, saucer 9/10, skill shot 2, jet
+  fighters 24, multiball base jackpots 5/6). A character that starts owning one needs a new keep form that ORs a bit
+  (`keep:` writes a value; `lit:` only works on a rule's shot mask) - listed as "next" for the reporter.
+- After the PAD-1075 merge a character takes up to four gifts in order, so three LIGHT ALLY gifts (all three allies lit)
+  are possible but untested; `keep:` holds a byte or word a player but every tick, so a once-a-ball Mothra/Anguirus
+  flag needs a set-at-turn-start form. PAD-1075's longer save already doubles the add-a-ball save (200).
+- Fresh setting-based ideas added to the sheet: Rampage ball save never shrinks / extra ball sooner, KOTM time attack loops +10 s / 8 minutes, city combos
+  extra ball at 4, three wallop ball saves, shorter Hedorah, slower tanks, easier Ghidorah and Gigan, bigger
+  Destruction Jackpots / annihilation bonuses, Planet X city unlocked, THEME MUSIC per character, MORE GOATS.

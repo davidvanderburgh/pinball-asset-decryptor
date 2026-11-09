@@ -4,8 +4,9 @@ BIOGOJI's pick card full size, whose badge ran off the card.
     python scripts/shot_pad1083.py <repo> <out_dir> <before|after>
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card, opens the
-Modes tab's Co-op characters dialog, loads Godzilla's set and shows BIOGOJI. Writes <out_dir>/<kind>_characters_dialog.png
-and <kind>_card_biogoji.png.
+Modes tab's Co-op characters dialog, loads Godzilla's set and shows BIOGOJI. Writes <out_dir>/<kind>_card_biogoji_set.png (the set as
+loaded), then, with BIOGOJI's own badge words emptied (a project saved before the set had them),
+<kind>_characters_dialog.png and <kind>_card_biogoji.png.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
 """
@@ -75,13 +76,26 @@ def main():
             page.wait_for_selector("text=Co-op characters", timeout=180000)
             webui_shot.api(url, "modes.coop_chars_preset")
             page.wait_for_selector(".modes-coop-ch-row", timeout=180000)
+            chars = dict(CP.load_characters(project), pick=True)          # the shipped set, as Load gives it
+            with open(os.path.join(out_dir, "%s_card_biogoji_set.png" % kind), "wb") as f:
+                f.write(CP.preview(project, chars, CP.words_for(), BIO))
+            # the reporter's own project: BIOGOJI's six powers saved with no badge words of its own
+            webui_shot.api(url, "modes.coop_char_set", BIO, None, None, None, "")
             webui_shot.api(url, "modes.coop_chars_show", BIO)
             time.sleep(4)
             chars = CP.load_characters(project)
-            print("rows", [(c["name"], c.get("sub"), c["ability"]) for c in chars["list"]], flush=True)
+            print("rows", [(c["name"], c.get("header"), c["powers"]) for c in chars["list"]], flush=True)
+            page.locator(".modes-coop-ch-row").nth(BIO).scroll_into_view_if_needed()
             page.mouse.move(5, 1790)
             time.sleep(2)
             page.screenshot(path=os.path.join(out_dir, "%s_characters_dialog.png" % kind))
+            if os.environ.get("PAD1083_CLICK"):                  # the warning's link opens the badge-words box
+                page.get_by_text("Write shorter badge words").click()
+                box = page.locator(".modes-coop-ch-powers input").last
+                box.wait_for(timeout=10000)
+                print("badge box placeholder:", box.get_attribute("placeholder"), flush=True)
+                box.scroll_into_view_if_needed()
+                page.screenshot(path=os.environ["PAD1083_CLICK"])
             browser.close()
         chars = dict(CP.load_characters(project), pick=True)
         with open(os.path.join(out_dir, "%s_card_biogoji.png" % kind), "wb") as f:

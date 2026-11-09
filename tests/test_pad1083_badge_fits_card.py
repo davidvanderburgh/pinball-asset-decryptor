@@ -47,7 +47,7 @@ def test_every_shipped_set_fits_its_cards():
             assert not CP.badge_on_card(c)[1], (stem, c["name"], CP.character_words(c))
     bio = next(c for c in CP.read_preset(CP.presets()["godzilla"])["characters"]["list"] if c["name"] == "BIOGOJI")
     assert bio["powers"] == SIX
-    assert bio["header"] == "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES, POPS AND LOOPS"
+    assert bio["header"] == "MASER, MAGNA GRAB, DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES, POPS AND LOOPS"
 
 
 def test_the_badge_stays_inside_the_card(tmp_path):

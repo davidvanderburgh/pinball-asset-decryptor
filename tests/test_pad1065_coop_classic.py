@@ -16,24 +16,21 @@ def _src():
 
 def test_4_to_6_play_1_to_3s_games(tmp_path):
     src = _src()
-    fns = (R._lift(src, "static unsigned coop_menu_game(unsigned v)")
-           + R._lift(src, "static unsigned coop_teams_size(unsigned always, unsigned setting_value, int has_setting)")
+    fns = (R._lift(src, "static unsigned coop_row_mode(unsigned v)")
            + R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)"))
     main = "#include <stdio.h>\n" + fns + r"""
 int main(void)
 {
     unsigned v;
-    for (v = 0; v <= 7; v++) printf("%u", coop_menu_game(v));
-    printf(" ");
-    for (v = 0; v <= 7; v++) printf("%u", coop_teams_size(0, v, 1));
+    for (v = 0; v <= 7; v++) printf("%u", coop_row_mode(v));
     printf(" ");
     for (v = 0; v <= 7; v++) printf("%d", insider_holding(1, v));
     printf(" %d\n", insider_holding(0, 0));
     return 0;
 }
 """
-    # 2 is Team 2v2 (4 players), 3 Team 2v1 (3); 4 Co-op Classic is co-op (no team game), 5 is 2v2, 6 is 2v1; Insider held back for 1-6
-    assert R._host_run(tmp_path, main).strip() == "01231237 00430430 01111110 1"
+    # PAD-1073: 0 Off, 1 Classic, 2 Enhanced; an older row's 3 reads Enhanced, 4-6 Classic; Insider held back for 1-6
+    assert R._host_run(tmp_path, main).strip() == "01221110 01111110 1"
 
 
 CHAR_UP_MAIN = r"""
@@ -65,9 +62,10 @@ int main(void)
 
 def test_classic_has_no_character_up(tmp_path):
     src = _src()
-    fns = R._lift(src, "static int coop_classic(void)") + R._lift(src, "static const struct coop_char *coop_char_up(void)")
+    fns = (R._lift(src, "static unsigned coop_row_mode(unsigned v)") + R._lift(src, "static int coop_classic(void)")
+           + R._lift(src, "static const struct coop_char *coop_char_up(void)"))
     out = R._host_run(tmp_path, CHAR_UP_MAIN.replace("@FNS@", fns), flags=("-no-pie",)).strip()
-    assert out == ("MECHAGODZILLA MECHAGODZILLA MECHAGODZILLA MECHAGODZILLA - - - MECHAGODZILLA | up")
+    assert out == ("MECHAGODZILLA - MECHAGODZILLA MECHAGODZILLA - - - MECHAGODZILLA | up")   # PAD-1073: 1 Classic
 
 
 def test_every_ability_waits_on_classic():
@@ -128,7 +126,7 @@ def test_the_menu_and_the_app_name_classic():
     from pinball_decryptor.plugins.stern import coop_play as CP
     from pinball_decryptor.webui import help_content
     from pinball_decryptor.webui.tabs import modes as M
-    assert CP.MENU_VALUES == 7 and (CP.MENU_COOP_CLASSIC, CP.MENU_TEAMS_CLASSIC, CP.MENU_TEAMS_2V1_CLASSIC) == (4, 5, 6)
-    assert len(CP.MENU_HELP) <= 63 and "Enhanced 1 Co-op 2 2v2 3 2v1. 4-6 Classic" in CP.MENU_HELP
-    assert "**4, 5 and 6 (Classic):** Co-op, Team 2v2 and Team 2v1" in str(help_content.__dict__)
-    assert "4, 5 and 6 the same three Classic (characters picked, no special abilities)" in M.ModesTab.COOP_MENU_TIP
+    assert CP.MENU_VALUES == 3 and CP.MENU_CLASSIC == 1                                     # PAD-1073
+    assert len(CP.MENU_HELP) <= 63 and "1 Classic. 2 Enhanced" in CP.MENU_HELP
+    assert "- **1 (Classic):** each player still picks a character" in str(help_content.__dict__)
+    assert "1 Classic (characters picked, no special abilities)" in M.ModesTab.COOP_MENU_TIP

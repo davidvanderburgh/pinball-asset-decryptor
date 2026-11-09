@@ -135,18 +135,9 @@ def test_team_2v1_is_its_own_choice_full_at_three(tmp_path):
 
 def test_the_choice_reads_the_row(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
-    fn = R._lift(src, "static unsigned coop_teams_size(unsigned always, unsigned setting_value, int has_setting)")
-    main = "#include <stdio.h>\n" + fn + r"""
-int main(void)
-{
-    unsigned v;
-    for (v = 0; v <= 4; v++) printf("%u", coop_teams_size(0, v, 1));
-    printf(" %u %u %u %u\n", coop_teams_size(0, 2, 0), coop_teams_size(4, 0, 1), coop_teams_size(3, 1, 1),
-           coop_teams_size(0, 3, 0));
-    return 0;
-}
-"""
-    assert R._host_run(tmp_path, main).strip() == "00430 0 4 3 0"                # 2: 2v2 (4), 3: 2v1 (3)
+    # PAD-1073: the start menu's pick sizes the team game (test_pad1073_coop_row_three.py), coop.cfg `teams` its own
+    body = R._lift(src, "static unsigned coop_teams_switched_on(void)")
+    assert "return coop.teams_always ? coop.teams_always : tm.size;" in body
 
 
 def test_one_start_is_the_games_own_one_player_game(tmp_path):
@@ -177,7 +168,7 @@ def test_the_top_line_board_and_gate_know_team_play():
     assert "if (n && !coop.teams && pm_in_game()) coop_scores_same(n);" in tick   # a team's score is the game's own
     line = R._lift(src, "static void coop_line(const char *s)")
     assert '"teams on")) { coop.teams_always = 4;' in line and '"teams 2v1")) { coop.teams_always = 3;' in line
-    assert "return !while_at || (value >= 1u && value <= 6u);" in R._lift(
+    assert "return !while_at || coop_row_mode(value) != 0u;" in R._lift(
         src, "static int insider_holding(unsigned while_at, unsigned value)")
 
 
@@ -186,15 +177,15 @@ def test_the_service_menu_row_has_team_2v2_and_the_tab_says_how_to_play_it(tmp_p
     from pinball_decryptor.plugins.stern import engine as E
     from pinball_decryptor.webui import help_content
     key, values, names, opts = E._CoopMenu(lambda *a: None).wanted()
-    assert (values, names, opts) == (7, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True})
-    assert (CP.MENU_OFF, CP.MENU_COOP, CP.MENU_TEAMS) == (0, 1, 2)
-    assert len(CP.MENU_HELP) <= 63 and "1 Co-op 2 2v2 3 2v1" in CP.MENU_HELP          # PAD-1065: shorter, for 4-6
+    assert (values, names, opts) == (3, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True})   # PAD-1073
+    assert (CP.MENU_OFF, CP.MENU_CLASSIC, CP.MENU_ENHANCED) == (0, 1, 2)
+    assert len(CP.MENU_HELP) <= 63 and "Games on start menu" in CP.MENU_HELP
     text = str(help_content.__dict__)
-    assert CP.MENU_TEAMS_2V1 == 3 and "**3 (Team 2v1):** the same team game for three players" in text
-    assert "**2 (Team 2v2):** players 1 and 3 play against players 2 and 4" in text
-    assert "step to **TEAM PLAY 2 VS 2** and press **Start** once. The game starts with all four players" in text
+    assert "- **TEAM PLAY 2 VS 1:** the same team game for three players" in text
+    assert "- **TEAM PLAY 2 VS 2:** players 1 and 3 play against players 2 and 4" in text
+    assert "step to it and press **Start** once. The game starts with all four players" in text
     from pinball_decryptor.webui.tabs import modes as M
-    assert "0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1" in M.ModesTab.COOP_MENU_TIP
+    assert "TEAM PLAY 2 VS 2: players 1 and 3 play as a team against players 2 and 4" in M.ModesTab.COOP_MENU_TIP
 
 
 def test_the_second_start_adds_all_four_and_says_the_teams(tmp_path):
@@ -257,18 +248,18 @@ int main(void)
 """
     assert R._host_run(tmp_path, main).strip() == "1 1 0 0"      # shown just before the game; a menu left long ago
     disp = R._lift(src, "static void on_team_dispatch(unsigned *r)\n{")   # the game's thread, not the tick's
-    assert "want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && team_menu_kind();" in disp
+    assert "want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && kind && team_menu_kinds(kinds);" in disp
     assert "if (!tm.armed || r[0] != tm.ball_id || !tm.seen_ms) return;" in disp and "coop_team_fill(0, 0, 0, 0)" in disp
     # through the runtime's own bus hook: a second hook of the bus never ran on Godzilla LE 1.16 (emulator)
     assert "on_team_dispatch(r);" in R._lift(src, "static void on_event_dispatch(unsigned *r)\n{")
     assert "COOP_JOIN_ROUNDS" in R._lift(src, "static void coop_join_tick(void)\n{")   # said twice: a film hid one
     assert "coop_team_fill" not in R._lift(src, "static void coop_tick(void)\n{")
     built = R._lift(src, "static void team_menu_built(unsigned *r)")
-    assert "*(unsigned *)(list + es * i + kat) = TEAM_KIND;" in built and "if (!team_menu_kind()) return;" in built
+    assert "*(unsigned *)(list + es * i + kat) = TEAM_KIND + kinds[j];" in built and "if (!nk) return;" in built
     picked = R._lift(src, "static void team_menu_picked(unsigned *r)")
     assert "else r[3] = 0;" in picked                                  # the game plays it as Standard
     frame = R._lift(src, "static void team_menu_frame(unsigned *r)")
-    assert 'pm_port_value("comp_menu_end_index", 0)' in frame and "pm_message_set(msg, team_menu_name());" in frame
+    assert 'pm_port_value("comp_menu_end_index", 0)' in frame and "pm_message_set(msg, team_kind_name(tm.kind));" in frame
     arm = R._lift(src, "static void team_menu_arm(void)\n{")
     assert 'hook_full(fn("comp_menu_frame"), team_menu_frame)' in arm
     assert 'hook(fn("challenge_menu_pick"), team_menu_picked)' in arm
@@ -292,10 +283,10 @@ int main(void)
 }
 """
     assert R._host_run(tmp_path, main).strip() == "CO-OP PLAY|START ADDS PLAYERS|UP TO 4 PLAYERS|"   # 19 fit
-    kind = R._lift(src, "static unsigned team_menu_kind(void)\n{")
-    assert "return t ? t : coop_switched_on() ? 1u : 0u;" in kind
+    kind = R._lift(src, "static unsigned team_menu_kinds(unsigned *kinds)\n{")
+    assert "kinds[0] = 1u;\n    if (!coop.setting) return 1;" in kind             # PAD-1073: CO-OP PLAY first
     disp = R._lift(src, "static void on_team_dispatch(unsigned *r)\n{")
-    assert "if (team_menu_kind() == 1u) {" in disp and "coop.n = 1;" in disp and "coop.teams = 0;" in disp
+    assert "if (kind == 1u) {" in disp and "coop.n = 1;" in disp and "coop.teams = 0;" in disp
     assert "coop.join_n = 1;" in disp
     wrap = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop.join_n = 0;" in wrap                                  # a teammate's join ends the menu's lines
@@ -319,11 +310,11 @@ def test_the_row_is_four_numbers_from_zero_on_godzilla():
     settings, writes, _cat, refused = M.plan_many(t, [E._CoopMenu(lambda *a: None).wanted()])
     assert not refused
     s = settings[0]
-    assert (s.values, s.low, s.default, s.kind, s.help) == (7, 0, 0, M.number_kind(t), CP.MENU_HELP)
+    assert (s.values, s.low, s.default, s.kind, s.help) == (3, 0, 0, M.number_kind(t), CP.MENU_HELP)
     assert M.number_kind(t) == 2 and t.entry(t.by_name["AD_GAME_ID"])["max"] == 9999
     out = bytearray(raw)
     for off, data in writes.items():
         out[off:off + len(data)] = data
     e = AdjustmentTable(bytes(out)).entry(s.id)
-    assert (e["min"], e["max"], e["default"]) == (0, 6, 0)                  # an Off/On row's 0 and 1 mean the same
+    assert (e["min"], e["max"], e["default"]) == (0, 2, 0)                  # PAD-1073: Off, Classic, Enhanced
     assert M.check(bytes(out), s) in ([], ["no menu page lists it"])         # the page record is placed by the Write

@@ -1221,9 +1221,9 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
     result.coop_file = path
     result.lines.append("co-op play: %s" % CP.HOW)
     if setting:
-        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1, "
-                            "4-6 the same Classic); %s" % (
-            "Insider Connected is off only while it is 1 to 6" if only
+        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Classic, 2 Enhanced; "
+                            "CO-OP PLAY, TEAM PLAY 2 VS 2 and 2 VS 1 on the start menu at 1 or 2); %s" % (
+            "Insider Connected is off only while it is 1 or 2" if only
             else "the card's modes keep its scores off Insider Connected either way"))
         result.lines.append("co-op play: Team 2v2 and 2v1: %s" % CP.TEAMS_HOW)    # PAD-1042
         result.lines.append("co-op play: %s" % CP.CLASSIC_HOW)                     # PAD-1065

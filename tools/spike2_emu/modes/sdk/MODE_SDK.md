@@ -6248,6 +6248,23 @@ players 2..4 itself on the one Start; `team_play_get_player_score` makes players
   NVRAM aside so the default shows, and needs 6 coins a player on fresh settings): Team 2v2 Classic (5) - 11 of 11
   patches found, both players picked, GODZILLA 1954's card said NO SPECIAL ABILITY and the game read no adjustment of
   its; the control at 2 read ball save 15 (its own 12) and saved the ball in play at the pick; no faults.
+- **Off / Classic / Enhanced** (PAD-1073, DoomWalrus666: "I would like for the service menu options to simply be
+  Co-op/Team: Off, Classic, Enhanced"): CO-OP PLAY is now 0 Off, 1 Classic, 2 Enhanced (`coop_play.MENU_VALUES` 3),
+  and the game is the start menu's pick alone: at 1 or 2 the menu has CO-OP PLAY, TEAM PLAY 2 VS 2 and TEAM PLAY 2 VS
+  1, all three (`team_menu_kinds`). On the entry lists each is a copy of Standard's entry with kind `TEAM_KIND` plus
+  what it makes (0x301, 0x304, 0x303), so a pick that hands over only the kind still says which; on the index menus
+  Standard's index goes on once for each, and the cursor's place among them picks the name lettered and the game
+  (`tm.kind`). The team fill takes its size from that pick (`tm.size`, read by `coop_teams_switched_on`); coop.cfg's
+  `teams` still makes its one team game. A store an older card's 0-6 row left reads as near as it can
+  (`coop_row_mode`: 3 Enhanced, 4-6 Classic). The right flipper held at Start still makes a co-op game (a team of one
+  alone) at 1 or 2, and a later Start in it adds a co-op teammate.
+  Emulator-proven with Write-built override sets and their pinned runtime (rig kit `C:/tmp/PAD-1073`: tryset.py
+  `<code> <card> <out> <default> <project> [chars]`, rig/job.sh steps the start menu entry by entry to `TARGET`; a
+  fresh store so the row reads its default): Godzilla LE 1.16 (an index menu) at 1 Classic - entries 4-6 CO-OP PLAY,
+  TEAM PLAY 2 VS 2, TEAM PLAY 2 VS 1 lettered in turn under the cursor, TEAM PLAY 2 VS 1 picked and one Start added
+  three players (team 1: 2, team 2: 1), GODZILLA 1954's card said NO SPECIAL ABILITY and its pick read no adjustment;
+  Iron Maiden LE 1.18 (an entry list) at 2 Enhanced - entries 3-5 the same three, CO-OP PLAY picked and two more
+  Starts added teammates 2 and 3; main's runtime on the same Godzilla card offered CO-OP PLAY alone; no faults.
 
 Emulator-proven on Godzilla LE 1.16 (rig kit `C:/tmp/PAD-1042/rig`: job.sh, team.cfg; tryset.py builds a Write
 override set with the row defaulting to 2): 4 players through the game's own CO-OP PLAY row at 2 (read live at Start;

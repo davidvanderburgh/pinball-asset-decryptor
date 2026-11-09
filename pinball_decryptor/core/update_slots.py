@@ -354,10 +354,51 @@ def _stage_into(setup_path, app_dir, target, version, run, cancel_cb,
         return False, "%s: %s" % (type(e).__name__, e)
 
 
+#: never carried back out of the old version's folder: PAD's own leftovers
+_NOT_THE_USERS = {"__pycache__", MARKER.lower()}
+
+
+def keep_users_entries(old, app_dir):
+    """Move into *app_dir* every top-level entry of *old* that *app_dir*
+    lacks, and return ``(moved, failed)`` (names; failed as ``(name,
+    error)``).
+
+    THE USER'S OWN FILES IN THE INSTALL FOLDER (PAD-1081, a JJP Sonic
+    project: "My entire project was deleted in this past update").  The app
+    runs elevated, so a project folder can be made inside
+    ``Program Files\\Pinball Asset Decryptor``, and the over-the-top
+    installer never touched it.  The swap renames that whole folder to .old
+    and deletes it, so the project went with the old version.  What the old
+    folder has at the top that a fresh install does not is the user's (or a
+    file an older PAD shipped, which the installer would have left in place
+    too), so it goes across - a rename on the same volume, instant however
+    big the project.  A name the new version has too stays the new one.
+    """
+    moved, failed = [], []
+    try:
+        names = sorted(os.listdir(old))
+    except OSError:
+        return moved, failed
+    have = {n.lower() for n in os.listdir(app_dir)}
+    for name in names:
+        if name.lower() in _NOT_THE_USERS or name.lower() in have:
+            continue
+        try:
+            shutil.move(os.path.join(old, name), os.path.join(app_dir, name))
+            moved.append(name)
+        except (OSError, shutil.Error) as e:
+            failed.append((name, str(e)))
+    return moved, failed
+
+
 def clear_leftovers(app_dir, current_version):
     """Delete ``<app>.old`` (the version a swap replaced) and a staged
     ``<app>.next`` that is not newer than the running app.  Returns
-    ``(deleted, failed)`` like old_versions' pruning."""
+    ``(deleted, failed)`` like old_versions' pruning.
+
+    Whatever of the user's .old still holds is moved back into *app_dir*
+    first (:func:`keep_users_entries`), and an .old with something that
+    would not move is left alone (PAD-1081)."""
     from .old_versions import _version
     deleted, failed = [], []
     targets = [old_dir(app_dir)]
@@ -367,6 +408,13 @@ def clear_leftovers(app_dir, current_version):
     for path in targets:
         if not os.path.isdir(path):
             continue
+        if path == old_dir(app_dir) and os.path.isdir(app_dir):
+            _, stuck = keep_users_entries(path, app_dir)
+            if stuck:
+                failed.append((path, "kept: %d of your own file(s) in it "
+                               "could not be moved back (%s)" % (
+                                   len(stuck), stuck[0][1])))
+                continue
         shutil.rmtree(path, ignore_errors=True)
         if os.path.exists(path):
             failed.append((path, "still in use"))
@@ -401,6 +449,20 @@ function AppVersion {
         if ($m) { return $m.Matches[0].Groups[1].Value } } catch {}
   return ''
 }
+# THE USER'S OWN FILES (PAD-1081): what the folder being retired has at the
+# top and $to lacks goes across - a project made inside the install folder
+# went with the old version.  Returns how many would not move
+function KeepUsers($from, $to) {
+  $n = 0; $stuck = 0
+  foreach ($e in @(Get-ChildItem -LiteralPath $from -Force -ErrorAction SilentlyContinue)) {
+    if (@('__pycache__', %(marker)s) -contains $e.Name) { continue }
+    if (Test-Path -LiteralPath (Join-Path $to $e.Name)) { continue }
+    try { Move-Item -LiteralPath $e.FullName -Destination (Join-Path $to $e.Name); $n++ }
+    catch { $stuck++; Say ('could not move back ' + $e.Name + ': ' + $_) }
+  }
+  if ($n) { Say ('kept ' + $n + ' of your own file(s)/folder(s) from ' + $from) }
+  return $stuck
+}
 function Fallback($why) {
   Say ('swap not done: ' + $why + ' - running the installer instead')
   if (%(setup)s -and (Test-Path -LiteralPath %(setup)s)) { Start-Process -FilePath %(setup)s -ArgumentList %(setup_args)s }
@@ -413,7 +475,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $next %(marker)s)) -and ((AppVersion
   Say 'already on v%(version)s - nothing to switch'
   exit 0
 }
-if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path -LiteralPath $old) {
+  if ((KeepUsers $old $app) -eq 0) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
+}
 if (Test-Path -LiteralPath $old) { Fallback ($old + ' is still there') }
 if (-not (Test-Path -LiteralPath (Join-Path $next %(marker)s))) { Fallback 'the new version is not staged' }
 $moved = $false
@@ -460,11 +524,13 @@ if (-not $whole -and (Test-Path -LiteralPath (Join-Path $old 'launcher.vbs'))) {
   try { Copy-Item -LiteralPath (Join-Path $old 'launcher.vbs') -Destination $app; $whole = $true; Say 'launcher.vbs copied over from the old version' } catch {}
 }
 if (-not $whole) { Say 'the new version has no launcher.vbs - the old one is kept in .old' }
+# before the new version starts: it reopens the project it finds there
+$stuck = KeepUsers $old $app
 if (%(launch)s) {
   Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + (Join-Path $app 'launcher.vbs') + '"') -WorkingDirectory $app
   Say 'started the new version'
 }
-if ($whole) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
+if ($whole -and -not $stuck) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
 if (Test-Path -LiteralPath $old) { Say ($old + ' is left for the next start to delete') }
 Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """

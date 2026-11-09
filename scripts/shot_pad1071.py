@@ -66,9 +66,17 @@ def _project(scratch):
     for name in ("sound_requests.tsv", "sound_test_names.csv", ".extract_source.json"):
         if os.path.isfile(os.path.join(PROJECT, name)):
             shutil.copyfile(os.path.join(PROJECT, name), os.path.join(dst, name))
+    # round 2: each sound's record key, as Extract now writes it (PAD1071_KEYS names a sound_keys.tsv)
+    if os.environ.get("PAD1071_KEYS"):
+        shutil.copyfile(os.environ["PAD1071_KEYS"], os.path.join(dst, "sound_keys.tsv"))
     shutil.copyfile(os.path.join(PROJECT, "video", "manifest.txt"), os.path.join(dst, "video", "manifest.txt"))
     for name in os.listdir(os.path.join(PROJECT, "audio")):
         open(os.path.join(dst, "audio", name), "wb").close()
+    for name in ("idx8034.wav", "idx4920.wav", "idx2250.wav", "idx0478.wav", "idx3062.wav", "idx7401.wav",
+                 "idx4375.wav", "idx2428.wav", "idx8052.wav", "idx2807.wav", "idx7438.wav", "idx4700.wav",
+                 "idx3753.wav", "idx1276.wav", "idx7739.wav", "idx4465.wav", "idx6128.wav", "idx7174.wav"):
+        if os.path.isfile(os.path.join(PROJECT, "audio", name)):      # GAME START's recordings, playable
+            shutil.copyfile(os.path.join(PROJECT, "audio", name), os.path.join(dst, "audio", name))
     for name in os.listdir(os.path.join(PROJECT, "video")):
         if name != "manifest.txt":
             open(os.path.join(dst, "video", name), "wb").close()
@@ -140,6 +148,25 @@ def main():
             time.sleep(2)
             print("log rows:", log.locator(".elog-row").count())
             shot = os.path.join(out_dir, "%s_log.png" % tag)
+            log.screenshot(path=shot)
+            print("shot", shot)
+            # the GAME START call alone, its play button pressed
+            log.get_by_placeholder("Filter by name or number").fill("GAME START")
+            time.sleep(1)
+            print("GAME START rows:", [log.locator(".elog-row").nth(k).inner_text().replace("\n", " | ")
+                                       for k in range(log.locator(".elog-row").count())])
+            log.locator(".elog-row").first.locator("button").first.click()
+            time.sleep(0.3)
+            shot = os.path.join(out_dir, "%s_log_stop.png" % tag)
+            log.screenshot(path=shot)
+            print("shot", shot, "| a stop button:", log.locator('.elog-row button[aria-label*="Stop"]').count())
+            # round 2: Colossus' line, asked for four times while a call the game ranks higher held the voice
+            log.keyboard.press("Escape")
+            log.get_by_placeholder("Filter by name or number").fill("COLOSSUS")
+            time.sleep(1)
+            print("COLOSSUS rows:", [log.locator(".elog-row").nth(k).inner_text().replace("\n", " | ")
+                                     for k in range(log.locator(".elog-row").count())])
+            shot = os.path.join(out_dir, "%s_log_unplayed.png" % tag)
             log.screenshot(path=shot)
             print("shot", shot)
             browser.close()

@@ -2968,6 +2968,13 @@ def extract_all(image_path, partitions, output_dir, log=None, progress=None,
                     "variants one after another." % n_var, "info")
         except Exception as e:
             log("The sound variants list couldn't be written (%s)." % e, "info")
+        # PAD-1071: each sound's record key, so the Emulate tab's Sound and video log can name the
+        # very recording a request played (the key the engine looks up)
+        try:
+            from . import clip_sounds as _cs
+            _cs.write_keys(output_dir, params)
+        except Exception as e:
+            log("The sound keys list couldn't be written (%s)." % e, "info")
         emu.close()
         emu = None   # decode runs in worker processes (or a fresh emu on fallback)
 
@@ -9665,9 +9672,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _mnodes = {"": None}
                 from . import coop_play as _CPS          # PAD-1031: the co-op pick's screens go in the HUD
                 _coop_hud = _coop_on and _CPS.wants_screens(assets_dir, _mprof)
+                # PAD-1079: the co-op characters' videos go into the video bank
+                _coop_clips = _coop_hud and bool(_CPS.clip_entries(assets_dir)) and _CPS.can_video(_mprof)
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel or (not _modes_on and not (_coop_hud and _rel == _MW.scene_rels(_mprof)[0]) and (
-                            not (_clips_on or _attract_on) or _rel != _MW.scene_rels(_mprof)[1])):
+                            not (_clips_on or _attract_on or _coop_clips) or _rel != _MW.scene_rels(_mprof)[1])):
                         continue        # a part this title cannot do (item 148)
                     _mnodes[_rel] = _MW.lookup(reader, _rel)
                     if _mnodes[_rel] is None:
@@ -9683,7 +9692,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 if not _modes_on:
                     if not _coop_hud:    # PAD-1031: the co-op pick's screens are in the HUD
                         _hud_rel = ""    # PAD-446: random clips change the bank only
-                    if not (_clips_on or _attract_on):
+                    if not (_clips_on or _attract_on or _coop_clips):
                         _bank_rel = ""   # PAD-494: music modes change neither
                 # item 164: the system scene whose full font a HUD with too few glyphs
                 # takes for its screens' words (absent: the words keep the HUD's font)

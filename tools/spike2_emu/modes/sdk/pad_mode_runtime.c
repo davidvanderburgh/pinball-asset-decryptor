@@ -1380,9 +1380,32 @@ static void sound_say(unsigned request, unsigned n)
     if (k > 0 && k < (int)sizeof b) write(log_fd, b, (unsigned long)k);
 }
 
+/* PAD-1071 round 2: WHICH RECORDING a request played. Nearly half a title's requests play one of several
+ * (Deadpool Pro 1.16: 377 of 853 - a spinner's four, GAME START's eighteen), and the worker's line names
+ * the request, not the pick. The pick is the record the engine looks up next (sound_lookup's r1, the
+ * 8-byte key Extract writes beside each sound, sound_keys.tsv), 1-5 ms after the worker on the rig. So a
+ * lookup within SOUND_KEY_MS of the worker's last request is logged too ("<ms> [pad] sound key <16 hex>"),
+ * as the game asked for it, before any swap below re-points it; the lookups the bank's index makes at
+ * boot (17000 on Deadpool, before any request) and a song's later sections are not. */
+#define SOUND_KEY_MS 500
+static volatile unsigned long sound_last;
+static void sound_key_say(const unsigned char *k)
+{
+    char b[64];
+    int n;
+    if (log_fd < 0 || sound_lines >= SOUND_LINES_MAX || !sound_last || pm_ms() - sound_last > SOUND_KEY_MS) return;
+    sound_lines++;
+    n = pm_snprintf(b, sizeof b, "%8lu [pad] sound key %02x%02x%02x%02x%02x%02x%02x%02x\n", pm_ms(),
+                    k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
+    if (n > 0 && n < (int)sizeof b) write(log_fd, b, (unsigned long)n);
+}
+
 static void on_sound_worker(unsigned *r)
 {
-    if (worker_log) sound_say(r[0], r[2]);
+    if (worker_log) {
+        sound_say(r[0], r[2]);
+        sound_last = pm_ms() ? pm_ms() : 1;
+    }
     if (cabs_live) cabs_worker(r[0]);         /* PAD-1040: a song with an expression light show of the card's */
     if (att_live) att_worker(r[0]);           /* PAD-645: the game's own sound at an attract press */
     if (blist_live) blist_play(r[0]);
@@ -1534,6 +1557,7 @@ static volatile int gms_live;
 
 static void on_sound_lookup(unsigned *r)
 {
+    if (worker_log && r[1]) sound_key_say((const unsigned char *)(unsigned long)r[1]);   /* PAD-1071 */
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
@@ -16585,6 +16609,12 @@ static int coop_scr_found, coop_scr_shown = -1;
 static void *coop_scr_classic[COOP_CHARS];  /* PAD-1065: PadCoopClassic_1..: NO SPECIAL ABILITY over each card */
 static int coop_scr_classic_shown = -1;
 static unsigned long coop_scr_try;
+/* PAD-1079: a character's own video (coop.cfg `char_clip <n> <clip>`): its card has a see-through window in the
+ * portrait frame and the clip loops behind the HUD (the backdrop, in the city's place) while its card is on the glass;
+ * `clip_crop <crop>` the crop it plays at ("" the port's backdrop_crop) */
+static char coop_clip[COOP_CHARS][48];
+static char coop_clip_crop[32];
+static int coop_clip_on = -1;               /* the character whose clip plays, -1 none */
 static int coop_adj_said;                   /* the log's adjustment reads, the first 32 */
 #define COOP_CACHES 4
 static struct coop_cache {
@@ -17428,6 +17458,33 @@ static int coop_cards_backdrop(const char *name)
     return 1;
 }
 
+/* PAD-1079: the clip of the character whose card is shown (want: its index, -1 none) behind it; the one before given
+ * back. A port with no backdrop shows the city through the window (the app builds no window there). */
+static void coop_clip_show(int want)
+{
+    int c = want >= 0 && want < coop_ch_n && coop_clip[want][0] ? want : -1;
+    unsigned k;
+    if (c == coop_clip_on) return;
+    if (coop_clip_on >= 0) {
+        pm_backdrop(0);
+        bd_crop_next[0] = 0;
+        say("co-op characters: %s's video given back", coop_ch[coop_clip_on].name);
+    }
+    coop_clip_on = c;
+    if (c < 0) return;
+    if (!(can & PM_CAN_BACKDROP) || !pm_backdrop(coop_clip[c])) {
+        say("co-op characters: %s's video \"%s\" cannot play - %s", coop_ch[c].name, coop_clip[c],
+            (can & PM_CAN_BACKDROP) ? "another of the card's modes has the backdrop" : "this port has no backdrop");
+        coop_clip_on = -1;
+        coop_clip[c][0] = 0;                                  /* said once: its picture's window shows the city */
+        return;
+    }
+    for (k = 0; coop_clip_crop[k] && k + 1 < sizeof bd_crop_next; k++) bd_crop_next[k] = coop_clip_crop[k];
+    bd_crop_next[k] = 0;
+    say("co-op characters: %s's video \"%s\" plays behind its card (crop %s)", coop_ch[c].name, coop_clip[c],
+        bd_crop_next[0] ? bd_crop_next : "the port's");
+}
+
 /* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown - with
  * the seconds left on its words line, and PAD-1044's PICKED on the one taken */
 static void coop_screens_tick(void)
@@ -17477,6 +17534,7 @@ static void coop_screens_tick(void)
     }
     if (want != coop_scr_shown && want >= 0 && want <= coop_ch_n && coop_scr[want]) pm_show(coop_scr[want], 1);
     coop_scr_shown = want;
+    coop_clip_show(want >= 0 && want <= coop_ch_n && coop_scr[want] ? want : -1);     /* PAD-1079: its video */
     want_classic = want >= 0 && want < coop_ch_n && coop_classic() ? want : -1;   /* PAD-1065: over the card */
     if (want_classic != coop_scr_classic_shown) {
         if (coop_scr_classic_shown >= 0 && coop_scr_classic[coop_scr_classic_shown])
@@ -18512,6 +18570,25 @@ static void coop_line(const char *s)
     if (str_starts(s, "award_cards on")) { coop_cards_on = 1; return; }  /* PAD-1028 round 2 */
     if (str_starts(s, "character ")) { coop_char_line(s + 10); return; }  /* PAD-1031 */
     if (str_starts(s, "pick on")) { coop_pick_on = 1; return; }
+    if (str_starts(s, "char_clip ")) {                                    /* PAD-1079: a character's own video */
+        unsigned n;
+        p = s + 10;
+        n = (unsigned)number(&p, &ok);
+        while (*p == ' ') p++;
+        if (ok && n >= 1 && n <= COOP_CHARS) {
+            str_copy(coop_clip[n - 1], sizeof coop_clip[n - 1], p, sizeof coop_clip[n - 1]);
+            for (ok = 0; coop_clip[n - 1][ok] && coop_clip[n - 1][ok] != ' ' && coop_clip[n - 1][ok] != '\r'; ok++) ;
+            coop_clip[n - 1][ok] = 0;
+        }
+        return;
+    }
+    if (str_starts(s, "clip_crop ")) {                                    /* PAD-1079: the crop the videos play at */
+        for (p = s + 10; *p == ' '; p++) ;
+        str_copy(coop_clip_crop, sizeof coop_clip_crop, p, sizeof coop_clip_crop);
+        for (ok = 0; coop_clip_crop[ok] && coop_clip_crop[ok] != ' ' && coop_clip_crop[ok] != '\r'; ok++) ;
+        coop_clip_crop[ok] = 0;
+        return;
+    }
     if (str_starts(s, "pick_time ")) {                                    /* PAD-1044: the pick's seconds, 0 none */
         unsigned v;
         p = s + 10;
@@ -22635,6 +22712,12 @@ static int soundlog_arm(void)
         else if (worker_hooked || (worker_hooked = hook(fn("sound_worker"), on_sound_worker))) {
             worker_log = 1;
             say("sound log: every request the sound worker takes (soundlog.on)");
+            /* and the record each one played (round 2): the lookup, when the port names it */
+            if (fn("sound_lookup") && (lookup_hooked || (lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))))
+                say("sound log: and the recording each one played (sound_lookup at 0x%08x)", fn("sound_lookup"));
+            else
+                say("sound log: the recording each request played is not logged - the port names no sound_lookup "
+                    "that can be hooked");
         } else
             say("sound log: off - the sound worker at 0x%08x could not be hooked", fn("sound_worker"));
     }

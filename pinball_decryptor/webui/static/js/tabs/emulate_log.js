@@ -51,12 +51,24 @@ function useLogRows() {
   return got;
 }
 
+// One sound at a time plays here; `onChange(i)` tells the page which row's is playing (null: none),
+// so that row's button is Stop while it plays (round 2: Jim-Beam asked for a Stop).
 let player = null;
-function playHere(root, rel) {
+let playingChange = () => {};
+function stopHere() {
   if (player) { player.pause(); player = null; }
-  if (!root || !rel) return;
-  player = new Audio("/media?p=" + encodeURIComponent(root + "/" + rel) + "&t=" + encodeURIComponent(TOKEN));
-  player.play().catch(() => {});
+  playingChange(null);
+}
+function playHere(root, r) {
+  stopHere();
+  if (!root || !r.rel) return;
+  const a = new Audio("/media?p=" + encodeURIComponent(root + "/" + r.rel) + "&t=" + encodeURIComponent(TOKEN));
+  player = a;
+  const done = () => { if (player === a) { player = null; playingChange(null); } };
+  a.addEventListener("ended", done);
+  a.addEventListener("error", done);
+  playingChange(r.i);
+  a.play().catch(done);
 }
 
 function open(r) {
@@ -76,6 +88,13 @@ function LogApp() {
   const [text, setText] = useState("");
   const [follow, setFollow] = useState(true);
   const [sel, setSel] = useState(null);
+  const [playing, setPlaying] = useState(null);
+  useEffect(() => {
+    playingChange = setPlaying;
+    const esc = (e) => { if (e.key === "Escape") stopHere(); };
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("keydown", esc); stopHere(); };
+  }, []);
   const wrap = useRef(null);
   const q = text.trim().toLowerCase();
   const rows = got.rows.filter((r) => (r.kind === "sound" ? sounds : clips)
@@ -95,9 +114,12 @@ function LogApp() {
     { key: "what", label: "Request / started by", width: "minmax(0,0.8fr)", cls: "dim elog-what" },
     { key: "act", label: "", width: "118px",
       render: (r) => html`<span class="row elog-act">
-        ${r.kind === "sound" ? html`<${Button} size="sm" kind="ghost" icon="play" disabled=${!r.rel}
-          title=${r.rel ? "Play this sound here" : "No Audio tab file plays this request"}
-          onClick=${(e) => { e.stopPropagation(); playHere(got.root, r.rel); }} />` : null}
+        ${r.kind === "sound" ? (playing === r.i
+          ? html`<${Button} size="sm" kind="ghost" icon="stop" title="Stop this sound (Esc)"
+              onClick=${(e) => { e.stopPropagation(); stopHere(); }} />`
+          : html`<${Button} size="sm" kind="ghost" icon="play" disabled=${!r.rel}
+              title=${r.rel ? "Play this sound here" : "No Audio tab file plays this request"}
+              onClick=${(e) => { e.stopPropagation(); playHere(got.root, r); }} />`) : null}
         <${Button} size="sm" disabled=${!r.rel}
           title=${r.rel ? (r.kind === "sound" ? "Show it on the Audio tab, selected and playing"
             : "Show it on the Video tab, selected and playing") : "It is not one of this project's files"}
@@ -128,15 +150,17 @@ function LogApp() {
       <${Field} sm width=${170} value=${text} onChange=${setText} placeholder="Filter by name or number" />
       <${Check} label="Follow" checked=${follow} onChange=${setFollow}
         title="Keep the newest row in view as the game plays" />
+      <${Button} size="sm" icon="stop" disabled=${playing == null} onClick=${stopHere}
+        title="Stop the sound playing here (Esc)">Stop<//>
     </div>
     ${notice}
     <div class="elog-table" ref=${wrap}>
       <${Table} columns=${cols} rows=${rows} rowKey=${(r) => r.i} selected=${sel} rowHeight=${32}
-        rowClass=${(r) => cx("elog-row", "elog-" + r.kind)}
+        rowClass=${(r) => cx("elog-row", "elog-" + r.kind, r.unplayed && "elog-unplayed")}
         onSelect=${(r) => { setSel(r.i); if (follow) setFollow(false); }}
         onActivate=${(r) => open(r)} empty=${empty} />
     </div>
-    <span class="small muted elog-foot">Double-click a row, or Open, to show it on its tab. ▶ plays a sound here.</span>
+    <span class="small muted elog-foot">Double-click a row, or Open, to show it on its tab. ▶ plays a sound here, ■ or Esc stops it.</span>
   </div>`;
 }
 

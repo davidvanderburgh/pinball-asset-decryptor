@@ -683,6 +683,8 @@ html.bp-1100 .rs-side { flex-basis: auto; width: 100%; max-height: 40vh; }
 html.bp-1100 .modes-coop-ch-row { grid-template-columns: 24px 1fr 1fr auto; }
 /* PAD-1056: a character's name with its sub header under it */
 .modes-coop-ch-names { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* PAD-1079: a row's colour, picture, video, preview and remove: two lines at most, beside what it does */
+.modes-coop-ch-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; max-width: 230px; }
 html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 /* round 6: a character's powers, opened under its row: the groups side by side, a tick per power */
 .modes-coop-ch-powers { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 6px 8px 8px 32px; border: 1px solid var(--line); border-radius: 6px; flex: none; }
@@ -691,6 +693,10 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .modes-coop-ch-powers > .row { flex-basis: 100%; }
 .modes-coop-ch-pv { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
 .modes-coop-ch-pv img { width: 460px; height: auto; border: 1px solid var(--line); border-radius: 6px; flex: none; }
+/* PAD-1079: the pick screen's look (Look... in the Co-op characters dialog) */
+.modes-coop-look { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.modes-coop-look-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 12px; }
+.modes-coop-look-c { display: flex; align-items: center; gap: 6px; min-height: 28px; }
 /* PAD-1033: what each handicap level does (the Levels dialog) */
 .modes-hand-levels { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .modes-hand-row { display: grid; grid-template-columns: 2.5em 1fr; align-items: baseline; gap: 8px; }

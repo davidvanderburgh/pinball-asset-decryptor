@@ -46,6 +46,8 @@ def _append(path, text, mode="a"):
      {"log": "off", "why": "the port is not this game's"}),
     ("      14 [pad] insider: score reports stay on this machine", None),
     ("      20 [KAIJU] sound 12 0", None),                # a mode's own line, not the worker's
+    ("   47595 [pad] sound key faa94d070a00508f", {"key": "faa94d070a00508f"}),   # round 2: what it played
+    ("       0 [pad] sound log: and the recording each one played (sound_lookup at 0x002dc4e0)", {"log": "keys"}),
 ])
 def test_the_runtimes_lines_are_read_as_sounds_and_the_logs_state(line, want):
     assert SW.line_event(line) == want
@@ -257,7 +259,14 @@ def test_the_runtime_arms_the_sound_log_right_after_the_port_gate_and_stops_ther
     arm = src[src.index("static int soundlog_arm(void)"):src.index("static void pad_mode_start(void)")]
     assert 'pm_trigger("soundlog.only")' in arm and 'pm_trigger("soundlog.on")' in arm
     # its own allowance: mode.log's 40000 lines would end a long session's list
-    assert "if (worker_log) sound_say(r[0], r[2]);" in src
+    assert "sound_say(r[0], r[2]);" in src
+    # round 2: the recording it played - the record key looked up just after the request, as the game asked
+    look = src[src.index("static void on_sound_lookup(unsigned *r)"):]
+    first = look.split("\n")[2]
+    assert "sound_key_say" in first and "worker_log" in first          # before any swap re-points r[1]
+    assert "hook(fn(\"sound_lookup\"), on_sound_lookup)" in arm
+    say = src[src.index("static void sound_key_say("):src.index("static void on_sound_worker(")]
+    assert "pm_ms() - sound_last > SOUND_KEY_MS" in say               # not the bank's index lookups at boot
 
 
 def test_every_boot_asks_soundlog_sh_after_the_cards_modes_and_the_launch_carries_its_variables():
@@ -283,3 +292,115 @@ def test_soundlog_sh_rules():
     assert 'rm -f "$DUMP/soundlog.only"' in own                        # never cuts a brought runtime short
     assert 'bash "$HERE/tryit.sh" install "$PAD_SOUNDLOG_STAGE"' in sh
     assert sh.rstrip().endswith("exit 0")                              # it never stops a run
+
+
+# ---- round 2: which recording played, and Stop ----------------------------------------------------------
+def test_extract_writes_each_sounds_record_key_and_the_log_reads_it_back(tmp_path):
+    from pinball_decryptor.plugins.stern import clip_sounds as CSD
+    params = [{"idx": 4154, "findkey": bytes.fromhex("faa94d070a00508f")},
+              {"idx": 24, "findkey": bytes.fromhex("b165724302003003")}, {"idx": 7}]
+    assert CSD.write_keys(str(tmp_path), params) == 2
+    assert CSD.read_keys(str(tmp_path)) == {"faa94d070a00508f": 4154, "b165724302003003": 24}
+    assert CSD.read_keys(str(tmp_path / "nothing")) == {}
+
+
+def _keyed(tmp_path):
+    """Deadpool Pro 1.16's request 363 (four recordings, the probe run's keys) and 392."""
+    p = _project(tmp_path)
+    with open(os.path.join(p, "sound_requests.tsv"), "a", encoding="utf-8") as f:
+        f.write("363\t6305,6196,6206,6154\t217,435,355,679\t\t\n")
+    for i in (6305, 6196, 6206, 6154):
+        open(os.path.join(p, "audio", "idx%04d.wav" % i), "wb").close()
+    with open(os.path.join(p, "sound_keys.tsv"), "w", encoding="utf-8") as f:
+        f.write("# keys\n6305\t68267f6b040020df\n6196\t892d57640a0040cc\n6154\td4664161030080c3\n"
+                "6206\td966e7010000d0cd\n4920\t7dc0870d0a00f0bf\n")
+    return p
+
+
+def test_a_row_of_several_recordings_names_and_plays_the_one_the_game_played(tmp_path):
+    ctl = str(tmp_path / "ctl")
+    # the probe run: four presses of one switch played request 363's four recordings in turn
+    keys = ["68267f6b040020df", "892d57640a0040cc", "d4664161030080c3", "d966e7010000d0cd"]
+    evs = [{"log": "keys", "t": 9.0}]
+    for n, k in enumerate(keys):
+        evs += [{"request": 363, "n": 0, "t": 10.0 + n * 0.4}, {"key": k, "t": 10.0 + n * 0.4}]
+    evs += [{"request": 392, "n": 0, "t": 12.0}, {"key": "7dc0870d0a00f0bf", "t": 12.25}]
+    _run(ctl, sounds=evs)
+    lg = EL.Log(ctl, 0, _keyed(tmp_path))
+    lg.poll(now=12.3)
+    got = [(r["name"], r["what"], r["rel"]) for r in lg.rows]
+    assert got == [("idx6305", "#363  1 of 4", "audio/idx6305.wav"),
+                   ("idx6196", "#363  2 of 4", "audio/idx6196.wav"),
+                   ("idx6154", "#363  4 of 4", "audio/idx6154.wav"),
+                   ("idx6206", "#363  3 of 4", "audio/idx6206.wav"),
+                   ("SPEECH: GAME START", "#392  2 of 2", "audio/idx4920.wav")]
+    assert lg.rows[4]["tip"][1] == "Played this time: idx4920.wav (2 of its 2 recordings)"
+
+
+def test_a_row_waits_for_its_key_then_shows_without_it_and_keeps_its_place(tmp_path):
+    ctl = str(tmp_path / "ctl")
+    _run(ctl, sounds=[{"log": "keys", "t": 9.0}, {"request": 363, "n": 0, "t": 10.0}],
+         clips=[{"path": "./a", "rel": "video/x.mov", "name": "x", "switch": "", "t": 10.2}])
+    lg = EL.Log(ctl, 0, _keyed(tmp_path))
+    assert lg.poll(now=10.3) is False and lg.rows == []           # the clip waits behind the sound
+    _run(ctl, sounds=[{"key": "d4664161030080c3", "t": 10.5}])
+    lg.poll(now=10.5)
+    assert [(r["kind"], r["rel"]) for r in lg.rows] == [("sound", "audio/idx6154.wav"), ("video", "video/x.mov")]
+    # a key that never comes: shown after HOLD_S with the first recording, as not played
+    _run(ctl, sounds=[{"request": 363, "n": 0, "t": 20.0}])
+    lg.poll(now=20.5)
+    assert len(lg.rows) == 2
+    lg.poll(now=20.0 + EL.HOLD_S + 0.1)
+    assert (lg.rows[-1]["rel"], lg.rows[-1]["what"]) == ("audio/idx6305.wav", "#363  not played")
+    assert "hold" not in lg.rows[-1]
+
+
+def test_a_run_from_an_emulator_that_logs_no_recordings_never_waits_nor_says_not_played(tmp_path):
+    ctl = str(tmp_path / "ctl")
+    _run(ctl, sounds=[{"log": "on", "t": 9.0}, {"request": 363, "n": 0, "t": 10.0}])
+    lg = EL.Log(ctl, 0, _keyed(tmp_path))
+    lg.poll(now=10.0)
+    assert [(r["what"], r["rel"], r.get("unplayed", False)) for r in lg.rows] == [("#363", "audio/idx6305.wav", False)]
+    assert any("not known for this run" in t for t in lg.rows[0]["tip"])
+
+
+def test_a_project_without_the_keys_says_to_extract_again_and_never_waits(tmp_path):
+    ctl = str(tmp_path / "ctl")
+    p = _keyed(tmp_path)
+    os.remove(os.path.join(p, "sound_keys.tsv"))
+    _run(ctl, sounds=[{"request": 363, "n": 0, "t": 10.0}, {"key": "d4664161030080c3", "t": 10.0}])
+    lg = EL.Log(ctl, 0, p)
+    lg.poll(now=10.0)
+    assert lg.rows[0]["rel"] == "audio/idx6305.wav"
+    assert any("one of 4 recordings" in t for t in lg.rows[0]["tip"])
+    assert any("Extract the card into it again to see which one played" in t for t in lg.rows[0]["tip"])
+
+
+def test_a_sound_playing_in_the_log_can_be_stopped():
+    page = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "emulate_log.js"),
+                encoding="utf-8").read()
+    assert "function stopHere()" in page and "player.pause()" in page
+    assert 'icon="stop"' in page and 'e.key === "Escape"' in page
+    assert 'addEventListener("ended"' in page                       # the button turns back by itself
+
+
+def test_a_request_the_game_did_not_play_says_so(tmp_path):
+    ctl = str(tmp_path / "ctl")
+    # the round-2 run: Colossus' line (364) asked for while a call it ranks higher held the voice - no
+    # recording looked up - and a one-recording sound that did play
+    _run(ctl, sounds=[{"log": "keys", "t": 9.0}, {"request": 388, "n": 0, "t": 10.0},
+                      {"key": "b165724302003003", "t": 10.0},
+                      {"request": 363, "n": 0, "t": 10.4}])
+    p = _keyed(tmp_path)
+    with open(os.path.join(p, "sound_keys.tsv"), "a", encoding="utf-8") as f:
+        f.write("24\tb165724302003003\n")
+    lg = EL.Log(ctl, 0, p)
+    lg.poll(now=10.4)
+    assert [(r["what"], r.get("unplayed", False)) for r in lg.rows] == [("#388", False)]
+    lg.poll(now=10.4 + EL.HOLD_S + 0.1)
+    row = lg.rows[-1]
+    assert row["what"] == "#363  not played" and row["unplayed"] is True
+    assert "did not play it this time" in row["tip"][1]
+    page = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "emulate_log.js"),
+                encoding="utf-8").read()
+    assert 'r.unplayed && "elog-unplayed"' in page

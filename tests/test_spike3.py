@@ -222,3 +222,73 @@ def test_keysource_no_key_raises():
     assert not ks.has_any()
     with pytest.raises(s3k.Spike3KeyError):
         ks.master_key(None, role="games")
+
+
+# --------------------------------------------------------------------------
+# Preview gating of the Spike 3 era
+# --------------------------------------------------------------------------
+def test_spike3_era_is_preview_gated(monkeypatch):
+    from pinball_decryptor.core import preview
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+    m = SternManufacturer()
+    monkeypatch.setattr(preview, "_active", set())
+    assert "spike3" not in [e[0] for e in m.eras]
+    monkeypatch.setattr(preview, "_active", {"spike3"})
+    assert "spike3" in [e[0] for e in m.eras]
+
+
+# --------------------------------------------------------------------------
+# SPKS archive parser (synthetic round-trip, both FINF and FI64)
+# --------------------------------------------------------------------------
+def _build_spks(files, use_64):
+    import struct as _s
+    # STRS table
+    strs = b""
+    offs = []
+    for name, _data in files:
+        offs.append(len(strs))
+        strs += name.encode() + b"\x00"
+    # records + data
+    recs = b""
+    data = b""
+    for (name, blob), noff in zip(files, offs):
+        doff = len(data)
+        if use_64:
+            rec = _s.pack("<I", noff) + b"\x00\x00\x00\x00" \
+                + _s.pack("<QQQ", len(blob), doff, len(blob)) \
+                + _s.pack("<I", 0o100644) + b"\x00" * 44
+            recs += b"FI64" + _s.pack("<I", 80) + rec
+        else:
+            rec = _s.pack("<IIIII", noff, len(blob), doff, len(blob), 0o100644) \
+                + b"\x00" * 40
+            recs += b"FINF" + _s.pack("<I", 60) + rec
+        data += blob
+    section = b"SPK0" + b"\xff\xff\xff\xff" + b"\x00" * 8
+    section += b"SIDX" + _s.pack("<I", 8) + b"spike\x00\x00\x00"
+    section += b"STRS" + _s.pack("<I", len(strs)) + strs
+    section += recs
+    section += b"FEND" + b"\x00\x00\x00\x00" + b"SDAT" + b"\x00\x00\x00\x00"
+    section += data
+    header = b"SPKS" + b"\xff\xff\xff\xff" + struct.pack("<III", 0x6A6F4697, 2, 1)
+    return header + section
+
+
+@pytest.mark.parametrize("use_64", [False, True])
+def test_spks_roundtrip(use_64):
+    from pinball_decryptor.plugins.stern import spks
+    files = [("mfs/sd/0001.wav", b"RIFFxxxxWAVEfmt "),
+             ("assets/lcd/GameLogo.png", b"\x89PNG\r\n\x1a\n" + b"IDATend"),
+             ("image.bin", b"\x70\x04" + b"A" * 500)]
+    blob = _build_spks(files, use_64)
+
+    def read(off, n):
+        return blob[off:off + n]
+
+    arc = spks.SpksArchive(read, len(blob))
+    assert len(arc.files) == 3
+    png = arc.get("assets/lcd/GameLogo.png")
+    assert png is not None and png.size == len(files[1][1])
+    got = b"".join(arc.read_file(png))
+    assert got == files[1][1]
+    wav = arc.get("mfs/sd/0001.wav")
+    assert b"".join(arc.read_file(wav)) == files[0][1]

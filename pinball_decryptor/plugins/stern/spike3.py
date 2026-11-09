@@ -235,6 +235,12 @@ class DecryptingSegmentReader:
         self._xts = otp.aes_xts_decrypt
         self._mk = master_key
         self._sector = int(seg.get("sector_size", 512))
+        # LUKS aes-xts-plain64 numbers the tweak in 512-byte units of the
+        # offset within the segment, even when the ENCRYPTION sector is larger
+        # (e.g. the .spk's 4096-byte sector).  So the tweak for encryption unit
+        # ``sec`` is ``sec * (sector_size // 512)`` -- 1x for a 512-byte sector
+        # (the SD-card partitions), 8x for a 4096-byte one (the .spk payload).
+        self._iv_step = max(1, self._sector // 512)
         self._seg_off = int(seg["offset"])            # bytes within partition
         self._phys_base = int(part_base_lba) * _SS + self._seg_off
         part_sectors = header_part_sectors(header, part_base_lba, fileobj)
@@ -259,7 +265,7 @@ class DecryptingSegmentReader:
         ct = self._f.read(self._sector)
         if len(ct) < self._sector:
             ct = ct + b"\x00" * (self._sector - len(ct))
-        pt = self._xts(self._mk, ct, sec, self._sector)
+        pt = self._xts(self._mk, ct, sec * self._iv_step, self._sector)
         self._cache[sec] = pt
         self._cache_order.append(sec)
         if len(self._cache_order) > self._cache_cap:

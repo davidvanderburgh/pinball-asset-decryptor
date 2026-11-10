@@ -74,7 +74,7 @@ chown -R "$BOF_USER": "$BOF_RIG" "$HOMEDIR"
 # its child, so a game started as `runuser ... setsid game &` quit the moment
 # the wsl.exe that ran this returned - i.e. right after watch.sh said Ready.
 setsid -f runuser -u "$BOF_USER" -- python3 "$BOF_TOOLS/bofhw.py" \
-    --dir "$BOF_RIG/hw" --profile "$PROFILE" \
+    --dir "$BOF_RIG/hw" --profile "$PROFILE" --build "$(dirname "$BIN")" \
     < /dev/null > "$BOF_RIG/hw/daemon.out" 2>&1
 for _ in $(seq 1 50); do [ -S "$BOF_RIG/hw/ctl.sock" ] && break; sleep 0.1; done
 [ -S "$BOF_RIG/hw/ctl.sock" ] || { echo "run_game.sh: board emulator did not start:" >&2; cat "$BOF_RIG/hw/daemon.out" >&2; exit 3; }

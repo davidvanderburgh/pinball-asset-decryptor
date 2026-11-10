@@ -33,6 +33,7 @@ import argparse
 import heapq
 import json
 import os
+import re
 import select
 import socket
 import time
@@ -51,6 +52,54 @@ DEFAULT_PORTS = [
     {"role": BICS, "usb": "1-2", "iface": "1.0", "manufacturer": "Arduino LLC",
      "product": "Arduino Due", "vid": "2341", "pid": "003d", "alias": "bof_worm"},
 ]
+
+# The BICS boards' firmware (Dune's Worm Wrangler, Winchester's Haunt Handler)
+# ships inside each game update, and the game reflashes the board whenever the
+# version in its ID reply is older than the one it expects ("BICS: Firmware
+# older than v%s.%s.%s", then FLASH? and bossac).  A stand-in that claims a
+# fixed version is "out of date" the day a build ships newer firmware, and that
+# build then re-asks ID / FLASH? forever (PAD-1124: Dune 2026.11.10).  So the
+# stand-in claims the version the running build ships.
+BICS_FW_MARK = b"Barrel_of_Interactive_Control_Systems"
+BICS_FW_VERSION = re.compile(rb"v(\d+)\.(\d+)\.(\d+)(?![\w.])")
+BICS_FW_MAX_BYTES = 4 << 20
+
+
+def bundled_bics_firmware(build_dir):
+    """'vN.N.N' of the BICS firmware image a build ships, or None.
+
+    The image is a small *.bin beside the game binary whose ID string holds the
+    board's name; its version is the first vN.N.N after that string (Worm
+    Wrangler: 'ID:Shai-Crab,Barrel_of_..._(BICS),WORM_WRANGLER,' then 'v1.0.0'),
+    else the highest vN.N.N anywhere in the image."""
+    if not build_dir or not os.path.isdir(build_dir):
+        return None
+    best = None
+    for name in sorted(os.listdir(build_dir)):
+        path = os.path.join(build_dir, name)
+        if not name.lower().endswith(".bin") or not os.path.isfile(path):
+            continue
+        if os.path.getsize(path) > BICS_FW_MAX_BYTES:
+            continue
+        with open(path, "rb") as f:
+            data = f.read()
+        mark = data.find(BICS_FW_MARK)
+        if mark < 0:
+            continue
+        m = BICS_FW_VERSION.search(data, mark, mark + 512)
+        for m in [m] if m else BICS_FW_VERSION.finditer(data):
+            ver = tuple(int(x) for x in m.groups())
+            if best is None or ver > best:
+                best = ver
+    return "v%d.%d.%d" % best if best else None
+
+
+def with_firmware(id_reply, version):
+    """The ID reply with its last comma field (the firmware) set to version."""
+    if not version or "," not in id_reply:
+        return id_reply
+    return id_reply.rsplit(",", 1)[0] + "," + version
+
 
 NUM_SWITCH_BYTES = 16        # SA: reply covers switches 0..127
 NAMED_POS = {"HOME": 0, "DOWN": 1, "FLUSH": 2, "UP": 3}
@@ -72,9 +121,10 @@ class Port:
 
 
 class Emulator:
-    def __init__(self, root, profile, log):
+    def __init__(self, root, profile, log, bics_fw=None):
         self.root = root
         self.profile = profile
+        self.bics_fw = bics_fw      # the build's own BICS firmware version
         self.logf = log
         self.t0 = time.monotonic()
         self.ports = {}
@@ -342,7 +392,8 @@ class Emulator:
         b = self.bics
         if cmd == "ID":
             self.status["bics_id"] = True
-            return dialect.get("id", "ID:WORM WRANGLER,PAD,EMULATED,v1.0.0")
+            return with_firmware(dialect.get("id", "ID:WORM WRANGLER,PAD,EMULATED,v1.0.0"),
+                                 self.bics_fw)
         if cmd.startswith("RESET"):
             return "RESET:ACK"
         if cmd.startswith("FLASH"):
@@ -539,6 +590,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--dir", required=True, help="rig dir (dev/, sys/, ctl.sock)")
     ap.add_argument("--profile", help="per-title JSON profile")
+    ap.add_argument("--build", help="the game build's folder: the BICS board "
+                    "claims the firmware version shipped there")
     args = ap.parse_args()
     profile = {}
     if args.profile:
@@ -546,7 +599,10 @@ def main():
             profile = json.load(f)
     os.makedirs(args.dir, exist_ok=True)
     log = open(os.path.join(args.dir, "bofhw.log"), "a")
-    emu = Emulator(args.dir, profile, log)
+    bics_fw = bundled_bics_firmware(args.build)
+    log.write("bundled BICS firmware: %s\n" % (bics_fw or "none found"))
+    log.flush()
+    emu = Emulator(args.dir, profile, log, bics_fw)
     emu.build()
     try:
         emu.run()

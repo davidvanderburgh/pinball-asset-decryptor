@@ -417,7 +417,7 @@ a game and play a ball by switch NAMES only (the same script, `coin`,
 | star_wars_2025_le 0.96.0 | plays, scores | END-STOP motors (Death Star, Jump Ramp, AT-AT) |
 | fallout_le 0.81.0 | character select, ball in play | STEPPER motors (Fat Man pan/tilt), ~110 s settle |
 | star_wars_elg 1.10.0 | ball served, opening crawl | node directory flag byte; per-switch polarity; GAME SETUP screen eats the first Start |
-| star_wars_2025_pro 0.84.0 | first boot reaches Guided Setup; NOT played | see below |
+| star_wars_2025_pro 0.84.0 | plays, scores 2,030 | legacy power board answered (0.5 -> 20 fps); autoguide on fresh frames |
 
 **Polarity is per switch** (device record +0x28 = LOCATION): playfield
 switches answer closed as wire 0, cabinet buttons stay high - the flipper
@@ -437,28 +437,45 @@ LE in their boot for ever. End switches go into nodesw (logical).
 from 0x10000100 to the end of the ELF's first flash segment; Pokemon's fixed
 range made Pro reflash (openocd fails) and freeze on the logo.
 
-**Star Wars 2025 Pro** runs the radium scene engine, not Godot, and preloads
-hundreds of scenes at boot. Its FIRST boot on a fresh slot reaches Guided
-Setup in ~5 min (autoguide then did not walk it - unverified why); a SECOND
-boot of the same slot sat on the SPIKE 3 logo for 11+ min (qemu busy, the
-PreLoad thread reading demand_loaded scene.radium files, no frames). Next:
-compare what the first boot wrote to data/ with a fresh slot, find the
-slow path, then walk its Guided Setup.
+**Star Wars 2025 Pro** (radium engine, not Godot) drew at 0.5 fps: it polls
+the power distribution board (`0x12`, `0x19`) every loop and each poll
+waited out its timeout. netbridge itself answers those when the power board
+is a Spike 1/2 one (HOST_Update, read off the unstripped firmware: `0x10` 3
+zeros, `0x12` line frequency u8, `0x15` 0xff, `0x19` line voltage u16; the
+rest unanswered) - the bridge does the same now and Pro runs at 20 fps. Its
+"second boot hangs" was autoguide judging a frame drawn BEFORE its press
+(s3press.frame_after now waits for a newer one).
 
-## Where it stands (pokemon_le 0.82.0, 2026-11-10)
+## Stage 8 - sound and the window (2026-11-10)
 
-A fresh slot boots unattended through the SPIKE 3 logo, node location,
-Guided Setup (walked) and the attract cycle with its video, and a GAME PLAYS:
-credits, start, ball served, launch, scoring, drain, bonus, next ball.
-Screenshots emulator_01..11 in the ticket's artifacts.
+**Sound** (`PAD_S3_AUDIO=1`, off by default - rig runs are muted): s3alsa
+writes the game's PCM non-blocking into `$SD/audio/audio.fifo` (bound at
+/run/padaudio) and "rate channels" into audio.fmt; s3run starts Spike 2's
+playaudio.sh outside the game's namespaces on port 46100+slot. SIGPIPE is
+blocked around the write. Proven silently: 139 s from the fifo, 138 s
+through the player's relay sink (emulator_18 is a 20 s WAV of it).
+
+**The window** (`s3run.sh --window`): padglhost with a window; s3bridge
+writes `tables/game/switch_list.txt` (Spike 2's shape) so the window binds
+its keys by the title's names, and s3keys.py carries its padsw.h block onto
+nodesw / the SPI chain, edges only. Proven on a private Xvfb with xdotool:
+5 = coin, 1 = Start (BALL 1), Space = launch, the door/trough latch at open.
+
+## Where it stands (2026-11-10)
+
+All six Spike 3 cards on hand boot, start a game and play a ball, with
+video, live sound on request, and a playable window.
 
 ## What is left for Spike 2 parity (next runs)
 
-1. **Star Wars 2025 Pro**: second-boot stall and its Guided Setup (above).
-2. **Audio**: s3alsa drops the PCM (rig runs are muted); a host player like
-   Spike 2's for the Emulate tab.
-3. **Rig integration**: the Emulate tab refuses a Spike 3 card at pick; hand
-   it to s3run.sh, a playfield window (switches.json gives the names),
-   rig slots/riglock.
-4. Coins: the game credits ~3 of 4 quarters even when each is delivered.
-5. Power distribution board (`0x10..0x1f`): unanswered, game falls back.
+1. **The Emulate tab** (PAD-367 refuses a Spike 3 card at Start): launch
+   `s3run.sh --window` on the claimed rig slot instead, with a setup check.
+2. **Setup on a user's PC** - the decision for David: s3run needs `cuse.ko`
+   (the SPI chain) and `i2c-stub.ko` built for ONE WSL kernel (6.6.87.2,
+   ~/.pad-s3/kernel) and a patched qemu-aarch64 (I2C+SPI ioctls). A user's
+   WSL kernel will not match. Options: ship the patched qemu and replace the
+   CUSE device with an in-guest LD_PRELOAD answering /dev/spidev4.0 (no
+   kernel module); or keep Spike 3 emulation to machines set up like this one.
+3. Coins: the game credits ~3 of 4 quarters even when each is delivered.
+4. The window's default key bindings fire one QR-scanner switch for a moment
+   before the title's switch list loads (harmless, settles).

@@ -145,7 +145,7 @@ def test_the_runtime_reads_the_lines_and_plays_on_a_press_while_the_mode_runs():
     arm = c[c.index("static void gms_arm(void)"):c.index("/* ---- the jukebox (PAD-685)")]
     assert "place_vfn_at" not in arm
     # it works on a card with no modes (`only`)
-    assert "gms_arm();" in c and "if (n_sndt || n_bsid || att.n || n_jmode || gms.n) return;" in c
+    assert "gms_arm();" in c and "if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request) return;" in c
 
 
 # ---- the build ------------------------------------------------------------------------------------

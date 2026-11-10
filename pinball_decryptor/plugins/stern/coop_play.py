@@ -1598,8 +1598,10 @@ PICKED_STILL_SECONDS = 3
 SOUND_EXTS = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus")
 #: a character's copy of the bonus loop in the video bank (1-based)
 BONUS_CLIP = "PadCoopBonus%d"
-#: the window on the glass (x, y, w, h): right of the bonus's words (Godzilla LE 1.16, emulator: they run x 435-925,
-#: centred on the glass's middle line), the portrait frame's shape
+#: the window on the glass (x, y, w, h), the portrait frame's shape: right of the bonus's summary (Godzilla LE 1.16,
+#: emulator census, a frame every 0.75 s: PLAYER 1 - the Insider name there when logged in -, TOTAL BONUS and TOTAL
+#: SCORE run x 425-940, y 140-665). The count's widest lines (GODZILLA POWERUP EARNED, x 135-1230) are drawn over the
+#: window's left part, outlined as always: no window this size clears them
 BONUS_WINDOW = (964, 236, 360, 290)
 #: its frame, glass pixels
 BONUS_BORDER = 5

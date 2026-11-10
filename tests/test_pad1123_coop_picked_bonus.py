@@ -131,7 +131,7 @@ def test_the_window_lands_right_of_the_bonus_words_on_the_glass():
     gx, gy = x * SQUARE[0] + SQUARE[12], y * SQUARE[5] + SQUARE[13]           # back on the glass
     assert abs(gx - CP.BONUS_WINDOW[0]) < 3 and abs(gy - CP.BONUS_WINDOW[1]) < 3
     assert abs(w * SQUARE[0] - CP.BONUS_WINDOW[2]) < 3 and abs(h * SQUARE[5] - CP.BONUS_WINDOW[3]) < 3
-    assert CP.BONUS_WINDOW[0] > 925                         # the bonus's words end at x 925 (emulator)
+    assert CP.BONUS_WINDOW[0] > 940                         # the bonus summary ends at x 940 (emulator census)
     assert CP.BONUS_WINDOW[0] + CP.BONUS_WINDOW[2] + CP.BONUS_BORDER <= 1360
     assert CP.bonus_box(None, 1360, 768)[:2] == CP.BONUS_WINDOW[:2]          # Normal: 1:1
 

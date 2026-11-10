@@ -326,7 +326,7 @@ export function CoopCharsDialog({ s, onClose }) {
         title=${r.picked_clip ? "What it shows full screen once picked: choose another." : "A short video, or a picture (a movie poster), shown full screen once a teammate picks it."}>
         ${r.picked_clip ? `Clip: ${r.picked_clip}` : "Clip…"}<//>
       ${r.picked_clip ? html`<${Button} size="xs" kind="ghost" icon="x" title="No clip once picked." onClick=${() => call("modes.coop_char_picked", i, true)} />` : null}
-      <${Button} size="xs" kind="ghost" icon="volume" onClick=${() => call("modes.coop_char_picked_sound", i, false)}
+      <${Button} size="xs" kind="ghost" icon="wave" onClick=${() => call("modes.coop_char_picked_sound", i, false)}
         title=${r.picked_sound ? "The sound it plays once picked: choose another." : "A sound of your own (a roar), played once a teammate picks it."}>
         ${r.picked_sound ? `Sound: ${r.picked_sound}` : "Sound…"}<//>
       ${r.picked_sound ? html`<${Button} size="xs" kind="ghost" icon="x" title="No sound of its own once picked." onClick=${() => call("modes.coop_char_picked_sound", i, true)} />` : null}

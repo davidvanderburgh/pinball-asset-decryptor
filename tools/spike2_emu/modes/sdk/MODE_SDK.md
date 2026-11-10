@@ -6400,6 +6400,29 @@ top line says `LANGUAGE: ENGLISH`, each flipper press flips every player's langu
 launches the ball at an Action press the runtime holds back, so an Action press, or any launch, ends it too); then the
 first pick, held back until here. Godzilla's own bar over its start film is under the intro, so this window is where the language is chosen.
 
+PAD-1123: a character's clip and sound once picked (the dialog's **When picked...**), and the character on its
+teammate's End of Ball Bonus (the dialog's **Show each teammate's character on their End of Ball Bonus**):
+
+    char_picked 1 PadCoopPicked1 4000         character 1's clip once picked (the owner's video, or a picture shown
+                                              3 s or as long as its sound, up to 10 s: full screen, fitted whole) and
+                                              its length in ms; sounds.cfg `cpick <n> <request> <carrier key> <its key>
+                                              <ms>` is its sound (its own file, else the video's), on the intro's carrier
+    bonus_loop EndOfBallBonus_BackgroundLoop  the clip the game's bonus loops (found in the bank by name; Godzilla 1.15
+                                              and 1.16, at SquareCrop: x1.29, moved -197,-126)
+    char_bonus 1 PadCoopBonus1                that loop made again with character 1's video (or picture) in a framed
+                                              window right of the bonus's words (glass 964,236 360x290)
+
+When the teammate up takes a character (its PICKED card on the glass) its sound plays at once; its clip waits until
+the card has had its 2.5 s and the card's own video behind it has been given back (the bank's one surface), then plays
+full screen over the game with `pm_clip` (asked for again once if a clip of the game's takes the surface in its first
+1.5 s). Both flipper buttons down together, each let go once since it began, cut it short, its sound too. A pick for a
+teammate who is not up plays neither. The bonus: the game asks for its loop by name through `clip_play` (hooked; a port
+on clip v2 or a clip layer has no bonus copies yet), and the runtime answers with the copy of the character of the
+teammate whose ball ended - the turn moves on only at the player change, after the bonus (emulator, Godzilla LE 1.16).
+A teammate with no character, or one with no picture or video, gets the game's own loop. The award cards' backdrop
+(PAD-1028 round 3) plays the game's own loop, never a teammate's copy. The build makes the copies from the project's
+own file of the loop (the stock one extracted, or the owner's replacement of it), else the card's.
+
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 
 - `adj:<id>=<v>` / `adj:<id>x<pct>:<lo>:<hi>`: the game's adjustment `<id>` reads `v`, or its own value x pct / 100

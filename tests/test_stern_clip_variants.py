@@ -781,6 +781,8 @@ long pm_read_file(const char *path, char *buf, unsigned long cap)
     return tot;
 }
 @DEFINES@
+/* PAD-1115: clipv_line hands "stime" lines to the screen-time reader; this test is about the clip table */
+static void stime_line(char **f, unsigned n) { (void)f; (void)n; }
 @FUNCS@
 int main(int argc, char **argv)
 {

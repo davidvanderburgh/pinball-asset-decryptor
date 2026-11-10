@@ -3254,10 +3254,96 @@ def test_tmnt_dof_hears_data_easts_numbers():
         assert not {1, 3, 11, 12, 13, 14, 15, 36} & set(m.dof_sols)
 
 
+
+def test_tmnt_dof_hears_the_slings_as_data_easts_switches():
+    # PAD-1116: slings DOF did not fire while pops did. The pops reach DOF
+    # twice (S17-19 and Data East's switches 46-48, which the table sends);
+    # the slings only as S20/S21, because this table's slings sent Data East
+    # no switch at all. Data East's tables send them as 21 (left) and 22
+    # (right), and DOF configs fire sling toys on those: so does the bridge.
+    pc = pytest.importorskip("padcontroller")
+    for title, left, right in (("turtles_pro", 70, 69), ("turtles_le", 71, 70)):
+        m = pc.VpxMap(title)
+        assert m.dof_switches[left] == [21] and m.dof_switches[right] == [22]
+        assert m.switch_rewrite[21] == left and m.switch_rewrite[22] == right
+
+
+def test_a_coil_pulse_between_two_reads_still_reaches_the_table():
+    # PAD-1116: the game kicks LOWER LOCK for ~20 ms; Visual Pinball reads
+    # ChangedSolenoids once a frame, so a pulse that came and went between two
+    # reads reached the table as OFF only, and the lock never let the ball go
+    # (a slow 4K frame in multiball). It is reported ON, then OFF next read.
+    pc = pytest.importorskip("padcontroller")
+    b = pc.Bridge()
+    b.set_game("turtles_pro")
+    b._sol_set(3, 1)
+    b._sol_set(3, 0)
+    assert b.changed_solenoids() == [[3, 1]]
+    assert b.changed_solenoids() == [[3, 0]]
+    assert b.changed_solenoids() is None
+    b._sol_set(3, 1)                              # a long one: on, then off, as ever
+    assert b.changed_solenoids() == [[3, 1]]
+    b._sol_set(3, 0)
+    assert b.changed_solenoids() == [[3, 0]]
+    assert b.changed_solenoids() is None
+
 def _tmnt_patch(title, src):
     tm = pytest.importorskip("patch_turtles_le")
     m = json.load(open(os.path.join(VPX, "%s.vpxmap.json" % title), encoding="utf-8"))
     return tm.patch_script(src, m)[0], m
+
+
+_TMNT_VBS_FAKES = [
+    # Controller: keeps each switch's state and how often it was made
+    "Class FakeCtl", "Public St, Made",
+    "Private Sub Class_Initialize : Set St = CreateObject(\"Scripting.Dictionary\") : "
+    "Set Made = CreateObject(\"Scripting.Dictionary\") : End Sub",
+    "Public Property Let Switch(n, v)",
+    "If v And Not St.Item(n) Then Made.Item(n) = Made.Item(n) + 1",
+    "St.Item(n) = CBool(v)",
+    "End Property", "End Class",
+    # vpmTimer: AddTimer queues; Flush runs the queue in time order (40 ms ticks)
+    "Class FakeTimer", "Public Q, Now",
+    "Private Sub Class_Initialize : Set Q = CreateObject(\"Scripting.Dictionary\") : Now = 0 : End Sub",
+    "Public Sub AddTimer(d, c) : Q.Add Q.Count & \"_\" & Rnd, Array(Now + d \\ 40, c) : End Sub",
+    "Public Sub Flush",
+    "Dim k, best, t",
+    "Do While Q.Count > 0",
+    "best = \"\" : t = 1E9",
+    "For Each k In Q.Keys : If Q.Item(k)(0) < t Then t = Q.Item(k)(0) : best = k",
+    "Next",
+    "Now = t : c = Q.Item(best)(1) : Q.Remove best : ExecuteGlobal c",
+    "Loop", "End Sub", "End Class",
+    "Dim c",
+    "Class FakeStack", "Public Balls",
+    "Public Sub Update : End Sub",
+    "Public Sub ExitSol_On : If Balls > 0 Then Balls = Balls - 1 : WScript.Echo \"out\"",
+    "End Sub", "End Class",
+    "Class FakeKicker", "Public Sub DestroyBall : End Sub",
+    "Public Sub Kick(a, p) : WScript.Echo \"kicked back\" : End Sub", "End Class",
+    "Class FakeVan", "Public blenddisablelighting", "End Class",
+    "Dim Controller, vpmTimer, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, sw41, pizzavan",
+    "Set Controller = New FakeCtl : Set vpmTimer = New FakeTimer : Set bsVan = New FakeStack",
+    "bsVan.Balls = 0 : padVanUp = 0 : padVanComing = 0 : padVanFalling = 0 : padVanPost = False",
+    "Set sw41 = New FakeKicker : Set pizzavan = New FakeVan",
+    "Sub pizzavanshake : End Sub",
+    "Sub Show(tag)",
+    "WScript.Echo tag & \": upper \" & padVanUp & \" lower \" & bsVan.Balls & \" sw \" & "
+    "-CInt(Controller.St.Item(1051)) & -CInt(Controller.St.Item(1052)) & -CInt(Controller.St.Item(1053)) & "
+    "\" made \" & Controller.Made.Item(1051) & Controller.Made.Item(1052) & Controller.Made.Item(1053)",
+    "End Sub",
+]
+
+
+def _tmnt_run_vbs(tmp_path, out, steps):
+    lines = out.split("\n")
+    a = lines.index("Sub PadVanIn(aKicker)")
+    b = lines.index("Sub PadKrang(Enabled)")
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join(_TMNT_VBS_FAKES + lines[a:b] + steps), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    return [x.strip() for x in r.stdout.strip().splitlines()], r.stdout + r.stderr
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
@@ -3265,58 +3351,65 @@ def _tmnt_patch(title, src):
 def test_tmnt_lock_ball_goes_to_the_upper_section_and_drops_on_its_coil(tmp_path):
     # PAD-896: the Pro let a ball put straight onto LOWER LOCK 1 out again
     # (emulator: LOWER LOCK fired 7 s later, nothing locked); a ball resting
-    # on UPPER LOCK 1 is what the game drops (UPPER LOCK) and holds. Run the
-    # generated subs for real with a fake ball stack and controller.
+    # on UPPER LOCK 1 is what the game drops (UPPER LOCK) and holds.
+    # PAD-1116: a ball shot in crosses the free switches above its place
+    # (the game calls a lock switch no ball crosses broken); a short UPPER
+    # LOCK pulse drops one ball, onto an empty LOWER LOCK only.
     out, m = _tmnt_patch("turtles_pro", "Sub sw41_Hit()\n\tController.Switch(41) = 1\nEnd Sub\n")
     assert "\tPadVanIn Me" in out
     tm = pytest.importorskip("patch_turtles_le")
     assert any(x.startswith('SolCallback(4) = "PadVanDrop"') for x in tm.gen_sol_callbacks(m))
-    lines = out.split("\n")
-    a = lines.index("Sub PadVanIn(aKicker)")
-    b = lines.index("Sub PadKrang(Enabled)")
-    subs = "\n".join(lines[a:b])
-    vbs = tmp_path / "t.vbs"
-    vbs.write_text("\n".join([
-        "Class FakeCtl", "Public Sub SetSw(n, v) : WScript.Echo \"sw \" & n & \"=\" & v : End Sub",
-        "Public Property Let Switch(n, v) : SetSw n, v : End Property", "End Class",
-        "Class FakeStack", "Public Balls", "Public Sub ExitSol_On : Balls = Balls - 1 : "
-        "WScript.Echo \"out\" : End Sub", "End Class",
-        "Class FakeKicker", "Public Sub DestroyBall : WScript.Echo \"taken\" : End Sub",
-        "Public Sub Kick(a, p) : WScript.Echo \"kicked back\" : End Sub", "End Class",
-        "Dim Controller, bsVan, padVanUp, sw41",
-        "Set Controller = New FakeCtl : Set bsVan = New FakeStack : bsVan.Balls = 0 : padVanUp = 0",
-        "Set sw41 = New FakeKicker",
-        "Sub pizzavanshake : End Sub",
-        "Class FakeVan", "Public blenddisablelighting", "End Class",
-        "Dim pizzavan : Set pizzavan = New FakeVan",
-        subs,
-        "PadVanIn sw41 : PadVanIn sw41",
-        "WScript.Echo \"lower \" & bsVan.Balls",
-        "PadVanDrop True",
-        "WScript.Echo \"lower \" & bsVan.Balls & \" upper \" & padVanUp",
-        "PadVanDrop True",
-        "WScript.Echo \"lower \" & bsVan.Balls & \" upper \" & padVanUp",
-        "PadVanOut True : PadVanDrop True",
-        "WScript.Echo \"lower \" & bsVan.Balls & \" upper \" & padVanUp",
-        "PadVanIn sw41 : PadVanIn sw41 : PadVanIn sw41 : PadVanIn sw41"]), encoding="latin-1")
-    import subprocess
-    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
-    got = [x.strip() for x in r.stdout.strip().splitlines()]
+    got, why = _tmnt_run_vbs(tmp_path, out, [
+        "PadVanIn sw41 : vpmTimer.Flush : Show \"one in\"",
+        "PadVanIn sw41 : vpmTimer.Flush : Show \"two in\"",
+        "PadVanDrop True : PadVanDrop False : vpmTimer.Flush : Show \"pulse\"",
+        "PadVanDrop True : PadVanDrop False : vpmTimer.Flush : Show \"pulse, lower full\"",
+        "PadVanOut True : PadVanOut False : vpmTimer.Flush : Show \"lower out\"",
+        "PadVanIn sw41 : PadVanIn sw41 : PadVanIn sw41 : vpmTimer.Flush : Show \"three more shot in\""])
     assert got == [
-        "taken", "sw 1051=1", "sw 1052=0", "sw 1053=0",          # into UPPER LOCK 1, not LOWER LOCK 1
-        "taken", "sw 1051=1", "sw 1052=1", "sw 1053=0",
-        "lower 0",
-        "sw 1051=1", "sw 1052=0", "sw 1053=0", "lower 1 upper 1",  # UPPER LOCK dropped one
-        "lower 1 upper 1",                                         # the lower place is full: no drop
-        "out", "sw 1051=0", "sw 1052=0", "sw 1053=0", "lower 1 upper 0",
-        "taken", "sw 1051=1", "sw 1052=0", "sw 1053=0",
-        "taken", "sw 1051=1", "sw 1052=1", "sw 1053=0",
-        "taken", "sw 1051=1", "sw 1052=1", "sw 1053=1",
-        "kicked back"], r.stdout + r.stderr                        # the upper section is full
+        "one in: upper 1 lower 0 sw 100 made 111",          # crossed 3 and 2, rests on 1
+        "two in: upper 2 lower 0 sw 110 made 122",          # crossed 3, rests on 2
+        "pulse: upper 1 lower 1 sw 100 made 122",           # UPPER LOCK dropped one
+        "pulse, lower full: upper 1 lower 1 sw 100 made 122",
+        "out", "lower out: upper 1 lower 0 sw 100 made 122",   # post up: the other stays
+        "kicked back",                                      # the upper section is full
+        "three more shot in: upper 3 lower 0 sw 111 made 134"], why
     # the LE's lock has two lower places and the same three upper ones
     out, _ = _tmnt_patch("turtles_le", "Sub Table1_Init()\n\tCreatBalls\nEnd Sub\n")
     assert "\tbsVan.InitSw 0, 1050, 1051, 0, 0, 0, 0, 0" in out
     assert "Controller.Switch(1054) = 1" in out
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the TMNT table script under cscript")
+def test_tmnt_lock_post_held_down_lets_every_locked_ball_out(tmp_path):
+    # PAD-1116: Ninja Pizza Multiball holds UPPER LOCK (the post) down ~5 s and
+    # wants every locked ball out, LOWER LOCK letting each go as it lands
+    # (emulator, turtles_pro 1.59). One ball per pulse used up the game's
+    # retries: DEVICE MALFUNCTION on UPPER LOCK and LOWER LOCK. While the post
+    # is down each ball rolls on as the lower place has room, and a ball shot
+    # in meanwhile goes straight through.
+    out, _ = _tmnt_patch("turtles_pro", "")
+    got, why = _tmnt_run_vbs(tmp_path, out, [
+        "PadVanIn sw41 : PadVanIn sw41 : PadVanIn sw41 : vpmTimer.Flush : Show \"locked\"",
+        "PadVanDrop True : vpmTimer.Flush : Show \"post down\"",
+        "PadVanOut True : PadVanOut False : vpmTimer.Flush : Show \"out 1\"",
+        "PadVanOut True : PadVanOut False : vpmTimer.Flush : Show \"out 2\"",
+        "PadVanOut True : PadVanOut False : vpmTimer.Flush : Show \"out 3\"",
+        "PadVanIn sw41 : vpmTimer.Flush : Show \"shot in, post down\"",
+        "PadVanOut True : PadVanOut False : vpmTimer.Flush",
+        "PadVanDrop False : PadVanIn sw41 : vpmTimer.Flush : Show \"post up\""])
+    assert got == [
+        "locked: upper 3 lower 0 sw 111 made 122",
+        "post down: upper 2 lower 1 sw 110 made 122",      # the first rolled to LOWER LOCK
+        "out", "out 1: upper 1 lower 1 sw 100 made 122",    # and the next one after it
+        "out", "out 2: upper 0 lower 1 sw 000 made 122",
+        "out", "out 3: upper 0 lower 0 sw 000 made 122",    # all three out, no new pulse
+        "shot in, post down: upper 0 lower 1 sw 000 made 233",
+        "out",
+        "post up: upper 1 lower 0 sw 100 made 344"], why    # post up: it locks again
+    # the roll down takes a moment: LOWER LOCK closes after UPPER LOCK opens
+    assert "vpmTimer.AddTimer 240, \"PadVanLand '\"" in out
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
@@ -3334,7 +3427,7 @@ def test_tmnt_pro_lair_lane_drops_the_ball_onto_the_lower_lock(tmp_path):
     subs = "\n".join(lines[a:lines.index("End Sub", a) + 1])
     vbs = tmp_path / "t.vbs"
     vbs.write_text("\n".join([
-        "Class FakeStack", "Public Balls", "End Class",
+        "Class FakeStack", "Public Balls", "Public Sub Update : End Sub", "End Class",
         "Class FakeBall", "Public VelY", "End Class",
         "Class FakeTrigger", "Public Sub DestroyBall : WScript.Echo \"taken\" : End Sub", "End Class",
         "Dim bsVan, ActiveBall, t25",

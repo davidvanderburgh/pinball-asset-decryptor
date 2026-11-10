@@ -405,6 +405,24 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   held ~10 s before LOWER LOCK let it out. So a ball going UP the table's
   t25 lane (behind the LAIR bank, above the left outlane) goes there
   (`lair_lane`), and comes back out of the parlor.
+* **UPPER LOCK is a post, held down to empty the lock** (PAD-1116). The game
+  calls a lock that does not empty a DEVICE MALFUNCTION (UPPER LOCK, LOWER
+  LOCK) once its kick's tries run out (`kickproc` 0x298380 in the 1.54
+  symbol build, 15 tries). At Ninja Pizza Multiball it holds UPPER LOCK
+  down ~5 s and wants all three balls out; the table dropped one per pulse,
+  so every multiball start used the hold's full timeout and two retries. Now
+  the balls roll on to LOWER LOCK (240 ms) while the post is down, LOWER
+  LOCK letting each go: the game lets the post up after 3 s, no retries.
+  A ball shot in crosses the free switches above its place, as on the
+  machine, since the game calls a lock switch no ball crosses for many balls
+  broken and stops lighting locks. The bridge reports a coil pulse that came
+  and went between two ChangedSolenoids reads ON, then OFF (the lower kick is
+  ~20 ms; a slow 4K frame missed it).
+* **TMNT's slings reach DOF as Data East's switches 21/22** (PAD-1116).
+  Data East's tables send their slings as switch 21 (left) and 22 (right),
+  and a DOF config may fire the sling toys on those rather than on S20/S21;
+  this table's slings sent no Data East number, so DOF heard the pops both
+  ways (S17-19 and W46-48) but the slings only as S20/S21. `switch_rewrite` maps 21/22 to the Stern slings.
 * **A lock lane is a stack, its post is held** (PAD-901). Deadpool's Katana
   Handle lock is one kicker in JP's table and LOCK 1-4 on the machine. As a
   saucer it held one ball on LOCK 1: the next sat unseen behind it, the game

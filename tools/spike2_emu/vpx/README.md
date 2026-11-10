@@ -324,6 +324,12 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   (`{"sLLFlipper": 101, ...}`) sends a flipper's DOF event from the machine's
   flipper coil, for a table whose script names its flipper events (in
   `SoundFXDOF(..., DOFFlippers)`) but never fires them on a flip.
+  `flipper_flag` (`{"flag": "bGameInPlay"}`, PAD-1096) is for a table whose
+  flipper subs DO fire them, but only behind its own game-running flag
+  (Batman 66: `if bGameInPlay then PlaySoundAt SoundFXDOF(..., 101, ...)`),
+  which only the table's own game sets: the machine's flipper coil holds the
+  flag True just for the table's flip, then puts it back, so its flipper
+  sounds and DOF play as the author wrote them.
 * **A ROM table's backglass runs beside PAD.Controller** (PAD-852). There
   controller.vbs's `LoadVPM` made `Controller` a B2S.Server, which runs
   VPinMAME inside itself and shows the .directb2s; PADSPIKE2.vbs makes it

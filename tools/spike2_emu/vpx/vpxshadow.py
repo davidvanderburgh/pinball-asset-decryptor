@@ -1297,7 +1297,20 @@ def gen(m, had, quiet=None, dof=None):
             out.append("SolCallback(%d) = %s          ' %s, as the controller follows it"
                        % (int(f["solenoid"]), vb(f["callback"]), f.get("name", name)))
     fdof = {k: v for k, v in m.get("flipper_dof", {}).items() if k != "_"}
+    fflag = flipper_flag(m)
     for const, sub in flips.items():
+        if fflag:
+            # PAD-1096: the table's flipper sub plays its flipper sound and DOF
+            # event only while ITS game runs (Batman 66: `if bGameInPlay then
+            # PlaySoundAt SoundFXDOF(..., 101, ...)`), and the machine runs the
+            # game: the flag is held up just for the table's own flip
+            out += ["Sub PadFlipOn_%s(e)" % const,
+                    "\tDim was : was = %s" % fflag,
+                    "\t%s = True" % fflag,
+                    "\t%s e" % sub,
+                    "\t%s = was" % fflag,
+                    "End Sub"]
+            sub = "PadFlipOn_" + const
         if const in fdof:
             # PAD-1094: the table's DOF event for this flipper (its own script
             # names it, but never fires it on a flip), from the machine's coil
@@ -1419,6 +1432,20 @@ def flipper_subs(m, had):
             if had.get(sub):
                 flips[const] = sub
     return flips
+
+
+def flipper_flag(m):
+    """PAD-1096: the table's own game-running flag its flipper subs check
+    before their sound and DOF (`"flipper_flag": {"flag": "bGameInPlay"}`, or
+    the bare name), or None."""
+    f = m.get("flipper_flag")
+    if isinstance(f, dict):
+        f = f.get("flag")
+    if not f:
+        return None
+    if not re.match(r"^[A-Za-z_]\w*$", f):
+        raise ValueError("flipper_flag %r is not a VBScript variable name" % (f,))
+    return f
 
 
 def has_sub(lines, name):

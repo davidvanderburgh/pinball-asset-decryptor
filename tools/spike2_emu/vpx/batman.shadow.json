@@ -121,6 +121,7 @@
   },
   "pup_stub": true,
   "helper_balls": ["postBall1", "postBall2", "craneBall"],
+  "flipper_flag": {"_": "PAD-1096: SolLFlipper/SolRFlipper play their flipper sounds and DOF 101/102 only if bGameInPlay, which only the table's own game sets; held True for the machine's flips", "flag": "bGameInPlay"},
   "neuter": [
     "BallRelease.CreateSizedball BallSize",
     "BallRelease.Kick 90",

@@ -368,50 +368,58 @@ SHOOTER LANE node 8 bit 28, coils TROUGH node 8 #1, AUTO PLUNGER #4. At rest
 the SPI interlock bit reads OPEN (door open: service menu live, no coils);
 `s3press.py hold SLOT 15` closes it.
 
-**Raw optos rest CLOSED** (beam received): LEFT EJECT OPTO left open read as a
-ball in the scoop - kicked at boot, "Left Scoop DEVICE MALFUNCTION". s3balls
-rests every `... OPTO` switch closed (`PAD_S3_OPTO_REST=0` leaves them).
+**The fault probe** `ff` is a STATUS poll, not a switch read: word A = the
+addressed frames the board took since the last probe (this one included,
+Spike 2's PAD-249 rule - a mismatch made the game re-initialise node 8/9 for
+ever), word B 0. Counting it as a read cleared raised requests with no scan.
+Only the scan (`11`) clears a request, and every input state the bridge sees
+is QUEUED for its own scan (a 150 ms coin pulse was otherwise lost).
+`F0 10`/`F0 20` (enumeration) hold a node's request another 30 s.
 
-**The fault probe** `ff` carries 32 of the 64 input bits; it marked all 64 as
-read, so a trough closed before boot (bits 32..37) never raised a request and
-the game ran LOCATING PINBALLS for ever. Fixed: only the bits it carries.
+**Polarity** - found with the game's own Ball Trough Test (service menu,
+live): every node board but the cabinet one (START BUTTON's, node 1) reports
+a CLOSED switch as wire bit 0. The game had always seen an empty trough: ball
+searches, "Auto Plunger / Left Scoop DEVICE MALFUNCTION". `nodesw` stays
+logical (1 = closed); the scan reply inverts active-low boards
+(`set_polarity`; `PAD_S3_ACTIVE_LOW/_HIGH` override). Optos rest open.
 
 **The ball model** `s3balls.py` (Spike 2's ballmodel/ballfeed rules, resolved
 by name per title): trough full at boot, a TROUGH fire opens the highest made
 position and closes SHOOTER LANE, an AUTO PLUNGER fire with a ball in the lane
-opens it (in play), `s3press.py drain SLOT` brings one home. First 0x40 to a
-coil = its configuration, later ones and the short `40 IDX ck` = fires.
-`PAD_S3_NBTRACE=1` writes every changed decoded frame to DIR/nbtrace.log.
+opens it (in play), `s3press.py drain SLOT` brings one home. Coil frames ask
+for no reply, so the model hears them on every addressed frame. First 0x40
+to a coil = its configuration. `PAD_S3_NBTRACE=1` traces decoded frames.
 
-**Proven**: door closed, Start -> CHOOSE YOUR MODE OF PLAY / STANDARD NORMAL
-PLAY (screenshot emulator_07). **Not yet**: the selected game never starts -
-the countdown ends back in attract with no coil frame at all (no trough eject),
-and the game logs nothing about why. With the trough full from boot, Start
-instead runs a ball search (LOCATING PINBALLS, every 28 s: coils 8#2,3,6,7,8,
-9#0,2,4..8) - the game counts a ball missing that nothing here holds.
+**Press by name**: the bridge writes `DIR/switches.json`; `s3press.py sw SLOT
+"START BUTTON"`, `coin SLOT N` (3 s apart; the game still credits only ~3 of
+4 quarters - harmless, Free Play avoids it).
+
+**Harness hygiene**: `s3run.sh` kills a killed run's helpers (an orphaned
+padglhost wrote stale frames and slowed later boots to 3x), frame dumps sort
+numerically, autoguide no longer mistakes service-menu pages for Guided Setup.
+
+**Proven** (pokemon_le 0.82.0, names only, emulator_08..11): coins ->
+CREDITS, START BUTTON -> BALL 1 (the trough eject is answered, the ball
+reaches the shooter lane), ACTION BUTTON -> the auto plunger fires, slings,
+pops and orbits score (1,022,310 -> 1,073,640), a drain gives the end-of-ball
+bonus and BALL 2; inside the ball save the game re-serves and auto-launches.
 
 ## Where it stands (pokemon_le 0.82.0, 2026-11-10)
 
-A fresh slot boots unattended through the SPIKE 3 logo, the version screen,
-node location, Guided Setup (walked), and the whole attract cycle with its
-video and how-to-play films; 6 minutes, no crash. Screenshots
-emulator_01..07 in the ticket's artifacts. Start reaches the mode select.
+A fresh slot boots unattended through the SPIKE 3 logo, node location,
+Guided Setup (walked) and the attract cycle with its video, and a GAME PLAYS:
+credits, start, ball served, launch, scoring, drain, bonus, next ball.
+Screenshots emulator_01..11 in the ticket's artifacts.
 
 ## What is left for Spike 2 parity (next runs)
 
-1. **Serve the first ball**: find what the game is missing between mode
-   select and the trough eject. Leads: the ball count it expects (Audits /
-   the Adjustments "balls installed"), other ball holders (RIGHT EJECT 9/1,
-   RIGHT RAMP HOLD 9/15, CAPTIVE BALL, Meowth motor UP/DOWN 9/24-25 with the
-   node-9 coil-7 rule `41 07 5a e8 03`), switches that read active at rest
-   (TROUGH JAM closed made no difference), and Spike 2's motor models
-   (hwshim steppers) for Meowth. Then flippers (node 8 bits 24/25) and a
-   drain end a ball.
-2. **The other five cards** on hand (fallout, star_wars x3, walking_dead):
-   s3nodes.py derives each title's node set and devices; check each boots
-   to attract and starts.
-3. **Audio**: s3alsa drops the PCM (rig runs are muted); a host player like
+1. **The other five cards** on hand (fallout, star_wars x3, walking_dead):
+   everything above is derived per title (node set, devices, polarity by the
+   START BUTTON board, ball model by name) - check each boots and plays a
+   ball the same way.
+2. **Audio**: s3alsa drops the PCM (rig runs are muted); a host player like
    Spike 2's for the Emulate tab.
-4. **Rig integration**: the Emulate tab refuses a Spike 3 card at pick; hand
-   it to s3run.sh, a playfield window, rig slots/riglock.
-5. Power distribution board (`0x10..0x1f`): unanswered, game falls back.
+3. **Rig integration**: the Emulate tab refuses a Spike 3 card at pick; hand
+   it to s3run.sh, a playfield window (switches.json gives the names),
+   rig slots/riglock.
+4. Power distribution board (`0x10..0x1f`): unanswered, game falls back.

@@ -92,6 +92,7 @@ def _run(d, body, timeout=60):
         _PRELUDE % {"dir": _q(d)},
         _function("ffplay_channel_args"),
         _function("mac_meter"),
+        _function("ffplay_status"),
         _function("host_player"),
         body, "",
     ])
@@ -132,7 +133,7 @@ echo "HP-DONE"
            "/pad/rootfs/dump/audio.fifo /tmp/pad_audio_ctl.json" in ev, (ev, text)
     player = [l for l in ev.splitlines() if l.startswith("player 1:")][0]
     assert player.endswith("-f s16le -ar 44100 -ch_layout stereo -i pipe:0"), player
-    assert "-loglevel warning" in player, player
+    assert "-loglevel info -stats" in player, player
     assert "tcp://" not in ev
     assert _cat(d, "heard1") == "PCM-BYTES"
     # a relay left from an earlier player is stopped before this one reads
@@ -179,6 +180,26 @@ echo "OUT=$(wc -c < "$D/out" | tr -d ' ')"
     assert "OUT=196608" in text, text
     assert "[box] handed to the Mac's speaker so far:" in text, text
     assert "[box] handed to the Mac's speaker in all: 196608 bytes" in text, text
+
+
+@needs_bash
+def test_ffplays_own_lines_pass_and_its_clock_is_sampled():
+    """PAD-1109: ffplay's status line is its playback clock; sampled, not
+    flooded, and every other line of its passed through."""
+    d = _fresh_dir()
+    script = "\n".join(["set -u", "PAD_FFSTAT_N=3", _function("ffplay_status"), r"""
+printf 'Input #0, s16le, from pipe:0:\n' |
+    cat - <(for i in 1 2 3 4 5 6 7; do printf '   %d.00 M-A:  0.000 fd=   0 aq=   %dKB vq=    0KB sq=    0B \r' $i $i; done) |
+    ffplay_status 2>&1
+""", ""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    lines = out.stdout.decode("utf-8", "replace").splitlines()
+    assert lines[0] == "[box] ffplay: Input #0, s16le, from pipe:0:", lines
+    played = [l for l in lines if l.startswith("[box] ffplay playing:")]
+    assert [l.split()[3] for l in played] == ["1.00", "4.00", "7.00"], lines
+    assert "aq= 4KB" in played[1], played
 
 
 @needs_bash

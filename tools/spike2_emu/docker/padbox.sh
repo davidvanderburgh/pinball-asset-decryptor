@@ -492,6 +492,23 @@ mac_meter() {
     [ -n "$line" ] && echo "[box] handed to the Mac's speaker in all: $line" >&2
     rm -f "$f"
 }
+# WHAT ffplay ITSELF SAYS (PAD-1109). Its status line - the playback clock,
+# then aq=, the sound it holds queued - only moves while the sound device is
+# taking audio from it, so it tells "fed but not playing" from "playing" from
+# inside the app's own run, the one place no Terminal test can stand in for.
+# ffplay rewrites that line with \r about 30 times a second: every
+# PAD_FFSTAT_N-th (900, about 30 s) is said, every other line of its passes.
+ffplay_status() {
+    tr '\r' '\n' | awk -v every="${PAD_FFSTAT_N:-900}" '
+        /(M-A|A-V|M-V):/ {
+            if (++n % every == 1) {
+                sub(/^ +/, ""); gsub(/ +/, " ")
+                print "[box] ffplay playing: " $0; fflush()
+            }
+            next
+        }
+        NF { print "[box] ffplay: " $0; fflush() }' >&2
+}
 host_player() {
     [ "${PAD_AUDIO:-1}" = 0 ] && return 0
     fmt=""
@@ -556,9 +573,9 @@ host_player() {
             mac_meter |
             env -i HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
                 TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-en_US.UTF-8}" \
-                "$fpbin" -hide_banner -loglevel warning -nodisp -autoexit \
+                "$fpbin" -hide_banner -loglevel info -stats -nodisp -autoexit \
                  -fflags nobuffer -flags low_delay \
-                 -f s16le -ar "$rate" $chargs -i pipe:0 &
+                 -f s16le -ar "$rate" $chargs -i pipe:0 2> >(ffplay_status) &
         fp=$!
         wait "$fp"; rc=$?; fp=""
         # The relay ends when the run does; so does this. Asked of the FIFO,

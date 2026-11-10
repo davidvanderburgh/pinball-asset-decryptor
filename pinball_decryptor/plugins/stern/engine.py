@@ -21702,10 +21702,48 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     # (one a sound channel, less its own), and never past the biggest bank Stern ships or
     # the emulator's window (soundbank.alone_bank_room).  The longest is placed first.
     one_of = {id(u): SB.unit_bytes([u], stride) for u in units}
-    small = [u for u in units if one_of[id(u)] <= limit]
-    longs = sorted((u for u in units if one_of[id(u)] > limit),
-                   key=lambda u: (-one_of[id(u)], u.edits[0].idx))
-    bank_units = SB.split_units(small, limit=limit, stride=stride) if small else []
+
+    def _cut(at):
+        """``(small, longs, bank_units)`` with banks sliced at *at* bytes."""
+        sm = [u for u in units if one_of[id(u)] <= at]
+        lg = sorted((u for u in units if one_of[id(u)] > at),
+                    key=lambda u: (-one_of[id(u)], u.edits[0].idx))
+        return sm, lg, (SB.split_units(sm, limit=at, stride=stride) if sm else [])
+    small, longs, bank_units = _cut(limit)
+    # PAD-1089: image.bin's header names a card's sound banks in the few words before its first
+    # table (soundbank.category_slots: Godzilla Pro 1.16 has room for 35). Five songs at random
+    # on each of Godzilla's eight music tracks, 20 to 49 MB each, never paired in a 40 MB slice:
+    # 40 banks, refused as "Unexpected error". The slice only keeps the banks the game can hold
+    # at once small; each channel's share of the room beside image.bin is what memory allows, so
+    # when the banks are more than the header can name the slice grows towards that share, as
+    # little as it takes.
+    want_n = len(bank_units) + len(longs)
+    if want_n > _room:
+        share = min(SB.MAX_BANK_BYTES, SB.emulator_bank_room(staged),
+                    max(0, cap - mem_img) // chans)
+        at = limit
+        while at < share:
+            at = min(share, at + 1_000_000)
+            got = _cut(at)
+            if len(got[2]) + len(got[1]) <= _room:
+                small, longs, bank_units = got
+                log("%d sounds go into sound banks, and image.bin's header can name only %d "
+                    "more: the banks are made up to %d MB rather than %d MB so the sounds share "
+                    "%d of them (the game still holds at most one for each of its %d sound "
+                    "channels beside image.bin)."
+                    % (len(units), _room, at // 10**6, limit // 10**6,
+                       len(bank_units) + len(longs), SB.SOUND_CHANNELS), "info")
+                limit = at
+                break
+        else:
+            n_best = len(got[2]) + len(got[1]) if limit < share else want_n
+            raise SoundRoomError(
+                "The music modes' files and the longer sounds need %d sound banks on this card, "
+                "and image.bin can name only %d more. Each bank can be at most %d MB here (the "
+                "game holds image.bin, %d MB, and one bank for each of its %d sound channels in "
+                "memory at once), so the sounds cannot share fewer banks. Use fewer files at "
+                "random or in turn, or shorter ones."
+                % (n_best, _room, share // 10**6, mem_img // 10**6, SB.SOUND_CHANNELS))
     cap_alone = _alone_room(mem_img + game_bank, staged)
     def _bank_words(g):
         """The sounds of bank *g* a user can shorten, one line of the refusal (PAD-880)."""

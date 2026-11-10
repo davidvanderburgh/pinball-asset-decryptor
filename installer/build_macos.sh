@@ -181,6 +181,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike1" \
     --hidden-import "pinball_decryptor.plugins.stern.sam_audio" \
     --hidden-import "pinball_decryptor.plugins.pinmame_classic.sam_sound" \
+    --hidden-import "pinball_decryptor.plugins.pinmame_classic.capcom" \
+    --hidden-import "pinball_decryptor.plugins.pinmame_classic.capcom_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.sam_images" \
     --hidden-import "pinball_decryptor.plugins.pinmame_classic.sam_art" \
     --hidden-import "pinball_decryptor.plugins.stern.sam_anim_assets" \
@@ -190,6 +192,12 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_images" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_text" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_extract" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_games" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_keys" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_spk" \
+    --hidden-import "pinball_decryptor.plugins.stern.spks" \
     --hidden-import "pinball_decryptor.plugins.stern.valpatch" \
     --hidden-import "pinball_decryptor.plugins.stern.ext4" \
     --hidden-import "pinball_decryptor.plugins.stern.explorer" \

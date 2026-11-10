@@ -41,7 +41,7 @@ macOS and Linux.
 |---|---|---|
 | American Pinball | 6 | Extract, Write, Replace Audio/Video, Emulate |
 | Barrels of Fun | 4 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate, Multi-boot (Labyrinth) (Bon Jovi: extract only) |
-| Capcom | 6 | Capture DMD animations + sound with PinMAME |
+| Capcom | 6 | Extract every sound as WAVs; capture DMD animations + sound with PinMAME |
 | Chicago Gaming Company | 5 | Extract, Write, Mod Pack, Replace Audio |
 | Data East (classic DMD) | 16 | Capture DMD animations + sound with PinMAME |
 | Dutch Pinball | 2 | Extract, Write, Apply Delta, Mod Pack, Replace Audio/Video, Emulate, Multi-boot (The Big Lebowski) |

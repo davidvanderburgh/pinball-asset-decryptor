@@ -112,7 +112,11 @@ class SegaManufacturer(_ClassicManufacturer):
 
 
 class CapcomManufacturer(_ClassicManufacturer):
-    """Capcom (1995-1996), six titles; see :mod:`.capcom`."""
+    """Capcom (1995-1996), six titles; see :mod:`.capcom`.
+
+    Unlike Data East / Sega, Capcom's sounds can be read straight out of
+    the ROMs (:mod:`.capcom_sound`, PAD-1088), so it has a Basic extract
+    (every sound to a WAV) beside the PinMAME capture."""
 
     key = "capcom"
     display = "Capcom"
@@ -120,17 +124,60 @@ class CapcomManufacturer(_ClassicManufacturer):
     input_spec = InputSpec(
         label="Capcom MAME ROM zips", extensions=(".zip",))
     pipeline_class = _capture.CapcomCapturePipeline
+    capabilities = Capabilities(extract=True, capture=True)
+    extract_phases = _capture.CAPCOM_SOUND_PHASES
+    combined_phases = _capture.CAPCOM_COMBINED_PHASES
+    capture_basic_label = "Basic extract (every sound, as WAVs)"
+    # attract mode only: Capcom has no PinMAME switch maps to play with
+    capture_simulates_gameplay = False
 
     def _catalogue(self):
         from .capcom import CAPCOM_GAME_DB
         return CAPCOM_GAME_DB
 
+    def capture_help_text(self, basic, capture):
+        if basic and capture:
+            return ("Both: decodes every sound in the sound ROMs to a WAV "
+                    "(audio/), then runs the game in attract mode under "
+                    "PinMAME and records its DMD animations + audio as "
+                    "MP4s, into the same project folder.  Capture requires "
+                    "libpinmame.")
+        if capture:
+            return ("Capture only: runs the game in attract mode under "
+                    "PinMAME and records its DMD animations + audio as "
+                    "MP4s.  Requires libpinmame.")
+        return ("Basic only: decodes every sound in the sound ROMs to a "
+                "WAV (audio/), each one whole, with audio/sounds.csv "
+                "listing them.  Tick \"Use PinMAME\" too to ALSO record "
+                "the DMD animations as they play, as MP4s.")
+
+    def make_extract_pipeline(self, input_path, output_dir,
+                              log_cb, phase_cb, progress_cb, done_cb,
+                              **_ignored):
+        return _capture.CapcomSoundsPipeline(
+            input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
+            game_db=self._game_db)
+
+    def make_capture_pipeline(self, input_path, output_dir,
+                              log_cb, phase_cb, progress_cb, done_cb,
+                              **kwargs):
+        if not kwargs.get("also_run_static"):
+            return super().make_capture_pipeline(
+                input_path, output_dir, log_cb, phase_cb, progress_cb,
+                done_cb, **kwargs)
+        return _capture.CapcomSoundsPlusCapturePipeline(
+            input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
+            game_db=self._game_db,
+            duration_seconds=kwargs.get("duration_seconds", 180.0),
+            frame_cb=kwargs.get("frame_cb"), capture_ready_cb=None)
+
     def extract_input_help(self):
         return ("Pick a MAME-format ROM zip for a Capcom game (e.g. "
                 "`bbb109.zip` for Big Bang Bar, `kpb105.zip` for "
-                "Kingpin).  Extract runs the game in attract mode "
-                "(libpinmame) and records the DMD animations + audio as "
-                "the game draws and plays them.")
+                "Kingpin).  Basic extract decodes every sound in the "
+                "sound ROMs to a WAV; the PinMAME capture runs the game "
+                "in attract mode (libpinmame) and records the DMD "
+                "animations + audio as the game draws and plays them.")
 
 
 def register():

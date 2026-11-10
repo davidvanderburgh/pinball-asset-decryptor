@@ -12,9 +12,12 @@ filesystem carries the same asset formats as Spike 2:
 This pipeline decrypts p6 on the fly (:mod:`.spike3`), walks the tree once, and
 copies those three categories into ``video/`` / ``images/`` / ``scenes/`` under
 the output directory, preserving each file's path so names stay unique and
-meaningful.  The scene-renderer texture ``.asset`` blobs and the ``image.bin``
-audio container need the Spike 2 scene/audio decode engine to become loose
-clips + WAVs; that reuse is the next step and is not done here.
+meaningful.  Every ``image.bin`` sound container is decoded straight to
+per-sound WAVs (:mod:`.spike3_sound`, PAD-1077): ``sound/<path>/audio/
+idxNNNN.wav`` beside where the container sat, so the main game's sounds and the
+``spike3/spike_menu`` ones each get their own ``audio/``.  The raw container is
+not kept (the WAVs are lossless and the card stays the source).  The
+scene-renderer texture ``.asset`` blobs are not decoded here.
 
 Keys are never in the repo: the pipeline asks
 :class:`.spike3_keys.Spike3KeySource` (``$PAD_SPIKE3_KEYFILE`` / a
@@ -28,6 +31,7 @@ import os
 
 from ...core.pipeline_base import BasePipeline, PipelineError
 from . import spike3
+from . import spike3_sound
 from .spike3_keys import Spike3KeySource, Spike3KeyError
 from .formats import _title_from_filename
 
@@ -42,6 +46,85 @@ PHASES = ("Detect", "Prepare", "Extract video", "Extract images",
 _QUICKTIME_TAGS = (b"ftyp", b"moov", b"mdat", b"wide", b"skip")
 
 
+#: categories the GUI can toggle (all on by default); "audio" is the Spike 2
+#: key too, so the Extract tab's Audio box reads the same everywhere
+CATEGORIES = (("audio", "Audio"), ("video", "Video"), ("images", "Images"),
+              ("scenes", "Scenes"))
+
+
+def want_category(cats, cat):
+    """Is category *cat* ticked in *cats* (None/{} = everything)?  Audio is
+    also off for the pre-PAD-1077 key ``sounds``."""
+    if not cats:
+        return True
+    if cat == "audio" and not cats.get("sounds", True):
+        return False
+    return bool(cats.get(cat, True))
+
+
+def decode_sound_containers(pipe, items, rel_of, extract_to):
+    """Extract each image.bin in *items* and decode it to WAVs (PAD-1077).
+
+    *rel_of(item)* is the container's path inside the card ("pokemon_le/
+    image.bin"); *extract_to(item, out_path)* writes its bytes. The WAVs go to
+    ``<output>/sound/<dir of rel>/audio/``, and the container is removed once
+    they are all written; a container that fails to decode is left in place
+    (with a warning) so nothing is lost. Returns ``(sounds, seconds)``."""
+    base = os.path.join(pipe.output_dir, "sound")
+    sounds, seconds = 0, 0.0
+    for item in items:
+        pipe._check_cancel()
+        rel = rel_of(item).lstrip("/")
+        out = os.path.join(base, rel.replace("/", os.sep))
+        where = os.path.dirname(rel) or "."
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        try:
+            pipe._progress(0, 1, "sound %s: copying container" % where)
+            extract_to(item, out)
+        except Exception as e:                               # noqa: BLE001
+            pipe._log("skip %s: %s" % (rel, e), "warn")
+            continue
+        audio = os.path.join(os.path.dirname(out), "audio")
+
+        def prog(done, total, where=where):
+            if done == total or done % 25 == 0:
+                pipe._progress(done, total, "sound %s: %d/%d"
+                               % (where, done, total))
+        try:
+            got = spike3_sound.decode_container(out, audio, progress=prog,
+                                                cancel=pipe._check_cancel)
+        except ValueError as e:
+            pipe._log("%s could not be decoded to WAVs (%s); the container "
+                      "is kept as it is." % (rel, e), "warn")
+            continue
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+        sounds += got["sounds"]
+        seconds += got["seconds"]
+        pipe._log("%s: %d sounds (%d mono, %d stereo, %.1f min) -> %s"
+                  % (rel, got["sounds"], got["mono"], got["stereo"],
+                     got["seconds"] / 60.0,
+                     os.path.relpath(audio, pipe.output_dir)), "success")
+    return sounds, seconds
+
+
+def summary_bits(counts):
+    """The "N video, N image, ..." pieces of a Spike 3 extract's summary."""
+    bits = []
+    if counts.get("video"):
+        bits.append("%d video" % counts["video"])
+    if counts.get("images"):
+        bits.append("%d image" % counts["images"])
+    if counts.get("scenes"):
+        bits.append("%d scene" % counts["scenes"])
+    if counts.get("audio"):
+        bits.append("%d sound (%.0f min)" % (counts["audio"],
+                                             counts.get("seconds", 0) / 60.0))
+    return bits
+
+
 def _is_quicktime(reader, inode):
     h = reader.peek(inode, 12)
     return len(h) >= 8 and h[4:8] in _QUICKTIME_TAGS
@@ -52,8 +135,7 @@ class Spike3ExtractPipeline(BasePipeline):
 
     PHASES = PHASES
     #: categories the GUI can toggle (all on by default)
-    CATEGORIES = (("video", "Video"), ("images", "Images"), ("scenes", "Scenes"),
-                  ("sounds", "Sounds"))
+    CATEGORIES = CATEGORIES
 
     def __init__(self, input_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
@@ -66,10 +148,7 @@ class Spike3ExtractPipeline(BasePipeline):
 
     # -- helpers -------------------------------------------------------------
     def _want(self, cat):
-        cats = self.extract_categories
-        if not cats:
-            return True
-        return bool(cats.get(cat, True))
+        return want_category(self.extract_categories, cat)
 
     def _image_id(self):
         # Stern names cards "<title>_<edition>-<version>.Release.…"; the
@@ -131,7 +210,7 @@ class Spike3ExtractPipeline(BasePipeline):
         want_video = self._want("video")
         want_images = self._want("images")
         want_scenes = self._want("scenes")
-        want_sounds = self._want("sounds")
+        want_sounds = self._want("audio")
 
         # Collect targets first (cheap: inode walk only), so progress has a
         # denominator and each phase can report n/total.
@@ -152,7 +231,7 @@ class Spike3ExtractPipeline(BasePipeline):
         self._log("Found %d video, %d image, %d scene, %d sound container(s)."
                   % (len(videos), len(images), len(scenes), len(sounds)), "info")
 
-        counts = {"video": 0, "images": 0, "scenes": 0, "sounds": 0}
+        counts = {"video": 0, "images": 0, "scenes": 0, "audio": 0}
         if want_video:
             self._set_phase(2)
             counts["video"] = self._copy_bucket(
@@ -165,13 +244,10 @@ class Spike3ExtractPipeline(BasePipeline):
             counts["scenes"] = self._copy_bucket(reader, scenes, "scenes")
         if want_sounds:
             self._set_phase(5)
-            # image.bin is the packed sound container; per-sound WAV decode
-            # needs the Spike 3 firmware codec (a separate step), so the
-            # container is copied out whole under sound/ for now.
-            counts["sounds"] = self._copy_bucket(reader, sounds, "sound")
-            if sounds:
-                self._log("image.bin copied under sound/ (per-sound WAV decode "
-                          "is a separate step).", "info")
+            # image.bin is a plaintext PCM container: decode it to WAVs
+            counts["audio"], counts["seconds"] = decode_sound_containers(
+                self, sounds, lambda it: it[0],
+                lambda it, out: reader.extract_file(it[1], out))
         return counts
 
     def _copy_bucket(self, reader, items, subdir, rename_ext=None):
@@ -194,10 +270,6 @@ class Spike3ExtractPipeline(BasePipeline):
         return done
 
     def _summary(self, counts):
-        bits = [("%d video" % counts["video"]) if counts["video"] else "",
-                ("%d image" % counts["images"]) if counts["images"] else "",
-                ("%d scene" % counts["scenes"]) if counts["scenes"] else "",
-                ("%d sound container" % counts["sounds"]) if counts["sounds"] else ""]
-        bits = [b for b in bits if b]
+        bits = summary_bits(counts)
         got = ", ".join(bits) if bits else "no"
         return "Extracted %s file(s) to %s" % (got, self.output_dir)

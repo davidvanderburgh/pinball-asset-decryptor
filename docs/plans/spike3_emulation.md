@@ -278,73 +278,90 @@ reflash the RP2040 and fails), `0x20` (repeated every second), `0x27`, `0x41`
 (node traffic: `41 <seq> <node> ...`, cycling node addresses), `0x25`,
 `0x12`/`0x19`.
 
-Next: answer the bridge (version/CRC so no reflash is tried, then the node
-boards behind it, from the board firmware's `uart_host.c` dispatch and the
-existing Spike 2 node model), so Tech Alerts clears to attract; the picture
-draws 800x480 at the top-left of the 1920x1080 frame - find why; the MAX9850
-headphone amp's I2C address is not in the stub's list (its write read-back
-fails, not fatal).
+## Stage 4b - the bridge board answers, the node boards register (done)
+
+`s3bridge.py` answers the host UART as `netbridge.elf`'s own `HOST_Update`
+dispatch does (read off the unstripped firmware): `0x20` version
+`[0, 98, 4, board rev]`; `0x30` the CRC32 (zlib's) of flash `0x10000100..
+0x10012b40` computed from the card's ELF - the game logs "netbridge image
+okay" and never runs openocd; `0x25` NODEBUS_Poll, the LOWEST node raising a
+request (0 = none; answering the highest node made the game service node 14
+for ever and skip the census); `0x27` LCD status; `0x41` the node relay,
+`[node][n][n bytes][reply_len]` -> reply_len-1 node bytes + status (`0x00`
+answered, `0x04` timeout with 0x55 fill). `0x10..0x1f` go to the power
+distribution board and stay unanswered (the game falls back to "Spike 1/2
+power distribution board").
+
+The node protocol behind 0x41 is byte-for-byte Spike 2's (`81 02 fe 7f 0d` is
+node 1's identity request on both). `s3nodes.py` reads the title's node
+directory and board catalog out of the aarch64 game through its
+R_AARCH64_RELATIVE relocations (the 64-bit `nbdir.py`; directory records are
+0x20 bytes: handler, name cell, node<<16|code, flags; catalog rows 0x28 from
+the part number; row = code - 2, checked by the CPU record landing on
+"SPIKE3 CPU") and claims each identity by Spike 2's measured rules against the
+`.hex` files the card ships. pokemon_le: nodes 1,2,4,7,8,9,10,12,13,14 all
+register. `PAD_S3_NODES_ABSENT=<ids>` leaves boards off the chain.
+
+**No network**: the game runs in its own network namespace (loopback only).
+A 200 s strace boot: zero connect/sendto. conagent is never started.
+
+## Stage 4c - cabinet inputs (done)
+
+The SPI chain is the cabinet inputs, 8 bytes, ACTIVE LOW. At 0x00 every
+button reads held and the game boots into its service path (Tech Alerts);
+0xff (at rest) boots normally. `s3spid --input=$SD/spi.in` answers live from
+that file; `s3press.py` presses bits. Measured in Guided Setup: byte 0 bit 0
+SELECT, bit 1 NEXT, bit 2 PREVIOUS, bit 3 BACK (BACK jumps the highlight to
+Save & Exit). The rest (start, coin, flippers, tilt) are NOT mapped yet: the
+attract-mode scan's screen metric was noise (it cropped the Guided Setup rows,
+not the CREDITS counter) - next run, score on the credits/start-prompt area.
+
+The game shows Guided Setup at EVERY boot here (the slot's NVRAM persists, so
+it is the game's choice - probably the "This machine has an invalid ..."
+identity it reports). `s3run.sh --bus --bridge` runs `s3press.py autoguide`,
+which spots it in the frame dumps and presses BACK + SELECT, and prunes old
+dumps (`PAD_S3_AUTOGUIDE=0` turns it off).
+
+## Stage 5 - video (done)
+
+The game decodes its clips through libavcodec (FFmpeg 5.1.6-rpi) out of its
+packed asset store (custom AVIO), expecting the Pi's V4L2 HEVC block and
+`h264_v4l2m2m`, with DRM-PRIME frames wrapped as EGL images. `s3vid.so`
+(guest, built against the FFmpeg 5.1.6 headers) takes HEVC/H.264 contexts
+over at `avcodec_open2/send_packet/receive_frame/flush_buffers/free_context`;
+packets go to `s3vidhost.py` (`s3vid.h` feed), one native ffmpeg per stream
+(Annex B in, I420 out) writes the padvid ring (2048x1152 slots, 16 a stream -
+`-DPADVID_MAX_W/H/SLOTS`); `s3egl`/`s3gl` turn the frame's fd into an image
+and its bind into `PADGL_TEXDIRECT`. Traps found: length prefixes 256..511
+look like start codes; `-fflags nobuffer` drops the IDR; the real
+h264_v4l2m2m open fails (taken over anyway); 4 slots deadlocked; drain must
+answer EOF promptly; pts may never be NOPTS.
+
+The GL bridge needed the rest of GLES 3 for the video to SHOW (and for much
+of Godot): MAXPROG 128 -> 1024 for Spike 3 (program 144's uniforms were never
+set), and new ring ops after PADGL_PRESENTTEX - instancing, uniform blocks,
+counted uniform arrays, colour/depth mask, pixel store, 3D textures, mipmaps.
+GLES varying limits (0x9122/0x9125) answered; samplerExternalOES shaders get
+the game's own `#define samplerExternalOES sampler2D`.
+
+## Where it stands (pokemon_le 0.82.0, 2026-11-10)
+
+A fresh slot boots unattended through the SPIKE 3 logo, the version screen,
+node location, Guided Setup (walked), and the whole attract cycle with its
+video and how-to-play films; 6 minutes, no crash. Screenshots
+emulator_01..06 in the ticket's artifacts.
 
 ## What is left for Spike 2 parity (next runs)
 
-1. **Toolchain**: an aarch64 cross gcc for the shims (only `arm-linux-gnueabihf`
-   is installed). Same private-prefix route the README uses for fuse2fs
-   (`apt-get download` + `dpkg-deb -x`), no system package needed.
-2. **Display**: aarch64 builds of `eglshim.c` + `glbridge.c` (check `padgl.h`
-   for 32-bit pointer assumptions), plus `libgbm`/`libdrm` entry points the game
-   uses to find `card1`, so `create_window` succeeds and frames reach
-   `padglhost`. The game is stripped (dynsym only) and its window is classic
-   KMS: it imports `drmModeGetResources/GetConnector/GetEncoder/GetCrtc`,
-   `drmModeAddFB/RmFB/SetCrtc/PageFlip`, `drmHandleEvent`, `gbm_create_device`,
-   `gbm_bo_create/map/get_handle/get_stride/get_fd/set_user_data...` and EGL
-   (`eglGetProcAddress`, so the display is most likely
-   `eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM)`). The shim fakes one connected
-   connector + CRTC at the panel's mode on a dummy `card1` fd, treats a GBM bo
-   as a bridge surface and a page flip as a present (the flip event answered
-   through `drmHandleEvent`). Strings name `card0` and `card1` - it probes both.
-   **It imports neither `eglCreateWindowSurface` nor `eglSwapBuffers`**: it
-   must render into GBM buffers exported as dma-bufs (`gbm_bo_get_fd`) and
-   wrapped as EGL images (`eglCreateImageKHR` +
-   `glEGLImageTargetRenderbufferStorageOES`/`Texture2DOES` through
-   `eglGetProcAddress`), then scan them out itself with `drmModeAddFB` +
-   `drmModePageFlip`. So in the shim an EGL image of a bo is a host FBO, and
-   the page flip of that bo's fb is the frame's present. Confirm with a
-   `--strace` run once the fake card1 answers.
-   Extensions it asks `eglGetProcAddress` for (strings): `eglGetPlatformDisplayEXT`,
-   `eglCreateImageKHR`/`eglDestroyImageKHR`, `glEGLImageTargetTexture2DOES`,
-   `eglCreateSyncKHR`/`ClientWaitSyncKHR`/`WaitSyncKHR`/`DestroySyncKHR`,
-   `glFramebufferTexture2DMultisampleEXT`, `glDebugMessageCallbackKHR`.
-   **The bridge exports 75 of the 130 GL calls the game imports.** Missing - all
-   GLES 3 the Spike 2 titles never used: glBeginTransformFeedback
-   glBindBufferBase glBindBufferRange glBindRenderbuffer glBlendColor
-   glBlitFramebuffer glClearBufferfv glClearDepthf glColorMask
-   glCompressedTexImage3D glCompressedTexSubImage3D glCopyBufferSubData
-   glCullFace glDeleteFramebuffers glDeleteQueries glDeleteRenderbuffers
-   glDepthFunc glDepthMask glDrawArraysInstanced glDrawElementsInstanced
-   glEndTransformFeedback glFinish glFlush glFramebufferRenderbuffer
-   glFramebufferTextureLayer glFrontFace glGenQueries glGenRenderbuffers
-   glGenerateMipmap glGetFloatv glGetInteger64v glGetProgramBinary glGetStringi
-   glGetSynciv glGetUniformBlockIndex glMapBufferRange glPixelStorei
-   glProgramBinary glReadBuffer glRenderbufferStorage glTexImage3D
-   glTexParameterf glTexStorage2D glTexSubImage3D glTransformFeedbackVaryings
-   glUniform1iv glUniform1ui glUniform1uiv glUniform2fv glUniform2iv
-   glUniform3fv glUniformBlockBinding glUniformMatrix3fv glUnmapBuffer
-   glVertexAttrib4f glVertexAttribDivisor glVertexAttribI4ui
-   glVertexAttribIPointer. Most are one-way commands the ring carries as is;
-   the round trips (`glGetUniformBlockIndex`, `glGetProgramBinary`,
-   `glGetSynciv`, queries) need the bridge's reply path, `glMapBufferRange`
-   a guest-side shadow flushed at unmap, and `glProgramBinary` can answer
-   "no binary formats" so the engine falls back to source.
-   Checked this run: `glbridge.c` and `eglshim.c` compile for aarch64 as they
-   are (xgcc.sh, `-nostdlib` against the card's own libc) - the ring protocol
-   is pointer-free fixed-width fields.
-3. **Netbridge**: what the game expects over `spidev4.0`/`ttyAMA5` (find the
-   framing in the game; the RP2040 firmware is on the card as
-   `spike3/netbridge/netbridge.elf`), then a bridge emulator that speaks the
-   existing nodebus.py node set behind it - switches, coils, LEDs.
-4. **hwshim for aarch64**: EEPROM, clocks/pause/speed, the validation reporter;
-   per-title addresses for aarch64 ELFs.
-5. **Audio / video** stubs rebuilt for aarch64.
-6. **Rig integration**: watch.sh / riglock slots / rig board, the Emulate tab
-   (today it refuses a Spike 3 card at pick - lift that once stage 2 boots to
-   attract), playfield window.
+1. **Start a game**: map start, coin, flippers, tilt on the SPI chain (scan
+   in attract scoring the CREDITS counter; a coin should read CREDITS 1/3),
+   then start and play a ball: the playfield switches come over the node bus
+   (`ff` replies = switch words, per Spike 2's nodebus model), coils and LEDs
+   go out on it.
+2. **The other five cards** on hand (fallout, star_wars x3, walking_dead):
+   s3nodes.py derives each title's node set; check each boots to attract.
+3. **Audio**: s3alsa drops the PCM (rig runs are muted); a host player like
+   Spike 2's for the Emulate tab.
+4. **Rig integration**: the Emulate tab refuses a Spike 3 card at pick; hand
+   it to s3run.sh, a playfield window, rig slots/riglock.
+5. Power distribution board (`0x10..0x1f`): unanswered, game falls back.

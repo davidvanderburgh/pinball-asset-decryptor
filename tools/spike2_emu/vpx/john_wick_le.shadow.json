@@ -17,7 +17,10 @@
     "LE: the diverter turns the table's guideramp, Karche is the arch's lock lane",
     "(LOCK 1-3, kicked out of KArche3 past the lowered post), and Targetclub is the",
     "pops' drop target (its opto made while it is down). The car's motor is the rig's",
-    "to answer, as on any LE run; the table's car does not move."
+    "to answer, as on any LE run; the table's car does not move.",
+    "PAD-1098: the table's own arch lock stays shut (checkarche quiet, its KArche CreateBalls",
+    "neutered): with three ramp diamonds lit (the machine's lights now) it swung the diverter open,",
+    "destroyed the ball at Karche and made one behind lockarche that nothing ever lets go."
   ],
   "title": "john_wick_le",
   "model": "LE",
@@ -103,7 +106,10 @@
     "BallRelease.CreateBall",
     "BallRelease.Kick",
     "PlungerIM.AutoFire",
-    "kicker001.createball"
+    "kicker001.createball",
+    "KArche1.CreateBall",
+    "KArche2.CreateBall",
+    "KArche3.CreateBall"
   ],
   "extra_vbs": "'---- PAD (PAD-905): John Wick's switches the shadow game kept for its missions\nTenemy7.Enabled = 1 : Tkatia.Enabled = 1          ' the skill shot, in the shooter lane\nTargetsave.Collidable = 1                        ' MID RIGHT TGT BOT\nTpostG.Enabled = 0 : TpostD.Enabled = 0          ' the machine has no return lane posts\n'---- the LE's mechs: the diverter on the center ramp sends the ball to the\n' lock behind the arch (Karche, LOCK 1-3, the post), and the pops' drop target\nSub PadDiverter(e)\n\tIf e Then\n\t\tguideramp.RotZ = -50 : guideramp.Collidable = 0 : guideramp1.Collidable = 1\n\tElse\n\t\tguideramp.RotZ = 0 : guideramp.Collidable = 1 : guideramp1.Collidable = 0\n\tEnd If\nEnd Sub\nSub PadLockPost(e) : lockarche.IsDropped = CBool(e) : PadHeldKarche_Sol e : End Sub\nSub Targetclub_Dropped : Controller.Switch(1081) = True : End Sub\nSub Targetclub_Raised : Controller.Switch(1081) = False : End Sub\nSub PadDropTrip(e) : If e Then Targetclub.IsDropped = 1 : PlaySoundAt \"fx_droptarget\", Targetclub : End If : End Sub\nSub PadDropReset(e) : If e Then Targetclub.IsDropped = 0 : PlaySoundAt \"fx_resetdrop\", Targetclub : End If : End Sub\n",
   "retrofit_triggers": {
@@ -276,7 +282,8 @@
     "StartRainbow",
     "GiEffect",
     "LightEffect",
-    "FlashEffect"
+    "FlashEffect",
+    "checkarche"
   ],
   "orig_hits": false,
   "orig_keep": [
@@ -286,5 +293,8 @@
     "Bumper1",
     "Kramploop",
     "lock"
+  ],
+  "repatch": [
+    {"old": "Case 1 KArche1.CreateBall", "why": "a ball can get stuck behind the post at the top of the center ramp", "since": "PAD-1098: the table's own arch lock stays shut"}
   ]
 }

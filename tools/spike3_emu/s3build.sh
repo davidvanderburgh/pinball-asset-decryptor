@@ -8,7 +8,10 @@
 #   libGLESv2.so.2   s3gl.c  (#includes ../spike2_emu/glbridge.c)
 #   libEGL.so.1      s3egl.c
 #   s3kms.so         s3kms.c (LD_PRELOAD: fake KMS + GBM)
-# Host (x86-64): padglhost from ../spike2_emu/padglhost.c, built HERE rather
+#   s3alsa.so        s3alsa.c (LD_PRELOAD: the sound cards, paced and muted)
+# Host (x86-64): s3spid (s3spid.c, the CUSE stand-in for the CPU board's SPI
+# I/O chain, s3run.sh --bus; needs libfuse3-dev), and padglhost from
+# ../spike2_emu/padglhost.c, built HERE rather
 # than over the Spike 2 rig's own copy, so a Spike 3 bring-up never swaps the
 # renderer under a Spike 2 run another ticket has going.
 #
@@ -32,10 +35,12 @@ CF="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -Wall -Werror=implicit-fun
 "$CC" $CF -nostdlib -Wl,-soname,libEGL.so.1 -o "$OUT/libEGL.so.1" \
     "$S/s3egl.c" -L"$LIBC" -l:libc.so.6 "$OUT/libGLESv2.so.2"
 "$CC" $CF -Wl,-soname,s3kms.so -o "$OUT/s3kms.so" "$S/s3kms.c" -ldl -lpthread
+"$CC" $CF -Wl,-soname,s3alsa.so -o "$OUT/s3alsa.so" "$S/s3alsa.c"
+gcc -std=gnu17 -O2 -Wall -o "$OUT/s3spid" "$S/s3spid.c" $(pkg-config --cflags --libs fuse3)
 
 gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -I"$S2" \
     -o "$OUT/padglhost" "$S2/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
-for f in libGLESv2.so.2 libEGL.so.1 s3kms.so padglhost; do
+for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3spid padglhost; do
     printf 's3build: %-15s %8d bytes\n' "$f" "$(stat -c%s "$OUT/$f")"
 done

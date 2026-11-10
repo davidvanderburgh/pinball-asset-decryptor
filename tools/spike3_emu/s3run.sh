@@ -26,7 +26,7 @@
 # game_monitor reads it.
 set -u
 S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-CARD=""; SLOT=1; SECS=60; STRACE=0; FRESH=0; BRIDGE=0; PROG=/games/game; ARGS=()
+CARD=""; SLOT=1; SECS=60; STRACE=0; FRESH=0; BRIDGE=0; BUS=0; PROG=/games/game; ARGS=()
 B=${PAD_S3_BUILD:-/home/david/.pad-s3/build}
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -35,13 +35,14 @@ while [ $# -gt 0 ]; do
         --strace) STRACE=1 ;;
         --fresh) FRESH=1 ;;
         --bridge) BRIDGE=1 ;;
+        --bus) BUS=1 ;;
         --prog) PROG=$2; shift ;;
         --) shift; ARGS=("$@"); break ;;
         *) CARD=$1 ;;
     esac
     shift
 done
-[ -n "$CARD" ] || { echo "usage: s3run.sh CARD.raw [--slot N] [--secs S] [--strace] [--fresh]" >&2; exit 2; }
+[ -n "$CARD" ] || { echo "usage: s3run.sh CARD.raw [--slot N] [--secs S] [--strace] [--fresh] [--bridge] [--bus]" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "[s3run] needs root (overlay mounts): wsl -u root -e bash s3run.sh ..." >&2; exit 2; }
 
 TREE=$(python3 "$S/s3store.py" path "$CARD") || {
@@ -71,6 +72,35 @@ if [ "$BRIDGE" = 1 ]; then
     [ -s "$SD/padgl.ring" ] || { echo "[s3run] padglhost made no ring:"; tail -5 "$SD/padglhost.log"; kill -9 $HOSTPID; exit 1; }
     echo "[s3run] renderer up: $(grep -a -m2 -E "GL_RENDERER|renderer|GL " "$SD/padglhost.log" | tr '\n' ' ')"
 fi
+
+# --bus: the node bus side of the CPU board (stage 4). Two host stand-ins, one
+# per slot, bound over the chroot's device nodes:
+#   /dev/spidev4.0  s3spid (CUSE char device; the game's spidev ioctls reach it
+#                   through the qemu-spi-ioctls.patch translation) -> $SD/spi.log
+#   /dev/ttyAMA5    s3bridge.py (a pty: the RP2040 netbridge's host UART)
+#                   -> $SD/bridge.log
+# Needs cuse.ko loaded on the host (built from the same kernel tree as
+# i2c-stub; see docs/plans/spike3_emulation.md stage 4).
+BUSPIDS=""
+DEVBINDS=""
+if [ "$BUS" = 1 ]; then
+    [ -e /dev/cuse ] || { echo "[s3run] --bus needs /dev/cuse (insmod cuse.ko)" >&2; exit 1; }
+    [ -x "$B/s3spid" ] || { echo "[s3run] --bus needs $B/s3spid: bash s3build.sh" >&2; exit 1; }
+    SPIDEV=pad-s3spi-slot$SLOT
+    rm -f "$SD/spi.log" "$SD/bridge.log" "$SD/bridge.path"
+    "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" > "$SD/s3spid.out" 2>&1 &
+    BUSPIDS="$!"
+    python3 "$S/s3bridge.py" "$SD" > "$SD/s3bridge.out" 2>&1 &
+    BUSPIDS="$BUSPIDS $!"
+    for i in $(seq 1 50); do
+        [ -e /dev/$SPIDEV ] && [ -s "$SD/bridge.path" ] && break; sleep 0.1
+    done
+    [ -e /dev/$SPIDEV ] || { echo "[s3run] s3spid made no /dev/$SPIDEV:"; tail -3 "$SD/s3spid.out"; kill $BUSPIDS; exit 1; }
+    [ -s "$SD/bridge.path" ] || { echo "[s3run] s3bridge made no pty:"; tail -3 "$SD/s3bridge.out"; kill $BUSPIDS; exit 1; }
+    DEVBINDS="spidev4.0=/dev/$SPIDEV ttyAMA5=$(cat "$SD/bridge.path")"
+    echo "[s3run] node bus up: $DEVBINDS"
+fi
+export DEVBINDS
 
 unshare -m -p -f --mount-proc=/proc bash -s "$TREE" "$SD" "$SECS" "$STRACE" "$BRIDGE" "$B" "$PROG" "${ARGS[@]}" <<'INNER'
 set -u
@@ -108,6 +138,12 @@ if [ -n "${PAD_S3_I2C:-}" ] && [ -e "/dev/i2c-${PAD_S3_I2C}" ]; then
     mknod "$R/dev/i2c-10" c 89 "${PAD_S3_I2C}" 2>/dev/null \
         && echo "[s3run] /dev/i2c-10 -> host i2c-${PAD_S3_I2C} (stub bus)"
 fi
+# --bus: each NAME=HOSTDEV in DEVBINDS bound over the chroot's /dev/NAME
+for kv in ${DEVBINDS:-}; do
+    n=${kv%%=*}; h=${kv#*=}
+    rm -f "$R/dev/$n"; touch "$R/dev/$n"
+    mount --bind "$h" "$R/dev/$n" && echo "[s3run] /dev/$n -> $h"
+done
 # /dump -> /connectivity/dump on the machine (S95game makes it)
 mkdir -p "$R/connectivity/dump/log"
 PRELOAD=""
@@ -120,8 +156,15 @@ if [ "$BRIDGE" = 1 ]; then
     # here, script/timeout/chroot - host binaries - each said it could not open
     # the aarch64 .so at a host path
     export PAD_GL_BRIDGE=/run/padgl
-    PRELOAD="env LD_PRELOAD=/usr/lib/pad/s3kms.so"
+    PRELOAD="/usr/lib/pad/s3kms.so"
 fi
+# the sound cards (s3alsa.so): without them the game asserts in
+# snd_pcm_prepare a few seconds in, once the node bus lets it get that far
+if [ -e "$B/s3alsa.so" ]; then
+    mkdir -p "$R/usr/lib/pad"; cp "$B/s3alsa.so" "$R/usr/lib/pad/"
+    PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/s3alsa.so"
+fi
+[ -n "$PRELOAD" ] && PRELOAD="env LD_PRELOAD=$PRELOAD"
 # The audio amp talks over /dev/i2c-10 with the Linux i2c-dev ioctls, which
 # stock qemu-user does not translate (it answers ENOTTY and the amp thread dies
 # -> xifo.cpp:72). A patched qemu-aarch64 that understands those ioctls lives at
@@ -160,6 +203,10 @@ case $RC in
 esac
 INNER
 RC=$?
+if [ -n "$BUSPIDS" ]; then
+    kill $BUSPIDS 2>/dev/null; sleep 0.5; kill -9 $BUSPIDS 2>/dev/null
+    echo "[s3run] node bus: spi $(grep -c xfer "$SD/spi.log" 2>/dev/null) transfers, $(grep -c ' open' "$SD/spi.log" 2>/dev/null) opens; bridge $(grep -c ' tx\[' "$SD/bridge.log" 2>/dev/null) bursts ($SD)"
+fi
 if [ -n "$HOSTPID" ]; then
     kill -INT -"$HOSTPID" 2>/dev/null; sleep 1; kill -9 -"$HOSTPID" 2>/dev/null
     echo "[s3run] frames dumped: $(ls "$SD/frames" | wc -l) ($SD/frames)"

@@ -229,6 +229,62 @@ entirely absent and is the likely next gate on the render loop once the amp is
 non-fatal. The game presents only a black clear-frame (frame 2 uploads the UI
 atlases but never composites them) until it gets past init.
 
+## Stage 4 - the node bus side of the CPU board (run 4: the game is on screen)
+
+What the "node bus" devices turned out to be, read off the bridge board's own
+firmware (`games/<title>/spike3/netbridge/netbridge.elf` is on the card,
+unstripped, with debug info: `uart_host.c`, `uart_node.c`, `uart_powerdist.c`,
+`ws2812.c`, `dmd.c`, `lcd.c`/`ch7038b.c`) and the game's own syscalls:
+
+| device | what | stand-in |
+|---|---|---|
+| `/dev/ttyAMA5` | the RP2040 **netbridge's host UART** (`HOSTUART_*`); the board fans out to the node boards, WS2812 LEDs, DMD, LCD, power distribution | `s3bridge.py`: a pty, every burst logged (`bridge.log`) |
+| `/dev/spidev4.0` | a **CPU-board SPI I/O chain**, not the bridge (the RP2040's only `spi_init` is in `DMD_Init1`): SPI mode 3, 100 kHz, 8 bytes out / 8 in, polled ~3000/s - the cabinet inputs and outputs. Its absence is the game's `FATAL error 226 (CPU SPI open failed)` | `s3spid` (CUSE): a real host char device, every transfer logged (`spi.log`), answers zeros |
+| ALSA | the sound cards (the game imports 18 `snd_pcm_*` calls, no mixer) | `s3alsa.so` (LD_PRELOAD): paced to the wall clock, muted |
+
+The SPI chain was THE gate. With only `spidev4.0` answering, the game stopped
+waiting in hardware init and ran on to sound init in 5 s (previously: never in
+120 s); the amp init that stage 3 left half-done now **completes** ("TAS57XX:
+amp initialization complete" - its failures were collateral of the missing
+SPI chain). With the sound cards answered too, Godot's main loop starts
+(`Godot Engine v4.4.1`), shaders compile, HEVC video decodes, and frames
+present continuously.
+
+**First picture, pokemon_le 0.82.0 (2026-11-10):** the game's own red **Tech
+Alerts** screen - "Check Node Board 4 : Invalid", "Check Node Board 0 : Not
+Initialized", ... "Press 'Select' for Node Bus Test" - exactly what a machine
+with no node boards answering shows, updating as the game retries them.
+
+Pieces:
+
+- `qemu-spi-ioctls.patch` (applied after `qemu-i2c-ioctls.patch`): the spidev
+  setting ioctls and `SPI_IOC_MESSAGE(1..16)` with each transfer's guest
+  tx/rx buffers mapped. Same staged `~/.pad-s3/qemu-aarch64`.
+- `cuse.ko`, built from the same 6.6.87.2 tree as the kernel and loaded live
+  (`make -C $K M=fs/fuse modules && insmod fs/fuse/cuse.ko`; the config already
+  has `CONFIG_CUSE=m`) - no WSL restart.
+- `s3run.sh --bus` starts `s3spid` (`/dev/pad-s3spi-slot<N>`) and
+  `s3bridge.py` per slot and binds them over the chroot's `/dev/spidev4.0` and
+  `/dev/ttyAMA5`; `s3alsa.so` is preloaded whenever it is built.
+
+The bridge link's framing, from the game's first messages: `02 <cmd> <id>
+[payload] <sum> 03` - STX, command, id, payload, a checksum that makes the
+bytes from `cmd` to it sum to 0 (counted unescaped), ETX; a 0x02 or 0x03
+inside the frame is sent as `1b 82` / `1b 83` (0x1b, then the byte | 0x80 -
+e.g. `02 12 1b 82 ec 03` is cmd 0x12, payload 0x02, 0x12+0x02+0xec = 0x100).
+First commands: `0x30` (the game logs
+"netbridge image CRC mismatch" when it goes unanswered, then runs openocd to
+reflash the RP2040 and fails), `0x20` (repeated every second), `0x27`, `0x41`
+(node traffic: `41 <seq> <node> ...`, cycling node addresses), `0x25`,
+`0x12`/`0x19`.
+
+Next: answer the bridge (version/CRC so no reflash is tried, then the node
+boards behind it, from the board firmware's `uart_host.c` dispatch and the
+existing Spike 2 node model), so Tech Alerts clears to attract; the picture
+draws 800x480 at the top-left of the 1920x1080 frame - find why; the MAX9850
+headphone amp's I2C address is not in the stub's list (its write read-back
+fails, not fatal).
+
 ## What is left for Spike 2 parity (next runs)
 
 1. **Toolchain**: an aarch64 cross gcc for the shims (only `arm-linux-gnueabihf`

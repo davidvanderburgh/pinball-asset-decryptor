@@ -19,6 +19,7 @@
  *                                  the effect queue, as the end of a display effect does)
  *   /dump/display.force "<id>" | "stop <id>"   start / stop stock mode id (cmode_manager get -> v[8] / v[11])
  *   /dump/display.deff "<id>"      start display effect id with queue 0, force 0 (the award-screen call)
+ *   /dump/display.fg "<id>"        show layered display id now (bdl_fg, as its waiter does; in a game)
  *
  *   site tick | deff_start | deff_start_w | deff_waiter | bdl_waiter | bdl_fg | bdl_bg | clip_play |
  *        bdl_cur_prio | deff_service | mode_get     <addr> <w0> <w1>
@@ -769,6 +770,15 @@ static void on_tick(unsigned *r)
         if (crop[0] == '-' && !crop[1]) crop = 0;
         say("clip \"%s\" loop %u crop \"%s\" requested by the probe", sp, loop, crop ? crop : "(null)");
         if (f) ((void (*)(const char *, unsigned, const char *))(unsigned long)f)(sp, loop, crop);
+    }
+    if (read_trigger("/dump/display.fg", buf, sizeof buf)) {
+        /* PAD-1115: "<id>" asks the layered display host for foreground <id> straight away, the call a
+         * layered waiter makes once the display is free (only acts while the host effect runs: a game) */
+        const char *s = buf;
+        unsigned id = number(&s), f = fn("bdl_fg");
+        unsigned char *m = bdl_mgr();
+        say("bdl fg %u requested by the probe: %s", id, f && m ? "calling" : "no bdl_fg / bdl mgr");
+        if (f && m) ((void (*)(void *, unsigned))(unsigned long)f)(m, id);
     }
     if (read_trigger("/dump/display.deff", buf, sizeof buf)) {
         const char *s = buf;

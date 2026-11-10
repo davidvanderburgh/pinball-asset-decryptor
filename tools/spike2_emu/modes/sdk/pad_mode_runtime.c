@@ -20937,6 +20937,8 @@ static int clipv_only, clipv_dropped;
 static struct clipv *volatile clipv_now;    /* the clip the game asked for last */
 static volatile int clipv_in;               /* clip v2: inside our own surface lookup */
 
+static void stime_line(char **f, unsigned n);     /* PAD-1115, below */
+
 /* one line, split in place at its TABs */
 static void clipv_line(char *s)
 {
@@ -20952,6 +20954,7 @@ static void clipv_line(char *s)
         *s++ = 0;
     }
     if (n == 1 && str_eq(f[0], "only")) { clipv_only = 1; return; }
+    if (str_eq(f[0], "stime")) { stime_line(f, n); return; }               /* PAD-1115 */
     if (str_eq(f[0], "sclip") && n >= 4 && *f[1]) k = 2;                 /* PAD-723: f[1] names the bank scene */
     else if (str_eq(f[0], "clip") && n >= 3) k = 1;
     else return;
@@ -20965,6 +20968,73 @@ static void clipv_line(char *s)
     if (v->n < 2) { v->n = 0; return; }
     v->last = CLIPV_PICKS;
     n_clipv++;
+}
+
+/* ---- screen times (PAD-1115): a game screen that shows a clip for a fixed time lasts as long as the clip ----
+ * DoomWalrus666, Godzilla: "Some videos natively freeze frame at the end. It doesn't matter if the clip is plenty
+ * long". The game's award and battle-start screens (Godzilla's layered displays, BDLSecretComboAward and its kin)
+ * play their clip ONCE and stay up for a time of their own: the base class sets the screen's length at its start
+ * from one virtual (a float in seconds, 3.0 unless the class has its own: Secret Combo 4.0) and ends it when its
+ * clock passes that. A clip shorter than that sits on its last frame for the rest; a longer one is cut. The build
+ * reads each such screen's vtable off the game program (screen_time.py) and writes, for a replaced clip whose
+ * length is not the screen's:
+ *
+ *     stime <TAB> <vtable> <TAB> <the slot's address> <TAB> <the word in it> <TAB> <ms> <TAB> <the clip's name>
+ *
+ * and the runtime points that one slot at stime_get, which hands the screen the clip's own length. The slot is
+ * only written when it still holds the word the build read (another build of the game, or another object that
+ * moved it, is left alone and said). */
+#define STIME_MAX 128
+struct stime_ent { unsigned vt, slot, old, ms, calls; const char *clip; };
+static struct stime_ent stime[STIME_MAX];
+static unsigned n_stime, n_stime_on;
+
+static void stime_line(char **f, unsigned n)
+{
+    const char *p;
+    struct stime_ent *e;
+    int ok1, ok2, ok3, ok4;
+    if (n < 6 || n_stime >= STIME_MAX) return;
+    e = &stime[n_stime];
+    p = f[1]; e->vt = (unsigned)number(&p, &ok1);
+    p = f[2]; e->slot = (unsigned)number(&p, &ok2);
+    p = f[3]; e->old = (unsigned)number(&p, &ok3);
+    p = f[4]; e->ms = (unsigned)number(&p, &ok4);
+    e->clip = f[5];
+    if (ok1 && ok2 && ok3 && ok4 && e->vt && e->slot && e->ms) n_stime++;
+}
+
+/* the screen's own virtual, in its place: the clip's length, in seconds (a float in s0: -mfloat-abi=hard) */
+static float stime_get(void *self)
+{
+    unsigned vt = self ? *(unsigned *)self : 0, i;
+    for (i = 0; i < n_stime; i++)
+        if (stime[i].vt == vt && stime[i].calls != ~0u) {
+            if (stime[i].calls++ < 8)
+                say("screen time: the %s screen stays up %u ms, the clip's own length", stime[i].clip, stime[i].ms);
+            return (float)stime[i].ms / 1000.0f;
+        }
+    /* not one of ours (cannot happen: only our vtables point here): the first slot's own answer */
+    return n_stime ? ((float (*)(void *))(unsigned long)stime[0].old)(self) : 3.0f;
+}
+
+static void stime_arm(void)
+{
+    unsigned i;
+    for (i = 0; i < n_stime; i++) {
+        unsigned *w = (unsigned *)(unsigned long)stime[i].slot;
+        if (!stime[i].slot || stime[i].slot & 3 || *w != stime[i].old) {
+            say("screen time: %s left as the game has it - its slot 0x%08x holds 0x%08x, not 0x%08x", stime[i].clip,
+                stime[i].slot, stime[i].slot && !(stime[i].slot & 3) ? *w : 0, stime[i].old);
+            stime[i].calls = ~0u;
+            continue;
+        }
+        mprotect((void *)(unsigned long)(stime[i].slot & ~0xfffu), 0x1000, 7);
+        *w = (unsigned)(unsigned long)stime_get;
+        n_stime_on++;
+    }
+    if (n_stime)
+        say("screen time: %u of %u screen(s) last as long as their clip", n_stime_on, n_stime);
 }
 
 static int clipv_read(void)
@@ -21133,11 +21203,12 @@ static void clipv_arm(void)
     static const char *const v2_v[] = { "scene_player_scene", 0 };
     clipv_census = pm_trigger("cliplog.on");
     if (!clipv_read() && !clipv_census) return;
+    stime_arm();                              /* PAD-1115: screens as long as their clip, whatever else is on */
     if (clipv_dropped)
         say("clip variants: %d line(s) not read - the table holds %d clips", clipv_dropped, CLIPV_SLOTS);
     if (clipv_census) say("clip census: every clip the game asks for by name is logged (cliplog.on)");
     if (!n_clipv && !clipv_census) {
-        say("clip variants: %s has no clip line - nothing hooked", "clips.cfg");
+        if (!n_stime) say("clip variants: %s has no clip line - nothing hooked", "clips.cfg");
         return;
     }
     if (have_sites(v1_s) && hook(fn("clip_play"), on_clipv_play)) {

@@ -1107,11 +1107,13 @@ class SternManufacturer(Manufacturer):
                # PAD-945: and whether the game's modes can play sounds on shots
                "shots_why": offer_shots(assets_dir, probe=True)}
         # PAD-685: a jukebox for the song modes, on a title that has them (no key elsewhere)
-        from .jukebox import offer as jukebox_offer, pool_rows as jukebox_pools
+        from .jukebox import offer as jukebox_offer, pool_rows as jukebox_pools, slot_pools
         jw = jukebox_offer(assets_dir, probe=True)
         if jw is not None:
             out["jukebox_why"] = jw
             out["jukebox_pools"] = jukebox_pools(assets_dir, probe=True)   # PAD-1007
+            # PAD-1106: the slots whose music the jukebox plays in place of (the pane plays a song for them)
+            out["jukebox_slots"] = slot_pools(assets_dir, rels, probe=True) if not jw else {}
         return out
 
     def sound_request_uses(self, assets_dir, rels):

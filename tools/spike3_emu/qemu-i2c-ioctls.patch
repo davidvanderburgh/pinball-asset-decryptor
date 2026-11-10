@@ -1,0 +1,213 @@
+PAD-1090: add Linux i2c-dev ioctl translation to qemu-user.
+I2C_SLAVE/SLAVE_FORCE/TENBIT/PEC/RETRIES/TIMEOUT (by value), I2C_FUNCS,
+and I2C_RDWR / I2C_SMBUS (nested-pointer handlers). Without these the
+guest's amp driver gets ENOTTY on every /dev/i2c transfer.
+
+Apply to a pristine qemu 8.2.2 tree:
+    cd qemu-8.2.2 && patch -p1 < qemu-i2c-ioctls.patch
+    ./configure --target-list=aarch64-linux-user --static \
+        --disable-system --disable-docs --disable-tools
+    make -C build qemu-aarch64
+
+--- a/linux-user/syscall.c
++++ b/linux-user/syscall.c
+@@ -62,6 +62,8 @@
+ #include <linux/icmp.h>
+ #include <linux/icmpv6.h>
+ #include <linux/if_tun.h>
++#include <linux/i2c.h>
++#include <linux/i2c-dev.h>
+ #include <linux/in6.h>
+ #include <linux/errqueue.h>
+ #include <linux/random.h>
+@@ -5558,6 +5560,152 @@
+     return get_errno(safe_ioctl(fd, ie->host_cmd, filter));
+ }
+ 
++
++/* PAD-1090: Linux i2c-dev ioctls. The aarch64 guest and x86-64 host share the
++ * same LP64 little-endian layout for these structs, so the handlers only need
++ * to translate the embedded guest buffer pointers. */
++static abi_long do_ioctl_i2c_rdwr(const IOCTLEntry *ie, uint8_t *buf_temp,
++                                  int fd, int cmd, abi_long arg)
++{
++    struct target_i2c_msg {
++        uint16_t addr;
++        uint16_t flags;
++        uint16_t len;
++        uint16_t pad;
++        abi_ulong buf;
++    } *tmsgs;
++    struct target_i2c_rdwr_ioctl_data {
++        abi_ulong msgs;
++        uint32_t nmsgs;
++    } *trdwr;
++    struct i2c_msg *hmsgs;
++    void **gbuf;
++    abi_ulong *gaddr;
++    struct i2c_rdwr_ioctl_data hrdwr;
++    abi_ulong msgs_addr;
++    uint32_t nmsgs, i;
++    abi_long ret;
++
++    (void)buf_temp; (void)cmd;
++    trdwr = lock_user(VERIFY_READ, arg, sizeof(*trdwr), 1);
++    if (!trdwr) {
++        return -TARGET_EFAULT;
++    }
++    msgs_addr = tswapal(trdwr->msgs);
++    nmsgs = tswap32(trdwr->nmsgs);
++    unlock_user(trdwr, arg, 0);
++
++    if (nmsgs == 0 || nmsgs > I2C_RDWR_IOCTL_MAX_MSGS) {
++        return -TARGET_EINVAL;
++    }
++    tmsgs = lock_user(VERIFY_READ, msgs_addr, nmsgs * sizeof(*tmsgs), 1);
++    if (!tmsgs) {
++        return -TARGET_EFAULT;
++    }
++
++    hmsgs = g_new0(struct i2c_msg, nmsgs);
++    gbuf = g_new0(void *, nmsgs);
++    gaddr = g_new0(abi_ulong, nmsgs);
++    ret = 0;
++
++    for (i = 0; i < nmsgs; i++) {
++        uint16_t flags = tswap16(tmsgs[i].flags);
++        uint16_t len = tswap16(tmsgs[i].len);
++        abi_ulong b = tswapal(tmsgs[i].buf);
++        int is_read = flags & I2C_M_RD;
++
++        hmsgs[i].addr = tswap16(tmsgs[i].addr);
++        hmsgs[i].flags = flags;
++        hmsgs[i].len = len;
++        gaddr[i] = b;
++        if (len) {
++            gbuf[i] = lock_user(is_read ? VERIFY_WRITE : VERIFY_READ,
++                                b, len, is_read ? 0 : 1);
++            if (!gbuf[i]) {
++                ret = -TARGET_EFAULT;
++                goto cleanup;
++            }
++        }
++        hmsgs[i].buf = gbuf[i];
++    }
++
++    hrdwr.msgs = hmsgs;
++    hrdwr.nmsgs = nmsgs;
++    ret = get_errno(safe_ioctl(fd, ie->host_cmd, &hrdwr));
++
++cleanup:
++    for (i = 0; i < nmsgs; i++) {
++        if (gbuf[i]) {
++            uint16_t flags = tswap16(tmsgs[i].flags);
++            uint16_t len = tswap16(tmsgs[i].len);
++            int is_read = flags & I2C_M_RD;
++            unlock_user(gbuf[i], gaddr[i],
++                        (is_read && !is_error(ret)) ? len : 0);
++        }
++    }
++    g_free(hmsgs);
++    g_free(gbuf);
++    g_free(gaddr);
++    unlock_user(tmsgs, msgs_addr, 0);
++    return ret;
++}
++
++static abi_long do_ioctl_i2c_smbus(const IOCTLEntry *ie, uint8_t *buf_temp,
++                                   int fd, int cmd, abi_long arg)
++{
++    struct target_i2c_smbus_ioctl_data {
++        uint8_t read_write;
++        uint8_t command;
++        uint16_t pad;
++        uint32_t size;
++        abi_ulong data;
++    } *tsm;
++    struct i2c_smbus_ioctl_data hsm;
++    union i2c_smbus_data hdata;
++    abi_ulong data_addr;
++    uint8_t read_write, command;
++    uint32_t size;
++    abi_long ret;
++    void *p;
++
++    (void)buf_temp; (void)cmd;
++    tsm = lock_user(VERIFY_READ, arg, sizeof(*tsm), 1);
++    if (!tsm) {
++        return -TARGET_EFAULT;
++    }
++    read_write = tsm->read_write;
++    command = tsm->command;
++    size = tswap32(tsm->size);
++    data_addr = tswapal(tsm->data);
++    unlock_user(tsm, arg, 0);
++
++    memset(&hdata, 0, sizeof(hdata));
++    if (data_addr) {
++        p = lock_user(VERIFY_READ, data_addr, sizeof(union i2c_smbus_data), 1);
++        if (!p) {
++            return -TARGET_EFAULT;
++        }
++        memcpy(&hdata, p, sizeof(union i2c_smbus_data));
++        unlock_user(p, data_addr, 0);
++    }
++
++    hsm.read_write = read_write;
++    hsm.command = command;
++    hsm.size = size;
++    hsm.data = data_addr ? &hdata : NULL;
++    ret = get_errno(safe_ioctl(fd, ie->host_cmd, &hsm));
++
++    if (!is_error(ret) && data_addr) {
++        p = lock_user(VERIFY_WRITE, data_addr, sizeof(union i2c_smbus_data), 0);
++        if (!p) {
++            return -TARGET_EFAULT;
++        }
++        memcpy(p, &hdata, sizeof(union i2c_smbus_data));
++        unlock_user(p, data_addr, sizeof(union i2c_smbus_data));
++    }
++    return ret;
++}
++
+ IOCTLEntry ioctl_entries[] = {
+ #define IOCTL(cmd, access, ...) \
+     { TARGET_ ## cmd, cmd, #cmd, access, 0, {  __VA_ARGS__ } },
+--- a/linux-user/syscall_defs.h
++++ b/linux-user/syscall_defs.h
+@@ -938,6 +938,17 @@
+ #define TARGET_FDEJECT        TARGET_IO(2, 0x5a)
+ 
+ #define TARGET_FIBMAP     TARGET_IO(0x00,1)  /* bmap access */
++
++/* PAD-1090: i2c-dev command numbers (same on every Linux arch) */
++#define TARGET_I2C_RETRIES     0x0701
++#define TARGET_I2C_TIMEOUT     0x0702
++#define TARGET_I2C_SLAVE       0x0703
++#define TARGET_I2C_TENBIT      0x0704
++#define TARGET_I2C_FUNCS       0x0705
++#define TARGET_I2C_SLAVE_FORCE 0x0706
++#define TARGET_I2C_RDWR        0x0707
++#define TARGET_I2C_PEC         0x0708
++#define TARGET_I2C_SMBUS       0x0720
+ #define TARGET_FIGETBSZ   TARGET_IO(0x00,2)  /* get the block size used for bmap */
+ 
+ #define TARGET_FICLONE    TARGET_IOW(0x94, 9, abi_int)
+--- a/linux-user/ioctls.h
++++ b/linux-user/ioctls.h
+@@ -392,6 +392,15 @@
+     { MK_PTR(MK_STRUCT(STRUCT__kernel_timespec)) } },
+ 
+   IOCTL(RNDGETENTCNT, IOC_R, MK_PTR(TYPE_INT))
++  IOCTL(I2C_SLAVE, 0, TYPE_ULONG)
++  IOCTL(I2C_SLAVE_FORCE, 0, TYPE_ULONG)
++  IOCTL(I2C_TENBIT, 0, TYPE_ULONG)
++  IOCTL(I2C_PEC, 0, TYPE_ULONG)
++  IOCTL(I2C_RETRIES, 0, TYPE_ULONG)
++  IOCTL(I2C_TIMEOUT, 0, TYPE_ULONG)
++  IOCTL(I2C_FUNCS, IOC_R, MK_PTR(TYPE_ULONG))
++  IOCTL_SPECIAL(I2C_RDWR, IOC_RW, do_ioctl_i2c_rdwr, TYPE_PTRVOID)
++  IOCTL_SPECIAL(I2C_SMBUS, IOC_RW, do_ioctl_i2c_smbus, TYPE_PTRVOID)
+   IOCTL(RNDADDTOENTCNT, IOC_W, MK_PTR(TYPE_INT))
+   IOCTL(RNDZAPENTCNT, 0, TYPE_NULL)
+   IOCTL(RNDCLEARPOOL, 0, TYPE_NULL)

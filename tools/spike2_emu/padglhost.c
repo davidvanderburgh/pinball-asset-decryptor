@@ -98,6 +98,8 @@ static void (*p_glUniform4fv)(int,int,const float*);
 static void (*p_glUniformMatrix4fv)(int,int,unsigned char,const float*);
 static void (*p_glGenFramebuffers)(int,unsigned*);
 static void (*p_glBindFramebuffer)(unsigned,unsigned);
+/* PAD-1090: PADGL_PRESENTTEX, Spike 3's frame boundary, blits a texture */
+static void (*p_glBlitFramebuffer)(int,int,int,int,int,int,int,int,unsigned,unsigned);
 static void (*p_glFramebufferTexture2D)(unsigned,unsigned,unsigned,unsigned,int);
 static unsigned (*p_glCheckFramebufferStatus)(unsigned);
 static void (*p_glDrawArrays)(unsigned,int,int);
@@ -141,6 +143,7 @@ static void load_gl(void)
     LOAD(glUniform2f); LOAD(glUniform3f); LOAD(glUniform4f); LOAD(glUniform4fv);
     LOAD(glUniformMatrix4fv); LOAD(glGenFramebuffers); LOAD(glBindFramebuffer);
     LOAD(glFramebufferTexture2D); LOAD(glCheckFramebufferStatus);
+    LOAD(glBlitFramebuffer);
     LOAD(glDrawArrays); LOAD(glDrawElements); LOAD(glReadPixels);
     LOAD(glFinish); LOAD(glGetError); LOAD(glGetIntegerv);
     LOAD(glGetVertexAttribiv); LOAD(glGetAttribLocation);
@@ -5116,7 +5119,7 @@ static void dump_op_histogram(void)
     nm[PADGL_BINDFBO]="BINDFBO"; nm[PADGL_BINDTEX]="BINDTEX";
     nm[PADGL_VERTEXATTRIB]="VERTEXATTRIB"; nm[PADGL_ENABLEATTRIB]="ENABLEATTRIB";
     nm[PADGL_BINDVAO]="BINDVAO"; nm[PADGL_COMPILESHADER]="COMPILESHADER";
-    nm[PADGL_TEXDIRECT]="TEXDIRECT";
+    nm[PADGL_TEXDIRECT]="TEXDIRECT"; nm[PADGL_PRESENTTEX]="PRESENTTEX";
     fprintf(stderr, "[padglhost] ops:");
     for (i = 0; i < PADGL_OP_MAX; i++)
         if (op_count[i]) fprintf(stderr, " %s=%ld", nm[i] ? nm[i] : "?", op_count[i]);
@@ -5609,6 +5612,44 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         }
     }
     switch (op) {
+    case PADGL_PRESENTTEX: {    /* PAD-1090, Spike 3: the frame is the guest
+                                 * texture the page-flipped GBM bo stands for
+                                 * (padgl.h). Blit it into the screen fbo,
+                                 * leave the game's own framebuffer bindings
+                                 * as they were, then everything SWAP does. A
+                                 * KMS buffer's row 0 is the TOP of the screen,
+                                 * GL's is the bottom, hence the flip -
+                                 * PAD_S3_FLIPY=0 turns it off. */
+        static unsigned rfbo;
+        static int flipy = -1;
+        int keep_draw = 0, keep_read = 0;
+        unsigned t = u[0] < MAXNAME ? map_tex[u[0]] : 0;
+        int w = (int)u[1], h = (int)u[2];
+        if (flipy < 0) { const char *e = getenv("PAD_S3_FLIPY"); flipy = !(e && e[0] == '0'); }
+        if (t && p_glBlitFramebuffer && w > 0 && h > 0) {
+            if (!rfbo) p_glGenFramebuffers(1, &rfbo);
+            p_glGetIntegerv(0x8CA6, &keep_draw);       /* DRAW_FRAMEBUFFER_BINDING */
+            p_glGetIntegerv(0x8CAA, &keep_read);       /* READ_FRAMEBUFFER_BINDING */
+            p_glBindFramebuffer(0x8CA8, rfbo);         /* READ_FRAMEBUFFER */
+            p_glFramebufferTexture2D(0x8CA8, 0x8CE0, 0x0DE1, t, 0);
+            p_glBindFramebuffer(0x8CA9, fbo_screen);   /* DRAW_FRAMEBUFFER */
+            p_glBlitFramebuffer(0, 0, w, h, 0, flipy ? fb_h : 0, fb_w, flipy ? 0 : fb_h,
+                                0x4000, 0x2601);       /* COLOR, LINEAR */
+            p_glBindFramebuffer(0x8CA8, (unsigned)keep_read);
+            p_glBindFramebuffer(0x8CA9, (unsigned)keep_draw);
+        } else {
+            static int said;
+            if (said++ < 4)
+                fprintf(stderr, "[padglhost] PRESENTTEX: guest texture %u has no host "
+                        "texture (or no glBlitFramebuffer) - frame not shown\n", u[0]);
+        }
+        present();
+        hdr->frame_ack++;
+        swap_total++;
+        swap_vidmask = 0; swap_draws = 0;
+        jgl_poll(0, 0);
+        break;
+    }
     case PADGL_SWAP:            /* item 44: the swap belongs to whichever
                                  * display the ops since the last TARGET drew.
                                  * frame_ack counts BOTH - the guest's

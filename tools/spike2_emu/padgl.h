@@ -24,7 +24,7 @@
  * refuses a mismatch at attach (glbridge.c), and padgl.h is on BOTH source
  * lists, so bumping it here makes both halves stale together - a new-host/
  * old-guest pair fails loudly instead of dropping ops on the floor. */
-#define PADGL_VERSION 2
+#define PADGL_VERSION 3          /* 3: PADGL_PRESENTTEX (PAD-1090, Spike 3) */
 
 /* Ring is a byte buffer with a header at offset 0. Single producer (guest),
  * single consumer (host). head/tail are free-running byte counters; the
@@ -146,6 +146,17 @@ enum {
      * it for the whole 30 s intro. Appended, not inserted, so every op above
      * keeps its number. */
     PADGL_TEXCOMPRESSEDSUB,     /* u32 lvl,x,y,w,h,fmt,size + data             */
+    /* PAD-1090, SPIKE 3: THE FRAME IS A TEXTURE, NOT FBO 0. A Spike 3 game
+     * (Godot 4 under Stern's KMS display server) never swaps a window
+     * surface: it renders into a GBM buffer bound to a texture through
+     * glEGLImageTargetTexture2DOES and page-flips that buffer. The guest
+     * (tools/spike3_emu/s3gl.c) sends this at the flip; the host blits the
+     * texture into the screen framebuffer and then does exactly what SWAP
+     * does (present, frame_ack). Appended, so every op above keeps its
+     * number; Spike 2 never sends it.
+     *
+     * u32 guest texture name, width, height */
+    PADGL_PRESENTTEX,
     PADGL_OP_MAX
 };
 

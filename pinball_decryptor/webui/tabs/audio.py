@@ -271,6 +271,10 @@ _VIDEO_FILETYPES = [("Video files", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm *.wmv 
 #: PAD-999: Add songs takes a song's audio and its intro video at once, named alike
 _JUKE_FILETYPES = [("Songs and their intro videos", _AUDIO_FILETYPES[0][1] + " " + _VIDEO_FILETYPES[0][1]),
                    _AUDIO_FILETYPES[0], _VIDEO_FILETYPES[0], ("All files", "*.*")]
+#: PAD-1106: the Replacement pane's title and a row's Replacement cell for a song mode's record the
+#: jukebox plays songs in place of (its pool's song count)
+_JUKE_PANE = "Replacement (jukebox: 1 of %d songs at random)"
+_JUKE_CELL = "Jukebox: 1 of %d songs at random"
 _JUKE_TIP = ("A jukebox for the song modes: each time a song mode starts, the game plays one of these "
              "songs, drawn at random, with its own intro video. A Common song comes up three times as "
              "often as a Rare one, and a song never comes back within five song modes, so none plays "
@@ -369,12 +373,16 @@ class AudioTab(FindOriginalsMixin, TabService):
         self.audio_search_var = self.var("search", "str", "")
         self.audio_type_var = self.var("type", "str", "All types")
         self.audio_change_filter_var = self.var("show", "str", "All")
+        # PAD-1105: leave out the sounds no sound request plays (Requests: None)
+        self.audio_hide_unused_var = self.var("hide_unused", "bool", False)
         self.audio_play_through_var = self.var("play_through", "bool", False)
         self.audio_play_subst_var = self.var("play_subst", "bool", False)
         self.audio_group_dups_var = self.var("group_dups", "bool", False)
         self.audio_search_var.trace_add("write",
                                         lambda *a: self._refresh_list())
         self.audio_change_filter_var.trace_add(
+            "write", lambda *a: self._refresh_list())
+        self.audio_hide_unused_var.trace_add(
             "write", lambda *a: self._refresh_list())
         self.audio_group_dups_var.trace_add("write",
                                             lambda *a: self._refresh_list())
@@ -421,6 +429,12 @@ class AudioTab(FindOriginalsMixin, TabService):
         # PAD-685: the jukebox's songs ([{"audio", "video", "weight", "pool"}]), its own sidecar key
         self._juke = []
         self._juke_pool = ""             # PAD-1007: the pool the Jukebox window shows (its first: "")
+        # PAD-1106: a jukebox song the Replacement pane drew for a song mode's record (its rel, or None),
+        # whether it was stopped or played to its end (the next Play draws again), and each pool's
+        # last draws (the next keeps clear of them, as the game's does)
+        self._juke_rep = None
+        self._juke_spent = False
+        self._juke_recent = {}
         # PAD-945: the sounds on the shots of the game's modes ([{"mode", "mode_name",
         # "switch", "switch_name", "file"}]), the same record; the sound the window adds next and
         # the game's modes and shots it offers (read once per project)
@@ -1041,6 +1055,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             self.audio_search_var.set("")
             self.audio_type_var.set("All types")
             self.audio_change_filter_var.set("All")
+            self.audio_hide_unused_var.set(False)
             self.audio_group_dups_var.set(False)
             self._refresh_list()
         if rel not in (self._visible_rels or ()):
@@ -1321,6 +1336,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         elif "audio_changed_only" in staged:
             self.audio_change_filter_var.set(
                 "Changed" if staged["audio_changed_only"] else "All")
+        self.audio_hide_unused_var.set(bool(staged.get("audio_hide_unused")))
 
     def _save_staged_changes(self):
         """Persist this tab's part of the folder's sidecar (the Tk window's
@@ -1354,6 +1370,10 @@ class AudioTab(FindOriginalsMixin, TabService):
             data.pop("sound_modes", None)
         data["audio_trim"] = bool(self.audio_trim_var.get())
         data["audio_change_filter"] = self.audio_change_filter_var.get()
+        if self.audio_hide_unused_var.get():
+            data["audio_hide_unused"] = True
+        else:
+            data.pop("audio_hide_unused", None)
         names = dict(data.get("replacement_names") or {})
         for rel, path in self._assign.items():
             if isinstance(path, str) and path.strip():
@@ -1457,7 +1477,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         elif is_changed:
             rep_disp, tag = self._changed_on_disk_cell(rel), "ondisk"
         else:
-            rep_disp, tag = "Choose…", ""
+            rep_disp, tag = self._juke_cell(rel) or "Choose…", ""
         row = {"k": rel, "len": s.duration_str(), "fmt": s.format_summary(),
                "type": cat_disp, "rep": rep_disp, "t": tag,
                "loop": bool(self._loop.get(rel)),
@@ -1490,6 +1510,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         query = (self.audio_search_var.get() or "").strip().lower()
         type_key = _TYPE_KEYS.get(self.audio_type_var.get())
         change_ok = self._change_filter_pred()
+        # PAD-1105: a sound no request plays reads None; a blank cell (a music
+        # bank's song, or no request map at all) is not known to be unused
+        uses_map = self._uses if self.audio_hide_unused_var.get() else None
         _cat_key = self._cat_key_fn()
         comments = self._load_comments()
 
@@ -1501,6 +1524,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                     comments.get(s.rel_path) or "").lower():
                 return False
             if change_ok is not None and not change_ok(s.rel_path):
+                return False
+            if uses_map and uses_map.get(s.rel_path, None) == []:
                 return False
             if type_key is None:
                 return True
@@ -1596,7 +1621,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                                                    extra)
             hint = ""
             if shown_n == 0:
-                hint = "Nothing matches the Search / Show / Type filters."
+                hint = ("Nothing matches the Search / Show / Type filters%s."
+                        % (" or Hide unused" if uses_map else ""))
                 if not query and type_key == "callouts":
                     hint = ("No call-outs identified in this folder yet.\n"
                             "Tick \"Auto-name call-outs\" on the Extract tab "
@@ -1713,6 +1739,14 @@ class AudioTab(FindOriginalsMixin, TabService):
         if value not in _CHANGE_FILTER_VALUES:
             return False
         self.audio_change_filter_var.set(value)
+        self._save_staged_changes()
+        return True
+
+    @rpc
+    def set_hide_unused(self, on):
+        """PAD-1105: "Hide unused" - leave out the sounds whose Requests read
+        None (persisted per folder)."""
+        self.audio_hide_unused_var.set(bool(on))
         self._save_staged_changes()
         return True
 
@@ -2035,6 +2069,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         rpath = self._assign.get(rel)
         if rpath and os.path.isfile(rpath):
             return True
+        if self._juke_songs_for(rel):
+            return True
         if staged_originals.snapshot_path(self._scan_dir, rel):
             slot = self._by_rel.get(rel)
             return bool(slot and slot.abs_path
@@ -2043,6 +2079,7 @@ class AudioTab(FindOriginalsMixin, TabService):
 
     def _load_rep_pane(self, rel, autoplay=False):
         from ...core import staged_originals
+        self._juke_rep = None
         if self._rep_mode is not None:
             # the slot's own replacement again: the loudness box is its own
             self._rep_mode = None
@@ -2067,8 +2104,60 @@ class AudioTab(FindOriginalsMixin, TabService):
                     gain_db=self._level.get(rel, 0),
                     base="Replacement (your file)", rel=rel)
                 return
+        if self._juke_load(rel, autoplay):
+            return
         self._pane_clear("rep", self._rep_pane_empty_text(
             rel, "no replacement assigned"), base="Replacement")
+
+    # -- PAD-1106: a song mode's record plays a jukebox song in the pane ------
+    def _juke_pool_of(self, rel):
+        """The jukebox pool whose songs the game plays in place of *rel* (a song mode's record), or None."""
+        if rel is None:
+            return None
+        return ((self._sm_offer or {}).get("jukebox_slots") or {}).get(rel)
+
+    def _juke_songs_for(self, rel):
+        """The jukebox songs the game plays in place of *rel*: ``[(audio, weight)]`` of its pool whose file
+        is there, ``[]`` when it is no jukebox music or its pool has none."""
+        from ...plugins.stern import jukebox as _JB
+        pool = self._juke_pool_of(rel)
+        if pool is None:
+            return []
+        return [(g["audio"], g.get("weight")) for g in self._juke
+                if (g.get("pool") or _JB.DEFAULT_POOL) == pool and g.get("audio")
+                and os.path.isfile(g["audio"])]
+
+    def _juke_load(self, rel, autoplay=False):
+        """Draw one of *rel*'s pool's songs as the game draws them (by weight, none of the pool's last
+        few) into the Replacement pane; False when *rel* has none."""
+        from ...plugins.stern import jukebox as _JB
+        songs = self._juke_songs_for(rel)
+        if not songs:
+            return False
+        pool = self._juke_pool_of(rel)
+        recent = self._juke_recent.setdefault(pool, [])
+        path = _JB.draw(songs, recent[-min(5, len(songs) - 1):] if len(songs) > 1 else ())
+        recent.append(path)
+        del recent[:-5]
+        self._pane_load("rep", path, autoplay=autoplay,
+                        label=os.path.basename(path), base=_JUKE_PANE % len(songs),
+                        rel=rel)
+        self._juke_rep = rel
+        self._juke_spent = False
+        return True
+
+    def _juke_redraw(self):
+        """▶ on a pane holding a jukebox song that was stopped or played to its end: draw the next."""
+        rel = self._current_rel
+        if not (self._juke_spent and rel is not None and self._juke_rep == rel
+                and self._panes["rep"].get("rel") == rel):
+            return False
+        return self._juke_load(rel, autoplay=True)
+
+    def _juke_cell(self, rel):
+        """The Replacement cell of a song mode's record the jukebox plays songs for, or None."""
+        n = len(self._juke_songs_for(rel))
+        return (_JUKE_CELL % n) if n else None
 
     def _compute_preview_limit(self, rel, rep_dur):
         if rel is None:
@@ -2121,6 +2210,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             return True
         if side == "orig" and self._play_intercept():
             return True
+        if side == "rep" and self._juke_redraw():
+            return True
         self._publish("audio_play", pane=side, path=pane["path"], pos=None,
                       v=pane["v"])
         return True
@@ -2134,6 +2225,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         pane = self._panes["rep"]
         if not pane["path"]:
             return False
+        if self._juke_redraw():
+            return True
         self._publish("audio_play", pane="rep", path=pane["path"], pos=0.0,
                       v=pane["v"])
         return True
@@ -2207,8 +2300,11 @@ class AudioTab(FindOriginalsMixin, TabService):
 
     @rpc
     def stop(self):
-        """■: the page silenced both panes; drop a queued sequential step."""
+        """■: the page silenced both panes; drop a queued sequential step.
+        PAD-1106: a jukebox song in the Replacement pane is done with: its
+        next ▶ draws another."""
         self._cancel_advance()
+        self._juke_spent = self._juke_rep is not None
         return True
 
     def on_tab_changed(self, ns):
@@ -2225,6 +2321,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         pane = self._panes.get(side)
         if pane is None or (path and pane["path"] != path):
             return False
+        if side == "rep" and self._juke_rep is not None:
+            self._juke_spent = True             # PAD-1106: played to its end, the next ▶ draws again
         if not self.audio_play_through_var.get():
             return False
         rel = self._current_rel
@@ -4275,6 +4373,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             cb = self.window.cb.get("on_folder_state_written")
             if cb is not None:
                 cb(assets_dir)
+        self._juke_spent = self._juke_rep is not None    # PAD-1106: the next ▶ draws from the new list
         self._refresh_list()
 
     def _add_mode(self):

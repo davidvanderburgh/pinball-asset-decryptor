@@ -84,6 +84,16 @@ Source: "{#ProjectDir}\pinball_decryptor\*"; DestDir: "{app}\pinball_decryptor";
     Flags: recursesubdirs ignoreversion; \
     Excludes: "__pycache__\*,*.pyc,*.pyo"
 
+; --- Spike 3 LUKS2 verifier/decryptor -----------------------------------
+; stern/spike3.py loads this repo tool by path at run time (_luks_otp(): four
+; parents up from the plugin file, then stern-spike-3\tools\luks_otp.py).  The
+; whole Spike 3 key/decrypt path (spike3_keys / spike3_spk / spike3_selfextract
+; / spike3_sound) imports it, so without it those throw in the installed app.
+; It lives outside the pinball_decryptor package, so the package glob above does
+; not reach it; ship it at the exact {app}-relative path _luks_otp() rebuilds.
+Source: "{#ProjectDir}\stern-spike-3\tools\luks_otp.py"; DestDir: "{app}\stern-spike-3\tools"; \
+    Flags: ignoreversion
+
 ; --- Spike 2 emulator rig ------------------------------------------------
 ; The Emulate tab runs the machine's own game binary under qemu-user inside
 ; WSL, and this is that rig.  It was deliberately NOT shipped for a while, on

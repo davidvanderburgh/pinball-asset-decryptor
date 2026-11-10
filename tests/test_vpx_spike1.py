@@ -182,7 +182,7 @@ def test_the_other_spike1_tributes_gi_is_the_machines_too(title, leds, n):
     m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
     gi = [v for v in m["lamps"].values() if isinstance(v, dict) and "GI" in v.get("name", "")]
     assert len(gi) == n and all([tuple(x) for x in v["leds"]] == leds and not v.get("rgb") for v in gi)
-    assert m["repatch"][-1]["since"].startswith("PAD-977")
+    assert any(k["since"].startswith("PAD-977") for k in m["repatch"])
     pc = pytest.importorskip("padcontroller")
     vm = pc.VpxMap(title)
     g = pc.lamp_number(*leds[0])

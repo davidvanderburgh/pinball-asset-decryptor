@@ -488,6 +488,15 @@ variable only a quieted sub ever `Set`, which running code still walks with
 that gave `RainbowLights` its lights, and its RainbowTimer is saved enabled, so
 the first tick stopped Visual Pinball on "Object not a collection".
 
+The plunger lane's own `_Hit` / `_UnHit` obey the same rule (PAD-1099).
+They are the tribute's rules - skill shots, ball savers, songs, its own
+light effects (`lighteffect 6` on JP's tables), gates - and the lane
+wrapper used to call them whatever `orig_hits` said, so they ran at every
+launch over the machine's lights. Their unconditional DOF calls come along
+as a switch's do; a map that needs the originals names the lane trigger in
+`orig_keep`. A table patched with the old wrapper is asked to patch again
+(every such map's `repatch`).
+
 **A spinner where the machine has an opto** (PAD-887): a switch's
 `"event": "pass"` takes the spinner's Spin as one pulse a pass, not one a
 spin: every spin restarts a 600 ms quiet time (`PadPassSw`), so the ball

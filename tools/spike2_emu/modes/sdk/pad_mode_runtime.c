@@ -16623,6 +16623,11 @@ static int coop_scr_found, coop_scr_shown = -1;
 static void *coop_scr_classic[COOP_CHARS];  /* PAD-1065: PadCoopClassic_1..: NO SPECIAL ABILITY over each card */
 static int coop_scr_classic_shown = -1;
 static unsigned long coop_scr_try;
+/* PAD-1107: the game's own logo at a game's start (port `text start_logo_scene` / `start_logo_path`: Godzilla's
+ * Logo_Instance, a scene of its own drawn OVER the HUD) - kept hidden while a pick card is on the glass */
+static void *coop_logo;
+static unsigned long coop_logo_try;
+static int coop_logo_hid, coop_logo_said;
 /* PAD-1079: a character's own video (coop.cfg `char_clip <n> <clip>`): its card has a see-through window in the
  * portrait frame and the clip loops behind the HUD (the backdrop, in the city's place) while its card is on the glass;
  * `clip_crop <crop>` the crop it plays at ("" the port's backdrop_crop) */
@@ -17499,6 +17504,34 @@ static void coop_clip_show(int want)
         bd_crop_next[0] ? bd_crop_next : "the port's");
 }
 
+/* PAD-1107: the game's start-of-game logo plays in a scene of its own, drawn over the HUD the pick's cards are in
+ * (DoomWalrus666, Godzilla: the GODZILLA logo over the character select at a CO-OP PLAY / TEAM PLAY start, emulator:
+ * a Start on the menu's entry, then a teammate's Start, opens the pick while the logo reveal plays). While a card is
+ * up the logo is hidden, every tick (the reveal's own keyframes may show it again); it is given back when the card
+ * goes, so the next game's start shows it as stock. The scene is auto-loaded, so the node found once stays. */
+static void coop_logo_hold(int card_up)
+{
+    const char *sc = pm_port_text("start_logo_scene"), *path = pm_port_text("start_logo_path");
+    if (!sc || !path) return;
+    if (card_up && !coop_logo && pm_ms() - coop_logo_try >= 250ul) {
+        coop_logo_try = pm_ms();
+        coop_logo = pm_node(sc, path);
+        if (coop_logo || !coop_logo_said++)
+            say("co-op characters: the game's start logo (%s) %s", path,
+                coop_logo ? "found - hidden while a pick card is up" : "is not up yet");
+    }
+    if (!coop_logo) return;
+    if (card_up) {
+        pm_show(coop_logo, 0);
+        if (!coop_logo_hid) say("co-op characters: the game's start logo hidden under the pick card");
+        coop_logo_hid = 1;
+    } else if (coop_logo_hid) {
+        pm_show(coop_logo, 1);
+        coop_logo_hid = 0;
+        say("co-op characters: the game's start logo given back");
+    }
+}
+
 /* the pick's own screens: found once the scene is up (tried each second), all hidden, the pick's one shown - with
  * the seconds left on its words line, and PAD-1044's PICKED on the one taken */
 static void coop_screens_tick(void)
@@ -17548,6 +17581,7 @@ static void coop_screens_tick(void)
     }
     if (want != coop_scr_shown && want >= 0 && want <= coop_ch_n && coop_scr[want]) pm_show(coop_scr[want], 1);
     coop_scr_shown = want;
+    coop_logo_hold(want >= 0 && want <= coop_ch_n && coop_scr[want] != 0);       /* PAD-1107 */
     coop_clip_show(want >= 0 && want <= coop_ch_n && coop_scr[want] ? want : -1);     /* PAD-1079: its video */
     want_classic = want >= 0 && want < coop_ch_n && coop_classic() ? want : -1;   /* PAD-1065: over the card */
     if (want_classic != coop_scr_classic_shown) {

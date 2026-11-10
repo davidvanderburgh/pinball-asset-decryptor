@@ -219,5 +219,9 @@
     "trgSarcGate",
     "CapWall1",
     "CapWall2"
+  ],
+  "repatch": [
+    {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1065) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
+    {"old": "Sub swPlungerRest_Hit : Controller.Switch(1065) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
   ]
 }

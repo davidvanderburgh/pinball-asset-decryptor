@@ -352,11 +352,15 @@ def read_machine(tables_dir, title=None, files=None):
                                     "where": _led_where(ld["node"], ld["name"], ld["image"])})
         g["leds"].append((ld["node"], ld["index"]))
         g["names"].append(ld["name"])
+    import padcontroller
     inserts = []
     for g in groups.values():
-        g["leds"].sort(key=lambda k: k[1])
+        pairs = sorted(zip(g["leds"], g["names"]), key=lambda p: p[0][1])   # each LED keeps its name
+        g["leds"], g["names"] = [p[0] for p in pairs], [p[1] for p in pairs]
         g["rgb"] = len(g["leds"]) == 3 and all(re.search(r"[- ](R|G|B|RED|GRN|GREEN|BLU|BLUE)$", n, re.I)
                                                for n in g["names"])
+        # the order they are listed in when not R, G, B (PAD-1097: Aerosmith's BLU, GRN, RED)
+        g["rgb_order"] = padcontroller.rgb_channels(g["names"]) if g["rgb"] else None
         if len(g["leds"]) == 1:
             g["name"] = g["names"][0]                 # a lone "TOPPER 105-B" is not a blue channel
         if not g["rgb"] and len(g["leds"]) > 1:
@@ -1367,7 +1371,7 @@ def starter_map(machine, table_name=""):
             continue
         e = {"leds": [list(k) for k in g["leds"]], "name": g["name"]}
         if g["rgb"]:
-            e["rgb"] = True
+            e["rgb"] = True if g.get("rgb_order") in (None, "RGB") else g["rgb_order"]
         lamps["TODO_" + re.sub(r"[^A-Z0-9]+", "_", g["name"].upper()).strip("_")] = e
     by_kind = {}
     for s in machine["switches"]:

@@ -187,7 +187,7 @@
     "li066": {"leds": [[8, 54]], "name": "KATANA HANDLE 3"},
     "li067": {"leds": [[8, 53]], "name": "KATANA HANDLE 2"},
     "li068": {"leds": [[8, 52]], "name": "KATANA HANDLE 1"},
-    "Boomlight": {"leds": [[1, 4], [1, 5], [1, 7]], "name": "LOCKDOWN BUTTON (JP's BOOM button light)"},
+    "Boomlight": {"leds": [[1, 4], [1, 5], [1, 7]], "rgb": "GRB", "name": "LOCKDOWN BUTTON (JP's BOOM button light)"},
     "gi001": {"leds": [[8, 0]], "name": "BOTTOM GI (GUESS)"},
     "gi002": {"leds": [[8, 0]], "name": "BOTTOM GI (GUESS)"},
     "gi003": {"leds": [[8, 0]], "name": "BOTTOM GI (GUESS)"},

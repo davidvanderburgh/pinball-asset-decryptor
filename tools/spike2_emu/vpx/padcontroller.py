@@ -401,6 +401,7 @@ class VpxMap:
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
         self.rgb_groups = set()             # numbers whose LEDs are an insert's R, G, B
+        self.rgb_order = {}                 # number -> "BGR" etc. when not listed R, G, B (PAD-1097)
         self.fakes = {}                     # name -> dict (switch_fakes)
         self.game_on = None                 # (number, [coils]) "flippers armed"
         self.cabinet = {}                   # cabinet switch names -> 1000+id
@@ -451,6 +452,8 @@ class VpxMap:
                 # (a Spooky board's, PAD-952: its colour is in the slot)
                 if v.get("rgb") and (len(leds) == 3 or (len(leds) == 1 and self.platform == "spooky")):
                     self.rgb_groups.add(lamp_number(*leds[0]))
+                    if isinstance(v["rgb"], str):
+                        self.rgb_order[lamp_number(*leds[0])] = v["rgb"]
         self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
         self._load_dof(m)
 
@@ -520,6 +523,34 @@ def rgb_value(r, g, b):
     top = max(r, g, b, 1)
     r, g, b = (min(255, c * 255 // top) for c in (r, g, b))
     return max(r | g << 8 | b << 16, 2)
+
+
+RGB_CHANNEL = re.compile(r"^(.*?\S)(?:-|\s+)(R|G|B|RED|GRN|GREEN|BLU|BLUE)$", re.I)
+
+
+def rgb_channels(names):
+    """The channel order of an RGB insert's three LED names, as "RGB", "BGR",
+    ... (PAD-1097: Aerosmith lists LOVE IN AN ELEVATOR-BLU, -GRN, -RED; Rush
+    names "SHOOT ME VUK R"), or None when they are not one insert's red,
+    green and blue."""
+    if len(names) != 3:
+        return None
+    parts = [RGB_CHANNEL.match((n or "").strip()) for n in names]
+    if not all(parts) or len({p.group(1).upper() for p in parts}) != 1:
+        return None
+    order = "".join(p.group(2)[0].upper() for p in parts)
+    return order if sorted(order) == ["B", "G", "R"] else None
+
+
+def rgb_levels(levels, order):
+    """An rgb light's three levels as R, G, B: its map's `rgb` is True (the
+    LEDs listed R, G, B) or the order they are listed in ("BGR"). The LEDs
+    themselves keep their order, so the light keeps its number (its first
+    LED's) and a table patched before stays wired."""
+    if isinstance(order, str) and sorted(order.upper()) == ["B", "G", "R"]:
+        order = order.upper()
+        return [levels[order.index(c)] for c in "RGB"]
+    return list(levels)
 
 
 def sol_number(node, index):
@@ -2347,7 +2378,8 @@ class Bridge:
                 if max(levels) < LAMP_ON:
                     self._lamp_set(n, 0)
                 elif n in self.map.rgb_groups:
-                    self._lamp_set(n, rgb_value(*(levels if len(leds) == 3 else rm.lamp_rgb(lamps, *leds[0]))))
+                    self._lamp_set(n, rgb_value(*(rgb_levels(levels, getattr(self.map, "rgb_order", {}).get(n)) if len(leds) == 3
+                                                  else rm.lamp_rgb(lamps, *leds[0]))))
                 else:
                     self._lamp_set(n, 1)
             for node in range(rm.MAX_NODES):
@@ -2402,7 +2434,7 @@ class Bridge:
             if max(levels) < LAMP_ON:
                 self._lamp_set(n, 0)
             elif n in self.map.rgb_groups:
-                self._lamp_set(n, rgb_value(*levels))
+                self._lamp_set(n, rgb_value(*rgb_levels(levels, getattr(self.map, "rgb_order", {}).get(n))))
             else:
                 self._lamp_set(n, 1)
         for node in range(16):

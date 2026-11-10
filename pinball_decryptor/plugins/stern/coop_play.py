@@ -1078,6 +1078,8 @@ def _characters(got):
                         "video": str(c.get("video") or "")})
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
+    if got.get("intro"):                                # PAD-1114: the co-op and team games' intro video
+        out["intro"] = str(got["intro"])
     if theme:
         out["theme"] = {k: (int(v) if k == "dim" and str(v).isdigit() else str(v)) for k, v in theme.items()
                         if k in THEME and v is not None and v != ""}
@@ -1090,7 +1092,7 @@ def save_characters(project, characters):
     chars = _characters(characters)
     data = staged_changes.load(project)
     raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
-    if chars["list"] or chars["pick"]:
+    if chars["list"] or chars["pick"] or chars.get("intro"):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)
@@ -1469,6 +1471,81 @@ def clip_entries(project, characters=None):
         path = video_path(project, c)
         if path:
             out.append((i, CLIP_NAME % (i + 1), path))
+    return out
+
+
+# ---- PAD-1114: the co-op and team games' intro video ---------------------------------------------------------------
+# DoomWalrus666 (Godzilla): "For co-op and team modes, I would like to have a custom intro video with its own sound.
+# This video would be skippable by pressing both flippers. Once the video finishes, or both flipper buttons are pressed,
+# the ball is put into the shooter Lane, and then language options, and then character select screen". The project
+# keeps one video (``coop/intro_video.<ext>``, the characters record's ``intro``); a Write makes it into a clip of the
+# video bank's size (:data:`INTRO_CLIP`, fitted whole, black round it) and its sound into a sound of the card's own
+# (sound_modes "the co-op intro"), and coop.cfg names both (pad_mode_runtime.c "PAD-1114").
+#: the intro's clip in the video bank
+INTRO_CLIP = "PadCoopIntro"
+#: the project's file (its extension the source's)
+INTRO_FILE = "intro_video"
+#: the longest intro a card takes (a mode's clip's longest)
+INTRO_MAX_SECONDS = 300
+
+
+def intro_path(project, characters=None):
+    """The absolute path of the project's co-op intro video (``""`` when it has none, or it is gone)."""
+    chars = _characters(characters) if characters is not None else load_characters(project)
+    return picture_path(project, {"picture": chars.get("intro") or ""})
+
+
+def save_intro(project, source=None):
+    """Copy *source* (a video file) into the project as the co-op and team games' intro, or with None forget it;
+    returns the characters as stored. Raises :class:`CoopError` when the file is not a video the app takes."""
+    import os
+    import shutil
+    chars = load_characters(project)
+    if source is None:
+        chars.pop("intro", None)
+        return save_characters(project, chars)
+    ext = os.path.splitext(source)[1].lower()
+    if ext not in VIDEO_EXTS or not os.path.isfile(source):
+        raise CoopError("That is not a video the app can take (%s)." % ", ".join(VIDEO_EXTS))
+    folder = os.path.join(project, PICTURE_DIR)
+    os.makedirs(folder, exist_ok=True)
+    for f in os.listdir(folder):                        # one intro: another extension's goes
+        if os.path.splitext(f)[0] == INTRO_FILE and f != INTRO_FILE + ext:
+            os.remove(os.path.join(folder, f))
+    shutil.copyfile(source, os.path.join(folder, INTRO_FILE + ext))
+    chars["intro"] = "%s/%s%s" % (PICTURE_DIR, INTRO_FILE, ext)
+    return save_characters(project, chars)
+
+
+def intro_clip(src, out, w, h, ffmpeg, max_seconds=None):
+    """*src* made into the intro's clip at *out*: w x h, the whole picture fitted in (never cropped), black round it,
+    30 fps, silent (its sound is :func:`intro_audio`'s), no longer than :data:`INTRO_MAX_SECONDS`."""
+    import subprocess
+    from . import mode_assets as MA
+    head, tail = MA._encode_args(ffmpeg, out)
+    vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,"
+          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,fps=%d" % (w, h, w, h, MA.FPS))
+    cmd = head + ["-i", src, "-t", str(max_seconds or INTRO_MAX_SECONDS), "-vf", vf] + tail
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if r.returncode != 0:
+        raise CoopError("ffmpeg could not make the intro's clip of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
+    return out
+
+
+def intro_audio(src, out, ffmpeg, max_seconds=None):
+    """The intro video *src*'s own sound as a 44.1 kHz 16-bit stereo WAV at *out* (the length its clip plays), or
+    ``""`` when the video has no sound. Raises :class:`CoopError` when ffmpeg cannot read it."""
+    import subprocess
+    from . import mode_assets as MA
+    probe = subprocess.run([ffmpeg, "-v", "error", "-i", src, "-map", "0:a:0", "-t", "0.1", "-f", "null", "-"],
+                           capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if probe.returncode != 0:
+        return ""                                       # no sound stream in it
+    cmd = [ffmpeg, "-v", "error", "-y", "-i", src, "-map", "0:a:0", "-t", str(max_seconds or INTRO_MAX_SECONDS),
+           "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", out]
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if r.returncode != 0:
+        raise CoopError("ffmpeg could not take the sound out of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
     return out
 
 
@@ -2222,6 +2299,14 @@ def export_settings(project, path):
         c["video"] = "%s/%d_%s_video%s" % (FILE_PICTURES, i + 1, picture_file_name(c["name"]) or "character",
                                            os.path.splitext(src)[1].lower())
         pictures.append((src, c["video"]))
+    intro = intro_path(project, chars)                         # PAD-1114: the co-op games' intro video
+    chars.pop("intro", None)
+    if intro:
+        if as_zip:
+            chars["intro"] = "%s/%s%s" % (FILE_PICTURES, INTRO_FILE, os.path.splitext(intro)[1].lower())
+            pictures.append((intro, chars["intro"]))
+        else:
+            left_out += 1
     back = backdrop_path(project, chars.get("theme"))          # PAD-1079: the pick's background picture
     if back:
         if as_zip:
@@ -2357,6 +2442,18 @@ def import_settings(project, path):
             f.write(blob)
         c["video"] = "%s/%s" % (PICTURE_DIR, name)
         pictures += 1
+    rel = chars.pop("intro", "") or ""                          # PAD-1114: the co-op games' intro video
+    blob = read(rel) if read and rel else None
+    ext = os.path.splitext(rel)[1].lower()
+    if blob and ext in VIDEO_EXTS:
+        os.makedirs(folder, exist_ok=True)
+        for f in os.listdir(folder):
+            if os.path.splitext(f)[0] == INTRO_FILE:
+                os.remove(os.path.join(folder, f))
+        with open(os.path.join(folder, INTRO_FILE + ext), "wb") as f:
+            f.write(blob)
+        chars["intro"] = "%s/%s%s" % (PICTURE_DIR, INTRO_FILE, ext)
+        pictures += 1
     theme = chars.get("theme") or {}                            # PAD-1079: the pick's background picture
     rel = theme.pop("backdrop", "")
     blob = read(rel) if read and rel else None
@@ -2390,7 +2487,7 @@ def import_settings(project, path):
                 awards[str(k)] = a
         if awards:
             raw["awards"] = awards
-    if chars["list"] or chars["pick"]:
+    if chars["list"] or chars["pick"] or chars.get("intro"):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)

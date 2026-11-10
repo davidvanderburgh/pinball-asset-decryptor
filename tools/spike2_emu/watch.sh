@@ -3177,6 +3177,11 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
                 { print "[event] " $0; fflush() }
             next }
         /\[play\]/               { print "[event] " $0; fflush(); next }
+        # PAD-1109: the relay to the player - attached, gone, the volume it
+        # applies, and every 30 s what it sent and how loud. A Mac run that
+        # was silent at 100% had every other counter healthy and nothing here
+        # that said whether the sound left the box or reached a player.
+        /\[padrelay\]/           { print "[event] " $0; fflush(); next }
         # PAD-456: a report of sound 20 s behind the picture came with no
         # line in the log that could say where it was held. The player now
         # says when it skipped to catch up and when its feed went dead, and

@@ -4568,3 +4568,104 @@ def test_gotg_patched_before_the_fix_is_asked_to_patch_again(tmp_path):
     script.write_text("Sub AddScore(points)\n\tdim multiplierVal\n", encoding="utf-8")
     pro = json.load(open(os.path.join(VPX, "guardians.shadow.json"), encoding="utf-8"))
     assert vs.missed_fixes(str(tmp_path), name, m["repatch"] + pro["repatch"]) == [m["repatch"][0]["why"]]
+
+
+# ---- PAD-1093: GotG's playfield dark, its domes flashing for good ------------
+
+def test_shadow_after_init_runs_once_the_tables_own_init_is_done():
+    # a tribute's boot can leave a look for a game of its own that never starts
+    # (GotG: EndOfGame's GiOff and dome show); `after_init` undoes it, last
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["lamps"] = {"_": "x", "gi1": {"leds": [[8, 1]], "name": "BOTTOM GI"}}
+    m["after_init"] = ["PadLookOff", "PadOther 1"]
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    assert ("\tSet LampCallback = GetRef(\"PadUpdateLamps\")\n\tPadLookOff\n\tPadOther 1\nEnd Sub"
+            in out)
+    assert out.index("\tTable1_Init_orig") < out.index("\tPadLookOff")
+    m["after_init"] = "PadLookOff"                     # one statement may be a plain string
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    assert "\tSet LampCallback = GetRef(\"PadUpdateLamps\")\n\tPadLookOff\nEnd Sub" in out
+
+
+#: the LE's own LED table (led_io.txt of guardians_le 1.15) and the Pro's
+#: (guardians-1.15.port): the GI is three LEDs a string on the LE, two on the Pro
+GOTG_GI = {"guardians_le.shadow.json": ([[8, 0], [8, 1], [8, 2]], [[9, 0], [9, 1], [9, 2]]),
+           "guardians.shadow.json": ([[8, 1], [8, 2]], [[9, 1], [9, 2]])}
+
+
+@pytest.mark.parametrize("f", sorted(GOTG_GI))
+def test_gotg_gi_is_the_whole_string_and_its_look_follows_it(f):
+    m = json.load(open(os.path.join(VPX, f), encoding="utf-8"))
+    bottom, top = GOTG_GI[f]
+    gi = {k: v["leds"] for k, v in m["lamps"].items() if k.startswith("gi")}
+    assert len(gi) == 26 and all(v in (bottom, top) for v in gi.values()), gi
+    calls = {v["arg"]: v for k, v in m["lamp_calls"].items() if k != "_"}
+    assert calls[0]["leds"] == bottom and calls[1]["leds"] == top
+    assert all(v["call"] == "PadGotgGi" for v in calls.values())
+    assert m["after_init"] == ["PadGotgLookOff"]
+    for sub in ("Sub PadGotgLookOff", "Sub PadGotgGi(n, v)", "Sub PadGotgGiLook(lit)"):
+        assert sub in m["extra_vbs"]
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(MINI_TRIBUTE, json.loads(json.dumps(dict(MINI_SHADOW, lamps=m["lamps"],
+                                                                lamp_calls=m["lamp_calls"],
+                                                                after_init=m["after_init"]))))
+    first = 1000 + bottom[0][0] * 100 + bottom[0][1]
+    assert 'PadCalls.Add "%d", Array(Array(GetRef("PadGotgGi"), 0))' % first in out
+    assert "\tSet LampCallback = GetRef(\"PadUpdateLamps\")\n\tPadGotgLookOff\nEnd Sub" in out
+
+
+def test_gotg_patched_before_the_dark_playfield_fix_is_asked_to_patch_again(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "guardians_le.shadow.json"), encoding="utf-8"))
+    mark = [k for k in m["repatch"] if "PAD-1093" in k["since"]]
+    assert len(mark) == 1
+    name = m["output"]
+    script = tmp_path / (name[:-4] + ".script.vbs")
+    script.write_text("Sub AddScore(points) : End Sub\n\tPadLampsInit\n"
+                      "\tSet LampCallback = GetRef(\"PadUpdateLamps\")\nEnd Sub\n", encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == [mark[0]["why"]]
+    script.write_text("Sub AddScore(points) : End Sub\n\tPadLampsInit\n"
+                      "\tSet LampCallback = GetRef(\"PadUpdateLamps\")\n\tPadGotgLookOff\nEnd Sub\n",
+                      encoding="utf-8")
+    assert vs.missed_fixes(str(tmp_path), name, m["repatch"]) == []
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's VBScript under cscript")
+@pytest.mark.parametrize("f", sorted(GOTG_GI))
+def test_gotg_look_undoes_the_boot_and_follows_the_machines_gi(tmp_path, f):
+    """The map's own GotG subs, run as VBScript: the table's boot (GiOff, the
+    red domes armed, the hadron dome blinking) is undone by after_init; the
+    machine's GI reading off before the game first lights it leaves the look
+    on; after that the look follows the GI (a tilt puts it out)."""
+    m = json.load(open(os.path.join(VPX, f), encoding="utf-8"))
+    ours = m["extra_vbs"][m["extra_vbs"].index("' The table's own init ends in its EndOfGame"):]
+    lines = [
+        "Class T : Public Enabled : End Class",
+        "Dim tmrHadronLightFlash : Set tmrHadronLightFlash = New T",
+        "Dim bFlash1Enabled, bFlash2Enabled, bFlash3Enabled, bFlash4Enabled, bFlash4FastEnabled",
+        "Dim Look, PadLampState",
+        "Sub GiOn : Look = \"on\" : End Sub",
+        "Sub GiOff : Look = \"off\" : End Sub",
+        "Sub PadReassertLamps : End Sub",
+        ours,
+        "Sub Say(tag)",
+        "\tWScript.Echo tag & \" \" & Look & \" \" & (bFlash1Enabled Or bFlash4Enabled) & \" \" & tmrHadronLightFlash.Enabled",
+        "End Sub",
+        "GiOff : bFlash1Enabled = True : bFlash4Enabled = True : tmrHadronLightFlash.Enabled = True",
+        "Say \"boot\"",
+        "PadGotgLookOff : Say \"after_init\"",
+        "PadGotgGi 0, 0 : PadGotgGi 1, 0 : Say \"before\"",
+        "PadGotgGi 0, 1 : Say \"lit\"",
+        "PadGotgGi 1, 1 : PadGotgGi 0, 0 : Say \"half\"",
+        "PadGotgGi 1, 0 : Say \"tilt\"",
+        "PadGotgGi 0, 1 : Say \"back\""]
+    vbs = tmp_path / "gotg_look.vbs"
+    vbs.write_text("\n".join(lines) + "\n", encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.stdout.splitlines()[:7] == [
+        "boot off True True", "after_init on False False", "before on False False",
+        "lit on False False", "half on False False", "tilt off False False",
+        "back on False False"], r.stdout

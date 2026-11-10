@@ -47,10 +47,19 @@ def _extract(name):
     raise AssertionError(name)
 
 
-FUNCS = ("popcount8", "led_insert_node", "led_gz_cmd", "led_show_cmd", "led_dec_log",
+FUNCS = ("led_pend_drop", "led_pend_put", "led_pend_settle",
+         "popcount8", "led_insert_node", "led_gz_cmd", "led_show_cmd", "led_dec_log",
          "led_wide_long", "led_wide_walk", "led_wide_strip_bank", "led_wide_dialect",
-         "led_wide_settled", "led_strip_levels", "led_wide_publish", "led_node_wide_publish",
-         "led_publish")
+         "led_wide_settled", "led_strip_levels", "led_wide_publish", "led_pend_offer",
+         "led_node_wide_publish", "led_publish")
+
+
+def _pend_state():
+    """the pending plane's globals (PAD-1093), as hwshim.c declares them"""
+    src = open(SHIM, encoding="utf-8", errors="replace").read()
+    m = re.search(r"^static unsigned char led_pend_val\[16\]\[96\].*?^static unsigned led_pend_n, led_pub_seq;$", src, re.M | re.S)
+    assert m, "the pending plane's declarations moved - update this test"
+    return m.group(0)
 
 HARNESS = r"""
 #include <stdio.h>
@@ -73,7 +82,8 @@ static unsigned short led_node_votes[16], led_node_yes[16];
 static int led_wide_verdict = -1;
 static void led_map(void) {}
 static void led_seen(unsigned node, unsigned idx) { shm.seen[node][idx] = 1; }
-static void led_val(unsigned node, unsigned idx, unsigned char v) { if (node < 16 && idx < 96) { shm.val[node][idx] = v; led_seen(node, idx); } }
+static void led_pend_drop(unsigned node, unsigned idx);
+static void led_val(unsigned node, unsigned idx, unsigned char v) { if (node < 16 && idx < 96) { shm.val[node][idx] = v; led_seen(node, idx); led_pend_drop(node, idx); } }
 static unsigned char led_level70(unsigned lo, unsigned hi) { (void)hi; return (unsigned char)lo; }
 static void led_show_note(unsigned node, unsigned cmd, unsigned weight) { (void)node; (void)cmd; (void)weight; }
 /* a banked frame's levels (PAD-500's version-6 plane): not what this test reads */
@@ -123,7 +133,7 @@ def shim(tmp_path_factory):
     if not CC:
         pytest.skip("no C compiler on this host")
     d = tmp_path_factory.mktemp("ledsettled")
-    (d / "h.c").write_text(HARNESS.replace("@FUNCS@", "\n".join(_extract(n) for n in FUNCS)), encoding="utf-8")
+    (d / "h.c").write_text(HARNESS.replace("@FUNCS@", "\n".join([_pend_state()] + [_extract(n) for n in FUNCS])), encoding="utf-8")
     exe = d / ("h.exe" if os.name == "nt" else "h")
     r = subprocess.run([CC, "-O1", "-o", str(exe), str(d / "h.c")], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
@@ -205,3 +215,50 @@ def test_a_settled_title_shows_an_insert_board_s_long_frame(shim):
 def test_before_the_vote_an_insert_board_s_long_frame_is_not_published(shim):
     out = _run(shim, *KNOWN, "send", "9", "1", LONG_NODE9, "val", "9", "11", "val", "9", "77")
     assert "VAL 9.11=0" in out and "VAL 9.77=0" in out
+
+
+# ---- PAD-1093: what the game sends BEFORE the title's vote is in -----------
+#
+# Guardians LE 1.15 took 19 s to fill the 200-frame vote (a traced boot, rig 3),
+# and at 12.9 s - mid-sample - sent this ONE `8a` frame to node 8 that turns the
+# bottom GI on (BOTTOM RED / WHITE / BLUE GI, index 0..2, all 0xff) with a dozen
+# inserts beside it, and never touched those lamps again. It was dropped for the
+# vote, so the GI read 0 for the whole run and a Visual Pinball table behind the
+# rig showed an unlit playfield. Not a godzilla command, so led_publish turned it
+# away at their gate before it could even reach led_wide_publish.
+GOTG_GI_ON = ("883d8acb063f7fbffe03f8ffffefff1fffffffff00ff00ff0000ff00ff00ff0000ff0000ff"
+              "0000ff0000ff000000ff0000ff0000ff0000ff0000ff00001e5300")
+#: a base-layer `cmd 70` write: node 8, lamp 0 to level 0 (a LATER word on that lamp)
+CMD70_LAMP0_OFF = "8805700000000000"
+
+
+def test_a_gi_frame_sent_before_the_vote_lights_once_the_title_is_believed(shim):
+    out = _run(shim, *KNOWN, "send", "8", "1", GOTG_GI_ON, "val", "8", "0",
+               *SETTLE_YES, "val", "8", "0", "val", "8", "1", "val", "8", "2", "val", "8", "3")
+    assert re.findall(r"VAL 8\.0=(\d+)", out) == ["0", "255"]   # held back for the vote, then shown
+    assert "VAL 8.1=255" in out and "VAL 8.2=255" in out and "VAL 8.3=255" in out
+    assert "sent before the vote applied now" in out
+    # applied before the vote is announced: nothing the believed title publishes is older
+    assert out.index("sent before the vote") < out.index("dialect ACCEPTED - publishing lamps")
+
+
+def test_a_title_the_vote_refuses_never_shows_what_was_kept(shim):
+    out = _run(shim, *KNOWN, "send", "8", "1", GOTG_GI_ON, *SETTLE_NO, "val", "8", "0", "val", "8", "1")
+    assert "dialect REFUSED" in out
+    assert "VAL 8.0=0" in out and "VAL 8.1=0" in out
+    assert "sent before the vote" not in out
+
+
+def test_a_long_frame_sent_before_the_vote_is_shown_once_it_is_in(shim):
+    out = _run(shim, *KNOWN, "send", "9", "1", LONG_NODE9, "val", "9", "11", *SETTLE_YES,
+               "val", "9", "11", "val", "9", "37", "val", "9", "75", "val", "9", "77")
+    assert re.findall(r"VAL 9\.11=(\d+)", out) == ["0", "255"]
+    assert "VAL 9.37=255" in out and "VAL 9.77=255" in out and "VAL 9.75=0" in out
+
+
+def test_a_later_write_from_another_path_beats_what_was_kept(shim):
+    # the GI frame is kept, then a base-layer cmd 70 puts lamp 0 out before the vote:
+    # the newer word stands, the rest of the kept frame still lands
+    out = _run(shim, *KNOWN, "send", "8", "1", GOTG_GI_ON, "send", "8", "1", CMD70_LAMP0_OFF,
+               *SETTLE_YES, "val", "8", "0", "val", "8", "1")
+    assert "VAL 8.0=0" in out and "VAL 8.1=255" in out

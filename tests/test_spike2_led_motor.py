@@ -118,7 +118,10 @@ def cbin(tmp_path_factory):
     d = tmp_path_factory.mktemp("ledmotor")
     state = re.search(r"^static unsigned char led_motor_out\[16\]\[96\];$", _src(), re.M)
     assert state, "the LED motor state declaration moved - update this test"
-    body = chr(10).join([state.group(0), _extract("led_val"), _extract("led_motor_publish")])
+    pend = re.search(r"^static unsigned char led_pend_val\[16\]\[96\].*?^static unsigned led_pend_n, led_pub_seq;$", _src(), re.M | re.S)
+    assert pend, "the pending plane's declarations moved (PAD-1093) - update this test"
+    body = chr(10).join([state.group(0), pend.group(0), _extract("led_pend_drop"),
+                         _extract("led_val"), _extract("led_motor_publish")])
     src = d / "ledmotor.c"
     src.write_text(HARNESS % body, encoding="utf-8")
     exe = d / ("ledmotor.exe" if os.name == "nt" else "ledmotor")

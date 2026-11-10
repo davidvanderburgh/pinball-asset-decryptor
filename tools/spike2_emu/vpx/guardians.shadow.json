@@ -114,7 +114,7 @@
     "chglamp = Controller.ChangedLamps",
     "then Controller.Stop"
   ],
-  "extra_vbs": "\n'---- PAD (map extra_vbs): GOTG's mechs, driven by the machine's coils\nSub PadRightScoop(e)\n\tIf e Then\n\t\tbsLeftScoop.SolOut True\n\t\tLeftScoopK.IsDropped = 0\n\t\tvpmTimer.AddTimer 100, \"LeftScoopK.IsDropped = 1 '\"\n\tEnd If\nEnd Sub\nSub PadOrbDropUp(e)\n\tIf e Then\n\t\tOrbTarget1.IsDropped = False\n\t\tController.Switch(1047) = False\n\tEnd If\nEnd Sub\nSub PadOrbDropDown(e)\n\tIf e Then\n\t\tOrbTarget1.IsDropped = True\n\t\tController.Switch(1047) = True\n\tEnd If\nEnd Sub\nSub PadOrbitGates(e)\n\tLoopGateLeft.Open = e\n\tGate002.Open = e\nEnd Sub\n\n' Groot's mouth stays open (the machine's jaw is a node-board motor the table\n' cannot follow) and his trough holds up to four balls on GROOT TROUGH 1..4;\n' the inside-the-Orb target stands back up (the machine's is a standup); the\n' Orb's blocking wall stays out of the way. Run from vpmTimer's slow updates.\nClass PadGotgMechs\n\tPrivate mSwapped, mOrbDown\n\tPrivate Sub Class_Initialize\n\t\tmSwapped = False\n\t\tmOrbDown = 0\n\tEnd Sub\n\tPublic Sub Reset\n\tEnd Sub\n\tPublic Sub Update\n\t\tIf Not mSwapped Then\n\t\t\tIf IsObject(bsGrootKicker) Then\n\t\t\t\tSet bsGrootKicker = PadGrootStack\n\t\t\t\tmSwapped = True\n\t\t\tEnd If\n\t\tEnd If\n\t\tIf GrootMouth.Collidable Then\n\t\t\tGrootMouth.Collidable = False\n\t\t\tGrootMouth.Z = -30\n\t\tEnd If\n\t\tIf OrbTarget1Disabled.Collidable Then\n\t\t\tOrbTarget1Disabled.Collidable = False\n\t\tEnd If\n\t\tIf OrbTarget2.IsDropped Then\n\t\t\tmOrbDown = mOrbDown + 1\n\t\t\tIf mOrbDown > 15 Then\n\t\t\t\tOrbTarget2.IsDropped = False\n\t\t\t\tmOrbDown = 0\n\t\t\tEnd If\n\t\tElse\n\t\t\tmOrbDown = 0\n\t\tEnd If\n\tEnd Sub\nEnd Class\nDim PadGrootStack : Set PadGrootStack = New cvpmBallStack\nPadGrootStack.InitSw 0, 1071, 1072, 1073, 1074, 0, 0, 0\nPadGrootStack.InitKick GrootKicker, 180, 20\nPadGrootStack.IsTrough = False\nDim PadMechs : Set PadMechs = New PadGotgMechs\nvpmTimer.EnableUpdate PadMechs, False, True\n\n' PinUP Player is the shadow game's display; the machine's LCD is the real one\nSet PuPlayer = New PadNoPuP\n",
+  "extra_vbs": "\n'---- PAD (map extra_vbs): GOTG's mechs, driven by the machine's coils\nSub PadRightScoop(e)\n\tIf e Then\n\t\tbsLeftScoop.SolOut True\n\t\tLeftScoopK.IsDropped = 0\n\t\tvpmTimer.AddTimer 100, \"LeftScoopK.IsDropped = 1 '\"\n\tEnd If\nEnd Sub\nSub PadOrbDropUp(e)\n\tIf e Then\n\t\tOrbTarget1.IsDropped = False\n\t\tController.Switch(1047) = False\n\tEnd If\nEnd Sub\nSub PadOrbDropDown(e)\n\tIf e Then\n\t\tOrbTarget1.IsDropped = True\n\t\tController.Switch(1047) = True\n\tEnd If\nEnd Sub\nSub PadOrbitGates(e)\n\tLoopGateLeft.Open = e\n\tGate002.Open = e\nEnd Sub\n\n' Groot's mouth stays open (the machine's jaw is a node-board motor the table\n' cannot follow) and his trough holds up to four balls on GROOT TROUGH 1..4;\n' the inside-the-Orb target stands back up (the machine's is a standup); the\n' Orb's blocking wall stays out of the way. Run from vpmTimer's slow updates.\nClass PadGotgMechs\n\tPrivate mSwapped, mOrbDown\n\tPrivate Sub Class_Initialize\n\t\tmSwapped = False\n\t\tmOrbDown = 0\n\tEnd Sub\n\tPublic Sub Reset\n\tEnd Sub\n\tPublic Sub Update\n\t\tIf Not mSwapped Then\n\t\t\tIf IsObject(bsGrootKicker) Then\n\t\t\t\tSet bsGrootKicker = PadGrootStack\n\t\t\t\tmSwapped = True\n\t\t\tEnd If\n\t\tEnd If\n\t\tIf GrootMouth.Collidable Then\n\t\t\tGrootMouth.Collidable = False\n\t\t\tGrootMouth.Z = -30\n\t\tEnd If\n\t\tIf OrbTarget1Disabled.Collidable Then\n\t\t\tOrbTarget1Disabled.Collidable = False\n\t\tEnd If\n\t\tIf OrbTarget2.IsDropped Then\n\t\t\tmOrbDown = mOrbDown + 1\n\t\t\tIf mOrbDown > 15 Then\n\t\t\t\tOrbTarget2.IsDropped = False\n\t\t\t\tmOrbDown = 0\n\t\t\tEnd If\n\t\tElse\n\t\t\tmOrbDown = 0\n\t\tEnd If\n\tEnd Sub\nEnd Class\nDim PadGrootStack : Set PadGrootStack = New cvpmBallStack\nPadGrootStack.InitSw 0, 1071, 1072, 1073, 1074, 0, 0, 0\nPadGrootStack.InitKick GrootKicker, 180, 20\nPadGrootStack.IsTrough = False\nDim PadMechs : Set PadMechs = New PadGotgMechs\nvpmTimer.EnableUpdate PadMechs, False, True\n\n' PinUP Player is the shadow game's display; the machine's LCD is the real one\nSet PuPlayer = New PadNoPuP\n\n' The table's own init ends in its EndOfGame: GiOff (PF_GiOFF, a dark overlay\n' over the whole playfield, and every plastic on its GI-off image) and its\n' attract show on the dome flashers (the four red domes and the hadron dome,\n' HadronFlash). Only its own game start (ResetForNewGame) undoes them, and\n' that game never starts behind the machine (PAD-1093). The machine has no\n' flashers for the domes (its coil list has none), so they rest; the GI's look\n' follows the machine's GI strings (PadGotgGi, the map's lamp_calls).\nDim PadGiBottom, PadGiTop, PadGiLit, PadGiSeen\nPadGiSeen = False\nPadGiBottom = 0 : PadGiTop = 0 : PadGiLit = 2   ' 2: not yet set (True is -1 in VBScript)\nSub PadGotgLookOff\n\tbFlash1Enabled = False : bFlash2Enabled = False\n\tbFlash3Enabled = False : bFlash4Enabled = False\n\tbFlash4FastEnabled = False\n\ttmrHadronLightFlash.Enabled = False\n\tGiOn\n\tPadGiLit = True\nEnd Sub\nSub PadGotgGi(n, v)\n\tDim lit\n\tIf n = 0 Then\n\t\tPadGiBottom = v\n\tElse\n\t\tPadGiTop = v\n\tEnd If\n\tlit = (PadGiBottom <> 0) Or (PadGiTop <> 0)\n\tPadGotgGiLook lit\nEnd Sub\nSub PadGotgGiLook(lit)\n\t' the machine's GI reads off until the game first lights it (a run reads\n\t' its lamps a few seconds into attract): the look stays on till then\n\tIf lit Then PadGiSeen = True\n\tIf Not PadGiSeen Then Exit Sub\n\tIf lit = PadGiLit Then Exit Sub\n\tPadGiLit = lit\n\tIf lit Then\n\t\tGiOn\n\tElse\n\t\tGiOff\n\tEnd If\n\tIf IsObject(PadLampState) Then PadReassertLamps   ' the bulbs are the machine's\nEnd Sub\n",
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
     "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100}
@@ -190,33 +190,39 @@
     "BumperLight001": {"leds": [[9, 9]], "name": "LEFT POP BUMPER"},
     "BumperLight003": {"leds": [[9, 10]], "name": "RIGHT POP BUMPER"},
     "BumperLight002": {"leds": [[9, 11]], "name": "BOTTOM POP BUMPER"},
-    "gi28": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi4": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi5": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi6": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi10": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi12": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi13": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi18": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi19": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi24": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi2": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi002": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi003": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi005": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi006": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi007": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi008": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi009": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi010": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi011": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi012": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi013": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi004": {"leds": [[8, 1]], "name": "BOTTOM GI 1"},
-    "gi8": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi15": {"leds": [[9, 1]], "name": "TOP GI 1"},
-    "gi001": {"leds": [[8, 1]], "name": "BOTTOM GI 1"}
+    "gi28": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi4": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi5": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi6": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi10": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi12": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi13": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi18": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi19": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi24": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi2": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi002": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi003": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi005": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi006": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi007": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi008": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi009": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi010": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi011": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi012": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi013": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi004": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"},
+    "gi8": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi15": {"leds": [[9, 1], [9, 2]], "name": "TOP GI 1 and 2"},
+    "gi001": {"leds": [[8, 1], [8, 2]], "name": "BOTTOM GI 1 and 2"}
   },
+  "lamp_calls": {
+    "_": "the GI's look (PF_GiOFF and the plastics' GI images, the table's GiOn/GiOff) follows the machine's GI strings (PAD-1093)",
+    "PadGiBottomLook": {"leds": [[8, 1], [8, 2]], "call": "PadGotgGi", "arg": 0, "name": "BOTTOM GI 1 and 2", "show": ["PF_GiOFF"]},
+    "PadGiTopLook": {"leds": [[9, 1], [9, 2]], "call": "PadGotgGi", "arg": 1, "name": "TOP GI 1 and 2", "show": ["PF_GiOFF"]}
+  },
+  "after_init": ["PadGotgLookOff"],
   "quiet_subs": [
     "StartLightSeq",
     "StartRainbow",
@@ -238,6 +244,7 @@
     "RightSlingShot"
   ],
   "repatch": [
-    {"old": "Sub AddScore(points) dim multiplierVal", "why": "Visual Pinball stops on a script error the first time the table scores", "since": "PAD-976: the table's own scoring stays quiet"}
+    {"old": "Sub AddScore(points) dim multiplierVal", "why": "Visual Pinball stops on a script error the first time the table scores", "since": "PAD-976: the table's own scoring stays quiet"},
+    {"old": "Set LampCallback = GetRef(\"PadUpdateLamps\") End Sub", "why": "the playfield stays dark and the dome flashers never stop", "since": "PAD-1093: the table's attract look ends once it is up, and its GI follows the machine's"}
   ]
 }

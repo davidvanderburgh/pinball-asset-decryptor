@@ -777,10 +777,12 @@ def publish_bin(tmp_path_factory):
         pytest.skip("no C compiler on this host")
     src = open(os.path.join(RIG, "hwshim.c"), encoding="utf-8", errors="replace").read()
     struct_src = re.search(r"^struct padled_shm \{.*?^\};", src, re.M | re.S).group(0)
-    funcs = "\n".join(_extract(src, n) for n in (
+    pend = re.search(r"^static unsigned char led_pend_val\[16\]\[96\].*?^static unsigned led_pend_n, led_pub_seq;$", src, re.M | re.S).group(0)    # PAD-1093
+    funcs = "\n".join([_extract(src, "led_seen"), pend] + [_extract(src, n) for n in (
+        "led_pend_drop", "led_pend_put", "led_pend_settle",
         "popcount8", "led_insert_node", "led_show_cmd", "led_wide_long", "led_wide_walk",
-        "led_wide_strip_bank", "led_wide_dialect", "led_wide_settled", "led_hi", "led_seen",
-        "led_strip_levels", "led_wide_publish"))
+        "led_wide_strip_bank", "led_wide_dialect", "led_wide_settled", "led_hi",
+        "led_strip_levels", "led_wide_publish")])
     d = tmp_path_factory.mktemp("ledlong")
     (d / "h.c").write_text(PUBLISH_HARNESS.replace("@STRUCT@", struct_src).replace("@FUNCS@", funcs),
                            encoding="utf-8")

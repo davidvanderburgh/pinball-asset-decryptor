@@ -84,10 +84,11 @@ def test_plan_and_export_sort_by_kind_and_rename_clashes(tmp_path):
     assert res["counts"] == {"video": 4, "audio": 3, "image": 2}
     assert not res["gone"]
     tos = sorted(os.path.relpath(f["to"], dest).replace("\\", "/") for f in res["files"])
-    assert tos == ["Audio/doom 2.wav", "Audio/doom.wav", "Audio/roar.wav",
+    # each file named after the game's file of the slot it replaces (round 3)
+    assert tos == ["Audio/music - doom.wav", "Audio/roar - doom 2.wav", "Audio/roar.wav",
                    "Images/bg.png", "Images/me.jpg",
-                   "Video/award.mp4", "Video/intro (2).mp4", "Video/intro.mp4",
-                   "Video/take 2.mp4"]
+                   "Video/a - award.mp4", "Video/intro (2).mp4", "Video/intro - take 2.mp4",
+                   "Video/intro.mp4"]
     out = rx.export(staged, res)
     assert out["copied"] == 9 and not out["cancelled"]
     with open(os.path.join(dest, "Video", "intro (2).mp4"), "rb") as f:
@@ -133,11 +134,11 @@ def test_repoint_reaches_every_section(tmp_path):
     out = rx.export(staged, rx.plan(staged, dest, project))
     data, n = rx.repoint(staged, out["mapping"])
     assert n == 10
-    assert data["video"]["video/modes/b.mp4"] == os.path.join(dest, "Video", "award.mp4")
+    assert data["video"]["video/modes/b.mp4"] == os.path.join(dest, "Video", "a - award.mp4")
     assert data["video_variants"]["video/attract/intro.mp4"][1] == \
         os.path.join(dest, "Video", "intro (2).mp4")
     assert data["sound_modes"]["slots"]["audio/music.wav"]["2"] == \
-        os.path.join(dest, "Audio", "doom.wav")
+        os.path.join(dest, "Audio", "music - doom.wav")
     assert data["attract_items"]["items"][0]["file"] == os.path.join(dest, "Images", "me.jpg")
     # settings keyed by slot stay as they were
     assert data["audio_levels"] == {"audio/roar.wav": -3}
@@ -153,8 +154,8 @@ def test_record_round_trip_onto_a_fresh_project(tmp_path):
     path = rx.write_record(str(dest), rx.make_record(staged, out["mapping"], str(dest),
                                                      game="Godzilla Pro 1.20"))
     rec = json.loads(open(path, encoding="utf-8").read())
-    assert rec["records"]["video"]["video/modes/a.mp4"] == "Video/award.mp4"
-    assert rec["records"]["sound_modes"]["turns"]["audio/roar.wav"] == ["Audio/doom 2.wav"]
+    assert rec["records"]["video"]["video/modes/a.mp4"] == "Video/a - award.mp4"
+    assert rec["records"]["sound_modes"]["turns"]["audio/roar.wav"] == ["Audio/roar - doom 2.wav"]
     assert "image_changed_only" not in rec["records"]     # a tab's view, not a replacement
     assert rec["records"]["audio_levels"] == {"audio/roar.wav": -3}
     # the folder moves to another PC, and a fresh extract takes it in
@@ -170,8 +171,8 @@ def test_record_round_trip_onto_a_fresh_project(tmp_path):
     assert data["audio"]["audio/other.wav"] == r"C:\mine\x.wav"     # kept
     assert data["audio"]["audio/roar.wav"] == str(moved / "Audio" / "roar.wav")
     assert data["video_variants"]["video/attract/intro.mp4"] == [
-        str(moved / "Video" / "take 2.mp4"), str(moved / "Video" / "intro (2).mp4")]
-    assert data["sound_modes"]["slots"]["audio/music.wav"]["2"] == str(moved / "Audio" / "doom.wav")
+        str(moved / "Video" / "intro - take 2.mp4"), str(moved / "Video" / "intro (2).mp4")]
+    assert data["sound_modes"]["slots"]["audio/music.wav"]["2"] == str(moved / "Audio" / "music - doom.wav")
     assert data["sound_modes"]["levels"] == {"audio/music.wav": {"2": 4}}
     assert data["audio_loop"] == {"audio/roar.wav": True}
     assert data["video_length_slots"] == {"video/modes/a.mp4": "full"}
@@ -243,7 +244,7 @@ def test_export_window_and_import(tmp_path):
                                      "sound_modes": {"slots": {"audio/m.wav": {"2": song}}}})
         st = w.call("shellx.export_open")
         assert st["dest"] == str(tmp_path / "p1 files")
-        assert {r["to"] for r in st["rows"]} == {"Video/intro.mp4", "Audio/song.wav"}
+        assert {r["to"] for r in st["rows"]} == {"Video/intro.mp4", "Audio/m - song.wav"}
         assert st["can_export"] and st["repoint"] is True
         dest = str(tmp_path / "out")
         w.call("shellx.export_set_dest", dest)
@@ -255,7 +256,7 @@ def test_export_window_and_import(tmp_path):
         assert _until(w, lambda: staged_changes.load(folder)["video"]["video/intro.mp4"]
                       == os.path.join(dest, "Video", "intro.mp4"))
         assert staged_changes.load(folder)["sound_modes"]["slots"]["audio/m.wav"]["2"] == \
-            os.path.join(dest, "Audio", "song.wav")
+            os.path.join(dest, "Audio", "m - song.wav")
         w.call("shellx.export_close")
 
         # a fresh project takes them back
@@ -266,7 +267,7 @@ def test_export_window_and_import(tmp_path):
         data = staged_changes.load(str(tmp_path / "p2"))
         assert data["video"]["video/intro.mp4"] == os.path.join(dest, "Video", "intro.mp4")
         assert data["sound_modes"]["slots"]["audio/m.wav"]["2"] == \
-            os.path.join(dest, "Audio", "song.wav")
+            os.path.join(dest, "Audio", "m - song.wav")
 
 
 # --- "anything customized" (the reporter, round 2) ---------------------------------
@@ -360,3 +361,44 @@ def test_changed_files_leave_out_picked_slots_and_the_text_manifest(tmp_path):
         for rel in ("video/a.mp4", "images/b.png", "text/strings.tsv")), encoding="utf-8")
     staged = {"video": {"video/a.mp4": r"C:\lib\a.mp4"}}
     assert rx.changed_files(str(p), staged) == ["images/b.png"]
+
+
+# --- round 3: "have the games stock video filename in their filename" ------------------
+
+def test_stock_name_puts_the_games_file_first():
+    assert rx.stock_name(r"D:\lib\my intro.mp4", "video/attract/GZ_Intro.mp4") == \
+        "GZ_Intro - my intro.mp4"
+    assert rx.stock_name(r"D:\lib\GZ_Intro_v2.mp4", "video/attract/GZ_Intro.mp4") == \
+        "GZ_Intro_v2.mp4"                                   # already says it
+    assert rx.stock_name(r"D:\lib\GZ_Intro2.mp4", "video/attract/GZ_Intro.mp4") == \
+        "GZ_Intro - GZ_Intro2.mp4"
+    assert rx.stock_name(r"D:\lib\me.jpg", None) == "me.jpg"   # an attract photo: no slot
+
+
+def test_slots_of_prefers_the_slot_a_file_was_picked_for():
+    staged = {"video_variants": {"video/b.mp4": [r"D:\x.mp4"]},
+              "video": {"video/a.mp4": r"D:\x.mp4"},
+              "sound_modes": {"slots": {"audio/m.wav": {"2": r"D:\s.wav"}}},
+              "attract_items": {"items": [{"kind": "photo", "file": r"D:\p.png"}]}}
+    assert rx.slots_of(staged) == {r"D:\x.mp4": "video/a.mp4", r"D:\s.wav": "audio/m.wav"}
+
+
+def test_a_file_exported_under_its_own_name_is_renamed(tmp_path):
+    """A v1.346.0 export left Video/my intro.mp4 and pointed the project at it."""
+    dest = tmp_path / "export"
+    old = _file(dest / "Video" / "my intro.mp4", b"clip")
+    staged = {"video": {"video/attract/GZ_Intro.mp4": old}}
+    res = rx.plan(staged, str(dest), str(tmp_path / "p"))
+    assert [(f["state"], os.path.basename(f["to"])) for f in res["files"]] == [
+        ("rename", "GZ_Intro - my intro.mp4")]
+    # the project keeps using its file: a copy under the new name, the old one stays
+    out = rx.export(staged, res)
+    assert os.path.isfile(old) and os.path.isfile(res["files"][0]["to"])
+    # the project uses the copies: moved, and re-pointed
+    os.remove(res["files"][0]["to"])
+    out = rx.export(staged, rx.plan(staged, str(dest), str(tmp_path / "p")), move_there=True)
+    new = str(dest / "Video" / "GZ_Intro - my intro.mp4")
+    assert not os.path.exists(old) and os.path.isfile(new)
+    data, n = rx.repoint(staged, out["mapping"])
+    assert data["video"]["video/attract/GZ_Intro.mp4"] == new and n == 1
+    assert rx.plan(data, str(dest), str(tmp_path / "p"))["files"][0]["state"] == "there"

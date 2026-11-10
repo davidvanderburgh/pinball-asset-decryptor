@@ -3240,11 +3240,10 @@ def probe_card_title(image):
                     entries = card.list_dir(part.index, "/spk/index")
                 except Exception:
                     continue
-                for e in entries:
-                    game, version = card_from_name(e.name)
-                    if game and not e.is_dir and e.name.lower().endswith(".sidx"):
-                        answer = (game, version)
-                        break
+                from .info import index_entries_name
+                game, version = card_from_name(index_entries_name(entries))     # PAD-1100
+                if game:
+                    answer = (game, version)
                 if answer[0]:
                     break
     except Exception:
@@ -3335,6 +3334,39 @@ def project_card(project):
     return ProjectCard(card.image, made_for.game_dir, made_for.version,
                        MODES_TITLE_SOURCE if not os.path.isfile(card.image)
                        else MODES_TITLE_UNREAD)
+
+
+def heal_card_record(project, card, game, version):
+    """PAD-1100: put right a project whose extract recorded another build than its card is.
+
+    Before PAD-1100 the extract of a compact multi-boot card (both games in p3, the second
+    under ``img1/``) could record the SECOND image's index (Brombomb's GZ 1.16 + Heisei card
+    became godzilla_pro 1.13), and Load modes / Copy to then asked for a port of that build.
+    ``game``/``version`` are what a read of the card's own primary index found (the Modes tab's
+    title read of ``card``, :func:`project_card`'s answer for ``project``). When ``card`` is the
+    card the extract recorded and names another build, the record is corrected: its
+    ``card_version``, and its stock stamp's index name, with the stamp's verdict dropped (it
+    was about the other image). Returns True when it changed the record."""
+    from ...core import extract_source
+    if card is None or not game or not version or not card.image:
+        return False
+    if card.game_dir == game and version_key(card.version) == version_key(version):
+        return False
+    rec = extract_source.read_extract_source(project) or {}
+    recorded = rec.get("input_path") or ""
+    if not recorded or os.path.normcase(os.path.abspath(recorded)) != os.path.normcase(
+            os.path.abspath(card.image)):
+        return False                  # not the extract's card (a Try it on card, the anchor's)
+    extra = {"card_version": version}
+    stock = rec.get("stock")
+    if card.game_dir != game and not isinstance(stock, dict):
+        return False                  # the game comes from the card's name: nothing here to fix
+    if isinstance(stock, dict):
+        name = "%s-%s.sidx" % (game, "_".join(version.split(".")))
+        if stock.get("sidx") != name:
+            extra["stock"] = {"sidx": name, "status": "unknown", "label": "", "text": ""}
+    extract_source.amend_extract_source(project, **extra)
+    return True
 
 
 #: PAD-720: where :func:`project_card` found the game when the extract recorded the card's index

@@ -2692,6 +2692,31 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return prof, "", self._with_switch_note(self._derived_words(prof), prof)
         return prof, "", self._port_note(prof)
 
+    def _heal_card_record(self, project, card, tr, profile, label):
+        """PAD-1100: ``(card, label)`` once the project's record says the build its card IS.
+
+        A read (``tr``) names the card's game program: a SHIPPED port matched on that very
+        program is that build (a port matches its own build and edition only), else the card's
+        own primary index says it. A record naming another build (Brombomb's dual-boot GZ 1.16
+        card recorded as 1.13) is corrected (:func:`.mode_project.heal_card_record`) so Load
+        modes, Copy to, Write and Try it ask for the build the tab shows."""
+        game, version = tr.game, tr.version
+        if (profile is not None and tr.port_origin == "shipped"
+                and profile.game_dir == tr.game and profile.version):
+            parts = str(profile.version).split(".")
+            game, version = profile.game_dir, ".".join(parts + ["0"] * (3 - len(parts)))
+        if not MP.heal_card_record(project, card, game, version):
+            return card, label
+        healed = MP.project_card(project)
+        if healed is None or not healed.game_dir:
+            return card, label
+        new = MP.title_label(healed.game_dir, healed.version)
+        self._say("the project recorded its card %s as %s; the card's game program is %s, so "
+                  "the record now says so" % (MP.file_name(card.image), label, new))
+        self._title_key = self._card_key(healed, "project")
+        self._title_files = self._title_files_sig(project)
+        return healed, new
+
     def _derived_words(self, profile):
         from ...plugins.stern import mode_write as MW
         return (self.DERIVED_UNPROVEN if MW.derived_not_run(profile)
@@ -2757,6 +2782,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._title_read = got
                 profile, why, note = self._profile_of_read(got, label)
                 origin = got.port_origin
+                if via == "project":
+                    card, label = self._heal_card_record(project, card, got, profile, label)
             else:
                 # a port already on this machine (shipped, or worked out earlier) is used at
                 # once; a read that runs meanwhile only adds what it finds

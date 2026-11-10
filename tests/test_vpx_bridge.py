@@ -3248,6 +3248,52 @@ def test_shadow_lamps_colour_dark_calls_and_the_tables_own_reads():
     assert "Sub PadUpdateLamps" in vs.patch(MINI_TRIBUTE, only_calls)[0]   # calls alone still get the loop
 
 
+# JP's Foo Fighters' SetLightColor (PAD-1101): Color and ColorFull the same
+FULL_COLOUR_SLC = """Sub SetLightColor(n, col, stat) 'stat 0 = off, 1 = on, 2 = blink
+    Select Case col
+        Case red
+            n.color = RGB(255, 0, 0)
+            n.colorfull = RGB(255, 0, 0)
+        Case orange
+            n.color = RGB(255, 64, 0)
+            n.colorfull = RGB(255, 64, 0)
+        Case green
+            n.color = RGB(0, 128, 0)
+            n.colorfull = RGB(0,128,0)
+    End Select
+    If stat <> -1 Then n.State = stat
+End Sub
+"""
+# the rest (JP's Jurassic Park, Deadpool, Rush...): a dim Color under a full ColorFull
+DIM_COLOUR_SLC = FULL_COLOUR_SLC.replace("n.color = RGB(255, 0, 0)", "n.color = RGB(18, 0, 0)").replace(
+    "n.color = RGB(255, 64, 0)", "n.color = RGB(18, 3, 0)").replace("n.color = RGB(0, 128, 0)", "n.color = RGB(0, 9, 0)")
+
+
+def test_shadow_rgb_insert_colour_follows_the_tables_own_set_light_color():
+    # PAD-1101: v1.388.7 gave Foo Fighters' arrows their colour, and with it a
+    # Color a 14th of ColorFull - the convention of most tributes. JP's Foo
+    # Fighters sets Color = ColorFull, so its lit arrows showed all but black
+    vs = pytest.importorskip("vpxshadow")
+    assert vs.full_colour_lights(FULL_COLOUR_SLC)
+    assert not vs.full_colour_lights(DIM_COLOUR_SLC)
+    assert not vs.full_colour_lights(MINI_TRIBUTE)                      # no SetLightColor: as before
+    assert not vs.full_colour_lights(FULL_COLOUR_SLC.split("Case green")[0] + "End Select\nEnd Sub\n")  # 2 pairs: too few
+    # Batman 66 / GotG: SetLightColor hands on to SetLightColorTimed, which sets them
+    timed = ("Sub SetLightColor(n, col, stat)\n\tSetLightColorTimed n, col, stat, 500\nEnd Sub\n"
+             + FULL_COLOUR_SLC.replace("Sub SetLightColor(n, col, stat)", "Sub SetLightColorTimed(n, col, stat, msec)"))
+    assert vs.full_colour_lights(timed)
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["lamps"] = {"_": "x", "L2": {"leds": [[8, 32], [8, 33], [8, 34]], "rgb": True, "name": "ARROW"}}
+    dim = r"PadDim = RGB((v And 255) \ 14, ((v \ 256) And 255) \ 14, ((v \ 65536) And 255) \ 14)"
+    out, rep = vs.patch(MINI_TRIBUTE + FULL_COLOUR_SLC, m)
+    assert "\tPadDim = v\n" in out and dim not in out
+    assert any("take their colour whole" in r for r in rep)
+    assert "If o.ColorFull <> v Then o.ColorFull = v : o.Color = PadDim(v)" in out
+    out, rep = vs.patch(MINI_TRIBUTE + DIM_COLOUR_SLC, m)
+    assert dim in out and "\tPadDim = v\n" not in out
+    assert not any("take their colour whole" in r for r in rep)
+
+
 def test_controller_reports_an_rgb_insert_in_its_colour():
     pc = pytest.importorskip("padcontroller")
     assert pc.rgb_value(255, 0, 0) == 0x0000FF                          # VBScript RGB(): red in the low byte

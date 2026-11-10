@@ -848,6 +848,30 @@ def gen_plunger(m, had):
             % (p["autoplunge"], "Fire" if p.get("auto_plunger") else "AutoFire")]
 
 
+_SET_LIGHT_COLOR = re.compile(r"(?ims)^[ \t]*(?:public[ \t]+|private[ \t]+)?sub[ \t]+SetLightColor(?:Timed)?\b.*?^[ \t]*end[ \t]+sub")
+_COLOUR_SET = re.compile(r"(?i)\.(color|colorfull)\s*=\s*RGB\s*\(([^)]*)\)")
+
+
+def full_colour_lights(script):
+    """True when the table's own SetLightColor gives a light the same Color
+    as its ColorFull (JP's Foo Fighters, PAD-1101), so a lit RGB insert's
+    colour goes on both. Most tributes set Color a dim tint of ColorFull
+    (RGB(18, 0, 0) beside RGB(255, 0, 0)), and PadDim copies that; on a table
+    built for equal colours that dim Color is the light's whole area, and its
+    lit arrows showed all but black. Needs most of at least three pairs."""
+    # SetLightColor, or the SetLightColorTimed it hands on to (Batman 66, GotG)
+    body = "".join(mo.group(0) for mo in _SET_LIGHT_COLOR.finditer(script or ""))
+    pairs, colour = [], None
+    for prop, args in _COLOUR_SET.findall(body):
+        args = re.sub(r"\s+", "", args)
+        if prop.lower() == "color":
+            colour = args
+        elif colour is not None:
+            pairs.append(colour == args)
+            colour = None
+    return len(pairs) >= 3 and sum(pairs) * 5 >= len(pairs) * 4
+
+
 def gen(m, had, quiet=None, dof=None):
     """The bridge's own script, appended after the original. `dof`: handler
     (`sw001_Hit`, `sol:3`) -> the table's DOF calls it must fire itself."""
@@ -1179,9 +1203,14 @@ def gen(m, had, quiet=None, dof=None):
                 "\t\to.State = v",
                 "\tEnd If",
                 "End Sub",
-                "Function PadDim(v)   ' the unlit tint, as the tributes' SetLightColor makes it",
-                "\tPadDim = RGB((v And 255) \\ 14, ((v \\ 256) And 255) \\ 14, ((v \\ 65536) And 255) \\ 14)",
-                "End Function",
+                "Function PadDim(v)   ' the light's Color beside ColorFull, as the table's SetLightColor makes it"]
+        if had.get("PadFullColour"):
+            # PAD-1101: JP's Foo Fighters sets Color = ColorFull; a Color a
+            # 14th as bright left its lit arrows all but black
+            out.append("\tPadDim = v")
+        else:
+            out.append("\tPadDim = RGB((v And 255) \\ 14, ((v \\ 256) And 255) \\ 14, ((v \\ 65536) And 255) \\ 14)")
+        out += ["End Function",
                 "Sub PadReassertLamps   ' the machine's last word on every mapped light, again",
                 "\tDim k, o",
                 "\tFor Each k In PadLampState.Keys",
@@ -1528,6 +1557,9 @@ def patch(script, m):
     route_b2s(lines, rep)
     had["PadLoadEM"] = early_b2s(lines, rep)
     own_lamp_reads(lines, rep)
+    had["PadFullColour"] = full_colour_lights(script)
+    if had["PadFullColour"]:
+        rep.append("lit RGB inserts take their colour whole (the script's SetLightColor sets Color = ColorFull)")
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
     for key, (progid, cls, label) in DMD_STUBS.items():
         if m.get(key):

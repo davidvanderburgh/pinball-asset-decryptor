@@ -698,6 +698,17 @@ class RawDeviceFile:
             finally:
                 self._io = None
 
+    def reopen(self):
+        """Swap in a fresh handle on the same device (PAD-1104: a read the
+        card or its reader failed is tried again on a new one).  The new
+        handle is opened BEFORE the old one is closed, so a card that has
+        gone away leaves this object as it was and the error is raised."""
+        fresh = _open_backend(self.path, self.writable)
+        old, self._io = self._io, fresh
+        if old is not None:
+            with contextlib.suppress(OSError):
+                old.close()
+
     def __enter__(self):
         return self
 
@@ -1228,6 +1239,10 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
         # or a genuinely unelevated run) as a FlashError so the dialog shows
         # the remedy instead of a helper traceback.
         raise FlashError(str(e)) from e
+    except OSError as e:
+        # The card or reader failing a write is not an 'Unexpected error'
+        # (PAD-1104): say what it is and what to do about it.
+        raise FlashError(_unwritable_card_text(e)) from e
     if progress is not None:
         progress(img_size, img_size, "Flash complete")
     if log is not None:
@@ -1242,6 +1257,17 @@ def flash_image_to_device(image_path, device_path, *, log=None, progress=None,
     if eject:
         _eject_device(device_path, log)
     return written
+
+
+def _unwritable_card_text(e, menu=False):
+    return (
+        "Writing %s failed: the card or its reader reported an error (%s). "
+        "%s Flash again with a different card reader, or a different card."
+        % ("the boot menu onto the card" if menu else "the card",
+           _card_error_detail(e),
+           "The games on the card are untouched, but its menu may be half "
+           "written: write it again before installing it." if menu else
+           "The card is incomplete: do NOT install it on the machine."))
 
 
 # Read-back verify chunk (bytes).  Large enough that the per-chunk overhead is
@@ -1381,8 +1407,10 @@ def read_device_to_image(device_path, image_path, *, log=None, progress=None,
         raise
     except OSError as e:
         _unlink_quiet(part_path)
-        raise FlashError("Reading the card failed at byte %s:\n%s"
-                         % (f"{read:,}", e)) from e
+        raise FlashError("Reading the card failed at byte %s: the card or "
+                         "its reader reported an error (%s). Re-seat the card "
+                         "(or its reader) and try again."
+                         % (f"{read:,}", _card_error_detail(e))) from e
 
     if read < dev_size:
         # The card stopped handing bytes back early — a short image would
@@ -1878,6 +1906,12 @@ def read_device_menu_to_image(device_path, image_path, *, log=None, progress=Non
     except PermissionError as e:
         _unlink_quiet(part_path)
         raise FlashError(str(e)) from e
+    except OSError as e:
+        _unlink_quiet(part_path)
+        raise FlashError("Reading the boot menu off the card failed after "
+                         "%s: the card or its reader reported an error (%s). "
+                         "Re-seat the card (or its reader) and try again."
+                         % (format_size(read), _card_error_detail(e))) from e
     except BaseException:
         _unlink_quiet(part_path)
         raise
@@ -1920,6 +1954,28 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
     if log is not None:
         log("Menu-only write: checking that this card was flashed from %s"
             % os.path.basename(image_path), "info")
+    try:
+        written = _flash_menu_plan(image_path, device_path, plan, log=log,
+                                   progress=progress, cancel=cancel)
+        if verify:
+            if on_verify_start is not None:
+                on_verify_start()
+            _verify_menu_readback(device_path, image_path, plan,
+                                  log=log, progress=progress, cancel=cancel)
+    except PermissionError as e:
+        raise FlashError(str(e)) from e
+    except OSError as e:
+        raise FlashError(_unwritable_card_text(e, menu=True)) from e
+    if log is not None:
+        log("Menu written: %s onto %s." % (format_size(written), device_path),
+            "success")
+    return written
+
+
+def _flash_menu_plan(image_path, device_path, plan, *, log=None,
+                     progress=None, cancel=None):
+    """The write half of :func:`flash_menu_to_device`: prove the card, then
+    put the plan's ranges on it.  Returns the bytes written."""
     written = 0
     with _disk_offline_for_write(device_path, log), \
             _locked_volumes(device_path, log):
@@ -1965,14 +2021,6 @@ def flash_menu_to_device(image_path, device_path, *, log=None, progress=None,
                                      "Writing the boot menu onto the card\u2026"
                                      + _rate_note(rate, written, total))
                 dev.flush()
-        if verify:
-            if on_verify_start is not None:
-                on_verify_start()
-            _verify_menu_readback(device_path, image_path, plan,
-                                  log=log, progress=progress, cancel=cancel)
-    if log is not None:
-        log("Menu written: %s onto %s." % (format_size(written), device_path),
-            "success")
     return written
 
 
@@ -2000,7 +2048,8 @@ def _verify_menu_readback(device_path, image_path, plan, *, log=None,
                 exp = src.read(min(_VERIFY_CHUNK, length - done))
                 if not exp:
                     break
-                got = dev._aligned_read(off + done, len(exp))
+                got = _read_back(dev, off + done, len(exp), total,
+                                 "the menu partition", shown_at=checked)
                 if got[:len(exp)] != exp:
                     raise FlashError(
                         "The card does not match the image at byte %s of the "
@@ -2014,6 +2063,66 @@ def _verify_menu_readback(device_path, image_path, plan, *, log=None,
                              + _rate_note(rate, checked, total))
     if log is not None:
         log("Menu verified: it matches the image byte-for-byte.", "success")
+
+
+#: A card read that fails is tried this many more times, each on a fresh
+#: handle after a short pause, before the card is given up on (PAD-1104).  A
+#: USB reader that hiccups once in a 16 GB read-back passes; a card that will
+#: not give the bytes back at all fails in a few seconds, with a message.
+_READ_RETRIES = 2
+_READ_RETRY_PAUSE_S = 1.0
+
+
+def _card_error_detail(e):
+    """What the card or reader said, in words a person can use.
+
+    Windows' C runtime has an errno for only a few dozen Win32 errors and
+    turns every other one - a bad sector, a CRC error, a reader that dropped
+    off the bus - into EINVAL, 'Invalid argument' (PAD-1104: a 16.58 GB
+    verify failed near its end and the app said just that)."""
+    if (sys.platform == "win32" and getattr(e, "errno", None) == 22
+            and not getattr(e, "winerror", None)):
+        return "an error Windows reports only as 'Invalid argument'"
+    return str(getattr(e, "strerror", None) or e)
+
+
+def _unreadable_card_text(at, total, err, what="the card"):
+    return (
+        "%s could not be read back at %s of %s: the card or its reader "
+        "reported an error (%s), %d tries running. The write cannot be "
+        "trusted, so do NOT install this card on the machine. This is the "
+        "card or the reader, not the image: flash again with a different "
+        "card reader, or a different card. A worn-out or counterfeit card "
+        "(one that claims more space than it really has, and writes very "
+        "slowly) fails like this partway through a big image."
+        % (what[:1].upper() + what[1:], format_size(at), format_size(total),
+           _card_error_detail(err), _READ_RETRIES + 1))
+
+
+def _read_back(dev, at, length, total, what="the card", shown_at=None):
+    """``dev._aligned_read(at, length)``, tried again on a fresh handle when
+    the card or reader fails it; :class:`FlashError` when every try fails.
+    The message says how far through *total* it got: *shown_at*, else
+    *at*."""
+    err = None
+    for attempt in range(_READ_RETRIES + 1):
+        if attempt:
+            time.sleep(_READ_RETRY_PAUSE_S)
+            try:
+                dev.reopen()
+            except PermissionError:
+                raise
+            except OSError as e:
+                err = e
+                continue
+        try:
+            return dev._aligned_read(at, length)
+        except PermissionError:
+            raise
+        except OSError as e:
+            err = e
+    raise FlashError(_unreadable_card_text(
+        at if shown_at is None else shown_at, total, err, what)) from err
 
 
 def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
@@ -2043,7 +2152,7 @@ def _verify_flash_readback(device_path, image_path, img_size, *, log=None,
                 break
             if overlay is not None:
                 exp = _apply_overlay(exp, checked, overlay)
-            got = dev._aligned_read(checked, len(exp))
+            got = _read_back(dev, checked, len(exp), img_size)
             if got != exp:
                 off = next((i for i in range(min(len(got), len(exp)))
                             if got[i] != exp[i]), min(len(got), len(exp)))

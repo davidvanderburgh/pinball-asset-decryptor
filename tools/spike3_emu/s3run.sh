@@ -98,6 +98,16 @@ for f in null zero urandom random tty; do
     mount --bind /dev/$f "$R/dev/$f"
 done
 ln -sf /proc/self/fd "$R/dev/fd" 2>/dev/null
+# /dev/i2c-10: the TAS57XX audio amp + cabinet EEPROM bus. On the machine it is a
+# real I2C controller; here the game only needs the bus to open and ACK, or its
+# amp thread exits and the game aborts at xifo.cpp:72 (PAD-1090). PAD_S3_I2C=<n>
+# names a host i2c-dev adapter (Linux's own i2c-stub, loaded on the host) to
+# surface inside the chroot as /dev/i2c-10 - major 89, minor = the host number.
+if [ -n "${PAD_S3_I2C:-}" ] && [ -e "/dev/i2c-${PAD_S3_I2C}" ]; then
+    rm -f "$R/dev/i2c-10"
+    mknod "$R/dev/i2c-10" c 89 "${PAD_S3_I2C}" 2>/dev/null \
+        && echo "[s3run] /dev/i2c-10 -> host i2c-${PAD_S3_I2C} (stub bus)"
+fi
 # /dump -> /connectivity/dump on the machine (S95game makes it)
 mkdir -p "$R/connectivity/dump/log"
 PRELOAD=""

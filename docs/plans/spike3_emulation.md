@@ -160,6 +160,50 @@ logged) - not written in this run. Then the first dumped frame, and the
 `[s3gl] first call` lines say which of the stubbed GLES3 calls Godot needs
 for real.
 
+## Stage 3 - the audio amp I2C bus (run 3: the crash is cleared)
+
+The abort above is only the *open* of `/dev/i2c-10` failing: the amp thread
+exits and leaves its XIFO queue NULL. So the bus has to exist. The clean,
+hardware-generic way is Linux's own **i2c-stub** test module (a dummy I2C
+adapter), not a hand-written bus model.
+
+It will not side-load into the stock WSL kernel: that kernel is Microsoft's
+exact GCC-11.2 / IBT / rethunk build, and its module loader rejects any module
+built against a reconstructed tree (`Invalid relocation target, existing value
+is nonzero for type 1`) - reproduced with both gcc-13 and gcc-11. So we build a
+**self-contained WSL kernel from the matching 6.6.87.2 source**:
+
+    ./scripts/config --set-str LOCALVERSION "-pad" -d LOCALVERSION_AUTO \
+                     -e I2C_CHARDEV -m I2C_STUB      # i2c-stub is `depends on m`
+    make -j olddefconfig && make -j bzImage          # -> arch/x86/boot/bzImage
+    # module built against THIS tree's own vmlinux.symvers (its CRCs, not the
+    # stock kernel's), with the SAME gcc as the bzImage, so it loads cleanly:
+    make -j -C $K M=~/.pad-s3/i2cstub modules
+
+Boot it via `.wslconfig` `kernel=C:\tmp\PAD-1090\bzImage-i2cstub`
+(`wsl --shutdown`), then `insmod i2c-stub.ko chip_addr=0x48,0x4c,0x4d,0x4e,0x50,
+0x51,0x52,0x53` -> `/dev/i2c-0` appears (i2c-dev built in). `s3run.sh`'s
+`PAD_S3_I2C=<n>` hook surfaces that host adapter as `/dev/i2c-10` in the chroot
+(mknod c 89 n).
+
+Measured on pokemon_le 0.82.0 (2026-11-09), kernel 6.6.87.2-pad: `/dev/i2c-10`
+now opens and **the game no longer aborts** - it runs the full cap instead of
+core-dumping at `xifo.cpp:72`. The amp thread survives. But it still stalls at
+the boot splash (uploads the UI atlases at frame 2, then no further presents),
+because the amp's register *writes* fail:
+
+    i2c: failed to write data: Inappropriate ioctl for device   (ENOTTY)
+    TAS57XX: failed to write oscillator trim: Inappropriate ioctl for device
+
+**Root cause: qemu-user (8.2.2) has no I2C ioctl translation.** The driver's
+`I2C_RDWR`/`I2C_SMBUS` transfers are nested-pointer ioctls upstream qemu-user
+never implemented, so qemu cannot marshal them to the host adapter at all - a
+perfect host bus would still never be reached. The next step is therefore an
+emulator-level one: teach qemu-user to translate the standard Linux i2c-dev
+ioctls (public `i2c-dev.h` structs, not game reverse-engineering) so the
+transfers reach the host i2c-stub (SMBus) or a null-ACK adapter (raw xfers).
+Only then does the amp init complete and the game advance past the splash.
+
 ## What is left for Spike 2 parity (next runs)
 
 1. **Toolchain**: an aarch64 cross gcc for the shims (only `arm-linux-gnueabihf`

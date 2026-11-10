@@ -899,6 +899,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
                           "look": self._coop_look(project, chars),                              # PAD-1079
+                          "intro": os.path.basename(_CP.intro_path(project, chars)) if project else "",   # PAD-1114
                           "videos": "" if prof is None or _CP.can_video(prof) else (
                               "%s cannot play a video behind its pick screen yet: a character's video is kept, and "
                               "its picture shows." % prof.label),
@@ -1062,6 +1063,31 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         _CP.save_look_default(project)
         hist = history_log.diff_scalar("modes  co-op pick look", "changed", "default")
         history_log.record(project, [hist] if hist else [])
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_intro(self, clear=False):
+        """PAD-1114: Intro video...: a video of the owner's, with its own sound, that opens each co-op and team game
+        (both flipper buttons skip it); *clear* takes it off."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        if clear:
+            _CP.save_intro(project, None)
+            self._say("co-op intro: none - co-op and team games start as the game's own do")
+        else:
+            path = self.window.ask_open("modes_file", "Choose the co-op and team games' intro video",
+                                        [("Videos", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_intro(project, path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op intro: %s opens each co-op and team game" % os.path.basename(path))
         self._publish_coop_chars(project)
         return True
 

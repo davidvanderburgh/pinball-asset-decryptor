@@ -772,6 +772,18 @@ def _switch_named(game_elf, pattern):
     return None
 
 
+def timed_plunger(game_elf):
+    """PAD-1114: the id of the game's TIMED PLUNGER adjustment (AD_TIMED_PLUNGER: "Autolaunches a ball in the Shooter
+    Lane after a specified amount of idle time"), or None. The runtime answers it 0 (off) while the co-op intro, the ball's
+    wait and the language window keep the ball in the lane: on Godzilla LE 1.16 (emulator) it launched the ball some 18 s
+    after it came, cutting the pick short."""
+    from .adjustments import AdjustmentTable
+    try:
+        return AdjustmentTable(game_elf).by_name.get("AD_TIMED_PLUNGER")
+    except Exception:                                   # noqa: BLE001 - a program the table cannot be read off
+        return None
+
+
 def action_button(game_elf):
     """The switch id of the Action button (the lockdown bar's: LOCKDOWN BUTTON, ACTION BUTTON) in the game program
     *game_elf* (bytes), or None."""
@@ -1107,11 +1119,10 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
     ``character <abilities> <name>|<what it does>`` for each character, an ability the card cannot have left out
     (``-``). None when *characters* has no pick or no characters."""
     chars = _characters(characters)
-    if not chars["pick"] or not chars["list"]:
+    picks = chars["pick"] and chars["list"]
+    if not picks and not chars.get("intro"):            # PAD-1114: an intro wants the buttons (its skip, the language)
         return []
-    parts = {p["key"]: p for p in powers(game_elf, sites=sites, values=values)}
-    wf = {k: p["words"] for k, p in parts.items() if p["cfg"]}
-    out = ["pick on", "pick_time %d" % chars["time"]]
+    out = ["pick on", "pick_time %d" % chars["time"]] if picks else []
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) == 2:
         out.append("left %d" % buttons[0])
@@ -1121,6 +1132,14 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
         lane = shooter_lane(game_elf)
         if lane is not None:
             out.append("lane %d" % lane)
+    if chars.get("intro"):
+        hold = timed_plunger(game_elf)
+        if hold is not None:
+            out.append("intro_hold %d" % hold)      # PAD-1114: no auto-launch while the intro holds the ball
+    if not picks:
+        return out
+    parts = {p["key"]: p for p in powers(game_elf, sites=sites, values=values)}
+    wf = {k: p["words"] for k, p in parts.items() if p["cfg"]}
     for c in chars["list"]:
         got = compose(c["powers"], parts)
         out.append("character %s %s|%s" % (got["cfg"] or "-", c["name"],

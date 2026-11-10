@@ -36,6 +36,7 @@ enum { COOP_AW_SCORE = 1 };                           /* PAD-1042: a team's poin
 struct coop_award { int kind; };
 static unsigned long long coop_award_now(const struct coop_award *a, unsigned p) { (void)a; (void)p; return 0; }
 static void coop_awards_end(unsigned n) { (void)n; }
+static void coop_users_put(unsigned g, unsigned p) { (void)g; (void)p; }   /* PAD-1108's login swap: test_pad1108 */
 static struct { int open; unsigned who; } pk;               /* PAD-1031: the characters' pick (test_pad1031_coop_characters.py) */
 static struct { int on; } coop_done;                       /* PAD-1044: the one taken, on the glass */
 static void coop_pick_say(void) {}

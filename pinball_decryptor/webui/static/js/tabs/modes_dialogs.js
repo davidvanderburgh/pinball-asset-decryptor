@@ -376,6 +376,14 @@ export function CoopCharsDialog({ s, onClose }) {
         title="The pick screen's look: its title, the color of each of its words, a background picture."
         onClick=${() => setLooking(!looking)}>Look…<//>
     </div>
+    <div class="row" style="margin-top:8px; gap:8px">
+      <${Button} size="sm" kind="ghost" icon="film" onClick=${() => call("modes.coop_intro", false)}
+        title=${ch.intro ? "The video that opens each co-op and team game: choose another." : "A video of your own, with its own sound, that opens each co-op and team game."}>
+        ${ch.intro ? "Intro video ✓" : "Intro video…"}<//>
+      ${ch.intro ? html`<${Button} size="xs" kind="ghost" icon="x" title="No intro: co-op and team games start as the game's own do."
+        onClick=${() => call("modes.coop_intro", true)} />` : null}
+      <span class="small dim wrap">${ch.intro ? `${ch.intro} opens each co-op and team game, with its own sound. Both flipper buttons skip it. Then the ball comes to the shooter lane, the flippers choose the language (when the game's Player Language Select is on), and the character pick opens.` : "Open each co-op and team game with a video of your own, with its own sound. Both flipper buttons skip it."}</span>
+    </div>
     ${looking && ch.look ? html`<${CoopLook} look=${ch.look} />` : null}
     ${ch.preview ? html`<div class="modes-coop-ch-pv">
       <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />

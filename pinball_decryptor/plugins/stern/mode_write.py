@@ -1254,6 +1254,61 @@ def coop_clips_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
     return out
 
 
+def coop_intro_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
+    """PAD-1114: the co-op and team games' intro video, made into a full-screen clip of the bank's size
+    (coop_play.intro_clip, the whole picture fitted in) and added to the bank scene the build has so far (the modes',
+    the characters' videos' or the stock one). Returns ``(clip name, ms)`` for coop.cfg's ``intro`` line, or None when
+    the project has no intro. Its sound is the sound build's (sound_modes "the co-op intro")."""
+    from . import clip_variants as CV
+    from . import coop_play as CP
+    from . import video_bank as VB
+    from ...core.video import detect_video_info
+    project = getattr(result, "project", "")
+    src = CP.intro_path(project) if project else ""
+    if not src:
+        return None
+    if not stock_bank:
+        raise ModeWriteError("the co-op intro video: the card's video bank was not read")
+    if not ffmpeg:
+        from ...core.audio import find_ffmpeg
+        ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise ModeWriteError("the co-op intro video needs ffmpeg, and none was found")
+    if progress is not None:
+        progress(0, 1, "Making the co-op intro video...")
+    bank_card = CV.bank_scene(result.profile)
+    bank_src = dict(result.replaced).get(bank_card, "")
+    if bank_src:
+        with open(bank_src, "rb") as f:
+            bank = f.read()
+    else:
+        bank = stock_bank
+    w, h = VB.clip_frame(stock_bank)
+    folder = os.path.join(scratch, "coop_clips")
+    os.makedirs(folder, exist_ok=True)
+    made = os.path.join(folder, "%s.mp4" % CP.INTRO_CLIP)
+    try:
+        CP.intro_clip(src, made, w, h, ffmpeg)
+    except CP.CoopError as e:
+        raise ModeWriteError(str(e)) from None
+    info = detect_video_info(made)
+    ms = int(round(float(getattr(info, "duration", 0) or 0) * 1000)) if info else 0
+    try:
+        bank, got = VB.add_clip(bank, CP.INTRO_CLIP, os.path.getsize(made))
+    except VB.VideoBankError as e:
+        raise ModeWriteError("the co-op intro video could not be added to the video bank (%s)" % e) from None
+    result.new.append((bank_card[:-len("scene.radium")] + "scene.assets/" + got["path"], made))
+    if not bank_src:
+        bank_src = os.path.join(scratch, "coop_tree", *bank_card.split("/"))
+        os.makedirs(os.path.dirname(bank_src), exist_ok=True)
+        result.replaced.append((bank_card, bank_src))
+    with open(bank_src, "wb") as f:
+        f.write(bank)
+    result.lines.append("co-op intro: %s (%.1f s) opens each co-op and team game; both flipper buttons skip it"
+                        % (os.path.basename(src), ms / 1000.0))
+    return CP.INTRO_CLIP, ms
+
+
 def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", stock_font=b"", stock_bank=b"",
               ffmpeg=None, progress=None):
     """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*, and (round 2) the
@@ -1295,6 +1350,9 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
                 text += "char_clip %d %s\n" % (n, name)             # PAD-1079: its video, behind its card
             if clips:
                 text += "clip_crop %s\n" % CLIP_CROP
+        intro = coop_intro_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)   # PAD-1114
+        if intro:
+            text += "intro %s %d\n" % intro
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)

@@ -8637,6 +8637,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                           desc_sites, assets_dir, audio_edits,
                                           sound_modes, sound_modes_prof,
                                           mode_own_used, log)
+                        if sound_modes.intro:
+                            # PAD-1114: the co-op intro's sound rides a
+                            # carrier of its own
+                            _intro_carrier(gr_path, img_path, params,
+                                           desc_sites, assets_dir, audio_edits,
+                                           sound_modes, sound_modes_prof,
+                                           mode_own_used, log)
                         # PAD-791: the records the game plays in a sequence,
                         # off its descriptors read whole (the play tables stop
                         # at 80 bytes; Iron Maiden's 974 plays idx 919 past
@@ -8688,6 +8695,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         _sm_key = [u for u in sound_mode_used
                                    if _SMo_is_attract(u["mode"])
                                    or _SMo_is_shot(u["mode"])
+                                   or _SMo_is_intro(u["mode"])
                                    or _SMo_is_juke(u["mode"])]
                         _sm_frags, _sm_sids, _sm_seqs = _sound_modes_for_banks(
                             gr_path, img_path, params, desc_sites,
@@ -9674,6 +9682,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _coop_hud = _coop_on and _CPS.wants_screens(assets_dir, _mprof)
                 # PAD-1079: the co-op characters' videos go into the video bank
                 _coop_clips = _coop_hud and bool(_CPS.clip_entries(assets_dir)) and _CPS.can_video(_mprof)
+                # PAD-1114: and the co-op games' intro video
+                _coop_clips = _coop_clips or (_coop_on and bool(_CPS.intro_path(assets_dir)))
                 for _rel in _MW.scene_rels(_mprof):
                     if not _rel or (not _modes_on and not (_coop_hud and _rel == _MW.scene_rels(_mprof)[0]) and (
                             not (_clips_on or _attract_on or _coop_clips) or _rel != _MW.scene_rels(_mprof)[1])):
@@ -9800,7 +9810,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 if _line.startswith("co-op play: "):         # PAD-1017: and co-op's, not "Random clips"
                     log("Co-op play: %s." % _line[len("co-op play: "):].rstrip("."), "info")
                     continue
-                if _line.startswith(("co-op awards ", "co-op characters")):   # PAD-1028's and PAD-1031's lines too
+                if _line.startswith(("co-op awards ", "co-op characters", "co-op intro")):   # PAD-1028/1031/1114 too
                     log("Co-op play: %s." % _line.rstrip("."), "info")
                     continue
                 if _line.startswith("inactivity pauses timers: "):   # PAD-1022: its own name too
@@ -10946,6 +10956,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     box = _JB.load(assets_dir)                 # PAD-685: the jukebox rides the same road
     if box.any:
         modes.jukebox = [s.audio for s in box.songs]
+    modes.intro = _coop_intro_wav(assets_dir, log)    # PAD-1114: and the co-op intro's sound
     if not modes.any:
         return None, None
     n = len(modes.files())
@@ -10990,7 +11001,8 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 log("Attract flipper sounds: %d file(s) for the flipper buttons in attract mode are "
                     "left out of this build: %s" % (len(modes.attract), a_why), "warning")
                 modes.attract = []
-                if not modes.count and not modes.turns and not modes.jukebox and not modes.shots:
+                if not modes.count and not modes.turns and not modes.jukebox and not modes.shots \
+                        and not modes.intro:
                     return None, None
         if modes.shots:
             # PAD-945: the sounds on the shots of the game's modes: the switch drain, a carrier
@@ -11000,10 +11012,20 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                 log("Sounds on shots: %d sound(s) on the shots of the game's modes are left out "
                     "of this build: %s" % (len(modes.shots), s_why), "warning")
                 modes.shots = []
-                if not modes.count and not modes.turns and not modes.jukebox and not modes.attract:
+                if not modes.count and not modes.turns and not modes.jukebox and not modes.attract \
+                        and not modes.intro:
+                    return None, None
+        if modes.intro:
+            # PAD-1114: the co-op intro's sound: the record lookup and a carrier, as the files in turn
+            i_why = _SMo.title_refusal(prof, turns=True)
+            if i_why:
+                log("Co-op intro: its sound is left out of this build (the intro plays without it): %s"
+                    % i_why.rstrip("."), "warning")
+                modes.intro = ""
+                if not modes.any:
                     return None, None
         why = _SMo.title_refusal(prof) if modes.count else ""
-        if why and (modes.attract or modes.shots) and not modes.turns:
+        if why and (modes.attract or modes.shots or modes.intro) and not modes.turns:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
                 % (len(modes.files()), why.rstrip(".")), "warning")
             modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
@@ -11015,7 +11037,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
             modes.slots, modes.names, modes.mode_turns, why = {}, [], {}, ""
         elif not why and modes.turns:
             why = _SMo.title_refusal(prof, turns=True)
-            if why and (modes.attract or modes.shots):
+            if why and (modes.attract or modes.shots or modes.intro):
                 log("Sounds in turn: %d file(s) the game would play in turn are left out of this "
                     "build: %s." % (sum(map(len, modes.turns.values())), why.rstrip(".")), "warning")
                 modes.slots, modes.names, modes.turns, why = {}, [], {}, ""
@@ -11030,6 +11052,9 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         elif modes.shots and not modes.count and not modes.turns:
             log("Sounds on shots: %d sound(s) on the shots of the game's modes are left out of "
                 "this build: %s." % (len(modes.shots), why.rstrip(".")), "warning")
+        elif modes.intro and not modes.count and not modes.turns:
+            log("Co-op intro: its sound is left out of this build (the intro plays without it): %s."
+                % why.rstrip("."), "warning")
         elif modes.count:
             log("Music modes: %d file(s) for the other music modes are left out of this build: %s."
                 % (n, why.rstrip(".")), "warning")
@@ -11058,6 +11083,8 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
         log("Found %d sound(s) for the flipper buttons in attract mode." % len(modes.attract), "info")
     if modes.shots:
         log("Found %d sound(s) on the shots of the game's modes." % len(modes.shots), "info")
+    if modes.intro:
+        log("Found the co-op intro's sound.", "info")
     if modes.jukebox:
         log("Found a jukebox of %d song(s) (%d with an intro video of its own) for the game's %d "
             "musics in %d pool(s)." % (len(modes.jukebox), sum(1 for s in box.songs if s.video),
@@ -11831,7 +11858,7 @@ def _sound_modes_grow(assets_dir, params, audio_edits, grows, modes, log, longer
                     who, ", ".join(map(str, sorted(bodies))), "s" if len(bodies) == 1 else "", what,
                     when), "info")
         if (not longer_ok or (_SMo.is_turn(mode) and not _SMo.is_attract(mode)
-                               and not _SMo.is_shot(mode))) and want > room \
+                               and not _SMo.is_shot(mode) and not _SMo.is_intro(mode))) and want > room \
                 and not _SMo.is_juke(mode):
             # as a replacement is when the bank can't grow (direct-SD, PAD_STERN_AUDIO_GROW=0); a file
             # in turn always (PAD-565: the game plays it for as long as its slot's descriptor says).
@@ -12208,7 +12235,8 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     from .adjustments import AdjustmentTable
     who = ("Music modes" if modes.count else "Sounds in turn" if modes.turns
            else "Attract flipper sounds" if modes.attract
-           else "Sounds on shots" if modes.shots else "Jukebox")
+           else "Sounds on shots" if modes.shots
+           else "Co-op intro" if modes.intro and not modes.jukebox else "Jukebox")
     live = 0
     banked = [u for u in used if u.get("bank") is not None]
     used = [u for u in used if u.get("bank") is None]
@@ -12218,6 +12246,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     attract = _attract_lines(params, [u for u in used if _SMo.is_attract(u["mode"])],
                              modes, log)
     shots = _shot_lines(params, [u for u in used if _SMo.is_shot(u["mode"])], modes, log)
+    intro = _intro_lines(params, [u for u in used if _SMo.is_intro(u["mode"])], modes, log)   # PAD-1114
     # PAD-638: a music mode's own files in turn are turned at that mode file's record (one in
     # image.bin: a mode file in a sound bank is played by a bank sound id, never its key)
     mode_hosts = {(u["rel"], int(u["mode"])): int(u["host"]) for u in used
@@ -12228,6 +12257,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     turns = _turn_key_lines(params, [u for u in used if _SMo.is_turn(u["mode"])
                                      and not _SMo.is_attract(u["mode"])
                                      and not _SMo.is_shot(u["mode"])
+                                     and not _SMo.is_intro(u["mode"])
                                      and not _SMo.is_juke(u["mode"])], log,
                             mode_hosts=mode_hosts)
     jukebox = _jukebox_lines(params, [u for u in used + banked if _SMo.is_juke(u["mode"])],
@@ -12247,10 +12277,11 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     if modes.count and not sounds and not bsids:
         log("Music modes: none of the files for the other modes can be played on this card, so "
             "MUSIC MODE is not added.", "warning")
-        if not turns and not tsids and not jukebox and not attract and not shots:
+        if not turns and not tsids and not jukebox and not attract and not shots and not intro:
             return ""
         modes.slots, modes.names = {}, []
-    if not sounds and not turns and not bsids and not tsids and not attract and not jukebox and not shots:
+    if not sounds and not turns and not bsids and not tsids and not attract and not jukebox and not shots \
+            and not intro:
         log("%s: none of the files can be played on this card; every sound plays its "
             "own." % ("Sounds in turn" if modes.turns or not (modes.attract or modes.shots)
                       else "Attract flipper sounds" if modes.attract else "Sounds on shots"), "warning")
@@ -12259,7 +12290,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     byidx = {p["idx"]: p for p in params}
     randoms = sorted({bytes(byidx[int(u["slot"])]["findkey"]) for u in used + banked
                       if _SMo.is_turn(u["mode"]) and not _SMo.is_mode_turn(u["mode"])
-                      and not _SMo.is_shot(u["mode"])
+                      and not _SMo.is_shot(u["mode"]) and not _SMo.is_intro(u["mode"])
                       and u.get("lines") and u["rel"] in modes.random
                       and (byidx.get(int(u["slot"])) or {}).get("findkey")})
     for u in used:                            # PAD-638: a music mode's own, by its file's record
@@ -12278,7 +12309,8 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
         f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
                               turns=turns, bsids=bsids, tsids=tsids, randoms=randoms, attract=attract,
-                              jukebox=jukebox, shots=shots, record=_SMo.card_record(modes, used + banked)))
+                              jukebox=jukebox, shots=shots, intro=intro,
+                              record=_SMo.card_record(modes, used + banked)))
     return path
 
 
@@ -12523,6 +12555,89 @@ def _shot_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, mod
         "idx %d, %s): %s." % (n, request, slot, whose, "; ".join(
             "%s in %s" % (r["switch_name"], r["mode_name"]) for r in modes.shots)), "info")
     return None
+
+
+def _intro_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, modes, prof,
+                   mode_own_used, log):
+    """PAD-1114: the carrier the co-op intro's sound rides (*modes*.intro), a request the game never plays
+    (:func:`_free_carrier`), not the attract flipper sounds' nor the shot sounds'. Sets ``modes.intro_rel`` and
+    ``modes.intro_plan`` ``{"request", "slot"}``; with none, logs why and empties ``modes.intro`` (the intro plays
+    without a sound of its own)."""
+    skip = [plan["slot"] for plan in (modes.attract_plan if modes.attract else None,
+                                      modes.shot_plan if modes.shots else None) if plan]
+    request, slot, rel, whose, why = _free_carrier(gr_path, img_path, params, sites, assets_dir,
+                                                   audio_edits, modes, prof, mode_own_used, skip=skip)
+    if request is None:
+        log("Co-op intro: its sound is left out of this build (the intro plays without it): %s." % why, "warning")
+        modes.intro, modes.intro_rel, modes.intro_plan = "", "", {}
+        return None
+    modes.intro_rel = rel
+    modes.intro_plan = {"request": request, "slot": slot}
+    log("Co-op intro: its sound rides request %d (sound idx %d, %s)." % (request, slot, whose), "info")
+    return None
+
+
+def _intro_lines(params, used, modes, log):
+    """PAD-1114: the ``sounds.cfg`` entry of the co-op intro's sound (*used*, its entry off the grow) for
+    :func:`.sound_modes.cfg_text`: ``{"request", "key" (the carrier's own record key), "host" (the sound's), "ms"}``,
+    or ``None`` when it did not land."""
+    plan = getattr(modes, "intro_plan", None) or {}
+    if not used or not plan:
+        return None
+    byidx = {p["idx"]: p for p in params}
+    u = used[0]
+    sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
+    if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
+        log("Co-op intro: its sound is left out: its record did not come out of the grown bank.", "warning")
+        return None
+    u["lines"] = 1
+    return {"request": int(plan["request"]), "key": bytes(sp["findkey"]), "host": bytes(hp["findkey"]),
+            "ms": int(-(-int(u["frames"]) * 1000 // 44100))}
+
+
+def _coop_intro_wav(assets_dir, log):
+    """PAD-1114: the co-op intro video's own sound as a WAV in the project's write cache (made again when the video
+    is newer), or ``""`` when co-op is off, there is no intro, it has no sound, or ffmpeg cannot take it out."""
+    from . import coop_play as _CP
+    from . import sound_modes as _SMo
+    try:
+        src = _CP.intro_path(assets_dir) if _CP.load(assets_dir) else ""
+    except Exception:  # noqa: BLE001 - an unreadable sidecar: no intro
+        src = ""
+    if not src:
+        return ""
+    from ...core.audio import find_ffmpeg
+    ff = find_ffmpeg()
+    if not ff:
+        log("Co-op intro: its sound is left out of this build: ffmpeg was not found.", "warning")
+        return ""
+    folder = os.path.join(assets_dir, _SMo.CACHE_DIR)
+    try:
+        st = os.stat(src)
+        # named for the video as it is and never written again: the build reads the sound set several times, and the
+        # slot conversion's cache key holds this file's own time - a WAV rewritten between them was asked for under a
+        # key never made (emulator build: FileNotFoundError on the conversion)
+        out = os.path.join(folder, "coop_intro_%s.wav" % hashlib.md5(
+            ("%s|%d|%d" % (os.path.abspath(src), st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:12])
+        os.makedirs(folder, exist_ok=True)
+        if os.path.isfile(out) and os.path.getsize(out) > 44:
+            return out
+        for f in os.listdir(folder):                    # an older intro's
+            if f.startswith("coop_intro_") and f.endswith(".wav"):
+                try:
+                    os.remove(os.path.join(folder, f))
+                except OSError:
+                    pass
+        got = _CP.intro_audio(src, out + ".part.wav", ff)
+        if got:
+            os.replace(got, out)
+            got = out
+    except (OSError, _CP.CoopError) as e:
+        log("Co-op intro: its sound is left out of this build: %s." % e, "warning")
+        return ""
+    if not got:
+        log("Co-op intro: %s has no sound, so the intro plays silent." % os.path.basename(src), "info")
+    return got
 
 
 def _attract_quiet_wav(log):
@@ -20995,6 +21110,12 @@ def _SMo_is_shot(mode):
     """PAD-945: a sound on a shot stays in image.bin: the runtime swaps its record's key in."""
     from . import sound_modes as _SMo
     return _SMo.is_shot(mode)
+
+
+def _SMo_is_intro(mode):
+    """PAD-1114: the co-op intro's sound stays in image.bin: the runtime swaps its record's key in."""
+    from . import sound_modes as _SMo
+    return _SMo.is_intro(mode)
 
 
 def _SMo_is_juke(mode):

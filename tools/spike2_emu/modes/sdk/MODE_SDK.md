@@ -6381,6 +6381,24 @@ PICKED) the runtime loops its clip as the backdrop, behind the HUD in the city's
 when the card goes. The app makes the clip the bank's size with the owner's video where the window is on the glass, on
 black, so the backdrop stretched over the glass puts the video in the frame.
 
+PAD-1114: the co-op and team games' intro (the dialog's **Intro video...**), with or without characters:
+
+    intro PadCoopIntro 12000                  the intro's clip (a full-screen clip the build added) and its length
+                                              in ms; sounds.cfg `cintro <request> <carrier key> <its key> <ms>` is
+                                              its sound, on a carrier the game never plays (as PAD-945's shot sounds)
+
+A game that begins as co-op or team (the right flipper held at Start, the start menu's CO-OP PLAY / TEAM PLAY, a
+team game's filling Start, a teammate joining before ball 1 is out) plays it once: full-screen over the game's own
+start film (`pm_clip`; asked for again once if the game's film takes the surface in its first 1.5 s), its sound on
+the carrier with the game's own sounds faded under it (its music asked for again after). Both flipper buttons down
+together, each let go once since it began, skip it. From then until the pick the flippers and Action are the
+runtime's (the game's language keys and launch do not see them), so the ball waits in the shooter lane
+(`ball_launch_flag`, 20 s at most); then, where the game's PLAYER LANGUAGE SELECT is on (`value language_adjustment`, read
+as the intro begins; Godzilla's 14 puts its own bar over its start film, under the intro), a language window: the
+top line says `LANGUAGE: ENGLISH`, each flipper press flips every player's language word (`data language_player`, +
+4 x player; `text language_<n>` names them), Action (or 10 s with no press) goes on; then the first pick, held back
+until here. Godzilla's own bar over its start film is under the intro, so this window is where the language is chosen.
+
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 
 - `adj:<id>=<v>` / `adj:<id>x<pct>:<lo>:<hi>`: the game's adjustment `<id>` reads `v`, or its own value x pct / 100

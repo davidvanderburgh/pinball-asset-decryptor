@@ -1,12 +1,12 @@
-"""PAD-1114 proof shots: the Modes tab's co-op row on a Godzilla LE 1.16 project with co-op on and Godzilla's
-characters loaded, before and after co-op and team games got an intro video of the owner's (Intro video...).
+"""PAD-1114 proof shots: the Co-op characters dialog with Godzilla's set loaded, before and after co-op and team games
+got an intro video of the owner's (the dialog's Intro video... row).
 
     python scripts/shot_pad1114.py <repo> <out_dir> <before|after> <pictures folder> [<intro video>]
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card, opens the
-Modes tab, ticks Co-op play (switched in the service menu), loads Godzilla's set and the pictures named after its
-characters. After: gives co-op and team games <intro video> as their intro. Writes <out_dir>/<kind>_coop_row.png (the
-co-op part of the Modes tab's list footer).
+Modes tab's Co-op characters dialog, loads Godzilla's set and the pictures named after its characters (the same steps
+as scripts/shot_pad1079.py's before shot). After: gives co-op and team games <intro video> as their intro. Writes
+<out_dir>/<kind>_characters_dialog.png.
 
 Needs Playwright (the user site-packages one), the installed Edge and the card in D:\\Pinball\\images\\Stern\\spike2.
 """
@@ -64,36 +64,27 @@ def main():
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1500, "height": 1100})
+            page = browser.new_page(viewport={"width": 1500, "height": 1900})
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             time.sleep(2)
             webui_shot.api(url, "ui.select_tab", "modes")
             time.sleep(6)
             webui_shot.api(url, "modes.set_coop", True)
-            webui_shot.api(url, "modes.set_coop_menu", True)
-            time.sleep(2)
+            time.sleep(3)
+            page.get_by_role("button", name="Characters…").dispatch_event("click")
+            page.wait_for_selector("text=Co-op characters", timeout=180000)
             webui_shot.api(url, "modes.coop_chars_preset")
+            page.wait_for_selector(".modes-coop-ch-row", timeout=180000)
             print("pictures from", folder, CP.pictures_from_folder(project, folder), flush=True)
             if kind == "after" and video:
                 CP.save_intro(project, video)
-            webui_shot.api(url, "modes.coop_chars_refresh")
-            # the row republishes on the next project read: reselect the tab
-            webui_shot.api(url, "ui.select_tab", "audio")
-            time.sleep(2)
-            webui_shot.api(url, "ui.select_tab", "modes")
+            webui_shot.api(url, "modes.coop_chars_show", 0)
             time.sleep(5)
-            page.mouse.move(5, 1090)
-            time.sleep(1)
-            row = page.locator(".modes-coop").first
-            row.scroll_into_view_if_needed()
-            time.sleep(1)
-            box = row.bounding_box()
-            pad = 12
-            page.screenshot(path=os.path.join(out_dir, "%s_coop_row.png" % kind),
-                            clip={"x": max(0, box["x"] - pad), "y": max(0, box["y"] - pad),
-                                  "width": box["width"] + 2 * pad, "height": box["height"] + 2 * pad})
-            page.screenshot(path=os.path.join(out_dir, "%s_modes_tab.png" % kind))
+            print("intro", CP.load_characters(project).get("intro"), flush=True)
+            page.mouse.move(5, 1890)
+            time.sleep(2)
+            page.screenshot(path=os.path.join(out_dir, "%s_characters_dialog.png" % kind))
             browser.close()
         print("shots in", out_dir, flush=True)
     finally:

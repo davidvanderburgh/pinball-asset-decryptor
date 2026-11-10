@@ -8183,6 +8183,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1041: Prolonged Competition on the start menu - comp.cfg beside the runtime (the modes' delivery)
     comp_prof = _comp_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _comp_on = comp_prof is not None
+    # PAD-1115: a game screen that shows a replaced clip for a fixed time lasts as long as the clip - stime lines in
+    # clips.cfg beside the runtime (the modes' delivery)
+    stime_lines, stime_prof = _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_device, log,
+                                                      cancel, **_mode_gate_kw)
+    _stime_on = bool(stime_lines)
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -9645,10 +9650,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Inactivity pauses timers" if _idle_on
                 else "Handicaps" if _hand_on
                 else "Expression lights" if _cabs_on
-                else "Prolonged Competition")
+                else "Prolonged Competition" if _comp_on
+                else "Screen times")
         _who_hud = _who
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on or _comp_on):
+                or _hand_on or _cabs_on or _comp_on or _stime_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -9661,7 +9667,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _coop_on else "Adding inactivity pausing the timers..."
                          if _idle_on else "Adding the handicaps..."
                          if _hand_on else "Adding the expression light shows..."
-                         if _cabs_on else "Adding Prolonged Competition...")
+                         if _cabs_on else "Adding Prolonged Competition..."
+                         if _comp_on else "Adding the screen times...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -9673,7 +9680,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
                     _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
-                              or idle_prof or hand_prof or cabs_prof or comp_prof)
+                              or idle_prof or hand_prof or cabs_prof or comp_prof or stime_prof)
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -9747,6 +9754,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     cabs=cabs_shows if _cabs_on else None, cabs_prof=cabs_prof,   # PAD-1040
                     cabs_sids=_cabs_sids,
                     comp=_comp_on, comp_prof=comp_prof,               # PAD-1041
+                    screen_times=stime_lines, screen_prof=stime_prof,  # PAD-1115
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -9817,6 +9825,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     log("Inactivity pauses timers: %s." % _line[len("inactivity pauses timers: "):].rstrip("."),
                         "info")
                     continue
+                if _line.startswith("screen times: "):   # PAD-1115: _screen_times_for_build said each one already
+                    continue
                 if _line.startswith("prolonged competition: "):   # PAD-1041: its own name too
                     log("Prolonged Competition: %s." % _line[len("prolonged competition: "):].rstrip("."), "info")
                     continue
@@ -9838,7 +9848,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               else "adding co-op play" if _coop_on
                               else "adding inactivity pausing the timers" if _idle_on
                               else "adding the handicaps" if _hand_on
-                              else "adding Prolonged Competition"), t0)
+                              else "adding the expression light shows" if _cabs_on
+                              else "adding Prolonged Competition" if _comp_on
+                              else "adding the screen times"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
         # modes just rewrote when they did.  The program part already landed
@@ -11305,6 +11317,75 @@ def _cab_sids_for_build(disk_f, parts, work, log, gr_path, img_path, shows):
             "warning")
         return {}
     return {slot: _CS.sids_for_slot(plays, slot) for slot in slots}
+
+
+def _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_device, log, cancel,
+                            ext4_available=None):
+    """PAD-1115: ``(stime lines, title)`` - the game's screens that show a clip of this build's replaced ones for a
+    fixed time, made to last as long as the clip (:mod:`.screen_time`); ``([], None)`` when there are none or they are
+    left out (one warning says why). The modes' gate, as the random clips': an image file, a host that can add files
+    to it, a title the runtime has a port for."""
+    from . import screen_time as _ST
+    if not video_edits or not _ST.enabled():
+        return [], None
+    try:
+        readers = _open_readers(disk_f, parts)
+        elf = b""
+        if readers:
+            _path, _node = _game_program_path(readers[0][1], cancel)
+            if _node is not None:
+                elf = bytes(readers[0][1].read_file_bytes(_node))
+        found = _ST.by_clip(_ST.screens(elf)) if elf else {}
+    except Exception as e:                                    # noqa: BLE001 - the screens keep the game's times
+        log("Screen times: the game program could not be read (%s); its screens keep their own times." % e,
+            "warning")
+        return [], None
+    if not found:
+        return [], None
+    from ...core.video import detect_video_info
+    lengths = {}
+    for fname, _card, staged in video_edits:
+        name = os.path.splitext(os.path.basename(fname))[0]
+        if name not in found:
+            continue
+        try:
+            info = detect_video_info(staged)
+        except Exception:                                     # noqa: BLE001 - unmeasured: left as it is
+            info = None
+        if info is not None and getattr(info, "duration", 0) > 0:
+            lengths[name] = float(info.duration)
+    lines = _ST.cfg_lines([s for v in found.values() for s in v], lengths)
+    if not lines:
+        return [], None
+    from . import clip_variants as _CV
+    from . import mode_write as _MW
+    if dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry them"
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _CV.project_title(assets_dir, probe=True)
+        if prof is None:
+            why = _CV.NO_TITLE
+    names = sorted({line.split("\t")[5] for line in lines})
+    if why:
+        log("Screen times: %d screen(s) showing a replaced clip (%s) keep the game's own time, so the clip freezes "
+            "on its last frame or is cut there: %s." % (len(lines), ", ".join(names), why.rstrip(".")), "warning")
+        return [], None
+    for line in lines:
+        cols = line.split("\t")
+        own = next((s.seconds for s in found[cols[5]] if s.slot == int(cols[2], 16)), 0.0)
+        log("Screen times: the screen showing %s lasts %.2f s, its clip's length (the game's own time is %.2f s)."
+            % (cols[5], int(cols[4]) / 1000.0, own), "info")
+    return lines, prof
 
 
 def _idle_for_build(assets_dir, dest_is_device, log, ext4_available=None):

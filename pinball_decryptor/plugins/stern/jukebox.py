@@ -291,6 +291,40 @@ def pool_intro(prof, key):
     return ""
 
 
+def record_pools(prof):
+    """PAD-1106: ``{record idx: pool key}``: each sound-bank record of the title's musics, the pool whose
+    songs the game plays in its place."""
+    return {int(idx): m.pool for m in song_modes(prof) for idx in m.records}
+
+
+def slot_pools(project, rels, probe=True):
+    """PAD-1106: ``{rel: pool key}`` for the Audio tab's slots in *rels* that are a jukebox music's record
+    (the Replacement pane plays one of that pool's songs, drawn as the game draws them); ``{}`` on a game
+    with no jukebox. *probe* as :func:`offer`."""
+    from . import sound_modes as SM
+    pools_of = record_pools(project_title(project, probe=probe))
+    if not pools_of:
+        return {}
+    out = {}
+    for rel in rels or ():
+        idx = SM.slot_idx(rel)
+        if idx in pools_of:
+            out[rel] = pools_of[idx]
+    return out
+
+
+def draw(songs, recent=()):
+    """PAD-1106: one of *songs* (``[(key, weight)]``) drawn as the runtime draws a song (pad_mode_runtime.c
+    the jukebox): by weight (a Common song three times as often as a Rare one), none of the keys in *recent*
+    while another is left; None when *songs* is empty."""
+    import random
+    songs = [(k, clean_weight(w)) for k, w in songs]
+    fresh = [s for s in songs if s[0] not in set(recent)] or songs
+    if not fresh:
+        return None
+    return random.choices([k for k, _w in fresh], weights=[w for _k, w in fresh])[0]
+
+
 def title_refusal(prof):
     """Why *prof*'s card cannot have a jukebox, or ``""``."""
     if prof is None:

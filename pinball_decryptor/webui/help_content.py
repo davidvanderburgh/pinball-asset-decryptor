@@ -280,6 +280,10 @@ HELP_CONTENT = {
          "- The rest of a song mode's screens (its level clips, its Champion name) stay as "
          "they are: make them the same for every song on the Video and Text tabs.\n"
          "- An extract of a card built with a jukebox brings it back.\n"
+         "- In the Audio list, the game's own music a pool plays songs in place of (Drive My "
+         "Car, Taxman...) says **Jukebox: 1 of N songs at random**. Its **Play** under "
+         "Replacement plays one of that pool's songs, drawn as the game draws them; after "
+         "**Stop**, or once it has played to its end, the next **Play** draws another.\n"
          "- Drag the window's title bar to move it and its bottom-right corner to resize it. "
          "It opens where you left it; a double-click on the title bar puts it back.\n"
          "- Needs an image build, not a direct SD write."),

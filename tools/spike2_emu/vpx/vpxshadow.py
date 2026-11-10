@@ -1202,7 +1202,30 @@ def gen(m, had, quiet=None, dof=None):
                 b0 += " : %s_UnHit_orig" % name
             else:
                 b0 += fx(name + "_UnHit")
-            if helpers:
+            if s.get("knock"):
+                # PAD-1121: a ball held in the trigger (Munsters' Herman magnet) is
+                # knocked off the opto by the next ball on the real machine; the
+                # table's magnet grabs that ball too and nothing comes loose. So a
+                # ball arriving while another sits in the trigger and `knock` (a
+                # VBScript condition: the magnet is on) holds opens the switch, and
+                # it stays open until the trigger is empty. The trigger counts its
+                # balls, so one leaving another inside does not open it either.
+                n, k = "PadIn_" + name, "PadKnocked_" + name
+                g = [guard] if helpers else []
+                out += (["Dim %s, %s" % (n, k), "Sub %s_Hit" % name] + g
+                        + ["\t%s = %s + 1" % (n, n),
+                           "\tIf %s > 1 Then" % n,
+                           "\t\tIf %s Then %s = True" % (s["knock"], k),
+                           "\tEnd If",
+                           "\tController.Switch(%d) = Not CBool(%s)" % (sid, k)]
+                        + ["\t" + x for x in b1.split(" : ", 1)[1:]]
+                        + ["End Sub", "Sub %s_UnHit" % name] + g
+                        + ["\t%s = %s - 1" % (n, n),
+                           "\tIf %s <= 0 Then %s = 0 : %s = False" % (n, n, k),
+                           "\tController.Switch(%d) = (%s > 0) And Not CBool(%s)" % (sid, n, k)]
+                        + ["\t" + x for x in b0.split(" : ", 1)[1:]]
+                        + ["End Sub"])
+            elif helpers:
                 out += ["Sub %s_Hit" % name, guard, "\t" + b1, "End Sub",
                         "Sub %s_UnHit" % name, guard, "\t" + b0, "End Sub"]
             else:

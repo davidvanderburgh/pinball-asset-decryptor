@@ -1239,12 +1239,80 @@ def test_munsters_herman_opto_stays_closed_under_the_magnet():
                         "\t\tPlaySoundAt SoundFXDOF(\"fx_bumper\", 109, DOFPulse, DOFContactors), ActiveBall",
                         "\tEnd If", "End Sub"])
     gen, _ = vs.patch(script, m)
-    assert "Sub sw45_Hit : Controller.Switch(1082) = True : End Sub" in gen
-    assert "Sub sw45_UnHit : Controller.Switch(1082) = False : End Sub" in gen
+    # held while a ball sits in it (PAD-1121 counts the balls: see below)
+    assert "Sub sw45_Hit\n\tPadIn_sw45 = PadIn_sw45 + 1" in gen
+    assert "\tController.Switch(1082) = Not CBool(PadKnocked_sw45)\nEnd Sub" in gen
+    assert "Sub sw45_UnHit\n\tPadIn_sw45 = PadIn_sw45 - 1" in gen
     assert ("Sub Bumper001_Hit : vpmTimer.PulseSw 1086 : PadDOF 109, DOFPulse, DOFContactors : End Sub") in gen
     for r in m["repatch"]:
         if r["since"].startswith("PAD-1117"):
             assert r["old"] not in gen
+
+
+def _munsters_herman(vs):
+    m = json.load(open(os.path.join(VPX, "munsters_pro.shadow.json"), encoding="utf-8"))
+    script = "\n".join(["Dim mHMagnet", "Sub sw45_Hit", "\tHermanShake", "End Sub",
+                        "Sub HMagnet_Hit", "\tIf mHMagnet.MagnetOn=true then", "\t\tDOF 135, DOFOn",
+                        "\tEnd If", "End Sub"])
+    gen, _ = vs.patch(script, m)
+    return m, gen
+
+
+def test_munsters_second_ball_knocks_hermans_ball_loose():
+    # PAD-1121: HERMAN HURRY UP says HIT THE BALL - the next ball knocks the
+    # held one off the opto and the game drops the magnet and starts Herman
+    # Multiball at once (emulator). The table's magnet grabs that ball too, so
+    # the opto opens when a second ball arrives while the magnet is on; and the
+    # magnet coil turning off ends the shaker HMagnet_Hit started (DOF 135).
+    vs = pytest.importorskip("vpxshadow")
+    m, gen = _munsters_herman(vs)
+    assert m["switches"]["sw45"]["knock"] == "mHMagnet.MagnetOn"
+    assert "Dim PadIn_sw45, PadKnocked_sw45" in gen
+    assert "\t\tIf mHMagnet.MagnetOn Then PadKnocked_sw45 = True" in gen
+    assert "\tController.Switch(1082) = (PadIn_sw45 > 0) And Not CBool(PadKnocked_sw45)" in gen
+    assert "\tmHMagnet.MagnetOn = e\n" in gen and "\tIf Not CBool(e) Then DOF 135, DOFOff\n" in gen
+    marks = {r["old"] for r in m["repatch"] if r["since"].startswith("PAD-1121")}
+    assert marks == {"Sub sw45_Hit : Controller.Switch(1082) = True : End Sub"}
+    assert not any(k in gen for k in marks)
+
+
+def test_hold_without_knock_is_unchanged():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "munsters_pro.shadow.json"), encoding="utf-8"))
+    del m["switches"]["sw45"]["knock"]
+    gen, _ = vs.patch("Sub sw45_Hit\n\tHermanShake\nEnd Sub", m)
+    assert "Sub sw45_Hit : Controller.Switch(1082) = True : End Sub" in gen
+    assert "PadIn_" not in gen
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_munsters_herman_knock_under_vbscript(tmp_path):
+    vs = pytest.importorskip("vpxshadow")
+    _, gen = _munsters_herman(vs)
+    subs = gen[gen.index("Dim PadIn_sw45"):gen.index("End Sub", gen.index("Sub sw45_UnHit")) + 7]
+    mag = gen[gen.index("Sub PadMagnet(e)"):gen.index("End Sub", gen.index("Sub PadMagnet(e)")) + 7]
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Class Ctl", "Public sw",
+        "Private Sub Class_Initialize : Set sw = CreateObject(\"Scripting.Dictionary\") : End Sub",
+        "Public Property Let Switch(n, v) : sw(n) = CBool(v) : End Property",
+        "Public Property Get Switch(n) : Switch = sw(n) : End Property", "End Class",
+        "Class Mag", "Public MagnetOn", "End Class",
+        "Dim Controller, mHMagnet, Log : Set Controller = New Ctl : Set mHMagnet = New Mag",
+        "Const DOFOff = 0",
+        "Sub DOF(n, s) : Log = Log & \"DOF\" & n & \"=\" & s & \" \" : End Sub",
+        "Sub S : Log = Log & Controller.Switch(1082) & \" \" : End Sub",
+        subs, mag,
+        "mHMagnet.MagnetOn = False",
+        "sw45_Hit : S",                          # Herman catches ball 1: closed
+        "PadMagnet 1 : sw45_Hit : S",            # ball 2 while the magnet holds: knocked loose
+        "PadMagnet 0 : sw45_UnHit : S : sw45_UnHit : S",
+        "sw45_Hit : sw45_Hit : S : sw45_UnHit : S : sw45_UnHit : S",   # two balls, no magnet
+        "WScript.Echo Log"]).replace("\n", "\r\n"), encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.split() == ["True", "False", "DOF135=0", "False", "False",
+                                "True", "True", "False"], r.stdout + r.stderr
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),

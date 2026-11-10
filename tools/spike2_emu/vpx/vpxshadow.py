@@ -190,6 +190,74 @@ def quiet_sub(lines, name, rep):
     return None
 
 
+PROC_RE = re.compile(r"^\s*(?:Public\s+|Private\s+)?(Sub|Function)\s+(\w+)", re.I)
+DIM_RE = re.compile(r"^\s*(?:Dim|Public|Private)\s+(?!Sub\b|Function\b|Const\b|Property\b)(.+)$", re.I)
+SET_VAR_RE = re.compile(r"\bSet\s+(\w+)\s*=", re.I)
+FOR_EACH_RE = re.compile(r"\bFor\s+Each\s+\w+\s+In\s+(\w+)\s*$", re.I)
+
+
+def _procs(lines):
+    """(name, first line, last line) of every Sub and Function."""
+    out, i = [], 0
+    while i < len(lines):
+        m = PROC_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        kind = m.group(1)
+        end_re = re.compile(r"\s*End\s+%s\b" % kind, re.I)
+        end = i
+        if not any(end_re.match(lines[i][a:b]) for a, b in _statements(lines[i])[1:]):
+            end = next((k for k in range(i + 1, len(lines)) if end_re.match(lines[k])), i)
+        out.append((m.group(2), i, end))
+        i = end + 1
+    return out
+
+
+def empty_walks(lines, quiet, rep):
+    """PAD-1102: module variables only a quieted Sub ever `Set`, which code
+    still running walks with `For Each`. Munsters' StartRainbow (quieted: the
+    machine runs the lights) was all that gave RainbowLights its lights, and
+    the table saves RainbowTimer enabled, so its first tick, 20 ms after the
+    table loaded, stopped Visual Pinball on "Object not a collection" (and
+    StopAttractMode's StopRainbow would have, at the game's start). Such a
+    variable starts as an empty list instead: the loops walk nothing, which
+    is what the quieted show leaves for them. The names, sorted."""
+    procs = _procs(lines)
+    in_proc = set()
+    for _, a, b in procs:
+        in_proc.update(range(a, b + 1))
+    module = set()
+    for i, line in enumerate(lines):
+        if i in in_proc:
+            continue
+        for stmt in (line[a:b] for a, b in _statements(line)):
+            d = DIM_RE.match(_code(stmt))
+            if d:
+                module.update(re.sub(r"\([^)]*\)", "", v).strip().lower() for v in d.group(1).split(","))
+    dead = {n.lower() + "_orig" for n in quiet}
+    set_dead, set_live, walked = {}, set(), {}
+    for name, a, b in procs + [("", i, i) for i in range(len(lines)) if i not in in_proc]:
+        is_dead = name.lower() in dead
+        for k in range(a, b + 1):
+            for stmt in (_code(lines[k][x:y]).strip() for x, y in _statements(lines[k])):
+                for v in SET_VAR_RE.findall(stmt):
+                    if is_dead:
+                        set_dead.setdefault(v.lower(), (v, name[:-5]))
+                    else:
+                        set_live.add(v.lower())
+                f = FOR_EACH_RE.search(stmt)
+                if f and not is_dead:
+                    walked.setdefault(f.group(1).lower(), []).append(name or "the script")
+    found = sorted(v for v in set_dead if v not in set_live and v in walked and v in module)
+    for v in found:
+        var, by = set_dead[v]
+        subs = sorted(set(walked[v]))
+        rep.append("%s starts as an empty list: only the quieted %s set it, and %s still walk%s it"
+                   % (var, by, ", ".join(subs), "s" if len(subs) == 1 else ""))
+    return [set_dead[v][0] for v in found]
+
+
 def neuter(lines, patterns, rep):
     """Comment out every line that creates or launches a ball. A statement
     sharing its line with others (`Sub Drain_Hit : PlungerIM.AutoFire : End
@@ -1524,6 +1592,10 @@ def patch(script, m):
         args = quiet_sub(lines, name, rep)
         if args is not None:
             quiet[name] = args
+    walks = empty_walks(lines, quiet, rep)
+    if walks:
+        lines.append("' PAD: what only a quieted Sub filled, empty, so its loops walk nothing (vpxshadow.py)")
+        lines.extend("%s = Array()" % v for v in walks)
     neuter(lines, m.get("neuter", []), rep)
     route_b2s(lines, rep)
     had["PadLoadEM"] = early_b2s(lines, rep)

@@ -84,8 +84,9 @@ def test_only_known_unsupported_games_exist(all_manufacturers):
     UI regressions where every game suddenly shows as unsupported."""
     expected_unsupported = {
         ("spooky", "total_nuclear"),
-        # (every Spike 3 title is supported since the fleet OTP keyfile
-        # unlocks them all; 5c07a816b left them listed here)
+        # Every Spike 3 title is decryptable now: the fleet OTP keyfile
+        # (user-supplied) unlocks each card's LUKS keyslots, so none are
+        # greyed.  See stern/spike3_games.py.
     }
     actual_unsupported = {
         (m.key, g.key)

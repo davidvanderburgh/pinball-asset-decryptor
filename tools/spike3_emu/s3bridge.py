@@ -43,12 +43,10 @@ A node the directory does not declare times out, as an empty address does.
         writes DIR/bridge.path (the pty) and DIR/bridge.log
 """
 import os
-import pty
 import select
 import struct
 import sys
 import time
-import tty
 import zlib
 
 STX, ETX, ESC = 0x02, 0x03, 0x1B
@@ -80,11 +78,27 @@ def frame(cmd, ident, payload=b""):
     return bytes(out)
 
 
+def unmask(node, data):
+    """Spike 3's node frame mask, read off the bus (its own inverse). A node
+    address with bit 0x40 set carries Spike 2's frame - `cmd args... ck`,
+    the whole frame summing to zero - with every byte XORed by
+    m = (node & 0x0f) << 4 | (n & 0x0f), n the byte count, and the odd
+    bytes by ~m instead. Measured on pokemon_le: decoded this way every one
+    of 110 distinct frame kinds checksums, the switch scan reads `11 key ck`
+    and the coil fire `40 IDX power ...` exactly as on Spike 2."""
+    n = len(data)
+    m = ((node & 0x0F) << 4) | (n & 0x0F)
+    return bytes(b ^ (m if j % 2 == 0 else (~m & 0xFF)) for j, b in enumerate(data))
+
+
 class Node:
     """One node board, answering as the title expects its board to."""
 
     def __init__(self, nid, claim, log):
         self.nid, self.c, self.log, self.said = nid, claim, log, set()
+        self.inputs = None        # () -> this node's 8 live input bytes
+        self.reported = bytes(8)  # what the game last read (scan or ff)
+        self.registered = 0       # when its identity was first read (time)
 
     def __call__(self, data, k):
         """k reply bytes (payload + checksum) for request payload `data`."""
@@ -95,6 +109,8 @@ class Node:
         cmd = data[0] if data else None
         c = self.c
         if cmd == 0xFE and plen >= 10:
+            if not self.registered:
+                self.registered = time.time()
             fw = c["fw"]
             p[0:4] = bytes([0, fw[0], fw[1], fw[2]])
             p[4:8] = struct.pack("<I", c["part"])
@@ -106,6 +122,28 @@ class Node:
         elif cmd == 0xF9 and len(data) > 1 and data[1] == 0 and plen >= 12:
             p[8:12] = struct.pack("<I", c["partno"])
             self.once("f9", "node %d reports part %s (%d)" % (self.nid, c["partstr"], c["partno"]))
+        elif plen == 10 and cmd == 0x11:
+            # THE SWITCH SCAN, Spike 2's 0x11 (masked on the wire - unmask):
+            # 10 bytes, [0..7] the board's 64 switch bits, [8..9] a u16 (0).
+            # A request carrying a byte before its checksum (n=3: `11 key
+            # ck`) keys the reply: byte c is XORed with rol8(key, c) (Spike
+            # 2's hwshim, measured). The bits are the live ones from nodesw.
+            bits = self.inputs() if self.inputs else bytes(8)
+            key = data[1] if len(data) >= 3 else 0
+            for i in range(8):
+                p[i] = bits[i] ^ (((key << i) | (key >> ((8 - i) & 7))) & 0xFF)
+            self.reported = bits
+            if any(bits):
+                self.once("sw" + bits.hex(), "node %d switches %s" % (self.nid, bits.hex()))
+        elif cmd == 0xFF and plen >= 8:
+            # the fault probe (Spike 2's 0x5a43d0): word A = the board's
+            # fault/status word (0: no fault), word B its input bits
+            bits = self.inputs() if self.inputs else bytes(8)
+            p[4:8] = bits[0:4]
+            # it carries 32 of the 64 bits: only those count as read. Marking
+            # all 64 hid a trough closed before boot (bits 32..37) for good -
+            # no request was ever raised, the game ran LOCATING PINBALLS
+            self.reported = bits[0:4] + self.reported[4:8]
         return bytes(p) + bytes([(-sum(p)) & 0xFF])
 
     def once(self, key, msg):
@@ -121,15 +159,51 @@ class Bridge:
         # node address -> model: the title's declared node boards
         self.nodes = {nid: Node(nid, c, log) for nid, c in (claims or {}).items()}
         self.counts = {}
+        self.balls = None         # s3balls.Balls once the inputs are attached
+
+    def attach_inputs(self, path):
+        """The slot's node switch inputs, live: 8 bytes a node (64 nodes),
+        bit b of node n = byte 8n + b//8, mask 1 << b%8, 1 = closed.
+        s3press.py `node` writes them while the game runs."""
+        import mmap
+        if not os.path.exists(path) or os.path.getsize(path) != 512:
+            with open(path, "wb") as f:
+                f.write(bytes(512))
+        f = open(path, "r+b")
+        self.sw = mmap.mmap(f.fileno(), 512)
+        for nid, n in self.nodes.items():
+            n.inputs = (lambda i=nid: bytes(self.sw[8 * i:8 * i + 8]))
 
     def attention(self):
-        """The lowest node address with something to report, 0 for none."""
+        """The lowest node address with something to report, 0 for none: a
+        node whose inputs changed since the game last read them (ff) - the
+        request a real board raises, which makes the game come and read it.
+
+        ONLY ONCE BRING-UP IS OVER (30 s after the node's identity was first
+        read): during the node enumeration the game answers a raised request
+        by re-addressing the board (F0 10 / F0 20, no reply) and polls again,
+        so a request raised then - the trough switches closed before boot -
+        held the enumerator on that node 46,000 times a minute for ever. In
+        the service loop a request is answered by the switch scan (02)."""
+        now = time.time()
+        for nid in sorted(self.nodes):
+            n = self.nodes[nid]
+            if (n.registered and now - n.registered > 30 and n.inputs
+                    and n.inputs() != n.reported):
+                return nid
         return 0
 
     def node_exchange(self, node, data, reply_len):
         """reply_len bytes for a 0x41 exchange (reply_len-1 from the node,
-        then the board's status byte)."""
+        then the board's status byte). Node bit 0x40 marks a MASKED frame
+        (see unmask): the model always sees Spike 2's plain command. The
+        REPLY goes back unmasked - measured: masking it too put up DEVICE
+        MALFUNCTION alerts and lost the Start button; plain, Start starts."""
         model = self.nodes.get(node & 0x3F)
+        if node & 0x40:
+            data = unmask(node, data)
+        if self.balls is not None and data[:1] == b"\x40" and len(data) >= 3:
+            self.balls.coil(node & 0x3F, data)
         if model is not None:
             r = model(data, reply_len - 1)
             if r is not None:
@@ -146,7 +220,12 @@ class Bridge:
             # NODEBUS_Poll's binary search goes DOWN on every answer: it
             # returns the LOWEST node address raising a request (0: none) -
             # the attention poll, not a count. No node wants service here.
-            return frame(0x25, ident, bytes([self.attention()]))
+            a = self.attention()
+            if a:
+                self.att_said = getattr(self, "att_said", 0) + 1
+                if self.att_said <= 40:
+                    self.log.write("# [attention] node %d raises a request\n" % a)
+            return frame(0x25, ident, bytes([a]))
         if cmd == 0x27:
             if p and p[0] in (0, 2):
                 return frame(0x27, ident, bytes([LCD_STATUS]))
@@ -189,6 +268,8 @@ def frames_in(buf):
 
 
 def main():
+    import pty      # Linux only: the protocol above imports anywhere (tests)
+    import tty
     d = sys.argv[1] if len(sys.argv) > 1 else "."
     elf = sys.argv[2] if len(sys.argv) > 2 else None
     log = open(os.path.join(d, "bridge.log"), "w", buffering=1)
@@ -217,6 +298,13 @@ def main():
     for n in sorted(absent & set(claims)):
         log.write("# node %d (%s) not fitted\n" % (n, claims.pop(n)["type"]))
     br = Bridge(crc, log, claims)
+    br.attach_inputs(os.path.join(d, "nodesw"))
+    if game and os.environ.get("PAD_S3_BALLS", "1") != "0":
+        try:
+            import s3balls
+            br.balls = s3balls.Balls.for_game(game, br.sw, log, d)
+        except Exception as e:                       # no model: switches by hand only
+            log.write("# [ball] no ball model (%s)\n" % e)
     master, slave = pty.openpty()
     name = os.ttyname(slave)
     tty.setraw(master)
@@ -228,8 +316,14 @@ def main():
     t0 = time.time()
     pend = b""
     seen = {}
+    tally, last_tally = {}, [0.0]
+    trace = (open(os.path.join(d, "nbtrace.log"), "w", buffering=1)
+             if os.environ.get("PAD_S3_NBTRACE") == "1" else None)
+    trace_last = {}
     while True:
-        r, _, _ = select.select([master], [], [], 0.5)
+        r, _, _ = select.select([master], [], [], 0.05 if br.balls else 0.5)
+        if br.balls:
+            br.balls.tick()
         if not r:
             continue
         try:
@@ -246,6 +340,30 @@ def main():
                 os.write(master, reply)
             key = (cmd, p[:3] if cmd == 0x41 else p)
             seen[key] = seen.get(key, 0) + 1
+            # every 30 s, how often each kind came (node+command for 0x41):
+            # the first-three log alone cannot say what the game polls
+            tally_k = ("%02x" % cmd) if cmd != 0x41 or len(p) < 3 else ("41:%02x:%02x" % (
+                p[0], unmask(p[0], p[2:2 + p[1]])[0] if p[0] & 0x40 and p[1] else p[2]))
+            tally[tally_k] = tally.get(tally_k, 0) + 1
+            if now - last_tally[0] >= 30:
+                log.write("%9.3f # tally %s\n" % (now, " ".join(
+                    "%s=%d" % kv for kv in sorted(tally.items(), key=lambda x: -x[1])[:24])))
+                tally.clear()
+                last_tally[0] = now
+            if trace and cmd == 0x41 and len(p) >= 3:
+                # PAD_S3_NBTRACE=1: every node frame that differs from the
+                # last one to the same node and command (coil traffic is a
+                # few changed frames among thousands of repeats)
+                n = p[1]
+                plain = p[2:2 + n]
+                if p[0] & 0x40:
+                    plain = unmask(p[0], plain)
+                # one stream per node+command (coil commands per coil too)
+                tk = (p[0] & 0x3F, plain[:2] if plain[:1] and 0x40 <= plain[0] < 0x50 else plain[:1])
+                if trace_last.get(tk) != plain:
+                    trace_last[tk] = plain
+                    trace.write("%9.3f n%-2d %s%s\n" % (
+                        now, p[0] & 0x3F, plain.hex(" "), (" -> " + reply.hex()) if reply else ""))
             if seen[key] <= 3:       # the first few of each kind, then quiet
                 log.write("%9.3f %s cmd %02x id %02x %s%s\n" % (
                     now, "rx" if ok else "BAD-SUM", cmd, ident, p.hex(),

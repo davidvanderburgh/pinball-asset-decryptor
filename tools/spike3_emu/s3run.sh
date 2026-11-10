@@ -114,7 +114,7 @@ if [ "$BUS" = 1 ]; then
     [ -e /dev/cuse ] || { echo "[s3run] --bus needs /dev/cuse (insmod cuse.ko)" >&2; exit 1; }
     [ -x "$B/s3spid" ] || { echo "[s3run] --bus needs $B/s3spid: bash s3build.sh" >&2; exit 1; }
     SPIDEV=pad-s3spi-slot$SLOT
-    rm -f "$SD/spi.log" "$SD/bridge.log" "$SD/bridge.path"
+    rm -f "$SD/spi.log" "$SD/bridge.log" "$SD/bridge.path" "$SD/nodesw"
     # the cabinet inputs, live: 8 bytes, every one at rest; s3press.py
     # presses a button by clearing its bit (active low) while the game runs
     python3 -c "import sys; open(sys.argv[1],'wb').write(bytes([int(sys.argv[2],0)])*8)" \

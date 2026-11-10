@@ -181,6 +181,51 @@ def directory(e, cat):
     raise ValueError("no node directory found")
 
 
+DEV_CLASS = {1: "switch", 2: "coil", 3: "led", 5: "gi"}
+
+
+def devices(e, directory_rows=None):
+    """[(name, node, index, class)] from the title's device tables: 0x50-byte
+    records, a name pointer at +0 and at +0x20 four u16s - the GROUP (the
+    1-based position of the board's record in the node directory: on
+    pokemon_le the CPU board, whose inputs are the SPI chain, is record 5
+    and node 8 record 7 - checked against the live bus), the index on that board, the
+    class (1 switch, 2 coil, 3 LED, 5 GI) and a sub-kind. Every table is
+    walked out from a record named "TROUGH 1" or "START BUTTON" (several
+    tables, one per class family). node -1 = a group past the directory."""
+    if directory_rows is None:
+        directory_rows = directory(e, catalog(e)[1])
+    order = [nid for nid, _c, _f in directory_rows]
+
+    def rec(a):
+        n = e.rel.get(a)
+        name = e.cstr(n) if n else None
+        if not name or len(name) > 40 or not name.isprintable():
+            return None
+        w = e.u64(a + 0x20)
+        if w is None:
+            return None
+        g, idx, cls = w & 0xFFFF, (w >> 16) & 0xFFFF, (w >> 32) & 0xFFFF
+        if not (1 <= g <= 64 and idx < 512 and cls in DEV_CLASS):
+            return None
+        return name, (order[g - 1] if g - 1 < len(order) else -1), idx, DEV_CLASS[cls]
+    out, done = [], set()
+    for anchor in ("TROUGH 1", "START BUTTON", "TROUGH", "AUTO PLUNGER"):
+        va = e.strva(anchor)
+        for a in e.inv.get(va, []) if va is not None else []:
+            if a in done or not rec(a):
+                continue
+            lo = a
+            while rec(lo - 0x50):
+                lo -= 0x50
+            while rec(lo):
+                if lo not in done:
+                    done.add(lo)
+                    out.append(rec(lo))
+                lo += 0x50
+    return out
+
+
 def hexfiles(hexdir):
     """{(type, class name): (maj, min, patch, filename)}"""
     out = {}

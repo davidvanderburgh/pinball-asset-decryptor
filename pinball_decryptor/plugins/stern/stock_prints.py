@@ -362,9 +362,13 @@ def _unreadable(text, sidx_name=""):
 
 def _file_nodes(reader):
     """``{path: inode}`` for every regular file on the partition (one
-    metadata walk; no file bytes are read)."""
+    metadata walk; no file bytes are read).  The primary image's only: a
+    compact multi-boot card's other games (``img1/`` ...) are not this card's
+    files (PAD-1100, :func:`.info.other_image_path`)."""
+    from .info import other_image_path
     return {fp.lstrip("/"): nd for fp, _i, nd in
-            reader.iter_regular_files(min_size=0, max_depth=20)}
+            reader.iter_regular_files(min_size=0, max_depth=20)
+            if not other_image_path(fp)}
 
 
 # ---------------------------------------------------------------------------
@@ -432,10 +436,15 @@ def card_print(card_path, table=None):
         for pt in parts:
             reader = card.reader(pt.index)
             nodes = _file_nodes(reader)
-            sidx_path = next((p for p in nodes if p.endswith(".sidx")
-                              and p.startswith("spk/index/")), None)
-            if sidx_path is None:
+            # PAD-1100: the card's own versioned index, whatever order the
+            # directory lists it in beside a bare <game>.sidx
+            from .info import index_name
+            name = index_name(p[len("spk/index/"):] for p in nodes
+                              if p.startswith("spk/index/")
+                              and p.count("/") == 2)
+            if not name:
                 continue
+            sidx_path = "spk/index/" + name
             try:
                 manifest = sidx_mod.manifest_files(
                     reader.read_file_bytes(nodes[sidx_path]))

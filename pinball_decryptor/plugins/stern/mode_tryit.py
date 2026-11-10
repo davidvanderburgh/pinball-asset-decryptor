@@ -131,7 +131,7 @@ def card_title(card):
     next to the title's directory, and the old one-directory rule made that "an unknown
     title". Only when no ``.sidx`` parses does the one title directory decide."""
     from .explorer import CardImage
-    from .info import version_from_filename
+    from .info import index_entries_name, other_image_path, version_from_filename
     try:
         img = CardImage(card)
     except OSError as e:
@@ -140,19 +140,20 @@ def card_title(card):
         parts = sorted((p for p in img.partitions() if p.browsable), key=lambda p: -p.size)
         for p in parts:
             try:
-                names = [e.name for e in img.list_dir(p.index, "/spk/index")
-                         if not e.is_dir and e.name.lower().endswith(".sidx")]
+                name = index_entries_name(img.list_dir(p.index, "/spk/index"))
                 dirs = [e.name for e in img.list_dir(p.index, "/")
-                        if e.is_dir and e.name not in ("spk", "lost+found")]
+                        if e.is_dir and e.name not in ("spk", "lost+found")
+                        and not other_image_path(e.name)]
             except (OSError, ValueError):
                 continue
             if not dirs:
                 continue
-            for name in sorted(names):
-                game, version = MP.card_from_name(name)
-                if game:
-                    return game, version, p.index
-            version = version_from_filename(names[0])[0] if names else None
+            # PAD-1100: the index the card's own <title>.sidx link names (else its newest),
+            # never the first by name - a card can keep the index of the build it replaced
+            game, version = MP.card_from_name(name)
+            if game:
+                return game, version, p.index
+            version = version_from_filename(name)[0] if name else None
             return dirs[0] if len(dirs) == 1 else "", version or "", p.index
     raise TryItError("%s is not a Spike 2 card image this can read (no games partition)."
                      % os.path.basename(card))

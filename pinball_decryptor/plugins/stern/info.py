@@ -119,15 +119,14 @@ def card_version_probe(path):
                     entries = card.list_dir(p.index, "/spk/index")
                 except Exception:
                     continue
-                names = [e.name for e in entries if not e.is_dir
-                         and e.name.lower().endswith(".sidx")]
-                if not names:
+                sidx_name = index_entries_name(entries)
+                if not sidx_name:
                     continue
-                sidx_name = names[0]
                 try:
                     dirs = [e.name for e in card.list_dir(p.index, "/")
                             if e.is_dir and e.name not in ("spk",
-                                                           "lost+found")]
+                                                           "lost+found")
+                            and not other_image_path(e.name)]
                     if len(dirs) == 1:
                         game_folder = dirs[0]
                 except Exception:
@@ -246,6 +245,57 @@ def version_id(code, version, edition):
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tga", ".webp")
 
 
+#: PAD-1100: a compact multi-boot card (``mkmulticard.py --layout store``)
+#: keeps every extra game as a whole tree INSIDE the primary's partition -
+#: ``img1/``, ``img2/`` ... each with its own ``spk/index/*.sidx`` - beside a
+#: shared ``.blobs`` pool.  Everything this app reads and writes is the
+#: primary's tree at the partition root (see :mod:`.multiimage`), so these are
+#: never part of the answer: Brombomb's GZ 1.16 + Heisei card was recorded as
+#: the other image's 1.13, and Load modes then asked for a 1.13 port.
+_OTHER_IMAGE = re.compile(r"^/?(?:img\d+|\.blobs)(?:/|$)")
+
+
+def other_image_path(path):
+    """Is *path* (``/img1/spk/index/x.sidx``) inside another image's tree on a
+    compact multi-boot card (:data:`_OTHER_IMAGE`)?"""
+    return bool(_OTHER_IMAGE.match(path or ""))
+
+
+def _version_tuple(name):
+    m = re.search(r"-(\d+)_(\d+)_(\d+)", name or "")
+    return tuple(int(x) for x in m.groups()) if m else ()
+
+
+def index_name(names, links=None):
+    """The card's live release index among ``.sidx`` file *names* (PAD-1100).
+
+    Stern's card keeps ``godzilla_pro-1_16_0.sidx`` and a bare
+    ``godzilla_pro.sidx`` SYMLINK to it, so the link's target (*links*:
+    ``{name: target}``, from a directory listing) is the answer when it names
+    one of *names*.  Else the newest versioned name (an update adds a newer
+    index; a card can keep the one it replaced), else the first by name - so
+    the order a directory happens to list them in never decides.  ``""``
+    when *names* has none."""
+    names = sorted(n for n in names if n and n.lower().endswith(".sidx"))
+    for n in names:
+        target = ((links or {}).get(n) or "").rsplit("/", 1)[-1]
+        if target and target in names and version_from_filename(target)[0]:
+            return target
+    versioned = [n for n in names if version_from_filename(n)[0]]
+    if versioned:
+        return max(versioned, key=lambda n: (_version_tuple(n), n))
+    return names[0] if names else ""
+
+
+def index_entries_name(entries):
+    """:func:`index_name` over a ``/spk/index`` listing's entries (their
+    symlinks followed)."""
+    entries = [e for e in entries if not e.is_dir]
+    return index_name([e.name for e in entries],
+                      {e.name: e.link_target for e in entries
+                       if getattr(e, "is_symlink", False) and e.link_target})
+
+
 def _walk_partition(reader, sniff=True):
     """One metadata walk of a partition: the ``.sidx`` manifest, ``image.bin``,
     per-category music banks, and on-card asset counts.  Videos are the same
@@ -260,11 +310,15 @@ def _walk_partition(reader, sniff=True):
              "image_bin_path": "", "videos": None, "images": 0, "scenes": 0,
              "music_banks": 0, "game_elves": {}, "video_paths": [],
              "to_sniff": []}
+    indexes = {}
     for fpath, _ino, node in reader.iter_regular_files(min_size=1,
                                                        max_depth=20):
+        if other_image_path(fpath):
+            continue                  # another image of a multi-boot card
         base = fpath.rsplit("/", 1)[-1]
         if fpath.endswith(".sidx") and "/spk/index/" in fpath:
-            found["sidx_path"], found["sidx_node"] = fpath, node
+            if fpath.startswith("/spk/index/") or not indexes:
+                indexes[base] = (fpath, node)   # the root's, else one lower down
         elif fpath.endswith("/image.bin"):
             found["image_bin"], found["image_bin_path"] = node, fpath
         elif base.startswith("image-sc") and base.endswith(".bin"):
@@ -277,6 +331,10 @@ def _walk_partition(reader, sniff=True):
             found["images"] += 1
         elif node["size"] >= 0x1000:
             found["to_sniff"].append((fpath, node))
+    root = {k: v for k, v in indexes.items() if v[0].startswith("/spk/index/")}
+    if root or indexes:
+        found["sidx_path"], found["sidx_node"] = (root or indexes)[
+            index_name(root or indexes)]
     if sniff:
         _sniff_videos(reader, found)
     return found

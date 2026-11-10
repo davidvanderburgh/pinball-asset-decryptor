@@ -77,8 +77,8 @@ fi
 # per slot, bound over the chroot's device nodes:
 #   /dev/spidev4.0  s3spid (CUSE char device; the game's spidev ioctls reach it
 #                   through the qemu-spi-ioctls.patch translation) -> $SD/spi.log
-#   /dev/ttyAMA5    s3bridge.py (a pty: the RP2040 netbridge's host UART)
-#                   -> $SD/bridge.log
+#   /dev/ttyAMA5    s3bridge.py (a pty: the RP2040 netbridge board, answering
+#                   its host UART as its own firmware does) -> $SD/bridge.log
 # Needs cuse.ko loaded on the host (built from the same kernel tree as
 # i2c-stub; see docs/plans/spike3_emulation.md stage 4).
 BUSPIDS=""
@@ -90,7 +90,7 @@ if [ "$BUS" = 1 ]; then
     rm -f "$SD/spi.log" "$SD/bridge.log" "$SD/bridge.path"
     "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" > "$SD/s3spid.out" 2>&1 &
     BUSPIDS="$!"
-    python3 "$S/s3bridge.py" "$SD" > "$SD/s3bridge.out" 2>&1 &
+    python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     for i in $(seq 1 50); do
         [ -e /dev/$SPIDEV ] && [ -s "$SD/bridge.path" ] && break; sleep 0.1
@@ -102,11 +102,18 @@ if [ "$BUS" = 1 ]; then
 fi
 export DEVBINDS
 
-unshare -m -p -f --mount-proc=/proc bash -s "$TREE" "$SD" "$SECS" "$STRACE" "$BRIDGE" "$B" "$PROG" "${ARGS[@]}" <<'INNER'
+# NO NETWORK. The game runs in its own network namespace (-n) holding only a
+# loopback interface: a Spike 3 title carries Stern's connectivity code
+# (Insider Connected, conagent), and nothing it tries may leave this PC -
+# without -n it shared WSL's own network and could have reached the internet
+# (David, PAD-1090). Every attempt fails here with no route, and the --strace
+# log shows what was attempted.
+unshare -m -p -n -f --mount-proc=/proc bash -s "$TREE" "$SD" "$SECS" "$STRACE" "$BRIDGE" "$B" "$PROG" "${ARGS[@]}" <<'INNER'
 set -u
 TREE=$1; SD=$2; SECS=$3; STRACE=$4; BRIDGE=$5; B=$6; PROG=$7; shift 7
 R=$SD/root
 mount --make-rprivate /
+ip link set lo up 2>/dev/null   # loopback only: no route off the PC
 ov() {  # lower mountpoint name
     mkdir -p "$SD/$3.up" "$SD/$3.wk" "$2"
     mount -t overlay overlay -o "lowerdir=$1,upperdir=$SD/$3.up,workdir=$SD/$3.wk" "$2"
@@ -205,7 +212,7 @@ INNER
 RC=$?
 if [ -n "$BUSPIDS" ]; then
     kill $BUSPIDS 2>/dev/null; sleep 0.5; kill -9 $BUSPIDS 2>/dev/null
-    echo "[s3run] node bus: spi $(grep -c xfer "$SD/spi.log" 2>/dev/null) transfers, $(grep -c ' open' "$SD/spi.log" 2>/dev/null) opens; bridge $(grep -c ' tx\[' "$SD/bridge.log" 2>/dev/null) bursts ($SD)"
+    echo "[s3run] node bus: spi $(grep -c xfer "$SD/spi.log" 2>/dev/null) transfers; bridge: $(grep -c "^# \[node\].*claims" "$SD/bridge.log" 2>/dev/null) node boards identified ($SD/bridge.log)"
 fi
 if [ -n "$HOSTPID" ]; then
     kill -INT -"$HOSTPID" 2>/dev/null; sleep 1; kill -9 -"$HOSTPID" 2>/dev/null

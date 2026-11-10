@@ -158,8 +158,8 @@ Apply after the i2c patch, to the same pristine qemu 8.2.2 tree:
 +++ b/linux-user/ioctls.h
 @@ -401,6 +401,32 @@
    IOCTL(I2C_FUNCS, IOC_R, MK_PTR(TYPE_ULONG))
-   IOCTL_SPECIAL(I2C_RDWR, IOC_RW, do_ioctl_i2c_rdwr, TYPE_PTRVOID)
-   IOCTL_SPECIAL(I2C_SMBUS, IOC_RW, do_ioctl_i2c_smbus, TYPE_PTRVOID)
+   IOCTL_SPECIAL(I2C_RDWR, IOC_W, do_ioctl_i2c_rdwr, TYPE_PTRVOID)
+   IOCTL_SPECIAL(I2C_SMBUS, IOC_W, do_ioctl_i2c_smbus, TYPE_PTRVOID)
 +  IOCTL(PAD_SPI_RD_MODE, IOC_R, MK_PTR(TYPE_CHAR))
 +  IOCTL(PAD_SPI_WR_MODE, IOC_W, MK_PTR(TYPE_CHAR))
 +  IOCTL(PAD_SPI_RD_LSB_FIRST, IOC_R, MK_PTR(TYPE_CHAR))

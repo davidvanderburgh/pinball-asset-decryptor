@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""s3nodes.py - a Spike 3 title's NODE DIRECTORY, read out of its own game
+program, and the identity each node board must claim (PAD-1090, stage 4).
+
+    python3 s3nodes.py <game-elf> [--hexdir DIR]      prints the claims
+
+The 64-bit counterpart of ../spike2_emu/nbdir.py: the same two static tables
+in the game's data, laid out for aarch64 and resolved through the program's
+R_AARCH64_RELATIVE relocations (the game is position-independent, so every
+pointer in .data is a relocation addend, zero in the file):
+
+  BOARD-MODEL CATALOG, 0x28-byte rows, starting at the part number:
+      +0x00 ptr  "520-XXXX-XX"           +0x08 u32  the same number x100
+      +0x10 ptr  type name ("pinnode")   +0x18 ptr  5-language name cell
+      +0x20 u64  flags
+  NODE DIRECTORY, 0x20-byte records sharing one handler (the CPU's has its
+  own), the w3 word = node id << 16 | model code:
+      +0x00 ptr  handler   +0x08 ptr  name cell   +0x10 u32  w3   +0x18 flags
+  and the catalog row of a code is code - 2, as on Spike 2 - checked here by
+  the CPU record (node 0) landing on the row named "SPIKE3 CPU".
+
+pokemon_le 0.82.0: node 1 pinnode 520-5319, 4 node4 520-5790, 8/9 pinnode
+520-7017, 10/13 pinnode 520-8511, 2/7/12/14 ws2812node 520-8511.
+
+THE CLAIM is nbdir.py's, unchanged (its comments carry the measurements): a
+CPU class whose part id the game recognises and whose
+<type>-<class>-<maj>_<min>_<patch>.hex the title ships beside its program;
+the firmware version from that file's name; the variant from the per-type
+priors measured on Spike 2 (the node boards are the same family).
+"""
+import os
+import re
+import struct
+import sys
+
+PART_BY_CLASS = {1: 0x00020023, 3: 0x00030030, 4: 0x00140040, 5: 0x2C40102B}
+CLASS_NAMES = {1: "LPC1112_101", 2: "LPC1112_201", 3: "LPC1113_302",
+               4: "LPC1124_303", 5: "LPC1313", 6: "LPC812", 7: "RP235x"}
+VARIANT_PRIOR = {"pinnode": 0x01, "ws2812node": 0x05, "node4": 0x03,
+                 "tmc5041node": 0x0d, "coil4node": 0x04, "lcdnode": 0x02,
+                 "hdmi_ws2812node": 0x0c, "coil4_lednode": 0x10}
+VARIANT_DEFAULT = 0x01
+CLASS_PREF = {"pinnode": (1, 5), "ws2812node": (5,), "node4": (4,),
+              "coil4node": (5, 1), "lcdnode": (3,), "hdmi_ws2812node": (5,),
+              "coil4_lednode": (5,)}
+CLASS_PREF_DEFAULT = (5, 1, 4)
+HWID = 0x0064            # board id: only tested non-zero (hwshim NB_HWID_DEFAULT)
+
+TYPE_NAMES = ["pinnode", "ws2812node", "ws2812pinnode", "coil4node",
+              "coil4_lednode", "lcdnode", "hdminode", "hdmi_ws2812node",
+              "magsensornode", "magsensor11node", "node4", "tmc2590node",
+              "tmc5041node", "afnode", "accbridgenode"]
+
+
+class Elf:
+    def __init__(self, path):
+        self.d = d = open(path, "rb").read()
+        if d[:4] != b"\x7fELF" or d[4] != 2:
+            raise ValueError("%s: not a 64-bit ELF" % path)
+        phoff, = struct.unpack_from("<Q", d, 0x20)
+        phsz, phn = struct.unpack_from("<HH", d, 0x36)
+        self.segs, dyn = [], None
+        for i in range(phn):
+            t, fl, off, va, pa, fs, ms, al = struct.unpack_from("<IIQQQQQQ", d, phoff + i * phsz)
+            if t == 1:
+                self.segs.append((va, off, fs, fl))
+            elif t == 2:
+                dyn = (off, fs)
+        tags = {}
+        for k in range(0, dyn[1], 16):
+            tg, val = struct.unpack_from("<qQ", d, dyn[0] + k)
+            if tg == 0:
+                break
+            tags.setdefault(tg, val)
+        self.rel = {}
+        ro = self.off(tags[7])
+        for k in range(0, tags[8], 24):
+            off, info, add = struct.unpack_from("<QQq", d, ro + k)
+            if info & 0xFFFFFFFF == 1027:        # R_AARCH64_RELATIVE
+                self.rel[off] = add
+        self.inv = {}
+        for off, add in self.rel.items():
+            self.inv.setdefault(add, []).append(off)
+
+    def off(self, va):
+        for s, o, fs, fl in self.segs:
+            if s <= va < s + fs:
+                return o + va - s
+        return None
+
+    def u32(self, va):
+        o = self.off(va)
+        return struct.unpack_from("<I", self.d, o)[0] if o is not None else None
+
+    def u64(self, va):
+        o = self.off(va)
+        return struct.unpack_from("<Q", self.d, o)[0] if o is not None else None
+
+    def cstr(self, va):
+        o = self.off(va)
+        if o is None:
+            return None
+        e = self.d.find(b"\0", o, o + 80)
+        return self.d[o:e].decode("latin1") if e > o else None
+
+    def ptr(self, va):
+        return self.rel.get(va)
+
+    def strva(self, s):
+        m = re.search(re.escape(b"\0" + s.encode() + b"\0"), self.d)
+        if not m:
+            return None
+        o = m.start() + 1
+        for sv, so, fs, fl in self.segs:
+            if so <= o < so + fs:
+                return sv + o - so
+        return None
+
+    def is_code(self, va):
+        return any(s <= va < s + fs and fl & 1 for s, o, fs, fl in self.segs)
+
+
+def catalog(e):
+    """(first row va, {row: (part str, part value, type, english name)}); row
+    0 is model code 2. Rows run while the part field is a "520-" number."""
+    slots = []
+    for t in TYPE_NAMES:
+        va = e.strva(t)
+        if va is not None:
+            slots += e.inv.get(va, [])
+    if not slots:
+        raise ValueError("no board-model catalog (no node type names referenced)")
+
+    def row(a):
+        p, t, c = e.ptr(a), e.ptr(a + 0x10), e.ptr(a + 0x18)
+        ps = e.cstr(p) if p else None
+        if not (ps and ps.startswith("520-")):
+            return None
+        en = e.ptr(c) if c else None
+        return (ps, e.u32(a + 8), (e.cstr(t) if t else None), (e.cstr(en) if en else None))
+    lo = min(slots) - 0x10
+    while row(lo - 0x28):
+        lo -= 0x28
+    rows, a = {}, lo
+    while row(a):
+        rows[(a - lo) // 0x28] = row(a)
+        a += 0x28
+    return lo, rows
+
+
+def directory(e, cat):
+    """[(node, code, flags)]: the 0x20-byte records around the CPU's own
+    (node 0, whose model row is named "... CPU"), each a code pointer, a
+    name cell, node<<16|code, flags; node ids distinct."""
+    cpu_codes = {i + 2 for i, r in cat.items() if r[3] and r[3].endswith("CPU")}
+    if not cpu_codes:
+        raise ValueError("no CPU row in the board catalog")
+
+    def rec(a):
+        h, w3 = e.ptr(a), e.u32(a + 0x10)
+        if h is None or not e.is_code(h) or w3 is None or w3 >> 24:
+            return None
+        nid, code = (w3 >> 16) & 0xFF, w3 & 0xFFFF
+        if nid >= 64 or (code - 2) not in cat:
+            return None
+        return nid, code, e.u64(a + 0x18) or 0
+    for a, add in sorted(e.rel.items()):
+        if not e.is_code(add):
+            continue
+        r = rec(a)
+        if not (r and r[0] == 0 and r[1] in cpu_codes):
+            continue
+        lo = hi = a
+        while rec(lo - 0x20):
+            lo -= 0x20
+        while rec(hi + 0x20):
+            hi += 0x20
+        out = [rec(x) for x in range(lo, hi + 0x20, 0x20)]
+        if len({n for n, _, _ in out}) == len(out) and len(out) >= 2:
+            return out
+    raise ValueError("no node directory found")
+
+
+def hexfiles(hexdir):
+    """{(type, class name): (maj, min, patch, filename)}"""
+    out = {}
+    for f in sorted(os.listdir(hexdir)) if hexdir and os.path.isdir(hexdir) else []:
+        m = re.match(r"^(.+?)-(LPC[0-9A-Z_]+|RP235x)-(\d+)_(\d+)_(\d+)\.hex$", f)
+        if m:
+            out[(m.group(1), m.group(2))] = (int(m.group(3)), int(m.group(4)), int(m.group(5)), f)
+    return out
+
+
+def derive(elf_path, hexdir=None):
+    """{node: claim dict} for every node board the title declares."""
+    e = Elf(elf_path)
+    lo, cat = catalog(e)
+    hexes = hexfiles(hexdir or os.path.dirname(os.path.realpath(elf_path)))
+    claims = {}
+    for nid, code, flags in directory(e, cat):
+        part_s, part_v, typ, _name = cat.get(code - 2, (None, 0, None, None))
+        if nid == 0 or typ is None:
+            continue
+        klass, fw, fname = None, None, None
+        for c in CLASS_PREF.get(typ, CLASS_PREF_DEFAULT):
+            h = hexes.get((typ, CLASS_NAMES[c]))
+            if h and c in PART_BY_CLASS:
+                klass, fw, fname = c, h[:3], h[3]
+                break
+        claims[nid] = dict(type=typ, code=code, flags=flags, partno=part_v,
+                           partstr=part_s, klass=klass,
+                           part=PART_BY_CLASS.get(klass, PART_BY_CLASS[1]),
+                           variant=VARIANT_PRIOR.get(typ, VARIANT_DEFAULT),
+                           variant_guess=typ not in VARIANT_PRIOR,
+                           fw=fw or (0, 1, 0), hex=fname, hwid=HWID)
+    return claims
+
+
+def main():
+    args = sys.argv[1:]
+    hexdir = None
+    if "--hexdir" in args:
+        i = args.index("--hexdir")
+        hexdir = args[i + 1]
+        del args[i:i + 2]
+    for nid, c in sorted(derive(args[0], hexdir).items()):
+        print("node %2d %-16s %s part=0x%08x class=%s variant=0x%02x%s fw=%d.%d.%d hex=%s flags=%#x" % (
+            nid, c["type"], c["partstr"], c["part"], CLASS_NAMES.get(c["klass"], "-"),
+            c["variant"], " (guess)" if c["variant_guess"] else "", *c["fw"], c["hex"], c["flags"]))
+
+
+if __name__ == "__main__":
+    main()

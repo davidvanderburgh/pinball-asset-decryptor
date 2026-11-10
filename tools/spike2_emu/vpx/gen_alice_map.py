@@ -275,7 +275,13 @@ def build():
         "listed": True,
         # PAD-939: a copy patched before the fix says so on the tab
         "repatch": [{"old": "Sub PadLaunch(e)", "why": "the launch button sends the ball all the way up the lane",
-                     "since": "PAD-960: autoFire fires the table's plunger at full strength"}],
+                     "since": "PAD-960: autoFire fires the table's plunger at full strength"}]
+        # PAD-1099: the lane wrapper called the table's own lane subs
+        + [{"old": "Sub Trigger1_%s : Controller.Switch(1050) = %s : Trigger1_%s_orig : End Sub" % (ev, lv, ev),
+            "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, "
+                   "over the machine's lights",
+            "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
+           for ev, lv in (("UnHit", "False"), ("Hit", "True"))],
     }
 
 

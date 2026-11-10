@@ -207,7 +207,7 @@ let rowFits = new WeakMap();
 function rowFit(r, f) {
   let w = rowFits.get(r);
   if (!w) {
-    w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono),
+    w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono) + (r.scr ? textWidth(r.scr, f.body) + 34 : 0),
           res: textWidth(r.res, f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
           rep: textWidth(r.rep, f.body), col: 0, conv: textWidth(r.conv, f.body),
           modes: textWidth(modesText(r), f.body), seen: textWidth(r.seen || "", f.body) };
@@ -1043,7 +1043,12 @@ export default function VideoTab() {
       render: (r) => html`<span class=${cx("vid-name", (r.follow || r.copy) && "vid-pairrow")} ...${tip({ head: r.rel, lines: [profileLine(r, colorNs)] })}>${r.follow || r.copy
         ? html`<span class="vid-pairmark" aria-hidden="true">↳</span>` : null}${r.dir
         ? html`<span class="mono muted">${r.dir}</span>` : null}${r.name}</span>` },
-    { key: "len", label: "Length", width: width("len"), num: true, sort: "len" },
+    // PAD-1115: a clip a game screen shows for a fixed time: that time, amber when the clip freezes or is cut
+    { key: "len", label: "Length", width: width("len"), num: true, sort: "len",
+      render: (r) => (r.scr
+        ? html`<span class="vid-lencell">${r.len}<span class=${cx("vid-scr", r.scr_cls)} aria-label=${r.scr_head}
+            ...${tip({ head: r.scr_head, lines: r.scr_tip || [] })}><${Icon} name="clock" />${r.scr}</span></span>`
+        : r.len) },
     { key: "res", label: "Resolution", width: width("res"), sort: "res" },
     { key: "fmt", label: "Format", width: width("fmt"), sort: "fmt", titleOf: (r) => r.fmt,
       render: (r) => html`<span class=${r.fmt_bad ? "err-ink" : "dim"}>${r.fmt}</span>` },

@@ -870,6 +870,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             self._load_track(first)
         self._start_change_scan()
         self._probe_metadata_async(scan_id)
+        self._screens_async(scan_id, scan_dir)
 
     def _load_staged(self, assets_dir):
         """MainWindow._load_staged_changes (plus the replacement-name
@@ -931,6 +932,58 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                 'PC or drive? Project ▾ → "Relink moved files…" searches a '
                 'folder you pick and re-points every one of these at once.',
                 "info")
+
+    # ---- PAD-1115: the game's screens that show a clip for a fixed time ----
+    def _screens_async(self, scan_id, scan_dir):
+        """Read the card's game program on a worker for the screens that show a clip for a fixed time
+        (:mod:`.screen_time`), then flag their rows (the Length cell). Stern only; a card that cannot
+        be read flags nothing."""
+        self._screens = {}
+        if self._mfr_key() != "stern" or not scan_dir:
+            return
+        box = {}
+
+        def _work():
+            try:
+                from ...plugins.stern import screen_time as ST
+                box["found"] = ST.project_screens(scan_dir) or {}
+            except Exception:                               # noqa: BLE001 - no flags
+                box["found"] = {}
+
+        def _poll():
+            if self._scan_id != scan_id:
+                return
+            if "found" not in box:
+                self.ctx.loop.after(250, _poll)
+                return
+            self._screens = box["found"]
+            for rel, i in list(self._index.items()):
+                slot = self._by_rel.get(rel)
+                if slot is not None and self._screen_of(rel):
+                    self._put_row(i, self._row(slot))
+
+        threading.Thread(target=_work, name="video-screens", daemon=True).start()
+        self.ctx.loop.after(250, _poll)
+
+    def _screen_of(self, rel):
+        """The screens that show *rel*'s clip (its file name is the clip's name), ``[]`` for none."""
+        screens = getattr(self, "_screens", None) or {}
+        return screens.get(os.path.splitext(os.path.basename(rel))[0]) or []
+
+    def _scr_row(self, rel, s, rep, is_changed):
+        """The Length cell's screen-time tag and its words (PAD-1115)."""
+        found = self._screen_of(rel)
+        if not found:
+            return {}
+        from ...plugins.stern import screen_time as ST
+        clip_s = 0.0
+        if s.info is not None and (is_changed or not rep):
+            clip_s = float(getattr(s.info, "duration", 0) or 0)
+        got = ST.flag(found, clip_s, bool(rep) or is_changed)
+        if got is None:
+            return {}
+        tag, cls, head, lines = got
+        return {"scr": tag, "scr_cls": cls, "scr_head": head, "scr_tip": lines}
 
     # ---- metadata probe (MainWindow._run_probe_pass) -------------------
     def _probe_metadata_async(self, scan_id):
@@ -1305,6 +1358,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                 "col_lock": self._color_locked(rel),
                 "col_stock": bool(self._color_stock
                                   and not self._assign.get(rel)),
+                **self._scr_row(rel, s, rep, is_changed),
                 **self._m_row(rel)}
 
     # -- the chosen-files colour profile (PAD-312) ------------------------

@@ -815,7 +815,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
-         cabs_sids=None, comp=False, comp_prof=None):
+         cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -859,7 +859,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
 
     PAD-1041: *comp* puts ``comp.cfg`` beside the mode files (Prolonged Competition on the start menu, its flag and
-    captions read off *game_elf*); with nothing else it is a plan of its own, for *comp_prof*."""
+    captions read off *game_elf*); with nothing else it is a plan of its own, for *comp_prof*.
+
+    PAD-1115: *screen_times* (``clips.cfg``'s ``stime`` lines, :func:`.screen_time.cfg_lines`) make the game's
+    screens that show a replaced clip last as long as it; with nothing else they are a plan of their own, for
+    *screen_prof*."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -911,6 +915,12 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 result = comp_plan(project, game_elf, comp_prof or handicap_prof or idle_prof or coop_prof
                                    or attract_prof or variants_prof or sound_modes_prof or picture_prof)
             comp_into(result, game_elf, scratch, only=True)
+        if screen_times:                             # PAD-1115: screen times, alone or with the above
+            if result is None:
+                result = screen_plan(project, game_elf, screen_prof or comp_prof or handicap_prof or idle_prof
+                                     or coop_prof or attract_prof or variants_prof or sound_modes_prof
+                                     or picture_prof)
+            screen_into(result, os.path.join(scratch, "screens"), screen_times, only=True)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -1001,6 +1011,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         cabs_into(result, scratch, cabs, cabs_sids or {}, only=False, log=log, game_elf=game_elf)
     if comp:                                         # PAD-1041
         comp_into(result, game_elf, scratch, only=False)
+    if screen_times:                                 # PAD-1115
+        screen_into(result, os.path.join(scratch, "screens"), screen_times, only=False)
     return result
 
 
@@ -1068,6 +1080,44 @@ def idle_into(result, scratch, only):
         f.write(IP.cfg_text(only))
     result.idle_file = path
     result.lines.append("inactivity pauses timers: %s" % IP.HOW)
+    return result
+
+
+# ---- PAD-1115: a game screen that shows a replaced clip lasts as long as the clip ----------------
+def screen_plan(project, game_elf, prof):
+    """A plan carrying only the screen times (:mod:`.screen_time`): no mode, no scene; the runtime and the
+    title's port on p2 with ``stime`` lines in ``clips.cfg`` (:func:`screen_into`)."""
+    if prof is None:
+        raise ModeWriteError("the app cannot tell which game this project is for")
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to time the screens of"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def screen_into(result, scratch, lines, only):
+    """Put the screen times' ``stime`` *lines* in *result*'s ``clips.cfg``: after the random clips' lines when the
+    build has them, else in a file of their own (``only`` first when the card carries no modes)."""
+    from . import clip_variants as CV
+    if not lines:
+        return result
+    path = getattr(result, "clips_file", "")
+    if path and os.path.isfile(path):
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            f.write("# PAD-1115: screens that last as long as their clip\n" + "\n".join(lines) + "\n")
+    else:
+        os.makedirs(scratch, exist_ok=True)
+        path = os.path.join(scratch, CV.CFG_NAME)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("# PAD-1115: screens that last as long as their clip (pad_mode_runtime.c)\n"
+                    + ("only\n" if only else "") + "\n".join(lines) + "\n")
+        result.clips_file = path
+    for line in lines:
+        cols = line.split("\t")
+        result.lines.append("screen times: the %s screen lasts as long as its clip, %.2f s"
+                            % (cols[5], int(cols[4]) / 1000.0))
     return result
 
 

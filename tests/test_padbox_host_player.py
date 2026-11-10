@@ -93,6 +93,7 @@ def _run(d, body, timeout=60):
         _function("ffplay_channel_args"),
         _function("mac_meter"),
         _function("ffplay_status"),
+        _function("mac_outputs"),
         _function("host_player"),
         body, "",
     ])
@@ -200,6 +201,71 @@ printf 'Input #0, s16le, from pipe:0:\n' |
     played = [l for l in lines if l.startswith("[box] ffplay playing:")]
     assert [l.split()[3] for l in played] == ["1.00", "4.00", "7.00"], lines
     assert "aq= 4KB" in played[1], played
+
+
+_PROFILER = """Audio:
+
+    Devices:
+
+        MacBook Pro Microphone:
+
+          Default Input Device: Yes
+          Input Channels: 1
+          Manufacturer: Apple Inc.
+          Current SampleRate: 48000
+          Transport: Built-in
+          Input Source: MacBook Pro Microphone
+
+        MacBook Pro Speakers:
+
+          Default Output Device: Yes
+          Default System Output Device: Yes
+          Manufacturer: Apple Inc.
+          Output Channels: 2
+          Current SampleRate: 48000
+          Transport: Built-in
+          Output Source: MacBook Pro Speakers
+
+        Studio Display Speakers:
+
+          Manufacturer: Apple Inc.
+          Output Channels: 2
+          Current SampleRate: 48000
+          Transport: USB
+
+"""
+
+
+@needs_bash
+def test_the_macs_outputs_are_listed_with_the_default_marked():
+    d = _fresh_dir()
+    script = "\n".join(["set -u", "D=%s" % _q(d), _function("mac_outputs"), r"""
+uname() { echo Darwin; }
+system_profiler() { cat "$D/profile"; }
+mac_outputs
+"""])
+    with open(os.path.join(d, "profile"), "w", encoding="utf-8") as fh:
+        fh.write(_PROFILER)
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    text = out.stdout.decode("utf-8", "replace")
+    assert text.startswith("[box] speaker: Mac outputs: "), text
+    assert "MacBook Pro Speakers (MacBook Pro Speakers) [default]" in text, text
+    assert "Studio Display Speakers" in text and "Microphone" not in text, text
+
+
+@needs_bash
+def test_off_a_mac_no_outputs_are_listed():
+    d = _fresh_dir()
+    script = "\n".join(["set -u", _function("mac_outputs"), r"""
+uname() { echo Linux; }
+mac_outputs; echo "RC=$?"
+"""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=30)
+    assert out.stdout.decode() == "RC=0\n", out.stdout
 
 
 @needs_bash

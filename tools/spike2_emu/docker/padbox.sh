@@ -509,6 +509,38 @@ ffplay_status() {
         }
         NF { print "[box] ffplay: " $0; fflush() }' >&2
 }
+# THE MAC'S SOUND OUTPUTS, ONCE PER RUN (PAD-1109). With the whole stream
+# proven to reach ffplay and its clock running at real time, the sound is
+# going somewhere the user does not hear; this says what outputs there are
+# and which is the default, so the log and the user's Sound settings can be
+# compared. system_profiler can take seconds: 15 s at most, and off a Mac
+# nothing is said.
+mac_outputs() {
+    [ "$(uname -s)" = Darwin ] || return 0
+    local f p w
+    f=$(mktemp "${TMPDIR:-/tmp}/padaudio.XXXXXX") || return 0
+    system_profiler SPAudioDataType >"$f" 2>/dev/null &
+    p=$!
+    ( sleep 15; kill "$p" 2>/dev/null ) >/dev/null 2>&1 &
+    w=$!
+    wait "$p" 2>/dev/null
+    kill "$w" 2>/dev/null
+    awk '
+        /^ {8}[^ ].*:$/ { name = $0; sub(/^ +/, "", name); sub(/:$/, "", name) }
+        /Output Channels:/ { out[name] = 1 }
+        /Default Output Device: Yes/ { def = name }
+        /Output Source:/ { src[name] = $0; sub(/.*Output Source: */, "", src[name]) }
+        END {
+            n = 0
+            for (d in out) {
+                n++
+                line = line (line == "" ? "" : "; ") d (src[d] != "" ? " (" src[d] ")" : "") (d == def ? " [default]" : "")
+            }
+            if (n) print "[box] speaker: Mac outputs: " line
+            else print "[box] speaker: the Mac lists no sound output"
+        }' "$f"
+    rm -f "$f"
+}
 host_player() {
     [ "${PAD_AUDIO:-1}" = 0 ] && return 0
     fmt=""
@@ -539,6 +571,7 @@ host_player() {
     echo "[box] speaker: $fpbin ($(ffplay -version 2>/dev/null | head -n 1 | cut -d' ' -f1-3))"
     left=$(env | grep -E '^(SDL_|AUDIODEV=|DYLD_|PYTHON)' | cut -d= -f1 | sort | tr '\n' ' ')
     [ -n "$left" ] && echo "[box] speaker: started without the app's ${left% }"
+    mac_outputs
     # NOT exec'd, and STARTED AGAIN IF IT STOPS (PAD-832), so the TERM that
     # takes this player down at the end has to reach ffplay as well. Killing
     # ffplay is enough: the docker exec feeding it dies on its next write.

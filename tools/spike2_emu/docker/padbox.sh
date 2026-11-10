@@ -463,6 +463,52 @@ ffplay_channel_args() {
         echo "-ac $1"
     fi
 }
+# WHAT REACHED THE MAC (PAD-1109). The box's relay says what it sent, but it
+# reads at the game's own pace whatever happens downstream, so it read just as
+# healthy while Colima swallowed the stream and ffplay got 310 KB in all. This
+# stage passes the stream through unchanged and, every PAD_METER_S (30) s,
+# asks dd for its own count (SIGINFO on a Mac, SIGUSR1 elsewhere) and says it:
+# the bytes ffplay was actually handed. stdin is named for dd, because a
+# background command in a script otherwise reads /dev/null.
+mac_meter() {
+    local f p sig i line
+    f=$(mktemp "${TMPDIR:-/tmp}/padmeter.XXXXXX") || { cat; return; }
+    dd bs=65536 <&0 2>"$f" &
+    p=$!
+    sig=USR1; [ "$(uname -s)" = Darwin ] && sig=INFO
+    while kill -0 "$p" 2>/dev/null; do
+        i=0
+        while [ "$i" -lt "${PAD_METER_S:-30}" ] && kill -0 "$p" 2>/dev/null; do
+            sleep 1; i=$(( i + 1 ))
+        done
+        kill -0 "$p" 2>/dev/null || break
+        kill -"$sig" "$p" 2>/dev/null
+        sleep 0.3
+        line=$(grep -E 'bytes' "$f" | tail -n 1)
+        [ -n "$line" ] && echo "[box] handed to the Mac's speaker so far: $line" >&2
+    done
+    wait "$p" 2>/dev/null
+    line=$(grep -E 'bytes' "$f" | tail -n 1)
+    [ -n "$line" ] && echo "[box] handed to the Mac's speaker in all: $line" >&2
+    rm -f "$f"
+}
+# WHAT ffplay ITSELF SAYS (PAD-1109). Its status line - the playback clock,
+# then aq=, the sound it holds queued - only moves while the sound device is
+# taking audio from it, so it tells "fed but not playing" from "playing" from
+# inside the app's own run, the one place no Terminal test can stand in for.
+# ffplay rewrites that line with \r about 30 times a second: every
+# PAD_FFSTAT_N-th (900, about 30 s) is said, every other line of its passes.
+ffplay_status() {
+    tr '\r' '\n' | awk -v every="${PAD_FFSTAT_N:-900}" '
+        /(M-A|A-V|M-V):/ {
+            if (++n % every == 1) {
+                sub(/^ +/, ""); gsub(/ +/, " ")
+                print "[box] ffplay playing: " $0; fflush()
+            }
+            next
+        }
+        NF { print "[box] ffplay: " $0; fflush() }' >&2
+}
 host_player() {
     [ "${PAD_AUDIO:-1}" = 0 ] && return 0
     fmt=""
@@ -518,13 +564,18 @@ host_player() {
         # take every other read of it, so it goes first
         docker exec -u 0 "$NAME" pkill -f 'padrelay.py --pipe' >/dev/null 2>&1
         # $chargs unquoted on purpose: it is an option and its value
-        docker exec -i "$NAME" python3 /pad/rig/padrelay.py --pipe \
+        # No -i: the relay reads nothing on stdin, and here stdin is /dev/null
+        # (an async list in a script), so -i only attached an input stream
+        # that ends at once. The stream a Mac user heard through Docker came
+        # from a command without it (PAD-1109).
+        docker exec "$NAME" python3 /pad/rig/padrelay.py --pipe \
                 "$BOX_FIFO" "${PAD_AUDIO_CTL:+$BOX_CTL}" |
+            mac_meter |
             env -i HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
                 TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-en_US.UTF-8}" \
-                "$fpbin" -hide_banner -loglevel warning -nodisp -autoexit \
+                "$fpbin" -hide_banner -loglevel info -stats -nodisp -autoexit \
                  -fflags nobuffer -flags low_delay \
-                 -f s16le -ar "$rate" $chargs -i pipe:0 &
+                 -f s16le -ar "$rate" $chargs -i pipe:0 2> >(ffplay_status) &
         fp=$!
         wait "$fp"; rc=$?; fp=""
         # The relay ends when the run does; so does this. Asked of the FIFO,

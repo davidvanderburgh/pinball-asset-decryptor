@@ -1200,6 +1200,78 @@ def test_shadow_flipper_subs_are_found_whole_word_only():
     assert vs.flipper_subs({"flippers": {"_": "x", "sLLFlipper": "MyFlipL"}}, had) == {"sLLFlipper": "MyFlipL"}
 
 
+def test_shadow_warns_when_the_flipper_coils_move_nothing():
+    # PAD-1112: Munsters flips inline in its key handlers, only while its own
+    # game runs, and has no SolLFlipper: with no `flippers` in the map the
+    # machine's flipper coils called nothing and the flippers never moved
+    vs = pytest.importorskip("vpxshadow")
+    inline = ["Sub Table1_KeyDown_orig(ByVal Keycode)", "\tIf bGameInPlay Then LF.Fire", "End Sub"]
+    rep = vs.flipper_warnings({}, {}, inline)
+    assert rep and rep[0].startswith("WARNING: the machine's flipper coils move nothing"), rep
+    assert vs.flipper_warnings({}, {"SolLFlipper": True}, ["Sub SolLFlipper(e)", "End Sub"]) == []
+    named = {"flippers": {"_": "x", "sLLFlipper": "PadLFlip", "sLRFlipper": "PadRFlip"},
+             "extra_vbs": "Sub PadLFlip(e)\n\tLF.Fire\nEnd Sub\n"}
+    assert vs.flipper_warnings(named, {}, inline) == [
+        "WARNING: the map's flipper sub PadRFlip is in neither the table's script nor extra_vbs"]
+    assert vs.flipper_warnings(named, {}, inline + ["Sub PadRFlip(e)", "End Sub"]) == []
+
+
+def test_shadow_maps_define_the_flipper_subs_they_name():
+    # a map's own `Pad...` flipper body lives in its extra_vbs; a typo there
+    # is a table whose flippers never move
+    vs = pytest.importorskip("vpxshadow")
+    for path in glob.glob(os.path.join(VPX, "*.shadow.json")):
+        m = json.load(open(path, encoding="utf-8"))
+        extra = (m.get("extra_vbs") or "").split("\n")
+        for sub in vs.flipper_subs(m, {}).values():
+            if sub.startswith("Pad"):
+                assert vs.has_sub(extra, sub), (os.path.basename(path), sub)
+
+
+def test_munsters_flips_on_the_machines_coils():
+    # PAD-1112: the machine's LEFT FLIPPER (48) and RIGHT FLIPPER (46) coils
+    # flip Munsters' flippers the way its key handlers did: LF/RF.Fire up,
+    # RotateToStart down, with the table's flipper sounds and DOF 101/102
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "munsters_pro.shadow.json"), encoding="utf-8"))
+    assert vs.flipper_subs(m, {}) == {"sLLFlipper": "PadLFlip", "sLRFlipper": "PadRFlip"}
+    assert vs.flipper_warnings(m, {}, []) == []
+    assert any(r["since"].startswith("PAD-1112") for r in m["repatch"])
+    if not (sys.platform == "win32" and shutil.which("cscript")):
+        return
+    harness = "\n".join([
+        "Option Explicit", "Dim calls : calls = \"\"",
+        "Const DOFOff = 0", "Const DOFOn = 1", "Const DOFFlippers = 7",
+        "Dim DOFeffects(10) : DOFeffects(7) = 2",
+        "Sub DOF(ev, st) : calls = calls & \"DOF \" & ev & \"=\" & st & \" \" : End Sub",
+        "Sub PlaySound(n, a, b, c, d, e, f, g, h) : calls = calls & n & \" \" : End Sub",
+        "Function AudioPan(o) : AudioPan = 0 : End Function",
+        "Function AudioFade(o) : AudioFade = 0 : End Function",
+        # the table's own SoundFXDOF, as its script has it
+        "Function SoundFXDOF(Sound, DOFevent, State, Effect)",
+        "\tIf DOFeffects(Effect) = 2 Then SoundFXDOF = Sound : DOF DOFevent, State",
+        "End Function",
+        "Class Obj : Public Name",
+        "\tSub Fire : calls = calls & Name & \".Fire \" : End Sub",
+        "\tSub RotateToStart : calls = calls & Name & \".RotateToStart \" : End Sub",
+        "End Class",
+        "Dim LF : Set LF = New Obj : LF.Name = \"LF\"",
+        "Dim RF : Set RF = New Obj : RF.Name = \"RF\"",
+        "Dim LeftFlipper : Set LeftFlipper = New Obj : LeftFlipper.Name = \"LeftFlipper\"",
+        "Dim RightFlipper : Set RightFlipper = New Obj : RightFlipper.Name = \"RightFlipper\"",
+        m["extra_vbs"].split("' the flippers (PAD-1112)")[1].split("\n", 1)[1],
+        "PadLFlip True : PadLFlip False : PadRFlip 1 : PadRFlip 0",
+        "WScript.Echo calls"])
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        vbs = os.path.join(d, "flip.vbs")
+        open(vbs, "w", encoding="latin-1").write(harness)
+        r = subprocess.run(["cscript", "//nologo", vbs], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == (
+        "LF.Fire DOF 101=1 fx_flipperup LeftFlipper.RotateToStart DOF 101=0 fx_flipperdown "
+        "RF.Fire DOF 102=1 fx_flipperup RightFlipper.RotateToStart DOF 102=0 fx_flipperdown"), r.stdout + r.stderr
+
+
 def test_shadow_lamps_drive_the_tables_lights():
     # with `lamps` the machine lights the table: a dictionary from the lamp
     # number (1000 + node*100 + index, the FIRST LED of an RGB insert) to the

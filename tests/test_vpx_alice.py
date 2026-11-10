@@ -359,7 +359,7 @@ def test_the_patched_file_ticks_the_plungers_auto_plunger_box():
 def test_a_copy_patched_before_the_fix_is_asked_to_patch_again(tmp_path):
     vs = pytest.importorskip("vpxsetup")
     m = json.load(open(VPX / "ac.shadow.json", encoding="utf-8"))
-    (mark,) = m["repatch"]
+    (mark,) = [k for k in m["repatch"] if k["since"].startswith("PAD-960")]
     # a line only the old patcher wrote: the map no longer carries it anywhere
     rest = dict(m)
     del rest["repatch"]

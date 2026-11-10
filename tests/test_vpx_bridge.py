@@ -1062,8 +1062,11 @@ def test_shadow_carries_the_tables_dof_into_its_own_subs():
     out, rep = vs.patch(DOF_TRIBUTE, _dof_shadow())
     assert ("Sub sw001_Hit : vpmTimer.PulseSw 1053 : PadDOF 107, DOFPulse, Empty"
             " : PadDOF 141, DOFPulse, DOFContactors : End Sub") in out
-    for n in (99, 98, 97, 77):
+    for n in (99, 98, 97):
         assert "PadDOF %d," % n not in out
+    # PAD-1099: the plunger lane's own sub no longer runs either; its
+    # unconditional DOF comes along, the auto-plunge branch's does not
+    assert "Sub Trigger1_Hit : Controller.Switch(1067) = True : PadDOF 77, DOFPulse, Empty : End Sub" in out
     # its own sub still runs, so its DOF is not doubled
     assert "Sub LeftSlingShot_Slingshot : vpmTimer.PulseSw 1069 : LeftSlingShot_Slingshot_orig : End Sub" in out
     assert "PadDOF 103," not in out
@@ -4874,3 +4877,103 @@ def test_gotg_look_undoes_the_boot_and_follows_the_machines_gi(tmp_path, f):
         "boot off True True", "after_init on False False", "before on False False",
         "lit on False False", "half on False False", "tilt off False False",
         "back on False False"], r.stdout
+
+
+# ---- PAD-1099: the plunger lane's own subs obey orig_hits ------------------
+#
+# Behind the machine a tribute's plunger-lane subs are its rules (skill shots,
+# ball savers, songs, light effects, even gates). The lane wrapper called them
+# whatever orig_hits said, so they ran on every launch over the machine's
+# lights. They are called now only where every other switch's would be.
+
+PLUNGER_TRIBUTE = MINI_TRIBUTE.replace(
+    "Sub Trigger1_Hit : bBallInPlungerLane = True : End Sub",
+    "Sub Trigger1_Hit : bBallInPlungerLane = True : DOF 117, DOFPulse : End Sub\n"
+    "Sub Trigger1_UnHit : bBallInPlungerLane = False : LightEffect 6 : End Sub")
+
+
+def _plunger_lines(out):
+    return [ln for ln in out.split("\n") if ln.startswith(("Sub Trigger1_Hit ", "Sub Trigger1_UnHit "))]
+
+
+def test_plunger_lane_calls_the_tributes_own_subs_only_with_orig_hits():
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(PLUNGER_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert _plunger_lines(out) == [
+        "Sub Trigger1_Hit : Controller.Switch(1067) = True : Trigger1_Hit_orig : End Sub",
+        "Sub Trigger1_UnHit : Controller.Switch(1067) = False : Trigger1_UnHit_orig : End Sub"]
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["orig_hits"] = False
+    out, rep = vs.patch(PLUNGER_TRIBUTE, m)
+    # the rules stay out; the lane's unconditional DOF is fired by the bridge
+    assert _plunger_lines(out) == [
+        "Sub Trigger1_Hit : Controller.Switch(1067) = True : PadDOF 117, DOFPulse, Empty : End Sub",
+        "Sub Trigger1_UnHit : Controller.Switch(1067) = False : End Sub"]
+    assert "Sub Trigger1_UnHit_orig" in out                 # renamed, never called
+    assert "Trigger1_Hit (117)" in " ".join(rep)
+    m["orig_keep"] = ["Trigger1"]                           # a map that needs them says so
+    out, rep = vs.patch(PLUNGER_TRIBUTE, m)
+    assert _plunger_lines(out)[1] == "Sub Trigger1_UnHit : Controller.Switch(1067) = False : Trigger1_UnHit_orig : End Sub"
+    assert "Trigger1_Hit (117)" not in " ".join(rep)
+
+
+def test_every_map_without_orig_hits_asks_a_table_with_the_old_lane_wrapper_to_patch_again(tmp_path):
+    vs = pytest.importorskip("vpxsetup")
+    seen = 0
+    for path in sorted(glob.glob(os.path.join(VPX, "*.shadow.json"))):
+        m = json.load(open(path, encoding="utf-8"))
+        if m.get("orig_hits", True) is not False or not m.get("plunger"):
+            continue
+        seen += 1
+        p = m["plunger"]
+        name = "t.vpx"
+        script = tmp_path / "t.script.vbs"
+        old = "Sub %s_UnHit : Controller.Switch(1%03d) = False : %s_UnHit_orig : End Sub" % (
+            p["lane_trigger"], p["lane_switch"], p["lane_trigger"])
+        script.write_text(old + "\n", encoding="utf-8")
+        assert any("every launch" in w for w in vs.missed_fixes(str(tmp_path), name, m["repatch"])), path
+        # what the patcher writes now asks nothing
+        script.write_text(old.replace(" : %s_UnHit_orig" % p["lane_trigger"], "") + "\n", encoding="utf-8")
+        assert not any("every launch" in w for w in vs.missed_fixes(str(tmp_path), name, m["repatch"])), path
+    assert seen >= 20
+
+
+# ---- PAD-1099: GotG's own rules bulbs rest; the LE's slings are the machine's
+
+@pytest.mark.parametrize("f", ["guardians_le.shadow.json", "guardians.shadow.json"])
+def test_gotg_rules_bulbs_rest_once_the_tables_init_is_done(f):
+    m = json.load(open(os.path.join(VPX, f), encoding="utf-8"))
+    ex = m["extra_vbs"]
+    look = ex[ex.index("Sub PadGotgLookOff"):]
+    look = look[:look.index("End Sub")]
+    assert "\tPadGotgBulbsOff" in look
+    bulbs = ex[ex.index("Sub PadGotgBulbsOff"):]
+    bulbs = bulbs[:bulbs.index("End Sub")]
+    assert "On Error Resume Next" in bulbs
+    for t in ("flshUpgrade", "flshModeSelect", "flshMystery", "flshExtraBall"):
+        assert "%s.TimerEnabled = False" % t in bulbs
+    assert "Lampz.SetLamp n, False" in bulbs
+    assert [k for k in m["repatch"] if "PAD-1099: the table's rules bulbs" in k["since"]]
+
+
+def test_gotg_le_sling_inserts_follow_the_machines_sling_leds():
+    m = json.load(open(os.path.join(VPX, "guardians_le.shadow.json"), encoding="utf-8"))
+    assert m["lamps"]["Light001"]["leds"] == [[10, 30]]      # LEFT SLING (led_io, LE 1.15)
+    assert m["lamps"]["Light004"]["leds"] == [[10, 29]]      # RIGHT SLING
+    pro = json.load(open(os.path.join(VPX, "guardians.shadow.json"), encoding="utf-8"))
+    assert "Light001" not in pro["lamps"]                    # the Pro build has no sling LEDs
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's VBScript under cscript")
+def test_gotg_bulbs_off_runs_without_the_tables_objects(tmp_path):
+    """PadGotgLookOff runs from Table1_Init; a table without the bulbs (or a
+    Lampz that is not up yet) must not stop it."""
+    m = json.load(open(os.path.join(VPX, "guardians_le.shadow.json"), encoding="utf-8"))
+    ex = m["extra_vbs"]
+    bulbs = ex[ex.index("Sub PadGotgBulbsOff"):]
+    bulbs = bulbs[:bulbs.index("End Sub") + len("End Sub")]
+    vbs = tmp_path / "bulbs.vbs"
+    vbs.write_text(bulbs + "\nPadGotgBulbsOff\nWScript.Echo \"done\"\n", encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and r.stdout.strip() == "done", r.stdout + r.stderr

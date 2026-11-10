@@ -830,16 +830,26 @@ def _calls_orig(m, name):
     return m.get("orig_hits", True) or name.lower() in {n.lower() for n in m.get("orig_keep", [])}
 
 
-def gen_plunger(m, had):
+def gen_plunger(m, had, dof=None):
     """The plunger lane's switch and PadAutoPlunge, the machine's launch coil."""
     p = m.get("plunger")
     if not p:
         return []
-    return ["Sub %s_Hit : Controller.Switch(1%03d) = True" % (p["lane_trigger"], p["lane_switch"])
-            + (" : %s_Hit_orig" % p["lane_trigger"] if had.get(p["lane_trigger"] + "_Hit") else "")
+    # PAD-1099: the lane's own subs obey orig_hits like every other switch's.
+    # They are the tribute's rules - skill shots, ball savers, songs, its own
+    # light effects (Foo Fighters', Deadpool's and Bond's `lighteffect 6`) and
+    # even gates (GotG opens its left loop gate, Deadpool its gate3) - and ran
+    # on every launch behind the machine. GotG's put a skill-shot arrow on
+    # white and blinking each time. A map that needs them names the lane
+    # trigger in orig_keep.
+    lane = p["lane_trigger"]
+    orig = _calls_orig(m, lane)
+    fx = lambda ev: "".join(" : " + c for c in (dof or {}).get(lane + ev, ()))   # noqa: E731
+    return ["Sub %s_Hit : Controller.Switch(1%03d) = True" % (lane, p["lane_switch"])
+            + (" : %s_Hit_orig" % lane if orig and had.get(lane + "_Hit") else fx("_Hit"))
             + " : End Sub",
-            "Sub %s_UnHit : Controller.Switch(1%03d) = False" % (p["lane_trigger"], p["lane_switch"])
-            + (" : %s_UnHit_orig" % p["lane_trigger"] if had.get(p["lane_trigger"] + "_UnHit") else "")
+            "Sub %s_UnHit : Controller.Switch(1%03d) = False" % (lane, p["lane_switch"])
+            + (" : %s_UnHit_orig" % lane if orig and had.get(lane + "_UnHit") else fx("_UnHit"))
             + " : End Sub",
             # PAD-960: a VPX Plunger the patched file makes a solenoid
             # launcher (auto_plunger_item) fires at full strength on Fire;
@@ -1018,7 +1028,7 @@ def gen(m, had, quiet=None, dof=None):
             "\tPlaySoundAt \"fx_drain\", %s" % t["drain"]]
     out += ["\t" + c for c in dof.get(t["drain"] + "_Hit", ())]
     out += ["End Sub"]
-    out += gen_plunger(m, had)
+    out += gen_plunger(m, had, dof)
     # ---- switches
     out.append("")
     if any(s.get("event") == "pass" for k, s in m["switches"].items() if k != "_"):
@@ -1476,6 +1486,9 @@ def dof_calls(lines, m):
                 dof[name + ev] = dof_of_sub(stmts, name + ev)
     for name in [m["trough"]["drain"]] + list(saucers(m)):
         dof[name + "_Hit"] = dof_of_sub(stmts, name + "_Hit")
+    if m.get("plunger"):                 # PAD-1099: the lane's own subs no longer run
+        for ev in ("_Hit", "_UnHit"):
+            dof[m["plunger"]["lane_trigger"] + ev] = dof_of_sub(stmts, m["plunger"]["lane_trigger"] + ev)
     fires = {"bsTrough.SolOut": m["trough"]["release"]}
     fires.update({"bs%s.SolOut" % k: k for k in saucers(m)})
     if m.get("plunger"):
@@ -1495,6 +1508,9 @@ def patch(script, m):
         if name != "_" and _calls_orig(m, name):   # its own sub runs and fires them
             for k in [k for k in dof if k.rsplit("_", 1)[0] == name]:
                 del dof[k]
+    if m.get("plunger") and _calls_orig(m, m["plunger"]["lane_trigger"]):
+        for ev in ("_Hit", "_UnHit"):
+            dof.pop(m["plunger"]["lane_trigger"] + ev, None)
     if dof:
         rep.append("DOF carried into the bridge: %s" % ", ".join(
             "%s (%s)" % (k, ", ".join(c.split()[1].rstrip(",") for c in v)) for k, v in dof.items()))

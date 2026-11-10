@@ -209,6 +209,13 @@ def build(title, model, preferred):
     }
     if preferred:
         m["preferred"] = True
+    # PAD-1099: the lane wrapper called the table's own lane subs
+    m["repatch"] = [{"old": "Sub swPlungerRest_%s : Controller.Switch(1023) = %s : swPlungerRest_%s_orig : End Sub"
+                            % (ev, lv, ev),
+                     "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, "
+                            "over the machine's lights",
+                     "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
+                    for ev, lv in (("UnHit", "False"), ("Hit", "True"))]
     return m
 
 

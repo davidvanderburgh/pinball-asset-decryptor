@@ -48,3 +48,18 @@ other build needs its own (a finder, see the plan).
 4. **Proof:** an emulator stand-in login (write a user into the user manager from a probe mode, as PAD-698's
    probe called agent_begin) - then a 3-teammate co-op game shows each teammate's name on their bonus, and an
    award call made while the gate holds is refused.
+
+## Done (run 2)
+
+- Built as planned for 1 and 2, with two changes found on the emulator: the swap is of the login tables' ENTRIES (one
+  data swap covers every reader: the lookup, the per-player name 0x475e4c on GZ Pro, the logged-in test), and a TEAM
+  game is left alone - the game counts two players there and clears the entries past its count (players 3 and 4's
+  went to 0 at player 3's first turn, with or without the swap), so player 1's entry swapped into place 3 was lost.
+- Finders on all 54 newest builds: `users` on every one (Beatles and Star Wars ELG at +0x150/+0x154), `achievements`
+  on all but Star Wars ELG (no audit add found).
+- 3: the team's high score stays under player 1's login on the co-op board (the logins are back as made at the game's
+  end). Naming every teammate there needs the user objects' names and the board record rewritten, and the emulator
+  has no Insider login to show either - left as a decision for David.
+- Proof: C:/tmp/PAD-1108 (job.sh co-op/teams with marker logins via mem.py at the guest base +0x10000; job_ach.sh +
+  ach_test_mode.c calling the award, with and without the `achievements` line). MODE_SDK.md "Co-op and Insider
+  Connected (PAD-1108)" has the results.

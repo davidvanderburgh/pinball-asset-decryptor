@@ -2,8 +2,9 @@
 Player 1 username displayed on End of Ball Bonus for all 3 players. High score attributed only to Player 1".
 
 The game plays one player for the team, and its user manager answers "the login of player N" from two tables of the
-players' entries (player p at table + 20p + 4). The runtime swaps the game's player's entry with the teammate up's and
-puts them back before each of the game's own player changes; it refuses the game's achievement award while Insider
+players' entries (player p at table + 20p + 4). In a co-op game the runtime swaps the game's player's entry with the
+teammate up's and puts them back before each of the game's own player changes (not in a team game: the game clears the
+entries past its count of two, and would lose player 1's); it refuses the game's achievement award while Insider
 Connected is held back. Both addresses are read off the card's program (coop_play.insider_users / achievement_award).
 
 Desk: hand-made code for the finders, the runtime's words. With game programs at hand (PAD_GAME_ELVES=<folder of game
@@ -125,7 +126,7 @@ def test_the_entries_go_back_before_every_game_player_change_and_follow_the_turn
     assert "coop_users_put(1, coop.turn)" in co[co.index("coop.turn = next;"):]
     tm = _body(src, "static unsigned coop_team_change(")
     assert tm.index("coop_users_put(0, 0)") < tm.index("ret = coop_change_game(")
-    assert "coop_users_put(p_after, coop.turn)" in tm
+    assert "coop_users_put(p_after" not in tm and "coop_users_put(1" not in tm    # a team game keeps its logins
     tick = _body(src, "static void coop_tick(void)\n{")
     assert re.search(r"if \(cu_g && !\(coop_teammates\(\) && pm_in_game\(\)\)\) coop_users_put\(0, 0\);", tick)
     assert "coop_users_arm();" in _body(src, "static void coop_arm(")

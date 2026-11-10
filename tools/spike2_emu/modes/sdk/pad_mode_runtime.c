@@ -18252,8 +18252,10 @@ static void team_menu_arm(void);              /* PAD-1052, with the start menu's
  * the user's 16-byte uuid and a flags word; Godzilla Pro 1.16: manager 0x7b0f50, +0x160 / +0x164), and every user of
  * a player's login reads them (the lookup, game_users_lookup on every build, and the logged-in test beside it). So
  * while teammate t is up, the game's player 1 holds teammate t's entry and teammate t's place holds player 1's: the
- * bonus, and anything else the game does for "player 1", is the teammate's. In a team game (PAD-1042) the game's player
- * g (the team up) holds the entry of the team player up. Before each of the game's own player changes the entries go
+ * bonus, and anything else the game does for "player 1", is the teammate's. NOT in a team game (PAD-1042): the game
+ * counts two players there and clears the entries past its count (emulator, Godzilla LE 1.16: players 3 and 4's went to
+ * 0 in a team game), so player 1's entry swapped into player 3's place was lost - a team game keeps the game's own
+ * logins, the team's first players'. Before each of the game's own player changes the entries go
  * back where they were (so the game's end, its high scores and its session see the logins as the players made them),
  * and they are swapped again for the next turn; a game that ends any other way is put back by the tick.
  * coop.cfg: `users <manager> <A> <B>` (coop_play.insider_users, read off the card's own program).
@@ -18603,7 +18605,6 @@ static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned
         p_after == p && *coop_ball_byte == before ? "an extra ball" : down ? "the next round on this ball"
         : *coop_ball_byte != before ? "the next ball" : "the other team", coop_team_of(coop.turn), coop.turn,
         *coop_ball_byte);
-    if (p_after >= 1 && p_after <= 2) coop_users_put(p_after, coop.turn);   /* PAD-1108 */
     coop_turn_show();
     coop_chars_turn();                                        /* PAD-1031: a first ball's pick */
     return ret;

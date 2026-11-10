@@ -271,6 +271,10 @@ _VIDEO_FILETYPES = [("Video files", "*.mp4 *.mov *.m4v *.mkv *.avi *.webm *.wmv 
 #: PAD-999: Add songs takes a song's audio and its intro video at once, named alike
 _JUKE_FILETYPES = [("Songs and their intro videos", _AUDIO_FILETYPES[0][1] + " " + _VIDEO_FILETYPES[0][1]),
                    _AUDIO_FILETYPES[0], _VIDEO_FILETYPES[0], ("All files", "*.*")]
+#: PAD-1106: the Replacement pane's title and a row's Replacement cell for a song mode's record the
+#: jukebox plays songs in place of (its pool's song count)
+_JUKE_PANE = "Replacement (jukebox: 1 of %d songs at random)"
+_JUKE_CELL = "Jukebox: 1 of %d songs at random"
 _JUKE_TIP = ("A jukebox for the song modes: each time a song mode starts, the game plays one of these "
              "songs, drawn at random, with its own intro video. A Common song comes up three times as "
              "often as a Rare one, and a song never comes back within five song modes, so none plays "
@@ -425,6 +429,12 @@ class AudioTab(FindOriginalsMixin, TabService):
         # PAD-685: the jukebox's songs ([{"audio", "video", "weight", "pool"}]), its own sidecar key
         self._juke = []
         self._juke_pool = ""             # PAD-1007: the pool the Jukebox window shows (its first: "")
+        # PAD-1106: a jukebox song the Replacement pane drew for a song mode's record (its rel, or None),
+        # whether it was stopped or played to its end (the next Play draws again), and each pool's
+        # last draws (the next keeps clear of them, as the game's does)
+        self._juke_rep = None
+        self._juke_spent = False
+        self._juke_recent = {}
         # PAD-945: the sounds on the shots of the game's modes ([{"mode", "mode_name",
         # "switch", "switch_name", "file"}]), the same record; the sound the window adds next and
         # the game's modes and shots it offers (read once per project)
@@ -1467,7 +1477,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         elif is_changed:
             rep_disp, tag = self._changed_on_disk_cell(rel), "ondisk"
         else:
-            rep_disp, tag = "Choose…", ""
+            rep_disp, tag = self._juke_cell(rel) or "Choose…", ""
         row = {"k": rel, "len": s.duration_str(), "fmt": s.format_summary(),
                "type": cat_disp, "rep": rep_disp, "t": tag,
                "loop": bool(self._loop.get(rel)),
@@ -2059,6 +2069,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         rpath = self._assign.get(rel)
         if rpath and os.path.isfile(rpath):
             return True
+        if self._juke_songs_for(rel):
+            return True
         if staged_originals.snapshot_path(self._scan_dir, rel):
             slot = self._by_rel.get(rel)
             return bool(slot and slot.abs_path
@@ -2067,6 +2079,7 @@ class AudioTab(FindOriginalsMixin, TabService):
 
     def _load_rep_pane(self, rel, autoplay=False):
         from ...core import staged_originals
+        self._juke_rep = None
         if self._rep_mode is not None:
             # the slot's own replacement again: the loudness box is its own
             self._rep_mode = None
@@ -2091,8 +2104,60 @@ class AudioTab(FindOriginalsMixin, TabService):
                     gain_db=self._level.get(rel, 0),
                     base="Replacement (your file)", rel=rel)
                 return
+        if self._juke_load(rel, autoplay):
+            return
         self._pane_clear("rep", self._rep_pane_empty_text(
             rel, "no replacement assigned"), base="Replacement")
+
+    # -- PAD-1106: a song mode's record plays a jukebox song in the pane ------
+    def _juke_pool_of(self, rel):
+        """The jukebox pool whose songs the game plays in place of *rel* (a song mode's record), or None."""
+        if rel is None:
+            return None
+        return ((self._sm_offer or {}).get("jukebox_slots") or {}).get(rel)
+
+    def _juke_songs_for(self, rel):
+        """The jukebox songs the game plays in place of *rel*: ``[(audio, weight)]`` of its pool whose file
+        is there, ``[]`` when it is no jukebox music or its pool has none."""
+        from ...plugins.stern import jukebox as _JB
+        pool = self._juke_pool_of(rel)
+        if pool is None:
+            return []
+        return [(g["audio"], g.get("weight")) for g in self._juke
+                if (g.get("pool") or _JB.DEFAULT_POOL) == pool and g.get("audio")
+                and os.path.isfile(g["audio"])]
+
+    def _juke_load(self, rel, autoplay=False):
+        """Draw one of *rel*'s pool's songs as the game draws them (by weight, none of the pool's last
+        few) into the Replacement pane; False when *rel* has none."""
+        from ...plugins.stern import jukebox as _JB
+        songs = self._juke_songs_for(rel)
+        if not songs:
+            return False
+        pool = self._juke_pool_of(rel)
+        recent = self._juke_recent.setdefault(pool, [])
+        path = _JB.draw(songs, recent[-min(5, len(songs) - 1):] if len(songs) > 1 else ())
+        recent.append(path)
+        del recent[:-5]
+        self._pane_load("rep", path, autoplay=autoplay,
+                        label=os.path.basename(path), base=_JUKE_PANE % len(songs),
+                        rel=rel)
+        self._juke_rep = rel
+        self._juke_spent = False
+        return True
+
+    def _juke_redraw(self):
+        """▶ on a pane holding a jukebox song that was stopped or played to its end: draw the next."""
+        rel = self._current_rel
+        if not (self._juke_spent and rel is not None and self._juke_rep == rel
+                and self._panes["rep"].get("rel") == rel):
+            return False
+        return self._juke_load(rel, autoplay=True)
+
+    def _juke_cell(self, rel):
+        """The Replacement cell of a song mode's record the jukebox plays songs for, or None."""
+        n = len(self._juke_songs_for(rel))
+        return (_JUKE_CELL % n) if n else None
 
     def _compute_preview_limit(self, rel, rep_dur):
         if rel is None:
@@ -2145,6 +2210,8 @@ class AudioTab(FindOriginalsMixin, TabService):
             return True
         if side == "orig" and self._play_intercept():
             return True
+        if side == "rep" and self._juke_redraw():
+            return True
         self._publish("audio_play", pane=side, path=pane["path"], pos=None,
                       v=pane["v"])
         return True
@@ -2158,6 +2225,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         pane = self._panes["rep"]
         if not pane["path"]:
             return False
+        if self._juke_redraw():
+            return True
         self._publish("audio_play", pane="rep", path=pane["path"], pos=0.0,
                       v=pane["v"])
         return True
@@ -2231,8 +2300,11 @@ class AudioTab(FindOriginalsMixin, TabService):
 
     @rpc
     def stop(self):
-        """■: the page silenced both panes; drop a queued sequential step."""
+        """■: the page silenced both panes; drop a queued sequential step.
+        PAD-1106: a jukebox song in the Replacement pane is done with: its
+        next ▶ draws another."""
         self._cancel_advance()
+        self._juke_spent = self._juke_rep is not None
         return True
 
     def on_tab_changed(self, ns):
@@ -2249,6 +2321,8 @@ class AudioTab(FindOriginalsMixin, TabService):
         pane = self._panes.get(side)
         if pane is None or (path and pane["path"] != path):
             return False
+        if side == "rep" and self._juke_rep is not None:
+            self._juke_spent = True             # PAD-1106: played to its end, the next ▶ draws again
         if not self.audio_play_through_var.get():
             return False
         rel = self._current_rel
@@ -4299,6 +4373,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             cb = self.window.cb.get("on_folder_state_written")
             if cb is not None:
                 cb(assets_dir)
+        self._juke_spent = self._juke_rep is not None    # PAD-1106: the next ▶ draws from the new list
         self._refresh_list()
 
     def _add_mode(self):

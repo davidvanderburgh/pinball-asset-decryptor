@@ -18278,9 +18278,114 @@ static void coop_solo_check(void)
 /* from the tick: the game's own words back once its co-op game is over */
 static void coop_scores_same(unsigned n);
 static void team_menu_arm(void);              /* PAD-1052, with the start menu's other entries */
+/* ---- PAD-1108: the Insider Connected login of the teammate up (MODE_SDK.md "Co-op and Insider Connected") ---------
+ * DoomWalrus666 (3-player co-op): "achievements earned by player 2 and 3 were shown as earned by Player 1. Player 1
+ * username displayed on End of Ball Bonus for all 3 players. High score attributed only to Player 1". The game plays
+ * ONE player for the team, and it asks its user manager for "the user of player N" with the game's player, always 1.
+ * The manager keeps two tables of the players' logins (the manager at +A and +B; player p's entry at table + 20p + 4:
+ * the user's 16-byte uuid and a flags word; Godzilla Pro 1.16: manager 0x7b0f50, +0x160 / +0x164), and every user of
+ * a player's login reads them (the lookup, game_users_lookup on every build, and the logged-in test beside it). So
+ * while teammate t is up, the game's player 1 holds teammate t's entry and teammate t's place holds player 1's: the
+ * bonus, and anything else the game does for "player 1", is the teammate's. NOT in a team game (PAD-1042): the game
+ * counts two players there and clears the entries past its count (emulator, Godzilla LE 1.16: players 3 and 4's went to
+ * 0 in a team game), so player 1's entry swapped into player 3's place was lost - a team game keeps the game's own
+ * logins, the team's first players'. Before each of the game's own player changes the entries go
+ * back where they were (so the game's end, its high scores and its session see the logins as the players made them),
+ * and they are swapped again for the next turn; a game that ends any other way is put back by the tick.
+ * coop.cfg: `users <manager> <A> <B>` (coop_play.insider_users, read off the card's own program).
+ * The game's achievements (PAD-698 holds back the list they come from, but on a card of co-op and nothing else only while
+ * CO-OP PLAY is not Off - a machine switched to co-op after booting at Off already has it, and awarded every
+ * teammate's to player 1): `achievements <award>` (coop_play.achievement_award) - the award, refused while the
+ * gate holds, so a co-op game shows no NEW INSIDER ACHIEVEMENT! that never reaches Insider Connected. */
+#define COOP_USER_ENTRY 20u                  /* a player's entry: the uuid (16 bytes) and its flags word */
+static unsigned cu_mgr, cu_off[2];          /* coop.cfg `users`: the user manager and its two tables' fields */
+static unsigned cu_award;                   /* coop.cfg `achievements`: the game's achievement award */
+static unsigned cu_g, cu_p;                 /* the game's player cu_g holds player cu_p's entry now (0: as made) */
+static unsigned cu_awards_held;
+
+/* the entries' place in table t for player p (1..4): t + 20p + 4 (tests lift it verbatim) */
+static unsigned coop_user_entry(unsigned t, unsigned p)
+{
+    return t + COOP_USER_ENTRY * p + 4u;
+}
+
+/* a table the manager points at: the heap (allocated after the gate read the mappings, so only its shape is checked) */
+static int coop_user_table_ok(unsigned t)
+{
+    return t >= 0x10000u && !(t & 3u) && t < 0xbf000000u;
+}
+
+/* swap players a's and b's entries in both tables; the tables that cannot be read are left (0: none swapped) */
+static int coop_users_swap(unsigned a, unsigned b)
+{
+    int k, done = 0;
+    unsigned i;
+    for (k = 0; k < 2; k++) {
+        unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+        volatile unsigned char *x, *y;
+        if (!coop_user_table_ok(t)) continue;
+        x = (volatile unsigned char *)(unsigned long)coop_user_entry(t, a);
+        y = (volatile unsigned char *)(unsigned long)coop_user_entry(t, b);
+        for (i = 0; i < COOP_USER_ENTRY; i++) {
+            unsigned char c = x[i];
+            x[i] = y[i];
+            y[i] = c;
+        }
+        done = 1;
+    }
+    return done;
+}
+
+/* the first word of player p's uuid in the first table, for the log (0: no login) */
+static unsigned coop_user_word(unsigned p)
+{
+    unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[0]);
+    if (!coop_user_table_ok(t)) return 0;
+    return *(volatile const unsigned *)(unsigned long)coop_user_entry(t, p);
+}
+
+/* the game's player g to hold player p's login (g == p, or 0: every login back as the players made them) */
+static void coop_users_put(unsigned g, unsigned p)
+{
+    if (!cu_mgr) return;
+    if (cu_g) {
+        coop_users_swap(cu_g, cu_p);
+        say("co-op insider: the logins back as made (player %u 0x%08x, player %u 0x%08x)", cu_g, coop_user_word(cu_g),
+            cu_p, coop_user_word(cu_p));
+        cu_g = cu_p = 0;
+    }
+    if (g >= 1 && g <= 4 && p >= 1 && p <= 4 && g != p && coop_users_swap(g, p)) {
+        cu_g = g;
+        cu_p = p;
+        say("co-op insider: the game's player %u has player %u's login (0x%08x) while player %u is up", g, p,
+            coop_user_word(g), p);
+    }
+}
+
+static int on_coop_award(unsigned *r);       /* below the Insider Connected gate */
+
+static void coop_users_arm(void)
+{
+    if (cu_mgr && (!maps_has(cu_mgr + cu_off[0], 4, MAP_R) || !maps_has(cu_mgr + cu_off[1], 4, MAP_R))) {
+        say("co-op insider: the user manager 0x%08x is not mapped - the logins stay player 1's", cu_mgr);
+        cu_mgr = 0;
+    } else if (cu_mgr) {
+        say("co-op insider: the teammate up has the game's player's Insider login (manager 0x%08x, +0x%x +0x%x)",
+            cu_mgr, cu_off[0], cu_off[1]);
+    }
+    if (cu_award) {
+        if (is_game_process(cu_award) && hook_veto(cu_award, on_coop_award))
+            say("co-op insider: the game's achievement award (0x%08x) is refused while Insider Connected is held back",
+                cu_award);
+        else
+            say("co-op insider: the achievement award 0x%08x could not be hooked", cu_award);
+    }
+}
+
 static void coop_tick(void)
 {
     unsigned n;
+    if (cu_g && !(coop_teammates() && pm_in_game())) coop_users_put(0, 0);   /* PAD-1108: a game ended another way */
     coop_solo_check();                                        /* PAD-1054 */
     n = coop_teammates();
     if (n && !coop.teams && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the game's own */
@@ -18515,6 +18620,7 @@ static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned
     before = *coop_ball_byte;
     down = p >= g && coop.round < rounds && before > 0;
     if (down) *coop_ball_byte = (unsigned char)(before - 1);
+    coop_users_put(0, 0);                                     /* PAD-1108: the game's own change sees the logins as made */
     ret = coop_change_game(r0, r1, r2, r3);
     p_after = coop_ball_byte[-1];
     round = coop_team_round(g, p, p_after, before, *coop_ball_byte, down, coop.round, rounds);
@@ -18551,6 +18657,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     if (down) *coop_ball_byte = (unsigned char)(before - 1);
     players = *coop_players_byte;
     *coop_players_byte = 1;                                   /* one player to change to: player 1, the team */
+    coop_users_put(0, 0);                                     /* PAD-1108: the game's own change sees the logins as made */
     ret = coop_change_game(r0, r1, r2, r3);
     /* the game's end sees ONE player (David, PAD-1017): its match draws once, not once a teammate - every teammate
      * has the team's last digits, so a match paid them all - and its high scores take the team's score once */
@@ -18562,6 +18669,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
         : next == 1 ? "teammate 1, the next ball" : "the next teammate, the same ball");
     if (ret & 0xff) {
         coop.turn = next;
+        coop_users_put(1, coop.turn);                         /* PAD-1108: the teammate up has player 1's login */
         coop_turn_show();
         coop_chars_turn();                                    /* PAD-1031: a first ball's pick */
     } else {
@@ -18649,6 +18757,20 @@ static void coop_line(const char *s)
         str_copy(coop_scr_scene, sizeof coop_scr_scene, p, sizeof coop_scr_scene);
         for (ok = 0; coop_scr_scene[ok] && coop_scr_scene[ok] != ' ' && coop_scr_scene[ok] != '\r'; ok++) ;
         coop_scr_scene[ok] = 0;
+        return;
+    }
+    if (str_starts(s, "users ")) {                                        /* PAD-1108: the logins' tables */
+        p = s + 6;
+        cu_mgr = (unsigned)number(&p, &ok);
+        if (ok) cu_off[0] = (unsigned)number(&p, &ok);
+        if (ok) cu_off[1] = (unsigned)number(&p, &ok);
+        if (!ok || !cu_mgr || cu_off[0] > 0x1000u || cu_off[1] > 0x1000u) cu_mgr = cu_off[0] = cu_off[1] = 0;
+        return;
+    }
+    if (str_starts(s, "achievements ")) {                                 /* PAD-1108: the award */
+        p = s + 13;
+        cu_award = (unsigned)number(&p, &ok);
+        if (!ok) cu_award = 0;
         return;
     }
     if (str_starts(s, "left ")) { p = s + 5; coop_left = (unsigned)number(&p, &ok); if (!ok) coop_left = 0; return; }
@@ -18780,6 +18902,7 @@ static void coop_arm(void)
     coop_awards_arm();                                        /* PAD-1028 */
     if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */
+    coop_users_arm();                                         /* PAD-1108 */
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
         data("coop_player"), data("coop_player") + 1, data("coop_players"));
@@ -20342,6 +20465,20 @@ static int on_agent_begin(unsigned *r)
 
 static unsigned coop_setting_wanted(void);       /* PAD-1017 round 2, below */
 static int attract_wanted(void);                 /* PAD-782, below */
+
+/* PAD-1108: the game's achievement award (coop.cfg `achievements`): refused while the gate holds back - the game shows
+ * no NEW INSIDER ACHIEVEMENT! for a list it was given before CO-OP PLAY went on */
+static int on_coop_award(unsigned *r)
+{
+    unsigned n;
+    (void)r;
+    if (!insider_holding(insider_while, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
+        return 0;                                                   /* CO-OP PLAY Off: the game's own */
+    n = ++cu_awards_held;
+    if (n == 1 || !(n & (n - 1)))
+        say("co-op insider: an achievement award refused while Insider Connected is held back (%u so far)", n);
+    return 1;
+}
 
 /* 1 = the gate is up. 0 = this port cannot keep scores off Insider Connected, or (PAD-698) the
  * game's achievement query was not found: NOTHING is hooked and the game runs stock, whatever else

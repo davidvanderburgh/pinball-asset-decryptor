@@ -6273,6 +6273,34 @@ with their own scores (11,717,290 / 12,465,960), each player's own character pic
 its initials and the attract mode's TEAM PLAY CHAMPION page, the game's own champions untouched; 3 players (`teams
 on`): player 3 played both of team 2's turns each ball; no faults.
 
+### Co-op and Insider Connected (PAD-1108)
+
+DoomWalrus666 (3-player co-op): "achievements earned by player 2 and 3 were shown as earned by Player 1. Player 1
+username displayed on End of Ball Bonus for all 3 players". The game plays one player for the team, and it asks its
+user manager for that player's login. The manager keeps two tables of the players' logins - player p's entry (a 16-byte
+user uuid and a flags word) at table + 20p + 4, the tables at the manager's +A and +B - and the per-player name, the
+achievement drivers and the logged-in test all read them. coop.cfg:
+
+    users <manager> <A> <B>     the user manager (a global) and its tables' fields (coop_play.insider_users: the
+                                lookup `ldr ip,[r0,#A]; cmp r3,#1; ldr r0,[r0,#B]; movne r0,ip; b <table lookup>`)
+    achievements <award>        the game's achievement award (coop_play.achievement_award: the one function counting
+                                AUD_CONNECTIVITY_ACHIEVEMENTS_GIVEN)
+
+While teammate t is up in a co-op game the game's player 1 holds teammate t's entry and t's place holds player 1's;
+before each of the game's own player changes they go back, so the game's end, its high scores and its session see the
+logins as the players made them (and the tick puts them back after a game ended any other way). A team game is left
+alone: the game counts two players there and clears the entries past its count, so a swapped entry would be lost.
+The award is refused while the gate holds back (the PAD-698 hold on the achievement list only works from boot: a card
+of co-op and nothing else holds only while CO-OP PLAY is not Off, and a machine switched to co-op after booting at Off
+already has the list). Every Spike 2 build measured has one manager (the tables at +0x160/+0x164, Beatles and Star
+Wars ELG +0x150/+0x154) and, but for Star Wars ELG, one award.
+
+Emulator, Godzilla LE 1.16 (marker logins planted in both tables from the host, read back at each turn): in a
+3-teammate co-op game the game's player 1 held teammate 2's entry through teammate 2's balls and teammate 3's through
+theirs, every entry back as planted after the game; in a team game players 1 and 2 kept theirs and the game itself
+cleared players 3 and 4's at player 3's first turn. A test mode calling the award on a scratch table was refused
+(the entry's earned byte stayed 0); without the `achievements` line the same call ran.
+
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

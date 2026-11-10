@@ -161,8 +161,117 @@ def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None, sett
         raise CoopError(NO_BUTTON)
     return ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
             + ("only\n" if setting and only else "")
+            + "".join(line + "\n" for line in insider_lines(game_elf))
             + "".join(line + "\n" for line in award_lines(game_elf, awards))
             + "".join(line + "\n" for line in character_lines(game_elf, characters, sites, values)))
+
+
+# ---- PAD-1108: the Insider Connected login of the teammate up ------------------------------------------------------
+# DoomWalrus666 (3-player co-op): "achievements earned by player 2 and 3 were shown as earned by Player 1. Player 1
+# username displayed on End of Ball Bonus for all 3 players. High score attributed only to Player 1". The game plays one
+# player for the team and asks its user manager for player 1's login all game; the runtime swaps the login tables'
+# entries so the teammate up has it (pad_mode_runtime.c "PAD-1108"), and refuses the game's achievement award while
+# Insider Connected is held back. Both are read off the card's own program: every Spike 2 build measured has one of
+# each, in the same shape (the users on all 54 newest builds, the award on 53: Star Wars ELG has no audit add found).
+
+#: the manager's lookup: ldr ip, [r0, #A]; cmp r3, #1; ldr r0, [r0, #B]; movne r0, ip; b <table lookup>
+_USERS_HEAD = (0xE590C000, 0xE3530001, 0xE5900000, 0x11A0000C)
+#: the table lookup's words: sub r3, r1, #1; cmp r3, #3; add r1, r1, r1, lsl #2; add r0, r0, r1, lsl #2;
+#: add r4, r0, #4 - player p's entry at table + 20p + 4 (the runtime's COOP_USER_ENTRY)
+_TABLE_WORDS = (0xE2413001, 0xE3530003, 0xE0811101, 0xE0800101, 0xE2804004)
+
+
+def _branch_to(e, k, link):
+    w = e.words[k]
+    if (w >> 24) != (0xEB if link else 0xEA):
+        return None
+    off = (w & 0xFFFFFF) << 2
+    if off & 0x2000000:
+        off -= 0x4000000
+    return e.text_va + 4 * k + 8 + off
+
+
+def insider_users(game_elf):
+    """``(manager, A, B)`` - the game's user manager (a global) and the fields of its two login tables - or None."""
+    from .portchallenge import Elf
+    e = Elf(game_elf)
+    w = e.words
+    found = []
+    for k in range(len(w) - 5):
+        if (w[k] & 0xFFFFF000) != _USERS_HEAD[0] or w[k + 1] != _USERS_HEAD[1] \
+                or (w[k + 2] & 0xFFFFF000) != _USERS_HEAD[2] or w[k + 3] != _USERS_HEAD[3]:
+            continue
+        to = _branch_to(e, k + 4, False)
+        if to is None or not e.text_va <= to < e.text_va + 4 * (len(w) - 12):
+            continue
+        j = (to - e.text_va) // 4
+        if w[j + 1] != _TABLE_WORDS[0] or w[j + 2] != _TABLE_WORDS[1] \
+                or not all(x in w[j:j + 12] for x in _TABLE_WORDS[2:]):
+            continue
+        found.append((e.text_va + 4 * k, w[k] & 0xFFF, w[k + 2] & 0xFFF))
+    if len(found) != 1:
+        return None
+    look, a, b = found[0]
+    managers = set()
+    for k in range(len(w)):
+        if _branch_to(e, k, True) != look:
+            continue
+        lo = hi = None
+        for j in range(k - 1, max(k - 8, 0), -1):                 # movw / movt r0 just before the call
+            x = w[j]
+            if lo is None and (x & 0xFFF0F000) == 0xE3000000:
+                lo = ((x >> 4) & 0xF000) | (x & 0xFFF)
+            if hi is None and (x & 0xFFF0F000) == 0xE3400000:
+                hi = ((x >> 4) & 0xF000) | (x & 0xFFF)
+        if lo is not None and hi is not None:
+            managers.add(lo | hi << 16)
+    if len(managers) != 1:
+        return None
+    return (managers.pop(), a, b)
+
+
+def achievement_award(game_elf):
+    """The game's achievement award (the one function counting AUD_CONNECTIVITY_ACHIEVEMENTS_GIVEN), or None."""
+    from . import stock_scan as S, stock_scan_c as SC
+    from .mode_framework import audit_add
+    from .portchallenge import Elf
+    e = Elf(game_elf)
+    add = audit_add(e)
+    if not add:
+        return None
+    ids = {n: i for i, n in SC.audit_ids(S.Program(game_elf))[1].items() if n}
+    aid = ids.get("AUD_CONNECTIVITY_ACHIEVEMENTS_GIVEN")
+    if aid is None or aid > 0xFF:
+        return None
+    w = e.words
+    hits = [k for k in range(4, len(w)) if _branch_to(e, k, True) == add
+            and (0xE3A00000 | aid) in w[k - 4:k] and 0xE3A01001 in w[k - 4:k]]
+    if len(hits) != 1:
+        return None
+    k = hits[0]
+    while k > 0 and not (w[k - 1] == 0xE12FFF1E or (w[k - 1] & 0xFFFF8000) == 0xE8BD8000):   # bx lr / pop {.., pc}
+        k -= 1
+    if w[k] != 0xE590C004 or (w[k + 1] & 0xFFFF4000) != 0xE92D4000:   # ldr ip, [r0, #4]; push {.., lr}
+        return None
+    return e.text_va + 4 * k
+
+
+def insider_lines(game_elf):
+    """coop.cfg's ``users`` and ``achievements`` lines for this program (each left out when not found)."""
+    out = []
+    try:
+        u = insider_users(game_elf)
+    except Exception:                                                # noqa: BLE001 - a build the finder cannot read
+        u = None
+    if u:
+        out.append("users 0x%08x 0x%x 0x%x" % u)
+    try:
+        a = achievement_award(game_elf)
+    except Exception:                                                # noqa: BLE001
+        a = None
+    if a:
+        out.append("achievements 0x%08x" % a)
+    return out
 
 
 # ---- PAD-1028: a co-op game's awards -----------------------------------------------------------------------------

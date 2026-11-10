@@ -10,7 +10,7 @@ from pinball_decryptor.plugins.stern import mode_project as MP
 from pinball_decryptor.plugins.stern import sound_modes as SMo
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GZ_ELF = "C:/tmp/PAD-1010/elfs/godzilla_le-1_16_0_spike2.elf"
+GZ_ELF = next((p for p in ("C:/tmp/PAD-1010/elfs/godzilla_le-1_16_0_spike2.elf", "C:/tmp/PAD-1108/elfs/godzilla_le-1_16_0_spike2.elf") if os.path.isfile(p)), "")
 
 
 def _read(p):
@@ -44,7 +44,7 @@ def test_offered_on_every_latest_title_without_its_own_coop():
 def test_coop_cfg_names_the_right_flipper_button():
     with open(GZ_ELF, "rb") as f:
         elf = f.read()
-    assert CP.cfg_text(elf).startswith("coop on\nbutton 59\naward ")    # PAD-1028: then the awards ticked
+    assert re.match(r"coop on\nbutton 59\n(users .*\n)?(achievements .*\n)?award ", CP.cfg_text(elf))   # PAD-1108, PAD-1028
 
 
 def test_no_flipper_buttons_no_cfg():
@@ -201,7 +201,8 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
     for off, data in writes.items():
         raw[off:off + len(data)] = data
     assert M.check(bytes(raw), s) in ([], ["no menu page lists it"])           # the page record is placed by the Write
-    head = lambda text: text[:text.find("award ")]                               # PAD-1028's award lines follow
+    head = lambda text: "".join(l for l in text[:text.find("award ")].splitlines(True)   # PAD-1028's awards follow,
+                                if not l.startswith(("users ", "achievements ")))         # PAD-1108's lines before
     assert head(CP.cfg_text(elf, setting=s.live)) == "coop on\nbutton 59\nsetting 0x%08x\n" % s.live
     assert head(CP.cfg_text(elf, setting=s.live, only=True)) == "coop on\nbutton 59\nsetting 0x%08x\nonly\n" % s.live
     assert head(CP.cfg_text(elf)) == "coop on\nbutton 59\n"                    # always on: no setting line

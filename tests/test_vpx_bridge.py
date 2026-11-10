@@ -152,6 +152,45 @@ def test_shadow_retrofit_trigger_is_live_invisible_and_on_the_playfield(vpxfile)
     assert "Sub PadCarHit_Hit : vpmTimer.PulseSw 1077 : End Sub" in out
 
 
+def test_shadow_leaves_out_lights_the_table_does_not_have():
+    # PAD-1127: a copy of JP's Deadpool without li044a001 stopped in Visual
+    # Pinball with "Variable is undefined: 'li044a001'": the bridge named it
+    # bare in PadLampsInit. The light is left out; its insert's others stay
+    vs = pytest.importorskip("vpxshadow")
+    m = {"switches": {}, "solenoids": {},
+         "lamps": {"_": "", "li044": {"leds": [[8, 3]]}, "li044a": {"leds": [[8, 3]]},
+                   "li044a001": {"leds": [[8, 3], [8, 4]]}, "LiGone": {"leds": [[9, 1]]}},
+         "dark": ["li099", "LIGONE2", "liGone"]}
+    names = {"li044", "li044a", "li099"}
+    assert vs.drop_missing_lights(m, names) == ["li044a001", "LiGone", "LIGONE2"]
+    assert list(m["lamps"]) == ["_", "li044", "li044a"] and m["dark"] == ["li099"]
+    out, _ = vs.patch(MINI_TRIBUTE, dict(json.loads(json.dumps(MINI_SHADOW)),
+                                        lamps=m["lamps"], dark=m["dark"]))
+    assert '\tPadLamps.Add "1803", Array(li044, li044a)' in out
+    assert "li044a001" not in out.lower() and "ligone" not in out.lower()
+    assert "\tPadDark = Array(li099)" in out
+    assert vs.drop_missing_lights({"lamps": {"li1": {"leds": [[1, 1]]}}}, {"li1"}) == []
+
+
+def test_shadow_retrofit_clone_missing_takes_any_of_its_kind(vpxfile):
+    # PAD-1127: the clone is a template only; a copy of the table without it
+    # (or naming it in another case) copies another light, not a KeyError
+    vs = pytest.importorskip("vpxshadow")
+    light = struct.pack("<i", 7) + _rec("VCEN", struct.pack("<ff", 5, 5)) + \
+        _rec("NAME", vpxfile.wide("li010")) + _rec("ENDB", b"")
+
+    class Table:
+        items = [light]
+        item_info = staticmethod(vpxfile.VpxTable.item_info)
+    for clone in ("li071", "LI010"):
+        m = {"retrofit_lights": {"lights": {"PadFlash": {"clone": clone, "at": [400, 246]}}}}
+        (item,) = vs.retrofit_items(Table, m)
+        assert vpxfile.VpxTable.item_info(item)[:2] == ("Light", "PadFlash")
+    m = {"retrofit_timers": {"PadTick": {"clone": "tmrGone", "interval_ms": 10}}}
+    with pytest.raises(AssertionError, match="no Timer"):
+        vs.retrofit_items(Table, m)                       # nothing of the kind at all
+
+
 # ---------------------------------------------------------------- padled v7 -
 
 def test_rule_plane_offsets_match_padled_h():

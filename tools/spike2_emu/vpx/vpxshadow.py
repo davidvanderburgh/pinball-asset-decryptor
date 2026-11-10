@@ -862,6 +862,27 @@ def lamp_groups(m):
     return groups
 
 
+def drop_missing_lights(m, names):
+    """PAD-1127: take the lights the table has no object for out of the
+    map's `lamps` and `dark`, and return their names. The bridge names
+    each one bare in PadLampsInit (PadLamps.Add .., Array(li044a001)), and
+    a name the table lacks stops the whole script with "Variable is
+    undefined" before the table plays: a copy of a table that dropped or
+    renamed one light (JP's Deadpool without li044a001) would never start.
+    `names` is the table's object names, lower case."""
+    gone = [n for n in m.get("lamps", {}) if n != "_" and n.lower() not in names]
+    low = {n.lower() for n in gone}
+    for n in m.get("dark", []):
+        if n.lower() not in names and n.lower() not in low:
+            gone.append(n)
+            low.add(n.lower())
+    if gone:
+        m["lamps"] = {k: v for k, v in m.get("lamps", {}).items() if k.lower() not in low}
+        if "dark" in m:
+            m["dark"] = [n for n in m["dark"] if n.lower() not in low]
+    return gone
+
+
 def lamp_calls(m):
     """lamp number -> [lamp_calls entries]: inserts the table shows with a
     sub of its own (extra_vbs) rather than a Light, keyed like lamp_groups."""
@@ -1738,17 +1759,27 @@ def patch(script, m):
 
 
 def retrofit_items(table, m):
-    by_name = {}
+    by_name, first = {}, {}
     for data in table.items:
         kind, name, pos = table.item_info(data)
-        by_name[name] = (kind, data)
+        by_name[name.lower()] = (kind, data)
+        first.setdefault(kind, data)
+
+    def source(name, kind):
+        # PAD-1127: the clone is only a template (its look; the copy gets its
+        # own name and place), so a copy of the table without it, or naming it
+        # in another case, takes any object of the kind instead of failing
+        k, data = by_name.get((name or "").lower(), ("", None))
+        if k == kind:
+            return k, data
+        assert kind in first, "the table has no %s to copy for %s" % (kind, name)
+        return kind, first[kind]
     items = []
     rl = m.get("retrofit_lights", {})
     for name, v in rl.get("lights", {}).items():
         if name == "_":
             continue
-        kind, src = by_name[v.get("clone", rl.get("clone"))]
-        assert kind == "Light", v.get("clone", rl.get("clone"))
+        kind, src = source(v.get("clone", rl.get("clone")), "Light")
         items.append(vpxfile.clone_item(src, name, *v["at"]))
     # PAD-922: a switch where the table has no object - a Trigger cloned from
     # `clone`, given its own `shape` (drag points), switched on, drawn as
@@ -1761,10 +1792,9 @@ def retrofit_items(table, m):
     for name, v in m.get("retrofit_triggers", {}).items():
         if name == "_":
             continue
-        kind, src = by_name[v["clone"]]
-        assert kind == "Trigger", v["clone"]
+        kind, src = source(v["clone"], "Trigger")
         surf = v.get("surface", "")
-        assert not surf or by_name.get(surf, ("",))[0] in ("Ramp", "Wall"), surf
+        assert not surf or by_name.get(surf.lower(), ("",))[0] in ("Ramp", "Wall"), surf
         fields = {"EBLD": struct.pack("<i", 1), "SHAP": struct.pack("<i", 0),
                   "SURF": struct.pack("<I", len(surf)) + surf.encode("latin1")}
         if "radius" in v:
@@ -1774,8 +1804,7 @@ def retrofit_items(table, m):
     for name, v in m.get("retrofit_timers", {}).items():
         if name == "_":
             continue
-        kind, src = by_name[v["clone"]]
-        assert kind == "Timer", v["clone"]
+        kind, src = source(v["clone"], "Timer")
         item = vpxfile.clone_item(src, name, 0, 0)
         items.append(vpxfile.set_fields(item, {"TMON": struct.pack("<i", 1),
                                                "TMIN": struct.pack("<i", int(v["interval_ms"]))}))
@@ -1846,14 +1875,19 @@ def main(argv):
         print("refusing: %s does not verify against its own MAC" % src)
         return 1
     info = [table.item_info(d) for d in table.items]
-    names = {n.lower() for _, n, _ in info} | {n.lower() for n in m.get("retrofit_triggers", {})}
-    for name in list(m["switches"]) + list(saucers(m)) + list(m.get("lamps", {})) + m.get("dark", []):
+    names = {n.lower() for _, n, _ in info} | {n.lower() for n in m.get("retrofit_triggers", {})} \
+        | {n.lower() for n in m.get("retrofit_lights", {}).get("lights", {})}
+    unlit = drop_missing_lights(m, names)
+    for name in list(m["switches"]) + list(saucers(m)):
         if name != "_" and name.lower() not in names:
             print("WARNING: the table has no object named %s" % name)
     for name in sounds_at_shapes(m.get("extra_vbs", ""), info):
         print("WARNING: a sound is played at %s, which has no position (PlaySoundAt reads its .x)" % name)
     m["_lightseqs"] = sorted(n for k, n, _ in info if k == "LightSeq")
     script, rep = patch(table.script(), m)
+    if unlit:
+        rep.insert(0, "left out light(s) this copy of the table does not have: %s"
+                   % ", ".join(unlit))
     script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858
     items = retrofit_items(table, m)
     streams.update(auto_plunger_item(table, m))

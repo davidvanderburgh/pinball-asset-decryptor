@@ -1274,8 +1274,15 @@ def gen(m, had, quiet=None, dof=None):
                 "\tNext",
                 "End Sub",
                 "Sub PadLampSet(o, v)   ' 0 off, 1 on, more: a lit RGB insert's colour",
+                # PAD-1113: a light's Color and ColorFull come back from VPX as
+                # OLE_COLOR, an unsigned VT_UI4 VBScript cannot compare ("Variable
+                # uses an Automation type not supported", 458): read through CLng.
+                # core.vbs calls LampCallback under On Error Resume Next, so the
+                # error was silent and ended the whole batch: no colour insert lit.
+                # Its own On Error keeps one light's failure to that light.
+                "\tOn Error Resume Next",
                 "\tIf v > 1 Then",
-                "\t\tIf o.ColorFull <> v Then o.ColorFull = v : o.Color = PadDim(v)",
+                "\t\tIf CLng(o.ColorFull) <> v Then o.ColorFull = v : o.Color = PadDim(v)",
                 "\t\tIf o.State <> 1 Then o.State = 1",
                 "\tElseIf o.State <> v Then",
                 "\t\to.State = v",

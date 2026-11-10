@@ -3377,7 +3377,7 @@ def test_shadow_lamps_colour_dark_calls_and_the_tables_own_reads():
     assert 'PadCalls.Add "1859", Array(Array(GetRef("PadBatSignal"), "flsh"))' in out
     assert "Set f = c(0) : f c(1), chg(ii, 1)" in out
     assert "\tPadDark = Array(L9, F1)" in out
-    assert "If o.ColorFull <> v Then o.ColorFull = v : o.Color = PadDim(v)" in out
+    assert "If CLng(o.ColorFull) <> v Then o.ColorFull = v : o.Color = PadDim(v)" in out
     assert r"PadDim = RGB((v And 255) \ 14, ((v \ 256) And 255) \ 14, ((v \ 65536) And 255) \ 14)" in out
     assert "\t\tIf PadLamps.Exists(k) Then\n\t\t\tFor Each o In PadLamps(k) : PadLampSet o, PadLampState(k) : Next" in out
     assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
@@ -3426,10 +3426,119 @@ def test_shadow_rgb_insert_colour_follows_the_tables_own_set_light_color():
     out, rep = vs.patch(MINI_TRIBUTE + FULL_COLOUR_SLC, m)
     assert "\tPadDim = v\n" in out and dim not in out
     assert any("take their colour whole" in r for r in rep)
-    assert "If o.ColorFull <> v Then o.ColorFull = v : o.Color = PadDim(v)" in out
+    assert "If CLng(o.ColorFull) <> v Then o.ColorFull = v : o.Color = PadDim(v)" in out
     out, rep = vs.patch(MINI_TRIBUTE + DIM_COLOUR_SLC, m)
     assert dim in out and "\tPadDim = v\n" not in out
     assert not any("take their colour whole" in r for r in rep)
+
+
+def _vbs_with_vpx_lights(code, calls):
+    """Run `code` in the Windows VBScript engine beside lights L1, L2 that
+    answer Color/ColorFull as VPX does: OLE_COLOR, an unsigned VT_UI4, and
+    State as a float. `calls` is VBScript run under On Error Resume Next, as
+    core.vbs calls LampCallback; Log lines come back with each light's props."""
+    pythoncom = pytest.importorskip("pythoncom")
+    axsite = pytest.importorskip("win32com.axscript.server.axsite")
+    from win32com.client import VARIANT
+    from win32com.server import policy, util
+
+    class Light:
+        _public_methods_ = []
+
+        def __init__(self, colour=True):
+            self.colour = colour
+            self.p = {"colorfull": 0xFFFFFF, "color": 0xFFFFFF, "state": 0.0}
+
+        def _dynamic_(self, name, lcid, wFlags, args):
+            k = name.lower()
+            if k in ("color", "colorfull") and not self.colour:
+                raise policy.COMException(scode=-2147352573)          # DISP_E_MEMBERNOTFOUND
+            if wFlags & 4:                                            # property put
+                self.p[k] = args[0]
+                return None
+            if k in ("color", "colorfull"):
+                return VARIANT(pythoncom.VT_UI4, int(self.p[k]) & 0xFFFFFFFF)
+            return VARIANT(pythoncom.VT_R4, float(self.p[k]))
+
+    class Out:
+        _public_methods_ = ["Log"]
+
+        def __init__(self):
+            self.lines = []
+
+        def Log(self, s):
+            self.lines.append(str(s))
+
+    lights = {"L1": Light(), "L2": Light(), "LX": Light(colour=False)}
+    out = Out()
+    items = {k: util.wrap(v, usePolicy=policy.DynamicPolicy) for k, v in lights.items()}
+    items["O"] = util.wrap(out)
+    site = axsite.AXSite(items)
+    eng = site.AddEngine("VBScript")
+    eng.AddCode(code + "\nSub PadTest\n\tOn Error Resume Next\n" + calls + "\nEnd Sub\n")
+    eng.Start()
+    sd = eng.GetScriptDispatch()
+    sd.Invoke(sd.GetIDsOfNames("PadTest"), 0, pythoncom.DISPATCH_METHOD, False)
+    eng.Close()
+    return out.lines, {k: v.p for k, v in lights.items()}
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the Windows VBScript engine")
+def test_shadow_rgb_insert_lights_with_colours_as_vpx_hands_them_over():
+    # PAD-1113 (Rush, and Foo Fighters' PAD-1111): VPX answers a light's Color
+    # and ColorFull as OLE_COLOR, a VT_UI4 VBScript cannot compare (error 458).
+    # PadLampSet's `If o.ColorFull <> v` failed on every lit colour insert;
+    # core.vbs calls LampCallback under On Error Resume Next, so it failed
+    # silently and the rest of the batch with it: no shot arrow ever lit
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["lamps"] = {"_": "x", "L2": {"leds": [[8, 32], [8, 33], [8, 34]], "rgb": True, "name": "ARROW"}}
+    out, _ = vs.patch(MINI_TRIBUTE + DIM_COLOUR_SLC, m)
+    code = "\n".join(re.search(r"(?ms)^%s .*?^End %s\s*$" % (kw, kw.split()[0]), out[out.index(start):]).group(0)
+                     for start, kw in (("Sub PadLampSet(", "Sub"), ("Function PadDim(", "Function")))
+    # the stand-in is VPX's: the old line fails on it as it did in Visual Pinball
+    old = code.replace("If CLng(o.ColorFull) <> v Then", "If o.ColorFull <> v Then").replace("\tOn Error Resume Next\n", "")
+    log, _ = _vbs_with_vpx_lights(old, 'O.Log VarType(L1.ColorFull)\nPadLampSet L1, 65535\nO.Log Err.Number')
+    assert log == ["19", "458"]
+    # a lit yellow arrow takes the game's colour and lights; a light that
+    # fails (LX has no colour) keeps it to itself; off and on still work
+    log, p = _vbs_with_vpx_lights(code, "PadLampSet L1, 65535 : O.Log Err.Number\n"
+                                        "PadLampSet LX, 255 : PadLampSet L2, 16711680 : O.Log Err.Number\n"
+                                        "PadLampSet L1, 65535\nPadLampSet L2, 0 : O.Log Err.Number")
+    assert log == ["0", "0", "0"]
+    assert p["L1"] == {"colorfull": 65535, "color": 18 * 256 + 18, "state": 1}
+    assert p["L2"]["colorfull"] == 16711680 and p["L2"]["color"] == 18 * 65536 and p["L2"]["state"] == 0
+    assert p["LX"]["state"] == 1                                       # lit, in its own colour
+
+
+def test_colour_maps_ask_a_table_patched_before_the_colour_fix_to_patch_again(tmp_path):
+    """PAD-1113: every tribute with colour inserts carries the mark; a script
+    with the old compare is told to patch again, a fresh patch never is."""
+    vs = pytest.importorskip("vpxshadow")
+    vset = pytest.importorskip("vpxsetup")
+    old = "If o.ColorFull <> v Then o.ColorFull = v"
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["lamps"] = {"_": "x", "L2": {"leds": [[8, 32], [8, 33], [8, 34]], "rgb": True, "name": "ARROW"}}
+    fresh, _ = vs.patch(MINI_TRIBUTE + DIM_COLOUR_SLC, m)
+    assert old.lower() not in re.sub(r"\s+", " ", fresh).lower()
+    stale = fresh.replace("If CLng(o.ColorFull) <> v Then", "If o.ColorFull <> v Then")
+    assert stale != fresh
+    n = 0
+    for f in sorted(glob.glob(os.path.join(VPX, "*.shadow.json"))):
+        mp = json.load(open(f, encoding="utf-8"))
+        rl = (mp.get("retrofit_lights") or {}).get("lights") or {}
+        if not any(isinstance(v, dict) and v.get("rgb")
+                   for sec in (mp.get("lamps") or {}, mp.get("lamp_calls") or {}, rl) for v in sec.values()):
+            continue
+        n += 1
+        marks = [k for k in mp.get("repatch") or [] if k["old"] == old]
+        assert len(marks) == 1, os.path.basename(f)
+        script = tmp_path / (mp["output"][:-4] + ".script.vbs")
+        script.write_text(stale, encoding="utf-8")
+        assert marks[0]["why"] in vset.missed_fixes(str(tmp_path), mp["output"], mp["repatch"]), f
+        script.write_text(fresh, encoding="utf-8")
+        assert marks[0]["why"] not in vset.missed_fixes(str(tmp_path), mp["output"], mp["repatch"]), f
+    assert n >= 23                                     # Rush, Foo Fighters, GotG, Guardians...
 
 
 def test_controller_reports_an_rgb_insert_in_its_colour():

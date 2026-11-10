@@ -248,6 +248,7 @@
     {"old": "Set LampCallback = GetRef(\"PadUpdateLamps\") End Sub", "why": "the playfield stays dark and the dome flashers never stop", "since": "PAD-1093: the table's attract look ends once it is up, and its GI follows the machine's"},
     {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1059) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "Sub swPlungerRest_Hit : Controller.Switch(1059) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
-    {"old": "tmrHadronLightFlash.Enabled = False GiOn PadGiLit = True End Sub", "why": "four small bulbs by the right ramp blink all game, whatever the game is doing", "since": "PAD-1099: the table's rules bulbs rest; the LE's slings follow the machine"}
+    {"old": "tmrHadronLightFlash.Enabled = False GiOn PadGiLit = True End Sub", "why": "four small bulbs by the right ramp blink all game, whatever the game is doing", "since": "PAD-1099: the table's rules bulbs rest; the LE's slings follow the machine"},
+    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}
   ]
 }

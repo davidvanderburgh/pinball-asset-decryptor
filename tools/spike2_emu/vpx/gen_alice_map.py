@@ -281,7 +281,11 @@ def build():
             "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, "
                    "over the machine's lights",
             "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
-           for ev, lv in (("UnHit", "False"), ("Hit", "True"))],
+           for ev, lv in (("UnHit", "False"), ("Hit", "True"))]
+        # PAD-1113: the colour compare VPX's OLE_COLOR failed on
+        + [{"old": "If o.ColorFull <> v Then o.ColorFull = v",
+            "why": "its colour inserts (the shot arrows and the like) never light",
+            "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}],
     }
 
 

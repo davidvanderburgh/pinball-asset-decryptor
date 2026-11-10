@@ -251,6 +251,7 @@
     "RightSlingShot"
   ],
   "repatch": [
-    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}
+    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"},
+    {"old": "o = PadGateA Or PadGateB", "why": "a ball going round the right orbit can fall behind the Bat Phone and stay there", "since": "PAD-1120: the left control gate and the turntable diverter are two parts"}
   ]
 }

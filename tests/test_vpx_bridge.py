@@ -1118,6 +1118,13 @@ def test_batmans_control_gate_is_not_the_turntable_diverter(tmp_path):
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
     assert r.stdout.split() == ["6on@phone:011", "6off:010", "7on@phone:010",
                                 "7on@turning:010", "7on@tv:100", "7off:010", "7on@batcave:100"], r.stdout + r.stderr
+    # a table patched before is asked to patch again; one patched now is not
+    vsu = pytest.importorskip("vpxsetup")
+    why = "a ball going round the right orbit can fall behind the Bat Phone and stay there"
+    (tmp_path / "B (PAD).script.vbs").write_text("Sub PadApplyGate\n\tDim o\n\to = PadGateA Or PadGateB\nEnd Sub\n", encoding="utf-8")
+    assert why in vsu.missed_fixes(str(tmp_path), "B (PAD).vpx", m["repatch"])
+    (tmp_path / "B (PAD).script.vbs").write_text(m["extra_vbs"], encoding="utf-8")
+    assert why not in vsu.missed_fixes(str(tmp_path), "B (PAD).vpx", m["repatch"])
 
 
 DOF_TRIBUTE ="""Option Explicit

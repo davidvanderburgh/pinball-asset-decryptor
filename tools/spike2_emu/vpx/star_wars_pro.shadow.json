@@ -1487,5 +1487,8 @@
     "swTrough4",
     "swTrough5",
     "swTrough6"
+  ],
+  "repatch": [
+    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}
   ]
 }

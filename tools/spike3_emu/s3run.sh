@@ -26,13 +26,15 @@
 # game_monitor reads it.
 set -u
 S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-CARD=""; SLOT=1; SECS=60; STRACE=0; FRESH=0; PROG=/games/game; ARGS=()
+CARD=""; SLOT=1; SECS=60; STRACE=0; FRESH=0; BRIDGE=0; PROG=/games/game; ARGS=()
+B=${PAD_S3_BUILD:-/home/david/.pad-s3/build}
 while [ $# -gt 0 ]; do
     case "$1" in
         --slot) SLOT=$2; shift ;;
         --secs) SECS=$2; shift ;;
         --strace) STRACE=1 ;;
         --fresh) FRESH=1 ;;
+        --bridge) BRIDGE=1 ;;
         --prog) PROG=$2; shift ;;
         --) shift; ARGS=("$@"); break ;;
         *) CARD=$1 ;;
@@ -50,9 +52,29 @@ LOG=$SD/run.log
 mkdir -p "$SD"
 echo "[s3run] card tree $TREE, slot $SLOT ($SD)"
 
-unshare -m -p -f --mount-proc=/proc bash -s "$TREE" "$SD" "$SECS" "$STRACE" "$PROG" "${ARGS[@]}" <<'INNER'
+# --bridge: the display (stage 2). s3build.sh's three guest libraries go into
+# this slot's overlay - libGLESv2/libEGL over the card's Mesa ones, s3kms.so
+# preloaded - and its own padglhost renders the ring headless (surfaceless EGL
+# on the GPU) and dumps every 30th frame to $SD/frames as PNG.
+HOSTPID=""
+if [ "$BRIDGE" = 1 ]; then
+    for f in libGLESv2.so.2 libEGL.so.1 s3kms.so padglhost; do
+        [ -e "$B/$f" ] || { echo "[s3run] --bridge needs $B/$f: bash s3build.sh" >&2; exit 1; }
+    done
+    rm -rf "$SD/frames" "$SD/padgl.ring"; mkdir -p "$SD/frames"
+    env -u DISPLAY -u WAYLAND_DISPLAY EGL_PLATFORM=surfaceless GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12} \
+        PAD_GL_W=${PAD_S3_W:-1920} PAD_GL_H=${PAD_S3_H:-1080} PAD_GL_DUMP="$SD/frames" \
+        PAD_GL_FRAME_EVERY=${PAD_GL_FRAME_EVERY:-30} PAD_GL_MAX_FRAMES=${PAD_GL_MAX_FRAMES:-40} \
+        setsid "$B/padglhost" "$SD/padgl.ring" > "$SD/padglhost.log" 2>&1 &
+    HOSTPID=$!
+    for i in $(seq 1 100); do [ -s "$SD/padgl.ring" ] && break; sleep 0.1; done
+    [ -s "$SD/padgl.ring" ] || { echo "[s3run] padglhost made no ring:"; tail -5 "$SD/padglhost.log"; kill -9 $HOSTPID; exit 1; }
+    echo "[s3run] renderer up: $(grep -a -m2 -E "GL_RENDERER|renderer|GL " "$SD/padglhost.log" | tr '\n' ' ')"
+fi
+
+unshare -m -p -f --mount-proc=/proc bash -s "$TREE" "$SD" "$SECS" "$STRACE" "$BRIDGE" "$B" "$PROG" "${ARGS[@]}" <<'INNER'
 set -u
-TREE=$1; SD=$2; SECS=$3; STRACE=$4; PROG=$5; shift 5
+TREE=$1; SD=$2; SECS=$3; STRACE=$4; BRIDGE=$5; B=$6; PROG=$7; shift 7
 R=$SD/root
 mount --make-rprivate /
 ov() {  # lower mountpoint name
@@ -78,6 +100,18 @@ done
 ln -sf /proc/self/fd "$R/dev/fd" 2>/dev/null
 # /dump -> /connectivity/dump on the machine (S95game makes it)
 mkdir -p "$R/connectivity/dump/log"
+PRELOAD=""
+if [ "$BRIDGE" = 1 ]; then
+    rm -f "$R/usr/lib/libEGL.so.1" "$R/usr/lib/libGLESv2.so.2"
+    cp "$B/libEGL.so.1" "$B/libGLESv2.so.2" "$R/usr/lib/"
+    mkdir -p "$R/usr/lib/pad"; cp "$B/s3kms.so" "$R/usr/lib/pad/"
+    touch "$R/run/padgl"; mount --bind "$SD/padgl.ring" "$R/run/padgl"
+    # LD_PRELOAD only INSIDE the chroot (the card's own env sets it): exported
+    # here, script/timeout/chroot - host binaries - each said it could not open
+    # the aarch64 .so at a host path
+    export PAD_GL_BRIDGE=/run/padgl
+    PRELOAD="env LD_PRELOAD=/usr/lib/pad/s3kms.so"
+fi
 echo "[s3run] exec $PROG $* (qemu-aarch64 via binfmt, ${SECS}s cap)"
 [ "$STRACE" = 1 ] && export QEMU_STRACE=1
 export HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -88,7 +122,7 @@ T0=$(date +%s.%N)
 # sweep). `script` gives it a terminal, so it is line-buffered as on the
 # machine's console. stderr stays its own file. TERM at the cap, KILL 5 s on.
 printf '%q ' "$PROG" "$@" > "$SD/.argv"
-script -q -f -e -c "timeout -s TERM -k 5 $SECS chroot $R $(cat "$SD/.argv") 2> $SD/game.err < /dev/null" "$SD/game.out" > /dev/null < /dev/null   # script reads stdin - which is THIS script (bash -s)
+script -q -f -e -c "timeout -s TERM -k 5 $SECS chroot $R $PRELOAD $(cat "$SD/.argv") 2> $SD/game.err < /dev/null" "$SD/game.out" > /dev/null < /dev/null   # script reads stdin - which is THIS script (bash -s)
 RC=$?
 # script's own exit is the child's (-e); a dumped core reads 128+signal
 grep -q 'COMMAND_EXIT_CODE="134"' "$SD/game.out" && RC=134
@@ -104,5 +138,10 @@ case $RC in
 esac
 INNER
 RC=$?
+if [ -n "$HOSTPID" ]; then
+    kill -INT -"$HOSTPID" 2>/dev/null; sleep 1; kill -9 -"$HOSTPID" 2>/dev/null
+    echo "[s3run] frames dumped: $(ls "$SD/frames" | wc -l) ($SD/frames)"
+    grep -a -E "ops:|UNKNOWN|FAILED|PRESENTTEX|error" "$SD/padglhost.log" | tail -6 | sed 's/^/[s3run]   host: /'
+fi
 echo "[s3run] stdout: $(wc -l < "$SD/game.out") lines, stderr: $(wc -l < "$SD/game.err") lines ($SD)"
 exit $RC

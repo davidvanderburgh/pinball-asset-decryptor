@@ -116,6 +116,50 @@ which under `bash -s` is the harness itself, so it gets `/dev/null`.
 Game log: `netbridge image CRC mismatch, write new image` / `failed to
 verify/update bridge` / `failed to init bridge thread`, then the window.
 
+## Stage 2 - the display (run 2, in progress)
+
+**The game is Godot 4** (its GLES3 "compatibility" renderer: `MethodBind`,
+`TextServer`, `res://scenes/...tscn`, `project.godot`) under a display server
+of Stern's own (`glWindow.cpp`) that drives KMS directly. No X11/Wayland
+display driver is compiled in, so the KMS side is faked.
+
+Built (`s3build.sh` -> `~/.pad-s3/build`, `s3run.sh --bridge` runs it):
+
+- `s3kms.c` (LD_PRELOAD): `/dev/dri/card0|1` is an eventfd; two connected
+  HDMI-A outputs at 1920x1080@60 (the game takes connector INDEX
+  `display_number` = 1, the second - glWindow at 0x926c9c checks index <
+  count_connectors and `connection == 1`); GBM bos with memfd dma-buf fds;
+  AddFB/SetCrtc/PageFlip present the bo, flip events through drmHandleEvent.
+- `s3egl.c` (libEGL.so.1): GBM platform display, surfaceless contexts, TWO
+  configs (XR24 and AR24 native visual ids - with only AR24 the game logged
+  `failed to find egl config for gbm format` and retried create_window),
+  dma-buf / GBM-pixmap EGL images resolved back to the bo, fences signalled.
+- `s3gl.c` (libGLESv2.so.2, one unit with glbridge.c): the 55 missing GLES3
+  entry points (buffer mapping as a guest shadow, renderbuffer/query names,
+  the rest log their first call), the Pi 4 V3D's GLES 3.1 limits for
+  glGetIntegerv, no program binaries, `glEGLImageTargetTexture2DOES`, and
+  `pad_s3_present_bo` -> `PADGL_PRESENTTEX`.
+- `padgl.h` v3: `PADGL_PRESENTTEX` appended (guest texture, w, h);
+  `padglhost.c` blits it into the screen fbo (y-flipped, `PAD_S3_FLIPY=0`
+  off) and then does what SWAP does. Spike 2 never sends it.
+
+Measured on pokemon_le 0.82.0 (2026-11-09): the window now comes up -
+`EGL version 1.5`, `egl resolution: 1920 x 1080`, nine 1920x1080 GBM bos,
+three EGL images bound as textures, the bridge attached to padglhost (D3D12,
+OpenGL ES 3.1 on the host), the first frame set with SetCrtc, the game
+drawing into an FBO. Then, ~2 min in, it aborts:
+
+    TAS57XX: amp initialization failed / TAS57XX thread exiting
+    xifo.cpp:72: bool XIFO_PutData(XIFO*, int8_t*): Assertion `pXifo' failed.
+
+The audio amplifier (TI TAS57xx) and the cabinet EEPROM both sit on
+`/dev/i2c-10`, which does not exist in the chroot; the amp's thread exits on
+the failed init and leaves its queue NULL. **Next: answer `/dev/i2c-10`** (an
+I2C bus model in the s3hw preload: the EEPROM and the amp, transactions
+logged) - not written in this run. Then the first dumped frame, and the
+`[s3gl] first call` lines say which of the stubbed GLES3 calls Godot needs
+for real.
+
 ## What is left for Spike 2 parity (next runs)
 
 1. **Toolchain**: an aarch64 cross gcc for the shims (only `arm-linux-gnueabihf`

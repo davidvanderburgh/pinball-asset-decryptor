@@ -27,9 +27,19 @@
 #include <string.h>
 #include <sys/uio.h>
 #include <time.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static FILE *logf;
 static int idle = 0x00;            /* --idle=0xNN: every rx byte */
+/* --input=FILE: the inputs LIVE - the file's bytes are the rx bytes of
+ * every transfer (byte k of a transfer = byte k of the file, up to its
+ * length), re-read through a shared mapping, so a button is pressed by
+ * writing the file (s3press.py) while the game runs */
+static volatile unsigned char *live;
+static unsigned live_len;
 static uint8_t mode = 0, lsb = 0, bits = 8;
 static uint32_t speed = 1000000, mode32 = 0;
 static struct timespec t0;
@@ -170,19 +180,42 @@ static void s_ioctl(fuse_req_t req, int icmd, void *arg, struct fuse_file_info *
             const uint8_t *tx = (const uint8_t *)in + arr;
             uint8_t *rx = malloc(rxsum ? rxsum : 1), *rp = rx;
             memset(rx, idle, rxsum ? rxsum : 1);
+            if (live) {                 /* each transfer's rx from the file */
+                size_t q = 0, j;
+                for (i = 0; i < n; i++)
+                    if (t[i].rx_buf)
+                        for (j = 0; j < t[i].len; j++, q++)
+                            rx[q] = j < live_len ? live[j] : (uint8_t)idle;
+            }
             size_t total = 0;
+            /* LOGGED ON CHANGE: the chain is polled ~3000 times a second with
+             * the same bytes, so a transfer whose tx and rx match the last
+             * one only counts (a boot logged a million identical lines) */
+            static uint8_t last[64];
+            static size_t last_n;
+            static unsigned long same;
+            uint8_t cur[64];
+            size_t cn = 0;
+            const uint8_t *tp = tx, *rq = rx;
+            int changed;
+            for (i = 0; i < n && cn + 2 * (size_t)t[i].len <= sizeof cur; i++) {
+                if (t[i].tx_buf) { memcpy(cur + cn, tp, t[i].len); cn += t[i].len; tp += t[i].len; }
+                if (t[i].rx_buf) { memcpy(cur + cn, rq, t[i].len); cn += t[i].len; rq += t[i].len; }
+            }
+            changed = cn != last_n || memcmp(cur, last, cn);
+            if (changed && same)
+                fprintf(logf, "%9.3f   (%lu identical transfers)\n", now(), same);
+            if (changed) { memcpy(last, cur, cn); last_n = cn; same = 0; } else same++;
             for (i = 0; i < n; i++) {
-                fprintf(logf, "%9.3f xfer#%lu.%zu len %u speed %u%s", now(), nxfer, i,
-                        t[i].len, t[i].speed_hz, t[i].cs_change ? " cs_change" : "");
-                if (t[i].tx_buf && t[i].len) {
-                    hexlog("tx", tx, t[i].len);
-                    tx += t[i].len;
+                if (changed) {
+                    fprintf(logf, "%9.3f xfer#%lu.%zu len %u speed %u%s", now(), nxfer, i,
+                            t[i].len, t[i].speed_hz, t[i].cs_change ? " cs_change" : "");
+                    if (t[i].tx_buf && t[i].len) hexlog("tx", tx, t[i].len);
+                    if (t[i].rx_buf && t[i].len) hexlog("rx", rp, t[i].len);
+                    fputc('\n', logf);
                 }
-                if (t[i].rx_buf && t[i].len) {
-                    hexlog("rx", rp, t[i].len);
-                    rp += t[i].len;
-                }
-                fputc('\n', logf);
+                if (t[i].tx_buf && t[i].len) tx += t[i].len;
+                if (t[i].rx_buf && t[i].len) rp += t[i].len;
                 total += t[i].len;
             }
             nxfer++;
@@ -201,10 +234,10 @@ static const struct cuse_lowlevel_ops ops = {
     .write = s_write, .ioctl = s_ioctl,
 };
 
-struct opts { char *name; char *log; char *idle; };
+struct opts { char *name; char *log; char *idle; char *input; };
 #define OPT(t, p) { t, offsetof(struct opts, p), 1 }
 static const struct fuse_opt optspec[] = {
-    OPT("--name=%s", name), OPT("--log=%s", log), OPT("--idle=%s", idle), FUSE_OPT_END
+    OPT("--name=%s", name), OPT("--log=%s", log), OPT("--idle=%s", idle), OPT("--input=%s", input), FUSE_OPT_END
 };
 
 int main(int argc, char **argv)
@@ -218,6 +251,15 @@ int main(int argc, char **argv)
     if (fuse_opt_parse(&args, &o, optspec, NULL))
         return 1;
     snprintf(devname, sizeof(devname), "DEVNAME=%s", o.name ? o.name : "pad-spidev4.0");
+    if (o.input) {
+        int fd = open(o.input, O_RDONLY);
+        struct stat sb;
+        if (fd >= 0 && fstat(fd, &sb) == 0 && sb.st_size > 0) {
+            void *m = mmap(0, (size_t)sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+            if (m != MAP_FAILED) { live = m; live_len = (unsigned)sb.st_size; }
+        }
+        if (fd >= 0) close(fd);
+    }
     if (o.idle)
         idle = (int)strtol(o.idle, NULL, 0) & 0xff;
     logf = o.log ? fopen(o.log, "w") : stderr;

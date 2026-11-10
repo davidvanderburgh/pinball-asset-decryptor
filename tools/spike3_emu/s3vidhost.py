@@ -34,7 +34,7 @@ CHAN_SZ = 32 * 4 + EXTRA + PKTS * 24
 PKT_EOF = 0x80000000
 # ---- ../spike2_emu/padvid.h ----
 PADVID_MAGIC, PADVID_VERSION = 0x56444150, 3
-P_SLOTS, P_HDR = 4, 8192
+P_SLOTS, P_HDR = 16, 8192               # s3build.sh's -DPADVID_SLOTS
 MAX_W, MAX_H = 2048, 1152               # s3build.sh's -DPADVID_MAX_W/H
 P_SLOT_BYTES = MAX_W * MAX_H * 3 // 2
 P_BYTES = P_HDR + CH * P_SLOTS * P_SLOT_BYTES

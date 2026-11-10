@@ -83,9 +83,11 @@ if [ "$BRIDGE" = 1 ]; then
         [ -e "$B/$f" ] || { echo "[s3run] --bridge needs $B/$f: bash s3build.sh" >&2; exit 1; }
     done
     rm -rf "$SD/frames" "$SD/padgl.ring"; mkdir -p "$SD/frames"
+    # 40 frames, or unbounded with --bus: s3press.py autoguide prunes them
+    MAXFR=40; [ "$BUS" = 1 ] && MAXFR=1000000
     env -u DISPLAY -u WAYLAND_DISPLAY EGL_PLATFORM=surfaceless GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12} \
         PAD_GL_W=${PAD_S3_W:-1920} PAD_GL_H=${PAD_S3_H:-1080} PAD_GL_DUMP="$SD/frames" \
-        PAD_GL_FRAME_EVERY=${PAD_GL_FRAME_EVERY:-30} PAD_GL_MAX_FRAMES=${PAD_GL_MAX_FRAMES:-40} \
+        PAD_GL_FRAME_EVERY=${PAD_GL_FRAME_EVERY:-30} PAD_GL_MAX_FRAMES=${PAD_GL_MAX_FRAMES:-$MAXFR} \
         PAD_VID_SHM="$SD/padvid.shm" \
         setsid "$B/padglhost" "$SD/padgl.ring" > "$SD/padglhost.log" 2>&1 &
     HOSTPID=$!
@@ -113,7 +115,11 @@ if [ "$BUS" = 1 ]; then
     [ -x "$B/s3spid" ] || { echo "[s3run] --bus needs $B/s3spid: bash s3build.sh" >&2; exit 1; }
     SPIDEV=pad-s3spi-slot$SLOT
     rm -f "$SD/spi.log" "$SD/bridge.log" "$SD/bridge.path"
-    "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" --idle=${PAD_S3_SPI_IDLE:-0xff} > "$SD/s3spid.out" 2>&1 &
+    # the cabinet inputs, live: 8 bytes, every one at rest; s3press.py
+    # presses a button by clearing its bit (active low) while the game runs
+    python3 -c "import sys; open(sys.argv[1],'wb').write(bytes([int(sys.argv[2],0)])*8)" \
+        "$SD/spi.in" "${PAD_S3_SPI_IDLE:-0xff}"
+    "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" --idle=${PAD_S3_SPI_IDLE:-0xff} --input="$SD/spi.in" > "$SD/s3spid.out" 2>&1 &
     BUSPIDS="$!"
     python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
@@ -135,6 +141,15 @@ if [ "$BUS" = 1 ]; then
         echo "[s3run] no video decoder: $(tail -2 "$SD/s3vidhost.out")"
     fi
     echo "[s3run] node bus up: $DEVBINDS"
+    # GUIDED SETUP, walked by the harness: the game holds a fresh machine (and
+    # this one on every boot) on its operator screen until Save & Exit is
+    # pressed. s3press.py watches the frame dumps and presses BACK + SELECT
+    # (the coin-door buttons on the SPI chain) whenever it comes up, pruning
+    # old dumps as it goes. PAD_S3_AUTOGUIDE=0 leaves the screen alone.
+    if [ "$BRIDGE" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" = 1 ]; then
+        python3 "$S/s3press.py" autoguide "$SLOT" > "$SD/autoguide.log" 2>&1 &
+        BUSPIDS="$BUSPIDS $!"
+    fi
 fi
 export DEVBINDS RUNBINDS
 

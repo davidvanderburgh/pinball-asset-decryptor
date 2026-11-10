@@ -65,6 +65,7 @@ static struct stream {
     unsigned eof_sent;
     int64_t pts[MAXPTS];                /* pending pts, unsorted */
     int npts;
+    int64_t last_pts, step;             /* for a frame with no packet time */
     unsigned long frames, packets;
 } st[S3VID_CHANNELS];
 
@@ -151,9 +152,19 @@ int avcodec_open2(AVCodecContext *ctx, const AVCodec *codec, AVDictionary **opts
     if (!tried) setup();
     if (!real_open2) real_open2 = dlsym(RTLD_NEXT, "avcodec_open2");
     r = real_open2(ctx, codec, opts);
-    if (r < 0 || !feed || !ctx ||
+    if (!feed || !ctx ||
         (ctx->codec_id != AV_CODEC_ID_HEVC && ctx->codec_id != AV_CODEC_ID_H264))
         return r;
+    /* The real open of the Pi's hardware decoders FAILS here - the game asks
+     * for h264_v4l2m2m by name and there is no V4L2 device ("Could not find
+     * a valid device") - and passing that on is "InitCodecContext failed" on
+     * every H.264 clip. The real decoder is never used on these contexts:
+     * the host decodes them, so the open succeeds regardless. */
+    if (r < 0) {
+        sayf("[s3vid] the real %s open failed (%ld): decoded on the host anyway\n",
+             (long)(codec && codec->name ? codec->name : "decoder"), r, 0);
+        r = 0;
+    }
     pthread_mutex_lock(&mu);
     for (c = 0; c < S3VID_CHANNELS; c++)
         if (!st[c].ctx) break;
@@ -164,6 +175,7 @@ int avcodec_open2(AVCodecContext *ctx, const AVCodec *codec, AVDictionary **opts
     }
     memset(&st[c], 0, sizeof st[c]);
     st[c].ctx = ctx;
+    st[c].last_pts = AV_NOPTS_VALUE;
     {
         struct s3vid_chan *ch = &feed->ch[c];
         unsigned n = ctx->extradata_size > 0 ? (unsigned)ctx->extradata_size : 0;
@@ -201,6 +213,25 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
         return real_send(ctx, pkt);
     }
     ch = &feed->ch[c];
+    /* A real decoder answers EAGAIN only while a decoded frame waits to be
+     * read, and the game calls anything else "Unexpected busy error when
+     * SENDING PACKET". So a full ring is waited out (the host drains it as
+     * fast as ffmpeg takes it), and EAGAIN is the last resort. */
+    {
+        unsigned need = pkt && pkt->size > 0 ? (unsigned)pkt->size : 0;
+        int i;
+        for (i = 0; i < 2000; i++) {
+            unsigned off0 = ch->data_w % S3VID_DATA;
+            unsigned pad = off0 + need > S3VID_DATA ? S3VID_DATA - off0 : 0;
+            if (ch->pkt_w - ch->pkt_r < S3VID_PKTS &&
+                ch->data_w + pad + need - ch->data_r <= S3VID_DATA)
+                break;
+            {
+                struct timespec ts = { 0, 1000000 };
+                nanosleep(&ts, 0);
+            }
+        }
+    }
     if (ch->pkt_w - ch->pkt_r >= S3VID_PKTS) return AVERROR(EAGAIN);
     d = &ch->pkt[ch->pkt_w % S3VID_PKTS];
     if (!pkt || !pkt->data || pkt->size <= 0) {         /* drain */
@@ -270,8 +301,20 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
     }
     v = &vshm->ch[c];
     if (feed->ch[c].flush_ack != feed->ch[c].flush_gen) return AVERROR(EAGAIN);
-    if (v->write_idx == st[c].handed)
-        return (st[c].eof_sent && v->eos) ? AVERROR_EOF : AVERROR(EAGAIN);
+    if (v->write_idx == st[c].handed && st[c].eof_sent) {
+        /* DRAINING (send_packet(NULL)): the game reads until AVERROR_EOF
+         * against a short timeout of its own ("SpiVideoStreamDecoderBase::
+         * FlushDecoder while loop timeout" when the end waited for the host
+         * ffmpeg to exit). So: a frame still coming out gets a moment, and
+         * then the end is the end. */
+        int i;
+        for (i = 0; i < 25 && v->write_idx == st[c].handed && !v->eos; i++) {
+            struct timespec ts = { 0, 1000000 };
+            nanosleep(&ts, 0);
+        }
+        if (v->write_idx == st[c].handed) return AVERROR_EOF;
+    }
+    if (v->write_idx == st[c].handed) return AVERROR(EAGAIN);
     __sync_synchronize();
     n = st[c].handed;
     slot = n % PADVID_SLOTS;
@@ -307,6 +350,14 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
     for (i = 0; i < st[c].npts; i++)
         if (best < 0 || st[c].pts[i] < st[c].pts[best]) best = i;
     if (best >= 0) { pts = st[c].pts[best]; st[c].pts[best] = st[c].pts[--st[c].npts]; }
+    /* A frame with no pending packet time (one whose packet's pts went with
+     * a flush): the game asserts pts != AV_NOPTS_VALUE (DecodeFrame, :1643),
+     * so it takes the stream's own cadence - the last time plus the last step */
+    if (pts == AV_NOPTS_VALUE)
+        pts = st[c].last_pts != AV_NOPTS_VALUE ? st[c].last_pts + (st[c].step > 0 ? st[c].step : 1) : 0;
+    if (st[c].last_pts != AV_NOPTS_VALUE && pts > st[c].last_pts)
+        st[c].step = pts - st[c].last_pts;
+    st[c].last_pts = pts;
     st[c].handed++;
     st[c].frames++;
     pthread_mutex_unlock(&mu);
@@ -330,6 +381,7 @@ void avcodec_flush_buffers(AVCodecContext *ctx)
     pthread_mutex_lock(&mu);
     st[c].npts = 0;
     st[c].eof_sent = 0;
+    st[c].last_pts = AV_NOPTS_VALUE;           /* a seek: time starts over */
     ch->flush_base = st[c].handed;
     __sync_synchronize();
     ch->flush_gen++;

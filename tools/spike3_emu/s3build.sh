@@ -31,7 +31,10 @@ ROOTFS=$(ls -d "$STORE"/cards/*/rootfs 2>/dev/null | head -1)
 LIBC=$ROOTFS/lib
 
 # the video ring's slot: Spike 3 clips run to 1940x1100 (padvid.h; s3vidhost.py matches)
-VIDMAX="-DPADVID_MAX_W=2048 -DPADVID_MAX_H=1152"
+# and 16 slots a stream, not 4: the game keeps several decoded frames queued
+# ahead of display (a V4L2 decoder has a deep pool), and with 4 it held every
+# slot, the host could not write the next frame and send_packet went "busy"
+VIDMAX="-DPADVID_MAX_W=2048 -DPADVID_MAX_H=1152 -DPADVID_SLOTS=16"
 # GL programs: Godot 4 builds well past the Spike 2 bridge's 128 (glbridge.c/padglhost.c must agree)
 GLMAX="-DMAXPROG=1024"
 CF="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -Wall -Werror=implicit-function-declaration"

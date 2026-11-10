@@ -2312,11 +2312,11 @@ def test_foo_fighters_kick_target_is_the_games_switch_and_kicks_harder(title, si
     lower right) reached no switch, so the game never counted it, and it
     kicked weaker than the real one. It is KICK TARGET (each program's own
     switch table, 1.04.0), the game's KICK TARGET coil sounds it, and the
-    patched table's wall kicks at 300 where JP's kicked at 240."""
+    patched table's wall kicks at 360 (PAD-1119; 300 by PAD-982) where JP's kicked at 240."""
     vs = pytest.importorskip("vpxshadow")
     m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
     assert m["switches"]["LightningTarget"] == {"id": sid, "event": "slingshot", "name": "KICK TARGET"}
-    assert m["item_fields"]["LightningTarget"] == {"SLGF": 300.0}
+    assert m["item_fields"]["LightningTarget"] == {"SLGF": 360.0}
     out = vs.gen(m, {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")})
     assert "Sub LightningTarget_Slingshot : vpmTimer.PulseSw %d" % (1000 + sid) in out
     assert 'SolCallback(10) = "PadKickTarget"' in out
@@ -5313,3 +5313,33 @@ def test_gotg_bulbs_off_runs_without_the_tables_objects(tmp_path):
     vbs.write_text(bulbs + "\nPadGotgBulbsOff\nWScript.Echo \"done\"\n", encoding="latin-1")
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and r.stdout.strip() == "done", r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("title", ["foo_fighters_pro", "foo_fighters_le"])
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's VBScript under cscript")
+def test_foo_fighters_kick_target_fires_dof_and_kicks_harder(tmp_path, title):
+    """PAD-1119: JP's kick target sub fires no DOF, so the KICK TARGET coil's
+    callback fires the right slingshot's (104 contactor, 107 MX; the target
+    stands beside it), on the coil's fire only; and it kicks harder than
+    PAD-982's 300. Copies patched with the DOF-less callback show Patch again."""
+    m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
+    sol = [s for k, s in m["solenoids"].items() if k != "_" and s.get("name") == "KICK TARGET"]
+    assert [s["callback"] for s in sol] == ["PadKickTarget"]
+    assert m["item_fields"]["LightningTarget"]["SLGF"] > 300.0
+    ex = m["extra_vbs"]
+    sub = ex[ex.index("Sub PadKickTarget"):]
+    sub = sub[:sub.index("End Sub", sub.index("End If")) + len("End Sub")]
+    old = 'Sub PadKickTarget(e) : If e Then PlaySoundAt "fx_slingshot_EM", Target004 : End If : End Sub'
+    assert old not in ex and [k for k in m["repatch"] if k["old"] == old]
+    vbs = tmp_path / "kick.vbs"
+    vbs.write_text("\n".join([
+        "Const DOFPulse = 2",
+        "Dim Target004, Got : Got = \"\"",
+        "Sub PlaySoundAt(s, o) : Got = Got & \"snd \" : End Sub",
+        "Sub DOF(n, v) : Got = Got & n & \":\" & v & \" \" : End Sub",
+        sub,
+        "PadKickTarget False : PadKickTarget True : PadKickTarget 0",
+        "WScript.Echo Got"]), encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.split() == ["snd", "104:2", "107:2"], r.stdout + r.stderr

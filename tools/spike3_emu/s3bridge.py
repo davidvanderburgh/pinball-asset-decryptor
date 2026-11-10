@@ -99,6 +99,7 @@ class Node:
         self.inputs = None        # () -> this node's 8 live input bytes
         self.reported = bytes(8)  # what the game last read (scan or ff)
         self.registered = 0       # when its identity was first read (time)
+        self.rx = 0               # addressed frames since the last ff probe
 
     def __call__(self, data, k):
         """k reply bytes (payload + checksum) for request payload `data`."""
@@ -136,14 +137,20 @@ class Node:
             if any(bits):
                 self.once("sw" + bits.hex(), "node %d switches %s" % (self.nid, bits.hex()))
         elif cmd == 0xFF and plen >= 8:
-            # the fault probe (Spike 2's 0x5a43d0): word A = the board's
-            # fault/status word (0: no fault), word B its input bits
-            bits = self.inputs() if self.inputs else bytes(8)
-            p[4:8] = bits[0:4]
-            # it carries 32 of the 64 bits: only those count as read. Marking
-            # all 64 hid a trough closed before boot (bits 32..37) for good -
-            # no request was ever raised, the game ran LOCATING PINBALLS
-            self.reported = bits[0:4] + self.reported[4:8]
+            # the status probe (Spike 2's 0x5a43d0, PAD-249): word A = the
+            # number of addressed frames the board took since the last probe,
+            # this one included - the game counts the same and, on a
+            # mismatch, sets bit 31 of B, and B & 0x8010211f re-initialises
+            # the board (a 14/46/48/72 burst) for ever. Word B stays 0: it
+            # was the input bits here, and node 9's bit 31 alone was a fault.
+            p[0:4] = struct.pack("<I", self.rx)
+            self.rx = 0
+            # NOT a read of the switches: the game sends it to every node once
+            # a second and takes no switch events from it. Counting it as one
+            # cleared a raised request with no scan - a trough closed before
+            # boot went unseen (LOCATING PINBALLS for ever), and of a coin, a
+            # Start and a flipper only the coin reached the game. Only the
+            # scan (0x11) clears a request.
         return bytes(p) + bytes([(-sum(p)) & 0xFF])
 
     def once(self, key, msg):
@@ -210,6 +217,30 @@ class Bridge:
                 return bytes(r[:reply_len - 1]).ljust(reply_len - 1, b"\x55") + b"\x00"
         return b"\x55" * (reply_len - 1) + b"\x04"
 
+    def note_enumeration(self, node, data):
+        """`F0 10`/`F0 20` re-address a node: the game is (still) enumerating it, so
+        its request stays down for another 30 s (attention()). A request
+        raised mid-enumeration is answered with F0 again - on a slow boot the
+        fixed 30 s after registration ran out first and the game sent 45,000
+        F0s a minute and never reached attract."""
+        model = self.nodes.get(node & 0x3F)
+        if model is None or not data:
+            return
+        if node & 0x40:
+            data = unmask(node, data)
+        if node & 0x80:
+            model.rx += 1             # every addressed frame, as the game counts
+            if data[0] == 0xF1:       # F1: the game restarts its own count
+                model.rx = 0
+        # F0 10 / F0 20 only: the service loop sends every node F0 11 once
+        # a second, and counting that kept every request down for good
+        if data[0] == 0xF0 and len(data) > 1 and data[1] in (0x10, 0x20) and model.registered:
+            model.registered = time.time()
+            self.enum_said = getattr(self, "enum_said", 0) + 1
+            if self.enum_said <= 20 or self.enum_said % 1000 == 0:
+                self.log.write("# [enumerate] node %d re-addressed (F0 %02x), request held 30 s (%d)\n" % (
+                    node & 0x3F, data[1], self.enum_said))
+
     def handle(self, cmd, ident, p):
         self.counts[cmd] = self.counts.get(cmd, 0) + 1
         if cmd == 0x20:
@@ -237,6 +268,7 @@ class Bridge:
             if len(p) < n + 3:
                 return None
             reply_len = p[n + 2]
+            self.note_enumeration(p[0], p[2:2 + n])
             if reply_len == 0:
                 return None
             return frame(0x41, ident, self.node_exchange(p[0], p[2:2 + n], reply_len))

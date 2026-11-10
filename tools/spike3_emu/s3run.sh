@@ -78,6 +78,12 @@ echo "[s3run] card tree $TREE, slot $SLOT ($SD)"
 # preloaded - and its own padglhost renders the ring headless (surfaceless EGL
 # on the GPU) and dumps every 30th frame to $SD/frames as PNG.
 HOSTPID=""
+# a run killed from outside (its session ended) leaves its setsid helpers
+# behind; an old padglhost kept dumping its own frames into this slot's
+# fresh frames dir for hours, and the "newest" frame was then a stale one
+for p in "padglhost $SD/padgl.ring" "s3bridge.py $SD( |\$)" "s3vidhost.py $SD( |\$)" "s3press.py autoguide $SLOT( |\$)"; do
+    pkill -f "$p" 2>/dev/null && echo "[s3run] stopped a leftover: $p"
+done
 if [ "$BRIDGE" = 1 ]; then
     for f in libGLESv2.so.2 libEGL.so.1 s3kms.so padglhost; do
         [ -e "$B/$f" ] || { echo "[s3run] --bridge needs $B/$f: bash s3build.sh" >&2; exit 1; }

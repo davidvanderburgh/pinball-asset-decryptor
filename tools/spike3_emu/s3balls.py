@@ -82,12 +82,13 @@ class Balls:
         if os.environ.get("PAD_S3_BALLS_HOME", "1") != "0":
             for nb in where["trough"]:
                 self.set(nb, True)
-        # an OPTO with nothing in its beam reads CLOSED (the raw bit is what
-        # the game reads; Spike 2's shim applied the polarity inside the
-        # game instead). Measured: LEFT EJECT OPTO left open = a ball in the
-        # scoop - kicked at boot, "Left Scoop DEVICE MALFUNCTION"; closed,
-        # no kick. PAD_S3_OPTO_REST=0 leaves them open.
-        if os.environ.get("PAD_S3_OPTO_REST", "1") != "0":
+        # Raw input bits are ACTIVE HIGH (1 = closed): the service menu's
+        # Switch Test map draws every node 8/9 switch open at all-zero and
+        # closed at all-ones. So optos rest OPEN like everything else.
+        # PAD_S3_OPTO_REST=1 closes them (an experiment: the scoop kicks at
+        # boot came back with a bus whose status probe was wrong, not from
+        # the optos).
+        if os.environ.get("PAD_S3_OPTO_REST", "0") == "1":
             for nb in where.get("optos", []):
                 self.set(nb, True)
         self.say("trough %s, shooter %s, eject coil %s, launch coil %s; %d home; %d optos at rest" % (

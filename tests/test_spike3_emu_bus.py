@@ -60,13 +60,15 @@ def test_scan_reply_keyed_with_the_decoded_key():
     assert sum(r) & 0xFF == 0
 
 
-def test_fault_probe_marks_only_the_bits_it_carries():
-    """A trough closed before boot (node 8 bits 32..37) must still raise a
-    request after the 32-bit ff probe - it was hidden for good."""
-    bits = bytes([0, 0, 0, 0, 0x3F, 0, 0, 0])
-    n = _node(bits)
-    n(bytes([0xFF, 0x77]), 9)
-    assert n.reported != bits
+def test_fault_probe_does_not_clear_a_request():
+    """The once-a-second ff probe is not a switch read: a change (a trough
+    closed before boot, a Start press) must stay raised until a scan."""
+    for bits in (bytes([0, 0, 0, 0, 0x3F, 0, 0, 0]), bytes([0, 0x08, 0, 0, 0, 0, 0, 0])):
+        n = _node(bits)
+        n(bytes([0xFF, 0x77]), 9)
+        assert n.reported != bits
+        n(bytes([0x11, 0x00, 0x00]), 11)
+        assert n.reported == bits
 
 
 def _balls():
@@ -95,7 +97,7 @@ def _run(b, secs):
 
 def test_eject_launch_drain():
     sw, w, b = _balls()
-    assert b.home() == 6 and b.made((8, 5))                  # optos rest closed
+    assert b.home() == 6 and not b.made((8, 5))              # optos rest open
     b.coil(8, bytes([0x40, 1, 0xFF] + [0] * 8))              # boot configuration
     _run(b, 0.6)
     assert b.home() == 6
@@ -116,3 +118,23 @@ def test_eject_retry_inside_the_gap_moves_one_ball():
     b.coil(8, bytes([0x40, 1, 0xE1, 6] + [0] * 7))
     _run(b, 0.7)
     assert b.home() == 5
+
+
+def test_status_probe_reports_frames_received():
+    """Word A of the ff reply = addressed frames since the last probe, this
+    one included (Spike 2 PAD-249); a mismatch made the game re-init the
+    board for ever."""
+    import struct as _s
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    br.nodes[8] = _node(bytes(8))
+
+    def send(payload, reply_len):
+        p = bytes([0x88, len(payload)]) + payload + bytes([reply_len])
+        return br.handle(0x41, 0, p)
+    send(bytes([0x46, 0xFF, 0x01, 0x00]), 0)
+    send(bytes([0x48, 0x00, 0x00, 0x00]), 0)
+    r = send(bytes([0xFF, 0x77]), 10)
+    body = s3bridge.frames_in(r)[0][0][2]
+    assert _s.unpack("<I", body[0:4])[0] == 3 and body[4:8] == bytes(4)
+    r = send(bytes([0xFF, 0x77]), 10)
+    assert _s.unpack("<I", s3bridge.frames_in(r)[0][0][2][0:4])[0] == 1

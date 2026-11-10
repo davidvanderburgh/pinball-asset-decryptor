@@ -60,9 +60,22 @@ def press(slot, bit, ms=200):
     setbit(slot, bit, False)
 
 
+def frames(slot):
+    """The slot's frame dumps, OLDEST FIRST. The names are frame_<n>.png,
+    not zero-padded, so a plain sort put frame_999 after frame_1000: past
+    the thousandth frame "the newest" was a stale one, and autoguide read -
+    and pressed BACK/SELECT on - a Guided Setup long gone, mid-game."""
+    def num(f):
+        try:
+            return int(os.path.basename(f)[6:-4])
+        except ValueError:
+            return -1
+    return sorted(glob.glob(os.path.join(BASE % slot, "frames", "frame_*.png")), key=num)
+
+
 def newest_frame(slot):
     """The newest FINISHED frame: the newest file may still be being written."""
-    fs = sorted(glob.glob(os.path.join(BASE % slot, "frames", "frame_*.png")))
+    fs = frames(slot)
     return fs[-2] if len(fs) > 1 else None
 
 
@@ -106,7 +119,7 @@ def scan(slot, first=0, last=63, hold_ms=250, settle=1.8):
         log.write(line + "\n")
         # keep the disk: drop every frame but the newest two (newest_frame
         # reads the second newest - the newest may still be being written)
-        for f in sorted(glob.glob(os.path.join(BASE % slot, "frames", "frame_*.png")))[:-2]:
+        for f in frames(slot)[:-2]:
             try:
                 os.remove(f)
             except OSError:
@@ -154,13 +167,21 @@ def guided(slot, max_steps=12):
 def is_guided_setup(f):
     """Guided Setup, full screen: the white title across the top centre and a
     highlighted (cyan) row in the left column. Tech Alerts (an 800x480 panel
-    at the top left) has its title elsewhere, attract has no cyan."""
+    at the top left) has its title elsewhere, attract has no cyan. The
+    service menu's pages look the same - white title, cyan row - but their
+    right column is a GREY description, where Guided Setup shows each row's
+    value in WHITE (English, U.S.A., Yes): measured 0.06 of that area white
+    on Guided Setup, 0.0 on the main menu and every Diagnostics page.
+    Pressing BACK there threw an operator out of the menu."""
     import numpy as np
     from PIL import Image
     a = np.asarray(Image.open(f).convert("RGB")).astype(np.int16)
     title = a[70:180, 680:1240]
     white = ((title[:, :, 0] > 220) & (title[:, :, 1] > 220) & (title[:, :, 2] > 220)).mean()
-    return white > 0.08 and highlighted_row(f) is not None
+    if not (white > 0.08 and highlighted_row(f) is not None):
+        return False
+    vals = a[240:700, 800:1400]
+    return ((vals[:, :, 0] > 220) & (vals[:, :, 1] > 220) & (vals[:, :, 2] > 220)).mean() > 0.02
 
 
 def autoguide(slot, secs=0, keep=60):
@@ -174,7 +195,7 @@ def autoguide(slot, secs=0, keep=60):
     walked = 0
     while not secs or time.time() - t0 < secs:
         time.sleep(2.0)
-        fs = sorted(glob.glob(os.path.join(BASE % slot, "frames", "frame_*.png")))
+        fs = frames(slot)
         for f in fs[:-keep]:
             try:
                 os.remove(f)

@@ -392,7 +392,8 @@ HELP_CONTENT = {
          "| Show: Unchanged | Only what you haven't touched yet |\n\n"
          "On Stern games the **Requests** column counts the game code's sound "
          "requests that play each sound (hover it for their numbers and Sound Test "
-         "names); **None** marks a sound no request plays.\n\n"
+         "names); **None** marks a sound no request plays. Tick **Hide unused** "
+         "to leave those out of the list.\n\n"
          "**Export CSV** saves the whole table (every slot, not just the filtered "
          "view) for a spreadsheet."),
         ("Where is this on the card?",

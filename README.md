@@ -49,7 +49,7 @@ macOS and Linux.
 | Pinball Brothers | 4 | Extract, Write, Apply Delta, Mod Pack, Replace Audio/Video, Emulate |
 | Sega (Whitestar DMD) | 18 | Capture DMD animations + sound with PinMAME |
 | Spooky Pinball | 14 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate, Multi-boot |
-| Stern Spike 3 | 6 | Extract (decrypts the card's encrypted games partition from a LUKS/ext4 SD image or `.spk`; needs your own OTP keyfile) |
+| Stern Spike 3 | 6 | Extract (decrypts the card's encrypted games partition from a LUKS/ext4 SD image or `.spk`; needs your own OTP keyfile, which a locked card can now help you read from your own board) |
 | Stern Spike 2 | 28 | Extract, Write, Direct-SD, Replace Audio/Video/Images/Text, Scenes, Partition Explorer, Emulate, Multi-boot |
 | Stern Spike 1 | 6 | Extract, Write, Replace Audio, Replace Images, Replace Text, Emulate |
 | Stern SAM | 26 | Extract, Write, Replace Audio, Replace Images (stills, fonts and DMD animation frames), Mod Pack; capture DMD animations with PinMAME |

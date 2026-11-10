@@ -122,6 +122,58 @@ def recorded_files(staged):
     return out
 
 
+#: the sections whose slot names a file first: a slot's own pick before its
+#: random clips and music mode files, so a file picked for a slot and also a
+#: random clip of another is named after the slot it was picked for
+_SLOT_ORDER = ("video", "audio", "image", "video_variants", "sound_modes")
+
+
+def _slot_like(key):
+    """Is *key* (a dict key on the way to a file) an extracted slot's rel?"""
+    return (isinstance(key, str) and "/" in key and not _ABS_RE.match(key)
+            and kind_of(key) is not None)
+
+
+def slots_of(staged):
+    """``{path: the slot rel it is first recorded for}``: the key on the way to
+    each file that is a slot (``video/attract/GZ_Intro.mp4``), the one of the
+    earliest section of :data:`_SLOT_ORDER`.  A file recorded for no slot (an
+    attract item) is not in it."""
+    out = {}
+    order = [k for k in _SLOT_ORDER if k in (staged or {})] + [
+        k for k in (staged or {}) if k not in _SLOT_ORDER]
+
+    def walk(node, slot, section):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, slot or (k if _slot_like(k) else None), section)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v, slot, section)
+        elif slot and _looks_like_file(node, section):
+            out.setdefault(node, slot)
+
+    for key in order:
+        walk(staged[key], None, key)
+    return out
+
+
+def stock_name(src, slot):
+    """The file name an exported *src* gets: the game's own name for the slot
+    it replaces first, then the file's own ("GZ_Intro - my intro.mp4"), so
+    "they can be easily identified" (the modder who asked).  A file already
+    named so, or recorded for no slot, keeps its own name."""
+    own = os.path.basename(src) or "file"
+    if not slot:
+        return own
+    stock = os.path.splitext(slot.replace("\\", "/").rsplit("/", 1)[-1])[0].strip()
+    stock = re.sub(r'[<>:"/\\|?*]+', "_", stock)
+    if not stock or re.match(re.escape(stock) + r"($|[^A-Za-z0-9])", os.path.splitext(own)[0],
+                             re.IGNORECASE):
+        return own
+    return "%s - %s" % (stock, own)
+
+
 def _inside(path, folder):
     try:
         a = os.path.normcase(os.path.abspath(path))
@@ -163,9 +215,13 @@ def plan(staged, dest, project=None, isfile=os.path.isfile):
     "kind", "to", "size", "uses", "state"}], "gone": [path], "counts": {kind:
     n}, "bytes": n}``.  ``state`` is ``"copy"``, ``"there"`` (already in its
     folder of *dest*, left as it is) or ``"same"`` (a copy of the same bytes is
-    already there, a re-export).  Two different files of one name get "name
-    (2).ext"; one file named by many slots is one copy.  Nothing is written."""
+    already there, a re-export).  Each file is named after the game's file of
+    the slot it replaces (:func:`stock_name`); a file a v1.346.0 export left
+    under its own name is ``"rename"``d to it.  Two different files of one
+    name get "name (2).ext"; one file named by many slots is one copy.
+    Nothing is written."""
     files, gone, taken = [], [], {}
+    slots = slots_of(staged)
     counts = {k: 0 for k in KINDS}
     total = 0
     for src, e in recorded_files(staged).items():
@@ -184,13 +240,14 @@ def plan(staged, dest, project=None, isfile=os.path.isfile):
             size = os.path.getsize(src)
         except OSError:
             size = 0
-        if _inside(src, sub):
+        name = stock_name(src, slots.get(src))
+        there = _inside(src, sub)
+        if there and os.path.basename(src) == name:
             files.append({"src": src, "kind": kind, "to": src, "size": size,
                           "uses": e["uses"], "state": "there"})
             taken[os.path.normcase(os.path.abspath(src))] = src
             counts[kind] += 1
             continue
-        name = os.path.basename(src) or "file"
         stem, ext = os.path.splitext(name)
         k = 2
         while True:
@@ -201,7 +258,7 @@ def plan(staged, dest, project=None, isfile=os.path.isfile):
                     state = "same"
                     break
             elif not os.path.exists(to):
-                state = "copy"
+                state = "rename" if there else "copy"
                 break
             elif _same_file(to, src):
                 state = "same"
@@ -212,7 +269,7 @@ def plan(staged, dest, project=None, isfile=os.path.isfile):
         files.append({"src": src, "kind": kind, "to": to, "size": size,
                       "uses": e["uses"], "state": state})
         counts[kind] += 1
-        if state == "copy":
+        if state in ("copy", "rename"):
             total += size
     return {"dest": dest, "files": files, "gone": gone, "counts": counts,
             "bytes": total}
@@ -250,15 +307,22 @@ class _Cancelled(Exception):
     pass
 
 
-def export(staged, result, progress=None, cancel=None):
+def export(staged, result, progress=None, cancel=None, move_there=False):
     """Copy the files of a :func:`plan` *result*.  Returns ``{"mapping": {src:
     to}, "copied", "reused", "bytes", "cancelled"}``; the mapping names every
-    file that is in the export folder now (copied, or already there)."""
+    file that is in the export folder now (copied, or already there).  A file
+    to ``"rename"`` (already exported under its own name) is moved to its new
+    name when *move_there* (the project is pointed at the new name after), else
+    copied, so the project that still names the old one keeps it."""
     mapping, copied, reused, done = {}, 0, 0, 0
     total = result.get("bytes") or 0
     cancelled = False
     for f in result["files"]:
-        if f["state"] == "copy":
+        if f["state"] == "rename" and move_there:
+            os.replace(f["src"], f["to"])
+            done += f["size"]
+            copied += 1
+        elif f["state"] in ("copy", "rename"):
             try:
                 done = _copy(f["src"], f["to"], progress, done, total, cancel)
             except _Cancelled:

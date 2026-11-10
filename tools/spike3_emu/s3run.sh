@@ -77,6 +77,9 @@ fi
 # per slot, bound over the chroot's device nodes:
 #   /dev/spidev4.0  s3spid (CUSE char device; the game's spidev ioctls reach it
 #                   through the qemu-spi-ioctls.patch translation) -> $SD/spi.log
+#                   Its inputs (the cabinet switches) read 0xff at rest,
+#                   PAD_S3_SPI_IDLE to change: at 0x00 every button reads HELD and
+#                   the game boots straight into its service path (Tech Alerts).
 #   /dev/ttyAMA5    s3bridge.py (a pty: the RP2040 netbridge board, answering
 #                   its host UART as its own firmware does) -> $SD/bridge.log
 # Needs cuse.ko loaded on the host (built from the same kernel tree as
@@ -88,7 +91,7 @@ if [ "$BUS" = 1 ]; then
     [ -x "$B/s3spid" ] || { echo "[s3run] --bus needs $B/s3spid: bash s3build.sh" >&2; exit 1; }
     SPIDEV=pad-s3spi-slot$SLOT
     rm -f "$SD/spi.log" "$SD/bridge.log" "$SD/bridge.path"
-    "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" > "$SD/s3spid.out" 2>&1 &
+    "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" --idle=${PAD_S3_SPI_IDLE:-0xff} > "$SD/s3spid.out" 2>&1 &
     BUSPIDS="$!"
     python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"

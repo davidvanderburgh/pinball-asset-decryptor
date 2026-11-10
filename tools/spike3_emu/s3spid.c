@@ -10,9 +10,8 @@
  * qemu-spi-ioctls.patch translation, already pointing at host memory, so the
  * nested SPI_IOC_MESSAGE buffers are fetched with CUSE's ioctl retry.
  *
- * Every transfer is logged as one line: time, tx bytes, rx bytes. The answer
- * is all zeros: this is the recon device, the one that says what the game
- * asks for before anything answers it.
+ * Every transfer is logged as one line: time, tx bytes, rx bytes. Every rx
+ * byte is --idle (default 0x00): the inputs at rest.
  *
  * Build: gcc -O2 -Wall -o s3spid s3spid.c $(pkg-config --cflags --libs fuse3)
  */
@@ -30,6 +29,7 @@
 #include <time.h>
 
 static FILE *logf;
+static int idle = 0x00;            /* --idle=0xNN: every rx byte */
 static uint8_t mode = 0, lsb = 0, bits = 8;
 static uint32_t speed = 1000000, mode32 = 0;
 static struct timespec t0;
@@ -168,7 +168,8 @@ static void s_ioctl(fuse_req_t req, int icmd, void *arg, struct fuse_file_info *
         /* 3: answer. tx data follows the array in `in`, in transfer order. */
         {
             const uint8_t *tx = (const uint8_t *)in + arr;
-            uint8_t *rx = calloc(1, rxsum ? rxsum : 1), *rp = rx;
+            uint8_t *rx = malloc(rxsum ? rxsum : 1), *rp = rx;
+            memset(rx, idle, rxsum ? rxsum : 1);
             size_t total = 0;
             for (i = 0; i < n; i++) {
                 fprintf(logf, "%9.3f xfer#%lu.%zu len %u speed %u%s", now(), nxfer, i,
@@ -200,10 +201,10 @@ static const struct cuse_lowlevel_ops ops = {
     .write = s_write, .ioctl = s_ioctl,
 };
 
-struct opts { char *name; char *log; };
+struct opts { char *name; char *log; char *idle; };
 #define OPT(t, p) { t, offsetof(struct opts, p), 1 }
 static const struct fuse_opt optspec[] = {
-    OPT("--name=%s", name), OPT("--log=%s", log), FUSE_OPT_END
+    OPT("--name=%s", name), OPT("--log=%s", log), OPT("--idle=%s", idle), FUSE_OPT_END
 };
 
 int main(int argc, char **argv)
@@ -217,6 +218,8 @@ int main(int argc, char **argv)
     if (fuse_opt_parse(&args, &o, optspec, NULL))
         return 1;
     snprintf(devname, sizeof(devname), "DEVNAME=%s", o.name ? o.name : "pad-spidev4.0");
+    if (o.idle)
+        idle = (int)strtol(o.idle, NULL, 0) & 0xff;
     logf = o.log ? fopen(o.log, "w") : stderr;
     if (!logf) {
         perror(o.log);

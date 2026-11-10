@@ -210,6 +210,12 @@ def main():
                 "%d=%s" % (n, c["type"]) for n, c in sorted(claims.items()))))
         except Exception as e:                       # a run without nodes still boots
             log.write("# no node directory (%s): every node will time out\n" % e)
+    # PAD_S3_NODES_ABSENT=12,14: boards not fitted on this machine - they time
+    # out as an empty address does (an optional board the title accepts as
+    # missing, such as an accessory whose own checks the emulator cannot pass)
+    absent = {int(x) for x in os.environ.get("PAD_S3_NODES_ABSENT", "").replace(",", " ").split() if x.isdigit()}
+    for n in sorted(absent & set(claims)):
+        log.write("# node %d (%s) not fitted\n" % (n, claims.pop(n)["type"]))
     br = Bridge(crc, log, claims)
     master, slave = pty.openpty()
     name = os.ttyname(slave)

@@ -72,7 +72,7 @@
   "saucers": {
     "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power[, kickz]); ToyBoxKicker's is swapped for the toy box stack in extra_vbs",
     "ScoopEject": {"switch": 50, "dir": 180, "power": 5, "name": "LEFT SCOOP"},
-    "ElevatorEject": {"switch": 49, "dir": 193, "power": 20, "kickz": 0.785, "name": "TOP SCOOP"},
+    "ElevatorEject": {"switch": 49, "dir": 193, "power": 20, "kickz": 0.785, "lift": 35, "name": "TOP SCOOP (lift: the ball raised to the table's own ElevatorKickOut height before the kick, or it bounces off the elevator and falls back in)"},
     "sw61": {"switch": 85, "dir": -36, "power": 9, "name": "RIGHT EJECT (PadRightEject aims it)"},
     "ToyBoxKicker": {"switch": 78, "dir": 160, "power": 10, "name": "TOY BOX ENTER 1 (replaced by PadToyBox)"}
   },
@@ -93,6 +93,7 @@
     "46": {"coil": [8, 0], "name": "RIGHT FLIPPER", "callback": null},
     "48": {"coil": [8, 5], "name": "LEFT FLIPPER", "callback": null}
   },
+  "flipper_dof": {"_": "the table's own flipper DOF events (EndOfBall2's SoundFXDOF 101/102, DOFFlippers), sent on the machine's flipper coils: its script never fires them on a flip", "sLLFlipper": 101, "sLRFlipper": 102},
   "pup_stub": false,
   "neuter": [
     "elseIf DMDMode = 2 Then",

@@ -82,15 +82,25 @@ echo "[s3run] exec $PROG $* (qemu-aarch64 via binfmt, ${SECS}s cap)"
 [ "$STRACE" = 1 ] && export QEMU_STRACE=1
 export HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin
 T0=$(date +%s.%N)
-timeout -s KILL "$SECS" chroot "$R" "$PROG" "$@" > "$SD/game.out" 2> "$SD/game.err" < /dev/null
+# STDOUT ON A PTY. To a plain file the game's stdout is block-buffered, and
+# neither a SIGKILL at the cap nor its own TERM handler (which exits without a
+# flush) ever wrote it: a 30 s boot left game.out EMPTY (PAD-1090, second
+# sweep). `script` gives it a terminal, so it is line-buffered as on the
+# machine's console. stderr stays its own file. TERM at the cap, KILL 5 s on.
+printf '%q ' "$PROG" "$@" > "$SD/.argv"
+script -q -f -e -c "timeout -s TERM -k 5 $SECS chroot $R $(cat "$SD/.argv") 2> $SD/game.err < /dev/null" "$SD/game.out" > /dev/null < /dev/null   # script reads stdin - which is THIS script (bash -s)
 RC=$?
+# script's own exit is the child's (-e); a dumped core reads 128+signal
+grep -q 'COMMAND_EXIT_CODE="134"' "$SD/game.out" && RC=134
 echo "[s3run] exit $RC after $(echo "$(date +%s.%N) - $T0" | bc | cut -c1-6) s"
 case $RC in
     0) echo "[s3run]   0 = RESTART REQUESTED" ;; 1) echo "[s3run]   1 = REBOOT REQUESTED" ;;
     2) echo "[s3run]   2 = EXIT REQUESTED" ;; 3) echo "[s3run]   3 = POWER LOSS" ;;
     4) echo "[s3run]   4 = FATAL ERROR" ;; 5) echo "[s3run]   5 = DISPATCH TIMEOUT" ;;
-    137) echo "[s3run]   137 = still running at the ${SECS}s cap (killed)" ;;
-    *) [ "$RC" -ge 128 ] && echo "[s3run]   uncaught signal $((RC-128))" ;;
+    124|143) echo "[s3run]   $RC = still running at the ${SECS}s cap (stopped with TERM)" ;;
+    137) echo "[s3run]   137 = still running at the cap and ignored TERM (killed)" ;;
+    *) [ "$RC" -ge 128 ] && echo "[s3run]   uncaught signal $((RC-128))"
+       grep -h -m3 -E "Assertion|uncaught target signal" "$SD/game.err" | sed 's/^/[s3run]   /' ;;
 esac
 INNER
 RC=$?

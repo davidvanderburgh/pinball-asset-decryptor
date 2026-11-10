@@ -47,8 +47,24 @@ the FILES, decrypted, each one once:
 
 Measured on pokemon_le 0.82.0: **61.9 GB image -> 2.89 GB of files -> 2.35 GB
 on disk**, 151 s from the D: drive. Within the one card the dedup already saves
-0.5 GB (the seven Mesa `*_dri.so` are one 12 MB file). Across the six cards on
-hand: see the table in the ticket's commit / `s3store.py status`.
+0.5 GB (the seven Mesa `*_dri.so` are one 12 MB file). All six cards on hand,
+built in this order from D: (2026-11-09):
+
+| card | files | added to the store | build |
+|---|---|---|---|
+| pokemon_le 0.82.0 | 2.89 GB | 2.34 GB | 151 s |
+| fallout_le 0.81.0 | 10.99 GB | 10.00 GB | 631 s |
+| star_wars_2025_le 0.96.0 | 12.34 GB | 10.94 GB | 888 s |
+| star_wars_2025_pro 0.84.0 | 10.16 GB | **1.32 GB** | 611 s |
+| star_wars_elg 1.10.0 | 4.09 GB | 3.17 GB | 212 s |
+| walking_dead_remastered_le 0.92.0 | 2.97 GB | 2.05 GB | 147 s |
+| **6 cards** | **43.4 GB** | **29.85 GB on disk** | |
+
+against **371.5 GB of images**. Every card after the first shares ~0.9 GB of
+rootfs; the Star Wars 2025 Pro added 1.3 GB on top of the LE's 12.3. A rebuild
+of a card already in the store adds nothing (re-reads, links, done). The cost is
+the read: ~15-20 MB/s off a Windows drive through 9p + dm-crypt, so a big title
+takes 10-15 minutes once.
 
 ## Stage 1 - the boot harness (done: the game runs)
 
@@ -59,10 +75,31 @@ the card's own first boot again; private mount + pid namespace; chroot; the
 game exec'd through binfmt's qemu-aarch64 (flags `POF`, so nothing from the
 host goes into the chroot).
 
-First boot, pokemon_le 0.82.0, no shims at all: the 52 MB aarch64 `game`
-loads every one of its 31 libraries, starts its threads, tries the node-bus
-bridge, carries on without it, and then sits in `create_window RETRY n / 27`
-(no display). Still running at the 40 s cap.
+First boot, no shims at all, **all six cards the same way** (2026-11-09): the
+aarch64 `game` loads every one of its 31 libraries, starts its threads, finds
+no netbridge (`cpuspi: device open failed`, openocd cannot open its SWD
+adapter, `failed to initialize bridge`), carries on, retries `create_window`
+27 times at 300 ms, and then aborts on its own check:
+
+    glWindow.cpp:1039: void glWindow::setGlContext():
+        Assertion `eglGetError() == EGL_SUCCESS' failed.      (exit 134)
+
+| card | window retries | aborts at |
+|---|---|---|
+| fallout_le 0.81.0 | 27 | 63 s, glWindow.cpp:1039 |
+| pokemon_le 0.82.0 | 27 | 59 s, :1039 |
+| star_wars_2025_le 0.96.0 | 0 | 51 s, :970 |
+| star_wars_2025_pro 0.84.0 | 0 | 51 s, :963 |
+| star_wars_elg 1.10.0 | 27 | 59 s, :1039 |
+| walking_dead_remastered_le 0.92.0 | 27 | 59 s, :1039 |
+
+The two Star Wars 2025 builds are an older engine with no retry loop. So the
+display is the one wall between every card on hand and its first picture.
+
+Two harness lessons: the game's stdout to a file is block-buffered and its
+TERM handler exits without a flush, so s3run.sh runs it on a pty (`script`)
+and a 30 s boot no longer leaves game.out empty; and `script` reads stdin,
+which under `bash -s` is the harness itself, so it gets `/dev/null`.
 
 ## The hardware it reached for (strace, first boot)
 

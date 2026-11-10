@@ -6511,6 +6511,17 @@ the name, and `<NAME> - <WHAT IT DOES>` under it. coop.cfg `screens <scene>` nam
 once the scene is up, keeps them hidden, shows the one the pick is on, and the top line then says only `PLAYER 2
 PICK`. With modes they go in the modes' own HUD pass (mode_assets.build); co-op alone, Write rewrites the HUD itself.
 
+**The game's start logo stays off the pick (PAD-1107).** A game whose start-of-game logo is a scene of its own, drawn
+over the HUD, would cover the card when the pick opens at the game's start (Godzilla: the GODZILLA logo reveal, at a
+CO-OP PLAY start with a teammate's Start, or a team start). The port names it:
+
+    text start_logo_scene     43b52a63772ce0a35b7f0e3d4f249566066b55f8
+    text start_logo_path      Logo_Instance
+
+and the runtime hides that node every tick a pick card is up, and shows it again once when the card goes, so the next
+game's start plays it as stock. A port without the lines leaves the logo alone. Godzilla LE 1.16 and Pro 1.16 carry
+them (the same auto-loaded scene, one node, on both cards).
+
 Emulator-proven on Godzilla LE 1.16: the pick (Action, the flipper walk past taken ones, RANDOM, the time), the
 screens (12 of 12 found and hidden, the shown one's picture and words, a set built by Write's own override path), the
 save time 15 instead of 12 and the heat ray's 10 spins instead of 20 while the right teammate is up, the Action save

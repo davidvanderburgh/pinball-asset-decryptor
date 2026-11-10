@@ -296,6 +296,10 @@ value roster_screen_bump_by 3
 site roster_portrait_step 0x00190acc 0xe92d4030 0xe30b4480
 data roster_portrait_state 0x007bb480
 # the screen's scene, the path to its places' nodes, and each slot's node names (battle_select.py's)
+# PAD-1107: the game's start-of-game logo, a scene of its own (auto-loaded, one node) drawn over the HUD;
+# the co-op pick hides it while a card is up (same id on LE and Pro 1.16, read off both cards)
+text start_logo_scene     43b52a63772ce0a35b7f0e3d4f249566066b55f8
+text start_logo_path      Logo_Instance
 text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
 text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.
 text roster_tile_0        Ebirah

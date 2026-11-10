@@ -208,6 +208,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.scene_eval" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_edit" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_share" \
+    --hidden-import "pinball_decryptor.plugins.stern.screen_time" \
     --hidden-import "pinball_decryptor.plugins.stern.game_text_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.score_colours" \
     --hidden-import "pinball_decryptor.plugins.stern.text_colour" \

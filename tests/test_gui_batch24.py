@@ -193,6 +193,7 @@ def test_audio_rep_available(tmp_path):
         _assign={"audio/assigned.wav": str(rep_src)},
         _changed={"audio/built.wav"},
         _scan_dir=str(assets),
+        _juke_songs_for=lambda rel: [],    # PAD-1106: no jukebox music here
         _by_rel={
             "audio/built.wav": SimpleNamespace(
                 abs_path=str(assets / "audio" / "built.wav")),

@@ -104,6 +104,8 @@ def _restore(kind, staged, current="All"):
     stub = SimpleNamespace()
     var = _Var(current)
     setattr(stub, "%s_change_filter_var" % kind, var)
+    if kind == "audio":     # PAD-1105: the audio filter restores Hide unused too
+        stub.audio_hide_unused_var = _Var(False)
     _RESTORE[kind](stub, staged)
     return var.get()
 

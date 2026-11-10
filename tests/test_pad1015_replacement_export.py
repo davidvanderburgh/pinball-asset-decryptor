@@ -366,13 +366,14 @@ def test_changed_files_leave_out_picked_slots_and_the_text_manifest(tmp_path):
 # --- round 3: "have the games stock video filename in their filename" ------------------
 
 def test_stock_name_puts_the_games_file_first():
-    assert rx.stock_name(r"D:\lib\my intro.mp4", "video/attract/GZ_Intro.mp4") == \
+    lib = os.sep + "lib"    # a path this OS splits: the app hands it native ones
+    assert rx.stock_name(os.path.join(lib, "my intro.mp4"), "video/attract/GZ_Intro.mp4") == \
         "GZ_Intro - my intro.mp4"
-    assert rx.stock_name(r"D:\lib\GZ_Intro_v2.mp4", "video/attract/GZ_Intro.mp4") == \
+    assert rx.stock_name(os.path.join(lib, "GZ_Intro_v2.mp4"), "video/attract/GZ_Intro.mp4") == \
         "GZ_Intro_v2.mp4"                                   # already says it
-    assert rx.stock_name(r"D:\lib\GZ_Intro2.mp4", "video/attract/GZ_Intro.mp4") == \
+    assert rx.stock_name(os.path.join(lib, "GZ_Intro2.mp4"), "video/attract/GZ_Intro.mp4") == \
         "GZ_Intro - GZ_Intro2.mp4"
-    assert rx.stock_name(r"D:\lib\me.jpg", None) == "me.jpg"   # an attract photo: no slot
+    assert rx.stock_name(os.path.join(lib, "me.jpg"), None) == "me.jpg"   # an attract photo: no slot
 
 
 def test_slots_of_prefers_the_slot_a_file_was_picked_for():

@@ -202,6 +202,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_extract" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_games" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_keys" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_spk" \
     --hidden-import "pinball_decryptor.plugins.stern.spks" \
     --hidden-import "pinball_decryptor.plugins.stern.valpatch" \
@@ -340,6 +341,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_games" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_keys" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_selfextract" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_spk" \
     --hidden-import "pinball_decryptor.plugins.stern.spks" \
     --hidden-import "pinball_decryptor.plugins.stern.game_check" \

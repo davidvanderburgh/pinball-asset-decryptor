@@ -13,10 +13,11 @@
    Linux distro. If setup asks to restart, let it (or use *Restart*: with
    Fast Startup on, *Shut down* doesn't count).
 3. Open the app and pick a manufacturer. If the prerequisites row is red,
-   press **Install Missing**. With WSL2 on, it offers the app's own Linux
-   (PAD-Runtime, a one-time download of about 434 MB) with every tool
-   already in it: no Ubuntu, no command line. WSL2 still off? The same
-   button sets it up first and asks for the restart.
+   press **Install Missing**.
+4. With WSL2 on, Install Missing offers the app's own Linux (PAD-Runtime, a
+   one-time download of about 434 MB) with every tool already in it: no
+   Ubuntu, no command line. WSL2 still off? The same button sets it up
+   first and asks for the restart.
 
 **Install Prerequisites** in the Start Menu is still there: it asks which
 manufacturers you use and installs an Ubuntu and their tools into it (see

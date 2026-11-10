@@ -128,3 +128,11 @@ html.bp-640 .x-float .x-ikv > .k { margin-top: 5px; }
 .x-rg-sub { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .x-rg-more { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: 0; font: inherit; font-size: 12.5px; text-align: left; }
 .x-rg-imp { margin-top: 6px; display: grid; gap: 2px; }
+
+/* Spike 3 OTP self-extractor panel (PAD-1086) */
+.x-spike3 { border-color: var(--info); background: var(--info-soft); margin-top: 8px; }
+.x-spike3 .x-alert-hd { cursor: default; font-weight: 600; color: var(--ink); }
+.x-spike3-why { color: var(--ink-3); margin: 6px 0 8px; line-height: 1.45; }
+.x-spike3-status { margin-top: 8px; color: var(--ink-2); line-height: 1.45; }
+.x-spike3-status.ok { color: var(--ok); }
+.x-spike3-steps { margin-top: 8px; max-height: 220px; overflow: auto; background: var(--panel); border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; }

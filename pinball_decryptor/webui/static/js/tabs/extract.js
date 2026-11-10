@@ -155,6 +155,32 @@ export function SourceBody({ s, hist }) {
     </div>`;
 }
 
+// A locked Spike 3 card: read the 256-bit OTP key from your own board with a
+// software-only extractor card, then unlock extraction (PAD-1086).
+function Spike3UnlockPanel({ s }) {
+  const u = s.spike3_unlock;
+  if (!u) return null;
+  if (u.verified) {
+    return html`<div class="x-alert x-spike3 ok" role="status">
+      <div class="x-alert-hd"><${Icon} name="check" /><span>Card unlocked</span></div>
+      <div class="x-alert-bd"><div class="small x-spike3-status ok">${u.status}</div></div>
+    </div>`;
+  }
+  return html`<div class="x-alert x-spike3" role="group">
+    <div class="x-alert-hd" aria-expanded="true">This Spike 3 card is encrypted — it needs its board's OTP key</div>
+    <div class="x-alert-bd">
+      <p class="small x-spike3-why">The 256-bit key is fused into the machine's Raspberry Pi, not stored on the card. Read it from your own board with a software-only card, then unlock extraction. This works on a board that does not enforce secure boot; a locked board can only be read with a hardware (DMA) dump.</p>
+      <div class="row wrap">
+        <${Button} size="sm" icon="plus" disabled=${u.busy} onClick=${() => call("extract.spike3_build_card")}>Build extractor card…<//>
+        <${Button} size="sm" disabled=${u.busy} onClick=${() => call("extract.spike3_ingest_key")}>I have the key (OTP_KEY.TXT)…<//>
+        ${u.busy ? html`<${Spinner} />` : null}
+      </div>
+      ${u.status ? html`<div class="small x-spike3-status">${u.status}</div>` : null}
+      ${u.instructions ? html`<pre class="small mono x-pre x-spike3-steps">${u.instructions}</pre>` : null}
+    </div>
+  </div>`;
+}
+
 function projectHint(p) {
   if (!p) return "";
   if (!p.exists) return "A new folder: Extract creates it.";
@@ -279,6 +305,7 @@ function CardSummary({ s }) {
       ${badge ? (badge.switch
         ? html`<button type="button" class=${cx("x-badge link", badge.kind)} onClick=${() => call("extract.switch_suggested")}><${Icon} name="warn" /><span>${badge.text}</span></button>`
         : html`<div class=${cx("x-badge", badge.kind)}><${Icon} name=${badge.kind === "info" ? "info" : "warn"} /><span>${badge.text}</span></div>`) : null}
+      <${Spike3UnlockPanel} s=${s} />
     </div>
     ${s.ssd && s.admin_panel ? html`<${AdminPanel} s=${s} />` : null}
     ${s.ssd && s.fda_panel ? html`<${FdaPanel} s=${s} />` : null}`;

@@ -15,7 +15,10 @@
     "car (CAR HIT OPTO) a trigger added on its nose, the invisible wall the ball meets in front of",
     "the table's car (retrofit_triggers); the captive ball top right is the table's own.",
     "Pro is preferred: the table's car does not move and its lock is scripted; the",
-    "Pro has neither (its locks are virtual), nor the drop target at the pops."
+    "Pro has neither (its locks are virtual), nor the drop target at the pops.",
+    "PAD-1098: the table's own arch lock stays shut (checkarche quiet, its KArche CreateBalls",
+    "neutered): with three ramp diamonds lit (the machine's lights now) it swung the diverter open,",
+    "destroyed the ball at Karche and made one behind lockarche that nothing ever lets go."
   ],
   "title": "john_wick_pro",
   "model": "Pro",
@@ -94,7 +97,10 @@
     "BallRelease.CreateBall",
     "BallRelease.Kick",
     "PlungerIM.AutoFire",
-    "kicker001.createball"
+    "kicker001.createball",
+    "KArche1.CreateBall",
+    "KArche2.CreateBall",
+    "KArche3.CreateBall"
   ],
   "extra_vbs": "'---- PAD (PAD-905): John Wick's switches the shadow game kept for its missions\nTenemy7.Enabled = 1 : Tkatia.Enabled = 1          ' the skill shot, in the shooter lane\nTargetsave.Collidable = 1                        ' MID RIGHT TGT BOT\nTpostG.Enabled = 0 : TpostD.Enabled = 0          ' the machine has no return lane posts\n'---- the Pro has no drop target at the pops' entrance\nTargetclub.IsDropped = 1\n",
   "retrofit_triggers": {
@@ -266,7 +272,8 @@
     "StartRainbow",
     "GiEffect",
     "LightEffect",
-    "FlashEffect"
+    "FlashEffect",
+    "checkarche"
   ],
   "orig_hits": false,
   "orig_keep": [
@@ -276,5 +283,8 @@
     "Bumper1",
     "Kramploop",
     "lock"
+  ],
+  "repatch": [
+    {"old": "Case 1 KArche1.CreateBall", "why": "a ball can get stuck behind the post at the top of the center ramp", "since": "PAD-1098: the table's own arch lock stays shut"}
   ]
 }

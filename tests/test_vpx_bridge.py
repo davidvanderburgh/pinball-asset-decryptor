@@ -1544,6 +1544,116 @@ def test_the_john_wick_maps_split_at_the_les_mechs():
         {k: v["leds"] for k, v in le["lamps"].items() if k != "_"}.keys()
 
 
+#: John Wick 3.0's own arch lock, as its script has it (cut down): the gun
+#: target, the Takira and Tcharon triggers, checkarche (the diverter, opened
+#: when the three ramp diamonds are lit) and Karche, which swallows the ball
+#: and makes one behind the arch's post.
+JW_ARCH = MINI_TRIBUTE + """Sub Targetgun_hit()
+    Targetgun.IsDropped = 1
+    Takira.Enabled = 1
+End Sub
+Sub Takira_hit()
+    Lakira.State = 1
+    CheckArche
+End Sub
+Sub checkarche()
+    If Lakira.state + Lcharon.state + Lkatia.state = 3 Then
+       guideramp.RotZ = -50
+       guideramp.collidable = 0
+       guideramp1.collidable = 1
+    End If
+End Sub
+Sub Karche_hit()
+    Karche.DestroyBall
+    ArcheDelayTimer_Timer
+End Sub
+Sub ArcheDelayTimer_Timer()
+    ArcheLocked = ArcheLocked + 1
+    Select Case ArcheLocked
+        Case 1
+
+            KArche1.CreateBall
+        Case 2
+            KArche2.CreateBall
+        Case 3
+            KArche3.CreateBall
+    End Select
+End Sub
+"""
+
+
+def test_the_john_wick_tables_own_arch_lock_stays_shut(tmp_path):
+    """PAD-1098: the John Wick tribute's own lock at the arch (top of the
+    center ramp) swung its diverter open whenever the three ramp diamonds
+    were lit, and those are the machine's lights now: the ball went to
+    Karche, which destroyed it and made one behind the arch's post, where it
+    sat for good. Both maps quiet checkarche (the LE's diverter is the
+    machine's coil, the Pro has none) and neuter the lock's CreateBalls; a
+    copy patched before is told to patch again."""
+    vs = pytest.importorskip("vpxshadow")
+    vset = pytest.importorskip("vpxsetup")
+    for m in _john_wick_maps():
+        assert "checkarche" in m["quiet_subs"], m["title"]
+        out, rep = vs.patch(JW_ARCH, m)
+        assert "quieted Sub checkarche (the machine runs that now)" in rep
+        assert "Sub checkarche() : End Sub" in out
+        assert re.search(r"Sub checkarche_orig\(\)", out)
+        for k in ("KArche1", "KArche2", "KArche3"):
+            assert "'PAD neutered: %s.CreateBall" % k in out, (m["title"], k)
+        script = tmp_path / "John_Wick_Legend (PAD).script.vbs"
+        old, _ = vs.patch(JW_ARCH, dict(m, quiet_subs=[s for s in m["quiet_subs"] if s != "checkarche"],
+                                        neuter=[n for n in m["neuter"] if "KArche" not in n]))
+        script.write_text(old, encoding="utf-8")
+        assert vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]) == [
+            "a ball can get stuck behind the post at the top of the center ramp"], m["title"]
+        script.write_text(out, encoding="utf-8")
+        assert vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]) == [], m["title"]
+
+
+def _last_sub(text, name):
+    """The last `Sub <name>` in a script, whole (a bridge's stub follows the
+    table's own, renamed, so the last one is what runs)."""
+    found, lines = None, text.split("\n")
+    for i, ln in enumerate(lines):
+        if re.match(r"\s*Sub\s+%s\b(?!_)" % re.escape(name), ln, re.I):
+            j = i
+            while not re.search(r"\bEnd\s+Sub\b", lines[j], re.I):
+                j += 1
+            found = "\n".join(lines[i:j + 1])
+    assert found, name
+    return found
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the patched VBScript under cscript")
+def test_the_john_wick_arch_lock_run_under_cscript(tmp_path):
+    """PAD-1098: the patched arch subs themselves, with the machine's three
+    diamonds lit: the ball over Takira no longer swings the diverter open."""
+    vs = pytest.importorskip("vpxshadow")
+    for m in _john_wick_maps():
+        out, _ = vs.patch(JW_ARCH, m)
+        body = [_last_sub(out, name) for name in ("Targetgun_hit", "Takira_hit", "checkarche")]
+        vbs = tmp_path / ("arch_%s.vbs" % m["title"])
+        vbs.write_text("""Class Obj
+  Public RotZ, Collidable, State, Enabled, IsDropped, Created, Destroyed
+  Private Sub Class_Initialize : RotZ = 0 : Collidable = 1 : State = 0 : Created = 0 : Destroyed = 0 : End Sub
+  Public Sub CreateBall : Created = Created + 1 : End Sub
+  Public Sub DestroyBall : Destroyed = Destroyed + 1 : End Sub
+End Class
+Dim ArcheLocked, n
+For Each n In Array("Targetgun","Takira","Lakira","Lcharon","Lkatia","guideramp","guideramp1","Karche","KArche1","KArche2","KArche3")
+  ExecuteGlobal "Dim " & n & " : Set " & n & " = New Obj"
+Next
+""" + "\n".join(body) + """
+Lcharon.State = 1 : Lkatia.State = 1     ' the machine's diamonds
+Targetgun_hit
+Takira_hit
+WScript.Echo guideramp.RotZ & " " & guideramp.Collidable
+""", encoding="ascii")
+        r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+        assert r.stdout.split() == ["0", "1"], (m["title"], r.stdout, r.stderr)
+
+
 def test_the_bond_pro_map_is_the_le_map_on_the_pros_numbers():
     """PAD-900: the Pro map was made from the LE one through both programs'
     own switch tables (1.06.0): the same table objects on the same switch

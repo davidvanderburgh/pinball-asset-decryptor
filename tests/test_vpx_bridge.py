@@ -1075,6 +1075,51 @@ def test_batman_map_holds_its_game_flag_for_flips():
     assert vs.flipper_flag(m) == "bGameInPlay"
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's VBScript under cscript")
+def test_batmans_control_gate_is_not_the_turntable_diverter(tmp_path):
+    # PAD-1120: CONTROL GATE (6) is the game's LEFT control gate at the top of
+    # the orbit, DIVERTER POWER (7) the turntable diverter. Both opened the
+    # tribute's lock door, so a combo that opened the left gate (12 times in
+    # 4 minutes on the emulator, with the turntable at the phone) dropped the
+    # orbit ball behind the turntable, stuck behind the Bat Phone. And the lane
+    # behind the turntable leads on only at the TV (its lock) and the Batcave
+    # (the game holds 7 there for many seconds): 7 at the Phone, or while the
+    # turntable turns (ball search pulses it anywhere), keeps the door shut.
+    m = json.load(open(os.path.join(VPX, "batman.shadow.json"), encoding="utf-8"))
+    ev = m["extra_vbs"].split("\n")
+
+    def sub(name):
+        i = next(k for k, ln in enumerate(ev) if ln.startswith("Sub %s" % name))
+        return "\n".join(ev[i:ev.index("End Sub", i) + 1])
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Class Wall : Public Collidable, Visible : End Class",
+        "Class Gate : Public Open : End Class",
+        "Class Tmr : Public Enabled : End Class",
+        "Const kTT_TV = -8 : Const kTT_Phone = 49 : Const kTT_Batcave = 174",
+        "Dim WallDoor1, WallDoor2, Gate002, tmrTurntable, CurMechPos, PadGateA, PadGateB",
+        "Set WallDoor1 = New Wall : Set WallDoor2 = New Wall : Set Gate002 = New Gate : Set tmrTurntable = New Tmr",
+        "WallDoor1.Collidable = False : WallDoor2.Collidable = True : Gate002.Open = False : tmrTurntable.Enabled = False",
+        "PadGateA = False : PadGateB = False",
+        sub("PadControlGate"), sub("PadDiverterPower"), sub("PadApplyGate"),
+        "Dim Log",
+        "Sub S(t) : Log = Log & t & \":\" & Abs(WallDoor1.Collidable) & Abs(WallDoor2.Collidable) & Abs(Gate002.Open) & \" \" : End Sub",
+        "CurMechPos = kTT_Phone",
+        "PadControlGate 1 : S \"6on@phone\" : PadControlGate 0 : S \"6off\"",
+        "PadDiverterPower 1 : S \"7on@phone\" : PadDiverterPower 0",
+        "CurMechPos = kTT_TV : tmrTurntable.Enabled = True",
+        "PadDiverterPower 1 : S \"7on@turning\"",
+        "tmrTurntable.Enabled = False : PadApplyGate : S \"7on@tv\"",
+        "PadDiverterPower 0 : S \"7off\"",
+        "CurMechPos = kTT_Batcave : PadDiverterPower 1 : S \"7on@batcave\" : PadDiverterPower 0",
+        "WScript.Echo Log"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.split() == ["6on@phone:011", "6off:010", "7on@phone:010",
+                                "7on@turning:010", "7on@tv:100", "7off:010", "7on@batcave:100"], r.stdout + r.stderr
+
+
 DOF_TRIBUTE ="""Option Explicit
 ExecuteGlobal GetTextFile("controller.vbs")
 Const cGameName = "rushle"   ' DOF's name

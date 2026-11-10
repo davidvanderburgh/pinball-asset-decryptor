@@ -535,6 +535,15 @@ turntable; at the phone they sat on `trgBallLock3`, the table reported
 TURNTABLE LOCK 3, and the game turned the turntable home and back out
 again, over and over.
 
+**A coil is one part** (PAD-1120): name a map's coils from the game's own
+adjustments before guessing. Batman 66's CONTROL GATE (6) and DIVERTER
+POWER (7) are DISABLE LEFT CONTROL GATE and DISABLE TURNTABLE DIVERTER;
+the map had both opening the tribute's turntable lock door, so every combo
+that opened the left control gate sent the orbit ball behind the turntable,
+stuck behind the Bat Phone. 6 now swings `Gate002` at the top of the orbit;
+7 opens the door, and only at a face where the lane behind the turntable
+leads on (the TV's lock, the Batcave), never at the Phone or while turning.
+
 Four more map fields (PAD-859), all in the generated script:
 
 * `"rgb": true` on a lamp whose three LEDs are an insert's -R, -G, -B: the

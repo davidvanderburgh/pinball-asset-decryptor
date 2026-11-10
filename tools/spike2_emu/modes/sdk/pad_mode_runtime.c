@@ -1570,6 +1570,8 @@ static int gms_lookup(unsigned *r);         /* PAD-945: a sound on a shot in one
 static volatile int gms_live;
 static int ci_lookup(unsigned *r);          /* PAD-1114: the co-op intro's sound */
 static volatile int ci_live;
+static int cpk_lookup(unsigned *r);         /* PAD-1123: a co-op character's sound once picked */
+static volatile int cpk_live;
 
 static void on_sound_lookup(unsigned *r)
 {
@@ -1577,6 +1579,7 @@ static void on_sound_lookup(unsigned *r)
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
     if (ci_live && r[1] && ci_lookup(r)) return;     /* PAD-1114: the co-op intro's sound */
+    if (cpk_live && r[1] && cpk_lookup(r)) return;   /* PAD-1123: a co-op character's sound once picked */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
     if (sndt_live && r[1]) sndt_lookup(r);   /* PAD-565: a sound's files in turn */
     if (swaps_live && r[1]) {
@@ -15991,6 +15994,27 @@ static struct {
     unsigned music[CI_MUSIC], n_music, faded, quiet[8], n_quiet;
     const char *why;
 } ci;
+/* PAD-1123: a co-op character's clip and sound once picked (below, "once picked"), and its copy of the game's End of
+ * Ball Bonus loop (below, "on the bonus") */
+#define CPK_CHARS 16                     /* = COOP_CHARS */
+static struct {
+    char clip[CPK_CHARS][32];            /* coop.cfg `char_picked <n> <clip> <ms>` */
+    unsigned ms[CPK_CHARS];
+    unsigned request;                    /* sounds.cfg `cpick <n> <request> <carrier key> <our key> <ms>` */
+    unsigned char key[8], host[CPK_CHARS][8];
+    unsigned sound_ms[CPK_CHARS], have_sound;   /* have_sound: bit n-1 */
+    volatile int snd;                    /* the character whose sound the carrier takes now, -1 none */
+    volatile unsigned long swap_until;
+    volatile int looked;
+    int pending, cur, on, again, freed;  /* pending: the character whose clip waits for its card to go, -1 none */
+    unsigned long pend_at, at, gone_at;
+} cpk = { .snd = -1, .pending = -1, .cur = -1 };
+static struct {
+    char loop[96];                       /* coop.cfg `bonus_loop <the game's clip>` */
+    char clip[CPK_CHARS][32];            /* `char_bonus <n> <clip>` */
+    unsigned says;
+    int armed;
+} cb;
 static unsigned (*coop_add_game)(unsigned, unsigned, unsigned, unsigned);
 static volatile unsigned char *coop_ball_byte, *coop_players_byte;
 
@@ -17197,6 +17221,7 @@ static void coop_pick_say(void)
 }
 
 static void coop_intro_begin(const char *why);   /* PAD-1114, below */
+static void coop_picked_begin(int c);           /* PAD-1123, below */
 static void coop_pick_open(unsigned t)
 {
     if (!coop_pick_on || !coop_ch_n || t < 1 || t > 4 || coop_pick_of[t] >= 0) return;
@@ -17259,6 +17284,7 @@ static void coop_pick_close(const char *how)
     } else {
         coop_turn_show();
     }
+    if (coop_done.on) coop_picked_begin(c);                       /* PAD-1123: its sound now, its clip after the card */
     if (c >= 0 && !coop_classic()) coop_gift(&coop_ch[c]);          /* PAD-1065: Classic, no ability */
     if (c >= 0 && !coop_classic()) coop_counts_give(&coop_ch[c]);
     coop_dbl_armed = 0;
@@ -17498,8 +17524,10 @@ static char coop_bonus_clip[96], coop_bonus_crop[32];
 static void coop_bonus_end(void)
 {
     unsigned k;
+    const char *name = gbg.name;
     if (!coop_cards_on || !coop_teammates() || !gbg.name[0]) return;
-    for (k = 0; gbg.name[k] && k + 1 < sizeof coop_bonus_clip; k++) coop_bonus_clip[k] = gbg.name[k];
+    if (cb.loop[0] && str_starts(name, "PadCoopBonus")) name = cb.loop;   /* PAD-1123: a teammate's copy: the game's */
+    for (k = 0; name[k] && k + 1 < sizeof coop_bonus_clip; k++) coop_bonus_clip[k] = name[k];
     coop_bonus_clip[k] = 0;
     for (k = 0; gbg.crop[k] && k + 1 < sizeof coop_bonus_crop; k++) coop_bonus_crop[k] = gbg.crop[k];
     coop_bonus_crop[k] = 0;
@@ -17840,6 +17868,7 @@ static void coop_chars_begin(void)
     for (t = 0; t < coop_cache_n; t++) coop_cache[t].held = 0;
     pk.open = 0;
     coop_done.on = 0;
+    cpk.pending = -1;                        /* PAD-1123 */
     coop_save_used = 0;
     coop_ball_out = 1;                       /* PAD-1045: the team forms in ball 1; a ball in the lane still waits */
     coop_turn_waited = 1;                    /* PAD-1051: ... as the flags say, once it is out */
@@ -18573,6 +18602,193 @@ static void coop_intro_tick(void)
     }
 }
 
+/* ---- PAD-1123: a co-op character's clip and sound once picked -----------------------------------------------------
+ * DoomWalrus666 (Godzilla): "After a player selects a character in co-op/teams play, I would like be able to select the
+ * following for each character: Play a sound of my choice (example: Godzilla roar from that specific era); Show a brief
+ * couple second video (like the characters original movie poster)". coop.cfg `char_picked <n> <clip> <ms>` (the build
+ * made the owner's video, or picture, a full-screen clip of the bank) and sounds.cfg `cpick <n> <request> <carrier key>
+ * <our key> <ms>` (its sound on the co-op intro's carrier, the record lookup swapped as the intro's is). When teammate
+ * up takes a character (coop_pick_close, the PICKED card on the glass) its sound plays at once; its clip waits until
+ * the card has had its COOP_PICK_DONE_MS and the card's video behind it (PAD-1079's backdrop) has been given back - the
+ * bank's one surface is the clip's then - and plays full screen over the game (pm_clip, as the intro's). Both flipper
+ * buttons down (each let go once since it began) cut it short, the sound too. A pick for a teammate who is not up (the
+ * turn ended under it) plays neither. */
+#define CPK_SETTLE_MS  250ul             /* after the card's video was given back, before the clip asks for the surface */
+#define CPK_WAIT_MS   8000ul             /* a clip whose card never goes in this long is dropped */
+
+/* the record lookup (any thread): the carrier's own record takes the picked character's sound while it plays */
+static int cpk_lookup(unsigned *r)
+{
+    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    int c = cpk.snd;
+    if (c < 0 || c >= CPK_CHARS || (long)(cpk.swap_until - pm_ms()) <= 0 || !key_is(k, cpk.key)) return 0;
+    r[1] = (unsigned)(unsigned long)cpk.host[c];
+    if (!cpk.looked) {
+        cpk.looked = 1;
+        say("co-op characters: request %u looked up its record, took character %d's sound once picked", cpk.request,
+            c + 1);
+    }
+    return 1;
+}
+
+/* whether character c has anything to play once picked: 1 its clip, 2 its sound (tests lift it verbatim) */
+static int cpk_has(int c, const char *clip, unsigned have_sound, unsigned request)
+{
+    if (c < 0 || c >= CPK_CHARS) return 0;
+    return (clip && clip[0] ? 1 : 0) | (request && (have_sound >> c & 1u) ? 2 : 0);
+}
+
+/* from coop_pick_close: character c was just taken by the teammate up */
+static void coop_picked_begin(int c)
+{
+    int has = cpk_has(c, c >= 0 && c < CPK_CHARS ? cpk.clip[c] : 0, cpk.have_sound, cpk.request);
+    if (!has) return;
+    if (has & 2) {
+        if (pm_sound_active(cpk.request)) pm_sound_stop(cpk.request);
+        cpk.snd = c;
+        cpk.looked = 0;
+        cpk.swap_until = pm_ms() + cpk.sound_ms[c] + 1000ul;
+        pm_sound(cpk.request);
+        say("co-op characters: %s's sound once picked (%u ms) plays on request %u", coop_ch[c].name, cpk.sound_ms[c],
+            cpk.request);
+    }
+    if (has & 1) {
+        cpk.pending = c;
+        cpk.pend_at = pm_ms();
+        say("co-op characters: %s's clip \"%s\" plays once its PICKED card has gone", coop_ch[c].name, cpk.clip[c]);
+    }
+}
+
+static void cpk_end(const char *how, int stop_sound)
+{
+    int c = cpk.cur;
+    if (pm_clip_playing()) pm_clip_stop();
+    if (stop_sound && cpk.request && cpk.snd >= 0) {
+        cpk.swap_until = 0;
+        if (pm_sound_active(cpk.request)) pm_sound_stop(cpk.request);
+    }
+    cpk.on = 0;
+    cpk.cur = -1;
+    say("co-op characters: %s's clip once picked %s after %lu ms", c >= 0 && c < coop_ch_n ? coop_ch[c].name : "a",
+        how, pm_ms() - cpk.at);
+}
+
+static void coop_picked_tick(void)
+{
+    unsigned long now = pm_ms();
+    int c;
+    if (cpk.pending < 0 && !cpk.on) return;
+    if (!coop_teammates()) {                                  /* the game is over (or another) */
+        if (cpk.on) cpk_end("cut short: the game ended", 1);
+        cpk.pending = -1;
+        return;
+    }
+    if (cpk.pending >= 0) {
+        c = cpk.pending;
+        if (!pm_in_game() || coop_done.on || coop_clip_on >= 0 || cpk.on) {   /* its card (and its video) still up */
+            cpk.gone_at = 0;
+            if (now - cpk.pend_at > CPK_WAIT_MS + COOP_PICK_DONE_MS) {
+                say("co-op characters: %s's clip once picked dropped - its card stayed up", coop_ch[c].name);
+                cpk.pending = -1;
+            }
+            return;
+        }
+        if (!cpk.gone_at) { cpk.gone_at = now; return; }       /* the card has gone: the surface settles first */
+        if (now - cpk.gone_at < CPK_SETTLE_MS) return;
+        cpk.pending = -1;
+        cpk.gone_at = 0;
+        if (!pm_clip(cpk.clip[c])) {
+            say("co-op characters: %s's clip \"%s\" cannot play - the game took no full-screen clip", coop_ch[c].name,
+                cpk.clip[c]);
+            return;
+        }
+        cpk.on = 1;
+        cpk.cur = c;
+        cpk.at = now;
+        cpk.again = 0;
+        cpk.freed = 0;
+        say("co-op characters: %s's clip \"%s\" (%u ms) plays full screen once picked", coop_ch[c].name, cpk.clip[c],
+            cpk.ms[c]);
+        return;
+    }
+    c = cpk.cur;
+    if (ci_skip(switch_held(coop_left), switch_held(coop.button), &cpk.freed)) {
+        cpk_end("cut short with both flipper buttons", 1);
+        return;
+    }
+    if (!pm_clip_playing()) {
+        if (now - cpk.at < CI_GRACE_MS && !cpk.again) {       /* the game's own clip took the surface after it */
+            cpk.again = 1;
+            say("co-op characters: a clip of the game's took the screen %lu ms in - %s's played again", now - cpk.at,
+                c >= 0 && c < coop_ch_n ? coop_ch[c].name : "the");
+            pm_clip(cpk.clip[c]);
+            return;
+        }
+        cpk_end("played to its end", 0);
+        return;
+    }
+    if (c >= 0 && cpk.ms[c] && now - cpk.at > cpk.ms[c] + CI_OVER_MS) {
+        cpk_end("past its length", 0);
+    }
+}
+
+/* ---- PAD-1123: the teammate's character on their End of Ball Bonus --------------------------------------------------
+ * DoomWalrus666: "At the end of a players ball, I would like to be able to display that players selected Character's
+ * image or video in a window on the End of Ball screen, maybe to the right of the scores/username". The bonus's own
+ * scene is not one the app can write, and the game does not draw the HUD while its bonus is up (PAD-1028 round 3), but
+ * the bonus plays a looped clip of the bank by name (Godzilla 1.16: EndOfBallBonus_BackgroundLoop at SquareCrop). The
+ * build makes that loop again per character with its picture or video in a framed window right of the bonus's words
+ * (coop.cfg `bonus_loop <the game's clip>`, `char_bonus <n> <clip>`), and the game's ask for the loop is answered with
+ * the copy of the character of the teammate whose ball ended - coop.turn moves on only at the player change, after the
+ * bonus (emulator). A teammate with no character, or a character with no copy, gets the game's own loop. */
+
+/* the copy for the game's ask of `name` with character c up (-1 none): its name, or 0 = the game's own (tests lift it
+ * verbatim) */
+static const char *cb_pick(const char *name, const char *loop, int c, const char (*clips)[32], int n)
+{
+    if (!name || !loop || !loop[0] || !str_eq(name, loop) || c < 0 || c >= n || !clips[c][0]) return 0;
+    return clips[c];
+}
+
+static void on_coop_bonus_play(unsigned *r)
+{
+    const char *name = (const char *)(unsigned long)r[0], *ours;
+    int c;
+    if (!name || !cb.loop[0] || !str_eq(name, cb.loop) || !coop_teammates()) return;
+    c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
+    ours = cb_pick(name, cb.loop, c < coop_ch_n ? c : -1, (const char (*)[32])cb.clip, CPK_CHARS);
+    if (cb.says < 60) {
+        cb.says++;
+        if (ours)
+            say("co-op characters: teammate %u's End of Ball Bonus - \"%s\" plays %s in its window", coop.turn, ours,
+                coop_ch[c].name);
+        else
+            say("co-op characters: teammate %u's End of Ball Bonus - the game's own loop (%s)", coop.turn,
+                c < 0 ? "no character" : "its character has no picture or video");
+    }
+    if (ours) r[0] = (unsigned)(unsigned long)ours;
+}
+
+/* from coop_chars_arm: the game's ask for its bonus loop, hooked */
+static void coop_bonus_chars_arm(void)
+{
+    int i, n = 0;
+    if (!cb.loop[0]) return;
+    for (i = 0; i < CPK_CHARS; i++) n += cb.clip[i][0] != 0;
+    if (!n) return;
+    if (!site("clip_play") || !fn("clip_play") || clip_v2 || clip_layer) {
+        say("co-op characters: not on the End of Ball Bonus - the port has no clip_play the game asks its loop by");
+        return;
+    }
+    if (!hook(fn("clip_play"), on_coop_bonus_play)) {
+        say("co-op characters: not on the End of Ball Bonus - clip_play 0x%08x cannot be hooked", fn("clip_play"));
+        return;
+    }
+    cb.armed = 1;
+    say("co-op characters: %d character(s) on their teammate's End of Ball Bonus (\"%s\" answered with theirs)", n,
+        cb.loop);
+}
+
 static void coop_join_tick(void);              /* PAD-1052, below */
 /* PAD-1054: the button last seen held at `held` (pm_ms(), 0 never) when the game's start was seen at `start`: held
  * at Start (tests lift it verbatim) */
@@ -18741,6 +18957,7 @@ static void coop_tick(void)
         coop_intro_begin(coop.teams ? "a team game begins" : "a co-op game begins");
     coop_intro_tick();                                        /* PAD-1114 */
     coop_chars_tick();                                        /* PAD-1031 */
+    coop_picked_tick();                                       /* PAD-1123 */
     if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
         coop_won_n = 0;
         say("co-op: the last co-op game's awards are off the attract mode (a new game)");
@@ -19098,6 +19315,27 @@ static void coop_line(const char *s)
         if (!ok) ci.ms = 0;
         return;
     }
+    if (str_starts(s, "char_picked ") || str_starts(s, "char_bonus ")) {  /* PAD-1123: a character's clips */
+        int bonus = s[5] == 'b', n, k;
+        char *to;
+        p = s + (bonus ? 11 : 12);
+        n = (int)number(&p, &ok);
+        while (*p == ' ') p++;
+        if (!ok || n < 1 || n > COOP_CHARS) return;
+        to = bonus ? cb.clip[n - 1] : cpk.clip[n - 1];
+        for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && k + 1 < (int)sizeof cb.clip[0]; k++) to[k] = p[k];
+        to[k] = 0;
+        p += k;
+        if (!bonus) cpk.ms[n - 1] = (unsigned)number(&p, &ok);
+        return;
+    }
+    if (str_starts(s, "bonus_loop ")) {                                   /* PAD-1123: the game's bonus loop */
+        int k;
+        for (p = s + 11; *p == ' '; p++) ;
+        for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && k + 1 < (int)sizeof cb.loop; k++) cb.loop[k] = p[k];
+        cb.loop[k] = 0;
+        return;
+    }
     if (str_starts(s, "intro_hold ")) {                                   /* PAD-1114: TIMED PLUNGER's id */
         p = s + 11;
         ci.hold_adj = (unsigned)number(&p, &ok);
@@ -19268,6 +19506,7 @@ static void coop_arm(void)
     coop_awards_arm();                                        /* PAD-1028 */
     if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */
+    coop_bonus_chars_arm();                                   /* PAD-1123: the characters on the bonus */
     coop_users_arm();                                         /* PAD-1108 */
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
@@ -21800,6 +22039,46 @@ static void ci_sound_line(const char *rs, const char *ks, const char *hs, const 
     ci.sound_ms = ms;
 }
 
+/* PAD-1123: sounds.cfg `cpick <n> <request> <carrier's key> <the sound's key> <ms>` (the intro's carrier) */
+static int cpk_bad;
+static void cpk_sound_line(const char *ns, const char *rs, const char *ks, const char *hs, const char *mss)
+{
+    const char *p = ns;
+    int ok, ok2, ok3;
+    unsigned n = (unsigned)number(&p, &ok), r, ms;
+    p = rs;
+    r = (unsigned)number(&p, &ok2);
+    p = mss;
+    ms = (unsigned)number(&p, &ok3);
+    if (!ok || !ok2 || !ok3 || !r || n < 1 || n > CPK_CHARS || (cpk.request && cpk.request != r)
+        || !key_hex(ks, cpk.key) || !key_hex(hs, cpk.host[n - 1])) { cpk_bad++; return; }
+    cpk.request = r;
+    cpk.sound_ms[n - 1] = ms;
+    cpk.have_sound |= 1u << (n - 1);
+}
+
+/* from sndm_arm: the record lookup's hook for the characters' sounds */
+static void cpk_sound_arm(void)
+{
+    if (cpk_bad) say("co-op characters: %d sound line(s) once picked in sounds.cfg not read", cpk_bad);
+    if (!cpk.request) return;
+    if (!fn("sound_play") || !fn("sound_lookup")) {
+        say("co-op characters: no sounds once picked - the port has no sound_play or sound_lookup for this build");
+        cpk.request = 0;
+        return;
+    }
+    if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+        say("co-op characters: no sounds once picked - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        cpk.request = 0;
+        return;
+    }
+    if (pm_sound_priority(cpk.request, 3, 0) < 0)
+        say("co-op characters: the carrier's priority stays its own - the port has no request table");
+    cpk_live = 1;
+    say("co-op characters: %u character sound(s) once picked ride request %u", (unsigned)__builtin_popcount(cpk.have_sound),
+        cpk.request);
+}
+
 /* from sndm_arm: the record lookup's hook for the intro's sound */
 static void ci_sound_arm(void)
 {
@@ -22468,6 +22747,10 @@ static void sndm_line(char *s)
         ci_sound_line(f[1], f[2], f[3], f[4]);
         return;
     }
+    if (n >= 6 && str_eq(f[0], "cpick")) {    /* PAD-1123: a co-op character's sound once picked */
+        cpk_sound_line(f[1], f[2], f[3], f[4], f[5]);
+        return;
+    }
     if (n >= 3 && str_eq(f[0], "gshot")) {    /* PAD-945 */
         gms_line(f[1], f[2]);
         return;
@@ -22775,9 +23058,10 @@ static void sndm_arm(void)
     att_arm();                                /* PAD-641: nor the flipper buttons' sounds in attract */
     gms_arm();                                /* PAD-945: nor a sound on a shot in one of the game's modes */
     ci_sound_arm();                           /* PAD-1114: nor the co-op intro's sound */
+    cpk_sound_arm();                          /* PAD-1123: nor the co-op characters' sounds once picked */
     juke_arm();                               /* PAD-685: nor the jukebox */
     if (!n_sndm) {
-        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request) return;
+        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }

@@ -894,7 +894,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                 result = coop_plan(project, game_elf, coop_prof or attract_prof or variants_prof
                                    or sound_modes_prof or picture_prof)
             coop_into(result, game_elf, scratch, coop_setting, only=True, stock_hud=stock_hud, stock_font=stock_font,
-                      stock_bank=stock_bank, ffmpeg=ffmpeg, progress=progress)
+                      stock_bank=stock_bank, ffmpeg=ffmpeg, progress=progress, read_card=read_card)
         if idle:                                     # PAD-1022: inactivity pausing the timers, alone or with the above
             if result is None:
                 result = idle_plan(project, game_elf, idle_prof or coop_prof or attract_prof or variants_prof
@@ -1002,7 +1002,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     result.picture_file = picture or ""
     if coop:                                         # PAD-1017
         coop_into(result, game_elf, scratch, coop_setting,   # PAD-1031: the pick's screens went in with the modes' build
-                  stock_bank=stock_bank, ffmpeg=ffmpeg, progress=progress)
+                  stock_bank=stock_bank, ffmpeg=ffmpeg, progress=progress, read_card=read_card)
     if idle:                                         # PAD-1022
         idle_into(result, scratch, only=False)
     if handicap:                                     # PAD-1033
@@ -1359,8 +1359,160 @@ def coop_intro_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
     return CP.INTRO_CLIP, ms
 
 
+def _coop_bank(result, stock_bank, what):
+    """``(bank card path, the bank scene as the build has it so far, its scratch file or "")``."""
+    from . import clip_variants as CV
+    if not stock_bank:
+        raise ModeWriteError("%s: the card's video bank was not read" % what)
+    bank_card = CV.bank_scene(result.profile)
+    bank_src = dict(result.replaced).get(bank_card, "")
+    if bank_src:
+        with open(bank_src, "rb") as f:
+            return bank_card, f.read(), bank_src
+    return bank_card, stock_bank, ""
+
+
+def _coop_bank_put(result, scratch, bank_card, bank, bank_src):
+    if not bank_src:
+        bank_src = os.path.join(scratch, "coop_tree", *bank_card.split("/"))
+        os.makedirs(os.path.dirname(bank_src), exist_ok=True)
+        result.replaced.append((bank_card, bank_src))
+    with open(bank_src, "wb") as f:
+        f.write(bank)
+
+
+def _ffmpeg_for(ffmpeg, what):
+    if not ffmpeg:
+        from ...core.audio import find_ffmpeg
+        ffmpeg = find_ffmpeg()
+    if not ffmpeg:
+        raise ModeWriteError("%s needs ffmpeg, and none was found" % what)
+    return ffmpeg
+
+
+def coop_picked_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
+    """PAD-1123: each co-op character's picked clip (a video, or a picture shown as long as its sound, at least
+    coop_play.PICKED_STILL_SECONDS), made full-screen at the bank's size (coop_play.picked_clip) and added to the bank
+    scene the build has so far. Returns ``[(character number, clip name, ms)]`` for coop.cfg's ``char_picked`` lines.
+    Its sound is the sound build's (sound_modes "the co-op intro", one pseudo mode a character)."""
+    from . import coop_play as CP
+    from . import video_bank as VB
+    from ...core.video import detect_video_info
+    project = getattr(result, "project", "")
+    got = CP.picked_entries(project) if project and CP.load_characters(project)["pick"] else []
+    if not got:
+        return []
+    ffmpeg = _ffmpeg_for(ffmpeg, "the co-op characters' picked clips")
+    bank_card, bank, bank_src = _coop_bank(result, stock_bank, "the co-op characters' picked clips")
+    w, h = VB.clip_frame(stock_bank)
+    assets = bank_card[:-len("scene.radium")] + "scene.assets/"
+    folder = os.path.join(scratch, "coop_clips")
+    os.makedirs(folder, exist_ok=True)
+    chars = CP.load_characters(project)["list"]
+    out = []
+    for k, (i, name, src) in enumerate(got):
+        if progress is not None:
+            progress(k, len(got), "Making the co-op characters' picked clips (%d of %d)..." % (k + 1, len(got)))
+        made = os.path.join(folder, "%s.mp4" % name)
+        secs = None
+        if CP.is_still(src):                            # a picture: as long as its sound, if it has a longer one
+            snd = CP.picked_sound_source(project, chars[i])
+            secs = max(CP.PICKED_STILL_SECONDS, min(CP.media_seconds(snd, ffmpeg) if snd else 0.0,
+                                                    CP.PICKED_MAX_SECONDS))
+        try:
+            CP.picked_clip(src, made, w, h, ffmpeg, seconds=secs)
+        except CP.CoopError as e:
+            raise ModeWriteError(str(e)) from None
+        info = detect_video_info(made)
+        ms = int(round(float(getattr(info, "duration", 0) or 0) * 1000)) if info else 0
+        try:
+            bank, added = VB.add_clip(bank, name, os.path.getsize(made))
+        except VB.VideoBankError as e:
+            raise ModeWriteError("the co-op characters' picked clips: %s could not be added to the video bank (%s)"
+                                 % (name, e)) from None
+        result.new.append((assets + added["path"], made))
+        out.append((i + 1, name, ms))
+    _coop_bank_put(result, scratch, bank_card, bank, bank_src)
+    result.lines.append("co-op characters: a clip once picked for %s"
+                        % ", ".join(chars[n - 1]["name"] for n, _name, _ms in out))
+    return out
+
+
+def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, progress=None):
+    """PAD-1123: the game's End of Ball Bonus loop made again for each co-op character with its picture or video in a
+    window right of the bonus's words (coop_play.bonus_clip), added to the bank scene the build has so far. The loop is
+    the project's own file of it (the stock one extracted, or the owner's replacement) or else the card's. Returns
+    ``(the game's loop name, [(character number, clip name)])`` for coop.cfg's ``bonus_loop`` / ``char_bonus`` lines,
+    or None when the characters' bonus is off, or the bank has no bonus loop (one line says so)."""
+    from . import clip_variants as CV
+    from . import coop_play as CP
+    from . import video_bank as VB
+    project = getattr(result, "project", "")
+    got = CP.bonus_entries(project) if project and CP.load_characters(project)["pick"] else []
+    if not got:
+        return None
+    if CV.route_of(result.profile) != "clip_play":
+        result.lines.append("co-op characters: not on the End of Ball Bonus - %s asks for its clips in a way the "
+                            "runtime cannot swap one of them per teammate yet" % result.profile.label)
+        return None
+    bank_card, bank, bank_src = _coop_bank(result, stock_bank, "the co-op characters on the bonus")
+    stock = VB.parse(stock_bank)
+    loop = CP.bonus_loop(stock_bank, stock)
+    if loop is None:
+        result.lines.append("co-op characters: not on the End of Ball Bonus - %s's video bank has no bonus loop the "
+                            "app knows" % result.profile.label)
+        return None
+    loop_name, crop = loop
+    entry = next(c for c in stock.library.entries if c.name == loop_name)
+    assets = bank_card[:-len("scene.radium")] + "scene.assets/"
+    card_path = assets + entry.path
+    src = ""
+    for rel, path in CV.manifest(project).items():          # the project's own: an owner's replacement goes on too
+        if path == card_path and os.path.isfile(os.path.join(project, *rel.split("/"))):
+            src = os.path.join(project, *rel.split("/"))
+            break
+    folder = os.path.join(scratch, "coop_clips")
+    os.makedirs(folder, exist_ok=True)
+    if not src:
+        blob = read_card(card_path) if read_card is not None else None
+        if not blob:
+            result.lines.append("co-op characters: not on the End of Ball Bonus - its loop (%s) could not be read off "
+                                "the card" % loop_name)
+            return None
+        src = os.path.join(folder, "bonus_loop_stock.mp4")
+        with open(src, "wb") as f:
+            f.write(blob)
+    ffmpeg = _ffmpeg_for(ffmpeg, "the co-op characters on the bonus")
+    w, h = VB.clip_frame(stock_bank, stock)
+    box = CP.bonus_box(VB.crop_transform(stock_bank, crop, stock), w, h)
+    chars = CP.load_characters(project)
+    theme = CP.theme_of(chars.get("theme"))
+    seconds = CP.media_seconds(src, ffmpeg) or None
+    out = []
+    for k, (i, name, pic, vid) in enumerate(got):
+        if progress is not None:
+            progress(k, len(got), "Putting the co-op characters on the bonus (%d of %d)..." % (k + 1, len(got)))
+        made = os.path.join(folder, "%s.mp4" % name)
+        try:
+            CP.bonus_clip(src, made, box, ffmpeg, picture=pic, video=vid, size=(w, h), seconds=seconds,
+                          colour=chars["list"][i].get("colour") or theme["accent"])
+        except CP.CoopError as e:
+            raise ModeWriteError(str(e)) from None
+        try:
+            bank, added = VB.add_clip(bank, name, os.path.getsize(made))
+        except VB.VideoBankError as e:
+            raise ModeWriteError("the co-op characters on the bonus: %s could not be added to the video bank (%s)"
+                                 % (name, e)) from None
+        result.new.append((assets + added["path"], made))
+        out.append((i + 1, name))
+    _coop_bank_put(result, scratch, bank_card, bank, bank_src)
+    result.lines.append("co-op characters: on their teammate's End of Ball Bonus (%s, a window right of its words) "
+                        "for %s" % (loop_name, ", ".join(chars["list"][n - 1]["name"] for n, _name in out)))
+    return loop_name, out
+
+
 def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", stock_font=b"", stock_bank=b"",
-              ffmpeg=None, progress=None):
+              ffmpeg=None, progress=None, read_card=None):
     """``coop.cfg`` for *result*'s card: co-op on, the right flipper button read off *game_elf*, and (round 2) the
     service menu's CO-OP PLAY value *setting* when it switches co-op. PAD-1031: the pick's screens go into the HUD
     scene - with the modes' own when *result* built them (mode_assets.build), else here from *stock_hud* - and
@@ -1403,6 +1555,13 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         intro = coop_intro_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)   # PAD-1114
         if intro:
             text += "intro %s %d\n" % intro
+        for n, name, ms in coop_picked_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress):
+            text += "char_picked %d %s %d\n" % (n, name, ms)           # PAD-1123: full screen once picked
+        bonus = coop_bonus_into(result, stock_bank, scratch, read_card=read_card, ffmpeg=ffmpeg, progress=progress)
+        if bonus:
+            text += "bonus_loop %s\n" % bonus[0]                        # PAD-1123: the teammate's on their bonus
+            for n, name in bonus[1]:
+                text += "char_bonus %d %s\n" % (n, name)
     except CP.CoopError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)

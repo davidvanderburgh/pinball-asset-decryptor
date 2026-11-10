@@ -390,7 +390,7 @@ def test_the_project_keeps_its_characters_beside_its_awards(tmp_path):
     assert chars == {"pick": True, "time": CP.PICK_TIME,                    # round 6: an old ability is its bundle's powers
                      "list": [{"name": "GODZILLA 1954", "sub": "", "powers": CP.ABILITY_POWERS["longer_save"],
                                "header": "", "ability": "longer_save", "picture": "", "colour": "",
-                               "video": ""}]}
+                               "video": "", "picked_clip": "", "picked_sound": ""}]}   # PAD-1123
     CP.save(project, False)                                          # unticked: the choices stay
     assert CP.load_characters(project) == chars
     assert CP.load_awards(project) == {"score": {"on": False}}

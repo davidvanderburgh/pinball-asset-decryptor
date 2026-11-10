@@ -24,6 +24,7 @@
  *   site tick | deff_start | deff_start_w | deff_waiter | bdl_waiter | bdl_fg | bdl_bg | clip_play |
  *        bdl_cur_prio | deff_service | mode_get     <addr> <w0> <w1>
  *   data dm_ptr | bdl_mgr_ptr | cur_proc | deff_table | bdl_table | mode_mgr | cur_player <addr>
+ *   data bdl_fg_at <offset>   PAD-1115: the manager's foreground request field (default 0x58; King Kong 0x68)
  * Godzilla Premium 1.16's display.sites (item 154 display runs r1-r7; Pro 1.15's addresses are in its
  * port's display lines):
  *   site tick           0x003b5420 0xe92d4038 0xe3a00037
@@ -298,6 +299,10 @@ static unsigned char *dm(void)
     return a ? *(unsigned char **)(unsigned long)a : 0;
 }
 
+/* PAD-1115: where the layered manager keeps its foreground request (+4 its priority, -0x14 the background
+ * index): Godzilla 0x58, King Kong / Jaws 0x68 (`data bdl_fg_at 0x68` in the sites file) */
+static unsigned fg_at = 0x58;
+
 static unsigned char *bdl_mgr(void)
 {
     unsigned a = data("bdl_mgr_ptr");
@@ -354,8 +359,8 @@ static unsigned bdl_real_prio(unsigned char *m)
 {
     int idx;
     unsigned char *v0, *v1;
-    if (*(unsigned *)(m + 0x58)) return m[0x5c];
-    idx = *(int *)(m + 0x44);
+    if (*(unsigned *)(m + fg_at)) return m[fg_at + 4];
+    idx = *(int *)(m + fg_at - 0x14);
     if (idx == -1) return 0;
     v0 = *(unsigned char **)(m + 0x48);
     v1 = *(unsigned char **)(m + 0x4c);
@@ -374,7 +379,7 @@ static void on_bdl_cur_prio(unsigned *r)
     if (!hold_q || !m) return;
     real = bdl_real_prio(m);
     if (real >= hold_q) return;
-    *(unsigned *)(fake_mgr + 0x58) = 1;
+    *(unsigned *)(fake_mgr + fg_at) = 1;
     fake_mgr[0x5c] = (unsigned char)hold_q;
     r[0] = (unsigned)(unsigned long)fake_mgr;
 }
@@ -451,7 +456,7 @@ static void on_bdl_fg(unsigned *r)
     unsigned fl = 0, pr = bdl_prio(r[1], &fl);
     unsigned char *m = (unsigned char *)(unsigned long)r[0];
     say("BDL fg request bdl=%u prio=%u flags=0x%x lr=0x%08x | cur fg %s prio %u bg idx %d",
-        r[1], pr, fl, r[5], m && *(unsigned *)(m + 0x58) ? "up" : "none", m ? m[0x5c] : 0, m ? *(int *)(m + 0x44) : -9);
+        r[1], pr, fl, r[5], m && *(unsigned *)(m + fg_at) ? "up" : "none", m ? m[fg_at + 4] : 0, m ? *(int *)(m + fg_at - 0x14) : -9);
 }
 
 static void on_bdl_bg(unsigned *r)
@@ -627,7 +632,7 @@ static void draw_tick(void)
             }
         }
         /* the surface idle and no layered foreground up: our loop again (a framed clip took it) */
-        if (++n % 30 == 0 && vs && st && cp && m && !*(unsigned *)(m + 0x58)) {
+        if (++n % 30 == 0 && vs && st && cp && m && !*(unsigned *)(m + fg_at)) {
             void *surf = ((void *(*)(void))(unsigned long)vs)();
             if (surf && ((int (*)(void *))(unsigned long)st)(surf) != 2) {
                 bg_replays++;
@@ -690,8 +695,8 @@ static void on_tick(unsigned *r)
     if (d) {
         unsigned cur = *(unsigned short *)(d + 0xc), pr = d[0xe], bg = *(unsigned short *)(d + 0x12);
         int q = queue_len(d);
-        unsigned fg = m ? *(unsigned *)(m + 0x58) : 0, fgp = m ? m[0x5c] : 0;
-        int bgi = m ? *(int *)(m + 0x44) : -9;
+        unsigned fg = m ? *(unsigned *)(m + fg_at) : 0, fgp = m ? m[fg_at + 4] : 0;
+        int bgi = m ? *(int *)(m + fg_at - 0x14) : -9;
         if (!host_id && cur && (deff_prio(cur) == 1) && bg == cur && m) {
             /* the layered-display host: the background effect current while a layered display is up */
         }
@@ -778,7 +783,8 @@ static void on_tick(unsigned *r)
         unsigned id = number(&s), f = fn("bdl_fg");
         unsigned char *m = bdl_mgr();
         say("bdl fg %u requested by the probe: %s", id, f && m ? "calling" : "no bdl_fg / bdl mgr");
-        if (f && m) ((void (*)(void *, unsigned))(unsigned long)f)(m, id);
+        /* r2: the request's priority, as the waiter passes it (King Kong / Jaws read it; Godzilla ignores it) */
+        if (f && m) ((void (*)(void *, unsigned, unsigned))(unsigned long)f)(m, id, bdl_prio(id, 0));
     }
     if (read_trigger("/dump/display.deff", buf, sizeof buf)) {
         const char *s = buf;
@@ -799,6 +805,7 @@ static void display_probe_start(void)
     struct entry *tick;
     unsigned i;
     load_sites();
+    if (data("bdl_fg_at")) fg_at = data("bdl_fg_at");
     tick = find("tick", 1);
     if (!tick || !is_game_process(tick->addr)) return;
     clock_gettime(CLOCK_MONOTONIC, &t0);

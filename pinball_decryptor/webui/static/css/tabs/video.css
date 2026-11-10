@@ -47,6 +47,11 @@
 .vid-repcell .vid-rep { flex: 0 1 auto; min-width: 0; }
 .vid-var { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 9px; background: var(--info-soft); color: var(--info); font-size: 12px; line-height: 18px; cursor: default; }
 .vid-var .i { width: 13px; height: 13px; }
+/* PAD-1115: the time a game screen shows the clip for (amber: it freezes on its last frame or is cut) */
+.vid-lencell { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.vid-scr { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 9px; background: var(--info-soft); color: var(--info); font-size: 12px; line-height: 18px; cursor: default; }
+.vid-scr.warn { background: var(--warn-soft); color: var(--warn); }
+.vid-scr .i { width: 13px; height: 13px; }
 
 /* the two players */
 .vid-preview { flex: 0 0 auto; border-top: 1px solid var(--line); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; }

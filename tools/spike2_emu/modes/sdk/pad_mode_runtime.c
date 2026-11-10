@@ -20972,10 +20972,10 @@ static void clipv_line(char *s)
 
 /* ---- screen times (PAD-1115): a game screen that shows a clip for a fixed time lasts as long as the clip ----
  * DoomWalrus666, Godzilla: "Some videos natively freeze frame at the end. It doesn't matter if the clip is plenty
- * long". The game's award and battle-start screens (Godzilla's layered displays, BDLSecretComboAward and its kin)
- * play their clip ONCE and stay up for a time of their own: the base class sets the screen's length at its start
- * from one virtual (a float in seconds, 3.0 unless the class has its own: Secret Combo 4.0) and ends it when its
- * clock passes that. A clip shorter than that sits on its last frame for the rest; a longer one is cut. The build
+ * long". The game's award and battle-start screens (Godzilla's layered displays, Jaws' and King Kong's) set a length
+ * at their start from one virtual (a float in seconds, 3.0 unless the class has its own: Secret Combo 4.0); most end
+ * when their clip does, but a screen whose "done" check is that clock (Godzilla's Secret Combo) holds a shorter clip's
+ * last frame for the rest and cuts a longer one. The build
  * reads each such screen's vtable off the game program (screen_time.py) and writes, for a replaced clip whose
  * length is not the screen's:
  *

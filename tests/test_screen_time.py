@@ -53,8 +53,10 @@ def _program():
     a["s_cls2"] = put_str(0x270, "15BDLBigLoopAward")
     a["s_clip3"] = put_str(0x290, "planetXhurryup")
     a["s_cls3"] = put_str(0x2a0, "9BDLHurry")
+    a["s_clip4"] = put_str(0x2b0, "shark_swim_loop")
+    a["s_cls4"] = put_str(0x2c8, "13BDLSharkSwim")
     fns = [("clip", "s_clip"), ("crop", "s_crop"), ("clip2", "s_clip2"), ("crop2", "s_crop2"),
-           ("clip3", "s_clip3")]
+           ("clip3", "s_clip3"), ("clip4", "s_clip4")]
     off = 0x100
     for name, s in fns:
         a[name] = BASE + off
@@ -68,12 +70,30 @@ def _program():
     off += 0x10
     a["other"] = BASE + off
     put_words(off, [0xE12FFF1E])
-    for k, (ti_off, cls, vt_off, clip, crop, tm) in enumerate((
-            (0x300, "s_cls", 0x400, "clip", "crop", "own_time"),
-            (0x310, "s_cls2", 0x500, "clip2", "crop2", "base_time"),
-            (0x320, "s_cls3", 0x600, "clip3", "crop", "other"))):
+    off += 0x10
+    a["once"] = BASE + off                       # the play-it-looped flag: mov r0, #0 / bx lr
+    put_words(off, [0xE3A00000, 0xE12FFF1E])
+    off += 0x10
+    a["looped"] = BASE + off                     # mov r0, #1 / bx lr
+    put_words(off, [0xE3A00001, 0xE12FFF1E])
+    # "done" checks (the slot before the clip's name): on its time (elapsed > length, the length field +0x78) ...
+    a["done_time"] = BASE + 0x800
+    put_words(0x800, [0xED907A1F, 0xEDD07A1E, 0xEEB47AE7, 0xEEF1FA10, 0xC3A00001, 0xD3A00000, 0xE12FFF1E])
+    # ... or on its clip's end (it asks the video surface, Godzilla's other 25 screens)
+    a["done_clip"] = BASE + 0x820
+    put_words(0x820, [0xE5900058, 0xE2500002, 0x13A00001, 0xE12FFF1E])
+    # the base class: its "done" check (elapsed +0x7c > length +0x78) and the start code that stores the
+    # length from vtable slot 20 (0x50) after comparing it with its own function
+    put_words(0x1c0, [0xED907A1F, 0xEDD07A1E, 0xEEB47AE7, 0xEEF1FA10, 0xE12FFF1E])
+    put_words(0x1e0, [0xE5922050, 0xE1520003, 0x0D9F0A00, 0xED840A1E, 0xE12FFF1E])
+    for k, (ti_off, cls, vt_off, clip, crop, tm, lp, done) in enumerate((
+            (0x300, "s_cls", 0x400, "clip", "crop", "own_time", "once", "done_time"),
+            (0x310, "s_cls2", 0x500, "clip2", "crop2", "base_time", "once", "done_clip"),
+            (0x320, "s_cls3", 0x600, "clip3", "crop", "other", "once", "done_time"),
+            (0x330, "s_cls4", 0x700, "clip4", "crop", "base_time", "looped", "done_time"))):
         put_words(ti_off, [0x12345678, a[cls]])
-        words = [0, BASE + ti_off] + [a["other"]] * 15 + [a[clip], a[crop]] + [a["other"]] * 3 + [a[tm]]
+        words = ([0, BASE + ti_off] + [a["other"]] * 14 + [a[done], a[clip], a[crop], a[lp]] + [a["other"]] * 2
+                 + [a[tm]])
         put_words(vt_off, words)
         a["vt%d" % k] = BASE + vt_off + 8
     hdr = bytearray(0x54)
@@ -88,10 +108,13 @@ def _program():
 
 def test_screens_read_off_the_program():
     elf, a = _program()
+    from pinball_decryptor.plugins.stern.portgen import Elf
+    assert ST.time_slot(Elf(elf)) == 20
     found = ST.screens(elf)
-    assert [(s.clip, s.crop, s.cls, s.seconds) for s in found] == [
-        ("secret_combo", "Normal", "BDLSecretComboAward", 4.0),
-        ("big_loop_award_threshold", "ScoreFrame", "BDLBigLoopAward", 3.0)]
+    assert [(s.clip, s.crop, s.cls, s.seconds, s.loops, s.timed) for s in found] == [
+        ("secret_combo", "Normal", "BDLSecretComboAward", 4.0, False, True),
+        ("big_loop_award_threshold", "ScoreFrame", "BDLBigLoopAward", 3.0, False, False),   # ends with its clip
+        ("shark_swim_loop", "Normal", "BDLSharkSwim", 3.0, True, True)]
     sc = found[0]
     assert sc.vt == a["vt0"]
     assert sc.slot == a["vt0"] + 4 * 20          # the time virtual: five entries after the clip's (15)
@@ -102,8 +125,8 @@ def test_screens_read_off_the_program():
 def test_cfg_lines_only_for_a_different_length():
     elf, a = _program()
     found = ST.screens(elf)
-    lines = ST.cfg_lines(found, {"secret_combo": 8.0, "big_loop_award_threshold": 3.02,
-                                 "not_a_screen": 9.0})
+    lines = ST.cfg_lines(found, {"secret_combo": 8.0, "big_loop_award_threshold": 9.0,   # follows its clip: no line
+                                 "not_a_screen": 9.0, "shark_swim_loop": 9.0})   # a looping screen: left alone
     assert lines == ["stime\t0x%08x\t0x%08x\t0x%08x\t8000\tsecret_combo"
                      % (a["vt0"], a["vt0"] + 80, a["own_time"])]
     # a shorter clip than the screen's time: the screen ends with it (no frozen last frame)
@@ -116,6 +139,15 @@ def test_cfg_lines_only_for_a_different_length():
 def test_no_screens_in_a_program_without_them():
     elf, _a = _program()
     assert ST.screens(elf[:0x100] + bytes(len(elf) - 0x100)) == []
+    # no base-class code to read the time slot from: nothing, whatever the vtables look like
+    assert ST.screens(elf[:0x1c0] + bytes(0x40) + elf[0x200:]) == []
+
+
+def test_unknown_loop_flag_layout_leaves_the_program_alone():
+    elf, a = _program()
+    b = bytearray(elf)
+    struct.pack_into("<I", b, a["once"] - BASE, 0xE30001B1)     # movw r0, #0x1b1: an id, not a flag (Avengers)
+    assert ST.screens(bytes(b)) == []
 
 
 def test_screen_into_writes_its_own_file_or_appends(tmp_path):
@@ -215,3 +247,56 @@ def test_godzilla_le_116_secret_combo():
     assert [(s.cls, s.vt, s.slot, s.old, s.seconds) for s in sc] == [
         ("BDLSecretComboAward", 0x6478E8, 0x647938, 0x179F1C, 4.0)]
     assert {s.seconds for s in found if s.clip != "secret_combo"} == {3.0}
+    # only Secret Combo's screen ends on its time: the other 25 end when their clip does
+    assert [s.clip for s in found if s.timed] == ["secret_combo"]
+
+
+def _scr(sec, loops=False, clip="secret_combo", timed=True):
+    return ST.Screen(clip=clip, crop="Normal", cls="BDLX", vt=0x1000, slot=0x1050, old=0x2000, seconds=sec,
+                     loops=loops, timed=timed)
+
+
+def test_flag_words_for_the_video_tab():
+    tag, cls, head, lines = ST.flag([_scr(4.0)], 2.866667, False)
+    assert (tag, cls, head) == ("4 s", "warn", "The game shows this clip for 4 s")
+    assert "last frame stays on screen for 1.13 s" in lines[0]
+    tag, cls, _h, lines = ST.flag([_scr(3.0)], 5.0, False)
+    assert cls == "warn" and "cuts it off after 3 s" in lines[0]
+    _t, cls, _h, lines = ST.flag([_scr(3.0)], 3.01, False)
+    assert cls == "" and "screen's own time" in lines[0]
+    # a replacement on the slot: no warning, the build gives the screen its length
+    _t, cls, _h, lines = ST.flag([_scr(4.0)], 8.0, True)
+    assert cls == "" and "lasts 8.00 s too" in lines[0]
+    # picked but not yet measured: the general words only
+    _t, cls, _h, lines = ST.flag([_scr(4.0)], 0, True)
+    assert cls == "" and len(lines) == 1
+    # a screen that plays its clip over and over: no tag at all
+    assert ST.flag([_scr(3.0, loops=True)], 9.0, False) is None
+    # a screen that ends with its clip: no freeze and no cut, so no tag
+    assert ST.flag([_scr(3.0, timed=False)], 9.0, False) is None
+    assert ST.flag([], 9.0, False) is None
+
+
+FLEET = r"C:\tmp\PAD-1115\elves"
+
+
+@pytest.mark.skipif(not os.path.isdir(FLEET), reason="the fleet's game programs are not on this PC")
+def test_fleet_jaws_and_king_kong_read_by_the_same_rules():
+    def read(name):
+        path = os.path.join(FLEET, name)
+        if not os.path.isfile(path):
+            pytest.skip("%s is not on this PC" % name)
+        return ST.screens(open(path, "rb").read())
+    jaws = read("jaws_le-1_02_0.Release.16G.elf")
+    kk = read("king_kong_le-0_97_0.Release.16G.elf")
+    assert (len(jaws), sum(s.loops for s in jaws)) == (23, 4)
+    # Jaws times only its looping screens; King Kong's all end with their clip
+    assert [s.clip for s in jaws if s.timed and not s.loops] == []
+    assert not any(s.timed for s in kk)
+    assert [s.clip for s in kk] == ["Kong_ExtraBall", "ExtraBall_Lit_Alt", "Kong_Replay", "Kong_GongHit2"]
+    assert {s.seconds for s in kk} == {3.0}
+    replay = [s for s in kk if s.clip == "Kong_Replay"][0]
+    assert (replay.vt, replay.slot, replay.old) == (0x6F7220, 0x6F7288, 0x46F7C)   # slot 26: 0x68 past the vtable
+    venom = os.path.join(FLEET, "venom_le-1_07_0.Release.8G.elf")
+    if os.path.isfile(venom):
+        assert ST.screens(open(venom, "rb").read()) == []

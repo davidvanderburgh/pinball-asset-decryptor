@@ -369,12 +369,16 @@ class AudioTab(FindOriginalsMixin, TabService):
         self.audio_search_var = self.var("search", "str", "")
         self.audio_type_var = self.var("type", "str", "All types")
         self.audio_change_filter_var = self.var("show", "str", "All")
+        # PAD-1105: leave out the sounds no sound request plays (Requests: None)
+        self.audio_hide_unused_var = self.var("hide_unused", "bool", False)
         self.audio_play_through_var = self.var("play_through", "bool", False)
         self.audio_play_subst_var = self.var("play_subst", "bool", False)
         self.audio_group_dups_var = self.var("group_dups", "bool", False)
         self.audio_search_var.trace_add("write",
                                         lambda *a: self._refresh_list())
         self.audio_change_filter_var.trace_add(
+            "write", lambda *a: self._refresh_list())
+        self.audio_hide_unused_var.trace_add(
             "write", lambda *a: self._refresh_list())
         self.audio_group_dups_var.trace_add("write",
                                             lambda *a: self._refresh_list())
@@ -1041,6 +1045,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             self.audio_search_var.set("")
             self.audio_type_var.set("All types")
             self.audio_change_filter_var.set("All")
+            self.audio_hide_unused_var.set(False)
             self.audio_group_dups_var.set(False)
             self._refresh_list()
         if rel not in (self._visible_rels or ()):
@@ -1321,6 +1326,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         elif "audio_changed_only" in staged:
             self.audio_change_filter_var.set(
                 "Changed" if staged["audio_changed_only"] else "All")
+        self.audio_hide_unused_var.set(bool(staged.get("audio_hide_unused")))
 
     def _save_staged_changes(self):
         """Persist this tab's part of the folder's sidecar (the Tk window's
@@ -1354,6 +1360,10 @@ class AudioTab(FindOriginalsMixin, TabService):
             data.pop("sound_modes", None)
         data["audio_trim"] = bool(self.audio_trim_var.get())
         data["audio_change_filter"] = self.audio_change_filter_var.get()
+        if self.audio_hide_unused_var.get():
+            data["audio_hide_unused"] = True
+        else:
+            data.pop("audio_hide_unused", None)
         names = dict(data.get("replacement_names") or {})
         for rel, path in self._assign.items():
             if isinstance(path, str) and path.strip():
@@ -1490,6 +1500,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         query = (self.audio_search_var.get() or "").strip().lower()
         type_key = _TYPE_KEYS.get(self.audio_type_var.get())
         change_ok = self._change_filter_pred()
+        # PAD-1105: a sound no request plays reads None; a blank cell (a music
+        # bank's song, or no request map at all) is not known to be unused
+        uses_map = self._uses if self.audio_hide_unused_var.get() else None
         _cat_key = self._cat_key_fn()
         comments = self._load_comments()
 
@@ -1501,6 +1514,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                     comments.get(s.rel_path) or "").lower():
                 return False
             if change_ok is not None and not change_ok(s.rel_path):
+                return False
+            if uses_map and uses_map.get(s.rel_path, None) == []:
                 return False
             if type_key is None:
                 return True
@@ -1596,7 +1611,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                                                    extra)
             hint = ""
             if shown_n == 0:
-                hint = "Nothing matches the Search / Show / Type filters."
+                hint = ("Nothing matches the Search / Show / Type filters%s."
+                        % (" or Hide unused" if uses_map else ""))
                 if not query and type_key == "callouts":
                     hint = ("No call-outs identified in this folder yet.\n"
                             "Tick \"Auto-name call-outs\" on the Extract tab "
@@ -1713,6 +1729,14 @@ class AudioTab(FindOriginalsMixin, TabService):
         if value not in _CHANGE_FILTER_VALUES:
             return False
         self.audio_change_filter_var.set(value)
+        self._save_staged_changes()
+        return True
+
+    @rpc
+    def set_hide_unused(self, on):
+        """PAD-1105: "Hide unused" - leave out the sounds whose Requests read
+        None (persisted per folder)."""
+        self.audio_hide_unused_var.set(bool(on))
         self._save_staged_changes()
         return True
 

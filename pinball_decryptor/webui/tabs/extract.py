@@ -559,6 +559,9 @@ class ExtractTab(TabService):
                 recheck = self.window.cb.get("on_recheck_prereqs")
                 if recheck is not None:
                     recheck()
+                # the era just became spike3 here on first detection; show the
+                # self-extractor panel now instead of waiting for a re-probe
+                self._refresh_spike3_unlock(res)
                 return
             self._notify_detected_game(res["caption"])
             if hasattr(mfr, "set_era") and not caps.write and not (
@@ -593,6 +596,7 @@ class ExtractTab(TabService):
                 badge = {"text": f"Not recognized as {mfr.display}",
                          "kind": "warn", "switch": False}
         self.set(badge=badge, detected=detected)
+        self._refresh_spike3_unlock(res)
 
         # audio-export support (_refresh_extract_audio_support)
         supported = bool(res["audio_supported"])
@@ -614,6 +618,145 @@ class ExtractTab(TabService):
             cb(m)
         self.extract_input_var.set(path)
         return True
+
+    # ------------------------------------------------------------------
+    # Spike 3: read the OTP key on your own board (self-extractor, PAD-1086)
+    # ------------------------------------------------------------------
+    def _spike3_key_present(self, path):
+        """True if a Spike 3 key is already discoverable for *path* (env
+        $PAD_SPIKE3_KEYFILE or a padkeys.json sidecar)."""
+        try:
+            from ...plugins.stern.spike3_keys import Spike3KeySource
+            src = Spike3KeySource.discover(image_path=path)
+            return bool(src and src.has_any())
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _refresh_spike3_unlock(self, res):
+        """Show the self-extractor panel when a locked Spike 3 card is the
+        input (detected Spike 3, no key yet); hide it otherwise."""
+        path = self.extract_input_var.get()
+        locked = (res and res.get("era") == "spike3" and res.get("game")
+                  and res.get("exists")
+                  and not self._spike3_key_present(path))
+        if not locked:
+            if self.get("spike3_unlock"):
+                self.set(spike3_unlock=None)
+            return
+        cur = self.get("spike3_unlock") or {}
+        # keep any build instructions / status already shown for this card
+        same = cur.get("path") == path
+        self.set(spike3_unlock={
+            "path": path,
+            "caption": res.get("caption") or "",
+            "busy": False,
+            "status": cur.get("status", "") if same else "",
+            "instructions": cur.get("instructions", "") if same else "",
+            "verified": False,
+        })
+
+    def _set_spike3(self, **kw):
+        """Merge fields into the Spike 3 unlock panel state (UI thread)."""
+        cur = dict(self.get("spike3_unlock") or {})
+        cur.update(kw)
+        self.set(spike3_unlock=cur)
+
+    @rpc
+    def spike3_build_card(self):
+        """Build the OTP-key extractor card from the selected Spike 3 image
+        into a folder the user picks; show the deploy/read-back steps."""
+        path = (self.extract_input_var.get() or "").strip()
+        if not path or not os.path.exists(path):
+            return False
+        outdir = self.window.ask_folder(
+            "spike3_card_out", "Where to write the extractor card files",
+            initialdir=self.window._initialdir_for(
+                self.extract_output_var.get(), path))
+        if not outdir:
+            return False
+        self._set_spike3(busy=True, status="Building the extractor card…",
+                         instructions="")
+
+        def _work():
+            from ...plugins.stern import spike3_selfextract as SX
+            try:
+                res = SX.build_extractor_card(path, outdir)
+                msg = ("Extractor card written to %s. Follow the steps below "
+                       "on a board that does NOT enforce secure boot; if the "
+                       "card will not boot, that board is locked - see the "
+                       "note." % outdir)
+                steps = res.instructions
+                self.ctx.loop.post(lambda: self._set_spike3(
+                    busy=False, status=msg, instructions=steps))
+            except Exception as e:                      # noqa: BLE001
+                self.ctx.loop.post(lambda e=e: self._set_spike3(
+                    busy=False, status="Could not build the card: %s" % e,
+                    instructions=""))
+
+        threading.Thread(target=_work, daemon=True,
+                         name="spike3-build-card").start()
+        return True
+
+    @rpc
+    def spike3_ingest_key(self):
+        """Take the OTP_KEY.TXT read back from the card, verify it against
+        the selected image, and - if good - save a padkeys.json and unlock
+        the card for extraction."""
+        path = (self.extract_input_var.get() or "").strip()
+        if not path or not os.path.exists(path):
+            return False
+        keyfile = self.window.ask_open(
+            "spike3_otp_key", "Select OTP_KEY.TXT read back from the card",
+            [("Key files", "*.txt *.bin"), ("All files", "*.*")],
+            initialdir=self.window._initialdir_for(
+                self.extract_output_var.get(), path))
+        if isinstance(keyfile, (list, tuple)):
+            keyfile = keyfile[0] if keyfile else ""
+        if not keyfile:
+            return False
+        self._set_spike3(busy=True, status="Verifying the key against this "
+                         "card…")
+
+        def _work():
+            from ...plugins.stern import spike3_selfextract as SX
+            try:
+                out = self._spike3_padkeys_path()
+                res = SX.ingest_otp_key(keyfile, path, out_path=out)
+                if res.verified:
+                    os.environ["PAD_SPIKE3_KEYFILE"] = res.sidecar
+                    self.ctx.loop.post(self._spike3_unlocked, res.message)
+                else:
+                    msg = res.message
+                    self.ctx.loop.post(lambda: self._set_spike3(
+                        busy=False, status=msg))
+            except Exception as e:                      # noqa: BLE001
+                self.ctx.loop.post(lambda e=e: self._set_spike3(
+                    busy=False, status="Could not read that key: %s" % e))
+
+        threading.Thread(target=_work, daemon=True,
+                         name="spike3-ingest-key").start()
+        return True
+
+    def _spike3_padkeys_path(self):
+        """A writable padkeys.json location (the project folder if set, else
+        the user config dir) - never next to the image, which may be on
+        read-only media."""
+        folder = (self.extract_output_var.get() or "").strip()
+        if folder and os.path.isdir(folder):
+            return os.path.join(folder, "padkeys.json")
+        base = compat.user_config_dir() if hasattr(compat, "user_config_dir") \
+            else os.path.join(os.path.expanduser("~"), ".pad")
+        os.makedirs(base, exist_ok=True)
+        return os.path.join(base, "spike3_padkeys.json")
+
+    def _spike3_unlocked(self, message):
+        """A verified key: mark the panel unlocked. The key is now discoverable
+        ($PAD_SPIKE3_KEYFILE), so Extract will use it; the confirmation stays
+        until the input changes rather than being wiped by an immediate
+        re-probe."""
+        self._set_spike3(busy=False, verified=True,
+                         status=message or "Key verified. This card is "
+                         "unlocked - you can Extract now.")
 
     # ------------------------------------------------------------------
     # the source toggle and the card row

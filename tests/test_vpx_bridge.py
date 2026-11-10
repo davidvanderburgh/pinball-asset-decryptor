@@ -1149,6 +1149,52 @@ def test_shadow_carries_the_tables_dof_into_its_own_subs():
     assert "PadDOF" not in plain and 'SolCallback(1) = "bsTrough.SolOut"' in plain
 
 
+def test_shadow_carries_dof_behind_a_not_tilted_guard():
+    # PAD-1117: Munsters' (and JAWS') pop bumpers fire their DOF only inside
+    # `If NOT Tilted Then`, so the bridge carried none and the bumpers' toys
+    # stayed still. The shadow game never tilts: the guard is always true.
+    vs = pytest.importorskip("vpxshadow")
+    script = "\n".join([
+        "Sub Bumper001_Hit", "\tDim p", "\tIf NOT Tilted Then",
+        "\t\tPlaySoundAt SoundFXDOF(\"fx_bumper\", 109, DOFPulse, DOFContactors), ActiveBall",
+        "\t\tDOF 302, DOFPulse",
+        "\t\tIf SuperPopsTimer.Enabled Then", "\t\t\tDOF 90, DOFPulse", "\t\tEnd If",
+        "\tElse", "\t\tDOF 91, DOFPulse", "\tEnd If", "End Sub",
+        "Sub B2_Hit", "\tIf Tilted = False Then DOF 110, DOFPulse", "End Sub",
+        "Sub B3_Hit", "\tIf Not (bTilted) Then", "\t\tDOF 111, DOFPulse", "\tEnd If", "End Sub",
+        # a guard that is not "not tilted" stays a branch of the shadow game's
+        "Sub B4_Hit", "\tIf Tilted Then", "\t\tDOF 92, DOFPulse", "\tEnd If",
+        "\tIf Not Tilted And Mode = 2 Then", "\t\tDOF 93, DOFPulse", "\tEnd If", "End Sub"])
+    st = list(vs._walk(script.split("\n")))
+    assert [c.split()[1].rstrip(",") for c in vs.dof_of_sub(st, "Bumper001_Hit")] == ["109", "302"]
+    assert vs.dof_of_sub(st, "B2_Hit") == ["PadDOF 110, DOFPulse, Empty"]
+    assert vs.dof_of_sub(st, "B3_Hit") == ["PadDOF 111, DOFPulse, Empty"]
+    assert vs.dof_of_sub(st, "B4_Hit") == []
+
+
+def test_munsters_herman_opto_stays_closed_under_the_magnet():
+    # PAD-1117: the table's Herman magnet holds the ball inside sw45, and the
+    # game reads a ball on the magnet as HERMAN OPTO staying closed (emulator:
+    # pulsed, the hurry-up never served its second ball). Old patches re-patch.
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "munsters_pro.shadow.json"), encoding="utf-8"))
+    assert m["switches"]["sw45"]["event"] == "hold" and m["switches"]["sw45"]["id"] == 82
+    old = {r["old"] for r in m["repatch"] if r["since"].startswith("PAD-1117")}
+    assert old == {"Sub sw45_Hit : vpmTimer.PulseSw 1082 : End Sub",
+                   "Sub Bumper001_Hit : vpmTimer.PulseSw 1086 : End Sub"}
+    script = "\n".join(["Sub sw45_Hit", "\tHermanShake", "End Sub", "Sub sw45_unhit()", "\tCaptured=False",
+                        "End Sub", "Sub Bumper001_Hit", "\tIf NOT Tilted Then",
+                        "\t\tPlaySoundAt SoundFXDOF(\"fx_bumper\", 109, DOFPulse, DOFContactors), ActiveBall",
+                        "\tEnd If", "End Sub"])
+    gen, _ = vs.patch(script, m)
+    assert "Sub sw45_Hit : Controller.Switch(1082) = True : End Sub" in gen
+    assert "Sub sw45_UnHit : Controller.Switch(1082) = False : End Sub" in gen
+    assert ("Sub Bumper001_Hit : vpmTimer.PulseSw 1086 : PadDOF 109, DOFPulse, DOFContactors : End Sub") in gen
+    for r in m["repatch"]:
+        if r["since"].startswith("PAD-1117"):
+            assert r["old"] not in gen
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the generated VBScript under cscript")
 def test_shadow_carried_dof_reaches_b2s_under_vbscript(tmp_path):

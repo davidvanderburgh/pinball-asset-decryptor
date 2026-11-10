@@ -425,11 +425,14 @@ def _walk(lines):
     """Every statement inside a Sub or Function, as (sub name lowered, block
     path, statement). The path names the If/Case/loop branch the statement
     runs in - () is the sub's own level; a single-line If's statements are
-    conditional and get a path of their own."""
+    conditional and get a path of their own. A "not tilted" guard is
+    NOT_TILTED in the path, not a branch id (see dof_of_sub)."""
     head = re.compile(r"^(?:public\s+|private\s+)?(?:sub|function)\s+(\w+)", re.I)
     sub, path, ids = None, [], [0]
 
-    def new():
+    def new(low=""):
+        if NOT_TILTED_RE.match(low):
+            return NOT_TILTED
         ids[0] += 1
         return ids[0]
     for line in lines:
@@ -454,9 +457,9 @@ def _walk(lines):
                 sub = None
                 continue
             if low.startswith("if ") and re.search(r"\bthen$", low):
-                path.append(new())
+                path.append(new(low))
             elif low.startswith("if ") and re.search(r"\bthen\b", low):
-                cond = tuple(path) + (new(),)
+                cond = tuple(path) + (new(low),)
                 yield sub, cond, re.split(r"(?i)\bthen\b", s, maxsplit=1)[1].strip()
             elif re.match(r"(elseif\b.*\bthen$|else$|case\b)", low) and path:
                 path[-1] = new()
@@ -476,10 +479,20 @@ def _dedupe(calls):
     return seen
 
 
+#: PAD-1117: a hit sub's "not tilted" guard - `If Not Tilted Then`, `If Tilted = False Then`, `If Not (bTilted)
+#: Then`. Munsters' pop bumpers fire their DOF (107-112, 302-304) only inside one, so the bridge carried none and the
+#: bumpers' toys stayed still. The shadow game never runs, so its tilt flag never rises and the guard is always true:
+#: what it wraps runs at the sub's own level. (The machine's tilt is its own; it never reached the table's flag.)
+NOT_TILTED = "not-tilted"
+NOT_TILTED_RE = re.compile(r"if\s+(?:not\s*\(?\s*\w*tilt\w*\s*\)?|\(?\s*\w*tilt\w*\s*\)?\s*=\s*(?:false|0))\s*then\b",
+                           re.I)
+
+
 def dof_of_sub(stmts, name):
-    """The DOF a sub always fires: its own level, no branch."""
-    return _dedupe([c for sub, path, s in stmts if sub == name.lower() and not path
-                    for c in _dof_in(s)])
+    """The DOF a sub always fires: its own level, no branch (a "not tilted"
+    guard is no branch: NOT_TILTED)."""
+    return _dedupe([c for sub, path, s in stmts if sub == name.lower()
+                    and all(p == NOT_TILTED for p in path) for c in _dof_in(s)])
 
 
 def dof_at_fire(stmts, obj):

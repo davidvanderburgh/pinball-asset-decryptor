@@ -75,11 +75,14 @@ and [Multi-boot cards](multi-boot.md).
 
 - **Games:** 6 (Pinball Magic, Airborne, Breakshot, Flipper Football, Kingpin, Big Bang Bar), every version PinMAME runs
 - **Reads:** `.zip` (MAME ROM dumps; the zip can have any name, the version is read from the ROMs inside)
-- **Tabs:** Capture (Extract)
+- **Tabs:** Extract (Basic and Capture)
 
-The same as Data East: Extract runs the game in attract mode under PinMAME
-and records the DMD animations with their sound as one MP4 per scene.
-Needs libpinmame and ffmpeg; you supply the ROMs.
+Basic extract reads every sound out of the sound ROMs (u28-u31) and writes
+each one whole as a WAV in `audio/`, with `audio/sounds.csv` listing them
+(`u28_017.wav` is sound 17 in u28's sound table); it needs only ffmpeg.
+The capture is the same as Data East's: it runs the game in attract mode
+under PinMAME and records the DMD animations with their sound as one MP4
+per scene, and needs libpinmame too.  You supply the ROMs.
 
 ## Chicago Gaming Company
 

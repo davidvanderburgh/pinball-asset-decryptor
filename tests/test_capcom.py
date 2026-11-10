@@ -28,10 +28,11 @@ ALL_ROMSETS = [(key, romset) for key, info in CAPCOM_GAME_DB.items()
                for romset in info["romsets"]]
 
 
-def test_capcom_registered_capture_primary(manufacturers_by_key):
+def test_capcom_registered_with_basic_and_capture(manufacturers_by_key):
     cap = manufacturers_by_key["capcom"]
     assert cap.display == "Capcom"
-    assert cap.capabilities.capture and not cap.capabilities.extract
+    # Basic = every sound out of the sound ROMs (PAD-1088), and the capture
+    assert cap.capabilities.capture and cap.capabilities.extract
     assert {g.display for g in cap.games} == {
         "Pinball Magic", "Airborne", "Breakshot", "Flipper Football",
         "Kingpin", "Big Bang Bar"}

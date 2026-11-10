@@ -138,3 +138,17 @@ def test_status_probe_reports_frames_received():
     assert _s.unpack("<I", body[0:4])[0] == 3 and body[4:8] == bytes(4)
     r = send(bytes([0xFF, 0x77]), 10)
     assert _s.unpack("<I", s3bridge.frames_in(r)[0][0][2][0:4])[0] == 1
+
+
+def test_playfield_boards_are_active_low():
+    """The game's Ball Trough Test shows a trough ball for wire bit 0: every
+    board but the cabinet one (START BUTTON) answers closed as 0."""
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    br.nodes[1] = _node(bytes([0, 0x08, 0, 0, 0, 0, 0, 0]))
+    br.nodes[8] = _node(bytes([0, 0, 0, 0, 0x3F, 0, 0, 0]))
+    br.set_polarity([("START BUTTON", 1, 11, "switch"), ("TROUGH 1", 8, 37, "switch")])
+    assert not br.nodes[1].active_low and br.nodes[8].active_low
+    for nid, want in ((1, bytes([0, 0x08, 0, 0, 0, 0, 0, 0])),
+                      (8, bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF]))):
+        r = br.nodes[nid](bytes([0x11, 0x00, 0x00]), 11)
+        assert r[:8] == want

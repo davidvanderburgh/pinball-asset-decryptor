@@ -100,6 +100,7 @@ class Node:
         self.reported = bytes(8)  # what the game last read (scan or ff)
         self.registered = 0       # when its identity was first read (time)
         self.rx = 0               # addressed frames since the last ff probe
+        self.active_low = False   # wire bit 0 = closed (set_polarity)
 
     def __call__(self, data, k):
         """k reply bytes (payload + checksum) for request payload `data`."""
@@ -130,9 +131,12 @@ class Node:
             # ck`) keys the reply: byte c is XORed with rol8(key, c) (Spike
             # 2's hwshim, measured). The bits are the live ones from nodesw.
             bits = self.inputs() if self.inputs else bytes(8)
+            # nodesw is LOGICAL (1 = closed); an active-low board's wire bit
+            # is 0 for a closed switch
+            wire = bytes(~b & 0xFF for b in bits) if self.active_low else bits
             key = data[1] if len(data) >= 3 else 0
             for i in range(8):
-                p[i] = bits[i] ^ (((key << i) | (key >> ((8 - i) & 7))) & 0xFF)
+                p[i] = wire[i] ^ (((key << i) | (key >> ((8 - i) & 7))) & 0xFF)
             self.reported = bits
             if any(bits):
                 self.once("sw" + bits.hex(), "node %d switches %s" % (self.nid, bits.hex()))
@@ -209,13 +213,31 @@ class Bridge:
         model = self.nodes.get(node & 0x3F)
         if node & 0x40:
             data = unmask(node, data)
-        if self.balls is not None and data[:1] == b"\x40" and len(data) >= 3:
-            self.balls.coil(node & 0x3F, data)
         if model is not None:
             r = model(data, reply_len - 1)
             if r is not None:
                 return bytes(r[:reply_len - 1]).ljust(reply_len - 1, b"\x55") + b"\x00"
         return b"\x55" * (reply_len - 1) + b"\x04"
+
+    def set_polarity(self, devs):
+        """Which boards report a CLOSED switch as wire bit 0. Measured on
+        pokemon_le with the service menu's Ball Trough Test, which draws the
+        game's own reading live: node 8's trough positions show a ball for
+        wire 0 and none for 1, SHOOTER LANE and TROUGH JAM likewise, the
+        scoop opto too - the playfield boards are active LOW. The cabinet
+        board (START BUTTON, coins) is active high: Start and coins register
+        as high pulses, and at rest its slam tilt and coins read open.
+        So every board but the one carrying START BUTTON is active low;
+        PAD_S3_ACTIVE_LOW=<ids> / PAD_S3_ACTIVE_HIGH=<ids> override."""
+        cab = {node for name, node, idx, cls in devs
+               if cls == "switch" and name.strip().upper() == "START BUTTON"}
+        ids = lambda v: {int(x) for x in os.environ.get(v, "").replace(",", " ").split() if x.isdigit()}
+        lo, hi = ids("PAD_S3_ACTIVE_LOW"), ids("PAD_S3_ACTIVE_HIGH")
+        for nid, n in self.nodes.items():
+            n.active_low = (nid in lo) or (nid not in hi and nid not in cab)
+        self.log.write("# [polarity] active low: %s; active high: %s\n" % (
+            " ".join(str(k) for k in sorted(self.nodes) if self.nodes[k].active_low),
+            " ".join(str(k) for k in sorted(self.nodes) if not self.nodes[k].active_low)))
 
     def note_enumeration(self, node, data):
         """`F0 10`/`F0 20` re-address a node: the game is (still) enumerating it, so
@@ -232,6 +254,11 @@ class Bridge:
             model.rx += 1             # every addressed frame, as the game counts
             if data[0] == 0xF1:       # F1: the game restarts its own count
                 model.rx = 0
+        # coil commands ask for no reply, so they never reach node_exchange:
+        # the ball model hears them here (the first trough eject of a real
+        # game went unanswered for that reason)
+        if self.balls is not None and data[0] == 0x40 and len(data) >= 3:
+            self.balls.coil(node & 0x3F, data)
         # F0 10 / F0 20 only: the service loop sends every node F0 11 once
         # a second, and counting that kept every request down for good
         if data[0] == 0xF0 and len(data) > 1 and data[1] in (0x10, 0x20) and model.registered:
@@ -331,6 +358,11 @@ def main():
         log.write("# node %d (%s) not fitted\n" % (n, claims.pop(n)["type"]))
     br = Bridge(crc, log, claims)
     br.attach_inputs(os.path.join(d, "nodesw"))
+    if game:
+        try:
+            br.set_polarity(s3nodes.devices(s3nodes.Elf(game)))
+        except Exception as e:
+            log.write("# [polarity] not derived (%s): every board active high\n" % e)
     if game and os.environ.get("PAD_S3_BALLS", "1") != "0":
         try:
             import s3balls

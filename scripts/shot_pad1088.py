@@ -47,7 +47,7 @@ def main():
                            if t["visible"]])
             if run:
                 # Basic only: the capture box off
-                for name, val in (("capture", False), ("basic", True)):
+                for name, val in (("capture", False), ("static", True)):
                     try:
                         ws.api(url, "ui.set", "extract", name, val)
                     except RuntimeError as e:
@@ -58,6 +58,8 @@ def main():
                     if not ws.state(url)["shell"].get("running"):
                         break
                     time.sleep(1)
+                ws.api(url, "extract.refresh_project")
+                print("footer", ws.state(url)["shell"].get("footer"))
             time.sleep(3)
             page.screenshot(path=out)
             print("shot", out)

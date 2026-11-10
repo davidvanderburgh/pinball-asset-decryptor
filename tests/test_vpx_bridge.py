@@ -3227,6 +3227,101 @@ def test_vpxlamps_fit_suggest_and_write(tmp_path):
     assert q.read_text() == json.dumps(mq, indent=2) + "\n"
 
 
+def test_vpxlamps_rgb_reads_every_channel_spelling_and_order(tmp_path):
+    # PAD-1097: Foo Fighters' arrows never took the mode colours. Its LED
+    # rows end in a connector ("8b") with no image, which read_unplaced
+    # skipped; Aerosmith names -BLU/-GRN/-RED, Rush " R"; and the controller
+    # reads a lit rgb light's levels in map order as R, G, B.
+    vl = pytest.importorskip("vpxlamps")
+    io = tmp_path / "led_io.txt"
+    io.write_text("# node index name                                   x     y  conn  image\n"
+                  "8      20    LEFT RAMP-R                            0     0  8b    \n"
+                  "8      21    LEFT RAMP-G                            0     0  8b    \n"
+                  "8      22    LEFT RAMP-B                            0     0  8b    \n"
+                  "8      30    TOY BOX ARROW-BLU                      0     0  -     \n"
+                  "8      31    TOY BOX ARROW-GRN                      0     0  -     \n"
+                  "8      32    TOY BOX ARROW-RED                      0     0  -     \n"
+                  "8      40    SHOOT ME VUK R                         0     0  -     \n"
+                  "8      41    SHOOT ME VUK G                         0     0  -     \n"
+                  "8      42    SHOOT ME VUK B                         0     0  -     \n"
+                  "8      50    GUARDIANS-LEFT                         0     0  -     \n"
+                  "8      51    GUARDIANS-CENTER                       0     0  -     \n"
+                  "8      52    GUARDIANS-RIGHT                        0     0  -     \n"
+                  "8      60    MOD A                                  0     0  -     \n"
+                  "8      61    OTHER-G                                0     0  -     \n"
+                  "8      62    MOD B                                  0     0  -     \n"
+                  "9      19    UFO-R                                120   300  9a    playfield\n",
+                  encoding="utf-8")
+    unplaced = vl.read_unplaced(str(io))
+    assert unplaced[(8, 20)] == "LEFT RAMP-R" and (9, 19) not in unplaced
+    leds = {k: (n,) for k, n in vl.read_names(str(io)).items()}
+    assert vl.rgb_flag(leds, [[8, 20], [8, 21], [8, 22]]) is True
+    assert vl.rgb_flag(leds, [[8, 30], [8, 31], [8, 32]]) == "BGR"
+    assert vl.rgb_flag(leds, [[8, 41], [8, 40], [8, 42]]) == "GRB"
+    assert vl.rgb_flag(leds, [[8, 50], [8, 51], [8, 52]]) is None       # three lamps, not three colours
+    assert vl.rgb_flag(leds, [[8, 60], [8, 61], [8, 62]]) is None       # not one insert
+    assert vl._base("TOY BOX ARROW-GRN") == "TOY BOX ARROW"
+    p = tmp_path / "t.shadow.json"
+    p.write_text('{\n  "title": "t",\n  "lamps": {\n    "_": "x",\n'
+                 '    "L1": {"leds": [[8, 20], [8, 21], [8, 22]], "name": "LEFT RAMP"},\n'
+                 '    "L2": {"leds": [[8, 30], [8, 31], [8, 32]], "name": "TOY BOX"},\n'
+                 '    "L3": {"leds": [[8, 50], [8, 51], [8, 52]], "name": "GUARDIANS"}\n  },\n'
+                 '  "lamp_calls": {\n    "C2": {"leds": [[8, 30], [8, 31], [8, 32]], "call": "X"}\n  }\n}\n',
+                 encoding="utf-8")
+    fixes = vl.rgb_fixes(json.loads(p.read_text(encoding="utf-8")), leds)
+    assert [(s, n) for s, n, _ in fixes] == [("lamps", "L1"), ("lamps", "L2"), ("lamp_calls", "C2")]
+    vl.mark_rgb(str(p), fixes)
+    text = p.read_text(encoding="utf-8")
+    # the LEDs keep their order (and the light its number): a table patched before stays wired
+    assert '    "L1": {"leds": [[8, 20], [8, 21], [8, 22]], "rgb": true, "name": "LEFT RAMP"},\n' in text
+    assert '    "L2": {"leds": [[8, 30], [8, 31], [8, 32]], "rgb": "BGR", "name": "TOY BOX"},\n' in text
+    assert '"C2": {"leds": [[8, 30], [8, 31], [8, 32]], "rgb": "BGR", "call": "X"}' in text
+    assert '"L3": {"leds": [[8, 50], [8, 51], [8, 52]], "name": "GUARDIANS"}' in text
+    assert vl.rgb_fixes(json.loads(text), leds) == []
+    # the drawing reads a BGR light the controller's way: blue LED full = blue
+    lv = {(8, 30): 255, (8, 31): 0, (8, 32): 0}
+    assert vl.lamp_value(lv, [(8, 30), (8, 31), (8, 32)], "BGR") == 255 << 16
+    # a json.dump file is dumped again
+    q = tmp_path / "d.shadow.json"
+    q.write_text(json.dumps({"title": "d", "lamps": {"L2": {"leds": [[8, 30], [8, 31], [8, 32]]}}}, indent=2) + "\n")
+    vl.mark_rgb(str(q), vl.rgb_fixes(json.loads(q.read_text()), leds))
+    mq = json.loads(q.read_text())
+    assert mq["lamps"]["L2"] == {"leds": [[8, 30], [8, 31], [8, 32]], "rgb": "BGR"}
+    assert q.read_text() == json.dumps(mq, indent=2) + "\n"
+
+
+def test_controller_reads_an_rgb_light_in_its_channel_order(tmp_path):
+    # PAD-1097: Aerosmith lists its arrows' LEDs BLU, GRN, RED. The map says
+    # "rgb": "BGR" and the controller turns the levels back into R, G, B.
+    pc = pytest.importorskip("padcontroller")
+    assert pc.rgb_channels(["X-BLU", "X-GRN", "X-RED"]) == "BGR"
+    assert pc.rgb_channels(["SHOOT ME VUK R", "SHOOT ME VUK G", "SHOOT ME VUK B"]) == "RGB"
+    assert pc.rgb_channels(["GUARDIANS-LEFT", "GUARDIANS-CENTER", "GUARDIANS-RIGHT"]) is None
+    assert pc.rgb_levels([10, 20, 30], "BGR") == [30, 20, 10]
+    assert pc.rgb_levels([10, 20, 30], True) == [10, 20, 30]
+    p = tmp_path / "t.shadow.json"
+    p.write_text(json.dumps({"title": "t", "lamps": {
+        "A": {"leds": [[8, 21], [8, 22], [8, 23]], "rgb": "BGR"},
+        "B": {"leds": [[8, 40], [8, 41], [8, 42]], "rgb": True}}}), encoding="utf-8")
+    vm = pc.VpxMap()
+    vm.load(str(p))
+    assert vm.rgb_order == {pc.lamp_number(8, 21): "BGR"}
+    assert vm.rgb_groups == {pc.lamp_number(8, 21), pc.lamp_number(8, 40)}
+
+
+def test_tribute_maps_light_the_mode_coloured_arrows_in_colour():
+    # PAD-1097: the RGB shot arrows of these tributes change colour with the
+    # modes on the real machine; their maps now say so, with the channel order.
+    want = {"foo_fighters_le": ("Light025", True), "foo_fighters_pro": ("Light060", True),
+            "aerosmith": ("I107", True), "guardians": ("lGamoraArrow", True), "rush_le": ("I103", True),
+            "star_wars_pro": ("LightFireButton", "GRB")}
+    for title, (light, flag) in want.items():
+        m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
+        assert m["lamps"][light].get("rgb") == flag, (title, light)
+    ae = json.load(open(os.path.join(VPX, "aerosmith.shadow.json"), encoding="utf-8"))["lamps"]
+    assert ae["I23"] == {"leds": [[8, 21], [8, 22], [8, 23]], "rgb": "BGR", "name": "LOVE IN AN ELEVATOR"}
+
+
 def test_vpxlamps_names_a_lamp_on_another_inserts_led(tmp_path):
     # Guardians LE's map carried the Pro's LED numbers; TMNT Pro's eight
     # episode lights all sat on EPISODE 2. The build's own LED names say so.

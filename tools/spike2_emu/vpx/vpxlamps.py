@@ -94,16 +94,32 @@ def misnamed(m, names):
 def read_unplaced(path):
     """(node, index) -> name of the LEDs a build names but does not place
     (Rush's and Foo Fighters' device tables have no positions): the
-    cabinet, speakers, topper, motors and GI left out."""
+    cabinet, speakers, topper, motors and GI left out. The column after the
+    place is the connector: "-", or a name like Foo Fighters' "8b" (PAD-1097:
+    those rows were all skipped)."""
     out = {}
     for line in open(path, encoding="utf-8", errors="replace"):
-        p = line.split()
-        if line.startswith("#") or len(p) < 6 or p[-1] != "-" or p[-3:-1] != ["0", "0"]:
+        mo = None if line.startswith("#") else LED_PLACE.match(line)
+        if not mo or (mo.group(4), mo.group(5)) != ("0", "0") or "playfield" in (mo.group(6) or "").lower():
             continue
-        name = " ".join(p[2:-3])
-        if 1 < int(p[0]) < 12 and not NOT_PLAYFIELD.search(name):   # 12-15: topper boards (PAD-498)
-            out[(int(p[0]), int(p[1]))] = name
+        name = mo.group(3)
+        if 1 < int(mo.group(1)) < 12 and not NOT_PLAYFIELD.search(name):   # 12-15: topper boards (PAD-498)
+            out[(int(mo.group(1)), int(mo.group(2)))] = name
     return out
+
+
+# a row with its place: node, index, name, x, y, then the connector and image (either may be missing)
+LED_PLACE = re.compile(r"^\s*(\d+)\s+(\d+)\s+(\S.*?)\s{2,}(-?\d+)\s+(-?\d+)(?:\s+(.*?))?\s*$")
+
+def rgb_flag(names, group):
+    """What a light on these LEDs puts in its map's `rgb`: True for one
+    insert's red, green and blue listed in that order, the order they are
+    listed in otherwise ("BGR", padcontroller.rgb_levels), None when they are
+    not one insert's three colours. The LEDs keep their order, so the light
+    keeps its number and a table patched before stays wired."""
+    import padcontroller
+    order = padcontroller.rgb_channels([names.get(tuple(g), ("",))[0] for g in group])
+    return None if order is None else (True if order == "RGB" else order)
 
 
 def gi_lights(table):
@@ -197,8 +213,9 @@ def fit_table(lights, wires, leds):
 
 
 def _base(name):
-    """An RGB insert's name without its -R/-G/-B."""
-    return name[:-2] if name[-2:] in ("-R", "-G", "-B") else name
+    """An RGB insert's name without its -R/-G/-B (or -RED/-GRN/-BLU)."""
+    mo = re.match(r"^(.*)-(R|G|B|RED|GRN|BLU)$", name)
+    return mo.group(1) if mo else name
 
 
 def audit(m, table, leds, unplaced=None):
@@ -293,7 +310,7 @@ def lamp_value(levels, group, rgb):
     if max(vals) < padcontroller.LAMP_ON:
         return 0
     if rgb and len(group) == 3:
-        return padcontroller.rgb_value(*vals)
+        return padcontroller.rgb_value(*padcontroller.rgb_levels(vals, rgb))
     return 1
 
 
@@ -375,9 +392,8 @@ def draw_audit(m, table, leds, rep, fit, out, height=2400):
 
 
 def is_rgb(leds, group):
-    """Three LEDs named <insert>-R, -G, -B, in that order."""
-    names = [leds.get(tuple(g), ("",))[0] for g in group]
-    return len(names) == 3 and [n[-2:] for n in names] == ["-R", "-G", "-B"]
+    """Three LEDs that are one insert's red, green and blue (rgb_flag), in any order."""
+    return rgb_flag(leds, group) is not None
 
 
 def retrofit_name(insert):
@@ -410,8 +426,9 @@ def suggest(m, table, leds):
     def entry(b, note):
         g = groups[b]
         e = {"leds": sorted(g["leds"])}
-        if is_rgb(leds, e["leds"]):
-            e["rgb"] = True
+        flag = rgb_flag(leds, e["leds"])
+        if flag:
+            e["rgb"] = flag
         e["name"] = b + (" (%s)" % note if note else "")
         return e
     pairs = sorted((math.dist(p, g["at"]), n, b) for n, p in free.items() for b, g in unwired.items())
@@ -500,20 +517,70 @@ def write_lamps(path, add, retro, rgb_names=()):
     open(path, "w", encoding="utf-8", newline="").write(text)
 
 
+RGB_SECTIONS = ("lamps", "lamp_calls", "retrofit_lights")
+
+
+def _sections(m):
+    for sect in RGB_SECTIONS:
+        table = m.get(sect, {})
+        if sect == "retrofit_lights":
+            table = table.get("lights", {})
+        yield sect, table
+
+
+def rgb_fixes(m, leds):
+    """[(section, light, rgb)] for every light on an RGB insert's three LEDs
+    whose `rgb` is missing or names another channel order (rgb_flag)."""
+    out = []
+    for sect, table in _sections(m):
+        for name, v in table.items():
+            if name == "_" or not isinstance(v, dict):
+                continue
+            flag = rgb_flag(leds, v.get("leds", []))
+            if flag and v.get("rgb") != flag:
+                out.append((sect, name, flag))
+    return out
+
+
+def mark_rgb(path, fixes):
+    """Set `rgb` on each light rgb_fixes found, keeping the map's layout: one
+    entry per line, or a json.dump file dumped again."""
+    text = open(path, encoding="utf-8").read()
+    m = json.loads(text)
+    dumped = text == json.dumps(m, indent=2) + "\n"
+    tables = dict(_sections(m))
+    for sect, name, flag in fixes:
+        v = tables[sect][name]
+        v2 = {"leds": v["leds"], "rgb": flag} | {k: x for k, x in v.items() if k not in ("leds", "rgb")}
+        if dumped:
+            tables[sect][name] = v2
+            continue
+        for old in ("%s: %s" % (json.dumps(name), json.dumps(v, ensure_ascii=False)),
+                    "%s: %s" % (json.dumps(name), json.dumps(v))):
+            if old in text:
+                break
+        else:
+            raise ValueError("%s: %s %s is not on one line" % (path, sect, name))
+        text = text.replace(old, "%s: %s" % (json.dumps(name), json.dumps(v2, ensure_ascii=False)), 1)
+    if dumped:
+        text = json.dumps(m, indent=2) + "\n"
+    json.loads(text)
+    open(path, "w", encoding="utf-8", newline="").write(text)
+
+
 def main(argv):
     if len(argv) >= 4 and argv[1] == "rgb":
         if argv[2].endswith(".vpxmap.json"):
             # a ROM table's own lamp code (NFadeL, Lampz) takes 0/1 only
             print("refused: %s is a ROM table's map; its lamps stay 0/1" % argv[2])
             return 1
-        m = json.load(open(argv[2], encoding="utf-8"))
-        leds = read_led_io(argv[3])
-        leds.update((k, (n,)) for k, n in read_unplaced(argv[3]).items())
-        names = [k for k, v in m.get("lamps", {}).items()
-                 if k != "_" and isinstance(v, dict) and not v.get("rgb") and is_rgb(leds, v["leds"])]
-        print("%d lamps on an RGB insert without rgb: %s" % (len(names), " ".join(names)))
-        if "--write" in argv and names:
-            write_lamps(argv[2], {}, {}, names)
+        # every LED the build names, placed or not: the channels are in the names
+        leds = {k: (n,) for k, n in read_names(argv[3]).items()}
+        fixes = rgb_fixes(json.load(open(argv[2], encoding="utf-8")), leds)
+        print("%d lights on an RGB insert without rgb or its channel order: %s"
+              % (len(fixes), " ".join(n for _, n, _ in fixes)))
+        if "--write" in argv and fixes:
+            mark_rgb(argv[2], fixes)
         return 0
     if len(argv) >= 5 and argv[1] == "suggest":
         m = json.load(open(argv[2], encoding="utf-8"))

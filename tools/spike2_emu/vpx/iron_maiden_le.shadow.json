@@ -184,7 +184,7 @@
     "l165_spot": {"leds": [[9, 16]], "name": "SPOT LEFT"},
     "l166a_spot": {"leds": [[8, 3]], "name": "SPOT RIGHT"},
     "l166b_spot": {"leds": [[8, 3]], "name": "SPOT RIGHT"},
-    "LFlasher005": {"leds": [[10, 0], [10, 1], [10, 2]], "name": "INTELLIGENT DOME 1 (PAD-859: the free light 3 px from it)"}
+    "LFlasher005": {"leds": [[10, 0], [10, 1], [10, 2]], "rgb": "GRB", "name": "INTELLIGENT DOME 1 (PAD-859: the free light 3 px from it)"}
   },
   "retrofit_lights": {
     "_": "inserts with no table light: a new Light cloned from `clone`, at [x, y] (the led_io place through the fit, vpxlamps.py suggest)",

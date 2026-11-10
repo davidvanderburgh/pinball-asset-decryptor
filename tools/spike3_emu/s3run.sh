@@ -122,7 +122,19 @@ if [ "$BRIDGE" = 1 ]; then
     export PAD_GL_BRIDGE=/run/padgl
     PRELOAD="env LD_PRELOAD=/usr/lib/pad/s3kms.so"
 fi
-echo "[s3run] exec $PROG $* (qemu-aarch64 via binfmt, ${SECS}s cap)"
+# The audio amp talks over /dev/i2c-10 with the Linux i2c-dev ioctls, which
+# stock qemu-user does not translate (it answers ENOTTY and the amp thread dies
+# -> xifo.cpp:72). A patched qemu-aarch64 that understands those ioctls lives at
+# PAD_S3_QEMU (default ~/.pad-s3/qemu-aarch64); run the game through it
+# explicitly, so the shared binfmt interpreter (Spike 2's qemu) stays stock.
+# Absent -> fall back to binfmt. See docs/plans/spike3_emulation.md stage 3.
+QEMU_INTERP=""
+PQ="${PAD_S3_QEMU:-$(dirname "$B")/qemu-aarch64}"
+if [ -x "$PQ" ]; then
+    cp "$PQ" "$R/.pad-qemu" && chmod +x "$R/.pad-qemu" && QEMU_INTERP="/.pad-qemu"
+    echo "[s3run] game runs under the I2C-patched qemu ($PQ)"
+fi
+echo "[s3run] exec $PROG $* (${SECS}s cap)"
 [ "$STRACE" = 1 ] && export QEMU_STRACE=1
 export HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin
 T0=$(date +%s.%N)
@@ -132,7 +144,7 @@ T0=$(date +%s.%N)
 # sweep). `script` gives it a terminal, so it is line-buffered as on the
 # machine's console. stderr stays its own file. TERM at the cap, KILL 5 s on.
 printf '%q ' "$PROG" "$@" > "$SD/.argv"
-script -q -f -e -c "timeout -s TERM -k 5 $SECS chroot $R $PRELOAD $(cat "$SD/.argv") 2> $SD/game.err < /dev/null" "$SD/game.out" > /dev/null < /dev/null   # script reads stdin - which is THIS script (bash -s)
+script -q -f -e -c "timeout -s TERM -k 5 $SECS chroot $R $PRELOAD $QEMU_INTERP $(cat "$SD/.argv") 2> $SD/game.err < /dev/null" "$SD/game.out" > /dev/null < /dev/null   # script reads stdin - which is THIS script (bash -s)
 RC=$?
 # script's own exit is the child's (-e); a dumped core reads 128+signal
 grep -q 'COMMAND_EXIT_CODE="134"' "$SD/game.out" && RC=134

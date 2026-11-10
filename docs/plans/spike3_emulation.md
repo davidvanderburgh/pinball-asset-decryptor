@@ -195,14 +195,39 @@ because the amp's register *writes* fail:
     i2c: failed to write data: Inappropriate ioctl for device   (ENOTTY)
     TAS57XX: failed to write oscillator trim: Inappropriate ioctl for device
 
-**Root cause: qemu-user (8.2.2) has no I2C ioctl translation.** The driver's
-`I2C_RDWR`/`I2C_SMBUS` transfers are nested-pointer ioctls upstream qemu-user
-never implemented, so qemu cannot marshal them to the host adapter at all - a
-perfect host bus would still never be reached. The next step is therefore an
-emulator-level one: teach qemu-user to translate the standard Linux i2c-dev
-ioctls (public `i2c-dev.h` structs, not game reverse-engineering) so the
-transfers reach the host i2c-stub (SMBus) or a null-ACK adapter (raw xfers).
-Only then does the amp init complete and the game advance past the splash.
+**Root cause was two-fold, both now fixed:**
+
+1. **qemu-user (8.2.2) had no I2C ioctl translation.** The driver's `I2C_SLAVE`
+   (and `I2C_RDWR`/`I2C_SMBUS`) ioctls are not in qemu-user's table, so it
+   answered `-ENOTTY` for every one. Fixed by `qemu-i2c-ioctls.patch`
+   (`linux-user/syscall.c` + `ioctls.h` + `syscall_defs.h`): `I2C_SLAVE` and the
+   other by-value ioctls, `I2C_FUNCS`, and nested-pointer handlers for
+   `I2C_RDWR`/`I2C_SMBUS` (guest aarch64 and host x86-64 share the LP64 LE
+   layout, so the handlers only translate the embedded buffer pointers). Built
+   static, staged at `~/.pad-s3/qemu-aarch64`; `s3run.sh` runs the game through
+   it explicitly (PAD_S3_QEMU), leaving the shared binfmt interpreter stock for
+   Spike 2.
+2. **i2c-stub is SMBus-only**, so once the ioctls reached it, the amp's raw
+   `I2C_RDWR` transfers returned `-EOPNOTSUPP`. Fixed by
+   `i2c-stub-master-xfer.patch`: a generic register-store `master_xfer` that
+   ACKs raw transfers (same `words[]` backing as the SMBus path).
+
+With both in place the whole I2C layer works - the `ENOTTY` errors are gone and
+the amp init runs through its I2C sequence (the crash moves from ~123 s to
+~196 s in). It does **not** fully complete yet; the amp init now fails further
+along, for reasons that are no longer I2C:
+
+    failed to write BQ coefficients: No such file or directory   (ENOENT, a file)
+    TAS57XX: oscillator trim failed to lock                      (status readback)
+
+and the amp thread still exits on that failure -> `xifo.cpp:72`. Remaining amp
+work: (a) find/provide the DSP biquad-coefficient source the `dsp.cpp`/
+`dsp_pdi.cpp` path opens (ENOENT), and (b) have the stub report the TAS57xx
+oscillator-lock status bit so the trim "locks". Separately, the **node bus**
+(spidev4.0 / ttyAMA5 / netbridge, the constant `cpuspi` failures) is still
+entirely absent and is the likely next gate on the render loop once the amp is
+non-fatal. The game presents only a black clear-frame (frame 2 uploads the UI
+atlases but never composites them) until it gets past init.
 
 ## What is left for Spike 2 parity (next runs)
 

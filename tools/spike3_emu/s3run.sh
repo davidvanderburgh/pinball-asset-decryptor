@@ -158,6 +158,32 @@ if [ "$BUS" = 1 ]; then
     fi
 fi
 export DEVBINDS RUNBINDS
+# SOUND, only when asked (PAD_S3_AUDIO=1): rig runs are muted. s3alsa.so
+# writes the game's PCM, non-blocking, into $SD/audio/audio.fifo (bound at
+# /run/padaudio inside) and its format into audio.fmt; Spike 2's
+# playaudio.sh plays it - a Windows speaker on WSL, pulse/alsa elsewhere.
+# Started HERE, outside the game's namespaces: inside them there is no
+# network, and the WSL player reaches the Windows speaker over localhost.
+# PAD_S3_AUDIO_PLAYER=0 makes only the fifo, for a caller that reads it.
+AUDPID=""
+pkill -f "playaudio.sh $SD/audio/" 2>/dev/null && echo "[s3run] stopped a leftover player"
+if [ "${PAD_S3_AUDIO:-0}" = 1 ]; then
+    rm -rf "$SD/audio"; mkdir -p "$SD/audio"
+    if [ "${PAD_S3_AUDIO_PLAYER:-1}" = 1 ]; then
+        # the player's TCP hop (WSL -> the Windows speaker, or a relay) gets
+        # a port of this slot's own: Spike 2 rigs hold 45997+slot, so a
+        # Spike 3 slot of the same number would take theirs
+        PAD_AUDIO_PORT=${PAD_AUDIO_PORT:-$((46100 + SLOT))} \
+        setsid bash "$S/../spike2_emu/playaudio.sh" "$SD/audio/audio.fifo" 44100 2 \
+            "$SD/audio/audio.fmt" > "$SD/playaudio.log" 2>&1 &
+        AUDPID=$!
+        echo "[s3run] sound: playaudio.sh (log $SD/playaudio.log)"
+    else
+        mkfifo "$SD/audio/audio.fifo"
+        echo "[s3run] sound: $SD/audio/audio.fifo, no player (PAD_S3_AUDIO_PLAYER=0)"
+    fi
+    export PAD_S3_AUDIO
+fi
 
 # NO NETWORK. The game runs in its own network namespace (-n) holding only a
 # loopback interface: a Spike 3 title carries Stern's connectivity code
@@ -245,6 +271,16 @@ if [ -e "$B/s3vid.so" ]; then
     PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/s3vid.so"
 fi
 [ -n "$PRELOAD" ] && PRELOAD="env LD_PRELOAD=$PRELOAD"
+# SOUND, only when asked (PAD_S3_AUDIO=1): rig runs are muted. s3alsa.so
+# writes the game's PCM, non-blocking, into $SD/audio/audio.fifo (bound at
+# /run/padaudio) and the format into audio.fmt; Spike 2's playaudio.sh plays
+# it (a Windows speaker on WSL, pulse/alsa/CoreAudio elsewhere).
+# PAD_S3_AUDIO_PLAYER=0 makes only the fifo, for a caller that reads it.
+if [ "${PAD_S3_AUDIO:-0}" = 1 ] && [ -n "$PRELOAD" ] && [ -d "$SD/audio" ]; then
+    mkdir -p "$R/run/padaudio"
+    mount --bind "$SD/audio" "$R/run/padaudio" && echo "[s3run] /run/padaudio -> $SD/audio"
+    PRELOAD="$PRELOAD PAD_S3_AUDIO_PLAY=/run/padaudio/audio.fifo PAD_S3_AUDIO_FMT=/run/padaudio/audio.fmt"
+fi
 # The audio amp talks over /dev/i2c-10 with the Linux i2c-dev ioctls, which
 # stock qemu-user does not translate (it answers ENOTTY and the amp thread dies
 # -> xifo.cpp:72). A patched qemu-aarch64 that understands those ioctls lives at
@@ -289,6 +325,10 @@ trap - TERM INT HUP
 if [ -n "$BUSPIDS" ]; then
     kill $BUSPIDS 2>/dev/null; sleep 0.5; kill -9 $BUSPIDS 2>/dev/null
     echo "[s3run] node bus: spi $(grep -c xfer "$SD/spi.log" 2>/dev/null) transfers; bridge: $(grep -c "^# \[node\].*claims" "$SD/bridge.log" 2>/dev/null) node boards identified ($SD/bridge.log)"
+fi
+if [ -n "$AUDPID" ]; then
+    kill -TERM -"$AUDPID" 2>/dev/null; sleep 0.5; kill -9 -"$AUDPID" 2>/dev/null
+    grep -a "\[s3alsa\] playing\|closed:" "$SD/game.err" | tail -2 | sed 's/^/[s3run]   sound: /'
 fi
 if [ -n "$HOSTPID" ]; then
     kill -INT -"$HOSTPID" 2>/dev/null; sleep 1; kill -9 -"$HOSTPID" 2>/dev/null

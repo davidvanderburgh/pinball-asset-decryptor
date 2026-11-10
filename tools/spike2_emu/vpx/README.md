@@ -509,7 +509,12 @@ Four more map fields (PAD-859), all in the generated script:
   controller reports it lit as its colour (VBScript `RGB()`, brightest
   channel at 255; never 0 or 1) and the light takes it as `ColorFull`, so a
   mode's shot arrows show the mode's colour. ROM tables' maps never carry
-  it: their own lamp code takes 0/1.
+  it: their own lamp code takes 0/1. LEDs listed in another channel order
+  carry the order instead, `"rgb": "BGR"` (PAD-1097: Aerosmith names
+  -BLU, -GRN, -RED; Rush "X R"), and the controller reads them back as R, G,
+  B; the LEDs stay as they are, so the light keeps its number.
+  `vpxlamps.py rgb` reads the channels from every LED the build names,
+  placed or not, and writes `true` or the order.
 * `retrofit_lights`: `{"lights": {name: {"leds", "clone", "at"}}}`, a new
   Light cloned from `clone` at `at` (table units) for an insert the table
   has no light for (Bond's rocket ring and right orbit arrow).

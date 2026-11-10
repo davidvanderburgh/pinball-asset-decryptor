@@ -152,3 +152,22 @@ def test_playfield_boards_are_active_low():
                       (8, bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF]))):
         r = br.nodes[nid](bytes([0x11, 0x00, 0x00]), 11)
         assert r[:8] == want
+
+
+def test_short_press_is_queued_until_scanned():
+    """A coin pulse released before the game came to read was lost."""
+    state = {"b": bytes(8)}
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    n = _node(bytes(8))
+    n.inputs = lambda: state["b"]
+    n.registered = time.time() - 60
+    br.nodes[1] = n
+    state["b"] = bytes([0, 0, 0x01, 0, 0, 0, 0, 0])      # coin closes
+    assert br.attention() == 1
+    state["b"] = bytes(8)                                # ...and opens again
+    assert br.attention() == 1
+    scan = lambda: n(bytes([0x11, 0x00, 0x00]), 11)[:8]
+    assert scan() == bytes([0, 0, 0x01, 0, 0, 0, 0, 0])
+    assert br.attention() == 1
+    assert scan() == bytes(8)
+    assert br.attention() == 0

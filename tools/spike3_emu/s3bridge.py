@@ -101,6 +101,7 @@ class Node:
         self.registered = 0       # when its identity was first read (time)
         self.rx = 0               # addressed frames since the last ff probe
         self.active_low = False   # wire bit 0 = closed (set_polarity)
+        self.queue = []           # input states seen, not yet scanned
 
     def __call__(self, data, k):
         """k reply bytes (payload + checksum) for request payload `data`."""
@@ -130,7 +131,11 @@ class Node:
             # A request carrying a byte before its checksum (n=3: `11 key
             # ck`) keys the reply: byte c is XORed with rol8(key, c) (Spike
             # 2's hwshim, measured). The bits are the live ones from nodesw.
-            bits = self.inputs() if self.inputs else bytes(8)
+            # the oldest queued state first (Bridge.attention), else live
+            if self.queue:
+                bits = self.queue.pop(0)
+            else:
+                bits = self.inputs() if self.inputs else bytes(8)
             # nodesw is LOGICAL (1 = closed); an active-low board's wire bit
             # is 0 for a closed switch
             wire = bytes(~b & 0xFF for b in bits) if self.active_low else bits
@@ -197,12 +202,23 @@ class Bridge:
         held the enumerator on that node 46,000 times a minute for ever. In
         the service loop a request is answered by the switch scan (02)."""
         now = time.time()
+        found = 0
         for nid in sorted(self.nodes):
             n = self.nodes[nid]
-            if (n.registered and now - n.registered > 30 and n.inputs
-                    and n.inputs() != n.reported):
-                return nid
-        return 0
+            if not n.inputs:
+                continue
+            # every distinct state seen here (the game polls ~100 times a
+            # second) is queued for its own scan: a 150 ms coin pulse was
+            # often released before the game came to read, and lost
+            cur = n.inputs()
+            last = n.queue[-1] if n.queue else n.reported
+            if cur != last:
+                n.queue.append(cur)
+                if len(n.queue) > 32:
+                    del n.queue[1:-15]
+            if not found and n.queue and n.registered and now - n.registered > 30:
+                found = nid
+        return found
 
     def node_exchange(self, node, data, reply_len):
         """reply_len bytes for a 0x41 exchange (reply_len-1 from the node,
@@ -360,7 +376,17 @@ def main():
     br.attach_inputs(os.path.join(d, "nodesw"))
     if game:
         try:
-            br.set_polarity(s3nodes.devices(s3nodes.Elf(game)))
+            devs = s3nodes.devices(s3nodes.Elf(game))
+            br.set_polarity(devs)
+            # every switch by name, for `s3press.py sw SLOT NAME` (logical
+            # bits in nodesw; node 0 = the CPU board's SPI chain)
+            import json
+            table = {}
+            for name, node, idx, cls in devs:
+                if cls == "switch" and node >= 0:
+                    table.setdefault(name.strip().upper(), [node, idx])
+            with open(os.path.join(d, "switches.json"), "w") as f:
+                json.dump(table, f, indent=0, sort_keys=True)
         except Exception as e:
             log.write("# [polarity] not derived (%s): every board active high\n" % e)
     if game and os.environ.get("PAD_S3_BALLS", "1") != "0":

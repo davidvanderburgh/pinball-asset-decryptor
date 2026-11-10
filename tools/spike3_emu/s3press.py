@@ -18,6 +18,15 @@ each transfer from the slot's spi.in, so writing that file presses a button.
                                        ff reply word; start/flippers are node 1)
     s3press.py set SLOT NODE BIT 0|1   leave a node switch closed (1) or open
     s3press.py drain SLOT              a ball in play drains to the trough
+    s3press.py sw SLOT NAME [MS]       press a switch by the title's own name
+                                       ("START BUTTON", "ACTION BUTTON",
+                                       "LEFT FLIPPER BUTTON", "LEFT SLINGSHOT")
+    s3press.py coin SLOT [N]           N coins, 3 s apart (closer ones are lost)
+
+A GAME (pokemon_le, measured): `coin 4` -> CREDITS 1, `sw START BUTTON`
+-> BALL 1 (s3balls answers the trough eject: the ball reaches the shooter
+lane), `sw ACTION BUTTON` launches (the auto plunger fires), switches
+score, `drain` ends the ball: bonus, then BALL 2.
     s3press.py autoguide SLOT [SECS]   walk it every time it comes up (s3run.sh
                                        --bus --bridge runs this)
 
@@ -221,6 +230,17 @@ def autoguide(slot, secs=0, keep=60):
             time.sleep(6.0)
 
 
+def main_node_press(slot, node, bit, ms):
+    """Close a node switch for MS ms (nodesw is logical: 1 = closed)."""
+    p = os.path.join(BASE % slot, "nodesw")
+    off = 8 * node + bit // 8
+    with open(p, "r+b") as f:
+        f.seek(off); v = f.read(1)[0]
+        f.seek(off); f.write(bytes([v | (1 << (bit % 8))])); f.flush()
+        time.sleep(ms / 1000.0)
+        f.seek(off); f.write(bytes([v & ~(1 << (bit % 8)) & 0xFF])); f.flush()
+
+
 def main():
     a = sys.argv[1:]
     if not a:
@@ -261,6 +281,29 @@ def main():
             f.seek(off); b = f.read(1)[0]
             b = (b | (1 << (bit % 8))) if v else (b & ~(1 << (bit % 8)) & 0xFF)
             f.seek(off); f.write(bytes([b])); f.flush()
+    elif cmd in ("sw", "coin"):
+        # by NAME from the title's own device tables (s3bridge writes
+        # DIR/switches.json): `sw SLOT "START BUTTON" [MS]`, `coin SLOT [N]`
+        import json
+        table = json.load(open(os.path.join(BASE % slot, "switches.json")))
+        if cmd == "coin":
+            name, count, ms = "LEFT COIN", int(a[2]) if len(a) > 2 else 1, 150
+        else:
+            name, count, ms = a[2].strip().upper(), 1, int(a[3]) if len(a) > 3 else 300
+        if name not in table:
+            print("no switch named %r (%d known)" % (name, len(table)))
+            return 1
+        node, idx = table[name]
+        for k in range(count):
+            if k:
+                # coins closer than ~3 s apart are not all counted (pokemon_le:
+                # 4 coins 2 s apart made 1/4 credit, 3 s apart a whole one)
+                time.sleep(3.0)
+            if node == 0:
+                press(slot, idx - 8, ms)          # CPU board: the SPI chain
+            else:
+                main_node_press(slot, node, idx, ms)
+        return 0
     elif cmd == "drain":
         # a ball in play drains: the lowest-numbered OPEN trough position
         # closes (s3balls.py's stack; balls.json says which switches)

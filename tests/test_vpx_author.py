@@ -415,3 +415,21 @@ def test_spike1_starter_and_markdown_say_the_platform(A, tmp_path, monkeypatch):
     sp2 = {"title": "x", "platform": "spike2", "binary": "", "image": "", "image_size": None, "have": {},
            "positions": False, "switches": [], "coils": [], "inserts": []}
     assert "platform" not in A.starter_map(sp2, "t.vpx")
+
+
+def test_script_brain_reads_what_the_script_calls_not_what_it_carries(A):
+    """PAD-1095: a scripted original that carries its own copy of controller.vbs
+    (its loaders name VPinMAME.Controller) is still scripted; FlexDMD's
+    GameName and a commented-out LoadVPM say nothing; a real ROM table's
+    LoadVPM call or Controller.GameName does."""
+    carried = ("Sub Table1_Init\n\tLoadEM\nEnd Sub\n"
+               "Sub LoadVPM(VPMver, VBSfile, VBSver)\n\tLoadController(\"VPM\")\nEnd Sub\n"
+               "Sub LoadVPinMAME\n\tSet Controller = CreateObject(\"VPinMAME.Controller\")\nEnd Sub\n")
+    assert A.script_brain(carried) == "scripted"
+    assert A.script_brain("Sub LoadFlexDMD\n\tFlexDMD.GameName = cGameName\nEnd Sub\n") == "scripted"
+    assert A.script_brain("' LoadVPM \"01\", \"sega.vbs\", 3.2\n'Set Controller = CreateObject(\"VPinMAME.Controller\")\n"
+                          "Rem LoadVPM again\nx = \"it's\" ' LoadVPM\n") == "scripted"
+    assert A.script_brain("LoadVPM \"03060000\", \"sam.VBS\", 3.10\n") == "rom"
+    assert A.script_brain("With Controller\n\t.GameName = cGameName\nEnd With\n") == "rom"
+    assert A.script_brain("Controller.GameName = \"x\"\n") == "rom"
+    assert A.script_brain(carried + "Set Controller = CreateObject(\"PAD.Controller\")\n") == "pad"

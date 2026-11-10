@@ -1,0 +1,1440 @@
+{
+  "_": [
+    "munsters_pro on Allknowing2012's 'Munsters (Original 2020)' 1.05 (VPUniverse 10068;",
+    "cGameName mmunsters), a scripted original on the same framework as his Aerosmith:",
+    "vpxshadow.py keeps its script as a shadow game and hands the ball to the real game.",
+    "The Pro, not the LE: the table has no lower playfield (the LE's second flippers,",
+    "trough, VUK and ramp), no moving Herman and no Herman 2-bank targets (PAD-1095).",
+    "The author named his switches by Stern's manual numbers (swNN = switch_list's `num`",
+    "NN), so every switch below is matched by NAME; sw28 and sw31 are the Walls behind",
+    "the Dragula and Lily targets. Ids: the RIG's switch_list.txt for munsters_pro; coils",
+    "through group_node.txt (group 6 = node 8, group 7 = node 9).",
+    "Mechs: the Dragula car is a Plunger (CarPlunger) the DRAGULA KICKER coil fires over",
+    "sw29; the UP POST is the DropStop wall; TRAP DOOR-SPOT is SpotWall (RaiseSpot /",
+    "DropSpot); MAGNET is mHMagnet; GRANDPA EJECT is the ScoopEject saucer.",
+    "PinUP: the table creates PinUP Player in an On Error block but reads getroot and",
+    "GetTimes(objFs.GetFolder(...)) outside it, so PadNoPuP stands in (pup_stub) and the",
+    "GetTimes line is neutered. Lamps: the inserts by what the script does with them",
+    "(each group's lighting order: Dragula L32 first, Lily L40, Spot L106/L89, Herman",
+    "L58, Raven L95) and the rest by place; GUESS = wants a look at the machine.",
+    "quiet_subs: its light shows, GI and lane change, which the machine does itself, and",
+    "the triggers that would move the up post or light the ball save behind its back."
+  ],
+  "title": "munsters_pro",
+  "model": "Pro",
+  "preferred": true,
+  "detect": [
+    "Allknowing2012",
+    "mmunsters"
+  ],
+  "output": "Munsters (Original 2020) 1.05 (PAD).vpx",
+  "table": {
+    "name": "Munsters (Original 2020) 1.05",
+    "by": "Allknowing2012",
+    "where": "VPUniverse",
+    "url": "https://vpuniverse.com/files/file/10068-munsters-original-2020-105vpx/"
+  },
+  "solenoid_max": 68,
+  "game_on": {
+    "number": 40,
+    "coils": [
+      [
+        8,
+        0
+      ],
+      [
+        8,
+        5
+      ]
+    ]
+  },
+  "cabinet": {
+    "start": 1038,
+    "launch": 1034,
+    "launch_key": "LockBarKey",
+    "tilt": 1040,
+    "slam": 1047,
+    "left_flipper": 1061,
+    "right_flipper": 1060,
+    "coin": 1041,
+    "coin_door_interlock": 1033
+  },
+  "keys_skip_orig": [
+    "StartGameKey",
+    "AddCreditKey",
+    "AddCreditKey2",
+    "LockBarKey"
+  ],
+  "switches": {
+    "_": "object -> Spike 2 switch id; event hit (pulse), hold (Hit/UnHit), spin, slingshot",
+    "sw1": {
+      "id": 53,
+      "event": "hit",
+      "name": "LEFT OUTLANE"
+    },
+    "sw2": {
+      "id": 54,
+      "event": "hit",
+      "name": "LEFT RETURN LANE-LEFT"
+    },
+    "sw3": {
+      "id": 57,
+      "event": "hit",
+      "name": "LEFT RETURN LANE-RIGHT"
+    },
+    "sw5": {
+      "id": 55,
+      "event": "hit",
+      "name": "RIGHT RETURN LANE"
+    },
+    "sw6": {
+      "id": 56,
+      "event": "hit",
+      "name": "RIGHT OUTLANE"
+    },
+    "sw28": {
+      "id": 58,
+      "event": "hit",
+      "name": "DRAGULA TARGET (X2)"
+    },
+    "sw29": {
+      "id": 59,
+      "event": "hold",
+      "name": "DRAGULA KICKER"
+    },
+    "sw31": {
+      "id": 51,
+      "event": "hit",
+      "name": "LILY TARGET (X2)"
+    },
+    "sw32": {
+      "id": 48,
+      "event": "hit",
+      "name": "SHOOTER LANE-UPPER"
+    },
+    "sw37": {
+      "id": 80,
+      "event": "hit",
+      "name": "TARGET 1"
+    },
+    "sw38": {
+      "id": 81,
+      "event": "hit",
+      "name": "TARGET 2"
+    },
+    "sw40": {
+      "id": 49,
+      "event": "hit",
+      "name": "TARGET 3"
+    },
+    "sw41": {
+      "id": 50,
+      "event": "hit",
+      "name": "TARGET 4"
+    },
+    "sw39": {
+      "id": 73,
+      "event": "hit",
+      "name": "KITTY TARGET"
+    },
+    "sw45": {
+      "id": 82,
+      "event": "hit",
+      "name": "HERMAN OPTO"
+    },
+    "sw53": {
+      "id": 88,
+      "event": "hit",
+      "name": "LEFT TOP LANE"
+    },
+    "sw54": {
+      "id": 78,
+      "event": "hit",
+      "name": "RIGHT TOP LANE"
+    },
+    "sw64": {
+      "id": 83,
+      "event": "hit",
+      "name": "LEFT ORBIT"
+    },
+    "sw65": {
+      "id": 84,
+      "event": "hit",
+      "name": "RIGHT ORBIT"
+    },
+    "sw68": {
+      "id": 76,
+      "event": "hit",
+      "name": "SPOT OPTO"
+    },
+    "sw69": {
+      "id": 77,
+      "event": "hit",
+      "name": "LEFT RAMP MADE"
+    },
+    "sw70": {
+      "id": 74,
+      "event": "hit",
+      "name": "RIGHT RAMP MADE"
+    },
+    "Spinner": {
+      "id": 79,
+      "event": "spin",
+      "name": "LEFT SPINNER"
+    },
+    "Bumper002": {
+      "id": 85,
+      "event": "hit",
+      "name": "LEFT POP BUMPER"
+    },
+    "Bumper001": {
+      "id": 86,
+      "event": "hit",
+      "name": "RIGHT POP BUMPER"
+    },
+    "Bumper003": {
+      "id": 87,
+      "event": "hit",
+      "name": "BOTTOM POP BUMPER"
+    },
+    "LeftSlingShot": {
+      "id": 64,
+      "event": "slingshot",
+      "name": "LEFT SLINGSHOT"
+    },
+    "RightSlingShot": {
+      "id": 63,
+      "event": "slingshot",
+      "name": "RIGHT SLINGSHOT"
+    }
+  },
+  "plunger": {
+    "lane_trigger": "swPlungerRest",
+    "lane_switch": 62,
+    "autoplunge": "plungerIM"
+  },
+  "trough": {
+    "release": "BallRelease",
+    "drain": "Drain",
+    "switches": [
+      71,
+      70,
+      69,
+      68,
+      67,
+      66,
+      72
+    ],
+    "balls": 6,
+    "kick": [
+      90,
+      4
+    ]
+  },
+  "saucers": {
+    "_": "kicker -> the switch it holds and how the coil kicks it out (dir, power[, kickz])",
+    "ScoopEject": {
+      "switch": 75,
+      "dir": 200,
+      "power": 8,
+      "name": "GRANDPA EJECT"
+    }
+  },
+  "solenoids": {
+    "1": {
+      "coil": [
+        8,
+        1
+      ],
+      "name": "TROUGH",
+      "callback": "bsTrough.SolOut"
+    },
+    "2": {
+      "coil": [
+        8,
+        4
+      ],
+      "name": "AUTO PLUNGER",
+      "callback": "PadAutoPlunge"
+    },
+    "3": {
+      "coil": [
+        8,
+        8
+      ],
+      "name": "DRAGULA KICKER",
+      "callback": "PadDragula"
+    },
+    "4": {
+      "coil": [
+        9,
+        1
+      ],
+      "name": "GRANDPA EJECT",
+      "callback": "bsScoopEject.SolOut"
+    },
+    "5": {
+      "coil": [
+        9,
+        0
+      ],
+      "name": "UP POST",
+      "callback": "PadUpPost"
+    },
+    "6": {
+      "coil": [
+        9,
+        6
+      ],
+      "name": "TRAP DOOR-SPOT",
+      "callback": "PadSpotDoor"
+    },
+    "7": {
+      "coil": [
+        9,
+        7
+      ],
+      "name": "MAGNET",
+      "callback": "PadMagnet"
+    },
+    "9": {
+      "coil": [
+        8,
+        2
+      ],
+      "name": "RIGHT SLINGSHOT",
+      "callback": null
+    },
+    "10": {
+      "coil": [
+        8,
+        3
+      ],
+      "name": "LEFT SLINGSHOT",
+      "callback": null
+    },
+    "11": {
+      "coil": [
+        9,
+        2
+      ],
+      "name": "LEFT POP BUMPER",
+      "callback": null
+    },
+    "12": {
+      "coil": [
+        9,
+        3
+      ],
+      "name": "RIGHT POP BUMPER",
+      "callback": null
+    },
+    "13": {
+      "coil": [
+        9,
+        4
+      ],
+      "name": "BOTTOM POP BUMPER",
+      "callback": null
+    },
+    "46": {
+      "coil": [
+        8,
+        0
+      ],
+      "name": "RIGHT FLIPPER",
+      "callback": null
+    },
+    "48": {
+      "coil": [
+        8,
+        5
+      ],
+      "name": "LEFT FLIPPER",
+      "callback": null
+    }
+  },
+  "pup_stub": true,
+  "neuter": [
+    "GetTimes(objFs.GetFolder(Folder))",
+    "BallRelease.CreateSizedball",
+    "BallRelease.Kick",
+    "ScoopEject.Kick",
+    "PlungerIM.AutoFire"
+  ],
+  "extra_vbs": "\n' ---- PAD: the Munsters' mechs (munsters_pro.shadow.json)\n' Dragula: the ball rests on sw29 in front of the car, which is a Plunger\n' (CarPlunger); the game's DRAGULA KICKER coil fires it.\nSub PadDragula(e)\n\tIf e Then\n\t\tCarPlunger.Pullback\n\t\tCarPlunger.Fire\n\t\tPlaySoundAt \"fx_plungerpull\", CarPlunger\n\tEnd If\nEnd Sub\n' the up post at the top of the loop (the table's DropStop wall)\nSub PadUpPost(e)\n\tDropStop.Collidable = e\n\tDropStop.IsDropped = Not e\nEnd Sub\n' Spot's trap door: the coil opens it (the table's RaiseSpot: the door\n' shown open, the wall that turns the ball onto Spot's ramp up)\nSub PadSpotDoor(e)\n\tIf e Then\n\t\tRaiseSpot\n\tElse\n\t\tDropSpot\n\tEnd If\nEnd Sub\n' Herman's magnet (the table's cvpmMagnet on HMagnet)\nSub PadMagnet(e)\n\tmHMagnet.MagnetOn = e\nEnd Sub\n",
+  "retrofit_timers": {
+    "PinMAMETimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 1
+    },
+    "PadTestTimer": {
+      "clone": "PulseTimer",
+      "interval_ms": 100
+    }
+  },
+  "lamps": {
+    "_": "table light -> Spike 2 LEDs [node, index] (several = an RGB insert: lit when any is); by what the script does with the light (its mode subs, the order a group lights in) and by place; GUESS = placed by place, not seen on the game",
+    "L25": {
+      "leds": [
+        [
+          8,
+          3
+        ]
+      ],
+      "name": "SHOOT AGAIN"
+    },
+    "L14": {
+      "leds": [
+        [
+          8,
+          4
+        ]
+      ],
+      "name": "RIGHT RETURN LANE"
+    },
+    "L15": {
+      "leds": [
+        [
+          8,
+          5
+        ]
+      ],
+      "name": "RIGHT OUTLANE"
+    },
+    "L20": {
+      "leds": [
+        [
+          8,
+          8
+        ]
+      ],
+      "name": "LILY COMPLETE"
+    },
+    "L17": {
+      "leds": [
+        [
+          8,
+          9
+        ]
+      ],
+      "name": "MUNSTER MADNESS"
+    },
+    "L18": {
+      "leds": [
+        [
+          8,
+          10
+        ]
+      ],
+      "name": "HERMAN COMPLETE"
+    },
+    "L21": {
+      "leds": [
+        [
+          8,
+          11
+        ]
+      ],
+      "name": "SPOT COMPLETE"
+    },
+    "L23": {
+      "leds": [
+        [
+          8,
+          12
+        ]
+      ],
+      "name": "2X"
+    },
+    "L24": {
+      "leds": [
+        [
+          8,
+          13
+        ]
+      ],
+      "name": "3X"
+    },
+    "L22": {
+      "leds": [
+        [
+          8,
+          14
+        ]
+      ],
+      "name": "GRANDPA COMPLETE"
+    },
+    "L19": {
+      "leds": [
+        [
+          8,
+          15
+        ]
+      ],
+      "name": "RAVEN COMPLETE"
+    },
+    "L30": {
+      "leds": [
+        [
+          8,
+          16
+        ]
+      ],
+      "name": "SUPER JACKPOT"
+    },
+    "L32": {
+      "leds": [
+        [
+          8,
+          17
+        ]
+      ],
+      "name": "(D)RAGULA"
+    },
+    "L33": {
+      "leds": [
+        [
+          8,
+          18
+        ]
+      ],
+      "name": "D(R)AGULA"
+    },
+    "L34": {
+      "leds": [
+        [
+          8,
+          19
+        ]
+      ],
+      "name": "DR(A)GULA"
+    },
+    "L35": {
+      "leds": [
+        [
+          8,
+          20
+        ]
+      ],
+      "name": "DRA(G)ULA"
+    },
+    "L36": {
+      "leds": [
+        [
+          8,
+          21
+        ]
+      ],
+      "name": "DRAG(U)LA"
+    },
+    "L37": {
+      "leds": [
+        [
+          8,
+          22
+        ]
+      ],
+      "name": "DRAGU(L)A"
+    },
+    "L38": {
+      "leds": [
+        [
+          8,
+          23
+        ]
+      ],
+      "name": "DRAGUL(A)"
+    },
+    "L28": {
+      "leds": [
+        [
+          8,
+          24
+        ]
+      ],
+      "name": "ADD-A-BALL"
+    },
+    "L78": {
+      "leds": [
+        [
+          8,
+          25
+        ]
+      ],
+      "name": "TARGET 1"
+    },
+    "L46": {
+      "leds": [
+        [
+          8,
+          26
+        ]
+      ],
+      "name": "EDDIE LEFT ORBIT"
+    },
+    "L47": {
+      "leds": [
+        [
+          8,
+          27
+        ],
+        [
+          8,
+          28
+        ],
+        [
+          8,
+          29
+        ]
+      ],
+      "name": "LEFT ORBIT JACKPOT"
+    },
+    "L29": {
+      "leds": [
+        [
+          8,
+          30
+        ]
+      ],
+      "name": "5X DRAGULA"
+    },
+    "L11": {
+      "leds": [
+        [
+          8,
+          31
+        ]
+      ],
+      "name": "LEFT OUTLANE"
+    },
+    "L12": {
+      "leds": [
+        [
+          8,
+          32
+        ]
+      ],
+      "name": "LEFT RETURN LANE-LEFT"
+    },
+    "L13": {
+      "leds": [
+        [
+          8,
+          33
+        ]
+      ],
+      "name": "LEFT RETURN LANE-RIGHT"
+    },
+    "Flasherlight1": {
+      "leds": [
+        [
+          8,
+          48
+        ]
+      ],
+      "name": "HERMAN SPOTLIGHT FLASH (GUESS: the flasher above Herman)"
+    },
+    "SpotLight": {
+      "leds": [
+        [
+          8,
+          49
+        ]
+      ],
+      "name": "SPOT RAMP FLASH (GUESS: the light at Spot's door)"
+    },
+    "L89": {
+      "leds": [
+        [
+          8,
+          50
+        ]
+      ],
+      "name": "(S)POT BACKPANEL"
+    },
+    "L90": {
+      "leds": [
+        [
+          8,
+          51
+        ]
+      ],
+      "name": "S(P)OT BACKPANEL"
+    },
+    "L91": {
+      "leds": [
+        [
+          8,
+          52
+        ]
+      ],
+      "name": "SP(O)T BACKPANEL"
+    },
+    "L92": {
+      "leds": [
+        [
+          8,
+          53
+        ]
+      ],
+      "name": "SPO(T) BACKPANEL"
+    },
+    "L86": {
+      "leds": [
+        [
+          8,
+          54
+        ]
+      ],
+      "name": "TOP LANE LEFT"
+    },
+    "L87": {
+      "leds": [
+        [
+          8,
+          55
+        ]
+      ],
+      "name": "TOP LANE RIGHT"
+    },
+    "Flasherlight4": {
+      "leds": [
+        [
+          9,
+          3
+        ]
+      ],
+      "name": "DRAGULA FLASH (GUESS: the left flasher)"
+    },
+    "Flasherlight3": {
+      "leds": [
+        [
+          9,
+          4
+        ]
+      ],
+      "name": "LILY FLASH (GUESS: the right flasher)"
+    },
+    "Flasherlight5": {
+      "leds": [
+        [
+          9,
+          5
+        ]
+      ],
+      "name": "HERMAN FLASH (GUESS: the flasher in front of Herman)"
+    },
+    "Flasherlight2": {
+      "leds": [
+        [
+          9,
+          6
+        ]
+      ],
+      "name": "GRANDPA FLASH (GUESS: the flasher by the eject)"
+    },
+    "L43": {
+      "leds": [
+        [
+          9,
+          8
+        ]
+      ],
+      "name": "LIL(Y)"
+    },
+    "L42": {
+      "leds": [
+        [
+          9,
+          9
+        ]
+      ],
+      "name": "LI(L)Y"
+    },
+    "L41": {
+      "leds": [
+        [
+          9,
+          10
+        ]
+      ],
+      "name": "L(I)LY"
+    },
+    "L40": {
+      "leds": [
+        [
+          9,
+          11
+        ]
+      ],
+      "name": "(L)ILY"
+    },
+    "B2L1": {
+      "leds": [
+        [
+          9,
+          19
+        ]
+      ],
+      "name": "LEFT POP FLASH"
+    },
+    "B2L2": {
+      "leds": [
+        [
+          9,
+          19
+        ]
+      ],
+      "name": "LEFT POP FLASH"
+    },
+    "F168": {
+      "leds": [
+        [
+          9,
+          19
+        ]
+      ],
+      "name": "LEFT POP FLASH"
+    },
+    "B1L1": {
+      "leds": [
+        [
+          9,
+          20
+        ]
+      ],
+      "name": "RIGHT POP FLASH"
+    },
+    "B1L2": {
+      "leds": [
+        [
+          9,
+          20
+        ]
+      ],
+      "name": "RIGHT POP FLASH"
+    },
+    "F169": {
+      "leds": [
+        [
+          9,
+          20
+        ]
+      ],
+      "name": "RIGHT POP FLASH"
+    },
+    "B3L1": {
+      "leds": [
+        [
+          9,
+          21
+        ]
+      ],
+      "name": "BOTTOM POP FLASH"
+    },
+    "B3L2": {
+      "leds": [
+        [
+          9,
+          21
+        ]
+      ],
+      "name": "BOTTOM POP FLASH"
+    },
+    "F170": {
+      "leds": [
+        [
+          9,
+          21
+        ]
+      ],
+      "name": "BOTTOM POP FLASH"
+    },
+    "F171": {
+      "leds": [
+        [
+          9,
+          22
+        ]
+      ],
+      "name": "POP FLASH"
+    },
+    "L80": {
+      "leds": [
+        [
+          9,
+          23
+        ]
+      ],
+      "name": "KITTY"
+    },
+    "F164": {
+      "leds": [
+        [
+          9,
+          24
+        ]
+      ],
+      "name": "GRANDPA EJECT FLASH"
+    },
+    "L73": {
+      "leds": [
+        [
+          9,
+          27
+        ],
+        [
+          9,
+          28
+        ],
+        [
+          9,
+          29
+        ]
+      ],
+      "name": "RIGHT ORBIT JACKPOT"
+    },
+    "L72": {
+      "leds": [
+        [
+          9,
+          30
+        ]
+      ],
+      "name": "EDDIE RIGHT ORBIT"
+    },
+    "L82": {
+      "leds": [
+        [
+          9,
+          31
+        ]
+      ],
+      "name": "TARGET 4"
+    },
+    "L102": {
+      "leds": [
+        [
+          9,
+          32
+        ]
+      ],
+      "name": "RIGHT RAMP MARILYN"
+    },
+    "L101": {
+      "leds": [
+        [
+          9,
+          33
+        ]
+      ],
+      "name": "RIGHT RAMP SPOT"
+    },
+    "L67": {
+      "leds": [
+        [
+          9,
+          34
+        ],
+        [
+          9,
+          35
+        ],
+        [
+          9,
+          36
+        ]
+      ],
+      "name": "RIGHT RAMP JACKPOT"
+    },
+    "L81": {
+      "leds": [
+        [
+          9,
+          37
+        ]
+      ],
+      "name": "TARGET 3"
+    },
+    "L64": {
+      "leds": [
+        [
+          9,
+          38
+        ]
+      ],
+      "name": "MUNSTER MADNESS ARROW"
+    },
+    "L104": {
+      "leds": [
+        [
+          9,
+          39
+        ]
+      ],
+      "name": "ADD TIME"
+    },
+    "L63": {
+      "leds": [
+        [
+          9,
+          40
+        ]
+      ],
+      "name": "GRANDPA'S LAB"
+    },
+    "L62": {
+      "leds": [
+        [
+          9,
+          41
+        ]
+      ],
+      "name": "EXTRA BALL"
+    },
+    "L103": {
+      "leds": [
+        [
+          9,
+          42
+        ]
+      ],
+      "name": "MYSTERY"
+    },
+    "L106": {
+      "leds": [
+        [
+          9,
+          43
+        ]
+      ],
+      "name": "(S)POT PLAYFIELD"
+    },
+    "L107": {
+      "leds": [
+        [
+          9,
+          44
+        ]
+      ],
+      "name": "S(P)OT PLAYFIELD"
+    },
+    "L108": {
+      "leds": [
+        [
+          9,
+          45
+        ]
+      ],
+      "name": "SP(O)T PLAYFIELD"
+    },
+    "L109": {
+      "leds": [
+        [
+          9,
+          46
+        ]
+      ],
+      "name": "SPO(T) PLAYFIELD"
+    },
+    "L56": {
+      "leds": [
+        [
+          9,
+          50
+        ],
+        [
+          9,
+          51
+        ],
+        [
+          9,
+          52
+        ]
+      ],
+      "name": "HERMAN JACKPOT (GUESS: the insert in front of Herman)"
+    },
+    "L58": {
+      "leds": [
+        [
+          9,
+          53
+        ]
+      ],
+      "name": "HERMAN 1"
+    },
+    "L59": {
+      "leds": [
+        [
+          9,
+          54
+        ]
+      ],
+      "name": "HERMAN 2"
+    },
+    "L60": {
+      "leds": [
+        [
+          9,
+          55
+        ]
+      ],
+      "name": "HERMAN 3"
+    },
+    "L79": {
+      "leds": [
+        [
+          9,
+          56
+        ]
+      ],
+      "name": "TARGET 2"
+    },
+    "L51": {
+      "leds": [
+        [
+          9,
+          57
+        ],
+        [
+          9,
+          58
+        ],
+        [
+          9,
+          59
+        ]
+      ],
+      "name": "LEFT RAMP JACKPOT"
+    },
+    "L98": {
+      "leds": [
+        [
+          9,
+          60
+        ]
+      ],
+      "name": "LEFT RAMP SPOT"
+    },
+    "L96": {
+      "leds": [
+        [
+          9,
+          61
+        ]
+      ],
+      "name": "ADV RAVEN 2"
+    },
+    "L95": {
+      "leds": [
+        [
+          9,
+          62
+        ]
+      ],
+      "name": "ADV RAVEN 1"
+    },
+    "L97": {
+      "leds": [
+        [
+          9,
+          63
+        ]
+      ],
+      "name": "ADV RAVEN 3"
+    },
+    "GIW002": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW003": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW004": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW005": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW006": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW007": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW008": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW009": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW010": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIG001R": {
+      "leds": [
+        [
+          9,
+          1
+        ]
+      ],
+      "name": "TOP GI-GRN"
+    },
+    "GIG002R": {
+      "leds": [
+        [
+          9,
+          1
+        ]
+      ],
+      "name": "TOP GI-GRN"
+    },
+    "GIG005R": {
+      "leds": [
+        [
+          9,
+          1
+        ]
+      ],
+      "name": "TOP GI-GRN"
+    },
+    "GIGR002": {
+      "leds": [
+        [
+          8,
+          1
+        ]
+      ],
+      "name": "BOTTOM GI-GRN"
+    },
+    "GIW012": {
+      "leds": [
+        [
+          8,
+          0
+        ]
+      ],
+      "name": "BOTTOM GI-WHT"
+    },
+    "GIW013": {
+      "leds": [
+        [
+          8,
+          0
+        ]
+      ],
+      "name": "BOTTOM GI-WHT"
+    },
+    "GIW015": {
+      "leds": [
+        [
+          8,
+          0
+        ]
+      ],
+      "name": "BOTTOM GI-WHT"
+    },
+    "GIW016": {
+      "leds": [
+        [
+          8,
+          0
+        ]
+      ],
+      "name": "BOTTOM GI-WHT"
+    },
+    "GIW017": {
+      "leds": [
+        [
+          8,
+          0
+        ]
+      ],
+      "name": "BOTTOM GI-WHT"
+    },
+    "GIW018": {
+      "leds": [
+        [
+          8,
+          0
+        ]
+      ],
+      "name": "BOTTOM GI-WHT"
+    },
+    "GIW019": {
+      "leds": [
+        [
+          8,
+          0
+        ]
+      ],
+      "name": "BOTTOM GI-WHT"
+    },
+    "GIW020": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIW021": {
+      "leds": [
+        [
+          9,
+          0
+        ]
+      ],
+      "name": "TOP GI-WHT"
+    },
+    "GIG006R": {
+      "leds": [
+        [
+          9,
+          1
+        ]
+      ],
+      "name": "TOP GI-GRN"
+    },
+    "GIW014": {
+      "leds": [
+        [
+          8,
+          0
+        ]
+      ],
+      "name": "BOTTOM GI-WHT"
+    },
+    "GIGR005": {
+      "leds": [
+        [
+          8,
+          1
+        ]
+      ],
+      "name": "BOTTOM GI-GRN"
+    },
+    "GIGR004": {
+      "leds": [
+        [
+          8,
+          1
+        ]
+      ],
+      "name": "BOTTOM GI-GRN"
+    },
+    "GIGR006": {
+      "leds": [
+        [
+          8,
+          1
+        ]
+      ],
+      "name": "BOTTOM GI-GRN"
+    },
+    "GIGR023": {
+      "leds": [
+        [
+          8,
+          1
+        ]
+      ],
+      "name": "BOTTOM GI-GRN"
+    },
+    "GIGR007": {
+      "leds": [
+        [
+          8,
+          1
+        ]
+      ],
+      "name": "BOTTOM GI-GRN"
+    },
+    "GIGR001": {
+      "leds": [
+        [
+          8,
+          1
+        ]
+      ],
+      "name": "BOTTOM GI-GRN"
+    }
+  },
+  "quiet_subs": [
+    "StartLightSeq",
+    "StartRainbow",
+    "StartRainbow2",
+    "GiEffect",
+    "LightEffect",
+    "FlashEffect",
+    "GIUpdateTimer_Timer",
+    "GiOn",
+    "GiOff",
+    "GiAllOff",
+    "RotateLaneLightsLeft",
+    "RotateLaneLightsRight",
+    "AddScore",
+    "sw_shortplunge_Hit",
+    "ballsavestarttrigger_hit"
+  ],
+  "orig_hits": false,
+  "orig_keep": [
+    "LeftSlingShot",
+    "RightSlingShot"
+  ]
+}

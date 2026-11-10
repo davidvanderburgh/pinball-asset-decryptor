@@ -32,8 +32,10 @@ LIBC=$ROOTFS/lib
 
 # the video ring's slot: Spike 3 clips run to 1940x1100 (padvid.h; s3vidhost.py matches)
 VIDMAX="-DPADVID_MAX_W=2048 -DPADVID_MAX_H=1152"
+# GL programs: Godot 4 builds well past the Spike 2 bridge's 128 (glbridge.c/padglhost.c must agree)
+GLMAX="-DMAXPROG=1024"
 CF="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -Wall -Werror=implicit-function-declaration"
-"$CC" $CF -nostdlib -I"$S2" -Wl,-soname,libGLESv2.so.2 -o "$OUT/libGLESv2.so.2" \
+"$CC" $CF $GLMAX -nostdlib -I"$S2" -Wl,-soname,libGLESv2.so.2 -o "$OUT/libGLESv2.so.2" \
     "$S/s3gl.c" -L"$LIBC" -l:libc.so.6
 "$CC" $CF -nostdlib -Wl,-soname,libEGL.so.1 -o "$OUT/libEGL.so.1" \
     "$S/s3egl.c" -L"$LIBC" -l:libc.so.6 "$OUT/libGLESv2.so.2"
@@ -58,7 +60,7 @@ fi
 "$CC" $CF $VIDMAX -I"$FFINC" -I"$S2" -Wl,-soname,s3vid.so -o "$OUT/s3vid.so" "$S/s3vid.c" -ldl -lpthread
 gcc -std=gnu17 -O2 -Wall -o "$OUT/s3spid" "$S/s3spid.c" $(pkg-config --cflags --libs fuse3)
 
-gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration $VIDMAX -I"$S2" \
+gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration $VIDMAX $GLMAX -I"$S2" \
     -o "$OUT/padglhost" "$S2/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
 for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3vid.so s3spid padglhost; do

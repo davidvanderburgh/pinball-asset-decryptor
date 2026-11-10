@@ -160,7 +160,14 @@ static void emit_u(unsigned int op, const unsigned int *v, unsigned int count)
 { emit(op, v, count * 4u, 0, 0); }
 
 /* ---------------- guest-side shadow state ---------------- */
+/* Overridable at build time, and padglhost.c must agree (the uniform and
+ * attribute tokens are program * slots): the Spike 3 build (s3build.sh) uses
+ * 1024, because Godot 4 builds well past 128 programs and every uniform of a
+ * program at or above the limit went unset - its video pass is program 144,
+ * whose colour transform stayed 0 and drew the video black (PAD-1090). */
+#ifndef MAXPROG
 #define MAXPROG 128
+#endif
 #define MAXUNI  32
 
 typedef struct { char name[40]; } Uni;

@@ -234,3 +234,24 @@ def test_end_stop_motor_runs_to_its_input(monkeypatch):
     time.sleep(0.1)
     assert send(bytes([0x52, 0x02, 0xE0]), 6)[2] == 0x20        # arrived
     assert sw[8 * 9 + 3] & 0x01                                  # input 24 made
+
+
+def test_netbridge_crc_range_and_version_come_from_the_card(tmp_path):
+    """The CRC runs to the end of the image's first flash segment and the
+    version is the card's version.txt: star_wars_2025_pro ships 0.97.0, a
+    shorter image, and Pokemon's fixed range froze it on the boot logo."""
+    import struct as _s
+    import zlib
+    flash = bytes(range(256)) * 0x40                       # 0x4000 bytes at 0x10000000
+    ph = _s.pack("<8I", 1, 0x100, 0x10000000, 0x10000000, len(flash), len(flash), 5, 0x1000)
+    hdr = bytearray(0x34)
+    hdr[0:4] = b"\x7fELF"
+    _s.pack_into("<I", hdr, 0x1C, 0x34)                   # e_phoff
+    _s.pack_into("<HH", hdr, 0x2A, 32, 1)                 # e_phentsize, e_phnum
+    img = bytes(hdr) + ph
+    img += bytes(0x100 - len(img)) + flash
+    elf = tmp_path / "netbridge.elf"
+    elf.write_bytes(img)
+    (tmp_path / "version.txt").write_text("0.97.0\n")
+    assert s3bridge.flash_crc(str(elf)) == zlib.crc32(flash[0x100:]) & 0xFFFFFFFF
+    assert s3bridge.fw_version(str(elf)) == (0, 97, 0)

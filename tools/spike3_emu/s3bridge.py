@@ -57,15 +57,34 @@ FLASH = (0x10000100, 0x10012B40)  # the range HOST_Update's 0x30 handler CRCs
 
 
 def flash_crc(elf_path):
-    """CRC32 the board computes over its own flash, from its ELF image."""
+    """CRC32 the board computes over its own flash, from its ELF image: from
+    FLASH[0] (past the 256-byte boot stage) to the END OF THE IMAGE'S FIRST
+    FLASH SEGMENT. That end is per build - 0x10012b40 on netbridge 0.98.4
+    (pokemon_le's FLASH[1]), 0x10012bec on 0.98.6 (fallout_le), 0x10012110
+    on 0.97.0 (star_wars_2025_pro): with Pokemon's range fixed in, Pro's CRC
+    could not be computed, the game tried to reflash the board with openocd,
+    failed, and stopped drawing on the boot logo."""
     d = open(elf_path, "rb").read()
     phoff, = struct.unpack_from("<I", d, 0x1C)
     phsz, phn = struct.unpack_from("<HH", d, 0x2A)
     for i in range(phn):
         t, off, va, pa, fsz, msz, fl, al = struct.unpack_from("<8I", d, phoff + i * phsz)
-        if t == 1 and va <= FLASH[0] and FLASH[1] <= va + fsz:
-            return zlib.crc32(d[off + FLASH[0] - va: off + FLASH[1] - va]) & 0xFFFFFFFF
-    raise ValueError("%s: no load segment covers the flash range" % elf_path)
+        if t == 1 and va <= FLASH[0] < va + fsz:
+            return zlib.crc32(d[off + FLASH[0] - va: off + fsz]) & 0xFFFFFFFF
+    raise ValueError("%s: no load segment covers the flash start" % elf_path)
+
+
+def fw_version(elf_path):
+    """The netbridge build the card ships (its version.txt beside the ELF,
+    "0.98.4"): the board reports what the game expects to find."""
+    try:
+        with open(os.path.join(os.path.dirname(elf_path), "version.txt")) as f:
+            v = tuple(int(x) for x in f.read().strip().split("."))
+        if len(v) == 3 and all(0 <= x < 256 for x in v):
+            return v
+    except (OSError, ValueError):
+        pass
+    return FW_VERSION
 
 
 def frame(cmd, ident, payload=b""):
@@ -171,6 +190,7 @@ class Node:
 class Bridge:
     def __init__(self, crc, log, claims=None):
         self.crc = crc
+        self.version = FW_VERSION     # main() sets the card's own (fw_version)
         self.log = log
         # node address -> model: the title's declared node boards
         self.nodes = {nid: Node(nid, c, log) for nid, c in (claims or {}).items()}
@@ -306,7 +326,7 @@ class Bridge:
     def handle(self, cmd, ident, p):
         self.counts[cmd] = self.counts.get(cmd, 0) + 1
         if cmd == 0x20:
-            return frame(0x20, ident, bytes(FW_VERSION) + bytes([BOARD_REV & 0xFF]))
+            return frame(0x20, ident, bytes(self.version) + bytes([BOARD_REV & 0xFF]))
         if cmd == 0x30:
             return frame(0x30, ident, struct.pack("<I", self.crc))
         if cmd == 0x25:
@@ -371,7 +391,8 @@ def main():
     if elf:
         try:
             crc = flash_crc(elf)
-            log.write("# netbridge image %s, flash CRC32 %08x\n" % (elf, crc))
+            log.write("# netbridge image %s (version %d.%d.%d), flash CRC32 %08x\n" % (
+                (elf,) + fw_version(elf) + (crc,)))
         except (OSError, ValueError) as e:
             log.write("# no image CRC (%s): the game will want to reflash\n" % e)
     claims = {}
@@ -392,6 +413,8 @@ def main():
     for n in sorted(absent & set(claims)):
         log.write("# node %d (%s) not fitted\n" % (n, claims.pop(n)["type"]))
     br = Bridge(crc, log, claims)
+    if elf:
+        br.version = fw_version(elf)
     br.attach_inputs(os.path.join(d, "nodesw"))
     try:
         import s3motors

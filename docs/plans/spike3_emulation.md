@@ -404,6 +404,47 @@ reaches the shooter lane), ACTION BUTTON -> the auto plunger fires, slings,
 pops and orbits score (1,022,310 -> 1,073,640), a drain gives the end-of-ball
 bonus and BALL 2; inside the ball save the game re-serves and auto-launches.
 
+## Stage 7 - the other titles (2026-11-10)
+
+Everything is derived per title, and five of the six cards on hand now start
+a game and play a ball by switch NAMES only (the same script, `coin`,
+`sw "START BUTTON"`, `sw "ACTION BUTTON"`/`"LOCKDOWN BUTTON"`, slings, drain):
+
+| card | result | what it needed |
+|---|---|---|
+| pokemon_le 0.82.0 | plays, ball 2 | (stage 6) |
+| walking_dead_remastered_le 0.92.0 | plays, scores | nothing new |
+| star_wars_2025_le 0.96.0 | plays, scores | END-STOP motors (Death Star, Jump Ramp, AT-AT) |
+| fallout_le 0.81.0 | character select, ball in play | STEPPER motors (Fat Man pan/tilt), ~110 s settle |
+| star_wars_elg 1.10.0 | ball served, opening crawl | node directory flag byte; per-switch polarity; GAME SETUP screen eats the first Start |
+| star_wars_2025_pro 0.84.0 | first boot reaches Guided Setup; NOT played | see below |
+
+**Polarity is per switch** (device record +0x28 = LOCATION): playfield
+switches answer closed as wire 0, cabinet buttons stay high - the flipper
+buttons on playfield node 8, and ELG's Start and tilt on node 8 too
+(`s3nodes.active_low_masks`, keyed on the TROUGH switches' location).
+
+**Board-run motors** (`s3motors.py`, Spike 2's PAD-393/656 and PAD-237/249/
+955/971 models): steppers `32` configure (end inputs data[5]/[6]), `34`
+home, `31` move, status `38+motor` -> pos, target, flags 0x02 moving 0x04
+homed; end-stop motors `51` configure (stops data[2]/[3], encoder data[5]/
+[6]), `53`/`54` to a stop, `55` to an input, status `52 <motor>` byte 2 =
+0x01 moving, 0x20 arrived (55), 0x08 done. Zeros held fallout and star wars
+LE in their boot for ever. End switches go into nodesw (logical).
+
+**The netbridge build is per card**: 0.98.4 (most), 0.98.6 (fallout), 0.97.0
+(star_wars_2025_pro). The bridge reports the card's `version.txt` and CRCs
+from 0x10000100 to the end of the ELF's first flash segment; Pokemon's fixed
+range made Pro reflash (openocd fails) and freeze on the logo.
+
+**Star Wars 2025 Pro** runs the radium scene engine, not Godot, and preloads
+hundreds of scenes at boot. Its FIRST boot on a fresh slot reaches Guided
+Setup in ~5 min (autoguide then did not walk it - unverified why); a SECOND
+boot of the same slot sat on the SPIKE 3 logo for 11+ min (qemu busy, the
+PreLoad thread reading demand_loaded scene.radium files, no frames). Next:
+compare what the first boot wrote to data/ with a fresh slot, find the
+slow path, then walk its Guided Setup.
+
 ## Where it stands (pokemon_le 0.82.0, 2026-11-10)
 
 A fresh slot boots unattended through the SPIKE 3 logo, node location,
@@ -413,13 +454,11 @@ Screenshots emulator_01..11 in the ticket's artifacts.
 
 ## What is left for Spike 2 parity (next runs)
 
-1. **The other five cards** on hand (fallout, star_wars x3, walking_dead):
-   everything above is derived per title (node set, devices, polarity by the
-   START BUTTON board, ball model by name) - check each boots and plays a
-   ball the same way.
+1. **Star Wars 2025 Pro**: second-boot stall and its Guided Setup (above).
 2. **Audio**: s3alsa drops the PCM (rig runs are muted); a host player like
    Spike 2's for the Emulate tab.
 3. **Rig integration**: the Emulate tab refuses a Spike 3 card at pick; hand
    it to s3run.sh, a playfield window (switches.json gives the names),
    rig slots/riglock.
-4. Power distribution board (`0x10..0x1f`): unanswered, game falls back.
+4. Coins: the game credits ~3 of 4 quarters even when each is delivered.
+5. Power distribution board (`0x10..0x1f`): unanswered, game falls back.

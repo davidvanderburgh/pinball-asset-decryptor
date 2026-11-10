@@ -691,6 +691,7 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .modes-coop-ch-grp { display: flex; flex-direction: column; gap: 2px; min-width: 200px; }
 .modes-coop-ch-grp .modes-list-grp { margin: 2px 0; }
 .modes-coop-ch-powers > .row { flex-basis: 100%; }
+.modes-coop-ch-picked { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px 32px; border: 1px solid var(--line); border-radius: 6px; flex: none; }  /* PAD-1123 */
 .modes-coop-ch-pv { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
 .modes-coop-ch-pv img { width: 460px; height: auto; border: 1px solid var(--line); border-radius: 6px; flex: none; }
 /* PAD-1079: the pick screen's look (Look... in the Co-op characters dialog) */

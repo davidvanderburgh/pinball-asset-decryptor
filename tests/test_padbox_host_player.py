@@ -91,7 +91,6 @@ def _run(d, body, timeout=60):
     script = "\n".join([
         _PRELUDE % {"dir": _q(d)},
         _function("ffplay_channel_args"),
-        _function("login_ffplay"),
         _function("host_player"),
         body, "",
     ])
@@ -159,92 +158,6 @@ sleep 0.3; kill $HP; wait $HP 2>/dev/null
     assert "[box] speaker: ffplay" in text, text
     seen = _cat(d, "env1")
     assert seen.startswith("sdl= home=/"), (seen, text)
-
-
-# ---- PAD-1109: the ffplay the user's Terminal runs -------------------------
-
-def _run_login(d, body, timeout=30):
-    script = "\n".join(["set -u", "D=%s" % _q(d), _function("login_ffplay"),
-                         body, ""])
-    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         timeout=timeout)
-    return out.stdout.decode("utf-8", "replace")
-
-
-_FAKE_SHELL = r"""
-uname() { echo Darwin; }
-mkdir -p "$D/brew"; printf '#!/bin/sh\n' > "$D/brew/ffplay"; chmod +x "$D/brew/ffplay"
-mkshell() { printf '#!/bin/sh\n%s\n' "$1" > "$D/shell"; chmod +x "$D/shell"; }
-SHELL="$D/shell"
-"""
-
-
-@needs_bash
-def test_the_login_shell_names_the_ffplay_even_after_profile_noise():
-    d = _fresh_dir()
-    text = _run_login(d, _FAKE_SHELL + r"""
-mkshell "echo 'Welcome back'; echo \"$D/brew/ffplay\""
-got=$(login_ffplay) && echo "GOT=$got"
-""")
-    assert "GOT=" in text, text
-    assert text.split("GOT=", 1)[1].split()[0].endswith("/brew/ffplay"), text
-
-
-@needs_bash
-def test_a_login_shell_answer_that_is_not_a_program_is_refused():
-    d = _fresh_dir()
-    text = _run_login(d, _FAKE_SHELL + r"""
-mkshell "echo ffplay"
-login_ffplay; echo "NAME-RC=$?"
-mkshell "echo $D/brew/nothing-here"
-login_ffplay; echo "MISSING-RC=$?"
-mkshell "exit 1"
-login_ffplay; echo "NONE-RC=$?"
-""")
-    assert "NAME-RC=1" in text and "MISSING-RC=1" in text and "NONE-RC=1" in text, text
-
-
-@needs_bash
-def test_a_login_shell_that_hangs_is_given_up_on():
-    d = _fresh_dir()
-    text = _run_login(d, _FAKE_SHELL + r"""
-mkshell "sleep 30; echo $D/brew/ffplay"
-st=$SECONDS; login_ffplay; echo "RC=$? TOOK=$(( SECONDS - st ))"
-""", timeout=25)
-    assert "RC=1" in text, text
-    took = int(text.split("TOOK=")[1].split()[0])
-    assert took <= 8, text
-
-
-@needs_bash
-def test_off_a_mac_the_login_shell_is_never_asked():
-    d = _fresh_dir()
-    text = _run_login(d, r"""
-uname() { echo Linux; }
-SHELL=/bin/false
-login_ffplay; echo "RC=$?"
-""")
-    assert "RC=1" in text, text
-
-
-@needs_bash
-def test_the_speaker_plays_through_terminals_ffplay_and_says_so():
-    d = _fresh_dir()
-    rc, text = _run(d, r"""
-login_ffplay() { echo ffplay-terminal; }
-ffplay-terminal() { echo "terminal $*" >> "$D/which"; ffplay "$@"; }
-touch "$D/up"; echo long > "$D/play1"
-host_player & HP=$!
-for i in $(seq 1 80); do [ -f "$D/env1" ] && break; sleep 0.1; done
-sleep 0.3; kill $HP; wait $HP 2>/dev/null
-""")
-    assert "[box] speaker: using ffplay-terminal, the ffplay your Terminal runs, " \
-        "not ffplay" in text, text
-    which = _cat(d, "which")
-    assert "-h demuxer=s16le" in which, which        # the channel probe
-    assert "-version" in which, which                # the speaker line
-    assert "-i pipe:0" in which, which               # the player itself
 
 
 @needs_bash

@@ -23,7 +23,19 @@ param(
     # Install Missing passes a temp-file path; writing it is this script's
     # first act, so the app can tell a PowerShell that never got this far
     # (blank window on hotel Wi-Fi, PAD-327) from one that is running.
-    [string]$StartedMarker = ""
+    [string]$StartedMarker = "",
+    # Set up WSL2 itself and nothing else: no Ubuntu, no packages, no menu
+    # (PAD-1103).  The app brings its own Linux (PAD-Runtime), so on a new PC
+    # the one thing it cannot do for itself is switch WSL on - which needs an
+    # administrator and usually a restart.  The Windows installer runs this
+    # (its "Set up WSL2" task), and so does Install Missing when WSL is off.
+    # Exit codes: 0 ready now, 3010 ready after a Windows restart, 2
+    # virtualization off in the firmware, 1 not installed.
+    [switch]$WslOnly,
+    # No "press Enter" at the end of a run that worked: the Windows installer
+    # waits on this window, and a prompt there would hold its Finish page.
+    # A run that FAILED still waits, so its reason can be read.
+    [switch]$Unattended
 )
 if ($StartedMarker) {
     try { Set-Content -LiteralPath $StartedMarker -Value $PID -ErrorAction Stop } catch {}
@@ -671,6 +683,142 @@ $ManufacturerPrereqs = [ordered]@{
             @{ probe="sounddevice";    pkg="sounddevice";    label="sounddevice";    reason="Emulate tab: plays the emulated game's sound out of Windows directly, instead of through WSLg's damaged audio hop" }
         )
     }
+}
+
+# =========================================================================
+# -WslOnly: switch WSL2 on, and stop there (PAD-1103)
+# =========================================================================
+# THE STEP A NEWCOMER CANNOT DO, AND THE ONLY ONE.  A Pinside helper set PAD
+# up on several PCs and every one needed WSL2 and then Ubuntu-24.04 installed
+# by hand from a command line, because the Windows installer left its
+# prerequisites box unticked and the full installer below insists on an
+# Ubuntu of the right release before anything works.  Neither is needed any
+# more: the app imports its own Linux (core/runtime.py), and the import only
+# asks that WSL itself be on.  So this does exactly that - `wsl --install
+# --no-distribution` - and says what comes next.  After it, Install Missing in
+# the app installs that Linux with every tool already in it.
+#
+# Same restart marker as the full install (the app's prerequisite strip reads
+# it to say "restart Windows" rather than "install WSL"), and the same rule
+# about it: written only when something was installed that waits on a
+# restart, and removed otherwise, because a marker from an install that did
+# not happen is a lie the next run would repeat (PAD-164).
+function Install-WslPlatform {
+    Write-Step "Checking WSL2..."
+    $ok = $false
+    try {
+        & wsl --status *> $null
+        $ok = ($LASTEXITCODE -eq 0)
+    } catch {}
+    if ($ok) {
+        Remove-Item -LiteralPath $script:RestartMarker -Force -ErrorAction SilentlyContinue
+        Write-OK "WSL2 (already set up)"
+        $script:WslSetupCode = 0; return
+    }
+    if (Test-VirtualizationDisabled) {
+        Write-VirtualizationBanner
+        Write-FAIL "WSL2 (virtualization disabled in BIOS/UEFI)"
+        $script:WslSetupCode = 2; return
+    }
+    $bootId = Get-BootSessionId
+    $pendingSince = $null
+    if (Test-Path -LiteralPath $script:RestartMarker) {
+        $pendingSince = (Get-Content -LiteralPath $script:RestartMarker `
+            -ErrorAction SilentlyContinue | Select-Object -First 1)
+    }
+    if ($bootId -and $pendingSince -eq $bootId -and (Test-WslFeatureEnabled)) {
+        Write-Host "  WSL2 is installed and waiting on a Windows restart (use Restart, not Shut down)." -ForegroundColor Yellow
+        Write-SKIP "WSL2 (waiting on a Windows restart)"
+        $script:WslSetupCode = 3010; return
+    }
+
+    Write-Host "  Installing WSL2 (no Linux distro: the app brings its own). This can take a few minutes..." -ForegroundColor Cyan
+    $help = ""
+    try { $help = ((& wsl --help 2>&1 | Out-String) -replace "`0", "") } catch {}
+    $exit = 1
+    if ($help -match '--no-distribution') {
+        & wsl --install --no-distribution
+        $exit = $LASTEXITCODE
+        if ($exit -ne 0 -and $help -match '--web-download') {
+            Write-Host ("  wsl --install exited with code {0} - retrying with --web-download (skips the Microsoft Store)..." -f $exit) -ForegroundColor Cyan
+            & wsl --install --no-distribution --web-download
+            $exit = $LASTEXITCODE
+        }
+    }
+    if ($exit -ne 0) {
+        # An older wsl.exe with no --no-distribution (it would install
+        # Ubuntu with no way to say otherwise), or an install it refused:
+        # switch the two Windows features on directly, which is what
+        # `wsl --install` itself does underneath.  3010 = done, restart due.
+        Write-Host "  Switching on the Windows features WSL2 runs on..." -ForegroundColor Cyan
+        $codes = @()
+        foreach ($f in @("Microsoft-Windows-Subsystem-Linux", "VirtualMachinePlatform")) {
+            & dism.exe /online /enable-feature /featurename:$f /all /norestart
+            $codes += $LASTEXITCODE
+        }
+        if (@($codes | Where-Object { $_ -ne 0 -and $_ -ne 3010 }).Count -eq 0) {
+            # The WSL 2 kernel comes with WSL's own update, not the feature.
+            & wsl --update *> $null
+            $exit = 0
+        } else {
+            $exit = 1
+        }
+    }
+    if ($exit -ne 0) {
+        Remove-Item -LiteralPath $script:RestartMarker -Force -ErrorAction SilentlyContinue
+        Write-Host ""
+        Write-Host "  WSL2 was NOT installed.  The error text above, from Windows itself, says why." -ForegroundColor Red
+        Write-Host "  Restarting will not change this - nothing is waiting on a restart." -ForegroundColor Yellow
+        Write-Host "  By hand, in an administrator PowerShell window:   wsl --install --no-distribution" -ForegroundColor Yellow
+        Write-FAIL "WSL2 (not installed)"
+        $script:WslSetupCode = 1; return
+    }
+
+    $ok = $false
+    try {
+        & wsl --status *> $null
+        $ok = ($LASTEXITCODE -eq 0)
+    } catch {}
+    if ($ok) {
+        Remove-Item -LiteralPath $script:RestartMarker -Force -ErrorAction SilentlyContinue
+        Write-Installed "WSL2 (ready, no restart needed)"
+        $script:WslSetupCode = 0; return
+    }
+    try {
+        New-Item -ItemType Directory -Force (Split-Path -Parent $script:RestartMarker) | Out-Null
+        Set-Content -LiteralPath $script:RestartMarker -Value $bootId
+    } catch {}
+    Write-Installed "WSL2 (restart required)"
+    $script:WslSetupCode = 3010; return
+}
+
+if ($WslOnly) {
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host "  Pinball Asset Decryptor - Setting up WSL2"                  -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    # Called bare, never assigned: wsl.exe and dism print straight to this
+    # window (captured, PowerShell 5.1 mangles them), and anything a
+    # function prints would land in its return value.  Hence the variable.
+    $script:WslSetupCode = 1
+    Install-WslPlatform
+    $code = $script:WslSetupCode
+    Write-Host ""
+    switch ($code) {
+        0 {
+            Write-Host "  WSL2 is ready.  Open Pinball Asset Decryptor and click 'Install Missing'" -ForegroundColor Green
+            Write-Host "  above the tabs: it installs the app's own Linux, with every tool in it." -ForegroundColor Green
+        }
+        3010 {
+            Write-Host "  RESTART WINDOWS to finish (use Restart, not Shut down)." -ForegroundColor Yellow
+            Write-Host "  Then open Pinball Asset Decryptor and click 'Install Missing' above the" -ForegroundColor Yellow
+            Write-Host "  tabs: it installs the app's own Linux, with every tool in it."         -ForegroundColor Yellow
+        }
+    }
+    if (-not $Unattended -or ($code -ne 0 -and $code -ne 3010)) {
+        Read-Host "Press Enter to close this window"
+    }
+    exit $code
 }
 
 # =========================================================================

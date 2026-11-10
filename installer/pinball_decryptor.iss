@@ -61,7 +61,16 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
-Name: "runprereqs"; Description: "Install prerequisites after setup (WSL2, partclone, debugfs, gpg)"; GroupDescription: "Prerequisites:"; Flags: unchecked
+; PAD-1103: SWITCH WSL2 ON, ticked, and only offered on a PC without it.  The
+; app brings its own Linux and imports it with one button, so the one step a
+; newcomer cannot get past alone is WSL itself (an administrator and usually a
+; restart).  It used to hide inside "runprereqs" below, which is unticked and
+; also installs an Ubuntu of one exact release - a Pinside helper set up
+; several PCs and had to install WSL2 and Ubuntu-24.04 by hand on every one.
+; This installs WSL2 with no distro at all (install_prerequisites.ps1
+; -WslOnly) and asks for the restart; see SetUpWsl / NeedRestart in [Code].
+Name: "setupwsl"; Description: "Set up WSL2 (the emulators and most extract/write work need it; Windows asks for one restart)"; GroupDescription: "Prerequisites:"; Check: WslNeedsSetup
+Name: "runprereqs"; Description: "Also run the full prerequisite installer (an Ubuntu with its Linux tools, gpg, ffmpeg)"; GroupDescription: "Prerequisites:"; Flags: unchecked
 
 [Files]
 ; --- Bundled Python and pip dependencies ---------------------------------
@@ -189,7 +198,9 @@ Source: "launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "padvpx.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 ; --- Prerequisites helper (re-runnable from Start Menu) ------------------
-Source: "install_prerequisites.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; AfterInstall: the WSL2 step (PAD-1103) runs the moment this file lands -
+; see SetUpWslIfChosen in [Code] for why it cannot wait for the end.
+Source: "install_prerequisites.ps1"; DestDir: "{app}"; Flags: ignoreversion; AfterInstall: SetUpWslIfChosen
 ; install_gdre.sh ships beside it — install_prerequisites.ps1 hands this
 ; file to WSL to install GDRE Tools (shared with the Linux installer).
 Source: "install_gdre.sh"; DestDir: "{app}"; Flags: ignoreversion
@@ -329,6 +340,73 @@ end;
 function IsStaged(): Boolean;
 begin
   Result := ExpandConstant('{param:STAGED|0}') = '2';
+end;
+
+{ ----------------------------------------------------------------- WSL2
+
+  PAD-1103.  Offered when neither WSL service is registered: WslService is
+  the Store WSL every current Windows gets from `wsl --install`, LxssManager
+  the older Windows feature.  Read from the registry, never by running
+  wsl.exe, which on a stuck WSL waits forever and would freeze this setup
+  on its Tasks page.  A PC with either is left to the app, whose
+  prerequisite strip knows the finer states (no distro, WSL 1, a restart
+  still due). }
+function WslNeedsSetup(): Boolean;
+begin
+  Result := (not IsStaged())
+    and (not RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\WslService'))
+    and (not RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\LxssManager'));
+end;
+
+var
+  WslRestartDue: Boolean;
+
+{ install_prerequisites.ps1 -WslOnly, in a window of its own so the user
+  watches Windows install it.  Exit 3010 means WSL2 waits on a restart,
+  which NeedRestart turns into the Finished page's "restart now" choice. }
+procedure SetUpWsl;
+var
+  ResultCode: Integer;
+begin
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -ExecutionPolicy Bypass -File "'
+        + ExpandConstant('{app}\install_prerequisites.ps1')
+        + '" -WslOnly -Unattended',
+      ExpandConstant('{app}'), SW_SHOWNORMAL, ewWaitUntilTerminated,
+      ResultCode) then
+  begin
+    Log('WSL2 setup did not start: ' + SysErrorMessage(ResultCode));
+    Exit;
+  end;
+  Log(Format('WSL2 setup exited with %d', [ResultCode]));
+  WslRestartDue := ResultCode = 3010;
+end;
+
+{ Run from install_prerequisites.ps1's own [Files] entry, as soon as that
+  file is in place.  NOT from CurStepChanged(ssPostInstall), which is where
+  it first went: Inno asks NeedRestart the moment the files are copied,
+  BEFORE ssPostInstall, so a restart found there was never offered - the
+  Finished page said "Click Finish to exit" over a WSL2 that could not run
+  until Windows restarted (measured on a test build: "WSL2 setup exited
+  with 3010", then "Need to restart Windows? No").  It still comes before
+  the [Run] entries' full prerequisite installer, which then finds WSL2
+  waiting on the restart instead of installing it a second time.
+
+  Never in a silent install: the in-app updater runs those, and an update
+  must not start installing Windows features under somebody who is
+  working. }
+procedure SetUpWslIfChosen;
+begin
+  if WizardIsTaskSelected('setupwsl') and (not WizardSilent())
+     and (not IsStaged()) then
+    SetUpWsl;
+end;
+
+function NeedRestart(): Boolean;
+begin
+  Result := WslRestartDue;
+  if Result then
+    Log('Asking for a restart: WSL2 waits on one');
 end;
 
 function InitializeSetup(): Boolean;

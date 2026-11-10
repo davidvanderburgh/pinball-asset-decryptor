@@ -453,7 +453,7 @@ esac
 # every run was silent. `-ch_layout` exists from 5.1 on; an older ffplay has
 # no such option and still takes `-ac`. Ask the ffplay which one it has.
 ffplay_channel_args() {
-    if ffplay -hide_banner -h demuxer=s16le 2>/dev/null | grep -q -- '-ch_layout'; then
+    if "${2:-ffplay}" -hide_banner -h demuxer=s16le 2>/dev/null | grep -q -- '-ch_layout'; then
         case "$1" in
             1) echo "-ch_layout mono" ;;
             2) echo "-ch_layout stereo" ;;
@@ -462,6 +462,34 @@ ffplay_channel_args() {
     else
         echo "-ac $1"
     fi
+}
+# THE ffplay TERMINAL WOULD RUN (PAD-1109). A Mac can have two: Apple
+# Silicon Homebrew's in /opt/homebrew/bin, and another in /usr/local/bin (an
+# Intel Homebrew left behind, or a build installed by hand). The app's PATH
+# found /usr/local/bin/ffplay (9.0.2); that one took the game's whole stream
+# at playback speed and nothing was heard, while the user's Terminal - whose
+# shell profile puts Homebrew first - played a test tone through the very
+# same options. So ask the user's own login shell, as Terminal does: its
+# answer only if it is an executable absolute path, given 5 s at most (a
+# profile can do anything), and nothing at all off a Mac.
+login_ffplay() {
+    [ "$(uname -s)" = Darwin ] || return 1
+    # into a FILE, not a pipe: a profile's own child (a hung helper) keeps a
+    # pipe open after the shell is killed, and reading it would wait for that
+    local out f p w
+    f=$(mktemp "${TMPDIR:-/tmp}/padffplay.XXXXXX") || return 1
+    "${SHELL:-/bin/zsh}" -lc 'command -v ffplay' </dev/null >"$f" 2>/dev/null &
+    p=$!
+    ( sleep 5; kill "$p" 2>/dev/null ) >/dev/null 2>&1 &
+    w=$!
+    wait "$p" 2>/dev/null
+    kill "$w" 2>/dev/null
+    out=$(tail -n 1 "$f")
+    rm -f "$f"
+    case "$out" in
+        /*) [ -x "$out" ] && { echo "$out"; return 0; } ;;
+    esac
+    return 1
 }
 host_player() {
     [ "${PAD_AUDIO:-1}" = 0 ] && return 0
@@ -473,12 +501,16 @@ host_player() {
     [ -n "$fmt" ] || { echo "[box] the guest never reported a PCM format; this run is silent" >&2; return 0; }
     set -- $fmt
     rate=${1:-48000}; ch=${2:-2}
-    if ! command -v ffplay >/dev/null 2>&1; then
+    pathbin=$(command -v ffplay 2>/dev/null)
+    fpbin=$(login_ffplay) || fpbin=$pathbin
+    if [ -z "$fpbin" ]; then
         echo "[box] no ffplay on this Mac, so this run is silent. Fix:" >&2
         echo "[box]   brew install ffmpeg   (the same package the app's previews use)" >&2
         return 0
     fi
-    chargs=$(ffplay_channel_args "$ch")
+    [ -n "$pathbin" ] && [ "$pathbin" != "$fpbin" ] &&
+        echo "[box] speaker: using $fpbin, the ffplay your Terminal runs, not $pathbin"
+    chargs=$(ffplay_channel_args "$ch" "$fpbin")
     echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch ($chargs) from the box's sound FIFO (docker exec)"
     # WHICH ffplay, AND IN A CLEAN ENVIRONMENT (PAD-1109). With the stream
     # proven to arrive - 172 KB/s at -3 dBFS, taken at playback speed - a
@@ -489,8 +521,7 @@ host_player() {
     # ffplay got the app's own. It now starts with only what a program needs
     # to find the user's sound (HOME, USER, LOGNAME, TMPDIR, LANG), and the
     # log names the binary and any SDL / DYLD / PYTHON variables left behind.
-    fpbin=$(command -v ffplay)
-    echo "[box] speaker: $fpbin ($(ffplay -version 2>/dev/null | head -n 1 | cut -d' ' -f1-3))"
+    echo "[box] speaker: $fpbin ($("$fpbin" -version 2>/dev/null | head -n 1 | cut -d' ' -f1-3))"
     left=$(env | grep -E '^(SDL_|AUDIODEV=|DYLD_|PYTHON)' | cut -d= -f1 | sort | tr '\n' ' ')
     [ -n "$left" ] && echo "[box] speaker: started without the app's ${left% }"
     # NOT exec'd, and STARTED AGAIN IF IT STOPS (PAD-832), so the TERM that

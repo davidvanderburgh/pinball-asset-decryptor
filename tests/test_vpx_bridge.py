@@ -978,7 +978,41 @@ def test_shadow_flipper_dof_from_the_machines_flipper_coil():
     assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
 
 
-DOF_TRIBUTE = """Option Explicit
+def test_shadow_flipper_flag_held_for_the_tables_own_flip():
+    # PAD-1096: Batman 66's flipper subs play their sound and DOF 101/102 only
+    # `if bGameInPlay`, which only the table's own game sets
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["flipper_flag"] = {"_": "x", "flag": "bGameInPlay"}
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    for const, sub in (("sLLFlipper", "SolLFlipper"), ("sLRFlipper", "SolRFlipper")):
+        assert ("Sub PadFlipOn_%s(e)\n\tDim was : was = bGameInPlay\n\tbGameInPlay = True\n"
+                "\t%s e\n\tbGameInPlay = was\nEnd Sub" % (const, sub)) in out
+        assert 'SolCallback(%s) = "PadFlipOn_%s"' % (const, const) in out
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+    # with flipper_dof too, the DOF wrapper calls the flag wrapper
+    m["flipper_dof"] = {"sLLFlipper": 101}
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    assert "Sub PadFlip_sLLFlipper(e)\n\tPadFlipOn_sLLFlipper e\n" in out
+    assert 'SolCallback(sLLFlipper) = "PadFlip_sLLFlipper"' in out
+    # a bare name works; anything but a variable name is refused
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["flipper_flag"] = "bGameInPlay"
+    assert "Sub PadFlipOn_sLLFlipper(e)" in vs.patch(MINI_TRIBUTE, m)[0]
+    m["flipper_flag"] = "x : Quit"
+    with pytest.raises(ValueError):
+        vs.patch(MINI_TRIBUTE, m)
+    plain, _ = vs.patch(MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert "PadFlipOn" not in plain
+
+
+def test_batman_map_holds_its_game_flag_for_flips():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "batman.shadow.json"), encoding="utf-8"))
+    assert vs.flipper_flag(m) == "bGameInPlay"
+
+
+DOF_TRIBUTE ="""Option Explicit
 ExecuteGlobal GetTextFile("controller.vbs")
 Const cGameName = "rushle"   ' DOF's name
 Sub Table1_Init : LoadEM : End Sub

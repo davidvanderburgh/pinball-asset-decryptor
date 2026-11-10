@@ -49,7 +49,7 @@ docker() {
     *"cat /pad/rootfs/dump/audio.fmt") echo "44100 2" ;;
     *" true"|*"test -p /pad/rootfs/dump/audio.fifo") [ -f "$D/up" ] ;;
     *"pkill -f padrelay.py --pipe") echo "reap" >> "$D/events" ;;
-    "-i pad-test python3 /pad/rig/padrelay.py --pipe "*)
+    "pad-test python3 /pad/rig/padrelay.py --pipe "*)
        n=$(( $(cat "$D/relays" 2>/dev/null || echo 0) + 1 )); echo $n > "$D/relays"
        echo "relay $n: $*" >> "$D/events"
        cat "$D/feed$n" 2>/dev/null ;;
@@ -128,7 +128,7 @@ sleep 0.3; kill $HP; wait $HP 2>/dev/null
 echo "HP-DONE"
 """)
     ev = _cat(d, "events")
-    assert "relay 1: -i pad-test python3 /pad/rig/padrelay.py --pipe " \
+    assert "relay 1: pad-test python3 /pad/rig/padrelay.py --pipe " \
            "/pad/rootfs/dump/audio.fifo /tmp/pad_audio_ctl.json" in ev, (ev, text)
     player = [l for l in ev.splitlines() if l.startswith("player 1:")][0]
     assert player.endswith("-f s16le -ar 44100 -ch_layout stereo -i pipe:0"), player

@@ -547,7 +547,11 @@ host_player() {
         # take every other read of it, so it goes first
         docker exec -u 0 "$NAME" pkill -f 'padrelay.py --pipe' >/dev/null 2>&1
         # $chargs unquoted on purpose: it is an option and its value
-        docker exec -i "$NAME" python3 /pad/rig/padrelay.py --pipe \
+        # No -i: the relay reads nothing on stdin, and here stdin is /dev/null
+        # (an async list in a script), so -i only attached an input stream
+        # that ends at once. The stream a Mac user heard through Docker came
+        # from a command without it (PAD-1109).
+        docker exec "$NAME" python3 /pad/rig/padrelay.py --pipe \
                 "$BOX_FIFO" "${PAD_AUDIO_CTL:+$BOX_CTL}" |
             mac_meter |
             env -i HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \

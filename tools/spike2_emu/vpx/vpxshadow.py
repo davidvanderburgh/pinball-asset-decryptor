@@ -1550,6 +1550,23 @@ def flipper_subs(m, had):
     return flips
 
 
+def flipper_warnings(m, had, lines):
+    """PAD-1112: what leaves the machine's flipper coils moving nothing. A
+    tribute that flips inline in its key handlers (Munsters: `If
+    bGameInPlay ... LF.Fire`) has no SolLFlipper, and without the map's
+    `flippers` its flippers never move: the keys go to the machine, the
+    table's handler flips only while its own game runs. A sub the map names
+    must be in the script or the map's extra_vbs."""
+    flips = flipper_subs(m, had)
+    if not flips:
+        return ["WARNING: the machine's flipper coils move nothing: the table has no "
+                "SolLFlipper/SolRFlipper and the map names no `flippers`"]
+    extra = (m.get("extra_vbs") or "").split("\n")
+    return ["WARNING: the map's flipper sub %s is in neither the table's script nor extra_vbs"
+            % sub for sub in dict.fromkeys(flips.values())
+            if not has_sub(lines, sub) and not has_sub(extra, sub)]
+
+
 def flipper_flag(m):
     """PAD-1096: the table's own game-running flag its flipper subs check
     before their sound and DOF (`"flipper_flag": {"flag": "bGameInPlay"}`, or
@@ -1632,6 +1649,7 @@ def patch(script, m):
             rename_sub(lines, f + "_Hit", rep)
     for sub in ("SolLFlipper", "SolRFlipper", "SolULFlipper", "SolURFlipper"):
         had[sub] = has_sub(lines, sub)
+    rep.extend(flipper_warnings(m, had, lines))
     quiet = {}
     for name in m.get("quiet_subs", []):
         args = quiet_sub(lines, name, rep)

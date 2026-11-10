@@ -377,6 +377,39 @@ class Bridge:
         return None
 
 
+def write_switch_list(table, path):
+    """The title's switches in the rig's switch_list.txt shape (`id num node
+    bit name`, Spike 2's mktables.py), so the game window - padglhost, the
+    Spike 2 renderer - binds its keys (flippers, Start, coins, the window-
+    open trough and coin-door latch) by NAME to this title's switches. Ids
+    are this list's own 1-based rows: s3keys.py reads them back from here.
+    Returns [(id, node, bit, name)]."""
+    rows = []
+    for i, (name, (node, bit)) in enumerate(sorted(table.items(), key=lambda kv: (kv[1], kv[0]))):
+        if i + 1 >= 256:                    # padsw.h PADSW_MAX_ID
+            break
+        rows.append((i + 1, node, bit, name))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("# id num node bit name - Spike 3 (s3bridge.py, from the device tables)\n")
+        for sid, node, bit, name in rows:
+            f.write("%d %d %d %d %s\n" % (sid, sid, node, bit, name))
+    return rows
+
+
+def read_switch_list(path):
+    """{id: (node, bit, name)} from a write_switch_list() file."""
+    out = {}
+    with open(path) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            p = line.split(None, 4)
+            if len(p) == 5:
+                out[int(p[0])] = (int(p[2]), int(p[3]), p[4].strip())
+    return out
+
+
 def frames_in(buf):
     """Split complete frames off the front of buf: (frames, rest). Each frame
     is (cmd, id, payload, ok)."""
@@ -456,6 +489,7 @@ def main():
                     table.setdefault(name.strip().upper(), [node, idx])
             with open(os.path.join(d, "switches.json"), "w") as f:
                 json.dump(table, f, indent=0, sort_keys=True)
+            write_switch_list(table, os.path.join(d, "tables", "game", "switch_list.txt"))
         except Exception as e:
             log.write("# [polarity] not derived (%s): every board active high\n" % e)
     if game and os.environ.get("PAD_S3_BALLS", "1") != "0":

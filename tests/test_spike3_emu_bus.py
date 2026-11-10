@@ -288,3 +288,47 @@ def test_legacy_power_distribution_answered_by_the_bridge():
     assert body(0x15) == b"\xff"
     assert len(body(0x19)) == 2
     assert br.handle(0x11, 1, b"") is None
+
+
+def test_window_keys_reach_spike3_switches(tmp_path, monkeypatch):
+    """padglhost's keyboard block (padsw.h) onto nodesw / spi.in, by the
+    s3bridge-written switch_list.txt: edges only, CPU switches on the SPI."""
+    import struct as _s
+    import s3keys
+    table = {"START BUTTON": [1, 11], "LEFT COIN": [1, 16], "TROUGH 1": [8, 37],
+             "SERVICE SELECT": [0, 8], "LEFT FLIPPER BUTTON": [8, 25]}
+    rows = s3bridge.write_switch_list(table, str(tmp_path / "t" / "switch_list.txt"))
+    ids = {name: sid for sid, node, bit, name in rows}
+    slot = tmp_path / "slot7"
+    slot.mkdir()
+    (slot / "nodesw").write_bytes(bytes(512))
+    (slot / "spi.in").write_bytes(b"\xff" * 8)
+    padsw = tmp_path / "padsw"
+    blk = bytearray(4096)
+    _s.pack_into("<I", blk, 0, s3keys.MAGIC)
+    padsw.write_bytes(bytes(blk))
+    monkeypatch.setattr(s3keys, "BASE", str(tmp_path / "slot%s"))
+    k = s3keys.Keys("7", str(padsw), str(tmp_path / "t" / "switch_list.txt"))
+    assert k.attach()
+    sw = lambda: (slot / "nodesw").read_bytes()
+
+    def poke(off, v):
+        k.mm.close(); k.mm = None                      # Windows: no rewrite under a map
+        b = bytearray(padsw.read_bytes()); b[off] = v; padsw.write_bytes(bytes(b))
+        k.attach()
+    poke(s3keys.OFF_CAB + 2, 1)                        # the window's START
+    k.step()
+    assert sw()[8 + 1] & 0x08
+    poke(s3keys.OFF_CAB + 2, 0)
+    k.step()
+    assert not sw()[8 + 1] & 0x08
+    poke(s3keys.OFF_HELD + ids["LEFT COIN"], 1)        # a coin by id
+    k.step()
+    assert sw()[8 + 2] & 0x01
+    poke(s3keys.OFF_CAB + 4, 1)                        # SELECT -> SPI bit 0, active low
+    k.step()
+    assert (slot / "spi.in").read_bytes()[0] == 0xFE
+    # edges only: a switch the ball model moved is not re-asserted
+    b = bytearray(sw()); b[8 * 8 + 4] |= 0x20; (slot / "nodesw").write_bytes(bytes(b))
+    k.step()
+    assert sw()[8 * 8 + 4] & 0x20

@@ -26,7 +26,7 @@
 # game_monitor reads it.
 set -u
 S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-CARD=""; SLOT=1; SECS=60; STRACE=0; FRESH=0; BRIDGE=0; BUS=0; PROG=/games/game; ARGS=()
+CARD=""; SLOT=1; SECS=60; STRACE=0; FRESH=0; BRIDGE=0; BUS=0; WINDOW=0; PROG=/games/game; ARGS=()
 B=${PAD_S3_BUILD:-/home/david/.pad-s3/build}
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -36,13 +36,14 @@ while [ $# -gt 0 ]; do
         --fresh) FRESH=1 ;;
         --bridge) BRIDGE=1 ;;
         --bus) BUS=1 ;;
+        --window) WINDOW=1; BRIDGE=1; BUS=1 ;;
         --prog) PROG=$2; shift ;;
         --) shift; ARGS=("$@"); break ;;
         *) CARD=$1 ;;
     esac
     shift
 done
-[ -n "$CARD" ] || { echo "usage: s3run.sh CARD.raw [--slot N] [--secs S] [--strace] [--fresh] [--bridge] [--bus]" >&2; exit 2; }
+[ -n "$CARD" ] || { echo "usage: s3run.sh CARD.raw [--slot N] [--secs S] [--strace] [--fresh] [--bridge] [--bus] [--window]" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "[s3run] needs root (overlay mounts): wsl -u root -e bash s3run.sh ..." >&2; exit 2; }
 
 # THE HOST MODULES, LOADED HERE. Both are built from the same 6.6.87.2 tree as
@@ -81,7 +82,7 @@ HOSTPID=""
 # a run killed from outside (its session ended) leaves its setsid helpers
 # behind; an old padglhost kept dumping its own frames into this slot's
 # fresh frames dir for hours, and the "newest" frame was then a stale one
-for p in "padglhost $SD/padgl.ring" "s3bridge.py $SD( |\$)" "s3vidhost.py $SD( |\$)" "s3press.py autoguide $SLOT( |\$)"; do
+for p in "padglhost $SD/padgl.ring" "s3bridge.py $SD( |\$)" "s3vidhost.py $SD( |\$)" "s3press.py autoguide $SLOT( |\$)" "s3keys.py $SLOT( |\$)"; do
     pkill -f "$p" 2>/dev/null && echo "[s3run] stopped a leftover: $p"
 done
 if [ "$BRIDGE" = 1 ]; then
@@ -91,7 +92,18 @@ if [ "$BRIDGE" = 1 ]; then
     rm -rf "$SD/frames" "$SD/padgl.ring"; mkdir -p "$SD/frames"
     # 40 frames, or unbounded with --bus: s3press.py autoguide prunes them
     MAXFR=40; [ "$BUS" = 1 ] && MAXFR=1000000
-    env -u DISPLAY -u WAYLAND_DISPLAY EGL_PLATFORM=surfaceless GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12} \
+    # --window: the game on screen, in Spike 2's renderer window, whose
+    # keyboard (padsw.h) s3keys.py carries onto this rig's switches; the
+    # window binds its keys by the title's own names from the
+    # switch_list.txt s3bridge writes (PAD_TABLES/PAD_GAME). Without it the
+    # renderer is headless (surfaceless EGL) and only dumps frames.
+    if [ "$WINDOW" = 1 ]; then
+        rm -f "$SD/padsw"
+        RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game)
+    else
+        RENV=(-u DISPLAY -u WAYLAND_DISPLAY EGL_PLATFORM=surfaceless)
+    fi
+    env "${RENV[@]}" GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12} \
         PAD_GL_W=${PAD_S3_W:-1920} PAD_GL_H=${PAD_S3_H:-1080} PAD_GL_DUMP="$SD/frames" \
         PAD_GL_FRAME_EVERY=${PAD_GL_FRAME_EVERY:-30} PAD_GL_MAX_FRAMES=${PAD_GL_MAX_FRAMES:-$MAXFR} \
         PAD_VID_SHM="$SD/padvid.shm" \
@@ -152,6 +164,11 @@ if [ "$BUS" = 1 ]; then
     # pressed. s3press.py watches the frame dumps and presses BACK + SELECT
     # (the coin-door buttons on the SPI chain) whenever it comes up, pruning
     # old dumps as it goes. PAD_S3_AUTOGUIDE=0 leaves the screen alone.
+    if [ "$WINDOW" = 1 ]; then
+        python3 "$S/s3keys.py" "$SLOT" "$SD/padsw" "$SD/tables/game/switch_list.txt" \
+            > "$SD/s3keys.log" 2>&1 &
+        BUSPIDS="$BUSPIDS $!"
+    fi
     if [ "$BRIDGE" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" = 1 ]; then
         python3 "$S/s3press.py" autoguide "$SLOT" > "$SD/autoguide.log" 2>&1 &
         BUSPIDS="$BUSPIDS $!"

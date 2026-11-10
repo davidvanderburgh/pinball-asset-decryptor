@@ -49,6 +49,18 @@ def test_panel_hidden_when_key_present(tmp_path, monkeypatch):
         assert w.state("extract").get("spike3_unlock") is None
 
 
+def test_panel_hidden_for_spk_package(tmp_path, monkeypatch):
+    # PAD-1077: a .spk package opens with the fleet update key, not a board's
+    # OTP key, so the extractor-card panel never applies to it
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w, monkeypatch, key_present=False)
+        w.run(lambda: svc.extract_input_var.set(
+            str(tmp_path / "pokemon_le-0_87_0_spike3.spk.zip")))
+        w.run(lambda: svc._refresh_spike3_unlock(_res()))
+        w.drain()
+        assert w.state("extract").get("spike3_unlock") is None
+
+
 def test_panel_hidden_for_non_spike3(tmp_path, monkeypatch):
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w, monkeypatch, key_present=False)

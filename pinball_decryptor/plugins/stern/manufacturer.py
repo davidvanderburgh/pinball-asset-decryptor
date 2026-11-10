@@ -40,6 +40,7 @@ from .pipeline import (SamExtractPipeline, SamExtractPlusCapturePipeline,
                        SternWritePipeline)
 from . import spike3 as _spike3
 from . import spike3_spk as _spike3_spk
+from . import spike3_extract as _spike3_extract
 from .spike3_extract import Spike3ExtractPipeline
 from .spike3_spk import Spike3SpkExtractPipeline
 from .spike3_games import SPIKE3_DB, spike3_key_for_path, spike3_display
@@ -171,13 +172,13 @@ _GAMES = (_SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES + _SAM_GAMES
 
 # Spike 3 (Pi-4 secure-boot era): the SD card's game partition is LUKS2-
 # encrypted, so Extract decrypts it on the fly and copies out the directly
-# usable assets — playable QuickTime videos, PNG images, and .radium/.sidx
-# scenes.  Extract-only for now: build/replace would re-encrypt + re-sign,
-# which this era doesn't do yet.  See spike3.py / spike3_extract.py.
+# usable assets — playable QuickTime videos, PNG images, .radium/.sidx
+# scenes, and every sound decoded from image.bin to a WAV (PAD-1077).
+# Extract-only for now: build/replace would re-encrypt + re-sign, which this
+# era doesn't do yet.  See spike3.py / spike3_extract.py / spike3_sound.py.
 _SPIKE3_CAPS = Capabilities(
     extract=True,
-    extract_categories=(("video", "Video"), ("images", "Images"),
-                        ("scenes", "Scenes")),
+    extract_categories=_spike3_extract.CATEGORIES,
 )
 
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD

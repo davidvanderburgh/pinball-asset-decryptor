@@ -43,7 +43,12 @@ tests/
 Once the `games` partition is decrypted and `image.bin` is pulled out, the audio
 needs no further keys: the sound master directory is plaintext and the bodies are
 raw 44100 Hz signed-16-bit PCM (mono or stereo). `tools/image_sound.py` reads the
-container and writes `idxNNNN.wav` per sound:
+container and writes `idxNNNN.wav` per sound. The app's Spike 3 Extract does this
+itself (its Audio box, on by default): each `image.bin` becomes
+`sound/<path>/audio/idxNNNN.wav` in the project, e.g. `sound/pokemon_le/audio/`
+and `sound/pokemon_le/spike3/spike_menu/audio/`, and the raw container is not
+kept. The decoder lives in `pinball_decryptor/plugins/stern/spike3_sound.py`;
+this CLI loads that file directly:
 
 ```sh
 python tools/image_sound.py info    path/to/image.bin

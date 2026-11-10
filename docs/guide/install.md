@@ -8,12 +8,21 @@
    [Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases)
    and run it. It bundles its own Python, so nothing else is needed to
    launch the app.
-2. Run **Install Prerequisites** from the Start Menu. It asks which
-   manufacturers you use and installs only what they need (see
-   [Per-manufacturer prerequisites](#per-manufacturer-prerequisites)).
-3. If it ends with **restart required**, WSL2 was just installed. Restart
-   Windows (use *Restart*: with Fast Startup on, *Shut down* doesn't
-   count), then run **Install Prerequisites** once more.
+2. Keep **Set up WSL2** ticked on the installer's tasks page (it is only
+   there when this PC has no WSL). It switches WSL2 on and installs no
+   Linux distro. If setup asks to restart, let it (or use *Restart*: with
+   Fast Startup on, *Shut down* doesn't count).
+3. Open the app and pick a manufacturer. If the prerequisites row is red,
+   press **Install Missing**. With WSL2 on, it offers the app's own Linux
+   (PAD-Runtime, a one-time download of about 434 MB) with every tool
+   already in it: no Ubuntu, no command line. WSL2 still off? The same
+   button sets it up first and asks for the restart.
+
+**Install Prerequisites** in the Start Menu is still there: it asks which
+manufacturers you use and installs an Ubuntu and their tools into it (see
+[Per-manufacturer prerequisites](#per-manufacturer-prerequisites)), and it
+installs the Windows-side tools (ffmpeg with ffplay, gpg). Install Missing
+runs it once the app's own Linux is in, or when you choose **No** to that.
 
 Re-running the installer is always safe: it skips anything already there.
 

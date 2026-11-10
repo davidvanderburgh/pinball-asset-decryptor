@@ -28,8 +28,10 @@ TASKS = (
     {"id": "install", "title": "Install and get ready", "tab": "", "go": "",
      "steps": (
          "Run the installer. It brings its own Python, so the app starts straight away.",
-         "From the Start Menu, run Install Prerequisites and tick the makers you use.",
-         "If it says restart required, use Restart (not Shut down), then run it again.",
+         "Keep Set up WSL2 selected. If it asks to restart, use Restart (not Shut down).",
+         "If the prerequisites row turns red, press Install Missing: it "
+         "installs the app's own Linux, with every tool in it (no Ubuntu "
+         "needed).",
          "In the app, ⚙ > Prerequisites shows what is in, and Install missing "
          "prerequisites… adds the rest.",
      )},

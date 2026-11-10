@@ -1350,21 +1350,177 @@ class App:
                 "installer/install_prerequisites.ps1.")
             return
 
-        # A worker thread: ShellExecuteEx waits for the UAC answer, and the
-        # started-check then waits out its grace period.
-        threading.Thread(target=self._run_install_prereqs_win,
+        # A worker thread: the route is decided by asking wsl.exe, which
+        # must never wait on the interface thread; ShellExecuteEx then waits
+        # for the UAC answer, and the started-check out its grace period.
+        threading.Thread(target=self._install_prereqs_win_route,
                          args=(script,), daemon=True).start()
 
-    def _run_install_prereqs_win(self, script):
+    def _install_prereqs_win_route(self, script):
+        """Install Missing on Windows: the ONE step this PC is missing
+        (PAD-1103, core.prereq_launch.pick_route) - WSL2 alone, the app's
+        own Linux, or the full prerequisite installer as before."""
+        from .core import prereq_launch
+        try:
+            route, rows, state = self._install_route_win()
+        except Exception:                               # noqa: BLE001
+            route, rows, state = prereq_launch.ROUTE_SCRIPT, [], ""
+        if route == prereq_launch.ROUTE_SCRIPT:
+            self._run_install_prereqs_win(script)
+            return
+        self.msg_queue.put(UiCallMsg(
+            lambda: self._offer_install_route_win(route, rows, state,
+                                                  script)))
+
+    def _install_route_win(self):
+        """(route, names of the missing WSL-side rows, runtime state).
+        Asks wsl.exe: worker thread only."""
+        from .core import prereq_launch, prereqs, runtime
+        results = getattr(self, "_prereq_results", None) or {}
+        mfr = self._current_mfr
+        rows = [p.name for p in tuple(getattr(mfr, "prerequisites", ())
+                                      or ())
+                if p.name in results and not results[p.name].ok
+                and prereqs.probes_wsl(p)]
+        if not rows:
+            return prereq_launch.ROUTE_SCRIPT, rows, ""
+        state = runtime.status(refresh=True)[0]
+        route = prereq_launch.pick_route(
+            True, prereqs._wsl_status_ok(), state,
+            restart_pending=prereqs._wsl_restart_pending())
+        return route, rows, state
+
+    def _offer_install_route_win(self, route, rows, state, script):
+        """Ask before the route's step; UI thread."""
+        from .core import prereq_launch, runtime
+        title = "Install Prerequisites"
+        if route == prereq_launch.ROUTE_WSL:
+            if messagebox.askyesno(title, prereq_launch.wsl_setup_text(rows)):
+                threading.Thread(target=self._run_install_prereqs_win,
+                                 args=(script, True), daemon=True).start()
+            return
+        answer = messagebox.askyesnocancel(title, prereq_launch.runtime_text(
+            rows, round(runtime.IMAGE.size / 1e6), stale=state == "stale"))
+        if answer is None:
+            return
+        if answer is False:
+            threading.Thread(target=self._run_install_prereqs_win,
+                             args=(script,), daemon=True).start()
+            return
+        self._install_runtime_from_prereqs()
+
+    def _install_runtime_from_prereqs(self):
+        """The app's own Linux, installed from Install Missing: a banner with
+        the download's progress, the log for the words, then a re-check so
+        the strip turns green on its own."""
+        from .core import runtime
+        from .webui import runtime_prompt
+        banner = getattr(self.window, "set_banner", None)
+        last = {"pct": None}
+
+        def show(pct):
+            if banner is None:
+                return
+            self.msg_queue.put(UiCallMsg(lambda: banner("runtime_install", {
+                "kind": "info",
+                "text": "Installing the app's own Linux (%s)... The log "
+                        "below says what it is doing." % runtime.IMAGE.version,
+                "progress": pct, "dismiss": False})))
+
+        def progress(done, total=None):
+            # the download's (bytes done, total); the import after it has no
+            # percent, so a finished download turns the bar into a spinner
+            if not total:
+                return
+            pct = int(done * 100 / total)
+            if pct >= 100:
+                pct = -1
+            if pct != last["pct"]:
+                last["pct"] = pct
+                show(pct)
+
+        def say(line):
+            self.msg_queue.put(LogMsg("[prerequisites] %s" % line, "info"))
+
+        def ask():
+            box = {}
+            done = threading.Event()
+
+            def _q():
+                try:
+                    box["yes"] = runtime_prompt.ask_before_replacing()
+                finally:
+                    done.set()
+            self.msg_queue.put(UiCallMsg(_q))
+            done.wait()
+            return bool(box.get("yes"))
+
+        def blocked(exc):
+            # runtime_prompt.offer_from_file installs on the calling thread,
+            # so the same question is asked on the UI thread and the install
+            # (a 1 GB import) goes to a worker, as on the Emulate tab
+            from .webui.emulate_rig import from_file_question
+            title, message, pick_title, filename = from_file_question(exc)
+
+            def _q():
+                if not messagebox.askyesno(title, message):
+                    return
+                path = filedialog.askopenfilename(title=pick_title,
+                                                  initialfile=filename)
+                if not path:
+                    return
+
+                def _from_file():
+                    try:
+                        replace = (ask() if runtime.status()[0] != "absent"
+                                   else False)
+                        runtime.install(log=say, source=path,
+                                        replace=replace)
+                    except Exception as e:              # noqa: BLE001
+                        say(str(e))
+                    finally:
+                        runtime.invalidate()
+                        self.msg_queue.put(UiCallMsg(self._recheck_prereqs))
+                threading.Thread(target=_from_file, daemon=True).start()
+            self.msg_queue.put(UiCallMsg(_q))
+
+        def work():
+            show(-1)
+            state = None
+            try:
+                state = runtime_prompt.ensure(say=say, progress=progress,
+                                              ask=ask, on_blocked=blocked)
+            except Exception as exc:                    # noqa: BLE001
+                say(str(exc))
+            finally:
+                runtime.invalidate()
+                if banner is not None:
+                    self.msg_queue.put(UiCallMsg(
+                        lambda: banner("runtime_install", None)))
+            if state == "ready":
+                self.msg_queue.put(LogMsg(
+                    "[prerequisites] the app's own Linux is installed; "
+                    "checking again.", "success"))
+            else:
+                self.msg_queue.put(LogMsg(
+                    "[prerequisites] the app's own Linux did not install; "
+                    "the lines above say why.", "error"))
+            self.msg_queue.put(UiCallMsg(self._recheck_prereqs))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _run_install_prereqs_win(self, script, wsl_only=False):
         """Run install_prerequisites.ps1 in an elevated PowerShell (it needs
         admin for winget install + wsl --install) and say so when that
         window never starts the script (PAD-327: a blank window on hotel
-        Wi-Fi, and the app said nothing)."""
+        Wi-Fi, and the app said nothing).  ``wsl_only``: its -WslOnly mode,
+        which switches WSL2 on and installs no distro (PAD-1103)."""
         from .core import prereq_launch
         marker = prereq_launch.new_marker_path()
         try:
             console = prereq_launch.ElevatedConsole(
-                prereq_launch.installer_args(script, marker),
+                prereq_launch.installer_args(script, marker,
+                                             wsl_only=wsl_only),
                 cwd=os.path.dirname(script))
         except Exception:
             console = None
@@ -1375,7 +1531,8 @@ class App:
             subprocess.Popen([
                 "powershell", "-NoProfile", "-Command",
                 f"Start-Process powershell -Verb RunAs -ArgumentList "
-                f"'-NoProfile -ExecutionPolicy Bypass -File \"{script}\"'",
+                f"'-NoProfile -ExecutionPolicy Bypass -File \"{script}\""
+                f"{' -WslOnly' if wsl_only else ''}'",
             ])
             return
         if console.declined:

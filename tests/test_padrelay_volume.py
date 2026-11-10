@@ -104,3 +104,59 @@ def test_no_volume_file_is_a_plain_relay(relay):
     vol = relay.Volume(None)
     assert vol.path is None
     assert vol.poll(now=10.0) == 1.0
+
+
+# ---- PAD-1109: the Mac reads the FIFO over docker exec (--pipe) ------------
+
+class _Vol:
+    def __init__(self, g):
+        self.path, self.g = "ctl", g
+
+    def poll(self):
+        return self.g
+
+
+def test_pump_keeps_samples_whole_scales_and_meters(relay):
+    chunks = [_pcm(1000, -1000) + b"\x10", b"\x00" + _pcm(4000), b""]
+    out, said = [], []
+    t = [0.0]
+    meter = relay.Meter(clock=lambda: t[0])
+
+    def read(_n):
+        t[0] += 20.0
+        return chunks.pop(0)
+    relay.pump(read, out.append, _Vol(0.5), said.append, meter)
+    got = b"".join(out)
+    assert struct.unpack("<4h", got) == (500, -500, 8, 2000)
+    assert said and said[0].startswith("[padrelay] last 40 s:")
+
+
+def test_pipe_gives_up_and_says_so_when_no_fifo_appears(relay, tmp_path, capsys):
+    t = [0.0]
+
+    def sleep(s):
+        t[0] += s
+    rc = relay.pipe_main([str(tmp_path / "audio.fifo"), ""], out=None,
+                         clock=lambda: t[0], sleep=sleep)
+    assert rc == 1
+    assert "this run is silent" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+def test_pipe_copies_the_fifo_to_its_output_at_the_volume(relay, tmp_path, capsys):
+    import io
+    import threading
+    fifo = str(tmp_path / "audio.fifo")
+    os.mkfifo(fifo)
+    ctl = tmp_path / "ctl.json"
+    _write(ctl, gain=0.5, muted=False)
+
+    def guest():
+        with open(fifo, "wb") as w:
+            w.write(_pcm(2000, -2000, 30000))
+    threading.Thread(target=guest, daemon=True).start()
+    out = io.BytesIO()
+    assert relay.pipe_main([fifo, str(ctl)], out=out) == 0
+    assert struct.unpack("<3h", out.getvalue()) == (1000, -1000, 15000)
+    err = capsys.readouterr().err
+    assert "over docker exec" in err and "6 bytes forwarded" in err

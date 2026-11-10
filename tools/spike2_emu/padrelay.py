@@ -39,6 +39,7 @@ import json
 import math
 import os
 import socket
+import stat
 import sys
 import time
 from array import array
@@ -146,9 +147,91 @@ class Meter:
         return s
 
 
+#: how long --pipe waits for playaudio.sh to make the FIFO
+PIPE_WAIT_S = 60.0
+
+
+def pump(read, write, vol, say, meter=None):
+    """Copy until read() ends: whole samples (a sample cut in two by the read
+    waits for its other half), at the volume, metered. Returns the bytes
+    written. A write error (the player went away) propagates."""
+    meter = meter or Meter()
+    total = 0
+    odd = b""
+    while True:
+        b = read(65536)
+        if not b:
+            return total
+        if vol.path:
+            b = odd + b
+            n = len(b) & ~1
+            b, odd = b[:n], b[n:]
+            b = scale(b, vol.poll())
+        write(b)
+        total += len(b)
+        meter.add(b)
+        said = meter.line()
+        if said:
+            say(said)
+
+
+def pipe_main(argv, out=None, clock=time.monotonic, sleep=time.sleep):
+    """padrelay.py --pipe <fifo> [ctl]: the FIFO to stdout (PAD-1109).
+
+    THE MAC'S SPEAKER READS THIS OVER `docker exec`, NOT OVER A PORT. Colima
+    publishes a box port through Lima's port forwarder, and on a Mac that
+    forwarder took the relay's whole stream - 11 minutes of it, at full rate,
+    nothing dropped - while ffplay at the far end received 310 KB, under two
+    seconds, and then nothing. A docker exec's output travels the Docker
+    socket that every other step of the run already uses, and it pushes back:
+    a player that stops reading stops this, and the guest's own dropped count
+    then says so instead of the sound vanishing in a buffer nobody can see.
+    Everything said goes to stderr; stdout is the sound."""
+    out = out or sys.stdout.buffer
+    if not argv:
+        print("usage: padrelay.py --pipe <fifo> [ctl]", file=sys.stderr)
+        return 2
+    fifo = argv[0]
+    vol = Volume(argv[1] if len(argv) > 1 and argv[1] else None)
+    vol.poll()
+
+    def say(s):
+        print(s, file=sys.stderr, flush=True)
+
+    t0 = clock()
+    while not (os.path.exists(fifo) and stat.S_ISFIFO(os.stat(fifo).st_mode)):
+        if clock() - t0 >= PIPE_WAIT_S:
+            say("[padrelay] no %s after %.0f s; this run is silent"
+                % (fifo, PIPE_WAIT_S))
+            return 1
+        sleep(0.25)
+    say("[padrelay] the player is reading %s over docker exec" % fifo)
+    fd = os.open(fifo, os.O_RDONLY)
+    total = [0]
+
+    def write(b):
+        out.write(b)
+        out.flush()
+        total[0] += len(b)
+    try:
+        pump(lambda n: os.read(fd, n), write, vol, say)
+    except (BrokenPipeError, OSError) as exc:
+        say("[padrelay] player went away: %s" % exc)
+        if out is getattr(sys.stdout, "buffer", None):
+            # or the exit's own flush of the dead pipe prints a traceback
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    finally:
+        say("[padrelay] %d bytes forwarded" % total[0])
+        os.close(fd)
+    return 0
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--pipe":
+        raise SystemExit(pipe_main(sys.argv[2:]))
     if len(sys.argv) < 3:
-        print("usage: padrelay.py <fifo> <port> [ctl]", file=sys.stderr)
+        print("usage: padrelay.py <fifo> <port> [ctl] | --pipe <fifo> [ctl]",
+              file=sys.stderr)
         raise SystemExit(2)
     fifo, port = sys.argv[1], int(sys.argv[2])
     vol = Volume(sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None)
@@ -180,30 +263,18 @@ def main():
         # at all - the player would find nothing to connect to and the run was
         # silent. Listen first, open second.
         fd = os.open(fifo, os.O_RDONLY)
-        total = 0
-        odd = b""
-        meter = Meter()
+        total = [0]
+
+        def send(b, conn=conn):
+            conn.sendall(b)
+            total[0] += len(b)
         try:
-            while True:
-                b = os.read(fd, 65536)
-                if not b:
-                    break
-                # a sample cut in two by the read waits for its other half
-                if vol.path:
-                    b = odd + b
-                    n = len(b) & ~1
-                    b, odd = b[:n], b[n:]
-                    b = scale(b, vol.poll())
-                conn.sendall(b)
-                total += len(b)
-                meter.add(b)
-                said = meter.line()
-                if said:
-                    print(said, flush=True)
+            pump(lambda n: os.read(fd, n), send, vol,
+                 lambda s: print(s, flush=True))
         except (BrokenPipeError, ConnectionResetError, OSError) as exc:
             print("[padrelay] player went away: %s" % exc, flush=True)
         finally:
-            print("[padrelay] %d bytes forwarded" % total, flush=True)
+            print("[padrelay] %d bytes forwarded" % total[0], flush=True)
             os.close(fd)
             conn.close()
 

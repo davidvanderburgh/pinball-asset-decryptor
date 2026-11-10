@@ -338,12 +338,13 @@ if [ "${1:-}" = watch.sh ] && [ "${PAD_PIVOT:-}" = 1 ]; then
     RUN_ARGS+=(--privileged -u 0 -e PAD_PIVOT=1 -e PAD_USER=pad)
 fi
 
-# SOUND LEAVES OVER TCP. No audio server exists inside the box and VNC carries
-# no sound, so the guest's PCM is served raw on a loopback port (playaudio.sh's
-# relay sink) and played out here on the Mac by host_player(), below.
-AUDIO_PORT=${PAD_AUDIO_PORT:-45997}
-RUN_ARGS+=(-p "127.0.0.1:$AUDIO_PORT:$AUDIO_PORT"
-           -e "PAD_AUDIO_SINK=relay" -e "PAD_AUDIO_PORT=$AUDIO_PORT")
+# SOUND LEAVES THROUGH docker exec. No audio server exists inside the box and
+# VNC carries no sound, so the guest's raw PCM FIFO (kept by playaudio.sh's
+# relay sink) is read by host_player(), below, with docker exec and played out
+# here on the Mac. It used to be served on a published loopback port, and
+# under Colima that port swallowed the stream (PAD-1109, see host_player).
+BOX_FIFO=/pad/rootfs/dump/audio.fifo
+RUN_ARGS+=(-e "PAD_AUDIO_SINK=relay")
 # THE VOLUME AND MUTE GO IN WITH IT (PAD-957). ffplay cannot change its level
 # while it plays, so the box's relay scales the sound instead, by a copy of the
 # Emulate tab's audio_ctl.json that ctl_pusher() below keeps up to date. A
@@ -351,9 +352,8 @@ RUN_ARGS+=(-p "127.0.0.1:$AUDIO_PORT:$AUDIO_PORT"
 # replaces it (which it does on every slider move), and whether a change in a
 # mounted folder shows up inside the box at once is up to the container
 # engine. Under its own name, so the box's playfield window (which reads
-# PAD_AUDIO_CTL) is left as it was.
+# PAD_AUDIO_CTL) is left as it was. host_player hands its path to the relay.
 BOX_CTL=/tmp/pad_audio_ctl.json
-[ -n "${PAD_AUDIO_CTL:-}" ] && RUN_ARGS+=(-e "PAD_RELAY_CTL=$BOX_CTL")
 
 # A card path on the HOST has to become one inside the box. Only the directory
 # is mounted, so this is a prefix swap and not a guess.
@@ -479,28 +479,37 @@ host_player() {
         return 0
     fi
     chargs=$(ffplay_channel_args "$ch")
-    echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch ($chargs) from tcp/$AUDIO_PORT"
+    echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch ($chargs) from the box's sound FIFO (docker exec)"
     # NOT exec'd, and STARTED AGAIN IF IT STOPS (PAD-832), so the TERM that
-    # takes this player down at the end has to reach ffplay as well.
+    # takes this player down at the end has to reach ffplay as well. Killing
+    # ffplay is enough: the docker exec feeding it dies on its next write.
     fp=""
     trap '[ -n "$fp" ] && kill "$fp" 2>/dev/null; exit 0' TERM INT
     quick=0; rc=""
     while :; do
-        # ONLY ONCE THE RELAY IS LISTENING. The fmt file appears a moment
-        # BEFORE playaudio.sh starts padrelay.py, and a Mac's port is
-        # published by the container engine's proxy, which accepts a
-        # connection whether or not anything in the box listens yet and then
-        # hangs up. ffplay reads that as the end of the stream and exits 0
-        # with nothing said - and as this was one exec, the whole run was
-        # silent: a Mac user's v1.287.5, where the -ac fix above had taken.
-        relay_listening || break
         # said only now: a box being stopped ends ffplay too, and is no restart
         [ -n "${rc:-}" ] && echo "[box] the speaker (ffplay) stopped (exit $rc); started it again"
         st=$SECONDS
+        # THROUGH docker exec, NOT A PUBLISHED PORT (PAD-1109). Under Colima
+        # the box's port reached the Mac through Lima's port forwarder, which
+        # took the relay's whole stream at full rate - 11 minutes, nothing
+        # dropped - while ffplay received 310 KB, under two seconds, and then
+        # nothing: a silent run with every counter healthy. docker exec rides
+        # the Docker socket every other step here already uses, and it pushes
+        # back, so a player that stops reading shows as the guest's dropped
+        # count instead of vanishing. padrelay.py --pipe waits for the FIFO
+        # itself (the PAD-832 race was a port answering before the relay was
+        # up; there is no port now), scales by the volume copy, and says what
+        # it sent every 30 s on stderr, which lands in the app's log.
+        # ONE READER OF THE FIFO: a relay left from the last player would
+        # take every other read of it, so it goes first
+        docker exec -u 0 "$NAME" pkill -f 'padrelay.py --pipe' >/dev/null 2>&1
         # $chargs unquoted on purpose: it is an option and its value
-        ffplay -hide_banner -loglevel error -nodisp -autoexit \
-             -fflags nobuffer -flags low_delay \
-             -f s16le -ar "$rate" $chargs "tcp://127.0.0.1:$AUDIO_PORT" &
+        docker exec -i "$NAME" python3 /pad/rig/padrelay.py --pipe \
+                "$BOX_FIFO" "${PAD_AUDIO_CTL:+$BOX_CTL}" |
+            ffplay -hide_banner -loglevel error -nodisp -autoexit \
+                 -fflags nobuffer -flags low_delay \
+                 -f s16le -ar "$rate" $chargs -i pipe:0 &
         fp=$!
         wait "$fp"; rc=$?; fp=""
         # The relay ends when the run does; so does this.
@@ -535,30 +544,6 @@ ctl_pusher() {
         fi
         sleep 0.25
     done
-}
-
-# IS padrelay.py LISTENING IN THE BOX? Read off the box's own socket table,
-# never by connecting: a test connection IS a player to the relay, which then
-# opens the FIFO for it and sees it hang up (playaudio.sh, "NO READINESS
-# PROBE"). Listening sockets are state 0A; the port is the local address's
-# hex. Gives up after PAD_BOX_RELAY_WAIT_S (60 s) or when the box is gone.
-relay_listening() {
-    local hex i n
-    hex=$(printf '%04X' "$AUDIO_PORT")
-    n=$(( ${PAD_BOX_RELAY_WAIT_S:-60} * 4 ))
-    i=0
-    while [ "$i" -lt "$n" ]; do
-        # matched out here, by the Mac's own awk: the box's is mawk, which
-        # stops at a missing input file, and tcp6 is one where IPv6 is off
-        docker exec "$NAME" cat /proc/net/tcp /proc/net/tcp6 2>/dev/null |
-            awk -v p=":$hex" 'substr($2, length($2) - 4) == p && $4 == "0A" { f = 1 }
-                              END { exit !f }' && return 0
-        docker exec "$NAME" true >/dev/null 2>&1 || return 1
-        sleep 0.25
-        i=$(( i + 1 ))
-    done
-    echo "[box] the box's audio relay never started listening on tcp/$AUDIO_PORT; this run is silent" >&2
-    return 1
 }
 
 # THE ENGINE HAS TO RUN 32-BIT ARM (PAD-884), and colima's does not out of the

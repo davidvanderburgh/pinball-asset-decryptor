@@ -1386,14 +1386,20 @@ Three container details are load-bearing, all in `padbox.sh`:
 | `--cap-add SYS_ADMIN --device /dev/fuse` | `cardmount.sh`'s read-only card mount |
 | `-p 127.0.0.1:5900` | the VNC display is an unauthenticated view of the machine; loopback only |
 
-**Sound leaves over loopback TCP** (`playaudio.sh`'s relay sink) and the Mac
-plays it with `ffplay`. ffplay cannot be given a new level while it plays,
-so the Emulate tab's Volume / Mute are applied by `padrelay.py` in the box
-(PAD-957): `padbox.sh`'s `ctl_pusher` copies `audio_ctl.json` to
-`/tmp/pad_audio_ctl.json` in the box whenever it changes, and the relay,
-told of it by `PAD_RELAY_CTL`, scales the samples and logs
-`[padrelay] volume -> 0.50` in `~/padaudio.log`. A copy, not a mount: the
-app replaces the file on every slider move, which a file bind mount loses.
+**Sound leaves through `docker exec`** (PAD-1109): `playaudio.sh`'s relay sink
+keeps the guest's PCM FIFO, and `padbox.sh`'s `host_player` runs
+`docker exec <box> python3 padrelay.py --pipe <fifo> <volume file>` piped into
+`ffplay -i pipe:0` on the Mac. It used to be a published loopback port, and
+under Colima Lima's port forwarder took the whole stream at full rate while
+ffplay received 310 KB and then nothing; docker exec rides the Docker socket
+and pushes back. ffplay cannot be given a new level while it plays, so the
+Emulate tab's Volume / Mute are applied by `padrelay.py` (PAD-957):
+`padbox.sh`'s `ctl_pusher` copies `audio_ctl.json` to
+`/tmp/pad_audio_ctl.json` in the box whenever it changes, and the relay
+scales the samples. It says `[padrelay] volume -> 0.50` and, every 30 s, how
+much it sent and how loud, on stderr, which lands in the app's log. A copy,
+not a mount: the app replaces the file on every slider move, which a file
+bind mount loses.
 
 **x11vnc runs with `-threads`** (`entrypoint.sh`, PAD-805). Without it, clicks
 and keys wait in line behind the ~1.5 MB frames the server is sending. The

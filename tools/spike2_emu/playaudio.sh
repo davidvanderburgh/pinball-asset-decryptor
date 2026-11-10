@@ -189,18 +189,19 @@ reap_port_relay() {
 # Same padrelay.py as the win sink below, for the same load-bearing reason:
 # it listens FIRST and opens the FIFO only once a player attaches, where an
 # ffmpeg would block on the silent FIFO and never open the socket at all.
-# THE VOLUME IS APPLIED HERE (PAD-957): the Mac's player is ffplay, which
-# cannot be given a new level while it plays, so the relay scales the samples
-# by PAD_RELAY_CTL, the copy of the Emulate tab's audio_ctl.json that
-# padbox.sh keeps in the box.
+# THE VOLUME IS APPLIED BY THE RELAY (PAD-957): the Mac's player is ffplay,
+# which cannot be given a new level while it plays, so padrelay.py scales the
+# samples by the copy of the Emulate tab's audio_ctl.json that padbox.sh keeps
+# in the box (/tmp/pad_audio_ctl.json, handed to `padrelay.py --pipe`).
+# NOT OVER A PORT ANY MORE (PAD-1109). The relay listened here and padbox.sh
+# published the port; under Colima, Lima's port forwarder took the whole
+# stream and the Mac's ffplay got its first 310 KB and then nothing. The Mac
+# now runs `padrelay.py --pipe` in the box with docker exec and plays its
+# output, so all this sink does is keep the FIFO there: made above, held open
+# by HOLD, removed when the run ends.
 if [ "$SINK" = relay ]; then
-    PORT=${PAD_AUDIO_PORT:-45997}
-    echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> host player (tcp/$PORT)"
-    reap_port_relay "$PORT"
-    python3 "$(dirname "$0")/padrelay.py" "$FIFO" "$PORT" "${PAD_RELAY_CTL:-}" &
-    SRV=$!
-    trap 'kill $HOLD $SRV 2>/dev/null; rm -f "$FIFO"' EXIT
-    wait $SRV
+    echo "[play] fifo $FIFO  ${RATE} Hz x ${CH} ch s16le -> the Mac's player (docker exec)"
+    wait $HOLD
     exit 0
 fi
 

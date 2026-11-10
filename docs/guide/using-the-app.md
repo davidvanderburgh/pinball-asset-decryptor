@@ -147,9 +147,11 @@ shorter one padded with silence to its length instead.
   your audio ends, so the next callout comes sooner and a song loops or
   moves on sooner. A sound with files to play in turn keeps the original's
   length.
-- **Room:** one sound bank holds about 2 GB; past that, longer sounds go
-  into extra banks beside it. They also share the games partition with
-  videos (see [SD card size](#sd-card-size-stern-spike-2)).
+- **Room:** longer sounds go into extra sound banks beside the main one,
+  and the machine has to hold the main bank and the banks it plays from in
+  its memory (see [How much audio fits](#how-much-audio-fits-stern-spike-2)).
+  They also share the games partition with videos (see
+  [SD card size](#sd-card-size-stern-spike-2)).
 - **When room runs short**, longer sounds are trimmed to fit, and the log
   names each one. Right-click a song > **Keep this song whole if the bank
   fills up** to fit it first.
@@ -194,6 +196,68 @@ Right-click a sound > **Play in turn** > **Add sounds to play in turn…**
 - Each file plays for as long as the sound it stands in for.
 - Needs an image build, not a direct SD write.
 
+### How much audio fits (Stern Spike 2)
+
+The limits for longer sounds, music modes and sounds in turn or at random,
+and how to fit a lot of audio on one card.
+
+| What | Limit |
+|---|---|
+| Music modes | 8 (mode 1, the card's own sounds, and 7 of yours). 4 are offered; **Add a music mode…** adds the rest. |
+| Files in turn or at random, per sound | 16 in all: the sound's own and 15 more. |
+| Files in turn or at random, per music mode | 16 in all for each mode's file: the mode's file and 15 more. |
+| One sound | About 20 minutes of stereo (218 MB, the biggest sound bank Stern ships). |
+| Number of sounds | No limit. |
+| All your audio together | The machine's memory (below) and the games partition (see [SD card size](#sd-card-size-stern-spike-2)). |
+
+**How long each file plays**
+
+- A replacement, a music mode's file, a flipper sound in attract and a sound
+  on a shot play whole, at their own length.
+- Files in turn or at random under the card's own sound (mode 1) are trimmed
+  to the length of the game's original sound in that slot.
+- Files in turn or at random under a music mode's file are trimmed to the
+  length of that mode's own file. Put the longest one first: it becomes the mode's file
+  and the rest can be as long as it.
+- The log names every file it trimmed and by how much.
+
+**The machine's memory**
+
+The machine keeps the main sound bank in memory all the time, and beside it
+every extra bank it is playing from, up to 8 at once (one per sound
+channel). Together they have to stay under about 2,180 MB.
+
+- On Godzilla 1.16 the main bank is about 1,650 MB, which leaves about
+  530 MB, roughly 50 minutes of stereo, for the 8 biggest extra banks
+  together. Other games leave more or less.
+- Sounds under about 3.8 minutes share 40 MB banks; a longer one gets a bank
+  of its own. So it is the 8 longest songs that use up the room: 20 songs of
+  5 minutes fit, 8 songs of 10 minutes do not.
+- Replacing one of the game's own songs takes the original out of the main
+  bank, which gives that room back.
+- The **Machine memory** line on the Replace Audio tab shows the total
+  before you build. A build that would not fit stops and names the bank.
+
+**Sound files**
+
+- Every sound goes on the card as 16-bit audio at 44.1 kHz in its slot's own
+  channels, about 10.6 MB a minute in stereo. The size or format of the file
+  you pick makes no difference to the room it takes.
+- Cut silence from the start and end of songs: it takes room like music does.
+- Set loudness per file (**Loudness of sound k…**, **Loudness of mode 2's
+  sound…**) instead of re-exporting louder files.
+
+**Fitting a lot of audio**
+
+- Keep long songs in music modes or as replacements, where they play whole.
+  Use sounds in turn and at random for callouts, effects and songs that are
+  the same length as the game's.
+- Keep the 8 longest songs short enough to fit the room together. Many songs
+  of a few minutes fit far more easily than a few very long ones.
+- One file in several music modes of the same sound is stored once, as long
+  as its loudness is the same in each.
+- For lots of video and audio, build for a bigger SD card on the Write tab.
+
 ### Sounds on shots in the game's modes (Stern Spike 2)
 
 While one of the game's modes runs, a hit on a shot you pick plays a sound you pick: one of
@@ -220,7 +284,7 @@ the game's own sounds (one it never plays, say) or a file of yours.
   picked together and pairs them by file name, and a row's video button plays its intro video. Drag its title bar to move its window and its
   corner to resize it; it keeps its place, and a double-click on the title
   bar puts it back.
-- **Machine memory** (Stern Spike 2): the status line shows how much of the machine's memory the card's sounds will take, before a Write. Hover it for the main bank, the game's own banks and the biggest extra bank; a build that would not fit is refused and names the bank.
+- **Machine memory** (Stern Spike 2): the status line shows how much of the machine's memory the card's sounds will take, before a Write. Hover it for the main bank, the game's own banks, the biggest extra bank and the limits; a build that would not fit is refused and names the bank.
 - **Replace from folder…**, **Find originals…** and clearing picks work
   the same on every Replace tab: see [Bulk picks and
   clearing](#bulk-picks-and-clearing).

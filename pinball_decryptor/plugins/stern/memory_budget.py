@@ -85,6 +85,23 @@ def _mb(n):
     return "{:,}".format(int(round(n / 1e6)))
 
 
+def limit_lines():
+    """PAD-1092: the tooltip's "Limits" lines. An owner adding lots of songs asked how long one can
+    be, how many music modes and how many files in turn or at random a sound takes; David: "we
+    should show this ... somewhere that shows this helpful information". Off the build's own
+    numbers (:data:`.spike2.soundbank.BANK_MAX_SEEN`, :data:`.sound_modes.MAX_MODES`,
+    :data:`.sound_modes.TURN_MAX`), so they move with them."""
+    from . import sound_modes as SMo
+    return [{"sec": "Limits"},
+            {"li": "One sound: up to about %d minutes of stereo." % int(minutes(SB.BANK_MAX_SEEN))},
+            {"li": "Music modes: up to %d, the card's own sounds as mode 1." % SMo.MAX_MODES},
+            {"li": "In turn or at random: up to %d files a sound, its own included, and %d more "
+                   "for each music mode's file." % (SMo.TURN_MAX, SMo.TURN_MAX - 1)},
+            {"li": "Files in turn are cut to the length of the sound they stand in for: the "
+                   "game's own, or in a music mode, that mode's first file. Put the longest "
+                   "first."}]
+
+
 def words(est):
     """``(chip text, kind, tooltip head, tooltip lines)`` for the Audio tab (kind ``""``,
     ``"warn"`` from 90 % of the room, ``"err"`` past it). The lines are the rich tooltip's
@@ -136,6 +153,7 @@ def words(est):
                          "to share." % (_mb(cap - total), minutes(cap - total))},
                   {"li": "Only the %d biggest banks count: a shorter song costs nothing more "
                          "until it is one of them." % chans}]
+    lines += limit_lines()
     lines += [{"sec": "How it works"},
               {"li": "The machine holds the main sound file in memory all the time."},
               {"li": "Beside it, every sound bank it is playing a sound from, up to %d at once "

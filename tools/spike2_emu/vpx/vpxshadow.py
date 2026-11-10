@@ -238,6 +238,47 @@ def route_b2s(lines, rep):
                    % (n, ", and controller.vbs's" if loads else ""))
 
 
+LOADEM_RE = re.compile(r"\bLoadEM\b", re.I)
+LOADEM_DEF_RE = re.compile(r"^\s*(?:Public\s+|Private\s+)?Sub\s+LoadEM\b", re.I)
+BLOCK_OPEN_RE = re.compile(r"^(?:If\b.*\bThen|Select\s+Case\b.*)$", re.I)
+BLOCK_CLOSE_RE = re.compile(r"^End\s+(?:If|Select)\b", re.I)
+
+
+def early_b2s(lines, rep):
+    """PAD-1094: a tribute that calls LoadEM only on one of its settings
+    (Aerosmith's Table1_Init does it under `If bUseFlexDMD`, and ships with
+    DMDMode = 2, PinUP, which the patch takes out) never starts B2S.Server:
+    no backglass, and controller.vbs's DOF is a no-op until LoadController
+    sets B2SOn. Such a table gets PadLoadEM: the bridge's Table1_Init starts
+    B2S.Server before the table's own init (so its `If B2SOn` backglass set-up
+    runs), and the table's own LoadEM calls become PadLoadEM, which does
+    nothing once it ran. A table calling LoadEM unconditionally is left as it
+    is. True when the table was given PadLoadEM."""
+    depth, conditional, calls = 0, False, []
+    for i, line in enumerate(lines):
+        code = _code(line).strip()
+        if not code or LOADEM_DEF_RE.match(code):
+            continue
+        if re.match(r"^(?:Public\s+|Private\s+)?(?:Sub|Function)\b", code, re.I):
+            depth = 0
+        if LOADEM_RE.search(code):
+            calls.append(i)
+            if depth > 0 or re.match(r"^If\b", code, re.I):   # in a block, or `If x Then LoadEM`
+                conditional = True
+        if BLOCK_CLOSE_RE.match(code):
+            depth = max(0, depth - 1)
+        elif BLOCK_OPEN_RE.match(code):
+            depth += 1
+    if not conditional:
+        return False
+    for i in calls:
+        code = _code(lines[i])
+        lines[i] = LOADEM_RE.sub("PadLoadEM", code) + lines[i][len(code):]
+    rep.append("B2S/DOF: the table starts B2S.Server only on some of its settings; "
+               "the bridge starts it before the table's init (%d call(s) made PadLoadEM)" % len(calls))
+    return True
+
+
 GAMENAME_RE = re.compile(r'^(\s*(?:Const\s+)?cGameName\s*=\s*)"[^"]*"', re.I)
 
 
@@ -833,7 +874,7 @@ def gen(m, had, quiet=None, dof=None):
             "\tre.Pattern = \"\\bController\\.B2S\" : re.IgnoreCase = True : re.Global = True",
             "\tPadB2SText = re.Replace(t, \"PadB2SCtl.B2S\")",
             "End Function"]
-    if dof:
+    if dof or m.get("flipper_dof"):
         out += ["Sub PadDOF(e, s, toy)   ' a DOF call of the table's, from a sub the bridge stands in for",
                 "\tOn Error Resume Next   ' a table without controller.vbs has no DOF",
                 "\tIf Not IsEmpty(toy) Then",
@@ -842,7 +883,16 @@ def gen(m, had, quiet=None, dof=None):
                 "\tDOF e, s",
                 "End Sub"]
     # ---- Init
+    if had.get("PadLoadEM"):
+        out += ["", "' PAD-1094: B2S.Server (DOF, the backglass) whatever DMD the table is set to;",
+                "' the table's own LoadEM calls come here and do nothing once it ran",
+                "Sub PadLoadEM",
+                "\tOn Error Resume Next   ' a table without controller.vbs has no B2S",
+                "\tIf IsEmpty(B2SOn) Then LoadEM",
+                "End Sub"]
     out += ["", "Sub Table1_Init"]
+    if had.get("PadLoadEM"):
+        out.append("\tPadLoadEM                   ' before the table's init: its If B2SOn set-up runs")
     if had["Table1_Init"]:
         out.append("\tTable1_Init_orig            ' the table's own physics, sounds, attract")
     out += ["\tOn Error Resume Next",
@@ -1168,6 +1218,24 @@ def gen(m, had, quiet=None, dof=None):
             if s.get("held_ms"):          # the post is down: it rolls on through
                 out.append("\tIf PadHeld%s And Not PadHeld%sRun Then PadHeld%s_Next" % (k, k, k))
             out.append("End Sub")
+        elif s.get("lift") is not None:
+            # PAD-1094: a kicker the ball cannot be kicked out of from where
+            # it rests (Aerosmith's elevator: the kick bounced off its roof and
+            # fell back in, a ball stuck for good). The table's own eject puts
+            # the ball at this height first (ElevatorKickOut: eBall.Z = 35);
+            # the coil does the same here, on the ball the kicker holds
+            out += ["Dim PadLiftBall%s" % k,
+                    "Sub %s_Hit : Set PadLiftBall%s = ActiveBall : %sbs%s.AddBall Me : "
+                    "PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
+                    % (k, k, enter + " : " if enter else "", k, k, fx(k + "_Hit")),
+                    "Sub PadLift%s_Sol(e)" % k,
+                    "\tIf e Then",
+                    "\t\tOn Error Resume Next",
+                    "\t\tIf bs%s.Balls > 0 Then PadLiftBall%s.Z = %s" % (k, k, s["lift"]),
+                    "\t\tOn Error Goto 0",
+                    "\tEnd If",
+                    "\tbs%s.SolOut e" % k,
+                    "End Sub"]
         else:
             out.append("Sub %s_Hit : %sbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
                        % (k, enter + " : " if enter else "", k, k, fx(k + "_Hit")))
@@ -1207,6 +1275,8 @@ def gen(m, had, quiet=None, dof=None):
     # ---- solenoids
     out += ["", "'---- the machine's coils (godzilla-style numbering: the map's small numbers)"]
     held = {"bs%s.SolOut" % k: "PadHeld%s_Sol" % k for k, s in saucers(m).items() if s.get("held_ms")}
+    held.update({"bs%s.SolOut" % k: "PadLift%s_Sol" % k for k, s in saucers(m).items()
+                 if s.get("lift") is not None and not s.get("stack")})
     for num, s in m["solenoids"].items():
         if num == "_" or not s.get("callback"):
             continue
@@ -1226,7 +1296,17 @@ def gen(m, had, quiet=None, dof=None):
         if name != "_" and isinstance(f, dict) and f.get("callback") and f.get("solenoid"):
             out.append("SolCallback(%d) = %s          ' %s, as the controller follows it"
                        % (int(f["solenoid"]), vb(f["callback"]), f.get("name", name)))
+    fdof = {k: v for k, v in m.get("flipper_dof", {}).items() if k != "_"}
     for const, sub in flips.items():
+        if const in fdof:
+            # PAD-1094: the table's DOF event for this flipper (its own script
+            # names it, but never fires it on a flip), from the machine's coil
+            out += ["Sub PadFlip_%s(e)" % const, "\t%s e" % sub,
+                    "\tOn Error Resume Next   ' a table without controller.vbs has no DOF",
+                    "\tIf e Then PadDOF %d, 1, DOFFlippers Else PadDOF %d, 0, DOFFlippers"
+                    % (fdof[const], fdof[const]),
+                    "End Sub"]
+            sub = "PadFlip_" + const
         out.append("SolCallback(%s) = %s          ' the machine's flipper coil" % (const, vb(sub)))
     # ---- test hook
     out += ["", "Sub PadTestTimer_Timer",
@@ -1410,6 +1490,7 @@ def patch(script, m):
             quiet[name] = args
     neuter(lines, m.get("neuter", []), rep)
     route_b2s(lines, rep)
+    had["PadLoadEM"] = early_b2s(lines, rep)
     own_lamp_reads(lines, rep)
     stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
     for key, (progid, cls, label) in DMD_STUBS.items():

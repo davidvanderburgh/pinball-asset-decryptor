@@ -312,6 +312,18 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `PadB2S` before `Controller` becomes PAD.Controller; every
   `Controller.B2S...` in the script, and in controller.vbs as it loads
   (`PadB2SText`), goes to it, and Table1_Exit stops it.
+* **B2S.Server starts whatever DMD the table is set to** (PAD-1094).
+  Aerosmith's Table1_Init calls `LoadEM` only under `If bUseFlexDMD`, and
+  ships set to PinUP (DMDMode 2), which the patch takes out: B2S.Server never
+  started, so no backglass, and controller.vbs's `DOF` did nothing (B2SOn
+  stays Empty until `LoadController`). A table whose every `LoadEM` is not
+  unconditional (`early_b2s`) has them made `PadLoadEM` (LoadEM once, if
+  B2SOn is still Empty), and the bridge's Table1_Init calls it before the
+  table's own init, so its `If B2SOn` backglass set-up runs too. A table
+  that calls `LoadEM` outright is patched as before. `flipper_dof`
+  (`{"sLLFlipper": 101, ...}`) sends a flipper's DOF event from the machine's
+  flipper coil, for a table whose script names its flipper events (in
+  `SoundFXDOF(..., DOFFlippers)`) but never fires them on a flip.
 * **A ROM table's backglass runs beside PAD.Controller** (PAD-852). There
   controller.vbs's `LoadVPM` made `Controller` a B2S.Server, which runs
   VPinMAME inside itself and shows the .directb2s; PADSPIKE2.vbs makes it
@@ -402,6 +414,12 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   entry kicker takes the ball in (`AddBall`), and the machine's coil kicks it
   out of the exit, where the table's own timer did. With a `stack`, a full lane
   sends the ball out of the exit too.
+* **A saucer's `lift`** (PAD-1094): the ball's Z just before the coil
+  kicks it. Aerosmith's elevator kick, from where the ball rests, bounced
+  off the elevator's roof and fell back in, every pulse the game sent; the
+  table's own eject (ElevatorKickOut) raises the ball to Z 35 first, and
+  the bridge's `PadLift<kicker>_Sol` does the same on the ball the kicker
+  holds.
 * **A switch the table has no object for** (PAD-922). John Wick's table
   walls its car in with an invisible ramp, so a car shot met no switch.
   `retrofit_triggers` clones a trigger (`clone`), gives it its own drag

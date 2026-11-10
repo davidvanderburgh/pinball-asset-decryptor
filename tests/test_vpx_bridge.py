@@ -872,6 +872,112 @@ def test_shadow_dof_reaches_b2s_under_vbscript(tmp_path):
     assert r.stdout.strip() == "B2S got name 101=1 110=1 110=0", r.stdout + r.stderr
 
 
+GATED_B2S_TRIBUTE = """Option Explicit
+ExecuteGlobal GetTextFile("controller.vbs")
+Const DMDMode = 2
+Dim bUseFlexDMD
+Sub Table1_Init
+    If DMDMode = 1 Then bUseFlexDMD = True
+    if bUseFlexDMD Then
+        LoadEM   ' only with FlexDMD
+    end if
+    If b2son then
+        Controller.B2SSetData 1,1
+    End If
+End Sub
+"""
+
+
+def test_shadow_starts_b2s_when_the_table_gates_loadem():
+    # PAD-1094: Aerosmith calls LoadEM only under `If bUseFlexDMD` and ships
+    # on PinUP: no B2S.Server, so no backglass and every DOF call a no-op
+    vs = pytest.importorskip("vpxshadow")
+    out, rep = vs.patch(GATED_B2S_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert "        PadLoadEM   ' only with FlexDMD" in out and "\n        LoadEM" not in out, "the table's own call runs once at most"
+    assert "Sub PadLoadEM\n\tOn Error Resume Next" in out and "\tIf IsEmpty(B2SOn) Then LoadEM" in out
+    init = out[out.index("\nSub Table1_Init\n"):]
+    assert init.index("\tPadLoadEM") < init.index("\tTable1_Init_orig"), "before the table's If B2SOn set-up"
+    assert init.index("Set PadB2S = Controller") < init.index('CreateObject("PAD.Controller")')
+    assert "made PadLoadEM" in " ".join(rep)
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+    # a table that loads B2S outright is patched as before
+    plain, rep = vs.patch(B2S_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert "PadLoadEM" not in plain and "made PadLoadEM" not in " ".join(rep)
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_gated_loadem_reaches_b2s_under_vbscript(tmp_path):
+    # the generated Init, run for real: B2S.Server starts once, the table's
+    # If B2SOn set-up reaches it, and a DOF call after the swap does too
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(GATED_B2S_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    lines = out.split("\n")
+    a = lines.index("Dim PadB2S")
+    b = next(n for n in range(a, len(lines)) if lines[n].startswith("End Function")
+             and "PadB2SText" in "".join(lines[a:n]))
+    c = lines.index("Sub PadLoadEM")
+    d = lines.index("End Sub", c)
+    i = lines.index("Sub Table1_Init_orig")
+    j = lines.index("End Sub", i)
+    k = lines.index("Sub Table1_Init")
+    e = next(n for n in range(k, len(lines)) if 'CreateObject("PAD.Controller")' in lines[n])
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Const DMDMode = 2",
+        "Dim bUseFlexDMD, Controller, B2SOn, Loads",
+        "Class FakeB2S", "Public Log, B2SName",
+        "Public Sub B2SSetData(a, b) : Log = Log & a & \"=\" & b & \" \" : End Sub", "End Class",
+        "Class FakePad : Public Sub B2SSetData(a, b) : WScript.Echo \"PAD got \" & a : End Sub : End Class",
+        "Function CreateObject(p) : Set CreateObject = New FakePad : End Function",
+        "Sub LoadEM : Loads = Loads + 1 : Set Controller = New FakeB2S : B2SOn = True : End Sub",
+        "\n".join(lines[a:b + 1]),
+        "Sub DOF(e, s) : If B2SOn Then PadB2SCtl.B2SSetData e, s",
+        "End Sub",
+        "\n".join(lines[c:d + 1]),
+        "\n".join(lines[i:j + 1]).replace("Controller.B2SSetData", "PadB2SCtl.B2SSetData"),
+        "\n".join(lines[k:e + 1]), "End Sub",
+        "Table1_Init : DOF 125, 1",
+        "WScript.Echo Loads & \" \" & PadB2S.Log"]), encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "1 1=1 125=1", r.stdout + r.stderr
+
+
+def test_shadow_saucer_lift_raises_the_ball_before_the_kick():
+    # PAD-1094: Aerosmith's elevator kick bounced off the elevator and fell
+    # back in; the table's own eject raises the ball (Z 35) before it kicks
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["saucers"]["Kicker1"]["lift"] = 35
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    assert "Sub Kicker1_Hit : Set PadLiftBallKicker1 = ActiveBall : bsKicker1.AddBall Me" in out
+    assert "\t\tIf bsKicker1.Balls > 0 Then PadLiftBallKicker1.Z = 35" in out, "only a ball it holds"
+    sol = out[out.index("Sub PadLiftKicker1_Sol(e)"):]
+    assert sol.index("PadLiftBallKicker1.Z = 35") < sol.index("\tbsKicker1.SolOut e")
+    assert 'SolCallback(3) = "PadLiftKicker1_Sol"' in out
+    assert "bsKicker1.KickZ = 1.4" in out
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+    plain, _ = vs.patch(MINI_TRIBUTE, json.loads(json.dumps(MINI_SHADOW)))
+    assert "PadLift" not in plain and 'SolCallback(3) = "bsKicker1.SolOut"' in plain
+
+
+def test_shadow_flipper_dof_from_the_machines_flipper_coil():
+    # PAD-1094: Aerosmith's script names its flipper DOF events (101/102) but
+    # never fires them on a flip
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["flipper_dof"] = {"_": "x", "sLLFlipper": 101}
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    assert ("Sub PadFlip_sLLFlipper(e)\n\tSolLFlipper e\n\tOn Error Resume Next   "
+            "' a table without controller.vbs has no DOF\n"
+            "\tIf e Then PadDOF 101, 1, DOFFlippers Else PadDOF 101, 0, DOFFlippers\nEnd Sub") in out
+    assert 'SolCallback(sLLFlipper) = "PadFlip_sLLFlipper"' in out
+    assert 'SolCallback(sLRFlipper) = "SolRFlipper"' in out, "a flipper without an event as before"
+    assert "Sub PadDOF(e, s, toy)" in out
+    assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
+
+
 DOF_TRIBUTE = """Option Explicit
 ExecuteGlobal GetTextFile("controller.vbs")
 Const cGameName = "rushle"   ' DOF's name

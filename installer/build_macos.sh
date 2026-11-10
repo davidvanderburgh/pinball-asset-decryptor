@@ -321,6 +321,13 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.soundbank" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.netbridge" \
     --hidden-import "pinball_decryptor.plugins.stern.spike2.window" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_extract" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_games" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_keys" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_selfextract" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_spk" \
+    --hidden-import "pinball_decryptor.plugins.stern.spks" \
     --hidden-import "pinball_decryptor.plugins.stern.game_check" \
     --hidden-import "pinball_decryptor.plugins.stern.final_wizard" \
     --hidden-import "pinball_decryptor.plugins.stern.memory_budget" \

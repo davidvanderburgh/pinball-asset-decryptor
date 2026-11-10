@@ -469,6 +469,35 @@ HELP_CONTENT = {
          "log names each one and the SD card size that would keep them whole.\n\n"
          "> SD card size on the Write tab (Windows and Linux) builds for a bigger "
          "card and gives the games partition more room."),
+        ("How much audio fits", [
+            "The limits for longer sounds, music modes and sounds in turn or at random "
+            "(Stern Spike 2).",
+            "| What | Limit |\n"
+            "|---|---|\n"
+            "| Music modes | 8, the card's own sounds as mode 1 |\n"
+            "| In turn or at random | 16 files a sound, its own included |\n"
+            "| In a music mode | 15 more for each mode's file |\n"
+            "| One sound | about 20 minutes of stereo |\n"
+            "| Number of sounds | unlimited |",
+            "### How long each one plays\n"
+            "- A replacement, a music mode's file, a flipper sound and a sound on a shot "
+            "play whole.\n"
+            "- Files in turn or at random under the card's own sound are cut to the length "
+            "of the game's sound.\n"
+            "- In a music mode they are cut to that mode's first file: put the longest first.\n"
+            "- The log names each one it cut.",
+            "### The machine's memory\n"
+            "The machine holds the main sound file all the time, and beside it each sound bank "
+            "it is playing from, up to 8 at once. Together they must stay under about 2,180 MB "
+            "(on Godzilla 1.16, about 50 minutes of stereo beside the main file).\n\n"
+            "- Songs under about 4 minutes share banks; a longer one gets a bank of its own. "
+            "The 8 longest songs are what count.\n"
+            "- Replacing one of the game's own songs gives its room back.\n"
+            "- **Machine memory** beside the slot count shows the total before you build "
+            "(hover it); Write refuses a card that will not fit.",
+            {"note": "Many songs of a few minutes fit far more easily than a few very long ones. "
+                     "Cut silence from the ends: it takes room like music does."},
+        ]),
         ("Save and load settings",
          "**More > Save settings to a file…** keeps this tab's picks, ticks and "
          "options in one small file. **Load settings from a file…** puts them back, "

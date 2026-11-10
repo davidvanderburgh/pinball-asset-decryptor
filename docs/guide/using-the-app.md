@@ -284,7 +284,7 @@ the game's own sounds (one it never plays, say) or a file of yours.
   picked together and pairs them by file name, and a row's video button plays its intro video. Drag its title bar to move its window and its
   corner to resize it; it keeps its place, and a double-click on the title
   bar puts it back.
-- **Machine memory** (Stern Spike 2): the status line shows how much of the machine's memory the card's sounds will take, before a Write. Hover it for the main bank, the game's own banks and the biggest extra bank; a build that would not fit is refused and names the bank.
+- **Machine memory** (Stern Spike 2): the status line shows how much of the machine's memory the card's sounds will take, before a Write. Hover it for the main bank, the game's own banks, the biggest extra bank and the limits; a build that would not fit is refused and names the bank.
 - **Replace from folder…**, **Find originals…** and clearing picks work
   the same on every Replace tab: see [Bulk picks and
   clearing](#bulk-picks-and-clearing).

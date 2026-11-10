@@ -6396,8 +6396,9 @@ runtime's (the game's language keys and launch do not see them), so the ball wai
 (`ball_launch_flag`, 20 s at most); then, where the game's PLAYER LANGUAGE SELECT is on (`value language_adjustment`, read
 as the intro begins; Godzilla's 14 puts its own bar over its start film, under the intro), a language window: the
 top line says `LANGUAGE: ENGLISH`, each flipper press flips every player's language word (`data language_player`, +
-4 x player; `text language_<n>` names them), Action (or 10 s with no press) goes on; then the first pick, held back
-until here. Godzilla's own bar over its start film is under the intro, so this window is where the language is chosen.
+4 x player; `text language_<n>` names them), and 6 s after the last press it goes on by itself (not on Action: Godzilla
+launches the ball at an Action press the runtime holds back, so an Action press, or any launch, ends it too); then the
+first pick, held back until here. Godzilla's own bar over its start film is under the intro, so this window is where the language is chosen.
 
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 

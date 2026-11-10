@@ -54,16 +54,23 @@ joining a plain game's ball 1) has no intro - its film has played.
 - scripts/shot_pad1114.py (Modes tab co-op row: cramped by its note + Try it; the dialog is the better place).
 - Before shots: C:/tmp/PAD-1114/shots/before_characters_dialog.png (scripts/shot_pad1079.py before).
 
-## Left (runs 2+)
+## Done (run 2) - emulator-proven, Godzilla LE 1.16 and Pro 1.16
 
-- mode_write.coop_clips_into: the intro clip into the bank (`intro_clip PadCoopIntro <ms>` in coop.cfg).
-- sound_modes + engine: the intro's soundtrack on a carrier (INTRO_MODE pseudo mode; is_shot bounded to SHOT_MAX;
-  _free_carrier skipping attract/shot slots; `cintro` line; card record `#cintro`). engine._sound_modes_for_build
-  adds it when coop_play.load(project) and an intro is set (WAV made by intro_audio into the write cache).
-- runtime (pad_mode_runtime.c "PAD-1114"): steps 1-5; prebuilt mode.so rebuilt (build_prebuilt.sh).
-- Dialog: an "Intro video..." row in the Co-op characters dialog (webui tabs/modes.py coop_intro rpc,
-  modes_dialogs.js), help text, MODE_SDK.md, docs/guide.
-- Tests: tests/test_pad1114_coop_intro.py (storage, settings zip, cfg lines, runtime lifted helpers).
-- Emulator proof on Godzilla LE 1.16 + Pro 1.16: solo hold, menu CO-OP, TEAM 2v2: intro plays with sound, both
-  flippers skip it, language window, then the pick; no intro on a plain Start.
-- After shots (dialog) and the reply draft.
+Rig C:/tmp/PAD-1114/rig: mkset.py (scratch project -> engine.write_overrides; needs its main() guard: the build's
+worker processes re-import the script), intro.sh (solo start: SKIP=1 both flippers at 4 s; TP=<n> TIMED PLUNGER on),
+intro_menu.sh (start menu, STEPS=1 STEPKEY=60 = TEAM PLAY 2 VS 2), go.sh <list> <out> <job> as root.
+
+- Plays full-screen with `pm_clip` over the game's film (the game's film takes the surface ~30-120 ms in: asked for
+  again once). Its sound: sounds.cfg `cintro`, carrier LE request 979 (idx 1725), Pro 1848 (idx 1259); the lookup
+  swap logged on both. The game's sounds (66/74 music, 585/589) faded once each, its music asked for again after.
+- Both flipper buttons skip it (each let go once: the right one is held through a solo Start); the game's language
+  stays as it was (its keys vetoed).
+- Ball waits; language window when adjustment 14 reads 1 (NOT the game's 0x225300 check: it answers 0 even on the
+  stock card while the bar shows); a flipper flips every player's word (LE 0x7b0e7c+4p, Pro 0x7a4844+4p; sampler saw
+  0 -> 1); closes 6 s after the last press. NOT on Action: Godzilla launches the ball at an Action press the runtime
+  holds back (flags dropped 33 ms after switch 34 was hidden), so an Action press or any launch ends it too.
+- TIMED PLUNGER (96): read once, at Start, before the intro begins - answered 0 at a Start about to be co-op/team
+  (button held, menu entry picked) and while held; TP=5 run: "read 5, answered 0", ball stayed.
+- Team 2v2 from the start menu: 4 players join, intro, skip, ball, language, players-added lines, pick.
+- Also fixed: the co-op test prelude lacked PAD-1108's coop_users_put (16 tests failed to link on main).
+

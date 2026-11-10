@@ -67,7 +67,7 @@ static int coop_ball_waits(void) { return ball_waits; }
 static void edge_take_held(unsigned id) { (void)id; }    /* PAD-1078: the drain section's (test_pad1051) */
 /* PAD-1114: the co-op intro (test_pad1114_coop_intro_runtime): never playing here */
 enum { CI_OFF, CI_START, CI_PLAY, CI_BALL, CI_LANG };
-static struct { int phase, pick_who; volatile int flips, go; } ci;
+static struct { int phase, pick_who; volatile int flips, go, go_down; } ci;
 static void coop_intro_begin(const char *why) { (void)why; }
 struct pm_stock_rule;
 static struct pm_stock_rule *pm_stock_rule(unsigned id) { (void)id; return 0; }

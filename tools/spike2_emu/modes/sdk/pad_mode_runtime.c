@@ -15987,7 +15987,7 @@ static struct {
     int again, freed, pick_who, step, lang, flips_seen;
     int lang_asks;                       /* the game's PLAYER LANGUAGE SELECT asks in this game (read at its start) */
     unsigned hold_adj;                   /* coop.cfg `intro_hold <id>`: TIMED PLUNGER, answered 0 while the ball is held */
-    volatile int flips, go;
+    volatile int flips, go, go_down;
     unsigned music[CI_MUSIC], n_music, faded, quiet[8], n_quiet;
     const char *why;
 } ci;
@@ -16698,7 +16698,18 @@ static unsigned adj_chain(unsigned id)
     unsigned v = adj_game(id);
     if (adj_hand_on) v = hand_adj_answer(id, v);
     if (adj_coop_on) v = coop_adj_answer(id, v);
-    if (ci.hold_adj && id == ci.hold_adj && ci.phase >= CI_PLAY) v = 0;   /* PAD-1114: the ball stays in the lane */
+    if (ci.hold_adj && id == ci.hold_adj) {                   /* PAD-1114: the ball stays in the lane */
+        /* the game reads it at its Start (emulator, Godzilla LE 1.16: once, before the intro begins), so a Start that
+         * is about to be a co-op or team game - the right flipper held, or the start menu's entry just picked - is
+         * answered off too */
+        int soon = ci.clip[0] && (coop_button_held() || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS));
+        static int said;
+        if (v && (ci.phase >= CI_PLAY || soon)) {
+            if (said < 8 && ++said)
+                say("co-op intro: the game read TIMED PLUNGER (%u) - %u, answered 0: the intro holds the ball", id, v);
+            v = 0;
+        }
+    }
     return v;
 }
 
@@ -17356,10 +17367,16 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
         }
         return;
     }
+    if (ci.phase == CI_LANG && id == coop_action && coop_teammates()) {
+        /* PAD-1114: Action goes on at its RELEASE, so the whole press is the window's (hidden): ended at the press, the
+         * pick opened under a held Action and its release launched the ball (emulator, Godzilla LE 1.16) */
+        if ((level & 1u) == closed) ci.go_down = 1;
+        else if (ci.go_down) ci.go = 1;
+        return;
+    }
     if ((level & 1u) != closed || !coop_teammates()) return;
-    if (ci.phase == CI_LANG) {                                /* PAD-1114: a flipper flips the language, Action goes on */
+    if (ci.phase == CI_LANG) {                                /* PAD-1114: a flipper flips the language */
         if (id == coop_left || id == coop.button) ci.flips++;
-        else if (id == coop_action) ci.go = 1;
         return;
     }
     if (ci.phase >= CI_PLAY) return;                          /* the intro's (its skip is polled) and the ball's wait */
@@ -18296,13 +18313,16 @@ static void coop_chars_arm(struct site *e)
  *   CI_BALL   until the game says its ball waits in the plunger (`ball_launch_flag` / `_wait_flag`, CI_BALL_MS at most)
  *   CI_LANG   with the game's PLAYER LANGUAGE SELECT on (`value language_adjustment`) and its players' language words known
  *             (`data language_player`, + 4 x player): the top line says the language, each flipper press flips it for
- *             every player, Action (or CI_LANG_MS without a press) goes on
+ *             every player, and CI_LANG_MS after the last press it goes on by itself. Not on Action: Godzilla launches the
+ *             ball at an Action press the runtime hides (emulator, LE and Pro 1.16: the plunger flags dropped 33 ms after
+ *             switch 34 was held back - another input path, as the flippers' cabinet keys are the language select's), so
+ *             an Action press, or the ball launched any other way, ends the window too, and the pick has a launched ball
  * then the first pick, held back (coop_pick_open) until here. A game that turns co-op later (a teammate joining a plain
  * game's ball in play) has no intro: its own film has played. */
 #define CI_GRACE_MS   1500ul             /* a clip not playing this soon after it was asked for is asked for again, once */
 #define CI_OVER_MS    3000ul             /* past its own length: over, whatever the clip says */
 #define CI_BALL_MS   20000ul
-#define CI_LANG_MS   10000ul
+#define CI_LANG_MS    6000ul             /* the language window closes this long after it opened or was last flipped */
 #define CI_STEP_MS    1500ul
 #define BUS_MUSIC_BIT 0x01u              /* the music bus (item 150, as mode_file.c's BUS_MUSIC) */
 
@@ -18380,7 +18400,6 @@ static void ci_language_say(void)
     pm_snprintf(key, sizeof key, "language_%d", ci.lang);
     name = pm_port_text(key);
     if (ci.step == 1) pm_snprintf(words, sizeof words, "FLIPPERS CHANGE IT");
-    else if (ci.step == 2) pm_snprintf(words, sizeof words, "ACTION TO GO ON");
     else pm_snprintf(words, sizeof words, "LANGUAGE: %s", name && name[0] ? name : ci.lang ? "OTHER" : "ENGLISH");
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
 }
@@ -18419,10 +18438,11 @@ static int ci_language_open(void)
     }
     ci.lang = (int)(*w & 1u);
     ci.flips = ci.flips_seen = 0;
-    ci.go = 0;
+    ci.go = ci.go_down = 0;
     ci.step = 0;
     ci.step_at = ci.said_at = pm_ms();
-    say("co-op intro: the language window - the flippers flip it (now %u), Action goes on", *w);
+    say("co-op intro: the language window - the flippers flip it (now %u); it goes on %lu ms after the last press", *w,
+        CI_LANG_MS);
     ci_language_say();
     return 1;
 }
@@ -18540,11 +18560,12 @@ static void coop_intro_tick(void)
             return;
         }
         if (ci.go || coop_ball_waits() == 0 || now - ci.step_at >= CI_LANG_MS) {
-            ci_over(ci.go ? "Action went on" : coop_ball_waits() == 0 ? "the ball was launched" : "the time ran out");
+            ci_over(ci.go ? "Action - the game launches the ball at it" : coop_ball_waits() == 0
+                    ? "the ball was launched" : "the language is chosen");
             return;
         }
         if (now - ci.said_at >= CI_STEP_MS) {
-            ci.step = (ci.step + 1) % (coop_action ? 3 : 2);
+            ci.step = (ci.step + 1) % 2;
             ci.said_at = now;
             ci_language_say();
         }

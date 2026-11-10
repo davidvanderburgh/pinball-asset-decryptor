@@ -189,6 +189,29 @@ def disc_subs(m):
     ]
 
 
+#: a ball's roll from the upper section's post down to LOWER LOCK
+VAN_ROLL_MS = 240
+#: a ball shot into the upper section crosses each free switch above its place
+VAN_CROSS_MS = 80
+
+
+def roll_in_sub(up):
+    """PadVanRollIn(place): a ball shot in crosses the free switches above
+    `place` (UPPER LOCK n down to place+1, one at a time, so the game never
+    counts more balls than will rest there) and rests on `place` (PadVanRest).
+    vpmTimer runs at 40 ms, so each switch is made for one tick."""
+    lines = ["Sub PadVanRollIn(place)", "\tSelect Case place"]
+    for place in range(1, len(up) + 1):
+        lines.append("\tCase %d" % place)
+        t = 0
+        for n in reversed(up[place:]):
+            lines += ["\t\tvpmTimer.AddTimer %d, \"Controller.Switch(%d) = 1 '\"" % (t, n),
+                      "\t\tvpmTimer.AddTimer %d, \"Controller.Switch(%d) = 0 '\"" % (t + VAN_CROSS_MS // 2, n)]
+            t += VAN_CROSS_MS
+        lines.append("\t\tvpmTimer.AddTimer %d, \"PadVanRest '\"" % (t + VAN_CROSS_MS // 2))
+    return lines + ["\tEnd Select", "End Sub", ""]
+
+
 def lair_subs(m, van):
     """The Pro's LAIR lane runs under the playfield to the lock's lower place:
     with Training lit, a ball landing on LOWER LOCK 1 without passing the upper
@@ -200,9 +223,10 @@ def lair_subs(m, van):
     return [
         "' the LAIR lane: a ball going up it drops onto LOWER LOCK, where the game holds it",
         "Sub PadLairIn(aTrigger)",
-        "\tIf ActiveBall.VelY < 0 And bsVan.Balls < %d Then" % len(van),
+        "\tIf ActiveBall.VelY < 0 And bsVan.Balls + padVanFalling < %d Then" % len(van),
         "\t\taTrigger.DestroyBall",
         "\t\tbsVan.Balls = bsVan.Balls + 1",
+        "\t\tbsVan.Update",
         "\tEnd If",
         "End Sub",
         "",
@@ -236,32 +260,61 @@ def pad_subs(m):
     ] + disc_subs(m) + [
         "' the lock's upper section (UPPER LOCK 1..%d): a ball shot in rests on the" % len(up),
         "' UPPER LOCK post. The game counts a lock there; a ball put straight into",
-        "' the lower section was let out again at once (PAD-896)",
+        "' the lower section was let out again at once (PAD-896). On its way down",
+        "' it rolls over the free switches above its place, as on the machine: the",
+        "' game calls a lock switch that no ball crosses for many balls broken, and",
+        "' then lights no more locks (PAD-1116)",
         "Sub PadVanIn(aKicker)",
-        "\tIf padVanUp < %d Then" % len(up),
+        "\tIf padVanUp + padVanComing < %d Then" % len(up),
         "\t\taKicker.DestroyBall",
-        "\t\tpadVanUp = padVanUp + 1",
-        "\t\tPadVanUpperSw",
+        "\t\tpadVanComing = padVanComing + 1",
+        "\t\tPadVanRollIn padVanUp + padVanComing",
         "\tElse",
         "\t\taKicker.Kick 190, 7        ' the upper section is full: it comes back out",
         "\tEnd If",
+        "End Sub",
+        "",
+    ] + roll_in_sub(up) + [
+        "Sub PadVanRest",
+        "\tpadVanComing = padVanComing - 1",
+        "\tpadVanUp = padVanUp + 1",
+        "\tPadVanUpperSw",
+        "\tPadVanFlow",
         "End Sub",
         "",
         "Sub PadVanUpperSw",
     ] + up_sw + [
         "End Sub",
         "",
-        "' UPPER LOCK: the post drops the upper section's bottom ball into the lower one",
+        "' UPPER LOCK is the post under the upper section: while it is down the balls",
+        "' there roll on to LOWER LOCK, one after another as the lower place has room.",
+        "' The game holds it down ~5 s to start Ninja Pizza Multiball and expects all",
+        "' of them out; one ball per pulse used up its retries and it called UPPER",
+        "' LOCK, then LOWER LOCK, a DEVICE MALFUNCTION (PAD-1116, emulator)",
         "Sub PadVanDrop(Enabled)",
-        "\tIf Enabled And padVanUp > 0 And bsVan.Balls < %d Then" % len(van),
+        "\tpadVanPost = Enabled",
+        "\tPadVanFlow",
+        "End Sub",
+        "",
+        "Sub PadVanFlow",
+        "\tIf padVanPost And padVanUp > 0 And bsVan.Balls + padVanFalling < %d Then" % len(van),
         "\t\tpadVanUp = padVanUp - 1",
         "\t\tPadVanUpperSw",
-        "\t\tbsVan.Balls = bsVan.Balls + 1",
+        "\t\tpadVanFalling = padVanFalling + 1",
+        "\t\tvpmTimer.AddTimer %d, \"PadVanLand '\"   ' the roll down to LOWER LOCK" % VAN_ROLL_MS,
         "\tEnd If",
         "End Sub",
         "",
+        "Sub PadVanLand",
+        "\tpadVanFalling = padVanFalling - 1",
+        "\tbsVan.Balls = bsVan.Balls + 1",
+        "\tbsVan.Update        ' on LOWER LOCK now, so its coil can let it out at once",
+        "\tPadVanFlow",
+        "End Sub",
+        "",
     ] + lair_subs(m, van) + [
-        "' LOWER LOCK: the van gives back one ball (LOWER LOCK %s)" % "/".join(str(x) for x in van),
+        "' LOWER LOCK: the van gives back one ball (LOWER LOCK %s); with the post" % "/".join(str(x) for x in van),
+        "' still down the next one rolls on",
         "Sub PadVanOut(Enabled)",
         "\tIf Enabled Then",
         "\t\tIf bsVan.Balls > 0 Then",
@@ -269,6 +322,7 @@ def pad_subs(m):
         "\t\t\tpizzavan.blenddisablelighting = 0.1",
         "\t\tEnd If",
         "\t\tbsVan.ExitSol_On",
+        "\t\tPadVanFlow",
         "\tEnd If",
         "End Sub",
         "",
@@ -381,8 +435,9 @@ def patch_script(src, m):
             rom = re.search(r'cgamename\s*=\s*"([^"]*)"', low)
             if rom:   # the backglass (B2S, DOF) knows the table by its ROM
                 out.append('PadB2SName = "%s"' % rom.group(1))
-            out.append("Dim bsTrough, bsVan, padVanUp, padGiState, padDiscOn")
-            out.append("padVanUp = 0 : padGiState = -1 : padDiscOn = 0")
+            out.append("Dim bsTrough, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, padGiState, padDiscOn")
+            out.append("padVanUp = 0 : padVanComing = 0 : padVanFalling = 0 : padVanPost = False : "
+                       "padGiState = -1 : padDiscOn = 0")
             continue
         if low.startswith("loadvpm "):
             out.append('LoadVPM "01000000","PADSPIKE2.vbs",3.10')
@@ -563,8 +618,8 @@ def patch_script(src, m):
             out.append(line)
             if msub:
                 out.append("\tvpmTimer.PulseSw %d   ' PAD: %s" % (sid, {
-                    1071: "LEFT SLINGSHOT", 1070: "RIGHT SLINGSHOT",
-                    1088: "LEFT RAMP ENTER OPTO", 1084: "VAN ENTER OPTO"}.get(sid, "")))
+                    "leftslingshot_slingshot": "LEFT SLINGSHOT", "rightslingshot_slingshot": "RIGHT SLINGSHOT",
+                    "portalentre_hit": "LEFT RAMP ENTER OPTO", "trigger001_hit": "VAN ENTER OPTO"}.get(sub_low, "")))
                 edges += 1
             if low == "end sub":
                 cur_sub = None

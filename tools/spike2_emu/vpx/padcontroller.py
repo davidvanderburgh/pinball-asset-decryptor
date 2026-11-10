@@ -1429,6 +1429,7 @@ class Bridge:
         # solenoids: number -> 0/1; pending likewise
         self.sol_state = {}
         self.sol_pending = set()
+        self.sol_unread_on = set()         # went ON since the table last read them
         self._coil_seen = {}               # (node, idx) -> (fires, until)
         self._coil_off_at = {}             # (node, idx) -> monotonic s
         self.sw_ids = {}                   # (node, input bit) -> switch id
@@ -2522,6 +2523,8 @@ class Bridge:
         if self.sol_state.get(n) != on:
             self.sol_state[n] = on
             self.sol_pending.add(n)
+            if on:
+                self.sol_unread_on.add(n)
             if n <= self.map.sol_max:
                 log("sol %d -> %d" % (n, on))
 
@@ -2582,12 +2585,26 @@ class Bridge:
         return out
 
     def changed_solenoids(self):
+        """Every coil that changed since the table last asked. A pulse that
+        came and went between two reads (Visual Pinball reads once a frame; a
+        lock's kick can be 20 ms, PAD-1116) is reported ON now and OFF on the
+        next read, so the table's SolCallback still sees it fire."""
         with self.lock:
             if not self.sol_pending:
                 return None
-            out = [[n, self.sol_state[n]] for n in sorted(self.sol_pending)
-                   if n <= self.map.sol_max]
+            out = []
+            again = set()
+            for n in sorted(self.sol_pending):
+                if n > self.map.sol_max:
+                    continue
+                on = self.sol_state[n]
+                if not on and n in self.sol_unread_on:
+                    on = 1
+                    again.add(n)
+                out.append([n, on])
             self.sol_pending.clear()
+            self.sol_pending.update(again)
+            self.sol_unread_on.clear()
         return out or None
 
     def lamp(self, n):

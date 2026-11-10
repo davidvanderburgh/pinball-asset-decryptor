@@ -26,10 +26,116 @@
 #define glGetIntegerv  pad_s2_glGetIntegerv
 #define glGetProgramiv pad_s2_glGetProgramiv
 #define pad_gl_proc    pad_s2_gl_proc
+#define glBindTexture  pad_s2_glBindTexture
+#define glTexParameteri pad_s2_glTexParameteri
+#define glShaderSource pad_s2_glShaderSource
 #include "glbridge.c"
 #undef glGetIntegerv
 #undef glGetProgramiv
 #undef pad_gl_proc
+#undef glBindTexture
+#undef glTexParameteri
+#undef glShaderSource
+
+/* THE VIDEO SHADERS SAMPLE A 2D TEXTURE HERE. The game's video, camera-feed
+ * and some canvas shaders declare `samplerExternalOES` under
+ * `#extension GL_OES_EGL_image_external(_essl3)`. The host GPU accepts that
+ * and compiles them - and an external sampler then reads the texture bound
+ * to GL_TEXTURE_EXTERNAL_OES on its unit, where nothing is (the frames go to
+ * GL_TEXTURE_2D, see glBindTexture below): black, every frame of every clip,
+ * with no error anywhere. So the source is rewritten on its way to the host
+ * into the game's own fallback for GPUs without external images: the
+ * extension lines dropped and `#define samplerExternalOES sampler2D` after
+ * #version. */
+extern void *malloc(unsigned long);
+extern void free(void *);
+extern char *strchr(const char *, int);
+extern int strncmp(const char *, const char *, unsigned long);
+extern void *memmove(void *, const void *, unsigned long);
+int glShaderSource(unsigned int sh, int count, const char *const *str, const int *len)
+{
+    unsigned long n = 0, k;
+    int i;
+    char *src, *out, *o;
+    const char *p;
+    static int said;
+    if (!str) return 0;
+    for (i = 0; i < count; i++)
+        if (str[i]) n += len && len[i] >= 0 ? (unsigned long)len[i] : strlen(str[i]);
+    src = malloc(n + 1);
+    if (!src) return pad_s2_glShaderSource(sh, count, str, len);
+    for (i = 0, k = 0; i < count; i++) {
+        unsigned long m;
+        if (!str[i]) continue;
+        m = len && len[i] >= 0 ? (unsigned long)len[i] : strlen(str[i]);
+        memcpy(src + k, str[i], m);
+        k += m;
+    }
+    src[n] = 0;
+    if (!strstr(src, "samplerExternalOES")) {
+        const char *one[1] = { src };
+        pad_s2_glShaderSource(sh, 1, one, 0);
+        free(src);
+        return 0;
+    }
+    out = malloc(n + 64);
+    if (!out) { free(src); return pad_s2_glShaderSource(sh, count, str, len); }
+    o = out;
+    p = src;
+    {
+        int defined = strstr(src, "#define samplerExternalOES") != 0, put = defined;
+        while (*p) {
+            const char *e = strchr(p, '\n');
+            unsigned long m = e ? (unsigned long)(e - p) + 1 : strlen(p);
+            int ext = 0;
+            if (m > 10 && !strncmp(p, "#extension", 10)) {
+                unsigned long q;
+                for (q = 10; q + 22 <= m && !ext; q++)
+                    ext = !strncmp(p + q, "OES_EGL_image_external", 22);
+            }
+            if (!ext) {
+                memcpy(o, p, m);
+                o += m;
+                if (!put && m > 8 && !strncmp(p, "#version", 8)) {
+                    if (!e) *o++ = '\n';
+                    memcpy(o, "#define samplerExternalOES sampler2D\n", 37);
+                    o += 37;
+                    put = 1;
+                }
+            }
+            p += m;
+        }
+        *o = 0;
+        if (!put) {                      /* no #version line: the define goes first */
+            memmove(out + 37, out, (unsigned long)(o - out) + 1);
+            memcpy(out, "#define samplerExternalOES sampler2D\n", 37);
+        }
+    }
+    if (said < 3) {
+        char m[120];
+        said++;
+        snprintf(m, sizeof m, "[s3gl] shader %u: samplerExternalOES -> sampler2D (video on a 2D texture)\n", sh);
+        say(m);
+    }
+    {
+        const char *one[1] = { out };
+        pad_s2_glShaderSource(sh, 1, one, 0);
+    }
+    free(out);
+    free(src);
+    return 0;
+}
+
+/* GL_TEXTURE_EXTERNAL_OES is the Pi's dma-buf target (the game's video and
+ * camera-feed textures). The host has no such target: the frame is uploaded
+ * into a plain 2D texture (stage 5, s3vid.c), and the game's shaders already
+ * fall back to `#define samplerExternalOES sampler2D` when the extension is
+ * not offered - so a bind or parameter on it is the same thing on 2D. */
+#define GL_TEXTURE_EXTERNAL_OES 0x8D65u
+int glBindTexture(unsigned int t, unsigned int id)
+{ return pad_s2_glBindTexture(t == GL_TEXTURE_EXTERNAL_OES ? 0x0DE1u : t, id); }
+int glTexParameteri(unsigned int t, unsigned int p, int v)
+{ return pad_s2_glTexParameteri(t == GL_TEXTURE_EXTERNAL_OES ? 0x0DE1u : t, p, v); }
 
 extern void *malloc(unsigned long);
 extern void free(void *);
@@ -65,6 +171,13 @@ static int s3_limit(unsigned p, int *v)
     case 0x8DFB: v[0] = 1024; return 1;              /* MAX_VERTEX_UNIFORM_VECTORS */
     case 0x8DFD: v[0] = 1024; return 1;              /* MAX_FRAGMENT_UNIFORM_VECTORS */
     case 0x8DFC: v[0] = 16; return 1;                /* MAX_VARYING_VECTORS */
+    /* Godot 4's GLES3 budget is MIN(vertex outputs, fragment inputs) / 4;
+     * left at 0 it refused every canvas material with a varying ("Too many
+     * varyings used in shader (1 used, maximum supported is 0)") and those
+     * items never drew. V3D: 64 components each, the 16 vectors above. */
+    case 0x8B4B: v[0] = 64; return 1;                /* MAX_VARYING_COMPONENTS */
+    case 0x9122: v[0] = 64; return 1;                /* MAX_VERTEX_OUTPUT_COMPONENTS */
+    case 0x9125: v[0] = 64; return 1;                /* MAX_FRAGMENT_INPUT_COMPONENTS */
     case 0x8B4A: v[0] = 4096; return 1;              /* MAX_VERTEX_UNIFORM_COMPONENTS */
     case 0x8B49: v[0] = 4096; return 1;              /* MAX_FRAGMENT_UNIFORM_COMPONENTS */
     case 0x8A30: v[0] = 16384; return 1;             /* MAX_UNIFORM_BLOCK_SIZE */
@@ -256,12 +369,37 @@ extern unsigned pad_s3_bo_size(unsigned handle, unsigned *w, unsigned *h) __attr
 /* An EGL image made by s3egl.c is (void *)(0x5300000 + bo handle). */
 #define S3IMG_BASE 0x5300000ul
 
+/* A video image (s3egl.c, stage 5) is (void *)(0x5400000 + id): a slot of the
+ * padvid ring the host decoder fills. Binding it uploads that slot's frame
+ * into the bound texture on the host GPU - PADGL_TEXDIRECT, the same op the
+ * Spike 2 video path uses - and the pixels never cross the emulated CPU. */
+#define S3VIMG_BASE 0x5400000ul
+extern int pad_s3_vid_image(unsigned id, unsigned *off, unsigned *w, unsigned *h,
+                            unsigned *bytes) __attribute__((weak));
+
 static void glEGLImageTargetTexture2DOES(unsigned target, void *image)
 {
     unsigned long v = (unsigned long)image;
-    unsigned handle = v > S3IMG_BASE ? (unsigned)(v - S3IMG_BASE) : 0, w = 0, h = 0;
+    unsigned handle, w = 0, h = 0;
     unsigned tex = cur_tex2d[cur_unit & 15u];
     char m[160];
+    if (v >= S3VIMG_BASE && v < S3VIMG_BASE + 0x10000ul) {
+        unsigned a[6], off = 0, bytes = 0;
+        static unsigned long binds;
+        if (!pad_s3_vid_image || !pad_s3_vid_image((unsigned)(v - S3VIMG_BASE), &off, &w, &h, &bytes))
+            return;
+        a[0] = w; a[1] = h; a[2] = PADGL_VIV_I420;
+        a[3] = PADGL_SRC_VIDSHM; a[4] = off; a[5] = bytes;
+        emit(PADGL_TEXDIRECT, a, sizeof a, 0, 0);
+        if (++binds == 1 || binds % 1800 == 0) {
+            snprintf(m, sizeof m, "[s3gl] video frame %lu: slot %lu (%ux%u) into texture %u\n",
+                     binds, v - S3VIMG_BASE, w, h, tex);
+            say(m);
+        }
+        (void)target;
+        return;
+    }
+    handle = v > S3IMG_BASE ? (unsigned)(v - S3IMG_BASE) : 0;
     if (!handle || handle >= MAXS3BO || !pad_s3_bo_size || !pad_s3_bo_size(handle, &w, &h)) {
         say("[s3gl] glEGLImageTargetTexture2DOES on an image that is no bo of ours\n");
         return;
@@ -310,5 +448,8 @@ void *pad_gl_proc(const char *name)
     if (!strcmp(name, "glDebugMessageCallbackKHR"))     return (void *)glDebugMessageCallbackKHR;
     if (!strcmp(name, "glFramebufferTexture2DMultisampleEXT"))
         return (void *)glFramebufferTexture2DMultisampleEXT;
+    if (!strcmp(name, "glBindTexture"))   return (void *)glBindTexture;
+    if (!strcmp(name, "glTexParameteri")) return (void *)glTexParameteri;
+    if (!strcmp(name, "glShaderSource"))  return (void *)glShaderSource;
     return pad_s2_gl_proc(name);
 }

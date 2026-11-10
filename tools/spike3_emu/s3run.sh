@@ -45,6 +45,26 @@ done
 [ -n "$CARD" ] || { echo "usage: s3run.sh CARD.raw [--slot N] [--secs S] [--strace] [--fresh] [--bridge] [--bus]" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "[s3run] needs root (overlay mounts): wsl -u root -e bash s3run.sh ..." >&2; exit 2; }
 
+# THE HOST MODULES, LOADED HERE. Both are built from the same 6.6.87.2 tree as
+# the self-built WSL kernel (docs/plans/spike3_emulation.md stages 3-4) and
+# neither survives a WSL restart - which another rig's restart does at any
+# time. So a run loads what it needs instead of failing on its absence.
+#   cuse.ko      --bus: the CPU board's SPI chain is a CUSE device
+#   i2c-stub.ko  PAD_S3_I2C: the amp/EEPROM bus. Chips: the TAS57xx amps and
+#                EEPROMs (0x48 0x4c-0x4e 0x50-0x53) and the MAX9850 headphone
+#                amp (0x10), whose register writes must read back.
+KMOD=${PAD_S3_KMOD:-/home/david/.pad-s3}
+KTREE=$KMOD/kernel/WSL2-Linux-Kernel-linux-msft-wsl-6.6.87.2
+if [ "$BUS" = 1 ] && [ ! -e /dev/cuse ]; then
+    insmod "$KTREE/fs/fuse/cuse.ko" 2>/dev/null && echo "[s3run] loaded cuse.ko"
+    for i in $(seq 1 20); do [ -e /dev/cuse ] && break; sleep 0.1; done
+fi
+if [ -n "${PAD_S3_I2C:-}" ] && [ ! -e "/dev/i2c-${PAD_S3_I2C}" ]; then
+    insmod "$KMOD/i2cstub/i2c-stub.ko" chip_addr=0x10,0x48,0x4c,0x4d,0x4e,0x50,0x51,0x52,0x53 2>/dev/null \
+        && echo "[s3run] loaded i2c-stub.ko"
+    for i in $(seq 1 20); do [ -e "/dev/i2c-${PAD_S3_I2C}" ] && break; sleep 0.1; done
+fi
+
 TREE=$(python3 "$S/s3store.py" path "$CARD") || {
     echo "[s3run] the card is not in the Spike 3 store yet: s3store.py build $CARD" >&2; exit 1; }
 SD=/var/tmp/pad-s3/slot$SLOT
@@ -66,6 +86,7 @@ if [ "$BRIDGE" = 1 ]; then
     env -u DISPLAY -u WAYLAND_DISPLAY EGL_PLATFORM=surfaceless GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12} \
         PAD_GL_W=${PAD_S3_W:-1920} PAD_GL_H=${PAD_S3_H:-1080} PAD_GL_DUMP="$SD/frames" \
         PAD_GL_FRAME_EVERY=${PAD_GL_FRAME_EVERY:-30} PAD_GL_MAX_FRAMES=${PAD_GL_MAX_FRAMES:-40} \
+        PAD_VID_SHM="$SD/padvid.shm" \
         setsid "$B/padglhost" "$SD/padgl.ring" > "$SD/padglhost.log" 2>&1 &
     HOSTPID=$!
     for i in $(seq 1 100); do [ -s "$SD/padgl.ring" ] && break; sleep 0.1; done
@@ -86,6 +107,7 @@ fi
 # i2c-stub; see docs/plans/spike3_emulation.md stage 4).
 BUSPIDS=""
 DEVBINDS=""
+RUNBINDS=""
 if [ "$BUS" = 1 ]; then
     [ -e /dev/cuse ] || { echo "[s3run] --bus needs /dev/cuse (insmod cuse.ko)" >&2; exit 1; }
     [ -x "$B/s3spid" ] || { echo "[s3run] --bus needs $B/s3spid: bash s3build.sh" >&2; exit 1; }
@@ -95,15 +117,26 @@ if [ "$BUS" = 1 ]; then
     BUSPIDS="$!"
     python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
+    # the video decoder (stage 5): s3vid.so hands the game's HEVC/H.264
+    # packets to it and its I420 frames go to padglhost through padvid.shm
+    rm -f "$SD/s3vid.feed" "$SD/padvid.shm" "$SD/s3vidhost.log"
+    python3 "$S/s3vidhost.py" "$SD/s3vid.feed" "$SD/padvid.shm" "$SD/s3vidhost.log" > "$SD/s3vidhost.out" 2>&1 &
+    BUSPIDS="$BUSPIDS $!"
     for i in $(seq 1 50); do
         [ -e /dev/$SPIDEV ] && [ -s "$SD/bridge.path" ] && break; sleep 0.1
     done
     [ -e /dev/$SPIDEV ] || { echo "[s3run] s3spid made no /dev/$SPIDEV:"; tail -3 "$SD/s3spid.out"; kill $BUSPIDS; exit 1; }
     [ -s "$SD/bridge.path" ] || { echo "[s3run] s3bridge made no pty:"; tail -3 "$SD/s3bridge.out"; kill $BUSPIDS; exit 1; }
     DEVBINDS="spidev4.0=/dev/$SPIDEV ttyAMA5=$(cat "$SD/bridge.path")"
+    for i in $(seq 1 50); do [ -s "$SD/padvid.shm" ] && [ -s "$SD/s3vid.feed" ] && break; sleep 0.1; done
+    if [ -s "$SD/padvid.shm" ] && [ -s "$SD/s3vid.feed" ]; then
+        RUNBINDS="s3vid=$SD/s3vid.feed padvid=$SD/padvid.shm"
+    else
+        echo "[s3run] no video decoder: $(tail -2 "$SD/s3vidhost.out")"
+    fi
     echo "[s3run] node bus up: $DEVBINDS"
 fi
-export DEVBINDS
+export DEVBINDS RUNBINDS
 
 # NO NETWORK. The game runs in its own network namespace (-n) holding only a
 # loopback interface: a Spike 3 title carries Stern's connectivity code
@@ -154,6 +187,11 @@ for kv in ${DEVBINDS:-}; do
     rm -f "$R/dev/$n"; touch "$R/dev/$n"
     mount --bind "$h" "$R/dev/$n" && echo "[s3run] /dev/$n -> $h"
 done
+# ...and each NAME=FILE in RUNBINDS over /run/NAME (the video feed and ring)
+for kv in ${RUNBINDS:-}; do
+    n=${kv%%=*}; h=${kv#*=}
+    touch "$R/run/$n" && mount --bind "$h" "$R/run/$n" && echo "[s3run] /run/$n -> $h"
+done
 # /dump -> /connectivity/dump on the machine (S95game makes it)
 mkdir -p "$R/connectivity/dump/log"
 PRELOAD=""
@@ -173,6 +211,12 @@ fi
 if [ -e "$B/s3alsa.so" ]; then
     mkdir -p "$R/usr/lib/pad"; cp "$B/s3alsa.so" "$R/usr/lib/pad/"
     PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/s3alsa.so"
+fi
+# the video decoder (s3vid.so): takes the game's HEVC/H.264 decoding to the
+# host when /run/s3vid is there (--bus), and leaves it alone when it is not
+if [ -e "$B/s3vid.so" ]; then
+    mkdir -p "$R/usr/lib/pad"; cp "$B/s3vid.so" "$R/usr/lib/pad/"
+    PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/s3vid.so"
 fi
 [ -n "$PRELOAD" ] && PRELOAD="env LD_PRELOAD=$PRELOAD"
 # The audio amp talks over /dev/i2c-10 with the Linux i2c-dev ioctls, which

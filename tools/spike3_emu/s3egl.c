@@ -31,6 +31,8 @@ extern int snprintf(char *, unsigned long, const char *, ...);
 
 extern void *pad_gl_proc(const char *);
 extern unsigned pad_s3_bo_by_fd(int fd, unsigned *w, unsigned *h) __attribute__((weak));
+/* s3vid.c (stage 5): a decoded video frame's dma-buf fd -> image id + 1 */
+extern unsigned pad_s3_vid_fd(int fd) __attribute__((weak));
 
 #define EGL_SUCCESS            0x3000
 #define EGL_NONE               0x3038
@@ -40,6 +42,7 @@ extern unsigned pad_s3_bo_by_fd(int fd, unsigned *w, unsigned *h) __attribute__(
 #define EGL_LINUX_DMA_BUF_EXT  0x3270
 #define EGL_DMA_BUF_PLANE0_FD  0x3272
 #define S3IMG_BASE             0x5300000ul
+#define S3VIMG_BASE            0x5400000ul    /* + video image id: s3gl.c uploads its ring slot */
 
 static void say(const char *s) { write(2, s, strlen(s)); }
 
@@ -183,6 +186,20 @@ void *eglCreateImageKHR(void *dpy, void *ctx, unsigned target, void *buf, const 
     unsigned h = 0, w = 0, hh = 0;
     int i;
     (void)dpy; (void)ctx;
+    if (target == EGL_LINUX_DMA_BUF_EXT && attr && pad_s3_vid_fd) {
+        /* a video frame from the host decoder (s3vid.c): the image is its
+         * ring slot, uploaded by s3gl.c when it is bound to a texture */
+        for (i = 0; attr[i] != EGL_NONE && i < 64; i += 2)
+            if (attr[i] == EGL_DMA_BUF_PLANE0_FD) {
+                unsigned v = pad_s3_vid_fd(attr[i + 1]);
+                if (v) {
+                    static int said;
+                    if (said++ < 4)
+                        sayf1("[s3egl] EGL image of video slot %lu\n", v - 1, 0, 0);
+                    return (void *)(S3VIMG_BASE + v - 1);
+                }
+            }
+    }
     if (target == EGL_LINUX_DMA_BUF_EXT && attr && pad_s3_bo_by_fd) {
         for (i = 0; attr[i] != EGL_NONE && i < 64; i += 2)
             if (attr[i] == EGL_DMA_BUF_PLANE0_FD) h = pad_s3_bo_by_fd(attr[i + 1], &w, &hh);

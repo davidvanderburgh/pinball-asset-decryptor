@@ -482,7 +482,11 @@ never touched), and the tribute's own light shows are quieted
 timer, every `LightSeq` stopped at init) with its hit subs no longer called
 (`orig_hits: false`; `orig_keep` names the slingshots, whose originals
 animate the rubbers). `vpxkeys.py lamps <file>` makes the table write every
-mapped light's state, to compare with the machine's `padled` plane.
+mapped light's state, to compare with the machine's `padled` plane. A module
+variable only a quieted sub ever `Set`, which running code still walks with
+`For Each`, starts as an empty list (PAD-1102): Munsters' StartRainbow was all
+that gave `RainbowLights` its lights, and its RainbowTimer is saved enabled, so
+the first tick stopped Visual Pinball on "Object not a collection".
 
 The plunger lane's own `_Hit` / `_UnHit` obey the same rule (PAD-1099).
 They are the tribute's rules - skill shots, ball savers, songs, its own

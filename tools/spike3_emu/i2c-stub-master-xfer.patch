@@ -1,0 +1,68 @@
+PAD-1090: give i2c-stub a raw-I2C master_xfer so I2C_RDWR transfers ACK
+(register-store model, same words[] backing as the SMBus path), and
+advertise I2C_FUNC_I2C. Built as a module against the matching WSL kernel
+source and loaded into the self-built 6.6.87.2-pad kernel.
+
+Apply to the kernel's drivers/i2c/i2c-stub.c (stock), then build as a
+module against the matching WSL kernel tree.
+
+--- a/drivers/i2c/i2c-stub.c
++++ b/drivers/i2c/i2c-stub.c
+@@ -298,12 +298,56 @@
+ 
+ static u32 stub_func(struct i2c_adapter *adapter)
+ {
+-	return STUB_FUNC_ALL & functionality;
++	return (STUB_FUNC_ALL & functionality) | I2C_FUNC_I2C;
++}
++
++
++/* PAD-1090: raw I2C transfers (I2C_RDWR). Generic register-store model backed
++ * by the same per-chip words[] as the SMBus path: a write's first byte sets the
++ * register pointer and the rest are stored; a read returns stored bytes. Every
++ * address is ACKed so a guest device's init cannot hard-fail on a NAK. */
++static int stub_master_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
++			    int num)
++{
++	int i, j, k;
++	struct stub_chip *chip;
++
++	for (i = 0; i < num; i++) {
++		struct i2c_msg *m = &msgs[i];
++
++		chip = NULL;
++		for (k = 0; k < stub_chips_nr; k++) {
++			if (m->addr == chip_addr[k]) {
++				chip = stub_chips + k;
++				break;
++			}
++		}
++		if (chip == NULL) {
++			/* unregistered address: ACK, reads come back zero */
++			if (m->flags & I2C_M_RD)
++				memset(m->buf, 0, m->len);
++			continue;
++		}
++		if (m->flags & I2C_M_RD) {
++			for (j = 0; j < m->len; j++)
++				m->buf[j] = *stub_get_wordp(chip,
++							    chip->pointer++) & 0xff;
++		} else if (m->len > 0) {
++			chip->pointer = m->buf[0];
++			for (j = 1; j < m->len; j++) {
++				u16 *wp = stub_get_wordp(chip, chip->pointer);
++				*wp = (*wp & 0xff00) | m->buf[j];
++				chip->pointer++;
++			}
++		}
++	}
++	return num;
+ }
+ 
+ static const struct i2c_algorithm smbus_algorithm = {
+ 	.functionality	= stub_func,
+ 	.smbus_xfer	= stub_xfer,
++	.master_xfer	= stub_master_xfer,
+ };
+ 
+ static struct i2c_adapter stub_adapter = {

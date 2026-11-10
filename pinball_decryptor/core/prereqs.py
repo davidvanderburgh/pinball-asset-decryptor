@@ -932,6 +932,22 @@ def _diagnose_wsl_unusable() -> Tuple[str, str]:
     status = _wsl_status_ok()
     if status is None:
         return _diagnose_wsl_silent()
+    # PAD-1103: where this build carries the app's own Linux, Install Missing
+    # installs THAT (core.prereq_launch.pick_route), not an Ubuntu of one
+    # exact release with the tools apt-installed into it - so the hint says
+    # what the button does now.  available() reads a constant: no wsl.exe.
+    if runtime.available() and sys.platform == "win32":
+        if status:
+            return ("WSL is enabled, but no Linux distro is installed yet — "
+                    "normal right after the post-install restart; one step "
+                    "remains.",
+                    "Click 'Install Missing' above the tabs — it installs "
+                    "the app's own Linux, with every tool already in it (no "
+                    "Ubuntu needed). No restart is needed this time.")
+        return ("WSL is not installed on this machine.",
+                "Click 'Install Missing' above the tabs — it sets up WSL2 "
+                "and asks for one Windows restart. After the restart, click "
+                "it again to install the app's own Linux.")
     if status:
         return ("WSL is enabled, but no Linux distro is installed yet — "
                 "normal right after the post-install restart; one step "

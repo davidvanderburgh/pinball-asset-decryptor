@@ -392,6 +392,69 @@ def test_shadow_spinner_as_an_opto_pulses_once_a_pass(tmp_path):
     assert r.stdout.split() == ["1083@1000", "1083@2140", "1056@2400"], r.stdout + r.stderr
 
 
+RAINBOW = """
+\tDim RGBStep, RGBFactor, rRed, rGreen, rBlue, RainbowLights, OtherLights
+\tSub StartRainbow(n)
+\t\tset RainbowLights = n
+\t\tRainbowTimer.Enabled = 1
+\tEnd Sub
+\tSub StopRainbow(n)
+\t\tDim obj
+\t\t\tFor each obj in RainbowLights
+\t\t\t\tSetLightColor obj, white, 0
+\t\t\tNext
+\tEnd Sub
+\tSub RainbowTimer_Timer 'rainbow led light color changing
+\t\tDim obj
+\t\trRed = rRed + 1
+\t\t\tFor each obj in RainbowLights
+\t\t\t\tobj.color = RGB(rRed, rGreen, rBlue)
+\t\t\tNext
+\tEnd Sub
+\tSub StartOther(n) : Set OtherLights = n : End Sub
+\tSub OtherToo : Set OtherLights = aLights : End Sub
+\tSub OtherTimer_Timer : Dim o : For Each o In OtherLights : o.State = 1 : Next : End Sub
+"""
+
+
+def test_shadow_quieted_set_leaves_an_empty_list(tmp_path):
+    # PAD-1102: Munsters saves RainbowTimer enabled, and only StartRainbow
+    # (quieted: the machine runs the lights) gave RainbowLights its lights;
+    # the first tick stopped Visual Pinball on "Object not a collection".
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["quiet_subs"] = ["StartRainbow", "StartOther"]
+    out, rep = vs.patch(MINI_TRIBUTE + RAINBOW, m)
+    lines = out.split("\n")
+    assert "RainbowLights = Array()" in lines
+    assert "OtherLights = Array()" not in lines        # OtherToo, still running, sets it too
+    assert any(r.startswith("RainbowLights starts as an empty list: only the quieted StartRainbow set it, "
+                            "and RainbowTimer_Timer, StopRainbow still walk it") for r in rep), rep
+    # what a loop inside the quieted Sub itself walks is never filled in
+    q = json.loads(json.dumps(MINI_SHADOW))
+    q["quiet_subs"] = ["StopRainbow", "RainbowTimer_Timer", "StartRainbow"]
+    assert "RainbowLights = Array()" not in vs.patch(MINI_TRIBUTE + RAINBOW, q)[0].split("\n")
+    # a local Dim is not the module's variable
+    local = "Sub Fill(n) : Dim Mine : Set Mine = n : End Sub\nSub Walk : Dim o : For Each o In Mine : Next : End Sub\n"
+    assert "Mine = Array()" not in vs.patch(MINI_TRIBUTE + local, dict(m, quiet_subs=["Fill"]))[0]
+    if not (sys.platform == "win32" and shutil.which("cscript")):
+        return
+    a = lines.index("\tDim RGBStep, RGBFactor, rRed, rGreen, rBlue, RainbowLights, OtherLights")
+    b = lines.index("\tEnd Sub", lines.index("\tSub RainbowTimer_Timer 'rainbow led light color changing"))
+    stand_in = next(ln for ln in lines if ln.startswith("Sub StartRainbow(n) : End Sub"))
+    # the table's block as patched (StartRainbow_orig is never called) and the stand-in
+    run = ["Dim aLights, white"] + lines[a:b + 1] + [stand_in]
+    tick = "StartRainbow aLights : RainbowTimer_Timer : StopRainbow aLights : WScript.Echo \"ran \" & rRed"
+    for name, guard in (("after", ["RainbowLights = Array()"]), ("before", [])):
+        vbs = tmp_path / ("%s.vbs" % name)
+        vbs.write_text("\n".join(run + guard + [tick]), encoding="latin-1")
+        r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+        if guard:
+            assert r.stdout.strip() == "ran 1" and not r.stderr.strip(), r.stdout + r.stderr
+        else:   # the table as v1.388.7 patched it: the reporter's error (cscript still exits 0)
+            assert "ran" not in r.stdout and "Object not a collection" in r.stderr, r.stdout + r.stderr
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the generated VBScript under cscript")
 def test_shadow_up_only_opto_pulses_on_the_way_up(tmp_path):
@@ -3249,6 +3312,52 @@ def test_shadow_lamps_colour_dark_calls_and_the_tables_own_reads():
     only_calls = json.loads(json.dumps(MINI_SHADOW))
     only_calls["lamp_calls"] = m["lamp_calls"]
     assert "Sub PadUpdateLamps" in vs.patch(MINI_TRIBUTE, only_calls)[0]   # calls alone still get the loop
+
+
+# JP's Foo Fighters' SetLightColor (PAD-1101): Color and ColorFull the same
+FULL_COLOUR_SLC = """Sub SetLightColor(n, col, stat) 'stat 0 = off, 1 = on, 2 = blink
+    Select Case col
+        Case red
+            n.color = RGB(255, 0, 0)
+            n.colorfull = RGB(255, 0, 0)
+        Case orange
+            n.color = RGB(255, 64, 0)
+            n.colorfull = RGB(255, 64, 0)
+        Case green
+            n.color = RGB(0, 128, 0)
+            n.colorfull = RGB(0,128,0)
+    End Select
+    If stat <> -1 Then n.State = stat
+End Sub
+"""
+# the rest (JP's Jurassic Park, Deadpool, Rush...): a dim Color under a full ColorFull
+DIM_COLOUR_SLC = FULL_COLOUR_SLC.replace("n.color = RGB(255, 0, 0)", "n.color = RGB(18, 0, 0)").replace(
+    "n.color = RGB(255, 64, 0)", "n.color = RGB(18, 3, 0)").replace("n.color = RGB(0, 128, 0)", "n.color = RGB(0, 9, 0)")
+
+
+def test_shadow_rgb_insert_colour_follows_the_tables_own_set_light_color():
+    # PAD-1101: v1.388.7 gave Foo Fighters' arrows their colour, and with it a
+    # Color a 14th of ColorFull - the convention of most tributes. JP's Foo
+    # Fighters sets Color = ColorFull, so its lit arrows showed all but black
+    vs = pytest.importorskip("vpxshadow")
+    assert vs.full_colour_lights(FULL_COLOUR_SLC)
+    assert not vs.full_colour_lights(DIM_COLOUR_SLC)
+    assert not vs.full_colour_lights(MINI_TRIBUTE)                      # no SetLightColor: as before
+    assert not vs.full_colour_lights(FULL_COLOUR_SLC.split("Case green")[0] + "End Select\nEnd Sub\n")  # 2 pairs: too few
+    # Batman 66 / GotG: SetLightColor hands on to SetLightColorTimed, which sets them
+    timed = ("Sub SetLightColor(n, col, stat)\n\tSetLightColorTimed n, col, stat, 500\nEnd Sub\n"
+             + FULL_COLOUR_SLC.replace("Sub SetLightColor(n, col, stat)", "Sub SetLightColorTimed(n, col, stat, msec)"))
+    assert vs.full_colour_lights(timed)
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["lamps"] = {"_": "x", "L2": {"leds": [[8, 32], [8, 33], [8, 34]], "rgb": True, "name": "ARROW"}}
+    dim = r"PadDim = RGB((v And 255) \ 14, ((v \ 256) And 255) \ 14, ((v \ 65536) And 255) \ 14)"
+    out, rep = vs.patch(MINI_TRIBUTE + FULL_COLOUR_SLC, m)
+    assert "\tPadDim = v\n" in out and dim not in out
+    assert any("take their colour whole" in r for r in rep)
+    assert "If o.ColorFull <> v Then o.ColorFull = v : o.Color = PadDim(v)" in out
+    out, rep = vs.patch(MINI_TRIBUTE + DIM_COLOUR_SLC, m)
+    assert dim in out and "\tPadDim = v\n" not in out
+    assert not any("take their colour whole" in r for r in rep)
 
 
 def test_controller_reports_an_rgb_insert_in_its_colour():

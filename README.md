@@ -64,9 +64,10 @@ Game lists, file formats and what each manufacturer's tabs do in detail:
 Download the latest release for your computer from the
 **[Releases page](https://github.com/davidvanderburgh/pinball-asset-decryptor/releases)**:
 
-- **Windows** - `…_Windows.exe`. Run it, then run **Install Prerequisites**
-  from the Start Menu and pick the manufacturers you use. Most tools run in
-  WSL2, which the installer sets up (it may ask for a restart).
+- **Windows** - `…_Windows.exe`. Run it and keep **Set up WSL2** ticked
+  (it may ask for a restart). Then, if the app's prerequisites row is red,
+  press **Install Missing**: it installs the app's own Linux with every tool
+  in it, so no Ubuntu or command line is needed.
 - **macOS** - `…_macOS_AppleSilicon.dmg` (M1 or newer) or
   `…_macOS_Intel.dmg`. Drag it to Applications; the first launch needs
   **Open Anyway** in System Settings → Privacy & Security, because the app

@@ -57,11 +57,24 @@ def find_sidx(reader):
     Returns ``(path, inode)`` or ``(None, None)``.  The manifest lives on the
     same data partition as ``image.bin`` (verified), so the caller's existing
     reader can both find and patch it.
+
+    PAD-1100: the primary image's own (``/spk/index`` at the partition root,
+    never a compact multi-boot card's ``img1/spk/index``), and of several
+    there the newest (:func:`.info.index_name`).
     """
+    from .info import index_name, other_image_path
+    root, deeper = {}, None
     for path, ino, node in reader.iter_regular_files(min_size=1, max_depth=20):
-        if path.endswith(".sidx") and "/spk/index/" in path:
-            return path, node
-    return None, None
+        if not path.endswith(".sidx") or "/spk/index/" not in path \
+                or other_image_path(path):
+            continue
+        if path.startswith("/spk/index/") and path.count("/") == 3:
+            root[path.rsplit("/", 1)[-1]] = (path, node)
+        elif deeper is None:
+            deeper = (path, node)         # a layout with the tree lower down
+    if root:
+        return root[index_name(root)]
+    return deeper or (None, None)
 
 
 def parse_records(data):

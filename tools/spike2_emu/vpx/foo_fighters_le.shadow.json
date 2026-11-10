@@ -69,6 +69,7 @@
     {"old": "Sub LightningTarget_Slingshot\n    If Tilted Then Exit Sub", "why": "the kick target scores nothing and kicks weaker than the real one", "since": "PAD-982: the kick target is the game's KICK TARGET switch and kicks harder"},
     {"old": "Sub Trigger015_UnHit : Controller.Switch(", "why": "hits on the ball the Overlord holds do not count, so All My Life Multiball never starts", "since": "PAD-982: the Overlord opto sees only the held ball's spot"},
     {"old": "PlaySoundAt \"fx_slingshot_EM\", LightningTarget", "why": "the first kick target hit stops Visual Pinball with a script error (ball.x)", "since": "PAD-992: the kick target sounds at the target beside it, as JP's own script does"},
+    {"old": "PadDim = RGB((v And 255) \\ 14", "why": "the shot arrows stay dark: their colour goes on at a 14th of its brightness", "since": "PAD-1101: a lit arrow's Color is its colour, as JP's own SetLightColor sets it"},
     {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1065) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "Sub swPlungerRest_Hit : Controller.Switch(1065) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
   ],

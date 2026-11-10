@@ -632,12 +632,23 @@ class ExtractTab(TabService):
         except Exception:                               # noqa: BLE001
             return False
 
+    @staticmethod
+    def _spike3_is_spk(path):
+        try:
+            from ...plugins.stern.spike3_spk import is_spk_input
+            return bool(path) and is_spk_input(path)
+        except Exception:                               # noqa: BLE001
+            return False
+
     def _refresh_spike3_unlock(self, res):
         """Show the self-extractor panel when a locked Spike 3 card is the
-        input (detected Spike 3, no key yet); hide it otherwise."""
+        input (detected Spike 3, no key yet); hide it otherwise.  Never for
+        a ``.spk`` package (PAD-1077): that is unlocked by the fleet update
+        key, not a board's OTP key, so an extractor card can't help it."""
         path = self.extract_input_var.get()
         locked = (res and res.get("era") == "spike3" and res.get("game")
                   and res.get("exists")
+                  and not self._spike3_is_spk(path)
                   and not self._spike3_key_present(path))
         if not locked:
             if self.get("spike3_unlock"):

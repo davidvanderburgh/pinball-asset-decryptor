@@ -28,6 +28,8 @@ from . import spks as _spks
 from .ext4 import Ext4Reader
 from .spike3_keys import Spike3KeySource, Spike3KeyError
 from .spike3_extract import PHASES          # shared Spike 3 extract phases
+from .spike3_extract import (CATEGORIES, want_category,
+                             decode_sound_containers, summary_bits)
 from .formats import _title_from_filename
 
 _LUKS2_MAGIC = spike3.LUKS2_MAGIC
@@ -86,8 +88,7 @@ def reconstruct_spk(zip_path, out_path, progress=None, cancel=None):
 
 class Spike3SpkExtractPipeline(BasePipeline):
     PHASES = PHASES
-    CATEGORIES = (("video", "Video"), ("images", "Images"),
-                  ("scenes", "Scenes"), ("sounds", "Sounds"))
+    CATEGORIES = CATEGORIES
 
     def __init__(self, input_path, output_dir,
                  log_cb, phase_cb, progress_cb, done_cb,
@@ -99,8 +100,7 @@ class Spike3SpkExtractPipeline(BasePipeline):
         self.key_source = key_source
 
     def _want(self, cat):
-        cats = self.extract_categories
-        return True if not cats else bool(cats.get(cat, True))
+        return want_category(self.extract_categories, cat)
 
     def _run(self):
         self._set_phase(0)  # Detect
@@ -188,7 +188,7 @@ class Spike3SpkExtractPipeline(BasePipeline):
 
     def _extract(self, arc):
         want_v, want_i = self._want("video"), self._want("images")
-        want_s, want_a = self._want("scenes"), self._want("sounds")
+        want_s, want_a = self._want("scenes"), self._want("audio")
         videos, images, scenes, sounds = [], [], [], []
         for fobj in arc.files:
             ext = os.path.splitext(fobj.path)[1].lower()
@@ -206,7 +206,7 @@ class Spike3SpkExtractPipeline(BasePipeline):
         self._log("Found %d video, %d image, %d scene, %d sound container(s)."
                   % (len(videos), len(images), len(scenes), len(sounds)), "info")
 
-        counts = {"video": 0, "images": 0, "scenes": 0, "sounds": 0}
+        counts = {"video": 0, "images": 0, "scenes": 0, "audio": 0}
         if want_v:
             self._set_phase(2)
             counts["video"] = self._copy(arc, videos, "video", ".mov")
@@ -218,13 +218,10 @@ class Spike3SpkExtractPipeline(BasePipeline):
             counts["scenes"] = self._copy(arc, scenes, "scenes")
         if want_a:
             self._set_phase(5)
-            # image.bin is the packed sound container; decoding it to per-sound
-            # WAVs needs the Spike 3 firmware codec (a separate step), so for now
-            # the container is copied out whole under sound/.
-            counts["sounds"] = self._copy(arc, sounds, "sound")
-            if sounds:
-                self._log("image.bin copied under sound/ (per-sound WAV decode "
-                          "is a separate step).", "info")
+            # image.bin is a plaintext PCM container: decode it to WAVs
+            counts["audio"], counts["seconds"] = decode_sound_containers(
+                self, sounds, lambda fobj: fobj.path,
+                lambda fobj, out: arc.extract(fobj, out))
         return counts
 
     def _copy(self, arc, items, subdir, rename_ext=None):
@@ -247,10 +244,6 @@ class Spike3SpkExtractPipeline(BasePipeline):
         return done
 
     def _summary(self, c):
-        bits = [("%d video" % c["video"]) if c["video"] else "",
-                ("%d image" % c["images"]) if c["images"] else "",
-                ("%d scene" % c["scenes"]) if c["scenes"] else "",
-                ("%d sound container" % c["sounds"]) if c["sounds"] else ""]
-        bits = [b for b in bits if b]
+        bits = summary_bits(c)
         return "Extracted %s to %s" % (", ".join(bits) if bits else "no files",
                                        self.output_dir)

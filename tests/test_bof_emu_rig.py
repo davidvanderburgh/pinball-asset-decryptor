@@ -188,6 +188,59 @@ def test_bics_never_offers_a_firmware_update():
     assert bics(emu("dune"), "FLASH?") == ""
 
 
+# PAD-1124: the game reflashes a BICS board whose ID firmware field is older
+# than the firmware its build ships ("BICS: Firmware older than v%s.%s.%s",
+# then FLASH? and bossac).  Dune 2026.11.10 shipped newer worm firmware than
+# the v1.0.0 the stand-in claimed and sat at WORM BOARD: UPDATING for ever.
+def _firmware_image(tmp_path, name, board, version, extra=b""):
+    body = (b"\x00" * 64 + b"FLASH:ACK\x00ID:Shai-Crab,"
+            b"Barrel_of_Interactive_Control_Systems_(BICS)," + board + b",\x00"
+            + version + b"\x00v1.3d\x00" + extra)
+    (tmp_path / name).write_bytes(body)
+
+
+def test_bundled_firmware_version_is_read_from_the_build(tmp_path):
+    _firmware_image(tmp_path, "worm_wrangler_main.bin", b"WORM_WRANGLER", b"v1.2.0")
+    (tmp_path / "bossac").write_bytes(b"v9.9.9")             # not firmware
+    (tmp_path / "other.bin").write_bytes(b"v8.8.8 no board")  # no BICS mark
+    assert bofhw.bundled_bics_firmware(str(tmp_path)) == "v1.2.0"
+
+
+def test_bundled_firmware_absent_or_unreadable(tmp_path):
+    assert bofhw.bundled_bics_firmware(None) is None
+    assert bofhw.bundled_bics_firmware(str(tmp_path / "missing")) is None
+    assert bofhw.bundled_bics_firmware(str(tmp_path)) is None
+    # the mark but no vN.N.N near it: the highest anywhere in the image
+    (tmp_path / "x.bin").write_bytes(b"Barrel_of_Interactive_Control_Systems"
+                                     + b"\x00" * 2000 + b"v0.7.0\x00v0.10.2\x00")
+    assert bofhw.bundled_bics_firmware(str(tmp_path)) == "v0.10.2"
+
+
+@pytest.mark.parametrize("title,board,version", [
+    ("dune", b"WORM_WRANGLER", "v1.4.2"),
+    ("winchester", b"HAUNT_HANDLER", "v0.9.0"),
+])
+def test_bics_id_claims_the_builds_own_firmware(tmp_path, title, board, version):
+    _firmware_image(tmp_path, "main.bin", board, version.encode())
+    prof = profile(title)
+    e = bofhw.Emulator("/nonexistent", prof, _Log(),
+                       bofhw.bundled_bics_firmware(str(tmp_path)))
+    for spec in prof.get("ports", bofhw.DEFAULT_PORTS):
+        e.ports[spec["role"]] = _FakePort(spec["role"])
+    fields = bics(e, "ID:").strip().split(",")
+    assert fields[3] == version                    # bics.gd: the firmware field
+    assert fields[:3] == profile(title)["bics"]["id"].split(",")[:3]
+
+
+def test_bics_id_without_a_build_keeps_the_profiles_version():
+    assert bics(emu("dune"), "ID:").strip().split(",")[3] == "v1.0.0"
+
+
+def test_run_game_hands_the_build_folder_to_the_boards():
+    run = (RIG / "run_game.sh").read_text()
+    assert '--build "$(dirname "$BIN")"' in run
+
+
 # ------------------------------------------------------------ the balls
 def test_eject_plunge_drain():
     e = emu("dune")

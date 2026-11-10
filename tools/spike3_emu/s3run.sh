@@ -165,7 +165,12 @@ export DEVBINDS RUNBINDS
 # without -n it shared WSL's own network and could have reached the internet
 # (David, PAD-1090). Every attempt fails here with no route, and the --strace
 # log shows what was attempted.
-unshare -m -p -n -f --mount-proc=/proc bash -s "$TREE" "$SD" "$SECS" "$STRACE" "$BRIDGE" "$B" "$PROG" "${ARGS[@]}" <<'INNER'
+# --kill-child and a background wait: a TERM to this script (a caller's
+# `kill`) now ends the game AND reaches the cleanup below. Run in the
+# foreground, bash held the trap until the game itself ended, the caller
+# gave up, and the setsid renderer lived on - three orphaned padglhosts
+# slowed every later boot to a crawl (node bus at 169 s instead of 62).
+unshare -m -p -n -f --kill-child --mount-proc=/proc bash -s "$TREE" "$SD" "$SECS" "$STRACE" "$BRIDGE" "$B" "$PROG" "${ARGS[@]}" <<'INNER' &
 set -u
 TREE=$1; SD=$2; SECS=$3; STRACE=$4; BRIDGE=$5; B=$6; PROG=$7; shift 7
 R=$SD/root
@@ -277,7 +282,10 @@ case $RC in
        grep -h -m3 -E "Assertion|uncaught target signal" "$SD/game.err" | sed 's/^/[s3run]   /' ;;
 esac
 INNER
-RC=$?
+INNERPID=$!
+trap 'kill -KILL $INNERPID 2>/dev/null' TERM INT HUP   # unshare --fork ignores TERM; KILL + --kill-child ends the namespace
+while :; do wait $INNERPID; RC=$?; kill -0 $INNERPID 2>/dev/null || break; done
+trap - TERM INT HUP
 if [ -n "$BUSPIDS" ]; then
     kill $BUSPIDS 2>/dev/null; sleep 0.5; kill -9 $BUSPIDS 2>/dev/null
     echo "[s3run] node bus: spi $(grep -c xfer "$SD/spi.log" 2>/dev/null) transfers; bridge: $(grep -c "^# \[node\].*claims" "$SD/bridge.log" 2>/dev/null) node boards identified ($SD/bridge.log)"

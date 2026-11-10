@@ -91,6 +91,7 @@ def _run(d, body, timeout=60):
     script = "\n".join([
         _PRELUDE % {"dir": _q(d)},
         _function("ffplay_channel_args"),
+        _function("mac_meter"),
         _function("host_player"),
         body, "",
     ])
@@ -158,6 +159,26 @@ sleep 0.3; kill $HP; wait $HP 2>/dev/null
     assert "[box] speaker: ffplay" in text, text
     seen = _cat(d, "env1")
     assert seen.startswith("sdl= home=/"), (seen, text)
+
+
+@needs_bash
+def test_the_mac_meter_passes_the_stream_and_says_what_reached_the_player():
+    """PAD-1109: the relay's count could not see a stream lost on its way to
+    the Mac; this one counts what ffplay is actually handed."""
+    d = _fresh_dir()
+    script = "\n".join(["set -u", "D=%s" % _q(d), "PAD_METER_S=1",
+                         _function("mac_meter"), r"""
+( for i in 1 2 3; do head -c 65536 /dev/zero | tr '\0' 'x'; sleep 1.2; done ) |
+    mac_meter > "$D/out"
+echo "OUT=$(wc -c < "$D/out" | tr -d ' ')"
+""", ""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    text = out.stdout.decode("utf-8", "replace")
+    assert "OUT=196608" in text, text
+    assert "[box] handed to the Mac's speaker so far:" in text, text
+    assert "[box] handed to the Mac's speaker in all: 196608 bytes" in text, text
 
 
 @needs_bash

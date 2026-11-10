@@ -463,6 +463,35 @@ ffplay_channel_args() {
         echo "-ac $1"
     fi
 }
+# WHAT REACHED THE MAC (PAD-1109). The box's relay says what it sent, but it
+# reads at the game's own pace whatever happens downstream, so it read just as
+# healthy while Colima swallowed the stream and ffplay got 310 KB in all. This
+# stage passes the stream through unchanged and, every PAD_METER_S (30) s,
+# asks dd for its own count (SIGINFO on a Mac, SIGUSR1 elsewhere) and says it:
+# the bytes ffplay was actually handed. stdin is named for dd, because a
+# background command in a script otherwise reads /dev/null.
+mac_meter() {
+    local f p sig i line
+    f=$(mktemp "${TMPDIR:-/tmp}/padmeter.XXXXXX") || { cat; return; }
+    dd bs=65536 <&0 2>"$f" &
+    p=$!
+    sig=USR1; [ "$(uname -s)" = Darwin ] && sig=INFO
+    while kill -0 "$p" 2>/dev/null; do
+        i=0
+        while [ "$i" -lt "${PAD_METER_S:-30}" ] && kill -0 "$p" 2>/dev/null; do
+            sleep 1; i=$(( i + 1 ))
+        done
+        kill -0 "$p" 2>/dev/null || break
+        kill -"$sig" "$p" 2>/dev/null
+        sleep 0.3
+        line=$(grep -E 'bytes' "$f" | tail -n 1)
+        [ -n "$line" ] && echo "[box] handed to the Mac's speaker so far: $line" >&2
+    done
+    wait "$p" 2>/dev/null
+    line=$(grep -E 'bytes' "$f" | tail -n 1)
+    [ -n "$line" ] && echo "[box] handed to the Mac's speaker in all: $line" >&2
+    rm -f "$f"
+}
 host_player() {
     [ "${PAD_AUDIO:-1}" = 0 ] && return 0
     fmt=""
@@ -520,6 +549,7 @@ host_player() {
         # $chargs unquoted on purpose: it is an option and its value
         docker exec -i "$NAME" python3 /pad/rig/padrelay.py --pipe \
                 "$BOX_FIFO" "${PAD_AUDIO_CTL:+$BOX_CTL}" |
+            mac_meter |
             env -i HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
                 TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-en_US.UTF-8}" \
                 "$fpbin" -hide_banner -loglevel warning -nodisp -autoexit \

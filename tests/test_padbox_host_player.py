@@ -238,14 +238,14 @@ _PROFILER = """Audio:
 
 @needs_bash
 def test_the_macs_outputs_are_listed_with_the_default_marked():
-    d = _fresh_dir()
-    script = "\n".join(["set -u", "D=%s" % _q(d), _function("mac_outputs"), r"""
+    # the profile is written by bash itself: here bash may be WSL's, whose
+    # temp dir Python cannot open
+    script = "\n".join(["set -u", "PROFILE=%s" % _q(_PROFILER),
+                        _function("mac_outputs"), r"""
 uname() { echo Darwin; }
-system_profiler() { cat "$D/profile"; }
+system_profiler() { printf '%s' "$PROFILE"; }
 mac_outputs
 """])
-    with open(os.path.join(d, "profile"), "w", encoding="utf-8") as fh:
-        fh.write(_PROFILER)
     out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          timeout=60)

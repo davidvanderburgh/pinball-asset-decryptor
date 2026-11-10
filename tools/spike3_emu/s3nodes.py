@@ -158,7 +158,10 @@ def directory(e, cat):
 
     def rec(a):
         h, w3 = e.ptr(a), e.u32(a + 0x10)
-        if h is None or not e.is_code(h) or w3 is None or w3 >> 24:
+        # the top byte is a per-record flag, not part of the node id:
+        # star_wars_elg 1.10's node 8 record reads 0x01080005, and stopping
+        # there lost every playfield board (pokemon_le's are all 0)
+        if h is None or not e.is_code(h) or w3 is None or (w3 >> 24) > 0x0F:
             return None
         nid, code = (w3 >> 16) & 0xFF, w3 & 0xFFFF
         if nid >= 64 or (code - 2) not in cat:
@@ -184,7 +187,7 @@ def directory(e, cat):
 DEV_CLASS = {1: "switch", 2: "coil", 3: "led", 5: "gi"}
 
 
-def devices(e, directory_rows=None):
+def devices(e, directory_rows=None, with_location=False):
     """[(name, node, index, class)] from the title's device tables: 0x50-byte
     records, a name pointer at +0 and at +0x20 four u16s - the GROUP (the
     1-based position of the board's record in the node directory: on
@@ -192,7 +195,10 @@ def devices(e, directory_rows=None):
     and node 8 record 7 - checked against the live bus), the index on that board, the
     class (1 switch, 2 coil, 3 LED, 5 GI) and a sub-kind. Every table is
     walked out from a record named "TROUGH 1" or "START BUTTON" (several
-    tables, one per class family). node -1 = a group past the directory."""
+    tables, one per class family). node -1 = a group past the directory.
+    with_location=True adds a 5th field, the u16 at +0x28: the switch's
+    LOCATION (one value for every playfield switch, others for the cabinet
+    buttons, the coin door, the jumpers) - see active_low_masks()."""
     if directory_rows is None:
         directory_rows = directory(e, catalog(e)[1])
     order = [nid for nid, _c, _f in directory_rows]
@@ -208,7 +214,10 @@ def devices(e, directory_rows=None):
         g, idx, cls = w & 0xFFFF, (w >> 16) & 0xFFFF, (w >> 32) & 0xFFFF
         if not (1 <= g <= 64 and idx < 512 and cls in DEV_CLASS):
             return None
-        return name, (order[g - 1] if g - 1 < len(order) else -1), idx, DEV_CLASS[cls]
+        row = (name, (order[g - 1] if g - 1 < len(order) else -1), idx, DEV_CLASS[cls])
+        if with_location:
+            row += ((e.u64(a + 0x28) or 0) & 0xFFFF,)
+        return row
     out, done = [], set()
     for anchor in ("TROUGH 1", "START BUTTON", "TROUGH", "AUTO PLUNGER"):
         va = e.strva(anchor)
@@ -224,6 +233,32 @@ def devices(e, directory_rows=None):
                     out.append(rec(lo))
                 lo += 0x50
     return out
+
+
+def active_low_masks(devs5):
+    """{node: 8-byte mask} of the switch inputs a node board reports as wire
+    bit 0 when CLOSED. Measured on pokemon_le: the game's own Ball Trough
+    Test sees a trough ball, and the game serves and scores balls, only with
+    PLAYFIELD switches answered active low - while START BUTTON, the coins
+    and the FLIPPER BUTTONS (cabinet, though wired to playfield node 8) are
+    active high. The playfield is recognised by location: the value the
+    TROUGH n switches carry. A bit no switch names follows the majority of
+    its board's named switches."""
+    pf = {loc for name, node, idx, cls, loc in devs5
+          if cls == "switch" and name.strip().upper().startswith("TROUGH ")}
+    per = {}
+    for name, node, idx, cls, loc in devs5:
+        if cls == "switch" and node > 0 and idx < 64:
+            per.setdefault(node, {})[idx] = loc in pf
+    masks = {}
+    for node, bits in per.items():
+        maj = sum(bits.values()) * 2 > len(bits)
+        m = bytearray(8)
+        for b in range(64):
+            if bits.get(b, maj):
+                m[b // 8] |= 1 << (b % 8)
+        masks[node] = bytes(m)
+    return masks
 
 
 def hexfiles(hexdir):

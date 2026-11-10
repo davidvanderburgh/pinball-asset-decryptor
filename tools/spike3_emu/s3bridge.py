@@ -100,7 +100,7 @@ class Node:
         self.reported = bytes(8)  # what the game last read (scan or ff)
         self.registered = 0       # when its identity was first read (time)
         self.rx = 0               # addressed frames since the last ff probe
-        self.active_low = False   # wire bit 0 = closed (set_polarity)
+        self.low_mask = bytes(8)  # inputs whose wire bit 0 = closed
         self.queue = []           # input states seen, not yet scanned
 
     def __call__(self, data, k):
@@ -138,7 +138,7 @@ class Node:
                 bits = self.inputs() if self.inputs else bytes(8)
             # nodesw is LOGICAL (1 = closed); an active-low board's wire bit
             # is 0 for a closed switch
-            wire = bytes(~b & 0xFF for b in bits) if self.active_low else bits
+            wire = bytes(b ^ m for b, m in zip(bits, self.low_mask))
             key = data[1] if len(data) >= 3 else 0
             for i in range(8):
                 p[i] = wire[i] ^ (((key << i) | (key >> ((8 - i) & 7))) & 0xFF)
@@ -176,6 +176,8 @@ class Bridge:
         self.nodes = {nid: Node(nid, c, log) for nid, c in (claims or {}).items()}
         self.counts = {}
         self.balls = None         # s3balls.Balls once the inputs are attached
+        self.steppers = None      # s3motors.Steppers once the inputs are attached
+        self.motors = None        # s3motors.Motors (end-stop / encoder motors)
 
     def attach_inputs(self, path):
         """The slot's node switch inputs, live: 8 bytes a node (64 nodes),
@@ -229,31 +231,42 @@ class Bridge:
         model = self.nodes.get(node & 0x3F)
         if node & 0x40:
             data = unmask(node, data)
+        st = None
+        if (self.steppers is not None and data and 0x38 <= data[0] <= 0x3D
+                and reply_len - 1 >= 6):
+            st = self.steppers.status(node & 0x3F, data[0] - 0x38)
+        if (self.motors is not None and len(data) >= 2 and data[0] == 0x52
+                and reply_len - 1 >= 5):
+            st = self.motors.status(node & 0x3F, data[1])
+        if st is not None:
+            r = st + bytes([(-sum(st)) & 0xFF])
+            return r.ljust(reply_len - 1, b"\x55") + b"\x00"
         if model is not None:
             r = model(data, reply_len - 1)
             if r is not None:
                 return bytes(r[:reply_len - 1]).ljust(reply_len - 1, b"\x55") + b"\x00"
         return b"\x55" * (reply_len - 1) + b"\x04"
 
-    def set_polarity(self, devs):
-        """Which boards report a CLOSED switch as wire bit 0. Measured on
-        pokemon_le with the service menu's Ball Trough Test, which draws the
-        game's own reading live: node 8's trough positions show a ball for
-        wire 0 and none for 1, SHOOTER LANE and TROUGH JAM likewise, the
-        scoop opto too - the playfield boards are active LOW. The cabinet
-        board (START BUTTON, coins) is active high: Start and coins register
-        as high pulses, and at rest its slam tilt and coins read open.
-        So every board but the one carrying START BUTTON is active low;
-        PAD_S3_ACTIVE_LOW=<ids> / PAD_S3_ACTIVE_HIGH=<ids> override."""
-        cab = {node for name, node, idx, cls in devs
-               if cls == "switch" and name.strip().upper() == "START BUTTON"}
+    def set_polarity(self, masks):
+        """masks: {node: 8 bytes}, the inputs that report CLOSED as wire bit
+        0 (s3nodes.active_low_masks: the playfield switches, by location).
+        Found with the service menu's Ball Trough Test, which draws the
+        game's own reading live: trough, shooter lane, jam and scoop show a
+        ball for wire 0. Cabinet buttons - on the cabinet board, and the
+        flipper buttons wired to playfield node 8 - stay active high.
+        PAD_S3_ACTIVE_LOW=<ids> / PAD_S3_ACTIVE_HIGH=<ids> force whole boards."""
         ids = lambda v: {int(x) for x in os.environ.get(v, "").replace(",", " ").split() if x.isdigit()}
         lo, hi = ids("PAD_S3_ACTIVE_LOW"), ids("PAD_S3_ACTIVE_HIGH")
         for nid, n in self.nodes.items():
-            n.active_low = (nid in lo) or (nid not in hi and nid not in cab)
-        self.log.write("# [polarity] active low: %s; active high: %s\n" % (
-            " ".join(str(k) for k in sorted(self.nodes) if self.nodes[k].active_low),
-            " ".join(str(k) for k in sorted(self.nodes) if not self.nodes[k].active_low)))
+            m = masks.get(nid, bytes(8))
+            if nid in lo:
+                m = b"\xff" * 8
+            if nid in hi:
+                m = bytes(8)
+            n.low_mask = m
+        self.log.write("# [polarity] active-low inputs: %s\n" % " ".join(
+            "%d:%s" % (k, self.nodes[k].low_mask.hex()) for k in sorted(self.nodes)
+            if any(self.nodes[k].low_mask)))
 
     def note_enumeration(self, node, data):
         """`F0 10`/`F0 20` re-address a node: the game is (still) enumerating it, so
@@ -261,20 +274,26 @@ class Bridge:
         raised mid-enumeration is answered with F0 again - on a slow boot the
         fixed 30 s after registration ran out first and the game sent 45,000
         F0s a minute and never reached attract."""
-        model = self.nodes.get(node & 0x3F)
-        if model is None or not data:
+        if not data:
             return
         if node & 0x40:
             data = unmask(node, data)
+        # coil and motor commands ask for no reply, so they never reach
+        # node_exchange: the models hear them here (the first trough eject
+        # of a real game went unanswered for that reason)
+        if self.balls is not None and data[0] == 0x40 and len(data) >= 3:
+            self.balls.coil(node & 0x3F, data)
+        if self.steppers is not None:
+            self.steppers.note(node & 0x3F, data)
+        if self.motors is not None:
+            self.motors.note(node & 0x3F, data)
+        model = self.nodes.get(node & 0x3F)
+        if model is None:
+            return
         if node & 0x80:
             model.rx += 1             # every addressed frame, as the game counts
             if data[0] == 0xF1:       # F1: the game restarts its own count
                 model.rx = 0
-        # coil commands ask for no reply, so they never reach node_exchange:
-        # the ball model hears them here (the first trough eject of a real
-        # game went unanswered for that reason)
-        if self.balls is not None and data[0] == 0x40 and len(data) >= 3:
-            self.balls.coil(node & 0x3F, data)
         # F0 10 / F0 20 only: the service loop sends every node F0 11 once
         # a second, and counting that kept every request down for good
         if data[0] == 0xF0 and len(data) > 1 and data[1] in (0x10, 0x20) and model.registered:
@@ -374,10 +393,17 @@ def main():
         log.write("# node %d (%s) not fitted\n" % (n, claims.pop(n)["type"]))
     br = Bridge(crc, log, claims)
     br.attach_inputs(os.path.join(d, "nodesw"))
+    try:
+        import s3motors
+        br.steppers = s3motors.Steppers(br.sw, log)
+        br.motors = s3motors.Motors(br.sw, log)
+    except Exception as e:                           # no motors: status answers zeros
+        log.write("# [stepper] no stepper model (%s)\n" % e)
     if game:
         try:
-            devs = s3nodes.devices(s3nodes.Elf(game))
-            br.set_polarity(devs)
+            devs5 = s3nodes.devices(s3nodes.Elf(game), with_location=True)
+            br.set_polarity(s3nodes.active_low_masks(devs5))
+            devs = [r[:4] for r in devs5]
             # every switch by name, for `s3press.py sw SLOT NAME` (logical
             # bits in nodesw; node 0 = the CPU board's SPI chain)
             import json
@@ -411,9 +437,13 @@ def main():
              if os.environ.get("PAD_S3_NBTRACE") == "1" else None)
     trace_last = {}
     while True:
-        r, _, _ = select.select([master], [], [], 0.05 if br.balls else 0.5)
+        r, _, _ = select.select([master], [], [], 0.05 if (br.balls or br.steppers) else 0.5)
         if br.balls:
             br.balls.tick()
+        if br.steppers:
+            br.steppers.tick()
+        if br.motors:
+            br.motors.tick()
         if not r:
             continue
         try:

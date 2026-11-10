@@ -140,18 +140,28 @@ def test_status_probe_reports_frames_received():
     assert _s.unpack("<I", s3bridge.frames_in(r)[0][0][2][0:4])[0] == 1
 
 
-def test_playfield_boards_are_active_low():
-    """The game's Ball Trough Test shows a trough ball for wire bit 0: every
-    board but the cabinet one (START BUTTON) answers closed as 0."""
+def test_playfield_switches_are_active_low():
+    """The game's Ball Trough Test shows a trough ball for wire bit 0: the
+    PLAYFIELD switches (by location word) answer closed as 0, while cabinet
+    buttons - even the flipper buttons on playfield node 8 - stay high."""
+    import s3nodes
+    PF, CAB = 0x0A6A, 0x0A67
+    devs5 = [("START BUTTON", 1, 11, "switch", CAB), ("TROUGH 1", 8, 37, "switch", PF),
+             ("SHOOTER LANE", 8, 28, "switch", PF), ("LEFT FLIPPER BUTTON", 8, 25, "switch", CAB)]
+    masks = s3nodes.active_low_masks(devs5)
     br = s3bridge.Bridge(0, open(os.devnull, "w"))
     br.nodes[1] = _node(bytes([0, 0x08, 0, 0, 0, 0, 0, 0]))
-    br.nodes[8] = _node(bytes([0, 0, 0, 0, 0x3F, 0, 0, 0]))
-    br.set_polarity([("START BUTTON", 1, 11, "switch"), ("TROUGH 1", 8, 37, "switch")])
-    assert not br.nodes[1].active_low and br.nodes[8].active_low
-    for nid, want in ((1, bytes([0, 0x08, 0, 0, 0, 0, 0, 0])),
-                      (8, bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF]))):
-        r = br.nodes[nid](bytes([0x11, 0x00, 0x00]), 11)
-        assert r[:8] == want
+    br.nodes[8] = _node(bytes([0, 0, 0, 0, 0x20, 0, 0, 0]))   # TROUGH 1 closed
+    br.set_polarity(masks)
+    assert br.nodes[1].low_mask == bytes(8)
+    m8 = br.nodes[8].low_mask
+    assert m8[37 // 8] & (1 << 5) and m8[28 // 8] & (1 << 4)
+    assert not m8[25 // 8] & (1 << 1)                         # flipper button high
+    assert m8[0] == 0xFF                                       # unnamed: majority (playfield)
+    r = br.nodes[1](bytes([0x11, 0x00, 0x00]), 11)
+    assert r[:8] == bytes([0, 0x08, 0, 0, 0, 0, 0, 0])
+    r = br.nodes[8](bytes([0x11, 0x00, 0x00]), 11)
+    assert r[4] & 0x20 == 0 and r[3] & 0x10 and not r[3] & 0x02
 
 
 def test_short_press_is_queued_until_scanned():
@@ -171,3 +181,56 @@ def test_short_press_is_queued_until_scanned():
     assert br.attention() == 1
     assert scan() == bytes(8)
     assert br.attention() == 0
+
+
+def test_stepper_homes_and_reports(monkeypatch):
+    """fallout_le 0.81's Fat Man (node 10): configure, home, poll 38+motor.
+    Answered with zeros the game homed and polled for ever, never booting."""
+    monkeypatch.setenv("PAD_STEPPER_SPS", "100000")
+    import s3motors
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    sw = bytearray(512)
+    br.steppers = s3motors.Steppers(sw)
+    cfg0 = bytes.fromhex("3200 00f401 4041 a080 6400 0000 0005 007d 0000 74".replace(" ", ""))
+    cfg1 = bytes.fromhex("3201 00f401 4243 a080 3200 0000 0005 007d 0000 a1".replace(" ", ""))
+
+    def send(payload, reply_len):
+        p = bytes([0x8A, len(payload)]) + payload + bytes([reply_len])
+        r = br.handle(0x41, 0, p)
+        return s3bridge.frames_in(r)[0][0][2] if r else None
+    send(cfg0, 0)
+    send(cfg1, 0)
+    assert send(bytes([0x39, 0xFB]), 7)[4] == 0                 # not homed yet
+    send(bytes([0x34, 0x01, 0x00, 0xFD]), 0)                     # home motor 1, dir 0
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        st = send(bytes([0x39, 0xFB]), 7)
+        if st[4] & 0x04:
+            break
+        time.sleep(0.01)
+    assert st[4] == 0x04 and st[0:2] == bytes(2)
+    # dir 0 = data[6]'s input (0x43 -> input 3, FAT MAN TILT-HOME) is home
+    assert sw[8 * 10] & (1 << 3)
+
+
+def test_end_stop_motor_runs_to_its_input(monkeypatch):
+    """star_wars_2025_le 0.96's AT-AT (node 9 motor 2): 51 configures stops
+    24/25, 55 sends it to input 24, 52 is polled for the arrival (0x20)."""
+    monkeypatch.setenv("PAD_MOTOR_MS", "50")
+    import s3motors
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    sw = bytearray(512)
+    br.motors = s3motors.Motors(sw)
+    cfg = bytes.fromhex("510258592200000000cb4c4d0028800000004a01c800dd".replace(" ", ""))[:21]
+    go = bytes.fromhex("55025800faf401048c")
+
+    def send(payload, reply_len):
+        p = bytes([0xC9, len(payload)]) + s3bridge.unmask(0xC9, payload) + bytes([reply_len])
+        r = br.handle(0x41, 0, p)
+        return s3bridge.frames_in(r)[0][0][2] if r else None
+    send(cfg, 0)
+    send(go, 0)
+    assert send(bytes([0x52, 0x02, 0xE0]), 6)[2] == 0x01        # moving
+    time.sleep(0.1)
+    assert send(bytes([0x52, 0x02, 0xE0]), 6)[2] == 0x20        # arrived
+    assert sw[8 * 9 + 3] & 0x01                                  # input 24 made

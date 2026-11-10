@@ -82,18 +82,17 @@ class Balls:
         if os.environ.get("PAD_S3_BALLS_HOME", "1") != "0":
             for nb in where["trough"]:
                 self.set(nb, True)
-        # Raw input bits are ACTIVE HIGH (1 = closed): the service menu's
-        # Switch Test map draws every node 8/9 switch open at all-zero and
-        # closed at all-ones. So optos rest OPEN like everything else.
-        # PAD_S3_OPTO_REST=1 closes them (an experiment: the scoop kicks at
-        # boot came back with a bus whose status probe was wrong, not from
-        # the optos).
+        # nodesw is LOGICAL (1 = closed; s3bridge applies each switch's wire
+        # polarity), so every switch - optos included - rests OPEN: nothing
+        # in the beam. PAD_S3_OPTO_REST=1 closes the optos (an experiment).
+        closed = 0
         if os.environ.get("PAD_S3_OPTO_REST", "0") == "1":
             for nb in where.get("optos", []):
                 self.set(nb, True)
-        self.say("trough %s, shooter %s, eject coil %s, launch coil %s; %d home; %d optos at rest" % (
+            closed = len(where.get("optos", []))
+        self.say("trough %s, shooter %s, eject coil %s, launch coil %s; %d home%s" % (
             where["trough"], where["shooter"], where["eject"], where["launch"], self.home(),
-            len(where.get("optos", []))))
+            "; %d optos held closed" % closed if closed else ""))
 
     @classmethod
     def for_game(cls, game, sw, log=None, d=None):

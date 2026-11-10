@@ -93,6 +93,7 @@ LAYOUT = {
     "jjp": (".iso", True, [], True, True, False, False),
     "pb": (".upd", False, [], False, False, False, False),
     "sega": (".zip", False, [], False, False, True, True),
+    "capcom": (".zip", False, [], False, False, True, True),
     "spooky": (".pkg", False, [], False, False, False, False),
     "stern": ("Card image", True, ["audio", "video", "images", "text"],
               False, False, False, False),

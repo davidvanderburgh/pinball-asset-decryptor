@@ -76,7 +76,7 @@ def _modes_on_disk(project):
 
 # ------------------------------------------------------------------ gating
 MFRS = ["stern", "jjp", "spooky", "pb", "williams", "cgc", "dp", "ap", "bof",
-        "data_east", "sega"]
+        "data_east", "sega", "capcom"]
 
 
 def _mfr_keys():

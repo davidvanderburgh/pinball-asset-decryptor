@@ -165,6 +165,19 @@ class CapturePipeline(_WilliamsCapture):
             "the audio by spoken text.")
 
 
+class CapcomCapturePipeline(CapturePipeline):
+    """The same capture for a Capcom game (1995-1996).
+
+    Its ROM zip may be named anything: the romset is read from the ROMs
+    inside (:func:`.capcom.pick_romset`) and PinMAME is given the zip
+    under that name (the capture stages it as ``<romset>.zip``)."""
+
+    def _resolve(self):
+        from .capcom import pick_romset
+        key, info, rom_zip, _ = super()._resolve()
+        return key, info, rom_zip, pick_romset(rom_zip, info)
+
+
 class SamCapturePipeline(CapturePipeline):
     """The same capture for a Stern S.A.M. game (2006-2014).
 

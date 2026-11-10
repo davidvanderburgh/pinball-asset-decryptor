@@ -138,7 +138,8 @@ def _patch(svc, monkeypatch, **kw):
     ("stern", "whitestar", False), ("jjp", "", False), ("spooky", "", False),
     ("pb", "", False), ("williams", "", False), ("cgc", "", False),
     ("dp", "", False), ("ap", "", False), ("bof", "", False),
-    ("data_east", "", False), ("sega", "", False)])
+    ("data_east", "", False), ("sega", "", False),
+    ("capcom", "", False)])
 def test_tab_follows_the_capability(tmp_path, mfr, era, visible):
     with web_app(tmp_path, mfr=mfr, era=era or None) as w:
         if mfr not in {m.key for m in w.window.manufacturers}:

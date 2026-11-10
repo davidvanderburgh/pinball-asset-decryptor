@@ -1521,6 +1521,15 @@ def _describe_status(status: int) -> str:
     return f"PinmameRun status {status} ({names.get(status, 'unknown')})"
 
 
+def _same_file_copy(dest: str, src: str) -> bool:
+    """True when *dest* is a copy2 of *src* as it is now."""
+    try:
+        d, s = os.stat(dest), os.stat(src)
+    except OSError:
+        return False
+    return d.st_size == s.st_size and int(d.st_mtime) == int(s.st_mtime)
+
+
 def _ensure_vpm_dir(rom_zip_path: str, rom_name: str, log=None) -> str:
     """Copy the user's ROM zip into a vpmPath/roms/<rom_name>.zip layout.
 
@@ -1548,8 +1557,12 @@ def _ensure_vpm_dir(rom_zip_path: str, rom_name: str, log=None) -> str:
     # Once initialized, NVRAM is safe to persist across captures —
     # the game just sees it as a normal warm boot.
     dest = os.path.join(roms_dir, f"{rom_name}.zip")
-    # If destination is the same file as source, skip the copy.
-    if not os.path.exists(dest) or os.path.getmtime(dest) < os.path.getmtime(rom_zip_path):
+    # Skip the copy only when the staged one is this file's earlier copy
+    # (copy2 keeps the time, so size + time match).  "Staged is older"
+    # was not enough: a different zip staged under the same romset name
+    # (a Capcom zip is staged under the version read from it, whatever
+    # it is called) and newer than the one picked was run in its place.
+    if not _same_file_copy(dest, rom_zip_path):
         shutil.copy2(rom_zip_path, dest)
         if log:
             log(f"Copied {os.path.basename(rom_zip_path)} -> {dest}",

@@ -1,4 +1,4 @@
-"""Data East manufacturer plugin (classic DMD era, 1991-1994).
+"""Data East / Sega / Capcom manufacturer plugins (classic DMD era).
 
 Data East / Sega / Stern are one hardware lineage that all run in
 PinMAME; this plugin family follows the Williams model (MAME ROM zip
@@ -48,8 +48,15 @@ class _ClassicManufacturer(Manufacturer):
                 "apt-get install ffmpeg       (Linux)")),
     )
 
+    #: the capture pipeline class this brand runs
+    pipeline_class = _capture.CapturePipeline
+
+    def _catalogue(self):
+        """{key: info} for this brand's games."""
+        return _slice(self.brand)
+
     def __init__(self):
-        self._game_db = _slice(self.brand)
+        self._game_db = self._catalogue()
         self.games = tuple(sorted(
             (Game(key=k, display=v["display"], manufacturer_key=self.key,
                   notes=f"{v['year']}, {v['dmd']} DMD")
@@ -68,7 +75,7 @@ class _ClassicManufacturer(Manufacturer):
     def make_capture_pipeline(self, input_path, output_dir,
                               log_cb, phase_cb, progress_cb, done_cb,
                               **kwargs):
-        return _capture.CapturePipeline(
+        return self.pipeline_class(
             input_path, output_dir,
             log_cb, phase_cb, progress_cb, done_cb,
             game_db=self._game_db,
@@ -104,6 +111,29 @@ class SegaManufacturer(_ClassicManufacturer):
         label="Sega MAME ROM zips", extensions=(".zip",))
 
 
+class CapcomManufacturer(_ClassicManufacturer):
+    """Capcom (1995-1996), six titles; see :mod:`.capcom`."""
+
+    key = "capcom"
+    display = "Capcom"
+    brand = "Capcom"
+    input_spec = InputSpec(
+        label="Capcom MAME ROM zips", extensions=(".zip",))
+    pipeline_class = _capture.CapcomCapturePipeline
+
+    def _catalogue(self):
+        from .capcom import CAPCOM_GAME_DB
+        return CAPCOM_GAME_DB
+
+    def extract_input_help(self):
+        return ("Pick a MAME-format ROM zip for a Capcom game (e.g. "
+                "`bbb109.zip` for Big Bang Bar, `kpb105.zip` for "
+                "Kingpin).  Extract runs the game in attract mode "
+                "(libpinmame) and records the DMD animations + audio as "
+                "the game draws and plays them.")
+
+
 def register():
     register_manufacturer(DataEastManufacturer())
     register_manufacturer(SegaManufacturer())
+    register_manufacturer(CapcomManufacturer())

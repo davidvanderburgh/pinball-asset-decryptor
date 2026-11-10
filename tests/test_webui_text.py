@@ -15,7 +15,7 @@ import pytest
 from tests.webui_harness import web_app
 
 MFRS = ["stern", "jjp", "spooky", "pb", "williams", "cgc", "dp", "ap", "bof",
-        "data_east", "sega"]
+        "data_east", "sega", "capcom"]
 
 
 # ---------------------------------------------------------------- helpers

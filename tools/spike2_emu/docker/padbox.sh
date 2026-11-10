@@ -480,6 +480,19 @@ host_player() {
     fi
     chargs=$(ffplay_channel_args "$ch")
     echo "[box] audio: ffplay, ${rate} Hz x ${ch} ch ($chargs) from the box's sound FIFO (docker exec)"
+    # WHICH ffplay, AND IN A CLEAN ENVIRONMENT (PAD-1109). With the stream
+    # proven to arrive - 172 KB/s at -3 dBFS, taken at playback speed - a
+    # Mac user still heard nothing from this ffplay, while the same ffplay
+    # run from Terminal played a test tone. The one systematic difference is
+    # the environment: on Linux the app scrubs its frozen bundle out of what
+    # the rig inherits (rig.rig_env_args, PAD-837), on macOS it never did, so
+    # ffplay got the app's own. It now starts with only what a program needs
+    # to find the user's sound (HOME, USER, LOGNAME, TMPDIR, LANG), and the
+    # log names the binary and any SDL / DYLD / PYTHON variables left behind.
+    fpbin=$(command -v ffplay)
+    echo "[box] speaker: $fpbin ($(ffplay -version 2>/dev/null | head -n 1 | cut -d' ' -f1-3))"
+    left=$(env | grep -E '^(SDL_|AUDIODEV=|DYLD_|PYTHON)' | cut -d= -f1 | sort | tr '\n' ' ')
+    [ -n "$left" ] && echo "[box] speaker: started without the app's ${left% }"
     # NOT exec'd, and STARTED AGAIN IF IT STOPS (PAD-832), so the TERM that
     # takes this player down at the end has to reach ffplay as well. Killing
     # ffplay is enough: the docker exec feeding it dies on its next write.
@@ -507,13 +520,19 @@ host_player() {
         # $chargs unquoted on purpose: it is an option and its value
         docker exec -i "$NAME" python3 /pad/rig/padrelay.py --pipe \
                 "$BOX_FIFO" "${PAD_AUDIO_CTL:+$BOX_CTL}" |
-            ffplay -hide_banner -loglevel error -nodisp -autoexit \
+            env -i HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
+                TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-en_US.UTF-8}" \
+                "$fpbin" -hide_banner -loglevel warning -nodisp -autoexit \
                  -fflags nobuffer -flags low_delay \
                  -f s16le -ar "$rate" $chargs -i pipe:0 &
         fp=$!
         wait "$fp"; rc=$?; fp=""
-        # The relay ends when the run does; so does this.
-        docker exec "$NAME" true >/dev/null 2>&1 || break
+        # The relay ends when the run does; so does this. Asked of the FIFO,
+        # which playaudio.sh removes as the run ends, and not only of the box:
+        # a box still shutting down answers `true`, and a speaker started
+        # again then was a reader left behind after Stop (PAD-1109's log:
+        # "TOTAL STILL RUNNING : 1", a padrelay.py --pipe one second old).
+        docker exec "$NAME" test -p "$BOX_FIFO" >/dev/null 2>&1 || break
         if [ $(( SECONDS - st )) -lt 5 ]; then quick=$(( quick + 1 )); else quick=0; fi
         if [ "$quick" -ge 5 ]; then
             echo "[box] the speaker (ffplay) stopped 5 times in a row as soon as it started (exit $rc); the rest of this run is silent" >&2

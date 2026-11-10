@@ -47,7 +47,7 @@ docker() {
   shift
   case "$*" in
     *"cat /pad/rootfs/dump/audio.fmt") echo "44100 2" ;;
-    *" true") [ -f "$D/up" ] ;;
+    *" true"|*"test -p /pad/rootfs/dump/audio.fifo") [ -f "$D/up" ] ;;
     *"pkill -f padrelay.py --pipe") echo "reap" >> "$D/events" ;;
     "-i pad-test python3 /pad/rig/padrelay.py --pipe "*)
        n=$(( $(cat "$D/relays" 2>/dev/null || echo 0) + 1 )); echo $n > "$D/relays"
@@ -55,12 +55,29 @@ docker() {
        cat "$D/feed$n" 2>/dev/null ;;
   esac
 }
-# ffplay: answers the option probe; otherwise records its arguments and what
-# came in on stdin, then plays as $D/play<N> says
+# env -i NAME=v... cmd: what env(1) does, for a cmd that is a function here.
+# Only ever called as an element of host_player's pipeline, which is its own
+# subshell, so the variables go in place: no further subshell, or the PID
+# host_player kills would not be the player's (env(1) execs, keeping it)
+env() {
+  [ "${1:-}" = -i ] || { command env "$@"; return; }
+  shift
+  for v in $(compgen -e); do
+    case $v in D|PATH) ;; *) unset "$v" ;; esac
+  done
+  while [ $# -gt 0 ] && [ "${1#*=}" != "$1" ]; do export "$1"; shift; done
+  "$@"
+}
+# ffplay: answers the option probes; otherwise records its arguments, its
+# environment and what came in on stdin, then plays as $D/play<N> says
 ffplay() {
-  case " $* " in *" -h "*) echo "  -ch_layout  <channel_layout>"; return 0 ;; esac
+  case " $* " in
+    *" -h "*) echo "  -ch_layout  <channel_layout>"; return 0 ;;
+    *" -version "*) echo "ffplay version 8.0 Copyright"; return 0 ;;
+  esac
   n=$(( $(cat "$D/starts" 2>/dev/null || echo 0) + 1 )); echo $n > "$D/starts"
   echo "player $n: $*" >> "$D/events"
+  echo "sdl=${SDL_AUDIODRIVER:-} home=${HOME:-}" > "$D/env$n"
   cat > "$D/heard$n"
   case "$(cat "$D/play$n" 2>/dev/null || echo eof)" in
     eof) return 0 ;;                       # the stream ended
@@ -114,11 +131,33 @@ echo "HP-DONE"
            "/pad/rootfs/dump/audio.fifo /tmp/pad_audio_ctl.json" in ev, (ev, text)
     player = [l for l in ev.splitlines() if l.startswith("player 1:")][0]
     assert player.endswith("-f s16le -ar 44100 -ch_layout stereo -i pipe:0"), player
+    assert "-loglevel warning" in player, player
     assert "tcp://" not in ev
     assert _cat(d, "heard1") == "PCM-BYTES"
     # a relay left from an earlier player is stopped before this one reads
     assert ev.index("reap") < ev.index("relay 1:")
     assert "docker exec" in text and "HP-DONE" in text
+
+
+@needs_bash
+def test_the_speaker_starts_clean_of_the_apps_environment_and_says_so():
+    """PAD-1109: the stream arrived and ffplay took it at playback speed, yet
+    nothing was heard, while the same ffplay from Terminal played a tone. The
+    Mac's ffplay now starts in a clean environment, and the log names the
+    variables of the app's it was spared."""
+    d = _fresh_dir()
+    rc, text = _run(d, r"""
+export SDL_AUDIODRIVER=dummy PYTHONHOME=/Applications/X.app/Contents/Frameworks
+touch "$D/up"; echo long > "$D/play1"
+host_player & HP=$!
+for i in $(seq 1 80); do [ -f "$D/env1" ] && break; sleep 0.1; done
+sleep 0.3; kill $HP; wait $HP 2>/dev/null
+""")
+    assert "[box] speaker: started without the app's PYTHONHOME SDL_AUDIODRIVER" \
+        in text, text
+    assert "[box] speaker: ffplay" in text, text
+    seen = _cat(d, "env1")
+    assert seen.startswith("sdl= home=/"), (seen, text)
 
 
 @needs_bash
@@ -164,7 +203,7 @@ def test_a_box_that_stops_ends_the_speaker_without_a_restart():
 touch "$D/up"; echo eof > "$D/play1"
 ffplay_real=$(declare -f ffplay)
 eval "${ffplay_real/ffplay ()/ffplay_inner ()}"
-ffplay() { case " $* " in *" -h "*) ffplay_inner "$@"; return ;; esac
+ffplay() { case " $* " in *" -h "*|*" -version "*) ffplay_inner "$@"; return ;; esac
            ffplay_inner "$@"; rm -f "$D/up"; }
 host_player
 echo "HP-RC=$?"

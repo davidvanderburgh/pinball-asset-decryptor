@@ -80,7 +80,7 @@ def test_an_ffplay_older_than_5_1_still_gets_ac():
 def test_the_player_never_passes_ac_itself():
     # the one ffplay command line takes its channel words from the probe
     player = _function("host_player")
-    cmd = player[player.index("ffplay -hide_banner"):]
+    cmd = player[player.index("\"$fpbin\" -hide_banner"):]
     cmd = cmd[:cmd.index("pipe:0")]
     assert "-ac" not in cmd
     assert "$chargs" in cmd

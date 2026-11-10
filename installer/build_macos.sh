@@ -152,6 +152,12 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/valpatch.py:pinball_decryptor/plugins/stern" \
     `# the official Stern stock fingerprints (PAD-426): data, not code` \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/data/stock_prints.json.xz:pinball_decryptor/plugins/stern/data" \
+    `# Spike 3 LUKS2 verifier/decryptor: stern/spike3.py loads it by path at run` \
+    `# time (_luks_otp(), four parents up from the plugin then` \
+    `# stern-spike-3/tools/luks_otp.py), so the whole Spike 3 key/decrypt path` \
+    `# throws without it. It lives outside the package; ship it at the exact` \
+    `# _MEIPASS-relative path _luks_otp() rebuilds.` \
+    --add-data "$ROOT_DIR/stern-spike-3/tools/luks_otp.py:stern-spike-3/tools" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/crypto_v3.py:pinball_decryptor/plugins/jjp" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/jjp/filelist.py:pinball_decryptor/plugins/jjp" \

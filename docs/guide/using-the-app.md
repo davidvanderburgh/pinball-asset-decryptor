@@ -117,6 +117,8 @@ build.
 
 - **Type** filters the list to Music, Sound FX, Callouts or Other, where
   the extract names them.
+- **Hide unused** (Stern): ticked, the list leaves out sounds that no
+  request in the game code plays (Requests shows **None**).
 - **Sound Test names** (Stern): on titles with a Sound Test menu, sounds
   arrive named by the game itself (`idx0091 - SE FX MATCH.wav`).
 - **Rename** a slot (right-click > **Properties…**). The name follows the

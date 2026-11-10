@@ -198,7 +198,11 @@ button's bit on node 0), and the controller finds each button's id in the
 title's own switch table: the ids differ by title, the wire does not. A table
 patched before them gets them the first time the app's Play opens it. The launch button is Enter on Godzilla (marty02 wired it to the
 plunger key) and the lockbar key, Left Alt by VPX's default, on Rush and Foo
-Fighters (their scripts wired the Action button to `LockBarKey`).
+Fighters (their scripts wired the Action button to `LockBarKey`). A machine
+with a manual plunger keeps the plunger key on the table's own plunger and its
+Action button on the lockbar key (PAD-1128: Jaws, John Wick and Jurassic Park
+had the plunger key pressing the Action button, so their plunger never pulled;
+Jaws' game waits with the ball in the lane until one or the other launches it).
 `%TEMP%\padcontroller.log` says what the controller did;
 `%TEMP%\padspike2.log` what the system script's load did.
 

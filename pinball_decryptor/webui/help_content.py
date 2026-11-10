@@ -4039,8 +4039,8 @@ PREVIEW_HELP = {
              "| 1 | Start |\n"
              "| 5 | coin (add coins until the game's screen shows a credit) |\n"
              "| Left and right Shift | flippers |\n"
-             "| Left Alt | launch on Rush and Foo Fighters (Visual Pinball's lockbar key) |\n"
-             "| Enter | launch on Godzilla |\n"
+             "| Enter | the plunger: hold to pull it back, let go to shoot (on Godzilla, the launch button) |\n"
+             "| Left Alt | the machine's Action button, which also launches the ball (Visual Pinball's lockbar key) |\n"
              "| Esc | leave; the game stops with the table |\n\n"
              "The first time, the game's screen may take the keyboard: click the "
              "playfield once and play on."),

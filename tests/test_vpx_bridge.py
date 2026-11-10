@@ -5595,3 +5595,49 @@ def test_foo_fighters_kick_target_fires_dof_and_kicks_harder(tmp_path, title):
         "WScript.Echo Got"]), encoding="latin-1")
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
     assert r.stdout.split() == ["snd", "104:2", "107:2"], r.stdout + r.stderr
+
+
+PULL_TRIBUTE = MINI_TRIBUTE.replace(
+    "Sub Table1_KeyDown(ByVal keycode)\n",
+    "Sub Table1_KeyDown(ByVal keycode)\n    If keycode = PlungerKey Then Plunger.Pullback\n").replace(
+    "Sub Table1_KeyUp(ByVal keycode) : End Sub",
+    "Sub Table1_KeyUp(ByVal keycode)\n    If keycode = PlungerKey Then Plunger.Fire\nEnd Sub")
+
+
+def test_no_map_takes_the_plunger_key_from_the_tables_plunger():
+    """PAD-1128: the Jaws, John Wick and Jurassic Park maps sent the plunger
+    key to the machine's Action button and kept it from the table, so a
+    manual-plunger machine's plunger never pulled (Jaws' game waits with the
+    ball in the lane until the plunger or the button launches it). A map may
+    take the plunger key only when the table's plunger IS the auto launcher
+    (`auto_plunger`, AC/DC)."""
+    for path in sorted(glob.glob(os.path.join(VPX, "*.shadow.json"))):
+        m = json.load(open(path, encoding="utf-8"))
+        if (m.get("plunger") or {}).get("auto_plunger"):
+            continue
+        assert "PlungerKey" not in m.get("keys_skip_orig", []), os.path.basename(path)
+
+
+def test_jaws_plunger_key_pulls_the_plunger_and_lockbar_is_action(tmp_path):
+    """PAD-1128: on the Jaws, John Wick and Jurassic Park maps Enter reaches
+    the table's own Plunger.Pullback / Fire and the lockbar key presses the
+    Action button; a copy patched before is told to patch again."""
+    vs = pytest.importorskip("vpxshadow")
+    vset = pytest.importorskip("vpxsetup")
+    for t in ("jaws_le", "john_wick_le", "john_wick_pro", "jurassic_park_le", "jurassic_park_pro"):
+        m = json.load(open(os.path.join(VPX, t + ".shadow.json"), encoding="utf-8"))
+        assert m["cabinet"]["launch_key"] == "LockBarKey", t
+        out, _ = vs.patch(PULL_TRIBUTE, m)
+        down = _last_sub(out, "Table1_KeyDown")
+        assert "If KeyCode = LockBarKey Then Controller.Switch(1034) = True" in down, t
+        assert "PlungerKey" not in down, t           # falls through to the table's own
+        assert re.search(r"Case Else\s+(?:If [^\n]*Then )?Table1_KeyDown_orig KeyCode", down), t
+        assert "If keycode = PlungerKey Then Plunger.Pullback" in out
+        script = tmp_path / (m["output"][:-4] + ".script.vbs")
+        old, _ = vs.patch(PULL_TRIBUTE, dict(m, cabinet=dict(m["cabinet"], launch_key="PlungerKey"),
+                                                keys_skip_orig=m["keys_skip_orig"] + ["PlungerKey"]))
+        script.write_text(old, encoding="utf-8")
+        why = m["repatch"][-1]["why"]
+        assert why in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
+        script.write_text(out, encoding="utf-8")
+        assert why not in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t

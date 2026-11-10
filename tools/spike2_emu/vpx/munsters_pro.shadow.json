@@ -1436,5 +1436,12 @@
   "orig_keep": [
     "LeftSlingShot",
     "RightSlingShot"
+  ],
+  "repatch": [
+    {
+      "old": "LinearEnvelope = Y End Function '====================================================================== '==== PAD: the Spike 2 emulator drives this table",
+      "why": "Visual Pinball stopped on \"Object not a collection\" as the table loaded",
+      "since": "PAD-1102: the rainbow lights' list starts empty"
+    }
   ]
 }

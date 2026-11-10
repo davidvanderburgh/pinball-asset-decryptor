@@ -392,6 +392,69 @@ def test_shadow_spinner_as_an_opto_pulses_once_a_pass(tmp_path):
     assert r.stdout.split() == ["1083@1000", "1083@2140", "1056@2400"], r.stdout + r.stderr
 
 
+RAINBOW = """
+\tDim RGBStep, RGBFactor, rRed, rGreen, rBlue, RainbowLights, OtherLights
+\tSub StartRainbow(n)
+\t\tset RainbowLights = n
+\t\tRainbowTimer.Enabled = 1
+\tEnd Sub
+\tSub StopRainbow(n)
+\t\tDim obj
+\t\t\tFor each obj in RainbowLights
+\t\t\t\tSetLightColor obj, white, 0
+\t\t\tNext
+\tEnd Sub
+\tSub RainbowTimer_Timer 'rainbow led light color changing
+\t\tDim obj
+\t\trRed = rRed + 1
+\t\t\tFor each obj in RainbowLights
+\t\t\t\tobj.color = RGB(rRed, rGreen, rBlue)
+\t\t\tNext
+\tEnd Sub
+\tSub StartOther(n) : Set OtherLights = n : End Sub
+\tSub OtherToo : Set OtherLights = aLights : End Sub
+\tSub OtherTimer_Timer : Dim o : For Each o In OtherLights : o.State = 1 : Next : End Sub
+"""
+
+
+def test_shadow_quieted_set_leaves_an_empty_list(tmp_path):
+    # PAD-1102: Munsters saves RainbowTimer enabled, and only StartRainbow
+    # (quieted: the machine runs the lights) gave RainbowLights its lights;
+    # the first tick stopped Visual Pinball on "Object not a collection".
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["quiet_subs"] = ["StartRainbow", "StartOther"]
+    out, rep = vs.patch(MINI_TRIBUTE + RAINBOW, m)
+    lines = out.split("\n")
+    assert "RainbowLights = Array()" in lines
+    assert "OtherLights = Array()" not in lines        # OtherToo, still running, sets it too
+    assert any(r.startswith("RainbowLights starts as an empty list: only the quieted StartRainbow set it, "
+                            "and RainbowTimer_Timer, StopRainbow still walk it") for r in rep), rep
+    # what a loop inside the quieted Sub itself walks is never filled in
+    q = json.loads(json.dumps(MINI_SHADOW))
+    q["quiet_subs"] = ["StopRainbow", "RainbowTimer_Timer", "StartRainbow"]
+    assert "RainbowLights = Array()" not in vs.patch(MINI_TRIBUTE + RAINBOW, q)[0].split("\n")
+    # a local Dim is not the module's variable
+    local = "Sub Fill(n) : Dim Mine : Set Mine = n : End Sub\nSub Walk : Dim o : For Each o In Mine : Next : End Sub\n"
+    assert "Mine = Array()" not in vs.patch(MINI_TRIBUTE + local, dict(m, quiet_subs=["Fill"]))[0]
+    if not (sys.platform == "win32" and shutil.which("cscript")):
+        return
+    a = lines.index("\tDim RGBStep, RGBFactor, rRed, rGreen, rBlue, RainbowLights, OtherLights")
+    b = lines.index("\tEnd Sub", lines.index("\tSub RainbowTimer_Timer 'rainbow led light color changing"))
+    stand_in = next(ln for ln in lines if ln.startswith("Sub StartRainbow(n) : End Sub"))
+    # the table's block as patched (StartRainbow_orig is never called) and the stand-in
+    run = ["Dim aLights, white"] + lines[a:b + 1] + [stand_in]
+    tick = "StartRainbow aLights : RainbowTimer_Timer : StopRainbow aLights : WScript.Echo \"ran \" & rRed"
+    for name, guard in (("after", ["RainbowLights = Array()"]), ("before", [])):
+        vbs = tmp_path / ("%s.vbs" % name)
+        vbs.write_text("\n".join(run + guard + [tick]), encoding="latin-1")
+        r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+        if guard:
+            assert r.stdout.strip() == "ran 1" and not r.stderr.strip(), r.stdout + r.stderr
+        else:   # the table as v1.388.7 patched it: the reporter's error (cscript still exits 0)
+            assert "ran" not in r.stdout and "Object not a collection" in r.stderr, r.stdout + r.stderr
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the generated VBScript under cscript")
 def test_shadow_up_only_opto_pulses_on_the_way_up(tmp_path):

@@ -84,13 +84,8 @@ def test_only_known_unsupported_games_exist(all_manufacturers):
     UI regressions where every game suddenly shows as unsupported."""
     expected_unsupported = {
         ("spooky", "total_nuclear"),
-        # Spike 3 SD images we can't decrypt offline yet: only Star Wars PRO
-        # 0.84's keys are in hand, so the rest are greyed with a reason.
-        ("stern", "star_wars_2025_le"),
-        ("stern", "star_wars_elg"),
-        ("stern", "fallout_le"),
-        ("stern", "pokemon_le"),
-        ("stern", "walking_dead_remastered_le"),
+        # (every Spike 3 title is supported since the fleet OTP keyfile
+        # unlocks them all; 5c07a816b left them listed here)
     }
     actual_unsupported = {
         (m.key, g.key)

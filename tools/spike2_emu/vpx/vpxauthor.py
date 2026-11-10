@@ -1021,6 +1021,46 @@ def gaps(machine, cov):
 TABLE_KINDS = ("Trigger", "Kicker", "HitTarget", "Bumper", "Spinner", "Flipper", "Gate", "Plunger",
                "Light", "Flasher", "Wall", "Ramp", "Primitive", "Timer")
 
+# controller.vbs's loaders, which a scripted original often carries a copy of
+# in its own script (Allknowing2012's Munsters, PAD-1095): their bodies name
+# VPinMAME.Controller whichever loader the table calls, so they say nothing
+# about the table's brain; only what the script itself calls does
+_LOADER_DEFS = re.compile(
+    r"^[ \t]*(?:Public[ \t]+|Private[ \t]+)?Sub[ \t]+(?:LoadVPM|LoadVPMALT|LoadVPinMAME|LoadController|LoadEM"
+    r"|LoadPROC)\b.*?^[ \t]*End[ \t]+Sub\b", re.I | re.M | re.S)
+
+
+def _uncommented(script):
+    """The script without its VBScript comments (a ' outside a string to the
+    line's end; Rem lines): Stranger Things keeps a commented-out LoadVPM, and
+    Iron Maiden names it in a remark."""
+    out = []
+    for line in script.splitlines():
+        if re.match(r"\s*rem\b", line, re.I):
+            continue
+        inq = False
+        for i, ch in enumerate(line):
+            if ch == '"':
+                inq = not inq
+            elif ch == "'" and not inq:
+                line = line[:i]
+                break
+        out.append(line)
+    return "\n".join(out)
+
+
+def script_brain(script):
+    """"pad", "rom" or "scripted": what drives a table, from its script."""
+    low = _LOADER_DEFS.sub("", _uncommented(script)).lower()
+    if "pad.controller" in low or "padspike2" in low:
+        return "pad"
+    # the ROM's name: Controller.GameName, or .GameName in a `With Controller`
+    # (FlexDMD.GameName = cGameName names a DMD's folder, not a ROM: Aerosmith)
+    if ("vpinmame.controller" in low or "loadvpm" in low
+            or re.search(r"(?:^[ \t]*|\bcontroller)\.gamename\s*=", low, re.M)):
+        return "rom"
+    return "scripted"
+
 
 def table_inventory(path):
     """What a .vpx has: its objects by kind (names for the ones that matter),
@@ -1032,13 +1072,7 @@ def table_inventory(path):
         kind, name, _pos = t.item_info(data)
         by.setdefault(kind, []).append(name)
     script = t.script()
-    low = script.lower()
-    if "pad.controller" in low or "padspike2" in low:
-        brain = "pad"
-    elif "vpinmame.controller" in low or "loadvpm" in low or re.search(r"\.gamename\s*=", low):
-        brain = "rom"
-    else:
-        brain = "scripted"
+    brain = script_brain(script)
     return {"path": path, "name": os.path.basename(path), "kinds": {k: sorted(v) for k, v in by.items()},
             "counts": {k: len(v) for k, v in by.items()}, "brain": brain,
             "script_lines": script.count("\n") + 1 if script else 0}

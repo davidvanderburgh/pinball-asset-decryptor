@@ -25,8 +25,18 @@ playaudio.sh hands this a third argument, the volume file padbox.sh keeps in
 step with the tab's audio_ctl.json ({"gain": 0-1, "muted": bool}), and the
 samples are scaled here on their way through. The Windows bridge passes none:
 padplay.py scales its own, and doing it twice would square the level.
+
+EVERY 30 s IT SAYS WHAT IT SENT AND HOW LOUD (PAD-1109). A Mac user heard
+nothing with the Volume at 100% while every counter the app's log could show
+read healthy: the game wrote its sound, nothing was dropped, the FIFO never
+backed up. Whether that sound left the box as silence or as music, and whether
+a player was even attached, was said only in padaudio.log inside the box,
+which the user cannot send. The [padrelay] lines are now carried into the
+app's log, and this one answers both: bytes handed to the player and their
+loudest sample, after the volume.
 """
 import json
+import math
 import os
 import socket
 import sys
@@ -95,6 +105,47 @@ class Volume:
         return self.gain
 
 
+#: how often the relay says what it sent, matching the guest's [aud] summary
+REPORT_S = 30.0
+
+
+def peak_dbfs(peak):
+    """A sample magnitude as dBFS text; 0 is digital silence, said as such."""
+    if peak <= 0:
+        return "digital silence"
+    return "loudest %.1f dBFS" % (20 * math.log10(min(peak, 32768) / 32768.0))
+
+
+class Meter:
+    """Bytes and loudest sample handed to the player, said every REPORT_S."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.t0 = clock()
+        self.bytes = 0
+        self.peak = 0
+
+    def add(self, b):
+        n = len(b) & ~1
+        if n:
+            a = array("h")
+            a.frombytes(b[:n])
+            self.peak = max(self.peak, max(a), -min(a))
+        self.bytes += len(b)
+
+    def line(self, now=None):
+        """The report line once REPORT_S has passed, else None (and resets)."""
+        now = self.clock() if now is None else now
+        secs = now - self.t0
+        if secs < REPORT_S:
+            return None
+        s = ("[padrelay] last %.0f s: %d KB to the player (%.0f KB/s), %s"
+             % (secs, self.bytes // 1024, self.bytes / 1024.0 / secs,
+                peak_dbfs(self.peak)))
+        self.t0, self.bytes, self.peak = now, 0, 0
+        return s
+
+
 def main():
     if len(sys.argv) < 3:
         print("usage: padrelay.py <fifo> <port> [ctl]", file=sys.stderr)
@@ -131,6 +182,7 @@ def main():
         fd = os.open(fifo, os.O_RDONLY)
         total = 0
         odd = b""
+        meter = Meter()
         try:
             while True:
                 b = os.read(fd, 65536)
@@ -144,6 +196,10 @@ def main():
                     b = scale(b, vol.poll())
                 conn.sendall(b)
                 total += len(b)
+                meter.add(b)
+                said = meter.line()
+                if said:
+                    print(said, flush=True)
         except (BrokenPipeError, ConnectionResetError, OSError) as exc:
             print("[padrelay] player went away: %s" % exc, flush=True)
         finally:

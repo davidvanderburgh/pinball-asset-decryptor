@@ -51,6 +51,23 @@ def test_in_between_scales_every_sample(relay):
     assert struct.unpack("<4h", out) == (16383, -16384, 500, -500)
 
 
+def test_the_meter_says_every_30_s_what_left_and_how_loud(relay):
+    """PAD-1109: a silent Mac run had nothing in the app's log saying whether
+    the box sent sound or silence; the relay now says it every 30 s."""
+    t = [0.0]
+    m = relay.Meter(clock=lambda: t[0])
+    m.add(_pcm(16384, -32768, 100) + b"\x01")     # odd byte: counted, not read
+    assert m.line(now=29.9) is None
+    s = m.line(now=30.0)
+    assert s.startswith("[padrelay] last 30 s: 0 KB to the player")
+    assert s.endswith("loudest 0.0 dBFS")
+    m.add(bytes(176400 * 30))                     # 30 s of digital silence
+    s = m.line(now=60.0)
+    assert "5167 KB to the player (172 KB/s)" in s and s.endswith("digital silence")
+    m.add(_pcm(3277))
+    assert m.line(now=90.0).endswith("loudest -20.0 dBFS")
+
+
 def test_the_file_says_the_level(relay, tmp_path):
     p = tmp_path / "audio_ctl.json"
     _write(p, gain=0.4, muted=False)

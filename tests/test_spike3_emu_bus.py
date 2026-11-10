@@ -255,3 +255,36 @@ def test_netbridge_crc_range_and_version_come_from_the_card(tmp_path):
     (tmp_path / "version.txt").write_text("0.97.0\n")
     assert s3bridge.flash_crc(str(elf)) == zlib.crc32(flash[0x100:]) & 0xFFFFFFFF
     assert s3bridge.fw_version(str(elf)) == (0, 97, 0)
+
+
+def test_frames_sort_numerically_and_frame_after_waits(tmp_path, monkeypatch):
+    """frame_999 sorted after frame_1000 made 'the newest' a stale frame;
+    frame_after must not return a frame drawn before the press."""
+    import s3press
+    monkeypatch.setattr(s3press, "BASE", str(tmp_path / "slot%s"))
+    d = tmp_path / "slot5" / "frames"
+    d.mkdir(parents=True)
+    for n in (998, 999, 1000, 1001):
+        (d / ("frame_%d.png" % n)).write_bytes(b"")
+    names = [os.path.basename(f) for f in s3press.frames("5")]
+    assert names[-1] == "frame_1001.png" and names[0] == "frame_998.png"
+    assert os.path.basename(s3press.newest_frame("5")) == "frame_1000.png"
+    before = str(d / "frame_1000.png")
+    t = time.time()
+    got = s3press.frame_after("5", before, timeout=0.6, gap=2)   # none newer yet
+    assert time.time() - t >= 0.5 and os.path.basename(got) == "frame_1000.png"
+    for n in (1002, 1003):
+        (d / ("frame_%d.png" % n)).write_bytes(b"")
+    assert os.path.basename(s3press.frame_after("5", before, gap=2)) == "frame_1002.png"
+
+
+def test_legacy_power_distribution_answered_by_the_bridge():
+    """netbridge answers 0x10/0x12/0x15/0x19 itself with a Spike 1/2 power
+    board; unanswered, star_wars_2025_pro waited out a timeout per poll."""
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    body = lambda cmd: s3bridge.frames_in(br.handle(cmd, 1, b""))[0][0][2]
+    assert body(0x10) == bytes(3)
+    assert body(0x12) == bytes([s3bridge.LINE_HZ])
+    assert body(0x15) == b"\xff"
+    assert len(body(0x19)) == 2
+    assert br.handle(0x11, 1, b"") is None

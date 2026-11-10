@@ -88,6 +88,28 @@ def newest_frame(slot):
     return fs[-2] if len(fs) > 1 else None
 
 
+def _frame_no(f):
+    try:
+        return int(os.path.basename(f)[6:-4])
+    except (TypeError, ValueError):
+        return -1
+
+
+def frame_after(slot, before, timeout=30.0, gap=2):
+    """The newest finished frame at least GAP dumps past BEFORE (a path),
+    waiting up to TIMEOUT s for the renderer to get there; the newest
+    there is when it does not."""
+    n0 = _frame_no(before)
+    end = time.time() + timeout
+    while True:
+        f = newest_frame(slot)
+        if f and _frame_no(f) >= n0 + gap:
+            return f
+        if time.time() >= end:
+            return f
+        time.sleep(0.5)
+
+
 def thumb(f):
     from PIL import Image
     im = Image.open(f).convert("RGB")
@@ -218,7 +240,10 @@ def autoguide(slot, secs=0, keep=60):
             continue
         press(slot, BACK)
         time.sleep(1.5)
-        g = newest_frame(slot)
+        # a frame drawn AFTER the press: star_wars_2025_pro draws ~0.5 fps
+        # under emulation, and the newest frame 1.5 s on still showed the
+        # highlight on Language - autoguide pressed BACK for ever
+        g = frame_after(slot, f)
         try:
             r = highlighted_row(g) if g else None
         except (OSError, ValueError):
@@ -228,6 +253,7 @@ def autoguide(slot, secs=0, keep=60):
             walked += 1
             print("[autoguide] Guided Setup: Save & Exit (%d)" % walked, flush=True)
             time.sleep(6.0)
+            frame_after(slot, g, gap=3)     # past the screen it just left
 
 
 def main_node_press(slot, node, bit, ms):

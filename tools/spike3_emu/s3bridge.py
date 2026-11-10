@@ -53,6 +53,8 @@ STX, ETX, ESC = 0x02, 0x03, 0x1B
 FW_VERSION = (0, 98, 4)          # main.c's version strings, pokemon_le 0.82.0
 BOARD_REV = 0                    # what ADC_Update's ladder can report: 0..10
 LCD_STATUS = 0
+LINE_HZ = int(os.environ.get("PAD_S3_LINE_HZ", "60"))     # ADC_GetLineFrequency
+LINE_V = int(os.environ.get("PAD_S3_LINE_V", "120"))      # ADC_GetLineVoltage
 FLASH = (0x10000100, 0x10012B40)  # the range HOST_Update's 0x30 handler CRCs
 
 
@@ -327,6 +329,24 @@ class Bridge:
         self.counts[cmd] = self.counts.get(cmd, 0) + 1
         if cmd == 0x20:
             return frame(0x20, ident, bytes(self.version) + bytes([BOARD_REV & 0xFF]))
+        if 0x10 <= cmd <= 0x1F:
+            # A Spike 1/2 ("legacy") power distribution board never answers
+            # its UART, so netbridge's HOST_Update answers these itself once
+            # its probe has given up (POWERDIST_IsSpike3() == 0), read off the
+            # unstripped firmware: 0x10 -> 3 zero bytes, 0x12 -> the line
+            # frequency (u8, 0xff unknown), 0x15 -> 0xff, 0x19 -> the line
+            # voltage (u16); the rest of 0x10..0x1f go unanswered there too.
+            # Left unanswered, star_wars_2025_pro polled 0x12 and 0x19 every
+            # loop, each waiting out its timeout: it drew at 0.5 fps.
+            if cmd == 0x10:
+                return frame(cmd, ident, bytes(3))
+            if cmd == 0x12:
+                return frame(cmd, ident, bytes([LINE_HZ & 0xFF]))
+            if cmd == 0x15:
+                return frame(cmd, ident, b"\xff")
+            if cmd == 0x19:
+                return frame(cmd, ident, struct.pack("<H", LINE_V & 0xFFFF))
+            return None
         if cmd == 0x30:
             return frame(0x30, ident, struct.pack("<I", self.crc))
         if cmd == 0x25:

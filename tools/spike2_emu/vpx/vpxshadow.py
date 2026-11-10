@@ -38,7 +38,10 @@ Lamps: the map's `lamps` put table lights on the machine's LEDs (an RGB
 insert's three, `rgb`, also give the light the insert's colour);
 `retrofit_lights` are new lights cloned where the machine has an insert the
 table lacks, and `dark` lights, which the machine has no LED for, are held
-off so the shadow game cannot leave them lit.
+off so the shadow game cannot leave them lit. `lamp_calls` show an insert
+(or the GI's look) with a sub of extra_vbs, and `after_init` statements run
+at the end of Table1_Init, after the table's own init, to undo a light show
+or GI-off its boot leaves for a game of its own that never starts.
 
 Switches the table has no object for: `retrofit_triggers` are new triggers,
 cloned from `clone` and given a `shape` (drag points), drawn as nothing; the
@@ -889,6 +892,12 @@ def gen(m, had, quiet=None, dof=None):
             out.append("\t%s.StopPlay" % seq)
         out += ["\tPadLampsInit",
                 "\tSet LampCallback = GetRef(\"PadUpdateLamps\")"]
+    # the map's `after_init` (PAD-1093): statements run once the table's own
+    # init is done, to undo what it left behind for a game of its own that
+    # never starts (GotG's boot ends in its EndOfGame: GI off, domes flashing)
+    after = m.get("after_init") or []
+    for line in ([after] if isinstance(after, str) else after):
+        out.append("\t" + line)
     out += ["End Sub", "",
             "Sub Table1_Exit",
             "\tOn Error Resume Next",

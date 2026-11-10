@@ -12148,6 +12148,87 @@ static void led_seen(unsigned node, unsigned idx)
     if (node < 16 && idx < 96) led_shm->seen[node][idx] = 1;
 }
 
+/* ★ WHAT THE GAME SAID BEFORE THE VOTE CAME IN (PAD-1093).
+ *
+ * Nothing in the swelf dialect is published until the title's 200-frame vote
+ * (led_wide_dialect) is in, and the vote's own note says why that was thought
+ * free: "200 frames is well under a second of attract". It is not on every
+ * build. A Guardians LE 1.15 boot took 19 s to fill the sample (t=19074 ms,
+ * PAD_NB_TRACE=1, rig 3), and at t=12909 ms - in the middle of it - the game
+ * sent ONE long `8a` frame to each of nodes 8 and 9 that turns the playfield
+ * GI on (BOTTOM/TOP RED, WHITE, BLUE GI, index 0..2, all 255) with a dozen
+ * inserts beside it, and then never touched those six lamps again: a GI is
+ * set once and held. The frame was walked, closed exactly, and was dropped
+ * for the vote, so the GI read 0 for the whole run - in attract and in play -
+ * and a Visual Pinball table behind the rig drew its playfield unlit.
+ *
+ * So a frame that closes exactly while the vote is still out is KEPT here,
+ * the last level per lamp (bank 0 only: the `hi` banks are toppers, repainted
+ * all the time), and applied the moment the title is ACCEPTED - as levels
+ * only, like a strip's bulk frame, so the light-show announcer counts nothing
+ * it did not count before. A title the vote REFUSES drops the lot: it never
+ * wrote a lamp, which is what the vote is for. A lamp another path writes in
+ * the meantime (cmd 70, the godzilla shapes) is newer than what is kept, and
+ * is let go of here (led_val, led_strip_levels).
+ *
+ * "Newer" means a LATER frame. The older shapes further down led_publish
+ * still get the very frame that was kept (that is how a title the vote will
+ * refuse is read, unchanged), and on Guardians they read the GI frame as
+ * zeros on those six lamps; a write from the frame that was kept is not
+ * news about it (led_pub_seq, one count per frame). */
+static unsigned char led_pend_val[16][96], led_pend_has[16][96];
+static unsigned led_pend_seq[16][96];
+static unsigned led_pend_n, led_pub_seq;
+
+static void led_pend_drop(unsigned node, unsigned idx)
+{
+    if (led_pend_n && node < 16 && idx < 96 && led_pend_has[node][idx]
+            && led_pend_seq[node][idx] != led_pub_seq) {
+        led_pend_has[node][idx] = 0;
+        led_pend_n--;
+    }
+}
+
+static void led_pend_put(unsigned node, int bank, const unsigned char *idx,
+                         const unsigned char *val, unsigned cnt)
+{
+    unsigned i;
+    if (bank != 0 || node >= 16) return;
+    for (i = 0; i < cnt; i++) {
+        if (idx[i] >= 96) continue;
+        if (!led_pend_has[node][idx[i]]) {
+            led_pend_has[node][idx[i]] = 1;
+            led_pend_n++;
+        }
+        led_pend_val[node][idx[i]] = val[i];
+        led_pend_seq[node][idx[i]] = led_pub_seq;
+    }
+}
+
+/* the vote is in: what was kept goes onto the plane (accepted) or away */
+static void led_pend_settle(int accepted)
+{
+    unsigned node, i, n = 0;
+    if (!led_pend_n) return;
+    for (node = 0; node < 16; node++)
+        for (i = 0; i < 96; i++) {
+            if (!led_pend_has[node][i]) continue;
+            led_pend_has[node][i] = 0;
+            if (!accepted || !led_shm) continue;
+            led_shm->val[node][i] = led_pend_val[node][i];
+            led_seen(node, i);
+            led_wide_owns[node][i] = 1;
+            n++;
+        }
+    led_pend_n = 0;
+    if (n && led_shm) {
+        char m[120];
+        led_shm->gen++;
+        snprintf(m, sizeof m, "[ledwide] %u lamp level(s) the game sent before the vote applied now\n", n);
+        logmsg(m);
+    }
+}
+
 /* ★ A STRIP BOARD'S BULK FRAME, AS LEVELS ONLY (PAD-500) - bank 0 into val[]
  * (and `seen`), banks 1 to 4 into `hi` (led_hi). led_wide_publish's long-body
  * branch is the one caller; see it for why. Deliberately NOT led_val(): these
@@ -12167,6 +12248,7 @@ static void led_strip_levels(unsigned node, int bank, const unsigned char *idx,
         if (idx[i] >= 96) continue;
         led_shm->val[node][idx[i]] = val[i];
         led_seen(node, idx[i]);
+        led_pend_drop(node, idx[i]);
     }
 }
 
@@ -12232,6 +12314,7 @@ static void led_val(unsigned node, unsigned idx, unsigned char v)
     }
     led_shm->val[node][idx] = v;
     led_seen(node, idx);
+    led_pend_drop(node, idx);
 }
 
 /* ---- PAD-965: A MOTOR ON TWO LED-CLASS OUTPUTS (cmd 50) ------------------
@@ -12905,6 +12988,7 @@ static int led_wide_dialect(int accepted)
     if (seen < SAMPLE) return 0;
 
     led_wide_verdict = (ok * 100 >= seen * 50);
+    led_pend_settle(led_wide_verdict);           /* PAD-1093: before this frame publishes */
     {
         char m[160];
         snprintf(m, sizeof m,
@@ -12958,7 +13042,7 @@ static int led_wide_publish(unsigned node, unsigned cmd,
     if ((cmd & 0xc0) != 0x80 || blen < 1) return 0;
     bank = led_wide_strip_bank(&cmd, &body, &blen);
 
-    /* The long bitmap body is refused on THIS path, as the walk refused it before
+    /* The long bitmap body is refused on THIS path
      * item mode-leds: the per-title verdict and what it publishes stay exactly
      * what they were. The per-node path below (led_node_wide_publish) reads it. */
     if (bank < 0 || led_wide_long(cmd, body, blen) || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
@@ -12997,6 +13081,11 @@ static int led_wide_publish(unsigned node, unsigned cmd,
             if (led_shm_len >= 8192) led_shm->wide_decoded++;
             return 1;
         }
+        /* PAD-1093: the vote is still out - keep what this long frame says */
+        if (bank >= 0 && led_wide_verdict < 0 && !led_wide_settled()
+                && led_wide_long(cmd, body, blen)
+                && led_wide_walk(body, blen, cmd, idx, val, &cnt))
+            led_pend_put(node, bank, idx, val, cnt);
         if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
         return 0;
     }
@@ -13016,7 +13105,11 @@ static int led_wide_publish(unsigned node, unsigned cmd,
      * So nothing is published until the rate is in evidence, and once it says
      * no it says no for the rest of the run. Same reasoning as the light-show
      * announcer above - a rate, not a count. */
-    if (!led_wide_dialect(1)) return 0;
+    if (!led_wide_dialect(1)) {
+        /* PAD-1093: not yet decided - keep it; refused - nothing is kept */
+        if (led_wide_verdict < 0) led_pend_put(node, bank, idx, val, cnt);
+        return 0;
+    }
 
     /* ★ NO ENUMERATION GATE HERE ANY MORE (item 165, Stranger Things LE 1.12).
      * This used to refuse a frame addressing any index the board "never
@@ -13089,6 +13182,32 @@ static int led_wide_publish(unsigned node, unsigned cmd,
  * says no, or has not decided, is read exactly as before, and a title whose own
  * verdict is yes (batman) never comes here. Premium 1.16: nodes 1, 7, 8, 9 yes
  * (200 of 200 each, decided 53-76 s into the boot), 12 and 14 no. */
+/* PAD-1093: an insert board's frame that led_publish turns away before the
+ * title's vote is in - any command the godzilla shapes do not own (8a, 84,
+ * 85, 96 ...) left at their gate, never reaching led_wide_publish. Guardians
+ * LE turns its GI on with exactly such a frame (cmd 8a, nodes 8 and 9) twelve
+ * seconds into a nineteen-second vote. It is walked and KEPT (led_pend_put),
+ * and NOT voted on: the vote is drawn from the frames it always was (see
+ * led_wide_settled), so this changes what a title shows once it is believed,
+ * never whether it is. */
+static void led_pend_offer(unsigned node, unsigned cmd,
+                           const unsigned char *body, unsigned blen)
+{
+    static int wide = -1;
+    unsigned char idx[96], val[96];
+    unsigned cnt = 0;
+    int bank;
+    if (wide < 0) {
+        const char *e = getenv("PAD_LED_WIDE");
+        wide = (e && *e == '0') ? 0 : 1;
+    }
+    if (!wide || led_wide_verdict >= 0 || led_wide_settled()) return;
+    if ((cmd & 0xc0) != 0x80 || blen < 1) return;
+    bank = led_wide_strip_bank(&cmd, &body, &blen);
+    if (bank < 0 || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) return;
+    led_pend_put(node, bank, idx, val, cnt);
+}
+
 static signed char led_node_verdict[16];         /* 0 undecided, 1 yes, -1 no   */
 static unsigned short led_node_votes[16], led_node_yes[16];
 
@@ -13322,6 +13441,7 @@ static void led_publish(const unsigned char *p, int n)
     if (n < 5 || !(p[0] & 0x80)) return;
     node = p[0] & 0x3f;
     cmd  = p[2];
+    led_pub_seq++;                       /* PAD-1093: one count per frame (led_pend_drop) */
 
     /* THE ATTRACT LIGHT SHOW, announced once, because it is the "past Tech
      * Alerts" signal gamestate.sh reads (item 27). The old test - "a clip
@@ -13594,7 +13714,10 @@ static void led_publish(const unsigned char *p, int n)
         return;
     }
     if (cmd != 0x97 && cmd != 0xa2 && cmd != 0xa3 && cmd != 0xa4 &&
-        cmd != 0xa5 && cmd != 0xa6 && cmd != 0xb4 && cmd != 0xb5) return;
+        cmd != 0xa5 && cmd != 0xa6 && cmd != 0xb4 && cmd != 0xb5) {
+        led_pend_offer(node, cmd, p + 3, (unsigned)n - 5);   /* PAD-1093 */
+        return;
+    }
 
     led_map();
     if (!led_shm) return;

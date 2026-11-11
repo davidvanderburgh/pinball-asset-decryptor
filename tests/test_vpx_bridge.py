@@ -943,7 +943,8 @@ def test_shadow_map_can_require_a_silent_player_even_with_pinup_installed():
     for title in ("batman", "iron_maiden_le"):
         m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
         assert m["pup_stub"] == "always"
-        assert any("If Err Then Err.Clear : Set PuPlayer" in r["old"] for r in m["repatch"])
+        assert any("If Err Then Err.Clear : Set PuPlayer" in r["old"] and r["since"].startswith("PAD-1164")
+                   for r in m["repatch"])
 
 
 def test_shadow_makes_pinup_player_optional(shadow):

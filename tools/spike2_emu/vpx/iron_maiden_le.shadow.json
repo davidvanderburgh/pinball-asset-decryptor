@@ -221,7 +221,7 @@
     "CapWall2"
   ],
   "repatch": [
-    {"old": "If Err Then Err.Clear : Set PuPlayer = New PadNoPuP : End If", "why": "installed PinUP Player still plays the tribute soundtrack over the machine audio", "since": "VPX always-silent PuP stub"},
+    {"old": "If Err Then Err.Clear : Set PuPlayer = New PadNoPuP : End If", "why": "with PinUP Player installed, the table's own music and callouts play over the machine's sound", "since": "PAD-1164: PinUP Player always stays silent on this table"},
     {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1065) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "Sub swPlungerRest_Hit : Controller.Switch(1065) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}

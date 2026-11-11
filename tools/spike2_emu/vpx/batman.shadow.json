@@ -251,7 +251,7 @@
     "RightSlingShot"
   ],
   "repatch": [
-    {"old": "If Err Then Err.Clear : Set PuPlayer = New PadNoPuP : End If", "why": "installed PinUP Player still plays the tribute soundtrack over the machine audio", "since": "VPX always-silent PuP stub"},
+    {"old": "If Err Then Err.Clear : Set PuPlayer = New PadNoPuP : End If", "why": "with PinUP Player installed, the table's own music and callouts play over the machine's sound", "since": "PAD-1164: PinUP Player always stays silent on this table"},
     {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"},
     {"old": "o = PadGateA Or PadGateB", "why": "a ball going round the right orbit can fall behind the Bat Phone and stay there", "since": "PAD-1120: the left control gate and the turntable diverter are two parts"}
   ]

@@ -167,7 +167,10 @@ def main():
     names = {(n, b): nm for n, b, nm in k.ids.values()}
     while True:
         for (nb, on) in k.step():
-            print("[s3keys] %s %s" % (names.get(nb, "node %d bit %d" % nb), "closed" if on else "open"),
+            # wall-clock time: lines up with the bridge's [scan] trace and a
+            # screen recording (PAD-1090: "one press, the menu ran away")
+            print("%s [s3keys] %s %s" % (time.strftime("%H:%M:%S") + ".%03d" % (time.time() % 1 * 1000),
+                                         names.get(nb, "node %d bit %d" % nb), "closed" if on else "open"),
                   flush=True)
         time.sleep(0.01)
 

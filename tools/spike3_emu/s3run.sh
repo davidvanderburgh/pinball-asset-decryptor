@@ -187,7 +187,7 @@ if [ "$BUS" = 1 ]; then
         "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" --idle=${PAD_S3_SPI_IDLE:-0xff} --input="$SD/spi.in" > "$SD/s3spid.out" 2>&1 &
         BUSPIDS="$!"
     fi
-    [ "$WINDOW" = 1 ] && export PAD_S3_PADLED="$SD/dump/padled"
+    [ "$WINDOW" = 1 ] && export PAD_S3_PADLED="$SD/dump/padled" PAD_S3_SWTRACE=${PAD_S3_SWTRACE:-1}
     python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     # the video decoder (stage 5): s3vid.so hands the game's HEVC/H.264

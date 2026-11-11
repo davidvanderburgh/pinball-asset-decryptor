@@ -173,8 +173,10 @@ class Node:
             if SWTRACE and bits != self.reported:
                 # every change the game SCANS (PAD_S3_SWTRACE=1): the log
                 # line below says each distinct state once only
-                self.log.write("%9.3f # [scan] node %d %s\n" % (
-                    time.time() - T0, self.nid, bits.hex()))
+                now = time.time()
+                self.log.write("%9.3f # [scan] %s.%03d node %d %s\n" % (
+                    now - T0, time.strftime("%H:%M:%S", time.localtime(now)),
+                    now % 1 * 1000, self.nid, bits.hex()))
             self.reported = bits
             if any(bits):
                 self.once("sw" + bits.hex(), "node %d switches %s" % (self.nid, bits.hex()))

@@ -326,7 +326,10 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `CreateObject("PinUpPlayer.PinDisplay")` on a machine without it, so the
   patcher scans every `PuPlayer.` call, writes a `PadNoPuP` class with those
   methods and argument counts, and wraps the CreateObject so the class
-  stands in.
+  stands in. `"pup_stub": "always"` uses the silent class even when PinUP
+  is installed. Batman and Iron Maiden use this mode to keep their tribute
+  music and callouts from playing over the machine's audio; every creation,
+  including a later LoadCoreFiles/PuPInit, uses the same silent shape.
 * **DOF stays on B2S.Server** (PAD-841): a tribute's `LoadEM` puts
   B2S.Server in `Controller`, and controller.vbs's `DOF` sub sends through
   `Controller.B2SSetData`. The bridge's Table1_Init keeps that object as

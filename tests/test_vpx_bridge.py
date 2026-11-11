@@ -901,6 +901,52 @@ def test_shadow_flippers_are_the_machines_coils(shadow):
     assert "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0" in out
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the PuP stub against a present player under cscript")
+def test_forced_pup_stub_silences_both_creations_when_pinup_is_installed(tmp_path):
+    vs = pytest.importorskip("vpxshadow")
+    lines = ['Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")',
+             'PuPlayer.Play 1, "song.mp3", 0, 0, 0',
+             'Sub LoadCoreFiles',
+             'Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")',
+             'PuPlayer.Play 1, "callout.mp3", 0, 0, 0',
+             'End Sub', 'LoadCoreFiles']
+    rep = []
+    stub = vs.pup_stub(lines, rep, force=True)
+    harness = '''Dim created, played, PuPlayer
+created = 0 : played = 0
+Function CreateObject(progid)
+created = created + 1
+Set CreateObject = New InstalledPlayer
+End Function
+Class InstalledPlayer
+Public Sub Play(a,b,c,d,e)
+played = played + 1
+End Sub
+End Class
+'''
+    vbs = tmp_path / "pup.vbs"
+    vbs.write_text(harness + "\n".join(lines) + stub + '\nWScript.Echo created & "," & played\n', encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["0,0"]
+    assert any("disabled at 2 place(s)" in s for s in rep)
+
+
+def test_shadow_map_can_require_a_silent_player_even_with_pinup_installed():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["pup_stub"] = "always"
+    out, rep = vs.patch(MINI_TRIBUTE, m)
+    assert 'CreateObject("PinUpPlayer.PinDisplay")' not in out
+    assert "Set PuPlayer = New PadNoPuP" in out and "Class PadNoPuP" in out
+    for title in ("batman", "iron_maiden_le"):
+        m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
+        assert m["pup_stub"] == "always"
+        assert any("If Err Then Err.Clear : Set PuPlayer" in r["old"] and r["since"].startswith("PAD-1164")
+                   for r in m["repatch"])
+
+
 def test_shadow_makes_pinup_player_optional(shadow):
     out, rep = shadow
     assert "Class PadNoPuP" in out

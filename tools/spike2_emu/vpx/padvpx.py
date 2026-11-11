@@ -80,8 +80,9 @@ def maps():
         if f.endswith(".shadow.json") or f.endswith(".vpxmap.json"):
             m = json.load(open(os.path.join(HERE, f), encoding="utf-8"))
             title = m.get("title") or f.split(".")[0]
+            game = m.get("game")            # same rule as padlaunch.game_for
             out[title] = {"kind": "shadow" if f.endswith(".shadow.json") else "mashup",
-                          "game": m.get("game") or title,
+                          "game": game if isinstance(game, str) and game else title,
                           "map": os.path.join(HERE, f), "detect": m.get("detect", []),
                           "output": m.get("output", ""), "model": m.get("model", ""),
                           "preferred": bool(m.get("preferred")),

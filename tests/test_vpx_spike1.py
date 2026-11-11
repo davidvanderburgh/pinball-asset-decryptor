@@ -495,6 +495,18 @@ def test_variant_cli_stop_looks_up_the_native_game_and_keeps_ownership_guard(var
     assert looked == ["ghostbusters_le"]
 
 
+def test_a_malformed_game_field_falls_back_to_the_title(variant_maps, tmp_path):
+    pc, pl, pv = variant_maps
+    maps = tmp_path / "maps"
+    m = {"title": "odd_table", "game": 5, "platform": "spike1", "detect": ["odd"]}
+    (maps / "odd_table.vpxmap.json").write_text(json.dumps(m), encoding="utf-8")
+    assert pv.maps()["odd_table"]["game"] == "odd_table"
+    assert pl.game_for("odd_table") == "odd_table"
+    b = pc.Bridge()
+    b.set_game("odd_table")
+    assert b.native_title == "odd_table"
+
+
 def test_padvpx_knows_a_maps_platform():
     pv = pytest.importorskip("padvpx")
     assert pv.platform_of("got_le") == "spike1"

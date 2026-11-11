@@ -687,7 +687,23 @@ like a Spike 2 one (`padlaunch.Spike1Launch`: start.sh with the title's
 .iso, on the app's data disk, visible and with sound; `padvpx run got_le
 --mute` by hand) - ONE rig, so a run of another title is refused, not
 replaced. The game's DMD is drawn by the app's Spike 1 tab, so a player keeps
-the app open beside Visual Pinball. The author's checklist (`padvpx
+the app open beside Visual Pinball. On Windows, an optional external native
+viewer can instead be set in the kit's `spike1_dmd_viewers`, for example:
+
+```json
+{"spike1_dmd_viewers": {"ghostbusters_le": "C:\\Pinball\\DmdViewer.exe"}}
+```
+
+The value is an executable path, or an argument list beginning with its
+executable. The launcher appends the Windows path to `spike1-0.run` and the
+game title as two arguments. The viewer reads that board record's distro/root
+to find the active `spi0.cap`; renderer libraries and colour data are the
+viewer's own configuration, supplied separately. No helper is started unless
+configured. Its output joins the title's launch log, failure to start it does
+not stop the game, and the launcher reaps only the viewer process it created
+when the table exits. There is no process-name search or global viewer kill.
+
+The author's checklist (`padvpx
 checklist got_le`, the tab's "For table authors") reads a Spike 1 title
 from its game program and switch map in the rig's cache (every Spike 1
 game extracted on the PC is offered): the switches with their slot ids,

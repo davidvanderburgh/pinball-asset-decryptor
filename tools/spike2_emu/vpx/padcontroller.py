@@ -423,6 +423,7 @@ class VpxMap:
 
     def __init__(self, title=None):
         self.title = title
+        self.game = title                   # variants may share one native game
         self.switch_rewrite = {}            # old table number -> Spike 2 id
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
@@ -456,6 +457,8 @@ class VpxMap:
 
     def load(self, path):
         m = json.load(open(path, encoding="utf-8"))
+        game = m.get("game")
+        self.game = game if isinstance(game, str) and game else self.title
         self.platform = (m.get("platform") or "spike2").lower()
         g = m.get("game_on") or {}
         self.game_on = (int(g["number"]), [tuple(c) for c in g["coils"]]) if g else None
@@ -1492,6 +1495,10 @@ class Bridge:
                len(self.map.solenoids), len(self.map.lamp_groups)))
 
     @property
+    def native_title(self):
+        return getattr(self.map, "game", None) or self.title
+
+    @property
     def rigmod(self):
         """The rig module of a platform whose run publishes one block of
         slots (PAD-943, PAD-952): s1bridge for Spike 1, spkbridge for
@@ -1562,7 +1569,7 @@ class Bridge:
         thread attaches when the game is up, and the table plays from then
         on - switches before that are kept and handed over at attach (the
         table's trough, set once at its Init), Visual Pinball never waits."""
-        self.rig = self.rigmod.Rig(self.title) if self.slots else Rig(self.title)
+        self.rig = self.rigmod.Rig(self.native_title) if self.slots else Rig(self.native_title)
         self.pipe = None
         self.launch = None
         self.attached = False
@@ -1785,7 +1792,7 @@ class Bridge:
         """The run's switch table (the rig writes it a little after the game
         is up, so a run this bridge started may be read again) and the
         flipper buttons' coils for a run without the rule plane."""
-        self.sw_ids = self.rig.switch_ids(self.title)
+        self.sw_ids = self.rig.switch_ids(self.native_title)
         if self.slots:
             # PAD-943: no rule plane on this rig; a held flipper button is a
             # held flipper coil, and the map's game_on is always armed (the
@@ -1819,11 +1826,11 @@ class Bridge:
         if self.launch is None:
             return
         if self.rig is None:
-            rec = (self.rigmod.board_record(self.title) if self.slots
+            rec = (self.rigmod.board_record(self.native_title) if self.slots
                    else Rig.board_slot(self.launch.slot))
             if rec:
-                self.rig = (self.rigmod.Rig(self.title, record=rec) if self.slots
-                            else Rig(self.title, record=rec))
+                self.rig = (self.rigmod.Rig(self.native_title, record=rec) if self.slots
+                            else Rig(self.native_title, record=rec))
                 log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         if self.rig is not None:
             data = read_block(self.rig.led_path(), READ_N)

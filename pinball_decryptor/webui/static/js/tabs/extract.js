@@ -5,6 +5,7 @@
 import { html, useEffect, useLayoutEffect, useRef, useState, Button, Field, Select, Seg, Check, Card, Chip,
          Icon, InfoBadge, Modal, PageHead, Spinner, openMenu, menuOpen, tip, cx, fmtBytes, call } from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { Spike3KeyGuide } from "../core/spike3_guide.js";
 
 export const css = true;
 
@@ -156,9 +157,12 @@ export function SourceBody({ s, hist }) {
 }
 
 // A locked Spike 3 card: unlock extraction with the board's OTP key, pasted
-// or from a key file (PAD-1086). The extractor-card route and its secure-boot
-// claims (PAD-1091) are gone from the page: the claims were never checked
-// (David, PAD-1090); "how to get the OTP key" is a follow-up ticket.
+// or from a key file (PAD-1086). PAD-1090 removed PAD-1091's unchecked
+// secure-boot paragraph; PAD-1133 adds a verified "How to get the OTP key"
+// guide (core/spike3_guide.js). The extractor-card button is NOT brought back:
+// every shipped Spike 3 board enforces secure boot (David, PAD-1133), so the
+// patched card never boots - the only proven route is the hardware DMA dump the
+// guide documents.
 // PAD-1090: the key pasted as text (David: "can't we just make it a text
 // field?"); a hidden field, never echoed - the window's spike3_paste_key
 // checks it against the selected card and keeps it for every Spike 3 tab.
@@ -191,6 +195,7 @@ function Spike3UnlockPanel({ s }) {
       <${KeyPaste} busy=${u.busy} />
       <div class="row wrap">
         <${Button} size="sm" kind="ghost" disabled=${u.busy} onClick=${() => call("extract.spike3_ingest_key")}>Or choose a key file…<//>
+        <${Spike3KeyGuide} disabled=${u.busy} />
         ${u.busy ? html`<${Spinner} />` : null}
       </div>
       ${u.status ? html`<div class="small x-spike3-status">${u.status}</div>` : null}

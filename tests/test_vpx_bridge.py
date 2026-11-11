@@ -4135,6 +4135,15 @@ def test_playfield_sounds_stay_and_the_soundtrack_goes():
     assert not vs.mechanical("fx_bumper", vs.OUT_BACKGLASS)              # a table's own bumper sfx
 
 
+@pytest.mark.parametrize("name", ["bottomjet", "leftjet", "rightjet", "fx_lrturn", "fx_lrbump"])
+def test_ghostbusters_jets_and_ramp_contacts_are_mechanical(name):
+    vs = pytest.importorskip("vpxsounds")
+    assert vs.mechanical(name, 0) and vs.mechanical(name.upper(), 0)
+    assert not vs.mechanical(name, vs.OUT_BACKGLASS)
+    assert not vs.mechanical("sfx_" + name, 0)
+    assert not vs.mechanical(name + "voice", 0)  # exact names, no broad jet/bump substring
+
+
 def test_playmusic_goes_to_empty_subs_by_argument_count():
     vs = pytest.importorskip("vpxsounds")
     lines = ['Sub Table1_MusicDone : PlayMusic "Aerosmith\\" & Song : End Sub',

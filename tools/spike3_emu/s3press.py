@@ -230,6 +230,16 @@ def autoguide(slot, secs=0, keep=60, boot=False):
     the newest KEEP, so dumping can run for the whole session."""
     t0 = time.time()
     walked = 0
+    # BOOT: the walk is part of the boot, said in SLOT/guided.state for the
+    # footer (s3prog.py) and the keyboard (s3keys.py holds the user's keys
+    # while it walks): watching -> walking -> done, or none (never shown)
+    state_path = os.path.join(BASE % slot, "guided.state")
+
+    def state(s):
+        if boot:
+            with open(state_path, "w") as f:
+                f.write(s)
+    state("watching")
     while not secs or time.time() - t0 < secs:
         time.sleep(2.0)
         fs = frames(slot)
@@ -239,6 +249,9 @@ def autoguide(slot, secs=0, keep=60, boot=False):
             except OSError:
                 pass
         if boot and (walked or time.time() - t0 > BOOT_S):
+            if not walked and time.time() - t0 > BOOT_S:
+                state("none")
+                walked = -1              # said once
             continue                     # the user's machine now: prune only
         f = newest_frame(slot)
         try:
@@ -246,6 +259,7 @@ def autoguide(slot, secs=0, keep=60, boot=False):
                 continue
         except (OSError, ValueError):
             continue
+        state("walking")
         press(slot, BACK)
         time.sleep(1.5)
         # a frame drawn AFTER the press: star_wars_2025_pro draws ~0.5 fps
@@ -262,6 +276,7 @@ def autoguide(slot, secs=0, keep=60, boot=False):
             print("[autoguide] Guided Setup: Save & Exit (%d)" % walked, flush=True)
             time.sleep(6.0)
             frame_after(slot, g, gap=3)     # past the screen it just left
+            state("done")
 
 
 def main_node_press(slot, node, bit, ms):

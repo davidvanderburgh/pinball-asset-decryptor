@@ -24,6 +24,18 @@ import time
 BOOT_S = float(os.environ.get("PAD_S3_PROG_BOOT_S", "8"))
 NODES_S = float(os.environ.get("PAD_S3_PROG_NODES_S", "50"))
 GIVE_UP_S = 600
+#: after the lamps light, how long Guided Setup may take to appear before the
+#: run is called ready anyway (a title that never shows it)
+GUIDED_WAIT_S = float(os.environ.get("PAD_S3_PROG_GUIDED_S", "25"))
+
+
+def guided(sd):
+    """s3press.py autoguide's SLOT/guided.state, or "" (not running)."""
+    try:
+        with open(os.path.join(sd, "guided.state")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 
 def state(sd):
@@ -54,10 +66,19 @@ def main():
     t0 = time.time()
     last = None
     t_claimed = None
+    t_lamps = None
     while time.time() - t0 < GIVE_UP_S:
         declared, claimed, lamps = state(sd)
         now = time.time()
+        g = guided(sd)
         if lamps:
+            t_lamps = t_lamps or now
+        if lamps and g == "walking":
+            line = ("nodes", 97, "Getting past Guided Setup (automatic - "
+                    "hands off for a moment)")
+        elif lamps and g == "watching" and now - t_lamps < GUIDED_WAIT_S:
+            line = ("nodes", 96, "The game is starting")
+        elif lamps:
             line = ("run", 100, "Running - the game is in attract")
         elif declared and claimed >= declared:
             t_claimed = t_claimed or now

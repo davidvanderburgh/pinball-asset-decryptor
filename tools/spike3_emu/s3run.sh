@@ -127,7 +127,7 @@ if [ "$BRIDGE" = 1 ]; then
         # dump/ is what the virtual playfield window reads and writes (padsw,
         # padled - Spike 2's padpath.dump()); its switch helper runs as the
         # WSL user, not root, so the block is everyone's to write
-        rm -rf "$SD/dump"; mkdir -p "$SD/dump" "$SD/tables"; chmod 777 "$SD/dump"
+        rm -rf "$SD/dump" "$SD/guided.state"; mkdir -p "$SD/dump" "$SD/tables"; chmod 777 "$SD/dump"
         # the playfield window's helpers (plunge.py, swhold.py...) run in WSL
         # and look for the title's tables under dump/tables (padpath.tables());
         # without this they fell back to godzilla_pro's switch ids

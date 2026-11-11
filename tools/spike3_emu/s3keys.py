@@ -129,8 +129,22 @@ class Keys:
             f.seek(off)
             f.write(bytes([v]))
 
+    def walking(self):
+        """s3press.py autoguide is walking Guided Setup (SLOT/guided.state):
+        the user's keys wait - a flipper pressed into the walk fought it, and
+        the game's own menu auto-repeat ran away with it (David, PAD-1090)."""
+        try:
+            with open(os.path.join(self.sd, "guided.state")) as f:
+                return f.read().strip() == "walking"
+        except OSError:
+            return False
+
     def step(self):
-        """Apply every switch whose wanted state changed; returns the edges."""
+        """Apply every switch whose wanted state changed; returns the edges.
+        Held back (not dropped) while Guided Setup is being walked: what the
+        keys say once it is done is applied then."""
+        if self.walking():
+            return []
         edges = []
         for nb, on in self.wanted().items():
             if self.last.get(nb, False) != on:

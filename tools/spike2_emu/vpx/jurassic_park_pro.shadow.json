@@ -25,12 +25,12 @@
   "table": {"name": "Jurassic Park Pro Le 4.02", "by": "JPSalas & marty", "where": "VPUniverse", "url": "https://vpuniverse.com/files/file/20502-jurassic-park-pro-le/"},
   "solenoid_max": 68,
   "game_on": {"number": 40, "coils": [[8, 5], [8, 0]]},
-  "cabinet": {"start": 1036, "launch": 1034, "launch_key": "PlungerKey", "tilt": 1038, "slam": 1045, "left_flipper": 1059, "right_flipper": 1058, "up_right_flipper": 1060, "coin": 1039, "coin_door_interlock": 1033},
+  "cabinet": {"start": 1036, "launch": 1034, "launch_key": "LockBarKey", "tilt": 1038, "slam": 1045, "left_flipper": 1059, "right_flipper": 1058, "up_right_flipper": 1060, "coin": 1039, "coin_door_interlock": 1033},
   "keys_skip_orig": [
     "StartGameKey",
     "AddCreditKey",
     "AddCreditKey2",
-    "PlungerKey"
+    "LockBarKey"
   ],
   "switches": {
     "_": "object -> Spike 2 switch id; event hit (pulse), hold (Hit/UnHit), spin, pass (a spinner as an opto: one pulse a pass), slingshot",
@@ -242,6 +242,8 @@
   ],
   "repatch": [
     {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1061) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
-    {"old": "Sub swPlungerRest_Hit : Controller.Switch(1061) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
+    {"old": "Sub swPlungerRest_Hit : Controller.Switch(1061) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
+    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"},
+    {"old": "If KeyCode = PlungerKey Then Controller.Switch(1034) = True", "why": "the plunger key pressed the Action Button: only the auto plunger launched, and the manual plunger never pulled", "since": "PAD-1128: the plunger key pulls the table's plunger, the Action Button is the lockbar key"}
   ]
 }

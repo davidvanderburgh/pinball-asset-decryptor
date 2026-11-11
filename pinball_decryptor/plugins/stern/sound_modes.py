@@ -293,12 +293,25 @@ class Modes:
     #: "slot"}`` (a build sets them; never saved)
     shot_rel: str = ""
     shot_plan: dict = field(default_factory=dict)
+    #: PAD-1114: the co-op intro's sound (a WAV the build takes out of the intro video, coop_play.intro_audio), the
+    #: carrier's slot it is built on and the build's carrier ``{"request", "slot"}`` (a build sets them; never saved)
+    intro: str = ""
+    intro_rel: str = ""
+    intro_plan: dict = field(default_factory=dict)
+    #: PAD-1123: each co-op character's sound once picked, ``[(character number, WAV)]``, on the intro's carrier (a
+    #: build sets them; never saved)
+    picks: list = field(default_factory=list)
+
+    @property
+    def coop(self):
+        """PAD-1123: whether a build carries a co-op sound: the intro's or a character's once picked."""
+        return bool(self.intro or self.picks)
 
     @property
     def any(self):
         """Whether a build has anything of these to carry: a music mode, a sound in turn or a
         sound for the flipper buttons in attract (PAD-945: or a sound on a shot in a game mode)."""
-        return bool(self.count or self.turns or self.attract or self.jukebox or self.shots)
+        return bool(self.count or self.turns or self.attract or self.jukebox or self.shots or self.coop)
 
     @property
     def count(self):
@@ -341,13 +354,15 @@ class Modes:
                 + ([(self.juke_rel, juke_mode(k), f) for k, f in enumerate(self.jukebox, 1)]
                    if self.juke_rel else [])
                 + ([(self.shot_rel, shot_mode(k), r["file"]) for k, r in enumerate(self.shots, 1)]
-                   if self.shot_rel else []))
+                   if self.shot_rel else [])
+                + ([(self.intro_rel, INTRO_MODE, self.intro)] if self.intro_rel and self.intro else [])
+                + ([(self.intro_rel, INTRO_MODE + int(n), f) for n, f in self.picks] if self.intro_rel else []))
 
     def level(self, rel, mode):
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
         sound), or ``None`` for a project saved before mode files had their own. A file in turn
         has a loudness of its own too (PAD-638: ``turn_levels``), 0 unless one was set."""
-        if is_juke(mode) or is_shot(mode):
+        if is_juke(mode) or is_shot(mode) or is_intro(mode):
             return 0
         if is_mode_turn(mode):
             m, k = mode_turn_of(mode)
@@ -403,7 +418,26 @@ def shot_mode(k):
 
 
 def is_shot(mode):
-    return SHOT_BASE < int(mode) < JUKE_BASE
+    return SHOT_BASE < int(mode) <= SHOT_BASE + SHOT_MAX
+
+
+#: PAD-1114: the co-op intro's sound is built under this pseudo mode (above the shots', below the jukebox's: built as a
+#: file in turn, matched to the carrier's loudness, never cut)
+INTRO_MODE = 4000
+
+
+#: PAD-1123: co-op character n's sound once picked is built under INTRO_MODE + n (n 1..PICKED_MAX), on the same carrier
+PICKED_MAX = 16
+
+
+def is_intro(mode):
+    """The co-op intro's sound, or (PAD-1123) a co-op character's once picked."""
+    return INTRO_MODE <= int(mode) <= INTRO_MODE + PICKED_MAX
+
+
+def picked_of(mode):
+    """PAD-1123: the co-op character a sound built under *mode* is for (1-based), 0 for the intro's."""
+    return int(mode) - INTRO_MODE if is_intro(mode) else 0
 
 
 def shot_of(mode):
@@ -443,6 +477,8 @@ def is_turn(mode):
 
 def turn_of(mode):
     """File k of a slot's sounds in turn, from its pseudo mode (PAD-638: of a music mode's too)."""
+    if is_intro(mode):
+        return 1
     if is_juke(mode):
         return int(mode) - JUKE_BASE
     if is_shot(mode):
@@ -454,6 +490,8 @@ def turn_of(mode):
 
 def who(mode):
     """The log lines' heading for a file built under *mode*."""
+    if is_intro(mode):
+        return "Co-op characters" if picked_of(mode) else "Co-op intro"
     if is_juke(mode):
         return "Jukebox"
     if is_shot(mode):
@@ -466,6 +504,9 @@ def who(mode):
 def what(rel, mode, name=""):
     """A file built under *mode* for slot *rel*, as the log names it."""
     base = os.path.basename(str(rel).replace("\\", "/"))
+    if is_intro(mode):
+        return ("co-op character %d's sound once picked" % picked_of(mode) if picked_of(mode)
+                else "the co-op intro's sound")
     if is_juke(mode):
         return "song %d" % turn_of(mode)
     if is_shot(mode):
@@ -485,6 +526,9 @@ def what(rel, mode, name=""):
 def tag(rel, mode):
     """The build record's words for a file built under *mode* for slot *rel*."""
     base = os.path.basename(str(rel).replace("\\", "/"))
+    if is_intro(mode):
+        return ("co-op character %d's sound once picked" % picked_of(mode) if picked_of(mode)
+                else "the co-op intro's sound")
     if is_juke(mode):
         return "jukebox song %d" % turn_of(mode)
     if is_shot(mode):
@@ -502,6 +546,9 @@ def tag(rel, mode):
 
 def when(mode):
     """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
+    if is_intro(mode):
+        return ("when a teammate picks co-op character %d" % picked_of(mode) if picked_of(mode)
+                else "as a co-op or team game's intro plays")
     if is_juke(mode):
         return "when the jukebox draws it for a song mode"
     if is_shot(mode):
@@ -1113,7 +1160,7 @@ def cut(wav, frames):
 
 # ---- the runtime's table ------------------------------------------------------------------------
 def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(), randoms=(),
-             attract=None, jukebox=None, shots=None):
+             attract=None, jukebox=None, shots=None, intro=None):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
     the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
     *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
@@ -1138,7 +1185,11 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     PAD-945: *shots* ``{"request", "key", "files": [(mode id, switch id, record key, ms[, lit]), ...]}``,
     the sounds on the shots of the game's modes: a ``gshot`` line (the carrier, its own record's key)
     and a ``gsfile`` line per file (pad_mode_runtime.c "a sound on a shot"); round 2: a row with a
-    condition on its shot's insert (*lit*, one of :data:`SHOT_LIT`) adds its class as a 7th field."""
+    condition on its shot's insert (*lit*, one of :data:`SHOT_LIT`) adds its class as a 7th field.
+    PAD-1114: *intro* ``{"request", "key", "host", "ms"}``, the co-op intro's sound: a ``cintro`` line (the carrier, its
+    own record's key, the sound's record key, its length in ms; pad_mode_runtime.c "the intro"). PAD-1123: its
+    ``picks`` ``[(character number, record key, ms)]``, the co-op characters' sounds once picked on the same carrier: a
+    ``cpick`` line each (with no ``host`` of the intro's, no ``cintro`` line)."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
@@ -1181,6 +1232,12 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
             lit = row[4] if len(row) > 4 else ""
             lines.append("gsfile\t%d\t%d\t%d\t%s\t%d" % (k, int(mode), int(sw), bytes(key).hex(), int(ms))
                          + ("\t%d" % SHOT_LIT.index(lit) if lit else ""))
+    if intro and intro.get("host"):
+        lines.append("cintro\t%d\t%s\t%s\t%d" % (int(intro["request"]), bytes(intro["key"]).hex(),
+                                                   bytes(intro["host"]).hex(), int(intro["ms"])))
+    for n, host, ms in (intro or {}).get("picks") or ():     # PAD-1123: a co-op character's sound once picked
+        lines.append("cpick\t%d\t%d\t%s\t%s\t%d" % (int(n), int(intro["request"]), bytes(intro["key"]).hex(),
+                                                     bytes(host).hex(), int(ms)))
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -1248,6 +1305,8 @@ def card_record(modes, used):
         if not u.get("lines"):
             continue
         m = int(u["mode"])
+        if is_intro(m):                             # PAD-1114: it comes from the intro video, kept by co-op's own
+            continue
         if is_juke(m):
             k = turn_of(m)
             src = modes.jukebox[k - 1] if 0 < k <= len(modes.jukebox) else ""

@@ -1,18 +1,17 @@
-"""PAD-832: the Mac's speaker starts only once the box's relay listens, and comes back.
+"""PAD-832 / PAD-1109: the Mac's speaker, how it is fed and how it comes back.
 
-A Mac user still heard nothing after the ``-ac`` fix: ffplay now started, and
-the run was silent all the same, with nothing in the log.  The fmt file that
-host_player waits for appears a moment BEFORE playaudio.sh starts padrelay.py,
-and the container engine's port proxy accepts a connection with nothing behind
-it yet and then hangs up.  ffplay took that for the end of the stream and
-exited 0, and as it was one ``exec`` nothing ever started it again.  (Proven in
-the Mac container on Docker Desktop: main's padbox.sh recorded 78 bytes, the
-fixed one 18 MB of a game's sound.)
+PAD-832: ffplay once connected to the box's published port before the relay
+listened, took the hang-up for the end of the stream, and the run was silent.
+PAD-1109: under Colima the published port reached the Mac through Lima's port
+forwarder, which took the relay's whole stream at full rate while ffplay got
+310 KB and then nothing. The speaker now reads the box's sound FIFO through
+``docker exec ... padrelay.py --pipe`` piped into ``ffplay -i pipe:0``: no port.
 
-padbox.sh's host_player and relay_listening are run here with ``docker`` and
-``ffplay`` replaced by shell functions; the "box" is a few files in a temp
-directory: ``up`` (the container runs), ``listening`` (padrelay.py has bound
-its port).  Fed on stdin for the reason test_padbox_build_watch.py gives.
+padbox.sh's host_player is run here with ``docker`` and ``ffplay`` replaced by
+shell functions; the "box" is a few files in a temp directory: ``up`` (the
+container runs), ``feed<N>`` (what the N-th relay writes), ``play<N>`` (how
+the N-th player behaves). Fed on stdin for the reason
+test_padbox_build_watch.py gives.
 """
 import os
 import re
@@ -29,8 +28,6 @@ BOX = os.path.join(RIG, "docker", "padbox.sh")
 needs_bash = pytest.mark.skipif(not (os.path.isfile(BOX) and HAS_BASH),
                                 reason="rig or working bash not present")
 
-PORT = 45997          # B3AD
-
 
 def _function(name):
     with open(BOX, "rb") as fh:
@@ -40,52 +37,62 @@ def _function(name):
     return m.group(0)
 
 
-# /proc/net/tcp as the box shows it. The ESTABLISHED row on our port is there
-# on purpose: only a LISTEN (0A) row may count as "the relay is up".
-_TABLE_DOWN = (
-    "  sl  local_address rem_address   st tx_queue rx_queue\n"
-    "   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000\n"
-    "   1: 020011AC:B3AD 010011AC:84D6 01 00000000:00000000\n")
-_TABLE_UP = _TABLE_DOWN + (
-    "   2: 00000000:B3AD 00000000:0000 0A 00000000:00000000\n")
-
 _PRELUDE = r"""
 set -u
 D=%(dir)s
-NAME=pad-test AUDIO_PORT=%(port)d PAD_AUDIO=1 PAD_BOX_RELAY_WAIT_S=%(wait)d
+NAME=pad-test PAD_AUDIO=1 BOX_FIFO=/pad/rootfs/dump/audio.fifo
+BOX_CTL=/tmp/pad_ctl/audio_ctl.json PAD_AUDIO_CTL="$D/audio_ctl.json"
 docker() {
   [ "$1" = exec ] || return 0
-  case "$3" in
-    cat) case "$4" in
-           /pad/rootfs/dump/audio.fmt) echo "44100 2" ;;
-           /proc/net/tcp) [ -f "$D/up" ] || return 1
-                          if [ -f "$D/listening" ]; then printf '%%s' %(up)s
-                          else printf '%%s' %(down)s; fi ;;
-         esac ;;
-    true) [ -f "$D/up" ] ;;
+  shift
+  case "$*" in
+    *"cat /pad/rootfs/dump/audio.fmt") echo "44100 2" ;;
+    *" true"|*"test -p /pad/rootfs/dump/audio.fifo") [ -f "$D/up" ] ;;
+    *"pkill -f padrelay.py --pipe") echo "reap" >> "$D/events" ;;
+    "pad-test python3 /pad/rig/padrelay.py --pipe "*)
+       n=$(( $(cat "$D/relays" 2>/dev/null || echo 0) + 1 )); echo $n > "$D/relays"
+       echo "relay $n: $*" >> "$D/events"
+       cat "$D/feed$n" 2>/dev/null ;;
   esac
 }
-# ffplay: answers the option probe; otherwise notes whether the relay was
-# listening when it connected, then plays what $D/play<N> says
+# env -i NAME=v... cmd: what env(1) does, for a cmd that is a function here.
+# Only ever called as an element of host_player's pipeline, which is its own
+# subshell, so the variables go in place: no further subshell, or the PID
+# host_player kills would not be the player's (env(1) execs, keeping it)
+env() {
+  [ "${1:-}" = -i ] || { command env "$@"; return; }
+  shift
+  for v in $(compgen -e); do
+    case $v in D|PATH) ;; *) unset "$v" ;; esac
+  done
+  while [ $# -gt 0 ] && [ "${1#*=}" != "$1" ]; do export "$1"; shift; done
+  "$@"
+}
+# ffplay: answers the option probes; otherwise records its arguments, its
+# environment and what came in on stdin, then plays as $D/play<N> says
 ffplay() {
-  case " $* " in *" -h "*) echo "  -ch_layout  <channel_layout>"; return 0 ;; esac
+  case " $* " in
+    *" -h "*) echo "  -ch_layout  <channel_layout>"; return 0 ;;
+    *" -version "*) echo "ffplay version 8.0 Copyright"; return 0 ;;
+  esac
   n=$(( $(cat "$D/starts" 2>/dev/null || echo 0) + 1 )); echo $n > "$D/starts"
-  if [ -f "$D/listening" ]; then echo "start $n relay-up" >> "$D/ffplay.log"
-  else echo "start $n EARLY" >> "$D/ffplay.log"; fi
+  echo "player $n: $*" >> "$D/events"
+  echo "sdl=${SDL_AUDIODRIVER:-} home=${HOME:-}" > "$D/env$n"
+  cat > "$D/heard$n"
   case "$(cat "$D/play$n" 2>/dev/null || echo eof)" in
-    eof) return 0 ;;                       # the stream ended at once
+    eof) return 0 ;;                       # the stream ended
     long) exec -a "padtest-player-$D" sleep 31 ;;   # a player that plays on
   esac
 }
 """
 
 
-def _run(d, body, wait=60, timeout=60):
+def _run(d, body, timeout=60):
     script = "\n".join([
-        _PRELUDE % {"dir": _q(d), "port": PORT,
-                    "wait": wait, "up": _q(_TABLE_UP), "down": _q(_TABLE_DOWN)},
+        _PRELUDE % {"dir": _q(d)},
         _function("ffplay_channel_args"),
-        _function("relay_listening"),
+        _function("mac_meter"),
+        _function("ffplay_status"),
         _function("host_player"),
         body, "",
     ])
@@ -112,28 +119,109 @@ def _cat(d, name):
 
 
 @needs_bash
-def test_the_speaker_waits_for_the_relay_to_listen():
+def test_the_speaker_plays_the_box_fifo_through_docker_exec_not_a_port():
     d = _fresh_dir()
-    # the relay comes up 1.5 s after the format is known; the player then plays on
     rc, text = _run(d, r"""
-touch "$D/up"; echo long > "$D/play1"
-( sleep 1.5; touch "$D/listening" ) &
+touch "$D/up"; printf 'PCM-BYTES' > "$D/feed1"; echo long > "$D/play1"
 host_player & HP=$!
-for i in $(seq 1 80); do [ -f "$D/starts" ] && break; sleep 0.1; done
-sleep 0.5; kill $HP; wait $HP 2>/dev/null
+for i in $(seq 1 80); do [ -s "$D/heard1" ] && break; sleep 0.1; done
+sleep 0.3; kill $HP; wait $HP 2>/dev/null
 echo "HP-DONE"
 """)
-    log = _cat(d, "ffplay.log")
-    assert "start 1 relay-up" in log, (log, text)
-    assert "EARLY" not in log, (log, text)
-    assert "HP-DONE" in text
+    ev = _cat(d, "events")
+    assert "relay 1: pad-test python3 /pad/rig/padrelay.py --pipe " \
+           "/pad/rootfs/dump/audio.fifo /tmp/pad_ctl/audio_ctl.json" in ev, (ev, text)
+    player = [l for l in ev.splitlines() if l.startswith("player 1:")][0]
+    assert player.endswith("-f s16le -ar 44100 -ch_layout stereo -i pipe:0"), player
+    assert "-loglevel info -stats" in player, player
+    assert "tcp://" not in ev
+    assert _cat(d, "heard1") == "PCM-BYTES"
+    # a relay left from an earlier player is stopped before this one reads
+    assert ev.index("reap") < ev.index("relay 1:")
+    assert "docker exec" in text and "HP-DONE" in text
+
+
+@needs_bash
+def test_the_speaker_starts_clean_of_the_apps_environment_and_says_so():
+    """PAD-1109: the stream arrived and ffplay took it at playback speed, yet
+    nothing was heard, while the same ffplay from Terminal played a tone. The
+    Mac's ffplay now starts in a clean environment, and the log names the
+    variables of the app's it was spared."""
+    d = _fresh_dir()
+    rc, text = _run(d, r"""
+export SDL_AUDIODRIVER=dummy PYTHONHOME=/Applications/X.app/Contents/Frameworks
+touch "$D/up"; echo long > "$D/play1"
+host_player & HP=$!
+for i in $(seq 1 80); do [ -f "$D/env1" ] && break; sleep 0.1; done
+sleep 0.3; kill $HP; wait $HP 2>/dev/null
+""")
+    assert "[box] speaker: started without the app's PYTHONHOME SDL_AUDIODRIVER" \
+        in text, text
+    assert "[box] speaker: ffplay" in text, text
+    seen = _cat(d, "env1")
+    assert seen.startswith("sdl= home=/"), (seen, text)
+
+
+@needs_bash
+def test_the_mac_meter_passes_the_stream_and_says_what_reached_the_player():
+    """PAD-1109: the relay's count could not see a stream lost on its way to
+    the Mac; this one counts what ffplay is actually handed."""
+    d = _fresh_dir()
+    script = "\n".join(["set -u", "D=%s" % _q(d), "PAD_METER_S=1",
+                         _function("mac_meter"), r"""
+( for i in 1 2 3; do head -c 65536 /dev/zero | tr '\0' 'x'; sleep 1.2; done ) |
+    mac_meter > "$D/out"
+echo "OUT=$(wc -c < "$D/out" | tr -d ' ')"
+""", ""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    text = out.stdout.decode("utf-8", "replace")
+    assert "OUT=196608" in text, text
+    assert "[box] handed to the Mac's speaker so far:" in text, text
+    assert "[box] handed to the Mac's speaker in all: 196608 bytes" in text, text
+
+
+@needs_bash
+def test_ffplays_own_lines_pass_and_its_clock_is_sampled():
+    """PAD-1109: ffplay's status line is its playback clock; sampled, not
+    flooded, and every other line of its passed through."""
+    d = _fresh_dir()
+    script = "\n".join(["set -u", "PAD_FFSTAT_N=3", _function("ffplay_status"), r"""
+printf 'Input #0, s16le, from pipe:0:\n' |
+    cat - <(for i in 1 2 3 4 5 6 7; do printf '   %d.00 M-A:  0.000 fd=   0 aq=   %dKB vq=    0KB sq=    0B \r' $i $i; done) |
+    ffplay_status 2>&1
+""", ""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    lines = out.stdout.decode("utf-8", "replace").splitlines()
+    assert lines[0] == "[box] ffplay: Input #0, s16le, from pipe:0:", lines
+    played = [l for l in lines if l.startswith("[box] ffplay playing:")]
+    assert [l.split()[3] for l in played] == ["1.00", "4.00", "7.00"], lines
+    assert "aq= 4KB" in played[1], played
+
+
+@needs_bash
+def test_no_volume_file_hands_the_relay_none():
+    d = _fresh_dir()
+    rc, text = _run(d, r"""
+PAD_AUDIO_CTL=
+touch "$D/up"; echo long > "$D/play1"
+host_player & HP=$!
+for i in $(seq 1 80); do [ -f "$D/starts" ] && break; sleep 0.1; done
+sleep 0.3; kill $HP; wait $HP 2>/dev/null
+""")
+    ev = _cat(d, "events")
+    assert "--pipe /pad/rootfs/dump/audio.fifo" in ev, (ev, text)
+    assert "/tmp/pad_ctl/audio_ctl.json" not in ev, ev
 
 
 @needs_bash
 def test_an_ended_speaker_is_started_again_and_stopped_with_the_run():
     d = _fresh_dir()
     rc, text = _run(d, r"""
-touch "$D/up" "$D/listening"; echo eof > "$D/play1"; echo long > "$D/play2"
+touch "$D/up"; echo eof > "$D/play1"; echo long > "$D/play2"
 host_player & HP=$!
 for i in $(seq 1 80); do [ "$(cat "$D/starts" 2>/dev/null)" = 2 ] && break; sleep 0.1; done
 sleep 0.3; kill $HP; wait $HP 2>/dev/null
@@ -142,8 +230,9 @@ sleep 0.3
 pgrep -f "padtest-player-$D" >/dev/null && echo "PLAYER-LEFT-BEHIND"
 echo "HP-DONE"
 """)
-    log = _cat(d, "ffplay.log")
-    assert log.count("start") == 2, (log, text)
+    ev = _cat(d, "events")
+    assert ev.count("player ") == 2 and ev.count("relay ") == 2, (ev, text)
+    assert ev.count("reap") == 2, ev
     assert "stopped (exit 0); started it again" in text
     assert "PLAYER-LEFT-BEHIND" not in text
     assert "HP-DONE" in text
@@ -153,57 +242,30 @@ echo "HP-DONE"
 def test_a_box_that_stops_ends_the_speaker_without_a_restart():
     d = _fresh_dir()
     rc, text = _run(d, r"""
-touch "$D/up" "$D/listening"; echo eof > "$D/play1"
-rm_up() { rm -f "$D/up"; }
-# the box is gone by the time the player ends
+touch "$D/up"; echo eof > "$D/play1"
 ffplay_real=$(declare -f ffplay)
 eval "${ffplay_real/ffplay ()/ffplay_inner ()}"
-ffplay() { case " $* " in *" -h "*) ffplay_inner "$@"; return ;; esac
-           ffplay_inner "$@"; rm_up; }
+ffplay() { case " $* " in *" -h "*|*" -version "*) ffplay_inner "$@"; return ;; esac
+           ffplay_inner "$@"; rm -f "$D/up"; }
 host_player
 echo "HP-RC=$?"
 """, timeout=30)
     assert "HP-RC=0" in text, text
     assert "started it again" not in text
-    assert _cat(d, "ffplay.log").count("start") == 1
+    assert _cat(d, "starts").strip() == "1"
 
 
 @needs_bash
 def test_a_speaker_that_keeps_failing_is_given_up_on_and_said():
     d = _fresh_dir()
     rc, text = _run(d, r"""
-touch "$D/up" "$D/listening"
+touch "$D/up"
 host_player
 echo "HP-RC=$?"
 """, timeout=60)
     assert "HP-RC=0" in text, text
     assert "stopped 5 times in a row" in text
-    assert _cat(d, "ffplay.log").count("start") == 5
-
-
-@needs_bash
-def test_a_relay_that_never_listens_is_said_and_no_player_starts():
-    d = _fresh_dir()
-    rc, text = _run(d, r"""
-touch "$D/up"
-host_player
-echo "HP-RC=$?"
-""", wait=1, timeout=30)
-    assert "never started listening on tcp/%d" % PORT in text, text
-    assert _cat(d, "starts") == ""
-
-
-@needs_bash
-def test_only_a_listen_row_on_our_port_counts():
-    d = _fresh_dir()
-    rc, text = _run(d, r"""
-touch "$D/up"
-relay_listening && echo "DOWN-SAID-UP"
-touch "$D/listening"
-relay_listening && echo "UP-SAID-UP"
-""", wait=1, timeout=30)
-    assert "DOWN-SAID-UP" not in text, text
-    assert "UP-SAID-UP" in text, text
+    assert _cat(d, "starts").strip() == "5"
 
 
 def test_the_game_sound_count_crosses_into_the_box():
@@ -216,25 +278,52 @@ def test_the_game_sound_count_crosses_into_the_box():
     assert "PAD_AUDIO_DUMP" in m.group(1).split()
 
 
-# ---- PAD-957: the tab's Volume and Mute reach the Mac's speaker -------------
+# ---- PAD-957 / PAD-1129: the control folder, both ways ---------------------
+#
+# ctl_sync runs here with `docker` a shell function and the box a folder: the
+# REAL docker/boxctl.py runs on it (python3), as `docker exec -i` would run it
+# in the box. $D/mac is the app's folder, $D/box the box's /tmp/pad_ctl.
+
+BOXCTL = os.path.join(RIG, "docker", "boxctl.py")
 
 _CTL_PRELUDE = r"""
 set -u
 D=%(dir)s
-NAME=pad-test PAD_AUDIO=1 BOX_CTL=/tmp/pad_audio_ctl.json
-PAD_AUDIO_CTL="$D/audio_ctl.json"
-# docker exec -i -u 0 NAME sh -c CMD: the box takes a copy only once it is up
+NAME=pad-test PAD_AUDIO=1 BOX_CTL_DIR=/tmp/pad_ctl
+mkdir -p "$D/mac"
+PAD_AUDIO_CTL="$D/mac/audio_ctl.json"
+cat > "$D/boxctl.py" <<'BOXCTLEOF'
+%(boxctl)s
+BOXCTLEOF
 docker() {
-  [ "$1" = exec ] || return 0
-  [ -f "$D/up" ] || { cat >/dev/null; return 1; }
-  cat > "$D/box_ctl"; echo push >> "$D/pushes"
+  case "$1" in
+    ps) [ -f "$D/up" ] && echo pad-test; return 0 ;;
+    exec) ;;
+    *) return 0 ;;
+  esac
+  [ -f "$D/up" ] || return 1
+  echo "exec ${*:2}" >> "$D/execs"
+  python3 "$D/boxctl.py" "$D/box"
 }
+# for: waits up to 6 s for a condition
+upto() { for _ in $(seq 1 60); do eval "$1" && return 0; sleep 0.1; done; return 1; }
 """
 
 
-def _run_pusher(d, body, timeout=30):
-    script = "\n".join([_CTL_PRELUDE % {"dir": _q(d)},
-                        _function("ctl_pusher"), body, ""])
+def _box_up():
+    with open(BOX, "rb") as fh:
+        body = fh.read().decode("utf-8")
+    m = re.search(r"^box_up\(\) \{.*\}\n", body, re.M)
+    assert m
+    return m.group(0)
+
+
+def _run_sync(d, body, timeout=60):
+    with open(BOXCTL, "rb") as fh:
+        boxctl = fh.read().decode("utf-8")
+    script = "\n".join([_CTL_PRELUDE % {"dir": _q(d), "boxctl": boxctl},
+                        _box_up(), _function("ctl_feed"), _function("ctl_apply"),
+                        _function("ctl_sync"), body, ""])
     out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          timeout=timeout)
@@ -242,47 +331,100 @@ def _run_pusher(d, body, timeout=30):
 
 
 @needs_bash
-def test_the_volume_file_is_copied_into_the_box_when_it_changes():
+def test_the_volume_file_and_clip_names_go_into_the_box_when_they_change():
     d = _fresh_dir()
-    rc, text = _run_pusher(d, r"""
-echo '{"gain": 0.5, "muted": false}' > "$D/audio_ctl.json"
-ctl_pusher & CP=$!
+    rc, text = _run_sync(d, r"""
+echo '{"gain": 0.5, "muted": false}' > "$D/mac/audio_ctl.json"
+printf '{\n "a": "Clip A"\n}\n' > "$D/mac/clip_names_0.json"
+ctl_sync & CS=$!
 sleep 0.8; touch "$D/up"                    # the box comes up later
-for i in $(seq 1 40); do [ -f "$D/pushes" ] && break; sleep 0.1; done
-sleep 0.8                                   # unchanged: no second copy
-echo '{"gain": 0.5, "muted": true}' > "$D/audio_ctl.json"
-for i in $(seq 1 40); do [ "$(wc -l < "$D/pushes")" -ge 2 ] && break; sleep 0.1; done
-kill $CP; wait $CP 2>/dev/null
-echo "PUSHES=$(( $(wc -l < "$D/pushes") ))"   # BSD wc pads the count
+upto 'grep -q 0.5 "$D/box/audio_ctl.json" 2>/dev/null' && echo IN-1
+upto '[ -s "$D/box/clip_names_0.json" ]' && echo NAMES-IN
+echo '{"gain": 0.5, "muted": true}' > "$D/mac/audio_ctl.json"
+upto 'grep -q true "$D/box/audio_ctl.json"' && echo IN-2
+kill $CS; wait $CS 2>/dev/null
+echo "EXECS=$(( $(wc -l < "$D/execs") ))"   # BSD wc pads the count
+cat "$D/box/clip_names_0.json"
 """)
-    assert "PUSHES=2" in text, text
-    assert '"muted": true' in _cat(d, "box_ctl"), text
+    assert "IN-1" in text and "IN-2" in text and "NAMES-IN" in text, text
+    assert '"a": "Clip A"' in text, text
+    assert "EXECS=1" in text, text        # one docker exec for the whole run
+    assert "exec -i -u 0 pad-test python3 /pad/rig/docker/boxctl.py /tmp/pad_ctl" \
+        in _cat(d, "execs"), text
 
 
 @needs_bash
-def test_no_volume_file_or_a_silent_run_copies_nothing():
+def test_the_windows_volume_and_mute_reach_the_tabs_file():
+    # PAD-1129: the box's playfield window writes its copy (json.dump, no
+    # newline, replaced in place); the tab's file follows and stays put
     d = _fresh_dir()
-    rc, text = _run_pusher(d, r"""
+    rc, text = _run_sync(d, r"""
+echo '{"gain": 1.0, "muted": false}' > "$D/mac/audio_ctl.json"
 touch "$D/up"
-ctl_pusher & CP=$!                          # the file does not exist
-sleep 0.8; kill $CP; wait $CP 2>/dev/null
-PAD_AUDIO=0 ctl_pusher; echo "SILENT-RC=$?"
-PAD_AUDIO_CTL= ctl_pusher; echo "UNSET-RC=$?"
+ctl_sync & CS=$!
+upto '[ -s "$D/box/audio_ctl.json" ]' && echo IN
+printf '{"gain": 0.3, "muted": true}' > "$D/box/audio_ctl.json.pf.tmp"
+mv -f "$D/box/audio_ctl.json.pf.tmp" "$D/box/audio_ctl.json"
+upto 'grep -q 0.3 "$D/mac/audio_ctl.json"' && echo OUT
+sleep 1.5                                   # and nothing bounces it back
+kill $CS; wait $CS 2>/dev/null
+echo "MAC=$(cat "$D/mac/audio_ctl.json")"
+echo "BOX=$(cat "$D/box/audio_ctl.json")"
 """)
-    assert _cat(d, "pushes") == "", text
-    assert "SILENT-RC=0" in text and "UNSET-RC=0" in text, text
+    assert "IN" in text and "OUT" in text, text
+    assert 'MAC={"gain": 0.3, "muted": true}' in text, text
+    assert 'BOX={"gain": 0.3, "muted": true}' in text, text
 
 
-def test_the_relay_is_told_where_the_copy_is_and_the_bridge_is_not():
+@needs_bash
+def test_restart_game_and_the_windows_records_reach_the_tab_for_its_slot():
+    d = _fresh_dir()
+    rc, text = _run_sync(d, r"""
+PAD_SLOT=2
+printf '{"x": 1}\n' > "$D/mac/clip_names_2.json"
+touch "$D/up"
+ctl_sync & CS=$!
+upto '[ -d "$D/box" ]'
+upto '[ -s "$D/box/clip_names_0.json" ]' && echo NAMES-IN
+echo 0 > "$D/box/restart_game_0.req"
+printf '{"clip": "a"}\n{"cl' >> "$D/box/clips_seen_0.jsonl"
+printf '{"sid": 7}\n' >> "$D/box/sounds_seen_0.jsonl"
+upto '[ -f "$D/mac/restart_game_2.req" ]' && echo REQ-OUT
+upto '[ -s "$D/mac/sounds_seen_2.jsonl" ]' && echo SOUNDS-OUT
+printf 'ip": "b"}\n' >> "$D/box/clips_seen_0.jsonl"
+upto '[ "$(wc -l < "$D/mac/clips_seen_2.jsonl")" -ge 2 ]' && echo CLIPS-OUT
+kill $CS; wait $CS 2>/dev/null
+[ -e "$D/box/restart_game_0.req" ] || echo REQ-TAKEN
+echo "REQ=$(cat "$D/mac/restart_game_2.req")"
+cat "$D/mac/clips_seen_2.jsonl" "$D/mac/sounds_seen_2.jsonl"
+""")
+    for word in ("NAMES-IN", "REQ-OUT", "SOUNDS-OUT", "CLIPS-OUT", "REQ-TAKEN",
+                 "REQ=2"):
+        assert word in text, (word, text)
+    assert '{"clip": "a"}\n{"clip": "b"}\n{"sid": 7}' in text, text
+    assert "the playfield window asked for Restart game" in text, text
+
+
+@needs_bash
+def test_no_volume_file_setting_syncs_nothing():
+    d = _fresh_dir()
+    rc, text = _run_sync(d, r"""
+touch "$D/up"
+PAD_AUDIO_CTL= ctl_sync; echo "UNSET-RC=$?"
+""")
+    assert "UNSET-RC=0" in text, text
+    assert _cat(d, "execs") == "", text
+
+
+def test_the_relay_and_the_window_share_the_boxs_copy():
     with open(BOX, "rb") as fh:
         box = fh.read().decode("utf-8")
-    assert '-e "PAD_RELAY_CTL=$BOX_CTL"' in box
-    assert "ctl_pusher & HOSTCTL=$!" in box
-    with open(os.path.join(RIG, "playaudio.sh"), "rb") as fh:
-        play = fh.read().decode("utf-8")
-    relay = play[play.index('if [ "$SINK" = relay ]'):]
-    relay_sink, win_sink = relay.split('if [ "$SINK" = win ]', 1)
-    # the Mac's relay scales; the Windows bridge's padplay.py scales its own,
-    # and a relay that scaled too would square the level
-    assert '"$PORT" "${PAD_RELAY_CTL:-}"' in relay_sink
-    assert "PAD_RELAY_CTL" not in win_sink
+    assert '"$BOX_FIFO" "${PAD_AUDIO_CTL:+$BOX_CTL}"' in _function("host_player")
+    assert "BOX_CTL=$BOX_CTL_DIR/audio_ctl.json" in box
+    # PAD-1129: the window inside the box is handed the copy
+    assert '[ -n "${PAD_AUDIO_CTL:-}" ] && RUN_ARGS+=(-e "PAD_AUDIO_CTL=$BOX_CTL")' in box
+    assert "ctl_sync & HOSTCTL=$!" in box
+    assert "ctl_pusher" not in box
+    # PAD-1109: no published sound port any more, so nothing on the Mac can
+    # reach the box's FIFO except the docker exec reader
+    assert "AUDIO_PORT" not in box and "tcp://" not in box

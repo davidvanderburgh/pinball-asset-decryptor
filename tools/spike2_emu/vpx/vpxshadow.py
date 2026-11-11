@@ -425,11 +425,14 @@ def _walk(lines):
     """Every statement inside a Sub or Function, as (sub name lowered, block
     path, statement). The path names the If/Case/loop branch the statement
     runs in - () is the sub's own level; a single-line If's statements are
-    conditional and get a path of their own."""
+    conditional and get a path of their own. A "not tilted" guard is
+    NOT_TILTED in the path, not a branch id (see dof_of_sub)."""
     head = re.compile(r"^(?:public\s+|private\s+)?(?:sub|function)\s+(\w+)", re.I)
     sub, path, ids = None, [], [0]
 
-    def new():
+    def new(low=""):
+        if NOT_TILTED_RE.match(low):
+            return NOT_TILTED
         ids[0] += 1
         return ids[0]
     for line in lines:
@@ -454,9 +457,9 @@ def _walk(lines):
                 sub = None
                 continue
             if low.startswith("if ") and re.search(r"\bthen$", low):
-                path.append(new())
+                path.append(new(low))
             elif low.startswith("if ") and re.search(r"\bthen\b", low):
-                cond = tuple(path) + (new(),)
+                cond = tuple(path) + (new(low),)
                 yield sub, cond, re.split(r"(?i)\bthen\b", s, maxsplit=1)[1].strip()
             elif re.match(r"(elseif\b.*\bthen$|else$|case\b)", low) and path:
                 path[-1] = new()
@@ -476,10 +479,20 @@ def _dedupe(calls):
     return seen
 
 
+#: PAD-1117: a hit sub's "not tilted" guard - `If Not Tilted Then`, `If Tilted = False Then`, `If Not (bTilted)
+#: Then`. Munsters' pop bumpers fire their DOF (107-112, 302-304) only inside one, so the bridge carried none and the
+#: bumpers' toys stayed still. The shadow game never runs, so its tilt flag never rises and the guard is always true:
+#: what it wraps runs at the sub's own level. (The machine's tilt is its own; it never reached the table's flag.)
+NOT_TILTED = "not-tilted"
+NOT_TILTED_RE = re.compile(r"if\s+(?:not\s*\(?\s*\w*tilt\w*\s*\)?|\(?\s*\w*tilt\w*\s*\)?\s*=\s*(?:false|0))\s*then\b",
+                           re.I)
+
+
 def dof_of_sub(stmts, name):
-    """The DOF a sub always fires: its own level, no branch."""
-    return _dedupe([c for sub, path, s in stmts if sub == name.lower() and not path
-                    for c in _dof_in(s)])
+    """The DOF a sub always fires: its own level, no branch (a "not tilted"
+    guard is no branch: NOT_TILTED)."""
+    return _dedupe([c for sub, path, s in stmts if sub == name.lower()
+                    and all(p == NOT_TILTED for p in path) for c in _dof_in(s)])
 
 
 def dof_at_fire(stmts, obj):
@@ -849,6 +862,27 @@ def lamp_groups(m):
     return groups
 
 
+def drop_missing_lights(m, names):
+    """PAD-1127: take the lights the table has no object for out of the
+    map's `lamps` and `dark`, and return their names. The bridge names
+    each one bare in PadLampsInit (PadLamps.Add .., Array(li044a001)), and
+    a name the table lacks stops the whole script with "Variable is
+    undefined" before the table plays: a copy of a table that dropped or
+    renamed one light (JP's Deadpool without li044a001) would never start.
+    `names` is the table's object names, lower case."""
+    gone = [n for n in m.get("lamps", {}) if n != "_" and n.lower() not in names]
+    low = {n.lower() for n in gone}
+    for n in m.get("dark", []):
+        if n.lower() not in names and n.lower() not in low:
+            gone.append(n)
+            low.add(n.lower())
+    if gone:
+        m["lamps"] = {k: v for k, v in m.get("lamps", {}).items() if k.lower() not in low}
+        if "dark" in m:
+            m["dark"] = [n for n in m["dark"] if n.lower() not in low]
+    return gone
+
+
 def lamp_calls(m):
     """lamp number -> [lamp_calls entries]: inserts the table shows with a
     sub of its own (extra_vbs) rather than a Light, keyed like lamp_groups."""
@@ -1189,7 +1223,30 @@ def gen(m, had, quiet=None, dof=None):
                 b0 += " : %s_UnHit_orig" % name
             else:
                 b0 += fx(name + "_UnHit")
-            if helpers:
+            if s.get("knock"):
+                # PAD-1121: a ball held in the trigger (Munsters' Herman magnet) is
+                # knocked off the opto by the next ball on the real machine; the
+                # table's magnet grabs that ball too and nothing comes loose. So a
+                # ball arriving while another sits in the trigger and `knock` (a
+                # VBScript condition: the magnet is on) holds opens the switch, and
+                # it stays open until the trigger is empty. The trigger counts its
+                # balls, so one leaving another inside does not open it either.
+                n, k = "PadIn_" + name, "PadKnocked_" + name
+                g = [guard] if helpers else []
+                out += (["Dim %s, %s" % (n, k), "Sub %s_Hit" % name] + g
+                        + ["\t%s = %s + 1" % (n, n),
+                           "\tIf %s > 1 Then" % n,
+                           "\t\tIf %s Then %s = True" % (s["knock"], k),
+                           "\tEnd If",
+                           "\tController.Switch(%d) = Not CBool(%s)" % (sid, k)]
+                        + ["\t" + x for x in b1.split(" : ", 1)[1:]]
+                        + ["End Sub", "Sub %s_UnHit" % name] + g
+                        + ["\t%s = %s - 1" % (n, n),
+                           "\tIf %s <= 0 Then %s = 0 : %s = False" % (n, n, k),
+                           "\tController.Switch(%d) = (%s > 0) And Not CBool(%s)" % (sid, n, k)]
+                        + ["\t" + x for x in b0.split(" : ", 1)[1:]]
+                        + ["End Sub"])
+            elif helpers:
                 out += ["Sub %s_Hit" % name, guard, "\t" + b1, "End Sub",
                         "Sub %s_UnHit" % name, guard, "\t" + b0, "End Sub"]
             else:
@@ -1274,8 +1331,15 @@ def gen(m, had, quiet=None, dof=None):
                 "\tNext",
                 "End Sub",
                 "Sub PadLampSet(o, v)   ' 0 off, 1 on, more: a lit RGB insert's colour",
+                # PAD-1113: a light's Color and ColorFull come back from VPX as
+                # OLE_COLOR, an unsigned VT_UI4 VBScript cannot compare ("Variable
+                # uses an Automation type not supported", 458): read through CLng.
+                # core.vbs calls LampCallback under On Error Resume Next, so the
+                # error was silent and ended the whole batch: no colour insert lit.
+                # Its own On Error keeps one light's failure to that light.
+                "\tOn Error Resume Next",
                 "\tIf v > 1 Then",
-                "\t\tIf o.ColorFull <> v Then o.ColorFull = v : o.Color = PadDim(v)",
+                "\t\tIf CLng(o.ColorFull) <> v Then o.ColorFull = v : o.Color = PadDim(v)",
                 "\t\tIf o.State <> 1 Then o.State = 1",
                 "\tElseIf o.State <> v Then",
                 "\t\to.State = v",
@@ -1550,6 +1614,23 @@ def flipper_subs(m, had):
     return flips
 
 
+def flipper_warnings(m, had, lines):
+    """PAD-1112: what leaves the machine's flipper coils moving nothing. A
+    tribute that flips inline in its key handlers (Munsters: `If
+    bGameInPlay ... LF.Fire`) has no SolLFlipper, and without the map's
+    `flippers` its flippers never move: the keys go to the machine, the
+    table's handler flips only while its own game runs. A sub the map names
+    must be in the script or the map's extra_vbs."""
+    flips = flipper_subs(m, had)
+    if not flips:
+        return ["WARNING: the machine's flipper coils move nothing: the table has no "
+                "SolLFlipper/SolRFlipper and the map names no `flippers`"]
+    extra = (m.get("extra_vbs") or "").split("\n")
+    return ["WARNING: the map's flipper sub %s is in neither the table's script nor extra_vbs"
+            % sub for sub in dict.fromkeys(flips.values())
+            if not has_sub(lines, sub) and not has_sub(extra, sub)]
+
+
 def flipper_flag(m):
     """PAD-1096: the table's own game-running flag its flipper subs check
     before their sound and DOF (`"flipper_flag": {"flag": "bGameInPlay"}`, or
@@ -1632,6 +1713,7 @@ def patch(script, m):
             rename_sub(lines, f + "_Hit", rep)
     for sub in ("SolLFlipper", "SolRFlipper", "SolULFlipper", "SolURFlipper"):
         had[sub] = has_sub(lines, sub)
+    rep.extend(flipper_warnings(m, had, lines))
     quiet = {}
     for name in m.get("quiet_subs", []):
         args = quiet_sub(lines, name, rep)
@@ -1677,17 +1759,27 @@ def patch(script, m):
 
 
 def retrofit_items(table, m):
-    by_name = {}
+    by_name, first = {}, {}
     for data in table.items:
         kind, name, pos = table.item_info(data)
-        by_name[name] = (kind, data)
+        by_name[name.lower()] = (kind, data)
+        first.setdefault(kind, data)
+
+    def source(name, kind):
+        # PAD-1127: the clone is only a template (its look; the copy gets its
+        # own name and place), so a copy of the table without it, or naming it
+        # in another case, takes any object of the kind instead of failing
+        k, data = by_name.get((name or "").lower(), ("", None))
+        if k == kind:
+            return k, data
+        assert kind in first, "the table has no %s to copy for %s" % (kind, name)
+        return kind, first[kind]
     items = []
     rl = m.get("retrofit_lights", {})
     for name, v in rl.get("lights", {}).items():
         if name == "_":
             continue
-        kind, src = by_name[v.get("clone", rl.get("clone"))]
-        assert kind == "Light", v.get("clone", rl.get("clone"))
+        kind, src = source(v.get("clone", rl.get("clone")), "Light")
         items.append(vpxfile.clone_item(src, name, *v["at"]))
     # PAD-922: a switch where the table has no object - a Trigger cloned from
     # `clone`, given its own `shape` (drag points), switched on, drawn as
@@ -1700,10 +1792,9 @@ def retrofit_items(table, m):
     for name, v in m.get("retrofit_triggers", {}).items():
         if name == "_":
             continue
-        kind, src = by_name[v["clone"]]
-        assert kind == "Trigger", v["clone"]
+        kind, src = source(v["clone"], "Trigger")
         surf = v.get("surface", "")
-        assert not surf or by_name.get(surf, ("",))[0] in ("Ramp", "Wall"), surf
+        assert not surf or by_name.get(surf.lower(), ("",))[0] in ("Ramp", "Wall"), surf
         fields = {"EBLD": struct.pack("<i", 1), "SHAP": struct.pack("<i", 0),
                   "SURF": struct.pack("<I", len(surf)) + surf.encode("latin1")}
         if "radius" in v:
@@ -1713,8 +1804,7 @@ def retrofit_items(table, m):
     for name, v in m.get("retrofit_timers", {}).items():
         if name == "_":
             continue
-        kind, src = by_name[v["clone"]]
-        assert kind == "Timer", v["clone"]
+        kind, src = source(v["clone"], "Timer")
         item = vpxfile.clone_item(src, name, 0, 0)
         items.append(vpxfile.set_fields(item, {"TMON": struct.pack("<i", 1),
                                                "TMIN": struct.pack("<i", int(v["interval_ms"]))}))
@@ -1785,14 +1875,19 @@ def main(argv):
         print("refusing: %s does not verify against its own MAC" % src)
         return 1
     info = [table.item_info(d) for d in table.items]
-    names = {n.lower() for _, n, _ in info} | {n.lower() for n in m.get("retrofit_triggers", {})}
-    for name in list(m["switches"]) + list(saucers(m)) + list(m.get("lamps", {})) + m.get("dark", []):
+    names = {n.lower() for _, n, _ in info} | {n.lower() for n in m.get("retrofit_triggers", {})} \
+        | {n.lower() for n in m.get("retrofit_lights", {}).get("lights", {})}
+    unlit = drop_missing_lights(m, names)
+    for name in list(m["switches"]) + list(saucers(m)):
         if name != "_" and name.lower() not in names:
             print("WARNING: the table has no object named %s" % name)
     for name in sounds_at_shapes(m.get("extra_vbs", ""), info):
         print("WARNING: a sound is played at %s, which has no position (PlaySoundAt reads its .x)" % name)
     m["_lightseqs"] = sorted(n for k, n, _ in info if k == "LightSeq")
     script, rep = patch(table.script(), m)
+    if unlit:
+        rep.insert(0, "left out light(s) this copy of the table does not have: %s"
+                   % ", ".join(unlit))
     script, streams = vpxsounds.quiet(script, table.ole, rep)   # PAD-858
     items = retrofit_items(table, m)
     streams.update(auto_plunger_item(table, m))

@@ -65,6 +65,11 @@
     "AddCreditKey2",
     "LockBarKey"
   ],
+  "flippers": {
+    "_": "PAD-1112: the tribute flips inline in its key handlers (no SolLFlipper), and only while its own game is in play, which never starts: the machine's flipper coils call these bodies instead",
+    "sLLFlipper": "PadLFlip",
+    "sLRFlipper": "PadRFlip"
+  },
   "switches": {
     "_": "object -> Spike 2 switch id; event hit (pulse), hold (Hit/UnHit), spin, slingshot",
     "sw1": {
@@ -139,8 +144,10 @@
     },
     "sw45": {
       "id": 82,
-      "event": "hit",
-      "name": "HERMAN OPTO"
+      "event": "hold",
+      "name": "HERMAN OPTO",
+      "why": "PAD-1117: the table's Herman magnet (HMagnet) holds the ball inside this trigger, and the game reads a ball caught on the magnet as this opto staying closed. Pulsed, the game let go of the magnet and the hurry-up never served its second ball (emulator: held, it serves it and starts Herman Multiball). PAD-1121: the game's HERMAN HURRY UP says HIT THE BALL: the next ball knocks the held one off the opto, and the game drops the magnet and starts Herman Multiball at once (emulator: opto opened = magnet off 0.4 s later and the 1,000,000 award; left closed = magnet held ~13 s). The table's magnet grabs that next ball too, so nothing came loose: `knock` opens the opto when a second ball arrives while the magnet is on",
+      "knock": "mHMagnet.MagnetOn"
     },
     "sw53": {
       "id": 88,
@@ -362,7 +369,7 @@
     "ScoopEject.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "\n' ---- PAD: the Munsters' mechs (munsters_pro.shadow.json)\n' Dragula: the ball rests on sw29 in front of the car, which is a Plunger\n' (CarPlunger); the game's DRAGULA KICKER coil fires it.\nSub PadDragula(e)\n\tIf e Then\n\t\tCarPlunger.Pullback\n\t\tCarPlunger.Fire\n\t\tPlaySoundAt \"fx_plungerpull\", CarPlunger\n\tEnd If\nEnd Sub\n' the up post at the top of the loop (the table's DropStop wall)\nSub PadUpPost(e)\n\tDropStop.Collidable = e\n\tDropStop.IsDropped = Not e\nEnd Sub\n' Spot's trap door: the coil opens it (the table's RaiseSpot: the door\n' shown open, the wall that turns the ball onto Spot's ramp up)\nSub PadSpotDoor(e)\n\tIf e Then\n\t\tRaiseSpot\n\tElse\n\t\tDropSpot\n\tEnd If\nEnd Sub\n' Herman's magnet (the table's cvpmMagnet on HMagnet)\nSub PadMagnet(e)\n\tmHMagnet.MagnetOn = e\nEnd Sub\n",
+  "extra_vbs": "\n' ---- PAD: the Munsters' mechs (munsters_pro.shadow.json)\n' Dragula: the ball rests on sw29 in front of the car, which is a Plunger\n' (CarPlunger); the game's DRAGULA KICKER coil fires it.\nSub PadDragula(e)\n\tIf e Then\n\t\tCarPlunger.Pullback\n\t\tCarPlunger.Fire\n\t\tPlaySoundAt \"fx_plungerpull\", CarPlunger\n\tEnd If\nEnd Sub\n' the up post at the top of the loop (the table's DropStop wall)\nSub PadUpPost(e)\n\tDropStop.Collidable = e\n\tDropStop.IsDropped = Not e\nEnd Sub\n' Spot's trap door: the coil opens it (the table's RaiseSpot: the door\n' shown open, the wall that turns the ball onto Spot's ramp up)\nSub PadSpotDoor(e)\n\tIf e Then\n\t\tRaiseSpot\n\tElse\n\t\tDropSpot\n\tEnd If\nEnd Sub\n' Herman's magnet (the table's cvpmMagnet on HMagnet)\nSub PadMagnet(e)\n\tmHMagnet.MagnetOn = e\n\t' PAD-1121: a ball reaching the magnet while it is on turns the\n\t' shaker on (HMagnet_Hit's DOF 135); the table's own MagnetStop turned\n\t' it off, which the machine's magnet coil never calls\n\tIf Not CBool(e) Then DOF 135, DOFOff\nEnd Sub\n' the flippers (PAD-1112): the table's own flip, sound and DOF 101/102 from\n' its key handlers, which flip only while its own game runs\nSub PadLFlip(e)\n\tIf CBool(e) Then\n\t\tLF.Fire\n\t\tPlaySound SoundFXDOF(\"fx_flipperup\",101,DOFOn,DOFFlippers), 0, .67, AudioPan(LeftFlipper), 0.05,0,0,1,AudioFade(LeftFlipper)\n\tElse\n\t\tLeftFlipper.RotateToStart\n\t\tPlaySound SoundFXDOF(\"fx_flipperdown\",101,DOFOff,DOFFlippers), 0, 1, AudioPan(LeftFlipper), 0.05,0,0,1,AudioFade(LeftFlipper)\n\tEnd If\nEnd Sub\nSub PadRFlip(e)\n\tIf CBool(e) Then\n\t\tRF.Fire\n\t\tPlaySound SoundFXDOF(\"fx_flipperup\",102,DOFOn,DOFFlippers), 0, .67, AudioPan(RightFlipper), 0.05,0,0,1,AudioFade(RightFlipper)\n\tElse\n\t\tRightFlipper.RotateToStart\n\t\tPlaySound SoundFXDOF(\"fx_flipperdown\",102,DOFOff,DOFFlippers), 0, 1, AudioPan(RightFlipper), 0.05,0,0,1,AudioFade(RightFlipper)\n\tEnd If\nEnd Sub\n",
   "retrofit_timers": {
     "PinMAMETimer": {
       "clone": "PulseTimer",
@@ -1439,11 +1446,39 @@
   ],
   "repatch": [
     {
+      "old": "Sub sw45_Hit : Controller.Switch(1082) = True : End Sub",
+      "why": "a second ball stuck to Herman's magnet beside the first instead of knocking it loose, and the shaker kept running after the magnet let go",
+      "since": "PAD-1121: the next ball knocks Herman's ball loose; the magnet shaker stops with the magnet"
+    },
+    {
+      "old": "Sub sw45_Hit : vpmTimer.PulseSw 1082 : End Sub",
+      "why": "Herman's magnet held the ball until the game called it missing and ended the ball",
+      "since": "PAD-1117: a ball on Herman's magnet keeps HERMAN OPTO closed"
+    },
+    {
+      "old": "Sub Bumper001_Hit : vpmTimer.PulseSw 1086 : End Sub",
+      "why": "the pop bumpers fired no DOF",
+      "since": "PAD-1117: DOF behind the table's tilt check is carried"
+    },
+    {
       "old": "LinearEnvelope = Y End Function '====================================================================== '==== PAD: the Spike 2 emulator drives this table",
       "why": "Visual Pinball stopped on \"Object not a collection\" as the table loaded",
       "since": "PAD-1102: the rainbow lights' list starts empty"
     },
-    {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1062) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
-    {"old": "Sub swPlungerRest_Hit : Controller.Switch(1062) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
+    {
+      "old": "Sub swPlungerRest_UnHit : Controller.Switch(1062) = False : swPlungerRest_UnHit_orig : End Sub",
+      "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights",
+      "since": "PAD-1099: the plunger lane's own subs stay out of the way"
+    },
+    {
+      "old": "Sub swPlungerRest_Hit : Controller.Switch(1062) = True : swPlungerRest_Hit_orig : End Sub",
+      "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights",
+      "since": "PAD-1099: the plunger lane's own subs stay out of the way"
+    },
+    {
+      "old": "Case StartGameKey, AddCreditKey, AddCreditKey2, LockBarKey ' the machine's keys: never the shadow game's",
+      "why": "the flippers did not move: the table flips only while its own game runs",
+      "since": "PAD-1112: the machine's flipper coils move the flippers"
+    }
   ]
 }

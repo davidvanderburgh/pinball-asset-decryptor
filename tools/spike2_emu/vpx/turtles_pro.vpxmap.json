@@ -54,7 +54,7 @@
     "coin_door_interlock": 1033
   },
   "switch_rewrite": {
-    "_": "the table's old Data East number -> Spike 2 switch id where the number names ONE thing (0 = no Stern switch: the edge is dropped). Shared numbers (20, 32, 40, 49, 50) go by object below.",
+    "_": "the table's old Data East number -> Spike 2 switch id where the number names ONE thing (0 = no Stern switch: the edge is dropped). Shared numbers (20, 32, 40, 49, 50) go by object below. 21/22 are Data East's left/right slingshot: this table's slings send no number (switch_extra adds the Stern ones), but a DOF config may fire the sling toys on W21/W22 rather than S20/S21, so DOF hears them from the Stern slings (PAD-1116).",
     "10": 0,
     "11": 0,
     "12": 0,
@@ -63,6 +63,8 @@
     "17": 57,
     "18": 61,
     "19": 60,
+    "21": 70,
+    "22": 69,
     "23": 0,
     "25": 0,
     "26": 62,

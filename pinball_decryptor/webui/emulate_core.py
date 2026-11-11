@@ -2472,7 +2472,12 @@ def setup_report(facts):
                                                                    binfmt))
     if facts.get("iswsl") == "1":
         lines.append("  survives a WSL restart: "
-                     + yes_no("wslconf", "yes", "NO — systemd is off"))
+                     + ("NO — this Linux has no systemd; Set up emulator… "
+                        "registers it again"
+                        if facts.get("wslconf") == "0"
+                        and facts.get("hassystemd") == "0"
+                        else yes_no("wslconf", "yes",
+                                    "NO — systemd is off")))
         lines.append("  logs in as: %s%s"
                      % (facts.get("user", "unknown"),
                         "  <- the picture will be black"
@@ -2573,6 +2578,19 @@ def setup_report_darwin(docker, cli=None, engine=None):
     return lines
 
 
+def wsl_can_turn_systemd_on(facts):
+    """Would writing ``[boot] systemd=true`` make the ARM handler survive a
+    WSL restart?  Only on WSL, only when systemd is not already PID 1, and
+    only where systemd is installed at all (PAD-1132).  The app's own
+    PAD-Runtime has none, by design (tools/runtime/Dockerfile), and the
+    notice promised to "turn systemd on" there anyway; setupfix.sh then did
+    nothing.  An older rig sends no ``hassystemd``: absent accuses nobody,
+    so it is treated as installed, as before."""
+    facts = facts or {}
+    return (facts.get("iswsl") == "1" and facts.get("wslconf") == "0"
+            and facts.get("hassystemd") != "0")
+
+
 def setup_settled(facts):
     """Is there NOTHING left to say about this machine?
 
@@ -2649,7 +2667,7 @@ def setup_fix_steps(facts):
         steps.append("Register the kernel's handler for 32-bit ARM programs.")
     elif binfmt == "disabled":
         steps.append("Switch the 32-bit ARM handler back on.")
-    if facts.get("iswsl") == "1" and facts.get("wslconf") == "0":
+    if wsl_can_turn_systemd_on(facts):
         steps.append("Add [boot] systemd=true to /etc/wsl.conf, so the "
                      "registration is still there after WSL restarts.")
     return steps
@@ -2828,7 +2846,7 @@ def setup_notice(facts, can_fix):
         # unsaid: `does[0]` ran off an empty list, so the tab answered such a
         # machine with an internal error where its notice should have been.
         # Seen on this PC while photographing PAD-126.
-        if facts.get("iswsl") == "1" and facts.get("wslconf") == "0":
+        if wsl_can_turn_systemd_on(facts):
             does.append("turns systemd on in /etc/wsl.conf, so the handler "
                         "is still registered after a WSL restart")
         parts.append(

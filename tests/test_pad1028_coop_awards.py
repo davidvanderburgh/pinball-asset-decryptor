@@ -355,7 +355,8 @@ def test_the_cards_show_over_the_bonuss_own_loop():
     disp = R._lift(src, "static void on_event_dispatch(unsigned *r)")
     assert "r[0] == (unsigned)coop_bonus_id) coop_bonus_end();" in disp
     bonus = R._lift(src, "static void coop_bonus_end(void)\n{")
-    assert "gbg.name[k]" in bonus and "gbg.crop[k]" in bonus      # the game's own last loop: the bonus's
+    assert "const char *name = gbg.name;" in bonus and "name[k]" in bonus and "gbg.crop[k]" in bonus  # the game's own
+    assert 'str_starts(name, "PadCoopBonus")) name = cb.loop;' in bonus   # PAD-1123: a teammate's copy: the game's
     show = R._lift(src, "static void coop_cards_show(unsigned n)")
     assert show.index("coop_cards_backdrop(coop_bonus_clip)") < show.index("pm_show(coop_card[c], 1);") \
         < show.index("coop_cards_backdrop(0);")

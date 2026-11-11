@@ -216,6 +216,10 @@ def build(title, model, preferred):
                             "over the machine's lights",
                      "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
                     for ev, lv in (("UnHit", "False"), ("Hit", "True"))]
+    # PAD-1113: the colour compare VPX's OLE_COLOR failed on
+    m["repatch"] += [{"old": "If o.ColorFull <> v Then o.ColorFull = v",
+                     "why": "its colour inserts (the shot arrows and the like) never light",
+                     "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}]
     return m
 
 

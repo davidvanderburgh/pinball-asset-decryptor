@@ -294,6 +294,12 @@ value roster_select_ms      13000
 site language_keys       0x0013c3b8 0xe92d40f8 0xe1a04001
 value language_keys_left   137
 value language_keys_right  139
+# PAD-1114: PLAYER LANGUAGE SELECT (adjustment 14: the bar over the start film) and each player's language
+# word (+ 4 * player, 0 English / 1 Japanese) - the co-op intro's language window after the ball
+value language_adjustment 14
+data language_player     0x007a4844
+text language_0 ENGLISH
+text language_1 JAPANESE
 site roster_screen_keys   0x0018d3a8 0xe92d4070 0xe1a05000
 site roster_screen_open   0x0018d53c 0xe92d4038 0xe1a04000
 site roster_screen_pick   0x0018cfc0 0xe3a01000 0xe92d4010

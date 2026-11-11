@@ -138,6 +138,8 @@ def test_the_log_the_user_sends_says_where_the_sound_stood():
     lines = [
         "[padplay] queue stayed above 19840 ms for 2 s - skipped 19490 ms to catch up",
         "[padplay] no data for 25 s - transport presumed dead, exiting for a fresh connection",
+        "[padrelay] player connected from ('172.17.0.1', 50412)",
+        "[padrelay] last 30 s: 5167 KB to the player (172 KB/s), loudest -2.7 dBFS",
         "[aud] --- 30117 ms --- writei calls=6487 frames=1173600 (26.6 s @ 44100 Hz x 2 ch)"
         "  main played=564600 dropped=0  center=586800  gate=0  latency=186/185 ms  fifo=0 ms",
         "[padplay] queue  204 ms  underruns    0  fed 15471200  played 15435176  skipped 0 ms",
@@ -146,4 +148,4 @@ def test_the_log_the_user_sends_says_where_the_sound_stood():
     out = subprocess.run([AWK, event_filter()], input="\n".join(lines) + "\n",
                          capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.splitlines() == ["[event] " + l for l in lines[:3]]
+    assert out.stdout.splitlines() == ["[event] " + l for l in lines[:5]]

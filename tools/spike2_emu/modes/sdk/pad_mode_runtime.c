@@ -1568,12 +1568,18 @@ static int att_lookup(unsigned *r);         /* PAD-641: the flipper buttons' sou
 static volatile int att_live;
 static int gms_lookup(unsigned *r);         /* PAD-945: a sound on a shot in one of the game's modes */
 static volatile int gms_live;
+static int ci_lookup(unsigned *r);          /* PAD-1114: the co-op intro's sound */
+static volatile int ci_live;
+static int cpk_lookup(unsigned *r);         /* PAD-1123: a co-op character's sound once picked */
+static volatile int cpk_live;
 
 static void on_sound_lookup(unsigned *r)
 {
     if (worker_log && r[1]) sound_key_say((const unsigned char *)(unsigned long)r[1]);   /* PAD-1071 */
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
+    if (ci_live && r[1] && ci_lookup(r)) return;     /* PAD-1114: the co-op intro's sound */
+    if (cpk_live && r[1] && cpk_lookup(r)) return;   /* PAD-1123: a co-op character's sound once picked */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
     if (sndt_live && r[1]) sndt_lookup(r);   /* PAD-565: a sound's files in turn */
     if (swaps_live && r[1]) {
@@ -15967,6 +15973,48 @@ static int coop_scores;                  /* the game's end-of-game high scores a
 static int coop_ball_msg = -1;           /* the message table's line that says "BALL %d" (-1: none found) */
 static int coop_ball_held;               /* it says whose turn it is now */
 #define COOP_MSG_ID 0xC0090u             /* our borrow of it (no message id of the game's is this high) */
+/* PAD-1114: the co-op and team games' intro (below, "the intro"): its phases, the clip and the sound coop.cfg and
+ * sounds.cfg name, and the first pick it holds back until it is over */
+enum { CI_OFF, CI_START, CI_PLAY, CI_BALL, CI_LANG };
+#define CI_MUSIC 4
+static struct {
+    char clip[48];                       /* coop.cfg `intro <clip> <ms>` */
+    unsigned ms;
+    unsigned request, sound_ms;          /* sounds.cfg `cintro <request> <carrier key> <our key> <ms>` */
+    unsigned char key[8], host[8];
+    volatile int phase;
+    unsigned game;                       /* chg_game_now() + 1 of the game it played in */
+    unsigned long at, step_at, said_at;
+    volatile unsigned long swap_until;
+    volatile int looked;
+    int again, freed, pick_who, step, lang, flips_seen;
+    int lang_asks;                       /* the game's PLAYER LANGUAGE SELECT asks in this game (read at its start) */
+    unsigned hold_adj;                   /* coop.cfg `intro_hold <id>`: TIMED PLUNGER, answered 0 while the ball is held */
+    volatile int flips, go, go_down;
+    unsigned music[CI_MUSIC], n_music, faded, quiet[8], n_quiet;
+    const char *why;
+} ci;
+/* PAD-1123: a co-op character's clip and sound once picked (below, "once picked"), and its copy of the game's End of
+ * Ball Bonus loop (below, "on the bonus") */
+#define CPK_CHARS 16                     /* = COOP_CHARS */
+static struct {
+    char clip[CPK_CHARS][32];            /* coop.cfg `char_picked <n> <clip> <ms>` */
+    unsigned ms[CPK_CHARS];
+    unsigned request;                    /* sounds.cfg `cpick <n> <request> <carrier key> <our key> <ms>` */
+    unsigned char key[8], host[CPK_CHARS][8];
+    unsigned sound_ms[CPK_CHARS], have_sound;   /* have_sound: bit n-1 */
+    volatile int snd;                    /* the character whose sound the carrier takes now, -1 none */
+    volatile unsigned long swap_until;
+    volatile int looked;
+    int pending, cur, on, again, freed;  /* pending: the character whose clip waits for its card to go, -1 none */
+    unsigned long pend_at, at, gone_at;
+} cpk = { .snd = -1, .pending = -1, .cur = -1 };
+static struct {
+    char loop[96];                       /* coop.cfg `bonus_loop <the game's clip>` */
+    char clip[CPK_CHARS][32];            /* `char_bonus <n> <clip>` */
+    unsigned says;
+    int armed;
+} cb;
 static unsigned (*coop_add_game)(unsigned, unsigned, unsigned, unsigned);
 static volatile unsigned char *coop_ball_byte, *coop_players_byte;
 
@@ -16674,6 +16722,18 @@ static unsigned adj_chain(unsigned id)
     unsigned v = adj_game(id);
     if (adj_hand_on) v = hand_adj_answer(id, v);
     if (adj_coop_on) v = coop_adj_answer(id, v);
+    if (ci.hold_adj && id == ci.hold_adj) {                   /* PAD-1114: the ball stays in the lane */
+        /* the game reads it at its Start (emulator, Godzilla LE 1.16: once, before the intro begins), so a Start that
+         * is about to be a co-op or team game - the right flipper held, or the start menu's entry just picked - is
+         * answered off too */
+        int soon = ci.clip[0] && (coop_button_held() || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS));
+        static int said;
+        if (v && (ci.phase >= CI_PLAY || soon)) {
+            if (said < 8 && ++said)
+                say("co-op intro: the game read TIMED PLUNGER (%u) - %u, answered 0: the intro holds the ball", id, v);
+            v = 0;
+        }
+    }
     return v;
 }
 
@@ -17160,9 +17220,17 @@ static void coop_pick_say(void)
     coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
 }
 
+static void coop_intro_begin(const char *why);   /* PAD-1114, below */
+static void coop_picked_begin(int c);           /* PAD-1123, below */
 static void coop_pick_open(unsigned t)
 {
     if (!coop_pick_on || !coop_ch_n || t < 1 || t > 4 || coop_pick_of[t] >= 0) return;
+    if (!ci.phase) coop_intro_begin("a co-op or team game begins");   /* PAD-1114 */
+    if (ci.phase) {                                           /* PAD-1114: after the intro and the language */
+        if (!ci.pick_who) say("co-op: teammate %u's pick waits for the intro and the language", t);
+        ci.pick_who = (int)t;
+        return;
+    }
     pk.who = t;
     pk.at = coop_pick_step(coop_ch_n, coop_ch_n, 1, coop_taken(t));   /* the first one free */
     pk.said_ms = pk.clock_ms = pm_ms();
@@ -17216,6 +17284,7 @@ static void coop_pick_close(const char *how)
     } else {
         coop_turn_show();
     }
+    if (coop_done.on) coop_picked_begin(c);                       /* PAD-1123: its sound now, its clip after the card */
     if (c >= 0 && !coop_classic()) coop_gift(&coop_ch[c]);          /* PAD-1065: Classic, no ability */
     if (c >= 0 && !coop_classic()) coop_counts_give(&coop_ch[c]);
     coop_dbl_armed = 0;
@@ -17259,6 +17328,10 @@ static int coop_unserved(void)
 static int coop_hides(unsigned id)
 {
     int w;
+    /* PAD-1114: from the intro to the end of the language window the flippers and Action are ours: a skip is not a
+     * language flip (nor the game's skip of its film), and the ball waits in the lane for the language and the pick */
+    if (coop_live && ci.phase >= CI_PLAY && id && (id == coop_left || id == coop.button || id == coop_action))
+        return 1;
     if (!coop_live || !pk.open || pk.moved || !id || (id != coop_left && id != coop.button && id != coop_action))
         return 0;
     w = coop_ball_waits();
@@ -17320,7 +17393,19 @@ static void coop_edge(unsigned id, unsigned level, unsigned flags, unsigned pola
         }
         return;
     }
+    if (ci.phase == CI_LANG && id == coop_action && coop_teammates()) {
+        /* PAD-1114: Action goes on at its RELEASE, so the whole press is the window's (hidden): ended at the press, the
+         * pick opened under a held Action and its release launched the ball (emulator, Godzilla LE 1.16) */
+        if ((level & 1u) == closed) ci.go_down = 1;
+        else if (ci.go_down) ci.go = 1;
+        return;
+    }
     if ((level & 1u) != closed || !coop_teammates()) return;
+    if (ci.phase == CI_LANG) {                                /* PAD-1114: a flipper flips the language */
+        if (id == coop_left || id == coop.button) ci.flips++;
+        return;
+    }
+    if (ci.phase >= CI_PLAY) return;                          /* the intro's (its skip is polled) and the ball's wait */
     if (pk.open) {
         if (id == coop_left) pk.walk--, pk.flips++;
         else if (id == coop.button) pk.walk++, pk.flips++;
@@ -17439,8 +17524,10 @@ static char coop_bonus_clip[96], coop_bonus_crop[32];
 static void coop_bonus_end(void)
 {
     unsigned k;
+    const char *name = gbg.name;
     if (!coop_cards_on || !coop_teammates() || !gbg.name[0]) return;
-    for (k = 0; gbg.name[k] && k + 1 < sizeof coop_bonus_clip; k++) coop_bonus_clip[k] = gbg.name[k];
+    if (cb.loop[0] && str_starts(name, "PadCoopBonus")) name = cb.loop;   /* PAD-1123: a teammate's copy: the game's */
+    for (k = 0; name[k] && k + 1 < sizeof coop_bonus_clip; k++) coop_bonus_clip[k] = name[k];
     coop_bonus_clip[k] = 0;
     for (k = 0; gbg.crop[k] && k + 1 < sizeof coop_bonus_crop; k++) coop_bonus_crop[k] = gbg.crop[k];
     coop_bonus_crop[k] = 0;
@@ -17781,6 +17868,7 @@ static void coop_chars_begin(void)
     for (t = 0; t < coop_cache_n; t++) coop_cache[t].held = 0;
     pk.open = 0;
     coop_done.on = 0;
+    cpk.pending = -1;                        /* PAD-1123 */
     coop_save_used = 0;
     coop_ball_out = 1;                       /* PAD-1045: the team forms in ball 1; a ball in the lane still waits */
     coop_turn_waited = 1;                    /* PAD-1051: ... as the flags say, once it is out */
@@ -17951,7 +18039,7 @@ static void coop_chars_arm(struct site *e)
     unsigned k;
     char name[48];
     coop_chars_begin();
-    if (!coop_ch_n) return;
+    if (!coop_ch_n && !ci.clip[0]) return;                       /* PAD-1114: an intro wants the buttons too */
     for (i = 0; i < coop_ch_n; i++) {
         adj |= coop_ch[i].n_adj != 0 || coop_ch[i].n_gift != 0 || coop_ch[i].unlock_adj != 0;
         save |= coop_ch[i].spot != 0 || coop_ch[i].addball != 0;
@@ -18151,12 +18239,12 @@ static void coop_chars_arm(struct site *e)
         say("co-op characters: the gifts are off - the port names no coop_adj_changed");
         for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_gift = 0;
     }
-    if ((coop_pick_on || save) && !(edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
+    if ((coop_pick_on || save || ci.clip[0]) && !(edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
         say("co-op characters: off - the switch drain could not be hooked, so no pick could be made");
         coop_ch_n = 0;
         return;
     }
-    if (coop_pick_on && fn("language_keys")) {               /* PAD-1078 */
+    if ((coop_pick_on || ci.clip[0]) && fn("language_keys")) {   /* PAD-1078; PAD-1114's intro */
         static int lang_hooked;
         if (!lang_hooked && (lang_hooked = hook_veto(fn("language_keys"), on_language_keys)) != 0)
             say("co-op characters: the game's language select does not see the flippers while the pick has them");
@@ -18185,6 +18273,17 @@ static void coop_chars_arm(struct site *e)
     else if (save && coop_action)
         say("co-op characters: coop.cfg names no shooter lane - every Action press counts toward x2, a launch's too");
     coop_live = 1;
+    if (ci.clip[0] && ci.hold_adj && !adj_wrap_arm()) {
+        say("co-op intro: the adjustment getter cannot be wrapped - the game's TIMED PLUNGER may launch the held ball");
+        ci.hold_adj = 0;
+    }
+    if (ci.clip[0])                                              /* PAD-1114 */
+        say("co-op intro: \"%s\" (%u ms) opens a co-op or team game before its first ball is out; both flipper "
+            "buttons skip it; then the ball, the language (%s), the pick", ci.clip, ci.ms,
+            data("language_player") && pm_port_value("language_adjustment", 0)
+            ? "when the game's PLAYER LANGUAGE SELECT is on" : "none here");
+    if (ci.clip[0] && ci.hold_adj)
+        say("co-op intro: the game's TIMED PLUNGER (adjustment %u) reads 0 while the intro holds the ball", ci.hold_adj);
     for (i = 0; i < coop_ch_n; i++) {
         char how[256];                       /* PAD-1075: thirteen adjustments and two gifts */
         unsigned o = 0;
@@ -18224,6 +18323,470 @@ static void coop_chars_arm(struct site *e)
     say("co-op characters: %d; %s, %u s to pick (0: no limit)", coop_ch_n,
         coop_pick_on ? "each teammate picks one at their first ball" : "no pick (coop.cfg has no `pick on`)",
         (unsigned)(coop_pick_ms / 1000ul));
+}
+
+/* ---- PAD-1114: the co-op and team games' intro -------------------------------------------------------------------
+ * DoomWalrus666 (Godzilla): "For co-op and team modes, I would like to have a custom intro video with its own sound.
+ * This video would be skippable by pressing both flippers. Once the video finishes, or both flipper buttons are
+ * pressed, the ball is put into the shooter Lane, and then language options, and then character select screen".
+ * Stock Godzilla LE 1.16 at a Start (emulator census, docs/plans/pad1114_coop_intro.md): its own film (intro1/3/4/6 at
+ * random) with PLAYER LANGUAGE SELECT as a bar over it, gone with the film (a flipper press ends it; each release flips
+ * the language), and the ball served whenever the trough gives it - so the order is the runtime's to make:
+ *   CI_START  a game that BEGINS as co-op or team (the right flipper held at Start, the start menu's CO-OP PLAY / TEAM
+ *             PLAY, a team game's filling Start) while its first ball is not out yet: from the tick
+ *   CI_PLAY   the intro's clip full-screen over everything (pm_clip: the game's film and its bar under it) and its own
+ *             sound on a carrier (sounds.cfg `cintro`, the record lookup swapped as PAD-945's are); the game's own sounds
+ *             faded while it plays, its music asked for again after. Both flipper buttons down (each let go once since it
+ *             began: the right one is held through a solo Start) skip it. The flippers and Action are the runtime's
+ *             (coop_hides) so the game's language keys never see them and the ball stays in the lane.
+ *   CI_BALL   until the game says its ball waits in the plunger (`ball_launch_flag` / `_wait_flag`, CI_BALL_MS at most)
+ *   CI_LANG   with the game's PLAYER LANGUAGE SELECT on (`value language_adjustment`) and its players' language words known
+ *             (`data language_player`, + 4 x player): the top line says the language, each flipper press flips it for
+ *             every player, and CI_LANG_MS after the last press it goes on by itself. Not on Action: Godzilla launches the
+ *             ball at an Action press the runtime hides (emulator, LE and Pro 1.16: the plunger flags dropped 33 ms after
+ *             switch 34 was held back - another input path, as the flippers' cabinet keys are the language select's), so
+ *             an Action press, or the ball launched any other way, ends the window too, and the pick has a launched ball
+ * then the first pick, held back (coop_pick_open) until here. A game that turns co-op later (a teammate joining a plain
+ * game's ball in play) has no intro: its own film has played. */
+#define CI_GRACE_MS   1500ul             /* a clip not playing this soon after it was asked for is asked for again, once */
+#define CI_OVER_MS    3000ul             /* past its own length: over, whatever the clip says */
+#define CI_BALL_MS   20000ul
+#define CI_LANG_MS    6000ul             /* the language window closes this long after it opened or was last flipped */
+#define CI_STEP_MS    1500ul
+#define BUS_MUSIC_BIT 0x01u              /* the music bus (item 150, as mode_file.c's BUS_MUSIC) */
+
+/* whether a co-op game's intro starts now: an intro on the card, not played in this game, ball 1 not out yet (its first
+ * ball unserved, or waiting) (tests lift it verbatim) */
+static int ci_wanted(int have, unsigned played_game, unsigned game, unsigned ball, int unserved, int waits)
+{
+    return have && played_game != game && ball <= 1 && (unserved || waits == 1);
+}
+
+/* both flipper buttons down, each let go at least once since the intro began (freed: bit 0 left, bit 1 right); returns
+ * the new freed bits in *freed (tests lift it verbatim) */
+static int ci_skip(int left, int right, int *freed)
+{
+    *freed |= (left ? 0 : 1) | (right ? 0 : 2);
+    return left && right && *freed == 3;
+}
+
+static void coop_intro_begin(const char *why)
+{
+    unsigned g;
+    if (!ci.clip[0] || ci.phase || !coop_ball_byte) return;
+    g = chg_game_now() + 1;
+    if (!ci_wanted(1, ci.game, g, *coop_ball_byte, coop_unserved(), coop_ball_waits())) {
+        if (ci.game != g)
+            say("co-op intro: not played - %s, but ball %u is already out", why, *coop_ball_byte);
+        ci.game = g;                                          /* asked once a game */
+        return;
+    }
+    ci.game = g;
+    ci.why = why;
+    ci.pick_who = 0;
+    ci.phase = CI_START;
+    say("co-op intro: %s - the intro plays", why);
+}
+
+/* the record lookup (any thread): the carrier's own record takes the intro's sound while it plays. 1 = swapped */
+static int ci_lookup(unsigned *r)
+{
+    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    if (!ci.request || (long)(ci.swap_until - pm_ms()) <= 0 || !key_is(k, ci.key)) return 0;
+    r[1] = (unsigned)(unsigned long)ci.host;
+    if (!ci.looked) {
+        ci.looked = 1;
+        say("co-op intro: request %u looked up its record, took the intro's sound", ci.request);
+    }
+    return 1;
+}
+
+/* the game's own sounds faded while the intro plays, each once (a fade asked for again starts over and never ends);
+ * its music remembered, to be asked for again after */
+static void ci_quiet(void)
+{
+    unsigned reqs[8], buses[8], k;
+    int n = pm_sound_playing(reqs, buses, 8), i;
+    for (i = 0; i < n && i < 8; i++) {
+        if (!reqs[i] || reqs[i] == ci.request) continue;
+        for (k = 0; k < ci.n_quiet && ci.quiet[k] != reqs[i]; k++) ;
+        if (k < ci.n_quiet) continue;                         /* fading already */
+        if (ci.n_quiet < 8) ci.quiet[ci.n_quiet++] = reqs[i];
+        if (buses[i] & BUS_MUSIC_BIT) {
+            for (k = 0; k < ci.n_music && ci.music[k] != reqs[i]; k++) ;
+            if (k == ci.n_music && k < CI_MUSIC) ci.music[ci.n_music++] = reqs[i];
+        }
+        if (pm_sound_fade(reqs[i], 250) && ci.faded++ < 12)
+            say("co-op intro: the game's sound %u (bus 0x%x) faded under the intro", reqs[i], buses[i]);
+    }
+}
+
+static void ci_language_say(void)
+{
+    char words[40], key[16];
+    const char *name;
+    if (coop_ball_msg < 0) return;
+    pm_snprintf(key, sizeof key, "language_%d", ci.lang);
+    name = pm_port_text(key);
+    if (ci.step == 1) pm_snprintf(words, sizeof words, "FLIPPERS CHANGE IT");
+    else pm_snprintf(words, sizeof words, "LANGUAGE: %s", name && name[0] ? name : ci.lang ? "OTHER" : "ENGLISH");
+    coop_ball_held = message_borrow(COOP_MSG_ID, (unsigned)coop_ball_msg, words);
+}
+
+static volatile unsigned *ci_language_word(unsigned p)
+{
+    unsigned base = data("language_player");
+    return base ? (volatile unsigned *)(unsigned long)(base + 4u * p) : 0;
+}
+
+/* whether the game's PLAYER LANGUAGE SELECT is on (`value language_adjustment`, Godzilla's 14, at 1): the game then
+ * shows its "USE FLIPPERS TO SELECT LANGUAGE" bar over its start film, which the intro covers (emulator, Godzilla LE
+ * 1.16, the stock card: the bar showed; the game's own check at 0x225300 - the adjustment and a count of the languages -
+ * answered 0 all the same, so it is not what the bar asks) */
+static int ci_language_asks(void)
+{
+    unsigned id = (unsigned)pm_port_value("language_adjustment", 0), v;
+    if (!id || !ci_language_word(1) || !fn("adjustment")) return 0;
+    v = adj_game ? adj_chain(id) : ((unsigned (*)(unsigned))(unsigned long)fn("adjustment"))(id);
+    say("co-op intro: the game's PLAYER LANGUAGE SELECT (adjustment %u) reads %u", id, v);
+    return v == 1;
+}
+
+/* the language window opens when the game's PLAYER LANGUAGE SELECT asked at the game's start and the port names the
+ * players' words; 0 = none */
+static int ci_language_open(void)
+{
+    volatile unsigned *w = ci_language_word(1);
+    if (!w || !pm_port_value("language_adjustment", 0)) {
+        say("co-op intro: no language window - the port names no %s", !w ? "language_player" : "language_adjustment");
+        return 0;
+    }
+    if (!ci.lang_asks) {
+        say("co-op intro: no language window - the game's PLAYER LANGUAGE SELECT is off");
+        return 0;
+    }
+    ci.lang = (int)(*w & 1u);
+    ci.flips = ci.flips_seen = 0;
+    ci.go = ci.go_down = 0;
+    ci.step = 0;
+    ci.step_at = ci.said_at = pm_ms();
+    say("co-op intro: the language window - the flippers flip it (now %u); it goes on %lu ms after the last press", *w,
+        CI_LANG_MS);
+    ci_language_say();
+    return 1;
+}
+
+static void ci_over(const char *how)
+{
+    unsigned k;
+    int t = ci.pick_who;
+    ci.phase = CI_OFF;
+    ci.pick_who = 0;
+    say("co-op intro: over (%s)%s", how, t ? " - the first pick opens" : "");
+    if (!coop.join_n) coop_turn_show();
+    if (t && !coop.join_n) coop_pick_open((unsigned)t);       /* the players-added lines open it at their end */
+    for (k = 0; k < ci.n_music; k++) ci.music[k] = 0;
+    ci.n_music = 0;
+}
+
+/* the intro's end, by its own end or a skip: its clip and sound stopped, the game's music asked for again */
+static void ci_played(const char *how)
+{
+    unsigned k;
+    if (pm_clip_playing()) pm_clip_stop();
+    ci.swap_until = 0;
+    if (ci.request && pm_sound_active(ci.request)) pm_sound_stop(ci.request);
+    for (k = 0; k < ci.n_music; k++)
+        if (!pm_sound_active(ci.music[k])) {
+            pm_sound(ci.music[k]);
+            say("co-op intro: the game's music %u asked for again", ci.music[k]);
+        }
+    say("co-op intro: %s after %lu ms", how, pm_ms() - ci.at);
+    ci.phase = CI_BALL;
+    ci.step_at = pm_ms();
+}
+
+static void coop_intro_tick(void)
+{
+    unsigned long now = pm_ms();
+    int w;
+    if (!ci.phase) return;
+    if (!coop_teammates()) {                                  /* the game is over (or another) */
+        if (ci.phase == CI_PLAY) ci_played("cut short: the game ended");
+        ci.phase = CI_OFF;
+        ci.pick_who = 0;
+        return;
+    }
+    if (!pm_in_game() && ci.phase == CI_START) return;        /* a menu over the game: it waits */
+    edge_take_held(coop_left);                                /* one held since before the intro (a solo Start's) */
+    edge_take_held(coop.button);
+    edge_take_held(coop_action);
+    switch (ci.phase) {
+    case CI_START:
+        ci.lang_asks = ci_language_asks();
+        ci.at = now;
+        ci.again = 0;
+        ci.freed = 0;
+        ci.faded = 0;
+        ci.n_music = 0;
+        ci.n_quiet = 0;
+        ci.looked = 0;
+        if (!pm_clip(ci.clip)) {
+            say("co-op intro: \"%s\" cannot play - the game took no full-screen clip", ci.clip);
+            ci.phase = CI_BALL;
+            ci.step_at = now;
+            return;
+        }
+        ci.phase = CI_PLAY;
+        ci_quiet();
+        if (ci.request) {
+            if (pm_sound_active(ci.request)) pm_sound_stop(ci.request);
+            ci.swap_until = now + (ci.sound_ms ? ci.sound_ms : ci.ms) + 1000ul;
+            pm_sound(ci.request);
+        }
+        say("co-op intro: \"%s\" (%u ms) plays%s", ci.clip, ci.ms,
+            ci.request ? ", its sound on the carrier" : " - no sound of its own on this card");
+        return;
+    case CI_PLAY:
+        ci_quiet();
+        if (ci_skip(switch_held(coop_left), switch_held(coop.button), &ci.freed)) {
+            ci_played("skipped with both flipper buttons");
+            return;
+        }
+        if (!pm_clip_playing()) {
+            if (now - ci.at < CI_GRACE_MS && !ci.again) {     /* the game's own film took the surface after it */
+                ci.again = 1;
+                say("co-op intro: the game's clip took the screen %lu ms in - played again", now - ci.at);
+                pm_clip(ci.clip);
+                return;
+            }
+            ci_played("played to its end");
+            return;
+        }
+        if (ci.ms && now - ci.at > ci.ms + CI_OVER_MS) ci_played("past its length");
+        return;
+    case CI_BALL:
+        w = coop_ball_waits();
+        if (w != 1 && w >= 0 && now - ci.step_at < CI_BALL_MS) return;
+        say("co-op intro: %s", w == 1 ? "the ball waits in the shooter lane" : w < 0
+            ? "the port names no plunger flags - on at once" : "no ball in the lane yet - on without it");
+        if (ci_language_open()) ci.phase = CI_LANG;
+        else ci_over("no language window");
+        return;
+    case CI_LANG:
+        if ((w = ci.flips) != ci.flips_seen) {
+            unsigned p, d = (unsigned)(w - ci.flips_seen) & 1u;
+            ci.flips_seen = w;
+            ci.lang ^= (int)d;
+            for (p = 1; p <= 4; p++) {
+                volatile unsigned *x = ci_language_word(p);
+                if (x) *x = (unsigned)ci.lang;
+            }
+            say("co-op intro: a flipper - the language is %d for every player", ci.lang);
+            ci.step = 0;
+            ci.step_at = ci.said_at = now;
+            ci_language_say();
+            return;
+        }
+        if (ci.go || coop_ball_waits() == 0 || now - ci.step_at >= CI_LANG_MS) {
+            ci_over(ci.go ? "Action - the game launches the ball at it" : coop_ball_waits() == 0
+                    ? "the ball was launched" : "the language is chosen");
+            return;
+        }
+        if (now - ci.said_at >= CI_STEP_MS) {
+            ci.step = (ci.step + 1) % 2;
+            ci.said_at = now;
+            ci_language_say();
+        }
+        return;
+    }
+}
+
+/* ---- PAD-1123: a co-op character's clip and sound once picked -----------------------------------------------------
+ * DoomWalrus666 (Godzilla): "After a player selects a character in co-op/teams play, I would like be able to select the
+ * following for each character: Play a sound of my choice (example: Godzilla roar from that specific era); Show a brief
+ * couple second video (like the characters original movie poster)". coop.cfg `char_picked <n> <clip> <ms>` (the build
+ * made the owner's video, or picture, a full-screen clip of the bank) and sounds.cfg `cpick <n> <request> <carrier key>
+ * <our key> <ms>` (its sound on the co-op intro's carrier, the record lookup swapped as the intro's is). When teammate
+ * up takes a character (coop_pick_close, the PICKED card on the glass) its sound plays at once; its clip waits until
+ * the card has had its COOP_PICK_DONE_MS and the card's video behind it (PAD-1079's backdrop) has been given back - the
+ * bank's one surface is the clip's then - and plays full screen over the game (pm_clip, as the intro's). Both flipper
+ * buttons down (each let go once since it began) cut it short, the sound too. A pick for a teammate who is not up (the
+ * turn ended under it) plays neither. */
+#define CPK_SETTLE_MS  250ul             /* after the card's video was given back, before the clip asks for the surface */
+#define CPK_WAIT_MS   8000ul             /* a clip whose card never goes in this long is dropped */
+
+/* the record lookup (any thread): the carrier's own record takes the picked character's sound while it plays */
+static int cpk_lookup(unsigned *r)
+{
+    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    int c = cpk.snd;
+    if (c < 0 || c >= CPK_CHARS || (long)(cpk.swap_until - pm_ms()) <= 0 || !key_is(k, cpk.key)) return 0;
+    r[1] = (unsigned)(unsigned long)cpk.host[c];
+    if (!cpk.looked) {
+        cpk.looked = 1;
+        say("co-op characters: request %u looked up its record, took character %d's sound once picked", cpk.request,
+            c + 1);
+    }
+    return 1;
+}
+
+/* whether character c has anything to play once picked: 1 its clip, 2 its sound (tests lift it verbatim) */
+static int cpk_has(int c, const char *clip, unsigned have_sound, unsigned request)
+{
+    if (c < 0 || c >= CPK_CHARS) return 0;
+    return (clip && clip[0] ? 1 : 0) | (request && (have_sound >> c & 1u) ? 2 : 0);
+}
+
+/* from coop_pick_close: character c was just taken by the teammate up */
+static void coop_picked_begin(int c)
+{
+    int has = cpk_has(c, c >= 0 && c < CPK_CHARS ? cpk.clip[c] : 0, cpk.have_sound, cpk.request);
+    if (!has) return;
+    if (has & 2) {
+        if (pm_sound_active(cpk.request)) pm_sound_stop(cpk.request);
+        cpk.snd = c;
+        cpk.looked = 0;
+        cpk.swap_until = pm_ms() + cpk.sound_ms[c] + 1000ul;
+        pm_sound(cpk.request);
+        say("co-op characters: %s's sound once picked (%u ms) plays on request %u", coop_ch[c].name, cpk.sound_ms[c],
+            cpk.request);
+    }
+    if (has & 1) {
+        cpk.pending = c;
+        cpk.pend_at = pm_ms();
+        say("co-op characters: %s's clip \"%s\" plays once its PICKED card has gone", coop_ch[c].name, cpk.clip[c]);
+    }
+}
+
+static void cpk_end(const char *how, int stop_sound)
+{
+    int c = cpk.cur;
+    if (pm_clip_playing()) pm_clip_stop();
+    if (stop_sound && cpk.request && cpk.snd >= 0) {
+        cpk.swap_until = 0;
+        if (pm_sound_active(cpk.request)) pm_sound_stop(cpk.request);
+    }
+    cpk.on = 0;
+    cpk.cur = -1;
+    say("co-op characters: %s's clip once picked %s after %lu ms", c >= 0 && c < coop_ch_n ? coop_ch[c].name : "a",
+        how, pm_ms() - cpk.at);
+}
+
+static void coop_picked_tick(void)
+{
+    unsigned long now = pm_ms();
+    int c;
+    if (cpk.pending < 0 && !cpk.on) return;
+    if (!coop_teammates()) {                                  /* the game is over (or another) */
+        if (cpk.on) cpk_end("cut short: the game ended", 1);
+        cpk.pending = -1;
+        return;
+    }
+    if (cpk.pending >= 0) {
+        c = cpk.pending;
+        if (!pm_in_game() || coop_done.on || coop_clip_on >= 0 || cpk.on) {   /* its card (and its video) still up */
+            cpk.gone_at = 0;
+            if (now - cpk.pend_at > CPK_WAIT_MS + COOP_PICK_DONE_MS) {
+                say("co-op characters: %s's clip once picked dropped - its card stayed up", coop_ch[c].name);
+                cpk.pending = -1;
+            }
+            return;
+        }
+        if (!cpk.gone_at) { cpk.gone_at = now; return; }       /* the card has gone: the surface settles first */
+        if (now - cpk.gone_at < CPK_SETTLE_MS) return;
+        cpk.pending = -1;
+        cpk.gone_at = 0;
+        if (!pm_clip(cpk.clip[c])) {
+            say("co-op characters: %s's clip \"%s\" cannot play - the game took no full-screen clip", coop_ch[c].name,
+                cpk.clip[c]);
+            return;
+        }
+        cpk.on = 1;
+        cpk.cur = c;
+        cpk.at = now;
+        cpk.again = 0;
+        cpk.freed = 0;
+        say("co-op characters: %s's clip \"%s\" (%u ms) plays full screen once picked", coop_ch[c].name, cpk.clip[c],
+            cpk.ms[c]);
+        return;
+    }
+    c = cpk.cur;
+    if (ci_skip(switch_held(coop_left), switch_held(coop.button), &cpk.freed)) {
+        cpk_end("cut short with both flipper buttons", 1);
+        return;
+    }
+    if (!pm_clip_playing()) {
+        if (now - cpk.at < CI_GRACE_MS && !cpk.again) {       /* the game's own clip took the surface after it */
+            cpk.again = 1;
+            say("co-op characters: a clip of the game's took the screen %lu ms in - %s's played again", now - cpk.at,
+                c >= 0 && c < coop_ch_n ? coop_ch[c].name : "the");
+            pm_clip(cpk.clip[c]);
+            return;
+        }
+        cpk_end("played to its end", 0);
+        return;
+    }
+    if (c >= 0 && cpk.ms[c] && now - cpk.at > cpk.ms[c] + CI_OVER_MS) {
+        cpk_end("past its length", 0);
+    }
+}
+
+/* ---- PAD-1123: the teammate's character on their End of Ball Bonus --------------------------------------------------
+ * DoomWalrus666: "At the end of a players ball, I would like to be able to display that players selected Character's
+ * image or video in a window on the End of Ball screen, maybe to the right of the scores/username". The bonus's own
+ * scene is not one the app can write, and the game does not draw the HUD while its bonus is up (PAD-1028 round 3), but
+ * the bonus plays a looped clip of the bank by name (Godzilla 1.16: EndOfBallBonus_BackgroundLoop at SquareCrop). The
+ * build makes that loop again per character with its picture or video in a framed window right of the bonus's words
+ * (coop.cfg `bonus_loop <the game's clip>`, `char_bonus <n> <clip>`), and the game's ask for the loop is answered with
+ * the copy of the character of the teammate whose ball ended - coop.turn moves on only at the player change, after the
+ * bonus (emulator). A teammate with no character, or a character with no copy, gets the game's own loop. */
+
+/* the copy for the game's ask of `name` with character c up (-1 none): its name, or 0 = the game's own (tests lift it
+ * verbatim) */
+static const char *cb_pick(const char *name, const char *loop, int c, const char (*clips)[32], int n)
+{
+    if (!name || !loop || !loop[0] || !str_eq(name, loop) || c < 0 || c >= n || !clips[c][0]) return 0;
+    return clips[c];
+}
+
+static void on_coop_bonus_play(unsigned *r)
+{
+    const char *name = (const char *)(unsigned long)r[0], *ours;
+    int c;
+    if (!name || !cb.loop[0] || !str_eq(name, cb.loop) || !coop_teammates()) return;
+    c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
+    ours = cb_pick(name, cb.loop, c < coop_ch_n ? c : -1, (const char (*)[32])cb.clip, CPK_CHARS);
+    if (cb.says < 60) {
+        cb.says++;
+        if (ours)
+            say("co-op characters: teammate %u's End of Ball Bonus - \"%s\" plays %s in its window", coop.turn, ours,
+                coop_ch[c].name);
+        else
+            say("co-op characters: teammate %u's End of Ball Bonus - the game's own loop (%s)", coop.turn,
+                c < 0 ? "no character" : "its character has no picture or video");
+    }
+    if (ours) r[0] = (unsigned)(unsigned long)ours;
+}
+
+/* from coop_chars_arm: the game's ask for its bonus loop, hooked */
+static void coop_bonus_chars_arm(void)
+{
+    int i, n = 0;
+    if (!cb.loop[0]) return;
+    for (i = 0; i < CPK_CHARS; i++) n += cb.clip[i][0] != 0;
+    if (!n) return;
+    if (!site("clip_play") || !fn("clip_play") || clip_v2 || clip_layer) {
+        say("co-op characters: not on the End of Ball Bonus - the port has no clip_play the game asks its loop by");
+        return;
+    }
+    if (!hook(fn("clip_play"), on_coop_bonus_play)) {
+        say("co-op characters: not on the End of Ball Bonus - clip_play 0x%08x cannot be hooked", fn("clip_play"));
+        return;
+    }
+    cb.armed = 1;
+    say("co-op characters: %d character(s) on their teammate's End of Ball Bonus (\"%s\" answered with theirs)", n,
+        cb.loop);
 }
 
 static void coop_join_tick(void);              /* PAD-1052, below */
@@ -18278,14 +18841,123 @@ static void coop_solo_check(void)
 /* from the tick: the game's own words back once its co-op game is over */
 static void coop_scores_same(unsigned n);
 static void team_menu_arm(void);              /* PAD-1052, with the start menu's other entries */
+/* ---- PAD-1108: the Insider Connected login of the teammate up (MODE_SDK.md "Co-op and Insider Connected") ---------
+ * DoomWalrus666 (3-player co-op): "achievements earned by player 2 and 3 were shown as earned by Player 1. Player 1
+ * username displayed on End of Ball Bonus for all 3 players. High score attributed only to Player 1". The game plays
+ * ONE player for the team, and it asks its user manager for "the user of player N" with the game's player, always 1.
+ * The manager keeps two tables of the players' logins (the manager at +A and +B; player p's entry at table + 20p + 4:
+ * the user's 16-byte uuid and a flags word; Godzilla Pro 1.16: manager 0x7b0f50, +0x160 / +0x164), and every user of
+ * a player's login reads them (the lookup, game_users_lookup on every build, and the logged-in test beside it). So
+ * while teammate t is up, the game's player 1 holds teammate t's entry and teammate t's place holds player 1's: the
+ * bonus, and anything else the game does for "player 1", is the teammate's. NOT in a team game (PAD-1042): the game
+ * counts two players there and clears the entries past its count (emulator, Godzilla LE 1.16: players 3 and 4's went to
+ * 0 in a team game), so player 1's entry swapped into player 3's place was lost - a team game keeps the game's own
+ * logins, the team's first players'. Before each of the game's own player changes the entries go
+ * back where they were (so the game's end, its high scores and its session see the logins as the players made them),
+ * and they are swapped again for the next turn; a game that ends any other way is put back by the tick.
+ * coop.cfg: `users <manager> <A> <B>` (coop_play.insider_users, read off the card's own program).
+ * The game's achievements (PAD-698 holds back the list they come from, but on a card of co-op and nothing else only while
+ * CO-OP PLAY is not Off - a machine switched to co-op after booting at Off already has it, and awarded every
+ * teammate's to player 1): `achievements <award>` (coop_play.achievement_award) - the award, refused while the
+ * gate holds, so a co-op game shows no NEW INSIDER ACHIEVEMENT! that never reaches Insider Connected. */
+#define COOP_USER_ENTRY 20u                  /* a player's entry: the uuid (16 bytes) and its flags word */
+static unsigned cu_mgr, cu_off[2];          /* coop.cfg `users`: the user manager and its two tables' fields */
+static unsigned cu_award;                   /* coop.cfg `achievements`: the game's achievement award */
+static unsigned cu_g, cu_p;                 /* the game's player cu_g holds player cu_p's entry now (0: as made) */
+static unsigned cu_awards_held;
+
+/* the entries' place in table t for player p (1..4): t + 20p + 4 (tests lift it verbatim) */
+static unsigned coop_user_entry(unsigned t, unsigned p)
+{
+    return t + COOP_USER_ENTRY * p + 4u;
+}
+
+/* a table the manager points at: the heap (allocated after the gate read the mappings, so only its shape is checked) */
+static int coop_user_table_ok(unsigned t)
+{
+    return t >= 0x10000u && !(t & 3u) && t < 0xbf000000u;
+}
+
+/* swap players a's and b's entries in both tables; the tables that cannot be read are left (0: none swapped) */
+static int coop_users_swap(unsigned a, unsigned b)
+{
+    int k, done = 0;
+    unsigned i;
+    for (k = 0; k < 2; k++) {
+        unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+        volatile unsigned char *x, *y;
+        if (!coop_user_table_ok(t)) continue;
+        x = (volatile unsigned char *)(unsigned long)coop_user_entry(t, a);
+        y = (volatile unsigned char *)(unsigned long)coop_user_entry(t, b);
+        for (i = 0; i < COOP_USER_ENTRY; i++) {
+            unsigned char c = x[i];
+            x[i] = y[i];
+            y[i] = c;
+        }
+        done = 1;
+    }
+    return done;
+}
+
+/* the first word of player p's uuid in the first table, for the log (0: no login) */
+static unsigned coop_user_word(unsigned p)
+{
+    unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[0]);
+    if (!coop_user_table_ok(t)) return 0;
+    return *(volatile const unsigned *)(unsigned long)coop_user_entry(t, p);
+}
+
+/* the game's player g to hold player p's login (g == p, or 0: every login back as the players made them) */
+static void coop_users_put(unsigned g, unsigned p)
+{
+    if (!cu_mgr) return;
+    if (cu_g) {
+        coop_users_swap(cu_g, cu_p);
+        say("co-op insider: the logins back as made (player %u 0x%08x, player %u 0x%08x)", cu_g, coop_user_word(cu_g),
+            cu_p, coop_user_word(cu_p));
+        cu_g = cu_p = 0;
+    }
+    if (g >= 1 && g <= 4 && p >= 1 && p <= 4 && g != p && coop_users_swap(g, p)) {
+        cu_g = g;
+        cu_p = p;
+        say("co-op insider: the game's player %u has player %u's login (0x%08x) while player %u is up", g, p,
+            coop_user_word(g), p);
+    }
+}
+
+static int on_coop_award(unsigned *r);       /* below the Insider Connected gate */
+
+static void coop_users_arm(void)
+{
+    if (cu_mgr && (!maps_has(cu_mgr + cu_off[0], 4, MAP_R) || !maps_has(cu_mgr + cu_off[1], 4, MAP_R))) {
+        say("co-op insider: the user manager 0x%08x is not mapped - the logins stay player 1's", cu_mgr);
+        cu_mgr = 0;
+    } else if (cu_mgr) {
+        say("co-op insider: the teammate up has the game's player's Insider login (manager 0x%08x, +0x%x +0x%x)",
+            cu_mgr, cu_off[0], cu_off[1]);
+    }
+    if (cu_award) {
+        if (is_game_process(cu_award) && hook_veto(cu_award, on_coop_award))
+            say("co-op insider: the game's achievement award (0x%08x) is refused while Insider Connected is held back",
+                cu_award);
+        else
+            say("co-op insider: the achievement award 0x%08x could not be hooked", cu_award);
+    }
+}
+
 static void coop_tick(void)
 {
     unsigned n;
+    if (cu_g && !(coop_teammates() && pm_in_game())) coop_users_put(0, 0);   /* PAD-1108: a game ended another way */
     coop_solo_check();                                        /* PAD-1054 */
     n = coop_teammates();
     if (n && !coop.teams && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the game's own */
     coop_join_tick();                                         /* PAD-1052 */
+    if (n && ci.clip[0] && !ci.phase && pm_in_game() && ci.game != chg_game_now() + 1)   /* PAD-1114 */
+        coop_intro_begin(coop.teams ? "a team game begins" : "a co-op game begins");
+    coop_intro_tick();                                        /* PAD-1114 */
     coop_chars_tick();                                        /* PAD-1031 */
+    coop_picked_tick();                                       /* PAD-1123 */
     if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
         coop_won_n = 0;
         say("co-op: the last co-op game's awards are off the attract mode (a new game)");
@@ -18444,7 +19116,7 @@ static void coop_join_tick(void)
     static int said;
     if (!coop.join_n) return;
     if (!coop_teammates()) coop.join_n = 0;                   /* the game is over (or another) */
-    else if (!pm_in_game()) coop.join_at = pm_ms();           /* busy (a menu over the game): the line waits */
+    else if (!pm_in_game() || ci.phase) coop.join_at = pm_ms();   /* busy (a menu over the game, PAD-1114's intro) */
     else if (disp_taken()) {
         coop.join_at = pm_ms();
         if (!said++) say("teams: the players-added lines wait - the game's own display has the screen");
@@ -18515,6 +19187,7 @@ static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned
     before = *coop_ball_byte;
     down = p >= g && coop.round < rounds && before > 0;
     if (down) *coop_ball_byte = (unsigned char)(before - 1);
+    coop_users_put(0, 0);                                     /* PAD-1108: the game's own change sees the logins as made */
     ret = coop_change_game(r0, r1, r2, r3);
     p_after = coop_ball_byte[-1];
     round = coop_team_round(g, p, p_after, before, *coop_ball_byte, down, coop.round, rounds);
@@ -18551,6 +19224,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
     if (down) *coop_ball_byte = (unsigned char)(before - 1);
     players = *coop_players_byte;
     *coop_players_byte = 1;                                   /* one player to change to: player 1, the team */
+    coop_users_put(0, 0);                                     /* PAD-1108: the game's own change sees the logins as made */
     ret = coop_change_game(r0, r1, r2, r3);
     /* the game's end sees ONE player (David, PAD-1017): its match draws once, not once a teammate - every teammate
      * has the team's last digits, so a match paid them all - and its high scores take the team's score once */
@@ -18562,6 +19236,7 @@ static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned
         : next == 1 ? "teammate 1, the next ball" : "the next teammate, the same ball");
     if (ret & 0xff) {
         coop.turn = next;
+        coop_users_put(1, coop.turn);                         /* PAD-1108: the teammate up has player 1's login */
         coop_turn_show();
         coop_chars_turn();                                    /* PAD-1031: a first ball's pick */
     } else {
@@ -18630,6 +19305,43 @@ static void coop_line(const char *s)
         }
         return;
     }
+    if (str_starts(s, "intro ")) {                                        /* PAD-1114: the intro's clip and length */
+        int n;
+        for (p = s + 6; *p == ' '; p++) ;
+        for (n = 0; p[n] && p[n] != ' ' && p[n] != '\r' && n + 1 < (int)sizeof ci.clip; n++) ci.clip[n] = p[n];
+        ci.clip[n] = 0;
+        p += n;
+        ci.ms = (unsigned)number(&p, &ok);
+        if (!ok) ci.ms = 0;
+        return;
+    }
+    if (str_starts(s, "char_picked ") || str_starts(s, "char_bonus ")) {  /* PAD-1123: a character's clips */
+        int bonus = s[5] == 'b', n, k;
+        char *to;
+        p = s + (bonus ? 11 : 12);
+        n = (int)number(&p, &ok);
+        while (*p == ' ') p++;
+        if (!ok || n < 1 || n > COOP_CHARS) return;
+        to = bonus ? cb.clip[n - 1] : cpk.clip[n - 1];
+        for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && k + 1 < (int)sizeof cb.clip[0]; k++) to[k] = p[k];
+        to[k] = 0;
+        p += k;
+        if (!bonus) cpk.ms[n - 1] = (unsigned)number(&p, &ok);
+        return;
+    }
+    if (str_starts(s, "bonus_loop ")) {                                   /* PAD-1123: the game's bonus loop */
+        int k;
+        for (p = s + 11; *p == ' '; p++) ;
+        for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && k + 1 < (int)sizeof cb.loop; k++) cb.loop[k] = p[k];
+        cb.loop[k] = 0;
+        return;
+    }
+    if (str_starts(s, "intro_hold ")) {                                   /* PAD-1114: TIMED PLUNGER's id */
+        p = s + 11;
+        ci.hold_adj = (unsigned)number(&p, &ok);
+        if (!ok) ci.hold_adj = 0;
+        return;
+    }
     if (str_starts(s, "clip_crop ")) {                                    /* PAD-1079: the crop the videos play at */
         for (p = s + 10; *p == ' '; p++) ;
         str_copy(coop_clip_crop, sizeof coop_clip_crop, p, sizeof coop_clip_crop);
@@ -18649,6 +19361,20 @@ static void coop_line(const char *s)
         str_copy(coop_scr_scene, sizeof coop_scr_scene, p, sizeof coop_scr_scene);
         for (ok = 0; coop_scr_scene[ok] && coop_scr_scene[ok] != ' ' && coop_scr_scene[ok] != '\r'; ok++) ;
         coop_scr_scene[ok] = 0;
+        return;
+    }
+    if (str_starts(s, "users ")) {                                        /* PAD-1108: the logins' tables */
+        p = s + 6;
+        cu_mgr = (unsigned)number(&p, &ok);
+        if (ok) cu_off[0] = (unsigned)number(&p, &ok);
+        if (ok) cu_off[1] = (unsigned)number(&p, &ok);
+        if (!ok || !cu_mgr || cu_off[0] > 0x1000u || cu_off[1] > 0x1000u) cu_mgr = cu_off[0] = cu_off[1] = 0;
+        return;
+    }
+    if (str_starts(s, "achievements ")) {                                 /* PAD-1108: the award */
+        p = s + 13;
+        cu_award = (unsigned)number(&p, &ok);
+        if (!ok) cu_award = 0;
         return;
     }
     if (str_starts(s, "left ")) { p = s + 5; coop_left = (unsigned)number(&p, &ok); if (!ok) coop_left = 0; return; }
@@ -18780,6 +19506,8 @@ static void coop_arm(void)
     coop_awards_arm();                                        /* PAD-1028 */
     if (coop_cards_on) coop_bonus_arm();                      /* PAD-1028 round 3: the cards over the last bonus */
     coop_chars_arm(e);                                        /* PAD-1031 */
+    coop_bonus_chars_arm();                                   /* PAD-1123: the characters on the bonus */
+    coop_users_arm();                                         /* PAD-1108 */
     say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
         "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
         data("coop_player"), data("coop_player") + 1, data("coop_players"));
@@ -20343,6 +21071,20 @@ static int on_agent_begin(unsigned *r)
 static unsigned coop_setting_wanted(void);       /* PAD-1017 round 2, below */
 static int attract_wanted(void);                 /* PAD-782, below */
 
+/* PAD-1108: the game's achievement award (coop.cfg `achievements`): refused while the gate holds back - the game shows
+ * no NEW INSIDER ACHIEVEMENT! for a list it was given before CO-OP PLAY went on */
+static int on_coop_award(unsigned *r)
+{
+    unsigned n;
+    (void)r;
+    if (!insider_holding(insider_while, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
+        return 0;                                                   /* CO-OP PLAY Off: the game's own */
+    n = ++cu_awards_held;
+    if (n == 1 || !(n & (n - 1)))
+        say("co-op insider: an achievement award refused while Insider Connected is held back (%u so far)", n);
+    return 1;
+}
+
 /* 1 = the gate is up. 0 = this port cannot keep scores off Insider Connected, or (PAD-698) the
  * game's achievement query was not found: NOTHING is hooked and the game runs stock, whatever else
  * the port names. */
@@ -20434,6 +21176,8 @@ static int clipv_only, clipv_dropped;
 static struct clipv *volatile clipv_now;    /* the clip the game asked for last */
 static volatile int clipv_in;               /* clip v2: inside our own surface lookup */
 
+static void stime_line(char **f, unsigned n);     /* PAD-1115, below */
+
 /* one line, split in place at its TABs */
 static void clipv_line(char *s)
 {
@@ -20449,6 +21193,7 @@ static void clipv_line(char *s)
         *s++ = 0;
     }
     if (n == 1 && str_eq(f[0], "only")) { clipv_only = 1; return; }
+    if (str_eq(f[0], "stime")) { stime_line(f, n); return; }               /* PAD-1115 */
     if (str_eq(f[0], "sclip") && n >= 4 && *f[1]) k = 2;                 /* PAD-723: f[1] names the bank scene */
     else if (str_eq(f[0], "clip") && n >= 3) k = 1;
     else return;
@@ -20462,6 +21207,73 @@ static void clipv_line(char *s)
     if (v->n < 2) { v->n = 0; return; }
     v->last = CLIPV_PICKS;
     n_clipv++;
+}
+
+/* ---- screen times (PAD-1115): a game screen that shows a clip for a fixed time lasts as long as the clip ----
+ * DoomWalrus666, Godzilla: "Some videos natively freeze frame at the end. It doesn't matter if the clip is plenty
+ * long". The game's award and battle-start screens (Godzilla's layered displays, Jaws' and King Kong's) set a length
+ * at their start from one virtual (a float in seconds, 3.0 unless the class has its own: Secret Combo 4.0); most end
+ * when their clip does, but a screen whose "done" check is that clock (Godzilla's Secret Combo) holds a shorter clip's
+ * last frame for the rest and cuts a longer one. The build
+ * reads each such screen's vtable off the game program (screen_time.py) and writes, for a replaced clip whose
+ * length is not the screen's:
+ *
+ *     stime <TAB> <vtable> <TAB> <the slot's address> <TAB> <the word in it> <TAB> <ms> <TAB> <the clip's name>
+ *
+ * and the runtime points that one slot at stime_get, which hands the screen the clip's own length. The slot is
+ * only written when it still holds the word the build read (another build of the game, or another object that
+ * moved it, is left alone and said). */
+#define STIME_MAX 128
+struct stime_ent { unsigned vt, slot, old, ms, calls; const char *clip; };
+static struct stime_ent stime[STIME_MAX];
+static unsigned n_stime, n_stime_on;
+
+static void stime_line(char **f, unsigned n)
+{
+    const char *p;
+    struct stime_ent *e;
+    int ok1, ok2, ok3, ok4;
+    if (n < 6 || n_stime >= STIME_MAX) return;
+    e = &stime[n_stime];
+    p = f[1]; e->vt = (unsigned)number(&p, &ok1);
+    p = f[2]; e->slot = (unsigned)number(&p, &ok2);
+    p = f[3]; e->old = (unsigned)number(&p, &ok3);
+    p = f[4]; e->ms = (unsigned)number(&p, &ok4);
+    e->clip = f[5];
+    if (ok1 && ok2 && ok3 && ok4 && e->vt && e->slot && e->ms) n_stime++;
+}
+
+/* the screen's own virtual, in its place: the clip's length, in seconds (a float in s0: -mfloat-abi=hard) */
+static float stime_get(void *self)
+{
+    unsigned vt = self ? *(unsigned *)self : 0, i;
+    for (i = 0; i < n_stime; i++)
+        if (stime[i].vt == vt && stime[i].calls != ~0u) {
+            if (stime[i].calls++ < 8)
+                say("screen time: the %s screen stays up %u ms, the clip's own length", stime[i].clip, stime[i].ms);
+            return (float)stime[i].ms / 1000.0f;
+        }
+    /* not one of ours (cannot happen: only our vtables point here): the first slot's own answer */
+    return n_stime ? ((float (*)(void *))(unsigned long)stime[0].old)(self) : 3.0f;
+}
+
+static void stime_arm(void)
+{
+    unsigned i;
+    for (i = 0; i < n_stime; i++) {
+        unsigned *w = (unsigned *)(unsigned long)stime[i].slot;
+        if (!stime[i].slot || stime[i].slot & 3 || *w != stime[i].old) {
+            say("screen time: %s left as the game has it - its slot 0x%08x holds 0x%08x, not 0x%08x", stime[i].clip,
+                stime[i].slot, stime[i].slot && !(stime[i].slot & 3) ? *w : 0, stime[i].old);
+            stime[i].calls = ~0u;
+            continue;
+        }
+        mprotect((void *)(unsigned long)(stime[i].slot & ~0xfffu), 0x1000, 7);
+        *w = (unsigned)(unsigned long)stime_get;
+        n_stime_on++;
+    }
+    if (n_stime)
+        say("screen time: %u of %u screen(s) last as long as their clip", n_stime_on, n_stime);
 }
 
 static int clipv_read(void)
@@ -20630,11 +21442,12 @@ static void clipv_arm(void)
     static const char *const v2_v[] = { "scene_player_scene", 0 };
     clipv_census = pm_trigger("cliplog.on");
     if (!clipv_read() && !clipv_census) return;
+    stime_arm();                              /* PAD-1115: screens as long as their clip, whatever else is on */
     if (clipv_dropped)
         say("clip variants: %d line(s) not read - the table holds %d clips", clipv_dropped, CLIPV_SLOTS);
     if (clipv_census) say("clip census: every clip the game asks for by name is logged (cliplog.on)");
     if (!n_clipv && !clipv_census) {
-        say("clip variants: %s has no clip line - nothing hooked", "clips.cfg");
+        if (!n_stime) say("clip variants: %s has no clip line - nothing hooked", "clips.cfg");
         return;
     }
     if (have_sites(v1_s) && hook(fn("clip_play"), on_clipv_play)) {
@@ -21211,6 +22024,81 @@ static struct {
     unsigned stops;
 } gms = { .cur = -1 };
 static int gms_bad;
+
+/* PAD-1114: sounds.cfg `cintro <request> <carrier's key> <the intro sound's key> <ms>` */
+static int ci_bad;
+static void ci_sound_line(const char *rs, const char *ks, const char *hs, const char *mss)
+{
+    const char *p = rs;
+    int ok, ok2;
+    unsigned r = (unsigned)number(&p, &ok), ms;
+    p = mss;
+    ms = (unsigned)number(&p, &ok2);
+    if (!ok || !ok2 || !r || !key_hex(ks, ci.key) || !key_hex(hs, ci.host)) { ci_bad++; return; }
+    ci.request = r;
+    ci.sound_ms = ms;
+}
+
+/* PAD-1123: sounds.cfg `cpick <n> <request> <carrier's key> <the sound's key> <ms>` (the intro's carrier) */
+static int cpk_bad;
+static void cpk_sound_line(const char *ns, const char *rs, const char *ks, const char *hs, const char *mss)
+{
+    const char *p = ns;
+    int ok, ok2, ok3;
+    unsigned n = (unsigned)number(&p, &ok), r, ms;
+    p = rs;
+    r = (unsigned)number(&p, &ok2);
+    p = mss;
+    ms = (unsigned)number(&p, &ok3);
+    if (!ok || !ok2 || !ok3 || !r || n < 1 || n > CPK_CHARS || (cpk.request && cpk.request != r)
+        || !key_hex(ks, cpk.key) || !key_hex(hs, cpk.host[n - 1])) { cpk_bad++; return; }
+    cpk.request = r;
+    cpk.sound_ms[n - 1] = ms;
+    cpk.have_sound |= 1u << (n - 1);
+}
+
+/* from sndm_arm: the record lookup's hook for the characters' sounds */
+static void cpk_sound_arm(void)
+{
+    if (cpk_bad) say("co-op characters: %d sound line(s) once picked in sounds.cfg not read", cpk_bad);
+    if (!cpk.request) return;
+    if (!fn("sound_play") || !fn("sound_lookup")) {
+        say("co-op characters: no sounds once picked - the port has no sound_play or sound_lookup for this build");
+        cpk.request = 0;
+        return;
+    }
+    if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+        say("co-op characters: no sounds once picked - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        cpk.request = 0;
+        return;
+    }
+    if (pm_sound_priority(cpk.request, 3, 0) < 0)
+        say("co-op characters: the carrier's priority stays its own - the port has no request table");
+    cpk_live = 1;
+    say("co-op characters: %u character sound(s) once picked ride request %u", (unsigned)__builtin_popcount(cpk.have_sound),
+        cpk.request);
+}
+
+/* from sndm_arm: the record lookup's hook for the intro's sound */
+static void ci_sound_arm(void)
+{
+    if (ci_bad) say("co-op intro: its sound line in sounds.cfg not read");
+    if (!ci.request) return;
+    if (!fn("sound_play") || !fn("sound_lookup")) {
+        say("co-op intro: no sound of its own - the port has no sound_play or sound_lookup for this build");
+        ci.request = 0;
+        return;
+    }
+    if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+        say("co-op intro: no sound of its own - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        ci.request = 0;
+        return;
+    }
+    if (pm_sound_priority(ci.request, 3, 0) < 0)
+        say("co-op intro: the carrier's priority stays its own - the port has no request table");
+    ci_live = 1;
+    say("co-op intro: its sound (%u ms) rides request %u", ci.sound_ms, ci.request);
+}
 
 static void gms_line(const char *rs, const char *ks)
 {
@@ -21855,6 +22743,14 @@ static void sndm_line(char *s)
         att_file(f[1], f[2], f[3]);
         return;
     }
+    if (n >= 5 && str_eq(f[0], "cintro")) {   /* PAD-1114: the co-op intro's sound */
+        ci_sound_line(f[1], f[2], f[3], f[4]);
+        return;
+    }
+    if (n >= 6 && str_eq(f[0], "cpick")) {    /* PAD-1123: a co-op character's sound once picked */
+        cpk_sound_line(f[1], f[2], f[3], f[4], f[5]);
+        return;
+    }
     if (n >= 3 && str_eq(f[0], "gshot")) {    /* PAD-945 */
         gms_line(f[1], f[2]);
         return;
@@ -22161,9 +23057,11 @@ static void sndm_arm(void)
     blist_arm();                              /* PAD-608: nor do the files in a sound bank */
     att_arm();                                /* PAD-641: nor the flipper buttons' sounds in attract */
     gms_arm();                                /* PAD-945: nor a sound on a shot in one of the game's modes */
+    ci_sound_arm();                           /* PAD-1114: nor the co-op intro's sound */
+    cpk_sound_arm();                          /* PAD-1123: nor the co-op characters' sounds once picked */
     juke_arm();                               /* PAD-685: nor the jukebox */
     if (!n_sndm) {
-        if (n_sndt || n_bsid || att.n || n_jmode || gms.n) return;
+        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }

@@ -161,8 +161,117 @@ def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None, sett
         raise CoopError(NO_BUTTON)
     return ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
             + ("only\n" if setting and only else "")
+            + "".join(line + "\n" for line in insider_lines(game_elf))
             + "".join(line + "\n" for line in award_lines(game_elf, awards))
             + "".join(line + "\n" for line in character_lines(game_elf, characters, sites, values)))
+
+
+# ---- PAD-1108: the Insider Connected login of the teammate up ------------------------------------------------------
+# DoomWalrus666 (3-player co-op): "achievements earned by player 2 and 3 were shown as earned by Player 1. Player 1
+# username displayed on End of Ball Bonus for all 3 players. High score attributed only to Player 1". The game plays one
+# player for the team and asks its user manager for player 1's login all game; the runtime swaps the login tables'
+# entries so the teammate up has it (pad_mode_runtime.c "PAD-1108"), and refuses the game's achievement award while
+# Insider Connected is held back. Both are read off the card's own program: every Spike 2 build measured has one of
+# each, in the same shape (the users on all 54 newest builds, the award on 53: Star Wars ELG has no audit add found).
+
+#: the manager's lookup: ldr ip, [r0, #A]; cmp r3, #1; ldr r0, [r0, #B]; movne r0, ip; b <table lookup>
+_USERS_HEAD = (0xE590C000, 0xE3530001, 0xE5900000, 0x11A0000C)
+#: the table lookup's words: sub r3, r1, #1; cmp r3, #3; add r1, r1, r1, lsl #2; add r0, r0, r1, lsl #2;
+#: add r4, r0, #4 - player p's entry at table + 20p + 4 (the runtime's COOP_USER_ENTRY)
+_TABLE_WORDS = (0xE2413001, 0xE3530003, 0xE0811101, 0xE0800101, 0xE2804004)
+
+
+def _branch_to(e, k, link):
+    w = e.words[k]
+    if (w >> 24) != (0xEB if link else 0xEA):
+        return None
+    off = (w & 0xFFFFFF) << 2
+    if off & 0x2000000:
+        off -= 0x4000000
+    return e.text_va + 4 * k + 8 + off
+
+
+def insider_users(game_elf):
+    """``(manager, A, B)`` - the game's user manager (a global) and the fields of its two login tables - or None."""
+    from .portchallenge import Elf
+    e = Elf(game_elf)
+    w = e.words
+    found = []
+    for k in range(len(w) - 5):
+        if (w[k] & 0xFFFFF000) != _USERS_HEAD[0] or w[k + 1] != _USERS_HEAD[1] \
+                or (w[k + 2] & 0xFFFFF000) != _USERS_HEAD[2] or w[k + 3] != _USERS_HEAD[3]:
+            continue
+        to = _branch_to(e, k + 4, False)
+        if to is None or not e.text_va <= to < e.text_va + 4 * (len(w) - 12):
+            continue
+        j = (to - e.text_va) // 4
+        if w[j + 1] != _TABLE_WORDS[0] or w[j + 2] != _TABLE_WORDS[1] \
+                or not all(x in w[j:j + 12] for x in _TABLE_WORDS[2:]):
+            continue
+        found.append((e.text_va + 4 * k, w[k] & 0xFFF, w[k + 2] & 0xFFF))
+    if len(found) != 1:
+        return None
+    look, a, b = found[0]
+    managers = set()
+    for k in range(len(w)):
+        if _branch_to(e, k, True) != look:
+            continue
+        lo = hi = None
+        for j in range(k - 1, max(k - 8, 0), -1):                 # movw / movt r0 just before the call
+            x = w[j]
+            if lo is None and (x & 0xFFF0F000) == 0xE3000000:
+                lo = ((x >> 4) & 0xF000) | (x & 0xFFF)
+            if hi is None and (x & 0xFFF0F000) == 0xE3400000:
+                hi = ((x >> 4) & 0xF000) | (x & 0xFFF)
+        if lo is not None and hi is not None:
+            managers.add(lo | hi << 16)
+    if len(managers) != 1:
+        return None
+    return (managers.pop(), a, b)
+
+
+def achievement_award(game_elf):
+    """The game's achievement award (the one function counting AUD_CONNECTIVITY_ACHIEVEMENTS_GIVEN), or None."""
+    from . import stock_scan as S, stock_scan_c as SC
+    from .mode_framework import audit_add
+    from .portchallenge import Elf
+    e = Elf(game_elf)
+    add = audit_add(e)
+    if not add:
+        return None
+    ids = {n: i for i, n in SC.audit_ids(S.Program(game_elf))[1].items() if n}
+    aid = ids.get("AUD_CONNECTIVITY_ACHIEVEMENTS_GIVEN")
+    if aid is None or aid > 0xFF:
+        return None
+    w = e.words
+    hits = [k for k in range(4, len(w)) if _branch_to(e, k, True) == add
+            and (0xE3A00000 | aid) in w[k - 4:k] and 0xE3A01001 in w[k - 4:k]]
+    if len(hits) != 1:
+        return None
+    k = hits[0]
+    while k > 0 and not (w[k - 1] == 0xE12FFF1E or (w[k - 1] & 0xFFFF8000) == 0xE8BD8000):   # bx lr / pop {.., pc}
+        k -= 1
+    if w[k] != 0xE590C004 or (w[k + 1] & 0xFFFF4000) != 0xE92D4000:   # ldr ip, [r0, #4]; push {.., lr}
+        return None
+    return e.text_va + 4 * k
+
+
+def insider_lines(game_elf):
+    """coop.cfg's ``users`` and ``achievements`` lines for this program (each left out when not found)."""
+    out = []
+    try:
+        u = insider_users(game_elf)
+    except Exception:                                                # noqa: BLE001 - a build the finder cannot read
+        u = None
+    if u:
+        out.append("users 0x%08x 0x%x 0x%x" % u)
+    try:
+        a = achievement_award(game_elf)
+    except Exception:                                                # noqa: BLE001
+        a = None
+    if a:
+        out.append("achievements 0x%08x" % a)
+    return out
 
 
 # ---- PAD-1028: a co-op game's awards -----------------------------------------------------------------------------
@@ -663,6 +772,18 @@ def _switch_named(game_elf, pattern):
     return None
 
 
+def timed_plunger(game_elf):
+    """PAD-1114: the id of the game's TIMED PLUNGER adjustment (AD_TIMED_PLUNGER: "Autolaunches a ball in the Shooter
+    Lane after a specified amount of idle time"), or None. The runtime answers it 0 (off) while the co-op intro, the ball's
+    wait and the language window keep the ball in the lane: on Godzilla LE 1.16 (emulator) it launched the ball some 18 s
+    after it came, cutting the pick short."""
+    from .adjustments import AdjustmentTable
+    try:
+        return AdjustmentTable(game_elf).by_name.get("AD_TIMED_PLUNGER")
+    except Exception:                                   # noqa: BLE001 - a program the table cannot be read off
+        return None
+
+
 def action_button(game_elf):
     """The switch id of the Action button (the lockdown bar's: LOCKDOWN BUTTON, ACTION BUTTON) in the game program
     *game_elf* (bytes), or None."""
@@ -966,9 +1087,16 @@ def _characters(got):
                         "powers": keys, "header": clean_header(c.get("header")),
                         "ability": bundle_of(keys),         # the bundle these are, for the dialog's starting points
                         "picture": str(c.get("picture") or ""), "colour": clean_colour(c.get("colour")),
-                        "video": str(c.get("video") or "")})
+                        "video": str(c.get("video") or ""),
+                        # PAD-1123: what plays full screen once it is picked, and the sound with it
+                        "picked_clip": str(c.get("picked_clip") or ""),
+                        "picked_sound": str(c.get("picked_sound") or "")})
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
+    if got.get("intro"):                                # PAD-1114: the co-op and team games' intro video
+        out["intro"] = str(got["intro"])
+    if got.get("bonus"):                                # PAD-1123: the teammate's character on their End of Ball Bonus
+        out["bonus"] = True
     if theme:
         out["theme"] = {k: (int(v) if k == "dim" and str(v).isdigit() else str(v)) for k, v in theme.items()
                         if k in THEME and v is not None and v != ""}
@@ -981,7 +1109,7 @@ def save_characters(project, characters):
     chars = _characters(characters)
     data = staged_changes.load(project)
     raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
-    if chars["list"] or chars["pick"]:
+    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("bonus"):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)
@@ -996,11 +1124,10 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
     ``character <abilities> <name>|<what it does>`` for each character, an ability the card cannot have left out
     (``-``). None when *characters* has no pick or no characters."""
     chars = _characters(characters)
-    if not chars["pick"] or not chars["list"]:
+    picks = chars["pick"] and chars["list"]
+    if not picks and not chars.get("intro"):            # PAD-1114: an intro wants the buttons (its skip, the language)
         return []
-    parts = {p["key"]: p for p in powers(game_elf, sites=sites, values=values)}
-    wf = {k: p["words"] for k, p in parts.items() if p["cfg"]}
-    out = ["pick on", "pick_time %d" % chars["time"]]
+    out = ["pick on", "pick_time %d" % chars["time"]] if picks else []
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) == 2:
         out.append("left %d" % buttons[0])
@@ -1010,6 +1137,14 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
         lane = shooter_lane(game_elf)
         if lane is not None:
             out.append("lane %d" % lane)
+    if chars.get("intro"):
+        hold = timed_plunger(game_elf)
+        if hold is not None:
+            out.append("intro_hold %d" % hold)      # PAD-1114: no auto-launch while the intro holds the ball
+    if not picks:
+        return out
+    parts = {p["key"]: p for p in powers(game_elf, sites=sites, values=values)}
+    wf = {k: p["words"] for k, p in parts.items() if p["cfg"]}
     for c in chars["list"]:
         got = compose(c["powers"], parts)
         out.append("character %s %s|%s" % (got["cfg"] or "-", c["name"],
@@ -1360,6 +1495,314 @@ def clip_entries(project, characters=None):
         path = video_path(project, c)
         if path:
             out.append((i, CLIP_NAME % (i + 1), path))
+    return out
+
+
+# ---- PAD-1114: the co-op and team games' intro video ---------------------------------------------------------------
+# DoomWalrus666 (Godzilla): "For co-op and team modes, I would like to have a custom intro video with its own sound.
+# This video would be skippable by pressing both flippers. Once the video finishes, or both flipper buttons are pressed,
+# the ball is put into the shooter Lane, and then language options, and then character select screen". The project
+# keeps one video (``coop/intro_video.<ext>``, the characters record's ``intro``); a Write makes it into a clip of the
+# video bank's size (:data:`INTRO_CLIP`, fitted whole, black round it) and its sound into a sound of the card's own
+# (sound_modes "the co-op intro"), and coop.cfg names both (pad_mode_runtime.c "PAD-1114").
+#: the intro's clip in the video bank
+INTRO_CLIP = "PadCoopIntro"
+#: the project's file (its extension the source's)
+INTRO_FILE = "intro_video"
+#: the longest intro a card takes (a mode's clip's longest)
+INTRO_MAX_SECONDS = 300
+
+
+def intro_path(project, characters=None):
+    """The absolute path of the project's co-op intro video (``""`` when it has none, or it is gone)."""
+    chars = _characters(characters) if characters is not None else load_characters(project)
+    return picture_path(project, {"picture": chars.get("intro") or ""})
+
+
+def save_intro(project, source=None):
+    """Copy *source* (a video file) into the project as the co-op and team games' intro, or with None forget it;
+    returns the characters as stored. Raises :class:`CoopError` when the file is not a video the app takes."""
+    import os
+    import shutil
+    chars = load_characters(project)
+    if source is None:
+        chars.pop("intro", None)
+        return save_characters(project, chars)
+    ext = os.path.splitext(source)[1].lower()
+    if ext not in VIDEO_EXTS or not os.path.isfile(source):
+        raise CoopError("That is not a video the app can take (%s)." % ", ".join(VIDEO_EXTS))
+    folder = os.path.join(project, PICTURE_DIR)
+    os.makedirs(folder, exist_ok=True)
+    for f in os.listdir(folder):                        # one intro: another extension's goes
+        if os.path.splitext(f)[0] == INTRO_FILE and f != INTRO_FILE + ext:
+            os.remove(os.path.join(folder, f))
+    shutil.copyfile(source, os.path.join(folder, INTRO_FILE + ext))
+    chars["intro"] = "%s/%s%s" % (PICTURE_DIR, INTRO_FILE, ext)
+    return save_characters(project, chars)
+
+
+def intro_clip(src, out, w, h, ffmpeg, max_seconds=None):
+    """*src* made into the intro's clip at *out*: w x h, the whole picture fitted in (never cropped), black round it,
+    30 fps, silent (its sound is :func:`intro_audio`'s), no longer than :data:`INTRO_MAX_SECONDS`."""
+    import subprocess
+    from . import mode_assets as MA
+    head, tail = MA._encode_args(ffmpeg, out)
+    vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,"
+          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,fps=%d" % (w, h, w, h, MA.FPS))
+    cmd = head + ["-i", src, "-t", str(max_seconds or INTRO_MAX_SECONDS), "-vf", vf] + tail
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if r.returncode != 0:
+        raise CoopError("ffmpeg could not make the intro's clip of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
+    return out
+
+
+def intro_audio(src, out, ffmpeg, max_seconds=None):
+    """The intro video *src*'s own sound as a 44.1 kHz 16-bit stereo WAV at *out* (the length its clip plays), or
+    ``""`` when the video has no sound. Raises :class:`CoopError` when ffmpeg cannot read it."""
+    import subprocess
+    from . import mode_assets as MA
+    probe = subprocess.run([ffmpeg, "-v", "error", "-i", src, "-map", "0:a:0", "-t", "0.1", "-f", "null", "-"],
+                           capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if probe.returncode != 0:
+        return ""                                       # no sound stream in it
+    cmd = [ffmpeg, "-v", "error", "-y", "-i", src, "-map", "0:a:0", "-t", str(max_seconds or INTRO_MAX_SECONDS),
+           "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", out]
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if r.returncode != 0:
+        raise CoopError("ffmpeg could not take the sound out of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
+    return out
+
+
+# ---- PAD-1123: a clip and a sound once a character is picked; the character on its teammate's End of Ball Bonus ------
+# DoomWalrus666 (Godzilla): "After a player selects a character in co-op/teams play, I would like be able to select the
+# following for each character: Play a sound of my choice (example: Godzilla roar from that specific era); Show a brief
+# couple second video (like the characters original movie poster)" and "At the end of a players ball, I would like to be
+# able to display that players selected Character's image or video in a window on the End of Ball screen, maybe to the
+# right of the scores/username". A character keeps a clip (a video, or a picture the build shows for
+# :data:`PICKED_STILL_SECONDS`) and a sound (any audio file, or a video's sound); a Write makes the clip full-screen in the
+# video bank (:data:`PICKED_CLIP`, fitted whole like the intro) and the sound a sound of the card's own on the intro's
+# carrier, and the runtime plays both when the character is picked (pad_mode_runtime.c "PAD-1123"). With ``bonus`` on,
+# the build makes the game's own End of Ball Bonus loop again per character with its picture (or video) in a window to the
+# right of the bonus's words (:data:`BONUS_CLIP`), and the runtime plays the copy of the teammate up's character when the
+# game asks for its loop.
+#: a character's picked clip in the video bank (1-based)
+PICKED_CLIP = "PadCoopPicked%d"
+#: the project's files (their extension the source's)
+PICKED_FILE = "character_%d_picked"
+PICKED_SOUND_FILE = "character_%d_picked_sound"
+#: the longest picked clip and sound a card takes ("a brief couple second video")
+PICKED_MAX_SECONDS = 10
+#: a picture as the picked clip shows this long (or as long as its sound, up to PICKED_MAX_SECONDS)
+PICKED_STILL_SECONDS = 3
+#: the sound files a character's Sound... takes (a video's own sound too)
+SOUND_EXTS = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus")
+#: a character's copy of the bonus loop in the video bank (1-based)
+BONUS_CLIP = "PadCoopBonus%d"
+#: the window on the glass (x, y, w, h), the portrait frame's shape: right of the bonus's summary (Godzilla LE 1.16,
+#: emulator census, a frame every 0.75 s: PLAYER 1 - the Insider name there when logged in -, TOTAL BONUS and TOTAL
+#: SCORE run x 425-940, y 140-665). The count's widest lines (GODZILLA POWERUP EARNED, x 135-1230) are drawn over the
+#: window's left part, outlined as always: no window this size clears them
+BONUS_WINDOW = (964, 236, 360, 290)
+#: its frame, glass pixels
+BONUS_BORDER = 5
+
+
+def picked_clip_path(project, character):
+    """The absolute path of *character*'s picked clip (a video or a picture) in *project* (``""``: none, or gone)."""
+    return picture_path(project, {"picture": (character or {}).get("picked_clip") or ""})
+
+
+def picked_sound_path(project, character):
+    """The absolute path of *character*'s picked sound file in *project* (``""``: none, or gone)."""
+    return picture_path(project, {"picture": (character or {}).get("picked_sound") or ""})
+
+
+def is_still(path):
+    """Whether *path* is a picture (a still picked clip), by its extension."""
+    import os
+    return os.path.splitext(str(path))[1].lower() in _PICTURE_EXTS
+
+
+def _save_char_file(project, index, source, field, stem, exts, what):
+    import os
+    import shutil
+    chars = load_characters(project)
+    if not 0 <= int(index) < len(chars["list"]):
+        raise CoopError("There is no character %d." % (int(index) + 1))
+    c = chars["list"][int(index)]
+    folder = os.path.join(project, PICTURE_DIR)
+    stem = stem % (int(index) + 1)
+    if source is not None:
+        ext = os.path.splitext(source)[1].lower()
+        if ext not in exts or not os.path.isfile(source):
+            raise CoopError("That is not %s the app can take (%s)." % (what, ", ".join(exts)))
+    if os.path.isdir(folder):
+        for f in os.listdir(folder):                    # one a character: another extension's goes
+            if os.path.splitext(f)[0] == stem and (source is None or f != stem + os.path.splitext(source)[1].lower()):
+                os.remove(os.path.join(folder, f))
+    if source is None:
+        c[field] = ""
+        return save_characters(project, chars)
+    os.makedirs(folder, exist_ok=True)
+    ext = os.path.splitext(source)[1].lower()
+    shutil.copyfile(source, os.path.join(folder, stem + ext))
+    c[field] = "%s/%s%s" % (PICTURE_DIR, stem, ext)
+    return save_characters(project, chars)
+
+
+def save_picked_clip(project, index, source=None):
+    """Copy *source* (a video, or a picture) into the project as what plays full screen once character *index* is
+    picked, or with None forget it; returns the characters as stored. Raises :class:`CoopError` on another file."""
+    if source is not None and is_still(source):
+        from PIL import Image
+        try:
+            with Image.open(source) as im:
+                im.verify()
+        except Exception as e:                          # noqa: BLE001 - say what the file is not
+            raise CoopError("That file is not a picture the app can read (%s)." % e) from None
+    return _save_char_file(project, index, source, "picked_clip", PICKED_FILE, VIDEO_EXTS + _PICTURE_EXTS,
+                           "a video or picture")
+
+
+def save_picked_sound(project, index, source=None):
+    """Copy *source* (a sound file, or a video whose sound is taken) into the project as the sound character *index*
+    plays once picked, or with None forget it; returns the characters as stored."""
+    return _save_char_file(project, index, source, "picked_sound", PICKED_SOUND_FILE, SOUND_EXTS + VIDEO_EXTS,
+                           "a sound file")
+
+
+def save_bonus(project, on):
+    """Whether each teammate's character shows on their End of Ball Bonus; returns the characters as stored."""
+    chars = load_characters(project)
+    if on:
+        chars["bonus"] = True
+    else:
+        chars.pop("bonus", None)
+    return save_characters(project, chars)
+
+
+def picked_sound_source(project, character):
+    """The file *character*'s picked sound comes from: its sound file, else its picked clip when that is a video (the
+    video's own sound; the build finds whether it has one), else ``""``."""
+    snd = picked_sound_path(project, character)
+    if snd:
+        return snd
+    clip = picked_clip_path(project, character)
+    return clip if clip and not is_still(clip) else ""
+
+
+def picked_entries(project, characters=None):
+    """``[(index, bank name, clip source)]`` of the characters with a picked clip (in order)."""
+    chars = _characters(characters if characters is not None else load_characters(project))
+    out = []
+    for i, c in enumerate(chars["list"]):
+        path = picked_clip_path(project, c)
+        if path:
+            out.append((i, PICKED_CLIP % (i + 1), path))
+    return out
+
+
+def media_seconds(path, ffmpeg):
+    """The length of the sound or video at *path* in seconds (0.0 when ffmpeg cannot tell)."""
+    import re
+    import subprocess
+    from . import mode_assets as MA
+    r = subprocess.run([ffmpeg, "-hide_banner", "-i", path], capture_output=True, text=True,
+                       creationflags=MA._NO_WINDOW)
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", r.stderr or "")
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else 0.0
+
+
+def picked_clip(src, out, w, h, ffmpeg, seconds=None):
+    """*src* made into a character's picked clip at *out*: w x h, the whole picture fitted in, black round it, 30 fps,
+    silent (its sound is the build's), no longer than :data:`PICKED_MAX_SECONDS`. A picture shows *seconds*
+    (:data:`PICKED_STILL_SECONDS` when None), a still that reads as video to the bank."""
+    import subprocess
+    from . import mode_assets as MA
+    head, tail = MA._encode_args(ffmpeg, out)
+    vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,"
+          "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,fps=%d,format=yuv420p" % (w, h, w, h, MA.FPS))
+    if is_still(src):
+        t = min(float(seconds or PICKED_STILL_SECONDS), PICKED_MAX_SECONDS)
+        cmd = head + ["-loop", "1", "-framerate", str(MA.FPS), "-i", src, "-t", "%.3f" % t, "-vf", vf] + tail
+    else:
+        cmd = head + ["-i", src, "-t", str(PICKED_MAX_SECONDS), "-vf", vf] + tail
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if r.returncode != 0:
+        raise CoopError("ffmpeg could not make the picked clip of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
+    return out
+
+
+def picked_audio(src, out, ffmpeg):
+    """*src*'s sound (a sound file, or a video's own) as a 44.1 kHz 16-bit stereo WAV at *out*, no longer than
+    :data:`PICKED_MAX_SECONDS`; ``""`` when it has none. Raises :class:`CoopError` when ffmpeg cannot read it."""
+    return intro_audio(src, out, ffmpeg, max_seconds=PICKED_MAX_SECONDS)
+
+
+def bonus_loop(bank_data, bank=None):
+    """``(the game's End of Ball Bonus loop's name, the crop the game plays it at)`` in the video bank *bank_data*, or
+    None when the bank has none. Found by its name (Godzilla 1.15/1.16: EndOfBallBonus_BackgroundLoop, at SquareCrop -
+    emulator, the backdrop's record of the game's own loop)."""
+    from . import video_bank as VB
+    bank = bank or VB.parse(bank_data)
+    names = [c.name for c in bank.library.entries]
+    got = [n for n in names if n.lower().replace("_", "").startswith("endofballbonus") and "loop" in n.lower()]
+    if not got:
+        return None
+    labels = dict(bank.labels)
+    return got[0], "SquareCrop" if "SquareCrop" in labels else "Normal"
+
+
+def bonus_box(transform, w, h):
+    """:data:`BONUS_WINDOW` (on the glass) in the loop's own pixels on a clip of w x h, through the crop's
+    *transform* (:func:`.video_bank.crop_transform`'s 16 floats; None: Normal): ``(x, y, width, height)``, even. The
+    clip is stretched over the :data:`GLASS`, then the crop scales and moves it."""
+    sx, sy, tx, ty = (transform[0], transform[5], transform[12], transform[13]) if transform else (1.0, 1.0, 0.0, 0.0)
+    ev = lambda v: int(round(v / 2.0)) * 2                                    # noqa: E731
+    gx, gy, gw, gh = BONUS_WINDOW
+    kx, ky = w / GLASS[0], h / GLASS[1]
+    return (ev((gx - tx) / sx * kx), ev((gy - ty) / sy * ky), max(2, ev(gw / sx * kx)), max(2, ev(gh / sy * ky)))
+
+
+def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400", seconds=None, size=(1360, 768)):
+    """The game's bonus loop *loop_src* (at *size*, the bank's clip frame: an owner's replacement of another size is
+    scaled to it first) made again at *out* with a character's *video* (looped) or *picture* in a window at *box* (the
+    loop's pixels, :func:`bonus_box`), framed in *colour*, as long as the loop (or *seconds*), 30 fps, silent."""
+    import subprocess
+    from . import mode_assets as MA
+    x, y, bw, bh = box
+    b = max(2, int(round(BONUS_BORDER * bw / BONUS_WINDOW[2])))
+    head, tail = MA._encode_args(ffmpeg, out)
+    if video:
+        src = ["-stream_loop", "-1", "-i", video]
+    elif picture:
+        src = ["-loop", "1", "-framerate", str(MA.FPS), "-i", picture]
+    else:
+        raise CoopError("a bonus window needs the character's picture or video")
+    col = "0x" + clean_colour(colour).lstrip("#") if clean_colour(colour) else "0xffb400"
+    fc = ("[1:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1,fps=%d[w];"
+          "[0:v]scale=%d:%d,setsar=1,fps=%d,drawbox=x=%d:y=%d:w=%d:h=%d:color=%s:t=fill[b];"
+          "[b][w]overlay=%d:%d:shortest=0:eof_action=repeat,format=yuv420p[v]"
+          % (bw, bh, bw, bh, MA.FPS, size[0], size[1], MA.FPS, x - b, y - b, bw + 2 * b, bh + 2 * b, col, x, y))
+    t = seconds or media_seconds(loop_src, ffmpeg) or 8.0
+    cmd = head + ["-i", loop_src] + src + ["-filter_complex", fc, "-map", "[v]", "-t", "%.3f" % t] + tail
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    if r.returncode != 0:
+        raise CoopError("ffmpeg could not make the bonus window's clip: %s" % (r.stderr or "").strip()[-300:])
+    return out
+
+
+def bonus_entries(project, characters=None):
+    """``[(index, bank name, picture path, video path)]`` of the characters whose End of Ball Bonus shows them (with
+    ``bonus`` on): each with a picture or a video (the video wins)."""
+    chars = _characters(characters if characters is not None else load_characters(project))
+    if not chars.get("bonus"):
+        return []
+    out = []
+    for i, c in enumerate(chars["list"]):
+        pic, vid = picture_path(project, c), video_path(project, c)
+        if pic or vid:
+            out.append((i, BONUS_CLIP % (i + 1), pic, vid))
     return out
 
 
@@ -2113,6 +2556,27 @@ def export_settings(project, path):
         c["video"] = "%s/%d_%s_video%s" % (FILE_PICTURES, i + 1, picture_file_name(c["name"]) or "character",
                                            os.path.splitext(src)[1].lower())
         pictures.append((src, c["video"]))
+    for i, c in enumerate(chars["list"]):                       # PAD-1123: each character's clip and sound once picked
+        for field, path_of, tag in (("picked_clip", picked_clip_path, "picked"),
+                                    ("picked_sound", picked_sound_path, "picked_sound")):
+            src = path_of(project, c)
+            c[field] = ""
+            if not src:
+                continue
+            if not as_zip:
+                left_out += 1
+                continue
+            c[field] = "%s/%d_%s_%s%s" % (FILE_PICTURES, i + 1, picture_file_name(c["name"]) or "character", tag,
+                                          os.path.splitext(src)[1].lower())
+            pictures.append((src, c[field]))
+    intro = intro_path(project, chars)                         # PAD-1114: the co-op games' intro video
+    chars.pop("intro", None)
+    if intro:
+        if as_zip:
+            chars["intro"] = "%s/%s%s" % (FILE_PICTURES, INTRO_FILE, os.path.splitext(intro)[1].lower())
+            pictures.append((intro, chars["intro"]))
+        else:
+            left_out += 1
     back = backdrop_path(project, chars.get("theme"))          # PAD-1079: the pick's background picture
     if back:
         if as_zip:
@@ -2248,6 +2712,32 @@ def import_settings(project, path):
             f.write(blob)
         c["video"] = "%s/%s" % (PICTURE_DIR, name)
         pictures += 1
+    for i, c in enumerate(chars["list"]):                       # PAD-1123: each character's clip and sound once picked
+        for field, stem, exts in (("picked_clip", PICKED_FILE, VIDEO_EXTS + _PICTURE_EXTS),
+                                  ("picked_sound", PICKED_SOUND_FILE, SOUND_EXTS + VIDEO_EXTS)):
+            rel, c[field] = c.get(field) or "", ""
+            blob = read(rel) if read and rel else None
+            ext = os.path.splitext(rel)[1].lower()
+            if not blob or ext not in exts:
+                continue
+            os.makedirs(folder, exist_ok=True)
+            name = (stem % (i + 1)) + ext
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(blob)
+            c[field] = "%s/%s" % (PICTURE_DIR, name)
+            pictures += 1
+    rel = chars.pop("intro", "") or ""                          # PAD-1114: the co-op games' intro video
+    blob = read(rel) if read and rel else None
+    ext = os.path.splitext(rel)[1].lower()
+    if blob and ext in VIDEO_EXTS:
+        os.makedirs(folder, exist_ok=True)
+        for f in os.listdir(folder):
+            if os.path.splitext(f)[0] == INTRO_FILE:
+                os.remove(os.path.join(folder, f))
+        with open(os.path.join(folder, INTRO_FILE + ext), "wb") as f:
+            f.write(blob)
+        chars["intro"] = "%s/%s%s" % (PICTURE_DIR, INTRO_FILE, ext)
+        pictures += 1
     theme = chars.get("theme") or {}                            # PAD-1079: the pick's background picture
     rel = theme.pop("backdrop", "")
     blob = read(rel) if read and rel else None
@@ -2281,7 +2771,7 @@ def import_settings(project, path):
                 awards[str(k)] = a
         if awards:
             raw["awards"] = awards
-    if chars["list"] or chars["pick"]:
+    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("bonus"):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)

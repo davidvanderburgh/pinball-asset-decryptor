@@ -51,6 +51,23 @@ def test_in_between_scales_every_sample(relay):
     assert struct.unpack("<4h", out) == (16383, -16384, 500, -500)
 
 
+def test_the_meter_says_every_30_s_what_left_and_how_loud(relay):
+    """PAD-1109: a silent Mac run had nothing in the app's log saying whether
+    the box sent sound or silence; the relay now says it every 30 s."""
+    t = [0.0]
+    m = relay.Meter(clock=lambda: t[0])
+    m.add(_pcm(16384, -32768, 100) + b"\x01")     # odd byte: counted, not read
+    assert m.line(now=29.9) is None
+    s = m.line(now=30.0)
+    assert s.startswith("[padrelay] last 30 s: 0 KB to the player")
+    assert s.endswith("loudest 0.0 dBFS")
+    m.add(bytes(176400 * 30))                     # 30 s of digital silence
+    s = m.line(now=60.0)
+    assert "5167 KB to the player (172 KB/s)" in s and s.endswith("digital silence")
+    m.add(_pcm(3277))
+    assert m.line(now=90.0).endswith("loudest -20.0 dBFS")
+
+
 def test_the_file_says_the_level(relay, tmp_path):
     p = tmp_path / "audio_ctl.json"
     _write(p, gain=0.4, muted=False)
@@ -87,3 +104,59 @@ def test_no_volume_file_is_a_plain_relay(relay):
     vol = relay.Volume(None)
     assert vol.path is None
     assert vol.poll(now=10.0) == 1.0
+
+
+# ---- PAD-1109: the Mac reads the FIFO over docker exec (--pipe) ------------
+
+class _Vol:
+    def __init__(self, g):
+        self.path, self.g = "ctl", g
+
+    def poll(self):
+        return self.g
+
+
+def test_pump_keeps_samples_whole_scales_and_meters(relay):
+    chunks = [_pcm(1000, -1000) + b"\x10", b"\x00" + _pcm(4000), b""]
+    out, said = [], []
+    t = [0.0]
+    meter = relay.Meter(clock=lambda: t[0])
+
+    def read(_n):
+        t[0] += 20.0
+        return chunks.pop(0)
+    relay.pump(read, out.append, _Vol(0.5), said.append, meter)
+    got = b"".join(out)
+    assert struct.unpack("<4h", got) == (500, -500, 8, 2000)
+    assert said and said[0].startswith("[padrelay] last 40 s:")
+
+
+def test_pipe_gives_up_and_says_so_when_no_fifo_appears(relay, tmp_path, capsys):
+    t = [0.0]
+
+    def sleep(s):
+        t[0] += s
+    rc = relay.pipe_main([str(tmp_path / "audio.fifo"), ""], out=None,
+                         clock=lambda: t[0], sleep=sleep)
+    assert rc == 1
+    assert "this run is silent" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
+def test_pipe_copies_the_fifo_to_its_output_at_the_volume(relay, tmp_path, capsys):
+    import io
+    import threading
+    fifo = str(tmp_path / "audio.fifo")
+    os.mkfifo(fifo)
+    ctl = tmp_path / "ctl.json"
+    _write(ctl, gain=0.5, muted=False)
+
+    def guest():
+        with open(fifo, "wb") as w:
+            w.write(_pcm(2000, -2000, 30000))
+    threading.Thread(target=guest, daemon=True).start()
+    out = io.BytesIO()
+    assert relay.pipe_main([fifo, str(ctl)], out=out) == 0
+    assert struct.unpack("<3h", out.getvalue()) == (1000, -1000, 15000)
+    err = capsys.readouterr().err
+    assert "over docker exec" in err and "6 bytes forwarded" in err

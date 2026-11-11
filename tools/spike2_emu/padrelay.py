@@ -25,10 +25,21 @@ playaudio.sh hands this a third argument, the volume file padbox.sh keeps in
 step with the tab's audio_ctl.json ({"gain": 0-1, "muted": bool}), and the
 samples are scaled here on their way through. The Windows bridge passes none:
 padplay.py scales its own, and doing it twice would square the level.
+
+EVERY 30 s IT SAYS WHAT IT SENT AND HOW LOUD (PAD-1109). A Mac user heard
+nothing with the Volume at 100% while every counter the app's log could show
+read healthy: the game wrote its sound, nothing was dropped, the FIFO never
+backed up. Whether that sound left the box as silence or as music, and whether
+a player was even attached, was said only in padaudio.log inside the box,
+which the user cannot send. The [padrelay] lines are now carried into the
+app's log, and this one answers both: bytes handed to the player and their
+loudest sample, after the volume.
 """
 import json
+import math
 import os
 import socket
+import stat
 import sys
 import time
 from array import array
@@ -95,9 +106,132 @@ class Volume:
         return self.gain
 
 
+#: how often the relay says what it sent, matching the guest's [aud] summary
+REPORT_S = 30.0
+
+
+def peak_dbfs(peak):
+    """A sample magnitude as dBFS text; 0 is digital silence, said as such."""
+    if peak <= 0:
+        return "digital silence"
+    return "loudest %.1f dBFS" % (20 * math.log10(min(peak, 32768) / 32768.0))
+
+
+class Meter:
+    """Bytes and loudest sample handed to the player, said every REPORT_S."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.t0 = clock()
+        self.bytes = 0
+        self.peak = 0
+
+    def add(self, b):
+        n = len(b) & ~1
+        if n:
+            a = array("h")
+            a.frombytes(b[:n])
+            self.peak = max(self.peak, max(a), -min(a))
+        self.bytes += len(b)
+
+    def line(self, now=None):
+        """The report line once REPORT_S has passed, else None (and resets)."""
+        now = self.clock() if now is None else now
+        secs = now - self.t0
+        if secs < REPORT_S:
+            return None
+        s = ("[padrelay] last %.0f s: %d KB to the player (%.0f KB/s), %s"
+             % (secs, self.bytes // 1024, self.bytes / 1024.0 / secs,
+                peak_dbfs(self.peak)))
+        self.t0, self.bytes, self.peak = now, 0, 0
+        return s
+
+
+#: how long --pipe waits for playaudio.sh to make the FIFO
+PIPE_WAIT_S = 60.0
+
+
+def pump(read, write, vol, say, meter=None):
+    """Copy until read() ends: whole samples (a sample cut in two by the read
+    waits for its other half), at the volume, metered. Returns the bytes
+    written. A write error (the player went away) propagates."""
+    meter = meter or Meter()
+    total = 0
+    odd = b""
+    while True:
+        b = read(65536)
+        if not b:
+            return total
+        if vol.path:
+            b = odd + b
+            n = len(b) & ~1
+            b, odd = b[:n], b[n:]
+            b = scale(b, vol.poll())
+        write(b)
+        total += len(b)
+        meter.add(b)
+        said = meter.line()
+        if said:
+            say(said)
+
+
+def pipe_main(argv, out=None, clock=time.monotonic, sleep=time.sleep):
+    """padrelay.py --pipe <fifo> [ctl]: the FIFO to stdout (PAD-1109).
+
+    THE MAC'S SPEAKER READS THIS OVER `docker exec`, NOT OVER A PORT. Colima
+    publishes a box port through Lima's port forwarder, and on a Mac that
+    forwarder took the relay's whole stream - 11 minutes of it, at full rate,
+    nothing dropped - while ffplay at the far end received 310 KB, under two
+    seconds, and then nothing. A docker exec's output travels the Docker
+    socket that every other step of the run already uses, and it pushes back:
+    a player that stops reading stops this, and the guest's own dropped count
+    then says so instead of the sound vanishing in a buffer nobody can see.
+    Everything said goes to stderr; stdout is the sound."""
+    out = out or sys.stdout.buffer
+    if not argv:
+        print("usage: padrelay.py --pipe <fifo> [ctl]", file=sys.stderr)
+        return 2
+    fifo = argv[0]
+    vol = Volume(argv[1] if len(argv) > 1 and argv[1] else None)
+    vol.poll()
+
+    def say(s):
+        print(s, file=sys.stderr, flush=True)
+
+    t0 = clock()
+    while not (os.path.exists(fifo) and stat.S_ISFIFO(os.stat(fifo).st_mode)):
+        if clock() - t0 >= PIPE_WAIT_S:
+            say("[padrelay] no %s after %.0f s; this run is silent"
+                % (fifo, PIPE_WAIT_S))
+            return 1
+        sleep(0.25)
+    say("[padrelay] the player is reading %s over docker exec" % fifo)
+    fd = os.open(fifo, os.O_RDONLY)
+    total = [0]
+
+    def write(b):
+        out.write(b)
+        out.flush()
+        total[0] += len(b)
+    try:
+        pump(lambda n: os.read(fd, n), write, vol, say)
+    except (BrokenPipeError, OSError) as exc:
+        say("[padrelay] player went away: %s" % exc)
+        if out is getattr(sys.stdout, "buffer", None):
+            # or the exit's own flush of the dead pipe prints a traceback
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    finally:
+        say("[padrelay] %d bytes forwarded" % total[0])
+        os.close(fd)
+    return 0
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--pipe":
+        raise SystemExit(pipe_main(sys.argv[2:]))
     if len(sys.argv) < 3:
-        print("usage: padrelay.py <fifo> <port> [ctl]", file=sys.stderr)
+        print("usage: padrelay.py <fifo> <port> [ctl] | --pipe <fifo> [ctl]",
+              file=sys.stderr)
         raise SystemExit(2)
     fifo, port = sys.argv[1], int(sys.argv[2])
     vol = Volume(sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None)
@@ -129,25 +263,18 @@ def main():
         # at all - the player would find nothing to connect to and the run was
         # silent. Listen first, open second.
         fd = os.open(fifo, os.O_RDONLY)
-        total = 0
-        odd = b""
+        total = [0]
+
+        def send(b, conn=conn):
+            conn.sendall(b)
+            total[0] += len(b)
         try:
-            while True:
-                b = os.read(fd, 65536)
-                if not b:
-                    break
-                # a sample cut in two by the read waits for its other half
-                if vol.path:
-                    b = odd + b
-                    n = len(b) & ~1
-                    b, odd = b[:n], b[n:]
-                    b = scale(b, vol.poll())
-                conn.sendall(b)
-                total += len(b)
+            pump(lambda n: os.read(fd, n), send, vol,
+                 lambda s: print(s, flush=True))
         except (BrokenPipeError, ConnectionResetError, OSError) as exc:
             print("[padrelay] player went away: %s" % exc, flush=True)
         finally:
-            print("[padrelay] %d bytes forwarded" % total, flush=True)
+            print("[padrelay] %d bytes forwarded" % total[0], flush=True)
             os.close(fd)
             conn.close()
 

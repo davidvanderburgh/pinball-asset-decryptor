@@ -882,7 +882,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                          "line": got["line"], "missing": got["missing"], "over": got["over"],
                          "lost": bool(c["powers"]) and not got["cfg"],
                          "picture": bool(_CP.picture_path(project, c)), "colour": c.get("colour") or "",
-                         "video": bool(_CP.video_path(project, c))})                         # PAD-1079
+                         "video": bool(_CP.video_path(project, c)),                          # PAD-1079
+                         # PAD-1123: what plays once it is picked
+                         "picked_clip": os.path.basename(_CP.picked_clip_path(project, c)),
+                         "picked_still": _CP.is_still(_CP.picked_clip_path(project, c)),
+                         "picked_sound": os.path.basename(_CP.picked_sound_path(project, c))})
         lost = sum(1 for r in rows if r["lost"])
         partly = sum(1 for r in rows if r["missing"] and not r["lost"])
         note = ("%d character(s). " % len(rows) if rows else "") + (
@@ -899,6 +903,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
                           "look": self._coop_look(project, chars),                              # PAD-1079
+                          "intro": os.path.basename(_CP.intro_path(project, chars)) if project else "",   # PAD-1114
+                          "bonus": bool(chars.get("bonus")),                                     # PAD-1123
+                          "picked_max": _CP.PICKED_MAX_SECONDS, "still_s": _CP.PICKED_STILL_SECONDS,
                           "videos": "" if prof is None or _CP.can_video(prof) else (
                               "%s cannot play a video behind its pick screen yet: a character's video is kept, and "
                               "its picture shows." % prof.label),
@@ -1064,6 +1071,99 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         history_log.record(project, [hist] if hist else [])
         self._publish_coop_chars(project)
         return True
+
+    @rpc
+    def coop_intro(self, clear=False):
+        """PAD-1114: Intro video...: a video of the owner's, with its own sound, that opens each co-op and team game
+        (both flipper buttons skip it); *clear* takes it off."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        if clear:
+            _CP.save_intro(project, None)
+            self._say("co-op intro: none - co-op and team games start as the game's own do")
+        else:
+            path = self.window.ask_open("modes_file", "Choose the co-op and team games' intro video",
+                                        [("Videos", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_intro(project, path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op intro: %s opens each co-op and team game" % os.path.basename(path))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_char_picked(self, i, clear=False):
+        """PAD-1123: a character's When picked clip: a video, or a picture, of the owner's that plays full screen once a
+        teammate picks it; *clear* takes it off."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        chars = _CP.load_characters(project) if project else None
+        if not chars or not 0 <= int(i) < len(chars["list"]):
+            return False
+        name = chars["list"][int(i)]["name"]
+        if clear:
+            _CP.save_picked_clip(project, int(i), None)
+            self._say("co-op characters: %s plays no clip once picked" % name)
+        else:
+            path = self.window.ask_open("modes_file", "Choose the video or picture %s shows once picked" % name,
+                                        [("Videos and pictures", " ".join("*" + e for e in _CP.VIDEO_EXTS
+                                                                          + _CP._PICTURE_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_picked_clip(project, int(i), path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op characters: %s shows %s once picked" % (name, os.path.basename(path)))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_char_picked_sound(self, i, clear=False):
+        """PAD-1123: a character's When picked sound: a sound file of the owner's (or a video's sound) played once a
+        teammate picks it; *clear* takes it off (a picked video's own sound plays then, if it has one)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        chars = _CP.load_characters(project) if project else None
+        if not chars or not 0 <= int(i) < len(chars["list"]):
+            return False
+        name = chars["list"][int(i)]["name"]
+        if clear:
+            _CP.save_picked_sound(project, int(i), None)
+            self._say("co-op characters: %s plays no sound of its own once picked" % name)
+        else:
+            path = self.window.ask_open("modes_file", "Choose the sound %s plays once picked" % name,
+                                        [("Sounds", " ".join("*" + e for e in _CP.SOUND_EXTS)),
+                                         ("A video's sound", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_picked_sound(project, int(i), path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op characters: %s plays %s once picked" % (name, os.path.basename(path)))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_chars_bonus(self, on):
+        """PAD-1123: whether each teammate's character shows on their End of Ball Bonus (its picture, or its video, in a
+        window right of the bonus's words)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project or not _CP.load_characters(project)["list"]:
+            return False
+        was = bool(_CP.load_characters(project).get("bonus"))
+        return self._save_coop_chars(project, dict(_CP.load_characters(project), bonus=bool(on)), "on the bonus",
+                                     "on" if was else "off", "on" if on else "off")
 
     @rpc
     def coop_chars_backdrop(self, clear=False):

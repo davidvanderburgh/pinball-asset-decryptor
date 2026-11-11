@@ -69,9 +69,11 @@
     {"old": "Sub LightningTarget_Slingshot\n    If Tilted Then Exit Sub", "why": "the kick target scores nothing and kicks weaker than the real one", "since": "PAD-982: the kick target is the game's KICK TARGET switch and kicks harder"},
     {"old": "Sub Trigger015_UnHit : Controller.Switch(", "why": "hits on the ball the Overlord holds do not count, so All My Life Multiball never starts", "since": "PAD-982: the Overlord opto sees only the held ball's spot"},
     {"old": "PlaySoundAt \"fx_slingshot_EM\", LightningTarget", "why": "the first kick target hit stops Visual Pinball with a script error (ball.x)", "since": "PAD-992: the kick target sounds at the target beside it, as JP's own script does"},
+    {"old": "Sub PadKickTarget(e) : If e Then PlaySoundAt \"fx_slingshot_EM\", Target004 : End If : End Sub", "why": "the kick target fires no DOF and kicks weaker than the real one", "since": "PAD-1119: the kick target fires the right slingshot's DOF (104, 107) and kicks harder"},
     {"old": "PadDim = RGB((v And 255) \\ 14", "why": "the shot arrows stay dark: their colour goes on at a 14th of its brightness", "since": "PAD-1101: a lit arrow's Color is its colour, as JP's own SetLightColor sets it"},
     {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1065) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
-    {"old": "Sub swPlungerRest_Hit : Controller.Switch(1065) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"}
+    {"old": "Sub swPlungerRest_Hit : Controller.Switch(1065) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
+    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}
   ],
   "switch_fakes": {
     "_": "PAD-968: the Overlord fork is a latched post the table has no switch for. FORK RELEASE pops it up (it catches the ball: with capture lit the game arms both coils on the OVERLORD OPTO), FORK DOWN pulls it back onto its latch (the ball goes). The controller follows it, answers OVERLORD FORK UP and hands the table its state as solenoid 60 (up = the posts up, the ball held)",
@@ -99,10 +101,10 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "Sub PadSavePost(e) : SavePost.IsDropped = Not e : End Sub\nSub PadVanPost(e) : VanPost.IsDropped = Not e : End Sub\nSub PadResetDrops(e) : If e Then dt1.IsDropped = 0 : dt2.IsDropped = 0 : dt3.IsDropped = 0 : End If : End Sub\nSub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e : End Sub\nSub PadKickTarget(e) : If e Then PlaySoundAt \"fx_slingshot_EM\", Target004 : End If : End Sub\n",
+  "extra_vbs": "Sub PadSavePost(e) : SavePost.IsDropped = Not e : End Sub\nSub PadVanPost(e) : VanPost.IsDropped = Not e : End Sub\nSub PadResetDrops(e) : If e Then dt1.IsDropped = 0 : dt2.IsDropped = 0 : dt3.IsDropped = 0 : End If : End Sub\nSub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e : End Sub\nSub PadKickTarget(e) : If e Then PlaySoundAt \"fx_slingshot_EM\", Target004 : DOF 104, DOFPulse : DOF 107, DOFPulse : End If : End Sub\n",
   "item_fields": {
-    "_": "PAD-982: the kick target (LightningTarget, a slingshot wall) kicks a quarter harder than JP's 240: Mike found it weaker than the real one, which can send the ball up the ramp",
-    "LightningTarget": {"SLGF": 300.0}
+    "_": "PAD-982, PAD-1119: the kick target (LightningTarget, a slingshot wall) kicks half again as hard as JP's 240 (300 was still weak): Mike found it weaker than the real one, which can send the ball up the ramp",
+    "LightningTarget": {"SLGF": 360.0}
   },
   "retrofit_triggers": {
     "_": "PAD-982: JP's Overlord opto (Trigger015) covers the whole pocket up to the hit target, so a held ball knocked back onto the target never left it, and the game counts a hit on the held ball only when its opto opens (emulator, 1.04.0: fourteen OVERLORD HIT TARGET hits with the opto made counted none). This one is the pocket's mouth, where the ball rests against the fork's posts: a ball knocked 45 units back leaves it",

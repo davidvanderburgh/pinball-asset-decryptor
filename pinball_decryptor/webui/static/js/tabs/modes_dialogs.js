@@ -294,6 +294,7 @@ export function CoopCharsDialog({ s, onClose }) {
   const groups = ch.groups || [];
   const [open, setOpen] = useState(-1);
   const [looking, setLooking] = useState(false);
+  const [picking, setPicking] = useState(-1);          // PAD-1123: the row whose When picked panel is open
   useEffect(() => { call("modes.coop_chars_refresh"); }, []);
   const opts = [{ value: "", label: "Start from..." }, { value: "-", label: "No powers" }].concat(abil.map((a) => (
     { value: a.key, label: a.ok ? a.words : `${a.words} (not on this game)`, disabled: !a.ok })));
@@ -317,6 +318,22 @@ export function CoopCharsDialog({ s, onClose }) {
         title="Put one of the set abilities' powers on this character in place of its list, as a starting point (No powers: an empty list)."
         onChange=${(v) => { if (v) call("modes.coop_char_set", i, null, v === "-" ? "" : v); }} />
     </div>
+  </div>`;
+  // PAD-1123: what plays full screen once a teammate picks it, and the sound with it
+  const pickedOf = (r, i) => html`<div class="modes-coop-ch-picked">
+    <div class="row" style="gap:8px">
+      <${Button} size="xs" kind="ghost" icon="film" onClick=${() => call("modes.coop_char_picked", i, false)}
+        title=${r.picked_clip ? "What it shows full screen once picked: choose another." : "A short video, or a picture (a movie poster), shown full screen once a teammate picks it."}>
+        ${r.picked_clip ? `Clip: ${r.picked_clip}` : "Clip…"}<//>
+      ${r.picked_clip ? html`<${Button} size="xs" kind="ghost" icon="x" title="No clip once picked." onClick=${() => call("modes.coop_char_picked", i, true)} />` : null}
+      <${Button} size="xs" kind="ghost" icon="wave" onClick=${() => call("modes.coop_char_picked_sound", i, false)}
+        title=${r.picked_sound ? "The sound it plays once picked: choose another." : "A sound of your own (a roar), played once a teammate picks it."}>
+        ${r.picked_sound ? `Sound: ${r.picked_sound}` : "Sound…"}<//>
+      ${r.picked_sound ? html`<${Button} size="xs" kind="ghost" icon="x" title="No sound of its own once picked." onClick=${() => call("modes.coop_char_picked_sound", i, true)} />` : null}
+    </div>
+    <span class="small dim wrap">${r.picked_clip || r.picked_sound
+      ? `Once a teammate picks ${r.name}, ${r.picked_clip ? (r.picked_still ? `its picture shows full screen for ${ch.still_s || 3} seconds (or as long as its sound, up to ${ch.picked_max || 10})` : `its clip plays full screen (up to ${ch.picked_max || 10} seconds)`) : "its card stays on the glass"}${r.picked_sound ? ", with its sound" : r.picked_clip && !r.picked_still ? ", with the clip's own sound" : ""}. Both flipper buttons cut it short.`
+      : `Give ${r.name} a short video or a picture to show full screen once picked, and a sound to play then. A video plays its own sound when it has no sound of its own here.`}</span>
   </div>`;
   const row = (r, i) => html`<div class="modes-coop-ch-row" key=${i + ":" + r.name}>
     <span class="small dim">${i + 1}</span>
@@ -347,6 +364,8 @@ export function CoopCharsDialog({ s, onClose }) {
       <${Button} size="xs" kind="ghost" icon="film" onClick=${() => call("modes.coop_char_video", i, false)}
         title=${r.video ? "Its video, playing in its picture's frame on the pick screen: choose another." : "A video of your own, played over and over in its picture's frame while the pick is on it."}>${r.video ? "Video ✓" : "Video…"}<//>
       ${r.video ? html`<${Button} size="xs" kind="ghost" icon="x" title="No video: its picture again." onClick=${() => call("modes.coop_char_video", i, true)} />` : null}
+      <${Button} size="xs" kind=${picking === i ? "" : "ghost"} icon="play" onClick=${() => setPicking(picking === i ? -1 : i)}
+        title="When picked: a clip and a sound that play once a teammate picks it.">${r.picked_clip || r.picked_sound ? "When picked ✓" : "When picked…"}<//>
       <${Button} size="xs" kind="ghost" icon="eye" title="Show its pick screen in the preview below." onClick=${() => call("modes.coop_chars_show", i)} />
       <${Button} size="xs" kind="ghost" icon="trash" title="Take this character out." onClick=${() => call("modes.coop_char_remove", i)} />
     </span>
@@ -376,6 +395,20 @@ export function CoopCharsDialog({ s, onClose }) {
         title="The pick screen's look: its title, the color of each of its words, a background picture."
         onClick=${() => setLooking(!looking)}>Look…<//>
     </div>
+    <div class="row" style="margin-top:8px; gap:8px">
+      <${Button} size="sm" kind="ghost" icon="film" onClick=${() => call("modes.coop_intro", false)}
+        title=${ch.intro ? "The video that opens each co-op and team game: choose another." : "A video of your own, with its own sound, that opens each co-op and team game."}>
+        ${ch.intro ? "Intro video ✓" : "Intro video…"}<//>
+      ${ch.intro ? html`<${Button} size="xs" kind="ghost" icon="x" title="No intro: co-op and team games start as the game's own do."
+        onClick=${() => call("modes.coop_intro", true)} />` : null}
+      <span class="small dim wrap">${ch.intro ? `${ch.intro} opens each co-op and team game, with its own sound. Both flipper buttons skip it. Then the ball comes to the shooter lane, the flippers choose the language (when the game's Player Language Select is on), and the character pick opens.` : "Open each co-op and team game with a video of your own, with its own sound. Both flipper buttons skip it."}</span>
+    </div>
+    <div class="row" style="margin-top:8px; gap:8px">
+      <${Check} checked=${!!ch.bonus} label="Show each teammate's character on their End of Ball Bonus" disabled=${!rows.length}
+        title="Its video (or picture, without one) in a framed window right of the bonus's words while that teammate's bonus counts."
+        onChange=${(v) => call("modes.coop_chars_bonus", v)} />
+      <span class="small dim wrap">${ch.bonus ? "Its video plays there, or its picture shows when it has no video. A character with neither keeps the game's own bonus." : ""}</span>
+    </div>
     ${looking && ch.look ? html`<${CoopLook} look=${ch.look} />` : null}
     ${ch.preview ? html`<div class="modes-coop-ch-pv">
       <img src=${mediaUrl(ch.preview.path) + "&v=" + ch.preview.seq} alt="The machine's pick screen" />
@@ -383,7 +416,7 @@ export function CoopCharsDialog({ s, onClose }) {
     </div>` : null}
     ${ch.refused ? html`<${Note} kind="warn">${ch.refused}<//>` : null}
     ${ch.videos && rows.some((r) => r.video) ? html`<${Note} kind="info">${ch.videos}<//>` : null}
-    ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(50vh, 520px)">${rows.map((r, i) => html`${row(r, i)}${open === i ? powersOf(r, i) : null}`)}</div>`
+    ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(50vh, 520px)">${rows.map((r, i) => html`${row(r, i)}${open === i ? powersOf(r, i) : null}${picking === i ? pickedOf(r, i) : null}`)}</div>`
       : html`<div class="small muted" style="margin-top:8px">No characters yet: press Add${ch.preset ? `, or load ${ch.preset}'s set` : ""}.</div>`}
   <//>`;
 }

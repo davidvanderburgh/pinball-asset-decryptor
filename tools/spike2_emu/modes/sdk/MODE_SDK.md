@@ -6273,6 +6273,34 @@ with their own scores (11,717,290 / 12,465,960), each player's own character pic
 its initials and the attract mode's TEAM PLAY CHAMPION page, the game's own champions untouched; 3 players (`teams
 on`): player 3 played both of team 2's turns each ball; no faults.
 
+### Co-op and Insider Connected (PAD-1108)
+
+DoomWalrus666 (3-player co-op): "achievements earned by player 2 and 3 were shown as earned by Player 1. Player 1
+username displayed on End of Ball Bonus for all 3 players". The game plays one player for the team, and it asks its
+user manager for that player's login. The manager keeps two tables of the players' logins - player p's entry (a 16-byte
+user uuid and a flags word) at table + 20p + 4, the tables at the manager's +A and +B - and the per-player name, the
+achievement drivers and the logged-in test all read them. coop.cfg:
+
+    users <manager> <A> <B>     the user manager (a global) and its tables' fields (coop_play.insider_users: the
+                                lookup `ldr ip,[r0,#A]; cmp r3,#1; ldr r0,[r0,#B]; movne r0,ip; b <table lookup>`)
+    achievements <award>        the game's achievement award (coop_play.achievement_award: the one function counting
+                                AUD_CONNECTIVITY_ACHIEVEMENTS_GIVEN)
+
+While teammate t is up in a co-op game the game's player 1 holds teammate t's entry and t's place holds player 1's;
+before each of the game's own player changes they go back, so the game's end, its high scores and its session see the
+logins as the players made them (and the tick puts them back after a game ended any other way). A team game is left
+alone: the game counts two players there and clears the entries past its count, so a swapped entry would be lost.
+The award is refused while the gate holds back (the PAD-698 hold on the achievement list only works from boot: a card
+of co-op and nothing else holds only while CO-OP PLAY is not Off, and a machine switched to co-op after booting at Off
+already has the list). Every Spike 2 build measured has one manager (the tables at +0x160/+0x164, Beatles and Star
+Wars ELG +0x150/+0x154) and, but for Star Wars ELG, one award.
+
+Emulator, Godzilla LE 1.16 (marker logins planted in both tables from the host, read back at each turn): in a
+3-teammate co-op game the game's player 1 held teammate 2's entry through teammate 2's balls and teammate 3's through
+theirs, every entry back as planted after the game; in a team game players 1 and 2 kept theirs and the game itself
+cleared players 3 and 4's at player 3's first turn. A test mode calling the award on a scratch table was refused
+(the entry's earned byte stayed 0); without the `achievements` line the same call ran.
+
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the
@@ -6352,6 +6380,48 @@ only on a title whose port has the backdrop, `backdrop_draw`). While its card is
 PICKED) the runtime loops its clip as the backdrop, behind the HUD in the city's place, and gives the backdrop back
 when the card goes. The app makes the clip the bank's size with the owner's video where the window is on the glass, on
 black, so the backdrop stretched over the glass puts the video in the frame.
+
+PAD-1114: the co-op and team games' intro (the dialog's **Intro video...**), with or without characters:
+
+    intro PadCoopIntro 12000                  the intro's clip (a full-screen clip the build added) and its length
+                                              in ms; sounds.cfg `cintro <request> <carrier key> <its key> <ms>` is
+                                              its sound, on a carrier the game never plays (as PAD-945's shot sounds)
+
+A game that begins as co-op or team (the right flipper held at Start, the start menu's CO-OP PLAY / TEAM PLAY, a
+team game's filling Start, a teammate joining before ball 1 is out) plays it once: full-screen over the game's own
+start film (`pm_clip`; asked for again once if the game's film takes the surface in its first 1.5 s), its sound on
+the carrier with the game's own sounds faded under it (its music asked for again after). Both flipper buttons down
+together, each let go once since it began, skip it. From then until the pick the flippers and Action are the
+runtime's (the game's language keys and launch do not see them), so the ball waits in the shooter lane
+(`ball_launch_flag`, 20 s at most); then, where the game's PLAYER LANGUAGE SELECT is on (`value language_adjustment`, read
+as the intro begins; Godzilla's 14 puts its own bar over its start film, under the intro), a language window: the
+top line says `LANGUAGE: ENGLISH`, each flipper press flips every player's language word (`data language_player`, +
+4 x player; `text language_<n>` names them), and 6 s after the last press it goes on by itself (not on Action: Godzilla
+launches the ball at an Action press the runtime holds back, so an Action press, or any launch, ends it too); then the
+first pick, held back until here. Godzilla's own bar over its start film is under the intro, so this window is where the language is chosen.
+
+PAD-1123: a character's clip and sound once picked (the dialog's **When picked...**), and the character on its
+teammate's End of Ball Bonus (the dialog's **Show each teammate's character on their End of Ball Bonus**):
+
+    char_picked 1 PadCoopPicked1 4000         character 1's clip once picked (the owner's video, or a picture shown
+                                              3 s or as long as its sound, up to 10 s: full screen, fitted whole) and
+                                              its length in ms; sounds.cfg `cpick <n> <request> <carrier key> <its key>
+                                              <ms>` is its sound (its own file, else the video's), on the intro's carrier
+    bonus_loop EndOfBallBonus_BackgroundLoop  the clip the game's bonus loops (found in the bank by name; Godzilla 1.15
+                                              and 1.16, at SquareCrop: x1.29, moved -197,-126)
+    char_bonus 1 PadCoopBonus1                that loop made again with character 1's video (or picture) in a framed
+                                              window right of the bonus's words (glass 964,236 360x290)
+
+When the teammate up takes a character (its PICKED card on the glass) its sound plays at once; its clip waits until
+the card has had its 2.5 s and the card's own video behind it has been given back (the bank's one surface), then plays
+full screen over the game with `pm_clip` (asked for again once if a clip of the game's takes the surface in its first
+1.5 s). Both flipper buttons down together, each let go once since it began, cut it short, its sound too. A pick for a
+teammate who is not up plays neither. The bonus: the game asks for its loop by name through `clip_play` (hooked; a port
+on clip v2 or a clip layer has no bonus copies yet), and the runtime answers with the copy of the character of the
+teammate whose ball ended - the turn moves on only at the player change, after the bonus (emulator, Godzilla LE 1.16).
+A teammate with no character, or one with no picture or video, gets the game's own loop. The award cards' backdrop
+(PAD-1028 round 3) plays the game's own loop, never a teammate's copy. The build makes the copies from the project's
+own file of the loop (the stock one extracted, or the owner's replacement of it), else the card's.
 
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 

@@ -337,6 +337,32 @@ def display_setting():
         return None
 
 
+def carry_lcd_layout(kit, conf=None, mons=None):
+    """PAD-1131: a Visual Pinball layout saved before the display setting
+    existed (PAD-811 came a day after the layouts) left only the kit's LCD
+    rectangle, so its run MOVED the framed WSLg window over the second
+    screen from this side, and the title bar and edges stayed visible ("the
+    windows border is visible ... when it goes full screen"). With the
+    display setting free, that rectangle becomes the setting the layout
+    writes today (full screen, borderless, on the monitor it fills), once:
+    the kit is marked so a later choice of "free" on the Emulate tab holds.
+    Returns the setting written, or None."""
+    lcd = kit.get("lcd") or {}
+    if kit.get("display_carried") or not all(k in lcd for k in ("x", "y", "w", "h")):
+        return None
+    kit["display_carried"] = True
+    import padisplay
+    conf = conf or padisplay.CONF
+    if padisplay.load(conf).get("mode", "free") != "free":
+        return None
+    mons = mons or padisplay.monitors()
+    s = padisplay.for_rect([lcd["x"], lcd["y"], lcd["w"], lcd["h"]], mons)
+    if s["mode"] == "free":
+        return None
+    padisplay.save(s, conf, mons)
+    return s
+
+
 def window_rect(hwnd):
     import ctypes
     r = (ctypes.c_long * 4)()
@@ -1429,6 +1455,7 @@ class Bridge:
         # solenoids: number -> 0/1; pending likewise
         self.sol_state = {}
         self.sol_pending = set()
+        self.sol_unread_on = set()         # went ON since the table last read them
         self._coil_seen = {}               # (node, idx) -> (fires, until)
         self._coil_off_at = {}             # (node, idx) -> monotonic s
         self.sw_ids = {}                   # (node, input bit) -> switch id
@@ -1553,6 +1580,7 @@ class Bridge:
                     % (padlaunch.PLATFORM_NAMES.get(self.map.platform, self.map.platform),
                        self.title or "this title", padlaunch.card_places(self.title, self.map.platform),
                        self.title))
+            self._carry_lcd_layout()
             self.launch = padlaunch.launch_for(self.map.platform, self.title, card)
             self._loading_start()
             try:
@@ -2074,6 +2102,23 @@ class Bridge:
             log("window placement failed: %s" % exc)
             self.lcd_placed = True
 
+    def _carry_lcd_layout(self):
+        """carry_lcd_layout for this run, before its window opens: the
+        renderer then maps it borderless and full screen itself."""
+        if sys.platform != "win32":
+            return
+        try:
+            kit = padlaunch.kit_load()
+            if kit.get("display_carried"):
+                return
+            s = carry_lcd_layout(kit)
+            padlaunch.kit_save(kit)
+            if s:
+                log("lcd: the layout's screen is now the display setting (%s on monitor %s, "
+                    "borderless)" % (s["mode"], s["monitor"]))
+        except Exception as exc:                            # noqa: BLE001
+            log("lcd: layout not carried into the display setting: %s" % exc)
+
     def _place_player(self):
         """Visual Pinball's own playfield window, where the kit's `player`
         says (padvpx player): borderless in windowed mode, so the user
@@ -2522,6 +2567,8 @@ class Bridge:
         if self.sol_state.get(n) != on:
             self.sol_state[n] = on
             self.sol_pending.add(n)
+            if on:
+                self.sol_unread_on.add(n)
             if n <= self.map.sol_max:
                 log("sol %d -> %d" % (n, on))
 
@@ -2582,12 +2629,26 @@ class Bridge:
         return out
 
     def changed_solenoids(self):
+        """Every coil that changed since the table last asked. A pulse that
+        came and went between two reads (Visual Pinball reads once a frame; a
+        lock's kick can be 20 ms, PAD-1116) is reported ON now and OFF on the
+        next read, so the table's SolCallback still sees it fire."""
         with self.lock:
             if not self.sol_pending:
                 return None
-            out = [[n, self.sol_state[n]] for n in sorted(self.sol_pending)
-                   if n <= self.map.sol_max]
+            out = []
+            again = set()
+            for n in sorted(self.sol_pending):
+                if n > self.map.sol_max:
+                    continue
+                on = self.sol_state[n]
+                if not on and n in self.sol_unread_on:
+                    on = 1
+                    again.add(n)
+                out.append([n, on])
             self.sol_pending.clear()
+            self.sol_pending.update(again)
+            self.sol_unread_on.clear()
         return out or None
 
     def lamp(self, n):

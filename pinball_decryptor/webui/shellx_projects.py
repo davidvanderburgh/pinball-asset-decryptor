@@ -889,8 +889,8 @@ class ProjectsMixin:
             rows.append({"file": os.path.basename(f["src"]), "path": f["src"],
                          "kind": rx.KIND_DIRS[f["kind"]], "uses": f["uses"],
                          "to": rx._rel(f["to"], dest) if dest else "",
-                         "state": "to copy" if f["state"] == "copy"
-                         else "already there"})
+                         "state": {"copy": "to copy", "rename": "to rename"}.get(
+                             f["state"], "already there")})
         rest = rx.rest_summary(_rest_preview(target))
         files = (("the %s of your own, in a Video, an Audio and an Images "
                   "folder, with " % rx.words(res["counts"])) if res["files"] else "")
@@ -902,7 +902,7 @@ class ProjectsMixin:
                 % (files, rx.RECORD_NAME, (", " + ", ".join(rest)) if rest else ""))
         status = ""
         if dest:
-            n_copy = sum(1 for f in res["files"] if f["state"] == "copy")
+            n_copy = sum(1 for f in res["files"] if f["state"] in ("copy", "rename"))
             status = "%d file(s) to copy (%s)%s." % (
                 n_copy, human_size(res["bytes"]),
                 ", %d already there" % (len(res["files"]) - n_copy)
@@ -968,7 +968,8 @@ class ProjectsMixin:
 
         def work(progress, cancel):
             out = rx.export(staged_changes.load(target), res,
-                            progress=progress, cancel=cancel)
+                            progress=progress, cancel=cancel,
+                            move_there=repoint)
             if not out["cancelled"]:
                 out["rest"] = rx.export_rest(target, dest, progress=progress,
                                              cancel=cancel)

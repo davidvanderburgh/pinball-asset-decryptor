@@ -570,22 +570,80 @@ def run_browser(ctx, server, host, open_browser=True):
     _close_app(ctx)
 
 
+def _venv_candidates(root):
+    """Where a checkout's interpreter may live, best first (PAD-1132).
+
+    A tree's own .venv; then, for a tree that has none, the .venv of the
+    checkout it was cut from.  Ticket trees (pad-triage/work/tickets/PAD-n)
+    and item worktrees never get a .venv of their own, so without this a
+    pad-triage "Launch app" or a dev-chooser pick ran on the system Python,
+    which has no pywebview: the app opened in the browser and its Emulate
+    tab said PAD's own Python was missing pywebview.  The tree stays the
+    cwd, so `-m` still imports the TREE's code; only the interpreter is
+    borrowed.  $PAD_DEV_VENV names one outright."""
+    import json
+    import subprocess
+    out = [os.path.join(root, ".venv")]
+    if os.environ.get("PAD_DEV_VENV"):
+        out.append(os.environ["PAD_DEV_VENV"])
+    # a worktree of a checkout: the checkout that holds the shared .git
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute",
+             "--git-common-dir"], cwd=root, capture_output=True, text=True,
+            timeout=10,
+            creationflags=0x08000000 if os.name == "nt" else 0).stdout.strip()
+        if common:
+            out.append(os.path.join(os.path.dirname(common), ".venv"))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    # a pad-triage ticket tree: <triage>/work/tickets/PAD-n, and pad-triage
+    # names David's dev checkout in its config.json (repo.dev_checkout)
+    parts = os.path.normpath(root).split(os.sep)
+    if len(parts) >= 4 and [p.lower() for p in parts[-3:-1]] == \
+            ["work", "tickets"]:
+        triage = os.sep.join(parts[:-3])
+        try:
+            with open(os.path.join(triage, "config.json"),
+                      encoding="utf-8") as fh:
+                dev = (json.load(fh).get("repo") or {}).get("dev_checkout")
+            if dev:
+                out.append(os.path.join(dev, ".venv"))
+        except (OSError, ValueError, AttributeError):
+            pass
+        out.append(os.path.join(os.path.dirname(triage),
+                                "pinball-asset-decryptor", ".venv"))
+    return out
+
+
+def _checkout_venv(root):
+    """(venv dir, its windowless python) for the first candidate that has
+    one, or None."""
+    for venv in _venv_candidates(root):
+        exe = (os.path.join(venv, "Scripts", "pythonw.exe")
+               if sys.platform == "win32"
+               else os.path.join(venv, "bin", "python"))
+        if os.path.isfile(exe):
+            return os.path.normpath(venv), exe
+    return None
+
+
 def _relaunch_with_checkout_venv(argv):
     """Development only: a checkout started by an interpreter without
     pywebview (the tree selector relaunches with the SAME interpreter it was
-    started with) re-runs itself with the checkout's own .venv, which has
-    the pinned requirements.  Never in an installed copy (no .venv there,
-    and frozen builds are skipped).  Returns True when it relaunched."""
+    started with) re-runs itself with a .venv that has the pinned
+    requirements: its own, or the dev checkout's (_venv_candidates).  Never
+    in an installed copy (no .venv and no git checkout there, and frozen
+    builds are skipped).  Returns True when it relaunched."""
     import subprocess
     if getattr(sys, "frozen", False) or os.environ.get("PAD_UI_VENV_RELAUNCHED"):
         return False
     root = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
-    venv = os.path.join(root, ".venv")
-    exe = (os.path.join(venv, "Scripts", "pythonw.exe")
-           if sys.platform == "win32" else os.path.join(venv, "bin", "python"))
-    if not os.path.isfile(exe):
+    found = _checkout_venv(root)
+    if not found:
         return False
+    venv, exe = found
     if os.path.normcase(os.path.abspath(sys.prefix)) == os.path.normcase(venv):
         return False
     env = dict(os.environ)

@@ -153,11 +153,17 @@ def _s3_rig(monkeypatch, check=b"s3check: ok\n"):
     monkeypatch.setattr(emulate_rig, "spike3_check_cmd",
                         lambda: ["bash", "s3launch.sh", "--check"])
     monkeypatch.setattr(emulate_rig, "spike3_launch_cmd",
-                        lambda card, slot, minutes, audio=False, keyfile=None, audio_ctl=None:
+                        lambda card, slot, minutes, audio=False, keyfile=None, audio_ctl=None,
+                        restore=None:
                         ["bash", "s3launch.sh", card, str(slot), str(minutes)]
                         + (["--audio"] if audio else [])
                         + (["--keyfile", keyfile] if keyfile else [])
-                        + (["--audio-ctl", audio_ctl] if audio_ctl else []))
+                        + (["--audio-ctl", audio_ctl] if audio_ctl else [])
+                        + (["--restore", restore] if restore else []))
+    monkeypatch.setattr(emulate_rig, "spike3_load_cmd",
+                        lambda slot, name: ["bash", "s3launch.sh", "--load", str(slot), name])
+    monkeypatch.setattr(emulate_rig, "spike3_slots_cmd",
+                        lambda *a: ["bash", "s3launch.sh", "--slots"] + list(a))
     monkeypatch.setattr(emulate_rig, "spike3_stop_cmd",
                         lambda slot: ["bash", "s3launch.sh", "--stop", str(slot)])
     return {"--check": _Done(check)}

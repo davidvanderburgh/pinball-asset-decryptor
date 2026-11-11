@@ -1512,10 +1512,11 @@ def spike3_keyfile(card, project=None):
 
 
 def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None,
-                      audio_ctl=None):
+                      audio_ctl=None, restore=None):
     """The run: the card into the Spike 3 store if needed (decrypted with
     *keyfile*, the user's padkeys.json), then the game in a window on rig
-    slot *slot* for *minutes*."""
+    slot *slot* for *minutes* - started from save state *restore*
+    (``game/slot``, PAD-1147) instead of booted when one is given."""
     conv = _wsl_path if sys.platform == "win32" else (lambda p: p)
     args = [conv(card), int(slot), int(minutes)] + (["--audio"] if audio else [])
     if keyfile:
@@ -1524,7 +1525,20 @@ def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None,
         # a native Windows path, as the Spike 2 run's PAD_AUDIO_CTL: the
         # Windows sound player reads it, never WSL - so not converted
         args += ["--audio-ctl", audio_ctl]
+    if restore:
+        args += ["--restore", restore]
     return _s3_argv(*args)
+
+
+def spike3_load_cmd(slot, name):
+    """Load save state *name* (a bare slot name: the run's own title's) into
+    the Spike 3 run on rig slot *slot* (PAD-1147)."""
+    return _s3_argv("--load", int(slot), name)
+
+
+def spike3_slots_cmd(*args):
+    """slots.sh ARGS (list / label / delete) on the Spike 3 save states."""
+    return _s3_argv("--slots", *args)
 
 
 def spike3_stop_cmd(slot):

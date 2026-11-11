@@ -624,6 +624,51 @@ untouched in play - a ball nobody plays drains home after PAD_BALL_HOME_MS,
 one somebody played a minute after their last input (PAD-134/186) - so the
 game never reaches its lost-ball wait there.
 
+## Save states (PAD-1147, 2026-11-11)
+
+Spike 2's save states, on Spike 3: the playfield window's Save state / Load
+state, the tab's slot list, Launch from a slot.
+
+- **A checkpointable run.** criu refuses a chroot'd task, one that is not its
+  pid namespace's init, and one whose session leader is outside it - all
+  three were the Stage 1 harness (`script` -> `timeout` -> `chroot`). A
+  window run (and `PAD_S3_PIVOT=1`) now does Spike 2's PAD_PIVOT: the
+  namespace's bash setsid's, pivots into the slot's root, drops the host tree
+  with a static busybox and execs a static qemu-aarch64 copied in as
+  `/.padqemu/game`, stdio on `/connectivity/dump/pad_game.*`. The cap is
+  s3run's own; stdout is block-buffered there (no pty), as on the machine.
+- **Save** (`s3save.sh`, via `s3state.sh save`, via Spike 2's savegame.sh
+  when the rig slot runs Spike 3): criu dump from INSIDE the game's network
+  namespace (`nsenter --net`), so the loopback-only namespace is criu's own
+  and needs no iptables lock or dump; externals named from s3run's known
+  layout (the overlays, /dev binds, the node-bus pty by device number, the
+  /run slot files); the four overlay uppers copied while frozen; the
+  renderer's GL journal (padglhost glstate.req in the slot dir). ~0.6-1.3 s
+  frozen; 1.2-1.4 GB raw, 83-88 MB packed (zstd), in Spike 2's slot shape at
+  /var/lib/pad-s3/saves/<title>/<slot>, so slots.sh lists/renames/deletes it.
+- **Load** (`s3restore.sh`): the uppers back, the GL journal replayed into the
+  run's renderer, the overlays mounted in a private namespace, criu restore
+  in a fresh `unshare -n` NOT detached: the game arms PDEATHSIG (SIGKILL), so
+  a detached restore's game died the instant criu exited. A cold load is
+  `s3run --restore DIR` (s3launch `--restore game/slot`); a load into a run is
+  `$SD/load.req`, served by s3run's wait loop, which ends the game and
+  restores into the same renderer, bridge and video host.
+- **Video after a load**: s3vid's stream table is in the restored memory but
+  the feed/ring are the run's; handed vs a zero write_idx read as frames
+  always waiting (5 million a minute). The feed carries a per-run `session`
+  (s3vid.h, the old pad word); a stream opened on another session is
+  re-opened (from its next key frame), releases of older frames ignored.
+  An in-run load gets a new session and every channel closed
+  (`s3vidhost.py --new-session`).
+- **Proven** on pokemon_le: saved at BALL 1 / 1,560; drained to BALL 2;
+  Load state brought back BALL 1 / 1,560 and the slingshots scored on
+  (1,950); a save of a loaded game and its load; a cold Launch from a slot
+  straight into BALL 1 / 1,560; a default window boot is checkpointable.
+- **Not carried**: the node-board model (s3bridge) keeps the run's state
+  through an in-run load and starts fresh on a cold one; the game re-arms
+  coil rules at its next ball start. No clock credit for the freeze (Spike 3
+  showed no watchdog at 1.3 s).
+
 ## What is left for Spike 2 parity
 
 1. (PAD-1139, fixed) Coins: the first two after boot were lost.

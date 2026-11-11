@@ -209,7 +209,15 @@ black, so restarting WSL won't help.
 
 *Windows via WSL2, Linux*
 
-A Spike 3 card runs much like a Spike 2 one, with two differences.
+A Spike 3 card runs much like a Spike 2 one, save states included:
+**Save state** and **Load state** on the playfield window, and the tab's
+slot list (Launch, Rename, Delete), work the same way, ten slots per game.
+A slot is about the size of a Spike 2 one once packed. A load replaces
+the game in the run that is up, or **Launch** starts a new run straight
+from the slot. They need the same `busybox-static` and `criu` as Spike 2's,
+which the first Spike 3 setup on a PC fetches and builds; without them the
+game still runs and the log says save states are off.
+The differences:
 
 - **Your own OTP key unlocks it.** The Emulate and Compare tabs stay locked
   until the key is on file; paste it in the key gate or point at a keyfile.

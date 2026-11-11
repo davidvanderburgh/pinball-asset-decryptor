@@ -67,7 +67,9 @@ static struct stream {
     int npts;
     int64_t last_pts, step;             /* for a frame with no packet time */
     unsigned long frames, packets;
-} st[S3VID_CHANNELS];
+    unsigned session;                   /* the host run this stream was opened on */
+    unsigned epoch;                     /* bumped at each (re)open: releases of */
+} st[S3VID_CHANNELS];                   /* older frames are not this ring's */
 
 static int slot_fd[S3VID_CHANNELS][PADVID_SLOTS];
 
@@ -144,6 +146,57 @@ static int wait_ack(volatile unsigned *ack, unsigned gen)
     return *ack == gen;
 }
 
+/* Hand channel c's stream (st[c].ctx) to the host decoder and wait for its
+ * answer. Called with mu held. */
+static int host_open(int c)
+{
+    AVCodecContext *ctx = st[c].ctx;
+    struct s3vid_chan *ch = &feed->ch[c];
+    unsigned n = ctx->extradata_size > 0 ? (unsigned)ctx->extradata_size : 0;
+    if (n > S3VID_EXTRA) n = S3VID_EXTRA;
+    ch->codec_id = (unsigned)ctx->codec_id;
+    ch->width = (unsigned)ctx->width;
+    ch->height = (unsigned)ctx->height;
+    ch->extra_size = n;
+    if (n) memcpy(ch->extra, ctx->extradata, n);
+    ch->closed = 0;
+    vshm->ch[c].read_idx = 0;
+    st[c].session = feed->session;
+    __sync_synchronize();
+    ch->open_gen++;
+    return wait_ack(&ch->open_ack, ch->open_gen);
+}
+
+/* A SAVE STATE BROUGHT BACK (PAD-1147). The game's memory - this file's
+ * stream table included - is the save's, but the feed and the frame ring are
+ * the new run's, all at zero, served by a host that has never seen these
+ * streams: handed (here) against write_idx (there) read as a frame always
+ * waiting, and a restored stream ran to five million frames a minute. The
+ * feed's session says which run it is; a stream opened on another run is
+ * opened again on this one, from frame 0. Its next packets are mid-stream,
+ * so the host shows the clip from its next key frame on. */
+static void resync(int c)
+{
+    if (feed->session == st[c].session) return;
+    pthread_mutex_lock(&mu);
+    if (feed->session != st[c].session && st[c].ctx) {
+        AVCodecContext *ctx = st[c].ctx;
+        unsigned long frames = st[c].frames, packets = st[c].packets;
+        unsigned ep = st[c].epoch;
+        memset(&st[c], 0, sizeof st[c]);
+        st[c].ctx = ctx;
+        st[c].epoch = ep + 1;
+        st[c].last_pts = AV_NOPTS_VALUE;
+        st[c].frames = frames;
+        st[c].packets = packets;
+        if (host_open(c))
+            sayf("[s3vid] ch%ld: a new run (save state loaded): stream re-opened\n", c, 0, 0);
+        else
+            sayf("[s3vid] ch%ld: a new run, and its host decoder did not answer\n", c, 0, 0);
+    }
+    pthread_mutex_unlock(&mu);
+}
+
 /* ---- the five calls ---------------------------------------------------- */
 
 int avcodec_open2(AVCodecContext *ctx, const AVCodec *codec, AVDictionary **opts)
@@ -173,28 +226,18 @@ int avcodec_open2(AVCodecContext *ctx, const AVCodec *codec, AVDictionary **opts
         sayf("[s3vid] all %ld channels busy: this stream decodes in the guest\n", S3VID_CHANNELS, 0, 0);
         return r;
     }
-    memset(&st[c], 0, sizeof st[c]);
+    {
+        unsigned ep = st[c].epoch;
+        memset(&st[c], 0, sizeof st[c]);
+        st[c].epoch = ep + 1;
+    }
     st[c].ctx = ctx;
     st[c].last_pts = AV_NOPTS_VALUE;
-    {
-        struct s3vid_chan *ch = &feed->ch[c];
-        unsigned n = ctx->extradata_size > 0 ? (unsigned)ctx->extradata_size : 0;
-        if (n > S3VID_EXTRA) n = S3VID_EXTRA;
-        ch->codec_id = (unsigned)ctx->codec_id;
-        ch->width = (unsigned)ctx->width;
-        ch->height = (unsigned)ctx->height;
-        ch->extra_size = n;
-        if (n) memcpy(ch->extra, ctx->extradata, n);
-        ch->closed = 0;
-        vshm->ch[c].read_idx = 0;
-        __sync_synchronize();
-        ch->open_gen++;
-        if (!wait_ack(&ch->open_ack, ch->open_gen)) {
-            st[c].ctx = 0;
-            pthread_mutex_unlock(&mu);
-            sayf("[s3vid] ch%ld: the host decoder did not answer the open\n", c, 0, 0);
-            return r;
-        }
+    if (!host_open(c)) {
+        st[c].ctx = 0;
+        pthread_mutex_unlock(&mu);
+        sayf("[s3vid] ch%ld: the host decoder did not answer the open\n", c, 0, 0);
+        return r;
     }
     pthread_mutex_unlock(&mu);
     sayf("[s3vid] ch%ld: %s %ldx", c, (long)(ctx->codec_id == AV_CODEC_ID_HEVC ? "hevc" : "h264"), ctx->width);
@@ -212,6 +255,7 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
         if (!real_send) real_send = dlsym(RTLD_NEXT, "avcodec_send_packet");
         return real_send(ctx, pkt);
     }
+    resync(c);
     ch = &feed->ch[c];
     /* A real decoder answers EAGAIN only while a decoded frame waits to be
      * read, and the game calls anything else "Unexpected busy error when
@@ -269,13 +313,19 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
     return 0;
 }
 
-struct held { int c; unsigned n; };
+struct held { int c; unsigned n, epoch; };
 
 static void release(void *opaque, uint8_t *data)
 {
     struct held *h = opaque;
     struct stream *s = &st[h->c];
     pthread_mutex_lock(&mu);
+    if (h->epoch != s->epoch) {         /* a frame from before a re-open */
+        pthread_mutex_unlock(&mu);
+        free(data);
+        free(h);
+        return;
+    }
     s->released[h->n % 64] = h->n + 1;
     /* read_idx follows the frames released IN ORDER: a slot is reused only
      * once every frame before it is gone too */
@@ -299,6 +349,7 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
         if (!real_recv) real_recv = dlsym(RTLD_NEXT, "avcodec_receive_frame");
         return real_recv(ctx, frame);
     }
+    resync(c);
     v = &vshm->ch[c];
     if (feed->ch[c].flush_ack != feed->ch[c].flush_gen) return AVERROR(EAGAIN);
     if (v->write_idx == st[c].handed && st[c].eof_sent) {
@@ -322,7 +373,7 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
     desc = calloc(1, sizeof *desc);
     hd = malloc(sizeof *hd);
     if (!desc || !hd) { free(desc); free(hd); return AVERROR(ENOMEM); }
-    hd->c = c; hd->n = n;
+    hd->c = c; hd->n = n; hd->epoch = st[c].epoch;
     desc->nb_objects = 1;
     desc->objects[0].fd = slot_fd[c][slot];
     desc->objects[0].size = v->frame_bytes;

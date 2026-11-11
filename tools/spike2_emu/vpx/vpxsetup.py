@@ -589,17 +589,7 @@ def display_for(lcd, mons):
     monitor it fills, else a borderless window on the monitor holding its
     middle (the main one when none does); no rectangle is free, the kit's
     own place for it."""
-    if not lcd:
-        return {"mode": "free", "monitor": 1, "border": True}
-    x, y, w, h = [int(v) for v in lcd]
-    for m in mons:
-        if (m["x"], m["y"], m["w"], m["h"]) == (x, y, w, h):
-            return {"mode": "fullscreen", "monitor": m["n"], "border": False}
-    cx, cy = x + w // 2, y + h // 2
-    mon = next((m for m in mons if m["x"] <= cx < m["x"] + m["w"]
-                and m["y"] <= cy < m["y"] + m["h"]), mons[0])
-    return {"mode": "window", "monitor": mon["n"], "border": False,
-            "rx": x - mon["x"], "ry": y - mon["y"], "w": w, "h": h}
+    return padisplay.for_rect(lcd, mons)
 
 
 def download_vpx(folder, say=print, progress=None):

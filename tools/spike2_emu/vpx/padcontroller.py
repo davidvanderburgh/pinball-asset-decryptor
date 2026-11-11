@@ -337,6 +337,32 @@ def display_setting():
         return None
 
 
+def carry_lcd_layout(kit, conf=None, mons=None):
+    """PAD-1131: a Visual Pinball layout saved before the display setting
+    existed (PAD-811 came a day after the layouts) left only the kit's LCD
+    rectangle, so its run MOVED the framed WSLg window over the second
+    screen from this side, and the title bar and edges stayed visible ("the
+    windows border is visible ... when it goes full screen"). With the
+    display setting free, that rectangle becomes the setting the layout
+    writes today (full screen, borderless, on the monitor it fills), once:
+    the kit is marked so a later choice of "free" on the Emulate tab holds.
+    Returns the setting written, or None."""
+    lcd = kit.get("lcd") or {}
+    if kit.get("display_carried") or not all(k in lcd for k in ("x", "y", "w", "h")):
+        return None
+    kit["display_carried"] = True
+    import padisplay
+    conf = conf or padisplay.CONF
+    if padisplay.load(conf).get("mode", "free") != "free":
+        return None
+    mons = mons or padisplay.monitors()
+    s = padisplay.for_rect([lcd["x"], lcd["y"], lcd["w"], lcd["h"]], mons)
+    if s["mode"] == "free":
+        return None
+    padisplay.save(s, conf, mons)
+    return s
+
+
 def window_rect(hwnd):
     import ctypes
     r = (ctypes.c_long * 4)()
@@ -1554,6 +1580,7 @@ class Bridge:
                     % (padlaunch.PLATFORM_NAMES.get(self.map.platform, self.map.platform),
                        self.title or "this title", padlaunch.card_places(self.title, self.map.platform),
                        self.title))
+            self._carry_lcd_layout()
             self.launch = padlaunch.launch_for(self.map.platform, self.title, card)
             self._loading_start()
             try:
@@ -2074,6 +2101,23 @@ class Bridge:
         except Exception as exc:                            # noqa: BLE001
             log("window placement failed: %s" % exc)
             self.lcd_placed = True
+
+    def _carry_lcd_layout(self):
+        """carry_lcd_layout for this run, before its window opens: the
+        renderer then maps it borderless and full screen itself."""
+        if sys.platform != "win32":
+            return
+        try:
+            kit = padlaunch.kit_load()
+            if kit.get("display_carried"):
+                return
+            s = carry_lcd_layout(kit)
+            padlaunch.kit_save(kit)
+            if s:
+                log("lcd: the layout's screen is now the display setting (%s on monitor %s, "
+                    "borderless)" % (s["mode"], s["monitor"]))
+        except Exception as exc:                            # noqa: BLE001
+            log("lcd: layout not carried into the display setting: %s" % exc)
 
     def _place_player(self):
         """Visual Pinball's own playfield window, where the kit's `player`

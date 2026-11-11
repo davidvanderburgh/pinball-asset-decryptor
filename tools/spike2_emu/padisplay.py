@@ -128,10 +128,28 @@ def resolve(setting, mons=None):
             % (mon["n"], s["mode"], border, rx, ry, x, y, w, h, fs))
 
 
-def save(setting, path=CONF):
+def for_rect(rect, mons):
+    """The setting for a window rectangle [x, y, w, h] in physical desktop
+    pixels: full screen on a monitor it fills, else a borderless window on
+    the monitor holding its middle (the main one when none does); no
+    rectangle is free. A Visual Pinball layout's LCD (vpxsetup) is one."""
+    if not rect:
+        return {"mode": "free", "monitor": 1, "border": True}
+    x, y, w, h = [int(v) for v in rect]
+    for m in mons:
+        if (m["x"], m["y"], m["w"], m["h"]) == (x, y, w, h):
+            return {"mode": "fullscreen", "monitor": m["n"], "border": False}
+    cx, cy = x + w // 2, y + h // 2
+    mon = next((m for m in mons if m["x"] <= cx < m["x"] + m["w"]
+                and m["y"] <= cy < m["y"] + m["h"]), mons[0])
+    return {"mode": "window", "monitor": mon["n"], "border": False,
+            "rx": x - mon["x"], "ry": y - mon["y"], "w": w, "h": h}
+
+
+def save(setting, path=CONF, mons=None):
     """Write the setting (atomically: padglhost may read mid-write). Free
     removes the line, and the window goes back to where it was left."""
-    line = resolve(setting)
+    line = resolve(setting, mons)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:

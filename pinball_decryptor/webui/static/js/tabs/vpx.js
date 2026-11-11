@@ -292,7 +292,6 @@ export default function Vpx() {
       <${Select} sm width=${200} value=${platform} options=${filterOpts} cls="vpx-filter"
         title="Every machine's tables are listed. Pick one to see only its tables, its games for table authors and its tables to download."
         onChange=${(v) => call("vpx.set_filter", v)} />
-      <${Chip} kind="info" sm>Preview<//>
       <${Button} kind="ghost" icon="refresh" disabled=${busy || !s.ok} onClick=${() => call("vpx.refresh")}>Check again<//>
       <${Button} kind="ghost" disabled=${busy || !s.ok} ...${tip({ head: "Restart WSL.", lines: [
         "The cure for the game's screen gone blank on the desktop while the table still plays, a game window that will not close, or crackly sound.",

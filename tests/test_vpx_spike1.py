@@ -140,6 +140,21 @@ def test_cpu_service_inputs_are_active_low_and_not_node_switches(s1, tmp_path, b
     assert not any((tmp_path / "sw.input").read_bytes()[s1.INPUT_HEADER.size:])
 
 
+def test_cpu_service_write_replaces_the_file_whole(s1, tmp_path, monkeypatch):
+    """qemu pads a short read with zeros (= every active-low input pressed),
+    so the file is swapped in whole, never truncated and rewritten."""
+    from types import SimpleNamespace
+    cpu = tmp_path / "cpu.input"
+    cpu.write_bytes(b"\xff\xff\xfe")
+    replaced = []
+    real = s1.os.replace
+    monkeypatch.setattr(s1.os, "replace", lambda a, b: (replaced.append((a, b)), real(a, b)))
+    pipe = s1.Spike1Pipe(SimpleNamespace(cpu_switch_path=lambda: str(cpu)))
+    assert pipe.set(9, 1)
+    assert replaced == [(str(cpu) + ".tmp", str(cpu))]
+    assert cpu.read_bytes() == b"\xff\xfd\xfe" and not (tmp_path / "cpu.input.tmp").exists()
+
+
 def test_cpu_service_write_can_be_retried_after_resolution_failure(s1, tmp_path, monkeypatch):
     from types import SimpleNamespace
     attempts = []

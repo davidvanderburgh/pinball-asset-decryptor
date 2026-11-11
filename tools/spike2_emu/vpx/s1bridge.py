@@ -249,8 +249,13 @@ class Spike1Pipe:
                 value |= 1 << bit
                 if self.held.get(bit):
                     value &= ~(1 << bit)    # CPU SPI inputs are active-low
-            with open(path, "wb") as f:
+            # Replace, never rewrite in place: qemu fills a short read with
+            # zeros, and on this active-low wire a truncated file reads as
+            # start, flippers and every service button pressed at once.
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as f:
                 f.write(value.to_bytes(3, "little"))
+            os.replace(tmp, path)
             return True
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             _log("Spike 1 CPU service write failed: %s" % exc)

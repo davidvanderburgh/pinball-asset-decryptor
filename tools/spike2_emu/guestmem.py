@@ -57,16 +57,60 @@ def guest_pid():
     return None
 
 
+def guest_base(pid):
+    """Where the game's addresses sit in the qemu process. PAD-1128: the game is
+    not always mapped at its link address - Jaws LE 1.02 on PAD-Runtime maps it
+    at 0x18000, so every game address is at +0x10000 in /proc/<pid>/mem, and a
+    read of the plain address answered 0 for the adjustments and its pokes
+    changed nothing. The base is the game file's offset-0 mapping minus 0x8000,
+    the link address of a Spike 2 game's first segment (0 when nothing says)."""
+    try:
+        with open(f"/proc/{pid}/maps") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 6 and parts[2] == "00000000" and os.path.basename(parts[5]) == "game":
+                    return int(parts[0].split("-")[0], 16) - 0x8000
+    except OSError:
+        pass
+    return 0
+
+
+class GuestMem:
+    """/proc/<pid>/mem addressed in the GAME's addresses (seek adds the base)."""
+
+    def __init__(self, f, base):
+        self.f, self.base = f, base
+
+    def seek(self, addr):
+        return self.f.seek(addr + self.base)
+
+    def read(self, n):
+        return self.f.read(n)
+
+    def write(self, b):
+        return self.f.write(b)
+
+    def close(self):
+        self.f.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
 def opened(write=False):
     pid = guest_pid()
     if not pid:
         print("no guest running")
         sys.exit(2)
     try:
-        return open(f"/proc/{pid}/mem", "r+b" if write else "rb", buffering=0)
+        f = open(f"/proc/{pid}/mem", "r+b" if write else "rb", buffering=0)
     except OSError as e:
         print(f"cannot open guest memory: {e}")
         sys.exit(3)
+    return GuestMem(f, guest_base(pid))
 
 
 def cmd_snap(args):

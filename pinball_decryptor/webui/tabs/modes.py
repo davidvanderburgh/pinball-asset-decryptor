@@ -4091,7 +4091,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             return out
         port = p.port if os.path.isabs(p.port) else os.path.join(MP.PORTS_DIR, p.port)
         for i in PA.insert_places(port):
+            # ``own``: the colour a one-colour insert's NAME says ("TOP GI-BLU (x10)"), its colour until the user
+            # sets one (PAD-1144); "" = white
             out["inserts"].append({"name": i["name"], "x": i["x"], "y": i["y"], "mono": i["mono"],
+                                   "own": (IC.named_colour(i["name"]) or "") if i["mono"] else "",
                                    "shots": [n for n, m in p.shots if m & i["shot"]]})
         game = p.game_dir
         # PAD-668: the single-colour inserts' own colours and the Real LEDs / All RGB switch, shared with the

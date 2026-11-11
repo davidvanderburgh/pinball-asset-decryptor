@@ -60,6 +60,9 @@ BOARD_REV = 0                    # what ADC_Update's ladder can report: 0..10
 LCD_STATUS = int(os.environ.get("PAD_S3_LCD_STATUS", "2"), 0)
 SWTRACE = os.environ.get("PAD_S3_SWTRACE") == "1"   # log every scanned switch change
 T0 = time.time()
+# PAD-1139: scans of a board's RESTING inputs the game is given before anything
+# the player does can reach it (Bridge.attention). Measured on pokemon_le.
+BASELINE_SCANS = int(os.environ.get("PAD_S3_BASELINE_SCANS", "1"))
 LINE_HZ = int(os.environ.get("PAD_S3_LINE_HZ", "60"))     # ADC_GetLineFrequency
 LINE_V = int(os.environ.get("PAD_S3_LINE_V", "120"))      # ADC_GetLineVoltage
 FLASH = (0x10000100, 0x10012B40)  # the range HOST_Update's 0x30 handler CRCs
@@ -130,6 +133,7 @@ class Node:
         self.rx = 0               # addressed frames since the last ff probe
         self.low_mask = bytes(8)  # inputs whose wire bit 0 = closed
         self.queue = []           # input states seen, not yet scanned
+        self.scans = 0            # switch scans (0x11) the game has made
 
     def __call__(self, data, k):
         """k reply bytes (payload + checksum) for request payload `data`."""
@@ -160,6 +164,7 @@ class Node:
             # ck`) keys the reply: byte c is XORed with rol8(key, c) (Spike
             # 2's hwshim, measured). The bits are the live ones from nodesw.
             # the oldest queued state first (Bridge.attention), else live
+            self.scans += 1
             if self.queue:
                 bits = self.queue.pop(0)
             else:
@@ -257,7 +262,12 @@ class Bridge:
                 n.queue.append(cur)
                 if len(n.queue) > 32:
                     del n.queue[1:-15]
-            if not found and n.queue and n.registered and now - n.registered > 30:
+            ready = n.registered and now - n.registered > 30
+            if ready and n.scans < BASELINE_SCANS and not n.queue:
+                # the first look at a board with nothing to report: queue its
+                # resting state (see BASELINE_SCANS)
+                n.queue.append(cur)
+            if not found and n.queue and ready:
                 found = nid
         return found
 
@@ -401,6 +411,38 @@ class Bridge:
         return None
 
 
+def close_coin_door(table, spi_in, log=None):
+    """Start the run with the coin door SHUT, as a machine on location is and
+    as the game window's keyboard has it (s3keys.py closes the interlock the
+    moment the window attaches). The interlock is a CPU-board input on the
+    SPI chain (node 0, index 23 = SPI bit 15, ACTIVE LOW), named COIN DOOR
+    POWER INTERLOCK or COIN DOOR INTERLOCK by title. Left at rest it reads
+    OPEN: 48V DISABLED, and on a slot with saved settings the game sat in
+    attract ~56 s before it asked for a single node board - a headless run's
+    first board at 66-69 s instead of ~10 (PAD-1142). PAD_S3_DOOR=open
+    leaves it open. Returns the SPI bits closed."""
+    if os.environ.get("PAD_S3_DOOR", "closed") == "open":
+        return []
+    bits = sorted({idx - 8 for name, (node, idx) in table.items()
+                   if node == 0 and "DOOR" in name and "INTERLOCK" in name
+                   and 0 <= idx - 8 < 64})
+    if not bits:
+        return []
+    try:
+        with open(spi_in, "r+b") as f:
+            b = bytearray(f.read())
+            bits = [s for s in bits if s // 8 < len(b)]
+            for s in bits:
+                b[s // 8] &= ~(1 << (s % 8)) & 0xFF
+            f.seek(0)
+            f.write(bytes(b))
+    except OSError:
+        return []
+    if log and bits:
+        log.write("# [door] coin door closed (SPI bit %s)\n" % ",".join(map(str, bits)))
+    return bits
+
+
 def write_switch_list(table, path):
     """The title's switches in the rig's switch_list.txt shape (`id num node
     bit name`, Spike 2's mktables.py), so the game window - padglhost, the
@@ -514,6 +556,7 @@ def main():
             with open(os.path.join(d, "switches.json"), "w") as f:
                 json.dump(table, f, indent=0, sort_keys=True)
             write_switch_list(table, os.path.join(d, "tables", "game", "switch_list.txt"))
+            close_coin_door(table, os.path.join(d, "spi.in"), log)
         except Exception as e:
             log.write("# [polarity] not derived (%s): every board active high\n" % e)
     if game and os.environ.get("PAD_S3_BALLS", "1") != "0":

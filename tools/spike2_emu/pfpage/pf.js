@@ -967,28 +967,32 @@ function startMain() {
     });
     const box = el("div", "body");
     box.append(el("div", "note", "One-colour inserts: the game sets only how bright they are, and each glows "
-      + "in its own colour. White = not set. Give each its colour here; kept for this title."));
+      + "in its own colour, which the card does not say (only a lamp named for its colour, like GI-BLU, has "
+      + "one). White = not set. Give each its colour here; kept for this title."));
     const list = el("div", "list");
     box.append(list);
     acc.append(sum, box);
     const count = () => {
-      const n = rows.filter((r) => r[1]).length;
+      const n = rows.filter((r) => r[1] || r[3]).length;
       cnt.textContent = `${n} of ${rows.length} set`;
     };
     for (const r of rows) {
-      const [name, hex, fids] = r;
+      // PAD-1144: r[3], the colour the lamp's NAME says ("TOP GI-BLU (x10)"),
+      // is its colour until the user sets another
+      const [name, hex, fids, own] = r;
       const row = el("div", "r");
       const pick = el("input");
       pick.type = "color";
-      pick.value = hex || "#ffffff";
-      pick.title = "The colour this insert glows on the machine";
+      pick.value = hex || own || "#ffffff";
+      pick.title = own ? "The colour this insert glows on the machine (from its name until you set one)"
+        : "The colour this insert glows on the machine";
       const lab = el("span", "k", name);
       const clr = btn("\u00d7", () => {
-        api("lens", name, null).then((v) => { r[1] = v || ""; pick.value = "#ffffff"; show(); });
+        api("lens", name, null).then((v) => { r[1] = v || ""; pick.value = own || "#ffffff"; show(); });
       }, "x");
-      clr.title = "Back to white (not set)";
+      clr.title = own ? "Back to the colour its name says" : "Back to white (not set)";
       clr.tabIndex = -1;
-      function show() { clr.style.visibility = r[1] ? "" : "hidden"; row.classList.toggle("set", !!r[1]); count(); }
+      function show() { clr.style.visibility = r[1] ? "" : "hidden"; row.classList.toggle("set", !!(r[1] || own)); count(); }
       pick.addEventListener("change", () => {
         api("lens", name, pick.value).then((v) => { r[1] = v || ""; show(); });
         // never keep the keyboard: a focused picker would eat the flipper keys

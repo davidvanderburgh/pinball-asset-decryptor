@@ -21,7 +21,7 @@ each transfer from the slot's spi.in, so writing that file presses a button.
     s3press.py sw SLOT NAME [MS]       press a switch by the title's own name
                                        ("START BUTTON", "ACTION BUTTON",
                                        "LEFT FLIPPER BUTTON", "LEFT SLINGSHOT")
-    s3press.py coin SLOT [N]           N coins, 3 s apart (closer ones are lost)
+    s3press.py coin SLOT [N]           N coins, 1 s apart
 
 A GAME (pokemon_le, measured): `coin 4` -> CREDITS 1, `sw START BUTTON`
 -> BALL 1 (s3balls answers the trough eject: the ball reaches the shooter
@@ -31,9 +31,11 @@ score, `drain` ends the ball: bonus, then BALL 2.
                                        --bus --bridge runs this)
 
 The coin door: SPI bit 15 is COIN DOOR POWER INTERLOCK (device group 5
-index 23; the service buttons are indices 8..11 = bits 0..3). At rest it
-reads OPEN - service buttons live, 48 V off, no coil fires. `hold SLOT 15`
-closes the door, and only then do coils fire (Spike 2 behaves the same).
+index 23; the service buttons are indices 8..11 = bits 0..3). Open, 48 V
+is off and no coil fires (Spike 2 behaves the same). s3bridge.py shuts it
+as the run starts (PAD-1142: left open, a slot with saved settings waited
+~56 s for its first node board); `release SLOT 15` opens it, `hold SLOT 15`
+shuts it again, and PAD_S3_DOOR=open starts a run with it open.
 
 Bit b is byte b // 8, mask 1 << (b % 8). Measured on pokemon_le 0.82.0 in
 Guided Setup (scan): the coin-door service buttons are byte 0 -
@@ -379,9 +381,10 @@ def main():
         node, idx = table[name]
         for k in range(count):
             if k:
-                # coins closer than ~3 s apart are not all counted (pokemon_le:
-                # 4 coins 2 s apart made 1/4 credit, 3 s apart a whole one)
-                time.sleep(3.0)
+                # PAD-1139: the coins "lost when closer than 3 s" were the
+                # first ones after boot (s3bridge BASELINE_SCANS); 8 coins 1 s
+                # apart now credit all 8 (pokemon_le)
+                time.sleep(1.0)
             if node == 0:
                 press(slot, idx - 8, ms)          # CPU board: the SPI chain
             else:

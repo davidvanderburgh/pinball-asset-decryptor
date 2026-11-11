@@ -22,7 +22,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(1, os.path.join(os.path.dirname(HERE), "spike2_emu"))
 import leddecode  # noqa: E402
 
-MAGIC, VERSION, BYTES = 0x44454C50, 4, 16384
+# VERSION 6: the `hi` plane is published (a board's channels past its first
+# 96). The version-5 drive table between `seen` and `hi` stays zero: a reader
+# times a drive from `until` changing, and zero never changes.
+MAGIC, VERSION, BYTES = 0x44454C50, 6, 16384
 NODES, IDX, COILS = 16, 96, 16
 GEN, DECODED, SKIPPED = 8, 12, 16
 VAL = 20                                    # val[16][96]
@@ -34,6 +37,8 @@ FADE_HEAD = COIL_DECODED + 4                # 2076, fade ring (unused here)
 SEEN = FADE_HEAD + 4 + 96 * 12              # 3232: seen[16][96]
 WIDE_DECODED = SEEN + NODES * IDX           # 4768
 WIDE_SKIPPED = WIDE_DECODED + 4
+HI = 7356                                   # hi[16][4 * 96], padled.h v6
+HI_BANKS = 4
 
 
 class PadLed:
@@ -45,7 +50,7 @@ class PadLed:
         os.close(fd)
         os.chmod(path, 0o644)
         struct.pack_into("<II", self.m, 0, MAGIC, VERSION)
-        self.lamps = self.wide = self.wide_bad = self.fires = 0
+        self.lamps = self.wide = self.wide_bad = self.fires = self.hi = 0
 
     def _bump(self, off, n=1):
         v = struct.unpack_from("<I", self.m, off)[0]
@@ -87,7 +92,19 @@ class PadLed:
         self._bump(WIDE_DECODED)
         self.wide += 1
         if bank:
-            return                    # banks past 96 channels: not on this plane
+            # PAD-1152: a board's channels past its first 96 - the cabinet's
+            # light strips (node 2: 288 or 432 channels), the speaker panel
+            # (120), the topper (276/285) - arrive in banks of 96 and were
+            # dropped here, so the window's cabinet views lit only their first
+            # 96. padled v6's `hi` plane, as Spike 2's shim fills it (led_hi):
+            # levels only, so `seen`, `decoded` and `gen` read as before.
+            if 1 <= bank <= HI_BANKS:
+                base = HI + node * HI_BANKS * IDX + (bank - 1) * IDX
+                for i, v in zip(idxs, vals):
+                    if 0 <= i < IDX:
+                        self.m[base + i] = v & 0xFF
+                self.hi += 1
+            return
         n = 0
         for i, v in zip(idxs, vals):
             if 0 <= i < IDX:

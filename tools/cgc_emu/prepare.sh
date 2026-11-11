@@ -15,6 +15,7 @@
 #
 #   <build>/<emumm|pin>/   the game folder (/home/debian/<program>): the
 #                          program, the Williams ROM, CGC's art and sounds
+#                          (pin: Cactus Canyon's Z5 engine, ccdata/)
 #   <build>/sysroot/       the machine's own libraries the program loads
 #                          (glibc 2.13, SDL 1.2, libdrm...) - qemu-arm's -L
 #   <build>/names.json     the ROM's switch / coil names (cgcroms.py)
@@ -104,10 +105,6 @@ done
 [ -n "$PROG" ] || { echo "prepare.sh: no emumm or pin program on the card" >&2; exit 4; }
 TITLE=$(python3 "$CGC_TOOLS/cgctitles.py" detect "$GAME/home/debian/$PROG") ||
     { echo "prepare.sh: a CGC card, but not a title this rig knows" >&2; exit 4; }
-if [ "$PROG" = pin ]; then
-    echo "prepare.sh: $(python3 "$CGC_TOOLS/cgctitles.py" get "$TITLE" title) runs CGC's Z5 engine (pin), which this rig does not drive yet" >&2
-    exit 4
-fi
 
 need=$(( $(du -sk "$GAME/home/debian/$PROG" | cut -f1) + 64 * 1024 ))
 mkdir -p "$CGC_CACHE"

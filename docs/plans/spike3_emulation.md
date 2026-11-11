@@ -391,12 +391,33 @@ for no reply, so the model hears them on every addressed frame. First 0x40
 to a coil = its configuration. `PAD_S3_NBTRACE=1` traces decoded frames.
 
 **Press by name**: the bridge writes `DIR/switches.json`; `s3press.py sw SLOT
-"START BUTTON"`, `coin SLOT N` (3 s apart; the game still credits only ~3 of
-4 quarters - harmless, Free Play avoids it).
+"START BUTTON"`, `coin SLOT N` (1 s apart).
+
+**First presses after boot (PAD-1139).** The cabinet board has nothing
+closed at boot, so it never raised a request and the game's FIRST scan of it
+was the player's first coin, which the game took as the starting state: the
+first two coins after a boot never credited (pokemon_le, 4 coins -> 1/2,
+twice). A real board's power-up request does not exist here, so once a board
+is past bring-up `attention()` queues its resting inputs for one scan
+(`PAD_S3_BASELINE_SCANS`, default 1; 0 = the old behaviour). Proven on fresh
+boots: 4 coins 3 s apart -> CREDITS 1 (twice), 8 coins 1 s apart -> 3
+credits, then Start -> BALL 1. In a settled attract nothing was ever lost:
+16 presses of 20..100 ms and 12 of 150..1000 ms all credited. Note the
+pricing (1/$1.00, 3/$2.00) when counting: 8 quarters show CREDITS 3.
 
 **Harness hygiene**: `s3run.sh` kills a killed run's helpers (an orphaned
 padglhost wrote stale frames and slowed later boots to 3x), frame dumps sort
 numerically, autoguide no longer mistakes service-menu pages for Guided Setup.
+
+**The coin door starts shut** (PAD-1142). A headless run (no `--window`)
+left the interlock (SPI bit 15, active low) at rest = OPEN: 48V DISABLED, and
+on a slot with saved settings the game went straight to attract and asked for
+no node board for ~56 s - first board at 68.7 s instead of ~10 (pokemon_le
+and star_wars_2025_le, same saved state, door open vs shut: 68.7 / 10.1 s and
+68.7 / 8.1 s). A fresh slot was not affected (Guided Setup starts the bus at
+once), nor a window run: the window's keyboard closes the interlock as it
+attaches. `s3bridge.py` now shuts it by name (COIN DOOR [POWER] INTERLOCK)
+before the game starts; `PAD_S3_DOOR=open` keeps the old start.
 
 **Proven** (pokemon_le 0.82.0, names only, emulator_08..11): coins ->
 CREDITS, START BUTTON -> BALL 1 (the trough eject is answered, the ball
@@ -563,6 +584,46 @@ ck`: it now reaches its stop switch after PAD_MOTOR_MS (600, Spike 2's).
 Unanswered, the game re-tried it every 10 s for ever. PAD_S3_RULES=0 turns
 the board model off.
 
+## A launched ball is kept alive (PAD-1137, 2026-11-11)
+
+There is no playfield, so a launched ball moved no switch at all. Measured on
+pokemon_le 0.82.0 (main's code, hands off after the ACTION BUTTON launch):
+the game re-arms its sling and pop rules every ~27 s (its ball search
+rounds) and at **130 s / 137 s** (two runs) gives the ball up and serves the
+next one from the trough; ball after ball the game ends. Not a crash and not
+NVRAM.
+
+Two ways out were on the table: real ball physics (large, and nothing else on
+the rig needs it) or a keep-alive. `s3balls.py` now does the keep-alive:
+while a ball is in play and no PLAYFIELD switch has moved for `ALIVE_S`
+(6 s, `PAD_S3_ALIVE_MS`, 0 = off), it taps a slingshot for 80 ms, the two in
+turn - the switch an unattended real ball hits most. The PAD-1134 rules then
+fire the sling coil, so the playfield window flashes it. Fallbacks by name for
+other titles: return lanes / inlanes, then pop bumpers; never an outlane.
+
+- "In play" is DERIVED from the switches (balls the trough and shooter lane
+  do not hold, against the most ever seen there), not from launches, so a
+  ball drained by clicking a trough dot in the playfield window stops the
+  taps with no call into the model.
+- "Playfield switch" = any node-board switch except buttons, coin, service,
+  tilt, trough, shooter, EOS, QR, jumper, headphone, volume, ticket, door and
+  motor end stops (`QUIET_EXCLUDE`). A click or key on one restarts the wait,
+  so somebody playing is never tapped over; flipper buttons do not count.
+- Nothing is tapped with every ball home or a ball waiting in the lane.
+- bridge.log: `[ball] keep-alive: ...` at start, then `keep-alive tap N`
+  (the first three, then every 25th).
+
+Proven on pokemon_le (hands off after the launch, 420 s): main's code gave
+the ball up at 137 s (BALL 2 on screen at 180 s, ball search re-arms every
+~27 s); with the keep-alive the game was still on BALL 1 at 420 s, with no
+second trough eject and no ball search round at all, ~70 taps of 82-92 ms
+and 74 sling coil fires by rule. The taps score like a real ball's sling hits.
+
+Spike 2's rig is left as it is: its ballfeed never leaves a ball sitting
+untouched in play - a ball nobody plays drains home after PAD_BALL_HOME_MS,
+one somebody played a minute after their last input (PAD-134/186) - so the
+game never reaches its lost-ball wait there.
+
 ## Save states (PAD-1147, 2026-11-11)
 
 Spike 2's save states, on Spike 3: the playfield window's Save state / Load
@@ -610,10 +671,37 @@ state, the tab's slot list, Launch from a slot.
 
 ## What is left for Spike 2 parity
 
-1. Coins: the game credits ~3 of 4 quarters even when each is delivered.
+1. (PAD-1139, fixed) Coins: the first two after boot were lost.
 2. The window's default key bindings fire one QR-scanner switch for a moment
    before the title's switch list loads (harmless, settles).
-3. The playfield's lamps are proven on pokemon_le; the other titles' tables
-   build (all six) but their lamp traffic is unwatched.
-4. The lit inserts draw white in "Real LEDs"; whether pokemon_le's inserts are
-   RGB (and the window's channel grouping misses them) is not checked yet.
+3. (Done, PAD-1152: every title's lamps watched - see below.)
+4. (Answered, PAD-1152: the inserts are one channel each - single-colour
+   inserts, drawn in their lens colour as on Spike 2 (PAD-668); Star Wars
+   2025 Pro's RGB inserts are named -R/-G/-B and group as RGB.)
+
+## Every title's lamps, watched (PAD-1152, 2026-11-11)
+
+Each card booted headless and muted to its attract show with the padled
+block published, polled every 0.5 s for every channel's peak level, and
+judged against the card's own device table (the placed inserts on the
+layout picture, by group -> node):
+
+| card | inserts lit / placed | addressed | notes |
+|---|---|---|---|
+| pokemon_le 0.82.0 | 29 / 30 | 30 | universal topper (node 14): 64 channels past 96 lit |
+| walking_dead_remastered_le 0.92.0 | 144 / 145 | 145 | topper (node 12): 26 past 96 lit |
+| star_wars_2025_le 0.96.0 | 130 / 131 | 131 | SHOOT AGAIN dark in attract |
+| star_wars_2025_pro 0.84.0 | 87 / 129 | 129 | the dark ones are R/G halves of RGB inserts the attract shows in one colour |
+| star_wars_elg 1.10.0 | 63 / 63 | 63 | after one Start clears the first-boot GAME SETUP (before it: 19) |
+| fallout_le 0.81.0 | no layout | - | insert boards 8/9/12 lit 85/89, 91/92, 63/73 |
+
+0 refused lamp frames on any title. **What it found:** a board's channels
+past its first 96 (bank form) were dropped by s3leds - the toppers, the
+speaker panel and the cabinet strips (node 2: 288/432 channels). s3leds now
+fills padled v6's `hi` plane as Spike 2's shim does (led_hi: levels only,
+`seen`/`decoded` untouched) and stamps the block version 6; the window lights
+them (before/after: Walking Dead's topper bottom row). The strips (node 2)
+and speaker panel (node 7) get no lamp frames in attract on any title - only
+the `72` 96-bit mask and `f2` reads - so they stay dark there by the game's
+choice. A slot whose saved state has the coin door open (48V disabled) sends
+no lamp frames at all: judge lamps on a slot in a known state.

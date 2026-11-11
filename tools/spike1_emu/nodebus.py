@@ -227,6 +227,31 @@ def read_injected_switches(path):
     return out
 
 
+def encoder_lamp_outputs(text):
+    """Optional adapter wiring: ``node,motor:node,LED;...``. A table can
+    consume a motor count through an unused mono state channel without
+    changing the game's replies or baking a title into the protocol."""
+    out = {}
+    for entry in (text or "").split(";"):
+        if not entry:
+            continue
+        motor, led = entry.split(":")
+        node, index = (int(n) for n in motor.split(","))
+        ln, li = (int(n) for n in led.split(","))
+        if not (0 <= node < 16 and 0 <= index < 256 and 0 <= ln < 16 and 0 <= li < 64):
+            raise ValueError("encoder lamp output outside the Spike 1 state slots")
+        out[node, index] = ln, li
+    return out
+
+
+def motor_lamp_publisher(hw, outputs):
+    def publish(node, motor, position):
+        led = outputs.get((node, motor))
+        if hw is not None and led is not None:
+            hw.lamp_level(*led, max(0, min(255, position)))
+    return publish
+
+
 class EncoderMotors:
     """The node's encoder counts, as in Spike 2 hwshim's PAD-249 model.
 
@@ -236,8 +261,9 @@ class EncoderMotors:
     their existing replies. The injected clock makes travel testable.
     """
 
-    def __init__(self, clock=time.monotonic, report=lambda s: None):
+    def __init__(self, clock=time.monotonic, report=lambda s: None, position=lambda n, m, p: None):
         self.clock, self.report = clock, report
+        self.position = position
         self.motors = {}
 
     def tick(self, m):
@@ -285,6 +311,7 @@ class EncoderMotors:
         if m is None:
             return None
         pos = self.tick(m)
+        self.position(node, motor, pos)
         flags = 1 if m["moving"] else (8 if m["homed"] else 0)
         return struct.pack("<hH", pos, flags)
 
@@ -757,7 +784,12 @@ def main():
         elif sub == 0x22:
             blocked.clear() if node == 0 else blocked.discard(node)
 
-    motors = EncoderMotors(report=logline)
+    try:
+        outputs = encoder_lamp_outputs(os.environ.get("S1_ENCODER_LAMPS"))
+    except ValueError as exc:
+        logline("encoder lamp wiring ignored: %s" % exc)
+        outputs = {}
+    motors = EncoderMotors(report=logline, position=motor_lamp_publisher(hw, outputs))
     parser = WireParser()
     try:
         while True:

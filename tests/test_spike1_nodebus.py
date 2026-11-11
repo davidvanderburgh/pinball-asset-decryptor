@@ -164,6 +164,20 @@ def test_status_poll_is_zero_payload_present():
     assert reply[:8] == bytes(8)            # zero payload = present, no faults
 
 
+def test_status_poll_reports_the_frames_the_board_received():
+    # Word A is the board's received-frame count: the game compares its change
+    # with the frames it sent, and a zero answer re-initialised every board on
+    # every poll, which restarted Ghostbusters' Slimer homing (PAD-1160).
+    import struct
+    for count in (1, 300, 0x1_0000_0005):
+        reply = nodebus.build_response(0x88, poll_body(0xFF), 10, rx_count=count)
+        assert gates_pass(reply, 10) == (True, "ok")
+        assert reply[:4] == struct.pack("<I", count & 0xFFFFFFFF)
+        assert reply[4:8] == bytes(4)       # word B: no faults
+    # only the status poll carries it
+    assert nodebus.build_response(0x88, poll_body(0x52), 6, rx_count=7) == bytes(6)
+
+
 def test_input_poll_active_low_closed_switch():
     # active-low: node-local position 0 closed -> byte0 bit0 cleared (0xfe)
     sw = bytearray(b"\xff" * 8)

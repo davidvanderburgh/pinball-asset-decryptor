@@ -41,7 +41,7 @@ def checksum(byts):
 
 
 def build_response(addr, body, resp_len, switch_bits=None, board=None,
-                   fw=None, lcd_sum=None, motor_status=None):
+                   fw=None, lcd_sum=None, motor_status=None, rx_count=None):
     """Reply frame the game's NODEBUS_TransferMessage (game ELF @0xbfc28)
     expects for an addressed poll:
 
@@ -93,7 +93,18 @@ def build_response(addr, body, resp_len, switch_bits=None, board=None,
           clears and switch nodes start getting cmd 0x11 polls.  `board` is
           {"type", "part"} for this node (None -> zero part -> the game's
           "unknown board / type 1" path, the pre-fix behaviour).
-      * cmd 0xff  GetStatus (8 payload): all-zero = present, no faults.
+      * cmd 0xff  GetStatus (8 payload): word A (payload[0..3], LE32) is the
+          number of addressed frames this board has received, `rx_count`
+          (None = 0, the old reply).  NODEBUS_GetStatus (@0xd2880 GBLE)
+          subtracts the word A it saw last time and compares the difference
+          with its own count of frames sent to the node since then
+          (DoTransferMessage @0xcd038 adds 1 per addressed frame, the 0xff
+          poll included); a mismatch sets bit 31 of word B, which the control
+          thread (@0x82004, mask 0x8000217f) treats as lost frames and
+          re-initialises the board.  Answering 0 did that to EVERY board on
+          EVERY poll (~0.8 s), and on Ghostbusters each re-init of node 8
+          restarted the Slimer motor's homing (PAD-1160; Spike 2 met the same
+          rule as PAD-249).  The rest of the payload: zero = no faults.
       * cmd 0xf2 sub 0x30  LCDInsertInfo (12 payload) — the LCD node's insert
           query.  The boot updater (node_bus_update_lcd_insert_data @0x81000
           GBLE) compares the u32 at payload[7..10] (lcdinfo_t+8) against
@@ -144,7 +155,9 @@ def build_response(addr, body, resp_len, switch_bits=None, board=None,
             p[0:4] = struct.pack("<I", board["part"] & 0xFFFFFFFF)
         # page 1, or an unknown node: zero payload (the game reads part 0 as an
         # unknown board / type 1 — exactly the pre-topology behaviour).
-    # cmd 0xff (status) and others: zero payload = present, no faults
+    elif cmd == 0xFF and plen >= 4 and rx_count is not None:
+        p[0:4] = struct.pack("<I", rx_count & 0xFFFFFFFF)
+    # cmd 0xff's other words, and other commands: zero = present, no faults
 
     chk = checksum(p)                       # byte plen: payload sums to 0
     status = 0x00                           # byte plen+1: NAK bits clear
@@ -231,8 +244,8 @@ class EncoderMotors:
     """The node's encoder counts, as in Spike 2 hwshim's PAD-249 model.
 
     Cmd 51 configures home/encoder inputs, 53 homes, 55 moves to a signed
-    position and 52 reads it. A move takes 600 ms, the existing model's
-    default. Only configured encoder motors answer; end-stop motors keep
+    position and 52 reads it. A move takes 600 ms, hwshim's default
+    (PAD_MOTOR_MS). Only configured encoder motors answer; end-stop motors keep
     their existing replies. The injected clock makes travel testable.
     """
 
@@ -758,6 +771,10 @@ def main():
             blocked.clear() if node == 0 else blocked.discard(node)
 
     motors = EncoderMotors(report=logline)
+    # addressed frames each board has received, for cmd 0xff's word A (see
+    # build_response): counted before the reply so the poll counts itself,
+    # as the game's own count does
+    rx_count = {}
     parser = WireParser()
     try:
         while True:
@@ -816,13 +833,15 @@ def main():
                 _, addr, body, resp_len = ev
                 cmd = body[0] if body else None
                 node = addr & 0x7F
+                rx_count[node] = (rx_count.get(node, 0) + 1) & 0xFFFFFFFF
                 motors.note(node, body)
                 if resp_len:
                     sb = motors.switches(node, injected.get(node)) if cmd == 0x11 else None
                     ms = motors.status(node, body[1]) if cmd == 0x52 and len(body) >= 3 else None
                     resp = build_response(addr, body, resp_len, switch_bits=sb,
                                           board=topology.get(node), fw=fw_ver,
-                                          lcd_sum=lcd_sum, motor_status=ms)
+                                          lcd_sum=lcd_sum, motor_status=ms,
+                                          rx_count=rx_count[node] if cmd == 0xFF else None)
                     if cmd == 0x11:
                         # the game actually READ this node's switches: record what
                         # we delivered (so poll_next stops offering it as changed)

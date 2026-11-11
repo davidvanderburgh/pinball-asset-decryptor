@@ -670,6 +670,17 @@ Sega's ROM) gets a `<title>.vpxmap.json` and a patcher like
 `patch_godzilla.py` for the script's conventions; a scripted tribute gets a
 `<title>.shadow.json` and `vpxshadow.py` as it is.
 
+Two different VPX tables can use the same native game. Give each map a
+distinct `title`, matching its filename and the patched script's cGameName,
+and set `game` to the rig's native title. For example, a second Ghostbusters
+map can be `ghostbusters_le_replica.vpxmap.json` with
+`"title": "ghostbusters_le_replica", "game": "ghostbusters_le"`. Its
+`detect`, `output`, `table` credits and wiring belong to that download. Both
+maps then stay separate in the tab while card discovery, rig-board matching,
+launch/stop and the author's machine checklist use the native game. An
+explicit card recorded for the variant wins; otherwise its native game's
+card entry or library filename is used. Maps without `game` behave as before.
+
 ## Other platforms (PAD-943)
 
 A map's `platform` says which rig is behind the table; `spike2` when it says

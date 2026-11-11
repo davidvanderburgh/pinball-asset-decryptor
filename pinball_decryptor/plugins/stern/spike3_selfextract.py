@@ -254,8 +254,9 @@ def ingest_otp_key(key, image_path, *, out_path=None):
             sidecar=sidecar, key_hex=key32.hex())
     return OtpKeyResult(
         False,
-        "That key did NOT unlock this card. Re-read OTP_KEY.TXT (it is 64 hex "
-        "characters), or if the card would not boot see the enforced-board note.")
+        "That is not this card's OTP key: it did not unlock the card, so PAD "
+        "did not keep it. Check you copied all 64 characters of the key for "
+        "this machine.")
 
 
 def main(argv=None):

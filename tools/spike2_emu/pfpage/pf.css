@@ -24,8 +24,16 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
 body { font-family: var(--sans); font-size: 13px; line-height: 1.4; overflow: hidden; -webkit-font-smoothing: antialiased; user-select: none; }
-#app { height: 100%; display: flex; flex-direction: column; }
+#app { height: 100%; display: flex; flex-direction: column; position: relative; }
 .pf-boot { margin: auto; color: var(--ink-3); }
+/* PAD-1090: the boot progress rides the top rig strip (David: use that spot,
+   not a bar at the bottom). While booting the 4px strip is a dim track with a
+   bright fill growing to 100%; once up it is the solid rig colour again. */
+#app.booting[data-rig] { border-top-color: var(--line); }
+.pf-load { position: absolute; top: 0; left: 0; height: 4px; width: 0; z-index: 30;
+  background: var(--rig-c, var(--accent)); box-shadow: 0 0 8px var(--rig-c, var(--accent));
+  transition: width .4s ease; pointer-events: none; }
+.pf-load[hidden] { display: none; }
 button { font: inherit; color: inherit; }
 ::-webkit-scrollbar { width: 11px; height: 11px; }
 ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; }

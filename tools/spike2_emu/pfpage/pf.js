@@ -341,7 +341,10 @@ function startMain() {
       clips = clipsPanel(S.clips);
       if (top) top.el.after(clips.el); else side.prepend(clips.el);
     }
-    app.append(body, status);
+    // PAD-1090: the boot progress bar rides the top rig strip (David)
+    const loadBar = el("i", "pf-load");
+    loadBar.hidden = true;
+    app.append(loadBar, body, status);
     view = {
       frame(f) {
         if (f.status != null) stxt.textContent = f.status;
@@ -413,10 +416,11 @@ function startMain() {
     // run with an app. This window stays open (PAD-738), so the button follows
     // the run's `restarting` (PAD-744): back the moment the request is taken.
     // PAD-744: how far the game has booted (bootprog.py), while it boots
+    // the bar itself is the top rig strip (.pf-load, set in update); the
+    // bottom cluster keeps only the % and the step words (PAD-1090)
     const boot = el("span", "boot");
-    const bar = el("span", "bar"), fill = el("i"), bootN = el("span", "n mono"), bootW = el("span", "w");
-    bar.append(fill);
-    boot.append(bar, bootN, bootW);
+    const bootN = el("span", "n mono"), bootW = el("span", "w");
+    boot.append(bootN, bootW);
     boot.hidden = true;
     box.append(boot);
     let restart = null;
@@ -458,9 +462,15 @@ function startMain() {
       pause.classList.toggle("primary", !!r.paused);
       box.classList.toggle("paused", !!r.paused);
       if (restart) showRestarting(r.restarting);
+      // the top rig strip is the progress bar (PAD-1090)
+      const loadBar = app.querySelector(".pf-load");
+      app.classList.toggle("booting", !!r.boot);
+      if (loadBar) {
+        loadBar.hidden = !r.boot;
+        if (r.boot) loadBar.style.width = r.boot.pct + "%";
+      }
       boot.hidden = !r.boot;
       if (r.boot) {
-        fill.style.width = r.boot.pct + "%";
         bootN.textContent = r.boot.pct + "%";
         bootW.textContent = r.boot.words;
         boot.title = r.boot.words;

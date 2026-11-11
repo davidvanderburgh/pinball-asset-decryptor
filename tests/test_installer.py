@@ -2827,3 +2827,23 @@ def test_a_distro_that_logs_in_as_somebody_is_not_touched(tmp_path, login, pad):
     assert "bash" not in calls and "--manage" not in calls, calls
     assert "INSTALLED" not in said and "MISSING" not in said, said
     assert after == login
+
+
+def test_installers_ship_the_spike3_rig_and_luks_otp():
+    """PAD-1090: the Spike 3 rig (tools/spike3_emu) and the LUKS2/OTP code the
+    app's Spike 3 decryption loads by path (stern-spike-3/tools/luks_otp.py)
+    ship in all three installers; the frozen builds also carry the readers
+    the rig's card store loads by path."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    iss = (root / "installer" / "pinball_decryptor.iss").read_text(encoding="utf-8")
+    assert r'"{#ProjectDir}\tools\spike3_emu\*"' in iss
+    assert r'"{#ProjectDir}\stern-spike-3\tools\luks_otp.py"' in iss
+    for name in ("build_linux.sh", "build_macos.sh"):
+        text = (root / "installer" / name).read_text(encoding="utf-8")
+        for need in ("tools/spike3_emu:tools/spike3_emu",
+                     "stern-spike-3/tools/luks_otp.py:stern-spike-3/tools",
+                     "plugins/stern/spike3.py:pinball_decryptor/plugins/stern",
+                     "plugins/stern/spike3_keys.py:pinball_decryptor/plugins/stern",
+                     "plugins/stern/ext4.py:pinball_decryptor/plugins/stern"):
+            assert need in text, (name, need)

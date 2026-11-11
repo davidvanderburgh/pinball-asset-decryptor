@@ -342,6 +342,9 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._spike3 = None
         self._spike3_why = ""
         self._spike3_probed = None
+        self._s3_slot = None            # PAD-1090: the rig a Spike 3 run is on
+        self._s3_label = None           # ...and what its state says
+        self._s3_foot = None            # ...and its footer step (s3prog.py)
         #: PAD-659: the picked file is a disk tool's backup of a card (a
         #: Macrium .mrimgx), not a card image: what to say about it, "" when
         #: it is not one.  Read off the loop at pick time; ``start()``
@@ -553,6 +556,10 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._bind_assets()
         self._overrides_paint()
 
+    def rail_needs(self):
+        # PAD-1090: a Spike 3 card is unusable without the user's OTP key
+        return "spike3key" if self._spike3_era() else None
+
     def on_show(self):
         self._bind_assets()
         # the Stern ladder, then what the last poll said (Tk showed idle
@@ -726,7 +733,13 @@ class EmulateTab(EmulateLogMixin, TabService):
             return
         self._spike3 = is3
         self._spike3_why = why or ""
-        if is3:
+        if is3 and rig.spike3_rig_present():
+            self._log("[emulate] %s is a Stern Spike 3 card: Start runs it on "
+                      "the Spike 3 emulator. The first run of a card decrypts "
+                      "it with YOUR card's OTP key (Extract tab, Spike 3 "
+                      "unlock) and takes a few minutes."
+                      % os.path.basename(path))
+        elif is3:
             self._log("[emulate] %s is a Stern Spike 3 card and cannot be "
                       "emulated: its partitions are encrypted with a key kept "
                       "in the machine, not on the card%s."
@@ -782,6 +795,14 @@ class EmulateTab(EmulateLogMixin, TabService):
             if not os.path.isfile(path) or path == self._precached:
                 return
             self._precached = path
+            # a Spike 3 card runs on its own rig, from its own store: copying
+            # its 60 GB into the Spike 2 card cache helps nothing (PAD-1090)
+            try:
+                from ...plugins.stern import spike3 as _s3
+                if _s3.is_spike3_card(path):
+                    return
+            except Exception:                            # noqa: BLE001
+                pass
             try:
                 cmd = self._cmd("cardmount.sh", rig.wsl_path(path),
                                 "--precache")
@@ -2962,12 +2983,19 @@ class EmulateTab(EmulateLogMixin, TabService):
         # or could not be asked) falls through and the run's own guard
         # (watch.sh) catches it without the copy.
         if self._spike3 is True:
-            self._refuse_start(
-                "%s is a Stern Spike 3 card and cannot be emulated. Its "
-                "partitions are encrypted with a key kept in the machine, not "
-                "on the card%s." % (
-                    os.path.basename(self._card()) or "this card",
-                    " (%s)" % self._spike3_why if self._spike3_why else ""))
+            # PAD-1090: the Spike 3 rig, where this PC has it - the launcher
+            # checks the rest (root, its build, qemu, CUSE) and says what is
+            # missing; without it, PAD-367's refusal stands.
+            if not rig.spike3_rig_present() or rig.spike3_check_cmd() is None:
+                self._refuse_start(
+                    "%s is a Stern Spike 3 card and cannot be emulated on "
+                    "this PC (Spike 3 emulation is not set up here). Its "
+                    "partitions are encrypted with a key kept in the "
+                    "machine, not on the card%s." % (
+                        os.path.basename(self._card()) or "this card",
+                        " (%s)" % self._spike3_why if self._spike3_why else ""))
+                return
+            self._start_spike3()
             return
         # A TICKET'S RIG IS TAKEN NOW, for this run, and given back at Stop
         # (core/rigslot.py claim_for_run). Nothing changes without a ticket.
@@ -3162,6 +3190,163 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._launch_accepted = prepare is not None
         self._thread(guarded)
 
+    # -- PAD-1090: a Spike 3 card, on the Spike 3 rig ----------------------
+    #: How long a Spike 3 run may last before the rig ends it itself, like
+    #: the Spike 2 run's BACKSTOP_MIN.
+    S3_MINUTES = 240
+
+    def _start_spike3(self):
+        """Check the Spike 3 rig, take a rig slot, and run the card in its
+        window (s3launch.sh: the card into the store the first time, then
+        s3run.sh --window). The run's lines go to the log; the button is
+        Stop while it runs; Stop asks s3launch.sh --stop."""
+        from ...core import rigslot
+        slot = rigslot.claim_for_run()
+        if slot is None:
+            busy = ", ".join("rig %d: %s" % (r["slot"], r["holder"])
+                             for r in rigslot.board()[1:] if r["holder"])
+            self._refuse_start("every emulator rig is in use right now (%s). "
+                               "Try again when one is free." % busy)
+            return
+        slot = slot or 1                    # 0 = no ticket: the first slot
+        card = self._card()
+        # sound on, and the panel's volume / Mute follow it LIVE through
+        # audio_ctl.json, as on Spike 2 - deciding Mute once at Start meant a
+        # box unticked after Start never sounded (David). Off only for the
+        # runs that are always silent (a session's, a hidden one: PAD-309)
+        from ...core import rigslot as _rs
+        audio = not _rs.muted()
+        self._starting = True
+        self._s3_slot = slot
+        self._s3_label = "Starting Spike 3…"
+        self._s3_foot = ("boot", 40, "Starting the Spike 3 emulator")
+        self._run_label(False, True)
+        self._set("state", self._s3_label)
+
+        def run():
+            try:
+                # the shared card store holds the cards already decrypted
+                # (s3store.py default_store): a WSL restart detaches it
+                if sys.platform == "win32":
+                    self._reattach_card_store(runtime.wsl_distro())
+                out = self._run(rig.spike3_check_cmd(), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=60)
+                text = out.stdout.decode("utf-8", "replace")
+                ok, what = rig.parse_s3check(text)
+                if ok is False and "s3setup:" in text and what.startswith("packages:"):
+                    # only packages missing: install them, once, and look again
+                    self._log("[emulate] setting up Spike 3 emulation on this "
+                              "PC (once, a few minutes): %s" % what)
+                    self._post(self._set, "state", "Setting up Spike 3 emulation…")
+                    sp = self._popen(rig.spike3_setup_cmd(), stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+                    for raw in sp.stdout:
+                        line = raw.decode("utf-8", "replace").rstrip()
+                        if line:
+                            self._log("[emulate] " + line)
+                    sp.wait()
+                    out = self._run(rig.spike3_check_cmd(), stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, timeout=60)
+                    ok, what = rig.parse_s3check(out.stdout.decode("utf-8", "replace"))
+                if ok is not True:
+                    self._starting = False
+                    self._s3_slot = self._s3_label = None
+                    rigslot.release_claimed()
+                    msg = ("Spike 3 emulation is not set up on this PC: %s." % what
+                           if what else "Spike 3 emulation could not be checked on this PC.")
+                    self._post(lambda: (self._refuse_start(msg),
+                                        self._set("state", "Not running"),
+                                        self._paint_run_btn()))
+                    return
+                keyfile = rig.spike3_keyfile(card, project=self._assets() or None)
+                if keyfile:
+                    self._log("[emulate] Spike 3 key: %s" % keyfile)
+                cmd = rig.spike3_launch_cmd(card, slot, self.S3_MINUTES, audio=audio,
+                                            keyfile=keyfile,
+                                            audio_ctl=audio_ctl_file() if audio else None)
+                self._log("[emulate] %s" % " ".join(str(c) for c in cmd))
+                self._proc = self._popen(cmd, stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT)
+                self._starting = False
+                self._started_here = True
+                self._post(self._paint_run_btn)
+                for raw in self._proc.stdout:
+                    line = raw.decode("utf-8", "replace").rstrip()
+                    self._log("[emulate] " + line)
+                    fields = rig.playfield_launch(line)
+                    if fields:                  # the virtual playfield (s3pf.py)
+                        self._post(self._open_playfield, fields)
+                    foot = self._s3_footer_for(line)
+                    if foot:
+                        self._s3_foot = foot
+                        self._post(self._footer, *foot)
+                        self._s3_label = (foot[2] if foot[0] != "run"
+                                          else "Running (Spike 3, rig %s)" % slot)
+                        self._post(self._set, "state", self._s3_label)
+                        continue
+                    label = self._s3_progress(line, slot)
+                    if label:
+                        self._s3_label = label
+                        self._post(self._set, "state", label)
+            except Exception as exc:                     # noqa: BLE001
+                log.exception("spike3 start")
+                self._log("[emulate] failed to start: %s" % exc)
+            finally:
+                self._proc = None
+                self._starting = False
+                self._s3_label = None
+                self._s3_foot = None
+                if not self._stopping:
+                    self._s3_slot = None
+                    rigslot.release_claimed()
+                    self._post(lambda: (self._set("state", "Not running"),
+                                        self._paint_run_btn()))
+
+        self._thread(run)
+
+    @staticmethod
+    def _s3_progress(line, slot):
+        """The state label a launcher line moves the tab to, or None."""
+        if line.startswith("s3launch: failed - "):
+            return "Not running - " + line[len("s3launch: failed - "):]
+        if line.startswith("s3launch: decrypting"):
+            return "Preparing the Spike 3 card (first time only)…"
+        if line.startswith("[s3run] exec "):
+            return "Running (Spike 3, rig %s)" % slot
+        return None
+
+    @staticmethod
+    def _s3_footer_for(line):
+        """(kind, pct, text) for the footer's steps (Copy card, Boot, Node
+        boards, Ready) from a Spike 3 run line, or None - the Spike 3 twin of
+        status.sh's boot_pct. s3prog.py says the boot's progress; the
+        launcher says the once-only steps before it."""
+        m = re.match(r"\[s3run\] progress (\w+) (\d+) (.*)$", line)
+        if m:
+            return m.group(1), int(m.group(2)), m.group(3)
+        if line.startswith("s3launch: decrypting"):
+            return "copy", 5, "Preparing the Spike 3 card (first time only)…"
+        m = re.match(r"s3launch:\s+\[s3store\]\s+(p\d) (\w+)", line)
+        if m:                                # a partition done: p2 .. p6
+            done = {"p2": 30, "p3": 40, "p5": 45, "p6": 95}.get(m.group(1), 50)
+            return "copy", done, "Preparing the Spike 3 card: %s done" % m.group(2)
+        m = re.match(r"s3launch:\s+\[s3store\]\s+games: \d+ files, (\d+) MB", line)
+        if m:
+            return ("copy", min(90, 45 + int(m.group(1)) // 50),
+                    "Preparing the Spike 3 card: %s MB of the game" % m.group(1))
+        if line.startswith("s3launch: building the Spike 3 rig"):
+            return "copy", 50, "Building the Spike 3 emulator (first time only)…"
+        if line.startswith("s3launch: starting slot"):
+            return "boot", 40, "Starting the Spike 3 emulator"
+        return None
+
+    def _muted_for_spike3(self):
+        """The panel's Mute: Spike 3 sound plays only when it is off."""
+        try:
+            return bool(self._mute_var.get())
+        except Exception:                                # noqa: BLE001
+            return True                     # unknown: rig runs stay muted
+
     def _open_playfield(self, fields):
         if sys.platform != "win32":
             return
@@ -3178,7 +3363,8 @@ class EmulateTab(EmulateLogMixin, TabService):
         if fields.get("savestates") == "1":
             cmd.append("--savestates")
         env = dict(os.environ)
-        for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES")):
+        for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES"),
+                          ("root_wsl", "PAD_ROOT_WSL")):
             if fields.get(key):
                 env[name] = fields[key]
         # WHICH RIG (core/rigslot.py): the window titles itself with it, and a
@@ -3191,10 +3377,32 @@ class EmulateTab(EmulateLogMixin, TabService):
             cmd.append("--pad-slot=%d" % n)
         if rigslot.label():
             env["PAD_LABEL"] = rigslot.label()
+        # its switch helpers call back into the distro the rig runs in
+        if not env.get("PAD_WSL_DISTRO"):
+            from ...core import runtime as _rt
+            try:
+                d = _rt.wsl_distro()
+            except Exception:                            # noqa: BLE001
+                d = None
+            if d:
+                env["PAD_WSL_DISTRO"] = d
         # PAD-204: the window's status bar moves this tab's volume / Mute
         env["PAD_AUDIO_CTL"] = audio_ctl_file()
         try:
-            self._pf_proc = self._popen(cmd, env=env)
+            # its own output to a file: a window that dies at once left no
+            # trace at all (PAD-1090: "I'm not seeing the playfield window")
+            pflog = os.path.join(tempfile.gettempdir(),
+                                 "pad_playfield_rig%d.log" % (n or 0))
+            try:
+                out = open(pflog, "w", encoding="utf-8", errors="replace")
+            except OSError:
+                out = None
+            if out is not None:
+                self._pf_proc = self._popen(cmd, env=env, stdout=out,
+                                            stderr=subprocess.STDOUT)
+                self._log("[emulate] the playfield window's own log: %s" % pflog)
+            else:
+                self._pf_proc = self._popen(cmd, env=env)
             self._log("[emulate] opened the virtual playfield window here — "
                       "this WSL cannot start Windows programs itself.")
         except Exception as exc:                         # noqa: BLE001
@@ -3228,8 +3436,26 @@ class EmulateTab(EmulateLogMixin, TabService):
 
         def run():
             needs_restart = False
+            s3 = self._s3_slot
+            if s3 is None and self._spike3_era() and rig.spike3_rig_present():
+                # a Spike 3 card after an app restart: this app no longer
+                # knows the run's slot, and the Spike 2 stop (killgame.sh on
+                # slot 0) cannot end it (David: "it looks like it's already
+                # running but it's not"). The Spike 3 stop of this app's rig
+                # slot, which also ends anything a run left behind there.
+                from ...core import rigslot as _rs
+                s3 = _rs.slot()
+                if not s3:
+                    try:            # the slot the lock board says is ours
+                        mine = [r["slot"] for r in _rs.board()[1:]
+                                if r.get("holder") and r["holder"] == _rs.label()]
+                    except Exception:                    # noqa: BLE001
+                        mine = []
+                    s3 = mine[0] if mine else 1
             try:
-                out = self._run(self._kill_cmd(), stdout=subprocess.PIPE,
+                kill = (rig.spike3_stop_cmd(s3) if s3 is not None
+                        else self._kill_cmd())
+                out = self._run(kill, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, timeout=60)
                 for line in out.stdout.decode("utf-8",
                                               "replace").splitlines():
@@ -3251,6 +3477,7 @@ class EmulateTab(EmulateLogMixin, TabService):
             # the rig goes back the moment it is not used (claim_for_run)
             from ...core import rigslot
             rigslot.release_claimed()
+            self._s3_slot = self._s3_label = None
             self._stopping = False
             if self._restart_wait:
                 self._post(self._restart_when_down)
@@ -3298,6 +3525,14 @@ class EmulateTab(EmulateLogMixin, TabService):
             return False
         if not (self._last_up or self._launched()):
             return False
+        if self._s3_slot is not None:
+            # a Spike 3 run has no restartgame.sh of its own (that one asks
+            # the Spike 2 rig of the same number): Stop, then Start again
+            self.log("[emulate] restarting the Spike 3 game: it stops and "
+                     "starts again.")
+            self._restart_wait = 40
+            self.stop()
+            return True
         self.log("[emulate] restarting the game: it boots again; the game "
                  "window and the playfield stay open.")
         self._rebooting = True
@@ -3733,6 +3968,13 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._footer("copy", pct, text)
 
     def _paint_footer(self, info=None):
+        if getattr(self, "_s3_slot", None) is not None:
+            # a Spike 3 run paints its own steps (s3prog.py); the Spike 2
+            # status poll sees no Spike 2 game and would paint "idle"
+            foot = getattr(self, "_s3_foot", None)
+            if foot:
+                self._footer(*foot)
+            return
         info = info if info is not None else self._last_info
         preparing = self._preparing is not None and not self._stopping
         copying = self._copying is not None and not self._stopping
@@ -3779,6 +4021,8 @@ class EmulateTab(EmulateLogMixin, TabService):
             label = self._preparing
         elif copying:
             label = self._copying
+        elif self._s3_label:            # a Spike 3 run: the rig's status
+            label = self._s3_label      # (watch.sh's) knows nothing of it
         self.set(state_tip=(self._preparing_explain() if preparing else
                             (self._copying_tip if copying else hint)) or "")
         self._set("state", label)

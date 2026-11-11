@@ -229,66 +229,318 @@ entirely absent and is the likely next gate on the render loop once the amp is
 non-fatal. The game presents only a black clear-frame (frame 2 uploads the UI
 atlases but never composites them) until it gets past init.
 
-## What is left for Spike 2 parity (next runs)
+## Stage 4 - the node bus side of the CPU board (run 4: the game is on screen)
 
-1. **Toolchain**: an aarch64 cross gcc for the shims (only `arm-linux-gnueabihf`
-   is installed). Same private-prefix route the README uses for fuse2fs
-   (`apt-get download` + `dpkg-deb -x`), no system package needed.
-2. **Display**: aarch64 builds of `eglshim.c` + `glbridge.c` (check `padgl.h`
-   for 32-bit pointer assumptions), plus `libgbm`/`libdrm` entry points the game
-   uses to find `card1`, so `create_window` succeeds and frames reach
-   `padglhost`. The game is stripped (dynsym only) and its window is classic
-   KMS: it imports `drmModeGetResources/GetConnector/GetEncoder/GetCrtc`,
-   `drmModeAddFB/RmFB/SetCrtc/PageFlip`, `drmHandleEvent`, `gbm_create_device`,
-   `gbm_bo_create/map/get_handle/get_stride/get_fd/set_user_data...` and EGL
-   (`eglGetProcAddress`, so the display is most likely
-   `eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM)`). The shim fakes one connected
-   connector + CRTC at the panel's mode on a dummy `card1` fd, treats a GBM bo
-   as a bridge surface and a page flip as a present (the flip event answered
-   through `drmHandleEvent`). Strings name `card0` and `card1` - it probes both.
-   **It imports neither `eglCreateWindowSurface` nor `eglSwapBuffers`**: it
-   must render into GBM buffers exported as dma-bufs (`gbm_bo_get_fd`) and
-   wrapped as EGL images (`eglCreateImageKHR` +
-   `glEGLImageTargetRenderbufferStorageOES`/`Texture2DOES` through
-   `eglGetProcAddress`), then scan them out itself with `drmModeAddFB` +
-   `drmModePageFlip`. So in the shim an EGL image of a bo is a host FBO, and
-   the page flip of that bo's fb is the frame's present. Confirm with a
-   `--strace` run once the fake card1 answers.
-   Extensions it asks `eglGetProcAddress` for (strings): `eglGetPlatformDisplayEXT`,
-   `eglCreateImageKHR`/`eglDestroyImageKHR`, `glEGLImageTargetTexture2DOES`,
-   `eglCreateSyncKHR`/`ClientWaitSyncKHR`/`WaitSyncKHR`/`DestroySyncKHR`,
-   `glFramebufferTexture2DMultisampleEXT`, `glDebugMessageCallbackKHR`.
-   **The bridge exports 75 of the 130 GL calls the game imports.** Missing - all
-   GLES 3 the Spike 2 titles never used: glBeginTransformFeedback
-   glBindBufferBase glBindBufferRange glBindRenderbuffer glBlendColor
-   glBlitFramebuffer glClearBufferfv glClearDepthf glColorMask
-   glCompressedTexImage3D glCompressedTexSubImage3D glCopyBufferSubData
-   glCullFace glDeleteFramebuffers glDeleteQueries glDeleteRenderbuffers
-   glDepthFunc glDepthMask glDrawArraysInstanced glDrawElementsInstanced
-   glEndTransformFeedback glFinish glFlush glFramebufferRenderbuffer
-   glFramebufferTextureLayer glFrontFace glGenQueries glGenRenderbuffers
-   glGenerateMipmap glGetFloatv glGetInteger64v glGetProgramBinary glGetStringi
-   glGetSynciv glGetUniformBlockIndex glMapBufferRange glPixelStorei
-   glProgramBinary glReadBuffer glRenderbufferStorage glTexImage3D
-   glTexParameterf glTexStorage2D glTexSubImage3D glTransformFeedbackVaryings
-   glUniform1iv glUniform1ui glUniform1uiv glUniform2fv glUniform2iv
-   glUniform3fv glUniformBlockBinding glUniformMatrix3fv glUnmapBuffer
-   glVertexAttrib4f glVertexAttribDivisor glVertexAttribI4ui
-   glVertexAttribIPointer. Most are one-way commands the ring carries as is;
-   the round trips (`glGetUniformBlockIndex`, `glGetProgramBinary`,
-   `glGetSynciv`, queries) need the bridge's reply path, `glMapBufferRange`
-   a guest-side shadow flushed at unmap, and `glProgramBinary` can answer
-   "no binary formats" so the engine falls back to source.
-   Checked this run: `glbridge.c` and `eglshim.c` compile for aarch64 as they
-   are (xgcc.sh, `-nostdlib` against the card's own libc) - the ring protocol
-   is pointer-free fixed-width fields.
-3. **Netbridge**: what the game expects over `spidev4.0`/`ttyAMA5` (find the
-   framing in the game; the RP2040 firmware is on the card as
-   `spike3/netbridge/netbridge.elf`), then a bridge emulator that speaks the
-   existing nodebus.py node set behind it - switches, coils, LEDs.
-4. **hwshim for aarch64**: EEPROM, clocks/pause/speed, the validation reporter;
-   per-title addresses for aarch64 ELFs.
-5. **Audio / video** stubs rebuilt for aarch64.
-6. **Rig integration**: watch.sh / riglock slots / rig board, the Emulate tab
-   (today it refuses a Spike 3 card at pick - lift that once stage 2 boots to
-   attract), playfield window.
+What the "node bus" devices turned out to be, read off the bridge board's own
+firmware (`games/<title>/spike3/netbridge/netbridge.elf` is on the card,
+unstripped, with debug info: `uart_host.c`, `uart_node.c`, `uart_powerdist.c`,
+`ws2812.c`, `dmd.c`, `lcd.c`/`ch7038b.c`) and the game's own syscalls:
+
+| device | what | stand-in |
+|---|---|---|
+| `/dev/ttyAMA5` | the RP2040 **netbridge's host UART** (`HOSTUART_*`); the board fans out to the node boards, WS2812 LEDs, DMD, LCD, power distribution | `s3bridge.py`: a pty, every burst logged (`bridge.log`) |
+| `/dev/spidev4.0` | a **CPU-board SPI I/O chain**, not the bridge (the RP2040's only `spi_init` is in `DMD_Init1`): SPI mode 3, 100 kHz, 8 bytes out / 8 in, polled ~3000/s - the cabinet inputs and outputs. Its absence is the game's `FATAL error 226 (CPU SPI open failed)` | `s3spid` (CUSE): a real host char device, every transfer logged (`spi.log`), answers zeros |
+| ALSA | the sound cards (the game imports 18 `snd_pcm_*` calls, no mixer) | `s3alsa.so` (LD_PRELOAD): paced to the wall clock, muted |
+
+The SPI chain was THE gate. With only `spidev4.0` answering, the game stopped
+waiting in hardware init and ran on to sound init in 5 s (previously: never in
+120 s); the amp init that stage 3 left half-done now **completes** ("TAS57XX:
+amp initialization complete" - its failures were collateral of the missing
+SPI chain). With the sound cards answered too, Godot's main loop starts
+(`Godot Engine v4.4.1`), shaders compile, HEVC video decodes, and frames
+present continuously.
+
+**First picture, pokemon_le 0.82.0 (2026-11-10):** the game's own red **Tech
+Alerts** screen - "Check Node Board 4 : Invalid", "Check Node Board 0 : Not
+Initialized", ... "Press 'Select' for Node Bus Test" - exactly what a machine
+with no node boards answering shows, updating as the game retries them.
+
+Pieces:
+
+- `qemu-spi-ioctls.patch` (applied after `qemu-i2c-ioctls.patch`): the spidev
+  setting ioctls and `SPI_IOC_MESSAGE(1..16)` with each transfer's guest
+  tx/rx buffers mapped. Same staged `~/.pad-s3/qemu-aarch64`.
+- `cuse.ko`, built from the same 6.6.87.2 tree as the kernel and loaded live
+  (`make -C $K M=fs/fuse modules && insmod fs/fuse/cuse.ko`; the config already
+  has `CONFIG_CUSE=m`) - no WSL restart.
+- `s3run.sh --bus` starts `s3spid` (`/dev/pad-s3spi-slot<N>`) and
+  `s3bridge.py` per slot and binds them over the chroot's `/dev/spidev4.0` and
+  `/dev/ttyAMA5`; `s3alsa.so` is preloaded whenever it is built.
+
+The bridge link's framing, from the game's first messages: `02 <cmd> <id>
+[payload] <sum> 03` - STX, command, id, payload, a checksum that makes the
+bytes from `cmd` to it sum to 0 (counted unescaped), ETX; a 0x02 or 0x03
+inside the frame is sent as `1b 82` / `1b 83` (0x1b, then the byte | 0x80 -
+e.g. `02 12 1b 82 ec 03` is cmd 0x12, payload 0x02, 0x12+0x02+0xec = 0x100).
+First commands: `0x30` (the game logs
+"netbridge image CRC mismatch" when it goes unanswered, then runs openocd to
+reflash the RP2040 and fails), `0x20` (repeated every second), `0x27`, `0x41`
+(node traffic: `41 <seq> <node> ...`, cycling node addresses), `0x25`,
+`0x12`/`0x19`.
+
+## Stage 4b - the bridge board answers, the node boards register (done)
+
+`s3bridge.py` answers the host UART as `netbridge.elf`'s own `HOST_Update`
+dispatch does (read off the unstripped firmware): `0x20` version
+`[0, 98, 4, board rev]`; `0x30` the CRC32 (zlib's) of flash `0x10000100..
+0x10012b40` computed from the card's ELF - the game logs "netbridge image
+okay" and never runs openocd; `0x25` NODEBUS_Poll, the LOWEST node raising a
+request (0 = none; answering the highest node made the game service node 14
+for ever and skip the census); `0x27` LCD status; `0x41` the node relay,
+`[node][n][n bytes][reply_len]` -> reply_len-1 node bytes + status (`0x00`
+answered, `0x04` timeout with 0x55 fill). `0x10..0x1f` go to the power
+distribution board and stay unanswered (the game falls back to "Spike 1/2
+power distribution board").
+
+The node protocol behind 0x41 is byte-for-byte Spike 2's (`81 02 fe 7f 0d` is
+node 1's identity request on both). `s3nodes.py` reads the title's node
+directory and board catalog out of the aarch64 game through its
+R_AARCH64_RELATIVE relocations (the 64-bit `nbdir.py`; directory records are
+0x20 bytes: handler, name cell, node<<16|code, flags; catalog rows 0x28 from
+the part number; row = code - 2, checked by the CPU record landing on
+"SPIKE3 CPU") and claims each identity by Spike 2's measured rules against the
+`.hex` files the card ships. pokemon_le: nodes 1,2,4,7,8,9,10,12,13,14 all
+register. `PAD_S3_NODES_ABSENT=<ids>` leaves boards off the chain.
+
+**No network**: the game runs in its own network namespace (loopback only).
+A 200 s strace boot: zero connect/sendto. conagent is never started.
+
+## Stage 4c - cabinet inputs (done)
+
+The SPI chain is the cabinet inputs, 8 bytes, ACTIVE LOW. At 0x00 every
+button reads held and the game boots into its service path (Tech Alerts);
+0xff (at rest) boots normally. `s3spid --input=$SD/spi.in` answers live from
+that file; `s3press.py` presses bits. Measured in Guided Setup: byte 0 bit 0
+SELECT, bit 1 NEXT, bit 2 PREVIOUS, bit 3 BACK (BACK jumps the highlight to
+Save & Exit). The rest (start, coin, flippers, tilt) are NOT mapped yet: the
+attract-mode scan's screen metric was noise (it cropped the Guided Setup rows,
+not the CREDITS counter) - next run, score on the credits/start-prompt area.
+
+The game shows Guided Setup at EVERY boot here (the slot's NVRAM persists, so
+it is the game's choice - probably the "This machine has an invalid ..."
+identity it reports). `s3run.sh --bus --bridge` runs `s3press.py autoguide`,
+which spots it in the frame dumps and presses BACK + SELECT, and prunes old
+dumps (`PAD_S3_AUTOGUIDE=0` turns it off).
+
+## Stage 5 - video (done)
+
+The game decodes its clips through libavcodec (FFmpeg 5.1.6-rpi) out of its
+packed asset store (custom AVIO), expecting the Pi's V4L2 HEVC block and
+`h264_v4l2m2m`, with DRM-PRIME frames wrapped as EGL images. `s3vid.so`
+(guest, built against the FFmpeg 5.1.6 headers) takes HEVC/H.264 contexts
+over at `avcodec_open2/send_packet/receive_frame/flush_buffers/free_context`;
+packets go to `s3vidhost.py` (`s3vid.h` feed), one native ffmpeg per stream
+(Annex B in, I420 out) writes the padvid ring (2048x1152 slots, 16 a stream -
+`-DPADVID_MAX_W/H/SLOTS`); `s3egl`/`s3gl` turn the frame's fd into an image
+and its bind into `PADGL_TEXDIRECT`. Traps found: length prefixes 256..511
+look like start codes; `-fflags nobuffer` drops the IDR; the real
+h264_v4l2m2m open fails (taken over anyway); 4 slots deadlocked; drain must
+answer EOF promptly; pts may never be NOPTS.
+
+The GL bridge needed the rest of GLES 3 for the video to SHOW (and for much
+of Godot): MAXPROG 128 -> 1024 for Spike 3 (program 144's uniforms were never
+set), and new ring ops after PADGL_PRESENTTEX - instancing, uniform blocks,
+counted uniform arrays, colour/depth mask, pixel store, 3D textures, mipmaps.
+GLES varying limits (0x9122/0x9125) answered; samplerExternalOES shaders get
+the game's own `#define samplerExternalOES sampler2D`.
+
+## Stage 6 - the node bus decoded, Start starts a game (2026-11-10)
+
+**The frame mask.** A node address with bit 0x40 set (`c1`, `c8`...) carries
+Spike 2's own frame - `cmd args... ck`, summing to zero with the address -
+with each byte XORed by m = (node & 0x0f) << 4 | (n & 0x0f) (n = the byte
+count) on even positions and ~m on odd ones (`s3bridge.unmask`, its own
+inverse). Read off the bus, not out of any firmware (the pinnode .hex files on
+the card are encrypted and were left alone): an all-zero LED frame showed the
+alternating mask, and decoded this way every one of 110 frame kinds
+checksums. What comes out is Spike 2's command set: `11 key ck` the switch
+scan, `40 IDX power t...` coil fire/config, `41` coil rules, `4d` coil off,
+`46/48/72/14/70` setup and status, `8x..bx` LEDs. The REPLY goes back plain;
+the scan reply is keyed with the DECODED key (rol8 per byte, as Spike 2).
+Keying it with the raw byte garbled every switch the game read.
+
+**The cabinet.** Device tables (`s3nodes.devices`, 0x50-byte records found by
+name): group g = the board of node-directory record g (1-based; record 5 is
+the CPU, whose inputs are the SPI chain). pokemon_le: START BUTTON node 1 bit
+11, COIN DOOR POWER INTERLOCK = SPI bit 15 (CPU index 23; service buttons
+8..11 = bits 0..3), trough node 8 bits 37 (TROUGH 1) .. 32 (TROUGH 6),
+SHOOTER LANE node 8 bit 28, coils TROUGH node 8 #1, AUTO PLUNGER #4. At rest
+the SPI interlock bit reads OPEN (door open: service menu live, no coils);
+`s3press.py hold SLOT 15` closes it.
+
+**The fault probe** `ff` is a STATUS poll, not a switch read: word A = the
+addressed frames the board took since the last probe (this one included,
+Spike 2's PAD-249 rule - a mismatch made the game re-initialise node 8/9 for
+ever), word B 0. Counting it as a read cleared raised requests with no scan.
+Only the scan (`11`) clears a request, and every input state the bridge sees
+is QUEUED for its own scan (a 150 ms coin pulse was otherwise lost).
+`F0 10`/`F0 20` (enumeration) hold a node's request another 30 s.
+
+**Polarity** - found with the game's own Ball Trough Test (service menu,
+live): every node board but the cabinet one (START BUTTON's, node 1) reports
+a CLOSED switch as wire bit 0. The game had always seen an empty trough: ball
+searches, "Auto Plunger / Left Scoop DEVICE MALFUNCTION". `nodesw` stays
+logical (1 = closed); the scan reply inverts active-low boards
+(`set_polarity`; `PAD_S3_ACTIVE_LOW/_HIGH` override). Optos rest open.
+
+**The ball model** `s3balls.py` (Spike 2's ballmodel/ballfeed rules, resolved
+by name per title): trough full at boot, a TROUGH fire opens the highest made
+position and closes SHOOTER LANE, an AUTO PLUNGER fire with a ball in the lane
+opens it (in play), `s3press.py drain SLOT` brings one home. Coil frames ask
+for no reply, so the model hears them on every addressed frame. First 0x40
+to a coil = its configuration. `PAD_S3_NBTRACE=1` traces decoded frames.
+
+**Press by name**: the bridge writes `DIR/switches.json`; `s3press.py sw SLOT
+"START BUTTON"`, `coin SLOT N` (3 s apart; the game still credits only ~3 of
+4 quarters - harmless, Free Play avoids it).
+
+**Harness hygiene**: `s3run.sh` kills a killed run's helpers (an orphaned
+padglhost wrote stale frames and slowed later boots to 3x), frame dumps sort
+numerically, autoguide no longer mistakes service-menu pages for Guided Setup.
+
+**Proven** (pokemon_le 0.82.0, names only, emulator_08..11): coins ->
+CREDITS, START BUTTON -> BALL 1 (the trough eject is answered, the ball
+reaches the shooter lane), ACTION BUTTON -> the auto plunger fires, slings,
+pops and orbits score (1,022,310 -> 1,073,640), a drain gives the end-of-ball
+bonus and BALL 2; inside the ball save the game re-serves and auto-launches.
+
+## Stage 7 - the other titles (2026-11-10)
+
+Everything is derived per title, and five of the six cards on hand now start
+a game and play a ball by switch NAMES only (the same script, `coin`,
+`sw "START BUTTON"`, `sw "ACTION BUTTON"`/`"LOCKDOWN BUTTON"`, slings, drain):
+
+| card | result | what it needed |
+|---|---|---|
+| pokemon_le 0.82.0 | plays, ball 2 | (stage 6) |
+| walking_dead_remastered_le 0.92.0 | plays, scores | nothing new |
+| star_wars_2025_le 0.96.0 | plays, scores | END-STOP motors (Death Star, Jump Ramp, AT-AT) |
+| fallout_le 0.81.0 | character select, ball in play | STEPPER motors (Fat Man pan/tilt), ~110 s settle |
+| star_wars_elg 1.10.0 | ball served, opening crawl | node directory flag byte; per-switch polarity; GAME SETUP screen eats the first Start |
+| star_wars_2025_pro 0.84.0 | plays, scores 2,030 | legacy power board answered (0.5 -> 20 fps); autoguide on fresh frames |
+
+**Polarity is per switch** (device record +0x28 = LOCATION): playfield
+switches answer closed as wire 0, cabinet buttons stay high - the flipper
+buttons on playfield node 8, and ELG's Start and tilt on node 8 too
+(`s3nodes.active_low_masks`, keyed on the TROUGH switches' location).
+
+**Board-run motors** (`s3motors.py`, Spike 2's PAD-393/656 and PAD-237/249/
+955/971 models): steppers `32` configure (end inputs data[5]/[6]), `34`
+home, `31` move, status `38+motor` -> pos, target, flags 0x02 moving 0x04
+homed; end-stop motors `51` configure (stops data[2]/[3], encoder data[5]/
+[6]), `53`/`54` to a stop, `55` to an input, status `52 <motor>` byte 2 =
+0x01 moving, 0x20 arrived (55), 0x08 done. Zeros held fallout and star wars
+LE in their boot for ever. End switches go into nodesw (logical).
+
+**The netbridge build is per card**: 0.98.4 (most), 0.98.6 (fallout), 0.97.0
+(star_wars_2025_pro). The bridge reports the card's `version.txt` and CRCs
+from 0x10000100 to the end of the ELF's first flash segment; Pokemon's fixed
+range made Pro reflash (openocd fails) and freeze on the logo.
+
+**Star Wars 2025 Pro** (radium engine, not Godot) drew at 0.5 fps: it polls
+the power distribution board (`0x12`, `0x19`) every loop and each poll
+waited out its timeout. netbridge itself answers those when the power board
+is a Spike 1/2 one (HOST_Update, read off the unstripped firmware: `0x10` 3
+zeros, `0x12` line frequency u8, `0x15` 0xff, `0x19` line voltage u16; the
+rest unanswered) - the bridge does the same now and Pro runs at 20 fps. Its
+"second boot hangs" was autoguide judging a frame drawn BEFORE its press
+(s3press.frame_after now waits for a newer one).
+
+## Stage 8 - sound and the window (2026-11-10)
+
+**Sound** (`PAD_S3_AUDIO=1`, off by default - rig runs are muted): s3alsa
+writes the game's PCM non-blocking into `$SD/audio/audio.fifo` (bound at
+/run/padaudio) and "rate channels" into audio.fmt; s3run starts Spike 2's
+playaudio.sh outside the game's namespaces on port 46100+slot. SIGPIPE is
+blocked around the write. Proven silently: 139 s from the fifo, 138 s
+through the player's relay sink (emulator_18 is a 20 s WAV of it).
+
+**The window** (`s3run.sh --window`): padglhost with a window; s3bridge
+writes `tables/game/switch_list.txt` (Spike 2's shape) so the window binds
+its keys by the title's names, and s3keys.py carries its padsw.h block onto
+nodesw / the SPI chain, edges only. Proven on a private Xvfb with xdotool:
+5 = coin, 1 = Start (BALL 1), Space = launch, the door/trough latch at open.
+
+## Where it stands (2026-11-10)
+
+All six Spike 3 cards on hand boot, start a game and play a ball, with
+video, live sound on request, and a playable window.
+
+## Stage 9 - the Emulate tab (2026-11-10)
+
+Start on a Spike 3 card runs it where the PC has the Spike 3 rig:
+`tools/spike3_emu/s3launch.sh` (as root, through `wsl -u root`) checks the
+rig (`--check`: root, the build, the patched qemu, CUSE, the amp bus,
+tools), puts the card in the store the first time (its padkeys.json beside
+it), and runs `s3run.sh --window` on the claimed rig slot; Stop is
+`s3launch.sh --stop SLOT`; sound follows the panel's Mute. Without the rig the
+PAD-367 refusal stands, saying Spike 3 is not set up on this PC. s3run finds
+the amp bus (i2c-stub) by name - unset, the game aborted at xifo.cpp:72.
+
+## Stage 10 - Spike 3 for every user (2026-11-10)
+
+David's decision: the OTP key is never committed, but a user may bring their
+own, so the emulator works for everyone who does. What that took:
+
+- **No custom kernel, no patched qemu.** s3dev.so (an LD_PRELOAD in the game)
+  answers /dev/spidev4.0 and /dev/i2c-10 inside the game - the SPI chain from
+  spi.in, the amp bus as the same generic register store i2c-stub is - and
+  the game runs under the distro's own qemu-aarch64-static (binfmt, F flag).
+  The `kernel=` line in .wslconfig is no longer needed.
+- **No dm-crypt.** s3store.py decrypts in user space with the app's own
+  LUKS/ext4 reader (spike3.py, luks_otp.py, `cryptography`) when the kernel
+  has no dm-crypt: bit-identical rootfs, pokemon_le in 278 s.
+- **The user's own key.** The Extract tab's Spike 3 unlock saves padkeys.json;
+  the Emulate tab finds it (spike3_keyfile) and hands its PATH to
+  s3launch.sh --keyfile. Used once per card, to build the store. No key: the
+  run says to unlock the card in the Extract tab.
+- **One door.** s3launch.sh --check / --setup (apt packages, binfmt), then the
+  store, then a one-time rig build (s3build.sh: downloads the cross compiler
+  and FFmpeg headers into /var/lib/pad-s3), then the run. The installers ship
+  tools/spike3_emu and luks_otp.py.
+- Proven from nothing: an empty rig home, no custom modules, the system qemu -
+  the launcher built the rig, Pokemon booted, Guided Setup was walked and a
+  ball was served and plunged.
+
+## Stage 11 - the virtual playfield (2026-11-10)
+
+Spike 2's playfield window, on a Spike 3 run, from the card's own data:
+
+- The device records carry their place exactly as the test menu draws them:
+  picture name at +0x18, x/y at +0x2c/+0x2e, w/h at +0x30 (s3nodes.records).
+  Every card ships the pictures: pokemon_playfield_le/pro, buck_le/pro_playfield
+  (Star Wars 2025), picnic_pf (Walking Dead), the ELG diagnostic drawing.
+  Fallout 0.81 places no playfield devices (its window shows the cabinet).
+- s3pf.py writes the window's tables at run start; the group map is exact
+  (group_node_exact.txt: a group is the board's place in the node directory).
+- s3leds.py fills padled.h's block from the node bus in s3bridge: lamp levels
+  through leddecode's swelf-generation grammar (Spike 3 speaks it: 3742 frames,
+  0 refused), coil fires from `40 IDX power`.
+- Proven on pokemon_le: 60 switches, 17 coils, 174 inserts on its drawing,
+  lit live by the attract show; a held SHOOTER LANE on the picture closed and
+  opened the game's switch.
+
+## Guided Setup at every boot: the factory config (2026-11-11)
+
+The game reopens Guided Setup at every boot with "This machine has an
+invalid Factory Config. Contact your distributor." Its settings DO persist
+(data.up/nv). The factory config is the 256-byte EEPROM the game reads at
+I2C 0x57 at boot (s3dev logs each address's first read; it never writes
+0x50-0x53 or 0x57). Spike 2 sidesteps the same screen by seeding a
+checksummed identity record (hwshim.c nv_ident_seed); Spike 3's factory
+config is not checksummed but protected with a PER-MACHINE factory key
+(AES-192-OFB + SHA-1/HMAC, /media/spi_factory_key-1_0_0.key - David's own
+research notes), so a valid one cannot be made without a machine's key.
+Window runs therefore ask the user for Save & Exit (watchguide); a
+"bring your own factory config" (a user's own 0x57 dump, never committed)
+is a follow-up ticket, untestable until someone has a real dump.
+
+## What is left for Spike 2 parity
+
+1. Coins: the game credits ~3 of 4 quarters even when each is delivered.
+2. The window's default key bindings fire one QR-scanner switch for a moment
+   before the title's switch list loads (harmless, settles).
+3. The playfield's lamps are proven on pokemon_le; the other titles' tables
+   build (all six) but their lamp traffic is unwatched.
+4. The lit inserts draw white in "Real LEDs"; whether pokemon_le's inserts are
+   RGB (and the window's channel grouping misses them) is not checked yet.

@@ -115,13 +115,26 @@ class Spike3KeySource:
         env = os.environ.get("PAD_SPIKE3_KEYFILE")
         if env and os.path.exists(env):
             return cls.from_keyfile(env, image_id=image_id)
+        side = None
         if image_path:
             d = os.path.dirname(os.path.abspath(image_path))
             for cand in (os.path.abspath(image_path) + ".padkeys.json",
                          os.path.join(d, "padkeys.json")):
                 if os.path.exists(cand):
-                    return cls.from_keyfile(cand, image_id=image_id)
-        return None
+                    side = cls.from_keyfile(cand, image_id=image_id)
+                    break
+        if side is not None and side.has_any():
+            return side
+        # the user's own key, kept once for every project (PAD-1090:
+        # webui/spike3_key.py writes it after verifying it against a card).
+        # A sidecar holding only the .spk package key lends it that key.
+        user = os.path.join(os.path.expanduser("~"), ".pad", "spike3_padkeys.json")
+        if os.path.exists(user):
+            src = cls.from_keyfile(user, image_id=image_id)
+            if side is not None and side.has_spk() and not src.has_spk():
+                src._spk = side._spk
+            return src
+        return side
 
     def has_any(self):
         return bool(self._otp or self._mks)

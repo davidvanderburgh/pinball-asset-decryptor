@@ -4624,6 +4624,22 @@ class RunCtl:
     def _poll_boot(self, live):
         """{"pct", "words"} while the game boots, None once it is up (or with
         no run or no log to read)."""
+        # A SPIKE 3 RUN says it outright (PAD-1090): tools/spike3_emu/s3prog.py
+        # writes dump/s3boot, "<step> <pct> <words>", the same steps the app's
+        # footer shows; "run" is up. It has none of the Spike 2 logs below.
+        dump = padpath.dump()
+        s3 = dump and os.path.join(dump, "s3boot")
+        if s3 and os.path.exists(s3):
+            try:
+                with open(s3, encoding="utf-8", errors="replace") as f:
+                    step, pct, words = (f.read().strip().split(" ", 2) + ["", ""])[:3]
+                pct = int(pct)
+            except (OSError, ValueError):
+                return None
+            if step == "run" or not live:
+                return None
+            self._booted_again = True
+            return {"pct": pct, "words": words}
         if self._boot_log is None:
             d = padpath.logdir() if self._logdir is False else self._logdir
             if not d:

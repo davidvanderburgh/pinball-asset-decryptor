@@ -312,6 +312,11 @@ input[type=range] { accent-color: var(--accent); }
 .banner.info { background: var(--info-soft); }
 .banner.warn { background: var(--warn-soft); }
 .banner .body-text { flex: 1 1 300px; min-width: 0; }
+/* PAD-1090: a Spike 3 tab without the user's OTP key - greyed, no clicks, under its key gate */
+.sx-keylocked { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; opacity: .45; filter: grayscale(1); pointer-events: none; user-select: none; }
+.banner.sx-s3key { align-items: flex-start; padding: 12px 16px; }
+.banner.sx-s3key .stack { gap: 6px; }
+.sx-s3key-in { flex: 1 1 360px; max-width: 560px; min-width: 0; }
 /* PAD-366 (Peanutsfr): a scene's path (one long word of hashes) has nowhere to break, so
    it ran past the box; overflow-wrap lets it fold inside the width instead. */
 .tip { position: fixed; z-index: 80; background: var(--panel-3); color: var(--ink); border: 1px solid var(--line-2); border-radius: 6px; padding: 7px 10px; font-size: 12.5px; max-width: 420px; white-space: pre-line; overflow-wrap: anywhere; pointer-events: none; box-shadow: var(--shadow); }

@@ -179,6 +179,9 @@ _GAMES = (_SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES + _SAM_GAMES
 _SPIKE3_CAPS = Capabilities(
     extract=True,
     extract_categories=_spike3_extract.CATEGORIES,
+    # PAD-1090: the Emulate tab runs a Spike 3 card on the Spike 3 rig
+    # (tools/spike3_emu/s3launch.sh), with the virtual playfield beside it
+    emulate=True,
 )
 
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD

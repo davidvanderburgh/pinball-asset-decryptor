@@ -24,6 +24,7 @@ import itertools
 import logging
 import os
 import sys
+import threading
 import time
 
 from .. import __version__
@@ -66,7 +67,7 @@ def _system_theme():
         return "dark"
 
 
-_EMULATE_KINDS = {"copy": (0, None), "boot": (1, 55),
+_EMULATE_KINDS = {"copy": (0, None), "boot": (1, 55), "nodes": (2, 60),
                   "techalerts": (2, 80), "run": (4, 100)}
 
 
@@ -389,6 +390,91 @@ class WebWindow:
 
     def refresh_rail(self):
         self.ctx.store.set("shell", tabs=self._rail())
+        self.refresh_spike3_key()
+
+    # -- PAD-1090: the user's own Spike 3 OTP key, which every Spike 3 tab
+    # needs (static/js/core/locks.js "spike3key"; webui/spike3_key.py) ------
+    def _spike3_card(self):
+        for name in ("extract_input_var", "emulate_card_var"):
+            try:
+                path = (getattr(self, name).get() or "").strip().strip('"')
+            except Exception:                           # noqa: BLE001
+                path = ""
+            if path and os.path.isfile(path):
+                return path
+        return ""
+
+    def refresh_spike3_key(self):
+        """shell.spike3_key: True when the user's OTP key is on file."""
+        from . import spike3_key
+        try:
+            have = bool(spike3_key.find_keyfile(self._spike3_card() or None))
+        except Exception:                               # noqa: BLE001
+            have = False
+        self.ctx.store.set("shell", spike3_key=have)
+        return have
+
+    @rpc
+    def spike3_paste_key(self, text):
+        """The key gate's field: the key pasted as text (64 hex characters,
+        or OTP_KEY.TXT's contents), checked against the selected card, kept.
+        The key itself never reaches the log."""
+        text = (text or "").strip()
+        if not text:
+            return False
+        return self._spike3_take_key(text)
+
+    @rpc
+    def spike3_load_key(self):
+        """The key gate's "Choose a key file": OTP_KEY.TXT, or the raw
+        32-byte key, which cannot be pasted."""
+        if not self._spike3_card():
+            return self._spike3_take_key(None)
+        key = self.ask_open("spike3_otp_key", "Select your OTP key "
+                            "(OTP_KEY.TXT or the 32-byte key file)",
+                            [("Key files", "*.txt *.bin"), ("All files", "*.*")])
+        if isinstance(key, (list, tuple)):
+            key = key[0] if key else ""
+        if not key:
+            return False
+        return self._spike3_take_key(key)
+
+    def _spike3_take_key(self, key):
+        """Verify *key* (text or a file path) against the selected card and
+        keep it (webui/spike3_key.save_key), off the UI thread."""
+        card = self._spike3_card()
+        if not card:
+            self.toast("Select your Spike 3 card first (the Select card tab): "
+                       "PAD checks the key against it before keeping it.", "warn")
+            return False
+        self.ctx.store.set("shell", spike3_key_busy=True, spike3_key_status=
+                           "Checking the key against your card…")
+
+        def work():
+            from . import spike3_key
+            try:
+                ok, msg, _path = spike3_key.save_key(key, card)
+            except Exception as exc:                    # noqa: BLE001
+                ok = False
+                err = str(exc)
+                if isinstance(key, str) and len(key) > 8 and key[:16] in err:
+                    err = type(exc).__name__     # never echo a pasted key
+                msg = "Could not use that key: %s" % err
+
+            def done():
+                self.ctx.store.set("shell", spike3_key_busy=False,
+                                   spike3_key_status=msg)
+                self.append_log("[spike3] " + msg, "success" if ok else "warn")
+                if ok:
+                    self.refresh_spike3_key()
+                    self.refresh_rail()
+                    ext = self._by_ns.get("extract")
+                    if ext is not None and ext.get("spike3_unlock"):
+                        ext._spike3_unlocked(msg)
+            self.ctx.loop.post(done)
+
+        threading.Thread(target=work, daemon=True, name="spike3-key").start()
+        return True
 
     def set_tab_badge(self, ns, badge):
         svc = self._by_ns.get(ns)
@@ -452,7 +538,9 @@ class WebWindow:
             "Expression Lights": g("modes"),
             # PAD-802: Visual Pinball on the Spike 2 emulator (a preview until
             # PAD-1136); PAD-943 (David): on every manufacturer the app emulates
-            "Visual Pinball": any(g(c) for c in VPX_EMULATORS) and self.vpx_preview_on(),
+            # (not Spike 3: its rig has no Visual Pinball bridge - PAD-1090)
+            "Visual Pinball": (any(g(c) for c in VPX_EMULATORS) and self.vpx_preview_on()
+                               and getattr(mfr, "_era", None) != "spike3"),
         }
         return gates
 

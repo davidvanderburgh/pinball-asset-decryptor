@@ -305,6 +305,20 @@ def test_launch_finds_a_spike1_card_in_the_sister_library(tmp_path, monkeypatch)
     assert isinstance(pl.launch_for("spike2", "rush_le", "c.raw"), pl.Launch)
 
 
+@pytest.mark.parametrize("python", [r"C:\PAD App\python\python.exe", ""])
+def test_spike1_launch_passes_the_native_audio_interpreter(monkeypatch, python):
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "win_python", lambda: python)
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, d: "mapped:" + p)
+    launch = pl.Spike1Launch("ghostbusters_le", "card.iso", dist="TestRuntime")
+    launch.work = "/work/spike1"
+    env, card = launch.env()
+    expected = ["PAD_WINPYTHON=mapped:" + python] if python else []
+    assert [s for s in env if s.startswith("PAD_WINPYTHON=")] == expected
+    assert "PAD_AUDIO=1" in env and "S1_WORK=/work/spike1" in env
+    assert card == "mapped:card.iso"
+
+
 def test_spike1_launch_refuses_another_titles_run(tmp_path, monkeypatch):
     pl = pytest.importorskip("padlaunch")
     s1 = pytest.importorskip("s1bridge")

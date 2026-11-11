@@ -214,6 +214,7 @@ class Bridge:
         self.balls = None         # s3balls.Balls once the inputs are attached
         self.steppers = None      # s3motors.Steppers once the inputs are attached
         self.motors = None        # s3motors.Motors (end-stop / encoder motors)
+        self.rules = None         # s3rules.Rules: coils the boards fire by rule
 
     def attach_inputs(self, path):
         """The slot's node switch inputs, live: 8 bytes a node (64 nodes),
@@ -241,6 +242,8 @@ class Bridge:
         the service loop a request is answered by the switch scan (02)."""
         now = time.time()
         found = 0
+        if self.rules is not None:
+            self.rules.tick()     # a flipper tap shorter than a loop pass
         for nid in sorted(self.nodes):
             n = self.nodes[nid]
             if not n.inputs:
@@ -312,8 +315,15 @@ class Bridge:
         F0s a minute and never reached attract."""
         if not data:
             return
+        raw = data
         if node & 0x40:
             data = unmask(node, data)
+        # PAD-1134: a coil's rule (41) and "run it by its rule" (short 40) -
+        # the board fires flippers, slings and pops itself (s3rules). Only a
+        # frame whose checksum holds (address + count + body = 0) may arm one.
+        if (self.rules is not None and data[0] in (0x40, 0x41)
+                and (node + len(raw) + sum(data)) & 0xFF == 0):
+            self.rules.note(node & 0x3F, data)
         # coil and motor commands ask for no reply, so they never reach
         # node_exchange: the models hear them here (the first trough eject
         # of a real game went unanswered for that reason)
@@ -536,14 +546,21 @@ def main():
             log.write("# padled: %s\n" % os.environ["PAD_S3_PADLED"])
         except Exception as e:                             # noqa: BLE001
             log.write("# padled: not published (%s)\n" % e)
+    try:
+        import s3rules
+        br.rules = s3rules.Rules(br.sw, log, fire=leds.fire if leds else None)
+    except Exception as e:                                 # noqa: BLE001
+        log.write("# [rule] no rule model (%s): ruled coils never fire\n" % e)
     while True:
-        r, _, _ = select.select([master], [], [], 0.05 if (br.balls or br.steppers) else 0.5)
+        r, _, _ = select.select([master], [], [], 0.05 if (br.balls or br.steppers or br.rules) else 0.5)
         if br.balls:
             br.balls.tick()
         if br.steppers:
             br.steppers.tick()
         if br.motors:
             br.motors.tick()
+        if br.rules:
+            br.rules.tick()
         if not r:
             continue
         try:

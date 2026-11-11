@@ -51,20 +51,25 @@ class PadLed:
         v = struct.unpack_from("<I", self.m, off)[0]
         struct.pack_into("<I", self.m, off, (v + n) & 0xFFFFFFFF)
 
+    def fire(self, node, idx, power):
+        """One coil fire: a `40 IDX power` from the game, or a coil the BOARD
+        fired by its rule (s3rules, PAD-1134) - counted alike, so the
+        playfield window flashes both."""
+        if 0 <= node < NODES and 0 <= idx < COILS:
+            o = node * COILS + idx
+            self.m[COIL + o] = (self.m[COIL + o] + 1) & 0xFF
+            self.m[LVL + o] = power & 0xFF
+            self._bump(COIL_DECODED)
+            self._bump(COIL_GEN)
+            self.fires += 1
+
     def frame(self, node, plain):
         """One node frame, unmasked: `cmd body... ck`."""
         if not plain or not 0 <= node < NODES:
             return
         cmd = plain[0]
         if cmd == 0x40 and len(plain) >= 4:
-            idx = plain[1]
-            if idx < COILS:
-                o = node * COILS + idx
-                self.m[COIL + o] = (self.m[COIL + o] + 1) & 0xFF
-                self.m[LVL + o] = plain[2]
-                self._bump(COIL_DECODED)
-                self._bump(COIL_GEN)
-                self.fires += 1
+            self.fire(node, plain[1], plain[2])
             return
         if cmd & 0xC0 != 0x80:
             return

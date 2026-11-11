@@ -535,6 +535,34 @@ Window runs therefore ask the user for Save & Exit (watchguide); a
 "bring your own factory config" (a user's own 0x57 dump, never committed)
 is a follow-up ticket, untestable until someone has a real dump.
 
+## The boards fire the flippers: coil rules (PAD-1134, 2026-11-11)
+
+The flipper buttons reached the game (every tap scanned) and no flipper ever
+fired: on the machine the game hands each node board a coil's RULE at ball
+start (cmd 41, Spike 2's frame, masked like every other) and the board fires
+the coil from its own switch; the game sends nothing per flip. `s3rules.py`
+plays that board side. The 49-byte frame, read off the wire (the pinnode
+.hex firmware is encrypted) and every field named from pokemon_le's device
+table:
+
+    [1] coil  [2] pulse power  [3..4] pulse ticks (100/s)  [5] hold power
+    [6..7] hold ticks  [24] 0x40|input that fires it  [27] 0x40|second
+    input (both flippers: their EOS)  [28] 0x40|input that stops a motor run
+
+pokemon_le arms RIGHT/LEFT FLIPPER (n8 #0/#5, f5 for 40 ms then hold 1e,
+inputs 24/25, EOS 31/16), the slingshots (n8 #2/#3, cc 30 ms, inputs 29/30)
+and the pop bumpers (n9 #2/#4, 20 ms, inputs 28/30). A closing edge fires
+the pulse, a hold follows while the switch is held, opening drops it; the
+flipper's EOS input closes while the bat is up. A fire bumps padled's coil
+counter (s3leds.fire), so the playfield window flashes the coil, and is
+logged `[rule]` in bridge.log. Only a frame whose checksum holds arms a rule.
+
+The same frame with only [28] is a cam motor (MEOWTH BALLOON MOTOR, stop
+MEOWTH UP / DOWN, 1000 ticks = its 10 s limit), run by the short `40 coil
+ck`: it now reaches its stop switch after PAD_MOTOR_MS (600, Spike 2's).
+Unanswered, the game re-tried it every 10 s for ever. PAD_S3_RULES=0 turns
+the board model off.
+
 ## What is left for Spike 2 parity
 
 1. Coins: the game credits ~3 of 4 quarters even when each is delivered.

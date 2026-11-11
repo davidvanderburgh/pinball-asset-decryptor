@@ -66,7 +66,12 @@ def save_key(key_path, card):
     from ..plugins.stern import spike3_selfextract as SX
     out = user_keyfile()
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    res = SX.ingest_otp_key(key_path, card, out_path=out)
+    try:
+        res = SX.ingest_otp_key(key_path, card, out_path=out)
+    except SX.Spike3SelfExtractError:
+        # the text is not shaped like a key at all (never echoed back)
+        return (False, "That is not an OTP key: a Spike 3 OTP key is 64 "
+                "characters, each 0-9 or a-f. PAD did not keep it.", None)
     if not res.verified:
         return False, res.message, None
     os.environ["PAD_SPIKE3_KEYFILE"] = res.sidecar

@@ -144,3 +144,15 @@ def test_an_empty_paste_does_nothing(tmp_path, home):
     from tests.webui_harness import web_app
     with web_app(tmp_path, mfr="stern") as w:
         assert w.call("ui.spike3_paste_key", "   ") is False
+
+
+def test_text_that_is_not_a_key_says_so_and_is_not_kept(tmp_path, home):
+    """David: if a user puts in the wrong one, do we know? Text that is not
+    shaped like a key never reaches the card, says what a key looks like,
+    and is never echoed back."""
+    for bad in ("hello this is not a key", "0" * 63):
+        ok, msg, path = spike3_key.save_key(bad, str(tmp_path / "no-card.raw"))
+        assert not ok and path is None
+        assert "64" in msg and "did not keep" in msg
+        assert bad not in msg
+    assert spike3_key.find_keyfile() is None

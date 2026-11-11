@@ -732,15 +732,13 @@ class ExtractTab(TabService):
                          "card…")
 
         def _work():
-            from ...plugins.stern import spike3_selfextract as SX
+            from .. import spike3_key
             try:
-                out = self._spike3_padkeys_path()
-                res = SX.ingest_otp_key(keyfile, path, out_path=out)
-                if res.verified:
-                    os.environ["PAD_SPIKE3_KEYFILE"] = res.sidecar
-                    self.ctx.loop.post(self._spike3_unlocked, res.message)
+                # the same check and the same words as the key field
+                ok, msg, _kept = spike3_key.save_key(keyfile, path)
+                if ok:
+                    self.ctx.loop.post(self._spike3_unlocked, msg)
                 else:
-                    msg = res.message
                     self.ctx.loop.post(lambda: self._set_spike3(
                         busy=False, status=msg))
             except Exception as e:                      # noqa: BLE001

@@ -476,14 +476,6 @@ class WebWindow:
         threading.Thread(target=work, daemon=True, name="spike3-key").start()
         return True
 
-    @rpc
-    def spike3_build_card(self):
-        """The key gate's "Build extractor card": the Extract tab's own
-        builder, whose steps show on that tab."""
-        self.select_tab("extract")
-        svc = self._by_ns.get("extract")
-        return bool(svc and svc.spike3_build_card())
-
     def set_tab_badge(self, ns, badge):
         svc = self._by_ns.get(ns)
         if svc is None:

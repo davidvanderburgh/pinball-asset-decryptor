@@ -155,11 +155,10 @@ export function SourceBody({ s, hist }) {
     </div>`;
 }
 
-// A locked Spike 3 card: unlock extraction with the board's OTP key. Every
-// shipped Stern board enforces secure boot, so the software extractor card only
-// boots on an un-enforced dev board; the realistic path for a normal machine is
-// to ingest a key you already have (the key is fleet-wide). Lead with that;
-// keep the card as a secondary, clearly dev-only option (PAD-1086, PAD-1091).
+// A locked Spike 3 card: unlock extraction with the board's OTP key, pasted
+// or from a key file (PAD-1086). The extractor-card route and its secure-boot
+// claims (PAD-1091) are gone from the page: the claims were never checked
+// (David, PAD-1090); "how to get the OTP key" is a follow-up ticket.
 // PAD-1090: the key pasted as text (David: "can't we just make it a text
 // field?"); a hidden field, never echoed - the window's spike3_paste_key
 // checks it against the selected card and keeps it for every Spike 3 tab.
@@ -190,10 +189,8 @@ function Spike3UnlockPanel({ s }) {
     <div class="x-alert-bd">
       <p class="small x-spike3-why">The 256-bit key is fused into the machine's Raspberry Pi, not stored on the card, and it is the same across machines. If you already have it, paste it here (64 hex characters): PAD verifies it against this card, unlocks extraction, and keeps it for every Spike 3 tab.</p>
       <${KeyPaste} busy=${u.busy} />
-      <p class="small x-spike3-why x-spike3-dev">Every shipped Stern board enforces secure boot, so the software extractor card will not boot on a normal machine — it only works on an un-enforced dev board. On a shipped board it simply refuses to boot (harmless: restore the backed-up boot.img / boot.sig). Reading the key off a secure-boot board needs a hardware (DMA) dump, which is out of scope here.</p>
       <div class="row wrap">
         <${Button} size="sm" kind="ghost" disabled=${u.busy} onClick=${() => call("extract.spike3_ingest_key")}>Or choose a key file…<//>
-        <${Button} size="sm" disabled=${u.busy} onClick=${() => call("extract.spike3_build_card")}>Build extractor card (dev boards)…<//>
         ${u.busy ? html`<${Spinner} />` : null}
       </div>
       ${u.status ? html`<div class="small x-spike3-status">${u.status}</div>` : null}

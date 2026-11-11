@@ -490,12 +490,8 @@ function Spike3KeyGate({ shell, lock }) {
         <${Button} size="sm" kind="primary" icon="unlock" disabled=${busy || !key.trim()} onClick=${send}>Use this key<//>
         ${busy ? html`<${Spinner} />` : null}
       </div>
-      <span class="small muted">Every shipped Stern board enforces secure boot, so the software extractor card will not boot on a normal machine:
-        it only works on an un-enforced dev board. On a shipped board it simply refuses to boot (harmless: restore the backed-up boot.img / boot.sig).
-        Reading the key off a secure-boot board needs a hardware (DMA) dump, which is out of scope here.</span>
       <div class="row wrap">
         <${Button} size="sm" kind="ghost" disabled=${busy} onClick=${() => call("ui.spike3_load_key")}>Or choose a key file…<//>
-        <${Button} size="sm" kind="ghost" disabled=${busy} onClick=${() => call("ui.spike3_build_card")}>Build extractor card (dev boards)…<//>
       </div>
       ${shell.spike3_key_status ? html`<span class="small">${shell.spike3_key_status}</span>` : null}
     </div>

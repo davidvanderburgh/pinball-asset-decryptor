@@ -102,6 +102,11 @@ function Spike3KeyGuideModal({ onClose }) {
         extraction, and keeps it for every Spike 3 tab and every Spike 3 card you
         own. Stuck on the firmware, the recovery kit or the boot image? Join our
         Discord and we will walk you through it.</p>
+
+      <p class="s3guide-ref">Further reading: the community worked this out in the
+        open on Pinside - see the
+        <a href="https://pinside.com/pinball/forum/topic/spike-3-in-the-wild/page/4#post-8886828"
+          target="_blank" rel="noopener">"Spike 3 in the wild"</a> thread.</p>
     </div>
   <//>`;
 }

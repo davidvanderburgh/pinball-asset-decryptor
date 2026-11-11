@@ -2711,6 +2711,54 @@ def test_setup_layout_display_fills_a_monitor_or_sits_on_one():
     assert vs.display_for(None, mons)["mode"] == "free"
 
 
+def test_an_old_layouts_lcd_becomes_the_borderless_display_setting(tmp_path):
+    """PAD-1131: a layout saved before PAD-811 left only the kit's LCD
+    rectangle, so the run moved the FRAMED window over the second screen
+    and its title bar showed. Carried once into the display setting the
+    layout writes today: full screen, borderless, on the monitor it fills."""
+    pc = pytest.importorskip("padcontroller")
+    pd = pytest.importorskip("padisplay")
+    mons = [{"n": 1, "x": 0, "y": 0, "w": 3840, "h": 2160, "primary": True},
+            {"n": 2, "x": 3840, "y": 0, "w": 1920, "h": 1080, "primary": False}]
+    conf = str(tmp_path / "display.conf")
+    kit = {"lcd": {"x": 3840, "y": 0, "w": 1920, "h": 1080, "topmost": True}}
+    got = pc.carry_lcd_layout(kit, conf=conf, mons=mons)
+    assert got == {"mode": "fullscreen", "monitor": 2, "border": False}
+    assert kit["display_carried"] is True
+    line = open(conf, encoding="utf-8").read()
+    assert "game monitor=2 mode=fullscreen border=0" in line
+    assert "x=3840 y=0 w=1920 h=1080 fs=1" in line
+    # the kit's rectangle stays, so the Visual Pinball tab still names the layout
+    assert kit["lcd"] == {"x": 3840, "y": 0, "w": 1920, "h": 1080, "topmost": True}
+
+    # once only: a later "free" on the Emulate tab holds
+    pd.save({"mode": "free"}, conf, mons)
+    assert pc.carry_lcd_layout(kit, conf=conf, mons=mons) is None
+    assert pd.load(conf)["mode"] == "free"
+
+
+def test_lcd_carry_leaves_a_chosen_setting_and_a_kit_with_no_rectangle(tmp_path):
+    pc = pytest.importorskip("padcontroller")
+    pd = pytest.importorskip("padisplay")
+    mons = [{"n": 1, "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}]
+    conf = str(tmp_path / "display.conf")
+    # the user's own setting is never replaced
+    pd.save({"mode": "window", "monitor": 1, "border": True, "rx": 10, "ry": 20,
+             "w": 800, "h": 450}, conf, mons)
+    kit = {"lcd": {"x": 0, "y": 0, "w": 1920, "h": 1080, "topmost": True}}
+    assert pc.carry_lcd_layout(kit, conf=conf, mons=mons) is None
+    assert pd.load(conf)["mode"] == "window" and pd.load(conf)["border"] is True
+    # the centred layout (no rectangle): nothing to carry, nothing marked
+    kit = {"lcd": {"topmost": True}}
+    assert pc.carry_lcd_layout(kit, conf=str(tmp_path / "other.conf"), mons=mons) is None
+    assert "display_carried" not in kit and not os.path.exists(str(tmp_path / "other.conf"))
+    # a rectangle on no monitor's full size: a borderless window where it was
+    kit = {"lcd": {"x": 100, "y": 50, "w": 960, "h": 540, "topmost": True}}
+    got = pc.carry_lcd_layout(kit, conf=str(tmp_path / "third.conf"), mons=mons)
+    assert got == {"mode": "window", "monitor": 1, "border": False,
+                   "rx": 100, "ry": 50, "w": 960, "h": 540}
+
+
 def test_setup_state_reports_the_game_display(tmp_path, monkeypatch):
     vs = pytest.importorskip("vpxsetup")
     pl = pytest.importorskip("padlaunch")

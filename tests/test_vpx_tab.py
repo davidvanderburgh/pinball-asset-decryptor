@@ -102,6 +102,10 @@ def test_the_tab_is_released_not_a_preview():
     assert preview.RELEASED.get("vpx") == "Visual Pinball"
     assert V.PREVIEW_FEATURE == "vpx"
     assert preview.enabled("vpx")
+    # its tips show in the ? window with no code
+    from pinball_decryptor.webui.help_content import sections_for
+    titles = [t for t, _b in sections_for("Visual Pinball")]
+    assert "What it's for" in titles and "Playing" in titles
     keys = [m[2] for m in __import__("pinball_decryptor.webui.tabs", fromlist=["TABS"]).TABS]
     assert "Visual Pinball" in keys
 

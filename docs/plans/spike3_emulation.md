@@ -409,6 +409,16 @@ pricing (1/$1.00, 3/$2.00) when counting: 8 quarters show CREDITS 3.
 padglhost wrote stale frames and slowed later boots to 3x), frame dumps sort
 numerically, autoguide no longer mistakes service-menu pages for Guided Setup.
 
+**The coin door starts shut** (PAD-1142). A headless run (no `--window`)
+left the interlock (SPI bit 15, active low) at rest = OPEN: 48V DISABLED, and
+on a slot with saved settings the game went straight to attract and asked for
+no node board for ~56 s - first board at 68.7 s instead of ~10 (pokemon_le
+and star_wars_2025_le, same saved state, door open vs shut: 68.7 / 10.1 s and
+68.7 / 8.1 s). A fresh slot was not affected (Guided Setup starts the bus at
+once), nor a window run: the window's keyboard closes the interlock as it
+attaches. `s3bridge.py` now shuts it by name (COIN DOOR [POWER] INTERLOCK)
+before the game starts; `PAD_S3_DOOR=open` keeps the old start.
+
 **Proven** (pokemon_le 0.82.0, names only, emulator_08..11): coins ->
 CREDITS, START BUTTON -> BALL 1 (the trough eject is answered, the ball
 reaches the shooter lane), ACTION BUTTON -> the auto plunger fires, slings,

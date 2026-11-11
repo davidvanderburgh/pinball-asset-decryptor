@@ -31,9 +31,11 @@ score, `drain` ends the ball: bonus, then BALL 2.
                                        --bus --bridge runs this)
 
 The coin door: SPI bit 15 is COIN DOOR POWER INTERLOCK (device group 5
-index 23; the service buttons are indices 8..11 = bits 0..3). At rest it
-reads OPEN - service buttons live, 48 V off, no coil fires. `hold SLOT 15`
-closes the door, and only then do coils fire (Spike 2 behaves the same).
+index 23; the service buttons are indices 8..11 = bits 0..3). Open, 48 V
+is off and no coil fires (Spike 2 behaves the same). s3bridge.py shuts it
+as the run starts (PAD-1142: left open, a slot with saved settings waited
+~56 s for its first node board); `release SLOT 15` opens it, `hold SLOT 15`
+shuts it again, and PAD_S3_DOOR=open starts a run with it open.
 
 Bit b is byte b // 8, mask 1 << (b % 8). Measured on pokemon_le 0.82.0 in
 Guided Setup (scan): the coin-door service buttons are byte 0 -

@@ -358,3 +358,24 @@ def test_window_keys_reach_spike3_switches(tmp_path, monkeypatch):
     b = bytearray(sw()); b[8 * 8 + 4] |= 0x20; (slot / "nodesw").write_bytes(bytes(b))
     k.step()
     assert sw()[8 * 8 + 4] & 0x20
+
+
+def test_coin_door_starts_shut_whatever_the_title_names_it(tmp_path, monkeypatch):
+    """PAD-1142: a headless run left the interlock (SPI bit 15, active low)
+    open - 48V DISABLED, and with saved settings the game waited ~56 s
+    before its first node board. The bridge shuts it by name, as the
+    window's keyboard does; PAD_S3_DOOR=open keeps it open."""
+    monkeypatch.delenv("PAD_S3_DOOR", raising=False)
+    for name in ("COIN DOOR POWER INTERLOCK", "COIN DOOR INTERLOCK"):
+        spi = tmp_path / "spi.in"
+        spi.write_bytes(b"\xff" * 8)
+        table = {name: [0, 23], "SERVICE SELECT": [0, 8], "PRISON DOOR CLOSED": [9, 14]}
+        assert s3bridge.close_coin_door(table, str(spi)) == [15]
+        assert spi.read_bytes() == b"\xff\x7f" + b"\xff" * 6
+    spi.write_bytes(b"\xff" * 8)
+    assert s3bridge.close_coin_door({"DOOR SWITCH OPTO": [0, 12]}, str(spi)) == []
+    monkeypatch.setenv("PAD_S3_DOOR", "open")
+    assert s3bridge.close_coin_door({"COIN DOOR INTERLOCK": [0, 23]}, str(spi)) == []
+    assert spi.read_bytes() == b"\xff" * 8
+    monkeypatch.delenv("PAD_S3_DOOR")
+    assert s3bridge.close_coin_door({"COIN DOOR INTERLOCK": [0, 23]}, str(tmp_path / "none")) == []

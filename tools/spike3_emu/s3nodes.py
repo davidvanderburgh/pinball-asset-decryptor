@@ -235,6 +235,65 @@ def devices(e, directory_rows=None, with_location=False):
     return out
 
 
+def _text(e, a):
+    """The string a relocated pointer at *a* names, or ""."""
+    n = e.rel.get(a)
+    s = e.cstr(n) if n else None
+    return s if s and s.isprintable() and len(s) < 200 else ""
+
+
+def records(e, directory_rows=None):
+    """Every device record WITH ITS PLACE, for the virtual playfield: dicts of
+    name, kind, group (1-based node directory position), node, index, and
+    where the title's own test menu draws it - image (+0x18, the picture's
+    name under assets/nuk/images, e.g. "playfield"), x, y (u16s at +0x2c,
+    +0x2e: TROUGH 1 at 358,844 on pokemon_le's 451x998 playfield), w, h
+    (+0x30, +0x32) - plus the connector (+0x38) and part text (+0x40). The
+    same table devices() walks; read from the data, as the menu reads it."""
+    if directory_rows is None:
+        directory_rows = directory(e, catalog(e)[1])
+    order = [nid for nid, _c, _f in directory_rows]
+    by_name = {}
+    for row in devices(e, directory_rows):
+        by_name.setdefault(row[0], row)
+    out, done = [], set()
+    for anchor in ("TROUGH 1", "START BUTTON", "TROUGH", "AUTO PLUNGER"):
+        va = e.strva(anchor)
+        for a in e.inv.get(va, []) if va is not None else []:
+            lo = a
+            while _rec_ok(e, lo - 0x50):
+                lo -= 0x50
+            while _rec_ok(e, lo):
+                if lo not in done:
+                    done.add(lo)
+                    w = e.u64(lo + 0x20)
+                    g, idx, cls = w & 0xFFFF, (w >> 16) & 0xFFFF, (w >> 32) & 0xFFFF
+                    p = e.u64(lo + 0x28) or 0
+                    sz = e.u64(lo + 0x30) or 0
+                    conn = _text(e, lo + 0x38)
+                    part = _text(e, lo + 0x40)
+                    out.append(dict(
+                        name=_text(e, lo), kind=DEV_CLASS[cls], group=g, index=idx,
+                        node=order[g - 1] if g - 1 < len(order) else -1,
+                        location=p & 0xFFFF, x=(p >> 32) & 0xFFFF, y=(p >> 48) & 0xFFFF,
+                        w=sz & 0xFFFF, h=(sz >> 16) & 0xFFFF,
+                        image=_text(e, lo + 0x18), conn=conn, part=part))
+                lo += 0x50
+    return out
+
+
+def _rec_ok(e, a):
+    n = e.rel.get(a)
+    name = e.cstr(n) if n else None
+    if not name or len(name) > 40 or not name.isprintable():
+        return False
+    w = e.u64(a + 0x20)
+    if w is None:
+        return False
+    g, idx, cls = w & 0xFFFF, (w >> 16) & 0xFFFF, (w >> 32) & 0xFFFF
+    return 1 <= g <= 64 and idx < 512 and cls in DEV_CLASS
+
+
 def active_low_masks(devs5):
     """{node: 8-byte mask} of the switch inputs a node board reports as wire
     bit 0 when CLOSED. Measured on pokemon_le: the game's own Ball Trough

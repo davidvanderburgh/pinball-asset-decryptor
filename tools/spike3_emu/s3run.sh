@@ -124,8 +124,11 @@ if [ "$BRIDGE" = 1 ]; then
     # switch_list.txt s3bridge writes (PAD_TABLES/PAD_GAME). Without it the
     # renderer is headless (surfaceless EGL) and only dumps frames.
     if [ "$WINDOW" = 1 ]; then
-        rm -f "$SD/padsw"
-        RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game)
+        # dump/ is what the virtual playfield window reads and writes (padsw,
+        # padled - Spike 2's padpath.dump()); its switch helper runs as the
+        # WSL user, not root, so the block is everyone's to write
+        rm -rf "$SD/dump"; mkdir -p "$SD/dump"; chmod 777 "$SD/dump"
+        RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/dump/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game)
     else
         RENV=(-u DISPLAY -u WAYLAND_DISPLAY EGL_PLATFORM=surfaceless)
     fi
@@ -167,6 +170,7 @@ if [ "$BUS" = 1 ]; then
         "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" --idle=${PAD_S3_SPI_IDLE:-0xff} --input="$SD/spi.in" > "$SD/s3spid.out" 2>&1 &
         BUSPIDS="$!"
     fi
+    [ "$WINDOW" = 1 ] && export PAD_S3_PADLED="$SD/dump/padled"
     python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     # the video decoder (stage 5): s3vid.so hands the game's HEVC/H.264
@@ -202,9 +206,29 @@ if [ "$BUS" = 1 ]; then
     # (the coin-door buttons on the SPI chain) whenever it comes up, pruning
     # old dumps as it goes. PAD_S3_AUTOGUIDE=0 leaves the screen alone.
     if [ "$WINDOW" = 1 ]; then
-        python3 "$S/s3keys.py" "$SLOT" "$SD/padsw" "$SD/tables/game/switch_list.txt" \
+        for i in $(seq 1 50); do [ -s "$SD/dump/padsw" ] && break; sleep 0.1; done
+        chmod 666 "$SD/dump/padsw" 2>/dev/null
+        python3 "$S/s3keys.py" "$SLOT" "$SD/dump/padsw" "$SD/tables/game/switch_list.txt" \
             > "$SD/s3keys.log" 2>&1 &
         BUSPIDS="$BUSPIDS $!"
+        # THE VIRTUAL PLAYFIELD: Spike 2's window (playfield.py) on this run,
+        # its layout and pictures from the card's own device records
+        # (s3pf.py), its lamps from the node bus (s3leds.py via s3bridge). The
+        # window is a Windows program the app opens on this line, as for a
+        # Spike 2 run whose WSL cannot start one itself.
+        if [ "${PAD_S3_PLAYFIELD:-1}" = 1 ]; then
+            TITLE=$(basename "$(dirname "$(readlink "$TREE/games/game")")")
+            for i in $(seq 1 50); do [ -s "$SD/tables/game/switch_list.txt" ] && break; sleep 0.1; done
+            python3 "$S/s3pf.py" "$TREE/games/game" "$TREE" "$TITLE" "$SD/tables/$TITLE" \
+                "$SD/tables/game/switch_list.txt" 2>&1 | sed 's/^/[s3run] /'
+            chmod -R a+rX "$SD/tables" 2>/dev/null
+            if [ -s "$SD/tables/$TITLE/device_xy.txt" ]; then
+                echo "PAD_PLAYFIELD_WINDOWS_LAUNCH game=$TITLE savestates=0" \
+                     "root=$(wslpath -w "$SD" 2>/dev/null)" \
+                     "tables=$(wslpath -w "$SD/tables" 2>/dev/null)" \
+                     "slot=$SLOT root_wsl=$SD"
+            fi
+        fi
     fi
     if [ "$BRIDGE" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" = 1 ]; then
         python3 "$S/s3press.py" autoguide "$SLOT" > "$SD/autoguide.log" 2>&1 &
@@ -386,6 +410,7 @@ while :; do wait $INNERPID 2>/dev/null; RC=$?; kill -0 $INNERPID 2>/dev/null || 
 trap - TERM INT HUP
 if [ -n "$BUSPIDS" ]; then
     kill $BUSPIDS 2>/dev/null; sleep 0.5; kill -9 $BUSPIDS 2>/dev/null
+    rm -f "$SD/dump/padled"      # gone = the run ended: the playfield window closes
     echo "[s3run] node bus: spi $(grep -c xfer "$SD/spi.log" 2>/dev/null) transfers; bridge: $(grep -c "^# \[node\].*claims" "$SD/bridge.log" 2>/dev/null) node boards identified ($SD/bridge.log)"
 fi
 if [ -n "$AUDPID" ]; then

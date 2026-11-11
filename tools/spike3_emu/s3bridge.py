@@ -513,6 +513,15 @@ def main():
     trace = (open(os.path.join(d, "nbtrace.log"), "w", buffering=1)
              if os.environ.get("PAD_S3_NBTRACE") == "1" else None)
     trace_last = {}
+    # PAD-1090: lamps and coils for the virtual playfield (padled.h's block)
+    leds = None
+    if os.environ.get("PAD_S3_PADLED"):
+        try:
+            import s3leds
+            leds = s3leds.PadLed(os.environ["PAD_S3_PADLED"])
+            log.write("# padled: %s\n" % os.environ["PAD_S3_PADLED"])
+        except Exception as e:                             # noqa: BLE001
+            log.write("# padled: not published (%s)\n" % e)
     while True:
         r, _, _ = select.select([master], [], [], 0.05 if (br.balls or br.steppers) else 0.5)
         if br.balls:
@@ -533,6 +542,8 @@ def main():
         now = time.time() - t0
         for cmd, ident, p, ok in got:
             reply = br.handle(cmd, ident, p) if ok else None
+            if leds and ok and cmd == 0x41 and len(p) >= 3 and p[0] & 0x40:
+                leds.frame(p[0] & 0x3F, unmask(p[0], p[2:2 + p[1]]))
             if reply:
                 os.write(master, reply)
             key = (cmd, p[:3] if cmd == 0x41 else p)

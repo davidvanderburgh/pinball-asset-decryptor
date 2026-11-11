@@ -298,3 +298,29 @@ def test_the_tab_hands_the_unlocked_key_to_the_launcher(tmp_path, monkeypatch):
         _wait(w, lambda: any("--keyfile" in c for c in rec.calls))
         launch = [c for c in rec.calls if "--keyfile" in c][0]
         assert launch[launch.index("--keyfile") + 1] == str(key)
+
+
+def test_a_spike3_run_opens_the_virtual_playfield(tmp_path, monkeypatch):
+    """s3run.sh prints the launch line once s3pf.py has written the title's
+    tables; the tab opens Spike 2's playfield window on it, as for a Spike 2
+    run whose WSL cannot start one itself."""
+    from tests.test_webui_emulate import _Recorder
+    card = tmp_path / "pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    line = ("PAD_PLAYFIELD_WINDOWS_LAUNCH game=pokemon_le savestates=0 "
+            r"root=\\wsl.localhost\Ubuntu\var\tmp\pad-s3\slot1 "
+            r"tables=\\wsl.localhost\Ubuntu\var\tmp\pad-s3\slot1\tables "
+            "slot=1 root_wsl=/var/tmp/pad-s3/slot1")
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        answers = _s3_rig(monkeypatch)
+        rec = _Recorder(answers=answers, lines=("s3launch: starting slot 1 for 240 min", line))
+        monkeypatch.setattr(svc, "_run", rec.run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        opened = []
+        monkeypatch.setattr(svc, "_open_playfield", opened.append)
+        _pick(w, svc, card)
+        w.call(NS + ".toggle")
+        _wait(w, lambda: opened)
+        assert opened[0]["game"] == "pokemon_le"
+        assert opened[0]["root_wsl"] == "/var/tmp/pad-s3/slot1"

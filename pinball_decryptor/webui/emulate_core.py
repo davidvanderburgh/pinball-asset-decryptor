@@ -1120,7 +1120,60 @@ def colima_mounts(profile=""):
     return [(loc, w) for loc, w in out if loc]
 
 
-def colima_start_argv(colima, profile="", share=("/Volumes",)):
+def mac_pacer_env():
+    """``PAD_PACER=<the app's binary>`` on a frozen Mac app, else nothing: the
+    program padbox.sh runs with ``--pace`` between docker exec and ffplay
+    (PAD-1109). The frozen binary, because a Mac has no other Python for
+    certain; an unfrozen app (a developer's) runs the rig's own padrelay.py
+    through ``sys.executable``, which padbox.sh takes as ``<python> <script>``."""
+    if sys.platform != "darwin":
+        return []
+    exe = sys.executable or ""
+    if not exe:
+        return []
+    if getattr(sys, "frozen", False):
+        return ["PAD_PACER=" + exe]
+    relay = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         os.pardir, "tools", "spike2_emu", "padrelay.py")
+    return ["PAD_PACER=" + exe, "PAD_PACER_SCRIPT=" + os.path.normpath(relay)]
+
+
+#: Colima's machine is 2 CPUs and 2 GiB unless told otherwise; the emulator's
+#: box runs a game under qemu and a software (llvmpipe) renderer beside it,
+#: and on a 2-CPU machine the renderer drew 14 fps and the sound reached the
+#: Mac in lumps (PAD-1109). Sized to the Mac, never more than half of it.
+COLIMA_CPUS_MAX = 4
+COLIMA_MEMORY_GIB_MAX = 4
+
+
+def colima_resource_args(host_cpus=None, host_mem_bytes=None):
+    """``--cpu N --memory G`` for ``colima start``, from the Mac's own size:
+    half its cores up to 4 (none below 4 cores), and 4 GiB from 16 GiB of
+    RAM, 3 from 8, nothing less (Colima's own defaults then)."""
+    args = []
+    cpus = os.cpu_count() if host_cpus is None else host_cpus
+    if cpus and cpus >= 4:
+        args += ["--cpu", str(min(COLIMA_CPUS_MAX, cpus // 2))]
+    mem = _host_memory_bytes() if host_mem_bytes is None else host_mem_bytes
+    gib = (mem or 0) // (1 << 30)
+    if gib >= 16:
+        args += ["--memory", str(COLIMA_MEMORY_GIB_MAX)]
+    elif gib >= 8:
+        args += ["--memory", "3"]
+    return args
+
+
+def _host_memory_bytes():
+    """The Mac's RAM in bytes (``sysctl hw.memsize``), or 0 when unknown."""
+    try:
+        out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+        return int(out)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def colima_start_argv(colima, profile="", share=("/Volumes",), resources=()):
     """``colima start`` sharing *share* with its Linux machine as well as
     what it shares already (PAD-903).
 
@@ -1146,7 +1199,7 @@ def colima_start_argv(colima, profile="", share=("/Volumes",)):
     argv = [colima, "start"] + (["-p", profile] if profile else [])
     for loc, w in have:
         argv += ["--mount", loc + (":w" if w else "")]
-    return argv
+    return argv + list(resources)
 
 
 def parse_status(text):

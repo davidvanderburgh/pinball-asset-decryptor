@@ -146,7 +146,7 @@ def test_pipe_gives_up_and_says_so_when_no_fifo_appears(relay, tmp_path, capsys)
 def test_pipe_copies_the_fifo_to_its_output_at_the_volume(relay, tmp_path, capsys, monkeypatch):
     import io
     import threading
-    monkeypatch.setenv("PAD_AUDIO_LEAD_MS", "0")      # the plain copy, unpaced
+    monkeypatch.delenv("PAD_AUDIO_LEAD_MS", raising=False)   # plain is the default
     fifo = str(tmp_path / "audio.fifo")
     os.mkfifo(fifo)
     ctl = tmp_path / "ctl.json"
@@ -258,3 +258,35 @@ def test_the_fmt_file_gives_the_rate_and_channels(relay, tmp_path):
     assert relay.read_fmt(str(p)) == (48000, 1)
     p.write_text("junk")
     assert relay.read_fmt(str(p)) == (44100, 2)
+
+
+def test_pace_reads_stdin_and_writes_a_paced_stream(relay, monkeypatch, capsys):
+    """--pace on the Mac: the app's binary between docker exec and ffplay."""
+    import io
+    import threading
+    import time as _time
+    monkeypatch.delenv("PAD_AUDIO_LEAD_MS", raising=False)
+    r, w = os.pipe()
+    sound = _pcm(*([3000, -3000] * 441))
+    clk = _Clock()
+
+    def feeder():
+        os.write(w, sound)
+    threading.Thread(target=feeder, daemon=True).start()
+    clk.hooks.append((0.0, lambda: _time.sleep(0.2)))
+
+    def close():
+        os.close(w)
+        _time.sleep(0.2)
+    clk.hooks.append((0.3, close))
+    out = io.BytesIO()
+    rc = relay.pace_main(["44100", "2"], fd=r, out=out, clock=clk.now, sleep=clk.sleep)
+    os.close(r)
+    assert rc == 0
+    got = out.getvalue()
+    assert sound in got and got.index(sound) % 4 == 0
+    assert len(got) >= 176400 * 350 // 1000
+    err = capsys.readouterr().err
+    assert "pacing the stream on the Mac: 44100 Hz x 2 ch, 350 ms ahead" in err
+    assert "bytes paced to the player" in err
+    assert relay.pace_main(["x"]) == 2

@@ -91,6 +91,7 @@ def _run(d, body, timeout=60):
     script = "\n".join([
         _PRELUDE % {"dir": _q(d)},
         _function("ffplay_channel_args"),
+        _function("mac_pace"),
         _function("mac_meter"),
         _function("ffplay_status"),
         _function("mac_outputs"),
@@ -266,6 +267,37 @@ mac_outputs; echo "RC=$?"
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          timeout=30)
     assert out.stdout.decode() == "RC=0\n", out.stdout
+
+
+@needs_bash
+def test_the_stream_is_paced_on_the_mac_by_the_apps_binary_when_given():
+    """PAD-1109: PAD_PACER (the frozen app, --pace) sits between docker exec
+    and ffplay; without one the stream goes straight through, as before."""
+    d = _fresh_dir()
+    rc, text = _run(d, r"""
+{ echo '#!/bin/sh'; echo "echo \"pacer: \$*\" >> \"$D/events\""; echo cat; } > "$D/pacer"; chmod +x "$D/pacer"
+PAD_PACER="$D/pacer"
+touch "$D/up"; printf 'PCM-BYTES' > "$D/feed1"; echo long > "$D/play1"
+host_player & HP=$!
+for i in $(seq 1 80); do [ -s "$D/heard1" ] && break; sleep 0.1; done
+sleep 0.3; kill $HP; wait $HP 2>/dev/null
+""")
+    ev = _cat(d, "events")
+    assert "pacer: --pace 44100 2" in ev, (ev, text)
+    # the three start together in one pipeline, so no order between them
+    assert "relay 1:" in ev and "player 1:" in ev, ev
+    assert _cat(d, "heard1") == "PCM-BYTES"
+    assert "[box] speaker: the stream is paced on this Mac by " in text, text
+    d2 = _fresh_dir()
+    rc, text = _run(d2, r"""
+PAD_PACER=
+touch "$D/up"; printf 'PCM-BYTES' > "$D/feed1"; echo long > "$D/play1"
+host_player & HP=$!
+for i in $(seq 1 80); do [ -s "$D/heard1" ] && break; sleep 0.1; done
+sleep 0.3; kill $HP; wait $HP 2>/dev/null
+""")
+    assert "no pacer on this Mac" in text, text
+    assert _cat(d2, "heard1") == "PCM-BYTES"
 
 
 @needs_bash

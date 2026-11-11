@@ -316,9 +316,11 @@ def pipe_main(argv, out=None, clock=time.monotonic, sleep=time.sleep):
             return 1
         sleep(0.25)
     rate, ch = read_fmt(os.path.join(os.path.dirname(fifo), "audio.fmt"))
-    lead_ms = int(os.environ.get("PAD_AUDIO_LEAD_MS", str(LEAD_MS)))
-    say("[padrelay] the player is reading %s over docker exec: %d Hz x %d ch, "
-        "paced %d ms ahead" % (fifo, rate, ch, lead_ms))
+    # PLAIN BY DEFAULT: the pacing belongs on the Mac, after the transport
+    # (see pace_main); a lead here is opt-in for a transport that needs it
+    lead_ms = int(os.environ.get("PAD_AUDIO_LEAD_MS", "0"))
+    say("[padrelay] the player is reading %s over docker exec: %d Hz x %d ch%s"
+        % (fifo, rate, ch, ", paced %d ms ahead" % lead_ms if lead_ms > 0 else ""))
     fd = os.open(fifo, os.O_RDONLY)
     total = [0]
 
@@ -343,12 +345,56 @@ def pipe_main(argv, out=None, clock=time.monotonic, sleep=time.sleep):
     return 0
 
 
+def pace_main(argv, fd=0, out=None, clock=time.monotonic, sleep=time.sleep):
+    """padrelay.py --pace <rate> <ch>: stdin to stdout, paced (PAD-1109).
+
+    THE MAC'S OWN CUSHION, after the transport. The box's stream reaches the
+    Mac through docker exec from a container that can be starved (Colima's
+    machine has 2 CPUs unless told otherwise, and the renderer ran at 14 fps
+    there), in lumps; a lead put on before the transport is eaten by it. Run
+    by the app's own binary on the Mac (pyinstaller_entry.py's --pace) between
+    docker exec and ffplay, this reads whatever arrives and writes exactly
+    real-time bytes, LEAD_MS ahead, silence for what has not arrived yet:
+    ffplay is never starved, however the lumps fall. The volume was applied
+    in the box already, so none is applied here."""
+    out = out or sys.stdout.buffer
+    try:
+        rate = int(argv[0]) if argv else 44100
+        ch = int(argv[1]) if len(argv) > 1 else 2
+    except ValueError:
+        print("usage: padrelay.py --pace <rate> <channels>", file=sys.stderr)
+        return 2
+    lead_ms = int(os.environ.get("PAD_AUDIO_LEAD_MS", str(LEAD_MS)))
+
+    def say(s):
+        print(s, file=sys.stderr, flush=True)
+
+    def write(b):
+        out.write(b)
+        out.flush()
+    say("[padrelay] pacing the stream on the Mac: %d Hz x %d ch, %d ms ahead"
+        % (rate, ch, lead_ms))
+    total = 0
+    try:
+        total = paced_pump(fd, write, Volume(None), say, rate, ch, lead_ms,
+                           clock=clock, sleep=sleep)
+    except (BrokenPipeError, OSError) as exc:
+        say("[padrelay] player went away: %s" % exc)
+        if out is getattr(sys.stdout, "buffer", None):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    finally:
+        say("[padrelay] %d bytes paced to the player" % total)
+    return 0
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--pace":
+        raise SystemExit(pace_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "--pipe":
         raise SystemExit(pipe_main(sys.argv[2:]))
     if len(sys.argv) < 3:
-        print("usage: padrelay.py <fifo> <port> [ctl] | --pipe <fifo> [ctl]",
-              file=sys.stderr)
+        print("usage: padrelay.py <fifo> <port> [ctl] | --pipe <fifo> [ctl]"
+              " | --pace <rate> <ch>", file=sys.stderr)
         raise SystemExit(2)
     fifo, port = sys.argv[1], int(sys.argv[2])
     vol = Volume(sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None)

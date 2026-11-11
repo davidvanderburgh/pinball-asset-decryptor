@@ -21,7 +21,7 @@ each transfer from the slot's spi.in, so writing that file presses a button.
     s3press.py sw SLOT NAME [MS]       press a switch by the title's own name
                                        ("START BUTTON", "ACTION BUTTON",
                                        "LEFT FLIPPER BUTTON", "LEFT SLINGSHOT")
-    s3press.py coin SLOT [N]           N coins, 3 s apart (closer ones are lost)
+    s3press.py coin SLOT [N]           N coins, 1 s apart
 
 A GAME (pokemon_le, measured): `coin 4` -> CREDITS 1, `sw START BUTTON`
 -> BALL 1 (s3balls answers the trough eject: the ball reaches the shooter
@@ -379,9 +379,10 @@ def main():
         node, idx = table[name]
         for k in range(count):
             if k:
-                # coins closer than ~3 s apart are not all counted (pokemon_le:
-                # 4 coins 2 s apart made 1/4 credit, 3 s apart a whole one)
-                time.sleep(3.0)
+                # PAD-1139: the coins "lost when closer than 3 s" were the
+                # first ones after boot (s3bridge BASELINE_SCANS); 8 coins 1 s
+                # apart now credit all 8 (pokemon_le)
+                time.sleep(1.0)
             if node == 0:
                 press(slot, idx - 8, ms)          # CPU board: the SPI chain
             else:

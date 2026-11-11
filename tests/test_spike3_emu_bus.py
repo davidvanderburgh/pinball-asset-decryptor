@@ -186,6 +186,29 @@ def test_short_press_is_queued_until_scanned():
     assert br.attention() == 0
 
 
+def test_resting_board_is_read_once_before_a_press():
+    """PAD-1139: the cabinet board (coins, Start) has nothing closed at boot,
+    so it never raised a request and the game's FIRST scan of it was the
+    player's first coin - which the game took as the starting state: the
+    first two coins after boot never credited (pokemon_le, 2 of 4). Past
+    bring-up the board now raises one request with its resting inputs."""
+    state = {"b": bytes(8)}
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    n = _node(bytes(8))
+    n.inputs = lambda: state["b"]
+    br.nodes[1] = n
+    scan = lambda: n(bytes([0x11, 0x00, 0x00]), 11)[:8]
+    n.registered = time.time()                           # still in bring-up
+    assert br.attention() == 0
+    n.registered = time.time() - 60
+    assert br.attention() == 1                           # the baseline read
+    assert scan() == bytes(8)
+    assert br.attention() == 0                           # once only
+    state["b"] = bytes([0, 0, 0x01, 0, 0, 0, 0, 0])      # then a coin
+    assert br.attention() == 1
+    assert scan() == bytes([0, 0, 0x01, 0, 0, 0, 0, 0])
+
+
 def test_stepper_homes_and_reports(monkeypatch):
     """fallout_le 0.81's Fat Man (node 10): configure, home, poll 38+motor.
     Answered with zeros the game homed and polled for ever, never booting."""

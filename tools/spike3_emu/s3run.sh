@@ -225,6 +225,9 @@ if [ "$BUS" = 1 ]; then
         python3 "$S/s3keys.py" "$SLOT" "$SD/dump/padsw" "$SD/tables/game/switch_list.txt" \
             > "$SD/s3keys.log" 2>&1 &
         BUSPIDS="$BUSPIDS $!"
+        # the boot's progress for the Emulate tab's footer ([s3run] progress)
+        python3 "$S/s3prog.py" "$SD" &
+        BUSPIDS="$BUSPIDS $!"
         # THE VIRTUAL PLAYFIELD: Spike 2's window (playfield.py) on this run,
         # its layout and pictures from the card's own device records
         # (s3pf.py), its lamps from the node bus (s3leds.py via s3bridge). The

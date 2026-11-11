@@ -409,3 +409,37 @@ def test_restart_game_on_a_spike3_run_is_stop_then_start(tmp_path, monkeypatch):
         w.run(lambda: setattr(svc, "_s3_slot", 1))
         assert w.run(svc.restart) is True
         assert stopped and svc._restart_wait == 40
+
+
+@pytest.mark.parametrize("line,expect", [
+    ("[s3run] progress boot 52 Booting the game", ("boot", 52, "Booting the game")),
+    ("[s3run] progress nodes 66 Locating node boards (4 of 10)",
+     ("nodes", 66, "Locating node boards (4 of 10)")),
+    ("[s3run] progress run 100 Running - the game is in attract",
+     ("run", 100, "Running - the game is in attract")),
+    ("s3launch: decrypting the card into the Spike 3 store (once per card; a few minutes)",
+     ("copy", 5, "Preparing the Spike 3 card (first time only)…")),
+    ("s3launch:   [s3store] p2 rootfs         4794 files    636.0 MB  new    226.3 MB  (60 s)",
+     ("copy", 30, "Preparing the Spike 3 card: rootfs done")),
+    ("s3launch:   [s3store]   games: 500 files, 2170 MB",
+     ("copy", 88, "Preparing the Spike 3 card: 2170 MB of the game")),
+    ("s3launch: building the Spike 3 rig (once; a few minutes)",
+     ("copy", 50, "Building the Spike 3 emulator (first time only)…")),
+    ("[s3run] exec /games/game  (14400s cap)", None),
+])
+def test_spike3_lines_become_footer_steps(line, expect):
+    from pinball_decryptor.webui.tabs.emulate import EmulateTab as EmulateService
+    assert EmulateService._s3_footer_for(line) == expect
+
+
+def test_a_spike3_run_paints_its_own_footer_not_the_spike2_poll(tmp_path, monkeypatch):
+    """The Spike 2 status poll sees no Spike 2 game and painted the footer
+    idle all through a Spike 3 boot; the run's own step wins."""
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        painted = []
+        monkeypatch.setattr(svc, "_footer", lambda *a: painted.append(a))
+        w.run(lambda: setattr(svc, "_s3_slot", 1))
+        w.run(lambda: setattr(svc, "_s3_foot", ("nodes", 70, "Locating node boards (6 of 10)")))
+        w.run(lambda: svc._paint_footer({"running": "0"}))
+        assert painted == [("nodes", 70, "Locating node boards (6 of 10)")]

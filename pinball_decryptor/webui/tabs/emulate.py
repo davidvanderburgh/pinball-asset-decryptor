@@ -344,6 +344,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._spike3_probed = None
         self._s3_slot = None            # PAD-1090: the rig a Spike 3 run is on
         self._s3_label = None           # ...and what its state says
+        self._s3_foot = None            # ...and its footer step (s3prog.py)
         #: PAD-659: the picked file is a disk tool's backup of a card (a
         #: Macrium .mrimgx), not a card image: what to say about it, "" when
         #: it is not one.  Read off the loop at pick time; ``start()``
@@ -3209,6 +3210,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._starting = True
         self._s3_slot = slot
         self._s3_label = "Starting Spike 3…"
+        self._s3_foot = ("boot", 40, "Starting the Spike 3 emulator")
         self._run_label(False, True)
         self._set("state", self._s3_label)
 
@@ -3260,6 +3262,14 @@ class EmulateTab(EmulateLogMixin, TabService):
                     fields = rig.playfield_launch(line)
                     if fields:                  # the virtual playfield (s3pf.py)
                         self._post(self._open_playfield, fields)
+                    foot = self._s3_footer_for(line)
+                    if foot:
+                        self._s3_foot = foot
+                        self._post(self._footer, *foot)
+                        self._s3_label = (foot[2] if foot[0] != "run"
+                                          else "Running (Spike 3, rig %s)" % slot)
+                        self._post(self._set, "state", self._s3_label)
+                        continue
                     label = self._s3_progress(line, slot)
                     if label:
                         self._s3_label = label
@@ -3271,6 +3281,7 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._proc = None
                 self._starting = False
                 self._s3_label = None
+                self._s3_foot = None
                 if not self._stopping:
                     self._s3_slot = None
                     rigslot.release_claimed()
@@ -3288,6 +3299,31 @@ class EmulateTab(EmulateLogMixin, TabService):
             return "Preparing the Spike 3 card (first time only)…"
         if line.startswith("[s3run] exec "):
             return "Running (Spike 3, rig %s)" % slot
+        return None
+
+    @staticmethod
+    def _s3_footer_for(line):
+        """(kind, pct, text) for the footer's steps (Copy card, Boot, Node
+        boards, Ready) from a Spike 3 run line, or None - the Spike 3 twin of
+        status.sh's boot_pct. s3prog.py says the boot's progress; the
+        launcher says the once-only steps before it."""
+        m = re.match(r"\[s3run\] progress (\w+) (\d+) (.*)$", line)
+        if m:
+            return m.group(1), int(m.group(2)), m.group(3)
+        if line.startswith("s3launch: decrypting"):
+            return "copy", 5, "Preparing the Spike 3 card (first time only)…"
+        m = re.match(r"s3launch:\s+\[s3store\]\s+(p\d) (\w+)", line)
+        if m:                                # a partition done: p2 .. p6
+            done = {"p2": 30, "p3": 40, "p5": 45, "p6": 95}.get(m.group(1), 50)
+            return "copy", done, "Preparing the Spike 3 card: %s done" % m.group(2)
+        m = re.match(r"s3launch:\s+\[s3store\]\s+games: \d+ files, (\d+) MB", line)
+        if m:
+            return ("copy", min(90, 45 + int(m.group(1)) // 50),
+                    "Preparing the Spike 3 card: %s MB of the game" % m.group(1))
+        if line.startswith("s3launch: building the Spike 3 rig"):
+            return "copy", 50, "Building the Spike 3 emulator (first time only)…"
+        if line.startswith("s3launch: starting slot"):
+            return "boot", 40, "Starting the Spike 3 emulator"
         return None
 
     def _muted_for_spike3(self):
@@ -3903,6 +3939,13 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._footer("copy", pct, text)
 
     def _paint_footer(self, info=None):
+        if getattr(self, "_s3_slot", None) is not None:
+            # a Spike 3 run paints its own steps (s3prog.py); the Spike 2
+            # status poll sees no Spike 2 game and would paint "idle"
+            foot = getattr(self, "_s3_foot", None)
+            if foot:
+                self._footer(*foot)
+            return
         info = info if info is not None else self._last_info
         preparing = self._preparing is not None and not self._stopping
         copying = self._copying is not None and not self._stopping

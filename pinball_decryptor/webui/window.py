@@ -66,7 +66,7 @@ def _system_theme():
         return "dark"
 
 
-_EMULATE_KINDS = {"copy": (0, None), "boot": (1, 55),
+_EMULATE_KINDS = {"copy": (0, None), "boot": (1, 55), "nodes": (2, 60),
                   "techalerts": (2, 80), "run": (4, 100)}
 
 

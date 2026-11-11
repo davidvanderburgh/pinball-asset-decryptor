@@ -52,7 +52,12 @@ import zlib
 STX, ETX, ESC = 0x02, 0x03, 0x1B
 FW_VERSION = (0, 98, 4)          # main.c's version strings, pokemon_le 0.82.0
 BOARD_REV = 0                    # what ADC_Update's ladder can report: 0..10
-LCD_STATUS = 0
+# The bridge's LCD status (cmd 27 sub 0/2). 0 held every boot ~30 s: the game
+# asks at once, then every 10 s, three times, before it gives up and starts
+# the node bus. 2 it takes at once - first board claimed 5.9 s after start
+# instead of 36 s, attract at 38 s instead of ~90 (pokemon_le, measured twice
+# each; star_wars_2025_le 8.5 s) - and the games play as before (PAD-1090).
+LCD_STATUS = int(os.environ.get("PAD_S3_LCD_STATUS", "2"), 0)
 LINE_HZ = int(os.environ.get("PAD_S3_LINE_HZ", "60"))     # ADC_GetLineFrequency
 LINE_V = int(os.environ.get("PAD_S3_LINE_V", "120"))      # ADC_GetLineVoltage
 FLASH = (0x10000100, 0x10012B40)  # the range HOST_Update's 0x30 handler CRCs

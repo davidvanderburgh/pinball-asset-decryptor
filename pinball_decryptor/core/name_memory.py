@@ -21,8 +21,10 @@ Best-effort throughout: a missing/corrupt store or an extract without a
 
 import hashlib
 import json
+import ntpath
 import os
 import re
+import sys
 
 from . import config
 
@@ -30,7 +32,17 @@ from . import config
 AUDIO_NAMES_FILE = os.path.join(os.path.dirname(config.SETTINGS_FILE),
                                 "audio_names.json")
 
-_MAX_LABEL = 80          # same cap the auto-transcribe rename enforces
+#: Longest name part a rename keeps (the auto-transcribe rename uses it too).
+#: PAD-1158: was 80, which cut a callout's whole-sentence transcription short.
+#: 200 leaves the full file name ("01m22s235 - idx0001 - <name>.wav") inside
+#: the 255 a file name may hold on NTFS, ext4 and APFS.
+MAX_LABEL = 200
+#: Longest file name in UTF-8 bytes (ext4 / APFS count bytes, not characters).
+_MAX_NAME_BYTES = 255
+#: Longest whole path a rename makes on Windows: MAX_PATH (260, NUL included)
+#: less room for a sibling the stagers write beside it ("<name>.tmp" etc.).
+#: Replace Audio, playback and the Build open these paths with plain calls.
+_MAX_WIN_PATH = 245
 _FORBIDDEN = '<>:"|?*/\\'
 
 # A decode audio name: optional play-length prefix, the idx/music_cat stem,
@@ -65,9 +77,33 @@ def sanitize_label(text):
         else:
             safe.append(ch)
     cleaned = " ".join("".join(safe).split())
-    if len(cleaned) > _MAX_LABEL:
-        cleaned = cleaned[:_MAX_LABEL].rstrip() + "..."
+    if len(cleaned) > MAX_LABEL:
+        cleaned = cleaned[:MAX_LABEL].rstrip() + "..."
     return cleaned.rstrip(". ")
+
+
+def fit_label(folder, prefix, label, ext, windows=None):
+    """*label* shortened just enough that ``<folder>/<prefix> - <label><ext>``
+    is a file name every filesystem holds (255 UTF-8 bytes) and, on Windows,
+    a path the plain file calls still open (PAD-1158: names may run to
+    :data:`MAX_LABEL` now, and a deep project folder plus a long sentence goes
+    past 260).  Unchanged when it already fits; '' when no name fits at all.
+    *windows* overrides the platform check (tests)."""
+    if not label:
+        return label or ""
+    if windows is None:
+        windows = sys.platform == "win32"
+    root = ntpath.abspath(folder) if windows else ""
+
+    def fits(lab):
+        base = "%s - %s%s" % (prefix, lab, ext)
+        if len(base.encode("utf-8")) > _MAX_NAME_BYTES:
+            return False
+        return not windows or len(ntpath.join(root, base)) <= _MAX_WIN_PATH
+
+    while label and not fits(label):
+        label = label[:-1].rstrip(". ")
+    return label
 
 
 def clashes(src, dst):
@@ -229,9 +265,10 @@ def apply_saved_names(assets_dir, log=None):
         if parts is None:
             continue
         prefix, cur_label, ext = parts
-        if cur_label == label:
-            continue
         src = os.path.join(assets_dir, *rel.split("/"))
+        label = fit_label(os.path.dirname(src), prefix, label, ext)
+        if not label or cur_label == label:
+            continue
         if not os.path.isfile(src):
             continue
         folder = rel.rpartition("/")[0]

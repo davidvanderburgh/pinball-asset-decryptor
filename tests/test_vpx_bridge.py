@@ -3904,6 +3904,42 @@ def test_controller_reports_an_rgb_insert_in_its_colour():
     assert b.lamp_state[1833] == 0                                      # an RGB insert's other LEDs stay unreported
 
 
+def test_raw_lamp_rewrite_on_spike2_reports_the_level_through_lamp_and_changes(tmp_path):
+    """A table reading Lamp(n) as a mechanism position (PR #25): the LED's
+    own 0..255 level, through both Controller.Lamp and ChangedLamps, on a
+    Spike 2 bridge too; every other lamp is still VPinMAME's Boolean."""
+    pc = pytest.importorskip("padcontroller")
+    mapping = tmp_path / "raw.vpxmap.json"
+    mapping.write_text(json.dumps({"raw_lamp_rewrite": {"_": "why", "281": [8, 59]},
+                                   "lamps": {"L1": {"leds": [[8, 32]]}}}), encoding="utf-8")
+    vm = pc.VpxMap(None)
+    vm.load(str(mapping))
+    assert vm.raw_lamp_rewrite == {281: (8, 59)}
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.map, b.lamp_state, b.lamp_pending = vm, {}, set()
+    b.lock = __import__("threading").Lock()
+    data = bytearray(20 + 16 * 96)
+    for level in (71, 130, 0):
+        data[20 + 8 * 96 + 59], data[20 + 8 * 96 + 32] = level, 200
+        b._poll_lamps(bytes(data))
+        assert dict(b.changed_lamps() or [])[281] == level
+        assert b.lamp(281) == level and type(b.lamp(281)) is int
+        assert b.lamp(1832) is True                      # a mapped group stays on/off
+    b._poll_lamps(bytes(data))
+    assert not b.changed_lamps()                         # nothing new, nothing reported
+
+
+@pytest.mark.parametrize("entry", [{"1859": [8, 59]}, {"0": [8, 59]}, {"281": [8]}, {"281": 59}])
+def test_raw_lamp_rewrite_refuses_an_entry_it_cannot_read(tmp_path, entry):
+    """1000+ is already every LED's own number (it would be set twice a
+    poll and report a change every frame); a value must be [node, index]."""
+    pc = pytest.importorskip("padcontroller")
+    mapping = tmp_path / "bad.vpxmap.json"
+    mapping.write_text(json.dumps({"raw_lamp_rewrite": entry}), encoding="utf-8")
+    with pytest.raises(ValueError, match="raw_lamp_rewrite"):
+        pc.VpxMap(None).load(str(mapping))
+
+
 def test_every_shadow_maps_lamps_are_consistent():
     # the controller keys a lamp by its FIRST LED: two entries starting on one
     # LED must be the same insert, or one would light the other's light

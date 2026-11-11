@@ -426,7 +426,7 @@ class VpxMap:
         self.switch_rewrite = {}            # old table number -> Spike 2 id
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
-        self.raw_lamp_rewrite = {}          # legacy number -> mono PWM slot (Spike 1)
+        self.raw_lamp_rewrite = {}          # legacy number -> one LED read as its raw level
         self.rgb_groups = set()             # numbers whose LEDs are an insert's R, G, B
         self.rgb_order = {}                 # number -> "BGR" etc. when not listed R, G, B (PAD-1097)
         self.fakes = {}                     # name -> dict (switch_fakes)
@@ -465,8 +465,16 @@ class VpxMap:
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
         self.sol_max = int(m.get("solenoid_max", 68))
-        self.raw_lamp_rewrite = {int(n): tuple(v) for n, v in m.get("raw_lamp_rewrite", {}).items()
-                                 if n != "_"}
+        self.raw_lamp_rewrite = {}
+        for k, v in m.get("raw_lamp_rewrite", {}).items():
+            if k == "_":
+                continue
+            # a legacy number (below 1000: 1000+ is already every LED's own
+            # number) -> one [node, index]; anything else would be set twice
+            # a poll and report a change every frame
+            if not (0 < int(k) < 1000 and isinstance(v, list) and len(v) == 2):
+                raise ValueError("raw_lamp_rewrite %r: want a number 1-999 -> [node, index], got %r" % (k, v))
+            self.raw_lamp_rewrite[int(k)] = (int(v[0]), int(v[1]))
         for k, v in m.get("solenoids", {}).items():
             if k != "_":
                 self.solenoids[int(k)] = tuple(v["coil"])
@@ -2485,7 +2493,10 @@ class Bridge:
         return 0
 
     def _poll_lamps(self, data):
-        # mapped groups first, then every LED any table might name directly
+        # raw channels (a mechanism's position, a mono level), then the
+        # mapped groups, then every LED any table might name directly
+        for n, (node, idx) in self.map.raw_lamp_rewrite.items():
+            self._lamp_set(n, self._led_level(data, node, idx))
         for n, leds in self.map.lamp_groups.items():
             levels = [self._led_level(data, nd, ix) for nd, ix in leds]
             if max(levels) < LAMP_ON:
@@ -2664,8 +2675,11 @@ class Bridge:
         return out or None
 
     def lamp(self, n):
+        n = int(n or 0)
         with self.lock:
-            return bool(self.lamp_state.get(int(n or 0), 0))
+            if n in self.map.raw_lamp_rewrite:     # the level itself, 0..255
+                return int(self.lamp_state.get(n, 0))
+            return bool(self.lamp_state.get(n, 0))
 
     def solenoid(self, n):
         with self.lock:

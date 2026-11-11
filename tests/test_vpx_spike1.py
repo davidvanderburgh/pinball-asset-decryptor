@@ -260,6 +260,31 @@ def test_spike1_raw_lamp_aliases_keep_levels_and_report_zero(tmp_path):
     assert not b.changed_lamps()    # an unchanged frame is not a new change
 
 
+def test_spike1_raw_lamp_alias_level_reaches_controller_lamp(tmp_path):
+    """Controller.Lamp(n), not only ChangedLamps, gives the table the raw
+    level (a table polling its mech position reads Lamp); other lamps stay
+    Boolean as VPinMAME's are."""
+    pc = pytest.importorskip("padcontroller")
+    s1 = pytest.importorskip("s1bridge")
+    m = pytest.importorskip("pinball_decryptor.plugins.stern.spike1_emulate")
+    mapping = tmp_path / "raw.vpxmap.json"
+    mapping.write_text(json.dumps({"platform": "spike1", "raw_lamp_rewrite": {"281": [15, 63]}}),
+                       encoding="utf-8")
+    b = pc.Bridge()
+    b.map = pc.VpxMap()
+    b.map.load(str(mapping))
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    b.rig, b.sw_ids = rig, {}
+    st = m.HardwareState()
+    st.set_lamp(15, 63, 71)
+    st.set_lamp(8, 11, 200)
+    (tmp_path / "s1hw.state").write_bytes(m.StateBlock.pack(st, seq=1))
+    b._poll_once_s1()
+    assert b.lamp(281) == 71 and type(b.lamp(281)) is int
+    assert b.lamp(pc.lamp_number(8, 11)) is True
+
+
 def test_launch_finds_a_spike1_card_in_the_sister_library(tmp_path, monkeypatch):
     pl = pytest.importorskip("padlaunch")
     lib2 = tmp_path / "spike2"

@@ -209,11 +209,12 @@ def test_coverage_of_the_other_map_shapes(A):
          "lamp_calls": {"Dome": {"leds": [[8, 26]], "call": "PadDome"}},
          "retrofit_lights": {"clone": "L21", "lights": {"PL": {"leds": [[8, 9]], "at": [1, 2]}}},
          "gi_leds": {"leds": [[8, 0], [9, 0]]}, "disc_leds": {"cw": [9, 51], "ccw": [9, 52]},
-         "lamp_flasher_numbers": {"61": 1947, "_names": {}}}
+         "lamp_flasher_numbers": {"61": 1947, "_names": {}},
+         "raw_lamp_rewrite": {"_": "legacy lamp -> node, channel", "281": [15, 63]}}
     cov = A.coverage(m)
     assert cov["switches"] == {62, 81, 77, 83, 71, 70, 53, 86, 87, 85, 78}
     assert cov["coils"] == {(9, 2)}
-    assert cov["leds"] == {(8, 26), (8, 9), (8, 0), (9, 0), (9, 51), (9, 52), (9, 47)}
+    assert cov["leds"] == {(8, 26), (8, 9), (8, 0), (9, 0), (9, 51), (9, 52), (9, 47), (15, 63)}
 
 
 def test_gaps_owe_the_switch_never_the_boards_coil(A, tmp_path):

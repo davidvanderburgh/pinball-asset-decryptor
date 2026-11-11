@@ -103,6 +103,36 @@ def _bash_has_python3():
 HAS_PY3 = _bash_has_python3()
 
 
+@pytest.mark.skipif(not HAS_BASH4, reason="requires bash 4")
+@pytest.mark.parametrize("present,loads,appears,code,message", [
+    (1, 1, 1, 0, "probes=0"),
+    (0, 1, 1, 0, "probes=1"),
+    (0, 0, 0, 1, "CUSE is unavailable"),
+    (0, 1, 0, 1, "did not create /dev/cuse"),
+])
+def test_start_checks_cuse_before_posting_a_run(present, loads, appears, code, message):
+    src = (RIG / "start.sh").read_text(encoding="utf-8")
+    preflight = re.search(r"(?ms)^s1_ensure_cuse\(\)\{.*?^}\ns1_ensure_cuse", src).group(0)
+    assert src.index(preflight) < src.index('mkdir -p "$S1_WORK"')
+    # Run the actual startup function, with a fake character-device test and
+    # modprobe. These tests never load modules or touch the host's /dev.
+    harness = '''present=%d
+probes=0
+function [() {
+    if [[ "$1" = "-c" && "$2" = "/dev/cuse" ]]; then
+        (( present == 1 ))
+    else
+        builtin [ "$@"
+    fi
+}
+modprobe(){ probes=$((probes+1)); present=%d; return %d; }
+fail(){ echo "ERROR: $1"; exit 1; }
+''' % (present, appears, 0 if loads else 1)
+    r = _run(harness + preflight + '\necho "probes=$probes"\n')
+    assert r.returncode == code, r.stderr
+    assert message in r.stdout
+
+
 # --------------------------------------------------------------- the table --
 
 def test_the_pacman_column_is_the_apps_own_translation():

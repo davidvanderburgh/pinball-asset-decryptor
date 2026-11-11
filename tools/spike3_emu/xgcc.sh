@@ -20,7 +20,7 @@
 # for no symbol version the card lacks. A card on a newer OS build could differ:
 # `readelf -V` the .so against the card's libc if one ever refuses to load.
 set -eu
-P=${PAD_S3_XGCC:-$HOME/.pad-s3/xgcc}
+P=${PAD_S3_XGCC:-${PAD_S3_HOME:-/var/lib/pad-s3}/xgcc}
 CC=$P/root/usr/bin/aarch64-linux-gnu-gcc-13
 W=$P/s3cc
 if [ ! -x "$CC" ] || [ ! -x "$W" ]; then

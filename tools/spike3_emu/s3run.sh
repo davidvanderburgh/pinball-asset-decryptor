@@ -27,7 +27,8 @@
 set -u
 S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CARD=""; SLOT=1; SECS=60; STRACE=0; FRESH=0; BRIDGE=0; BUS=0; WINDOW=0; PROG=/games/game; ARGS=()
-B=${PAD_S3_BUILD:-/home/david/.pad-s3/build}
+H=${PAD_S3_HOME:-/var/lib/pad-s3}       # the rig's own files (it runs as root)
+B=${PAD_S3_BUILD:-$H/build}
 while [ $# -gt 0 ]; do
     case "$1" in
         --slot) SLOT=$2; shift ;;
@@ -54,7 +55,7 @@ done
 #   i2c-stub.ko  PAD_S3_I2C: the amp/EEPROM bus. Chips: the TAS57xx amps and
 #                EEPROMs (0x48 0x4c-0x4e 0x50-0x53) and the MAX9850 headphone
 #                amp (0x10), whose register writes must read back.
-KMOD=${PAD_S3_KMOD:-/home/david/.pad-s3}
+KMOD=${PAD_S3_KMOD:-$H}
 KTREE=$KMOD/kernel/WSL2-Linux-Kernel-linux-msft-wsl-6.6.87.2
 # THE DEFAULT NEEDS NONE OF THIS (DEVMODE=preload): s3dev.so answers the SPI
 # chain and the amp bus inside the game, so a stock WSL kernel and stock

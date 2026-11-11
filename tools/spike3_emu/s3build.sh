@@ -1,7 +1,7 @@
 #!/bin/bash
 # s3build.sh - build the Spike 3 shims and their own host renderer (PAD-1090).
 #
-#   bash s3build.sh [OUT]          # default ~/.pad-s3/build
+#   bash s3build.sh [OUT]          # default $PAD_S3_HOME/build (/var/lib/pad-s3)
 #
 # Guest (aarch64, xgcc.sh, -nostdlib against the CARD's own libc - any card's
 # rootfs in the store will do; they are one OS build):
@@ -22,11 +22,10 @@
 set -eu
 S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 S2=$S/../spike2_emu
-OUT=${1:-$HOME/.pad-s3/build}
+OUT=${1:-${PAD_S3_BUILD:-${PAD_S3_HOME:-/var/lib/pad-s3}/build}}
 mkdir -p "$OUT"
 CC=$(bash "$S/xgcc.sh")
-STORE=${PAD_SPIKE3_STORE:-/mnt/wsl/cards/spike3}
-[ -d "$STORE/cards" ] || STORE=$HOME/cardcache/spike3
+STORE=${PAD_SPIKE3_STORE:-$(python3 "$S/s3store.py" where)}
 ROOTFS=$(ls -d "$STORE"/cards/*/rootfs 2>/dev/null | head -1)
 [ -n "$ROOTFS" ] || { echo "s3build: no card in the Spike 3 store to link against (s3store.py build)" >&2; exit 1; }
 LIBC=$ROOTFS/lib
@@ -63,11 +62,15 @@ if [ ! -e "$FFINC/libavutil/avconfig.h" ]; then
 ' > "$FFINC/libavutil/avconfig.h"
 fi
 "$CC" $CF $VIDMAX -I"$FFINC" -I"$S2" -Wl,-soname,s3vid.so -o "$OUT/s3vid.so" "$S/s3vid.c" -ldl -lpthread
-gcc -std=gnu17 -O2 -Wall -o "$OUT/s3spid" "$S/s3spid.c" $(pkg-config --cflags --libs fuse3)
+# s3spid: only the old CUSE path (PAD_S3_DEV=0) uses it, so no fuse3 = no s3spid
+if pkg-config --exists fuse3 2>/dev/null; then
+    gcc -std=gnu17 -O2 -Wall -o "$OUT/s3spid" "$S/s3spid.c" $(pkg-config --cflags --libs fuse3)
+fi
 
 gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration $VIDMAX $GLMAX -I"$S2" \
     -o "$OUT/padglhost" "$S2/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
 for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3dev.so s3vid.so s3spid padglhost; do
+    [ -e "$OUT/$f" ] || continue
     printf 's3build: %-15s %8d bytes\n' "$f" "$(stat -c%s "$OUT/$f")"
 done

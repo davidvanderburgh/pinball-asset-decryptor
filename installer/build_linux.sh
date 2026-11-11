@@ -68,6 +68,14 @@ pyinstaller \
     `# the playfield as a Windows process, the audio bridge - are WSL` \
     `# workarounds the Linux path skips.` \
     --add-data "$ROOT_DIR/tools/spike2_emu:tools/spike2_emu" \
+    `# The Spike 3 rig (PAD-1090) and what its card store loads by path: the` \
+    `# LUKS2/OTP code and the app's own Spike 3 + ext4 readers, as plain files` \
+    `# (the frozen archive is not readable from the rig's python3).` \
+    --add-data "$ROOT_DIR/tools/spike3_emu:tools/spike3_emu" \
+    --add-data "$ROOT_DIR/stern-spike-3/tools/luks_otp.py:stern-spike-3/tools" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/spike3.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/spike3_keys.py:pinball_decryptor/plugins/stern" \
+    --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/ext4.py:pinball_decryptor/plugins/stern" \
     `# The JJP rig, for the same reason: the JJP Multi-boot tab and installing` \
     `# an ISO onto a game SSD both run tools/jjp_emu/mkjjpmulti.py with python3` \
     `# from beside the package, exactly as they run Spike 2's mkmulticard.py.` \
@@ -165,6 +173,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_games" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_keys" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_spk" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.spks" \
     --hidden-import "pinball_decryptor.plugins.stern.valpatch" \
     --hidden-import "pinball_decryptor.plugins.stern.ext4" \
@@ -303,6 +312,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_keys" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_selfextract" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_spk" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.spks" \
     --hidden-import "pinball_decryptor.plugins.stern.game_check" \
     --hidden-import "pinball_decryptor.plugins.stern.final_wizard" \

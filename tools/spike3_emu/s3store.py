@@ -91,10 +91,14 @@ def default_store():
         return env
     if os.path.isdir("/mnt/wsl/cards/cardcache") and os.path.ismount("/mnt/wsl/cards"):
         return "/mnt/wsl/cards/spike3"
+    # a store already made under the user's home (cardcache, as the Spike 2
+    # card cache) stays where it is; a new one goes with the rest of the
+    # Spike 3 rig, which runs as root ($PAD_S3_HOME, /var/lib/pad-s3)
     home = os.environ.get("PAD_HOME") or os.environ.get("HOME") or "/root"
-    if os.geteuid() == 0 and os.path.isdir("/home/david"):
-        home = "/home/david"
-    return os.path.join(home, "cardcache", "spike3")
+    legacy = os.path.join(home, "cardcache", "spike3")
+    if os.path.isdir(os.path.join(legacy, "cards")):
+        return legacy
+    return os.path.join(os.environ.get("PAD_S3_HOME") or "/var/lib/pad-s3", "store")
 
 
 def win_to_wsl(p):
@@ -278,6 +282,135 @@ class OpenPartition:
 
 
 # --------------------------------------------------------------------------
+# opening one partition WITHOUT the kernel (no dm-crypt, no loop, no mount)
+# --------------------------------------------------------------------------
+# A stock WSL kernel has dm-crypt only as a module, which a PC may not be able
+# to load; the app already reads a Spike 3 card in user space for the Extract
+# tab - the LUKS2 keyslot, AES-XTS and ext4, from the user's own OTP key - so
+# the store can use exactly that code. PAD_S3_STORE_MODE=kernel|user forces one.
+def _app_stern():
+    """The app's own spike3.py + ext4.py (pinball_decryptor/plugins/stern),
+    loaded as a bare package so none of the app's other imports come along;
+    spike3.py finds luks_otp.py (stern-spike-3/tools) beside the app."""
+    import importlib
+    import types
+    if "pad_s3_stern" not in sys.modules:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        pkg = types.ModuleType("pad_s3_stern")
+        pkg.__path__ = [os.path.join(root, "pinball_decryptor", "plugins", "stern")]
+        sys.modules["pad_s3_stern"] = pkg
+    return importlib.import_module("pad_s3_stern.spike3")
+
+
+def kernel_crypt_ok():
+    """Whether this kernel can open LUKS (dm-crypt) for the faster path."""
+    mode = os.environ.get("PAD_S3_STORE_MODE", "")
+    if mode in ("kernel", "user"):
+        return mode == "kernel"
+    try:
+        out = subprocess.run(["dmsetup", "targets"], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL).stdout.decode()
+        if "crypt" in out.split():
+            return True
+        subprocess.run(["modprobe", "dm_crypt"], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+        out = subprocess.run(["dmsetup", "targets"], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL).stdout.decode()
+        return "crypt" in out.split()
+    except OSError:
+        return False
+
+
+class UserPartition:
+    """A partition's ext4, read through the app's decrypting reader: the
+    user's OTP key unlocks the LUKS keyslot, AES-XTS is done in Python
+    (the cryptography package), nothing touches the kernel."""
+
+    def __init__(self, img, start, count, key, luks=True):
+        self.img, self.start, self.count, self.key, self.luks = img, start, count, key, luks
+        self.f = None
+
+    def __enter__(self):
+        sp = _app_stern()
+        self.f = open(self.img, "rb")
+        part = {"start_lba": self.start, "sectors": self.count}
+        if self.luks:
+            src = sp_keys_source(self.key)
+            try:
+                self.fs = sp.open_partition_ext4(self.f, part, src)
+            except sp.Spike3KeyError as e:
+                raise SystemExit("s3store: the key did not open p@%d (%s)" % (self.start, e))
+        else:
+            self.fs = sp._ext4.Ext4Reader(self.f, self.start * SECTOR, self.count * SECTOR)
+        return self
+
+    def __exit__(self, *exc):
+        if self.f:
+            self.f.close()
+
+
+def sp_keys_source(key):
+    """The app's Spike3KeySource for one OTP key (spike3_keys.py)."""
+    import importlib
+    _app_stern()
+    return importlib.import_module("pad_s3_stern.spike3_keys").Spike3KeySource(otp_keyfile=key)
+
+
+def _rdev(inode):
+    """A device node's number, out of i_block (old or new ext4 encoding)."""
+    old, new = struct.unpack_from("<II", bytes(inode["i_block"][:8]))
+    if old:
+        return os.makedev((old >> 8) & 0xFF, old & 0xFF)
+    return os.makedev((new & 0xFFF00) >> 8, (new & 0xFF) | ((new >> 12) & 0xFFF00))
+
+
+def copy_tree_reader(fs, dst, objs, progress=None):
+    """copy_tree() for a partition read in user space: the same tree, the
+    same objects, the same owners, modes and times."""
+    files = nbytes = 0
+    dirs = []
+    os.makedirs(dst, exist_ok=True)
+    root = fs.read_inode(2)
+    dirs.append((dst, root))
+    for rel, kind, ino, inode in fs.iter_tree():
+        d = os.path.join(dst, rel)
+        m = inode["mode"]
+        if kind == "dir":
+            os.mkdir(d)
+            dirs.append((d, inode))
+        elif kind == "file":
+            chunks = (b for _off, b in fs.read_file_chunks(inode, CHUNK))
+            obj, size = objs.put_chunks(chunks, m, inode["uid"], inode["gid"],
+                                        inode["atime"], inode["mtime"])
+            try:
+                os.link(obj, d)
+            except OSError as e:
+                if e.errno != errno.EMLINK:
+                    raise
+                shutil.copy2(obj, d)
+                os.chown(d, inode["uid"], inode["gid"])
+            files += 1
+            nbytes += size
+            if progress and files % 500 == 0:
+                progress(files, nbytes)
+        elif kind == "symlink":
+            os.symlink(fs.read_symlink(inode), d)
+            os.lchown(d, inode["uid"], inode["gid"])
+            os.utime(d, (inode["atime"], inode["mtime"]), follow_symlinks=False)
+        else:                                       # char/block device, fifo, socket
+            try:
+                os.mknod(d, m, _rdev(inode))
+                os.chown(d, inode["uid"], inode["gid"])
+            except OSError:
+                pass
+    for d, inode in reversed(dirs):
+        os.chown(d, inode["uid"], inode["gid"])
+        os.chmod(d, stat.S_IMODE(inode["mode"]))
+        os.utime(d, (inode["atime"], inode["mtime"]))
+    return files, nbytes
+
+
+# --------------------------------------------------------------------------
 # the object store
 # --------------------------------------------------------------------------
 class Objects:
@@ -322,6 +455,46 @@ class Objects:
                 self.new_bytes += st.st_size
             tmp = None
             return dst
+        finally:
+            if fd is not None:
+                os.close(fd)
+            if tmp and os.path.exists(tmp):
+                os.unlink(tmp)
+
+
+    def put_chunks(self, chunks, mode, uid, gid, atime, mtime):
+        """put() for a file read through the user-space reader: *chunks* its
+        bytes, the rest its inode's fields. Same key, same holes."""
+        h = hashlib.sha256()
+        fd, tmp = tempfile.mkstemp(dir=self.tmp)
+        size = 0
+        try:
+            with os.fdopen(fd, "wb") as fo:
+                fd = None
+                for b in chunks:
+                    h.update(b)
+                    size += len(b)
+                    if b == ZERO[:len(b)]:
+                        fo.seek(len(b), os.SEEK_CUR)
+                    else:
+                        fo.write(b)
+                fo.truncate()
+            key = "%s-%o-%d-%d" % (h.hexdigest(), stat.S_IMODE(mode), uid, gid)
+            dst = os.path.join(self.dir, key[:2], key)
+            if os.path.exists(dst):
+                self.shared_files += 1
+                self.shared_bytes += size
+                os.unlink(tmp)
+            else:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                os.chown(tmp, uid, gid)
+                os.chmod(tmp, stat.S_IMODE(mode))
+                os.utime(tmp, (atime, mtime))
+                os.rename(tmp, dst)
+                self.new_files += 1
+                self.new_bytes += size
+            tmp = None
+            return dst, size
         finally:
             if fd is not None:
                 os.close(fd)
@@ -465,6 +638,9 @@ def cmd_build(a):
                 "$PAD_SPIKE3_OTP_KEY, or put \"otp_keyfile\" in the padkeys.json "
                 "the extractor uses." % os.path.basename(img))
         print("[s3store] %s: key from %s" % (cid, where), flush=True)
+        use_kernel = kernel_crypt_ok()
+        print("[s3store] decrypting with %s" % ("dm-crypt (the kernel)" if use_kernel else
+              "the app's own LUKS/ext4 reader (no dm-crypt on this kernel)"), flush=True)
         final = card_dir(store, cid)
         part = final + ".partial"
         if os.path.exists(part):
@@ -483,13 +659,19 @@ def cmd_build(a):
 
             def prog(files, nbytes, role=role):
                 print("[s3store]   %s: %d files, %.0f MB" % (role, files, nbytes / 1e6), flush=True)
-            with OpenPartition(img, start, count, key, name, mnt, luks=luks) as op:
-                files, nbytes = copy_tree(op.mnt, os.path.join(part, role), objs, prog)
-                sv = os.statvfs(op.mnt)
+            if use_kernel:
+                with OpenPartition(img, start, count, key, name, mnt, luks=luks) as op:
+                    files, nbytes = copy_tree(op.mnt, os.path.join(part, role), objs, prog)
+                    sv = os.statvfs(op.mnt)
+                    used = (sv.f_blocks - sv.f_bfree) * sv.f_frsize
+            else:
+                with UserPartition(img, start, count, key, luks=luks) as up:
+                    files, nbytes = copy_tree_reader(up.fs, os.path.join(part, role), objs, prog)
+                    used = None
             roles[role] = {
                 "index": idx, "luks": luks, "files": files, "bytes": nbytes,
                 "partition_bytes": count * SECTOR,
-                "fs_used_bytes": (sv.f_blocks - sv.f_bfree) * sv.f_frsize,
+                "fs_used_bytes": used,
                 "new_files": objs.new_files - nf0, "new_bytes": objs.new_bytes - nb0,
                 "seconds": round(time.time() - t1, 1)}
             r = roles[role]
@@ -613,8 +795,12 @@ def main(argv=None):
     sub.add_parser("gc")
     r = sub.add_parser("remove")
     r.add_argument("card_id")
+    sub.add_parser("where")                  # the store's directory
     a = ap.parse_args(argv)
     a.store = a.store or default_store()
+    if a.cmd == "where":
+        print(a.store)
+        return 0
     return {"build": cmd_build, "path": cmd_path, "status": cmd_status,
             "gc": cmd_gc, "remove": cmd_remove}[a.cmd](a)
 

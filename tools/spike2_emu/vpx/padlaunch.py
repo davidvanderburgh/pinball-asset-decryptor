@@ -770,6 +770,9 @@ class Spike1Launch:
     def env(self):
         card = padpath.to_wsl(self.card, self.distro)
         env = ["PAD_LABEL=%s" % LABEL, "PAD_HIDDEN=0", "PAD_AUDIO=1", "S1_PIVOT=1"]
+        py = win_python()
+        if py:
+            env.append("PAD_WINPYTHON=%s" % padpath.to_wsl(py, self.distro))
         if sys.platform == "win32":
             env.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD, self.distro))
         if self.work_dir():

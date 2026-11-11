@@ -75,8 +75,8 @@ setup() {
     pk=$(missing_pkgs)
     if [ -n "$pk" ]; then
         echo "s3launch: installing $pk"
-        DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $pk 2>&1 | tail -3 | sed 's/^/s3launch:   /'
+        DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 update -qq && \
+        DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq $pk 2>&1 | tail -3 | sed 's/^/s3launch:   /'
     fi
     # binfmt-support registers qemu-aarch64 without F on some releases
     if ! grep -qs '^flags:.*F' /proc/sys/fs/binfmt_misc/qemu-aarch64 && [ -x /usr/bin/qemu-aarch64-static ]; then

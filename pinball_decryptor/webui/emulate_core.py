@@ -1495,6 +1495,13 @@ def spike3_check_cmd():
     return _s3_argv("--check")
 
 
+def spike3_setup_cmd():
+    """``s3launch.sh --setup``: install what --check found missing (apt
+    packages, the qemu-aarch64 binfmt) - the tab runs it on a Start that the
+    check refused for packages alone, then checks again."""
+    return _s3_argv("--setup")
+
+
 def spike3_keyfile(card, project=None):
     """The padkeys.json holding the user's OWN OTP key for *card*, or None.
 

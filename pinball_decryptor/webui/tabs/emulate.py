@@ -728,7 +728,13 @@ class EmulateTab(EmulateLogMixin, TabService):
             return
         self._spike3 = is3
         self._spike3_why = why or ""
-        if is3:
+        if is3 and rig.spike3_rig_present():
+            self._log("[emulate] %s is a Stern Spike 3 card: Start runs it on "
+                      "the Spike 3 emulator. The first run of a card decrypts "
+                      "it with YOUR card's OTP key (Extract tab, Spike 3 "
+                      "unlock) and takes a few minutes."
+                      % os.path.basename(path))
+        elif is3:
             self._log("[emulate] %s is a Stern Spike 3 card and cannot be "
                       "emulated: its partitions are encrypted with a key kept "
                       "in the machine, not on the card%s."
@@ -784,6 +790,14 @@ class EmulateTab(EmulateLogMixin, TabService):
             if not os.path.isfile(path) or path == self._precached:
                 return
             self._precached = path
+            # a Spike 3 card runs on its own rig, from its own store: copying
+            # its 60 GB into the Spike 2 card cache helps nothing (PAD-1090)
+            try:
+                from ...plugins.stern import spike3 as _s3
+                if _s3.is_spike3_card(path):
+                    return
+            except Exception:                            # noqa: BLE001
+                pass
             try:
                 cmd = self._cmd("cardmount.sh", rig.wsl_path(path),
                                 "--precache")
@@ -3202,7 +3216,23 @@ class EmulateTab(EmulateLogMixin, TabService):
             try:
                 out = self._run(rig.spike3_check_cmd(), stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, timeout=60)
-                ok, what = rig.parse_s3check(out.stdout.decode("utf-8", "replace"))
+                text = out.stdout.decode("utf-8", "replace")
+                ok, what = rig.parse_s3check(text)
+                if ok is False and "s3setup:" in text and what.startswith("packages:"):
+                    # only packages missing: install them, once, and look again
+                    self._log("[emulate] setting up Spike 3 emulation on this "
+                              "PC (once, a few minutes): %s" % what)
+                    self._post(self._set, "state", "Setting up Spike 3 emulation…")
+                    sp = self._popen(rig.spike3_setup_cmd(), stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+                    for raw in sp.stdout:
+                        line = raw.decode("utf-8", "replace").rstrip()
+                        if line:
+                            self._log("[emulate] " + line)
+                    sp.wait()
+                    out = self._run(rig.spike3_check_cmd(), stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, timeout=60)
+                    ok, what = rig.parse_s3check(out.stdout.decode("utf-8", "replace"))
                 if ok is not True:
                     self._starting = False
                     self._s3_slot = self._s3_label = None

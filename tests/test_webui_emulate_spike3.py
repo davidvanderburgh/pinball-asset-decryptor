@@ -79,7 +79,8 @@ def test_a_confirmed_spike3_card_is_refused_before_any_copy(tmp_path, monkeypatc
         assert svc._proc is None and not svc._starting
 
 
-def test_the_pick_logs_the_spike3_notice(tmp_path):
+def test_the_pick_logs_the_spike3_notice(tmp_path, monkeypatch):
+    monkeypatch.setattr(emulate_rig, "spike3_rig_present", lambda: False)
     card = tmp_path / "wdr-secure.raw"
     card.write_bytes(b"\0" * 512)
     with web_app(tmp_path, mfr="stern") as w:
@@ -343,3 +344,54 @@ def test_a_spike3_card_gets_the_emulate_tab_and_not_visual_pinball():
     assert not gates["Visual Pinball"]
     mfr.set_era("spike2")
     assert WebWindow._gate(fake, mfr)["Visual Pinball"]
+
+
+def test_with_the_rig_the_pick_says_start_runs_it(tmp_path, monkeypatch):
+    """David's log: the pick still said "cannot be emulated" on a PC whose
+    Spike 3 rig runs the card."""
+    monkeypatch.setattr(emulate_rig, "spike3_rig_present", lambda: True)
+    card = tmp_path / "wdr-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        w.run(lambda: w.window.emulate_card_var.set(str(card)))
+        w.run(lambda: svc._spike3_apply(str(card), True, "SPIKE3"))
+        w.drain()
+        log = _lines(w)
+        assert any("Start runs it on the Spike 3 emulator" in ln for ln in log)
+        assert not any("cannot be emulated" in ln for ln in log)
+
+
+def test_missing_packages_are_installed_and_the_run_goes_on(tmp_path, monkeypatch):
+    """PAD-Runtime lacked five apt packages: Start installs them
+    (s3launch.sh --setup), checks again, and runs the card."""
+    from tests.test_webui_emulate import _Done, _Recorder
+    card = tmp_path / "pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        _s3_rig(monkeypatch)
+        monkeypatch.setattr(emulate_rig, "spike3_setup_cmd",
+                            lambda: ["bash", "s3launch.sh", "--setup"])
+        checks = [b"s3check: missing - packages: python3-pil\n"
+                  b"s3setup: apt-get install python3-pil\n", b"s3check: ok\n"]
+        rec = _Recorder(lines=("s3launch: installing python3-pil",))
+        real_run = rec.run
+
+        def run(cmd, **kw):
+            if "--check" in cmd:
+                rec.calls.append(list(map(str, cmd)))
+                return _Done(checks.pop(0))
+            return real_run(cmd, **kw)
+        monkeypatch.setattr(svc, "_run", run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        _pick(w, svc, card)
+        w.call(NS + ".toggle")
+        _wait(w, lambda: any(str(card) in " ".join(c) for c in rec.calls))
+        names = [" ".join(c) for c in rec.calls]
+        setup = [i for i, c in enumerate(names) if "--setup" in c]
+        launch = [i for i, c in enumerate(names) if str(card) in c]
+        assert setup and launch and setup[0] < launch[0]
+        assert not (svc.last_refusal or "")
+        assert any("setting up Spike 3 emulation" in ln for ln in _lines(w))
+

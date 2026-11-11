@@ -50,6 +50,10 @@ CUSTOM_RE = re.compile(r"^(vo|sfx|mu|music|song|say|quote|callout|speech|voice|a
 # "kickdrum", "bumperDino1", "fx_targetbounty", "enterinitials-sound")
 CUSTOM_WORDS = ("shoot", "golden", "startball", "crash", "dino", "bomb", "bounty",
                 "initials", "endofball", "barchetta", "drum")
+# Ghostbusters LE 1.2 calls its pop-bumper samples jets and its left-ramp
+# contacts lrturn/lrbump. Keep these exact mechanical names without making
+# every sound containing "jet" or "bump" a playfield sound.
+MECH_NAMES = {"bottomjet", "leftjet", "rightjet", "fx_lrturn", "fx_lrbump"}
 # the playfield's own sounds
 MECH = ("ball", "roll", "flip", "rubber", "metal", "wood", "plastic", "wire", "ramp",
         "drain", "trough", "plunge", "kick", "saucer", "scoop", "hole", "popper", "vuk",
@@ -103,7 +107,8 @@ def mechanical(name, output):
     if output == OUT_BACKGLASS or CUSTOM_RE.match(name):
         return False
     low = name.lower()
-    return not any(w in low for w in CUSTOM_WORDS) and any(w in low for w in MECH)
+    return (not any(w in low for w in CUSTOM_WORDS)
+            and (low in MECH_NAMES or any(w in low for w in MECH)))
 
 
 def silent(snd):

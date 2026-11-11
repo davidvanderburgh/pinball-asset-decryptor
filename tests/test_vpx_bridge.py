@@ -5410,6 +5410,100 @@ def test_a_launch_attaches_the_card_store_before_the_run(tmp_path, monkeypatch):
     assert events == [("watch", True)]
 
 
+def _failed_start_bridge(pc, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.title, b.map = "batman", SimpleNamespace(platform="spike2")
+    b.rig = SimpleNamespace(led_path=lambda: "fixture")
+    b._rig_up = lambda data: False
+    b.launch = Mock(card="card.raw", logfile="boot.log")
+    b.launch.alive.return_value = False
+    b.running, b._start_retried = True, False
+    b.start_t = pc.time.monotonic()
+    b._loading_end = Mock()
+    monkeypatch.setattr(pc, "read_block", lambda *a: None)
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    monkeypatch.setattr(pc.padlaunch, "kit_load", lambda: {"startup_retry_titles": ["batman"]})
+    return b
+
+
+def test_failed_start_with_a_board_record_is_cleaned_and_retried_once(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    pc = pytest.importorskip("padcontroller")
+    b = _failed_start_bridge(pc, monkeypatch)
+    old, replacement = b.launch, Mock()
+    replacement.start.return_value = 2
+    factory = Mock(return_value=replacement)
+    monkeypatch.setattr(pc.padlaunch, "launch_for", factory)
+    b._poll_starting()
+    old.stop.assert_called_once()
+    replacement.start.assert_called_once()
+    factory.assert_called_once_with("spike2", "batman", "card.raw")
+    assert b._start_retried and b.launch is replacement
+    b.rig = SimpleNamespace(led_path=lambda: "fixture")
+    replacement.alive.return_value = False
+    b._poll_starting()
+    assert factory.call_count == 1
+    replacement.stop.assert_called_once()
+    assert b.launch is None and b.rig is None
+    b._loading_end.assert_called_once()
+
+
+@pytest.mark.parametrize("close_during", ["cleanup", "retry"])
+def test_closing_the_table_during_start_recovery_leaves_no_new_run(monkeypatch, close_during):
+    from unittest.mock import Mock
+    pc = pytest.importorskip("padcontroller")
+    b = _failed_start_bridge(pc, monkeypatch)
+    replacement = Mock()
+    replacement.start.return_value = 2
+    def close():
+        b.running = False
+        b.launch = None
+        return 2
+    if close_during == "cleanup":
+        b.launch.stop.side_effect = close
+    else:
+        replacement.start.side_effect = close
+    factory = Mock(return_value=replacement)
+    monkeypatch.setattr(pc.padlaunch, "launch_for", factory)
+    b._poll_starting()
+    assert b.launch is None
+    if close_during == "cleanup":
+        factory.assert_not_called()
+    else:
+        replacement.stop.assert_called_once()
+
+
+@pytest.mark.parametrize("configured", [[], None, "batman", ["deadpool_pro"]])
+def test_failed_start_cleanup_does_not_retry_without_an_explicit_title_list(monkeypatch, configured):
+    from unittest.mock import Mock
+    pc = pytest.importorskip("padcontroller")
+    b = _failed_start_bridge(pc, monkeypatch)
+    old = b.launch
+    monkeypatch.setattr(pc.padlaunch, "kit_load", lambda: {"startup_retry_titles": configured})
+    factory = Mock()
+    monkeypatch.setattr(pc.padlaunch, "launch_for", factory)
+    b._poll_starting()
+    old.stop.assert_called_once()
+    factory.assert_not_called()
+    assert b.launch is None and b.rig is None
+
+
+def test_failed_start_retry_exception_cleans_the_replacement(monkeypatch):
+    from unittest.mock import Mock
+    pc = pytest.importorskip("padcontroller")
+    b = _failed_start_bridge(pc, monkeypatch)
+    replacement = Mock()
+    replacement.start.side_effect = RuntimeError("cannot start")
+    monkeypatch.setattr(pc.padlaunch, "launch_for", lambda *a: replacement)
+    b._poll_starting()
+    replacement.stop.assert_called_once()
+    assert b.launch is None
+    assert "cannot start" in b._loading_end.call_args.args[0]
+
+
 def _boot_bridge(pc, monkeypatch, tmp_path, slot=1):
     """A bridge with a run it started, attached, its loading window up."""
     pl = pc.padlaunch

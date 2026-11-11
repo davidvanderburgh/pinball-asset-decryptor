@@ -563,6 +563,46 @@ ck`: it now reaches its stop switch after PAD_MOTOR_MS (600, Spike 2's).
 Unanswered, the game re-tried it every 10 s for ever. PAD_S3_RULES=0 turns
 the board model off.
 
+## A launched ball is kept alive (PAD-1137, 2026-11-11)
+
+There is no playfield, so a launched ball moved no switch at all. Measured on
+pokemon_le 0.82.0 (main's code, hands off after the ACTION BUTTON launch):
+the game re-arms its sling and pop rules every ~27 s (its ball search
+rounds) and at **130 s / 137 s** (two runs) gives the ball up and serves the
+next one from the trough; ball after ball the game ends. Not a crash and not
+NVRAM.
+
+Two ways out were on the table: real ball physics (large, and nothing else on
+the rig needs it) or a keep-alive. `s3balls.py` now does the keep-alive:
+while a ball is in play and no PLAYFIELD switch has moved for `ALIVE_S`
+(6 s, `PAD_S3_ALIVE_MS`, 0 = off), it taps a slingshot for 80 ms, the two in
+turn - the switch an unattended real ball hits most. The PAD-1134 rules then
+fire the sling coil, so the playfield window flashes it. Fallbacks by name for
+other titles: return lanes / inlanes, then pop bumpers; never an outlane.
+
+- "In play" is DERIVED from the switches (balls the trough and shooter lane
+  do not hold, against the most ever seen there), not from launches, so a
+  ball drained by clicking a trough dot in the playfield window stops the
+  taps with no call into the model.
+- "Playfield switch" = any node-board switch except buttons, coin, service,
+  tilt, trough, shooter, EOS, QR, jumper, headphone, volume, ticket, door and
+  motor end stops (`QUIET_EXCLUDE`). A click or key on one restarts the wait,
+  so somebody playing is never tapped over; flipper buttons do not count.
+- Nothing is tapped with every ball home or a ball waiting in the lane.
+- bridge.log: `[ball] keep-alive: ...` at start, then `keep-alive tap N`
+  (the first three, then every 25th).
+
+Proven on pokemon_le (hands off after the launch, 420 s): main's code gave
+the ball up at 137 s (BALL 2 on screen at 180 s, ball search re-arms every
+~27 s); with the keep-alive the game was still on BALL 1 at 420 s, with no
+second trough eject and no ball search round at all, ~70 taps of 82-92 ms
+and 74 sling coil fires by rule. The taps score like a real ball's sling hits.
+
+Spike 2's rig is left as it is: its ballfeed never leaves a ball sitting
+untouched in play - a ball nobody plays drains home after PAD_BALL_HOME_MS,
+one somebody played a minute after their last input (PAD-134/186) - so the
+game never reaches its lost-ball wait there.
+
 ## What is left for Spike 2 parity
 
 1. Coins: the game credits ~3 of 4 quarters even when each is delivered.

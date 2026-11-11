@@ -30,6 +30,21 @@ records what was resolved, for s3press.py.
 
 PAD_S3_BALLS=0 turns the model off; PAD_S3_BALLS_HOME=0 starts the trough
 empty instead of full.
+
+KEEP THE BALL ALIVE (PAD-1137). With no playfield a launched ball never
+touches a switch, and a Spike 3 game treats a ball that has moved nothing for
+long enough as lost: ball search, then the ball ends and, ball after ball,
+the game. A real ball left alone rattles between the slingshots on its way
+down, so while a ball is in play (derived from the switches: balls the trough
+and shooter lane do not hold, so a drain clicked in the playfield window
+counts) and no PLAYFIELD switch has moved for ALIVE_S, the model taps one:
+the slingshots in turn (the boards' coil rules, PAD-1134, then fire the sling
+coil, so the window flashes it), else the return lanes / inlanes, else the
+pop bumpers. Any playfield switch moving - a click, a key, a ball search
+firing a coil the game watches - restarts the wait, so somebody playing is
+never tapped over. Cabinet buttons, the trough, the shooter lane and the
+like are not playfield switches (QUIET_EXCLUDE). PAD_S3_ALIVE_MS sets the
+wait (0 turns it off).
 """
 import json
 import os
@@ -37,6 +52,18 @@ import re
 import time
 
 EJECT_GAP = 0.6       # a second eject inside this window is the game's retry
+
+#: PAD-1137: no playfield switch for this long with a ball in play -> tap one.
+#: Well inside the game's ball search wait (see docs/plans/spike3_emulation.md).
+ALIVE_S = float(os.environ.get("PAD_S3_ALIVE_MS", "6000")) / 1000.0
+#: How long a tap holds the switch closed: a sling switch a ball brushes.
+TAP_S = 0.08
+#: Switches that are not the ball moving on the playfield, by name.
+QUIET_EXCLUDE = re.compile(
+    r"BUTTON|COIN|SERVICE|TILT|TROUGH|SHOOTER|\bEOS\b|^QR |JUMPER|HEADPHONE|VOLUME|"
+    r"TICKET|INTERLOCK|DOOR|ENCODER|\b(UP|DOWN|HOME)$")
+#: The switches a tap may use, best first: a group is used if it has any.
+ALIVE_GROUPS = (r"\bSLING", r"\bRETURN LANE\b|\bINLANE\b|\bIN LANE\b", r"\bPOP\b|\bBUMPER\b")
 
 
 def _norm(s):
@@ -47,10 +74,18 @@ def resolve(devs):
     """{trough: [(node, bit)] eject end first, shooter, eject, launch} from
     s3nodes.devices rows (name, node, index, class)."""
     trough, shooter, eject, launch, optos = {}, None, None, None, []
+    playfield, groups = {}, [[] for _ in ALIVE_GROUPS]
     for name, node, idx, cls in devs:
         n = _norm(name)
         if node < 0:
             continue
+        # node 0 is the CPU board's SPI chain (cabinet and service inputs)
+        if cls == "switch" and node > 0 and not QUIET_EXCLUDE.search(n):
+            playfield.setdefault((node, idx), n)
+            for g, pat in enumerate(ALIVE_GROUPS):
+                if re.search(pat, n) and "OUTLANE" not in n:
+                    groups[g].append((node, idx, n))
+                    break
         if cls == "switch" and re.search(r"\bOPTO\b", n) and node > 0:
             optos.append((node, idx))
         if cls == "switch":
@@ -65,8 +100,11 @@ def resolve(devs):
             elif launch is None and (n.startswith("AUTO PLUNGER") or n.startswith("AUTO LAUNCH")
                                      or n == "AUTOLAUNCH"):
                 launch = (node, idx)
+    alive = next((sorted(set(g)) for g in groups if g), [])
     return dict(trough=[trough[k] for k in sorted(trough)], shooter=shooter,
-                eject=eject, launch=launch, optos=sorted(set(optos)))
+                eject=eject, launch=launch, optos=sorted(set(optos)),
+                alive=[[nd, ix, nm] for nd, ix, nm in alive],
+                playfield=sorted([nd, ix] for nd, ix in playfield))
 
 
 class Balls:
@@ -93,6 +131,19 @@ class Balls:
         self.say("trough %s, shooter %s, eject coil %s, launch coil %s; %d home%s" % (
             where["trough"], where["shooter"], where["eject"], where["launch"], self.home(),
             "; %d optos held closed" % closed if closed else ""))
+        # PAD-1137 keep-alive: the balls this machine has (the most ever seen
+        # home or in the lane), the playfield's last state and when it moved
+        self.total = self.home() + self.lane()
+        self.pf = [tuple(nb) for nb in where.get("playfield", [])]
+        self.alive = [(nd, ix, nm) for nd, ix, nm in where.get("alive", [])]
+        self.pf_last = self.pf_state()
+        self.pf_moved = time.time()
+        self.taps = 0
+        if ALIVE_S > 0 and self.alive:
+            self.say("keep-alive: with a ball in play and no playfield switch for %.0f s, "
+                     "tap %s" % (ALIVE_S, ", ".join(nm for _, _, nm in self.alive)))
+        elif ALIVE_S > 0:
+            self.say("keep-alive: no slingshot, return lane or pop bumper switch - off")
 
     @classmethod
     def for_game(cls, game, sw, log=None, d=None):
@@ -119,18 +170,59 @@ class Balls:
     def home(self):
         return sum(self.made(nb) for nb in self.w["trough"])
 
+    def lane(self):
+        sh = self.w["shooter"]
+        return 1 if sh and self.made(sh) else 0
+
+    def out(self):
+        """Balls neither home nor in the shooter lane - DERIVED from the
+        switches, so a drain clicked in the playfield window counts."""
+        self.total = max(self.total, self.home() + self.lane())
+        return self.total - self.home() - self.lane()
+
+    def pf_state(self):
+        return tuple(self.made(nb) for nb in self.pf)
+
+    def keep_alive(self, now):
+        """PAD-1137: tap a slingshot (or lane, or pop) when a ball in play has
+        moved no playfield switch for ALIVE_S. See the module docstring."""
+        cur = self.pf_state()
+        if cur != self.pf_last:
+            self.pf_last, self.pf_moved = cur, now
+            return
+        if ALIVE_S <= 0 or not self.alive or now - self.pf_moved < ALIVE_S:
+            return
+        if self.out() <= 0:
+            self.pf_moved = now          # nothing out there: wait a whole ALIVE_S again
+            return
+        node, idx, name = self.alive[self.taps % len(self.alive)]
+        nb = (node, idx)
+        self.taps += 1
+        self.pf_moved = now
+        self.set(nb, True)
+        self.pf_last = self.pf_state()   # our own close is not somebody playing
+        quiet = self.taps > 3 and self.taps % 25
+        def release():
+            self.set(nb, False)
+            self.pf_last = self.pf_state()
+        self.due.append((now + TAP_S, release, None if quiet else
+                         "keep-alive tap %d: %s (no playfield switch for %.0f s, %d in play)"
+                         % (self.taps, name, ALIVE_S, self.out())))
+
     def after(self, secs, fn, why):
         self.due.append((time.time() + secs, fn, why))
 
     def tick(self):
+        now = time.time()
+        self.keep_alive(now)
         if not self.due:
             return
-        now = time.time()
         keep = []
         for t, fn, why in self.due:
             if t <= now:
                 fn()
-                self.say(why)
+                if why:
+                    self.say(why)
             else:
                 keep.append((t, fn, why))
         self.due = keep

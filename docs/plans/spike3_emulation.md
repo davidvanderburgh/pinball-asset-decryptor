@@ -466,16 +466,27 @@ nodesw / the SPI chain, edges only. Proven on a private Xvfb with xdotool:
 All six Spike 3 cards on hand boot, start a game and play a ball, with
 video, live sound on request, and a playable window.
 
-## What is left for Spike 2 parity (next runs)
+## Stage 9 - the Emulate tab (2026-11-10)
 
-1. **The Emulate tab** (PAD-367 refuses a Spike 3 card at Start): launch
-   `s3run.sh --window` on the claimed rig slot instead, with a setup check.
-2. **Setup on a user's PC** - the decision for David: s3run needs `cuse.ko`
-   (the SPI chain) and `i2c-stub.ko` built for ONE WSL kernel (6.6.87.2,
-   ~/.pad-s3/kernel) and a patched qemu-aarch64 (I2C+SPI ioctls). A user's
-   WSL kernel will not match. Options: ship the patched qemu and replace the
-   CUSE device with an in-guest LD_PRELOAD answering /dev/spidev4.0 (no
-   kernel module); or keep Spike 3 emulation to machines set up like this one.
-3. Coins: the game credits ~3 of 4 quarters even when each is delivered.
-4. The window's default key bindings fire one QR-scanner switch for a moment
+Start on a Spike 3 card runs it where the PC has the Spike 3 rig:
+`tools/spike3_emu/s3launch.sh` (as root, through `wsl -u root`) checks the
+rig (`--check`: root, the build, the patched qemu, CUSE, the amp bus,
+tools), puts the card in the store the first time (its padkeys.json beside
+it), and runs `s3run.sh --window` on the claimed rig slot; Stop is
+`s3launch.sh --stop SLOT`; sound follows the panel's Mute. Without the rig the
+PAD-367 refusal stands, saying Spike 3 is not set up on this PC. s3run finds
+the amp bus (i2c-stub) by name - unset, the game aborted at xifo.cpp:72.
+
+## What is left for Spike 2 parity
+
+1. **Spike 3 on a user's PC** - David's call. The rig needs two kernel
+   modules built for one WSL kernel (cuse.ko for the SPI chain, i2c-stub.ko
+   for the amp bus) and a patched qemu-aarch64, and none of tools/spike3_emu
+   ships in the installers. The SPI module could be replaced by an in-guest
+   LD_PRELOAD; the amp bus could only be dropped by writing I2C emulation,
+   which is ruled out - so a user needs i2c-stub (or a matching kernel) either
+   way. Options: build and ship the modules for the WSL kernel PAD-Runtime
+   uses, or keep Spike 3 emulation to set-up machines (today's state).
+2. Coins: the game credits ~3 of 4 quarters even when each is delivered.
+3. The window's default key bindings fire one QR-scanner switch for a moment
    before the title's switch list loads (harmless, settles).

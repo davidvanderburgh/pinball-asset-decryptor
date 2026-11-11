@@ -381,7 +381,7 @@ class NativeExecutor(CommandExecutor):
             if _pkexec_declined(rc, text):
                 raise CommandError(bash_cmd, rc,
                                    "the password prompt for root was "
-                                   "cancelled or refused")
+                                   "canceled or refused")
             if "authentication agent" in text.lower() or "pkexec" in text.lower():
                 raise CommandError(bash_cmd, rc, _pkexec_explained(text))
         if rc != 0:

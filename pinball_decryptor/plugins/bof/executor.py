@@ -9,7 +9,7 @@ import sys
 import threading
 from collections import deque
 
-from ...core import runtime
+from ...core import root_session, runtime
 
 # Prevent console windows from flashing when launched via pythonw.exe on Windows
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -261,12 +261,19 @@ class WslExecutor(CommandExecutor):
 
 
 class NativeExecutor(CommandExecutor):
-    """Execute commands natively on Linux."""
+    """Native Linux.  Root when the app is root or sudo asks no password, and
+    otherwise the USER's own shell (with /usr/sbin on PATH): nothing these
+    commands do needs root (partclone and debugfs on the user's own files,
+    gpg, tar), and ``sudo bash -c`` from a desktop launcher has no terminal to
+    ask a password on, so every command failed (PAD-1173; the Stern
+    executor's PAD-314)."""
 
     def _prefix(self):
         if hasattr(os, "getuid") and os.getuid() == 0:
             return ["bash", "-c"]
-        return ["sudo", "bash", "-c"]
+        if root_session.passwordless_sudo():
+            return ["sudo", "bash", "-c"]
+        return ["bash", "-c"]
 
     def run(self, bash_cmd, timeout=120):
         full_cmd = [*self._prefix(), bash_cmd]
@@ -278,6 +285,7 @@ class NativeExecutor(CommandExecutor):
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout,
+                env=root_session.user_env(),
             )
         except subprocess.TimeoutExpired as e:
             raise CommandError(bash_cmd, -1, f"Timed out after {timeout}s") from e
@@ -296,6 +304,7 @@ class NativeExecutor(CommandExecutor):
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            env=root_session.user_env(),
         )
         with self._lock:
             self._current_proc = proc

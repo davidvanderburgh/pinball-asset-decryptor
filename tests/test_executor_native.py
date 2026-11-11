@@ -119,7 +119,7 @@ def test_run_root_with_passwordless_sudo_never_prompts(monkeypatch):
 
 def test_a_cancelled_prompt_says_so(monkeypatch):
     _rooted(monkeypatch, rc=126, out="", err="")
-    with pytest.raises(EX.CommandError, match="password prompt for root was cancelled"):
+    with pytest.raises(EX.CommandError, match="password prompt for root was canceled"):
         EX.NativeExecutor().run_root("losetup x")
 
 

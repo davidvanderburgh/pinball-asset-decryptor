@@ -22,6 +22,17 @@
 set -eu
 S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 S2=$S/../spike2_emu
+# WHAT THE BUILD IS MADE FROM, as one sum (PAD-1090): this script, the Spike 3
+# sources, and the Spike 2 files compiled in (glbridge.c into libGLESv2,
+# padglhost.c, the shared headers). Written beside the build; s3launch.sh
+# rebuilds when it no longer matches - an app update that changes glbridge.c
+# would otherwise keep running the old bridge (the built files still exist).
+srcsum() {
+    cat "$S/s3build.sh" "$S"/*.c "$S"/*.h "$S2/glbridge.c" "$S2/padglhost.c" \
+        "$S2/padgl.h" "$S2/padsw.h" "$S2/padvid.h" "$S2/i420.h" "$S2/padicon.h" 2>/dev/null \
+        | sha256sum | cut -c1-16
+}
+if [ "${1:-}" = --sum ]; then srcsum; exit 0; fi
 OUT=${1:-${PAD_S3_BUILD:-${PAD_S3_HOME:-/var/lib/pad-s3}/build}}
 mkdir -p "$OUT"
 CC=$(bash "$S/xgcc.sh")
@@ -70,6 +81,7 @@ fi
 gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration $VIDMAX $GLMAX -I"$S2" \
     -o "$OUT/padglhost" "$S2/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
+srcsum > "$OUT/.srcsum"
 for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3dev.so s3vid.so s3spid padglhost; do
     [ -e "$OUT/$f" ] || continue
     printf 's3build: %-15s %8d bytes\n' "$f" "$(stat -c%s "$OUT/$f")"

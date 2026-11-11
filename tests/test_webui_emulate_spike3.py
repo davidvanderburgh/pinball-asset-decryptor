@@ -142,8 +142,13 @@ OTP_DOC = '{"otp_keyfile": "%s"}' % ("00" * 32)
 
 
 def _s3_rig(monkeypatch, check=b"s3check: ok\n"):
+    import tempfile
     from pinball_decryptor.core import rigdata
     monkeypatch.setattr(rigdata, "cards_exists", lambda: False)   # no WSL in tests
+    # never the real user's ~/.pad: a key kept there is not this test's
+    home = tempfile.mkdtemp(prefix="pad_s3_home_")
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("USERPROFILE", home)
     monkeypatch.setattr(emulate_rig, "spike3_rig_present", lambda: True)
     monkeypatch.setattr(emulate_rig, "spike3_check_cmd",
                         lambda: ["bash", "s3launch.sh", "--check"])

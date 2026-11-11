@@ -93,6 +93,9 @@ build_ok() {
     for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3dev.so s3vid.so padglhost; do
         [ -e "$B/$f" ] || return 1
     done
+    # built from these sources? (s3build.sh --sum: an app update that changed
+    # glbridge.c or a rig source rebuilds once, instead of running the old one)
+    [ "$(cat "$B/.srcsum" 2>/dev/null)" = "$(bash "$S/s3build.sh" --sum)" ]
 }
 
 case "${1:-}" in
@@ -144,7 +147,7 @@ if ! python3 "$S/s3store.py" path "$CARD" >/dev/null 2>&1; then
         echo "s3launch: failed - $NOKEY"; exit 1; }
 fi
 if ! build_ok; then
-    echo "s3launch: building the Spike 3 rig (once; a few minutes)"
+    echo "s3launch: building the Spike 3 rig (once per app update; a few minutes)"
     if ! bash "$S/s3build.sh" "$B" 2>&1 | sed 's/^/s3launch:   /'; then
         echo "s3launch: failed - the Spike 3 rig did not build"; exit 1
     fi

@@ -3197,3 +3197,25 @@ def test_the_card_functions_are_the_plugins(tmp_path):
     from pinball_decryptor.plugins.stern import cards
     assert emulate_core.override_base_card is cards.override_base_card
     assert emulate_core._title_label is cards._title_label
+
+
+def test_no_systemd_to_turn_on_is_never_promised():
+    """PAD-1132: the app's own PAD-Runtime has no systemd, by design.  Its
+    check says wslconf=0 (PID 1 is WSL's init) and hassystemd=0; the notice
+    on screen for another reason must not promise "turns systemd on", the
+    consent list must not hold that step, and a machine with nothing else
+    to fix gets no button sentence at all (not an IndexError)."""
+    facts = _facts(wslconf="0", hassystemd="0", user="root")
+    assert not emulate_core.wsl_can_turn_systemd_on(facts)
+    assert not any("systemd" in s for s in emulate_core.setup_fix_steps(facts))
+    text = setup_notice(facts, can_fix=True)
+    assert "systemd on in /etc/wsl.conf" not in text
+    assert "stay BLACK" in text, "the warning it is on screen for"
+
+
+def test_an_older_rig_without_hassystemd_still_offers_it():
+    """Absent accuses nobody: a rig that predates the fact keeps the old
+    behaviour."""
+    facts = _facts(wslconf="0", user="root")
+    facts.pop("hassystemd", None)
+    assert emulate_core.wsl_can_turn_systemd_on(facts)

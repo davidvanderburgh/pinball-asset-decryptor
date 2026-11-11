@@ -15,7 +15,8 @@ Each table starts with the text for a bad number ("INVALID SW. NUMBER",
   flippers  8 pointers, the flipper switches (R. FLIPPER E.O.S. ...)
   coils     24+ pointers, solenoids 1.. (TROUGH EJECT ...)
 
-Unused entries point at "NOT USED" and are left out.  Prints a table, or
+Unused entries ("NOT USED", Cactus Canyon's "UNUSED ##9") are left out, and
+a switch's '*' (the ROM's opto mark) is dropped from its name.  Prints a table, or
 with --json {"switches": {"D1": ..., "11": ...}, "flippers": {"F1": ...},
 "coils": {"1": ...}}.
 """
@@ -25,8 +26,11 @@ import struct
 import sys
 
 PAGE = 0x4000
-# a name: printable, starting like one (AFM has "M"ARTIAN TARGET)
-NAME = re.compile(rb"[A-Z0-9\"'(.][\x20-\x7e]{1,30}\x00")
+# a name: printable, starting like one (AFM has "M"ARTIAN TARGET; Cactus
+# Canyon marks its optos "*TROUGH BALL 1" and names coils "##1 (L) DROP TGT.")
+NAME = re.compile(rb"[A-Z0-9\"'(.*#][\x20-\x7e]{1,30}\x00")
+# entry 0 of a table: the text for a bad number
+BAD_ENTRY = re.compile(r"^(INVALID|NULL$)", re.I)
 
 
 def page_tables(rom, base):
@@ -79,8 +83,11 @@ def tables(rom):
 def page_set(rom, base):
     found = {}
     for off, names in page_tables(rom, base):
-        # entry 0 of every table is its "invalid number" text
-        names = names[1:]
+        # entry 0 of every table is its "invalid number" text - unless a
+        # printable byte right before that text hid it from page_tables
+        # (Cactus Canyon's flipper-switch table) and the run starts at 1
+        if names and BAD_ENTRY.match(names[0]):
+            names = names[1:]
         if "switches" not in found and len(names) >= 64 and "LEFT COIN SLOT" in names[0]:
             found["switches"] = names[:72]
         elif "flippers" not in found and sum("FLIPPER" in n for n in names[:8]) >= 4                 and any("BUTTON" in n or "BUT." in n for n in names[:8]):
@@ -96,7 +103,8 @@ def named(rom):
     out = {"switches": {}, "flippers": {}, "coils": {}}
     for i, n in enumerate(t.get("switches", [])):
         key = "D%d" % (i + 1) if i < 8 else "%d%d" % ((i - 8) // 8 + 1, (i - 8) % 8 + 1)
-        if n != "NOT USED":
+        n = n.lstrip("*")               # the ROM's opto mark, not the name
+        if n != "NOT USED" and not n.startswith("UNUSED"):
             out["switches"][key] = n
     for i, n in enumerate(t.get("flippers", [])):
         if n != "NOT USED":
@@ -104,9 +112,9 @@ def named(rom):
     # a coil table runs on into whatever follows it: keep names only until
     # the first entry that is not a plausible coil name
     for i, n in enumerate(t.get("coils", [])):
-        if not re.match(r"^[A-Z0-9\"'(.][A-Z0-9 .#/()\"'+-]+$", n) or len(n) < 3:
+        if not re.match(r"^[A-Z0-9\"'(.#][A-Z0-9 .#/()\"'+-]+$", n) or len(n) < 3:
             break
-        if n != "NOT USED":
+        if n != "NOT USED" and not n.startswith("UNUSED"):
             out["coils"][str(i + 1)] = n
     return out
 

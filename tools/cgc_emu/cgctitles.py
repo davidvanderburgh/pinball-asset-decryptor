@@ -49,20 +49,32 @@ TITLES = {
         "verified": False,
         "optos": [],
         "holes": {},
-        # Start pulses the bank motor every 1.5 s and never serves: this
-        # model of it is not yet what the game wants (PAD-273, open)
+        # Start pulses FRANK. MOTOR (16) every 1.5 s and never serves: this
+        # model of the table is not yet what the game wants (PAD-273, open;
+        # PAD-1170 fixed its coil numbers, which were read one off)
         "mechs": [("UP/DN BANK MOTOR", "UP/DN BANK UP", "UP/DN BANK DOWN"),
                   ("FRANK. MOTOR", "FRANK. TABLE DOWN", "FRANK. TABLE UP")],
     },
     "cc": {
         "title": "Cactus Canyon (CGC)",
         "program": "pin",
-        # CGC's Z5 engine: different symbols, not wired yet (see README)
-        "verified": False,
+        # CGC's Z5 engine (cgcshim.c "Z5"): pin says which switches are
+        # optos itself, so none are listed here.  Proven on the rig
+        # (PAD-1170): attract, coins, serve, plunge, poppers, games to the end
+        "verified": True,
         "optos": [],
-        "holes": {},
+        # a ball in a popper closes its switch until the popper's coil
+        # (6 mine, 8 saloon) kicks it out
+        "holes": {"MINE POPPER": "MINE POPPER", "SALOON POPPER": "SALOON POPPER"},
+        # closed at rest; nothing in pin sets them (the WPC titles' programs
+        # do it themselves)
+        "closed": ["COIN DOOR CLOSED", "ALWAYS CLOSED"],
     },
 }
+
+# the Williams game ROM in a game folder: "mm_10.rom", Cactus Canyon's
+# "cc_g11.1_3" (U6 at G11) - never its DCS sound ROMs ("s2.rom")
+GAME_ROM = re.compile(r"^[a-z]+_[0-9a-z]+(\.rom|\.[0-9]+_[0-9]+)$")
 
 
 def detect(game_dir):
@@ -81,11 +93,14 @@ def detect(game_dir):
 
 
 def find_rom(game_dir):
-    for root, _dirs, files in os.walk(game_dir):
+    any_rom = None
+    for root, _dirs, files in sorted(os.walk(game_dir)):
         for f in sorted(files):
-            if f.endswith(".rom"):
+            if GAME_ROM.match(f):
                 return os.path.join(root, f)
-    return None
+            if f.endswith(".rom") and not any_rom:
+                any_rom = os.path.join(root, f)
+    return any_rom
 
 
 def balls(key, names):
@@ -98,7 +113,9 @@ def balls(key, names):
     jam = [int(sw[n]) for n in ("TROUGH EJECT", "TROUGH JAM") if n in sw]
     shooter = next((int(sw[n]) for n in sw if n.startswith("SHOOTER")), 0)
     eject = next((coil[n] for n in coil if n in ("TROUGH EJECT", "TROUGH", "BALL RELEASE")), "")
-    launch = next((coil[n] for n in coil if n in ("AUTO PLUNGER", "AUTO LAUNCH", "LAUNCH")), "")
+    launch = next((coil[n] for n in coil
+                   if n in ("AUTO PLUNGER", "AUTOPLUNGER", "AUTO LAUNCH", "LAUNCH")), "")
+    closed = [int(sw[n]) for n in t.get("closed", []) if n in sw]
     optos = sorted(set(trough + jam + t["optos"]))
     holes = ["%s:%s" % (sw[s], coil[c]) for s, c in t["holes"].items() if s in sw and c in coil]
     parts = ["optos=" + ",".join(map(str, optos))]
@@ -112,6 +129,8 @@ def balls(key, names):
         parts.append("launch=" + launch)
     if holes:
         parts.append("holes=" + ",".join(holes))
+    if closed:
+        parts.append("closed=" + ",".join(map(str, closed)))
     mechs = ["%s:%s:%s" % (coil[c], sw[a], sw[b]) for c, a, b in t.get("mechs", [])
              if c in coil and a in sw and b in sw]
     if mechs:

@@ -10,11 +10,13 @@
 # window and speakers are the app's Emulate tab's business (a follow-up).
 #
 # The machine runs /home/debian/emumm/emumm from its own folder (it opens
-# ../emumm/appdata/rom/... and ./cgc.so relative to it).  Here that folder
+# ../emumm/appdata/rom/... and ./cgc.so relative to it; Cactus Canyon's
+# /home/debian/pin/pin opens ./ccdata/...).  Here that folder
 # is $CGC_RIG/home/emumm, the build hard-linked, with the files the game
 # writes linked to this slot's kept copies in $CGC_NV (the FRAM, CGC's
 # adjustments samadj.bin, the clock offset); CGC_FRESH=1 starts over.  The
-# game logs to /tmp/z4.log, so it gets a private /tmp ($CGC_RIG/tmp).
+# game logs to /tmp/z4.log (pin: /tmp/z5.log), so it gets a private /tmp
+# ($CGC_RIG/tmp).
 #
 # A fresh FRAM makes the Williams ROM restore factory settings and wait for
 # the operator; run_game.sh presses ENTER, then ESCAPE until attract, as an
@@ -44,7 +46,7 @@ BUILD=${BUILD%/}
 
 TITLE=$(cat "$BUILD/.pad_title")
 PROG=$(cat "$BUILD/.pad_program")
-[ "$PROG" = emumm ] || { echo "run_game.sh: $TITLE runs $PROG, which this rig does not drive yet" >&2; exit 4; }
+case "$PROG" in emumm|pin) ;; *) echo "run_game.sh: $TITLE runs $PROG, which this rig does not drive" >&2; exit 4 ;; esac
 
 bash "$CGC_TOOLS/killgame.sh" >/dev/null 2>&1
 
@@ -101,6 +103,20 @@ cgc_game_alive || { echo "run_game.sh: the game did not start:" >&2; cat "$CGC_R
 # Up = attract mode: the game drives its lamps (they are all off while it
 # boots, restores factory settings or sits in the service menu).
 lamps_on() { grep -q '^lamps ' "$CGC_RIG/state" 2>/dev/null && ! grep -q '^lamps 0000000000000000$' "$CGC_RIG/state"; }
+# pin (Cactus Canyon) drives a few lamps from the moment its output tables
+# load, long before attract: there, up = the board at rest and the lamps
+# moving (a lamp show), not merely some lit
+if [ "$PROG" = pin ]; then
+    first_lamps=
+    lamps_on() {
+        local l
+        grep -q '^idle 1$' "$CGC_RIG/state" 2>/dev/null || return 1
+        l=$(sed -n 's/^lamps //p' "$CGC_RIG/state" 2>/dev/null)
+        [ -n "$l" ] && [ "$l" != 0000000000000000 ] || return 1
+        [ -z "$first_lamps" ] && { first_lamps=$l; return 1; }
+        [ "$l" != "$first_lamps" ]
+    }
+fi
 tap() { echo "$1 1" > "$CGC_RIG/ctl"; sleep 0.2; echo "$1 0" > "$CGC_RIG/ctl"; }
 up=0
 for i in $(seq 1 600); do
@@ -121,6 +137,6 @@ if [ $up = 1 ]; then
         "${PAD_TITLE:-$(python3 "$CGC_TOOLS/cgctitles.py" get "$TITLE" title)}" 0 0
 else
     echo "run_game.sh: the game did not reach attract:" >&2
-    tail -20 "$CGC_RIG/shim.log" "$CGC_RIG/tmp/z4.log" "$CGC_RIG/game.out" >&2 2>/dev/null
+    tail -20 "$CGC_RIG/shim.log" "$CGC_RIG/tmp/z4.log" "$CGC_RIG/tmp/z5.log" "$CGC_RIG/game.out" >&2 2>/dev/null
     exit 1
 fi

@@ -14,8 +14,27 @@ kept as they are.
 """
 import json
 import os
+import re
 
 LOOKS = ("real", "rgb")
+
+#: PAD-1144: a one-colour lamp whose NAME says its colour ("TOP GI-BLU (x10)", "R2D2-WHT") glows in it until the user
+#: sets another. The same rule as the emulator's tools/spike2_emu/cablights.py (NAMED_COLOURS, named_colour), which
+#: cannot import this package; tests/test_pad1144_named_colours.py holds the two together.
+NAMED_COLOURS = {
+    "RED": "#ff2818", "GRN": "#28dc40", "GREEN": "#28dc40", "BLU": "#306eff", "BLUE": "#306eff", "WHT": "#ffffff",
+    "WHITE": "#ffffff", "YEL": "#ffd600", "YLW": "#ffd600", "YELLOW": "#ffd600", "AMB": "#ffb000", "AMBER": "#ffb000",
+    "ORG": "#ff7800", "ORANGE": "#ff7800", "PUR": "#a040ff", "PURPLE": "#a040ff", "PNK": "#ff5ab4", "PINK": "#ff5ab4",
+    "CYN": "#20e0ff", "CYAN": "#20e0ff"}
+_NAMED = re.compile(r"-\s*(%s)\s*(?:\(\s*X\s*\d+\s*\))?\s*$"
+                    % "|".join(sorted(NAMED_COLOURS, key=len, reverse=True)), re.I)
+
+
+def named_colour(name):
+    """``"#rrggbb"`` the lamp's name says ("TOP GI-BLU (x10)" -> blue), or None: only after a dash, an "(xN)" count
+    allowed after it."""
+    m = _NAMED.search(str(name or ""))
+    return NAMED_COLOURS[m.group(1).upper()] if m else None
 
 
 def state_path():

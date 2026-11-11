@@ -8,11 +8,9 @@
     "units over the lower two thirds) and to led_io.txt (LED drawing -> table: x*3.36-48,",
     "y*3.35-35, every insert within a few units); the top of the drawing is compressed, so the",
     "back-of-table switches were decided by what their hit subs do.",
-    "NOT driven: the Sarcophagus lock (Ramp Motor CPU Unload/Load/Unload/Flat 94-97) and the",
-    "Guardian diverter (Diverter Motor Up/Down 76/77) are MOTORS the game runs through LED-driver",
-    "outputs (node 9 LEDs 56-61), which the bridge cannot see; the table's own lock and Guardian",
-    "stay where its init leaves them (Guardian closed), so the lock is unreachable and Top Ball",
-    "Sense (79) is never made.",
+    "Sarcophagus ramp positions follow motor end stops 94-97; Guardian follows 76/77.",
+    "The machine's merged switch state drives the existing animations; no motor end stop is fabricated.",
+    "Full Sarcophagus lock sensing, ball retention and multiball still need separate validation.",
     "Numbers: switch 1000+id (switch_list.txt), solenoids the small numbers under `solenoids`;",
     "flippers keep core.vbs's 46/48 and 36 (up left) / 34 (up right)."
   ],
@@ -100,10 +98,11 @@
     "PlungerIM.AutoFire",
     "Underworld.Kick"
   ],
-  "extra_vbs": "Sub PadResetDrops(e)\n\tIf e Then\n\t\tDTRaise 1\n\t\tDTRaise 2\n\t\tDTRaise 3\n\t\tDropCount = 0\n\tEnd If\nEnd Sub\nSub PadPostRight(e)\n\tIf e Then\n\t\tpost001_IsDropped 0\n\tElse\n\t\tpost001_IsDropped 1\n\tEnd If\nEnd Sub\nSub PadPostLeft(e)\n\tIf e Then\n\t\tpost002_IsDropped 0\n\tElse\n\t\tpost002_IsDropped 1\n\tEnd If\nEnd Sub\nSub PadRampUp(e)\n\tIf e Then\n\t\tRampUp\n\tEnd If\nEnd Sub\nSub PadRampDown(e)\n\tIf e Then\n\t\tRampDown\n\tEnd If\nEnd Sub\nSub PadTopEject(e)   ' the table's own Exit_Underworld: ramp up, kick, ramp down 800 ms later\n\tIf e Then\n\t\tRampUp\n\t\tbsUnderworld.SolOut True\n\t\tvpmTimer.AddTimer 800, \"RampDown '\"\n\tEnd If\nEnd Sub\n",
+  "extra_vbs": "Sub PadResetDrops(e)\n\tIf e Then\n\t\tDTRaise 1\n\t\tDTRaise 2\n\t\tDTRaise 3\n\t\tDropCount = 0\n\tEnd If\nEnd Sub\nSub PadPostRight(e)\n\tIf e Then\n\t\tpost001_IsDropped 0\n\tElse\n\t\tpost001_IsDropped 1\n\tEnd If\nEnd Sub\nSub PadPostLeft(e)\n\tIf e Then\n\t\tpost002_IsDropped 0\n\tElse\n\t\tpost002_IsDropped 1\n\tEnd If\nEnd Sub\nSub PadRampUp(e)\n\tIf e Then\n\t\tRampUp\n\tEnd If\nEnd Sub\nSub PadRampDown(e)\n\tIf e Then\n\t\tRampDown\n\tEnd If\nEnd Sub\nSub PadTopEject(e)   ' the table's own Exit_Underworld: ramp up, kick, ramp down 800 ms later\n\tIf e Then\n\t\tRampUp\n\t\tbsUnderworld.SolOut True\n\t\tvpmTimer.AddTimer 800, \"RampDown '\"\n\tEnd If\nEnd Sub\n\n'---- PAD: motor end stops belong to the machine, not the tribute's rules.\nDim PadMaidenRampPosition, PadMaidenGuardianPosition\nSub PadMaidenMotorTimer_Timer\n    On Error Resume Next\n    Dim p, g\n    p = -1\n    If Controller.Switch(1094) Then p = 0 ' CPU unload / Underworld\n    If Controller.Switch(1095) Then p = 3 ' load\n    If Controller.Switch(1096) Then p = 2 ' rear unload\n    If Controller.Switch(1097) Then p = 1 ' flat\n    If p >= 0 Then\n        If IsEmpty(PadMaidenRampPosition) Or PadMaidenRampPosition <> p Then\n            PadMaidenRampPosition = p\n            RotateRamp2 p, True\n            If p = 3 Then\n                ' RotateRamp2's virtual-lock rule chooses flat with a ball\n                ' held. The machine asked for load: keep that destination.\n                gRampPos = p\n                LockStopPos = 18\n                If LockStopPos < LockCurPos Then\n                    LockCurInc = -0.2\n                Else\n                    LockCurInc = 0.2\n                End If\n            End If\n        End If\n    End If\n    g = -1\n    If Controller.Switch(1076) Then g = 1 ' Guardian up\n    If Controller.Switch(1077) Then g = 0 ' Guardian down\n    If g >= 0 Then\n        If IsEmpty(PadMaidenGuardianPosition) Or PadMaidenGuardianPosition <> g Then\n            PadMaidenGuardianPosition = g\n            OpenRamp2 CBool(g), True\n        End If\n    End If\nEnd Sub\n",
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
-    "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100}
+    "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100},
+    "PadMaidenMotorTimer": {"clone": "PulseTimer", "interval_ms": 100}
   },
   "lamps": {
     "_": "table CONTROL light (the first of each Lampz group; its v*/b* twins follow it) -> Spike 2 LEDs [node, index] (several = an RGB insert); placed by position against led_io.txt, GUESS = the position fits but the name does not",
@@ -207,7 +206,9 @@
     "LightEffect",
     "FlashEffect",
     "GiOff",
-    "CheckDrops"
+    "CheckDrops",
+    "RotateRamp",
+    "OpenRamp"
   ],
   "orig_hits": false,
   "orig_keep": [
@@ -221,6 +222,7 @@
     "CapWall2"
   ],
   "repatch": [
+    {"old": "Sub RotateRamp(rampPos)\t\t' 0=Underworld, 1=Flat, 2=Eject, 3=RampLoad", "why": "the Sarcophagus and Guardian animations do not follow the machine's motor end stops", "since": "PAD-1163 (PR #28): the ramp and Guardian follow the motor end stops"},
     {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1065) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "Sub swPlungerRest_Hit : Controller.Switch(1065) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}

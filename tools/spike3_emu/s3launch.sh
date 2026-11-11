@@ -91,6 +91,17 @@ setup() {
             > /proc/sys/fs/binfmt_misc/register 2>/dev/null && echo "s3launch: registered qemu-aarch64 (binfmt, F)"
     fi
     modprobe dm_crypt 2>/dev/null
+    # SAVE STATES (PAD-1147) need a static busybox and criu, as Spike 2's do.
+    # Best effort and never a reason to refuse the run: without them every
+    # card still plays and s3run.sh says save states are off and why.
+    if ! [ -x /bin/busybox ] || ! dpkg -s busybox-static >/dev/null 2>&1; then
+        DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y -qq busybox-static \
+            >/dev/null 2>&1 && echo "s3launch: installed busybox-static (save states)"
+    fi
+    if ! [ -x "$( . "$S/../spike2_emu/padpath.sh" 2>/dev/null; pad_criu 2>/dev/null)" ]; then
+        echo "s3launch: building criu for save states (once, a few minutes)"
+        bash "$S/../spike2_emu/getcriu.sh" 2>&1 | tail -2 | sed 's/^/s3launch:   /'
+    fi
     check
 }
 

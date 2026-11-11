@@ -144,7 +144,7 @@ elif [ "${PAD_S3_PIVOT:-$WINDOW}" = 1 ]; then
 fi
 if [ "$SAVES" = 1 ] && [ ! -x "${CRIU:-}" ]; then
     SAVES=0
-    echo "[s3run] save states are off: no criu here (Set up emulator... builds it)"
+    echo "[s3run] save states are off: no criu on this PC (s3launch.sh --setup builds it)"
 fi
 export PIVOT QSTATIC BBX
 

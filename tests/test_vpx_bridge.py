@@ -4197,6 +4197,85 @@ def test_sound_record_reads_and_mutes_in_its_own_layout(lower):
     assert vs.read_sound(b"\x05\x00\x00\x00abc") is None                 # fits no layout
 
 
+def test_iron_maiden_motor_timer_is_fitted_and_tribute_commands_are_quiet():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    assert m["retrofit_timers"]["PadMaidenMotorTimer"] == {"clone": "PulseTimer", "interval_ms": 100}
+    out, _ = vs.patch('''Sub Table1_Init
+End Sub
+Sub RotateRamp(p)
+WScript.Echo "tribute ramp"
+End Sub
+Sub OpenRamp(p)
+WScript.Echo "tribute guardian"
+End Sub''', m)
+    assert "Sub RotateRamp_orig" in out and "Sub OpenRamp_orig" in out
+    assert "Sub RotateRamp(p) : End Sub" in out
+    assert "Sub OpenRamp(p) : End Sub" in out
+    assert "Sub PadMaidenMotorTimer_Timer" in out
+    old = next(r["old"] for r in m["repatch"] if "RotateRamp" in r["old"])
+    source = old + "\nEnd Sub"
+    updated, _ = vs.patch(source, m)
+    assert old not in updated  # the tab can distinguish old and rebuilt tables
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's motor animation under cscript")
+def test_iron_maiden_animations_follow_real_end_stops_without_writing_them(tmp_path):
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    extra = m["extra_vbs"].split("'---- PAD: motor end stops", 1)[1]
+    extra = extra[extra.index("\n"):]
+    harness = '''Class TestController
+Public state
+Private Sub Class_Initialize
+Set state = CreateObject("Scripting.Dictionary")
+End Sub
+Public Property Get Switch(n)
+Switch = False
+If state.Exists(n) Then Switch = state(n)
+End Property
+Public Property Let Switch(n, value)
+WScript.Echo "ERROR: fabricated end stop" : WScript.Quit 2
+End Property
+End Class
+Dim Controller : Set Controller = New TestController
+Dim gRampPos, LockStopPos, LockCurPos, LockCurInc, rampCalls, guardianCalls
+rampCalls = 0 : guardianCalls = 0 : LockCurPos = 8
+Sub RotateRamp2(p, mute)
+rampCalls = rampCalls + 1 : gRampPos = p
+If p = 3 Then gRampPos = 1 : LockStopPos = 0 : LockCurInc = -0.2
+WScript.Echo "ramp=" & p
+End Sub
+Sub OpenRamp2(p, force)
+guardianCalls = guardianCalls + 1
+WScript.Echo "guardian=" & p
+End Sub
+Sub AtStop(n)
+Controller.state.RemoveAll
+Controller.state.Add n, True
+PadMaidenMotorTimer_Timer
+End Sub
+'''
+    calls = '''PadMaidenMotorTimer_Timer
+WScript.Echo "idle=" & rampCalls & "," & guardianCalls
+AtStop 1094
+AtStop 1095
+WScript.Echo "load=" & gRampPos & "," & LockStopPos & "," & Sgn(LockCurInc)
+AtStop 1096
+AtStop 1097
+AtStop 1076
+AtStop 1077
+PadMaidenMotorTimer_Timer
+WScript.Echo "calls=" & rampCalls & "," & guardianCalls
+'''
+    vbs = tmp_path / "motors.vbs"
+    vbs.write_text(harness + extra + calls, encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["idle=0,0", "ramp=0", "ramp=3", "load=3,18,1", "ramp=2", "ramp=1",
+                                     "guardian=True", "guardian=False", "calls=4,2"]
+
+
 def test_playfield_sounds_stay_and_the_soundtrack_goes():
     vs = pytest.importorskip("vpxsounds")
     keep = ["fx_ballrolling3", "Flipper_L01", "Rubber_Strong_4", "fx_bumper", "Drain_7",

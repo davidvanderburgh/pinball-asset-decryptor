@@ -2133,6 +2133,11 @@ class Bridge:
         if not hwnd:
             return
         try:
+            import ctypes
+            # A minimized player has an icon rectangle (often at -32000),
+            # not its playfield's proportions. Wait until it is restored.
+            if ctypes.windll.user32.IsIconic(ctypes.c_void_p(hwnd)):
+                return
             dpi_aware()
             # THE TABLE'S OWN PROPORTIONS (PAD-811): Visual Pinball scales its
             # picture to the window, so a window forced to the kit's 1440x2160
@@ -2236,7 +2241,7 @@ class Bridge:
         try:
             import ctypes
             u = ctypes.windll.user32
-            if not u.IsWindow(ctypes.c_void_p(hwnd)):
+            if not u.IsWindow(ctypes.c_void_p(hwnd)) or u.IsIconic(ctypes.c_void_p(hwnd)):
                 return
             if u.IsZoomed(ctypes.c_void_p(hwnd)):
                 self._fill_player(hwnd)

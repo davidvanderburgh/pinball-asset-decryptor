@@ -324,3 +324,22 @@ def test_a_spike3_run_opens_the_virtual_playfield(tmp_path, monkeypatch):
         _wait(w, lambda: opened)
         assert opened[0]["game"] == "pokemon_le"
         assert opened[0]["root_wsl"] == "/var/tmp/pad-s3/slot1"
+
+
+def test_a_spike3_card_gets_the_emulate_tab_and_not_visual_pinball():
+    """David opened a Spike 3 card in the ticket's app and saw no Emulate tab:
+    the era's capabilities were extract-only, and the window's gate is where
+    a tab appears - so it is asked here, not the tab."""
+    import types
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+    from pinball_decryptor.webui.window import WebWindow
+    mfr = SternManufacturer()
+    mfr.set_era("spike3")
+    fake = types.SimpleNamespace(modes_preview_on=lambda m: False,
+                                 vpx_preview_on=lambda: True)
+    gates = WebWindow._gate(fake, mfr)
+    assert gates["Emulate"] is True
+    assert gates["Extract"] is True
+    assert not gates["Visual Pinball"]
+    mfr.set_era("spike2")
+    assert WebWindow._gate(fake, mfr)["Visual Pinball"]

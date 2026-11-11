@@ -452,7 +452,9 @@ class WebWindow:
             "Expression Lights": g("modes"),
             # PAD-802: Visual Pinball on the Spike 2 emulator, a preview;
             # PAD-943 (David): on every manufacturer the app emulates
-            "Visual Pinball": any(g(c) for c in VPX_EMULATORS) and self.vpx_preview_on(),
+            # (not Spike 3: its rig has no Visual Pinball bridge - PAD-1090)
+            "Visual Pinball": (any(g(c) for c in VPX_EMULATORS) and self.vpx_preview_on()
+                               and getattr(mfr, "_era", None) != "spike3"),
         }
         return gates
 

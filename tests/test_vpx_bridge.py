@@ -3431,6 +3431,83 @@ def test_rom_patchers_keep_the_rom_name_for_the_backglass():
     assert 'out_name = m.get("output") or' in src
 
 
+def _metallica_drop_script():
+    # Only the patcher's required landmarks and the two computed drop-bank
+    # writes. No table download or artwork is needed for this regression.
+    return '''ExecuteGlobal GetTextFile("controller.vbs")
+Const cGameName = "mtl_180h"
+Const UseSolenoids = 1
+Const UseLamps = 1
+Const UseVPMModSol = 1
+LoadVPM "x", "sam.VBS", 3.10
+SolCallback(15) = "SolLFlipper"
+SolCallback(16) = "SolRFlipper"
+Sub Table_Init
+InitVPMFFlipsSAM
+vpmMapLights allLamps
+vpmNudge.TiltSwitch = 16
+End Sub
+Sub Table_KeyDown(keycode)
+If keycode = StartGameKey Then Controller.Switch(16) = 1
+If vpmKeyDown(keycode) Then Exit Sub
+End Sub
+Sub Table_KeyUp(keycode)
+If keycode = StartGameKey Then Controller.Switch(16) = 0
+If vpmKeyUp(keycode) Then Exit Sub
+End Sub
+' This table has raised DT switches = 1 and dropped = 0
+controller.switch(60) = 1
+controller.switch(61) = 1
+controller.switch(62) = 1
+Set DT60 = (new DropTarget)(sw60, sw60a, BM_sw60, 60, 0, false)
+Set DT61 = (new DropTarget)(sw61, sw61a, BM_sw61, 61, 0, false)
+Set DT62 = (new DropTarget)(sw62, sw62a, BM_sw62, 62, 0, false)
+Sub DropTarget(Switchid)
+controller.Switch(Switchid mod 100) = 0  ' dropped DT
+End Sub
+Sub RaiseTarget(Switchid)
+controller.Switch(Switchid mod 100) = 1  ' raised DT
+End Sub'''
+
+
+def test_metallica_drop_bank_and_resync_agree_on_logical_polarity():
+    mt = pytest.importorskip("patch_metallica_spike")
+    m = json.load(open(mt.MAP, encoding="utf-8"))
+    out, _ = mt.patch_script(_metallica_drop_script(), m)
+    assert "controller.Switch(Switchid mod 100) = 1" in out
+    assert "controller.Switch(Switchid mod 100) = 0" in out
+    assert "Controller.Switch(DTArray(i).sw) = DTArray(i).isDropped" in out
+    assert "Not DTArray(i).isDropped" not in out
+    # the table's own load-time writes of the three raised targets flip too (PR #21 review)
+    for sid in (1048, 1049, 1050):
+        assert re.search(r"(?m)^controller\.switch\(%d\) = 0\t" % sid, out)
+    assert "raised DT switches = 1 and dropped = 0" not in out
+    # Computed SAM aliases stay on their small numbers; the controller's
+    # existing map resolves each of the three physical drop targets.
+    assert [m["switch_rewrite"][str(n)] for n in (60, 61, 62)] == [48, 49, 50]
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the patched drop-bank writes under cscript")
+def test_metallica_drop_and_raise_publish_closed_and_open(tmp_path):
+    mt = pytest.importorskip("patch_metallica_spike")
+    m = json.load(open(mt.MAP, encoding="utf-8"))
+    out, _ = mt.patch_script(_metallica_drop_script(), m)
+    actions = re.search(r"(?ms)^Sub DropTarget.*?^End Sub\nSub RaiseTarget.*?^End Sub", out).group(0)
+    init = "\n".join(re.findall(r"(?m)^controller\.switch\(10[45]\d\) = .*$", out))
+    vbs = tmp_path / "drops.vbs"
+    vbs.write_text('''Class TestController
+Public Property Let Switch(n, value)
+WScript.Echo n & "=" & CInt(value)
+End Property
+End Class
+Dim Controller : Set Controller = New TestController
+''' + init + '\n' + actions + '\nDropTarget 160 : RaiseTarget 160\nDropTarget 161 : RaiseTarget 161\nDropTarget 162 : RaiseTarget 162\n', encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["1048=0", "1049=0", "1050=0", "60=1", "60=0", "61=1", "61=0", "62=1", "62=0"]
+
+
 def test_tmnt_shooter_lane_top_switch_ends_the_turtle_select():
     # PAD-897: the game keeps the turtle select open, turtles cycling, until
     # the launched ball crosses the shooter lane's upper switch; the table had
@@ -4135,6 +4212,15 @@ def test_playfield_sounds_stay_and_the_soundtrack_goes():
     assert not vs.mechanical("fx_bumper", vs.OUT_BACKGLASS)              # a table's own bumper sfx
 
 
+@pytest.mark.parametrize("name", ["bottomjet", "leftjet", "rightjet", "fx_lrturn", "fx_lrbump"])
+def test_ghostbusters_jets_and_ramp_contacts_are_mechanical(name):
+    vs = pytest.importorskip("vpxsounds")
+    assert vs.mechanical(name, 0) and vs.mechanical(name.upper(), 0)
+    assert not vs.mechanical(name, vs.OUT_BACKGLASS)
+    assert not vs.mechanical("sfx_" + name, 0)
+    assert not vs.mechanical(name + "voice", 0)  # exact names, no broad jet/bump substring
+
+
 def test_playmusic_goes_to_empty_subs_by_argument_count():
     vs = pytest.importorskip("vpxsounds")
     lines = ['Sub Table1_MusicDone : PlayMusic "Aerosmith\\" & Song : End Sub',
@@ -4447,6 +4533,60 @@ def test_the_grips_stand_aside_while_visual_pinball_is_paused(monkeypatch):
     g.bridge.set_pause(0)                                                       # Resume
     assert tick() == [("SetWindowPos", (77, None, 10, 20, 400, 600, 0x50))]     # back, shown again
     assert not g.aside and any("grips back" in s for s in logged)
+
+
+def test_minimized_player_is_not_placed_until_it_is_restored(monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+    pc = pytest.importorskip("padcontroller")
+    minimized = [True]
+    u = SimpleNamespace(IsIconic=lambda h: minimized[0])
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=u), raising=False)
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    monkeypatch.setattr(pc.padlaunch, "kit_load", lambda: {})
+    monkeypatch.setattr(pc, "dpi_aware", lambda: None)
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    reads = []
+    def rect(h):
+        reads.append(h)
+        return (-32000, -32000, 160, 28) if minimized[0] else (100, 200, 600, 1200)
+    monkeypatch.setattr(pc, "window_rect", rect)
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.player_hwnd, b.player_placed = 55, False
+    b._frame_player = lambda h: False
+    b._place_player()
+    assert not reads and not b.player_placed
+    assert not hasattr(b, "player_aspect")
+    minimized[0] = False
+    b._place_player()
+    assert reads == [55] and b.player_placed and b.player_aspect == 2.0
+
+
+def test_minimized_player_does_not_replace_the_saved_geometry(monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+    pc = pytest.importorskip("padcontroller")
+    minimized = [True]
+    u = SimpleNamespace(IsIconic=lambda h: minimized[0], IsWindow=lambda h: True,
+                        IsZoomed=lambda h: False)
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=u), raising=False)
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    reads, saves = [], []
+    def rect(h):
+        reads.append(h)
+        return (-32000, -32000, 160, 28) if minimized[0] else (100, 200, 600, 1200)
+    monkeypatch.setattr(pc, "window_rect", rect)
+    monkeypatch.setattr(pc.padlaunch, "kit_save", lambda k: saves.append(k))
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.player_hwnd, b.player_placed, b.player_aspect = 55, True, 2.0
+    b._player_seen = b._player_settled = (100, 200, 600, 1200)
+    b._player_seen_t = 0
+    b._watch_player()
+    assert not reads and not saves
+    assert b._player_seen == b._player_settled == (100, 200, 600, 1200)
+    minimized[0] = False
+    b._watch_player()
+    assert reads == [55] and not saves   # restored, still at the saved place
 
 
 def test_a_table_that_runs_without_its_window_still_gets_the_grips(monkeypatch):

@@ -13,6 +13,15 @@ Rows are ordered most-recently-touched first (main included) and the top
 row is pre-selected, so the usual launch — Enter on the checkout you were
 just working in — needs no aiming.
 
+Ticket trees (PAD-1130): pad-triage works each ticket in a worktree of
+its OWN clone (``../pad-triage/work/repo``, trees under
+``work/tickets/PAD-n``), which this checkout's `git worktree list` never
+shows.  So the chooser also asks that clone, keeps the ``ticket/PAD-n``
+trees whose ticket is still open in pad-triage's database, labels them
+with the ticket's title, and starts a picked one with ``PAD_TICKET=PAD-n``
+exactly as pad-triage's "Launch app" button does (the app's rig slot claim
+keys on it).
+
 The chooser is a small pywebview window run in a child process
 (:func:`_ask`); without pywebview it is skipped and this checkout starts.
 
@@ -150,27 +159,122 @@ def _recency_key(entry):
     return (-touched_at(entry[0]),) + _sort_key(entry)
 
 
+#: pad-triage's folder, when it is not this checkout's sibling.
+ENV_TRIAGE_DIR = "PAD_TRIAGE_DIR"
+
+#: pad-triage ticket statuses that mean the ticket is over; its worktree
+#: may linger a while, but it is not a tree anyone is testing.
+_CLOSED_STATUSES = frozenset(("CLOSED", "REJECTED", "SPAM"))
+
+#: path (normcased) -> ("PAD-n", title or None, status or None) for each
+#: ticket tree discovery kept, so the label and the launch can name it.
+_TICKETS = {}
+
+_TICKET_BRANCH = re.compile(r"ticket/PAD-(\d+)")
+
+
+def triage_dir(root):
+    """pad-triage's folder: $PAD_TRIAGE_DIR, else root's sibling
+    ``pad-triage``.  None when there is none (every installed copy)."""
+    cand = os.environ.get(ENV_TRIAGE_DIR) or os.path.join(
+        os.path.dirname(os.path.normpath(root)), "pad-triage")
+    if os.path.isdir(os.path.join(cand, "work", "repo")):
+        return cand
+    return None
+
+
+def open_tickets(triage):
+    """{ticket id: (title, status)} for pad-triage's tickets still open, or
+    None when its database cannot be read (then every ticket tree shows).
+    Read-only: the database belongs to the running pad-triage app."""
+    db = os.path.join(triage, "work", "padtriage.db")
+    if not os.path.isfile(db):
+        return None
+    try:
+        import sqlite3
+        from urllib.request import pathname2url
+        con = sqlite3.connect("file:%s?mode=ro" % pathname2url(db),
+                              uri=True, timeout=2)
+        try:
+            rows = con.execute(
+                "SELECT id, title, subject, status FROM tickets").fetchall()
+        finally:
+            con.close()
+    except Exception:                                   # noqa: BLE001
+        return None
+    return {int(tid): ((title or subject or None), status)
+            for tid, title, subject, status in rows
+            if status not in _CLOSED_STATUSES}
+
+
+def discover_ticket_checkouts(root):
+    """pad-triage's ticket trees for tickets still open: [(path, branch)].
+
+    One `git worktree list` in pad-triage's clone and one database read,
+    never a git call per tree here (the recency sort makes those later,
+    for the open trees only)."""
+    triage = triage_dir(root)
+    if not triage:
+        return []
+    out = _git(["worktree", "list", "--porcelain"],
+               cwd=os.path.join(triage, "work", "repo"))
+    if not out:
+        return []
+    tickets = open_tickets(triage)
+    found = []
+    for path, branch in parse_worktree_list(out):
+        m = _TICKET_BRANCH.fullmatch(branch or "")
+        if not m:
+            continue                    # its main clone, the QA tree, ...
+        tid = int(m.group(1))
+        if tickets is not None and tid not in tickets:
+            continue                    # closed, or not pad-triage's
+        p = os.path.normpath(path)
+        if not os.path.isfile(
+                os.path.join(p, "pinball_decryptor", "__main__.py")):
+            continue
+        title, status = (tickets or {}).get(tid, (None, None))
+        _TICKETS[os.path.normcase(p)] = ("PAD-%d" % tid, title, status)
+        found.append((p, branch))
+    return found
+
+
+def ticket_of(path):
+    """("PAD-n", title, status) when *path* is a pad-triage ticket tree
+    discovery kept, else None."""
+    return _TICKETS.get(os.path.normcase(os.path.normpath(path)))
+
+
 def discover_other_checkouts(root):
-    """Worktrees of root's repo that are runnable copies of the app.
+    """Runnable copies of the app other than root: worktrees of root's repo
+    and pad-triage's open ticket trees, most recently touched first.
 
     Excludes root itself, session-internal worktrees under a `.claude`
     directory, and any worktree missing the package entry point.
     """
-    out = _git(["worktree", "list", "--porcelain"], cwd=root)
-    if not out:
-        return []
     root_key = os.path.normcase(os.path.normpath(root))
     found = []
-    for path, branch in parse_worktree_list(out):
+    seen = {root_key}
+    out = _git(["worktree", "list", "--porcelain"], cwd=root)
+    for path, branch in parse_worktree_list(out or ""):
         p = os.path.normpath(path)
-        if os.path.normcase(p) == root_key:
+        if os.path.normcase(p) in seen:
             continue
         if (os.sep + ".claude" + os.sep) in p:
             continue
         if not os.path.isfile(
                 os.path.join(p, "pinball_decryptor", "__main__.py")):
             continue
+        seen.add(os.path.normcase(p))
         found.append((p, branch))
+    try:
+        tickets = discover_ticket_checkouts(root)
+    except Exception:                                   # noqa: BLE001
+        tickets = []        # the chooser must never brick a launch
+    for p, branch in tickets:
+        if os.path.normcase(p) not in seen:
+            seen.add(os.path.normcase(p))
+            found.append((p, branch))
     return sorted(found, key=_recency_key)
 
 
@@ -196,7 +300,19 @@ def _shorten(text, limit=64):
 
 
 def _describe(path, branch):
-    """One chooser row: branch, item title if findable, dirty marker."""
+    """One chooser row: branch, item title if findable, dirty marker.
+    A pad-triage ticket tree reads ``PAD-n — <ticket title> (status)``."""
+    ticket = ticket_of(path)
+    if ticket:
+        code, title, status = ticket
+        label = code
+        if title:
+            label += "  —  " + _shorten(title)
+        if status:
+            label += "  (%s)" % status.replace("_", " ").lower()
+        if _status(path).strip():
+            label += "   ● uncommitted"
+        return label
     label = branch or os.path.basename(path)
     title = None
     try:
@@ -265,13 +381,20 @@ def _launch(path):
     """Start the chosen checkout's app with this same interpreter."""
     env = dict(os.environ)
     env[ENV_PICKED] = "1"
+    ticket = ticket_of(path)
+    if ticket:
+        # what pad-triage's Launch app sets: the app claims a rig of its
+        # own for the ticket (core/rigslot.py), and a session's CLAUDECODE
+        # would hide and mute every emulator run (PAD-309)
+        env["PAD_TICKET"] = ticket[0]
+        env.pop("CLAUDECODE", None)
     subprocess.Popen([sys.executable, "-m", "pinball_decryptor"],
                      cwd=path, env=env)
 
 
 #: The chooser window's title and question.
 _CHOOSER_TITLE = "Pinball Asset Decryptor — dev"
-_CHOOSER_QUESTION = "Item worktrees exist. Run the app from which checkout?"
+_CHOOSER_QUESTION = "Run the app from which tree?"
 
 
 def _has_webview(python):

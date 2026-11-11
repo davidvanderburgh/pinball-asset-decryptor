@@ -520,6 +520,21 @@ Spike 2's playfield window, on a Spike 3 run, from the card's own data:
   lit live by the attract show; a held SHOOTER LANE on the picture closed and
   opened the game's switch.
 
+## Guided Setup at every boot: the factory config (2026-11-11)
+
+The game reopens Guided Setup at every boot with "This machine has an
+invalid Factory Config. Contact your distributor." Its settings DO persist
+(data.up/nv). The factory config is the 256-byte EEPROM the game reads at
+I2C 0x57 at boot (s3dev logs each address's first read; it never writes
+0x50-0x53 or 0x57). Spike 2 sidesteps the same screen by seeding a
+checksummed identity record (hwshim.c nv_ident_seed); Spike 3's factory
+config is not checksummed but protected with a PER-MACHINE factory key
+(AES-192-OFB + SHA-1/HMAC, /media/spi_factory_key-1_0_0.key - David's own
+research notes), so a valid one cannot be made without a machine's key.
+Window runs therefore ask the user for Save & Exit (watchguide); a
+"bring your own factory config" (a user's own 0x57 dump, never committed)
+is a follow-up ticket, untestable until someone has a real dump.
+
 ## What is left for Spike 2 parity
 
 1. Coins: the game credits ~3 of 4 quarters even when each is delivered.

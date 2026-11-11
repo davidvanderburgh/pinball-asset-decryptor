@@ -286,6 +286,12 @@ static int i2c_ioctl(int fd, unsigned long cmd, void *arg)
             struct i2c_msg_a64 *m = &d->msgs[i];
             struct chip *c = chip_at(m->addr);
             if (m->flags & 1) {                        /* I2C_M_RD */
+                static uint8_t said_rd[128];
+                if (!said_rd[m->addr & 127]) {         /* what the game reads, once each */
+                    said_rd[m->addr & 127] = 1;
+                    fprintf(stderr, "[s3dev] i2c 0x%02x: first read (%u bytes at 0x%02x)\n",
+                            m->addr, m->len, c ? c->ptr : 0);
+                }
                 for (j = 0; j < m->len; j++)
                     m->buf[j] = c ? c->reg[c->ptr++] : 0;
             } else if (c && m->len > 0) {

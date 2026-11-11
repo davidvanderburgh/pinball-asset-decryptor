@@ -98,6 +98,39 @@ def test_encoder_protocol_leaves_unconfigured_and_end_stop_motors_alone():
     assert nodebus.build_response(0x88, b"\x52\x00\x00", 6) == bytes(6)
 
 
+def test_motor_position_publication_is_optional_and_data_driven():
+    import struct
+    class Hardware:
+        def __init__(self):
+            self.calls = []
+        def lamp_level(self, *args):
+            self.calls.append(args)
+    hw = Hardware()
+    outputs = nodebus.encoder_lamp_outputs("8,0:15,63;9,1:14,62")
+    publish = nodebus.motor_lamp_publisher(hw, outputs)
+    publish(8, 0, 71)
+    publish(9, 1, 300)
+    publish(9, 1, -20)
+    publish(10, 0, 99)
+    assert hw.calls == [(15, 63, 71), (14, 62, 255), (14, 62, 0)]
+    now = [0.0]
+    motor = nodebus.EncoderMotors(clock=lambda: now[0], position=publish)
+    motor.note(8, b"\x51\x00\x45\x00\x00\x43\x44\x00")
+    motor.note(8, b"\x55\x00" + struct.pack("<h", -120) + b"\0")
+    now[0] = .7
+    assert motor.status(8, 0) == struct.pack("<hH", -120, 0)  # protocol keeps signed counts
+    assert hw.calls[-1] == (15, 63, 0)                       # only the adapter clamps
+    nodebus.motor_lamp_publisher(None, outputs)(8, 0, 10)
+    assert nodebus.encoder_lamp_outputs("") == {}
+    for bad in ("8,0:16,0", "8,0:15,64", "8,256:15,63", "broken"):
+        try:
+            nodebus.encoder_lamp_outputs(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid encoder wiring accepted: " + bad)
+
+
 def test_presence_reply_passes_all_gates():
     for node in (1, 8, 9, 10, 11, 12):
         addr = 0x80 | node

@@ -589,3 +589,21 @@ def test_padvpx_knows_a_maps_platform():
     assert pv.platform_of("got_le") == "spike1"
     assert pv.platform_of("rush_le") == "spike2"
     assert pv.maps()["got_le"]["platform"] == "spike1" and pv.maps()["got_le"]["listed"] is True
+
+
+def test_spike1_launch_passes_only_the_selected_maps_encoder_wiring(tmp_path, monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    maps = tmp_path / "maps"
+    maps.mkdir()
+    (maps / "ghostbusters_le_replica.vpxmap.json").write_text(json.dumps({
+        "encoder_lamps": {"8,0": [15, 63]}}), encoding="utf-8")
+    monkeypatch.setattr(pl, "USER_MAPS", str(maps))
+    monkeypatch.setattr(pl, "win_python", lambda: "")
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, d: p)
+    for title, expected in (("ghostbusters_le_replica", ["S1_ENCODER_LAMPS=8,0:15,63"]), ("got_le", [])):
+        launch = pl.Spike1Launch(title, "card.iso", dist="TestRuntime")
+        launch.work = "/test/spike1"
+        env, _ = launch.env()
+        assert [s for s in env if s.startswith("S1_ENCODER_LAMPS=")] == expected
+    with pytest.raises(ValueError, match="encoder_lamps"):
+        pl.encoder_lamp_env({"8,0": [15, 64]})

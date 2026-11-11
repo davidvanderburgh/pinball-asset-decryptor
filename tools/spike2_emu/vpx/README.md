@@ -61,6 +61,16 @@ instead of an on/off value or a packed RGB insert colour. The number
 must be below 1000 (1000 and up already name every LED directly). Normal
 lamp groups and their colour handling are unchanged.
 
+A Spike 1 map can export an encoder count to an otherwise unused mono state
+channel with `encoder_lamps`, for example `"8,0": [15, 63]` for node 8's
+motor 0. The launcher forwards only that map's wiring as `S1_ENCODER_LAMPS`
+(`node,motor:node,LED;...`). The responder publishes the current count there
+when the game reads the motor status; a `raw_lamp_rewrite` alias can feed the
+table's existing mechanism animation. Choose an unused channel: this is an
+adapter value, not a physical lamp or an input injected into the game. The
+mono value clamps to 0..255, while the motor's protocol position remains a
+signed 16-bit count. With no wiring configured, no output channel is changed.
+
 ## The kit: `padvpx`
 
 Nothing here needs the app running. `padvpx.py` is the whole kit, run with

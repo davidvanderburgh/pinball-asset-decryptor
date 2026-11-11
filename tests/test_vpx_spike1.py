@@ -468,6 +468,110 @@ def test_spike1_viewer_stop_reaps_only_its_owned_child(monkeypatch):
     assert viewer.terminate.call_count == 1
 
 
+@pytest.fixture
+def variant_maps(tmp_path, monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    pl = pytest.importorskip("padlaunch")
+    pv = pytest.importorskip("padvpx")
+    maps = tmp_path / "maps"
+    maps.mkdir()
+    for title, suffix, word, name in (("ghostbusters_le", ".shadow.json", "jp_ghostbusters", "Slimer"),
+                                       ("ghostbusters_le_replica", ".vpxmap.json", "spagb_100", "Replica")):
+        m = {"title": title, "game": "ghostbusters_le", "platform": "spike1", "detect": [word],
+             "output": name + " (PAD).vpx", "table": {"name": name, "by": "Test author"}}
+        (maps / (title + suffix)).write_text(json.dumps(m), encoding="utf-8")
+    for module in (pc, pl, pv):
+        monkeypatch.setattr(module, "HERE", str(maps))
+    for module in (pc, pl):
+        monkeypatch.setattr(module, "USER_MAPS", str(tmp_path / "user-maps"))
+    monkeypatch.delenv("PAD_VPX_CARD", raising=False)
+    monkeypatch.delenv("PAD_VPX_LIBRARY", raising=False)
+    return pc, pl, pv
+
+
+def test_two_table_variants_keep_distinct_maps_and_tab_rows(variant_maps, tmp_path, monkeypatch):
+    pc, pl, pv = variant_maps
+    setup = pytest.importorskip("vpxsetup")
+    card = tmp_path / "GHOSTBUSTERS_LE-1_17.iso"
+    card.write_bytes(b"test fixture")
+    monkeypatch.setattr(pl, "kit_load", lambda: {"library": str(tmp_path)})
+    maps = pv.maps()
+    assert set(maps) == {"ghostbusters_le", "ghostbusters_le_replica"}
+    assert all(i["game"] == "ghostbusters_le" for i in maps.values())
+    rows = setup.known_tables(str(tmp_path))
+    assert {r["name"] for r in rows} == {"Slimer", "Replica"}
+    assert all(r["card"] == str(card) for r in rows)
+    b = pc.Bridge()
+    b.set_game("ghostbusters_le_replica")
+    assert b.title == "ghostbusters_le_replica" and b.native_title == "ghostbusters_le"
+    assert b.map.path.endswith("ghostbusters_le_replica.vpxmap.json")
+
+
+def test_variant_card_override_wins_then_falls_back_to_native_game(variant_maps, tmp_path, monkeypatch):
+    _, pl, _ = variant_maps
+    native, variant = tmp_path / "native.iso", tmp_path / "variant.iso"
+    native.write_bytes(b"native fixture")
+    variant.write_bytes(b"variant fixture")
+    cards = {"ghostbusters_le": str(native), "ghostbusters_le_replica": str(variant)}
+    monkeypatch.setattr(pl, "kit_load", lambda: {"cards": cards})
+    assert pl.card_for("ghostbusters_le_replica", "spike1") == str(variant)
+    variant.unlink()
+    assert pl.card_for("ghostbusters_le_replica", "spike1") == str(native)
+    launch = pl.Spike1Launch("ghostbusters_le_replica", str(native), dist="TestRuntime")
+    assert launch.title == "ghostbusters_le"
+
+
+def test_variant_attaches_to_the_native_games_board_record(variant_maps, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    pc, _, _ = variant_maps
+    b = pc.Bridge()
+    b.set_game("ghostbusters_le_replica")
+    names = []
+    record = {"game": "GHOSTBUSTERS_LE"}
+    def board(title):
+        names.append(("board", title))
+        return record
+    def rig(title, record=None):
+        names.append(("rig", title))
+        return SimpleNamespace(led_path=lambda: "fixture", how="test", dump="test")
+    monkeypatch.setitem(pc.SLOT_BRIDGES, "spike1", SimpleNamespace(board_record=board, Rig=rig, is_up=lambda d: False))
+    monkeypatch.setattr(pc, "read_block", lambda *a: None)
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    b.rig, b.launch = None, Mock()
+    b.launch.alive.return_value = True
+    b.start_t = pc.time.monotonic()
+    b._poll_starting()
+    assert names == [("board", "ghostbusters_le"), ("rig", "ghostbusters_le")]
+    assert b.title == "ghostbusters_le_replica"
+
+
+def test_variant_author_checklist_reads_the_native_game(variant_maps, monkeypatch):
+    _, _, _ = variant_maps
+    va = pytest.importorskip("vpxauthor")
+    monkeypatch.setattr(va, "find_tables", lambda title, tables_dir: {})
+    looked = []
+    def sources(title):
+        looked.append(title)
+        return {"elf": "fixture", "switchmap": "switches"}
+    monkeypatch.setattr(va, "spike1_sources", sources)
+    monkeypatch.setattr(va, "read_machine_spike1", lambda title, *a: {"title": title})
+    assert va.machine_for("ghostbusters_le_replica") == {"title": "ghostbusters_le"}
+    assert looked == ["ghostbusters_le"]
+
+
+def test_variant_cli_stop_looks_up_the_native_game_and_keeps_ownership_guard(variant_maps, monkeypatch):
+    _, _, pv = variant_maps
+    s1 = pytest.importorskip("s1bridge")
+    looked = []
+    def board(title):
+        looked.append(title)
+        return {"game": title, "label": "another owner"}
+    monkeypatch.setattr(s1, "board_record", board)
+    assert pv.stop("ghostbusters_le_replica") == 1
+    assert looked == ["ghostbusters_le"]
+
+
 def test_padvpx_knows_a_maps_platform():
     pv = pytest.importorskip("padvpx")
     assert pv.platform_of("got_le") == "spike1"

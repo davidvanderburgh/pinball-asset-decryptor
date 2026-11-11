@@ -53,6 +53,13 @@ range (`solenoids` in the map; the flippers keep core.vbs's own Consts
 below 1000 goes through the map (`switch_rewrite`, `lamps`), so a table can
 run on its original numbering while its map is being built.
 
+For a Spike 1 ROM table which reads a mono channel as a mechanical position
+or raw brightness, `raw_lamp_rewrite` maps its legacy lamp number to
+`[node, index]`, for example `"281": [15, 63]`. `Lamp(281)` and
+`ChangedLamps` then retain the channel's 0..255 value, including zero,
+instead of an on/off value or a packed RGB insert colour. Normal lamp
+groups and their colour handling are unchanged.
+
 ## The kit: `padvpx`
 
 Nothing here needs the app running. `padvpx.py` is the whole kit, run with

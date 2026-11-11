@@ -426,6 +426,7 @@ class VpxMap:
         self.switch_rewrite = {}            # old table number -> Spike 2 id
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
+        self.raw_lamp_rewrite = {}          # legacy number -> mono PWM slot (Spike 1)
         self.rgb_groups = set()             # numbers whose LEDs are an insert's R, G, B
         self.rgb_order = {}                 # number -> "BGR" etc. when not listed R, G, B (PAD-1097)
         self.fakes = {}                     # name -> dict (switch_fakes)
@@ -464,6 +465,8 @@ class VpxMap:
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
         self.sol_max = int(m.get("solenoid_max", 68))
+        self.raw_lamp_rewrite = {int(n): tuple(v) for n, v in m.get("raw_lamp_rewrite", {}).items()
+                                 if n != "_"}
         for k, v in m.get("solenoids", {}).items():
             if k != "_":
                 self.solenoids[int(k)] = tuple(v["coil"])
@@ -2418,6 +2421,10 @@ class Bridge:
         now = time.monotonic()
         with self.lock:
             self.mrg = switches
+            # Some ROM tables read Lamp(n) as a mechanical position or raw
+            # brightness, rather than the normal 0/1 or RGB insert value.
+            for n, (node, idx) in self.map.raw_lamp_rewrite.items():
+                self._lamp_set(n, rm.lamp_level(lamps, node, idx))
             for n, leds in self.map.lamp_groups.items():
                 levels = [rm.lamp_level(lamps, nd, ix) for nd, ix in leds]
                 if max(levels) < LAMP_ON:

@@ -331,7 +331,10 @@ def test_spike1_starts_only_the_configured_owned_dmd_viewer(monkeypatch, command
     monkeypatch.setattr(pl, "BOARD", "test-board")
     monkeypatch.setattr(pl, "kit_load", lambda: {"spike1_dmd_viewers": {"ghostbusters_le": command}})
     monkeypatch.setattr(pl.os.path, "isfile", lambda p: True)
+    said = []
+    monkeypatch.setattr(pl, "log", said.append)
     spawn = Mock()
+    spawn.return_value.pid = 4242
     monkeypatch.setattr(pl.subprocess, "Popen", spawn)
     launch = pl.Spike1Launch.__new__(pl.Spike1Launch)
     launch.title, launch.dmd_viewer = "ghostbusters_le", None
@@ -342,6 +345,7 @@ def test_spike1_starts_only_the_configured_owned_dmd_viewer(monkeypatch, command
     assert spawn.call_args.kwargs["stdout"] is output
     assert not spawn.call_args.kwargs.get("shell")
     assert launch.dmd_viewer is spawn.return_value
+    assert len(said) == 1 and "pid 4242" in said[0] and "ghostbusters_le" in said[0]
 
 
 @pytest.mark.parametrize("command", [None, [], [1], "missing.exe"])
@@ -351,13 +355,19 @@ def test_spike1_missing_or_invalid_viewer_does_not_stop_the_game(monkeypatch, co
     monkeypatch.setattr(pl.sys, "platform", "win32")
     monkeypatch.setattr(pl, "kit_load", lambda: {"spike1_dmd_viewers": {"ghostbusters_le": command}})
     monkeypatch.setattr(pl.os.path, "isfile", lambda p: False)
-    monkeypatch.setattr(pl, "log", lambda s: None)
+    said = []
+    monkeypatch.setattr(pl, "log", said.append)
     spawn = Mock()
     monkeypatch.setattr(pl.subprocess, "Popen", spawn)
     launch = pl.Spike1Launch.__new__(pl.Spike1Launch)
     launch.title, launch.dmd_viewer = "ghostbusters_le", None
     launch._start_dmd_viewer(None)
     spawn.assert_not_called()
+    assert launch.dmd_viewer is None
+    if command:                     # a configured but unusable viewer says which and why
+        assert len(said) == 1 and "ghostbusters_le" in said[0] and repr(command) in said[0]
+    else:                           # an unconfigured one is silent
+        assert said == []
 
 
 def test_spike1_viewer_stop_reaps_only_its_owned_child(monkeypatch):

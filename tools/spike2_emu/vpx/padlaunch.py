@@ -809,7 +809,8 @@ class Spike1Launch:
         argv = [viewer] if isinstance(viewer, str) else viewer
         if (not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv)
                 or not os.path.isfile(argv[0])):
-            log("Spike 1 DMD viewer not started: configure an executable path or argument list")
+            log("Spike 1 DMD viewer for %s not started: %r is not an existing executable path "
+                "or an argument list starting with one" % (self.title, viewer))
             return
         try:
             self.dmd_viewer = subprocess.Popen(
@@ -817,7 +818,10 @@ class Spike1Launch:
                 stdin=subprocess.DEVNULL, stdout=output, stderr=output,
                 creationflags=_CREATE_NO_WINDOW)
         except OSError as exc:
-            log("Spike 1 DMD viewer failed: %s" % exc)
+            log("Spike 1 DMD viewer for %s failed: %s" % (self.title, exc))
+            return
+        log("started the Spike 1 DMD viewer for %s (pid %d): %s"
+            % (self.title, self.dmd_viewer.pid, " ".join(argv)))
 
     def _stop_dmd_viewer(self):
         viewer, self.dmd_viewer = self.dmd_viewer, None

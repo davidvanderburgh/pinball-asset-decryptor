@@ -5,8 +5,8 @@
 Serves THIS checkout (run main's copy for the before shot) on a scratch
 settings.json and a scratch home whose kit file points at an empty tables
 folder, so David's own kit file and tables are never read or written. Writes
-<before_|after_>vpx_tables.png: the Tables card scrolled to the Ghostbusters
-rows. Needs Playwright and the installed Edge.
+<before_|after_>vpx_tables.png: the Tables card where the original-layout
+Ghostbusters LE row sorts (beside Godzilla). Needs Playwright and the installed Edge.
 """
 import json
 import os
@@ -66,12 +66,14 @@ def main():
                 if "ghost" in json.dumps(t).lower():
                     print("  row:", t.get("name"), "|", t.get("by"), "|", t.get("url"), flush=True)
             time.sleep(1.5)
-            row = page.locator(".vpx-tables").get_by_text("Ghostbusters", exact=False).last
+            cards = page.locator(".vpx-tables")
+            row = cards.get_by_text("Ghostbusters LE 1.2", exact=False)
+            row = row.first if row.count() else cards.get_by_text("Godzilla", exact=False).first
             row.scroll_into_view_if_needed()
             time.sleep(0.5)
             box = row.bounding_box()
             card = page.locator(".vpx-tables").bounding_box()
-            clip = {"x": card["x"], "y": max(card["y"], box["y"] - 260), "width": card["width"], "height": 520}
+            clip = {"x": card["x"], "y": max(card["y"], box["y"] - 200), "width": card["width"], "height": 420}
             page.screenshot(path=os.path.join(out_dir, pre + "vpx_tables.png"), clip=clip,
                             full_page=True)
             print("page errors:", errors, flush=True)

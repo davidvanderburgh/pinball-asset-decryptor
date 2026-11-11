@@ -477,16 +477,55 @@ it), and runs `s3run.sh --window` on the claimed rig slot; Stop is
 PAD-367 refusal stands, saying Spike 3 is not set up on this PC. s3run finds
 the amp bus (i2c-stub) by name - unset, the game aborted at xifo.cpp:72.
 
+## Stage 10 - Spike 3 for every user (2026-11-10)
+
+David's decision: the OTP key is never committed, but a user may bring their
+own, so the emulator works for everyone who does. What that took:
+
+- **No custom kernel, no patched qemu.** s3dev.so (an LD_PRELOAD in the game)
+  answers /dev/spidev4.0 and /dev/i2c-10 inside the game - the SPI chain from
+  spi.in, the amp bus as the same generic register store i2c-stub is - and
+  the game runs under the distro's own qemu-aarch64-static (binfmt, F flag).
+  The `kernel=` line in .wslconfig is no longer needed.
+- **No dm-crypt.** s3store.py decrypts in user space with the app's own
+  LUKS/ext4 reader (spike3.py, luks_otp.py, `cryptography`) when the kernel
+  has no dm-crypt: bit-identical rootfs, pokemon_le in 278 s.
+- **The user's own key.** The Extract tab's Spike 3 unlock saves padkeys.json;
+  the Emulate tab finds it (spike3_keyfile) and hands its PATH to
+  s3launch.sh --keyfile. Used once per card, to build the store. No key: the
+  run says to unlock the card in the Extract tab.
+- **One door.** s3launch.sh --check / --setup (apt packages, binfmt), then the
+  store, then a one-time rig build (s3build.sh: downloads the cross compiler
+  and FFmpeg headers into /var/lib/pad-s3), then the run. The installers ship
+  tools/spike3_emu and luks_otp.py.
+- Proven from nothing: an empty rig home, no custom modules, the system qemu -
+  the launcher built the rig, Pokemon booted, Guided Setup was walked and a
+  ball was served and plunged.
+
+## Stage 11 - the virtual playfield (2026-11-10)
+
+Spike 2's playfield window, on a Spike 3 run, from the card's own data:
+
+- The device records carry their place exactly as the test menu draws them:
+  picture name at +0x18, x/y at +0x2c/+0x2e, w/h at +0x30 (s3nodes.records).
+  Every card ships the pictures: pokemon_playfield_le/pro, buck_le/pro_playfield
+  (Star Wars 2025), picnic_pf (Walking Dead), the ELG diagnostic drawing.
+  Fallout 0.81 places no playfield devices (its window shows the cabinet).
+- s3pf.py writes the window's tables at run start; the group map is exact
+  (group_node_exact.txt: a group is the board's place in the node directory).
+- s3leds.py fills padled.h's block from the node bus in s3bridge: lamp levels
+  through leddecode's swelf-generation grammar (Spike 3 speaks it: 3742 frames,
+  0 refused), coil fires from `40 IDX power`.
+- Proven on pokemon_le: 60 switches, 17 coils, 174 inserts on its drawing,
+  lit live by the attract show; a held SHOOTER LANE on the picture closed and
+  opened the game's switch.
+
 ## What is left for Spike 2 parity
 
-1. **Spike 3 on a user's PC** - David's call. The rig needs two kernel
-   modules built for one WSL kernel (cuse.ko for the SPI chain, i2c-stub.ko
-   for the amp bus) and a patched qemu-aarch64, and none of tools/spike3_emu
-   ships in the installers. The SPI module could be replaced by an in-guest
-   LD_PRELOAD; the amp bus could only be dropped by writing I2C emulation,
-   which is ruled out - so a user needs i2c-stub (or a matching kernel) either
-   way. Options: build and ship the modules for the WSL kernel PAD-Runtime
-   uses, or keep Spike 3 emulation to set-up machines (today's state).
-2. Coins: the game credits ~3 of 4 quarters even when each is delivered.
-3. The window's default key bindings fire one QR-scanner switch for a moment
+1. Coins: the game credits ~3 of 4 quarters even when each is delivered.
+2. The window's default key bindings fire one QR-scanner switch for a moment
    before the title's switch list loads (harmless, settles).
+3. The playfield's lamps are proven on pokemon_le; the other titles' tables
+   build (all six) but their lamp traffic is unwatched.
+4. RGB inserts draw as white in "Real LEDs" (the R/G/B channels of one insert
+   are separate lamps on Spike 3's boards; the colour grouping is Spike 2's).

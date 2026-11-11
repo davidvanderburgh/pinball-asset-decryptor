@@ -38,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MAXFD 4096
@@ -154,6 +155,42 @@ static int spi_live(uint8_t *buf, int max)
     }
 }
 
+/* PACE THE SPI CHAIN AS THE WIRE DOES (PAD-1090; Spike 2 learned it first:
+ * hwshim.c spi_pace_us). The game reads the cabinet inputs in a loop with no
+ * sleep of its own; on the machine each transfer takes its bits / clock, and
+ * the game COUNTS TRANSFERS to time a held button - a held cabinet switch
+ * auto-repeats in its menus by that count (padsw.h: on Spike 2's Main Menu
+ * 120 and 200 ms moved the cursor 0 rows, 300 ms 3). Answered instantly, the
+ * loop ran far faster than the wire, a 130 ms keypress counted as a long
+ * hold, and one press of a flipper ran the Main Menu's highlight for 2.5 s
+ * (David's recording) - while burning a core. So each message takes the time
+ * the wire would: sum of len * bits / speed_hz (+ delay_usecs).
+ * PAD_S3_SPI_US=<n> forces n us a message; PAD_S3_SPI_US=0 free-runs. */
+static void spi_pace(uint64_t ns)
+{
+    static long fixed = -2;
+    struct timespec ts;
+    if (fixed == -2) {
+        const char *p = getenv("PAD_S3_SPI_US");
+        fixed = (p && *p) ? atol(p) : -1;
+    }
+    if (fixed >= 0)
+        ns = (uint64_t)fixed * 1000;
+    {
+        static int said;
+        if (!said) {
+            said = 1;
+            fprintf(stderr, "[s3dev] SPI paced as the wire: %llu us a message%s\n",
+                    (unsigned long long)(ns / 1000), fixed >= 0 ? " (PAD_S3_SPI_US)" : "");
+        }
+    }
+    if (!ns)
+        return;
+    ts.tv_sec = (time_t)(ns / 1000000000ull);
+    ts.tv_nsec = (long)(ns % 1000000000ull);
+    nanosleep(&ts, NULL);
+}
+
 static int spi_ioctl(unsigned long cmd, void *arg)
 {
     unsigned nr = (cmd >> 0) & 0xff, type = (cmd >> 8) & 0xff;
@@ -169,13 +206,20 @@ static int spi_ioctl(unsigned long cmd, void *arg)
         unsigned n = size / sizeof(*t), i, j, total = 0;
         uint8_t live[64];
         int live_len = spi_live(live, sizeof(live));
+        uint64_t ns = 0;
         for (i = 0; i < n; i++) {
             uint8_t *rx = (uint8_t *)(uintptr_t)t[i].rx_buf;
+            uint32_t hz = t[i].speed_hz ? t[i].speed_hz : spi_speed;
+            unsigned bits = t[i].bits_per_word ? t[i].bits_per_word : (spi_bits ? spi_bits : 8);
             if (rx)
                 for (j = 0; j < t[i].len; j++)
                     rx[j] = j < (unsigned)live_len ? live[j] : 0xff;
             total += t[i].len;
+            if (hz)
+                ns += (uint64_t)t[i].len * bits * 1000000000ull / hz;
+            ns += (uint64_t)t[i].delay_usecs * 1000;
         }
+        spi_pace(ns);
         return (int)total;
     }
     switch (nr) {                                      /* the settings */

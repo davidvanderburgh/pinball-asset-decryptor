@@ -141,9 +141,11 @@ def test_status_probe_reports_frames_received():
 
 
 def test_playfield_switches_are_active_low():
-    """The game's Ball Trough Test shows a trough ball for wire bit 0: the
-    PLAYFIELD switches (by location word) answer closed as 0, while cabinet
-    buttons - even the flipper buttons on playfield node 8 - stay high."""
+    """The game's Ball Trough Test shows a trough ball for wire bit 0: a
+    board carrying PLAYFIELD switches (by location word) answers closed as 0
+    on EVERY input - the flipper buttons on node 8 included (PAD-1090: taken
+    active high, one flipper tap ran the service menu for ever) - while the
+    cabinet board (node 1: Start) stays high."""
     import s3nodes
     PF, CAB = 0x0A6A, 0x0A67
     devs5 = [("START BUTTON", 1, 11, "switch", CAB), ("TROUGH 1", 8, 37, "switch", PF),
@@ -156,12 +158,13 @@ def test_playfield_switches_are_active_low():
     assert br.nodes[1].low_mask == bytes(8)
     m8 = br.nodes[8].low_mask
     assert m8[37 // 8] & (1 << 5) and m8[28 // 8] & (1 << 4)
-    assert not m8[25 // 8] & (1 << 1)                         # flipper button high
-    assert m8[0] == 0xFF                                       # unnamed: majority (playfield)
+    assert m8[25 // 8] & (1 << 1)                             # flipper button LOW too
+    assert m8 == b"\xff" * 8                                   # the whole board
     r = br.nodes[1](bytes([0x11, 0x00, 0x00]), 11)
     assert r[:8] == bytes([0, 0x08, 0, 0, 0, 0, 0, 0])
     r = br.nodes[8](bytes([0x11, 0x00, 0x00]), 11)
-    assert r[4] & 0x20 == 0 and r[3] & 0x10 and not r[3] & 0x02
+    # TROUGH 1 closed reads 0; the open flipper button reads 1 (not held)
+    assert r[4] & 0x20 == 0 and r[3] & 0x10 and r[3] & 0x02
 
 
 def test_short_press_is_queued_until_scanned():

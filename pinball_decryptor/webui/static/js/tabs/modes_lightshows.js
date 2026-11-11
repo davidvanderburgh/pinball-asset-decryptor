@@ -298,7 +298,7 @@ function Preview({ pf, show, light, t, onPick, picking, centre, look, lens, mark
       : html`<rect class="pf-outline" x="3" y="3" width=${w - 6} height=${h - 6} rx="48" />`}
     ${ins.map((i, k) => {
       let c = st ? fxBlend(st, at.prev, i.x, i.y, k, at.t, S) : 0;
-      if (c && i.mono && look !== "rgb") c = monoColour(c, (lens || {})[i.name]);
+      if (c && i.mono && look !== "rgb") c = monoColour(c, (lens || {})[i.name] || i.own);
       return html`<circle key=${i.name + i.x} class=${cx("ls-ins", c && "lit")} cx=${i.x} cy=${i.y} r="6"
         style=${c ? { fill: css(c), color: css(c) } : null} ...${tip({ head: i.name, lines: [i.shots.length ? "Shot: " + i.shots.join(", ") : "Not a shot's light"] })} />`;
     })}
@@ -322,14 +322,17 @@ function InsertColours({ pf, lens, setColour, setMarked }) {
   const [open, setOpen] = useState(false);
   const names = [...new Set((pf.inserts || []).filter((i) => i.mono).map((i) => i.name))].sort();
   if (!names.length) return null;
-  const n = names.filter((x) => lens[x]).length;
+  // PAD-1144: the colour a lamp's NAME says ("TOP GI-BLU (x10)") until the user sets one
+  const own = {};
+  for (const i of pf.inserts || []) if (i.mono && i.own) own[i.name] = i.own;
+  const n = names.filter((x) => lens[x] || own[x]).length;
   return html`<div class="ls-lens">
     <button type="button" class="ls-lens-hd" aria-expanded=${open} ...${tip(TIP.lens)} onClick=${() => setOpen(!open)}>
       <span class=${cx("ls-caret", open && "open")}></span><span>Insert colors</span><span class="sp"></span>
       <span class="small muted">${n} of ${names.length} set</span></button>
     ${open ? html`<div class="ls-lens-list" onMouseLeave=${() => setMarked(null)}>
-      ${names.map((name) => html`<div key=${name} class=${cx("ls-lens-row", lens[name] && "set")} onMouseEnter=${() => setMarked(name)}>
-        <input type="color" value=${lens[name] || "#ffffff"} aria-label=${name + " color"}
+      ${names.map((name) => html`<div key=${name} class=${cx("ls-lens-row", (lens[name] || own[name]) && "set")} onMouseEnter=${() => setMarked(name)}>
+        <input type="color" value=${lens[name] || own[name] || "#ffffff"} aria-label=${name + " color"}
           onChange=${(e) => setColour(name, e.target.value)} />
         <span class="ellip">${name}</span>
         <button type="button" class="ls-lens-x" style=${{ visibility: lens[name] ? "" : "hidden" }} ...${tip(TIP.lensX)}

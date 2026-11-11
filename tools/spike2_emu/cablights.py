@@ -138,6 +138,32 @@ def split_channel(name, spaced=()):
     return m.group(1).rstrip(), m.group(2)[0].upper()
 
 
+#: PAD-1144: a one-colour lamp whose NAME says its colour - Star Wars 2025's
+#: "TOP GI-BLU (x10)", "R2D2-WHT", Walking Dead's "BICYCLE GIRL FLASH-RED",
+#: TMNT's "TOP GI-GRN(X5)". Only after a dash, so a "BIG RED" insert is not
+#: read as one; an "(xN)" count after it is allowed. The colours are a plain
+#: rendering of the word, not a measured LED.
+NAMED_COLOURS = {
+    "RED": (255, 40, 24), "GRN": (40, 220, 64), "GREEN": (40, 220, 64),
+    "BLU": (48, 110, 255), "BLUE": (48, 110, 255), "WHT": (255, 255, 255),
+    "WHITE": (255, 255, 255), "YEL": (255, 214, 0), "YLW": (255, 214, 0),
+    "YELLOW": (255, 214, 0), "AMB": (255, 176, 0), "AMBER": (255, 176, 0),
+    "ORG": (255, 120, 0), "ORANGE": (255, 120, 0), "PUR": (160, 64, 255),
+    "PURPLE": (160, 64, 255), "PNK": (255, 90, 180), "PINK": (255, 90, 180),
+    "CYN": (32, 224, 255), "CYAN": (32, 224, 255)}
+_NAMED = re.compile(r"-\s*(%s)\s*(?:\(\s*X\s*\d+\s*\))?\s*$"
+                    % "|".join(sorted(NAMED_COLOURS, key=len, reverse=True)), re.I)
+
+
+def named_colour(name):
+    """(r, g, b) a one-colour lamp's name gives it ("TOP GI-BLU (x10)" ->
+    blue), or None - the colour it glows in when the user set none (PAD-1144).
+    pinball_decryptor/plugins/stern/insert_colours.py keeps the same rule for
+    the Modes tab (tests/test_pad1144_named_colours.py holds them together)."""
+    m = _NAMED.search(name or "")
+    return NAMED_COLOURS[m.group(1).upper()] if m else None
+
+
 def spaced_stems(names):
     """The stems a table spells "STEM R" with two or more of R, G, B - an RGB
     light, where a lone "TARGET B" is not."""

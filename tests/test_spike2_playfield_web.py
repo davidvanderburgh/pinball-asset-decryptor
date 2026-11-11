@@ -203,7 +203,7 @@ def test_a_mode_s_colour_on_a_one_colour_insert_is_named_not_drawn(pf, monkeypat
     assert r == g == bl and r > 128                                                   # white, lifted; not red
     tip = view.describe("led", 0)
     assert "MASER   (one colour)" in tip and "value 128" in tip
-    assert "its colour not set (white): see INSERT COLOURS" in tip
+    assert "its colour not set (white) - the card does not say it: see INSERT COLOURS" in tip
     assert "a mode asks for #ff0000" in tip and "glows in its own colour" in tip
     with open(pf.LED_PATH, "wb") as f:
         f.write(_led_block(pf, {(8, 3): 128}))                                         # no mode holds it
@@ -223,6 +223,28 @@ def test_a_one_colour_insert_is_white_until_given_its_colour():
     assert playfield.fixture_color({"R": 255, "G": 0, "B": 0}, (0, 0, 255))[0] == (255, 0, 0)
 
 
+def test_a_lamp_named_for_its_colour_glows_in_it_until_the_user_sets_one(pf, monkeypatch):
+    """PAD-1144: Spike 3's Star Wars 2025 names one-colour lamps for their colour ("TOP GI-BLU (x10)"); Real LEDs
+    drew them white like a lamp the card says nothing about. It glows blue now, INSERT COLOURS shows blue as its
+    default, a colour the user picks still wins, and x goes back to blue, not white."""
+    ctl = _one_colour_field(pf, monkeypatch)
+    view = ctl.view
+    view.fixtures[2]["name"] = "TOP GI-BLU (x10)"
+    spec = ctl.state("main")["view"]
+    assert ["TOP GI-BLU (x10)", "", [2], "#306eff"] in spec["lens"]
+    assert ["MASER", "", [0], ""] in spec["lens"]                                     # no colour in its name
+    with open(pf.LED_PATH, "wb") as f:
+        f.write(_led_block(pf, {(8, 3): 255, (8, 4): 255}))
+    fx = view.tick(0.0)["fx"]
+    assert fx[2][:3] == [48, 110, 255]                                                # its name's blue
+    assert fx[0][:3] == [255, 255, 255]                                               # MASER: still white
+    assert "from its name" in view.describe("led", 2)
+    assert ctl.api_lens("TOP GI-BLU (x10)", "#ff2000") == "#ff2000"
+    assert view.tick(0.0)["fx"][2][:3] == [255, 32, 0]                                # the user's colour wins
+    assert ctl.api_lens("TOP GI-BLU (x10)", None) == ""
+    assert view.tick(0.0)["fx"][2][:3] == [48, 110, 255]                              # x: back to its name's
+
+
 def test_the_insert_colours_table_is_edited_from_the_page_and_kept_per_title(pf, monkeypatch):
     """PAD-668: the side panel's INSERT COLOURS lists the one-colour inserts by name (RGB ones are not in it);
     a colour picked there is drawn at once, kept in the state file under the title for the next run, and x puts it
@@ -230,7 +252,7 @@ def test_the_insert_colours_table_is_edited_from_the_page_and_kept_per_title(pf,
     ctl = _one_colour_field(pf, monkeypatch)
     view = ctl.view
     spec = ctl.state("main")["view"]
-    assert spec["lens"] == [["BRIDGE", "", [2]], ["MASER", "", [0]]]
+    assert spec["lens"] == [["BRIDGE", "", [2], ""], ["MASER", "", [0], ""]]
     with open(pf.LED_PATH, "wb") as f:
         f.write(_led_block(pf, {(8, 3): 255}))
     assert view.tick(0.0)["fx"][0][:3] == [255, 255, 255]
@@ -241,7 +263,7 @@ def test_the_insert_colours_table_is_edited_from_the_page_and_kept_per_title(pf,
     assert st["lens_colours"] == {"godzilla_le": {"MASER": "#ff2000"}}
     assert pf.lens_colours("godzilla_pro") == {}                                      # another title: its own
     monkeypatch.setattr(pf, "_LENS", None)                                           # the next run reads it back
-    assert pf.Playfield().state("main")["view"]["lens"][1] == ["MASER", "#ff2000", [0]]
+    assert pf.Playfield().state("main")["view"]["lens"][1] == ["MASER", "#ff2000", [0], ""]
     assert ctl.api_lens("MASER", None) == ""                                          # x: back to white
     assert view.tick(0.0)["fx"][0][:3] == [255, 255, 255]
     assert pf.load_state()["lens_colours"] == {"godzilla_le": {}}

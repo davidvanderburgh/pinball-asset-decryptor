@@ -89,7 +89,7 @@ def test_the_preview_shows_a_single_colour_insert_at_the_colour_s_brightest_part
 
 def test_the_preview_has_the_switch_and_the_table():
     src = open(JS, encoding="utf-8").read()
-    assert 'if (c && i.mono && look !== "rgb") c = monoColour(c, (lens || {})[i.name]);' in src
+    assert 'if (c && i.mono && look !== "rgb") c = monoColour(c, (lens || {})[i.name] || i.own);' in src
     assert 'call("modes.blocks_insert_look", k)' in src and 'call("modes.blocks_insert_colour", pf ? pf.game : "", name, colour)' in src
     assert '[["real", "Real LEDs"], ["rgb", "All RGB"]]' in src
     from pinball_decryptor.webui.tabs import modes

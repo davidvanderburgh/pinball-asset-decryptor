@@ -279,10 +279,18 @@ if [ "${PAD_S3_AUDIO:-0}" = 1 ]; then
     # the player is the desktop's user too (its sound server's), as the window
     [ ${#AS_USER[@]} -gt 0 ] && chown "${AS_USER[2]}" "$SD/audio"
     if [ "${PAD_S3_AUDIO_PLAYER:-1}" = 1 ]; then
+        # LOW LATENCY, so the sound tracks the picture (David: ~0.5 s behind).
+        # Spike 2's player pre-rolls 350 ms (padplay.py); Spike 3's source is
+        # s3alsa writing straight to the FIFO at 1x, so a smaller cushion
+        # holds. PAD_S3_AUDIO_LAG_MS (default 90) is the player pre-roll;
+        # raise it if a run crackles (an underrun), lower it for less lag.
+        LAG=${PAD_S3_AUDIO_LAG_MS:-90}
         # the player's TCP hop (WSL -> the Windows speaker, or a relay) gets
         # a port of this slot's own: Spike 2 rigs hold 45997+slot, so a
         # Spike 3 slot of the same number would take theirs
         PAD_AUDIO_PORT=${PAD_AUDIO_PORT:-$((46100 + SLOT))} \
+        PAD_AUDIO_PREBUFFER_MS=${PAD_AUDIO_PREBUFFER_MS:-$LAG} \
+        PAD_AUDIO_LATENCY_MS=${PAD_AUDIO_LATENCY_MS:-40} \
         "${AS_USER[@]}" setsid bash "$S/../spike2_emu/playaudio.sh" "$SD/audio/audio.fifo" 44100 2 \
             "$SD/audio/audio.fmt" > "$SD/playaudio.log" 2>&1 &
         AUDPID=$!

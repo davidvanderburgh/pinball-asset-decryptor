@@ -157,6 +157,14 @@ puts it back. The app's Visual Pinball tab says the same under each row's
 card and on its Card images row, with the cache's room and a Cache… to the
 Emulate tab's cache window.
 
+**A launcher that exits during startup.** A board record alone does not
+prove that the game came up. The bridge cleans the failed run it started
+and reports the failure. The kit can opt specific titles into one retry,
+for example `"startup_retry_titles": ["batman"]`; the default is no retry.
+The old run is stopped before the new one starts, and closing the table
+during either cleanup or restart stops recovery. This applies only before
+the table attaches to a live game; it does not restart a game being played.
+
 **Sharing a table with somebody else.** The kit never ships a table or a
 card. What the other person needs: the PAD installer (the emulator, its
 runtime distro, the bundled Python with pywin32, and this kit - all in it),

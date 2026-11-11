@@ -545,10 +545,12 @@ static int shooter_ball, in_play;
  * switch waits forever (MB would not serve a ball). */
 #define MECH_LEAVE_MS 60
 #define MECH_TRAVEL_MS 700
-struct mech { int coil, sw[2], pos, run, idle_ms; };
+struct mech { int coil, sw[2], pos, run, idle_ms, leave_ms, travel_ms; };
 static struct mech mechs[8];
 static int nmechs;
 static void sw_set(int n, int closed);
+static FILE *evf;                       /* $CGC_EVENTS */
+static unsigned long now_ms;            /* the board thread's clock */
 
 static void mech_tick(uint32_t sols)
 {
@@ -558,16 +560,58 @@ static void mech_tick(uint32_t sols)
         else if (m->idle_ms < 1000) m->idle_ms++;
         if (m->idle_ms > 30) continue;          /* stopped (PWM gaps < 30 ms) */
         m->run++;
-        if (m->run == MECH_LEAVE_MS) sw_set(m->sw[m->pos], 0);
-        if (m->run >= MECH_TRAVEL_MS) {
+        if (m->run == m->leave_ms) {
+            sw_set(m->sw[m->pos], 0);
+            if (evf) fprintf(evf, "%lu motor %d leaves %d\n", now_ms, m->coil, m->sw[m->pos]);
+        }
+        if (m->run >= m->travel_ms) {
             m->pos ^= 1;
             sw_set(m->sw[m->pos], 1);
             m->run = 0;
+            if (evf) fprintf(evf, "%lu motor %d reaches %d\n", now_ms, m->coil, m->sw[m->pos]);
+        }
+    }
+}
+/* A motor that runs a toy along a track past several position switches,
+ * a coil for each direction (MB's Dracula: DRAC. MTR. FORWD./BCKWD. over
+ * DRAC. POSITION 1..5).  The game drives it as PWM, so what moves it is the
+ * time its coil is ON: it leaves a position after TRACK_LEAVE_MS of that
+ * and reaches the next after TRACK_STEP_MS; at either end it stays.  The
+ * switch of the position it is at is closed, none between two.  A game
+ * that drives it and sees no position change gives up on it (MB kept a
+ * ball in the left eject while it drove Dracula, then ball-searched). */
+#define TRACK_LEAVE_MS 20
+#define TRACK_STEP_MS 150
+struct track { int fwd, back, sw[8], n, pos, run; };
+static struct track tracks[4];
+static int ntracks;
+
+static void track_tick(uint32_t sols)
+{
+    for (int i = 0; i < ntracks; i++) {
+        struct track *t = &tracks[i];
+        int f = t->fwd && (sols & (1u << (t->fwd - 1)));
+        int b = t->back && (sols & (1u << (t->back - 1)));
+        int dir = f && !b ? 1 : b && !f ? -1 : 0;
+        if (!dir) continue;
+        int next = t->pos + dir;
+        if (next < 0 || next >= t->n) { t->run = 0; continue; }   /* end stop */
+        if ((t->run > 0 && dir < 0) || (t->run < 0 && dir > 0)) t->run = 0;
+        t->run += dir;
+        int r = t->run < 0 ? -t->run : t->run;
+        if (r == TRACK_LEAVE_MS) {
+            sw_set(t->sw[t->pos], 0);
+            if (evf) fprintf(evf, "%lu track %d leaves %d\n", now_ms, t->fwd, t->sw[t->pos]);
+        }
+        if (r >= TRACK_STEP_MS) {
+            t->pos = next;
+            t->run = 0;
+            sw_set(t->sw[t->pos], 1);
+            if (evf) fprintf(evf, "%lu track %d reaches %d\n", now_ms, t->fwd, t->sw[t->pos]);
         }
     }
 }
 static pthread_mutex_t board_mu = PTHREAD_MUTEX_INITIALIZER;
-static unsigned long now_ms;            /* the board thread's clock */
 /* a served ball's way out: the kick empties trough position 1 at once, the
  * rest roll down after ROLL_MS, the ball reaches the shooter lane after
  * SHOOT_MS.  A game that sees no trough switch move re-kicks. */
@@ -625,20 +669,47 @@ static void parse_balls(void)
             launch_coil = atoi(v);
         } else if (!strcmp(kv, "exit")) {
             exit_sw = atoi(v);
+        } else if (!strcmp(kv, "tracks")) {
+            /* "21:22:78/77/76/75/74" - forward coil : backward coil : the
+             * position switches, home first */
+            for (char *t = v; t && *t && ntracks < 4; ) {
+                struct track *k = &tracks[ntracks];
+                char *end = strchr(t, ','), *c;
+                memset(k, 0, sizeof *k);
+                k->fwd = atoi(t);
+                c = strchr(t, ':');
+                if (c && (!end || c < end)) {
+                    k->back = atoi(c + 1);
+                    c = strchr(c + 1, ':');
+                }
+                while (c && (!end || c < end) && k->n < 8) {
+                    k->sw[k->n++] = atoi(c + 1);
+                    c = strchr(c + 1, '/');
+                }
+                if (k->n >= 2) ntracks++;
+                t = end ? end + 1 : NULL;
+            }
         } else if (!strcmp(kv, "closed")) {
             nrest_closed = int_list(v, rest_closed, 8);
         } else if (!strcmp(kv, "mechs")) {
-            /* "16:81:82,15:83:84" - motor coil : rest end : far end */
+            /* "16:81:82,15:83:84" - motor coil : rest end : far end, then
+             * optionally ":leave:travel" in ms (default 60 and 700) */
             for (char *t = v; t && *t && nmechs < 8; ) {
                 struct mech *m = &mechs[nmechs++];
-                m->coil = atoi(t);
+                int f[5] = { 0, 0, 0, MECH_LEAVE_MS, MECH_TRAVEL_MS };
+                char *c = t, *end = strchr(t, ',');
+                for (int k = 0; k < 5 && c && (!end || c < end); k++) {
+                    f[k] = atoi(c);
+                    c = strchr(c, ':');
+                    if (c) c++;
+                }
+                m->coil = f[0];
+                m->sw[0] = f[1];
+                m->sw[1] = f[2];
+                m->leave_ms = f[3] > 0 ? f[3] : MECH_LEAVE_MS;
+                m->travel_ms = f[4] > m->leave_ms ? f[4] : MECH_TRAVEL_MS;
                 m->idle_ms = 1000;              /* not running */
-                char *c = strchr(t, ':');
-                m->sw[0] = c ? atoi(c + 1) : 0;
-                c = c ? strchr(c + 1, ':') : NULL;
-                m->sw[1] = c ? atoi(c + 1) : 0;
-                t = strchr(t, ',');
-                if (t) t++;
+                t = end ? end + 1 : NULL;
             }
         } else if (!strcmp(kv, "holes")) {
             int flat[32], k = int_list(v, flat, 32);
@@ -655,8 +726,8 @@ static void parse_balls(void)
         }
     }
     trough_n = ntrough;
-    slog("balls: %d in the trough, eject coil %d, shooter %d, %d holes, %d motors",
-         ntrough, eject_coil, shooter_sw, nholes, nmechs);
+    slog("balls: %d in the trough, eject coil %d, shooter %d, %d holes, %d motors, %d tracks",
+         ntrough, eject_coil, shooter_sw, nholes, nmechs, ntracks);
 }
 
 /* The machine at rest, as far as the board models it.  board_mu held.
@@ -674,6 +745,10 @@ static void board_rest(void)
     for (int i = 0; i < nmechs; i++) {
         sw_set(mechs[i].sw[0], 1);
         sw_set(mechs[i].sw[1], 0);
+    }
+    for (int i = 0; i < ntracks; i++) {
+        tracks[i].pos = tracks[i].run = 0;
+        for (int k = 0; k < tracks[i].n; k++) sw_set(tracks[i].sw[k], k == 0);
     }
     trough_show();
     sw_set(shooter_sw, 0);
@@ -752,7 +827,9 @@ static void *board_thread(void *unused)
 {
     (void)unused;
     const char *ev = getenv("CGC_EVENTS");
-    FILE *evf = ev ? fopen(ev, "a") : NULL;
+    int trace = getenv("CGC_TRACE") && *getenv("CGC_TRACE") == '1';
+    unsigned long on_since[33] = { 0 };
+    evf = ev ? fopen(ev, "a") : NULL;
     uint32_t last = 0;
     unsigned long ms = 0, off_since[33] = { 0 };
     if (evf) setvbuf(evf, NULL, _IOLBF, 0);
@@ -807,9 +884,10 @@ static void *board_thread(void *unused)
         for (int s = 1; s <= 32; s++)
             if (sol_get(s)) sols |= 1u << (s - 1);
         uint32_t ch = sols ^ last;
-        if (nmechs && have_idle) {
+        if ((nmechs || ntracks) && have_idle) {
             pthread_mutex_lock(&board_mu);
             mech_tick(sols);
+            track_tick(sols);
             pthread_mutex_unlock(&board_mu);
         }
         if (!ch) continue;
@@ -822,7 +900,12 @@ static void *board_thread(void *unused)
                 if (evf) fprintf(evf, "%lu sol %d\n", ms, s);
                 on_coil(s);
             }
-            if (!on) off_since[s] = ms;
+            if (on) on_since[s] = ms;
+            else {
+                off_since[s] = ms;
+                /* CGC_TRACE=1: every edge off, with how long it was on */
+                if (trace && evf) fprintf(evf, "%lu sol %d off %lu\n", ms, s, ms - on_since[s]);
+            }
         }
         pthread_mutex_unlock(&board_mu);
         last = sols;

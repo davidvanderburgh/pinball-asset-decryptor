@@ -282,3 +282,61 @@ def test_sw_state_stacked_shooter(tmp_path, monkeypatch):
     monkeypatch.setenv("CGC_ROOT", str(tmp_path))
     monkeypatch.setenv("PAD_SLOT", "0")
     assert sw.state()["balls"]["shooter"] is True
+
+
+# Monster Bash (PAD-1174): its coil-name table runs 1, 2, 3, 5 ... (solenoid 4
+# unused, left out), so entry n from LEFT GATE on is coil n + 1 - the ROM's
+# own solenoid test shows "09 TROUGH EJECT".  Names as cgcroms reads them:
+MB_COILS = ["AUTO PLUNGER", "BRIDE POST", "MUMMY COFFIN", "LEFT GATE", "RIGHT GATE",
+            "KNOCKER", "RAMP LOCK POST", "TROUGH EJECT", "LEFT SLINGSHOT",
+            "RIGHT SLINGSHOT", "LEFT JET", "RIGHT JET", "BOTTOM JET", "LEFT EJECT",
+            "RIGHT POPPER", "FRANK. MOTOR", "UP/DN BANK MOTOR", "FRANK. RAMP POWER",
+            "FRANK. RAMP HOLD", "DRAC. MTR. FORWD.", "DRAC. MTR. BCKWD.",
+            "L. FLIP PROX.", "R. FLIP PROX.", "COIN METER"]
+MB_SWITCHES = {"13": "START BUTTON", "18": "SHOOTER LANE", "28": "LEFT EJECT",
+               "31": "TROUGH EJECT", "32": "TROUGH BALL 1", "33": "TROUGH BALL 2",
+               "34": "TROUGH BALL 3", "35": "TROUGH BALL 4", "36": "RIGHT POPPER",
+               "74": "DRAC. POSITION 5", "75": "DRAC. POSITION 4",
+               "76": "DRAC. POSITION 3", "77": "DRAC. POSITION 2",
+               "78": "DRAC. POSITION 1", "81": "UP/DN BANK UP", "82": "UP/DN BANK DOWN",
+               "83": "FRANK. TABLE DOWN", "84": "FRANK. TABLE UP"}
+
+
+def _mb_names():
+    return {"switches": dict(MB_SWITCHES), "flippers": {},
+            "coils": {str(i + 1): n for i, n in enumerate(MB_COILS)}}
+
+
+def test_mb_coils_skip_solenoid_4():
+    coils = cgctitles.rig_names("mb", _mb_names())["coils"]
+    assert coils["1"] == "AUTO PLUNGER"
+    assert coils["3"] == "MUMMY COFFIN"
+    assert "4" not in coils
+    assert coils["5"] == "LEFT GATE"
+    assert coils["9"] == "TROUGH EJECT"
+    assert coils["16"] == "RIGHT POPPER"
+    assert coils["17"] == "FRANK. MOTOR"
+    assert coils["25"] == "COIN METER"
+    # titles without a gap keep the table's numbers
+    names = {"coils": {"2": "TROUGH EJECT"}}
+    assert cgctitles.rig_names("mm", names) is names
+
+
+def test_mb_ball_model():
+    kv = dict(p.split("=") for p in cgctitles.balls("mb", _mb_names()).split(";"))
+    # the rig run (PAD-1174): serve on 9, launch on 1, the right popper an
+    # opto read empty, both kickouts on their own coils, Dracula's track
+    # (forward 21, backward 22) from position 1 (78) to 5 (74)
+    assert kv["eject"] == "9"
+    assert kv["launch"] == "1"
+    assert kv["optos"] == "31,32,33,34,35,36"
+    assert set(kv["holes"].split(",")) == {"36:16", "28:15"}
+    assert "closed" not in kv
+    assert kv["tracks"] == "21:22:78/77/76/75/74"
+    assert kv["mechs"] == "18:81:82,17:83:84"
+
+
+def test_ready_frames_only_where_the_rom_waits():
+    assert cgctitles.TITLES["mb"]["ready_frames"] == 1800
+    for key in ("mm", "afm", "cc"):
+        assert "ready_frames" not in cgctitles.TITLES[key]

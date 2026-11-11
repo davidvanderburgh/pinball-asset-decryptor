@@ -116,6 +116,20 @@ case "${1:-}" in
         else
             echo "s3launch: slot $SLOT was not running"
         fi
+        # and whatever a run left behind in that slot (a run killed from
+        # outside, or one from before a fix): the Emulate tab counts any of
+        # them as a run still up, and Start turned into Stop (PAD-1090)
+        SD=/var/tmp/pad-s3/slot$SLOT
+        left=0
+        for p in "playaudio.sh $SD/audio/" "padglhost $SD/padgl.ring" "s3bridge.py $SD( |\$)" \
+                 "s3vidhost.py $SD( |\$)" "s3prog.py $SD( |\$)" "s3press.py autoguide $SLOT( |\$)" \
+                 "s3keys.py $SLOT( |\$)"; do
+            pkill -TERM -f "$p" 2>/dev/null && left=$((left + 1))
+        done
+        sleep 0.5
+        for p in "playaudio.sh $SD/audio/" "padglhost $SD/padgl.ring"; do pkill -9 -f "$p" 2>/dev/null; done
+        [ "$left" -gt 0 ] && echo "s3launch: cleared $left leftover helper(s) in slot $SLOT"
+        rm -f "$SD/dump/padled"
         exit 0
         ;;
     ""|-*)

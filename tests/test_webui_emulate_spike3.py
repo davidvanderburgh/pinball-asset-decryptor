@@ -467,3 +467,30 @@ def test_a_spike3_run_paints_its_own_footer_not_the_spike2_poll(tmp_path, monkey
         w.run(lambda: setattr(svc, "_s3_foot", ("nodes", 70, "Locating node boards (6 of 10)")))
         w.run(lambda: svc._paint_footer({"running": "0"}))
         assert painted == [("nodes", 70, "Locating node boards (6 of 10)")]
+
+
+def test_stop_after_an_app_restart_uses_the_spike3_stop_on_our_slot(tmp_path, monkeypatch):
+    """David restarted the app with a Spike 3 run's leftovers up: the tab
+    showed a run, its Stop went to Spike 2's killgame.sh on slot 0
+    ("slot 0 is held's and in use") and nothing ended. The app no longer
+    knows the run's slot; the lock board does."""
+    from pinball_decryptor.core import rigslot
+    from tests.test_webui_emulate import _Recorder
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        rec = _Recorder(answers=_s3_rig(monkeypatch))
+        monkeypatch.setattr(svc, "_run", rec.run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        monkeypatch.setattr(svc, "_spike3_era", lambda: True)
+        monkeypatch.setattr(rigslot, "slot", lambda: 0)
+        monkeypatch.setattr(rigslot, "label", lambda: "PAD-1090")
+        monkeypatch.setattr(rigslot, "board", lambda: [
+            {"slot": 0, "holder": ""}, {"slot": 1, "holder": "PAD-1090"},
+            {"slot": 2, "holder": "PAD-1128"}])
+        assert svc._s3_slot is None
+        w.run(svc.stop)
+        _wait(w, lambda: any("--stop" in c for c in rec.calls))
+        stop = [c for c in rec.calls if "--stop" in c][0]
+        assert stop[-2:] == ["--stop", "1"]
+        assert not any("killgame.sh" in " ".join(c) for c in rec.calls)
+        _wait(w, lambda: not svc._stopping)

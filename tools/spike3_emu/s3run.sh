@@ -441,7 +441,11 @@ if [ -n "$BUSPIDS" ]; then
     echo "[s3run] node bus: spi $(grep -c xfer "$SD/spi.log" 2>/dev/null) transfers; bridge: $(grep -c "^# \[node\].*claims" "$SD/bridge.log" 2>/dev/null) node boards identified ($SD/bridge.log)"
 fi
 if [ -n "$AUDPID" ]; then
-    kill -TERM -"$AUDPID" 2>/dev/null; sleep 0.5; kill -9 -"$AUDPID" 2>/dev/null
+    # by name too: run as the desktop user (runuser ... setsid) the player is
+    # in a session of its own, which $AUDPID's group is not - it outlived the
+    # run and the Emulate tab took it for one still up (PAD-1090)
+    kill -TERM -"$AUDPID" 2>/dev/null; pkill -TERM -f "playaudio.sh $SD/audio/" 2>/dev/null
+    sleep 0.5; kill -9 -"$AUDPID" 2>/dev/null; pkill -9 -f "playaudio.sh $SD/audio/" 2>/dev/null
     grep -a "\[s3alsa\] playing\|closed:" "$SD/game.err" | tail -2 | sed 's/^/[s3run]   sound: /'
 fi
 if [ -n "$HOSTPID" ]; then

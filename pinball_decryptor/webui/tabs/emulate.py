@@ -3437,6 +3437,21 @@ class EmulateTab(EmulateLogMixin, TabService):
         def run():
             needs_restart = False
             s3 = self._s3_slot
+            if s3 is None and self._spike3_era() and rig.spike3_rig_present():
+                # a Spike 3 card after an app restart: this app no longer
+                # knows the run's slot, and the Spike 2 stop (killgame.sh on
+                # slot 0) cannot end it (David: "it looks like it's already
+                # running but it's not"). The Spike 3 stop of this app's rig
+                # slot, which also ends anything a run left behind there.
+                from ...core import rigslot as _rs
+                s3 = _rs.slot()
+                if not s3:
+                    try:            # the slot the lock board says is ours
+                        mine = [r["slot"] for r in _rs.board()[1:]
+                                if r.get("holder") and r["holder"] == _rs.label()]
+                    except Exception:                    # noqa: BLE001
+                        mine = []
+                    s3 = mine[0] if mine else 1
             try:
                 kill = (rig.spike3_stop_cmd(s3) if s3 is not None
                         else self._kill_cmd())

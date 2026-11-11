@@ -40,6 +40,64 @@ def poll_body(cmd):
     return bytes([cmd, 0x00])       # body = [cmd, checksum] (checksum unused here)
 
 
+def test_encoder_motor_homes_moves_signed_counts_and_preserves_other_inputs():
+    import struct
+    now = [0.0]
+    motors = nodebus.EncoderMotors(clock=lambda: now[0])
+    # Ghostbusters Slimer: node 8, motor 0, home input 5, encoders 3/4.
+    motors.note(8, bytes([0x51, 0, 0x45, 0, 0, 0x43, 0x44, 0]))
+    assert motors.status(8, 0) == struct.pack("<hH", 0, 0)
+    motors.note(8, bytes([0x53, 0, 40, 32, 232, 3, 0]))
+    assert motors.status(8, 0) == struct.pack("<hH", 0, 1)
+    now[0] = .7
+    assert motors.status(8, 0) == struct.pack("<hH", 0, 8)
+    switches = bytearray(nodebus.SW_IDLE)
+    switches[2] = 0xfe
+    assert motors.switches(8, switches) == b"\xdf\xff\xfe" + b"\xff" * 5
+    motors.note(8, bytes([0x55, 0]) + struct.pack("<h", -120) + b"\0")
+    now[0] = 1.0
+    pos, flags = struct.unpack("<hH", motors.status(8, 0))
+    assert -61 <= pos <= -59 and flags == 1
+    assert motors.switches(8, switches)[0] == 0xff
+    assert motors.switches(8, switches)[2] == 0xfe
+    now[0] = 1.4
+    assert motors.status(8, 0) == struct.pack("<hH", -120, 8)
+    reply = nodebus.build_response(0x88, b"\x52\x00\x00", 6, motor_status=motors.status(8, 0))
+    assert gates_pass(reply, 6) == (True, "ok")
+    assert reply[:4] == struct.pack("<hH", -120, 8)
+    assert motors.switches(9, switches) == bytes(switches)
+
+
+def test_repeated_encoder_commands_do_not_restart_a_move():
+    import struct
+    now = [0.0]
+    motors = nodebus.EncoderMotors(clock=lambda: now[0])
+    motors.note(8, b"\x51\x00\x45\x00\x00\x43\x44\x00")
+    move = b"\x55\x00" + struct.pack("<h", 60) + b"\0"
+    motors.note(8, move)
+    now[0] = .4
+    motors.note(8, move)
+    now[0] = .7
+    assert motors.status(8, 0) == struct.pack("<hH", 60, 0)
+    motors.note(8, move)
+    assert motors.status(8, 0) == struct.pack("<hH", 60, 0)
+    # A home command at the same target as a position move still homes it.
+    motors.note(8, b"\x55\x00\x00\x00\x00")
+    motors.note(8, b"\x53\x00\x00")
+    now[0] = 1.4
+    assert motors.status(8, 0) == struct.pack("<hH", 0, 8)
+
+
+def test_encoder_protocol_leaves_unconfigured_and_end_stop_motors_alone():
+    motors = nodebus.EncoderMotors()
+    motors.note(8, b"\x51\x00\x45\x46\x00\x00\x00\x00")  # no encoders
+    for body in (b"", b"\x51", b"\x51\x00\0", b"\x55\x00\x05\0"):
+        motors.note(8, body)
+    assert motors.status(8, 0) is None
+    assert motors.switches(8, nodebus.SW_IDLE) == nodebus.SW_IDLE
+    assert nodebus.build_response(0x88, b"\x52\x00\x00", 6) == bytes(6)
+
+
 def test_presence_reply_passes_all_gates():
     for node in (1, 8, 9, 10, 11, 12):
         addr = 0x80 | node

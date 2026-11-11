@@ -373,6 +373,10 @@ to patch the known tables, and never distribute the tables themselves.
   Pinball tab (Play group, after Emulate) with a code, on Windows, for a
   manufacturer the Spike 2 emulator runs; unlocking or removing a code shows
   or hides it at once.
+* PAD-1136 (David: "Make the Visual Pinball feature not a preview feature"):
+  `vpx` moved to `core/preview.RELEASED`, so the tab is in every copy on
+  Windows with no code, its tips show for everyone, and a code someone still
+  holds for it is listed as no longer needed.
 * The tab (`webui/tabs/vpx.py`, `static/js/tabs/vpx.js`) replaces the setup
   window: padwizard.py is gone, its pure parts are `vpxsetup.py`. WSL 2 and
   the runtime are the Emulate tab's job, so the tab only reports them.

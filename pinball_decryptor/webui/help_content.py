@@ -428,7 +428,8 @@ HELP_CONTENT = {
          "it belongs to or what plays it. It is kept in the comment column of "
          "the project's callouts.csv, follows the sound through renames and "
          "Auto-name, shows in a Comment column once a sound has one, is found "
-         "by the Search box, and goes out with Export CSV."),
+         "by the Search box, and goes out with Export CSV. Tick or untick "
+         "**Show comments** in the toolbar to show or hide that column."),
         ("Blip-free callouts (always on)",
          "Every replaced sound plays your audio all the way through, with no "
          "scrap of the original inside it. There is nothing to switch on.\n\n"

@@ -113,9 +113,77 @@ def test_switch_ids_are_the_names_tables_slots(s1, tmp_path, monkeypatch):
     (tmp_path / "s1switches.json").write_text(json.dumps(names), encoding="utf-8")
     rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
     rig.dump = str(tmp_path)
-    assert rig.switch_ids() == {(1, 11): 75, (8, 2): 514}
+    service = {(0, b): b for b in (8, 9, 10, 11)}
+    assert rig.switch_ids() == {(1, 11): 75, (8, 2): 514, **service}
     rig.dump = str(tmp_path / "nowhere")
-    assert rig.switch_ids() == {}
+    assert rig.switch_ids() == service
+
+
+@pytest.mark.parametrize("bit", [8, 9, 10, 11])
+def test_cpu_service_inputs_are_active_low_and_not_node_switches(s1, tmp_path, bit):
+    from types import SimpleNamespace
+    cpu = tmp_path / "cpu.input"
+    cpu.write_bytes(b"\xaa\xff\xfe")   # unrelated DIP / trough / door bits
+    rig = SimpleNamespace(cpu_switch_path=lambda: str(cpu), sw_path=lambda: str(tmp_path / "sw.input"))
+    pipe = s1.Spike1Pipe(rig)
+    assert pipe.set(bit, 1)
+    expected = bytearray(b"\xaa\xff\xfe")
+    expected[1] &= ~(1 << (bit - 8))
+    assert cpu.read_bytes() == expected and not (tmp_path / "sw.input").exists()
+    assert pipe.set(75, 1)  # a later playfield write must not leak the CPU bit
+    bits = (tmp_path / "sw.input").read_bytes()[s1.INPUT_HEADER.size:]
+    assert bits[75 >> 3] & (1 << (75 & 7)) and not bits[1]
+    assert pipe.set(bit, 0) and cpu.read_bytes() == b"\xaa\xff\xfe"
+    assert pipe.set(bit, 1)
+    pipe.close()
+    assert cpu.read_bytes() == b"\xaa\xff\xfe"
+    assert not any((tmp_path / "sw.input").read_bytes()[s1.INPUT_HEADER.size:])
+
+
+def test_cpu_service_write_replaces_the_file_whole(s1, tmp_path, monkeypatch):
+    """qemu pads a short read with zeros (= every active-low input pressed),
+    so the file is swapped in whole, never truncated and rewritten."""
+    from types import SimpleNamespace
+    cpu = tmp_path / "cpu.input"
+    cpu.write_bytes(b"\xff\xff\xfe")
+    replaced = []
+    real = s1.os.replace
+    monkeypatch.setattr(s1.os, "replace", lambda a, b: (replaced.append((a, b)), real(a, b)))
+    pipe = s1.Spike1Pipe(SimpleNamespace(cpu_switch_path=lambda: str(cpu)))
+    assert pipe.set(9, 1)
+    assert replaced == [(str(cpu) + ".tmp", str(cpu))]
+    assert cpu.read_bytes() == b"\xff\xfd\xfe" and not (tmp_path / "cpu.input.tmp").exists()
+
+
+def test_cpu_service_write_can_be_retried_after_resolution_failure(s1, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    attempts = []
+    cpu = tmp_path / "cpu.input"
+    def path():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise s1.subprocess.TimeoutExpired("readlink", 10)
+        return str(cpu)
+    monkeypatch.setattr(s1, "_log", lambda s: None)
+    pipe = s1.Spike1Pipe(SimpleNamespace(cpu_switch_path=path))
+    assert not pipe.set(11, 1)
+    assert pipe.set(11, 1) and len(attempts) == 2
+    assert cpu.read_bytes() == b"\xff\xf7\xfe"
+
+
+def test_cpu_input_path_resolves_the_wsl_symlink_once(s1, monkeypatch):
+    from types import SimpleNamespace
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.root, rig.distro = "/pad work/spike1", "TestRuntime"
+    calls = []
+    def run(cmd, **kw):
+        calls.append(cmd)
+        return SimpleNamespace(stdout="/pad work/cache/GB/rootfs\n", check_returncode=lambda: None)
+    monkeypatch.setattr(s1.sys, "platform", "win32")
+    monkeypatch.setattr(s1.subprocess, "run", run)
+    want = os.path.join(r"\\wsl.localhost\TestRuntime\pad work\cache\GB\rootfs", "data", "s1cpusw.input")
+    assert rig.cpu_switch_path() == rig.cpu_switch_path() == want
+    assert calls == [["wsl.exe", "-d", "TestRuntime", "-u", "root", "--", "readlink", "-f", "/pad work/spike1/rootfs"]]
 
 
 def test_pipe_rewrites_the_bitmap_and_lets_go_on_close(s1, tmp_path):
@@ -234,6 +302,57 @@ def test_spike1_poll_reports_lamps_coils_and_held_flippers(tmp_path):
     assert b.polls == 2 and b.poll_fail == 0
 
 
+def test_spike1_raw_lamp_aliases_keep_levels_and_report_zero(tmp_path):
+    pc = pytest.importorskip("padcontroller")
+    s1 = pytest.importorskip("s1bridge")
+    m = pytest.importorskip("pinball_decryptor.plugins.stern.spike1_emulate")
+    mapping = tmp_path / "raw.vpxmap.json"
+    mapping.write_text(json.dumps({"platform": "spike1", "raw_lamp_rewrite": {
+        "_": "legacy lamp number -> node and channel", "281": [15, 63], "94": [8, 11]}}), encoding="utf-8")
+    b = pc.Bridge()
+    b.map = pc.VpxMap()
+    b.map.load(str(mapping))
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    b.rig, b.sw_ids = rig, {}
+    st = m.HardwareState()
+    for seq, position, brightness in ((1, 71, 128), (2, 130, 255), (3, 0, 0)):
+        st.set_lamp(15, 63, position)
+        st.set_lamp(8, 11, brightness)
+        (tmp_path / "s1hw.state").write_bytes(m.StateBlock.pack(st, seq=seq))
+        b._poll_once_s1()
+        changes = dict(b.changed_lamps() or [])
+        assert changes[281] == position and changes[94] == brightness
+        assert b.lamp_state[281] == position
+    b._poll_once_s1()
+    assert not b.changed_lamps()    # an unchanged frame is not a new change
+
+
+def test_spike1_raw_lamp_alias_level_reaches_controller_lamp(tmp_path):
+    """Controller.Lamp(n), not only ChangedLamps, gives the table the raw
+    level (a table polling its mech position reads Lamp); other lamps stay
+    Boolean as VPinMAME's are."""
+    pc = pytest.importorskip("padcontroller")
+    s1 = pytest.importorskip("s1bridge")
+    m = pytest.importorskip("pinball_decryptor.plugins.stern.spike1_emulate")
+    mapping = tmp_path / "raw.vpxmap.json"
+    mapping.write_text(json.dumps({"platform": "spike1", "raw_lamp_rewrite": {"281": [15, 63]}}),
+                       encoding="utf-8")
+    b = pc.Bridge()
+    b.map = pc.VpxMap()
+    b.map.load(str(mapping))
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    b.rig, b.sw_ids = rig, {}
+    st = m.HardwareState()
+    st.set_lamp(15, 63, 71)
+    st.set_lamp(8, 11, 200)
+    (tmp_path / "s1hw.state").write_bytes(m.StateBlock.pack(st, seq=1))
+    b._poll_once_s1()
+    assert b.lamp(281) == 71 and type(b.lamp(281)) is int
+    assert b.lamp(pc.lamp_number(8, 11)) is True
+
+
 def test_launch_finds_a_spike1_card_in_the_sister_library(tmp_path, monkeypatch):
     pl = pytest.importorskip("padlaunch")
     lib2 = tmp_path / "spike2"
@@ -254,6 +373,20 @@ def test_launch_finds_a_spike1_card_in_the_sister_library(tmp_path, monkeypatch)
     assert isinstance(pl.launch_for("spike2", "rush_le", "c.raw"), pl.Launch)
 
 
+@pytest.mark.parametrize("python", [r"C:\PAD App\python\python.exe", ""])
+def test_spike1_launch_passes_the_native_audio_interpreter(monkeypatch, python):
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "win_python", lambda: python)
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, d: "mapped:" + p)
+    launch = pl.Spike1Launch("ghostbusters_le", "card.iso", dist="TestRuntime")
+    launch.work = "/work/spike1"
+    env, card = launch.env()
+    expected = ["PAD_WINPYTHON=mapped:" + python] if python else []
+    assert [s for s in env if s.startswith("PAD_WINPYTHON=")] == expected
+    assert "PAD_AUDIO=1" in env and "S1_WORK=/work/spike1" in env
+    assert card == "mapped:card.iso"
+
+
 def test_spike1_launch_refuses_another_titles_run(tmp_path, monkeypatch):
     pl = pytest.importorskip("padlaunch")
     s1 = pytest.importorskip("s1bridge")
@@ -272,8 +405,89 @@ def test_spike1_launch_refuses_another_titles_run(tmp_path, monkeypatch):
     assert launch.alive()                           # the board says the title's run is up
 
 
+@pytest.mark.parametrize("command", [r"C:\DMD Tools\viewer.exe", [r"C:\PAD App\python.exe", "viewer.py"]])
+def test_spike1_starts_only_the_configured_owned_dmd_viewer(monkeypatch, command):
+    from unittest.mock import Mock
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl.sys, "platform", "win32")
+    monkeypatch.setattr(pl, "BOARD", "test-board")
+    monkeypatch.setattr(pl, "kit_load", lambda: {"spike1_dmd_viewers": {"ghostbusters_le": command}})
+    monkeypatch.setattr(pl.os.path, "isfile", lambda p: True)
+    said = []
+    monkeypatch.setattr(pl, "log", said.append)
+    spawn = Mock()
+    spawn.return_value.pid = 4242
+    monkeypatch.setattr(pl.subprocess, "Popen", spawn)
+    launch = pl.Spike1Launch.__new__(pl.Spike1Launch)
+    launch.title, launch.dmd_viewer = "ghostbusters_le", None
+    output = object()
+    launch._start_dmd_viewer(output)
+    expected = [command] if isinstance(command, str) else command
+    assert spawn.call_args.args[0] == expected + [os.path.join("test-board", "spike1-0.run"), "ghostbusters_le"]
+    assert spawn.call_args.kwargs["stdout"] is output
+    assert not spawn.call_args.kwargs.get("shell")
+    assert launch.dmd_viewer is spawn.return_value
+    assert len(said) == 1 and "pid 4242" in said[0] and "ghostbusters_le" in said[0]
+
+
+@pytest.mark.parametrize("command", [None, [], [1], "missing.exe"])
+def test_spike1_missing_or_invalid_viewer_does_not_stop_the_game(monkeypatch, command):
+    from unittest.mock import Mock
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl.sys, "platform", "win32")
+    monkeypatch.setattr(pl, "kit_load", lambda: {"spike1_dmd_viewers": {"ghostbusters_le": command}})
+    monkeypatch.setattr(pl.os.path, "isfile", lambda p: False)
+    said = []
+    monkeypatch.setattr(pl, "log", said.append)
+    spawn = Mock()
+    monkeypatch.setattr(pl.subprocess, "Popen", spawn)
+    launch = pl.Spike1Launch.__new__(pl.Spike1Launch)
+    launch.title, launch.dmd_viewer = "ghostbusters_le", None
+    launch._start_dmd_viewer(None)
+    spawn.assert_not_called()
+    assert launch.dmd_viewer is None
+    if command:                     # a configured but unusable viewer says which and why
+        assert len(said) == 1 and "ghostbusters_le" in said[0] and repr(command) in said[0]
+    else:                           # an unconfigured one is silent
+        assert said == []
+
+
+def test_spike1_viewer_stop_reaps_only_its_owned_child(monkeypatch):
+    from unittest.mock import Mock
+    pl = pytest.importorskip("padlaunch")
+    launch = pl.Spike1Launch.__new__(pl.Spike1Launch)
+    viewer = Mock()
+    viewer.poll.return_value = None
+    viewer.wait.side_effect = [pl.subprocess.TimeoutExpired("viewer", 3), 0]
+    launch.dmd_viewer = viewer
+    launch._stop_dmd_viewer()
+    viewer.terminate.assert_called_once()
+    viewer.kill.assert_called_once()
+    assert viewer.wait.call_count == 2 and launch.dmd_viewer is None
+    launch._stop_dmd_viewer()   # repeated cleanup cannot stop another process
+    assert viewer.terminate.call_count == 1
+
+
 def test_padvpx_knows_a_maps_platform():
     pv = pytest.importorskip("padvpx")
     assert pv.platform_of("got_le") == "spike1"
     assert pv.platform_of("rush_le") == "spike2"
     assert pv.maps()["got_le"]["platform"] == "spike1" and pv.maps()["got_le"]["listed"] is True
+
+
+def test_spike1_launch_passes_only_the_selected_maps_encoder_wiring(tmp_path, monkeypatch):
+    pl = pytest.importorskip("padlaunch")
+    maps = tmp_path / "maps"
+    maps.mkdir()
+    (maps / "ghostbusters_le_replica.vpxmap.json").write_text(json.dumps({
+        "encoder_lamps": {"8,0": [15, 63]}}), encoding="utf-8")
+    monkeypatch.setattr(pl, "USER_MAPS", str(maps))
+    monkeypatch.setattr(pl, "win_python", lambda: "")
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, d: p)
+    for title, expected in (("ghostbusters_le_replica", ["S1_ENCODER_LAMPS=8,0:15,63"]), ("got_le", [])):
+        launch = pl.Spike1Launch(title, "card.iso", dist="TestRuntime")
+        launch.work = "/test/spike1"
+        env, _ = launch.env()
+        assert [s for s in env if s.startswith("S1_ENCODER_LAMPS=")] == expected
+    with pytest.raises(ValueError, match="encoder_lamps"):
+        pl.encoder_lamp_env({"8,0": [15, 64]})

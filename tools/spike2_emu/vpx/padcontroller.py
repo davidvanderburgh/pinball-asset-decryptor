@@ -426,6 +426,7 @@ class VpxMap:
         self.switch_rewrite = {}            # old table number -> Spike 2 id
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
+        self.raw_lamp_rewrite = {}          # legacy number -> one LED read as its raw level
         self.rgb_groups = set()             # numbers whose LEDs are an insert's R, G, B
         self.rgb_order = {}                 # number -> "BGR" etc. when not listed R, G, B (PAD-1097)
         self.fakes = {}                     # name -> dict (switch_fakes)
@@ -464,6 +465,16 @@ class VpxMap:
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
         self.sol_max = int(m.get("solenoid_max", 68))
+        self.raw_lamp_rewrite = {}
+        for k, v in m.get("raw_lamp_rewrite", {}).items():
+            if k == "_":
+                continue
+            # a legacy number (below 1000: 1000+ is already every LED's own
+            # number) -> one [node, index]; anything else would be set twice
+            # a poll and report a change every frame
+            if not (0 < int(k) < 1000 and isinstance(v, list) and len(v) == 2):
+                raise ValueError("raw_lamp_rewrite %r: want a number 1-999 -> [node, index], got %r" % (k, v))
+            self.raw_lamp_rewrite[int(k)] = (int(v[0]), int(v[1]))
         for k, v in m.get("solenoids", {}).items():
             if k != "_":
                 self.solenoids[int(k)] = tuple(v["coil"])
@@ -1558,6 +1569,7 @@ class Bridge:
         self.boot = None
         self.ready_t = 0.0
         self.start_t = time.monotonic()
+        self._start_retried = False
         self.front_done = False            # the LCD window's first grab is undone once, never again
         self.b2s_handed = set()            # backglass windows whose first grab was undone (PAD-893)
         self.front_tries = {}
@@ -1819,12 +1831,45 @@ class Bridge:
             if self._rig_up(data):
                 self._attach(data)
                 return
-        if not self.launch.alive() and self.rig is None:
+        if not self.launch.alive():
+            # A board record can appear before the game is ready. It does
+            # not make an exited launcher alive: clean the run we owned,
+            # including its slot, before reporting failure or trying again.
+            failed = self.launch
+            logfile = failed.logfile
+            self.launch, self.rig = None, None
+            failed.stop()
+            retry_titles = padlaunch.kit_load().get("startup_retry_titles", [])
+            if (self.running and isinstance(retry_titles, list) and self.title in retry_titles
+                    and not self._start_retried):
+                self._start_retried = True
+                log("retrying %s once after its startup process exited" % self.title)
+                self.start_t = time.monotonic()
+                self.boot, self.ready_t = None, 0.0
+                self.front_done, self.front_tries = False, {}
+                self.lcd_placed = False
+                self.lcd_tries = self.lcd_stable = 0
+                retry = padlaunch.launch_for(self.map.platform, self.title, failed.card)
+                self.launch = retry
+                try:
+                    slot = retry.start()
+                    if not self.running:
+                        retry.stop()
+                        if self.launch is retry:
+                            self.launch = None
+                    else:
+                        log("retry started %s on slot %d" % (self.title, slot))
+                    return
+                except Exception as exc:
+                    retry.stop()
+                    if self.launch is retry:
+                        self.launch = None
+                    self._loading_end("failed Startup retry failed: %s" % exc)
+                    return
             log("the run started for %s ended before it came up (see %s)"
-                % (self.title, self.launch.logfile))
+                % (self.title, logfile))
             self._loading_end("failed The emulator stopped before the game came up. Its log: %s"
-                              % self.launch.logfile)
-            self.launch = None
+                              % logfile)
         elif time.monotonic() - self.start_t > self.START_TIMEOUT_S:
             log("the run started for %s is not up after %d s; giving up on it"
                 % (self.title, self.START_TIMEOUT_S))
@@ -2423,6 +2468,10 @@ class Bridge:
         now = time.monotonic()
         with self.lock:
             self.mrg = switches
+            # Some ROM tables read Lamp(n) as a mechanical position or raw
+            # brightness, rather than the normal 0/1 or RGB insert value.
+            for n, (node, idx) in self.map.raw_lamp_rewrite.items():
+                self._lamp_set(n, rm.lamp_level(lamps, node, idx))
             for n, leds in self.map.lamp_groups.items():
                 levels = [rm.lamp_level(lamps, nd, ix) for nd, ix in leds]
                 if max(levels) < LAMP_ON:
@@ -2478,7 +2527,10 @@ class Bridge:
         return 0
 
     def _poll_lamps(self, data):
-        # mapped groups first, then every LED any table might name directly
+        # raw channels (a mechanism's position, a mono level), then the
+        # mapped groups, then every LED any table might name directly
+        for n, (node, idx) in self.map.raw_lamp_rewrite.items():
+            self._lamp_set(n, self._led_level(data, node, idx))
         for n, leds in self.map.lamp_groups.items():
             levels = [self._led_level(data, nd, ix) for nd, ix in leds]
             if max(levels) < LAMP_ON:
@@ -2657,8 +2709,11 @@ class Bridge:
         return out or None
 
     def lamp(self, n):
+        n = int(n or 0)
         with self.lock:
-            return bool(self.lamp_state.get(int(n or 0), 0))
+            if n in self.map.raw_lamp_rewrite:     # the level itself, 0..255
+                return int(self.lamp_state.get(n, 0))
+            return bool(self.lamp_state.get(n, 0))
 
     def solenoid(self, n):
         with self.lock:

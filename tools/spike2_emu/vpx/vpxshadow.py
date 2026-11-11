@@ -557,12 +557,14 @@ def _optional(lines, i, fallback, note):
     lines[i] = "\n".join(out)
 
 
-def pup_stub(lines, rep):
+def pup_stub(lines, rep, force=False):
     """PinUP Player is a separate install most machines lack, and a tribute
     that calls it dies at CreateObject before anything else runs. Make the
     object optional: when CreateObject fails, PuPlayer becomes a class with
     every method the script calls, each taking the argument count the script
-    uses, doing nothing. Returns the class text."""
+    uses, doing nothing. With force=True it always stands in, even on a
+    cabinet with PinUP installed, so the tribute cannot play its soundtrack
+    over the machine's own. Returns the class text."""
     counts, spelling = {}, {}
     for line in lines:
         s = line.strip()
@@ -587,12 +589,16 @@ def pup_stub(lines, rep):
     for i, line in enumerate(lines):
         if line.lstrip().startswith("'"):
             continue
-        if re.search(r'Set\s+PuPlayer\s*=\s*CreateObject\("PinUpPlayer\.PinDisplay"\)', line, re.I):
-            _optional(lines, i, "Set PuPlayer = New PadNoPuP", "no PinUP Player here")
+        creation = r'Set\s+PuPlayer\s*=\s*CreateObject\("PinUpPlayer\.PinDisplay"\)'
+        if re.search(creation, line, re.I):
+            if force:
+                lines[i] = re.sub(creation, "Set PuPlayer = New PadNoPuP", line, flags=re.I)
+            else:
+                _optional(lines, i, "Set PuPlayer = New PadNoPuP", "no PinUP Player here")
             made += 1
     if made:
-        rep.append("PuP made optional at %d place(s) (PadNoPuP stands in, %d methods)"
-                   % (made, len(counts)))
+        rep.append("PuP %s at %d place(s) (PadNoPuP stands in, %d methods)"
+                   % ("disabled" if force else "made optional", made, len(counts)))
     out = ["", "'---- PAD: PinUP Player's shape, for a machine without it", "Class PadNoPuP"]
     for meth, cs in list(counts.items()):
         if meth in ("getroot",):
@@ -1730,7 +1736,7 @@ def patch(script, m):
     had["PadFullColour"] = full_colour_lights(script)
     if had["PadFullColour"]:
         rep.append("lit RGB inserts take their colour whole (the script's SetLightColor sets Color = ColorFull)")
-    stub = pup_stub(lines, rep) if m.get("pup_stub") else ""
+    stub = pup_stub(lines, rep, force=m.get("pup_stub") == "always") if m.get("pup_stub") else ""
     for key, (progid, cls, label) in DMD_STUBS.items():
         if m.get(key):
             stub += flexdmd_stub(lines, rep, progid, cls, label)

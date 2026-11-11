@@ -190,22 +190,38 @@ SPOOKY_UPDATES = {"h78": ("code_H78*.pkg",), "um": ("code_UM*.pkg",), "ac": ("ac
 SPOOKY_PROC = {"ac": "config/alice.yaml"}
 
 
+def table_map(title):
+    """Map metadata in PAD.Controller's user/kit lookup order."""
+    if title:
+        for directory in (USER_MAPS, HERE):
+            for suffix in (".vpxmap.json", ".shadow.json"):
+                try:
+                    with open(os.path.join(directory, title + suffix), encoding="utf-8") as f:
+                        m = json.load(f)
+                    return m if isinstance(m, dict) else {}
+                except (OSError, ValueError):
+                    pass
+    return {}
+
+
+def encoder_lamp_env(mapping):
+    """Map's optional encoder_lamps -> the responder's adapter wiring."""
+    entries = []
+    for motor, led in mapping.items():
+        if motor == "_":
+            continue
+        node, index = (int(n) for n in motor.split(","))
+        if (not isinstance(led, list) or len(led) != 2 or any(type(n) is not int for n in led)
+                or not (0 <= node < 16 and 0 <= index < 256 and 0 <= led[0] < 16 and 0 <= led[1] < 64)):
+            raise ValueError("encoder_lamps needs node,motor -> [node, LED] within Spike 1 slots")
+        entries.append("%d,%d:%d,%d" % (node, index, *led))
+    return ";".join(entries)
+
+
 def game_for(title):
-    """A map variant's native game identity; existing maps use their title.
-    Look in the same user/kit map locations and order as PAD.Controller."""
-    if not title:
-        return title
-    for directory in (USER_MAPS, HERE):
-        for suffix in (".vpxmap.json", ".shadow.json"):
-            path = os.path.join(directory, title + suffix)
-            try:
-                with open(path, encoding="utf-8") as f:
-                    m = json.load(f)
-            except (OSError, ValueError):
-                continue
-            game = m.get("game")
-            return game if isinstance(game, str) and game else title
-    return title
+    """A table variant's native game; maps without game keep their title."""
+    game = table_map(title).get("game")
+    return game if isinstance(game, str) and game else title
 
 
 def card_for(title, platform="spike2"):
@@ -771,6 +787,7 @@ class Spike1Launch:
     starts is stopped with it; an existing app/viewer is left alone."""
 
     def __init__(self, title, card, dist=None, minutes=240):
+        self.map_title = title
         self.title = game_for(title)
         self.card = card
         self.distro = dist if dist is not None else distro()
@@ -793,6 +810,15 @@ class Spike1Launch:
     def env(self):
         card = padpath.to_wsl(self.card, self.distro)
         env = ["PAD_LABEL=%s" % LABEL, "PAD_HIDDEN=0", "PAD_AUDIO=1", "S1_PIVOT=1"]
+        # a mistyped encoder_lamps loses only that wiring, as the responder
+        # does, never the table's start
+        try:
+            outputs = encoder_lamp_env(table_map(self.map_title).get("encoder_lamps") or {})
+        except (ValueError, TypeError, AttributeError) as exc:
+            log("%s: encoder_lamps ignored (%s)" % (self.map_title, exc))
+            outputs = ""
+        if outputs:
+            env.append("S1_ENCODER_LAMPS=" + outputs)
         py = win_python()
         if py:
             env.append("PAD_WINPYTHON=%s" % padpath.to_wsl(py, self.distro))

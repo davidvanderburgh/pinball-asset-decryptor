@@ -317,6 +317,27 @@ persistent-storage init are all handled and the game **boots + runs its main
 loop**. The remaining work is device *content* — the node bus, then DMD/audio —
 decoded from the live captures the running game now produces.
 
+### Status polls and encoder motors (PAD-1160, PR #26)
+
+Two node-bus rules the DMD-era responder (`nodebus.py`) now keeps, both read
+out of Ghostbusters LE 1.17 and both the same as Spike 2's (PAD-249):
+
+* **`0xff` word A is the board's received-frame count.** `NODEBUS_GetStatus`
+  (`0xd2880`) subtracts the word A it saw last time and compares the change
+  with its own count of addressed frames sent to that node
+  (`DoTransferMessage`, `0xcd038`; the poll itself included). A mismatch sets
+  bit 31 of word B, the control thread (`0x82004`, mask `0x8000217f`) calls
+  that lost frames and re-initialises the board. Answering zero did that to
+  every board on every poll, about every 0.8 s, so the game kept resending
+  every lamp and re-homing the Slimer motor. The responder counts each
+  node's addressed frames and answers that count.
+* **Encoder motors** (`EncoderMotors`): cmd 51 with encoder inputs configures
+  one, 53 homes it, 55 sends it to a signed position, 52 reads position plus
+  flags (`0x01` moving, `0x08` homed and done, `0x40` fault). The game's
+  `EncoderMotor` homes in two passes (configure forward and home, then
+  configure reversed, `0x80` on the home input, and home again) and then
+  waits for positions. With both rules the Slimer homes once per boot.
+
 ## The switch-matrix / LED viewer (built now)
 
 `plugins/stern/spike1_emulate.py` defines a **format-agnostic** hardware-state

@@ -971,9 +971,10 @@ def coverage(m):
                 guesses.append(("lamp", obj, v.get("name", "")))
     for x in (m.get("gi_leds") or {}).get("leds") or []:
         leds.add(tuple(x))
-    for k, v in (m.get("disc_leds") or {}).items():
-        if k != "_" and isinstance(v, list) and len(v) == 2:
-            leds.add(tuple(v))
+    for sect in ("disc_leds", "raw_lamp_rewrite"):
+        for k, v in (m.get(sect) or {}).items():
+            if k != "_" and isinstance(v, list) and len(v) == 2:
+                leds.add(tuple(v))
     for k, v in (m.get("lamp_flasher_numbers") or {}).items():
         if k not in ("_", "_names") and isinstance(v, int) and v >= 1000:
             leds.add(((v - 1000) // 100, (v - 1000) % 100))

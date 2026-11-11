@@ -4449,6 +4449,60 @@ def test_the_grips_stand_aside_while_visual_pinball_is_paused(monkeypatch):
     assert not g.aside and any("grips back" in s for s in logged)
 
 
+def test_minimized_player_is_not_placed_until_it_is_restored(monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+    pc = pytest.importorskip("padcontroller")
+    minimized = [True]
+    u = SimpleNamespace(IsIconic=lambda h: minimized[0])
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=u), raising=False)
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    monkeypatch.setattr(pc.padlaunch, "kit_load", lambda: {})
+    monkeypatch.setattr(pc, "dpi_aware", lambda: None)
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    reads = []
+    def rect(h):
+        reads.append(h)
+        return (-32000, -32000, 160, 28) if minimized[0] else (100, 200, 600, 1200)
+    monkeypatch.setattr(pc, "window_rect", rect)
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.player_hwnd, b.player_placed = 55, False
+    b._frame_player = lambda h: False
+    b._place_player()
+    assert not reads and not b.player_placed
+    assert not hasattr(b, "player_aspect")
+    minimized[0] = False
+    b._place_player()
+    assert reads == [55] and b.player_placed and b.player_aspect == 2.0
+
+
+def test_minimized_player_does_not_replace_the_saved_geometry(monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+    pc = pytest.importorskip("padcontroller")
+    minimized = [True]
+    u = SimpleNamespace(IsIconic=lambda h: minimized[0], IsWindow=lambda h: True,
+                        IsZoomed=lambda h: False)
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=u), raising=False)
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    reads, saves = [], []
+    def rect(h):
+        reads.append(h)
+        return (-32000, -32000, 160, 28) if minimized[0] else (100, 200, 600, 1200)
+    monkeypatch.setattr(pc, "window_rect", rect)
+    monkeypatch.setattr(pc.padlaunch, "kit_save", lambda k: saves.append(k))
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.player_hwnd, b.player_placed, b.player_aspect = 55, True, 2.0
+    b._player_seen = b._player_settled = (100, 200, 600, 1200)
+    b._player_seen_t = 0
+    b._watch_player()
+    assert not reads and not saves
+    assert b._player_seen == b._player_settled == (100, 200, 600, 1200)
+    minimized[0] = False
+    b._watch_player()
+    assert reads == [55] and not saves   # restored, still at the saved place
+
+
 def test_a_table_that_runs_without_its_window_still_gets_the_grips(monkeypatch):
     """PAD-933: The Beatles (and TMNT) call a bare `Controller.Run`, as their
     ROM scripts had it, so the bridge never got the player window: no grips,

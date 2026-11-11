@@ -1394,12 +1394,22 @@ under Colima Lima's port forwarder took the whole stream at full rate while
 ffplay received 310 KB and then nothing; docker exec rides the Docker socket
 and pushes back. ffplay cannot be given a new level while it plays, so the
 Emulate tab's Volume / Mute are applied by `padrelay.py` (PAD-957):
-`padbox.sh`'s `ctl_pusher` copies `audio_ctl.json` to
-`/tmp/pad_audio_ctl.json` in the box whenever it changes, and the relay
+`padbox.sh`'s `ctl_sync` copies `audio_ctl.json` to
+`/tmp/pad_ctl/audio_ctl.json` in the box whenever it changes, and the relay
 scales the samples. It says `[padrelay] volume -> 0.50` and, every 30 s, how
 much it sent and how loud, on stderr, which lands in the app's log. A copy,
 not a mount: the app replaces the file on every slider move, which a file
 bind mount loses.
+
+**The box's playfield window has the same Volume, Mute and Restart game as on
+Windows** (PAD-1129). It is handed `PAD_AUDIO_CTL=/tmp/pad_ctl/audio_ctl.json`,
+the relay's copy, so its Volume moves the sound in the box at once.
+`ctl_sync` carries that folder both ways through one `docker exec -i ...
+docker/boxctl.py`: the tab's volume file and the run's clip names go in; the
+window's volume, its Restart game request and its clip and sound records come
+back out into the tab's own files, so the tab's slider follows the window's
+and its Restart and Sound and video log work as on Windows. Before it the
+window had no such file and its page left those controls out.
 
 **x11vnc runs with `-threads`** (`entrypoint.sh`, PAD-805). Without it, clicks
 and keys wait in line behind the ~1.5 MB frames the server is sending. The

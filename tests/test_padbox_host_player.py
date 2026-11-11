@@ -41,7 +41,7 @@ _PRELUDE = r"""
 set -u
 D=%(dir)s
 NAME=pad-test PAD_AUDIO=1 BOX_FIFO=/pad/rootfs/dump/audio.fifo
-BOX_CTL=/tmp/pad_audio_ctl.json PAD_AUDIO_CTL="$D/audio_ctl.json"
+BOX_CTL=/tmp/pad_ctl/audio_ctl.json PAD_AUDIO_CTL="$D/audio_ctl.json"
 docker() {
   [ "$1" = exec ] || return 0
   shift
@@ -130,7 +130,7 @@ echo "HP-DONE"
 """)
     ev = _cat(d, "events")
     assert "relay 1: pad-test python3 /pad/rig/padrelay.py --pipe " \
-           "/pad/rootfs/dump/audio.fifo /tmp/pad_audio_ctl.json" in ev, (ev, text)
+           "/pad/rootfs/dump/audio.fifo /tmp/pad_ctl/audio_ctl.json" in ev, (ev, text)
     player = [l for l in ev.splitlines() if l.startswith("player 1:")][0]
     assert player.endswith("-f s16le -ar 44100 -ch_layout stereo -i pipe:0"), player
     assert "-loglevel info -stats" in player, player
@@ -214,7 +214,7 @@ sleep 0.3; kill $HP; wait $HP 2>/dev/null
 """)
     ev = _cat(d, "events")
     assert "--pipe /pad/rootfs/dump/audio.fifo" in ev, (ev, text)
-    assert "/tmp/pad_audio_ctl.json" not in ev, ev
+    assert "/tmp/pad_ctl/audio_ctl.json" not in ev, ev
 
 
 @needs_bash
@@ -278,25 +278,52 @@ def test_the_game_sound_count_crosses_into_the_box():
     assert "PAD_AUDIO_DUMP" in m.group(1).split()
 
 
-# ---- PAD-957: the tab's Volume and Mute reach the Mac's speaker -------------
+# ---- PAD-957 / PAD-1129: the control folder, both ways ---------------------
+#
+# ctl_sync runs here with `docker` a shell function and the box a folder: the
+# REAL docker/boxctl.py runs on it (python3), as `docker exec -i` would run it
+# in the box. $D/mac is the app's folder, $D/box the box's /tmp/pad_ctl.
+
+BOXCTL = os.path.join(RIG, "docker", "boxctl.py")
 
 _CTL_PRELUDE = r"""
 set -u
 D=%(dir)s
-NAME=pad-test PAD_AUDIO=1 BOX_CTL=/tmp/pad_audio_ctl.json
-PAD_AUDIO_CTL="$D/audio_ctl.json"
-# docker exec -i -u 0 NAME sh -c CMD: the box takes a copy only once it is up
+NAME=pad-test PAD_AUDIO=1 BOX_CTL_DIR=/tmp/pad_ctl
+mkdir -p "$D/mac"
+PAD_AUDIO_CTL="$D/mac/audio_ctl.json"
+cat > "$D/boxctl.py" <<'BOXCTLEOF'
+%(boxctl)s
+BOXCTLEOF
 docker() {
-  [ "$1" = exec ] || return 0
-  [ -f "$D/up" ] || { cat >/dev/null; return 1; }
-  cat > "$D/box_ctl"; echo push >> "$D/pushes"
+  case "$1" in
+    ps) [ -f "$D/up" ] && echo pad-test; return 0 ;;
+    exec) ;;
+    *) return 0 ;;
+  esac
+  [ -f "$D/up" ] || return 1
+  echo "exec ${*:2}" >> "$D/execs"
+  python3 "$D/boxctl.py" "$D/box"
 }
+# for: waits up to 6 s for a condition
+upto() { for _ in $(seq 1 60); do eval "$1" && return 0; sleep 0.1; done; return 1; }
 """
 
 
-def _run_pusher(d, body, timeout=30):
-    script = "\n".join([_CTL_PRELUDE % {"dir": _q(d)},
-                        _function("ctl_pusher"), body, ""])
+def _box_up():
+    with open(BOX, "rb") as fh:
+        body = fh.read().decode("utf-8")
+    m = re.search(r"^box_up\(\) \{.*\}\n", body, re.M)
+    assert m
+    return m.group(0)
+
+
+def _run_sync(d, body, timeout=60):
+    with open(BOXCTL, "rb") as fh:
+        boxctl = fh.read().decode("utf-8")
+    script = "\n".join([_CTL_PRELUDE % {"dir": _q(d), "boxctl": boxctl},
+                        _box_up(), _function("ctl_feed"), _function("ctl_apply"),
+                        _function("ctl_sync"), body, ""])
     out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          timeout=timeout)
@@ -304,52 +331,100 @@ def _run_pusher(d, body, timeout=30):
 
 
 @needs_bash
-def test_the_volume_file_is_copied_into_the_box_when_it_changes():
+def test_the_volume_file_and_clip_names_go_into_the_box_when_they_change():
     d = _fresh_dir()
-    rc, text = _run_pusher(d, r"""
-echo '{"gain": 0.5, "muted": false}' > "$D/audio_ctl.json"
-ctl_pusher & CP=$!
+    rc, text = _run_sync(d, r"""
+echo '{"gain": 0.5, "muted": false}' > "$D/mac/audio_ctl.json"
+printf '{\n "a": "Clip A"\n}\n' > "$D/mac/clip_names_0.json"
+ctl_sync & CS=$!
 sleep 0.8; touch "$D/up"                    # the box comes up later
-for i in $(seq 1 40); do [ -f "$D/pushes" ] && break; sleep 0.1; done
-sleep 0.8                                   # unchanged: no second copy
-echo '{"gain": 0.5, "muted": true}' > "$D/audio_ctl.json"
-for i in $(seq 1 40); do [ "$(wc -l < "$D/pushes")" -ge 2 ] && break; sleep 0.1; done
-kill $CP; wait $CP 2>/dev/null
-echo "PUSHES=$(( $(wc -l < "$D/pushes") ))"   # BSD wc pads the count
+upto 'grep -q 0.5 "$D/box/audio_ctl.json" 2>/dev/null' && echo IN-1
+upto '[ -s "$D/box/clip_names_0.json" ]' && echo NAMES-IN
+echo '{"gain": 0.5, "muted": true}' > "$D/mac/audio_ctl.json"
+upto 'grep -q true "$D/box/audio_ctl.json"' && echo IN-2
+kill $CS; wait $CS 2>/dev/null
+echo "EXECS=$(( $(wc -l < "$D/execs") ))"   # BSD wc pads the count
+cat "$D/box/clip_names_0.json"
 """)
-    assert "PUSHES=2" in text, text
-    assert '"muted": true' in _cat(d, "box_ctl"), text
+    assert "IN-1" in text and "IN-2" in text and "NAMES-IN" in text, text
+    assert '"a": "Clip A"' in text, text
+    assert "EXECS=1" in text, text        # one docker exec for the whole run
+    assert "exec -i -u 0 pad-test python3 /pad/rig/docker/boxctl.py /tmp/pad_ctl" \
+        in _cat(d, "execs"), text
 
 
 @needs_bash
-def test_no_volume_file_or_a_silent_run_copies_nothing():
+def test_the_windows_volume_and_mute_reach_the_tabs_file():
+    # PAD-1129: the box's playfield window writes its copy (json.dump, no
+    # newline, replaced in place); the tab's file follows and stays put
     d = _fresh_dir()
-    rc, text = _run_pusher(d, r"""
+    rc, text = _run_sync(d, r"""
+echo '{"gain": 1.0, "muted": false}' > "$D/mac/audio_ctl.json"
 touch "$D/up"
-ctl_pusher & CP=$!                          # the file does not exist
-sleep 0.8; kill $CP; wait $CP 2>/dev/null
-PAD_AUDIO=0 ctl_pusher; echo "SILENT-RC=$?"
-PAD_AUDIO_CTL= ctl_pusher; echo "UNSET-RC=$?"
+ctl_sync & CS=$!
+upto '[ -s "$D/box/audio_ctl.json" ]' && echo IN
+printf '{"gain": 0.3, "muted": true}' > "$D/box/audio_ctl.json.pf.tmp"
+mv -f "$D/box/audio_ctl.json.pf.tmp" "$D/box/audio_ctl.json"
+upto 'grep -q 0.3 "$D/mac/audio_ctl.json"' && echo OUT
+sleep 1.5                                   # and nothing bounces it back
+kill $CS; wait $CS 2>/dev/null
+echo "MAC=$(cat "$D/mac/audio_ctl.json")"
+echo "BOX=$(cat "$D/box/audio_ctl.json")"
 """)
-    assert _cat(d, "pushes") == "", text
-    assert "SILENT-RC=0" in text and "UNSET-RC=0" in text, text
+    assert "IN" in text and "OUT" in text, text
+    assert 'MAC={"gain": 0.3, "muted": true}' in text, text
+    assert 'BOX={"gain": 0.3, "muted": true}' in text, text
 
 
-def test_the_relay_is_told_where_the_copy_is_and_the_bridge_is_not():
+@needs_bash
+def test_restart_game_and_the_windows_records_reach_the_tab_for_its_slot():
+    d = _fresh_dir()
+    rc, text = _run_sync(d, r"""
+PAD_SLOT=2
+printf '{"x": 1}\n' > "$D/mac/clip_names_2.json"
+touch "$D/up"
+ctl_sync & CS=$!
+upto '[ -d "$D/box" ]'
+upto '[ -s "$D/box/clip_names_0.json" ]' && echo NAMES-IN
+echo 0 > "$D/box/restart_game_0.req"
+printf '{"clip": "a"}\n{"cl' >> "$D/box/clips_seen_0.jsonl"
+printf '{"sid": 7}\n' >> "$D/box/sounds_seen_0.jsonl"
+upto '[ -f "$D/mac/restart_game_2.req" ]' && echo REQ-OUT
+upto '[ -s "$D/mac/sounds_seen_2.jsonl" ]' && echo SOUNDS-OUT
+printf 'ip": "b"}\n' >> "$D/box/clips_seen_0.jsonl"
+upto '[ "$(wc -l < "$D/mac/clips_seen_2.jsonl")" -ge 2 ]' && echo CLIPS-OUT
+kill $CS; wait $CS 2>/dev/null
+[ -e "$D/box/restart_game_0.req" ] || echo REQ-TAKEN
+echo "REQ=$(cat "$D/mac/restart_game_2.req")"
+cat "$D/mac/clips_seen_2.jsonl" "$D/mac/sounds_seen_2.jsonl"
+""")
+    for word in ("NAMES-IN", "REQ-OUT", "SOUNDS-OUT", "CLIPS-OUT", "REQ-TAKEN",
+                 "REQ=2"):
+        assert word in text, (word, text)
+    assert '{"clip": "a"}\n{"clip": "b"}\n{"sid": 7}' in text, text
+    assert "the playfield window asked for Restart game" in text, text
+
+
+@needs_bash
+def test_no_volume_file_setting_syncs_nothing():
+    d = _fresh_dir()
+    rc, text = _run_sync(d, r"""
+touch "$D/up"
+PAD_AUDIO_CTL= ctl_sync; echo "UNSET-RC=$?"
+""")
+    assert "UNSET-RC=0" in text, text
+    assert _cat(d, "execs") == "", text
+
+
+def test_the_relay_and_the_window_share_the_boxs_copy():
     with open(BOX, "rb") as fh:
         box = fh.read().decode("utf-8")
     assert '"$BOX_FIFO" "${PAD_AUDIO_CTL:+$BOX_CTL}"' in _function("host_player")
-    assert "ctl_pusher & HOSTCTL=$!" in box
+    assert "BOX_CTL=$BOX_CTL_DIR/audio_ctl.json" in box
+    # PAD-1129: the window inside the box is handed the copy
+    assert '[ -n "${PAD_AUDIO_CTL:-}" ] && RUN_ARGS+=(-e "PAD_AUDIO_CTL=$BOX_CTL")' in box
+    assert "ctl_sync & HOSTCTL=$!" in box
+    assert "ctl_pusher" not in box
     # PAD-1109: no published sound port any more, so nothing on the Mac can
     # reach the box's FIFO except the docker exec reader
     assert "AUDIO_PORT" not in box and "tcp://" not in box
-    with open(os.path.join(RIG, "playaudio.sh"), "rb") as fh:
-        play = fh.read().decode("utf-8")
-    relay = play[play.index('if [ "$SINK" = relay ]'):]
-    relay_sink, win_sink = relay.split('if [ "$SINK" = win ]', 1)
-    # the box keeps the FIFO and starts no listener of its own
-    assert "padrelay.py" not in relay_sink.split("\nfi\n", 1)[0]
-    # the Windows bridge's padplay.py scales its own; a relay that scaled
-    # too would square the level
-    assert "PAD_RELAY_CTL" not in play
-    assert "--pipe" not in win_sink

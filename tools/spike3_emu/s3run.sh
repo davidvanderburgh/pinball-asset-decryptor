@@ -56,6 +56,14 @@ done
 #                amp (0x10), whose register writes must read back.
 KMOD=${PAD_S3_KMOD:-/home/david/.pad-s3}
 KTREE=$KMOD/kernel/WSL2-Linux-Kernel-linux-msft-wsl-6.6.87.2
+# THE DEFAULT NEEDS NONE OF THIS (DEVMODE=preload): s3dev.so answers the SPI
+# chain and the amp bus inside the game, so a stock WSL kernel and stock
+# qemu-user run it. PAD_S3_DEV=0 (or no s3dev.so built) is the old path:
+# s3spid over CUSE, i2c-stub, and the ioctl-patched qemu.
+DEVMODE=preload
+{ [ "${PAD_S3_DEV:-1}" = 0 ] || [ ! -e "$B/s3dev.so" ]; } && DEVMODE=kernel
+export DEVMODE
+if [ "$DEVMODE" = kernel ]; then
 if [ "$BUS" = 1 ] && [ ! -e /dev/cuse ]; then
     insmod "$KTREE/fs/fuse/cuse.ko" 2>/dev/null && echo "[s3run] loaded cuse.ko"
     for i in $(seq 1 20); do [ -e /dev/cuse ] && break; sleep 0.1; done
@@ -78,6 +86,9 @@ fi
 # fails and the game aborts at xifo.cpp:72 a minute in (every proof run set
 # PAD_S3_I2C=0 by hand; the Emulate tab's launcher sets nothing)
 [ -n "${PAD_S3_I2C:-}" ] || PAD_S3_I2C=$(stub_bus) || PAD_S3_I2C=""
+else
+    PAD_S3_I2C=""                      # the amp bus is s3dev.so's
+fi
 export PAD_S3_I2C
 
 TREE=$(python3 "$S/s3store.py" path "$CARD") || {
@@ -143,16 +154,18 @@ BUSPIDS=""
 DEVBINDS=""
 RUNBINDS=""
 if [ "$BUS" = 1 ]; then
-    [ -e /dev/cuse ] || { echo "[s3run] --bus needs /dev/cuse (insmod cuse.ko)" >&2; exit 1; }
-    [ -x "$B/s3spid" ] || { echo "[s3run] --bus needs $B/s3spid: bash s3build.sh" >&2; exit 1; }
-    SPIDEV=pad-s3spi-slot$SLOT
     rm -f "$SD/spi.log" "$SD/bridge.log" "$SD/bridge.path" "$SD/nodesw"
     # the cabinet inputs, live: 8 bytes, every one at rest; s3press.py
     # presses a button by clearing its bit (active low) while the game runs
     python3 -c "import sys; open(sys.argv[1],'wb').write(bytes([int(sys.argv[2],0)])*8)" \
         "$SD/spi.in" "${PAD_S3_SPI_IDLE:-0xff}"
-    "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" --idle=${PAD_S3_SPI_IDLE:-0xff} --input="$SD/spi.in" > "$SD/s3spid.out" 2>&1 &
-    BUSPIDS="$!"
+    if [ "$DEVMODE" = kernel ]; then
+        [ -e /dev/cuse ] || { echo "[s3run] --bus needs /dev/cuse (insmod cuse.ko)" >&2; exit 1; }
+        [ -x "$B/s3spid" ] || { echo "[s3run] --bus needs $B/s3spid: bash s3build.sh" >&2; exit 1; }
+        SPIDEV=pad-s3spi-slot$SLOT
+        "$B/s3spid" -f --name=$SPIDEV --log="$SD/spi.log" --idle=${PAD_S3_SPI_IDLE:-0xff} --input="$SD/spi.in" > "$SD/s3spid.out" 2>&1 &
+        BUSPIDS="$!"
+    fi
     python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     # the video decoder (stage 5): s3vid.so hands the game's HEVC/H.264
@@ -161,16 +174,25 @@ if [ "$BUS" = 1 ]; then
     python3 "$S/s3vidhost.py" "$SD/s3vid.feed" "$SD/padvid.shm" "$SD/s3vidhost.log" > "$SD/s3vidhost.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     for i in $(seq 1 50); do
-        [ -e /dev/$SPIDEV ] && [ -s "$SD/bridge.path" ] && break; sleep 0.1
+        { [ "$DEVMODE" != kernel ] || [ -e /dev/$SPIDEV ]; } && [ -s "$SD/bridge.path" ] && break; sleep 0.1
     done
-    [ -e /dev/$SPIDEV ] || { echo "[s3run] s3spid made no /dev/$SPIDEV:"; tail -3 "$SD/s3spid.out"; kill $BUSPIDS; exit 1; }
+    if [ "$DEVMODE" = kernel ]; then
+        [ -e /dev/$SPIDEV ] || { echo "[s3run] s3spid made no /dev/$SPIDEV:"; tail -3 "$SD/s3spid.out"; kill $BUSPIDS; exit 1; }
+    fi
     [ -s "$SD/bridge.path" ] || { echo "[s3run] s3bridge made no pty:"; tail -3 "$SD/s3bridge.out"; kill $BUSPIDS; exit 1; }
-    DEVBINDS="spidev4.0=/dev/$SPIDEV ttyAMA5=$(cat "$SD/bridge.path")"
+    if [ "$DEVMODE" = kernel ]; then
+        DEVBINDS="spidev4.0=/dev/$SPIDEV ttyAMA5=$(cat "$SD/bridge.path")"
+    else
+        DEVBINDS="ttyAMA5=$(cat "$SD/bridge.path")"    # spidev4.0: s3dev.so
+    fi
     for i in $(seq 1 50); do [ -s "$SD/padvid.shm" ] && [ -s "$SD/s3vid.feed" ] && break; sleep 0.1; done
     if [ -s "$SD/padvid.shm" ] && [ -s "$SD/s3vid.feed" ]; then
         RUNBINDS="s3vid=$SD/s3vid.feed padvid=$SD/padvid.shm"
     else
         echo "[s3run] no video decoder: $(tail -2 "$SD/s3vidhost.out")"
+    fi
+    if [ "$DEVMODE" != kernel ]; then                  # s3dev.so reads it live
+        RUNBINDS="${RUNBINDS:+$RUNBINDS }padspi=$SD/spi.in"
     fi
     echo "[s3run] node bus up: $DEVBINDS"
     # GUIDED SETUP, walked by the harness: the game holds a fresh machine (and
@@ -295,6 +317,11 @@ if [ -e "$B/s3alsa.so" ]; then
     mkdir -p "$R/usr/lib/pad"; cp "$B/s3alsa.so" "$R/usr/lib/pad/"
     PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/s3alsa.so"
 fi
+# the SPI chain and the amp bus, inside the game (s3dev.so, DEVMODE=preload)
+if [ "$DEVMODE" != kernel ]; then
+    mkdir -p "$R/usr/lib/pad"; cp "$B/s3dev.so" "$R/usr/lib/pad/"
+    PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/s3dev.so"
+fi
 # the video decoder (s3vid.so): takes the game's HEVC/H.264 decoding to the
 # host when /run/s3vid is there (--bus), and leaves it alone when it is not
 if [ -e "$B/s3vid.so" ]; then
@@ -302,6 +329,7 @@ if [ -e "$B/s3vid.so" ]; then
     PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/s3vid.so"
 fi
 [ -n "$PRELOAD" ] && PRELOAD="env LD_PRELOAD=$PRELOAD"
+[ -n "$PRELOAD" ] && [ "$DEVMODE" != kernel ] && PRELOAD="$PRELOAD PAD_S3_SPI_IN=/run/padspi"
 # SOUND, only when asked (PAD_S3_AUDIO=1): rig runs are muted. s3alsa.so
 # writes the game's PCM, non-blocking, into $SD/audio/audio.fifo (bound at
 # /run/padaudio) and the format into audio.fmt; Spike 2's playaudio.sh plays
@@ -320,7 +348,9 @@ fi
 # Absent -> fall back to binfmt. See docs/plans/spike3_emulation.md stage 3.
 QEMU_INTERP=""
 PQ="${PAD_S3_QEMU:-$(dirname "$B")/qemu-aarch64}"
-if [ -x "$PQ" ]; then
+if [ "$DEVMODE" != kernel ] && [ -z "${PAD_S3_QEMU:-}" ]; then
+    echo "[s3run] game runs under the system's qemu-aarch64 (binfmt); buses in s3dev.so"
+elif [ -x "$PQ" ]; then
     cp "$PQ" "$R/.pad-qemu" && chmod +x "$R/.pad-qemu" && QEMU_INTERP="/.pad-qemu"
     echo "[s3run] game runs under the I2C-patched qemu ($PQ)"
 fi

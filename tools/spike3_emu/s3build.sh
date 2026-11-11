@@ -9,6 +9,7 @@
 #   libEGL.so.1      s3egl.c
 #   s3kms.so         s3kms.c (LD_PRELOAD: fake KMS + GBM)
 #   s3alsa.so        s3alsa.c (LD_PRELOAD: the sound cards, paced and muted)
+#   s3dev.so         s3dev.c (LD_PRELOAD: the SPI chain and amp bus, in the game)
 #   s3vid.so         s3vid.c  (LD_PRELOAD: video decoded on the host, s3vidhost.py)
 # Host (x86-64): s3spid (s3spid.c, the CUSE stand-in for the CPU board's SPI
 # I/O chain, s3run.sh --bus; needs libfuse3-dev), and padglhost from
@@ -44,6 +45,7 @@ CF="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -Wall -Werror=implicit-fun
     "$S/s3egl.c" -L"$LIBC" -l:libc.so.6 "$OUT/libGLESv2.so.2"
 "$CC" $CF -Wl,-soname,s3kms.so -o "$OUT/s3kms.so" "$S/s3kms.c" -ldl -lpthread
 "$CC" $CF -Wl,-soname,s3alsa.so -o "$OUT/s3alsa.so" "$S/s3alsa.c"
+"$CC" $CF -Wl,-soname,s3dev.so -o "$OUT/s3dev.so" "$S/s3dev.c" -ldl
 # s3vid.so builds against the card's own FFmpeg (5.1.6-rpi: libavcodec
 # 59.37.100) - its AVFrame/AVCodecContext layouts - so the headers of that
 # exact release, fetched once beside the build
@@ -66,6 +68,6 @@ gcc -std=gnu17 -O2 -Wall -o "$OUT/s3spid" "$S/s3spid.c" $(pkg-config --cflags --
 gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration $VIDMAX $GLMAX -I"$S2" \
     -o "$OUT/padglhost" "$S2/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
-for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3vid.so s3spid padglhost; do
+for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3dev.so s3vid.so s3spid padglhost; do
     printf 's3build: %-15s %8d bytes\n' "$f" "$(stat -c%s "$OUT/$f")"
 done

@@ -3455,6 +3455,13 @@ Sub Table_KeyUp(keycode)
 If keycode = StartGameKey Then Controller.Switch(16) = 0
 If vpmKeyUp(keycode) Then Exit Sub
 End Sub
+' This table has raised DT switches = 1 and dropped = 0
+controller.switch(60) = 1
+controller.switch(61) = 1
+controller.switch(62) = 1
+Set DT60 = (new DropTarget)(sw60, sw60a, BM_sw60, 60, 0, false)
+Set DT61 = (new DropTarget)(sw61, sw61a, BM_sw61, 61, 0, false)
+Set DT62 = (new DropTarget)(sw62, sw62a, BM_sw62, 62, 0, false)
 Sub DropTarget(Switchid)
 controller.Switch(Switchid mod 100) = 0  ' dropped DT
 End Sub
@@ -3471,6 +3478,10 @@ def test_metallica_drop_bank_and_resync_agree_on_logical_polarity():
     assert "controller.Switch(Switchid mod 100) = 0" in out
     assert "Controller.Switch(DTArray(i).sw) = DTArray(i).isDropped" in out
     assert "Not DTArray(i).isDropped" not in out
+    # the table's own load-time writes of the three raised targets flip too (PR #21 review)
+    for sid in (1048, 1049, 1050):
+        assert re.search(r"(?m)^controller\.switch\(%d\) = 0\t" % sid, out)
+    assert "raised DT switches = 1 and dropped = 0" not in out
     # Computed SAM aliases stay on their small numbers; the controller's
     # existing map resolves each of the three physical drop targets.
     assert [m["switch_rewrite"][str(n)] for n in (60, 61, 62)] == [48, 49, 50]
@@ -3483,6 +3494,7 @@ def test_metallica_drop_and_raise_publish_closed_and_open(tmp_path):
     m = json.load(open(mt.MAP, encoding="utf-8"))
     out, _ = mt.patch_script(_metallica_drop_script(), m)
     actions = re.search(r"(?ms)^Sub DropTarget.*?^End Sub\nSub RaiseTarget.*?^End Sub", out).group(0)
+    init = "\n".join(re.findall(r"(?m)^controller\.switch\(10[45]\d\) = .*$", out))
     vbs = tmp_path / "drops.vbs"
     vbs.write_text('''Class TestController
 Public Property Let Switch(n, value)
@@ -3490,10 +3502,10 @@ WScript.Echo n & "=" & CInt(value)
 End Property
 End Class
 Dim Controller : Set Controller = New TestController
-''' + actions + '\nDropTarget 160 : RaiseTarget 160\nDropTarget 161 : RaiseTarget 161\nDropTarget 162 : RaiseTarget 162\n', encoding="utf-8")
+''' + init + '\n' + actions + '\nDropTarget 160 : RaiseTarget 160\nDropTarget 161 : RaiseTarget 161\nDropTarget 162 : RaiseTarget 162\n', encoding="utf-8")
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr
-    assert r.stdout.splitlines() == ["60=1", "60=0", "61=1", "61=0", "62=1", "62=0"]
+    assert r.stdout.splitlines() == ["1048=0", "1049=0", "1050=0", "60=1", "60=0", "61=1", "61=0", "62=1", "62=0"]
 
 
 def test_tmnt_shooter_lane_top_switch_ends_the_turtle_select():

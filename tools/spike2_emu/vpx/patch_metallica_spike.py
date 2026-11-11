@@ -19,7 +19,9 @@ WHAT CHANGES, all of it driven by metallica_spike.vpxmap.json:
            UseLamps 0, UseVPMModSol 0 (the controller reports 0/1);
            every literal switch number -> its Spike 2 id + 1000 (the target
            helpers' computed `Switchid mod 100` go through the map's
-           switch_rewrite in the controller); the flipper callbacks move to
+           switch_rewrite in the controller); the drop bank's writes, computed
+           and literal, from SAM's raised = 1 to Spike's logical dropped = 1
+           (PR #21); the flipper callbacks move to
            core.vbs's flipper Consts; the SAM fast-flip init goes; the lamp
            block: every insert and RGB channel on its Spike 2 LED, the
            flashers (LEDs on Spike 2) calling the table's own SolModCallback
@@ -59,6 +61,10 @@ def patch_script(src, m):
     seen = set()
     rewritten = dropped = 0
     cur_sub = None
+    # the drop bank's SAM switch numbers (`Set DT60 = (new DropTarget)(sw60, sw60a, BM_sw60, 60, ...)`):
+    # the table also writes them as literals, at load, on SAM's polarity
+    drop_sw = {int(n) for n in re.findall(
+        r"(?im)^\s*set\s+\w+\s*=\s*\(\s*new\s+droptarget\s*\)\s*\([^,]*,[^,]*,[^,]*,\s*(\d+)", src)}
 
     def need(tag):
         seen.add(tag)
@@ -159,6 +165,13 @@ def patch_script(src, m):
             state = 1 - int(drop.group(2))
             out.append("%s%d\t' PAD: dropped closes, raised opens the Spike switch" % (drop.group(1), state))
             continue
+        if low.startswith("' this table has raised dt switches = 1"):
+            out.append("' PAD: the Spike switch is logical: raised DT switches = 0 and dropped = 1")
+            continue
+        lit = re.match(r"^(\s*controller\.switch\(\s*)(\d+)(\s*\)\s*=\s*)([01])(\s*(?:'.*)?)$", line, re.I)
+        if lit and int(lit.group(2)) in drop_sw:
+            line = "%s%s%s%d\t' PAD: raised opens the Spike switch" % (
+                lit.group(1), lit.group(2), lit.group(3), 1 - int(lit.group(4)))
 
         # ---- literal switch numbers
         def _rw(mm):
@@ -254,7 +267,7 @@ def gen_test_timer():
             "'---- table's own key handlers, then deletes the file.",
             "'---- It also re-sends the table's held switches every two seconds",
             "'---- (PadSync): a switch set before the controller attaches to the run",
-            "'---- (Table_Init's trough, the raised drop targets, the grave marker",
+            "'---- (Table_Init's trough, the drop targets' state, the grave marker",
             "'---- at its top) never reaches the game. TROUGH 5 / 6 are two balls",
             "'---- the table does not have: Metallica Remastered is a six-ball game",
             "'---- and refuses a Start with four (PAD-811: on four, Start went to",

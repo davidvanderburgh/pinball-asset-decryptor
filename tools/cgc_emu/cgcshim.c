@@ -86,10 +86,11 @@ static void slog(const char *fmt, ...)
 /* ----------------------------------------------- the program's symbols -- */
 
 typedef struct { char name[48]; uint32_t addr; } sym_t;
-static sym_t syms[64];
+static sym_t syms[96];
 static int nsyms;
 
-/* Every FUNC symbol of the running program whose name is in `want`. */
+/* Every FUNC or OBJECT symbol of the running program whose name is in
+ * `want` (Z5 needs a few of its tables too). */
 static void find_syms(const char *const *want)
 {
     int fd = open("/proc/self/exe", O_RDONLY);
@@ -106,10 +107,11 @@ static void find_syms(const char *const *want)
         const char *str = (const char *)(m + sh[sh[i].sh_link].sh_offset);
         int n = sh[i].sh_size / sizeof(Elf32_Sym);
         for (int k = 0; k < n; k++) {
-            if (ELF32_ST_TYPE(s[k].st_info) != STT_FUNC || !s[k].st_value) continue;
+            int ty = ELF32_ST_TYPE(s[k].st_info);
+            if ((ty != STT_FUNC && ty != STT_OBJECT) || !s[k].st_value) continue;
             const char *nm = str + s[k].st_name;
             for (int w = 0; want[w]; w++) {
-                if (strcmp(nm, want[w]) == 0 && nsyms < 64) {
+                if (strcmp(nm, want[w]) == 0 && nsyms < 96) {
                     snprintf(syms[nsyms].name, sizeof syms[0].name, "%s", nm);
                     syms[nsyms++].addr = s[k].st_value;
                 }
@@ -174,7 +176,15 @@ static int patch(const char *name, int val, void *fn)
 
 static int (*real_open)(const char *, int, ...);
 static int (*real_ioctl)(int, unsigned long, ...);
-static int spi_fd = -1, drm_fd = -1, mem_fd = -1;
+static int spi_fd = -1, drm_fd = -1;
+/* every fd opened as /dev/mem: Z5's pin opens it once for the McSPI
+ * registers and again for the four GPIO banks */
+static int mem_fds[8], nmem_fds;
+static int is_mem_fd(int fd)
+{
+    for (int i = 0; i < nmem_fds; i++) if (mem_fds[i] == fd) return 1;
+    return 0;
+}
 
 static void resolve(void)
 {
@@ -193,9 +203,10 @@ int open(const char *path, int flags, ...)
         va_end(ap);
     }
     if (strcmp(path, "/dev/mem") == 0) {
-        mem_fd = real_open("/dev/zero", O_RDWR);
-        slog("open /dev/mem -> /dev/zero (fd %d)", mem_fd);
-        return mem_fd;
+        int fd = real_open("/dev/zero", O_RDWR);
+        if (fd >= 0 && nmem_fds < 8) mem_fds[nmem_fds++] = fd;
+        slog("open /dev/mem -> /dev/zero (fd %d)", fd);
+        return fd;
     }
     if (strncmp(path, "/dev/spidev", 11) == 0) {
         spi_fd = real_open("/dev/null", O_RDWR);
@@ -218,7 +229,7 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
 {
     static void *(*real_mmap)(void *, size_t, int, int, int, off_t);
     if (!real_mmap) real_mmap = dlsym(RTLD_NEXT, "mmap");
-    if (fd >= 0 && fd == mem_fd)
+    if (fd >= 0 && is_mem_fd(fd))
         return real_mmap(addr, len, prot, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     return real_mmap(addr, len, prot, flags, fd, off);
 }
@@ -493,6 +504,9 @@ static get_pf_t get_pf;
 static set_sys_t set_sys;
 static get_sys_t get_sys;
 static get_n_t lamp_get, sol_get;
+/* Z5 (Cactus Canyon's pin, below): its I/O block and number maps */
+static uint8_t *z5io;
+static int32_t *z5_swmap, *z5_solmap, *z5_flashmap, *z5_lpmap;
 
 /* The board.  The program's switch array holds what the WPC CPU reads: a
  * set bit is a CLOSED switch, except an opto, which reads set when its beam
@@ -516,8 +530,13 @@ static get_n_t lamp_get, sol_get;
  * kickout whose coil (sw:coil) puts it back in play.  Counting, not
  * physics. */
 static uint8_t idle[100], have_idle, opto[100];
+/* switches closed while the machine rests that no program sets itself
+ * (Z5: COIN DOOR CLOSED, ALWAYS CLOSED): $CGC_BALLS "closed=22,24" */
+static int rest_closed[8], nrest_closed;
 static int trough[8], ntrough, trough_n, eject_coil, shooter_sw, exit_sw, launch_coil;
 static int holes[16][2], nholes, held[100];
+/* balls in the shooter lane: a kick with one already there stacks a second
+ * behind it, as on the machine (refusing it, pin re-kicks forever) */
 static int shooter_ball, in_play;
 /* A two-position motor (MB's up/down bank and Frankenstein table, MM's
  * drawbridge): its coil runs the motor, a switch closes at each end.  The
@@ -587,7 +606,7 @@ static void parse_balls(void)
 {
     const char *c = getenv("CGC_BALLS");
     if (!c) return;
-    char buf[256], *save = NULL;
+    char buf[512], *save = NULL;
     snprintf(buf, sizeof buf, "%s", c);
     for (char *kv = strtok_r(buf, ";", &save); kv; kv = strtok_r(NULL, ";", &save)) {
         char *v = strchr(kv, '=');
@@ -606,6 +625,8 @@ static void parse_balls(void)
             launch_coil = atoi(v);
         } else if (!strcmp(kv, "exit")) {
             exit_sw = atoi(v);
+        } else if (!strcmp(kv, "closed")) {
+            nrest_closed = int_list(v, rest_closed, 8);
         } else if (!strcmp(kv, "mechs")) {
             /* "16:81:82,15:83:84" - motor coil : rest end : far end */
             for (char *t = v; t && *t && nmechs < 8; ) {
@@ -638,18 +659,39 @@ static void parse_balls(void)
          ntrough, eject_coil, shooter_sw, nholes, nmechs);
 }
 
+/* The machine at rest, as far as the board models it.  board_mu held.
+ * Every opto clear (MB's program powers up with them all at 0, blocked,
+ * and its ROM then asks for the opto 12 V fuses), the switches that rest
+ * closed, each motor at its rest end, then the balls where they rest:
+ * the trough full (its eject/jam opto clear), shooter lane and kickouts
+ * empty. */
+static int z5_rested;
+static void board_rest(void)
+{
+    for (int n = 11; n <= 88; n++)
+        if (valid_sw(n) && opto[n]) sw_set(n, 0);
+    for (int i = 0; i < nrest_closed; i++) sw_set(rest_closed[i], 1);
+    for (int i = 0; i < nmechs; i++) {
+        sw_set(mechs[i].sw[0], 1);
+        sw_set(mechs[i].sw[1], 0);
+    }
+    trough_show();
+    sw_set(shooter_sw, 0);
+    if (exit_sw) sw_set(exit_sw, 0);
+    for (int i = 0; i < nholes; i++) sw_set(holes[i][0], 0);
+}
+
 static void on_coil(int n)
 {
-    if (n == eject_coil && trough_n > 0 && !shooter_ball && !shoot_at) {
+    if (n == eject_coil && trough_n > 0 && !shoot_at) {
         trough_n--;
         sw_set(trough[0], 0);           /* the kicked ball leaves position 1 */
         roll_at = now_ms + ROLL_MS;
         shoot_at = now_ms + SHOOT_MS;
         if (exit_sw) { exit_on = now_ms + 100; exit_off = now_ms + 250; }
     }
-    if (n == launch_coil && shooter_ball) {
-        shooter_ball = 0;
-        sw_set(shooter_sw, 0);
+    if (n == launch_coil && shooter_ball) {   /* the front ball */
+        if (--shooter_ball == 0) sw_set(shooter_sw, 0);
         in_play++;
     }
     for (int i = 0; i < nholes; i++) {
@@ -673,10 +715,10 @@ static void do_line(char *l)
     } else if (sscanf(l, "sys %d %d %d", &a, &b, &c) == 3 && set_sys) {
         set_sys(a, b, c);
     } else if (!strcmp(l, "plunge")) {
-        if (shooter_ball) {
+        if (shooter_ball) {                 /* a stack goes out together */
+            in_play += shooter_ball;
             shooter_ball = 0;
             sw_set(shooter_sw, 0);
-            in_play++;
         }
     } else if (!strcmp(l, "drain")) {
         if (in_play > 0 && trough_n < ntrough) {
@@ -738,7 +780,7 @@ static void *board_thread(void *unused)
         if (shoot_at && ms >= shoot_at) {
             pthread_mutex_lock(&board_mu);
             shoot_at = 0;
-            shooter_ball = 1;
+            shooter_ball++;
             sw_set(shooter_sw, 1);
             pthread_mutex_unlock(&board_mu);
         }
@@ -750,19 +792,7 @@ static void *board_thread(void *unused)
             for (int n = 11; n <= 88; n++)
                 if (valid_sw(n)) idle[n] = get_pf(n) ? 1 : 0;
             have_idle = 1;
-            /* every opto clear (MB's program powers up with them all at 0,
-             * blocked, and its ROM then asks for the opto 12 V fuses),
-             * then the balls where they rest */
-            for (int n = 11; n <= 88; n++)
-                if (valid_sw(n) && opto[n]) sw_set(n, 0);
-            for (int i = 0; i < nmechs; i++) {  /* each motor at its rest end */
-                sw_set(mechs[i].sw[0], 1);
-                sw_set(mechs[i].sw[1], 0);
-            }
-            trough_show();
-            sw_set(shooter_sw, 0);
-            if (exit_sw) sw_set(exit_sw, 0);
-            for (int i = 0; i < nholes; i++) sw_set(holes[i][0], 0);
+            if (!z5_rested) board_rest();
             pthread_mutex_unlock(&board_mu);
             {
                 char set[256] = "";
@@ -883,10 +913,80 @@ static void *state_thread(void *unused)
 
 /* A crash says where, in the program's own addresses: the rig's log is
  * the only record of a run nobody watched. */
+/* An unaligned LDRD/STRD/LDM/STM.  ARMv7 faults on those; the machine's
+ * kernel fixes them up (/proc/cpu/alignment) and the game never knows -
+ * Cactus Canyon's bcd_clear stores a score with STRD at an address only
+ * 2-aligned, every ball start.  qemu-arm raises SIGBUS instead, so do
+ * what the kernel does: the access byte by byte, then step past it.
+ * Thumb-2 only (the CGC programs are Thumb); 1 = done. */
+static unsigned long n_fixups;
+static int fixup_unaligned(mcontext_t *m)
+{
+    unsigned long *r = &m->arm_r0;      /* r0..r15 in order */
+    if (!(m->arm_cpsr & 0x20)) return 0;                /* ARM state */
+    if (m->arm_cpsr & 0x0600fc00) return 0;             /* inside an IT block */
+    const uint16_t *pc = (const uint16_t *)(uintptr_t)m->arm_pc;
+    uint16_t h1 = pc[0], h2 = pc[1];
+    int len = 4;
+    if ((h1 & 0xfe40) == 0xe840 && (h1 & 0x0120)) {     /* LDRD/STRD imm */
+        int p = h1 >> 8 & 1, u = h1 >> 7 & 1, w = h1 >> 5 & 1, l = h1 >> 4 & 1;
+        int rn = h1 & 15, rt = h2 >> 12, rt2 = h2 >> 8 & 15;
+        if (rn == 15) return 0;
+        uint32_t off = (h2 & 0xff) << 2, base = r[rn];
+        uint32_t wb = u ? base + off : base - off, a = p ? wb : base;
+        uint32_t v[2];
+        if (l) { memcpy(v, (void *)(uintptr_t)a, 8); r[rt] = v[0]; r[rt2] = v[1]; }
+        else { v[0] = r[rt]; v[1] = r[rt2]; memcpy((void *)(uintptr_t)a, v, 8); }
+        if (w) r[rn] = wb;
+    } else if ((h1 & 0xffd0) == 0xe890 || (h1 & 0xffd0) == 0xe880 ||
+               (h1 & 0xffd0) == 0xe910 || (h1 & 0xffd0) == 0xe900) {   /* LDM/STM.W */
+        int db = (h1 & 0xff00) == 0xe900, w = h1 >> 5 & 1, l = h1 >> 4 & 1, rn = h1 & 15;
+        uint16_t list = h2;
+        if (rn == 15 || (list & 0x8000 && !l)) return 0;
+        int n = __builtin_popcount(list);
+        uint32_t a = db ? r[rn] - 4 * n : r[rn], next = db ? r[rn] - 4 * n : r[rn] + 4 * n;
+        unsigned long newpc = 0;
+        for (int k = 0; k < 16; k++) {
+            if (!(list & (1 << k))) continue;
+            uint32_t v;
+            if (l) { memcpy(&v, (void *)(uintptr_t)a, 4); if (k == 15) newpc = v; else r[k] = v; }
+            else { v = r[k]; memcpy((void *)(uintptr_t)a, &v, 4); }
+            a += 4;
+        }
+        if (w && !(l && (list & (1 << rn)))) r[rn] = next;
+        if (newpc) {                    /* ldm ..., pc: an interworking return */
+            m->arm_pc = newpc & ~1ul;
+            if (newpc & 1) m->arm_cpsr |= 0x20; else m->arm_cpsr &= ~0x20ul;
+            len = 0;
+        }
+    } else if ((h1 & 0xf000) == 0xc000) {               /* 16-bit LDMIA/STMIA */
+        int l = h1 >> 11 & 1, rn = h1 >> 8 & 7;
+        uint8_t list = h1 & 0xff;
+        uint32_t a = r[rn];
+        for (int k = 0; k < 8; k++) {
+            if (!(list & (1 << k))) continue;
+            uint32_t v;
+            if (l) { memcpy(&v, (void *)(uintptr_t)a, 4); r[k] = v; }
+            else { v = r[k]; memcpy((void *)(uintptr_t)a, &v, 4); }
+            a += 4;
+        }
+        if (!l || !(list & (1 << rn))) r[rn] = a;
+        len = 2;
+    } else {
+        return 0;
+    }
+    m->arm_pc += len;
+    if (n_fixups++ < 5)
+        slog("unaligned access fixed up at pc %#lx (%04x %04x), as the machine's kernel does",
+             (unsigned long)(uintptr_t)pc, h1, h2);
+    return 1;
+}
+
 static void on_crash(int sig, siginfo_t *si, void *ctx)
 {
     ucontext_t *uc = ctx;
     mcontext_t *m = &uc->uc_mcontext;
+    if (sig == SIGBUS && fixup_unaligned(m)) return;
     slog("signal %d at pc %#lx lr %#lx addr %p; r0 %#lx r1 %#lx r2 %#lx r3 %#lx r4 %#lx r5 %#lx sp %#lx",
          sig, m->arm_pc, m->arm_lr, si->si_addr, m->arm_r0, m->arm_r1, m->arm_r2,
          m->arm_r3, m->arm_r4, m->arm_r5, m->arm_sp);
@@ -943,6 +1043,200 @@ static int state_sol(int n)
     return wpc_state[9 + ((n - 1) >> 3)] & (1 << ((n - 1) & 7));
 }
 
+/* ------------------------------------------- Z5: Cactus Canyon's pin -- */
+
+/* Cactus Canyon runs `pin`, CGC's own engine ("Z5": no 6809, no Williams
+ * ROM in the loop).  Its board traffic, once a millisecond in
+ * z5_io_gameloop:
+ *
+ *   z5_spi_packet_xfer(24, out, in)  the playfield PIC: the reply holds a
+ *       0x43 start byte, 12 data bytes, their sum (with the 0x43) and a
+ *       status byte; data bytes 1..8 are the switch matrix, one bit per
+ *       switch, 0 = closed contact (active low), z5_sw_unstuff reads them
+ *       into switch entries 16..79.  A reply without the 0x43 is a PIC
+ *       error, and the matrix is not read at all.
+ *   z5_gpio_xfer(in, out)  the cabinet bus: in[0..1] (g_z5io+0x29) are
+ *       switch entries 0..15 (coin door, flipper buttons), active low.
+ *   z5_spix and z5_spi_cs_*  the FRAM, the same chip and commands as the
+ *       WPC titles' (03 read, 06 + 02 write), 8 KiB.
+ *
+ * Every switch entry is 196 bytes at g_z5io + n*196: +0x2e flags (0x10:
+ * the contact reads inverted, an opto), +0x30 raw, +0x38 the logical state
+ * the game reads (z5_sw_get: 1 = active - a ball in a popper, a ball on a
+ * trough opto).  pin numbers its inputs its own way and builds the table
+ * from the WPC numbers at power-up: z5_sw_wms_to_cgc_map[] by WPC's linear
+ * number (D1..D8 = 1..8, matrix 11..88 = 9..72, flipper switches 0x81..),
+ * likewise z5_sol_ / z5_flash_ / z5_lp_wms_to_cgc_map for the outputs.
+ *
+ * So here every switch is set by what the GAME should read (closed =
+ * active), through the program's own map and its own opto flag - whether
+ * a switch is an opto is the program's business, not the ROM's '*' (the
+ * ROM marks both poppers as optos; the remake's pin does not).  The rest
+ * of the rig (ball model, control FIFO, state file) is the WPC titles'. */
+static uint8_t z5_pf[8] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+static uint8_t z5_cab[2] = { 0xff, 0xff };
+static int (*z5_sol_get_fn)(int), (*z5_flash_get_fn)(int);
+#define Z5_NSW 0x61                     /* switch entries 0..96 */
+#define Z5_SW(c) (z5io + (c) * 196)
+
+/* the maps are built at power-up: entries 1..256 filled with -1, then the
+ * wired ones; 0xf0 is never a WPC input */
+static int z5_ready(void) { return z5_swmap && z5_swmap[0xf0] == -1; }
+
+static int z5_cgc(int linear)
+{
+    if (!z5_ready() || linear < 0 || linear > 0xff) return -1;
+    int c = z5_swmap[linear];
+    return c >= 0 && c < Z5_NSW ? c : -1;
+}
+
+/* entry c's flags: 0x20 an opto (the game's WPC layer reads it active when
+ * the beam is blocked, z5_sw_get 0), 0x10 its contact reads inverted */
+#define Z5_OPTO(c) (!!(Z5_SW(c)[0x2e] & 0x20))
+#define Z5_INV(c) (!!(Z5_SW(c)[0x2e] & 0x10))
+
+/* "closed" = active as the game reads it: a ball on a trough opto, a ball
+ * in a popper.  The reading z5_sw_get gives is that, inverted for an opto;
+ * the raw contact is the reading, inverted again for an inverted one. */
+static void z5_entry_set(int c, int closed)
+{
+    int raw = !!closed ^ Z5_OPTO(c) ^ Z5_INV(c);
+    if (c >= 16 && c < 80) {            /* the matrix, from the PIC */
+        int b = c - 16;
+        if (raw) z5_pf[b >> 3] &= ~(1 << (b & 7));
+        else z5_pf[b >> 3] |= 1 << (b & 7);
+    } else if (c < 16) {                /* the cabinet bus */
+        if (raw) z5_cab[c >> 3] &= ~(1 << (c & 7));
+        else z5_cab[c >> 3] |= 1 << (c & 7);
+    } else {                            /* nothing reads these from a bus */
+        *(int32_t *)(Z5_SW(c) + 0x30) = raw;
+    }
+}
+
+static int z5_entry_get(int c) { return (*(int32_t *)(Z5_SW(c) + 0x38) != 0) ^ Z5_OPTO(c); }
+
+/* WPC matrix 11..88 -> WPC linear 9..72 */
+static int wpc_linear(int n) { return (n / 10 - 1) * 8 + (n % 10 - 1) + 9; }
+
+static void z5_set_pf(int n, int closed)
+{
+    int c = z5_cgc(wpc_linear(n));
+    if (c >= 0) z5_entry_set(c, closed);
+}
+static int z5_get_pf(int n)
+{
+    int c = z5_cgc(wpc_linear(n));
+    return c >= 0 && z5_entry_get(c);
+}
+/* bank 0: the coin door D1..D8 (linear 1..8); bank 1: flipper switches */
+static void z5_set_sys(int bank, int bit, int closed)
+{
+    int c = z5_cgc(bank ? 0x81 + bit : 1 + bit);
+    if (c >= 0) z5_entry_set(c, closed);
+}
+static int z5_get_sys(int bank, int bit)
+{
+    int c = z5_cgc(bank ? 0x81 + bit : 1 + bit);
+    return c >= 0 && z5_entry_get(c);
+}
+/* lamps 11..88 by WPC number: linear 1..64.  A lamp entry is 32 bytes at
+ * g_z5io+0x4980; +0x2e is the bit driven to the lamp board
+ * (z5_io_map_output_table) - z5_lamp_get's +0x2c stays 0 through attract */
+static int z5_lamp(int n)
+{
+    if (!z5_ready()) return 0;
+    int c = z5_lpmap[(n / 10 - 1) * 8 + (n % 10 - 1) + 1];
+    return c >= 0 && c < 0x50 && z5io[0x4980 + c * 0x20 + 0x2e];
+}
+/* solenoids 1..32 by WPC number: a coil, or a flasher (WPC 17..28) */
+static int z5_sol(int n)
+{
+    if (!z5_ready()) return 0;
+    int c = z5_solmap[n];
+    if (c >= 0 && c < 0x18 && z5_sol_get_fn) return z5_sol_get_fn(c);
+    c = z5_flashmap[n];
+    if (c >= 0 && c < 0x20 && z5_flash_get_fn) return z5_flash_get_fn(c);
+    return 0;
+}
+
+/* the first exchange after the maps exist: the machine at rest, before
+ * pin's power-up checks read it (all trough optos alike = OPTO TROUGH BAD) */
+static void z5_first(void)
+{
+    if (z5_rested || !z5_ready()) return;
+    pthread_mutex_lock(&board_mu);
+    for (int c = 0; c < Z5_NSW; c++) z5_entry_set(c, 0);
+    board_rest();
+    z5_rested = 1;
+    pthread_mutex_unlock(&board_mu);
+    char line[512] = "";
+    for (int c = 0; c < Z5_NSW; c++)
+        if (Z5_SW(c)[0x2e] & 0x30)
+            snprintf(line + strlen(line), sizeof line - strlen(line), " %d/%02x", c, Z5_SW(c)[0x2e]);
+    slog("Z5 board at rest; opto/inverted entries:%s", line);
+    /* pin's own wiring, for anyone matching it to the ROM's names */
+    for (int lin = 1; lin <= 0xff; lin++) {
+        int c = z5_swmap[lin];
+        if (c < 0 || c >= Z5_NSW) continue;
+        slog("Z5 input %#x -> entry %d '%.16s' flags %02x", lin, c,
+             (const char *)Z5_SW(c) + 0xdc, Z5_SW(c)[0x2e]);
+    }
+}
+
+static int z5_pic_xfer(int len, const uint8_t *out, uint8_t *in)
+{
+    (void)out;
+    z5_first();
+    memset(in, 0, len);
+    if (len < 15) return 0;
+    in[0] = 0x43;
+    memcpy(in + 2, z5_pf, 8);
+    unsigned sum = 0x43;
+    for (int i = 1; i <= 12; i++) sum += in[i];
+    in[13] = sum & 0xff;
+    return 0;
+}
+
+static void z5_gpio(uint8_t *in, uint8_t *out)
+{
+    (void)out;
+    z5_first();
+    in[0] = z5_cab[0];
+    in[1] = z5_cab[1];
+}
+
+static int z5_setup(void)
+{
+    if (!sym("z5_main") || !sym("g_z5io")) return 0;
+    z5io = (uint8_t *)(uintptr_t)sym("g_z5io");
+    z5_swmap = (int32_t *)(uintptr_t)sym("z5_sw_wms_to_cgc_map");
+    z5_solmap = (int32_t *)(uintptr_t)sym("z5_sol_wms_to_cgc_map");
+    z5_flashmap = (int32_t *)(uintptr_t)sym("z5_flash_wms_to_cgc_map");
+    z5_lpmap = (int32_t *)(uintptr_t)sym("z5_lp_wms_to_cgc_map");
+    z5_sol_get_fn = (int (*)(int))(uintptr_t)sym("z5_sol_get_logical");
+    z5_flash_get_fn = (int (*)(int))(uintptr_t)sym("z5_flash_get");
+    if (!z5_swmap || !z5_solmap || !z5_flashmap || !z5_lpmap) {
+        slog("Z5: the program's wms_to_cgc maps are missing");
+        return 0;
+    }
+    fram_open();
+    hook("z5_spi_setup", fram_nop);
+    hook("z5_spi_cs_on", fram_cs_on);
+    hook("z5_spi_cs_off", fram_cs_off);
+    hook("z5_spi_done", fram_nop);
+    hook("z5_spix", fram_x);
+    hook("z5_spi_packet_xfer", z5_pic_xfer);
+    hook("z5_gpio_xfer", z5_gpio);
+    set_pf = z5_set_pf;
+    get_pf = z5_get_pf;
+    set_sys = z5_set_sys;
+    get_sys = z5_get_sys;
+    lamp_get = z5_lamp;
+    sol_get = z5_sol;
+    slog("Z5 engine (pin): g_z5io at %p", (void *)z5io);
+    return 1;
+}
+
 /* ------------------------------------------------------------- start -- */
 
 __attribute__((constructor)) static void cgcshim_init(void)
@@ -950,7 +1244,12 @@ __attribute__((constructor)) static void cgcshim_init(void)
     static const char *const want[] = {
         "io", "sam_io", "spi_init", "emu_setPF_Sw", "emu_getPF_Sw", "emu_setSys_Sw",
         "emu_getSys_Sw", "wms_lamp_get", "wms_sol_get",
-        "spi_setup", "spi_cs_on", "spi_cs_off", "spi_done", "spix", NULL
+        "spi_setup", "spi_cs_on", "spi_cs_off", "spi_done", "spix",
+        /* Z5 (pin) */
+        "z5_main", "g_z5io", "z5_sw_wms_to_cgc_map", "z5_sol_wms_to_cgc_map",
+        "z5_flash_wms_to_cgc_map", "z5_lp_wms_to_cgc_map", "z5_sol_get_logical",
+        "z5_flash_get", "z5_spi_setup", "z5_spi_cs_on", "z5_spi_cs_off",
+        "z5_spi_done", "z5_spix", "z5_spi_packet_xfer", "z5_gpio_xfer", NULL
     };
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
@@ -962,6 +1261,16 @@ __attribute__((constructor)) static void cgcshim_init(void)
     resolve();
     find_syms(want);
     slog("pid %d, %d of the program's functions found", getpid(), nsyms);
+    if (z5_setup()) {
+        parse_balls();
+        /* pin knows its optos (z5_entry_set): the names' '*' is not used */
+        memset(opto, 0, sizeof opto);
+        pthread_t t;
+        pthread_create(&t, NULL, ctl_thread, NULL);
+        pthread_create(&t, NULL, board_thread, NULL);
+        pthread_create(&t, NULL, state_thread, NULL);
+        return;
+    }
     /* the once-a-millisecond board exchange: io() (MM) or sam_io() (AFM) */
     if (!stub_return("io", 1) && !stub_return("sam_io", 1))
         slog("no io() or sam_io() to stub: the board traffic will run");

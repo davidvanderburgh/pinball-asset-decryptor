@@ -49,6 +49,14 @@ def layout_image(recs):
                                             len(kv[1]), kv[0] == "playfield"))[0]
 
 
+def is_playfield_picture(name):
+    """A top-down playfield drawing, by the names every card uses for one:
+    `playfield`, `TestMenu/picnic_pf`, `TestMode/Playfield_AK_..._cropped`.
+    Not the cabinet front, topper, speaker panel or backbox."""
+    n = (name or "").lower().rsplit("/", 1)[-1]
+    return "playfield" in n or n == "pf" or n.endswith("_pf") or n.startswith("pf_")
+
+
 def _words(s):
     return set(re.split(r"[^a-z0-9]+", s.lower()))
 
@@ -110,6 +118,16 @@ def build(elf, card_root, title, out, switch_list=None):
     drows = s3nodes.directory(e, cat)
     recs = s3nodes.records(e, drows)
     image = layout_image(recs)
+    # A PLAYFIELD OR NOTHING (David: Fallout's window showed the cabinet
+    # front). fallout_le 0.81 places no playfield device - its records' x, y
+    # are all 0 - so the vote fell to the cabinet front's 18. Not a playfield:
+    # no layout at all, and the window lists every switch (clickable) beside
+    # the live light grid, as for a Spike 2 title without positions.
+    if image and not is_playfield_picture(image):
+        print("[s3pf] %s places nothing on its playfield (only on %s): the "
+              "window lists the switches instead" % (title, image), flush=True)
+        recs = [dict(r, image="") for r in recs]
+        image = None
     size = (0, 0)
     pics = {}
     for name in sorted({r["image"] for r in recs if r["image"] and r["x"]}):
@@ -145,7 +163,7 @@ def build(elf, card_root, title, out, switch_list=None):
     print("[s3pf] %s: %d devices, %d on %s%s" % (
         title, len(recs), placed, image or "(no layout)",
         (" (%s, %dx%d)" % (os.path.basename(pics[image]), size[0], size[1]))
-        if image in pics else " - no picture on the card"), flush=True)
+        if image in pics else (" - no picture on the card" if image else "")), flush=True)
     return image, pics.get(image)
 
 

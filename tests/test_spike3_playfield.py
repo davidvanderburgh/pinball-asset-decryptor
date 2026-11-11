@@ -100,3 +100,14 @@ def test_s3leds_publishes_lamps_and_coils_at_padled_offsets(tmp_path):
     assert struct.unpack_from("<I", d, s3leds.WIDE_DECODED)[0] == 1
     led.close()
     assert not path.exists()            # gone = the run ended (playfield.py)
+
+
+def test_a_cabinet_front_is_never_the_playfield():
+    """fallout_le 0.81 places nothing on its playfield; the window drew its
+    cabinet front instead (David). Only a playfield picture is a layout."""
+    for name in ("playfield", "TestMenu/picnic_pf", "TestMode/Playfield_AK_SW_PIN_DIAG_GRAPHIC_cropped"):
+        assert s3pf.is_playfield_picture(name), name
+    for name in ("System/TestMode/spike_2_no_tournament_cabinet_front_cropped",
+                 "System/TestMode/universal_topper_scaled", "TestMenu/topper_tm",
+                 "System/TestMode/spike_3_speaker_panel", "TestMenu/picnic_bp"):
+        assert not s3pf.is_playfield_picture(name), name

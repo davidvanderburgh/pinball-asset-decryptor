@@ -104,7 +104,7 @@ echo "[s3run] card tree $TREE, slot $SLOT ($SD)"
 # this slot's overlay - libGLESv2/libEGL over the card's Mesa ones, s3kms.so
 # preloaded - and its own padglhost renders the ring headless (surfaceless EGL
 # on the GPU) and dumps every 30th frame to $SD/frames as PNG.
-HOSTPID=""
+HOSTPID=""; AS_USER=()
 # a run killed from outside (its session ended) leaves its setsid helpers
 # behind; an old padglhost kept dumping its own frames into this slot's
 # fresh frames dir for hours, and the "newest" frame was then a stale one
@@ -129,10 +129,23 @@ if [ "$BRIDGE" = 1 ]; then
         # WSL user, not root, so the block is everyone's to write
         rm -rf "$SD/dump"; mkdir -p "$SD/dump"; chmod 777 "$SD/dump"
         RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/dump/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game)
+        # AS THE DESKTOP'S USER, NOT ROOT (watch.sh learned it first): as
+        # root, padglhost cannot attach to the WSLg X server's shared memory -
+        # "MESA: error: Failed to attach to x11 shm" on repeat, 0.5 fps, a
+        # black window. The X socket's owner is that user; the slot directory
+        # becomes theirs so the renderer can make its ring (root still writes
+        # anything in it).
+        XU=$(stat -c %U "/tmp/.X11-unix/X${DISPLAY#*:}" 2>/dev/null | head -1)
+        XU=${XU%%.*}
+        if [ "$(id -u)" = 0 ] && [ -n "$XU" ] && [ "$XU" != root ] && id -u "$XU" >/dev/null 2>&1; then
+            chown "$XU" "$SD" "$SD/frames"
+            AS_USER=(runuser -u "$XU" --)
+            echo "[s3run] the window, as $XU (the X display's owner)"
+        fi
     else
         RENV=(-u DISPLAY -u WAYLAND_DISPLAY EGL_PLATFORM=surfaceless)
     fi
-    env "${RENV[@]}" GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12} \
+    "${AS_USER[@]}" env "${RENV[@]}" GALLIUM_DRIVER=${GALLIUM_DRIVER:-d3d12} \
         PAD_GL_W=${PAD_S3_W:-1920} PAD_GL_H=${PAD_S3_H:-1080} PAD_GL_DUMP="$SD/frames" \
         PAD_GL_FRAME_EVERY=${PAD_GL_FRAME_EVERY:-30} PAD_GL_MAX_FRAMES=${PAD_GL_MAX_FRAMES:-$MAXFR} \
         PAD_VID_SHM="$SD/padvid.shm" \
@@ -191,6 +204,7 @@ if [ "$BUS" = 1 ]; then
         DEVBINDS="ttyAMA5=$(cat "$SD/bridge.path")"    # spidev4.0: s3dev.so
     fi
     for i in $(seq 1 50); do [ -s "$SD/padvid.shm" ] && [ -s "$SD/s3vid.feed" ] && break; sleep 0.1; done
+    chmod 666 "$SD/padvid.shm" 2>/dev/null     # the renderer may be the desktop user
     if [ -s "$SD/padvid.shm" ] && [ -s "$SD/s3vid.feed" ]; then
         RUNBINDS="s3vid=$SD/s3vid.feed padvid=$SD/padvid.shm"
     else
@@ -247,12 +261,14 @@ AUDPID=""
 pkill -f "playaudio.sh $SD/audio/" 2>/dev/null && echo "[s3run] stopped a leftover player"
 if [ "${PAD_S3_AUDIO:-0}" = 1 ]; then
     rm -rf "$SD/audio"; mkdir -p "$SD/audio"
+    # the player is the desktop's user too (its sound server's), as the window
+    [ ${#AS_USER[@]} -gt 0 ] && chown "${AS_USER[2]}" "$SD/audio"
     if [ "${PAD_S3_AUDIO_PLAYER:-1}" = 1 ]; then
         # the player's TCP hop (WSL -> the Windows speaker, or a relay) gets
         # a port of this slot's own: Spike 2 rigs hold 45997+slot, so a
         # Spike 3 slot of the same number would take theirs
         PAD_AUDIO_PORT=${PAD_AUDIO_PORT:-$((46100 + SLOT))} \
-        setsid bash "$S/../spike2_emu/playaudio.sh" "$SD/audio/audio.fifo" 44100 2 \
+        "${AS_USER[@]}" setsid bash "$S/../spike2_emu/playaudio.sh" "$SD/audio/audio.fifo" 44100 2 \
             "$SD/audio/audio.fmt" > "$SD/playaudio.log" 2>&1 &
         AUDPID=$!
         echo "[s3run] sound: playaudio.sh (log $SD/playaudio.log)"
@@ -393,7 +409,7 @@ script -q -f -e -c "timeout -s TERM -k 5 $SECS chroot $R $PRELOAD $QEMU_INTERP $
 RC=$?
 # script's own exit is the child's (-e); a dumped core reads 128+signal
 grep -q 'COMMAND_EXIT_CODE="134"' "$SD/game.out" && RC=134
-echo "[s3run] exit $RC after $(echo "$(date +%s.%N) - $T0" | bc | cut -c1-6) s"
+echo "[s3run] exit $RC after $(python3 -c "import sys,time; print('%.1f' % (time.time() - float(sys.argv[1])))" "$T0") s"
 case $RC in
     0) echo "[s3run]   0 = RESTART REQUESTED" ;; 1) echo "[s3run]   1 = REBOOT REQUESTED" ;;
     2) echo "[s3run]   2 = EXIT REQUESTED" ;; 3) echo "[s3run]   3 = POWER LOSS" ;;
@@ -418,7 +434,8 @@ if [ -n "$AUDPID" ]; then
     grep -a "\[s3alsa\] playing\|closed:" "$SD/game.err" | tail -2 | sed 's/^/[s3run]   sound: /'
 fi
 if [ -n "$HOSTPID" ]; then
-    kill -INT -"$HOSTPID" 2>/dev/null; sleep 1; kill -9 -"$HOSTPID" 2>/dev/null
+    kill -INT -"$HOSTPID" 2>/dev/null; pkill -INT -f "padglhost $SD/padgl.ring" 2>/dev/null
+    sleep 1; kill -9 -"$HOSTPID" 2>/dev/null; pkill -9 -f "padglhost $SD/padgl.ring" 2>/dev/null
     echo "[s3run] frames dumped: $(ls "$SD/frames" | wc -l) ($SD/frames)"
     grep -a -E "ops:|UNKNOWN|FAILED|PRESENTTEX|error" "$SD/padglhost.log" | tail -6 | sed 's/^/[s3run]   host: /'
 fi

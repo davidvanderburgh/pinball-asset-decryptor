@@ -157,6 +157,14 @@ puts it back. The app's Visual Pinball tab says the same under each row's
 card and on its Card images row, with the cache's room and a Cache… to the
 Emulate tab's cache window.
 
+**A launcher that exits during startup.** A board record alone does not
+prove that the game came up. The bridge cleans the failed run it started
+and reports the failure. The kit can opt specific titles into one retry,
+for example `"startup_retry_titles": ["batman"]`; the default is no retry.
+The old run is stopped before the new one starts, and closing the table
+during either cleanup or restart stops recovery. This applies only before
+the table attaches to a live game; it does not restart a game being played.
+
 **Sharing a table with somebody else.** The kit never ships a table or a
 card. What the other person needs: the PAD installer (the emulator, its
 runtime distro, the bundled Python with pywin32, and this kit - all in it),
@@ -318,7 +326,10 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `CreateObject("PinUpPlayer.PinDisplay")` on a machine without it, so the
   patcher scans every `PuPlayer.` call, writes a `PadNoPuP` class with those
   methods and argument counts, and wraps the CreateObject so the class
-  stands in.
+  stands in. `"pup_stub": "always"` uses the silent class even when PinUP
+  is installed. Batman and Iron Maiden use this mode to keep their tribute
+  music and callouts from playing over the machine's audio; every creation,
+  including a later LoadCoreFiles/PuPInit, uses the same silent shape.
 * **DOF stays on B2S.Server** (PAD-841): a tribute's `LoadEM` puts
   B2S.Server in `Controller`, and controller.vbs's `DOF` sub sends through
   `Controller.B2SSetData`. The bridge's Table1_Init keeps that object as
@@ -698,7 +709,23 @@ like a Spike 2 one (`padlaunch.Spike1Launch`: start.sh with the title's
 .iso, on the app's data disk, visible and with sound; `padvpx run got_le
 --mute` by hand) - ONE rig, so a run of another title is refused, not
 replaced. The game's DMD is drawn by the app's Spike 1 tab, so a player keeps
-the app open beside Visual Pinball. The author's checklist (`padvpx
+the app open beside Visual Pinball. On Windows, an optional external native
+viewer can instead be set in the kit's `spike1_dmd_viewers`, for example:
+
+```json
+{"spike1_dmd_viewers": {"ghostbusters_le": "C:\\Pinball\\DmdViewer.exe"}}
+```
+
+The value is an executable path, or an argument list beginning with its
+executable. The launcher appends the Windows path to `spike1-0.run` and the
+game title as two arguments. The viewer reads that board record's distro/root
+to find the active `spi0.cap`; renderer libraries and colour data are the
+viewer's own configuration, supplied separately. No helper is started unless
+configured. Its output joins the title's launch log, failure to start it does
+not stop the game, and the launcher reaps only the viewer process it created
+when the table exits. There is no process-name search or global viewer kill.
+
+The author's checklist (`padvpx
 checklist got_le`, the tab's "For table authors") reads a Spike 1 title
 from its game program and switch map in the rig's cache (every Spike 1
 game extracted on the PC is offered): the switches with their slot ids,

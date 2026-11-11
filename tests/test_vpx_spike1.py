@@ -373,6 +373,20 @@ def test_launch_finds_a_spike1_card_in_the_sister_library(tmp_path, monkeypatch)
     assert isinstance(pl.launch_for("spike2", "rush_le", "c.raw"), pl.Launch)
 
 
+@pytest.mark.parametrize("python", [r"C:\PAD App\python\python.exe", ""])
+def test_spike1_launch_passes_the_native_audio_interpreter(monkeypatch, python):
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl, "win_python", lambda: python)
+    monkeypatch.setattr(pl.padpath, "to_wsl", lambda p, d: "mapped:" + p)
+    launch = pl.Spike1Launch("ghostbusters_le", "card.iso", dist="TestRuntime")
+    launch.work = "/work/spike1"
+    env, card = launch.env()
+    expected = ["PAD_WINPYTHON=mapped:" + python] if python else []
+    assert [s for s in env if s.startswith("PAD_WINPYTHON=")] == expected
+    assert "PAD_AUDIO=1" in env and "S1_WORK=/work/spike1" in env
+    assert card == "mapped:card.iso"
+
+
 def test_spike1_launch_refuses_another_titles_run(tmp_path, monkeypatch):
     pl = pytest.importorskip("padlaunch")
     s1 = pytest.importorskip("s1bridge")
@@ -505,6 +519,69 @@ def test_a_malformed_game_field_falls_back_to_the_title(variant_maps, tmp_path):
     b = pc.Bridge()
     b.set_game("odd_table")
     assert b.native_title == "odd_table"
+
+
+@pytest.mark.parametrize("command", [r"C:\DMD Tools\viewer.exe", [r"C:\PAD App\python.exe", "viewer.py"]])
+def test_spike1_starts_only_the_configured_owned_dmd_viewer(monkeypatch, command):
+    from unittest.mock import Mock
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl.sys, "platform", "win32")
+    monkeypatch.setattr(pl, "BOARD", "test-board")
+    monkeypatch.setattr(pl, "kit_load", lambda: {"spike1_dmd_viewers": {"ghostbusters_le": command}})
+    monkeypatch.setattr(pl.os.path, "isfile", lambda p: True)
+    said = []
+    monkeypatch.setattr(pl, "log", said.append)
+    spawn = Mock()
+    spawn.return_value.pid = 4242
+    monkeypatch.setattr(pl.subprocess, "Popen", spawn)
+    launch = pl.Spike1Launch.__new__(pl.Spike1Launch)
+    launch.title, launch.dmd_viewer = "ghostbusters_le", None
+    output = object()
+    launch._start_dmd_viewer(output)
+    expected = [command] if isinstance(command, str) else command
+    assert spawn.call_args.args[0] == expected + [os.path.join("test-board", "spike1-0.run"), "ghostbusters_le"]
+    assert spawn.call_args.kwargs["stdout"] is output
+    assert not spawn.call_args.kwargs.get("shell")
+    assert launch.dmd_viewer is spawn.return_value
+    assert len(said) == 1 and "pid 4242" in said[0] and "ghostbusters_le" in said[0]
+
+
+@pytest.mark.parametrize("command", [None, [], [1], "missing.exe"])
+def test_spike1_missing_or_invalid_viewer_does_not_stop_the_game(monkeypatch, command):
+    from unittest.mock import Mock
+    pl = pytest.importorskip("padlaunch")
+    monkeypatch.setattr(pl.sys, "platform", "win32")
+    monkeypatch.setattr(pl, "kit_load", lambda: {"spike1_dmd_viewers": {"ghostbusters_le": command}})
+    monkeypatch.setattr(pl.os.path, "isfile", lambda p: False)
+    said = []
+    monkeypatch.setattr(pl, "log", said.append)
+    spawn = Mock()
+    monkeypatch.setattr(pl.subprocess, "Popen", spawn)
+    launch = pl.Spike1Launch.__new__(pl.Spike1Launch)
+    launch.title, launch.dmd_viewer = "ghostbusters_le", None
+    launch._start_dmd_viewer(None)
+    spawn.assert_not_called()
+    assert launch.dmd_viewer is None
+    if command:                     # a configured but unusable viewer says which and why
+        assert len(said) == 1 and "ghostbusters_le" in said[0] and repr(command) in said[0]
+    else:                           # an unconfigured one is silent
+        assert said == []
+
+
+def test_spike1_viewer_stop_reaps_only_its_owned_child(monkeypatch):
+    from unittest.mock import Mock
+    pl = pytest.importorskip("padlaunch")
+    launch = pl.Spike1Launch.__new__(pl.Spike1Launch)
+    viewer = Mock()
+    viewer.poll.return_value = None
+    viewer.wait.side_effect = [pl.subprocess.TimeoutExpired("viewer", 3), 0]
+    launch.dmd_viewer = viewer
+    launch._stop_dmd_viewer()
+    viewer.terminate.assert_called_once()
+    viewer.kill.assert_called_once()
+    assert viewer.wait.call_count == 2 and launch.dmd_viewer is None
+    launch._stop_dmd_viewer()   # repeated cleanup cannot stop another process
+    assert viewer.terminate.call_count == 1
 
 
 def test_padvpx_knows_a_maps_platform():

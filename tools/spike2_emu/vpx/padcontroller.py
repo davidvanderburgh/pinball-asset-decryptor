@@ -1576,6 +1576,7 @@ class Bridge:
         self.boot = None
         self.ready_t = 0.0
         self.start_t = time.monotonic()
+        self._start_retried = False
         self.front_done = False            # the LCD window's first grab is undone once, never again
         self.b2s_handed = set()            # backglass windows whose first grab was undone (PAD-893)
         self.front_tries = {}
@@ -1837,12 +1838,45 @@ class Bridge:
             if self._rig_up(data):
                 self._attach(data)
                 return
-        if not self.launch.alive() and self.rig is None:
+        if not self.launch.alive():
+            # A board record can appear before the game is ready. It does
+            # not make an exited launcher alive: clean the run we owned,
+            # including its slot, before reporting failure or trying again.
+            failed = self.launch
+            logfile = failed.logfile
+            self.launch, self.rig = None, None
+            failed.stop()
+            retry_titles = padlaunch.kit_load().get("startup_retry_titles", [])
+            if (self.running and isinstance(retry_titles, list) and self.title in retry_titles
+                    and not self._start_retried):
+                self._start_retried = True
+                log("retrying %s once after its startup process exited" % self.title)
+                self.start_t = time.monotonic()
+                self.boot, self.ready_t = None, 0.0
+                self.front_done, self.front_tries = False, {}
+                self.lcd_placed = False
+                self.lcd_tries = self.lcd_stable = 0
+                retry = padlaunch.launch_for(self.map.platform, self.title, failed.card)
+                self.launch = retry
+                try:
+                    slot = retry.start()
+                    if not self.running:
+                        retry.stop()
+                        if self.launch is retry:
+                            self.launch = None
+                    else:
+                        log("retry started %s on slot %d" % (self.title, slot))
+                    return
+                except Exception as exc:
+                    retry.stop()
+                    if self.launch is retry:
+                        self.launch = None
+                    self._loading_end("failed Startup retry failed: %s" % exc)
+                    return
             log("the run started for %s ended before it came up (see %s)"
-                % (self.title, self.launch.logfile))
+                % (self.title, logfile))
             self._loading_end("failed The emulator stopped before the game came up. Its log: %s"
-                              % self.launch.logfile)
-            self.launch = None
+                              % logfile)
         elif time.monotonic() - self.start_t > self.START_TIMEOUT_S:
             log("the run started for %s is not up after %d s; giving up on it"
                 % (self.title, self.START_TIMEOUT_S))

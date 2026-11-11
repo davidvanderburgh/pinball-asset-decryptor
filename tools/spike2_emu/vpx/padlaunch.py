@@ -766,8 +766,9 @@ class Spike1Launch:
 
     The game's DMD is not a window of the rig's own: the app's Spike 1 tab
     draws it (spike1_windows.py) from the run's spi0.cap, so a player keeps
-    the app open beside Visual Pinball to see it; the tribute's own scripted
-    display keeps running as the shadow game's."""
+    the app open beside Visual Pinball to see it, or configures an optional
+    native viewer in the kit's spike1_dmd_viewers. A viewer this launch
+    starts is stopped with it; an existing app/viewer is left alone."""
 
     def __init__(self, title, card, dist=None, minutes=240):
         self.title = game_for(title)
@@ -781,6 +782,7 @@ class Spike1Launch:
                                       self.distro)
         self.logfile = os.path.join(os.path.dirname(LOG), "padvpx-%s.log" % title)
         self.work = None
+        self.dmd_viewer = None
 
     def work_dir(self):
         """S1_WORK for this run: the app's data disk, else the rig's default."""
@@ -791,6 +793,9 @@ class Spike1Launch:
     def env(self):
         card = padpath.to_wsl(self.card, self.distro)
         env = ["PAD_LABEL=%s" % LABEL, "PAD_HIDDEN=0", "PAD_AUDIO=1", "S1_PIVOT=1"]
+        py = win_python()
+        if py:
+            env.append("PAD_WINPYTHON=%s" % padpath.to_wsl(py, self.distro))
         if sys.platform == "win32":
             env.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD, self.distro))
         if self.work_dir():
@@ -815,6 +820,47 @@ class Spike1Launch:
     def take_slot(self):
         return 0
 
+    def _start_dmd_viewer(self, output):
+        """An optional native viewer consumes the run's spi0.cap via its
+        board record. Own only the process we launch; no app window or
+        already-running viewer is found or stopped."""
+        if sys.platform != "win32":
+            return
+        viewers = kit_load().get("spike1_dmd_viewers") or {}
+        viewer = viewers.get(self.title) if isinstance(viewers, dict) else None
+        if not viewer:
+            return
+        argv = [viewer] if isinstance(viewer, str) else viewer
+        if (not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv)
+                or not os.path.isfile(argv[0])):
+            log("Spike 1 DMD viewer for %s not started: %r is not an existing executable path "
+                "or an argument list starting with one" % (self.title, viewer))
+            return
+        try:
+            self.dmd_viewer = subprocess.Popen(
+                argv + [os.path.join(BOARD, "spike1-0.run"), self.title],
+                stdin=subprocess.DEVNULL, stdout=output, stderr=output,
+                creationflags=_CREATE_NO_WINDOW)
+        except OSError as exc:
+            log("Spike 1 DMD viewer for %s failed: %s" % (self.title, exc))
+            return
+        log("started the Spike 1 DMD viewer for %s (pid %d): %s"
+            % (self.title, self.dmd_viewer.pid, " ".join(argv)))
+
+    def _stop_dmd_viewer(self):
+        viewer, self.dmd_viewer = self.dmd_viewer, None
+        if viewer is None or viewer.poll() is not None:
+            return
+        try:
+            viewer.terminate()
+            try:
+                viewer.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                viewer.kill()
+                viewer.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log("Spike 1 DMD viewer stop failed: %s" % exc)
+
     def start(self):
         why = no_linux(self.distro)
         if why:
@@ -829,6 +875,7 @@ class Spike1Launch:
         out = open(self.logfile, "ab")
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
                                      creationflags=_CREATE_NO_WINDOW)
+        self._start_dmd_viewer(out)
         log("started %s on the Spike 1 rig from %s (distro %s, log %s)"
             % (self.title, self.card, self.distro or "default", self.logfile))
         return 0
@@ -842,6 +889,7 @@ class Spike1Launch:
         return s1bridge.board_record(self.title) is not None
 
     def stop(self):
+        self._stop_dmd_viewer()
         try:
             env = ["S1_WORK=%s" % self.work_dir()] if self.work_dir() else []
             _run(self.head() + env + ["bash", "%s/stop.sh" % self.rig_wsl], timeout=120)

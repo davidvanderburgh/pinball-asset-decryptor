@@ -1657,8 +1657,13 @@ class AudioTab(FindOriginalsMixin, TabService):
         sel = [r for r in self._sel if r in keep]
         if sel != self._sel:
             self._sel = sel
+        # PAD-1176: "Show comments" shows / hides the Comment column; until
+        # it is first ticked or unticked the column shows once a sound has one
+        shown = self._show_comments_pref()
+        if shown is None:
+            shown = bool(comments)
         self.set(rows=rows, empty=hint, sel=list(self._sel),
-                 sort={"key": col, "desc": desc}, comments=bool(comments),
+                 sort={"key": col, "desc": desc}, comments=shown,
                  dup_scanning=self._dup_scanning, attract=self._attract_state(),
                  jukebox=self._jukebox_state(), shots=self._shots_state())
         self._publish_status()
@@ -1784,6 +1789,36 @@ class AudioTab(FindOriginalsMixin, TabService):
             self._sort = (col, not cur[1])
         else:
             self._sort = (col, _SORT_DEFAULT_DESC[col])
+        self._refresh_list()
+        return True
+
+    # PAD-1176: "Show comments", kept app-wide in settings.json
+    _SHOW_COMMENTS_KEY = "audio_show_comments"
+
+    def _show_comments_pref(self):
+        """True / False once "Show comments" was ticked or unticked; None
+        before (the Comment column then shows once a sound has a comment)."""
+        s = getattr(self.app, "_settings", None) if self.app else None
+        got = (s or {}).get(self._SHOW_COMMENTS_KEY)
+        if not isinstance(got, bool):
+            got = getattr(self, "_show_comments_local", None)
+        return got if isinstance(got, bool) else None
+
+    @rpc
+    def set_show_comments(self, on):
+        """PAD-1176: show or hide the Comment column, remembered between
+        sessions; hiding the column the list is sorted by sorts by name."""
+        on = bool(on)
+        self._show_comments_local = on
+        app = self.app
+        if app is not None and isinstance(getattr(app, "_settings", None), dict):
+            app._settings[self._SHOW_COMMENTS_KEY] = on
+            try:
+                app._save_settings()
+            except Exception:                              # noqa: BLE001
+                pass
+        if not on and self._sort and self._sort[0] == "cm":
+            self._sort = ("#0", False)
         self._refresh_list()
         return True
 

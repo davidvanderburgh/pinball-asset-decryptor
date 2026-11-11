@@ -19,6 +19,7 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `PADSPIKE2.vbs` | the "system script" a table loads in place of `controller.vbs` + `SEGA.VBS`: loads VPX's own `core.vbs`, creates the controller, names the cabinet switches and flipper coils. |
 | `vpxfile.py` | read, patch and RE-SIGN a .vpx: VPX refuses a file whose MD2 MAC does not match, and this reproduces the digest (proven bit-for-bit on the stock table). Writes through pywin32's structured storage. |
 | `<title>.vpxmap.json` | the table-to-machine map: switch numbers, solenoid callbacks, every light's LED, the retrofit lights and triggers the table lacked. |
+| `patch_ghostbusters_le.py`, `ghostbusters_le_replica.vpxmap.json` | ninuzzu/tom tower/djrobx's original-layout Ghostbusters LE 1.2 on the Spike 1 game, separate from JP's Slimer conversion. |
 | `patch_godzilla.py` | applies `godzilla_le.vpxmap.json` to marty02's "Godzilla Limited Edition" v2.6: rewires the script, adds 36 lights and the Mechagodzilla magnet, re-signs. |
 | `patch_beatles.py`, `beatles.vpxmap.json` | "The Beatles" (Original 2018) v007 (VPForums), Stern's Beatles playfield on Stern's 1980 Seawitch ROM (`seawitfp`) with rules of its own on top (PAD-926): the switches, coils and inserts go to the machine's, the upper flippers to their own coils, the record to its magnet and motor; the tribute's own modes, ball save, lock and PinUP Player are emptied. |
 | `vpxshadow.py` | the patcher for a SCRIPTED tribute (no ROM): keeps its script as a shadow game, generates the bridge from `<title>.shadow.json`, neuters its own balls, makes PinUP Player optional, re-signs. |
@@ -692,6 +693,22 @@ explicit card recorded for the variant wins; otherwise its native game's
 card entry or library filename is used. Maps without `game` behave as before.
 
 ## Other platforms (PAD-943)
+
+**Original-layout Ghostbusters LE 1.2.** The replica by ninuzzu, tom tower
+and djrobx uses map title `ghostbusters_le_replica`, native game
+`ghostbusters_le`, and output `Ghostbusters LE 1.2 (PAD).vpx`. Supply your
+own original author table: the kit ships its patcher and wiring, not that
+table or its assets. `padvpx patch` detects `spagb_100`, its SPA loader and
+Scoleri code. JP's Slimer map remains a separate option for JP's layout.
+
+The conversion retains the author's playfield, physics, mechanisms and
+mechanical samples. PAD replaces SPA, its CPU service keys use the shared
+service numbers, and direct hardware lamp numbers cannot index the table's
+fixed legacy arrays. Manual lamp aliases retain intensity; Slimer's existing
+animation reads the map-selected encoder position through lamp 281. Ecto
+Goggles video is not integrated: that internal playfield screen stays at
+standby. The real game's DMD comes from the app or a separately configured
+native viewer; the conversion disables the old SPA DMD.
 
 A map's `platform` says which rig is behind the table; `spike2` when it says
 nothing. The kit's survey of what exists for every platform PAD reads is

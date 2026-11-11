@@ -3069,8 +3069,9 @@ def test_every_table_row_links_its_download():
     assert "showfile=15967" in rows["deadpool_pro"]["url"]
     for r in rows.values():
         assert r["url"] == "" or re.match(r"https://(vpuniverse\.com/files/file/\d+-|www\.vpforums\.org/index\.php\?app=downloads&showfile=\d+$)", r["url"]), r
-    # the ones no page could be found for say so by having none
-    assert sorted(t for t, r in rows.items() if not r["url"]) == ["aerosmith", "beatles", "star_wars_pro"]
+    # the ones no page could be found for say so by having none (PAD-1171:
+    # the original-layout Ghostbusters LE was withdrawn from VPForums)
+    assert sorted(t for t, r in rows.items() if not r["url"]) == ["aerosmith", "beatles", "ghostbusters_le_replica", "star_wars_pro"]
 
 
 def test_jurassic_park_table_is_dropped(tmp_path, monkeypatch):

@@ -57,8 +57,8 @@ TABS = (
      "emulate"),
     ("emulate_pb", "emulate_pb", "Emulate PB", "Emulate", "Play",
      "emulate"),
-    # PAD-802: a Visual Pinball table played by the Spike 2 emulator (a
-    # preview feature, core/preview.py "vpx")
+    # PAD-802: a Visual Pinball table played by the Spike 2 emulator (in
+    # every copy since PAD-1136, core/preview.RELEASED "vpx")
     ("vpx", "vpx", "Visual Pinball", "Visual Pinball", "Play",
      "playfield"),
     # Not a tab: the app-wide menus, windows and banners (settings, help,

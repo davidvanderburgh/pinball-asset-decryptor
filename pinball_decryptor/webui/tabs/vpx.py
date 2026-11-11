@@ -1,8 +1,8 @@
 """Visual Pinball tab: the Spike 2 emulator plays a Visual Pinball table.
 
-A PREVIEW FEATURE (core/preview.py, ``vpx``): the rail shows the tab only
-with a preview code for it, on Windows, for a manufacturer the Spike 2
-emulator runs (PAD-802).  It is the Visual Pinball kit (tools/spike2_emu/vpx,
+The rail shows the tab on Windows, for a manufacturer the app emulates
+(PAD-802, PAD-943). It was a preview feature (core/preview.py, ``vpx``)
+until PAD-1136 put it in preview.RELEASED: on in every copy, no code.  It is the Visual Pinball kit (tools/spike2_emu/vpx,
 docs/plans/vpx_bridge.md) with buttons, in place of the separate setup
 window and beta installer it used to need:
 

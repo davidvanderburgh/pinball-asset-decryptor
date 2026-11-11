@@ -3950,7 +3950,8 @@ PREVIEW_HELP = {
             ]),
         ],
     },
-    # PAD-802: the Visual Pinball tab
+    # PAD-802: the Visual Pinball tab; in every copy since PAD-1136
+    # (core/preview.RELEASED), read through sections_for like the Modes tips
     "vpx": {
         "Visual Pinball": [
             ("What it's for",

@@ -39,7 +39,10 @@ SHOTS = {
     "partition-explorer.png": "stern-spike2-partitions.png",
     "multi-boot.png": "stern-spike2-multiboot.png",
 }
-GATED_TABS = ("Modes", "Visual Pinball")
+#: Tabs only a preview code shows, which must never reach the README. None
+#: today: the Modes tab was released in PAD-763 and Visual Pinball in PAD-1136
+#: (core/preview.RELEASED); a new preview tab goes here.
+GATED_TABS = ()
 
 
 def settings_path():

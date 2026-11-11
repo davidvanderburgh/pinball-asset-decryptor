@@ -1,5 +1,5 @@
-// Visual Pinball: the Spike 2 emulator plays a Visual Pinball table (a
-// preview feature, PAD-802).  Python half: webui/tabs/vpx.py, which runs the
+// Visual Pinball: the Spike 2 emulator plays a Visual Pinball table
+// (PAD-802; a preview feature until PAD-1136).  Python half: webui/tabs/vpx.py, which runs the
 // kit in tools/spike2_emu/vpx.  The app ships no tables: the person downloads
 // one the kit knows from its author and patches it here.
 //

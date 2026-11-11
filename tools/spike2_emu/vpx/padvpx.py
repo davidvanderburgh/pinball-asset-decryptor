@@ -11,7 +11,7 @@ name the card a title boots, start or stop a run by hand.
         A table more than one title's map fits (JP's Foo Fighters: Pro or
         LE) takes --title, else the title of --card, else the first with
         a card known, else its preferred map (the Pro).
-    The app's Visual Pinball tab (a preview feature) is the same kit with
+    The app's Visual Pinball tab is the same kit with
     buttons: vpxsetup.py is its half here.
     padvpx setup "<table.vpx>" <image.raw>
         The one step for a shared table: registers the controller if it is

@@ -75,8 +75,8 @@ on an installed app; the venv's in a checkout):
 On an installed app the command is `padvpx.cmd` in the app folder, and the
 installer registers the controller itself.
 
-**The app's Visual Pinball tab** (a preview feature since PAD-802, the
-preview code's feature `vpx`) is everything above with buttons, for somebody
+**The app's Visual Pinball tab** (PAD-802; a preview feature until PAD-1136,
+in every copy of the app on Windows since) is everything above with buttons, for somebody
 who is not going to type any of it: the PAD runtime (the Emulate tab sets it
 up), Visual Pinball (found, chosen, or the 10.8.0 release downloaded and
 unpacked), the controller (registered by the installer; a Register button

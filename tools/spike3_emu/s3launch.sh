@@ -124,10 +124,10 @@ case "${1:-}" in
         # run names its slot dir (or its slot) on its command line, and the
         # list missed one - the sound player's padrelay.py, which carries the
         # run's PAD_SLOT, so the tab's status poll still counted a run
-        left=$(pgrep -f "$SD/|s3press.py autoguide $SLOT( |\$)|s3keys.py $SLOT( |\$)" | grep -vc "^$$\$")
-        pkill -TERM -f "$SD/|s3press.py autoguide $SLOT( |\$)|s3keys.py $SLOT( |\$)" 2>/dev/null
+        left=$(pgrep -f "$SD/|s3press.py (auto|watch)guide $SLOT( |$)|s3keys.py $SLOT( |\$)" | grep -vc "^$$\$")
+        pkill -TERM -f "$SD/|s3press.py (auto|watch)guide $SLOT( |$)|s3keys.py $SLOT( |\$)" 2>/dev/null
         sleep 0.5
-        pkill -9 -f "$SD/|s3press.py autoguide $SLOT( |\$)|s3keys.py $SLOT( |\$)" 2>/dev/null
+        pkill -9 -f "$SD/|s3press.py (auto|watch)guide $SLOT( |$)|s3keys.py $SLOT( |\$)" 2>/dev/null
         [ "${left:-0}" -gt 0 ] && echo "s3launch: cleared $left leftover helper(s) in slot $SLOT"
         rm -f "$SD/dump/padled"
         exit 0

@@ -67,16 +67,22 @@ def main():
     last = None
     t_claimed = None
     t_lamps = None
+    seen_guided = False
     while time.time() - t0 < GIVE_UP_S:
         declared, claimed, lamps = state(sd)
         now = time.time()
         g = guided(sd)
         if lamps:
             t_lamps = t_lamps or now
-        if lamps and g == "walking":
+        if lamps and g == "walking":                 # autoguide (a headless run)
             line = ("nodes", 97, "Getting past Guided Setup (automatic - "
                     "hands off for a moment)")
-        elif lamps and g == "watching" and now - t_lamps < GUIDED_WAIT_S:
+        elif lamps and g == "showing":               # watchguide: the user's to clear
+            seen_guided = True
+            line = ("nodes", 98, "Guided Setup is waiting for you: press Save & Exit "
+                    "(Backspace moves to it, Enter selects) - it shows at every boot")
+        elif (lamps and g in ("watching", "clear", "") and not seen_guided
+              and now - t_lamps < GUIDED_WAIT_S):
             line = ("nodes", 96, "The game is starting")
         elif lamps:
             line = ("run", 100, "Running - the game is in attract")

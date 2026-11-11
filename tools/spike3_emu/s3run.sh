@@ -108,7 +108,7 @@ HOSTPID=""; AS_USER=()
 # a run killed from outside (its session ended) leaves its setsid helpers
 # behind; an old padglhost kept dumping its own frames into this slot's
 # fresh frames dir for hours, and the "newest" frame was then a stale one
-for p in "padglhost $SD/padgl.ring" "s3bridge.py $SD( |\$)" "s3vidhost.py $SD( |\$)" "s3press.py autoguide $SLOT( |\$)" "s3keys.py $SLOT( |\$)"; do
+for p in "padglhost $SD/padgl.ring" "s3bridge.py $SD( |\$)" "s3vidhost.py $SD( |\$)" "s3press.py (auto|watch)guide $SLOT( |$)" "s3keys.py $SLOT( |\$)"; do
     pkill -f "$p" 2>/dev/null && echo "[s3run] stopped a leftover: $p"
 done
 if [ "$BRIDGE" = 1 ]; then
@@ -252,11 +252,15 @@ if [ "$BUS" = 1 ]; then
         fi
     fi
     if [ "$BRIDGE" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" = 1 ]; then
-        # a window run is the user's: Guided Setup is walked ONCE, at boot,
-        # and then the harness never presses a button again (David: "the
-        # guided setup seems to have a mind of its own")
-        if [ "$WINDOW" = 1 ]; then AG=(--boot); else AG=(); fi
-        python3 "$S/s3press.py" autoguide "$SLOT" "${AG[@]}" > "$SD/autoguide.log" 2>&1 &
+        # a window run is the user's (David, PAD-1090: no automatic Guided
+        # Setup): watchguide never presses a button - it only says when
+        # Guided Setup is on the screen, for the footer and the playfield
+        # window. A headless run (tests, nobody to press) walks it.
+        if [ "$WINDOW" = 1 ]; then
+            python3 "$S/s3press.py" watchguide "$SLOT" > "$SD/autoguide.log" 2>&1 &
+        else
+            python3 "$S/s3press.py" autoguide "$SLOT" > "$SD/autoguide.log" 2>&1 &
+        fi
         BUSPIDS="$BUSPIDS $!"
     fi
 fi

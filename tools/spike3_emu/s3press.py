@@ -218,6 +218,40 @@ def is_guided_setup(f):
 BOOT_S = 240    # --boot: Guided Setup is the boot's, if it comes at all
 
 
+def watchguide(slot, keep=60):
+    """A WINDOW RUN's helper (David, PAD-1090: "we should do b" - no
+    automatic Guided Setup): NEVER presses a button. It prunes the frame
+    dumps (unbounded in a window run) and says in SLOT/guided.state whether
+    Guided Setup is on the screen ("showing") or not ("clear"), so the
+    footer and the virtual playfield window can tell the user to press Save &
+    Exit (it comes back at every boot: this machine's identity is invalid)."""
+    state_path = os.path.join(BASE % slot, "guided.state")
+    last = None
+    clear_run = 0       # consecutive clear readings: the highlight's pulse
+    while True:         # misses a frame now and then, so "clear" needs 3
+        time.sleep(2.0)
+        fs = frames(slot)
+        for f in fs[:-keep]:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        f = newest_frame(slot)
+        try:
+            s = "showing" if f and is_guided_setup(f) else "clear"
+        except (OSError, ValueError):
+            continue
+        clear_run = clear_run + 1 if s == "clear" else 0
+        if s == "clear" and last == "showing" and clear_run < 3:
+            continue
+        if s != last:
+            with open(state_path, "w") as fh:
+                fh.write(s)
+            print("[watchguide] Guided Setup %s" % ("on the screen" if s == "showing" else "not shown"),
+                  flush=True)
+            last = s
+
+
 def autoguide(slot, secs=0, keep=60, boot=False):
     """Walk Guided Setup every time it comes up, for SECS (0 = for ever).
     BOOT (a window run, the user's - PAD-1090): walk it at most ONCE and only
@@ -372,6 +406,8 @@ def main():
                 return 1
     elif cmd == "guided":
         return 0 if guided(slot) else 1
+    elif cmd == "watchguide":
+        watchguide(slot)
     elif cmd == "autoguide":
         rest = [x for x in a[2:] if x != "--boot"]
         autoguide(slot, int(rest[0]) if rest else 0, boot="--boot" in a[2:])

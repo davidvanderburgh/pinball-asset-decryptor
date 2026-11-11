@@ -25,7 +25,11 @@ HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "
 
 @pytest.fixture(autouse=True)
 def rig_on(monkeypatch):
+    from pinball_decryptor.webui.tabs import emulate as emulate_tab
     monkeypatch.setattr(emulate_rig, "rig_available", lambda: True)
+    # the panel's platform gate (a Linux desktop needs password-free root):
+    # these are about what it lists and launches, on any platform
+    monkeypatch.setattr(emulate_tab, "_slots_here", lambda: True)
 
 
 def _wsl(monkeypatch):

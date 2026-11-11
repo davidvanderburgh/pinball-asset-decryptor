@@ -298,12 +298,11 @@ def active_low_masks(devs5):
     """{node: 8-byte mask} of the switch inputs a node board reports as wire
     bit 0 when CLOSED.
 
-    POLARITY IS THE BOARD'S, not the switch's (its input circuit sets it). A
-    board carrying any PLAYFIELD switch (the location the TROUGH n switches
-    carry) is active low on EVERY input; the others (the cabinet's node 1:
-    START BUTTON, the coins) stay active high. Measured on pokemon_le: the
-    game's own Ball Trough Test sees a trough ball, and the game serves and
-    scores balls, with the playfield answered active low.
+    PLAYFIELD switches (the location the TROUGH n switches carry) and the
+    FLIPPER BUTTONS are active low; the other cabinet switches (node 1's
+    START BUTTON, the coins) active high. Measured on pokemon_le: the game's
+    own Ball Trough Test sees a trough ball, and the game serves and scores
+    balls, with the playfield answered active low.
 
     THE FLIPPER BUTTONS ARE ACTIVE LOW TOO (PAD-1090). They are cabinet
     switches wired to playfield node 8, and an earlier rule took them active
@@ -315,9 +314,24 @@ def active_low_masks(devs5):
     row, as SERVICE PLUS on the SPI chain always did)."""
     pf = {loc for name, node, idx, cls, loc in devs5
           if cls == "switch" and name.strip().upper().startswith("TROUGH ")}
-    boards = {node for name, node, idx, cls, loc in devs5
-              if cls == "switch" and node > 0 and loc in pf}
-    return {node: b"\xff" * 8 for node in sorted(boards)}
+    per = {}
+    for name, node, idx, cls, loc in devs5:
+        if cls == "switch" and node > 0 and idx < 64:
+            # the flipper buttons: active low with their board (measured)
+            low = loc in pf or "FLIPPER BUTTON" in name.upper()
+            per.setdefault(node, {})[idx] = low
+    masks = {}
+    for node, bits in per.items():
+        # NARROW ON PURPOSE: star_wars_elg carries its START BUTTON and TILT
+        # PENDULUM on node 8 too, unmeasured - they keep the location rule
+        # (cabinet: high), and an unnamed bit the majority of its board
+        maj = sum(bits.values()) * 2 > len(bits)
+        m = bytearray(8)
+        for b in range(64):
+            if bits.get(b, maj):
+                m[b // 8] |= 1 << (b % 8)
+        masks[node] = bytes(m)
+    return masks
 
 
 def hexfiles(hexdir):

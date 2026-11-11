@@ -31,6 +31,15 @@ log(){ echo "$*"; }
 # reasonably took for part of the package list (2026-09-08).
 fail(){ log "ERROR: $1"; exit "${2:-1}"; }
 
+# Installed shims still need the host's CUSE device after a WSL restart.
+# Check before building, extracting a card or publishing a run on the board.
+s1_ensure_cuse(){
+    [ -c /dev/cuse ] && return 0
+    modprobe cuse 2>/dev/null || fail "CUSE is unavailable; Spike 1 requires the Linux cuse module."
+    [ -c /dev/cuse ] || fail "The cuse module did not create /dev/cuse."
+}
+s1_ensure_cuse
+
 mkdir -p "$S1_WORK"
 
 # 0. CAN THIS MACHINE BUILD WHAT IS ABOUT TO BE BUILT?  Asked before either

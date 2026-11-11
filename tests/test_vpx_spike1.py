@@ -302,6 +302,57 @@ def test_spike1_poll_reports_lamps_coils_and_held_flippers(tmp_path):
     assert b.polls == 2 and b.poll_fail == 0
 
 
+def test_spike1_raw_lamp_aliases_keep_levels_and_report_zero(tmp_path):
+    pc = pytest.importorskip("padcontroller")
+    s1 = pytest.importorskip("s1bridge")
+    m = pytest.importorskip("pinball_decryptor.plugins.stern.spike1_emulate")
+    mapping = tmp_path / "raw.vpxmap.json"
+    mapping.write_text(json.dumps({"platform": "spike1", "raw_lamp_rewrite": {
+        "_": "legacy lamp number -> node and channel", "281": [15, 63], "94": [8, 11]}}), encoding="utf-8")
+    b = pc.Bridge()
+    b.map = pc.VpxMap()
+    b.map.load(str(mapping))
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    b.rig, b.sw_ids = rig, {}
+    st = m.HardwareState()
+    for seq, position, brightness in ((1, 71, 128), (2, 130, 255), (3, 0, 0)):
+        st.set_lamp(15, 63, position)
+        st.set_lamp(8, 11, brightness)
+        (tmp_path / "s1hw.state").write_bytes(m.StateBlock.pack(st, seq=seq))
+        b._poll_once_s1()
+        changes = dict(b.changed_lamps() or [])
+        assert changes[281] == position and changes[94] == brightness
+        assert b.lamp_state[281] == position
+    b._poll_once_s1()
+    assert not b.changed_lamps()    # an unchanged frame is not a new change
+
+
+def test_spike1_raw_lamp_alias_level_reaches_controller_lamp(tmp_path):
+    """Controller.Lamp(n), not only ChangedLamps, gives the table the raw
+    level (a table polling its mech position reads Lamp); other lamps stay
+    Boolean as VPinMAME's are."""
+    pc = pytest.importorskip("padcontroller")
+    s1 = pytest.importorskip("s1bridge")
+    m = pytest.importorskip("pinball_decryptor.plugins.stern.spike1_emulate")
+    mapping = tmp_path / "raw.vpxmap.json"
+    mapping.write_text(json.dumps({"platform": "spike1", "raw_lamp_rewrite": {"281": [15, 63]}}),
+                       encoding="utf-8")
+    b = pc.Bridge()
+    b.map = pc.VpxMap()
+    b.map.load(str(mapping))
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.dump = str(tmp_path)
+    b.rig, b.sw_ids = rig, {}
+    st = m.HardwareState()
+    st.set_lamp(15, 63, 71)
+    st.set_lamp(8, 11, 200)
+    (tmp_path / "s1hw.state").write_bytes(m.StateBlock.pack(st, seq=1))
+    b._poll_once_s1()
+    assert b.lamp(281) == 71 and type(b.lamp(281)) is int
+    assert b.lamp(pc.lamp_number(8, 11)) is True
+
+
 def test_launch_finds_a_spike1_card_in_the_sister_library(tmp_path, monkeypatch):
     pl = pytest.importorskip("padlaunch")
     lib2 = tmp_path / "spike2"

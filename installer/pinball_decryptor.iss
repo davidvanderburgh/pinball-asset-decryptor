@@ -214,7 +214,7 @@ Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ig
 Source: "launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 ; The Visual Pinball kit's command (tools/spike2_emu/vpx/padvpx.py on the
 ; bundled Python): `padvpx setup "<table.vpx>" <card.raw>` and friends, the
-; long way round the app's Visual Pinball tab (a preview feature, PAD-802).
+; long way round the app's Visual Pinball tab (PAD-802).
 ; NO TABLE SHIPS: they are their authors' to hand out; the tab patches the
 ; copy the person downloaded.
 Source: "padvpx.cmd"; DestDir: "{app}"; Flags: ignoreversion

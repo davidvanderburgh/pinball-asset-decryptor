@@ -536,8 +536,8 @@ class WebWindow:
             "Attract": g("modes"),
             # PAD-1040: the expression light shows ride it too, and are no part of the mode maker
             "Expression Lights": g("modes"),
-            # PAD-802: Visual Pinball on the Spike 2 emulator, a preview;
-            # PAD-943 (David): on every manufacturer the app emulates
+            # PAD-802: Visual Pinball on the Spike 2 emulator (a preview until
+            # PAD-1136); PAD-943 (David): on every manufacturer the app emulates
             # (not Spike 3: its rig has no Visual Pinball bridge - PAD-1090)
             "Visual Pinball": (any(g(c) for c in VPX_EMULATORS) and self.vpx_preview_on()
                                and getattr(mfr, "_era", None) != "spike3"),
@@ -546,8 +546,9 @@ class WebWindow:
 
     @staticmethod
     def vpx_preview_on():
-        """The Visual Pinball tab's preview switch (core/preview.py "vpx");
-        Visual Pinball and the kit's controller are Windows only."""
+        """The Visual Pinball tab's switch (core/preview.py "vpx", in
+        preview.RELEASED since PAD-1136, so on with no code); Visual Pinball and
+        the kit's controller are Windows only."""
         if sys.platform != "win32":
             return False
         from ..core import preview

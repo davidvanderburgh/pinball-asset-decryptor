@@ -58,18 +58,18 @@ PUBLIC_KEYS = (
 )
 
 #: The preview features this version of the app has, by id, with the name people see.
-#: The Visual Pinball tab (PAD-802): the Spike 2 emulator plays a Visual Pinball table.
 FEATURES = {
-    "vpx": "Visual Pinball",
     # Stern Spike 3 (Pi-4 secure-boot era): decrypt a secure SD image or a
     # .spk package and extract its assets.  Behind a code while it is new.
     "spike3": "Stern Spike 3",
 }
 #: Features that WERE previews and are now in every copy, switched on with no code
 #: (the mode maker, PAD-763). :func:`enabled` answers yes for them; a code that names
-#: one says it is no longer needed.
+#: one says it is no longer needed. The Visual Pinball tab (PAD-802) joined them in
+#: PAD-1136.
 RELEASED = {
     "modes": "Mode maker",
+    "vpx": "Visual Pinball",
 }
 
 _NAME_MAX = 64

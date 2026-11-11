@@ -218,6 +218,24 @@ def encoder_lamp_env(mapping):
     return ";".join(entries)
 
 
+def game_for(title):
+    """A map variant's native game identity; existing maps use their title.
+    Look in the same user/kit map locations and order as PAD.Controller."""
+    if not title:
+        return title
+    for directory in (USER_MAPS, HERE):
+        for suffix in (".vpxmap.json", ".shadow.json"):
+            path = os.path.join(directory, title + suffix)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    m = json.load(f)
+            except (OSError, ValueError):
+                continue
+            game = m.get("game")
+            return game if isinstance(game, str) and game else title
+    return title
+
+
 def card_for(title, platform="spike2"):
     """The card image to boot for `title`, or None with the places looked.
     A Spike 1 title's card is its .iso (GOT_LE-1_37.iso), looked for the same
@@ -226,16 +244,18 @@ def card_for(title, platform="spike2"):
     if env and os.path.isfile(env):
         return env
     kit = kit_load()
-    card = (kit.get("cards") or {}).get(title)
-    if card and os.path.isfile(card):
-        return card
+    game = game_for(title)
+    for key in dict.fromkeys((title, game)):
+        card = (kit.get("cards") or {}).get(key)
+        if card and os.path.isfile(card):
+            return card
     for lib in libraries(platform, kit):
         # by name in any case, as Windows does: a Spike 1 card is GOT_LE-1_37.iso
         # for got_le, and Linux/macOS glob tells the cases apart (PAD-951)
         if platform == "spooky":
-            pats = [g.lower() for g in SPOOKY_UPDATES.get(title, ())]
+            pats = [g.lower() for g in SPOOKY_UPDATES.get(game, ())]
         else:
-            pats = [("%s-%s" % (title, g)).lower() for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"])]
+            pats = [("%s-%s" % (game, g)).lower() for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"])]
         found = [os.path.join(lib, n) for n in sorted(os.listdir(lib))
                  if any(fnmatch.fnmatchcase(n.lower(), p) for p in pats)]
         if found:
@@ -539,7 +559,7 @@ class Launch:
     """One run started for a table: a slot, a watch.sh, and the stop for it."""
 
     def __init__(self, title, card, dist=None, minutes=240):
-        self.title = title
+        self.title = game_for(title)
         self.card = card
         self.distro = dist if dist is not None else distro()
         self.minutes = minutes
@@ -780,7 +800,7 @@ class Spike1Launch:
 
     def __init__(self, title, card, dist=None, minutes=240):
         self.map_title = title
-        self.title = title
+        self.title = game_for(title)
         self.card = card
         self.distro = dist if dist is not None else distro()
         self.minutes = minutes

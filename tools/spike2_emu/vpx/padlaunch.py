@@ -822,7 +822,13 @@ class Spike1Launch:
     def env(self):
         card = padpath.to_wsl(self.card, self.distro)
         env = ["PAD_LABEL=%s" % LABEL, "PAD_HIDDEN=0", "PAD_AUDIO=1", "S1_PIVOT=1"]
-        outputs = encoder_lamp_env(table_map(self.map_title).get("encoder_lamps") or {})
+        # a mistyped encoder_lamps loses only that wiring, as the responder
+        # does, never the table's start
+        try:
+            outputs = encoder_lamp_env(table_map(self.map_title).get("encoder_lamps") or {})
+        except (ValueError, TypeError, AttributeError) as exc:
+            log("%s: encoder_lamps ignored (%s)" % (self.map_title, exc))
+            outputs = ""
         if outputs:
             env.append("S1_ENCODER_LAMPS=" + outputs)
         py = win_python()

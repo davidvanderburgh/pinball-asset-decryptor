@@ -141,9 +141,10 @@ def _s3_rig(monkeypatch, check=b"s3check: ok\n"):
     monkeypatch.setattr(emulate_rig, "spike3_check_cmd",
                         lambda: ["bash", "s3launch.sh", "--check"])
     monkeypatch.setattr(emulate_rig, "spike3_launch_cmd",
-                        lambda card, slot, minutes, audio=False:
+                        lambda card, slot, minutes, audio=False, keyfile=None:
                         ["bash", "s3launch.sh", card, str(slot), str(minutes)]
-                        + (["--audio"] if audio else []))
+                        + (["--audio"] if audio else [])
+                        + (["--keyfile", keyfile] if keyfile else []))
     monkeypatch.setattr(emulate_rig, "spike3_stop_cmd",
                         lambda slot: ["bash", "s3launch.sh", "--stop", str(slot)])
     return {"--check": _Done(check)}
@@ -235,3 +236,65 @@ def test_spike3_launch_cmd_runs_the_launcher_as_root(monkeypatch):
     assert cmd[5].endswith("/spike3_emu/s3launch.sh")
     assert cmd[6:] == ["/mnt/d/cards/x.raw", "3", "240", "--audio"]
     assert emulate_core.spike3_stop_cmd(3)[-2:] == ["--stop", "3"]
+
+
+def test_spike3_launch_cmd_hands_over_the_users_keyfile(monkeypatch):
+    if sys.platform != "win32":
+        pytest.skip("the WSL argv is Windows-only")
+    monkeypatch.setattr(emulate_core, "_wsl_head", lambda root=False: ["wsl.exe"] + (["-u", "root"] if root else []) + ["-e"])
+    cmd = emulate_core.spike3_launch_cmd(r"D:\cards\x.raw", 3, 240,
+                                         keyfile=r"C:\proj\padkeys.json")
+    assert cmd[-2:] == ["--keyfile", "/mnt/c/proj/padkeys.json"]
+
+
+def test_spike3_keyfile_is_found_where_the_extract_unlock_left_it(tmp_path, monkeypatch):
+    """The Extract tab's unlock sets $PAD_SPIKE3_KEYFILE (this process only)
+    and saves padkeys.json to the project folder or ~/.pad - the Emulate tab
+    finds it in the same places, card-side sidecars first after the env."""
+    home = tmp_path / "home"
+    (home / ".pad").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("PAD_SPIKE3_KEYFILE", raising=False)
+    cards = tmp_path / "cards"
+    cards.mkdir()
+    card = cards / "pokemon_le.raw"
+    card.write_bytes(b"")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    find = emulate_core.spike3_keyfile
+    assert find(str(card), project=str(proj)) is None
+    cfg = home / ".pad" / "spike3_padkeys.json"
+    cfg.write_text("{}")
+    assert find(str(card), project=str(proj)) == str(cfg)
+    (proj / "padkeys.json").write_text("{}")
+    assert find(str(card), project=str(proj)) == str(proj / "padkeys.json")
+    (cards / "padkeys.json").write_text("{}")
+    assert find(str(card), project=str(proj)) == str(cards / "padkeys.json")
+    side = cards / "pokemon_le.raw.padkeys.json"
+    side.write_text("{}")
+    assert find(str(card), project=str(proj)) == str(side)
+    env = tmp_path / "unlocked.json"
+    env.write_text("{}")
+    monkeypatch.setenv("PAD_SPIKE3_KEYFILE", str(env))
+    assert find(str(card), project=str(proj)) == str(env)
+
+
+def test_the_tab_hands_the_unlocked_key_to_the_launcher(tmp_path, monkeypatch):
+    from tests.test_webui_emulate import _Recorder
+    card = tmp_path / "pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    key = tmp_path / "padkeys.json"
+    key.write_text("{}")
+    monkeypatch.setenv("PAD_SPIKE3_KEYFILE", str(key))
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        answers = _s3_rig(monkeypatch)
+        rec = _Recorder(answers=answers, lines=("s3launch: starting slot 1 for 240 min",))
+        monkeypatch.setattr(svc, "_run", rec.run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        _pick(w, svc, card)
+        w.call(NS + ".toggle")
+        _wait(w, lambda: any("--keyfile" in c for c in rec.calls))
+        launch = [c for c in rec.calls if "--keyfile" in c][0]
+        assert launch[launch.index("--keyfile") + 1] == str(key)

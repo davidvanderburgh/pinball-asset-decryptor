@@ -3213,7 +3213,11 @@ class EmulateTab(EmulateLogMixin, TabService):
                                         self._set("state", "Not running"),
                                         self._paint_run_btn()))
                     return
-                cmd = rig.spike3_launch_cmd(card, slot, self.S3_MINUTES, audio=audio)
+                keyfile = rig.spike3_keyfile(card, project=self._assets() or None)
+                if keyfile:
+                    self._log("[emulate] Spike 3 key: %s" % keyfile)
+                cmd = rig.spike3_launch_cmd(card, slot, self.S3_MINUTES, audio=audio,
+                                            keyfile=keyfile)
                 self._log("[emulate] %s" % " ".join(str(c) for c in cmd))
                 self._proc = self._popen(cmd, stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT)
@@ -3223,6 +3227,9 @@ class EmulateTab(EmulateLogMixin, TabService):
                 for raw in self._proc.stdout:
                     line = raw.decode("utf-8", "replace").rstrip()
                     self._log("[emulate] " + line)
+                    fields = rig.playfield_launch(line)
+                    if fields:                  # the virtual playfield (s3pf.py)
+                        self._post(self._open_playfield, fields)
                     label = self._s3_progress(line, slot)
                     if label:
                         self._s3_label = label
@@ -3276,7 +3283,8 @@ class EmulateTab(EmulateLogMixin, TabService):
         if fields.get("savestates") == "1":
             cmd.append("--savestates")
         env = dict(os.environ)
-        for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES")):
+        for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES"),
+                          ("root_wsl", "PAD_ROOT_WSL")):
             if fields.get(key):
                 env[name] = fields[key]
         # WHICH RIG (core/rigslot.py): the window titles itself with it, and a
@@ -3289,6 +3297,15 @@ class EmulateTab(EmulateLogMixin, TabService):
             cmd.append("--pad-slot=%d" % n)
         if rigslot.label():
             env["PAD_LABEL"] = rigslot.label()
+        # its switch helpers call back into the distro the rig runs in
+        if not env.get("PAD_WSL_DISTRO"):
+            from ...core import runtime as _rt
+            try:
+                d = _rt.wsl_distro()
+            except Exception:                            # noqa: BLE001
+                d = None
+            if d:
+                env["PAD_WSL_DISTRO"] = d
         # PAD-204: the window's status bar moves this tab's volume / Mute
         env["PAD_AUDIO_CTL"] = audio_ctl_file()
         try:

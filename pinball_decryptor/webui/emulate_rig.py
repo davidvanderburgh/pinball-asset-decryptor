@@ -37,7 +37,7 @@ from .emulate_core import (  # noqa: F401  (re-exported)
     parse_spike3, cache_last_used, cache_unused, CACHE_UNUSED_DAYS,
     parse_status,
     playfield_launch, preview_modes_reason, renderer_text, rig_available,
-    spike3_cmd, spike3_check_cmd, spike3_launch_cmd, spike3_stop_cmd,
+    spike3_cmd, spike3_check_cmd, spike3_launch_cmd, spike3_stop_cmd, spike3_keyfile,
     spike3_rig_present, parse_s3check,
     rig_cmd, rig_cmd_root, rig_dir, setup_fix_steps, setup_fixable,
     setup_notice,

@@ -1495,11 +1495,36 @@ def spike3_check_cmd():
     return _s3_argv("--check")
 
 
-def spike3_launch_cmd(card, slot, minutes, audio=False):
-    """The run: the card into the Spike 3 store if needed, then the game in a
-    window on rig slot *slot* for *minutes*."""
-    path = _wsl_path(card) if sys.platform == "win32" else card
-    args = [path, int(slot), int(minutes)] + (["--audio"] if audio else [])
+def spike3_keyfile(card, project=None):
+    """The padkeys.json holding the user's OWN OTP key for *card*, or None.
+
+    The same places the Extract tab's Spike 3 unlock leaves it: the
+    ``$PAD_SPIKE3_KEYFILE`` it sets in this process, ``<card>.padkeys.json``
+    or ``padkeys.json`` beside the card, ``padkeys.json`` in the project
+    folder, then ``~/.pad/spike3_padkeys.json``. Only the path travels to the
+    rig (the key itself is never on a command line); the store needs it just
+    once per card, to decrypt the card into the store."""
+    cands = [os.environ.get("PAD_SPIKE3_KEYFILE") or ""]
+    if card:
+        c = os.path.abspath(card)
+        cands += [c + ".padkeys.json", os.path.join(os.path.dirname(c), "padkeys.json")]
+    if project:
+        cands.append(os.path.join(project, "padkeys.json"))
+    cands.append(os.path.join(os.path.expanduser("~"), ".pad", "spike3_padkeys.json"))
+    for c in cands:
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
+def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None):
+    """The run: the card into the Spike 3 store if needed (decrypted with
+    *keyfile*, the user's padkeys.json), then the game in a window on rig
+    slot *slot* for *minutes*."""
+    conv = _wsl_path if sys.platform == "win32" else (lambda p: p)
+    args = [conv(card), int(slot), int(minutes)] + (["--audio"] if audio else [])
+    if keyfile:
+        args += ["--keyfile", conv(keyfile)]
     return _s3_argv(*args)
 
 

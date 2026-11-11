@@ -3,7 +3,7 @@
 #
 #   s3launch.sh --check                     can this PC run a Spike 3 card?
 #   s3launch.sh --setup                     install what --check found missing
-#   s3launch.sh CARD.raw SLOT MINUTES [--audio]
+#   s3launch.sh CARD.raw SLOT MINUTES [--audio] [--keyfile PADKEYS.json]
 #                                           put the card in the store if it is
 #                                           not there yet, then run it in a
 #                                           window on rig slot SLOT
@@ -12,7 +12,9 @@
 # Runs as ROOT (the tab calls it through rig_cmd_root, `wsl -u root`):
 # s3run.sh's overlay mounts and namespaces need it, and the store lives under
 # /var/lib/pad-s3. Nothing here needs a special kernel or a patched qemu: a
-# stock WSL and the user's OWN OTP key (padkeys.json beside the card).
+# stock WSL and the user's OWN OTP key: --keyfile (the padkeys.json the
+# Extract tab's Spike 3 unlock saved), else padkeys.json beside the card. The
+# key is used once per card, to decrypt it into the store; never stored here.
 #
 # Every line the tab acts on starts with a fixed token:
 #   s3check: ok | s3check: missing - <what>  (+ s3setup: <the fix>)
@@ -119,18 +121,27 @@ case "${1:-}" in
         ;;
 esac
 
-CARD=$1; SLOT=${2:?usage: s3launch.sh CARD.raw SLOT MINUTES [--audio]}; MIN=${3:-30}
-AUDIO=0; [ "${4:-}" = --audio ] && AUDIO=1
+CARD=$1; SLOT=${2:?usage: s3launch.sh CARD.raw SLOT MINUTES [--audio] [--keyfile F]}; MIN=${3:-30}
+shift 3 2>/dev/null || shift $#
+AUDIO=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --audio) AUDIO=1 ;;
+        --keyfile) export PAD_SPIKE3_KEYFILE=${2:-}; shift ;;
+    esac
+    shift
+done
+NOKEY="the card could not be decrypted: unlock it once with YOUR card's OTP key (Extract tab, Spike 3 unlock), or put padkeys.json beside the card image"
 check >/dev/null || { echo "s3launch: failed - $(check | sed 's/^s3check: //')"; exit 1; }
 [ -f "$CARD" ] || { echo "s3launch: failed - no such card image: $CARD"; exit 1; }
 if ! python3 "$S/s3store.py" path "$CARD" >/dev/null 2>&1; then
     echo "s3launch: decrypting the card into the Spike 3 store (once per card; a few minutes)"
     if ! python3 "$S/s3store.py" build "$CARD" 2>&1 | sed 's/^/s3launch:   /'; then
-        echo "s3launch: failed - the card could not be decrypted: put padkeys.json, holding YOUR card's OTP key, beside the card image"
+        echo "s3launch: failed - $NOKEY"
         exit 1
     fi
     python3 "$S/s3store.py" path "$CARD" >/dev/null 2>&1 || {
-        echo "s3launch: failed - the card could not be decrypted: put padkeys.json, holding YOUR card's OTP key, beside the card image"; exit 1; }
+        echo "s3launch: failed - $NOKEY"; exit 1; }
 fi
 if ! build_ok; then
     echo "s3launch: building the Spike 3 rig (once; a few minutes)"

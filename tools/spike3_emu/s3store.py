@@ -209,9 +209,12 @@ def resolve_key(img, given=None):
     for c in cands:
         if not os.path.exists(c):
             continue
-        with open(c, "rb") as f:
-            doc = json.loads(f.read().decode("utf-8"))
-        v = doc.get("otp_keyfile")
+        try:
+            with open(c, "rb") as f:
+                doc = json.loads(f.read().decode("utf-8"))
+        except ValueError as e:
+            raise SystemExit("s3store: %s is not a readable padkeys.json (%s)" % (c, e))
+        v = doc.get("otp_keyfile") if isinstance(doc, dict) else None
         if not v:
             continue
         if isinstance(v, str) and not os.path.isabs(win_to_wsl(v)) and \

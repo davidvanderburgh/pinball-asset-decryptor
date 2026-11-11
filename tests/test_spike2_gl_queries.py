@@ -37,6 +37,15 @@ pytestmark = [pytest.mark.skipif(not os.path.isfile(BRIDGE), reason="rig not pre
 
 DRIVER = r"""
 #include <stdio.h>
+#ifdef __APPLE__
+/* The emulator's shim supplies these and glbridge.c references them weakly.
+ * Linux's linker leaves a missing weak one NULL; the Mac's refuses to link
+ * (PAD-1153). Stand in with what the bridge does without them: the wall
+ * clock, and no frame in the video ring. */
+#include <unistd.h>
+void pad_real_sleep_us(long long us) { usleep((useconds_t)us); }
+long pad_vid_ring_offset(const void *p) { (void)p; return -1; }
+#endif
 int glViewport(int, int, int, int); int glScissor(int, int, int, int);
 int glEnable(unsigned); int glDisable(unsigned); int glIsEnabled(unsigned);
 int glGetIntegerv(unsigned, int *); int glGetBooleanv(unsigned, unsigned char *);

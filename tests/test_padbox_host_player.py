@@ -165,11 +165,16 @@ sleep 0.3; kill $HP; wait $HP 2>/dev/null
 @needs_bash
 def test_the_mac_meter_passes_the_stream_and_says_what_reached_the_player():
     """PAD-1109: the relay's count could not see a stream lost on its way to
-    the Mac; this one counts what ffplay is actually handed."""
+    the Mac; this one counts what ffplay is actually handed.
+
+    Fed as a stream is, a little every tenth of a second: the Mac's dd says
+    its count on SIGINFO only once its next read returns, so a feed in
+    bursts a second apart left the count unsaid (PAD-1153)."""
     d = _fresh_dir()
     script = "\n".join(["set -u", "D=%s" % _q(d), "PAD_METER_S=1",
                          _function("mac_meter"), r"""
-( for i in 1 2 3; do head -c 65536 /dev/zero | tr '\0' 'x'; sleep 1.2; done ) |
+x=$(head -c 4096 /dev/zero | tr '\0' 'x')
+( for i in $(seq 1 48); do printf '%s' "$x"; sleep 0.1; done ) |
     mac_meter > "$D/out"
 echo "OUT=$(wc -c < "$D/out" | tr -d ' ')"
 """, ""])
@@ -307,6 +312,11 @@ docker() {
 }
 # for: waits up to 6 s for a condition
 upto() { for _ in $(seq 1 60); do eval "$1" && return 0; sleep 0.1; done; return 1; }
+# The run ends as padbox.sh ends it: the box goes first (docker run returns;
+# the stopped container takes boxctl.py with it, and that ends the pipeline
+# ctl_sync runs), then ctl_sync is killed. Killing ctl_sync alone leaves the
+# pipeline running, holding this test's output open until its timeout.
+box_down() { rm -f "$D/up"; pkill -f "$D/boxctl.py"; }
 """
 
 
@@ -342,7 +352,7 @@ upto 'grep -q 0.5 "$D/box/audio_ctl.json" 2>/dev/null' && echo IN-1
 upto '[ -s "$D/box/clip_names_0.json" ]' && echo NAMES-IN
 echo '{"gain": 0.5, "muted": true}' > "$D/mac/audio_ctl.json"
 upto 'grep -q true "$D/box/audio_ctl.json"' && echo IN-2
-kill $CS; wait $CS 2>/dev/null
+box_down; kill $CS; wait $CS 2>/dev/null
 echo "EXECS=$(( $(wc -l < "$D/execs") ))"   # BSD wc pads the count
 cat "$D/box/clip_names_0.json"
 """)
@@ -367,7 +377,7 @@ printf '{"gain": 0.3, "muted": true}' > "$D/box/audio_ctl.json.pf.tmp"
 mv -f "$D/box/audio_ctl.json.pf.tmp" "$D/box/audio_ctl.json"
 upto 'grep -q 0.3 "$D/mac/audio_ctl.json"' && echo OUT
 sleep 1.5                                   # and nothing bounces it back
-kill $CS; wait $CS 2>/dev/null
+box_down; kill $CS; wait $CS 2>/dev/null
 echo "MAC=$(cat "$D/mac/audio_ctl.json")"
 echo "BOX=$(cat "$D/box/audio_ctl.json")"
 """)
@@ -393,7 +403,7 @@ upto '[ -f "$D/mac/restart_game_2.req" ]' && echo REQ-OUT
 upto '[ -s "$D/mac/sounds_seen_2.jsonl" ]' && echo SOUNDS-OUT
 printf 'ip": "b"}\n' >> "$D/box/clips_seen_0.jsonl"
 upto '[ "$(wc -l < "$D/mac/clips_seen_2.jsonl")" -ge 2 ]' && echo CLIPS-OUT
-kill $CS; wait $CS 2>/dev/null
+box_down; kill $CS; wait $CS 2>/dev/null
 [ -e "$D/box/restart_game_0.req" ] || echo REQ-TAKEN
 echo "REQ=$(cat "$D/mac/restart_game_2.req")"
 cat "$D/mac/clips_seen_2.jsonl" "$D/mac/sounds_seen_2.jsonl"

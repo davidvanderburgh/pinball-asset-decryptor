@@ -92,6 +92,13 @@ def main():
             line = ("boot", pct, "Booting the game")
         if line != last:
             print("[s3run] progress %s %d %s" % line, flush=True)
+            # the virtual playfield window shows it too (playfield.py
+            # _poll_boot reads dump/s3boot, as it reads bootprog on Spike 2)
+            try:
+                with open(os.path.join(sd, "dump", "s3boot"), "w") as f:
+                    f.write("%s %d %s\n" % line)
+            except OSError:
+                pass
             last = line
         if line[0] == "run":
             return 0

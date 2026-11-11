@@ -177,3 +177,21 @@ def test_the_app_footer_takes_the_finer_percent():
     assert got[-1]["pct"] == 88 and got[-1]["index"] == 2
     w.set_emulate_progress("techalerts", None, "", tab="Emulate")
     assert got[-1]["pct"] == 80                           # as before without it
+
+
+@needs_pf
+def test_a_spike3_run_shows_its_boot_in_the_window(monkeypatch, tmp_path):
+    """PAD-1090 (David: "our virtual playfield window should show the loading
+    progress bar too"): a Spike 3 run has none of the Spike 2 logs; its
+    s3prog.py writes dump/s3boot with the steps the app's footer shows, and
+    the window draws them until the step is "run"."""
+    monkeypatch.setattr(pf, "SW_PATH", _block(tmp_path, 0))
+    dump = tmp_path / "dump"
+    dump.mkdir()
+    monkeypatch.setattr(pf.padpath, "dump", lambda: str(dump))
+    (dump / "s3boot").write_text("nodes 66 Locating node boards (4 of 10)\n")
+    run = pf.RunCtl(None, logdir=str(tmp_path / "nolog"))
+    assert run.poll(10.0) is True
+    assert run.dyn()["boot"] == {"pct": 66, "words": "Locating node boards (4 of 10)"}
+    (dump / "s3boot").write_text("run 100 Running - the game is in attract\n")
+    assert run.poll(11.1) is True and run.dyn()["boot"] is None

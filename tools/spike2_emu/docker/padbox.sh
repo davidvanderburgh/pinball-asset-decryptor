@@ -475,10 +475,14 @@ ffplay_channel_args() {
 # asks dd for its own count (SIGINFO on a Mac, SIGUSR1 elsewhere) and says it:
 # the bytes ffplay was actually handed. stdin is named for dd, because a
 # background command in a script otherwise reads /dev/null.
+# ibs/obs, never bs= (PAD-1162): with bs= alone the Mac's dd takes POSIX's
+# unbuffered path, which writes each read and loops back BEFORE its SIGINFO
+# check, so it never said its count until the end. obs=512 keeps the pass
+# prompt: at most 511 bytes (under 3 ms of sound) wait for the next read.
 mac_meter() {
     local f p sig i line
     f=$(mktemp "${TMPDIR:-/tmp}/padmeter.XXXXXX") || { cat; return; }
-    dd bs=65536 <&0 2>"$f" &
+    dd ibs=65536 obs=512 <&0 2>"$f" &
     p=$!
     sig=USR1; [ "$(uname -s)" = Darwin ] && sig=INFO
     while kill -0 "$p" 2>/dev/null; do

@@ -176,16 +176,19 @@ def test_the_store_loads_the_apps_own_spike3_readers():
 
 
 class _FakeFs:
-    """The slice of Ext4Reader copy_tree_reader uses."""
+    """The slice of Ext4Reader copy_tree_reader uses. Owned by whoever runs
+    the test: the store gives every file its card owner, and only root may
+    give one away (the real build runs as root; CI's runner does not)."""
     def __init__(self):
         D, F, L = 0o040755, 0o100644, 0o120777
+        u, g = os.getuid(), os.getgid()
         self.nodes = {
-            2: dict(mode=D, uid=0, gid=0, atime=1, mtime=2),
-            3: dict(mode=D, uid=0, gid=0, atime=1, mtime=2),
-            4: dict(mode=F, uid=0, gid=0, atime=1, mtime=2, data=b"same bytes"),
-            5: dict(mode=F, uid=0, gid=0, atime=1, mtime=2, data=b"same bytes"),
-            6: dict(mode=0o100755, uid=0, gid=0, atime=1, mtime=2, data=b"\0" * 70000 + b"x"),
-            7: dict(mode=L, uid=0, gid=0, atime=1, mtime=2, target="sub/a"),
+            2: dict(mode=D, uid=u, gid=g, atime=1, mtime=2),
+            3: dict(mode=D, uid=u, gid=g, atime=1, mtime=2),
+            4: dict(mode=F, uid=u, gid=g, atime=1, mtime=2, data=b"same bytes"),
+            5: dict(mode=F, uid=u, gid=g, atime=1, mtime=2, data=b"same bytes"),
+            6: dict(mode=0o100755, uid=u, gid=g, atime=1, mtime=2, data=b"\0" * 70000 + b"x"),
+            7: dict(mode=L, uid=u, gid=g, atime=1, mtime=2, target="sub/a"),
         }
         self.tree = [("sub", "dir", 3), ("sub/a", "file", 4), ("sub/b", "file", 5),
                      ("tool", "file", 6), ("link", "symlink", 7)]

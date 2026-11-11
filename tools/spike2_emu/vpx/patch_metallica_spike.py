@@ -151,6 +151,15 @@ def patch_script(src, m):
             need("flip" + mflip.group(1))
             continue
 
+        # ---- the drop-bank helpers used SAM's inverse polarity. PAD's
+        # Switch API is logical: a dropped target makes its switch. Keep
+        # the computed alias (switch_rewrite resolves it), change the state.
+        drop = re.match(r"^(\s*controller\.switch\(switchid\s+mod\s+100\)\s*=\s*)([01])(\s*(?:'.*)?)$", line, re.I)
+        if drop:
+            state = 1 - int(drop.group(2))
+            out.append("%s%d\t' PAD: dropped closes, raised opens the Spike switch" % (drop.group(1), state))
+            continue
+
         # ---- literal switch numbers
         def _rw(mm):
             nonlocal rewritten, dropped
@@ -261,7 +270,7 @@ def gen_test_timer():
             "\tController.Switch(1073) = (sw19.BallCntOver > 0)",
             "\tController.Switch(1072) = (sw18.BallCntOver > 0)",
             "\tFor i = 0 To UBound(DTArray)",
-            "\t\tController.Switch(DTArray(i).sw) = Not DTArray(i).isDropped   ' SAM polarity: raised = made",
+            "\t\tController.Switch(DTArray(i).sw) = DTArray(i).isDropped   ' PAD: dropped closes the Spike switch",
             "\tNext",
             "\tController.Switch(1093) = (CrossPos >= CrossMax)",
             "\tController.Switch(1092) = (CrossPos <= CrossMin)",

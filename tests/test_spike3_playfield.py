@@ -91,7 +91,7 @@ def test_s3leds_publishes_lamps_and_coils_at_padled_offsets(tmp_path):
     led.frame(b[0] & 0x3F, b[2:-1])
     led.frame(8, bytes([0x40, 3, 0xA0, 0x00, 0x00]))     # coil 3 on node 8 fires
     d = path.read_bytes()
-    assert struct.unpack_from("<II", d, 0) == (coilmap.PADLED_MAGIC, 4)
+    assert struct.unpack_from("<II", d, 0) == (coilmap.PADLED_MAGIC, 6)
     for i, v in zip(idxs, vals):
         assert d[s3leds.VAL + node * 96 + i] == v
         assert d[s3leds.SEEN + node * 96 + i] == 1
@@ -100,6 +100,34 @@ def test_s3leds_publishes_lamps_and_coils_at_padled_offsets(tmp_path):
     assert struct.unpack_from("<I", d, s3leds.WIDE_DECODED)[0] == 1
     led.close()
     assert not path.exists()            # gone = the run ended (playfield.py)
+
+
+def test_s3leds_publishes_a_boards_channels_past_96_in_the_hi_plane(tmp_path):
+    """PAD-1152: the cabinet strips (node 2: 288/432 channels), speaker panel
+    and topper take their lamps past the first 96 in banks of 96 - dropped
+    until now, so the window's cabinet views lit only the first 96. They land
+    in padled v6's `hi` plane, where the window's reader (coilmap.strip_level)
+    finds them, levels only: `seen`, `decoded` and `gen` are untouched."""
+    import s3leds
+    sys.path.insert(0, os.path.join(ROOT, "tests"))
+    from test_spike2_led_wide_bank import FRAMES
+    path = tmp_path / "padled"
+    led = s3leds.PadLed(str(path))
+    h, bank, idxs, vals = FRAMES["b1_list_on"]          # bank 2: lamps 2 8 14 20 on
+    b = bytes.fromhex(h)
+    led.frame(14, b[2:-1])                              # the topper's board
+    led.frame(2, bytes.fromhex(FRAMES["b3_bank_dim"][0])[2:-1])   # bank 1, all at 0x0a
+    d = path.read_bytes()
+    for i, v in zip(idxs, vals):
+        assert coilmap.strip_level(d, 14, 96 * bank + i) == v
+        assert d[s3leds.VAL + 14 * 96 + i] == 0           # bank 0 is not touched
+    assert coilmap.strip_level(d, 14, 96 * bank + 3) == 0
+    assert all(coilmap.strip_level(d, 2, 96 + i) == 0x0A for i in range(96))
+    assert struct.unpack_from("<I", d, 12)[0] == 0      # decoded: bank 0 lamps only
+    assert not any(d[s3leds.SEEN:s3leds.SEEN + 16 * 96])
+    assert struct.unpack_from("<I", d, s3leds.WIDE_DECODED)[0] == 2
+    assert led.hi == 2
+    led.close()
 
 
 def test_a_cabinet_front_is_never_the_playfield():

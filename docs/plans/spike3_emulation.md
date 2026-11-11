@@ -568,7 +568,34 @@ the board model off.
 1. Coins: the game credits ~3 of 4 quarters even when each is delivered.
 2. The window's default key bindings fire one QR-scanner switch for a moment
    before the title's switch list loads (harmless, settles).
-3. The playfield's lamps are proven on pokemon_le; the other titles' tables
-   build (all six) but their lamp traffic is unwatched.
-4. The lit inserts draw white in "Real LEDs"; whether pokemon_le's inserts are
-   RGB (and the window's channel grouping misses them) is not checked yet.
+3. (Done, PAD-1152: every title's lamps watched - see below.)
+4. (Answered, PAD-1152: the inserts are one channel each - single-colour
+   inserts, drawn in their lens colour as on Spike 2 (PAD-668); Star Wars
+   2025 Pro's RGB inserts are named -R/-G/-B and group as RGB.)
+
+## Every title's lamps, watched (PAD-1152, 2026-11-11)
+
+Each card booted headless and muted to its attract show with the padled
+block published, polled every 0.5 s for every channel's peak level, and
+judged against the card's own device table (the placed inserts on the
+layout picture, by group -> node):
+
+| card | inserts lit / placed | addressed | notes |
+|---|---|---|---|
+| pokemon_le 0.82.0 | 29 / 30 | 30 | universal topper (node 14): 64 channels past 96 lit |
+| walking_dead_remastered_le 0.92.0 | 144 / 145 | 145 | topper (node 12): 26 past 96 lit |
+| star_wars_2025_le 0.96.0 | 130 / 131 | 131 | SHOOT AGAIN dark in attract |
+| star_wars_2025_pro 0.84.0 | 87 / 129 | 129 | the dark ones are R/G halves of RGB inserts the attract shows in one colour |
+| star_wars_elg 1.10.0 | 63 / 63 | 63 | after one Start clears the first-boot GAME SETUP (before it: 19) |
+| fallout_le 0.81.0 | no layout | - | insert boards 8/9/12 lit 85/89, 91/92, 63/73 |
+
+0 refused lamp frames on any title. **What it found:** a board's channels
+past its first 96 (bank form) were dropped by s3leds - the toppers, the
+speaker panel and the cabinet strips (node 2: 288/432 channels). s3leds now
+fills padled v6's `hi` plane as Spike 2's shim does (led_hi: levels only,
+`seen`/`decoded` untouched) and stamps the block version 6; the window lights
+them (before/after: Walking Dead's topper bottom row). The strips (node 2)
+and speaker panel (node 7) get no lamp frames in attract on any title - only
+the `72` 96-bit mask and `f2` reads - so they stay dark there by the game's
+choice. A slot whose saved state has the coin door open (48V disabled) sends
+no lamp frames at all: judge lamps on a slot in a known state.

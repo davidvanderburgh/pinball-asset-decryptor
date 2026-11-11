@@ -98,3 +98,49 @@ def test_spike3_tabs_need_the_key_and_spike2_ones_do_not():
         assert cls.rail_needs(fake) == "spike3key"
         fake.mfr._era = "spike2"
         assert cls.rail_needs(fake) is None
+
+
+def _wait(pred, limit=6.0):
+    import time
+    end = time.time() + limit
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.mark.parametrize("verified", [True, False])
+def test_a_pasted_key_is_checked_kept_and_never_logged(tmp_path, home, monkeypatch, verified):
+    """David: "can't we just make it a text field for a user to paste in?"
+    The pasted text goes to the same check as a key file, and neither the
+    log nor the gate's status line ever shows it."""
+    from tests.webui_harness import web_app
+    pasted = "ab" * 32
+    got = {}
+
+    def save(key, card):
+        got.update(key=key, card=card)
+        if verified:
+            return True, "Your OTP key unlocks this card.", "kept.json"
+        return False, "That key did NOT unlock this card.", None
+    monkeypatch.setattr(spike3_key, "save_key", save)
+    card = tmp_path / "pokemon_le.raw"
+    card.write_bytes(b"\0" * 512)
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(lambda: w.window.extract_input_var.set(str(card)))
+        assert w.call("ui.spike3_paste_key", "  " + pasted + "\n") is True
+        assert _wait(lambda: w.state("shell").get("spike3_key_busy") is False)
+        w.drain()
+        assert got == {"key": pasted, "card": str(card)}
+        shell = w.state("shell")
+        assert pasted not in str(shell.get("spike3_key_status"))
+        logs = str(w.window.__dict__.get("_logs", "")) + str(shell)
+        assert pasted not in logs
+        assert ("unlocks" in shell["spike3_key_status"]) is verified
+
+
+def test_an_empty_paste_does_nothing(tmp_path, home):
+    from tests.webui_harness import web_app
+    with web_app(tmp_path, mfr="stern") as w:
+        assert w.call("ui.spike3_paste_key", "   ") is False

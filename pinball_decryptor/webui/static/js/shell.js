@@ -473,19 +473,29 @@ function Rail({ shell }) {
 // walkthrough, with the same two ways in, and the key kept for every tab.
 function Spike3KeyGate({ shell, lock }) {
   const busy = !!shell.spike3_key_busy;
+  const [key, setKey] = useState("");
+  const send = () => { if (key.trim()) { call("ui.spike3_paste_key", key.trim()); setKey(""); } };
   return html`<div class="banner warn sx-lock sx-s3key" role="group">
     <${Icon} name="lock" />
     <div class="body-text stack">
       <b>${lock.long}</b>
       <span class="small">The 256-bit key is fused into the machine's Raspberry Pi, not stored on the card, and it is the same across machines.
-        If you already have the key (OTP_KEY.TXT, or the 32-byte key file), PAD checks it against the selected card and keeps it.</span>
+        If you already have it, paste it here (64 hex characters): PAD checks it against the selected card and keeps it.</span>
+      <div class="row wrap">
+        <div class=${cx("field mono sx-s3key-in", busy && "disabled")}>
+          <input type="password" autocomplete="off" spellcheck="false" aria-label="Your Spike 3 OTP key"
+            placeholder="Paste your OTP key (64 hex characters)" value=${key} disabled=${busy}
+            onInput=${(e) => setKey(e.target.value)} onKeyDown=${(e) => { if (e.key === "Enter") send(); }} />
+        </div>
+        <${Button} size="sm" kind="primary" icon="unlock" disabled=${busy || !key.trim()} onClick=${send}>Use this key<//>
+        ${busy ? html`<${Spinner} />` : null}
+      </div>
       <span class="small muted">Every shipped Stern board enforces secure boot, so the software extractor card will not boot on a normal machine:
         it only works on an un-enforced dev board. On a shipped board it simply refuses to boot (harmless: restore the backed-up boot.img / boot.sig).
         Reading the key off a secure-boot board needs a hardware (DMA) dump, which is out of scope here.</span>
       <div class="row wrap">
-        <${Button} size="sm" kind="primary" icon="unlock" disabled=${busy} onClick=${() => call("ui.spike3_load_key")}>I have the key…<//>
-        <${Button} size="sm" disabled=${busy} onClick=${() => call("ui.spike3_build_card")}>Build extractor card (dev boards)…<//>
-        ${busy ? html`<${Spinner} />` : null}
+        <${Button} size="sm" kind="ghost" disabled=${busy} onClick=${() => call("ui.spike3_load_key")}>Or choose a key file…<//>
+        <${Button} size="sm" kind="ghost" disabled=${busy} onClick=${() => call("ui.spike3_build_card")}>Build extractor card (dev boards)…<//>
       </div>
       ${shell.spike3_key_status ? html`<span class="small">${shell.spike3_key_status}</span>` : null}
     </div>

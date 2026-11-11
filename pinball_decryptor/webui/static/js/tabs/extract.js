@@ -160,6 +160,22 @@ export function SourceBody({ s, hist }) {
 // boots on an un-enforced dev board; the realistic path for a normal machine is
 // to ingest a key you already have (the key is fleet-wide). Lead with that;
 // keep the card as a secondary, clearly dev-only option (PAD-1086, PAD-1091).
+// PAD-1090: the key pasted as text (David: "can't we just make it a text
+// field?"); a hidden field, never echoed - the window's spike3_paste_key
+// checks it against the selected card and keeps it for every Spike 3 tab.
+function KeyPaste({ busy }) {
+  const [key, setKey] = useState("");
+  const send = () => { if (key.trim()) { call("ui.spike3_paste_key", key.trim()); setKey(""); } };
+  return html`<div class="row wrap">
+    <div class=${cx("field mono sx-s3key-in", busy && "disabled")}>
+      <input type="password" autocomplete="off" spellcheck="false" aria-label="Your Spike 3 OTP key"
+        placeholder="Paste your OTP key (64 hex characters)" value=${key} disabled=${busy}
+        onInput=${(e) => setKey(e.target.value)} onKeyDown=${(e) => { if (e.key === "Enter") send(); }} />
+    </div>
+    <${Button} size="sm" kind="primary" icon="unlock" disabled=${busy || !key.trim()} onClick=${send}>Use this key<//>
+  </div>`;
+}
+
 function Spike3UnlockPanel({ s }) {
   const u = s.spike3_unlock;
   if (!u) return null;
@@ -172,10 +188,11 @@ function Spike3UnlockPanel({ s }) {
   return html`<div class="x-alert x-spike3" role="group">
     <div class="x-alert-hd" aria-expanded="true">This Spike 3 card is encrypted — it needs its board's OTP key</div>
     <div class="x-alert-bd">
-      <p class="small x-spike3-why">The 256-bit key is fused into the machine's Raspberry Pi, not stored on the card, and it is the same across machines. If you already have the key (OTP_KEY.TXT), PAD verifies it against this card and unlocks extraction.</p>
+      <p class="small x-spike3-why">The 256-bit key is fused into the machine's Raspberry Pi, not stored on the card, and it is the same across machines. If you already have it, paste it here (64 hex characters): PAD verifies it against this card, unlocks extraction, and keeps it for every Spike 3 tab.</p>
+      <${KeyPaste} busy=${u.busy} />
       <p class="small x-spike3-why x-spike3-dev">Every shipped Stern board enforces secure boot, so the software extractor card will not boot on a normal machine — it only works on an un-enforced dev board. On a shipped board it simply refuses to boot (harmless: restore the backed-up boot.img / boot.sig). Reading the key off a secure-boot board needs a hardware (DMA) dump, which is out of scope here.</p>
       <div class="row wrap">
-        <${Button} size="sm" icon="unlock" disabled=${u.busy} onClick=${() => call("extract.spike3_ingest_key")}>I have the key (OTP_KEY.TXT)…<//>
+        <${Button} size="sm" kind="ghost" disabled=${u.busy} onClick=${() => call("extract.spike3_ingest_key")}>Or choose a key file…<//>
         <${Button} size="sm" disabled=${u.busy} onClick=${() => call("extract.spike3_build_card")}>Build extractor card (dev boards)…<//>
         ${u.busy ? html`<${Spinner} />` : null}
       </div>

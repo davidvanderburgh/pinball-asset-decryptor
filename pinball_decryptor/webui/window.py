@@ -415,20 +415,37 @@ class WebWindow:
         return have
 
     @rpc
-    def spike3_load_key(self):
-        """The key gate's "I have my key": pick the key file (OTP_KEY.TXT, or
-        the 32-byte key), verify it against the selected card, keep it."""
-        card = self._spike3_card()
-        if not card:
-            self.toast("Select your Spike 3 card first (the Select card tab): "
-                       "PAD checks the key against it before keeping it.", "warn")
+    def spike3_paste_key(self, text):
+        """The key gate's field: the key pasted as text (64 hex characters,
+        or OTP_KEY.TXT's contents), checked against the selected card, kept.
+        The key itself never reaches the log."""
+        text = (text or "").strip()
+        if not text:
             return False
+        return self._spike3_take_key(text)
+
+    @rpc
+    def spike3_load_key(self):
+        """The key gate's "Choose a key file": OTP_KEY.TXT, or the raw
+        32-byte key, which cannot be pasted."""
+        if not self._spike3_card():
+            return self._spike3_take_key(None)
         key = self.ask_open("spike3_otp_key", "Select your OTP key "
                             "(OTP_KEY.TXT or the 32-byte key file)",
                             [("Key files", "*.txt *.bin"), ("All files", "*.*")])
         if isinstance(key, (list, tuple)):
             key = key[0] if key else ""
         if not key:
+            return False
+        return self._spike3_take_key(key)
+
+    def _spike3_take_key(self, key):
+        """Verify *key* (text or a file path) against the selected card and
+        keep it (webui/spike3_key.save_key), off the UI thread."""
+        card = self._spike3_card()
+        if not card:
+            self.toast("Select your Spike 3 card first (the Select card tab): "
+                       "PAD checks the key against it before keeping it.", "warn")
             return False
         self.ctx.store.set("shell", spike3_key_busy=True, spike3_key_status=
                            "Checking the key against your card…")
@@ -438,7 +455,11 @@ class WebWindow:
             try:
                 ok, msg, _path = spike3_key.save_key(key, card)
             except Exception as exc:                    # noqa: BLE001
-                ok, msg = False, "Could not read that key: %s" % exc
+                ok = False
+                err = str(exc)
+                if isinstance(key, str) and len(key) > 8 and key[:16] in err:
+                    err = type(exc).__name__     # never echo a pasted key
+                msg = "Could not use that key: %s" % err
 
             def done():
                 self.ctx.store.set("shell", spike3_key_busy=False,
@@ -447,6 +468,9 @@ class WebWindow:
                 if ok:
                     self.refresh_spike3_key()
                     self.refresh_rail()
+                    ext = self._by_ns.get("extract")
+                    if ext is not None and ext.get("spike3_unlock"):
+                        ext._spike3_unlocked(msg)
             self.ctx.loop.post(done)
 
         threading.Thread(target=work, daemon=True, name="spike3-key").start()

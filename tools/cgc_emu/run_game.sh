@@ -66,9 +66,12 @@ done
 # The ROM's switch / coil names and the ball model, from this checkout's
 # tables (prepare.sh's copies in the build are what the card was checked with)
 ROM=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import cgctitles; print(cgctitles.find_rom(sys.argv[2]) or "")'     "$CGC_TOOLS" "$G")
-python3 "$CGC_TOOLS/cgcroms.py" "$ROM" --json > "$CGC_RIG/names.json" &&
-    python3 "$CGC_TOOLS/cgctitles.py" balls "$TITLE" "$CGC_RIG/names.json" > "$CGC_RIG/balls" ||
+python3 "$CGC_TOOLS/cgcroms.py" "$ROM" --json > "$CGC_RIG/rom_names.json" &&
+    python3 "$CGC_TOOLS/cgctitles.py" rignames "$TITLE" "$CGC_RIG/rom_names.json" > "$CGC_RIG/names.json" &&
+    python3 "$CGC_TOOLS/cgctitles.py" balls "$TITLE" "$CGC_RIG/rom_names.json" > "$CGC_RIG/balls" ||
     cp "$BUILD/.pad_balls" "$CGC_RIG/balls"
+# CGC_BALLS=<line>: try a ball model by hand (developers), the title's ignored
+[ -n "${CGC_BALLS:-}" ] && echo "$CGC_BALLS" > "$CGC_RIG/balls"
 mkfifo "$CGC_RIG/ctl"
 : > "$CGC_RIG/events"
 echo "$BUILD" > "$CGC_RIG/build"
@@ -80,7 +83,7 @@ chmod 1777 "$CGC_RIG/tmp"
 ENVS="PATH=/usr/bin:/bin HOME=$CGC_RIG/home USER=$CGC_USER LANG=C \
 CGC_MARK=$CGC_RIG CGC_FB=$CGC_RIG/fb CGC_CTL=$CGC_RIG/ctl CGC_STATE=$CGC_RIG/state \
 CGC_EVENTS=$CGC_RIG/events CGC_LOG=$CGC_RIG/shim.log CGC_NV=$NV/fram.bin \
-SDL_AUDIODRIVER=dummy"
+SDL_AUDIODRIVER=dummy CGC_TRACE=${CGC_TRACE:-0}"
 # ns.sh: a private /tmp for the game's z4.log, then the game.  Detached
 # whole (setsid -f, stdin closed): a child of runuser dies with the wsl.exe
 # that started this (tools/bof_emu learned it).
@@ -130,6 +133,18 @@ for i in $(seq 1 600); do
     fi
     sleep 0.1
 done
+# Some ROMs ignore Start for a while after their lamps run (Monster Bash:
+# ~1740 frames from power-up); the title's ready_frames waits that out, so a
+# Start pressed once this returns is taken
+READY_FRAMES=$(python3 "$CGC_TOOLS/cgctitles.py" get "$TITLE" ready_frames)
+if [ $up = 1 ] && [ -n "$READY_FRAMES" ]; then
+    for _ in $(seq 1 1200); do
+        f=$(sed -n 's/^frames //p' "$CGC_RIG/state" 2>/dev/null)
+        [ "${f:-0}" -ge "$READY_FRAMES" ] && break
+        cgc_game_alive || { up=0; break; }
+        sleep 0.1
+    done
+fi
 if [ $up = 1 ]; then
     touch "$NV/.attract"
     echo "Ready: $(basename "$BUILD"), slot $CGC_SLOT"

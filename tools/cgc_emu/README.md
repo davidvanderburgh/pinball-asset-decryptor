@@ -12,7 +12,7 @@ and muted.
 |---|---|---|
 | Medieval Madness 3.0 | `MedievalMadness300Installer.img` | attract, coins, serve, launch, drain, ball save |
 | Attack From Mars 1.0 | `AttackFromMars100Installer.img` | attract, coins, serve (bootcheck pass) |
-| Monster Bash 1.03 | `MonsterBash103Installer.img` | attract, coins; Start does not serve yet (below) |
+| Monster Bash 1.03 | `MonsterBash103Installer.img` | attract, coins, serve, launch, poppers, Dracula, drain, ball 2 (PAD-1174, below) |
 | Cactus Canyon 1.13 | `CactusCanyon_cc113_9-2-25_card.img` | attract, coins, serve, plunge, poppers, drain, full games (PAD-1170, Z5 engine below) |
 
 The Emulate tab for these is a follow-up ticket; nothing in the app calls
@@ -60,12 +60,50 @@ title).  PAD-Runtime's disk is small: check `df -h /var/tmp` first.
   nothing move re-kicks; a second kick stacks a ball behind one already in
   the lane, as on the machine), the AUTO PLUNGER coil (shooter lane -> in play),
   kickouts (MM: LEFT POPPER, RIGHT EJECT, CATAPULT; CC: MINE and SALOON
-  POPPER on coils 6 and 8), two-position motors
-  (MM drawbridge; MB bank and Frankenstein table).  Coil pulses are read at
-  1 kHz; `$CGC_RIG/events` logs one line per pulse.
+  POPPER on coils 6 and 8; MB: RIGHT POPPER 16, LEFT EJECT 15), two-position
+  motors (MM drawbridge; MB bank and Frankenstein table; `mechs=coil:rest:far`,
+  optionally `:leave:travel` in ms, default 60 and 700), and a toy on a track
+  (MB's Dracula: `tracks=fwd:back:pos1/pos2/...`, home first; it moves while
+  its coil is ON, 150 ms of that per position, so a game's PWM drive moves it
+  too).  Coil pulses are read at 1 kHz; `$CGC_RIG/events` logs one line per
+  pulse, and one per motor or track reaching or leaving a switch.
+* **Debugging the model.**  `CGC_BALLS='<line>' run_game.sh` runs a ball model
+  by hand instead of the title's; `CGC_TRACE=1` adds every coil's release to
+  `events` with how long it was on (`<ms> sol <n> off <on-ms>`).
 * **First boot.**  A new FRAM makes the ROM restore factory settings and
   wait; `run_game.sh` presses ENTER, then ESCAPE until the lamps run, as an
   operator would, once per slot and title.
+* **Ready.**  Every WPC ROM here ignores Start for a while after its lamps
+  run (MM, AFM: ~450 frames from power-up; the rig's 5 s settle covers it).
+  Monster Bash's does for ~1740 frames (~29 s of game time) whatever the board
+  says, so its title entry has `ready_frames` and `run_game.sh` returns only
+  once the game is past it: a Start pressed then is taken.
+
+## Monster Bash (PAD-1174)
+
+What PAD-273 and PAD-1170 took for the Frankenstein table was three other
+things, each proven on the rig:
+
+* **Its coil numbers.**  The ROM's coil-name table leaves out solenoid 4
+  (unused on this machine): its entries run 1, 2, 3, 5, 6 ..., so LEFT GATE
+  and every coil after it is one higher than its place in the table.  The
+  ROM's own solenoid test (T.4) shows it: "09 TROUGH EJECT" fires coil 9,
+  "01 AUTO PLUNGER" coil 1, 04 and 07 (KNOCKER) are skipped.  `cgctitles.py`
+  carries the gap (`coil_gaps`) and the rig's `names.json` uses the machine's
+  numbers.  MM's and AFM's tables have no gap.
+* **The right popper.**  Its switch (36) is an opto the program powers up
+  reading blocked: the game saw a ball there and kicked coil 16 (the popper)
+  every 1.5 s - the pulse that read as FRANK. MOTOR through the gap.  It is
+  now an opto read empty, kicked out by 16; LEFT EJECT (28) by 15.
+* **Start.**  The ROM ignores Start for its first ~29 s (above); the rig
+  pressed it at ~8 s.  `bootcheck.sh` and every later press now land after it.
+
+Dracula rides a track: DRAC. MTR. FORWD. (21) and BCKWD. (22) over DRAC.
+POSITION 1 (78, home) to 5 (74).  A ball in the left eject sends him forward,
+and the eject waits for him to move.  The Frankenstein table (FRANK. MOTOR 17,
+TABLE DOWN 83 at rest / UP 84) and the up/down bank (18, UP 81 at rest / DOWN
+82) keep the two-position model; nothing in the runs here asked either to
+move.
 
 ## Cactus Canyon: the Z5 engine (PAD-1170)
 
@@ -128,13 +166,6 @@ bash tools/cgc_emu/bootcheck.sh <build>      # VERDICT: attract, coins booked, a
 
 ## Not done yet
 
-* **Monster Bash** reaches attract and books coins, but after Start never
-  serves.  Until PAD-1170 its coil numbers were read one off (its ROM's coil
-  table has no "invalid" entry 0, and the reader dropped AUTO PLUNGER), so
-  the model watched coil 7 for TROUGH EJECT (it is 8) and coil 16 for the
-  bank motor (it is 17).  With the right numbers, Start pulses FRANK. MOTOR
-  (16) about every 1.5 s and waits: the Frankenstein table's model (rest at
-  FRANK. TABLE DOWN, travel to UP) is not what the game waits for.
 * The colour: the shots show CGC's green DMD dots; whether the card's
   default is a colour palette (`cgc.so` replacement art) was not checked.
 * A visible window, sound, and the Emulate tab (with a switch window).

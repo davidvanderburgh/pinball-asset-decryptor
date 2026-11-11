@@ -113,9 +113,77 @@ def test_switch_ids_are_the_names_tables_slots(s1, tmp_path, monkeypatch):
     (tmp_path / "s1switches.json").write_text(json.dumps(names), encoding="utf-8")
     rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
     rig.dump = str(tmp_path)
-    assert rig.switch_ids() == {(1, 11): 75, (8, 2): 514}
+    service = {(0, b): b for b in (8, 9, 10, 11)}
+    assert rig.switch_ids() == {(1, 11): 75, (8, 2): 514, **service}
     rig.dump = str(tmp_path / "nowhere")
-    assert rig.switch_ids() == {}
+    assert rig.switch_ids() == service
+
+
+@pytest.mark.parametrize("bit", [8, 9, 10, 11])
+def test_cpu_service_inputs_are_active_low_and_not_node_switches(s1, tmp_path, bit):
+    from types import SimpleNamespace
+    cpu = tmp_path / "cpu.input"
+    cpu.write_bytes(b"\xaa\xff\xfe")   # unrelated DIP / trough / door bits
+    rig = SimpleNamespace(cpu_switch_path=lambda: str(cpu), sw_path=lambda: str(tmp_path / "sw.input"))
+    pipe = s1.Spike1Pipe(rig)
+    assert pipe.set(bit, 1)
+    expected = bytearray(b"\xaa\xff\xfe")
+    expected[1] &= ~(1 << (bit - 8))
+    assert cpu.read_bytes() == expected and not (tmp_path / "sw.input").exists()
+    assert pipe.set(75, 1)  # a later playfield write must not leak the CPU bit
+    bits = (tmp_path / "sw.input").read_bytes()[s1.INPUT_HEADER.size:]
+    assert bits[75 >> 3] & (1 << (75 & 7)) and not bits[1]
+    assert pipe.set(bit, 0) and cpu.read_bytes() == b"\xaa\xff\xfe"
+    assert pipe.set(bit, 1)
+    pipe.close()
+    assert cpu.read_bytes() == b"\xaa\xff\xfe"
+    assert not any((tmp_path / "sw.input").read_bytes()[s1.INPUT_HEADER.size:])
+
+
+def test_cpu_service_write_replaces_the_file_whole(s1, tmp_path, monkeypatch):
+    """qemu pads a short read with zeros (= every active-low input pressed),
+    so the file is swapped in whole, never truncated and rewritten."""
+    from types import SimpleNamespace
+    cpu = tmp_path / "cpu.input"
+    cpu.write_bytes(b"\xff\xff\xfe")
+    replaced = []
+    real = s1.os.replace
+    monkeypatch.setattr(s1.os, "replace", lambda a, b: (replaced.append((a, b)), real(a, b)))
+    pipe = s1.Spike1Pipe(SimpleNamespace(cpu_switch_path=lambda: str(cpu)))
+    assert pipe.set(9, 1)
+    assert replaced == [(str(cpu) + ".tmp", str(cpu))]
+    assert cpu.read_bytes() == b"\xff\xfd\xfe" and not (tmp_path / "cpu.input.tmp").exists()
+
+
+def test_cpu_service_write_can_be_retried_after_resolution_failure(s1, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    attempts = []
+    cpu = tmp_path / "cpu.input"
+    def path():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise s1.subprocess.TimeoutExpired("readlink", 10)
+        return str(cpu)
+    monkeypatch.setattr(s1, "_log", lambda s: None)
+    pipe = s1.Spike1Pipe(SimpleNamespace(cpu_switch_path=path))
+    assert not pipe.set(11, 1)
+    assert pipe.set(11, 1) and len(attempts) == 2
+    assert cpu.read_bytes() == b"\xff\xf7\xfe"
+
+
+def test_cpu_input_path_resolves_the_wsl_symlink_once(s1, monkeypatch):
+    from types import SimpleNamespace
+    rig = s1.Spike1Rig.__new__(s1.Spike1Rig)
+    rig.root, rig.distro = "/pad work/spike1", "TestRuntime"
+    calls = []
+    def run(cmd, **kw):
+        calls.append(cmd)
+        return SimpleNamespace(stdout="/pad work/cache/GB/rootfs\n", check_returncode=lambda: None)
+    monkeypatch.setattr(s1.sys, "platform", "win32")
+    monkeypatch.setattr(s1.subprocess, "run", run)
+    want = os.path.join(r"\\wsl.localhost\TestRuntime\pad work\cache\GB\rootfs", "data", "s1cpusw.input")
+    assert rig.cpu_switch_path() == rig.cpu_switch_path() == want
+    assert calls == [["wsl.exe", "-d", "TestRuntime", "-u", "root", "--", "readlink", "-f", "/pad work/spike1/rootfs"]]
 
 
 def test_pipe_rewrites_the_bitmap_and_lets_go_on_close(s1, tmp_path):

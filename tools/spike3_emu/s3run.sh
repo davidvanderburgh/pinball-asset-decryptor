@@ -60,11 +60,25 @@ if [ "$BUS" = 1 ] && [ ! -e /dev/cuse ]; then
     insmod "$KTREE/fs/fuse/cuse.ko" 2>/dev/null && echo "[s3run] loaded cuse.ko"
     for i in $(seq 1 20); do [ -e /dev/cuse ] && break; sleep 0.1; done
 fi
-if [ -n "${PAD_S3_I2C:-}" ] && [ ! -e "/dev/i2c-${PAD_S3_I2C}" ]; then
+stub_bus() {          # the i2c-stub adapter's bus number, by NAME, not "0"
+    local a
+    for a in /sys/bus/i2c/devices/i2c-* /sys/class/i2c-adapter/i2c-*; do
+        grep -q "SMBus stub driver" "$a/name" 2>/dev/null && { echo "${a##*-}"; return 0; }
+    done
+    return 1
+}
+if [ -n "${PAD_S3_I2C:-}" ] && [ ! -e "/dev/i2c-${PAD_S3_I2C}" ] || \
+   { [ -z "${PAD_S3_I2C:-}" ] && ! stub_bus >/dev/null; }; then
     insmod "$KMOD/i2cstub/i2c-stub.ko" chip_addr=0x10,0x48,0x4c,0x4d,0x4e,0x50,0x51,0x52,0x53 2>/dev/null \
         && echo "[s3run] loaded i2c-stub.ko"
-    for i in $(seq 1 20); do [ -e "/dev/i2c-${PAD_S3_I2C}" ] && break; sleep 0.1; done
+    [ -e /dev/i2c-0 ] || modprobe i2c-dev 2>/dev/null
+    for i in $(seq 1 20); do stub_bus >/dev/null && break; sleep 0.1; done
 fi
+# UNSET = the stub bus, found by name: without an amp bus the TAS57xx init
+# fails and the game aborts at xifo.cpp:72 a minute in (every proof run set
+# PAD_S3_I2C=0 by hand; the Emulate tab's launcher sets nothing)
+[ -n "${PAD_S3_I2C:-}" ] || PAD_S3_I2C=$(stub_bus) || PAD_S3_I2C=""
+export PAD_S3_I2C
 
 TREE=$(python3 "$S/s3store.py" path "$CARD") || {
     echo "[s3run] the card is not in the Spike 3 store yet: s3store.py build $CARD" >&2; exit 1; }
@@ -337,7 +351,7 @@ esac
 INNER
 INNERPID=$!
 trap 'kill -KILL $INNERPID 2>/dev/null' TERM INT HUP   # unshare --fork ignores TERM; KILL + --kill-child ends the namespace
-while :; do wait $INNERPID; RC=$?; kill -0 $INNERPID 2>/dev/null || break; done
+while :; do wait $INNERPID 2>/dev/null; RC=$?; kill -0 $INNERPID 2>/dev/null || break; done
 trap - TERM INT HUP
 if [ -n "$BUSPIDS" ]; then
     kill $BUSPIDS 2>/dev/null; sleep 0.5; kill -9 $BUSPIDS 2>/dev/null

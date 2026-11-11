@@ -342,6 +342,8 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._spike3 = None
         self._spike3_why = ""
         self._spike3_probed = None
+        self._s3_slot = None            # PAD-1090: the rig a Spike 3 run is on
+        self._s3_label = None           # ...and what its state says
         #: PAD-659: the picked file is a disk tool's backup of a card (a
         #: Macrium .mrimgx), not a card image: what to say about it, "" when
         #: it is not one.  Read off the loop at pick time; ``start()``
@@ -2962,12 +2964,19 @@ class EmulateTab(EmulateLogMixin, TabService):
         # or could not be asked) falls through and the run's own guard
         # (watch.sh) catches it without the copy.
         if self._spike3 is True:
-            self._refuse_start(
-                "%s is a Stern Spike 3 card and cannot be emulated. Its "
-                "partitions are encrypted with a key kept in the machine, not "
-                "on the card%s." % (
-                    os.path.basename(self._card()) or "this card",
-                    " (%s)" % self._spike3_why if self._spike3_why else ""))
+            # PAD-1090: the Spike 3 rig, where this PC has it - the launcher
+            # checks the rest (root, its build, qemu, CUSE) and says what is
+            # missing; without it, PAD-367's refusal stands.
+            if not rig.spike3_rig_present() or rig.spike3_check_cmd() is None:
+                self._refuse_start(
+                    "%s is a Stern Spike 3 card and cannot be emulated on "
+                    "this PC (Spike 3 emulation is not set up here). Its "
+                    "partitions are encrypted with a key kept in the "
+                    "machine, not on the card%s." % (
+                        os.path.basename(self._card()) or "this card",
+                        " (%s)" % self._spike3_why if self._spike3_why else ""))
+                return
+            self._start_spike3()
             return
         # A TICKET'S RIG IS TAKEN NOW, for this run, and given back at Stop
         # (core/rigslot.py claim_for_run). Nothing changes without a ticket.
@@ -3162,6 +3171,95 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._launch_accepted = prepare is not None
         self._thread(guarded)
 
+    # -- PAD-1090: a Spike 3 card, on the Spike 3 rig ----------------------
+    #: How long a Spike 3 run may last before the rig ends it itself, like
+    #: the Spike 2 run's BACKSTOP_MIN.
+    S3_MINUTES = 240
+
+    def _start_spike3(self):
+        """Check the Spike 3 rig, take a rig slot, and run the card in its
+        window (s3launch.sh: the card into the store the first time, then
+        s3run.sh --window). The run's lines go to the log; the button is
+        Stop while it runs; Stop asks s3launch.sh --stop."""
+        from ...core import rigslot
+        slot = rigslot.claim_for_run()
+        if slot is None:
+            busy = ", ".join("rig %d: %s" % (r["slot"], r["holder"])
+                             for r in rigslot.board()[1:] if r["holder"])
+            self._refuse_start("every emulator rig is in use right now (%s). "
+                               "Try again when one is free." % busy)
+            return
+        slot = slot or 1                    # 0 = no ticket: the first slot
+        card = self._card()
+        audio = not self._muted_for_spike3()
+        self._starting = True
+        self._s3_slot = slot
+        self._s3_label = "Starting Spike 3…"
+        self._run_label(False, True)
+        self._set("state", self._s3_label)
+
+        def run():
+            try:
+                out = self._run(rig.spike3_check_cmd(), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=60)
+                ok, what = rig.parse_s3check(out.stdout.decode("utf-8", "replace"))
+                if ok is not True:
+                    self._starting = False
+                    self._s3_slot = self._s3_label = None
+                    rigslot.release_claimed()
+                    msg = ("Spike 3 emulation is not set up on this PC: %s." % what
+                           if what else "Spike 3 emulation could not be checked on this PC.")
+                    self._post(lambda: (self._refuse_start(msg),
+                                        self._set("state", "Not running"),
+                                        self._paint_run_btn()))
+                    return
+                cmd = rig.spike3_launch_cmd(card, slot, self.S3_MINUTES, audio=audio)
+                self._log("[emulate] %s" % " ".join(str(c) for c in cmd))
+                self._proc = self._popen(cmd, stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT)
+                self._starting = False
+                self._started_here = True
+                self._post(self._paint_run_btn)
+                for raw in self._proc.stdout:
+                    line = raw.decode("utf-8", "replace").rstrip()
+                    self._log("[emulate] " + line)
+                    label = self._s3_progress(line, slot)
+                    if label:
+                        self._s3_label = label
+                        self._post(self._set, "state", label)
+            except Exception as exc:                     # noqa: BLE001
+                log.exception("spike3 start")
+                self._log("[emulate] failed to start: %s" % exc)
+            finally:
+                self._proc = None
+                self._starting = False
+                self._s3_label = None
+                if not self._stopping:
+                    self._s3_slot = None
+                    rigslot.release_claimed()
+                    self._post(lambda: (self._set("state", "Not running"),
+                                        self._paint_run_btn()))
+
+        self._thread(run)
+
+    @staticmethod
+    def _s3_progress(line, slot):
+        """The state label a launcher line moves the tab to, or None."""
+        if line.startswith("s3launch: failed - "):
+            return "Not running - " + line[len("s3launch: failed - "):]
+        if line.startswith("s3launch: decrypting"):
+            return "Preparing the Spike 3 card (first time only)…"
+        if line.startswith("[s3run] exec "):
+            return "Running (Spike 3, rig %s)" % slot
+        return None
+
+    def _muted_for_spike3(self):
+        """The panel's Mute: Spike 3 sound plays only when it is off."""
+        try:
+            return bool(self._mute_var.get())
+        except Exception:                                # noqa: BLE001
+            return True                     # unknown: rig runs stay muted
+
     def _open_playfield(self, fields):
         if sys.platform != "win32":
             return
@@ -3228,8 +3326,11 @@ class EmulateTab(EmulateLogMixin, TabService):
 
         def run():
             needs_restart = False
+            s3 = self._s3_slot
             try:
-                out = self._run(self._kill_cmd(), stdout=subprocess.PIPE,
+                kill = (rig.spike3_stop_cmd(s3) if s3 is not None
+                        else self._kill_cmd())
+                out = self._run(kill, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, timeout=60)
                 for line in out.stdout.decode("utf-8",
                                               "replace").splitlines():
@@ -3251,6 +3352,7 @@ class EmulateTab(EmulateLogMixin, TabService):
             # the rig goes back the moment it is not used (claim_for_run)
             from ...core import rigslot
             rigslot.release_claimed()
+            self._s3_slot = self._s3_label = None
             self._stopping = False
             if self._restart_wait:
                 self._post(self._restart_when_down)
@@ -3779,6 +3881,8 @@ class EmulateTab(EmulateLogMixin, TabService):
             label = self._preparing
         elif copying:
             label = self._copying
+        elif self._s3_label:            # a Spike 3 run: the rig's status
+            label = self._s3_label      # (watch.sh's) knows nothing of it
         self.set(state_tip=(self._preparing_explain() if preparing else
                             (self._copying_tip if copying else hint)) or "")
         self._set("state", label)

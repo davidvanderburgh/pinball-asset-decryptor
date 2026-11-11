@@ -130,3 +130,108 @@ def test_the_probe_asks_parts_py_and_records_the_verdict(tmp_path, monkeypatch):
         _wait(w, lambda: svc._spike3 is True)
         assert any("--spike3" in " ".join(c) for c in rec.calls)
         assert "LUKS" in svc._spike3_why
+
+
+# ---------------------------------------------------------------------------
+# PAD-1090: on a PC with the Spike 3 rig, the card runs instead
+# ---------------------------------------------------------------------------
+
+def _s3_rig(monkeypatch, check=b"s3check: ok\n"):
+    monkeypatch.setattr(emulate_rig, "spike3_rig_present", lambda: True)
+    monkeypatch.setattr(emulate_rig, "spike3_check_cmd",
+                        lambda: ["bash", "s3launch.sh", "--check"])
+    monkeypatch.setattr(emulate_rig, "spike3_launch_cmd",
+                        lambda card, slot, minutes, audio=False:
+                        ["bash", "s3launch.sh", card, str(slot), str(minutes)]
+                        + (["--audio"] if audio else []))
+    monkeypatch.setattr(emulate_rig, "spike3_stop_cmd",
+                        lambda slot: ["bash", "s3launch.sh", "--stop", str(slot)])
+    return {"--check": _Done(check)}
+
+
+def _pick(w, svc, card):
+    w.run(lambda: w.window.emulate_card_var.set(str(card)))
+    w.run(lambda: svc._spike3_apply(str(card), True, "partitions p2, p3 are LUKS-encrypted"))
+
+
+def test_a_spike3_card_runs_on_the_spike3_rig(tmp_path, monkeypatch):
+    from tests.test_webui_emulate import _Recorder
+    card = tmp_path / "pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        answers = _s3_rig(monkeypatch)
+        rec = _Recorder(answers=answers, lines=(
+            "s3launch: starting slot 1 for 240 min",
+            "[s3run] exec /games/game  (14400s cap)"))
+        monkeypatch.setattr(svc, "_run", rec.run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        _pick(w, svc, card)
+        w.call(NS + ".toggle")
+        _wait(w, lambda: any("s3launch.sh" in c and str(card) in c
+                             for c in (" ".join(x) for x in rec.calls)))
+        assert not (svc.last_refusal or "")
+        assert not any("watch.sh" in " ".join(c) for c in rec.calls)
+        log = _lines(w)
+        assert any("[s3run] exec /games/game" in ln for ln in log)
+        # Stop asks the launcher, not killgame.sh
+        w.run(lambda: setattr(svc, "_s3_slot", 1))
+        w.run(svc.stop)
+        _wait(w, lambda: any("--stop" in c for c in rec.calls))
+        _wait(w, lambda: not svc._stopping)
+        assert not any("killgame.sh" in " ".join(c) for c in rec.calls)
+
+
+def test_a_spike3_rig_that_is_not_set_up_says_what_is_missing(tmp_path, monkeypatch):
+    from tests.test_webui_emulate import _Recorder
+    card = tmp_path / "fallout_le-0_81_0.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        answers = _s3_rig(monkeypatch, check=b"s3check: missing - CUSE (/dev/cuse)\n")
+        rec = _Recorder(answers=answers)
+        monkeypatch.setattr(svc, "_run", rec.run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        _pick(w, svc, card)
+        w.call(NS + ".toggle")
+        _wait(w, lambda: "not set up" in (svc.last_refusal or ""))
+        assert "CUSE" in svc.last_refusal
+        assert not any(len(c) > 2 and c[2] == str(card) for c in rec.calls)
+        _wait(w, lambda: not svc._starting and svc._proc is None)
+
+
+def test_spike3_sound_follows_the_panel_mute(tmp_path, monkeypatch):
+    from tests.test_webui_emulate import _Recorder
+    card = tmp_path / "star_wars_2025_le-0_96_0.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        rec = _Recorder(answers=_s3_rig(monkeypatch))
+        monkeypatch.setattr(svc, "_run", rec.run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        w.run(lambda: svc._mute_var.set(False))
+        _pick(w, svc, card)
+        w.call(NS + ".toggle")
+        _wait(w, lambda: any(str(card) in c for c in rec.calls))
+        launch = [c for c in rec.calls if str(card) in c][0]
+        assert launch[-1] == "--audio"
+
+
+@pytest.mark.parametrize("text,expect", [
+    ("s3check: ok", (True, "")),
+    ("warn\ns3check: missing - root;CUSE (/dev/cuse)", (False, "root;CUSE (/dev/cuse)")),
+    ("", (None, "")),
+])
+def test_parse_s3check(text, expect):
+    assert emulate_core.parse_s3check(text) == expect
+
+
+def test_spike3_launch_cmd_runs_the_launcher_as_root(monkeypatch):
+    if sys.platform != "win32":
+        pytest.skip("the WSL argv is Windows-only")
+    monkeypatch.setattr(emulate_core, "_wsl_head", lambda root=False: ["wsl.exe"] + (["-u", "root"] if root else []) + ["-e"])
+    cmd = emulate_core.spike3_launch_cmd(r"D:\cards\x.raw", 3, 240, audio=True)
+    assert cmd[:4] == ["wsl.exe", "-u", "root", "-e"]
+    assert cmd[5].endswith("/spike3_emu/s3launch.sh")
+    assert cmd[6:] == ["/mnt/d/cards/x.raw", "3", "240", "--audio"]
+    assert emulate_core.spike3_stop_cmd(3)[-2:] == ["--stop", "3"]

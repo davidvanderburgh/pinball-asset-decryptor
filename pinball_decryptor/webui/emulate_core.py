@@ -1466,6 +1466,59 @@ def parse_spike3(text):
     return None, ""
 
 
+#: The Spike 3 rig's launcher, beside the Spike 2 rig (PAD-1090).  It ships
+#: only in a source checkout today, so its absence is an answer, not an error.
+S3_LAUNCH = os.path.join("..", "spike3_emu", "s3launch.sh")
+
+
+def spike3_rig_present():
+    """Whether the Spike 3 launcher is on this PC at all."""
+    return os.path.isfile(os.path.join(rig_dir(), S3_LAUNCH))
+
+
+def _s3_argv(*args):
+    """``s3launch.sh ARGS`` as ROOT (the store's dm-crypt and s3run.sh's
+    overlay mounts need it) - Windows only, through ``wsl -u root``; None
+    where there is no password-free root (see rig_cmd_root)."""
+    if sys.platform == "win32":
+        return _wsl_head(root=True) + [
+            "bash", "%s/%s" % (_wsl_path(rig_dir()), S3_LAUNCH.replace(os.sep, "/"))] + \
+            [str(a) for a in args]
+    if sys.platform != "darwin" and linux_root_head() is not None:
+        return list(linux_root_head()) + [
+            "bash", os.path.join(rig_dir(), S3_LAUNCH)] + [str(a) for a in args]
+    return None
+
+
+def spike3_check_cmd():
+    """``s3launch.sh --check``: can this PC run a Spike 3 card?"""
+    return _s3_argv("--check")
+
+
+def spike3_launch_cmd(card, slot, minutes, audio=False):
+    """The run: the card into the Spike 3 store if needed, then the game in a
+    window on rig slot *slot* for *minutes*."""
+    path = _wsl_path(card) if sys.platform == "win32" else card
+    args = [path, int(slot), int(minutes)] + (["--audio"] if audio else [])
+    return _s3_argv(*args)
+
+
+def spike3_stop_cmd(slot):
+    return _s3_argv("--stop", int(slot))
+
+
+def parse_s3check(text):
+    """``(True|False|None, what)`` out of ``s3launch.sh --check``: None when
+    no verdict line came back (the launcher could not be asked)."""
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line == "s3check: ok":
+            return True, ""
+        if line.startswith("s3check: missing - "):
+            return False, line[len("s3check: missing - "):].strip()
+    return None, ""
+
+
 def slot_up_cmd():
     """``slot.sh up N`` as root for the rig this app's run is on, or ``None``
     when there is nothing to mount: rig 0 (the ordinary rig, no layer), or a

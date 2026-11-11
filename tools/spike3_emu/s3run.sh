@@ -269,7 +269,7 @@ export DEVBINDS RUNBINDS
 # network, and the WSL player reaches the Windows speaker over localhost.
 # PAD_S3_AUDIO_PLAYER=0 makes only the fifo, for a caller that reads it.
 AUDPID=""
-pkill -f "playaudio.sh $SD/audio/" 2>/dev/null && echo "[s3run] stopped a leftover player"
+pkill -f "$SD/audio/" 2>/dev/null && echo "[s3run] stopped a leftover player"
 if [ "${PAD_S3_AUDIO:-0}" = 1 ]; then
     rm -rf "$SD/audio"; mkdir -p "$SD/audio"
     # the player is the desktop's user too (its sound server's), as the window
@@ -444,8 +444,8 @@ if [ -n "$AUDPID" ]; then
     # by name too: run as the desktop user (runuser ... setsid) the player is
     # in a session of its own, which $AUDPID's group is not - it outlived the
     # run and the Emulate tab took it for one still up (PAD-1090)
-    kill -TERM -"$AUDPID" 2>/dev/null; pkill -TERM -f "playaudio.sh $SD/audio/" 2>/dev/null
-    sleep 0.5; kill -9 -"$AUDPID" 2>/dev/null; pkill -9 -f "playaudio.sh $SD/audio/" 2>/dev/null
+    kill -TERM -"$AUDPID" 2>/dev/null; pkill -TERM -f "$SD/audio/" 2>/dev/null     # the player and its padrelay.py
+    sleep 0.5; kill -9 -"$AUDPID" 2>/dev/null; pkill -9 -f "$SD/audio/" 2>/dev/null
     grep -a "\[s3alsa\] playing\|closed:" "$SD/game.err" | tail -2 | sed 's/^/[s3run]   sound: /'
 fi
 if [ -n "$HOSTPID" ]; then

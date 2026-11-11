@@ -219,21 +219,9 @@ def encoder_lamp_env(mapping):
 
 
 def game_for(title):
-    """A map variant's native game identity; existing maps use their title.
-    Look in the same user/kit map locations and order as PAD.Controller."""
-    if not title:
-        return title
-    for directory in (USER_MAPS, HERE):
-        for suffix in (".vpxmap.json", ".shadow.json"):
-            path = os.path.join(directory, title + suffix)
-            try:
-                with open(path, encoding="utf-8") as f:
-                    m = json.load(f)
-            except (OSError, ValueError):
-                continue
-            game = m.get("game")
-            return game if isinstance(game, str) and game else title
-    return title
+    """A table variant's native game; maps without game keep their title."""
+    game = table_map(title).get("game")
+    return game if isinstance(game, str) and game else title
 
 
 def card_for(title, platform="spike2"):

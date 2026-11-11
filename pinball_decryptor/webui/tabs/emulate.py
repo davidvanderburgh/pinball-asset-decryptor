@@ -343,6 +343,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._spike3_why = ""
         self._spike3_probed = None
         self._s3_slot = None            # PAD-1090: the rig a Spike 3 run is on
+        self._s3_restore = None         # PAD-1147: a save state to start from
         self._s3_label = None           # ...and what its state says
         self._s3_foot = None            # ...and its footer step (s3prog.py)
         #: PAD-659: the picked file is a disk tool's backup of a card (a
@@ -731,8 +732,12 @@ class EmulateTab(EmulateLogMixin, TabService):
     def _spike3_apply(self, path, is3, why):
         if path != self._spike3_probed:
             return
+        was = self._spike3
         self._spike3 = is3
         self._spike3_why = why or ""
+        if bool(was) != bool(is3):
+            # the save states listed are the Spike 3 rig's or Spike 2's
+            self.slots_refresh()
         if is3 and rig.spike3_rig_present():
             self._log("[emulate] %s is a Stern Spike 3 card: Start runs it on "
                       "the Spike 3 emulator. The first run of a card decrypts "
@@ -1734,7 +1739,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         def run():
             rows, total, free = [], None, None
             try:
-                r = self._run(self._cmd_root("slots.sh", "list"), capture_output=True, timeout=30)
+                r = self._run(self._slots_cmd("list"), capture_output=True, timeout=30)
                 for ln in (r.stdout or b"").decode("utf8",
                                                    "replace").splitlines():
                     p = ln.split("|")
@@ -1756,6 +1761,15 @@ class EmulateTab(EmulateLogMixin, TabService):
 
         self._thread(run)
         return True
+
+    def _slots_cmd(self, *args):
+        """slots.sh ARGS on the save states of the card's kind: a Spike 3
+        card's are the Spike 3 rig's (PAD-1147), kept the same way."""
+        if self._spike3 is True:
+            cmd = rig.spike3_slots_cmd(*args)
+            if cmd:
+                return cmd
+        return self._cmd_root("slots.sh", *args)
 
     def _slots_paint(self):
         rows = self._slots_rows
@@ -1832,6 +1846,8 @@ class EmulateTab(EmulateLogMixin, TabService):
             return False
         if self._loading or self._starting or self._stopping:
             return False
+        if self._spike3 is True:
+            return self._s3_slot_launch(slot)
         if self._last_up:
             self._slot_load(slot)
             return True
@@ -1841,6 +1857,42 @@ class EmulateTab(EmulateLogMixin, TabService):
         self.start()
         if self._launch_serial == serial:   # start refused (bad path, busy)
             self._launch_slot = None
+        return True
+
+    def _s3_slot_launch(self, slot):
+        """Launch on a Spike 3 card (PAD-1147): into the run that is up, or
+        a new run that starts from the save instead of booting."""
+        if self._proc is not None and self._s3_slot:
+            cmd = rig.spike3_load_cmd(self._s3_slot, slot.rsplit("/", 1)[-1])
+            if not cmd:
+                return False
+            self._loading = True
+            self._set("state", "Loading save…")
+            self.log("[emulate] loading slot '%s'" % slot)
+
+            def run():
+                try:
+                    r = self._run(cmd, capture_output=True, timeout=240)
+                    lines = [ln.strip() for ln in (r.stdout or b"").decode(
+                        "utf8", "replace").splitlines() if ln.strip()]
+                except Exception:                        # noqa: BLE001
+                    lines = ["the load did not run"]
+                for ln in lines[-6:]:
+                    self._log("[emulate] " + ln)
+
+                def done():
+                    self._loading = False
+                    if self._s3_label:
+                        self._set("state", self._s3_label)
+                self._post(done)
+
+            self._thread(run)
+            return True
+        self._s3_restore = slot
+        self.log("[emulate] starting from slot '%s'" % slot)
+        self.start()
+        if not self._starting and self._proc is None:   # start refused
+            self._s3_restore = None
         return True
 
     def _slot_load(self, slot):
@@ -1922,7 +1974,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         def run():
             out = ""
             try:
-                r = self._run(self._cmd_root("slots.sh", *args),
+                r = self._run(self._slots_cmd(*args),
                               capture_output=True, timeout=60)
                 out = (r.stdout or b"").decode("utf8", "replace").strip()
             except Exception:                            # noqa: BLE001
@@ -3261,9 +3313,11 @@ class EmulateTab(EmulateLogMixin, TabService):
                 keyfile = rig.spike3_keyfile(card, project=self._assets() or None)
                 if keyfile:
                     self._log("[emulate] Spike 3 key: %s" % keyfile)
+                restore, self._s3_restore = self._s3_restore, None
                 cmd = rig.spike3_launch_cmd(card, slot, self.S3_MINUTES, audio=audio,
                                             keyfile=keyfile,
-                                            audio_ctl=audio_ctl_file() if audio else None)
+                                            audio_ctl=audio_ctl_file() if audio else None,
+                                            restore=restore)
                 self._log("[emulate] %s" % " ".join(str(c) for c in cmd))
                 self._proc = self._popen(cmd, stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT)

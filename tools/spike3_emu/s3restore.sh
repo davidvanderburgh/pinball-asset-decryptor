@@ -17,8 +17,14 @@
 #      nor saved it), detached.
 # It prints "[s3restore] pid N" (the game's host pid) and exits 0, or says
 # why not and exits 1. The restored game is the run's game from then on.
+#
+#   s3restore.sh --check SLOT DIR TREE   the pre-flight alone: exit 0 when DIR
+#                                        can be loaded into a run of TREE (a
+#                                        running game is ended only after it)
 set -u
 S=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+CHECK=0; RUNTREE=""
+[ "${1:-}" = --check ] && { CHECK=1; shift; RUNTREE=${3:-}; }
 SLOT=${1:?usage: s3restore.sh SLOT DIR}
 DDIR=${2:?usage: s3restore.sh SLOT DIR}
 SD=/var/tmp/pad-s3/slot$SLOT
@@ -30,6 +36,11 @@ say() { echo "[s3restore] $*"; }
 [ -s "$DDIR/restore.env" ] && [ -s "$DDIR/inventory.img" ] || { say "not a save state: $DDIR"; exit 1; }
 TREE=$(awk '$1 == "tree" {print $2}' "$DDIR/restore.env")
 [ -d "$TREE/rootfs" ] || { say "the card this was saved from is not in the Spike 3 store ($TREE)"; exit 1; }
+if [ -n "$RUNTREE" ] && [ "$(readlink -f "$RUNTREE")" != "$(readlink -f "$TREE")" ]; then
+    say "this save is of another card ($(basename "$TREE")); start that card to load it"
+    exit 1
+fi
+[ "$CHECK" = 1 ] && exit 0
 
 # --- 1. the disk as it was --------------------------------------------------
 for l in root games data connectivity; do
@@ -53,6 +64,16 @@ if [ -s "$DDIR/glstate.bin" ] && [ -e "$SD/padgl.ring" ]; then
         say "NOTE: the renderer did not take the GL journal; pictures come back as the game redraws"
     fi
     rm -f "$SD/glreplay.bin" "$SD/glreplay.ok"
+fi
+
+# --- the video feed: a new session, every channel closed -------------------
+# A cold load's feed is new anyway; a load into a running run's feed finds the
+# old game's streams still open on the host. A new session makes the restored
+# game re-open each of its streams (s3vid.c resync); closing the rest ends the
+# old game's decoders. The offsets are s3vidhost.py's (s3vid.h's layout).
+if [ -s "$SD/s3vid.feed" ]; then
+    python3 "$S/s3vidhost.py" --new-session "$SD/s3vid.feed" \
+        || say "NOTE: the video feed could not be reset; clips may stall until the next one"
 fi
 
 # --- 3. the externals, and 4. the restore -----------------------------------

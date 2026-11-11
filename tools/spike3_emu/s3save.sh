@@ -87,14 +87,25 @@ while read -r _id _par mm froot mp _rest; do
 done < "/proc/$PID/mountinfo"
 
 # --- the node-bus pty the game holds (criu's tty[] key: rdev:dev, hex) ------
+# A booted game opened it as /dev/ttyAMA5; a game brought back from a save
+# holds the pty s3restore.sh handed in from outside (--inherit-fd), which
+# reads as the host's /dev/pts/N, on a mount the game's namespace does not
+# have ("Can't lookup mount ... /dev/pts/9", the first save after a load).
+# So it is found by WHAT it is - the run's node-bus pty, by device number -
+# not by the name it was opened under. A pty of the game's own devpts stays
+# criu's to dump.
+BUSPTY=$(cat "$SD/bridge.path" 2>/dev/null)
+BUSRDEV=$( [ -n "$BUSPTY" ] && stat -c %t:%T "$BUSPTY" 2>/dev/null)
 for fd in /proc/$PID/fd/*; do
     t=$(readlink "$fd" 2>/dev/null) || continue
     case "$t" in
-    /dev/ttyAMA5)
-        k=$(python3 -c 'import os,sys;s=os.stat(sys.argv[1]);print("%x:%x"%(s.st_rdev,s.st_dev))' "$fd") || continue
-        EXT+=(--external "tty[$k]")
-        echo "tty ${fd##*/} $k" >> "$DDIR/restore.env" ;;
+    /dev/ttyAMA5) ;;
+    /dev/pts/*) [ -n "$BUSRDEV" ] && [ "$(stat -L -c %t:%T "$fd" 2>/dev/null)" = "$BUSRDEV" ] || continue ;;
+    *) continue ;;
     esac
+    k=$(python3 -c 'import os,sys;s=os.stat(sys.argv[1]);print("%x:%x"%(s.st_rdev,s.st_dev))' "$fd") || continue
+    EXT+=(--external "tty[$k]")
+    echo "tty ${fd##*/} $k" >> "$DDIR/restore.env"
 done
 # THE NETWORK NAMESPACE (loopback only, PAD-1090) is not criu's to dump: a
 # tree with a namespace of its own is network-LOCKED with iptables-restore

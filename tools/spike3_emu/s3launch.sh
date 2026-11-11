@@ -8,6 +8,12 @@
 #                                           not there yet, then run it in a
 #                                           window on rig slot SLOT
 #   s3launch.sh --stop SLOT                 end that slot's run
+#   ... --restore GAME/NAME                 (with the run) start from that save
+#                                           state instead of booting (PAD-1147)
+#   s3launch.sh --load SLOT NAME            load save state NAME into the run
+#                                           on rig slot SLOT
+#   s3launch.sh --slots list|label|delete ...   the Spike 3 save states
+#                                           (Spike 2's slots.sh, on these)
 #
 # Runs as ROOT (the tab calls it through rig_cmd_root, `wsl -u root`):
 # s3run.sh's overlay mounts and namespaces need it, and the store lives under
@@ -132,18 +138,26 @@ case "${1:-}" in
         rm -f "$SD/dump/padled"
         exit 0
         ;;
+    --load)
+        exec bash "$S/s3state.sh" load "${2:?usage: s3launch.sh --load SLOT NAME}" "${3:?}"
+        ;;
+    --slots)
+        shift
+        PAD_S3_SAVES_LIST=1 exec bash "$S/../spike2_emu/slots.sh" "$@"
+        ;;
     ""|-*)
-        sed -n 2,20p "$0"
+        sed -n 2,26p "$0"
         exit 2
         ;;
 esac
 
 CARD=$1; SLOT=${2:?usage: s3launch.sh CARD.raw SLOT MINUTES [--audio] [--keyfile F]}; MIN=${3:-30}
 shift 3 2>/dev/null || shift $#
-AUDIO=0
+AUDIO=0; RESTORE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --audio) AUDIO=1 ;;
+        --restore) RESTORE=${2:-}; shift ;;
         --keyfile) export PAD_SPIKE3_KEYFILE=${2:-}; shift ;;
         # the Emulate tab's volume / Mute file (a Windows path): the sound
         # player follows it live, as on Spike 2 (playaudio.sh's win sink)
@@ -170,5 +184,13 @@ if ! build_ok; then
     fi
     build_ok || { echo "s3launch: failed - the Spike 3 rig did not build"; exit 1; }
 fi
+RARGS=()
+if [ -n "$RESTORE" ]; then
+    LD=/var/tmp/pad-s3/slot$SLOT.load
+    echo "s3launch: unpacking save state $RESTORE"
+    bash "$S/s3state.sh" unpack "$RESTORE" "$LD" || {
+        echo "s3launch: failed - save state $RESTORE could not be read"; exit 1; }
+    RARGS=(--restore "$LD")
+fi
 echo "s3launch: starting slot $SLOT for $MIN min$( [ $AUDIO = 1 ] && echo ', with sound')"
-PAD_S3_AUDIO=$AUDIO exec bash "$S/s3run.sh" "$CARD" --slot "$SLOT" --secs $((MIN * 60)) --window
+PAD_S3_AUDIO=$AUDIO exec bash "$S/s3run.sh" "$CARD" --slot "$SLOT" --secs $((MIN * 60)) --window ${RARGS[@]+"${RARGS[@]}"}

@@ -56,6 +56,8 @@ class Shm:
         self.f = make(feed_path, S3VID_BYTES)
         self.v = make(vid_path, P_BYTES)
         struct.pack_into("<II", self.f, 0, S3VID_MAGIC, S3VID_VERSION)
+        # the run's session (s3vid.h): a restored guest re-opens on a new one
+        struct.pack_into("<I", self.f, 12, (int.from_bytes(os.urandom(4), "little") | 1))
         struct.pack_into("<II", self.v, 0, PADVID_MAGIC, PADVID_VERSION)
 
     # feed channel fields
@@ -246,7 +248,26 @@ class Decoder:
             pass
 
 
+def new_session(path):
+    """A save state is being loaded into this run (PAD-1147, s3restore.sh):
+    every channel closed (the host ends the old game's decoders) and a new
+    session, so the restored game's s3vid.so re-opens each of its streams."""
+    with open(path, "r+b") as f:
+        m = mmap.mmap(f.fileno(), 0)
+        try:
+            if struct.unpack_from("<I", m, 0)[0] != S3VID_MAGIC:
+                return 1
+            for c in range(CH):
+                struct.pack_into("<I", m, 16 + c * CHAN_SZ + CLOSED * 4, 1)
+            struct.pack_into("<I", m, 12, int.from_bytes(os.urandom(4), "little") | 1)
+        finally:
+            m.close()
+    return 0
+
+
 def main():
+    if sys.argv[1] == "--new-session":
+        sys.exit(new_session(sys.argv[2]))
     feed, vid = sys.argv[1], sys.argv[2]
     log = open(sys.argv[3], "a", buffering=1) if len(sys.argv) > 3 else sys.stderr
     s = Shm(feed, vid)

@@ -71,7 +71,10 @@ struct s3vid_chan {
 struct s3vid_feed {
     unsigned magic, version;
     unsigned host_alive;                /* host bumps it while it serves */
-    unsigned pad;
+    unsigned session;                   /* host: nonzero, new each run (PAD-1147):
+                                         * a guest brought back from a save state
+                                         * finds it changed and re-opens its
+                                         * streams on this run's rings */
     struct s3vid_chan ch[S3VID_CHANNELS];
 };
 

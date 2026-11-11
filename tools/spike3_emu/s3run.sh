@@ -101,6 +101,53 @@ LOG=$SD/run.log
 mkdir -p "$SD"
 echo "[s3run] card tree $TREE, slot $SLOT ($SD)"
 
+# PAD_S3_PIVOT=1: a CHECKPOINTABLE run (PAD-1147, save states). criu cannot
+# dump a chroot'd task ("The root task has another root than mntns"), nor one
+# that is not its pid namespace's init or whose session leader is outside it,
+# so the game becomes pid 1 of the namespace, its own session (setsid), its
+# root pivoted (Spike 2's PAD_PIVOT recipe, run_game.sh). Decided here, where
+# the static busybox (to drop the host tree after the pivot) and the static
+# qemu-aarch64 (exec'd explicitly: binfmt's interpreter lives on the host
+# tree the pivot drops) are checked.
+PIVOT=0
+# static_elf FILE: an ELF with no program interpreter (static or static-pie:
+# Ubuntu's qemu-aarch64-static is the latter, which `file` words differently)
+static_elf() {
+    python3 - "$1" <<'PYEOF' 2>/dev/null
+import struct, sys
+b = open(sys.argv[1], "rb").read(1 << 16)
+if b[1:4] != b"ELF" or b[0] != 0x7f or b[4] != 2: sys.exit(1)
+phoff, = struct.unpack_from("<Q", b, 32); phes, phn = struct.unpack_from("<HH", b, 54)
+sys.exit(1 if any(struct.unpack_from("<I", b, phoff + i * phes)[0] == 3 for i in range(phn)) else 0)
+PYEOF
+}
+# On by default for a window run (the Emulate tab's), off for a headless one
+# unless asked; PAD_S3_PIVOT=0 turns it off.
+. "$S/../spike2_emu/padpath.sh" 2>/dev/null
+CRIU=${CRIU:-$(pad_criu 2>/dev/null)}
+SAVES=0
+if [ -n "$RESTORE" ]; then
+    SAVES=1                            # a restored game is a pivoted one
+elif [ "${PAD_S3_PIVOT:-$WINDOW}" = 1 ]; then
+    QSTATIC=$(command -v qemu-aarch64-static 2>/dev/null)
+    BBX=/bin/busybox
+    if [ "$DEVMODE" = kernel ]; then
+        echo "[s3run] save states are off: the kernel device path (CUSE, i2c-stub) cannot be checkpointed"
+    elif [ -z "$QSTATIC" ] || ! static_elf "$(readlink -f "$QSTATIC")"; then
+        echo "[s3run] save states are off: no static qemu-aarch64 (apt install qemu-user-static)"
+    elif ! static_elf "$(readlink -f "$BBX")"; then
+        echo "[s3run] save states are off: no static busybox at /bin/busybox (apt install busybox-static)"
+    else
+        PIVOT=1; SAVES=1
+        echo "[s3run] checkpointable run (pivot_root, explicit qemu): save states on"
+    fi
+fi
+if [ "$SAVES" = 1 ] && [ ! -x "${CRIU:-}" ]; then
+    SAVES=0
+    echo "[s3run] save states are off: no criu here (Set up emulator... builds it)"
+fi
+export PIVOT QSTATIC BBX
+
 # --bridge: the display (stage 2). s3build.sh's three guest libraries go into
 # this slot's overlay - libGLESv2/libEGL over the card's Mesa ones, s3kms.so
 # preloaded - and its own padglhost renders the ring headless (surfaceless EGL
@@ -245,7 +292,7 @@ if [ "$BUS" = 1 ]; then
                 "$SD/tables/game/switch_list.txt" 2>&1 | sed 's/^/[s3run] /'
             chmod -R a+rX "$SD/tables" 2>/dev/null
             if [ -s "$SD/tables/$TITLE/device_xy.txt" ]; then
-                echo "PAD_PLAYFIELD_WINDOWS_LAUNCH game=$TITLE savestates=0" \
+                echo "PAD_PLAYFIELD_WINDOWS_LAUNCH game=$TITLE savestates=$SAVES" \
                      "root=$(wslpath -w "$SD" 2>/dev/null)" \
                      "tables=$(wslpath -w "$SD/tables" 2>/dev/null)" \
                      "slot=$SLOT root_wsl=$SD"
@@ -321,57 +368,20 @@ if [ -n "$RESTORE" ]; then
     rm -f "$SD/game.out" "$SD/game.err"
     ln -sfn "$SD/connectivity.up/dump/pad_game.out" "$SD/game.out"
     ln -sfn "$SD/connectivity.up/dump/pad_game.err" "$SD/game.err"
-    GPID=$(bash "$S/s3restore.sh" "$SLOT" "$RESTORE" | tee /dev/stderr | sed -n 's/^\[s3restore\] pid //p')
-    PIVOT=0; RC=1; CAPPID=""
+    # its lines through a file, not `tee /dev/stderr`: that REOPENS this
+    # run's log when it is a file, truncating everything written before it
+    bash "$S/s3restore.sh" "$SLOT" "$RESTORE" > "$SD/restore.out" 2>&1
+    cat "$SD/restore.out"
+    GPID=$(sed -n 's/^\[s3restore\] pid //p' "$SD/restore.out")
     if [ -n "$GPID" ]; then
         echo "[s3run] the game is back from the save state (pid $GPID)"
-        trap 'kill -KILL $GPID 2>/dev/null' TERM INT HUP
-        T0=$(date +%s)
-        while kill -0 "$GPID" 2>/dev/null; do
-            [ $(( $(date +%s) - T0 )) -ge "$SECS" ] && { echo "[s3run] still running at the ${SECS}s cap: stopped"; kill -KILL "$GPID"; }
-            sleep 1
-        done
-        trap - TERM INT HUP
-        RC=0
-        echo "[s3run] the restored game ended after $(( $(date +%s) - T0 )) s"
+        # criu is done with the images once the game runs: an unpacked copy
+        # (s3launch.sh --restore's, ~1.2 GB) goes
+        [ "$RESTORE" = "$SD.load" ] && rm -rf "$SD.load"
     fi
     INNERPID=""
 else
-# PAD_S3_PIVOT=1: a CHECKPOINTABLE run (PAD-1147, save states). criu cannot
-# dump a chroot'd task ("The root task has another root than mntns"), nor one
-# that is not its pid namespace's init or whose session leader is outside it,
-# so the game becomes pid 1 of the namespace, its own session (setsid), its
-# root pivoted (Spike 2's PAD_PIVOT recipe, run_game.sh). Decided here, where
-# the static busybox (to drop the host tree after the pivot) and the static
-# qemu-aarch64 (exec'd explicitly: binfmt's interpreter lives on the host
-# tree the pivot drops) are checked.
-PIVOT=0
-# static_elf FILE: an ELF with no program interpreter (static or static-pie:
-# Ubuntu's qemu-aarch64-static is the latter, which `file` words differently)
-static_elf() {
-    python3 - "$1" <<'PYEOF' 2>/dev/null
-import struct, sys
-b = open(sys.argv[1], "rb").read(1 << 16)
-if b[1:4] != b"ELF" or b[0] != 0x7f or b[4] != 2: sys.exit(1)
-phoff, = struct.unpack_from("<Q", b, 32); phes, phn = struct.unpack_from("<HH", b, 54)
-sys.exit(1 if any(struct.unpack_from("<I", b, phoff + i * phes)[0] == 3 for i in range(phn)) else 0)
-PYEOF
-}
-if [ "${PAD_S3_PIVOT:-0}" = 1 ]; then
-    QSTATIC=$(command -v qemu-aarch64-static 2>/dev/null)
-    BBX=/bin/busybox
-    if [ "$DEVMODE" = kernel ]; then
-        echo "[s3run] save states are off: the kernel device path (CUSE, i2c-stub) cannot be checkpointed"
-    elif [ -z "$QSTATIC" ] || ! static_elf "$(readlink -f "$QSTATIC")"; then
-        echo "[s3run] save states are off: no static qemu-aarch64 (apt install qemu-user-static)"
-    elif ! static_elf "$(readlink -f "$BBX")"; then
-        echo "[s3run] save states are off: no static busybox at /bin/busybox (apt install busybox-static)"
-    else
-        PIVOT=1
-        echo "[s3run] checkpointable run (pivot_root, explicit qemu): save states on"
-    fi
-fi
-export PIVOT QSTATIC BBX
+GPID=""
 SETSID=""; [ "$PIVOT" = 1 ] && SETSID=setsid
 unshare -m -p -n -f --kill-child --mount-proc=/proc $SETSID bash -s "$TREE" "$SD" "$SECS" "$STRACE" "$BRIDGE" "$B" "$PROG" "${ARGS[@]}" <<'INNER' &
 set -u
@@ -528,21 +538,61 @@ esac
 INNER
 INNERPID=$!
 fi
-[ -z "$RESTORE" ] && CAPPID=""
-if [ -n "$INNERPID" ] && [ "$PIVOT" = 1 ]; then
-    # the cap `timeout` keeps on a chroot run: a pivoted game is the
-    # namespace's init, so ending unshare (--kill-child) ends it
-    ( sleep "$SECS"; echo "[s3run] still running at the ${SECS}s cap: stopped"; kill -KILL $INNERPID 2>/dev/null ) &
-    CAPPID=$!
-    T0=$(date +%s)
-fi
-if [ -n "$INNERPID" ]; then
-trap 'kill -KILL $INNERPID 2>/dev/null' TERM INT HUP   # unshare --fork ignores TERM; KILL + --kill-child ends the namespace
-while :; do wait $INNERPID 2>/dev/null; RC=$?; kill -0 $INNERPID 2>/dev/null || break; done
+# THE RUN'S GAME, until it ends: the booted one (INNERPID, unshare, whose
+# --kill-child ends the namespace) or a restored one (GPID, pid 1 of its own
+# namespace, criu its parent). A LOAD (PAD-1147: the playfield's Load state,
+# s3state.sh load) asks through $SD/load.req: the game is ended, the save
+# brought back into this run's renderer, boards and video, and the answer
+# left in $SD/load.result. The --secs cap counts the whole run.
+game_alive() {
+    if [ -n "$INNERPID" ]; then kill -0 "$INNERPID" 2>/dev/null
+    else [ -n "$GPID" ] && kill -0 "$GPID" 2>/dev/null; fi
+}
+end_game() {
+    [ -n "$INNERPID" ] && kill -KILL "$INNERPID" 2>/dev/null
+    [ -n "$GPID" ] && kill -KILL "$GPID" 2>/dev/null
+}
+serve_load() {
+    local dir why
+    dir=$(head -1 "$SD/load.req" 2>/dev/null); rm -f "$SD/load.req" "$SD/load.result"
+    if ! why=$(bash "$S/s3restore.sh" --check "$SLOT" "$dir" "$TREE" 2>&1); then
+        echo "fail ${why#\[s3restore\] }" > "$SD/load.result"; return 0
+    fi
+    echo "[s3run] loading the save state $dir"
+    end_game
+    for _ in $(seq 1 50); do game_alive || break; sleep 0.1; done
+    [ -n "$INNERPID" ] && wait "$INNERPID" 2>/dev/null
+    INNERPID=""
+    GPID=$(bash "$S/s3restore.sh" "$SLOT" "$dir" 2>&1 | tee "$SD/load.log" | sed -n 's/^\[s3restore\] pid //p')
+    if [ -n "$GPID" ]; then
+        echo "[s3run] the game is back from the save state (pid $GPID)"
+        echo ok > "$SD/load.result"
+        # criu is done with the images once the game runs: the unpacked copy
+        # (s3state.sh's, ~1.2 GB) goes
+        [ "$dir" = "$SD.load" ] && rm -rf "$SD.load"
+    else
+        why=$(grep -a "could not load\|not" "$SD/load.log" | tail -1)
+        echo "[s3run] the load failed, so this run is over: ${why#\[s3restore\] }"
+        echo "fail ${why#\[s3restore\] }" > "$SD/load.result"
+    fi
+}
+rm -f "$SD/load.req" "$SD/load.result"
+T0=$(date +%s)
+trap 'end_game' TERM INT HUP
+while game_alive; do
+    [ -s "$SD/load.req" ] && [ "$SAVES" = 1 ] && serve_load
+    if [ $(( $(date +%s) - T0 )) -ge "$SECS" ]; then
+        echo "[s3run] still running at the ${SECS}s cap: stopped"; end_game
+    fi
+    sleep 0.3
+done
 trap - TERM INT HUP
+if [ -n "$INNERPID" ]; then
+    wait "$INNERPID" 2>/dev/null; RC=$?
+else
+    RC=0
 fi
-if [ -n "$CAPPID" ]; then
-    pkill -P $CAPPID sleep 2>/dev/null; kill $CAPPID 2>/dev/null
+if [ "$PIVOT" = 1 ] || [ -n "$GPID" ]; then
     echo "[s3run] exit $RC after $(( $(date +%s) - T0 )) s"
     [ "$RC" -ge 128 ] && grep -h -m3 -E "Assertion|uncaught target signal" "$SD/game.err" 2>/dev/null | sed 's/^/[s3run]   /'
 fi

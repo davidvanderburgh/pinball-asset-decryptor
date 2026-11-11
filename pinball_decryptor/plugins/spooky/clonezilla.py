@@ -448,26 +448,16 @@ def _mount_iso_macos(image_path, log_cb=None):
 
 
 def _mount_iso_linux(image_path, log_cb=None):
-    """Mount ISO via loop mount. Returns (mount_point, cleanup_fn)."""
-    mount_point = tempfile.mkdtemp(prefix="spooky_iso_")
-    result = subprocess.run(
-        ["sudo", "mount", "-o", "loop,ro", image_path, mount_point],
-        capture_output=True, text=True, timeout=30)
+    """Mount ISO via loop mount. Returns (mount_point, cleanup_fn).
 
-    if result.returncode != 0:
-        os.rmdir(mount_point)
-        raise RuntimeError(f"Failed to mount ISO: {result.stderr}")
-
-    def cleanup():
-        try:
-            subprocess.run(
-                ["sudo", "umount", mount_point],
-                capture_output=True, timeout=30)
-            os.rmdir(mount_point)
-        except Exception:
-            pass
-
-    return mount_point, cleanup
+    Root for the mount and the umount comes from :mod:`core.root_session`:
+    ``sudo mount`` from a desktop launcher had no terminal to ask a password
+    on (PAD-1173); a desktop now gets one password dialog for both."""
+    from ...core import root_session
+    try:
+        return root_session.mount_iso(image_path, prefix="spooky_iso_")
+    except RuntimeError as e:
+        raise RuntimeError(f"Failed to mount ISO: {e}") from e
 
 
 def _find_partclone_in_dir(search_root, search_files):

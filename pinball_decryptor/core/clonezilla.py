@@ -114,22 +114,10 @@ def _mount_macos(image_path, log_cb):
 
 
 def _mount_linux(image_path, log_cb):
-    mount_point = tempfile.mkdtemp(prefix="pad_iso_")
-    res = subprocess.run(
-        ["sudo", "mount", "-o", "loop,ro", image_path, mount_point],
-        capture_output=True, text=True, timeout=60)
-    if res.returncode != 0:
-        os.rmdir(mount_point)
-        raise RuntimeError(f"mount failed: {res.stderr}")
-
-    def cleanup():
-        try:
-            subprocess.run(["sudo", "umount", mount_point],
-                           capture_output=True, timeout=30)
-            os.rmdir(mount_point)
-        except Exception:
-            pass
-
+    # root for mount + umount through core.root_session: one password dialog
+    # on a desktop, where ``sudo mount`` had no terminal to ask on (PAD-1173)
+    from . import root_session
+    mount_point, cleanup = root_session.mount_iso(image_path, prefix="pad_iso_")
     return mount_point, mount_point, cleanup
 
 

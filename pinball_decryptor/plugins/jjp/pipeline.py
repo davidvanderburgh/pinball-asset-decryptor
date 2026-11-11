@@ -906,7 +906,10 @@ def _robust_run(executor):
             # over an .iso that was mounted a second earlier.
             return list(executor._head()) + [bash_cmd]
         if cls == "NativeExecutor":
-            return [*executor._cmd_prefix(), bash_cmd]
+            # None = the run's root session (pkexec, PAD-1173), which stops a
+            # command past its timeout itself
+            prefix = executor._cmd_prefix()
+            return None if prefix is None else [*prefix, bash_cmd]
         if cls == "DockerExecutor":
             if not getattr(executor, "_container_running", False):
                 return None  # let orig_run raise the canonical "not running"
@@ -959,6 +962,22 @@ def _install_robust_run_host(executor):
     executor.run_win = _robust_run_host
     executor.run = _robust_run(executor)
     return executor
+
+
+def _done_ends_root(done_cb, executor):
+    """*done_cb*, after first ending the run's root shell (PAD-1173): on a
+    Linux desktop a run asks for root ONCE and keeps it to its end, and the
+    end is the done callback - cleanup has unmounted everything by then.  A
+    root command after it simply asks again."""
+    def _done(*args, **kwargs):
+        close = getattr(executor, "close_root", None)
+        if close is not None:
+            try:
+                close()
+            except Exception:
+                pass
+        return done_cb(*args, **kwargs)
+    return _done
 
 
 def _ps_list(args):
@@ -1881,9 +1900,8 @@ class DecryptionPipeline:
         self.log_link = lambda text, url: None  # optional; set by caller
         self.on_phase = phase_cb
         self.on_progress = progress_cb
-        self.on_done = done_cb
-
         self.executor = _install_robust_run_host(create_executor())
+        self.on_done = _done_ends_root(done_cb, self.executor)
         self.mount_point = None
         self.game_name = None
         self.cancelled = False
@@ -10474,9 +10492,9 @@ class RestoreToSSDPipeline:
         self.log = log_cb
         self.on_phase = phase_cb
         self.on_progress = progress_cb
-        self.on_done = done_cb
         self.cancelled = False
         self.executor = executor or _install_robust_run_host(create_executor())
+        self.on_done = _done_ends_root(done_cb, self.executor)
         self._tool = tool_path or _mkjjpmulti_path()
         self._attached = None       # the Windows disk handed to WSL, until handed back
         self._offlined = None       # the disk number taken offline, until put back
@@ -10945,40 +10963,41 @@ def check_prerequisites(executor, standalone=False):
                 "  (enables direct SSD access without copying)"))
 
     elif isinstance(executor, NativeExecutor):
-        # Linux: check tools directly
+        # Linux: check tools directly, AS THE USER - a tool probe needs no
+        # root, and through pkexec it would ask for a password (PAD-1173)
         ok, msg = executor.check_available()
         results.append(("System", ok, msg))
 
         try:
-            executor.run("command -v partclone.ext4", timeout=10)
+            executor.run_user("command -v partclone.ext4", timeout=10)
             results.append(("partclone", True, "Available"))
         except Exception:
             results.append(("partclone", False,
                 "Not installed. Run: sudo apt install partclone"))
 
         try:
-            executor.run("command -v xorriso", timeout=10)
+            executor.run_user("command -v xorriso", timeout=10)
             results.append(("xorriso", True, "Available"))
         except Exception:
             results.append(("xorriso", False,
                 "Not installed. Run: sudo apt install xorriso"))
 
         try:
-            executor.run("command -v debugfs", timeout=10)
+            executor.run_user("command -v debugfs", timeout=10)
             results.append(("debugfs", True, "Available"))
         except Exception:
             results.append(("debugfs", False,
                 "Not installed. Run: sudo apt install e2fsprogs"))
 
         try:
-            executor.run("command -v pigz", timeout=10)
+            executor.run_user("command -v pigz", timeout=10)
             results.append(("pigz", True, "Available"))
         except Exception:
             results.append(("pigz", False,
                 "Not installed. Run: sudo apt install pigz"))
 
         try:
-            executor.run("command -v ffmpeg", timeout=10)
+            executor.run_user("command -v ffmpeg", timeout=10)
             results.append(("ffmpeg", True, "Available"))
         except Exception:
             results.append(("ffmpeg", False,

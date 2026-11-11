@@ -13,7 +13,7 @@ and muted.
 | Medieval Madness 3.0 | `MedievalMadness300Installer.img` | attract, coins, serve, launch, drain, ball save |
 | Attack From Mars 1.0 | `AttackFromMars100Installer.img` | attract, coins, serve (bootcheck pass) |
 | Monster Bash 1.03 | `MonsterBash103Installer.img` | attract, coins; Start does not serve yet (below) |
-| Cactus Canyon 1.13 | `CactusCanyon_cc113_9-2-25_card.img` | refused: CGC's Z5 engine (below) |
+| Cactus Canyon 1.13 | `CactusCanyon_cc113_9-2-25_card.img` | attract, coins, serve, plunge, poppers, drain, full games (PAD-1170, Z5 engine below) |
 
 The Emulate tab for these is a follow-up ticket; nothing in the app calls
 this rig yet and the installer does not ship it.
@@ -57,13 +57,50 @@ title).  PAD-Runtime's disk is small: check `df -h /var/tmp` first.
   from those names: the trough (TROUGH BALL 1-4, closed = a ball), the
   TROUGH EJECT coil (kicks position 1 at once, the rest roll down after
   400 ms, the ball reaches the SHOOTER LANE after 600 ms - a game that sees
-  nothing move re-kicks), the AUTO PLUNGER coil (shooter lane -> in play),
-  kickouts (MM: LEFT POPPER, RIGHT EJECT, CATAPULT), two-position motors
+  nothing move re-kicks; a second kick stacks a ball behind one already in
+  the lane, as on the machine), the AUTO PLUNGER coil (shooter lane -> in play),
+  kickouts (MM: LEFT POPPER, RIGHT EJECT, CATAPULT; CC: MINE and SALOON
+  POPPER on coils 6 and 8), two-position motors
   (MM drawbridge; MB bank and Frankenstein table).  Coil pulses are read at
   1 kHz; `$CGC_RIG/events` logs one line per pulse.
 * **First boot.**  A new FRAM makes the ROM restore factory settings and
   wait; `run_game.sh` presses ENTER, then ESCAPE until the lamps run, as an
   operator would, once per slot and title.
+
+## Cactus Canyon: the Z5 engine (PAD-1170)
+
+Cactus Canyon runs `/home/debian/pin`, CGC's own C engine ("Z5": no 6809;
+the Williams ROM `ccdata/rom/cc_g11.1_3` is there for its names and text).
+The shim finds `z5_main` and takes a second hook map (cgcshim.c, "Z5"):
+
+* **FRAM**: `z5_spix` / `z5_spi_cs_*` - the same chip model, 8 KiB used.
+* **Playfield switches**: `z5_spi_packet_xfer` is answered with the
+  playfield PIC's reply (0x43, 12 data bytes, their sum; bytes 1-8 the
+  matrix, active low).  Without a valid reply pin never reads the matrix.
+* **Cabinet switches** (coin door, Start, flipper buttons):
+  `z5_gpio_xfer`'s two input bytes.
+* **Numbers**: pin's own tables at power-up map WPC numbers to its inputs
+  and outputs (`z5_sw_wms_to_cgc_map`, `z5_sol_`, `z5_flash_`, `z5_lp_`),
+  so `sw.py` and `$CGC_BALLS` speak WPC numbers as for the other titles.
+  `shim.log` lists the switch map.
+* **Optos**: every input carries pin's flags: 0x20 an opto, which the game
+  reads *active when blocked*, 0x10 its contact inverted.  The shim sets
+  what the game should read (closed = a ball there) through both, so the
+  ROM's `*` marks are not used.  Getting this backwards is what trips a
+  hand-made board: with the trough read inverted pin serves at power-up,
+  with the poppers inverted it kicks both of them in a ball search.  At
+  rest: 32-35 a ball each, 31 (TROUGH EJECT) clear - all five alike is
+  OPTO TROUGH BAD - poppers 41/42 empty, 22 and 24 closed.
+* **Lamps**: the drive bit (+0x2e of each lamp entry); `z5_lamp_get` reads
+  a field that stays 0.  pin lights a few lamps as its tables load, so
+  `run_game.sh` takes attract as the lamps *moving* once the board rests.
+* **Unaligned LDRD/STRD/LDM/STM**: pin stores scores with STRD at 2-aligned
+  addresses (`bcd_clear`, every ball start).  The BeagleBone's kernel fixes
+  those up; qemu-arm raises SIGBUS, so the shim's handler does the access
+  byte by byte and steps past it, as the kernel would (`shim.log`: "fixed
+  up").
+* No USB saloon kit (the Bart toy mech): pin says SALOON MECH NOT FOUND at
+  ball start and plays on without it.
 
 ## Using it
 
@@ -91,13 +128,13 @@ bash tools/cgc_emu/bootcheck.sh <build>      # VERDICT: attract, coins booked, a
 
 ## Not done yet
 
-* **Monster Bash** reaches attract and books coins, but after Start pulses
-  the UP/DN BANK MOTOR every 1.5 s and never serves: the bank model (either
-  rest end) is not what the game waits for.
-* **Cactus Canyon** runs `/home/debian/pin`, CGC's own "Z5" engine (a native
-  C re-implementation, no 6809: `z5_spi_*`, `z5_fram_*`, `z5_sw_*`,
-  `z5_sol_*`, plus a USB "saloon" kit).  The same approach applies with a
-  second hook map; `prepare.sh` refuses it with exit 4 until then.
+* **Monster Bash** reaches attract and books coins, but after Start never
+  serves.  Until PAD-1170 its coil numbers were read one off (its ROM's coil
+  table has no "invalid" entry 0, and the reader dropped AUTO PLUNGER), so
+  the model watched coil 7 for TROUGH EJECT (it is 8) and coil 16 for the
+  bank motor (it is 17).  With the right numbers, Start pulses FRANK. MOTOR
+  (16) about every 1.5 s and waits: the Frankenstein table's model (rest at
+  FRANK. TABLE DOWN, travel to UP) is not what the game waits for.
 * The colour: the shots show CGC's green DMD dots; whether the card's
   default is a colour palette (`cgc.so` replacement art) was not checked.
 * A visible window, sound, and the Emulate tab (with a switch window).

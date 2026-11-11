@@ -11,6 +11,7 @@ GPG verification, etc.).
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -50,6 +51,12 @@ class CommandExecutor:
 
     def stream(self, bash_cmd, timeout=600):
         raise NotImplementedError
+
+    def run_root(self, bash_cmd, timeout=120):
+        """:meth:`run`, for a command that needs ROOT (a loop device).  WSL
+        runs every command as root already; native Linux overrides this to
+        ask for it (PAD-1172)."""
+        return self.run(bash_cmd, timeout=timeout)
 
     def popen_binary(self, bash_cmd):
         """Start *bash_cmd* and return a Popen with a **binary** stdout pipe.
@@ -240,7 +247,9 @@ class NativeExecutor(CommandExecutor):
     before the command runs - which is how every card write on a Linux desktop
     failed at the loop-device probe (PAD-314, Ales). What needs no root (debugfs on
     the user's own image, the mode payload's installer, a compile) now runs as the
-    user; what does (a loop mount) fails with its own permission error."""
+    user. What does (a card grow's ``losetup``) goes through :meth:`run_root`,
+    which asks for root with the desktop's own password dialog (pkexec) when
+    sudo would want a password (PAD-1172)."""
     _sudo_ok = None                     # None = not asked yet (class-wide: one ask a run)
 
     def _prefix(self):
@@ -314,6 +323,71 @@ class NativeExecutor(CommandExecutor):
 
     def check_available(self):
         return True, "Native Linux"
+
+    # -- root, for the few steps that need it (PAD-1172) -----------------
+    #: what :meth:`run_root` says when it has no way to become root
+    NO_ROOT = ("this needs root (to attach the card image as a disk) and "
+               "there is no way to ask for it here: install polkit's pkexec "
+               "(package 'polkitd' / 'policykit-1' / 'polkit') so the app can "
+               "show your desktop's password prompt, or start the app as root")
+
+    def root_route(self):
+        """How :meth:`run_root` becomes root: ``"root"`` (the app is),
+        ``"sudo"`` (sudo asks no password), ``"pkexec"`` (the desktop's own
+        password prompt, polkit), or ``None`` (no way)."""
+        if hasattr(os, "getuid") and os.getuid() == 0:
+            return "root"
+        if NativeExecutor._sudo_ok is None:
+            NativeExecutor._sudo_ok = _passwordless_sudo()
+        if NativeExecutor._sudo_ok:
+            return "sudo"
+        return "pkexec" if shutil.which("pkexec") else None
+
+    def run_root(self, bash_cmd, timeout=120):
+        """:meth:`run` as ROOT.  A Linux desktop asks sudo for a password, and a
+        GUI has no terminal to give it on, so :meth:`run` stays the user there
+        (PAD-314) - and a card grow's ``losetup`` then failed with
+        "Permission denied" (PAD-1172, Brombomb).  This asks through pkexec
+        instead: one password dialog for the one script that needs it."""
+        route = self.root_route()
+        if route in ("root", "sudo"):
+            return self.run(bash_cmd, timeout=timeout)
+        if route is None:
+            raise CommandError(bash_cmd, 1, self.NO_ROOT)
+        from .elevated_flash import _pkexec_declined, _pkexec_explained
+        # pkexec hands bash a clean root environment (its PATH has /usr/sbin);
+        # no internal text agent: a GUI has no terminal for it to ask on
+        proc = subprocess.Popen(
+            [shutil.which("pkexec"), "--disable-internal-agent",
+             "bash", "-c", bash_cmd],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+            errors="replace")
+        with self._lock:
+            self._current_proc = proc
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            proc.kill()
+            proc.communicate()
+            raise CommandError(bash_cmd, -1,
+                               f"Timed out after {timeout}s") from e
+        finally:
+            with self._lock:
+                self._current_proc = None
+        rc = proc.returncode
+        if rc in (126, 127):
+            text = (err or "") + (out or "")
+            if _pkexec_declined(rc, text):
+                raise CommandError(bash_cmd, rc,
+                                   "the password prompt for root was "
+                                   "cancelled or refused")
+            if "authentication agent" in text.lower() or "pkexec" in text.lower():
+                raise CommandError(bash_cmd, rc, _pkexec_explained(text))
+        if rc != 0:
+            raise CommandError(bash_cmd, rc,
+                               ((err or "") + (out or "")).strip())
+        return out
 
 
 def bundled_e2fsprogs_dir():

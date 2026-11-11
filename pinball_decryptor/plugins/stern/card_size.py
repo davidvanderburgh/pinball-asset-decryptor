@@ -1125,6 +1125,13 @@ class _E2fs:
         if not out.rstrip().endswith("ok"):
             raise CardSizeError("the Linux this app uses can't attach the "
                                 "card image as a disk (no loop devices)")
+        # The probe above runs as the USER on a Linux desktop, where only
+        # asking for a free loop device works; attaching one needs root
+        # (PAD-1172).  Refused here, before anything is built, when there is
+        # no way to become root at all.
+        route = getattr(self.ex, "root_route", None)
+        if route is not None and route() is None:
+            raise CardSizeError(self.ex.NO_ROOT)
 
     def grow(self, image_path, offset, size, epoch=None, timeout=5400):
         """Check, grow to fill and re-check the ext4 at *offset*, the
@@ -1220,7 +1227,9 @@ def _run_script(ex, script, timeout):
     """Run *script* under bash in the executor's Linux, shipped as a base64
     temp FILE the way ext4_grow ships its own (wsl.exe mangles quoting on a
     command line).  Returns its output; an executor failure comes back as
-    the error's text, which carries no ``PAD_E2`` marker."""
+    the error's text, which carries no ``PAD_E2`` marker.  As ROOT
+    (``run_root``): ``losetup`` needs it, and on a Linux desktop the plain
+    executor is the user (PAD-1172)."""
     import base64
     import tempfile
     fd, tmp = tempfile.mkstemp(suffix=".b64", prefix="pad_card_size_")
@@ -1228,8 +1237,9 @@ def _run_script(ex, script, timeout):
         os.write(fd, base64.b64encode(script.encode("utf-8")))
         os.close(fd)
         try:
-            return ex.run("base64 -d < %s | bash" % shlex.quote(
-                ex.to_exec_path(tmp)), timeout=timeout)
+            return getattr(ex, "run_root", ex.run)(
+                "base64 -d < %s | bash" % shlex.quote(ex.to_exec_path(tmp)),
+                timeout=timeout)
         except Exception as e:  # noqa: BLE001 - CommandError / timeout
             return str(e)
     finally:

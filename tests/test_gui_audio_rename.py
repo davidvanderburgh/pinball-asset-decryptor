@@ -254,7 +254,13 @@ def test_a_long_name_in_a_deep_folder_is_shortened_to_fit(tmp_path,
     plain file calls open, as much of it as fits is used, and the log says
     so, instead of a rename that leaves a file nothing can play."""
     from pinball_decryptor.core import name_memory
-    monkeypatch.setattr(name_memory.sys, "platform", "win32")
+    # Only the name budget is Windows-like. Changing the shared sys module
+    # sends Linux's web-UI dependencies (including shutil.which) down their
+    # Windows paths before the test even reaches the rename.
+    fit_label = name_memory.fit_label
+    monkeypatch.setattr(name_memory, "fit_label",
+                        lambda folder, prefix, label, ext, windows=None:
+                            fit_label(folder, prefix, label, ext, windows=True))
     assets = _folder(tmp_path)
     budget = len(os.path.abspath(os.path.join(assets, "audio"))) + 80
     monkeypatch.setattr(name_memory, "_MAX_WIN_PATH", budget)

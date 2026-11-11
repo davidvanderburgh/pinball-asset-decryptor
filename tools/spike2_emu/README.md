@@ -1392,7 +1392,16 @@ keeps the guest's PCM FIFO, and `padbox.sh`'s `host_player` runs
 `ffplay -i pipe:0` on the Mac. It used to be a published loopback port, and
 under Colima Lima's port forwarder took the whole stream at full rate while
 ffplay received 310 KB and then nothing; docker exec rides the Docker socket
-and pushes back. ffplay cannot be given a new level while it plays, so the
+and pushes back. **The stream is paced** (`padrelay.py --pipe`, PAD-1109): a
+continuous real-time stream 350 ms ahead of the clock (`PAD_AUDIO_LEAD_MS`;
+0 = the plain copy), digital silence filled in wherever the game wrote
+nothing, a source more than 750 ms ahead cut back to the lead. The Mac's
+player must never wait for sound: ffplay's audio callback blocks until it
+has a frame, SDL runs it inside the audio queue's own callback, and CoreAudio
+stops using a queue it is not fed fast enough (SDL issue 2459) while the
+callback goes on firing, so a game's sound (nothing for seconds at boot and
+between sounds) was consumed in full and never heard, while a file or a short
+tone always played. ffplay cannot be given a new level while it plays, so the
 Emulate tab's Volume / Mute are applied by `padrelay.py` (PAD-957):
 `padbox.sh`'s `ctl_pusher` copies `audio_ctl.json` to
 `/tmp/pad_audio_ctl.json` in the box whenever it changes, and the relay

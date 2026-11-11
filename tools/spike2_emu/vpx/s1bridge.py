@@ -26,6 +26,7 @@ run's s1switches.json ({"node,index": name}), the rig's own numbering.
 import json
 import os
 import struct
+import subprocess
 import sys
 import time
 
@@ -38,6 +39,7 @@ MAX_INDEX = 64
 N_SLOTS = MAX_NODES * MAX_INDEX
 STATE_MAGIC = 0x53314857                 # "S1HW"
 STATE_VERSION = 1
+CPU_SERVICE = (8, 9, 10, 11)             # shared controller's node-0 service slots
 STATE_HEADER = struct.Struct("<4I")
 STATE_SIZE = STATE_HEADER.size + N_SLOTS + N_SLOTS * 3 + N_SLOTS
 INPUT_MAGIC = 0x53315357                 # "S1SW"
@@ -176,9 +178,29 @@ class Spike1Rig:
     def names_path(self):
         return os.path.join(self.dump, "s1switches.json")
 
+    def cpu_switch_path(self):
+        """The CPU SPI inputs live inside the active card's rootfs, not
+        the node-bus bitmap. WSL's Windows share cannot follow rootfs's
+        absolute Linux symlink, so resolve that target once on Windows."""
+        if not hasattr(self, "_cpu_path"):
+            root = self.root + "/rootfs"
+            if sys.platform == "win32":
+                r = subprocess.run(self.wsl_head() + ["-u", "root", "--", "readlink", "-f", root],
+                                   capture_output=True, text=True, timeout=10,
+                                   creationflags=0x08000000)
+                r.check_returncode()
+                target = r.stdout.strip()
+                if not target.startswith("/"):
+                    raise ValueError("Spike 1 rootfs did not resolve to an absolute path")
+                root = r"\\wsl.localhost\%s%s" % (self.distro, target.replace("/", "\\"))
+            self._cpu_path = os.path.join(root, "data", "s1cpusw.input")
+        return self._cpu_path
+
     def switch_ids(self, title=None):
         """{(node, index): slot} for every switch the run's names table has."""
-        return {k: slot(*k) for k in read_names(self.names_path())}
+        ids = {k: slot(*k) for k in read_names(self.names_path())}
+        ids.update({(0, bit): bit for bit in CPU_SERVICE})
+        return ids
 
 
 class Spike1Pipe:
@@ -192,13 +214,47 @@ class Spike1Pipe:
         self.seq = int(time.time()) & 0xFFFF
         self._failed = 0
         self._pause_said = False
+        self._service_used = False
 
     def set(self, sw, level):
         level = 1 if level else 0
         if self.held.get(sw) == level:
             return True
+        previous = self.held.get(sw)
         self.held[sw] = level
+        if sw in CPU_SERVICE:
+            self._service_used = True
+            if self._write_cpu():
+                return True
+            # A failed first write must be retryable at the same level.
+            if previous is None:
+                self.held.pop(sw, None)
+            else:
+                self.held[sw] = previous
+            return False
         return self._write()
+
+    def _write_cpu(self):
+        try:
+            path = self.rig.cpu_switch_path()
+            try:
+                with open(path, "rb") as f:
+                    data = f.read(3)
+            except FileNotFoundError:
+                data = b"\xff\xff\xfe"  # door closed, other inputs idle
+            if len(data) != 3:
+                raise ValueError("Spike 1 CPU input file must contain three bytes")
+            value = int.from_bytes(data, "little")
+            for bit in CPU_SERVICE:
+                value |= 1 << bit
+                if self.held.get(bit):
+                    value &= ~(1 << bit)    # CPU SPI inputs are active-low
+            with open(path, "wb") as f:
+                f.write(value.to_bytes(3, "little"))
+            return True
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            _log("Spike 1 CPU service write failed: %s" % exc)
+            return False
 
     def pause(self):
         # the Spike 1 rig has no pause line; Visual Pinball's pause leaves
@@ -210,7 +266,7 @@ class Spike1Pipe:
 
     def _write(self):
         self.seq = (self.seq + 1) & 0xFFFFFFFF
-        closed = {s for s, lv in self.held.items() if lv}
+        closed = {s for s, lv in self.held.items() if lv and s not in CPU_SERVICE}
         data = pack_input(closed, self.seq)
         try:
             tmp = self.rig.sw_path() + ".tmp"
@@ -236,6 +292,8 @@ class Spike1Pipe:
     def close(self):
         if self.held:
             self.held = {}
+            if self._service_used:
+                self._write_cpu()
             self._write()
 
 

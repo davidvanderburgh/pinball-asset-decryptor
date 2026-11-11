@@ -3210,7 +3210,12 @@ class EmulateTab(EmulateLogMixin, TabService):
             return
         slot = slot or 1                    # 0 = no ticket: the first slot
         card = self._card()
-        audio = not self._muted_for_spike3()
+        # sound on, and the panel's volume / Mute follow it LIVE through
+        # audio_ctl.json, as on Spike 2 - deciding Mute once at Start meant a
+        # box unticked after Start never sounded (David). Off only for the
+        # runs that are always silent (a session's, a hidden one: PAD-309)
+        from ...core import rigslot as _rs
+        audio = not _rs.muted()
         self._starting = True
         self._s3_slot = slot
         self._s3_label = "Starting Spike 3…"
@@ -3257,7 +3262,8 @@ class EmulateTab(EmulateLogMixin, TabService):
                 if keyfile:
                     self._log("[emulate] Spike 3 key: %s" % keyfile)
                 cmd = rig.spike3_launch_cmd(card, slot, self.S3_MINUTES, audio=audio,
-                                            keyfile=keyfile)
+                                            keyfile=keyfile,
+                                            audio_ctl=audio_ctl_file() if audio else None)
                 self._log("[emulate] %s" % " ".join(str(c) for c in cmd))
                 self._proc = self._popen(cmd, stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT)

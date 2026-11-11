@@ -27,7 +27,7 @@ A GAME (pokemon_le, measured): `coin 4` -> CREDITS 1, `sw START BUTTON`
 -> BALL 1 (s3balls answers the trough eject: the ball reaches the shooter
 lane), `sw ACTION BUTTON` launches (the auto plunger fires), switches
 score, `drain` ends the ball: bonus, then BALL 2.
-    s3press.py autoguide SLOT [SECS]   walk it every time it comes up (s3run.sh
+    s3press.py autoguide SLOT [SECS] [--boot]   walk it every time it comes up (--boot: once, at boot) (s3run.sh
                                        --bus --bridge runs this)
 
 The coin door: SPI bit 15 is COIN DOOR POWER INTERLOCK (device group 5
@@ -215,8 +215,14 @@ def is_guided_setup(f):
     return ((vals[:, :, 0] > 220) & (vals[:, :, 1] > 220) & (vals[:, :, 2] > 220)).mean() > 0.02
 
 
-def autoguide(slot, secs=0, keep=60):
+BOOT_S = 240    # --boot: Guided Setup is the boot's, if it comes at all
+
+
+def autoguide(slot, secs=0, keep=60, boot=False):
     """Walk Guided Setup every time it comes up, for SECS (0 = for ever).
+    BOOT (a window run, the user's - PAD-1090): walk it at most ONCE and only
+    in the first BOOT_S seconds; after that never press a button again, and
+    only go on pruning the frame dumps (unbounded in a window run).
     The game shows it at every boot of a fresh rig slot (and again on later
     boots - this emulator's machine reports no valid identity), and it holds
     the machine there until an operator presses Save & Exit: BACK puts the
@@ -232,6 +238,8 @@ def autoguide(slot, secs=0, keep=60):
                 os.remove(f)
             except OSError:
                 pass
+        if boot and (walked or time.time() - t0 > BOOT_S):
+            continue                     # the user's machine now: prune only
         f = newest_frame(slot)
         try:
             if not f or not is_guided_setup(f):
@@ -350,7 +358,8 @@ def main():
     elif cmd == "guided":
         return 0 if guided(slot) else 1
     elif cmd == "autoguide":
-        autoguide(slot, int(a[2]) if len(a) > 2 else 0)
+        rest = [x for x in a[2:] if x != "--boot"]
+        autoguide(slot, int(rest[0]) if rest else 0, boot="--boot" in a[2:])
     elif cmd == "scan":
         scan(slot, int(a[2]) if len(a) > 2 else 0, int(a[3]) if len(a) > 3 else 63)
     else:

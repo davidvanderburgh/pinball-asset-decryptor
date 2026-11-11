@@ -58,6 +58,8 @@ BOARD_REV = 0                    # what ADC_Update's ladder can report: 0..10
 # instead of 36 s, attract at 38 s instead of ~90 (pokemon_le, measured twice
 # each; star_wars_2025_le 8.5 s) - and the games play as before (PAD-1090).
 LCD_STATUS = int(os.environ.get("PAD_S3_LCD_STATUS", "2"), 0)
+SWTRACE = os.environ.get("PAD_S3_SWTRACE") == "1"   # log every scanned switch change
+T0 = time.time()
 LINE_HZ = int(os.environ.get("PAD_S3_LINE_HZ", "60"))     # ADC_GetLineFrequency
 LINE_V = int(os.environ.get("PAD_S3_LINE_V", "120"))      # ADC_GetLineVoltage
 FLASH = (0x10000100, 0x10012B40)  # the range HOST_Update's 0x30 handler CRCs
@@ -168,6 +170,11 @@ class Node:
             key = data[1] if len(data) >= 3 else 0
             for i in range(8):
                 p[i] = wire[i] ^ (((key << i) | (key >> ((8 - i) & 7))) & 0xFF)
+            if SWTRACE and bits != self.reported:
+                # every change the game SCANS (PAD_S3_SWTRACE=1): the log
+                # line below says each distinct state once only
+                self.log.write("%9.3f # [scan] node %d %s\n" % (
+                    time.time() - T0, self.nid, bits.hex()))
             self.reported = bits
             if any(bits):
                 self.once("sw" + bits.hex(), "node %d switches %s" % (self.nid, bits.hex()))

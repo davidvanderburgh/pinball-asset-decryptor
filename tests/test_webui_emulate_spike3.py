@@ -153,10 +153,11 @@ def _s3_rig(monkeypatch, check=b"s3check: ok\n"):
     monkeypatch.setattr(emulate_rig, "spike3_check_cmd",
                         lambda: ["bash", "s3launch.sh", "--check"])
     monkeypatch.setattr(emulate_rig, "spike3_launch_cmd",
-                        lambda card, slot, minutes, audio=False, keyfile=None:
+                        lambda card, slot, minutes, audio=False, keyfile=None, audio_ctl=None:
                         ["bash", "s3launch.sh", card, str(slot), str(minutes)]
                         + (["--audio"] if audio else [])
-                        + (["--keyfile", keyfile] if keyfile else []))
+                        + (["--keyfile", keyfile] if keyfile else [])
+                        + (["--audio-ctl", audio_ctl] if audio_ctl else []))
     monkeypatch.setattr(emulate_rig, "spike3_stop_cmd",
                         lambda slot: ["bash", "s3launch.sh", "--stop", str(slot)])
     return {"--check": _Done(check)}
@@ -213,8 +214,16 @@ def test_a_spike3_rig_that_is_not_set_up_says_what_is_missing(tmp_path, monkeypa
         _wait(w, lambda: not svc._starting and svc._proc is None)
 
 
-def test_spike3_sound_follows_the_panel_mute(tmp_path, monkeypatch):
+@pytest.mark.parametrize("session_muted", [False, True])
+def test_spike3_sound_follows_the_panel_mute_live(tmp_path, monkeypatch, session_muted):
+    """David unticked Mute after Start and heard nothing: Mute was read once,
+    at Start. Now the run always has its sound and the panel's audio_ctl.json
+    (volume / Mute) goes to the player, which follows it live - ticked at
+    Start too. Only an always-silent run (a session's, PAD-309) has none."""
+    from pinball_decryptor.core import rigslot
+    from pinball_decryptor.webui.tabs.emulate import audio_ctl_file
     from tests.test_webui_emulate import _Recorder
+    monkeypatch.setattr(rigslot, "muted", lambda: session_muted)
     card = tmp_path / "star_wars_2025_le-0_96_0.Release.64G.sdcard-secure.raw"
     card.write_bytes(b"\0" * 512)
     with web_app(tmp_path, mfr="stern") as w:
@@ -222,12 +231,16 @@ def test_spike3_sound_follows_the_panel_mute(tmp_path, monkeypatch):
         rec = _Recorder(answers=_s3_rig(monkeypatch))
         monkeypatch.setattr(svc, "_run", rec.run)
         monkeypatch.setattr(svc, "_popen", rec.popen)
-        w.run(lambda: svc._mute_var.set(False))
+        w.run(lambda: svc._mute_var.set(True))
         _pick(w, svc, card)
         w.call(NS + ".toggle")
         _wait(w, lambda: any(str(card) in c for c in rec.calls))
         launch = [c for c in rec.calls if str(card) in c][0]
-        assert launch[-1] == "--audio"
+        if session_muted:
+            assert "--audio" not in launch and "--audio-ctl" not in launch
+        else:
+            assert "--audio" in launch
+            assert launch[launch.index("--audio-ctl") + 1] == audio_ctl_file()
 
 
 @pytest.mark.parametrize("text,expect", [

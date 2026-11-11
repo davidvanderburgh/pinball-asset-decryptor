@@ -127,7 +127,11 @@ if [ "$BRIDGE" = 1 ]; then
         # dump/ is what the virtual playfield window reads and writes (padsw,
         # padled - Spike 2's padpath.dump()); its switch helper runs as the
         # WSL user, not root, so the block is everyone's to write
-        rm -rf "$SD/dump"; mkdir -p "$SD/dump"; chmod 777 "$SD/dump"
+        rm -rf "$SD/dump"; mkdir -p "$SD/dump" "$SD/tables"; chmod 777 "$SD/dump"
+        # the playfield window's helpers (plunge.py, swhold.py...) run in WSL
+        # and look for the title's tables under dump/tables (padpath.tables());
+        # without this they fell back to godzilla_pro's switch ids
+        ln -sfn "$SD/tables" "$SD/dump/tables"
         RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/dump/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game)
         # AS THE DESKTOP'S USER, NOT ROOT (watch.sh learned it first): as
         # root, padglhost cannot attach to the WSLg X server's shared memory -
@@ -248,7 +252,11 @@ if [ "$BUS" = 1 ]; then
         fi
     fi
     if [ "$BRIDGE" = 1 ] && [ "${PAD_S3_AUTOGUIDE:-1}" = 1 ]; then
-        python3 "$S/s3press.py" autoguide "$SLOT" > "$SD/autoguide.log" 2>&1 &
+        # a window run is the user's: Guided Setup is walked ONCE, at boot,
+        # and then the harness never presses a button again (David: "the
+        # guided setup seems to have a mind of its own")
+        if [ "$WINDOW" = 1 ]; then AG=(--boot); else AG=(); fi
+        python3 "$S/s3press.py" autoguide "$SLOT" "${AG[@]}" > "$SD/autoguide.log" 2>&1 &
         BUSPIDS="$BUSPIDS $!"
     fi
 fi

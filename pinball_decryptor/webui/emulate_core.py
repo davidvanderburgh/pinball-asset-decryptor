@@ -1511,7 +1511,8 @@ def spike3_keyfile(card, project=None):
     return spike3_key.find_keyfile(card, project=project)
 
 
-def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None):
+def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None,
+                      audio_ctl=None):
     """The run: the card into the Spike 3 store if needed (decrypted with
     *keyfile*, the user's padkeys.json), then the game in a window on rig
     slot *slot* for *minutes*."""
@@ -1519,6 +1520,10 @@ def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None):
     args = [conv(card), int(slot), int(minutes)] + (["--audio"] if audio else [])
     if keyfile:
         args += ["--keyfile", conv(keyfile)]
+    if audio_ctl:
+        # a native Windows path, as the Spike 2 run's PAD_AUDIO_CTL: the
+        # Windows sound player reads it, never WSL - so not converted
+        args += ["--audio-ctl", audio_ctl]
     return _s3_argv(*args)
 
 

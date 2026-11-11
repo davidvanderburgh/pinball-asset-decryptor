@@ -131,6 +131,9 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --audio) AUDIO=1 ;;
         --keyfile) export PAD_SPIKE3_KEYFILE=${2:-}; shift ;;
+        # the Emulate tab's volume / Mute file (a Windows path): the sound
+        # player follows it live, as on Spike 2 (playaudio.sh's win sink)
+        --audio-ctl) export PAD_AUDIO_CTL=${2:-}; shift ;;
     esac
     shift
 done

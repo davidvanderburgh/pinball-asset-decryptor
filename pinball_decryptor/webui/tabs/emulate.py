@@ -3339,7 +3339,20 @@ class EmulateTab(EmulateLogMixin, TabService):
         # PAD-204: the window's status bar moves this tab's volume / Mute
         env["PAD_AUDIO_CTL"] = audio_ctl_file()
         try:
-            self._pf_proc = self._popen(cmd, env=env)
+            # its own output to a file: a window that dies at once left no
+            # trace at all (PAD-1090: "I'm not seeing the playfield window")
+            pflog = os.path.join(tempfile.gettempdir(),
+                                 "pad_playfield_rig%d.log" % (n or 0))
+            try:
+                out = open(pflog, "w", encoding="utf-8", errors="replace")
+            except OSError:
+                out = None
+            if out is not None:
+                self._pf_proc = self._popen(cmd, env=env, stdout=out,
+                                            stderr=subprocess.STDOUT)
+                self._log("[emulate] the playfield window's own log: %s" % pflog)
+            else:
+                self._pf_proc = self._popen(cmd, env=env)
             self._log("[emulate] opened the virtual playfield window here — "
                       "this WSL cannot start Windows programs itself.")
         except Exception as exc:                         # noqa: BLE001
@@ -3447,6 +3460,14 @@ class EmulateTab(EmulateLogMixin, TabService):
             return False
         if not (self._last_up or self._launched()):
             return False
+        if self._s3_slot is not None:
+            # a Spike 3 run has no restartgame.sh of its own (that one asks
+            # the Spike 2 rig of the same number): Stop, then Start again
+            self.log("[emulate] restarting the Spike 3 game: it stops and "
+                     "starts again.")
+            self._restart_wait = 40
+            self.stop()
+            return True
         self.log("[emulate] restarting the game: it boots again; the game "
                  "window and the playfield stay open.")
         self._rebooting = True

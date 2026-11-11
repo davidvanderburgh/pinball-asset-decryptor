@@ -395,3 +395,17 @@ def test_missing_packages_are_installed_and_the_run_goes_on(tmp_path, monkeypatc
         assert not (svc.last_refusal or "")
         assert any("setting up Spike 3 emulation" in ln for ln in _lines(w))
 
+
+
+def test_restart_game_on_a_spike3_run_is_stop_then_start(tmp_path, monkeypatch):
+    """restartgame.sh asks the Spike 2 rig of the same number; a Spike 3 run
+    restarts by Stop and Start instead."""
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        stopped = []
+        monkeypatch.setattr(svc, "stop", lambda: stopped.append(1))
+        monkeypatch.setattr(svc, "_launched", lambda: True)
+        monkeypatch.setattr(svc, "_run", lambda *a, **k: pytest.fail("restartgame.sh asked"))
+        w.run(lambda: setattr(svc, "_s3_slot", 1))
+        assert w.run(svc.restart) is True
+        assert stopped and svc._restart_wait == 40

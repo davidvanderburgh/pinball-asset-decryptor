@@ -24,6 +24,7 @@ import itertools
 import logging
 import os
 import sys
+import threading
 import time
 
 from .. import __version__
@@ -389,6 +390,75 @@ class WebWindow:
 
     def refresh_rail(self):
         self.ctx.store.set("shell", tabs=self._rail())
+        self.refresh_spike3_key()
+
+    # -- PAD-1090: the user's own Spike 3 OTP key, which every Spike 3 tab
+    # needs (static/js/core/locks.js "spike3key"; webui/spike3_key.py) ------
+    def _spike3_card(self):
+        for name in ("extract_input_var", "emulate_card_var"):
+            try:
+                path = (getattr(self, name).get() or "").strip().strip('"')
+            except Exception:                           # noqa: BLE001
+                path = ""
+            if path and os.path.isfile(path):
+                return path
+        return ""
+
+    def refresh_spike3_key(self):
+        """shell.spike3_key: True when the user's OTP key is on file."""
+        from . import spike3_key
+        try:
+            have = bool(spike3_key.find_keyfile(self._spike3_card() or None))
+        except Exception:                               # noqa: BLE001
+            have = False
+        self.ctx.store.set("shell", spike3_key=have)
+        return have
+
+    @rpc
+    def spike3_load_key(self):
+        """The key gate's "I have my key": pick the key file (OTP_KEY.TXT, or
+        the 32-byte key), verify it against the selected card, keep it."""
+        card = self._spike3_card()
+        if not card:
+            self.toast("Select your Spike 3 card first (the Select card tab): "
+                       "PAD checks the key against it before keeping it.", "warn")
+            return False
+        key = self.ask_open("spike3_otp_key", "Select your OTP key "
+                            "(OTP_KEY.TXT or the 32-byte key file)",
+                            [("Key files", "*.txt *.bin"), ("All files", "*.*")])
+        if isinstance(key, (list, tuple)):
+            key = key[0] if key else ""
+        if not key:
+            return False
+        self.ctx.store.set("shell", spike3_key_busy=True, spike3_key_status=
+                           "Checking the key against your card…")
+
+        def work():
+            from . import spike3_key
+            try:
+                ok, msg, _path = spike3_key.save_key(key, card)
+            except Exception as exc:                    # noqa: BLE001
+                ok, msg = False, "Could not read that key: %s" % exc
+
+            def done():
+                self.ctx.store.set("shell", spike3_key_busy=False,
+                                   spike3_key_status=msg)
+                self.append_log("[spike3] " + msg, "success" if ok else "warn")
+                if ok:
+                    self.refresh_spike3_key()
+                    self.refresh_rail()
+            self.ctx.loop.post(done)
+
+        threading.Thread(target=work, daemon=True, name="spike3-key").start()
+        return True
+
+    @rpc
+    def spike3_build_card(self):
+        """The key gate's "Build extractor card": the Extract tab's own
+        builder, whose steps show on that tab."""
+        self.select_tab("extract")
+        svc = self._by_ns.get("extract")
+        return bool(svc and svc.spike3_build_card())
 
     def set_tab_badge(self, ns, badge):
         svc = self._by_ns.get(ns)

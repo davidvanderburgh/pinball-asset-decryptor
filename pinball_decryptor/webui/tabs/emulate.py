@@ -556,6 +556,10 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._bind_assets()
         self._overrides_paint()
 
+    def rail_needs(self):
+        # PAD-1090: a Spike 3 card is unusable without the user's OTP key
+        return "spike3key" if self._spike3_era() else None
+
     def on_show(self):
         self._bind_assets()
         # the Stern ladder, then what the last poll said (Tk showed idle
@@ -3216,6 +3220,10 @@ class EmulateTab(EmulateLogMixin, TabService):
 
         def run():
             try:
+                # the shared card store holds the cards already decrypted
+                # (s3store.py default_store): a WSL restart detaches it
+                if sys.platform == "win32":
+                    self._reattach_card_store(runtime.wsl_distro())
                 out = self._run(rig.spike3_check_cmd(), stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, timeout=60)
                 text = out.stdout.decode("utf-8", "replace")

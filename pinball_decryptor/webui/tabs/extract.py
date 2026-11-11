@@ -646,6 +646,9 @@ class ExtractTab(TabService):
         a ``.spk`` package (PAD-1077): that is unlocked by the fleet update
         key, not a board's OTP key, so an extractor card can't help it."""
         path = self.extract_input_var.get()
+        refresh = getattr(self.window, "refresh_spike3_key", None)
+        if refresh:                     # the other Spike 3 tabs' key gate
+            refresh()
         locked = (res and res.get("era") == "spike3" and res.get("game")
                   and res.get("exists")
                   and not self._spike3_is_spk(path)
@@ -749,16 +752,14 @@ class ExtractTab(TabService):
         return True
 
     def _spike3_padkeys_path(self):
-        """A writable padkeys.json location (the project folder if set, else
-        the user config dir) - never next to the image, which may be on
-        read-only media."""
-        folder = (self.extract_output_var.get() or "").strip()
-        if folder and os.path.isdir(folder):
-            return os.path.join(folder, "padkeys.json")
-        base = compat.user_config_dir() if hasattr(compat, "user_config_dir") \
-            else os.path.join(os.path.expanduser("~"), ".pad")
-        os.makedirs(base, exist_ok=True)
-        return os.path.join(base, "spike3_padkeys.json")
+        """Where a verified key is kept: the ONE per-user padkeys.json every
+        Spike 3 tab looks in (webui/spike3_key.py) - not the project folder,
+        which forgot it for every other project and tab (PAD-1090); never
+        next to the image, which may be on read-only media."""
+        from ..spike3_key import user_keyfile
+        out = user_keyfile()
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        return out
 
     def _spike3_unlocked(self, message):
         """A verified key: mark the panel unlocked. The key is now discoverable
@@ -768,6 +769,10 @@ class ExtractTab(TabService):
         self._set_spike3(busy=False, verified=True,
                          status=message or "Key verified. This card is "
                          "unlocked - you can Extract now.")
+        # every other Spike 3 tab waits on the same key (PAD-1090)
+        refresh = getattr(self.window, "refresh_spike3_key", None)
+        if refresh:
+            refresh()
 
     # ------------------------------------------------------------------
     # the source toggle and the card row

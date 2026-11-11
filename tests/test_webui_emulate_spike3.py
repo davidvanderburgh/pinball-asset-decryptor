@@ -137,7 +137,13 @@ def test_the_probe_asks_parts_py_and_records_the_verdict(tmp_path, monkeypatch):
 # PAD-1090: on a PC with the Spike 3 rig, the card runs instead
 # ---------------------------------------------------------------------------
 
+#: a padkeys.json naming an OTP key (zeros: no real key belongs in a test)
+OTP_DOC = '{"otp_keyfile": "%s"}' % ("00" * 32)
+
+
 def _s3_rig(monkeypatch, check=b"s3check: ok\n"):
+    from pinball_decryptor.core import rigdata
+    monkeypatch.setattr(rigdata, "cards_exists", lambda: False)   # no WSL in tests
     monkeypatch.setattr(emulate_rig, "spike3_rig_present", lambda: True)
     monkeypatch.setattr(emulate_rig, "spike3_check_cmd",
                         lambda: ["bash", "s3launch.sh", "--check"])
@@ -266,17 +272,17 @@ def test_spike3_keyfile_is_found_where_the_extract_unlock_left_it(tmp_path, monk
     find = emulate_core.spike3_keyfile
     assert find(str(card), project=str(proj)) is None
     cfg = home / ".pad" / "spike3_padkeys.json"
-    cfg.write_text("{}")
+    cfg.write_text(OTP_DOC)
     assert find(str(card), project=str(proj)) == str(cfg)
-    (proj / "padkeys.json").write_text("{}")
+    (proj / "padkeys.json").write_text(OTP_DOC)
     assert find(str(card), project=str(proj)) == str(proj / "padkeys.json")
-    (cards / "padkeys.json").write_text("{}")
+    (cards / "padkeys.json").write_text(OTP_DOC)
     assert find(str(card), project=str(proj)) == str(cards / "padkeys.json")
     side = cards / "pokemon_le.raw.padkeys.json"
-    side.write_text("{}")
+    side.write_text(OTP_DOC)
     assert find(str(card), project=str(proj)) == str(side)
     env = tmp_path / "unlocked.json"
-    env.write_text("{}")
+    env.write_text(OTP_DOC)
     monkeypatch.setenv("PAD_SPIKE3_KEYFILE", str(env))
     assert find(str(card), project=str(proj)) == str(env)
 
@@ -286,7 +292,7 @@ def test_the_tab_hands_the_unlocked_key_to_the_launcher(tmp_path, monkeypatch):
     card = tmp_path / "pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
     card.write_bytes(b"\0" * 512)
     key = tmp_path / "padkeys.json"
-    key.write_text("{}")
+    key.write_text(OTP_DOC)
     monkeypatch.setenv("PAD_SPIKE3_KEYFILE", str(key))
     with web_app(tmp_path, mfr="stern") as w:
         svc = _svc(w)

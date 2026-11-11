@@ -1503,25 +1503,12 @@ def spike3_setup_cmd():
 
 
 def spike3_keyfile(card, project=None):
-    """The padkeys.json holding the user's OWN OTP key for *card*, or None.
-
-    The same places the Extract tab's Spike 3 unlock leaves it: the
-    ``$PAD_SPIKE3_KEYFILE`` it sets in this process, ``<card>.padkeys.json``
-    or ``padkeys.json`` beside the card, ``padkeys.json`` in the project
-    folder, then ``~/.pad/spike3_padkeys.json``. Only the path travels to the
-    rig (the key itself is never on a command line); the store needs it just
-    once per card, to decrypt the card into the store."""
-    cands = [os.environ.get("PAD_SPIKE3_KEYFILE") or ""]
-    if card:
-        c = os.path.abspath(card)
-        cands += [c + ".padkeys.json", os.path.join(os.path.dirname(c), "padkeys.json")]
-    if project:
-        cands.append(os.path.join(project, "padkeys.json"))
-    cands.append(os.path.join(os.path.expanduser("~"), ".pad", "spike3_padkeys.json"))
-    for c in cands:
-        if c and os.path.isfile(c):
-            return c
-    return None
+    """The padkeys.json holding the user's OWN OTP key for *card*, or None -
+    webui/spike3_key.py's search (only a file that names an OTP key: one
+    beside the cards may hold only the .spk package key). Only the path
+    travels to the rig; the store needs it once per card."""
+    from . import spike3_key
+    return spike3_key.find_keyfile(card, project=project)
 
 
 def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None):

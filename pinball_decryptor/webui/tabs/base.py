@@ -107,8 +107,14 @@ class TabService:
     def rail_needs(self):
         """What this tab needs before it can be used on this manufacturer:
         ``None`` for the page's own table (static/js/core/locks.js NEEDS),
-        ``"none"``, ``"project"`` or ``"extract"`` to say otherwise."""
+        ``"none"``, ``"project"``, ``"extract"`` or ``"spike3key"`` to say
+        otherwise."""
         return None
+
+    def _spike3_era(self):
+        """True on a Stern Spike 3 card, where everything needs the user's
+        own OTP key (PAD-1090: rail_needs "spike3key")."""
+        return getattr(self.mfr, "_era", None) == "spike3"
 
     def on_field(self, key, value):
         """The page set ``key`` with no Var bound to it (plain state)."""

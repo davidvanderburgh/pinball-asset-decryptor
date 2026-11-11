@@ -29,6 +29,7 @@ import shutil
 import sys
 
 from .pipeline_base import BasePipeline, PipelineError
+from . import name_memory
 
 
 WHISPER_IMPORT_HINT = (
@@ -330,7 +331,7 @@ class TranscribePipeline(BasePipeline):
                 if not label:
                     new_rows.append((rel, kind, text))
                     continue
-                new_rel = _renamed_rel_path(rel, label)
+                new_rel = _renamed_rel_path(rel, label, self.assets_dir)
                 if new_rel == rel:
                     new_rows.append((rel, kind, text))
                     skipped_renames += 1
@@ -1203,13 +1204,13 @@ def _has_named_wavs(root):
 # Characters not allowed in Windows filenames + the path separators that
 # would let a malicious transcript escape the dir.  Replaced with '_'.
 _FORBIDDEN_FILENAME_CHARS = r'<>:"|?*/\\'
-# Cap the renamed filename's stem at this many chars.  Windows MAX_PATH
-# is 260; we leave headroom for the parent dir, extension, and the
-# original stem prefix.
-_MAX_TEXT_LEN = 80
+# Cap the transcript part of a renamed filename at this many chars: the
+# same cap a rename in Replace Audio has (PAD-1158: was 80, which cut long
+# callouts short).  The path-length side is name_memory.fit_label's job.
+_MAX_TEXT_LEN = name_memory.MAX_LABEL
 
 
-def _renamed_rel_path(rel_path, text):
+def _renamed_rel_path(rel_path, text, assets_dir=None):
     """Compute the renamed relative path for a transcribed file.
 
     ``original.wav`` + ``"Joust champion!"`` -> ``original - Joust champion!.wav``.
@@ -1238,6 +1239,10 @@ def _renamed_rel_path(rel_path, text):
     if len(cleaned) > _MAX_TEXT_LEN:
         cleaned = cleaned[:_MAX_TEXT_LEN].rstrip() + "..."
     cleaned = cleaned.rstrip(". ")
+    if cleaned and assets_dir:
+        # as much of it as this folder still holds (Windows' 260 limit)
+        cleaned = name_memory.fit_label(os.path.join(assets_dir, parent),
+                                        stem, cleaned, ext)
     if not cleaned:
         return rel_path
 

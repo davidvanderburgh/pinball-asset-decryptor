@@ -4665,7 +4665,19 @@ class AudioTab(FindOriginalsMixin, TabService):
         if new_cat not in dict(_CAT_NAMES):
             new_cat = "other"
         cur_cat = self._cats.get(rel) or "other"
-        new_label = name_memory.sanitize_label(name)
+        wanted = name_memory.sanitize_label(name)
+        new_label = self._fit_label(rel, wanted)
+        if wanted and not new_label:
+            compat.messagebox.showerror(
+                "Audio Properties",
+                "This sound's folder is too deep for Windows to hold a name "
+                "after it:\n%s\n\nMove the project to a shorter folder."
+                % os.path.dirname(slot.abs_path))
+            return None
+        if new_label != wanted:
+            self.log("Replace Audio: name shortened to %d characters so the "
+                     "file's path stays inside Windows' 260-character limit."
+                     % len(new_label), "info")
         if new_label == label:
             if new_cat == cur_cat:
                 return rel
@@ -4739,6 +4751,18 @@ class AudioTab(FindOriginalsMixin, TabService):
                 self._scan_dir, rel) else cat
         except Exception:                               # noqa: BLE001
             return cat
+
+    def _fit_label(self, rel, label):
+        """*label* (already sanitized) as much of it as fits as decode slot
+        *rel*'s name where the file lives (PAD-1158:
+        :func:`name_memory.fit_label`)."""
+        from ...core import name_memory
+        slot = self._by_rel.get(rel)
+        parts = name_memory.split_decode_name(os.path.basename(rel))
+        if slot is None or parts is None or not label:
+            return label
+        return name_memory.fit_label(os.path.dirname(slot.abs_path),
+                                     parts[0], label, parts[2])
 
     def _rename_slot(self, rel, new_label, new_cat):
         """Rename decode slot *rel* on disk to ``<prefix> - <new_label>``
@@ -4868,7 +4892,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             if parts is None:
                 fixed += 1
                 continue
-            label = name_memory.sanitize_label(text)
+            label = self._fit_label(rel, name_memory.sanitize_label(text))
             if label and label != parts[1]:
                 plan.append((rel, label, row))
         return plan, unmatched, fixed
@@ -5012,7 +5036,8 @@ class AudioTab(FindOriginalsMixin, TabService):
                 changed = True
             # the words win while they still make this name ("Kaiju award:
             # 2x" files as "Kaiju award_ 2x"); a blank name keeps them
-            if label and name_memory.sanitize_label(text) != label:
+            if label and self._fit_label(
+                    rel, name_memory.sanitize_label(text)) != label:
                 row[keys["text"]] = label
                 changed = True
             updated += changed

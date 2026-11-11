@@ -391,8 +391,19 @@ for no reply, so the model hears them on every addressed frame. First 0x40
 to a coil = its configuration. `PAD_S3_NBTRACE=1` traces decoded frames.
 
 **Press by name**: the bridge writes `DIR/switches.json`; `s3press.py sw SLOT
-"START BUTTON"`, `coin SLOT N` (3 s apart; the game still credits only ~3 of
-4 quarters - harmless, Free Play avoids it).
+"START BUTTON"`, `coin SLOT N` (1 s apart).
+
+**First presses after boot (PAD-1139).** The cabinet board has nothing
+closed at boot, so it never raised a request and the game's FIRST scan of it
+was the player's first coin, which the game took as the starting state: the
+first two coins after a boot never credited (pokemon_le, 4 coins -> 1/2,
+twice). A real board's power-up request does not exist here, so once a board
+is past bring-up `attention()` queues its resting inputs for one scan
+(`PAD_S3_BASELINE_SCANS`, default 1; 0 = the old behaviour). Proven on fresh
+boots: 4 coins 3 s apart -> CREDITS 1 (twice), 8 coins 1 s apart -> 3
+credits, then Start -> BALL 1. In a settled attract nothing was ever lost:
+16 presses of 20..100 ms and 12 of 150..1000 ms all credited. Note the
+pricing (1/$1.00, 3/$2.00) when counting: 8 quarters show CREDITS 3.
 
 **Harness hygiene**: `s3run.sh` kills a killed run's helpers (an orphaned
 padglhost wrote stale frames and slowed later boots to 3x), frame dumps sort
@@ -565,7 +576,7 @@ the board model off.
 
 ## What is left for Spike 2 parity
 
-1. Coins: the game credits ~3 of 4 quarters even when each is delivered.
+1. (PAD-1139, fixed) Coins: the first two after boot were lost.
 2. The window's default key bindings fire one QR-scanner switch for a moment
    before the title's switch list loads (harmless, settles).
 3. The playfield's lamps are proven on pokemon_le; the other titles' tables

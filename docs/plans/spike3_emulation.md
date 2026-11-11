@@ -527,5 +527,5 @@ Spike 2's playfield window, on a Spike 3 run, from the card's own data:
    before the title's switch list loads (harmless, settles).
 3. The playfield's lamps are proven on pokemon_le; the other titles' tables
    build (all six) but their lamp traffic is unwatched.
-4. RGB inserts draw as white in "Real LEDs" (the R/G/B channels of one insert
-   are separate lamps on Spike 3's boards; the colour grouping is Spike 2's).
+4. The lit inserts draw white in "Real LEDs"; whether pokemon_le's inserts are
+   RGB (and the window's channel grouping misses them) is not checked yet.

@@ -9,6 +9,7 @@ import { call, onCallError } from "./core/rpc.js";
 import { DialogHost, openDialog } from "./core/dialogs.js";
 import { tabLock } from "./core/locks.js";
 import { setLanguage } from "./core/i18n.js";
+import { Spike3KeyGuide } from "./core/spike3_guide.js";
 // The app-wide windows (Tips, Preview features, disk space, the Project
 // menu's windows) register themselves on import; ShellxOverlays draws the
 // progress windows the shellx service drives (docs/plans/web_ui_tabs/shellx.md).
@@ -492,6 +493,7 @@ function Spike3KeyGate({ shell, lock }) {
       </div>
       <div class="row wrap">
         <${Button} size="sm" kind="ghost" disabled=${busy} onClick=${() => call("ui.spike3_load_key")}>Or choose a key file…<//>
+        <${Spike3KeyGuide} disabled=${busy} />
       </div>
       ${shell.spike3_key_status ? html`<span class="small">${shell.spike3_key_status}</span>` : null}
     </div>

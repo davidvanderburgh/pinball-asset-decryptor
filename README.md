@@ -49,7 +49,7 @@ macOS and Linux.
 | Pinball Brothers | 4 | Extract, Write, Apply Delta, Mod Pack, Replace Audio/Video, Emulate |
 | Sega (Whitestar DMD) | 18 | Capture DMD animations + sound with PinMAME |
 | Spooky Pinball | 14 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate, Multi-boot |
-| Stern Spike 3 | 6 | Extract (decrypts the card's encrypted games partition from a LUKS/ext4 SD image or `.spk`; needs your own OTP keyfile, which a locked card can now help you read from your own board) |
+| Stern Spike 3 | 6 | Extract, Emulate (decrypts the card's encrypted games partition from a LUKS/ext4 SD image or `.spk` and plays it on this PC; needs your own OTP key, pasted or as a keyfile) |
 | Stern Spike 2 | 28 | Extract, Write, Direct-SD, Replace Audio/Video/Images/Text, Scenes, Partition Explorer, Emulate, Multi-boot |
 | Stern Spike 1 | 6 | Extract, Write, Replace Audio, Replace Images, Replace Text, Emulate |
 | Stern SAM | 26 | Extract, Write, Replace Audio, Replace Images (stills, fonts and DMD animation frames), Mod Pack; capture DMD animations with PinMAME |
@@ -114,7 +114,7 @@ Questions, or something to show off? The **Discord** button in the top bar
 | [Getting started](docs/guide/getting-started.md) | Your first mod, step by step: swap one song and put it on the machine |
 | [Common problems](docs/guide/common-problems.md) | What new users most often run into, and what to do |
 | [Using the app](docs/guide/using-the-app.md) | Every tab from Extract to Mod Pack, projects, history and the log |
-| [Emulate](docs/guide/emulate.md) | Playing a game on this PC: Stern Spike 2, Jersey Jack, Dutch Pinball |
+| [Emulate](docs/guide/emulate.md) | Playing a game on this PC: Stern Spike 2, Stern Spike 3, Jersey Jack, Dutch Pinball |
 | [Multi-boot cards](docs/guide/multi-boot.md) | Several games on one card with a menu at power-up |
 | [AI agents](docs/guide/ai-agents.md) | Letting an AI agent (Claude, Cursor...) use the app for you through MCP |
 | [Color profile maths](docs/guide/color-profile-maths.md) | Every step of the Color profile tab, in order, with its limits |

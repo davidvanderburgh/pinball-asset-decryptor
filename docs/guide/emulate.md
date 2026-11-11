@@ -28,8 +28,9 @@ way the machine does: splash, boot checks, then attract.
   nothing was left running.
 - **What it costs:** about a third of one CPU core while it runs, plus 1–2
   GB of memory, shown live in the status line.
-- **Spike 3 cards** are refused up front: their game partition is
-  encrypted, so they cannot run here.
+- **Spike 3 cards** run too, once your own OTP key is on file (paste it or
+  point at a keyfile). The game plays in the same window; see [Stern Spike
+  3](#stern-spike-3) below.
 
 ### Getting set up
 
@@ -203,6 +204,20 @@ black, so restarting WSL won't help.
   **Volume** and **Mute** work there too, live, as on Windows.
 - **Start Docker** starts the engine you have; **Get Docker…** opens the
   download page when there's nothing to install with.
+
+## Stern Spike 3
+
+*Windows via WSL2, Linux*
+
+A Spike 3 card runs much like a Spike 2 one, with two differences.
+
+- **Your own OTP key unlocks it.** The Emulate and Compare tabs stay locked
+  until the key is on file; paste it in the key gate or point at a keyfile.
+  The key is verified once and kept per user.
+- **Guided Setup runs once at boot.** The emulated machine has no factory
+  identity, so the game asks for Guided Setup; the app walks it for you and
+  the game reaches attract in about a minute. Some titles list their
+  switches in the playfield window instead of a cabinet photo.
 
 ## Jersey Jack Pinball
 

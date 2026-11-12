@@ -66,8 +66,8 @@ static int ball_waits = -1;                              /* PAD-1051: the game's
 static int coop_ball_waits(void) { return ball_waits; }
 static void edge_take_held(unsigned id) { (void)id; }    /* PAD-1078: the drain section's (test_pad1051) */
 /* PAD-1114: the co-op intro (test_pad1114_coop_intro_runtime): never playing here */
-enum { CI_OFF, CI_START, CI_PLAY, CI_BALL, CI_LANG };
-static struct { int phase, pick_who; volatile int flips, go, go_down; } ci;
+enum { CI_OFF, CI_START, CI_FILM, CI_PLAY, CI_BALL, CI_LANG };
+static struct { int phase, pick_who, holding; volatile int flips, go, go_down; } ci;
 static void coop_intro_begin(const char *why) { (void)why; }
 /* PAD-1123: a character's clip and sound once picked (test_pad1123_coop_picked_bonus): never playing here */
 static void coop_picked_begin(int c) { (void)c; }

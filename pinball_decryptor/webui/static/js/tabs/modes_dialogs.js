@@ -401,7 +401,7 @@ export function CoopCharsDialog({ s, onClose }) {
         ${ch.intro ? "Intro video ✓" : "Intro video…"}<//>
       ${ch.intro ? html`<${Button} size="xs" kind="ghost" icon="x" title="No intro: co-op and team games start as the game's own do."
         onClick=${() => call("modes.coop_intro", true)} />` : null}
-      <span class="small dim wrap">${ch.intro ? `${ch.intro} opens each co-op and team game, with its own sound. Both flipper buttons skip it. Then the ball comes to the shooter lane, the flippers choose the language (when the game's Player Language Select is on), and the character pick opens.` : "Open each co-op and team game with a video of your own, with its own sound. Both flipper buttons skip it."}</span>
+      <span class="small dim wrap">${ch.intro ? `${ch.intro} opens each co-op and team game, with its own sound. While it plays the flippers choose the language (when the game's Player Language Select is on), and both flipper buttons together skip it. Then the character pick opens, and the ball comes to the shooter lane once a character is taken.` : "Open each co-op and team game with a video of your own, with its own sound. Both flipper buttons skip it."}</span>
     </div>
     <div class="row" style="margin-top:8px; gap:8px">
       <${Check} checked=${!!ch.bonus} label="Show each teammate's character on their End of Ball Bonus" disabled=${!rows.length}

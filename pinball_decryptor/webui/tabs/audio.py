@@ -378,6 +378,17 @@ class AudioTab(FindOriginalsMixin, TabService):
         self.audio_play_through_var = self.var("play_through", "bool", False)
         self.audio_play_subst_var = self.var("play_subst", "bool", False)
         self.audio_group_dups_var = self.var("group_dups", "bool", False)
+        # PAD-1209: the Play boxes come back as the last session left them
+        self.audio_play_through_var.set(
+            self._pref("audio_play_through", bool) is True)
+        self.audio_play_subst_var.set(
+            self._pref("audio_play_subst", bool) is True)
+        self.audio_play_through_var.trace_add(
+            "write", lambda *a: self._remember(
+                "audio_play_through", bool(self.audio_play_through_var.get())))
+        self.audio_play_subst_var.trace_add(
+            "write", lambda *a: self._remember(
+                "audio_play_subst", bool(self.audio_play_subst_var.get())))
         self.audio_search_var.trace_add("write",
                                         lambda *a: self._refresh_list())
         self.audio_change_filter_var.trace_add(
@@ -933,7 +944,9 @@ class AudioTab(FindOriginalsMixin, TabService):
                  req_note=(req_why or "") if self._uses is None else "")
         self._sm_offer = offer if isinstance(offer, dict) else None
         if scan_dir != self._scan_dir:
-            self.audio_type_var.set("All types")
+            # PAD-1209: the Type last picked, in any session
+            want = self._pref("audio_type", str)
+            self.audio_type_var.set(want if want in _TYPE_KEYS else "All types")
         self._refresh_type_filter()
         if scan_dir == self._scan_dir:
             old = self._by_rel
@@ -1335,16 +1348,22 @@ class AudioTab(FindOriginalsMixin, TabService):
                 "info")
 
     def _restore_change_filter(self, staged):
-        # a folder that doesn't say shows everything, whatever the last
-        # project was filtered to
+        # PAD-1209: Show and Hide unused are app-wide, remembered between
+        # sessions; a folder saved before that still says what it was
+        # filtered to until they are first picked
         self.audio_change_filter_var.set("All")
-        val = staged.get("audio_change_filter")
+        val = self._pref("audio_show", str)
+        if val not in _CHANGE_FILTER_VALUES:
+            val = staged.get("audio_change_filter")
         if val in _CHANGE_FILTER_VALUES:
             self.audio_change_filter_var.set(val)
         elif "audio_changed_only" in staged:
             self.audio_change_filter_var.set(
                 "Changed" if staged["audio_changed_only"] else "All")
-        self.audio_hide_unused_var.set(bool(staged.get("audio_hide_unused")))
+        hide = self._pref("audio_hide_unused", bool)
+        if hide is None:
+            hide = bool(staged.get("audio_hide_unused"))
+        self.audio_hide_unused_var.set(hide)
 
     def _save_staged_changes(self):
         """Persist this tab's part of the folder's sidecar (the Tk window's
@@ -1748,18 +1767,20 @@ class AudioTab(FindOriginalsMixin, TabService):
     # ------------------------------------------------------------------
     @rpc
     def set_show(self, value):
-        """Show: All / Changed / Unchanged (persisted per folder)."""
+        """Show: All / Changed / Unchanged (remembered between sessions)."""
         if value not in _CHANGE_FILTER_VALUES:
             return False
         self.audio_change_filter_var.set(value)
+        self._remember("audio_show", value)
         self._save_staged_changes()
         return True
 
     @rpc
     def set_hide_unused(self, on):
         """PAD-1105: "Hide unused" - leave out the sounds whose Requests read
-        None (persisted per folder)."""
+        None (remembered between sessions)."""
         self.audio_hide_unused_var.set(bool(on))
+        self._remember("audio_hide_unused", bool(on))
         self._save_staged_changes()
         return True
 
@@ -1768,6 +1789,7 @@ class AudioTab(FindOriginalsMixin, TabService):
         if value != "All types" and value not in _TYPE_KEYS:
             return False
         self.audio_type_var.set(value)
+        self._remember("audio_type", value)
         self._refresh_list()
         return True
 
@@ -1800,31 +1822,47 @@ class AudioTab(FindOriginalsMixin, TabService):
         self._refresh_list()
         return True
 
-    # PAD-1176: "Show comments", kept app-wide in settings.json
+    # PAD-1176 / PAD-1209: toolbar choices kept app-wide in settings.json
     _SHOW_COMMENTS_KEY = "audio_show_comments"
+
+    def _pref(self, key, kind):
+        """The value *key* was last set to (of type *kind*), this session
+        or an earlier one; None when it never was."""
+        app = self.app
+        s = getattr(app, "_settings", None) if app is not None else None
+        got = s.get(key) if isinstance(s, dict) else None
+        if not isinstance(got, kind):
+            got = getattr(self, "_prefs_local", {}).get(key)
+        return got if isinstance(got, kind) else None
+
+    def _remember(self, key, value):
+        """Keep *value* for *key* in settings.json (saved straight away, so
+        it is there next session whatever way the app is closed)."""
+        if not hasattr(self, "_prefs_local"):
+            self._prefs_local = {}
+        if self._prefs_local.get(key) == value and self._pref(
+                key, type(value)) == value:
+            return
+        self._prefs_local[key] = value
+        app = self.app
+        if app is not None and isinstance(getattr(app, "_settings", None), dict):
+            app._settings[key] = value
+            try:
+                app._save_settings()
+            except Exception:                              # noqa: BLE001
+                pass
 
     def _show_comments_pref(self):
         """True / False once "Show comments" was ticked or unticked; None
         before (the Comment column then shows once a sound has a comment)."""
-        s = getattr(self.app, "_settings", None) if self.app else None
-        got = (s or {}).get(self._SHOW_COMMENTS_KEY)
-        if not isinstance(got, bool):
-            got = getattr(self, "_show_comments_local", None)
-        return got if isinstance(got, bool) else None
+        return self._pref(self._SHOW_COMMENTS_KEY, bool)
 
     @rpc
     def set_show_comments(self, on):
         """PAD-1176: show or hide the Comment column, remembered between
         sessions; hiding the column the list is sorted by sorts by name."""
         on = bool(on)
-        self._show_comments_local = on
-        app = self.app
-        if app is not None and isinstance(getattr(app, "_settings", None), dict):
-            app._settings[self._SHOW_COMMENTS_KEY] = on
-            try:
-                app._save_settings()
-            except Exception:                              # noqa: BLE001
-                pass
+        self._remember(self._SHOW_COMMENTS_KEY, on)
         if not on and self._sort and self._sort[0] == "cm":
             self._sort = ("#0", False)
         self._refresh_list()

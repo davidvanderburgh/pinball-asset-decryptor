@@ -1087,6 +1087,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         return [{"key": k, "label": label, "tip": tip, "on": k in left}
                 for k, label, tip in run_leave_out.KINDS if k in keys]
 
+    @rpc
     def set_leave_out(self, key, on):
         """PAD-1197: a "Leave out of this run" tick was flipped."""
         from ...plugins.stern import run_leave_out

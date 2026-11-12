@@ -290,3 +290,8 @@ def test_a_start_with_nothing_left_out_calls_them_as_before(monkeypatch, tmp_pat
     staged, built, reasons = _start(monkeypatch, tmp_path, [])
     # not named at all: the stand-ins for both keep their older signatures
     assert staged == [()] and built == ["not named"] and reasons == [()]
+
+
+def test_the_page_can_reach_the_ticks():
+    from pinball_decryptor.webui.tabs.emulate import EmulateTab
+    assert getattr(EmulateTab.set_leave_out, "__pad_rpc__", None) is not None

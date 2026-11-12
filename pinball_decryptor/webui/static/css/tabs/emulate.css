@@ -94,6 +94,7 @@ html.bp-720 .emu-kv { grid-template-columns: 120px minmax(0, 1fr); }
 
 /* PAD-251: the Scenes tab's edits, their own tick under the opt-in */
 .emu-ovr-sub { padding-left: 26px; }
+.emu-leave-out { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
 
 /* PAD-1071: the Sound and video log's entry: its words, and its Open button at the end */
 .emu-win-row { gap: 10px; align-items: center; }

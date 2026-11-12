@@ -4898,7 +4898,8 @@ class App:
                 else contextlib.nullcontext())
 
     def stage_pending_replacements(self, assets_dir, cancel_cb=None,
-                                   progress_cb=None, confirm_cb=None):
+                                   progress_cb=None, confirm_cb=None,
+                                   leave_out=()):
         """Apply every assigned Replace-tab replacement into *assets_dir* now.
 
         The three ``_stage_pending_*`` calls a Write makes, in the same order,
@@ -4927,9 +4928,17 @@ class App:
         and returns ``None``.  *progress_cb(kind, i, total, rel)* is the
         video, then the picture staging's own progress (*kind* ``"videos"``
         / ``"pictures"``).
+
+        PAD-1197: *leave_out* is the Emulate tab's "Leave out of this run"
+        (``"sounds"``, ``"videos"``, ``"pictures"``...): a kind it names is
+        not staged, its picks stay assigned for the next Start or build
+        that carries it.
         """
-        video = self._video_staging(assets_dir) or {}
-        image = self._image_staging(assets_dir) or {}
+        skip = set(leave_out or ())
+        video = ({} if "videos" in skip
+                 else self._video_staging(assets_dir) or {})
+        image = ({} if "pictures" in skip
+                 else self._image_staging(assets_dir) or {})
         if confirm_cb is not None and not confirm_cb(
                 self._staging_work(assets_dir, video, image)):
             return None
@@ -4939,12 +4948,15 @@ class App:
                 return None
             return lambda i, total, rel="": progress_cb(name, i, total, rel)
 
-        pend_a = self._stage_pending_audio(assets_dir)
-        pend_v = self._stage_pending_video(assets_dir, cancel_cb=cancel_cb,
-                                           progress_cb=kind("videos"),
-                                           staging=video)
+        pend_a = ((0, 0, []) if "sounds" in skip
+                  else self._stage_pending_audio(assets_dir))
+        pend_v = ((0, 0, []) if "videos" in skip else
+                  self._stage_pending_video(assets_dir, cancel_cb=cancel_cb,
+                                            progress_cb=kind("videos"),
+                                            staging=video))
         # cancelled during the videos: the pictures are not begun at all
-        pend_i = ((0, 0, []) if cancel_cb is not None and cancel_cb() else
+        pend_i = ((0, 0, []) if "pictures" in skip
+                  or (cancel_cb is not None and cancel_cb()) else
                   self._stage_pending_image(assets_dir, cancel_cb=cancel_cb,
                                             progress_cb=kind("pictures"),
                                             staging=image))

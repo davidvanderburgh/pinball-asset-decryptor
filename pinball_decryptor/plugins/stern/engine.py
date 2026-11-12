@@ -8003,7 +8003,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-305: the color profile, applied to everything the game draws by
     # patching its drawing shaders (plugins/stern/shader_profile.py) - a game
     # program edit with no file of the project behind it
-    shader_prof = _shader_colour_profile(assets_dir)
+    # PAD-1186: a Spike 3 card's profile went into the replaced files as
+    # they were staged (colour_profile_on_display is Spike 2's alone)
+    shader_prof = (None if _is_spike3(disk_f)
+                   else _shader_colour_profile(assets_dir))
     # PAD-444: a mode's own copy of a clip it shares with another mode - a new
     # clip in the video bank and that mode's references in the game program
     # moved to its name (plugins/stern/clip_modes.py)

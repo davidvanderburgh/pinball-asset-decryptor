@@ -121,12 +121,23 @@ class Run:
             time.sleep(3)
         raise SystemExit("%s did not finish in %d s" % (what, timeout))
 
-    def wait_rows(self, ns, key="rows", timeout=600):
+    def wait_rows(self, ns, key="rows", timeout=900):
+        """The tab's rows once its scan is done.  A tab scans by itself when
+        shown, and its Scan button is a toggle (a second press cancels), so
+        Scan is pressed only when the tab sits idle with nothing listed."""
         t0 = time.time()
+        idle_since, pressed = None, False
         while time.time() - t0 < timeout:
             s = self.st(ns)
             if s.get(key) and not s.get("scanning"):
                 return s[key]
+            if s.get("scanning"):
+                idle_since = None
+            elif idle_since is None:
+                idle_since = time.time()
+            elif not pressed and time.time() - idle_since > 6:
+                self.api(ns + ".scan")
+                pressed = True
             time.sleep(2)
         raise SystemExit("%s: no %s after %d s" % (ns, key, timeout))
 
@@ -190,7 +201,6 @@ def e2e(run, page, project, build, files):
 
     # Replace Audio: a longer and a shorter sound
     run.api("ui.select_tab", "audio")
-    run.api("audio.scan")
     rows = run.wait_rows("audio")
     print("audio rows:", len(rows), flush=True)
     for needle, src in (("idx0000", "long_tone.wav"), ("idx0001", "short_tone.wav")):
@@ -201,7 +211,6 @@ def e2e(run, page, project, build, files):
 
     # Replace Video: a clip bigger than its slot
     run.api("ui.select_tab", "video")
-    run.api("video.scan")
     rows = run.wait_rows("video")
     print("video rows:", len(rows), flush=True)
     rel = _rel(rows, "PK_BGPattern_PokeBallRed")
@@ -211,7 +220,6 @@ def e2e(run, page, project, build, files):
 
     # Replace Images
     run.api("ui.select_tab", "images")
-    run.api("images.scan")
     rows = run.wait_rows("images")
     print("image rows:", len(rows), flush=True)
     rel = _rel(rows, "Coin0015")
@@ -221,7 +229,6 @@ def e2e(run, page, project, build, files):
 
     # Replace Text
     run.api("ui.select_tab", "text")
-    run.api("text.scan")
     rows = run.wait_rows("text")
     print("text rows:", len(rows), flush=True)
     hit = next(r for r in rows if r.get("original") == "GAME NAME")

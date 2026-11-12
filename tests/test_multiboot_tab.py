@@ -3507,6 +3507,58 @@ def test_the_two_ticks_make_the_names():
     assert (rows[1].own_scores, rows[1].hiscores) == ("", "")
 
 
+def test_share_with_puts_images_in_one_store_or_table():
+    """PAD-1196 (pb_lawww): 'Share with' joins another image's store or
+    table by its name, 'No other image' keeps the name while nobody else
+    holds it and makes a new one when it leaves a group, and calling it
+    again with the same choices changes nothing (the dialog writes through)."""
+    mb = multiboot_core
+    a, b, c = (mb.ImageRow(x, title=t) for x, t in
+               (("a", "Heisei orch 3"), ("b", "Heisei bw 3"), ("c", "Original")))
+    rows = [a, b, c]
+    others = lambda r: [x for x in rows if x is not r]
+    mb.set_row_scores(a, True, True, others(a), settings_with=mb.NEW_GROUP,
+                      scores_with=mb.NEW_GROUP)
+    assert (a.own_scores, a.hiscores) == ("heisei-orch-3", "")
+    # b joins a's settings store, and a table called 'heisei'
+    mb.set_row_scores(b, True, True, others(b), settings_with="heisei-orch-3",
+                      scores_with="heisei")
+    assert (b.own_scores, b.hiscores) == ("heisei-orch-3", "heisei")
+    mb.set_row_scores(a, True, True, others(a), settings_with="heisei-orch-3",
+                      scores_with="heisei")
+    assert (a.own_scores, a.hiscores) == ("heisei-orch-3", "heisei")
+    assert mb.share_choice_of(rows, b, "settings") == "heisei-orch-3"
+    assert mb.share_choice_of(rows, b, "scores") == "heisei"
+    assert mb.share_choice_of(rows, c, "settings") == mb.NEW_GROUP
+    labels = {o["value"]: o["label"] for o in mb.share_choices(rows, c, "scores")}
+    assert labels == {mb.NEW_GROUP: "No other image", "heisei": "Heisei orch 3, Heisei bw 3"}
+    # the same call again (a title typed) changes nothing
+    b.title = "Heisei b/w 3 ball"
+    for _ in range(2):
+        mb.set_row_scores(b, True, True, others(b), settings_with="heisei-orch-3",
+                          scores_with="heisei")
+        assert (b.own_scores, b.hiscores) == ("heisei-orch-3", "heisei")
+    # b leaves a's store: a new one of its own, kept on the next call
+    mb.set_row_scores(b, True, True, others(b), settings_with=mb.NEW_GROUP,
+                      scores_with="heisei")
+    new = b.own_scores
+    assert new not in ("heisei-orch-3", "heisei", "")
+    mb.set_row_scores(b, True, True, others(b), settings_with=mb.NEW_GROUP,
+                      scores_with="heisei")
+    assert b.own_scores == new and b.hiscores == "heisei"
+    # a alone again in its store keeps its name
+    assert mb.share_choice_of(rows, a, "settings") == mb.NEW_GROUP
+    mb.set_row_scores(a, True, True, others(a), settings_with=mb.NEW_GROUP,
+                      scores_with="heisei")
+    assert a.own_scores == "heisei-orch-3"
+    # a table joined with shared settings, and the split it makes
+    mb.set_row_scores(c, False, True, others(c), scores_with="heisei")
+    assert (c.own_scores, c.hiscores) == ("", "heisei") and mb.scores_split(c)
+    # a name the card would refuse is never taken
+    mb.set_row_scores(c, True, True, others(c), settings_with="../x", scores_with="../y")
+    assert c.own_scores not in ("../x", "") and c.hiscores == "heisei"
+
+
 def test_hiscores_come_back_off_the_card_and_are_a_menu_change(tmp_path):
     mb = multiboot_core
     rows, _warn = mb.rows_from_inspect({"images": [

@@ -1157,6 +1157,17 @@ class WebMultibootPanel(_Base):
             "scores_label": mt.SCORES_LABEL,
             "settings_label": mt.SETTINGS_LABEL,
             "scores_note": mt.SCORES_NOTE,
+            # PAD-1196: which other images it shares that store / table with
+            "share_label": mt.SHARE_WITH_LABEL,
+            "share_note": mt.SHARE_NOTE,
+            "settings_with": mt.share_choices(
+                self._rows, self._rows[d._index] if d._index is not None
+                and 0 <= d._index < len(self._rows) else mt.ImageRow(""),
+                "settings"),
+            "scores_with": mt.share_choices(
+                self._rows, self._rows[d._index] if d._index is not None
+                and 0 <= d._index < len(self._rows) else mt.ImageRow(""),
+                "scores"),
             "scores_modes": mt.modes_line(
                 self._rows[d._index] if d._index is not None
                 and 0 <= d._index < len(self._rows) else None),

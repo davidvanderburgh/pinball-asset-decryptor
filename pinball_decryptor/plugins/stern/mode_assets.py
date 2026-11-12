@@ -98,6 +98,32 @@ def load_art(path, max_w=1360, max_h=768):
     return np.asarray(img)
 
 
+def check_picture(src):
+    """Raise ``OSError`` / ``ValueError`` unless *src* (a path or a file object) decodes whole: every pixel, not
+    just PIL's ``verify()``, which checks a PNG's chunk checksums and never inflates its data (PAD-1192: a PNG
+    with damaged image data passed it)."""
+    with Image.open(src) as im:
+        im.load()
+
+
+def clean_still(src, out_png):
+    """PAD-1192: the picture *src* decoded whole by PIL and saved again at *out_png* as a plain PNG (its first
+    frame, RGB or RGBA) - what a looped still (``ffmpeg -loop 1 -i``) is made from. ffmpeg retries a picture it
+    cannot decode forever under ``-loop 1`` (its ``-t`` counts frames out, and none come), so a damaged picture hung
+    the build with no word; and an animated PNG has no ``-loop`` at all. Raises ``ValueError`` naming the file
+    when PIL cannot read it either."""
+    try:
+        with Image.open(src) as im:
+            im.load()
+            im = im.convert("RGBA" if ("A" in im.getbands() or "transparency" in im.info) else "RGB")
+    except Exception as e:                              # noqa: BLE001 - say which file and why
+        raise ValueError("%s is not a picture that reads whole (%s) - open it in an image editor and save it "
+                         "again, or pick another" % (os.path.basename(str(src)), e)) from None
+    os.makedirs(os.path.dirname(os.path.abspath(out_png)), exist_ok=True)
+    im.save(out_png, "PNG", compress_level=1)
+    return out_png
+
+
 # ---- the clip -----------------------------------------------------------------------------
 def _encode_args(ffmpeg, out):
     return [ffmpeg, "-v", "error", "-y"], ["-c:v", "libx264", "-profile:v", "baseline", "-level", "3.0",

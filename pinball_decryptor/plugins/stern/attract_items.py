@@ -498,9 +498,20 @@ def still_clip(image, seconds, out, w, h, ffmpeg=None):
     ff = ffmpeg or _ffmpeg()
     vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
           % (w, h, w, h))
-    cmd = [ff, "-y", "-v", "error", "-loop", "1", "-i", image, "-t", "%d" % seconds, "-r", "30", "-vf", vf,
+    from .mode_assets import clean_still
+    try:                                                # PAD-1192: a picture ffmpeg cannot decode loops forever
+        still = clean_still(image, out + ".still.png")
+    except ValueError as e:
+        raise AttractError(str(e)) from None
+    cmd = [ff, "-y", "-v", "error", "-loop", "1", "-i", still, "-t", "%d" % seconds, "-r", "30", "-vf", vf,
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-an", out]
-    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, creationflags=_NO_WINDOW)
+    finally:
+        try:
+            os.remove(still)
+        except OSError:
+            pass
     if r.returncode or not os.path.isfile(out):
         raise AttractError("%s could not be made into a clip: %s" % (os.path.basename(image),
                                                                       (r.stderr or "").strip()[-200:]))

@@ -6155,3 +6155,110 @@ def test_jaws_plunger_key_pulls_the_plunger_and_lockbar_is_action(tmp_path):
         assert why in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
         script.write_text(out, encoding="utf-8")
         assert why not in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
+
+
+# ------------------------------------------------- flipper latency ---------
+
+def _flip_bridge(pc, monkeypatch):
+    """A bridge with a pipe and the left flipper's coil (8, 5) as solenoid
+    48, its button switch id 60; no rule cached until a test sets one."""
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    b = pc.Bridge()
+
+    class Pipe:
+        def __init__(self):
+            self.held = {}
+
+        def set(self, sid, level):
+            self.held[sid] = 1 if level else 0
+    b.pipe = Pipe()
+    b.map.solenoids = {48: (8, 5)}
+    b.switch_id = lambda n: n
+    return b
+
+
+def test_set_switch_without_a_cached_rule_sets_no_coil(monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    b = _flip_bridge(pc, monkeypatch)
+    b.set_switch(60, 1)
+    assert b.pipe.held[60] == 1
+    assert b.sol_state == {} and b.changed_solenoids() is None
+
+
+def test_a_board_fired_coil_follows_its_switch_at_once(monkeypatch):
+    """A flipper's coil reaches the table on the press itself, not a poll
+    (~25-30 ms over \\\\wsl.localhost) later, and drops on the release."""
+    pc = pytest.importorskip("padcontroller")
+    b = _flip_bridge(pc, monkeypatch)
+    b._rule_coils = {60: [((8, 5), True)]}
+    b.set_switch(60, 1)
+    assert b.sol_state[48] == 1
+    assert [48, 1] in [list(c) for c in b.changed_solenoids()]
+    b.set_switch(60, 0)
+    assert b.sol_state[48] == 0
+
+
+def test_a_release_does_not_cut_a_live_fire_short(monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    b = _flip_bridge(pc, monkeypatch)
+    b._rule_coils = {60: [((8, 5), True)]}
+    b.set_switch(60, 1)
+    b._coil_off_at[(8, 5)] = pc.time.monotonic() + 60.0    # the game fired it too
+    b.set_switch(60, 0)
+    assert b.sol_state[48] == 1                             # the poll ends it
+
+
+def test_a_spike1_button_coil_turns_on_at_once_and_off_with_the_poll(monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    b = _flip_bridge(pc, monkeypatch)
+    b._rule_coils = {60: [((8, 5), False)]}
+    b.set_switch(60, 1)
+    assert b.sol_state[48] == 1
+    b.set_switch(60, 0)
+    assert b.sol_state[48] == 1                             # the board says when
+
+
+def test_log_does_not_write_in_the_callers_thread_and_loses_nothing(monkeypatch, tmp_path):
+    pc = pytest.importorskip("padcontroller")
+    path = tmp_path / "padcontroller.log"
+    monkeypatch.setattr(pc, "LOG", str(path))
+    for i in range(200):
+        pc.log("burst %d" % i)
+    import time as _t
+    deadline = _t.monotonic() + 5.0
+    lines = []
+    while _t.monotonic() < deadline:
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines()
+                 if " burst " in ln] if path.exists() else []
+        if len(lines) == 200:
+            break
+        _t.sleep(0.01)
+    assert [ln.split(" ", 1)[1] for ln in lines] == ["burst %d" % i for i in range(200)]
+
+
+def test_the_poll_caches_a_rules_switch_and_agrees_with_set_switch(monkeypatch):
+    """_poll_coils keeps {switch id: coils} from the v7 rule plane; a press
+    turns the coil on at once and the next poll, reading the same held
+    switch, leaves it on; a release turns it off and the poll agrees."""
+    pc = pytest.importorskip("padcontroller")
+    import coilmap
+    b = _flip_bridge(pc, monkeypatch)
+    data = bytearray(coilmap.RULE_READ)
+    struct.pack_into("<I", data, 0, coilmap.PADLED_MAGIC)
+    struct.pack_into("<I", data, 4, 7)
+    o = 8 * coilmap.COIL_N + 5                                   # node 8 coil 5
+    data[coilmap.RULE_PWR_OFF + o] = 0xff
+    data[coilmap.RULE_IN_OFF + o] = 0x40 | 25                    # fired by input 25
+    data = bytes(data)
+    b.sw_ids = {(8, 25): 60}
+    b._poll_coils(data, 0.0)
+    b._poll_coils(data, 0.0)
+    assert b._rule_coils == {60: [((8, 5), True)]}
+    b.set_switch(60, 1)
+    assert b.sol_state[48] == 1
+    b._poll_coils(data, 0.0)
+    assert b.sol_state[48] == 1
+    b.set_switch(60, 0)
+    assert b.sol_state[48] == 0
+    b._poll_coils(data, 0.0)
+    assert b.sol_state[48] == 0

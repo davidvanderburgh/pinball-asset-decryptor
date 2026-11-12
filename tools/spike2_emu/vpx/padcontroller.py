@@ -131,12 +131,57 @@ LOG = os.path.join(os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp",
                    "padcontroller.log")
 
 
-def log(msg):
+# The log is written by one daemon thread, never by the caller: set_switch
+# logs every flipper press inside Visual Pinball's synchronous COM call (its
+# main thread) and _sol_set logs holding the bridge lock, so an open+append
+# there put file I/O in the flipper's path. Lines are queued and written in
+# batches; whatever is still queued at exit is flushed by atexit.
+_LOGQ = queue.Queue()
+_LOG_THREAD = None
+_LOG_START = threading.Lock()
+
+
+def _log_write(lines):
     try:
         with open(LOG, "a", encoding="utf-8") as f:
-            f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+            f.write("".join(lines))
     except OSError:
         pass
+
+
+def _log_drain():
+    lines = []
+    try:
+        while True:
+            lines.append(_LOGQ.get_nowait())
+    except queue.Empty:
+        pass
+    return lines
+
+
+def _log_writer():
+    while True:
+        lines = [_LOGQ.get()] + _log_drain()
+        _log_write(lines)
+
+
+def _log_flush():
+    lines = _log_drain()
+    if lines:
+        _log_write(lines)
+
+
+atexit.register(_log_flush)
+
+
+def log(msg):
+    global _LOG_THREAD
+    _LOGQ.put("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+    if _LOG_THREAD is None:
+        with _LOG_START:
+            if _LOG_THREAD is None:
+                _LOG_THREAD = threading.Thread(target=_log_writer, daemon=True, name="padlog")
+                _LOG_THREAD.start()
 
 
 # ---------------------------------------------------------------- the map --
@@ -1474,6 +1519,10 @@ class Bridge:
         self._coil_off_at = {}             # (node, idx) -> monotonic s
         self.sw_ids = {}                   # (node, input bit) -> switch id
         self._button_coils = {}            # (node, idx) -> button input bit
+        # switch id -> [((node, idx), release_now)]: the board-fired coils
+        # each switch fires, from the last poll, so set_switch can turn the
+        # coil on (and off) at once instead of a poll later
+        self._rule_coils = {}
         self.mrg = bytes(padsw.MAX_ID)     # the guest's merged switch truth
         self.max_id = padsw.MAX_ID         # one past the highest switch id (set_game)
         self.polls = 0
@@ -2003,6 +2052,18 @@ class Bridge:
         if self.pipe.held.get(sid) != (1 if level else 0):
             log("sw %s -> id %d = %d" % (n, sid, 1 if level else 0))
         self.pipe.set(sid, level)
+        # A board-fired coil (a flipper) follows its switch NOW, not on the
+        # next poll (~25-30 ms a cycle over \\wsl.localhost): the same answer
+        # _poll_coils gives from pipe.held, so the next poll agrees with it.
+        rc = self._rule_coils.get(sid)
+        if rc:
+            now = time.monotonic()
+            with self.lock:
+                for key, release_now in rc:
+                    if level:
+                        self._coil_set(key, 1)
+                    elif release_now and self._coil_off_at.get(key, 0) <= now:
+                        self._coil_set(key, 0)
 
     def get_switch(self, n):
         sid = self.switch_id(n)
@@ -2473,6 +2534,7 @@ class Bridge:
             if self.sw_ids:
                 log("switch table arrived: %d ids" % len(self.sw_ids))
         now = time.monotonic()
+        rule_coils = {}
         with self.lock:
             self.mrg = switches
             # Some ROM tables read Lamp(n) as a mechanical position or raw
@@ -2503,9 +2565,14 @@ class Bridge:
                     bit = self._button_coils.get(key)
                     if bit is not None:
                         sid = self.sw_ids.get((node, bit))
+                        if sid:
+                            # the board's own coil state says when it lets
+                            # go, so set_switch only turns it on
+                            rule_coils.setdefault(sid, []).append((key, False))
                         if sid and (self.pipe.held.get(sid) if self.pipe else 0):
                             on = 1
                     self._coil_set(key, on)
+            self._rule_coils = rule_coils
             if self.map.game_on:
                 self._sol_set(self.map.game_on[0], 1)
             self._fakes_tick(now)
@@ -2561,6 +2628,7 @@ class Bridge:
 
     def _poll_coils(self, data, now):
         fires = struct.unpack_from("<I", data, coilmap.DRIVE_FIRES_OFF)[0]
+        rule_coils = {}
         for node in range(16):
             for idx in range(16):
                 key = (node, idx)
@@ -2596,6 +2664,7 @@ class Bridge:
                 if r and r["power"] and r["input"] is not None:
                     sid = self.sw_ids.get((node, r["input"]))
                     if sid:
+                        rule_coils.setdefault(sid, []).append((key, True))
                         made = (self.pipe.held.get(sid) if self.pipe and sid in self.pipe.held
                                 else (self.mrg[sid] if sid < len(self.mrg) else 0))
                         if made:
@@ -2603,6 +2672,7 @@ class Bridge:
                         elif self._coil_off_at.get(key, 0) <= now:
                             on = 0
                 self._coil_set(key, on)
+        self._rule_coils = rule_coils
         if self.map.game_on:
             num, coils = self.map.game_on
             armed = 0

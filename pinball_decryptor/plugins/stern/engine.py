@@ -3960,6 +3960,13 @@ def _changed_radium_text(assets_dir):
         # padding too: its words are the edit
         out[path] = [(o, r.strip(" ") if path.endswith(".radium") and _old_padding(r)
                       else r) for o, r in pairs]
+    if _source_card_is_stock(assets_dir):
+        # PAD-1186: a stock card's own lines carry runs of spaces too (the
+        # status bar's "CREDITS 00     ", Deadpool's "Credits 50 1/4    ");
+        # repairing them moved the spaces by the box's alignment and shifted
+        # the line on screen in every build.  Only a card a Write padded has
+        # anything to repair.
+        return out
     try:
         rows = text_manifest.load(assets_dir)
     except Exception:                                  # noqa: BLE001
@@ -3971,6 +3978,31 @@ def _changed_radium_text(assets_dir):
             continue
         out.setdefault(path, []).append((orig, orig.strip(" ")))
     return out
+
+
+def _source_card_is_stock(assets_dir):
+    """Is *assets_dir* known to be extracted from a card no Write built?
+    Its extract record says so (the official-release verdict), or names a
+    card that is still where it was with no build record beside it (every
+    Build since v0.214.0 leaves one, before the padding PAD-412 repairs was
+    ever written).  ``False`` when it cannot tell (no record, the card
+    gone): the repair then runs as before.  A Spike 3 card no Write before
+    PAD-1186 ever touched counts the same way."""
+    from ...core import extract_source
+    try:
+        rec = extract_source.read_extract_source(assets_dir)
+    except Exception:                                  # noqa: BLE001
+        return False
+    if not rec:
+        return False
+    stock = rec.get("stock")
+    if isinstance(stock, dict) and stock.get("status") == "modified":
+        return False
+    if isinstance(stock, dict) and stock.get("status") == "official":
+        return True
+    path = rec.get("input_path") or ""
+    return (bool(path) and os.path.isfile(path)
+            and not os.path.exists(path + BUILD_MANIFEST_SUFFIX))
 
 
 def _old_padding(text):

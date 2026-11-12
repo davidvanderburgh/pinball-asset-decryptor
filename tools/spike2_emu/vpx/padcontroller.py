@@ -2055,7 +2055,7 @@ class Bridge:
         # A board-fired coil (a flipper) follows its switch NOW, not on the
         # next poll (~25-30 ms a cycle over \\wsl.localhost): the same answer
         # _poll_coils gives from pipe.held, so the next poll agrees with it.
-        rc = self._rule_coils.get(sid)
+        rc = (getattr(self, "_rule_coils", None) or {}).get(sid)
         if rc:
             now = time.monotonic()
             with self.lock:

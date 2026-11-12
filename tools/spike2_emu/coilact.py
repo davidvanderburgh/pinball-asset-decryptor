@@ -87,8 +87,20 @@ def switch_names(name):
     if n.endswith(" MAGNET"):
         return [n + " FIRED VIRTUAL", n + " FIRED"]
     if _FOLLOWS.search(n):
-        return [n, n + " OPTO"]
+        out = [n, n + " OPTO"]
+        # PAD-1183: a title's coil and switch tables abbreviate apart -
+        # pokemon_le's coil BOTTOM POP BUMPER fires on switch BOT POP BUMPER
+        for long_, short_ in _ABBREV:
+            for a, b in ((long_, short_), (short_, long_)):
+                if n.startswith(a + " "):
+                    alt = b + n[len(a):]
+                    out += [alt, alt + " OPTO"]
+        return out
     return []
+
+
+#: word pairs a coil's name and its switch's name spell either way
+_ABBREV = (("BOTTOM", "BOT"), ("UPPER", "UP"), ("LOWER", "LWR"))
 
 
 def _title_switches():

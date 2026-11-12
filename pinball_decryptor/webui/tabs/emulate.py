@@ -3422,8 +3422,11 @@ class EmulateTab(EmulateLogMixin, TabService):
         if fields.get("savestates") == "1":
             cmd.append("--savestates")
         env = dict(os.environ)
+        # logdir: a Spike 3 run's slot directory, where its padvid.log feeds
+        # the window's CLIPS list (PAD-1183); a Spike 2 run's window finds
+        # its logs from PAD_ROOT itself
         for key, name in (("root", "PAD_ROOT"), ("tables", "PAD_TABLES"),
-                          ("root_wsl", "PAD_ROOT_WSL")):
+                          ("root_wsl", "PAD_ROOT_WSL"), ("logdir", "PAD_LOGDIR")):
             if fields.get(key):
                 env[name] = fields[key]
         # WHICH RIG (core/rigslot.py): the window titles itself with it, and a

@@ -306,37 +306,51 @@ def active_low_masks(devs5):
     """{node: 8-byte mask} of the switch inputs a node board reports as wire
     bit 0 when CLOSED.
 
-    PLAYFIELD switches (the location the TROUGH n switches carry) and the
-    FLIPPER BUTTONS are active low; the other cabinet switches (node 1's
-    START BUTTON, the coins) active high. Measured on pokemon_le: the game's
-    own Ball Trough Test sees a trough ball, and the game serves and scores
-    balls, with the playfield answered active low.
+    EVERY PHYSICAL SWITCH ON A NODE BOARD IS ACTIVE LOW - the playfield's,
+    the flipper buttons' and the cabinet board's alike (a physical switch is
+    a row with a location word; location 0 is a status flag). Any other
+    input follows its board: on a board carrying PLAYFIELD switches (the
+    location the TROUGH n switches carry) the whole board is low, as
+    measured; elsewhere (node 1's spare bits, node 4's QR status) it reads 0.
 
-    THE FLIPPER BUTTONS ARE ACTIVE LOW TOO (PAD-1090). They are cabinet
-    switches wired to playfield node 8, and an earlier rule took them active
-    high by their location - which reads as "held" at rest. The game ignores
-    a switch it never saw open, so attract hid it; in the service menu one
-    tap became a held button and the menu auto-repeated for ever (David's
-    recording; reproduced headless: a tap scrolled the Main Menu without
-    end, and with the whole board active low each tap moves exactly one
-    row, as SERVICE PLUS on the SPI chain always did)."""
+    THE PLAYFIELD: measured on pokemon_le - the game's own Ball Trough Test
+    sees a trough ball, and the game serves and scores balls, with the
+    playfield answered active low.
+
+    THE FLIPPER BUTTONS (PAD-1090). Cabinet switches wired to playfield node
+    8, once taken active high by their location - which reads as "held" at
+    rest: in the service menu one tap became a held button and the menu
+    auto-repeated for ever. With the whole board low each tap moves one row.
+
+    THE CABINET BOARD (PAD-1189). Node 1's START BUTTON, coins, TILT
+    PENDULUM and SLAM TILT were taken active high, by the same location rule,
+    unmeasured - so its resting word said every one of them was HELD. That
+    stayed hidden while the game only ever scanned node 1 on a press; once
+    the bridge handed it the board's resting state (PAD-1139's baseline
+    scan) the game saw the slam tilt and the tilt pendulum made at boot,
+    put up TILT and stopped dead ~35 s later: no frame drawn, no lamp sent,
+    every title, every boot (star_wars_2025_le, pokemon_le). Active low,
+    node 1 rests at `04 59 7f 00 00 00 00 00` on the wire - every switch
+    bit 1 (released), every bit without a switch 0 - which is the word
+    Spike 2's node 1 answers at rest (codeselect/README.md, measured across
+    godzilla, D&D, batman, avengers and stranger things)."""
     pf = {loc for name, node, idx, cls, loc in devs5
           if cls == "switch" and name.strip().upper().startswith("TROUGH ")}
-    per = {}
+    per, has_pf = {}, set()
     for name, node, idx, cls, loc in devs5:
         if cls == "switch" and node > 0 and idx < 64:
-            # the flipper buttons: active low with their board (measured)
-            low = loc in pf or "FLIPPER BUTTON" in name.upper()
-            per.setdefault(node, {})[idx] = low
+            # LOCATION 0 is no physical switch: the QR scanner board's status
+            # flags (node 4, every title), PIPBOY FIRED VIRTUAL, a motor's
+            # stop flag - a level the board computes, read high as before
+            per.setdefault(node, {})[idx] = bool(loc)
+            if loc in pf:
+                has_pf.add(node)
     masks = {}
     for node, bits in per.items():
-        # NARROW ON PURPOSE: star_wars_elg carries its START BUTTON and TILT
-        # PENDULUM on node 8 too, unmeasured - they keep the location rule
-        # (cabinet: high), and an unnamed bit the majority of its board
-        maj = sum(bits.values()) * 2 > len(bits)
+        whole = node in has_pf
         m = bytearray(8)
         for b in range(64):
-            if bits.get(b, maj):
+            if bits.get(b, whole):
                 m[b // 8] |= 1 << (b % 8)
         masks[node] = bytes(m)
     return masks

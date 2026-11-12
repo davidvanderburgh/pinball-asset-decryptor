@@ -410,6 +410,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  hand_tip=self.HAND_TIP)
         self.set(comp_on=False, comp_note="", comp_note_kind="", comp_shown=False,   # PAD-1041
                  comp_tip=self.COMP_TIP)
+        from ...plugins.stern import mode_project as _MPk
+        self.set(keeps_ic_head=_MPk.KEEPS_IC_HEAD, keeps_ic_note=_MPk.KEEPS_IC_NOTE)   # PAD-1204: their own group
         self.set(feed_on=False, feed_url="", feed_note="", feed_note_kind="", feed_shown=False,   # PAD-1204
                  feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="")
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
@@ -2966,7 +2968,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if profile is not None and not profile.insider_gate:
             no_port = note = MP.insider_gate_words(profile.label)   # item 166: no gate, no modes
         elif profile is not None:
-            insider_note = MP.INSIDER_NOTE
+            insider_note = MP.INSIDER_TAB_NOTE              # PAD-1204: says what keeps Insider Connected
         self._no_port = no_port
         self._profile = profile
         self._card_bound = bool(card is not None and card.game_dir and profile is not None)

@@ -309,3 +309,28 @@ def test_the_modes_tab_tick_and_its_address(tmp_path, monkeypatch):
     assert state["feed_shown"] is False                              # a game whose end it cannot see: hidden
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
     assert 'call("modes.set_score_feed", v)' in js and 'call("modes.set_score_feed", true, v)' in js
+
+
+def test_what_keeps_insider_connected_has_its_own_section():
+    """David: "users see the banner at the top and assume they lose IC access" - the options that change no score sit
+    in a section of their own that says Insider Connected stays, and the banner says only modes and co-op hold the
+    reports back."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    assert MP.KEEPS_IC_HEAD == "Keeps Insider Connected"
+    assert MP.KEEPS_IC_HEAD in MP.INSIDER_TAB_NOTE and "modes or co-op play" in MP.INSIDER_TAB_NOTE
+    assert "keep Insider Connected" in MP.KEEPS_IC_NOTE
+    for text in (MP.INSIDER_TAB_NOTE, MP.KEEPS_IC_NOTE):
+        assert "—" not in text
+    tab = (ROOT / "pinball_decryptor" / "webui" / "tabs" / "modes.py").read_text(encoding="utf-8")
+    assert "insider_note = MP.INSIDER_TAB_NOTE" in tab
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
+    def fn(name):
+        i = js.index("function %s(" % name)
+        return js[i:js.index("\nfunction ", i + 1)]
+    card = fn("KeepsIcCard")
+    for call in ("modes.set_handicap", "modes.set_prolonged_comp", "modes.set_score_feed", "modes.set_idle_pause"):
+        assert call in card, call
+    assert "modes.set_coop" not in card                                  # co-op takes the reports off: not here
+    lst = fn("ModeList")
+    assert "modes.set_coop" in lst and "modes.set_handicap" not in lst and "modes.set_score_feed" not in lst
+    assert "<${KeepsIcCard} s=${s}" in js

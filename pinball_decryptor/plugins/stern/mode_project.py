@@ -2100,6 +2100,19 @@ INSIDER_NOTE = ("Insider Connected: players still log in on a card with modes, b
                 "game awards no Insider achievements. A mode's points are not the game's stock "
                 "scoring, so they stay on the machine.")
 
+#: PAD-1204: the Modes tab's banner. David: "users see the banner at the top and assume they lose IC access which is
+#: important to a lot of users" - so it says which things on the tab hold the reports back, and that the ones under
+#: KEEPS_IC_HEAD do not
+INSIDER_TAB_NOTE = ("Insider Connected with modes or co-op play on the card: players still log in, but the machine "
+                    "sends no game, score, high-score or achievement report to Insider Connected, and the game "
+                    "awards no Insider achievements, because a mode's points are not the game's stock scoring. "
+                    "The options under Keeps Insider Connected change no score: a card with only those stays fully "
+                    "on Insider Connected.")
+#: PAD-1204: the Modes tab's group of the options that change no score, and what it says under its head
+KEEPS_IC_HEAD = "Keeps Insider Connected"
+KEEPS_IC_NOTE = ("These change no score. On a card with none of your modes and no co-op play, players keep Insider "
+                 "Connected as before: scores, high scores and achievements.")
+
 
 def insider_gate_words(label):
     """Why modes cannot go on *label*'s card: its port lacks the score gate."""

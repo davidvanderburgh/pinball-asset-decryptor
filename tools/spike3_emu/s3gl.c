@@ -194,13 +194,32 @@ static void s3say(const char *what, const char *name)
 #define FIRST(name) do { static int seen_; if (!seen_) { seen_ = 1; \
                          s3say("first call (not bridged yet)", name); } } while (0)
 
+/* ---- the extensions this bridge really carries (PAD-1182) ---------------
+ * Godot 4's GLES3 renderer reads its extension list with glGetStringi and
+ * only then decides what it may use. With an empty list it set
+ * external_texture_supported false, never looked up
+ * glEGLImageTargetTexture2DOES, and every video it plays through an
+ * ExternalTexture (Pokemon's DISCOVER background, the capture/select/evolve
+ * backgrounds) stayed on its black placeholder: s3vid decoded the frames,
+ * the game made an EGL image of each, and nothing was ever attached. Stern's
+ * own SpiVideoPlayer (the map background) looks the function up without
+ * asking, which is why that clip played. Only what is bridged is listed:
+ * EGL images (s3egl.c/glEGLImageTargetTexture2DOES below) and the external
+ * sampler, which the shader rewrite above turns into a 2D one. */
+static const char *const s3_ext[] = {
+    "GL_OES_EGL_image",
+    "GL_OES_EGL_image_external",
+    "GL_OES_EGL_image_external_essl3",
+};
+#define S3_NEXT ((int)(sizeof s3_ext / sizeof s3_ext[0]))
+
 /* ---- limits: Mesa v3d on the Pi 4 (V3D 4.2, GLES 3.1) ------------------ */
 static int s3_limit(unsigned p, int *v)
 {
     switch (p) {
     case 0x821B: v[0] = 3; return 1;                 /* MAJOR_VERSION */
     case 0x821C: v[0] = 1; return 1;                 /* MINOR_VERSION */
-    case 0x821D: v[0] = 0; return 1;                 /* NUM_EXTENSIONS */
+    case 0x821D: v[0] = S3_NEXT; return 1;           /* NUM_EXTENSIONS */
     case 0x0D33: v[0] = 4096; return 1;              /* MAX_TEXTURE_SIZE */
     case 0x851C: v[0] = 4096; return 1;              /* MAX_CUBE_MAP_TEXTURE_SIZE */
     case 0x8073: v[0] = 2048; return 1;              /* MAX_3D_TEXTURE_SIZE */
@@ -278,7 +297,11 @@ int glGetFloatv(unsigned int p, float *v)
 }
 
 const unsigned char *glGetStringi(unsigned int name, unsigned int i)
-{ (void)name; (void)i; FIRST("glGetStringi"); return (const unsigned char *)""; }
+{
+    if (name == 0x1F03 && i < (unsigned)S3_NEXT)      /* GL_EXTENSIONS */
+        return (const unsigned char *)s3_ext[i];
+    return 0;                                         /* GL_INVALID_VALUE */
+}
 
 /* ---- programs: never claim a program binary ---------------------------- */
 #define MAXBINPROG 4096

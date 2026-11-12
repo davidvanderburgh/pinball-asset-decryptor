@@ -1155,6 +1155,7 @@ class WebMultibootPanel(_Base):
                 self._rows[d._index] if d._index is not None
                 and 0 <= d._index < len(self._rows) else mt.ImageRow("")) != "",
             "scores_label": mt.SCORES_LABEL,
+            "settings_label": mt.SETTINGS_LABEL,
             "scores_note": mt.SCORES_NOTE,
             "scores_modes": mt.modes_line(
                 self._rows[d._index] if d._index is not None

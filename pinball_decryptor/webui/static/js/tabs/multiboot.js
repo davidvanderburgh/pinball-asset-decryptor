@@ -477,8 +477,9 @@ function EditDialog({ s, w }) {
           </div>
           <span class="small muted">${ed.roll_note}</span>
         <//>` : null}
-        ${ed.scores ? html`<${Box} legend="High scores">
+        ${ed.scores ? html`<${Box} legend="Settings and high scores">
           ${ed.scores_modes ? html`<span class="small">${ed.scores_modes}</span>` : null}
+          <${Check} ns=${NS} k="ed_own_settings" checked=${s.ed_own_settings} label=${ed.settings_label} />
           <${Check} ns=${NS} k="ed_own_scores" checked=${s.ed_own_scores} label=${ed.scores_label} />
           <span class="small muted">${ed.scores_note}</span>
         <//>` : null}

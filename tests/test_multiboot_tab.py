@@ -3454,6 +3454,77 @@ def test_own_scores_come_back_off_the_card_and_are_a_menu_change(tmp_path):
     assert menu == ["high scores"] and not rebuild
 
 
+# ---- PAD-1194: high scores apart from settings ----------------------------------------------
+def test_hiscores_ride_on_build_inject_and_update(tmp_path):
+    """One high-score group per GAME, only once some image's scores do not
+    follow its settings - then every game names one, so the selector can hand
+    each table on - and always spelled out on a Stern card, so a split taken
+    off is taken off the card too."""
+    mb = multiboot_core
+    form = _form(tmp_path, 3)
+    card = str(tmp_path / "card.raw")
+    # nothing split: all '' (the card PAD-226 wrote)
+    form.images[1].own_scores = "heisei"
+    assert build_args(form)[build_args(form).index("--hiscores") + 1] == ";;"
+    # pb_lawww's card: image 0 everything of its own, 1 and 2 own settings + the shared table
+    form.images[0].own_scores = "original"
+    form.images[1].hiscores = mb.SHARED_SCORES
+    form.images[2].own_scores = "orchestral"
+    form.images[2].hiscores = mb.SHARED_SCORES
+    for argv in (build_args(form), inject_args(form, card), mb.update_args(form, card)):
+        assert argv[argv.index("--hiscores") + 1] == "original;shared;shared"
+    # an image that shares everything plays into the shared table too
+    form.images[2].own_scores = ""
+    form.images[2].hiscores = ""
+    assert build_args(form)[build_args(form).index("--hiscores") + 1] == "original;shared;shared"
+    # shared settings, a table of its own
+    form.images[2].hiscores = "mine"
+    assert build_args(form)[build_args(form).index("--hiscores") + 1] == "original;shared;mine"
+    # a name the card would refuse never reaches the tool
+    form.images[2].hiscores = "../x"
+    assert build_args(form)[build_args(form).index("--hiscores") + 1] == "original;shared;"
+
+
+def test_the_two_ticks_make_the_names():
+    mb = multiboot_core
+    rows = [mb.ImageRow("a", title="Original"), mb.ImageRow("b", title="Heisei")]
+    mb.set_row_scores(rows[0], True, True, [rows[1]])
+    assert (rows[0].own_scores, rows[0].hiscores) == ("original", "")
+    mb.set_row_scores(rows[1], True, False, [rows[0]])
+    assert (rows[1].own_scores, rows[1].hiscores) == ("heisei", "shared")
+    assert mb.row_own_settings(rows[1]) and not mb.row_own_hiscores(rows[1])
+    # a store name is kept once given; the scores tick alone flips the group
+    rows[1].title = "Heisei V2"
+    mb.set_row_scores(rows[1], True, True, [rows[0]])
+    assert (rows[1].own_scores, rows[1].hiscores) == ("heisei", "")
+    # shared settings, its own table: a name of its own, never one another row holds
+    rows[1].own_scores = ""
+    rows[1].title = "Original"
+    mb.set_row_scores(rows[1], False, True, [rows[0]])
+    assert rows[1].own_scores == "" and rows[1].hiscores == "original-2"
+    assert mb.scores_split(rows[1]) and not mb.scores_split(rows[0])
+    mb.set_row_scores(rows[1], False, False, [rows[0]])
+    assert (rows[1].own_scores, rows[1].hiscores) == ("", "")
+
+
+def test_hiscores_come_back_off_the_card_and_are_a_menu_change(tmp_path):
+    mb = multiboot_core
+    rows, _warn = mb.rows_from_inspect({"images": [
+        {"device": "/dev/mmcblk0p3", "title": "A", "own_scores": "original", "hiscores": "original"},
+        {"device": "/dev/mmcblk0p7:img1", "title": "B", "own_scores": "heisei", "hiscores": "shared"},
+        {"device": "/dev/mmcblk0p7:img2", "title": "C", "hiscores": "shared"},
+        {"device": "/dev/mmcblk0p7:img3", "title": "D", "hiscores": "mine"},
+    ]})
+    assert [r.hiscores for r in rows] == ["", "shared", "", "mine"]
+    assert [mb.row_own_hiscores(r) for r in rows] == [True, False, False, True]
+    before = _form(tmp_path, 2)
+    after = _form(tmp_path, 2)
+    before.images[1].own_scores = after.images[1].own_scores = "b"
+    after.images[1].hiscores = mb.SHARED_SCORES
+    menu, rebuild = mb.diff_forms(before, after)
+    assert menu == ["high scores"] and not rebuild
+
+
 def test_a_store_name_is_the_title_made_unique():
     f = multiboot_core.scores_name_for
     assert f("TMNT 1987!") == "tmnt-1987"

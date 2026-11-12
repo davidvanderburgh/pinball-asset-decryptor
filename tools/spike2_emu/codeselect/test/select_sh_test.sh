@@ -123,6 +123,18 @@ case " $* " in
         [ "$rc" = 0 ] && echo copy > "$to"
         echo "[select] color: fake apply, exit $rc"
         exit "$rc" ;;
+    # PAD-1194: the high-score hand-over - records its arguments, a save leaves a table at --to
+    *" --scores-save "*)
+        echo "$*" >> "$SCOREARGS"
+        to=""
+        while [ $# -gt 0 ]; do [ "$1" = "--to" ] && to=$2; shift; done
+        echo table > "$to"
+        echo "[select] scores: fake save"
+        exit "${FAKE_SAVE_RC:-0}" ;;
+    *" --scores-load "*)
+        echo "$*" >> "$SCOREARGS"
+        echo "[select] scores: fake load"
+        exit "${FAKE_LOAD_RC:-0}" ;;
 esac
 echo "$*" > "$SELARGS"
 out=""
@@ -272,6 +284,61 @@ export CODESELECT_CONF="$W/conf_scores"
 rm -f "$G/game"; : > "$G/game"
 hook scores_notitle 0 0 ""
 grep -q "cannot tell its title" "$W/out" || { echo "select_sh_test: FAIL (scores_notitle) message"; cat "$W/out"; exit 1; }
+rm -f "$G/game"; ln -s godzilla_pro/game "$G/game"
+# ---- PAD-1194: high scores apart from settings (hiscores=<N>|<group>) ---------------------------
+# the table of the store that booted LAST is saved to its group before the store is bound; the
+# group's table is loaded into the bound store after; last.<title> says which store that was
+HS="$W/nvhs"; SCOREARGS="$W/scoreargs"
+export CODESELECT_NV_HS="$HS" SCOREARGS
+{ cat "$W/conf"; echo "scores=0|heisei"; echo "hiscores = 0 | shared "; } > "$W/conf_hs_own"
+{ cat "$W/conf"; echo "hiscores=0|shared"; } > "$W/conf_hs_base"
+[ "$(sh select.sh --hiscores 0 "$W/conf_hs_own")" = shared ] || { echo "select_sh_test: FAIL --hiscores 0"; exit 1; }
+[ -z "$(sh select.sh --hiscores 1 "$W/conf_hs_own")" ] || { echo "select_sh_test: FAIL --hiscores 1 has none"; exit 1; }
+[ -z "$(sh select.sh --hiscores 0 "$W/conf_scores")" ] || { echo "select_sh_test: FAIL --hiscores read a scores= line"; exit 1; }
+# 1. its own settings, the shared table, nothing booted before: no save, a load into its store
+rm -rf "$HS"; : > "$SCOREARGS"
+export CODESELECT_CONF="$W/conf_hs_own"
+hook hs_first 0 0 "" "mount --bind $NVO/heisei/godzilla_pro $NVD/godzilla_pro"
+[ "$(cat "$SCOREARGS")" = "--scores-load --from $HS/shared/godzilla_pro --store $NVD/godzilla_pro" ] \
+    || { echo "select_sh_test: FAIL (hs_first) calls"; cat "$SCOREARGS"; cat "$W/out"; exit 1; }
+[ "$(cat "$HS/last.godzilla_pro")" = "shared|$NVO/heisei/godzilla_pro" ] \
+    || { echo "select_sh_test: FAIL (hs_first) last"; cat "$HS/last.godzilla_pro"; exit 1; }
+grep -q "scores: fake load (group shared)" "$W/out" || { echo "select_sh_test: FAIL (hs_first) message"; cat "$W/out"; exit 1; }
+# 2. the shared settings, the same table: the last store's table is saved first, then loaded here
+: > "$SCOREARGS"
+export CODESELECT_CONF="$W/conf_hs_base"
+hook hs_next 0 0 ""
+[ "$(cat "$SCOREARGS")" = "--scores-save --store $NVO/heisei/godzilla_pro --to $HS/shared/godzilla_pro
+--scores-load --from $HS/shared/godzilla_pro --store $NVD/godzilla_pro" ] \
+    || { echo "select_sh_test: FAIL (hs_next) calls"; cat "$SCOREARGS"; cat "$W/out"; exit 1; }
+[ "$(cat "$HS/last.godzilla_pro")" = "shared|$NVD/godzilla_pro" ] || { echo "select_sh_test: FAIL (hs_next) last"; exit 1; }
+[ ! -e "$HS/last.godzilla_pro.part" ] || { echo "select_sh_test: FAIL (hs_next) a .part was left"; exit 1; }
+# 3. a load the selector refuses (another game version): said, and the boot goes on
+: > "$SCOREARGS"
+FAKE_LOAD_RC=2 hook hs_refused 0 0 ""
+grep -q "the shared high scores could not be loaded (exit 2)" "$W/out" || { echo "select_sh_test: FAIL (hs_refused) message"; cat "$W/out"; exit 1; }
+# 4. a card that splits nothing for the image: the last table is still saved, then forgotten
+: > "$SCOREARGS"
+export CODESELECT_CONF="$W/conf"
+hook hs_none 0 0 ""
+[ "$(cat "$SCOREARGS")" = "--scores-save --store $NVD/godzilla_pro --to $HS/shared/godzilla_pro" ] \
+    || { echo "select_sh_test: FAIL (hs_none) calls"; cat "$SCOREARGS"; exit 1; }
+[ ! -e "$HS/last.godzilla_pro" ] || { echo "select_sh_test: FAIL (hs_none) last was kept"; exit 1; }
+# 5. a last file that names a store outside the title's: nothing saved from it
+echo "shared|/etc" > "$HS/last.godzilla_pro"; : > "$SCOREARGS"
+export CODESELECT_CONF="$W/conf_hs_base"
+hook hs_badlast 0 0 ""
+grep -q "names no store of godzilla_pro ('/etc'): nothing saved" "$W/out" || { echo "select_sh_test: FAIL (hs_badlast) message"; cat "$W/out"; exit 1; }
+grep -q -- "--scores-save" "$SCOREARGS" && { echo "select_sh_test: FAIL (hs_badlast) saved from /etc"; exit 1; }
+# 6. a bad group name: no load, the table it has
+{ cat "$W/conf"; echo "hiscores=0|../x"; } > "$W/conf_hs_bad"; : > "$SCOREARGS"
+export CODESELECT_CONF="$W/conf_hs_bad"
+hook hs_badgroup 0 0 ""
+grep -q "bad hiscores group '../x'" "$W/out" || { echo "select_sh_test: FAIL (hs_badgroup) message"; cat "$W/out"; exit 1; }
+grep -q -- "--scores-load" "$SCOREARGS" && { echo "select_sh_test: FAIL (hs_badgroup) loaded"; exit 1; }
+unset CODESELECT_NV_HS
+rm -rf "$HS"
+rm -f "$G/game"; : > "$G/game"
 export CODESELECT_CONF="$W/conf"
 unset CODESELECT_NV CODESELECT_NV_OWN
 rm -rf "$G/godzilla_pro" "$NVD" "$NVO"

@@ -1902,7 +1902,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
                        groups=None, default_card=None, heading=None, text_size=None,
                        counter=None, countdown_word=None, footer=None, scores=None,
-                       colours=None, settings=None, edition=None):
+                       colours=None, settings=None, edition=None, hiscores=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -2043,6 +2043,13 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
             raise Refused("scores: image %d is not on the card (%d images)" % (int(i), len(devices)))
         if name:
             out.append("scores=%d|%s" % (int(i), check_scores_name(name)))
+    # WHOSE HIGH-SCORE TABLE EACH IMAGE PLAYS INTO (PAD-1194): {index: group}, apart from where its
+    # settings are; none at all on a card where every image's scores go with its settings
+    for i, name in sorted((hiscores or {}).items()):
+        if not 0 <= int(i) < len(devices):
+            raise Refused("hiscores: image %d is not on the card (%d images)" % (int(i), len(devices)))
+        if name:
+            out.append("hiscores=%d|%s" % (int(i), check_scores_name(name, "hiscores")))
     # PAD-307: what each adjustable image's game was built with, in index order; none at all on a
     # card with no such image (byte for byte what it was)
     for i, col in sorted((colours or {}).items()):
@@ -2059,7 +2066,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         if any(name for name in (scores or {}).values()):
             raise Refused("edition: every edition shares the game's settings store, or the "
                           "EDITION an operator sets under one is not the one the next power-up "
-                          "reads; take the own high scores off")
+                          "reads; take the images' own settings off (a high-score table of its own is fine)")
         out.append("edition=%s|%s|%d" % (edition["store"], edition["key"], edition["values"]))
     if font:
         out.append("font=%s" % font)
@@ -2125,7 +2132,7 @@ def parse_images_conf(text):
             "timeout": 15, "heading": None, "text_size": None,
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
-            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {},
+            "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}, "hiscores": {},
             "colours": {}, "settings": None, "edition": None}
     for raw in text.splitlines():
         line = raw.strip()
@@ -2202,6 +2209,13 @@ def parse_images_conf(text):
             idx, _sep, name = val.partition("|")
             try:
                 conf["scores"][int(idx.strip())] = check_scores_name(name)
+            except (ValueError, Refused):
+                pass
+        elif key == "hiscores":
+            # PAD-1194: dropped (its scores go with its settings) when select.sh would refuse it too
+            idx, _sep, name = val.partition("|")
+            try:
+                conf["hiscores"][int(idx.strip())] = check_scores_name(name, "hiscores")
             except (ValueError, Refused):
                 pass
         elif key == "color_profile":
@@ -3658,6 +3672,12 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
         scores = {i: check_scores_name(x, "--own-scores") for i, x in enumerate(own.split(";")) if x.strip()}
     else:
         scores = dict(ex.get("scores") or {}) if same_n else {}
+    # PAD-1194: --hiscores likewise - one high-score group per image, apart from its store
+    hs = getattr(args, "hiscores", None)
+    if hs is not None:
+        hiscores = {i: check_scores_name(x, "--hiscores") for i, x in enumerate(hs.split(";")) if x.strip()}
+    else:
+        hiscores = dict(ex.get("hiscores") or {}) if same_n else {}
     default = args.default if getattr(args, "default", None) is not None else (ex["default"] if ex["default"] is not None else 0)
     timeout = args.timeout if getattr(args, "timeout", None) is not None else (ex["timeout"] if ex["timeout"] is not None else 15)
     font = SELECT_DIR + "/font.ttf"
@@ -3779,7 +3799,7 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
                               groups=groups, default_card=default_card, heading=heading,
                               text_size=text_size, counter=counter,
                               countdown_word=countdown_word, footer=footer, scores=scores,
-                              colours=colours, settings=settings, edition=edition)
+                              colours=colours, settings=settings, edition=edition, hiscores=hiscores)
 
 
 # ============================================================================= the JSON sidecars
@@ -3824,6 +3844,8 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
             ("confirm", confirm or None),
             # PAD-226: the store name when this image keeps high scores of its own
             ("own_scores", (conf.get("scores") or {}).get(i)),
+            # PAD-1194: its high-score group when that is not simply its store's
+            ("hiscores", (conf.get("hiscores") or {}).get(i)),
             ("title_dir", v.get("title") or old.get("title_dir")),
             ("version", v.get("version") or old.get("version")),
             ("node_fw_version", v.get("node_fw_version") or old.get("node_fw_version")),
@@ -5951,7 +5973,7 @@ def render_images_conf_text(conf):
         heading=conf.get("heading"), text_size=conf.get("text_size"),
         counter=conf.get("counter"), countdown_word=conf.get("countdown_word"),
         footer=conf.get("footer"), scores=conf.get("scores"),
-        colours=conf.get("colours"), settings=conf.get("settings"))
+        colours=conf.get("colours"), settings=conf.get("settings"), hiscores=conf.get("hiscores"))
 
 
 # ============================================================================= reading a card back
@@ -7808,6 +7830,7 @@ def inspect_card(card, media_out=None):
             # PAD-226: the store name when this image keeps its own high scores, and the custom
             # modes it runs (None = none)
             ("own_scores", (conf.get("scores") or {}).get(i)),
+            ("hiscores", (conf.get("hiscores") or {}).get(i)),
             ("modes", card_mode_summary(ref, i)),
             ("title_dir", title_dir), ("bypass", state),
             # what game code this image actually is, read off the card (item 90's version gate);
@@ -9500,6 +9523,13 @@ def _add_conf_flags(s):
                         "settings and audits) of its own on the machine, '' leaves it sharing the title's "
                         "store (images.conf scores=; PAD-226). Images given the same name share that store. "
                         "An existing card's are kept when absent; --own-scores '' makes every image share")
+    s.add_argument("--hiscores", metavar="NAMES",
+                   help="';'-separated, one per image: the high-score table it plays into, apart from "
+                        "where its settings are (images.conf hiscores=; PAD-1194). Images of one game given "
+                        "the same name share one table even when each keeps its own settings; the selector "
+                        "hands the table from the image that played last to the one that boots. '' = its "
+                        "scores stay with its settings. Kept from an existing card when absent; "
+                        "--hiscores '' clears them all")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
     s.add_argument("--heading", metavar="TEXT",
                    help="images.conf heading=TEXT - the line across the top of the menu (the selector's "

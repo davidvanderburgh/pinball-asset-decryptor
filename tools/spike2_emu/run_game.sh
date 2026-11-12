@@ -308,14 +308,17 @@ if [ -n "${PAD_CARD:-}" ]; then
         # ★ PAD-226: THE CARD'S OWN INDEX FOR EACH DEVICE, and the store name its
         # scores= line gives it. The menu above counts the trees it found; the
         # card's per-image modes (modes/img<N>) and scores= lines count the
-        # card's images.conf lines. `<token><TAB><card index><TAB><scores name>`.
+        # card's images.conf lines. `<token><TAB><card index><TAB><scores name>
+        # <TAB><hiscores group>` (PAD-1194: the high-score table, apart from the store).
         printf '%s\n' "$SEL_CARDCONF" | awk -F'|' '
             /^[ \t]*image[ \t]*=/ { d = $1; sub(/^[ \t]*image[ \t]*=[ \t]*/, "", d)
                                     gsub(/[ \t]+$/, "", d); sub(/^\/dev\/mmcblk0/, "", d)
                                     dev[n++] = d }
             /^[ \t]*scores[ \t]*=/ { i = $1; sub(/^[ \t]*scores[ \t]*=[ \t]*/, "", i); gsub(/[ \t]/, "", i)
                                      nm = $2; gsub(/^[ \t]+|[ \t]+$/, "", nm); sc[i] = nm }
-            END { for (k = 0; k < n; k++) printf "%s\t%d\t%s\n", dev[k], k, sc[k] }' \
+            /^[ \t]*hiscores[ \t]*=/ { i = $1; sub(/^[ \t]*hiscores[ \t]*=[ \t]*/, "", i); gsub(/[ \t]/, "", i)
+                                       nm = $2; gsub(/^[ \t]+|[ \t]+$/, "", nm); hs[i] = nm }
+            END { for (k = 0; k < n; k++) printf "%s\t%d\t%s\t%s\n", dev[k], k, sc[k], hs[k] }' \
             > "$R/dump/codeselect.cardidx"
         echo "[select] menu: $SEL_N images; default $SEL_DEFAULT; auto-boot after $SEL_TIMEOUT s"
         # THE MEDIA (item 90 v2): the card's /usr/local/codeselect/media,
@@ -900,10 +903,27 @@ if [ -n "$SEL_DIRS" ]; then
     fi
     # ★ PAD-226: WHAT BELONGS TO THE IMAGE THAT BOOTS, as the card's select.sh
     # binds it on the machine, keyed by the CARD's index for the chosen device.
-    SEL_CARDIDX=""; SEL_SCORES=""
+    SEL_CARDIDX=""; SEL_SCORES=""; SEL_HISCORES=""
     if [ "$SEL_RC" = 0 ] && [ -n "$SEL_DIR" ] && [ -f "$R/dump/codeselect.cardidx" ]; then
-        IFS=$'\t' read -r _tok SEL_CARDIDX SEL_SCORES \
+        IFS=$'\t' read -r _tok SEL_CARDIDX SEL_SCORES SEL_HISCORES \
             < <(awk -F'\t' -v t="$SEL_IDX" '$1 == t' "$R/dump/codeselect.cardidx" | head -1)
+    fi
+    # ★ PAD-1194: HIGH SCORES APART FROM SETTINGS, as the card's select.sh hands them over.
+    # BEFORE the store is bound: the table of the store that booted this title last goes to
+    # that boot's group (data/nv.hs/<group>/<title>); after it, the group's table goes into
+    # the bound store as a new LKRAM generation (the same codeselect, chroot'd, as on the
+    # machine). data/nv.hs/last.<title> = '<group>|<store as the guest spells it>'.
+    _hs_title=$(basename "${SEL_DIR:-$GAME}"); _hs_own=""
+    _hs_sel() { chroot "$R" /usr/local/codeselect/codeselect "$@" </dev/null 2>/dev/null | head -1 | sed 's/^\[select\] //'; }
+    if [ -n "$SEL_CARDIDX" ] && [ -f "$R/data/nv.hs/last.$_hs_title" ]; then
+        IFS='|' read -r _hg _hp < "$R/data/nv.hs/last.$_hs_title"
+        case "$_hg" in ""|.*|*/*|*[!A-Za-z0-9._-]*) _hp="" ;; esac
+        case "$_hp" in "/data/nv/$_hs_title"|/data/nv.own/*/"$_hs_title") ;; *) _hp="" ;; esac
+        case "$_hp" in */../*) _hp="" ;; esac
+        if [ -n "$_hp" ] && [ -d "$R$_hp" ]; then
+            mkdir -p "$R/data/nv.hs/$_hg"
+            echo "[select] image $SEL_CARDIDX: $(_hs_sel --scores-save --store "$_hp" --to "/data/nv.hs/$_hg/$_hs_title") (group $_hg)"
+        fi
     fi
     # ITS OWN CUSTOM MODES: image N's set (or none) instead of the primary's -
     # only when the modes were the card's to decide (nothing the launch brought)
@@ -940,11 +960,29 @@ if [ -n "$SEL_DIRS" ]; then
                 [ -n "$_o" ] && [ -z "$(ls -A "$_store" 2>/dev/null)" ] && chown "$_o" "$_store" 2>/dev/null
             fi
             if [ -d "$_store" ] && mount --bind "$_store" "$R/data/nv/$_title"; then
+                _hs_own="/data/nv.own/$SEL_SCORES/$_title"
                 echo "[select] image $SEL_CARDIDX keeps its own high scores: data/nv.own/$SEL_SCORES/$_title bound over data/nv/$_title"
             else
                 echo "[select] image $SEL_CARDIDX: its own machine store could not be bound; it shares the title's" >&2
             fi ;;
     esac
+    # ★ PAD-1194 (above): the group's table into the store that boots, and this boot remembered
+    if [ -n "$SEL_CARDIDX" ]; then
+        case "$SEL_HISCORES" in
+            "") rm -f "$R/data/nv.hs/last.$_hs_title" ;;
+            .*|*/*|*[!A-Za-z0-9._-]*)
+                echo "[select] image $SEL_CARDIDX: bad hiscores group '$SEL_HISCORES': it keeps the table it has" >&2 ;;
+            *)
+                mkdir -p "$R/data/nv.hs"
+                echo "[select] image $SEL_CARDIDX: $(_hs_sel --scores-load --from "/data/nv.hs/$SEL_HISCORES/$_hs_title" --store "/data/nv/$_hs_title") (group $SEL_HISCORES)"
+                echo "$SEL_HISCORES|${_hs_own:-/data/nv/$_hs_title}" > "$R/data/nv.hs/last.$_hs_title"
+                # ROOT IS ELEVATION, NOT OWNERSHIP (PAD-182), as for the stores above
+                if [ "$(id -u)" = 0 ]; then
+                    _o=$(stat -c %u:%g "$R/data" 2>/dev/null)
+                    [ -n "$_o" ] && chown -R "$_o" "$R/data/nv.hs" 2>/dev/null
+                fi ;;
+        esac
+    fi
     # ★ PAD-307: THE COLOR CORRECTION SET ON THIS MACHINE, as the card's select.sh applies it on
     # the machine. The menu's Settings > Color correction keeps the operator's numbers per image
     # in /data/codeselect.color ($R/data persists across runs here); when the image that boots

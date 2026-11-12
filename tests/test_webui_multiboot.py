@@ -498,9 +498,10 @@ def test_edit_dialog_writes_through_and_cancel_restores(tmp_path):
 
 
 def test_edit_dialog_gives_an_image_its_own_high_scores(tmp_path):
-    """PAD-226: the tick names a store after the title the first time, keeps
-    that name when the title changes later, shows in the table, and Cancel
-    and an untick both put the image back on the shared table."""
+    """PAD-226: the ticks name a store after the title the first time, keep
+    that name when the title changes later, show in the table, and Cancel
+    and an untick both put the image back on the shared table.  PAD-1194:
+    settings and high scores are two ticks; both ticked is the old one."""
     a = _raw(tmp_path, "a_pro-1_59_0.Release.8G.sdcard.raw")
     b = _raw(tmp_path, "b_pro-1_59_0.Other.8G.sdcard.raw")
     with web_app(tmp_path, mfr="stern") as w:
@@ -511,8 +512,11 @@ def test_edit_dialog_gives_an_image_its_own_high_scores(tmp_path):
         w.call("multiboot.edit", 1)
         s = _st(w)
         assert s["ed"]["scores"] is True and s["ed_own_scores"] is False
+        assert s["ed_own_settings"] is False
         assert s["ed"]["scores_label"] == "Keep its own high scores on the machine"
+        assert s["ed"]["settings_label"] == "Keep its own settings and audits on the machine"
         w.call("ui.set", "multiboot", "ed_title", "HEISEI")
+        w.call("ui.set", "multiboot", "ed_own_settings", True)
         w.call("ui.set", "multiboot", "ed_own_scores", True)
         s = _st(w)
         assert s["rows"][1]["scores"] == "own"
@@ -525,15 +529,76 @@ def test_edit_dialog_gives_an_image_its_own_high_scores(tmp_path):
         s = _st(w)
         assert s["rows"][1]["scores"] == "shared" and _panel(w)._rows[1].own_scores == ""
         w.call("multiboot.edit", 1)
+        w.call("ui.set", "multiboot", "ed_own_settings", True)
         w.call("ui.set", "multiboot", "ed_own_scores", True)
         w.call("multiboot.edit_ok")
         assert _panel(w)._rows[1].own_scores != ""
         w.call("multiboot.edit", 1)
-        assert _st(w)["ed_own_scores"] is True
+        assert _st(w)["ed_own_scores"] is True and _st(w)["ed_own_settings"] is True
         w.call("ui.set", "multiboot", "ed_own_scores", False)
+        w.call("ui.set", "multiboot", "ed_own_settings", False)
         w.call("multiboot.edit_ok")
         s = _st(w)
         assert s["rows"][1]["scores"] == "shared" and _panel(w)._rows[1].own_scores == ""
+
+
+def test_own_settings_with_a_shared_high_score_table(tmp_path):
+    """PAD-1194 (pb_lawww, Pinside): an Original with everything of its own and
+    two Heisei images with their own settings but one high-score table.  The
+    ticks give each Heisei image a store and put its scores in the shared
+    group; the table says so; the build hands the selector one group per game;
+    a modded image whose scores still mix is flagged."""
+    imgs = [_raw(tmp_path, "godzilla_le-1_16_0.%s.8G.sdcard.raw" % n)
+            for n in ("Release", "HeiseiOS", "HeiseiOrch")]
+    with web_app(tmp_path, mfr="stern") as w:
+        for a in imgs:
+            _add(w, a)
+        for ri, (title, settings, scores) in enumerate((
+                ("Original", True, True),
+                ("Heisei - Original Sound", True, False),
+                ("Heisei - Orchestral Sound", True, False))):
+            w.call("multiboot.edit", ri)
+            w.call("ui.set", "multiboot", "ed_title", title)
+            w.call("ui.set", "multiboot", "ed_own_settings", settings)
+            w.call("ui.set", "multiboot", "ed_own_scores", scores)
+            w.call("multiboot.edit_ok")
+        p = _panel(w)
+        s = _st(w)
+        assert [r["scores"] for r in s["rows"]] == ["own", "own settings", "own settings"]
+        assert "plays into the high-score table it shares" in s["rows"][1]["scores_tip"]
+        assert [r.own_scores for r in p._rows] == [
+            "original", "heisei-original-sound", "heisei-orchestral-sound"]
+        assert [r.hiscores for r in p._rows] == ["", "shared", "shared"]
+        args = mt.build_args(p.form())
+        assert args[args.index("--own-scores") + 1] == \
+            "original;heisei-original-sound;heisei-orchestral-sound"
+        assert args[args.index("--hiscores") + 1] == "original;shared;shared"
+        # the dialog reads the row back as it was left
+        w.call("multiboot.edit", 1)
+        assert _st(w)["ed_own_settings"] is True and _st(w)["ed_own_scores"] is False
+        w.call("multiboot.edit_cancel")
+        # the other way round: shared settings, a table of its own
+        w.call("multiboot.edit", 2)
+        w.call("ui.set", "multiboot", "ed_own_settings", False)
+        w.call("ui.set", "multiboot", "ed_own_scores", True)
+        w.call("multiboot.edit_ok")
+        assert _st(w)["rows"][2]["scores"] == "own scores"
+        assert p._rows[2].own_scores == "" and p._rows[2].hiscores not in ("", "shared")
+        args = mt.build_args(p.form())
+        assert args[args.index("--hiscores") + 1] == \
+            "original;shared;%s" % p._rows[2].hiscores
+        # a modded image whose scores go to the shared table is flagged
+        p._take_modes({1: "2 mode files, 0 code modes"})
+        assert _st(w)["rows"][1]["scores_warn"] is True
+        # every image back to one tick each way: no group at all, the PAD-226 card
+        for ri in range(3):
+            w.call("multiboot.edit", ri)
+            w.call("ui.set", "multiboot", "ed_own_settings", False)
+            w.call("ui.set", "multiboot", "ed_own_scores", False)
+            w.call("multiboot.edit_ok")
+        args = mt.build_args(p.form())
+        assert args[args.index("--hiscores") + 1] == ";;"
+        assert args[args.index("--own-scores") + 1] == ";;"
 
 
 def test_an_image_found_running_modes_gets_its_own_scores_once(tmp_path):
@@ -555,7 +620,9 @@ def test_an_image_found_running_modes_gets_its_own_scores_once(tmp_path):
         # the owner unticks it: the table warns, and the next plan leaves it be
         w.call("multiboot.edit", 1)
         assert "runs custom modes (2 mode files" in _st(w)["ed"]["scores_modes"]
+        assert _st(w)["ed_own_settings"] is True and _st(w)["ed_own_scores"] is True
         w.call("ui.set", "multiboot", "ed_own_scores", False)
+        w.call("ui.set", "multiboot", "ed_own_settings", False)
         w.call("multiboot.edit_ok")
         p._take_modes({1: "2 mode files, 0 code modes"})
         s = _st(w)

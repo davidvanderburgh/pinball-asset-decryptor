@@ -172,10 +172,15 @@ card you start from matters:
   factory settings and runs its Guided Setup.
 - **Every image of the same game shares them,** across code versions, the
   way a Stern update keeps them.
-- **Keep its own high scores on the machine** (✎ on an image) gives that
-  image its own settings and audits too, not just scores. Its first boot
-  starts from a copy of the shared ones, so reset its high scores once in
-  the service menu.
+- **Keep its own settings and audits on the machine** and **Keep its own
+  high scores on the machine** (✎ on an image) are two separate choices.
+  An image can keep its own settings and still play into the high-score
+  table it shares with the other images of the game, or the other way
+  round. For example: an original with everything of its own, plus two
+  variants that each have their own settings but one table between them.
+- An image starts from a copy of the shared settings, or of the shared
+  table, so reset its high scores once in the service menu when it gets a
+  table of its own.
 
 Flashing the whole card writes the image's copy over the machine's,
 unless you tick **Keep the SD card's settings, audits and high scores**

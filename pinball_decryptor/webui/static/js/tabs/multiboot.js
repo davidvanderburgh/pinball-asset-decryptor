@@ -480,8 +480,11 @@ function EditDialog({ s, w }) {
         ${ed.scores ? html`<${Box} legend="Settings and high scores">
           ${ed.scores_modes ? html`<span class="small">${ed.scores_modes}</span>` : null}
           <${Check} ns=${NS} k="ed_own_settings" checked=${s.ed_own_settings} label=${ed.settings_label} />
+          ${s.ed_own_settings && (ed.settings_with || []).length > 1 ? html`<${ShareWith} ed=${ed} k="ed_settings_with" value=${s.ed_settings_with} options=${ed.settings_with} />` : null}
           <${Check} ns=${NS} k="ed_own_scores" checked=${s.ed_own_scores} label=${ed.scores_label} />
+          ${s.ed_own_scores && (ed.scores_with || []).length > 1 ? html`<${ShareWith} ed=${ed} k="ed_scores_with" value=${s.ed_scores_with} options=${ed.scores_with} />` : null}
           <span class="small muted">${ed.scores_note}</span>
+          ${(ed.settings_with || []).length > 1 || (ed.scores_with || []).length > 1 ? html`<span class="small muted">${ed.share_note}</span>` : null}
         <//>` : null}
         ${w.sound === false ? null : html`<${Box} legend="Sounds">
           <div class="kv mb-kv2">
@@ -495,6 +498,16 @@ function EditDialog({ s, w }) {
       <${Box} legend="Preview" cls="mb-ed-pv"><${CardPreview} card=${ed.card} /><//>
     </div>
   <//>`;
+}
+
+// PAD-1196: under an own-settings / own-high-scores tick, which other images
+// it shares that store or table with.  The options' values are the names on
+// the card; "No other image" is one of its own.
+function ShareWith({ ed, k, value, options }) {
+  return html`<div class="row mb-indent">
+    <label class="k" style="white-space:nowrap" for=${fid(k)}>${ed.share_label}</label>
+    <${Select} id=${fid(k)} value=${value} options=${options} ns=${NS} k=${k} cls="grow" />
+  </div>`;
 }
 
 // PAD-239: a random card's games, changed where the card is edited.  One

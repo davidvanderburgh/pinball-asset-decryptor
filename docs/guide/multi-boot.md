@@ -178,6 +178,12 @@ card you start from matters:
   table it shares with the other images of the game, or the other way
   round. For example: an original with everything of its own, plus two
   variants that each have their own settings but one table between them.
+- **Share with** under each tick puts the image in the same settings, or
+  the same high-score table, as other images you pick: say two Original
+  images on one table and four Heisei images on another, two of them on
+  one set of settings too. Images are the same game when they run the
+  same title (every Godzilla build, stock or modded, is Godzilla); images
+  of different games never share.
 - An image starts from a copy of the shared settings, or of the shared
   table, so reset its high scores once in the service menu when it gets a
   table of its own.

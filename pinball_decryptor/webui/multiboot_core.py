@@ -2336,6 +2336,19 @@ SCORES_NOTE = (
     "table, so reset its high scores once in the service menu.")
 #: The group name of a title's shared high-score table (PAD-1194).
 SHARED_SCORES = "shared"
+#: PAD-1196: the 'Share with' choice 'No other image': a store or table
+#: this image holds alone - the name it has while no other image holds it,
+#: a new one when it leaves a group.  Never a name on the card (it does not
+#: pass SCORES_NAME_RE).
+NEW_GROUP = "+new"
+#: PAD-1196's 'Share with' label and note in the Edit dialog.
+SHARE_WITH_LABEL = "Share with:"
+SHARE_NOTE = (
+    "Share with puts this image in the same settings store, or the same "
+    "high-score table, as other images (pb_lawww: two Original images on "
+    "one table and four Heisei images on another). Images only share when "
+    "they are the same game: an image of another game named here keeps "
+    "its own.")
 
 
 def row_own_settings(row):
@@ -2343,43 +2356,135 @@ def row_own_settings(row):
     return bool((row.own_scores or "").strip())
 
 
-def row_own_hiscores(row):
-    """PAD-1194: does this image keep a high-score table of its own?  Its
-    ``hiscores`` when that says, else whatever its settings do."""
+def row_store(row):
+    """PAD-1196: the name of the settings store this image boots, "" = the
+    title's shared one.  Images given the same name share that store."""
+    return (row.own_scores or "").strip()
+
+
+def row_table(row):
+    """PAD-1196: the high-score table this image plays into, by name:
+    :data:`SHARED_SCORES` for the title's shared table, else the group
+    (its own store's name when its scores simply go with its settings).
+    Images given the same name share that table."""
     h = (row.hiscores or "").strip()
     if not h:
-        return row_own_settings(row)
-    return h != SHARED_SCORES
+        return row_store(row) or SHARED_SCORES
+    return h
 
 
-def set_row_scores(row, own_settings, own_hiscores, others, title=""):
+def row_own_hiscores(row):
+    """PAD-1194: does this image keep a high-score table of its own (alone
+    or with the images it shares a named table with)?"""
+    return row_table(row) != SHARED_SCORES
+
+
+def _share_name(row, kind):
+    """PAD-1196: the store ('settings') or own table ('scores') *row* is in
+    by name, "" when it shares the title's."""
+    if kind == "settings":
+        return row_store(row)
+    return row_table(row) if row_own_hiscores(row) else ""
+
+
+def set_row_scores(row, own_settings, own_hiscores, others, title="",
+                   settings_with="", scores_with=""):
     """PAD-1194: the two ticks -> the row's ``own_scores`` (its store) and
     ``hiscores`` (its table, when that is not simply its store's).  Names are
     made from the title the first time and KEPT, so renaming the image never
     strands what the machine holds; ``others`` are the rows whose names this
-    one must not take."""
+    one must not take.
+
+    PAD-1196: ``settings_with`` / ``scores_with`` are the 'Share with'
+    choices: "" keeps the name the row has (a new one when it has none),
+    :data:`NEW_GROUP` one no other row holds (the one it has when nobody
+    else does), and any other name puts it in that store / table beside the
+    images that hold it.  Calling it again with the same choices changes
+    nothing, so the dialog can write through on every keystroke."""
+    others = list(others)
     taken = {SHARED_SCORES}
     for r in others:
         taken.add((r.own_scores or "").strip())
         taken.add((r.hiscores or "").strip())
     taken.discard("")
+    base = title or row.title
+    had_table = _share_name(row, "scores")
+    old_store = row_store(row)
+
+    def held(name):
+        return any(name in (_share_name(r, "settings"), _share_name(r, "scores"))
+                   for r in others)
+
+    def fresh():
+        name = scores_name_for(base, taken)
+        taken.add(name)
+        return name
+
+    sw = (settings_with or "").strip()
     if not own_settings:
         row.own_scores = ""
-    elif not (row.own_scores or "").strip():
-        row.own_scores = scores_name_for(title or row.title, taken)
-        taken.add(row.own_scores)
-    if own_hiscores == own_settings:
-        row.hiscores = ""
+    elif sw == NEW_GROUP:
+        if not old_store or held(old_store):
+            row.own_scores = fresh()
+    elif sw and SCORES_NAME_RE.match(sw):
+        row.own_scores = sw
+    elif not old_store:
+        row.own_scores = fresh()
+    taken.add(row_store(row))
+    store = row_store(row) or SHARED_SCORES
+
+    tw = (scores_with or "").strip()
+    if not own_hiscores:
+        table = SHARED_SCORES
+    elif tw == NEW_GROUP:
+        if had_table and not held(had_table):
+            table = had_table
+        elif row_store(row) and not held(row_store(row)):
+            table = row_store(row)
+        else:
+            table = fresh()
+    elif tw and SCORES_NAME_RE.match(tw):
+        table = tw
+    elif had_table and had_table != old_store:
+        table = had_table           # a named table it already plays into
     elif own_settings:
-        row.hiscores = SHARED_SCORES
-    elif (row.hiscores or "").strip() in ("", SHARED_SCORES):
-        row.hiscores = scores_name_for(title or row.title, taken)
+        table = store
+    else:
+        table = fresh()
+    row.hiscores = "" if table == store else table
 
 
 def scores_split(row):
     """PAD-1194: True when this image's high scores do not follow its
     settings - the case that needs the selector to hand the table over."""
-    return row_own_hiscores(row) != row_own_settings(row)
+    return row_table(row) != (row_store(row) or SHARED_SCORES)
+
+
+def share_choices(rows, row, kind):
+    """PAD-1196: the Edit dialog's 'Share with' options for *row* (``kind``
+    'settings' or 'scores') as ``[{value, label}]``: 'No other image'
+    (:data:`NEW_GROUP`), then each store or table other images hold, named
+    by those images.  The value is the name on the card."""
+    groups = {}
+    for i, r in enumerate(rows):
+        if r is row or (is_group(r) and r.keep):
+            continue
+        n = _share_name(r, kind)
+        if n:
+            groups.setdefault(n, []).append(
+                (r.title or "").strip() or "image %d" % i)
+    return ([{"value": NEW_GROUP, "label": "No other image"}]
+            + [{"value": n, "label": ", ".join(t)} for n, t in groups.items()])
+
+
+def share_choice_of(rows, row, kind):
+    """PAD-1196: the 'Share with' value the dialog opens on: the name of the
+    store / table *row* shares with another image, else 'No other image'."""
+    n = _share_name(row, kind)
+    if n and any(_share_name(r, kind) == n for r in rows if r is not row
+                 and not (is_group(r) and r.keep)):
+        return n
+    return NEW_GROUP
 
 
 def hiscores_from_card(im):
@@ -2449,13 +2554,7 @@ def hiscores_args(form):
         row = form.images[ri]
         name = ""
         if split:
-            h = (row.hiscores or "").strip()
-            if not row_own_hiscores(row):
-                name = SHARED_SCORES
-            elif h and h != SHARED_SCORES:
-                name = h
-            else:
-                name = (row.own_scores or "").strip()
+            name = row_table(row)
         names.append(name if SCORES_NAME_RE.match(name) else "")
     return ["--hiscores", ";".join(names)] if names else []
 
@@ -4720,7 +4819,7 @@ def _menu_fields(before, after):
             changed.add("confirm sound")
         # PAD-226: images.conf's scores= lines, which an inject rewrites
         if ((b.own_scores or "").strip() != (a.own_scores or "").strip()
-                or row_own_hiscores(b) != row_own_hiscores(a)):
+                or row_table(b) != row_table(a)):
             changed.add("high scores")
     if _media_value(before.sound_move) != _media_value(after.sound_move):
         changed.add("move sound")
@@ -7164,6 +7263,10 @@ class MultibootPanel:
         #: and PAD-1194's that gives it settings and audits of its own
         self._ed_own_scores = tk.BooleanVar(value=False)
         self._ed_own_settings = tk.BooleanVar(value=False)
+        #: PAD-1196: which other images each of those shares with (a name
+        #: on the card, or NEW_GROUP for one of its own) - share_choices
+        self._ed_settings_with = tk.StringVar(value=NEW_GROUP)
+        self._ed_scores_with = tk.StringVar(value=NEW_GROUP)
         #: What the tick said while it was still a question, so coming back
         #: off a shuffle is the round trip it looks like.  None = nothing to
         #: put back.
@@ -7177,7 +7280,8 @@ class MultibootPanel:
                                self._ed_video, self._ed_anim_start)
         for var in (self._ed_title, self._ed_sub, self._ed_music,
                     self._ed_confirm, self._ed_roll, self._ed_roll_norepeat,
-                    self._ed_own_scores, self._ed_own_settings):
+                    self._ed_own_scores, self._ed_own_settings,
+                    self._ed_settings_with, self._ed_scores_with):
             var.trace_add("write", lambda *_a: self._editor_changed())
         # ...and a write to what the image SHOWS is the one time the row's
         # art and animation are derived again from the dialog's choice.
@@ -8411,6 +8515,22 @@ class MultibootPanel:
         return "shared"
 
     def _scores_tip(self, row):
+        tip = self._scores_tip_alone(row)
+        if not tip:
+            return tip
+        # PAD-1196: the other images it shares a named store or table with
+        for kind, what in (("settings", "Shares its settings and audits with: %s."),
+                           ("scores", "Shares its high-score table with: %s.")):
+            mine = share_choice_of(self._rows, row, kind)
+            if mine == NEW_GROUP:
+                continue
+            with_ = [c["label"] for c in share_choices(self._rows, row, kind)
+                     if c["value"] == mine]
+            if with_:
+                tip += " " + what % with_[0]
+        return tip
+
+    def _scores_tip_alone(self, row):
         cell = self._scores_cell(row)
         runs = ("Runs custom modes (%s). " % row.modes) if (row.modes or "").strip() else ""
         if cell == "own":
@@ -8566,6 +8686,10 @@ class MultibootPanel:
             self._ed_roll_norepeat.set(roll_no_repeat(row_roll(row)))
             self._ed_own_settings.set(row_own_settings(row))
             self._ed_own_scores.set(row_own_hiscores(row))
+            self._ed_settings_with.set(
+                share_choice_of(self._rows, row, "settings"))
+            self._ed_scores_with.set(
+                share_choice_of(self._rows, row, "scores"))
             # A still taken off a video with no clip yet (an older form)
             # keeps its second as the clip's start.
             self._ed_anim_start.set(row.anim_start or (
@@ -8640,7 +8764,9 @@ class MultibootPanel:
         set_row_scores(row, bool(self._ed_own_settings.get()),
                        bool(self._ed_own_scores.get()),
                        [r for r in self._rows if r is not row],
-                       row.title or self._ed_title.get())
+                       row.title or self._ed_title.get(),
+                       settings_with=self._ed_settings_with.get(),
+                       scores_with=self._ed_scores_with.get())
 
     def _apply_media(self, i, row):
         """Row *i*'s art and animation <- the dialog's one choice.  'card'

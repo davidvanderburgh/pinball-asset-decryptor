@@ -556,7 +556,12 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
             except Exception:                            # noqa: BLE001
                 exts = None
             try:
+                keep = mfr.slot_keep_dirs(assets_path) if mfr else ()
+            except Exception:                           # noqa: BLE001
+                keep = ()
+            try:
                 slots = scan_image_slots(assets_path, roots=roots, exts=exts,
+                                         keep_dirs=keep,
                                          probe=False)
             except Exception:                            # noqa: BLE001
                 slots = []

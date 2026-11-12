@@ -323,6 +323,7 @@ The **Convert** column says it before you build:
 - **Check card…** lists the clips on any built card whose bitrate is low
   enough to look blocky. It opens the card read-only.
 - **More > Export compare report (CSV)…** writes one row per replacement, random clip and mode copy beside the game's own clip: lengths, the length after Write, resolution, fps and a note when Write cuts, pads or scales.
+- **Full screen:** the button at the right of a player's bar, or a double-click on the picture, fills the window with it. Esc comes back; the bar and pointer hide while it plays.
 - **The Big Lebowski's** `.cdmd` clips are re-encoded back into `.cdmd`
   at the original frame count, so they stay in sync with their sound.
 
@@ -377,6 +378,13 @@ selected clip, read from its program.
 - A clip with no sure sound lists the ones that *may* be its.
 - Not listed: a sound the game picks at random, or one in the clip's own
   audio track.
+
+### A clip's song (other makers)
+
+For JJP and the other makers, a long clip lists the song whose name ends the same way and runs about as long.
+
+- **Play it with the clip** starts, pauses, seeks and stops the song with whichever player plays.
+- The callout shows how the two lengths compare and links the song on the **Audio** tab.
 
 ### Undo and redo
 

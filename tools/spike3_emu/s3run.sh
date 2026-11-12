@@ -180,7 +180,11 @@ if [ "$BRIDGE" = 1 ]; then
         # and look for the title's tables under dump/tables (padpath.tables());
         # without this they fell back to godzilla_pro's switch ids
         ln -sfn "$SD/tables" "$SD/dump/tables"
-        RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/dump/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game)
+        # PAD_PAUSE_KEEPER=1 (PAD-1183): Pause / F9 - in this window or the
+        # playfield's - is asked of s3keys.py, which runs as root beside the
+        # game and stops it; the renderer is the desktop user and may not
+        RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/dump/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game
+              PAD_PAUSE_KEEPER=1)
         # AS THE DESKTOP'S USER, NOT ROOT (watch.sh learned it first): as
         # root, padglhost cannot attach to the WSLg X server's shared memory -
         # "MESA: error: Failed to attach to x11 shm" on repeat, 0.5 fps, a
@@ -241,7 +245,7 @@ if [ "$BUS" = 1 ]; then
     # the video decoder (stage 5): s3vid.so hands the game's HEVC/H.264
     # packets to it and its I420 frames go to padglhost through padvid.shm
     rm -f "$SD/s3vid.feed" "$SD/padvid.shm" "$SD/s3vidhost.log"
-    python3 "$S/s3vidhost.py" "$SD/s3vid.feed" "$SD/padvid.shm" "$SD/s3vidhost.log" > "$SD/s3vidhost.out" 2>&1 &
+    python3 "$S/s3vidhost.py" "$SD/s3vid.feed" "$SD/padvid.shm" "$SD/s3vidhost.log" "$TREE" > "$SD/s3vidhost.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     for i in $(seq 1 50); do
         { [ "$DEVMODE" != kernel ] || [ -e /dev/$SPIDEV ]; } && [ -s "$SD/bridge.path" ] && break; sleep 0.1
@@ -295,7 +299,8 @@ if [ "$BUS" = 1 ]; then
                 echo "PAD_PLAYFIELD_WINDOWS_LAUNCH game=$TITLE savestates=$SAVES" \
                      "root=$(wslpath -w "$SD" 2>/dev/null)" \
                      "tables=$(wslpath -w "$SD/tables" 2>/dev/null)" \
-                     "slot=$SLOT root_wsl=$SD"
+                     "slot=$SLOT root_wsl=$SD" \
+                     "logdir=$(wslpath -w "$SD" 2>/dev/null)"
             fi
         fi
     fi

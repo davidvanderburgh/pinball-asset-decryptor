@@ -30,7 +30,9 @@ CH, PKTS, DATA, EXTRA, HDR = 8, 256, 8 << 20, 4096, 1 << 20
 S3VID_BYTES = HDR + CH * DATA
 CHAN_SZ = 32 * 4 + EXTRA + PKTS * 24
 (OPEN_GEN, OPEN_ACK, CODEC, WIDTH, HEIGHT, EXTRA_SIZE, FLUSH_GEN, FLUSH_ACK,
- FLUSH_BASE, CLOSED, PKT_W, PKT_R, DATA_W, DATA_R, FRAMES_OUT) = range(15)
+ FLUSH_BASE, CLOSED, PKT_W, PKT_R, DATA_W, DATA_R, FRAMES_OUT,
+ CLIP_FRAMES, CLIP_RATE_NUM, CLIP_RATE_DEN) = range(18)
+PATH = 256                              # S3VID_PATH: clip[c] after the channels
 PKT_EOF = 0x80000000
 # ---- ../spike2_emu/padvid.h ----
 PADVID_MAGIC, PADVID_VERSION = 0x56444150, 3
@@ -66,6 +68,15 @@ class Shm:
 
     def fset(self, c, i, val):
         struct.pack_into("<I", self.f, 16 + c * CHAN_SZ + i * 4, val & 0xFFFFFFFF)
+
+    def clip(self, c):
+        """(file, frames, fps) of channel c's clip as the guest named it
+        (PAD-1183); file is "" when it could not tell."""
+        o = 16 + CH * CHAN_SZ + c * PATH
+        raw = bytes(self.f[o:o + PATH]).split(b"\0", 1)[0]
+        num, den = self.fget(c, CLIP_RATE_NUM), self.fget(c, CLIP_RATE_DEN)
+        return (raw.decode("utf-8", "replace"), self.fget(c, CLIP_FRAMES),
+                num / den if num and den else 0.0)
 
     def extra(self, c):
         n = min(self.fget(c, EXTRA_SIZE), EXTRA)
@@ -265,6 +276,109 @@ def new_session(path):
     return 0
 
 
+def qt_length(path):
+    """(frames, fps) of a QuickTime / MP4 file's first video track, off its
+    moov box (stsz sample count over mdhd duration / timescale), or (0, 0.0).
+    The clips are the card's `.asset` files (`ftyp qt`); reading the header
+    is a few small reads, once per clip start."""
+    def boxes(f, start, end):
+        pos = start
+        while pos + 8 <= end:
+            f.seek(pos)
+            hdr = f.read(16)
+            if len(hdr) < 8:
+                return
+            size, kind = struct.unpack(">I4s", hdr[:8])
+            head = 8
+            if size == 1 and len(hdr) >= 16:
+                size, head = struct.unpack(">Q", hdr[8:16])[0], 16
+            elif size == 0:
+                size = end - pos
+            if size < head:
+                return
+            yield kind, pos + head, min(pos + size, end)
+            pos += size
+
+    def child(f, start, end, kind):
+        return next(((s, e) for k, s, e in boxes(f, start, end) if k == kind), None)
+
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            moov = child(f, 0, f.tell(), b"moov")
+            for k, s, e in boxes(f, *moov) if moov else ():
+                if k != b"trak":
+                    continue
+                mdia = child(f, s, e, b"mdia")
+                hdlr = mdia and child(f, *mdia, b"hdlr")
+                if not hdlr:
+                    continue
+                f.seek(hdlr[0] + 8)
+                if f.read(4) != b"vide":
+                    continue
+                mdhd = child(f, *mdia, b"mdhd")
+                minf = child(f, *mdia, b"minf")
+                stbl = minf and child(f, *minf, b"stbl")
+                stsz = stbl and child(f, *stbl, b"stsz")
+                if not (mdhd and stsz):
+                    continue
+                f.seek(mdhd[0])
+                ver = f.read(1)[0]
+                if ver == 1:
+                    f.seek(mdhd[0] + 20)
+                    scale, dur = struct.unpack(">IQ", f.read(12))
+                else:
+                    f.seek(mdhd[0] + 12)
+                    scale, dur = struct.unpack(">II", f.read(8))
+                f.seek(stsz[0] + 8)
+                n = struct.unpack(">I", f.read(4))[0]
+                return n, (n * scale / float(dur) if dur and scale else 0.0)
+    except (OSError, struct.error, TypeError, IndexError):
+        pass
+    return 0, 0.0
+
+
+class ClipLog:
+    """padvid.log in Spike 2's words, for clipwatch.py (PAD-1183):
+        [padvid 12.34] ch1 serving 1920x1080 121 frames <file> (30.00 fps)
+    Its first line carries the time it was started to the hundredth, which is
+    how the reader tells this run's log from the last one's. `tree` is the
+    card's tree the game's /games is mounted from (s3run.sh's TREE): a clip's
+    length is read off its own file there when the guest could not say."""
+
+    def __init__(self, path, tree=None):
+        self.path = path
+        self.tree = tree
+        self.lengths = {}
+        self.t0 = time.time()
+        try:
+            self.f = open(path, "w", buffering=1)
+            self.f.write("[padvid 0.00] s3vidhost started %.2f\n" % self.t0)
+            os.chmod(path, 0o644)
+        except OSError:
+            self.f = None
+
+    def length(self, path):
+        if path not in self.lengths:
+            got = (0, 0.0)
+            if self.tree and path.startswith("/games/"):
+                got = qt_length(os.path.join(self.tree, path.lstrip("/")))
+            self.lengths[path] = got
+        return self.lengths[path]
+
+    def serving(self, c, w, h, path, frames, fps):
+        if self.f is None or not path:
+            return
+        if not frames or not fps:
+            frames, fps = self.length(path)
+        try:
+            self.f.write("[padvid %.2f] ch%d serving %dx%d %d frames %s%s\n" % (
+                time.time() - self.t0, c, w, h, frames, path,
+                " (%.2f fps)" % fps if fps else ""))
+        except OSError:
+            pass
+
+
 def main():
     if sys.argv[1] == "--new-session":
         sys.exit(new_session(sys.argv[2]))
@@ -274,6 +388,11 @@ def main():
     say = lambda m: log.write("%8.3f %s\n" % (time.time() - t0, m))
     t0 = time.time()
     say("s3vidhost: feed %s, frames %s" % (feed, vid))
+    # PAD-1183: the virtual playfield's CLIPS list reads Spike 2's padvid.log
+    # (tools/spike2_emu/clipwatch.py): one `serving` line per clip start,
+    # beside the feed in the slot's directory (the window's PAD_LOGDIR)
+    clips = ClipLog(os.path.join(os.path.dirname(os.path.abspath(feed)), "padvid.log"),
+                    sys.argv[4] if len(sys.argv) > 4 else None)
     dec = [None] * CH
     seen = [0] * CH
     alive = 0
@@ -298,6 +417,7 @@ def main():
                     dec[c] = Decoder(s, c, codec, w, h, s.extra(c), log)
                     say("ch%d: open %s %dx%d, %d bytes of extradata (NAL length %d)" % (
                         c, "hevc" if codec == HEVC else "h264", w, h, len(s.extra(c)), dec[c].nl))
+                    clips.serving(c, w, h, *s.clip(c))
                 else:
                     say("ch%d: open REFUSED codec %d %dx%d (beyond the %dx%d ring slot)" % (
                         c, codec, w, h, MAX_W, MAX_H))

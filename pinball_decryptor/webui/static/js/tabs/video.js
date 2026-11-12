@@ -44,6 +44,8 @@ const T = {
   undoNone: "Nothing to undo yet: choosing or clearing a replacement, Replace from folder, a clip's conversion, length, colors or random clips, and the boxes over the list each make a step.",
   redoNone: "Nothing to redo: Redo does again what Undo just took back, until the next change.",
   soundGo: "Show this sound on the Audio tab",
+  songSync: "Play it with the clip",
+  songSyncTip: "Plays this sound alongside whichever player (Original or Replacement) is playing, kept to the clip's playhead: pause, seek and stop follow it. The game plays the song from its own file, so this is how the clip looks and sounds on the machine.",
   qTitle: "Check the videos already on a card",
   qIntro: "Measures every clip on a built card image and lists the ones whose bitrate is low enough to look blocky — the same test a Write applies to a replacement, applied after the fact to what is actually on the card. This reads the card image only; nothing is written and nothing is extracted.",
 };
@@ -72,6 +74,65 @@ function stopSound() {
   if (soundEl) { soundEl.pause(); soundEl = null; }
 }
 
+// PAD-1190: a clip's song (JJP: a separate file the game plays with it), played along with
+// whichever pane plays and kept to its playhead
+const songSync = { path: null, on: true };
+let songEl = null;
+function songStop() {
+  if (songEl) { songEl.pause(); songEl = null; }
+}
+function songFollow(v, kind) {
+  if (!v) return;
+  if (!songSync.on || !songSync.path) { songStop(); return; }
+  if (kind === "play") {
+    if (!songEl || songEl.__src !== songSync.path) {
+      songStop();
+      songEl = new Audio(mediaUrl(songSync.path));
+      songEl.__src = songSync.path;
+    }
+    stopSound();
+    songEl.__v = v;
+    try { songEl.currentTime = v.currentTime; } catch (e) { /* not loaded yet */ }
+    const p = songEl.play();
+    if (p && p.catch) p.catch(() => {});
+    return;
+  }
+  if (!songEl || songEl.__v !== v) return;
+  if (kind === "pause") songEl.pause();
+  else if (kind === "stop") songStop();
+  else if (Math.abs(songEl.currentTime - v.currentTime) > 0.35) {
+    try { songEl.currentTime = v.currentTime; } catch (e) { /* not loaded yet */ }
+  }
+}
+function playingPane() {
+  for (const side of ["orig", "rep"]) {
+    const v = players[side];
+    if (v && !v.paused) return v;
+  }
+  return null;
+}
+
+// The callout's "Play it with the clip" box: the song it names follows the players while the
+// row is on show.
+function SongSync({ it }) {
+  const [on, setOn] = useState(songSync.on);
+  useEffect(() => {
+    songSync.path = it.path;
+    const v = playingPane();
+    if (v) songFollow(v, "play");
+    return () => { if (songSync.path === it.path) songSync.path = null; songStop(); };
+  }, [it.path]);
+  const flip = (val) => {
+    songSync.on = !!val;
+    setOn(songSync.on);
+    if (!songSync.on) { songStop(); return; }
+    const v = playingPane();
+    if (v) songFollow(v, "play");
+  };
+  return html`<div class="vid-song-sync"><${Check} checked=${on} onChange=${flip} label=${T.songSync}
+    title=${T.songSyncTip} /></div>`;
+}
+
 // One of the sounds the game plays with a clip: ▷ plays its file here, its name shows it on the
 // Audio tab. A sound the extract has no file for is its words alone.
 function SoundItem({ it }) {
@@ -80,6 +141,7 @@ function SoundItem({ it }) {
   const play = () => {
     if (on) { stopSound(); setOn(false); return; }
     stopSound();
+    songStop();
     const a = new Audio(mediaUrl(it.path));
     soundEl = a;
     const off = () => { if (soundEl === a) soundEl = null; setOn(false); };
@@ -287,6 +349,76 @@ function PaneView({ side, view, look }) {
   </div>`;
 }
 
+// ------------------------------------------------------------- Full screen
+// PAD-1191 (Ben): a player goes full screen, as on YouTube: its button (or a double-click
+// on the picture) fills the screen with the clip and its play / seek bar, Esc or the
+// button again brings it back.  The page fills the window with the player itself (a page
+// asking for full screen is ignored by the app's window: WebView2 fills only its own
+// control, Qt WebEngine refuses it), and the app takes its window full screen with it
+// (shell.fullscreen).  In a browser there is no app window: the page asks the browser.
+const FULL_IDLE_MS = 2500;   // a still pointer over a playing clip hides the bar, as YouTube does
+
+async function screenFull(on) {
+  if (await call("shell.fullscreen", on)) return;
+  try {
+    if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen();
+    } else if (!on && document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+  } catch (e) { /* the browser said no: the player still fills the page */ }
+}
+
+export function useFullView(playing) {
+  const [full, setFull] = useState(false);
+  const [idle, setIdle] = useState(false);
+  const timer = useRef(0);
+  useEffect(() => {
+    if (!full) return undefined;
+    screenFull(true);
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setFull(false);
+    };
+    // the browser's own Esc (or F11) leaves its full screen: the player comes back with it
+    let wasFull = false;
+    const onChange = () => {
+      if (document.fullscreenElement) wasFull = true;
+      else if (wasFull) setFull(false);
+    };
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("fullscreenchange", onChange);
+      screenFull(false);
+    };
+  }, [full]);
+  const wake = () => {
+    setIdle(false);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setIdle(true), FULL_IDLE_MS);
+  };
+  useEffect(() => { if (full) wake(); else { clearTimeout(timer.current); setIdle(false); } }, [full, playing]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return {
+    full,
+    toggle: () => setFull((f) => !f),
+    // on the player's box: the class that fills the screen, and the pointer that wakes its bar
+    cls: full ? cx("vid-full", idle && playing && "vid-idle") : "",
+    onMouseMove: full ? wake : undefined,
+  };
+}
+
+export function FullButton({ fv, size = "sm" }) {
+  const label = fv.full ? "Exit full screen" : "Full screen";
+  return html`<${Button} size=${size} kind="ghost" icon=${fv.full ? "unfit" : "fit"} label=${label}
+    title=${fv.full ? "Exit full screen (Esc)" : "Full screen (or double-click the picture). Esc comes back."}
+    onClick=${(e) => { e.stopPropagation(); fv.toggle(); }} />`;
+}
+
 function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const vref = useRef(null);
   const [glLive, setGlLive] = useState(false);
@@ -299,6 +431,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const dur = (facts && facts.dur) || 0;
   const direct = !!(pane.path && facts && enginePlays(facts) && !failed);
   const src = pane.proxy || (direct ? pane.path : null);
+  const fv = useFullView(playing);
 
   useEffect(() => { setFailed(false); setPos(0); setPlaying(false); wantPlay.current = 0; }, [pane.seq]);
   // Ask Python for a playable copy when the engine can't take the file.
@@ -344,6 +477,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     setPlaying(false);
     setPos(0);
     if (!v) return;
+    songFollow(v, "stop");
     v.pause();
     // load() drops the queued "pause" event, so the state is set above
     if (src) v.load();
@@ -353,6 +487,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     setPlaying(false);
     setPos(0);
     const v = e.currentTarget;
+    songFollow(v, "stop");
     if (v && src) v.load();
   };
   const onError = () => {
@@ -375,14 +510,16 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const fid = "vid-look-" + side;
   const fstyle = steps && steps.length && !glLive ? `filter: url(#${fid})` : undefined;
   const mediaKey = pane.path && src ? pane.seq + ":" + src : "";
-  return html`<div class="vid-pane">
-    ${head}
+  return html`<div class=${cx("vid-pane", fv.cls)} onMouseMove=${fv.onMouseMove}>
+    ${fv.full ? null : head}
     <${LookFilter} id=${fid} steps=${steps} />
-    <div class="vid-screen">
+    <div class="vid-screen" onDblClick=${pane.path ? fv.toggle : undefined}>
       ${mediaKey ? html`<video key=${mediaKey} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
           poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="metadata" playsinline
-          onPlay=${() => setPlaying(true)} onPause=${() => setPlaying(false)} onEnded=${onEnded}
-          onTimeUpdate=${(e) => { if (!e.currentTarget.paused) setPos(e.currentTarget.currentTime); }} onError=${onError}
+          onPlay=${(e) => { setPlaying(true); songFollow(e.currentTarget, "play"); }}
+          onPause=${(e) => { setPlaying(false); songFollow(e.currentTarget, "pause"); }} onEnded=${onEnded}
+          onSeeked=${(e) => songFollow(e.currentTarget, "seek")}
+          onTimeUpdate=${(e) => { if (!e.currentTarget.paused) { setPos(e.currentTarget.currentTime); songFollow(e.currentTarget, "time"); } }} onError=${onError}
           onLoadedData=${onReady} onCanPlay=${onReady}></video>`
         : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" style=${fstyle} />` : null}
       ${look && look.offered && pane.path ? html`<${LookGL} media=${vref} mediaKey=${mediaKey} poster=${pane.poster}
@@ -397,8 +534,9 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
         disabled=${!src || !(dur > 0)} aria-label=${"Seek " + (pane.title || "")}
         onInput=${(e) => { const v = vref.current; const t = Number(e.target.value); setPos(t); if (v) v.currentTime = t; }} />
       <span class="mono small muted nw">${clock(pos, pane.path ? dur : 0)}</span>
+      ${pane.path ? html`<${FullButton} fv=${fv} />` : null}
     </div>
-    ${look && look.offered && pane.path ? html`<${PaneView} side=${side} view=${(look.views || {})[side]} look=${look} />` : null}
+    ${fv.full ? null : look && look.offered && pane.path ? html`<${PaneView} side=${side} view=${(look.views || {})[side]} look=${look} />` : null}
   </div>`;
 }
 
@@ -451,6 +589,7 @@ function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove
   const dur = (facts && facts.dur) || 0;
   const direct = !!(pane.path && facts && enginePlays(facts) && !failed);
   const src = pane.proxy || (direct ? pane.path : null);
+  const fv = useFullView(playing);
 
   useEffect(() => { setFailed(false); setPos(0); setPlaying(false); }, [pane.seq]);
   useEffect(() => {
@@ -487,20 +626,21 @@ function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove
   const mediaKey = pane.path && src ? pane.seq + ":" + src : "";
   const sides = (t.sides || []).map(([value, label]) => ({ value, label }));
   const name = (row && row.name) || t.rel.split("/").pop();
-  return html`<div class=${cx("vcm-tile", active && "on")}>
-    <div class="row vcm-tilehd">
+  return html`<div class=${cx("vcm-tile", active && "on", fv.cls)} onMouseMove=${fv.onMouseMove}>
+    ${fv.full ? null : html`<div class="row vcm-tilehd">
       <span class="mono small ellip vcm-name" ...${tip({ head: t.rel, lines: [pane.label ? `${pane.title}: ${pane.label}` : pane.title] })}>${name}</span>
       <span class="grow"></span>
       ${sides.length > 1 ? html`<${Seg} value=${t.side} options=${sides} onChange=${(v) => call("video.compare_side", t.id, v)} />`
         : html`<span class="small muted nw">${pane.title || "Original"}</span>`}
       <${Button} size="xs" kind="ghost" icon="x" title="Take this clip out of Compare" disabled=${!canRemove}
         onClick=${() => call("video.compare_remove", t.id)} />
-    </div>
+    </div>`}
     <${LookFilter} id=${fid} steps=${steps} />
     <div class="vid-screen vcm-screen" role="button" tabindex="0" aria-pressed=${active ? "true" : "false"}
         aria-label=${"Pick " + name + " for the Color profiles bar"}
-        onClick=${onPick} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
-        ...${tip(active ? "The clip the Color profiles bar changes, and the one you hear." : "Click: the Color profiles bar changes this clip's colors, and it is the one you hear.")}>
+        onClick=${onPick} onDblClick=${pane.path ? fv.toggle : undefined}
+        onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
+        ...${fv.full ? {} : tip(active ? "The clip the Color profiles bar changes, and the one you hear." : "Click: the Color profiles bar changes this clip's colors, and it is the one you hear.")}>
       ${mediaKey ? html`<video key=${mediaKey} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
           poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="auto" playsinline loop=${loop} muted=${!active}
           onPlay=${() => seen(true)} onPause=${() => seen(false)} onEnded=${() => seen(false)}
@@ -509,7 +649,7 @@ function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove
         : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" style=${fstyle} />` : null}
       ${offered && pane.path ? html`<${LookGL} media=${vref} mediaKey=${mediaKey} poster=${pane.poster}
         lut=${t.lut || null} onLive=${setGlLive} />` : null}
-      <${CmpBadge} row=${row} cs=${cs} />
+      ${fv.full ? null : html`<${CmpBadge} row=${row} cs=${cs} />`}
       ${overlay}
     </div>
     <div class="row vid-transport">
@@ -518,8 +658,9 @@ function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove
         disabled=${!src || !(dur > 0)} aria-label=${"Seek " + name}
         onInput=${(e) => { const v = vref.current; const x = Number(e.target.value); setPos(x); if (v) v.currentTime = x; }} />
       <span class="mono small muted nw">${clock(pos, pane.path ? dur : 0)}</span>
+      ${pane.path ? html`<${FullButton} fv=${fv} />` : null}
     </div>
-    <${CmpColor} t=${t} row=${row} cs=${cs} />
+    ${fv.full ? null : html`<${CmpColor} t=${t} row=${row} cs=${cs} />`}
   </div>`;
 }
 
@@ -1239,6 +1380,7 @@ export default function VideoTab() {
               <${SoundItem} key=${it.rel || it.text} it=${it} />`)}</ul>` : null}
             ${pv.sounds.maybe_more ? html`<div class="small muted">${pv.sounds.maybe_more}</div>` : null}
             ${pv.sounds.none ? html`<span>${pv.sounds.none}</span>` : null}
+            ${pv.sounds.sync && (pv.sounds.items || []).length ? html`<${SongSync} key=${pv.sounds.items[0].path} it=${pv.sounds.items[0]} />` : null}
             ${pv.sounds.foot ? html`<div class="small muted">${pv.sounds.foot}</div>` : null}</div><//>
         </div>` : null}
         ${pv.seen && pv.seen.rel === currentRel ? html`<div class="vid-seen">

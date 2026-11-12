@@ -789,7 +789,10 @@ class AudioTab(FindOriginalsMixin, TabService):
         mfr = self.mfr
         if getattr(mfr, "key", None) != "stern":
             return False
-        if getattr(mfr, "current_era", "spike2") != "spike2":
+        # PAD-1186: a Spike 3 Write plays each sound at its own length too
+        # (spike3_write.plan_sounds: shorter in place, longer grows the
+        # container), so a replacement is staged whole there as well
+        if getattr(mfr, "current_era", "spike2") not in ("spike2", "spike3"):
             return False
         # Always on since PAD-843 (no Advanced checkbox any more); only the
         # engine-level PAD_STERN_AUDIO_GROW=0 turns it off.
@@ -826,7 +829,12 @@ class AudioTab(FindOriginalsMixin, TabService):
             except Exception:                           # noqa: BLE001
                 exts = None
             try:
+                keep = mfr.slot_keep_dirs(assets_path) if mfr else ()
+            except Exception:                           # noqa: BLE001
+                keep = ()
+            try:
                 slots = scan_audio_slots(assets_path, roots=roots, exts=exts,
+                                         keep_dirs=keep,
                                          probe=False)
             except Exception:                           # noqa: BLE001
                 slots = []

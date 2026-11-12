@@ -59,6 +59,11 @@ class Host:
         self._pending_title = None
         # the screens, read while the App is built (preload_window)
         self.screens = None
+        # PAD-1191: a video played full screen takes the window full screen;
+        # whether it was maximized before is what the app keeps meanwhile
+        self._fullscreen = False
+        self._fs_was_max = False
+        self._fs_lock = threading.Lock()
 
     # -- called by the app ------------------------------------------------
     def set_title(self, text):
@@ -82,7 +87,50 @@ class Host:
                 pass
 
     def is_maximized(self):
-        return self._maximized
+        # full screen is not a size to keep: the window as it was before it
+        return self._fs_was_max if self._fullscreen else self._maximized
+
+    @property
+    def fullscreen(self):
+        return self._fullscreen
+
+    def set_fullscreen(self, on):
+        """Take the window full screen, or back to how it was (PAD-1191: a
+        video played full screen, as on YouTube).  The page fills the window
+        with the player itself: pywebview ignores a page asking for full
+        screen (WebView2 fills only its own control with it, Qt WebEngine
+        refuses it), so the window is what goes full screen.
+
+        Returns True when the app's window did it, False when there is no
+        window to do it (the app in a browser: the page asks the browser)."""
+        win = self.window
+        if win is None or self.mode != "native":
+            return False
+        on = bool(on)
+        with self._fs_lock:
+            if on == self._fullscreen:
+                return True
+            if on:
+                self._fs_was_max = self._maximized
+                self._fullscreen = True
+            try:
+                win.toggle_fullscreen()
+            except Exception:                           # noqa: BLE001
+                log.warning("could not toggle full screen", exc_info=True)
+                if on:
+                    self._fullscreen = False
+                return False
+            if not on:
+                self._fullscreen = False
+                self._maximized = self._fs_was_max
+                # leaving full screen puts the window back at its old size,
+                # but not maximized (WinForms, Qt): maximize it again
+                if self._fs_was_max:
+                    try:
+                        win.maximize()
+                    except Exception:                   # noqa: BLE001
+                        pass
+            return True
 
     def maximize(self):
         win = self.window
@@ -219,6 +267,10 @@ def build(ctx=None, meanwhile=None):
     reg.register("fs.roots", list_roots, on_loop=False)
     reg.register("shell.zoom", app._on_ui_zoom_change)
     reg.register("shell.quit", lambda: ctx.host.quit() if ctx.host else None,
+                 on_loop=False)
+    # PAD-1191: a video played full screen takes the window with it
+    reg.register("shell.fullscreen",
+                 lambda on: ctx.host.set_fullscreen(on) if ctx.host else False,
                  on_loop=False)
     # an AI agent driving the app (PAD-844): its calls always, the link
     # file only while Settings > Let AI agents control PAD is ticked
@@ -362,11 +414,15 @@ def run_native(ctx, server, host):
             closing_done.set()
         return True
 
+    # full screen maximizes the window and leaving it restores it: neither
+    # is the user's maximize (Host.set_fullscreen keeps that)
     def _on_maximized():
-        host._maximized = True
+        if not host.fullscreen:
+            host._maximized = True
 
     def _on_restored():
-        host._maximized = False
+        if not host.fullscreen:
+            host._maximized = False
 
     def _on_resized(w, h):
         try:
@@ -529,7 +585,7 @@ def fit_to_screens(width, height, x, y, screens):
 def _remember_geometry(ctx, host, w, h):
     app = ctx.app
     win = host.window
-    if app is None or win is None or host._maximized:
+    if app is None or win is None or host._maximized or host.fullscreen:
         return
     try:
         x, y = win.x, win.y

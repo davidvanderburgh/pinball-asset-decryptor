@@ -341,6 +341,14 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   is installed. Batman and Iron Maiden use this mode to keep their tribute
   music and callouts from playing over the machine's audio; every creation,
   including a later LoadCoreFiles/PuPInit, uses the same silent shape.
+* **FlexDMD and UltraDMD never open** (PAD-1187): the machine's LCD is the
+  table's only display, so every `CreateObject("FlexDMD.FlexDMD")` and
+  `CreateObject("UltraDMD.DMDObject")` becomes a null object (`PadNoFlex`,
+  `PadNoUltra`) with every member the script uses. Before, a table whose map
+  did not set `flexdmd_stub` only had FlexDMD made optional, and on a PC
+  with FlexDMD installed John Wick's DMD window opened over the LCD. A map
+  sets `"flexdmd_stub": false` (or `"ultradmd_stub": false`) to keep the
+  table's own library.
 * **DOF stays on B2S.Server** (PAD-841): a tribute's `LoadEM` puts
   B2S.Server in `Controller`, and controller.vbs's `DOF` sub sends through
   `Controller.B2SSetData`. The bridge's Table1_Init keeps that object as

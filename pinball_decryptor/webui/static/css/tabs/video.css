@@ -171,6 +171,21 @@ html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 
 .vid-sound-play .i { width: 12px; height: 12px; }
 a.vid-sound-go { color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
 a.vid-sound-go:hover { color: var(--accent); }
+.vid-song-sync { margin: 2px 0 4px; }
 /* a mode's own row of a clip another mode plays too, under that mode's row */
 .vid-pairmark { color: var(--accent); margin-right: 6px; }
 .vid-rep.follow { color: var(--ink-3); font-style: italic; }
+
+/* PAD-1191 (Ben): a player full screen, as on YouTube - the clip fills the window (the app takes
+   the window full screen with it) and its bar sits along the bottom; a still pointer over a
+   playing clip hides the bar and the pointer.  Under menus (60), toasts and tooltips. */
+.vid-pane.vid-full, .vcm-tile.vid-full { position: fixed; inset: 0; z-index: 58; margin: 0; padding: 0; gap: 0;
+  border: 0; border-radius: 0; box-shadow: none; background: #000; display: flex; flex-direction: column; }
+.vid-full .vid-screen { flex: 1 1 auto; height: auto; min-height: 0; border: 0; border-radius: 0; background: #000; }
+.vid-full .vid-transport { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 22px 16px 10px;
+  background: linear-gradient(to top, rgba(0, 0, 0, .85), rgba(0, 0, 0, .55) 60%, rgba(0, 0, 0, 0));
+  transition: opacity .25s ease; }
+.vid-full .vid-transport .muted { color: #d0d4d9; }
+.vid-full.vid-idle { cursor: none; }
+.vid-full.vid-idle .vid-screen { cursor: none; }
+.vid-full.vid-idle .vid-transport { opacity: 0; }

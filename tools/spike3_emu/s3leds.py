@@ -9,7 +9,8 @@ hands each one here and this fills the same block, at padled.h's offsets, for
 the same reader (playfield.py). Only what the wire says: a lamp's level from
 the lamp builder's frames (leddecode.wide_decode_any, the swelf-generation
 grammar Spike 3 speaks - its commands are 0x80..0xbf), a coil's fire count and
-drive byte from `40 IDX power...`.
+drive byte from `40 IDX power...`, and what each coil is DRIVEN to (padled v5's
+drive table, PAD-1183: the window's Shaker panel times the shaker from it).
 
 A LAMP'S FADE (PAD-1189). Every lamp write carries a second channel, the
 time the board takes to fade from the lamp's old level to the new one
@@ -32,8 +33,8 @@ sys.path.insert(1, os.path.join(os.path.dirname(HERE), "spike2_emu"))
 import leddecode  # noqa: E402
 
 # VERSION 6: the `hi` plane is published (a board's channels past its first
-# 96). The version-5 drive table between `seen` and `hi` stays zero: a reader
-# times a drive from `until` changing, and zero never changes.
+# 96). The version-5 drive table between `seen` and `hi` is filled as Spike 2's
+# shim fills it (hwshim.c coil_drive_note; coilmap.drive reads it).
 MAGIC, VERSION, BYTES = 0x44454C50, 6, 16384
 NODES, IDX, COILS = 16, 96, 16
 GEN, DECODED, SKIPPED = 8, 12, 16
@@ -49,6 +50,15 @@ RING_UNIT_MS = float(os.environ.get("PAD_PF_FADE_UNIT_MS") or 12)
 SEEN = FADE_HEAD + 4 + 96 * 12              # 3232: seen[16][96]
 WIDE_DECODED = SEEN + NODES * IDX           # 4768
 WIDE_SKIPPED = WIDE_DECODED + 4
+DRIVE_T0 = 4776                             # padled.h v5, coilmap.DRIVE_*
+DRIVE_TPS = 4780
+DRIVE_UNTIL = 4784                          # u32[16][16], 0 = off
+DRIVE_PULSE_T = 5808                        # u16[16][16], board ticks
+DRIVE_HOLD_T = 6320
+DRIVE_PULSE_PWR = 6832
+DRIVE_HOLD_PWR = 7088
+DRIVE_FIRES, DRIVE_OFFS, DRIVE_RULE_FIRES = 7344, 7348, 7352
+TICKS_PER_S = 100                           # s3nodes.HWID: what every node claims
 HI = 7356                                   # hi[16][4 * 96], padled.h v6
 HI_BANKS = 4
 
@@ -62,6 +72,7 @@ class PadLed:
         os.close(fd)
         os.chmod(path, 0o644)
         struct.pack_into("<II", self.m, 0, MAGIC, VERSION)
+        struct.pack_into("<II", self.m, DRIVE_T0, 0, TICKS_PER_S)
         self.lamps = self.wide = self.wide_bad = self.fires = self.hi = self.fades = 0
 
     def _bump(self, off, n=1):
@@ -80,13 +91,47 @@ class PadLed:
             self._bump(COIL_GEN)
             self.fires += 1
 
+    def drive(self, node, idx, pulse_pwr=0, pulse_t=0, hold_pwr=0, hold_t=0, now_ms=None):
+        """One coil command into the drive table, as hwshim.c coil_drive_note:
+        `until` is a clock of ours (CLOCK_MONOTONIC ms, never 0 while on) that
+        a reader only watches CHANGE; the times stay in board ticks. All
+        zeros is an OFF (cmd 4d)."""
+        if not (0 <= node < NODES and 0 <= idx < COILS):
+            return
+        o = node * COILS + idx
+        until = 0
+        if pulse_pwr or hold_pwr:
+            now = int(time.monotonic() * 1000) if now_ms is None else now_ms
+            until = (now + (pulse_t + hold_t) * 1000 // TICKS_PER_S) & 0xFFFFFFFF or 1
+        struct.pack_into("<I", self.m, DRIVE_UNTIL + 4 * o, until)
+        struct.pack_into("<H", self.m, DRIVE_PULSE_T + 2 * o, pulse_t & 0xFFFF)
+        struct.pack_into("<H", self.m, DRIVE_HOLD_T + 2 * o, hold_t & 0xFFFF)
+        self.m[DRIVE_PULSE_PWR + o] = pulse_pwr & 0xFF
+        self.m[DRIVE_HOLD_PWR + o] = hold_pwr & 0xFF
+        self._bump(DRIVE_FIRES if until else DRIVE_OFFS)
+
     def frame(self, node, plain):
         """One node frame, unmasked: `cmd body... ck`."""
         if not plain or not 0 <= node < NODES:
             return
         cmd = plain[0]
+        if cmd == 0x40 and len(plain) >= 9:
+            # the 14-byte fire: [1] coil [2] pulse power [3..4] pulse ticks
+            # [5] hold power [6..7] hold ticks (hwshim.c coil_drive_decode)
+            self.fire(node, plain[1], plain[2])
+            self.drive(node, plain[1], plain[2], plain[3] | plain[4] << 8,
+                       plain[5], plain[6] | plain[7] << 8)
+            return
         if cmd == 0x40 and len(plain) >= 4:
             self.fire(node, plain[1], plain[2])
+            return
+        if cmd == 0x40 and len(plain) >= 2:
+            # the short 40: fire by its rule, which s3rules plays (and counts
+            # through fire()); the drive table only counts it, as Spike 2's
+            self._bump(DRIVE_RULE_FIRES)
+            return
+        if cmd == 0x4D and len(plain) >= 2:
+            self.drive(node, plain[1])            # OFF
             return
         if cmd & 0xC0 != 0x80:
             return

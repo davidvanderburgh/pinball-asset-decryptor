@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""s3keys.py - the game window's keyboard, onto a Spike 3 rig's switches
-(PAD-1090).
+"""s3keys.py - the game window's keyboard and the virtual playfield, onto a
+Spike 3 rig's switches, and the rig's switches back (PAD-1090, PAD-1183).
 
     s3keys.py SLOT PADSW_FILE SWITCH_LIST
 
@@ -20,41 +20,62 @@ On Spike 2 the guest shim merges those; here this does, into the slot's
 nodesw (s3bridge's live node inputs, LOGICAL: 1 = closed) and spi.in (the
 CPU board's SPI chain, ACTIVE LOW: node 0 index i = SPI bit i - 8).
 
-EDGES ONLY, as Spike 2's merge (last edge wins, per switch): a switch is
-written when the union of the sources that name it CHANGES, and never
-re-asserted - the ball model and s3press.py write the same switches, and a
-level rewritten 100 times a second would undo every ball they move.
+LAST EDGE WINS, PER SWITCH, as Spike 2's merge (PAD-1183). A switch moves
+when ONE of the sources that name it changes, to that source's new level,
+and is never re-asserted - the ball model and s3press.py write the same
+switches, and a level rewritten 100 times a second would undo every ball
+they move. It used to be the UNION of the sources, and that is wrong the
+moment two disagree: padglhost latches the coin door shut and a full trough
+in the keyboard's half at window open, so the playfield's door click (the
+scripts' half going 1 -> 0) never opened the door at all.
 
-AND THE ANSWER GOES BACK (PAD-1181): mrg[id] / mrg_gen are what Spike 2's
-guest shim publishes - the level each switch actually has - and every reader
-of the block takes its switch state from there: the playfield window's
-trough dots, its `balls 5/6 trough   lane 1   in play 0` line, Drain's
-grey-out, the key panel's lit rows. Nothing on a Spike 3 run wrote it, so
-the window fell back to the keyboard's own array: a trough forever full and
-no ball ever in the shooter lane, whatever the ball model had moved. This
-publishes the slot's live levels (nodesw, and spi.in for the CPU board's
-switches) there, by the same switch ids.
+THE SHIM'S OTHER JOBS ON SPIKE 2, done here for the same readers:
+
+  mrg[id]      what the GAME is handed: every switch's live level, read back
+               off nodesw / spi.in after the merge - so the window's dots, the
+               trough and the key panel show what the ball model and the board
+               rules did too, and padsw.set_confirmed can see a write land.
+               guest_t0 is stamped at attach, which is what tells the helpers
+               a game is there to take a write (padsw.merging).
+  spin[id]     the RIP (right-hold on a spinner): the switch alternates every
+               RIP_MS while it is set, an edge each time, so the game counts
+               spins (Spike 2's shim flips it per scan).
+  stop_*       the PAUSE (Pause / F9, either window): padglhost asks, as on a
+               Spike 2 app run (PAD_PAUSE_KEEPER=1, pausekeep.py), and this -
+               root, beside the game - SIGSTOPs / SIGCONTs the slot's game and
+               answers with the count and the generation served. A frozen game
+               is resumed if this exits.
 """
 import mmap
 import os
+import signal
 import struct
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(1, os.path.join(os.path.dirname(HERE), "spike2_emu"))
 import s3bridge  # noqa: E402
 
 BASE = "/var/tmp/pad-s3/slot%s"
 
-# padsw.h, field by field (unsigned = 4 bytes, PADSW_MAX_ID = 256)
+# padsw.h, field by field (unsigned = 4 bytes, PADSW_MAX_ID = 256); padsw.py
+# is the Python copy and tests/test_spike3_emu_bus.py pins these to it
 MAGIC = 0x53444150
+MAX_ID = 256
 OFF_HELD = 8
 OFF_SCR_HELD = 8 + 256 + 12 + 4
-OFF_MRG_GEN = OFF_SCR_HELD + 256          # 536: the merged answer's generation
-OFF_MRG = OFF_MRG_GEN + 4                 # 540: the merged answer, by switch id
-MAX_ID = 256
+OFF_MRG_GEN = OFF_SCR_HELD + MAX_ID          # 536
+OFF_MRG = OFF_MRG_GEN + 4                    # 540
+OFF_GUEST_T0 = 804
+OFF_SPIN = 812
 OFF_CAB = 1068
 OFF_SCR_CAB = OFF_CAB + 8
+OFF_STOP_WANT = 1096
+OFF_STOP_GEN = 1100
+OFF_STOP_N = 1104
+OFF_STOP_ACK = 1108
 CAB_NAMES = ("LEFT", "RIGHT", "START", "ACTION", "SELECT", "PLUS", "MINUS", "BACK")
 # the cabinet buttons' switches: by name where the title names them, the
 # service cluster by its SPI bits (CPU indices 8..11 on every title)
@@ -68,6 +89,9 @@ CAB_SWITCH = {
     "MINUS": ("SERVICE MINUS",),
     "BACK": ("SERVICE BACK",),
 }
+#: a rip's half period: one edge this often while the spinner is held. The
+#: game raises a scan per change at its ~100 Hz poll, so 30 ms is never missed
+RIP_MS = float(os.environ.get("PAD_S3_RIP_MS") or 30)
 
 
 def cab_targets(by_name):
@@ -81,86 +105,99 @@ def cab_targets(by_name):
     return out
 
 
+def game_pids(slot):
+    """The slot's game: comm `game` (the PAD_PIVOT copy of qemu, s3run.sh)
+    whose root overlay's upper layer is this slot's - s3save.sh's rule, so a
+    Pause in one rig never freezes another's."""
+    want = "upperdir=%s/root.up," % (BASE % slot)
+    out = []
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            with open("/proc/%s/comm" % d) as f:
+                if f.read().strip() != "game":
+                    continue
+            with open("/proc/%s/mountinfo" % d) as f:
+                if any(" / / " in ln and want in ln for ln in f):
+                    out.append(int(d))
+        except OSError:
+            pass
+    return out
+
+
 class Keys:
     def __init__(self, slot, padsw, switch_list):
+        self.slot = slot
         self.sd = BASE % slot
         self.ids = s3bridge.read_switch_list(switch_list)
         by_name = {name.upper(): (node, bit) for node, bit, name in self.ids.values()}
         self.cab = cab_targets(by_name)
         self.padsw = padsw
         self.mm = None
+        self.writable = False
         self.last = {}                       # (node, bit) -> closed, as last written
+        self.src = None                      # source -> level, as last read
+        self.mrg = None                      # the merged array as last published
+        self.stop_seen = None                # stop_gen as last served
+        self.frozen = []                     # pids this stopped
 
     def attach(self):
         if self.mm is None:
-            try:
-                f = open(self.padsw, "r+b")
-                self.mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_WRITE)
-                self.writable = True
-            except (OSError, ValueError):
-                try:                                 # read-only: keys still work
-                    f = open(self.padsw, "rb")
-                    self.mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-                    self.writable = False
+            for mode, acc in (("r+b", mmap.ACCESS_WRITE), ("rb", mmap.ACCESS_READ)):
+                try:
+                    with open(self.padsw, mode) as f:
+                        self.mm = mmap.mmap(f.fileno(), 0, access=acc)
+                    self.writable = acc == mmap.ACCESS_WRITE
+                    break
                 except (OSError, ValueError):
-                    return False
-        return struct.unpack_from("<I", self.mm, 0)[0] == MAGIC
+                    continue
+            if self.mm is None:
+                return False
+        if struct.unpack_from("<I", self.mm, 0)[0] != MAGIC:
+            return False
+        if self.writable and not struct.unpack_from("<I", self.mm, OFF_GUEST_T0)[0]:
+            # padsw.guest_ms's origin: CLOCK_MONOTONIC ms, as the shim's pad_ms
+            struct.pack_into("<I", self.mm, OFF_GUEST_T0,
+                             (time.monotonic_ns() // 1000000 - 1) & 0xFFFFFFFF or 1)
+        return True
 
-    def levels(self):
-        """{id: closed} - every switch's live level on the slot: nodesw for
-        the node boards (logical, 1 = closed), spi.in for the CPU board's
-        (active low; node 0 index i = SPI bit i - 8)."""
-        try:
-            with open(os.path.join(self.sd, "nodesw"), "rb") as f:
-                sw = f.read()
-        except OSError:
-            sw = b""
-        try:
-            with open(os.path.join(self.sd, "spi.in"), "rb") as f:
-                spi = f.read()
-        except OSError:
-            spi = b""
+    def sources(self):
+        """{source: (target (node, bit), level)} - every input the window's
+        block carries, one entry per writer and switch."""
+        m = self.mm
         out = {}
         for sid, (node, bit, _n) in self.ids.items():
-            if node == 0:
-                b = bit - 8
-                on = 0 <= b and b // 8 < len(spi) and not spi[b // 8] & (1 << (b % 8))
-            else:
-                o = 8 * node + bit // 8
-                on = 0 <= bit < 64 and o < len(sw) and bool(sw[o] & (1 << (bit % 8)))
-            out[sid] = bool(on)
+            out[("h", sid)] = ((node, bit), bool(m[OFF_HELD + sid]))
+            out[("s", sid)] = ((node, bit), bool(m[OFF_SCR_HELD + sid]))
+        for i, nb in self.cab.items():
+            out[("c", i)] = (nb, bool(m[OFF_CAB + i]))
+            out[("sc", i)] = (nb, bool(m[OFF_SCR_CAB + i]))
         return out
 
-    def publish(self):
-        """The live levels into mrg[] (module docstring); bumps mrg_gen when
-        one changed, and once at the start so readers switch over to it.
-        True when it wrote."""
-        if not getattr(self, "writable", False) or self.mm is None:
-            return False
-        m = self.mm
-        changed = not struct.unpack_from("<I", m, OFF_MRG_GEN)[0]
-        for sid, on in self.levels().items():
-            if 0 < sid < MAX_ID and m[OFF_MRG + sid] != int(on):
-                m[OFF_MRG + sid] = int(on)
-                changed = True
-        if changed:
-            gen = struct.unpack_from("<I", m, OFF_MRG_GEN)[0]
-            struct.pack_into("<I", m, OFF_MRG_GEN, (gen + 1) & 0xFFFFFFFF or 1)
-        return changed
-
     def wanted(self):
-        """{(node, bit): closed} - every switch the window's sources name."""
-        m = self.mm
+        """{(node, bit): closed} - the merge: on the first look the union of
+        every source (what the window opened with: the door and trough
+        latches), after that each switch follows the LAST source that moved."""
+        src = self.sources()
         want = {}
-        for sid, (node, bit, _n) in self.ids.items():
-            on = m[OFF_HELD + sid] or m[OFF_SCR_HELD + sid]
-            want[(node, bit)] = want.get((node, bit), False) or bool(on)
-        for i, nb in self.cab.items():
-            if m[OFF_CAB + i] or m[OFF_SCR_CAB + i]:
-                want[nb] = True
-            else:
-                want.setdefault(nb, False)
+        if self.src is None:
+            for nb, on in src.values():
+                want[nb] = want.get(nb, False) or on
+        else:
+            want = dict(self.want)
+            for k, (nb, on) in src.items():
+                if self.src.get(k) != on:
+                    want[nb] = on
+        self.src = {k: on for k, (_nb, on) in src.items()}
+        self.want = want
         return want
+
+    def spinning(self):
+        """{(node, bit)} the window is ripping (padsw spin[])."""
+        m = self.mm
+        return {(node, bit) for sid, (node, bit, _n) in self.ids.items()
+                if m[OFF_SPIN + sid]}
 
     def apply(self, node, bit, closed):
         if node == 0:                       # the CPU board: the SPI chain
@@ -200,19 +237,115 @@ class Keys:
         except OSError:
             return False
 
-    def step(self):
+    def step(self, now=None):
         """Apply every switch whose wanted state changed; returns the edges.
         Held back (not dropped) while Guided Setup is being walked: what the
         keys say once it is done is applied then."""
         if self.walking():
             return []
+        now = time.monotonic() if now is None else now
+        want = self.wanted()
+        rip = self.spinning()
+        if rip:
+            phase = int(now * 1000 / RIP_MS) & 1 == 0
+            want = dict(want)
+            for nb in rip:
+                want[nb] = phase
         edges = []
-        for nb, on in self.wanted().items():
+        for nb, on in want.items():
             if self.last.get(nb, False) != on:
                 self.last[nb] = on
                 self.apply(nb[0], nb[1], on)
                 edges.append((nb, on))
+        self.publish()
         return edges
+
+    def live(self):
+        """{(node, bit): closed} for every switch, off nodesw and spi.in as
+        the bridge answers the game - whoever moved it."""
+        try:
+            with open(os.path.join(self.sd, "nodesw"), "rb") as f:
+                nsw = f.read()
+            with open(os.path.join(self.sd, "spi.in"), "rb") as f:
+                spi = f.read()
+        except OSError:
+            return None
+        out = {}
+        for node, bit, _n in self.ids.values():
+            if node == 0:
+                i = bit - 8
+                out[(node, bit)] = (0 <= i < 8 * len(spi)
+                                    and not spi[i // 8] >> (i % 8) & 1)
+            else:
+                o = 8 * node + bit // 8
+                out[(node, bit)] = (0 <= bit < 64 and o < len(nsw)
+                                    and bool(nsw[o] >> (bit % 8) & 1))
+        return out
+
+    def publish(self):
+        """mrg[]: what the game is handed, for the window and the helpers
+        (PAD-1181 / PAD-1183: the trough dots, the BALLS line, Drain's
+        grey-out, the key panel's lit rows, padsw.set_confirmed). mrg_gen
+        moves on the first publish, so readers switch over to it, and then
+        only when a level changed. True when it wrote."""
+        if not self.writable or self.mm is None:
+            return False
+        live = self.live()
+        if live is None:
+            return False
+        arr = bytearray(MAX_ID)
+        for sid, (node, bit, _n) in self.ids.items():
+            if 0 <= sid < MAX_ID:
+                arr[sid] = 1 if live.get((node, bit)) else 0
+        if arr == self.mrg:
+            return False
+        self.mm[OFF_MRG:OFF_MRG + MAX_ID] = bytes(arr)
+        struct.pack_into("<I", self.mm, OFF_MRG_GEN,
+                         (struct.unpack_from("<I", self.mm, OFF_MRG_GEN)[0] + 1) & 0xFFFFFFFF or 1)
+        self.mrg = arr
+        return True
+
+    # ---- the Pause keeper ------------------------------------------------
+    def pause_serve(self, pids=None):
+        """Serve one padglhost stop request (stop_want / stop_gen), if a new
+        one is waiting: SIGSTOP or SIGCONT the slot's game, then answer
+        stop_n and stop_ack, in that order (padglhost reads the ack). Returns
+        what was done, or None."""
+        if not self.writable:
+            return None
+        gen = struct.unpack_from("<I", self.mm, OFF_STOP_GEN)[0]
+        if self.stop_seen is None:
+            # requests from before this attach are not replayed
+            self.stop_seen = struct.unpack_from("<I", self.mm, OFF_STOP_ACK)[0]
+        if gen == self.stop_seen:
+            return None
+        stop = bool(struct.unpack_from("<I", self.mm, OFF_STOP_WANT)[0])
+        if stop:
+            targets = game_pids(self.slot) if pids is None else pids
+        else:
+            targets = self.frozen or (game_pids(self.slot) if pids is None else pids)
+        n = 0
+        sig = getattr(signal, "SIGSTOP" if stop else "SIGCONT", None)
+        for pid in targets if sig is not None else ():
+            try:
+                os.kill(pid, sig)
+                n += 1
+            except OSError:
+                pass
+        self.frozen = list(targets) if stop and n else []
+        struct.pack_into("<I", self.mm, OFF_STOP_N, n)
+        struct.pack_into("<I", self.mm, OFF_STOP_ACK, gen)
+        self.stop_seen = gen
+        return ("stop" if stop else "cont", n)
+
+    def thaw(self):
+        """Never leave the game frozen behind this process."""
+        for pid in self.frozen:
+            try:
+                os.kill(pid, getattr(signal, "SIGCONT", signal.SIGTERM))
+            except OSError:
+                pass
+        self.frozen = []
 
 
 def main():
@@ -222,25 +355,42 @@ def main():
     k = Keys(*sys.argv[1:4])
     print("[s3keys] %d switches, cabinet buttons %s" % (
         len(k.ids), {CAB_NAMES[i]: nb for i, nb in sorted(k.cab.items())}), flush=True)
+
+    def bye(*_a):
+        k.thaw()
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, bye)
+    signal.signal(signal.SIGINT, bye)
     while not k.attach():
         time.sleep(0.5)
-    print("[s3keys] window keyboard attached (%s)" % k.padsw, flush=True)
+    print("[s3keys] window keyboard attached (%s%s)" % (
+        k.padsw, "" if k.writable else ", read-only: no switch state back, no Pause"), flush=True)
     names = {(n, b): nm for n, b, nm in k.ids.values()}
-    if not getattr(k, "writable", False):
-        print("[s3keys] the block is read-only here: the window will not see the live switches",
-              flush=True)
-    n = 0
-    while True:
-        n += 1
-        if n % 5 == 0:                       # 20 Hz: the window reads at 10
-            k.publish()
-        for (nb, on) in k.step():
-            # wall-clock time: lines up with the bridge's [scan] trace and a
-            # screen recording (PAD-1090: "one press, the menu ran away")
-            print("%s [s3keys] %s %s" % (time.strftime("%H:%M:%S") + ".%03d" % (time.time() % 1 * 1000),
-                                         names.get(nb, "node %d bit %d" % nb), "closed" if on else "open"),
-                  flush=True)
-        time.sleep(0.01)
+    ripping = set()
+    try:
+        while True:
+            rip = k.spinning()
+            for nb in rip ^ ripping:
+                print("%s [s3keys] %s %s" % (time.strftime("%H:%M:%S"),
+                                             names.get(nb, "node %d bit %d" % nb),
+                                             "ripping" if nb in rip else "rip ended"), flush=True)
+            ripping = rip
+            for (nb, on) in k.step():
+                if nb in rip:
+                    continue                 # a rip's edges are not news
+                # wall-clock time: lines up with the bridge's [scan] trace and a
+                # screen recording (PAD-1090: "one press, the menu ran away")
+                print("%s [s3keys] %s %s" % (time.strftime("%H:%M:%S") + ".%03d" % (time.time() % 1 * 1000),
+                                             names.get(nb, "node %d bit %d" % nb), "closed" if on else "open"),
+                      flush=True)
+            got = k.pause_serve()
+            if got:
+                print("%s [s3keys] pause: %s %d game process(es)" % (
+                    time.strftime("%H:%M:%S"), "froze" if got[0] == "stop" else "resumed", got[1]),
+                    flush=True)
+            time.sleep(0.01)
+    finally:
+        k.thaw()
 
 
 if __name__ == "__main__":

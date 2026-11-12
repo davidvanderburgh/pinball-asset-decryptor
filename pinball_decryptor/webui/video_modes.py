@@ -71,6 +71,11 @@ SOUNDS_HEAD = "Sounds the game plays with this clip (read from its program):"
 SOUNDS_MAX = 8
 SOUNDS_HOW = {"record": "kept with the clip", "next": "asked for right after it",
               "name": "named after it"}
+#: PAD-1190: a clip's song where the game's program is not read (JJP)
+SONG_HEAD = "The song that goes with this clip (a sound named after it, about as long):"
+SONG_FOOT = ("Matched by the files' names and lengths. Tick \"Play it with the clip\" to hear "
+             "it while either player plays.")
+SONGS_MAX = 3
 SOUNDS_FOOT = ("Extract the card again to see which sound files these are: the extract writes "
                "sound_requests.tsv.")
 #: PAD-827: the callout's part for what the emulator saw the game do with the clip
@@ -147,6 +152,7 @@ class ModesMixin:
         self._m_run += 1
         self._m_clips = None
         self._m_key = None
+        self._s_cache = None          # PAD-1190: clip songs of the project
         self._m_filter = ""
         self._m_drop_virtual()
         self._m_clear_state()
@@ -164,7 +170,11 @@ class ModesMixin:
 
     def _m_kick(self, project):
         """After a scan: read which mode plays each clip, once per card (Stern only)."""
-        if self._mfr_key() != "stern" or not project:
+        # (a Spike 2 game program's modes: a Spike 3 card has none to read,
+        # PAD-1186 - its capabilities carry no ``modes``)
+        caps = getattr(getattr(self, "mfr", None), "capabilities", None)
+        if (self._mfr_key() != "stern" or not project
+                or not getattr(caps, "modes", False)):
             self._m_reset()
             return
         card = self._m_card(project)
@@ -557,6 +567,8 @@ class ModesMixin:
     def _m_sounds(self, rel):
         """The callout's sounds part for the row on show, or None."""
         clips = self._m_clips
+        if rel and self._mfr_key() != "stern":
+            return self._s_songs(rel)          # PAD-1190
         if not rel or clips is None:
             return None
         out = {"rel": rel, "head": SOUNDS_HEAD, "items": [], "more": "", "maybe_head": "",
@@ -603,6 +615,54 @@ class ModesMixin:
         if any(not it["rel"] for it in out["items"] + out["maybe"]) and not self._m_sound_names()[0]:
             out["foot"] = SOUNDS_FOOT
         return out
+
+    # -- PAD-1190: the song a long clip plays with, where no program is read ---------------
+    def _s_songs(self, rel):
+        """The callout's sounds part for a clip of a maker whose program is not read (JJP):
+        the long sound named after it and about as long, or None. Measured on a worker the
+        first time; the callout comes up when it is."""
+        from ..core import clip_songs as CS
+        slot = self._by_rel.get(rel)
+        secs = float(getattr(getattr(slot, "info", None), "duration", 0) or 0)
+        if secs < CS.MIN_SECONDS or not self._scan_dir:
+            return None
+        cache = getattr(self, "_s_cache", None)
+        if cache is None or cache.get("") != self._scan_dir:
+            cache = self._s_cache = {"": self._scan_dir}
+        key = (rel, round(secs, 2))
+        if key not in cache:
+            cache[key] = None
+            project = self._scan_dir
+
+            def _work():
+                try:
+                    if "audio" not in cache:
+                        cache["audio"] = CS.audio_files(project)
+                    got = CS.songs_for(project, rel, secs, audio=cache["audio"])
+                except Exception:                           # noqa: BLE001 - never break the tab
+                    got = []
+
+                def _apply():
+                    if getattr(self, "_s_cache", None) is not cache:
+                        return
+                    cache[key] = got
+                    if self._current == rel:
+                        self._update_note(rel)
+                self.ctx.loop.post(_apply)
+            threading.Thread(target=_work, daemon=True, name="video-songs").start()
+        got = cache.get(key)
+        if not got:
+            return None
+        items = []
+        for srel, ssecs in got[:SONGS_MAX]:
+            name = os.path.basename(srel)
+            items.append({"text": name, "how": CS.how_words(secs, ssecs),
+                          "tip": {"head": name, "lines": [srel, "Length %s (the clip: %s)"
+                                                          % (CS.clock(ssecs), CS.clock(secs))]},
+                          "rel": srel, "path": os.path.join(self._scan_dir, *srel.split("/")),
+                          "sync": True})
+        return {"rel": rel, "head": SONG_HEAD, "items": items, "more": "", "maybe_head": "",
+                "maybe": [], "maybe_more": "", "none": "", "foot": SONG_FOOT, "sync": True}
 
     @rpc
     def open_sound(self, rel):

@@ -412,6 +412,27 @@ def _sounds_unread_why(missing, job="extract"):
 # --------------------------------------------------------------------------
 # locating + extracting the card's game_real / image.bin
 # --------------------------------------------------------------------------
+def _spike3_card(path):
+    """Is the card image at *path* a Stern Spike 3 secure card (PAD-1186)?"""
+    try:
+        from . import spike3
+        return spike3.is_spike3_card(_lp(path))
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+#: PAD-1186: set while the write core works on a Spike 3 volume, for the
+#: checks deep inside it that see only files (:func:`_intact_verdict`)
+_SPIKE3_RUN = threading.local()
+
+
+def _is_spike3(disk_f):
+    """Is *disk_f* a Stern Spike 3 games volume (PAD-1186)?  Its sounds are
+    plain PCM that spike3_sound writes itself, and it has no Spike 2 game
+    program, so the write core leaves both alone."""
+    return bool(getattr(disk_f, "pad_spike3", False))
+
+
 def _locate(disk_f, partitions):
     """Find the Spike 2 game directory (the one holding ``image.bin``) and its
     firmware ELF across the card's ext partitions (largest first).  Returns
@@ -433,6 +454,11 @@ def _locate(disk_f, partitions):
         if img_ino is not None and img_only is None:
             img_only = (r, r.read_inode(img_ino))
     if img_only is not None:
+        if _is_spike3(disk_f):
+            # PAD-1186: a Spike 3 games volume (spike3_card.GamesVolume) has
+            # no Spike 2 program beside image.bin - its game is an aarch64
+            # Godot program, and nothing here reads or patches it
+            return img_only[0], None, img_only[1]
         raise FileNotFoundError(
             "Found image.bin but not the game firmware ELF next to it on the "
             "card.")
@@ -1957,6 +1983,11 @@ def rebuild_scene_layouts_from_card(image_path, output_dir, log=None,
     next to the game ELF), so the card paths it writes match the ones already
     in the manifests."""
     log = log or (lambda *a, **k: None)
+    if open_disk is None and partitions is None and _spike3_card(image_path):
+        # PAD-1186: a Spike 3 card's games volume, decrypted
+        from . import spike3_card
+        vol = spike3_card.open_games(image_path)
+        open_disk, partitions = (lambda: vol), spike3_card.volume_parts(vol)
     if partitions is None:
         partitions = _linux_partitions(image_path)
     disk_f = (open_disk() if open_disk is not None
@@ -3593,6 +3624,26 @@ def _intact_copy_source(src, staged, fname, slot_size, log, verdict=None):
     return _accept() if ok else _reject(why)
 
 
+def _colour_baked_videos(assets_dir, video_edits, disk_f):
+    """PAD-1186: the ``video/<name>`` rels whose staged copy has a color
+    profile baked in, on a Spike 3 card, where the profile reaches the
+    machine only that way (its plugin's colour_profile_on_display is False):
+    the project's profile while one is active, else each clip's own (as
+    video_slots._staging_items bakes them).  Their user files never go on
+    intact, which would drop the colors.  A Spike 2 card's whole-screen
+    profile is its game program's shaders, so nothing changes there."""
+    if not _is_spike3(disk_f):
+        return set()
+    rels = ["video/" + f for f, _cp, _s in video_edits]
+    try:
+        from ...core import colour_profile as _colour
+        if _colour.active(assets_dir) is not None:
+            return set(rels)
+        return set(_colour.asset_map(assets_dir, "videos", rels) or {})
+    except Exception:                                   # noqa: BLE001
+        return set()
+
+
 def _intact_verdict(src, staged):
     """``(True, None)`` when the user's file *src* may go on the card as it
     is in place of the clip *staged* was converted for, else ``(False, why)``
@@ -3609,7 +3660,12 @@ def _intact_verdict(src, staged):
     if info is None:
         return True, None     # no ffprobe/ffmpeg — the container check stands
     codec = (info.vcodec or "").lower()
-    if codec and codec != "h264":
+    if getattr(_SPIKE3_RUN, "on", False):
+        # PAD-1186: a Spike 3 game opens the Pi 4's HEVC and H.264 decoders
+        if codec and codec not in ("h264", "hevc"):
+            return False, ("it's %s and the machine plays H.264 and HEVC"
+                           % codec.upper())
+    elif codec and codec != "h264":
         return False, "it's %s and Spike 2 plays H.264" % codec.upper()
     if (info.pix_fmt or "") not in _video.SAFE_PIX_FMTS:
         return False, ("it's %s and the machine's decoder handles only 8-bit "
@@ -3904,6 +3960,13 @@ def _changed_radium_text(assets_dir):
         # padding too: its words are the edit
         out[path] = [(o, r.strip(" ") if path.endswith(".radium") and _old_padding(r)
                       else r) for o, r in pairs]
+    if _source_card_is_stock(assets_dir):
+        # PAD-1186: a stock card's own lines carry runs of spaces too (the
+        # status bar's "CREDITS 00     ", Deadpool's "Credits 50 1/4    ");
+        # repairing them moved the spaces by the box's alignment and shifted
+        # the line on screen in every build.  Only a card a Write padded has
+        # anything to repair.
+        return out
     try:
         rows = text_manifest.load(assets_dir)
     except Exception:                                  # noqa: BLE001
@@ -3915,6 +3978,31 @@ def _changed_radium_text(assets_dir):
             continue
         out.setdefault(path, []).append((orig, orig.strip(" ")))
     return out
+
+
+def _source_card_is_stock(assets_dir):
+    """Is *assets_dir* known to be extracted from a card no Write built?
+    Its extract record says so (the official-release verdict), or names a
+    card that is still where it was with no build record beside it (every
+    Build since v0.214.0 leaves one, before the padding PAD-412 repairs was
+    ever written).  ``False`` when it cannot tell (no record, the card
+    gone): the repair then runs as before.  A Spike 3 card no Write before
+    PAD-1186 ever touched counts the same way."""
+    from ...core import extract_source
+    try:
+        rec = extract_source.read_extract_source(assets_dir)
+    except Exception:                                  # noqa: BLE001
+        return False
+    if not rec:
+        return False
+    stock = rec.get("stock")
+    if isinstance(stock, dict) and stock.get("status") == "modified":
+        return False
+    if isinstance(stock, dict) and stock.get("status") == "official":
+        return True
+    path = rec.get("input_path") or ""
+    return (bool(path) and os.path.isfile(path)
+            and not os.path.exists(path + BUILD_MANIFEST_SUFFIX))
 
 
 def _old_padding(text):
@@ -7779,6 +7867,21 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     (:func:`_hole_files_whole`).  An override set takes them itself
     (write_overrides), and a card written in place (*dest_is_device*) can't
     grow a file, so there :func:`_place` refuses them."""
+    was3 = getattr(_SPIKE3_RUN, "on", False)
+    _SPIKE3_RUN.on = _is_spike3(disk_f)
+    try:
+        return _compute_patches_rounds(
+            disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
+            label=label, dest_is_device=dest_is_device,
+            boot_screen=boot_screen, sound_ok=sound_ok)
+    finally:
+        _SPIKE3_RUN.on = was3
+
+
+def _compute_patches_rounds(disk_f, parts, assets_dir, log, progress, cancel,
+                            phase=None, label=None, dest_is_device=False,
+                            boot_screen=True, sound_ok=None):
+    """:func:`_compute_patches`' body (its hole and host-exclusion rounds)."""
     own = (getattr(_HOLE_WRITES, "writes", None) is None
            and not dest_is_device)
     if own:
@@ -7967,13 +8070,20 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # Per-song music banks (music_catNN_*.wav) edited by the user — re-encoded
     # back into their image-scNN.bin banks (see _compute_music_patches).
     music_edits = _changed_music_banks(assets_dir, baseline)
+    if _is_spike3(disk_f):
+        # PAD-1186: a Spike 3 card's sounds are written by spike3_write
+        # (plain PCM in image.bin), never through the Spike 2 codec
+        audio_edits, music_edits = type(audio_edits)(), type(music_edits)()
     # Edited LCD display strings (text/strings.tsv rows where replacement !=
     # original) — patched size-neutral, in place, into their .radium scenes.
     text_edits = _changed_radium_text(assets_dir)
     # PAD-305: the color profile, applied to everything the game draws by
     # patching its drawing shaders (plugins/stern/shader_profile.py) - a game
     # program edit with no file of the project behind it
-    shader_prof = _shader_colour_profile(assets_dir)
+    # PAD-1186: a Spike 3 card's profile went into the replaced files as
+    # they were staged (colour_profile_on_display is Spike 2's alone)
+    shader_prof = (None if _is_spike3(disk_f)
+                   else _shader_colour_profile(assets_dir))
     # PAD-444: a mode's own copy of a clip it shares with another mode - a new
     # clip in the video bank and that mode's references in the game program
     # moved to its name (plugins/stern/clip_modes.py)
@@ -9877,13 +9987,19 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             # oversized ones grow their slot instead of being crushed to fit.
             from ...core import staged_changes as _sc
             _saved = _sc.load(assets_dir)
+            _verdicts = dict((space_chk.verdicts if space_chk is not None
+                              else None) or {})
+            for _rel in _colour_baked_videos(assets_dir, video_edits, disk_f):
+                # the converted copy goes on whole: it alone has the colors
+                _verdicts[_rel[len("video/"):]] = (
+                    False, "it would go on without this project's color "
+                    "profile, which only the converted copy carries")
             t0 = time.monotonic()
             video_patches, _vskip, video_grow_jobs = _prepare_video_patches(
                 reader, video_edits, work, log, cancel,
                 originals=_saved.get("video") or {},
                 dest_is_device=dest_is_device,
-                verdicts=(space_chk.verdicts if space_chk is not None
-                          else None),
+                verdicts=_verdicts or None,
                 grow_check=(space_chk.grow_check if space_chk is not None
                             else None))
             if cancel():

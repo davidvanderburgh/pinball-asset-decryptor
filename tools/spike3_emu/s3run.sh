@@ -183,8 +183,14 @@ if [ "$BRIDGE" = 1 ]; then
         # PAD_PAUSE_KEEPER=1 (PAD-1183): Pause / F9 - in this window or the
         # playfield's - is asked of s3keys.py, which runs as root beside the
         # game and stops it; the renderer is the desktop user and may not
+        # A second screen (PAD-1199: Fallout's Pip-Boy, on the other HDMI
+        # output) gets the renderer's display-2 window, opened at half the
+        # render size beside the game window - it renders 1920x1080 like the
+        # backbox, and a second full-size window would cover the desktop.
+        W2=${PAD_GL2_WIN_W:-$(( ${PAD_S3_W:-1920} / 2 ))}
+        H2=${PAD_GL2_WIN_H:-$(( ${PAD_S3_H:-1080} / 2 ))}
         RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/dump/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game
-              PAD_PAUSE_KEEPER=1)
+              PAD_GL2_WIN_W=$W2 PAD_GL2_WIN_H=$H2 PAD_PAUSE_KEEPER=1)
         # AS THE DESKTOP'S USER, NOT ROOT (watch.sh learned it first): as
         # root, padglhost cannot attach to the WSLg X server's shared memory -
         # "MESA: error: Failed to attach to x11 shm" on repeat, 0.5 fps, a

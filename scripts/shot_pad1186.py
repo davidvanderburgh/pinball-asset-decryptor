@@ -243,7 +243,8 @@ def e2e(run, page, project, build, files):
     run.api("ui.select_tab", "text")
     rows = run.wait_rows("text")
     print("text rows:", len(rows), flush=True)
-    idx = next(i for i, r in enumerate(rows) if r.get("original") == "GAME NAME")
+    idx = next(i for i, r in enumerate(rows)
+               if (r.get("o") or r.get("original")) == "GAME NAME")
     print("  text.select", idx, run.api("text.select", idx), flush=True)
     time.sleep(1)
     print("  text.apply", run.api("text.apply", "PAD 1186"), flush=True)
@@ -269,6 +270,55 @@ def e2e(run, page, project, build, files):
     shot(page, os.path.join(out, "after_write_done.png"))
 
 
+def pass2(run, page, project, build):
+    """The second pass, on the project ``e2e`` made: Scenes hides the
+    credits line of the attract screens' status bar (scene 394c4a03, layer
+    LinkedCreditsTextSymbol_instance), Color profile takes the green out of
+    the replaced pictures and videos, and Write builds the card again."""
+    out = run.out
+    run.api("ui.pick_manufacturer", "stern")
+    run.api("ui.select_tab", "extract")
+    run.answer([CARD])
+    run.api("extract.browse_input")
+    time.sleep(3)
+    run.answer([project])
+    run.api("extract.browse_output")
+    time.sleep(3)
+
+    run.api("ui.select_tab", "scenes")
+    t0 = time.time()
+    rows = []
+    while time.time() - t0 < 300 and not rows:
+        rows = [r for r in (run.st("text_scenes").get("scenes") or [])
+                if "394c4a03" in r.get("d", "")]
+        time.sleep(2)
+    d = rows[0]["d"]
+    print("  text_scenes.select", d, run.api("text_scenes.select", d), flush=True)
+    time.sleep(4)
+    print("  text_scenes.tree_visible 3570 off",
+          run.api("text_scenes.tree_visible", 3570, False), flush=True)
+    time.sleep(4)
+    shot(page, os.path.join(out, "after_scenes_edit.png"))
+
+    run.api("ui.select_tab", "color")
+    time.sleep(3)
+    print("  color.set_params", run.api("color.set_params",
+                                        {"name": "PAD-1186 less green",
+                                         "gain": [1.0, 0.3, 1.0]}), flush=True)
+    time.sleep(3)
+    shot(page, os.path.join(out, "after_colors_edit.png"))
+
+    run.api("ui.select_tab", "write")
+    time.sleep(3)
+    run.answer([build])
+    print("  build location", run.api("write.change_build_location"), flush=True)
+    time.sleep(4)
+    shot(page, os.path.join(out, "after_write_pending2.png"))
+    print("  write.primary", run.api("write.primary"), flush=True)
+    run.wait_idle("build", timeout=7200, settle=5)
+    shot(page, os.path.join(out, "after_write_done2.png"))
+
+
 def main():
     tree, out, mode = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2]), sys.argv[3]
     os.makedirs(out, exist_ok=True)
@@ -283,6 +333,8 @@ def main():
             if mode == "rail":
                 rail(run, page, sys.argv[4] if len(sys.argv) > 4 else "",
                      os.path.join(out, sys.argv[5] if len(sys.argv) > 5 else "rail.png"))
+            elif mode == "pass2":
+                pass2(run, page, sys.argv[4], sys.argv[5])
             else:
                 e2e(run, page, sys.argv[4], sys.argv[5], sys.argv[6])
             browser.close()

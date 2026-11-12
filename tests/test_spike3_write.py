@@ -243,21 +243,57 @@ def test_from_parts_reads_like_the_file(tmp_path):
 
 # -- growing a file through dm-crypt --------------------------------------------
 
-def test_grow_script_opens_the_volume_with_its_key():
+def test_grow_script_maps_the_volume_with_its_key():
+    """The PAD Runtime image has no cryptsetup: the script carries
+    core/dmcrypt.py and maps the data segment with python3 (device-mapper
+    ioctls), mounts the mapping, and closes it on the way out."""
     from pinball_decryptor.core import ext4_grow
     key = bytes(range(64))
+    luks = {"key": key, "offset": 16 << 20, "sector_size": 512,
+            "cipher": "aes-xts-plain64"}
     s = ext4_grow._bash_script(1 << 30, [("pk/image.bin", "/w/image.bin")],
-                               "/mnt/c/out.raw", luks_key=key,
-                               part_size=1 << 32)
+                               "/mnt/c/out.raw", luks=luks, part_size=1 << 32)
     assert "--sizelimit %d" % (1 << 32) in s
-    assert 'cryptsetup open --type luks2 --volume-key-file "$KF"' in s
-    assert 'mount /dev/mapper/"$DM" "$MP"' in s
+    assert not [ln for ln in s.splitlines() if ln.lstrip().startswith(
+        ("cryptsetup", "dmsetup", "[ -n \"$DM\" ] && cryptsetup"))]
+    seg = (16 << 20) // 512
+    assert ('python3 "$DMPY" open "$DM" "$LOOP" %d %d "$KF" 512'
+            % (seg, (1 << 32) // 512 - seg)) in s
+    assert 'mount "$NODE" "$MP"' in s
+    assert "def open_crypt(" in s and ext4_grow._DMPY_EOF in s
     assert "\\x00\\x01\\x02" in s and key.hex() not in s
-    assert 'cryptsetup close "$DM"' in s and "PAD_GROW_NOCRYPT" in s
+    assert 'python3 "$DMPY" close "$DM"' in s and "PAD_GROW_NOCRYPT" in s
     assert 'cp /w/image.bin "$MP"/pk/image.bin' in s
     # the plain script is the old one
     plain = ext4_grow._bash_script(4096, [("a", "/b")], "/c")
-    assert "cryptsetup" not in plain and 'mount "$LOOP" "$MP"' in plain
+    assert "dmcrypt" not in plain and 'mount "$LOOP" "$MP"' in plain
+    # a cipher the helper does not map is refused, not mapped wrong
+    with pytest.raises(ext4_grow.Ext4GrowUnavailable, match="aes-cbc"):
+        ext4_grow._bash_script(0, [("a", "/b")], "/c", part_size=1 << 30,
+                               luks=dict(luks, cipher="aes-cbc-essiv:sha256"))
+
+
+def test_dmcrypt_ioctl_layout_and_table():
+    """struct dm_ioctl is 312 bytes, dm_target_spec 40; the crypt table
+    names the cipher, the key, the device and the data offset, padded to 8."""
+    from pinball_decryptor.core import dmcrypt as D
+    assert D._DM_SIZE == 312 and D._SPEC_SIZE == 40
+    assert D._ioc(3) == 0xC138FD03                    # DM_DEV_CREATE
+    t = D.crypt_table("/dev/loop7", 32768, 1000, bytes(range(64)))
+    import struct as _s
+    start, length, status, nxt, typ = _s.unpack(D._SPEC_FMT, t[:40])
+    assert (start, length, nxt, typ.rstrip(b"\0")) == (0, 1000, len(t), b"crypt")
+    assert len(t) % 8 == 0
+    params = t[40:].rstrip(b"\0").decode()
+    assert params == "aes-xts-plain64 %s 0 /dev/loop7 32768" % bytes(range(64)).hex()
+    t4k = D.crypt_table("/dev/loop7", 0, 8, b"k" * 64, sector_size=4096)
+    assert t4k[40:].rstrip(b"\0").endswith(b" 1 sector_size:4096")
+    h = D._header("pad_s3_1", 312)
+    f = _s.unpack(D._DM_FMT, h)
+    assert f[:5] == (4, 0, 0, 312, 312) and f[11].rstrip(b"\0") == b"pad_s3_1"
+    # huge_encode_dev of 254:0 and 254:300
+    assert D._decode_dev((254 << 8) | 0) == (254, 0)
+    assert D._decode_dev(((300 & 0xff) | (254 << 8) | ((300 & ~0xff) << 12))) == (254, 300)
 
 
 def test_grow_refuses_an_encrypted_card_where_debugfs_writes(monkeypatch, tmp_path):
@@ -267,7 +303,8 @@ def test_grow_refuses_an_encrypted_card_where_debugfs_writes(monkeypatch, tmp_pa
     monkeypatch.setattr(ext4_grow, "uses_debugfs", lambda platform=None: True)
     with pytest.raises(ext4_grow.Ext4GrowUnavailable, match="dm-crypt"):
         ext4_grow.grow_files(str(tmp_path / "c.raw"), 0, [("a", str(src))],
-                             luks_key=b"k" * 64)
+                             luks={"key": b"k" * 64, "offset": 16 << 20},
+                             part_size=1 << 30)
 
 
 # -- the card store tells a rebuilt card from the last ---------------------------

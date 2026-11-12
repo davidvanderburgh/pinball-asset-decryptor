@@ -421,6 +421,11 @@ def _spike3_card(path):
         return False
 
 
+#: PAD-1186: set while the write core works on a Spike 3 volume, for the
+#: checks deep inside it that see only files (:func:`_intact_verdict`)
+_SPIKE3_RUN = threading.local()
+
+
 def _is_spike3(disk_f):
     """Is *disk_f* a Stern Spike 3 games volume (PAD-1186)?  Its sounds are
     plain PCM that spike3_sound writes itself, and it has no Spike 2 game
@@ -3635,7 +3640,12 @@ def _intact_verdict(src, staged):
     if info is None:
         return True, None     # no ffprobe/ffmpeg — the container check stands
     codec = (info.vcodec or "").lower()
-    if codec and codec != "h264":
+    if getattr(_SPIKE3_RUN, "on", False):
+        # PAD-1186: a Spike 3 game opens the Pi 4's HEVC and H.264 decoders
+        if codec and codec not in ("h264", "hevc"):
+            return False, ("it's %s and the machine plays H.264 and HEVC"
+                           % codec.upper())
+    elif codec and codec != "h264":
         return False, "it's %s and Spike 2 plays H.264" % codec.upper()
     if (info.pix_fmt or "") not in _video.SAFE_PIX_FMTS:
         return False, ("it's %s and the machine's decoder handles only 8-bit "
@@ -7805,6 +7815,21 @@ def _compute_patches(disk_f, parts, assets_dir, log, progress, cancel,
     (:func:`_hole_files_whole`).  An override set takes them itself
     (write_overrides), and a card written in place (*dest_is_device*) can't
     grow a file, so there :func:`_place` refuses them."""
+    was3 = getattr(_SPIKE3_RUN, "on", False)
+    _SPIKE3_RUN.on = _is_spike3(disk_f)
+    try:
+        return _compute_patches_rounds(
+            disk_f, parts, assets_dir, log, progress, cancel, phase=phase,
+            label=label, dest_is_device=dest_is_device,
+            boot_screen=boot_screen, sound_ok=sound_ok)
+    finally:
+        _SPIKE3_RUN.on = was3
+
+
+def _compute_patches_rounds(disk_f, parts, assets_dir, log, progress, cancel,
+                            phase=None, label=None, dest_is_device=False,
+                            boot_screen=True, sound_ok=None):
+    """:func:`_compute_patches`' body (its hole and host-exclusion rounds)."""
     own = (getattr(_HOLE_WRITES, "writes", None) is None
            and not dest_is_device)
     if own:

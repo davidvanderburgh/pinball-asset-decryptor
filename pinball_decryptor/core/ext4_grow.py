@@ -287,7 +287,7 @@ def _makes_dir(card_rel):
     return None
 
 
-def _bash_script(loop_off, jobs_exec, image_exec, luks_key=None,
+def _bash_script(loop_off, jobs_exec, image_exec, luks=None,
                  part_size=None):
     """Compose the mount → free-space check → cp → sync → unmount script.
 
@@ -295,12 +295,12 @@ def _bash_script(loop_off, jobs_exec, image_exec, luks_key=None,
     Everything is shell-quoted; the script cleans up its loop device and mount
     on any exit via a trap so a mid-run failure never leaves the card mounted.
 
-    *luks_key* (bytes, PAD-1186): the partition is a LUKS2 volume (a Stern
-    Spike 3 card's games partition) and this is its volume key - see
-    :func:`_bash_script_luks`.
+    *luks* (PAD-1186): the partition is a LUKS2 volume (a Stern Spike 3
+    card's games partition) - ``{"key", "offset", "sector_size", "cipher"}``,
+    its volume key and data segment - see :func:`_bash_script_luks`.
     """
-    if luks_key is not None:
-        return _bash_script_luks(loop_off, jobs_exec, image_exec, luks_key,
+    if luks is not None:
+        return _bash_script_luks(loop_off, jobs_exec, image_exec, luks,
                                  part_size)
     lines = [
         "set -e",
@@ -324,41 +324,70 @@ def _bash_script(loop_off, jobs_exec, image_exec, luks_key=None,
     return "\n".join(lines + _job_lines(jobs_exec))
 
 
-def _bash_script_luks(loop_off, jobs_exec, image_exec, luks_key, part_size):
-    """:func:`_bash_script` through dm-crypt (PAD-1186): loop -> ``cryptsetup
-    open`` with the volume key -> mount the mapper device -> the same copies.
-    The key sits only in a 0600 file in /dev/shm for the moment cryptsetup
-    reads it.  Exit 5 with ``PAD_GROW_NOCRYPT`` when this Linux has no
-    cryptsetup or no dm-crypt (:func:`grow_files` makes that
+#: the heredoc delimiter the dm-crypt helper's source travels under
+_DMPY_EOF = "PAD_DMCRYPT_PY_EOF"
+
+
+def _bash_script_luks(loop_off, jobs_exec, image_exec, luks, part_size):
+    """:func:`_bash_script` through dm-crypt (PAD-1186): loop -> a dm-crypt
+    mapping of the data segment with the volume key -> mount it -> the same
+    copies.  The mapping is made by :mod:`.dmcrypt` (its source travels in
+    the script and runs with the Linux's python3: device-mapper ioctls, no
+    cryptsetup, which the app's own PAD Runtime image does not carry).  The
+    key sits only in a 0600 file in /dev/shm until the mapping is made.  Exit
+    5 with ``PAD_GROW_NOCRYPT`` when this Linux has no python3 or no
+    device-mapper (:func:`grow_files` makes that
     :class:`Ext4GrowUnavailable`)."""
-    esc = "".join("\\x%02x" % b for b in bytes(luks_key))
+    # read, not imported: it runs in the Linux, and needs fcntl
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "dmcrypt.py"), encoding="utf-8") as f:
+        helper = f.read()
+    if _DMPY_EOF in helper:                          # never: the heredoc's end
+        raise ValueError("dmcrypt.py names the script's heredoc delimiter")
+    if luks.get("cipher", "aes-xts-plain64") != "aes-xts-plain64":
+        raise Ext4GrowUnavailable(
+            "Can't grow files on this encrypted card: its volume uses %s, "
+            "which the app does not map. The affected file(s) keep their "
+            "stock content on the card." % luks.get("cipher"))
+    key = bytes(luks["key"])
+    esc = "".join("\\x%02x" % b for b in key)
+    seg = int(luks.get("offset", 0))
+    secsz = int(luks.get("sector_size", 512) or 512)
+    if not part_size:
+        raise ValueError("an encrypted partition needs its size")
+    length = (int(part_size) - seg) // 512
     lines = [
         "set -e",
         "IMG=%s" % shlex.quote(image_exec),
         "OFF=%d" % loop_off,
-        "LOOP=", "DM=", "KF=",
+        "LOOP=", "DM=", "KF=", "DMPY=",
         "MP=$(mktemp -d /var/tmp/pad_grow_XXXXXX)",
         'cleanup() { [ -n "$KF" ] && rm -f "$KF"; sync -f "$MP" 2>/dev/null; '
         'umount "$MP" 2>/dev/null || true; '
-        '[ -n "$DM" ] && cryptsetup close "$DM" 2>/dev/null || true; '
+        '[ -n "$DM" ] && python3 "$DMPY" close "$DM" 2>/dev/null || true; '
         '[ -n "$LOOP" ] && losetup -d "$LOOP" 2>/dev/null || true; '
+        '[ -n "$DMPY" ] && rm -f "$DMPY"; '
         'rmdir "$MP" 2>/dev/null || true; }',
         "trap cleanup EXIT",
-        'command -v cryptsetup >/dev/null 2>&1 || '
-        '{ echo "PAD_GROW_NOCRYPT no cryptsetup" >&2; exit 5; }',
+        'command -v python3 >/dev/null 2>&1 || '
+        '{ echo "PAD_GROW_NOCRYPT no python3" >&2; exit 5; }',
         'modprobe dm_crypt 2>/dev/null || true',
-        'dmsetup targets 2>/dev/null | grep -qw crypt || '
+        '[ -e /dev/mapper/control ] || '
         '{ echo "PAD_GROW_NOCRYPT no dm-crypt" >&2; exit 5; }',
-        ('LOOP=$(losetup --find --show -o "$OFF" --sizelimit %d "$IMG")'
-         % int(part_size)) if part_size else
-        'LOOP=$(losetup --find --show -o "$OFF" "$IMG")',
+        'DMPY=$(mktemp /dev/shm/pad_dm_XXXXXX)',
+        "cat > \"$DMPY\" <<'%s'\n%s\n%s" % (_DMPY_EOF, helper.rstrip("\n"),
+                                             _DMPY_EOF),
+        'LOOP=$(losetup --find --show -o "$OFF" --sizelimit %d "$IMG")'
+        % int(part_size),
         'KF=$(mktemp /dev/shm/pad_vk_XXXXXX)',
         'chmod 600 "$KF"',
         "printf '%%b' '%s' > \"$KF\"" % esc,
         'DM=pad_s3_$$',
-        'cryptsetup open --type luks2 --volume-key-file "$KF" "$LOOP" "$DM"',
+        'NODE=$(python3 "$DMPY" open "$DM" "$LOOP" %d %d "$KF" %d) || '
+        '{ echo "PAD_GROW_NOCRYPT no dm-crypt" >&2; DM=; exit 5; }'
+        % (seg // 512, length, secsz),
         'rm -f "$KF"; KF=',
-        'mount /dev/mapper/"$DM" "$MP"',
+        'mount "$NODE" "$MP"',
     ]
     return "\n".join(lines + _job_lines(jobs_exec))
 
@@ -405,7 +434,7 @@ def _job_lines(jobs_exec):
 
 
 def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
-               timeout=1800, luks_key=None, part_size=None):
+               timeout=1800, luks=None, part_size=None):
     """Copy each ``(card_rel, host_src_path)`` in *jobs* over its file inside
     the ext4 partition at *part_offset* in *image_path*, growing the inode.
 
@@ -415,8 +444,9 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
     platform can't mount ext4 (caller should fall back), or
     :class:`Ext4GrowError` on any mount/copy failure.
 
-    *luks_key* / *part_size* (PAD-1186): the partition is a LUKS2 volume
-    opened with that volume key through dm-crypt (WSL2 / Linux only).
+    *luks* / *part_size* (PAD-1186): the partition is a LUKS2 volume,
+    mapped through dm-crypt with its volume key and data segment
+    (:func:`_bash_script_luks`; WSL2 / Linux only).
     """
     log = log or (lambda *a, **k: None)
     cancel = cancel or (lambda: False)
@@ -439,7 +469,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
                 "it was time to copy them onto the card." % len(missing))
         return 0
 
-    if luks_key is not None and uses_debugfs():
+    if luks is not None and uses_debugfs():
         raise Ext4GrowUnavailable(
             "Can't grow files on an encrypted card on this system: it needs "
             "the Linux kernel's dm-crypt, which the app reaches on Windows "
@@ -471,7 +501,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
     log("Growing %d file(s) to full size via the Linux filesystem "
         "driver..." % len(jobs), "info")
     script = _bash_script(part_offset, jobs_exec, image_exec,
-                          luks_key=luks_key, part_size=part_size)
+                          luks=luks, part_size=part_size)
     # Ship the script through a base64 temp FILE, not the command line:
     #  * base64 (pure ASCII) survives wsl.exe's argument mangling, which would
     #    otherwise corrupt the script's shell quoting (``-o "$OFF"`` -> ``""``);
@@ -496,7 +526,7 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
                 "Can't grow files on an encrypted card on this system: its "
                 "Linux (WSL2) has no %s. The affected file(s) keep their "
                 "stock content on the card."
-                % ("cryptsetup" if "no cryptsetup" in text else
+                % ("python3" if "no python3" in text else
                    "dm-crypt")) from e
         if "PAD_GROW_ENOSPC" in text:
             raise _no_space(text, grown=n_ok) from e
@@ -994,7 +1024,7 @@ def grow_files_pinned(image_path, part_offset, jobs, epoch, log=None,
                 "Can't grow files on an encrypted card on this system: its "
                 "Linux (WSL2) has no %s. The affected file(s) keep their "
                 "stock content on the card."
-                % ("cryptsetup" if "no cryptsetup" in text else
+                % ("python3" if "no python3" in text else
                    "dm-crypt")) from e
         if "PAD_GROW_ENOSPC" in text:
             raise _no_space(text, grown=n_ok) from e

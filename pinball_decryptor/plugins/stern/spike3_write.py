@@ -22,7 +22,7 @@ moved, and the container goes onto the card whole.
 A file that has to grow (a longer sound's container, a video larger than its
 slot) is copied over the card's own file through the Linux kernel's ext4
 driver on the volume opened with dm-crypt (:func:`.ext4_grow.grow_files`,
-``luks_key``), as Spike 2's grown files are without the encryption.
+``luks``), as Spike 2's grown files are without the encryption.
 """
 
 from __future__ import annotations
@@ -406,16 +406,18 @@ def write_card(original_path, assets_dir, output_path, log=None,
                     _sidx_refresh(out, out_reader, p.card_path, p.node,
                                   p.staged, log)
             out.flush()
-            luks = (out.master_key, out.part_offset, out.part["sectors"] * 512)
+            luks = {"key": out.master_key, "offset": out.segment_offset,
+                    "sector_size": out._sector,
+                    "cipher": out.header.segment("0")["encryption"]}
+            poff, psize = out.part_offset, out.part["sectors"] * 512
         finally:
             out.close()
         if jobs:
             log("Copying %d file(s) whole onto the card through its "
                 "encrypted volume..." % len(jobs), "info")
-            mk, poff, psize = luks
             try:
                 grown = ext4_grow.grow_files(output_path, poff, jobs, log=log,
-                                             cancel=cancel_fn, luks_key=mk,
+                                             cancel=cancel_fn, luks=luks,
                                              part_size=psize)
             except ext4_grow.Ext4GrowUnavailable as e:
                 log(str(e), "error")

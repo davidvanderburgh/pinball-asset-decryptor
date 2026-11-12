@@ -154,7 +154,10 @@ function Which({ s }) {
   else if (w.kind === "other_build") text = html`Not your project's card: PAD built this one from another project, <b>${w.other}</b>.`;
   else text = html`Not your project's card: ${proj} was extracted from ${w.source_name
     ? html`<span class="mono">${w.source_name}</span>` : "a different card"}.`;
-  const also = ours ? null : s.overrides
+  const era3 = (useNs("shell").mfr || {}).era === "spike3";
+  const also = ours ? null : era3
+    ? " It runs exactly as it is; to see your project's edits, build the card on the Write tab and use the last build."
+    : s.overrides
     ? " With the box below ticked, your project's edits run on top of it."
     : " It runs exactly as it is; tick the box below to run your project's edits on top of it.";
   const btns = [];
@@ -170,6 +173,7 @@ function Which({ s }) {
 }
 
 function CardSource({ s }) {
+  const era3 = (useNs("shell").mfr || {}).era === "spike3";
   const pathRef = useRef(null);
   useEndScroll(pathRef, s.card);
   const countries = (s.countries || []).map((c) => ({ value: c, label: c }));
@@ -216,7 +220,7 @@ function CardSource({ s }) {
         title="Draws the game window through your project's Machine screen (Color profile tab), the way the Scenes preview does, so this PC shows the colors the machine's own screen will. Works on any card, a card you already wrote included, with or without your replaced assets. Off: you see the colors exactly as they go on the card, which on a PC look darker or brighter where your color profiles correct for the machine. Only the emulator's window: the card is never changed. Takes effect at the next Start." />
     </div>
     ${s.screen_live ? html`<div class="small muted">${s.screen_live}</div>` : null}
-    <div class=${cx("note emu-ovr", s.ovr_refused && "warn")}>
+    ${era3 ? html`<div class="note emu-ovr" role="status"><span class="small muted">${S3_EDITS}</span></div>` : html`<div class=${cx("note emu-ovr", s.ovr_refused && "warn")}>
       <${Check} ns="emulate" k="overrides" checked=${s.overrides} wrap
         label="Apply my replaced assets on top, without rebuilding the card" />
       ${s.overrides && s.scene_edits_offer ? html`<div class="emu-ovr-sub">
@@ -236,9 +240,13 @@ function CardSource({ s }) {
           title="The Write tab's Assets Folder: the edits that would run." />
       </div>
       <span class=${cx("small emu-ovr-hint", s.ovr_refused ? "warn-ink" : "muted")}>${s.ovr_hint}</span>
-    </div>
+    </div>`}
   <//>`;
 }
+
+// PAD-1186: a Spike 3 run is a whole card (the Spike 3 rig has no override
+// set), so a project's edits are seen by building them
+const S3_EDITS = "To see your replaced assets here, build the card on the Write tab, then use the last build (or pick the built card above).";
 
 // -------------------------------------------------------- save states
 // A cell cut short shows the whole of it on hover, and every column but the

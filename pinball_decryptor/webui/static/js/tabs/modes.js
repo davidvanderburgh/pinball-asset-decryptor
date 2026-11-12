@@ -309,6 +309,13 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, 
           onChange=${(v) => call("modes.set_prolonged_comp", v)} />
         ${s.comp_note ? html`<span class=${cx("small", s.comp_note_kind === "err" ? "err-ink" : "muted")}>${s.comp_note}</span>` : null}
       </div>` : null}
+      ${s.feed_shown ? html`<div class="stack modes-coop">
+        <${Check} checked=${s.feed_on} wrap label="Score feed" title=${s.feed_tip}
+          onChange=${(v) => call("modes.set_score_feed", v)} />
+        ${s.feed_on ? html`<${Field} value=${s.feed_url} mono sm placeholder=${s.feed_placeholder} title=${s.feed_url_tip}
+          bad=${s.feed_note_kind === "err"} onChange=${() => {}} onCommit=${(v) => call("modes.set_score_feed", true, v)} />` : null}
+        ${s.feed_note ? html`<span class=${cx("small", s.feed_note_kind === "err" ? "err-ink" : "muted")}>${s.feed_note}</span>` : null}
+      </div>` : null}
       ${s.idle_shown ? html`<div class="stack modes-coop">
         <${Check} checked=${s.idle_on} wrap label="Inactivity pauses timers" title=${s.idle_tip}
           onChange=${(v) => call("modes.set_idle_pause", v)} />

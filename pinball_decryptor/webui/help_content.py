@@ -3732,6 +3732,35 @@ PREVIEW_HELP = {
                 "- On its own it keeps the card on Insider Connected, as the game's own Competition does. With "
                 "modes or co-op play on the same card, the scores stay on the machine as those always do.",
             ]),
+            ("Score feed", [
+                "**Score feed**, under the list, has the machine send each game's final scores to a server of "
+                "your own on your network: for a high-score board on a TV, a league sheet, a home automation "
+                "hub. Tick it, type your server's address, then Write:\n\n"
+                "- After every game the machine posts one JSON message to the address: the game, how many "
+                "played, each player's final score, and for each player who was logged in to Insider "
+                "Connected their account's id (the same id every game, so your server can put a name to it). "
+                "A game reset with Start held down mid-game is not sent.\n"
+                "- The address is plain **http://**, your server's **IP address** (like "
+                "`http://192.168.1.50:8080/scores`), as the machine looks no names up and does not do https. "
+                "Your server answers with any 2xx status.\n"
+                "- When the server is off, the machine tries three times, 10 seconds apart, then lets that game "
+                "go. The game itself never waits for it.\n"
+                "- Nothing goes to Stern, and no score is changed. On its own it keeps the card on Insider "
+                "Connected; with modes on the same card, the scores stay off Insider Connected as they always "
+                "do, and still come to your server.\n\n"
+                "A message looks like "
+                "`{\"source\":\"PAD score feed\",\"game\":\"Godzilla Premium/LE 1.16\",\"players\":2,"
+                "\"scores\":[123456780,98765430],\"insider\":[\"3f2a9c1e-...\",null],...}`:\n\n"
+                "| Field | What it holds |\n"
+                "|---|---|\n"
+                "| `game` | the game and its version, as the app names the card |\n"
+                "| `port` | the same, in the app's own short form |\n"
+                "| `game_number` | the games sent since the machine was switched on: 1, 2, 3... |\n"
+                "| `time` | the machine's clock, in Unix seconds (null when it was never set) |\n"
+                "| `players` | how many played |\n"
+                "| `scores` | each player's final score, player 1 first |\n"
+                "| `insider` | each player's Insider Connected account id, null for a player not logged in |",
+            ]),
             ("Inactivity pauses timers", [
                 "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "
                 "LE, 1.15). Its operator menu has the setting **ALLOW INACTIVITY TO PAUSE TIMERS** like every "

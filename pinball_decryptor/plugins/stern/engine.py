@@ -8353,6 +8353,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1041: Prolonged Competition on the start menu - comp.cfg beside the runtime (the modes' delivery)
     comp_prof = _comp_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _comp_on = comp_prof is not None
+    # PAD-1204: the score feed - scorefeed.cfg beside the runtime (the modes' delivery)
+    feed_prof, feed_url = _feed_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _feed_on = bool(feed_url)
     # PAD-1115: a game screen that shows a replaced clip for a fixed time lasts as long as the clip - stime lines in
     # clips.cfg beside the runtime (the modes' delivery)
     stime_lines, stime_prof = _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_device, log,
@@ -8366,7 +8369,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
-            and not _hand_on and not _cabs_on and not _comp_on
+            and not _hand_on and not _cabs_on and not _comp_on and not _feed_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -9822,10 +9825,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Handicaps" if _hand_on
                 else "Expression lights" if _cabs_on
                 else "Prolonged Competition" if _comp_on
+                else "Score feed" if _feed_on and not _stime_on
                 else "Screen times")
         _who_hud = _who
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on or _comp_on or _stime_on):
+                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -9839,7 +9843,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _idle_on else "Adding the handicaps..."
                          if _hand_on else "Adding the expression light shows..."
                          if _cabs_on else "Adding Prolonged Competition..."
-                         if _comp_on else "Adding the screen times...")
+                         if _comp_on else "Adding the score feed..."
+                         if _feed_on and not _stime_on else "Adding the screen times...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 if mode_list:
@@ -9926,6 +9931,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     cabs_sids=_cabs_sids,
                     comp=_comp_on, comp_prof=comp_prof,               # PAD-1041
                     screen_times=stime_lines, screen_prof=stime_prof,  # PAD-1115
+                    score_feed=feed_url, score_feed_prof=feed_prof,   # PAD-1204
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -10021,6 +10027,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               else "adding the handicaps" if _hand_on
                               else "adding the expression light shows" if _cabs_on
                               else "adding Prolonged Competition" if _comp_on
+                              else "adding the score feed" if _feed_on and not _stime_on
                               else "adding the screen times"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
@@ -10327,6 +10334,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "cabs": bool(getattr(mode_plan, "cabshow_file", "")),
                 # PAD-1041: Prolonged Competition on the start menu
                 "comp": bool(getattr(mode_plan, "comp_file", "")),
+                # PAD-1204: the score feed (the address the reports go to)
+                "score_feed": (feed_url if getattr(mode_plan, "scorefeed_file", "") else ""),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -11597,6 +11606,38 @@ def _idle_for_build(assets_dir, dest_is_device, log, ext4_available=None):
         return None
     log("Inactivity pauses timers: %s." % _IP.HOW, "info")
     return prof
+
+
+def _feed_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1204: ``(profile, address)`` of the card the score feed goes on, or ``(None, "")`` when the project does not
+    ask for it or it is left out (one warning says why). The modes' gate, as inactivity pausing the timers'."""
+    from . import score_feed as _SF
+    from . import mode_write as _MW
+    on, url = _SF.load(assets_dir)
+    if not on:
+        return None, ""
+    why = _SF.url_problem(url)
+    if not why and dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry it"
+    elif not why:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _SF.project_title(assets_dir, probe=True)
+        why = _SF.title_refusal(prof)
+    if why:
+        log("Score feed: left out of this build: %s." % why.rstrip("."), "warning")
+        return None, ""
+    url = url.strip()
+    log("Score feed: %s." % (_SF.HOW % url), "info")
+    return prof, url
 
 
 def _handicap_for_build(assets_dir, dest_is_device, log, ext4_available=None):
@@ -13109,14 +13150,16 @@ def _install_modes(output_path, modes, landed, planned, log):
     who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                                  or modes.get("picture") or modes.get("attract")
                                                  or modes.get("coop") or modes.get("idle")
-                                                 or modes.get("handicap") or modes.get("comp"))
+                                                 or modes.get("handicap") or modes.get("comp")
+                                                 or modes.get("score_feed"))
            else "Random clips" if modes.get("variants") else "Music modes"
            if modes.get("music_modes") else "Picture settings" if modes.get("picture")
            else "Attract items" if modes.get("attract")   # PAD-782
            else "Co-op play" if modes.get("coop")         # PAD-1017
            else "Inactivity pauses timers" if modes.get("idle")   # PAD-1022
            else "Handicaps" if modes.get("handicap")      # PAD-1033
-           else "Prolonged Competition")                  # PAD-1041
+           else "Prolonged Competition" if modes.get("comp")   # PAD-1041
+           else "Score feed")                             # PAD-1204
     if who == "Music modes" and all(t.endswith(" in attract") for t in modes["music_modes"]):
         who = "Attract flipper sounds"   # PAD-641: the same program, its own words
     elif who == "Music modes" and all(t.endswith((" in turn)", " in attract"))
@@ -13206,9 +13249,14 @@ def _install_modes(output_path, modes, landed, planned, log):
         from . import prolonged_comp as _PCo
         log("Prolonged Competition on the card: %s. Like the game's own Competition, it keeps the card on Insider "
             "Connected." % _PCo.HOW, "success")
+    if modes.get("score_feed"):               # PAD-1204
+        from . import score_feed as _SF
+        log("Score feed on the card: %s. It changes no score: on its own it keeps the card on Insider Connected."
+            % (_SF.HOW % modes["score_feed"]), "success")
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                   or modes.get("picture") or modes.get("attract") or modes.get("coop")
-                                  or modes.get("idle") or modes.get("handicap") or modes.get("comp")):
+                                  or modes.get("idle") or modes.get("handicap") or modes.get("comp")
+                                  or modes.get("score_feed")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")

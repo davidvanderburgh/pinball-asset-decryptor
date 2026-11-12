@@ -329,6 +329,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.idle_pause" \
     --hidden-import "pinball_decryptor.plugins.stern.handicap" \
     --hidden-import "pinball_decryptor.plugins.stern.prolonged_comp" \
+    --hidden-import "pinball_decryptor.plugins.stern.score_feed" \
+    --hidden-import "pinball_decryptor.plugins.stern.run_leave_out" \
     --hidden-import "pinball_decryptor.plugins.stern.cab_shows" \
     --hidden-import "pinball_decryptor.plugins.stern.cab_stock" \
     --hidden-import "pinball_decryptor.plugins.stern.cab_auto" \

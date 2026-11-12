@@ -50,8 +50,8 @@ def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
     assert re.search(r'static const char \*const s\[\] = \{ "agent_header", "agent_begin", 0 \};', src)
     # the gate comes right after the port gate, and a missing gate hooks nothing. Only PAD-446's
     # clip variants, PAD-494's music modes, PAD-537's picture settings, PAD-1022's inactivity
-    # pausing the timers, PAD-1033's handicaps and PAD-1040's expression light shows arm between them
-    # (none scores anything: a card of light shows stays on Insider Connected), and a card with only
+    # pausing the timers, PAD-1033's handicaps, PAD-1040's expression light shows and PAD-1204's score feed arm
+    # between them (none scores anything: a card of light shows stays on Insider Connected), and a card with only
     # those stops there (handicaps and light shows hooking the tick) - unless it also carries PAD-782's
     # attract items or PAD-1017's co-op play, which take the whole gate (attract_wanted, coop_wanted).
     # PAD-1071's sound log goes first of all: it only watches the sound worker, and a stock card
@@ -59,8 +59,10 @@ def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
     assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*if \(soundlog_arm\(\)\) return;[^\n]*\n"
                      r"\s*clipv_arm\(\);[^\n]*\n\s*sndm_arm\(\);[^\n]*\n"
                      r"\s*pic_arm\(\);[^\n]*\n\s*idle_arm\(\);[^\n]*\n\s*hand_arm\(\);[^\n]*\n\s*comp_arm\(\);[^\n]*\n\s*cabs_arm\(\);[^\n]*\n"
-                     r"\s*if \(\(clipv_only \|\| sndm_only \|\| pic_only \|\| idle_only \|\| hand_cfg_only\(\) \|\| comp_cfg_only\(\)"
-                     r" \|\| \(cabs_only && n_cabs\)\)\s*&& !attract_wanted\(\) && !coop_wanted\(\)\) \{.*?"
+                     r"\s*feed_arm\(\);[^\n]*\n"
+                     r"\s*if \(\(\(clipv_only \|\| sndm_only \|\| pic_only \|\| idle_only \|\| hand_cfg_only\(\) \|\| comp_cfg_only\(\)"
+                     r" \|\| \(cabs_only && n_cabs\)\)\s*\|\| feed_cfg_only\(\)\)"
+                     r"\s*&& !attract_wanted\(\) && !coop_wanted\(\)\) \{.*?"
                      r"if \(\(hand\.on \|\| n_cabs\) && !hook\(fn\(\"tick\"\), on_hand_tick\)\) \{[^{}]*\}\s*return;"
                      r"\s*\}\s*\n\s*if \(!insider_arm\(\)\) return;",
                      src, re.S)

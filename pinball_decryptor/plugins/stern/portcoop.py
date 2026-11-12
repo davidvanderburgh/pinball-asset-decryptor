@@ -37,6 +37,8 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
   site  audit_add             the game's audit add, whose audits a co-op game's awards count per teammate (PAD-1028)
   site  coop_panel_lit        the score panel's call of the player-up getter that lights the box up (PAD-1043),
   site  coop_panel_up[_n]     and its "player changed" checks' calls: answered with the teammate up
+  site  coop_up_call          (PAD-1202) the ball start's "player N, you're up" process's call of the player-up
+                              getter: answered with the real player in a co-op or team game
 
 and, for the team's own high score boards, the end-of-game high scores' lines (portchallenge.scores_lines).
 
@@ -235,6 +237,58 @@ def panel_sites(e, getter):
                                                  for i, q in enumerate(up[:4])]
 
 
+def _movable(x):
+    """The word after a call hook_call may move as it is (pad_mode_runtime.c's own test): no branch, nothing that
+    reads or writes pc."""
+    if x & 0x0E000000 == 0x0A000000 or ((x >> 12) & 0xF) == 15:
+        return False
+    if x & 0x0C000000 == 0x04000000 and ((x >> 16) & 0xF) == 15:
+        return False
+    return not (x & 0x0C000000 == 0 and (((x >> 16) & 0xF) == 15 or (not x & 0x02000000 and (x & 0xF) == 15)))
+
+
+def up_call(e, player, players):
+    """PAD-1202 (DoomWalrus666: "a call out that said 'player one, you're up' during player two's turn"): the va of
+    the call of the player-up getter in the ball start's "player N, you're up" process, or None. A co-op game plays
+    the game's player 1 (a team game its player 1 or 2), so the call named player one for every teammate.
+
+    The process is started at a ball's start only with more than one player - `bl <players getter> ; cmp r0, #1 ;
+    (cmphi r4, #1 ;) bls ..`, then its address into r1 for the process start - waits a moment, then asks the getter
+    who is up and plays that player's call: Godzilla's callout_nth(0x470 / 0x471, player - 1), and the same process
+    on Avengers, D&D, Foo Fighters, Iron Maiden, Bond, Jaws, Jurassic Park, King Kong, Led Zeppelin, Mandalorian,
+    Star Wars and Venom. The first getter call in its first 40 words is the one. The word after it must be one
+    hook_call can move, and nothing in the process may branch to it. Two different calls: None (which one says whose
+    turn it is cannot be told). (Elvira's process of this shape is handed the player COUNT - its "n-player game"
+    call - and reads no getter: none.)"""
+    getter, count = player_getter(e, player), player_getter(e, players)
+    if not getter or not count:
+        return None
+    w, base = e.words, e.text_va
+    found = set()
+    for k in range(len(w) - 4):
+        if bl_target(base + 4 * k, w[k]) != count or w[k + 1] & 0xFFF0FFFF != 0xE3500001:   # cmp rN, #1
+            continue
+        j = k + 2
+        if w[j] & 0xFFF0FFFF == 0x83500001:                                                # cmphi rM, #1
+            j += 1
+        if w[j] & 0xFF000000 != 0x9A000000:                                                # bls
+            continue
+        for _q, r, v in _movw_movt(w, j + 1, j + 12):
+            i = (v - base) // 4
+            if r != 1 or v & 3 or not 0 <= i < len(w) or w[i] & PUSH_LR_MASK != PUSH_LR:
+                continue
+            end = next((q for q in range(i + 1, min(i + 200, len(w))) if w[q] & PUSH_LR_MASK == PUSH_LR),
+                       min(i + 200, len(w)))
+            q = next((q for q in range(i + 1, min(i + 40, end - 1)) if bl_target(base + 4 * q, w[q]) == getter), None)
+            if q is None or not _movable(w[q + 1]):
+                continue
+            into = base + 4 * (q + 1)
+            if any(w[b] & 0x0E000000 == 0x0A000000 and bl_target(base + 4 * b, 0xEB000000 | w[b] & 0xFFFFFF) == into
+                   for b in range(i, end)):
+                continue
+            found.add(base + 4 * q)
+    return found.pop() if len(found) == 1 else None
+
 def lines(elf):
     """(lines, notes): the co-op port lines of `elf` (the game program's bytes or its path), and what was not found."""
     e = Elf(elf)
@@ -273,4 +327,8 @@ def lines(elf):
     getter = player_getter(e, player)
     for name, at in panel_sites(e, getter) if getter else []:
         out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % (name, at, e.word(at), e.word(at + 4)))
+    # PAD-1202: the ball start's "player N, you're up" call, given the real player
+    up = up_call(e, player, players)
+    if up:
+        out.append("site  coop_up_call           0x%08x 0x%08x 0x%08x" % (up, e.word(up), e.word(up + 4)))
     return out + [line for line in scores if not line.startswith("#")], []

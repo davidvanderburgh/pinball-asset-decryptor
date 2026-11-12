@@ -771,5 +771,8 @@ data  coop_player        0x0068d165
 data  coop_players       0x007588cc
 site  coop_first_ball    0x003835c8 0xebfb6124 0xe1a04000
 
+# ---- PAD-1202: co-op play - the ball start's "player N, you're up" call's read of the player up (portcoop.py) ----
+site  coop_up_call           0x000d43c8 0xeb061d7f 0xe3500003
+
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x003ea3f8 0xe92d43f0 0xe2505000

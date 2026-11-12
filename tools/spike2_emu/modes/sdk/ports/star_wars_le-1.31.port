@@ -735,6 +735,9 @@ data  coop_player        0x006129c0
 data  coop_players       0x006c0e68
 site  coop_first_ball    0x00339534 0xeb000691 0xe1a04000
 
+# ---- PAD-1202: co-op play - the ball start's "player N, you're up" call's read of the player up (portcoop.py) ----
+site  coop_up_call           0x0004edac 0xeb0bb04e 0xe30636e8
+
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 value coop_ball_msg          1255
 

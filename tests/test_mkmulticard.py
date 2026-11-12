@@ -991,13 +991,13 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
     assert man["images"] == [
         {"device": "/dev/mmcblk0p3", "source": os.path.abspath("/img/a.raw"), "title": "STERN 1.59.0",
          "subtitle": "Original Stern code", "art": "art0.png", "anim": None, "music": None,
-         "confirm": None, "own_scores": None,
+         "confirm": None, "own_scores": None, "hiscores": None,
          "title_dir": "turtles_pro", "version": "1.59.0", "node_fw_version": "1.33.0",
          # item 106: null = this image is a card of its own
          "group": None},
         {"device": "/dev/mmcblk0p7", "source": os.path.abspath("/img/b.raw"), "title": "TMNT 1987",
          "subtitle": "1987 cartoon upscale", "art": "art1.png", "anim": "anim1.gif", "music": "music1.wav",
-         "confirm": None, "own_scores": None,
+         "confirm": None, "own_scores": None, "hiscores": None,
          "title_dir": "turtles_pro", "version": "1.58.0", "node_fw_version": "1.19.0",
          "group": None}]
     # it is JSON, and exactly the keys contract A names
@@ -1564,6 +1564,24 @@ def test_conf_for_plan_takes_own_scores_from_the_flag_else_the_card(mk):
     assert "scores=" not in mk.conf_for_plan(plan, argparse.Namespace(own_scores=""), existing=ex)
     with pytest.raises(mk.Refused):
         mk.conf_for_plan(plan, argparse.Namespace(own_scores=";../x"), existing=ex)
+
+
+def test_conf_for_plan_takes_hiscores_from_the_flag_else_the_card(mk):
+    """PAD-1194: hiscores=<N>|<group> lines, written, read back and carried like scores=."""
+    plan = _two_image_plan(mk)
+    out = mk.conf_for_plan(plan, argparse.Namespace(own_scores="original;heisei", hiscores="original;shared"))
+    assert "scores=0|original\n" in out and "hiscores=0|original\n" in out and "hiscores=1|shared\n" in out
+    ex = mk.parse_images_conf(out)
+    assert ex["hiscores"] == {0: "original", 1: "shared"} and ex["scores"] == {0: "original", 1: "heisei"}
+    # no flag: the card's own ride through
+    assert "hiscores=1|shared\n" in mk.conf_for_plan(plan, argparse.Namespace(), existing=ex)
+    # --hiscores '' clears them all; the stores stay
+    out = mk.conf_for_plan(plan, argparse.Namespace(hiscores=""), existing=ex)
+    assert "hiscores=" not in out and "scores=1|heisei\n" in out
+    with pytest.raises(mk.Refused):
+        mk.conf_for_plan(plan, argparse.Namespace(hiscores=";../x"), existing=ex)
+    # a line select.sh would refuse is dropped on the way in
+    assert mk.parse_images_conf(out + "hiscores=1|../x\n")["hiscores"] == {}
 
 
 def test_conf_for_plan_takes_the_heading_from_the_flag_else_the_card(mk):

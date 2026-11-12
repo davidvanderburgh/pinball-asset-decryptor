@@ -47,6 +47,7 @@
 #include "art.h"
 #include "audio.h"
 #include "nvm.h"
+#include "scores.h"
 #include "codec.h"
 #include "log.h"
 #include "colour.h"
@@ -155,6 +156,10 @@ struct opts {
      * --apply-color --image N --program PATH --to OUT */
     const char *colour_file, *apply_program, *apply_to;
     int apply_colour, apply_image;
+    /* PAD-1194: the boot hook's high-score hand-over, no conf needed:
+     * --scores-save --store DIR --to FILE | --scores-load --from FILE --store DIR */
+    int scores_op;                      /* 0, 1 = save, 2 = load */
+    const char *scores_store, *scores_from;
     /* --snapshot --screen settings|color [--screen-row N] [--screen-edit]:
      * a settings screen instead of the menu (tests, the preview, screenshots) */
     const char *screen;
@@ -251,6 +256,10 @@ static void usage(FILE *f)
         "  --apply-color --image N --program PATH --to OUT   the boot hook's step: when the values\n"
         "                     file sets image N's colors, write a copy of PATH with them in its\n"
         "                     shaders to OUT; exit 0 = written, 1 = nothing to do, 2 = refused\n"
+        "  --scores-save --store DIR --to FILE   the boot hook's step (PAD-1194): the high-score\n"
+        "                     table of the store DIR (/data/nv/<title>) to FILE; --scores-load\n"
+        "                     --from FILE --store DIR puts FILE's table into DIR as a new LKRAM\n"
+        "                     generation; both: exit 0 = done, 1 = nothing to do, 2 = refused\n"
         "exit status: 0 = a choice was written, 2 = no choice\n", ANIM_MAX_FRAMES, DEF_VOLUME,
         VOLUME_CEILING);
 }
@@ -347,10 +356,14 @@ static int parse_args(struct opts *o, int argc, char **argv)
         ARG("--color-file", colour_file)
         ARG("--program", apply_program)
         ARG("--to", apply_to)
+        ARG("--store", scores_store)
+        ARG("--from", scores_from)
         ARG("--screen", screen)
 #undef ARG
         if (!strcmp(a, "--learn")) { o->learn = 1; continue; }
         if (!strcmp(a, "--apply-color")) { o->apply_colour = 1; continue; }
+        if (!strcmp(a, "--scores-save")) { o->scores_op = 1; continue; }
+        if (!strcmp(a, "--scores-load")) { o->scores_op = 2; continue; }
         if (!strcmp(a, "--image")) { if (!v) goto missing; o->apply_image = atoi(v); i++; continue; }
         if (!strcmp(a, "--screen-row")) { if (!v) goto missing; o->screen_row = atoi(v); i++; continue; }
         if (!strcmp(a, "--screen-edit")) { o->screen_edit = 1; continue; }
@@ -428,6 +441,11 @@ missing:
     }
     if (o->apply_colour && (o->apply_image < 0 || !o->apply_program || !o->apply_to)) {
         fprintf(stderr, "codeselect: --apply-color needs --image N, --program PATH and --to OUT\n");
+        return -1;
+    }
+    if (o->scores_op && (!o->scores_store || (o->scores_op == 1 ? !o->apply_to : !o->scores_from))) {
+        fprintf(stderr, "codeselect: --scores-save needs --store DIR and --to FILE, "
+                "--scores-load --from FILE and --store DIR\n");
         return -1;
     }
     if (o->screen && !o->snapshot) {
@@ -1860,6 +1878,15 @@ int main(int argc, char **argv)
     sel_log("codeselect " VERSION " starting (conf %s, input %s%s)", o.conf, o.input,
             o.snapshot ? ", snapshot" : o.headless ? ", headless" : "");
 
+    if (o.scores_op) {
+        char smsg[1600];
+        rc = o.scores_op == 1 ? scores_save(o.scores_store, o.apply_to, smsg, sizeof smsg)
+                              : scores_load(o.scores_from, o.scores_store, smsg, sizeof smsg);
+        sel_say("%s", smsg);
+        sel_log("exit %d", rc);
+        sel_log_close();
+        return rc;
+    }
     if (conf_load(&c, o.conf, err, sizeof err) < 0) {
         sel_say("error: %s", err);
         return 2;

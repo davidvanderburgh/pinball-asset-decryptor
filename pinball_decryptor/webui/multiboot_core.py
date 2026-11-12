@@ -605,6 +605,12 @@ class ImageRow:
     #: image of that game.  A GROUP card's value is its members'.  The name is
     #: kept once given, so renaming the image never strands its scores.
     own_scores: str = ""
+    #: ITS HIGH SCORES APART FROM ITS SETTINGS (PAD-1194; images.conf
+    #: ``hiscores=<N>|<group>``): "" = they go with its settings (its own
+    #: store's table, or the shared one), :data:`SHARED_SCORES` = the title's
+    #: shared table although its settings are its own, any other name = a
+    #: table of its own (that name) although its settings are shared.
+    hiscores: str = ""
     #: THE CUSTOM MODES THIS IMAGE RUNS (PAD-226), as the tool says it
     #: ("2 mode files, 0 code modes"), "" = none.  Like the version, a fact
     #: read off the .raw (plan) or the card (inspect), never typed.
@@ -2309,18 +2315,82 @@ def group_media_args(form):
     return args
 
 
-#: THE EDIT DIALOG'S HIGH SCORES BOX (PAD-226).  The game keeps its settings,
-#: audits and high-score table in one store per GAME on the card's /data, which
-#: every image shares - so the tick is also the answer for settings and audits,
-#: and the note says so rather than letting a changed free-play setting surprise.
+#: THE EDIT DIALOG'S SETTINGS AND HIGH SCORES BOX (PAD-226, PAD-1194).  The
+#: game keeps its settings, audits and high-score table in one store per GAME
+#: on the card's /data, which every image of that game shares.  The first tick
+#: gives an image a store of its own (settings and audits); the second decides
+#: its high scores apart from that, since the selector can hand the score
+#: table alone from image to image (pb_lawww, Pinside: "Heisei - Original
+#: Sound (own settings, shared highscore)").  Both ticked is what one tick
+#: used to mean.
+SETTINGS_LABEL = "Keep its own settings and audits on the machine"
 SCORES_LABEL = "Keep its own high scores on the machine"
 SCORES_NOTE = (
-    "Tick this for an image whose custom modes change the scoring, so its "
-    "scores never mix with the stock game's. The machine then keeps this "
-    "image's high scores, settings and audits apart from the other images of "
-    "the same game; unticked images of that game share one table. The first "
-    "time it boots it starts from a copy of the shared settings and scores: "
-    "reset its high scores once in the service menu.")
+    "Unticked, this image shares with every other image of the same game "
+    "that leaves the box unticked. Tick high scores for an image whose custom "
+    "modes change the scoring, so its scores never mix with the stock "
+    "game's. Tick settings alone to give an image settings of its own (free "
+    "play, volume, difficulty) while its high scores stay in the shared "
+    "table. An image with its own settings starts from a copy of the shared "
+    "ones; one with its own high scores starts from a copy of the shared "
+    "table, so reset its high scores once in the service menu.")
+#: The group name of a title's shared high-score table (PAD-1194).
+SHARED_SCORES = "shared"
+
+
+def row_own_settings(row):
+    """PAD-1194: does this image keep settings and audits of its own?"""
+    return bool((row.own_scores or "").strip())
+
+
+def row_own_hiscores(row):
+    """PAD-1194: does this image keep a high-score table of its own?  Its
+    ``hiscores`` when that says, else whatever its settings do."""
+    h = (row.hiscores or "").strip()
+    if not h:
+        return row_own_settings(row)
+    return h != SHARED_SCORES
+
+
+def set_row_scores(row, own_settings, own_hiscores, others, title=""):
+    """PAD-1194: the two ticks -> the row's ``own_scores`` (its store) and
+    ``hiscores`` (its table, when that is not simply its store's).  Names are
+    made from the title the first time and KEPT, so renaming the image never
+    strands what the machine holds; ``others`` are the rows whose names this
+    one must not take."""
+    taken = {SHARED_SCORES}
+    for r in others:
+        taken.add((r.own_scores or "").strip())
+        taken.add((r.hiscores or "").strip())
+    taken.discard("")
+    if not own_settings:
+        row.own_scores = ""
+    elif not (row.own_scores or "").strip():
+        row.own_scores = scores_name_for(title or row.title, taken)
+        taken.add(row.own_scores)
+    if own_hiscores == own_settings:
+        row.hiscores = ""
+    elif own_settings:
+        row.hiscores = SHARED_SCORES
+    elif (row.hiscores or "").strip() in ("", SHARED_SCORES):
+        row.hiscores = scores_name_for(title or row.title, taken)
+
+
+def scores_split(row):
+    """PAD-1194: True when this image's high scores do not follow its
+    settings - the case that needs the selector to hand the table over."""
+    return row_own_hiscores(row) != row_own_settings(row)
+
+
+def hiscores_from_card(im):
+    """PAD-1194: a card's ``hiscores`` group for an image (inspect / build.json)
+    -> the row's ``hiscores``: "" when it is just its store's table (or the
+    shared one for a sharing image), else what it says."""
+    group = (im.get("hiscores") or "").strip()
+    store = (im.get("own_scores") or "").strip()
+    if not group or group == store or (group == SHARED_SCORES and not store):
+        return ""
+    return group
 
 def modes_line(row):
     """The Edit dialog's line about the custom modes this image runs, or ""."""
@@ -2360,6 +2430,34 @@ def own_scores_args(form):
         name = (form.images[ri].own_scores or "").strip()
         names.append(name if SCORES_NAME_RE.match(name) else "")
     return ["--own-scores", ";".join(names)] if names else []
+
+
+def hiscores_args(form):
+    """``--hiscores`` (PAD-1194) - one high-score group per GAME, always
+    spelled out on a Stern card so a split taken off is taken off the card
+    too.  Only a card where some image's scores do not follow its settings
+    names any: then EVERY game gets a group (its own store's name, its own
+    table's, or the shared one), so the selector can carry each table from
+    the image that played last to the one that boots.  Otherwise all are ''
+    and the card is the one PAD-226 wrote.  JJP and BOF keep no such store."""
+    if backend_for(form).key != "stern":
+        return []
+    trees = list(form_trees(form))
+    split = any(scores_split(form.images[ri]) for _i, _p, ri, _mi in trees)
+    names = []
+    for _i, _path, ri, _mi in trees:
+        row = form.images[ri]
+        name = ""
+        if split:
+            h = (row.hiscores or "").strip()
+            if not row_own_hiscores(row):
+                name = SHARED_SCORES
+            elif h and h != SHARED_SCORES:
+                name = h
+            else:
+                name = (row.own_scores or "").strip()
+        names.append(name if SCORES_NAME_RE.match(name) else "")
+    return ["--hiscores", ";".join(names)] if names else []
 
 
 def game_titles(form, platform="stern"):
@@ -2662,6 +2760,7 @@ def build_args(form):
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     args += own_scores_args(form)
+    args += hiscores_args(form)
     args += settings_args(form)
     args += editions_args(form)
     # ALWAYS: the validator bypass on every image (David, after the TMNT
@@ -2762,6 +2861,7 @@ def inject_args(form, card):
     args += (heading_args(form) + text_size_args(form)
              + menu_text_args(form) + theme_args(form))
     args += own_scores_args(form)
+    args += hiscores_args(form)
     args += settings_args(form)
     args += editions_args(form)
     if form.machine_volume:
@@ -2792,6 +2892,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
     args += (heading_args(form) + text_size_args(form)
              + menu_text_args(form) + theme_args(form))
     args += own_scores_args(form)
+    args += hiscores_args(form)
     args += settings_args(form)
     args += editions_args(form)
     if form.machine_volume:
@@ -4359,6 +4460,7 @@ def rows_from_inspect(info):
                        # guessed from a file name
                        version=(im.get("version") or "").strip(),
                        own_scores=(im.get("own_scores") or "").strip(),
+                       hiscores=hiscores_from_card(im),
                        modes=(im.get("modes") or "").strip())
         if im.get("art_source"):
             row.art, row.art_video, row.art_time = \
@@ -4459,7 +4561,8 @@ def group_rows(rows, groups):
                         # what such a card does (see row_roll).
                         roll=(g.get("roll") or ""),
                         # its games' store: they were written with one name
-                        own_scores=rows[g["members"][0]].own_scores)
+                        own_scores=rows[g["members"][0]].own_scores,
+                        hiscores=rows[g["members"][0]].hiscores)
         # the card's own media is the group's, not its first member's row
         for key in ("art", "anim", "music", "confirm"):
             val = (g.get(key) or "")
@@ -4616,7 +4719,8 @@ def _menu_fields(before, after):
                 or b.confirm_on_card != a.confirm_on_card):
             changed.add("confirm sound")
         # PAD-226: images.conf's scores= lines, which an inject rewrites
-        if (b.own_scores or "").strip() != (a.own_scores or "").strip():
+        if ((b.own_scores or "").strip() != (a.own_scores or "").strip()
+                or row_own_hiscores(b) != row_own_hiscores(a)):
             changed.add("high scores")
     if _media_value(before.sound_move) != _media_value(after.sound_move):
         changed.add("move sound")
@@ -7056,8 +7160,10 @@ class MultibootPanel:
         self._ed_roll = tk.StringVar(value=roll_draw(ROLL_DEFAULT))
         self._ed_roll_norepeat = tk.BooleanVar(
             value=roll_no_repeat(ROLL_DEFAULT))
-        #: PAD-226: the tick that gives the image high scores of its own
+        #: PAD-226: the tick that gives the image high scores of its own,
+        #: and PAD-1194's that gives it settings and audits of its own
         self._ed_own_scores = tk.BooleanVar(value=False)
+        self._ed_own_settings = tk.BooleanVar(value=False)
         #: What the tick said while it was still a question, so coming back
         #: off a shuffle is the round trip it looks like.  None = nothing to
         #: put back.
@@ -7071,7 +7177,7 @@ class MultibootPanel:
                                self._ed_video, self._ed_anim_start)
         for var in (self._ed_title, self._ed_sub, self._ed_music,
                     self._ed_confirm, self._ed_roll, self._ed_roll_norepeat,
-                    self._ed_own_scores):
+                    self._ed_own_scores, self._ed_own_settings):
             var.trace_add("write", lambda *_a: self._editor_changed())
         # ...and a write to what the image SHOWS is the one time the row's
         # art and animation are derived again from the dialog's choice.
@@ -8289,11 +8395,20 @@ class MultibootPanel:
 
     def _scores_cell(self, row):
         """PAD-226: 'own' / 'shared' - whose high-score table this image
-        plays into on the machine.  Blank on a JJP card, and on a random card
-        that only stands in front of games other rows already hold."""
+        plays into on the machine, and PAD-1194's 'own settings' / 'own
+        scores' when only one of the two is its own.  Blank on a JJP card,
+        and on a random card that only stands in front of games other rows
+        already hold."""
         if self._backend.key != "stern" or (is_group(row) and row.keep):
             return ""
-        return "own" if (row.own_scores or "").strip() else "shared"
+        settings, scores = row_own_settings(row), row_own_hiscores(row)
+        if settings and scores:
+            return "own"
+        if settings:
+            return "own settings"
+        if scores:
+            return "own scores"
+        return "shared"
 
     def _scores_tip(self, row):
         cell = self._scores_cell(row)
@@ -8301,6 +8416,15 @@ class MultibootPanel:
         if cell == "own":
             return runs + ("Keeps its own high scores, settings and audits on the "
                            "machine (store '%s' on the card)." % row.own_scores.strip())
+        if cell == "own settings":
+            return runs + ("Keeps its own settings and audits on the machine (store "
+                           "'%s' on the card) and plays into the high-score table it "
+                           "shares with the other images of the same game."
+                           % row.own_scores.strip())
+        if cell == "own scores":
+            return runs + ("Keeps its own high scores on the machine and shares its "
+                           "settings and audits with the other images of the same "
+                           "game.")
         if cell == "shared":
             if runs:
                 return runs + ("It SHARES its high-score table with the other images "
@@ -8311,7 +8435,8 @@ class MultibootPanel:
 
     def _scores_warn(self, row):
         """A modded image that still shares its table: worth a second look."""
-        return self._scores_cell(row) == "shared" and bool((row.modes or "").strip())
+        return (self._scores_cell(row) != "" and not row_own_hiscores(row)
+                and bool((row.modes or "").strip()))
 
     def _refresh_tree(self, select=None):
         """Rebuild the table from ``self._rows`` and settle everything that
@@ -8439,7 +8564,8 @@ class MultibootPanel:
             self._roll_norepeat_free = None
             self._ed_roll.set(roll_draw(row_roll(row)))
             self._ed_roll_norepeat.set(roll_no_repeat(row_roll(row)))
-            self._ed_own_scores.set(bool((row.own_scores or "").strip()))
+            self._ed_own_settings.set(row_own_settings(row))
+            self._ed_own_scores.set(row_own_hiscores(row))
             # A still taken off a video with no clip yet (an older form)
             # keeps its second as the clip's start.
             self._ed_anim_start.set(row.anim_start or (
@@ -8504,19 +8630,17 @@ class MultibootPanel:
         self._update_row_label()
 
     def _own_scores_from_editor(self, row):
-        """PAD-226: the row's store name <- the tick.  A name is made from the
-        title the first time the box is ticked and KEPT after that, so a title
-        edited later does not move the image to a new, empty store; untick
-        and it shares again.  A JJP or BOF install keeps no such store."""
+        """PAD-226 / PAD-1194: the row's store and high-score names <- the two
+        ticks (:func:`set_row_scores`).  A name is made from the title the
+        first time a box is ticked and KEPT after that, so a title edited
+        later does not move the image to a new, empty store; untick and it
+        shares again.  A JJP or BOF install keeps no such store."""
         if self._backend.key != "stern":
             return
-        if not bool(self._ed_own_scores.get()):
-            row.own_scores = ""
-        elif not (row.own_scores or "").strip():
-            taken = {(r.own_scores or "").strip() for r in self._rows
-                     if r is not row}
-            row.own_scores = scores_name_for(
-                row.title or self._ed_title.get(), taken)
+        set_row_scores(row, bool(self._ed_own_settings.get()),
+                       bool(self._ed_own_scores.get()),
+                       [r for r in self._rows if r is not row],
+                       row.title or self._ed_title.get())
 
     def _apply_media(self, i, row):
         """Row *i*'s art and animation <- the dialog's one choice.  'card'

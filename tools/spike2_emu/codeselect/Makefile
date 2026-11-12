@@ -127,8 +127,8 @@ endif
 GLLIBS    =
 AUDLIBS   =
 LIBC      =
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c
-HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h jjp_glibc.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h jjp_glibc.h $(BUILD)/theme_table.h
 else ifeq ($(PLATFORM),bof)
 # ---- BOF: native x86-64, the host gcc, STATIC, the machine's paths baked in ----
 # Everything the menu keeps lives under the update's own folder: the
@@ -156,8 +156,8 @@ LDPOST    =
 GLLIBS    =
 AUDLIBS   =
 LIBC      = -lpthread -lm
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_bof.c log.c art.c audio.c audio_fifo.c nvm.c
-HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_bof.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 else ifneq ($(filter dp spk,$(PLATFORM)),)
 # ---- DP: native x86-64, the host gcc, STATIC (as BOF), drawing on X ----
 # Every path is passed by the launcher (padselect_dp.sh): the menu's folder
@@ -192,8 +192,8 @@ LDPOST    =
 GLLIBS    =
 AUDLIBS   =
 LIBC      = -lpthread -lm
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c x11_raw.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_dp.c log.c art.c audio.c audio_fifo.c nvm.c
-HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h x11_raw.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c x11_raw.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_dp.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h x11_raw.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 else
 # ---- Stern: the ARM cross build against the card rootfs ----
 CC        = $(CROSS)gcc
@@ -232,8 +232,8 @@ GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 AUDLIBS   = -l:libasound.so.2
 # input_jjpio.c is plain POSIX and rides along: codeselect.c dispatches every
 # backend by name, and on a Stern card `--input jjpio` finds no /dev/jjpio
-SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c
-HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 endif
 
 # THE PAST-32 BINARY (item 105).  The animation tick used to mark the cards

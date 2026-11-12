@@ -323,7 +323,7 @@ function ImagesCard({ s, w, busy }) {
     { key: "media", label: "Picture", width: "60px", cls: "dim", titleOf: (r) => r.media },
     { key: "music", label: "Sounds", title: "Music · Confirm sound", width: "84px", cls: "dim",
       titleOf: (r) => "Music: " + r.music + " · Confirm: " + r.sound, render: (r) => `${r.music} · ${r.sound}` },
-    { key: "scores", label: "Scores", title: "High scores on the machine", width: "52px", cls: "dim", titleOf: (r) => r.scores_tip,
+    { key: "scores", label: "Scores", title: "Settings and high scores on the machine", width: "84px", cls: "dim", titleOf: (r) => r.scores_tip,
       render: (r) => html`<span class=${r.scores_warn ? "warn-ink" : ""}>${r.scores}${r.modes ? " ★" : ""}</span>` },
     { key: "code", label: "Code", width: "52px", cls: "mono" },
     acts,
@@ -334,7 +334,7 @@ function ImagesCard({ s, w, busy }) {
     { key: "media", label: "Picture", width: "60px", cls: "dim", titleOf: (r) => r.media },
     { key: "music", label: "Music", width: "48px", cls: "dim", titleOf: (r) => r.music },
     { key: "sound", label: "Confirm", width: "56px", cls: "dim", titleOf: (r) => r.sound },
-    { key: "scores", label: "Scores", title: "High scores on the machine", width: "56px", cls: "dim", titleOf: (r) => r.scores_tip,
+    { key: "scores", label: "Scores", title: "Settings and high scores on the machine", width: "84px", cls: "dim", titleOf: (r) => r.scores_tip,
       render: (r) => html`<span class=${r.scores_warn ? "warn-ink" : ""}>${r.scores}${r.modes ? " ★" : ""}</span>` },
     { key: "code", label: "Code", width: "52px", cls: "mono" },
     acts,
@@ -477,8 +477,9 @@ function EditDialog({ s, w }) {
           </div>
           <span class="small muted">${ed.roll_note}</span>
         <//>` : null}
-        ${ed.scores ? html`<${Box} legend="High scores">
+        ${ed.scores ? html`<${Box} legend="Settings and high scores">
           ${ed.scores_modes ? html`<span class="small">${ed.scores_modes}</span>` : null}
+          <${Check} ns=${NS} k="ed_own_settings" checked=${s.ed_own_settings} label=${ed.settings_label} />
           <${Check} ns=${NS} k="ed_own_scores" checked=${s.ed_own_scores} label=${ed.scores_label} />
           <span class="small muted">${ed.scores_note}</span>
         <//>` : null}

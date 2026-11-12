@@ -37,6 +37,18 @@
 # Each image without a line keeps sharing. Every failure here leaves the image
 # on the shared store and the boot goes on.
 #
+# HIGH SCORES APART FROM SETTINGS (PAD-1194): a `hiscores=<N>|<group>` line puts
+# image N's high-score table in <group>, whichever store its settings are in, so
+# images with settings of their own can still play into one table (pb_lawww:
+# "Heisei - Original Sound (own settings, shared highscore)"). The game plays
+# its table from one block of /data/nv/<title>/LKRAM (codeselect's scores.h),
+# so only that block is handed over: before the image's store is bound,
+# `codeselect --scores-save` copies the table of the store that booted this
+# title LAST ($NV_HS/last.<title>) to $NV_HS/<group>/<title>; once it is bound,
+# `--scores-load` writes the group's table into it as a new LKRAM generation.
+# Never in the boot's way: a table that cannot be handed over (another game
+# version, no LKRAM yet) leaves the image with the table it has.
+#
 # EACH IMAGE'S OWN CUSTOM MODES (PAD-226): a card's modes live on the rootfs at
 # /usr/local/padmode, and a multi-boot card has only the primary's rootfs. The
 # build copies every other image's set to $DIR/modes/img<N>/ (and makes an empty
@@ -59,6 +71,7 @@
 #   select.sh --lookup N [conf]   print image N's device (without :<sub>)
 #   select.sh --lookup-sub N [conf]   print image N's subdirectory ("" when none)
 #   select.sh --scores N [conf]   print image N's own-scores name ("" when it shares)
+#   select.sh --hiscores N [conf] print image N's high-score group ("" = with its settings)
 #
 # POSIX sh; needs only busybox sed/awk/grep/head/tr/mkdir/mount/umount + pidof.
 # The CODESELECT_* variables exist for the tests (a fake selector, fake
@@ -76,6 +89,7 @@ MOUNT=${CODESELECT_MOUNT:-mount}
 UMOUNT=${CODESELECT_UMOUNT:-umount}
 NV=${CODESELECT_NV:-/data/nv}
 NV_OWN=${CODESELECT_NV_OWN:-/data/nv.own}
+NV_HS=${CODESELECT_NV_HS:-/data/nv.hs}
 MODES=${CODESELECT_MODES:-$DIR/modes}
 PADMODE=${CODESELECT_PADMODE:-/usr/local/padmode}
 COLOR=${CODESELECT_COLOR:-/data/codeselect.color}
@@ -157,6 +171,22 @@ scores_name() {
         }' "$2"
 }
 
+# image N's `hiscores=<N>|<group>` group ("" when its scores go with its settings)
+hiscores_name() {
+    $AWK -F'|' -v want="$1" '
+        /^[ \t]*hiscores[ \t]*=/ {
+            sub(/^[ \t]*hiscores[ \t]*=[ \t]*/, "", $1)
+            gsub(/[ \t]+$/, "", $1); gsub(/^[ \t]+|[ \t]+$/, "", $2)
+            if ($1 == want "") { print $2; exit }
+        }' "$2"
+}
+
+# a store/group name select.sh accepts (the rule scores= names follow)
+good_name() {
+    case "$1" in ""|.*|*/*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+    return 0
+}
+
 # the title directory the mounted games tree runs: game -> <title>/game
 game_title() {
     t=$(readlink "$GAMES/game" 2>/dev/null)
@@ -192,9 +222,54 @@ own_scores() {
     fi
     mkdir -p "$NV/$title" 2>/dev/null
     if $MOUNT --bind "$store" "$NV/$title"; then
+        STORE_REAL=$store
         log "image $idx: $store bound over $NV/$title (its own settings, audits and high scores)"
     else
         log "image $idx: binding $store failed: it shares the machine store"
+    fi
+}
+
+# PAD-1194, BEFORE the store is bound: the table of the store that booted this
+# title last goes to that boot's group (see the header)
+hs_save_last() {
+    HS_TITLE=$(game_title) || { HS_TITLE=""; return 0; }
+    last=$NV_HS/last.$HS_TITLE
+    [ -f "$last" ] || return 0
+    IFS='|' read -r lg lp < "$last"
+    good_name "$lg" || { log "image $idx: $last names no group ('$lg'): nothing saved"; return 0; }
+    case "$lp" in
+        "$NV/$HS_TITLE"|"$NV_OWN"/*/"$HS_TITLE") ;;
+        *) log "image $idx: $last names no store of $HS_TITLE ('$lp'): nothing saved"; return 0 ;;
+    esac
+    [ -d "$lp" ] || return 0
+    mkdir -p "$NV_HS/$lg" 2>/dev/null
+    msg=$("$BIN" --scores-save --store "$lp" --to "$NV_HS/$lg/$HS_TITLE" </dev/null 2>/dev/null)
+    rc=$?
+    [ -n "$msg" ] && log "image $idx: $(echo "$msg" | sed 's/^\[select\] //' | head -n 1) (group $lg)"
+    [ "$rc" -le 1 ] || log "image $idx: the last game's high scores could not be saved (exit $rc)"
+}
+
+# PAD-1194, AFTER the store is bound: its group's table into it, and this boot
+# remembered as the one to save from next time
+hs_load() {
+    [ -n "$HS_TITLE" ] || return 0
+    group=$(hiscores_name "$idx" "$CONF")
+    if [ -z "$group" ]; then
+        # nothing split for this image: no hand-over to make next time
+        rm -f "$NV_HS/last.$HS_TITLE"
+        return 0
+    fi
+    good_name "$group" || { log "image $idx: bad hiscores group '$group': it keeps the table it has"; return 0; }
+    mkdir -p "$NV_HS" 2>/dev/null || { log "image $idx: cannot create $NV_HS: it keeps the table it has"; return 0; }
+    msg=$("$BIN" --scores-load --from "$NV_HS/$group/$HS_TITLE" --store "$NV/$HS_TITLE" </dev/null 2>/dev/null)
+    rc=$?
+    [ -n "$msg" ] && log "image $idx: $(echo "$msg" | sed 's/^\[select\] //' | head -n 1) (group $group)"
+    [ "$rc" -le 1 ] || log "image $idx: the shared high scores could not be loaded (exit $rc): it keeps the table it has"
+    if echo "$group|$STORE_REAL" > "$NV_HS/last.$HS_TITLE.part" \
+            && mv "$NV_HS/last.$HS_TITLE.part" "$NV_HS/last.$HS_TITLE"; then
+        :
+    else
+        log "image $idx: cannot write $NV_HS/last.$HS_TITLE: its scores are not handed on"
     fi
 }
 
@@ -252,7 +327,11 @@ own_color() {
 
 # everything that belongs to the image that is about to boot, once it is mounted
 image_ready() {
+    STORE_REAL=""
+    hs_save_last
     own_scores
+    [ -n "$STORE_REAL" ] || STORE_REAL=$NV/$HS_TITLE
+    hs_load
     own_modes
     own_color
 }
@@ -261,6 +340,11 @@ case "$1" in
     --scores)
         [ -n "$2" ] || { echo "usage: select.sh --scores N [conf]" >&2; exit 1; }
         scores_name "$2" "${3:-$CONF}"
+        exit 0
+        ;;
+    --hiscores)
+        [ -n "$2" ] || { echo "usage: select.sh --hiscores N [conf]" >&2; exit 1; }
+        hiscores_name "$2" "${3:-$CONF}"
         exit 0
         ;;
     --lookup)

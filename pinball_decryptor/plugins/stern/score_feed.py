@@ -28,8 +28,7 @@ NO_PORT = "The app does not know %s well enough to see when its games end."
 HOW = ("at the end of each game the players' final scores, and the Insider Connected login of each player who was "
        "logged in, are posted to %s")
 #: the Modes tab's line under the tick
-NOTE = ("On the card: after each game the machine posts the final scores (JSON) to this address on your network. "
-        "Insider Connected is not involved.")
+NOTE = "After each game the machine posts the final scores here."
 #: the box's hint
 PLACEHOLDER = "http://192.168.1.50:8080/scores"
 

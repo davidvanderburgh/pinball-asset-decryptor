@@ -412,6 +412,22 @@ def _sounds_unread_why(missing, job="extract"):
 # --------------------------------------------------------------------------
 # locating + extracting the card's game_real / image.bin
 # --------------------------------------------------------------------------
+def _spike3_card(path):
+    """Is the card image at *path* a Stern Spike 3 secure card (PAD-1186)?"""
+    try:
+        from . import spike3
+        return spike3.is_spike3_card(_lp(path))
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def _is_spike3(disk_f):
+    """Is *disk_f* a Stern Spike 3 games volume (PAD-1186)?  Its sounds are
+    plain PCM that spike3_sound writes itself, and it has no Spike 2 game
+    program, so the write core leaves both alone."""
+    return bool(getattr(disk_f, "pad_spike3", False))
+
+
 def _locate(disk_f, partitions):
     """Find the Spike 2 game directory (the one holding ``image.bin``) and its
     firmware ELF across the card's ext partitions (largest first).  Returns
@@ -433,6 +449,11 @@ def _locate(disk_f, partitions):
         if img_ino is not None and img_only is None:
             img_only = (r, r.read_inode(img_ino))
     if img_only is not None:
+        if _is_spike3(disk_f):
+            # PAD-1186: a Spike 3 games volume (spike3_card.GamesVolume) has
+            # no Spike 2 program beside image.bin - its game is an aarch64
+            # Godot program, and nothing here reads or patches it
+            return img_only[0], None, img_only[1]
         raise FileNotFoundError(
             "Found image.bin but not the game firmware ELF next to it on the "
             "card.")
@@ -1957,6 +1978,11 @@ def rebuild_scene_layouts_from_card(image_path, output_dir, log=None,
     next to the game ELF), so the card paths it writes match the ones already
     in the manifests."""
     log = log or (lambda *a, **k: None)
+    if open_disk is None and partitions is None and _spike3_card(image_path):
+        # PAD-1186: a Spike 3 card's games volume, decrypted
+        from . import spike3_card
+        vol = spike3_card.open_games(image_path)
+        open_disk, partitions = (lambda: vol), spike3_card.volume_parts(vol)
     if partitions is None:
         partitions = _linux_partitions(image_path)
     disk_f = (open_disk() if open_disk is not None
@@ -7967,6 +7993,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # Per-song music banks (music_catNN_*.wav) edited by the user — re-encoded
     # back into their image-scNN.bin banks (see _compute_music_patches).
     music_edits = _changed_music_banks(assets_dir, baseline)
+    if _is_spike3(disk_f):
+        # PAD-1186: a Spike 3 card's sounds are written by spike3_write
+        # (plain PCM in image.bin), never through the Spike 2 codec
+        audio_edits, music_edits = type(audio_edits)(), type(music_edits)()
     # Edited LCD display strings (text/strings.tsv rows where replacement !=
     # original) — patched size-neutral, in place, into their .radium scenes.
     text_edits = _changed_radium_text(assets_dir)

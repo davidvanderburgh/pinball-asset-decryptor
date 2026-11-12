@@ -108,20 +108,24 @@ class _FakeArc:
 
 
 class _FakeReader:
-    """Stands in for the Spike 3 ext4 reader of the games partition."""
+    """Stands in for the Spike 3 ext4 reader of the games partition: the
+    game's own image.bin is the one find_spike_assets names (MAIN)."""
 
     def __init__(self, files):
         self.files = files
 
-    def iter_regular_files(self, root_ino=2, max_depth=12):
+    def find_spike_assets(self):
+        for i, (p, _s) in enumerate(self.files):
+            if p == MAIN:
+                return i + 10, None
+        return None, None
+
+    def iter_regular_files(self, root_ino=2, max_depth=12, min_size=1):
         for i, (p, s) in enumerate(self.files):
-            yield "/" + p, i + 10, s
+            yield "/" + p, i + 10, {"src": s, "size": os.path.getsize(s)}
 
-    def extract_file(self, inode, out):
-        shutil.copyfile(inode, out)
-
-    def peek(self, inode, n):
-        return b"\0" * n
+    def extract_file(self, node, out):
+        shutil.copyfile(node["src"], out)
 
 
 def _pipe(cls, out, cats=None):
@@ -168,27 +172,41 @@ def test_spk_pipeline_writes_wavs(tmp_path):
 
 
 def test_sd_pipeline_writes_wavs(tmp_path):
+    """PAD-1186: a card's sounds land where the Replace Audio tab and the
+    Spike 3 Write keep them - the game's in audio/ (Spike 2's folder), the
+    service menu's in audio_spike_menu/ - and a container that isn't one is
+    left out with a warning."""
     out = tmp_path / "proj"
-    p, _logs = _pipe(SX.Spike3ExtractPipeline, out)
-    counts = p._extract_tree(_FakeReader(_files(tmp_path)))
-    assert counts["audio"] == 4
-    _assert_layout(out)
-    assert "4 sound" in p._summary(counts)
+    p, logs = _pipe(SX.Spike3ExtractPipeline, out)
+    n, secs = p._extract_sounds(_FakeReader(_files(tmp_path, bad=True)))
+    assert n == 4 and secs == pytest.approx(300 / 44100.0)
+    _check_pair(str(out / "audio"))
+    _check_pair(str(out / "audio_spike_menu"))
+    assert not (out / "sound").exists()
+    assert not list(out.glob("**/image.bin"))       # containers not kept
+    assert any(lvl == "warn" and "other/image.bin" in m for lvl, m in logs)
+    assert "4 sound" in p._summary({"audio": n, "seconds": secs})
 
 
 @pytest.mark.parametrize("cats", [{"audio": False}, {"sounds": False}])
 def test_audio_unticked_writes_nothing(tmp_path, cats):
-    for cls, drive in ((SPK.Spike3SpkExtractPipeline,
-                        lambda p, f: p._extract(_FakeArc(f))),
-                       (SX.Spike3ExtractPipeline,
-                        lambda p, f: p._extract_tree(_FakeReader(f)))):
-        out = tmp_path / cls.__name__
-        work = tmp_path / ("w_" + cls.__name__)
-        work.mkdir()
-        p, _ = _pipe(cls, out, cats)
-        counts = drive(p, _files(work))
-        assert counts["audio"] == 0
-        assert not (out / "sound").exists()
+    out = tmp_path / "spk"
+    work = tmp_path / "w_spk"
+    work.mkdir()
+    p, _ = _pipe(SPK.Spike3SpkExtractPipeline, out, cats)
+    counts = p._extract(_FakeArc(_files(work)))
+    assert counts["audio"] == 0
+    assert not (out / "sound").exists()
+    # the SD pipeline: every other category off, audio's switch as given
+    out = tmp_path / "sd"
+    work = tmp_path / "w_sd"
+    work.mkdir()
+    off = dict(cats, video=False, images=False, scenes=False)
+    p, _ = _pipe(SX.Spike3ExtractPipeline, out, off)
+    os.makedirs(str(out))
+    counts = p._extract_project(_FakeReader(_files(work)))
+    assert counts["audio"] == 0
+    assert not (out / "audio").exists()
 
 
 def test_extract_tab_offers_audio_for_spike3():

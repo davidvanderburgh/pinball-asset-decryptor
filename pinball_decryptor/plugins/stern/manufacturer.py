@@ -171,14 +171,21 @@ _GAMES = (_SPIKE2_GAMES + _SPIKE1_GAMES + _WHITESTAR_GAMES + _SAM_GAMES
           + _SPIKE3_GAMES)
 
 # Spike 3 (Pi-4 secure-boot era): the SD card's game partition is LUKS2-
-# encrypted, so Extract decrypts it on the fly and copies out the directly
-# usable assets — playable QuickTime videos, PNG images, .radium/.sidx
-# scenes, and every sound decoded from image.bin to a WAV (PAD-1077).
-# Extract-only for now: build/replace would re-encrypt + re-sign, which this
-# era doesn't do yet.  See spike3.py / spike3_extract.py / spike3_sound.py.
+# encrypted over Spike 2's own asset tree.  Extract decrypts it on the fly
+# and runs the Spike 2 extractors over it (spike3_card.GamesVolume), every
+# sound decoded from image.bin to a WAV (PAD-1077); PAD-1186: the Replace
+# tabs work on that project as on Spike 2's, and Write puts the edits back
+# on a copy of the card through the volume's own encryption
+# (spike3_write.py) - the boot partition is never touched, so nothing needs
+# signing.  See spike3_card.py / spike3_extract.py / spike3_write.py.
 _SPIKE3_CAPS = Capabilities(
     extract=True,
     extract_categories=_spike3_extract.CATEGORIES,
+    write=True,
+    replace_audio=True,
+    replace_video=True,
+    replace_image=True,
+    replace_text=True,
     # PAD-1090: the Emulate tab runs a Spike 3 card on the Spike 3 rig
     # (tools/spike3_emu/s3launch.sh), with the virtual playfield beside it
     emulate=True,
@@ -741,6 +748,9 @@ class SternManufacturer(Manufacturer):
     def write_phases(self):
         if self._era == "sam":
             return SamWritePipeline.PHASES
+        if self._era == "spike3":
+            from .spike3_write import PHASES as _S3_WRITE_PHASES
+            return _S3_WRITE_PHASES
         return self._SPIKE1_WRITE_PHASES if self._era == "spike1" \
             else self._SPIKE2_WRITE_PHASES
 
@@ -780,7 +790,8 @@ class SternManufacturer(Manufacturer):
         # SAM: the code update itself, which the machine's USB update reads
         if self._era == "sam":
             return ".bin"
-        return ".raw" if self._era == "spike2" else ""
+        # Spike 3 (PAD-1186): a secure SD-card image, raw like Spike 2's
+        return ".raw" if self._era in ("spike2", "spike3") else ""
 
     def audio_forces_length_match(self, assets_dir=None):
         # Spike audio (both generations) is a size-neutral in-place patch:
@@ -808,6 +819,13 @@ class SternManufacturer(Manufacturer):
                     "original slot length (longer is trimmed, shorter padded "
                     "with silence) and loudness-matched to the original "
                     "(soft-limited).")
+        if self._era == "spike3":
+            return ("Each replacement plays at its own length, longer or "
+                    "shorter than the original (always on), as 16-bit PCM "
+                    "at 44.1 kHz with the original's channels: a shorter one "
+                    "goes in the original's place, a longer one into new "
+                    "space in the sound container, which then goes onto the "
+                    "card whole.")
         return ("Each replacement plays at its own length, longer or shorter "
                 "than the original (always on): it goes into new space at the "
                 "end of the sound bank, on image builds only. A direct-SD "
@@ -1237,6 +1255,11 @@ class SternManufacturer(Manufacturer):
                 log_cb, phase_cb, progress_cb, done_cb)
         if self._era == "spike1":
             return Spike1WritePipeline(
+                original_path, assets_dir, output_path,
+                log_cb, phase_cb, progress_cb, done_cb)
+        if self._era == "spike3":
+            from .spike3_write import Spike3WritePipeline
+            return Spike3WritePipeline(
                 original_path, assets_dir, output_path,
                 log_cb, phase_cb, progress_cb, done_cb)
         return SternWritePipeline(

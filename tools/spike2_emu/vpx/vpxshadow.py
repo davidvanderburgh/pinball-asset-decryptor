@@ -1737,8 +1737,13 @@ def patch(script, m):
     if had["PadFullColour"]:
         rep.append("lit RGB inserts take their colour whole (the script's SetLightColor sets Color = ColorFull)")
     stub = pup_stub(lines, rep, force=m.get("pup_stub") == "always") if m.get("pup_stub") else ""
+    # PAD-1187: on by default for every table. A FlexDMD (or UltraDMD) a PC
+    # has installed opens its own DMD window, and on John Wick it sat over
+    # the machine's LCD, which is the only display behind a PAD table. A map
+    # sets the key to false to keep the table's own library (then FlexDMD
+    # is still made optional below, for a PC without it).
     for key, (progid, cls, label) in DMD_STUBS.items():
-        if m.get(key):
+        if m.get(key, True):
             stub += flexdmd_stub(lines, rep, progid, cls, label)
     flex_optional(lines, rep)
     # what core.vbs's PinMAMETimer expects a VPM table to declare, at the TOP:

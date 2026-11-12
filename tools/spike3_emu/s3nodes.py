@@ -138,6 +138,14 @@ def catalog(e):
             return None
         en = e.ptr(c) if c else None
         return (ps, e.u32(a + 8), (e.cstr(t) if t else None), (e.cstr(en) if en else None))
+    # Only a reference that sits IN a catalog row counts (its row's part
+    # field a "520-" number): transformers_mtmte_le 0.96 also names
+    # "pinnode" in a plain list of node-type names (0x978d18, beside "lcd
+    # node", "qr node", ...) far below its catalog, and starting from the
+    # lowest reference found no rows at all (PAD-1140).
+    slots = [a for a in slots if row(a - 0x10)]
+    if not slots:
+        raise ValueError("no board-model catalog (no node type name in a catalog row)")
     lo = min(slots) - 0x10
     while row(lo - 0x28):
         lo -= 0x28

@@ -43,7 +43,20 @@ if __name__ == "__main__":
         import importlib.util
         import os
         base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        relay = os.path.join(base, "tools", "spike2_emu", "padrelay.py")
+        # a Mac bundle keeps its data under Contents/Resources (PyInstaller 6
+        # symlinks it from Contents/Frameworks, where _MEIPASS points); a
+        # source tree keeps it beside installer/
+        relay = ""
+        for d in (base, os.path.join(base, os.pardir, "Resources"),
+                  os.path.join(base, os.pardir)):
+            cand = os.path.join(d, "tools", "spike2_emu", "padrelay.py")
+            if os.path.isfile(cand):
+                relay = cand
+                break
+        if not relay:
+            print("[pace] no tools/spike2_emu/padrelay.py near %s" % base,
+                  file=sys.stderr)
+            sys.exit(2)
         spec = importlib.util.spec_from_file_location("padrelay", relay)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

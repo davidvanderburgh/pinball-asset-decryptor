@@ -105,3 +105,24 @@ def test_workers_get_the_guard_too():
     with open(entry, encoding="utf-8") as fh:
         src = fh.read()
     assert src.index("guard_child_env()") < src.index("freeze_support()")
+
+
+def test_the_frozen_app_can_run_the_macs_sound_pacer():
+    """PAD-1109: `<app> --pace <rate> <ch>` runs tools/spike2_emu/padrelay.py's
+    pacer from the bundle, before any GUI import, looking beside _MEIPASS,
+    in Contents/Resources and in the source tree."""
+    entry = os.path.join(os.path.dirname(__file__), os.pardir, "installer",
+                         "pyinstaller_entry.py")
+    with open(entry, encoding="utf-8") as fh:
+        src = fh.read()
+    pace = src.index('if "--pace" in sys.argv:')
+    assert pace < src.index("from pinball_decryptor.webui.host import main")
+    body = src[pace:src.index("from pinball_decryptor.webui.host import main")]
+    assert "Resources" in body and "pace_main(" in body and "_MEIPASS" in body
+    # and run for real from the source tree: the pacer answers a bad rate
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    env = dict(os.environ, PYTHONPATH=root)        # the frozen app has it built in
+    out = subprocess.run([sys.executable, entry, "--pace", "x"], env=env,
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 2, (out.returncode, out.stderr)
+    assert "usage: padrelay.py --pace" in out.stderr

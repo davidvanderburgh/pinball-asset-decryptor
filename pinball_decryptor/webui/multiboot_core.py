@@ -208,6 +208,7 @@ from ..core import config, runtime
 from . import compat
 from . import rig as _rig
 from . import multiboot_docker as _mac
+from . import multiboot_root as _root
 from .emulate_core import rig_dir, wsl_account, wsl_home
 from . import preview_audio
 from .preview_audio import PreviewAudio
@@ -2939,11 +2940,13 @@ def wsl_command(args, cwd=None, exe="python3"):
 def wsl_shell_root(line, home=None):
     """The argv that runs one shell line AS ROOT: ``wsl -u root`` carrying
     the desktop user's HOME (root's own is /root, where ``~/spike2root`` is
-    not - the shape the Emulate tab's checkpointable launch uses), ``sudo
-    -n`` on Linux (fails fast rather than waiting for a password a GUI
-    cannot type).  A SEPARATE function, never a flag: a wrong argument must
-    not be able to turn an ordinary run into a root one (_rig.rig_cmd_root's
-    rule)."""
+    not - the shape the Emulate tab's checkpointable launch uses).  On a
+    Linux desktop :func:`multiboot_root.linux_argv`: root, a password-free
+    sudo, sudo on the terminal the app was started from, or the run's one
+    pkexec root shell (PAD-1188: ``sudo -n`` alone failed every build from a
+    desktop launcher).  A SEPARATE function, never a flag: a wrong argument
+    must not be able to turn an ordinary run into a root one
+    (_rig.rig_cmd_root's rule)."""
     if sys.platform == "win32":
         head = runtime.wsl_head(root=True) + ["-e"]
         if home:
@@ -2955,7 +2958,7 @@ def wsl_shell_root(line, home=None):
         # ask for a password it could not have spent (PAD-192).  *home* is a
         # WSL concern and means nothing here.
         return _mac.exec_argv(line)
-    return ["sudo", "-n", "bash", "-lc", line]
+    return _root.linux_argv(line, home)
 
 
 def wsl_command_root(args, cwd=None, exe="python3", home=None):
@@ -2964,8 +2967,11 @@ def wsl_command_root(args, cwd=None, exe="python3", home=None):
     return wsl_shell_root(shell_line(args, cwd, exe), home)
 
 
-#: What sudo prints when it has nowhere to ask for a password.
-_SUDO_NEEDS_PASSWORD = "a password is required"
+#: What sudo prints when it has nowhere to ask for a password: classic
+#: sudo's two, and sudo-rs's (Ubuntu 25.10's default sudo, PAD-1188).
+_SUDO_NEEDS_PASSWORD = ("a password is required",
+                        "a terminal is required",
+                        "interactive authentication is required")
 
 def sudo_password_note(text):
     """One sentence for a root step that died for want of a password, or ""
@@ -2980,12 +2986,12 @@ def sudo_password_note(text):
     whose own user is root (:mod:`multiboot_docker`), so nothing on that
     platform shells out to sudo.
     """
-    if _SUDO_NEEDS_PASSWORD not in (text or ""):
+    if not any(m in (text or "") for m in _SUDO_NEEDS_PASSWORD):
         return ""
-    return ("This step needs administrator rights and could not get them: "
-            "the app asks with `sudo -n`, which never waits for a password. "
-            "Give this account passwordless sudo, or start the app from a "
-            "terminal where `sudo -v` has already been run.")
+    return ("This step needs administrator rights and sudo wanted a "
+            "password it had nowhere to ask for. Install polkit's pkexec "
+            "so the app can show your desktop's password prompt, or start "
+            "the app from a terminal.")
 
 
 #: What Docker or Podman prints when a step is run and no container of ours
@@ -3046,12 +3052,27 @@ def root_command(args, cwd=None, exe="python3"):
     "check that WSL starts" on a WSL that had just built the menu program,
     rendered the preview and planned the card - and could never build one.
     """
-    if sys.platform != "win32":
+    if _mac.enabled():
         return wsl_command_root(args, cwd, exe)
+    if sys.platform != "win32":
+        # resolved on the worker too: the route asks sudo, and an AppImage's
+        # tools are copied where root can read them first (PAD-1188)
+        def linux_later(_texts):
+            return wsl_command_root(args, _linux_root_cwd(cwd), exe)
+        return linux_later
 
     def later(_texts):
         return wsl_command_root(args, cwd, exe, home=_root_step_home())
     return later
+
+
+def _linux_root_cwd(cwd):
+    """The checkout a Linux root step ``cd``s into: the tab's own, or the
+    copy :func:`multiboot_root.root_repo_dir` makes when that is the
+    AppImage's FUSE mount, which root cannot enter (PAD-1188)."""
+    if cwd is None:
+        cwd = wsl(repo_dir())
+    return _root.root_repo_dir(cwd)
 
 
 def root_shell_line(line, cwd=None):
@@ -3062,8 +3083,13 @@ def root_shell_line(line, cwd=None):
     if cwd is None:
         cwd = wsl(repo_dir())
     full = "cd %s && %s" % (_q(cwd), line)
-    if sys.platform != "win32":
+    if _mac.enabled():
         return wsl_shell_root(full)
+    if sys.platform != "win32":
+        def linux_later(_texts):
+            return wsl_shell_root("cd %s && %s"
+                                  % (_q(_linux_root_cwd(cwd)), line))
+        return linux_later
 
     def later(_texts):
         home = wsl_home()
@@ -13424,6 +13450,9 @@ class MultibootPanel:
                 # preview compiled its menu program in one and ran it in the
                 # other, and failed at frame 0 (PAD-307; runtime.rehead, which
                 # leaves anything that is not a wsl.exe command alone).
+                # the pkexec route's root step goes to the run's root shell
+                # (multiboot_root, PAD-1188), never to Popen
+                root_line = argv if isinstance(argv, _root.RootLine) else None
                 argv = runtime.rehead(argv)
                 is_container_exec = (
                     len(argv) >= 2 and argv[1] == "exec"
@@ -13436,9 +13465,13 @@ class MultibootPanel:
                     break
                 self._append("$ " + argv[-1])
                 try:
-                    proc = subprocess.Popen(
-                        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        creationflags=_rig.CREATE_FLAGS)
+                    if root_line is not None:
+                        proc = _root.start(root_line, preview=preview)
+                    else:
+                        proc = subprocess.Popen(
+                            argv, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            creationflags=_rig.CREATE_FLAGS)
                 except Exception as exc:                # noqa: BLE001
                     self._append("cannot start %s: %s"
                                  % (label, exc))
@@ -13491,6 +13524,10 @@ class MultibootPanel:
                 if rc != 0:
                     failed = label
                     break
+
+            if not preview:
+                # the run's root shell, if it opened one, ends with the run
+                _root.end_run()
 
             def finish():
                 if preview:

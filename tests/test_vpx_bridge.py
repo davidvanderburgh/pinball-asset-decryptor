@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import struct
+import tempfile
 import sys
 
 import pytest
@@ -5786,12 +5787,21 @@ def test_flexdmd_stands_in_on_every_table():
     out, rep = vs.patch(MINI_TRIBUTE + _JW_FLEX, keep)
     assert 'CreateObject("FlexDMD.FlexDMD")' in out and "PadNoFlex" not in out
     assert any("FlexDMD made optional" in r for r in rep), rep
+    # a copy patched the old way (FlexDMD only optional) is told to patch again
+    vset = pytest.importorskip("vpxsetup")
+    why = "the table's own FlexDMD window opened, and could sit over the machine's screen"
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "T (PAD).script.vbs"), "w", encoding="utf-8") as f:
+            f.write(out)
+        assert vset.missed_fixes(d, "T (PAD).vpx", vset.GENERIC_REPATCH) == [why]
+        with open(os.path.join(d, "T (PAD).script.vbs"), "w", encoding="utf-8") as f:
+            f.write(vs.patch(MINI_TRIBUTE + _JW_FLEX, json.loads(json.dumps(MINI_SHADOW)))[0])
+        assert vset.missed_fixes(d, "T (PAD).vpx", vset.GENERIC_REPATCH) == []
     # the script's FlexDMD code runs on the stand-in under VBScript itself
     if sys.platform != "win32" or not shutil.which("cscript"):
         pytest.skip("no cscript")
     lines = _JW_FLEX.strip().split("\n")
     cls = vs.flexdmd_stub(lines, [])
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         vbs = os.path.join(d, "jw.vbs")
         with open(vbs, "w", encoding="utf-8") as f:

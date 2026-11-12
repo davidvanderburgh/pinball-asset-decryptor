@@ -6400,6 +6400,26 @@ top line says `LANGUAGE: ENGLISH`, each flipper press flips every player's langu
 launches the ball at an Action press the runtime holds back, so an Action press, or any launch, ends it too); then the
 first pick, held back until here. Godzilla's own bar over its start film is under the intro, so this window is where the language is chosen.
 
+**Round 2: in the game's own intro screen; the ball after the pick.** DoomWalrus666: "add language selection during
+the intro video in a small dialogue", "Ball must NOT go to the shooter lane until video, language, and character
+selection are all completed". On a port that names its start films (`text start_film_clips`, Godzilla's
+intro1/3/4/6, played by its BDLGameIntro screen at a Start), a Start about to be co-op or team (the right flipper held
+within 1.5 s with characters to pick, the start menu's entry just picked, or a co-op game already waiting for its
+film) has the game's film ask answered with the intro's clip: the game plays it in its own intro screen, with its own
+PLAYER LANGUAGE SELECT bar over it, and the flippers flip the language as on a stock Start (the right flipper held
+through Start is not a flip). Its own words over the film (`text intro_hide_<k>`: the place, the date, the Japanese
+date art) are hidden; the screen's scene is demand-loaded, so its root is the one the game passes its node finders
+(`site find_node` / `find_text`) when it looks those words up. The screen is up while the game's state word reads
+`value intro_state_up` (`data intro_state` -> + `value intro_state_at`; Godzilla 0, then 4); a film the screen closes
+before its end goes on full screen as the runtime's clip. Both flipper buttons stop the film, and the game closes its
+screen. A co-op game that formed before the game asked for its film waits up to 2 s for it, then plays full screen as
+above. Then the first pick opens at once - no ball wait, no language window. BALL 1'S SERVE (`site serve_ball`: the
+ball start's call of the framework's serve, Godzilla LE 0x2a77ec) waits on the game's own process, a tick at a time
+(`site proc_sleep`), through the intro and the first pick until a character is taken (or the start menu's
+players-added lines and the pick after them); while it waits the pick has the flippers and Action (no ball to launch:
+its top line says ACTION PICKS). Not earlier in the ball start: held at its first-ball check the game never put its
+intro screen up. The handicap pick (PAD-1033) already waits for the character's.
+
 PAD-1123: a character's clip and sound once picked (the dialog's **When picked...**), and the character on its
 teammate's End of Ball Bonus (the dialog's **Show each teammate's character on their End of Ball Bonus**):
 

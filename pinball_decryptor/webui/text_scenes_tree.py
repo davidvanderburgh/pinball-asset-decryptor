@@ -1039,6 +1039,10 @@ class TreeEditMixin:
                 "x": round(box[0]) if box else None, "y": round(box[1]) if box else None,
                 "w": round(box[2] - box[0]) if box else None,
                 "h": round(box[3] - box[1]) if box else None,
+                # PAD-1211: the box as it is (x, y, w, h), not rounded: what a drag snaps by and
+                # what X and Y move from, so a part at 485.7 lands on the line, not 0.3 off it
+                "box": [round(box[0], 3), round(box[1], 3), round(box[2] - box[0], 3),
+                        round(box[3] - box[1], 3)] if box else None,
                 "scale": round(scale * 100), "scale_y": round(scale_y * 100),
                 "rotate": round(rotate, 2),
                 "game_turn": self._tree_game_turn(nid, rotate),

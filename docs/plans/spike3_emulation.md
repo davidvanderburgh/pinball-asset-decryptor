@@ -344,6 +344,20 @@ counted uniform arrays, colour/depth mask, pixel store, 3D textures, mipmaps.
 GLES varying limits (0x9122/0x9125) answered; samplerExternalOES shaders get
 the game's own `#define samplerExternalOES sampler2D`.
 
+**Two video paths, and the extension list (PAD-1182).** The game shows video
+two ways. Stern's own SpiVideoPlayer (0x945040 in pokemon_le 0.82: the map
+background) looks up glEGLImageTargetTexture2DOES and binds each frame's
+image itself. Videos placed in Godot scenes go through an ExternalTexture
+(0xd02420: the DISCOVER, capture, select and evolve backgrounds), and Godot
+only attaches an image when its config found `GL_OES_EGL_image_external_essl3`
+in the extension list. The bridge listed none (NUM_EXTENSIONS 0), so those
+backgrounds stayed on Godot's black placeholder while s3vid decoded every
+frame and the game made an image of each (6,800 images, 0 binds). s3gl.c now
+lists exactly what it carries: GL_OES_EGL_image, GL_OES_EGL_image_external,
+GL_OES_EGL_image_external_essl3. Tell-tale in padglhost.log: no `video upload`
+line for a channel the host is decoding. (The 1940x1100 size of those clips is
+not the cause: cropping them to 1920x1080 on the host changed nothing.)
+
 ## Stage 6 - the node bus decoded, Start starts a game (2026-11-10)
 
 **The frame mask.** A node address with bit 0x40 set (`c1`, `c8`...) carries
@@ -418,6 +432,25 @@ and star_wars_2025_le, same saved state, door open vs shut: 68.7 / 10.1 s and
 once), nor a window run: the window's keyboard closes the interlock as it
 attaches. `s3bridge.py` now shuts it by name (COIN DOOR [POWER] INTERLOCK)
 before the game starts; `PAD_S3_DOOR=open` keeps the old start.
+
+**The boot discovery is answered** (PAD-1180). Even with the door shut, every
+title sat ~30 s on its own red LOCATING NODE BOARDS / NODES NOT FOUND box
+(empty list): after the bus reset (F1 to node 0) and an unblock-all (F0 22)
+the game walks NODEBUS_Poll (0x25), blocks each board it is handed (F0 10 +
+F0 20) and polls again until a 0 - Spike 1's node_bus_identify_attached_nodes.
+The bridge answered 0 at once, so the game found no board, re-read every
+board's runtime info every 0.3 s and gave up 30 s after the bus reset (first
+service probe at f1 + 31 s on all 7 titles). `Bridge.discover()` now hands
+out each declared board once until it is blocked, then answers only switch
+requests; a bus reset starts it again. A board's switch-request hold
+(`attention()`) now ends at the service loop's first status probe (ff) rather
+than a flat 30 s after its identity, or a coin in the earlier attract would
+have waited ~20 s. Measured (headless, saved slots): pokemon_le every board
+found at 9 s, service loop 11-13 s (was 35 s), lamps 18 s (was 38 s), Guided
+Setup by 33 s (was ~49 s); fallout_le, star_wars_2025_le/pro, star_wars_elg,
+transformers_mtmte_le, walking_dead_remastered_le all found every board 3-5 s
+after the bus reset and lit their lamps at 15-24 s. Runtime info or LED (f2)
+replies filled with patterns changed nothing - the walk is the gate.
 
 **Proven** (pokemon_le 0.82.0, names only, emulator_08..11): coins ->
 CREDITS, START BUTTON -> BALL 1 (the trough eject is answered, the ball
@@ -668,6 +701,35 @@ state, the tab's slot list, Launch from a slot.
   through an in-run load and starts fresh on a cold one; the game re-arms
   coil rules at its next ball start. No clock credit for the freeze (Spike 3
   showed no watchdog at 1.3 s).
+
+## The window's balls: plunge, drain, multiball (PAD-1181, 2026-11-11)
+
+The ball model served the game's eject and auto plunger, but the virtual
+playfield's BALLS section was Spike 2's and saw none of it: the window
+takes its switch levels from padsw's merged array (`mrg[]`, `mrg_gen`),
+which only Spike 2's guest shim writes, so on Spike 3 it fell back to the
+keyboard's array - `balls 6/6 trough   in play 0` with the ball sitting in
+the shooter lane, Drain greyed for ever, and Plunge (plunge.py, writing
+Spike 2's script array and reading the empty merge) answering "nothing in
+the shooter lane to launch / trough 0/6".
+
+- `s3keys.py` publishes the slot's live levels (nodesw; spi.in for the CPU
+  board) into `mrg[]` by switch id at 20 Hz, bumping `mrg_gen` on a change.
+  The window's dots, BALLS line, Drain grey-out and lit key rows follow.
+- `plunge.py` hands its ball verbs - plunge, drain, take, serve, reset - to
+  the bridge on a Spike 3 slot (`s3ballask.py`: its PAD_ROOT holds
+  balls.json): a request file `dump/s3ballreq.<tag>`, answered in
+  `dump/s3ballans.<tag>`. Coin and Start stay plain switches.
+- `s3balls.py` makes them, in its one loop with its timers: Plunge launches
+  only the ball in the lane; Drain needs a ball in play and ROLLS - the ball
+  closes and opens every open position from the far end (TROUGH 6) down,
+  then settles on the lowest open one (Spike 2's PAD-186 rule); Take puts a
+  ball out of the trough onto the playfield; Reset fills the trough and
+  clears the lane. Moves queue behind a roll still playing. A trough eject
+  that meets a ball in the lane is held and served when the lane clears
+  (multiball on a manual plunger: each Plunge brings the next ball).
+  `dump/padball` (`fed N` + newest lines) feeds the BALLS note.
+- `s3press.py drain|plunge|take|serve|reset SLOT` go the same way.
 
 ## What is left for Spike 2 parity
 

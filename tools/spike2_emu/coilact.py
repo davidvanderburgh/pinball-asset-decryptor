@@ -206,6 +206,13 @@ def fire(name):
     if kind == "ball":
         return subprocess.call([sys.executable,
                                 os.path.join(HERE, "plunge.py"), "serve"])
+    if kind == "lane":
+        # PAD-1181: on a Spike 3 slot the shooter lane is the bridge's ball
+        # model's to open (s3ballask.py), not a switch this writes
+        import s3ballask
+        d = s3ballask.spike3_dir()
+        if d:
+            return s3ballask.spike3_ask(d, "plunge")
     m = plunge._open()
     if m is None:
         return 1

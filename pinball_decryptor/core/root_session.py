@@ -216,7 +216,10 @@ class RootSession:
             [self._pkexec, "--disable-internal-agent",
              "bash", "-c", _SHELL, "pad-root"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, start_new_session=True)
+            stderr=subprocess.PIPE, start_new_session=True,
+            # not the app's own cwd: from an AppImage that is its FUSE
+            # mount, which root cannot enter (PAD-1188)
+            cwd="/")
         self._proc = proc
         self.starts += 1
         threading.Thread(target=self._read_out, args=(proc,),

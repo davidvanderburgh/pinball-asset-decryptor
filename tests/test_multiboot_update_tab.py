@@ -59,7 +59,10 @@ def test_build_and_update_run_as_root_with_the_desktop_home(monkeypatch, tmp_pat
     assert [label for label, _ in cmds] == ["selector", "prepare", "update", "inspect", INSPECT_JSON]
     assert wsl_shell_root("echo hi") == ["wsl.exe", "-u", "root", "-e", "bash", "-lc", "echo hi"]
     monkeypatch.setattr(multiboot_core.sys, "platform", "linux")
-    assert wsl_shell_root("echo hi", "/home/x") == ["sudo", "-n", "bash", "-lc", "echo hi"]
+    # a Linux desktop: the root route's argv, the desktop HOME carried (PAD-1188)
+    monkeypatch.setattr(multiboot_core._root.root_session, "route", lambda: "sudo")
+    assert wsl_shell_root("echo hi", "/home/x") == [
+        "sudo", "-n", "env", "HOME=/home/x", "bash", "-lc", "echo hi"]
 
 
 def test_a_root_step_without_a_home_fails_with_a_sentence(monkeypatch, tmp_path):

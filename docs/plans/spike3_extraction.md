@@ -66,8 +66,9 @@ are greyed. A card run without a keyfile detects but reports "no key" cleanly.
 
 - **Done:** decrypt + extract video/images/scenes from a Spike 3 SD image.
   Proven end-to-end on a real 62 GB secure image.
-- **Not here:** build/replace (would re-encrypt + re-sign); decoding the
-  `image.bin` audio and scene-renderer `.asset` blobs into loose WAVs/clips
-  (reuses the Spike 2 scene/audio engine over the decrypting reader — a follow-up);
-  the `.spk` update-package path (a separate input that needs a real Stern `.spk`
-  to verify — none on hand).
+- **Done (PAD-1077):** `image.bin` sounds to WAVs.
+- **Done (PAD-1186):** the SD extract runs the Spike 2 extractors over the
+  decrypted volume (a Spike 2-shaped project), and the Replace tabs + Write
+  work on it: edits go back through the card's own encryption, nothing is
+  re-signed (only the boot partition is signed, and it is never touched).
+  See `spike3_replace.md`.

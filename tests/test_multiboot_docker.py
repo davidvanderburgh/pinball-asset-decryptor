@@ -68,7 +68,10 @@ def test_linux_and_windows_are_untouched(monkeypatch):
     monkeypatch.setattr(mt.sys, "platform", "linux")
     monkeypatch.setattr(D.sys, "platform", "linux")
     assert mt.wsl_shell("x") == ["bash", "-lc", "x"]
-    assert mt.wsl_shell_root("x") == ["sudo", "-n", "bash", "-lc", "x"]
+    monkeypatch.setattr(mt._root.root_session, "route", lambda: "sudo")
+    monkeypatch.setattr(mt._root, "_user_home", lambda: "/home/u")
+    assert mt.wsl_shell_root("x") == ["sudo", "-n", "env", "HOME=/home/u",
+                                      "bash", "-lc", "x"]
 
 
 # --------------------------------------------------------------------- paths

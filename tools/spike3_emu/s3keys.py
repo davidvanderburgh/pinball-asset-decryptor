@@ -283,22 +283,27 @@ class Keys:
         return out
 
     def publish(self):
-        """mrg[]: what the game is handed, for the window and the helpers."""
-        if not self.writable:
-            return
+        """mrg[]: what the game is handed, for the window and the helpers
+        (PAD-1181 / PAD-1183: the trough dots, the BALLS line, Drain's
+        grey-out, the key panel's lit rows, padsw.set_confirmed). mrg_gen
+        moves on the first publish, so readers switch over to it, and then
+        only when a level changed. True when it wrote."""
+        if not self.writable or self.mm is None:
+            return False
         live = self.live()
         if live is None:
-            return
+            return False
         arr = bytearray(MAX_ID)
         for sid, (node, bit, _n) in self.ids.items():
             if 0 <= sid < MAX_ID:
                 arr[sid] = 1 if live.get((node, bit)) else 0
         if arr == self.mrg:
-            return
+            return False
         self.mm[OFF_MRG:OFF_MRG + MAX_ID] = bytes(arr)
         struct.pack_into("<I", self.mm, OFF_MRG_GEN,
-                         (struct.unpack_from("<I", self.mm, OFF_MRG_GEN)[0] + 1) & 0xFFFFFFFF)
+                         (struct.unpack_from("<I", self.mm, OFF_MRG_GEN)[0] + 1) & 0xFFFFFFFF or 1)
         self.mrg = arr
+        return True
 
     # ---- the Pause keeper ------------------------------------------------
     def pause_serve(self, pids=None):

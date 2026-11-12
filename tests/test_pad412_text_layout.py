@@ -315,3 +315,54 @@ def test_a_padded_replacement_is_written_and_drawn_by_its_words(tmp_path, fonts)
     want = _draw(tmp_path, dict(d, text="GODZILLA VS BATTRA"), fonts)
     assert np.array_equal(_draw(tmp_path, d, fonts, {STOCK: PADDED}), want)
     assert np.array_equal(_draw(tmp_path, dict(d, text=SPLIT), fonts), want)
+
+
+# ---------------------------------------------------------------------------------------------
+# PAD-1186: a stock card's own lines carry runs of spaces too (the status bar's
+# "CREDITS 00     " on Spike 3 Pokemon / Fallout, Deadpool's "Credits 50 1/4    "), and the
+# repair moved them by the box's alignment in every build ("     CREDITS 00" on Fallout's
+# card). Only a project from a card a Write built is repaired.
+# ---------------------------------------------------------------------------------------------
+STOCK_SPACED = "CREDITS 00     "
+
+
+def _project_from(tmp_path, built):
+    from pinball_decryptor.core.extract_source import write_extract_source
+    from tests.test_stern_radium import _write_tsv
+    card = tmp_path / "card.raw"
+    card.write_bytes(b"\0" * 16)
+    if built:
+        (tmp_path / ("card.raw" + engine.BUILD_MANIFEST_SUFFIX)).write_text("{}")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    write_extract_source(str(proj), str(card))
+    _write_tsv(proj, [("/g/a.radium", STOCK_SPACED, "")])
+    return proj
+
+
+def test_a_stock_cards_spaced_line_is_left_alone(tmp_path):
+    proj = _project_from(tmp_path, built=False)
+    assert engine._source_card_is_stock(str(proj))
+    assert engine._changed_radium_text(str(proj)) == {}
+
+
+def test_a_built_cards_padded_line_is_still_repaired(tmp_path):
+    proj = _project_from(tmp_path, built=True)
+    assert not engine._source_card_is_stock(str(proj))
+    assert engine._changed_radium_text(str(proj)) == {
+        "/g/a.radium": [(STOCK_SPACED, "CREDITS 00")]}
+
+
+def test_an_official_verdict_is_stock_wherever_the_card_went(tmp_path):
+    import json
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / ".extract_source.json").write_text(json.dumps(
+        {"input_path": str(tmp_path / "gone.raw"), "stock": {"status": "official"}}))
+    assert engine._source_card_is_stock(str(proj))
+    (proj / ".extract_source.json").write_text(json.dumps(
+        {"input_path": str(tmp_path / "gone.raw"), "stock": {"status": "modified"}}))
+    assert not engine._source_card_is_stock(str(proj))
+    (proj / ".extract_source.json").write_text(json.dumps(
+        {"input_path": str(tmp_path / "gone.raw")}))
+    assert not engine._source_card_is_stock(str(proj))      # can't tell: repair as before

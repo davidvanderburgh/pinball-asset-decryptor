@@ -134,6 +134,7 @@ class Node:
         self.low_mask = bytes(8)  # inputs whose wire bit 0 = closed
         self.queue = []           # input states seen, not yet scanned
         self.scans = 0            # switch scans (0x11) the game has made
+        self.in_service = False   # the game's service loop has probed it (ff)
 
     def __call__(self, data, k):
         """k reply bytes (payload + checksum) for request payload `data`."""
@@ -194,6 +195,9 @@ class Node:
             # was the input bits here, and node 9's bit 31 alone was a fault.
             p[0:4] = struct.pack("<I", self.rx)
             self.rx = 0
+            # the probe comes only from the service loop: bring-up is over
+            # for this board, and its requests may go up (Bridge.attention)
+            self.in_service = True
             # NOT a read of the switches: the game sends it to every node once
             # a second and takes no switch events from it. Counting it as one
             # cleared a raised request with no scan - a trough closed before
@@ -220,6 +224,56 @@ class Bridge:
         self.steppers = None      # s3motors.Steppers once the inputs are attached
         self.motors = None        # s3motors.Motors (end-stop / encoder motors)
         self.rules = None         # s3rules.Rules: coils the boards fire by rule
+        # the game's boot discovery (PAD-1180, see discover())
+        self.discovered = set()   # boards it has found and blocked
+        self.offered = set()      # boards handed out in this pass, not yet blocked
+
+    def discover(self):
+        """The board the game's BOOT DISCOVERY finds next, 0 when it has them
+        all (PAD-1180). Spike 1's node_bus_identify_attached_nodes, and Spike
+        3 sends the same frames: after the bus reset (F1 to node 0) and an
+        unblock-all (F0 22 to node 0) it polls NODEBUS_Poll (0x25), BLOCKS the
+        board it is handed (F0 10 + F0 20 to it, no reply) and polls again,
+        until a 0 ends the walk. A board found that way counts as attached.
+        Answered 0 from the first poll - as this bridge did - the game found
+        no board, re-ran its identity walk every 0.3 s and gave up after a
+        fixed 30 s from the bus reset, its red LOCATING NODE BOARDS box on
+        the screen all that time: every title, every boot (pokemon_le's
+        service loop at 35 s; with the walk answered, at 10 s).
+
+        Each declared board is handed out once until the game blocks it;
+        then the walk is over for good (until another bus reset), so the
+        service loop's polls meet only the switch requests of attention().
+        A board the game is handed but does not block is offered again on
+        its next pass, never twice in one; and none once the service loop
+        has begun (a status probe reached any board)."""
+        if any(n.in_service for n in self.nodes.values()):
+            return 0
+        for nid in sorted(self.nodes):
+            if nid not in self.discovered and nid not in self.offered:
+                self.offered.add(nid)
+                return nid
+        self.offered.clear()
+        return 0
+
+    def note_traffic(self, node, data):
+        """F1 / F0 frames, as discover() needs them: F1 to node 0 resets the
+        bus (a fresh discovery); F0 10 or F0 20 to a board handed out blocks
+        it - found."""
+        nid = node & 0x3F
+        if data[0] == 0xF1 and nid == 0:
+            if self.discovered:
+                self.log.write("# [discover] bus reset: the boards are found again\n")
+            self.discovered.clear()
+            self.offered.clear()
+            for n in self.nodes.values():
+                n.in_service = False
+        elif data[0] == 0xF0 and len(data) > 1 and data[1] in (0x10, 0x20) \
+                and nid in self.offered and nid not in self.discovered:
+            self.discovered.add(nid)
+            if self.discovered >= set(self.nodes):
+                self.log.write("%9.3f # [discover] the game found every board (%s)\n" % (
+                    time.time() - T0, " ".join(str(n) for n in sorted(self.discovered))))
 
     def attach_inputs(self, path):
         """The slot's node switch inputs, live: 8 bytes a node (64 nodes),
@@ -239,12 +293,16 @@ class Bridge:
         node whose inputs changed since the game last read them (ff) - the
         request a real board raises, which makes the game come and read it.
 
-        ONLY ONCE BRING-UP IS OVER (30 s after the node's identity was first
-        read): during the node enumeration the game answers a raised request
-        by re-addressing the board (F0 10 / F0 20, no reply) and polls again,
-        so a request raised then - the trough switches closed before boot -
-        held the enumerator on that node 46,000 times a minute for ever. In
-        the service loop a request is answered by the switch scan (02)."""
+        ONLY ONCE BRING-UP IS OVER for the board - the service loop's status
+        probe (ff) has reached it, or 30 s since its identity was first read
+        (or it was last re-addressed): during the node enumeration the game
+        answers a raised request by re-addressing the board (F0 10 / F0 20,
+        no reply) and polls again, so a request raised then - the trough
+        switches closed before boot - held the enumerator on that node 46,000
+        times a minute for ever. In the service loop a request is answered by
+        the switch scan (02). With the discovery answered (PAD-1180) attract
+        comes ~25 s sooner; the 30 s alone would have held a Start or a coin
+        there for ~20 s."""
         now = time.time()
         found = 0
         if self.rules is not None:
@@ -262,7 +320,7 @@ class Bridge:
                 n.queue.append(cur)
                 if len(n.queue) > 32:
                     del n.queue[1:-15]
-            ready = n.registered and now - n.registered > 30
+            ready = n.registered and (n.in_service or now - n.registered > 30)
             if ready and n.scans < BASELINE_SCANS and not n.queue:
                 # the first look at a board with nothing to report: queue its
                 # resting state (see BASELINE_SCANS)
@@ -343,6 +401,8 @@ class Bridge:
             self.steppers.note(node & 0x3F, data)
         if self.motors is not None:
             self.motors.note(node & 0x3F, data)
+        if data[0] in (0xF0, 0xF1):
+            self.note_traffic(node, data)
         model = self.nodes.get(node & 0x3F)
         if model is None:
             return
@@ -354,6 +414,7 @@ class Bridge:
         # a second, and counting that kept every request down for good
         if data[0] == 0xF0 and len(data) > 1 and data[1] in (0x10, 0x20) and model.registered:
             model.registered = time.time()
+            model.in_service = False
             self.enum_said = getattr(self, "enum_said", 0) + 1
             if self.enum_said <= 20 or self.enum_said % 1000 == 0:
                 self.log.write("# [enumerate] node %d re-addressed (F0 %02x), request held 30 s (%d)\n" % (
@@ -386,7 +447,11 @@ class Bridge:
         if cmd == 0x25:
             # NODEBUS_Poll's binary search goes DOWN on every answer: it
             # returns the LOWEST node address raising a request (0: none) -
-            # the attention poll, not a count. No node wants service here.
+            # the attention poll, not a count. At boot it is the game's board
+            # discovery (discover()); after that, switch requests only.
+            a = self.discover()
+            if a:
+                return frame(0x25, ident, bytes([a]))
             a = self.attention()
             if a:
                 self.att_said = getattr(self, "att_said", 0) + 1

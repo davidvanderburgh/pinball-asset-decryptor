@@ -1702,6 +1702,12 @@ class ColorTab(TabService):
         if fn is None or not getattr(emu, "_visible", False):
             self.set(try_note="This machine has no emulator in PAD yet.")
             return False
+        if getattr(self.mfr, "_era", None) == "spike3":
+            # PAD-1186: the Spike 3 rig runs whole cards, no override set
+            self.set(try_note="On Spike 3 the emulator runs a card: build it "
+                              "on the Write tab, then use the last build on "
+                              "the Emulate tab.")
+            return False
         note = fn()
         self.set(try_note=note or "")
         self.window.select_tab("emulate")

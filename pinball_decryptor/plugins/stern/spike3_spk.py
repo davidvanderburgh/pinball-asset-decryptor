@@ -29,11 +29,12 @@ from .ext4 import Ext4Reader
 from .spike3_keys import Spike3KeySource, Spike3KeyError
 from .spike3_extract import PHASES          # shared Spike 3 extract phases
 from .spike3_extract import (CATEGORIES, want_category,
-                             decode_sound_containers, summary_bits)
+                             decode_sound_containers, summary_bits,
+                             extract_videos, is_sound_container,
+                             is_video_head, video_brand, _MAX_RADIUM)
 from .formats import _title_from_filename
 
 _LUKS2_MAGIC = spike3.LUKS2_MAGIC
-_QUICKTIME = (b"ftyp", b"moov", b"mdat", b"wide", b"skip")
 
 
 def is_spk_input(path):
@@ -190,26 +191,33 @@ class Spike3SpkExtractPipeline(BasePipeline):
         want_v, want_i = self._want("video"), self._want("images")
         want_s, want_a = self._want("scenes"), self._want("audio")
         videos, images, scenes, sounds = [], [], [], []
+        radiums = {}   # scene dir -> scene.radium: what names the clips
         for fobj in arc.files:
             ext = os.path.splitext(fobj.path)[1].lower()
             base = os.path.basename(fobj.path).lower()
+            if fobj.path.endswith("/scene.radium"):
+                radiums[fobj.path[:-len("/scene.radium")]] = fobj
             if ext == ".png" and want_i:
                 images.append(fobj)
             elif ext in (".radium", ".sidx") and want_s:
                 scenes.append(fobj)
-            elif base == "image.bin" and want_a:
+            elif is_sound_container(base) and want_a:
                 sounds.append(fobj)
             elif ext == ".asset" and want_v:
                 head = arc._read(fobj.offset, 12)
-                if len(head) >= 8 and head[4:8] in _QUICKTIME:
-                    videos.append(fobj)
+                if is_video_head(head):
+                    videos.append((fobj, video_brand(head)))
         self._log("Found %d video, %d image, %d scene, %d sound container(s)."
                   % (len(videos), len(images), len(scenes), len(sounds)), "info")
 
         counts = {"video": 0, "images": 0, "scenes": 0, "audio": 0}
         if want_v:
             self._set_phase(2)
-            counts["video"] = self._copy(arc, videos, "video", ".mov")
+            counts["video"], _named = extract_videos(
+                self, videos, lambda it: it[0].path, lambda it: it[0].size,
+                lambda it: it[1], lambda it, out: arc.extract(it[0], out),
+                radiums, lambda f: (b"".join(arc.read_file(f))
+                                    if f.size <= _MAX_RADIUM else None))
         if want_i:
             self._set_phase(3)
             counts["images"] = self._copy(arc, images, "images")
@@ -224,15 +232,13 @@ class Spike3SpkExtractPipeline(BasePipeline):
                 lambda fobj, out: arc.extract(fobj, out))
         return counts
 
-    def _copy(self, arc, items, subdir, rename_ext=None):
+    def _copy(self, arc, items, subdir):
         base = os.path.join(self.output_dir, subdir)
         total = len(items)
         done = 0
         for i, fobj in enumerate(items):
             self._check_cancel()
             rel = fobj.path.lstrip("/")
-            if rename_ext:
-                rel = os.path.splitext(rel)[0] + rename_ext
             out = os.path.join(base, rel.replace("/", os.sep))
             os.makedirs(os.path.dirname(out), exist_ok=True)
             try:

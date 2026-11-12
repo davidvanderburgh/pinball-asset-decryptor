@@ -1310,6 +1310,8 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
                  "codec.c", "codec.h",
                  "nvm.c", "nvm.h",
+                 # PAD-1194: the boot hook's high-score hand-over
+                 "scores.c", "scores.h",
                  "Makefile", "select.sh", "materialize.py", "images.conf.example",
                  "third_party/stb_truetype.h", "third_party/stb_image.h"]
 

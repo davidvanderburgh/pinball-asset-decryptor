@@ -25,6 +25,17 @@
  *   page flip          pad_s3_flip(bo) -> the GL bridge presents the texture
  *                      that bo's EGL image was bound to (s3gl.c), then the
  *                      flip event is queued and the eventfd made readable
+ *   two screens        PAD-1199: Fallout drives BOTH outputs - its backbox
+ *                      on HDMI-A-2 (display_number 1, opened first) and the
+ *                      Pip-Boy screen on HDMI-A-1 - flipping them in turn.
+ *                      Every flip used to go to the one window, so the two
+ *                      pictures alternated in it frame by frame. Each flip
+ *                      now says which screen it is: the crtc the game shows
+ *                      FIRST is the main window (display 0) and any other
+ *                      crtc is the second window (display 1), so a one-screen
+ *                      title is unchanged whichever output it picks. The
+ *                      flip event hands back the crtc it was asked for, and
+ *                      each crtc keeps its own current fb.
  *
  * Nothing here talks to the host renderer itself; it calls weak hooks in the
  * game's libGLESv2 (the bridge), so a run without the bridge still boots and
@@ -120,8 +131,10 @@ static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 static int card_fd = -1;          /* the eventfd standing in for card1       */
 static int pend_n;                /* flips queued for drmHandleEvent         */
 static void *pend_data[8];
+static uint32_t pend_crtc[8];     /* the crtc each queued flip was for   */
 static unsigned flip_seq, flips;
-static uint32_t cur_fb;
+static uint32_t cur_fb[NOUT];     /* each crtc's current fb (GetCrtc)        */
+static uint32_t main_crtc;        /* the first crtc shown: the main window   */
 static int scr_w = 1920, scr_h = 1080;
 
 static void say(const char *fmt, ...)
@@ -144,7 +157,8 @@ static void init_once(void)
 
 /* hooks into the bridge (s3gl.c, in the game's libGLESv2); weak so the shim
  * works without one */
-extern void pad_s3_present_bo(uint32_t handle, uint32_t w, uint32_t h) __attribute__((weak));
+extern void pad_s3_present_bo(uint32_t handle, uint32_t w, uint32_t h,
+                              uint32_t disp) __attribute__((weak));
 
 /* ---- the device node ---------------------------------------------------- */
 static int is_card(const char *p)
@@ -258,7 +272,7 @@ drmModeCrtc *drmModeGetCrtc(int fd, uint32_t id)
     (void)fd;
     if (id < CRTC_ID || id >= CRTC_ID + NOUT) return NULL;
     c = calloc(1, sizeof *c);
-    c->crtc_id = id; c->buffer_id = cur_fb;
+    c->crtc_id = id; c->buffer_id = cur_fb[id - CRTC_ID];
     c->width = scr_w; c->height = scr_h; c->mode_valid = 1; fill_mode(&c->mode);
     c->gamma_size = 256;
     return c;
@@ -292,35 +306,55 @@ int drmModeRmFB(int fd, uint32_t fb)
     return 0;
 }
 
-static void show_fb(uint32_t fb)
+/* Which window a crtc's pictures go to: 0 = the main one (the first crtc the
+ * game shows), 1 = the second. An id that is no crtc of ours is the main. */
+static uint32_t disp_of(uint32_t crtc)
+{
+    if (crtc < CRTC_ID || crtc >= CRTC_ID + NOUT) return 0;
+    if (!main_crtc) {
+        main_crtc = crtc;
+        say("[s3kms] crtc %u (HDMI-A-%u) is the main window\n", crtc, 1 + crtc - CRTC_ID);
+    }
+    if (crtc == main_crtc) return 0;
+    {
+        static int said;
+        if (!said++)
+            say("[s3kms] crtc %u (HDMI-A-%u) shows too: a second screen, its own window\n",
+                crtc, 1 + crtc - CRTC_ID);
+    }
+    return 1;
+}
+
+static void show_fb(uint32_t crtc, uint32_t fb)
 {
     uint32_t h = (fb >= 100 && fb < 356) ? fb_bo[fb - 100] : 0;
     struct gbm_bo *bo = bo_by_handle(h);
-    cur_fb = fb;
+    uint32_t d = disp_of(crtc);
+    if (crtc >= CRTC_ID && crtc < CRTC_ID + NOUT) cur_fb[crtc - CRTC_ID] = fb;
     flips++;
     if (flips == 1 || flips == 60 || flips % 1800 == 0)
-        say("[s3kms] flip %u: fb %u (bo %u %ux%u)%s\n", flips, fb, h,
-            bo ? bo->w : 0, bo ? bo->h : 0,
+        say("[s3kms] flip %u: crtc %u fb %u (bo %u %ux%u) display %u%s\n", flips, crtc, fb, h,
+            bo ? bo->w : 0, bo ? bo->h : 0, d,
             pad_s3_present_bo ? "" : " - no bridge, nothing shown");
-    if (bo && pad_s3_present_bo) pad_s3_present_bo(h, bo->w, bo->h);
+    if (bo && pad_s3_present_bo) pad_s3_present_bo(h, bo->w, bo->h, d);
 }
 
 int drmModeSetCrtc(int fd, uint32_t crtc, uint32_t fb, uint32_t x, uint32_t y,
                    uint32_t *conns, int count, drmModeModeInfo *mode)
 {
-    (void)fd; (void)crtc; (void)x; (void)y; (void)conns; (void)count; (void)mode;
-    say("[s3kms] SetCrtc fb %u\n", fb);
-    if (fb) show_fb(fb);
+    (void)fd; (void)x; (void)y; (void)conns; (void)count; (void)mode;
+    say("[s3kms] SetCrtc %u fb %u\n", crtc, fb);
+    if (fb) show_fb(crtc, fb);
     return 0;
 }
 
 int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb, uint32_t flags, void *data)
 {
     uint64_t one = 1;
-    (void)fd; (void)crtc; (void)flags;
-    show_fb(fb);
+    (void)fd; (void)flags;
+    show_fb(crtc, fb);
     pthread_mutex_lock(&mu);
-    if (pend_n < 8) pend_data[pend_n++] = data;
+    if (pend_n < 8) { pend_crtc[pend_n] = crtc; pend_data[pend_n++] = data; }
     pthread_mutex_unlock(&mu);
     (void)!write(card_fd, &one, sizeof one);
     return 0;
@@ -330,18 +364,19 @@ int drmHandleEvent(int fd, drmEventContext *ctx)
 {
     uint64_t v;
     void *d[8];
+    uint32_t c[8];
     int n, i;
     struct timespec ts;
     (void)fd;
     (void)!read(card_fd, &v, sizeof v);
     pthread_mutex_lock(&mu);
-    n = pend_n; memcpy(d, pend_data, sizeof d); pend_n = 0;
+    n = pend_n; memcpy(d, pend_data, sizeof d); memcpy(c, pend_crtc, sizeof c); pend_n = 0;
     pthread_mutex_unlock(&mu);
     clock_gettime(CLOCK_MONOTONIC, &ts);
     for (i = 0; i < n; i++) {
         flip_seq++;
         if (ctx->version >= 3 && ctx->page_flip_handler2)
-            ctx->page_flip_handler2(card_fd, flip_seq, ts.tv_sec, ts.tv_nsec / 1000, CRTC_ID + 1, d[i]);
+            ctx->page_flip_handler2(card_fd, flip_seq, ts.tv_sec, ts.tv_nsec / 1000, c[i], d[i]);
         else if (ctx->page_flip_handler)
             ctx->page_flip_handler(card_fd, flip_seq, ts.tv_sec, ts.tv_nsec / 1000, d[i]);
     }

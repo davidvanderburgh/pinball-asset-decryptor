@@ -130,6 +130,16 @@ Built (`s3build.sh` -> `~/.pad-s3/build`, `s3run.sh --bridge` runs it):
   `display_number` = 1, the second - glWindow at 0x926c9c checks index <
   count_connectors and `connection == 1`); GBM bos with memfd dma-buf fds;
   AddFB/SetCrtc/PageFlip present the bo, flip events through drmHandleEvent.
+  **Two screens (PAD-1199)**: fallout_le drives BOTH outputs - the backbox
+  on HDMI-A-2 (crtc 52, opened first, bos 1-3) and the Pip-Boy screen on
+  HDMI-A-1 (crtc 51, bos 4-6) - flipping them in turn. Every flip used to go
+  to the one window, so the two pictures alternated in it frame by frame.
+  Each flip now carries its screen: the first crtc shown is the main window,
+  any other is display 2 (`PADGL_PRESENTTEX`'s optional fourth word), which
+  padglhost shows in Spike 2's display-2 window (opened at half the render
+  size by `s3run.sh --window`) and dumps headless as `frames/display2.png`.
+  The flip event reports the crtc it was for. One-screen titles (pokemon_le:
+  crtc 52 only) are unchanged.
 - `s3egl.c` (libEGL.so.1): GBM platform display, surfaceless contexts, TWO
   configs (XR24 and AR24 native visual ids - with only AR24 the game logged
   `failed to find egl config for gbm format` and retried create_window),

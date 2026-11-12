@@ -611,14 +611,16 @@ static void glEGLImageTargetTexture2DOES(unsigned target, void *image)
 static void glEGLImageTargetRenderbufferStorageOES(unsigned target, void *image)
 { (void)target; (void)image; FIRST("glEGLImageTargetRenderbufferStorageOES"); }
 
-/* s3kms.c's page flip: show the texture this bo stands for. */
-void pad_s3_present_bo(unsigned handle, unsigned w, unsigned h)
+/* s3kms.c's page flip: show the texture this bo stands for, in the window of
+ * the screen it was flipped to (disp: 0 = main, 1 = the second screen -
+ * PAD-1199, Fallout's Pip-Boy). */
+void pad_s3_present_bo(unsigned handle, unsigned w, unsigned h, unsigned disp)
 {
-    unsigned v[3];
+    unsigned v[4];
     if (!bridge_init() || handle >= MAXS3BO || !tex_of_bo[handle]) return;
-    v[0] = tex_of_bo[handle]; v[1] = w; v[2] = h;
+    v[0] = tex_of_bo[handle]; v[1] = w; v[2] = h; v[3] = disp;
     frame_no++;
-    emit_u(PADGL_PRESENTTEX, v, 3);
+    emit_u(PADGL_PRESENTTEX, v, 4);
     hdr->frame_seq++;
     {
         static int inflight = -1;

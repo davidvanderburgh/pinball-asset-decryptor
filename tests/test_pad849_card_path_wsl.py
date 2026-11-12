@@ -123,3 +123,20 @@ def test_rig_message_names_the_card_it_cannot_see():
     assert unseen < body.index("Pick a card image")
     assert "pad_card_unseen" in body
     assert "/mnt/unc/*)" in src[src.index("pad_card_unseen() {"):]
+
+
+def test_the_macs_container_gets_its_own_unreadable_card_message():
+    """PAD-1109: a card under /pad/cards (padbox.sh's mount) read 'Operation
+    not permitted' after Colima was started from a Terminal without access
+    to ~/Downloads; the message says so in Mac terms, not WSL ones."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = open(os.path.join(here, "..", "tools", "spike2_emu",
+                            "ensurebuild.sh"), encoding="utf-8").read()
+    fn = src[src.index("pad_card_unseen() {"):]
+    fn = fn[:fn.index(chr(10) + "}" + chr(10))]
+    mac = fn[fn.index("/pad/cards/*)"):]
+    mac = mac[:mac.index("return 0 ;;")]
+    assert "colima stop" in mac and "Files and Folders" in mac
+    assert "WSL" not in mac
+    # the Mac branch is decided before the WSL wording is printed
+    assert fn.index("/pad/cards/*)") < fn.index("cannot be opened from inside WSL")

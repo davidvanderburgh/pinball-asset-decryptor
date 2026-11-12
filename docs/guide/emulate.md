@@ -232,6 +232,8 @@ The differences:
   switches in the playfield window instead of a cabinet photo.
 - **A second screen gets its own window.** Fallout's Pip-Boy screen opens
   in a smaller window beside the game window.
+- **Game display applies here too.** The game window takes the monitor,
+  full screen or set window you picked, as on Spike 2.
 
 ## Jersey Jack Pinball
 

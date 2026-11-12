@@ -6993,6 +6993,16 @@ int main(int argc, char **argv)
                         nf ? conv_us / nf / 1000.0 : 0.0,
                         nf ? up_us / nf / 1000.0 : 0.0,
                         nf ? swap_us / nf / 1000.0 : 0.0, vid_texsub);
+                /* PAD-1201: a second screen's own rate beside the main one's
+                 * (Fallout's Pip-Boy), so a run says which screen the frames
+                 * went to - "fps" above is the main window only. */
+                {
+                    static long last_f2;
+                    if (frames2_done != last_f2)
+                        fprintf(stderr, "[padglhost] display 2: %.1f fps (%ld frames total)\n",
+                                (frames2_done - last_f2) / dt, frames2_done);
+                    last_f2 = frames2_done;
+                }
                 last_up = vid_uploads; last_dist = vid_distinct;
                 conv_us = up_us = swap_us = 0;
                 if (vid_back || vid_skip) {

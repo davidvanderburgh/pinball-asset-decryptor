@@ -1474,14 +1474,14 @@ def window_box(w, h):
 def window_clip(src, out, w, h, ffmpeg, max_seconds=None):
     """*src* made into a character's clip at *out*: w x h, black but for the portrait window, where the video covers
     it (cropped, never stretched), 30 fps, silent, no longer than a mode's clip."""
-    import subprocess
+    import os
     from . import mode_assets as MA
     x, y, bw, bh = window_box(w, h)
     head, tail = MA._encode_args(ffmpeg, out)
     vf = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,pad=%d:%d:%d:%d:black,fps=%d"
           % (bw, bh, bw, bh, w, h, x, y, MA.FPS))
     cmd = head + ["-i", src, "-t", str(max_seconds or MA.MODE_CLIP_MAX_SECONDS), "-vf", vf] + tail
-    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    r = _ffmpeg_run(cmd, "the clip of %s" % os.path.basename(src))
     if r.returncode != 0:
         raise CoopError("ffmpeg could not make the clip of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
     return out
@@ -1541,16 +1541,35 @@ def save_intro(project, source=None):
     return save_characters(project, chars)
 
 
+#: PAD-1192: the longest any one co-op clip's or sound's ffmpeg run may take. Each is at most INTRO_MAX_SECONDS of
+#: video made in seconds; a run past this is stuck (a looped input it cannot decode never ends) and a Write's Cancel
+#: cannot reach into it, so it is stopped and the build says which file
+FFMPEG_TIMEOUT = 600
+
+
+def _ffmpeg_run(cmd, what):
+    """*cmd* run with :data:`FFMPEG_TIMEOUT`; a run that does not end is killed and :class:`CoopError` names *what*."""
+    import subprocess
+    from . import mode_assets as MA
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW,
+                              stdin=subprocess.DEVNULL, timeout=FFMPEG_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise CoopError("ffmpeg was still making %s after %d minutes and was stopped - the file it reads may be "
+                        "damaged: open it in an editor and save it again, or pick another"
+                        % (what, FFMPEG_TIMEOUT // 60)) from None
+
+
 def intro_clip(src, out, w, h, ffmpeg, max_seconds=None):
     """*src* made into the intro's clip at *out*: w x h, the whole picture fitted in (never cropped), black round it,
     30 fps, silent (its sound is :func:`intro_audio`'s), no longer than :data:`INTRO_MAX_SECONDS`."""
-    import subprocess
+    import os
     from . import mode_assets as MA
     head, tail = MA._encode_args(ffmpeg, out)
     vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,"
           "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,fps=%d" % (w, h, w, h, MA.FPS))
     cmd = head + ["-i", src, "-t", str(max_seconds or INTRO_MAX_SECONDS), "-vf", vf] + tail
-    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    r = _ffmpeg_run(cmd, "the intro's clip of %s" % os.path.basename(src))
     if r.returncode != 0:
         raise CoopError("ffmpeg could not make the intro's clip of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
     return out
@@ -1559,15 +1578,14 @@ def intro_clip(src, out, w, h, ffmpeg, max_seconds=None):
 def intro_audio(src, out, ffmpeg, max_seconds=None):
     """The intro video *src*'s own sound as a 44.1 kHz 16-bit stereo WAV at *out* (the length its clip plays), or
     ``""`` when the video has no sound. Raises :class:`CoopError` when ffmpeg cannot read it."""
-    import subprocess
-    from . import mode_assets as MA
-    probe = subprocess.run([ffmpeg, "-v", "error", "-i", src, "-map", "0:a:0", "-t", "0.1", "-f", "null", "-"],
-                           capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    import os
+    probe = _ffmpeg_run([ffmpeg, "-v", "error", "-i", src, "-map", "0:a:0", "-t", "0.1", "-f", "null", "-"],
+                        "the sound of %s" % os.path.basename(src))
     if probe.returncode != 0:
         return ""                                       # no sound stream in it
     cmd = [ffmpeg, "-v", "error", "-y", "-i", src, "-map", "0:a:0", "-t", str(max_seconds or INTRO_MAX_SECONDS),
            "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", out]
-    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    r = _ffmpeg_run(cmd, "the sound of %s" % os.path.basename(src))
     if r.returncode != 0:
         raise CoopError("ffmpeg could not take the sound out of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
     return out
@@ -1617,6 +1635,12 @@ def picked_sound_path(project, character):
     return picture_path(project, {"picture": (character or {}).get("picked_sound") or ""})
 
 
+def MA_check_picture(src):                              # noqa: N802 - mode_assets.check_picture, imported late
+    """*src* decodes whole, or an exception says why (PAD-1192: ``verify()`` let a PNG with damaged data in)."""
+    from . import mode_assets as MA
+    MA.check_picture(src)
+
+
 def is_still(path):
     """Whether *path* is a picture (a still picked clip), by its extension."""
     import os
@@ -1654,10 +1678,8 @@ def save_picked_clip(project, index, source=None):
     """Copy *source* (a video, or a picture) into the project as what plays full screen once character *index* is
     picked, or with None forget it; returns the characters as stored. Raises :class:`CoopError` on another file."""
     if source is not None and is_still(source):
-        from PIL import Image
         try:
-            with Image.open(source) as im:
-                im.verify()
+            MA_check_picture(source)
         except Exception as e:                          # noqa: BLE001 - say what the file is not
             raise CoopError("That file is not a picture the app can read (%s)." % e) from None
     return _save_char_file(project, index, source, "picked_clip", PICKED_FILE, VIDEO_EXTS + _PICTURE_EXTS,
@@ -1707,27 +1729,54 @@ def media_seconds(path, ffmpeg):
     import re
     import subprocess
     from . import mode_assets as MA
-    r = subprocess.run([ffmpeg, "-hide_banner", "-i", path], capture_output=True, text=True,
-                       creationflags=MA._NO_WINDOW)
+    try:
+        r = subprocess.run([ffmpeg, "-hide_banner", "-i", path], capture_output=True, text=True,
+                           creationflags=MA._NO_WINDOW, stdin=subprocess.DEVNULL, timeout=FFMPEG_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return 0.0
     m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", r.stderr or "")
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)) if m else 0.0
+
+
+def _clean_still(picture, out):
+    """PAD-1192: *picture* as a plain PNG beside *out* for ffmpeg's looped still input (mode_assets.clean_still:
+    a picture ffmpeg cannot decode looped forever and hung the build); :class:`CoopError` when it does not read."""
+    from . import mode_assets as MA
+    try:
+        return MA.clean_still(picture, out + ".still.png")
+    except ValueError as e:
+        raise CoopError(str(e)) from None
+
+
+def _drop(path):
+    import os
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def picked_clip(src, out, w, h, ffmpeg, seconds=None):
     """*src* made into a character's picked clip at *out*: w x h, the whole picture fitted in, black round it, 30 fps,
     silent (its sound is the build's), no longer than :data:`PICKED_MAX_SECONDS`. A picture shows *seconds*
     (:data:`PICKED_STILL_SECONDS` when None), a still that reads as video to the bank."""
-    import subprocess
+    import os
     from . import mode_assets as MA
     head, tail = MA._encode_args(ffmpeg, out)
     vf = ("scale=%d:%d:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,"
           "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:black,fps=%d,format=yuv420p" % (w, h, w, h, MA.FPS))
+    still = ""
     if is_still(src):
         t = min(float(seconds or PICKED_STILL_SECONDS), PICKED_MAX_SECONDS)
-        cmd = head + ["-loop", "1", "-framerate", str(MA.FPS), "-i", src, "-t", "%.3f" % t, "-vf", vf] + tail
+        still = _clean_still(src, out)
+        cmd = head + ["-loop", "1", "-framerate", str(MA.FPS), "-i", still, "-t", "%.3f" % t, "-vf", vf] + tail
     else:
         cmd = head + ["-i", src, "-t", str(PICKED_MAX_SECONDS), "-vf", vf] + tail
-    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    try:
+        r = _ffmpeg_run(cmd, "the picked clip of %s" % os.path.basename(src))
+    finally:
+        _drop(still)
     if r.returncode != 0:
         raise CoopError("ffmpeg could not make the picked clip of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
     return out
@@ -1768,7 +1817,7 @@ def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400
     """The game's bonus loop *loop_src* (at *size*, the bank's clip frame: an owner's replacement of another size is
     scaled to it first) made again at *out* with a character's *video* (looped) or *picture* in a window at *box* (the
     loop's pixels, :func:`bonus_box`), framed in *colour*, as long as the loop (or *seconds*), 30 fps, silent."""
-    import subprocess
+    import os
     from . import mode_assets as MA
     x, y, bw, bh = box
     b = max(2, int(round(BONUS_BORDER * bw / BONUS_WINDOW[2])))
@@ -1776,7 +1825,8 @@ def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400
     if video:
         src = ["-stream_loop", "-1", "-i", video]
     elif picture:
-        src = ["-loop", "1", "-framerate", str(MA.FPS), "-i", picture]
+        still = _clean_still(picture, out)
+        src = ["-loop", "1", "-framerate", str(MA.FPS), "-i", still]
     else:
         raise CoopError("a bonus window needs the character's picture or video")
     col = "0x" + clean_colour(colour).lstrip("#") if clean_colour(colour) else "0xffb400"
@@ -1786,7 +1836,10 @@ def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400
           % (bw, bh, bw, bh, MA.FPS, size[0], size[1], MA.FPS, x - b, y - b, bw + 2 * b, bh + 2 * b, col, x, y))
     t = seconds or media_seconds(loop_src, ffmpeg) or 8.0
     cmd = head + ["-i", loop_src] + src + ["-filter_complex", fc, "-map", "[v]", "-t", "%.3f" % t] + tail
-    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=MA._NO_WINDOW)
+    try:
+        r = _ffmpeg_run(cmd, "the bonus window's clip of %s" % os.path.basename(video or picture))
+    finally:
+        _drop(src[-1] if picture and not video else "")
     if r.returncode != 0:
         raise CoopError("ffmpeg could not make the bonus window's clip: %s" % (r.stderr or "").strip()[-300:])
     return out
@@ -1846,10 +1899,8 @@ def save_picture(project, index, source):
     characters as stored. Raises :class:`CoopError` when the file is not a picture."""
     import os
     import shutil
-    from PIL import Image
     try:
-        with Image.open(source) as im:
-            im.verify()
+        MA_check_picture(source)
     except Exception as e:                              # noqa: BLE001 - say what the file is not
         raise CoopError("That file is not a picture the app can read (%s)." % e) from None
     chars = load_characters(project)
@@ -1904,15 +1955,13 @@ def save_backdrop(project, source=None):
     file is not a picture."""
     import os
     import shutil
-    from PIL import Image
     chars = load_characters(project)
     theme = dict(chars.get("theme") or {})
     if source is None:
         theme.pop("backdrop", None)
     else:
         try:
-            with Image.open(source) as im:
-                im.verify()
+            MA_check_picture(source)
         except Exception as e:                          # noqa: BLE001 - say what the file is not
             raise CoopError("That file is not a picture the app can read (%s)." % e) from None
         folder = os.path.join(project, PICTURE_DIR)
@@ -2677,7 +2726,6 @@ def import_settings(project, path):
     "characters", "pictures", "awards", "preset"}``. Raises :class:`CoopError` when it is not one."""
     import io
     import os
-    from PIL import Image
     from ...core import staged_changes
     head, read = _read_file(path)
     chars = _characters(head.get("characters"))
@@ -2690,8 +2738,7 @@ def import_settings(project, path):
         if not blob or ext not in _PICTURE_EXTS:
             continue
         try:
-            with Image.open(io.BytesIO(blob)) as im:
-                im.verify()
+            MA_check_picture(io.BytesIO(blob))
         except Exception:                               # noqa: BLE001 - not a picture: the panel with its name
             continue
         os.makedirs(folder, exist_ok=True)
@@ -2744,8 +2791,7 @@ def import_settings(project, path):
     ext = os.path.splitext(rel)[1].lower()
     if blob and ext in _PICTURE_EXTS:
         try:
-            with Image.open(io.BytesIO(blob)) as im:
-                im.verify()
+            MA_check_picture(io.BytesIO(blob))
             os.makedirs(folder, exist_ok=True)
             with open(os.path.join(folder, BACKDROP_FILE + ext), "wb") as f:
                 f.write(blob)

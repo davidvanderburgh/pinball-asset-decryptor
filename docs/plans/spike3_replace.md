@@ -72,6 +72,15 @@ Every replacement plays at its own length, as on Spike 2:
 
 `.sidx`: the container's record is refreshed from what the card then holds.
 
+Music banks (merged from main's PAD-1185): `image-scNN.bin` beside an
+`image.bin` is the same container (Fallout LE 0.81.0: 69 banks, Transformers
+LE 0.96.0: 45; all 115 containers of the two follow the directory-CRC,
+`0x38` and size rules above). They extract into their `image.bin`'s folder as
+Spike 2's `music_catNN_NNNN.wav`, and `project_sound_dirs` gives each bank as
+a container of its own with that stem, so a replaced song goes into its own
+bank (in place or grown, staged as `<folder>_image-scNN.bin`), never into
+`image.bin`'s `idx` of the same number nor another bank.
+
 ## Growing a file on an encrypted card (ext4_grow luks_key)
 
 The grow script opens the partition through dm-crypt (`cryptsetup open

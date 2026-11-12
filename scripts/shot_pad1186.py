@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
-CARD = r"D:\Pinball\images\Stern\spike3\pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
+CARD = os.environ.get("PAD1186_CARD") or r"D:\Pinball\images\Stern\spike3\pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
 
 LAUNCHER = r'''
 import json, os, sys
@@ -423,6 +423,47 @@ def build_only(run, page, project, build, tag):
     shot(page, os.path.join(out, "after_write_done%s.png" % tag))
 
 
+def banks(run, page, project, build, files):
+    """A card with music banks (Fallout LE: PAD1186_CARD): Extract, replace
+    one bank song with a shorter one and another with a longer one on
+    Replace Audio, Build on Write."""
+    import shutil
+    out = run.out
+    shutil.rmtree(project, ignore_errors=True)
+    os.makedirs(project)
+    run.api("ui.pick_manufacturer", "stern")
+    run.api("ui.select_tab", "extract")
+    run.answer([CARD])
+    run.api("extract.browse_input")
+    time.sleep(3)
+    run.answer([project])
+    run.api("extract.browse_output")
+    time.sleep(2)
+    run.api("extract.start")
+    run.wait_idle("extract", timeout=7200)
+    shot(page, os.path.join(out, "banks_extract.png"))
+    run.api("ui.select_tab", "audio")
+    rows = run.wait_rows("audio")
+    print("audio rows:", len(rows), "songs:",
+          sum(1 for r in rows if "music_cat" in json.dumps(r)), flush=True)
+    for needle, src in (("music_cat01_0000", "short_song.wav"),
+                        ("music_cat02_0000", "long_song.wav")):
+        rel = _rel(rows, needle)
+        run.answer([os.path.join(files, src)])
+        print("  audio.choose", rel, run.api("audio.choose", rel), flush=True)
+    run.api("audio.select", [_rel(rows, "music_cat02_0000")])
+    shot(page, os.path.join(out, "banks_replace_audio.png"))
+    run.api("ui.select_tab", "write")
+    time.sleep(3)
+    run.answer([build])
+    print("  build location", run.api("write.change_build_location"), flush=True)
+    time.sleep(4)
+    shot(page, os.path.join(out, "banks_write_pending.png"))
+    print("  write.primary", run.api("write.primary"), flush=True)
+    run.wait_idle("build", timeout=7200, settle=5)
+    shot(page, os.path.join(out, "banks_write_done.png"))
+
+
 def main():
     tree, out, mode = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2]), sys.argv[3]
     os.makedirs(out, exist_ok=True)
@@ -445,6 +486,8 @@ def main():
                            sys.argv[7] if len(sys.argv) > 7 else "4")
             elif mode == "tour":
                 tour(run, page, sys.argv[4])
+            elif mode == "banks":
+                banks(run, page, sys.argv[4], sys.argv[5], sys.argv[6])
             elif mode == "build":
                 build_only(run, page, sys.argv[4], sys.argv[5],
                            sys.argv[6] if len(sys.argv) > 6 else "3")

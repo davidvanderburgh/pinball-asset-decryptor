@@ -1023,8 +1023,11 @@ def test_page_project_game(tmp_path):
     (tmp_path / "tabs").mkdir()
     (tmp_path / "core").mkdir()
     (tmp_path / "tabs" / "extract.js").write_text(src, encoding="utf-8")
-    for mod, frm in (("ui", "../core/ui.js"), ("store", "../core/store.js")):
-        m = re.search(r"import \{([^}]*)\} from \"%s\"" % re.escape(frm), src)
+    # every ../core module the page imports gets a stub (spike3_guide.js
+    # joined ui and store; a fixed list went red on main when it did)
+    for m in re.finditer(r"import \{([^}]*)\} from \"\.\./core/(\w+)\.js\"",
+                         src):
+        mod = m.group(2)
         names = [n.strip() for n in m.group(1).split(",") if n.strip()]
         body = "".join("export const %s = () => null;\n" % n
                        for n in names if n != "html")

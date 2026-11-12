@@ -1158,6 +1158,45 @@ def load_switches():
     return sorted(rows, key=lambda r: r["id"])
 
 
+def panel_switch_rows():
+    """The switches the title draws on its BACK PANEL picture, not the
+    playfield (PAD-1179), in the device table's order.
+
+    Iron Maiden's bullseye behind the centre ramp - BULLS EYE, INNER RING,
+    OUTER RING - is on the picture named `backpanel`, and so are Star Wars
+    LE's accelerator optos and Stranger Things LE's back-panel lock; King
+    Kong LE's TRAIN ENTER OPTO is on its own back-panel wireframe. load_switches()
+    keeps only the layout image, so none of them had anything to click."""
+    if not LAYOUT_IMAGE:
+        return []
+    return [r for r in DEV_ROWS
+            if r["kind"] == "switch" and r["image"] != LAYOUT_IMAGE
+            and cablights.is_backpanel_image(r["image"])]
+
+
+def load_panel_switches(switch_list=None):
+    """panel_switch_rows() joined to the live switch ids on the NAME, as
+    load_switches() derives a playfield one: [{id, node, bit, name}, ...].
+    A row the running game's table does not name is left out (it cannot be
+    pressed), and so is a switch the playfield already draws."""
+    rows = panel_switch_rows()
+    if not rows:
+        return []
+    if switch_list is None:
+        switch_list = load_switch_list()
+    live = {r["name"].strip().upper(): r for r in switch_list
+            if r["name"] and r["name"] != "?"}
+    out, seen = [], set()
+    for r in rows:
+        hit = live.get(r["name"].strip().upper())
+        if hit is None or hit["id"] in seen:
+            continue
+        seen.add(hit["id"])
+        out.append(dict(id=hit["id"], node=hit["node"], bit=hit["bit"],
+                        name=r["name"]))
+    return out
+
+
 def load_leds():
     """The layout's LEDs: name, position, and the (node, index) on the wire.
 
@@ -3742,6 +3781,9 @@ class Field(LedRing):
                 self.chan_fix.setdefault(key, []).append(F)
 
         self.sw_rows = list(self.switches)
+        # PAD-1179: the back panel's switches (Iron Maiden's bullseye), drawn
+        # under the Backpanel section of the cabinet column
+        self.panel_sw = self._panel_switches()
         self.insert_look = insert_look()        # PAD-668
         # PAD-500: the cabinet's own lights, in a column left of the art
         self.cab = CabinetLights(expression_on())
@@ -3809,11 +3851,37 @@ class Field(LedRing):
             if name is None or F["name"] == name:
                 F["state"] = None
 
+    def _panel_switches(self, switch_list=None):
+        """load_panel_switches(), less any switch the playfield draws."""
+        on_pf = {S["id"] for S in self.switches}
+        return [S for S in load_panel_switches(switch_list)
+                if S["id"] not in on_pf]
+
     def cab_spec(self):
         """The cabinet column (PAD-500), or None on a title with none.
         `w` is its width in the artwork's own pixels, so the page scales the
-        two together."""
+        two together.
+
+        PAD-1179: the back panel's switches ride its section as `sw`, [[k,
+        name, id], ...] - a ring and a name each, under the lamps, because
+        on the picture Iron Maiden's three bullseye switches are 11 px
+        apart and the column draws it at a quarter size. A title whose back
+        panel has switches and no lamps gets the section for them alone."""
         secs = self.cab.spec()
+        if self.panel_sw:
+            bp = [S for S in secs if S["key"] == cablights.BACKPANEL]
+            if not bp:
+                nodes = sorted({S["node"] for S in self.panel_sw})
+                bp = [{"key": cablights.BACKPANEL,
+                       "label": cablights.LABEL[cablights.BACKPANEL],
+                       "node": nodes[0], "board": "", "n": 0,
+                       "role": cablights.BACKPANEL,
+                       "where": ("node %d" % nodes[0] if len(nodes) == 1
+                                 else "nodes " + ", ".join(map(str, nodes)))}]
+                secs.append(bp[0])
+                secs.sort(key=lambda S: cablights.ORDER.get(S["role"], 9))
+            bp[0]["sw"] = [[k, S["name"], S["id"]]
+                           for k, S in enumerate(self.panel_sw)]
         if not secs:
             return None
         bw = (self.base or (313, 710))[0]
@@ -3839,13 +3907,20 @@ class Field(LedRing):
         """THE SWITCH TABLE IS THE ONE PART THAT NEEDS A RUN - the game builds
         it on the heap, so the first run of a title opens this window without
         it. A stat every SWITCH_POLL_S while it is missing, nothing after."""
-        if self.switches or time.monotonic() < self._sw_next:
+        # PAD-1179: the back panel's switches join on the same table
+        want_panel = not self.panel_sw and bool(panel_switch_rows())
+        if ((self.switches and not want_panel)
+                or time.monotonic() < self._sw_next):
             return False
         self._sw_next = time.monotonic() + SWITCH_POLL_S
+        if self.switches:
+            self.panel_sw = self._panel_switches()
+            return bool(self.panel_sw)
         rows = load_switches()
         if not rows:
             return False
         self.switches = rows
+        self.panel_sw = self._panel_switches()
         if not self.sw.positions and not self.sw.set_rows(rows):
             self.sw.set_rows(load_switch_list())
         self.sw_rows = list(rows)
@@ -3870,6 +3945,11 @@ class Field(LedRing):
     def describe(self, kind, k):
         if kind == "cab":
             return self.cab.describe(k)
+        if kind == "panelsw":
+            d = self.panel_sw[k]
+            return ("SWITCH  %s\nid %d   node %d  bit %d\non the back panel\n"
+                    "hold to keep it closed\nright-hold to RIP it"
+                    % (d["name"], d["id"], d["node"], d["bit"]))
         if kind == "switch":
             d = self.sw_rows[k]
             C = self.kicker(d["id"])
@@ -4840,7 +4920,8 @@ class Playfield:
         section. Every change is gated: a still machine costs the read."""
         if not view.sw.poll():
             return False
-        ids = ([S["id"] for S in view.sw_rows] if view.kind == "field"
+        ids = ([S["id"] for S in view.sw_rows + view.panel_sw]
+               if view.kind == "field"
                else [e["id"] for e in view.entries
                      if "id" in e and e["live"]])
         changes = {}

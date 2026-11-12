@@ -252,3 +252,136 @@ def test_the_column_draws_the_shape_then_the_row():
     assert by[0]["x"] < by[1]["x"] < by[2]["x"] and by[1]["y"] == by[2]["y"] < by[0]["y"]
     assert by[3]["y"] > max(by[c]["y"] for c in (0, 1, 2))
     assert got["labels"][0]["sub"] == "nodes 8, 9"
+
+
+# ------------------------------------------------- back-panel switches (PAD-1179) --
+
+KK_PANEL = "TestMode/Rodeo_LE_Service_Backpanel_Wireframe_300dpi_cropped"
+
+
+def _sw(name, x, y, image="backpanel", group=7, index=9):
+    return dict(kind="switch", name=name, x=x, y=y, w=20, h=20, group=group,
+                index=index, image=image, conn="")
+
+
+#: Iron Maiden LE 1.18.0's switches: two on the playfield, its bullseye and
+#: the diverter's sensors on the back panel, and a service button elsewhere
+IRON_MAIDEN_SW = [_sw("LEFT OUTLANE", 20, 600, "playfield", 6, 1),
+                  _sw("DIVERTER MOTOR UP", 118, 48, index=0),
+                  _sw("BULLS EYE", 309, 132, index=9),
+                  _sw("INNER RING", 309, 143, index=10),
+                  _sw("OUTER RING", 309, 159, index=11),
+                  _sw("START BUTTON", 50, 50, "System/TestMode/chuck_buttons_cropped")]
+IRON_MAIDEN_LIST = [dict(id=i, node=n, bit=b, name=nm) for i, n, b, nm in (
+    (20, 8, 1, "Left Outlane"), (76, 9, 0, "Diverter Motor Up"),
+    (83, 9, 9, "Bulls Eye"), (84, 9, 10, "Inner Ring"), (85, 9, 11, "Outer Ring"),
+    (1, 1, 0, "Start Button"))]
+
+
+def test_a_picture_named_for_the_back_panel_is_the_back_panel():
+    assert cablights.is_backpanel_image("backpanel")
+    assert cablights.is_backpanel_image(KK_PANEL)
+    assert not cablights.is_backpanel_image("Test/scaled_playfield")
+    assert not cablights.is_backpanel_image("")
+    # King Kong LE's waterfall flasher joins the Backpanel section
+    assert cablights.role(_lamp("WATERFALL FLASH", 8, 66, 76, 75, KK_PANEL)) == "backpanel"
+
+
+def _field_tables(monkeypatch, rows, switch_list):
+    import playfield as pf
+    monkeypatch.setattr(pf, "DEV_ROWS", rows)
+    monkeypatch.setattr(pf, "LAYOUT_IMAGE", "playfield")
+    monkeypatch.setattr(pf, "load_switch_list", lambda: list(switch_list))
+    return pf
+
+
+def test_the_back_panel_switches_join_the_live_table(monkeypatch):
+    pf = _field_tables(monkeypatch, IRON_MAIDEN_SW, IRON_MAIDEN_LIST)
+    got = pf.load_panel_switches()
+    assert [(S["name"], S["id"], S["node"], S["bit"]) for S in got] == [
+        ("DIVERTER MOTOR UP", 76, 9, 0), ("BULLS EYE", 83, 9, 9),
+        ("INNER RING", 84, 9, 10), ("OUTER RING", 85, 9, 11)]
+    # a switch the running game does not name cannot be pressed: left out
+    pf = _field_tables(monkeypatch, IRON_MAIDEN_SW, IRON_MAIDEN_LIST[:3])
+    assert [S["name"] for S in pf.load_panel_switches()] == [
+        "DIVERTER MOTOR UP", "BULLS EYE"]
+    # no table yet (a first run): nothing, and no error
+    pf = _field_tables(monkeypatch, IRON_MAIDEN_SW, [])
+    assert pf.load_panel_switches() == []
+
+
+def test_king_kong_les_train_opto_is_a_back_panel_switch(monkeypatch):
+    rows = [_sw("TRAIN ENTER OPTO", 257, 128, KK_PANEL, 8, 6)]
+    pf = _field_tables(monkeypatch, rows, [dict(id=40, node=10, bit=6,
+                                                name="Train Enter Opto")])
+    assert [S["id"] for S in pf.load_panel_switches()] == [40]
+
+
+def _field_stub(pf, cab_sections, panel_sw, switches=()):
+    import types
+
+    class Cab:
+        def spec(self):
+            return [dict(s) for s in cab_sections]
+    return types.SimpleNamespace(cab=Cab(), panel_sw=panel_sw, base=(313, 710),
+                                 switches=list(switches))
+
+
+def test_the_backpanel_section_carries_its_switches(monkeypatch):
+    pf = _field_tables(monkeypatch, IRON_MAIDEN_SW, IRON_MAIDEN_LIST)
+    top = {"key": "topper:12", "role": "topper", "label": "Topper", "node": 12}
+    bp = {"key": "backpanel", "role": "backpanel", "label": "Backpanel", "node": 9,
+          "pos": [[0, 34, 67], [1, 137, 67]]}
+    # a switch the playfield already draws is not drawn twice
+    stub = _field_stub(pf, [top, bp], None, switches=[dict(id=76)])
+    stub.panel_sw = pf.Field._panel_switches(stub)
+    spec = pf.Field.cab_spec(stub)
+    s = [S for S in spec["sections"] if S["key"] == "backpanel"][0]
+    assert s["sw"] == [[0, "BULLS EYE", 83], [1, "INNER RING", 84],
+                       [2, "OUTER RING", 85]]
+    assert s["pos"] == bp["pos"]
+    # the tooltip names it and says where it is
+    tip = pf.Field.describe(stub, "panelsw", 0)
+    assert tip.startswith("SWITCH  BULLS EYE\nid 83   node 9  bit 9\non the back panel")
+
+
+def test_switches_alone_make_a_backpanel_section(monkeypatch):
+    """Star Wars LE's accelerator optos: a back panel with no lamps placed."""
+    pf = _field_tables(monkeypatch, [], [])
+    top = {"key": "topper:12", "role": "topper", "label": "Topper", "node": 12}
+    sw = [dict(id=90 + n, node=11, bit=3 + n, name="ACCELERATOR OPTO %d" % n)
+          for n in range(1, 5)]
+    spec = pf.Field.cab_spec(_field_stub(pf, [top], sw))
+    assert [S["key"] for S in spec["sections"]] == ["topper:12", "backpanel"]
+    s = spec["sections"][1]
+    assert (s["label"], s["where"], len(s["sw"])) == ("Backpanel", "node 11", 4)
+    # and a title with no cabinet lights at all still gets its column
+    assert pf.Field.cab_spec(_field_stub(pf, [], sw))["sections"][0]["key"] == "backpanel"
+    assert pf.Field.cab_spec(_field_stub(pf, [], [])) is None
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
+def test_the_column_lists_the_back_panel_switches_under_its_lamps():
+    sections = [{"key": "backpanel", "label": "Backpanel", "node": 9,
+                 "where": "node 9", "board": "",
+                 "pos": [[0, 34, 67], [1, 137, 67], [2, 308, 131]], "row": [3],
+                 "sw": [[0, "BULLS EYE", 83], [1, "INNER RING", 84],
+                        [2, "OUTER RING", 85]]}]
+    js = ("const { cabLayout, cabSwHit } = require(%s);\n"
+          "const L = cabLayout(%s, 110, 720);\n"
+          "const s = L.switches[1];\n"
+          "L.hit = [cabSwHit(L.switches, 110, s.x + 40, s.y + 2), cabSwHit(L.switches, 110, s.x, 1)];\n"
+          "process.stdout.write(JSON.stringify(L));"
+          % (json.dumps(PF_JS), json.dumps(sections)))
+    r = subprocess.run([shutil.which("node"), "-e", js], capture_output=True,
+                       text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    sw = got["switches"]
+    assert [(s["name"], s["id"], s["k"]) for s in sw] == [
+        ("BULLS EYE", 83, 0), ("INNER RING", 84, 1), ("OUTER RING", 85, 2)]
+    # under every lamp, one row each, far enough apart to click
+    assert sw[0]["y"] > max(m["y"] for m in got["marks"])
+    assert sw[1]["y"] - sw[0]["y"] >= 13 and sw[0]["r"] >= 3.5
+    # the row's name is part of it; a point above the list is nothing
+    assert got["hit"][0]["k"] == 1 and got["hit"][1] is None

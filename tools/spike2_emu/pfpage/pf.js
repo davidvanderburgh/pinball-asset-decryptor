@@ -148,11 +148,13 @@ function pfHit(view, fx, scale, px, py) {
 // other strip wraps in chain order, and the blades stand in whatever height is
 // left, one bar a side with pixel 1 at the BOTTOM - where King Kong's picture
 // puts it. PURE, so Node can test it: marks are {cid, x, y, r} (a dot) or
-// {cid, x, y, w, h} (a bar segment), centred; labels {text, sub, x, y}.
+// {cid, x, y, w, h} (a bar segment), centred; labels {text, sub, x, y};
+// switches {k, id, name, x, y, r, h} - a ring at x, y and its name after it,
+// h the row's height (PAD-1179: the back panel's, Iron Maiden's bullseye).
 const CAB_PAD = 6, CAB_LABEL = 26;
 function cabLayout(sections, W, H) {
   const inner = Math.max(10, W - 2 * CAB_PAD);
-  const marks = [], labels = [];
+  const marks = [], labels = [], switches = [];
   let y = CAB_PAD;
   for (const s of sections) {
     labels.push({ text: s.label, sub: (s.where || "node " + s.node) + (s.board ? " · " + s.board : ""), x: CAB_PAD, y });
@@ -197,8 +199,24 @@ function cabLayout(sections, W, H) {
       s.row.forEach((cid, i) => marks.push({ cid, x: CAB_PAD + p / 2 + (i % per) * p, y: y + p / 2 + Math.floor(i / per) * p, r: p * 0.38 }));
       y += Math.ceil(s.row.length / per) * p + 10;
     }
+    // the back panel's switches, a labelled row each: on its picture they
+    // sit too close to tell apart at the column's size
+    if (s.sw && s.sw.length) {
+      const h = Math.max(13, Math.min(18, inner / 7));
+      const r = Math.max(3.5, h * 0.3);
+      s.sw.forEach(([k, name, id], i) => switches.push({ k, id, name, x: CAB_PAD + r + 2, y: y + h / 2 + i * h, r, h }));
+      y += s.sw.length * h + 10;
+    }
   }
-  return { marks, labels };
+  return { marks, labels, switches };
+}
+
+// the switch row under a point: anywhere along its row, ring or name
+function cabSwHit(switches, W, px, py) {
+  for (const s of switches) {
+    if (Math.abs(py - s.y) <= s.h / 2 && px >= s.x - s.r - 2 && px <= W) return s;
+  }
+  return null;
 }
 
 // The switch list's swatch grid gives the same two boards the same shapes: the
@@ -645,7 +663,8 @@ function startMain() {
     const balls = ballsBox(V, D);
     const trough = balls ? balls.trough : null;
     // the cabinet column (PAD-500), left of the artwork at its scale
-    const cab = V.cab ? cabColumn(V.cab, D.cab) : null;
+    const made = Object.assign({}, D.sw || {});
+    const cab = V.cab ? cabColumn(V.cab, D.cab, made) : null;
     if (cab) wrap.append(cab.el);
     wrap.append(stage);
     main.append(wrap);
@@ -654,7 +673,6 @@ function startMain() {
     const CW = cab ? V.cab.w : 0, GAP = cab ? 10 : 0;
     const fx = {}; for (const k in (D.fx || {})) fx[k] = D.fx[k];
     const coilHot = Object.assign({}, D.coil || {});
-    const made = Object.assign({}, D.sw || {});
     let held = null;      // ["switch"|"coil", k]
     let ripping = null;
     let shakeLvl = D.shaker ? D.shaker[0] : 0, jiggled = false;
@@ -816,7 +834,7 @@ function startMain() {
         if (f.cab && cab) cab.update(f.cab);
         if (f.coil) { Object.assign(coilHot, f.coil); dirty = true; }
         if (f.shaker) shakeLvl = f.shaker[0];
-        if (f.sw) { Object.assign(made, f.sw); dirty = true; }
+        if (f.sw) { Object.assign(made, f.sw); dirty = true; if (cab) cab.touch(); }
         if (f.trough && trough) trough.update(f.trough);
       },
       side: balls ? balls.el : null,
@@ -828,12 +846,14 @@ function startMain() {
   // the artwork and at its scale - cabLayout() above says where each goes.
   // A lit pixel is its colour at its level's alpha with a soft glow, a dark one
   // the artwork's own dark-insert grey. Redrawn only when something changed.
-  function cabColumn(spec, dyn) {
+  function cabColumn(spec, dyn, made) {
     const box = el("div", "pf-cab");
     const cv = el("canvas");
     box.append(cv);
     const px = Object.assign({}, dyn || {});
-    let W = 0, H = 0, L = { marks: [], labels: [] }, dirty = true;
+    made = made || {};
+    let W = 0, H = 0, L = { marks: [], labels: [], switches: [] }, dirty = true;
+    let held = null, ripping = null;     // the back-panel switch row down (PAD-1179)
     function fit(w, h) {
       W = w; H = h;
       box.style.width = w + "px";
@@ -888,21 +908,56 @@ function startMain() {
         if (!v) { g.shadowBlur = 0; g.lineWidth = 1; g.strokeStyle = "#333"; g.stroke(); }
       }
       g.shadowBlur = 0;
+      // the back panel's switches: the playfield's ring, its green dot when
+      // made, and the name after it
+      g.textBaseline = "middle";
+      for (const s of L.switches) {
+        const isHeld = held === s.k, isRip = ripping === s.k;
+        g.beginPath(); g.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        g.lineWidth = isHeld || isRip ? 2.5 : 1.5;
+        g.strokeStyle = isHeld ? "#ffd400" : isRip ? "#ff9500" : "#2a8cff";
+        g.stroke();
+        if (made[String(s.id)]) {
+          g.beginPath(); g.arc(s.x, s.y, s.r * 0.5, 0, Math.PI * 2);
+          g.fillStyle = "#00c853"; g.fill();
+        }
+        const tx = s.x + s.r + 5;
+        g.fillStyle = "#c9d1d9";
+        g.fillText(fitText(g, s.name, "@px " + cs.getPropertyValue("--mono"), 10, W - tx - CAB_PAD), tx, s.y);
+      }
     }
     // the pixel under the pointer says what it is, as an insert does
     let tipFor = null, tipText = "";
+    const swAt = (e) => { const r = cv.getBoundingClientRect(); return cabSwHit(L.switches, W, e.clientX - r.left, e.clientY - r.top); };
     cv.addEventListener("pointermove", (e) => {
       const r = cv.getBoundingClientRect();
-      const cid = cabHit(L.marks, e.clientX - r.left, e.clientY - r.top);
-      if (cid == null) { tipFor = null; hideTip(); return; }
-      if (cid !== tipFor) {
-        tipFor = cid;
-        api("tip", "cab", cid).then((t) => { if (tipFor === cid) { tipText = t || ""; showTip(tipText, e.clientX, e.clientY); } });
+      const s = swAt(e);
+      cv.style.cursor = s ? "pointer" : "default";
+      const ask = s ? ["panelsw", s.k] : ["cab", cabHit(L.marks, e.clientX - r.left, e.clientY - r.top)];
+      if (ask[1] == null) { tipFor = null; hideTip(); return; }
+      const key = ask.join(":");
+      if (key !== tipFor) {
+        tipFor = key;
+        api("tip", ask[0], ask[1]).then((t) => { if (tipFor === key) { tipText = t || ""; showTip(tipText, e.clientX, e.clientY); } });
       }
       showTip(tipText, e.clientX, e.clientY);
     });
     cv.addEventListener("pointerleave", () => { tipFor = null; hideTip(); });
-    return { el: box, fit, draw, update(c) { for (const k in c) px[k] = c[k]; dirty = true; } };
+    cv.addEventListener("contextmenu", (e) => e.preventDefault());
+    // a back-panel switch is pressed as a playfield one is: hold, right-hold rips
+    cv.addEventListener("pointerdown", (e) => {
+      const s = swAt(e);
+      if (!s) return;
+      if (e.button === 0) {
+        holdWith(cv, e, () => { held = s.k; dirty = true; api("hold", s.id); },
+          () => { held = null; dirty = true; api("unhold"); });
+      } else if (e.button === 2) {
+        holdWith(cv, e, () => { ripping = s.k; dirty = true; api("rip", s.id, true); },
+          () => { ripping = null; dirty = true; api("rip", s.id, false); });
+      }
+    });
+    return { el: box, fit, draw, update(c) { for (const k in c) px[k] = c[k]; dirty = true; },
+      touch() { dirty = true; } };
   }
 
   // The side panel's CABINET LIGHTS box (PAD-500): which boards the column
@@ -1554,4 +1609,4 @@ function startLcd() {
 }
 
 // Node (the tests) takes the pure part; a browser has no `module`.
-if (typeof module !== "undefined") module.exports = { pfHit, cabLayout, cabHit, gridRing, gridBars };
+if (typeof module !== "undefined") module.exports = { pfHit, cabLayout, cabHit, cabSwHit, gridRing, gridBars };

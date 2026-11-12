@@ -52,6 +52,18 @@ BACKPANEL = "backpanel"
 #: The image name a back-panel lamp carries (devicexy.BARE_IMAGES).
 BACKPANEL_IMAGE = "backpanel"
 
+
+def is_backpanel_image(image):
+    """Is this device-table picture the back panel? The bare word
+    `backpanel` (PAD-705), or a picture of its own whose name says so: King
+    Kong LE draws its back panel as
+    `TestMode/Rodeo_LE_Service_Backpanel_Wireframe_300dpi_cropped`, with the
+    accent spots, the waterfall flasher and the TRAIN ENTER OPTO on it
+    (PAD-1179)."""
+    image = image or ""
+    return (image == BACKPANEL_IMAGE
+            or "backpanel" in os.path.basename(image).lower())
+
 #: The roles the window's "Expression lights" tick box takes out: the blades
 #: and the speakers - "a toggle to disable expression lights (blades and
 #: speakers)", in the request's own words.
@@ -100,7 +112,7 @@ def role(row):
         return UV
     if "TOPPER" in name or "topper" in (row.get("image") or "").lower():
         return TOPPER
-    if row.get("image") == BACKPANEL_IMAGE:
+    if is_backpanel_image(row.get("image")):
         return BACKPANEL
     return None
 

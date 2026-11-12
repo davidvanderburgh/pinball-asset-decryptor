@@ -145,10 +145,23 @@ def audio_ctl_file():
 RESTART_REQ_S = 30
 
 
-def restart_req_file():
+def restart_req_file(n=None):
+    """``n``: the rig the window is on, when not this app's (a Spike 3 run
+    on rig 1 from an app on rig 0 - PAD-1198)."""
     from ...core import rigslot
     return os.path.join(os.path.dirname(config.SETTINGS_FILE),
-                        "restart_game_%d.req" % rigslot.slot())
+                        "restart_game_%d.req"
+                        % (rigslot.slot() if n is None else n))
+
+
+def stop_req_file(n=None):
+    """PAD-1198: the playfield window's Stop emulator (and its X) asks
+    through this file, one per rig, beside the restart one (playfield.py's
+    stop_req_path names it the same way); the status poll acts on it."""
+    from ...core import rigslot
+    return os.path.join(os.path.dirname(config.SETTINGS_FILE),
+                        "stop_emulator_%d.req"
+                        % (rigslot.slot() if n is None else n))
 
 
 def load_audio_ctl():
@@ -3064,6 +3077,10 @@ class EmulateTab(EmulateLogMixin, TabService):
         if self._starting or self._stopping:
             self._refuse_start("the emulator is already starting or stopping")
             return
+        try:            # PAD-1198: a Stop the last run's window left behind
+            os.remove(stop_req_file())
+        except OSError:
+            pass
         if self._launched():
             # the watch.sh this tab started is still up: a second one would
             # be a second launcher (must survive #0)
@@ -3317,6 +3334,10 @@ class EmulateTab(EmulateLogMixin, TabService):
         # runs that are always silent (a session's, a hidden one: PAD-309)
         from ...core import rigslot as _rs
         audio = not _rs.muted()
+        try:            # PAD-1198: a Stop an earlier window left on this rig
+            os.remove(stop_req_file(slot))
+        except OSError:
+            pass
         self._starting = True
         self._s3_slot = slot
         self._s3_label = "Starting Spike 3…"
@@ -3680,19 +3701,49 @@ class EmulateTab(EmulateLogMixin, TabService):
         start the run itself (Stop closes it), so it leaves a request beside
         the volume file, one per rig, and this poll acts on it. A request
         older than RESTART_REQ_S is from a run that is gone and is dropped."""
-        path = restart_req_file()
-        try:
-            age = time.time() - os.stat(path).st_mtime
-        except OSError:
-            return
-        try:
-            os.remove(path)
-        except OSError:
-            return
-        if age > RESTART_REQ_S:
+        age = self._take_req(restart_req_file)
+        if age is None or age > RESTART_REQ_S:
             return
         if self.restart():
             self.log("[emulate] (asked for by the playfield window)")
+
+    def _take_req(self, name):
+        """A playfield window's request file, taken (removed) - its age in
+        seconds, or None with none there. Looked for under this app's rig
+        AND the rig its Spike 3 run is on: an app on rig 0 runs Spike 3 on
+        rig 1 (``slot or 1``), and the window names its files by its own rig
+        (PAD-1198: Restart game and Stop from a Spike 3 window went unread)."""
+        from ...core import rigslot
+        rigs = [rigslot.slot()]
+        s3 = getattr(self, "_s3_slot", None)
+        if s3 is not None and s3 not in rigs:
+            rigs.append(s3)
+        got = None
+        for n in rigs:
+            path = name(n)
+            try:
+                age = time.time() - os.stat(path).st_mtime
+                os.remove(path)
+            except OSError:
+                continue
+            got = age if got is None else min(got, age)
+        return got
+
+    def _follow_stop_req(self):
+        """The playfield window's Stop emulator, or its X (PAD-1198): the
+        same request-file shape as Restart game. Acted on only while this
+        tab's run is up and not already stopping - a request left by a
+        window that closed with its run (or older than RESTART_REQ_S) ends
+        nothing, least of all the next run."""
+        age = self._take_req(stop_req_file)
+        if age is None or age > RESTART_REQ_S or self._stopping:
+            return False
+        if not (self._last_up or self._launched()
+                or self._s3_slot is not None):
+            return False
+        self.log("[emulate] stopping: asked for by the playfield window")
+        self.stop()
+        return True
 
     def _restart_when_down(self):
         """After a Try-it or Restart game Stop: Start once the rig says
@@ -4062,6 +4113,7 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._apply(info)
                 self._follow_audio_ctl()
                 self._follow_restart_req()
+                self._follow_stop_req()
                 self.set(rigs=rigs)
             self._post(apply_and_release)
 

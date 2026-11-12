@@ -431,6 +431,7 @@ def test_the_button_says_resume_however_the_game_was_frozen(monkeypatch, tmp_pat
     run = pf.RunCtl(None, logdir=None)
     assert run.poll(10.0) is True
     assert run.dyn() == {"paused": True, "restart": False,  # no file: no volume row
+                         "stop": False, "stopping": False,  # nor Stop (PAD-1198)
                          "restarting": False, "boot": None, "audio": None}
     assert run.poll(10.1) is False                          # paced, and unchanged
     monkeypatch.setattr(pf, "SW_PATH", str(_pf_block(tmp_path, 0)))

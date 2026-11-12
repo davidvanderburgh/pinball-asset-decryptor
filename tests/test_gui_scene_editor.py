@@ -176,6 +176,9 @@ def test_the_editor_draws_the_tree_and_edits_it(tmp_path):
         assert _ops(folder) == [{"op": "move", "node": art["id"], "dx": 30.0, "dy": -10.0}]
         p = _tv(w)["props"]
         assert (p["x"], p["y"]) == (x0 + 30, y0 - 10)
+        # PAD-1211: the box as it is goes along, unrounded (what a drag snaps by)
+        bx = p["box"]
+        assert len(bx) == 4 and abs(bx[0] - p["x"]) <= 0.5 and abs(bx[2] - p["w"]) <= 0.5
 
         # to 150 %: Resize from Top-left (PAD-557), so X and Y stay put
         tl = (p["x"], p["y"])

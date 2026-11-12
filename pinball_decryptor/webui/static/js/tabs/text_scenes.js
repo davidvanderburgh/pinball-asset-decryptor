@@ -695,6 +695,11 @@ function useSnap() {
 }
 // a handle as fractions of the box across and down
 const handleAt = (h) => [{ l: 0, c: 0.5, r: 1 }[h[1]], { t: 0, m: 0.5, b: 1 }[h[0]]];
+// PAD-1211: a part's box on the glass as it is (props.box), else the rounded one shown
+export const exactBox = (p) => (p.box ? { x: p.box[0], y: p.box[1], w: p.box[2], h: p.box[3] }
+  : { x: p.x, y: p.y, w: p.w, h: p.h });
+// a move kept to a thousandth of a pixel (what the edits keep)
+export const r3 = (v) => Math.round(v * 1000) / 1000;
 // the box round a set of outline points
 export function boxOfPts(pts) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -708,37 +713,38 @@ function snapLines(o) {
   for (const b of o.others || []) { xs.push(b.x, b.x + b.w / 2, b.x + b.w); ys.push(b.y, b.y + b.h / 2, b.y + b.h); }
   return [xs, ys];
 }
-// one way (across or down): pts are where the snapping points are now -> {d, line}: how far to
-// move them, and the guide (null: on the grid, or not snapped).  The nearest line within tol
-// wins over the grid; the grid takes pts[0].
+// one way (across or down): pts are where the snapping points are now -> {d, line, hit}: how
+// far to move them, the guide (null: on the grid, or not snapped) and whether it snapped at all.
+// The nearest line within tol wins over the grid; the grid takes pts[0].
 function snapAxis(pts, lines, o) {
   let best = null;
   if (o.objects) {
     for (const p of pts) {
       for (const l of lines) {
         const d = l - p;
-        if (Math.abs(d) <= o.tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, line: l };
+        if (Math.abs(d) <= o.tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, line: l, hit: true };
       }
     }
   }
   if (best) return best;
-  if (o.grid && o.size > 0) return { d: Math.round(pts[0] / o.size) * o.size - pts[0], line: null };
-  return { d: 0, line: null };
+  if (o.grid && o.size > 0) return { d: Math.round(pts[0] / o.size) * o.size - pts[0], line: null, hit: true };
+  return { d: 0, line: null, hit: false };
 }
 const guidesOf = (sx, sy) => [...(sx.line != null ? [{ x: sx.line }] : []), ...(sy.line != null ? [{ y: sy.line }] : [])];
-// a part (box *b*) moved by (dx, dy) -> the move snapped, and its guides
+// a part (box *b*) moved by (dx, dy) -> the move snapped, its guides, and which ways it
+// snapped ([across, down]: the drop keeps those exact, PAD-1211)
 export function snapMove(b, dx, dy, o) {
   const [fx, fy] = o.handle && o.handle !== "auto" ? handleAt(o.handle).map((f) => [f]) : [[0, 0.5, 1], [0, 0.5, 1]];
   const [xs, ys] = snapLines(o);
   const sx = snapAxis(fx.map((f) => b.x + b.w * f + dx), xs, o);
   const sy = snapAxis(fy.map((f) => b.y + b.h * f + dy), ys, o);
-  return { dx: dx + sx.d, dy: dy + sy.d, guides: guidesOf(sx, sy) };
+  return { dx: dx + sx.d, dy: dy + sy.d, guides: guidesOf(sx, sy), snapped: [sx.hit, sy.hit] };
 }
 // a corner dragged to (x, y) -> where it snaps
 export function snapPoint(x, y, o) {
   const [xs, ys] = snapLines(o);
   const sx = snapAxis([x], xs, o), sy = snapAxis([y], ys, o);
-  return { x: x + sx.d, y: y + sy.d, guides: guidesOf(sx, sy) };
+  return { x: x + sx.d, y: y + sy.d, guides: guidesOf(sx, sy), snapped: [sx.hit, sy.hit] };
 }
 // a picture scaled by *f* about (cx, cy) from its corner (kx, ky): the size that puts that
 // corner on the nearest line (across or down, whichever is nearer), else on the grid
@@ -760,9 +766,12 @@ export function snapScale(c, k, f, o) {
 // a drag (dragTo's) with the snapping *o* put on it; o null: none
 export function snapDrag(d, o) {
   if (!d.go) return d;
-  if (!o || (!o.grid && !o.objects)) return d.guides ? { ...d, guides: null } : d;
-  if (d.mode === "move" && d.b) { const s = snapMove(d.b, d.dx, d.dy, o); return { ...d, dx: s.dx, dy: s.dy, guides: s.guides }; }
-  if (d.mode === "box") { const s = snapPoint(d.x, d.y, o); return { ...d, x: s.x, y: s.y, guides: s.guides }; }
+  if (!o || (!o.grid && !o.objects)) return d.guides || d.snapped ? { ...d, guides: null, snapped: null } : d;
+  if (d.mode === "move" && d.b) {
+    const s = snapMove(d.b, d.dx, d.dy, o);
+    return { ...d, dx: s.dx, dy: s.dy, guides: s.guides, snapped: s.snapped };
+  }
+  if (d.mode === "box") { const s = snapPoint(d.x, d.y, o); return { ...d, x: s.x, y: s.y, guides: s.guides, snapped: s.snapped }; }
   if (d.mode === "scale" && d.kx != null) {
     const s = snapScale([d.cx, d.cy], [d.kx, d.ky], d.f, o);
     return { ...d, f: s.f, guides: s.guides };
@@ -1449,9 +1458,13 @@ function TreeCanvas({ s }) {
     nudgeT.current = setTimeout(flushNudge, 350);
   };
 
+  // PAD-1211: the pointer on the glass, inside the canvas's border (the picture and the
+  // outlines fill the inside, not the border box)
   const toStage = (e) => {
-    const r = box.current.getBoundingClientRect();
-    return [((e.clientX - r.left) * W) / r.width, ((e.clientY - r.top) * H) / r.height];
+    const el = box.current, r = el.getBoundingClientRect();
+    const bx = el.clientLeft || 0, by = el.clientTop || 0;
+    return [((e.clientX - r.left - bx) * W) / Math.max(1, r.width - 2 * bx),
+      ((e.clientY - r.top - by) * H) / Math.max(1, r.height - 2 * by)];
   };
   const pick = (x, y) => {
     const hits = t.hits || [];
@@ -1464,7 +1477,8 @@ function TreeCanvas({ s }) {
   // a line of text's box is resized apart from its words (PAD-383); the words re-flow in it
   const boxLive = drag && drag.mode === "box" ? boxOf(drag)
     : boxPend && p && boxPend.node === p.id ? boxPend.box : null;
-  const selBox = boxLive || (p && !multi && p.x != null ? { x: p.x, y: p.y, w: p.w, h: p.h } : null);
+  // PAD-1211: the box as it is, not the rounded one the panel shows: a drag snaps by it
+  const selBox = boxLive || (p && !multi && p.x != null ? exactBox(p) : null);
   const corner = (x, y) => {
     if (!selBox) return null;
     const r = box.current.getBoundingClientRect();
@@ -1529,13 +1543,17 @@ function TreeCanvas({ s }) {
     const d = drag;
     setDrag(null);
     if (!d || !d.go) return;                  // a click (PAD-447): it picked, it moves nothing
-    if (d.mode === "move" && Math.abs(d.dx) + Math.abs(d.dy) >= 1) {
-      const dx = Math.round(d.dx), dy = Math.round(d.dy);
-      send(d.ids, { m: "move", dx, dy }, () => moveCall(d.ids, dx, dy));
+    // PAD-1211 (DragonRR: "after letting go of the mouse there always seems to be a few pixels
+    // shift"): a way that snapped keeps the move exact, so the part lands on the line; one
+    // dragged freely moves by whole pixels
+    const sn = d.snapped || [];
+    if (d.mode === "move") {
+      const dx = sn[0] ? r3(d.dx) : Math.round(d.dx), dy = sn[1] ? r3(d.dy) : Math.round(d.dy);
+      if (dx || dy) send(d.ids, { m: "move", dx, dy }, () => moveCall(d.ids, dx, dy));
     }
-    if (d.mode === "box" && Math.abs(d.x - d.mx) + Math.abs(d.y - d.my) >= 1) {
+    if (d.mode === "box" && (sn[0] || sn[1] || Math.abs(d.x - d.mx) + Math.abs(d.y - d.my) >= 1)) {
       const b = boxOf(d);
-      const r = { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) };
+      const r = { x: r3(b.x), y: r3(b.y), w: r3(b.w), h: r3(b.h) };
       setBoxPend({ node: d.node, box: r, rev: t.rev || 0 });
       Promise.resolve(call("text_scenes.tree_set_box", d.node, r.x, r.y, r.w, r.h))
         .then((ok) => { if (ok === false) setBoxPend(null); }, () => setBoxPend(null));
@@ -1840,8 +1858,8 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
       </div>
       ${p.x != null ? null : html`<div class="small muted">Not on the glass at this moment.</div>`}
       <div class="tree-row">
-        ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, Number(v) - p.x, 0), "Left edge on the glass (px)", p.x == null)}
-        ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, Number(v) - p.y), "Top edge on the glass (px)", p.x == null)}
+        ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, r3(Number(v) - exactBox(p).x), 0), "Left edge on the glass (px)", p.x == null)}
+        ${num("Y", p.y, (v) => call("text_scenes.tree_move", p.id, 0, r3(Number(v) - exactBox(p).y)), "Top edge on the glass (px)", p.x == null)}
       </div>
       <div class="tree-row">
         ${num("W px", p.w, (v) => call("text_scenes.tree_set_pixels", p.id, v, null, keepShape), isText

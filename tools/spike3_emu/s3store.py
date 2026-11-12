@@ -147,6 +147,21 @@ def luks_data_offset(img, start_lba):
             return 16 << 20
 
 
+#: the record the app's Write leaves beside a card it built (engine.py
+#: BUILD_MANIFEST_SUFFIX)
+BUILD_RECORD = ".pad-build.json"
+
+
+def build_id(img):
+    """The ``build_id`` of the app's build record beside *img*, or ``""``."""
+    try:
+        with open(img + BUILD_RECORD, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    return str(doc.get("build_id") or "") if isinstance(doc, dict) else ""
+
+
 def card_id(img, plist=None):
     """``<title-version>-<10 hex>``: the file's stem (what the library names a
     card by) plus a fingerprint of the card itself, so a rename keeps nothing
@@ -168,6 +183,13 @@ def card_id(img, plist=None):
                 h.update(luks_uuid(img, start).encode())
                 f.seek(start * SECTOR + luks_data_offset(img, start))
                 h.update(f.read(64 << 10))
+    # PAD-1186: a card the app's Spike 3 Write built changes files in place,
+    # past those first 64 KiB, so a rebuild under the same name would read
+    # as the card already stored. Every Write leaves a fresh build id in the
+    # record beside the card; a stock card has none, and keeps its id.
+    bid = build_id(img)
+    if bid:
+        h.update(("build:%s" % bid).encode())
     stem = os.path.basename(img).split(".", 1)[0]
     return "%s-%s" % (stem, h.hexdigest()[:10])
 

@@ -120,6 +120,25 @@ class ImageSound:
                              % (RECORD_SIZE * self.count, len(dir_bytes)))
         self.records = self._parse_directory(dir_bytes)
 
+    @classmethod
+    def from_parts(cls, hdr: bytes, dir_bytes: bytes, filesize: int,
+                   path: str = "") -> "ImageSound":
+        """The view from the container's header and directory bytes alone
+        (read off a card volume without pulling the whole file out,
+        PAD-1186's Spike 3 Write)."""
+        self = cls.__new__(cls)
+        self.path = path
+        self.filesize = filesize
+        if len(hdr) < HEADER_SIZE:
+            raise ValueError("file too small to be an image.bin container")
+        self.md_off = struct.unpack_from("<Q", hdr, MD_OFF_FIELD)[0]
+        self.count = struct.unpack_from("<I", hdr, COUNT_FIELD)[0]
+        self._check_invariant()
+        if len(dir_bytes) < RECORD_SIZE * self.count:
+            raise ValueError("directory truncated")
+        self.records = self._parse_directory(dir_bytes)
+        return self
+
     def _check_invariant(self) -> None:
         expect = self.md_off + _align16(RECORD_SIZE * self.count) + 8
         if expect != self.filesize:

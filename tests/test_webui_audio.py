@@ -122,6 +122,9 @@ def test_grow_active_on_every_spike2_card(tmp_path, monkeypatch):
         monkeypatch.delenv("PAD_STERN_AUDIO_GROW")
         w.call("ui.set_era", "spike1")
         assert w.window._audio_grow_active() is False
+        # PAD-1186: a Spike 3 Write plays each sound at its own length too
+        w.call("ui.set_era", "spike3")
+        assert w.window._audio_grow_active() is True
     with web_app(tmp_path / "b", mfr="jjp", settings=settings) as w:
         assert w.window._audio_grow_active() is False
 

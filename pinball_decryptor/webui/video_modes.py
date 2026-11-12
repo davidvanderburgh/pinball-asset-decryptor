@@ -164,7 +164,11 @@ class ModesMixin:
 
     def _m_kick(self, project):
         """After a scan: read which mode plays each clip, once per card (Stern only)."""
-        if self._mfr_key() != "stern" or not project:
+        # (a Spike 2 game program's modes: a Spike 3 card has none to read,
+        # PAD-1186 - its capabilities carry no ``modes``)
+        caps = getattr(getattr(self, "mfr", None), "capabilities", None)
+        if (self._mfr_key() != "stern" or not project
+                or not getattr(caps, "modes", False)):
             self._m_reset()
             return
         card = self._m_card(project)

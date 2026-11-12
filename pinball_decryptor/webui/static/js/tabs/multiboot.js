@@ -505,7 +505,7 @@ function EditDialog({ s, w }) {
 // the card; "No other image" is one of its own.
 function ShareWith({ ed, k, value, options }) {
   return html`<div class="row mb-indent">
-    <label class="k" for=${fid(k)}>${ed.share_label}</label>
+    <label class="k" style="white-space:nowrap" for=${fid(k)}>${ed.share_label}</label>
     <${Select} id=${fid(k)} value=${value} options=${options} ns=${NS} k=${k} cls="grow" />
   </div>`;
 }

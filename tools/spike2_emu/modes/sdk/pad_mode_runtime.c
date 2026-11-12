@@ -16501,6 +16501,40 @@ static void coop_panel_arm(void)
     if (armed) say("co-op: the score panel lights the teammate up's box (%d call%s)", armed, armed == 1 ? "" : "s");
 }
 
+/* ---- PAD-1202: the ball start's "player N, you're up" call -------------------------------------------------------
+ * DoomWalrus666 (Godzilla): "a call out that said 'player one, you're up' during player two's turn"; daveyvandy: "or
+ * correct them for the active player". The game starts a process at a ball's start when it has more than one player
+ * (Godzilla 1.16: callout_nth(0x470 or 0x471, player - 1), two sets of four calls, then 0x473 until the plunge); a
+ * co-op game plays the game's player 1 (a team game its player 1 or 2), so it named player one for every teammate.
+ * The process's one call of the player-up getter (`site coop_up_call`, portcoop.up_call) is wrapped where it is made
+ * and answers the player really up - the teammate in a co-op game, the player (1-4) in a team game; every other
+ * caller still hears the game's own, so the team's progress stays shared. */
+static unsigned (*coop_up_game)(unsigned, unsigned, unsigned, unsigned);
+
+static unsigned coop_up_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    static unsigned said;
+    unsigned game = coop_up_game(r0, r1, r2, r3);
+    unsigned up = coop_panel_box(coop_teammates(), coop.turn, game);   /* a team game's coop.n are its players */
+    if (up != game && said < 40) {
+        said++;
+        say("co-op: \"player N, you're up\" names player %u (the game's player %u)", up, game);
+    }
+    return up;
+}
+
+static void coop_up_arm(void)
+{
+    unsigned at;
+    if (!site("coop_up_call")) return;
+    if (!fn("coop_up_call") || !(at = hook_call(fn("coop_up_call"), (void *)coop_up_wrap))) {
+        say("co-op: the ball start's \"player N, you're up\" call could not be wrapped - it names the game's player");
+        return;
+    }
+    coop_up_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
+    say("co-op: the ball start's \"player N, you're up\" call names the player really up (0x%08x)", fn("coop_up_call"));
+}
+
 static void coop_turn_show(void)
 {
     char words[40];
@@ -19489,6 +19523,7 @@ static void coop_arm(void)
                 "back", !fb ? "not in the port" : !fb->ok ? "not this build's" : "not wrapped");
     }
     coop_panel_arm();                                         /* PAD-1043 */
+    coop_up_arm();                                            /* PAD-1202 */
     coop_ball_find();
     if (coop_ball_msg < 0) say("co-op: the game's \"BALL %%d\" line was not found - the screen does not say whose turn it is");
     if (!chg_scores_on) chg_scores_arm();                     /* the team's own boards (PAD-640/663) */

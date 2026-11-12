@@ -948,6 +948,9 @@ data  coop_player        0x00819088
 data  coop_players       0x008b5770
 site  coop_first_ball    0x003fc320 0xebfdd460 0xe1a04000
 
+# ---- PAD-1202: co-op play - the ball start's "player N, you're up" call's read of the player up (portcoop.py) ----
+site  coop_up_call           0x0007f208 0xeb0bc881 0xe2400002
+
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x005dc004 0xe92d43f0 0xe2505000
 # PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again

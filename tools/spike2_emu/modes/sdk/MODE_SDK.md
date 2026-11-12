@@ -6171,6 +6171,15 @@ or the game's end). So the game ends after the last teammate's last ball.
   changed" checks (the getter, then `ldrb rA, [this, #count + 1] ; cmp rA, r0`; X-Men has two). No other title's
   program has a panel of this shape, and those get no lines. A Team 2v2 game (below) is left the game's own: it
   plays a game player per team, so its own player up already lights the team's box.
+- **"Player N, you're up" (PAD-1202, DoomWalrus666):** at a ball's start, with more than one player, the game starts a
+  process that waits a moment, asks the player-up getter who is up and plays that player's call (Godzilla 1.16:
+  `callout_nth(0x470 or 0x471, player - 1)`). With the game playing player 1 (a team game its player 1 or 2) it named
+  player one for every teammate. The process's getter call is wrapped where it is made (`hook_call`) and answers the
+  player really up: the teammate in a co-op game, the player (1-4) in a team game; mode.log says `co-op: "player N,
+  you're up" names player n (the game's player m)`. The process is found by its start: `bl <players getter> ; cmp
+  r0, #1 ; (cmphi r4, #1 ;) bls`, then its address into r1 - on Godzilla, Avengers, D&D, Foo Fighters, Iron Maiden,
+  Bond, Jaws, Jurassic Park, King Kong, Led Zeppelin, Mandalorian, Star Wars and Venom. Elvira's process of that
+  shape is handed the player COUNT ("n-player game") and reads no getter; the other titles have none.
 
 Port lines (portcoop.py; one framework shape on every Spike 2 build, the older ones' count at +0x50 of a struct):
 
@@ -6181,6 +6190,7 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
     site  coop_first_ball     the ball start's call of the ball getter that tells a first ball (PAD-1046)
     site  coop_panel_lit      (PAD-1043) the score panel's frame update's call of the player-up getter (hook_call)
     site  coop_panel_up[_n]   (PAD-1043) its "player changed" checks' calls (hook_call; _2 .. _4 for more than one)
+    site  coop_up_call        (PAD-1202) the ball start's "player N, you're up" process's getter call (hook_call)
 
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).

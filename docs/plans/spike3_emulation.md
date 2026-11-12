@@ -344,6 +344,20 @@ counted uniform arrays, colour/depth mask, pixel store, 3D textures, mipmaps.
 GLES varying limits (0x9122/0x9125) answered; samplerExternalOES shaders get
 the game's own `#define samplerExternalOES sampler2D`.
 
+**Two video paths, and the extension list (PAD-1182).** The game shows video
+two ways. Stern's own SpiVideoPlayer (0x945040 in pokemon_le 0.82: the map
+background) looks up glEGLImageTargetTexture2DOES and binds each frame's
+image itself. Videos placed in Godot scenes go through an ExternalTexture
+(0xd02420: the DISCOVER, capture, select and evolve backgrounds), and Godot
+only attaches an image when its config found `GL_OES_EGL_image_external_essl3`
+in the extension list. The bridge listed none (NUM_EXTENSIONS 0), so those
+backgrounds stayed on Godot's black placeholder while s3vid decoded every
+frame and the game made an image of each (6,800 images, 0 binds). s3gl.c now
+lists exactly what it carries: GL_OES_EGL_image, GL_OES_EGL_image_external,
+GL_OES_EGL_image_external_essl3. Tell-tale in padglhost.log: no `video upload`
+line for a channel the host is decoding. (The 1940x1100 size of those clips is
+not the cause: cropping them to 1920x1080 on the host changed nothing.)
+
 ## Stage 6 - the node bus decoded, Start starts a game (2026-11-10)
 
 **The frame mask.** A node address with bit 0x40 set (`c1`, `c8`...) carries

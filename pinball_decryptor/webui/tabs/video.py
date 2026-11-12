@@ -750,7 +750,12 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             except Exception:                               # noqa: BLE001
                 exts = None
             try:
+                keep = mfr.slot_keep_dirs(path) if mfr else ()
+            except Exception:                           # noqa: BLE001
+                keep = ()
+            try:
                 slots = scan_video_slots(path, roots=roots, exts=exts,
+                                         keep_dirs=keep,
                                          probe=False)
             except Exception:                               # noqa: BLE001
                 slots = []

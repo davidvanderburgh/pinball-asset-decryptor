@@ -32,7 +32,7 @@ from dataclasses import dataclass, replace
 from typing import Dict, List, Optional
 
 from .audio_slots import replace_with_retry
-from .checksums import NON_ASSET_DIRS, is_other_extract
+from .checksums import slot_dir_filter
 from .video import (VIDEO_EXTS, VideoInfo, backend_for, detect_video_info,
                     encode_replacement, find_ffmpeg, isobmff_brand,
                     keyint_conflict, profile_rank, remux_video_to,
@@ -99,7 +99,7 @@ class VideoSlot:
 
 
 def scan_video_slots(assets_dir: str, roots=None, exts=None,
-                     probe: bool = True) -> List[VideoSlot]:
+                     probe: bool = True, keep_dirs=()) -> List[VideoSlot]:
     """Walk *assets_dir* and return a VideoSlot for every video file, sorted
     by relative path.  Hidden dot-folders and our own ``*.stage.*`` temp files
     are skipped.
@@ -128,18 +128,16 @@ def scan_video_slots(assets_dir: str, roots=None, exts=None,
 
     allowed = tuple(e.lower() for e in exts) if exts else VIDEO_EXTS
     walk_roots = [r for r in (roots or [assets_dir]) if os.path.isdir(r)]
+    keep = slot_dir_filter(assets_dir, keep_dirs)
     seen = set()
     for walk_root in walk_roots:
         for root, dirs, files in os.walk(walk_root):
-            # Same prune as audio_slots: dot-dirs + the project's top-level
-            # generated / staged folders (checksums.NON_ASSET_DIRS).
-            dirs[:] = [d for d in dirs
-                       if not d.startswith(".")
-                       and not is_other_extract(os.path.join(root, d))
-                       and not (d in NON_ASSET_DIRS
-                                and os.path.normcase(os.path.normpath(root))
-                                == os.path.normcase(
-                                    os.path.normpath(assets_dir)))]
+            # checksums.slot_dir_filter: dot-dirs, the project's own
+            # generated / staged folders at the top, another card's
+            # extract inside this one, and (PAD-1193) any folder the
+            # extract never wrote into: the user's own files kept
+            # beside it are not this card's slots.
+            dirs[:] = [d for d in dirs if keep(root, d)]
             for fn in files:
                 ext = os.path.splitext(fn)[1].lower()
                 if ext not in allowed or ".stage." in fn:

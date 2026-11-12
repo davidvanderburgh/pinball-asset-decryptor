@@ -4550,17 +4550,20 @@ class App:
             from .core.audio_slots import scan_audio_slots
             slots = scan_audio_slots(assets_dir,
                                      roots=_hook("audio_slot_dirs"),
+                                     keep_dirs=_hook("slot_keep_dirs") or (),
                                      exts=_hook("audio_slot_exts"))
         elif kind == "video":
             from .core.video_slots import scan_video_slots
             slots = scan_video_slots(assets_dir,
                                      roots=_hook("video_slot_dirs"),
+                                     keep_dirs=_hook("slot_keep_dirs") or (),
                                      exts=_hook("video_slot_exts"),
                                      probe=False)
         else:
             from .core.image_slots import scan_image_slots
             slots = scan_image_slots(assets_dir,
                                      roots=_hook("image_slot_dirs"),
+                                     keep_dirs=_hook("slot_keep_dirs") or (),
                                      exts=_hook("image_slot_exts"),
                                      probe=False)
         slots_by_rel = {s.rel_path: s for s in slots}
@@ -4870,8 +4873,12 @@ class App:
             exts = mfr.image_slot_exts(assets_dir)
         except Exception:                               # noqa: BLE001
             exts = None
+        try:
+            keep = mfr.slot_keep_dirs(assets_dir)
+        except Exception:                               # noqa: BLE001
+            keep = ()
         slots = scan_image_slots(assets_dir, roots=roots, exts=exts,
-                                 probe=False)
+                                 probe=False, keep_dirs=keep)
         return ({sl.rel_path: sl for sl in slots}, {}, frozenset())
 
     def _colour_assets_scope(self):

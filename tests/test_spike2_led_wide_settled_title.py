@@ -89,6 +89,10 @@ static void led_show_note(unsigned node, unsigned cmd, unsigned weight) { (void)
 /* a banked frame's levels (PAD-500's version-6 plane): not what this test reads */
 static void led_hi(unsigned node, int bank, const unsigned char *idx, const unsigned char *val, unsigned cnt)
 { (void)node; (void)bank; (void)idx; (void)val; (void)cnt; }
+/* PAD-1189: a level change's fade into padled's ring: not what this test reads */
+static void led_wide_fades(unsigned node, const unsigned char *idx, const unsigned char *val,
+                           const unsigned char *fade, unsigned cnt)
+{ (void)node; (void)idx; (void)val; (void)fade; (void)cnt; }
 @FUNCS@
 int main(int argc, char **argv)
 {

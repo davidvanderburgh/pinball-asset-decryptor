@@ -93,7 +93,7 @@ int main(int argc, char **argv)
     while (h[0] && h[1] && n < 512) { char t[3] = { h[0], h[1], 0 }; raw[n++] = (unsigned char)strtoul(t, 0, 16); h += 2; }
     cmd = raw[2]; body = raw + 3; blen = (unsigned)n - 5;
     bank = led_wide_strip_bank(&cmd, &body, &blen);
-    if (bank < 0 || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) { printf("REFUSED\n"); return 0; }
+    if (bank < 0 || !led_wide_walk(body, blen, cmd, idx, val, 0, &cnt)) { printf("REFUSED\n"); return 0; }
     printf("%d", bank);
     for (i = 0; i < cnt; i++) printf(" %u:%u", idx[i], val[i]);
     printf("\n");

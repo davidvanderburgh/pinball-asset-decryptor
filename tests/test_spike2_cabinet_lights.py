@@ -743,6 +743,10 @@ static void led_map(void) {}
 static void led_val(unsigned node, unsigned idx, unsigned char v) { moves++; if (node < 16 && idx < 96) shm.val[node][idx] = v; }
 static void led_show_note(unsigned node, unsigned cmd, unsigned weight) { (void)node; (void)cmd; notes += weight; }
 static int led_dec_log(void) { return 0; }
+/* PAD-1189: a level change's fade into padled's ring: not what this test reads */
+static void led_wide_fades(unsigned node, const unsigned char *idx, const unsigned char *val,
+                           const unsigned char *fade, unsigned cnt)
+{ (void)node; (void)idx; (void)val; (void)fade; (void)cnt; }
 @FUNCS@
 int main(int argc, char **argv)
 {

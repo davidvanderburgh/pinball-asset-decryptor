@@ -61,10 +61,12 @@ CF="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -Wall -Werror=implicit-fun
 # exact release, fetched once beside the build
 FFD=$(dirname "$OUT")/ffmpeg
 FFINC=$FFD/inc/ffmpeg-5.1.6
-if [ ! -e "$FFINC/libavutil/avconfig.h" ]; then
+# (libavformat's too since PAD-1183: s3vid.c reads a clip's frame count and
+# rate off its demuxer - an install from before re-extracts)
+if [ ! -e "$FFINC/libavutil/avconfig.h" ] || [ ! -e "$FFINC/libavformat/avformat.h" ]; then
     mkdir -p "$FFD/inc"
     [ -f "$FFD/ffmpeg-5.1.6.tar.xz" ] || curl -sSL -o "$FFD/ffmpeg-5.1.6.tar.xz" https://ffmpeg.org/releases/ffmpeg-5.1.6.tar.xz
-    tar -xJf "$FFD/ffmpeg-5.1.6.tar.xz" -C "$FFD/inc" --wildcards 'ffmpeg-5.1.6/libavutil/*.h' 'ffmpeg-5.1.6/libavcodec/*.h'
+    tar -xJf "$FFD/ffmpeg-5.1.6.tar.xz" -C "$FFD/inc" --wildcards 'ffmpeg-5.1.6/libavutil/*.h' 'ffmpeg-5.1.6/libavcodec/*.h' 'ffmpeg-5.1.6/libavformat/*.h'
     printf '#ifndef AVUTIL_AVCONFIG_H
 #define AVUTIL_AVCONFIG_H
 #define AV_HAVE_BIG_ENDIAN 0

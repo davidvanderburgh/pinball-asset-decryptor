@@ -767,3 +767,35 @@ and speaker panel (node 7) get no lamp frames in attract on any title - only
 the `72` 96-bit mask and `f2` reads - so they stay dark there by the game's
 choice. A slot whose saved state has the coin door open (48V disabled) sends
 no lamp frames at all: judge lamps on a slot in a known state.
+
+## Every playfield control and readout, wired (PAD-1183, 2026-11-11)
+
+Each control and readout of the virtual playfield window was tried on a live
+pokemon_le 0.82.0 window run (rig slot 33, hidden, muted), on main's code and
+then on this branch. On Spike 2 the guest shim does half of what the window
+relies on; on Spike 3 nothing did, so these were dead:
+
+| control / readout | on main | what it was | now |
+|---|---|---|---|
+| Coin door click (and `C`) | never opened the door | s3keys merged the keyboard's and the scripts' halves as a UNION; padglhost latches the door shut in the keyboard's half, so the click's 1 -> 0 changed nothing | last edge wins per switch, as Spike 2's merge: the game shows 48V DISABLED / CLOSE COIN DOOR, a second click shuts it |
+| Switch dots, trough, key-panel highlight | showed only what the window itself pressed (6/6 in the trough after the eject) | padsw `mrg[]` (what the game is handed) was never written, so the window fell back to the keyboard's half | s3keys publishes every switch's live level off nodesw / spi.in (the ball model's moves too) and stamps `guest_t0`, so `padsw.set_confirmed` sees a write land |
+| Pause / F9 (window and game window) | nothing | padglhost is the desktop user and the game is root: its SIGSTOP was refused, and no keeper ran | the renderer runs with PAD_PAUSE_KEEPER=1 and s3keys (root) serves stop_want / stop_gen, stopping the slot's `game` (s3save.sh's rule: comm + the slot's root overlay). A 30 s pause froze frames and bus; the attract show carried on after it |
+| Right-hold rip on a spinner | nothing | padsw `spin[]` was never read | s3keys flips the switch every RIP_MS (30 ms): ~78 node-9 scans of SPINNER OPTO in 1.5 s |
+| Shaker panel | "no shake yet" for ever | padled v5's drive table stayed zero | s3leds fills it from the 14-byte cmd 40 / cmd 4d (hwshim.c coil_drive_note's fields, 100 ticks/s): the panel logged the game's own shake (node 1 coil 0, 100 ms at 31/255) |
+| CLIPS list | "No clip yet" | it reads Spike 2's padvid.log, which nothing wrote | s3vid.c names each clip at the decoder's open from the game's open `.asset` (/proc/self/fd: `scene.assets/2.asset/247.asset`), s3vidhost.py writes padvid.log lines with the clip's frames and rate read off its own QuickTime header, and s3run's launch line carries `logdir=` (the Emulate tab's PAD_LOGDIR) |
+| Click on BOTTOM POP BUMPER | "nothing wired" | its switch is BOT POP BUMPER | coilact matches BOTTOM/BOT, UPPER/UP, LOWER/LWR spellings |
+
+Already working and re-checked: Insert coin, Start, the service buttons,
+Clear switch alerts, the LEFT EJECT drop (held until the game fired the coil),
+Restart game (Stop + Start on Spike 3), volume / mute, Save / Load state.
+The ball panel's Plunge / Drain / Reset and the trough clicks are PAD-1181's.
+
+The CLIPS frame count is the host's read of the clip's own file: the game
+probes several media through libavformat on other threads, so the guest's
+per-thread probe (kept, logged in game.err as `[s3vid] chN: clip ...`)
+rarely belongs to the clip whose decoder opens.
+
+Lamps are wired (0 refused frames, ~30 inserts blink in 20 s of play), but
+two fidelity questions are left for the lamp decoder: channel B of a lamp
+command (the blink partner level, dropped by leddecode for Spike 2 as well)
+and the window runs' attract sending no lamp frames at all.

@@ -45,7 +45,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <dirent.h>
+
 #include "libavcodec/avcodec.h"
+#include "libavformat/avformat.h"
 #include "libavutil/hwcontext_drm.h"
 #include "padvid.h"
 #include "s3vid.h"
@@ -72,6 +75,88 @@ static struct stream {
 } st[S3VID_CHANNELS];                   /* older frames are not this ring's */
 
 static int slot_fd[S3VID_CHANNELS][PADVID_SLOTS];
+
+/* ---- WHICH CLIP (PAD-1183): the virtual playfield's CLIPS list ----------
+ * A channel's decoder knows nothing of its file. The game demuxes each clip
+ * with libavformat through its own I/O (avio_alloc_context), so the url is
+ * not the answer either; but the clip IS a file the game holds open while it
+ * plays - "/games/<title>/assets/lcd/.../scene.assets/2.asset/247.asset", a
+ * QuickTime .asset, the shape Spike 2's padvid.log names too. So at the
+ * decoder's open: the open .asset no other channel is playing, read off
+ * /proc/self/fd (qemu-user hands it to the host kernel; the paths are the
+ * game's own root), and the frame count and rate its demuxer found, kept
+ * per thread by avformat_find_stream_info below. */
+static __thread unsigned probe_frames, probe_num, probe_den;
+static unsigned long probes;
+static int (*real_fsi)(AVFormatContext *, AVDictionary **);
+
+int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **opts)
+{
+    int r;
+    unsigned i;
+    if (!real_fsi) real_fsi = dlsym(RTLD_NEXT, "avformat_find_stream_info");
+    if (!real_fsi) return AVERROR(ENOSYS);
+    r = real_fsi(ic, opts);
+    if (r >= 0 && ic)
+        for (i = 0; i < ic->nb_streams; i++) {
+            AVStream *v = ic->streams[i];
+            if (v && v->codecpar && v->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                AVRational q = v->avg_frame_rate.num ? v->avg_frame_rate : v->r_frame_rate;
+                probe_frames = v->nb_frames > 0 ? (unsigned)v->nb_frames : 0;
+                probe_num = q.num > 0 ? (unsigned)q.num : 0;
+                probe_den = q.den > 0 ? (unsigned)q.den : 0;
+                probes++;
+                break;
+            }
+        }
+    return r;
+}
+
+static int clip_file(const char *p)
+{
+    size_t n = strlen(p);
+    return (n > 6 && !strcmp(p + n - 6, ".asset")) || strstr(p, "scene.assets/") != 0
+        || (n > 4 && (!strcmp(p + n - 4, ".mov") || !strcmp(p + n - 4, ".mp4")
+                      || !strcmp(p + n - 4, ".mkv")));
+}
+
+/* Channel c's clip into the feed, with mu held: the open clip file with the
+ * highest fd that no other open channel names (ties are rare: two clips
+ * opened in the same instant), and this thread's probe. */
+static void clip_note(int c)
+{
+    char best[S3VID_PATH] = "", path[64], got[S3VID_PATH];
+    int bestfd = -1, k;
+    DIR *d = opendir("/proc/self/fd");
+    struct dirent *e;
+    while (d && (e = readdir(d))) {
+        int fd = atoi(e->d_name);
+        ssize_t n;
+        if (e->d_name[0] < '0' || e->d_name[0] > '9' || fd <= bestfd) continue;
+        snprintf(path, sizeof path, "/proc/self/fd/%d", fd);
+        n = readlink(path, got, sizeof got - 1);
+        if (n <= 0) continue;
+        got[n] = 0;
+        if (!clip_file(got)) continue;
+        for (k = 0; k < S3VID_CHANNELS; k++)
+            if (k != c && st[k].ctx && !strcmp(feed->clip[k], got)) break;
+        if (k < S3VID_CHANNELS) continue;
+        bestfd = fd;
+        memcpy(best, got, (size_t)n + 1);
+    }
+    if (d) closedir(d);
+    memcpy(feed->clip[c], best, sizeof best);
+    feed->ch[c].clip_frames = probe_frames;
+    feed->ch[c].clip_rate_num = probe_num;
+    feed->ch[c].clip_rate_den = probe_den;
+    if (best[0]) {
+        char m[S3VID_PATH + 96];
+        int n = snprintf(m, sizeof m, "[s3vid] ch%d: clip %s (%u frames, %u/%u fps, %lu probes)\n",
+                         c, best, probe_frames, probe_num, probe_den, probes);
+        if (n > 0) (void)!write(2, m, (size_t)(n < (int)sizeof m ? n : (int)sizeof m - 1));
+    }
+    probe_frames = probe_num = probe_den = 0;
+}
 
 static int (*real_open2)(AVCodecContext *, const AVCodec *, AVDictionary **);
 static int (*real_send)(AVCodecContext *, const AVPacket *);
@@ -189,6 +274,7 @@ static void resync(int c)
         st[c].last_pts = AV_NOPTS_VALUE;
         st[c].frames = frames;
         st[c].packets = packets;
+        clip_note(c);
         if (host_open(c))
             sayf("[s3vid] ch%ld: a new run (save state loaded): stream re-opened\n", c, 0, 0);
         else
@@ -233,6 +319,7 @@ int avcodec_open2(AVCodecContext *ctx, const AVCodec *codec, AVDictionary **opts
     }
     st[c].ctx = ctx;
     st[c].last_pts = AV_NOPTS_VALUE;
+    clip_note(c);
     if (!host_open(c)) {
         st[c].ctx = 0;
         pthread_mutex_unlock(&mu);

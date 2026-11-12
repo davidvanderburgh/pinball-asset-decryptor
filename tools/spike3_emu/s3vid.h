@@ -32,6 +32,7 @@
 #define S3VID_PKTS     256              /* packet descriptors per channel */
 #define S3VID_DATA     (8u << 20)       /* packet bytes per channel, circular */
 #define S3VID_EXTRA    4096             /* codec extradata (hvcC / avcC / Annex B) */
+#define S3VID_PATH     256              /* a clip's file name (PAD-1183) */
 #define S3VID_HDR      (1u << 20)       /* header block; channel data follows */
 #define S3VID_BYTES    (S3VID_HDR + S3VID_CHANNELS * S3VID_DATA)
 
@@ -63,7 +64,12 @@ struct s3vid_chan {
     unsigned data_w;                    /* guest: bytes written, monotonic */
     unsigned data_r;                    /* host: bytes consumed, monotonic */
     unsigned frames_out;                /* host: frames decoded, for the log */
-    unsigned pad[17];
+    /* guest, before open_gen (PAD-1183): the clip's frame count and rate off
+     * its container (avformat_find_stream_info), 0 = unknown; its file is
+     * clip[c] below. The host names the clip in padvid.log for the virtual
+     * playfield's CLIPS list. */
+    unsigned clip_frames, clip_rate_num, clip_rate_den;
+    unsigned pad[14];
     unsigned char extra[S3VID_EXTRA];
     struct s3vid_pkt pkt[S3VID_PKTS];
 };
@@ -76,6 +82,10 @@ struct s3vid_feed {
                                          * finds it changed and re-opens its
                                          * streams on this run's rings */
     struct s3vid_chan ch[S3VID_CHANNELS];
+    /* guest, before open_gen (PAD-1183): the file channel c's clip is read
+     * from, as the game has it open ("/games/<title>/.../scene.assets/2.asset
+     * /247.asset"), "" when it could not be told */
+    char clip[S3VID_CHANNELS][S3VID_PATH];
 };
 
 typedef char s3vid_hdr_fits[(int)(S3VID_HDR - (int)sizeof(struct s3vid_feed))];

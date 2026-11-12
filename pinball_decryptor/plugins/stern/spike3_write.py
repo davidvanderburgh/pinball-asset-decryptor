@@ -397,14 +397,23 @@ def write_card(original_path, assets_dir, output_path, log=None,
                             out.write(body[:n])
                             body = body[n:]
             out.flush()
-            # in-place sound edits: their container's record from the card
+            # .sidx records: an in-place sound container's from the card; a
+            # file that goes on whole (a grown container, and the engine's
+            # grown videos and scenes, whose records the Spike 2 core leaves
+            # to its validator bypass - which a Spike 3 game program has no
+            # counterpart of) from the file it will be, size included
+            n_rec = 0
             for p in sounds:
                 if not p.staged:
-                    _sidx_refresh(out, out_reader, p.card_path, p.node, None,
-                                  log)
-                else:
-                    _sidx_refresh(out, out_reader, p.card_path, p.node,
-                                  p.staged, log)
+                    n_rec += _sidx_refresh(out, out_reader, p.card_path,
+                                           p.node, None, log)
+            for rel, src in jobs:
+                n_rec += _sidx_refresh(out, out_reader, "/" + rel.lstrip("/"),
+                                       None, src, log)
+            if n_rec:
+                log("Refreshed %d more SD-validation manifest record(s) for "
+                    "the files written whole or in the sound containers."
+                    % n_rec, "info")
             out.flush()
             luks = {"key": out.master_key, "offset": out.segment_offset,
                     "sector_size": out._sector,

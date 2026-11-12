@@ -319,6 +319,59 @@ def pass2(run, page, project, build):
     shot(page, os.path.join(out, "after_write_done2.png"))
 
 
+def scene_hide(run, page, project, build, nodes, tag):
+    """Hide more layers of the status-bar scene (394c4a03) on Scenes, then
+    Build on Write."""
+    run.api("ui.pick_manufacturer", "stern")
+    run.api("ui.select_tab", "extract")
+    run.answer([CARD])
+    run.api("extract.browse_input")
+    time.sleep(3)
+    run.answer([project])
+    run.api("extract.browse_output")
+    time.sleep(3)
+    run.api("ui.select_tab", "scenes")
+    t0 = time.time()
+    rows = []
+    while time.time() - t0 < 300 and not rows:
+        rows = [r for r in (run.st("text_scenes").get("scenes") or [])
+                if "394c4a03" in r.get("d", "")]
+        time.sleep(2)
+    print("  text_scenes.select", run.api("text_scenes.select", rows[0]["d"]),
+          flush=True)
+    time.sleep(4)
+    for n in nodes:
+        print("  text_scenes.tree_visible %d off" % n,
+              run.api("text_scenes.tree_visible", n, False), flush=True)
+        time.sleep(2)
+    shot(page, os.path.join(run.out, "after_scenes_edit%s.png" % tag))
+    build_only(run, page, project, build, tag)
+
+
+def build_only(run, page, project, build, tag):
+    """Open the project and Build on Write again (no new edits)."""
+    out = run.out
+    run.api("ui.pick_manufacturer", "stern")
+    run.api("ui.select_tab", "extract")
+    run.answer([CARD])
+    run.api("extract.browse_input")
+    time.sleep(3)
+    run.answer([project])
+    run.api("extract.browse_output")
+    time.sleep(3)
+    run.api("ui.select_tab", "audio")         # its assignments load with the tab
+    run.wait_rows("audio")
+    run.api("ui.select_tab", "write")
+    time.sleep(3)
+    run.answer([build])
+    print("  build location", run.api("write.change_build_location"), flush=True)
+    time.sleep(4)
+    shot(page, os.path.join(out, "after_write_pending%s.png" % tag))
+    print("  write.primary", run.api("write.primary"), flush=True)
+    run.wait_idle("build", timeout=7200, settle=5)
+    shot(page, os.path.join(out, "after_write_done%s.png" % tag))
+
+
 def main():
     tree, out, mode = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2]), sys.argv[3]
     os.makedirs(out, exist_ok=True)
@@ -335,6 +388,13 @@ def main():
                      os.path.join(out, sys.argv[5] if len(sys.argv) > 5 else "rail.png"))
             elif mode == "pass2":
                 pass2(run, page, sys.argv[4], sys.argv[5])
+            elif mode == "scene":
+                scene_hide(run, page, sys.argv[4], sys.argv[5],
+                           [int(n) for n in sys.argv[6].split(",")],
+                           sys.argv[7] if len(sys.argv) > 7 else "4")
+            elif mode == "build":
+                build_only(run, page, sys.argv[4], sys.argv[5],
+                           sys.argv[6] if len(sys.argv) > 6 else "3")
             else:
                 e2e(run, page, sys.argv[4], sys.argv[5], sys.argv[6])
             browser.close()

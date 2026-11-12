@@ -370,3 +370,19 @@ def test_video_rules_take_the_machines_codecs(monkeypatch):
     assert why == "is HEVC and the machine plays H.264"     # Spike 2's words
     # no app context (a script, a test): Spike 2's rule
     assert vh.machine_codecs() == ("h264",)
+
+
+def test_a_profiled_clip_never_goes_on_as_the_users_file(monkeypatch):
+    """On a Spike 3 card a color profile reaches the machine only baked into
+    the converted copy, so that copy goes on whole, not the user's file."""
+    from types import SimpleNamespace as NS
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.core import colour_profile as CP
+    edits = [("a.mp4", "/g/1.asset", "s/a.mp4"), ("b.mp4", "/g/2.asset", "s/b.mp4")]
+    s3, s2 = NS(pad_spike3=True), NS()
+    monkeypatch.setattr(CP, "active", lambda d: object())
+    assert E._colour_baked_videos("p", edits, s3) == {"video/a.mp4", "video/b.mp4"}
+    assert E._colour_baked_videos("p", edits, s2) == set()      # Spike 2: shaders
+    monkeypatch.setattr(CP, "active", lambda d: None)
+    monkeypatch.setattr(CP, "asset_map", lambda d, kind, rels: {"video/b.mp4": 1})
+    assert E._colour_baked_videos("p", edits, s3) == {"video/b.mp4"}

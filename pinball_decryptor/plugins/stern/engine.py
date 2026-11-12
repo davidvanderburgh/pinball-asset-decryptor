@@ -3624,6 +3624,26 @@ def _intact_copy_source(src, staged, fname, slot_size, log, verdict=None):
     return _accept() if ok else _reject(why)
 
 
+def _colour_baked_videos(assets_dir, video_edits, disk_f):
+    """PAD-1186: the ``video/<name>`` rels whose staged copy has a color
+    profile baked in, on a Spike 3 card, where the profile reaches the
+    machine only that way (its plugin's colour_profile_on_display is False):
+    the project's profile while one is active, else each clip's own (as
+    video_slots._staging_items bakes them).  Their user files never go on
+    intact, which would drop the colors.  A Spike 2 card's whole-screen
+    profile is its game program's shaders, so nothing changes there."""
+    if not _is_spike3(disk_f):
+        return set()
+    rels = ["video/" + f for f, _cp, _s in video_edits]
+    try:
+        from ...core import colour_profile as _colour
+        if _colour.active(assets_dir) is not None:
+            return set(rels)
+        return set(_colour.asset_map(assets_dir, "videos", rels) or {})
+    except Exception:                                   # noqa: BLE001
+        return set()
+
+
 def _intact_verdict(src, staged):
     """``(True, None)`` when the user's file *src* may go on the card as it
     is in place of the clip *staged* was converted for, else ``(False, why)``
@@ -9935,13 +9955,19 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             # oversized ones grow their slot instead of being crushed to fit.
             from ...core import staged_changes as _sc
             _saved = _sc.load(assets_dir)
+            _verdicts = dict((space_chk.verdicts if space_chk is not None
+                              else None) or {})
+            for _rel in _colour_baked_videos(assets_dir, video_edits, disk_f):
+                # the converted copy goes on whole: it alone has the colors
+                _verdicts[_rel[len("video/"):]] = (
+                    False, "it would go on without this project's color "
+                    "profile, which only the converted copy carries")
             t0 = time.monotonic()
             video_patches, _vskip, video_grow_jobs = _prepare_video_patches(
                 reader, video_edits, work, log, cancel,
                 originals=_saved.get("video") or {},
                 dest_is_device=dest_is_device,
-                verdicts=(space_chk.verdicts if space_chk is not None
-                          else None),
+                verdicts=_verdicts or None,
                 grow_check=(space_chk.grow_check if space_chk is not None
                             else None))
             if cancel():

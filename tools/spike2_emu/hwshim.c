@@ -12534,6 +12534,89 @@ static unsigned lcd_le32(const unsigned char *q)
          | ((unsigned)q[2] << 16) | ((unsigned)q[3] << 24);
 }
 
+/* ---- PAD-1184: WHERE THE DISPLAY'S PLAYBACK IS ---------------------------
+ *
+ * The f2 90 reply's word0 is read back by the game's channel layer as the
+ * playback position (see the 0x90 answer below), and a "play A..D" waits for
+ * it to leave [A, D). So each display index (the low 2 bits of the selector)
+ * keeps the position a real board would report:
+ *   8-byte form  [0][u32 A]              a seek: at A, not moving
+ *   4-byte form  [verb]                  1 = the next play loops, 2 = plays
+ *                                        once; 3 and 4 hold where it is, 5
+ *                                        carries on (their names are not
+ *                                        traced - holding is what the old
+ *                                        echo did for every one of them)
+ *   14/24-byte   [flags][u32 A][u32 D][u16 rate]  plays A..D at the rate's
+ *                                        fps (lcd_fps; 30 when unknown) -
+ *                                        once ends AT D, a loop wraps to A
+ * The clock is pad_ms(), the game's own, so a sped-up rig runs it with the
+ * game. A position nothing has commanded is "not known" and the old asset
+ * echo answers instead. */
+static struct {
+    unsigned known, run, loop, from, to, at, fps;
+    unsigned long t0;
+} lcd_pl[4];
+
+static unsigned lcd_play_pos(unsigned idx)
+{
+    unsigned long steps;
+    unsigned span;
+    idx &= 3;
+    if (!lcd_pl[idx].run) return lcd_pl[idx].at;
+    if (lcd_pl[idx].to <= lcd_pl[idx].from) {
+        lcd_pl[idx].run = 0;
+        return lcd_pl[idx].at = lcd_pl[idx].to;
+    }
+    span = lcd_pl[idx].to - lcd_pl[idx].from;
+    steps = (pad_ms() - lcd_pl[idx].t0) * lcd_pl[idx].fps / 1000ul;
+    if (steps >= span) {
+        if (!lcd_pl[idx].loop) {
+            lcd_pl[idx].run = 0;
+            return lcd_pl[idx].at = lcd_pl[idx].to;
+        }
+        steps %= span;
+    }
+    return lcd_pl[idx].at = lcd_pl[idx].from + (unsigned)steps;
+}
+
+static int lcd_play_known(unsigned idx)
+{
+    return lcd_pl[idx & 3].known;
+}
+
+static void lcd_play_note(const unsigned char *p, unsigned ilen, unsigned sel)
+{
+    unsigned idx = sel & 3, fps;
+    if ((sel & 0xf8u) != 0x98u) return;
+    if (ilen == 4) {
+        if (p[4] == 1 || p[4] == 2) {
+            lcd_pl[idx].loop = p[4] == 1;
+        } else if (p[4] == 3 || p[4] == 4) {
+            lcd_play_pos(idx);
+            lcd_pl[idx].run = 0;
+        } else if (p[4] == 5 && !lcd_pl[idx].run && lcd_pl[idx].known
+                   && lcd_pl[idx].at < lcd_pl[idx].to) {
+            /* carry on from where it was held */
+            lcd_pl[idx].run = 1;
+            fps = lcd_pl[idx].fps ? lcd_pl[idx].fps : 30;
+            lcd_pl[idx].t0 = pad_ms()
+                - (unsigned long)(lcd_pl[idx].at - lcd_pl[idx].from) * 1000ul / fps;
+        }
+    } else if (ilen == 8) {
+        lcd_pl[idx].known = 1;
+        lcd_pl[idx].run = 0;
+        lcd_pl[idx].at = lcd_le32(p + 5);
+    } else if (ilen == 14 || ilen == 24) {
+        fps = lcd_fps((unsigned)p[13] | ((unsigned)p[14] << 8));
+        lcd_pl[idx].known = 1;
+        lcd_pl[idx].from = lcd_pl[idx].at = lcd_le32(p + 5);
+        lcd_pl[idx].to = lcd_le32(p + 9);
+        lcd_pl[idx].fps = fps ? fps : 30;
+        lcd_pl[idx].t0 = pad_ms();
+        lcd_pl[idx].run = 1;
+    }
+}
+
 /* ★ WRITTEN AGAINST THE GAME'S OWN FRAME BUILDERS AND ITS DISPATCHER
  * (padlcd.h documents the table, the addresses, and what is still unnamed).
  *
@@ -12567,6 +12650,7 @@ static void lcd_publish(const unsigned char *p, int n)
     if (sel < 0x80u) return;      /* every LCD selector is >= 0x80          */
     ilen = p[1];                  /* cmd..cksum, so payload ends at p[1+ilen]*/
     if (ilen < 3 || (unsigned)n < ilen + 2) return;
+    lcd_play_note(p, ilen, sel);  /* PAD-1184: with or without the panel   */
     lcd_map();
     if (!lcd_shm) return;
 
@@ -15086,6 +15170,21 @@ long shim_read(int fd, void *b, unsigned long n)
              * stays present with no fault (nbsched flags 0x0 all run). The
              * word0=asset content below is HUMAN-FACING telemetry only - it
              * makes a raw bus dump readable - not something the game reads.
+             *
+             * ★ PAD-1184 CORRECTS (1): the display object's get_status is
+             * dead, but a SECOND poller is not. The channel layer (0x498fe8,
+             * channel table at 0x8716ac) sends the same f2 90 and stores
+             * word0 as the channel's playback POSITION, and 0x4988e4 - "play
+             * from A to D and wait" - spins until that position leaves
+             * [A, D). batman's Bat Phone show 0x1c is one such wait (A 0x1e4,
+             * D 0x1f0), and while it runs the game will not turn the
+             * turntable to the Bat Phone (0x2f97c). Echoing the commanded A
+             * kept the position inside [A, D) for good: the show only ended
+             * if another show re-commanded the display, so in about half of
+             * long rig games every hurry-up after the first was played with
+             * the phone facing away. word0 is now the modelled position
+             * (lcd_play_pos); the asset echo stays for a display never sent
+             * a play or a seek.
              *   PAD_LCD_R=<24 hex chars>  force an exact 12-byte payload
              *   PAD_LCD_R=0               all-zero reply (same game effect)
              * Nothing here can revive the villain-TV renderer: those pixels
@@ -15101,6 +15200,13 @@ long shim_read(int fd, void *b, unsigned long n)
                         p[i] = (unsigned char)(hexval(q[0]) * 16 + hexval(q[1]));
                         q += 2;
                     }                       /* "0" = fewer than 2 digits: zeros */
+                } else if (nb_req_len > 4 && lcd_play_known(nb_req[4])) {
+                    /* PAD-1184: where its playback IS, not what it was told */
+                    unsigned pos = lcd_play_pos(nb_req[4]);
+                    p[0] = (unsigned char)pos;
+                    p[1] = (unsigned char)(pos >> 8);
+                    p[2] = (unsigned char)(pos >> 16);
+                    p[3] = (unsigned char)(pos >> 24);
                 } else if (lcd_shm && lcd_shm->asset) {
                     p[0] = (unsigned char)lcd_shm->asset;
                     p[1] = (unsigned char)(lcd_shm->asset >> 8);

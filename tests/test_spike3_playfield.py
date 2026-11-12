@@ -111,3 +111,66 @@ def test_a_cabinet_front_is_never_the_playfield():
                  "System/TestMode/universal_topper_scaled", "TestMenu/topper_tm",
                  "System/TestMode/spike_3_speaker_panel", "TestMenu/picnic_bp"):
         assert not s3pf.is_playfield_picture(name), name
+
+
+class _FakeElf:
+    """Just what s3nodes.catalog() reads: strings at addresses, pointer cells
+    (RELATIVE relocations) and u32s."""
+
+    def __init__(self):
+        self.strs, self.rel, self.words = {}, {}, {}
+
+    def put(self, va, s):
+        self.strs[va] = s
+        return va
+
+    def strva(self, s):
+        for va, v in self.strs.items():
+            if v == s:
+                return va
+        return None
+
+    @property
+    def inv(self):
+        out = {}
+        for a, v in self.rel.items():
+            out.setdefault(v, []).append(a)
+        return out
+
+    def ptr(self, a):
+        return self.rel.get(a)
+
+    def cstr(self, va):
+        return self.strs.get(va)
+
+    def u32(self, a):
+        return self.words.get(a, 0)
+
+
+def test_catalog_skips_a_stray_type_name_reference():
+    """transformers_mtmte_le 0.96 names "pinnode" in a plain list of node-type
+    names far below its board catalog; starting from the lowest reference
+    found no rows and the whole run had no boards (PAD-1140)."""
+    import s3nodes
+    e = _FakeElf()
+    pin = e.put(0x1000, "pinnode")
+    ws = e.put(0x1010, "ws2812node")
+    e.put(0x1020, "lcd node")
+    e.rel[0x5000] = pin                      # the stray list: pinnode, lcd node
+    e.rel[0x5008] = 0x1020
+    rows = [("520-5319-XX", pin, "Cabinet"), ("520-6976-XX", ws, "SPI WS2812"),
+            ("520-1071-XX", None, "SPIKE3 CPU")]
+    base = 0x9000
+    for i, (part, typ, name) in enumerate(rows):
+        a = base + i * 0x28
+        e.rel[a] = e.put(0x2000 + i * 0x40, part)
+        e.words[a + 8] = int(part[4:8]) * 100000
+        if typ:
+            e.rel[a + 0x10] = typ
+        en = e.put(0x2020 + i * 0x40, name)
+        e.rel[a + 0x18] = 0x3000 + i * 8     # english name: a pointer to a pointer
+        e.rel[0x3000 + i * 8] = en
+    lo, cat = s3nodes.catalog(e)
+    assert lo == base
+    assert [cat[i][3] for i in sorted(cat)] == ["Cabinet", "SPI WS2812", "SPIKE3 CPU"]
+    assert cat[0][2] == "pinnode" and cat[2][2] is None

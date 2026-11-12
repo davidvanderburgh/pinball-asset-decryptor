@@ -11,6 +11,12 @@ import re
 
 CHECKSUMS_FILE = ".checksums.md5"
 
+# Folders an update delta wrote into after the baseline was taken (Dutch
+# Pinball and Pinball Brothers baseline the pristine base, then merge their
+# deltas on top): card content the baseline does not list, one ``/``-path a
+# line.  Read by :func:`extract_dirs`; a fresh baseline starts it over.
+EXTRACT_DIRS_FILE = ".extract_dirs"
+
 # A ``.checksums.md5`` line in md5sum form: "<md5>  <path>" (optionally "*path").
 _MD5SUM_LINE = re.compile(r'^([a-f0-9]{32})\s+\*?(.+)$')
 
@@ -80,6 +86,100 @@ def is_other_extract(path):
     prunes them, or the Replace tabs list thousands of strays and the Write
     takes each ``idxNNNN.wav`` in there as an edit of the same idx here."""
     return os.path.isfile(os.path.join(path, CHECKSUMS_FILE))
+
+
+def extract_dirs(folder, baseline=None):
+    """The folders of the project *folder* its extract wrote files into:
+    every folder that holds a baselined file, and every folder above one
+    (``""`` is the project root).  Casefolded ``/``-separated paths.
+
+    ``None`` when the project has no baseline to go by (a folder never
+    extracted, or one from before baselines): nothing can be told apart, so
+    callers walk everything as before."""
+    if baseline is None:
+        baseline = read_baseline_any(folder)
+    if not baseline:
+        return None
+    out = {""}
+    for rel in list(baseline) + [d + "/-" for d in _noted_dirs(folder)]:
+        parts = rel.casefold().split("/")[:-1]
+        for i in range(len(parts), 0, -1):
+            sub = "/".join(parts[:i])
+            if sub in out:
+                break
+            out.add(sub)
+    return out
+
+
+def _noted_dirs(folder):
+    try:
+        with open(os.path.join(folder, EXTRACT_DIRS_FILE), "r",
+                  encoding="utf-8") as f:
+            return [ln.strip().strip("/") for ln in f if ln.strip().strip("/")]
+    except OSError:
+        return []
+
+
+def note_extract_files(folder, rels):
+    """Record that the extract's own update (a delta merged after the
+    baseline) wrote the files *rels* (``/``-paths) into *folder*, so the
+    Replace tabs keep listing the folders they are in (:func:`extract_dirs`).
+    """
+    dirs = {r.replace("\\", "/").strip("/").rsplit("/", 1)[0]
+            for r in rels if "/" in r.replace("\\", "/").strip("/")}
+    have = set(_noted_dirs(folder))
+    new = sorted(dirs - have)
+    if not new:
+        return
+    with open(os.path.join(folder, EXTRACT_DIRS_FILE), "a",
+              encoding="utf-8") as f:
+        for d in new:
+            f.write(d + "\n")
+
+
+def slot_dir_filter(assets_dir, keep=()):
+    """A ``keep(root, name) -> bool`` for the Replace tabs' slot walks
+    (core.audio_slots / video_slots / image_slots): which sub-folder *name*
+    of the walked folder *root* to descend into.
+
+    Left out: dot-folders (folder state: .orig, .hydrate), the project's own
+    generated or staged folders at the top (:data:`NON_ASSET_DIRS`), another
+    card's extract inside this one (:func:`is_other_extract`), and (PAD-1193)
+    any folder the extract never wrote into: a folder of the user's own
+    replacement clips or sounds kept beside the extract listed every file in
+    it as a slot "not on this card".  The baseline tells them apart
+    (:func:`extract_dirs`); a project without one walks every folder.
+
+    *keep* names top-level folders a plugin's Extract writes but leaves out
+    of the baseline on purpose (derived copies the tabs still list), so the
+    baseline rule never hides them."""
+    base = os.path.normcase(os.path.normpath(assets_dir))
+    try:
+        ours = extract_dirs(assets_dir)
+    except OSError:
+        ours = None
+    if not isinstance(keep, (list, tuple, set, frozenset)):
+        keep = ()                    # a hook that answered nothing usable
+    kept_top = {k.casefold() for k in keep if isinstance(k, str)}
+
+    def _keep(root, name):
+        if name.startswith("."):
+            return False
+        at_top = os.path.normcase(os.path.normpath(root)) == base
+        if at_top and name in NON_ASSET_DIRS:
+            return False
+        full = os.path.join(root, name)
+        if is_other_extract(full):
+            return False
+        if ours is None:
+            return True
+        rel = os.path.relpath(full, assets_dir).replace(os.sep, "/")
+        if rel.startswith(".."):
+            return True              # a plugin root outside the project
+        rel = rel.casefold()
+        return rel in ours or rel.split("/", 1)[0] in kept_top
+
+    return _keep
 
 
 #: how many files the baseline and the change scans hash at once.  MD5 runs
@@ -217,6 +317,10 @@ def generate_checksums(folder, log_cb=None, progress_cb=None,
     # instead of hashing the whole extract a second time.
     from . import hashcache
     out_path = os.path.join(folder, CHECKSUMS_FILE)
+    try:
+        os.remove(os.path.join(folder, EXTRACT_DIRS_FILE))
+    except OSError:
+        pass
     skipped = 0
     written = 0
     cache = {}

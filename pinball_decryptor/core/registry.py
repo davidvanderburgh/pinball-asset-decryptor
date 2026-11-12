@@ -901,6 +901,17 @@ class Manufacturer(ABC):
         return ReadCardPipeline(device_path, image_path,
                                 log_cb, phase_cb, progress_cb, done_cb)
 
+    def slot_keep_dirs(self, assets_dir):
+        """Top-level folders of *assets_dir* the Replace tabs list although
+        the Extract leaves them out of its baseline on purpose (derived
+        copies Write still repacks, e.g. CGC's decoded DCS sounds).
+
+        With a baseline, the slot scans skip every folder the extract never
+        wrote into, so a folder of the user's own files kept in the project
+        is not listed as slots (PAD-1193, core.checksums.slot_dir_filter).
+        Default: none."""
+        return ()
+
     def audio_slot_dirs(self, assets_dir):
         """Subdirectories of *assets_dir* that hold replaceable audio slots.
 

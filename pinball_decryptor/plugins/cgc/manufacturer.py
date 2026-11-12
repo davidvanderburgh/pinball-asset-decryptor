@@ -155,6 +155,13 @@ class CGCManufacturer(Manufacturer):
         return Game(key=key, display=info["display"],
                     manufacturer_key="cgc")
 
+    def slot_keep_dirs(self, assets_dir):
+        # The decoded DCS sounds (dcs_audio/, new_audio/) and the other
+        # derived renders are left out of the baseline on purpose, yet
+        # Write repacks the sounds: the Replace tabs keep listing them.
+        from .pipeline import _DERIVED_SUBDIRS
+        return tuple(_DERIVED_SUBDIRS)
+
     def audio_forces_length_match(self, assets_dir=None):
         # Pulp Fiction stores audio in JPS ``.bnk`` banks whose slots are
         # FIXED-LENGTH: Write splices each replacement into the original

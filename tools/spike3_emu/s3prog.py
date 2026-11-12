@@ -12,8 +12,9 @@ Prints one line each time the boot moves, then exits once the game is up:
 Read off the run's own files - the bridge log (the node directory, each
 board's claim) and dump/padled (lamp writes) - so nothing in the game is
 touched. The boot share is by time: a game on this rig asks for its first
-board ~6 s after it starts (BOOT_S), and its lamps light ~50 s after the
-boards are claimed (NODES_S); both only steer the bar inside a step.
+board ~6 s after it starts (BOOT_S), and its lamps light ~10 s after the
+boards are claimed (NODES_S; ~30 s more until PAD-1180 answered the game's
+board discovery); both only steer the bar inside a step.
 """
 import os
 import re
@@ -22,7 +23,7 @@ import sys
 import time
 
 BOOT_S = float(os.environ.get("PAD_S3_PROG_BOOT_S", "8"))
-NODES_S = float(os.environ.get("PAD_S3_PROG_NODES_S", "50"))
+NODES_S = float(os.environ.get("PAD_S3_PROG_NODES_S", "12"))
 GIVE_UP_S = 600
 #: after the lamps light, how long Guided Setup may take to appear before the
 #: run is called ready anyway (a title that never shows it)

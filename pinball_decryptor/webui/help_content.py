@@ -1501,6 +1501,109 @@ HELP_CONTENT = {
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
     "Modes": [],
+    "Play Options": [
+        ("What it's for", [
+            "Options for how the game itself plays and what it reports, without making a mode: a handicap for "
+            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
+            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
+            "**Insider Connected keeps working.** Nothing here changes a score, so on a card with these and none "
+            "of your modes or co-op play, players keep Insider Connected as before: scores, high scores and "
+            "achievements. Your own modes and co-op play (on the Modes tab) are what keep a card's scores on the "
+            "machine.",
+        ]),
+        ("Handicap per player", [
+            "**Handicap per player** lets each player of a game pick a handicap from "
+            "**-3** (hardest) to **+3** (easiest), so players of different skill can play one game. Tick "
+            "it, then Write. On the machine:\n\n"
+            "1. Start a game and add players as usual.\n"
+            "2. At each player's first ball the top of the screen shows **P1 HANDICAP 0** (P2 for "
+            "player 2, and so on). The **left flipper button** makes it harder, the **right** easier. "
+            "It starts at what that player had in the last game, or at 0 for everyone after a game "
+            "reset with Start and the left flipper button.\n"
+            "3. Plunge: the ball's first score takes the handicap, and it holds for that player until "
+            "the game ends.\n\n"
+            "- **0** is the game's own settings, as the operator set them.\n"
+            "- A level reads the game's own settings easier or harder for that player only: a longer or "
+            "shorter ball save, and the game's difficulty settings (how hard its modes and multiballs "
+            "are to light) a step at a time, more of them at each level. On Godzilla: +1 lights battles "
+            "easier with a longer ball save, +2 adds an easier heat ray and Building Multiball, +3 easier "
+            "tanks, bridge, powerline and jets as well; -1 to -3 the same the other way, and -3 has no "
+            "ball save.\n"
+            "- **Levels…**, under the tick, shows them as a table: a row for each of the game's own "
+            "difficulty settings (the ball save, how hard each mode, multiball and qualifier is, the "
+            "ball save timers) and a column for each level. Each cell says what the app does there "
+            "(app: easier 2); change it to the game's own value, or to any value that setting offers in "
+            "the service menu. **Defaults** puts the app's choices back.\n"
+            "- The machine's settings are never changed: the game reads the player's level while they "
+            "are up.\n"
+            "- The service menu gets a **HANDICAP** row (Adjustments > Machine Settings > Attract Mode, "
+            "or at the end of Standard Adjustments), Off to start with: set it to **On** to play with "
+            "handicaps. Off: no player is asked and the game plays as it always has. A game with no spare "
+            "row left for it has handicaps always on.\n"
+            "- Like the operator's own settings, handicaps keep the card on Insider Connected. With "
+            "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
+            "- In a co-op game each teammate picks one at their first ball.",
+        ]),
+        ("Prolonged Competition", [
+            "**Prolonged Competition** adds the start menu entry Venom and Dungeons & "
+            "Dragons have to any other game whose start menu the app knows. Tick it, then Write:\n\n"
+            "- Hold both flipper buttons in attract to open **CHOOSE YOUR MODE OF PLAY**. The last entry "
+            "reads **COMPETITION / UNTIL POWERED OFF**: pick it with Start and that game and every game "
+            "after it is a Competition game (all randomness removed), exactly as the game's own "
+            "COMPETITION entry makes one game.\n"
+            "- It lasts until the machine is switched off. To end it sooner, pick the same entry again: "
+            "it now reads **STANDARD / ENDS PROLONGED COMPETITION**.\n"
+            "- The machine's settings are never changed.\n"
+            "- On its own it keeps the card on Insider Connected, as the game's own Competition does. With "
+            "modes or co-op play on the same card, the scores stay on the machine as those always do.",
+        ]),
+        ("Score feed", [
+            "**Score feed** has the machine send each game's final scores to a server of "
+            "your own on your network: for a high-score board on a TV, a league sheet, a home automation "
+            "hub. Tick it, type your server's address, then Write:\n\n"
+            "- After every game the machine posts one JSON message to the address: the game, how many "
+            "played, each player's final score, and for each player who was logged in to Insider "
+            "Connected their account's id (the same id every game, so your server can put a name to it). "
+            "A game reset with Start held down mid-game is not sent.\n"
+            "- The address is plain **http://**, your server's **IP address** (like "
+            "`http://192.168.1.50:8080/scores`), as the machine looks no names up and does not do https. "
+            "Your server answers with any 2xx status.\n"
+            "- When the server is off, the machine tries three times, 10 seconds apart, then lets that game "
+            "go. The game itself never waits for it.\n"
+            "- Nothing goes to Stern, and no score is changed. On its own it keeps the card on Insider "
+            "Connected; with modes on the same card, the scores stay off Insider Connected as they always "
+            "do, and still come to your server.\n\n"
+            "A message looks like "
+            "`{\"source\":\"PAD score feed\",\"game\":\"Godzilla Premium/LE 1.16\",\"players\":2,"
+            "\"scores\":[123456780,98765430],\"insider\":[\"3f2a9c1e-...\",null],...}`:\n\n"
+            "| Field | What it holds |\n"
+            "|---|---|\n"
+            "| `game` | the game and its version, as the app names the card |\n"
+            "| `port` | the same, in the app's own short form |\n"
+            "| `game_number` | the games sent since the machine was switched on: 1, 2, 3... |\n"
+            "| `time` | the machine's clock, in Unix seconds (null when it was never set) |\n"
+            "| `players` | how many played |\n"
+            "| `scores` | each player's final score, player 1 first |\n"
+            "| `insider` | each player's Insider Connected account id, null for a player not logged in |\n\n"
+            "**What your server receives (API contract)**, on the Score feed card once it is ticked, shows the "
+            "whole request as the machine sends it to your address, the body laid out, every field with its type, "
+            "and what your server should answer.",
+        ]),
+        ("Inactivity pauses timers", [
+            "**Inactivity pauses timers** shows on Guardians of the Galaxy (Pro and "
+            "LE, 1.15). Its operator menu has the setting **ALLOW INACTIVITY TO PAUSE TIMERS** like every "
+            "Spike 2 game, but the game ignores it. Tick it, then Write, and the card makes it work as "
+            "on Stern's other games:\n\n"
+            "- While the setting is on (it is by default), the missions' clocks and the hurry-ups wait "
+            "when nobody has scored for 6 seconds: a ball held on a flipper, a ball stuck. They run on "
+            "at the next score.\n"
+            "- A mission's clock on this game is its song. The song keeps playing while the clock waits, "
+            "and if a long wait outlasts the song, the clock counts down the rest by itself.\n"
+            "- Turn the setting off in the operator menu and the clocks never wait, as before.\n"
+            "- On its own, it keeps the card's scores on Insider Connected. With modes or co-op play on "
+            "the same card, the scores stay on the machine as those always do.",
+        ]),
+    ],
     "Attract": [
         ("What it's for",
          "Stern Spike 2. Put your own photos, clips and text cards between the screens the game shows in "
@@ -3687,66 +3790,6 @@ PREVIEW_HELP = {
                 "- **0 (Off):** the game plays and reports to Insider Connected as it always has, on a card "
                 "with no modes. A card that also carries modes keeps its scores off Insider Connected "
                 "either way.",
-            ]),
-            ("Handicap per player", [
-                "**Handicap per player**, under the list, lets each player of a game pick a handicap from "
-                "**-3** (hardest) to **+3** (easiest), so players of different skill can play one game. Tick "
-                "it, then Write. On the machine:\n\n"
-                "1. Start a game and add players as usual.\n"
-                "2. At each player's first ball the top of the screen shows **P1 HANDICAP 0** (P2 for "
-                "player 2, and so on). The **left flipper button** makes it harder, the **right** easier. "
-                "It starts at what that player had in the last game, or at 0 for everyone after a game "
-                "reset with Start and the left flipper button.\n"
-                "3. Plunge: the ball's first score takes the handicap, and it holds for that player until "
-                "the game ends.\n\n"
-                "- **0** is the game's own settings, as the operator set them.\n"
-                "- A level reads the game's own settings easier or harder for that player only: a longer or "
-                "shorter ball save, and the game's difficulty settings (how hard its modes and multiballs "
-                "are to light) a step at a time, more of them at each level. On Godzilla: +1 lights battles "
-                "easier with a longer ball save, +2 adds an easier heat ray and Building Multiball, +3 easier "
-                "tanks, bridge, powerline and jets as well; -1 to -3 the same the other way, and -3 has no "
-                "ball save.\n"
-                "- **Levels…**, under the tick, shows them as a table: a row for each of the game's own "
-                "difficulty settings (the ball save, how hard each mode, multiball and qualifier is, the "
-                "ball save timers) and a column for each level. Each cell says what the app does there "
-                "(app: easier 2); change it to the game's own value, or to any value that setting offers in "
-                "the service menu. **Defaults** puts the app's choices back.\n"
-                "- The machine's settings are never changed: the game reads the player's level while they "
-                "are up.\n"
-                "- The service menu gets a **HANDICAP** row (Adjustments > Machine Settings > Attract Mode, "
-                "or at the end of Standard Adjustments), Off to start with: set it to **On** to play with "
-                "handicaps. Off: no player is asked and the game plays as it always has. A game with no spare "
-                "row left for it has handicaps always on.\n"
-                "- Like the operator's own settings, handicaps keep the card on Insider Connected. With "
-                "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
-                "- In a co-op game each teammate picks one at their first ball.",
-            ]),
-            ("Prolonged Competition", [
-                "**Prolonged Competition**, under the list, adds the start menu entry Venom and Dungeons & "
-                "Dragons have to any other game whose start menu the app knows. Tick it, then Write:\n\n"
-                "- Hold both flipper buttons in attract to open **CHOOSE YOUR MODE OF PLAY**. The last entry "
-                "reads **COMPETITION / UNTIL POWERED OFF**: pick it with Start and that game and every game "
-                "after it is a Competition game (all randomness removed), exactly as the game's own "
-                "COMPETITION entry makes one game.\n"
-                "- It lasts until the machine is switched off. To end it sooner, pick the same entry again: "
-                "it now reads **STANDARD / ENDS PROLONGED COMPETITION**.\n"
-                "- The machine's settings are never changed.\n"
-                "- On its own it keeps the card on Insider Connected, as the game's own Competition does. With "
-                "modes or co-op play on the same card, the scores stay on the machine as those always do.",
-            ]),
-            ("Inactivity pauses timers", [
-                "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "
-                "LE, 1.15). Its operator menu has the setting **ALLOW INACTIVITY TO PAUSE TIMERS** like every "
-                "Spike 2 game, but the game ignores it. Tick it, then Write, and the card makes it work as "
-                "on Stern's other games:\n\n"
-                "- While the setting is on (it is by default), the missions' clocks and the hurry-ups wait "
-                "when nobody has scored for 6 seconds: a ball held on a flipper, a ball stuck. They run on "
-                "at the next score.\n"
-                "- A mission's clock on this game is its song. The song keeps playing while the clock waits, "
-                "and if a long wait outlasts the song, the clock counts down the rest by itself.\n"
-                "- Turn the setting off in the operator menu and the clocks never wait, as before.\n"
-                "- On its own, it keeps the card's scores on Insider Connected. With modes or co-op play on "
-                "the same card, the scores stay on the machine as those always do.",
             ]),
             ("Making a mode", [
                 "**New mode**, over the list, asks how you want to build it, with a "

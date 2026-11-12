@@ -599,6 +599,8 @@ class ModePlan:
     cabshow_file: str = ""
     #: PAD-1041: ``comp.cfg`` beside the mode files, Prolonged Competition on the start menu ("" = none)
     comp_file: str = ""
+    #: PAD-1204: ``scorefeed.cfg`` beside the mode files, each game's final scores posted to the owner's server ("" = none)
+    scorefeed_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -815,7 +817,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
-         cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None):
+         cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
+         score_feed_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -863,7 +866,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-1115: *screen_times* (``clips.cfg``'s ``stime`` lines, :func:`.screen_time.cfg_lines`) make the game's
     screens that show a replaced clip last as long as it; with nothing else they are a plan of their own, for
-    *screen_prof*."""
+    *screen_prof*.
+
+    PAD-1204: *score_feed* (an address) puts ``scorefeed.cfg`` beside the mode files: each game's final scores posted
+    there (the logins' tables read off *game_elf*); with nothing else it is a plan of its own, for *score_feed_prof*,
+    and the file says the card has no modes."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -921,6 +928,12 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                                      or coop_prof or attract_prof or variants_prof or sound_modes_prof
                                      or picture_prof)
             screen_into(result, os.path.join(scratch, "screens"), screen_times, only=True)
+        if score_feed:                               # PAD-1204: the score feed, alone or with the above
+            if result is None:
+                result = feed_plan(project, game_elf, score_feed_prof or screen_prof or comp_prof or handicap_prof
+                                   or idle_prof or coop_prof or attract_prof or variants_prof or sound_modes_prof
+                                   or picture_prof)
+            feed_into(result, game_elf, scratch, score_feed, only=True)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -1013,6 +1026,45 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         comp_into(result, game_elf, scratch, only=False)
     if screen_times:                                 # PAD-1115
         screen_into(result, os.path.join(scratch, "screens"), screen_times, only=False)
+    if score_feed:                                   # PAD-1204
+        feed_into(result, game_elf, scratch, score_feed, only=False)
+    return result
+
+
+# ---- PAD-1204: the score feed --------------------------------------------------------------------
+def feed_plan(project, game_elf, prof):
+    """A plan carrying only the score feed: no mode, no scene; the runtime and the title's port on p2 with
+    ``scorefeed.cfg`` (:func:`feed_into`)."""
+    from . import score_feed as SF
+    why = SF.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to see a game's end on"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def feed_into(result, game_elf, scratch, url, only):
+    """``scorefeed.cfg`` for *result*'s card: *url*, the game's name, the logins' tables read off *game_elf*; *only*
+    when the card carries no modes (the runtime then arms this alone)."""
+    from . import score_feed as SF
+    why = SF.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        text = SF.cfg_text(url, getattr(result.profile, "label", ""), game_elf, only)
+    except SF.ScoreFeedError as e:
+        raise ModeWriteError(str(e)) from None
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, SF.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.scorefeed_file = path
+    result.lines.append("score feed: %s%s" % (SF.HOW % url, "" if "\nusers " in text
+                                              else " (this game's Insider logins are not known: the reports name none)"))
     return result
 
 
@@ -2211,6 +2263,11 @@ def p2_payload(result, out_dir, project=None):
             from . import prolonged_comp as PCo
             dst = os.path.join(out_dir, PCo.CFG_NAME)
             shutil.copyfile(result.comp_file, dst)
+            extras.append(dst)
+        if getattr(result, "scorefeed_file", ""):      # PAD-1204: scorefeed.cfg, the score feed
+            from . import score_feed as SF
+            dst = os.path.join(out_dir, SF.CFG_NAME)
+            shutil.copyfile(result.scorefeed_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

@@ -6763,6 +6763,64 @@ there is nothing for a mode to call. The Modes tab's **Prolonged Competition** p
 Proven (emulator, Deadpool Pro 1.16): picked, two Competition games, picked again, off; the sweep over the latest builds
 is in docs/plans/pad1041_prolonged_comp.md.
 
+## The score feed (PAD-1204)
+
+C0untDeM0net (Pinside): "a high score display external from the games running on a TV ... capture the end game scores
+and user info if logged in, then push them to an external server separate from IC". Nothing for a mode to call: the
+Play options tab's **Score feed** puts `scorefeed.cfg` beside the runtime (`plugins/stern/score_feed.py`), and at the end of
+each game the runtime posts one JSON object to the owner's server:
+
+    {"source":"PAD score feed","game":"Godzilla LE 1.16","port":"godzilla_le 1.16","game_number":1,
+     "time":1794510083,"players":2,"scores":[1657980,1657980],
+     "insider":["11111111-2222-3333-4444-555555555555","aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]}
+
+`game` is the `title` line (the app's name for the card), `port` the port's own game and version, `game_number` the
+games reported since boot, `time` the machine's clock in Unix seconds (null below 2017: never set), `scores` each
+player's final score (`pm_score`, 64- or 32-bit), and `insider` each player's Insider Connected user id, the 16 bytes
+at the user manager's table + 20p + 4 (co-op's `users` line, PAD-1108; first table, then the second), in memory
+order as 8-4-4-4-12 hex, null for a player not logged in. The players are the most `pm_player()` seen up while
+`pm_in_game()` in that game.
+
+    feed http://192.168.1.50:8080/scores   where to post: http://, an IPv4 address, a port, a path (the app refuses
+                                           https, a name, 127.x and 0.0.0.0)
+    title Godzilla Premium/LE 1.16         the report's game
+    users 0x007bf878 0x160 0x164           the logins' tables (coop_play.insider_users), when the finder sees them
+    only                                   the card has no modes: armed before the score gate with nothing else
+
+**When a game has ended.** The tick keeps the scores and logins when `pm_in_game()` falls with players known. A port
+that names `game_over` (58 of 70) sends at that event, re-reading the scores and keeping any login the game cleared
+since the fall; the fall alone is never a game's end there (James Bond's `in_game` also falls at each multiball's
+end). A port without it (Elvira 3, D&D, King Kong, TMNT Pro: 12 of 70) sends once play has stayed stopped
+`FEED_QUIET_MS` (30 s) with no new ball. On either, a ball start that finds a score below the one kept is the next
+game (the game zeroes them) and the kept report goes then; a ball start with every score kept or higher is the same
+game going on, and the kept report is dropped. A game reset with Start held mid-game is never reported.
+
+**How it is sent: never waiting.** Rules 1 and 2 hold for the runtime too (`build_mode.sh` refuses `pthread_*`,
+sleeping, `poll` and `select`), so the send is a state machine stepped once a tick on the game's tick: a
+`SOCK_NONBLOCK` socket whose `connect` is asked again each tick until `EISCONN` (or an error), the request sent with
+`MSG_NOSIGNAL | MSG_DONTWAIT` as the socket takes it, the answer's status line read as it comes; 5 s for each, then
+up to 3 tries 10 s apart, then the report is dropped. 8 reports wait at most. A name lookup would block, hence the IP
+address. `socket`, `connect`, `send` and `__errno_location` are weak: a game process without them logs `score feed:
+off - the game's process has no network calls`. The game's scoring is never touched, so it arms before the score
+gate; on a card of only this, Insider Connected is left as it was.
+
+mode.log:
+
+    score feed: armed - each game's final scores and Insider logins are posted to http://127.0.0.1:18208/pinball/scores
+      (at the game's game_over; bus 0x4d game, 0x25 ball, game_over) (scorefeed.cfg: only)
+    score feed: game 1 over (the game's game_over) - 2 player(s): 1657980 1657980 0 0, logged in 1100
+    score feed: game 1 posted to http://127.0.0.1:18208/pinball/scores (HTTP 200): {...}
+    score feed: game 2 not taken on try 1 of 3 - the server refused the connection (nothing listens on that port)
+    score feed: game 2 DROPPED after 3 tries
+
+**Proof** (emulator, rig kit `C:\tmp\PAD-1204\rig`: `feed.sh` builds the runtime, installs it with `scorefeed.cfg`
+and the port, and runs `feedlisten.py`, a stand-in server on 127.0.0.1; the rig shares the distro's network).
+Godzilla LE 1.16, 1 ball a game, ball save off: game 1, two players with marker logins planted in both tables
+(`loginpoke.py`), posted at its game_over (HTTP 200): players 2, scores 1,657,980 and 1,657,980 as the game's own score
+panel showed them, both marker ids in player order; game 2 with the server down: refused, refused, refused 10 s
+apart, dropped, and the machine played on; game 3, server back: posted as game_number 3.
+Elvira 3 1.13 (its port names no game_over), one player, three balls: after the last drain nothing was pressed, and 30 s later `game 1 over (play stopped with no new ball)` posted 2,269,300, the score the game's own end-of-game screen showed; one report, none between balls. An earlier run whose job pressed Start inside the 30 s sent the finished game's 500,100 at the next game's first ball (`the next game started`).
+
 ## Expression light shows (PAD-1040)
 
 BEN (Led Zeppelin): "if songs are swapped out, the expression lighting is no longer in sync with the replaced audio

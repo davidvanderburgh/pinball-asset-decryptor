@@ -297,23 +297,6 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, 
           <${Button} size="sm" icon="folder" onClick=${() => call("modes.coop_settings_load")} title=${s.coop_load_tip}>Load…<//>
         </div>` : null}
       </div>` : null}
-      ${s.hand_shown ? html`<div class="stack modes-coop">
-        <${Check} checked=${s.hand_on} wrap label="Handicap per player" title=${s.hand_tip}
-          onChange=${(v) => call("modes.set_handicap", v)} />
-        ${s.hand_note ? html`<span class=${cx("small", s.hand_note_kind === "err" ? "err-ink" : "muted")}>${s.hand_note}</span>` : null}
-        ${s.hand_on && s.hand_note_kind !== "err" ? html`<${Button} size="sm" icon="list" onClick=${onHandLevels}
-          title="What each level, -3 to +3, does on this card's game.">Levels…<//>` : null}
-      </div>` : null}
-      ${s.comp_shown ? html`<div class="stack modes-coop">
-        <${Check} checked=${s.comp_on} wrap label="Prolonged Competition" title=${s.comp_tip}
-          onChange=${(v) => call("modes.set_prolonged_comp", v)} />
-        ${s.comp_note ? html`<span class=${cx("small", s.comp_note_kind === "err" ? "err-ink" : "muted")}>${s.comp_note}</span>` : null}
-      </div>` : null}
-      ${s.idle_shown ? html`<div class="stack modes-coop">
-        <${Check} checked=${s.idle_on} wrap label="Inactivity pauses timers" title=${s.idle_tip}
-          onChange=${(v) => call("modes.set_idle_pause", v)} />
-        ${s.idle_note ? html`<span class=${cx("small", s.idle_note_kind === "err" ? "err-ink" : "muted")}>${s.idle_note}</span>` : null}
-      </div>` : null}
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
       <div class="row modes-list-acts">
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>

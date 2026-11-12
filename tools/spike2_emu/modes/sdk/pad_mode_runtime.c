@@ -20904,6 +20904,579 @@ static void comp_arm(void)
         comp.caption_end, comp.flag, comp.game_id, comp.ball_id, comp.only ? " (comp.cfg: only)" : "");
 }
 
+/* ---- PAD-1204: the score feed - each game's final scores posted to the owner's own server ---------------------------
+ * C0untDeM0net (Pinside): "a high score display external from the games running on a TV ... capture the end game
+ * scores and user info if logged in, then push them to an external server separate from IC". At each game's end the
+ * runtime reads the players' scores (`data scores` / `scores32`, as pm_score) and, where the card's program shows
+ * where they are, each player's Insider Connected login (the user manager's tables coop.cfg's `users` line names:
+ * player p's 16-byte user id at table + 20p + 4), and posts them as one JSON object to the address the owner gave:
+ *   {"source":"PAD score feed","game":"Godzilla Premium/LE 1.16","port":"godzilla_le 1.16","game_number":3,
+ *    "time":1794326400,"players":2,"scores":[123456780,98765430],"insider":["3f2a...-...",null]}
+ * game_number counts the games reported since the machine was switched on; time is the machine's clock (Unix seconds,
+ * null when the clock was never set); an insider entry is null for a player who was not logged in.
+ * WHEN a game has ended: the tick watches pm_in_game() fall with a game's players known (the most players seen up in
+ * it). A port that names game_over sends at that event (a game reset with Start + the left flipper fires none and is
+ * not reported; James Bond's in_game also falls at each multiball's end, and only game_over is a game's end there);
+ * a port without it sends once play has stayed stopped for FEED_QUIET_MS with no new ball. Either way a ball start
+ * that finds a score lower than the one kept at the fall is the next game (the game zeroes them), and the kept
+ * scores go then; a ball start with every score kept or higher was the same game going on.
+ * HOW it is sent: plain HTTP/1.0 POST, one step a tick on the game's tick and never waiting (rule 1; rule 2: no
+ * threads, no sleeping): a non-blocking socket whose connect is asked again each tick until it says connected
+ * (EISCONN) or failed, the request sent as the socket takes it, the answer's status line read as it comes.
+ * FEED_TIMEOUT_MS to connect, as long to send and for the answer; up to FEED_TRIES tries FEED_RETRY_MS apart, then
+ * the report is dropped (mode.log says why). send() with MSG_NOSIGNAL: a server that hangs up must never signal the
+ * game. The address is an IPv4 address: a name lookup would hold the game up, so the app asks for the server's IP.
+ * No TLS: the app refuses https://. The socket calls are weak: a game process without them says the feed is off.
+ * scorefeed.cfg (beside the runtime, or /dump for a rig), written by the Play options tab's Score feed
+ * (plugins/stern/score_feed.py):
+ *   feed <http://host[:port][/path]>   where to post
+ *   title <words>                      the game's name for the report (the app's own name for the card)
+ *   users <manager> <A> <B>            optional: the logins' tables (coop_play.insider_users)
+ *   only                               the card carries no modes: armed before the score gate with nothing else (the
+ *                                      scores stay on Insider Connected too; the feed changes no score)
+ * It scores nothing, so it arms before the score gate. */
+#define FEED_QUIET_MS   30000ul
+#define FEED_TRIES      3
+#define FEED_TIMEOUT_MS 5000ul
+#define FEED_RETRY_MS   10000ul
+#define FEED_QUEUE      8
+#define FEED_JSON_MAX   768
+#define FEED_REQ_MAX    (FEED_JSON_MAX + 384)
+#define FEED_HOST_MAX   96
+#define FEED_PATH_MAX   160
+static const char *const FEED_FILES[] = { "/usr/local/padmode/scorefeed.cfg", "/dump/scorefeed.cfg" };
+
+extern int  socket(int, int, int) __attribute__((weak));
+extern int  connect(int, const void *, unsigned) __attribute__((weak));
+extern long send(int, const void *, __SIZE_TYPE__, int) __attribute__((weak));
+extern int *__errno_location(void) __attribute__((weak));
+#define FEED_EINTR       4
+#define FEED_EAGAIN      11
+#define FEED_ENETUNREACH 101
+#define FEED_EISCONN     106
+#define FEED_ECONNREFUSED 111
+#define FEED_EHOSTUNREACH 113
+#define FEED_EALREADY    114
+#define FEED_EINPROGRESS 115
+
+enum { FEED_IDLE, FEED_WAIT, FEED_CONNECTING, FEED_SENDING, FEED_READING };
+
+struct feed_report {
+    unsigned players, number;
+    uint64_t scores[4];
+    unsigned char ids[4][16];
+    unsigned char has_id[4];
+};
+
+static struct {
+    int armed, only, over_named;
+    char host[FEED_HOST_MAX], path[FEED_PATH_MAX], title[64];
+    unsigned port;
+    unsigned mgr, off[2];                       /* the logins' tables (0: not known) */
+    unsigned game_id, ball_id, over_id;
+    volatile unsigned games, balls, overs;      /* counted on the bus, read on the tick */
+    unsigned games_seen, balls_seen, overs_seen;
+    int was_in_game;
+    unsigned max_player;                        /* the most players seen up in this game */
+    int pending, reported;                      /* a fall kept (not sent yet); this game sent */
+    unsigned long fall_ms;
+    struct feed_report kept;
+    unsigned number;                            /* games reported since boot */
+    unsigned char ip[4];
+    struct feed_report queue[FEED_QUEUE];
+    unsigned head, tail;                        /* added at head, sent from tail (both on the tick) */
+    int state, fd, tries, status;               /* the send of the report at tail */
+    unsigned long state_ms;                     /* when the state began */
+    unsigned req_len, req_sent, resp_len;
+    char req[FEED_REQ_MAX], body[FEED_JSON_MAX], resp[64];
+} feed;
+
+static int feed_cfg_only(void)
+{
+    return feed.armed && feed.only;
+}
+
+/* Split an http:// address into host, port and path; 0 when it is not one this feed can post to (https, no host, a
+ * port out of range, too long). (tests lift it verbatim) */
+static int feed_parse_url(const char *u, char *host, unsigned hcap, unsigned *port, char *path, unsigned pcap)
+{
+    unsigned n = 0, p = 0;
+    const char *s;
+    if (!u || !str_starts(u, "http://")) return 0;
+    u += 7;
+    for (s = u; *s && *s != ':' && *s != '/' && *s != '?'; s++) {
+        if (n + 1 >= hcap || *s == ' ' || *s == '@') return 0;
+        host[n++] = *s;
+    }
+    host[n] = 0;
+    if (!n) return 0;
+    *port = 80;
+    if (*s == ':') {
+        for (s++, n = 0; *s >= '0' && *s <= '9'; s++, n++) {
+            p = p * 10u + (unsigned)(*s - '0');
+            if (p > 65535u) return 0;
+        }
+        if (!n || !p) return 0;
+        *port = p;
+    }
+    if (*s && *s != '/' && *s != '?') return 0;
+    n = 0;
+    if (*s != '/') path[n++] = '/';
+    for (; *s; s++) {
+        if (n + 1 >= pcap || *s == ' ' || *s == '\r' || *s == '\n') return 0;
+        path[n++] = *s;
+    }
+    path[n] = 0;
+    return 1;
+}
+
+/* A dotted IPv4 address in network byte order into *out; 0 when s is not one. (tests lift it verbatim) */
+static int feed_ipv4(const char *s, unsigned char out[4])
+{
+    unsigned k, v, digits;
+    for (k = 0; k < 4; k++) {
+        for (v = 0, digits = 0; *s >= '0' && *s <= '9'; s++, digits++) {
+            v = v * 10u + (unsigned)(*s - '0');
+            if (v > 255u || digits > 2) return 0;
+        }
+        if (!digits) return 0;
+        out[k] = (unsigned char)v;
+        if (k < 3 && *s++ != '.') return 0;
+    }
+    return *s == 0;
+}
+
+static int feed_fmt(char *b, unsigned long cap, const char *f, ...)
+{
+    va_list a;
+    int n;
+    va_start(a, f);
+    n = vsnprintf(b, cap, f, a);
+    va_end(a);
+    return n;
+}
+
+/* s as a JSON string's insides: quotes and backslashes escaped, control bytes dropped. (tests lift it verbatim) */
+static unsigned feed_json_str(char *out, unsigned cap, const char *s)
+{
+    unsigned n = 0;
+    for (; s && *s && n + 3 < cap; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c < 0x20) continue;
+        if (c == '"' || c == '\\') out[n++] = '\\';
+        out[n++] = (char)c;
+    }
+    out[n] = 0;
+    return n;
+}
+
+/* The report as JSON into out (NUL-terminated); its length, or 0 when it does not fit. `when` is the machine's clock in
+ * Unix seconds (0: never set). (tests lift it verbatim) */
+static unsigned feed_json(char *out, unsigned cap, const struct feed_report *r, const char *title, const char *port_name,
+                          long when)
+{
+    static const char hex[] = "0123456789abcdef";
+    char t[96], pn[96];
+    unsigned n, p, i;
+    int m;
+    feed_json_str(t, sizeof t, title);
+    feed_json_str(pn, sizeof pn, port_name);
+    m = feed_fmt(out, cap, "{\"source\":\"PAD score feed\",\"game\":\"%s\",\"port\":\"%s\",\"game_number\":%u,", t, pn,
+                 r->number);
+    if (m <= 0 || (unsigned)m >= cap) return 0;
+    n = (unsigned)m;
+    m = when > 0 ? feed_fmt(out + n, cap - n, "\"time\":%ld,", when) : feed_fmt(out + n, cap - n, "\"time\":null,");
+    if (m <= 0 || (unsigned)m >= cap - n) return 0;
+    n += (unsigned)m;
+    m = feed_fmt(out + n, cap - n, "\"players\":%u,\"scores\":[", r->players);
+    if (m <= 0 || (unsigned)m >= cap - n) return 0;
+    n += (unsigned)m;
+    for (p = 0; p < r->players; p++) {
+        m = feed_fmt(out + n, cap - n, "%s%llu", p ? "," : "", (unsigned long long)r->scores[p]);
+        if (m <= 0 || (unsigned)m >= cap - n) return 0;
+        n += (unsigned)m;
+    }
+    m = feed_fmt(out + n, cap - n, "],\"insider\":[");
+    if (m <= 0 || (unsigned)m >= cap - n) return 0;
+    n += (unsigned)m;
+    for (p = 0; p < r->players; p++) {
+        if (n + 48 >= cap) return 0;
+        if (p) out[n++] = ',';
+        if (!r->has_id[p]) {
+            out[n++] = 'n'; out[n++] = 'u'; out[n++] = 'l'; out[n++] = 'l';
+            continue;
+        }
+        out[n++] = '"';
+        for (i = 0; i < 16; i++) {                      /* 8-4-4-4-12, the bytes as they are in memory */
+            if (i == 4 || i == 6 || i == 8 || i == 10) out[n++] = '-';
+            out[n++] = hex[r->ids[p][i] >> 4];
+            out[n++] = hex[r->ids[p][i] & 15];
+        }
+        out[n++] = '"';
+    }
+    if (n + 3 >= cap) return 0;
+    out[n++] = ']';
+    out[n++] = '}';
+    out[n] = 0;
+    return n;
+}
+
+/* 1 when any score is lower than the one kept: the game zeroed them, a new game. (tests lift it verbatim) */
+static int feed_scores_fell(const uint64_t *kept, const uint64_t *now, unsigned players)
+{
+    unsigned p;
+    for (p = 0; p < players && p < 4; p++)
+        if (now[p] < kept[p]) return 1;
+    return 0;
+}
+
+static int feed_errno(void)
+{
+    return __errno_location ? *__errno_location() : 0;
+}
+
+static void feed_close(void)
+{
+    if (feed.fd >= 0) close(feed.fd);
+    feed.fd = -1;
+}
+
+/* The request for report r into feed.req; 0 when it does not fit. */
+static int feed_request(const struct feed_report *r)
+{
+    struct { long s, ns; } now;
+    char pn[64];
+    unsigned len;
+    int m;
+    now.s = 0;
+    clock_gettime(0 /* CLOCK_REALTIME */, &now);
+    feed_fmt(pn, sizeof pn, "%s %s", port.game, port.version);
+    len = feed_json(feed.body, sizeof feed.body, r, feed.title, pn, now.s > 1500000000l ? now.s : 0);
+    if (!len) return 0;
+    m = feed.port == 80 ? feed_fmt(feed.req, sizeof feed.req, "POST %s HTTP/1.0\r\nHost: %s\r\n", feed.path, feed.host)
+                        : feed_fmt(feed.req, sizeof feed.req, "POST %s HTTP/1.0\r\nHost: %s:%u\r\n", feed.path,
+                                   feed.host, feed.port);
+    if (m <= 0 || (unsigned)m >= sizeof feed.req) return 0;
+    m += feed_fmt(feed.req + m, sizeof feed.req - (unsigned)m, "User-Agent: PAD-score-feed\r\n"
+                  "Content-Type: application/json\r\nContent-Length: %u\r\nConnection: close\r\n\r\n%s", len, feed.body);
+    if (m <= 0 || (unsigned)m >= sizeof feed.req) return 0;
+    feed.req_len = (unsigned)m;
+    return 1;
+}
+
+/* The status code of an HTTP answer's first line, or 0 when it is not one. (tests lift it verbatim) */
+static int feed_status(const char *resp, unsigned len)
+{
+    if (len < 12 || !str_starts(resp, "HTTP/1.") || resp[8] != ' ') return 0;
+    if (resp[9] < '1' || resp[9] > '5' || resp[10] < '0' || resp[10] > '9' || resp[11] < '0' || resp[11] > '9') return 0;
+    return (resp[9] - '0') * 100 + (resp[10] - '0') * 10 + (resp[11] - '0');
+}
+
+/* The try at the report at tail ended: taken (why 0), another try later, or the report dropped. */
+static void feed_try_done(const char *why)
+{
+    const struct feed_report *r = &feed.queue[feed.tail % FEED_QUEUE];
+    feed_close();
+    if (!why)
+        say("score feed: game %u posted to http://%s:%u%s (HTTP %d): %s", r->number, feed.host, feed.port, feed.path,
+            feed.status, feed.body);
+    else if (feed.status)
+        say("score feed: game %u not taken on try %d of %d - %s (HTTP %d)", r->number, feed.tries, FEED_TRIES, why,
+            feed.status);
+    else
+        say("score feed: game %u not taken on try %d of %d - %s", r->number, feed.tries, FEED_TRIES, why);
+    if (why && feed.tries < FEED_TRIES) {
+        feed.state = FEED_WAIT;
+        feed.state_ms = pm_ms();
+        return;
+    }
+    if (why) say("score feed: game %u DROPPED after %d tries", r->number, feed.tries);
+    feed.tail++;
+    feed.tries = 0;
+    feed.state = FEED_IDLE;
+}
+
+/* One step of the send, each tick: every call in it returns at once (a non-blocking socket). */
+static void feed_send_step(void)
+{
+    unsigned char sa[16];
+    unsigned long now;
+    long got;
+    int k, e;
+    if (feed.state == FEED_IDLE && feed.tail == feed.head) return;     /* nothing to send: the usual tick */
+    now = pm_ms();
+    switch (feed.state) {
+    case FEED_WAIT:
+        if (now - feed.state_ms < FEED_RETRY_MS) return;
+        /* fall through - the next try */
+    case FEED_IDLE:
+        if (feed.tail == feed.head) return;
+        if (!feed.tries && !feed_request(&feed.queue[feed.tail % FEED_QUEUE])) {
+            feed.tries = FEED_TRIES;
+            feed_try_done("the report did not fit");
+            return;
+        }
+        feed.tries++;
+        feed.status = 0;
+        feed.req_sent = feed.resp_len = 0;
+        feed.fd = socket(2 /* AF_INET */, 1 | 0x800 | 0x80000 /* SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC */, 0);
+        if (feed.fd < 0) {
+            feed_try_done("no socket");
+            return;
+        }
+        feed.state = FEED_CONNECTING;
+        feed.state_ms = now;
+        /* fall through - the first connect */
+    case FEED_CONNECTING:
+        for (k = 0; k < 16; k++) sa[k] = 0;
+        sa[0] = 2;                                      /* AF_INET (a little-endian u16); the port and address big-endian */
+        sa[2] = (unsigned char)(feed.port >> 8);
+        sa[3] = (unsigned char)(feed.port & 255u);
+        for (k = 0; k < 4; k++) sa[4 + k] = feed.ip[k];
+        if (connect(feed.fd, sa, 16) != 0) {
+            e = feed_errno();
+            if (e == FEED_EINPROGRESS || e == FEED_EALREADY || e == FEED_EINTR) {
+                if (now - feed.state_ms >= FEED_TIMEOUT_MS) feed_try_done("the server did not answer");
+                return;
+            }
+            if (e != FEED_EISCONN) {
+                feed_try_done(e == FEED_ECONNREFUSED ? "the server refused the connection (nothing listens on that port)"
+                              : e == FEED_EHOSTUNREACH || e == FEED_ENETUNREACH ? "no way to the server's address"
+                              : "the connection failed");
+                return;
+            }
+        }
+        feed.state = FEED_SENDING;
+        feed.state_ms = now;
+        /* fall through */
+    case FEED_SENDING:
+        while (feed.req_sent < feed.req_len) {
+            got = send(feed.fd, feed.req + feed.req_sent, (unsigned long)(feed.req_len - feed.req_sent),
+                       0x4000 | 0x40 /* MSG_NOSIGNAL | MSG_DONTWAIT */);
+            if (got > 0) {
+                feed.req_sent += (unsigned)got;
+                continue;
+            }
+            e = feed_errno();
+            if (got < 0 && (e == FEED_EAGAIN || e == FEED_EINTR) && now - feed.state_ms < FEED_TIMEOUT_MS) return;
+            feed_try_done("the server hung up while it was sent");
+            return;
+        }
+        feed.state = FEED_READING;
+        feed.state_ms = now;
+        /* fall through */
+    case FEED_READING:
+        while (feed.resp_len + 1 < sizeof feed.resp) {
+            got = read(feed.fd, feed.resp + feed.resp_len, sizeof feed.resp - 1 - feed.resp_len);
+            if (got > 0) {
+                feed.resp_len += (unsigned)got;
+                if (feed.resp_len >= 12) break;         /* the status line is in: that is all it needs */
+                continue;
+            }
+            e = feed_errno();
+            if (got < 0 && (e == FEED_EAGAIN || e == FEED_EINTR) && now - feed.state_ms < FEED_TIMEOUT_MS) return;
+            break;                                      /* the end of the answer, or out of time */
+        }
+        feed.resp[feed.resp_len] = 0;
+        feed.status = feed_status(feed.resp, feed.resp_len);
+        feed_try_done(feed.status >= 200 && feed.status < 300 ? 0 : feed.status ? "the server refused it"
+                      : feed.resp_len ? "the server's answer is not HTTP" : "the server sent no answer");
+        return;
+    }
+}
+
+static int feed_login(unsigned p, unsigned char out[16])
+{
+    int k, i, any;
+    if (!feed.mgr) return 0;
+    for (k = 0; k < 2; k++) {
+        unsigned t = *(volatile const unsigned *)(unsigned long)(feed.mgr + feed.off[k]);
+        const volatile unsigned char *e;
+        if (!coop_user_table_ok(t)) continue;
+        e = (const volatile unsigned char *)(unsigned long)coop_user_entry(t, p);
+        for (i = 0, any = 0; i < 16; i++) {
+            out[i] = e[i];
+            any |= out[i];
+        }
+        if (any) return 1;
+    }
+    return 0;
+}
+
+static void feed_snapshot(struct feed_report *r)
+{
+    unsigned p;
+    r->players = feed.max_player > 4 ? 4 : feed.max_player;
+    for (p = 0; p < 4; p++) {
+        r->scores[p] = p < r->players ? pm_score(p + 1) : 0;
+        r->has_id[p] = (unsigned char)(p < r->players && feed_login(p + 1, r->ids[p]));
+    }
+}
+
+static void feed_queue(const struct feed_report *r, const char *why)
+{
+    struct feed_report *q;
+    if (feed.head - feed.tail >= FEED_QUEUE) {
+        say("score feed: a game's report dropped - %d are waiting to be sent already", FEED_QUEUE);
+        return;
+    }
+    q = &feed.queue[feed.head % FEED_QUEUE];
+    *q = *r;
+    q->number = ++feed.number;
+    say("score feed: game %u over (%s) - %u player(s): %llu %llu %llu %llu, logged in %d%d%d%d", q->number, why,
+        q->players, (unsigned long long)q->scores[0], (unsigned long long)q->scores[1],
+        (unsigned long long)q->scores[2], (unsigned long long)q->scores[3], q->has_id[0], q->has_id[1], q->has_id[2],
+        q->has_id[3]);
+    feed.head++;
+}
+
+static void on_feed_dispatch(unsigned *r)
+{
+    if (r[0] == feed.game_id) __sync_fetch_and_add(&feed.games, 1u);
+    else if (r[0] == feed.ball_id) __sync_fetch_and_add(&feed.balls, 1u);
+    else if (r[0] == feed.over_id) __sync_fetch_and_add(&feed.overs, 1u);
+}
+
+static void on_feed_tick(unsigned *regs)
+{
+    unsigned games = feed.games, balls = feed.balls, overs = feed.overs, p = pm_player();
+    int in_game = pm_in_game();
+    (void)regs;
+    feed_send_step();
+    if (balls != feed.balls_seen) {                     /* a ball: the next game's, or the same one going on */
+        feed.balls_seen = balls;
+        if (feed.pending) {
+            uint64_t now[4];
+            unsigned k;
+            for (k = 0; k < 4; k++) now[k] = pm_score(k + 1);
+            if (feed_scores_fell(feed.kept.scores, now, feed.kept.players)) {
+                feed_queue(&feed.kept, "the next game started");
+                feed.reported = 1;
+            }
+            feed.pending = 0;
+        }
+    }
+    if (games != feed.games_seen) {                     /* a new game: the last one is done with */
+        feed.games_seen = games;
+        if (feed.pending && !feed.reported) feed_queue(&feed.kept, "the next game started");
+        feed.pending = feed.reported = 0;
+        feed.max_player = 0;
+    }
+    if (in_game && p > feed.max_player) {
+        if (feed.reported) feed.reported = 0;           /* a game the bus did not announce (first after boot) */
+        feed.max_player = p;
+    }
+    if (feed.was_in_game && !in_game && feed.max_player && !feed.reported) {
+        feed_snapshot(&feed.kept);
+        feed.pending = 1;
+        feed.fall_ms = pm_ms();
+    }
+    feed.was_in_game = in_game;
+    if (overs != feed.overs_seen) {
+        feed.overs_seen = overs;
+        if (feed.max_player && !feed.reported) {
+            struct feed_report r;
+            unsigned k;
+            feed_snapshot(&r);
+            for (k = 0; k < 4; k++) {                  /* a login the game cleared at its end: the fall's */
+                if (feed.pending && !r.has_id[k] && feed.kept.has_id[k]) {
+                    unsigned i;
+                    for (i = 0; i < 16; i++) r.ids[k][i] = feed.kept.ids[k][i];
+                    r.has_id[k] = 1;
+                }
+                if (feed.pending && r.scores[k] < feed.kept.scores[k]) r.scores[k] = feed.kept.scores[k];
+            }
+            feed_queue(&r, "the game's game_over");
+            feed.reported = 1;
+            feed.pending = 0;
+        }
+    }
+    if (!feed.over_named && feed.pending && pm_ms() - feed.fall_ms >= FEED_QUIET_MS) {
+        struct feed_report r;
+        unsigned k;
+        feed_snapshot(&r);
+        for (k = 0; k < 4; k++) {
+            if (!r.has_id[k] && feed.kept.has_id[k]) {
+                unsigned i;
+                for (i = 0; i < 16; i++) r.ids[k][i] = feed.kept.ids[k][i];
+                r.has_id[k] = 1;
+            }
+            if (r.scores[k] < feed.kept.scores[k]) r.scores[k] = feed.kept.scores[k];
+        }
+        feed_queue(&r, "play stopped with no new ball");
+        feed.reported = 1;
+        feed.pending = 0;
+    }
+}
+
+static void feed_arm(void)
+{
+    static char raw[1024];
+    char url[FEED_HOST_MAX + FEED_PATH_MAX + 16];
+    struct site *bus = site("hook_dispatch");
+    long n = -1, i;
+    int ok, game = event_bus_id("game_start"), ball = event_bus_id("ball_start"), over = event_bus_id("game_over");
+    unsigned k;
+    const char *p;
+    url[0] = 0;
+    for (k = 0; k < sizeof FEED_FILES / sizeof FEED_FILES[0] && n < 0; k++)
+        n = pm_read_file(FEED_FILES[k], raw, sizeof raw - 1);
+    if (n <= 0) return;
+    raw[n] = 0;
+    for (i = 0; i < n; i++) {
+        if (i && raw[i - 1] != '\n') continue;
+        if (str_starts(raw + i, "only")) feed.only = 1;
+        else if (str_starts(raw + i, "feed ")) word(raw + i + 5, url, sizeof url);
+        else if (str_starts(raw + i, "title ")) {
+            unsigned m = 0;
+            for (p = raw + i + 6; *p && *p != '\n' && *p != '\r' && m + 1 < sizeof feed.title; p++)
+                feed.title[m++] = *p;
+            feed.title[m] = 0;
+        } else if (str_starts(raw + i, "users ")) {
+            p = raw + i + 6;
+            feed.mgr = (unsigned)number(&p, &ok);
+            if (ok) feed.off[0] = (unsigned)number(&p, &ok);
+            if (ok) feed.off[1] = (unsigned)number(&p, &ok);
+            if (!ok) feed.mgr = 0;
+        }
+    }
+    if (!feed_parse_url(url, feed.host, sizeof feed.host, &feed.port, feed.path, sizeof feed.path)) {
+        say("score feed: off - scorefeed.cfg's feed line is not an http:// address (%s)", url[0] ? url : "none");
+        return;
+    }
+    if (!feed_ipv4(feed.host, feed.ip)) {
+        say("score feed: off - %s is not an IPv4 address (a name lookup would hold the game up)", feed.host);
+        return;
+    }
+    if (!socket || !connect || !send || !__errno_location) {
+        say("score feed: off - the game's process has no network calls");
+        return;
+    }
+    feed.fd = -1;
+    if (!bus || !bus->ok || game < 0 || ball < 0 || !fn("tick")) {
+        say("score feed: off - %s", !bus || !bus->ok ? "the port's hook_dispatch is missing or wrong"
+            : !fn("tick") ? "the port has no tick" : "the port names no game_start / ball_start event");
+        return;
+    }
+    if (feed.mgr && (!maps_has(feed.mgr + feed.off[0], 4, MAP_R) || !maps_has(feed.mgr + feed.off[1], 4, MAP_R))) {
+        say("score feed: the user manager 0x%08x is not mapped - the reports name no Insider logins", feed.mgr);
+        feed.mgr = 0;
+    }
+    feed.game_id = (unsigned)game;
+    feed.ball_id = (unsigned)ball;
+    feed.over_id = over >= 0 ? (unsigned)over : ~0u;
+    feed.over_named = over >= 0;
+    if (!hook(bus->addr, on_feed_dispatch) || !hook(fn("tick"), on_feed_tick)) {
+        say("score feed: off - the event bus or the tick could not be hooked");
+        return;
+    }
+    feed.armed = 1;
+    say("score feed: armed - each game's final scores%s are posted to http://%s:%u%s (%s; bus 0x%x game, 0x%x ball%s)%s",
+        feed.mgr ? " and Insider logins" : "", feed.host, feed.port, feed.path,
+        feed.over_named ? "at the game's game_over" : "once play has stopped 30 s with no new ball",
+        feed.game_id, feed.ball_id, feed.over_named ? ", game_over" : "", feed.only ? " (scorefeed.cfg: only)" : "");
+}
+
 /* ---- PAD-1052: TEAM PLAY on the start menu ------------------------------------------------------------------
  * Stock Stern's team play (TMNT: TEAM PLAY 2 VS 2 "TWO PLAYERS PER TEAM", TEAM PLAY 2 VS 1) is an entry of CHOOSE YOUR
  * MODE OF PLAY: picked, one Start makes the whole team game. With CO-OP PLAY not Off (PAD-1073; before, 2 or 3) the
@@ -24031,14 +24604,18 @@ static void pad_mode_start(void)
     hand_arm();                               /* PAD-1033: nor does a player's handicap (the operator's settings) */
     comp_arm();                               /* PAD-1041: nor does Prolonged Competition (the game's own Competition) */
     cabs_arm();                               /* PAD-1040: nor do the card's expression light shows */
-    if ((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))
+    feed_arm();                               /* PAD-1204: nor does the score feed (it only reads the scores) */
+    if (((clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))
+         || feed_cfg_only())
         && !attract_wanted() && !coop_wanted()) {   /* PAD-782: attract items take the whole gate; PAD-1017: co-op too */
-        say("armed: %s%s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
+        say("armed: %s%s%s%s%s%s%s%sonly (%s says the card has no modes) - nothing else is hooked",
             clipv_only ? "clip variants " : "", sndm_only ? "music modes " : "", pic_only ? "picture settings " : "",
             idle_only ? "inactivity pausing timers " : "", hand_cfg_only() ? "handicaps " : "",
             comp_cfg_only() ? "prolonged competition " : "", cabs_only && n_cabs ? "expression light shows " : "",
+            feed_cfg_only() ? "score feed " : "",
             clipv_only ? "clips.cfg" : sndm_only ? "sounds.cfg" : pic_only ? "picture.cfg" : idle_only ? "idle.cfg"
-            : hand_cfg_only() ? "handicap.cfg" : comp_cfg_only() ? "comp.cfg" : "cabshow.cfg");
+            : hand_cfg_only() ? "handicap.cfg" : comp_cfg_only() ? "comp.cfg" : feed_cfg_only() ? "scorefeed.cfg"
+            : "cabshow.cfg");
         if (n_cabs) lamps_arm();              /* PAD-1040: the shows hold the cabinet's lights on the lamp layer */
         if ((hand.on || n_cabs) && !hook(fn("tick"), on_hand_tick)) {
             hand.on = 0;

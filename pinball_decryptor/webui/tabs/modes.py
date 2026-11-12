@@ -410,6 +410,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  hand_tip=self.HAND_TIP)
         self.set(comp_on=False, comp_note="", comp_note_kind="", comp_shown=False,   # PAD-1041
                  comp_tip=self.COMP_TIP)
+        from ...plugins.stern import mode_project as _MPk
+        self.set(keeps_ic_head=_MPk.KEEPS_IC_HEAD, keeps_ic_note=_MPk.KEEPS_IC_NOTE)   # PAD-1204: their own group
+        self.set(feed_on=False, feed_url="", feed_note="", feed_note_kind="", feed_shown=False,   # PAD-1204
+                 feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="", feed_contract=None)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -677,6 +681,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._publish_idle(project)                          # PAD-1022
         self._publish_handicap(project)                      # PAD-1033
         self._publish_comp(project)                          # PAD-1041
+        self._publish_feed(project)                          # PAD-1204
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
         if select_game is not None and select_game in game:
@@ -1507,6 +1512,56 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         history_log.record(project, [hist] if hist else [])
         self._say("prolonged competition: %s" % ("the card gets it at the next Write" if on else "not on the card"))
         self._publish_comp(project)
+        return True
+
+    #: PAD-1204: the score feed (plugins/stern/score_feed.py): each game's final scores posted to the owner's own server,
+    #: for a scoreboard of their own (C0untDeM0net: "a high score display external from the games running on a TV")
+    FEED_TIP = (
+        "After every game the machine sends the players' final scores, and the Insider Connected account of each "
+        "player who was logged in, to a server of your own on your network (a high-score board on a TV, a "
+        "spreadsheet, a home automation hub...). It is one JSON message a game, posted to the address you give. "
+        "Nothing goes to Stern, and the game's own scoring is not touched. Write puts it on the card.")
+    FEED_URL_TIP = (
+        "Where the machine posts each game's scores: http://, your server's IP address on your network, its port "
+        "and path, like http://192.168.1.50:8080/scores. The machine looks no names up and does not do https.")
+
+    def _publish_feed(self, project):
+        """PAD-1204: the Score feed tick, shown for a game whose end the app can see, its address box once ticked, and
+        under it what the card does, or in red why it cannot."""
+        from ...plugins.stern import score_feed as _SF
+        prof = _SF.project_title(project) if project else None
+        shown = bool(project) and prof is not None and not _SF.title_refusal(prof)
+        on, url = _SF.load(project) if project else (False, "")
+        note, kind = "", ""
+        if on:
+            why = _SF.title_refusal(prof) or _SF.url_problem(url)
+            if why:
+                note, kind = why, "err"
+            else:
+                note = _SF.NOTE
+        self.set(feed_shown=shown or on, feed_on=on, feed_url=url, feed_note=note, feed_note_kind=kind,
+                 feed_placeholder=_SF.PLACEHOLDER, feed_contract=_SF.contract(url))   # the Play options tab shows it
+
+    @rpc
+    def set_score_feed(self, on, url=None):
+        """Tick or untick the score feed for this project, or (*url*) change where it posts (PAD-1204)."""
+        from ...core import history_log
+        from ...plugins.stern import score_feed as _SF
+        project = self.project()
+        if not project:
+            return False
+        was_on, was_url = _SF.save(project, bool(on), url)
+        now_on, now_url = _SF.load(project)
+        hist = [h for h in (
+            history_log.diff_scalar("modes  score feed", "on" if was_on else "off", "on" if now_on else "off"),
+            history_log.diff_scalar("modes  score feed address", was_url or "(none)", now_url or "(none)"))
+            if h]
+        history_log.record(project, hist)
+        why = _SF.url_problem(now_url)
+        self._say("score feed: %s" % ("not on the card" if not now_on
+                                      else "the card gets it at the next Write (posting to %s)" % now_url if not why
+                                      else "not on the card until the address is right: %s" % why))
+        self._publish_feed(project)
         return True
 
     #: PAD-1033: a handicap for each player (plugins/stern/handicap.py): the game's own settings read easier or harder
@@ -2913,7 +2968,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if profile is not None and not profile.insider_gate:
             no_port = note = MP.insider_gate_words(profile.label)   # item 166: no gate, no modes
         elif profile is not None:
-            insider_note = MP.INSIDER_NOTE
+            insider_note = MP.INSIDER_TAB_NOTE              # PAD-1204: says what keeps Insider Connected
         self._no_port = no_port
         self._profile = profile
         self._card_bound = bool(card is not None and card.game_dir and profile is not None)

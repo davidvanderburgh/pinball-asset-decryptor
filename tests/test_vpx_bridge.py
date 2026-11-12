@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import struct
+import tempfile
 import sys
 
 import pytest
@@ -5739,6 +5740,75 @@ def test_ultradmd_stands_in_too():
     assert "Public Function DisplayScene(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9)" in cls
     assert "GetMajorVersion() : GetMajorVersion = 1" in cls and "GetMinorVersion() : GetMinorVersion = 9" in cls
     assert sh.flexdmd_stub(["x = 1"], [], "UltraDMD.DMDObject", "PadNoUltra", "UltraDMD") == ""
+
+
+# PAD-1187: John Wick's own FlexDMD set-up (JPSalas: on in cabinet mode)
+_JW_FLEX = """
+Dim UseFlexDMD
+UseFlexDMD = True
+Dim FlexDMD, DMDScene
+Sub DMD_Init()
+    If UseFlexDMD Then
+        Set FlexDMD = CreateObject("FlexDMD.FlexDMD")
+        If Not FlexDMD is Nothing Then
+            FlexDMD.RenderMode = 2
+            FlexDMD.Run = True
+            Set DMDScene = FlexDMD.NewGroup("Scene")
+            DMDScene.AddActor FlexDMD.NewImage("Back", "VPX.d_border")
+            DMDScene.GetImage("Back").SetSize FlexDMD.Width, FlexDMD.Height
+            FlexDMD.LockRenderThread
+            FlexDMD.Stage.AddActor DMDScene
+            FlexDMD.UnlockRenderThread
+        End If
+    End If
+End Sub
+Sub DMDDisplayChar(c, d)
+    If UseFlexDMD Then DMDScene.GetImage("Dig" & d).Bitmap = FlexDMD.NewImage("", "VPX." & c & "&dmd=2&add").Bitmap
+End Sub
+"""
+
+
+def test_flexdmd_stands_in_on_every_table():
+    """PAD-1187: John Wick's FlexDMD window sat over the machine's LCD. Its
+    map never asked for `flexdmd_stub`, so the patch only made FlexDMD
+    optional, and on a PC that has FlexDMD installed the table made it and
+    its DMD window opened anyway. The null object is now the default for
+    every table (UltraDMD too); a map opts out with false."""
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    assert "flexdmd_stub" not in m
+    out, rep = vs.patch(MINI_TRIBUTE + _JW_FLEX, m)
+    assert 'CreateObject("FlexDMD.FlexDMD")' not in out
+    assert "Set FlexDMD = New PadNoFlex" in out and "Class PadNoFlex" in out
+    assert any("FlexDMD replaced by PadNoFlex" in r for r in rep), rep
+    assert not any("FlexDMD made optional" in r for r in rep), rep
+    # a map that keeps the table's own FlexDMD: optional, as before
+    keep = dict(json.loads(json.dumps(MINI_SHADOW)), flexdmd_stub=False)
+    out, rep = vs.patch(MINI_TRIBUTE + _JW_FLEX, keep)
+    assert 'CreateObject("FlexDMD.FlexDMD")' in out and "PadNoFlex" not in out
+    assert any("FlexDMD made optional" in r for r in rep), rep
+    # a copy patched the old way (FlexDMD only optional) is told to patch again
+    vset = pytest.importorskip("vpxsetup")
+    why = "the table's own FlexDMD window opened, and could sit over the machine's screen"
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "T (PAD).script.vbs"), "w", encoding="utf-8") as f:
+            f.write(out)
+        assert vset.missed_fixes(d, "T (PAD).vpx", vset.GENERIC_REPATCH) == [why]
+        with open(os.path.join(d, "T (PAD).script.vbs"), "w", encoding="utf-8") as f:
+            f.write(vs.patch(MINI_TRIBUTE + _JW_FLEX, json.loads(json.dumps(MINI_SHADOW)))[0])
+        assert vset.missed_fixes(d, "T (PAD).vpx", vset.GENERIC_REPATCH) == []
+    # the script's FlexDMD code runs on the stand-in under VBScript itself
+    if sys.platform != "win32" or not shutil.which("cscript"):
+        pytest.skip("no cscript")
+    lines = _JW_FLEX.strip().split("\n")
+    cls = vs.flexdmd_stub(lines, [])
+    with tempfile.TemporaryDirectory() as d:
+        vbs = os.path.join(d, "jw.vbs")
+        with open(vbs, "w", encoding="utf-8") as f:
+            f.write(cls + "\n" + "\n".join(lines) + '\nDMD_Init\nDMDDisplayChar "A", 0\n'
+                    'WScript.Echo TypeName(FlexDMD)\n')
+        r = subprocess.run(["cscript", "//Nologo", vbs], capture_output=True, text=True, timeout=30)
+    assert r.stdout.strip() == "PadNoFlex", r.stdout + r.stderr
 
 
 # PAD-976: GotG's own scoring, run with the table's own game never started

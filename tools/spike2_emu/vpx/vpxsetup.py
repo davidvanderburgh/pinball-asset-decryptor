@@ -253,6 +253,8 @@ def known_tables(tables_dir=None):
         row.setdefault("marks", []).extend(m.get("repatch") or [])
     out = []
     for row in rows.values():
+        row.setdefault("marks", []).extend(GENERIC_REPATCH)
+    for row in rows.values():
         title, _ = padvpx.choose(row.pop("fits"))
         marks = row.pop("marks")
         # PAD-943: a Spike 1 title's card is its .iso, in the spike1 library;
@@ -475,6 +477,16 @@ def patched_title(tables_dir, out_name):
         if m:
             return m.group(1)
     return ""
+
+
+#: marks of fixes the patcher makes on EVERY table, in a map's `repatch`
+#: shape. PAD-1187: before FlexDMD stood in as a null object everywhere, a
+#: table's FlexDMD was only made optional, and that wrap's note is in no
+#: script patched since (a map that keeps FlexDMD opts out, and none does).
+GENERIC_REPATCH = [
+    {"old": "' PAD: no FlexDMD here",
+     "why": "the table's own FlexDMD window opened, and could sit over the machine's screen"},
+]
 
 
 def missed_fixes(tables_dir, out_name, marks):

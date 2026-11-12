@@ -32,13 +32,14 @@ def on_shown(self, *a, **k):
         for p in PLAIN:
             self.add_image(p)
         # pb_lawww's card: Original keeps its own table; the two Heisei images
-        for ri, (title, own) in enumerate(PRE):
+        for ri, ent in enumerate(PRE):
+            title, own = ent[0], ent[1]
             row = self._rows[ri]
             row.title = title
             if own:
                 row.own_scores = own
-            for k, v in (PRE[ri][2] if len(PRE[ri]) > 2 else {}).items():
-                setattr(row, k, v)
+            for key, val in (PRE[ri][2] if len(PRE[ri]) > 2 else {}).items():
+                setattr(row, key, val)
         self._refresh_tree()
     return _orig(self, *a, **k)
 mp.WebMultibootPanel.on_shown = on_shown
@@ -99,7 +100,6 @@ def main():
                 time.sleep(3)
                 out = os.path.join(out_dir, "%s_%s.png" % (prefix, name))
                 if name == "edit_image":
-                    page.screenshot(path=out.replace(".png", "_page.png"))
                     out2 = os.path.join(out_dir, "%s_table.png" % prefix)
                     webui_shot.api(url, "multiboot.edit_cancel"); time.sleep(1)
                     page.screenshot(path=out2); print("shot", out2, flush=True)

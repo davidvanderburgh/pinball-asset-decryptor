@@ -273,3 +273,25 @@ def test_window_reads_the_live_spike3_switches(tmp_path, monkeypatch):
     # nothing changed: no new generation
     assert k.attach()
     assert not k.publish()
+
+
+def test_auto_plunger_marker_launches_through_the_spike3_bridge(tmp_path):
+    """The artwork's AUTO PLUNGER coil marker (coilact.py) opens the lane by
+    the bridge's Plunge on a Spike 3 slot, not by writing the switch itself."""
+    (tmp_path / "dump").mkdir()
+    _sw, b = _balls(tmp_path)
+    _serve(b)
+    assert b.made(LANE)
+    stop = threading.Event()
+    t = threading.Thread(target=_bridge_thread, args=(b, stop), daemon=True)
+    t.start()
+    env = dict(os.environ, PAD_ROOT=str(tmp_path), PAD_SW_FILE=str(tmp_path / "padsw"),
+               PAD_TABLES=str(tmp_path / "tables"))
+    try:
+        r = subprocess.run([sys.executable, os.path.join(S2, "coilact.py"), "AUTO PLUNGER"], env=env,
+                           capture_output=True, text=True, timeout=30, cwd=S2)
+        assert r.returncode == 0 and "shooter lane opened" in r.stdout, r.stdout + r.stderr
+        assert not b.made(LANE) and b.out() == 1
+    finally:
+        stop.set()
+        t.join(2)

@@ -171,6 +171,7 @@ html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 
 .vid-sound-play .i { width: 12px; height: 12px; }
 a.vid-sound-go { color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
 a.vid-sound-go:hover { color: var(--accent); }
+.vid-song-sync { margin: 2px 0 4px; }
 /* a mode's own row of a clip another mode plays too, under that mode's row */
 .vid-pairmark { color: var(--accent); margin-right: 6px; }
 .vid-rep.follow { color: var(--ink-3); font-style: italic; }

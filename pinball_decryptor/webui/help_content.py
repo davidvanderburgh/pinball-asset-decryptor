@@ -804,6 +804,12 @@ HELP_CONTENT = {
             "clip with none of those lists the sounds that may be its (named like it, or "
             "asked for in the same part of the program). A sound the game picks at random, "
             "or a clip's own audio track, is not listed.",
+            "**A clip's song** (Jersey Jack and others): a song clip carries no sound of its "
+            "own; the game plays the song from a separate file. Under the panes the Video tab "
+            "names that file: a sound in the project named after the same song, both at least "
+            "30 seconds long and about as long as each other. Tick **Play it with the clip** "
+            "and it plays along with either player, following its pause, seek and stop, so the "
+            "clip looks and sounds the way the machine shows it.",
             "**When it plays** (Spike 2): what the emulator saw the game do with each clip. "
             "Play a game on the **Emulate** tab and the playfield window's **CLIPS** list "
             "names each clip as it plays, with the switch made just before it (**after "

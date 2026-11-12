@@ -748,6 +748,30 @@ class Rig:
             log("switch table for %s not copied from %s: %s" % (title, src, exc))
 
 
+#: the run log's lines that say nothing about why a run stalled or ended
+_RUN_LOG_NOISE = re.compile(r"^\[event\] \[sw\] id=|^\[padglhost\] [\d.]+ fps ")
+
+
+def run_log_tail(path, n=8):
+    """The last *n* telling lines of a started run's log (padlaunch's
+    padvpx-<title>.log, watch.sh's output), [] when it cannot be read."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - 65536))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except (OSError, TypeError):
+        return []
+    return [ln.strip()[:300] for ln in lines
+            if ln.strip() and not _RUN_LOG_NOISE.match(ln)][-n:]
+
+
+def run_log_said(path, n=8):
+    """': its log ends:' and the run log's last lines, one per controller log
+    line, so a report (which leaves paths out) still says why (PAD-1208)."""
+    tail = run_log_tail(path, n)
+    return (": its log ends:\n" + "\n".join("    | " + ln for ln in tail)) if tail else ""
+
+
 def read_block(path, n):
     """One fresh read of `n` bytes, or None (no run, or a 9p hiccup)."""
     try:
@@ -1577,6 +1601,8 @@ class Bridge:
         self.ready_t = 0.0
         self.start_t = time.monotonic()
         self._start_retried = False
+        self._board_t = None           # when the started run's board record came (PAD-1208)
+        self._block_said = False
         self.front_done = False            # the LCD window's first grab is undone once, never again
         self.b2s_handed = set()            # backglass windows whose first grab was undone (PAD-893)
         self.front_tries = {}
@@ -1663,6 +1689,9 @@ class Bridge:
     # -- PAD-963: a started run is up when the game is in attract
     #: how long a boot log may stay unreadable before the run counts as up
     BOOT_LOG_S = 15.0
+    #: a board record whose output block is not up this long after is said, with
+    #: the run log's last lines (PAD-1208: attach normally comes ~20 s after it)
+    BLOCK_LATE_S = 60
 
     def _boot_watch(self):
         """The padled block comes up early in a Spike 2 boot: Batman sat on
@@ -1838,6 +1867,17 @@ class Bridge:
             if self._rig_up(data):
                 self._attach(data)
                 return
+            # PAD-1208: a game is up ~20 s after its board record; one whose
+            # block never came said nothing here, and the table sat idle
+            now = time.monotonic()
+            if getattr(self, "_board_t", None) is None:
+                self._board_t = now
+            elif (not getattr(self, "_block_said", False) and self.launch.alive()
+                  and now - self._board_t > self.BLOCK_LATE_S):
+                self._block_said = True
+                log("the game's output block (%s) is not up %d s after its board record "
+                    "came%s" % (self.rig.led_path(), self.BLOCK_LATE_S,
+                                run_log_said(self.launch.logfile)))
         if not self.launch.alive():
             # A board record can appear before the game is ready. It does
             # not make an exited launcher alive: clean the run we owned,
@@ -1853,6 +1893,7 @@ class Bridge:
                 log("retrying %s once after its startup process exited" % self.title)
                 self.start_t = time.monotonic()
                 self.boot, self.ready_t = None, 0.0
+                self._board_t, self._block_said = None, False
                 self.front_done, self.front_tries = False, {}
                 self.lcd_placed = False
                 self.lcd_tries = self.lcd_stable = 0
@@ -1873,8 +1914,8 @@ class Bridge:
                         self.launch = None
                     self._loading_end("failed Startup retry failed: %s" % exc)
                     return
-            log("the run started for %s ended before it came up (see %s)"
-                % (self.title, logfile))
+            log("the run started for %s ended before it came up (see %s)%s"
+                % (self.title, logfile, run_log_said(logfile)))
             self._loading_end("failed The emulator stopped before the game came up. Its log: %s"
                               % logfile)
         elif time.monotonic() - self.start_t > self.START_TIMEOUT_S:

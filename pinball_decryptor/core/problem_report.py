@@ -198,6 +198,42 @@ def vpx_log_tail(tab="", max_lines=MAX_VPX_LINES, now=None):
     return kept[-max_lines:]
 
 
+#: the run a table started (tools/spike2_emu/vpx/padlaunch.py: watch.sh's
+#: output, ``padvpx-<title>.log`` beside the controller log). The controller
+#: log only says a run never came up, or "ended before it came up (see
+#: <path>)" with the path a report hides; why is in this one (PAD-1208)
+MAX_VPX_RUN_LINES = 120
+#: the switch table's line per switch and the renderer's frame rate
+_VPX_RUN_NOISE = re.compile(r"^\[event\] \[sw\] id=|^\[padglhost\] [\d.]+ fps ")
+#: how much of the end of a run log is read (it is appended run after run)
+_VPX_RUN_READ = 2_000_000
+
+
+def vpx_run_log_tail(tab="", max_lines=MAX_VPX_RUN_LINES, now=None):
+    """``(file name, lines)`` of the table run log written last
+    (``padvpx-*.log``): its last *max_lines* lines, the switch table and
+    frame-rate lines left out, on the same terms as :func:`vpx_log_tail`.
+    ``("", [])`` when there is none, or it is old and the report is from
+    another tab."""
+    folder = os.path.dirname(vpx_log_path())
+    try:
+        logs = [os.path.join(folder, n) for n in os.listdir(folder)
+                if n.lower().startswith("padvpx-") and n.lower().endswith(".log")]
+        if not logs:
+            return "", []
+        path = max(logs, key=os.path.getmtime)
+        recent = (now or time.time()) - os.path.getmtime(path) < VPX_RECENT_S
+        if tab != "Visual Pinball" and not recent:
+            return "", []
+        with open(path, "rb") as fh:
+            fh.seek(max(0, os.path.getsize(path) - _VPX_RUN_READ))
+            lines = fh.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return "", []
+    kept = [ln[:1000] for ln in lines if ln.strip() and not _VPX_RUN_NOISE.match(ln)]
+    return os.path.basename(path), kept[-max_lines:]
+
+
 # --------------------------------------------------------------- the picture
 def shrink_picture(source):
     """``(jpeg_bytes, "image/jpeg")`` for *source* (a path or bytes),
@@ -353,6 +389,11 @@ def as_text(report):
         lines += ["", "Visual Pinball controller log (last %d lines)" % len(vpx),
                   "-" * 24]
         lines += [fix(ln) for ln in vpx]
+    run = report.get("vpx_run_log") or {}
+    if run.get("lines"):
+        lines += ["", "Visual Pinball run log, %s (last %d lines)"
+                  % (run.get("name") or "padvpx.log", len(run["lines"])), "-" * 24]
+        lines += [fix(ln) for ln in run["lines"]]
     return "\n".join(lines) + "\n"
 
 

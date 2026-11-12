@@ -6155,3 +6155,60 @@ def test_jaws_plunger_key_pulls_the_plunger_and_lockbar_is_action(tmp_path):
         assert why in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
         script.write_text(out, encoding="utf-8")
         assert why not in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
+
+
+def test_a_run_whose_block_never_comes_says_what_its_log_says(tmp_path, monkeypatch):
+    """PAD-1208: every table on one PC got its board record and then sat:
+    the game's output block never came, the controller said nothing for a
+    minute, and a run that died said only "see <path>" - a path the report
+    leaves out. Both now carry the run log's last telling lines."""
+    pc = pytest.importorskip("padcontroller")
+    said = []
+    monkeypatch.setattr(pc, "log", said.append)
+    logfile = tmp_path / "padvpx-batman.log"
+    logfile.write_text("[watch] slot 1\n[event] [sw] id=1  num=1 x\n"
+                       "[padglhost] 30.0 fps (290 frames total)\n"
+                       "[cardmount] fuse2fs refused the cached card\n", encoding="utf-8")
+    led = tmp_path / "padled"
+    led.write_bytes(b"\0" * 64)                               # there, never with its magic
+
+    class Rig:
+        how = "rig board slot 1 (batman)"
+        dump = str(tmp_path)
+
+        def led_path(self):
+            return str(led)
+
+    class Launch:
+        slot = 1
+        up = True
+
+        def __init__(self):
+            self.logfile = str(logfile)
+
+        def alive(self):
+            return self.up
+
+        def stop(self):
+            pass
+
+    b = pc.Bridge()
+    b.title = "batman"
+    b.running = False
+    b.launch, b.rig = Launch(), Rig()
+    b.start_t = pc.time.monotonic()
+    monkeypatch.setattr(b, "_loading_end", lambda *a: None)
+    b._poll_starting()
+    assert not said                                           # its first sight of the block
+    b._board_t -= b.BLOCK_LATE_S + 1
+    b._poll_starting()
+    b._poll_starting()                                        # once
+    assert len(said) == 1
+    assert "not up %d s after its board record" % b.BLOCK_LATE_S in said[0]
+    assert "    | [cardmount] fuse2fs refused the cached card" in said[0]
+    assert "fps" not in said[0] and "id=1" not in said[0]
+    b.launch.up = False
+    b._poll_starting()
+    assert "ended before it came up" in said[-1] and "fuse2fs refused" in said[-1]
+    assert pc.run_log_tail(str(tmp_path / "gone.log")) == []
+    assert pc.run_log_said(str(tmp_path / "gone.log")) == ""

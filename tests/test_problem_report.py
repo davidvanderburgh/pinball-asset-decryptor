@@ -253,6 +253,35 @@ def test_a_visual_pinball_report_carries_the_controller_log(tmp_path, monkeypatc
     assert "controller log" not in R.as_text(_report())
 
 
+def test_a_visual_pinball_report_carries_the_run_log(tmp_path, monkeypatch):
+    """PAD-1208: the controller log said a table's run never came up, or
+    "ended before it came up (see <path>)" with the path hidden; why was in
+    the run's own padvpx-<title>.log, which no report carried."""
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    assert R.vpx_run_log_tail("Visual Pinball") == ("", [])
+    old = tmp_path / "padvpx-bond.log"
+    old.write_text("[watch] bond\n", encoding="utf-8")
+    os.utime(str(old), (1000, 1000))
+    log = tmp_path / "padvpx-batman.log"
+    log.write_text("\n".join(
+        ["[watch] slot 1 C:\\Users\\x\\batman.raw"]
+        + ["[event] [sw] id=%d  num=%d" % (i, i) for i in range(300)]
+        + ["[padglhost] 30.0 fps (290 frames total)", "",
+           "[cardmount] fuse2fs refused the card"]) + "\n", encoding="utf-8")
+    name, tail = R.vpx_run_log_tail("Visual Pinball")
+    assert name == "padvpx-batman.log"
+    assert tail == ["[watch] slot 1 C:\\Users\\x\\batman.raw",
+                    "[cardmount] fuse2fs refused the card"]
+    assert len(R.vpx_run_log_tail("Visual Pinball", max_lines=1)[1]) == 1
+    later = os.path.getmtime(str(log)) + R.VPX_RECENT_S + 1
+    assert R.vpx_run_log_tail("Stern Pinball", now=later) == ("", [])
+    assert R.vpx_run_log_tail("Visual Pinball", now=later)[1] == tail
+    text = R.as_text(_report(vpx_run_log={"name": name, "lines": tail}, hide_paths=True))
+    assert "Visual Pinball run log, padvpx-batman.log (last 2 lines)" in text
+    assert "[watch] slot 1 <path>" in text
+    assert "run log" not in R.as_text(_report())
+
+
 def test_a_picture_is_shrunk_to_a_small_jpeg():
     data, kind = R.shrink_picture(_png(3000, 2000))
     assert kind == "image/jpeg" and data[:3] == b"\xff\xd8\xff"

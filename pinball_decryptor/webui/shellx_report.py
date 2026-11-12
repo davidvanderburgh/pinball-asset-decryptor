@@ -217,6 +217,8 @@ class ReportMixin:
                 "facts": self._report_facts(),
                 "log": problem_report.log_tail(),
                 "vpx_log": problem_report.vpx_log_tail(tab),
+                "vpx_run_log": dict(zip(("name", "lines"),
+                                        problem_report.vpx_run_log_tail(tab))),
                 "text": text or "", "name": name or "",
                 "hide_paths": bool(hide_paths),
                 "paths": self._report_paths(),

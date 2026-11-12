@@ -76,6 +76,8 @@ const P = {
   zoomin: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5M11 8v6M8 11h6",
   zoomout: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5M8 11h6",
   fit: "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",
+  // PAD-1191: leave a video's full screen (the corners turned in)
+  unfit: "M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5",
   sd: "M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM10 3v4M13 3v4",
   disk: "M4 5h16v14H4zM4 15h16M8 18h.01",
   upload: "M12 16V4M7 9l5-5 5 5M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3",

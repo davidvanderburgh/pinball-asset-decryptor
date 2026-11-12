@@ -349,6 +349,76 @@ function PaneView({ side, view, look }) {
   </div>`;
 }
 
+// ------------------------------------------------------------- Full screen
+// PAD-1191 (Ben): a player goes full screen, as on YouTube: its button (or a double-click
+// on the picture) fills the screen with the clip and its play / seek bar, Esc or the
+// button again brings it back.  The page fills the window with the player itself (a page
+// asking for full screen is ignored by the app's window: WebView2 fills only its own
+// control, Qt WebEngine refuses it), and the app takes its window full screen with it
+// (shell.fullscreen).  In a browser there is no app window: the page asks the browser.
+const FULL_IDLE_MS = 2500;   // a still pointer over a playing clip hides the bar, as YouTube does
+
+async function screenFull(on) {
+  if (await call("shell.fullscreen", on)) return;
+  try {
+    if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen();
+    } else if (!on && document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+  } catch (e) { /* the browser said no: the player still fills the page */ }
+}
+
+export function useFullView(playing) {
+  const [full, setFull] = useState(false);
+  const [idle, setIdle] = useState(false);
+  const timer = useRef(0);
+  useEffect(() => {
+    if (!full) return undefined;
+    screenFull(true);
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setFull(false);
+    };
+    // the browser's own Esc (or F11) leaves its full screen: the player comes back with it
+    let wasFull = false;
+    const onChange = () => {
+      if (document.fullscreenElement) wasFull = true;
+      else if (wasFull) setFull(false);
+    };
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("fullscreenchange", onChange);
+      screenFull(false);
+    };
+  }, [full]);
+  const wake = () => {
+    setIdle(false);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setIdle(true), FULL_IDLE_MS);
+  };
+  useEffect(() => { if (full) wake(); else { clearTimeout(timer.current); setIdle(false); } }, [full, playing]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return {
+    full,
+    toggle: () => setFull((f) => !f),
+    // on the player's box: the class that fills the screen, and the pointer that wakes its bar
+    cls: full ? cx("vid-full", idle && playing && "vid-idle") : "",
+    onMouseMove: full ? wake : undefined,
+  };
+}
+
+export function FullButton({ fv, size = "sm" }) {
+  const label = fv.full ? "Exit full screen" : "Full screen";
+  return html`<${Button} size=${size} kind="ghost" icon=${fv.full ? "unfit" : "fit"} label=${label}
+    title=${fv.full ? "Exit full screen (Esc)" : "Full screen (or double-click the picture). Esc comes back."}
+    onClick=${(e) => { e.stopPropagation(); fv.toggle(); }} />`;
+}
+
 function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const vref = useRef(null);
   const [glLive, setGlLive] = useState(false);
@@ -361,6 +431,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const dur = (facts && facts.dur) || 0;
   const direct = !!(pane.path && facts && enginePlays(facts) && !failed);
   const src = pane.proxy || (direct ? pane.path : null);
+  const fv = useFullView(playing);
 
   useEffect(() => { setFailed(false); setPos(0); setPlaying(false); wantPlay.current = 0; }, [pane.seq]);
   // Ask Python for a playable copy when the engine can't take the file.
@@ -439,10 +510,10 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const fid = "vid-look-" + side;
   const fstyle = steps && steps.length && !glLive ? `filter: url(#${fid})` : undefined;
   const mediaKey = pane.path && src ? pane.seq + ":" + src : "";
-  return html`<div class="vid-pane">
-    ${head}
+  return html`<div class=${cx("vid-pane", fv.cls)} onMouseMove=${fv.onMouseMove}>
+    ${fv.full ? null : head}
     <${LookFilter} id=${fid} steps=${steps} />
-    <div class="vid-screen">
+    <div class="vid-screen" onDblClick=${pane.path ? fv.toggle : undefined}>
       ${mediaKey ? html`<video key=${mediaKey} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
           poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="metadata" playsinline
           onPlay=${(e) => { setPlaying(true); songFollow(e.currentTarget, "play"); }}
@@ -463,8 +534,9 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
         disabled=${!src || !(dur > 0)} aria-label=${"Seek " + (pane.title || "")}
         onInput=${(e) => { const v = vref.current; const t = Number(e.target.value); setPos(t); if (v) v.currentTime = t; }} />
       <span class="mono small muted nw">${clock(pos, pane.path ? dur : 0)}</span>
+      ${pane.path ? html`<${FullButton} fv=${fv} />` : null}
     </div>
-    ${look && look.offered && pane.path ? html`<${PaneView} side=${side} view=${(look.views || {})[side]} look=${look} />` : null}
+    ${fv.full ? null : look && look.offered && pane.path ? html`<${PaneView} side=${side} view=${(look.views || {})[side]} look=${look} />` : null}
   </div>`;
 }
 
@@ -517,6 +589,7 @@ function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove
   const dur = (facts && facts.dur) || 0;
   const direct = !!(pane.path && facts && enginePlays(facts) && !failed);
   const src = pane.proxy || (direct ? pane.path : null);
+  const fv = useFullView(playing);
 
   useEffect(() => { setFailed(false); setPos(0); setPlaying(false); }, [pane.seq]);
   useEffect(() => {
@@ -553,20 +626,21 @@ function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove
   const mediaKey = pane.path && src ? pane.seq + ":" + src : "";
   const sides = (t.sides || []).map(([value, label]) => ({ value, label }));
   const name = (row && row.name) || t.rel.split("/").pop();
-  return html`<div class=${cx("vcm-tile", active && "on")}>
-    <div class="row vcm-tilehd">
+  return html`<div class=${cx("vcm-tile", active && "on", fv.cls)} onMouseMove=${fv.onMouseMove}>
+    ${fv.full ? null : html`<div class="row vcm-tilehd">
       <span class="mono small ellip vcm-name" ...${tip({ head: t.rel, lines: [pane.label ? `${pane.title}: ${pane.label}` : pane.title] })}>${name}</span>
       <span class="grow"></span>
       ${sides.length > 1 ? html`<${Seg} value=${t.side} options=${sides} onChange=${(v) => call("video.compare_side", t.id, v)} />`
         : html`<span class="small muted nw">${pane.title || "Original"}</span>`}
       <${Button} size="xs" kind="ghost" icon="x" title="Take this clip out of Compare" disabled=${!canRemove}
         onClick=${() => call("video.compare_remove", t.id)} />
-    </div>
+    </div>`}
     <${LookFilter} id=${fid} steps=${steps} />
     <div class="vid-screen vcm-screen" role="button" tabindex="0" aria-pressed=${active ? "true" : "false"}
         aria-label=${"Pick " + name + " for the Color profiles bar"}
-        onClick=${onPick} onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
-        ...${tip(active ? "The clip the Color profiles bar changes, and the one you hear." : "Click: the Color profiles bar changes this clip's colors, and it is the one you hear.")}>
+        onClick=${onPick} onDblClick=${pane.path ? fv.toggle : undefined}
+        onKeyDown=${(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
+        ...${fv.full ? {} : tip(active ? "The clip the Color profiles bar changes, and the one you hear." : "Click: the Color profiles bar changes this clip's colors, and it is the one you hear.")}>
       ${mediaKey ? html`<video key=${mediaKey} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
           poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="auto" playsinline loop=${loop} muted=${!active}
           onPlay=${() => seen(true)} onPause=${() => seen(false)} onEnded=${() => seen(false)}
@@ -575,7 +649,7 @@ function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove
         : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" style=${fstyle} />` : null}
       ${offered && pane.path ? html`<${LookGL} media=${vref} mediaKey=${mediaKey} poster=${pane.poster}
         lut=${t.lut || null} onLive=${setGlLive} />` : null}
-      <${CmpBadge} row=${row} cs=${cs} />
+      ${fv.full ? null : html`<${CmpBadge} row=${row} cs=${cs} />`}
       ${overlay}
     </div>
     <div class="row vid-transport">
@@ -584,8 +658,9 @@ function CmpTile({ t, row, cs, offered, active, onPick, stopSeq, loop, canRemove
         disabled=${!src || !(dur > 0)} aria-label=${"Seek " + name}
         onInput=${(e) => { const v = vref.current; const x = Number(e.target.value); setPos(x); if (v) v.currentTime = x; }} />
       <span class="mono small muted nw">${clock(pos, pane.path ? dur : 0)}</span>
+      ${pane.path ? html`<${FullButton} fv=${fv} />` : null}
     </div>
-    <${CmpColor} t=${t} row=${row} cs=${cs} />
+    ${fv.full ? null : html`<${CmpColor} t=${t} row=${row} cs=${cs} />`}
   </div>`;
 }
 

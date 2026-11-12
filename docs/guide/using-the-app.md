@@ -378,6 +378,13 @@ selected clip, read from its program.
 - Not listed: a sound the game picks at random, or one in the clip's own
   audio track.
 
+### A clip's song (other makers)
+
+For JJP and the other makers, a long clip lists the song whose name ends the same way and runs about as long.
+
+- **Play it with the clip** starts, pauses, seeks and stops the song with whichever player plays.
+- The callout shows how the two lengths compare and links the song on the **Audio** tab.
+
 ### Undo and redo
 
 **Undo** and **Redo** at the top of the tab (Ctrl+Z; Ctrl+Y or

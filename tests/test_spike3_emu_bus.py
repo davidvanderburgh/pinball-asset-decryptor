@@ -108,7 +108,9 @@ def test_eject_launch_drain():
     b.coil(8, bytes([0x40, 4, 0x96, 6] + [0] * 7))
     _run(b, 0.2)
     assert not b.made((8, 28)) and b.in_play == 1
-    assert b.drain() and b.home() == 6
+    assert b.drain()                                         # rolls home (PAD-1181)
+    _run(b, 0.3)
+    assert b.home() == 6
 
 
 def test_eject_retry_inside_the_gap_moves_one_ball():

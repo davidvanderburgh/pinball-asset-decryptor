@@ -1,4 +1,5 @@
-"""hwshim.c's led_wide_walk and leddecode.wide_decode must stay twins.
+"""hwshim.c's led_wide_walk and leddecode.wide_decode must stay twins -
+levels and, since PAD-1189, channel B's fade times (leddecode.wide_fades).
 
 The rig has two implementations of this grammar on purpose - the C one runs
 inside the emulated game and is the only one that can see the wire, the Python
@@ -72,7 +73,7 @@ HARNESS = r"""
 
 int main(int argc, char **argv)
 {
-    unsigned char body[512], idx[96], val[96];
+    unsigned char body[512], idx[96], val[96], fade[96];
     unsigned cmd, blen, n = 0, i;
     int len = 0;
     const char *h;
@@ -84,11 +85,11 @@ int main(int argc, char **argv)
         h += 2;
     }
     blen = (unsigned)len;
-    if (!led_wide_walk(body, blen, cmd, idx, val, &n)) {
+    if (!led_wide_walk(body, blen, cmd, idx, val, fade, &n)) {
         printf("REFUSED\n");
         return 0;
     }
-    for (i = 0; i < n; i++) printf("%%u:%%u ", idx[i], val[i]);
+    for (i = 0; i < n; i++) printf("%%u:%%u:%%u ", idx[i], val[i], fade[i]);
     printf("\n");
     return 0;
 }
@@ -117,7 +118,8 @@ def _c_side(cbin, cmd, body):
     if out == "REFUSED":
         return None
     pairs = [p.split(":") for p in out.split()]
-    return [int(a) for a, _ in pairs], [int(b) for _, b in pairs]
+    return ([int(a) for a, _, _ in pairs], [int(b) for _, b, _ in pairs],
+            [int(f) for _, _, f in pairs])
 
 
 def _py_side(cmd, body):
@@ -126,7 +128,12 @@ def _py_side(cmd, body):
     # sides are fed the same bytes through each one's real entry point.
     frame = bytes([0x80, len(body) + 2, cmd]) + body + bytes([0, 0])
     frame = frame[:-2] + bytes([(-sum(frame[:-2])) & 0xFF, 0])
-    return leddecode.wide_decode(frame)
+    d = leddecode.wide_decode(frame)
+    if d is None:
+        return None
+    # channel B, the fade time (PAD-1189): None (the frame says none) is C's 0
+    f = leddecode.wide_fades(frame)
+    return d[0], d[1], [x or 0 for x in f[3]]
 
 
 def _frames():
@@ -146,6 +153,7 @@ def test_c_and_python_agree_on_real_frames(cbin, cmd):
     assert c is not None, "cmd %02x: Python decoded a frame C refused" % cmd
     assert c[0] == p[0], "cmd %02x: the two sides address different lamps" % cmd
     assert c[1] == p[1], "cmd %02x: the two sides give different levels" % cmd
+    assert c[2] == p[2], "cmd %02x: the two sides give different fade times" % cmd
 
 
 def test_c_and_python_agree_on_mutations(cbin):
@@ -175,7 +183,7 @@ def test_c_and_python_agree_on_mutations(cbin):
                     assert c is not None, (
                         "cmd %02x body %s: Python decoded, C refused"
                         % (cmd, m.hex()))
-                    assert c[0] == p[0] and c[1] == p[1], (
+                    assert c[0] == p[0] and c[1] == p[1] and c[2] == p[2], (
                         "cmd %02x body %s: twins disagree" % (cmd, m.hex()))
     assert checked > 100, "the mutation sweep did not actually run"
     assert base  # keeps the corpus reference honest if 0x8a is ever removed

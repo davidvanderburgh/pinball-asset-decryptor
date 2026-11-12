@@ -12746,14 +12746,19 @@ static int led_dec_log(void)
  * window at all - can be read without inventing a rule about which boards are
  * allowed to be lamps. Frames that do not close are counted in wide_skipped.
  *
- * CHANNEL B IS DECODED BUT NOT PUBLISHED. Every lamp on this generation
- * carries two bytes (the cmd 0x70 builder at 0x51c2b4 scales and sends both).
- * What the second one MEANS is not established: the values seen on the wire
- * come from a small repeating alphabet (0x08, 0x0f, 0x1e) that looks like a
- * rate or a curve id beside channel A's plain 0x00/0x10/0xff levels, and
- * "looks like" is not a finding. Its bytes are walked so the frame can be
- * length-checked, and then dropped. When somebody reads the board firmware or
- * runs the service LED test against it, it gets a name and a plane of its own.
+ * ★ CHANNEL B IS THE LAMP'S FADE TIME (PAD-1189), the time the board takes
+ * to go from the lamp's level to the new one. Over 76,804 lamp writes in two
+ * Spike 3 attracts (star_wars_2025_le, pokemon_le - the same grammar) it was
+ * never 255 and never equal to a lit lamp's level, so not a second level a
+ * lamp blinks to (a steady lamp would carry its own), only a small alphabet
+ * 0..62; and the larger it is the longer the game holds the lamp before its
+ * next change (2: ~35 ms, 6: ~170 ms, 20: ~0.67 s, 30: ~1 s). The board
+ * ramps; the wire never carries the steps. led_wide_fades puts each change
+ * that has one in the fade ring as a one-way envelope (old -> new, back in
+ * 0), which the window already runs on top of val[]. The UNIT is not
+ * established (the boards' firmware is encrypted): PAD_FADE_B_UNIT_MS,
+ * default 10 - pokemon_le's B=60 chase steps every 0.600 s exactly.
+ * leddecode.wide_fades is the twin.
  */
 static unsigned popcount8(unsigned v)
 {
@@ -12782,7 +12787,8 @@ static int led_wide_long(unsigned cmd, const unsigned char *body, unsigned blen)
 }
 
 static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
-                         unsigned char *idx, unsigned char *val, unsigned *nout)
+                         unsigned char *idx, unsigned char *val, unsigned char *fade,
+                         unsigned *nout)
 {
     unsigned A = cmd & 0x03, B = cmd & 0x1c, M = cmd & 0x20;
     unsigned p = 0, cnt = 0, i, k, sel = 0, sl = 0;
@@ -12906,18 +12912,33 @@ static int led_wide_walk(const unsigned char *body, unsigned blen, unsigned cmd,
         p++;
     }
 
-    /* Channel B is walked for its LENGTH and then dropped - see the header. */
-    if (B == 0) {
+    /* Channel B: each lamp's FADE TIME (PAD-1189 - see the header), into
+     * fade[] when the caller wants it (0 = the frame says none: snap). */
+    if (B == 0) {                            /* one time each                */
         if (p + cnt > blen) return 0;
+        if (fade) for (i = 0; i < cnt; i++) fade[i] = body[p + i];
         p += cnt;
     } else {
-        if (B & 0x10) p++;
-        if ((B & 0x0c) == 0x08) {
+        unsigned char base = 0;
+        if (B & 0x10) {                      /* the unselected lamps' time    */
+            if (p + 1 > blen) return 0;
+            base = body[p++];
+        }
+        if (fade) for (i = 0; i < cnt; i++) fade[i] = base;
+        if ((B & 0x0c) == 0x08) {            /* one time for the selected     */
+            if (p + 1 > blen) return 0;
+            if (fade)
+                for (k = 0; k < cnt; k++)
+                    if (body[sel + (k >> 3)] >> (k & 7) & 1) fade[k] = body[p];
             p++;
-        } else if ((B & 0x0c) == 0x0c) {
+        } else if ((B & 0x0c) == 0x0c) {     /* one time per selected lamp    */
             if (!sl) return 0;
             for (k = 0; k < cnt; k++)
-                p += body[sel + (k >> 3)] >> (k & 7) & 1;
+                if (body[sel + (k >> 3)] >> (k & 7) & 1) {
+                    if (p >= blen) return 0;
+                    if (fade) fade[k] = body[p];
+                    p++;
+                }
         }
     }
     if (p != blen) return 0;                 /* ★ the whole safety net       */
@@ -13024,10 +13045,73 @@ static int led_wide_settled(void)
  * nothing decoded, which is what keeps them comparable with older runs.
  * wide_decoded/wide_skipped answer the separate question "how did THIS decoder
  * do", and a frame can honestly appear in both. */
+/* PAD-1189: the fade ring entries for one wide frame's lamps - each lamp
+ * whose level changes with a fade time (channel B) goes FROM its level in
+ * val[] (read BEFORE the frame lands there) TO the new one at that time, and
+ * back in 0, so the window ramps it and lets go on val[]. Neighbours going
+ * the same way at the same time share one entry (a range), so a chase step
+ * of 45 lamps is a handful of entries in the 96-entry ring. The ring's rate
+ * unit is the window's (playfield.py FADE_UNIT_MS, 12 ms); channel B's is
+ * PAD_FADE_B_UNIT_MS (default 10). s3leds.PadLed._fades is the twin. */
+static void led_fade_entry(unsigned node, unsigned start, unsigned end,
+                           unsigned char from, unsigned char to, unsigned units)
+{
+    unsigned slot = led_shm->fade_head % 96u;
+    led_shm->fade[slot].ms    = (unsigned)pad_ms();
+    led_shm->fade[slot].node  = (unsigned char)node;
+    led_shm->fade[slot].start = (unsigned char)start;
+    led_shm->fade[slot].end   = (unsigned char)end;
+    led_shm->fade[slot].from  = from;
+    led_shm->fade[slot].to    = to;
+    led_shm->fade[slot].rise  = (unsigned char)(to >= from ? units : 0);
+    led_shm->fade[slot].fall  = (unsigned char)(to >= from ? 0 : units);
+    led_shm->fade[slot].pad   = 0;
+    led_shm->fade_head++;     /* AFTER the entry, single writer */
+}
+
+static void led_wide_fades(unsigned node, const unsigned char *idx,
+                           const unsigned char *val, const unsigned char *fade,
+                           unsigned cnt)
+{
+    static int unit10 = -1;                  /* channel-B unit, in 0.1 ms   */
+    unsigned i, have = 0, s0 = 0, s1 = 0, u0 = 0;
+    unsigned char f0 = 0, t0 = 0;
+    if (!led_shm || node >= 16 || !fade) return;
+    if (unit10 < 0) {                        /* "10", "12.5": tenths of a ms */
+        const char *e = getenv("PAD_FADE_B_UNIT_MS");
+        int v = 0, frac = -1;
+        for (; e && *e; e++) {
+            if (*e == '.' && frac < 0) { frac = 0; continue; }
+            if (*e < '0' || *e > '9' || v > 100000) break;
+            if (frac < 0) v = v * 10 + (*e - '0');
+            else if (frac++ == 0) v = v * 10 + (*e - '0');
+        }
+        if (frac < 1) v *= 10;               /* no tenths digit given        */
+        unit10 = v > 0 ? v : 100;
+    }
+    for (i = 0; i < cnt; i++) {
+        unsigned char old, to = val[i];
+        unsigned units;
+        if (idx[i] >= 96 || !fade[i]) continue;
+        old = led_shm->val[node][idx[i]];
+        if (old == to) continue;
+        units = (fade[i] * (unsigned)unit10 + 60) / 120;   /* -> 12 ms units */
+        if (units < 1) units = 1;
+        if (units > 255) units = 255;
+        if (have && idx[i] == s1 + 1 && old == f0 && to == t0 && units == u0) {
+            s1 = idx[i];
+            continue;
+        }
+        if (have) led_fade_entry(node, s0, s1, f0, t0, u0);
+        have = 1; s0 = s1 = idx[i]; f0 = old; t0 = to; u0 = units;
+    }
+    if (have) led_fade_entry(node, s0, s1, f0, t0, u0);
+}
+
 static int led_wide_publish(unsigned node, unsigned cmd,
                             const unsigned char *body, unsigned blen)
 {
-    unsigned char idx[96], val[96];
+    unsigned char idx[96], val[96], fade[96];
     unsigned cnt = 0, i, cmd0 = cmd;
     int bank;
 
@@ -13045,7 +13129,7 @@ static int led_wide_publish(unsigned node, unsigned cmd,
     /* The long bitmap body is refused on THIS path
      * item mode-leds: the per-title verdict and what it publishes stay exactly
      * what they were. The per-node path below (led_node_wide_publish) reads it. */
-    if (bank < 0 || led_wide_long(cmd, body, blen) || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+    if (bank < 0 || led_wide_long(cmd, body, blen) || !led_wide_walk(body, blen, cmd, idx, val, fade, &cnt)) {
         led_wide_dialect(0);
         led_map();
         /* ★ EXCEPT A STRIP BOARD'S, ONCE THE TITLE'S VERDICT IS IN (PAD-500).
@@ -13073,7 +13157,7 @@ static int led_wide_publish(unsigned node, unsigned cmd,
          * not put them back. */
         if (bank >= 0 && led_wide_settled() && led_shm
                 && led_wide_long(cmd, body, blen)
-                && led_wide_walk(body, blen, cmd, idx, val, &cnt)) {
+                && led_wide_walk(body, blen, cmd, idx, val, 0, &cnt)) {
             if (led_insert_node(node) && bank == 0)
                 for (i = 0; i < cnt; i++)
                     if (node < 16 && idx[i] < 96) led_wide_owns[node][idx[i]] = 1;
@@ -13084,7 +13168,7 @@ static int led_wide_publish(unsigned node, unsigned cmd,
         /* PAD-1093: the vote is still out - keep what this long frame says */
         if (bank >= 0 && led_wide_verdict < 0 && !led_wide_settled()
                 && led_wide_long(cmd, body, blen)
-                && led_wide_walk(body, blen, cmd, idx, val, &cnt))
+                && led_wide_walk(body, blen, cmd, idx, val, 0, &cnt))
             led_pend_put(node, bank, idx, val, cnt);
         if (led_shm && led_shm_len >= 8192) led_shm->wide_skipped++;
         return 0;
@@ -13133,6 +13217,7 @@ static int led_wide_publish(unsigned node, unsigned cmd,
         if (led_shm_len >= 8192) led_shm->wide_decoded++;
         return 1;
     }
+    led_wide_fades(node, idx, val, fade, cnt);    /* PAD-1189, before val[] moves */
     for (i = 0; i < cnt; i++) {
         if (node < 16 && idx[i] < 96) led_wide_owns[node][idx[i]] = 1;
         led_val(node, idx[i], val[i]);
@@ -13204,7 +13289,7 @@ static void led_pend_offer(unsigned node, unsigned cmd,
     if (!wide || led_wide_verdict >= 0 || led_wide_settled()) return;
     if ((cmd & 0xc0) != 0x80 || blen < 1) return;
     bank = led_wide_strip_bank(&cmd, &body, &blen);
-    if (bank < 0 || !led_wide_walk(body, blen, cmd, idx, val, &cnt)) return;
+    if (bank < 0 || !led_wide_walk(body, blen, cmd, idx, val, 0, &cnt)) return;
     led_pend_put(node, bank, idx, val, cnt);
 }
 
@@ -13214,13 +13299,13 @@ static unsigned short led_node_votes[16], led_node_yes[16];
 static int led_node_wide_publish(unsigned node, unsigned cmd,
                                  const unsigned char *body, unsigned blen)
 {
-    unsigned char idx[96], val[96];
+    unsigned char idx[96], val[96], fade[96];
     unsigned cnt = 0, i, ok, cmd0 = cmd;
     int bank;
     if (node >= 16 || (cmd & 0xc0) != 0x80 || blen < 1 || led_wide_settled()) return 0;
     if (led_node_verdict[node] < 0) return 0;
     bank = led_wide_strip_bank(&cmd, &body, &blen);     /* item 165: a banked board's prefix */
-    ok = bank >= 0 && led_wide_walk(body, blen, cmd, idx, val, &cnt);
+    ok = bank >= 0 && led_wide_walk(body, blen, cmd, idx, val, fade, &cnt);
     if (!led_node_verdict[node]) {
         if (ok && cnt < 2) return 0;             /* one lamp: no vote           */
         led_node_votes[node]++;
@@ -13249,6 +13334,7 @@ static int led_node_wide_publish(unsigned node, unsigned cmd,
         if (led_shm_len >= 8192) led_shm->wide_decoded++;
         return 1;
     }
+    led_wide_fades(node, idx, val, fade, cnt);    /* PAD-1189, before val[] moves */
     for (i = 0; i < cnt; i++) {
         led_wide_owns[node][idx[i]] = 1;
         led_val(node, idx[i], val[i]);

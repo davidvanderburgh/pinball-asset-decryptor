@@ -102,6 +102,50 @@ def test_s3leds_publishes_lamps_and_coils_at_padled_offsets(tmp_path):
     assert not path.exists()            # gone = the run ended (playfield.py)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="mmap of a growing file: the rig runs it in WSL")
+def test_s3leds_publishes_channel_b_as_a_fade_the_window_runs(tmp_path):
+    """PAD-1189: a lamp write's channel B is the board's fade time. A level
+    that changes with one goes in padled's fade ring as a one-way envelope,
+    old -> new, back in 0 - and playfield.py's own reader (LedRing) ramps it
+    and lets go on val[]. A lamp that stays where it was costs no entry, and
+    neighbours going the same way share one."""
+    import leddecode
+    import playfield
+    import s3leds
+    path = tmp_path / "padled"
+    led = s3leds.PadLed(str(path))
+    # pokemon_le attract, node 9 (cmd 9a: per-lamp levels, base + selected
+    # fade): lamps 32..58, of which only 45 and 46 come on - fade 6
+    real = bytes.fromhex("9ac047ff07f09fff0000000000000000000000000000ffff00000000000000"
+                         "0000000000060ec9")
+    bank, idxs, vals, fades = leddecode.wide_fades(bytes([0x89, len(real)]) + real + b"\x00")
+    assert dict(zip(idxs, fades))[45] == 6 and dict(zip(idxs, fades))[47] == 14
+    led.frame(9, real)
+    d = path.read_bytes()
+    assert struct.unpack_from("<I", d, s3leds.FADE_HEAD)[0] == 1      # 45..46, one entry
+    ring = playfield.LedRing.__new__(playfield.LedRing)
+    ring.overlay, ring._fade_seen = {}, 0
+    assert ring._take_fades(d, 100.0) == 1
+    env = ring.overlay[(9, 45)]
+    assert ring.overlay[(9, 46)] is env and (9, 44) not in ring.overlay
+    unit = leddecode.FADE_B_UNIT_MS / 1000.0
+    assert (env["frm"], env["to"], env["back_s"]) == (0, 255, 0)
+    assert abs(env["out_s"] - 6 * unit) < 0.012                     # one ring unit
+    assert ring._env_level(env, 100.0 + 3 * unit) == pytest.approx(127.5, abs=30)
+    assert ring._env_level(env, 100.0 + 7 * unit) is None           # lands on val[]
+    assert d[s3leds.VAL + 9 * 96 + 45] == 255
+    # cmd 94: lamp 45 back to 0 (A=0), base fade 60 - a fall
+    led.frame(9, bytes([0x94, 45, 60, 0]))
+    d = path.read_bytes()
+    assert ring._take_fades(d, 200.0) == 1
+    env = ring.overlay[(9, 45)]
+    assert (env["frm"], env["to"]) == (255, 0)
+    assert abs(env["out_s"] - 60 * unit) < 0.012
+    led.frame(9, bytes([0x94, 45, 60, 0]))                           # already 0: nothing
+    assert struct.unpack_from("<I", path.read_bytes(), s3leds.FADE_HEAD)[0] == 2
+    led.close()
+
+
 def test_s3leds_publishes_a_boards_channels_past_96_in_the_hi_plane(tmp_path):
     """PAD-1152: the cabinet strips (node 2: 288/432 channels), speaker panel
     and topper take their lamps past the first 96 in banks of 96 - dropped

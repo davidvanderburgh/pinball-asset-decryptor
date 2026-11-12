@@ -47,6 +47,7 @@ bytes mean, which is the whole reason they are separate.
 Coverage is printed. Do not read a decoded playfield as complete.
 """
 import collections
+import os
 import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
@@ -160,7 +161,8 @@ def wide_decode(b):
     THE COMMAND BYTE IS THE GRAMMAR:
 
         A = cmd & 0x03   how the LEVEL is carried
-        B = cmd & 0x1c   how channel B is carried (walked, then dropped)
+        B = cmd & 0x1c   how channel B, each lamp's FADE TIME, is carried
+                         (wide_fades returns it; this returns levels only)
         M = cmd & 0x20   index LIST rather than a single index (short body)
 
     ★ A == 0 AND A == 1 CARRY A LEVEL WITHOUT SPENDING A BYTE ON IT, which is
@@ -173,6 +175,12 @@ def wide_decode(b):
     as "this frame says nothing about brightness" costs every lamp the game
     turns fully ON with one, and that is most of batman's node 8.
     """
+    r = _wide_walk(b)
+    return (r[0], r[1]) if r else None
+
+
+def _wide_walk(b):
+    """wide_decode's walk: (idxs, levels, fades), fades as wide_fades says."""
     if len(b) < 6 or not b[0] & 0x80:
         return None
     cmd, body = b[2], b[3:-2]
@@ -301,21 +309,71 @@ def wide_decode(b):
         vals = [body[p]] * cnt
         p += 1
 
-    # Channel B is walked for its LENGTH and then dropped - see the header.
-    if B == 0:
+    # Channel B: each lamp's FADE TIME (wide_fades, PAD-1189). hwshim.c's
+    # twin walks it for its length only; the decode is the same either way.
+    fades = [None] * cnt
+    if B == 0:                              # one byte each
+        if p + cnt > len(body):
+            return None
+        fades = list(body[p:p + cnt])
         p += cnt
     else:
-        if B & 0x10:
+        base = None
+        if B & 0x10:                        # the unselected lamps' time
+            if p + 1 > len(body):
+                return None
+            base = body[p]
             p += 1
-        if B & 0x0C == 0x08:
+        fades = [base] * cnt
+        if B & 0x0C == 0x08:                # one time for the selected lamps
+            if p + 1 > len(body):
+                return None
+            for k in range(cnt):
+                if sel[k >> 3] >> (k & 7) & 1:
+                    fades[k] = body[p]
             p += 1
-        elif B & 0x0C == 0x0C:
+        elif B & 0x0C == 0x0C:              # one time per selected lamp
             if sel is None:
                 return None
-            p += sum(sel[k >> 3] >> (k & 7) & 1 for k in range(cnt))
+            for k in range(cnt):
+                if sel[k >> 3] >> (k & 7) & 1:
+                    if p >= len(body):
+                        return None
+                    fades[k] = body[p]
+                    p += 1
     if p != len(body):
         return None
-    return idxs, vals
+    return idxs, vals, fades
+
+
+#: Milliseconds per unit of a channel-B fade time. NOT ESTABLISHED - the node
+#: boards' firmware is encrypted - and so it is a knob, like playfield.py's
+#: PAD_PF_FADE_UNIT_MS for the a2 pulses. 10 fits what the wire shows: in
+#: pokemon_le's attract a chase sent with B=60 steps every 0.600 s exactly,
+#: and no time seen (2..62) then exceeds the hold the game gives its lamp.
+FADE_B_UNIT_MS = float(os.environ.get("PAD_FADE_B_UNIT_MS") or 10)
+
+
+def wide_fades(b):
+    """(bank, idxs, levels, fades) for a plain or bank-form frame, or None.
+
+    ★ CHANNEL B IS A FADE TIME (PAD-1189), the time the board takes to go
+    from the lamp's level to the new one - not a second level. Over 76,804
+    lamp writes in star_wars_2025_le's and pokemon_le's attract it was never
+    255 and never equal to a lit lamp's level (a steady lamp would carry its
+    own level as a blink partner), only a small alphabet 0..62; and the
+    larger it is, the longer the game holds the lamp before its next change
+    (B=2: ~35 ms, 6: ~170 ms, 20: ~0.67 s, 30: ~1 s, 50: ~1.6-1.9 s). The
+    tail it rides in: B == 0 one time per lamp; else an optional base byte
+    for every lamp (B & 0x10), then one time for the lamps the selector
+    bitmap picks (B & 0x0c == 8) or one each (== 0x0c). fades[k] is None
+    when the frame says nothing about lamp k's time (snap)."""
+    r = wide_bank(b)
+    if r is None:
+        return None
+    bank, frame = r
+    d = _wide_walk(frame)
+    return (bank,) + d if d else None
 
 
 def wide_bank(b):

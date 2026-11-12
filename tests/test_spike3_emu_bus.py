@@ -146,27 +146,54 @@ def test_playfield_switches_are_active_low():
     """The game's Ball Trough Test shows a trough ball for wire bit 0: a
     board carrying PLAYFIELD switches (by location word) answers closed as 0
     on EVERY input - the flipper buttons on node 8 included (PAD-1090: taken
-    active high, one flipper tap ran the service menu for ever) - while the
-    cabinet board (node 1: Start) stays high."""
+    active high, one flipper tap ran the service menu for ever) - and the
+    cabinet board's switches too (PAD-1189, test below)."""
     import s3nodes
     PF, CAB = 0x0A6A, 0x0A67
     devs5 = [("START BUTTON", 1, 11, "switch", CAB), ("TROUGH 1", 8, 37, "switch", PF),
              ("SHOOTER LANE", 8, 28, "switch", PF), ("LEFT FLIPPER BUTTON", 8, 25, "switch", CAB)]
     masks = s3nodes.active_low_masks(devs5)
     br = s3bridge.Bridge(0, open(os.devnull, "w"))
-    br.nodes[1] = _node(bytes([0, 0x08, 0, 0, 0, 0, 0, 0]))
+    br.nodes[1] = _node(bytes([0, 0x08, 0, 0, 0, 0, 0, 0]))   # START held
     br.nodes[8] = _node(bytes([0, 0, 0, 0, 0x20, 0, 0, 0]))   # TROUGH 1 closed
     br.set_polarity(masks)
-    assert br.nodes[1].low_mask == bytes(8)
+    assert br.nodes[1].low_mask == bytes([0, 0x08, 0, 0, 0, 0, 0, 0])
     m8 = br.nodes[8].low_mask
     assert m8[37 // 8] & (1 << 5) and m8[28 // 8] & (1 << 4)
     assert m8[25 // 8] & (1 << 1)                             # flipper button LOW too
     assert m8 == b"\xff" * 8                                   # the whole board
     r = br.nodes[1](bytes([0x11, 0x00, 0x00]), 11)
-    assert r[:8] == bytes([0, 0x08, 0, 0, 0, 0, 0, 0])
+    assert r[:8] == bytes(8)                                  # START held reads 0
     r = br.nodes[8](bytes([0x11, 0x00, 0x00]), 11)
     # TROUGH 1 closed reads 0; the open flipper button reads 1 (not held)
     assert r[4] & 0x20 == 0 and r[3] & 0x10 and r[3] & 0x02
+
+
+def test_cabinet_board_rests_released():
+    """PAD-1189: node 1's cabinet switches are active low. Taken active high,
+    its resting scan (the PAD-1139 baseline) told the game the SLAM TILT and
+    TILT PENDULUM were made at boot: TILT on the screen, and the game stopped
+    dead ~35 s later - no frame, no lamp - every title, every boot. At rest
+    the board answers Spike 2's measured node-1 word, 04 59 7f 00 ...: every
+    switch released (1), every bit without a switch 0; a coin clears its bit."""
+    import s3nodes
+    CAB = 0x0A67
+    names = {2: "LOCKDOWN BUTTON", 8: "TICKET NOTCH", 11: "START BUTTON",
+             12: "TOURNAMENT START BUTTON", 14: "TILT PENDULUM", 16: "LEFT COIN",
+             17: "CENTER COIN", 18: "RIGHT COIN", 19: "FOURTH COIN", 20: "FIFTH COIN",
+             21: "SIXTH COIN", 22: "SLAM TILT"}
+    devs5 = [(nm, 1, i, "switch", CAB) for i, nm in names.items()]
+    devs5.append(("TROUGH 1", 8, 37, "switch", 0x0A6A))
+    state = {"b": bytes(8)}
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    n = _node(bytes(8))
+    n.inputs = lambda: state["b"]
+    br.nodes[1] = n
+    br.set_polarity(s3nodes.active_low_masks(devs5))
+    scan = lambda: n(bytes([0x11, 0x00, 0x00]), 11)[:8]
+    assert scan() == bytes([0x04, 0x59, 0x7F, 0, 0, 0, 0, 0])
+    state["b"] = bytes([0, 0, 0x01, 0, 0, 0, 0, 0])      # LEFT COIN made
+    assert scan() == bytes([0x04, 0x59, 0x7E, 0, 0, 0, 0, 0])
 
 
 def test_short_press_is_queued_until_scanned():

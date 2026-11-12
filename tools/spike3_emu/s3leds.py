@@ -12,6 +12,14 @@ grammar Spike 3 speaks - its commands are 0x80..0xbf), a coil's fire count and
 drive byte from `40 IDX power...`, and what each coil is DRIVEN to (padled v5's
 drive table, PAD-1183: the window's Shaker panel times the shaker from it).
 
+A LAMP'S FADE (PAD-1189). Every lamp write carries a second channel, the
+time the board takes to fade from the lamp's old level to the new one
+(leddecode.wide_fades). The board ramps; the wire never carries the steps
+between. A level that changes with a fade time goes into padled's fade ring
+as a one-way envelope - FROM the old level TO the new one at that time, back
+in 0 - which playfield.py already runs on top of val[] for Spike 2's a2
+pulses, so the window ramps the lamp as the board would, and lands on val[].
+
     PadLed(path).frame(node, plain)     one unmasked node frame
 """
 import mmap
@@ -35,7 +43,10 @@ COIL = VAL + NODES * IDX                    # 1556: coil[16][16] fire count
 LVL = COIL + NODES * COILS                  # last drive byte
 COIL_GEN = LVL + NODES * COILS              # 2068
 COIL_DECODED = COIL_GEN + 4
-FADE_HEAD = COIL_DECODED + 4                # 2076, fade ring (unused here)
+FADE_HEAD = COIL_DECODED + 4                # 2076: fade ring head (written, ever)
+FADE_ENT, FADE_STRIDE, FADE_RING = FADE_HEAD + 4, 12, 96
+#: the ring's rate unit, as its reader scales it (playfield.py FADE_UNIT_MS)
+RING_UNIT_MS = float(os.environ.get("PAD_PF_FADE_UNIT_MS") or 12)
 SEEN = FADE_HEAD + 4 + 96 * 12              # 3232: seen[16][96]
 WIDE_DECODED = SEEN + NODES * IDX           # 4768
 WIDE_SKIPPED = WIDE_DECODED + 4
@@ -62,7 +73,7 @@ class PadLed:
         os.chmod(path, 0o644)
         struct.pack_into("<II", self.m, 0, MAGIC, VERSION)
         struct.pack_into("<II", self.m, DRIVE_T0, 0, TICKS_PER_S)
-        self.lamps = self.wide = self.wide_bad = self.fires = self.hi = 0
+        self.lamps = self.wide = self.wide_bad = self.fires = self.hi = self.fades = 0
 
     def _bump(self, off, n=1):
         v = struct.unpack_from("<I", self.m, off)[0]
@@ -127,14 +138,14 @@ class PadLed:
         # leddecode reads Spike 2's [addr][len][cmd][body][ck][pad]
         b = bytes([0x80 | node, len(plain)]) + bytes(plain) + b"\x00"
         try:
-            d = leddecode.wide_decode_any(b)
+            d = leddecode.wide_fades(b)
         except Exception:                                  # noqa: BLE001
             d = None
         if not d:
             self._bump(WIDE_SKIPPED)
             self.wide_bad += 1
             return
-        bank, idxs, vals = d
+        bank, idxs, vals, fades = d
         self._bump(WIDE_DECODED)
         self.wide += 1
         if bank:
@@ -151,6 +162,7 @@ class PadLed:
                         self.m[base + i] = v & 0xFF
                 self.hi += 1
             return
+        self._fades(node, idxs, vals, fades)
         n = 0
         for i, v in zip(idxs, vals):
             if 0 <= i < IDX:
@@ -161,6 +173,39 @@ class PadLed:
             self._bump(DECODED, n)
             self._bump(GEN)
             self.lamps += n
+
+    def _fades(self, node, idxs, vals, fades):
+        """Ring entries for the lamps this frame fades (module docstring),
+        read against val[] BEFORE the frame lands there. Neighbouring lamps
+        that go the same way at the same time share one entry (a range), so
+        a 45-lamp chase step is a handful of entries in a 96-entry ring."""
+        run = None                                  # [start, end, frm, to, units]
+        for i, v, f in zip(idxs, vals, fades):
+            if not (0 <= i < IDX) or not f:
+                continue
+            old = self.m[VAL + node * IDX + i]
+            if old == v & 0xFF:
+                continue
+            units = max(1, min(255, round(f * leddecode.FADE_B_UNIT_MS / RING_UNIT_MS)))
+            if run and i == run[1] + 1 and run[2:] == [old, v & 0xFF, units]:
+                run[1] = i
+                continue
+            if run:
+                self._ring(node, *run)
+            run = [i, i, old, v & 0xFF, units]
+        if run:
+            self._ring(node, *run)
+
+    def _ring(self, node, start, end, frm, to, units):
+        head = struct.unpack_from("<I", self.m, FADE_HEAD)[0]
+        off = FADE_ENT + (head % FADE_RING) * FADE_STRIDE
+        # rise/fall: the slot for the direction of travel takes it out, the
+        # other brings it back - 0 here, so it stays where val[] says
+        rise, fall = (units, 0) if to >= frm else (0, units)
+        struct.pack_into("<I8B", self.m, off, int(time.monotonic() * 1000) & 0xFFFFFFFF,
+                         node, start, end, frm, to, rise, fall, 0)
+        struct.pack_into("<I", self.m, FADE_HEAD, (head + 1) & 0xFFFFFFFF)  # after the entry
+        self.fades += 1
 
     def close(self):
         try:

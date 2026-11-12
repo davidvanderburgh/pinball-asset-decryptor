@@ -753,3 +753,31 @@ and speaker panel (node 7) get no lamp frames in attract on any title - only
 the `72` 96-bit mask and `f2` reads - so they stay dark there by the game's
 choice. A slot whose saved state has the coin door open (48V disabled) sends
 no lamp frames at all: judge lamps on a slot in a known state.
+
+## Attract went dark, and channel B is a fade time (PAD-1189, 2026-11-12)
+
+**The attract freeze.** Since PAD-1139's baseline scan (the bridge hands the
+game each board's resting inputs once), every Spike 3 boot froze ~35 s after
+that scan - ~52 s in: the screen stuck on one frame (Star Wars 2025 LE on its
+TILT clip), no lamp frame sent, the game's main thread parked on a futex at
+~0% CPU. Bisected by file swap and env: `PAD_S3_BASELINE_SCANS=0` lit to the
+cap, and restricting the baseline to node 1 alone reproduced it. Cause: node
+1's cabinet switches (Start, coins, TILT PENDULUM, SLAM TILT) were taken
+ACTIVE HIGH, so its resting scan said all of them were made. They are active
+low like the playfield's (s3nodes.active_low_masks): node 1 now rests at
+`04 59 7f 00 00 00 00 00`, Spike 2's measured node-1 word; status rows
+(location 0: node 4's QR scanner flags, motor stop flags) read as before.
+PAD-1152's "lit in attract" table predates PAD-1139 (its runs had the door
+open and no baseline) - its peaks are real; HEAD runs since went dark.
+Proven: Star Wars LE x2 + Pokemon light to the cap; 4 coins -> CREDITS 1 and
+Start -> BALL 1 on Star Wars, Start -> BALL 1 on Pokemon (free play).
+
+**Channel B.** Not a blink partner level: over 76,804 attract lamp writes
+(Star Wars LE, Pokemon) B was never 255 and never equal to a lit lamp's
+level, only 0..62, and the larger B the longer the game holds the lamp (2:
+~35 ms, 6: ~170 ms, 20: ~0.67 s, 30: ~1 s). It is the board's FADE TIME.
+leddecode.wide_fades / hwshim.c's walk return it; s3leds and the shim put a
+level change with a fade into padled's fade ring as a one-way envelope, which
+playfield.py already ramps. Unit 10 ms (`PAD_FADE_B_UNIT_MS`), a guess: the
+node firmware .hex images are encrypted (entropy 7.99), and Pokemon's B=60
+chase steps every 0.600 s exactly.

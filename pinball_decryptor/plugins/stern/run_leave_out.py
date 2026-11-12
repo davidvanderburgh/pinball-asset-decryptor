@@ -82,7 +82,9 @@ def offered(project):
         pass
     try:
         from . import mode_write
-        if mode_write.held_modes(project):
+        # with the mode maker's preview off a run builds no modes, and a copy without
+        # a code must not name the feature (PAD-1205)
+        if mode_write.preview_on() and mode_write.held_modes(project):
             out.append("modes")
     except Exception:                                   # noqa: BLE001
         pass

@@ -107,6 +107,10 @@ PROGID = "PAD.Controller"
 VERSION = "03060000"            # what core.vbs compares; modulated solenoids off
 
 SW_SRC = "v"                    # padsw.h's writer tag for Visual Pinball
+#: PAD-1184: lines a run may spend on the switches a table reads (a mech's
+#: position switches change a few times a ball; this only caps a table that
+#: polls something that flickers)
+READ_LOG_BUDGET = 2000
 POLL_S = 0.008                  # padled poll; a 9p read is ~1-3 ms
 READ_N = max(coilmap.HI_READ, coilmap.RULE_READ)   # one read takes every plane
 LAMP_ON = int(os.environ.get("PAD_VPX_LAMP_ON", "1"))   # LED level that is "lit"
@@ -1481,6 +1485,12 @@ class Bridge:
         self.last_poll_ms = 0.0
         self._fake = {}                    # name -> state for switch_fakes
         self._early = {}                   # switch id -> level the table set before the run was up
+        # PAD-1184: switches the TABLE reads (a mech that follows the machine,
+        # Batman's turntable 77-79 and crane 82-87): what it was last told,
+        # and what the machine last said, so a report's log shows both sides
+        self._told = {}                    # switch id -> level last answered to the table
+        self._mach = {}                    # switch id -> the machine's level last seen
+        self._read_log_left = READ_LOG_BUDGET
         self.dof = None                    # DofHost, when the table asked for DOF
         self._dof_state = {}               # (kind, number) -> value last sent
 
@@ -2012,7 +2022,44 @@ class Bridge:
             return bool(self._early[sid])
         if self.pipe and sid in self.pipe.held:
             return bool(self.pipe.held[sid])
-        return bool(self.mrg[sid]) if sid < len(self.mrg) else False
+        v = bool(self.mrg[sid]) if sid < len(self.mrg) else False
+        if self.attached:
+            self._note_read(sid, v)
+        return v
+
+    def _note_read(self, sid, v):
+        """PAD-1184: the first read of a machine switch, and every change in
+        what the table is told. A table that follows a mech reads its position
+        switches every tick, so "table reads switch 78" proves its timer runs,
+        and "table told switch 78 = 1" that it heard the machine turn - Mike's
+        report showed a Bat Phone hurry-up with the turntable never turned, and
+        nothing in his log could say which side had not moved."""
+        with self.lock:
+            was = self._told.get(sid)
+            if was == v:
+                return
+            self._told[sid] = v
+            self._mach.setdefault(sid, v)
+            if self._read_log_left <= 0:
+                return
+            self._read_log_left -= 1
+        if was is None:
+            log("table reads switch %d (now %d)" % (sid, v))
+        else:
+            log("table told switch %d = %d" % (sid, v))
+
+    def _note_machine(self):
+        """PAD-1184: the machine's own changes of the switches the table reads
+        (under the poll's lock). Beside the "table told" lines above, a turn the
+        machine made and the table never asked about shows up as a machine line
+        with no table line after it."""
+        for sid in list(self._told):
+            v = bool(self.mrg[sid]) if sid < len(self.mrg) else False
+            if self._mach.get(sid) != v:
+                self._mach[sid] = v
+                if self._read_log_left > 0:
+                    self._read_log_left -= 1
+                    log("machine switch %d -> %d" % (sid, v))
 
     # -- the poll
     def _poll_loop(self):
@@ -2449,6 +2496,7 @@ class Bridge:
         with self.lock:
             if sw and len(sw) >= padsw.OFF_MRG + padsw.MAX_ID:
                 self.mrg = sw[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+                self._note_machine()
             self._poll_lamps(data)
             self._poll_coils(data, now)
             if self.dof and self.dof.up:

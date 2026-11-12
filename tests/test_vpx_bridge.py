@@ -6155,3 +6155,56 @@ def test_jaws_plunger_key_pulls_the_plunger_and_lockbar_is_action(tmp_path):
         assert why in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
         script.write_text(out, encoding="utf-8")
         assert why not in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
+
+
+def test_the_log_shows_what_the_table_reads_and_what_the_machine_did(monkeypatch):
+    """PAD-1184: Mike's Batman 66 table showed a Bat Phone hurry-up with the
+    turntable never turned, and his log could not say whether the machine had
+    turned it (switch 78) or the table had not heard. The bridge now logs a
+    table's first read of a machine switch, every change in what it is told,
+    and the machine's own changes of those switches."""
+    pc = pytest.importorskip("padcontroller")
+    lines = []
+    monkeypatch.setattr(pc, "log", lines.append)
+    b = pc.Bridge()
+    b.set_game("batman")
+    lines.clear()
+    b.attached = True
+    m = bytearray(len(b.mrg))
+    m[77] = 1
+    b.mrg = bytes(m)
+    assert b.get_switch(1077) is True and b.get_switch(1078) is False
+    b.get_switch(1077)                                   # no change: no line
+    assert lines == ["table reads switch 77 (now 1)", "table reads switch 78 (now 0)"]
+    # the machine turns to the Bat Phone: home opens, POS. #2 makes
+    m[77], m[78] = 0, 1
+    b.mrg = bytes(m)
+    with b.lock:
+        b._note_machine()
+    assert lines[2:] == ["machine switch 77 -> 0", "machine switch 78 -> 1"]
+    # ... and the table, reading on, hears it
+    assert b.get_switch(1078) is True and b.get_switch(1077) is False
+    assert lines[4:] == ["table told switch 78 = 1", "table told switch 77 = 0"]
+    # a table that stops reading leaves only the machine's side in the log
+    m[78], m[79] = 0, 1
+    b.mrg = bytes(m)
+    with b.lock:
+        b._note_machine()
+    assert lines[6:] == ["machine switch 78 -> 0"]    # 79 was never read
+
+
+def test_switch_read_logging_is_budgeted(monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    lines = []
+    monkeypatch.setattr(pc, "log", lines.append)
+    monkeypatch.setattr(pc, "READ_LOG_BUDGET", 3)
+    b = pc.Bridge()
+    b.set_game("batman")
+    lines.clear()
+    b.attached = True
+    m = bytearray(len(b.mrg))
+    for i in range(6):
+        m[77] = i & 1
+        b.mrg = bytes(m)
+        b.get_switch(1077)
+    assert len(lines) == 3

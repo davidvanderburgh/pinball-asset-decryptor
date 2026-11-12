@@ -323,6 +323,20 @@ data roster_portrait_state 0x007aedc0
 # the co-op pick hides it while a card is up (same id on LE and Pro 1.16, read off both cards)
 text start_logo_scene     43b52a63772ce0a35b7f0e3d4f249566066b55f8
 text start_logo_path      Logo_Instance
+# PAD-1114: the start films (BDLGameIntro), intro<N> at random at a Start (Pro drew intro2, a name the program
+# builds); the co-op intro stands in for them
+text start_film_clips intro*
+# PAD-1114 round 2: the intro screen (scene 762a9b99...) - its state word (the game's state object at *0x7a4938, + 0x44)
+# reads 0 while it is up; its own words over the film hidden while the co-op intro is its film; the language bar stays
+data intro_state           0x007a4938
+value intro_state_at        0x44
+value intro_state_up        0
+text intro_scene 762a9b99fc0c933b6c6c4822cb48911fa92bbd97
+text intro_hide_0 Line1_Textbox
+text intro_hide_1 Line2_Textbox
+text intro_hide_2 JapaneseText_Artbox
+# the ball start's serve (bl 0x37131c, the framework's serve with the serve record 0x7d74e4), after its start display
+site serve_ball             0x00459f44 0xebfc5cf4 0xe3a00026
 text roster_screen_scene  cac32730af42b9d26d26c4bb6e667b07da53113e
 text roster_screen_path   SelectOverlay_Textbox.CharacterSelect_Instance.
 text roster_tile_0        Ebirah
@@ -1041,6 +1055,9 @@ site  coop_add_player    0x00408294 0xe92d4038 0xe3a00051
 data  coop_player        0x0070e848
 data  coop_players       0x007e168c
 site  coop_first_ball    0x00459e6c 0xebfeb945 0xe1a04000
+
+# ---- PAD-1202: co-op play - the ball start's "player N, you're up" call's read of the player up (portcoop.py) ----
+site  coop_up_call           0x000554e4 0xeb0ecb82 0xe2401001
 
 # ---- PAD-1043: co-op play - the score panel's calls of the player-up getter (portcoop.py) ----
 site  coop_panel_lit         0x001aa084 0xeb09789a 0xe5943070

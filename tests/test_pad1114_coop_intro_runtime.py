@@ -46,11 +46,11 @@ def test_both_flippers_skip_it_once_each_was_let_go(tmp_path):
 
 def _elf():
     import os
-    path = r"C:/tmp/PAD-1108/elfs/godzilla_le-1_16_0_spike2.elf"
-    if not os.path.isfile(path):
+    from tests.test_pad1031_coop_characters import GZ_ELF
+    if not GZ_ELF or not os.path.isfile(GZ_ELF):
         import pytest
         pytest.skip("the Godzilla LE 1.16 game program is not on this machine")
-    with open(path, "rb") as f:
+    with open(GZ_ELF, "rb") as f:
         return f.read()
 
 

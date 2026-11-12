@@ -25,6 +25,8 @@ VETO_MAIN = r"""
 static unsigned coop_left = 60;
 static struct { unsigned button; } coop = { 59 };
 static int edge_hid_n, pick_has, still_hidden;
+static struct { int film_veto; unsigned long film_at; } ci;   /* PAD-1114: the intro's held-flipper veto: none here */
+static int ci_film_due(void) { return 0; }
 static int coop_hides(unsigned id) { return pick_has && (id == 59 || id == 60); }
 static int edge_hidden(unsigned id) { return still_hidden && id == 59 ? 0 : -1; }
 @FN@

@@ -206,6 +206,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_images" \
     --hidden-import "pinball_decryptor.plugins.stern.spike1_text" \
     --hidden-import "pinball_decryptor.plugins.stern.sidx" \
+    --hidden-import "pinball_decryptor.plugins.stern.run_leave_out" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_extract" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_card" \
@@ -330,7 +331,6 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.handicap" \
     --hidden-import "pinball_decryptor.plugins.stern.prolonged_comp" \
     --hidden-import "pinball_decryptor.plugins.stern.score_feed" \
-    --hidden-import "pinball_decryptor.plugins.stern.run_leave_out" \
     --hidden-import "pinball_decryptor.plugins.stern.cab_shows" \
     --hidden-import "pinball_decryptor.plugins.stern.cab_stock" \
     --hidden-import "pinball_decryptor.plugins.stern.cab_auto" \

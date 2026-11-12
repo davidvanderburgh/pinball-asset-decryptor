@@ -487,6 +487,10 @@ def test_the_video_tab_names_the_sounds_a_clips_code_plays(tmp_path, monkeypatch
         (proj / "audio").mkdir()
         for n in ("idx0012 - SE GZ VO ROAR.wav", "idx0013.wav", "idx0014.wav"):
             (proj / "audio" / n).write_bytes(b"")
+        # the extract wrote them (PAD-1193: a folder the baseline never names is the
+        # user's own, and the Audio tab would not list it)
+        from pinball_decryptor.core import checksums
+        checksums.note_extract_files(str(proj), ["audio/idx0013.wav"])
         _scan(w, proj)
         snd = shown(w, INTRO)
         assert [i["text"] for i in snd["items"]] == ["sound request 5",

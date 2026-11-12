@@ -28,6 +28,7 @@ driver on the volume opened with dm-crypt (:func:`.ext4_grow.grow_files`,
 from __future__ import annotations
 
 import os
+import re
 import struct
 import time
 import zlib
@@ -51,23 +52,32 @@ def _np():
 # --------------------------------------------------------------------------
 
 def sound_containers(reader):
-    """``[(card_path, node), ...]`` for every ``image.bin`` on the volume,
-    the game's own first (the one beside the game's assets)."""
+    """``[(card_path, node), ...]`` for every sound container on the volume:
+    each ``image.bin`` and its ``image-scNN.bin`` music banks (the same
+    format, PAD-1185), the game's own first (the one beside the game's
+    assets), a folder's banks after its ``image.bin`` in number order."""
+    from .spike3_extract import is_sound_container, _container_order
     main_ino, _fw = reader.find_spike_assets()
-    out = []
+    main_dirs = set()
+    found = []
     for path, ino, node in reader.iter_regular_files(min_size=0x80,
                                                      max_depth=12):
-        if os.path.basename(path) != "image.bin":
+        if not is_sound_container(os.path.basename(path)):
             continue
-        out.append((0 if ino == main_ino else 1, path, node))
+        if ino == main_ino:
+            main_dirs.add(os.path.dirname(path))
+        found.append((path, node))
+    out = [(0 if os.path.dirname(p) in main_dirs else 1,
+            _container_order(p), p, n) for p, n in found]
     out.sort(key=lambda t: (t[0], t[1]))
-    return [(p, n) for _k, p, n in out]
+    return [(p, n) for _k, _o, p, n in out]
 
 
 def sound_dir(card_path, main):
     """The project folder a container's WAVs live in: ``audio`` for the
     game's own, ``audio_<folder>`` for another (``audio_spike_menu``: the
-    service menu's), so the two sets never share a name."""
+    service menu's), so the two sets never share a name.  A music bank's
+    folder is its ``image.bin``'s."""
     if main:
         return GAME_SOUNDS
     parent = os.path.basename(os.path.dirname(card_path.rstrip("/"))) or "other"
@@ -75,9 +85,15 @@ def sound_dir(card_path, main):
 
 
 def project_sound_dirs(reader):
-    """``[(card_path, node, project_dir), ...]`` for the volume."""
+    """``[(card_path, node, project_dir, stem), ...]`` for the volume.
+    *stem* is ``None`` for an ``image.bin`` (its WAVs are ``idxNNNN``) and
+    ``music_catNN`` for bank NN (``music_catNN_NNNN``)."""
+    from .spike3_extract import _sound_stem
     conts = sound_containers(reader)
-    return [(p, n, sound_dir(p, i == 0)) for i, (p, n) in enumerate(conts)]
+    main_dir = os.path.dirname(conts[0][0]) if conts else None
+    return [(p, n, sound_dir(p, i == 0 or os.path.dirname(p) == main_dir),
+             _sound_stem(os.path.basename(p)))
+            for i, (p, n) in enumerate(conts)]
 
 
 # --------------------------------------------------------------------------
@@ -87,10 +103,11 @@ def project_sound_dirs(reader):
 class SoundPlan:
     """The sound edits for one container: in place, or the file whole."""
 
-    def __init__(self, card_path, node, folder):
+    def __init__(self, card_path, node, folder, stem=None):
         self.card_path = card_path
         self.node = node
         self.folder = folder
+        self.stem = stem           # None: image.bin; "music_catNN": a bank
         self.inplace = []          # [(file_off, bytes)]
         self.staged = None         # path of the whole file, when it grows
         self.n_fit = 0
@@ -99,9 +116,28 @@ class SoundPlan:
         self.grown = []            # idx longer than their slot
 
 
-def _changed_wavs(assets_dir, folder, baseline):
+_MUSIC_STEM_RE = re.compile(r"\bmusic_cat0*(\d+)_0*(\d+)", re.IGNORECASE)
+
+
+def _wav_index(stem, name_stem):
+    """The sound number a WAV name *name_stem* gives in the container whose
+    WAV stem is *stem* (``None``: ``idxNNNN``; ``music_catNN``: that bank's
+    ``music_catNN_NNNN``), or ``None`` when the WAV is another container's."""
+    from . import engine
+    if stem is None:
+        if _MUSIC_STEM_RE.search(name_stem):
+            return None
+        return engine._wav_idx(name_stem)
+    m = _MUSIC_STEM_RE.search(name_stem)
+    if not m or "music_cat%02d" % int(m.group(1)) != stem.lower():
+        return None
+    return int(m.group(2))
+
+
+def _changed_wavs(assets_dir, folder, baseline, stem=None):
     """``{idx: path}`` of the WAVs in *folder* whose bytes differ from the
-    Extract baseline (``idxNNNN.wav``, or a renamed ``idxNNNN - name.wav``)."""
+    Extract baseline (``idxNNNN.wav``, or a renamed ``idxNNNN - name.wav``;
+    with *stem* a music bank's ``music_catNN_NNNN[ - name].wav``)."""
     from . import engine
     base = os.path.join(assets_dir, folder)
     if not os.path.isdir(base):
@@ -110,7 +146,7 @@ def _changed_wavs(assets_dir, folder, baseline):
     for fn in sorted(os.listdir(base)):
         if not fn.lower().endswith(".wav"):
             continue
-        idx = engine._wav_idx(os.path.splitext(fn)[0])
+        idx = _wav_index(stem, os.path.splitext(fn)[0])
         if idx is None:
             continue
         path = os.path.join(base, fn)
@@ -163,15 +199,15 @@ def plan_sounds(reader, assets_dir, baseline, work_dir, log, cancel=None):
     np = _np()
     rs = spike3_sound.RECORD_SIZE
     plans = []
-    for card_path, node, folder in project_sound_dirs(reader):
-        edits = _changed_wavs(assets_dir, folder, baseline)
+    for card_path, node, folder, stem in project_sound_dirs(reader):
+        edits = _changed_wavs(assets_dir, folder, baseline, stem)
         if not edits:
             continue
         hdr, img = read_container(reader, node)
         dir_len = spike3_sound._align16(rs * img.count)
         d = bytearray(reader.read_range(node, img.md_off, dir_len))
         trailer = bytearray(reader.read_range(node, img.md_off + dir_len, 8))
-        plan = SoundPlan(card_path, node, folder)
+        plan = SoundPlan(card_path, node, folder, stem)
         grows = []
         for idx in sorted(edits):
             if cancel:
@@ -195,7 +231,8 @@ def plan_sounds(reader, assets_dir, baseline, work_dir, log, cancel=None):
                 grows.append((rec, body, n))
         if grows:
             plan.staged = os.path.join(
-                work_dir, "%s_image.bin" % folder.replace("/", "_"))
+                work_dir, "%s_%s" % (folder.replace("/", "_"),
+                                     os.path.basename(card_path)))
             _stage_grown(reader, node, hdr, img, d, trailer, plan.inplace,
                          grows, plan.staged, cancel)
             plan.n_grown = len(grows)

@@ -13,7 +13,9 @@ exactly as a Spike 2 one: ``video/`` (named from the scenes), ``images/``
 Sounds are plain PCM (:mod:`.spike3_sound`), one ``image.bin`` per sound set:
 the game's go to ``audio/idxNNNN.wav`` (Spike 2's folder), another set to
 ``audio_<its folder>/`` (``audio_spike_menu``: the service menu's) - the
-folders :mod:`.spike3_write` puts them back from.
+folders :mod:`.spike3_write` puts them back from.  The per-category music
+banks ``image-scNN.bin`` beside an ``image.bin`` (the same container format)
+decode into its folder as Spike 2's ``music_catNN_NNNN.wav`` (PAD-1185).
 
 The ``.spk`` update package (:mod:`.spike3_spk`) is a different input with no
 card to write back to; it keeps its own file-copy layout and shares
@@ -28,6 +30,7 @@ A card we can't unlock still detects and reports cleanly.
 from __future__ import annotations
 
 import os
+import re
 
 from ...core.pipeline_base import BasePipeline, PipelineError
 from . import spike3
@@ -47,6 +50,9 @@ PHASES = ("Detect", "Prepare", "Extract video", "Extract images",
 CATEGORIES = (("audio", "Audio"), ("video", "Video"), ("images", "Images"),
               ("scenes", "Scenes"))
 
+#: the first-atom tags of a QuickTime / MP4 clip (``.asset`` sniff)
+_QUICKTIME_TAGS = (b"ftyp", b"moov", b"mdat", b"wide", b"skip")
+
 
 def want_category(cats, cat):
     """Is category *cat* ticked in *cats* (None/{} = everything)?  Audio is
@@ -58,8 +64,35 @@ def want_category(cats, cat):
     return bool(cats.get(cat, True))
 
 
+#: a per-category music bank beside image.bin; the number is its category, as
+#: on Spike 2 (:func:`.spike2.category.read_category_id`)
+_BANK_RE = re.compile(r"^image-sc(\d+)\.bin$", re.IGNORECASE)
+
+
+def is_sound_container(name):
+    """Is the card file *name* (a base name) a sound container: the game's
+    ``image.bin`` or one of its ``image-scNN.bin`` music banks?"""
+    low = name.lower()
+    return low == "image.bin" or bool(_BANK_RE.match(low))
+
+
+def _sound_stem(name):
+    """The WAV name stem for the container *name*: ``None`` (``idxNNNN``) for
+    image.bin, ``music_catNN`` for bank NN -- the Spike 2 names, which the
+    Audio tab's kinds, song naming and name memory all key on."""
+    m = _BANK_RE.match(name)
+    return "music_cat%02d" % int(m.group(1)) if m else None
+
+
+def _container_order(rel):
+    d, name = os.path.split(rel.lstrip("/"))
+    m = _BANK_RE.match(name)
+    return (d, int(m.group(1)) if m else -1, name)
+
+
 def decode_sound_containers(pipe, items, rel_of, extract_to):
-    """Extract each image.bin in *items* and decode it to WAVs (PAD-1077).
+    """Extract each sound container in *items* and decode it to WAVs
+    (PAD-1077; the ``image-scNN.bin`` banks too, PAD-1185).
 
     *rel_of(item)* is the container's path inside the card ("pokemon_le/
     image.bin"); *extract_to(item, out_path)* writes its bytes. The WAVs go to
@@ -68,9 +101,12 @@ def decode_sound_containers(pipe, items, rel_of, extract_to):
     (with a warning) so nothing is lost. Returns ``(sounds, seconds)``."""
     base = os.path.join(pipe.output_dir, "sound")
     sounds, seconds = 0, 0.0
+    # image.bin first, then the banks in number order
+    items = sorted(items, key=lambda it: _container_order(rel_of(it)))
     for item in items:
         pipe._check_cancel()
         rel = rel_of(item).lstrip("/")
+        stem = _sound_stem(os.path.basename(rel))
         out = os.path.join(base, rel.replace("/", os.sep))
         where = os.path.dirname(rel) or "."
         os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -88,7 +124,8 @@ def decode_sound_containers(pipe, items, rel_of, extract_to):
                                % (where, done, total))
         try:
             got = spike3_sound.decode_container(out, audio, progress=prog,
-                                                cancel=pipe._check_cancel)
+                                                cancel=pipe._check_cancel,
+                                                stem=stem)
         except ValueError as e:
             pipe._log("%s could not be decoded to WAVs (%s); the container "
                       "is kept as it is." % (rel, e), "warn")
@@ -104,6 +141,144 @@ def decode_sound_containers(pipe, items, rel_of, extract_to):
                      got["seconds"] / 60.0,
                      os.path.relpath(audio, pipe.output_dir)), "success")
     return sounds, seconds
+
+
+# -- clip names (PAD-1185) ----------------------------------------------------
+#: a scene.radium bigger than this is not parsed for names (Spike 2's guard)
+_MAX_RADIUM = 0x2000000
+
+
+def video_brand(head):
+    """The container brand of a clip from its first 12 bytes: the ``ftyp``
+    brand, or ``qt  `` for a QuickTime file that opens on another atom."""
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return bytes(head[8:12])
+    return b"qt  "
+
+
+def is_video_head(head):
+    return len(head) >= 8 and head[4:8] in _QUICKTIME_TAGS
+
+
+def video_group(card_path):
+    """The folder a clip goes in under ``video/``: the directory on the card
+    that holds its ``assets/`` (``fallout_le``, ``fallout_le/spike3/
+    spike_menu``), so the game's clips and the service menu's keep apart the
+    way their sounds do.  ``""`` for a clip outside any ``assets/``."""
+    p = "/" + card_path.replace("\\", "/").lstrip("/")
+    i = p.find("/assets/")
+    return p[1:i] if i > 0 else ""
+
+
+def name_videos(videos, radiums, read_radium):
+    """The output path of each clip in *videos* (``[(card path, brand)]``),
+    relative to ``video/``: ``"<group>/<name>.<mp4|mov>"`` with the name the
+    clip's scene element gives it (Spike 2's naming,
+    :func:`.engine._video_names`: duplicates ``_2``, ``_3`` ...; a clip no
+    scene names is ``video_<scene hash8>_<ref>``).
+
+    *radiums* is ``{scene dir: item}`` for every ``scene.radium`` on the card
+    and *read_radium(item)* its bytes (``None`` to skip it).  Each is parsed
+    at most once.  Returns ``[(rel path, named_from_scene)]`` in *videos*
+    order."""
+    from .engine import _parse_radium, _video_names
+    cache = {}
+
+    def title_for(path):
+        if "/scene.assets/" not in path:
+            return None
+        hashdir, ref = path.rsplit("/scene.assets/", 1)
+        item = radiums.get(hashdir)
+        if item is None:
+            return None
+        if hashdir not in cache:
+            try:
+                data = read_radium(item)
+                cache[hashdir] = _parse_radium(data) if data else {}
+            except Exception:                                # noqa: BLE001
+                cache[hashdir] = {}
+        return cache[hashdir].get(ref)
+
+    groups = {}
+    for i, (path, _brand) in enumerate(videos):
+        groups.setdefault(video_group(path), []).append(i)
+    out = [None] * len(videos)
+    for group, idxs in groups.items():
+        names = _video_names([(videos[i][0], None, videos[i][1]) for i in idxs],
+                             title_for)
+        for i, (fname, titled) in zip(idxs, names):
+            out[i] = ("%s/%s" % (group, fname) if group else fname, titled)
+    return out
+
+
+def _old_layout_copy(video_dir, card_path):
+    """Where an extract before PAD-1185 put this clip: its card path with
+    ``.mov`` for ``.asset``."""
+    rel = os.path.splitext(card_path.lstrip("/"))[0] + ".mov"
+    return os.path.join(video_dir, rel.replace("/", os.sep))
+
+
+def _prune_empty(d, top):
+    """Remove *d* and its parents up to (not including) *top* while empty."""
+    top = os.path.normcase(os.path.abspath(top))
+    d = os.path.abspath(d)
+    while (os.path.normcase(d) != top
+           and os.path.normcase(d).startswith(top + os.sep)):
+        try:
+            os.rmdir(d)
+        except OSError:
+            return
+        d = os.path.dirname(d)
+
+
+def extract_videos(pipe, items, path_of, size_of, brand_of, extract_to,
+                   radiums, read_radium):
+    """Write every clip in *items* to ``<output>/video/`` under its scene name
+    (:func:`name_videos`), with ``video/manifest.txt`` (output, card path,
+    bytes) the way Spike 2's extract writes it.
+
+    A copy an older extract made of the same clip under its card path is
+    removed (only those exact files, and the folders they leave empty), so a
+    re-extract leaves one file per clip.  Returns ``(written, named)``."""
+    video_dir = os.path.join(pipe.output_dir, "video")
+    plan = name_videos([(path_of(it), brand_of(it)) for it in items],
+                       radiums, read_radium)
+    total = len(items)
+    rows, done, named, stale = [], 0, 0, 0
+    for i, (item, (rel, titled)) in enumerate(zip(items, plan)):
+        pipe._check_cancel()
+        out = os.path.join(video_dir, rel.replace("/", os.sep))
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        try:
+            extract_to(item, out)
+        except Exception as e:                               # noqa: BLE001
+            pipe._log("skip %s: %s" % (path_of(item), e), "warn")
+            continue
+        done += 1
+        named += bool(titled)
+        rows.append("%s\t%s\t%d" % (rel, path_of(item), size_of(item)))
+        old = _old_layout_copy(video_dir, path_of(item))
+        if (os.path.normcase(old) != os.path.normcase(out)
+                and os.path.isfile(old)):
+            try:
+                os.remove(old)
+                stale += 1
+                _prune_empty(os.path.dirname(old), video_dir)
+            except OSError:
+                pass
+        pipe._progress(i + 1, total, "video %d/%d" % (i + 1, total))
+    if rows:
+        with open(os.path.join(video_dir, "manifest.txt"), "w",
+                  encoding="utf-8") as f:
+            f.write("# output\tcard path\tbytes\n" + "\n".join(rows) + "\n")
+    if stale:
+        pipe._log("Removed %d video(s) an earlier extract had saved under "
+                  "their card path." % stale, "info")
+    if done:
+        pipe._log("%d of %d video(s) named from the game's scenes "
+                  "(video/manifest.txt gives each one's place on the card)."
+                  % (named, done), "success" if named else "info")
+    return done, named
 
 
 def summary_bits(counts):
@@ -255,12 +430,14 @@ class Spike3ExtractPipeline(BasePipeline):
         return counts
 
     def _extract_sounds(self, reader):
-        """Every image.bin to WAVs in its project folder (spike3_write's
-        :func:`.spike3_write.sound_dir`): ``audio/`` for the game's own."""
+        """Every sound container to WAVs in its project folder (spike3_write's
+        :func:`.spike3_write.sound_dir`): ``audio/`` for the game's own, its
+        music banks beside them as ``music_catNN_NNNN.wav``."""
         from . import spike3_write
         import tempfile
         sounds, seconds = 0, 0.0
-        for card_path, node, folder in spike3_write.project_sound_dirs(reader):
+        for card_path, node, folder, stem in spike3_write.project_sound_dirs(
+                reader):
             self._check_cancel()
             dest = os.path.join(self.output_dir, folder)
             fd, tmp = tempfile.mkstemp(prefix="pad_s3_snd_", suffix=".bin")
@@ -275,7 +452,8 @@ class Spike3ExtractPipeline(BasePipeline):
                                        % (folder, done, total))
                 try:
                     got = spike3_sound.decode_container(
-                        tmp, dest, progress=prog, cancel=self._check_cancel)
+                        tmp, dest, progress=prog, cancel=self._check_cancel,
+                        stem=stem)
                 except ValueError as e:
                     self._log("%s could not be decoded to WAVs (%s)."
                               % (card_path, e), "warn")

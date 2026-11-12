@@ -196,20 +196,25 @@ def wav_name(img: "ImageSound", rec: SoundRecord) -> str:
     return "idx%0*d.wav" % (img.name_width, rec.index)
 
 
-def decode_container(path, out_dir, progress=None, cancel=None):
+def decode_container(path, out_dir, progress=None, cancel=None, stem=None):
     """Decode every sound in the image.bin at *path* to ``out_dir/idxNNNN.wav``.
 
+    With *stem* (``"music_cat07"``, for an ``image-sc07.bin`` music bank) the
+    files are ``<stem>_NNNN.wav`` instead, Spike 2's bank names (PAD-1185).
+
     Validates the container first (raises ``ValueError`` if it is not one), and
-    clears ``idx*.wav`` left in *out_dir* by an earlier extract so a build with
-    fewer sounds leaves no strays. *progress(done, total)* is called after each
-    WAV; *cancel()* is polled before each and may raise to stop. Returns
+    clears the files of that name (``idx*.wav`` / ``<stem>_*.wav``) left in
+    *out_dir* by an earlier extract so a build with fewer sounds leaves no
+    strays. *progress(done, total)* is called after each WAV; *cancel()* is
+    polled before each and may raise to stop. Returns
     ``{"sounds", "seconds", "mono", "stereo"}``."""
     img = ImageSound(path)
     img.validate()
     os.makedirs(out_dir, exist_ok=True)
+    lead = (stem + "_").lower() if stem else "idx"
     for name in os.listdir(out_dir):
         low = name.lower()
-        if low.startswith("idx") and low.endswith(".wav"):
+        if low.startswith(lead) and low.endswith(".wav"):
             try:
                 os.remove(os.path.join(out_dir, name))
             except OSError:
@@ -226,7 +231,9 @@ def decode_container(path, out_dir, progress=None, cancel=None):
             if len(pcm) != r.body_bytes:
                 raise ValueError("record %d: short read (%d of %d bytes)"
                                  % (r.index, len(pcm), r.body_bytes))
-            with wave.open(os.path.join(out_dir, wav_name(img, r)), "wb") as w:
+            fname = ("%s_%04d.wav" % (stem, r.index) if stem
+                     else wav_name(img, r))
+            with wave.open(os.path.join(out_dir, fname), "wb") as w:
                 w.setnchannels(r.channels)
                 w.setsampwidth(SAMPLE_WIDTH)
                 w.setframerate(SAMPLE_RATE)

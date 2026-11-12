@@ -17,7 +17,11 @@ each transfer from the slot's spi.in, so writing that file presses a button.
     s3press.py node SLOT NODE BIT [MS] close a node board's switch input (its
                                        ff reply word; start/flippers are node 1)
     s3press.py set SLOT NODE BIT 0|1   leave a node switch closed (1) or open
-    s3press.py drain SLOT              a ball in play drains to the trough
+    s3press.py drain SLOT              a ball in play drains to the trough,
+                                       rolling over its open positions
+    s3press.py plunge|take|serve|reset SLOT
+                                       the window's other ball moves (the
+                                       bridge's s3balls.py makes them all)
     s3press.py sw SLOT NAME [MS]       press a switch by the title's own name
                                        ("START BUTTON", "ACTION BUTTON",
                                        "LEFT FLIPPER BUTTON", "LEFT SLINGSHOT")
@@ -390,23 +394,30 @@ def main():
             else:
                 main_node_press(slot, node, idx, ms)
         return 0
-    elif cmd == "drain":
-        # a ball in play drains: the lowest-numbered OPEN trough position
-        # closes (s3balls.py's stack; balls.json says which switches)
-        import json
-        w = json.load(open(os.path.join(BASE % slot, "balls.json")))
-        p = os.path.join(BASE % slot, "nodesw")
-        with open(p, "r+b") as f:
-            for node, bit in w["trough"]:
-                off = 8 * node + bit // 8
-                f.seek(off); b = f.read(1)[0]
-                if not b & (1 << (bit % 8)):
-                    f.seek(off); f.write(bytes([b | (1 << (bit % 8))])); f.flush()
-                    print("drain: node %d bit %d closes" % (node, bit))
-                    break
-            else:
-                print("drain: the trough is full")
-                return 1
+    elif cmd in ("drain", "plunge", "take", "serve", "reset"):
+        # a ball move, made by the bridge's ball model (s3balls.py, PAD-1181):
+        # a drain rolls over the trough's open positions from the far end and
+        # settles on the lowest open one; the others are the window's verbs
+        import s3balls
+        sd = BASE % slot
+        d = os.path.join(sd, "dump")
+        d = d if os.path.isdir(d) else sd
+        tag = "%d.%d" % (os.getpid(), int(time.time() * 1000))
+        req, ans = os.path.join(d, s3balls.REQ_PREFIX + tag), os.path.join(d, s3balls.ANS_PREFIX + tag)
+        with open(req + ".tmp", "w") as f:
+            f.write(cmd + "\n")
+        os.replace(req + ".tmp", req)
+        for _ in range(100):
+            if os.path.exists(ans):
+                text = open(ans).read().strip()
+                os.remove(ans)
+                print("%s: %s" % (cmd, text))
+                return 1 if text.startswith(("nothing", "the trough is", "the ball is still",
+                                             "not ", "a ball is already")) else 0
+            time.sleep(0.05)
+        os.remove(req)
+        print("%s: the bridge's ball model did not answer (is the run up?)" % cmd)
+        return 1
     elif cmd == "guided":
         return 0 if guided(slot) else 1
     elif cmd == "watchguide":

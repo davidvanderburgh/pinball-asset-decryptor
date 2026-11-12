@@ -669,6 +669,35 @@ state, the tab's slot list, Launch from a slot.
   coil rules at its next ball start. No clock credit for the freeze (Spike 3
   showed no watchdog at 1.3 s).
 
+## The window's balls: plunge, drain, multiball (PAD-1181, 2026-11-11)
+
+The ball model served the game's eject and auto plunger, but the virtual
+playfield's BALLS section was Spike 2's and saw none of it: the window
+takes its switch levels from padsw's merged array (`mrg[]`, `mrg_gen`),
+which only Spike 2's guest shim writes, so on Spike 3 it fell back to the
+keyboard's array - `balls 6/6 trough   in play 0` with the ball sitting in
+the shooter lane, Drain greyed for ever, and Plunge (plunge.py, writing
+Spike 2's script array and reading the empty merge) answering "nothing in
+the shooter lane to launch / trough 0/6".
+
+- `s3keys.py` publishes the slot's live levels (nodesw; spi.in for the CPU
+  board) into `mrg[]` by switch id at 20 Hz, bumping `mrg_gen` on a change.
+  The window's dots, BALLS line, Drain grey-out and lit key rows follow.
+- `plunge.py` hands its ball verbs - plunge, drain, take, serve, reset - to
+  the bridge on a Spike 3 slot (`s3ballask.py`: its PAD_ROOT holds
+  balls.json): a request file `dump/s3ballreq.<tag>`, answered in
+  `dump/s3ballans.<tag>`. Coin and Start stay plain switches.
+- `s3balls.py` makes them, in its one loop with its timers: Plunge launches
+  only the ball in the lane; Drain needs a ball in play and ROLLS - the ball
+  closes and opens every open position from the far end (TROUGH 6) down,
+  then settles on the lowest open one (Spike 2's PAD-186 rule); Take puts a
+  ball out of the trough onto the playfield; Reset fills the trough and
+  clears the lane. Moves queue behind a roll still playing. A trough eject
+  that meets a ball in the lane is held and served when the lane clears
+  (multiball on a manual plunger: each Plunge brings the next ball).
+  `dump/padball` (`fed N` + newest lines) feeds the BALLS note.
+- `s3press.py drain|plunge|take|serve|reset SLOT` go the same way.
+
 ## What is left for Spike 2 parity
 
 1. (PAD-1139, fixed) Coins: the first two after boot were lost.

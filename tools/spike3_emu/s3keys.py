@@ -24,6 +24,16 @@ EDGES ONLY, as Spike 2's merge (last edge wins, per switch): a switch is
 written when the union of the sources that name it CHANGES, and never
 re-asserted - the ball model and s3press.py write the same switches, and a
 level rewritten 100 times a second would undo every ball they move.
+
+AND THE ANSWER GOES BACK (PAD-1181): mrg[id] / mrg_gen are what Spike 2's
+guest shim publishes - the level each switch actually has - and every reader
+of the block takes its switch state from there: the playfield window's
+trough dots, its `balls 5/6 trough   lane 1   in play 0` line, Drain's
+grey-out, the key panel's lit rows. Nothing on a Spike 3 run wrote it, so
+the window fell back to the keyboard's own array: a trough forever full and
+no ball ever in the shooter lane, whatever the ball model had moved. This
+publishes the slot's live levels (nodesw, and spi.in for the CPU board's
+switches) there, by the same switch ids.
 """
 import mmap
 import os
@@ -40,6 +50,9 @@ BASE = "/var/tmp/pad-s3/slot%s"
 MAGIC = 0x53444150
 OFF_HELD = 8
 OFF_SCR_HELD = 8 + 256 + 12 + 4
+OFF_MRG_GEN = OFF_SCR_HELD + 256          # 536: the merged answer's generation
+OFF_MRG = OFF_MRG_GEN + 4                 # 540: the merged answer, by switch id
+MAX_ID = 256
 OFF_CAB = 1068
 OFF_SCR_CAB = OFF_CAB + 8
 CAB_NAMES = ("LEFT", "RIGHT", "START", "ACTION", "SELECT", "PLUS", "MINUS", "BACK")
@@ -81,11 +94,59 @@ class Keys:
     def attach(self):
         if self.mm is None:
             try:
-                f = open(self.padsw, "rb")
-                self.mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                f = open(self.padsw, "r+b")
+                self.mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_WRITE)
+                self.writable = True
             except (OSError, ValueError):
-                return False
+                try:                                 # read-only: keys still work
+                    f = open(self.padsw, "rb")
+                    self.mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                    self.writable = False
+                except (OSError, ValueError):
+                    return False
         return struct.unpack_from("<I", self.mm, 0)[0] == MAGIC
+
+    def levels(self):
+        """{id: closed} - every switch's live level on the slot: nodesw for
+        the node boards (logical, 1 = closed), spi.in for the CPU board's
+        (active low; node 0 index i = SPI bit i - 8)."""
+        try:
+            with open(os.path.join(self.sd, "nodesw"), "rb") as f:
+                sw = f.read()
+        except OSError:
+            sw = b""
+        try:
+            with open(os.path.join(self.sd, "spi.in"), "rb") as f:
+                spi = f.read()
+        except OSError:
+            spi = b""
+        out = {}
+        for sid, (node, bit, _n) in self.ids.items():
+            if node == 0:
+                b = bit - 8
+                on = 0 <= b and b // 8 < len(spi) and not spi[b // 8] & (1 << (b % 8))
+            else:
+                o = 8 * node + bit // 8
+                on = 0 <= bit < 64 and o < len(sw) and bool(sw[o] & (1 << (bit % 8)))
+            out[sid] = bool(on)
+        return out
+
+    def publish(self):
+        """The live levels into mrg[] (module docstring); bumps mrg_gen when
+        one changed, and once at the start so readers switch over to it.
+        True when it wrote."""
+        if not getattr(self, "writable", False) or self.mm is None:
+            return False
+        m = self.mm
+        changed = not struct.unpack_from("<I", m, OFF_MRG_GEN)[0]
+        for sid, on in self.levels().items():
+            if 0 < sid < MAX_ID and m[OFF_MRG + sid] != int(on):
+                m[OFF_MRG + sid] = int(on)
+                changed = True
+        if changed:
+            gen = struct.unpack_from("<I", m, OFF_MRG_GEN)[0]
+            struct.pack_into("<I", m, OFF_MRG_GEN, (gen + 1) & 0xFFFFFFFF or 1)
+        return changed
 
     def wanted(self):
         """{(node, bit): closed} - every switch the window's sources name."""
@@ -165,7 +226,14 @@ def main():
         time.sleep(0.5)
     print("[s3keys] window keyboard attached (%s)" % k.padsw, flush=True)
     names = {(n, b): nm for n, b, nm in k.ids.values()}
+    if not getattr(k, "writable", False):
+        print("[s3keys] the block is read-only here: the window will not see the live switches",
+              flush=True)
+    n = 0
     while True:
+        n += 1
+        if n % 5 == 0:                       # 20 Hz: the window reads at 10
+            k.publish()
         for (nb, on) in k.step():
             # wall-clock time: lines up with the bridge's [scan] trace and a
             # screen recording (PAD-1090: "one press, the menu ran away")

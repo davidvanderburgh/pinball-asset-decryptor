@@ -143,12 +143,12 @@ def _project(tmp_path, reader, cont):
     """A project extracted from *reader*: the WAVs and the baseline."""
     from pinball_decryptor.core.checksums import generate_checksums
     proj = tmp_path / "proj"
-    for card_path, node, folder in W.project_sound_dirs(reader):
+    for card_path, node, folder, stem in W.project_sound_dirs(reader):
         d = proj / folder
-        d.mkdir(parents=True)
-        src = tmp_path / ("src_%s.bin" % folder)
+        d.mkdir(parents=True, exist_ok=True)
+        src = tmp_path / ("src_%s_%s" % (folder, os.path.basename(card_path)))
         src.write_bytes(reader.files[card_path])
-        SND.decode_container(str(src), str(d))
+        SND.decode_container(str(src), str(d), stem=stem)
     generate_checksums(str(proj))
     return proj
 
@@ -157,9 +157,62 @@ def test_sound_folders_keep_the_two_sets_apart(tmp_path):
     cont = _container_bytes(tmp_path)
     r = _Reader({"/pk/image.bin": cont,
                  "/pk/spike3/spike_menu/image.bin": cont}, "/pk/image.bin")
-    got = [(p, f) for p, _n, f in W.project_sound_dirs(r)]
+    got = [(p, f) for p, _n, f, _s in W.project_sound_dirs(r)]
     assert got == [("/pk/image.bin", "audio"),
                    ("/pk/spike3/spike_menu/image.bin", "audio_spike_menu")]
+
+
+def test_music_banks_share_their_image_bin_folder(tmp_path):
+    """main's PAD-1185 decodes image-scNN.bin banks; the Write must find them
+    in the same folder, named music_catNN_NNNN, the game's banks first."""
+    cont = _container_bytes(tmp_path)
+    r = _Reader({"/pk/image-sc10.bin": cont, "/pk/image-sc02.bin": cont,
+                 "/pk/image.bin": cont,
+                 "/pk/spike3/spike_menu/image.bin": cont}, "/pk/image.bin")
+    got = [(p, f, s) for p, _n, f, s in W.project_sound_dirs(r)]
+    assert got == [("/pk/image.bin", "audio", None),
+                   ("/pk/image-sc02.bin", "audio", "music_cat02"),
+                   ("/pk/image-sc10.bin", "audio", "music_cat10"),
+                   ("/pk/spike3/spike_menu/image.bin", "audio_spike_menu",
+                    None)]
+
+
+def test_a_replaced_bank_song_goes_into_its_own_bank(tmp_path):
+    """A music_cat02 song is the bank's sound, never image.bin's (whose
+    idx0001 it does not touch) nor another bank's; a renamed file counts."""
+    cont = _container_bytes(tmp_path)
+    r = _Reader({"/pk/image.bin": cont, "/pk/image-sc02.bin": cont,
+                 "/pk/image-sc03.bin": cont}, "/pk/image.bin")
+    proj = _project(tmp_path, r, cont)
+    names = sorted(os.listdir(proj / "audio"))
+    assert "music_cat02_0001.wav" in names and "idx0001.wav" in names
+    os.remove(proj / "audio" / "music_cat02_0001.wav")
+    _wav(proj / "audio" / "music_cat02_0001 - Theme.wav", 30, 2, 7000)
+    from pinball_decryptor.core.checksums import read_checksums
+    plans = W.plan_sounds(r, str(proj), read_checksums(str(proj)),
+                          str(tmp_path), lambda *a: None)
+    assert [(p.card_path, p.stem, p.padded) for p in plans] ==         [("/pk/image-sc02.bin", "music_cat02", [1])]
+    out = bytearray(cont)
+    for off, b in plans[0].inplace:
+        out[off:off + len(b)] = b
+    (tmp_path / "bank.bin").write_bytes(bytes(out))
+    new = SND.ImageSound(str(tmp_path / "bank.bin"))
+    assert new.records[1].frames == 30
+    assert max(struct.unpack("<60h", new.read_body(new.records[1]))) > 6000
+
+
+def test_a_grown_bank_stages_under_its_own_name(tmp_path):
+    cont = _container_bytes(tmp_path)
+    r = _Reader({"/pk/image.bin": cont, "/pk/image-sc02.bin": cont},
+                "/pk/image.bin")
+    proj = _project(tmp_path, r, cont)
+    _wav(proj / "audio" / "idx0001.wav", 80, 2, 3000)
+    _wav(proj / "audio" / "music_cat02_0001.wav", 90, 2, 3000)
+    from pinball_decryptor.core.checksums import read_checksums
+    plans = W.plan_sounds(r, str(proj), read_checksums(str(proj)),
+                          str(tmp_path / "w"), lambda *a: None)         if (tmp_path / "w").mkdir() is None else None
+    staged = sorted(os.path.basename(p.staged) for p in plans)
+    assert staged == ["audio_image-sc02.bin", "audio_image.bin"]
 
 
 def test_a_shorter_sound_plays_its_own_length_in_place(tmp_path):
@@ -173,7 +226,7 @@ def test_a_shorter_sound_plays_its_own_length_in_place(tmp_path):
     assert len(plans) == 1
     p = plans[0]
     assert p.staged is None and p.n_fit == 1 and p.padded == [0]
-    img = SND.ImageSound(str(tmp_path / "src_audio.bin"))
+    img = SND.ImageSound(str(tmp_path / "src_audio_image.bin"))
     # the body, the directory with the new length, and its CRC - in place
     out = bytearray(cont)
     for off, b in p.inplace:
@@ -201,7 +254,7 @@ def test_a_longer_sound_grows_the_container(tmp_path):
     p, = W.plan_sounds(r, str(proj), read_checksums(str(proj)),
                        str(tmp_path), lambda *a: None)
     assert p.grown == [1] and p.staged
-    old = SND.ImageSound(str(tmp_path / "src_audio.bin"))
+    old = SND.ImageSound(str(tmp_path / "src_audio_image.bin"))
     new = SND.ImageSound(p.staged)
     new.validate()
     assert new.count == 2 and new.md_off == old.md_off + 80 * 4

@@ -288,3 +288,48 @@ def test_store_id_follows_the_build_record(tmp_path):
     assert len({stock, one, two}) == 3
     os.remove(img + s3store.BUILD_RECORD)
     assert s3store.card_id(img) == stock
+
+
+# -- the app: tabs, Write and the video rules on a Spike 3 card -------------------
+
+def _stern(era):
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+    m = SternManufacturer()
+    m.set_era(era)
+    return m
+
+
+def test_spike3_offers_the_replace_tabs_and_write():
+    m = _stern("spike3")
+    caps = m.capabilities
+    for c in ("extract", "write", "replace_audio", "replace_video",
+              "replace_image", "replace_text", "emulate"):
+        assert getattr(caps, c), c
+    assert not caps.dmd_shades and not caps.modes          # Scenes on, no modes
+    assert m.write_output_ext() == ".raw"
+    assert tuple(m.write_phases) == W.PHASES
+    p = m.make_write_pipeline("in.raw", "proj", "out.raw", *([lambda *a, **k: None] * 4))
+    assert isinstance(p, W.Spike3WritePipeline)
+    assert not m.colour_profile_on_display()   # the profile goes into the files
+    assert m.video_codecs() == ("h264", "hevc")
+    assert _stern("spike2").video_codecs() == ("h264",)
+
+
+def test_video_rules_take_the_machines_codecs(monkeypatch):
+    from types import SimpleNamespace as NS
+    from pinball_decryptor.webui import compat
+    from pinball_decryptor.webui import video_helpers as vh
+    from pinball_decryptor.core import video as V
+    slot = NS(info=V.VideoInfo("a.mp4", vcodec="hevc", width=1920, height=1080,
+                               pix_fmt="yuv420p"), abs_path="a.mp4")
+    monkeypatch.setattr(V, "backend_for", lambda p: None)
+    for era, plays in (("spike3", True), ("spike2", False)):
+        compat.install(NS(window=NS(current_mfr=_stern(era))))
+        try:
+            why = vh.slot_unplayable("stern", slot)
+        finally:
+            compat.uninstall()
+        assert (why is None) is plays, (era, why)
+    assert why == "is HEVC and the machine plays H.264"     # Spike 2's words
+    # no app context (a script, a test): Spike 2's rule
+    assert vh.machine_codecs() == ("h264",)

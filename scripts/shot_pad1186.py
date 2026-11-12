@@ -173,7 +173,7 @@ def rail(run, page, project, path):
 
 def _rel(rows, needle):
     for r in rows:
-        for k in ("rel", "iid", "id", "rel_path"):
+        for k in ("k", "rel", "iid", "id", "rel_path"):
             v = r.get(k)
             if isinstance(v, str) and needle in v:
                 return v
@@ -182,8 +182,13 @@ def _rel(rows, needle):
 
 def e2e(run, page, project, build, files):
     import shutil
-    shutil.rmtree(project, ignore_errors=True)
-    os.makedirs(project)
+    # PAD1186_REUSE=1: the project already holds this card's extract (and no
+    # edits): open it rather than extract again
+    reuse = (os.environ.get("PAD1186_REUSE") == "1"
+             and os.path.isfile(os.path.join(project, ".checksums.md5")))
+    if not reuse:
+        shutil.rmtree(project, ignore_errors=True)
+        os.makedirs(project)
     out = run.out
     run.api("ui.pick_manufacturer", "stern")
     run.api("ui.select_tab", "extract")
@@ -193,10 +198,11 @@ def e2e(run, page, project, build, files):
     run.answer([project])
     run.api("extract.browse_output")
     time.sleep(2)
-    print("rail before extract:", tabs_on_rail(run), flush=True)
-    run.api("extract.start")
-    run.wait_idle("extract")
-    shot(page, os.path.join(out, "after_extract.png"))
+    if not reuse:
+        print("rail before extract:", tabs_on_rail(run), flush=True)
+        run.api("extract.start")
+        run.wait_idle("extract")
+        shot(page, os.path.join(out, "after_extract.png"))
     print("rail after extract:", tabs_on_rail(run), flush=True)
 
     # Replace Audio: a longer and a shorter sound
@@ -220,9 +226,15 @@ def e2e(run, page, project, build, files):
 
     # Replace Images
     run.api("ui.select_tab", "images")
-    rows = run.wait_rows("images")
-    print("image rows:", len(rows), flush=True)
-    rel = _rel(rows, "Coin0015")
+    t0 = time.time()                 # the Images list comes in chunks (nchunks)
+    while time.time() - t0 < 900:
+        s = run.st("images")
+        if s.get("nchunks") and not s.get("scanning"):
+            break
+        time.sleep(2)
+    print("image chunks:", run.st("images").get("nchunks"), flush=True)
+    rel = ("images/pokemon_le/spike3/spike_menu/assets/nuk/images/Connectivity/"
+           "Icons/Coin/Coin0015.png")
     run.answer([os.path.join(files, "red_coin.png")])
     print("  images.choose", rel, run.api("images.choose", rel), flush=True)
     shot(page, os.path.join(out, "after_replace_images.png"))
@@ -231,8 +243,8 @@ def e2e(run, page, project, build, files):
     run.api("ui.select_tab", "text")
     rows = run.wait_rows("text")
     print("text rows:", len(rows), flush=True)
-    hit = next(r for r in rows if r.get("original") == "GAME NAME")
-    run.api("text.select", hit.get("iid") or hit.get("id"))
+    idx = next(i for i, r in enumerate(rows) if r.get("original") == "GAME NAME")
+    print("  text.select", idx, run.api("text.select", idx), flush=True)
     time.sleep(1)
     print("  text.apply", run.api("text.apply", "PAD 1186"), flush=True)
     shot(page, os.path.join(out, "after_replace_text.png"))

@@ -61,6 +61,30 @@ SORT_CFG = (("#0", "Original Video", False), ("len", "Length", True),
 # ---------------------------------------------------------------------------
 # Playability (MainWindow._video_playability_conflict & co)
 # ---------------------------------------------------------------------------
+def machine_codecs():
+    """The video codecs the machine in use decodes, lower case: the
+    manufacturer's ``video_codecs()`` (Stern Spike 3, PAD-1186: H.264 and
+    HEVC, the Pi 4's two decoders the game opens itself), else Spike 2's
+    VPU fact, H.264 alone."""
+    try:
+        from . import compat
+        mfr = getattr(compat.ctx().window, "current_mfr", None)
+        fn = getattr(mfr, "video_codecs", None)
+        if fn is not None:
+            got = tuple(str(c).lower() for c in fn() or ())
+            if got:
+                return got
+    except Exception:                                   # noqa: BLE001
+        pass
+    return ("h264",)
+
+
+def _plays(codecs):
+    """"H.264" / "H.264 and HEVC": what the machine plays, in words."""
+    names = {"h264": "H.264", "hevc": "HEVC"}
+    return " and ".join(names.get(c, c.upper()) for c in codecs)
+
+
 def playability_conflict(slot, path, stock_path=None):
     """MainWindow._video_playability_conflict: why the machine wouldn't play
     *path* in *slot*, or None.  Geometry / frame rate / profile are measured
@@ -73,9 +97,10 @@ def playability_conflict(slot, path, stock_path=None):
     if info is None:
         return None
     codec = (info.vcodec or "").lower()
-    if codec and codec != "h264":
-        return ("%s is %s and the machine plays H.264"
-                % (name, codec.upper()))
+    plays = machine_codecs()
+    if codec and codec not in plays:
+        return ("%s is %s and the machine plays %s"
+                % (name, codec.upper(), _plays(plays)))
     pix = info.pix_fmt or ""
     if pix and pix not in _video.SAFE_PIX_FMTS:
         return ("%s is %s and the machine's decoder handles only 8-bit "
@@ -137,8 +162,9 @@ def slot_unplayable(mfr_key, slot):
     if _video.backend_for(slot.abs_path) is not None:
         return None
     codec = (info.vcodec or "").lower()
-    if codec and codec != "h264":
-        return "is %s and the machine plays H.264" % codec.upper()
+    plays = machine_codecs()
+    if codec and codec not in plays:
+        return "is %s and the machine plays %s" % (codec.upper(), _plays(plays))
     pix = info.pix_fmt or ""
     if pix and pix not in _video.SAFE_PIX_FMTS:
         return ("is %s and the machine's decoder handles only 8-bit "

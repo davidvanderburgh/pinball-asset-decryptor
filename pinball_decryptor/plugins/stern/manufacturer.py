@@ -699,6 +699,13 @@ class SternManufacturer(Manufacturer):
     def current_era(self):
         return self._era
 
+    def video_codecs(self):
+        """The codecs the machine's video player decodes (webui
+        video_helpers.machine_codecs): Spike 2's i.MX6 VPU plays H.264;
+        Spike 3's game opens the Pi 4's HEVC and H.264 decoders itself
+        (PAD-1090 stage 5, PAD-1186)."""
+        return ("h264", "hevc") if self._era == "spike3" else ("h264",)
+
     def colour_profile_on_display(self):
         """Spike 2: the Write patches the game's drawing shaders
         (shader_profile.py), which reach every picture, clip and line of

@@ -529,7 +529,9 @@ HELP_CONTENT = {
             "in, no re-encode) or \"will be re-encoded to match this slot\". "
             "Transparency is kept where the original has it.\n"
             "- Picks are stored in the project folder, not the card: they survive "
-            "closing the app or pointing Extract at another card image.",
+            "closing the app or pointing Extract at another card image.\n"
+            "- **Full screen:** the button at the right of a player's bar, or a "
+            "double-click on the picture, fills the window with it; Esc comes back.",
         ]),
         ("Replace from a folder", [
             "**Replace from folder…**, beside the project folder, picks each file in a "

@@ -419,6 +419,25 @@ once), nor a window run: the window's keyboard closes the interlock as it
 attaches. `s3bridge.py` now shuts it by name (COIN DOOR [POWER] INTERLOCK)
 before the game starts; `PAD_S3_DOOR=open` keeps the old start.
 
+**The boot discovery is answered** (PAD-1180). Even with the door shut, every
+title sat ~30 s on its own red LOCATING NODE BOARDS / NODES NOT FOUND box
+(empty list): after the bus reset (F1 to node 0) and an unblock-all (F0 22)
+the game walks NODEBUS_Poll (0x25), blocks each board it is handed (F0 10 +
+F0 20) and polls again until a 0 - Spike 1's node_bus_identify_attached_nodes.
+The bridge answered 0 at once, so the game found no board, re-read every
+board's runtime info every 0.3 s and gave up 30 s after the bus reset (first
+service probe at f1 + 31 s on all 7 titles). `Bridge.discover()` now hands
+out each declared board once until it is blocked, then answers only switch
+requests; a bus reset starts it again. A board's switch-request hold
+(`attention()`) now ends at the service loop's first status probe (ff) rather
+than a flat 30 s after its identity, or a coin in the earlier attract would
+have waited ~20 s. Measured (headless, saved slots): pokemon_le every board
+found at 9 s, service loop 11-13 s (was 35 s), lamps 18 s (was 38 s), Guided
+Setup by 33 s (was ~49 s); fallout_le, star_wars_2025_le/pro, star_wars_elg,
+transformers_mtmte_le, walking_dead_remastered_le all found every board 3-5 s
+after the bus reset and lit their lamps at 15-24 s. Runtime info or LED (f2)
+replies filled with patterns changed nothing - the walk is the gate.
+
 **Proven** (pokemon_le 0.82.0, names only, emulator_08..11): coins ->
 CREDITS, START BUTTON -> BALL 1 (the trough eject is answered, the ball
 reaches the shooter lane), ACTION BUTTON -> the auto plunger fires, slings,

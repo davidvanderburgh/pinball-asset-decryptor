@@ -379,3 +379,72 @@ def test_coin_door_starts_shut_whatever_the_title_names_it(tmp_path, monkeypatch
     assert spi.read_bytes() == b"\xff" * 8
     monkeypatch.delenv("PAD_S3_DOOR")
     assert s3bridge.close_coin_door({"COIN DOOR INTERLOCK": [0, 23]}, str(tmp_path / "none")) == []
+
+
+def _poll(br):
+    return s3bridge.frames_in(br.handle(0x25, 1, b""))[0][0][2][0]
+
+
+def _send(br, node, payload, reply_len=0):
+    return br.handle(0x41, 0, bytes([node, len(payload)]) + bytes(payload) + bytes([reply_len]))
+
+
+def test_boot_discovery_hands_out_every_board_once():
+    """PAD-1180: the game's boot discovery polls 0x25, blocks the board it is
+    handed (F0 10 + F0 20) and polls again until a 0. Answered 0 from the
+    first poll, every Spike 3 title sat 30 s on LOCATING NODE BOARDS. Each
+    declared board goes out until it is blocked, then the walk is over for
+    good - until the next bus reset (F1 to node 0)."""
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    for nid in (1, 2, 8):
+        br.nodes[nid] = _node(bytes(8))
+    _send(br, 0x80, [0xF1, 0x8D])                        # bus reset
+    _send(br, 0x80, [0xF0, 0x22, 0x6B])                  # unblock all
+    got = []
+    for _ in range(4):
+        a = _poll(br)
+        got.append(a)
+        if a:
+            _send(br, 0x80 | a, [0xF0, 0x10, 0])
+            _send(br, 0x80 | a, [0xF0, 0x20, 0])
+    assert got == [1, 2, 8, 0]
+    assert br.discovered == {1, 2, 8}
+    _send(br, 0x80, [0xF0, 0x22, 0x6B])                  # the walk ends: unblock all
+    assert _poll(br) == 0                                # no second walk
+    _send(br, 0x80, [0xF1, 0x8D])                        # a new bus reset: again
+    assert _poll(br) == 1
+
+
+def test_board_not_blocked_is_offered_once_a_pass():
+    """A board the game is handed but does not block comes round again on the
+    next pass, never twice in one (the walk always ends in a 0)."""
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    br.nodes[1] = _node(bytes(8))
+    br.nodes[4] = _node(bytes(8))
+    assert _poll(br) == 1
+    _send(br, 0x81, [0xF0, 0x20, 0])                     # node 1 blocked
+    assert [_poll(br), _poll(br)] == [4, 0]              # node 4 is not
+    assert [_poll(br), _poll(br)] == [4, 0]              # so it comes round again
+
+
+def test_service_loop_ends_discovery_and_the_request_hold():
+    """Once the service loop's status probe (ff) has reached a board, the poll
+    is the switch requests' alone and the board's hold is over at once - not
+    30 s after its identity: attract comes ~25 s sooner with the discovery
+    answered, and a coin there would have waited ~20 s (PAD-1180)."""
+    br = s3bridge.Bridge(0, open(os.devnull, "w"))
+    n = _node(bytes([0, 0, 0x01, 0, 0, 0, 0, 0]))        # a coin closed
+    br.nodes[9] = n
+    br.discovered = {9}                                  # the walk is done
+    n.registered = time.time()                           # identity just read
+    assert br.attention() == 0                           # still in bring-up
+    n(bytes([0xFF, 0x77]), 9)                            # the service probe
+    assert n.in_service
+    assert br.attention() == 9
+    # re-addressed in service (F0 10/F0 20): back in bring-up until probed
+    _send(br, 0x89, [0xF0, 0x10, 0])
+    assert not n.in_service
+    br2 = s3bridge.Bridge(0, open(os.devnull, "w"))
+    br2.nodes[1] = _node(bytes(8))
+    br2.nodes[1].in_service = True                       # service has begun:
+    assert _poll(br2) == 0                               # no discovery answer

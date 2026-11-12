@@ -44,6 +44,8 @@ const T = {
   undoNone: "Nothing to undo yet: choosing or clearing a replacement, Replace from folder, a clip's conversion, length, colors or random clips, and the boxes over the list each make a step.",
   redoNone: "Nothing to redo: Redo does again what Undo just took back, until the next change.",
   soundGo: "Show this sound on the Audio tab",
+  songSync: "Play it with the clip",
+  songSyncTip: "Plays this sound alongside whichever player (Original or Replacement) is playing, kept to the clip's playhead: pause, seek and stop follow it. The game plays the song from its own file, so this is how the clip looks and sounds on the machine.",
   qTitle: "Check the videos already on a card",
   qIntro: "Measures every clip on a built card image and lists the ones whose bitrate is low enough to look blocky — the same test a Write applies to a replacement, applied after the fact to what is actually on the card. This reads the card image only; nothing is written and nothing is extracted.",
 };
@@ -72,6 +74,65 @@ function stopSound() {
   if (soundEl) { soundEl.pause(); soundEl = null; }
 }
 
+// PAD-1190: a clip's song (JJP: a separate file the game plays with it), played along with
+// whichever pane plays and kept to its playhead
+const songSync = { path: null, on: true };
+let songEl = null;
+function songStop() {
+  if (songEl) { songEl.pause(); songEl = null; }
+}
+function songFollow(v, kind) {
+  if (!v) return;
+  if (!songSync.on || !songSync.path) { songStop(); return; }
+  if (kind === "play") {
+    if (!songEl || songEl.__src !== songSync.path) {
+      songStop();
+      songEl = new Audio(mediaUrl(songSync.path));
+      songEl.__src = songSync.path;
+    }
+    stopSound();
+    songEl.__v = v;
+    try { songEl.currentTime = v.currentTime; } catch (e) { /* not loaded yet */ }
+    const p = songEl.play();
+    if (p && p.catch) p.catch(() => {});
+    return;
+  }
+  if (!songEl || songEl.__v !== v) return;
+  if (kind === "pause") songEl.pause();
+  else if (kind === "stop") songStop();
+  else if (Math.abs(songEl.currentTime - v.currentTime) > 0.35) {
+    try { songEl.currentTime = v.currentTime; } catch (e) { /* not loaded yet */ }
+  }
+}
+function playingPane() {
+  for (const side of ["orig", "rep"]) {
+    const v = players[side];
+    if (v && !v.paused) return v;
+  }
+  return null;
+}
+
+// The callout's "Play it with the clip" box: the song it names follows the players while the
+// row is on show.
+function SongSync({ it }) {
+  const [on, setOn] = useState(songSync.on);
+  useEffect(() => {
+    songSync.path = it.path;
+    const v = playingPane();
+    if (v) songFollow(v, "play");
+    return () => { if (songSync.path === it.path) songSync.path = null; songStop(); };
+  }, [it.path]);
+  const flip = (val) => {
+    songSync.on = !!val;
+    setOn(songSync.on);
+    if (!songSync.on) { songStop(); return; }
+    const v = playingPane();
+    if (v) songFollow(v, "play");
+  };
+  return html`<div class="vid-song-sync"><${Check} checked=${on} onChange=${flip} label=${T.songSync}
+    title=${T.songSyncTip} /></div>`;
+}
+
 // One of the sounds the game plays with a clip: ▷ plays its file here, its name shows it on the
 // Audio tab. A sound the extract has no file for is its words alone.
 function SoundItem({ it }) {
@@ -80,6 +141,7 @@ function SoundItem({ it }) {
   const play = () => {
     if (on) { stopSound(); setOn(false); return; }
     stopSound();
+    songStop();
     const a = new Audio(mediaUrl(it.path));
     soundEl = a;
     const off = () => { if (soundEl === a) soundEl = null; setOn(false); };
@@ -344,6 +406,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     setPlaying(false);
     setPos(0);
     if (!v) return;
+    songFollow(v, "stop");
     v.pause();
     // load() drops the queued "pause" event, so the state is set above
     if (src) v.load();
@@ -353,6 +416,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     setPlaying(false);
     setPos(0);
     const v = e.currentTarget;
+    songFollow(v, "stop");
     if (v && src) v.load();
   };
   const onError = () => {
@@ -381,8 +445,10 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     <div class="vid-screen">
       ${mediaKey ? html`<video key=${mediaKey} ref=${vref} src=${mediaUrl(src)} style=${fstyle}
           poster=${pane.poster ? mediaUrl(pane.poster) : undefined} preload="metadata" playsinline
-          onPlay=${() => setPlaying(true)} onPause=${() => setPlaying(false)} onEnded=${onEnded}
-          onTimeUpdate=${(e) => { if (!e.currentTarget.paused) setPos(e.currentTarget.currentTime); }} onError=${onError}
+          onPlay=${(e) => { setPlaying(true); songFollow(e.currentTarget, "play"); }}
+          onPause=${(e) => { setPlaying(false); songFollow(e.currentTarget, "pause"); }} onEnded=${onEnded}
+          onSeeked=${(e) => songFollow(e.currentTarget, "seek")}
+          onTimeUpdate=${(e) => { if (!e.currentTarget.paused) { setPos(e.currentTarget.currentTime); songFollow(e.currentTarget, "time"); } }} onError=${onError}
           onLoadedData=${onReady} onCanPlay=${onReady}></video>`
         : pane.poster ? html`<img src=${mediaUrl(pane.poster)} alt="" style=${fstyle} />` : null}
       ${look && look.offered && pane.path ? html`<${LookGL} media=${vref} mediaKey=${mediaKey} poster=${pane.poster}
@@ -1239,6 +1305,7 @@ export default function VideoTab() {
               <${SoundItem} key=${it.rel || it.text} it=${it} />`)}</ul>` : null}
             ${pv.sounds.maybe_more ? html`<div class="small muted">${pv.sounds.maybe_more}</div>` : null}
             ${pv.sounds.none ? html`<span>${pv.sounds.none}</span>` : null}
+            ${pv.sounds.sync && (pv.sounds.items || []).length ? html`<${SongSync} key=${pv.sounds.items[0].path} it=${pv.sounds.items[0]} />` : null}
             ${pv.sounds.foot ? html`<div class="small muted">${pv.sounds.foot}</div>` : null}</div><//>
         </div>` : null}
         ${pv.seen && pv.seen.rel === currentRel ? html`<div class="vid-seen">

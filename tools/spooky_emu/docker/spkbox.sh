@@ -74,14 +74,17 @@ command -v docker >/dev/null 2>&1 || {
 box_up() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$NAME"; }
 
 # The settings the rig reads, into the box. PAD_AUDIO_CTL is a path on THIS
-# machine; its folder is mounted at /pad/ctl when the box starts.
+# machine; the box gets a copy of it of its own (BOX_CTL, kept level by
+# ctl_sync below), which the volume keeper and the playfield window share.
+BOX_CTL_DIR=/tmp/pad_ctl
+BOX_CTL=$BOX_CTL_DIR/audio_ctl.json
 box_env() {
     local v
     for v in PAD_SLOT PAD_LABEL PAD_VISIBLE PAD_HIDDEN PAD_AUDIO PAD_AUDIO_ASKED \
              PAD_TITLE PAD_GAMEKEYS SPK_GL SPK_FRESH; do
         [ -n "${!v:-}" ] && printf '%s\n' "-e" "$v=${!v}"
     done
-    [ -n "${PAD_AUDIO_CTL:-}" ] && printf '%s\n' "-e" "PAD_AUDIO_CTL=/pad/ctl/$(basename "$PAD_AUDIO_CTL")"
+    [ -n "${PAD_AUDIO_CTL:-}" ] && printf '%s\n' "-e" "PAD_AUDIO_CTL=$BOX_CTL"
 }
 box_exec() {            # <script> [args...]: as root, stdin passed through
     local e=() line
@@ -116,7 +119,7 @@ case "${1:-}" in
         exec docker exec -d -u pad -e DISPLAY=:99 -e HOME=/home/pad \
             ${e[@]+"${e[@]}"} "$NAME" python3 "$RIG/spkpf.py" \
             --slot "${PAD_SLOT:-0}" --table "${2:?switches.json}" \
-            ${PAD_AUDIO_CTL:+--audio-ctl "/pad/ctl/$(basename "$PAD_AUDIO_CTL")"} ;;
+            ${PAD_AUDIO_CTL:+--audio-ctl "$BOX_CTL"} ;;
     --shell)
         box_up || { echo "[box] the emulator is not running" >&2; exit 1; }
         exec docker exec -it -u 0 "$NAME" bash ;;
@@ -146,10 +149,11 @@ if [ "$(uname -s)" = Darwin ] && ! under_home "$APP"; then
     T=$APP/tools
     [ -f "$T/spooky_emu/watch.sh" ] || {
         echo "[box] no rig at $T/spooky_emu" >&2; exit 1; }
-    mkdir -p "$STAGE/tools/spike2_emu" "$STAGE/pinball_decryptor/plugins/spooky" || exit 1
+    mkdir -p "$STAGE/tools/spike2_emu/docker" "$STAGE/pinball_decryptor/plugins/spooky" || exit 1
     # over the top, never rm -rf first: a live box has this folder mounted
     cp -R "$T/spooky_emu" "$T/proc_emu" "$T/ap_emu" "$STAGE/tools"/ \
         && cp -R "$T/spike2_emu/pfweb.py" "$T/spike2_emu/pfpage" "$STAGE/tools/spike2_emu"/ \
+        && cp "$T/spike2_emu/docker/boxctl.py" "$STAGE/tools/spike2_emu/docker"/ \
         && cp "$APP/pinball_decryptor/plugins/spooky/games.py" \
               "$STAGE/pinball_decryptor/plugins/spooky"/ || {
         echo "[box] could not copy the emulator into $STAGE" >&2; exit 1; }
@@ -207,9 +211,6 @@ ARGS=(-d --rm --name "$NAME" --platform "$PLATFORM" --privileged
       -p "127.0.0.1:$PORT:5900" -p "127.0.0.1:$AUDIO_PORT:$AUDIO_PORT"
       -e "PAD_AUDIO_PORT=$AUDIO_PORT" -e "PAD_VNC_PASSWD=$PAD_VNC_PASSWD"
       -v "$APP:/pad/app:ro" -v "$UPD_DIR:/pad/files:ro" -v "$VOL:/var/tmp")
-if [ -n "${PAD_AUDIO_CTL:-}" ] && [ -d "$(dirname "$PAD_AUDIO_CTL")" ]; then
-    ARGS+=(-v "$(dirname "$PAD_AUDIO_CTL"):/pad/ctl:ro")
-fi
 echo "[box] starting the emulator container"
 docker run "${ARGS[@]}" "$IMAGE" >/dev/null || {
     echo "[box] the emulator container did not start (docker said so above)" >&2; exit 1; }
@@ -251,6 +252,60 @@ if [ "${PAD_AUDIO:-0}" = 1 ] && [ "$(uname -s)" = Darwin ]; then
     else
         echo "[box] no ffplay on this Mac, so this run is silent (brew install ffmpeg)" >&2
     fi
+fi
+
+# THE VOLUME FILE, both ways (PAD-1177). The tab's audio_ctl.json used to be
+# mounted read only at /pad/ctl, so the playfield window's Volume and Mute,
+# which write that file, changed nothing: the write failed and the window
+# said nothing. The box now keeps its own copy (BOX_CTL) and this carries it
+# both ways through docker exec, as the Spike 2 box does (padbox.sh ctl_sync,
+# the same boxctl.py): the tab's slider in, the window's Volume / Mute out to
+# the tab's file. Not a writable mount: whether the box's user may write a
+# mounted Mac folder is up to the engine (PAD-957, PAD-1129).
+#   ctl_feed   the Mac's file, sent whenever it changes (base64, one line)
+#   ctl_apply  the window's change, into the Mac's file
+#   ctl_sync   both, until THIS box is gone. Detached from the app's output,
+#              as the speaker is: this script returns at attract.
+BOXCTL=$RIG/../spike2_emu/docker/boxctl.py
+ctl_feed() {
+    local last="" cur beat=0
+    while :; do
+        cur=$(cat "$PAD_AUDIO_CTL" 2>/dev/null) || cur=""
+        if [ -n "$cur" ] && [ "$cur" != "$last" ]; then
+            printf 'PUT ctl %s\n' "$(printf '%s\n' "$cur" | base64 | tr -d '\n')" || return 0
+            last=$cur
+        fi
+        # a word now and then, so a box that has gone ends this too
+        beat=$(( beat + 1 ))
+        if [ "$beat" -ge 8 ]; then beat=0; echo NOP || return 0; fi
+        sleep 0.25
+    done
+}
+ctl_apply() {
+    local line
+    while IFS= read -r line; do
+        case $line in
+            "CTL "*) printf '%s\n' "${line#CTL }" > "$PAD_AUDIO_CTL.box.tmp" &&
+                         mv -f "$PAD_AUDIO_CTL.box.tmp" "$PAD_AUDIO_CTL" ;;
+        esac
+    done
+}
+box_id() { docker inspect -f '{{.Id}}' "$NAME" 2>/dev/null; }
+ctl_sync() {
+    [ -n "${PAD_AUDIO_CTL:-}" ] || return 0
+    local id
+    id=$(box_id) || return 0
+    [ -n "$id" ] || return 0
+    # the next run's box has the same name: this one's sync ends with its box
+    while [ "$(box_id)" = "$id" ]; do
+        ctl_feed |
+            docker exec -i -u 0 "$NAME" python3 "$BOXCTL" "$BOX_CTL_DIR" |
+            ctl_apply
+        sleep 1
+    done
+}
+if [ -n "${PAD_AUDIO_CTL:-}" ]; then
+    ctl_sync < /dev/null >> "${TMPDIR:-/tmp}/pad-spooky-ctl.log" 2>&1 &
 fi
 
 e=(); while IFS= read -r line; do e+=("$line"); done < <(box_env)

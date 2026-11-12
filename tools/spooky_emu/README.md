@@ -282,6 +282,14 @@ registers an amd64 handler at start).
   spooky_box` when the app is outside home, since colima shares only home),
   the update file's folder at `/pad/files` read only, and a named volume
   `pad-spooky-var` at `/var/tmp` (builds, the games' Python, settings).
+* Volume / Mute (PAD-1177): the box keeps its own copy of the tab's
+  `audio_ctl.json` at `/tmp/pad_ctl/audio_ctl.json`, which the volume keeper
+  (`spkvol.py`) and the playfield window share. `spkbox.sh`'s `ctl_sync`
+  carries it both ways through one `docker exec -i ... boxctl.py` (the Spike
+  2 box's, `tools/spike2_emu/docker/boxctl.py`): the tab's slider in, the
+  window's Volume / Mute out to the tab's file. The tab's folder used to be
+  mounted read only at `/pad/ctl`, so the window's Volume and Mute failed to
+  write and changed nothing.
 * The DMD games (pinHeck) are not boxed: their window runs on a Python of
   the computer's own, which the frozen Mac app lacks; the tab says so.
 

@@ -8,6 +8,7 @@ what it was asked (and a `uname` that says Darwin where the Mac's copying is
 the point), as test_padbox_mac_sharing.py does for the Spike 2 box.
 """
 import os
+import re
 import subprocess
 
 import pytest
@@ -29,9 +30,11 @@ trap 'rm -rf "$W"' EXIT
 mkdir -p "$W/bin" "$W/home/games" "$W/ctl"
 for a in "$W/apps/app" "$W/home/dev/app"; do
     mkdir -p "$a/tools/spooky_emu/docker" "$a/tools/proc_emu" "$a/tools/ap_emu" \
-             "$a/tools/spike2_emu/pfpage" "$a/pinball_decryptor/plugins/spooky"
+             "$a/tools/spike2_emu/pfpage" "$a/tools/spike2_emu/docker" \
+             "$a/pinball_decryptor/plugins/spooky"
     echo x > "$a/tools/spooky_emu/watch.sh"
     echo x > "$a/tools/spike2_emu/pfweb.py"
+    echo x > "$a/tools/spike2_emu/docker/boxctl.py"
     echo x > "$a/tools/rigboard.sh"
     echo keys > "$a/pinball_decryptor/plugins/spooky/games.py"
     echo FROM > "$a/tools/spooky_emu/docker/Dockerfile"
@@ -104,7 +107,9 @@ def test_a_start_runs_an_idle_amd64_box_then_watch_sh_inside_it():
     # under home: the checkout itself is mounted, read only, at /pad/app
     assert "/home/dev/app:/pad/app:ro" in run
     assert "/home/games:/pad/files:ro" in run
-    assert "/ctl:/pad/ctl:ro" in run
+    # PAD-1177: the volume folder is no longer mounted (read only, the
+    # window's Volume / Mute could not write it); the box keeps a copy
+    assert "/pad/ctl" not in run
     assert "127.0.0.1:5901:5900" in run and "127.0.0.1:45998:45998" in run
     text = text.split("--LOG--", 1)[1]
     watch = [ln for ln in _lines(text, "DOCKER exec ") if "watch.sh" in ln]
@@ -114,8 +119,8 @@ def test_a_start_runs_an_idle_amd64_box_then_watch_sh_inside_it():
     assert "/pad/app/tools/spooky_emu/watch.sh /pad/files/ac-gamecode.pkg" in w
     assert "-e PAD_SLOT=0" in w and "-e PAD_VISIBLE=1" in w
     assert "-e PAD_TITLE=Alice" in w
-    # the host's Volume / Mute file, as the box sees it
-    assert "-e PAD_AUDIO_CTL=/pad/ctl/audio_ctl.json" in w
+    # the box's own copy of the host's Volume / Mute file
+    assert "-e PAD_AUDIO_CTL=/tmp/pad_ctl/audio_ctl.json" in w
     # a run that reached attract keeps its box
     assert not [ln for ln in _lines(text, "DOCKER rm ")
                 if text.index(ln) > text.index(w)]
@@ -151,7 +156,7 @@ def test_an_installed_app_is_copied_under_home_with_the_games_keys():
     assert stage + ":/pad/app:ro" in run
     assert "/apps/app:/pad/app" not in run
     listing = text.split("--LOG--", 1)[1]
-    for f in ("games.py", "watch.sh", "pfweb.py", "rigboard.sh"):
+    for f in ("games.py", "watch.sh", "pfweb.py", "rigboard.sh", "boxctl.py"):
         assert f in listing, listing
 
 
@@ -191,7 +196,161 @@ def test_the_playfield_opens_in_the_box_as_pad_on_its_screen():
     ex = [ln for ln in _lines(text, "DOCKER exec ") if "spkpf.py" in ln][0]
     assert "-d -u pad -e DISPLAY=:99" in ex
     assert "--table /var/tmp/pad_spkproc/rig0/switches.json" in ex
-    assert "--audio-ctl /pad/ctl/audio_ctl.json" in ex
+    assert "--audio-ctl /tmp/pad_ctl/audio_ctl.json" in ex
+
+
+# ---- PAD-1177: the volume file, both ways -----------------------------------
+#
+# spkbox.sh's ctl_sync runs here with `docker` a shell function and the box a
+# folder: the REAL spike2_emu/docker/boxctl.py runs on it, as `docker exec -i`
+# runs it in the box, and the REAL AP switch window (appf.App, which spkpf.py
+# is) moves Volume and Mute in the box's copy. $D/mac is the app's folder,
+# $D/box the box's /tmp/pad_ctl.
+
+BOXCTL = os.path.join(ROOT, "tools", "spike2_emu", "docker", "boxctl.py")
+APPF = os.path.join(ROOT, "tools", "ap_emu", "appf.py")
+
+_CTL_PRELUDE = r"""
+set -u
+D=$(mktemp -d)
+NAME=pad-spooky BOX_CTL_DIR=/tmp/pad_ctl BOXCTL=/pad/app/tools/spike2_emu/docker/boxctl.py
+mkdir -p "$D/mac"
+PAD_AUDIO_CTL="$D/mac/audio_ctl.json"
+cat > "$D/boxctl.py" <<'BOXCTLEOF'
+%(boxctl)s
+BOXCTLEOF
+docker() {
+  case "$1" in
+    inspect) [ -f "$D/up" ] && cat "$D/up"; return 0 ;;
+    exec) ;;
+    *) return 0 ;;
+  esac
+  [ -f "$D/up" ] || return 1
+  echo "exec ${*:2}" >> "$D/execs"
+  python3 "$D/boxctl.py" "$D/box"
+}
+upto() { for _ in $(seq 1 60); do eval "$1" && return 0; sleep 0.1; done; return 1; }
+# the box goes as spkbox.sh's Stop takes it: removed, and its boxctl.py with it
+box_down() { rm -f "$D/up"; pkill -f "$D/boxctl.py"; }
+# the switch window's own Volume / Mute (appf.App._write_audio, unchanged)
+window() {
+  python3 - "$D/box/audio_ctl.json" "$1" %(apdir)s <<'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[3])
+import appf
+app = appf.App.__new__(appf.App)          # only the volume half is used
+app.audio_ctl, app.host = sys.argv[1], None
+what, val = sys.argv[2].split("=")
+if what == "volume":
+    app._write_audio(gain=float(val) / 100.0)
+else:
+    app._write_audio(muted=val == "1")
+PYEOF
+}
+"""
+
+
+def _sh_function(body, name):
+    m = re.search(r"^%s\(\) \{\n.*?^\}\n" % name, body, re.S | re.M)
+    if not m:
+        m = re.search(r"^%s\(\) \{.*\}\n" % name, body, re.M)
+    assert m, "%s() not found in spkbox.sh" % name
+    return m.group(0)
+
+
+def _wsl(path):
+    # `bash` on a Windows runner is WSL's (C:\x -> /mnt/c/x)
+    if os.name != "nt":
+        return path
+    drive, rest = os.path.splitdrive(os.path.abspath(path))
+    return "/mnt/%s%s" % (drive[0].lower(), rest.replace("\\", "/"))
+
+
+def _run_sync(body, timeout=60):
+    with open(BOX, "rb") as fh:
+        box = fh.read().decode("utf-8")
+    with open(BOXCTL, "rb") as fh:
+        boxctl = fh.read().decode("utf-8")
+    apdir = "'%s'" % _wsl(os.path.dirname(APPF))
+    script = "\n".join([_CTL_PRELUDE % {"boxctl": boxctl, "apdir": apdir}]
+                       + [_sh_function(box, n) for n in
+                          ("box_id", "ctl_feed", "ctl_apply", "ctl_sync")]
+                       + [body, 'rm -rf "$D"', ""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=timeout)
+    return out.returncode, out.stdout.decode("utf-8", "replace")
+
+
+@needs_bash
+def test_the_switch_windows_volume_and_mute_reach_the_tabs_file():
+    rc, text = _run_sync(r"""
+echo '{"gain": 1.0, "muted": false}' > "$D/mac/audio_ctl.json"
+echo box-1 > "$D/up"
+ctl_sync & CS=$!
+upto '[ -s "$D/box/audio_ctl.json" ]' && echo IN
+window volume=40
+upto 'grep -q 0.4 "$D/mac/audio_ctl.json"' && echo VOLUME-OUT
+window mute=1
+upto 'grep -q true "$D/mac/audio_ctl.json"' && echo MUTE-OUT
+sleep 1.5                                   # and nothing bounces it back
+echo "MAC=$(cat "$D/mac/audio_ctl.json")"
+echo "BOX=$(cat "$D/box/audio_ctl.json")"
+box_down; kill $CS 2>/dev/null; wait $CS 2>/dev/null
+echo "EXECS=$(( $(wc -l < "$D/execs") ))"
+cat "$D/execs"
+""")
+    for word in ("IN", "VOLUME-OUT", "MUTE-OUT"):
+        assert word in text, (word, text)
+    assert 'MAC={"gain": 0.4, "muted": true}' in text, text
+    assert 'BOX={"gain": 0.4, "muted": true}' in text, text
+    assert "EXECS=1" in text, text
+    assert ("exec -i -u 0 pad-spooky python3 "
+            "/pad/app/tools/spike2_emu/docker/boxctl.py /tmp/pad_ctl") in text, text
+
+
+@needs_bash
+def test_the_tabs_slider_reaches_the_boxs_copy():
+    rc, text = _run_sync(r"""
+echo '{"gain": 0.5, "muted": false}' > "$D/mac/audio_ctl.json"
+ctl_sync & CS=$!                            # no box yet: ends at once
+wait $CS; echo "NO-BOX-RC=$?"
+echo box-1 > "$D/up"
+ctl_sync & CS=$!
+upto 'grep -q 0.5 "$D/box/audio_ctl.json" 2>/dev/null' && echo IN-1
+echo '{"gain": 0.5, "muted": true}' > "$D/mac/audio_ctl.json"
+upto 'grep -q true "$D/box/audio_ctl.json"' && echo IN-2
+box_down; kill $CS 2>/dev/null; wait $CS 2>/dev/null
+""")
+    for word in ("NO-BOX-RC=0", "IN-1", "IN-2"):
+        assert word in text, (word, text)
+
+
+@needs_bash
+def test_the_sync_ends_with_its_own_box_not_the_next_runs():
+    # Stop removes the box and the next Start makes one of the same name:
+    # the old sync must not go on feeding the new box beside its own sync
+    rc, text = _run_sync(r"""
+echo '{"gain": 1.0, "muted": false}' > "$D/mac/audio_ctl.json"
+echo box-1 > "$D/up"
+ctl_sync & CS=$!
+upto '[ -s "$D/box/audio_ctl.json" ]' && echo IN
+echo box-2 > "$D/up"; pkill -f "$D/boxctl.py"     # a new box, same name
+for _ in $(seq 1 50); do kill -0 $CS 2>/dev/null || break; sleep 0.1; done
+kill -0 $CS 2>/dev/null && echo STILL-RUNNING || echo ENDED
+box_down; kill $CS 2>/dev/null; wait $CS 2>/dev/null
+""")
+    assert "IN" in text and "ENDED" in text, text
+
+
+@needs_bash
+def test_no_volume_file_setting_syncs_nothing():
+    rc, text = _run_sync(r"""
+echo box-1 > "$D/up"
+PAD_AUDIO_CTL= ctl_sync; echo "UNSET-RC=$?"
+[ -e "$D/execs" ] || echo NO-EXECS
+""")
+    assert "UNSET-RC=0" in text and "NO-EXECS" in text, text
 
 
 def test_the_rig_plays_to_the_boxs_sound_server_when_told():

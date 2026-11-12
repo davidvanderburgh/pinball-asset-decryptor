@@ -223,6 +223,45 @@ def fit_box(w, h, bw, bh):
     return (s, 0.0, 0.0, s, (bw - s * w) / 2.0, (bh - s * h) / 2.0)
 
 
+# PAD-1200: how many of a kept picture's pixels a Write keeps per pixel of the box the game
+# fits it into.  The game draws a scene picture from ONE texture level with a LINEAR filter
+# (no mipmaps, padglhost's MIN_FILTER record), so a texture many times bigger than where it
+# shows is sampled at scattered texels: DragonRR's 2020x3070 Battle Select grid, fitted into
+# its ~400x600 box, came out grainy and jagged in the emulator while PAD's preview (a proper
+# resize) looked clean.  Two pixels per box pixel keep PAD-865's extra detail for where a
+# scene zooms in, and a LINEAR filter at half size still averages neighbouring texels.
+KEEP_HEADROOM = 2.0
+
+
+def kept_texture_size(w, h, boxes, headroom=KEEP_HEADROOM):
+    """``(w, h)`` a *w* x *h* picture kept at its own size is written at, or None to write it
+    as it is: shrunk, its shape kept, to *headroom* times the biggest of *boxes* (``(bw, bh)``
+    pairs: the stock picture's own size and every Shape box it fills) it is fitted into
+    (:func:`fit_box`).  Where it shows on the glass does not change, since the fit is worked
+    out from the box, not the picture."""
+    boxes = [(bw, bh) for bw, bh in boxes or () if bw and bh]
+    if not (w and h and boxes):
+        return None
+    s = max(min(bw / float(w), bh / float(h)) for bw, bh in boxes) * headroom
+    if s >= 1.0:
+        return None
+    return max(1, int(round(w * s))), max(1, int(round(h * s)))
+
+
+def every_draw_fitted(scene, tids, own=()):
+    """True when every node of *scene* (parsed, stock) that draws one of the textures *tids*
+    has :func:`keep_boxes` fit it into its box: none draws it together with something else
+    (those are left drawing it at its own size) and none is in *own* (laid out over it at its
+    own size, PAD-981).  Only then can a Write shrink the texture without moving anything."""
+    from .scene_edit import _tree_index
+    for n, _sibs in _tree_index(scene).values():
+        mine = [c for c in n.components
+                if c.obj.kind == "Bitmap" and c.obj.body.get("tex") in tids]
+        if mine and (n.id in own or len(mine) != len(n.components)):
+            return False
+    return True
+
+
 def keep_boxes(stock, grown, offs, own=()):
     """*grown* (a scene :func:`regrow` resized the pictures at the stock offsets *offs* in)
     with each of those pictures shown in its stock place and size, fitted and centred:

@@ -6654,13 +6654,13 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                         "bitmaps": len(_rg.image_refs(data, im["data_off"],
                                                       imgs)), "fills": []}
                         for im in imgs}
-                scenes[radium_path] = (atlas, draws)
+                scenes[radium_path] = (atlas, draws, sc)
             except Exception:
                 scenes[radium_path] = None
         facts = scenes[radium_path]
         if facts is None:
             return "its scene couldn't be read"
-        atlas, draws = facts
+        atlas, draws, _sc = facts
         if data_off in atlas:
             return ("it is a font atlas, and its letters are measured in its "
                     "pixels")
@@ -6677,6 +6677,29 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
         fills = ((facts[1].get(data_off) or {}).get("fills") if facts
                  else None)
         return max(fills, key=lambda s: s[0] * s[1]) if fills else None
+
+    def _kept_size(radium_path, data_off, w, h, pad_w, pad_h):
+        """``(w, h)`` the picture kept at its own size at *data_off* is written at
+        (PAD-1200, :func:`radium_grow.kept_texture_size`): shrunk once, properly, to twice
+        the box the game fits it into, when every place that draws it is fitted (so its
+        place on the glass stays put), else its own *w* x *h*."""
+        from . import radium_grow as _rg
+        facts = scenes.get(radium_path)
+        sc = facts[2] if facts else None
+        if sc is None or os.environ.get("PAD_KEEP_SIZE_FULL") == "1":
+            return w, h
+        how = facts[1].get(data_off) or {}
+        want = _rg.kept_texture_size(w, h, [(pad_w, pad_h)] + list(how.get("fills") or ()))
+        if want is None:
+            return w, h
+        own = ()
+        if assets_dir:
+            from . import scene_edit as _scene_edit
+            own = _scene_edit.own_size_nodes(assets_dir, radium_path)
+        tids = {tid for tid, t in sc.textures.items() if t.get("data_off") == data_off}
+        if not _rg.every_draw_fitted(sc, tids, own):
+            return w, h
+        return want
 
     moved = {}                     # card path -> outputs whose record isn't there
     # The block encodes run on a pool (PAD-599): a BC3 encode of a screen
@@ -6747,23 +6770,38 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                         why = _resize_refusal(radium_path, node, data_off)
                         ok = not why
                     if ok:
-                        got = resized.get((staged, fmt))
+                        tw, th = _kept_size(radium_path, data_off, w, h, pad_w,
+                                            pad_h)
+                        got = resized.get((staged, fmt, tw, th))
                         if got is None:
-                            grid = Image.new("RGBA", (_padded4(w), _padded4(h)),
+                            src = im
+                            if (tw, th) != (w, h):
+                                # resized in premultiplied colour, so the
+                                # clear pixels round it don't bleed into its
+                                # edges
+                                src = im.convert("RGBa").resize(
+                                    (tw, th), Image.LANCZOS).convert("RGBA")
+                                log("Radium image %s is %dx%d, far bigger than "
+                                    "the %dx%d place the game draws it in, which "
+                                    "it would shrink unsmoothed (grainy, jagged): "
+                                    "written at %dx%d instead, smoothed, in the "
+                                    "same place and size on the screen."
+                                    % (output, w, h, pad_w, pad_h, tw, th), "info")
+                            grid = Image.new("RGBA", (_padded4(tw), _padded4(th)),
                                              (0, 0, 0, 0))
-                            grid.paste(im, (0, 0))
+                            grid.paste(src, (0, 0))
                             arr = _premultiplied(
                                 np.asarray(grid, dtype=np.uint8), output,
                                 radium_path, node, data_off, length, pad_w,
                                 pad_h, fmt)
-                            got = resized[(staged, fmt)] = (
-                                w, h, _dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
+                            got = resized[(staged, fmt, tw, th)] = (
+                                tw, th, _dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
                                 else _dds.encode_bc3(arr))
                         grown.setdefault(radium_path, (node, {}))[1][data_off] = got
                         patched_outputs.add(output)
                         log("Radium image %s is %dx%d, not the original %dx%d: "
                             "the scene (%s) is re-serialized around its new "
-                            "size." % (output, w, h, pad_w, pad_h, radium_path),
+                            "size." % (output, tw, th, pad_w, pad_h, radium_path),
                             "info")
                         box = _fill_box(radium_path, data_off)
                         if box:
@@ -6771,7 +6809,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                                 "and the box keeps its size: the picture shows "
                                 "at the same place and size, with %dx%d pixels "
                                 "for where the scene zooms in on it."
-                                % ((output,) + box + (w, h)), "info")
+                                % ((output,) + box + (tw, th)), "info")
                         continue
                 if override is not None:
                     log("Radium image %s is %dx%d but must stay %dx%d; skipped "

@@ -1067,6 +1067,17 @@ def lens_of(name):
     return _LENS.get(name)
 
 
+def own_lens(name):
+    """The colour a single-colour insert glows in (r, g, b): the user's
+    (lens_of), else the one its NAME says (PAD-1144: Star Wars 2025's "TOP
+    GI-BLU (x10)" - cablights.named_colour), else None for white."""
+    return lens_of(name) or cablights.named_colour(name)
+
+
+def _hex(rgb):
+    return "#%02x%02x%02x" % rgb if rgb else ""
+
+
 def state_changed(every=1.0):
     """True when the state file changed since it was last looked at - at most
     once every ``every`` s. The Modes tab's Light shows writes the same
@@ -2835,7 +2846,7 @@ class LedGrid(LedRing):
         lit = 0
         for C in self.cells:
             rgb, level = fixture_color(self._chan_vals(C, d, now),
-                                       lens_of(C["name"]))
+                                       own_lens(C["name"]))
             if rgb:
                 lit += 1
             st = (rgb, level)
@@ -3781,17 +3792,15 @@ class Field(LedRing):
     def lens_spec(self):
         """PAD-668: the side panel's INSERT COLOURS table - every positioned
         single-colour insert, by name, with the colour the user gave it ("" =
-        the default, white). [[name, "#rrggbb" or "", [fid, ...]], ...]; the
-        fids light the insert on the picture while its row is hovered."""
+        the default). [[name, "#rrggbb" or "", [fid, ...], default], ...]; the
+        fids light the insert on the picture while its row is hovered, and
+        ``default`` is the colour its name says ("" = white, PAD-1144)."""
         rows = {}
         for F in self.fixtures:
             if set(F["channels"]) == {"W"}:
                 rows.setdefault(F["name"], []).append(F["fid"])
-        out = []
-        for name in sorted(rows):
-            rgb = lens_of(name)
-            out.append([name, "#%02x%02x%02x" % rgb if rgb else "", rows[name]])
-        return out
+        return [[name, _hex(lens_of(name)), rows[name],
+                 _hex(cablights.named_colour(name))] for name in sorted(rows)]
 
     def lens_changed(self, name=None):
         """Redraw an insert whose colour the user just changed (every insert:
@@ -3902,7 +3911,7 @@ class Field(LedRing):
             # PAD-668: a mode's colour here is what it ASKED for; a
             # one-colour insert shows its lens's colour whatever it asks
             asked = coilmap.paint_tints(self.last, GROUP_NODE).get((node, idx))
-            lens = lens_of(d["name"])
+            lens = own_lens(d["name"])
             if asked and self.insert_look == "rgb":
                 asks = ("\ndrawn #%02x%02x%02x, the mode's colour (All RGB);"
                         "\non the machine it glows in its own colour" % asked)
@@ -3911,10 +3920,16 @@ class Field(LedRing):
                         "\nglows in its own colour on the machine" % asked)
             else:
                 asks = ""
+            if lens and lens_of(d["name"]):
+                own = "its colour %s, as set under INSERT COLOURS" % _hex(lens)
+            elif lens:
+                own = ("its colour %s, from its name (INSERT COLOURS can"
+                       " change it)" % _hex(lens))
+            else:
+                own = ("its colour not set (white) - the card does not say"
+                       " it: see INSERT COLOURS")
             return ("LED  %s   (one colour)\n%s\nvalue %s\n%s%s"
-                    % (d["name"], where(node, idx), fmt(vals.get("W")),
-                       "its colour #%02x%02x%02x, as set under INSERT COLOURS" % lens
-                       if lens else "its colour not set (white): see INSERT COLOURS",
+                    % (d["name"], where(node, idx), fmt(vals.get("W")), own,
                        asks))
         lines = ["LED  %s   (RGB fixture)" % d["name"]]
         for chan in "RGB":
@@ -4085,7 +4100,7 @@ class Field(LedRing):
                  if self.insert_look == "rgb" else None)
         for F in self.fixtures:
             rgb, level = fixture_color(
-                tinted(self._chan_vals(F, d, now), F, tints), lens_of(F["name"]))
+                tinted(self._chan_vals(F, d, now), F, tints), own_lens(F["name"]))
             if rgb:
                 lit += 1
             st = (rgb, level)
@@ -4366,11 +4381,8 @@ class Schematic:
         for name in self.leds.names.values():
             stem, chan = split_channel(name)
             chans.setdefault(stem, set()).add(chan)
-        out = []
-        for name in sorted(n for n, c in chans.items() if c == {"W"}):
-            rgb = lens_of(name)
-            out.append([name, "#%02x%02x%02x" % rgb if rgb else "", []])
-        return out
+        return [[name, _hex(lens_of(name)), [], _hex(cablights.named_colour(name))]
+                for name in sorted(n for n, c in chans.items() if c == {"W"})]
 
     def lens_changed(self, name):
         for C in self.leds.cells:
@@ -4624,6 +4636,22 @@ class RunCtl:
     def _poll_boot(self, live):
         """{"pct", "words"} while the game boots, None once it is up (or with
         no run or no log to read)."""
+        # A SPIKE 3 RUN says it outright (PAD-1090): tools/spike3_emu/s3prog.py
+        # writes dump/s3boot, "<step> <pct> <words>", the same steps the app's
+        # footer shows; "run" is up. It has none of the Spike 2 logs below.
+        dump = padpath.dump()
+        s3 = dump and os.path.join(dump, "s3boot")
+        if s3 and os.path.exists(s3):
+            try:
+                with open(s3, encoding="utf-8", errors="replace") as f:
+                    step, pct, words = (f.read().strip().split(" ", 2) + ["", ""])[:3]
+                pct = int(pct)
+            except (OSError, ValueError):
+                return None
+            if step == "run" or not live:
+                return None
+            self._booted_again = True
+            return {"pct": pct, "words": words}
         if self._boot_log is None:
             d = padpath.logdir() if self._logdir is False else self._logdir
             if not d:

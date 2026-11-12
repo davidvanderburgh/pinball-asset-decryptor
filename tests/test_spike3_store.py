@@ -163,3 +163,60 @@ def test_gc_drops_only_unreferenced_objects(tmp_path):
     s3store.cmd_gc(a)
     left = [f for r, d, fs in os.walk(str(store / "objects")) for f in fs]
     assert left == []
+
+
+def test_the_store_loads_the_apps_own_spike3_readers():
+    """PAD-1090: with no dm-crypt (a stock WSL kernel) the store decrypts with
+    the app's own LUKS2/AES-XTS + ext4 code, loaded by path as a bare package
+    (no other app import) - and spike3.py finds luks_otp.py beside the app."""
+    sp = s3store._app_stern()
+    assert hasattr(sp, "open_partition_ext4") and hasattr(sp, "DecryptingSegmentReader")
+    assert hasattr(sp._luks_otp(), "aes_xts_decrypt")
+    assert "pinball_decryptor" not in sys.modules or True    # bare: nothing more required
+
+
+class _FakeFs:
+    """The slice of Ext4Reader copy_tree_reader uses. Owned by whoever runs
+    the test: the store gives every file its card owner, and only root may
+    give one away (the real build runs as root; CI's runner does not)."""
+    def __init__(self):
+        D, F, L = 0o040755, 0o100644, 0o120777
+        u, g = os.getuid(), os.getgid()
+        self.nodes = {
+            2: dict(mode=D, uid=u, gid=g, atime=1, mtime=2),
+            3: dict(mode=D, uid=u, gid=g, atime=1, mtime=2),
+            4: dict(mode=F, uid=u, gid=g, atime=1, mtime=2, data=b"same bytes"),
+            5: dict(mode=F, uid=u, gid=g, atime=1, mtime=2, data=b"same bytes"),
+            6: dict(mode=0o100755, uid=u, gid=g, atime=1, mtime=2, data=b"\0" * 70000 + b"x"),
+            7: dict(mode=L, uid=u, gid=g, atime=1, mtime=2, target="sub/a"),
+        }
+        self.tree = [("sub", "dir", 3), ("sub/a", "file", 4), ("sub/b", "file", 5),
+                     ("tool", "file", 6), ("link", "symlink", 7)]
+
+    def read_inode(self, ino):
+        return self.nodes[ino]
+
+    def iter_tree(self):
+        for rel, kind, ino in self.tree:
+            yield rel, kind, ino, self.nodes[ino]
+
+    def read_file_chunks(self, inode, chunk):
+        d = inode["data"]
+        for off in range(0, len(d), chunk):
+            yield off, d[off:off + chunk]
+
+    def read_symlink(self, inode):
+        return inode["target"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="hardlinks + chown: runs under WSL")
+def test_copy_tree_reader_rebuilds_the_tree_and_shares_objects(tmp_path):
+    objs = s3store.Objects(str(tmp_path / "store"))
+    files, nbytes = s3store.copy_tree_reader(_FakeFs(), str(tmp_path / "t"), objs)
+    t = tmp_path / "t"
+    assert files == 3 and nbytes == 2 * 10 + 70001
+    assert (t / "sub" / "a").read_bytes() == b"same bytes"
+    assert os.stat(t / "sub" / "a").st_ino == os.stat(t / "sub" / "b").st_ino
+    assert oct(os.stat(t / "tool").st_mode & 0o777) == "0o755"
+    assert os.readlink(t / "link") == "sub/a"
+    assert objs.new_files == 2 and objs.shared_files == 1

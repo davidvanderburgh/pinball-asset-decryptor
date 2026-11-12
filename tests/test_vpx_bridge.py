@@ -901,6 +901,52 @@ def test_shadow_flippers_are_the_machines_coils(shadow):
     assert "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0" in out
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the PuP stub against a present player under cscript")
+def test_forced_pup_stub_silences_both_creations_when_pinup_is_installed(tmp_path):
+    vs = pytest.importorskip("vpxshadow")
+    lines = ['Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")',
+             'PuPlayer.Play 1, "song.mp3", 0, 0, 0',
+             'Sub LoadCoreFiles',
+             'Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")',
+             'PuPlayer.Play 1, "callout.mp3", 0, 0, 0',
+             'End Sub', 'LoadCoreFiles']
+    rep = []
+    stub = vs.pup_stub(lines, rep, force=True)
+    harness = '''Dim created, played, PuPlayer
+created = 0 : played = 0
+Function CreateObject(progid)
+created = created + 1
+Set CreateObject = New InstalledPlayer
+End Function
+Class InstalledPlayer
+Public Sub Play(a,b,c,d,e)
+played = played + 1
+End Sub
+End Class
+'''
+    vbs = tmp_path / "pup.vbs"
+    vbs.write_text(harness + "\n".join(lines) + stub + '\nWScript.Echo created & "," & played\n', encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["0,0"]
+    assert any("disabled at 2 place(s)" in s for s in rep)
+
+
+def test_shadow_map_can_require_a_silent_player_even_with_pinup_installed():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["pup_stub"] = "always"
+    out, rep = vs.patch(MINI_TRIBUTE, m)
+    assert 'CreateObject("PinUpPlayer.PinDisplay")' not in out
+    assert "Set PuPlayer = New PadNoPuP" in out and "Class PadNoPuP" in out
+    for title in ("batman", "iron_maiden_le"):
+        m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
+        assert m["pup_stub"] == "always"
+        assert any("If Err Then Err.Clear : Set PuPlayer" in r["old"] and r["since"].startswith("PAD-1164")
+                   for r in m["repatch"])
+
+
 def test_shadow_makes_pinup_player_optional(shadow):
     out, rep = shadow
     assert "Class PadNoPuP" in out
@@ -2711,6 +2757,54 @@ def test_setup_layout_display_fills_a_monitor_or_sits_on_one():
     assert vs.display_for(None, mons)["mode"] == "free"
 
 
+def test_an_old_layouts_lcd_becomes_the_borderless_display_setting(tmp_path):
+    """PAD-1131: a layout saved before PAD-811 left only the kit's LCD
+    rectangle, so the run moved the FRAMED window over the second screen
+    and its title bar showed. Carried once into the display setting the
+    layout writes today: full screen, borderless, on the monitor it fills."""
+    pc = pytest.importorskip("padcontroller")
+    pd = pytest.importorskip("padisplay")
+    mons = [{"n": 1, "x": 0, "y": 0, "w": 3840, "h": 2160, "primary": True},
+            {"n": 2, "x": 3840, "y": 0, "w": 1920, "h": 1080, "primary": False}]
+    conf = str(tmp_path / "display.conf")
+    kit = {"lcd": {"x": 3840, "y": 0, "w": 1920, "h": 1080, "topmost": True}}
+    got = pc.carry_lcd_layout(kit, conf=conf, mons=mons)
+    assert got == {"mode": "fullscreen", "monitor": 2, "border": False}
+    assert kit["display_carried"] is True
+    line = open(conf, encoding="utf-8").read()
+    assert "game monitor=2 mode=fullscreen border=0" in line
+    assert "x=3840 y=0 w=1920 h=1080 fs=1" in line
+    # the kit's rectangle stays, so the Visual Pinball tab still names the layout
+    assert kit["lcd"] == {"x": 3840, "y": 0, "w": 1920, "h": 1080, "topmost": True}
+
+    # once only: a later "free" on the Emulate tab holds
+    pd.save({"mode": "free"}, conf, mons)
+    assert pc.carry_lcd_layout(kit, conf=conf, mons=mons) is None
+    assert pd.load(conf)["mode"] == "free"
+
+
+def test_lcd_carry_leaves_a_chosen_setting_and_a_kit_with_no_rectangle(tmp_path):
+    pc = pytest.importorskip("padcontroller")
+    pd = pytest.importorskip("padisplay")
+    mons = [{"n": 1, "x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}]
+    conf = str(tmp_path / "display.conf")
+    # the user's own setting is never replaced
+    pd.save({"mode": "window", "monitor": 1, "border": True, "rx": 10, "ry": 20,
+             "w": 800, "h": 450}, conf, mons)
+    kit = {"lcd": {"x": 0, "y": 0, "w": 1920, "h": 1080, "topmost": True}}
+    assert pc.carry_lcd_layout(kit, conf=conf, mons=mons) is None
+    assert pd.load(conf)["mode"] == "window" and pd.load(conf)["border"] is True
+    # the centred layout (no rectangle): nothing to carry, nothing marked
+    kit = {"lcd": {"topmost": True}}
+    assert pc.carry_lcd_layout(kit, conf=str(tmp_path / "other.conf"), mons=mons) is None
+    assert "display_carried" not in kit and not os.path.exists(str(tmp_path / "other.conf"))
+    # a rectangle on no monitor's full size: a borderless window where it was
+    kit = {"lcd": {"x": 100, "y": 50, "w": 960, "h": 540, "topmost": True}}
+    got = pc.carry_lcd_layout(kit, conf=str(tmp_path / "third.conf"), mons=mons)
+    assert got == {"mode": "window", "monitor": 1, "border": False,
+                   "rx": 100, "ry": 50, "w": 960, "h": 540}
+
+
 def test_setup_state_reports_the_game_display(tmp_path, monkeypatch):
     vs = pytest.importorskip("vpxsetup")
     pl = pytest.importorskip("padlaunch")
@@ -2975,8 +3069,9 @@ def test_every_table_row_links_its_download():
     assert "showfile=15967" in rows["deadpool_pro"]["url"]
     for r in rows.values():
         assert r["url"] == "" or re.match(r"https://(vpuniverse\.com/files/file/\d+-|www\.vpforums\.org/index\.php\?app=downloads&showfile=\d+$)", r["url"]), r
-    # the ones no page could be found for say so by having none
-    assert sorted(t for t, r in rows.items() if not r["url"]) == ["aerosmith", "beatles", "star_wars_pro"]
+    # the ones no page could be found for say so by having none (PAD-1171:
+    # the original-layout Ghostbusters LE was withdrawn from VPForums)
+    assert sorted(t for t, r in rows.items() if not r["url"]) == ["aerosmith", "beatles", "ghostbusters_le_replica", "star_wars_pro"]
 
 
 def test_jurassic_park_table_is_dropped(tmp_path, monkeypatch):
@@ -3381,6 +3476,83 @@ def test_rom_patchers_keep_the_rom_name_for_the_backglass():
     # PAD-852: the output is the map's name whatever the download is called,
     # so the backglass padvpx copies to that name sits beside the table
     assert 'out_name = m.get("output") or' in src
+
+
+def _metallica_drop_script():
+    # Only the patcher's required landmarks and the two computed drop-bank
+    # writes. No table download or artwork is needed for this regression.
+    return '''ExecuteGlobal GetTextFile("controller.vbs")
+Const cGameName = "mtl_180h"
+Const UseSolenoids = 1
+Const UseLamps = 1
+Const UseVPMModSol = 1
+LoadVPM "x", "sam.VBS", 3.10
+SolCallback(15) = "SolLFlipper"
+SolCallback(16) = "SolRFlipper"
+Sub Table_Init
+InitVPMFFlipsSAM
+vpmMapLights allLamps
+vpmNudge.TiltSwitch = 16
+End Sub
+Sub Table_KeyDown(keycode)
+If keycode = StartGameKey Then Controller.Switch(16) = 1
+If vpmKeyDown(keycode) Then Exit Sub
+End Sub
+Sub Table_KeyUp(keycode)
+If keycode = StartGameKey Then Controller.Switch(16) = 0
+If vpmKeyUp(keycode) Then Exit Sub
+End Sub
+' This table has raised DT switches = 1 and dropped = 0
+controller.switch(60) = 1
+controller.switch(61) = 1
+controller.switch(62) = 1
+Set DT60 = (new DropTarget)(sw60, sw60a, BM_sw60, 60, 0, false)
+Set DT61 = (new DropTarget)(sw61, sw61a, BM_sw61, 61, 0, false)
+Set DT62 = (new DropTarget)(sw62, sw62a, BM_sw62, 62, 0, false)
+Sub DropTarget(Switchid)
+controller.Switch(Switchid mod 100) = 0  ' dropped DT
+End Sub
+Sub RaiseTarget(Switchid)
+controller.Switch(Switchid mod 100) = 1  ' raised DT
+End Sub'''
+
+
+def test_metallica_drop_bank_and_resync_agree_on_logical_polarity():
+    mt = pytest.importorskip("patch_metallica_spike")
+    m = json.load(open(mt.MAP, encoding="utf-8"))
+    out, _ = mt.patch_script(_metallica_drop_script(), m)
+    assert "controller.Switch(Switchid mod 100) = 1" in out
+    assert "controller.Switch(Switchid mod 100) = 0" in out
+    assert "Controller.Switch(DTArray(i).sw) = DTArray(i).isDropped" in out
+    assert "Not DTArray(i).isDropped" not in out
+    # the table's own load-time writes of the three raised targets flip too (PR #21 review)
+    for sid in (1048, 1049, 1050):
+        assert re.search(r"(?m)^controller\.switch\(%d\) = 0\t" % sid, out)
+    assert "raised DT switches = 1 and dropped = 0" not in out
+    # Computed SAM aliases stay on their small numbers; the controller's
+    # existing map resolves each of the three physical drop targets.
+    assert [m["switch_rewrite"][str(n)] for n in (60, 61, 62)] == [48, 49, 50]
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the patched drop-bank writes under cscript")
+def test_metallica_drop_and_raise_publish_closed_and_open(tmp_path):
+    mt = pytest.importorskip("patch_metallica_spike")
+    m = json.load(open(mt.MAP, encoding="utf-8"))
+    out, _ = mt.patch_script(_metallica_drop_script(), m)
+    actions = re.search(r"(?ms)^Sub DropTarget.*?^End Sub\nSub RaiseTarget.*?^End Sub", out).group(0)
+    init = "\n".join(re.findall(r"(?m)^controller\.switch\(10[45]\d\) = .*$", out))
+    vbs = tmp_path / "drops.vbs"
+    vbs.write_text('''Class TestController
+Public Property Let Switch(n, value)
+WScript.Echo n & "=" & CInt(value)
+End Property
+End Class
+Dim Controller : Set Controller = New TestController
+''' + init + '\n' + actions + '\nDropTarget 160 : RaiseTarget 160\nDropTarget 161 : RaiseTarget 161\nDropTarget 162 : RaiseTarget 162\n', encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["1048=0", "1049=0", "1050=0", "60=1", "60=0", "61=1", "61=0", "62=1", "62=0"]
 
 
 def test_tmnt_shooter_lane_top_switch_ends_the_turtle_select():
@@ -3856,6 +4028,42 @@ def test_controller_reports_an_rgb_insert_in_its_colour():
     assert b.lamp_state[1833] == 0                                      # an RGB insert's other LEDs stay unreported
 
 
+def test_raw_lamp_rewrite_on_spike2_reports_the_level_through_lamp_and_changes(tmp_path):
+    """A table reading Lamp(n) as a mechanism position (PR #25): the LED's
+    own 0..255 level, through both Controller.Lamp and ChangedLamps, on a
+    Spike 2 bridge too; every other lamp is still VPinMAME's Boolean."""
+    pc = pytest.importorskip("padcontroller")
+    mapping = tmp_path / "raw.vpxmap.json"
+    mapping.write_text(json.dumps({"raw_lamp_rewrite": {"_": "why", "281": [8, 59]},
+                                   "lamps": {"L1": {"leds": [[8, 32]]}}}), encoding="utf-8")
+    vm = pc.VpxMap(None)
+    vm.load(str(mapping))
+    assert vm.raw_lamp_rewrite == {281: (8, 59)}
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.map, b.lamp_state, b.lamp_pending = vm, {}, set()
+    b.lock = __import__("threading").Lock()
+    data = bytearray(20 + 16 * 96)
+    for level in (71, 130, 0):
+        data[20 + 8 * 96 + 59], data[20 + 8 * 96 + 32] = level, 200
+        b._poll_lamps(bytes(data))
+        assert dict(b.changed_lamps() or [])[281] == level
+        assert b.lamp(281) == level and type(b.lamp(281)) is int
+        assert b.lamp(1832) is True                      # a mapped group stays on/off
+    b._poll_lamps(bytes(data))
+    assert not b.changed_lamps()                         # nothing new, nothing reported
+
+
+@pytest.mark.parametrize("entry", [{"1859": [8, 59]}, {"0": [8, 59]}, {"281": [8]}, {"281": 59}])
+def test_raw_lamp_rewrite_refuses_an_entry_it_cannot_read(tmp_path, entry):
+    """1000+ is already every LED's own number (it would be set twice a
+    poll and report a change every frame); a value must be [node, index]."""
+    pc = pytest.importorskip("padcontroller")
+    mapping = tmp_path / "bad.vpxmap.json"
+    mapping.write_text(json.dumps({"raw_lamp_rewrite": entry}), encoding="utf-8")
+    with pytest.raises(ValueError, match="raw_lamp_rewrite"):
+        pc.VpxMap(None).load(str(mapping))
+
+
 def test_every_shadow_maps_lamps_are_consistent():
     # the controller keys a lamp by its FIRST LED: two entries starting on one
     # LED must be the same insert, or one would light the other's light
@@ -4072,6 +4280,85 @@ def test_sound_record_reads_and_mutes_in_its_own_layout(lower):
     assert vs.read_sound(b"\x05\x00\x00\x00abc") is None                 # fits no layout
 
 
+def test_iron_maiden_motor_timer_is_fitted_and_tribute_commands_are_quiet():
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    assert m["retrofit_timers"]["PadMaidenMotorTimer"] == {"clone": "PulseTimer", "interval_ms": 100}
+    out, _ = vs.patch('''Sub Table1_Init
+End Sub
+Sub RotateRamp(p)
+WScript.Echo "tribute ramp"
+End Sub
+Sub OpenRamp(p)
+WScript.Echo "tribute guardian"
+End Sub''', m)
+    assert "Sub RotateRamp_orig" in out and "Sub OpenRamp_orig" in out
+    assert "Sub RotateRamp(p) : End Sub" in out
+    assert "Sub OpenRamp(p) : End Sub" in out
+    assert "Sub PadMaidenMotorTimer_Timer" in out
+    old = next(r["old"] for r in m["repatch"] if "RotateRamp" in r["old"])
+    source = old + "\nEnd Sub"
+    updated, _ = vs.patch(source, m)
+    assert old not in updated  # the tab can distinguish old and rebuilt tables
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's motor animation under cscript")
+def test_iron_maiden_animations_follow_real_end_stops_without_writing_them(tmp_path):
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    extra = m["extra_vbs"].split("'---- PAD: motor end stops", 1)[1]
+    extra = extra[extra.index("\n"):]
+    harness = '''Class TestController
+Public state
+Private Sub Class_Initialize
+Set state = CreateObject("Scripting.Dictionary")
+End Sub
+Public Property Get Switch(n)
+Switch = False
+If state.Exists(n) Then Switch = state(n)
+End Property
+Public Property Let Switch(n, value)
+WScript.Echo "ERROR: fabricated end stop" : WScript.Quit 2
+End Property
+End Class
+Dim Controller : Set Controller = New TestController
+Dim gRampPos, LockStopPos, LockCurPos, LockCurInc, rampCalls, guardianCalls
+rampCalls = 0 : guardianCalls = 0 : LockCurPos = 8
+Sub RotateRamp2(p, mute)
+rampCalls = rampCalls + 1 : gRampPos = p
+If p = 3 Then gRampPos = 1 : LockStopPos = 0 : LockCurInc = -0.2
+WScript.Echo "ramp=" & p
+End Sub
+Sub OpenRamp2(p, force)
+guardianCalls = guardianCalls + 1
+WScript.Echo "guardian=" & p
+End Sub
+Sub AtStop(n)
+Controller.state.RemoveAll
+Controller.state.Add n, True
+PadMaidenMotorTimer_Timer
+End Sub
+'''
+    calls = '''PadMaidenMotorTimer_Timer
+WScript.Echo "idle=" & rampCalls & "," & guardianCalls
+AtStop 1094
+AtStop 1095
+WScript.Echo "load=" & gRampPos & "," & LockStopPos & "," & Sgn(LockCurInc)
+AtStop 1096
+AtStop 1097
+AtStop 1076
+AtStop 1077
+PadMaidenMotorTimer_Timer
+WScript.Echo "calls=" & rampCalls & "," & guardianCalls
+'''
+    vbs = tmp_path / "motors.vbs"
+    vbs.write_text(harness + extra + calls, encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines() == ["idle=0,0", "ramp=0", "ramp=3", "load=3,18,1", "ramp=2", "ramp=1",
+                                     "guardian=True", "guardian=False", "calls=4,2"]
+
+
 def test_playfield_sounds_stay_and_the_soundtrack_goes():
     vs = pytest.importorskip("vpxsounds")
     keep = ["fx_ballrolling3", "Flipper_L01", "Rubber_Strong_4", "fx_bumper", "Drain_7",
@@ -4085,6 +4372,15 @@ def test_playfield_sounds_stay_and_the_soundtrack_goes():
     for n in mute:
         assert not vs.mechanical(n, 0), n
     assert not vs.mechanical("fx_bumper", vs.OUT_BACKGLASS)              # a table's own bumper sfx
+
+
+@pytest.mark.parametrize("name", ["bottomjet", "leftjet", "rightjet", "fx_lrturn", "fx_lrbump"])
+def test_ghostbusters_jets_and_ramp_contacts_are_mechanical(name):
+    vs = pytest.importorskip("vpxsounds")
+    assert vs.mechanical(name, 0) and vs.mechanical(name.upper(), 0)
+    assert not vs.mechanical(name, vs.OUT_BACKGLASS)
+    assert not vs.mechanical("sfx_" + name, 0)
+    assert not vs.mechanical(name + "voice", 0)  # exact names, no broad jet/bump substring
 
 
 def test_playmusic_goes_to_empty_subs_by_argument_count():
@@ -4399,6 +4695,60 @@ def test_the_grips_stand_aside_while_visual_pinball_is_paused(monkeypatch):
     g.bridge.set_pause(0)                                                       # Resume
     assert tick() == [("SetWindowPos", (77, None, 10, 20, 400, 600, 0x50))]     # back, shown again
     assert not g.aside and any("grips back" in s for s in logged)
+
+
+def test_minimized_player_is_not_placed_until_it_is_restored(monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+    pc = pytest.importorskip("padcontroller")
+    minimized = [True]
+    u = SimpleNamespace(IsIconic=lambda h: minimized[0])
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=u), raising=False)
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    monkeypatch.setattr(pc.padlaunch, "kit_load", lambda: {})
+    monkeypatch.setattr(pc, "dpi_aware", lambda: None)
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    reads = []
+    def rect(h):
+        reads.append(h)
+        return (-32000, -32000, 160, 28) if minimized[0] else (100, 200, 600, 1200)
+    monkeypatch.setattr(pc, "window_rect", rect)
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.player_hwnd, b.player_placed = 55, False
+    b._frame_player = lambda h: False
+    b._place_player()
+    assert not reads and not b.player_placed
+    assert not hasattr(b, "player_aspect")
+    minimized[0] = False
+    b._place_player()
+    assert reads == [55] and b.player_placed and b.player_aspect == 2.0
+
+
+def test_minimized_player_does_not_replace_the_saved_geometry(monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+    pc = pytest.importorskip("padcontroller")
+    minimized = [True]
+    u = SimpleNamespace(IsIconic=lambda h: minimized[0], IsWindow=lambda h: True,
+                        IsZoomed=lambda h: False)
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=u), raising=False)
+    monkeypatch.setattr(pc.sys, "platform", "win32")
+    reads, saves = [], []
+    def rect(h):
+        reads.append(h)
+        return (-32000, -32000, 160, 28) if minimized[0] else (100, 200, 600, 1200)
+    monkeypatch.setattr(pc, "window_rect", rect)
+    monkeypatch.setattr(pc.padlaunch, "kit_save", lambda k: saves.append(k))
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.player_hwnd, b.player_placed, b.player_aspect = 55, True, 2.0
+    b._player_seen = b._player_settled = (100, 200, 600, 1200)
+    b._player_seen_t = 0
+    b._watch_player()
+    assert not reads and not saves
+    assert b._player_seen == b._player_settled == (100, 200, 600, 1200)
+    minimized[0] = False
+    b._watch_player()
+    assert reads == [55] and not saves   # restored, still at the saved place
 
 
 def test_a_table_that_runs_without_its_window_still_gets_the_grips(monkeypatch):
@@ -5107,6 +5457,100 @@ def test_a_launch_attaches_the_card_store_before_the_run(tmp_path, monkeypatch):
     assert events == [("watch", True)]
 
 
+def _failed_start_bridge(pc, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    b = pc.Bridge.__new__(pc.Bridge)
+    b.title, b.map = "batman", SimpleNamespace(platform="spike2")
+    b.rig = SimpleNamespace(led_path=lambda: "fixture")
+    b._rig_up = lambda data: False
+    b.launch = Mock(card="card.raw", logfile="boot.log")
+    b.launch.alive.return_value = False
+    b.running, b._start_retried = True, False
+    b.start_t = pc.time.monotonic()
+    b._loading_end = Mock()
+    monkeypatch.setattr(pc, "read_block", lambda *a: None)
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    monkeypatch.setattr(pc.padlaunch, "kit_load", lambda: {"startup_retry_titles": ["batman"]})
+    return b
+
+
+def test_failed_start_with_a_board_record_is_cleaned_and_retried_once(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    pc = pytest.importorskip("padcontroller")
+    b = _failed_start_bridge(pc, monkeypatch)
+    old, replacement = b.launch, Mock()
+    replacement.start.return_value = 2
+    factory = Mock(return_value=replacement)
+    monkeypatch.setattr(pc.padlaunch, "launch_for", factory)
+    b._poll_starting()
+    old.stop.assert_called_once()
+    replacement.start.assert_called_once()
+    factory.assert_called_once_with("spike2", "batman", "card.raw")
+    assert b._start_retried and b.launch is replacement
+    b.rig = SimpleNamespace(led_path=lambda: "fixture")
+    replacement.alive.return_value = False
+    b._poll_starting()
+    assert factory.call_count == 1
+    replacement.stop.assert_called_once()
+    assert b.launch is None and b.rig is None
+    b._loading_end.assert_called_once()
+
+
+@pytest.mark.parametrize("close_during", ["cleanup", "retry"])
+def test_closing_the_table_during_start_recovery_leaves_no_new_run(monkeypatch, close_during):
+    from unittest.mock import Mock
+    pc = pytest.importorskip("padcontroller")
+    b = _failed_start_bridge(pc, monkeypatch)
+    replacement = Mock()
+    replacement.start.return_value = 2
+    def close():
+        b.running = False
+        b.launch = None
+        return 2
+    if close_during == "cleanup":
+        b.launch.stop.side_effect = close
+    else:
+        replacement.start.side_effect = close
+    factory = Mock(return_value=replacement)
+    monkeypatch.setattr(pc.padlaunch, "launch_for", factory)
+    b._poll_starting()
+    assert b.launch is None
+    if close_during == "cleanup":
+        factory.assert_not_called()
+    else:
+        replacement.stop.assert_called_once()
+
+
+@pytest.mark.parametrize("configured", [[], None, "batman", ["deadpool_pro"]])
+def test_failed_start_cleanup_does_not_retry_without_an_explicit_title_list(monkeypatch, configured):
+    from unittest.mock import Mock
+    pc = pytest.importorskip("padcontroller")
+    b = _failed_start_bridge(pc, monkeypatch)
+    old = b.launch
+    monkeypatch.setattr(pc.padlaunch, "kit_load", lambda: {"startup_retry_titles": configured})
+    factory = Mock()
+    monkeypatch.setattr(pc.padlaunch, "launch_for", factory)
+    b._poll_starting()
+    old.stop.assert_called_once()
+    factory.assert_not_called()
+    assert b.launch is None and b.rig is None
+
+
+def test_failed_start_retry_exception_cleans_the_replacement(monkeypatch):
+    from unittest.mock import Mock
+    pc = pytest.importorskip("padcontroller")
+    b = _failed_start_bridge(pc, monkeypatch)
+    replacement = Mock()
+    replacement.start.side_effect = RuntimeError("cannot start")
+    monkeypatch.setattr(pc.padlaunch, "launch_for", lambda *a: replacement)
+    b._poll_starting()
+    replacement.stop.assert_called_once()
+    assert b.launch is None
+    assert "cannot start" in b._loading_end.call_args.args[0]
+
+
 def _boot_bridge(pc, monkeypatch, tmp_path, slot=1):
     """A bridge with a run it started, attached, its loading window up."""
     pl = pc.padlaunch
@@ -5595,3 +6039,49 @@ def test_foo_fighters_kick_target_fires_dof_and_kicks_harder(tmp_path, title):
         "WScript.Echo Got"]), encoding="latin-1")
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
     assert r.stdout.split() == ["snd", "104:2", "107:2"], r.stdout + r.stderr
+
+
+PULL_TRIBUTE = MINI_TRIBUTE.replace(
+    "Sub Table1_KeyDown(ByVal keycode)\n",
+    "Sub Table1_KeyDown(ByVal keycode)\n    If keycode = PlungerKey Then Plunger.Pullback\n").replace(
+    "Sub Table1_KeyUp(ByVal keycode) : End Sub",
+    "Sub Table1_KeyUp(ByVal keycode)\n    If keycode = PlungerKey Then Plunger.Fire\nEnd Sub")
+
+
+def test_no_map_takes_the_plunger_key_from_the_tables_plunger():
+    """PAD-1128: the Jaws, John Wick and Jurassic Park maps sent the plunger
+    key to the machine's Action button and kept it from the table, so a
+    manual-plunger machine's plunger never pulled (Jaws' game waits with the
+    ball in the lane until the plunger or the button launches it). A map may
+    take the plunger key only when the table's plunger IS the auto launcher
+    (`auto_plunger`, AC/DC)."""
+    for path in sorted(glob.glob(os.path.join(VPX, "*.shadow.json"))):
+        m = json.load(open(path, encoding="utf-8"))
+        if (m.get("plunger") or {}).get("auto_plunger"):
+            continue
+        assert "PlungerKey" not in m.get("keys_skip_orig", []), os.path.basename(path)
+
+
+def test_jaws_plunger_key_pulls_the_plunger_and_lockbar_is_action(tmp_path):
+    """PAD-1128: on the Jaws, John Wick and Jurassic Park maps Enter reaches
+    the table's own Plunger.Pullback / Fire and the lockbar key presses the
+    Action button; a copy patched before is told to patch again."""
+    vs = pytest.importorskip("vpxshadow")
+    vset = pytest.importorskip("vpxsetup")
+    for t in ("jaws_le", "john_wick_le", "john_wick_pro", "jurassic_park_le", "jurassic_park_pro"):
+        m = json.load(open(os.path.join(VPX, t + ".shadow.json"), encoding="utf-8"))
+        assert m["cabinet"]["launch_key"] == "LockBarKey", t
+        out, _ = vs.patch(PULL_TRIBUTE, m)
+        down = _last_sub(out, "Table1_KeyDown")
+        assert "If KeyCode = LockBarKey Then Controller.Switch(1034) = True" in down, t
+        assert "PlungerKey" not in down, t           # falls through to the table's own
+        assert re.search(r"Case Else\s+(?:If [^\n]*Then )?Table1_KeyDown_orig KeyCode", down), t
+        assert "If keycode = PlungerKey Then Plunger.Pullback" in out
+        script = tmp_path / (m["output"][:-4] + ".script.vbs")
+        old, _ = vs.patch(PULL_TRIBUTE, dict(m, cabinet=dict(m["cabinet"], launch_key="PlungerKey"),
+                                                keys_skip_orig=m["keys_skip_orig"] + ["PlungerKey"]))
+        script.write_text(old, encoding="utf-8")
+        why = m["repatch"][-1]["why"]
+        assert why in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
+        script.write_text(out, encoding="utf-8")
+        assert why not in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t

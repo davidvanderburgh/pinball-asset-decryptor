@@ -126,6 +126,8 @@ build.
 - **Comment** on any sound (right-click > **Properties…** or **Comment…**).
   Comments are kept in the extract's `callouts.csv`, show in a Comment
   column, and the search box finds them.
+- **Show comments**: untick it to hide the Comment column (the search
+  still finds comment text); the choice is remembered.
 
 ### Listening
 

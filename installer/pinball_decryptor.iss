@@ -115,6 +115,18 @@ Source: "{#ProjectDir}\tools\spike2_emu\*"; DestDir: "{app}\tools\spike2_emu"; \
 ; exclusion above would otherwise drop: the playfield's favicon is a .png.
 Source: "{#ProjectDir}\tools\spike2_emu\icons\*"; DestDir: "{app}\tools\spike2_emu\icons"; \
     Flags: ignoreversion
+; --- Spike 3 emulator rig (PAD-1090) ---------------------------------------
+; Runs a Spike 3 card's game under qemu-user in WSL, for anyone who brings
+; their card's own OTP key (never shipped). Sources only, like the Spike 2
+; rig: s3launch.sh builds it under /var/lib/pad-s3 in WSL the first time.
+Source: "{#ProjectDir}\tools\spike3_emu\*"; DestDir: "{app}\tools\spike3_emu"; \
+    Flags: recursesubdirs ignoreversion; \
+    Excludes: "__pycache__\*,*.pyc,*.pyo,*.log,*.png,*.raw"
+; The LUKS2/OTP code the app's Spike 3 decryption loads by path
+; (plugins/stern/spike3.py _luks_otp): without it an installed copy could not
+; open a Spike 3 card at all, in the Extract tab or the Spike 3 rig's store.
+Source: "{#ProjectDir}\stern-spike-3\tools\luks_otp.py"; DestDir: "{app}\stern-spike-3\tools"; \
+    Flags: ignoreversion
 ; The Spike 1 rig (tools/spike1_emu) drives the Emulate tab for the DMD era.
 ; Just sources — the patched qemu and the extracted game are built/cached under
 ; the user's WSL home at run time (see tools/spike1_emu/start.sh), never here.
@@ -202,7 +214,7 @@ Source: "{#ProjectDir}\Pinball Asset Decryptor.pyw"; DestDir: "{app}"; Flags: ig
 Source: "launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 ; The Visual Pinball kit's command (tools/spike2_emu/vpx/padvpx.py on the
 ; bundled Python): `padvpx setup "<table.vpx>" <card.raw>` and friends, the
-; long way round the app's Visual Pinball tab (a preview feature, PAD-802).
+; long way round the app's Visual Pinball tab (PAD-802).
 ; NO TABLE SHIPS: they are their authors' to hand out; the tab patches the
 ; copy the person downloaded.
 Source: "padvpx.cmd"; DestDir: "{app}"; Flags: ignoreversion

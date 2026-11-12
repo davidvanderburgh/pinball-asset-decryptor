@@ -9,6 +9,8 @@ import { useNs } from "../core/store.js";
 
 export const css = true;
 
+const INTRO3 = "Runs a real Stern Spike 3 game on this PC under emulation, in its own window, with sound and its virtual playfield. "
+  + "Pick a card image: its first run decrypts it once with your OTP key, then it runs straight from that copy.";
 const INTRO = "Runs a real Stern Spike 2 game binary on this PC under emulation, in its own window, with sound. "
   + "Pick a card image and it runs straight off it — nothing is extracted and the image is opened read only.";
 
@@ -314,10 +316,12 @@ function Status({ s }) {
 // name gives the game; otherwise it is described, never a placeholder.
 function WindowsCard({ s }) {
   const game = s.game;
+  const era3 = (useNs("shell").mfr || {}).era === "spike3";
   const mac = s.platform === "darwin";
   const gameWin = html`<div class="note emu-win"><div class="stack">
-      ${game ? html`<b class="emu-wt mono">${game} - Stern Spike 2 emulator</b>` : html`<b class="emu-wt">The game window</b>`}
-      <span class="small">The game's own picture and sound, with a “Controls - Spike 2 emulator” window beside it that lists the keys.</span>
+      ${game ? html`<b class="emu-wt mono">${game} - Stern ${era3 ? "Spike 3" : "Spike 2"} emulator</b>` : html`<b class="emu-wt">The game window</b>`}
+      <span class="small">${era3 ? "The game's own picture and sound; its keys work in that window."
+        : "The game's own picture and sound, with a “Controls - Spike 2 emulator” window beside it that lists the keys."}</span>
     </div></div>`;
   const playfield = html`<div class="note emu-win"><div class="stack">
       ${game ? html`<b class="emu-wt mono">${game} - virtual playfield</b>` : html`<b class="emu-wt">The virtual playfield</b>`}
@@ -494,9 +498,10 @@ function RenameModal({ r }) {
 // --------------------------------------------------------------- page
 export default function EmulateTab() {
   const s = useNs("emulate");
+  const era3 = (useNs("shell").mfr || {}).era === "spike3";
   const win = s.platform === "win32";
   return html`<div class="page emu">
-    <${PageHead} title="Emulate" sub=${INTRO}>
+    <${PageHead} title="Emulate" sub=${era3 ? INTRO3 : INTRO}>
       <${Button} disabled=${!s.check_enabled} busy=${!s.check_enabled}
         title="Re-checks what this PC needs to run the emulator and writes the full report to the log, including a machine with nothing wrong. It changes nothing."
         onClick=${() => call("emulate.check_setup")}>${s.check_label || "Check setup…"}<//>

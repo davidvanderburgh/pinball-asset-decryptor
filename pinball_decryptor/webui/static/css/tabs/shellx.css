@@ -352,3 +352,17 @@ html.bp-700 .sx-usage { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .sx-ask-x { margin-left: 4px; padding: 0 2px; border: 0; background: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; }
 .sx-ask-x:disabled { cursor: default; opacity: .5; }
 .dlg-report { margin-right: auto; }
+
+/* PAD-1133: the "How to get the OTP key" guide modal (core/spike3_guide.js),
+   shown from the Spike 3 key gate and the Extract unlock panel. */
+.s3guide-bd { gap: 4px; line-height: 1.5; max-width: 62ch; }
+.s3guide-bd p { margin: 6px 0; }
+.s3guide-bd h3 { margin: 14px 0 4px; font-size: 13.5px; color: var(--accent); }
+.s3guide-steps { margin: 4px 0; padding-left: 22px; }
+.s3guide-steps > li { margin: 7px 0; }
+.s3guide-steps ul { margin: 4px 0; padding-left: 18px; }
+.s3guide-steps ul > li { margin: 3px 0; }
+.s3guide-bd code { font-family: var(--mono); font-size: 12px; background: var(--accent-soft); padding: 0 4px; border-radius: 4px; }
+.s3guide-note { display: flex; gap: 7px; align-items: flex-start; margin: 10px 0; padding: 8px 10px; border-radius: 6px; background: var(--warn-soft); color: var(--ink); }
+.s3guide-note .i { flex: 0 0 auto; color: var(--warn); margin-top: 1px; }
+.s3guide-ref { margin-top: 12px; font-size: 12px; color: var(--ink-3); }

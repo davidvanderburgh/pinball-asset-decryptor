@@ -11,7 +11,7 @@ name the card a title boots, start or stop a run by hand.
         A table more than one title's map fits (JP's Foo Fighters: Pro or
         LE) takes --title, else the title of --card, else the first with
         a card known, else its preferred map (the Pro).
-    The app's Visual Pinball tab (a preview feature) is the same kit with
+    The app's Visual Pinball tab is the same kit with
     buttons: vpxsetup.py is its half here.
     padvpx setup "<table.vpx>" <image.raw>
         The one step for a shared table: registers the controller if it is
@@ -80,7 +80,9 @@ def maps():
         if f.endswith(".shadow.json") or f.endswith(".vpxmap.json"):
             m = json.load(open(os.path.join(HERE, f), encoding="utf-8"))
             title = m.get("title") or f.split(".")[0]
+            game = m.get("game")            # same rule as padlaunch.game_for
             out[title] = {"kind": "shadow" if f.endswith(".shadow.json") else "mashup",
+                          "game": game if isinstance(game, str) and game else title,
                           "map": os.path.join(HERE, f), "detect": m.get("detect", []),
                           "output": m.get("output", ""), "model": m.get("model", ""),
                           "preferred": bool(m.get("preferred")),
@@ -124,6 +126,10 @@ def choose(fits, title=None, card=None):
     for want in (title, card_title(card)):
         if want in by:
             return want, by[want]
+        if want and want != title:
+            for t, info in fits:
+                if info.get("game") == want:
+                    return t, info
     for t, info in fits:
         if padlaunch.card_for(t, info.get("platform") or "spike2"):
             return t, info
@@ -347,7 +353,9 @@ def run(title, hidden=False, mute=False):
 
 def stop(title):
     from padcontroller import Rig
-    if platform_of(title) == "spike1":
+    platform = platform_of(title)
+    title = padlaunch.game_for(title)
+    if platform == "spike1":
         import s1bridge
         rec = s1bridge.board_record(title)
         if not rec:
@@ -362,7 +370,7 @@ def stop(title):
         launch.stop()
         print("stopped %s on the Spike 1 rig" % title)
         return 0
-    if platform_of(title) == "spooky":
+    if platform == "spooky":
         import spkbridge
         rec = spkbridge.board_record(title)
         if not rec:

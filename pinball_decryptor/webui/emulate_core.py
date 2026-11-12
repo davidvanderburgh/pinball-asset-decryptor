@@ -1519,6 +1519,97 @@ def parse_spike3(text):
     return None, ""
 
 
+#: The Spike 3 rig's launcher, beside the Spike 2 rig (PAD-1090).  It ships
+#: only in a source checkout today, so its absence is an answer, not an error.
+S3_LAUNCH = os.path.join("..", "spike3_emu", "s3launch.sh")
+
+
+def spike3_rig_present():
+    """Whether the Spike 3 launcher is on this PC at all."""
+    return os.path.isfile(os.path.join(rig_dir(), S3_LAUNCH))
+
+
+def _s3_argv(*args):
+    """``s3launch.sh ARGS`` as ROOT (the store's dm-crypt and s3run.sh's
+    overlay mounts need it) - Windows only, through ``wsl -u root``; None
+    where there is no password-free root (see rig_cmd_root)."""
+    if sys.platform == "win32":
+        return _wsl_head(root=True) + [
+            "bash", "%s/%s" % (_wsl_path(rig_dir()), S3_LAUNCH.replace(os.sep, "/"))] + \
+            [str(a) for a in args]
+    if sys.platform != "darwin" and linux_root_head() is not None:
+        return list(linux_root_head()) + [
+            "bash", os.path.join(rig_dir(), S3_LAUNCH)] + [str(a) for a in args]
+    return None
+
+
+def spike3_check_cmd():
+    """``s3launch.sh --check``: can this PC run a Spike 3 card?"""
+    return _s3_argv("--check")
+
+
+def spike3_setup_cmd():
+    """``s3launch.sh --setup``: install what --check found missing (apt
+    packages, the qemu-aarch64 binfmt) - the tab runs it on a Start that the
+    check refused for packages alone, then checks again."""
+    return _s3_argv("--setup")
+
+
+def spike3_keyfile(card, project=None):
+    """The padkeys.json holding the user's OWN OTP key for *card*, or None -
+    webui/spike3_key.py's search (only a file that names an OTP key: one
+    beside the cards may hold only the .spk package key). Only the path
+    travels to the rig; the store needs it once per card."""
+    from . import spike3_key
+    return spike3_key.find_keyfile(card, project=project)
+
+
+def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None,
+                      audio_ctl=None, restore=None):
+    """The run: the card into the Spike 3 store if needed (decrypted with
+    *keyfile*, the user's padkeys.json), then the game in a window on rig
+    slot *slot* for *minutes* - started from save state *restore*
+    (``game/slot``, PAD-1147) instead of booted when one is given."""
+    conv = _wsl_path if sys.platform == "win32" else (lambda p: p)
+    args = [conv(card), int(slot), int(minutes)] + (["--audio"] if audio else [])
+    if keyfile:
+        args += ["--keyfile", conv(keyfile)]
+    if audio_ctl:
+        # a native Windows path, as the Spike 2 run's PAD_AUDIO_CTL: the
+        # Windows sound player reads it, never WSL - so not converted
+        args += ["--audio-ctl", audio_ctl]
+    if restore:
+        args += ["--restore", restore]
+    return _s3_argv(*args)
+
+
+def spike3_load_cmd(slot, name):
+    """Load save state *name* (a bare slot name: the run's own title's) into
+    the Spike 3 run on rig slot *slot* (PAD-1147)."""
+    return _s3_argv("--load", int(slot), name)
+
+
+def spike3_slots_cmd(*args):
+    """slots.sh ARGS (list / label / delete) on the Spike 3 save states."""
+    return _s3_argv("--slots", *args)
+
+
+def spike3_stop_cmd(slot):
+    return _s3_argv("--stop", int(slot))
+
+
+def parse_s3check(text):
+    """``(True|False|None, what)`` out of ``s3launch.sh --check``: None when
+    no verdict line came back (the launcher could not be asked)."""
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line == "s3check: ok":
+            return True, ""
+        if line.startswith("s3check: missing - "):
+            return False, line[len("s3check: missing - "):].strip()
+    return None, ""
+
+
 def slot_up_cmd():
     """``slot.sh up N`` as root for the rig this app's run is on, or ``None``
     when there is nothing to mount: rig 0 (the ordinary rig, no layer), or a
@@ -2453,7 +2544,12 @@ def setup_report(facts):
                                                                    binfmt))
     if facts.get("iswsl") == "1":
         lines.append("  survives a WSL restart: "
-                     + yes_no("wslconf", "yes", "NO — systemd is off"))
+                     + ("NO — this Linux has no systemd; Set up emulator… "
+                        "registers it again"
+                        if facts.get("wslconf") == "0"
+                        and facts.get("hassystemd") == "0"
+                        else yes_no("wslconf", "yes",
+                                    "NO — systemd is off")))
         lines.append("  logs in as: %s%s"
                      % (facts.get("user", "unknown"),
                         "  <- the picture will be black"
@@ -2554,6 +2650,19 @@ def setup_report_darwin(docker, cli=None, engine=None):
     return lines
 
 
+def wsl_can_turn_systemd_on(facts):
+    """Would writing ``[boot] systemd=true`` make the ARM handler survive a
+    WSL restart?  Only on WSL, only when systemd is not already PID 1, and
+    only where systemd is installed at all (PAD-1132).  The app's own
+    PAD-Runtime has none, by design (tools/runtime/Dockerfile), and the
+    notice promised to "turn systemd on" there anyway; setupfix.sh then did
+    nothing.  An older rig sends no ``hassystemd``: absent accuses nobody,
+    so it is treated as installed, as before."""
+    facts = facts or {}
+    return (facts.get("iswsl") == "1" and facts.get("wslconf") == "0"
+            and facts.get("hassystemd") != "0")
+
+
 def setup_settled(facts):
     """Is there NOTHING left to say about this machine?
 
@@ -2630,7 +2739,7 @@ def setup_fix_steps(facts):
         steps.append("Register the kernel's handler for 32-bit ARM programs.")
     elif binfmt == "disabled":
         steps.append("Switch the 32-bit ARM handler back on.")
-    if facts.get("iswsl") == "1" and facts.get("wslconf") == "0":
+    if wsl_can_turn_systemd_on(facts):
         steps.append("Add [boot] systemd=true to /etc/wsl.conf, so the "
                      "registration is still there after WSL restarts.")
     return steps
@@ -2809,7 +2918,7 @@ def setup_notice(facts, can_fix):
         # unsaid: `does[0]` ran off an empty list, so the tab answered such a
         # machine with an internal error where its notice should have been.
         # Seen on this PC while photographing PAD-126.
-        if facts.get("iswsl") == "1" and facts.get("wslconf") == "0":
+        if wsl_can_turn_systemd_on(facts):
             does.append("turns systemd on in /etc/wsl.conf, so the handler "
                         "is still registered after a WSL restart")
         parts.append(

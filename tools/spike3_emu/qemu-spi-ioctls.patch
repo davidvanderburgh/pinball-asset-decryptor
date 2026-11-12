@@ -1,0 +1,191 @@
+PAD-1090: add Linux spidev ioctl translation to qemu-user (on top of
+qemu-i2c-ioctls.patch). The spidev settings (mode, lsb-first, bits per
+word, max speed, mode32) by pointer, and SPI_IOC_MESSAGE(1..16) through a
+nested-pointer handler that maps each transfer's guest tx/rx buffers.
+Without it the CPU board's SPI I/O chain (/dev/spidev4.0) answers ENOTTY.
+
+Apply after the i2c patch, to the same pristine qemu 8.2.2 tree:
+    cd qemu-8.2.2 && patch -p1 < qemu-i2c-ioctls.patch
+    patch -p1 < qemu-spi-ioctls.patch
+
+--- a/linux-user/syscall.c
++++ b/linux-user/syscall.c
+@@ -64,6 +64,33 @@
+ #include <linux/if_tun.h>
+ #include <linux/i2c.h>
+ #include <linux/i2c-dev.h>
++#include <linux/spi/spidev.h>
++#define PAD_SPI_RD_MODE SPI_IOC_RD_MODE
++#define PAD_SPI_WR_MODE SPI_IOC_WR_MODE
++#define PAD_SPI_RD_LSB_FIRST SPI_IOC_RD_LSB_FIRST
++#define PAD_SPI_WR_LSB_FIRST SPI_IOC_WR_LSB_FIRST
++#define PAD_SPI_RD_BITS_PER_WORD SPI_IOC_RD_BITS_PER_WORD
++#define PAD_SPI_WR_BITS_PER_WORD SPI_IOC_WR_BITS_PER_WORD
++#define PAD_SPI_RD_MAX_SPEED_HZ SPI_IOC_RD_MAX_SPEED_HZ
++#define PAD_SPI_WR_MAX_SPEED_HZ SPI_IOC_WR_MAX_SPEED_HZ
++#define PAD_SPI_RD_MODE32 SPI_IOC_RD_MODE32
++#define PAD_SPI_WR_MODE32 SPI_IOC_WR_MODE32
++#define PAD_SPI_MSG1 SPI_IOC_MESSAGE(1)
++#define PAD_SPI_MSG2 SPI_IOC_MESSAGE(2)
++#define PAD_SPI_MSG3 SPI_IOC_MESSAGE(3)
++#define PAD_SPI_MSG4 SPI_IOC_MESSAGE(4)
++#define PAD_SPI_MSG5 SPI_IOC_MESSAGE(5)
++#define PAD_SPI_MSG6 SPI_IOC_MESSAGE(6)
++#define PAD_SPI_MSG7 SPI_IOC_MESSAGE(7)
++#define PAD_SPI_MSG8 SPI_IOC_MESSAGE(8)
++#define PAD_SPI_MSG9 SPI_IOC_MESSAGE(9)
++#define PAD_SPI_MSG10 SPI_IOC_MESSAGE(10)
++#define PAD_SPI_MSG11 SPI_IOC_MESSAGE(11)
++#define PAD_SPI_MSG12 SPI_IOC_MESSAGE(12)
++#define PAD_SPI_MSG13 SPI_IOC_MESSAGE(13)
++#define PAD_SPI_MSG14 SPI_IOC_MESSAGE(14)
++#define PAD_SPI_MSG15 SPI_IOC_MESSAGE(15)
++#define PAD_SPI_MSG16 SPI_IOC_MESSAGE(16)
+ #include <linux/in6.h>
+ #include <linux/errqueue.h>
+ #include <linux/random.h>
+@@ -5706,6 +5733,72 @@
+     return ret;
+ }
+ 
++
++/* PAD-1090: Linux spidev SPI_IOC_MESSAGE(n). The transfer array is n fixed
++ * 32-byte records; each one's tx_buf/rx_buf is a guest address. */
++static abi_long do_ioctl_spi_msg(const IOCTLEntry *ie, uint8_t *buf_temp,
++                                 int fd, int cmd, abi_long arg)
++{
++    uint32_t n = (((uint32_t)cmd >> 16) & 0x3fff) / sizeof(struct spi_ioc_transfer);
++    struct spi_ioc_transfer *t, *h;
++    void **tx, **rx;
++    uint32_t i;
++    abi_long ret = 0;
++
++    (void)buf_temp;
++    if (n == 0 || n > 16) {
++        return -TARGET_EINVAL;
++    }
++    t = lock_user(VERIFY_READ, arg, n * sizeof(*t), 1);
++    if (!t) {
++        return -TARGET_EFAULT;
++    }
++    h = g_new0(struct spi_ioc_transfer, n);
++    tx = g_new0(void *, n);
++    rx = g_new0(void *, n);
++    for (i = 0; i < n; i++) {
++        uint32_t len = tswap32(t[i].len);
++        abi_ulong gt = tswap64(t[i].tx_buf), gr = tswap64(t[i].rx_buf);
++
++        h[i] = t[i];
++        h[i].len = len;
++        h[i].tx_buf = 0;
++        h[i].rx_buf = 0;
++        if (len && gt) {
++            tx[i] = lock_user(VERIFY_READ, gt, len, 1);
++            if (!tx[i]) {
++                ret = -TARGET_EFAULT;
++                goto out;
++            }
++            h[i].tx_buf = (uintptr_t)tx[i];
++        }
++        if (len && gr) {
++            rx[i] = lock_user(VERIFY_WRITE, gr, len, 0);
++            if (!rx[i]) {
++                ret = -TARGET_EFAULT;
++                goto out;
++            }
++            h[i].rx_buf = (uintptr_t)rx[i];
++        }
++    }
++    ret = get_errno(safe_ioctl(fd, ie->host_cmd, h));
++out:
++    for (i = 0; i < n; i++) {
++        uint32_t len = tswap32(t[i].len);
++        if (tx[i]) {
++            unlock_user(tx[i], tswap64(t[i].tx_buf), 0);
++        }
++        if (rx[i]) {
++            unlock_user(rx[i], tswap64(t[i].rx_buf), is_error(ret) ? 0 : len);
++        }
++    }
++    g_free(h);
++    g_free(tx);
++    g_free(rx);
++    unlock_user(t, arg, 0);
++    return ret;
++}
++
+ IOCTLEntry ioctl_entries[] = {
+ #define IOCTL(cmd, access, ...) \
+     { TARGET_ ## cmd, cmd, #cmd, access, 0, {  __VA_ARGS__ } },
+--- a/linux-user/syscall_defs.h
++++ b/linux-user/syscall_defs.h
+@@ -949,6 +949,34 @@
+ #define TARGET_I2C_RDWR        0x0707
+ #define TARGET_I2C_PEC         0x0708
+ #define TARGET_I2C_SMBUS       0x0720
++
++/* PAD-1090: spidev command numbers (asm-generic ioctl layout, same as host) */
++#define TARGET_PAD_SPI_RD_MODE          0x80016b01
++#define TARGET_PAD_SPI_WR_MODE          0x40016b01
++#define TARGET_PAD_SPI_RD_LSB_FIRST     0x80016b02
++#define TARGET_PAD_SPI_WR_LSB_FIRST     0x40016b02
++#define TARGET_PAD_SPI_RD_BITS_PER_WORD 0x80016b03
++#define TARGET_PAD_SPI_WR_BITS_PER_WORD 0x40016b03
++#define TARGET_PAD_SPI_RD_MAX_SPEED_HZ  0x80046b04
++#define TARGET_PAD_SPI_WR_MAX_SPEED_HZ  0x40046b04
++#define TARGET_PAD_SPI_RD_MODE32        0x80046b05
++#define TARGET_PAD_SPI_WR_MODE32        0x40046b05
++#define TARGET_PAD_SPI_MSG1 0x40206b00
++#define TARGET_PAD_SPI_MSG2 0x40406b00
++#define TARGET_PAD_SPI_MSG3 0x40606b00
++#define TARGET_PAD_SPI_MSG4 0x40806b00
++#define TARGET_PAD_SPI_MSG5 0x40a06b00
++#define TARGET_PAD_SPI_MSG6 0x40c06b00
++#define TARGET_PAD_SPI_MSG7 0x40e06b00
++#define TARGET_PAD_SPI_MSG8 0x41006b00
++#define TARGET_PAD_SPI_MSG9 0x41206b00
++#define TARGET_PAD_SPI_MSG10 0x41406b00
++#define TARGET_PAD_SPI_MSG11 0x41606b00
++#define TARGET_PAD_SPI_MSG12 0x41806b00
++#define TARGET_PAD_SPI_MSG13 0x41a06b00
++#define TARGET_PAD_SPI_MSG14 0x41c06b00
++#define TARGET_PAD_SPI_MSG15 0x41e06b00
++#define TARGET_PAD_SPI_MSG16 0x42006b00
+ #define TARGET_FIGETBSZ   TARGET_IO(0x00,2)  /* get the block size used for bmap */
+ 
+ #define TARGET_FICLONE    TARGET_IOW(0x94, 9, abi_int)
+--- a/linux-user/ioctls.h
++++ b/linux-user/ioctls.h
+@@ -401,6 +401,32 @@
+   IOCTL(I2C_FUNCS, IOC_R, MK_PTR(TYPE_ULONG))
+   IOCTL_SPECIAL(I2C_RDWR, IOC_W, do_ioctl_i2c_rdwr, TYPE_PTRVOID)
+   IOCTL_SPECIAL(I2C_SMBUS, IOC_W, do_ioctl_i2c_smbus, TYPE_PTRVOID)
++  IOCTL(PAD_SPI_RD_MODE, IOC_R, MK_PTR(TYPE_CHAR))
++  IOCTL(PAD_SPI_WR_MODE, IOC_W, MK_PTR(TYPE_CHAR))
++  IOCTL(PAD_SPI_RD_LSB_FIRST, IOC_R, MK_PTR(TYPE_CHAR))
++  IOCTL(PAD_SPI_WR_LSB_FIRST, IOC_W, MK_PTR(TYPE_CHAR))
++  IOCTL(PAD_SPI_RD_BITS_PER_WORD, IOC_R, MK_PTR(TYPE_CHAR))
++  IOCTL(PAD_SPI_WR_BITS_PER_WORD, IOC_W, MK_PTR(TYPE_CHAR))
++  IOCTL(PAD_SPI_RD_MAX_SPEED_HZ, IOC_R, MK_PTR(TYPE_INT))
++  IOCTL(PAD_SPI_WR_MAX_SPEED_HZ, IOC_W, MK_PTR(TYPE_INT))
++  IOCTL(PAD_SPI_RD_MODE32, IOC_R, MK_PTR(TYPE_INT))
++  IOCTL(PAD_SPI_WR_MODE32, IOC_W, MK_PTR(TYPE_INT))
++  IOCTL_SPECIAL(PAD_SPI_MSG1, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG2, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG3, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG4, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG5, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG6, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG7, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG8, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG9, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG10, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG11, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG12, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG13, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG14, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG15, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
++  IOCTL_SPECIAL(PAD_SPI_MSG16, IOC_W, do_ioctl_spi_msg, TYPE_PTRVOID)
+   IOCTL(RNDADDTOENTCNT, IOC_W, MK_PTR(TYPE_INT))
+   IOCTL(RNDZAPENTCNT, 0, TYPE_NULL)
+   IOCTL(RNDCLEARPOOL, 0, TYPE_NULL)

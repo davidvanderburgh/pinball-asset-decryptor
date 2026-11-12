@@ -428,7 +428,8 @@ HELP_CONTENT = {
          "it belongs to or what plays it. It is kept in the comment column of "
          "the project's callouts.csv, follows the sound through renames and "
          "Auto-name, shows in a Comment column once a sound has one, is found "
-         "by the Search box, and goes out with Export CSV."),
+         "by the Search box, and goes out with Export CSV. Tick or untick "
+         "**Show comments** in the toolbar to show or hide that column."),
         ("Blip-free callouts (always on)",
          "Every replaced sound plays your audio all the way through, with no "
          "scrap of the original inside it. There is nothing to switch on.\n\n"
@@ -3950,7 +3951,8 @@ PREVIEW_HELP = {
             ]),
         ],
     },
-    # PAD-802: the Visual Pinball tab
+    # PAD-802: the Visual Pinball tab; in every copy since PAD-1136
+    # (core/preview.RELEASED), read through sections_for like the Modes tips
     "vpx": {
         "Visual Pinball": [
             ("What it's for",
@@ -4039,8 +4041,8 @@ PREVIEW_HELP = {
              "| 1 | Start |\n"
              "| 5 | coin (add coins until the game's screen shows a credit) |\n"
              "| Left and right Shift | flippers |\n"
-             "| Left Alt | launch on Rush and Foo Fighters (Visual Pinball's lockbar key) |\n"
-             "| Enter | launch on Godzilla |\n"
+             "| Enter | the plunger: hold to pull it back, let go to shoot (on Godzilla, the launch button) |\n"
+             "| Left Alt | the machine's Action button, which also launches the ball (Visual Pinball's lockbar key) |\n"
              "| Esc | leave; the game stops with the table |\n\n"
              "The first time, the game's screen may take the keyboard: click the "
              "playfield once and play on."),

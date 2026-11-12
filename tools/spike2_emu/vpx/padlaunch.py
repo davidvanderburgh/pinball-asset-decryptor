@@ -39,6 +39,7 @@ if RIG not in sys.path:
 import padpath    # noqa: E402
 
 KIT = os.path.join(os.path.expanduser("~"), ".pad-vpx.json")
+USER_MAPS = os.path.join(os.path.expanduser("~"), ".pad-vpx", "maps")
 LABEL = "PAD-VPX"
 RUNTIME_DISTRO = "PAD-Runtime"
 LOG = os.path.join(os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp",
@@ -189,6 +190,40 @@ SPOOKY_UPDATES = {"h78": ("code_H78*.pkg",), "um": ("code_UM*.pkg",), "ac": ("ac
 SPOOKY_PROC = {"ac": "config/alice.yaml"}
 
 
+def table_map(title):
+    """Map metadata in PAD.Controller's user/kit lookup order."""
+    if title:
+        for directory in (USER_MAPS, HERE):
+            for suffix in (".vpxmap.json", ".shadow.json"):
+                try:
+                    with open(os.path.join(directory, title + suffix), encoding="utf-8") as f:
+                        m = json.load(f)
+                    return m if isinstance(m, dict) else {}
+                except (OSError, ValueError):
+                    pass
+    return {}
+
+
+def encoder_lamp_env(mapping):
+    """Map's optional encoder_lamps -> the responder's adapter wiring."""
+    entries = []
+    for motor, led in mapping.items():
+        if motor == "_":
+            continue
+        node, index = (int(n) for n in motor.split(","))
+        if (not isinstance(led, list) or len(led) != 2 or any(type(n) is not int for n in led)
+                or not (0 <= node < 16 and 0 <= index < 256 and 0 <= led[0] < 16 and 0 <= led[1] < 64)):
+            raise ValueError("encoder_lamps needs node,motor -> [node, LED] within Spike 1 slots")
+        entries.append("%d,%d:%d,%d" % (node, index, *led))
+    return ";".join(entries)
+
+
+def game_for(title):
+    """A table variant's native game; maps without game keep their title."""
+    game = table_map(title).get("game")
+    return game if isinstance(game, str) and game else title
+
+
 def card_for(title, platform="spike2"):
     """The card image to boot for `title`, or None with the places looked.
     A Spike 1 title's card is its .iso (GOT_LE-1_37.iso), looked for the same
@@ -197,16 +232,18 @@ def card_for(title, platform="spike2"):
     if env and os.path.isfile(env):
         return env
     kit = kit_load()
-    card = (kit.get("cards") or {}).get(title)
-    if card and os.path.isfile(card):
-        return card
+    game = game_for(title)
+    for key in dict.fromkeys((title, game)):
+        card = (kit.get("cards") or {}).get(key)
+        if card and os.path.isfile(card):
+            return card
     for lib in libraries(platform, kit):
         # by name in any case, as Windows does: a Spike 1 card is GOT_LE-1_37.iso
         # for got_le, and Linux/macOS glob tells the cases apart (PAD-951)
         if platform == "spooky":
-            pats = [g.lower() for g in SPOOKY_UPDATES.get(title, ())]
+            pats = [g.lower() for g in SPOOKY_UPDATES.get(game, ())]
         else:
-            pats = [("%s-%s" % (title, g)).lower() for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"])]
+            pats = [("%s-%s" % (game, g)).lower() for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"])]
         found = [os.path.join(lib, n) for n in sorted(os.listdir(lib))
                  if any(fnmatch.fnmatchcase(n.lower(), p) for p in pats)]
         if found:
@@ -510,7 +547,7 @@ class Launch:
     """One run started for a table: a slot, a watch.sh, and the stop for it."""
 
     def __init__(self, title, card, dist=None, minutes=240):
-        self.title = title
+        self.title = game_for(title)
         self.card = card
         self.distro = dist if dist is not None else distro()
         self.minutes = minutes
@@ -745,11 +782,13 @@ class Spike1Launch:
 
     The game's DMD is not a window of the rig's own: the app's Spike 1 tab
     draws it (spike1_windows.py) from the run's spi0.cap, so a player keeps
-    the app open beside Visual Pinball to see it; the tribute's own scripted
-    display keeps running as the shadow game's."""
+    the app open beside Visual Pinball to see it, or configures an optional
+    native viewer in the kit's spike1_dmd_viewers. A viewer this launch
+    starts is stopped with it; an existing app/viewer is left alone."""
 
     def __init__(self, title, card, dist=None, minutes=240):
-        self.title = title
+        self.map_title = title
+        self.title = game_for(title)
         self.card = card
         self.distro = dist if dist is not None else distro()
         self.minutes = minutes
@@ -760,6 +799,7 @@ class Spike1Launch:
                                       self.distro)
         self.logfile = os.path.join(os.path.dirname(LOG), "padvpx-%s.log" % title)
         self.work = None
+        self.dmd_viewer = None
 
     def work_dir(self):
         """S1_WORK for this run: the app's data disk, else the rig's default."""
@@ -770,6 +810,18 @@ class Spike1Launch:
     def env(self):
         card = padpath.to_wsl(self.card, self.distro)
         env = ["PAD_LABEL=%s" % LABEL, "PAD_HIDDEN=0", "PAD_AUDIO=1", "S1_PIVOT=1"]
+        # a mistyped encoder_lamps loses only that wiring, as the responder
+        # does, never the table's start
+        try:
+            outputs = encoder_lamp_env(table_map(self.map_title).get("encoder_lamps") or {})
+        except (ValueError, TypeError, AttributeError) as exc:
+            log("%s: encoder_lamps ignored (%s)" % (self.map_title, exc))
+            outputs = ""
+        if outputs:
+            env.append("S1_ENCODER_LAMPS=" + outputs)
+        py = win_python()
+        if py:
+            env.append("PAD_WINPYTHON=%s" % padpath.to_wsl(py, self.distro))
         if sys.platform == "win32":
             env.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD, self.distro))
         if self.work_dir():
@@ -794,6 +846,47 @@ class Spike1Launch:
     def take_slot(self):
         return 0
 
+    def _start_dmd_viewer(self, output):
+        """An optional native viewer consumes the run's spi0.cap via its
+        board record. Own only the process we launch; no app window or
+        already-running viewer is found or stopped."""
+        if sys.platform != "win32":
+            return
+        viewers = kit_load().get("spike1_dmd_viewers") or {}
+        viewer = viewers.get(self.title) if isinstance(viewers, dict) else None
+        if not viewer:
+            return
+        argv = [viewer] if isinstance(viewer, str) else viewer
+        if (not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv)
+                or not os.path.isfile(argv[0])):
+            log("Spike 1 DMD viewer for %s not started: %r is not an existing executable path "
+                "or an argument list starting with one" % (self.title, viewer))
+            return
+        try:
+            self.dmd_viewer = subprocess.Popen(
+                argv + [os.path.join(BOARD, "spike1-0.run"), self.title],
+                stdin=subprocess.DEVNULL, stdout=output, stderr=output,
+                creationflags=_CREATE_NO_WINDOW)
+        except OSError as exc:
+            log("Spike 1 DMD viewer for %s failed: %s" % (self.title, exc))
+            return
+        log("started the Spike 1 DMD viewer for %s (pid %d): %s"
+            % (self.title, self.dmd_viewer.pid, " ".join(argv)))
+
+    def _stop_dmd_viewer(self):
+        viewer, self.dmd_viewer = self.dmd_viewer, None
+        if viewer is None or viewer.poll() is not None:
+            return
+        try:
+            viewer.terminate()
+            try:
+                viewer.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                viewer.kill()
+                viewer.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            log("Spike 1 DMD viewer stop failed: %s" % exc)
+
     def start(self):
         why = no_linux(self.distro)
         if why:
@@ -808,6 +901,7 @@ class Spike1Launch:
         out = open(self.logfile, "ab")
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
                                      creationflags=_CREATE_NO_WINDOW)
+        self._start_dmd_viewer(out)
         log("started %s on the Spike 1 rig from %s (distro %s, log %s)"
             % (self.title, self.card, self.distro or "default", self.logfile))
         return 0
@@ -821,6 +915,7 @@ class Spike1Launch:
         return s1bridge.board_record(self.title) is not None
 
     def stop(self):
+        self._stop_dmd_viewer()
         try:
             env = ["S1_WORK=%s" % self.work_dir()] if self.work_dir() else []
             _run(self.head() + env + ["bash", "%s/stop.sh" % self.rig_wsl], timeout=120)

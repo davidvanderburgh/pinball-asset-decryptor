@@ -97,7 +97,7 @@ def state():
         "lamps_on": bits(out.get("lamps", ""), lambda c, r: (c + 1) * 10 + r + 1),
         "coils_on": [n + 1 for n in range(32) if sols >> n & 1],
         "frames": int(out.get("frames", "0")),
-        "balls": {"trough": int(b.get("trough", 0)), "shooter": b.get("shooter") == "1",
+        "balls": {"trough": int(b.get("trough", 0)), "shooter": int(b.get("shooter", 0) or 0) > 0,
                   "in_play": int(b.get("play", 0)),
                   "held": [int(x) for x in b.get("held", "").split(",") if x]},
     }

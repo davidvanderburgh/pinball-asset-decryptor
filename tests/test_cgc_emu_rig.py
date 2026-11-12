@@ -50,15 +50,19 @@ MM_COILS = ["AUTO PLUNGER", "TROUGH EJECT", "LEFT POPPER", "CASTLE", "CASTLE GAT
             "DRAWBRIDGE MOTOR"]
 
 
-def _page(tables):
+def _page(tables, glued=()):
     """A 16 KiB ROM page laid out as a WPC ROM's: each table a run of BE
     pointers (CPU address 0x4000 + offset), entry 0 the "invalid" text, the
-    names after the tables, NUL-ended."""
+    names after the tables, NUL-ended.  A name in `glued` follows a printable
+    byte instead of a NUL (Cactus Canyon's flipper table's entry 0)."""
     page = bytearray(0x4000)
     names_at = 0x1000
     ptr_at = 0x100
     for bad, names in tables:
         for n in [bad] + names:
+            if n in glued:
+                page[names_at] = ord("z")
+                names_at += 1
             page[ptr_at:ptr_at + 2] = struct.pack(">H", 0x4000 + names_at)
             ptr_at += 2
             b = n.encode() + b"\0"
@@ -190,3 +194,149 @@ def test_sw_state_parses_the_shim_file(tmp_path, monkeypatch):
     assert s["lamps_on"] == [11, 88]
     assert s["coils_on"] == [1, 2]
     assert s["balls"] == {"trough": 3, "shooter": True, "in_play": 0, "held": [36]}
+
+
+# Cactus Canyon (PAD-1170): optos marked "*", coils named "##1 (L) DROP TGT.",
+# unused entries "UNUSED ##n", and a flipper table whose "invalid" entry
+# follows a printable byte, so the table is found from entry 1
+CC_SWITCHES = (["LEFT COIN SLOT", "CENTER COIN SLOT", "RIGHT COIN SLOT", "4TH COIN OPTION",
+                "ESCAPE", "DOWN", "UP", "ENTER"]
+               + ["UNUSED ##9", "UNUSED ##10", "START BUTTON", "PLUMB BOB TILT",
+                  "MINE ENTRANCE", "LEFT OUTLANE", "R. RETURN", "SHOOTER LANE"]
+               + ["SLAM TILT", "COIN DOOR CLOSED", "UNUSED ##19", "ALWAYS CLOSED",
+                  "UNUSED ##21", "L. RETURN", "RIGHT OUTLANE", "R STANDUP (BOT)"]
+               + ["*TROUGH EJECT", "*TROUGH BALL 1", "*TROUGH BALL 2", "*TROUGH BALL 3",
+                  "*TROUGH BALL 4", "*L. LOOP BOTTOM", "*RT. LOOP BOTTOM", "UNUSED ##32"]
+               + ["*MINE POPPER", "*SALOON POPPER", "*UNUSED ##35", "R STANDUP (TOP)",
+                  "UNUSED ##37", "BEER MUG SWITCH", "L. BONUS X LANE", "JET EXIT"]
+               + ["L. SLINGSHOT", "R. SLINGSHOT", "LEFT JET", "RIGHT JET", "BOTTOM JET",
+                  "RIGHT LOOP TOP", "R. BONUS X LANE", "LEFT LOOP TOP"]
+               + ["UNUSED ##%d" % n for n in range(49, 65)])
+CC_COILS = ["AUTOPLUNGER", "##1 (L) DROP TGT.", "##2 (LC) DROP TGT.", "##3 (RC) DROP TGT.",
+            "##4 (R) DROP TGT.", "MINE POPPER", "KNOCKER-NOT USED", "SALOON POPPER",
+            "TROUGH EJECT", "L. SLINGSHOT", "R. SLINGSHOT", "LEFT JET", "RIGHT JET",
+            "L. GUNFIGHT POST", "R. GUNFIGHT POST", "BOTTOM JET", "MINE MOTOR", "UNUSED ##23"]
+
+
+@pytest.fixture
+def cc_rom():
+    return _page([("NULL", CC_COILS), ("INVALID SW. NUMBER", CC_SWITCHES),
+                  ("INVALID FL. SW. NUM.", MM_FLIPPERS)],
+                 glued={"INVALID FL. SW. NUM."}) + bytes(0x4000)
+
+
+def test_cc_rom_names(cc_rom):
+    n = cgcroms.named(cc_rom)
+    assert n["switches"]["31"] == "TROUGH EJECT"         # the '*' opto mark dropped
+    assert n["switches"]["32"] == "TROUGH BALL 1"
+    assert n["switches"]["41"] == "MINE POPPER"
+    assert "11" not in n["switches"] and "43" not in n["switches"]   # UNUSED ##n
+    # the flipper table read from entry 1 is not shifted by one
+    assert n["flippers"]["F1"] == "R. FLIPPER E.O.S."
+    assert n["flippers"]["F4"] == "L. FLIPPER BUTTON"
+    # coil numbers as the machine's: 6 mine popper, 8 saloon popper, 9 eject
+    assert n["coils"]["1"] == "AUTOPLUNGER"
+    assert n["coils"]["2"] == "##1 (L) DROP TGT."
+    assert n["coils"]["6"] == "MINE POPPER"
+    assert n["coils"]["8"] == "SALOON POPPER"
+    assert n["coils"]["9"] == "TROUGH EJECT"
+    assert "18" not in n["coils"]
+
+
+def test_mm_names_unchanged_by_the_cc_rules(mm_rom):
+    n = cgcroms.named(mm_rom)
+    assert n["flippers"]["F1"] == "R. FLIPPER E.O.S."
+    assert n["coils"]["1"] == "AUTO PLUNGER"
+    assert n["switches"]["31"] == "TROUGH EJECT"
+
+
+def test_cc_ball_model(cc_rom):
+    kv = dict(p.split("=") for p in cgctitles.balls("cc", cgcroms.named(cc_rom)).split(";"))
+    # the rig run (PAD-1170): trough 32-35 with 31 clear, serve on coil 9,
+    # autoplunger 1, poppers 41/42 kicked by coils 6/8, coin door closed
+    assert kv["trough"] == "32,33,34,35"
+    assert kv["eject"] == "9"
+    assert kv["launch"] == "1"
+    assert kv["shooter"] == "18"
+    assert set(kv["holes"].split(",")) == {"41:6", "42:8"}
+    assert kv["closed"] == "22,24"
+    assert "closed" not in cgctitles.balls("mm", {"switches": {"22": "COIN DOOR CLOSED"}})
+
+
+def test_find_rom_takes_the_game_rom(tmp_path):
+    rom = tmp_path / "ccdata" / "rom"
+    rom.mkdir(parents=True)
+    for f in ("s2.rom", "s3.rom", "cc_g11.1_3"):
+        (rom / f).write_bytes(b"")
+    assert cgctitles.find_rom(str(tmp_path)).endswith("cc_g11.1_3")
+    mm = tmp_path / "mm"
+    mm.mkdir()
+    (mm / "mm_10.rom").write_bytes(b"")
+    assert cgctitles.find_rom(str(mm)).endswith("mm_10.rom")
+
+
+def test_sw_state_stacked_shooter(tmp_path, monkeypatch):
+    rig = tmp_path / "rig0"
+    rig.mkdir()
+    (rig / "state").write_text("sw 0000000000000000\nballs trough=2 shooter=2 play=0 held=\n")
+    monkeypatch.setenv("CGC_ROOT", str(tmp_path))
+    monkeypatch.setenv("PAD_SLOT", "0")
+    assert sw.state()["balls"]["shooter"] is True
+
+
+# Monster Bash (PAD-1174): its coil-name table runs 1, 2, 3, 5 ... (solenoid 4
+# unused, left out), so entry n from LEFT GATE on is coil n + 1 - the ROM's
+# own solenoid test shows "09 TROUGH EJECT".  Names as cgcroms reads them:
+MB_COILS = ["AUTO PLUNGER", "BRIDE POST", "MUMMY COFFIN", "LEFT GATE", "RIGHT GATE",
+            "KNOCKER", "RAMP LOCK POST", "TROUGH EJECT", "LEFT SLINGSHOT",
+            "RIGHT SLINGSHOT", "LEFT JET", "RIGHT JET", "BOTTOM JET", "LEFT EJECT",
+            "RIGHT POPPER", "FRANK. MOTOR", "UP/DN BANK MOTOR", "FRANK. RAMP POWER",
+            "FRANK. RAMP HOLD", "DRAC. MTR. FORWD.", "DRAC. MTR. BCKWD.",
+            "L. FLIP PROX.", "R. FLIP PROX.", "COIN METER"]
+MB_SWITCHES = {"13": "START BUTTON", "18": "SHOOTER LANE", "28": "LEFT EJECT",
+               "31": "TROUGH EJECT", "32": "TROUGH BALL 1", "33": "TROUGH BALL 2",
+               "34": "TROUGH BALL 3", "35": "TROUGH BALL 4", "36": "RIGHT POPPER",
+               "74": "DRAC. POSITION 5", "75": "DRAC. POSITION 4",
+               "76": "DRAC. POSITION 3", "77": "DRAC. POSITION 2",
+               "78": "DRAC. POSITION 1", "81": "UP/DN BANK UP", "82": "UP/DN BANK DOWN",
+               "83": "FRANK. TABLE DOWN", "84": "FRANK. TABLE UP"}
+
+
+def _mb_names():
+    return {"switches": dict(MB_SWITCHES), "flippers": {},
+            "coils": {str(i + 1): n for i, n in enumerate(MB_COILS)}}
+
+
+def test_mb_coils_skip_solenoid_4():
+    coils = cgctitles.rig_names("mb", _mb_names())["coils"]
+    assert coils["1"] == "AUTO PLUNGER"
+    assert coils["3"] == "MUMMY COFFIN"
+    assert "4" not in coils
+    assert coils["5"] == "LEFT GATE"
+    assert coils["9"] == "TROUGH EJECT"
+    assert coils["16"] == "RIGHT POPPER"
+    assert coils["17"] == "FRANK. MOTOR"
+    assert coils["25"] == "COIN METER"
+    # titles without a gap keep the table's numbers
+    names = {"coils": {"2": "TROUGH EJECT"}}
+    assert cgctitles.rig_names("mm", names) is names
+
+
+def test_mb_ball_model():
+    kv = dict(p.split("=") for p in cgctitles.balls("mb", _mb_names()).split(";"))
+    # the rig run (PAD-1174): serve on 9, launch on 1, the right popper an
+    # opto read empty, both kickouts on their own coils, Dracula's track
+    # (forward 21, backward 22) from position 1 (78) to 5 (74)
+    assert kv["eject"] == "9"
+    assert kv["launch"] == "1"
+    assert kv["optos"] == "31,32,33,34,35,36"
+    assert set(kv["holes"].split(",")) == {"36:16", "28:15"}
+    assert "closed" not in kv
+    assert kv["tracks"] == "21:22:78/77/76/75/74"
+    assert kv["mechs"] == "18:81:82,17:83:84"
+
+
+def test_ready_frames_only_where_the_rom_waits():
+    assert cgctitles.TITLES["mb"]["ready_frames"] == 1800
+    for key in ("mm", "afm", "cc"):
+        assert "ready_frames" not in cgctitles.TITLES[key]

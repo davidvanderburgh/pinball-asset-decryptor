@@ -61,9 +61,19 @@
 /* 1360x768 I420 is 1566720 bytes. Four slots is 6 MB and about 130 ms of
  * buffering at 30 fps - enough to ride out a scheduling hiccup in an emulated
  * guest, small enough that a seek does not have to throw much away. */
+#ifndef PADVID_SLOTS      /* overridable: the Spike 3 build uses 16 (PAD-1090) */
 #define PADVID_SLOTS      4
+#endif
+/* Overridable at build time for the Spike 3 rig only (PAD-1090: its clips
+ * run to 1940x1100), whose s3build.sh builds its own padglhost and s3vid.so
+ * with -DPADVID_MAX_W=2048 -DPADVID_MAX_H=1152 and whose s3vidhost.py writes
+ * the matching layout. Every Spike 2 reader and writer keeps these values. */
+#ifndef PADVID_MAX_W
 #define PADVID_MAX_W      1920
+#endif
+#ifndef PADVID_MAX_H
 #define PADVID_MAX_H      1088
+#endif
 #define PADVID_SLOT_BYTES ((PADVID_MAX_W) * (PADVID_MAX_H) * 3 / 2)
 
 /* Eight channels of 564 bytes plus three globals is 4524, so the old 4096 no

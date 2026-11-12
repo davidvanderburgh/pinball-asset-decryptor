@@ -160,7 +160,14 @@ static void emit_u(unsigned int op, const unsigned int *v, unsigned int count)
 { emit(op, v, count * 4u, 0, 0); }
 
 /* ---------------- guest-side shadow state ---------------- */
+/* Overridable at build time, and padglhost.c must agree (the uniform and
+ * attribute tokens are program * slots): the Spike 3 build (s3build.sh) uses
+ * 1024, because Godot 4 builds well past 128 programs and every uniform of a
+ * program at or above the limit went unset - its video pass is program 144,
+ * whose colour transform stayed 0 and drew the video black (PAD-1090). */
+#ifndef MAXPROG
 #define MAXPROG 128
+#endif
 #define MAXUNI  32
 
 typedef struct { char name[40]; } Uni;
@@ -173,6 +180,77 @@ static void viv_probe_own(void);          /* item 67, defined with viv_tab */
 static unsigned cur_unit;                /* tentative: defined with its comment below */
 static unsigned cur_tex2d[16];
 static unsigned cur_fbo_shadow;          /* item 67: the bound framebuffer */
+
+/* PAD-1128: STATE QUERIES ARE ANSWERED FROM WHAT THE GAME SET.
+ *
+ * The queries are answered here, never by the host (a round trip per call),
+ * and they used to be answered with constants: glIsEnabled said 1 for every
+ * capability, glGetIntegerv said 0 for everything it did not know - and for
+ * GL_VIEWPORT and GL_SCISSOR_BOX wrote only the first of their four ints,
+ * leaving the caller's other three as whatever its stack held. Code that
+ * saves state, draws, and puts the state back (a render pass into a texture:
+ * Jaws' video mode draws its 3D background that way) restored a viewport of
+ * stack garbage, re-bound framebuffer 0 instead of its own, and switched ON
+ * every capability it had found "on" - so after Jaws' video mode the LCD
+ * showed a few HUD pieces, enlarged and shifted, over no video at all, for
+ * the rest of the game. The guest shadows below keep what was really set;
+ * each query nothing tracks says so in the run log, once. */
+static int vp_box[4], sc_box[4], vp_set, sc_set;
+static unsigned cur_prog_shadow, cur_vao_shadow, read_fbo_shadow;
+static unsigned elem_buf[1024];          /* GL_ELEMENT_ARRAY_BUFFER_BINDING per VAO */
+static unsigned blend_eq_rgb = 0x8006, blend_eq_a = 0x8006;          /* FUNC_ADD */
+static unsigned blend_s_rgb = 1, blend_d_rgb = 0, blend_s_a = 1, blend_d_a = 0;
+#define NCAPS 16
+static unsigned cap_id[NCAPS];
+static unsigned char cap_on[NCAPS];
+static int ncaps;
+static unsigned char *cap_slot(unsigned cap, int make)
+{
+    int i;
+    for (i = 0; i < ncaps; i++) if (cap_id[i] == cap) return &cap_on[i];
+    if (!make || ncaps >= NCAPS) return 0;
+    cap_id[ncaps] = cap;
+    cap_on[ncaps] = (cap == 0x0BD0u);                    /* GL_DITHER starts on */
+    return &cap_on[ncaps++];
+}
+static int cap_is_on(unsigned cap)
+{
+    unsigned char *c = cap_slot(cap, 0);
+    return c ? *c : cap == 0x0BD0u;
+}
+static void say(const char *m);
+static int envint(const char *n, int dflt);
+/* PAD_GL_QLOG=1: every distinct (query, value asked for, caller) once - which
+ * state a game reads back, and from where (a save/restore pair shows as the
+ * same caller asking twice). */
+static int qlog = -1;
+static void query_note(const char *fn, unsigned p, unsigned long from)
+{
+    static unsigned long seen_p[128], seen_from[128];
+    static int n;
+    int i;
+    char m[120];
+    if (qlog < 0) qlog = envint("PAD_GL_QLOG", 0);
+    if (!qlog) return;
+    for (i = 0; i < n; i++) if (seen_p[i] == p && seen_from[i] == from) return;
+    if (n >= 128) return;
+    seen_p[n] = p; seen_from[n] = from; n++;
+    snprintf(m, sizeof m, "[gl] query %s 0x%x from 0x%lx (frame %d, fbo %u)\n",
+             fn, p, from, frame_no, cur_fbo_shadow);
+    say(m);
+}
+static void query_untracked(const char *fn, unsigned p)
+{
+    static unsigned said[32];
+    static int n;
+    int i;
+    char m[96];
+    for (i = 0; i < n; i++) if (said[i] == p) return;
+    if (n >= 32) return;
+    said[n++] = p;
+    snprintf(m, sizeof m, "[gl] %s 0x%x: not tracked, answered 0 (PAD-1128)\n", fn, p);
+    say(m);
+}
 static void caller_note(const char *what, unsigned long ra, unsigned a,
                         unsigned b, unsigned c);
 
@@ -323,10 +401,12 @@ static void vp_say(const char *what, int x, int y, int w, int h)
 
 int glViewport(int x, int y, int w, int h)
 { const unsigned int op_ = PADGL_VIEWPORT; vp_say("viewport", x, y, w, h);
+  vp_box[0] = x; vp_box[1] = y; vp_box[2] = w; vp_box[3] = h; vp_set = 1;
   U((unsigned)x,(unsigned)y,(unsigned)w,(unsigned)h); return 0; }
 
 int glScissor(int x, int y, int w, int h)
 { const unsigned int op_ = PADGL_SCISSOR; vp_say("scissor ", x, y, w, h);
+  sc_box[0] = x; sc_box[1] = y; sc_box[2] = w; sc_box[3] = h; sc_set = 1;
   U((unsigned)x,(unsigned)y,(unsigned)w,(unsigned)h); return 0; }
 
 int glClearColor(float r, float g, float b, float a)
@@ -340,19 +420,30 @@ int glClear(unsigned int mask)
                   cur_fbo_shadow, cur_tex2d[cur_unit & 15u], mask);
   U(mask); return 0; }
 
-int glEnable(unsigned int cap)  { const unsigned int op_ = PADGL_ENABLE;  U(cap); return 0; }
-int glDisable(unsigned int cap) { const unsigned int op_ = PADGL_DISABLE; U(cap); return 0; }
-int glIsEnabled(unsigned int cap) { (void)cap; return 1; }
+int glEnable(unsigned int cap)
+{ const unsigned int op_ = PADGL_ENABLE; unsigned char *c = cap_slot(cap, 1);
+  if (c) *c = 1;
+  U(cap); return 0; }
+int glDisable(unsigned int cap)
+{ const unsigned int op_ = PADGL_DISABLE; unsigned char *c = cap_slot(cap, 1);
+  if (c) *c = 0;
+  U(cap); return 0; }
+int glIsEnabled(unsigned int cap)                                   /* PAD-1128 */
+{ query_note("glIsEnabled", cap, (unsigned long)__builtin_return_address(0));
+  return cap_is_on(cap); }
 
 int glBlendFunc(unsigned int s, unsigned int d)
-{ const unsigned int op_ = PADGL_BLENDFUNC; blend_src = (int)s; blend_dst = (int)d; U(s,d); return 0; }
+{ const unsigned int op_ = PADGL_BLENDFUNC; blend_src = (int)s; blend_dst = (int)d;
+  blend_s_rgb = blend_s_a = s; blend_d_rgb = blend_d_a = d; U(s,d); return 0; }
 
 int glBlendFuncSeparate(unsigned int s, unsigned int d, unsigned int as, unsigned int ad)
-{ const unsigned int op_ = PADGL_BLENDFUNCSEP; blend_src = (int)s; blend_dst = (int)d; U(s,d,as,ad); return 0; }
+{ const unsigned int op_ = PADGL_BLENDFUNCSEP; blend_src = (int)s; blend_dst = (int)d;
+  blend_s_rgb = s; blend_d_rgb = d; blend_s_a = as; blend_d_a = ad; U(s,d,as,ad); return 0; }
 
-int glBlendEquation(unsigned int m) { const unsigned int op_ = PADGL_BLENDEQ; U(m); return 0; }
+int glBlendEquation(unsigned int m)
+{ const unsigned int op_ = PADGL_BLENDEQ; blend_eq_rgb = blend_eq_a = m; U(m); return 0; }
 int glBlendEquationSeparate(unsigned int r, unsigned int a)
-{ const unsigned int op_ = PADGL_BLENDEQSEP; U(r,a); return 0; }
+{ const unsigned int op_ = PADGL_BLENDEQSEP; blend_eq_rgb = r; blend_eq_a = a; U(r,a); return 0; }
 
 /* ★ PAD-441: OBJECT NAMES GO ROUND, BUT NEVER ONTO ONE STILL IN USE.
  *
@@ -628,6 +719,7 @@ static unsigned array_buffer_bound;
 int glBindBuffer(unsigned int t, unsigned int id)
 { const unsigned int op_ = PADGL_BINDBUF;
   if (t == 0x8892 /* GL_ARRAY_BUFFER */) array_buffer_bound = id;
+  else if (t == 0x8893 /* GL_ELEMENT_ARRAY_BUFFER: VAO state */) elem_buf[cur_vao_shadow & 1023u] = id;
   U(t,id); return 0; }
 
 int glBufferData(unsigned int target, long size, const void *data, unsigned int usage)
@@ -653,7 +745,7 @@ int glGenVertexArrays(int n, unsigned int *ids)
 int glDeleteVertexArrays(int n, const unsigned int *ids)
 { int i; for (i = 0; i < n; i++) name_drop(&pool_vao, ids[i]); return 0; }
 int glBindVertexArray(unsigned int id)
-{ const unsigned int op_ = PADGL_BINDVAO; U(id); return 0; }
+{ const unsigned int op_ = PADGL_BINDVAO; cur_vao_shadow = id; U(id); return 0; }
 
 /* CLIENT-SIDE VERTEX ARRAYS ARE NOT SUPPORTED, AND USED TO BE SILENT ABOUT IT.
  *
@@ -727,7 +819,7 @@ int glCompileShader(unsigned int sh) { const unsigned int op_ = PADGL_COMPILESHA
 int glAttachShader(unsigned int p, unsigned int s) { const unsigned int op_ = PADGL_ATTACHSHADER; U(p,s); return 0; }
 int glDetachShader(unsigned int p, unsigned int s) { (void)p; (void)s; return 0; }
 int glLinkProgram(unsigned int p) { const unsigned int op_ = PADGL_LINKPROGRAM; U(p); return 0; }
-int glUseProgram(unsigned int p)  { const unsigned int op_ = PADGL_USEPROGRAM;  U(p); return 0; }
+int glUseProgram(unsigned int p)  { const unsigned int op_ = PADGL_USEPROGRAM; cur_prog_shadow = p; U(p); return 0; }
 int glDeleteShader(unsigned int s) { (void)s; return 0; }
 int glDeleteProgram(unsigned int p) { (void)p; return 0; }
 
@@ -805,7 +897,11 @@ int glGenFramebuffers(int n, unsigned int *ids)
 { int i; for (i = 0; i < n; i++) { const unsigned int op_ = PADGL_GENFBO;
     ids[i] = name_take(&pool_fbo); U(ids[i]); } return 0; }
 int glBindFramebuffer(unsigned int t, unsigned int id)
-{ const unsigned int op_ = PADGL_BINDFBO; cur_fbo_shadow = id; U(t,id); return 0; }
+{ const unsigned int op_ = PADGL_BINDFBO;
+  /* GL_FRAMEBUFFER binds both; GL_READ_FRAMEBUFFER (0x8CA8) only the read one */
+  if (t != 0x8CA8u) cur_fbo_shadow = id;
+  if (t != 0x8CA9u) read_fbo_shadow = id;
+  U(t,id); return 0; }
 int glFramebufferTexture2D(unsigned int t, unsigned int att, unsigned int tt,
                            unsigned int tex, int level)
 { const unsigned int op_ = PADGL_FBOTEX;
@@ -841,19 +937,57 @@ int glGetError(void) { return 0; }
 
 int glGetIntegerv(unsigned int p, int *v)
 {
+    query_note("glGetIntegerv", p, (unsigned long)__builtin_return_address(0));
     if (!v) return 0;
     switch (p) {
-    case 0x80CB: *v = blend_src; break;          /* GL_BLEND_SRC - per frame */
-    case 0x80CA: *v = blend_dst; break;          /* GL_BLEND_DST - per frame */
+    case 0x80CB: *v = (int)blend_s_a; break;     /* GL_BLEND_SRC_ALPHA - per frame */
+    case 0x80CA: *v = (int)blend_d_a; break;     /* GL_BLEND_DST_ALPHA - per frame */
     case 0x0D33: *v = 4096; break;
     case 0x8872: *v = 8;    break;
     case 0x8DFB: case 0x8DFC: *v = 256; break;
     case 0x8869: *v = 16;   break;
-    default: *v = 0; break;
+    /* PAD-1128: what the game set (see "STATE QUERIES" above) */
+    case 0x0BA2:                                  /* GL_VIEWPORT    */
+        v[0] = vp_set ? vp_box[0] : 0; v[1] = vp_set ? vp_box[1] : 0;
+        v[2] = vp_set ? vp_box[2] : fb_w; v[3] = vp_set ? vp_box[3] : fb_h; break;
+    case 0x0C10:                                  /* GL_SCISSOR_BOX */
+        v[0] = sc_set ? sc_box[0] : 0; v[1] = sc_set ? sc_box[1] : 0;
+        v[2] = sc_set ? sc_box[2] : fb_w; v[3] = sc_set ? sc_box[3] : fb_h; break;
+    case 0x8CA6: *v = (int)cur_fbo_shadow; break;  /* (DRAW_)FRAMEBUFFER_BINDING */
+    case 0x8CAA: *v = (int)read_fbo_shadow; break; /* READ_FRAMEBUFFER_BINDING   */
+    case 0x8B8D: *v = (int)cur_prog_shadow; break; /* CURRENT_PROGRAM            */
+    case 0x85B5: *v = (int)cur_vao_shadow; break;  /* VERTEX_ARRAY_BINDING       */
+    case 0x8894: *v = (int)array_buffer_bound; break;
+    case 0x8895: *v = (int)elem_buf[cur_vao_shadow & 1023u]; break;
+    case 0x84E0: *v = (int)(0x84C0u + cur_unit); break;      /* ACTIVE_TEXTURE */
+    case 0x8069: *v = (int)cur_tex2d[cur_unit & 15u]; break;  /* TEXTURE_BINDING_2D */
+    case 0x8009: *v = (int)blend_eq_rgb; break;    /* BLEND_EQUATION(_RGB)       */
+    case 0x883D: *v = (int)blend_eq_a; break;      /* BLEND_EQUATION_ALPHA       */
+    case 0x80C9: *v = (int)blend_s_rgb; break;     /* BLEND_SRC_RGB              */
+    case 0x80C8: *v = (int)blend_d_rgb; break;     /* BLEND_DST_RGB              */
+    case 0x0BE2: case 0x0B71: case 0x0C11: case 0x0B44: case 0x0B90:
+    case 0x0BD0: case 0x8037: case 0x809E: case 0x80A0: case 0x8C89:
+        *v = cap_is_on(p); break;                  /* a capability, as 0 / 1     */
+    default: *v = 0; query_untracked("glGetIntegerv", p); break;
     }
     return 0;
 }
-int glGetBooleanv(unsigned int p, unsigned char *v) { (void)p; if (v) *v = 0; return 0; }
+int glGetBooleanv(unsigned int p, unsigned char *v)
+{
+    int i[4] = { 0, 0, 0, 0 };
+    if (!v) return 0;
+    switch (p) {
+    case 0x0C23: v[0] = v[1] = v[2] = v[3] = 1; return 0;   /* COLOR_WRITEMASK */
+    case 0x0B72: v[0] = 1; return 0;                         /* DEPTH_WRITEMASK */
+    case 0x0BE2: case 0x0B71: case 0x0C11: case 0x0B44: case 0x0B90:
+    case 0x0BD0: case 0x8037: case 0x809E: case 0x80A0: case 0x8C89:
+        v[0] = (unsigned char)cap_is_on(p); return 0;
+    default:
+        glGetIntegerv(p, i);
+        v[0] = i[0] != 0;
+        return 0;
+    }
+}
 int glGetShaderiv(unsigned int s, unsigned int p, int *v) { (void)s;(void)p; if (v) *v = 1; return 0; }
 int glGetProgramiv(unsigned int s, unsigned int p, int *v) { (void)s;(void)p; if (v) *v = 1; return 0; }
 int glGetShaderInfoLog(unsigned int s, int m, int *l, char *b)

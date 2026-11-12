@@ -29,6 +29,7 @@ Usage:  nodebus.py <slave-path-out-file> <capture-file> [log-file]
 import os
 import struct
 import sys
+import time
 # NOTE: termios is imported lazily inside main() — it is Unix-only, but the pure
 # framing helpers (checksum / build_response) are imported by the test suite on
 # any platform.
@@ -40,7 +41,7 @@ def checksum(byts):
 
 
 def build_response(addr, body, resp_len, switch_bits=None, board=None,
-                   fw=None, lcd_sum=None):
+                   fw=None, lcd_sum=None, motor_status=None, rx_count=None):
     """Reply frame the game's NODEBUS_TransferMessage (game ELF @0xbfc28)
     expects for an addressed poll:
 
@@ -92,7 +93,18 @@ def build_response(addr, body, resp_len, switch_bits=None, board=None,
           clears and switch nodes start getting cmd 0x11 polls.  `board` is
           {"type", "part"} for this node (None -> zero part -> the game's
           "unknown board / type 1" path, the pre-fix behaviour).
-      * cmd 0xff  GetStatus (8 payload): all-zero = present, no faults.
+      * cmd 0xff  GetStatus (8 payload): word A (payload[0..3], LE32) is the
+          number of addressed frames this board has received, `rx_count`
+          (None = 0, the old reply).  NODEBUS_GetStatus (@0xd2880 GBLE)
+          subtracts the word A it saw last time and compares the difference
+          with its own count of frames sent to the node since then
+          (DoTransferMessage @0xcd038 adds 1 per addressed frame, the 0xff
+          poll included); a mismatch sets bit 31 of word B, which the control
+          thread (@0x82004, mask 0x8000217f) treats as lost frames and
+          re-initialises the board.  Answering 0 did that to EVERY board on
+          EVERY poll (~0.8 s), and on Ghostbusters each re-init of node 8
+          restarted the Slimer motor's homing (PAD-1160; Spike 2 met the same
+          rule as PAD-249).  The rest of the payload: zero = no faults.
       * cmd 0xf2 sub 0x30  LCDInsertInfo (12 payload) — the LCD node's insert
           query.  The boot updater (node_bus_update_lcd_insert_data @0x81000
           GBLE) compares the u32 at payload[7..10] (lcdinfo_t+8) against
@@ -128,6 +140,8 @@ def build_response(addr, body, resp_len, switch_bits=None, board=None,
         for i in range(8):
             p[i] = sw[i] if i < len(sw) else 0xFF
         # p[8..9] aux "input mask" — ignored by the runtime path, keep 0.
+    elif cmd == 0x52 and plen >= 4 and motor_status is not None:
+        p[:4] = motor_status
     elif (cmd == 0xF2 and plen >= 11 and len(body) > 1
             and body[1] == 0x30):           # LCDInsertInfo (see the docstring)
         if lcd_sum is not None:
@@ -141,7 +155,9 @@ def build_response(addr, body, resp_len, switch_bits=None, board=None,
             p[0:4] = struct.pack("<I", board["part"] & 0xFFFFFFFF)
         # page 1, or an unknown node: zero payload (the game reads part 0 as an
         # unknown board / type 1 — exactly the pre-topology behaviour).
-    # cmd 0xff (status) and others: zero payload = present, no faults
+    elif cmd == 0xFF and plen >= 4 and rx_count is not None:
+        p[0:4] = struct.pack("<I", rx_count & 0xFFFFFFFF)
+    # cmd 0xff's other words, and other commands: zero = present, no faults
 
     chk = checksum(p)                       # byte plen: payload sums to 0
     status = 0x00                           # byte plen+1: NAK bits clear
@@ -222,6 +238,108 @@ def read_injected_switches(path):
         if closed:
             out[node] = bytes(sw)
     return out
+
+
+def encoder_lamp_outputs(text):
+    """Optional adapter wiring: ``node,motor:node,LED;...``. A table can
+    consume a motor count through an unused mono state channel without
+    changing the game's replies or baking a title into the protocol."""
+    out = {}
+    for entry in (text or "").split(";"):
+        if not entry:
+            continue
+        motor, led = entry.split(":")
+        node, index = (int(n) for n in motor.split(","))
+        ln, li = (int(n) for n in led.split(","))
+        if not (0 <= node < 16 and 0 <= index < 256 and 0 <= ln < 16 and 0 <= li < 64):
+            raise ValueError("encoder lamp output outside the Spike 1 state slots")
+        out[node, index] = ln, li
+    return out
+
+
+def motor_lamp_publisher(hw, outputs):
+    def publish(node, motor, position):
+        led = outputs.get((node, motor))
+        if hw is not None and led is not None:
+            hw.lamp_level(*led, max(0, min(255, position)))
+    return publish
+
+
+class EncoderMotors:
+    """The node's encoder counts, as in Spike 2 hwshim's PAD-249 model.
+
+    Cmd 51 configures home/encoder inputs, 53 homes, 55 moves to a signed
+    position and 52 reads it. A move takes 600 ms, hwshim's default
+    (PAD_MOTOR_MS). Only configured encoder motors answer; end-stop motors keep
+    their existing replies. The injected clock makes travel testable.
+    """
+
+    def __init__(self, clock=time.monotonic, report=lambda s: None, position=lambda n, m, p: None):
+        self.clock, self.report = clock, report
+        self.position = position
+        self.motors = {}
+
+    def tick(self, m):
+        if m["moving"]:
+            fraction = min(1.0, max(0.0, (self.clock() - m["start"]) / .6))
+            m["pos"] = int(m["from"] + (m["to"] - m["from"]) * fraction)
+            if fraction >= 1:
+                m["moving"] = False
+                if m["homing"]:
+                    m["homed"] = True
+        return m["pos"]
+
+    def note(self, node, body):
+        if len(body) < 3:
+            return
+        cmd, data = body[0], body[1:-1]    # WireParser has checked the checksum
+        key = (node, data[0])
+        if cmd == 0x51 and len(data) >= 6:
+            if not ((data[4] & 0x40) or (data[5] & 0x40)):
+                return
+            if key not in self.motors:
+                self.motors[key] = {"home": (data[1] & 63) if data[1] & 0x40 else None,
+                                    "pos": 0, "homed": False, "moving": False,
+                                    "homing": False, "start": 0, "from": 0, "to": 0}
+                self.report("encoder motor %d,%d configured" % key)
+        elif cmd in (0x53, 0x55) and key in self.motors:
+            if cmd == 0x55 and len(data) < 3:
+                return
+            m = self.motors[key]
+            self.tick(m)
+            homing = cmd == 0x53
+            target = 0 if homing else struct.unpack("<h", data[1:3])[0]
+            if m["moving"] and m["to"] == target and m["homing"] == homing:
+                return
+            if not homing and not m["moving"] and m["pos"] == target:
+                return
+            m.update(start=self.clock(), moving=True, homing=homing,
+                     **{"from": m["pos"], "to": target})
+            if homing:
+                m["homed"] = False
+            self.report("encoder motor %d,%d -> %d (cmd %02x)" % (node, data[0], target, cmd))
+
+    def status(self, node, motor):
+        m = self.motors.get((node, motor))
+        if m is None:
+            return None
+        pos = self.tick(m)
+        self.position(node, motor, pos)
+        flags = 1 if m["moving"] else (8 if m["homed"] else 0)
+        return struct.pack("<hH", pos, flags)
+
+    def switches(self, node, bits):
+        out = bytearray(bits if bits is not None else SW_IDLE)
+        for (nd, _), m in self.motors.items():
+            if nd != node or m["home"] is None:
+                continue
+            bit = m["home"]
+            pos = self.tick(m)
+            if m["homed"] and not m["moving"] and pos == 0:
+                out[bit >> 3] &= ~(1 << (bit & 7))
+            else:
+                out[bit >> 3] |= 1 << (bit & 7)
+        return bytes(out)
 
 
 class WireParser:
@@ -656,8 +774,8 @@ def main():
         # scan forever, and the control loop's OTHER duties (the CPU-SPI
         # dedicated-switch read, coil output drain) never run: coins/flippers/
         # interlock go dead and the trough-eject coil can never fire.
-        for n in sorted(set(injected) | set(last_reported)):
-            cur = injected.get(n, SW_IDLE)
+        for n in sorted(set(injected) | set(last_reported) | {nd for nd, _ in motors.motors}):
+            cur = motors.switches(n, injected.get(n, SW_IDLE))
             if cur != last_reported.get(n) and sw_attempts.get(n, 0) < _SW_ATTEMPT_CAP:
                 sw_attempts[n] = sw_attempts.get(n, 0) + 1
                 return n
@@ -679,6 +797,16 @@ def main():
         elif sub == 0x22:
             blocked.clear() if node == 0 else blocked.discard(node)
 
+    try:
+        outputs = encoder_lamp_outputs(os.environ.get("S1_ENCODER_LAMPS"))
+    except ValueError as exc:
+        logline("encoder lamp wiring ignored: %s" % exc)
+        outputs = {}
+    motors = EncoderMotors(report=logline, position=motor_lamp_publisher(hw, outputs))
+    # addressed frames each board has received, for cmd 0xff's word A (see
+    # build_response): counted before the reply so the poll counts itself,
+    # as the game's own count does
+    rx_count = {}
     parser = WireParser()
     try:
         while True:
@@ -736,17 +864,21 @@ def main():
                     continue
                 _, addr, body, resp_len = ev
                 cmd = body[0] if body else None
+                node = addr & 0x7F
+                rx_count[node] = (rx_count.get(node, 0) + 1) & 0xFFFFFFFF
+                motors.note(node, body)
                 if resp_len:
-                    node = addr & 0x7F
-                    sb = injected.get(node) if cmd == 0x11 else None
+                    sb = motors.switches(node, injected.get(node)) if cmd == 0x11 else None
+                    ms = motors.status(node, body[1]) if cmd == 0x52 and len(body) >= 3 else None
                     resp = build_response(addr, body, resp_len, switch_bits=sb,
                                           board=topology.get(node), fw=fw_ver,
-                                          lcd_sum=lcd_sum)
+                                          lcd_sum=lcd_sum, motor_status=ms,
+                                          rx_count=rx_count[node] if cmd == 0xFF else None)
                     if cmd == 0x11:
                         # the game actually READ this node's switches: record what
                         # we delivered (so poll_next stops offering it as changed)
                         # and clear its spin-guard counter.
-                        last_reported[node] = injected.get(node, SW_IDLE)
+                        last_reported[node] = sb
                         sw_attempts[node] = 0
                         if hw:
                             hw.set_switches(node, closed_indexes(last_reported[node]))

@@ -337,6 +337,32 @@ def display_setting():
         return None
 
 
+def carry_lcd_layout(kit, conf=None, mons=None):
+    """PAD-1131: a Visual Pinball layout saved before the display setting
+    existed (PAD-811 came a day after the layouts) left only the kit's LCD
+    rectangle, so its run MOVED the framed WSLg window over the second
+    screen from this side, and the title bar and edges stayed visible ("the
+    windows border is visible ... when it goes full screen"). With the
+    display setting free, that rectangle becomes the setting the layout
+    writes today (full screen, borderless, on the monitor it fills), once:
+    the kit is marked so a later choice of "free" on the Emulate tab holds.
+    Returns the setting written, or None."""
+    lcd = kit.get("lcd") or {}
+    if kit.get("display_carried") or not all(k in lcd for k in ("x", "y", "w", "h")):
+        return None
+    kit["display_carried"] = True
+    import padisplay
+    conf = conf or padisplay.CONF
+    if padisplay.load(conf).get("mode", "free") != "free":
+        return None
+    mons = mons or padisplay.monitors()
+    s = padisplay.for_rect([lcd["x"], lcd["y"], lcd["w"], lcd["h"]], mons)
+    if s["mode"] == "free":
+        return None
+    padisplay.save(s, conf, mons)
+    return s
+
+
 def window_rect(hwnd):
     import ctypes
     r = (ctypes.c_long * 4)()
@@ -397,9 +423,11 @@ class VpxMap:
 
     def __init__(self, title=None):
         self.title = title
+        self.game = title                   # variants may share one native game
         self.switch_rewrite = {}            # old table number -> Spike 2 id
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
+        self.raw_lamp_rewrite = {}          # legacy number -> one LED read as its raw level
         self.rgb_groups = set()             # numbers whose LEDs are an insert's R, G, B
         self.rgb_order = {}                 # number -> "BGR" etc. when not listed R, G, B (PAD-1097)
         self.fakes = {}                     # name -> dict (switch_fakes)
@@ -429,6 +457,8 @@ class VpxMap:
 
     def load(self, path):
         m = json.load(open(path, encoding="utf-8"))
+        game = m.get("game")
+        self.game = game if isinstance(game, str) and game else self.title
         self.platform = (m.get("platform") or "spike2").lower()
         g = m.get("game_on") or {}
         self.game_on = (int(g["number"]), [tuple(c) for c in g["coils"]]) if g else None
@@ -438,6 +468,16 @@ class VpxMap:
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
         self.sol_max = int(m.get("solenoid_max", 68))
+        self.raw_lamp_rewrite = {}
+        for k, v in m.get("raw_lamp_rewrite", {}).items():
+            if k == "_":
+                continue
+            # a legacy number (below 1000: 1000+ is already every LED's own
+            # number) -> one [node, index]; anything else would be set twice
+            # a poll and report a change every frame
+            if not (0 < int(k) < 1000 and isinstance(v, list) and len(v) == 2):
+                raise ValueError("raw_lamp_rewrite %r: want a number 1-999 -> [node, index], got %r" % (k, v))
+            self.raw_lamp_rewrite[int(k)] = (int(v[0]), int(v[1]))
         for k, v in m.get("solenoids", {}).items():
             if k != "_":
                 self.solenoids[int(k)] = tuple(v["coil"])
@@ -1455,6 +1495,10 @@ class Bridge:
                len(self.map.solenoids), len(self.map.lamp_groups)))
 
     @property
+    def native_title(self):
+        return getattr(self.map, "game", None) or self.title
+
+    @property
     def rigmod(self):
         """The rig module of a platform whose run publishes one block of
         slots (PAD-943, PAD-952): s1bridge for Spike 1, spkbridge for
@@ -1525,13 +1569,14 @@ class Bridge:
         thread attaches when the game is up, and the table plays from then
         on - switches before that are kept and handed over at attach (the
         table's trough, set once at its Init), Visual Pinball never waits."""
-        self.rig = self.rigmod.Rig(self.title) if self.slots else Rig(self.title)
+        self.rig = self.rigmod.Rig(self.native_title) if self.slots else Rig(self.native_title)
         self.pipe = None
         self.launch = None
         self.attached = False
         self.boot = None
         self.ready_t = 0.0
         self.start_t = time.monotonic()
+        self._start_retried = False
         self.front_done = False            # the LCD window's first grab is undone once, never again
         self.b2s_handed = set()            # backglass windows whose first grab was undone (PAD-893)
         self.front_tries = {}
@@ -1554,6 +1599,7 @@ class Bridge:
                     % (padlaunch.PLATFORM_NAMES.get(self.map.platform, self.map.platform),
                        self.title or "this title", padlaunch.card_places(self.title, self.map.platform),
                        self.title))
+            self._carry_lcd_layout()
             self.launch = padlaunch.launch_for(self.map.platform, self.title, card)
             self._loading_start()
             try:
@@ -1747,7 +1793,7 @@ class Bridge:
         """The run's switch table (the rig writes it a little after the game
         is up, so a run this bridge started may be read again) and the
         flipper buttons' coils for a run without the rule plane."""
-        self.sw_ids = self.rig.switch_ids(self.title)
+        self.sw_ids = self.rig.switch_ids(self.native_title)
         if self.slots:
             # PAD-943: no rule plane on this rig; a held flipper button is a
             # held flipper coil, and the map's game_on is always armed (the
@@ -1781,23 +1827,56 @@ class Bridge:
         if self.launch is None:
             return
         if self.rig is None:
-            rec = (self.rigmod.board_record(self.title) if self.slots
+            rec = (self.rigmod.board_record(self.native_title) if self.slots
                    else Rig.board_slot(self.launch.slot))
             if rec:
-                self.rig = (self.rigmod.Rig(self.title, record=rec) if self.slots
-                            else Rig(self.title, record=rec))
+                self.rig = (self.rigmod.Rig(self.native_title, record=rec) if self.slots
+                            else Rig(self.native_title, record=rec))
                 log("rig: %s -> %s" % (self.rig.how, self.rig.dump))
         if self.rig is not None:
             data = read_block(self.rig.led_path(), READ_N)
             if self._rig_up(data):
                 self._attach(data)
                 return
-        if not self.launch.alive() and self.rig is None:
+        if not self.launch.alive():
+            # A board record can appear before the game is ready. It does
+            # not make an exited launcher alive: clean the run we owned,
+            # including its slot, before reporting failure or trying again.
+            failed = self.launch
+            logfile = failed.logfile
+            self.launch, self.rig = None, None
+            failed.stop()
+            retry_titles = padlaunch.kit_load().get("startup_retry_titles", [])
+            if (self.running and isinstance(retry_titles, list) and self.title in retry_titles
+                    and not self._start_retried):
+                self._start_retried = True
+                log("retrying %s once after its startup process exited" % self.title)
+                self.start_t = time.monotonic()
+                self.boot, self.ready_t = None, 0.0
+                self.front_done, self.front_tries = False, {}
+                self.lcd_placed = False
+                self.lcd_tries = self.lcd_stable = 0
+                retry = padlaunch.launch_for(self.map.platform, self.title, failed.card)
+                self.launch = retry
+                try:
+                    slot = retry.start()
+                    if not self.running:
+                        retry.stop()
+                        if self.launch is retry:
+                            self.launch = None
+                    else:
+                        log("retry started %s on slot %d" % (self.title, slot))
+                    return
+                except Exception as exc:
+                    retry.stop()
+                    if self.launch is retry:
+                        self.launch = None
+                    self._loading_end("failed Startup retry failed: %s" % exc)
+                    return
             log("the run started for %s ended before it came up (see %s)"
-                % (self.title, self.launch.logfile))
+                % (self.title, logfile))
             self._loading_end("failed The emulator stopped before the game came up. Its log: %s"
-                              % self.launch.logfile)
-            self.launch = None
+                              % logfile)
         elif time.monotonic() - self.start_t > self.START_TIMEOUT_S:
             log("the run started for %s is not up after %d s; giving up on it"
                 % (self.title, self.START_TIMEOUT_S))
@@ -2075,6 +2154,23 @@ class Bridge:
             log("window placement failed: %s" % exc)
             self.lcd_placed = True
 
+    def _carry_lcd_layout(self):
+        """carry_lcd_layout for this run, before its window opens: the
+        renderer then maps it borderless and full screen itself."""
+        if sys.platform != "win32":
+            return
+        try:
+            kit = padlaunch.kit_load()
+            if kit.get("display_carried"):
+                return
+            s = carry_lcd_layout(kit)
+            padlaunch.kit_save(kit)
+            if s:
+                log("lcd: the layout's screen is now the display setting (%s on monitor %s, "
+                    "borderless)" % (s["mode"], s["monitor"]))
+        except Exception as exc:                            # noqa: BLE001
+            log("lcd: layout not carried into the display setting: %s" % exc)
+
     def _place_player(self):
         """Visual Pinball's own playfield window, where the kit's `player`
         says (padvpx player): borderless in windowed mode, so the user
@@ -2089,6 +2185,11 @@ class Bridge:
         if not hwnd:
             return
         try:
+            import ctypes
+            # A minimized player has an icon rectangle (often at -32000),
+            # not its playfield's proportions. Wait until it is restored.
+            if ctypes.windll.user32.IsIconic(ctypes.c_void_p(hwnd)):
+                return
             dpi_aware()
             # THE TABLE'S OWN PROPORTIONS (PAD-811): Visual Pinball scales its
             # picture to the window, so a window forced to the kit's 1440x2160
@@ -2192,7 +2293,7 @@ class Bridge:
         try:
             import ctypes
             u = ctypes.windll.user32
-            if not u.IsWindow(ctypes.c_void_p(hwnd)):
+            if not u.IsWindow(ctypes.c_void_p(hwnd)) or u.IsIconic(ctypes.c_void_p(hwnd)):
                 return
             if u.IsZoomed(ctypes.c_void_p(hwnd)):
                 self._fill_player(hwnd)
@@ -2374,6 +2475,10 @@ class Bridge:
         now = time.monotonic()
         with self.lock:
             self.mrg = switches
+            # Some ROM tables read Lamp(n) as a mechanical position or raw
+            # brightness, rather than the normal 0/1 or RGB insert value.
+            for n, (node, idx) in self.map.raw_lamp_rewrite.items():
+                self._lamp_set(n, rm.lamp_level(lamps, node, idx))
             for n, leds in self.map.lamp_groups.items():
                 levels = [rm.lamp_level(lamps, nd, ix) for nd, ix in leds]
                 if max(levels) < LAMP_ON:
@@ -2429,7 +2534,10 @@ class Bridge:
         return 0
 
     def _poll_lamps(self, data):
-        # mapped groups first, then every LED any table might name directly
+        # raw channels (a mechanism's position, a mono level), then the
+        # mapped groups, then every LED any table might name directly
+        for n, (node, idx) in self.map.raw_lamp_rewrite.items():
+            self._lamp_set(n, self._led_level(data, node, idx))
         for n, leds in self.map.lamp_groups.items():
             levels = [self._led_level(data, nd, ix) for nd, ix in leds]
             if max(levels) < LAMP_ON:
@@ -2608,8 +2716,11 @@ class Bridge:
         return out or None
 
     def lamp(self, n):
+        n = int(n or 0)
         with self.lock:
-            return bool(self.lamp_state.get(int(n or 0), 0))
+            if n in self.map.raw_lamp_rewrite:     # the level itself, 0..255
+                return int(self.lamp_state.get(n, 0))
+            return bool(self.lamp_state.get(n, 0))
 
     def solenoid(self, n):
         with self.lock:

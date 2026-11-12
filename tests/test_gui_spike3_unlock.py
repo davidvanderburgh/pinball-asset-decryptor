@@ -70,14 +70,21 @@ def test_panel_hidden_for_non_spike3(tmp_path, monkeypatch):
 
 
 # --- where padkeys.json is written -----------------------------------------
-def test_padkeys_path_prefers_project_folder(tmp_path):
+def test_padkeys_path_is_the_users_own_whatever_the_project(tmp_path, monkeypatch):
+    """PAD-1090: the key kept in one project folder was lost to every other
+    project and tab ("why don't i have the OTP key in my local?"); it is the
+    user's, kept once, where every Spike 3 tab looks (webui/spike3_key.py)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     with web_app(tmp_path, mfr="stern") as w:
         svc = w.window.service("extract")
         proj = tmp_path / "proj"
         proj.mkdir()
         w.run(lambda: svc.extract_output_var.set(str(proj)))
         got = w.run(svc._spike3_padkeys_path)
-        assert got == os.path.join(str(proj), "padkeys.json")
+        assert got == os.path.join(str(home), ".pad", "spike3_padkeys.json")
 
 
 def test_padkeys_path_falls_back_outside_readonly_image_dir(tmp_path):

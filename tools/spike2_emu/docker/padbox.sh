@@ -347,13 +347,18 @@ BOX_FIFO=/pad/rootfs/dump/audio.fifo
 RUN_ARGS+=(-e "PAD_AUDIO_SINK=relay")
 # THE VOLUME AND MUTE GO IN WITH IT (PAD-957). ffplay cannot change its level
 # while it plays, so the box's relay scales the sound instead, by a copy of the
-# Emulate tab's audio_ctl.json that ctl_pusher() below keeps up to date. A
-# copy and not a mount: a bind mount of a file is lost the moment the app
-# replaces it (which it does on every slider move), and whether a change in a
-# mounted folder shows up inside the box at once is up to the container
-# engine. Under its own name, so the box's playfield window (which reads
-# PAD_AUDIO_CTL) is left as it was. host_player hands its path to the relay.
-BOX_CTL=/tmp/pad_audio_ctl.json
+# Emulate tab's audio_ctl.json that ctl_sync() below keeps up to date. A copy
+# and not a mount: a bind mount of a file is lost the moment the app replaces
+# it (which it does on every slider move), and whether a change in a mounted
+# folder shows up inside the box at once is up to the container engine.
+# THE BOX'S PLAYFIELD WINDOW SHARES THE COPY (PAD-1129). It used to be started
+# with no PAD_AUDIO_CTL at all, so its page left out Volume, Mute and Restart
+# game. It now gets the copy's path, and ctl_sync carries the folder both
+# ways: the tab's volume and clip names in, the window's volume, Restart game
+# request and clip / sound records out (docker/boxctl.py).
+BOX_CTL_DIR=/tmp/pad_ctl
+BOX_CTL=$BOX_CTL_DIR/audio_ctl.json
+[ -n "${PAD_AUDIO_CTL:-}" ] && RUN_ARGS+=(-e "PAD_AUDIO_CTL=$BOX_CTL")
 
 # A card path on the HOST has to become one inside the box. Only the directory
 # is mounted, so this is a prefix swap and not a guess.
@@ -463,13 +468,6 @@ ffplay_channel_args() {
         echo "-ac $1"
     fi
 }
-# WHAT REACHED THE MAC (PAD-1109). The box's relay says what it sent, but it
-# reads at the game's own pace whatever happens downstream, so it read just as
-# healthy while Colima swallowed the stream and ffplay got 310 KB in all. This
-# stage passes the stream through unchanged and, every PAD_METER_S (30) s,
-# asks dd for its own count (SIGINFO on a Mac, SIGUSR1 elsewhere) and says it:
-# the bytes ffplay was actually handed. stdin is named for dd, because a
-# background command in a script otherwise reads /dev/null.
 # THE CUSHION, ON THE MAC (PAD-1109). The box's stream arrives through docker
 # exec from a container Colima can starve (its machine has 2 CPUs unless told
 # otherwise; the renderer drew 14 fps there), in lumps, and on a Mac a player
@@ -486,10 +484,21 @@ mac_pace() {
         cat
     fi
 }
+# WHAT REACHED THE MAC (PAD-1109). The box's relay says what it sent, but it
+# reads at the game's own pace whatever happens downstream, so it read just as
+# healthy while Colima swallowed the stream and ffplay got 310 KB in all. This
+# stage passes the stream through unchanged and, every PAD_METER_S (30) s,
+# asks dd for its own count (SIGINFO on a Mac, SIGUSR1 elsewhere) and says it:
+# the bytes ffplay was actually handed. stdin is named for dd, because a
+# background command in a script otherwise reads /dev/null.
+# ibs/obs, never bs= (PAD-1162): with bs= alone the Mac's dd takes POSIX's
+# unbuffered path, which writes each read and loops back BEFORE its SIGINFO
+# check, so it never said its count until the end. obs=512 keeps the pass
+# prompt: at most 511 bytes (under 3 ms of sound) wait for the next read.
 mac_meter() {
     local f p sig i line
     f=$(mktemp "${TMPDIR:-/tmp}/padmeter.XXXXXX") || { cat; return; }
-    dd bs=65536 <&0 2>"$f" &
+    dd ibs=65536 obs=512 <&0 2>"$f" &
     p=$!
     sig=USR1; [ "$(uname -s)" = Darwin ] && sig=INFO
     while kill -0 "$p" 2>/dev/null; do
@@ -648,26 +657,69 @@ host_player() {
     done
 }
 
-# THE VOLUME FILE, copied into the box whenever it changes (PAD-957). Read
-# every quarter second on the Mac and sent only when different, so the
-# slider's every move reaches the relay inside half a second and an idle
-# knob costs a `cat`. As root, so every copy has the same owner whoever the
-# box runs as, and written beside and moved into place, so the relay never
-# reads half of one. Until the box is up the copy fails and is tried again;
-# no file on the Mac means full volume, which is what the relay plays
-# without one.
-ctl_pusher() {
-    [ "${PAD_AUDIO:-1}" = 0 ] && return 0
-    [ -n "${PAD_AUDIO_CTL:-}" ] || return 0
-    local last="" cur
+# THE CONTROL FOLDER, kept level with the box's (PAD-957, PAD-1129). Three
+# parts in one pipeline, through the docker exec every other step rides:
+#   ctl_feed   the Mac's volume file and the run's clip names, read every
+#              quarter second and sent only when different, so the tab's
+#              slider reaches the relay inside half a second and an idle knob
+#              costs a `cat`. Base64, so a file is one line whatever it holds.
+#   boxctl.py  in the box, as root: writes them into place beside the window
+#              and says what the window did (see its docstring).
+#   ctl_apply  that, here: the window's Volume / Mute into the tab's file (the
+#              tab's slider follows it, as on Windows), its Restart game as the
+#              tab's request file, its clip and sound records appended to the
+#              tab's. The box's rig is always slot 0; the Mac's files are named
+#              for the app's own slot.
+# No volume file on the Mac means full volume, which is what the relay plays
+# without one. Until the box is up there is nothing to talk to and it is tried
+# again; a pipeline that ends with the box up is started again.
+ctl_feed() {
+    local names last_c="" last_n="" cur beat=0
+    names="$1/clip_names_$2.json"
     while :; do
         cur=$(cat "$PAD_AUDIO_CTL" 2>/dev/null) || cur=""
-        if [ -n "$cur" ] && [ "$cur" != "$last" ]; then
-            printf '%s\n' "$cur" | docker exec -i -u 0 "$NAME" sh -c \
-                "cat > $BOX_CTL.tmp && mv -f $BOX_CTL.tmp $BOX_CTL" \
-                >/dev/null 2>&1 && last=$cur
+        if [ -n "$cur" ] && [ "$cur" != "$last_c" ]; then
+            printf 'PUT ctl %s\n' "$(printf '%s\n' "$cur" | base64 | tr -d '\n')" || return 0
+            last_c=$cur
         fi
+        cur=$(cat "$names" 2>/dev/null) || cur=""
+        if [ -n "$cur" ] && [ "$cur" != "$last_n" ]; then
+            printf 'PUT names %s\n' "$(printf '%s\n' "$cur" | base64 | tr -d '\n')" || return 0
+            last_n=$cur
+        fi
+        # a word now and then, so a box that has gone ends this too
+        beat=$(( beat + 1 ))
+        if [ "$beat" -ge 8 ]; then beat=0; echo NOP || return 0; fi
         sleep 0.25
+    done
+}
+ctl_apply() {
+    local dir=$1 slot=$2 line kind rest
+    while IFS= read -r line; do
+        kind=${line%% *}; rest=${line#* }
+        case $kind in
+            CTL) printf '%s\n' "$rest" > "$PAD_AUDIO_CTL.box.tmp" &&
+                     mv -f "$PAD_AUDIO_CTL.box.tmp" "$PAD_AUDIO_CTL" ;;
+            REQ) printf '%s\n' "$slot" > "$dir/restart_game_$slot.req"
+                 echo "[box] the playfield window asked for Restart game" >&2 ;;
+            ADD) case ${rest%% *} in
+                     clips)  printf '%s\n' "${rest#* }" >> "$dir/clips_seen_$slot.jsonl" ;;
+                     sounds) printf '%s\n' "${rest#* }" >> "$dir/sounds_seen_$slot.jsonl" ;;
+                 esac ;;
+        esac
+    done
+}
+ctl_sync() {
+    [ -n "${PAD_AUDIO_CTL:-}" ] || return 0
+    local dir slot
+    dir=$(dirname "$PAD_AUDIO_CTL"); slot=${PAD_SLOT:-0}
+    while :; do
+        if box_up; then
+            ctl_feed "$dir" "$slot" |
+                docker exec -i -u 0 "$NAME" python3 /pad/rig/docker/boxctl.py "$BOX_CTL_DIR" |
+                ctl_apply "$dir" "$slot"
+        fi
+        sleep 1
     done
 }
 
@@ -699,7 +751,7 @@ echo "[box] on macOS: open 'vnc://:$PAD_VNC_PASSWD@localhost:$PORT'   (Screen Sh
 # NOT exec'd any more: the run has a Mac-side child now, and something has to
 # be here afterwards to take it down when the box exits.
 host_player & HOSTAUD=$!
-ctl_pusher & HOSTCTL=$!
+ctl_sync & HOSTCTL=$!
 docker run "${RUN_ARGS[@]}" "$IMAGE" "$@"
 RC=$?
 kill "$HOSTAUD" "$HOSTCTL" 2>/dev/null

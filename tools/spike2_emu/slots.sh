@@ -60,7 +60,16 @@ find_root() {
     done
     return 1
 }
+# SPIKE 3 SAVES (PAD-1147) are the same shape in the Spike 3 rig's own
+# directory: used when this rig slot runs a Spike 3 game (the playfield
+# window), or when asked for (PAD_S3_SAVES_LIST=1: the Emulate tab on a
+# Spike 3 card).
+S3STATE=$(dirname "$0")/../spike3_emu/s3state.sh
+if [ "${PAD_S3_SAVES_LIST:-0}" = 1 ] ||    { [ -n "${PAD_SLOT:-}" ] && bash "$S3STATE" running "$PAD_SLOT" 2>/dev/null; }; then
+    SAVES=$(bash "$S3STATE" root); mkdir -p "$SAVES"
+else
 SAVES=$(find_root) || { echo "slots: no saves directory found"; exit 1; }
+fi
 
 # A name component is a FILENAME under $SAVES, never a path - it reaches
 # rm -rf.

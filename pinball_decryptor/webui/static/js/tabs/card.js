@@ -46,6 +46,9 @@ function WhatCard({ shell, s }) {
   const direct = tabs.filter((t) => !needOf(t));
   const folder = tabs.filter((t) => needOf(t) === "project");
   const needs = tabs.filter((t) => needOf(t) === "extract");
+  // PAD-1090: a Spike 3 card's tabs wait on the user's own OTP key
+  const keyed = tabs.filter((t) => needOf(t) === "spike3key");
+  const keyLocked = keyed.some((t) => tabLock(t, ps, shell.spike3_key));
   const anyLocked = folder.concat(needs).some((t) => tabLock(t, ps));
   const project = ps ? html`<${Chip} kind="acc" title=${ps.folder}>${ps.name}<//>` : null;
   const d = (s.project && s.project.details) || {};
@@ -67,6 +70,10 @@ function WhatCard({ shell, s }) {
     ${needs.length ? html`<div class="stack c-sec">
         <span class="lbl">Needs the card extracted into a project folder</span>
         ${needs.map((t) => html`<${TabRow} t=${t} lock=${tabLock(t, ps)} />`)}
+      </div>` : null}
+    ${keyed.length ? html`<div class="stack c-sec">
+        <span class="lbl">${keyLocked ? "Needs your Spike 3 OTP key (open one of these tabs to give it to PAD)" : "Uses your Spike 3 OTP key (PAD has it)"}</span>
+        ${keyed.map((t) => html`<${TabRow} t=${t} lock=${tabLock(t, ps, shell.spike3_key)} />`)}
       </div>` : null}
   <//>`;
 }

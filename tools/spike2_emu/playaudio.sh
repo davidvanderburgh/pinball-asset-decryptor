@@ -192,7 +192,7 @@ reap_port_relay() {
 # THE VOLUME IS APPLIED BY THE RELAY (PAD-957): the Mac's player is ffplay,
 # which cannot be given a new level while it plays, so padrelay.py scales the
 # samples by the copy of the Emulate tab's audio_ctl.json that padbox.sh keeps
-# in the box (/tmp/pad_audio_ctl.json, handed to `padrelay.py --pipe`).
+# in the box (/tmp/pad_ctl/audio_ctl.json, handed to `padrelay.py --pipe`).
 # NOT OVER A PORT ANY MORE (PAD-1109). The relay listened here and padbox.sh
 # published the port; under Colima, Lima's port forwarder took the whole
 # stream and the Mac's ffplay got its first 310 KB and then nothing. The Mac

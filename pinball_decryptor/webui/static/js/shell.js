@@ -9,6 +9,7 @@ import { call, onCallError } from "./core/rpc.js";
 import { DialogHost, openDialog } from "./core/dialogs.js";
 import { tabLock } from "./core/locks.js";
 import { setLanguage } from "./core/i18n.js";
+import { Spike3KeyGuide } from "./core/spike3_guide.js";
 // The app-wide windows (Tips, Preview features, disk space, the Project
 // menu's windows) register themselves on import; ShellxOverlays draws the
 // progress windows the shellx service drives (docs/plans/web_ui_tabs/shellx.md).
@@ -456,7 +457,7 @@ function Rail({ shell }) {
       ${items.map((t) => {
         // PAD-224: a tab with nothing to work on yet is greyed out but still
         // opens, under a banner that says why
-        const lock = tabLock(t, shell.project_state);
+        const lock = tabLock(t, shell.project_state, shell.spike3_key);
         return html`<button type="button" class=${cx("item", shell.tab === t.ns && "on", lock && "locked")}
           aria-current=${shell.tab === t.ns ? "page" : undefined}
           onClick=${() => call("ui.select_tab", t.ns)} ...${tip(lock ? t.label + ": " + lock.short : t.label)}>
@@ -469,11 +470,52 @@ function Rail({ shell }) {
 }
 
 // The open tab can't do anything yet (PAD-224): say why, and where to go.
+// PAD-1090: a Spike 3 tab without the user's OTP key - the Extract tab's own
+// walkthrough, with the same two ways in, and the key kept for every tab.
+function Spike3KeyGate({ shell, lock }) {
+  const busy = !!shell.spike3_key_busy;
+  const [key, setKey] = useState("");
+  const send = () => { if (key.trim()) { call("ui.spike3_paste_key", key.trim()); setKey(""); } };
+  return html`<div class="banner warn sx-lock sx-s3key" role="group">
+    <${Icon} name="lock" />
+    <div class="body-text stack">
+      <b>${lock.long}</b>
+      <span class="small">The 256-bit key is fused into the machine's Raspberry Pi, not stored on the card, and it is the same across machines.
+        If you already have it, paste it here (64 hex characters): PAD checks it against the selected card and keeps it.</span>
+      <div class="row wrap">
+        <div class=${cx("field mono sx-s3key-in", busy && "disabled")}>
+          <input type="password" autocomplete="off" spellcheck="false" aria-label="Your Spike 3 OTP key"
+            placeholder="Paste your OTP key (64 hex characters)" value=${key} disabled=${busy}
+            onInput=${(e) => setKey(e.target.value)} onKeyDown=${(e) => { if (e.key === "Enter") send(); }} />
+        </div>
+        <${Button} size="sm" kind="primary" icon="unlock" disabled=${busy || !key.trim()} onClick=${send}>Use this key<//>
+        ${busy ? html`<${Spinner} />` : null}
+      </div>
+      <div class="row wrap">
+        <${Button} size="sm" kind="ghost" disabled=${busy} onClick=${() => call("ui.spike3_load_key")}>Or choose a key file…<//>
+        <${Spike3KeyGuide} disabled=${busy} />
+      </div>
+      ${shell.spike3_key_status ? html`<span class="small">${shell.spike3_key_status}</span>` : null}
+    </div>
+  </div>`;
+}
+
+// A Spike 3 tab without the key is shown greyed and does not take clicks
+// (David: "greyed out unless the user has the OTP key"); the gate above it
+// is the way in.
+function KeyLockedPage({ shell, children }) {
+  const t = (shell.tabs || []).find((r) => r.ns === shell.tab);
+  const lock = t ? tabLock(t, shell.project_state, shell.spike3_key) : null;
+  if (!lock || lock.need !== "spike3key") return children;
+  return html`<div class="sx-keylocked" aria-disabled="true" inert>${children}</div>`;
+}
+
 function LockBanner({ shell }) {
   const x = useNs("extract");
   const t = (shell.tabs || []).find((r) => r.ns === shell.tab);
-  const lock = t ? tabLock(t, shell.project_state) : null;
+  const lock = t ? tabLock(t, shell.project_state, shell.spike3_key) : null;
   if (!lock) return null;
+  if (lock.need === "spike3key") return html`<${Spike3KeyGate} shell=${shell} lock=${lock} />`;
   const haveCard = !!(x.ssd ? x.drive : x.input);
   const pickFirst = lock.need === "extract" && !haveCard;
   return html`<div class="banner warn sx-lock" role="status">
@@ -1125,7 +1167,7 @@ export function Shell() {
         <${Rail} shell=${shell} />
         <main class="main">
           <${LockBanner} shell=${shell} />
-          <${TabHost} ns=${shell.tab} />
+          <${KeyLockedPage} shell=${shell}><${TabHost} ns=${shell.tab} /><//>
           <${LogSplit} open=${logOpen} setOpen=${setLogOpen} height=${logH} setHeight=${setLogH} />
           <${StatusBar} shell=${shell} />
           <${LogHead} shell=${shell} open=${logOpen} setOpen=${setLogOpen} />

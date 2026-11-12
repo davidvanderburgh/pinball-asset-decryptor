@@ -20,10 +20,10 @@
 # for no symbol version the card lacks. A card on a newer OS build could differ:
 # `readelf -V` the .so against the card's libc if one ever refuses to load.
 set -eu
-P=${PAD_S3_XGCC:-$HOME/.pad-s3/xgcc}
+P=${PAD_S3_XGCC:-${PAD_S3_HOME:-/var/lib/pad-s3}/xgcc}
 CC=$P/root/usr/bin/aarch64-linux-gnu-gcc-13
 W=$P/s3cc
-if [ ! -x "$CC" ] || [ ! -x "$W" ]; then
+if [ ! -x "$CC" ]; then
     command -v aarch64-linux-gnu-as >/dev/null || {
         echo "xgcc.sh: binutils-aarch64-linux-gnu is missing (apt install binutils-aarch64-linux-gnu)" >&2; exit 1; }
     mkdir -p "$P/debs"
@@ -35,12 +35,20 @@ if [ ! -x "$CC" ] || [ ! -x "$W" ]; then
         libtsan2-arm64-cross libubsan1-arm64-cross libitm1-arm64-cross \
         libgomp1-arm64-cross >&2 )
     for d in "$P"/debs/*.deb; do dpkg-deb -x "$d" "$P/root"; done
-    G=$P/root/usr/lib/gcc-cross/aarch64-linux-gnu/13
-    cat > "$W" <<EOF
+fi
+# THE WRAPPER FINDS ITS COMPILER BESIDE ITSELF (PAD-1090): it used to name the
+# prefix it was made in, and a rig home moved (/var/tmp/... -> /var/lib/pad-s3)
+# left a wrapper exec-ing a gcc that was not there. Rewritten when it is an
+# old one (no "self-located" mark) or missing.
+if ! grep -qs "self-located" "$W"; then
+    cat > "$W" <<'EOF'
 #!/bin/sh
-exec "$CC" -B/usr/aarch64-linux-gnu/bin/ -B$G/ -B$P/root/usr/aarch64-linux-gnu/lib/ \\
-    --sysroot=$P/root -isystem $G/include -isystem $P/root/usr/aarch64-linux-gnu/include \\
-    -L$P/root/usr/aarch64-linux-gnu/lib "\$@"
+# s3cc - self-located: the aarch64 gcc unpacked beside this file (xgcc.sh)
+P=$(cd "$(dirname "$0")" && pwd)
+G=$P/root/usr/lib/gcc-cross/aarch64-linux-gnu/13
+exec "$P/root/usr/bin/aarch64-linux-gnu-gcc-13" -B/usr/aarch64-linux-gnu/bin/ -B"$G"/ -B"$P"/root/usr/aarch64-linux-gnu/lib/ \
+    --sysroot="$P"/root -isystem "$G"/include -isystem "$P"/root/usr/aarch64-linux-gnu/include \
+    -L"$P"/root/usr/aarch64-linux-gnu/lib "$@"
 EOF
     chmod +x "$W"
 fi

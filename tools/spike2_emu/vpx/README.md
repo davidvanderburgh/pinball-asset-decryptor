@@ -19,6 +19,7 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `PADSPIKE2.vbs` | the "system script" a table loads in place of `controller.vbs` + `SEGA.VBS`: loads VPX's own `core.vbs`, creates the controller, names the cabinet switches and flipper coils. |
 | `vpxfile.py` | read, patch and RE-SIGN a .vpx: VPX refuses a file whose MD2 MAC does not match, and this reproduces the digest (proven bit-for-bit on the stock table). Writes through pywin32's structured storage. |
 | `<title>.vpxmap.json` | the table-to-machine map: switch numbers, solenoid callbacks, every light's LED, the retrofit lights and triggers the table lacked. |
+| `patch_ghostbusters_le.py`, `ghostbusters_le_replica.vpxmap.json` | ninuzzu/tom tower/djrobx's original-layout Ghostbusters LE 1.2 on the Spike 1 game, separate from JP's Slimer conversion. |
 | `patch_godzilla.py` | applies `godzilla_le.vpxmap.json` to marty02's "Godzilla Limited Edition" v2.6: rewires the script, adds 36 lights and the Mechagodzilla magnet, re-signs. |
 | `patch_beatles.py`, `beatles.vpxmap.json` | "The Beatles" (Original 2018) v007 (VPForums), Stern's Beatles playfield on Stern's 1980 Seawitch ROM (`seawitfp`) with rules of its own on top (PAD-926): the switches, coils and inserts go to the machine's, the upper flippers to their own coils, the record to its magnet and motor; the tribute's own modes, ball save, lock and PinUP Player are emptied. |
 | `vpxshadow.py` | the patcher for a SCRIPTED tribute (no ROM): keeps its script as a shadow game, generates the bridge from `<title>.shadow.json`, neuters its own balls, makes PinUP Player optional, re-signs. |
@@ -53,6 +54,24 @@ range (`solenoids` in the map; the flippers keep core.vbs's own Consts
 below 1000 goes through the map (`switch_rewrite`, `lamps`), so a table can
 run on its original numbering while its map is being built.
 
+For a ROM table (Spike 1 or Spike 2) which reads a mono channel as a mechanical position
+or raw brightness, `raw_lamp_rewrite` maps its legacy lamp number to
+`[node, index]`, for example `"281": [15, 63]`. `Lamp(281)` and
+`ChangedLamps` then retain the channel's 0..255 value, including zero,
+instead of an on/off value or a packed RGB insert colour. The number
+must be below 1000 (1000 and up already name every LED directly). Normal
+lamp groups and their colour handling are unchanged.
+
+A Spike 1 map can export an encoder count to an otherwise unused mono state
+channel with `encoder_lamps`, for example `"8,0": [15, 63]` for node 8's
+motor 0. The launcher forwards only that map's wiring as `S1_ENCODER_LAMPS`
+(`node,motor:node,LED;...`). The responder publishes the current count there
+when the game reads the motor status; a `raw_lamp_rewrite` alias can feed the
+table's existing mechanism animation. Choose an unused channel: this is an
+adapter value, not a physical lamp or an input injected into the game. The
+mono value clamps to 0..255, while the motor's protocol position remains a
+signed 16-bit count. With no wiring configured, no output channel is changed.
+
 ## The kit: `padvpx`
 
 Nothing here needs the app running. `padvpx.py` is the whole kit, run with
@@ -75,8 +94,8 @@ on an installed app; the venv's in a checkout):
 On an installed app the command is `padvpx.cmd` in the app folder, and the
 installer registers the controller itself.
 
-**The app's Visual Pinball tab** (a preview feature since PAD-802, the
-preview code's feature `vpx`) is everything above with buttons, for somebody
+**The app's Visual Pinball tab** (PAD-802; a preview feature until PAD-1136,
+in every copy of the app on Windows since) is everything above with buttons, for somebody
 who is not going to type any of it: the PAD runtime (the Emulate tab sets it
 up), Visual Pinball (found, chosen, or the 10.8.0 release downloaded and
 unpacked), the controller (registered by the installer; a Register button
@@ -149,6 +168,14 @@ puts it back. The app's Visual Pinball tab says the same under each row's
 card and on its Card images row, with the cache's room and a Cache… to the
 Emulate tab's cache window.
 
+**A launcher that exits during startup.** A board record alone does not
+prove that the game came up. The bridge cleans the failed run it started
+and reports the failure. The kit can opt specific titles into one retry,
+for example `"startup_retry_titles": ["batman"]`; the default is no retry.
+The old run is stopped before the new one starts, and closing the table
+during either cleanup or restart stops recovery. This applies only before
+the table attaches to a live game; it does not restart a game being played.
+
 **Sharing a table with somebody else.** The kit never ships a table or a
 card. What the other person needs: the PAD installer (the emulator, its
 runtime distro, the bundled Python with pywin32, and this kit - all in it),
@@ -198,7 +225,11 @@ button's bit on node 0), and the controller finds each button's id in the
 title's own switch table: the ids differ by title, the wire does not. A table
 patched before them gets them the first time the app's Play opens it. The launch button is Enter on Godzilla (marty02 wired it to the
 plunger key) and the lockbar key, Left Alt by VPX's default, on Rush and Foo
-Fighters (their scripts wired the Action button to `LockBarKey`).
+Fighters (their scripts wired the Action button to `LockBarKey`). A machine
+with a manual plunger keeps the plunger key on the table's own plunger and its
+Action button on the lockbar key (PAD-1128: Jaws, John Wick and Jurassic Park
+had the plunger key pressing the Action button, so their plunger never pulled;
+Jaws' game waits with the ball in the lane until one or the other launches it).
 `%TEMP%\padcontroller.log` says what the controller did;
 `%TEMP%\padspike2.log` what the system script's load did.
 
@@ -306,7 +337,10 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   `CreateObject("PinUpPlayer.PinDisplay")` on a machine without it, so the
   patcher scans every `PuPlayer.` call, writes a `PadNoPuP` class with those
   methods and argument counts, and wraps the CreateObject so the class
-  stands in.
+  stands in. `"pup_stub": "always"` uses the silent class even when PinUP
+  is installed. Batman and Iron Maiden use this mode to keep their tribute
+  music and callouts from playing over the machine's audio; every creation,
+  including a later LoadCoreFiles/PuPInit, uses the same silent shape.
 * **DOF stays on B2S.Server** (PAD-841): a tribute's `LoadEM` puts
   B2S.Server in `Controller`, and controller.vbs's `DOF` sub sends through
   `Controller.B2SSetData`. The bridge's Table1_Init keeps that object as
@@ -647,7 +681,34 @@ Sega's ROM) gets a `<title>.vpxmap.json` and a patcher like
 `patch_godzilla.py` for the script's conventions; a scripted tribute gets a
 `<title>.shadow.json` and `vpxshadow.py` as it is.
 
+Two different VPX tables can use the same native game. Give each map a
+distinct `title`, matching its filename and the patched script's cGameName,
+and set `game` to the rig's native title. For example, a second Ghostbusters
+map can be `ghostbusters_le_replica.vpxmap.json` with
+`"title": "ghostbusters_le_replica", "game": "ghostbusters_le"`. Its
+`detect`, `output`, `table` credits and wiring belong to that download. Both
+maps then stay separate in the tab while card discovery, rig-board matching,
+launch/stop and the author's machine checklist use the native game. An
+explicit card recorded for the variant wins; otherwise its native game's
+card entry or library filename is used. Maps without `game` behave as before.
+
 ## Other platforms (PAD-943)
+
+**Original-layout Ghostbusters LE 1.2.** The replica by ninuzzu, tom tower
+and djrobx uses map title `ghostbusters_le_replica`, native game
+`ghostbusters_le`, and output `Ghostbusters LE 1.2 (PAD).vpx`. Supply your
+own original author table: the kit ships its patcher and wiring, not that
+table or its assets. `padvpx patch` detects `spagb_100`, its SPA loader and
+Scoleri code. JP's Slimer map remains a separate option for JP's layout.
+
+The conversion retains the author's playfield, physics, mechanisms and
+mechanical samples. PAD replaces SPA, its CPU service keys use the shared
+service numbers, and direct hardware lamp numbers cannot index the table's
+fixed legacy arrays. Manual lamp aliases retain intensity; Slimer's existing
+animation reads the map-selected encoder position through lamp 281. Ecto
+Goggles video is not integrated: that internal playfield screen stays at
+standby. The real game's DMD comes from the app or a separately configured
+native viewer; the conversion disables the old SPA DMD.
 
 A map's `platform` says which rig is behind the table; `spike2` when it says
 nothing. The kit's survey of what exists for every platform PAD reads is
@@ -675,7 +736,23 @@ like a Spike 2 one (`padlaunch.Spike1Launch`: start.sh with the title's
 .iso, on the app's data disk, visible and with sound; `padvpx run got_le
 --mute` by hand) - ONE rig, so a run of another title is refused, not
 replaced. The game's DMD is drawn by the app's Spike 1 tab, so a player keeps
-the app open beside Visual Pinball. The author's checklist (`padvpx
+the app open beside Visual Pinball. On Windows, an optional external native
+viewer can instead be set in the kit's `spike1_dmd_viewers`, for example:
+
+```json
+{"spike1_dmd_viewers": {"ghostbusters_le": "C:\\Pinball\\DmdViewer.exe"}}
+```
+
+The value is an executable path, or an argument list beginning with its
+executable. The launcher appends the Windows path to `spike1-0.run` and the
+game title as two arguments. The viewer reads that board record's distro/root
+to find the active `spi0.cap`; renderer libraries and colour data are the
+viewer's own configuration, supplied separately. No helper is started unless
+configured. Its output joins the title's launch log, failure to start it does
+not stop the game, and the launcher reaps only the viewer process it created
+when the table exits. There is no process-name search or global viewer kill.
+
+The author's checklist (`padvpx
 checklist got_le`, the tab's "For table authors") reads a Spike 1 title
 from its game program and switch map in the rig's cache (every Spike 1
 game extracted on the PC is offered): the switches with their slot ids,

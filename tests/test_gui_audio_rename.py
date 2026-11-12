@@ -226,3 +226,54 @@ def test_visible_order_follows_the_list_not_the_scan(tmp_path):
         assert svc._visible_rels == [other, REL]
         assert w.run(svc._next_visible_rel, other) == REL
         assert w.run(svc._next_visible_rel, REL) is None
+
+
+LONG = ("Welcome to the city, the monster has been spotted near the harbour "
+        "and every unit is to report to the bridge before it reaches the tower")
+
+
+def test_a_long_callout_name_is_kept_whole(tmp_path, monkeypatch):
+    """PAD-1158: a tester's whole-sentence transcription (136 characters) was
+    cut at 80; it now names the file in full and is remembered in full.
+    (Windows' path budget lifted: pytest's temp folder alone is ~110 deep.)"""
+    from pinball_decryptor.core import name_memory
+    monkeypatch.setattr(name_memory, "_MAX_WIN_PATH", 1000)
+    assets = _folder(tmp_path)
+    with web_app(tmp_path, mfr="stern") as w:
+        _load(w, assets)
+        _rename(w, REL, LONG, "callout")
+        new_rel = "audio/idx0001 - %s.wav" % LONG
+        assert _rows(w) == [new_rel]
+        assert os.path.isfile(os.path.join(assets, *new_rel.split("/")))
+        assert LONG in name_memory.load().values()
+
+
+def test_a_long_name_in_a_deep_folder_is_shortened_to_fit(tmp_path,
+                                                          monkeypatch):
+    """PAD-1158: where the whole name would put the path past what Windows'
+    plain file calls open, as much of it as fits is used, and the log says
+    so, instead of a rename that leaves a file nothing can play."""
+    from pinball_decryptor.core import name_memory
+    # Only the name budget is Windows-like. Changing the shared sys module
+    # sends Linux's web-UI dependencies (including shutil.which) down their
+    # Windows paths before the test even reaches the rename.
+    fit_label = name_memory.fit_label
+    monkeypatch.setattr(name_memory, "fit_label",
+                        lambda folder, prefix, label, ext, windows=None:
+                            fit_label(folder, prefix, label, ext, windows=True))
+    assets = _folder(tmp_path)
+    budget = len(os.path.abspath(os.path.join(assets, "audio"))) + 80
+    monkeypatch.setattr(name_memory, "_MAX_WIN_PATH", budget)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _load(w, assets)
+        logged = []
+        orig = svc.log
+        monkeypatch.setattr(svc, "log",
+                            lambda m, *a, **k: (logged.append(m),
+                                                orig(m, *a, **k)))
+        _rename(w, REL, LONG, "callout")
+        (rel,) = _rows(w)
+        label = name_memory.split_decode_name(rel.rpartition("/")[2])[1]
+        assert LONG.startswith(label) and 30 < len(label) < len(LONG)
+        assert len(os.path.abspath(os.path.join(assets, *rel.split("/"))))             <= budget
+        assert any("name shortened" in m for m in logged), logged

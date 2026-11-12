@@ -1,10 +1,10 @@
-"""The Visual Pinball tab (PAD-802): the kit in the app, behind a preview code.
+"""The Visual Pinball tab (PAD-802): the kit in the app.
 
 What is worth failing on:
 
-  * THE GATE. The tab shows only with a preview code for "vpx", only on
-    Windows, and only for a manufacturer the Spike 2 emulator runs; without a
-    code nobody sees it.
+  * THE GATE. The tab shows on Windows for a manufacturer the app emulates,
+    with no preview code (PAD-1136 released it: core/preview.RELEASED); a
+    code someone still holds for it is listed as no longer needed.
   * THE KIT STAYS OUT OF PROCESS. The tab runs the kit's own scripts and reads
     the LAST JSON line they print; anything else (a traceback, nothing) is an
     error the page can show, never a crash.
@@ -95,14 +95,22 @@ def tab(monkeypatch, tmp_path):
     return t
 
 
-def test_the_preview_names_the_tab():
-    assert preview.FEATURES.get("vpx") == "Visual Pinball"
+def test_the_tab_is_released_not_a_preview():
+    """PAD-1136: Visual Pinball is in every copy, so the gear menu's Preview
+    features... no longer offers it and enabled() answers yes with no code."""
+    assert "vpx" not in preview.FEATURES
+    assert preview.RELEASED.get("vpx") == "Visual Pinball"
     assert V.PREVIEW_FEATURE == "vpx"
+    assert preview.enabled("vpx")
+    # its tips show in the ? window with no code
+    from pinball_decryptor.webui.help_content import sections_for
+    titles = [t for t, _b in sections_for("Visual Pinball")]
+    assert "What it's for" in titles and "Playing" in titles
     keys = [m[2] for m in __import__("pinball_decryptor.webui.tabs", fromlist=["TABS"]).TABS]
     assert "Visual Pinball" in keys
 
 
-def test_the_tab_shows_only_with_a_code_on_windows(monkeypatch):
+def test_the_tab_shows_with_no_code_on_windows(monkeypatch):
     from pinball_decryptor.webui import window as W
     caps = types.SimpleNamespace(emulate=True)
     mfr = types.SimpleNamespace(capabilities=caps)
@@ -111,9 +119,8 @@ def test_the_tab_shows_only_with_a_code_on_windows(monkeypatch):
         pytest.skip("no WebWindow class")
     monkeypatch.setattr(type(win), "modes_preview_on", lambda self, m=None: False)
     monkeypatch.setattr(W.sys, "platform", "win32")
+    # PAD-1136: no code at all, and the tab is there
     monkeypatch.setattr(preview, "_active", frozenset())
-    assert win._gate(mfr)["Visual Pinball"] is False
-    monkeypatch.setattr(preview, "_active", frozenset({"vpx"}))
     assert win._gate(mfr)["Visual Pinball"] is True
     # PAD-943 (David): on every manufacturer the app emulates
     for cap in ("emulate_spike1", "emulate_jjp", "emulate_ap", "emulate_bof", "emulate_dp", "emulate_spooky", "emulate_pb"):
@@ -124,6 +131,26 @@ def test_the_tab_shows_only_with_a_code_on_windows(monkeypatch):
     # Visual Pinball and the controller are Windows only
     monkeypatch.setattr(W.sys, "platform", "linux")
     assert win._gate(mfr)["Visual Pinball"] is False
+
+
+def test_an_old_vpx_code_is_no_longer_needed():
+    """PAD-1136: a code issued for the Visual Pinball preview turns nothing more
+    on; the dialog says it is in every copy now."""
+    import datetime as dt
+    from pinball_decryptor.core import ed25519
+    seed = bytes(range(32))
+    pub = ed25519.public_key(seed)
+    today = dt.date(2026, 11, 11)
+    payload = preview.payload_bytes(["vpx"], "Test Person", today,
+                                    today + dt.timedelta(days=30), "ab12cd")
+    code = preview.encode(payload, ed25519.sign(seed, preview.CONTEXT + payload))
+    keys = (pub.hex(),)
+    with pytest.raises(preview.PreviewCodeError, match="Visual Pinball.*No code is needed"):
+        preview.check(code, today, keys)
+    active, rows = preview.judge([code], today, keys)
+    assert active == frozenset()
+    assert rows[0].lines == ["Visual Pinball: in every copy of the app now, this code is "
+                             "no longer needed (code for Test Person)"]
 
 
 def test_the_last_json_line_is_the_answer():

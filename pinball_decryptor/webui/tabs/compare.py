@@ -138,6 +138,10 @@ class CompareTab(TabService):
         return bool(getattr(getattr(mfr, "capabilities", None), "compare",
                             False))
 
+    def rail_needs(self):
+        # PAD-1090: a Spike 3 card is unusable without the user's OTP key
+        return "spike3key" if self._spike3_era() else None
+
     def on_show(self):
         self._push_history()
 

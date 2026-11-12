@@ -341,7 +341,10 @@ function startMain() {
       clips = clipsPanel(S.clips);
       if (top) top.el.after(clips.el); else side.prepend(clips.el);
     }
-    app.append(body, status);
+    // PAD-1090: the boot progress bar rides the top rig strip (David)
+    const loadBar = el("i", "pf-load");
+    loadBar.hidden = true;
+    app.append(loadBar, body, status);
     view = {
       frame(f) {
         if (f.status != null) stxt.textContent = f.status;
@@ -413,10 +416,11 @@ function startMain() {
     // run with an app. This window stays open (PAD-738), so the button follows
     // the run's `restarting` (PAD-744): back the moment the request is taken.
     // PAD-744: how far the game has booted (bootprog.py), while it boots
+    // the bar itself is the top rig strip (.pf-load, set in update); the
+    // bottom cluster keeps only the % and the step words (PAD-1090)
     const boot = el("span", "boot");
-    const bar = el("span", "bar"), fill = el("i"), bootN = el("span", "n mono"), bootW = el("span", "w");
-    bar.append(fill);
-    boot.append(bar, bootN, bootW);
+    const bootN = el("span", "n mono"), bootW = el("span", "w");
+    boot.append(bootN, bootW);
     boot.hidden = true;
     box.append(boot);
     let restart = null;
@@ -458,9 +462,15 @@ function startMain() {
       pause.classList.toggle("primary", !!r.paused);
       box.classList.toggle("paused", !!r.paused);
       if (restart) showRestarting(r.restarting);
+      // the top rig strip is the progress bar (PAD-1090)
+      const loadBar = app.querySelector(".pf-load");
+      app.classList.toggle("booting", !!r.boot);
+      if (loadBar) {
+        loadBar.hidden = !r.boot;
+        if (r.boot) loadBar.style.width = r.boot.pct + "%";
+      }
       boot.hidden = !r.boot;
       if (r.boot) {
-        fill.style.width = r.boot.pct + "%";
         bootN.textContent = r.boot.pct + "%";
         bootW.textContent = r.boot.words;
         boot.title = r.boot.words;
@@ -957,28 +967,32 @@ function startMain() {
     });
     const box = el("div", "body");
     box.append(el("div", "note", "One-colour inserts: the game sets only how bright they are, and each glows "
-      + "in its own colour. White = not set. Give each its colour here; kept for this title."));
+      + "in its own colour, which the card does not say (only a lamp named for its colour, like GI-BLU, has "
+      + "one). White = not set. Give each its colour here; kept for this title."));
     const list = el("div", "list");
     box.append(list);
     acc.append(sum, box);
     const count = () => {
-      const n = rows.filter((r) => r[1]).length;
+      const n = rows.filter((r) => r[1] || r[3]).length;
       cnt.textContent = `${n} of ${rows.length} set`;
     };
     for (const r of rows) {
-      const [name, hex, fids] = r;
+      // PAD-1144: r[3], the colour the lamp's NAME says ("TOP GI-BLU (x10)"),
+      // is its colour until the user sets another
+      const [name, hex, fids, own] = r;
       const row = el("div", "r");
       const pick = el("input");
       pick.type = "color";
-      pick.value = hex || "#ffffff";
-      pick.title = "The colour this insert glows on the machine";
+      pick.value = hex || own || "#ffffff";
+      pick.title = own ? "The colour this insert glows on the machine (from its name until you set one)"
+        : "The colour this insert glows on the machine";
       const lab = el("span", "k", name);
       const clr = btn("\u00d7", () => {
-        api("lens", name, null).then((v) => { r[1] = v || ""; pick.value = "#ffffff"; show(); });
+        api("lens", name, null).then((v) => { r[1] = v || ""; pick.value = own || "#ffffff"; show(); });
       }, "x");
-      clr.title = "Back to white (not set)";
+      clr.title = own ? "Back to the colour its name says" : "Back to white (not set)";
       clr.tabIndex = -1;
-      function show() { clr.style.visibility = r[1] ? "" : "hidden"; row.classList.toggle("set", !!r[1]); count(); }
+      function show() { clr.style.visibility = r[1] ? "" : "hidden"; row.classList.toggle("set", !!(r[1] || own)); count(); }
       pick.addEventListener("change", () => {
         api("lens", name, pick.value).then((v) => { r[1] = v || ""; show(); });
         // never keep the keyboard: a focused picker would eat the flipper keys

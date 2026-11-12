@@ -12,6 +12,10 @@ RIG=$(cd "$(dirname "$0")" && pwd)
 # The running guest is found among THIS rig slot's processes (PAD_SLOT).
 . "$RIG/padslot.sh"
 SLOT=${1:-quicksave}
+# A SPIKE 3 GAME in this rig slot (PAD-1147): the Spike 3 rig loads it.
+if [ -n "${PAD_SLOT:-}" ] && bash "$RIG/../spike3_emu/s3state.sh" running "$PAD_SLOT" 2>/dev/null; then
+    exec bash "$RIG/../spike3_emu/s3state.sh" load "$PAD_SLOT" "$SLOT"
+fi
 # A SUBSHELL, because padpath.sh sets ROOT and this script's ROOT comes from
 # the RUNNING GUEST's own environment first (see below) - sourcing it here
 # would quietly overrule that. All that is wanted is the one definition of

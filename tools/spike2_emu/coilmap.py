@@ -593,6 +593,22 @@ def load(path):
                  switch_lines=_maybe_lines(swlist))
 
 
+def read_exact_group_node(path):
+    """{group: node} from a group_node_exact.txt (`group node` per line), or
+    {} when there is none. A rig that KNOWS its title's map writes it - Spike 3
+    (PAD-1090), whose device group is simply the board's 1-based place in the
+    title's node directory - and then nothing has to be inferred."""
+    out = {}
+    for line in _maybe_lines(path) or []:
+        p = line.split()
+        if len(p) >= 2 and not line.startswith("#"):
+            try:
+                out[int(p[0])] = int(p[1])
+            except ValueError:
+                continue
+    return out
+
+
 def group_node_for(table_path, dev_rows=None):
     """This title's derived group -> node map, from a device_xy.txt PATH.
 
@@ -612,6 +628,9 @@ def group_node_for(table_path, dev_rows=None):
     not parsed twice.
     """
     d = os.path.dirname(table_path or "")
+    exact = read_exact_group_node(os.path.join(d, "group_node_exact.txt"))
+    if exact:
+        return exact
     if dev_rows is None:
         dev_rows = parse_rows(_maybe_lines(table_path) or [])
     nodedir = os.path.join(d, "node_ident.txt")

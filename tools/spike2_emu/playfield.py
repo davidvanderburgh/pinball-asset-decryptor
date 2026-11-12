@@ -4659,6 +4659,17 @@ def restart_req_path(ctl_path):
                         "restart_game_%d.req" % padpath.slot())
 
 
+def stop_req_path(ctl_path):
+    """The Stop emulator request file (PAD-1198), beside the Restart one and
+    one per rig: the Emulate tab's stop_req_file() names the same. The window
+    cannot end the run itself - the run is the app's, Spike 2 or Spike 3 - so
+    it asks, as Restart game does."""
+    if not ctl_path:
+        return None
+    return os.path.join(os.path.dirname(ctl_path),
+                        "stop_emulator_%d.req" % padpath.slot())
+
+
 class RunCtl:
     """The status bar's Pause button and volume (PAD-204): what the page shows
     for them, polled every RUN_POLL_S. The pause flag is padglhost's, read off
@@ -4672,6 +4683,7 @@ class RunCtl:
         self._mtime = self._stat()
         self._next = 0.0
         self.restarting = False
+        self.stopping = False      # Stop emulator asked (PAD-1198)
         self._restart_t = None     # when Restart game was asked
         self._taken_t = None       # when that request was last seen in flight
         self._booted_again = False  # the old boot's log is gone since then
@@ -4796,9 +4808,26 @@ class RunCtl:
         self.restarting = True
         return True
 
+    def ask_stop(self):
+        """PAD-1198: Stop emulator - asked of the app that launched this run,
+        whose Stop ends it (and this window with it, when the run goes).
+        False with no app to ask."""
+        path = stop_req_path(self.ctl_path)
+        if not path:
+            return False
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("%d\n" % padpath.slot())
+        except OSError:
+            return False
+        self.stopping = True
+        return True
+
     def dyn(self):
         return {"paused": self.paused,
                 "restart": bool(self.ctl_path),
+                "stop": bool(self.ctl_path),
+                "stopping": self.stopping,
                 "restarting": self.restarting,
                 "boot": self.boot,
                 "audio": ({"gain": self.audio[0], "muted": self.audio[1]}
@@ -4838,6 +4867,7 @@ class Playfield:
         self._state_msg = None
         self._stop = threading.Event()
         self._closed = False
+        self._run_left = False     # gone(): the run ended first (PAD-1198)
         self.pos = {}
         self.lcd = LcdPanel(GAME, on_build=self._open_lcd)
         self.lcd.drv = self.drv
@@ -5208,6 +5238,7 @@ class Playfield:
     def gone(self):
         """The run ended (its LED block went): save first - leaving with the
         run is the COMMON way this window closes - then close everything."""
+        self._run_left = True      # closing now is not a Stop (PAD-1198)
         self.save_state()
         self.publish("close")
         self._stop.set()
@@ -5402,6 +5433,26 @@ class Playfield:
         """The status bar's Restart game (PAD-735)."""
         return self.run.ask_restart()
 
+    def api_stop(self):
+        """The status bar's Stop emulator (PAD-1198)."""
+        ok = self.run.ask_stop()
+        if ok:
+            self.publish("run", self.run.dyn())
+        return ok
+
+    def closed_by_user(self):
+        """The window's own close (its X): the run goes with it (PAD-1198),
+        as closing the game window ends it - unless the run left first
+        (gone(): the app's Stop, or the game ending), which closes this
+        window too and must not ask for a second Stop. A window that never
+        came up is not closed by anyone."""
+        if not self._run_left and not self._closed and \
+                getattr(self.host, "_ready", True):
+            if self.run.ask_stop():
+                print("playfield: window closed; asked the app to stop the "
+                      "emulator", flush=True)
+        self.bye()
+
     def api_volume(self, pct):
         ok = self.run.set_audio(gain=float(pct) / 100.0)
         if ok:
@@ -5578,7 +5629,7 @@ def main():
     host.start()
     ctl.start()
     try:
-        host.run(ctl.window_spec(), on_close=ctl.bye)
+        host.run(ctl.window_spec(), on_close=ctl.closed_by_user)
     finally:
         ctl.bye()
         ctl.stop()

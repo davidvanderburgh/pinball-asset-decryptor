@@ -430,6 +430,23 @@ function startMain() {
     const pause = btn("Pause", () => { pause.blur(); api("pause"); }, "sm");
     pause.title = "Freeze the game where it is, and carry on from there (Pause or F9)";
     box.append(pause);
+    // PAD-1198: Stop emulator, beside Pause - asked of the app that launched
+    // the run (its Stop, Spike 2 or Spike 3), so only a run with an app. The
+    // window closes itself when the run has gone; closing it (X) asks the
+    // same. Greyed as "Stopping…" once asked.
+    let stop = null;
+    const showStopping = (on) => {
+      stop.textContent = on ? "Stopping…" : "Stop emulator";
+      stop.disabled = !!on;
+    };
+    if (R && R.stop) {
+      stop = btn("Stop emulator", () => {
+        stop.blur();
+        api("stop").then((ok) => { if (ok) showStopping(true); });
+      }, "sm");
+      stop.title = "End the emulator run, as Stop emulator in the app does (closing this window does too)";
+      box.append(stop);
+    }
     // PAD-735: the app that launched the run has the game boot again; only a
     // run with an app. This window stays open (PAD-738), so the button follows
     // the run's `restarting` (PAD-744): back the moment the request is taken.
@@ -480,6 +497,7 @@ function startMain() {
       pause.classList.toggle("primary", !!r.paused);
       box.classList.toggle("paused", !!r.paused);
       if (restart) showRestarting(r.restarting);
+      if (stop) showStopping(r.stopping);
       // the top rig strip is the progress bar (PAD-1090)
       const loadBar = app.querySelector(".pf-load");
       app.classList.toggle("booting", !!r.boot);

@@ -702,6 +702,8 @@ ctl_apply() {
                      mv -f "$PAD_AUDIO_CTL.box.tmp" "$PAD_AUDIO_CTL" ;;
             REQ) printf '%s\n' "$slot" > "$dir/restart_game_$slot.req"
                  echo "[box] the playfield window asked for Restart game" >&2 ;;
+            STOP) printf '%s\n' "$slot" > "$dir/stop_emulator_$slot.req"
+                  echo "[box] the playfield window asked to stop the emulator" >&2 ;;
             ADD) case ${rest%% *} in
                      clips)  printf '%s\n' "${rest#* }" >> "$dir/clips_seen_$slot.jsonl" ;;
                      sounds) printf '%s\n' "${rest#* }" >> "$dir/sounds_seen_$slot.jsonl" ;;

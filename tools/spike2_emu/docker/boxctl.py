@@ -52,6 +52,8 @@ class BoxCtl:
         self.ctl = os.path.join(d, "audio_ctl.json")
         self.names = os.path.join(d, "clip_names_%d.json" % n)
         self.req = os.path.join(d, "restart_game_%d.req" % n)
+        # PAD-1198: the window's Stop emulator (or its X), the same way
+        self.stop_req = os.path.join(d, "stop_emulator_%d.req" % n)
         self.seen = {"clips": os.path.join(d, "clips_seen_%d.jsonl" % n),
                      "sounds": os.path.join(d, "sounds_seen_%d.jsonl" % n)}
         self.pos = {k: 0 for k in self.seen}
@@ -116,6 +118,13 @@ class BoxCtl:
                 pass
             else:
                 self.say("REQ")
+        if os.path.exists(self.stop_req):
+            try:
+                os.remove(self.stop_req)
+            except OSError:
+                pass
+            else:
+                self.say("STOP")
         for kind, path in self.seen.items():
             try:
                 with open(path, "rb") as f:

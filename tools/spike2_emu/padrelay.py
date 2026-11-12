@@ -175,6 +175,116 @@ def pump(read, write, vol, say, meter=None):
             say(said)
 
 
+#: how far ahead of real time the paced stream runs (the cushion the Mac's
+#: player eats from while the source hiccups), and how far the source may
+#: run ahead before the oldest sound is dropped (padplay.py's PAD-456 rule)
+LEAD_MS = 350
+MAX_LATE_MS = 750
+PERIOD_MS = 10
+
+
+def read_fmt(path, default=(44100, 2)):
+    """The guest's PCM format off its fmt file ("44100 2"), else the default."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            rate, ch = f.read().split()[:2]
+        rate, ch = int(rate), int(ch)
+        if rate > 0 and ch > 0:
+            return rate, ch
+    except (OSError, ValueError):
+        pass
+    return default
+
+
+def paced_pump(fd, write, vol, say, rate, ch, lead_ms, clock=time.monotonic,
+               sleep=time.sleep, max_late_ms=MAX_LATE_MS, period_ms=PERIOD_MS):
+    """The FIFO to write() as a CONTINUOUS real-time stream (PAD-1109).
+
+    THE MAC'S PLAYER MUST NEVER WAIT FOR SOUND. ffplay's audio callback blocks
+    until it has a frame, SDL runs that callback inside the audio queue's own
+    callback, and CoreAudio stops using an audio queue it is not fed fast
+    enough (SDL issue 2459, in its maintainers' words) - the callback goes on
+    firing, so ffplay goes on consuming, and nothing is heard again. A game's
+    sound starves a player constantly: nothing at all for seconds at boot and
+    between sounds, then 10 ms pieces with no lead. A file or a short tone
+    never does, which is why every test played and every run was silent.
+
+    So the FIFO is read by a thread into a buffer, and this writes exactly
+    real-time bytes every period, lead_ms ahead of the clock: the game's
+    sound when the buffer has it, digital silence when it has not. The
+    source running more than max_late_ms ahead (a stall let go at once) is
+    cut back to the lead, one skip, as padplay.py does."""
+    import threading
+    frame = 2 * ch
+    bps = rate * frame
+    lead = bps * lead_ms // 1000 // frame * frame
+    ceiling = bps * max(max_late_ms, lead_ms + 100) // 1000
+    period = bps * period_ms // 1000 // frame * frame
+    buf = bytearray()
+    lock = threading.Lock()
+    done = threading.Event()
+    meter = Meter(clock=clock)
+    filled = [0]
+
+    def reader():
+        try:
+            while True:
+                b = os.read(fd, 65536)
+                if not b:
+                    break
+                with lock:
+                    buf.extend(b)
+        except OSError:
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=reader, daemon=True).start()
+    t0 = clock()
+    written = 0
+
+    def report(chunk, fill):
+        meter.add(chunk)
+        filled[0] += fill
+        said = meter.line()
+        if said:
+            if filled[0]:
+                said += ", %.1f s of silence filled in" % (filled[0] / bps)
+                filled[0] = 0
+            say(said)
+
+    while True:
+        if done.is_set():
+            # the run is over (the FIFO's writer closed): the rest goes at
+            # once, and no silence after it
+            with lock:
+                chunk = bytes(buf[:len(buf) // frame * frame])
+                buf.clear()
+            if vol.path and chunk:
+                chunk = scale(chunk, vol.poll())
+            if chunk:
+                write(chunk)
+                written += len(chunk)
+                report(chunk, 0)
+            return written
+        due = int((clock() - t0) * bps) // frame * frame + lead
+        if due - written < period:
+            sleep(max(0.0, (period - (due - written)) / bps))
+            continue
+        with lock:
+            if len(buf) > ceiling:
+                del buf[:(len(buf) - lead) // frame * frame]
+            take = min(due - written, len(buf) // frame * frame)
+            chunk = bytes(buf[:take])
+            del buf[:take]
+        if vol.path and chunk:
+            chunk = scale(chunk, vol.poll())
+        fill = due - written - len(chunk)
+        write(chunk + bytes(fill))
+        written += len(chunk) + fill
+        report(chunk, fill)
+
+
 def pipe_main(argv, out=None, clock=time.monotonic, sleep=time.sleep):
     """padrelay.py --pipe <fifo> [ctl]: the FIFO to stdout (PAD-1109).
 
@@ -205,7 +315,12 @@ def pipe_main(argv, out=None, clock=time.monotonic, sleep=time.sleep):
                 % (fifo, PIPE_WAIT_S))
             return 1
         sleep(0.25)
-    say("[padrelay] the player is reading %s over docker exec" % fifo)
+    rate, ch = read_fmt(os.path.join(os.path.dirname(fifo), "audio.fmt"))
+    # PLAIN BY DEFAULT: the pacing belongs on the Mac, after the transport
+    # (see pace_main); a lead here is opt-in for a transport that needs it
+    lead_ms = int(os.environ.get("PAD_AUDIO_LEAD_MS", "0"))
+    say("[padrelay] the player is reading %s over docker exec: %d Hz x %d ch%s"
+        % (fifo, rate, ch, ", paced %d ms ahead" % lead_ms if lead_ms > 0 else ""))
     fd = os.open(fifo, os.O_RDONLY)
     total = [0]
 
@@ -214,7 +329,11 @@ def pipe_main(argv, out=None, clock=time.monotonic, sleep=time.sleep):
         out.flush()
         total[0] += len(b)
     try:
-        pump(lambda n: os.read(fd, n), write, vol, say)
+        if lead_ms > 0:
+            paced_pump(fd, write, vol, say, rate, ch, lead_ms,
+                       clock=clock, sleep=sleep)
+        else:
+            pump(lambda n: os.read(fd, n), write, vol, say)
     except (BrokenPipeError, OSError) as exc:
         say("[padrelay] player went away: %s" % exc)
         if out is getattr(sys.stdout, "buffer", None):
@@ -226,12 +345,56 @@ def pipe_main(argv, out=None, clock=time.monotonic, sleep=time.sleep):
     return 0
 
 
+def pace_main(argv, fd=0, out=None, clock=time.monotonic, sleep=time.sleep):
+    """padrelay.py --pace <rate> <ch>: stdin to stdout, paced (PAD-1109).
+
+    THE MAC'S OWN CUSHION, after the transport. The box's stream reaches the
+    Mac through docker exec from a container that can be starved (Colima's
+    machine has 2 CPUs unless told otherwise, and the renderer ran at 14 fps
+    there), in lumps; a lead put on before the transport is eaten by it. Run
+    by the app's own binary on the Mac (pyinstaller_entry.py's --pace) between
+    docker exec and ffplay, this reads whatever arrives and writes exactly
+    real-time bytes, LEAD_MS ahead, silence for what has not arrived yet:
+    ffplay is never starved, however the lumps fall. The volume was applied
+    in the box already, so none is applied here."""
+    out = out or sys.stdout.buffer
+    try:
+        rate = int(argv[0]) if argv else 44100
+        ch = int(argv[1]) if len(argv) > 1 else 2
+    except ValueError:
+        print("usage: padrelay.py --pace <rate> <channels>", file=sys.stderr)
+        return 2
+    lead_ms = int(os.environ.get("PAD_AUDIO_LEAD_MS", str(LEAD_MS)))
+
+    def say(s):
+        print(s, file=sys.stderr, flush=True)
+
+    def write(b):
+        out.write(b)
+        out.flush()
+    say("[padrelay] pacing the stream on the Mac: %d Hz x %d ch, %d ms ahead"
+        % (rate, ch, lead_ms))
+    total = 0
+    try:
+        total = paced_pump(fd, write, Volume(None), say, rate, ch, lead_ms,
+                           clock=clock, sleep=sleep)
+    except (BrokenPipeError, OSError) as exc:
+        say("[padrelay] player went away: %s" % exc)
+        if out is getattr(sys.stdout, "buffer", None):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+    finally:
+        say("[padrelay] %d bytes paced to the player" % total)
+    return 0
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--pace":
+        raise SystemExit(pace_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "--pipe":
         raise SystemExit(pipe_main(sys.argv[2:]))
     if len(sys.argv) < 3:
-        print("usage: padrelay.py <fifo> <port> [ctl] | --pipe <fifo> [ctl]",
-              file=sys.stderr)
+        print("usage: padrelay.py <fifo> <port> [ctl] | --pipe <fifo> [ctl]"
+              " | --pace <rate> <ch>", file=sys.stderr)
         raise SystemExit(2)
     fifo, port = sys.argv[1], int(sys.argv[2])
     vol = Volume(sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None)

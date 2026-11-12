@@ -643,7 +643,7 @@ def colima_fix(unseen):
     argv, or None when the engine is not colima or the command is not
     there.  The start keeps every folder the profile already shares
     (:func:`emulate_core.colima_start_argv`)."""
-    from .emulate_core import colima_start_argv, which_tool
+    from .emulate_core import colima_resource_args, colima_start_argv, which_tool
     engine = _engine_name()
     if not (engine == "colima" or engine.startswith("colima-")):
         return None
@@ -653,7 +653,8 @@ def colima_fix(unseen):
     profile = engine[len("colima-"):]
     p = ["-p", profile] if profile else []
     return [[colima, "stop"] + p,
-            colima_start_argv(colima, profile, _share_roots(unseen))]
+            colima_start_argv(colima, profile, _share_roots(unseen),
+                              resources=colima_resource_args())]
 
 
 class Unshared(RuntimeError):

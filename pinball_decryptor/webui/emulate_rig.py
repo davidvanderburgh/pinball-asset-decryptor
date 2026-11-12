@@ -25,6 +25,7 @@ import os
 from ..core import runtime
 from pinball_decryptor.webui import runtime_prompt as _runtime_ui  # noqa: F401  (re-exported)
 from .emulate_core import (  # noqa: F401  (re-exported)
+    colima_resource_args, colima_start_argv, mac_pacer_env,
     FIRST_SET_NOTE, FIRST_SET_WORDS, MULTI_IMAGE_NOTE, _ADVANCING_HINT, _BOX_EXPLAIN, _CARD_COPY_RE, _COPY_EXPLAIN,
     box_build_line,
     _CREATE_FLAGS as CREATE_FLAGS, _MODES_EXPLAIN, _MULTIBOOT_PROBE_S,

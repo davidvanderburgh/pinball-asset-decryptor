@@ -1558,8 +1558,11 @@ class EmulateTab(EmulateLogMixin, TabService):
     def _colima_argv():
         # /Volumes too, from the first start: the Multi-boot tab's ISOs live
         # on other disks as often as not (PAD-903).
+        # and sized to this Mac (PAD-1109): Colima's own 2 CPUs starved the
+        # game's renderer and lumped its sound
         colima = rig.which_tool("colima")
-        return rig.colima_start_argv(colima) if colima else None
+        return (rig.colima_start_argv(colima, resources=rig.colima_resource_args())
+                if colima else None)
 
     def _setup_recheck(self):
         self.set(setup_enabled=True, setup_label="Set up emulator…",
@@ -2930,13 +2933,15 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._elog_new_run(project)       # PAD-1071: and the log lists this run's
 
     def _launch_env(self, src):
+        # PAD_PACER: on a Mac the app's own binary paces the sound between
+        # docker exec and ffplay (padbox.sh host_player, PAD-1109)
         # PAD_AUDIO=1: a rig is silent unless it is asked (PAD-253), and this
         # tab's run is the one that has a window and a Volume / Mute.
         # PAD_SOUNDLOG=1: the Sound and video log's sounds (PAD-1071, modes/soundlog.sh)
         env = ["PAD_AUDIO=1", "PAD_AUDIO_DUMP=30", "PAD_SOUNDLOG=1",
                "PAD_AUDIO_CTL=" + audio_ctl_file()] + \
             list(src) + self._machine_env() + self._edition_env() + \
-            self._screen_env()
+            self._screen_env() + rig.mac_pacer_env()
         if self._launch_slot:
             env.append("PAD_SELECT=0")
         elif self._select_touched:

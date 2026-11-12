@@ -993,6 +993,7 @@ def test_the_unshared_error_carries_colimas_fix(unix_paths, monkeypatch):
     monkeypatch.setattr(D, "_docker", _Engine(_cache_only, context="colima-work"))
     monkeypatch.setattr(E, "which_tool", lambda n, *a: "/usr/local/bin/" + n)
     monkeypatch.setattr(E, "colima_mounts", lambda profile="": [])
+    monkeypatch.setattr(E, "colima_resource_args", lambda: [])   # sized elsewhere
     monkeypatch.setattr(E.os.path, "expanduser",
                         lambda p: p.replace("~", "/Users/me", 1))
     with pytest.raises(D.Unshared) as e:
@@ -1512,3 +1513,34 @@ def test_docker_build_and_run_pass_env(monkeypatch):
     assert len(run_calls) == 1
     assert "env" in run_calls[0][1]
     assert run_calls[0][1]["env"] is not None
+
+
+# ---- PAD-1109: Colima's machine sized to the Mac --------------------------------
+
+def test_colima_gets_cpus_and_memory_from_the_macs_own_size():
+    gib = 1 << 30
+    assert E.colima_resource_args(10, 32 * gib) == ["--cpu", "4", "--memory", "4"]
+    assert E.colima_resource_args(8, 16 * gib) == ["--cpu", "4", "--memory", "4"]
+    assert E.colima_resource_args(6, 8 * gib) == ["--cpu", "3", "--memory", "3"]
+    assert E.colima_resource_args(4, 8 * gib) == ["--cpu", "2", "--memory", "3"]
+    assert E.colima_resource_args(2, 4 * gib) == []          # Colima's own defaults
+    assert E.colima_resource_args(0, 0) == []
+
+
+def test_colima_start_carries_the_resources_after_the_mounts():
+    argv = E.colima_start_argv("colima", resources=["--cpu", "4", "--memory", "4"])
+    assert argv[-4:] == ["--cpu", "4", "--memory", "4"]
+    assert argv[:2] == ["colima", "start"]
+
+
+def test_the_pacer_env_names_the_frozen_app_on_a_mac(monkeypatch):
+    monkeypatch.setattr(E.sys, "platform", "darwin")
+    monkeypatch.setattr(E.sys, "executable", "/Applications/P.app/Contents/MacOS/P")
+    monkeypatch.setattr(E.sys, "frozen", True, raising=False)
+    assert E.mac_pacer_env() == ["PAD_PACER=/Applications/P.app/Contents/MacOS/P"]
+    monkeypatch.setattr(E.sys, "frozen", False, raising=False)
+    env = E.mac_pacer_env()
+    assert env[0] == "PAD_PACER=/Applications/P.app/Contents/MacOS/P"
+    assert env[1].startswith("PAD_PACER_SCRIPT=") and env[1].endswith("padrelay.py")
+    monkeypatch.setattr(E.sys, "platform", "win32")
+    assert E.mac_pacer_env() == []

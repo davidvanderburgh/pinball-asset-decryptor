@@ -468,6 +468,22 @@ ffplay_channel_args() {
         echo "-ac $1"
     fi
 }
+# THE CUSHION, ON THE MAC (PAD-1109). The box's stream arrives through docker
+# exec from a container Colima can starve (its machine has 2 CPUs unless told
+# otherwise; the renderer drew 14 fps there), in lumps, and on a Mac a player
+# left waiting loses the next second of sound while the audio queue restarts:
+# a game's sound, consumed in full, was never heard. The app's own binary
+# (PAD_PACER, pyinstaller_entry.py --pace; a developer's python with
+# PAD_PACER_SCRIPT) runs padrelay.py's pacer here: reads what arrives, writes
+# exactly real-time bytes 350 ms ahead, silence for what is late. Without a
+# pacer the stream goes straight through, as before.
+mac_pace() {
+    if [ -n "${PAD_PACER:-}" ] && [ -x "$PAD_PACER" ]; then
+        "$PAD_PACER" ${PAD_PACER_SCRIPT:+"$PAD_PACER_SCRIPT"} --pace "$rate" "$ch"
+    else
+        cat
+    fi
+}
 # WHAT REACHED THE MAC (PAD-1109). The box's relay says what it sent, but it
 # reads at the game's own pace whatever happens downstream, so it read just as
 # healthy while Colima swallowed the stream and ffplay got 310 KB in all. This
@@ -518,6 +534,38 @@ ffplay_status() {
         }
         NF { print "[box] ffplay: " $0; fflush() }' >&2
 }
+# THE MAC'S SOUND OUTPUTS, ONCE PER RUN (PAD-1109). With the whole stream
+# proven to reach ffplay and its clock running at real time, the sound is
+# going somewhere the user does not hear; this says what outputs there are
+# and which is the default, so the log and the user's Sound settings can be
+# compared. system_profiler can take seconds: 15 s at most, and off a Mac
+# nothing is said.
+mac_outputs() {
+    [ "$(uname -s)" = Darwin ] || return 0
+    local f p w
+    f=$(mktemp "${TMPDIR:-/tmp}/padaudio.XXXXXX") || return 0
+    system_profiler SPAudioDataType >"$f" 2>/dev/null &
+    p=$!
+    ( sleep 15; kill "$p" 2>/dev/null ) >/dev/null 2>&1 &
+    w=$!
+    wait "$p" 2>/dev/null
+    kill "$w" 2>/dev/null
+    awk '
+        /^ {8}[^ ].*:$/ { name = $0; sub(/^ +/, "", name); sub(/:$/, "", name) }
+        /Output Channels:/ { out[name] = 1 }
+        /Default Output Device: Yes/ { def = name }
+        /Output Source:/ { src[name] = $0; sub(/.*Output Source: */, "", src[name]) }
+        END {
+            n = 0
+            for (d in out) {
+                n++
+                line = line (line == "" ? "" : "; ") d (src[d] != "" ? " (" src[d] ")" : "") (d == def ? " [default]" : "")
+            }
+            if (n) print "[box] speaker: Mac outputs: " line
+            else print "[box] speaker: the Mac lists no sound output"
+        }' "$f"
+    rm -f "$f"
+}
 host_player() {
     [ "${PAD_AUDIO:-1}" = 0 ] && return 0
     fmt=""
@@ -548,6 +596,12 @@ host_player() {
     echo "[box] speaker: $fpbin ($(ffplay -version 2>/dev/null | head -n 1 | cut -d' ' -f1-3))"
     left=$(env | grep -E '^(SDL_|AUDIODEV=|DYLD_|PYTHON)' | cut -d= -f1 | sort | tr '\n' ' ')
     [ -n "$left" ] && echo "[box] speaker: started without the app's ${left% }"
+    mac_outputs
+    if [ -n "${PAD_PACER:-}" ] && [ -x "$PAD_PACER" ]; then
+        echo "[box] speaker: the stream is paced on this Mac by $PAD_PACER"
+    else
+        echo "[box] speaker: no pacer on this Mac (PAD_PACER); the stream goes straight to ffplay"
+    fi
     # NOT exec'd, and STARTED AGAIN IF IT STOPS (PAD-832), so the TERM that
     # takes this player down at the end has to reach ffplay as well. Killing
     # ffplay is enough: the docker exec feeding it dies on its next write.
@@ -579,6 +633,7 @@ host_player() {
         # from a command without it (PAD-1109).
         docker exec "$NAME" python3 /pad/rig/padrelay.py --pipe \
                 "$BOX_FIFO" "${PAD_AUDIO_CTL:+$BOX_CTL}" |
+            mac_pace |
             mac_meter |
             env -i HOME="${HOME:-}" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
                 TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-en_US.UTF-8}" \

@@ -34,5 +34,33 @@ if __name__ == "__main__":
         from pinball_decryptor.mcp import main as mcp_main
         sys.exit(mcp_main())
 
+    # The Mac emulator's sound cushion (PAD-1109): the frozen binary with
+    # --pace runs tools/spike2_emu/padrelay.py's pacer between docker exec and
+    # ffplay, so the speaker is never starved by a lumpy transport. The app's
+    # own Python, because a Mac has no other for certain; nothing of the GUI
+    # is imported for it.
+    if "--pace" in sys.argv:
+        import importlib.util
+        import os
+        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        # a Mac bundle keeps its data under Contents/Resources (PyInstaller 6
+        # symlinks it from Contents/Frameworks, where _MEIPASS points); a
+        # source tree keeps it beside installer/
+        relay = ""
+        for d in (base, os.path.join(base, os.pardir, "Resources"),
+                  os.path.join(base, os.pardir)):
+            cand = os.path.join(d, "tools", "spike2_emu", "padrelay.py")
+            if os.path.isfile(cand):
+                relay = cand
+                break
+        if not relay:
+            print("[pace] no tools/spike2_emu/padrelay.py near %s" % base,
+                  file=sys.stderr)
+            sys.exit(2)
+        spec = importlib.util.spec_from_file_location("padrelay", relay)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.exit(mod.pace_main(sys.argv[sys.argv.index("--pace") + 1:]))
+
     from pinball_decryptor.webui.host import main
     sys.exit(main(sys.argv[1:]))

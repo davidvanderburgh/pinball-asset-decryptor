@@ -143,9 +143,10 @@ def test_pipe_gives_up_and_says_so_when_no_fifo_appears(relay, tmp_path, capsys)
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs here")
-def test_pipe_copies_the_fifo_to_its_output_at_the_volume(relay, tmp_path, capsys):
+def test_pipe_copies_the_fifo_to_its_output_at_the_volume(relay, tmp_path, capsys, monkeypatch):
     import io
     import threading
+    monkeypatch.delenv("PAD_AUDIO_LEAD_MS", raising=False)   # plain is the default
     fifo = str(tmp_path / "audio.fifo")
     os.mkfifo(fifo)
     ctl = tmp_path / "ctl.json"
@@ -160,3 +161,132 @@ def test_pipe_copies_the_fifo_to_its_output_at_the_volume(relay, tmp_path, capsy
     assert struct.unpack("<3h", out.getvalue()) == (1000, -1000, 15000)
     err = capsys.readouterr().err
     assert "over docker exec" in err and "6 bytes forwarded" in err
+
+
+# ---- PAD-1109: the paced stream the Mac's player never waits for -----------
+
+class _Clock:
+    """A clock the pump's own sleeps advance; `at` hooks run when it passes."""
+
+    def __init__(self):
+        self.t = 0.0
+        self.hooks = []
+
+    def now(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+        for when, fn in list(self.hooks):
+            if self.t >= when:
+                self.hooks.remove((when, fn))
+                fn()
+
+
+def _paced(relay, feed, lead_ms=350, close_at=0.5, vol=None, settle=0.0, **kw):
+    """Run paced_pump over a real pipe: `feed` is written by a thread (a
+    pipe's buffer is small), the pipe is closed when the fake clock passes
+    `close_at`; `settle` seconds of REAL time at the first sleep let the
+    reader take the whole feed first."""
+    import threading
+    import time as _time
+    r, w = os.pipe()
+
+    def feeder():
+        os.write(w, feed)
+    threading.Thread(target=feeder, daemon=True).start()
+    clk = _Clock()
+    if settle:
+        clk.hooks.append((0.0, lambda: _time.sleep(settle)))
+    def close():
+        # fake time outruns real time; the reader needs a moment to see EOF
+        os.close(w)
+        _time.sleep(0.2)
+    clk.hooks.append((close_at, close))
+    out, said = [], []
+    n = relay.paced_pump(r, out.append, vol or relay.Volume(None), said.append,
+                         44100, 2, lead_ms, clock=clk.now, sleep=clk.sleep, **kw)
+    os.close(r)
+    return b"".join(out), said, n
+
+
+def test_paced_stream_is_continuous_real_time_with_silence_for_gaps(relay):
+    sound = _pcm(*([1000, -1000] * 441))            # 10 ms of sound
+    out, said, n = _paced(relay, sound, close_at=0.5, settle=0.2)
+    bps = 176400
+    lead = bps * 350 // 1000
+    # the sound, whole and frame-aligned, inside the first lead; silence
+    # everywhere else; in all what 0.5 s of real time needs plus the lead
+    at = out.index(sound)
+    assert at % 4 == 0 and at <= lead + 4 * 1764, at   # the first write may be the lead alone
+    assert out[:at] == bytes(at)
+    assert out[at + len(sound):at + len(sound) + 4000] == bytes(4000)
+    assert abs(n - (bps // 2 + lead)) <= 2 * 1764, n
+    assert n % 4 == 0
+
+
+def test_paced_stream_drops_a_source_that_ran_too_far_ahead(relay):
+    bps = 176400
+    two_s = bytes(range(256)) * (2 * bps // 256)   # 2 s, recognisable bytes
+    out, said, n = _paced(relay, two_s, close_at=0.05, settle=0.4)
+    # a source 2 s ahead is cut back to the 350 ms lead: not everything
+    # passes, and what the end flushes is the source's own tail
+    assert n < len(two_s), n
+    assert out.endswith(two_s[-1764:])
+
+
+def test_paced_stream_scales_by_the_volume_and_says_what_it_filled(relay, tmp_path):
+    p = tmp_path / "ctl.json"
+    _write(p, gain=0.5, muted=False)
+    vol = relay.Volume(str(p))
+    sound = _pcm(*([2000, -2000] * 441))
+    relay_report = relay.REPORT_S
+    try:
+        relay.REPORT_S = 0.3
+        out, said, n = _paced(relay, sound, close_at=0.5, vol=vol, settle=0.2)
+    finally:
+        relay.REPORT_S = relay_report
+    half = _pcm(*([1000, -1000] * 441))
+    assert half in out and out.index(half) % 4 == 0
+    assert said and "silence filled in" in said[0], said
+
+
+def test_the_fmt_file_gives_the_rate_and_channels(relay, tmp_path):
+    p = tmp_path / "audio.fmt"
+    assert relay.read_fmt(str(p)) == (44100, 2)
+    p.write_text("48000 1" + chr(10))
+    assert relay.read_fmt(str(p)) == (48000, 1)
+    p.write_text("junk")
+    assert relay.read_fmt(str(p)) == (44100, 2)
+
+
+def test_pace_reads_stdin_and_writes_a_paced_stream(relay, monkeypatch, capsys):
+    """--pace on the Mac: the app's binary between docker exec and ffplay."""
+    import io
+    import threading
+    import time as _time
+    monkeypatch.delenv("PAD_AUDIO_LEAD_MS", raising=False)
+    r, w = os.pipe()
+    sound = _pcm(*([3000, -3000] * 441))
+    clk = _Clock()
+
+    def feeder():
+        os.write(w, sound)
+    threading.Thread(target=feeder, daemon=True).start()
+    clk.hooks.append((0.0, lambda: _time.sleep(0.2)))
+
+    def close():
+        os.close(w)
+        _time.sleep(0.2)
+    clk.hooks.append((0.3, close))
+    out = io.BytesIO()
+    rc = relay.pace_main(["44100", "2"], fd=r, out=out, clock=clk.now, sleep=clk.sleep)
+    os.close(r)
+    assert rc == 0
+    got = out.getvalue()
+    assert sound in got and got.index(sound) % 4 == 0
+    assert len(got) >= 176400 * 350 // 1000
+    err = capsys.readouterr().err
+    assert "pacing the stream on the Mac: 44100 Hz x 2 ch, 350 ms ahead" in err
+    assert "bytes paced to the player" in err
+    assert relay.pace_main(["x"]) == 2

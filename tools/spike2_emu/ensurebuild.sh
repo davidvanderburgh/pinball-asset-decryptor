@@ -461,6 +461,23 @@ pad_ensure_bridge() {
 # drive WSL started without. Says which, and what to do; the caller exits.
 pad_card_unseen() {
     echo "[$2]   $1" >&2
+    # THE MAC'S CONTAINER (PAD-1109): /pad/cards is padbox.sh's mount of the
+    # card's folder. macOS keeps Downloads, Desktop and Documents behind a
+    # permission, and the VM's share of them is served by whoever started
+    # Colima: started from Terminal without that permission, a card the app
+    # opened fine read "Operation not permitted" in here.
+    case $1 in
+        /pad/cards/*)
+            echo "[$2] cannot be opened inside the emulator's container on this Mac" >&2
+            echo "[$2] (it opens fine in the app). macOS keeps Downloads, Desktop and" >&2
+            echo "[$2] Documents behind a permission, and the container sees them" >&2
+            echo "[$2] through whoever started Colima. Either stop Colima in Terminal" >&2
+            echo "[$2] (colima stop) and let the app start it again, grant that" >&2
+            echo "[$2] program access to the folder (System Settings > Privacy &" >&2
+            echo "[$2] Security > Files and Folders), or copy the card to a folder" >&2
+            echo "[$2] outside those three and pick it there." >&2
+            return 0 ;;
+    esac
     echo "[$2] cannot be opened from inside WSL, which is where the emulator" >&2
     echo "[$2] runs (it opens fine in the app, which runs on Windows)." >&2
     case $1 in

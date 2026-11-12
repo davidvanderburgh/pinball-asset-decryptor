@@ -91,8 +91,10 @@ def _run(d, body, timeout=60):
     script = "\n".join([
         _PRELUDE % {"dir": _q(d)},
         _function("ffplay_channel_args"),
+        _function("mac_pace"),
         _function("mac_meter"),
         _function("ffplay_status"),
+        _function("mac_outputs"),
         _function("host_player"),
         body, "",
     ])
@@ -205,6 +207,102 @@ printf 'Input #0, s16le, from pipe:0:\n' |
     played = [l for l in lines if l.startswith("[box] ffplay playing:")]
     assert [l.split()[3] for l in played] == ["1.00", "4.00", "7.00"], lines
     assert "aq= 4KB" in played[1], played
+
+
+_PROFILER = """Audio:
+
+    Devices:
+
+        MacBook Pro Microphone:
+
+          Default Input Device: Yes
+          Input Channels: 1
+          Manufacturer: Apple Inc.
+          Current SampleRate: 48000
+          Transport: Built-in
+          Input Source: MacBook Pro Microphone
+
+        MacBook Pro Speakers:
+
+          Default Output Device: Yes
+          Default System Output Device: Yes
+          Manufacturer: Apple Inc.
+          Output Channels: 2
+          Current SampleRate: 48000
+          Transport: Built-in
+          Output Source: MacBook Pro Speakers
+
+        Studio Display Speakers:
+
+          Manufacturer: Apple Inc.
+          Output Channels: 2
+          Current SampleRate: 48000
+          Transport: USB
+
+"""
+
+
+@needs_bash
+def test_the_macs_outputs_are_listed_with_the_default_marked():
+    # the profile is written by bash itself: here bash may be WSL's, whose
+    # temp dir Python cannot open
+    script = "\n".join(["set -u", "PROFILE=%s" % _q(_PROFILER),
+                        _function("mac_outputs"), r"""
+uname() { echo Darwin; }
+system_profiler() { printf '%s' "$PROFILE"; }
+mac_outputs
+"""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=60)
+    text = out.stdout.decode("utf-8", "replace")
+    assert text.startswith("[box] speaker: Mac outputs: "), text
+    assert "MacBook Pro Speakers (MacBook Pro Speakers) [default]" in text, text
+    assert "Studio Display Speakers" in text and "Microphone" not in text, text
+
+
+@needs_bash
+def test_off_a_mac_no_outputs_are_listed():
+    d = _fresh_dir()
+    script = "\n".join(["set -u", _function("mac_outputs"), r"""
+uname() { echo Linux; }
+mac_outputs; echo "RC=$?"
+"""])
+    out = subprocess.run(["bash", "-s"], input=script.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         timeout=30)
+    assert out.stdout.decode() == "RC=0\n", out.stdout
+
+
+@needs_bash
+def test_the_stream_is_paced_on_the_mac_by_the_apps_binary_when_given():
+    """PAD-1109: PAD_PACER (the frozen app, --pace) sits between docker exec
+    and ffplay; without one the stream goes straight through, as before."""
+    d = _fresh_dir()
+    rc, text = _run(d, r"""
+{ echo '#!/bin/sh'; echo "echo \"pacer: \$*\" >> \"$D/events\""; echo cat; } > "$D/pacer"; chmod +x "$D/pacer"
+PAD_PACER="$D/pacer"
+touch "$D/up"; printf 'PCM-BYTES' > "$D/feed1"; echo long > "$D/play1"
+host_player & HP=$!
+for i in $(seq 1 80); do [ -s "$D/heard1" ] && break; sleep 0.1; done
+sleep 0.3; kill $HP; wait $HP 2>/dev/null
+""")
+    ev = _cat(d, "events")
+    assert "pacer: --pace 44100 2" in ev, (ev, text)
+    # the three start together in one pipeline, so no order between them
+    assert "relay 1:" in ev and "player 1:" in ev, ev
+    assert _cat(d, "heard1") == "PCM-BYTES"
+    assert "[box] speaker: the stream is paced on this Mac by " in text, text
+    d2 = _fresh_dir()
+    rc, text = _run(d2, r"""
+PAD_PACER=
+touch "$D/up"; printf 'PCM-BYTES' > "$D/feed1"; echo long > "$D/play1"
+host_player & HP=$!
+for i in $(seq 1 80); do [ -s "$D/heard1" ] && break; sleep 0.1; done
+sleep 0.3; kill $HP; wait $HP 2>/dev/null
+""")
+    assert "no pacer on this Mac" in text, text
+    assert _cat(d2, "heard1") == "PCM-BYTES"
 
 
 @needs_bash

@@ -550,6 +550,9 @@ _SCENE_BASES = threading.local()
 # PAD-251: the Emulate tab can run a set WITHOUT the Scenes tab's edits (its own tick); set only
 # around write_overrides' patch computation.
 _SKIP_SCENE_EDITS = threading.local()
+# PAD-1197: the kinds the Emulate tab leaves out of this run's set (``.kinds``, keys of
+# :data:`.run_leave_out.KEYS`); set only around write_overrides' patch computation.
+_LEAVE_OUT = threading.local()
 # PAD-306: why this thread's last patch computation left the project's modes out (``.why``),
 # so write_overrides can put it in the set's manifest and Try it can say it, rather than
 # "the log says why" over a nine-minute log.
@@ -8121,6 +8124,23 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # nothing staged, but the card this is built from may hold our words
         stock_mode_edits = _stock_mode_words_to_restore(disk_f, parts,
                                                         assets_dir)
+    # PAD-1197: what the Emulate tab leaves out of this run, gone before anything is built
+    _left = frozenset(getattr(_LEAVE_OUT, "kinds", ()) or ())
+    if _left:
+        from . import run_leave_out as _RLO
+        log("Left out of this run (Emulate tab): %s. A card you build still carries them."
+            % _RLO.said(_left), "info")
+        if "sounds" in _left:
+            audio_edits, music_edits = type(audio_edits)(), type(music_edits)()
+        if "videos" in _left:
+            video_edits = type(video_edits)()
+        if "pictures" in _left:
+            image_edits = type(image_edits)()
+            texture_edits = type(texture_edits)()
+            radimg_edits = type(radimg_edits)()
+            glyph_edits = type(glyph_edits)()
+        if "modes" in _left:
+            own_clips = type(own_clips)()
     _save_hashcache(assets_dir)
     _stage_done(log, "scanning the assets for changes (checksumming every "
                 "sound and video against the Extract baseline)", t_scan)
@@ -8136,7 +8156,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # stop the Write), one sentence says they are left out, and the build goes
     # on exactly as one without the family would.
     from . import mode_write as _MW
-    _family = _mode_family_on()
+    _family = _mode_family_on() and "modes" not in _left
     # The own-sound gate, decided ONCE for this build.  A caller that closes
     # it (Try it's fast run) passes sound_ok=False, so a quick set can be
     # built beside a full Write without either touching the environment the
@@ -8151,7 +8171,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-306: an override set (boot_screen=False) is written into a folder, not mounted
     _mode_gate_kw = ({} if boot_screen
                      else {"ext4_available": _override_needs_no_mount})
-    if not _family:
+    if "modes" in _left:
+        pass                    # said once above, with the rest this run leaves out
+    elif not _family:
         _off = _MW.preview_left_out(assets_dir)
         if _off:
             log(_off, "warning")
@@ -8258,12 +8280,12 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-446: the clips that play one of several at random ride the modes'
     # delivery (the runtime, its port and clips.cfg on p2) but not the mode
     # maker's preview switch: a card of random clips carries no mode.
-    variant_slots, variant_prof = _variants_for_build(
-        assets_dir, dest_is_device, log, **_mode_gate_kw)
+    variant_slots, variant_prof = (({}, None) if "random_clips" in _left else _variants_for_build(
+        assets_dir, dest_is_device, log, **_mode_gate_kw))
     # PAD-494: a slot's files for the other music modes ride the same delivery, as
     # records of their own in the bank and MUSIC MODE in the operator menu
-    sound_modes, sound_modes_prof = _sound_modes_for_build(
-        assets_dir, dest_is_device, log, **_mode_gate_kw)
+    sound_modes, sound_modes_prof = ((None, None) if "music_modes" in _left else _sound_modes_for_build(
+        assets_dir, dest_is_device, log, **_mode_gate_kw))
     # PAD-685: the jukebox's intro videos go into the video bank by the random clips' road
     from . import clip_variants as _CVj
     _juke_clips = bool(sound_modes is not None and sound_modes.juke_rel
@@ -13849,7 +13871,8 @@ def _colour_signature(assets_dir):
 
 
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
-                    cancel=None, label=None, run_card=None, sound_ok=None, scene_edits=True):
+                    cancel=None, label=None, run_card=None, sound_ok=None, scene_edits=True,
+                    leave_out=()):
     """Build an OVERRIDE SET: the card files the user's edits touch, patched,
     and nothing else — so the emulator can run those edits without a rebuild.
 
@@ -13893,6 +13916,11 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     own sounds out with a reason in the log.  A parameter rather than the
     environment because a Try it can run beside a Write in the same process.
 
+    *leave_out* names the kinds of edit this set goes without (PAD-1197: the
+    Emulate tab's "Leave out of this run" ticks, :mod:`.run_leave_out`), so a
+    test of one picture is not a rebuild of the sound bank.  Recorded in the
+    manifest (``left_out``).
+
     *out_dir* is emptied first when it cannot be patched, and only if it is
     empty or already an override set (it carries :data:`OVERRIDE_MANIFEST`)
     — a stale file left behind would still be bound over the card, so "what is
@@ -13933,6 +13961,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         _KEEP_EXTRACTS.on = bool(getattr(_KEEP_EXTRACTS, "wanted", False))
         _SCENE_BASES.store = scene_bases = {}
         _SKIP_SCENE_EDITS.on = not scene_edits
+        from . import run_leave_out as _RLO
+        _LEAVE_OUT.kinds = frozenset(_RLO.clean(leave_out))
         _MODES_LEFT_OUT.why = ""
         # PAD-505: a set's files are plain files, so an edit may fill a hole
         _HOLE_WRITES.writes = held = []
@@ -13948,6 +13978,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             _KEEP_EXTRACTS.on = False
             _SCENE_BASES.store = None
             _SKIP_SCENE_EDITS.on = False
+            _LEAVE_OUT.kinds = frozenset()
             modes_left_out = getattr(_MODES_LEFT_OUT, "why", "") or ""
             _MODES_LEFT_OUT.why = ""
             _HOLE_WRITES.writes = None
@@ -14191,6 +14222,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         "removed": removed,
         # PAD-251: whether the Scenes tab's edits are in this set (the Emulate tab's tick)
         "scene_edits": bool(scene_edits),
+        # PAD-1197: the kinds the Emulate tab left out of this set
+        "left_out": list(_RLO.clean(leave_out)),
         # PAD-305: the color profile the set's pictures and clips carry
         "colour_profile": _colour_signature(assets_dir),
         # PAD-938: how its image.bin was built (a set from before the fix is built again)

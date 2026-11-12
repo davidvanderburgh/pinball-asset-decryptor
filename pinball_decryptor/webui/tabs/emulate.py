@@ -230,6 +230,9 @@ class EmulateTab(EmulateLogMixin, TabService):
         self.emulate_overrides_var = self.var("overrides", "bool", False)
         # PAD-251 (DragonRR): the Scenes tab's edits have their own on/off under the opt-in
         self.emulate_scene_edits_var = self.var("scene_edits", "bool", True)
+        # PAD-1197 (DragonRR): kinds of edit left out of the next runs, a comma
+        # list of run_leave_out keys.  Not remembered: each session has them all.
+        self.emulate_leave_out_var = self.var("leave_out", "str", "")
         # PAD-305: run with the stock colours, skipping the Color profile tab's
         # correction (the profile is made for the machine's screen, and the
         # emulator is watched on the PC's).  Not remembered: off each session.
@@ -371,6 +374,8 @@ class EmulateTab(EmulateLogMixin, TabService):
         self.emulate_overrides_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
         self.emulate_scene_edits_var.trace_add(
+            "write", lambda *_a: self._overrides_paint())
+        self.emulate_leave_out_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
         self.emulate_colour_stock_var.trace_add(
             "write", lambda *_a: self._on_colour_stock())
@@ -1046,7 +1051,8 @@ class EmulateTab(EmulateLogMixin, TabService):
         # into the project folder at Start, and neither may hide behind a
         # hover (must survive #4).
         self.set(assets=assets, ovr_hint=text, ovr_refused=False,
-                 scene_edits_offer=bool(assets) and self._project_has_scene_edits(assets))
+                 scene_edits_offer=bool(assets) and self._project_has_scene_edits(assets),
+                 leave_out_offer=self._leave_out_offer(assets))
         self._refresh_colour_note()
 
     def _refresh_colour_note(self):
@@ -1059,6 +1065,38 @@ class EmulateTab(EmulateLogMixin, TabService):
         except Exception:                                # noqa: BLE001
             on = False
         self.set(colour_offer=on)
+
+    def _leave_out(self):
+        """PAD-1197: the kinds this run leaves out (run_leave_out keys)."""
+        from ...plugins.stern import run_leave_out
+        try:
+            return run_leave_out.clean(self.emulate_leave_out_var.get())
+        except Exception:                                # noqa: BLE001
+            return ()
+
+    def _leave_out_offer(self, assets):
+        """PAD-1197: ``[{key, label, tip, on}]``, a tick for each kind the
+        project can leave out of a run.  A kind left out stays offered while
+        it is, so it can always be put back."""
+        from ...plugins.stern import run_leave_out
+        try:
+            keys = set(run_leave_out.offered(assets)) | set(self._leave_out())
+        except Exception:                                # noqa: BLE001
+            return []
+        left = set(self._leave_out())
+        return [{"key": k, "label": label, "tip": tip, "on": k in left}
+                for k, label, tip in run_leave_out.KINDS if k in keys]
+
+    @rpc
+    def set_leave_out(self, key, on):
+        """PAD-1197: a "Leave out of this run" tick was flipped."""
+        from ...plugins.stern import run_leave_out
+        left = set(self._leave_out())
+        if on:
+            left.add(str(key))
+        else:
+            left.discard(str(key))
+        self.emulate_leave_out_var.set(",".join(run_leave_out.clean(left)))
 
     def _project_has_scene_edits(self, assets):
         try:
@@ -2421,8 +2459,9 @@ class EmulateTab(EmulateLogMixin, TabService):
         fp = rig.assets_fingerprint(assets)
         manifest = stern_engine.read_override_manifest(out)
         scenes_on = self._scene_edits_on()
+        left = self._leave_out()
         why = rig.overrides_reason(manifest, card, assets, fp, run_card=picked,
-                                   scene_edits=scenes_on)
+                                   scene_edits=scenes_on, left_out=left)
         if not why:
             why = rig.preview_modes_reason(manifest, assets)
         if not why:
@@ -2451,6 +2490,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         try:
             counts, _mode, _val, files = stern_engine.write_overrides(
                 card, assets, out, scene_edits=scenes_on, progress=progress,
+                **({"leave_out": left} if left else {}),
                 log=lambda msg, level="info": self._log("[emulate] " + msg),
                 cancel=lambda: (self._stopping or self._stopped
                                 or self._cancel_prepare),
@@ -2631,8 +2671,12 @@ class EmulateTab(EmulateLogMixin, TabService):
         try:
             # "Runs on the caller's worker thread" (App's docstring), as
             # the Tk panel called it
+            # PAD-1197: a kind left out is not converted (only named when one is:
+            # the stand-ins for the App's callback keep its older signature)
+            left = self._leave_out()
             got = stage(assets, cancel_cb=cancelled, progress_cb=progress,
-                        confirm_cb=confirm)
+                        confirm_cb=confirm,
+                        **({"leave_out": left} if left else {}))
         except Exception as exc:                         # noqa: BLE001
             self._overrides_refuse(
                 "The replacements you assigned could not be applied to %s: %s"

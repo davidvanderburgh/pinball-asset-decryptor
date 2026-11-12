@@ -228,6 +228,11 @@ function CardSource({ s }) {
           label="Include my Scenes tab edits"
           title="On: the game runs with what you changed on the Scenes tab (and takes further edits there while it runs, for the screens it loads each time it shows them). Off: the scenes run as the card has them; everything else you replaced still applies." />
       </div>` : null}
+      ${s.overrides && (s.leave_out_offer || []).length ? html`<div class="emu-ovr-sub emu-leave-out">
+        <span class="small muted nw" ...${tip("For a quicker Start while you test one thing: what you tick here is not in this run, so it is not rebuilt or converted. Changing a tick builds your edits again once. Builds on the Write tab always carry everything. Back to all included each time the app starts.")}>Leave out of this run:</span>
+        ${s.leave_out_offer.map((o) => html`<${Check} key=${o.key} checked=${o.on} label=${o.label} title=${o.tip}
+          onChange=${(v) => call("emulate.set_leave_out", o.key, v)} />`)}
+      </div>` : null}
       ${s.overrides ? html`<div class="emu-ovr-sub">
         ${s.colour_offer ? html`<${Check} ns="emulate" k="colour_stock" checked=${!!s.colour_stock}
           label="Stock colors: leave out my color profile"

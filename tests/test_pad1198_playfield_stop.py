@@ -196,15 +196,25 @@ def test_api_stop_publishes_stopping(tmp_path, monkeypatch):
     assert pf.Playfield.api_stop(ns) is False
 
 
-def test_the_page_puts_stop_beside_pause():
+def test_the_page_puts_stop_at_the_far_left_in_red():
+    """David: outlined in red like the app's, at the bottom left so it is
+    visually separate from Pause and the rest."""
     pf_js = _text("tools", "spike2_emu", "pfpage", "pf.js")
     body = pf_js[pf_js.index("function runCluster(R)"):]
     body = body[:body.index("\n  }\n") + 4]
     assert 'api("stop")' in body and "R.stop" in body and "r.stopping" in body
     assert "Stop emulator" in body and "Stopping…" in body
-    # straight after Pause, before Restart game
-    assert body.index("box.append(pause)") < body.index("box.append(stop)") \
-        < body.index("box.append(restart)")
+    assert '"sm danger"' in body
+    # not in the run cluster beside Pause: handed back, first in the bar
+    assert "box.append(stop)" not in body
+    assert "return { el: box, stop, update };" in body
+    bar = pf_js[pf_js.index('const status = el("div", "pf-status");'):]
+    bar = bar[:bar.index("const states =")]
+    assert "if (run.stop) status.prepend(run.stop);" in bar
+    assert bar.index("status.append(chip)") < bar.index("status.prepend(run.stop)")
+    css = _text("tools", "spike2_emu", "pfpage", "pf.css")
+    assert ".btn.danger { color: var(--err); border-color: var(--err); " \
+        "background: transparent; }" in css
     assert "host.run(ctl.window_spec(), on_close=ctl.closed_by_user)" in \
         _text("tools", "spike2_emu", "playfield.py")
 

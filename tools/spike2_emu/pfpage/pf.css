@@ -48,6 +48,9 @@ button { font: inherit; color: inherit; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
 .btn.sm { height: 24px; padding: 0 9px; font-size: 12px; }
+/* the app's danger button (app.css .btn.danger): Stop emulator (PAD-1198) */
+.btn.danger { color: var(--err); border-color: var(--err); background: transparent; }
+.btn.danger:hover:not(:disabled) { background: rgba(240,112,95,.14); border-color: var(--err); }
 select.sel { height: 28px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); font: 12.5px var(--mono); padding: 0 6px; }
 
 /* ------------------------------------------------------------ rig badge */

@@ -316,6 +316,8 @@ function startMain() {
     const stxt = el("div", "txt", S.status || "");
     status.append(stxt);
     const run = runCluster(S.run);
+    // PAD-1198: Stop emulator on its own at the far left, away from Pause
+    if (run.stop) status.prepend(run.stop);
     status.append(run.el);
     const states = S.savestates ? stateCluster() : null;
     if (states) status.append(states.el);
@@ -430,10 +432,12 @@ function startMain() {
     const pause = btn("Pause", () => { pause.blur(); api("pause"); }, "sm");
     pause.title = "Freeze the game where it is, and carry on from there (Pause or F9)";
     box.append(pause);
-    // PAD-1198: Stop emulator, beside Pause - asked of the app that launched
-    // the run (its Stop, Spike 2 or Spike 3), so only a run with an app. The
-    // window closes itself when the run has gone; closing it (X) asks the
-    // same. Greyed as "Stopping…" once asked.
+    // PAD-1198: Stop emulator - asked of the app that launched the run (its
+    // Stop, Spike 2 or Spike 3), so only a run with an app. The window closes
+    // itself when the run has gone; closing it (X) asks the same. Red-outlined
+    // like the app's own Stop emulator (danger), and handed back on its own:
+    // the status bar puts it at the far left, apart from Pause and the rest.
+    // Greyed as "Stopping…" once asked.
     let stop = null;
     const showStopping = (on) => {
       stop.textContent = on ? "Stopping…" : "Stop emulator";
@@ -443,9 +447,8 @@ function startMain() {
       stop = btn("Stop emulator", () => {
         stop.blur();
         api("stop").then((ok) => { if (ok) showStopping(true); });
-      }, "sm");
+      }, "sm danger");
       stop.title = "End the emulator run, as Stop emulator in the app does (closing this window does too)";
-      box.append(stop);
     }
     // PAD-735: the app that launched the run has the game boot again; only a
     // run with an app. This window stays open (PAD-738), so the button follows
@@ -520,7 +523,7 @@ function startMain() {
       }
     };
     update(R || {});
-    return { el: box, update };
+    return { el: box, stop, update };
   }
 
   // ---- the save-state cluster (item 13) --------------------------------------

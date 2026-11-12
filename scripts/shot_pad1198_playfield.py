@@ -46,7 +46,7 @@ def main():
             pg.goto(url)
             pg.wait_for_timeout(3000)
             print("status bar buttons:",
-                  pg.evaluate("Array.from(document.querySelectorAll('.pf-run .btn'))"
+                  pg.evaluate("Array.from(document.querySelectorAll('.pf-status .btn'))"
                               ".map(b => b.textContent)"))
             pg.screenshot(path=out)
             print("shot", out)
@@ -55,7 +55,7 @@ def main():
                 pg.wait_for_timeout(1000)
                 req = os.path.join(scratch, "stop_emulator_2.req")
                 print("after the click:",
-                      pg.evaluate("Array.from(document.querySelectorAll('.pf-run .btn'))"
+                      pg.evaluate("Array.from(document.querySelectorAll('.pf-status .btn'))"
                                   ".map(b => b.textContent + (b.disabled ? ' (greyed)' : ''))"),
                       "| request for the app:", req if os.path.isfile(req) else "NOT WRITTEN")
             b.close()

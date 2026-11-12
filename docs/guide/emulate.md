@@ -138,6 +138,7 @@ every insert lit live and every switch clickable.
   clickable switch-list schematic instead, with the same buttons.
 - **Pause** (the Pause key or F9, in either window) freezes the whole game,
   video and sound too. The next press carries on from that frame.
+- **Stop emulator** (bottom left, outlined red) stops the run as the tab's Stop does. Closing the playfield window stops it too.
 
 ### Save states
 

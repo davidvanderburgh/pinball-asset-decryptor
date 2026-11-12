@@ -348,6 +348,57 @@ def scene_hide(run, page, project, build, nodes, tag):
     build_only(run, page, project, build, tag)
 
 
+def tour(run, page, project):
+    """The finished project, tab by tab: what David approves from."""
+    out = run.out
+    run.api("ui.pick_manufacturer", "stern")
+    run.api("ui.select_tab", "extract")
+    run.answer([CARD])
+    run.api("extract.browse_input")
+    time.sleep(3)
+    run.answer([project])
+    run.api("extract.browse_output")
+    time.sleep(3)
+    shot(page, os.path.join(out, "after_extract.png"))
+    run.api("ui.select_tab", "audio")
+    run.wait_rows("audio")
+    run.api("audio.select", ["audio/idx0000.wav"])
+    shot(page, os.path.join(out, "after_replace_audio.png"))
+    run.api("ui.select_tab", "video")
+    run.wait_rows("video")
+    try:                                 # the HEVC background clips
+        page.locator(".page input[placeholder='Search']").first.fill("BGPattern")
+        time.sleep(2)
+        run.api("video.select", "video/PK_BGPattern_PokeBallRed.mp4")
+        time.sleep(3)
+    except Exception as e:                           # noqa: BLE001
+        print("  video search:", e, flush=True)
+    shot(page, os.path.join(out, "after_replace_video.png"))
+    run.api("ui.select_tab", "images")
+    time.sleep(6)
+    shot(page, os.path.join(out, "after_replace_images.png"))
+    run.api("ui.select_tab", "text")
+    run.wait_rows("text")
+    shot(page, os.path.join(out, "after_replace_text.png"))
+    run.api("ui.select_tab", "scenes")
+    time.sleep(4)
+    rows = [r for r in (run.st("text_scenes").get("scenes") or [])
+            if "394c4a03" in r.get("d", "")]
+    if rows:
+        run.api("text_scenes.select", rows[0]["d"])
+        time.sleep(5)
+    shot(page, os.path.join(out, "after_scenes.png"))
+    run.api("ui.select_tab", "color")
+    time.sleep(4)
+    shot(page, os.path.join(out, "after_colors.png"))
+    run.api("ui.select_tab", "write")
+    time.sleep(4)
+    shot(page, os.path.join(out, "after_write.png"))
+    run.api("ui.select_tab", "emulate")
+    time.sleep(4)
+    shot(page, os.path.join(out, "after_emulate.png"))
+
+
 def build_only(run, page, project, build, tag):
     """Open the project and Build on Write again (no new edits)."""
     out = run.out
@@ -392,6 +443,8 @@ def main():
                 scene_hide(run, page, sys.argv[4], sys.argv[5],
                            [int(n) for n in sys.argv[6].split(",")],
                            sys.argv[7] if len(sys.argv) > 7 else "4")
+            elif mode == "tour":
+                tour(run, page, sys.argv[4])
             elif mode == "build":
                 build_only(run, page, sys.argv[4], sys.argv[5],
                            sys.argv[6] if len(sys.argv) > 6 else "3")

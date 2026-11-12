@@ -407,9 +407,9 @@ def write_card(original_path, assets_dir, output_path, log=None,
                 if not p.staged:
                     n_rec += _sidx_refresh(out, out_reader, p.card_path,
                                            p.node, None, log)
-            for rel, src in jobs:
+            for rel, whole in jobs:
                 n_rec += _sidx_refresh(out, out_reader, "/" + rel.lstrip("/"),
-                                       None, src, log)
+                                       None, whole, log)
             if n_rec:
                 log("Refreshed %d more SD-validation manifest record(s) for "
                     "the files written whole or in the sound containers."

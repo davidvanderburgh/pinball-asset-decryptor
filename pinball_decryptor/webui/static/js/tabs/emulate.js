@@ -189,7 +189,7 @@ function CardSource({ s }) {
       ${s.hint ? html`<span class="small dim emu-hint" role="status">${s.hint}</span>` : null}`}>
     <div class="row emu-src">
       <div class="grow emu-path" ref=${pathRef}>
-        <${Field} ns="emulate" k="card" value=${s.card} mono placeholder="Pick a Spike 2 card image" title=${s.card || ""} />
+        <${Field} ns="emulate" k="card" value=${s.card} mono placeholder=${era3 ? "Pick a Spike 3 card image" : "Pick a Spike 2 card image"} title=${s.card || ""} />
       </div>
       <${Button} drop onClick=${() => call("emulate.browse")}>Browse…<//>
       <${Button} kind="ghost" onClick=${() => call("emulate.open_cache")}

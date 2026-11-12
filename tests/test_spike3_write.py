@@ -386,3 +386,82 @@ def test_a_profiled_clip_never_goes_on_as_the_users_file(monkeypatch):
     monkeypatch.setattr(CP, "active", lambda d: None)
     monkeypatch.setattr(CP, "asset_map", lambda d, kind, rels: {"video/b.mp4": 1})
     assert E._colour_baked_videos("p", edits, s3) == {"video/b.mp4"}
+
+
+def test_write_card_runs_through_and_closes_the_original(tmp_path, monkeypatch):
+    """write_card's own control flow, every heavy part stood in for: the
+    core's writes go through the output volume, a file the core grows gets
+    its .sidx record from the file it will be, the grow step is handed the
+    volume's LUKS description, and the original's volume is closed at the
+    end (a loop variable once shadowed it: the build said Failed after
+    writing the whole card)."""
+    from types import SimpleNamespace as NS
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import ext4 as X
+    from pinball_decryptor.core import checksums as CK, ext4_grow as G
+    vols = []
+
+    class Vol:
+        size, master_key, segment_offset, _sector = 1 << 20, b"k" * 64, 16 << 20, 512
+        part_offset, part = 4096, {"sectors": 2048}
+        header = NS(segment=lambda i: {"encryption": "aes-xts-plain64"})
+
+        def __init__(self, path, writable):
+            self.path, self.writable, self.writes, self.closed = path, writable, [], False
+            self._pos = 0
+
+        def seek(self, o):
+            self._pos = o
+
+        def write(self, b):
+            self.writes.append((self._pos, bytes(b)))
+
+        def flush(self):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    def open_games(path, writable=False, key_source=None):
+        v = Vol(path, writable)
+        vols.append(v)
+        return v
+    monkeypatch.setattr(C, "open_games", open_games)
+    monkeypatch.setattr(X, "Ext4Reader", lambda f, o, s: NS(f=f))
+    monkeypatch.setattr(CK, "read_checksums", lambda d: {})
+    whole = tmp_path / "whole.asset"
+    whole.write_bytes(b"v" * 100)
+    monkeypatch.setattr(E, "_compute_patches", lambda *a, **k: (
+        [(512, b"patch")], (0, 1, 0, 0),
+        {"jobs": [("pk/v.asset", str(whole))], "cleanup": None}, None, None))
+    monkeypatch.setattr(E, "_work_dir", lambda *a, **k: str(tmp_path / "w"))
+    monkeypatch.setattr(W, "plan_sounds", lambda *a, **k: [])
+    monkeypatch.setattr(W, "_Copier", lambda s, d: NS(wait=lambda *a: None,
+                                                      join=lambda: None))
+    refreshed = []
+    monkeypatch.setattr(W, "_sidx_refresh", lambda vol, r, path, node, staged, log:
+                        refreshed.append((path, staged)) or True)
+    grown = {}
+
+    def grow(img, off, jobs, log=None, cancel=None, luks=None, part_size=None):
+        grown.update(img=img, off=off, jobs=list(jobs), luks=luks, size=part_size)
+        return len(jobs)
+    monkeypatch.setattr(G, "grow_files", grow)
+    monkeypatch.setattr(W.Spike3KeySource if hasattr(W, "Spike3KeySource") else
+                        __import__("pinball_decryptor.plugins.stern.spike3_keys",
+                                   fromlist=["x"]).Spike3KeySource,
+                        "discover", classmethod(lambda cls, **k: object()))
+    out = str(tmp_path / "out.raw")
+    counts = W.write_card("orig.raw", str(tmp_path), out)
+    assert counts == (0, 1, 0, 0)
+    src, dst = vols
+    assert src.closed and not src.writable
+    assert dst.writable and dst.closed and dst.writes == [(512, b"patch")]
+    assert refreshed == [("/pk/v.asset", str(whole))]
+    assert grown["jobs"] == [("pk/v.asset", str(whole))]
+    assert grown["luks"] == {"key": b"k" * 64, "offset": 16 << 20,
+                             "sector_size": 512, "cipher": "aes-xts-plain64"}
+    assert (grown["off"], grown["size"]) == (4096, 2048 * 512)
+    import json
+    rec = json.load(open(out + ".pad-build.json"))
+    assert rec["complete"] and rec["spike3"] and rec["build_id"]

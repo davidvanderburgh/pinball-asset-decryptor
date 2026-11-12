@@ -4925,10 +4925,13 @@ static void on_layered_priority(unsigned *r)
 }
 
 /* clip_play from anyone but us while our clip draws: the one surface is the game's now */
+static int ci_film_swap(unsigned *r);      /* PAD-1114: the co-op intro in the game's own start film */
 static void on_clip_play(unsigned *r)
 {
-    const char *name = (const char *)(unsigned long)r[0];
+    const char *name;
     unsigned i;
+    ci_film_swap(r);                          /* PAD-1114: before anything reads the name */
+    name = (const char *)(unsigned long)r[0];
     if (!disp_clip_ours) bd_clip_lost();      /* hud-layers: the backdrop is played again after it */
     if (disp_clip_ours) gbg_ours();           /* PAD-658: ours took the one surface (a full-screen clip, the backdrop) */
     else gbg_seen(r);                         /* PAD-658: the game's own (a background's, when it loops) */
@@ -15975,7 +15978,7 @@ static int coop_ball_held;               /* it says whose turn it is now */
 #define COOP_MSG_ID 0xC0090u             /* our borrow of it (no message id of the game's is this high) */
 /* PAD-1114: the co-op and team games' intro (below, "the intro"): its phases, the clip and the sound coop.cfg and
  * sounds.cfg name, and the first pick it holds back until it is over */
-enum { CI_OFF, CI_START, CI_PLAY, CI_BALL, CI_LANG };
+enum { CI_OFF, CI_START, CI_FILM, CI_PLAY, CI_BALL, CI_LANG };
 #define CI_MUSIC 4
 static struct {
     char clip[48];                       /* coop.cfg `intro <clip> <ms>` */
@@ -15990,10 +15993,23 @@ static struct {
     int again, freed, pick_who, step, lang, flips_seen;
     int lang_asks;                       /* the game's PLAYER LANGUAGE SELECT asks in this game (read at its start) */
     unsigned hold_adj;                   /* coop.cfg `intro_hold <id>`: TIMED PLUNGER, answered 0 while the ball is held */
+    volatile unsigned long film_at;      /* pm_ms() | 1 when the game's start film was asked for as the intro; 0 none */
+    char film_was[24];                   /* the game's own film it stands in for */
+    int film_veto;                       /* the right flipper held through Start: its release is no language flip */
+    int film_skip;                       /* both flippers stopped it: the game ends its intro screen */
+    int film_up_seen;                    /* the game's intro screen was seen up (its state word reads -1 at first) */
+    unsigned long begun;                 /* pm_ms() the co-op game's intro was asked for */
+    volatile int holding;                /* ball 1's serve waits (ci_ball_hold): no ball in the lane yet */
+    int lang_before;                     /* player 1's language word to keep (attract's, or at a skip; -1: none) */
+    unsigned long lang_until;            /* ... until then */
+    unsigned long film_seen;             /* pm_ms() the game's intro screen was last seen up */
+    void *film_hide[3];                  /* the screen's own words over the film, hidden while it is ours */
+    volatile unsigned film_root;         /* the intro screen's scene, seen as the game looks its words up */
     volatile int flips, go, go_down;
     unsigned music[CI_MUSIC], n_music, faded, quiet[8], n_quiet;
     const char *why;
 } ci;
+static void ci_find_seen(unsigned *r);   /* PAD-1114 round 2, below */
 /* PAD-1123: a co-op character's clip and sound once picked (below, "once picked"), and its copy of the game's End of
  * Ball Bonus loop (below, "on the bonus") */
 #define CPK_CHARS 16                     /* = COOP_CHARS */
@@ -17229,7 +17245,8 @@ static unsigned coop_pick_secs(unsigned long left)
  * with no countdown: Godzilla LE's line shows 20 characters, then its own CREDITS text (emulator) */
 static const char *coop_pick_how(void)
 {
-    return !coop_action ? "" : coop_flag_in || coop_flag_wait ? "ACTION/LAUNCH PICKS" : "ACTION PICKS";
+    return !coop_action ? "" : (coop_flag_in || coop_flag_wait) && !ci.holding ? "ACTION/LAUNCH PICKS"
+           : "ACTION PICKS";                                  /* PAD-1114: no ball to launch while its serve waits */
 }
 
 /* the steps the top line turns through, 1.5 s each: the name, what it does (where it says), how to take one */
@@ -17255,6 +17272,7 @@ static void coop_pick_say(void)
 }
 
 static void coop_intro_begin(const char *why);   /* PAD-1114, below */
+static int ci_film_due(void);
 static void coop_picked_begin(int c);           /* PAD-1123, below */
 static void coop_pick_open(unsigned t)
 {
@@ -17366,6 +17384,10 @@ static int coop_hides(unsigned id)
      * language flip (nor the game's skip of its film), and the ball waits in the lane for the language and the pick */
     if (coop_live && ci.phase >= CI_PLAY && id && (id == coop_left || id == coop.button || id == coop_action))
         return 1;
+    if (coop_live && (ci.phase == CI_FILM || ci.phase == CI_START) && id && id == coop_action)
+        return 1;                         /* PAD-1114 round 2: in the film the flippers choose the language */
+    if (coop_live && ci.holding && pk.open && id && (id == coop_left || id == coop.button || id == coop_action))
+        return 1;                         /* ... and the pick has them while ball 1 is not served yet */
     if (!coop_live || !pk.open || pk.moved || !id || (id != coop_left && id != coop.button && id != coop_action))
         return 0;
     w = coop_ball_waits();
@@ -17382,6 +17404,10 @@ static int coop_hides(unsigned id)
 static int coop_language_veto(unsigned sw, unsigned left_key, unsigned right_key)
 {
     unsigned id = sw == left_key ? coop_left : sw == right_key ? coop.button : 0u;
+    if (sw == right_key && ci.film_veto != 2 && (ci.film_veto == 1 || (!ci.film_at && ci_film_due()))) {
+        ci.film_veto = 2;                                     /* PAD-1114: held through Start, not a flip (once) */
+        return 1;
+    }
     return id && (coop_hides(id) || (edge_hid_n && edge_hidden(id) >= 0));
 }
 
@@ -18307,6 +18333,10 @@ static void coop_chars_arm(struct site *e)
     else if (save && coop_action)
         say("co-op characters: coop.cfg names no shooter lane - every Action press counts toward x2, a launch's too");
     coop_live = 1;
+    if (ci.clip[0] && pm_port_text("intro_hide_0") && pm_port_text("start_film_clips")) {   /* round 2 */
+        if (fn("find_text")) hook(fn("find_text"), ci_find_seen);
+        if (fn("find_node")) hook(fn("find_node"), ci_find_seen);
+    }
     if (ci.clip[0] && ci.hold_adj && !adj_wrap_arm()) {
         say("co-op intro: the adjustment getter cannot be wrapped - the game's TIMED PLUNGER may launch the held ball");
         ci.hold_adj = 0;
@@ -18387,6 +18417,10 @@ static void coop_chars_arm(struct site *e)
 #define CI_BALL_MS   20000ul
 #define CI_LANG_MS    6000ul             /* the language window closes this long after it opened or was last flipped */
 #define CI_STEP_MS    1500ul
+#define CI_FILM_FRESH_MS 15000ul         /* the game's film asked for this soon before the co-op game forms: it is the intro */
+#define CI_HELD_MS        1500ul         /* the right flipper held this soon before the game asks for its film: a co-op Start */
+#define CI_FILM_WAIT_MS   5000ul
+#define CI_LANG_GUARD_MS  1500ul         /* the attract's language held for this long into the intro */         /* a co-op game formed before the game asked for its film: it is waited for so long */
 #define BUS_MUSIC_BIT 0x01u              /* the music bus (item 150, as mode_file.c's BUS_MUSIC) */
 
 /* whether a co-op game's intro starts now: an intro on the card, not played in this game, ball 1 not out yet (its first
@@ -18404,11 +18438,72 @@ static int ci_skip(int left, int right, int *freed)
     return left && right && *freed == 3;
 }
 
+/* PAD-1114 round 2 (DoomWalrus666: "add language selection during the intro video in a small dialogue"): on a title
+ * whose port names its start films (`text start_film_clips`, Godzilla's intro1/3/4/6), a Start about to be co-op or
+ * team (the right flipper held, or the start menu's entry just picked) has the game's own film ask answered with the
+ * intro's clip: the game plays it in its own start-film scene, with its own PLAYER LANGUAGE SELECT bar over it. From
+ * the clip_play hook (the game's thread, at its Start). 1 = swapped. */
+static int ci_film_due(void)
+{
+    int held = coop_ch_n && coop_pick_on                      /* a held Start is a co-op game of one (PAD-1054) */
+               && (coop_button_held() || (coop.held_ms && pm_ms() - (coop.held_ms & ~1ul) <= CI_HELD_MS));
+    return ci.clip[0] && coop.on && (ci.phase == CI_START || held
+                                     || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS)
+                                     /* the start menu's team fill runs at ball_start, before the film is asked for */
+                                     || (coop_teammates() && ci.game != chg_game_now() + 1));
+}
+
+static int ci_film_swap(unsigned *r)
+{
+    const char *name = (const char *)(unsigned long)r[0], *list = pm_port_text("start_film_clips"), *p;
+    unsigned n;
+    if (!name || !list || !ci.clip[0]) return 0;
+    for (n = 0; name[n] && name[n] != ' '; n++) ;
+    for (p = list; *p; ) {
+        unsigned k;
+        while (*p == ' ') p++;
+        unsigned j;
+        for (k = 0; p[k] && p[k] != ' '; k++) ;
+        if (k > 1 && p[k - 1] == '*') {                       /* a prefix: Godzilla builds intro<N> (Pro drew intro2) */
+            for (j = 0; j < k - 1 && j < n && p[j] == name[j]; j++) ;
+            if (j == k - 1) break;
+        }
+        for (j = 0; j < n && k == n && p[j] == name[j]; j++) ;
+        if (k && k == n && j == n) break;
+        p += k;
+    }
+    if (!*p) return 0;
+    if (!ci_film_due()) {
+        static int said;
+        if (said < 6 && ++said)
+            say("co-op intro: the game's start film \"%s\" asked for - not a co-op Start (held %d, %lu ms since, menu %d, "
+                "teammates %u, phase %d)", name, coop_button_held(), coop.held_ms ? pm_ms() - (coop.held_ms & ~1ul) : 0ul,
+                tm.pending, coop_teammates(), ci.phase);
+        return 0;
+    }
+    str_copy(ci.film_was, sizeof ci.film_was, name, sizeof ci.film_was);
+    ci.film_at = pm_ms() | 1ul;
+    if (ci.film_veto != 2) ci.film_veto = coop_button_held();
+    ci.film_skip = 0;
+    r[0] = (unsigned)(unsigned long)ci.clip;
+    say("co-op intro: the game's start film \"%s\" asked for - \"%s\" plays in its place", ci.film_was, ci.clip);
+    return 1;
+}
+
 static void coop_intro_begin(const char *why)
 {
     unsigned g;
     if (!ci.clip[0] || ci.phase || !coop_ball_byte) return;
     g = chg_game_now() + 1;
+    if (ci.film_at && pm_ms() - (ci.film_at & ~1ul) < CI_FILM_FRESH_MS && ci.game != g) {
+        ci.game = g;
+        ci.why = why;
+        ci.pick_who = 0;
+        ci.phase = CI_START;
+        say("co-op intro: %s - the game's own intro screen plays it (\"%s\" in \"%s\"'s place)", why, ci.clip,
+            ci.film_was);
+        return;
+    }
     if (!ci_wanted(1, ci.game, g, *coop_ball_byte, coop_unserved(), coop_ball_waits())) {
         if (ci.game != g)
             say("co-op intro: not played - %s, but ball %u is already out", why, *coop_ball_byte);
@@ -18418,6 +18513,7 @@ static void coop_intro_begin(const char *why)
     ci.game = g;
     ci.why = why;
     ci.pick_who = 0;
+    ci.begun = pm_ms();
     ci.phase = CI_START;
     say("co-op intro: %s - the intro plays", why);
 }
@@ -18515,6 +18611,7 @@ static void ci_over(const char *how)
     unsigned k;
     int t = ci.pick_who;
     ci.phase = CI_OFF;
+    ci.film_veto = 0;                                         /* the next game's held Start is vetoed again */
     ci.pick_who = 0;
     say("co-op intro: over (%s)%s", how, t ? " - the first pick opens" : "");
     if (!coop.join_n) coop_turn_show();
@@ -18536,14 +18633,119 @@ static void ci_played(const char *how)
             say("co-op intro: the game's music %u asked for again", ci.music[k]);
         }
     say("co-op intro: %s after %lu ms", how, pm_ms() - ci.at);
+    if (ci.film_at) {                                         /* round 2: the language was the screen's own */
+        ci.film_at = 0;
+        ci_over(how);
+        return;
+    }
     ci.phase = CI_BALL;
     ci.step_at = pm_ms();
+}
+
+/* PAD-1114 round 2: the game's intro screen is up while its state word reads `value intro_state_up` (`data intro_state`, a
+ * pointer to the game's state object, + `value intro_state_at`): Godzilla LE 1.16 (emulator) 0 from the Start until its
+ * film ends or its own ~9.5 s run out, then 4. -1 when the port does not say. */
+static int ci_film_up(void)
+{
+    unsigned holder = data("intro_state"), obj;
+    if (!holder) return -1;
+    obj = *(volatile unsigned *)(unsigned long)holder;
+    if (obj < 0x10000u) return -1;
+    return *(volatile unsigned *)(unsigned long)(obj + (unsigned)pm_port_value("intro_state_at", 0x44))
+           == (unsigned)pm_port_value("intro_state_up", 0);
+}
+
+/* the intro screen's own words over its film (the place and the date, `text intro_hide_<k>`) kept hidden while the film
+ * is ours, every tick (the screen's timeline shows them). Its scene is demand-loaded (Godzilla's 762a9b99...), which the
+ * resource manager does not find by id, so its root is the one the game passes its node finders when it looks those
+ * words up itself (ci_find_seen) */
+static void ci_film_words(int hide)
+{
+    int k;
+    unsigned root = ci.film_root;
+    if (!root || !(can & PM_CAN_SCREENS)) return;
+    for (k = 0; k < 3; k++) {
+        char key[20];
+        const char *path;
+        pm_snprintf(key, sizeof key, "intro_hide_%d", k);
+        if (!(path = pm_port_text(key))) continue;
+        if (!ci.film_hide[k]) {
+            unsigned str = std_string(path), out[2] = { 0, 0 };
+            /* the boxes are nodes: pm_show on a text instance (its own vtable) faulted the game (emulator) */
+            if (fn("find_node")) ((void (*)(unsigned *, unsigned, unsigned *))(unsigned long)fn("find_node"))(out, root, &str);
+            ci.film_hide[k] = (void *)(unsigned long)out[0];
+            say("co-op intro: the intro screen's %s %s", path, out[0] ? "found - hidden while the film is ours"
+                : "not found in its scene");
+            if (!out[0]) ci.film_hide[k] = (void *)1;        /* asked once */
+        }
+        if (ci.film_hide[k] && ci.film_hide[k] != (void *)1) pm_show(ci.film_hide[k], hide ? 0 : 1);
+    }
+}
+
+/* the game's own node finders (`site find_node` / `find_text`: r1 the scene, r2 the path, a std::string): the intro
+ * screen's scene, the first time the game looks one of its words up */
+static void ci_find_seen(unsigned *r)
+{
+    const char *path, *want;
+    unsigned i;
+    if (!r[1] || !r[2]) return;
+    path = *(const char **)(unsigned long)r[2];
+    want = pm_port_text("intro_hide_0");
+    if (!path || !want) return;
+    for (i = 0; want[i] && want[i] != '.' && path[i] == want[i]; i++) ;
+    if (want[i] && want[i] != '.') return;                    /* not the screen's first box */
+    if (ci.film_root != r[1]) {
+        ci.film_root = r[1];
+        ci.film_hide[0] = ci.film_hide[1] = ci.film_hide[2] = 0;
+    }
+}
+
+
+/* the film is over (its end, a skip, the screen's own time): the game's own words back; a film longer than the screen's
+ * time goes on full screen as the runtime's own clip (the one surface still plays it), else straight to the pick - the
+ * language was chosen on the screen's own bar */
+static void ci_film_over(const char *how)
+{
+    unsigned long now = pm_ms(), played = now - (ci.film_at & ~1ul);
+    ci_film_words(0);
+    if (!ci.film_skip && ci.ms && played + 700ul < ci.ms) {
+        clip.on = 1;
+        clip.seen = 0;
+        clip.started = clip.last = now;
+        clip_owner = 0;
+        ci.at = (ci.film_at & ~1ul);
+        ci.phase = CI_PLAY;
+        say("co-op intro: the game's intro screen closed %lu ms in (%s) - the rest of it full screen", played, how);
+        return;
+    }
+    ci.swap_until = 0;
+    if (ci.request && pm_sound_active(ci.request)) pm_sound_stop(ci.request);
+    say("co-op intro: over after %lu ms (%s)", played, how);
+    ci.film_at = 0;
+    ci_over(how);
 }
 
 static void coop_intro_tick(void)
 {
     unsigned long now = pm_ms();
     int w;
+    if (!pm_player() && !ci.phase && ci_language_word(1)) {   /* attract only: not while ball 1's serve waits */
+        ci.lang_before = (int)(*ci_language_word(1) & 1u);    /* attract: the language the next game starts in */
+        ci.lang_until = 0;                                    /* (held until the intro begins, then a moment more) */
+    }
+    /* the right flipper held through a solo Start flips the language at its release, through more than the language
+     * keys (emulator: vetoed there, the word still flipped ~0.4 s after Start); so do the two releases of a skip, one
+     * of them the pick's - the language is put back to the attract's for the first CI_LANG_GUARD_MS of the intro, and
+     * to the one chosen for as long after a skip, before the player chooses again */
+    if (ci.lang_before >= 0 && ci_language_word(1) && (ci.phase || ci.lang_until)) {
+        if ((int)(*ci_language_word(1) & 1u) != ci.lang_before) {
+            unsigned p;
+            for (p = 1; p <= 4; p++) if (ci_language_word(p)) *ci_language_word(p) = (unsigned)ci.lang_before;
+            say("co-op intro: the language a held or skipping flipper flipped is put back (%d)", ci.lang_before);
+        }
+        if (!ci.lang_until && ci.phase) ci.lang_until = now + CI_LANG_GUARD_MS;
+        if (ci.lang_until && (long)(now - ci.lang_until) >= 0) ci.lang_before = -1, ci.lang_until = 0;
+    }
     if (!ci.phase) return;
     if (!coop_teammates()) {                                  /* the game is over (or another) */
         if (ci.phase == CI_PLAY) ci_played("cut short: the game ended");
@@ -18557,7 +18759,30 @@ static void coop_intro_tick(void)
     edge_take_held(coop_action);
     switch (ci.phase) {
     case CI_START:
+        if (!ci.film_at && pm_port_text("start_film_clips") && now - ci.begun < CI_FILM_WAIT_MS)
+            return;                                           /* round 2: the game's film is asked for a moment later */
         ci.lang_asks = ci_language_asks();
+        if (ci.film_at && now - (ci.film_at & ~1ul) < CI_FILM_FRESH_MS) {   /* round 2: the game's own screen plays it */
+            ci.at = now;
+            ci.freed = 0;
+            ci.faded = 0;
+            ci.n_music = 0;
+            ci.n_quiet = 0;
+            ci.looked = 0;
+            ci.film_seen = now;
+            ci.film_up_seen = 0;
+            ci.phase = CI_FILM;
+            ci_quiet();
+            if (ci.request) {
+                if (pm_sound_active(ci.request)) pm_sound_stop(ci.request);
+                ci.swap_until = now + (ci.sound_ms ? ci.sound_ms : ci.ms) + 1000ul;
+                pm_sound(ci.request);
+            }
+            ci_film_words(1);
+            say("co-op intro: the game's intro screen plays it with its own language bar%s",
+                ci.request ? ", its sound on the carrier" : "");
+            return;
+        }
         ci.at = now;
         ci.again = 0;
         ci.freed = 0;
@@ -18581,6 +18806,27 @@ static void coop_intro_tick(void)
         say("co-op intro: \"%s\" (%u ms) plays%s", ci.clip, ci.ms,
             ci.request ? ", its sound on the carrier" : " - no sound of its own on this card");
         return;
+    case CI_FILM: {
+        int up = ci_film_up();
+        ci_quiet();
+        ci_film_words(1);
+        if (up == 1) ci.film_seen = now, ci.film_up_seen = 1;
+        if (!ci.film_skip && ci_skip(switch_held(coop_left), switch_held(coop.button), &ci.freed)) {
+            ci.film_skip = 1;                                 /* its film stopped: the game ends its screen */
+            if (ci_language_word(1)) {                        /* the skip's releases are not a language choice */
+                ci.lang_before = (int)(*ci_language_word(1) & 1u);
+                ci.lang_until = now + CI_LANG_GUARD_MS;
+            }
+            ((void (*)(void))(unsigned long)fn("clip_stop"))();
+            say("co-op intro: skipped with both flipper buttons after %lu ms - the film stopped",
+                now - (ci.film_at & ~1ul));
+            return;
+        }
+        if ((up == 0 && ci.film_up_seen) || (up < 0 && now - (ci.film_at & ~1ul) >= ci.ms + 500ul)
+            || now - ci.film_seen > 3000ul || now - (ci.film_at & ~1ul) > ci.ms + CI_OVER_MS + 9000ul)
+            ci_film_over(ci.film_skip ? "skipped" : up == 0 ? "the game's screen closed" : "its length");
+        return;
+    }
     case CI_PLAY:
         ci_quiet();
         if (ci_skip(switch_held(coop_left), switch_held(coop.button), &ci.freed)) {
@@ -19304,6 +19550,51 @@ static unsigned coop_first_ball_answer(unsigned n, unsigned later, unsigned ball
     return n && later && ball == 1 ? 2u : ball;
 }
 
+/* PAD-1114 round 2 (DoomWalrus666: "The ball goes to the shooter lane at the start of the Intro video. I would like the
+ * ball to not go to the shooter lane until the video is complete or skipped"): the ball start's SERVE (`site serve_ball`,
+ * its call of the framework's serve, Godzilla LE 1.16 0x2a77ec -> 0x38910c, after it began the start display) waits on
+ * the game's own process - a tick at a time (`site proc_sleep`), as the award cards' end-of-game hold - while a co-op
+ * intro of this Start is due or plays. Not earlier in the ball start: held at its first-ball check (emulator) the game
+ * never put its intro screen up, the attract's own loop came back and took the surface 5 s in. Given up after the
+ * intro's own length + 8 s, or 2.5 s with no intro. */
+static void ci_ball_hold(unsigned ball)
+{
+    unsigned long t0 = pm_ms(), most, intro_end = 0;
+    int said = 0, picking = 0;
+    const char *why = "";
+    if (ball != 1 || !ci.clip[0] || !fn("proc_sleep")) return;
+    if (!(ci.phase || (ci.film_at && t0 - (ci.film_at & ~1ul) < 3000ul)
+          || (ci_film_due() && ci.game != chg_game_now() + 1))) return;
+    most = (ci.ms ? ci.ms : 30000ul) + 8000ul;
+    ci.holding = 1;
+    for (;;) {
+        unsigned long now = pm_ms();
+        if (!pm_player()) { why = "the game ended"; break; }
+        if (ci.phase >= CI_BALL) { why = "the intro waits for the ball"; break; }      /* the full-screen route */
+        if (ci.phase != CI_OFF) {
+            if (now - t0 >= most) { why = "the intro ran past its length"; break; }
+        } else if (ci.game != chg_game_now() + 1) {
+            if (now - t0 > 2500ul) { why = "no intro after all"; break; }
+        } else {                                              /* round 2: and the first pick, until it is taken */
+            if (!intro_end) intro_end = now;
+            if (pk.open || coop.join_n) picking = 1;
+            else if (picking) { why = "the character is taken"; break; }
+            else if (now - intro_end > 1500ul) { why = "no character pick"; break; }
+        }
+        if (!said++) say("co-op intro: ball 1's serve waits - the intro, the language and the character pick first");
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    }
+    ci.holding = 0;
+    if (said) say("co-op intro: ball 1 is served after %lu ms (%s)", pm_ms() - t0, why);
+}
+
+static unsigned (*ci_serve_game)(unsigned, unsigned, unsigned, unsigned);
+static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    ci_ball_hold(coop_ball_byte ? *coop_ball_byte : 1u);
+    return ci_serve_game(r0, r1, r2, r3);
+}
+
 static unsigned coop_first_ball_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     unsigned ball = coop_ball_game(r0, r1, r2, r3), n = coop_teammates();
@@ -19518,6 +19809,12 @@ static void coop_arm(void)
         struct site *fb = site("coop_first_ball");   /* PAD-1046: the ball start's read of the ball */
         unsigned at = fn("coop_first_ball"), to = at ? hook_call(at, (void *)coop_first_ball_wrap) : 0;
         coop_ball_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)to;
+        if (ci.clip[0] && fn("serve_ball") && !ci_serve_game) {   /* PAD-1114 round 2: the serve after the intro */
+            unsigned st = hook_call(fn("serve_ball"), (void *)ci_serve_wrap);
+            ci_serve_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)st;
+            say("co-op intro: %s", st ? "ball 1's serve waits for the intro" : "the serve could not be hooked - the "
+                "ball comes as the game serves it");
+        }
         if (!to)
             say("co-op: the ball start's first-ball read is %s - each teammate's ball 1 sets the team's ball-1 progress "
                 "back", !fb ? "not in the port" : !fb->ok ? "not this build's" : "not wrapped");

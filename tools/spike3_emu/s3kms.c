@@ -19,9 +19,10 @@
  *                      SECOND, on pokemon_le 0.82.0 (glWindow, 0x926c9c:
  *                      index < count_connectors, then connection == 1, else
  *                      "failed to get DRM connector for display_number N")
- *   gbm_bo             a struct of our own; get_fd hands out a dup'd memfd so
- *                      every bo has a distinct fd the EGL shim can map back
- *                      (pad_s3_bo_by_fd) when the game makes an EGL image
+ *   gbm_bo             a struct of our own, each its own memfd; get_fd hands
+ *                      out a dup of it, which the EGL shim maps back to the bo
+ *                      by the file's inode (pad_s3_bo_by_fd, PAD-1201: not by
+ *                      the fd number, which the game closes and gets again)
  *   page flip          pad_s3_flip(bo) -> the GL bridge presents the texture
  *                      that bo's EGL image was bound to (s3gl.c), then the
  *                      flip event is queued and the eventfd made readable
@@ -51,6 +52,7 @@
 #include <string.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
@@ -116,6 +118,7 @@ struct gbm_bo {
     struct gbm_device *dev;
     uint32_t w, h, stride, format, flags, handle;
     int dmafd;                    /* our memfd, what gbm_bo_get_fd dups      */
+    dev_t dev_id; ino_t ino;      /* that memfd's identity (pad_s3_bo_by_fd) */
     void *map;                    /* gbm_bo_map's pixels, made on demand     */
     void *user_data;
     void (*destroy_user_data)(struct gbm_bo *, void *);
@@ -124,7 +127,6 @@ union gbm_bo_handle { void *ptr; int32_t s32; uint32_t u32; int64_t s64; uint64_
 
 #define MAXBO 64
 static struct gbm_bo *bos[MAXBO];
-static int bo_fds[MAXBO][8];      /* every fd handed out for each bo         */
 static uint32_t fb_bo[256];       /* fb id -> bo handle                      */
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 
@@ -142,6 +144,22 @@ static void say(const char *fmt, ...)
     char b[400]; va_list ap; int n;
     va_start(ap, fmt); n = vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
     if (n > 0) { if (n > (int)sizeof b - 1) n = sizeof b - 1; (void)!write(2, b, n); }
+}
+
+/* PAD-1201 diagnostic, PAD_S3_KMS_TRACE=N: N lines of flip timing (ms on the
+ * monotonic clock, the calling thread) once the run is past its first 3000
+ * flips, so a run says when the game flips each screen and when it is told
+ * the flip finished. */
+static void ktrace(const char *what, uint32_t crtc, int n)
+{
+    static int left = -1;
+    struct timespec t;
+    if (left < 0) { const char *e = getenv("PAD_S3_KMS_TRACE"); left = e ? atoi(e) : 0; }
+    if (!left || flips < 3000) return;
+    left--;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    say("[s3kms] t %ld.%06ld tid %ld %s crtc %u n %d\n", (long)(t.tv_sec % 1000),
+        t.tv_nsec / 1000,(long)syscall(SYS_gettid), what, crtc, n);
 }
 
 static void init_once(void)
@@ -352,6 +370,7 @@ int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb, uint32_t flags, void *da
 {
     uint64_t one = 1;
     (void)fd; (void)flags;
+    ktrace("flip", crtc, 0);
     show_fb(crtc, fb);
     pthread_mutex_lock(&mu);
     if (pend_n < 8) { pend_crtc[pend_n] = crtc; pend_data[pend_n++] = data; }
@@ -373,6 +392,7 @@ int drmHandleEvent(int fd, drmEventContext *ctx)
     n = pend_n; memcpy(d, pend_data, sizeof d); memcpy(c, pend_crtc, sizeof c); pend_n = 0;
     pthread_mutex_unlock(&mu);
     clock_gettime(CLOCK_MONOTONIC, &ts);
+    ktrace("event", n ? c[0] : 0, n);
     for (i = 0; i < n; i++) {
         flip_seq++;
         if (ctx->version >= 3 && ctx->page_flip_handler2)
@@ -406,8 +426,11 @@ struct gbm_bo *gbm_bo_create(struct gbm_device *dev, uint32_t w, uint32_t h,
     bo->dev = dev; bo->w = w; bo->h = h; bo->format = format; bo->flags = flags;
     bo->stride = w * 4; bo->handle = (uint32_t)i + 1;
     bo->dmafd = (int)syscall(SYS_memfd_create, "pad-s3-bo", 0);
+    {
+        struct stat st;
+        if (bo->dmafd >= 0 && fstat(bo->dmafd, &st) == 0) { bo->dev_id = st.st_dev; bo->ino = st.st_ino; }
+    }
     bos[i] = bo;
-    memset(bo_fds[i], -1, sizeof bo_fds[i]);
     pthread_mutex_unlock(&mu);
     say("[s3kms] gbm_bo_create %ux%u fmt %.4s flags 0x%x -> bo %u\n",
         w, h, (const char *)&format, flags, bo->handle);
@@ -416,12 +439,10 @@ struct gbm_bo *gbm_bo_create(struct gbm_device *dev, uint32_t w, uint32_t h,
 
 void gbm_bo_destroy(struct gbm_bo *bo)
 {
-    int k;
     if (!bo) return;
     if (bo->destroy_user_data) bo->destroy_user_data(bo, bo->user_data);
     pthread_mutex_lock(&mu);
     bos[bo->handle - 1] = NULL;
-    for (k = 0; k < 8; k++) bo_fds[bo->handle - 1][k] = -1;
     pthread_mutex_unlock(&mu);
     if (bo->map) free(bo->map);
     close(bo->dmafd);
@@ -439,26 +460,31 @@ void gbm_bo_set_user_data(struct gbm_bo *bo, void *d, void (*fn)(struct gbm_bo *
 { bo->user_data = d; bo->destroy_user_data = fn; }
 void *gbm_bo_get_user_data(struct gbm_bo *bo) { return bo->user_data; }
 
-int gbm_bo_get_fd(struct gbm_bo *bo)
-{
-    int fd = dup(bo->dmafd), k;
-    pthread_mutex_lock(&mu);
-    for (k = 0; k < 8; k++)
-        if (bo_fds[bo->handle - 1][k] < 0) { bo_fds[bo->handle - 1][k] = fd; break; }
-    pthread_mutex_unlock(&mu);
-    return fd;
-}
+int gbm_bo_get_fd(struct gbm_bo *bo) { return dup(bo->dmafd); }
 
-/* The EGL shim's way back from a dma-buf fd to the bo it is (0 = not ours). */
+/* The EGL shim's way back from a dma-buf fd to the bo it is (0 = not ours).
+ *
+ * BY THE FILE, NOT THE FD NUMBER (PAD-1201). This kept a table of the fd
+ * numbers each bo had handed out and matched the number. The game gets a bo's
+ * fd, makes its EGL image and CLOSES the fd before asking for the next bo's -
+ * so dup() hands the next bo the same number, and the stale entry of the
+ * first bo matched it first. Every image of a triple-buffered screen became
+ * bo 1's (fallout_le: "EGL image of bo 1" three times, then bo 4 three
+ * times); bos 2, 3, 5 and 6 never had a texture and their flips were dropped
+ * in pad_s3_present_bo, so each screen showed one frame in three: 20 fps of
+ * the game's 60, the stutter. Each bo is its own memfd, so the fd's inode
+ * says which bo it is whatever its number. */
 uint32_t pad_s3_bo_by_fd(int fd, uint32_t *w, uint32_t *h)
 {
-    int i, k;
+    int i;
     uint32_t r = 0;
+    struct stat st;
+    if (fstat(fd, &st) != 0) return 0;
     pthread_mutex_lock(&mu);
     for (i = 0; i < MAXBO && !r; i++)
-        if (bos[i])
-            for (k = 0; k < 8; k++)
-                if (bo_fds[i][k] == fd) { r = bos[i]->handle; *w = bos[i]->w; *h = bos[i]->h; break; }
+        if (bos[i] && bos[i]->ino == st.st_ino && bos[i]->dev_id == st.st_dev) {
+            r = bos[i]->handle; *w = bos[i]->w; *h = bos[i]->h;
+        }
     pthread_mutex_unlock(&mu);
     return r;
 }

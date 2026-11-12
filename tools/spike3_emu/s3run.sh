@@ -182,15 +182,31 @@ if [ "$BRIDGE" = 1 ]; then
         ln -sfn "$SD/tables" "$SD/dump/tables"
         # PAD_PAUSE_KEEPER=1 (PAD-1183): Pause / F9 - in this window or the
         # playfield's - is asked of s3keys.py, which runs as root beside the
-        # game and stops it; the renderer is the desktop user and may not
+        # game and stops it; the renderer is the desktop user and may not.
+        #
         # A second screen (PAD-1199: Fallout's Pip-Boy, on the other HDMI
         # output) gets the renderer's display-2 window, opened at half the
         # render size beside the game window - it renders 1920x1080 like the
         # backbox, and a second full-size window would cover the desktop.
         W2=${PAD_GL2_WIN_W:-$(( ${PAD_S3_W:-1920} / 2 ))}
         H2=${PAD_GL2_WIN_H:-$(( ${PAD_S3_H:-1080} / 2 ))}
+        # WHERE THE GAME WINDOW GOES (PAD-1201; Spike 2's PAD-811, watch.sh):
+        # the Emulate tab's display setting - full screen on a monitor, a
+        # rectangle, borderless - is display.conf on the rig board, read live
+        # by padglhost. Spike 3 never passed it, so its backbox always opened
+        # as a framed 1920x1080 window wherever the desktop put it, whatever
+        # the user had chosen. A hidden run (PAD_HIDDEN=1, a private display)
+        # leaves it alone, as watch.sh does.
+        # PAD_SLOT: the renderer remembers where its window was left in
+        # ~/.pad_windows.rig<N> by its slot, and without it every Spike 3
+        # run - a hidden one on a private display too - wrote the base rig's
+        # ~/.pad_windows, the spot David's own game window comes back to.
+        if [ "${PAD_HIDDEN:-0}" != 1 ] && [ -z "${PAD_DISPLAY_CONF:-}" ] && type pad_board_dir >/dev/null 2>&1; then
+            PAD_DISPLAY_CONF="$(pad_board_dir)/display.conf"
+        fi
         RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/dump/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game
-              PAD_GL2_WIN_W=$W2 PAD_GL2_WIN_H=$H2 PAD_PAUSE_KEEPER=1)
+              PAD_GL2_WIN_W=$W2 PAD_GL2_WIN_H=$H2 PAD_DISPLAY_CONF="${PAD_DISPLAY_CONF:-}"
+              PAD_SLOT="$SLOT" PAD_PAUSE_KEEPER=1)
         # AS THE DESKTOP'S USER, NOT ROOT (watch.sh learned it first): as
         # root, padglhost cannot attach to the WSLg X server's shared memory -
         # "MESA: error: Failed to attach to x11 shm" on repeat, 0.5 fps, a

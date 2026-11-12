@@ -140,6 +140,20 @@ Built (`s3build.sh` -> `~/.pad-s3/build`, `s3run.sh --bridge` runs it):
   size by `s3run.sh --window`) and dumps headless as `frames/display2.png`.
   The flip event reports the crtc it was for. One-screen titles (pokemon_le:
   crtc 52 only) are unchanged.
+  **Every buffer shown (PAD-1201)**: each screen was a flat 20 fps (the
+  game makes 60) - fallout_le gets a bo's dma-buf fd, makes its EGL image
+  and closes the fd before the next bo's, so dup() handed every bo the same
+  fd NUMBER and `pad_s3_bo_by_fd`, matching numbers, found bo 1 each time
+  ("EGL image of bo 1" x3, then bo 4 x3). Bos 2/3/5/6 never had a texture
+  and `pad_s3_present_bo` dropped their flips: one frame in three. The fd
+  is matched by its memfd's inode now (tests/test_spike3_kms_buffers.py
+  replays the game's order). Found by: the game at 30% of a core, a steady
+  19.8 flips/s a screen and 1% of the time waiting on the renderer
+  (`[s3gl] flips/s` every 10 s), then `PAD_S3_KMS_TRACE=N` (flip times per
+  crtc): the game flipped ~40/s a screen and never called drmHandleEvent.
+  Same run: s3run now hands the renderer the Emulate tab's display.conf
+  (not on a hidden run) and PAD_SLOT, so the game window obeys Game display
+  and remembers its spot per rig, not in rig 0's ~/.pad_windows.
 - `s3egl.c` (libEGL.so.1): GBM platform display, surfaceless contexts, TWO
   configs (XR24 and AR24 native visual ids - with only AR24 the game logged
   `failed to find egl config for gbm format` and retried create_window),

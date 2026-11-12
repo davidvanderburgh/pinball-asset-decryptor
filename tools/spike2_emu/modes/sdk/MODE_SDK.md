@@ -6737,7 +6737,7 @@ is in docs/plans/pad1041_prolonged_comp.md.
 
 C0untDeM0net (Pinside): "a high score display external from the games running on a TV ... capture the end game scores
 and user info if logged in, then push them to an external server separate from IC". Nothing for a mode to call: the
-Modes tab's **Score feed** puts `scorefeed.cfg` beside the runtime (`plugins/stern/score_feed.py`), and at the end of
+Play options tab's **Score feed** puts `scorefeed.cfg` beside the runtime (`plugins/stern/score_feed.py`), and at the end of
 each game the runtime posts one JSON object to the owner's server:
 
     {"source":"PAD score feed","game":"Godzilla LE 1.16","port":"godzilla_le 1.16","game_number":1,

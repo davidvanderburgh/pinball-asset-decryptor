@@ -302,7 +302,8 @@ def test_the_modes_tab_tick_and_its_levels(tmp_path, monkeypatch):
     assert state["hand_note_kind"] == "err" and state["hand_shown"] is True              # ticked: shown, in red
     assert svc.set_handicap(False) is True and HC.STAGED_KEY not in staged_changes.load(str(tmp_path))
     assert state["hand_shown"] is False                                                  # a game that cannot: hidden
-    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
+    # PAD-1204: the tick and its Levels... live on the Play options tab
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "playopts.js").read_text(encoding="utf-8")
     assert 'call("modes.set_handicap", v)' in js and "HandicapLevelsDialog" in js
 
 

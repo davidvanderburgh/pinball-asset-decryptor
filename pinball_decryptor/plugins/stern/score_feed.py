@@ -6,7 +6,7 @@ and user info if logged in, then push them to an external server separate from I
 machine: at the end of each game it posts one JSON object, the players' final scores and the Insider Connected login
 of each player who was logged in, to the address the owner gives (plain HTTP to an IPv4 address on their network).
 
-The Modes tab's Score feed (the project sidecar's ``score_feed: {"on": true, "url": "http://..."}``) puts
+The Play options tab's Score feed (the project sidecar's ``score_feed: {"on": true, "url": "http://..."}``) puts
 ``scorefeed.cfg`` beside the runtime, so a card with no modes of its own carries it too. It changes no score: a card
 with nothing else on it stays on Insider Connected."""
 import re
@@ -159,3 +159,51 @@ def cfg_text(url, title, game_elf, only):
     return ("# PAD-1204: each game's final scores, posted to the owner's own server\n"
             "feed %s\n" % url.strip() + ("title %s\n" % title if title else "") + (users + "\n" if users else "")
             + ("only\n" if only else ""))
+
+
+#: PAD-1204 (David: "I'd like to see the sample API contract for the scores API"): what the machine sends and what it
+#: expects back, as the Play options tab shows it. The fields are pad_mode_runtime.c feed_json's, in its order.
+FIELDS = (
+    ("source", "string", 'always "PAD score feed"'),
+    ("game", "string", "the game and its version, as the app names the card"),
+    ("port", "string", "the same in the app's short form (game key and version)"),
+    ("game_number", "integer", "games sent since the machine was switched on: 1, 2, 3..."),
+    ("time", "integer or null", "the machine's clock in Unix seconds; null when the clock was never set"),
+    ("players", "integer", "how many played, 1 to 4"),
+    ("scores", "array of integers", "each player's final score, player 1 first (one per player)"),
+    ("insider", "array of strings or null",
+     "each player's Insider Connected account id (8-4-4-4-12 hex, the same every game); null for a player who was "
+     "not logged in"),
+)
+#: a game's report as the machine sends it (two players, player 1 logged in)
+SAMPLE = {"source": "PAD score feed", "game": "Godzilla Premium/LE 1.16", "port": "godzilla_le 1.16",
+          "game_number": 3, "time": 1794510083, "players": 2, "scores": [123456780, 98765430],
+          "insider": ["3f2a9c1e-5b7d-4e20-8a61-0c9d2b4f7e13", None]}
+#: what the server answers, and what the machine does when it does not
+ANSWER = ("Answer with any 2xx status (200 or 204); the body is not read. Anything else, no answer within 5 s, or a "
+          "refused connection counts as not taken: the machine tries again 10 s later, 3 tries in all, then lets that "
+          "game go. The game never waits for your server.")
+
+
+def sample_request(url=PLACEHOLDER):
+    """The request the machine sends to *url* for :data:`SAMPLE`, as text (HTTP/1.0, one line of JSON)."""
+    import json
+    m = re.match(r"^http://([^/:?]+)(?::(\d+))?([/?].*)?$", (url or "").strip()) or \
+        re.match(r"^http://([^/:?]+)(?::(\d+))?([/?].*)?$", PLACEHOLDER)
+    host, port, path = m.group(1), m.group(2), m.group(3) or "/"
+    if not path.startswith("/"):
+        path = "/" + path
+    body = json.dumps(SAMPLE, separators=(",", ":"))
+    return ("POST %s HTTP/1.0\nHost: %s\nUser-Agent: PAD-score-feed\nContent-Type: application/json\n"
+            "Content-Length: %d\nConnection: close\n\n%s"
+            % (path, host + (":" + port if port and port != "80" else ""), len(body), body))
+
+
+def contract(url=""):
+    """The Play options tab's API contract for the score feed, for *url* (or the example address)."""
+    import json
+    good = url and not url_problem(url)
+    return {"request": sample_request(url.strip() if good else PLACEHOLDER),
+            "body": json.dumps(SAMPLE, indent=2),
+            "fields": [{"name": n, "type": t, "what": w} for n, t, w in FIELDS],
+            "answer": ANSWER}

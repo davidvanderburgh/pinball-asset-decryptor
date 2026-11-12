@@ -20595,7 +20595,7 @@ static void comp_arm(void)
  * the report is dropped (mode.log says why). send() with MSG_NOSIGNAL: a server that hangs up must never signal the
  * game. The address is an IPv4 address: a name lookup would hold the game up, so the app asks for the server's IP.
  * No TLS: the app refuses https://. The socket calls are weak: a game process without them says the feed is off.
- * scorefeed.cfg (beside the runtime, or /dump for a rig), written by the Modes tab's Score feed
+ * scorefeed.cfg (beside the runtime, or /dump for a rig), written by the Play options tab's Score feed
  * (plugins/stern/score_feed.py):
  *   feed <http://host[:port][/path]>   where to post
  *   title <words>                      the game's name for the report (the app's own name for the card)

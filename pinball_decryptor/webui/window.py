@@ -45,7 +45,7 @@ MULTIBOOT_PHASES = ("Media", "Copy", "Inject", "Verify")
 #: Which chip row a tab owns (Tk's PHASE_ROW_BY_TAB): None = no run row.
 PHASE_ROW_BY_KEY = {
     "Extract": "extract", "Compare": "extract", "Mod Pack": "extract",
-    "Write": "write", "Modes": "write", "Attract": "write", "Expression Lights": "write",
+    "Write": "write", "Modes": "write", "Attract": "write", "Expression Lights": "write", "Play Options": "write",
     "Emulate": "emulate", "Emulate JJP": "emulate",
     "Emulate Spike1": "emulate", "Emulate BoF": "emulate",
     "Emulate DP": "emulate",
@@ -534,6 +534,8 @@ class WebWindow:
             "Modes": self.modes_preview_on(mfr),
             # PAD-782: the attract mode editor rides the mode runtime (Stern Spike 2)
             "Attract": g("modes"),
+            # PAD-1204: the play options ride it too, and keep Insider Connected
+            "Play Options": g("modes"),
             # PAD-1040: the expression light shows ride it too, and are no part of the mode maker
             "Expression Lights": g("modes"),
             # PAD-802: Visual Pinball on the Spike 2 emulator (a preview until

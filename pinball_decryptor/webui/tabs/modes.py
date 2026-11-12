@@ -413,7 +413,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import mode_project as _MPk
         self.set(keeps_ic_head=_MPk.KEEPS_IC_HEAD, keeps_ic_note=_MPk.KEEPS_IC_NOTE)   # PAD-1204: their own group
         self.set(feed_on=False, feed_url="", feed_note="", feed_note_kind="", feed_shown=False,   # PAD-1204
-                 feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="")
+                 feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="", feed_contract=None)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -1540,7 +1540,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             else:
                 note = _SF.NOTE
         self.set(feed_shown=shown or on, feed_on=on, feed_url=url, feed_note=note, feed_note_kind=kind,
-                 feed_placeholder=_SF.PLACEHOLDER)
+                 feed_placeholder=_SF.PLACEHOLDER, feed_contract=_SF.contract(url))   # the Play options tab shows it
 
     @rpc
     def set_score_feed(self, on, url=None):

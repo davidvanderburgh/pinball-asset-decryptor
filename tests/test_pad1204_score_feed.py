@@ -307,30 +307,77 @@ def test_the_modes_tab_tick_and_its_address(tmp_path, monkeypatch):
     monkeypatch.setattr(SF, "title_refusal", lambda prof: "no port")
     svc._publish_feed(str(tmp_path))
     assert state["feed_shown"] is False                              # a game whose end it cannot see: hidden
-    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "playopts.js").read_text(encoding="utf-8")
     assert 'call("modes.set_score_feed", v)' in js and 'call("modes.set_score_feed", true, v)' in js
+    assert state["feed_contract"]["fields"][0]["name"] == "source"           # the API contract rides the state
 
 
-def test_what_keeps_insider_connected_has_its_own_section():
-    """David: "users see the banner at the top and assume they lose IC access" - the options that change no score sit
-    in a section of their own that says Insider Connected stays, and the banner says only modes and co-op hold the
-    reports back."""
+def test_what_keeps_insider_connected_has_a_tab_of_its_own():
+    """David: "users see the banner at the top and assume they lose IC access", then "this layout is too crammed ...
+    move these items to a separate tab": Handicap per player, Prolonged Competition, the score feed and inactivity
+    pausing the timers are on the Play options tab, which says Insider Connected keeps working; the Modes banner names
+    that tab, and co-op play (which holds the reports back) stays on the Modes tab."""
     from pinball_decryptor.plugins.stern import mode_project as MP
-    assert MP.KEEPS_IC_HEAD == "Keeps Insider Connected"
-    assert MP.KEEPS_IC_HEAD in MP.INSIDER_TAB_NOTE and "modes or co-op play" in MP.INSIDER_TAB_NOTE
-    assert "keep Insider Connected" in MP.KEEPS_IC_NOTE
-    for text in (MP.INSIDER_TAB_NOTE, MP.KEEPS_IC_NOTE):
-        assert "—" not in text
+    from pinball_decryptor.webui import tabs as T
+    from pinball_decryptor.webui.tabs import playopts as PO
+    assert ("playopts", "playopts", "Play Options", "Play options", "Make", "gear") in T.TABS
+    assert [t[0] for t in T.TABS].index("playopts") == [t[0] for t in T.TABS].index("defaults") + 1
+    assert "Play options tab" in MP.INSIDER_TAB_NOTE and "modes or co-op play" in MP.INSIDER_TAB_NOTE
+    assert "stays on Insider Connected" in MP.KEEPS_IC_NOTE
+    for text in (MP.INSIDER_TAB_NOTE, MP.KEEPS_IC_NOTE, PO.INTRO):
+        assert "\u2014" not in text
     tab = (ROOT / "pinball_decryptor" / "webui" / "tabs" / "modes.py").read_text(encoding="utf-8")
     assert "insider_note = MP.INSIDER_TAB_NOTE" in tab
-    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
-    def fn(name):
-        i = js.index("function %s(" % name)
-        return js[i:js.index("\nfunction ", i + 1)]
-    card = fn("KeepsIcCard")
+    win = (ROOT / "pinball_decryptor" / "webui" / "window.py").read_text(encoding="utf-8")
+    assert '"Play Options": g("modes"),' in win
+    page = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "playopts.js").read_text(encoding="utf-8")
     for call in ("modes.set_handicap", "modes.set_prolonged_comp", "modes.set_score_feed", "modes.set_idle_pause"):
-        assert call in card, call
-    assert "modes.set_coop" not in card                                  # co-op takes the reports off: not here
-    lst = fn("ModeList")
-    assert "modes.set_coop" in lst and "modes.set_handicap" not in lst and "modes.set_score_feed" not in lst
-    assert "<${KeepsIcCard} s=${s}" in js
+        assert call in page, call
+    assert "modes.set_coop" not in page and "FeedContract" in page
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
+    assert "modes.set_coop" in js
+    for call in ("modes.set_handicap", "modes.set_prolonged_comp", "modes.set_score_feed", "modes.set_idle_pause"):
+        assert call not in js, call
+    from pinball_decryptor.webui import help_content as HD
+    assert [t for t, _b in HD.sections_for("Play Options")] == [
+        "What it's for", "Handicap per player", "Prolonged Competition", "Score feed", "Inactivity pauses timers"]
+
+
+def test_the_play_options_tab_asks_the_modes_service_to_publish(monkeypatch):
+    from pinball_decryptor.webui.tabs import playopts as PO
+    said, state = [], {}
+
+    class Modes:
+        def project(self):
+            return "P"
+
+        def __getattr__(self, name):
+            if name.startswith("_publish_"):
+                return lambda project: said.append((name, project))
+            raise AttributeError(name)
+
+    tab = PO.PlayOptionsTab.__new__(PO.PlayOptionsTab)
+    monkeypatch.setattr(tab, "set", lambda **kw: state.update(kw), raising=False)
+    tab.window = type("W", (), {"service": lambda self, ns: Modes() if ns == "modes" else None})()
+    tab.on_show()
+    assert sorted(said) == sorted([("_publish_handicap", "P"), ("_publish_comp", "P"), ("_publish_feed", "P"),
+                                   ("_publish_idle", "P")]) and state["project"] == "P"
+
+
+def test_the_api_contract_is_what_the_machine_sends():
+    """David: "I'd like to see the sample API contract for the scores API". The sample is the runtime's own format:
+    the same keys in the same order as feed_json writes them, and a request the machine would send."""
+    import json as _json
+    from pinball_decryptor.plugins.stern import score_feed as SF
+    c = SF.contract("http://10.0.0.7:9000/pinball/scores")
+    head, body = c["request"].split("\n\n", 1)
+    lines = head.split("\n")
+    assert lines[0] == "POST /pinball/scores HTTP/1.0" and "Host: 10.0.0.7:9000" in lines
+    assert "Content-Type: application/json" in lines and "Content-Length: %d" % len(body) in lines
+    assert _json.loads(body) == SF.SAMPLE == _json.loads(c["body"])
+    src = RUNTIME.read_text(encoding="utf-8")
+    fmt = R._lift(src, "static unsigned feed_json(char *out, unsigned cap, const struct feed_report *r, const char *title,")
+    keys = list(dict.fromkeys(re.findall(r'\\"([a-z_]+)\\":', fmt)))     # "time" twice: a number, or null
+    assert keys == [f["name"] for f in c["fields"]] == list(SF.SAMPLE)
+    assert SF.contract("https://bad/")["request"].startswith("POST /scores HTTP/1.0\nHost: 192.168.1.50:8080")
+    assert "2xx" in c["answer"] and "3 tries" in c["answer"]

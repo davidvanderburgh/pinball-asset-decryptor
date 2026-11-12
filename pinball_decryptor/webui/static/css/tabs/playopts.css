@@ -1,0 +1,17 @@
+/* Play options tab (js/tabs/playopts.js, PAD-1204): the options that keep Insider Connected, one card each. */
+.po-page { gap: 16px; }
+.po-note { flex: none; }
+.po-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; align-items: start; }
+html.bp-1100 .po-grid { grid-template-columns: 1fr; }
+.po-opt .bd { display: flex; flex-direction: column; gap: 10px; }
+.po-does { margin: 0; color: var(--ink-2); line-height: 1.45; }
+.po-field { display: flex; flex-direction: column; gap: 4px; }
+.po-contract { border-top: 1px solid var(--line); padding-top: 8px; }
+.po-contract-hd { font: inherit; font-weight: 600; color: var(--ink-2); background: transparent; border: 0; padding: 2px 0;
+                  cursor: pointer; text-align: left; }
+.po-contract-bd { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.po-pre { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap;
+          word-break: break-all; max-height: 480px; overflow: auto; }
+.po-fields { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.po-fields th, .po-fields td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.po-fields th { color: var(--ink-3); font-weight: 600; }

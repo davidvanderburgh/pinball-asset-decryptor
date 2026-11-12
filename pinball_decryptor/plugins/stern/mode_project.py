@@ -2106,12 +2106,12 @@ INSIDER_NOTE = ("Insider Connected: players still log in on a card with modes, b
 INSIDER_TAB_NOTE = ("Insider Connected with modes or co-op play on the card: players still log in, but the machine "
                     "sends no game, score, high-score or achievement report to Insider Connected, and the game "
                     "awards no Insider achievements, because a mode's points are not the game's stock scoring. "
-                    "The options under Keeps Insider Connected change no score: a card with only those stays fully "
-                    "on Insider Connected.")
-#: PAD-1204: the Modes tab's group of the options that change no score, and what it says under its head
-KEEPS_IC_HEAD = "Keeps Insider Connected"
-KEEPS_IC_NOTE = ("These change no score. On a card with none of your modes and no co-op play, players keep Insider "
-                 "Connected as before: scores, high scores and achievements.")
+                    "The Play options tab's options (handicaps, Prolonged Competition, the score feed, inactivity "
+                    "pausing the timers) change no score: a card with only those stays fully on Insider Connected.")
+#: PAD-1204: the Play options tab's note, the options that change no score
+KEEPS_IC_HEAD = "Insider Connected keeps working"
+KEEPS_IC_NOTE = ("Nothing on this tab changes a score, so a card carrying only these stays on Insider Connected: "
+                 "players' scores, high scores and achievements reach it as before.")
 
 
 def insider_gate_words(label):

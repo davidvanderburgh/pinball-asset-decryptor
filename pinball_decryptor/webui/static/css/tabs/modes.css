@@ -15,12 +15,6 @@
 .modes-list .li .chip.sm { padding: 0 7px; }
 .modes-list-empty { padding: 10px 8px; }
 .modes-list-ft { flex-direction: column; align-items: flex-start !important; gap: 6px !important; padding: 8px 12px !important; }
-/* PAD-1204: the options that change no score, a section of their own that says Insider Connected stays */
-.modes-keeps-ic { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; flex: none; }
-.modes-keeps-ic-hd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
-.modes-keeps-ic-t { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
-.modes-keeps-ic-opts { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 28px; }
-.modes-keeps-ic-opt { gap: 4px; min-width: 200px; max-width: 340px; }
 .modes-list-acts { gap: 6px; flex-wrap: wrap; max-width: 100%; }   /* PAD-232: Delete wrapped instead of running off the card */
 
 .modes-editor { flex: 1 1 auto; min-width: 0; }

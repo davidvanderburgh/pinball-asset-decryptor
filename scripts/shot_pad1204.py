@@ -1,6 +1,6 @@
 """PAD-1204 proof shot: the Modes tab's Score feed (under the mode list).
 
-    python scripts/shot_pad1204.py <repo> <out.png> [--tick]
+    python scripts/shot_pad1204.py <repo> <out.png> [--tick] [--tab playopts] [--contract]
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Godzilla LE 1.16 card (its
 .extract_source.json names it) and shows the Modes tab. Before (main) there is no Score feed under the list;
@@ -34,6 +34,8 @@ def main():
     repo = os.path.abspath(sys.argv[1])
     out = os.path.abspath(sys.argv[2])
     tick = "--tick" in sys.argv[3:]
+    tab = sys.argv[sys.argv.index("--tab") + 1] if "--tab" in sys.argv else "modes"
+    contract = "--contract" in sys.argv[3:]
     scratch = tempfile.mkdtemp(prefix="pad1204-")
     project = os.path.join(scratch, "project")
     os.makedirs(project)
@@ -58,16 +60,21 @@ def main():
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1500, "height": 1000})
+            page = browser.new_page(viewport={"width": 1500, "height": 2600 if contract else 1000})
             page.goto(url)
             page.wait_for_function("window.__padReady === true", timeout=60000)
             time.sleep(2)
-            webui_shot.api(url, "ui.select_tab", "modes")
+            webui_shot.api(url, "ui.select_tab", tab)
             time.sleep(6)
             if tick:
                 webui_shot.api(url, "modes.set_score_feed", True, "http://192.168.1.50:8080/scores")
                 time.sleep(3)
-            page.screenshot(path=out)
+            if contract:            # the Score feed card alone, its API contract open
+                page.get_by_text("What your server receives").click()
+                time.sleep(1)
+                page.locator(".po-opt", has_text="Score feed").first.screenshot(path=out)
+            else:
+                page.screenshot(path=out)
             print("shot", out, flush=True)
             browser.close()
     finally:

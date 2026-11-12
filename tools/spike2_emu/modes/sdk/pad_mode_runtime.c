@@ -15993,6 +15993,7 @@ static struct {
     int again, freed, pick_who, step, lang, flips_seen;
     int lang_asks;                       /* the game's PLAYER LANGUAGE SELECT asks in this game (read at its start) */
     unsigned hold_adj;                   /* coop.cfg `intro_hold <id>`: TIMED PLUNGER, answered 0 while the ball is held */
+    unsigned start_sw;                   /* coop.cfg `intro_start <id>`: the Start button, taken while ball 1 waits */
     volatile unsigned long film_at;      /* pm_ms() | 1 when the game's start film was asked for as the intro; 0 none */
     char film_was[24];                   /* the game's own film it stands in for */
     int film_veto;                       /* the right flipper held through Start: its release is no language flip */
@@ -17549,6 +17550,14 @@ static void coop_cards_show(unsigned n)
             !coop_cards_found ? "none found in the HUD scene" : "the port names no proc_sleep");
         return;
     }
+    if (!coop_bonus_clip[0] && cb.loop[0]) {                  /* PAD-1114 round 3: no bonus end was seen - the */
+        say("co-op awards: no bonus end was seen this game - the game's own bonus loop \"%s\" goes behind the cards",
+            cb.loop);                                         /* game's own loop all the same (PAD-1123's line) */
+        str_copy(coop_bonus_clip, sizeof coop_bonus_clip, cb.loop, sizeof coop_bonus_clip);
+    }
+    if (!coop_bonus_clip[0])
+        say("co-op awards: no bonus loop is known (no bonus end seen, no bonus_loop line) - the cards show over the "
+            "main play");
     backdrop = coop_bonus_clip[0] && coop_cards_backdrop(coop_bonus_clip);   /* round 3: the bonus's loop under them */
     for (i = 0; i < coop_won_n && pm_ms() - t0 < COOP_CARDS_MAX_MS; i++)
         for (t = 1; t <= n && t <= 4 && pm_ms() - t0 < COOP_CARDS_MAX_MS; t++) {
@@ -17609,12 +17618,29 @@ static int coop_cards_backdrop(const char *name)
 {
     unsigned long t0 = pm_ms();
     unsigned k;
+    const struct pm_mode *was = current;
+    int ok;
+    /* PAD-1114 round 3 (DoomWalrus666: "The awards ceremony is now playing over what appears to be an active game"):
+     * pm_backdrop is refused while one of the card's own modes runs (the backdrop is that mode's) - on his card, with
+     * modes of his own, one still ran at the game's end and the cards showed over the city. At the game's end the
+     * backdrop is the cards': asked for in the running mode's name, and given back in it */
+    current = running;
     if (!name || !name[0]) {
         pm_backdrop(0);
+        current = was;
         bd_crop_next[0] = 0;
         return 0;
     }
-    if (!(can & PM_CAN_BACKDROP) || !pm_backdrop(name)) return 0;
+    ok = (can & PM_CAN_BACKDROP) && pm_backdrop(name);
+    current = was;
+    if (!ok) {
+        say("co-op awards: the bonus loop \"%s\" cannot play behind the cards - %s", name,
+            !(can & PM_CAN_BACKDROP) ? "this port has no backdrop" : "the backdrop was refused");
+        return 0;
+    }
+    if (running) say("co-op awards: a mode of the card's still ran at the game's end - the cards take its backdrop");
+    if (!coop_bonus_crop[0] && pm_port_text("bonus_loop_crop"))   /* the loop was not seen at a bonus end */
+        str_copy(coop_bonus_crop, sizeof coop_bonus_crop, pm_port_text("bonus_loop_crop"), sizeof coop_bonus_crop);
     for (k = 0; coop_bonus_crop[k] && k + 1 < sizeof bd_crop_next; k++) bd_crop_next[k] = coop_bonus_crop[k];
     bd_crop_next[k] = 0;
     while (!pm_backdrop_showing() && pm_ms() - t0 < 1500ul)      /* the display's next draw plays it */
@@ -18614,8 +18640,17 @@ static void ci_over(const char *how)
     ci.film_veto = 0;                                         /* the next game's held Start is vetoed again */
     ci.pick_who = 0;
     say("co-op intro: over (%s)%s", how, t ? " - the first pick opens" : "");
-    if (!coop.join_n) coop_turn_show();
-    if (t && !coop.join_n) coop_pick_open((unsigned)t);       /* the players-added lines open it at their end */
+    /* round 3 (DoomWalrus666: "After the video completes or is skipped, there is a long period of about 30 seconds
+     * where the map is displayed ... Character selection comes up immediately after the video"): the start menu's
+     * players-added lines (3 lines, said COOP_JOIN_ROUNDS times, ~18 s and more while the logo plays) waited for the
+     * intro and then held the pick back - with an intro they are dropped and the pick opens at once */
+    if (coop.join_n) {
+        say("co-op intro: the players-added lines are dropped - the pick opens at once");
+        coop.join_n = 0;
+        if (!t) t = 1;
+    }
+    coop_turn_show();
+    if (t) coop_pick_open((unsigned)t);
     for (k = 0; k < ci.n_music; k++) ci.music[k] = 0;
     ci.n_music = 0;
 }
@@ -19557,6 +19592,37 @@ static unsigned coop_first_ball_answer(unsigned n, unsigned later, unsigned ball
  * intro of this Start is due or plays. Not earlier in the ball start: held at its first-ball check (emulator) the game
  * never put its intro screen up, the attract's own loop came back and took the surface 5 s in. Given up after the
  * intro's own length + 8 s, or 2.5 s with no intro. */
+/* round 3 (DoomWalrus666: "player two, player three, or player four cannot be added until the player one character
+ * selection comes up ... Start button can be pressed for each player that is to be added to the game immediately when
+ * the game is started"): the game takes Start on its own process, and that process waits in ci_ball_hold - so its
+ * presses were lost (emulator: two Starts in the intro, no teammate). While it waits, a press of the Start button
+ * (`intro_start`; not with the left flipper held: that is the game's reset) is the game's own add, called here on
+ * its process as the start menu's team fill calls it, through the co-op wrap (a teammate, or the team game's next
+ * player). (tests lift ci_start_edge verbatim) */
+static int ci_start_edge(int now_down, int *was_down, int left_down)
+{
+    int edge = now_down && !*was_down && !left_down;
+    *was_down = now_down;
+    return edge;
+}
+
+static int ci_start_was;
+static void ci_start_poll(void)
+{
+    unsigned got;
+    int down;
+    if (!ci.start_sw || !coop_add_game) return;
+    down = switch_held(ci.start_sw);
+    if (!coop_teammates() || ci.game != chg_game_now() + 1) {   /* the co-op game not formed yet: its Start's own */
+        ci_start_was = down;                                  /* press is not a teammate's */
+        return;
+    }
+    if (!ci_start_edge(down, &ci_start_was, coop_left && switch_held(coop_left))) return;
+    got = coop_add_wrap(0, 0, 0, 0);
+    say("co-op intro: Start while ball 1 waits - %s (%u in the game)", got ? "a teammate joins" : "the game added no one",
+        coop_teammates());
+}
+
 static void ci_ball_hold(unsigned ball)
 {
     unsigned long t0 = pm_ms(), most, intro_end = 0;
@@ -19567,6 +19633,7 @@ static void ci_ball_hold(unsigned ball)
           || (ci_film_due() && ci.game != chg_game_now() + 1))) return;
     most = (ci.ms ? ci.ms : 30000ul) + 8000ul;
     ci.holding = 1;
+    ci_start_was = ci.start_sw ? switch_held(ci.start_sw) : 0;   /* the game's own Start, still down: not a join */
     for (;;) {
         unsigned long now = pm_ms();
         if (!pm_player()) { why = "the game ended"; break; }
@@ -19582,6 +19649,7 @@ static void ci_ball_hold(unsigned ball)
             else if (now - intro_end > 1500ul) { why = "no character pick"; break; }
         }
         if (!said++) say("co-op intro: ball 1's serve waits - the intro, the language and the character pick first");
+        ci_start_poll();
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
     }
     ci.holding = 0;
@@ -19589,6 +19657,7 @@ static void ci_ball_hold(unsigned ball)
 }
 
 static unsigned (*ci_serve_game)(unsigned, unsigned, unsigned, unsigned);
+static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3);   /* below */
 static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     ci_ball_hold(coop_ball_byte ? *coop_ball_byte : 1u);
@@ -19659,6 +19728,12 @@ static void coop_line(const char *s)
         for (p = s + 11; *p == ' '; p++) ;
         for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && k + 1 < (int)sizeof cb.loop; k++) cb.loop[k] = p[k];
         cb.loop[k] = 0;
+        return;
+    }
+    if (str_starts(s, "intro_start ")) {                                  /* PAD-1114 round 3: the Start button */
+        p = s + 12;
+        ci.start_sw = (unsigned)number(&p, &ok);
+        if (!ok) ci.start_sw = 0;
         return;
     }
     if (str_starts(s, "intro_hold ")) {                                   /* PAD-1114: TIMED PLUNGER's id */

@@ -6430,6 +6430,13 @@ players-added lines and the pick after them); while it waits the pick has the fl
 its top line says ACTION PICKS). Not earlier in the ball start: held at its first-ball check the game never put its
 intro screen up. The handicap pick (PAD-1033) already waits for the character's.
 
+**Round 3: players added during the intro; the pick at once.** The game takes Start on its own process, which waits
+in the serve, so a Start in the intro was lost: while ball 1's serve waits, a press of the Start button (coop.cfg
+`intro_start <id>`, the program's START BUTTON; not with the left flipper held, the game's reset; not the press that
+began the game) is the game's own add, called through the co-op wrap (a teammate, or the team game's next player).
+The start menu's players-added lines (about 18 s, more while the logo plays) are dropped when an intro played: the
+pick opens the moment the intro ends or is skipped.
+
 PAD-1123: a character's clip and sound once picked (the dialog's **When picked...**), and the character on its
 teammate's End of Ball Bonus (the dialog's **Show each teammate's character on their End of Ball Bonus**):
 

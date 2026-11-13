@@ -164,6 +164,16 @@ if [ "$BRIDGE" = 1 ]; then
         [ -e "$B/$f" ] || { echo "[s3run] --bridge needs $B/$f: bash s3build.sh" >&2; exit 1; }
     done
     rm -rf "$SD/frames" "$SD/padgl.ring"; mkdir -p "$SD/frames"
+    # THIS TITLE'S SWITCH LIST BEFORE THE WINDOW OPENS (PAD-1213). The window
+    # binds its keys by it and latches the coin door and the trough as it
+    # opens; the bridge only writes it a second or so later, so the window
+    # used to open on the slot's list from the LAST run - another title's -
+    # and hold those ids closed while this game booted: on Transformers its
+    # JUMPER LVDS RESOLUTION 1 (Guided Setup came up at the other resolution),
+    # two slingshots, a flipper EOS. The stale list goes; the new one is the
+    # bridge's own derivation, written again (the same) when the bridge starts.
+    rm -rf "$SD/tables" "$SD/switches.json"; mkdir -p "$SD/tables"
+    python3 "$S/s3bridge.py" --switches "$SD" "$TREE/games/game" 2>&1 | tail -1
     # 40 frames, or unbounded with --bus: s3press.py autoguide prunes them
     MAXFR=40; [ "$BUS" = 1 ] && MAXFR=1000000
     # --window: the game on screen, in Spike 2's renderer window, whose
@@ -360,12 +370,21 @@ if [ "${PAD_S3_AUDIO:-0}" = 1 ]; then
         # holds. PAD_S3_AUDIO_LAG_MS (default 90) is the player pre-roll;
         # raise it if a run crackles (an underrun), lower it for less lag.
         LAG=${PAD_S3_AUDIO_LAG_MS:-90}
+        # AND THE LAG MUST NOT STAY (PAD-1213, David: "audio lag from
+        # input"). The player drops a backlog only once its queue has sat above
+        # PAD_AUDIO_MAX_LATE_MS for 2 s - 750 ms by default, set for Spike 2's
+        # bursty guest. Spike 3's sound comes out at exactly 1.000x (measured
+        # over a whole Transformers game), so any backlog is the PC's: a
+        # player held up by a busy desktop, a slow start. Under the 750 ms
+        # rule David's run sat 0.2-0.85 s late, saw-toothing for minutes, and a
+        # single 600 ms hiccup stayed as 660-690 ms of lag for good. At 200 ms
+        # the queue goes back to the 90 ms cushion within about 2 s.
         # the player's TCP hop (WSL -> the Windows speaker, or a relay) gets
         # a port of this slot's own: Spike 2 rigs hold 45997+slot, so a
         # Spike 3 slot of the same number would take theirs
         PAD_AUDIO_PORT=${PAD_AUDIO_PORT:-$((46100 + SLOT))} \
         PAD_AUDIO_PREBUFFER_MS=${PAD_AUDIO_PREBUFFER_MS:-$LAG} \
-        PAD_AUDIO_LATENCY_MS=${PAD_AUDIO_LATENCY_MS:-40} \
+        PAD_AUDIO_LATENCY_MS=${PAD_AUDIO_LATENCY_MS:-40}         PAD_AUDIO_MAX_LATE_MS=${PAD_AUDIO_MAX_LATE_MS:-200} \
         "${AS_USER[@]}" setsid bash "$S/../spike2_emu/playaudio.sh" "$SD/audio/audio.fifo" 44100 2 \
             "$SD/audio/audio.fmt" > "$SD/playaudio.log" 2>&1 &
         AUDPID=$!

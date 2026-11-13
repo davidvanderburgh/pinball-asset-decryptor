@@ -1095,6 +1095,8 @@ def _characters(got):
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
     if got.get("intro"):                                # PAD-1114: the co-op and team games' intro video
         out["intro"] = str(got["intro"])
+    if got.get("ceremony"):                             # PAD-1219: the awards ceremony's background video
+        out["ceremony"] = str(got["ceremony"])
     if got.get("bonus"):                                # PAD-1123: the teammate's character on their End of Ball Bonus
         out["bonus"] = True
     if theme:
@@ -1109,7 +1111,7 @@ def save_characters(project, characters):
     chars = _characters(characters)
     data = staged_changes.load(project)
     raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
-    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("bonus"):
+    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("ceremony") or chars.get("bonus"):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)
@@ -1141,10 +1143,10 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
         hold = timed_plunger(game_elf)
         if hold is not None:
             out.append("intro_hold %d" % hold)      # PAD-1114: no auto-launch while the intro holds the ball
-        from .handicap import start_button
-        start = start_button(game_elf)
-        if start is not None:
-            out.append("intro_start %d" % start)    # round 3: a Start while ball 1 waits adds a teammate
+    from .handicap import start_button
+    start = start_button(game_elf)
+    if start is not None:                           # round 3: a Start while ball 1 waits adds a teammate; PAD-1215:
+        out.append("intro_start %d" % start)        # the same while a pick holds a player's first ball back
     if not picks:
         return out
     parts = {p["key"]: p for p in powers(game_elf, sites=sites, values=values)}
@@ -1526,23 +1528,53 @@ def intro_path(project, characters=None):
 def save_intro(project, source=None):
     """Copy *source* (a video file) into the project as the co-op and team games' intro, or with None forget it;
     returns the characters as stored. Raises :class:`CoopError` when the file is not a video the app takes."""
+    return _save_game_video(project, source, "intro", INTRO_FILE)
+
+
+def _save_game_video(project, source, key, stem):
+    """:func:`save_intro` / :func:`save_ceremony`: *source* copied into the pictures folder as *stem* and named in the
+    characters' *key*, or with None forgotten."""
     import os
     import shutil
     chars = load_characters(project)
     if source is None:
-        chars.pop("intro", None)
+        chars.pop(key, None)
         return save_characters(project, chars)
     ext = os.path.splitext(source)[1].lower()
     if ext not in VIDEO_EXTS or not os.path.isfile(source):
         raise CoopError("That is not a video the app can take (%s)." % ", ".join(VIDEO_EXTS))
     folder = os.path.join(project, PICTURE_DIR)
     os.makedirs(folder, exist_ok=True)
-    for f in os.listdir(folder):                        # one intro: another extension's goes
-        if os.path.splitext(f)[0] == INTRO_FILE and f != INTRO_FILE + ext:
+    for f in os.listdir(folder):                        # one of each: another extension's goes
+        if os.path.splitext(f)[0] == stem and f != stem + ext:
             os.remove(os.path.join(folder, f))
-    shutil.copyfile(source, os.path.join(folder, INTRO_FILE + ext))
-    chars["intro"] = "%s/%s%s" % (PICTURE_DIR, INTRO_FILE, ext)
+    shutil.copyfile(source, os.path.join(folder, stem + ext))
+    chars[key] = "%s/%s%s" % (PICTURE_DIR, stem, ext)
     return save_characters(project, chars)
+
+
+# ---- PAD-1219: the awards ceremony's background video --------------------------------------------------------------
+# DoomWalrus666: "Please add an option in the Modes tab Character settings to add a custom awards ceremony background
+# video". At a co-op game's end the award cards show over a clip that fills the glass, the game's HUD (score panel,
+# power-up meter, credits line) off it (pad_mode_runtime.c "PAD-1219"): the game's own End of Ball Bonus loop, or this
+# video of the owner's, made into a silent clip of the video bank's size (as the intro, :func:`intro_clip`) that loops
+# for as long as the cards show. coop.cfg names it (``ceremony <clip> <crop>``).
+#: the ceremony's clip in the video bank
+CEREMONY_CLIP = "PadCoopCeremony"
+#: the project's file (its extension the source's)
+CEREMONY_FILE = "ceremony_video"
+
+
+def ceremony_path(project, characters=None):
+    """The absolute path of the project's awards ceremony video (``""`` when it has none, or it is gone)."""
+    chars = _characters(characters) if characters is not None else load_characters(project)
+    return picture_path(project, {"picture": chars.get("ceremony") or ""})
+
+
+def save_ceremony(project, source=None):
+    """Copy *source* (a video file) into the project as the co-op awards ceremony's background, or with None forget
+    it (the game's own End of Ball Bonus loop goes behind the cards); returns the characters as stored."""
+    return _save_game_video(project, source, "ceremony", CEREMONY_FILE)
 
 
 #: PAD-1192: the longest any one co-op clip's or sound's ffmpeg run may take. Each is at most INTRO_MAX_SECONDS of
@@ -2535,7 +2567,45 @@ def award_screens(project, characters=None):
         out.append(dict(name=name, art_rgba=award_card(project, chars, i, chars.get("theme")), words=" ",
                         words_name=name + "_Words", x=float(AWARD_AT[0]), y=float(AWARD_AT[1]),
                         words_at=(AWARD_WORDS_X, float(AWARD_WORDS_Y + 16)), words_scale=AWARD_WORDS_SCALE))
+    out.append(dict(name=FINAL_NODE, art_rgba=final_band(chars.get("theme")), words=" ",
+                    words_name=FINAL_NODE + "_Words",
+                    x=float(FINAL_AT[0]), y=float(FINAL_AT[1]),
+                    words_at=(round(FINAL_SIZE[0] * (1 - FINAL_WORDS_SCALE) / 2, 1), float(FINAL_WORDS_Y)),
+                    words_scale=FINAL_WORDS_SCALE))
     return out
+
+
+# ---- PAD-1219: the final score under the award cards ---------------------------------------------------------------
+# DoomWalrus666: "During the awards ceremony, please remove the scoreboard, power up bar, and credits/player/ball count
+# thing. Just display the awards box, and the final score along the bottom in large font." The runtime keeps the
+# game's HUD off the glass while the cards show; this band across the glass's foot carries the team's final score
+# (its words the runtime's: "FINAL SCORE  240,960").
+FINAL_NODE = "PadCoopFinal"
+FINAL_AT = (0, 596)
+FINAL_SIZE = (1360, 160)
+FINAL_WORDS_Y = 92
+FINAL_WORDS_SCALE = 1.4          # (emulator: x2.1 cut "FINAL SCORE  2,160,640" at both ends; x1.4 fits 28)
+
+
+def final_band(theme=None):
+    """The final score's band as a premultiplied RGBA array of :data:`FINAL_SIZE`: dark glass fading in from the top,
+    an accent rule along its top edge."""
+    import numpy as np
+    th = theme_of(theme)
+    A, A2 = _hex(th["accent"]), _hex(th["accent2"])
+    w, h = FINAL_SIZE
+    out = np.zeros((h, w, 4), dtype=np.float32)
+    ramp = np.clip(np.arange(h, dtype=np.float32) / 40.0, 0.0, 1.0) * 0.82
+    out[..., 3] = ramp[:, None]
+    out[..., 0], out[..., 1], out[..., 2] = 6 / 255.0, 8 / 255.0, 14 / 255.0
+    edge = np.abs(np.arange(w, dtype=np.float32) - w / 2) / (w / 2)
+    fade = np.clip(1.0 - edge, 0.0, 1.0) ** 0.6
+    for y0, y1, col in ((10, 14, A), (14, 16, A2)):            # the rule: the accent, a thin second colour under it
+        for k in range(3):
+            out[y0:y1, :, k] = col[k] / 255.0
+        out[y0:y1, :, 3] = fade[None, :]
+    out[..., :3] *= out[..., 3:4]                              # premultiplied, as the cards (the game blends so)
+    return (out * 255 + 0.5).astype(np.uint8)
 
 
 # ---- PAD-1053: the co-op settings file -----------------------------------------------------------------------------
@@ -2622,14 +2692,16 @@ def export_settings(project, path):
             c[field] = "%s/%d_%s_%s%s" % (FILE_PICTURES, i + 1, picture_file_name(c["name"]) or "character", tag,
                                           os.path.splitext(src)[1].lower())
             pictures.append((src, c[field]))
-    intro = intro_path(project, chars)                         # PAD-1114: the co-op games' intro video
-    chars.pop("intro", None)
-    if intro:
-        if as_zip:
-            chars["intro"] = "%s/%s%s" % (FILE_PICTURES, INTRO_FILE, os.path.splitext(intro)[1].lower())
-            pictures.append((intro, chars["intro"]))
-        else:
-            left_out += 1
+    for key, stem, path_of in (("intro", INTRO_FILE, intro_path),          # PAD-1114: the co-op games' intro video
+                               ("ceremony", CEREMONY_FILE, ceremony_path)):   # PAD-1219: the awards' background
+        got = path_of(project, chars)
+        chars.pop(key, None)
+        if got:
+            if as_zip:
+                chars[key] = "%s/%s%s" % (FILE_PICTURES, stem, os.path.splitext(got)[1].lower())
+                pictures.append((got, chars[key]))
+            else:
+                left_out += 1
     back = backdrop_path(project, chars.get("theme"))          # PAD-1079: the pick's background picture
     if back:
         if as_zip:
@@ -2777,18 +2849,19 @@ def import_settings(project, path):
                 f.write(blob)
             c[field] = "%s/%s" % (PICTURE_DIR, name)
             pictures += 1
-    rel = chars.pop("intro", "") or ""                          # PAD-1114: the co-op games' intro video
-    blob = read(rel) if read and rel else None
-    ext = os.path.splitext(rel)[1].lower()
-    if blob and ext in VIDEO_EXTS:
-        os.makedirs(folder, exist_ok=True)
-        for f in os.listdir(folder):
-            if os.path.splitext(f)[0] == INTRO_FILE:
-                os.remove(os.path.join(folder, f))
-        with open(os.path.join(folder, INTRO_FILE + ext), "wb") as f:
-            f.write(blob)
-        chars["intro"] = "%s/%s%s" % (PICTURE_DIR, INTRO_FILE, ext)
-        pictures += 1
+    for key, stem in (("intro", INTRO_FILE), ("ceremony", CEREMONY_FILE)):   # PAD-1114 / PAD-1219: the videos
+        rel = chars.pop(key, "") or ""
+        blob = read(rel) if read and rel else None
+        ext = os.path.splitext(rel)[1].lower()
+        if blob and ext in VIDEO_EXTS:
+            os.makedirs(folder, exist_ok=True)
+            for f in os.listdir(folder):
+                if os.path.splitext(f)[0] == stem:
+                    os.remove(os.path.join(folder, f))
+            with open(os.path.join(folder, stem + ext), "wb") as f:
+                f.write(blob)
+            chars[key] = "%s/%s%s" % (PICTURE_DIR, stem, ext)
+            pictures += 1
     theme = chars.get("theme") or {}                            # PAD-1079: the pick's background picture
     rel = theme.pop("backdrop", "")
     blob = read(rel) if read and rel else None
@@ -2821,7 +2894,7 @@ def import_settings(project, path):
                 awards[str(k)] = a
         if awards:
             raw["awards"] = awards
-    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("bonus"):
+    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("ceremony") or chars.get("bonus"):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)

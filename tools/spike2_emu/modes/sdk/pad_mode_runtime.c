@@ -4162,9 +4162,11 @@ static unsigned bd_held;                  /* PAD-658: the background the backdro
 /* PAD-658: may the backdrop go in this background's place? The city always; any other background of the game's
  * while the mode that asked keeps the game's modes from starting (a qualifying screen like the barrier, never a
  * running mode of the game's), and the one it already held through that mode's ending (its TOTAL) */
+static int coop_cer_on;                   /* PAD-1219 (below): the co-op awards ceremony is on the glass */
+
 static int bd_place_ok(unsigned e)
 {
-    if (bd_is_city(e)) return 1;
+    if (bd_is_city(e) || coop_cer_on) return 1;   /* PAD-1219: the ceremony's clip goes in ANY background's place */
     if (block_owner && running == block_owner && bd_owner == running) return 1;
     return bd_lingers && e == bd_held;
 }
@@ -4296,6 +4298,28 @@ int pm_game_words(void)
 
 static void scene_show_backdrop(unsigned *r);
 
+/* ---- PAD-1219: the co-op awards ceremony, the HUD off the glass ------------------------------------------------
+ * DoomWalrus666: "During the awards ceremony, please remove the scoreboard, power up bar, and credits/player/ball count
+ * thing. Just display the awards box, and the final score along the bottom in large font." While the award cards show
+ * (coop_cards_show) every scene the game asks to show is kept out of the frame but the cards' own (the HUD scene the
+ * build put them in, with the final score's band) and the video player (the ceremony's clip, in the background's
+ * place): the score panels, the top bar and its words, the background's own words. */
+static void *coop_cer_keep, *coop_cer_keep_player;   /* the cards' scene and its scene player: let through */
+static unsigned coop_cer_gone[8], coop_cer_gone_n, coop_cer_vetoes;
+
+static void coop_cer_scene_show(unsigned *r)
+{
+    unsigned k;
+    if (!r[0] || (void *)(unsigned long)r[0] == coop_cer_keep || (void *)(unsigned long)r[0] == coop_cer_keep_player ||
+        r[0] == (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_player"))())
+        return;
+    for (k = 0; k < coop_cer_gone_n && coop_cer_gone[k] != r[0]; k++) ;
+    if (k == coop_cer_gone_n && k < sizeof coop_cer_gone / sizeof coop_cer_gone[0])
+        coop_cer_gone[coop_cer_gone_n++] = r[0];
+    coop_cer_vetoes++;
+    r[0] = 0;
+}
+
 /* scene_show(scene, layer): a background of the game's let through is on the glass (PAD-662) - not under a full-screen
  * clip of ours, drawn over everything (emulator run block1: KIRYU's ending clip over the barrier moved its HUD for
  * nothing) */
@@ -4304,6 +4328,7 @@ static void on_scene_show(unsigned *r)
     unsigned e = bd.elem, sc = e ? *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18)) : 0;
     int bg = e && r[0] && r[0] == sc;
     scene_show_backdrop(r);
+    if (coop_cer_on) coop_cer_scene_show(r);          /* PAD-1219 */
     if (bg && r[0] == sc && !bd_is_city(e) && !clip.on) gw_seen(e);
 }
 
@@ -17353,7 +17378,9 @@ static void coop_pick_close(const char *how)
         say("co-op: the selection screen's places at the pick (0 open, 2 won, else locked): %s", st);
     }
     if (c >= 0 && pk.who == coop.turn) coop_cache_hold();
-    if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game && !coop_classic()) {   /* the ball out was served before it */
+    /* the ball out was served before it; PAD-1215: not while its serve waits for this pick - the game reads the
+     * character's save as it serves, and a save run now would be spent before the ball is in play */
+    if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game && !coop_classic() && !ci.holding) {
         unsigned v = adj_chain(coop_ch[c].bs_adj);           /* what the game reads: a handicap, then theirs */
         say("co-op: %s - the ball in play gets its ball save now (%u s)", coop_ch[c].name, v);
         if (v) pm_ball_save(v);
@@ -17507,6 +17534,7 @@ static int coop_cards_on;                   /* coop.cfg asks for them */
 static void *coop_card[COOP_CHARS], *coop_card_words[COOP_CHARS];
 static int coop_cards_found;
 static unsigned coop_cards_game;            /* round 3: the game (chg_game_now() + 1) whose cards have been shown */
+static void *coop_final, *coop_final_words;            /* PAD-1219: the final score's band (PadCoopFinal) */
 
 /* the cards, found once the HUD scene is up (with the pick's screens), all hidden */
 static void coop_cards_find(void)
@@ -17523,6 +17551,8 @@ static void coop_cards_find(void)
     }
     if (!got) return;
     for (i = 0; i < coop_ch_n; i++) if (coop_card[i]) pm_show(coop_card[i], 0);
+    if (!coop_final) coop_final = pm_node(coop_scr_scene, "PadCoopFinal");   /* PAD-1219: hidden until the ceremony */
+    if (coop_final) pm_show(coop_final, 0);
     coop_cards_found = 1;
     say("co-op awards: %d of the characters' %d award cards found in %s - hidden until the game's end", got, coop_ch_n,
         coop_scr_scene);
@@ -17536,8 +17566,11 @@ static void coop_card_words_of(char *out, unsigned cap, const char *award, unsig
     pm_snprintf(out, cap, "%s  PLAYER %u  %s", award, t, num);
 }
 
-static char coop_bonus_clip[96];             /* round 3, below: the bonus's own loop */
+static char coop_bonus_clip[96], coop_bonus_crop[32];   /* round 3, below: the bonus's own loop */
 static int coop_cards_backdrop(const char *name);
+static char coop_cer_clip[96], coop_cer_crop[32];      /* PAD-1219: coop.cfg `ceremony <clip> <crop>` */
+static void coop_cer_begin(void);
+static void coop_cer_end(void);
 
 /* the game is over (coop_change_wrap, the game's thread): each award on each winner's card in turn */
 static void coop_cards_show(unsigned n)
@@ -17554,6 +17587,12 @@ static void coop_cards_show(unsigned n)
             !coop_cards_found ? "none found in the HUD scene" : "the port names no proc_sleep");
         return;
     }
+    if (coop_cer_clip[0]) {                                   /* PAD-1219: the build names the ceremony's clip */
+        str_copy(coop_bonus_clip, sizeof coop_bonus_clip, coop_cer_clip, sizeof coop_bonus_clip);
+        str_copy(coop_bonus_crop, sizeof coop_bonus_crop, coop_cer_crop, sizeof coop_bonus_crop);
+        say("co-op awards: the ceremony's clip \"%s\" (crop %s) goes behind the cards", coop_bonus_clip,
+            coop_bonus_crop[0] ? coop_bonus_crop : "the port's");
+    }
     if (!coop_bonus_clip[0] && cb.loop[0]) {                  /* PAD-1114 round 3: no bonus end was seen - the */
         say("co-op awards: no bonus end was seen this game - the game's own bonus loop \"%s\" goes behind the cards",
             cb.loop);                                         /* game's own loop all the same (PAD-1123's line) */
@@ -17562,6 +17601,7 @@ static void coop_cards_show(unsigned n)
     if (!coop_bonus_clip[0])
         say("co-op awards: no bonus loop is known (no bonus end seen, no bonus_loop line) - the cards show over the "
             "main play");
+    coop_cer_begin();                                         /* PAD-1219: the HUD off, the final score up */
     backdrop = coop_bonus_clip[0] && coop_cards_backdrop(coop_bonus_clip);   /* round 3: the bonus's loop under them */
     for (i = 0; i < coop_won_n && pm_ms() - t0 < COOP_CARDS_MAX_MS; i++)
         for (t = 1; t <= n && t <= 4 && pm_ms() - t0 < COOP_CARDS_MAX_MS; t++) {
@@ -17577,7 +17617,59 @@ static void coop_cards_show(unsigned n)
             shown++;
         }
     if (backdrop) coop_cards_backdrop(0);
+    coop_cer_end();
     say("co-op awards: %d shown on the winners' cards in %lu ms - then the game's end goes on", shown, pm_ms() - t0);
+}
+
+/* PAD-1219: the final score's words (tests lift it verbatim): a co-op game's one score, a team game's two. The band's
+ * words are lettered x1.4 (coop_play.FINAL_WORDS_SCALE): COOP_FINAL_FITS characters fill the glass, so a team game's
+ * two long scores are said shorter */
+#define COOP_FINAL_FITS 28
+static void coop_final_words_of(char *out, unsigned cap, int teams, unsigned long long s1, unsigned long long s2)
+{
+    char a[32], b[32];
+    unsigned k;
+    pm_commas(a, sizeof a, s1);
+    pm_commas(b, sizeof b, s2);
+    if (!teams) {
+        pm_snprintf(out, cap, "FINAL SCORE  %s", a);
+        return;
+    }
+    pm_snprintf(out, cap, "TEAM 1  %s   TEAM 2  %s", a, b);
+    for (k = 0; out[k]; k++) ;
+    if (k > COOP_FINAL_FITS) pm_snprintf(out, cap, "T1 %s  T2 %s", a, b);
+}
+
+/* PAD-1219: the ceremony begins - the cards' scene alone (and the clip behind it) on the glass, the final score up */
+static void coop_cer_begin(void)
+{
+    char words[80];
+    coop_cer_keep = scene(coop_scr_scene);
+    coop_cer_keep_player = scene_player_of(coop_scr_scene);
+    if (!coop_final) coop_final = pm_node(coop_scr_scene, "PadCoopFinal");
+    if (!coop_final_words) coop_final_words = pm_text(coop_scr_scene, "PadCoopFinal.PadCoopFinal_Words");
+    coop_final_words_of(words, sizeof words, coop.teams, pm_score(1), pm_score(2));
+    if (coop_final_words) pm_set_text(coop_final_words, words);
+    if (coop_final) pm_show(coop_final, 1);
+    coop_cer_gone_n = coop_cer_vetoes = 0;
+    coop_cer_on = coop_cer_keep != 0 && (can & PM_CAN_BACKDROP);
+    say("co-op awards: the cards' scene 0x%08x, its player 0x%08x", (unsigned)(unsigned long)coop_cer_keep,
+        (unsigned)(unsigned long)coop_cer_keep_player);
+    say("co-op awards: the ceremony - %s; %s", coop_cer_on ? "the game's HUD off the glass" :
+        !coop_cer_keep ? "the HUD stays (the cards' scene was not found)" : "the HUD stays (this port has no scene "
+        "show to keep it off)", coop_final ? words : "no final score band on this card (built before PAD-1219)");
+}
+
+static void coop_cer_end(void)
+{
+    unsigned k;
+    if (coop_final) pm_show(coop_final, 0);
+    if (coop_cer_on) {
+        say("co-op awards: the ceremony is over - %u scene show(s) of %u scene(s) kept off the glass, the HUD back",
+            coop_cer_vetoes, coop_cer_gone_n);
+        for (k = 0; k < coop_cer_gone_n; k++) say("co-op awards:   kept off: scene 0x%08x", coop_cer_gone[k]);
+    }
+    coop_cer_on = 0;
 }
 
 /* ---- PAD-1028 round 3: the cards over the bonus's own loop -----------------------------------------------------
@@ -19640,13 +19732,13 @@ static int ci_start_edge(int now_down, int *was_down, int left_down)
 }
 
 static int ci_start_was;
-static void ci_start_poll(void)
+static void ci_start_poll(int formed)
 {
     unsigned got;
     int down;
     if (!ci.start_sw || !coop_add_game) return;
     down = switch_held(ci.start_sw);
-    if (!coop_teammates() || ci.game != chg_game_now() + 1) {   /* the co-op game not formed yet: its Start's own */
+    if (!coop_teammates() || !formed) {                       /* the co-op game not formed yet: its Start's own */
         ci_start_was = down;                                  /* press is not a teammate's */
         return;
     }
@@ -19682,11 +19774,56 @@ static void ci_ball_hold(unsigned ball)
             else if (now - intro_end > 1500ul) { why = "no character pick"; break; }
         }
         if (!said++) say("co-op intro: ball 1's serve waits - the intro, the language and the character pick first");
-        ci_start_poll();
+        ci_start_poll(ci.game == chg_game_now() + 1);
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
     }
     ci.holding = 0;
     if (said) say("co-op intro: ball 1 is served after %lu ms (%s)", pm_ms() - t0, why);
+}
+
+/* PAD-1215 (DoomWalrus666, Team 2v2: "using the action button to pick a character on Player 2, 3, or 4 launched the
+ * ball ... letting the character select timeout to 0 also launched the ball"): a player's first-ball pick opens at
+ * the player change and the ball start serves their ball at once, so the pick ran with the ball in the shooter lane -
+ * Action, Godzilla's launch, took the character and launched it in one press (emulator, LE 1.16: the plunger flag
+ * dropped with the press, a hidden press too, PAD-1114), and the game's TIMED PLUNGER let it go while the time ran.
+ * Ball 1 of player 1 escaped only behind an intro (ci_ball_hold). So the serve of any turn whose player has a pick to
+ * make waits for it, the intro's way: the game's process sleeps a tick at a time until the character is taken, then
+ * the ball comes to the lane for the player to launch. A pick not open yet (the start menu's players-added lines first)
+ * is waited for while they run, else COOP_PICK_DUE_MS; a Start meanwhile is still a join (ci_start_poll). Not while an
+ * intro's phase runs: its own hold and its language window have the ball. (tests lift coop_pick_due verbatim) */
+#define COOP_PICK_DUE_MS 1500ul
+static int coop_pick_due(int on, int n_chars, unsigned turn, int picked, unsigned teammates, int intro_phase)
+{
+    return on && n_chars && teammates && turn >= 1 && turn <= 4 && picked < 0 && !intro_phase;
+}
+
+static void coop_pick_hold(void)
+{
+    unsigned long t0 = pm_ms(), begun = t0, most = (coop_pick_ms ? coop_pick_ms : COOP_PICK_MAX_S * 1000ul) + 10000ul;
+    unsigned t = coop.turn;
+    int said = 0;
+    const char *why = "";
+    if (!fn("proc_sleep") || !coop_pick_due(coop_pick_on, coop_ch_n, t, t >= 1 && t <= 4 ? coop_pick_of[t] : 0,
+                                            coop_teammates(), ci.phase != CI_OFF))
+        return;
+    ci.holding = 1;
+    ci_start_was = ci.start_sw ? switch_held(ci.start_sw) : 0;
+    for (;;) {
+        unsigned long now = pm_ms();
+        int open = pk.open && pk.who == t;
+        if (!pm_player()) { why = "the game ended"; break; }
+        if (coop.turn != t) { why = "the turn moved on"; break; }
+        if (coop_pick_of[t] >= 0) { why = "the character is taken"; break; }
+        if (ci.phase != CI_OFF) { why = "an intro began"; break; }
+        if (!open && !coop.join_n && now - t0 > COOP_PICK_DUE_MS) { why = "no character pick opened"; break; }
+        if (open && pk.left && !pk.held) t0 = now;          /* a pick under way: its own time limits it */
+        if (now - t0 >= most) { why = "the pick ran past its time"; break; }
+        if (!said++) say("co-op: player %u's ball waits to be served until their character is picked", t);
+        ci_start_poll(1);
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    }
+    ci.holding = 0;
+    if (said) say("co-op: player %u's ball is served after %lu ms (%s)", t, pm_ms() - begun, why);
 }
 
 static unsigned (*ci_serve_game)(unsigned, unsigned, unsigned, unsigned);
@@ -19694,6 +19831,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
 static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     ci_ball_hold(coop_ball_byte ? *coop_ball_byte : 1u);
+    coop_pick_hold();                                         /* PAD-1215 */
     return ci_serve_game(r0, r1, r2, r3);
 }
 
@@ -19754,6 +19892,18 @@ static void coop_line(const char *s)
         to[k] = 0;
         p += k;
         if (!bonus) cpk.ms[n - 1] = (unsigned)number(&p, &ok);
+        return;
+    }
+    if (str_starts(s, "ceremony ")) {                                     /* PAD-1219: behind the award cards */
+        int k;
+        for (p = s + 9; *p == ' '; p++) ;
+        for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && k + 1 < (int)sizeof coop_cer_clip; k++)
+            coop_cer_clip[k] = p[k];
+        coop_cer_clip[k] = 0;
+        for (p += k; *p == ' '; p++) ;
+        for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && p[k] != '\n' && k + 1 < (int)sizeof coop_cer_crop; k++)
+            coop_cer_crop[k] = p[k];
+        coop_cer_crop[k] = 0;
         return;
     }
     if (str_starts(s, "bonus_loop ")) {                                   /* PAD-1123: the game's bonus loop */
@@ -19917,11 +20067,13 @@ static void coop_arm(void)
         struct site *fb = site("coop_first_ball");   /* PAD-1046: the ball start's read of the ball */
         unsigned at = fn("coop_first_ball"), to = at ? hook_call(at, (void *)coop_first_ball_wrap) : 0;
         coop_ball_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)to;
-        if (ci.clip[0] && fn("serve_ball") && !ci_serve_game) {   /* PAD-1114 round 2: the serve after the intro */
-            unsigned st = hook_call(fn("serve_ball"), (void *)ci_serve_wrap);
+        if ((ci.clip[0] || (coop_pick_on && coop_ch_n)) && fn("serve_ball") && !ci_serve_game) {
+            unsigned st = hook_call(fn("serve_ball"), (void *)ci_serve_wrap);   /* PAD-1114 round 2, PAD-1215 */
             ci_serve_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)st;
-            say("co-op intro: %s", st ? "ball 1's serve waits for the intro" : "the serve could not be hooked - the "
-                "ball comes as the game serves it");
+            say("co-op: %s", !st ? "the serve could not be hooked - the ball comes as the game serves it, and a pick "
+                "with it in the lane takes a launch" : ci.clip[0] ? "ball 1's serve waits for the intro, and each "
+                "player's first ball for their character pick" : "each player's first ball waits to be served for "
+                "their character pick");
         }
         if (!to)
             say("co-op: the ball start's first-ball read is %s - each teammate's ball 1 sets the team's ball-1 progress "

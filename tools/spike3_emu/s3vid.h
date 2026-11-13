@@ -33,6 +33,7 @@
 #define S3VID_DATA     (8u << 20)       /* packet bytes per channel, circular */
 #define S3VID_EXTRA    4096             /* codec extradata (hvcC / avcC / Annex B) */
 #define S3VID_PATH     256              /* a clip's file name (PAD-1183) */
+#define S3VID_SLOTMAP  16               /* slot map entries (PAD-1213): >= PADVID_SLOTS */
 #define S3VID_HDR      (1u << 20)       /* header block; channel data follows */
 #define S3VID_BYTES    (S3VID_HDR + S3VID_CHANNELS * S3VID_DATA)
 
@@ -69,7 +70,23 @@ struct s3vid_chan {
      * clip[c] below. The host names the clip in padvid.log for the virtual
      * playfield's CLIPS list. */
     unsigned clip_frames, clip_rate_num, clip_rate_den;
-    unsigned pad[14];
+    /* PAD-1213: A SLOT IS FREE WHEN ITS FRAME IS RELEASED, NOT WHEN EVERY
+     * FRAME BEFORE IT IS. The ring used to put frame n in slot n % SLOTS and
+     * reuse slots in order (padvid read_idx), so a game holding ONE frame -
+     * Fallout keeps the one its main screen shows - jammed it: "frame 164
+     * still held, 15 of the 15 after it released", the decoder stopped, and
+     * the backbox video froze for good. Now the host puts each frame in any
+     * free slot (round robin, a held one skipped) and says which; the guest
+     * frees a slot as it releases that frame. Both sides opt in at open, so
+     * an older build on either side keeps the in-order ring. */
+    unsigned slotmap_guest;             /* guest, before open_gen: 1 = it
+                                         * clears slot_busy[] as it releases */
+    unsigned slotmap_host;              /* host, before open_ack: 1 = frame n
+                                         * is in slot slot_of[n % S3VID_SLOTMAP] */
+    unsigned char slot_busy[S3VID_SLOTMAP]; /* host: 1 filling a slot;
+                                             * guest: 0 when its frame is released */
+    unsigned char slot_of[S3VID_SLOTMAP];   /* host: the slot of frame n */
+    unsigned pad[4];
     unsigned char extra[S3VID_EXTRA];
     struct s3vid_pkt pkt[S3VID_PKTS];
 };

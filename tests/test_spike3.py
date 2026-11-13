@@ -175,6 +175,27 @@ def test_bulk_xts_matches_the_library_unit_by_unit(sector, step, first):
     assert otp.aes_xts_decrypt(key, ref, first, sector, step) == data
 
 
+@pytest.mark.parametrize("sector,step,units", [(512, 1, 1), (512, 1, 3), (512, 1, 9),
+                                               (4096, 8, 2)])
+def test_xts_without_cryptography_takes_the_bulk_path(monkeypatch, sector, step, units):
+    """PAD-1241: the installed app ships pycryptodome and NOT cryptography.
+    Its XTS must still be the numpy bulk path over pycryptodome's AES-ECB
+    (the manual per-16-byte loop ran at 2.56 MB/s), giving the same bytes as
+    cryptography's own XTS cipher."""
+    otp = spike3._luks_otp()
+    if otp._np is None or not otp._HAVE_PCD or otp._BACKEND != "cryptography":
+        pytest.skip("needs numpy, pycryptodome and cryptography (the reference)")
+    key = os.urandom(64)
+    data = os.urandom(sector * units)
+    first = 51740675
+    ref = otp.aes_xts_encrypt(key, data, first, sector, step)
+    monkeypatch.setattr(otp, "_BACKEND", None)
+    monkeypatch.setattr(otp, "_xts_one_unit",
+                        lambda *a, **k: pytest.fail("fell back to per-unit XTS"))
+    assert otp.aes_xts_encrypt(key, data, first, sector, step) == ref
+    assert otp.aes_xts_decrypt(key, ref, first, sector, step) == data
+
+
 def test_decrypting_reader_reads_in_runs_not_sectors():
     """PAD-1238: a file's data is one request; small reads fill a read-ahead
     window; the bytes match whatever the read size or cache size."""

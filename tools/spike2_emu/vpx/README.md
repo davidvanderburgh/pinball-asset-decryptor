@@ -523,10 +523,15 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   down. A retrofit trigger can sit on a ramp (`surface`; on the playfield a
   ball 80 units up the ramp never meets it) with a `radius`, the reach
   core.vbs's cvpmMagnet takes from it. `PadTMMagnet` is one on Ramp011's top,
-  made a cvpmMagnet in `extra_vbs` that the coil turns on and off. Its own Hit
-  sub takes most of a ball's speed as it comes into a live magnet's field:
-  cvpmMagnet grabs only inside 20 units, at its 10 ms update, and a fast ball
-  crossed that window between two updates.
+  made a cvpmMagnet in `extra_vbs` that the coil turns on and off.
+  PAD-1240: that held the ball on the ramp, halfway up as a player sees it,
+  and let it roll back down at the player. Now the trigger only finds the
+  ball: the map's own hold (a 1 ms `PadTMTimer`) pulls it in past the ramp's
+  end into the time machine and keeps it there at the ramp's height (no
+  floor under it in the tribute). Let go after a real hold (the multiball
+  start: lift ramp up, MAGNET 4-8 s, then a 20 ms pulse; emulator) it leaves
+  out the back onto the left wire return (Ramp007/Ramp012's join), past no
+  game switch; a short ball-search pulse puts a caught ball back and lets go.
 * **A scoop the ball passes an opto into** (PAD-910). Rush's side scoop is
   SIDE SCOOP OPTO on the way in and LOWER SIDE SCOOP where the ball rests;
   the game fires SIDE SCOOP only from the lower one. The saucer held the

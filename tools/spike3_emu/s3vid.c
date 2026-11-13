@@ -72,7 +72,9 @@ static struct stream {
     unsigned long frames, packets;
     unsigned session;                   /* the host run this stream was opened on */
     unsigned epoch;                     /* bumped at each (re)open: releases of */
-} st[S3VID_CHANNELS];                   /* older frames are not this ring's */
+                                        /* older frames are not this ring's */
+    unsigned jam_said;                  /* PAD-1213: read_idx+1 last reported jammed */
+} st[S3VID_CHANNELS];
 
 static int slot_fd[S3VID_CHANNELS][PADVID_SLOTS];
 
@@ -419,6 +421,21 @@ static void release(void *opaque, uint8_t *data)
     while (vshm->ch[h->c].read_idx < s->handed &&
            s->released[vshm->ch[h->c].read_idx % 64] == vshm->ch[h->c].read_idx + 1)
         vshm->ch[h->c].read_idx++;
+    /* PAD-1213: A JAMMED RING SAYS SO. Every slot handed out and the oldest
+     * one still held: the host has nowhere to put the next frame, so the
+     * decoder stops and the game's packets back up ("Unexpected busy error
+     * when SENDING PACKET"). Whether the later frames are already released
+     * tells a game holding ONE frame from one queueing them all. */
+    if (s->handed - vshm->ch[h->c].read_idx >= PADVID_SLOTS &&
+        s->jam_said != vshm->ch[h->c].read_idx + 1) {
+        unsigned r = vshm->ch[h->c].read_idx, k;
+        long ahead = 0;
+        for (k = r + 1; k < s->handed; k++)
+            if (s->released[k % 64] == k + 1) ahead++;
+        s->jam_said = r + 1;
+        sayf("[s3vid] ch%ld: ring full - frame %ld still held, ", h->c, (long)r, 0);
+        sayf("%ld of the %ld after it released\n", ahead, (long)(s->handed - r - 1), 0);
+    }
     pthread_mutex_unlock(&mu);
     free(data);
     free(h);

@@ -6525,6 +6525,7 @@ player 1's ball waited 20 s for its pick, player 2's was served at the Action pi
 
     co-op: player 2's ball waits to be served until their character is picked
     co-op: player 2's ball is served after 4513 ms (the character is taken)
+
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and
 a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.

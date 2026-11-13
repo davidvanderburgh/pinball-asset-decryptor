@@ -18,6 +18,26 @@ import os
 
 # (title, body) sections per notebook-tab name.  Keys match the tab captions
 # exactly (the tab's key, as the ? window asks for it).
+def _play_options_intro():
+    """The Play options tab's "What it's for" text. Only a copy with the mode
+    maker on names its modes and co-op play (Modes tab) beside these."""
+    try:
+        from ..core import preview
+        modes = preview.enabled("modes")
+    except Exception:                                   # noqa: BLE001
+        modes = False
+    text = ("Options for how the game itself plays and what it reports, without making a mode: a handicap for "
+            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
+            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
+            "**Insider Connected keeps working.** Nothing here changes a score, so ")
+    if not modes:
+        return text + ("on a card with these, players keep Insider Connected as before: scores, high scores "
+                       "and achievements.")
+    return text + ("on a card with these and none of your modes or co-op play, players keep Insider Connected "
+                   "as before: scores, high scores and achievements. Your own modes and co-op play (on the "
+                   "Modes tab) are what keep a card's scores on the machine.")
+
+
 HELP_CONTENT = {
     "Select Card": [
         ("The whole job", [
@@ -1502,15 +1522,9 @@ HELP_CONTENT = {
     # The key stays so every notebook tab has an entry.
     "Modes": [],
     "Play Options": [
-        ("What it's for", [
-            "Options for how the game itself plays and what it reports, without making a mode: a handicap for "
-            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
-            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
-            "**Insider Connected keeps working.** Nothing here changes a score, so on a card with these and none "
-            "of your modes or co-op play, players keep Insider Connected as before: scores, high scores and "
-            "achievements. Your own modes and co-op play (on the Modes tab) are what keep a card's scores on the "
-            "machine.",
-        ]),
+        # read when the window renders: a copy without the mode maker (a preview
+        # again) names nothing of it (test_app_run_logic's clean surface)
+        ("What it's for", lambda: [_play_options_intro()]),
         ("Handicap per player", [
             "**Handicap per player** lets each player of a game pick a handicap from "
             "**-3** (hardest) to **+3** (easiest), so players of different skill can play one game. Tick "

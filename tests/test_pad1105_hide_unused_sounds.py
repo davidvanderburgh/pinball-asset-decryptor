@@ -3,7 +3,8 @@
 A tester asked for a filter to hide the rows whose Requests column reads None (PAD-635): a sound
 the game's code never asks for. The tick sits beside Show, only where the Requests column is;
 it hides only the None rows (a blank cell, a music bank's song, says nothing either way), is
-remembered with the folder like Show, and a reveal of a hidden sound turns it off."""
+remembered app-wide like Show since PAD-1209 (a folder saved before that keeps its own until
+the first pick), and a reveal of a hidden sound turns it off."""
 
 import os
 
@@ -51,18 +52,19 @@ def test_hide_unused_leaves_out_the_none_rows_only(tmp_path):
         assert "audio_hide_unused" not in _sidecar(proj)
 
 
-def test_it_is_remembered_with_the_folder(tmp_path):
+def test_it_is_remembered_across_folders(tmp_path):
+    """PAD-1209: Hide unused is the app's choice, not the folder's: another
+    folder opens with it on too (it has no None row, so all its sounds show)."""
     proj = _project(tmp_path / "a", RELS)
-    other = _project(tmp_path / "b", RELS[:2])
+    other = _project(tmp_path / "b", RELS[:1])
     _requests(proj)
     _requests(other)
     with web_app(tmp_path, mfr="stern", era="spike2") as w:
         _open(w, proj)
         w.call("audio.set_hide_unused", True)
-        # another folder that never said starts with every sound
         _open(w, other)
-        assert w.state("audio")["hide_unused"] is False
-        assert sorted(_keys(w)) == sorted(RELS[:2])
+        assert w.state("audio")["hide_unused"] is True
+        assert _keys(w) == [RELS[0]]
         _open(w, proj)
         assert w.state("audio")["hide_unused"] is True
         assert RELS[1] not in _keys(w)

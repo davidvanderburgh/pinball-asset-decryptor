@@ -690,9 +690,22 @@ pad_card_ns() {                    # <script> [args...]  -> execs, or returns 0/
 # interpreter names stay because arm-binfmt also matches the chroot's busybox
 # sh in the second or two before ./game execs, and qemu-arm covers a container
 # whose binfmt rewrites argv with its own interpreter path.
+#
+# THE INTERPRETER HAS TO BE THE PROGRAM, NOT A WORD ON THE LINE (PAD-1223).
+# The bare `-f 'arm-binfmt|qemu-arm'` matched ANY command line naming qemu -
+# and a PAD_PIVOT boot runs `cp -f /usr/bin/qemu-arm-static $R/.padqemu/game`
+# a moment before the guest exists. On the first start after WSL comes up the
+# page cache is cold, that copy outlives a 0.25 s poll, watch.sh's start wait
+# took it for the game, and its poll loop then found nothing in the gap before
+# /.padqemu/game exec'd: "the game exited", run stopped, the game coming up a
+# second later with nobody left to show it (Batman 66 in VPX, first launch
+# only). So the name must be argv0 - the interpreter's own path, which is how
+# both binfmt (`/usr/libexec/qemu-binfmt/arm-binfmt-P ./game ...`, measured)
+# and an explicit qemu put it; a cp, ldd or file ON qemu has its own argv0.
+PAD_GUEST_INTERP_RE='^[^ ]*(arm-binfmt|qemu-arm)[^ /]*( |$)'
 pad_guest_up() {
     [ -n "$(pad_pids -x game)" ] && return 0
-    [ -n "$(pad_pids -f 'arm-binfmt|qemu-arm')" ]
+    [ -n "$(pad_pids -f "$PAD_GUEST_INTERP_RE")" ]
 }
 
 # ---- THE GAME'S SPEED (PAD-484), FOR THE SHELL HALF OF THE HARNESS --------

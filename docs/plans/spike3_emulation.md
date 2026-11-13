@@ -920,3 +920,35 @@ hold starting at a pts jump and none elsewhere. The table is now 4096, a full
 one says so once, and the every-600-frames line gives the most times ever
 pending and how many were lost. Any Spike 3 clip over 128 frames on any title
 had the same jump ~5 s in.
+
+## Battle clips that never showed (PAD-1234, 2026-11-13)
+
+Transformers' battle and mode screens (Solar Needle, Autobot Run, Golden
+Lagoon: clips of 55-100 frames) had a black centre. The game opened each
+clip, closed it ~0.27 s later and opened the next, four a second, printing
+"SpiVideoStreamDecoderBase::Play while loop timeout" each time, and its frame
+rate fell from ~58 to ~6. Short one-shot clips (829, 1026, 409, 503) closed
+the same way.
+
+From the game binary (stripped; found by the strings' xrefs): Play() starts
+the stream and polls a "frame received" byte 250 times, usleep(1000) apart.
+The decode thread sets it on each received frame, and on AVERROR_EOF with
+two or fewer frames queued it treats the clip as finished and tears it down,
+freeing the queue. A short clip is read whole, its end-of-input drain
+included, a few ms after the open, before the host's first frame (40-60 ms).
+s3vid answered EOF 25 ms into a drain, so the clip "ended" before it began.
+`PAD_S3_VID_TRACE=2` (new) adds, to each release, the game return addresses
+on the stack: every frame of a cycling clip was freed by that teardown, in
+the millisecond it was handed over.
+
+The player drains in two places, told apart by the packet: its decode loop at
+the end of the input sends its own EMPTY packet, and FlushDecoder (a stop or
+seek) sends NULL, then reads up to 99 frames, freeing each, 0.5 ms apart. A
+NULL drain keeps the quick EOF. An empty-packet drain gets EAGAIN while
+frames are owed (packet times still pending) and EOF once none are, the
+host's decoder has ended, or nothing has come for EOF_WAIT_MS (400). Proven
+on a hidden rig replaying the switches that started Solar Needle: before, 18
+Play timeouts in 10 s and no frame ever bound for drawing; after, none, each
+clip played its full length with its first frame drawn ~52 ms after the open,
+57 fps throughout. FlushDecoder timeouts (a long clip torn down mid-play) are
+unchanged: 7 in a 7-minute run before, 5 in a 4-minute run after.

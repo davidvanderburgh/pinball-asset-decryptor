@@ -84,7 +84,15 @@ static struct stream {
     unsigned jam_said;                  /* PAD-1213: read_idx+1 last reported jammed */
     int npts_peak;                      /* PAD-1230: most packet times pending at once */
     unsigned long pts_lost;             /* and times dropped on a full table */
+    long drain_since;                   /* PAD-1234: ms (monotonic) a drain began waiting, 0 = not */
+    unsigned eof_flush;                 /* the drain is a teardown (send_packet(NULL)) */
+    unsigned eof_said;                  /* an early EOF reported */
 } st[S3VID_CHANNELS];
+
+/* PAD-1234: how long a drained stream with frames still owed waits for the
+ * next one before it is called ended - well past the host's first frame
+ * (40-60 ms) and the game's own ~275 ms Play() wait */
+#define EOF_WAIT_MS 400
 
 static int slot_fd[S3VID_CHANNELS][PADVID_SLOTS];
 
@@ -195,12 +203,53 @@ static void tracef(const char *k, long a, long b, long c, long d)
     struct timespec t;
     char m[120];
     int n;
-    if (trace < 0) { const char *e = getenv("PAD_S3_VID_TRACE"); trace = e && *e && *e != '0'; }
+    if (trace < 0) { const char *e = getenv("PAD_S3_VID_TRACE"); trace = e && *e && *e != '0' ? (*e == '2' ? 2 : 1) : 0; }
     if (!trace) return;
     clock_gettime(CLOCK_REALTIME, &t);
     n = snprintf(m, sizeof m, "[vt] %s %ld.%03ld %ld %ld %ld %ld\n", k, (long)t.tv_sec,
                  t.tv_nsec / 1000000, a, b, c, d);
     if (n > 0) (void)!write(2, m, (size_t)(n < (int)sizeof m ? n : (int)sizeof m - 1));
+}
+
+/* PAD_S3_VID_TRACE=2 (PAD-1234): who released a frame - the words on the
+ * stack that are return addresses into the game's own code (each follows a
+ * BL/BLR there), as offsets into /games/<title>/game, up to six. Names which
+ * of the game's routines threw a frame away. */
+#include <link.h>
+static uintptr_t game_bias, game_lo, game_hi;
+static int game_text(struct dl_phdr_info *i, size_t sz, void *u)
+{
+    int k;
+    (void)sz; (void)u;
+    for (k = 0; k < i->dlpi_phnum; k++)
+        if (i->dlpi_phdr[k].p_type == PT_LOAD && (i->dlpi_phdr[k].p_flags & PF_X)) {
+            uintptr_t a = i->dlpi_addr + i->dlpi_phdr[k].p_vaddr;
+            if (!game_lo || a < game_lo) game_lo = a;
+            if (a + i->dlpi_phdr[k].p_memsz > game_hi) game_hi = a + i->dlpi_phdr[k].p_memsz;
+        }
+    game_bias = i->dlpi_addr;
+    return 1;                                   /* the first object is the program */
+}
+static void trace_callers(const char *k)
+{
+    uintptr_t *sp = (uintptr_t *)__builtin_frame_address(0);
+    char m[200];
+    int n, got = 0, i;
+    if (trace != 2) return;
+    if (!game_hi) dl_iterate_phdr(game_text, 0);
+    n = snprintf(m, sizeof m, "[vt] %s<", k);
+    for (i = 0; i < 1024 && got < 6; i++) {
+        uintptr_t a = sp[i];
+        if (a >= game_lo + 4 && a < game_hi && !(a & 3)) {
+            uint32_t ins = *(uint32_t *)(a - 4);
+            if ((ins & 0xFC000000u) == 0x94000000u || (ins & 0xFFFFFC1Fu) == 0xD63F0000u) {
+                n += snprintf(m + n, sizeof m - (size_t)n, " %lx", (unsigned long)(a - game_bias));
+                got++;
+            }
+        }
+    }
+    n += snprintf(m + n, sizeof m - (size_t)n, "\n");
+    (void)!write(2, m, (size_t)n);
 }
 
 static void *map(const char *path, unsigned long bytes)
@@ -397,6 +446,13 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
     if (ch->pkt_w - ch->pkt_r >= S3VID_PKTS) return AVERROR(EAGAIN);
     d = &ch->pkt[ch->pkt_w % S3VID_PKTS];
     if (!pkt || !pkt->data || pkt->size <= 0) {         /* drain */
+        /* PAD-1234: WHO DRAINS. Stern's player drains in two places: its
+         * decode loop at the end of the input, with its own (empty) packet,
+         * and SpiVideoStreamDecoderBase::FlushDecoder, a teardown that sends
+         * NULL and then reads up to 99 frames, freeing each, 0.5 ms apart.
+         * The first must get every frame before EOF; the second must get
+         * its EOF at once, or a stop or seek waits out the whole clip. */
+        if (!pkt) st[c].eof_flush = 1;
         if (st[c].eof_sent) return AVERROR_EOF;
         d->pos = ch->data_w; d->size = 0; d->flags = S3VID_PKT_EOF;
         d->pts_lo = d->pts_hi = 0;
@@ -451,6 +507,7 @@ static void release(void *opaque, uint8_t *data)
     }
     s->released[h->n % 64] = h->n + 1;
     tracef("F", h->c, h->n, h->slot, 0);
+    trace_callers("F");
     if (feed->ch[h->c].slotmap_host) {  /* PAD-1213: this frame's slot is free */
         __sync_synchronize();
         feed->ch[h->c].slot_busy[h->slot] = 0;
@@ -500,16 +557,56 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
         /* DRAINING (send_packet(NULL)): the game reads until AVERROR_EOF
          * against a short timeout of its own ("SpiVideoStreamDecoderBase::
          * FlushDecoder while loop timeout" when the end waited for the host
-         * ffmpeg to exit). So: a frame still coming out gets a moment, and
-         * then the end is the end. */
-        int i;
-        for (i = 0; i < 25 && v->write_idx == st[c].handed && !v->eos; i++) {
+         * ffmpeg to exit), so the end must not wait for that exit.
+         *
+         * PAD-1234: BUT EOF ONLY WHEN THE FRAMES ARE ALL OUT. A short clip
+         * (Transformers' battle and mode clips, 55-100 frames) is sent whole,
+         * drain included, a few ms after its open - before the host has
+         * decoded anything (its first frame comes 40-60 ms after the open).
+         * EOF after a fixed 25 ms told the game's decode thread the clip was
+         * over before it began: it tore the stream down and freed every
+         * frame as it came, its Play() waited 250 polls for a first frame
+         * and gave up ("Play while loop timeout"), and the game opened the
+         * next clip, four a second, the screen black and the game at 6 fps.
+         * Every packet sent leaves a time in the pending table until its
+         * frame comes out, so frames are owed while it is not empty: answer
+         * EAGAIN (the game's decode loop sleeps and asks again), and EOF once
+         * it is empty, the host's decoder has ended, or nothing has come for
+         * EOF_WAIT_MS (a packet that never makes a frame). */
+        struct timespec now;
+        long ms;
+        int owed;
+        if (st[c].eof_flush) {                  /* a teardown: the end is the end */
+            for (i = 0; i < 25 && v->write_idx == st[c].handed && !v->eos; i++) {
+                struct timespec ts = { 0, 1000000 };
+                nanosleep(&ts, 0);
+            }
+            if (v->write_idx == st[c].handed) return AVERROR_EOF;
+            goto frame;
+        }
+        for (i = 0; i < 5 && v->write_idx == st[c].handed && !v->eos; i++) {
             struct timespec ts = { 0, 1000000 };
             nanosleep(&ts, 0);
         }
-        if (v->write_idx == st[c].handed) return AVERROR_EOF;
+        if (v->write_idx == st[c].handed) {
+            pthread_mutex_lock(&mu);
+            owed = st[c].npts;
+            pthread_mutex_unlock(&mu);
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            ms = now.tv_sec * 1000L + now.tv_nsec / 1000000;
+            if (!st[c].drain_since) st[c].drain_since = ms;
+            if (!owed || v->eos || ms - st[c].drain_since >= EOF_WAIT_MS) {
+                if (owed && !st[c].eof_said++)
+                    sayf("[s3vid] ch%ld: drained with %ld frames never decoded (%ld ms)\n",
+                         c, (long)owed, ms - st[c].drain_since);
+                return AVERROR_EOF;
+            }
+            return AVERROR(EAGAIN);
+        }
     }
     if (v->write_idx == st[c].handed) return AVERROR(EAGAIN);
+frame:
+    st[c].drain_since = 0;                      /* a frame: the wait starts over */
     __sync_synchronize();
     n = st[c].handed;
     slot = feed->ch[c].slotmap_host ? feed->ch[c].slot_of[n % S3VID_SLOTMAP] % PADVID_SLOTS
@@ -581,6 +678,8 @@ void avcodec_flush_buffers(AVCodecContext *ctx)
     pthread_mutex_lock(&mu);
     st[c].npts = 0;
     st[c].eof_sent = 0;
+    st[c].eof_flush = 0;
+    st[c].drain_since = 0;
     st[c].last_pts = AV_NOPTS_VALUE;           /* a seek: time starts over */
     ch->flush_base = st[c].handed;
     __sync_synchronize();

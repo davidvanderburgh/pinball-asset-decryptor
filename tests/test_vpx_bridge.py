@@ -670,104 +670,91 @@ def test_rushs_right_return_lanes_match_their_inserts():
 
 def test_rushs_time_machine_magnet_follows_its_coil():
     # PAD-925: the tribute has no magnet; the game's MAGNET (coil 9) found a
-    # null callback. A trigger added on the time machine ramp is a cvpmMagnet
+    # null callback. A trigger added on the time machine ramp finds the ball.
+    # PAD-1240: the hold is inside the time machine, past the ramp's end
+    # (y 473), not on the ramp; a timer of the map's own keeps it there
     m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
     assert m["solenoids"]["9"] == {"coil": [9, 7], "name": "MAGNET", "callback": "PadTimeMachineMagnet"}
     t = m["retrofit_triggers"]["PadTMMagnet"]
     assert t["clone"] == "tm2" and t["surface"] == "Ramp011", "on the ramp tm2 sits on"
     xs, ys = zip(*t["shape"])
     assert min(ys) < 589 - 40, "up the ramp from tm2 (y 589), the shot the game turns it on at"
-    assert ".InitMagnet PadTMMagnet, 40" in m["extra_vbs"]
-    assert "Sub PadTimeMachineMagnet(e) : mPadTM.MagnetOn = CBool(e) : End Sub" in m["extra_vbs"]
+    assert m["retrofit_timers"]["PadTMTimer"] == {"clone": "PulseTimer", "interval_ms": 1}
+    ev = m["extra_vbs"]
+    assert "Sub PadTimeMachineMagnet(e)" in ev and "Sub PadTMTimer_Timer" in ev
+    assert "cvpmMagnet" not in ev, "core.vbs's magnet holds a ball only where its trigger is, on the ramp"
 
 
-CORE_VBS = r"C:\Visual Pinball\scripts\core.vbs"
-
-
-@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript") and os.path.exists(CORE_VBS)),
-                    reason="runs core.vbs's cvpmMagnet under cscript")
-def test_rushs_time_machine_magnet_holds_the_ball_while_the_coil_is_on(tmp_path):
-    # PAD-925: core.vbs's own cvpmMagnet, on the map's trigger, the map's
-    # extra_vbs, a ball shot up Ramp011 (y 659 up to 473, 80 units high:
-    # gravity pulls it back down, past the ramp's top it meets tm1 at y 394
-    # and bounces), and coil 9 as the emulator fires it: on as the ball
-    # passes tm2, 4.1 s, off, a 60 ms pulse 0.16 s later. Every shot from
-    # one that barely passes tm2 to one that flies off the top is held for
-    # the 4.1 s and rolls back down past tm2 once let go (the fast ones,
-    # caught on the way back, slipped through core.vbs's 20-unit grab
-    # between its 10 ms updates before the field took their speed); with no
-    # coil the ball is never held. Not Visual Pinball's physics: the
-    # magnet's own logic on a ball that moves like one
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's VBScript under cscript")
+def test_rushs_time_machine_holds_the_ball_inside_and_lets_it_out_the_back(tmp_path):
+    # PAD-1240: the map's own extra_vbs, a ball shot up Ramp011 (y 659 up to
+    # 473, 80 units high: gravity pulls it back down; past the top it flies
+    # on and bounces off tm1 at y 394), its timer at 10 ms (a slow frame), and
+    # coil 9 as the emulator fires it for a multiball start (lift ramp up):
+    # on 20 ms after the ball passes tm2, off 4.1 s later, a 20 ms pulse
+    # 0.17 s after that. Every shot from one that barely reaches the trigger
+    # to one that flies off the top is pulled in past the ramp's end and held
+    # inside the machine (517,435, at the ramp's height) at 1 s and 4 s, then
+    # leaves out the back onto the wire return (364,418, 75 up), moving down
+    # it. A 60 ms ball-search pulse puts a ball it caught back where it was:
+    # it rolls back down past tm2 as before. No coil: never held. Not Visual
+    # Pinball's physics: the map's logic on a ball that moves like one
     m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
-    core = open(CORE_VBS, encoding="latin-1").read()
-
-    def block(start, end):   # to `end` at a line's start (vpmBuildEvent has an "End Sub" in a string)
-        a = core.index(start)
-        b = core.index("\n" + end, a) + 1 + len(end)
-        return core[a:b].replace("Private Function", "Function").replace("Private Sub", "Sub")
     t = m["retrofit_triggers"]["PadTMMagnet"]
     xs, ys = zip(*t["shape"])
-    cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
     vbs = tmp_path / "t.vbs"
     vbs.write_text("\n".join([
-        block("Class cvpmDictionary", "End Class"),
-        block("Class cvpmMagnet", "End Class"),
-        block("Private Function vpmCheckEvent", "End Function"),
-        block("Private Sub vpmBuildEvent", "End Sub"),
-        block("Private Function vpmIsArray", "End Function"),
-        block("Private Function vpmIsCollection", "End Function"),
-        "Class FakeTimer",
-        "\tPublic Upd, UpdOn",
-        "\tPublic Sub InitTimer(o, f) : End Sub",
-        "\tSub EnableUpdate(c, f, e) : Set Upd = c : UpdOn = e : End Sub",
-        "End Class",
-        "Class FakeTrigger : Public Name, X, Y, Radius, TimerInterval, TimerEnabled : End Class",
-        "Class FakeBall : Public X, Y, VelX, VelY : End Class",
-        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
-        "Dim PadTMMagnet : Set PadTMMagnet = New FakeTrigger",
-        "PadTMMagnet.Name = \"PadTMMagnet\" : PadTMMagnet.X = %r : PadTMMagnet.Y = %r : PadTMMagnet.Radius = %r"
-        % (cx, cy, t["radius"]),
-        "Dim ActiveBall",
+        "Class FakeBall : Public X, Y, Z, VelX, VelY, VelZ : End Class",
+        "Dim ActiveBall, GameTime",
         m["extra_vbs"],
-        "Function Shot(v0, xoff, coil)",
-        "\tDim b, t, inside, was, tOn, held1, held4, back, dx, dy",
-        "\tSet b = New FakeBall : b.X = %r + xoff : b.Y = 650 : b.VelX = 0 : b.VelY = -v0" % cx,
-        "\tSet ActiveBall = b : was = False : tOn = -1 : held1 = False : held4 = False : back = False",
+        "Function Shot(v0, xoff, mode)",
+        "\tDim b, t, inside, was, tOn, held1, held4, out, back, ok, d",
+        "\tSet b = New FakeBall : b.X = 517 + xoff : b.Y = 650 : b.Z = 25 : b.VelX = 0 : b.VelY = -v0 : b.VelZ = 0",
+        "\tSet ActiveBall = b : was = False : tOn = -1 : held1 = False : held4 = False : out = False : back = False",
+        "\tPadTMState = 0 : PadTMIn = Empty : PadTMBall = Empty : PadTMOn = False",
         "\tFor t = 0 To 9000",
-        "\t\tIf b.Y > 400 Then b.VelY = b.VelY + 0.089 Else b.Y = 400 : b.VelY = Abs(b.VelY) * 0.5",
-        "\t\tb.X = b.X + b.VelX / 10 : b.Y = b.Y + b.VelY / 10",
+        "\t\tGameTime = t",
+        "\t\tIf b.X > 400 Then",
+        "\t\t\tIf b.Y > 400 Then b.VelY = b.VelY + 0.089 Else b.Y = 400 : b.VelY = Abs(b.VelY) * 0.5",
+        "\t\t\tb.X = b.X + b.VelX / 10 : b.Y = b.Y + b.VelY / 10",
+        "\t\t\tIf b.Y >= 473 Then b.Z = 25 + 80 * (659 - b.Y) / 186",
+        "\t\tEnd If",
         "\t\tinside = b.X > %r And b.X < %r And b.Y > %r And b.Y < %r" % (min(xs), max(xs), min(ys), max(ys)),
         "\t\tIf inside And Not was Then PadTMMagnet_Hit",
         "\t\tIf was And Not inside Then PadTMMagnet_UnHit",
         "\t\twas = inside",
         "\t\tIf tOn < 0 And b.Y < 589 And b.VelY < 0 Then tOn = t + 20",
-        "\t\tIf coil And t = tOn Then PadTimeMachineMagnet 1",
-        "\t\tIf coil And t = tOn + 4100 Then PadTimeMachineMagnet 0",
-        "\t\tIf coil And t = tOn + 4260 Then PadTimeMachineMagnet 1",
-        "\t\tIf coil And t = tOn + 4320 Then PadTimeMachineMagnet 0",
-        "\t\tIf t Mod 10 = 0 And vpmTimer.UpdOn Then vpmTimer.Upd.Update",
-        "\t\tdx = b.X - PadTMMagnet.X : dy = b.Y - PadTMMagnet.Y",
-        "\t\tIf tOn > 0 And t = tOn + 1000 Then held1 = Sqr(dx * dx + dy * dy) < 2",
-        "\t\tIf tOn > 0 And t = tOn + 4000 Then held4 = Sqr(dx * dx + dy * dy) < 2",
-        "\t\tIf b.Y > 600 And b.VelY > 0 And tOn > 0 Then back = True : Exit For",
+        "\t\tIf mode = 1 And t = tOn Then PadTimeMachineMagnet 1",
+        "\t\tIf mode = 1 And t = tOn + 4100 Then PadTimeMachineMagnet 0",
+        "\t\tIf mode = 1 And t = tOn + 4270 Then PadTimeMachineMagnet 1",
+        "\t\tIf mode = 1 And t = tOn + 4290 Then PadTimeMachineMagnet 0",
+        "\t\tIf mode = 2 And inside And tOn > 0 And ok = 0 Then PadTimeMachineMagnet 1 : ok = t",
+        "\t\tIf mode = 2 And ok > 0 And t = ok + 60 Then PadTimeMachineMagnet 0",
+        "\t\tIf t Mod 10 = 0 Then PadTMTimer_Timer",
+        "\t\tIf tOn > 0 And t = tOn + 1000 Then held1 = Abs(b.X - 517) + Abs(b.Y - 435) + Abs(b.Z - 105) < 1",
+        "\t\tIf tOn > 0 And t = tOn + 4000 Then held4 = Abs(b.X - 517) + Abs(b.Y - 435) + Abs(b.Z - 105) < 1",
+        "\t\tIf b.X = 364 And b.Y = 418 And b.Z = 100 And b.VelY > 0 And PadTMState = 0 Then out = True : d = t - tOn : Exit For",
+        "\t\tIf b.Y > 600 And b.VelY > 0 And tOn > 0 Then back = True : d = t - tOn : Exit For",
         "\tNext",
-        "\tShot = held1 & \"/\" & held4 & \"/\" & back & \"@\" & Int((t - tOn) / 100) / 10",
+        "\tShot = held1 & \"/\" & held4 & \"/\" & out & \"/\" & back & \"@\" & Int(d / 100) / 10",
         "End Function",
         "Dim xoff, v, s",
         "For Each xoff In Array(-12, -3, 6, 11) : For v = 15 To 160 Step 5",
-        "\ts = s & v & \"/\" & xoff & \":\" & Shot(v, xoff, True) & \" \"",
+        "\ts = s & v & \"/\" & xoff & \":\" & Shot(v, xoff, 1) & \" \"",
         "Next : Next",
-        "WScript.Echo s & \"nocoil:\" & Shot(60, 6, False)",
+        "WScript.Echo s & \"search:\" & Shot(60, 6, 2) & \" nocoil:\" & Shot(60, 6, 0)",
     ]), encoding="latin-1")
     import subprocess
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=120)
     got = r.stdout.split()
-    assert len(got) == 4 * 30 + 1, r.stdout + r.stderr
-    for s in got[:-1]:
+    assert len(got) == 4 * 30 + 2, r.stdout + r.stderr
+    for s in got[:-2]:
         flags, after = s.split(":")[1].split("@")
-        assert flags == "True/True/True", s                 # held at 1 s and 4 s, then rolled back down
-        assert 4.1 <= float(after) <= 5.5, s                # down past tm2 soon after the magnet let go
-    assert got[-1].split(":")[1].split("@")[0] == "False/False/True", got[-1]   # no coil: straight back down
+        assert flags == "True/True/True/False", s           # held inside at 1 s and 4 s, then out the back
+        assert 4.1 <= float(after) <= 4.5, s                 # onto the wire soon after the magnet let go
+    assert got[-2].split(":")[1].split("@")[0] == "False/False/False/True", got[-2]   # a search pulse: back down
+    assert got[-1].split(":")[1].split("@")[0] == "False/False/False/True", got[-1]   # no coil: straight back down
 
 
 def test_rushs_side_scoop_rests_on_the_lower_switch():
@@ -808,7 +795,7 @@ def _rush_1228_vbs(vs):
     out, _ = vs.patch(MINI_TRIBUTE, t)
     hits = [ln for ln in out.split("\n") if re.match(r"Sub sw1[123]_Hit ", ln)]
     ev = m["extra_vbs"]
-    own = ev[ev.index("Sub PadDrop(t)"):ev.index("' PAD-925")]
+    own = ev[ev.index("Sub PadDrop(t)"):ev.index("' PAD-1240")]
     return m, hits, own
 
 

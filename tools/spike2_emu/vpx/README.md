@@ -499,6 +499,18 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   (`{"LightningTarget": {"SLGF": 300.0}}`: Foo Fighters' kick target kicks
   harder; a JSON float is written as a float, an int as an int). The object's
   GameItem stream is replaced, which the MAC does not cover.
+* **Drop targets the tribute made from stand-ups** (PAD-1228). drhotwing's
+  Rush hides three stand-up HitTargets in its own hit subs to make its
+  instrument bank drop; with those subs out of the way the targets stood and
+  the switch only blinked. A `drop` switch may name a `call`, a sub of the
+  map's `extra_vbs` run after the switch is made (`PadDrop sw11`: hide it the
+  tribute's way); the reset coil's sub stands them up and opens the switches.
+* **A mechanism the board turns itself** (PAD-1228). A node board runs its
+  steppers and the game hears only their end switches, so Rush's drum clock
+  stood still. The shim writes each stepper's place into padled (version 8,
+  `coilmap.stepper`); a map's `mechs` (`{"0": {"stepper": [10, 0]}}`) makes
+  `Controller.GetMech(0)` answer it in steps from home, and a map timer turns
+  the table's object by it.
 * **A sound played at a wall stops the table** (PAD-992). JP's
   `PlaySoundAt` pans by the object's `.x`, which a wall, ramp or rubber has
   not: Foo Fighters' first KICK TARGET coil stopped Visual Pinball with

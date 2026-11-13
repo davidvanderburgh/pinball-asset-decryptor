@@ -45,7 +45,7 @@
 #define PADLED_H
 
 #define PADLED_MAGIC   0x44454c50u      /* 'PLED' */
-#define PADLED_VERSION 7
+#define PADLED_VERSION 8
 
 /* Node ids run to 14 and index to 95, so a flat [16][96] covers every board
  * with room to spare and needs no per-node base to get wrong. */
@@ -194,6 +194,18 @@ struct padled_shm {
     unsigned char rule_pwr[PADLED_NODES][PADLED_COILS];
     unsigned char rule_in[PADLED_NODES][PADLED_COILS];
     unsigned rule_sets;           /* cmd 41 frames published, ever         */
+    /* VERSION 8 (PAD-1228): A NODE BOARD'S STEPPER, WHERE IT WAS SENT. The
+     * board runs a stepper itself (cmd 34 homes it, cmd 35 moves it) and the
+     * game hears back only its end switches, so a reader playing the machine
+     * for a table of its own could not show the mechanism: Rush LE's drum
+     * clock hand (node 10 motor 0, 10 steps a game minute) turned on every
+     * pop and the Visual Pinball table's clock stood still. Written by the
+     * shim's stepper model at each home (0) and move (its destination):
+     * step_cfg[node] bit k says motor k has been homed or moved, step_pos is
+     * its place in steps from home, either sign. Offsets for a Python reader:
+     * step_cfg 16072, step_pos 16088 (coilmap.STEP_*). */
+    unsigned char step_cfg[PADLED_NODES];
+    int step_pos[PADLED_NODES][4];
 };
 
 #endif

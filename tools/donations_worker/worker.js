@@ -11,7 +11,8 @@
 //   POST   /v1/donate               add one (header X-PAD-Key = APP_KEY)
 //   POST   /v1/report               a problem report from the app (X-PAD-Key)
 //   GET    /v1/report/status?ids=   how the app's own reports are doing
-//   POST   /v1/report/<id>/reply    the user's answer to a question (PAD-972)
+//   POST   /v1/report/<id>/reply    the user's answer to a question (PAD-972),
+//                                   or a follow-up on the report (PAD-1254)
 //   GET    /v1/admin/reports        reports not yet taken; .../<id>/taken,
 //                                   /answer, /stage, /reply-taken (X-PAD-Admin)
 //   GET    /v1/admin/replies        answers waiting for the tracker (X-PAD-Admin)
@@ -81,6 +82,12 @@ const REPORT_STAGES = ["queued", "working", "ready", "done", "question"];
 // user's answer (words and files) to /v1/report/<id>/reply, which the
 // tracker collects from /v1/admin/replies and clears with /reply-taken.
 // One answer per question: a new question opens the way again.
+// PAD-1254: the same endpoint with `follow_up: true` is the reporter adding
+// to a report they already sent (Report a problem's "This is about"), in
+// any stage once the tracker has filed it, released or closed included:
+// words and files the tracker collects the same way, so it lands on the
+// report's ticket instead of a new one.  One waiting at a time.  A body
+// without it is an answer, exactly as before, so an older app is unchanged.
 const QUESTION_MAX = 4000;
 const REPLY_MAX = 20000;
 const REPLY_FILES = 5;
@@ -538,15 +545,34 @@ async function reportReply(request, env, id) {
     "SELECT COUNT(*) AS n FROM reply_log WHERE ip_hash = ? AND at > ?")
     .bind(who, now - 3600).first();
   if (reports.n + answers.n >= REPORTS_PER_HOUR) return fail("Too many in one hour. Try again later.", 429);
-  const r = await env.DB.prepare(
-    "UPDATE reports SET reply = ?, reply_files = ?, reply_at = ?, reply_pending = 1, stage = 'working' " +
-    "WHERE id = ? AND stage = 'question' AND reply_pending = 0 AND reply_at < question_at")
-    .bind(rep.message, JSON.stringify(rep.files), now, id).run();
-  if (!r.meta.changes) return fail("That question is no longer open.", 409);
+  if (body.follow_up === true) {
+    const row = await env.DB.prepare("SELECT state, reply_pending FROM reports WHERE id = ?")
+      .bind(id).first();
+    if (!row) return json({ ok: false, code: "gone", error: "That report is no longer on record." }, 404);
+    if (row.state === "received") {
+      return json({ ok: false, code: "not_filed", error: "That report hasn't reached the developer's queue yet. Try again in a few minutes." }, 409);
+    }
+    // a question it answers moves on as an answer does; any other stage
+    // is the tracker's to move
+    const f = await env.DB.prepare(
+      "UPDATE reports SET reply = ?, reply_files = ?, reply_at = ?, reply_pending = 1, " +
+      "stage = CASE WHEN stage = 'question' THEN 'working' ELSE stage END " +
+      "WHERE id = ? AND reply_pending = 0 AND state != 'received'")
+      .bind(rep.message, JSON.stringify(rep.files), now, id).run();
+    if (!f.meta.changes) {
+      return json({ ok: false, code: "pending", error: "Your last message on this report hasn't been picked up yet. Try again in a few minutes." }, 409);
+    }
+  } else {
+    const r = await env.DB.prepare(
+      "UPDATE reports SET reply = ?, reply_files = ?, reply_at = ?, reply_pending = 1, stage = 'working' " +
+      "WHERE id = ? AND stage = 'question' AND reply_pending = 0 AND reply_at < question_at")
+      .bind(rep.message, JSON.stringify(rep.files), now, id).run();
+    if (!r.meta.changes) return fail("That question is no longer open.", 409);
+  }
   // the log is for that count alone, so nothing older than the hour stays
   await env.DB.prepare("DELETE FROM reply_log WHERE at <= ?").bind(now - 3600).run();
   await env.DB.prepare("INSERT INTO reply_log (ip_hash, at) VALUES (?, ?)").bind(who, now).run();
-  return json({ ok: true, id });
+  return json(body.follow_up === true ? { ok: true, id, follow_up: true } : { ok: true, id });
 }
 
 // the tracker collecting the answers that came in, oldest first

@@ -1368,6 +1368,9 @@ function ReportDialog({ close, prefill = "" }) {
   const [busy, setBusy] = useState(false);
   const [hidden, setHidden] = useState(false);      // while the window is being shot
   const [sentId, setSentId] = useState(null);
+  // PAD-1254: one of the user's own reports this is about ("" = something
+  // new); the one waiting on their answer comes picked
+  const [about, setAbout] = useState("");
   useEffect(() => {
     (async () => {
       const i = await call("shellx.report_open", prefill || "");
@@ -1375,16 +1378,17 @@ function ReportDialog({ close, prefill = "" }) {
       setInfo(i);
       setName(i.name || ""); setHidePaths(i.hide_paths !== false);
       if (i.prefill && !text) setText(i.prefill);
+      if (i.about) setAbout(i.about);
     })();
   }, []);
   useEffect(() => {
     if (!showPreview) return undefined;
     const id = setTimeout(async () => {
-      const p = await call("shellx.report_preview", text, name, hidePaths);
+      const p = await call("shellx.report_preview", text, name, hidePaths, about);
       if (p) setPreview(p.text);
     }, 300);
     return () => clearTimeout(id);
-  }, [showPreview, text, name, hidePaths]);
+  }, [showPreview, text, name, hidePaths, about]);
   useEffect(() => {
     // the send finished off the loop: the service's answer, or why not
     if (!r.last || busy === false) return;
@@ -1413,12 +1417,19 @@ function ReportDialog({ close, prefill = "" }) {
   };
   const send = async () => {
     setErr(null); setBusy(true);
-    const ok = await act(() => call("shellx.report_send", text, name, hidePaths));
+    const ok = await act(() => call("shellx.report_send", text, name, hidePaths, about));
     if (!ok) setBusy(false);
   };
   const save = () => act(() => call("shellx.report_save", text, name, hidePaths));
   // the reports this app sent are a board of their own (PAD-914)
   const mine = r.mine || [];
+  // newest first, under where each one is
+  const open = mine.filter((m) => m.followable).slice().reverse();
+  const aboutOpts = [{ value: "", label: "Something new" }].concat(open.map((m) => ({
+    value: m.id, group: m.waiting ? "Needs your answer" : m.state === "filed" ? "Open" : "Finished",
+    label: (m.ticket ? m.ticket + ": " : "") + (m.title || "A problem report") })));
+  const aboutM = about ? open.find((m) => m.id === about) : null;
+  const fu = r.last && r.last.ok && r.last.follow_up ? r.last : null;
   const hasNews = !!mine.find((m) => m.seen === false);
   const asked = !!mine.find((m) => m.waiting);
   const board = () => { close(); openDialog("reports"); };
@@ -1431,7 +1442,8 @@ function ReportDialog({ close, prefill = "" }) {
   if (sentId) {
     return html`<${Modal} title="Report a problem" icon="flag" onClose=${onClose} cls=${"sx-report " + uid}
       footer=${html`<${Button} onClick=${board}>See your reports<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
-      <${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. Your reports shows where it is in the queue, and when a release addresses it this app tells you with a notice at the top.<//>
+      ${fu ? html`<${Note} kind="ok">Added to your report "${fu.title || "your report"}"${fu.ticket ? ` (${fu.ticket})` : ""}, with the log and the card's details attached. It goes to the same ticket, not a new one. Your reports shows where it is.<//>`
+        : html`<${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. Your reports shows where it is in the queue, and when a release addresses it this app tells you with a notice at the top.<//>`}
     <//>`;
   }
   // ticked, the table shows the facts the way the record will carry them
@@ -1443,9 +1455,15 @@ function ReportDialog({ close, prefill = "" }) {
       <${Button} kind="primary" onClick=${send} busy=${busy} disabled=${busy || !r.available}>${busy ? "Sending…" : "Send"}<//>`}>
     <div class="stack" style="gap:10px">
       <p class="sx-p">Say what went wrong and what you expected. The app adds its version, your system, the card and project it has open, and the last ${(info && info.log_lines) || 0} lines of its log, so you don't have to.</p>
-      <label class="lbl" for="sx-rep-text">What happened</label>
+      ${open.length ? html`<div class="row wrap sx-rep-about" style="gap:10px">
+        <label class="lbl" for="sx-rep-about">This is about</label>
+        <${Select} id="sx-rep-about" value=${about} options=${aboutOpts} onChange=${setAbout} width=${460} />
+        <span class="small muted">${aboutM ? "It goes onto that report, with the log and your picture, instead of starting a new one."
+          : "Something you sent before? Pick it so it stays one report."}</span>
+      </div>` : null}
+      <label class="lbl" for="sx-rep-text">${aboutM ? "What's new about it" : "What happened"}</label>
       <textarea id="sx-rep-text" class="area" rows="5" value=${text} autoFocus
-        placeholder="I pressed Write on the Godzilla card and it stopped at 40% with…"
+        placeholder=${aboutM ? "I tried it again on the new version and…" : "I pressed Write on the Godzilla card and it stopped at 40% with…"}
         onInput=${(e) => setText(e.target.value)}></textarea>
       <div class="row wrap" style="gap:14px">
         <span class="stack" style="gap:4px"><span class="lbl">Your name (optional)</span>
@@ -1487,6 +1505,9 @@ function AnswerBox({ m, reply, focus }) {
   const files = rp.files || [];
   const [text, setText] = useState("");
   const [err, setErr] = useState(null);
+  // PAD-1254: the log tails a report carries go with the answer too
+  const [logs, setLogs] = useState(true);
+  const most = logs ? 4 : 5;
   const ref = useRef(null);
   useEffect(() => {
     if (!focus || !ref.current) return;
@@ -1500,11 +1521,11 @@ function AnswerBox({ m, reply, focus }) {
   };
   const attach = () => act(() => call("shellx.report_reply_attach", m.id));
   const remove = (i) => act(() => call("shellx.report_reply_remove", m.id, i));
-  const send = () => act(() => call("shellx.report_reply_send", m.id, text));
+  const send = () => act(() => call("shellx.report_reply_send", m.id, text, logs));
   const b = m.board || {};
   const busy = !!rp.busy;
   const onPaste = (e) => {
-    if (busy || files.length >= 5) return;
+    if (busy || files.length >= most) return;
     setErr(null); pastePicture(e, m.id, setErr);
   };
   return html`<section class="sx-ask" ref=${ref} data-id=${m.id} onPaste=${onPaste}>
@@ -1518,14 +1539,16 @@ function AnswerBox({ m, reply, focus }) {
     <textarea class="area" rows="4" value=${text} disabled=${busy} aria-label="Your answer"
       placeholder="Your answer…" onInput=${(e) => setText(e.target.value)}></textarea>
     <div class="row wrap" style="gap:8px;margin-top:6px">
-      <${Button} size="sm" onClick=${attach} disabled=${busy || files.length >= 5}>Attach files…<//>
+      <${Button} size="sm" onClick=${attach} disabled=${busy || files.length >= most}>Attach files…<//>
       ${files.map((f, i) => html`<span class="chip acc sm notr" title=${f.trimmed ? "Too big to send whole: its last part goes" : f.name}>${f.name} · ${f.kb} KB${f.trimmed ? " (trimmed)" : ""}
         <button class="sx-ask-x" aria-label=${"Remove " + f.name} disabled=${busy} onClick=${() => remove(i)}>×</button></span>`)}
       <span class="grow"></span>
       <${Button} kind="primary" size="sm" onClick=${send} busy=${busy}
         disabled=${busy || (!text.trim() && !files.length)}>${busy ? "Sending…" : "Send"}<//>
     </div>
-    <div class="small muted" style="margin-top:4px">Any file helps, such as a log; paste a picture into the box with Ctrl+V. Up to 5 files, about 1 MB in all; a log too big to send whole keeps its last part.</div>
+    <${Check} checked=${logs} onChange=${setLogs} disabled=${busy} cls="sx-ask-logs"
+      label="Include the app's logs" title="The app's log, and the Visual Pinball logs when you played a table, the same as a report carries" />
+    <div class="small muted" style="margin-top:4px">Any file helps, such as a log; paste a picture into the box with Ctrl+V. Up to ${most} files${logs ? " besides the logs" : ""}, about 1 MB in all; a log too big to send whole keeps its last part.</div>
     <${ErrorNote} text=${err || rp.error} />
   </section>`;
 }

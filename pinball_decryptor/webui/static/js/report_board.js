@@ -14,7 +14,8 @@
 // An entry is core/problem_report.py's board_entry(): id, title, at
 // (seconds), stage (received | queued | working | ready | done |
 // question), state, ticket, progress (0-100, -1 for none), version,
-// message, new, and (PAD-972) question, waiting, answer_sent.  A report
+// message, new, (PAD-972) question, waiting, answer_sent, and (PAD-1254)
+// followed: the user added to it from Report a problem.  A report
 // whose question waits on the user is drawn in Being worked on with a look
 // of its own, "Needs your answer"; a stage this script does not know goes
 // in Received rather than nowhere.
@@ -127,6 +128,8 @@
       if (opts.askHint) out += '<div class="prb-q-hint">' + esc(opts.askHint) + "</div>";
     } else if (e.answer_sent && e.stage !== "done") {
       out += '<div class="prb-out ok">Answer sent</div>';
+    } else if (e.followed) {
+      out += '<div class="prb-out ok">Follow-up sent</div>';
     }
     const p = Number(e.progress);
     if (e.stage === "working" && p >= 0 && p <= 100) {

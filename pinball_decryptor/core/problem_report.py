@@ -358,8 +358,13 @@ def as_text(report):
     fix = ((lambda s: redact(s, known=known)) if hide
            else (lambda s: s or ""))
     at = report.get("at") or time.time()
-    lines = ["Pinball Asset Decryptor problem report",
-             "======================================",
+    # PAD-1254: the same record goes with a follow-up and an answer, as a
+    # file, so it says which it is
+    head = {"follow_up": "Pinball Asset Decryptor follow-up on a problem report",
+            "answer": "Pinball Asset Decryptor answer to a question about a "
+                      "problem report"}.get(report.get("kind") or "",
+                                            "Pinball Asset Decryptor problem report")
+    lines = [head, "=" * len(head),
              "Sent: %s (local time)" % time.strftime("%Y-%m-%d %H:%M",
                                                      time.localtime(at))]
     for label, value in report.get("facts") or ():
@@ -379,8 +384,9 @@ def as_text(report):
         lines.append("Picture: %s (%s, %d KB)" % (
             p.get("name") or "picture", p.get("type") or "image",
             (len(p.get("data") or b"") + 512) // 1024))
-    lines += ["", "What happened", "-------------",
-              report.get("text") or "", ""]
+    said = {"follow_up": "What they added", "answer": "Their answer"}.get(
+        report.get("kind") or "", "What happened")
+    lines += ["", said, "-" * len(said), report.get("text") or "", ""]
     log = report.get("log") or []
     lines += ["Log (last %d lines)" % len(log), "-" * 24]
     lines += [fix(ln) for ln in log]
@@ -526,6 +532,7 @@ def board_entry(entry):
             "waiting": waiting(entry),
             "answer_sent": bool(entry.get("answer_sent"))
             and not waiting(entry) and not answered(entry),
+            "followed": bool(entry.get("followed")) and not waiting(entry),
             "new": entry.get("seen") is False}
 
 
@@ -659,6 +666,8 @@ def apply_status(cache, rows):
         m["message"] = r["message"]
         m["answered_at"] = r["answered_at"]
         m["stage"] = r.get("stage") or ""
+        if m.get("followed") and m["stage"] != m.get("followed_stage"):
+            m["followed"] = False           # it moved on: the card says where
         m["ticket"] = r.get("ticket") or ""
         m["progress"] = r.get("progress", -1)
         m["question"] = r.get("question") or ""
@@ -689,6 +698,21 @@ def note_answer_sent(cache, rid, now=None):
             m["stage"] = "working"
             m["answer_sent"] = True
             return m
+    return None
+
+
+def note_follow_up_sent(cache, rid, now=None):
+    """The service took a follow-up on *rid* (PAD-1254).  One that answers
+    a question waiting on the user is that answer; otherwise the card says
+    it went until the report moves on to another stage."""
+    for m in cache.get("mine") or ():
+        if m.get("id") != rid:
+            continue
+        if waiting(m):
+            return note_answer_sent(cache, rid, now)
+        m["followed"] = True
+        m["followed_stage"] = m.get("stage") or ""
+        return m
     return None
 
 
@@ -732,6 +756,12 @@ def reply_file(path, room=REPLY_MAX_BYTES):
     kind = mimetypes.guess_type(name)[0] or (
         "text/plain" if os.path.splitext(name)[1].lower() in _TEXT_EXT
         else "application/octet-stream")
+    return _fit(name, kind, data, room)
+
+
+def _fit(name, kind, data, room):
+    """*data* as one file of an answer, trimmed to its tail when it is text
+    too big for *room* (see :func:`reply_file`)."""
     size = len(data)
     if size <= room:
         return {"name": name, "type": kind, "data": data, "size": size,
@@ -754,11 +784,37 @@ def reply_file(path, room=REPLY_MAX_BYTES):
             "trimmed": True}
 
 
-def send_reply(url, key, rid, message, files, timeout=TIMEOUT):
+#: the name the record goes by as a file of a follow-up or an answer
+RECORD_NAME = "pad-report.txt"
+
+
+def record_file(report, room=REPLY_MAX_BYTES):
+    """The record (:func:`as_text`: the facts, the words and the three log
+    tails, redacted as the report asks) as one text file of an answer or a
+    follow-up (PAD-1254), its tail kept when it is too big for *room*."""
+    return _fit(RECORD_NAME, "text/plain",
+                as_text(report).encode("utf-8"), room)
+
+
+def followable(entry):
+    """True when a follow-up can go onto this report (PAD-1254): the
+    developer's tracker has filed it (a report it has not taken yet has no
+    ticket to land on) and the service still has it."""
+    return bool(entry.get("id")) and (entry.get("state") or "received") in (
+        "filed", "released", "closed")
+
+
+def send_reply(url, key, rid, message, files, timeout=TIMEOUT,
+               follow_up=False):
     """Post the user's answer to *rid*'s question: *message* and *files*
     (:func:`reply_file` dicts).  :class:`QuestionClosed` when the question
     is no longer open (409), :class:`ReportError` for another refusal; a
-    network failure is the urllib error."""
+    network failure is the urllib error.
+
+    *follow_up* (PAD-1254): the same words and files added to the report
+    in whatever stage it is, not an answer to its question; a refusal is a
+    :class:`ReportError` with the service's words (a service from before
+    PAD-1254 refuses it as a question no longer open, which says so)."""
     if not url:
         raise ReportError("No report service is configured.")
     message = (message or "").strip()
@@ -774,6 +830,8 @@ def send_reply(url, key, rid, message, files, timeout=TIMEOUT):
             "files": [{"name": f["name"], "type": f.get("type") or "",
                        "b64": base64.b64encode(f["data"]).decode("ascii")}
                       for f in files]}
+    if follow_up:
+        body["follow_up"] = True
     if sum(len(f["b64"]) for f in body["files"]) > REPLY_MAX_B64:
         raise ReportError("The files are too big to send together.")
     req = urllib.request.Request(
@@ -790,6 +848,16 @@ def send_reply(url, key, rid, message, files, timeout=TIMEOUT):
                 msg = _read_json(e).get("error")
             except Exception:                           # noqa: BLE001
                 msg = None
+            if follow_up:
+                if e.code in (404, 409) and not msg or                         msg == "That question is no longer open.":
+                    msg = ("The report service can't add to a report yet. "
+                           "Pick Something new to send this as a report of "
+                           "its own.")
+                elif e.code == 404:
+                    msg = ("That report is no longer on record. Pick "
+                           "Something new to send this as a report of its "
+                           "own.")
+                raise ReportError(msg or "The service refused the follow-up.")
             if e.code == 409:
                 raise QuestionClosed(
                     "This question is no longer open. Check now shows "

@@ -80,6 +80,15 @@ function showTip(text, x, y) {
   tipEl.style.top = ty + "px";
 }
 function hideTip() { tipEl.hidden = true; }
+// PAD-1237: words in the bottom bar give way to its controls, cut with an
+// ellipsis; hovering `host` then shows them whole. Uncut words carry no
+// tooltip (they are all there already).
+function tipWhenCut(host, words) {
+  host.addEventListener("pointerenter", () => {
+    if (words.scrollWidth > words.clientWidth + 1) host.title = words.textContent;
+    else host.removeAttribute("title");
+  });
+}
 // hold something for as long as the mouse button is down, wherever the
 // pointer goes meanwhile (the release opens what was HELD)
 function holdWith(target, ev, down, up) {
@@ -314,6 +323,7 @@ function startMain() {
       delete app.dataset.rig;
     }
     const stxt = el("div", "txt", S.status || "");
+    tipWhenCut(stxt, stxt);
     status.append(stxt);
     const run = runCluster(S.run);
     // PAD-1198: Stop emulator on its own at the far left, away from Pause
@@ -460,6 +470,7 @@ function startMain() {
     const bootN = el("span", "n mono"), bootW = el("span", "w");
     boot.append(bootN, bootW);
     boot.hidden = true;
+    tipWhenCut(boot, bootW);
     box.append(boot);
     let restart = null;
     const showRestarting = (on) => {
@@ -492,7 +503,10 @@ function startMain() {
       mute.type = "checkbox";
       mute.addEventListener("change", () => { api("mute", mute.checked); mute.blur(); });
       mbox.append(mute, el("span", null, "Mute"));
-      box.append(lab, vol, pct, mbox);
+      // one unit, so a wrapping bar (PAD-1237) never parts Mute from its slider
+      const grp = el("span", "volgrp");
+      grp.append(lab, vol, pct, mbox);
+      box.append(grp);
     }
     const update = (r) => {
       if (!r) return;
@@ -512,7 +526,6 @@ function startMain() {
       if (r.boot) {
         bootN.textContent = r.boot.pct + "%";
         bootW.textContent = r.boot.words;
-        boot.title = r.boot.words;
       }
       if (vol && r.audio) {
         if (!sliding) {

@@ -742,7 +742,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. At 1 "
                         "(Classic) or 2 (Enhanced) the game's start menu (both flipper buttons in attract) offers "
                         "CO-OP PLAY (each Start then adds a teammate; or the right flipper button + Start adds one), "
-                        "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four) "
+                        "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four), "
                         "TEAM PLAY 2 VS 1 (players 1 and 3 against player 2) and TEAM PLAY 3 VS 1 (players 1, 3 "
                         "and 4 against player 2); at 2 also ENHANCED STANDARD (a normal game of competing players, "
                         "each with their own score and progress and a character). Classic: the players pick "

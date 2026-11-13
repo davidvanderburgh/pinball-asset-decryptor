@@ -322,15 +322,15 @@ function startMain() {
     } else {
       delete app.dataset.rig;
     }
-    const stxt = el("div", "txt", S.status || "");
-    tipWhenCut(stxt, stxt);
-    status.append(stxt);
+    // PAD-1237: the bar is the run's controls alone, on one row. What the
+    // last press said (a ball, a helper) is the BALLS section's, and the save
+    // states are a side-panel section of their own, below.
+    const msg = el("div", "pf-msg", S.status || "");
+    status.append(el("span", "sp"));
     const run = runCluster(S.run);
     // PAD-1198: Stop emulator on its own at the far left, away from Pause
     if (run.stop) status.prepend(run.stop);
     status.append(run.el);
-    const states = S.savestates ? stateCluster() : null;
-    if (states) status.append(states.el);
     let v;
     if (S.kind === "field") v = fieldView(main);
     else if (S.kind === "schematic") v = schematicView(main);
@@ -340,7 +340,7 @@ function startMain() {
     // before padbinds brings the key panel, the side panel is the window's own:
     // the ball controls (PAD-668: never over the playfield) under the info
     let side = panel ? panel.el : null;
-    if (!side && ((S.view && S.view.info) || v.side)) { side = el("aside", "pf-panel"); body.append(side); }
+    if (!side && ((S.view && S.view.info) || v.side || S.savestates)) { side = el("aside", "pf-panel"); body.append(side); }
     // the extra information (PAD-238) sits at the head of the side panel,
     // folded away, never over the playfield
     let info = null;
@@ -371,13 +371,28 @@ function startMain() {
       clips = clipsPanel(S.clips);
       if (top) top.el.after(clips.el); else side.prepend(clips.el);
     }
+    // PAD-1237: SAVE STATES, under the clips (off the bottom bar)
+    let states = null;
+    if (side && S.savestates) {
+      states = statesPanel();
+      const after = clips || top;
+      if (after) after.el.after(states.el); else side.prepend(states.el);
+    }
+    // the last press's answer, in the BALLS section (or atop the side panel;
+    // in the bar only for a window with no side panel at all)
+    const ballSec = (panel && panel.ballSec) || v.side;
+    if (ballSec) {
+      const nt = ballSec.querySelector(".kp-note");
+      if (nt) nt.before(msg); else ballSec.append(msg);
+    } else if (side) side.prepend(msg);
+    else { msg.className = "txt"; tipWhenCut(msg, msg); status.querySelector(".sp").replaceWith(msg); }
     // PAD-1090: the boot progress bar rides the top rig strip (David)
     const loadBar = el("i", "pf-load");
     loadBar.hidden = true;
     app.append(loadBar, body, status);
     view = {
       frame(f) {
-        if (f.status != null) stxt.textContent = f.status;
+        if (f.status != null) msg.textContent = f.status;
         if (f.live && info) info.live(f.live);
         if (f.shaker && shaker) shaker.update(f.shaker);
         if (v.frame) v.frame(f);
@@ -539,10 +554,25 @@ function startMain() {
     return { el: box, stop, update };
   }
 
-  // ---- the save-state cluster (item 13) --------------------------------------
-  function stateCluster() {
-    const box = el("div", "pf-states");
+  // ---- the save states (item 13): a side-panel section since PAD-1237 -------
+  // The slot list, Save state and Load state, and their own line: "saving
+  // state...", the helper's answer, an empty slot. Open unless it was folded.
+  function statesPanel() {
+    const acc = el("details", "kp-acc pf-sts");
+    let open = true;
+    try { open = localStorage.getItem("pf-acc-states") !== "0"; } catch (e) { /* no storage */ }
+    acc.open = open;
+    const sum = el("summary", null, "SAVE STATES");
+    // never keep the keyboard: a focused summary would eat the space bar
+    sum.tabIndex = -1;
+    sum.addEventListener("mousedown", (ev) => ev.preventDefault());
+    acc.addEventListener("toggle", () => {
+      try { localStorage.setItem("pf-acc-states", acc.open ? "1" : "0"); } catch (e) { /* no storage */ }
+    });
+    acc.title = "Snapshot the running game, mid-ball, into a slot and come back to it later";
+    const body = el("div", "body");
     const sel = el("select", "sel");
+    sel.addEventListener("change", () => sel.blur());
     const fill = (vals) => {
       const keep = sel.selectedIndex;
       sel.textContent = "";
@@ -550,12 +580,24 @@ function startMain() {
       sel.selectedIndex = keep >= 0 ? keep : 0;
     };
     fill(S.slots || []);
-    const save = btn("Save state", () => saveDialog(sel.selectedIndex));
-    const loadB = btn("Load state", () => api("load", sel.selectedIndex));
+    const save = btn("Save state", () => { save.blur(); saveDialog(sel.selectedIndex); }, "sm");
+    const loadB = btn("Load state", () => { loadB.blur(); api("load", sel.selectedIndex); }, "sm");
+    const bs = el("div", "kp-btns");
+    bs.append(save, loadB);
+    const line = el("div", "pf-msg");
+    let timer = null;
+    const say = (m) => {
+      if (!m) return;
+      clearTimeout(timer);
+      line.textContent = m[0] || "";
+      if (m[0] && m[1] != null) timer = setTimeout(() => { line.textContent = ""; }, m[1] * 1000);
+    };
     const setBusy = (b) => { save.disabled = loadB.disabled = !!b; };
     setBusy(S.state_busy);
-    box.append(sel, save, loadB);
-    return { el: box, update(s) { fill(s.values || []); setBusy(s.busy); } };
+    say(S.slot_msg);
+    body.append(sel, bs, line);
+    acc.append(sum, body);
+    return { el: acc, update(s) { fill(s.values || []); setBusy(s.busy); say(s.msg); } };
   }
   function saveDialog(idx) {
     const scrim = el("div", "pf-scrim");
@@ -1383,9 +1425,10 @@ function startMain() {
     if (spec.rows.some((r) => r.click != null)) kb.append(el("div", "kp-hint", "click Start Button or Left Coin to press it"));
 
     // the BALLS section (PAD-134)
-    let ball = null, drain = null, note = null, dots = null;
+    let ball = null, drain = null, note = null, dots = null, ballSec = null;
     if (spec.balls) {
       const sec = el("div", "kp-sec");
+      ballSec = sec;
       const h = el("div", "kp-head");
       h.append(el("span", "kp-group", "BALLS"));
       if (spec.trough_keys) { const t = el("span", "ks mono", spec.trough_keys); t.style.color = "var(--key)"; t.style.fontSize = "10.5px"; h.append(t); }
@@ -1499,7 +1542,7 @@ function startMain() {
       if (note) fitNote(d.note || []);
     }
     update(P.dyn || {});
-    return { el: root, update };
+    return { el: root, update, ballSec };
   }
 
   // ---- the keyboard, with THIS window focused (item 39) -----------------------

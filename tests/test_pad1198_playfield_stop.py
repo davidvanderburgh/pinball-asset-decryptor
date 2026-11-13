@@ -209,7 +209,7 @@ def test_the_page_puts_stop_at_the_far_left_in_red():
     assert "box.append(stop)" not in body
     assert "return { el: box, stop, update };" in body
     bar = pf_js[pf_js.index('const status = el("div", "pf-status");'):]
-    bar = bar[:bar.index("const states =")]
+    bar = bar[:bar.index("status.append(run.el)")]
     assert "if (run.stop) status.prepend(run.stop);" in bar
     assert bar.index("status.append(chip)") < bar.index("status.prepend(run.stop)")
     css = _text("tools", "spike2_emu", "pfpage", "pf.css")

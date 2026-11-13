@@ -1,15 +1,16 @@
-r"""PAD-1237 proof: the virtual playfield window's bottom bar with long words.
+r"""PAD-1237 proof: the virtual playfield window's bottom bar and side panel.
 
     python scripts/shot_pad1237_playfield.py <tree> <out png> [--width N]
 
 <tree> is the source tree whose playfield is served (a ``git archive`` of main
 for the "before" shot, the ticket branch for "after"): scripts/playfield_demo.py
 with no emulator, handed a volume file as the app hands it (PAD_AUDIO_CTL), so
-the bar carries Stop emulator, Pause, Restart game, Volume, Mute and the save
-states. The page's first /state answer is given the boot step David saw
-("98% Guided Setup is waiting for you: ...") and a long status line, so the
-words compete with the controls. Prints where each control's right edge falls
-against the window's, whether the words are cut, and the tooltip they carry.
+the bar carries Stop emulator, Pause, Restart game, Volume and Mute, and the
+window has save states. The page's first /state answer is given the boot step
+David saw ("98% Guided Setup is waiting for you: ..."), a ball message (the
+status line) and a save-state message, so each shows where it lives. Prints
+the bar's height, where the controls end against the window's width, where
+the save states and each message are, and the boot words' tooltip.
 Writes <out png> (the whole window) and <out>_bar.png (the bottom bar).
 """
 import json
@@ -21,8 +22,37 @@ import time
 
 GUIDED = ("Guided Setup is waiting for you: press Save & Exit (Backspace moves to it, "
           "Enter selects) to finish it and the game reaches attract mode")
-STATUS = ("trough 6 of 6 | feeder: trough full, waiting for a game | "
-          "switches 70-75 closed | coin door closed")
+STATUS = "ball in RIGHT VUK - it stays until the game fires RIGHT VUK KICKER"
+SLOT_MSG = "slot 2 is empty - nothing to load"
+
+PROBE = """([status, slotMsg]) => {
+  const W = document.documentElement.clientWidth;
+  const r = (sel) => { const e = document.querySelector(sel);
+    return e ? Math.round(e.getBoundingClientRect().right) : null; };
+  const cut = (sel) => { const e = document.querySelector(sel);
+    return e ? e.scrollWidth > e.clientWidth : null; };
+  const tip = (sel) => { const e = document.querySelector(sel);
+    if (!e) return null;
+    e.dispatchEvent(new PointerEvent('pointerenter'));
+    return e.getAttribute('title'); };
+  const where = (t) => {
+    const e = Array.from(document.querySelectorAll('div'))
+      .find(d => d.children.length === 0 && d.textContent === t);
+    if (!e) return 'not shown';
+    return e.closest('.pf-status') ? 'bottom bar'
+      : e.closest('.pf-sts') ? 'SAVE STATES section'
+      : e.closest('.kp-sec, .pf-balls') ? 'BALLS section' : 'side panel'; };
+  const sel = document.querySelector('select');
+  return {window: W,
+          bar_height: Math.round(document.querySelector('.pf-status').getBoundingClientRect().height),
+          controls_right: Math.max(r('.pf-run .mute') || 0, r('.pf-status > :last-child') || 0),
+          save_states_in: !sel ? 'none' : sel.closest('.pf-status') ? 'bottom bar'
+                          : sel.closest('.pf-sts') ? 'SAVE STATES section' : 'elsewhere',
+          ball_message_in: where(status),
+          slot_message_in: where(slotMsg),
+          boot_words_cut: cut('.pf-run .boot .w'),
+          boot_tip: tip('.pf-run .boot')};
+}"""
 
 
 def main():
@@ -58,6 +88,7 @@ def main():
             run["boot"] = {"pct": 98, "words": GUIDED}
             S["run"] = run
             S["status"] = STATUS
+            S["slot_msg"] = [SLOT_MSG, None]
             route.fulfill(response=r, body=json.dumps(S),
                           headers={**r.headers, "content-type": "application/json"})
 
@@ -67,27 +98,11 @@ def main():
             pg.route("**/state?*", state)
             pg.goto(url)
             pg.wait_for_timeout(3000)
-            # the demo's frames carry their own status line; put ours back
-            pg.evaluate("t => { const s = document.querySelector('.pf-status .txt');"
-                        " if (s) s.textContent = t; }", STATUS)
-            info = pg.evaluate("""() => {
-              const W = document.documentElement.clientWidth;
-              const r = (sel) => { const e = document.querySelector(sel);
-                return e ? Math.round(e.getBoundingClientRect().right) : null; };
-              const cut = (sel) => { const e = document.querySelector(sel);
-                return e ? e.scrollWidth > e.clientWidth : null; };
-              const tip = (sel) => { const e = document.querySelector(sel);
-                if (!e) return null;
-                e.dispatchEvent(new PointerEvent('pointerenter'));
-                return e.getAttribute('title'); };
-              return {window: W,
-                      mute_right: r('.pf-run .mute'), states_right: r('.pf-states'),
-                      load_state_right: r('.pf-states .btn:last-child'),
-                      boot_words_cut: cut('.pf-run .boot .w'),
-                      boot_tip: tip('.pf-run .boot'),
-                      status_cut: cut('.pf-status .txt'),
-                      status_tip: tip('.pf-status .txt')};
-            }""")
+            # main's page put the status line in the bar; the demo's frames
+            # may have blanked it, so put the ball message back where it lives
+            pg.evaluate("t => { const s = document.querySelector('.pf-msg, .pf-status .txt');"
+                        " if (s && !s.textContent) s.textContent = t; }", STATUS)
+            info = pg.evaluate(PROBE, [STATUS, SLOT_MSG])
             for k, v in info.items():
                 print("%-16s %s" % (k, v))
             pg.screenshot(path=out)

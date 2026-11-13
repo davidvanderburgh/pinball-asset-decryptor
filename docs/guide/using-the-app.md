@@ -586,16 +586,19 @@ it again restores the whole setup.
   modes (`Modes.zip`), text edits, defaults and font changes; **Import
   replacements…** puts all of it back on a fresh extract.
 - **Team…** (folder button) lets several people work on one project, each
-  on their own PC. Everyone extracts the same card and picks the same team
-  folder, one that OneDrive, Dropbox, Google Drive or a network drive keeps
-  the same on every PC. Each part of the project (Videos, Images, Sounds,
-  Scenes, Text, Fonts, Modes, Color profiles, Defaults and attract) belongs
-  to whoever **Take**s it. **Share my parts** copies yours into your own
-  folder of the team folder; **Get from the team** replaces each other part
-  with its owner's, files copied into the project's `Team files` folder.
-  Nobody writes into anyone else's folder, so the sync service never makes
-  conflict copies. When someone shares, a **Team: N new** chip shows in
-  the top bar.
+  on their own PC.
+  - Everyone extracts the same card and picks the same team folder, one
+    that OneDrive, Dropbox, Google Drive or a network drive keeps the same
+    on every PC.
+  - Each part of the project (Videos, Images, Sounds, Scenes, Text, Fonts,
+    Modes, Color profiles, Defaults and attract) belongs to whoever
+    **Take**s it.
+  - **Share my parts** copies yours into your own folder of the team
+    folder; **Get from the team** replaces each other part with its
+    owner's, files copied into the project's `Team files` folder. Nobody
+    writes into anyone else's folder, so the sync service never makes
+    conflict copies.
+  - When someone shares, a **Team: N new** chip shows in the top bar.
 - **Recent paths:** every file and folder box keeps a dropdown of your
   recent paths, per manufacturer.
 - **Drag and drop:** drop a file or folder from the desktop on any

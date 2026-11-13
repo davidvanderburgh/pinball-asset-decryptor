@@ -132,7 +132,7 @@ def test_the_latest_ports_carry_the_line():
 MAIN = r"""
 #include <stdio.h>
 static unsigned teammates;
-static struct { unsigned turn; } coop;
+static struct { unsigned turn; int standard; } coop;   /* standard: PAD-1224 */
 static unsigned coop_teammates(void) { return teammates; }
 static void say(const char *f, ...) { (void)f; }
 static unsigned game_player = 1;

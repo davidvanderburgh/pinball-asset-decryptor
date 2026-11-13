@@ -1046,7 +1046,9 @@ def test_a_shorter_pick_is_offered_a_loop(tmp_path, monkeypatch):
                                 lambda self, rel: 200.1)
             monkeypatch.setattr(core_video, "probe_duration",
                                 lambda _p, n=near: n)
-            w.answers.append(str(mine))
+            # a file of its own: the tab keeps each file's probed length
+            # (PAD-1232), so re-picking mine.mp4 would still read 1:29
+            w.answers.append(str(_mine(tmp_path, "near%d.mp4" % (near * 10))))
             n = len(w.asked)
             assert w.call("video.choose", rel) is True
             assert len(w.asked) == n + 1

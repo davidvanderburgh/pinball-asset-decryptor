@@ -73,7 +73,7 @@ def test_every_ability_waits_on_classic():
     close = R._lift(src, "static void coop_pick_close(const char *how)")
     assert "if (c >= 0 && !coop_classic()) coop_gift(&coop_ch[c]);" in close
     assert "if (c >= 0 && !coop_classic()) coop_counts_give(&coop_ch[c]);" in close
-    assert "&& coop_adj_game && !coop_classic()) {" in close                  # the pick's late ball save
+    assert "&& coop_adj_game && !coop_classic() && !ci.holding) {" in close   # the pick's late ball save (PAD-1215)
     turn = R._lift(src, "static void coop_chars_turn(void)")
     assert "&& !coop_classic())\n        coop_gift(" in turn                  # a gift at every turn
     say = R._lift(src, "static void coop_pick_say(void)")

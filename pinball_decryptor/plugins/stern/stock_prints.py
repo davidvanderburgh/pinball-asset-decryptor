@@ -471,10 +471,11 @@ def card_files(reader, manifest, paths, deep=False, cancel=None, nodes=None):
     """``({path: (size, md5)}, stale)``: what the card really holds at each
     of *paths*, and how many of its own manifest records are out of date.
 
-    The manifest is NOT the whole truth.  PAD rewrites the records of the
-    files it changes, but a card built elsewhere can leave them as Stern
-    wrote them: DragonRR's Heisei card replaced 541 videos and kept every
-    one's stock size and MD5 in its manifest.  So each file's size is taken
+    The manifest is NOT the whole truth.  A build can leave the records of
+    the files it changed as Stern wrote them: DragonRR's Heisei card replaced
+    541 videos and kept every one's stock size and MD5 in its manifest, and
+    PAD's own Spike 2 builds did the same for every video they copied on
+    whole until PAD-1242.  So each file's size is taken
     from the filesystem (free: the walk already read the inodes), and a size
     that disagrees with the record marks the file changed.  With *deep*, the
     bytes of every file whose size still agrees are hashed as well, which
@@ -552,8 +553,10 @@ def check_walked(reader, found, table=None, deep=False, cancel=None):
     status = "official" if not diff["changed"] else "modified"
     text = describe(status, label, diff)
     if stale:
-        text += (" Its own manifest still lists %s as Stern's, so it was "
-                 "not built by PAD." % _plural(stale, "changed file"))
+        # Not proof of who built it (PAD-1242): PAD's own Spike 2 builds left
+        # the records of the videos they copied on whole as Stern's
+        text += (" Its own manifest still lists %s as Stern's."
+                 % _plural(stale, "changed file"))
     if status == "official" and not deep:
         text = ("Official %s - every file matches the card Stern released "
                 "(by the card's manifest and file sizes)." % label)

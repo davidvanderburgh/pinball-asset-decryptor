@@ -6955,7 +6955,8 @@ def _merge_radium_overlays(dst, src):
 
 def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
                          full_repl, radium_overlays, log,
-                         fw_node=None, fw_patched_path=None, grown_files=None):
+                         fw_node=None, fw_patched_path=None, grown_files=None,
+                         whole_files=None):
     """Produce the on-disk writes that refresh the ``.sidx`` manifest records for
     every file this Write changed, so the card passes Stern SD validation.
 
@@ -6965,8 +6966,11 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
     ``radium_overlays`` (``{i_block: (node, {file_off: bytes})}``), the
     rebuilt firmware (*fw_node* / *fw_patched_path*) and any other file this
     write replaces WHOLE at a new length (*grown_files*, ``{i_block: staged
-    path}`` — a re-serialised scene); the last two get their stored size
-    rewritten alongside the digests."""
+    path}`` — a re-serialised scene) and the files the ext4 driver copies
+    on whole (*whole_files*, ``[(card_rel, source path)]``: the videos
+    replaced intact.  PAD-1242: their records used to stay Stern's, so a card
+    PAD built read as one whose manifest lies); the last three get their
+    stored size rewritten alongside the digests."""
     from . import sidx
     sidx_path, sidx_node = sidx.find_sidx(reader)
     if sidx_node is None:
@@ -7009,6 +7013,10 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
         if p:
             modified[p] = sidx.digests_file(_lp(staged))
             resized[p] = os.path.getsize(_lp(staged))
+    for rel, staged in (whole_files or ()):
+        p = rel.lstrip("/")
+        modified[p] = sidx.digests_file(_lp(staged))
+        resized[p] = os.path.getsize(_lp(staged))
     if music_patches:
         banks = {}
         for sc_node, body_off, body in music_patches:
@@ -10259,7 +10267,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 reader, disk_f, img_node, audio_inplace, music_patches,
                 full_repl, radium_overlays, log,
                 fw_node=fw_node, fw_patched_path=patched_gr,
-                grown_files=grown_files)
+                grown_files=grown_files, whole_files=video_grow_jobs)
         except Exception as e:
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")

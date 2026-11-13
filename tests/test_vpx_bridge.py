@@ -889,6 +889,54 @@ def test_rushs_drops_and_drum_clock_under_vbscript(tmp_path):
         "-2600=drum_7", "200=drum_5"], r.stdout + r.stderr
 
 
+def test_rushs_side_scoop_gate_lets_a_resting_ball_out(tmp_path):
+    # PAD-1239: TROUGH LOCK (coil 10, node 9 coil 0) is the side scoop's gate.
+    # The game sometimes opens it and waits for the ball to roll out past SIDE
+    # SCOOP OPTO, never firing SIDE SCOOP; with no callback the ball sat and
+    # the game said SIDE SCOOP DEVICE MALFUNCTION (reporter's photos). On the
+    # emulator a release + 78 pulse made the game clear its rule 0.6 s later
+    # and serve no new ball
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
+    assert m["solenoids"]["10"] == {"coil": [9, 0], "name": "TROUGH LOCK", "callback": "PadSideScoopGate"}
+    t = json.loads(json.dumps(MINI_SHADOW))
+    t["solenoids"]["10"] = m["solenoids"]["10"]
+    t["saucers"]["Kicker1"] = m["saucers"]["Kicker1"]
+    t["extra_vbs"] = m["extra_vbs"]
+    out, _ = vs.patch(MINI_TRIBUTE, t)
+    assert re.search(r'(?m)^SolCallback\(10\) = "PadSideScoopGate"', out), out
+    ev = m["extra_vbs"]
+    a = ev.index("Sub PadSideScoopGate(e)")
+    gate = ev[a:ev.index("End Sub", a) + len("End Sub")]
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log",
+        "Class FakeStack : Public Balls",
+        "\tPublic Sub ExitSol_On : Balls = Balls - 1 : Log = Log & \"out,\" : End Sub",
+        "End Class",
+        "Class FakeTimer",
+        "\tPublic Sub PulseSw(n) : Log = Log & \"pulse\" & n & \",\" : End Sub",
+        "End Class",
+        "Dim bsKicker1 : Set bsKicker1 = New FakeStack",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        gate,
+        "bsKicker1.Balls = 0 : PadSideScoopGate True : Log = Log & \"|\"",       # empty: nothing
+        "bsKicker1.Balls = 1 : PadSideScoopGate False : Log = Log & \"|\"",      # let go: nothing
+        "PadSideScoopGate True : Log = Log & \"|\"",                             # a ball rolls out
+        "PadSideScoopGate True : Log = Log & \"|\"",                             # the re-send: empty now
+        "WScript.Echo Log & bsKicker1.Balls",
+    ]), encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "||out,pulse1078,||0", r.stdout + r.stderr
+    # a Rush table patched before is asked to patch again; one patched now is not
+    vsu = pytest.importorskip("vpxsetup")
+    why = "its side scoop can keep the ball and the game calls it a device malfunction"
+    (tmp_path / "R (PAD).script.vbs").write_text(out.replace(gate, ""), encoding="utf-8")
+    assert why in vsu.missed_fixes(str(tmp_path), "R (PAD).vpx", m["repatch"])
+    (tmp_path / "R (PAD).script.vbs").write_text(out, encoding="utf-8")
+    assert why not in vsu.missed_fixes(str(tmp_path), "R (PAD).vpx", m["repatch"])
+
+
 def test_stepper_plane_offsets_match_padled_h():
     # PAD-1228: padled version 8, each node board's stepper place
     import coilmap
@@ -4373,7 +4421,7 @@ def test_colour_maps_ask_a_table_patched_before_the_colour_fix_to_patch_again(tm
                    for sec in (mp.get("lamps") or {}, mp.get("lamp_calls") or {}, rl) for v in sec.values()):
             continue
         n += 1
-        marks = [k for k in mp.get("repatch") or [] if k["old"] == old]
+        marks = [k for k in mp.get("repatch") or [] if k.get("old") == old]
         assert len(marks) == 1, os.path.basename(f)
         script = tmp_path / (mp["output"][:-4] + ".script.vbs")
         script.write_text(stale, encoding="utf-8")
@@ -6529,7 +6577,7 @@ def test_foo_fighters_kick_target_fires_dof_and_kicks_harder(tmp_path, title):
     sub = ex[ex.index("Sub PadKickTarget"):]
     sub = sub[:sub.index("End Sub", sub.index("End If")) + len("End Sub")]
     old = 'Sub PadKickTarget(e) : If e Then PlaySoundAt "fx_slingshot_EM", Target004 : End If : End Sub'
-    assert old not in ex and [k for k in m["repatch"] if k["old"] == old]
+    assert old not in ex and [k for k in m["repatch"] if k.get("old") == old]
     vbs = tmp_path / "kick.vbs"
     vbs.write_text("\n".join([
         "Const DOFPulse = 2",

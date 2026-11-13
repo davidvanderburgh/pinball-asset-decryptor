@@ -538,6 +538,12 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   opto: the game held its trough lock and waited, the ball sat until a ball
   search, and the opto read stuck. A saucer's `enter` is the opto: the
   kicker pulses it as the ball comes in and holds `switch`.
+* **A gate the game opens instead of kicking** (PAD-1239). Rush's TROUGH
+  LOCK is the side scoop's gate. Sometimes the game holds it open and waits
+  for the ball to roll out past SIDE SCOOP OPTO without firing SIDE SCOOP at
+  all. With no callback the ball sat and the game called the scoop a DEVICE
+  MALFUNCTION. Before you leave a coil's `callback` null, check in a trace
+  what the game waits for after it fires that coil.
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game

@@ -67,7 +67,7 @@ def test_captured_rule_frames_checksum_and_parse():
         assert s3rules.frame_ok(0xC0 | node, f), f.hex()
     r = s3rules.parse(RIGHT_FLIPPER)
     assert r == {"coil": 0, "pwr": 0xF5, "pulse": 4, "hold_pwr": 0x1E, "hold": 3,
-                 "trig": 24, "eos": 31, "stop": None}           # RIGHT FLIPPER BUTTON / EOS
+                 "trig": 24, "eos": 31, "stop": None, "stop_hi": False}  # RIGHT FLIPPER BUTTON / EOS
     assert s3rules.parse(LEFT_FLIPPER)["trig"] == 25 and s3rules.parse(LEFT_FLIPPER)["eos"] == 16
     assert s3rules.parse(RIGHT_SLING)["trig"] == 29 and not s3rules.parse(RIGHT_SLING)["hold_pwr"]
     b = s3rules.parse(BALLOON)
@@ -169,6 +169,33 @@ def test_ruled_motor_reaches_its_stop(monkeypatch):
     clk.t += 0.7
     br.rules.tick()
     assert _made(br, 9, 24)
+
+
+def _held_lock(node=9):
+    """PAD-1239: Spike 2 rush_le 1.19's TROUGH LOCK rule as sent (pulse ff 3
+    ticks, HOLD 0x50 300 ticks, [28] = 0x80|0x40|16 SIDE SCOOP OPTO), checksum
+    redone for this bus's address."""
+    body = bytes.fromhex("4100ff0300502c01" + "00" * 20 + "d0" + "00" * 19)
+    return body + bytes([-(0xC0 | node) - len(body) - 1 - sum(body) & 0xFF])
+
+
+def test_a_held_coil_its_switch_lets_go_is_not_a_motor(monkeypatch):
+    """PAD-1239: a stop input with a hold (or 0x80 on it) is a coil held until
+    the ball crosses that switch. Played as a motor the switch closed with no
+    ball: rush_le said SIDE SCOOP DEVICE MALFUNCTION and never kicked."""
+    br, fired, clk = _rig(monkeypatch)
+    lock = _held_lock()
+    assert s3rules.frame_ok(0xC9, lock)
+    _send(br, 9, lock)
+    _send(br, 9, _hex("40 00 f4"))   # the short 40, coil 0
+    assert fired == [(9, 0, 0xFF)]
+    clk.t += 5
+    br.rules.tick()
+    assert not _made(br, 9, 16) and br.rules.motors == {}
+    for hold, stop in ((0x50, 0x50), (0, 0xD0)):     # either sign alone
+        r = dict(s3rules.parse(lock), hold_pwr=hold, stop_hi=stop & 0x80 != 0)
+        assert not s3rules.is_motor(r)
+    assert s3rules.is_motor(s3rules.parse(BALLOON))
 
 
 def test_rules_off(monkeypatch):

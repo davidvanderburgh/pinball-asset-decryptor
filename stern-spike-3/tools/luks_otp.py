@@ -107,8 +107,14 @@ _BULK_MIN_UNITS = 4
 def _xts_run(key, data, sector_no, sector_size, tweak_step, encrypt):
     assert len(data) % sector_size == 0, "data must be a multiple of sector_size"
     units = len(data) // sector_size
-    if (units >= _BULK_MIN_UNITS and _np is not None and _BACKEND == "cryptography"
-            and sector_size % 16 == 0):
+    # The bulk path needs only AES-ECB, which pycryptodome has too. The
+    # installed app ships pycryptodome WITHOUT cryptography, and pycryptodome
+    # has no XTS mode, so gating this on cryptography sent every unit to the
+    # pure-Python XTS loop: 2.56 MB/s, a Fallout card's videos took 38 min
+    # (PAD-1241). Without cryptography even one unit goes through here.
+    if (_np is not None and sector_size % 16 == 0 and units
+            and (_BACKEND == "cryptography" or _HAVE_PCD)
+            and (units >= _BULK_MIN_UNITS or _BACKEND != "cryptography")):
         return _xts_bulk(key, data, sector_no, sector_size, tweak_step, encrypt)
     out = bytearray()
     n = sector_no
@@ -146,9 +152,8 @@ def _xts_bulk(key, data, sector_no, sector_size, tweak_step, encrypt):
 
 
 def _ecb(key, data, encrypt):
-    c = Cipher(algorithms.AES(key), modes.ECB(), backend=default_backend())
-    op = c.encryptor() if encrypt else c.decryptor()
-    return op.update(data) + op.finalize()
+    """Raw AES-ECB over *data*, from whichever backend is there."""
+    return aes_ecb_encrypt(key, data) if encrypt else _aes_ecb_decrypt(key, data)
 
 
 def _xts_one_unit(key, unit, tweak_no, encrypt=False, sector_size=512):

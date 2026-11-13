@@ -4780,6 +4780,73 @@ WScript.Echo "calls=" & rampCalls & "," & guardianCalls
                                      "guardian=True", "guardian=False", "calls=4,2"]
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's motor timer under cscript")
+def test_iron_maiden_sarcophagus_swings_in_the_machines_time(tmp_path):
+    """PAD-1253: at game over the machine holds the Sarcophagus at UNLOAD for 0.6-3.4 s for the
+    locked ball; the tribute's own 0.2-degree ticks took 3.3 s from load to open the Underworld
+    exit, so the ball never came out and Start never began a game."""
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    extra = m["extra_vbs"].split("'---- PAD: motor end stops", 1)[1]
+    extra = extra[extra.index("\n"):]
+    harness = '''Class TestController
+Public state
+Private Sub Class_Initialize
+Set state = CreateObject("Scripting.Dictionary")
+End Sub
+Public Property Get Switch(n)
+Switch = False
+If state.Exists(n) Then Switch = state(n)
+End Property
+End Class
+Dim Controller : Set Controller = New TestController
+Dim gRampPos, LockStopPos, LockCurPos, LockCurInc
+Sub RotateRamp2(p, mute)       ' the tribute's: a stop angle, 0.2 a tick towards it
+gRampPos = p
+LockStopPos = Array(-14, 0, 8, 0)(p)
+If p = 3 Then gRampPos = 1
+If LockStopPos < LockCurPos Then LockCurInc = -0.2 Else LockCurInc = 0.2
+End Sub
+Sub OpenRamp2(p, force)
+End Sub
+Function Swing(n, from)         ' tmrBallLock's 20 ms ticks from the stop to the swing's end
+Dim k
+LockCurPos = from
+Controller.state.RemoveAll
+Controller.state.Add n, True
+PadMaidenMotorTimer_Timer
+k = 0
+Do
+k = k + 1
+LockCurPos = LockCurPos + LockCurInc
+Loop Until (LockCurPos >= LockStopPos And LockCurInc > 0) Or (LockCurPos <= LockStopPos And LockCurInc < 0) Or k > 1000
+Swing = k
+End Function
+'''
+    calls = '''WScript.Echo "load->unload " & Swing(1094, 18)
+WScript.Echo "flat->unload " & Swing(1097, 18) & " " & Swing(1094, 0)
+WScript.Echo "unload->load " & Swing(1095, -14) & " " & LockStopPos
+WScript.Echo "eject->flat " & Swing(1097, 8)
+'''
+    vbs = tmp_path / "swing.vbs"
+    vbs.write_text(harness + extra + calls, encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    # every swing the machine asks for ends 15 ticks (0.3 s; 16 when the float sum falls short of
+    # the stop) after its stop, where the tribute took 160 (load -> unload) and 70 (flat -> unload);
+    # load keeps its destination
+    lines = r.stdout.splitlines()
+    assert [ln.split()[0] for ln in lines] == ["load->unload", "flat->unload", "unload->load", "eject->flat"]
+    ticks = [int(w) for ln in lines for w in ln.split()[1:]]
+    assert lines[2].split()[2] == "18"
+    del ticks[4]
+    assert all(15 <= k <= 16 for k in ticks), lines
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch("Sub Table1_Init\nEnd Sub\n", m)
+    mark = next(r for r in m["repatch"] if r.get("absent") == "Sub PadMaidenSwingNow")
+    assert mark["absent"] in out          # an older build lacks it: the Tables card says Patch again
+
+
 def test_iron_maiden_sarcophagus_lock_switch_latches():
     """PAD-1206: a pulse on Ball Lock told the game the Sarcophagus was empty again at once."""
     vs = pytest.importorskip("vpxshadow")

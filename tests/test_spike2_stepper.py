@@ -61,6 +61,7 @@ static unsigned long now_ms;
 static unsigned long pad_ms(void) { return now_ms; }
 static void logmsg(const char *s) { (void)s; }
 static void motor_say(const char *s) { (void)s; }
+static void stepper_publish(unsigned nid, unsigned k, long pos) { (void)nid; (void)k; (void)pos; }   /* the LED view's share */
 static void motor_switch(unsigned nid, int bit, int made)
 {
     printf("E %%lu %%u %%d %%d\n", now_ms, nid, bit, made ? 1 : 0);

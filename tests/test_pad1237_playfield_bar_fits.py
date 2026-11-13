@@ -54,6 +54,9 @@ def test_save_states_and_messages_left_the_bar():
     panel = _fn(js, "function statesPanel()")
     assert '"SAVE STATES"' in panel and 'saveDialog(sel.selectedIndex)' in panel
     assert 'api("load", sel.selectedIndex)' in panel and "s.msg" in panel
+    # folded until opened (David), then as it was left
+    assert 'localStorage.getItem("pf-acc-states") === "1"' in panel
+    assert "let open = false;" in panel
     # the status line's text is drawn in the BALLS section
     assert "panel.ballSec" in js and 'el("div", "pf-msg"' in js
     assert "msg.textContent = f.status" in js

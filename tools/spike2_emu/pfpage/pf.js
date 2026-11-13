@@ -556,11 +556,12 @@ function startMain() {
 
   // ---- the save states (item 13): a side-panel section since PAD-1237 -------
   // The slot list, Save state and Load state, and their own line: "saving
-  // state...", the helper's answer, an empty slot. Open unless it was folded.
+  // state...", the helper's answer, an empty slot. Folded until opened.
   function statesPanel() {
     const acc = el("details", "kp-acc pf-sts");
-    let open = true;
-    try { open = localStorage.getItem("pf-acc-states") !== "0"; } catch (e) { /* no storage */ }
+    // folded until opened (David), then as it was left
+    let open = false;
+    try { open = localStorage.getItem("pf-acc-states") === "1"; } catch (e) { /* no storage */ }
     acc.open = open;
     const sum = el("summary", null, "SAVE STATES");
     // never keep the keyboard: a focused summary would eat the space bar

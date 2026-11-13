@@ -7481,7 +7481,14 @@ class _SpaceCard:
         try:
             with open(_lp(path), "rb") as f:
                 # (a card made as small as it can be grows too: PAD-593)
-                layout = cs.read_growing_layout(f, grow_to)
+                try:
+                    layout = cs.read_growing_layout(f, grow_to)
+                except cs.CardSizeError:
+                    if grow_to:
+                        raise
+                    # PAD-1235: one at its own size still has the bigger
+                    # sizes' room to offer when it doesn't fit
+                    layout = cs.read_layout(f, any_size=True)
         except (cs.CardSizeError, OSError):
             layout = None            # not Stern-shaped: measured as it is
         self.at = grow_to if layout is not None else None

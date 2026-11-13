@@ -1061,7 +1061,14 @@ def bigger_card_offer(refusal):
     if not isinstance(refusal, WontFit) or refusal.fixed or not supported():
         return None
     cur, fits = refusal.current, refusal.fits
-    if cur not in LAYOUT_SIZES or fits not in CARD_SIZES:
+    if fits not in CARD_SIZES:
+        return None
+    if cur is None:
+        # PAD-1235: measured at its own size, which is no Stern size (a card
+        # made as small as it can be: only such a card has room at bigger
+        # sizes without a size of its own)
+        return None, fits
+    if cur not in LAYOUT_SIZES:
         return None
     if CARD_SIZES[fits] <= LAYOUT_SIZES[cur]:
         return None
@@ -1072,6 +1079,12 @@ def offer_question(current, fits):
     """The one-click question for :func:`bigger_card_offer`'s answer.  From
     the smaller 16 GB card the machine's card has to hold Stern's own image
     of that size, which some 16 GB cards don't: said in bytes."""
+    if current is None:
+        return ("Your assets no longer fit on this card image, which was made "
+                "as small as it can be. Would you like to change the size "
+                "requirement to %s so that you don't have to compress any "
+                "assets?\n\nThe SD card in the machine has to be %s or "
+                "bigger." % (words(fits), words(fits)))
     now = words(current)
     need = ("hold a %s image" % size_words(CARD_SIZES[fits])
             if current == SMALL else "be %s or bigger" % words(fits))

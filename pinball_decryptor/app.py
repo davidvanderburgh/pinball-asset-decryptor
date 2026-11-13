@@ -5574,7 +5574,8 @@ class App:
                                    cs.offer_question(current, fits)):
             self.window.append_log(
                 "Not built: the SD card size stays %s. To fit it, use fewer "
-                "or smaller replacements." % cs.words(current), "info")
+                "or smaller replacements."
+                % (cs.words(current) or "the original's own"), "info")
             return True
         # From the smaller 16 GB card of a 16 GB original (PAD-465), the size
         # that fits is the original's own: that is "Same as the original",

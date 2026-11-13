@@ -217,3 +217,37 @@ def test_off_switch(cbin):
 def test_travel_time_is_pad_motor_ms(cbin):
     edges = _run(cbin, ["t0:9", RULE_UP, RUN, "t249:9", "t250:9"], PAD_MOTOR_MS="250")
     assert edges == [(250, 9, 12, 1)]
+
+
+#: PAD-1239: rush_le 1.19, node 9 coil 0 TROUGH LOCK, as sent (PAD_NB_TRACE=1,
+#: rig 1, 2026-11-13) - pulse ff 3 ticks, HOLD 0x50 300 ticks (byte 7), and
+#: byte 30 = 0x80|0x40|16, SIDE SCOOP OPTO. The game re-sends it with a short
+#: 40 every ~258 ms while it waits for a ball to cross the opto.
+RUSH_LOCK = ("89314100ff0300502c01000000000000000000000000000000000000"
+             "0000d000000000000000000000000000000000000000b600")
+#: the same title's topper (node 12 coil 0), which IS a motor: 1000 ticks, no
+#: hold, byte 30 = 0x40|4
+RUSH_TOPPER = ("8c31410046e803000000000000000000000000000000000000000000"
+               "000044000000000000000000000000000000000000008d00")
+
+
+def test_a_held_coil_its_switch_lets_go_is_not_a_motor(cbin):
+    """PAD-1239: played as a motor, SIDE SCOOP OPTO closed 600 ms after the
+    ball landed on LOWER SIDE SCOOP and stayed closed - the game never kicked
+    and called it SIDE SCOOP DEVICE MALFUNCTION. The switch is the ball's."""
+    steps = ["t0:9"]
+    for t in range(0, 5000, 258):
+        steps += [RUSH_LOCK, RUN, "t%d:9" % t]
+    assert _run(cbin, steps + ["t9000:9"]) == []
+    # either sign alone is enough: a hold power, or 0x80 on the stop byte
+    hold_only = RUSH_LOCK[:60] + "50" + RUSH_LOCK[62:]
+    flag_only = RUSH_LOCK[:14] + "00" + RUSH_LOCK[16:]
+    for f in (hold_only, flag_only):
+        assert _run(cbin, ["t0:9", f, RUN, "t5000:9"]) == []
+    # and the title's real motor still runs to its stop
+    assert _run(cbin, ["t0:12", RUSH_TOPPER, "8c0340000000", "t600:12"]) == [(600, 12, 4, 1)]
+
+
+def test_a_motor_rule_turning_into_a_held_one_stops_the_run(cbin):
+    edges = _run(cbin, ["t0:9", RULE_UP, RUN, "t300:9", RUSH_LOCK, "t5000:9"])
+    assert edges == []

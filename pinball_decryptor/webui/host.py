@@ -202,12 +202,14 @@ class Host:
         types = _filetypes_for_pywebview(spec.get("filetypes"))
         if types and mode != "folder":
             kwargs["file_types"] = types
+        def _show(**kw):
+            return _on_gui_thread(win, lambda: win.create_file_dialog(kind, **kw))
         try:
-            result = win.create_file_dialog(kind, **kwargs)
+            result = _show(**kwargs)
         except Exception:                               # noqa: BLE001
             # a malformed filter on one platform: try once without it
             kwargs.pop("file_types", None)
-            result = win.create_file_dialog(kind, **kwargs)
+            result = _show(**kwargs)
         if result is None:
             return ""
         if isinstance(result, str):
@@ -216,6 +218,41 @@ class Host:
         if spec.get("multiple"):
             return result
         return result[0] if result else ""
+
+
+def _on_gui_thread(win, fn):
+    """``fn()`` on the window's own GUI thread, its answer back here.
+
+    PAD-1227: pywebview's Windows backend shows a file picker on whichever
+    thread asks, and the app asks from a new worker thread per pick
+    (Dialogs._run_native): a COM multi-threaded one, where Windows' file
+    dialog is meant for a single-threaded one, owned by a window on another
+    thread.  Shown that way the picker could take seconds to come up, stop
+    taking clicks and refuse to close.  On the form's own (single-threaded)
+    thread it is an ordinary modal dialog of the window.  Elsewhere (macOS,
+    Linux, a window without a WinForms form) *fn* runs as it is."""
+    form = None
+    if sys.platform == "win32":
+        try:
+            form = win.native
+            if not form.InvokeRequired:
+                form = None
+        except Exception:                               # noqa: BLE001
+            form = None
+    if form is None:
+        return fn()
+    from System import Action   # pywebview's WinForms backend loaded it
+    box = {}
+
+    def _go():
+        try:
+            box["r"] = fn()
+        except BaseException as e:                      # noqa: BLE001
+            box["e"] = e
+    form.Invoke(Action(_go))
+    if "e" in box:
+        raise box["e"]
+    return box.get("r")
 
 
 def build(ctx=None, meanwhile=None):

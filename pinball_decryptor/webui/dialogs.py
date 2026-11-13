@@ -19,11 +19,14 @@ showing, through every check a picked file goes through.
 
 import fnmatch
 import itertools
+import logging
 import os
 import string
 import sys
 import threading
 import time
+
+log = logging.getLogger(__name__)
 
 #: how long armed drops wait for the picker their click opens
 DROP_WAIT_S = 5.0
@@ -44,6 +47,7 @@ class Dialogs:
         #: set by the desktop host: fn(kind, spec) -> answer, runs off-loop
         self.native_file_dialog = None
         self._drop = None           # (time armed, [paths]) for the next picker
+        self._picking = False       # a file picker is open (PAD-1227)
 
     # ------------------------------------------------------------------
     def ask(self, spec):
@@ -120,6 +124,22 @@ class Dialogs:
             return self._normalise(dropped[0], spec)
         if dropped is not None:
             return self._normalise(self._drop_answer(dropped, spec), spec)
+        # PAD-1227: one picker at a time.  The loop keeps turning while a
+        # picker is up, so a second click on Choose... (or the clicks made
+        # while a slow picker was coming up) ran here again and opened a
+        # picker over the first, which could not answer until the last one
+        # closed: a stack that grew with every click.  A click while one is
+        # open is a cancelled pick; the open picker is the one to answer.
+        if self._picking:
+            log.info("a file picker is already open: %r not opened", title)
+            return self._normalise("", spec)
+        self._picking = True
+        try:
+            return self._pick(spec)
+        finally:
+            self._picking = False
+
+    def _pick(self, spec):
         native = self.native_file_dialog
         if native is not None:
             # the OS draws this one: its file-type names in the app's

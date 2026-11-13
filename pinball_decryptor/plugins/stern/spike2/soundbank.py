@@ -181,21 +181,31 @@ def next_category_ids(ids, taken=(), n=1):
     raise SoundBankError("no category id is free for a new sound bank")
 
 
-def header_writes_new_categories(image_header, cats):
+def header_writes_new_categories(image_header, cats, drop=()):
     """``{offset: bytes}`` that make ``image.bin``'s header name the new
     categories *cats* after the ones it has: the count word and one id word
-    each.  Raises when the header has no room for them."""
+    each.  Raises when the header has no room for them.
+
+    PAD-1235: *drop* are categories the header names now that it names no more
+    (an earlier Write's banks this one builds again): the list is written whole,
+    the ids it keeps first, and the words the dropped ones held past its new end
+    are zeroed."""
     count, ids, room = category_slots(image_header)
     cats = [int(c) for c in cats]
+    drop = {int(c) for c in drop or ()}
+    kept = [i for i in ids if i not in drop]
+    room += count - len(kept)
     if len(cats) > room:
         raise SoundBankError("image.bin's header has room for %d more sound bank(s), "
                              "not %d" % (room, len(cats)))
     for c in cats:
-        if c in ids or cats.count(c) > 1:
+        if c in kept or cats.count(c) > 1:
             raise SoundBankError("category %d is already a sound bank of this card" % c)
-    out = {IMG_CAT_COUNT: struct.pack("<I", count + len(cats))}
-    for i, c in enumerate(cats):
-        out[IMG_CAT_IDS + 4 * (count + i)] = struct.pack("<I", c)
+    new = kept + cats
+    out = {IMG_CAT_COUNT: struct.pack("<I", len(new))}
+    start = 0 if len(kept) < count else count
+    for i in range(start, max(len(new), count)):
+        out[IMG_CAT_IDS + 4 * i] = struct.pack("<I", new[i] if i < len(new) else 0)
     return out
 
 

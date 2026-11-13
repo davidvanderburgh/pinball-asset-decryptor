@@ -623,12 +623,13 @@ def key_hex(row):
     return bytes(row["findkey"]).hex()
 
 
-def image_header_writes(img_path, cats):
+def image_header_writes(img_path, cats, drop=()):
     """``{offset: bytes}`` naming the new categories *cats* in ``image.bin``'s
-    header (:func:`.soundbank.header_writes_new_categories`)."""
+    header, and no more the earlier Write's *drop* (PAD-1235,
+    :func:`.soundbank.header_writes_new_categories`)."""
     with open(_lp(img_path), "rb") as f:
         head = f.read(0x200)
-    return SB.header_writes_new_categories(head, cats)
+    return SB.header_writes_new_categories(head, cats, drop=drop)
 
 
 def category_ids_free(img_path, bank_names, n):

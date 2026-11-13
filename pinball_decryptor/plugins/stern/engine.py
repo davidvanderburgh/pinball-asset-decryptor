@@ -8907,7 +8907,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             space_chk, log, game_sids=_game_ok,
                             game_why=_game_why, sm_frags=_sm_frags,
                             game_seqs=_game_seqs, sm_seqs=_sm_seqs,
-                            sm_hold=_sm_turn_hosts(sound_mode_used, _sm_frags))
+                            sm_hold=_sm_turn_hosts(sound_mode_used, _sm_frags),
+                            # PAD-1235: the mode runtime's files go on again, so an
+                            # earlier Write's banks of its sounds are this one's to replace
+                            retire_touched=(set(_bank_touched.values()) if (
+                                mode_list or code_list or sound_mode_used or _clips_on
+                                or _attract_on or _coop_on or _idle_on or _hand_on
+                                or _cabs_on or _comp_on or _stime_on or _feed_on)
+                                else None))
                         if bank_plan is not None:
                             bank_plan.old_map = dict(_old_bank_map)
                             _user_grows = {i: g for i, g in _user_grows.items()
@@ -9811,6 +9818,20 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             bank_new = [("%s/%s" % (_gdir, os.path.basename(_bp)) if _gdir
                          else os.path.basename(_bp), _bp)
                         for _cat, _bp in bank_plan.files]
+            # PAD-1235: an earlier Write's bank no bank of this one's took the name of is
+            # emptied (image.bin no longer names it, so the game never opens it)
+            _left = sorted(c for c in bank_plan.retired
+                           if c not in {c2 for c2, _p in bank_plan.files})
+            if _left:
+                # (beside the staged banks, which last until the copy)
+                _empty = os.path.join(os.path.dirname(bank_plan.files[0][1]),
+                                      "pad_retired_bank.empty")
+                open(_empty, "wb").close()
+                bank_new += [("%s/%s" % (_gdir, bank_plan.retired[c][0]) if _gdir
+                              else bank_plan.retired[c][0], _empty) for c in _left]
+                log("%d sound bank(s) an earlier Write put on this card that this build "
+                    "needs no more are emptied: %s." % (
+                        len(_left), ", ".join(bank_plan.retired[c][0] for c in _left)), "info")
 
         # Item 149: the modes' screens and clips, built from this card's STOCK
         # HUD and bank scenes (never on top of an earlier build), plus the
@@ -9835,6 +9856,18 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Score feed" if _feed_on and not _stime_on
                 else "Screen times")
         _who_hud = _who
+        if (bank_plan is not None and bank_plan.retired
+                and not (_modes_on or _clips_on or sound_modes_cfg or picture_cfg
+                         or _attract_on or _coop_on or _idle_on or _hand_on or _cabs_on
+                         or _comp_on or _stime_on or _feed_on)):
+            # PAD-1235: the earlier Write's runtime files would stay and play the
+            # banks this build took the place of
+            raise RuntimeError(
+                "This build takes the place of the sound banks an earlier build put on this "
+                "card, but it does not put the mode runtime's files on the card again, so "
+                "the earlier build's music modes would play the wrong sounds. Build from a "
+                "card without the earlier build's music modes, or keep a music mode or "
+                "another mode feature in the project.")
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
                 or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on):
             t0 = time.monotonic()
@@ -10289,11 +10322,16 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _folded, writes = _MW.fold_writes(
                     writes, reader.disk_ranges(_man_node, 0,
                                                _man_node["size"]))
+                _man_bytes = bytes(reader.read_file_bytes(_man_node))
+                # PAD-1235: a bank that takes the name of an earlier Write's (or empties
+                # it) refreshes that bank's record; the others are new records
+                _had = set(_sidx.parse_records(_man_bytes)[0]) if bank_new else set()
                 _new_man = _MW.compose_manifest(
-                    bytes(reader.read_file_bytes(_man_node)), inplace=_folded,
+                    _man_bytes, inplace=_folded,
                     refreshed=_m_replaced + [r for r in _c_replaced
-                                             if r[0] not in _m_rels],
-                    new=_m_new + _c_new + bank_new)
+                                             if r[0] not in _m_rels]
+                    + [r for r in bank_new if r[0] in _had],
+                    new=_m_new + _c_new + [r for r in bank_new if r[0] not in _had])
                 _man_src = os.path.join(
                     grow_work, "modes" if mode_plan is not None else "own_clips",
                     os.path.basename(_man_path))
@@ -10308,7 +10346,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             except _MW.ModeWriteError as e:
                 raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
-            _added = [r for r, _s in _m_new + _c_new + bank_new]
+            _added = [r for r, _s in _m_new + _c_new + bank_new if r not in _had]
             log("%s: the SD-validation manifest gains %d record(s) (%s) "
                 "and %d in-place record refresh(es) are folded into it; it is "
                 "copied onto the card whole."
@@ -21309,6 +21347,8 @@ class _BankPlan(object):
         # PAD-777: the most image.bin may come to beside the banks the game can play
         # from at once (soundbank.MAPPED_MAX less the biggest of them)
         self.image_room = None
+        # PAD-1235: an earlier Write's banks this one takes the place of, {cat: (name, size)}
+        self.retired = {}
         # the card's banks' sid maps, {bank sid: game sid} (an earlier Write's)
         self.old_map = {}
         # PAD-608: the music modes' files and the sounds in turn in the banks,
@@ -21970,7 +22010,8 @@ def _sm_turn_hosts(used, banked=()):
 
 def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows, used,
                       reader, img_node, space_chk, log, game_sids=None, game_why=None,
-                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=()):
+                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=(),
+                      retire_touched=None):
     """Decide which of the modes' own sounds leave ``image.bin`` for a sound
     bank of their own (PAD-595), and take them out of *grows* and
     *audio_edits*.  Returns ``(plan or None, audio_edits, grows)``.
@@ -21998,7 +22039,14 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     build whose sounds all fit is exactly the build it was, unless it has music modes'
     files a bank can hold (PAD-749): then every bankable sound goes into a bank but the
     music modes' files *sm_hold* (hosts with files in turn of their own, PAD-638, which play
-    only from a record in image.bin)."""
+    only from a record in image.bin).
+
+    *retire_touched* (PAD-1235), when the build puts the mode runtime's files on the card
+    again: the game sids this build edits.  A sound bank an earlier Write of this app put on
+    the card (a shared card built with music modes, written again with them) whose game sounds
+    are all among them holds nothing this card still plays once this build is on it, so it
+    is RETIRED: its name and its place in image.bin's list are this build's to use again,
+    and a retired bank no new one takes is emptied (``plan.retired``)."""
     from . import bank_build as BB
     from .spike2 import masterdir as MD
     from .spike2 import soundbank as SB
@@ -22055,7 +22103,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         _grown_body_bytes(byidx[i], g[1])
         for i, g in sorted(kept.items()) + sorted(spilled.items())])
     # the bank files: one per 2 GiB, the lowest category ids the card lacks
-    on_card, vendor = [], []
+    on_card, vendor, retired = [], [], {}
     dir_rel = ""
     try:
         for path, _ino, _node in reader.iter_regular_files(min_size=1):
@@ -22063,14 +22111,29 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             if base.startswith("image-sc") and base.endswith(".bin"):
                 on_card.append(base)
                 size = int(_node["size"])
-                if not SB.is_pad_bank_at(
-                        lambda off, k, _n=_node: reader.read_range(_n, off, k), size):
+                _read = (lambda off, k, _n=_node: reader.read_range(_n, off, k))
+                if not SB.is_pad_bank_at(_read, size):
                     vendor.append(size)
+                elif retire_touched is not None and SB.category_of(base) is not None:
+                    # PAD-1235: an earlier Write's bank this one builds again
+                    left = set(SB.read_sid_map_at(_read, size).values()) - set(retire_touched)
+                    if not left:
+                        retired[int(SB.category_of(base))] = (base, size)
         if img_node is not None:
             dir_rel = os.path.dirname(_card_rel_path(reader, img_node) or "")
     except Exception:  # noqa: BLE001 - the ids then avoid image.bin's list alone
         pass
     _c, ids, _room = SB.category_slots(head)
+    if retired:
+        # (their names and their places in image.bin's list are free for this build's banks)
+        on_card = [b for b in on_card if b not in {n for n, _s in retired.values()}]
+        _room += sum(1 for i in ids if int(i) in retired)
+        ids = [i for i in ids if int(i) not in retired]
+        log("%d sound bank(s) an earlier Write of this app put on this card (%s, %d MB) hold "
+            "only the music modes' and the modes' own sounds and sounds this build puts in "
+            "again: this build's banks take their place." % (
+                len(retired), ", ".join(n for _c2, (n, _s) in sorted(retired.items())),
+                sum(s2 for _n, s2 in retired.values()) // 10**6), "info")
     stride = SB.fragment_stride(head)
     # PAD-1005: a game that ships sound banks of its own (Deadpool 16, Metallica 24, D&D 29) plays
     # from them beside ours: its biggest takes one of the sound channels' places, and what is left
@@ -22408,6 +22471,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             % (len(group), SB.bank_name(cat), size / 1e6, why,
                ", ".join(_named(e.idx) for e in group)), "info")
     plan = _BankPlan(banks, wavs, spilled, dir_rel)
+    plan.retired = dict(retired)
     plan.game = {i: game_sids[i] for i in spilled if i in game_sids}
     # PAD-777: the most image.bin may come to beside the banks: the user's longer sounds
     # that stay in it are trimmed to this
@@ -23029,7 +23093,8 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
                 "%#x; the mode points its carrier, request %d, at it." % (
                     u.get("name"), _MW_sound_words(u.get("key")), SB.bank_name(cat), r["idx"],
                     (int(r["length"]) - BLOCK) / 44100.0, sid, int(u["request"])), "info")
-    writes = BB.image_header_writes(img_path, [c for c, _p in plan.files])
+    writes = BB.image_header_writes(img_path, [c for c, _p in plan.files],
+                                    drop=sorted(plan.retired))
     with open(_lp(img_path), "r+b") as f:
         for off, data in sorted(writes.items()):
             f.seek(off)

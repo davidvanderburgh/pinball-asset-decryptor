@@ -16008,6 +16008,7 @@ static struct {
     volatile unsigned film_root;         /* the intro screen's scene, seen as the game looks its words up */
     volatile int flips, go, go_down;
     unsigned music[CI_MUSIC], n_music, faded, quiet[8], n_quiet;
+    unsigned long join_at;               /* PAD-1221: a Start press while ball 1 waits (`| 1`), for ci_quiet */
     const char *why;
 } ci;
 static void ci_find_seen(unsigned *r);   /* PAD-1114 round 2, below */
@@ -18557,6 +18558,16 @@ static int ci_lookup(unsigned *r)
     return 1;
 }
 
+/* PAD-1221 (DoomWalrus666: "ANY ADDITIONAL START BUTTON PRESSES ADD PLAYERS BUT DO NOT PLAY ANY CALLOUTS OR AUDIO OR
+ * DISRUPT THE INTRO VIDEO"): the game's add answers a Start with its own sound some 0.5 s later (emulator, Godzilla LE
+ * 1.16: request 1161 on bus 0x2), which the fade below let be heard for its 250 ms. A sound other than music first
+ * seen within CI_JOIN_CUT_MS of a Start press while ball 1 waits is stopped outright. (tests lift it verbatim) */
+#define CI_JOIN_CUT_MS 3000ul
+static int ci_join_cut(unsigned bus, unsigned long join_at, unsigned long now)
+{
+    return join_at && !(bus & BUS_MUSIC_BIT) && now - (join_at & ~1ul) < CI_JOIN_CUT_MS;
+}
+
 /* the game's own sounds faded while the intro plays, each once (a fade asked for again starts over and never ends);
  * its music remembered, to be asked for again after */
 static void ci_quiet(void)
@@ -18572,7 +18583,10 @@ static void ci_quiet(void)
             for (k = 0; k < ci.n_music && ci.music[k] != reqs[i]; k++) ;
             if (k == ci.n_music && k < CI_MUSIC) ci.music[ci.n_music++] = reqs[i];
         }
-        if (pm_sound_fade(reqs[i], 250) && ci.faded++ < 12)
+        if (ci_join_cut(buses[i], ci.join_at, pm_ms())) {           /* PAD-1221 */
+            if (pm_sound_stop(reqs[i]) && ci.faded++ < 12)
+                say("co-op intro: the game's sound %u (bus 0x%x) at a player's add - stopped", reqs[i], buses[i]);
+        } else if (pm_sound_fade(reqs[i], 250) && ci.faded++ < 12)
             say("co-op intro: the game's sound %u (bus 0x%x) faded under the intro", reqs[i], buses[i]);
     }
 }
@@ -19618,6 +19632,7 @@ static void ci_start_poll(void)
         return;
     }
     if (!ci_start_edge(down, &ci_start_was, coop_left && switch_held(coop_left))) return;
+    ci.join_at = pm_ms() | 1ul;                               /* PAD-1221: its sound is cut, not faded (ci_quiet) */
     got = coop_add_wrap(0, 0, 0, 0);
     say("co-op intro: Start while ball 1 waits - %s (%u in the game)", got ? "a teammate joins" : "the game added no one",
         coop_teammates());

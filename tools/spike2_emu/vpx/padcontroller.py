@@ -2956,6 +2956,23 @@ def selftest():
     c.Stop()
 
 
+def quote_local_server():
+    """Put the server's program in quotes (PAD-1229): pywin32 writes it as
+    its 8.3 short name with none, and with short names off on the drive that
+    is the long path with spaces, which Windows has to guess the end of."""
+    import winreg
+    import vpxsetup
+    key = "CLSID\\%s\\LocalServer32" % CLSID
+    try:
+        cmd = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, key)
+    except OSError:
+        return
+    fixed = vpxsetup.quoted_server_cmd(cmd)
+    if fixed:
+        winreg.SetValue(winreg.HKEY_CLASSES_ROOT, key, winreg.REG_SZ, fixed)
+        print("LocalServer32 quoted: %s" % fixed)
+
+
 def main(argv):
     if "--status" in argv:
         status()
@@ -2967,7 +2984,19 @@ def main(argv):
         # UseCommandLine reads --register / --unregister off sys.argv itself;
         # addnPath lands in the registry as PythonCOMPath, which is how the
         # COM-launched pythonw.exe finds this module.
-        _reg.UseCommandLine(PadController, addnPath=HERE)
+        # PAD-1229: so it is handed THIS argv, not the caller's: `padvpx.py
+        # unregister` (the uninstaller's) has "unregister" with no dashes on
+        # sys.argv, and pywin32 registered again instead of removing it.
+        # --unattended: an access-denied raises here rather than pywin32
+        # opening a second elevation of its own the caller cannot see.
+        saved = sys.argv
+        sys.argv = [saved[0] if saved else "padcontroller.py"] + list(argv) + ["--unattended"]
+        try:
+            _reg.UseCommandLine(PadController, addnPath=HERE)
+        finally:
+            sys.argv = saved
+        if "--register" in argv:
+            quote_local_server()
         return 0
     print(__doc__)
     return 2

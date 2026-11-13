@@ -5195,10 +5195,75 @@ class AudioTab(FindOriginalsMixin, TabService):
             if rel is None or rel in seen:
                 continue
             seen.add(rel)
-            note = callouts.get(row, COMMENT)
+            note = " ".join(callouts.get(row, COMMENT).split())
             if note:
                 self._comments[rel] = note
         return self._comments
+
+    @rpc
+    def comments_from_callouts(self):
+        """PAD-1246: More > Update comments from callouts.csv…: take every
+        sound's comment from the comment column of the project's callouts.csv
+        as it is now (filled in by hand, in a spreadsheet or by an LLM), each
+        row finding its sound by folder + file or its idx number like Rename
+        from callouts.csv.  Names, types and the other columns are left as
+        they are.  Says how many comments came in, changed or went."""
+        from ...core.transcribe import CALLOUTS_CSV, COMMENT, CalloutsFile
+        title = "Update comments from callouts.csv"
+        if not self._slots or not self._scan_dir:
+            compat.messagebox.showinfo(
+                title, "Scan an assets folder first — the audio table is "
+                       "empty.")
+            return False
+        path = os.path.join(self._scan_dir, CALLOUTS_CSV)
+        if not os.path.isfile(path):
+            compat.messagebox.showinfo(
+                title, "This project has no %s yet.\n\nAuto-name call-outs on "
+                       "the Extract tab writes one, and so does a comment typed "
+                       "in Audio Properties." % CALLOUTS_CSV)
+            return False
+        try:
+            callouts = CalloutsFile(path)
+        except (OSError, ValueError, csv.Error) as e:
+            compat.messagebox.showerror(title, "Couldn't read %s:\n%s"
+                                        % (CALLOUTS_CSV, e))
+            return False
+        if callouts.key(COMMENT) is None:
+            compat.messagebox.showinfo(
+                title, "%s has no comment column.\n\nAdd a column headed "
+                       "\"comment\" and put each sound's note on its row, then "
+                       "press this again." % CALLOUTS_CSV)
+            return False
+        shown = dict(self._comments)
+        self._comments_sig = None            # read the file whatever it says
+        now = dict(self._load_comments())
+        find = self._callout_finder(callouts)
+        unmatched = sum(1 for r in callouts.rows
+                        if callouts.get(r, COMMENT) and callouts.get(r, "file")
+                        and find(r) is None)
+        added = sum(1 for r in now if r not in shown)
+        changed = sum(1 for r in now if r in shown and shown[r] != now[r])
+        cleared = sum(1 for r in shown if r not in now)
+        self._refresh_list()
+        parts = [("%d new" % added) if added else "",
+                 ("%d changed" % changed) if changed else "",
+                 ("%d cleared" % cleared) if cleared else ""]
+        parts = [p for p in parts if p]
+        msg = ("%d sound(s) have a comment from %s." % (len(now), CALLOUTS_CSV)
+               if now else "%s gives no sound a comment." % CALLOUTS_CSV)
+        msg += (" Since the list last showed them: %s." % ", ".join(parts)
+                if parts else " The list already showed every one of them.")
+        if unmatched:
+            msg += ("\n\n%d row(s) with a comment name a sound this project "
+                    "doesn't have." % unmatched)
+        if now and self._show_comments_pref() is False:
+            msg += ("\n\nTick Show comments in the toolbar to see the Comment "
+                    "column.")
+        self.log("Replace Audio: comments from %s: %d sound(s)%s."
+                 % (CALLOUTS_CSV, len(now),
+                    (" (" + ", ".join(parts) + ")") if parts else ""), "info")
+        compat.messagebox.showinfo(title, msg)
+        return True
 
     @rpc
     def set_comment(self, rel, text):

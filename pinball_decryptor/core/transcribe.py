@@ -1115,7 +1115,8 @@ class CalloutsFile:
         text = raw.decode(self.encoding, errors="replace")
         head = text.split("\n", 1)[0]
         self.delimiter = max(",;\t", key=head.count)
-        reader = csv.DictReader(text.splitlines(), delimiter=self.delimiter)
+        reader = csv.DictReader(text.splitlines(keepends=True),
+                                delimiter=self.delimiter)
         self.fields = list(reader.fieldnames or [])
         self.rows = list(reader)
         for want in ("file", "text"):
@@ -1136,10 +1137,15 @@ class CalloutsFile:
         self.rows = []
         return self
 
+    #: PAD-1246: other headers a column goes by in a CSV brought back from a
+    #: spreadsheet or an LLM ("Comments", "Notes"), tried after the name itself
+    ALIASES = {COMMENT: ("comments", "note", "notes")}
+
     def key(self, name):
-        for f in self.fields:
-            if (f or "").strip().lower() == name:
-                return f
+        heads = {(f or "").strip().lower(): f for f in reversed(self.fields)}
+        for want in (name,) + self.ALIASES.get(name, ()):
+            if want in heads:
+                return heads[want]
         return None
 
     def get(self, row, name):

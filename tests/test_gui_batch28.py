@@ -106,6 +106,9 @@ def _restore(kind, staged, current="All"):
     setattr(stub, "%s_change_filter_var" % kind, var)
     if kind == "audio":     # PAD-1105: the audio filter restores Hide unused too
         stub.audio_hide_unused_var = _Var(False)
+        # PAD-1209: Show and Hide unused are app-wide once picked; never
+        # picked, the folder's saved choice is what comes back
+        stub._pref = lambda key, kind: None
     _RESTORE[kind](stub, staged)
     return var.get()
 

@@ -852,3 +852,54 @@ level change with a fade into padled's fade ring as a one-way envelope, which
 playfield.py already ramps. Unit 10 ms (`PAD_FADE_B_UNIT_MS`), a guess: the
 node firmware .hex images are encrypted (entropy 7.99), and Pokemon's B=60
 chase steps every 0.600 s exactly.
+
+## David's four (PAD-1213, 2026-11-12)
+
+**Guided Setup not full screen (Transformers, in a window).** The game window
+binds its keys and LATCHES the coin door and trough as it opens, by the ids in
+the slot's `tables/game/switch_list.txt`. Only the bridge wrote that, a second
+after the window was up, so the window opened on the previous run's list:
+after Star Wars 2025 LE/Pro or The Walking Dead, their coin-door id (9) is
+Transformers' JUMPER LVDS RESOLUTION 1 (SPI bit 12), and their trough ids
+were both flipper buttons and the shooter lanes. The game reads the jumper
+at boot and draws at 1360x768 - in the corner of the 1920x1080 screen. s3run
+now clears the slot's tables and writes the title's own list
+(`s3bridge.py --switches DIR GAME`, 0.8 s) before the renderer starts.
+
+**Sound lag.** s3alsa's output measures 1.0000x of real time over a whole
+Transformers game (a counter on the fifo, no player). The lag is the Windows
+player's queue: padplay.py drops a backlog only when it has sat above
+PAD_AUDIO_MAX_LATE_MS (750) for 2 s. David's run saw-toothed 0.2-0.85 s late
+for minutes; on the bench a 600 ms hiccup stayed as 660-690 ms of lag. Spike
+3 runs set 200 ms: the hiccup comes back to 110-140 ms; a source 3% faster
+than the speaker stays within 170-270 ms (a ~100 ms skip every few seconds)
+instead of climbing to 780.
+
+**Video: clip starts.** s3vidhost decodes with slice threads, never ffmpeg's
+default HEVC frame threading (the first frame waited for 15 packets, 589 ms,
+on a 10-core PC), and keeps a warm ffmpeg per (codec, size) of the last three
+opened, so an open or flush does not wait on a process start. First frames
+23-65 ms after open in the game (log: `first frame N ms after open|seek`),
+was 114-589 ms. `PAD_S3_VID_THREADS`, `PAD_S3_VID_WARM=0`.
+
+**Video: the frozen backbox (Fallout) and the crawling intro (Transformers).**
+The ring put frame n in slot n % 16 and freed slots IN ORDER (padvid
+read_idx). Fallout keeps the frame its main screen shows and releases the
+rest: s3vid.c's new jam line read "frame 164 still held, 15 of the 15 after it
+released" - a full ring with 15 free slots, the decoder stopped, packets
+backed up ("Unexpected busy error when SENDING PACKET") and the background
+video froze for good. Now a slot is free when its own frame is released: the
+guest opts in at open (`slotmap_guest`), the host answers (`slotmap_host`),
+writes each frame to the next free slot round robin and publishes it in
+`slot_of[n % 16]`; the guest clears `slot_busy[slot]` on release. A flush
+frees only the frames the game never took. Proven by grabbing the X screen of
+a window run at 4 fps: Fallout's main screen changed in 18 of 239 grabs
+before, 211 after. Transformers' intro clip (24 fps) came out at 11.6 fps
+before, 19.3 after, the game drawing 30-32 fps through it (was 12); the
+renderer then gets 20-24 new video frames a second.
+
+Still seen, not explained: one ~7 s hold of Fallout's background in 60 s
+of attract, with no stream event on the host at the time and the clip moving
+in its source; and the Transformers intro scene itself keeps the game near
+30 fps (59-70% waiting on the renderer), a cost of drawing that scene on
+this GPU, not of the video.

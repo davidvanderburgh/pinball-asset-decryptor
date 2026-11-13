@@ -443,7 +443,8 @@ export function Controls({ s, p, update }) {
       <span class="lbl">Start from</span>
       <div class="row wrap">
         ${presets.map((pr) => html`<${Button} size="sm" cls=${pr.key === s.preset_on ? "on" : ""}
-          title=${pr.tip + (pr.key === s.preset_on ? " (In use now.)" : "")} onClick=${() => call("color.preset", pr.key)}>${pr.label}<//>`)}
+          title=${pr.tip + (pr.key === s.preset_on ? (s.in_use === "" ? " (Picked, but not on any file yet.)" : " (In use now.)") : "")} onClick=${() => call("color.preset", pr.key)}>${pr.label}<//>`)}
+        ${inUseChip(s)}
       </div>
     </div>
     <div class="cp-row">
@@ -895,6 +896,15 @@ const thisFile = (f) => (f && f.count > 1 ? `these ${f.count} files` : "this " +
 // The line under the modes: what the profile on show does to this project now.  ownColor
 // (PAD-514): the color of its own the line of text on show has (the Scenes Font bar's), which
 // the profile does not change.
+// PAD-1217 (DragonRR): what this mode applies now, beside the starting points, so a lit
+// starting point is never mistaken for one in use: "In use: <name>", or "None set".
+export function inUseChip(s) {
+  if (!s.has_project || s.in_use === undefined || s.in_use === null) return null;
+  return s.in_use
+    ? html`<span class="chip ok sm cp-in-use" title="The profile applied now">In use: ${s.in_use}</span>`
+    : html`<span class="chip sm cp-in-use" title="No color profile is applied here yet: pick a starting point or a saved profile, or move a slider">None set</span>`;
+}
+
 export function statusNote(s, ownColor = null) {
   const assets = s.per_file && s.mode === "assets";
   const screen = s.per_file && s.mode === "screen";

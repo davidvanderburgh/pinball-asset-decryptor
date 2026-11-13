@@ -6212,3 +6212,68 @@ def test_a_run_whose_block_never_comes_says_what_its_log_says(tmp_path, monkeypa
     assert "ended before it came up" in said[-1] and "fuse2fs refused" in said[-1]
     assert pc.run_log_tail(str(tmp_path / "gone.log")) == []
     assert pc.run_log_said(str(tmp_path / "gone.log")) == ""
+
+
+def test_an_unquoted_server_path_with_spaces_is_still_registered(tmp_path):
+    # PAD-1229: pywin32 writes LocalServer32 as GetShortPathName(pythonw.exe)
+    # unquoted; with 8.3 names off that is the long path, spaces and all,
+    # and the check cut it at "C:\Program" - "still not registered"
+    vs = pytest.importorskip("vpxsetup")
+    kit = tmp_path / "vpx"
+    kit.mkdir()
+    (kit / "padcontroller.py").write_text("")
+    pydir = tmp_path / "Pinball Asset Decryptor" / "python"
+    pydir.mkdir(parents=True)
+    py = pydir / "pythonw.exe"
+    py.write_bytes(b"")
+    server = '%s "%s" {7D5B2A1E}' % (py, tmp_path / "Pinball Asset Decryptor" / "localserver.py")
+    assert vs.server_exe(server) == str(py)
+    assert vs.registration_ok(str(kit), server)
+    fixed = vs.quoted_server_cmd(server)
+    assert fixed == '"%s"%s' % (py, server[len(str(py)):])
+    assert vs.server_exe(fixed) == str(py) and vs.registration_ok(str(kit), fixed)
+    assert vs.quoted_server_cmd(fixed) is None                                  # already quoted
+    assert vs.quoted_server_cmd(r'C:\PROGRA~1\PAD\python\pythonw.exe "x.py" {c}') is None
+    assert vs.quoted_server_cmd("") is None
+    assert vs.server_exe(r"C:\a b\x.exec\pythonw.exe /Automate") == r"C:\a b\x.exec\pythonw.exe"
+
+
+def test_controller_register_hands_pywin32_its_own_argv(monkeypatch):
+    # PAD-1229: UseCommandLine reads sys.argv itself, and `padvpx.py
+    # unregister` (the uninstaller's) carries "unregister" with no dashes:
+    # it registered again instead of removing the controller
+    pc = pytest.importorskip("padcontroller")
+    seen = []
+
+    class FakeReg:
+        @staticmethod
+        def UseCommandLine(*classes, **flags):
+            seen.append(list(sys.argv[1:]))
+
+    quoted = []
+    monkeypatch.setattr(pc, "_reg", FakeReg, raising=False)
+    monkeypatch.setattr(pc, "quote_local_server", lambda: quoted.append(1))
+    monkeypatch.setattr(sys, "argv", ["padvpx.py", "unregister", "--log", "x.log"])
+    assert pc.main(["--unregister"]) == 0
+    assert pc.main(["--register"]) == 0
+    assert seen == [["--unregister", "--unattended"], ["--register", "--unattended"]]
+    assert quoted == [1]                                         # only after a register
+    assert sys.argv == ["padvpx.py", "unregister", "--log", "x.log"]
+
+
+def test_register_with_a_log_keeps_what_happened(tmp_path, monkeypatch):
+    # PAD-1229: the tab runs the register elevated, where its output went
+    # nowhere; --log keeps it (the traceback and the exit) for the tab
+    pv = pytest.importorskip("padvpx")
+    log = tmp_path / "reg.log"
+
+    def boom(cmd):
+        raise PermissionError("[WinError 5] Access is denied")
+    monkeypatch.setattr(pv, "_register", boom)
+    assert pv.main(["register", "--log", str(log)]) == 1
+    text = log.read_text(encoding="utf-8")
+    assert "PermissionError: [WinError 5] Access is denied" in text and text.strip().endswith("exit 1")
+
+    monkeypatch.setattr(pv, "_register", lambda cmd: print("registered %s" % cmd) or 0)
+    assert pv.main(["register", "--log", str(log)]) == 0
+    assert log.read_text(encoding="utf-8").split() == ["registered", "register", "exit", "0"]

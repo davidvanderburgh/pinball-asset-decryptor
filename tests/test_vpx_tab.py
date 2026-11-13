@@ -1079,3 +1079,21 @@ def test_restart_wsl_asks_first_then_shuts_wsl_down(tab, monkeypatch):
     assert tab.restart_wsl() is True
     _wait(tab)
     assert tab.get("message_level") == "error" and "boom" in tab.get("message")
+
+
+def test_register_says_what_went_wrong_not_only_was_it_declined():
+    # PAD-1229: "was the administrator prompt declined?" to a user who saw
+    # no prompt, running the app as administrator
+    f = V.register_failure
+    declined = ("Start-Process : This command cannot be run due to the error: "
+                "The operation was canceled by the user.\r\nAt line:1 char:1\r\n")
+    assert "declined" in f(declined, None)
+    blocked = "Start-Process : This command cannot be run due to the error: The file cannot be accessed.\r\n"
+    assert f(blocked, None) == ("Windows would not run the register as administrator: This command "
+                                "cannot be run due to the error: The file cannot be accessed.")
+    assert "did not run" in f("", None)
+    tb = "Traceback (most recent call last):\n  File x\nPermissionError: [WinError 5] Access is denied\nexit 1\n"
+    assert f("", tb) == "the controller could not be registered: PermissionError: [WinError 5] Access is denied"
+    assert f("", "Registered: PAD.Controller\nexit 0\n") == (
+        "the register finished, but Windows still does not show the controller: Registered: PAD.Controller")
+    assert "declined" not in f("", "exit 0\n")

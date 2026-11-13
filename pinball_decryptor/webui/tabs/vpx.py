@@ -126,6 +126,34 @@ def kit_python():
     return emulate_core.windows_python(console=True)
 
 
+def register_failure(prompt_error, log_text):
+    """What Register says when the controller is still not registered
+    (PAD-1229): it said "was the administrator prompt declined?" every
+    time, to a user who had seen no prompt and was running the app as
+    administrator.  *prompt_error* is what PowerShell's elevation said ("" when
+    it raised none, or when no prompt was needed); *log_text* the register's
+    own log (None when it never ran)."""
+    if log_text is None:
+        err = (prompt_error or "").strip()
+        if "cancel" in err.lower() or "1223" in err:
+            return ("the administrator prompt was declined, so the controller is not "
+                    "registered. Press Register and answer Yes.")
+        if err:
+            line = [ln.strip() for ln in err.splitlines() if ln.strip()][0]
+            line = re.sub(r"^Start-Process\s*:\s*", "", line)
+            return "Windows would not run the register as administrator: %s" % line
+        return ("the register did not run, so the controller is not registered "
+                "(it left no log behind).")
+    lines = [ln.strip() for ln in log_text.splitlines() if ln.strip()]
+    rc = None
+    if lines and re.match(r"^exit -?\d+$", lines[-1]):
+        rc = int(lines.pop().split()[1])
+    if rc == 0:
+        return ("the register finished, but Windows still does not show the controller"
+                + (": %s" % lines[-1] if lines else "."))
+    return "the controller could not be registered: %s" % (lines[-1] if lines else "exit %s" % rc)
+
+
 def last_json(text):
     """The last line of *text* that is a JSON object, or None."""
     for line in reversed((text or "").splitlines()):
@@ -689,17 +717,48 @@ class VpxTab(TabService):
         script = os.path.join(kit_dir(), "padvpx.py")
 
         def work():
-            ps = ("Start-Process -FilePath '%s' -ArgumentList '\"%s\" register' "
-                  "-Verb RunAs -Wait -WindowStyle Hidden"
-                  % (exe.replace("'", "''"), script.replace("'", "''")))
-            subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps],
-                           capture_output=True, timeout=300, creationflags=_CREATE_NO_WINDOW)
+            if not exe:
+                self._say("No Windows Python was found to run the Visual Pinball kit with.", "error")
+                return
+            # PAD-1229: the register writes what happened here; it runs
+            # elevated, where its output had nowhere to go, and the tab said
+            # "was the administrator prompt declined?" whatever went wrong
+            import tempfile
+            log = os.path.join(tempfile.gettempdir(), "pad_vpx_register.log")
+            try:
+                os.remove(log)
+            except OSError:
+                pass
+            from ...core.admin import is_admin
+            prompt_error = ""
+            if is_admin():
+                # already elevated: no prompt to show, so none is asked for
+                subprocess.run([exe, script, "register", "--log", log], capture_output=True,
+                               timeout=300, creationflags=_CREATE_NO_WINDOW)
+            else:
+                ps = ("Start-Process -FilePath '%s' -ArgumentList '\"%s\" register --log \"%s\"' "
+                      "-Verb RunAs -Wait -WindowStyle Hidden"
+                      % (exe.replace("'", "''"), script.replace("'", "''"), log.replace("'", "''")))
+                out = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps],
+                                     capture_output=True, timeout=300, creationflags=_CREATE_NO_WINDOW)
+                if out.returncode or out.stderr.strip():
+                    prompt_error = (out.stderr or out.stdout or b"").decode("utf-8", "replace")
+            try:
+                with open(log, encoding="utf-8", errors="replace") as f:
+                    log_text = f.read()
+            except OSError:
+                log_text = None
             st = self._kit("vpxsetup.py", ["state"])
             if st.get("registered"):
                 self._say("the controller is registered.")
-            else:
-                self._say("the controller is still not registered (was the "
-                          "administrator prompt declined?).", "warning")
+                return
+            if log_text:
+                try:
+                    self.ctx.loop.post(self.window.append_log,
+                                       "Visual Pinball: the register said:\n" + log_text.strip(), "info")
+                except Exception:                           # noqa: BLE001
+                    pass
+            self._say(register_failure(prompt_error, log_text), "warning")
         return self._start("Registering the controller", work)
 
     @rpc

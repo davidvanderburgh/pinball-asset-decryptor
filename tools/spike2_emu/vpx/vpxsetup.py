@@ -91,11 +91,51 @@ def registered_here(path):
         return False
 
 
+def server_exe(server_cmd):
+    """The program a LocalServer32 command starts.
+
+    PAD-1229: pywin32 writes that command as ``GetShortPathName(pythonw.exe)``
+    with NO quotes, and on a PC with 8.3 short names off (common on a second
+    drive, and on some Windows installs) the "short" name is the long one,
+    spaces and all: ``C:\\Program Files\\Pinball Asset Decryptor\\python\\
+    pythonw.exe "...localserver.py" {clsid}``.  Cut at the first space that
+    read "C:\\Program", the check said not registered, and Register said
+    "was the administrator prompt declined?" on a PC where it had worked.
+    So an unquoted command is read up to the first ``.exe`` the way Windows
+    reads it, not to the first space."""
+    cmd = (server_cmd or "").strip()
+    if cmd.startswith('"'):
+        return cmd[1:].split('"', 1)[0]
+    low = cmd.lower()
+    at = 0
+    while True:
+        i = low.find(".exe", at)
+        if i < 0:
+            break
+        end = i + 4
+        if end == len(cmd) or cmd[end] in " \t":
+            return cmd[:end]
+        at = end
+    return cmd.split(" ", 1)[0]
+
+
+def quoted_server_cmd(server_cmd):
+    """*server_cmd* with its program in quotes when it has a space and none
+    (PAD-1229, see server_exe): Windows has to guess where an unquoted path
+    with spaces ends.  None when nothing needs changing."""
+    cmd = (server_cmd or "").strip()
+    if not cmd or cmd.startswith('"'):
+        return None
+    exe = server_exe(cmd)
+    if " " not in exe:
+        return None
+    return '"%s"%s' % (exe, cmd[len(exe):])
+
+
 def registration_ok(com_path, server_cmd):
     """The registered folder holds padcontroller.py, and the python the
     server command starts exists."""
-    exe = server_cmd.strip()
-    exe = exe[1:].split('"', 1)[0] if exe.startswith('"') else exe.split(" ", 1)[0]
+    exe = server_exe(server_cmd)
     return (bool(com_path) and os.path.isfile(os.path.join(com_path, "padcontroller.py"))
             and bool(exe) and os.path.isfile(exe))
 

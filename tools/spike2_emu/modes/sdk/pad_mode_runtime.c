@@ -4158,9 +4158,11 @@ static unsigned bd_held;                  /* PAD-658: the background the backdro
 /* PAD-658: may the backdrop go in this background's place? The city always; any other background of the game's
  * while the mode that asked keeps the game's modes from starting (a qualifying screen like the barrier, never a
  * running mode of the game's), and the one it already held through that mode's ending (its TOTAL) */
+static int coop_cer_on;                   /* PAD-1219 (below): the co-op awards ceremony is on the glass */
+
 static int bd_place_ok(unsigned e)
 {
-    if (bd_is_city(e)) return 1;
+    if (bd_is_city(e) || coop_cer_on) return 1;   /* PAD-1219: the ceremony's clip goes in ANY background's place */
     if (block_owner && running == block_owner && bd_owner == running) return 1;
     return bd_lingers && e == bd_held;
 }
@@ -4292,6 +4294,28 @@ int pm_game_words(void)
 
 static void scene_show_backdrop(unsigned *r);
 
+/* ---- PAD-1219: the co-op awards ceremony, the HUD off the glass ------------------------------------------------
+ * DoomWalrus666: "During the awards ceremony, please remove the scoreboard, power up bar, and credits/player/ball count
+ * thing. Just display the awards box, and the final score along the bottom in large font." While the award cards show
+ * (coop_cards_show) every scene the game asks to show is kept out of the frame but the cards' own (the HUD scene the
+ * build put them in, with the final score's band) and the video player (the ceremony's clip, in the background's
+ * place): the score panels, the top bar and its words, the background's own words. */
+static void *coop_cer_keep, *coop_cer_keep_player;   /* the cards' scene and its scene player: let through */
+static unsigned coop_cer_gone[8], coop_cer_gone_n, coop_cer_vetoes;
+
+static void coop_cer_scene_show(unsigned *r)
+{
+    unsigned k;
+    if (!r[0] || (void *)(unsigned long)r[0] == coop_cer_keep || (void *)(unsigned long)r[0] == coop_cer_keep_player ||
+        r[0] == (unsigned)(unsigned long)((void *(*)(void))(unsigned long)fn("video_player"))())
+        return;
+    for (k = 0; k < coop_cer_gone_n && coop_cer_gone[k] != r[0]; k++) ;
+    if (k == coop_cer_gone_n && k < sizeof coop_cer_gone / sizeof coop_cer_gone[0])
+        coop_cer_gone[coop_cer_gone_n++] = r[0];
+    coop_cer_vetoes++;
+    r[0] = 0;
+}
+
 /* scene_show(scene, layer): a background of the game's let through is on the glass (PAD-662) - not under a full-screen
  * clip of ours, drawn over everything (emulator run block1: KIRYU's ending clip over the barrier moved its HUD for
  * nothing) */
@@ -4300,6 +4324,7 @@ static void on_scene_show(unsigned *r)
     unsigned e = bd.elem, sc = e ? *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18)) : 0;
     int bg = e && r[0] && r[0] == sc;
     scene_show_backdrop(r);
+    if (coop_cer_on) coop_cer_scene_show(r);          /* PAD-1219 */
     if (bg && r[0] == sc && !bd_is_city(e) && !clip.on) gw_seen(e);
 }
 
@@ -17505,6 +17530,7 @@ static int coop_cards_on;                   /* coop.cfg asks for them */
 static void *coop_card[COOP_CHARS], *coop_card_words[COOP_CHARS];
 static int coop_cards_found;
 static unsigned coop_cards_game;            /* round 3: the game (chg_game_now() + 1) whose cards have been shown */
+static void *coop_final, *coop_final_words;            /* PAD-1219: the final score's band (PadCoopFinal) */
 
 /* the cards, found once the HUD scene is up (with the pick's screens), all hidden */
 static void coop_cards_find(void)
@@ -17521,6 +17547,8 @@ static void coop_cards_find(void)
     }
     if (!got) return;
     for (i = 0; i < coop_ch_n; i++) if (coop_card[i]) pm_show(coop_card[i], 0);
+    if (!coop_final) coop_final = pm_node(coop_scr_scene, "PadCoopFinal");   /* PAD-1219: hidden until the ceremony */
+    if (coop_final) pm_show(coop_final, 0);
     coop_cards_found = 1;
     say("co-op awards: %d of the characters' %d award cards found in %s - hidden until the game's end", got, coop_ch_n,
         coop_scr_scene);
@@ -17534,8 +17562,11 @@ static void coop_card_words_of(char *out, unsigned cap, const char *award, unsig
     pm_snprintf(out, cap, "%s  PLAYER %u  %s", award, t, num);
 }
 
-static char coop_bonus_clip[96];             /* round 3, below: the bonus's own loop */
+static char coop_bonus_clip[96], coop_bonus_crop[32];   /* round 3, below: the bonus's own loop */
 static int coop_cards_backdrop(const char *name);
+static char coop_cer_clip[96], coop_cer_crop[32];      /* PAD-1219: coop.cfg `ceremony <clip> <crop>` */
+static void coop_cer_begin(void);
+static void coop_cer_end(void);
 
 /* the game is over (coop_change_wrap, the game's thread): each award on each winner's card in turn */
 static void coop_cards_show(unsigned n)
@@ -17552,6 +17583,12 @@ static void coop_cards_show(unsigned n)
             !coop_cards_found ? "none found in the HUD scene" : "the port names no proc_sleep");
         return;
     }
+    if (coop_cer_clip[0]) {                                   /* PAD-1219: the build names the ceremony's clip */
+        str_copy(coop_bonus_clip, sizeof coop_bonus_clip, coop_cer_clip, sizeof coop_bonus_clip);
+        str_copy(coop_bonus_crop, sizeof coop_bonus_crop, coop_cer_crop, sizeof coop_bonus_crop);
+        say("co-op awards: the ceremony's clip \"%s\" (crop %s) goes behind the cards", coop_bonus_clip,
+            coop_bonus_crop[0] ? coop_bonus_crop : "the port's");
+    }
     if (!coop_bonus_clip[0] && cb.loop[0]) {                  /* PAD-1114 round 3: no bonus end was seen - the */
         say("co-op awards: no bonus end was seen this game - the game's own bonus loop \"%s\" goes behind the cards",
             cb.loop);                                         /* game's own loop all the same (PAD-1123's line) */
@@ -17560,6 +17597,7 @@ static void coop_cards_show(unsigned n)
     if (!coop_bonus_clip[0])
         say("co-op awards: no bonus loop is known (no bonus end seen, no bonus_loop line) - the cards show over the "
             "main play");
+    coop_cer_begin();                                         /* PAD-1219: the HUD off, the final score up */
     backdrop = coop_bonus_clip[0] && coop_cards_backdrop(coop_bonus_clip);   /* round 3: the bonus's loop under them */
     for (i = 0; i < coop_won_n && pm_ms() - t0 < COOP_CARDS_MAX_MS; i++)
         for (t = 1; t <= n && t <= 4 && pm_ms() - t0 < COOP_CARDS_MAX_MS; t++) {
@@ -17575,7 +17613,59 @@ static void coop_cards_show(unsigned n)
             shown++;
         }
     if (backdrop) coop_cards_backdrop(0);
+    coop_cer_end();
     say("co-op awards: %d shown on the winners' cards in %lu ms - then the game's end goes on", shown, pm_ms() - t0);
+}
+
+/* PAD-1219: the final score's words (tests lift it verbatim): a co-op game's one score, a team game's two. The band's
+ * words are lettered x1.4 (coop_play.FINAL_WORDS_SCALE): COOP_FINAL_FITS characters fill the glass, so a team game's
+ * two long scores are said shorter */
+#define COOP_FINAL_FITS 28
+static void coop_final_words_of(char *out, unsigned cap, int teams, unsigned long long s1, unsigned long long s2)
+{
+    char a[32], b[32];
+    unsigned k;
+    pm_commas(a, sizeof a, s1);
+    pm_commas(b, sizeof b, s2);
+    if (!teams) {
+        pm_snprintf(out, cap, "FINAL SCORE  %s", a);
+        return;
+    }
+    pm_snprintf(out, cap, "TEAM 1  %s   TEAM 2  %s", a, b);
+    for (k = 0; out[k]; k++) ;
+    if (k > COOP_FINAL_FITS) pm_snprintf(out, cap, "T1 %s  T2 %s", a, b);
+}
+
+/* PAD-1219: the ceremony begins - the cards' scene alone (and the clip behind it) on the glass, the final score up */
+static void coop_cer_begin(void)
+{
+    char words[80];
+    coop_cer_keep = scene(coop_scr_scene);
+    coop_cer_keep_player = scene_player_of(coop_scr_scene);
+    if (!coop_final) coop_final = pm_node(coop_scr_scene, "PadCoopFinal");
+    if (!coop_final_words) coop_final_words = pm_text(coop_scr_scene, "PadCoopFinal.PadCoopFinal_Words");
+    coop_final_words_of(words, sizeof words, coop.teams, pm_score(1), pm_score(2));
+    if (coop_final_words) pm_set_text(coop_final_words, words);
+    if (coop_final) pm_show(coop_final, 1);
+    coop_cer_gone_n = coop_cer_vetoes = 0;
+    coop_cer_on = coop_cer_keep != 0 && (can & PM_CAN_BACKDROP);
+    say("co-op awards: the cards' scene 0x%08x, its player 0x%08x", (unsigned)(unsigned long)coop_cer_keep,
+        (unsigned)(unsigned long)coop_cer_keep_player);
+    say("co-op awards: the ceremony - %s; %s", coop_cer_on ? "the game's HUD off the glass" :
+        !coop_cer_keep ? "the HUD stays (the cards' scene was not found)" : "the HUD stays (this port has no scene "
+        "show to keep it off)", coop_final ? words : "no final score band on this card (built before PAD-1219)");
+}
+
+static void coop_cer_end(void)
+{
+    unsigned k;
+    if (coop_final) pm_show(coop_final, 0);
+    if (coop_cer_on) {
+        say("co-op awards: the ceremony is over - %u scene show(s) of %u scene(s) kept off the glass, the HUD back",
+            coop_cer_vetoes, coop_cer_gone_n);
+        for (k = 0; k < coop_cer_gone_n; k++) say("co-op awards:   kept off: scene 0x%08x", coop_cer_gone[k]);
+    }
+    coop_cer_on = 0;
 }
 
 /* ---- PAD-1028 round 3: the cards over the bonus's own loop -----------------------------------------------------
@@ -19769,6 +19859,18 @@ static void coop_line(const char *s)
         to[k] = 0;
         p += k;
         if (!bonus) cpk.ms[n - 1] = (unsigned)number(&p, &ok);
+        return;
+    }
+    if (str_starts(s, "ceremony ")) {                                     /* PAD-1219: behind the award cards */
+        int k;
+        for (p = s + 9; *p == ' '; p++) ;
+        for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && k + 1 < (int)sizeof coop_cer_clip; k++)
+            coop_cer_clip[k] = p[k];
+        coop_cer_clip[k] = 0;
+        for (p += k; *p == ' '; p++) ;
+        for (k = 0; p[k] && p[k] != ' ' && p[k] != '\r' && p[k] != '\n' && k + 1 < (int)sizeof coop_cer_crop; k++)
+            coop_cer_crop[k] = p[k];
+        coop_cer_crop[k] = 0;
         return;
     }
     if (str_starts(s, "bonus_loop ")) {                                   /* PAD-1123: the game's bonus loop */

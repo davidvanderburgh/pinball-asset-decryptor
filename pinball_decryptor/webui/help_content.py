@@ -429,7 +429,13 @@ HELP_CONTENT = {
          "the project's callouts.csv, follows the sound through renames and "
          "Auto-name, shows in a Comment column once a sound has one, is found "
          "by the Search box, and goes out with Export CSV. Tick or untick "
-         "**Show comments** in the toolbar to show or hide that column."),
+         "**Show comments** in the toolbar to show or hide that column.\n\n"
+         "Commenting many at once: fill in the comment column of callouts.csv "
+         "(by hand, in a spreadsheet or with another tool; a header of "
+         "comment, comments or notes all work), save it, then **More > Update "
+         "comments from callouts.csv…** brings every comment in and says how "
+         "many came in, changed or went. Only the comments change: names and "
+         "types stay as they are."),
         ("Blip-free callouts (always on)",
          "Every replaced sound plays your audio all the way through, with no "
          "scrap of the original inside it. There is nothing to switch on.\n\n"

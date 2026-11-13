@@ -898,8 +898,25 @@ before, 211 after. Transformers' intro clip (24 fps) came out at 11.6 fps
 before, 19.3 after, the game drawing 30-32 fps through it (was 12); the
 renderer then gets 20-24 new video frames a second.
 
-Still seen, not explained: one ~7 s hold of Fallout's background in 60 s
-of attract, with no stream event on the host at the time and the clip moving
-in its source; and the Transformers intro scene itself keeps the game near
+Still seen then: one ~7 s hold of Fallout's background in 60 s of attract
+(explained in PAD-1230 below); and the Transformers intro scene itself keeps the game near
 30 fps (59-70% waiting on the renderer), a cost of drawing that scene on
 this GPU, not of the video.
+
+## The background that held ~7 s once a minute (PAD-1230, 2026-11-13)
+
+A frame's time is not the host's: ffmpeg's pipe carries no pts, so s3vid.c
+gives each frame the smallest time of the packets sent and not yet out as
+frames. That table held 128 times. Every clip opens with 271-326 packets in
+before its first frame (the game reads ahead; the host feeds ffmpeg's pipe),
+so the times past the 128th were dropped, silently. Frames 0-127 were timed
+right; frame 128 of Fallout's backbox clip (92.asset) took pts 160256 where
+65536 had just gone (12288 ticks/s: 7.7 s ahead), and the game stopped taking
+frames until its clock got there, then raced through the late ones. A 4 min
+attract with `PAD_S3_VID_TRACE=1` (one `[vt] R|F|B` line per frame handed,
+released, bound for drawing, wall-clock ms) showed it at each of the clip's
+starts: R 0 for 7-8 s while the renderer kept binding the one frame, every
+hold starting at a pts jump and none elsewhere. The table is now 4096, a full
+one says so once, and the every-600-frames line gives the most times ever
+pending and how many were lost. Any Spike 3 clip over 128 frames on any title
+had the same jump ~5 s in.

@@ -1982,7 +1982,9 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         offered a loop to the stock clip's length, rather than holding its
         last frame (or ending early).  Asked only when the clip has no
         length of its own picked yet (or "match the stock clip"), and not
-        for a clip going on as-is, whose length can't be changed."""
+        for a clip going on as-is, whose length can't be changed.  Not asked
+        for a file within a second of the stock clip either (Ben, both
+        3:20): looping that would only flash its opening at the end."""
         choice = self._length.get(rel)
         if choice not in (None, LENGTH_STOCK) or self._asis_for(rel):
             return
@@ -1992,7 +1994,11 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         except Exception:                               # noqa: BLE001
             mine = 0.0
         stock = self._stock_seconds(rel)
-        if not mine or not stock or mine >= stock - 0.05:
+        # A file only a few frames short (both read 3:20) would loop just a
+        # flash of its opening: ask only when it is a second or more short
+        # and the two lengths read differently.
+        if (not mine or not stock or stock - mine < 1.0
+                or _clock(mine) == _clock(stock)):
             return
         held = choice == LENGTH_STOCK or bool(self.video_trim_var.get())
         if compat.messagebox.askyesno(

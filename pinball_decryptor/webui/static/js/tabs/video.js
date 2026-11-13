@@ -202,10 +202,14 @@ function clock(pos, dur) {
 // Tk tree's minwidth.  Measured over every slot, not only the filtered view,
 // so typing in Search doesn't make the columns jump.
 const FIT_MAX = 480;
-const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, col: 56, conv: 60, modes: 110, seen: 120 };
+const COL_MIN = { rel: 160, len: 46, res: 70, fmt: 80, aud: 70, rep: 110, fit: 70, col: 56, conv: 60, modes: 110, seen: 120 };
 const HEADS = { rel: "Original Video", len: "Length", res: "Resolution", fmt: "Format",
-                aud: "Audio", rep: "Replacement", col: "Color", conv: "Convert", modes: "Played in",
+                aud: "Audio", rep: "Replacement", fit: "Vs stock", col: "Color", conv: "Convert", modes: "Played in",
                 seen: "When it plays" };
+// PAD-1232 (DoomWalrus666): the Vs stock column's header tip
+const FIT_TIP = { head: "Vs stock", lines: [
+  "How much longer (+) or shorter (−) your file runs than the clip it replaces, and the speed change that would make it run exactly as long.",
+  "Right-click a clip → This clip's length → Speed my file to the stock clip's length to have the build do that. Click the header to sort by it."] };
 // PAD-444: a row's Played in cell, in words
 const modesText = (r) => (r.unplayed ? "Not played" : r.other ? "Other parts of the game"
   : (r.modes || []).join(", "));
@@ -271,7 +275,7 @@ function rowFit(r, f) {
   if (!w) {
     w = { rel: textWidth(r.dir, f.mono) + textWidth(r.name, f.body), len: textWidth(r.len, f.mono) + (r.scr ? textWidth(r.scr, f.body) + 34 : 0),
           res: textWidth(r.res, f.body), fmt: textWidth(r.fmt, f.body), aud: textWidth(r.aud, f.body),
-          rep: textWidth(r.rep, f.body), col: 0, conv: textWidth(r.conv, f.body),
+          rep: textWidth(r.rep, f.body), fit: textWidth(r.fit || "", f.mono), col: 0, conv: textWidth(r.conv, f.body),
           modes: textWidth(modesText(r), f.body), seen: textWidth(r.seen || "", f.body) };
     rowFits.set(r, w);
   }
@@ -429,6 +433,10 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
   const asked = useRef(0);
   const facts = pane.facts;
   const dur = (facts && facts.dur) || 0;
+  // PAD-1232: a clip set to "Speed my file to the stock clip's length"
+  // plays here at the speed the build will give it, its clock in the
+  // stock clip's time
+  const rate = pane.fit_to > 0 && dur > 0 ? Math.min(16, Math.max(0.0625, dur / pane.fit_to)) : 1;
   const direct = !!(pane.path && facts && enginePlays(facts) && !failed);
   const src = pane.proxy || (direct ? pane.path : null);
   const fv = useFullView(playing);
@@ -443,6 +451,7 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
     call("video.make_proxy", side, pane.seq, proxyFormat());
   }, [pane.seq, !!facts, direct, pane.proxy, pane.proxy_busy]);
   useEffect(() => { players[side] = vref.current; return () => { if (players[side] === vref.current) players[side] = null; }; });
+  useEffect(() => { const v = vref.current; if (v) { v.defaultPlaybackRate = rate; v.playbackRate = rate; } });
   // autoplay: a row change while playing resumes on the same pane
   useEffect(() => {
     if (!play || play.side !== side || !play.seq) return;
@@ -533,11 +542,20 @@ function Pane({ pane, side, play, stopSeq, onEmptyPlay, head, look }) {
       <input type="range" class="vid-seek" min="0" max=${dur || 0} step="0.01" value=${Math.min(pos, dur || 0)}
         disabled=${!src || !(dur > 0)} aria-label=${"Seek " + (pane.title || "")}
         onInput=${(e) => { const v = vref.current; const t = Number(e.target.value); setPos(t); if (v) v.currentTime = t; }} />
-      <span class="mono small muted nw">${clock(pos, pane.path ? dur : 0)}</span>
+      <span class="mono small muted nw">${clock(pos / rate, pane.path ? dur / rate : 0)}</span>
       ${pane.path ? html`<${FullButton} fv=${fv} />` : null}
     </div>
+    ${!fv.full && rate !== 1 ? html`<div class="small acc-ink vid-speed" ...${tip({ head: "Speed my file to the stock clip's length",
+      lines: [`Your file runs ${dur.toFixed(2)} s and the stock clip ${pane.fit_to.toFixed(2)} s, so it plays at ${(rate * 100).toFixed(1)}% speed here, as the build will make it.`] })}>
+      Playing ${speedWords(rate)} to fill the stock clip's ${clock(pane.fit_to, pane.fit_to).split(" / ").pop()}</div>` : null}
     ${fv.full ? null : look && look.offered && pane.path ? html`<${PaneView} side=${side} view=${(look.views || {})[side]} look=${look} />` : null}
   </div>`;
+}
+// PAD-1232: "2.5% slower" for a player rate of 0.975 (core.video.speed_words)
+function speedWords(rate) {
+  const pct = (1 - rate) * 100;
+  const n = Math.abs(pct);
+  return `${n < 10 ? n.toFixed(1) : Math.round(n)}% ${pct > 0 ? "slower" : "faster"}`;
 }
 
 // ----------------------------------------------------------------- Compare
@@ -1110,6 +1128,7 @@ export default function VideoTab() {
         { label: `Follow the Trim / pad box (${info.length_follow})`, checked: info.length === "box", onClick: () => call("video.set_length", rel, null) },
         { label: "Match the stock clip", checked: info.length === "stock", onClick: () => call("video.set_length", rel, "stock") },
         { label: "Loop my file to the stock clip's length", checked: info.length === "loop", onClick: () => call("video.set_length", rel, "loop") },
+        { label: "Speed my file to the stock clip's length", checked: info.length === "stretch", onClick: () => call("video.set_length", rel, "stretch") },
         { label: "Keep my file's full length", checked: info.length === "full", onClick: () => call("video.set_length", rel, "full") },
         { label: info.length === "custom" ? `Set a length… (${info.length_secs} s)` : "Set a length…", checked: info.length === "custom", onClick: () => call("video.set_length", rel, "custom") },
       ] },
@@ -1148,7 +1167,9 @@ export default function VideoTab() {
   // PAD-444: Played in, once the card's program has been read and names a mode
   const md = s.modes || {};
   const modesCol = !!(md.ready && (md.list || []).length);
-  const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "rep"].concat(modesCol ? ["modes"] : []).reduce((a, k) =>
+  // PAD-1232: Vs stock, once a clip has a replacement to compare
+  const fitCol = allRows.some((r) => r.fit);
+  const minWidth = 30 + ["rel", "len", "res", "fmt", "aud", "rep"].concat(fitCol ? ["fit"] : [], modesCol ? ["modes"] : []).reduce((a, k) =>
     a + (tuned[k] ? Math.max(36, tuned[k]) : FLEX.includes(k) ? COL_MIN[k] : fit[k]), 0) + fit.conv
     + (colorCol ? fit.col + 10 : 0) + (modesCol ? 8 : 7) * 10 + 20;
   const dragFrom = useRef(null);
@@ -1202,6 +1223,11 @@ export default function VideoTab() {
         onClick=${(e) => { e.stopPropagation(); setSel(new Set([r.rel])); anchor.current = r.rel; choose(r.rel); }}>${r.rep}</button>${r.var
         ? html`<span class="vid-var" aria-label=${`${r.var} more clips play at random`} ...${tip({ head: "Random clips", lines: [r.var_tip] })}><${Icon} name="shuffle" />+${r.var}</span>`
         : null}</span>` },
+    fitCol && { key: "fit", label: "Vs stock", width: width("fit"), num: true, sort: "fit", title: FIT_TIP,
+      render: (r) => (r.fit
+        ? html`<span class=${cx("vid-fit", r.fit_cls === "on" ? "acc-ink" : "dim")}
+            ...${tip(r.fit_tip || r.fit)}>${r.fit}</span>`
+        : "") },
     modesCol && { key: "modes", label: "Played in", width: width("modes"), title: T.modes,
       render: (r) => (r.unplayed
         ? html`<span class="vid-modes-cell unplayed" ...${tip({ head: "Not played", lines: [

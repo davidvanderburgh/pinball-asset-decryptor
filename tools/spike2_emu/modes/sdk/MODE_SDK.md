@@ -618,7 +618,7 @@ yours at the carriers' stock priority 2 is dropped while any other speech plays.
 
 | To... | Call |
 |---|---|
-| change how a request competes | `pm_sound_priority(request, priority, flags)` - -1 leaves one as it is; returns the old `priority << 8 \| flags`, or -1 without `data sound_requests` / `sound_request_count` in the port |
+| change how a request competes | `pm_sound_priority(request, priority, flags)` - -1 leaves one as it is; returns the old `priority << 8 \| flags`, or -1 without `data sound_requests` / `sound_request_count` in the port, or on a record whose priority byte is past 9 that it never changed (real ones go up to 255: Godzilla's "player added" is 196; one it changed itself it takes past 9 and back, PAD-1220) |
 | give a request its own priority and flags back (PAD-682) | `pm_sound_priority_stock(request)` - as `pm_sound_priority` first found them, also on a swap still armed on it; a mode's music carrier gets them back once its music has faded at the end, since a carrier can still be one the game plays (Bond LE 1.06: 94 is Bird One Multiball's music, and with its steal flag left cleared the game's next music could not take the bus from it) |
 
 start and end calls to priority 4, shot calls to priority 3, all three without the steal flag
@@ -6396,6 +6396,8 @@ PAD-1114: the co-op and team games' intro (the dialog's **Intro video...**), wit
     intro PadCoopIntro 12000                  the intro's clip (a full-screen clip the build added) and its length
                                               in ms; sounds.cfg `cintro <request> <carrier key> <its key> <ms>` is
                                               its sound, on a carrier the game never plays (as PAD-945's shot sounds)
+                                              - at priority 255 while the intro plays, so the game's own sounds (a
+                                              Start's "player added") cannot take its bus; 3 again after (PAD-1220)
 
 A game that begins as co-op or team (the right flipper held at Start, the start menu's CO-OP PLAY / TEAM PLAY, a
 team game's filling Start, a teammate joining before ball 1 is out) plays it once: full-screen over the game's own

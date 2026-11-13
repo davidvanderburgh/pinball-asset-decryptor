@@ -40,6 +40,7 @@ from ..shellx_getting_started import GettingStartedMixin
 from ..shellx_projects import ProjectsMixin
 from ..shellx_report import ReportMixin
 from ..shellx_reset import ResetMixin
+from ..shellx_team import TeamMixin
 from ..update_interval import (UPDATE_INTERVAL_CHOICES,
                                normalize_update_interval)
 from ...core.updater import (AUTO_DOWNLOAD_DEFAULT, AUTO_DOWNLOAD_KEY,
@@ -102,7 +103,7 @@ def _visuals():
     return dict(MFR_VISUALS)
 
 
-class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
+class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin,
                   DonationsMixin, ReportMixin, GettingStartedMixin, TabService):
     ns = "shellx"
     key = ""
@@ -169,6 +170,7 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin,
         self._projects_init()
         self._disk_init()
         self._reset_init()
+        self._team_init()
         self._machines_init()
         self._gs_init()
         self.set(update_state="", download=None, log_seed=None,

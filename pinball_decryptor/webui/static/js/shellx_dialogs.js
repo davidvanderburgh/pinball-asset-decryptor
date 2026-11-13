@@ -827,6 +827,83 @@ function ExportFilesDialog({ close, folder }) {
 }
 registerDialog("project_export_files", ExportFilesDialog);
 
+// ------------------------------------------------------- Team (PAD-1236)
+// Several PCs on one project: a team folder a sync service keeps the same on
+// every PC, each part of the project owned by one member, who shares it; the
+// others get it (webui/shellx_team.py, core/team_sync.py).  Floating like Export.
+function TeamDialog({ close }) {
+  const dup = useSingleton("project_team", close);
+  const sx = useNs("shellx");
+  const [ready, setReady] = useState(false);
+  const [team, setTeam] = useState(null);
+  const [name, setName] = useState(null);
+  const [widths, setWidths] = useState(null);
+  const tm = sx.team;
+  useEffect(() => {
+    if (dup) return;
+    call("shellx.team_open").then((r) => { if (!r) close(); else setReady(true); });
+    return () => { call("shellx.team_close"); };
+  }, []);
+  if (dup || !ready || !tm) return null;
+  const teamShown = team == null ? tm.default_team || "" : team;
+  const nameShown = name == null ? tm.default_name || "" : name;
+  const browse = async () => { const p = await call("shellx.team_browse"); if (p) setTeam(p); };
+  const join = async () => { if (await call("shellx.team_join", teamShown, nameShown)) { setTeam(null); setName(null); } };
+  const busy = !!tm.busy || !!sx.job;
+  if (!tm.joined) {
+    return html`<${FloatWin} title="Team" icon="refresh" onClose=${close} cls="sx-team"
+      footer=${html`<span class="grow"></span>
+        <${Button} kind="primary" disabled=${!teamShown.trim() || !nameShown.trim()} onClick=${join}>Join<//>
+        <${Button} onClick=${close}>Close<//>`}>
+      <div class="sx-p">${tm.intro}</div>
+      <div class="row">
+        <span class="lbl nw">Team folder</span>
+        <${Field} value=${teamShown} onChange=${setTeam} mono cls="grow" placeholder="A folder your sync service shares, e.g. OneDrive\\Godzilla team" />
+        <${Button} drop onClick=${browse}>Browse...<//>
+      </div>
+      <div class="row">
+        <span class="lbl nw">Your name</span>
+        <${Field} value=${nameShown} onChange=${setName} cls="grow" />
+      </div>
+      <div class="small muted sx-wrap">The first person to join makes the team; the others pick the same folder on their PC, each with their own name. Then each takes the parts they work on.</div>
+    <//>`;
+  }
+  const act = (r) => r.mine
+    ? html`<${Button} size="sm" disabled=${busy} onClick=${() => call("shellx.team_let_go", r.key)}
+        title=${{ head: "Let go", lines: [["Click", "nobody owns " + r.label + " until someone takes them; nobody gets yours from then on"]] }}>Let go<//>`
+    : html`<${Button} size="sm" disabled=${busy} onClick=${() => call("shellx.team_take", r.key)}
+        title=${{ head: "Take", lines: [["Click", r.owner ? "take " + r.label + " over from " + r.owner + ": from then on the others get yours" : "make " + r.label + " yours: you share them, the others get them"]] }}>Take<//>`;
+  const cols = [
+    { key: "label", label: "Part", width: "minmax(0,1fr)", render: (r) => html`<span class=${cx("sx-cell", r.mine && "ok-ink")}>${r.label}</span>` },
+    { key: "owner", label: "Whose", width: "120px", render: (r) => html`<span class="ellip sx-cell notr">${r.mine ? "Yours" : r.owner || "Nobody"}</span>` },
+    { key: "state", label: "", width: "minmax(0,2.2fr)", render: (r) => html`<span class=${cx("small ellip sx-cell", r.news && "acc-ink", r.changed_here && "warn-ink")} title=${r.state}>${r.state}</span>` },
+    { key: "act", label: "", width: "90px", render: act },
+  ];
+  const who = (tm.members || []).map((m) => m.name + (m.me ? " (you)" : "")
+    + (m.parts.length ? ": " + m.parts.join(", ") : ": no parts")
+    + (m.shared ? ", shared " + m.shared : "") + (m.arriving ? ", still arriving here" : "")).join("  ·  ");
+  return html`<${FloatWin} title="Team" icon="refresh" onClose=${close} cls="sx-team"
+    footer=${html`<${Button} size="sm" disabled=${busy} onClick=${() => call("shellx.team_leave")}>Leave team<//>
+      <span class="grow"></span>
+      ${tm.busy ? html`<${Spinner} />` : null}
+      <${Button} kind=${tm.news ? "primary" : ""} disabled=${busy || !tm.news} onClick=${() => call("shellx.team_get")}
+        title=${{ head: "Get from the team", lines: [["Click", "put the parts other people shared since you last got them into this project; each part is replaced by its owner's"]] }}>Get from the team${tm.news ? " (" + tm.news + ")" : ""}<//>
+      <${Button} kind=${tm.to_share && !tm.news ? "primary" : ""} disabled=${busy} onClick=${() => call("shellx.team_share")}
+        title=${{ head: "Share my parts", lines: [["Click", "copy the parts you own to your folder in the team folder, for the others to get"]] }}>Share my parts<//>
+      <${Button} onClick=${close}>Close<//>`}>
+    <div class="row small">
+      <span class="lbl nw">Team folder</span><span class="mono ellip grow notr" title=${tm.team}>${tm.team}</span>
+      <span class="lbl nw">You</span><span class="notr">${tm.me}</span>
+    </div>
+    ${(tm.warnings || []).map((w) => html`<${Note} kind="warn">${w}<//>`)}
+    <${Table} columns=${cols} rows=${tm.parts || []} rowKey=${(r) => r.key} cls="card sx-fill"
+      resizable widths=${widths} onResize=${setWidths}
+      empty=${html`<div class="empty small">${tm.busy ? "Looking at the team folder…" : "Nothing here."}</div>`} />
+    <div class="small muted sx-wrap notr">${who || "Nobody has joined yet."}</div>
+  <//>`;
+}
+registerDialog("project_team", TeamDialog);
+
 // ------------------------------------------- state-driven windows
 // A project copy / archive in progress (projects_ui._ProgressDialog) and
 // the update download (MainWindow.open_update_download_dialog).

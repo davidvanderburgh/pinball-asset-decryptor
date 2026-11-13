@@ -2863,7 +2863,10 @@ HELP_CONTENT = {
             "- **Pause** (or F9), in either window or on the bottom bar, freezes the "
             "whole game, video and sound too. **Resume** carries on from that frame. "
             "The bar also has **Restart game** (as on the Emulate tab), Volume and "
-            "Mute.",
+            "Mute.\n"
+            "- **SAVE STATES** in the side panel saves the game into a slot and loads "
+            "it back. What the last ball press or action did shows in the **BALLS** "
+            "section.",
         ]),
         ("Sound and video log", [
             "**Open** beside it under **Windows the emulator opens** shows every sound "

@@ -6511,6 +6511,20 @@ the pick also hides from a new game's start (`game_start`) until its first ball 
 line's turn (name, what it does) ends with how to take one: `ACTION/LAUNCH PICKS` (`ACTION PICKS` on a port
 with no plunger flags; nothing with no `action`).
 Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
+
+PAD-1215 (DoomWalrus666, Team 2v2: "using the action button to pick a character on Player 2, 3, or 4 launched the
+ball ... letting the character select timeout to 0 also launched the ball"): hiding was never enough - a hidden Action
+press still launches (PAD-1114), and the game's TIMED PLUNGER lets a waiting ball go on its own. Ball 1 of player 1
+escaped only behind an intro's serve hold. Now the ball start's serve (`site serve_ball`, hooked whenever there is a
+pick, intro or not) waits for any turn whose player has a pick to make (`coop_pick_hold`, the game's process asleep a
+tick at a time as in PAD-1114's `ci_ball_hold`): no ball is in the lane until the character is taken, and the top
+line says `ACTION PICKS`. A pick not open yet is waited for while the start menu's players-added lines run, else
+1.5 s; a Start meanwhile is still a join (`intro_start`, now written whenever there is a pick). Emulator, Godzilla LE
+1.16, Team 2v2, TIMED PLUNGER 10 s: on main player 2's Action pick and player 3's wait both launched the ball; fixed,
+player 1's ball waited 20 s for its pick, player 2's was served at the Action pick and waited for a second press, player 3's came at the time-out and was still in the lane 8 s later.
+
+    co-op: player 2's ball waits to be served until their character is picked
+    co-op: player 2's ball is served after 4513 ms (the character is taken)
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and
 a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.

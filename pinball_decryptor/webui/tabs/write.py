@@ -85,6 +85,10 @@ CARD_SIZE_WAY_BACK = ("To build it at its own size, choose \"Same as the "
 #: 16 GB card (PAD-465, card_size.SMALL), which an 8 GB card grows to and a
 #: 16 GB card is made smaller for
 CARD_SIZE_CHOICES = ("16S", "16G", "32G")
+#: PAD-1235: the probe's "own" for an original laid out the way Stern lays a
+#: card out at no Stern size: one made as small as it can be (card_size
+#: fit_image), which a build can still grow to any bigger size
+FITTED = "fitted"
 #: the control's words for a size, where "<n> GB card" would not say it
 CARD_SIZE_LABELS = {"16S": "Smaller 16 GB card"}
 #: PAD-467: under SD card size, the finished build cut down to what is on it
@@ -265,7 +269,8 @@ def _probe_card_size(path):
     "why": {choice: (class it builds at or None, error sentence, the built
     image's size or None)}, "room": {class: usable bytes}}`` with ``own``
     None when the tables are not laid out the way Stern lays a Spike 2 card
-    out.  The built size is card_size.plan's: the class size, or the original
+    out (:data:`FITTED` for one laid out that way at no Stern size: a card
+    made as small as it can be).  The built size is card_size.plan's: the class size, or the original
     FILE's size when that is longer (a dump of a whole bigger SD card keeps
     its length).  ``room`` is :func:`_probe_room`'s."""
     from ...core.longpath import ext as _lp
@@ -283,6 +288,15 @@ def _probe_card_size(path):
                 own = cs.layout_class(layout.laid_out)
             except cs.CardSizeError:
                 own = layout = None
+                # PAD-1235: a card made as small as it can be (a custom image
+                # someone shared after building it that way) is Stern's
+                # table at no Stern size; a build grows it all the same
+                # (card_size.read_growing_layout, PAD-593)
+                try:
+                    layout = cs.read_layout(f, size, any_size=True)
+                    own = FITTED
+                except cs.CardSizeError:
+                    layout = None
         why = {}
         for choice in CARD_SIZE_CHOICES:
             try:
@@ -298,7 +312,8 @@ def _probe_card_size(path):
         return None
     room = _probe_room(path, layout, own, why)
     return {"own": own, "size": size, "why": why, "room": room,
-            "fit": _probe_fit(path, own)}
+            "fit": _probe_fit(path, own),
+            "laid_out": layout.laid_out if layout is not None else None}
 
 
 def _probe_fit(path, own):
@@ -342,6 +357,12 @@ def _probe_room(path, layout, own, why):
                        if (why.get(c) or (None, "", None))[0]
                        and not why[c][1]]
     room = {}
+    if own == FITTED:
+        # at its own size: the partition as it is
+        try:
+            room[own] = cs.usable_blocks(space, None, cs.ROUTE_MOUNT)                 * space.block_size
+        except Exception:  # noqa: BLE001 - no figure
+            log.debug("card size probe: no room figure", exc_info=True)
     for c in classes:
         try:
             room.update(cs.room_by_class(layout, space, [c], cs.ROUTE_MOUNT))
@@ -1631,9 +1652,14 @@ class WriteTab(TabService):
             note, kind = card_class_words(err), "err"
         else:
             size = int(probe.get("size") or 0)
-            note = ("The original is %s %s card"
-                    % ("an" if own == "8G" else "a", _class_words(own)))
-            if size > layout_size(own):
+            if own == FITTED:
+                note = ("The original is a card image made as small as it "
+                        "can be (%s), not one of Stern's card sizes"
+                        % _fmt_size(probe.get("laid_out") or size))
+            else:
+                note = ("The original is %s %s card"
+                        % ("an" if own == "8G" else "a", _class_words(own)))
+            if own != FITTED and size > layout_size(own):
                 note += " in a %s file" % _fmt_size(size)
             note += "." + _room_words(probe.get("room") or {}, own, offered)
             if builds_at and fit:

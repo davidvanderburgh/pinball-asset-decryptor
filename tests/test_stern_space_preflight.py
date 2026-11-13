@@ -288,10 +288,13 @@ def _tiny_fs(free=200, sb_free=None, v1=3000, v2=3000):
     return bytes(fs)
 
 
-def _stern_card(path, fs, cls="8G"):
+def _stern_card(path, fs, cls="8G", cut=0):
     """A sparse card laid out exactly like Stern's *cls* card, *fs* as its
-    games partition."""
+    games partition.  *cut* sectors off the games partition (and the file):
+    a card made as small as it can be (card_size.fit_image), at no Stern
+    size."""
     p3c, p4s = TABLES[cls]
+    p3c, p4s = p3c - cut, p4s - cut
     mbr = bytearray(512)
     mbr[446:462] = bytes.fromhex("00000140 0c0320bf 00200000 00400000")
     mbr[462:478] = bytes.fromhex("000001c0 8303e0ff 00600000 00800a00")
@@ -301,7 +304,7 @@ def _stern_card(path, fs, cls="8G"):
                     + struct.pack("<II", p4s, P4_COUNT))
     mbr[510:512] = b"\x55\xaa"
     with open(path, "wb") as f:
-        cs._grow_file(f, 0, cs.CARD_SIZES[cls])
+        cs._grow_file(f, 0, cs.CARD_SIZES[cls] - cut * 512)
         f.seek(0)
         f.write(bytes(mbr))
         for ebr, raw in ((p4s, "0003e0ff 8303e0ff 00080000 fe3f0200"
@@ -455,6 +458,26 @@ def test_a_whole_build_that_cannot_fit_is_refused_before_any_encode(rig):
     # named as the project names them, not by their card paths
     assert sorted(name for _n, name in e.items) == ["0.mp4", "1.mp4"]
     assert ".asset" not in str(e)
+
+
+def test_a_card_made_as_small_as_it_can_be_names_the_size_that_fits(rig):
+    """PAD-1235: a shared custom image made as small as it can be is at no
+    Stern size.  Built at its own size and refused, the refusal still names
+    the SD card size it fits (the build grows such a card, PAD-593), and the
+    one-click question offers it."""
+    card = _stern_card(rig.tmp / "orig.raw", _tiny_fs(free=200),
+                       cut=2048 * 400)
+    with open(card, "rb") as f:
+        with pytest.raises(cs.CardSizeError):
+            cs.read_layout(f)               # no Stern size
+    proj = _project(rig.tmp, {V1: (150_000, 150_000), V2: (150_000, 150_000)})
+    with pytest.raises(cs.WontFit) as ei:
+        _compute(rig, card, proj, _budget(card, sizes=("16S", "16G", "32G")))
+    e = ei.value
+    assert rig.ran == []
+    assert e.current is None and e.fits == "16G"
+    assert "Build it for a 16 GB SD card" in str(e)
+    assert cs.bigger_card_offer(e) == (None, "16G")
 
 
 def test_the_same_build_that_fits_logs_its_budget_and_goes_on(rig):

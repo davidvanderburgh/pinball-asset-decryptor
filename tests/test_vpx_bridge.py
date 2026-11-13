@@ -902,6 +902,25 @@ def test_shadow_flippers_are_the_machines_coils(shadow):
     assert "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0" in out
 
 
+def test_pup_stub_counts_each_call_on_a_line_on_its_own():
+    """PAD-1207: Batman 66 runs two LabelSets in one VPMTimer string, joined by
+    `:`. They read as one 9-argument call and every patch log said "LabelSet
+    is called with [5, 9] arguments"; a method called only second on its
+    line was never stubbed."""
+    vs = pytest.importorskip("vpxshadow")
+    lines = ['Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")',
+             'PuPlayer.LabelSet screen,"GeneralTop1",msgs(0),1,"{\'mt\':2,\'color\':"&RGB(247, 170, 51)&",\'size\':6}"',
+             'VPMTimer.AddTimer 3000, "bPlay=False:puPlayer.LabelSet pBackglass,""GeneralCenter1"", """" ,1,"""":'
+             'puPlayer.LabelSet pBackglass,""GeneralCenter2"", """" ,1,"""" \'"',
+             'x = 1 : PuPlayer.playlistplayex(pBackglass, "a", "b", 100, 1) : PuPlayer.SetBackground 5, 1']
+    rep = []
+    stub = vs.pup_stub(lines, rep)
+    assert not any("WARNING" in s for s in rep), rep
+    assert "Public Sub LabelSet(a0, a1, a2, a3, a4) : End Sub" in stub
+    assert "Public Sub playlistplayex(a0, a1, a2, a3, a4) : End Sub" in stub
+    assert "Public Sub SetBackground(a0, a1) : End Sub" in stub
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the PuP stub against a present player under cscript")
 def test_forced_pup_stub_silences_both_creations_when_pinup_is_installed(tmp_path):
@@ -2742,6 +2761,53 @@ def test_setup_layout_writes_the_kit_and_the_ini_and_reads_back(tmp_path, monkey
     assert pd.load(conf)["mode"] == "free"                # the kit places it, as before
 
 
+def test_setup_always_on_top_is_a_choice_layouts_keep(tmp_path, monkeypatch):
+    """PAD-1231: a desktop player asked for the game's screen NOT always on
+    top. The kit keeps the choice, a layout no longer forces it back on and
+    still reads as the layout in use, and an open game's window follows."""
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    pv = pytest.importorskip("padvpx")
+    pd = pytest.importorskip("padisplay")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pv, "vpx_ini_set", lambda kv: None)
+    monkeypatch.setattr(pd, "CONF", str(tmp_path / "display.conf"))
+    monkeypatch.setattr(pd, "monitors", lambda: [
+        {"n": 1, "x": 0, "y": 0, "w": 3840, "h": 2160, "primary": True}])
+    pc = pytest.importorskip("padcontroller")
+    raised = []
+    monkeypatch.setattr(vs.sys, "platform", "win32")
+    monkeypatch.setattr(pc, "find_lcd_window", lambda: 77)
+    monkeypatch.setattr(pc, "raise_window", lambda h, top=True: raised.append((h, top)))
+    assert vs.lcd_on_top(pl.kit_load()) is True           # on, as it always was
+    got = vs.set_on_top(False)
+    assert got == {"result": "ok", "lcd_on_top": False, "live": True} and raised == [(77, False)]
+    assert pl.kit_load()["lcd"] == {"topmost": False}
+    presets = vs.layout_presets([(0, 0, 3840, 2160)])
+    vs.apply_layout("side", [0, 0, 1440, 2160], [1440, 0, 2400, 1350])
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"x": 1440, "y": 0, "w": 2400, "h": 1350, "topmost": False}
+    assert vs.layout_key(kit, presets) == "side" and vs.lcd_on_top(kit) is False
+    vs.set_on_top(True)                                   # the rectangle stays
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"x": 1440, "y": 0, "w": 2400, "h": 1350, "topmost": True}
+    vs.apply_layout("centre", None, None)
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"topmost": True} and vs.layout_key(kit, presets) == "centre"
+    vs.set_on_top(False)                                  # still the centre layout, not on top
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    # a fresh kit's choice alone is no layout taken; an old centre kit still is one
+    pl.kit_save({})
+    vs.set_on_top(True)
+    assert vs.layout_key(pl.kit_load(), presets) == ""
+    pl.kit_save({"lcd": {"topmost": True}})
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    vs.set_on_top(False)
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    monkeypatch.setattr(pc, "find_lcd_window", lambda: 0)  # no game open: saved only
+    assert vs.set_on_top(False)["live"] is False and len(raised) == 5
+
+
 def test_setup_layout_display_fills_a_monitor_or_sits_on_one():
     """PAD-811: the LCD rectangle becomes the game display setting: full
     screen on a monitor it fills, else a borderless window on the monitor
@@ -4358,6 +4424,67 @@ WScript.Echo "calls=" & rampCalls & "," & guardianCalls
     assert r.returncode == 0, r.stderr
     assert r.stdout.splitlines() == ["idle=0,0", "ramp=0", "ramp=3", "load=3,18,1", "ramp=2", "ramp=1",
                                      "guardian=True", "guardian=False", "calls=4,2"]
+
+
+def test_iron_maiden_sarcophagus_lock_switch_latches():
+    """PAD-1206: a pulse on Ball Lock told the game the Sarcophagus was empty again at once."""
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    assert m["switches"]["trgBallLock3"]["event"] == "latch"
+    assert m["retrofit_timers"]["PadMaidenLockTimer"] == {"clone": "PulseTimer", "interval_ms": 100}
+    out, _ = vs.patch('''Sub Table1_Init
+End Sub
+Sub trgBallLock3_Hit()
+BallsInRealLock=BallsInRealLock+1
+HandleMummyLock True
+End Sub''', m)
+    assert "Sub trgBallLock3_Hit : Controller.Switch(1080) = True : PadMaidenLockIn : End Sub" in out
+    assert "PulseSw 1080" not in out
+    assert "Sub PadMaidenLockTimer_Timer" in out
+    old = next(r["old"] for r in m["repatch"] if "trgBallLock3" in r["old"])
+    assert old not in out                 # the Tables card tells an old build from a rebuilt one
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's lock subs under cscript")
+def test_iron_maiden_sarcophagus_lock_follows_the_held_ball(tmp_path):
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    v = m["extra_vbs"]
+    lock = v[v.index("'---- PAD-1206"):v.index("'---- PAD: motor end stops")]
+    harness = '''Class TestController
+Public Property Let Switch(n, value)
+WScript.Echo "switch " & n & "=" & value
+End Property
+End Class
+Class TestBall
+End Class
+Dim Controller : Set Controller = New TestController
+Dim BallsInRealLock, LockBall1, LockBall2, ballA, ballB, cur
+BallsInRealLock = 0
+Set ballA = New TestBall : Set ballB = New TestBall
+Function ActiveBall : Set ActiveBall = cur : End Function
+'''
+    calls = '''PadMaidenLockTimer_Timer
+Set cur = ballA : Controller.Switch(1080) = True : PadMaidenLockIn
+WScript.Echo "in=" & BallsInRealLock & "," & (LockBall1 Is ballA)
+PadMaidenLockTimer_Timer
+Set cur = ballA : PadMaidenLockIn
+WScript.Echo "again=" & BallsInRealLock
+BallsInRealLock = BallsInRealLock - 1
+PadMaidenLockTimer_Timer
+PadMaidenLockTimer_Timer
+Set cur = ballB : PadMaidenLockIn
+WScript.Echo "next=" & BallsInRealLock & "," & (LockBall1 Is ballB)
+PadMaidenLockTimer_Timer
+'''
+    vbs = tmp_path / "lock.vbs"
+    vbs.write_text(harness + lock + calls, encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    # held from the hit to the tribute counting the ball out (trgBallLock0/2), once each way;
+    # the held ball back over the trigger at load is not a second ball
+    assert r.stdout.splitlines() == ["switch 1080=True", "in=1,True", "again=1", "switch 1080=False",
+                                     "next=1,True"]
 
 
 def test_playfield_sounds_stay_and_the_soundtrack_goes():

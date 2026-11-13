@@ -909,6 +909,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
                           "look": self._coop_look(project, chars),                              # PAD-1079
                           "intro": os.path.basename(_CP.intro_path(project, chars)) if project else "",   # PAD-1114
+                          # PAD-1219: the awards ceremony's own video
+                          "ceremony": os.path.basename(_CP.ceremony_path(project, chars)) if project else "",
                           "bonus": bool(chars.get("bonus")),                                     # PAD-1123
                           "picked_max": _CP.PICKED_MAX_SECONDS, "still_s": _CP.PICKED_STILL_SECONDS,
                           "videos": "" if prof is None or _CP.can_video(prof) else (
@@ -1099,6 +1101,32 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._say(str(e))
                 return False
             self._say("co-op intro: %s opens each co-op and team game" % os.path.basename(path))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_ceremony(self, clear=False):
+        """PAD-1219: Awards video...: a video of the owner's that plays behind the co-op award cards at a co-op game's
+        end (looped, silent, the game's HUD off the glass); *clear* takes it off (the game's End of Ball Bonus loop
+        plays there instead)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        if clear:
+            _CP.save_ceremony(project, None)
+            self._say("co-op awards: no video of your own - the game's End of Ball Bonus loop plays behind the cards")
+        else:
+            path = self.window.ask_open("modes_file", "Choose the co-op awards ceremony's background video",
+                                        [("Videos", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_ceremony(project, path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op awards: %s plays behind the award cards" % os.path.basename(path))
         self._publish_coop_chars(project)
         return True
 

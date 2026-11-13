@@ -2164,10 +2164,12 @@ class Bridge:
                     # (and keeps it there as that changes); here only ON TOP
                     # of Visual Pinball, which comes up full screen
                     if key not in self.placed_at:
-                        raise_window(hwnd, bool((setting or {}).get("topmost", True)))
+                        # PAD-1231: on top unless the tab's Always on top is off
+                        on_top = bool((setting or {}).get("topmost", True))
+                        raise_window(hwnd, on_top)
                         self.placed_at[key] = time.monotonic()
-                        log("lcd window left to the display setting (%s), on top"
-                            % shown.get("mode"))
+                        log("lcd window left to the display setting (%s), %s"
+                            % (shown.get("mode"), "on top" if on_top else "not on top"))
                     continue
                 rect = lcd_rect(setting or {}, monitors())
                 if key == "playfield" and not any(k in (setting or {}) for k in ("x", "monitor")):

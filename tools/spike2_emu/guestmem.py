@@ -46,7 +46,7 @@ LO, HI = 0x5F8000, 0x6E8000
 def guest_pid():
     """The qemu-user process running the game. Same patterns as padpath.sh's
     pad_guest_up, so this agrees with the rest of the rig about what is up."""
-    for cmd in (["pgrep", "-x", "game"], ["pgrep", "-f", "arm-binfmt|qemu-arm"]):
+    for cmd in (["pgrep", "-x", "game"], ["pgrep", "-f", "^[^ ]*(arm-binfmt|qemu-arm)[^ /]*( |$)"]):
         try:
             out = subprocess.run(cmd, capture_output=True, text=True).stdout.split()
         except OSError:

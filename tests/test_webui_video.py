@@ -1038,6 +1038,20 @@ def test_a_shorter_pick_is_offered_a_loop(tmp_path, monkeypatch):
         assert len(w.asked) == n + 1
         assert w.call("video.row_menu", [rel])["length"] == "full"
 
+        # a file only a fraction of a second short (both read 3:20) is not
+        # asked: looping it would only flash its opening
+        assert w.call("video.set_length", rel, None) is True
+        for near in (199.6, 199.2):
+            monkeypatch.setattr(VideoTab, "_stock_seconds",
+                                lambda self, rel: 200.1)
+            monkeypatch.setattr(core_video, "probe_duration",
+                                lambda _p, n=near: n)
+            w.answers.append(str(mine))
+            n = len(w.asked)
+            assert w.call("video.choose", rel) is True
+            assert len(w.asked) == n + 1
+            assert w.call("video.row_menu", [rel])["length"] == "box"
+
         # and the row menu sets it directly, surviving a fresh session
         assert w.call("video.set_length", rel, "loop") is True
     with web_app(tmp_path / "again", mfr="stern") as w:

@@ -528,6 +528,39 @@ def write_switch_list(table, path):
     return rows
 
 
+def write_switch_tables(devs, d):
+    """The title's switches by name: DIR/switches.json (s3press.py sw) and
+    DIR/tables/game/switch_list.txt (the game window's binds, s3keys.py).
+    devs: s3nodes.devices() rows (name, node, idx, class). Returns the table."""
+    import json
+    table = {}
+    for name, node, idx, cls in devs:
+        if cls == "switch" and node >= 0:
+            table.setdefault(name.strip().upper(), [node, idx])
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "switches.json"), "w") as f:
+        json.dump(table, f, indent=0, sort_keys=True)
+    write_switch_list(table, os.path.join(d, "tables", "game", "switch_list.txt"))
+    return table
+
+
+def switches_main(d, game):
+    """`s3bridge.py --switches DIR GAME`: only the switch tables, before the
+    game window opens (PAD-1213). The window binds its keys - and LATCHES the
+    coin door and the trough as it opens - by the ids in switch_list.txt.
+    Written only by the bridge, a second or so after the window was up, the
+    window opened on whatever list the slot held from its LAST run: another
+    title's. Its coin-door id was Transformers' JUMPER LVDS RESOLUTION 1 and
+    its trough ids two slingshots, a flipper EOS and three trough switches,
+    all held closed while the game booted and read its jumpers."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import s3nodes
+    devs = [r[:4] for r in s3nodes.devices(s3nodes.Elf(game), with_location=True)]
+    table = write_switch_tables(devs, d)
+    print("[s3bridge] %d switches -> %s" % (len(table), os.path.join(d, "tables", "game", "switch_list.txt")))
+    return 0
+
+
 def read_switch_list(path):
     """{id: (node, bit, name)} from a write_switch_list() file."""
     out = {}
@@ -566,6 +599,8 @@ def frames_in(buf):
 
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--switches":
+        return switches_main(sys.argv[2], sys.argv[3])
     import pty      # Linux only: the protocol above imports anywhere (tests)
     import tty
     d = sys.argv[1] if len(sys.argv) > 1 else "."
@@ -613,14 +648,7 @@ def main():
             devs = [r[:4] for r in devs5]
             # every switch by name, for `s3press.py sw SLOT NAME` (logical
             # bits in nodesw; node 0 = the CPU board's SPI chain)
-            import json
-            table = {}
-            for name, node, idx, cls in devs:
-                if cls == "switch" and node >= 0:
-                    table.setdefault(name.strip().upper(), [node, idx])
-            with open(os.path.join(d, "switches.json"), "w") as f:
-                json.dump(table, f, indent=0, sort_keys=True)
-            write_switch_list(table, os.path.join(d, "tables", "game", "switch_list.txt"))
+            table = write_switch_tables(devs, d)
             close_coin_door(table, os.path.join(d, "spi.in"), log)
         except Exception as e:
             log.write("# [polarity] not derived (%s): every board active high\n" % e)
@@ -718,4 +746,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

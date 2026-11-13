@@ -2761,6 +2761,53 @@ def test_setup_layout_writes_the_kit_and_the_ini_and_reads_back(tmp_path, monkey
     assert pd.load(conf)["mode"] == "free"                # the kit places it, as before
 
 
+def test_setup_always_on_top_is_a_choice_layouts_keep(tmp_path, monkeypatch):
+    """PAD-1231: a desktop player asked for the game's screen NOT always on
+    top. The kit keeps the choice, a layout no longer forces it back on and
+    still reads as the layout in use, and an open game's window follows."""
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    pv = pytest.importorskip("padvpx")
+    pd = pytest.importorskip("padisplay")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pv, "vpx_ini_set", lambda kv: None)
+    monkeypatch.setattr(pd, "CONF", str(tmp_path / "display.conf"))
+    monkeypatch.setattr(pd, "monitors", lambda: [
+        {"n": 1, "x": 0, "y": 0, "w": 3840, "h": 2160, "primary": True}])
+    pc = pytest.importorskip("padcontroller")
+    raised = []
+    monkeypatch.setattr(vs.sys, "platform", "win32")
+    monkeypatch.setattr(pc, "find_lcd_window", lambda: 77)
+    monkeypatch.setattr(pc, "raise_window", lambda h, top=True: raised.append((h, top)))
+    assert vs.lcd_on_top(pl.kit_load()) is True           # on, as it always was
+    got = vs.set_on_top(False)
+    assert got == {"result": "ok", "lcd_on_top": False, "live": True} and raised == [(77, False)]
+    assert pl.kit_load()["lcd"] == {"topmost": False}
+    presets = vs.layout_presets([(0, 0, 3840, 2160)])
+    vs.apply_layout("side", [0, 0, 1440, 2160], [1440, 0, 2400, 1350])
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"x": 1440, "y": 0, "w": 2400, "h": 1350, "topmost": False}
+    assert vs.layout_key(kit, presets) == "side" and vs.lcd_on_top(kit) is False
+    vs.set_on_top(True)                                   # the rectangle stays
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"x": 1440, "y": 0, "w": 2400, "h": 1350, "topmost": True}
+    vs.apply_layout("centre", None, None)
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"topmost": True} and vs.layout_key(kit, presets) == "centre"
+    vs.set_on_top(False)                                  # still the centre layout, not on top
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    # a fresh kit's choice alone is no layout taken; an old centre kit still is one
+    pl.kit_save({})
+    vs.set_on_top(True)
+    assert vs.layout_key(pl.kit_load(), presets) == ""
+    pl.kit_save({"lcd": {"topmost": True}})
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    vs.set_on_top(False)
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    monkeypatch.setattr(pc, "find_lcd_window", lambda: 0)  # no game open: saved only
+    assert vs.set_on_top(False)["live"] is False and len(raised) == 5
+
+
 def test_setup_layout_display_fills_a_monitor_or_sits_on_one():
     """PAD-811: the LCD rectangle becomes the game display setting: full
     screen on a monitor it fills, else a borderless window on the monitor

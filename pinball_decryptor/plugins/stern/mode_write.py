@@ -1411,6 +1411,49 @@ def coop_intro_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
     return CP.INTRO_CLIP, ms
 
 
+def coop_ceremony_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
+    """PAD-1219: what plays behind the co-op award cards, filling the glass with the game's HUD off it. The owner's
+    awards ceremony video (coop_play.ceremony_path), made into a silent full-screen clip of the bank's size
+    (coop_play.intro_clip) and added to the bank scene the build has so far, at the bank's "Normal" crop; else the
+    game's own End of Ball Bonus loop at the crop the game plays it at. Returns ``(clip name, crop)`` for coop.cfg's
+    ``ceremony`` line, or None when there is neither (the runtime keeps the city under the cards, HUD off)."""
+    from . import coop_play as CP
+    from . import video_bank as VB
+    from ...core.video import detect_video_info
+    project = getattr(result, "project", "")
+    src = CP.ceremony_path(project) if project else ""
+    if not src:
+        loop = CP.bonus_loop(stock_bank) if stock_bank else None
+        if loop is None:
+            result.lines.append("co-op awards: the cards show over the main play, the HUD off it - %s's video bank "
+                                "has no End of Ball Bonus loop the app knows" % result.profile.label)
+            return None
+        result.lines.append("co-op awards: the cards show over the game's End of Ball Bonus loop (%s)" % loop[0])
+        return loop
+    bank_card, bank, bank_src = _coop_bank(result, stock_bank, "the co-op awards ceremony video")
+    ffmpeg = _ffmpeg_for(ffmpeg, "the co-op awards ceremony video")
+    if progress is not None:
+        progress(0, 1, "Making the co-op awards ceremony video...")
+    w, h = VB.clip_frame(stock_bank)
+    folder = os.path.join(scratch, "coop_clips")
+    os.makedirs(folder, exist_ok=True)
+    made = os.path.join(folder, "%s.mp4" % CP.CEREMONY_CLIP)
+    try:
+        CP.intro_clip(src, made, w, h, ffmpeg)
+    except CP.CoopError as e:
+        raise ModeWriteError(str(e)) from None
+    info = detect_video_info(made)
+    try:
+        bank, got = VB.add_clip(bank, CP.CEREMONY_CLIP, os.path.getsize(made))
+    except VB.VideoBankError as e:
+        raise ModeWriteError("the co-op awards ceremony video could not be added to the video bank (%s)" % e) from None
+    result.new.append((bank_card[:-len("scene.radium")] + "scene.assets/" + got["path"], made))
+    _coop_bank_put(result, scratch, bank_card, bank, bank_src)
+    result.lines.append("co-op awards: %s (%.1f s, looped) plays behind the award cards"
+                        % (os.path.basename(src), float(getattr(info, "duration", 0) or 0) if info else 0.0))
+    return CP.CEREMONY_CLIP, "Normal"
+
+
 def _coop_bank(result, stock_bank, what):
     """``(bank card path, the bank scene as the build has it so far, its scratch file or "")``."""
     from . import clip_variants as CV
@@ -1599,6 +1642,9 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
             text += "award_cards on\n"            # PAD-1028 round 2: the awards on the winners' cards
+            ceremony = coop_ceremony_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)
+            if ceremony:
+                text += "ceremony %s %s\n" % ceremony               # PAD-1219: behind the cards, the HUD off
             clips = coop_clips_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)
             for n, name in clips:
                 text += "char_clip %d %s\n" % (n, name)             # PAD-1079: its video, behind its card
@@ -1624,10 +1670,12 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
     result.lines.append("co-op play: %s" % CP.HOW)
     if setting:
         result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Classic, 2 Enhanced; "
-                            "CO-OP PLAY, TEAM PLAY 2 VS 2 and 2 VS 1 on the start menu at 1 or 2); %s" % (
+                            "CO-OP PLAY, TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1 on the start menu at 1 or 2, "
+                            "ENHANCED STANDARD at 2); %s" % (
             "Insider Connected is off only while it is 1 or 2" if only
             else "the card's modes keep its scores off Insider Connected either way"))
-        result.lines.append("co-op play: Team 2v2 and 2v1: %s" % CP.TEAMS_HOW)    # PAD-1042
+        result.lines.append("co-op play: Team 2v2, 2v1 and 3v1: %s" % CP.TEAMS_HOW)    # PAD-1042
+        result.lines.append("co-op play: %s" % CP.STANDARD_HOW)                   # PAD-1224
         result.lines.append("co-op play: %s" % CP.CLASSIC_HOW)                     # PAD-1065
     got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
     result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))

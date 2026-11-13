@@ -839,6 +839,32 @@ def rule(data, node, index):
             "input": (raw & 0x3F) if raw & 0x40 else None}
 
 
+#: padled VERSION 8 (PAD-1228): where each node board's STEPPER was last sent
+#: (cmd 34 home = 0, cmd 35 a move): a bit per configured motor, then its
+#: place in steps from home. The board runs the motor itself and tells the
+#: game only its end switches, so a Visual Pinball table could not follow
+#: Rush LE's drum clock hand. padled.h carries the meaning.
+STEPPERS = 4
+STEP_CFG_OFF = RULE_READ
+STEP_POS_OFF = STEP_CFG_OFF + NODES
+STEP_READ = STEP_POS_OFF + NODES * STEPPERS * 4
+
+
+def stepper(data, node, motor):
+    """One node-board stepper's place (steps from home; either sign), from a
+    version-8 block, or None while the block cannot say: an older shim, or a
+    motor the game has not homed or moved yet."""
+    if data is None or len(data) < STEP_READ or not has_magic(data):
+        return None
+    if struct.unpack_from("<I", data, 4)[0] < 8:
+        return None
+    if not (0 <= node < NODES and 0 <= motor < STEPPERS):
+        return None
+    if not data[STEP_CFG_OFF + node] & (1 << motor):
+        return None
+    return struct.unpack_from("<i", data, STEP_POS_OFF + (node * STEPPERS + motor) * 4)[0]
+
+
 def paint_tints(data, group_node):
     """{(node, index): (r, g, b)} - the one-colour inserts a mode holds now, in the colour it painted them; empty
     when the block has no such plane (an older watch.sh, no mode runtime, a real machine's log). ``group_node``:

@@ -32,6 +32,8 @@ CHAN_SZ = 32 * 4 + EXTRA + PKTS * 24
 (OPEN_GEN, OPEN_ACK, CODEC, WIDTH, HEIGHT, EXTRA_SIZE, FLUSH_GEN, FLUSH_ACK,
  FLUSH_BASE, CLOSED, PKT_W, PKT_R, DATA_W, DATA_R, FRAMES_OUT,
  CLIP_FRAMES, CLIP_RATE_NUM, CLIP_RATE_DEN) = range(18)
+SLOTMAP_GUEST, SLOTMAP_HOST = 18, 19     # PAD-1213: s3vid.h slotmap_guest/host
+SLOT_BUSY, SLOT_OF, SLOTMAP = 20 * 4, 24 * 4, 16   # byte offsets in the channel; S3VID_SLOTMAP
 PATH = 256                              # S3VID_PATH: clip[c] after the channels
 PKT_EOF = 0x80000000
 # ---- ../spike2_emu/padvid.h ----
@@ -102,6 +104,39 @@ class Shm:
     def slot(self, c, n):
         return P_HDR + (c * P_SLOTS + n % P_SLOTS) * P_SLOT_BYTES
 
+    def slot_at(self, c, k):
+        """Byte offset of channel c's ring slot k."""
+        return P_HDR + (c * P_SLOTS + k) * P_SLOT_BYTES
+
+    # PAD-1213: the slot map (s3vid.h) - one byte per slot / per frame
+    def busy(self, c, k):
+        return self.f[16 + c * CHAN_SZ + SLOT_BUSY + k]
+
+    def set_busy(self, c, k, v):
+        self.f[16 + c * CHAN_SZ + SLOT_BUSY + k] = v
+
+    def slot_of(self, c, n):
+        return self.f[16 + c * CHAN_SZ + SLOT_OF + n % SLOTMAP]
+
+    def set_slot_of(self, c, n, k):
+        self.f[16 + c * CHAN_SZ + SLOT_OF + n % SLOTMAP] = k
+
+    def slotmap_reset(self, c):
+        """At an open: every slot free, and the map on if the guest frees
+        slots as it releases frames (else the in-order ring, as before)."""
+        o = 16 + c * CHAN_SZ
+        self.f[o + SLOT_BUSY:o + SLOT_BUSY + SLOTMAP] = bytes(SLOTMAP)
+        self.f[o + SLOT_OF:o + SLOT_OF + SLOTMAP] = bytes(SLOTMAP)
+        self.fset(c, SLOTMAP_HOST, 1 if self.fget(c, SLOTMAP_GUEST) else 0)
+
+    def next_free(self, c, after):
+        """The first free slot after slot `after`, round robin, or None."""
+        for i in range(1, P_SLOTS + 1):
+            k = (after + i) % P_SLOTS
+            if not self.busy(c, k):
+                return k
+        return None
+
 
 def param_sets(codec, extra):
     """(Annex B parameter sets, NAL length size; 0 = packets are Annex B)."""
@@ -158,30 +193,72 @@ def annexb(pkt, nl):
     return pkt                     # already Annex B (or not length-prefixed after all)
 
 
-class Decoder:
-    """One ffmpeg for one stream of one channel."""
+def decoder_threads():
+    """SLICE threads, never frame threads (PAD-1213). ffmpeg's default for
+    HEVC is frame threading, one thread per core, and a frame-threaded
+    decoder hands back its first frame only once it holds that many packets:
+    15 packets, 589 ms, on a 10-core PC for Transformers' 1080p clips fed at
+    the game's pace, where the Pi's decoder answers in a couple. Stern's
+    player waits about 70 ms for a clip's first frame
+    ("SpiVideoStreamDecoderBase::Play while loop timeout"), then closes it
+    and tries again - David's Transformers game start did that 99 times in a
+    row, the screen black while the sound played on. Slice threads cost no
+    latency and still decode those clips at ~330 fps."""
+    env = os.environ.get("PAD_S3_VID_THREADS", "")
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    return max(1, min(4, os.cpu_count() or 1))
 
-    def __init__(self, shm, c, codec, w, h, extra, log):
-        self.shm, self.c, self.w, self.h, self.log = shm, c, w, h, log
+
+def decoder_cmd(codec, w, h, threads=None):
+    """The native ffmpeg one stream is decoded by: Annex B in, I420 out."""
+    fmt = "hevc" if codec == HEVC else "h264"
+    # NOT -fflags nobuffer: on a piped raw stream it drops frames - the IDR
+    # first among them (71 of a 121-frame clip came out, every one grey for
+    # want of its references). The small probe is fine: byte-identical to a
+    # plain decode, and the first frame comes out without ffmpeg reading
+    # seconds of stream ahead.
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error",
+            "-threads", str(threads or decoder_threads()), "-thread_type", "slice",
+            "-probesize", "32", "-analyzeduration", "0", "-f", fmt, "-i", "pipe:0",
+            "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", "%dx%d" % (w, h), "pipe:1"]
+
+
+class Decoder:
+    """One ffmpeg for one stream of one channel.
+
+    Made in two steps (PAD-1213): the process is started first - possibly
+    well before the game asks, as a Spares warm spare - and bound to its
+    channel and the clip's extradata when the stream opens. Starting ffmpeg
+    is most of a cold first frame (65-115 ms of it), longer than the game
+    waits; a warm one answers in ~50 ms."""
+
+    def __init__(self, shm, codec, w, h, log, c=None, extra=None):
+        self.shm, self.codec, self.w, self.h, self.log = shm, codec, w, h, log
         self.fb = w * h + 2 * ((w + 1) // 2) * ((h + 1) // 2)
-        self.extra = extra
-        self.ps, self.nl = param_sets(codec, extra)
+        self.c, self.extra, self.ps, self.nl = None, b"", b"", 4
+        self.bound = threading.Event()
+        self.last_slot = P_SLOTS - 1           # round robin from slot 0 (PAD-1213)
         self.q = queue.Queue(maxsize=48)
         self.stop = False
-        fmt = "hevc" if codec == HEVC else "h264"
-        self.p = subprocess.Popen(
-            # NOT -fflags nobuffer: on a piped raw stream it drops frames -
-            # the IDR first among them (71 of a 121-frame clip came out, every
-            # one grey for want of its references). The small probe is fine:
-            # byte-identical to a plain decode, and the first frame comes out
-            # without ffmpeg reading seconds of stream ahead.
-            ["ffmpeg", "-hide_banner", "-loglevel", "error",
-             "-probesize", "32", "-analyzeduration", "0", "-f", fmt, "-i", "pipe:0",
-             "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", "%dx%d" % (w, h), "pipe:1"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, bufsize=0)
+        self.p = subprocess.Popen(decoder_cmd(codec, w, h), stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, stderr=log, bufsize=0)
         self.first = True
         threading.Thread(target=self.writer, daemon=True).start()
-        threading.Thread(target=self.reader, daemon=True).start()
+        self.rt = threading.Thread(target=self.reader, daemon=True)
+        self.rt.start()
+        if c is not None:
+            self.bind(c, extra or b"")
+
+    def bind(self, c, extra):
+        """This decoder is channel c's stream now, with that clip's extradata."""
+        self.c, self.extra = c, extra
+        self.ps, self.nl = param_sets(self.codec, extra)
+        self.bound.set()
+        return self
+
+    def alive(self):
+        return not self.stop and self.p.poll() is None
 
     def put(self, data):
         """False when the queue is full (try again later)."""
@@ -193,6 +270,9 @@ class Decoder:
 
     def writer(self):
         dump = None
+        self.bound.wait()
+        if self.stop:
+            return
         if os.environ.get("PAD_S3_VID_DUMP"):
             # PAD_S3_VID_DUMP=DIR: what ffmpeg is fed, as a file ffmpeg can
             # read back offline (DIR/ch<c>-<n>.hevc), and the raw extradata
@@ -216,6 +296,9 @@ class Decoder:
             pass
 
     def reader(self):
+        self.bound.wait()
+        if self.stop:
+            return
         s, c = self.shm, self.c
         try:
             while not self.stop:
@@ -229,12 +312,28 @@ class Decoder:
                     buf += part
                 if len(buf) < self.fb:
                     break
-                while not self.stop and s.vget(c, P_WRITE) - s.vget(c, P_READ) >= P_SLOTS:
-                    time.sleep(0.002)          # the game still holds that slot
-                if self.stop:
-                    return
-                n = s.vget(c, P_WRITE)
-                o = s.slot(c, n)
+                if s.fget(c, SLOTMAP_HOST):
+                    # any slot whose frame the game has released (PAD-1213)
+                    k = None
+                    while not self.stop:
+                        k = s.next_free(c, self.last_slot)
+                        if k is not None:
+                            break
+                        time.sleep(0.002)      # every slot held by the game
+                    if self.stop:
+                        return
+                    n = s.vget(c, P_WRITE)
+                    s.set_busy(c, k, 1)
+                    s.set_slot_of(c, n, k)
+                    self.last_slot = k
+                    o = s.slot_at(c, k)
+                else:
+                    while not self.stop and s.vget(c, P_WRITE) - s.vget(c, P_READ) >= P_SLOTS:
+                        time.sleep(0.002)      # the game still holds that slot
+                    if self.stop:
+                        return
+                    n = s.vget(c, P_WRITE)
+                    o = s.slot(c, n)
                 s.v[o:o + self.fb] = buf
                 s.vset(c, P_WRITE, n + 1)
                 s.fset(c, FRAMES_OUT, s.fget(c, FRAMES_OUT) + 1)
@@ -245,6 +344,7 @@ class Decoder:
 
     def kill(self):
         self.stop = True
+        self.bound.set()                   # an unbound spare's threads end too
         try:
             self.p.kill()
         except OSError:
@@ -257,6 +357,59 @@ class Decoder:
             self.p.wait(timeout=2)
         except subprocess.TimeoutExpired:
             pass
+        # its last frame lands (or not) before the caller rewrites the ring
+        if self.rt is not threading.current_thread():
+            self.rt.join(timeout=1)
+
+
+class Spares:
+    """Warm decoders (PAD-1213): one ffmpeg, already started and waiting on
+    its stdin, for each of the last KEEP (codec, width, height) the game
+    opened. An open or a flush (a seek, a loop) takes the spare and a new one
+    is started behind it, so the game's ~70 ms wait for a first frame is
+    spent decoding, not starting a process. A title's clips come in a few
+    sizes (Transformers: 1920x1080 and 1360x768), so a few spares cover it;
+    an idle spare costs no CPU. PAD_S3_VID_WARM=0 turns them off."""
+    KEEP = 3
+
+    def __init__(self, shm, log, make=None):
+        self.shm, self.log = shm, log
+        self.make = make or (lambda key: Decoder(shm, key[0], key[1], key[2], log))
+        self.on = os.environ.get("PAD_S3_VID_WARM", "1") != "0"
+        self.spare = {}                    # key -> Decoder, oldest use first
+        self.lock = threading.Lock()
+
+    def take(self, c, codec, w, h, extra):
+        """Channel c's decoder for a stream of this kind, bound to it."""
+        key = (codec, w, h)
+        with self.lock:
+            d = self.spare.pop(key, None)
+        if d is not None and not d.alive():
+            d.kill()
+            d = None
+        if d is None:
+            d = self.make(key)
+        if self.on:
+            threading.Thread(target=self.refill, args=(key,), daemon=True).start()
+        return d.bind(c, extra)
+
+    def refill(self, key):
+        d = self.make(key)
+        old = []
+        with self.lock:
+            if key in self.spare:
+                old.append(self.spare.pop(key))
+            self.spare[key] = d
+            while len(self.spare) > self.KEEP:
+                old.append(self.spare.pop(next(iter(self.spare))))
+        for o in old:
+            o.kill()
+
+    def close(self):
+        with self.lock:
+            old, self.spare = list(self.spare.values()), {}
+        for o in old:
+            o.kill()
 
 
 def new_session(path):
@@ -394,7 +547,12 @@ def main():
     clips = ClipLog(os.path.join(os.path.dirname(os.path.abspath(feed)), "padvid.log"),
                     sys.argv[4] if len(sys.argv) > 4 else None)
     dec = [None] * CH
+    spares = Spares(s, log)
     seen = [0] * CH
+    # PAD-1213: when each stream was opened (or flushed) and its first frame
+    # not yet seen - "first frame N ms after open" is what the game's own
+    # ~70 ms wait is measured against
+    asked = [None] * CH
     alive = 0
     while True:
         busy = False
@@ -409,12 +567,14 @@ def main():
                 s.fset(c, FRAMES_OUT, 0)
                 s.vset(c, P_WRITE, 0)
                 s.vset(c, P_EOS, 0)
+                s.slotmap_reset(c)
                 ok = codec in (HEVC, H264) and 0 < w <= MAX_W and 0 < h <= MAX_H
                 if ok:
                     s.vset(c, P_W, w)
                     s.vset(c, P_H, h)
                     s.vset(c, P_FB, w * h + 2 * ((w + 1) // 2) * ((h + 1) // 2))
-                    dec[c] = Decoder(s, c, codec, w, h, s.extra(c), log)
+                    dec[c] = spares.take(c, codec, w, h, s.extra(c))
+                    asked[c] = (time.time(), 0, "open")
                     say("ch%d: open %s %dx%d, %d bytes of extradata (NAL length %d)" % (
                         c, "hevc" if codec == HEVC else "h264", w, h, len(s.extra(c)), dec[c].nl))
                     clips.serving(c, w, h, *s.clip(c))
@@ -428,14 +588,22 @@ def main():
                 d = dec[c]
                 if d:
                     d.kill()
-                    dec[c] = Decoder(s, c, s.fget(c, CODEC), d.w, d.h, s.extra(c), log)
-                s.vset(c, P_WRITE, s.fget(c, FLUSH_BASE))
+                    dec[c] = spares.take(c, s.fget(c, CODEC), d.w, d.h, s.extra(c))
+                    asked[c] = (time.time(), s.fget(c, FRAMES_OUT), "seek")
+                base, wrote = s.fget(c, FLUSH_BASE), s.vget(c, P_WRITE)
+                if s.fget(c, SLOTMAP_HOST):
+                    # the frames the game never took are dropped: their slots
+                    # are free again (the ones it holds stay busy until released)
+                    for n in range(base, wrote):
+                        s.set_busy(c, s.slot_of(c, n), 0)
+                s.vset(c, P_WRITE, base)
                 s.vset(c, P_EOS, 0)
                 s.fset(c, FLUSH_ACK, s.fget(c, FLUSH_GEN))
                 busy = True
             if s.fget(c, CLOSED) and dec[c]:
                 dec[c].kill()
                 dec[c] = None
+                asked[c] = None
                 say("ch%d: closed after %d frames" % (c, s.fget(c, FRAMES_OUT)))
             d = dec[c]
             while d and s.fget(c, PKT_R) != s.fget(c, PKT_W):
@@ -453,6 +621,9 @@ def main():
                     s.fset(c, DATA_R, pos + size)
                 busy = True
             fo = s.fget(c, FRAMES_OUT)
+            if asked[c] is not None and fo > asked[c][1]:
+                say("ch%d: first frame %d ms after %s" % (c, (time.time() - asked[c][0]) * 1000, asked[c][2]))
+                asked[c] = None
             if d and fo and fo // 900 != seen[c] // 900:
                 say("ch%d: %d frames decoded" % (c, fo))
             seen[c] = fo

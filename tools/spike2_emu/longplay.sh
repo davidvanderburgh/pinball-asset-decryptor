@@ -69,8 +69,9 @@ poke() { PAD_SW_SRC=g python3 "$S/swpoke.py" "$1" "${2:-90}" >/dev/null 2>&1; }
 
 # The same union as padpath.sh's pad_guest_up (this script sources only
 # gamestate.sh): comm=game on every platform measured; the interpreter names
-# are platform details - arm-binfmt is WSL's, qemu-arm a container's.
-guest_up() { [ -n "$(pad_pids -x game)" ] || [ -n "$(pad_pids -f 'arm-binfmt|qemu-arm')" ]; }
+# are platform details - arm-binfmt is WSL's, qemu-arm a container's - and
+# must be argv0, or a `cp` of qemu reads as the guest (PAD-1223).
+guest_up() { [ -n "$(pad_pids -x game)" ] || [ -n "$(pad_pids -f '^[^ ]*(arm-binfmt|qemu-arm)[^ /]*( |$)')" ]; }
 
 # One ball into play. plunge.py takes the lowest trough ball still held, so a
 # `reset` first is what makes this repeatable across blocks.

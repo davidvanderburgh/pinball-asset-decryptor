@@ -17,6 +17,8 @@ process:
                                           Visual Pinball's own tables folder)
     vpxsetup.py layout <key> <player> <lcd>
                                           where the windows go: [x, y, w, h] JSON or null
+    vpxsetup.py ontop on|off              whether the game's screen stays on top of every other
+                                          window (PAD-1231); an open game's window at once
     vpxsetup.py cache [on|off]            what each title's card costs the emulator's disk before
                                           a game (PAD-964), and whether a game copies its card into
                                           the cache first (on) or reads it where it lies (off)
@@ -618,12 +620,59 @@ def layout_presets(mons):
     return out
 
 
+def lcd_on_top(kit):
+    """PAD-1231: whether the game's screen stays on top of every other
+    window - the kit's `lcd.topmost`, on unless turned off (the window has
+    always opened on top of Visual Pinball, which comes up full screen)."""
+    return bool((kit.get("lcd") or {}).get("topmost", True))
+
+
+def set_on_top(on):
+    """PAD-1231 (a desktop player: the game's screen over everything got in
+    the way of the rest of the desktop): keep the choice in the kit, where
+    the controller reads it as the game's window opens, and put an open
+    game's window on top (or not) at once."""
+    d = padlaunch.kit_load()
+    if "layout" not in d:
+        d["layout"] = "centre" if _old_centre(d) else ""
+    lcd = dict(d.get("lcd") or {})
+    lcd["topmost"] = bool(on)
+    d["lcd"] = lcd
+    padlaunch.kit_save(d)
+    live = False
+    if sys.platform == "win32":
+        try:
+            import padcontroller
+            hwnd = padcontroller.find_lcd_window()
+            if hwnd:
+                padcontroller.raise_window(hwnd, bool(on))
+                live = True
+        except Exception:                                   # noqa: BLE001
+            pass
+    return {"result": "ok", "lcd_on_top": bool(on), "live": live}
+
+
+def _old_centre(kit):
+    """A kit saved before PAD-1231 told the centre layout (no rectangles)
+    apart by its LCD's bare {"topmost": true}."""
+    return "player" not in kit and kit.get("lcd") == {"topmost": True}
+
+
 def layout_key(kit, presets):
-    """Which preset the kit's saved player / lcd rectangles are, or ""."""
-    player, lcd = kit.get("player"), kit.get("lcd")
+    """Which preset the kit's saved player / lcd rectangles are, or "".
+    Whether the screen is on top is a choice of its own (PAD-1231), so the
+    centre layout, which has no rectangles, is the one the kit says it took
+    (`layout`, which apply_layout writes)."""
+    player = kit.get("player")
+    lcd = {k: v for k, v in (kit.get("lcd") or {}).items() if k != "topmost"}
     for key, _, p, q in presets:
         want_p = {"x": p[0], "y": p[1], "w": p[2], "h": p[3]} if p else None
-        want_q = dict({"x": q[0], "y": q[1], "w": q[2], "h": q[3]}, topmost=True) if q else {"topmost": True}
+        if not q:
+            taken = kit.get("layout") == key if "layout" in kit else _old_centre(kit)
+            if taken and player == want_p and not lcd:
+                return key
+            continue
+        want_q = {"x": q[0], "y": q[1], "w": q[2], "h": q[3]}
         if player == want_p and lcd == want_q:
             return key
     return ""
@@ -640,11 +689,14 @@ def apply_layout(key, player, lcd):
     else:
         d.pop("player", None)
         padvpx.vpx_ini_set({"FullScreen": "0"})
+    # PAD-1231: a layout moves the windows; on top or not stays as chosen
+    on_top = lcd_on_top(d)
+    d["layout"] = key
     if lcd:
         x, y, w, h = [int(v) for v in lcd]
-        d["lcd"] = {"x": x, "y": y, "w": w, "h": h, "topmost": True}
+        d["lcd"] = {"x": x, "y": y, "w": w, "h": h, "topmost": on_top}
     else:
-        d["lcd"] = {"topmost": True}
+        d["lcd"] = {"topmost": on_top}
     padlaunch.kit_save(d)
     # PAD-811: the game's renderer places its own window from the display
     # setting, live; CONF named here so a test can point it elsewhere
@@ -895,6 +947,8 @@ def state():
         "presets": [{"key": k, "words": w, "short": LAYOUT_SHORT.get(k, k), "player": p, "lcd": q}
                     for k, w, p, q in presets],
         "layout": layout_key(kit, presets),
+        # PAD-1231: the game's screen on top of every other window, or not
+        "lcd_on_top": lcd_on_top(kit),
         # PAD-811: where the game's screen goes, as the layout or the
         # Emulate tab last set it
         "display": {"setting": shown, "text": padisplay.describe(shown)},
@@ -911,6 +965,8 @@ def main(argv):
         out = {"result": "ok", "cards": set_library(os.path.abspath(rest[0]))}
     elif cmd == "layout" and len(rest) == 3:
         out = {"result": apply_layout(rest[0], json.loads(rest[1]), json.loads(rest[2]))}
+    elif cmd == "ontop" and len(rest) == 1 and rest[0] in ("on", "off"):
+        out = set_on_top(rest[0] == "on")
     elif cmd == "downloads":
         # PAD-943: read the downloads in the tables folder (or the one given)
         tables = rest[0] if rest else vpx_tables_dir()

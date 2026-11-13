@@ -72,7 +72,9 @@ static struct stream {
     unsigned long frames, packets;
     unsigned session;                   /* the host run this stream was opened on */
     unsigned epoch;                     /* bumped at each (re)open: releases of */
-} st[S3VID_CHANNELS];                   /* older frames are not this ring's */
+                                        /* older frames are not this ring's */
+    unsigned jam_said;                  /* PAD-1213: read_idx+1 last reported jammed */
+} st[S3VID_CHANNELS];
 
 static int slot_fd[S3VID_CHANNELS][PADVID_SLOTS];
 
@@ -245,6 +247,7 @@ static int host_open(int c)
     ch->extra_size = n;
     if (n) memcpy(ch->extra, ctx->extradata, n);
     ch->closed = 0;
+    ch->slotmap_guest = 1;              /* PAD-1213: slots freed as released */
     vshm->ch[c].read_idx = 0;
     st[c].session = feed->session;
     __sync_synchronize();
@@ -400,7 +403,8 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
     return 0;
 }
 
-struct held { int c; unsigned n, epoch; };
+struct held { int c; unsigned n, epoch, slot; };
+typedef char s3vid_slotmap_fits[(int)(S3VID_SLOTMAP - PADVID_SLOTS) + 1];
 
 static void release(void *opaque, uint8_t *data)
 {
@@ -414,11 +418,31 @@ static void release(void *opaque, uint8_t *data)
         return;
     }
     s->released[h->n % 64] = h->n + 1;
+    if (feed->ch[h->c].slotmap_host) {  /* PAD-1213: this frame's slot is free */
+        __sync_synchronize();
+        feed->ch[h->c].slot_busy[h->slot] = 0;
+    }
     /* read_idx follows the frames released IN ORDER: a slot is reused only
      * once every frame before it is gone too */
     while (vshm->ch[h->c].read_idx < s->handed &&
            s->released[vshm->ch[h->c].read_idx % 64] == vshm->ch[h->c].read_idx + 1)
         vshm->ch[h->c].read_idx++;
+    /* PAD-1213: A JAMMED RING SAYS SO. Every slot handed out and the oldest
+     * one still held: the host has nowhere to put the next frame, so the
+     * decoder stops and the game's packets back up ("Unexpected busy error
+     * when SENDING PACKET"). Whether the later frames are already released
+     * tells a game holding ONE frame from one queueing them all. */
+    if (!feed->ch[h->c].slotmap_host &&
+        s->handed - vshm->ch[h->c].read_idx >= PADVID_SLOTS &&
+        s->jam_said != vshm->ch[h->c].read_idx + 1) {
+        unsigned r = vshm->ch[h->c].read_idx, k;
+        long ahead = 0;
+        for (k = r + 1; k < s->handed; k++)
+            if (s->released[k % 64] == k + 1) ahead++;
+        s->jam_said = r + 1;
+        sayf("[s3vid] ch%ld: ring full - frame %ld still held, ", h->c, (long)r, 0);
+        sayf("%ld of the %ld after it released\n", ahead, (long)(s->handed - r - 1), 0);
+    }
     pthread_mutex_unlock(&mu);
     free(data);
     free(h);
@@ -455,12 +479,13 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
     if (v->write_idx == st[c].handed) return AVERROR(EAGAIN);
     __sync_synchronize();
     n = st[c].handed;
-    slot = n % PADVID_SLOTS;
+    slot = feed->ch[c].slotmap_host ? feed->ch[c].slot_of[n % S3VID_SLOTMAP] % PADVID_SLOTS
+                                    : n % PADVID_SLOTS;
     w = v->width; h = v->height;
     desc = calloc(1, sizeof *desc);
     hd = malloc(sizeof *hd);
     if (!desc || !hd) { free(desc); free(hd); return AVERROR(ENOMEM); }
-    hd->c = c; hd->n = n; hd->epoch = st[c].epoch;
+    hd->c = c; hd->n = n; hd->epoch = st[c].epoch; hd->slot = slot;
     desc->nb_objects = 1;
     desc->objects[0].fd = slot_fd[c][slot];
     desc->objects[0].size = v->frame_bytes;

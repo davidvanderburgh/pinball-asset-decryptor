@@ -742,8 +742,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. At 1 "
                         "(Classic) or 2 (Enhanced) the game's start menu (both flipper buttons in attract) offers "
                         "CO-OP PLAY (each Start then adds a teammate; or the right flipper button + Start adds one), "
-                        "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four) "
-                        "and TEAM PLAY 2 VS 1 (players 1 and 3 against player 2). Classic: the players pick "
+                        "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four), "
+                        "TEAM PLAY 2 VS 1 (players 1 and 3 against player 2) and TEAM PLAY 3 VS 1 (players 1, 3 "
+                        "and 4 against player 2); at 2 also ENHANCED STANDARD (a normal game of competing players, "
+                        "each with their own score and progress and a character). Classic: the players pick "
                         "characters, but none has a special ability; Enhanced: with the abilities. With characters, a "
                         "player starting a game alone with the right flipper button held picks one too. 1 or 2 "
                         "disables most "
@@ -771,10 +773,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     COOP_MENU_TIP = (
         "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Classic (characters picked, no special "
         "abilities), 2 Enhanced (with the abilities). At 1 or 2 the game's start menu (both flipper buttons in "
-        "attract) offers three games. CO-OP PLAY: picked, each Start in the first ball adds a teammate; or teammates "
+        "attract) offers the games below. CO-OP PLAY: picked, each Start in the first ball adds a teammate; or teammates "
         "join with the right flipper button and Start. TEAM PLAY 2 VS 2: players 1 and 3 play as a team against "
         "players 2 and 4, each team with its own score and progress, taking turns; one Start "
-        "adds all four. TEAM PLAY 2 VS 1: players 1 and 3 against player 2, who plays both of team 2's turns. A "
+        "adds all four. TEAM PLAY 2 VS 1: players 1 and 3 against player 2, who plays both of team 2's turns. "
+        "TEAM PLAY 3 VS 1: players 1, 3 and 4 against player 2, who plays all three of team 2's turns. ENHANCED "
+        "STANDARD (at 2 only): the game's own game of competing players, each Start in the first ball adding one, "
+        "each with their own score and progress, and each picking a character at their first ball. A "
         "plain Start stays a one-player game. 1 or 2 disables most Insider "
         "Connected features (the "
         "card's scores, high scores and achievements stay on the machine). At 0 the game plays and "
@@ -909,6 +914,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
                           "look": self._coop_look(project, chars),                              # PAD-1079
                           "intro": os.path.basename(_CP.intro_path(project, chars)) if project else "",   # PAD-1114
+                          # PAD-1219: the awards ceremony's own video
+                          "ceremony": os.path.basename(_CP.ceremony_path(project, chars)) if project else "",
                           "bonus": bool(chars.get("bonus")),                                     # PAD-1123
                           "picked_max": _CP.PICKED_MAX_SECONDS, "still_s": _CP.PICKED_STILL_SECONDS,
                           "videos": "" if prof is None or _CP.can_video(prof) else (
@@ -1099,6 +1106,32 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._say(str(e))
                 return False
             self._say("co-op intro: %s opens each co-op and team game" % os.path.basename(path))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_ceremony(self, clear=False):
+        """PAD-1219: Awards video...: a video of the owner's that plays behind the co-op award cards at a co-op game's
+        end (looped, silent, the game's HUD off the glass); *clear* takes it off (the game's End of Ball Bonus loop
+        plays there instead)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        if clear:
+            _CP.save_ceremony(project, None)
+            self._say("co-op awards: no video of your own - the game's End of Ball Bonus loop plays behind the cards")
+        else:
+            path = self.window.ask_open("modes_file", "Choose the co-op awards ceremony's background video",
+                                        [("Videos", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_ceremony(project, path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op awards: %s plays behind the award cards" % os.path.basename(path))
         self._publish_coop_chars(project)
         return True
 

@@ -641,8 +641,15 @@ HELP_CONTENT = {
          "- Needs an image build, not a direct SD write."),
         ("Clip length",
          "Right-click > **This clip's length**: follow the **Trim / pad** box (default), "
-         "match the stock clip, keep your file's full length, or type seconds.\n\n"
+         "match the stock clip, loop your file to it, speed your file to it, keep your "
+         "file's full length, or type seconds.\n\n"
          "- A clip with its own length shows it after the **Length** cell.\n"
+         "- **Vs stock** shows how much longer (+) or shorter (−) your file runs than "
+         "the stock clip and the speed change that would make it run exactly as long, "
+         "like −0.25 s • 2.5% slower. Click its header to sort by it.\n"
+         "- **Speed my file to the stock clip's length** slows a shorter file down (or "
+         "speeds a longer one up) to fill it, with no frozen last frame and no cut; the "
+         "sound keeps its pitch. The Replacement player plays it at that speed.\n"
          "- Trim / pad always measures against the stock clip, even on a replaced "
          "slot.\n"
          "- Clips under a second (a sixth of one Batman card's 6331, down to one-frame "
@@ -1502,15 +1509,7 @@ HELP_CONTENT = {
     # The key stays so every notebook tab has an entry.
     "Modes": [],
     "Play Options": [
-        ("What it's for", [
-            "Options for how the game itself plays and what it reports, without making a mode: a handicap for "
-            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
-            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
-            "**Insider Connected keeps working.** Nothing here changes a score, so on a card with these and none "
-            "of your modes or co-op play, players keep Insider Connected as before: scores, high scores and "
-            "achievements. Your own modes and co-op play (on the Modes tab) are what keep a card's scores on the "
-            "machine.",
-        ]),
+        ("What it's for", lambda: _play_options_intro()),
         ("Handicap per player", [
             "**Handicap per player** lets each player of a game pick a handicap from "
             "**-3** (hardest) to **+3** (easiest), so players of different skill can play one game. Tick "
@@ -3692,12 +3691,13 @@ PREVIEW_HELP = {
                 "button to itself: the game's own language select (PLAYER LANGUAGE SELECT in its "
                 "adjustments) gets the flippers, and the Action button launches, only once the character "
                 "is taken. So: Action picks, the flippers choose the language, then the plunger or Action "
-                "launches; a ball launched before picking takes the one shown. The seconds left count down on the machine, and every flipper press starts them again from the top (so a player can read each character as long as they like; the time only runs out when the flippers are left alone), and the one taken stays on the glass a "
+                "launches. Each player's first ball only comes to the shooter lane once they have picked, so "
+                "neither the Action press that picks nor the game's timed plunger can launch it early. The seconds left count down on the machine, and every flipper press starts them again from the top (so a player can read each character as long as they like; the time only runs out when the flippers are left alone), and the one taken stays on the glass a "
                 "moment saying PICKED. A player on their own gets the pick too: hold the **right flipper button** "
                 "while pressing Start to begin the game (with CO-OP PLAY on, when it is in the service menu). The "
                 "right flipper held through that Start belongs to the pick, so it does not change the game's "
                 "language; let go of it and walk the characters as usual. The machine's top line also says how "
-                "to take one (ACTION/LAUNCH PICKS). The "
+                "to take one (ACTION PICKS). The "
                 "score then goes on the game's own boards, and a Start in ball 1 still adds a teammate. "
                 "**Time to pick** sets how long (30 seconds unless you change it, or "
                 "no time limit). RANDOM picks one nobody has. The box under a character's name takes a smaller "
@@ -3721,7 +3721,10 @@ PREVIEW_HELP = {
                 "once, and the first ball comes to the shooter lane only after a character is taken with the "
                 "Action button (then the handicap pick, when handicaps are on). Start adds players while the "
                 "intro plays, as at any other moment before the first ball. It needs no characters: "
-                "without them the ball comes as the intro ends. **When picked…** on a character gives it a short clip (a video, or a "
+                "without them the ball comes as the intro ends. At a co-op game's end the award cards show "
+                "over the game's End of Ball Bonus loop, with the team's final score in large letters along "
+                "the bottom and the score panels, the power-up meter and the credits line off the screen; "
+                "**Awards video…** plays a video of your own there instead (looped, silent). **When picked…** on a character gives it a short clip (a video, or a "
                 "picture such as a movie poster, shown 3 seconds or as long as its sound, up to 10) that plays "
                 "full screen once a teammate picks it, and a sound (a roar of that era) played at the pick; "
                 "a video with no sound of its own here plays its own. Both flipper buttons cut the clip short. "
@@ -3768,7 +3771,7 @@ PREVIEW_HELP = {
                 "**NO SPECIAL ABILITY**, but none of them changes the game.\n"
                 "- **2 (Enhanced):** the characters' abilities hold, as described above.\n"
                 "- At **1** or **2**, hold both flipper buttons in attract to open the start menu. Besides the "
-                "game's own entries it offers three, each below:\n"
+                "game's own entries it offers these, each below (**ENHANCED STANDARD** at 2 only):\n"
                 "- **CO-OP PLAY:** step to it and press **Start**; each Start in the first ball then adds a "
                 "teammate (or teammates join with the right flipper button held, as above).\n"
                 "- **TEAM PLAY 2 VS 2:** players 1 and 3 play against players 2 and 4, picked the way Stern's "
@@ -3786,6 +3789,15 @@ PREVIEW_HELP = {
                 "who plays both of team 2's turns each ball so both teams get the same number of balls. One Start "
                 "adds all three (**3 PLAYERS ADDED**, **TEAM 1: P1 AND P3**, **TEAM 2: P2**); another Start adds no "
                 "one, and the higher team score goes on a **TEAM 2V1** board of its own.\n"
+                "- **TEAM PLAY 3 VS 1:** the team game for four players: players 1, 3 and 4 against player 2, "
+                "who plays all three of team 2's turns each ball (player 1, player 2, player 3, player 2, player 4, "
+                "player 2). One Start adds all four (**4 PLAYERS ADDED**, **TEAM 1: P1, P3, P4**, **TEAM 2: P2**), "
+                "and the higher team score goes on a **TEAM 3V1** board of its own.\n"
+                "- **ENHANCED STANDARD** (at 2 only): the game's own normal game of competing players, with "
+                "characters. Step to it and press **Start**; each Start in the first ball adds a player, as it "
+                "always does. Every player has their own score and their own progress, nothing shared, and the "
+                "scores go on the game's own high score boards. Each player picks a character at their first ball "
+                "(no two the same), and its ability holds while that player is up.\n"
                 "- A plain **Start** is still a normal one-player game. At 1 or 2 most Insider Connected features "
                 "are off: the card's scores, high scores and achievements stay on the machine.\n"
                 "- **0 (Off):** the game plays and reports to Insider Connected as it always has, on a card "
@@ -4126,6 +4138,23 @@ PREVIEW_HELP = {
         ],
     },
 }
+
+
+def _play_options_intro():
+    """The Play Options tab's opening section. The tab rides the game's modes
+    capability, not the mode maker's switch, so it names the Modes tab (and
+    its co-op play) only while the mode maker is on: a copy where it is a
+    preview again, switched off, shows nothing of it."""
+    from ..core import preview
+    text = ("Options for how the game itself plays and what it reports, without making a mode: a handicap for "
+            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
+            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
+            "**Insider Connected keeps working.** Nothing here changes a score, so ")
+    if not preview.enabled("modes"):
+        return [text + "players keep Insider Connected as before: scores, high scores and achievements."]
+    return [text + "on a card with these and none of your modes or co-op play, players keep Insider Connected "
+            "as before: scores, high scores and achievements. Your own modes and co-op play (on the Modes tab) "
+            "are what keep a card's scores on the machine."]
 
 
 def sections_for(tab_name):

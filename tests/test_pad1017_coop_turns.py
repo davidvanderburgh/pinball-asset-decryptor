@@ -19,7 +19,8 @@ static void say(const char *f, ...) { va_list a; va_start(a, f); vprintf(f, a); 
 static unsigned chg_game_now(void) { return game_no; }
 static int coop_button_held(void) { return button; }
 static struct { int on; unsigned button, game, n, turn; unsigned teams_always; unsigned teams, team_n[3], team_max, round;
-                int filling; unsigned join_n, join_step; unsigned long join_at; } coop;   /* PAD-1052: the fill */
+                int filling; unsigned join_n, join_step; unsigned long join_at;
+                unsigned team_kind; int standard; } coop;   /* PAD-1052: the fill; PAD-1224: 3v1, Enhanced Standard */
 static struct { int armed; } tm;                      /* PAD-1052: TEAM PLAY on the start menu (0: the second Start) */
 static unsigned long pm_ms(void) { return 0; }
 #define pm_snprintf snprintf
@@ -47,7 +48,8 @@ static void coop_cache_let_go(void) {}
 static void coop_cards_show(unsigned n) { (void)n; }    /* PAD-1028 round 2: the awards on the characters' cards */
 static int coop_switched_on(void) { return 1; }          /* round 2: CO-OP PLAY says On (test_pad1017_coop_lines.py) */
 static int teams_on;                                      /* PAD-1042: CO-OP PLAY says Team 2v2 (1) or 2v1 (3) (test_pad1042_team_play.py) */
-static unsigned coop_teams_switched_on(void) { return teams_on == 1 ? 4u : (unsigned)teams_on; }   /* the most players */
+static unsigned coop_teams_kind(void) { return teams_on == 1 ? 4u : (unsigned)teams_on; }   /* PAD-1224: 4, 3, 5 (3v1) */
+static unsigned coop_teams_switched_on(void) { return teams_on == 1 || teams_on == 5 ? 4u : (unsigned)teams_on; }   /* the most players */
 /* the framework's own, modelled */
 static unsigned game_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
@@ -118,13 +120,18 @@ SIGS = (
     "static unsigned coop_next_turn(unsigned n, unsigned turn, unsigned before, unsigned after, unsigned down)",
     "static unsigned coop_team_player(unsigned team, unsigned size, unsigned round)",
     "static unsigned coop_team_of(unsigned p)",
-    "static int coop_join_words(unsigned n, unsigned step, char *out, unsigned cap)",
+    "static unsigned coop_team_player_in(unsigned kind, unsigned team, unsigned size, unsigned round)",   # PAD-1224
+    "static unsigned coop_team_of_in(unsigned kind, unsigned p)",
+    "static unsigned team_kind_most(unsigned kind)",
+    "static int coop_join_words(unsigned n, unsigned step, char *out, unsigned cap)\n{",
+    "static int coop_join_words_in(unsigned kind, int standard, unsigned n, unsigned step, char *out, unsigned cap)",
     "static unsigned coop_team_round(unsigned g, unsigned p, unsigned p_after, unsigned before, unsigned after,",
     "static unsigned coop_teammates(void)",
     "static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
     "static unsigned coop_team_fill(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
     "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
     "static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",
+    "static unsigned coop_std_change(unsigned r0, unsigned r1, unsigned r2, unsigned r3)",   # PAD-1224
     "static unsigned coop_change_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
 
 

@@ -618,7 +618,7 @@ yours at the carriers' stock priority 2 is dropped while any other speech plays.
 
 | To... | Call |
 |---|---|
-| change how a request competes | `pm_sound_priority(request, priority, flags)` - -1 leaves one as it is; returns the old `priority << 8 \| flags`, or -1 without `data sound_requests` / `sound_request_count` in the port |
+| change how a request competes | `pm_sound_priority(request, priority, flags)` - -1 leaves one as it is; returns the old `priority << 8 \| flags`, or -1 without `data sound_requests` / `sound_request_count` in the port, or on a record whose priority byte is past 9 that it never changed (real ones go up to 255: Godzilla's "player added" is 196; one it changed itself it takes past 9 and back, PAD-1220) |
 | give a request its own priority and flags back (PAD-682) | `pm_sound_priority_stock(request)` - as `pm_sound_priority` first found them, also on a swap still armed on it; a mode's music carrier gets them back once its music has faded at the end, since a carrier can still be one the game plays (Bond LE 1.06: 94 is Bird One Multiball's music, and with its steal flag left cleared the game's next music could not take the bus from it) |
 
 start and end calls to priority 4, shot calls to priority 3, all three without the steal flag
@@ -6129,6 +6129,7 @@ tab's **Co-op play**):
                      and 3 Classic, no character's ability (PAD-1065)
     teams on         (PAD-1042) every game of two or more players is a Team 2v2 game, no menu row needed
     teams 2v1        (PAD-1042) ... a Team 2v1 game
+    teams 3v1        (PAD-1224) ... a Team 3v1 game
 
 Round 2 (DoomWalrus666): the Modes tab's "Switch it on and off in the service menu" puts a CO-OP PLAY row in the game's
 own menu (menu_settings.COOP_PLAY, on a spare setting, Off to start with) and its live value in coop.cfg. Teammates join
@@ -6245,6 +6246,20 @@ players 2..4 itself on the one Start; `team_play_get_player_score` makes players
   ball (P1, P2, P3, P2); TEAM PLAY 2 VS 1 and one Start adds three (`3 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2:
   P2`), a later Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
   `team_max`). Its scores go on a `TEAM 2V1` board of their own, so a 2v1 champion never sits on the 2v2 board.
+- **Team 3v1** (PAD-1224, DoomWalrus666: "Also please add a 3v1 mode"): TEAM PLAY 3 VS 1 (start-menu kind 5, or
+  `teams 3v1`) is the team game of four whose team 1 is players 1, 3 and 4 against player 2, who plays all three of
+  team 2's turns each ball (P1, P2, P3, P2, P4, P2); one Start adds four (`4 PLAYERS ADDED`, `TEAM 1: P1, P3, P4`,
+  `TEAM 2: P2`). `coop.team_kind` (4, 3, 5) says which team game it is; `coop_team_player_in` / `coop_team_of_in`
+  give 3v1's layout (player 2 must be the game's player 2: the joins fill the teams in Start order). Its scores go on a
+  `TEAM 3V1` board.
+- **Enhanced Standard** (PAD-1224, DoomWalrus666: "standard play but with the ability for players to choose a
+  character with special abilities ... their own scores and gameplay progress as normal, nothing shared"): CO-OP PLAY
+  at Enhanced adds ENHANCED STANDARD (start-menu kind 2) after CO-OP PLAY. It is the game's own game of competing
+  players (`coop.standard`): Starts in ball 1 are the game's own adds (`coop.n` follows its count), the player change
+  is the game's own (`coop_std_change`) and `coop.turn` is the game's player up, so each player's pick (at their
+  first ball) holds while they are up. The abilities' records are the game's player's already. Scores, the score
+  panel, the top line, the "you're up" call, Insider logins, first-ball setup, handicap records and the high score
+  boards stay the game's own; no co-op awards follow it. Classic has no such entry.
 - **Classic** (PAD-1065, DoomWalrus666: "play these modes without any special abilities. The players may select a
   character but none of them will have any special abilities"): CO-OP PLAY 4, 5 and 6 are Co-op, Team 2v2 and Team
   2v1 Classic, the same games as 1, 2 and 3 (now called Enhanced; `coop_menu_game`, `coop_teams_size`). The pick is
@@ -6396,6 +6411,8 @@ PAD-1114: the co-op and team games' intro (the dialog's **Intro video...**), wit
     intro PadCoopIntro 12000                  the intro's clip (a full-screen clip the build added) and its length
                                               in ms; sounds.cfg `cintro <request> <carrier key> <its key> <ms>` is
                                               its sound, on a carrier the game never plays (as PAD-945's shot sounds)
+                                              - at priority 255 while the intro plays, so the game's own sounds (a
+                                              Start's "player added") cannot take its bus; 3 again after (PAD-1220)
 
 A game that begins as co-op or team (the right flipper held at Start, the start menu's CO-OP PLAY / TEAM PLAY, a
 team game's filling Start, a teammate joining before ball 1 is out) plays it once: full-screen over the game's own
@@ -6430,6 +6447,8 @@ players-added lines and the pick after them); while it waits the pick has the fl
 its top line says ACTION PICKS). Not earlier in the ball start: held at its first-ball check the game never put its
 intro screen up. The handicap pick (PAD-1033) already waits for the character's.
 
+**PAD-1221: a Start press in the intro adds a player with no sound.** The game answers an add with its own sound about 0.5 s later (Godzilla LE 1.16: request 1161, bus 0x2), which the intro's 250 ms fade let be heard. A Start press while ball 1 waits sets `ci.join_at`, and `ci_quiet` stops outright (`ci_join_cut`) any non-music sound first seen within 3 s of it. (Every teammate's pick holding their serve is PAD-1215's, below.)
+
 **Round 3: players added during the intro; the pick at once.** The game takes Start on its own process, which waits
 in the serve, so a Start in the intro was lost: while ball 1's serve waits, a press of the Start button (coop.cfg
 `intro_start <id>`, the program's START BUTTON; not with the left flipper held, the game's reset; not the press that
@@ -6459,6 +6478,19 @@ teammate whose ball ended - the turn moves on only at the player change, after t
 A teammate with no character, or one with no picture or video, gets the game's own loop. The award cards' backdrop
 (PAD-1028 round 3) plays the game's own loop, never a teammate's copy. The build makes the copies from the project's
 own file of the loop (the stock one extracted, or the owner's replacement of it), else the card's.
+
+**The awards ceremony (PAD-1219).** DoomWalrus666 saw the cards over a battle's clip on his machine and asked for the
+HUD off and the final score along the bottom. A bonus end seen during the game is no longer needed: the build names
+what plays behind the cards in coop.cfg, `ceremony <clip> <crop>` - the owner's Awards video (made into
+`PadCoopCeremony`, a silent full-screen clip of the bank's size, crop `Normal`) or else the bank's End of Ball Bonus
+loop at its own crop - and the backdrop takes ANY background's place while the cards show (a battle's included, which
+bd_place_ok refused before). While they show, `on_scene_show` keeps every scene but the cards' own (the HUD scene the
+build put them in) and the video player out of the frame: the score panels, the top bar's words, the background's own
+words; the power-up meter goes with them. The build adds `PadCoopFinal` beside the cards, a band across the glass's
+foot (y 596, 1360x160) whose words the runtime writes at x1.4 (28 characters fill the glass; x2.1 cut the words' ends on the emulator):
+"FINAL SCORE  <player 1's>" in co-op, "TEAM 1  <p1>   TEAM 2  <p2>" in a team game ("T1 <p1>  T2 <p2>" when that is
+too long). Emulator, Godzilla LE 1.16: see the ticket's after shots. A port with no
+backdrop (`scene_show` unhooked) keeps the HUD and says so.
 
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 
@@ -6511,6 +6543,21 @@ the pick also hides from a new game's start (`game_start`) until its first ball 
 line's turn (name, what it does) ends with how to take one: `ACTION/LAUNCH PICKS` (`ACTION PICKS` on a port
 with no plunger flags; nothing with no `action`).
 Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
+
+PAD-1215 (DoomWalrus666, Team 2v2: "using the action button to pick a character on Player 2, 3, or 4 launched the
+ball ... letting the character select timeout to 0 also launched the ball"): hiding was never enough - a hidden Action
+press still launches (PAD-1114), and the game's TIMED PLUNGER lets a waiting ball go on its own. Ball 1 of player 1
+escaped only behind an intro's serve hold. Now the ball start's serve (`site serve_ball`, hooked whenever there is a
+pick, intro or not) waits for any turn whose player has a pick to make (`coop_pick_hold`, the game's process asleep a
+tick at a time as in PAD-1114's `ci_ball_hold`): no ball is in the lane until the character is taken, and the top
+line says `ACTION PICKS`. A pick not open yet is waited for while the start menu's players-added lines run, else
+1.5 s; a Start meanwhile is still a join (`intro_start`, now written whenever there is a pick). Emulator, Godzilla LE
+1.16, Team 2v2, TIMED PLUNGER 10 s: on main player 2's Action pick and player 3's wait both launched the ball; fixed,
+player 1's ball waited 20 s for its pick, player 2's was served at the Action pick and waited for a second press, player 3's came at the time-out and was still in the lane 8 s later.
+
+    co-op: player 2's ball waits to be served until their character is picked
+    co-op: player 2's ball is served after 4513 ms (the character is taken)
+
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and
 a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.

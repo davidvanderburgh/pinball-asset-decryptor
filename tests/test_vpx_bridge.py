@@ -203,7 +203,7 @@ def test_rule_plane_offsets_match_padled_h():
         tuple(int(x) for x in m.groups())
     assert coilmap.RULE_READ <= int(re.search(r"#define PADLED_BYTES (\d+)", hdr).group(1))
     assert coilmap.RULE_PWR_OFF >= coilmap.PAINT_READ            # after every older plane
-    assert "#define PADLED_VERSION 7" in hdr
+    assert "#define PADLED_VERSION 8" in hdr
 
 
 def test_rule_reads_power_and_input():
@@ -793,6 +793,172 @@ def test_rushs_side_scoop_rests_on_the_lower_switch():
     assert "Sub Kicker1_Hit : bsKicker1.AddBall Me" in plain
 
 
+def vs_events():
+    """The switch events the patcher knows (vpxshadow.EVENT_SUBS)."""
+    return tuple(pytest.importorskip("vpxshadow").EVENT_SUBS)
+
+
+def _rush_1228_vbs(vs):
+    """The Rush map's PAD-1228 code: the instrument bank's hit subs as the
+    patcher writes them, and the map's drop, reset and drum clock subs."""
+    m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
+    t = json.loads(json.dumps(MINI_SHADOW))
+    for k in ("sw13", "sw12", "sw11"):
+        t["switches"][k] = m["switches"][k]
+    out, _ = vs.patch(MINI_TRIBUTE, t)
+    hits = [ln for ln in out.split("\n") if re.match(r"Sub sw1[123]_Hit ", ln)]
+    ev = m["extra_vbs"]
+    own = ev[ev.index("Sub PadDrop(t)"):ev.index("' PAD-925")]
+    return m, hits, own
+
+
+def test_rushs_instrument_bank_is_a_drop_bank_on_its_reset_coil():
+    # PAD-1228: sw13/sw12/sw11 are stand-up HitTargets the tribute's own hit
+    # subs hid; with those out of the way they stood and their switches only
+    # blinked. Each drops on a hit and holds its switch; 3 BANK DROP (coil 6)
+    # stands them up and opens them, without the tribute's own light rules
+    vs = pytest.importorskip("vpxshadow")
+    m, hits, own = _rush_1228_vbs(vs)
+    assert {k: (m["switches"][k]["id"], m["switches"][k]["event"]) for k in ("sw13", "sw12", "sw11")} == \
+        {"sw13": (47, "drop"), "sw12": (48, "drop"), "sw11": (49, "drop")}
+    assert sorted(hits) == ["Sub sw11_Hit : Controller.Switch(1049) = True : PadDrop sw11 : End Sub",
+                            "Sub sw12_Hit : Controller.Switch(1048) = True : PadDrop sw12 : End Sub",
+                            "Sub sw13_Hit : Controller.Switch(1047) = True : PadDrop sw13 : End Sub"]
+    assert m["solenoids"]["6"] == {"coil": [8, 8], "name": "3 BANK DROP", "callback": "PadResetDrops"}
+    ev = m["extra_vbs"]
+    reset = ev[ev.index("Sub PadResetDrops(e)"):]
+    reset = reset[:reset.index("End Sub")]
+    assert "ResetDropTargets" not in reset, "the tribute's reset starts its own target lights"
+    assert m["switches"]["sw20"]["id"] == 52 and m["switches"]["sw20"]["event"] == "hit"
+
+
+def test_rushs_drum_clock_is_the_boards_stepper():
+    # PAD-1228: the drum clock hand is node 10 stepper 0 (DRUM CLOCK HOME 94)
+    m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
+    assert m["mechs"]["0"]["stepper"] == [10, 0]
+    assert m["retrofit_timers"]["PadDrumClockTimer"] == {"clone": "PulseTimer", "interval_ms": 100}
+    assert "Controller.GetMech(0)" in m["extra_vbs"]
+    pc = pytest.importorskip("padcontroller")
+    assert pc.VpxMap("rush_le").mechs == {0: (10, 0)}
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_rushs_drops_and_drum_clock_under_vbscript(tmp_path):
+    # PAD-1228, run for real: a hit drops its target (hidden, the way the
+    # tribute did it) and holds its switch; the reset coil off does nothing,
+    # on stands all three up and opens them. The drum face follows the
+    # stepper: home 6:00, 200 steps an hour the negative way (emulator: the
+    # game's panel read 7:10 PM at -234, CLOCK 7 lit from -201)
+    vs = pytest.importorskip("vpxshadow")
+    _, hits, own = _rush_1228_vbs(vs)
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Const DOFPulse = 2",
+        "Dim Dofs, Mech",
+        "Sub DOF(n, how) : Dofs = Dofs & n & \",\" : End Sub",
+        "Class FakeCtl",
+        "\tPrivate sw",
+        "\tPrivate Sub Class_Initialize : Set sw = CreateObject(\"Scripting.Dictionary\") : End Sub",
+        "\tPublic Property Let Switch(n, v) : sw(n) = v : End Property",
+        "\tPublic Property Get Switch(n) : Switch = CBool(sw(n)) : End Property",
+        "\tPublic Function GetMech(n) : GetMech = Mech : End Function",
+        "End Class",
+        "Class FakeTarget : Public IsDropped, Visible : End Class",
+        "Class FakePrim : Public Image : End Class",
+        "Dim Controller : Set Controller = New FakeCtl",
+        "Dim sw11, sw12, sw13, Primitive027",
+        "Set sw11 = New FakeTarget : Set sw12 = New FakeTarget : Set sw13 = New FakeTarget",
+        "sw11.IsDropped = False : sw12.IsDropped = False : sw13.IsDropped = False",
+        "sw11.Visible = 1 : sw12.Visible = 1 : sw13.Visible = 1",
+        "Set Primitive027 = New FakePrim : Primitive027.Image = \"drumtemplate\"",
+        "\n".join(hits),
+        own,
+        "Function Bank()",
+        "\tBank = sw13.IsDropped & \"/\" & sw12.IsDropped & \"/\" & sw11.IsDropped & \"|\" & _",
+        "\t\tsw13.Visible & sw12.Visible & sw11.Visible & \"|\" & _",
+        "\t\tController.Switch(1047) & \"/\" & Controller.Switch(1048) & \"/\" & Controller.Switch(1049)",
+        "End Function",
+        "Dim s : s = Bank()",
+        "sw12_Hit : s = s & \" \" & Bank()",
+        "sw13_Hit : sw11_Hit : s = s & \" \" & Bank()",
+        "PadResetDrops 0 : s = s & \" \" & Bank()",
+        "PadResetDrops 1 : s = s & \" \" & Bank() & \" dof=\" & Dofs",
+        "Dim p",
+        "For Each p In Array(0, -1, -184, -201, -234, -1199, -1200, -1400, -2399, -2400, -2600, 200)",
+        "\tMech = p : PadDrumClockTimer_Timer : s = s & \" \" & p & \"=\" & Primitive027.Image",
+        "Next",
+        "WScript.Echo s",
+    ]), encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.split() == [
+        "False/False/False|111|False/False/False",
+        "False/True/False|101|False/True/False",
+        "True/True/True|000|True/True/True",
+        "True/True/True|000|True/True/True",               # the coil let go: nothing moves
+        "False/False/False|111|False/False/False", "dof=111,",
+        "0=drum_6", "-1=drum_6", "-184=drum_6", "-201=drum_7", "-234=drum_7",
+        "-1199=drum_11", "-1200=drum_12", "-1400=drum_1", "-2399=drum_5", "-2400=drum_6",
+        "-2600=drum_7", "200=drum_5"], r.stdout + r.stderr
+
+
+def test_stepper_plane_offsets_match_padled_h():
+    # PAD-1228: padled version 8, each node board's stepper place
+    import coilmap
+    hdr = open(os.path.join(EMU, "padled.h"), encoding="utf-8").read()
+    m = re.search(r"step_cfg (\d+), step_pos (\d+)", hdr)
+    assert m, "padled.h names the version-8 offsets"
+    assert (coilmap.STEP_CFG_OFF, coilmap.STEP_POS_OFF) == tuple(int(x) for x in m.groups())
+    assert coilmap.STEP_CFG_OFF == coilmap.RULE_READ             # after every older plane
+    assert coilmap.STEP_READ <= int(re.search(r"#define PADLED_BYTES (\d+)", hdr).group(1))
+    shim = open(os.path.join(EMU, "hwshim.c"), encoding="utf-8").read()
+    assert "unsigned char step_cfg[16];\n    int step_pos[16][4];\n};" in shim, "the shim's twin of padled.h"
+    assert "led_shm->version = (led_shm_len >= 16384) ? 8" in shim
+
+
+def _stepper_block(coilmap, version=8):
+    data = bytearray(coilmap.STEP_READ)
+    struct.pack_into("<I", data, 0, coilmap.PADLED_MAGIC)
+    struct.pack_into("<I", data, 4, version)
+    data[coilmap.STEP_CFG_OFF + 10] = 0b11                       # node 10: motors 0 and 1
+    struct.pack_into("<i", data, coilmap.STEP_POS_OFF + (10 * coilmap.STEPPERS + 0) * 4, -234)
+    struct.pack_into("<i", data, coilmap.STEP_POS_OFF + (10 * coilmap.STEPPERS + 1) * 4, 94)
+    return data
+
+
+def test_stepper_reads_a_motors_place():
+    import coilmap
+    data = _stepper_block(coilmap)
+    assert coilmap.stepper(bytes(data), 10, 0) == -234
+    assert coilmap.stepper(bytes(data), 10, 1) == 94
+    assert coilmap.stepper(bytes(data), 10, 2) is None           # never homed or moved
+    assert coilmap.stepper(bytes(data), 9, 0) is None
+    assert coilmap.stepper(bytes(_stepper_block(coilmap, 7)), 10, 0) is None   # an older shim
+    assert coilmap.stepper(bytes(data[:coilmap.STEP_POS_OFF]), 10, 0) is None
+
+
+def test_getmech_answers_the_maps_stepper(monkeypatch, tmp_path):
+    # PAD-1228: Controller.GetMech(n) was always 0; now the stepper the map's
+    # `mechs` names for n, read with the rest of the block each poll
+    import coilmap
+    pc = pytest.importorskip("padcontroller")
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    monkeypatch.setattr(pc, "LOG", str(tmp_path / "padcontroller.log"))
+    assert pc.READ_N >= coilmap.STEP_READ, "one read takes the stepper plane too"
+    b = pc.Bridge()
+    b.map = pc.VpxMap("rush_le")
+    b.rig = type("R", (), {"led_path": lambda s: "led", "sw_path": lambda s: "sw"})()
+    block = bytes(_stepper_block(coilmap)) + bytes(pc.READ_N - coilmap.STEP_READ)
+    monkeypatch.setattr(pc, "read_block", lambda path, n: block if path == "led" else None)
+    assert b.get_mech(0) == 0                                    # nothing read yet
+    b._poll_once()
+    assert b.get_mech(0) == -234
+    assert b.get_mech(1) == 0                                    # a number the map does not name
+    ctl = pc.PadController.__new__(pc.PadController)
+    ctl.bridge, ctl.props = b, {}
+    assert ctl._get("getmech", (0,)) == -234
+
+
 def _lock_stack_shadow():
     # PAD-901: Deadpool's Katana Handle lock is one kicker in JP's table and
     # LOCK 1-4 on the machine, under a post the game holds down for seconds
@@ -900,6 +1066,25 @@ def test_shadow_flippers_are_the_machines_coils(shadow):
     assert "Sub Table1_Init_orig" in out and "Table1_KeyDown_orig KeyCode" in out
     assert 'SolCallback(1) = "bsTrough.SolOut"' in out and "SolCallback(7)" not in out
     assert "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0" in out
+
+
+def test_pup_stub_counts_each_call_on_a_line_on_its_own():
+    """PAD-1207: Batman 66 runs two LabelSets in one VPMTimer string, joined by
+    `:`. They read as one 9-argument call and every patch log said "LabelSet
+    is called with [5, 9] arguments"; a method called only second on its
+    line was never stubbed."""
+    vs = pytest.importorskip("vpxshadow")
+    lines = ['Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")',
+             'PuPlayer.LabelSet screen,"GeneralTop1",msgs(0),1,"{\'mt\':2,\'color\':"&RGB(247, 170, 51)&",\'size\':6}"',
+             'VPMTimer.AddTimer 3000, "bPlay=False:puPlayer.LabelSet pBackglass,""GeneralCenter1"", """" ,1,"""":'
+             'puPlayer.LabelSet pBackglass,""GeneralCenter2"", """" ,1,"""" \'"',
+             'x = 1 : PuPlayer.playlistplayex(pBackglass, "a", "b", 100, 1) : PuPlayer.SetBackground 5, 1']
+    rep = []
+    stub = vs.pup_stub(lines, rep)
+    assert not any("WARNING" in s for s in rep), rep
+    assert "Public Sub LabelSet(a0, a1, a2, a3, a4) : End Sub" in stub
+    assert "Public Sub playlistplayex(a0, a1, a2, a3, a4) : End Sub" in stub
+    assert "Public Sub SetBackground(a0, a1) : End Sub" in stub
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
@@ -2547,8 +2732,13 @@ def test_shadow_maps_are_consistent(title):
     g = m["game_on"]
     assert g["number"] not in nums and g["number"] <= m.get("solenoid_max", 68)
     assert all(tuple(c) in coils for c in g["coils"]), "game_on names the flipper coils"
-    for ev in (s.get("event", "hit") for k, s in m["switches"].items() if k != "_"):
-        assert ev in ("hit", "hold", "spin", "slingshot", "drop")
+    for k, s in m["switches"].items():
+        if k == "_":
+            continue
+        assert s.get("event", "hit") in vs_events(), (k, s.get("event"))
+        if s.get("call"):              # a map sub the switch calls (PAD-1228's drops)
+            sub = s["call"].split()[0]
+            assert re.search(r"(?i)\bSub\s+%s\b" % re.escape(sub), m.get("extra_vbs", "")), "%s has no Sub" % sub
     # every coil callback is something the generated script defines
     extra = m.get("extra_vbs", "")
     saucers = {k for k in m["saucers"] if k != "_"}
@@ -2887,6 +3077,53 @@ def test_setup_layout_writes_the_kit_and_the_ini_and_reads_back(tmp_path, monkey
     assert vs.layout_key(kit, presets) == "centre"
     assert "FullScreen = 0" in ini.read_text(encoding="utf-8")
     assert pd.load(conf)["mode"] == "free"                # the kit places it, as before
+
+
+def test_setup_always_on_top_is_a_choice_layouts_keep(tmp_path, monkeypatch):
+    """PAD-1231: a desktop player asked for the game's screen NOT always on
+    top. The kit keeps the choice, a layout no longer forces it back on and
+    still reads as the layout in use, and an open game's window follows."""
+    vs = pytest.importorskip("vpxsetup")
+    pl = pytest.importorskip("padlaunch")
+    pv = pytest.importorskip("padvpx")
+    pd = pytest.importorskip("padisplay")
+    monkeypatch.setattr(pl, "KIT", str(tmp_path / "kit.json"))
+    monkeypatch.setattr(pv, "vpx_ini_set", lambda kv: None)
+    monkeypatch.setattr(pd, "CONF", str(tmp_path / "display.conf"))
+    monkeypatch.setattr(pd, "monitors", lambda: [
+        {"n": 1, "x": 0, "y": 0, "w": 3840, "h": 2160, "primary": True}])
+    pc = pytest.importorskip("padcontroller")
+    raised = []
+    monkeypatch.setattr(vs.sys, "platform", "win32")
+    monkeypatch.setattr(pc, "find_lcd_window", lambda: 77)
+    monkeypatch.setattr(pc, "raise_window", lambda h, top=True: raised.append((h, top)))
+    assert vs.lcd_on_top(pl.kit_load()) is True           # on, as it always was
+    got = vs.set_on_top(False)
+    assert got == {"result": "ok", "lcd_on_top": False, "live": True} and raised == [(77, False)]
+    assert pl.kit_load()["lcd"] == {"topmost": False}
+    presets = vs.layout_presets([(0, 0, 3840, 2160)])
+    vs.apply_layout("side", [0, 0, 1440, 2160], [1440, 0, 2400, 1350])
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"x": 1440, "y": 0, "w": 2400, "h": 1350, "topmost": False}
+    assert vs.layout_key(kit, presets) == "side" and vs.lcd_on_top(kit) is False
+    vs.set_on_top(True)                                   # the rectangle stays
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"x": 1440, "y": 0, "w": 2400, "h": 1350, "topmost": True}
+    vs.apply_layout("centre", None, None)
+    kit = pl.kit_load()
+    assert kit["lcd"] == {"topmost": True} and vs.layout_key(kit, presets) == "centre"
+    vs.set_on_top(False)                                  # still the centre layout, not on top
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    # a fresh kit's choice alone is no layout taken; an old centre kit still is one
+    pl.kit_save({})
+    vs.set_on_top(True)
+    assert vs.layout_key(pl.kit_load(), presets) == ""
+    pl.kit_save({"lcd": {"topmost": True}})
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    vs.set_on_top(False)
+    assert vs.layout_key(pl.kit_load(), presets) == "centre"
+    monkeypatch.setattr(pc, "find_lcd_window", lambda: 0)  # no game open: saved only
+    assert vs.set_on_top(False)["live"] is False and len(raised) == 5
 
 
 def test_setup_layout_display_fills_a_monitor_or_sits_on_one():
@@ -4505,6 +4742,67 @@ WScript.Echo "calls=" & rampCalls & "," & guardianCalls
     assert r.returncode == 0, r.stderr
     assert r.stdout.splitlines() == ["idle=0,0", "ramp=0", "ramp=3", "load=3,18,1", "ramp=2", "ramp=1",
                                      "guardian=True", "guardian=False", "calls=4,2"]
+
+
+def test_iron_maiden_sarcophagus_lock_switch_latches():
+    """PAD-1206: a pulse on Ball Lock told the game the Sarcophagus was empty again at once."""
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    assert m["switches"]["trgBallLock3"]["event"] == "latch"
+    assert m["retrofit_timers"]["PadMaidenLockTimer"] == {"clone": "PulseTimer", "interval_ms": 100}
+    out, _ = vs.patch('''Sub Table1_Init
+End Sub
+Sub trgBallLock3_Hit()
+BallsInRealLock=BallsInRealLock+1
+HandleMummyLock True
+End Sub''', m)
+    assert "Sub trgBallLock3_Hit : Controller.Switch(1080) = True : PadMaidenLockIn : End Sub" in out
+    assert "PulseSw 1080" not in out
+    assert "Sub PadMaidenLockTimer_Timer" in out
+    old = next(r["old"] for r in m["repatch"] if "trgBallLock3" in r["old"])
+    assert old not in out                 # the Tables card tells an old build from a rebuilt one
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's lock subs under cscript")
+def test_iron_maiden_sarcophagus_lock_follows_the_held_ball(tmp_path):
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    v = m["extra_vbs"]
+    lock = v[v.index("'---- PAD-1206"):v.index("'---- PAD: motor end stops")]
+    harness = '''Class TestController
+Public Property Let Switch(n, value)
+WScript.Echo "switch " & n & "=" & value
+End Property
+End Class
+Class TestBall
+End Class
+Dim Controller : Set Controller = New TestController
+Dim BallsInRealLock, LockBall1, LockBall2, ballA, ballB, cur
+BallsInRealLock = 0
+Set ballA = New TestBall : Set ballB = New TestBall
+Function ActiveBall : Set ActiveBall = cur : End Function
+'''
+    calls = '''PadMaidenLockTimer_Timer
+Set cur = ballA : Controller.Switch(1080) = True : PadMaidenLockIn
+WScript.Echo "in=" & BallsInRealLock & "," & (LockBall1 Is ballA)
+PadMaidenLockTimer_Timer
+Set cur = ballA : PadMaidenLockIn
+WScript.Echo "again=" & BallsInRealLock
+BallsInRealLock = BallsInRealLock - 1
+PadMaidenLockTimer_Timer
+PadMaidenLockTimer_Timer
+Set cur = ballB : PadMaidenLockIn
+WScript.Echo "next=" & BallsInRealLock & "," & (LockBall1 Is ballB)
+PadMaidenLockTimer_Timer
+'''
+    vbs = tmp_path / "lock.vbs"
+    vbs.write_text(harness + lock + calls, encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    # held from the hit to the tribute counting the ball out (trgBallLock0/2), once each way;
+    # the held ball back over the trigger at load is not a second ball
+    assert r.stdout.splitlines() == ["switch 1080=True", "in=1,True", "again=1", "switch 1080=False",
+                                     "next=1,True"]
 
 
 def test_playfield_sounds_stay_and_the_soundtrack_goes():
@@ -6424,3 +6722,110 @@ def test_register_with_a_log_keeps_what_happened(tmp_path, monkeypatch):
     monkeypatch.setattr(pv, "_register", lambda cmd: print("registered %s" % cmd) or 0)
     assert pv.main(["register", "--log", str(log)]) == 0
     assert log.read_text(encoding="utf-8").split() == ["registered", "register", "exit", "0"]
+
+
+# ------------------------------------------------- flipper latency ---------
+
+def _flip_bridge(pc, monkeypatch):
+    """A bridge with a pipe and the left flipper's coil (8, 5) as solenoid
+    48, its button switch id 60; no rule cached until a test sets one."""
+    monkeypatch.setattr(pc, "log", lambda s: None)
+    b = pc.Bridge()
+
+    class Pipe:
+        def __init__(self):
+            self.held = {}
+
+        def set(self, sid, level):
+            self.held[sid] = 1 if level else 0
+    b.pipe = Pipe()
+    b.map.solenoids = {48: (8, 5)}
+    b.switch_id = lambda n: n
+    return b
+
+
+def test_set_switch_without_a_cached_rule_sets_no_coil(monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    b = _flip_bridge(pc, monkeypatch)
+    b.set_switch(60, 1)
+    assert b.pipe.held[60] == 1
+    assert b.sol_state == {} and b.changed_solenoids() is None
+
+
+def test_a_board_fired_coil_follows_its_switch_at_once(monkeypatch):
+    """A flipper's coil reaches the table on the press itself, not a poll
+    (~25-30 ms over \\\\wsl.localhost) later, and drops on the release."""
+    pc = pytest.importorskip("padcontroller")
+    b = _flip_bridge(pc, monkeypatch)
+    b._rule_coils = {60: [((8, 5), True)]}
+    b.set_switch(60, 1)
+    assert b.sol_state[48] == 1
+    assert [48, 1] in [list(c) for c in b.changed_solenoids()]
+    b.set_switch(60, 0)
+    assert b.sol_state[48] == 0
+
+
+def test_a_release_does_not_cut_a_live_fire_short(monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    b = _flip_bridge(pc, monkeypatch)
+    b._rule_coils = {60: [((8, 5), True)]}
+    b.set_switch(60, 1)
+    b._coil_off_at[(8, 5)] = pc.time.monotonic() + 60.0    # the game fired it too
+    b.set_switch(60, 0)
+    assert b.sol_state[48] == 1                             # the poll ends it
+
+
+def test_a_spike1_button_coil_turns_on_at_once_and_off_with_the_poll(monkeypatch):
+    pc = pytest.importorskip("padcontroller")
+    b = _flip_bridge(pc, monkeypatch)
+    b._rule_coils = {60: [((8, 5), False)]}
+    b.set_switch(60, 1)
+    assert b.sol_state[48] == 1
+    b.set_switch(60, 0)
+    assert b.sol_state[48] == 1                             # the board says when
+
+
+def test_log_does_not_write_in_the_callers_thread_and_loses_nothing(monkeypatch, tmp_path):
+    pc = pytest.importorskip("padcontroller")
+    path = tmp_path / "padcontroller.log"
+    monkeypatch.setattr(pc, "LOG", str(path))
+    for i in range(200):
+        pc.log("burst %d" % i)
+    import time as _t
+    deadline = _t.monotonic() + 5.0
+    lines = []
+    while _t.monotonic() < deadline:
+        lines = [ln for ln in path.read_text(encoding="utf-8").splitlines()
+                 if " burst " in ln] if path.exists() else []
+        if len(lines) == 200:
+            break
+        _t.sleep(0.01)
+    assert [ln.split(" ", 1)[1] for ln in lines] == ["burst %d" % i for i in range(200)]
+
+
+def test_the_poll_caches_a_rules_switch_and_agrees_with_set_switch(monkeypatch):
+    """_poll_coils keeps {switch id: coils} from the v7 rule plane; a press
+    turns the coil on at once and the next poll, reading the same held
+    switch, leaves it on; a release turns it off and the poll agrees."""
+    pc = pytest.importorskip("padcontroller")
+    import coilmap
+    b = _flip_bridge(pc, monkeypatch)
+    data = bytearray(coilmap.RULE_READ)
+    struct.pack_into("<I", data, 0, coilmap.PADLED_MAGIC)
+    struct.pack_into("<I", data, 4, 7)
+    o = 8 * coilmap.COIL_N + 5                                   # node 8 coil 5
+    data[coilmap.RULE_PWR_OFF + o] = 0xff
+    data[coilmap.RULE_IN_OFF + o] = 0x40 | 25                    # fired by input 25
+    data = bytes(data)
+    b.sw_ids = {(8, 25): 60}
+    b._poll_coils(data, 0.0)
+    b._poll_coils(data, 0.0)
+    assert b._rule_coils == {60: [((8, 5), True)]}
+    b.set_switch(60, 1)
+    assert b.sol_state[48] == 1
+    b._poll_coils(data, 0.0)
+    assert b.sol_state[48] == 1
+    b.set_switch(60, 0)
+    assert b.sol_state[48] == 0
+    b._poll_coils(data, 0.0)
+    assert b.sol_state[48] == 0

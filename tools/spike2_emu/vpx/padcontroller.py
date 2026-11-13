@@ -108,7 +108,7 @@ VERSION = "03060000"            # what core.vbs compares; modulated solenoids of
 
 SW_SRC = "v"                    # padsw.h's writer tag for Visual Pinball
 POLL_S = 0.008                  # padled poll; a 9p read is ~1-3 ms
-READ_N = max(coilmap.HI_READ, coilmap.RULE_READ)   # one read takes every plane
+READ_N = max(coilmap.HI_READ, coilmap.STEP_READ)   # one read takes every plane
 LAMP_ON = int(os.environ.get("PAD_VPX_LAMP_ON", "1"))   # LED level that is "lit"
 MIN_PULSE_MS = 40               # a coil pulse shorter than a poll still shows
 FRONT_WATCH_S = 300             # how long after Run a started run's windows are watched
@@ -131,12 +131,57 @@ LOG = os.path.join(os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp",
                    "padcontroller.log")
 
 
-def log(msg):
+# The log is written by one daemon thread, never by the caller: set_switch
+# logs every flipper press inside Visual Pinball's synchronous COM call (its
+# main thread) and _sol_set logs holding the bridge lock, so an open+append
+# there put file I/O in the flipper's path. Lines are queued and written in
+# batches; whatever is still queued at exit is flushed by atexit.
+_LOGQ = queue.Queue()
+_LOG_THREAD = None
+_LOG_START = threading.Lock()
+
+
+def _log_write(lines):
     try:
         with open(LOG, "a", encoding="utf-8") as f:
-            f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+            f.write("".join(lines))
     except OSError:
         pass
+
+
+def _log_drain():
+    lines = []
+    try:
+        while True:
+            lines.append(_LOGQ.get_nowait())
+    except queue.Empty:
+        pass
+    return lines
+
+
+def _log_writer():
+    while True:
+        lines = [_LOGQ.get()] + _log_drain()
+        _log_write(lines)
+
+
+def _log_flush():
+    lines = _log_drain()
+    if lines:
+        _log_write(lines)
+
+
+atexit.register(_log_flush)
+
+
+def log(msg):
+    global _LOG_THREAD
+    _LOGQ.put("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+    if _LOG_THREAD is None:
+        with _LOG_START:
+            if _LOG_THREAD is None:
+                _LOG_THREAD = threading.Thread(target=_log_writer, daemon=True, name="padlog")
+                _LOG_THREAD.start()
 
 
 # ---------------------------------------------------------------- the map --
@@ -433,6 +478,7 @@ class VpxMap:
         self.fakes = {}                     # name -> dict (switch_fakes)
         self.game_on = None                 # (number, [coils]) "flippers armed"
         self.cabinet = {}                   # cabinet switch names -> 1000+id
+        self.mechs = {}                     # GetMech(n) -> (node, motor) of a stepper (PAD-1228)
         self.platform = "spike2"            # which rig the title runs on (PAD-943)
         # core.vbs indexes SolCallback(68) and friends by the number it is
         # handed, so ChangedSolenoids may only carry numbers up to this; a
@@ -495,6 +541,12 @@ class VpxMap:
                     if isinstance(v["rgb"], str):
                         self.rgb_order[lamp_number(*leds[0])] = v["rgb"]
         self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
+        # PAD-1228: a node board's stepper the table shows (Rush LE's drum
+        # clock): Controller.GetMech(n) answers its place in steps from home
+        self.mechs = {}
+        for k, v in m.get("mechs", {}).items():
+            if k != "_":
+                self.mechs[int(k)] = (int(v["stepper"][0]), int(v["stepper"][1]))
         self._load_dof(m)
 
     def _load_dof(self, m):
@@ -1498,7 +1550,12 @@ class Bridge:
         self._coil_off_at = {}             # (node, idx) -> monotonic s
         self.sw_ids = {}                   # (node, input bit) -> switch id
         self._button_coils = {}            # (node, idx) -> button input bit
+        # switch id -> [((node, idx), release_now)]: the board-fired coils
+        # each switch fires, from the last poll, so set_switch can turn the
+        # coil on (and off) at once instead of a poll later
+        self._rule_coils = {}
         self.mrg = bytes(padsw.MAX_ID)     # the guest's merged switch truth
+        self.mech_pos = {}                 # GetMech number -> steps (PAD-1228)
         self.max_id = padsw.MAX_ID         # one past the highest switch id (set_game)
         self.polls = 0
         self.poll_fail = 0
@@ -2044,6 +2101,18 @@ class Bridge:
         if self.pipe.held.get(sid) != (1 if level else 0):
             log("sw %s -> id %d = %d" % (n, sid, 1 if level else 0))
         self.pipe.set(sid, level)
+        # A board-fired coil (a flipper) follows its switch NOW, not on the
+        # next poll (~25-30 ms a cycle over \\wsl.localhost): the same answer
+        # _poll_coils gives from pipe.held, so the next poll agrees with it.
+        rc = (getattr(self, "_rule_coils", None) or {}).get(sid)
+        if rc:
+            now = time.monotonic()
+            with self.lock:
+                for key, release_now in rc:
+                    if level:
+                        self._coil_set(key, 1)
+                    elif release_now and self._coil_off_at.get(key, 0) <= now:
+                        self._coil_set(key, 0)
 
     def get_switch(self, n):
         sid = self.switch_id(n)
@@ -2164,10 +2233,12 @@ class Bridge:
                     # (and keeps it there as that changes); here only ON TOP
                     # of Visual Pinball, which comes up full screen
                     if key not in self.placed_at:
-                        raise_window(hwnd, bool((setting or {}).get("topmost", True)))
+                        # PAD-1231: on top unless the tab's Always on top is off
+                        on_top = bool((setting or {}).get("topmost", True))
+                        raise_window(hwnd, on_top)
                         self.placed_at[key] = time.monotonic()
-                        log("lcd window left to the display setting (%s), on top"
-                            % shown.get("mode"))
+                        log("lcd window left to the display setting (%s), %s"
+                            % (shown.get("mode"), "on top" if on_top else "not on top"))
                     continue
                 rect = lcd_rect(setting or {}, monitors())
                 if key == "playfield" and not any(k in (setting or {}) for k in ("x", "monitor")):
@@ -2492,6 +2563,10 @@ class Bridge:
                 self.mrg = sw[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
             self._poll_lamps(data)
             self._poll_coils(data, now)
+            for n, (node, motor) in self.map.mechs.items():
+                pos = coilmap.stepper(data, node, motor)
+                if pos is not None:
+                    self.mech_pos[n] = pos
             if self.dof and self.dof.up:
                 self._poll_dof(data)
 
@@ -2514,6 +2589,7 @@ class Bridge:
             if self.sw_ids:
                 log("switch table arrived: %d ids" % len(self.sw_ids))
         now = time.monotonic()
+        rule_coils = {}
         with self.lock:
             self.mrg = switches
             # Some ROM tables read Lamp(n) as a mechanical position or raw
@@ -2544,9 +2620,14 @@ class Bridge:
                     bit = self._button_coils.get(key)
                     if bit is not None:
                         sid = self.sw_ids.get((node, bit))
+                        if sid:
+                            # the board's own coil state says when it lets
+                            # go, so set_switch only turns it on
+                            rule_coils.setdefault(sid, []).append((key, False))
                         if sid and (self.pipe.held.get(sid) if self.pipe else 0):
                             on = 1
                     self._coil_set(key, on)
+            self._rule_coils = rule_coils
             if self.map.game_on:
                 self._sol_set(self.map.game_on[0], 1)
             self._fakes_tick(now)
@@ -2602,6 +2683,7 @@ class Bridge:
 
     def _poll_coils(self, data, now):
         fires = struct.unpack_from("<I", data, coilmap.DRIVE_FIRES_OFF)[0]
+        rule_coils = {}
         for node in range(16):
             for idx in range(16):
                 key = (node, idx)
@@ -2637,6 +2719,7 @@ class Bridge:
                 if r and r["power"] and r["input"] is not None:
                     sid = self.sw_ids.get((node, r["input"]))
                     if sid:
+                        rule_coils.setdefault(sid, []).append((key, True))
                         made = (self.pipe.held.get(sid) if self.pipe and sid in self.pipe.held
                                 else (self.mrg[sid] if sid < len(self.mrg) else 0))
                         if made:
@@ -2644,6 +2727,7 @@ class Bridge:
                         elif self._coil_off_at.get(key, 0) <= now:
                             on = 0
                 self._coil_set(key, on)
+        self._rule_coils = rule_coils
         if self.map.game_on:
             num, coils = self.map.game_on
             armed = 0
@@ -2766,6 +2850,18 @@ class Bridge:
     def solenoid(self, n):
         with self.lock:
             return bool(self.sol_state.get(int(n or 0), 0))
+
+    def get_mech(self, n):
+        """Controller.GetMech(n): the place of the stepper the map's `mechs`
+        names for n, in steps from home; 0 until the game first homes or moves
+        it, and for a number the map does not name (VPinMAME's answer for a
+        mech a ROM lacks)."""
+        try:
+            n = int(n or 0)
+        except (TypeError, ValueError):
+            return 0
+        with self.lock:
+            return int(self.mech_pos.get(n, 0))
 
     def status(self):
         return {"title": self.title, "running": self.running, "polls": self.polls,
@@ -2902,7 +2998,9 @@ class PadController:
             return b.title
         if key in ("games", "settings"):
             return _anything()
-        if key in ("getmech", "mech", "dip", "solmask", "rawdmdwidth", "rawdmdheight",
+        if key == "getmech":
+            return b.get_mech(args[0] if args else 0)
+        if key in ("mech", "dip", "solmask", "rawdmdwidth", "rawdmdheight",
                    "timefence"):
             return 0
         if key == "padstatus":

@@ -902,6 +902,25 @@ def test_shadow_flippers_are_the_machines_coils(shadow):
     assert "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0" in out
 
 
+def test_pup_stub_counts_each_call_on_a_line_on_its_own():
+    """PAD-1207: Batman 66 runs two LabelSets in one VPMTimer string, joined by
+    `:`. They read as one 9-argument call and every patch log said "LabelSet
+    is called with [5, 9] arguments"; a method called only second on its
+    line was never stubbed."""
+    vs = pytest.importorskip("vpxshadow")
+    lines = ['Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")',
+             'PuPlayer.LabelSet screen,"GeneralTop1",msgs(0),1,"{\'mt\':2,\'color\':"&RGB(247, 170, 51)&",\'size\':6}"',
+             'VPMTimer.AddTimer 3000, "bPlay=False:puPlayer.LabelSet pBackglass,""GeneralCenter1"", """" ,1,"""":'
+             'puPlayer.LabelSet pBackglass,""GeneralCenter2"", """" ,1,"""" \'"',
+             'x = 1 : PuPlayer.playlistplayex(pBackglass, "a", "b", 100, 1) : PuPlayer.SetBackground 5, 1']
+    rep = []
+    stub = vs.pup_stub(lines, rep)
+    assert not any("WARNING" in s for s in rep), rep
+    assert "Public Sub LabelSet(a0, a1, a2, a3, a4) : End Sub" in stub
+    assert "Public Sub playlistplayex(a0, a1, a2, a3, a4) : End Sub" in stub
+    assert "Public Sub SetBackground(a0, a1) : End Sub" in stub
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the PuP stub against a present player under cscript")
 def test_forced_pup_stub_silences_both_creations_when_pinup_is_installed(tmp_path):
@@ -4358,6 +4377,67 @@ WScript.Echo "calls=" & rampCalls & "," & guardianCalls
     assert r.returncode == 0, r.stderr
     assert r.stdout.splitlines() == ["idle=0,0", "ramp=0", "ramp=3", "load=3,18,1", "ramp=2", "ramp=1",
                                      "guardian=True", "guardian=False", "calls=4,2"]
+
+
+def test_iron_maiden_sarcophagus_lock_switch_latches():
+    """PAD-1206: a pulse on Ball Lock told the game the Sarcophagus was empty again at once."""
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    assert m["switches"]["trgBallLock3"]["event"] == "latch"
+    assert m["retrofit_timers"]["PadMaidenLockTimer"] == {"clone": "PulseTimer", "interval_ms": 100}
+    out, _ = vs.patch('''Sub Table1_Init
+End Sub
+Sub trgBallLock3_Hit()
+BallsInRealLock=BallsInRealLock+1
+HandleMummyLock True
+End Sub''', m)
+    assert "Sub trgBallLock3_Hit : Controller.Switch(1080) = True : PadMaidenLockIn : End Sub" in out
+    assert "PulseSw 1080" not in out
+    assert "Sub PadMaidenLockTimer_Timer" in out
+    old = next(r["old"] for r in m["repatch"] if "trgBallLock3" in r["old"])
+    assert old not in out                 # the Tables card tells an old build from a rebuilt one
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's lock subs under cscript")
+def test_iron_maiden_sarcophagus_lock_follows_the_held_ball(tmp_path):
+    m = json.load(open(os.path.join(VPX, "iron_maiden_le.shadow.json"), encoding="utf-8"))
+    v = m["extra_vbs"]
+    lock = v[v.index("'---- PAD-1206"):v.index("'---- PAD: motor end stops")]
+    harness = '''Class TestController
+Public Property Let Switch(n, value)
+WScript.Echo "switch " & n & "=" & value
+End Property
+End Class
+Class TestBall
+End Class
+Dim Controller : Set Controller = New TestController
+Dim BallsInRealLock, LockBall1, LockBall2, ballA, ballB, cur
+BallsInRealLock = 0
+Set ballA = New TestBall : Set ballB = New TestBall
+Function ActiveBall : Set ActiveBall = cur : End Function
+'''
+    calls = '''PadMaidenLockTimer_Timer
+Set cur = ballA : Controller.Switch(1080) = True : PadMaidenLockIn
+WScript.Echo "in=" & BallsInRealLock & "," & (LockBall1 Is ballA)
+PadMaidenLockTimer_Timer
+Set cur = ballA : PadMaidenLockIn
+WScript.Echo "again=" & BallsInRealLock
+BallsInRealLock = BallsInRealLock - 1
+PadMaidenLockTimer_Timer
+PadMaidenLockTimer_Timer
+Set cur = ballB : PadMaidenLockIn
+WScript.Echo "next=" & BallsInRealLock & "," & (LockBall1 Is ballB)
+PadMaidenLockTimer_Timer
+'''
+    vbs = tmp_path / "lock.vbs"
+    vbs.write_text(harness + lock + calls, encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    # held from the hit to the tribute counting the ball out (trgBallLock0/2), once each way;
+    # the held ball back over the trigger at load is not a second ball
+    assert r.stdout.splitlines() == ["switch 1080=True", "in=1,True", "again=1", "switch 1080=False",
+                                     "next=1,True"]
 
 
 def test_playfield_sounds_stay_and_the_soundtrack_goes():

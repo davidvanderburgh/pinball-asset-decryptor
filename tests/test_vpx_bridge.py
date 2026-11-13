@@ -902,6 +902,25 @@ def test_shadow_flippers_are_the_machines_coils(shadow):
     assert "Const UseSolenoids = 1, UseLamps = 0, UseGI = 0, UsePdbLeds = 0" in out
 
 
+def test_pup_stub_counts_each_call_on_a_line_on_its_own():
+    """PAD-1207: Batman 66 runs two LabelSets in one VPMTimer string, joined by
+    `:`. They read as one 9-argument call and every patch log said "LabelSet
+    is called with [5, 9] arguments"; a method called only second on its
+    line was never stubbed."""
+    vs = pytest.importorskip("vpxshadow")
+    lines = ['Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay")',
+             'PuPlayer.LabelSet screen,"GeneralTop1",msgs(0),1,"{\'mt\':2,\'color\':"&RGB(247, 170, 51)&",\'size\':6}"',
+             'VPMTimer.AddTimer 3000, "bPlay=False:puPlayer.LabelSet pBackglass,""GeneralCenter1"", """" ,1,"""":'
+             'puPlayer.LabelSet pBackglass,""GeneralCenter2"", """" ,1,"""" \'"',
+             'x = 1 : PuPlayer.playlistplayex(pBackglass, "a", "b", 100, 1) : PuPlayer.SetBackground 5, 1']
+    rep = []
+    stub = vs.pup_stub(lines, rep)
+    assert not any("WARNING" in s for s in rep), rep
+    assert "Public Sub LabelSet(a0, a1, a2, a3, a4) : End Sub" in stub
+    assert "Public Sub playlistplayex(a0, a1, a2, a3, a4) : End Sub" in stub
+    assert "Public Sub SetBackground(a0, a1) : End Sub" in stub
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the PuP stub against a present player under cscript")
 def test_forced_pup_stub_silences_both_creations_when_pinup_is_installed(tmp_path):

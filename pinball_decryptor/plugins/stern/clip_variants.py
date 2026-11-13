@@ -433,13 +433,14 @@ def stage(project, rel, files, log=None, cancel=None, tag="", first=2, what="ran
     seconds = VS.length_seconds(choice)
     if choice == VS.LENGTH_FULL:
         trim = False
-    elif choice == VS.LENGTH_STOCK or seconds:
+    elif choice in (VS.LENGTH_STOCK, VS.LENGTH_LOOP) or seconds:
         trim = True
     else:
         trim = bool(side.get("video_trim"))
     asis = (side.get("video_asis_slots") or {}).get(rel)
     noconv = bool(side.get("video_no_conversion")) if asis is None else bool(asis)
     best = bool(side.get("video_best_quality"))
+    loop = choice == VS.LENGTH_LOOP          # PAD-1226: fill by looping
     rate = VS._clip_bitrate(pristine)
     try:
         from ...core import colour_profile
@@ -464,7 +465,8 @@ def stage(project, rel, files, log=None, cancel=None, tag="", first=2, what="ran
                 target = VS._with_length(target, seconds)
             recipe = VS.StagedCache.recipe(target, src, pristine, trim=trim, length=seconds or 0,
                                            noconv=noconv, rate=round(rate or 0), best=best,
-                                           colour=colour.key() if colour is not None else "")
+                                           colour=colour.key() if colour is not None else "",
+                                           **({"loop": True} if loop else {}))
             key = target.rel_path
             if cache.fresh(key, recipe, out):
                 if kept is not None:
@@ -476,7 +478,7 @@ def stage(project, rel, files, log=None, cancel=None, tag="", first=2, what="ran
                 continue
             ok, detail = VS.stage_replacement(
                 target, src, trim_to_length=trim, no_conversion=noconv, cancel_cb=cancel,
-                match_bitrate=rate, best_quality=best,
+                match_bitrate=rate, best_quality=best, loop=loop,
                 **({"colour": colour} if colour is not None else {}))
             if not ok:
                 cache.entries.pop(key, None)

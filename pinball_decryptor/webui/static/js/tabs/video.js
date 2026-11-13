@@ -1109,6 +1109,7 @@ export default function VideoTab() {
       { label: "This clip's length", submenu: [
         { label: `Follow the Trim / pad box (${info.length_follow})`, checked: info.length === "box", onClick: () => call("video.set_length", rel, null) },
         { label: "Match the stock clip", checked: info.length === "stock", onClick: () => call("video.set_length", rel, "stock") },
+        { label: "Loop my file to the stock clip's length", checked: info.length === "loop", onClick: () => call("video.set_length", rel, "loop") },
         { label: "Keep my file's full length", checked: info.length === "full", onClick: () => call("video.set_length", rel, "full") },
         { label: info.length === "custom" ? `Set a length… (${info.length_secs} s)` : "Set a length…", checked: info.length === "custom", onClick: () => call("video.set_length", rel, "custom") },
       ] },

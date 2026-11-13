@@ -45,7 +45,8 @@ import time
 from dataclasses import replace
 
 from .. import compat
-from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
+from ...core.video_slots import (LENGTH_FULL, LENGTH_LOOP, LENGTH_STOCK,
+                                 length_seconds)
 from .. import look_switches
 from .. import video_helpers as vh
 from ..colour_save import ColourSaveMixin
@@ -61,7 +62,7 @@ _LABEL = "Replace Video"          # MainWindow._REPLACE_LABELS["video"]
 
 def _length_ok(choice):
     """A per-clip length choice worth keeping from a sidecar."""
-    return choice in (LENGTH_STOCK, LENGTH_FULL) or bool(
+    return choice in (LENGTH_STOCK, LENGTH_FULL, LENGTH_LOOP) or bool(
         length_seconds(choice))
 
 
@@ -77,6 +78,12 @@ def _variants_from(raw, by_rel):
             if keep:
                 out[rel] = keep
     return out
+
+
+def _clock(seconds):
+    """*seconds* as the players show it: 0:03, 4:56."""
+    s = int(round(seconds or 0))
+    return "%d:%02d" % (s // 60, s % 60)
 
 
 def _length_key(choice):
@@ -1281,7 +1288,8 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             return length
         secs = length_seconds(choice)
         word = ("%g s" % secs if secs else
-                "stock" if choice == LENGTH_STOCK else "full")
+                {LENGTH_STOCK: "stock", LENGTH_LOOP: "loop"}.get(choice,
+                                                                 "full"))
         return "%s • %s" % (length, word)
 
     def _asis_for(self, rel):
@@ -1914,6 +1922,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                 return False
             self._m_publish()
         self._assign[rel] = path
+        self._offer_loop(rel, path)
         self._save_staged()
         note = vh.conversion_note(self._by_rel.get(rel), rel, path,
                                   self._asis_for(rel),
@@ -1956,12 +1965,59 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             self._update_note(rel)
         return True
 
+    def _stock_seconds(self, rel):
+        """How long the game's own clip in *rel* runs: its ``.orig/``
+        snapshot once a build has staged over it, else the slot's probe."""
+        snap = self._stock_path(rel)
+        if snap and os.path.isfile(snap):
+            from ...core.video import probe_duration
+            secs = probe_duration(snap)
+            if secs:
+                return secs
+        slot = self._by_rel.get(rel)
+        return slot.duration if slot is not None else 0.0
+
+    def _offer_loop(self, rel, path):
+        """PAD-1226: a replacement shorter than the clip it replaces is
+        offered a loop to the stock clip's length, rather than holding its
+        last frame (or ending early).  Asked only when the clip has no
+        length of its own picked yet (or "match the stock clip"), and not
+        for a clip going on as-is, whose length can't be changed."""
+        choice = self._length.get(rel)
+        if choice not in (None, LENGTH_STOCK) or self._asis_for(rel):
+            return
+        from ...core.video import probe_duration
+        try:
+            mine = probe_duration(path)
+        except Exception:                               # noqa: BLE001
+            mine = 0.0
+        stock = self._stock_seconds(rel)
+        if not mine or not stock or mine >= stock - 0.05:
+            return
+        held = choice == LENGTH_STOCK or bool(self.video_trim_var.get())
+        if compat.messagebox.askyesno(
+                "Shorter than the clip it replaces",
+                "%s runs %s and the clip it replaces (%s) runs %s.\n\n"
+                "Loop your file so it plays over and over until it fills "
+                "the %s?\n\nNo: %s.  You can change this later: right-click "
+                "the clip → This clip's length."
+                % (os.path.basename(path), _clock(mine),
+                   os.path.basename(rel), _clock(stock), _clock(stock),
+                   "it plays once and holds its last frame to the end"
+                   if held else "it plays once, %s long" % _clock(mine))):
+            self._length[rel] = LENGTH_LOOP
+            self.log("Replace Video: %s will loop %s to fill the stock "
+                     "clip's %s." % (rel, os.path.basename(path),
+                                     _clock(stock)), "info")
+
     @rpc
     @undoable("the length of %s")
     def set_length(self, rel, value):
         """This clip's own length (PAD-215): None follows the Trim / pad
-        box, "stock" cuts or pads to the stock clip, "full" keeps the
-        replacement's own length, "custom" asks for a number of seconds."""
+        box, "stock" cuts or pads to the stock clip, "loop" cuts a longer
+        replacement to it and plays a shorter one over and over to fill it
+        (PAD-1226), "full" keeps the replacement's own length, "custom"
+        asks for a number of seconds."""
         slot = self._by_rel.get(rel)
         if slot is None:
             return False
@@ -1981,10 +2037,12 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             self._length.pop(rel, None)
             self.log("Replace Video: %s follows the Trim / pad box again."
                      % rel, "info")
-        elif value in (LENGTH_STOCK, LENGTH_FULL) or length_seconds(value):
+        elif _length_ok(value):
             self._length[rel] = value
             what = ("%g s" % value if length_seconds(value) else
                     "the stock clip's length" if value == LENGTH_STOCK
+                    else "the stock clip's length, your file looped to fill "
+                    "it" if value == LENGTH_LOOP
                     else "your file's own length")
             self.log("Replace Video: %s will run %s, whatever the Trim / "
                      "pad box says." % (rel, what), "info")

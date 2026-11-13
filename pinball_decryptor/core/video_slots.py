@@ -335,7 +335,8 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                       trim_to_length: bool = False, no_conversion: bool = False,
                       cancel_cb=None, byte_budget: Optional[int] = None,
                       match_bitrate: Optional[float] = None,
-                      best_quality: bool = False, colour=None):
+                      best_quality: bool = False, colour=None,
+                      loop: bool = False):
     """Stage a single replacement over *slot*.
 
     With *no_conversion* set, the replacement is copied through verbatim and
@@ -367,6 +368,11 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
     *best_quality* makes a re-encode with no budget a constant-quality one
     instead (the Video tab's "Best quality"), held up to *match_bitrate* when
     the picture is simple enough to come in under it.
+
+    *loop*, with *trim_to_length*, fills a slot longer than the replacement
+    by playing the replacement over and over (PAD-1226) rather than holding
+    its last frame.  Only a re-encode can do that; a custom-backend format
+    pads as before.
 
     Returns ``(ok, detail)`` — on success *detail* summarises the conversions
     applied (may be empty, or note a copy-through); on failure it's an error
@@ -447,7 +453,8 @@ def stage_replacement(slot: VideoSlot, replacement_path: str,
                     match_length=trim_to_length, cancel_cb=cancel_cb,
                     max_bytes=byte_budget,
                     match_bitrate=match_bitrate,
-                    best_quality=best_quality, colour=colour)
+                    best_quality=best_quality, colour=colour,
+                    **({"loop": True} if loop else {}))
                 if not ok:
                     _remove(tmp)
                     return False, detail
@@ -614,6 +621,9 @@ def staging_workers(clips: int) -> int:
 #: seconds is the third.
 LENGTH_STOCK = "stock"
 LENGTH_FULL = "full"
+#: the stock clip's length, a shorter replacement played over and over to
+#: fill it instead of holding its last frame (PAD-1226)
+LENGTH_LOOP = "loop"
 
 
 def length_seconds(choice) -> float:
@@ -703,7 +713,7 @@ def _conversion(cache, slot, rep, orig, slot_noconv, choice, trim_to_length,
     seconds = length_seconds(choice)
     if choice == LENGTH_FULL:
         slot_trim = False
-    elif choice == LENGTH_STOCK or seconds:
+    elif choice in (LENGTH_STOCK, LENGTH_LOOP) or seconds:
         slot_trim = True
     else:
         slot_trim = bool(trim_to_length)
@@ -732,6 +742,10 @@ def _conversion(cache, slot, rep, orig, slot_noconv, choice, trim_to_length,
     # another (PAD-305); with none the recipe is exactly what it was.
     if clip_colour is not None:
         gop["colour"] = clip_colour.key()
+    # A looped clip is a different conversion from a held last frame
+    # (PAD-1226); every other recipe is exactly what it was.
+    if choice == LENGTH_LOOP:
+        gop["loop"] = True
     recipe = cache.recipe(slot, rep, orig, trim=slot_trim,
                           length=seconds or 0,
                           noconv=slot_noconv, budget=budget,
@@ -844,8 +858,9 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
     *length_overrides*, when given, is ``{rel_path: choice}`` and wins over
     *trim_to_length* for those slots -- the per-clip answer to "how long
     should this come out": :data:`LENGTH_STOCK` (the stock clip's length),
-    :data:`LENGTH_FULL` (the replacement's own length) or a number of
-    seconds.  A tester's 14 s export for a 6 s slot had to be cut to 6 s,
+    :data:`LENGTH_FULL` (the replacement's own length),
+    :data:`LENGTH_LOOP` (the stock clip's length, a shorter replacement
+    looped to fill it; PAD-1226) or a number of seconds.  A tester's 14 s export for a 6 s slot had to be cut to 6 s,
     and one tab-wide box couldn't say that for one clip and not the next
     (PAD-215).  A typed length gets no byte budget: the stock clip's bytes
     were sized for the stock clip's length.
@@ -940,6 +955,9 @@ def stage_replacements(slots_by_rel: Dict[str, VideoSlot],
                                        byte_budget=budget,
                                        match_bitrate=rate,
                                        best_quality=best_quality,
+                                       **({"loop": True}
+                                          if lengths.get(rel) == LENGTH_LOOP
+                                          else {}),
                                        **({"colour": clip_colour}
                                           if clip_colour is not None else {}))
         with lock:

@@ -169,3 +169,76 @@ def test_the_200_ms_ceiling_cuts_back_to_the_cushion(least_ms, cut_ms, monkeypat
     ceiling = bps * max(late, pre + 100) // 1000
     cut = padplay.catch_up(bps * least_ms // 1000, bps * pre // 1000, ceiling, 4)
     assert abs(cut * 1000 // bps - cut_ms) <= 1
+
+
+# ---- the frame ring: a slot is free when its frame is released ---------------
+
+def small_shm():
+    """s3vidhost.Shm over in-memory buffers just big enough for the headers."""
+    s = object.__new__(s3vidhost.Shm)
+    s.f = bytearray(16 + s3vidhost.CH * s3vidhost.CHAN_SZ)
+    s.v = bytearray(s3vidhost.P_HDR)
+    return s
+
+
+def test_the_slot_map_is_on_only_when_the_guest_frees_slots():
+    s = small_shm()
+    s.slotmap_reset(1)
+    assert s.fget(1, s3vidhost.SLOTMAP_HOST) == 0          # an older guest: in order
+    s.fset(1, s3vidhost.SLOTMAP_GUEST, 1)
+    s.set_busy(1, 3, 1)
+    s.slotmap_reset(1)
+    assert s.fget(1, s3vidhost.SLOTMAP_HOST) == 1 and s.busy(1, 3) == 0
+
+
+def test_a_held_frame_does_not_jam_the_ring():
+    """Fallout holds the frame its main screen shows and releases the rest:
+    "frame 164 still held, 15 of the 15 after it released". In order, that
+    was a full ring and a frozen video; by slot, the other 15 are free."""
+    s = small_shm()
+    s.fset(1, s3vidhost.SLOTMAP_GUEST, 1)
+    s.slotmap_reset(1)
+    last, used = s3vidhost.P_SLOTS - 1, []
+    for n in range(s3vidhost.P_SLOTS):                    # fill every slot
+        k = s.next_free(1, last)
+        s.set_busy(1, k, 1); s.set_slot_of(1, n, k); used.append(k); last = k
+    assert used == list(range(s3vidhost.P_SLOTS))         # round robin, as before
+    assert s.next_free(1, last) is None                   # all held: wait
+    for k in range(1, s3vidhost.P_SLOTS):                 # the game keeps slot 0's frame
+        s.set_busy(1, k, 0)
+    nxt = []
+    for _ in range(40):
+        k = s.next_free(1, last)
+        assert k is not None and k != 0
+        s.set_busy(1, k, 1); nxt.append(k); last = k
+        s.set_busy(1, k, 0)                                # shown and released
+    assert set(nxt) == set(range(1, s3vidhost.P_SLOTS))   # every other slot, in turn
+
+
+def test_the_host_and_guest_agree_on_the_slot_map_layout():
+    h = read("s3vid.h")
+    # the four new words and two 16-byte arrays replace ten of the 14 pad words
+    assert "unsigned pad[4];" in h and "#define S3VID_SLOTMAP  16" in h
+    assert s3vidhost.SLOTMAP == 16 and s3vidhost.P_SLOTS <= s3vidhost.SLOTMAP
+    body = h[h.index("struct s3vid_chan"):h.index("unsigned char slot_busy")]
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+    order = [n.strip() for decl in re.findall(r"^\s+unsigned ([\w, ]+);", body, re.M)
+             for n in decl.split(",")]
+    assert order.index("slotmap_guest") == s3vidhost.SLOTMAP_GUEST
+    assert order.index("slotmap_host") == s3vidhost.SLOTMAP_HOST
+    assert s3vidhost.SLOT_BUSY == 4 * (s3vidhost.SLOTMAP_HOST + 1)
+    assert s3vidhost.SLOT_OF == s3vidhost.SLOT_BUSY + 16
+
+
+def test_the_guest_opts_in_and_frees_a_slot_as_it_releases():
+    c = read("s3vid.c")
+    assert "ch->slotmap_guest = 1;" in c
+    assert "feed->ch[h->c].slot_busy[h->slot] = 0;" in c
+    assert "slot_of[n % S3VID_SLOTMAP]" in c
+
+
+def test_a_flush_frees_only_the_frames_the_game_never_took():
+    src = read("s3vidhost.py")
+    i = src.index("base, wrote = s.fget(c, FLUSH_BASE), s.vget(c, P_WRITE)")
+    assert "for n in range(base, wrote):" in src[i:i + 400]
+    assert "set_busy(c, s.slot_of(c, n), 0)" in src[i:i + 400]

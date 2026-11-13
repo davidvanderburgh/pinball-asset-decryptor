@@ -32,6 +32,8 @@ CHAN_SZ = 32 * 4 + EXTRA + PKTS * 24
 (OPEN_GEN, OPEN_ACK, CODEC, WIDTH, HEIGHT, EXTRA_SIZE, FLUSH_GEN, FLUSH_ACK,
  FLUSH_BASE, CLOSED, PKT_W, PKT_R, DATA_W, DATA_R, FRAMES_OUT,
  CLIP_FRAMES, CLIP_RATE_NUM, CLIP_RATE_DEN) = range(18)
+SLOTMAP_GUEST, SLOTMAP_HOST = 18, 19     # PAD-1213: s3vid.h slotmap_guest/host
+SLOT_BUSY, SLOT_OF, SLOTMAP = 20 * 4, 24 * 4, 16   # byte offsets in the channel; S3VID_SLOTMAP
 PATH = 256                              # S3VID_PATH: clip[c] after the channels
 PKT_EOF = 0x80000000
 # ---- ../spike2_emu/padvid.h ----
@@ -101,6 +103,39 @@ class Shm:
 
     def slot(self, c, n):
         return P_HDR + (c * P_SLOTS + n % P_SLOTS) * P_SLOT_BYTES
+
+    def slot_at(self, c, k):
+        """Byte offset of channel c's ring slot k."""
+        return P_HDR + (c * P_SLOTS + k) * P_SLOT_BYTES
+
+    # PAD-1213: the slot map (s3vid.h) - one byte per slot / per frame
+    def busy(self, c, k):
+        return self.f[16 + c * CHAN_SZ + SLOT_BUSY + k]
+
+    def set_busy(self, c, k, v):
+        self.f[16 + c * CHAN_SZ + SLOT_BUSY + k] = v
+
+    def slot_of(self, c, n):
+        return self.f[16 + c * CHAN_SZ + SLOT_OF + n % SLOTMAP]
+
+    def set_slot_of(self, c, n, k):
+        self.f[16 + c * CHAN_SZ + SLOT_OF + n % SLOTMAP] = k
+
+    def slotmap_reset(self, c):
+        """At an open: every slot free, and the map on if the guest frees
+        slots as it releases frames (else the in-order ring, as before)."""
+        o = 16 + c * CHAN_SZ
+        self.f[o + SLOT_BUSY:o + SLOT_BUSY + SLOTMAP] = bytes(SLOTMAP)
+        self.f[o + SLOT_OF:o + SLOT_OF + SLOTMAP] = bytes(SLOTMAP)
+        self.fset(c, SLOTMAP_HOST, 1 if self.fget(c, SLOTMAP_GUEST) else 0)
+
+    def next_free(self, c, after):
+        """The first free slot after slot `after`, round robin, or None."""
+        for i in range(1, P_SLOTS + 1):
+            k = (after + i) % P_SLOTS
+            if not self.busy(c, k):
+                return k
+        return None
 
 
 def param_sets(codec, extra):
@@ -203,13 +238,15 @@ class Decoder:
         self.fb = w * h + 2 * ((w + 1) // 2) * ((h + 1) // 2)
         self.c, self.extra, self.ps, self.nl = None, b"", b"", 4
         self.bound = threading.Event()
+        self.last_slot = P_SLOTS - 1           # round robin from slot 0 (PAD-1213)
         self.q = queue.Queue(maxsize=48)
         self.stop = False
         self.p = subprocess.Popen(decoder_cmd(codec, w, h), stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=log, bufsize=0)
         self.first = True
         threading.Thread(target=self.writer, daemon=True).start()
-        threading.Thread(target=self.reader, daemon=True).start()
+        self.rt = threading.Thread(target=self.reader, daemon=True)
+        self.rt.start()
         if c is not None:
             self.bind(c, extra or b"")
 
@@ -275,12 +312,28 @@ class Decoder:
                     buf += part
                 if len(buf) < self.fb:
                     break
-                while not self.stop and s.vget(c, P_WRITE) - s.vget(c, P_READ) >= P_SLOTS:
-                    time.sleep(0.002)          # the game still holds that slot
-                if self.stop:
-                    return
-                n = s.vget(c, P_WRITE)
-                o = s.slot(c, n)
+                if s.fget(c, SLOTMAP_HOST):
+                    # any slot whose frame the game has released (PAD-1213)
+                    k = None
+                    while not self.stop:
+                        k = s.next_free(c, self.last_slot)
+                        if k is not None:
+                            break
+                        time.sleep(0.002)      # every slot held by the game
+                    if self.stop:
+                        return
+                    n = s.vget(c, P_WRITE)
+                    s.set_busy(c, k, 1)
+                    s.set_slot_of(c, n, k)
+                    self.last_slot = k
+                    o = s.slot_at(c, k)
+                else:
+                    while not self.stop and s.vget(c, P_WRITE) - s.vget(c, P_READ) >= P_SLOTS:
+                        time.sleep(0.002)      # the game still holds that slot
+                    if self.stop:
+                        return
+                    n = s.vget(c, P_WRITE)
+                    o = s.slot(c, n)
                 s.v[o:o + self.fb] = buf
                 s.vset(c, P_WRITE, n + 1)
                 s.fset(c, FRAMES_OUT, s.fget(c, FRAMES_OUT) + 1)
@@ -304,6 +357,9 @@ class Decoder:
             self.p.wait(timeout=2)
         except subprocess.TimeoutExpired:
             pass
+        # its last frame lands (or not) before the caller rewrites the ring
+        if self.rt is not threading.current_thread():
+            self.rt.join(timeout=1)
 
 
 class Spares:
@@ -511,6 +567,7 @@ def main():
                 s.fset(c, FRAMES_OUT, 0)
                 s.vset(c, P_WRITE, 0)
                 s.vset(c, P_EOS, 0)
+                s.slotmap_reset(c)
                 ok = codec in (HEVC, H264) and 0 < w <= MAX_W and 0 < h <= MAX_H
                 if ok:
                     s.vset(c, P_W, w)
@@ -533,7 +590,13 @@ def main():
                     d.kill()
                     dec[c] = spares.take(c, s.fget(c, CODEC), d.w, d.h, s.extra(c))
                     asked[c] = (time.time(), s.fget(c, FRAMES_OUT), "seek")
-                s.vset(c, P_WRITE, s.fget(c, FLUSH_BASE))
+                base, wrote = s.fget(c, FLUSH_BASE), s.vget(c, P_WRITE)
+                if s.fget(c, SLOTMAP_HOST):
+                    # the frames the game never took are dropped: their slots
+                    # are free again (the ones it holds stay busy until released)
+                    for n in range(base, wrote):
+                        s.set_busy(c, s.slot_of(c, n), 0)
+                s.vset(c, P_WRITE, base)
                 s.vset(c, P_EOS, 0)
                 s.fset(c, FLUSH_ACK, s.fget(c, FLUSH_GEN))
                 busy = True

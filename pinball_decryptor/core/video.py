@@ -1410,14 +1410,17 @@ def _rate_str(bps):
 
 def transcode_video_to(src_path, dst_path, original_info,
                        match_length=False, cancel_cb=None, max_bytes=None,
-                       match_bitrate=None, best_quality=False, colour=None):
+                       match_bitrate=None, best_quality=False, colour=None,
+                       loop=False):
     """Transcode *src_path* into *dst_path*, whose extension selects the
     output container / codec.
 
     Resolution, frame rate, and (where the format allows) the alpha channel
     are matched to *original_info* so the result drops into the slot it
     replaces.  When *match_length* is set, the result is trimmed or padded to
-    the original's duration.  *cancel_cb* (returns truthy to abort) is polled
+    the original's duration; with *loop* too, a shorter source is played
+    over and over until it fills that duration (PAD-1226) instead of holding
+    its last frame.  *cancel_cb* (returns truthy to abort) is polled
     during the encode so a user Cancel stops ffmpeg promptly.  Returns
     ``(ok, actions)`` — *actions* is a short human-readable summary; on
     failure *ok* is False and *actions* is an error.
@@ -1504,12 +1507,20 @@ def transcode_video_to(src_path, dst_path, original_info,
     src_dur = probe_duration(src_path)
     enc_dur = src_dur
     cap_to = None
+    looped = False
     if match_length and original_info and original_info.duration > 0:
         target = original_info.duration
         if src_dur > target + 0.05:
             cap_to = target
             enc_dur = target
             actions.append(f"trim {src_dur:.1f}s→{target:.1f}s")
+        elif src_dur and src_dur < target - 0.05 and loop:
+            # PAD-1226: repeat the whole source (-stream_loop before -i)
+            # and cut the endless stream at the slot's length.
+            looped = True
+            cap_to = target
+            enc_dur = target
+            actions.append(f"loop {src_dur:.1f}s→{target:.1f}s")
         elif src_dur and src_dur < target - 0.05:
             vf.append(
                 f"tpad=stop_mode=clone:stop_duration={target - src_dur:.3f}")
@@ -1572,7 +1583,10 @@ def transcode_video_to(src_path, dst_path, original_info,
                 vbps = max(40_000, int(budget * 8 * hr / enc_dur) - abps)
 
             def build_cmd(pass_no, out, _vbps=vbps, _floored=floored):
-                cmd = [ffmpeg, "-y", "-i", src_path]
+                cmd = [ffmpeg, "-y"]
+                if looped:
+                    cmd += ["-stream_loop", "-1"]
+                cmd += ["-i", src_path]
                 if vf:
                     cmd += ["-vf", ",".join(vf)]
                 if original_info and original_info.fps > 0:

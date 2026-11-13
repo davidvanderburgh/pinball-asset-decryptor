@@ -997,3 +997,49 @@ def test_random_clips_are_not_offered_where_the_plugin_has_none(tmp_path):
         assert w.call("video.row_menu", ["video/intro.mp4"])["variants"] is None
         assert w.call("video.add_variants", "video/intro.mp4") is False
         assert _row(w.state("video"), "video/intro.mp4")["var"] == 0
+
+
+def test_a_shorter_pick_is_offered_a_loop(tmp_path, monkeypatch):
+    # PAD-1226: a replacement shorter than the clip it replaces asks whether
+    # to loop it to the stock clip's length; Yes sets the clip's length to
+    # "loop" (the row menu's new choice), No leaves it as it was, and a clip
+    # with its own length already picked is not asked.
+    from pinball_decryptor.core import video as core_video
+    from pinball_decryptor.webui.tabs.video import VideoTab
+    monkeypatch.setattr(core_video, "probe_duration", lambda _p: 89.0)
+    monkeypatch.setattr(VideoTab, "_stock_seconds", lambda self, rel: 296.0)
+    proj = _project(tmp_path)
+    mine = _mine(tmp_path)
+    rel = "video/intro.mp4"
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        w.answers += [str(mine), "yes"]
+        assert w.call("video.choose", rel) is True
+        q = w.asked[-1]
+        assert q["title"] == "Shorter than the clip it replaces"
+        assert "runs 1:29" in q["message"] and "runs 4:56" in q["message"]
+        assert w.call("video.row_menu", [rel])["length"] == "loop"
+        assert _row(w.state("video"), rel)["len"].endswith("• loop")
+        assert w.window.pending_video_assignments(str(proj))[5] == {rel: "loop"}
+
+        # No keeps the clip following the box
+        assert w.call("video.set_length", rel, None) is True
+        w.answers += [str(mine), "no"]
+        n = len(w.asked)
+        assert w.call("video.choose", rel) is True
+        assert len(w.asked) == n + 2
+        assert w.call("video.row_menu", [rel])["length"] == "box"
+
+        # a clip whose length is already its own is not asked
+        assert w.call("video.set_length", rel, "full") is True
+        w.answers.append(str(mine))
+        n = len(w.asked)
+        assert w.call("video.choose", rel) is True
+        assert len(w.asked) == n + 1
+        assert w.call("video.row_menu", [rel])["length"] == "full"
+
+        # and the row menu sets it directly, surviving a fresh session
+        assert w.call("video.set_length", rel, "loop") is True
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        _scan(w, proj)
+        assert w.call("video.row_menu", [rel])["length"] == "loop"

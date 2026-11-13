@@ -15,7 +15,9 @@
     "Kicker1 is the side scoop: the ball passes SIDE SCOOP OPTO (78, `enter`) and rests on LOWER SIDE SCOOP (85), where the game fires SIDE SCOOP. Held on 78 the game only held its trough lock and waited, the ball sat until a ball search and the switch read stuck (PAD-910).",
     "The right side has two return lanes: TRightInlane (x 692, lighting I96) is the inner one, RIGHT RETURN LANE-INNER (63); TRightInlane2 (x 761, lighting I97) the outer, RIGHT RETURN LANE (61). They were the other way round and each lit the other's insert (PAD-921).",
     "The time machine's MAGNET (coil 9): the tribute has no magnet, so its ball ran up Ramp011 over tm2, met tm1 and rolled straight back down while the game held MAGNET ~4.1 s for it (emulator: on at LIFT RAMP OPTO, off, one 60 ms pulse 0.16 s later). PadTMMagnet is a trigger added on Ramp011's top (retrofit_triggers, `surface`), made a cvpmMagnet in extra_vbs that the coil turns on and off: the ball is held there while it is on and rolls back down the ramp when it lets go (PAD-925).",
-    "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847)."
+    "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847).",
+    "The instrument bank (sw13 drumsticks, sw12 guitar, sw11 bass: 3 BANK DROP LEFT/CENT/RIGHT) is three stand-up HitTargets that the tribute's own hit subs hid to make them drops. With those subs out of the way the targets stood like stand-ups and their switches only blinked, so the game never saw the bank down and never let the ball at what is behind it (sw20, SKILL SHOT: the game says SHOOT BEHIND DROPS). A hit now drops the target (PadDrop) and its switch stays made until the game fires 3 BANK DROP, which stands all three up and opens them; the tribute's ResetDropTargets is no longer called, it started its own target-light rules too (PAD-1228).",
+    "The drum clock (Primitive027, the tribute's 12 faces drum_1..drum_12) is the machine's node 10 stepper 0 (home DRUM CLOCK HOME, 94), which the board runs and the table never heard of, so the face stood still. Emulator, rush_le 1.19: home is 6:00, the hand turns the negative way, one game minute a pop and 200 steps an hour (the panel read 7:10 PM at -234, CLOCK 7 lit from -201). `mechs` hands the stepper's place to Controller.GetMech(0) and PadDrumClockTimer shows the hour it points at, the hour of the CLOCK LED the game lights (PAD-1228)."
   ],
   "title": "rush_le",
   "detect": [
@@ -39,9 +41,9 @@
     "sw002": {"id": 54, "event": "hit", "name": "R(U)SH TARGET"},
     "sw003": {"id": 55, "event": "hit", "name": "RU(S)H TARGET"},
     "sw004": {"id": 56, "event": "hit", "name": "RUS(H) TARGET"},
-    "sw13": {"id": 47, "event": "hit", "name": "3 BANK DROP LEFT"},
-    "sw12": {"id": 48, "event": "hit", "name": "3 BANK DROP CENT"},
-    "sw11": {"id": 49, "event": "hit", "name": "3 BANK DROP RIGHT"},
+    "sw13": {"id": 47, "event": "drop", "call": "PadDrop sw13", "name": "3 BANK DROP LEFT"},
+    "sw12": {"id": 48, "event": "drop", "call": "PadDrop sw12", "name": "3 BANK DROP CENT"},
+    "sw11": {"id": 49, "event": "drop", "call": "PadDrop sw11", "name": "3 BANK DROP RIGHT"},
     "Lock1": {"id": 50, "event": "hit", "name": "RT RAMP LT TARGET"},
     "Lock2": {"id": 51, "event": "hit", "name": "RT RAMP RT TARGET"},
     "TLeftOutlane": {"id": 59, "event": "hit", "name": "LEFT OUTLANE"},
@@ -73,6 +75,10 @@
     "Kicker2": {"switch": 93, "dir": 270, "power": 30, "name": "MAIN SCOOP OPTO"},
     "Kicker3": {"switch": 79, "dir": 1, "power": 55, "kickz": 1.4, "name": "VUK"}
   },
+  "mechs": {
+    "_": "Controller.GetMech(n) -> a node board's stepper [node, motor]: its place in steps from home (padled version 8, PAD-1228)",
+    "0": {"stepper": [10, 0], "name": "DRUM CLOCK (home DRUM CLOCK HOME, 94)"}
+  },
   "solenoids": {
     "1": {"coil": [8, 1], "name": "TROUGH", "callback": "bsTrough.SolOut"},
     "2": {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "PadAutoPlunge"},
@@ -98,14 +104,15 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "Sub PadResetDrops(e) : If e Then ResetDropTargets : End If : End Sub\n' PAD-925: the time machine magnet on PadTMMagnet (Ramp011's top): MAGNET holds the ball there, let go it rolls back down\nDim mPadTM : Set mPadTM = New cvpmMagnet\nWith mPadTM\n\t.InitMagnet PadTMMagnet, 40\n\t.GrabCenter = True\nEnd With\n' cvpmMagnet grabs a ball only inside 20 units, at its 10 ms update: a fast one crossed that between two.\n' A live magnet takes the ball's speed as it comes into the field, so the grab cannot miss\nSub PadTMMagnet_Hit\n\tmPadTM.AddBall ActiveBall\n\tIf mPadTM.MagnetOn Then ActiveBall.VelX = ActiveBall.VelX * 0.2 : ActiveBall.VelY = ActiveBall.VelY * 0.2\nEnd Sub\nSub PadTMMagnet_UnHit : mPadTM.RemoveBall ActiveBall : End Sub\nSub PadTimeMachineMagnet(e) : mPadTM.MagnetOn = CBool(e) : End Sub\n",
+  "extra_vbs": "' PAD-1228: the instrument bank drops. A hit drops the target (the tribute hid them the same way)\n' and its switch stays made (the map's drop event) until 3 BANK DROP stands the three up again.\n' The tribute's ResetDropTargets is not called: it started its own target light rules too.\nSub PadDrop(t) : t.IsDropped = True : t.Visible = 0 : End Sub\nSub PadResetDrops(e)\n\tIf e Then\n\t\tDim t\n\t\tFor Each t In Array(sw13, sw12, sw11) : t.IsDropped = False : t.Visible = 1 : Next\n\t\tController.Switch(1047) = False : Controller.Switch(1048) = False : Controller.Switch(1049) = False\n\t\tDOF 111, DOFPulse\n\tEnd If\nEnd Sub\n' PAD-1228: the drum clock's hand is the machine's node 10 stepper 0 (the map's mechs, GetMech(0)):\n' home is 6 o'clock, 200 steps an hour, the negative way clockwise. The face shows the hour it points at.\nDim PadDrumFace : PadDrumFace = \"\"\nSub PadDrumClockTimer_Timer\n\tDim m, h, f\n\tm = -CLng(Controller.GetMech(0))\n\tm = m Mod 2400 : If m < 0 Then m = m + 2400\n\th = 6 + m \\ 200 : If h > 12 Then h = h - 12\n\tf = \"drum_\" & h\n\tIf f <> PadDrumFace Then Primitive027.Image = f : PadDrumFace = f\nEnd Sub\n' PAD-925: the time machine magnet on PadTMMagnet (Ramp011's top): MAGNET holds the ball there, let go it rolls back down\nDim mPadTM : Set mPadTM = New cvpmMagnet\nWith mPadTM\n\t.InitMagnet PadTMMagnet, 40\n\t.GrabCenter = True\nEnd With\n' cvpmMagnet grabs a ball only inside 20 units, at its 10 ms update: a fast one crossed that between two.\n' A live magnet takes the ball's speed as it comes into the field, so the grab cannot miss\nSub PadTMMagnet_Hit\n\tmPadTM.AddBall ActiveBall\n\tIf mPadTM.MagnetOn Then ActiveBall.VelX = ActiveBall.VelX * 0.2 : ActiveBall.VelY = ActiveBall.VelY * 0.2\nEnd Sub\nSub PadTMMagnet_UnHit : mPadTM.RemoveBall ActiveBall : End Sub\nSub PadTimeMachineMagnet(e) : mPadTM.MagnetOn = CBool(e) : End Sub\n",
   "retrofit_triggers": {
     "_": "no table object: a Trigger cloned from `clone`, given `shape` (its drag points), live and drawn as nothing, on `surface`",
     "PadTMMagnet": {"clone": "tm2", "surface": "Ramp011", "radius": 40, "shape": [[482, 470], [552, 470], [552, 540], [482, 540]], "name": "the time machine magnet: Ramp011's top 70 units, its whole width (the ramp runs from y 659 up to 473, 80 units high); centre 517,505"}
   },
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
-    "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100}
+    "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100},
+    "PadDrumClockTimer": {"clone": "PulseTimer", "interval_ms": 100}
   },
   "lamps": {
     "_": "table light -> Spike 2 LEDs [node, index] (several = an RGB insert: lit when any is); GUESS = placed by the script's use of the light, not seen on the game",

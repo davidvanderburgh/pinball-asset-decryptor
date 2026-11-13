@@ -1306,6 +1306,12 @@ def gen(m, had, quiet=None, dof=None):
             # the game resets the bank (drop_resets): open on a machine whose
             # bank reads made while standing (`up_closed`), else made
             body = "Controller.Switch(%d) = %s" % (sid, "False" if s.get("up_closed") else "True")
+            if s.get("call"):
+                # PAD-1228: the map's sub that drops the target on the table
+                # (Rush's instrument bank is three stand-up HitTargets the
+                # tribute's own hit subs hid; with those out of the way it
+                # stood like a stand-up and its switch only blinked)
+                body += " : " + s["call"]
             if had.get(name + "_Hit") and calls_orig(name):
                 body += " : %s_Hit_orig" % name
             else:

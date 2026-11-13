@@ -108,7 +108,7 @@ VERSION = "03060000"            # what core.vbs compares; modulated solenoids of
 
 SW_SRC = "v"                    # padsw.h's writer tag for Visual Pinball
 POLL_S = 0.008                  # padled poll; a 9p read is ~1-3 ms
-READ_N = max(coilmap.HI_READ, coilmap.RULE_READ)   # one read takes every plane
+READ_N = max(coilmap.HI_READ, coilmap.STEP_READ)   # one read takes every plane
 LAMP_ON = int(os.environ.get("PAD_VPX_LAMP_ON", "1"))   # LED level that is "lit"
 MIN_PULSE_MS = 40               # a coil pulse shorter than a poll still shows
 FRONT_WATCH_S = 300             # how long after Run a started run's windows are watched
@@ -433,6 +433,7 @@ class VpxMap:
         self.fakes = {}                     # name -> dict (switch_fakes)
         self.game_on = None                 # (number, [coils]) "flippers armed"
         self.cabinet = {}                   # cabinet switch names -> 1000+id
+        self.mechs = {}                     # GetMech(n) -> (node, motor) of a stepper (PAD-1228)
         self.platform = "spike2"            # which rig the title runs on (PAD-943)
         # core.vbs indexes SolCallback(68) and friends by the number it is
         # handed, so ChangedSolenoids may only carry numbers up to this; a
@@ -495,6 +496,12 @@ class VpxMap:
                     if isinstance(v["rgb"], str):
                         self.rgb_order[lamp_number(*leds[0])] = v["rgb"]
         self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
+        # PAD-1228: a node board's stepper the table shows (Rush LE's drum
+        # clock): Controller.GetMech(n) answers its place in steps from home
+        self.mechs = {}
+        for k, v in m.get("mechs", {}).items():
+            if k != "_":
+                self.mechs[int(k)] = (int(v["stepper"][0]), int(v["stepper"][1]))
         self._load_dof(m)
 
     def _load_dof(self, m):
@@ -1499,6 +1506,7 @@ class Bridge:
         self.sw_ids = {}                   # (node, input bit) -> switch id
         self._button_coils = {}            # (node, idx) -> button input bit
         self.mrg = bytes(padsw.MAX_ID)     # the guest's merged switch truth
+        self.mech_pos = {}                 # GetMech number -> steps (PAD-1228)
         self.max_id = padsw.MAX_ID         # one past the highest switch id (set_game)
         self.polls = 0
         self.poll_fail = 0
@@ -2494,6 +2502,10 @@ class Bridge:
                 self.mrg = sw[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
             self._poll_lamps(data)
             self._poll_coils(data, now)
+            for n, (node, motor) in self.map.mechs.items():
+                pos = coilmap.stepper(data, node, motor)
+                if pos is not None:
+                    self.mech_pos[n] = pos
             if self.dof and self.dof.up:
                 self._poll_dof(data)
 
@@ -2769,6 +2781,18 @@ class Bridge:
         with self.lock:
             return bool(self.sol_state.get(int(n or 0), 0))
 
+    def get_mech(self, n):
+        """Controller.GetMech(n): the place of the stepper the map's `mechs`
+        names for n, in steps from home; 0 until the game first homes or moves
+        it, and for a number the map does not name (VPinMAME's answer for a
+        mech a ROM lacks)."""
+        try:
+            n = int(n or 0)
+        except (TypeError, ValueError):
+            return 0
+        with self.lock:
+            return int(self.mech_pos.get(n, 0))
+
     def status(self):
         return {"title": self.title, "running": self.running, "polls": self.polls,
                 "poll_fail": self.poll_fail, "last_poll_ms": round(self.last_poll_ms, 2),
@@ -2904,7 +2928,9 @@ class PadController:
             return b.title
         if key in ("games", "settings"):
             return _anything()
-        if key in ("getmech", "mech", "dip", "solmask", "rawdmdwidth", "rawdmdheight",
+        if key == "getmech":
+            return b.get_mech(args[0] if args else 0)
+        if key in ("mech", "dip", "solmask", "rawdmdwidth", "rawdmdheight",
                    "timefence"):
             return 0
         if key == "padstatus":

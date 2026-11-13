@@ -1141,10 +1141,10 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
         hold = timed_plunger(game_elf)
         if hold is not None:
             out.append("intro_hold %d" % hold)      # PAD-1114: no auto-launch while the intro holds the ball
-        from .handicap import start_button
-        start = start_button(game_elf)
-        if start is not None:
-            out.append("intro_start %d" % start)    # round 3: a Start while ball 1 waits adds a teammate
+    from .handicap import start_button
+    start = start_button(game_elf)
+    if start is not None:                           # round 3: a Start while ball 1 waits adds a teammate; PAD-1215:
+        out.append("intro_start %d" % start)        # the same while a pick holds a player's first ball back
     if not picks:
         return out
     parts = {p["key"]: p for p in powers(game_elf, sites=sites, values=values)}

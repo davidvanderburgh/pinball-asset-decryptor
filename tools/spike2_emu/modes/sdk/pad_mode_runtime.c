@@ -17349,7 +17349,9 @@ static void coop_pick_close(const char *how)
         say("co-op: the selection screen's places at the pick (0 open, 2 won, else locked): %s", st);
     }
     if (c >= 0 && pk.who == coop.turn) coop_cache_hold();
-    if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game && !coop_classic()) {   /* the ball out was served before it */
+    /* the ball out was served before it; PAD-1215: not while its serve waits for this pick - the game reads the
+     * character's save as it serves, and a save run now would be spent before the ball is in play */
+    if (c >= 0 && coop_ch[c].bs_adj && pk.who == coop.turn && coop_adj_game && !coop_classic() && !ci.holding) {
         unsigned v = adj_chain(coop_ch[c].bs_adj);           /* what the game reads: a handicap, then theirs */
         say("co-op: %s - the ball in play gets its ball save now (%u s)", coop_ch[c].name, v);
         if (v) pm_ball_save(v);
@@ -19607,13 +19609,13 @@ static int ci_start_edge(int now_down, int *was_down, int left_down)
 }
 
 static int ci_start_was;
-static void ci_start_poll(void)
+static void ci_start_poll(int formed)
 {
     unsigned got;
     int down;
     if (!ci.start_sw || !coop_add_game) return;
     down = switch_held(ci.start_sw);
-    if (!coop_teammates() || ci.game != chg_game_now() + 1) {   /* the co-op game not formed yet: its Start's own */
+    if (!coop_teammates() || !formed) {                       /* the co-op game not formed yet: its Start's own */
         ci_start_was = down;                                  /* press is not a teammate's */
         return;
     }
@@ -19649,11 +19651,56 @@ static void ci_ball_hold(unsigned ball)
             else if (now - intro_end > 1500ul) { why = "no character pick"; break; }
         }
         if (!said++) say("co-op intro: ball 1's serve waits - the intro, the language and the character pick first");
-        ci_start_poll();
+        ci_start_poll(ci.game == chg_game_now() + 1);
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
     }
     ci.holding = 0;
     if (said) say("co-op intro: ball 1 is served after %lu ms (%s)", pm_ms() - t0, why);
+}
+
+/* PAD-1215 (DoomWalrus666, Team 2v2: "using the action button to pick a character on Player 2, 3, or 4 launched the
+ * ball ... letting the character select timeout to 0 also launched the ball"): a player's first-ball pick opens at
+ * the player change and the ball start serves their ball at once, so the pick ran with the ball in the shooter lane -
+ * Action, Godzilla's launch, took the character and launched it in one press (emulator, LE 1.16: the plunger flag
+ * dropped with the press, a hidden press too, PAD-1114), and the game's TIMED PLUNGER let it go while the time ran.
+ * Ball 1 of player 1 escaped only behind an intro (ci_ball_hold). So the serve of any turn whose player has a pick to
+ * make waits for it, the intro's way: the game's process sleeps a tick at a time until the character is taken, then
+ * the ball comes to the lane for the player to launch. A pick not open yet (the start menu's players-added lines first)
+ * is waited for while they run, else COOP_PICK_DUE_MS; a Start meanwhile is still a join (ci_start_poll). Not while an
+ * intro's phase runs: its own hold and its language window have the ball. (tests lift coop_pick_due verbatim) */
+#define COOP_PICK_DUE_MS 1500ul
+static int coop_pick_due(int on, int n_chars, unsigned turn, int picked, unsigned teammates, int intro_phase)
+{
+    return on && n_chars && teammates && turn >= 1 && turn <= 4 && picked < 0 && !intro_phase;
+}
+
+static void coop_pick_hold(void)
+{
+    unsigned long t0 = pm_ms(), begun = t0, most = (coop_pick_ms ? coop_pick_ms : COOP_PICK_MAX_S * 1000ul) + 10000ul;
+    unsigned t = coop.turn;
+    int said = 0;
+    const char *why = "";
+    if (!fn("proc_sleep") || !coop_pick_due(coop_pick_on, coop_ch_n, t, t >= 1 && t <= 4 ? coop_pick_of[t] : 0,
+                                            coop_teammates(), ci.phase != CI_OFF))
+        return;
+    ci.holding = 1;
+    ci_start_was = ci.start_sw ? switch_held(ci.start_sw) : 0;
+    for (;;) {
+        unsigned long now = pm_ms();
+        int open = pk.open && pk.who == t;
+        if (!pm_player()) { why = "the game ended"; break; }
+        if (coop.turn != t) { why = "the turn moved on"; break; }
+        if (coop_pick_of[t] >= 0) { why = "the character is taken"; break; }
+        if (ci.phase != CI_OFF) { why = "an intro began"; break; }
+        if (!open && !coop.join_n && now - t0 > COOP_PICK_DUE_MS) { why = "no character pick opened"; break; }
+        if (open && pk.left && !pk.held) t0 = now;          /* a pick under way: its own time limits it */
+        if (now - t0 >= most) { why = "the pick ran past its time"; break; }
+        if (!said++) say("co-op: player %u's ball waits to be served until their character is picked", t);
+        ci_start_poll(1);
+        ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+    }
+    ci.holding = 0;
+    if (said) say("co-op: player %u's ball is served after %lu ms (%s)", t, pm_ms() - begun, why);
 }
 
 static unsigned (*ci_serve_game)(unsigned, unsigned, unsigned, unsigned);
@@ -19661,6 +19708,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
 static unsigned ci_serve_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
 {
     ci_ball_hold(coop_ball_byte ? *coop_ball_byte : 1u);
+    coop_pick_hold();                                         /* PAD-1215 */
     return ci_serve_game(r0, r1, r2, r3);
 }
 
@@ -19884,11 +19932,13 @@ static void coop_arm(void)
         struct site *fb = site("coop_first_ball");   /* PAD-1046: the ball start's read of the ball */
         unsigned at = fn("coop_first_ball"), to = at ? hook_call(at, (void *)coop_first_ball_wrap) : 0;
         coop_ball_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)to;
-        if (ci.clip[0] && fn("serve_ball") && !ci_serve_game) {   /* PAD-1114 round 2: the serve after the intro */
-            unsigned st = hook_call(fn("serve_ball"), (void *)ci_serve_wrap);
+        if ((ci.clip[0] || (coop_pick_on && coop_ch_n)) && fn("serve_ball") && !ci_serve_game) {
+            unsigned st = hook_call(fn("serve_ball"), (void *)ci_serve_wrap);   /* PAD-1114 round 2, PAD-1215 */
             ci_serve_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)st;
-            say("co-op intro: %s", st ? "ball 1's serve waits for the intro" : "the serve could not be hooked - the "
-                "ball comes as the game serves it");
+            say("co-op: %s", !st ? "the serve could not be hooked - the ball comes as the game serves it, and a pick "
+                "with it in the lane takes a launch" : ci.clip[0] ? "ball 1's serve waits for the intro, and each "
+                "player's first ball for their character pick" : "each player's first ball waits to be served for "
+                "their character pick");
         }
         if (!to)
             say("co-op: the ball start's first-ball read is %s - each teammate's ball 1 sets the team's ball-1 progress "

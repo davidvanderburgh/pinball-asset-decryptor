@@ -5225,6 +5225,79 @@ def _scene_with_overlay(reader, node, overlays):
     return bytes(buf)
 
 
+def _pad_leftover_scenes(assets_dir):
+    """PAD-1255: the card paths (no leading slash) of the scenes a PAD build may have put screens in on the
+    project's title - its HUD, its video bank and Godzilla's battle selection - or [] when the title is not known."""
+    from . import clip_variants as _CVL
+    prof = _CVL.project_title(assets_dir, probe=True)
+    if prof is None:
+        return []
+    out = []
+    for scene, which in ((getattr(prof, "hud_scene", ""), "hud"), (getattr(prof, "bank_scene", ""), "bank")):
+        try:
+            rel = "%s/%s/scene.radium" % (prof.game_dir, prof.lcd(which)) if scene else ""
+        except Exception:                               # noqa: BLE001 - a port naming no such scene
+            rel = ""
+        if rel and rel not in out:
+            out.append(rel)
+    from . import battle_select as _BSL
+    out.append("%s/%s" % (prof.game_dir, _BSL.REL))
+    return out
+
+
+def _pad_leftover_writes(reader, assets_dir, radium_overlays, log):
+    """PAD-1255: a card built from one a PAD build made keeps that build's scenes, and the screens it put in them are
+    authored SHOWING (scene_write: the runtime hides them). Built without the feature that hid them (DragonRR: co-op
+    off on DoomWalrus666's co-op card), they sat on the glass all game. Each such screen still drawn is switched off
+    in place (its keyframes, as the Scenes window's hide) - a build that puts them in again cuts the old set out
+    first (:func:`scene_write.without_pad`). Returns the flat writes; the file-relative patch joins
+    *radium_overlays*."""
+    from . import scene_write as _SWL
+    from . import mode_write as _MWL
+    writes = []
+    try:
+        rels = _pad_leftover_scenes(assets_dir)
+    except Exception as e:                              # noqa: BLE001 - never the reason a build fails
+        log("Scenes left by an earlier build: the title could not be read (%s), so none were looked for." % e,
+            "warning")
+        return writes
+    for rel in rels:
+        try:
+            node = _MWL.lookup(reader, rel)
+            data = _scene_with_overlay(reader, node, radium_overlays) if node is not None else b""
+            patch = _SWL.pad_hidden_patch(data) if data else {}
+        except Exception as e:                          # noqa: BLE001 - never the reason a build fails
+            log("Scenes left by an earlier build: %s could not be read (%s), so it was not looked at." % (rel, e),
+                "warning")
+            continue
+        if not patch:
+            continue
+        for off, payload in sorted(patch.items()):
+            writes.extend(_place(reader, node, off, payload))
+        radium_overlays.setdefault(bytes(node["i_block"]), (node, {}))[1].update(patch)
+        names = sorted({n.name for n in _SWL.pad_nodes(data)})
+        log("%s still carries %d screen(s) an earlier PAD build put in (%s%s); they are switched off, so only "
+            "a feature this build puts in shows its own." % (rel, len(names), ", ".join(names[:4]),
+                                                              ", ..." if len(names) > 4 else ""), "info")
+    return writes
+
+
+def _pad_stock_scene(data, rel, log):
+    """PAD-1255: the scene a build puts its screens in, with those an earlier PAD build left cut back out (the stock
+    scene), so it carries one set, not a new set over the old; *data* as it is when nothing was left or the cut is
+    not a scene the app knows (the build then refuses it with :func:`scene_write.profile_for`'s words)."""
+    from . import scene_write as _SWL
+    if not data:
+        return data
+    out = _SWL.without_pad(data)
+    if out is None:
+        return data
+    if out is not data:
+        log("%s: the screens an earlier PAD build put in were taken back out before this build's go in."
+            % rel, "info")
+    return out
+
+
 def _regrow_over_modes(src, start, card_path, entry, tree_ops, grow_dir, assets_dir, log):
     """PAD-1035: the project's own edits of a scene that GROW it (longer text, resized pictures,
     the Scenes window's edits; *entry* is its ``grown_radium`` one, *tree_ops* its
@@ -9767,6 +9840,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # so their in-place edits (all at stock offsets) fold into the grown
         # bytes; the grown scene is then written whole and its in-place
         # writes are dropped.
+        # PAD-1255: screens an earlier PAD build left in the card's scenes, switched off (before the scene edits
+        # below, so a scene they grow keeps them off too)
+        pad_left_writes = _pad_leftover_writes(reader, assets_dir, radium_overlays, log)
         tree_writes, n_tree, tree_whole = [], 0, {}
         if tree_edits:
             if progress:
@@ -9798,6 +9874,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 color_writes = _drop_writes_in(color_writes, reader, _gnode)
                 layout_writes = _drop_writes_in(layout_writes, reader, _gnode)
                 tree_writes = _drop_writes_in(tree_writes, reader, _gnode)
+                pad_left_writes = _drop_writes_in(pad_left_writes, reader, _gnode)
                 radimg_writes = _drop_writes_in(radimg_writes, reader, _gnode)
         # A grown sound bank rides the same mechanism: a whole-file copy with
         # its manifest record's size rewritten alongside its digests.
@@ -9904,7 +9981,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         raise _MW.ModeWriteError(_CM.NO_TITLE)
                 else:
                     _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
-                              or idle_prof or hand_prof or cabs_prof or comp_prof or stime_prof)
+                              or idle_prof or hand_prof or cabs_prof or comp_prof or stime_prof
+                              or feed_prof)                           # PAD-1255: a feed-only build crashed here
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -9953,8 +10031,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 from . import attract_items as _AIS     # PAD-782: a clip v2 title's attract scene
                 mode_plan = _MW.plan(
                     assets_dir,
-                    _scene_with_overlay(reader, _mnodes[_hud_rel], grown_overlays) if _hud_rel else b"",
-                    _scene_with_overlay(reader, _mnodes[_bank_rel], grown_overlays) if _bank_rel else b"",
+                    _pad_stock_scene(_scene_with_overlay(reader, _mnodes[_hud_rel], grown_overlays), _hud_rel, log)
+                    if _hud_rel else b"",                    # PAD-1255: an earlier build's screens cut out
+                    _pad_stock_scene(_scene_with_overlay(reader, _mnodes[_bank_rel], grown_overlays), _bank_rel, log)
+                    if _bank_rel else b"",
                     bytes(reader.read_file_bytes(fw_node)),
                     os.path.join(grow_work, "modes"), log=log,
                     end_sound=mode_sound_used, own_sounds=mode_own_used,
@@ -10014,6 +10094,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         layout_writes = _drop_writes_in(layout_writes, reader, _node)
                         tree_writes = _drop_writes_in(tree_writes, reader, _node)
                         radimg_writes = _drop_writes_in(radimg_writes, reader, _node)
+                        pad_left_writes = _drop_writes_in(pad_left_writes, reader, _node)
                         log("%s: this project's own edits of %s go on in the scene they are built "
                             "into." % (_who_hud, _rel), "info")
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
@@ -10174,7 +10255,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 and not texture_patches and not radimg_writes
                 and not text_writes and not color_writes
                 and not layout_writes and not tree_writes
-                and not radium_grow_jobs
+                and not pad_left_writes and not radium_grow_jobs
                 and not boot_writes and boot_grow is None
                 and patched_gr is None and mode_plan is None
                 and not clip_files
@@ -10193,7 +10274,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # Display-text writes are already (disk_offset, bytes) (the radium-text
         # helper resolved them through disk_ranges itself).
         writes = (list(text_writes) + list(color_writes) + list(layout_writes)
-                  + list(radimg_writes) + list(tree_writes))
+                  + list(radimg_writes) + list(tree_writes) + list(pad_left_writes))
         writes += stock_mode_writes          # the game's own modes (item 145)
         writes += score_writes               # the score panel's colours (PAD-507)
         writes += sound_list_writes          # the request lists' bank sids (PAD-606)

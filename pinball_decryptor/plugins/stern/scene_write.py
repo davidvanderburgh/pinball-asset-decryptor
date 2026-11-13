@@ -930,6 +930,10 @@ def _profile(data):
 def profile_for(data):
     md5 = hashlib.md5(data).hexdigest()
     p = _profile(data)
+    if p is None and pad_nodes(data):                   # PAD-1255: not cut back by without_pad
+        raise SceneWriteError("this card's scene still carries the screens an earlier build of this app put in "
+                              "(%s), and they could not be taken back out; build from the card as it came from "
+                              "Stern" % ", ".join(sorted({n.name for n in pad_nodes(data)})[:3]))
     if p is None:
         raise SceneWriteError("no measured profile for a scene with md5 %s; read it off a boot "
                               "with modes/scenelog.c first (scenelog.want)" % md5)
@@ -1442,3 +1446,82 @@ def add_screens(data, screens, stock=None, clips=None, font_source=None, huds=No
             raise SceneWriteError("%s: the library does not start at byte 1" % p.label)
         struct.pack_into("<Q", new, 1, struct.unpack_from("<Q", new, 1)[0] + len(libs))
     return bytes(new), infos
+
+
+# ---- PAD-1255: the screens an EARLIER build left in the card's scenes ------------------------------------------------
+# DragonRR built a Godzilla card from one DoomWalrus666 had built with co-op and Teams, with co-op off: the HUD the new
+# card kept was the old build's, its co-op pick screens and award cards authored visible (above: the mode.so hides
+# them), and no co-op runtime ran to hide them - FINALGOJI's award card, the last one drawn, sat over the game all game.
+# Every node a build puts in a scene is named with one of these stems (coop_play, mode_project, mode_hud, battle_select).
+PAD_NODE_STEMS = ("PadCoop", "PadMode_", "PadSel_")
+
+
+def _pad_named(name):
+    return any(name.startswith(s) for s in PAD_NODE_STEMS)
+
+
+def pad_nodes(data):
+    """The topmost nodes of *data* (a scene's bytes) an earlier PAD build put in it (scene_tree Nodes; a PAD node's
+    own children are left out), [] for a scene with none or one that does not read as a tree."""
+    if not any(s.encode() in data for s in PAD_NODE_STEMS):
+        return []
+    from . import scene_tree
+    try:
+        tree = scene_tree.parse(data)
+    except Exception:                                   # noqa: BLE001 - not a scene this app walks: nothing to say
+        return []
+    out, inside = [], set()
+    for n, parent, _depth in tree.walk():
+        if parent is not None and id(parent) in inside:
+            inside.add(id(n))
+            continue
+        if _pad_named(n.name) and n.at is not None:
+            out.append(n)
+            inside.add(id(n))
+    return out
+
+
+def pad_hidden_patch(data):
+    """``{file offset: b"\x00"}``: the visible byte of each keyframe of every PAD node in *data* still drawn (the
+    Scenes window's hide, its keyframes all off), so a card that keeps the scene without the runtime that hid them
+    shows the game's own screen. ``{}`` when none is drawn."""
+    patch = {}
+    for n in pad_nodes(data):
+        o = n.at + 4                                    # u32 id (a first occurrence: the node's definition)
+        ln = struct.unpack_from("<Q", data, o)[0]
+        if data[o + 8:o + 8 + ln] != n.name.encode("latin1"):
+            continue                                    # not laid out as a defined node: leave it alone
+        o += 8 + ln + 4                                 # name, u32 flag
+        k = struct.unpack_from("<Q", data, o)[0]
+        if k != len(n.keyframes):
+            continue
+        for i in range(k):
+            vis = o + 8 + i * 5 + 4
+            if data[vis]:
+                patch[vis] = b"\x00"
+    return patch
+
+
+def without_pad(data):
+    """*data* with the root screens an earlier PAD build put in cut back out - the stock scene they were added to,
+    so a new build adds its own once, not a second set over the first (the root's child count put back). *data*
+    itself when it carries none; None when the cut is not a scene this module has measured (a profile's md5, or
+    one edited in place, :func:`_profile`) or PAD nodes sit below the root: then it cannot be told apart from a
+    scene the cut broke."""
+    nodes = pad_nodes(data)
+    if not nodes:
+        return data
+    from . import scene_tree
+    kids = scene_tree.parse(data).root["kids"]
+    roots = {k.at for k in kids}
+    if any(n.at not in roots for n in nodes):
+        return None
+    count_at = kids[0].at - 8
+    if struct.unpack_from("<Q", data, count_at)[0] != len(kids):
+        return None
+    out = bytearray(data)
+    for n in sorted(nodes, key=lambda n: -n.at):
+        del out[n.at:n.end]
+    struct.pack_into("<Q", out, count_at, len(kids) - len(nodes))
+    out = bytes(out)
+    return out if _profile(out) is not None else None

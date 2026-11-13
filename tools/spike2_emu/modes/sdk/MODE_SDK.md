@@ -6430,6 +6430,14 @@ players-added lines and the pick after them); while it waits the pick has the fl
 its top line says ACTION PICKS). Not earlier in the ball start: held at its first-ball check the game never put its
 intro screen up. The handicap pick (PAD-1033) already waits for the character's.
 
+**PAD-1221: every teammate's pick holds its serve.** Teammates 2-4 picked with their ball already in the lane, and the
+Action press that took the character launched it (the game launches on Action even when the runtime hides it), so
+their handicap pick never had a waiting ball. The serve hook is now set whenever `pick on` (intro or not), and any
+pick open at a ball start's serve holds it the same way (`coop_pick_hold`: until the character is taken, the game
+ends, or the pick's time + 5 s; 5 min with no pick time): the character, then the ball in the lane with the handicap
+pick, then Action or the plunger launches. Emulator, Godzilla LE 1.16, teammate 2: plunger flag 12 stayed 0 through
+the pick, rose 0.8 s after Action took it, and fell only at the next Action.
+
 **Round 3: players added during the intro; the pick at once.** The game takes Start on its own process, which waits
 in the serve, so a Start in the intro was lost: while ball 1's serve waits, a press of the Start button (coop.cfg
 `intro_start <id>`, the program's START BUTTON; not with the left flipper held, the game's reset; not the press that

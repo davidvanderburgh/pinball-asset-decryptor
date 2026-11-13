@@ -526,6 +526,10 @@ def _argcount(rest):
                 n += 1
             elif ch == "'":
                 break
+            elif ch == ":" and depth == 0:
+                # PAD-1207: the statement ends here; what follows is the
+                # next call, not more arguments
+                break
         if not ch.isspace():
             seen = True
     return (n + 1) if seen else 0
@@ -571,10 +575,15 @@ def pup_stub(lines, rep, force=False):
         if s.startswith("'"):
             continue
         # any case: Aerosmith's PuPInit calls `puplayer.getroot`
-        for m in re.finditer(r"\bPuPlayer\.(\w+)\s*(.*)$", s, re.I):
-            meth, rest = m.groups()
+        # each call on the line on its own (PAD-1207: Batman 66's timer
+        # string `...:puPlayer.LabelSet a,b,c,d,e:puPlayer.LabelSet a,b,c,d,e`
+        # read as one 9-argument call, a false WARNING in every patch log,
+        # and a method called only after another on its line went missing)
+        for m in re.finditer(r"\bPuPlayer\.(\w+)\s*", s, re.I):
+            meth, rest = m.group(1), s[m.end():]
             if rest.startswith("("):
-                inner = rest[1:rest.rfind(")")] if ")" in rest else rest[1:]
+                span = _paren_span(rest, 0)
+                inner = rest[1:span[1]] if span else rest[1:]
                 n = _argcount(inner)
             elif rest.startswith("="):
                 continue

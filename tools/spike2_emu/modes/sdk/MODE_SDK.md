@@ -6447,6 +6447,8 @@ players-added lines and the pick after them); while it waits the pick has the fl
 its top line says ACTION PICKS). Not earlier in the ball start: held at its first-ball check the game never put its
 intro screen up. The handicap pick (PAD-1033) already waits for the character's.
 
+**PAD-1221: a Start press in the intro adds a player with no sound.** The game answers an add with its own sound about 0.5 s later (Godzilla LE 1.16: request 1161, bus 0x2), which the intro's 250 ms fade let be heard. A Start press while ball 1 waits sets `ci.join_at`, and `ci_quiet` stops outright (`ci_join_cut`) any non-music sound first seen within 3 s of it. (Every teammate's pick holding their serve is PAD-1215's, below.)
+
 **Round 3: players added during the intro; the pick at once.** The game takes Start on its own process, which waits
 in the serve, so a Start in the intro was lost: while ball 1's serve waits, a press of the Start button (coop.cfg
 `intro_start <id>`, the program's START BUTTON; not with the left flipper held, the game's reset; not the press that

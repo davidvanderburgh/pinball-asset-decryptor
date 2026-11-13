@@ -72,7 +72,8 @@ SUB_RE = r"^(\s*)(Public\s+|Private\s+)?Sub\s+(%s)\s*(\([^)]*\))?(\s*'.*|\s*:.*)
 #: spinner standing in for the machine's OPTO: a ball through it spins it a
 #: dozen times, and the opto must see one pass, not twelve
 EVENT_SUBS = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
-              "pass": ("_Spin",), "slingshot": ("_Slingshot",), "drop": ("_Hit",)}
+              "pass": ("_Spin",), "slingshot": ("_Slingshot",), "drop": ("_Hit",),
+              "latch": ("_Hit",)}
 PASS_MS = 600
 
 
@@ -1272,6 +1273,25 @@ def gen(m, had, quiet=None, dof=None):
             else:
                 body += fx(name + "_Slingshot")
             out.append("Sub %s_Slingshot : %s : End Sub" % (name, body))
+        elif ev == "latch":
+            # PAD-1206: a ball a MECHANISM holds (Iron Maiden's Sarcophagus). The ball
+            # drops onto the trigger, the switch closes and stays closed: a pulse told
+            # the game the lock was empty again at once, so it never counted the lock
+            # and served another ball. No UnHit opens it either - the table switches
+            # the trigger off under the ball as the mechanism turns - so the map's
+            # `call` (a sub of its extra_vbs) notes the ball for the table's own
+            # mechanics and the map's code opens the switch when the ball leaves.
+            body = "Controller.Switch(%d) = True" % sid
+            if s.get("call"):
+                body += " : " + s["call"]
+            if had.get(name + "_Hit") and calls_orig(name):
+                body += " : %s_Hit_orig" % name
+            else:
+                body += fx(name + "_Hit")
+            if helpers:
+                out += ["Sub %s_Hit" % name, guard, "	" + body, "End Sub"]
+            else:
+                out.append("Sub %s_Hit : %s : End Sub" % (name, body))
         elif ev == "drop":
             # PAD-952: a drop target's switch stays as the hit left it until
             # the game resets the bank (drop_resets): open on a machine whose

@@ -558,7 +558,8 @@ def test_co_op_alone_puts_the_pick_screens_in_the_hud_and_names_the_scene(tmp_pa
                                                                       and hud + b"+screens", []))
     result = MW.ModePlan(project=project, profile=Prof(), port="", build=None)
     MW.coop_into(result, b"", str(tmp_path / "scratch"), stock_hud=b"HUD", stock_font=b"")
-    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopAward_1"]   # PAD-1028: + the award card
+    # PAD-1028: + the award card; PAD-1219: + the final score's band
+    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopAward_1", "PadCoopFinal"]
     (card, src), = result.replaced
     assert card == "godzilla_le/godzilla_le/assets/lcd/auto_loaded/32e6ae28/scene.radium"
     assert open(src, "rb").read() == b"HUD+screens"

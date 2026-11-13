@@ -6460,6 +6460,19 @@ A teammate with no character, or one with no picture or video, gets the game's o
 (PAD-1028 round 3) plays the game's own loop, never a teammate's copy. The build makes the copies from the project's
 own file of the loop (the stock one extracted, or the owner's replacement of it), else the card's.
 
+**The awards ceremony (PAD-1219).** DoomWalrus666 saw the cards over a battle's clip on his machine and asked for the
+HUD off and the final score along the bottom. A bonus end seen during the game is no longer needed: the build names
+what plays behind the cards in coop.cfg, `ceremony <clip> <crop>` - the owner's Awards video (made into
+`PadCoopCeremony`, a silent full-screen clip of the bank's size, crop `Normal`) or else the bank's End of Ball Bonus
+loop at its own crop - and the backdrop takes ANY background's place while the cards show (a battle's included, which
+bd_place_ok refused before). While they show, `on_scene_show` keeps every scene but the cards' own (the HUD scene the
+build put them in) and the video player out of the frame: the score panels, the top bar's words, the background's own
+words; the power-up meter goes with them. The build adds `PadCoopFinal` beside the cards, a band across the glass's
+foot (y 596, 1360x160) whose words the runtime writes at x1.4 (28 characters fill the glass; x2.1 cut the words' ends on the emulator):
+"FINAL SCORE  <player 1's>" in co-op, "TEAM 1  <p1>   TEAM 2  <p2>" in a team game ("T1 <p1>  T2 <p2>" when that is
+too long). Emulator, Godzilla LE 1.16: see the ticket's after shots. A port with no
+backdrop (`scene_show` unhooked) keeps the HUD and says so.
+
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 
 - `adj:<id>=<v>` / `adj:<id>x<pct>:<lo>:<hi>`: the game's adjustment `<id>` reads `v`, or its own value x pct / 100

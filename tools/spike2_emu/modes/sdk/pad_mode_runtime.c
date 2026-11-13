@@ -19288,7 +19288,20 @@ static void on_coop_bonus_play(unsigned *r)
 {
     const char *name = (const char *)(unsigned long)r[0], *ours;
     int c;
+    static int attract_said;
     if (!name || !cb.loop[0] || !str_eq(name, cb.loop) || !coop_teammates()) return;
+    /* PAD-1243 (DoomWalrus666: "held left flipper and start button to reset the game. The players character image was
+     * still on screen during attract mode"): Godzilla's attract plays the same loop behind its pages, every 3-5 s
+     * (emulator, LE 1.16), and a co-op game is this game's until the next one starts - a reset (or any game's end)
+     * leaves the player byte at 1, only pm_in_game() falls. So the copy answers only while a game is played (the
+     * bonus is: pm_in_game() held through it); attract gets the game's own loop */
+    if (!pm_in_game()) {
+        if (!attract_said) say("co-op characters: the game asks for its bonus loop with no game played (attract) - "
+                               "its own loop, no character");
+        attract_said = 1;
+        return;
+    }
+    attract_said = 0;
     c = coop.turn >= 1 && coop.turn <= 4 ? coop_pick_of[coop.turn] : -1;
     ours = cb_pick(name, cb.loop, c < coop_ch_n ? c : -1, (const char (*)[32])cb.clip, CPK_CHARS);
     if (cb.says < 60) {

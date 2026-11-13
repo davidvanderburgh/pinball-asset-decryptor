@@ -227,9 +227,17 @@ class Spike3SpkExtractPipeline(BasePipeline):
         if want_a:
             self._set_phase(5)
             # image.bin is a plaintext PCM container: decode it to WAVs
+            # PAD-1244: each image.bin's sounds named from the Sound Test
+            # menu of the game program packed beside it
+            games = {os.path.dirname(f.path.lstrip("/")): f for f in arc.files
+                     if os.path.basename(f.path) == "game"}
+
+            def game_of(d):
+                f = games.get(d)
+                return b"".join(arc.read_file(f)) if f is not None else None
             counts["audio"], counts["seconds"] = decode_sound_containers(
                 self, sounds, lambda fobj: fobj.path,
-                lambda fobj, out: arc.extract(fobj, out))
+                lambda fobj, out: arc.extract(fobj, out), game_of=game_of)
         return counts
 
     def _copy(self, arc, items, subdir):

@@ -189,6 +189,13 @@ _SPIKE3_CAPS = Capabilities(
     # PAD-1090: the Emulate tab runs a Spike 3 card on the Spike 3 rig
     # (tools/spike3_emu/s3launch.sh), with the virtual playfield beside it
     emulate=True,
+    # PAD-1244: the sounds decode to Spike 2's audio/idxNNNN.wav and
+    # music_catNN_NNNN.wav, so Extract's Auto-transcribe (faster-whisper
+    # names the callouts) and Auto-name music run on them unchanged.
+    # Extract itself names the ones the game's Sound Test menu names first
+    # (spike3_requests), and Auto-transcribe skips named files.
+    transcribe=True,
+    music_id=True,
 )
 
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD
@@ -735,8 +742,9 @@ class SternManufacturer(Manufacturer):
             return _SPIKE1_PREREQS
         if self._era == "spike3":
             # LUKS decrypt is pure Python over the bundled crypto backend;
-            # videos copy out verbatim (no ffmpeg).  Nothing extra to install.
-            return ()
+            # videos copy out verbatim (no ffmpeg).  Only Auto-transcribe
+            # needs anything (PAD-1244), and extract works without it.
+            return (_SPIKE1_PREREQS[1],)
         return self._SPIKE2_PREREQS
 
     @property
@@ -1545,6 +1553,14 @@ class SternManufacturer(Manufacturer):
             rename_after=rename_after)
 
     def extract_input_help(self):
+        if self._era == "spike3":
+            return ("Select a Stern Spike 3 secure SD-card image (.raw) or a "
+                    ".spk package. Extract decrypts the games partition, "
+                    "decodes its sounds to per-sound WAVs (audio/), named from "
+                    "the game's Sound Test menu where it names them, and "
+                    "copies out the videos and pictures. Tick Auto-transcribe "
+                    "to name the rest of the voice callouts by their spoken "
+                    "text.")
         if self._era == "spike1":
             return ("Select a Stern Spike 1 SD-card image — Stern's update "
                     ".iso files are raw card images and work directly. "

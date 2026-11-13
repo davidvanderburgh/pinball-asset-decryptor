@@ -1057,3 +1057,63 @@ def test_a_shorter_pick_is_offered_a_loop(tmp_path, monkeypatch):
     with web_app(tmp_path / "again", mfr="stern") as w:
         _scan(w, proj)
         assert w.call("video.row_menu", [rel])["length"] == "loop"
+
+
+def test_vs_stock_column_sorts_and_speed_choice(tmp_path, monkeypatch):
+    # PAD-1232 (DoomWalrus666): each picked file says how much shorter or
+    # longer it runs than the stock clip and the speed change that would
+    # make it run exactly as long; the column sorts by it; "stretch" is the
+    # row menu's new length choice, shown in Length, kept with the project,
+    # and the Replacement player is told the stock length to play it at.
+    import os as _os
+    from pinball_decryptor.core import video as core_video
+    from pinball_decryptor.webui.tabs.video import VideoTab
+    secs = {"short.mp4": 9.75, "long.mp4": 12.5}
+    monkeypatch.setattr(core_video, "probe_duration",
+                        lambda p: secs.get(_os.path.basename(str(p)), 0.0))
+    monkeypatch.setattr(VideoTab, "_stock_secs",
+                        lambda self, rel, probe=False: 10.0)
+    proj = _project(tmp_path)
+    short, long_ = _mine(tmp_path, "short.mp4"), _mine(tmp_path, "long.mp4")
+    a, b = "video/attract.mp4", "video/intro.mp4"
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        assert _row(w.state("video"), a)["fit"] == ""
+        w.answers.append(str(long_))
+        assert w.call("video.choose", a) is True
+        w.answers.append(str(short))
+        assert w.call("video.choose", b) is True   # 0.25 s short: no loop asked
+        st = _wait(w, lambda st: _row(st, a)["fit"] not in ("", "…")
+                   and _row(st, b)["fit"] not in ("", "…"))
+        assert _row(st, b)["fit"] == "−0.25 s • 2.5% slower"
+        assert _row(st, a)["fit"] == "+2.50 s • 25% faster"
+        assert "2.5% slower" in " ".join(_row(st, b)["fit_tip"]["lines"])
+
+        assert w.call("video.sort", "fit") is True
+        order = [r for r in _rels(w.state("video")) if r in (a, b)]
+        assert order == [b, a]                      # the most short first
+        w.call("video.sort", "fit")
+        order = [r for r in _rels(w.state("video")) if r in (a, b)]
+        assert order == [a, b]
+
+        w.call("video.select", b)
+        assert w.state("video")["preview"]["rep"].get("fit_to") is None
+        assert w.call("video.set_length", b, "stretch") is True
+        st = w.state("video")
+        assert _row(st, b)["len"].endswith("• speed")
+        assert _row(st, b)["fit_cls"] == "on"
+        assert w.call("video.row_menu", [b])["length"] == "stretch"
+        assert st["preview"]["rep"]["fit_to"] == 10.0
+        assert w.window.pending_video_assignments(str(proj))[5] == {
+            b: "stretch"}
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        _scan(w, proj)
+        assert w.call("video.row_menu", [b])["length"] == "stretch"
+
+
+def test_gap_words():
+    from pinball_decryptor.webui.tabs.video import _gap_words
+    assert _gap_words(9.75, 10.0) == "−0.25 s • 2.5% slower"
+    assert _gap_words(10.02, 10.0) == "same length"
+    assert _gap_words(30.0, 15.0) == "+15.0 s • 100% faster"
+    assert _gap_words(100.0, 200.0) == "−1:40 • 50% slower"

@@ -641,8 +641,15 @@ HELP_CONTENT = {
          "- Needs an image build, not a direct SD write."),
         ("Clip length",
          "Right-click > **This clip's length**: follow the **Trim / pad** box (default), "
-         "match the stock clip, keep your file's full length, or type seconds.\n\n"
+         "match the stock clip, loop your file to it, speed your file to it, keep your "
+         "file's full length, or type seconds.\n\n"
          "- A clip with its own length shows it after the **Length** cell.\n"
+         "- **Vs stock** shows how much longer (+) or shorter (−) your file runs than "
+         "the stock clip and the speed change that would make it run exactly as long, "
+         "like −0.25 s • 2.5% slower. Click its header to sort by it.\n"
+         "- **Speed my file to the stock clip's length** slows a shorter file down (or "
+         "speeds a longer one up) to fill it, with no frozen last frame and no cut; the "
+         "sound keeps its pitch. The Replacement player plays it at that speed.\n"
          "- Trim / pad always measures against the stock clip, even on a replaced "
          "slot.\n"
          "- Clips under a second (a sixth of one Batman card's 6331, down to one-frame "

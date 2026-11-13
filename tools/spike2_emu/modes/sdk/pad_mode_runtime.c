@@ -1091,7 +1091,11 @@ int pm_sound_priority(unsigned request, int priority, int flags)
     int old, i;
     if (!table || !count || !request || request >= *(unsigned *)(unsigned long)count) return -1;
     rec = (unsigned char *)(unsigned long)(table + request * 20);
-    if (!*(unsigned *)(rec + 8) || rec[16] > 9 || rec[19] != 0) return -1;
+    for (i = 0; i < PRIO_STOCK_MAX && prio_stock[i].request && prio_stock[i].request != request; i++) ;
+    /* the record check: a priority past 9 is not taken for a record - unless it is one changed here before (PAD-1220:
+     * the co-op intro's carrier goes up to 255 while it plays, and comes back down after) */
+    if (!*(unsigned *)(rec + 8) || rec[19] != 0
+        || (rec[16] > 9 && !(i < PRIO_STOCK_MAX && prio_stock[i].request == request))) return -1;
     old = rec[16] << 8 | rec[17];
     if ((priority >= 0 && priority != rec[16]) || (flags >= 0 && flags != rec[17])) {
         for (i = 0; i < PRIO_STOCK_MAX && prio_stock[i].request && prio_stock[i].request != request; i++) ;
@@ -18649,12 +18653,48 @@ static int ci_lookup(unsigned *r)
     return 1;
 }
 
+/* PAD-1220 (DoomWalrus666: "If start button is pressed more than once at the beginning of a co-op game to add more
+ * players, it kills the audio from the intro video and it does not come back"): each teammate added during the intro
+ * has the game's "player added" sound (Godzilla LE/Pro 1.16 request 1161, priority 196 with the steal flag, emulator),
+ * on the intro carrier's bus and of a higher priority than its 3 - it took the bus, and the intro's sound was gone for good (a sound cannot be started
+ * again part way in). The carrier plays at the top priority while the intro does, so the bus turns the game's sounds
+ * away instead; a request's priority is copied into its channel at the play, so it is raised before the play and set
+ * back once the intro is over. */
+#define CI_PRIO_IDLE    3
+#define CI_PRIO_PLAYING 255              /* over the game's "player added" 196 (flagged to steal) */
+static int ci_prio_lifted;
+
+static void ci_sound_start(unsigned long now)
+{
+    if (!ci.request) return;
+    if (pm_sound_active(ci.request)) pm_sound_stop(ci.request);
+    ci.swap_until = now + (ci.sound_ms ? ci.sound_ms : ci.ms) + 1000ul;
+    if (pm_sound_priority(ci.request, CI_PRIO_PLAYING, 0) >= 0) ci_prio_lifted = 1;
+    pm_sound(ci.request);
+}
+
+/* every tick: the carrier's priority back to its own once the intro is not playing */
+static void ci_sound_settle(void)
+{
+    if (!ci_prio_lifted || ci.phase == CI_FILM || ci.phase == CI_PLAY) return;
+    ci_prio_lifted = 0;
+    if (ci.request && pm_sound_priority(ci.request, CI_PRIO_IDLE, 0) >= 0)
+        say("co-op intro: its carrier %u back to priority %d", ci.request, CI_PRIO_IDLE);
+}
+
 /* the game's own sounds faded while the intro plays, each once (a fade asked for again starts over and never ends);
  * its music remembered, to be asked for again after */
 static void ci_quiet(void)
 {
     unsigned reqs[8], buses[8], k;
-    int n = pm_sound_playing(reqs, buses, 8), i;
+    int n = pm_sound_playing(reqs, buses, 8), i, j, m;
+    /* PAD-1220: one no longer playing (its fade over) is forgotten, so the next time the game plays it - each teammate
+     * added during the intro has its "player added" sound - it is faded again */
+    for (k = m = 0; k < ci.n_quiet; k++) {
+        for (j = 0; j < n && j < 8 && reqs[j] != ci.quiet[k]; j++) ;
+        if (j < n && j < 8) ci.quiet[m++] = ci.quiet[k];
+    }
+    ci.n_quiet = m;
     for (i = 0; i < n && i < 8; i++) {
         if (!reqs[i] || reqs[i] == ci.request) continue;
         for (k = 0; k < ci.n_quiet && ci.quiet[k] != reqs[i]; k++) ;
@@ -18856,6 +18896,7 @@ static void coop_intro_tick(void)
 {
     unsigned long now = pm_ms();
     int w;
+    ci_sound_settle();
     if (!pm_player() && !ci.phase && ci_language_word(1)) {   /* attract only: not while ball 1's serve waits */
         ci.lang_before = (int)(*ci_language_word(1) & 1u);    /* attract: the language the next game starts in */
         ci.lang_until = 0;                                    /* (held until the intro begins, then a moment more) */
@@ -18900,11 +18941,7 @@ static void coop_intro_tick(void)
             ci.film_up_seen = 0;
             ci.phase = CI_FILM;
             ci_quiet();
-            if (ci.request) {
-                if (pm_sound_active(ci.request)) pm_sound_stop(ci.request);
-                ci.swap_until = now + (ci.sound_ms ? ci.sound_ms : ci.ms) + 1000ul;
-                pm_sound(ci.request);
-            }
+            ci_sound_start(now);
             ci_film_words(1);
             say("co-op intro: the game's intro screen plays it with its own language bar%s",
                 ci.request ? ", its sound on the carrier" : "");
@@ -18925,11 +18962,7 @@ static void coop_intro_tick(void)
         }
         ci.phase = CI_PLAY;
         ci_quiet();
-        if (ci.request) {
-            if (pm_sound_active(ci.request)) pm_sound_stop(ci.request);
-            ci.swap_until = now + (ci.sound_ms ? ci.sound_ms : ci.ms) + 1000ul;
-            pm_sound(ci.request);
-        }
+        ci_sound_start(now);
         say("co-op intro: \"%s\" (%u ms) plays%s", ci.clip, ci.ms,
             ci.request ? ", its sound on the carrier" : " - no sound of its own on this card");
         return;
@@ -23226,7 +23259,7 @@ static void ci_sound_arm(void)
         ci.request = 0;
         return;
     }
-    if (pm_sound_priority(ci.request, 3, 0) < 0)
+    if (pm_sound_priority(ci.request, CI_PRIO_IDLE, 0) < 0)
         say("co-op intro: the carrier's priority stays its own - the port has no request table");
     ci_live = 1;
     say("co-op intro: its sound (%u ms) rides request %u", ci.sound_ms, ci.request);

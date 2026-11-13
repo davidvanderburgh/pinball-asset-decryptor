@@ -153,6 +153,62 @@ def test_decrypting_reader_roundtrip():
     assert r.read(30) == plain[sector * 5 - 7:sector * 5 + 23]
 
 
+@pytest.mark.parametrize("sector,step,first", [(512, 1, 0), (512, 1, (1 << 32) - 3),
+                                               (4096, 8, 51740675)])
+def test_bulk_xts_matches_the_library_unit_by_unit(sector, step, first):
+    """PAD-1238: the two-ECB-call XTS gives exactly the bytes of one
+    cryptography XTS cipher per unit (the independent reference)."""
+    otp = spike3._luks_otp()
+    if otp._np is None:
+        pytest.skip("numpy")
+    key = os.urandom(64)
+    data = os.urandom(sector * 9)
+    ref = b"".join(otp._xts_one_unit(key, data[i * sector:(i + 1) * sector],
+                                     first + i * step, encrypt=True, sector_size=sector)
+                   for i in range(9))
+    assert otp._xts_bulk(key, data, first, sector, step, True) == ref
+    assert otp.aes_xts_encrypt(key, data, first, sector, step) == ref
+    back = b"".join(otp._xts_one_unit(key, ref[i * sector:(i + 1) * sector],
+                                      first + i * step, encrypt=False, sector_size=sector)
+                    for i in range(9))
+    assert back == data
+    assert otp.aes_xts_decrypt(key, ref, first, sector, step) == data
+
+
+def test_decrypting_reader_reads_in_runs_not_sectors():
+    """PAD-1238: a file's data is one request; small reads fill a read-ahead
+    window; the bytes match whatever the read size or cache size."""
+    otp = spike3._luks_otp()
+    key = os.urandom(64)
+    nsec = 600
+    plain = os.urandom(512 * nsec)
+    ct = otp.aes_xts_encrypt(key, plain, 0, 512)
+
+    class _Counting(io.BytesIO):
+        reads = 0
+
+        def read(self, n=-1):
+            type(self).reads += 1
+            return super().read(n)
+    f = _Counting(ct)
+    hdr = _FakeHeader()
+    hdr._pad_part_sectors = nsec
+    r = spike3.DecryptingSegmentReader(f, 0, hdr, key, cache_sectors=200)
+    r.seek(1000)
+    assert r.read(512 * 100) == plain[1000:1000 + 512 * 100] and _Counting.reads == 1
+    for off, n in ((5, 40), (511, 2), (512 * 130 + 3, 4096), (512 * 599, 512),
+                   (512 * 300 - 1, 512 * 70), (7, 512 * 63)):
+        r.seek(off)
+        assert r.read(n) == plain[off:off + n], (off, n)
+    assert len(r._cache) <= 200
+    _Counting.reads = 0
+    r.seek(512 * 400)
+    r.read(16)
+    r.seek(512 * 400 + 4096)                         # inside the read-ahead
+    assert r.read(16) == plain[512 * 400 + 4096:512 * 400 + 4112]
+    assert _Counting.reads == 1
+
+
 # --------------------------------------------------------------------------
 # Title table / filename mapping
 # --------------------------------------------------------------------------

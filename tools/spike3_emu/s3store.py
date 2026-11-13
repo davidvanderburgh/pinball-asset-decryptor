@@ -53,6 +53,7 @@ Builds take a lock on the store, so two at once queue rather than race (the
 same one-card-at-a-time rule the Spike 2 cache copies follow).
 """
 import argparse
+import contextlib
 import errno
 import hashlib
 import json
@@ -389,15 +390,42 @@ def _rdev(inode):
     return os.makedev((new & 0xFFF00) >> 8, (new & 0xFF) | ((new >> 12) & 0xFFF00))
 
 
-def copy_tree_reader(fs, dst, objs, progress=None):
+# The meter's total is the bytes of the files the copy reads - a hardlinked
+# or sparse file is read once per name and whole - NOT the blocks in use:
+# Fallout's rootfs has 240 MB of blocks and 636 MB of files (PAD-1238).
+def file_bytes(src):
+    """The bytes copy_tree() will read out of *src* (a mounted tree)."""
+    total = 0
+    for root, dirs, files in os.walk(src):
+        if root == src and "lost+found" in dirs:
+            dirs.remove("lost+found")
+        for n in files:
+            try:
+                st = os.lstat(os.path.join(root, n))
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                total += st.st_size
+    return total
+
+
+def reader_walk(fs):
+    """``(entries, bytes)``: one walk of a user-space reader's tree, for
+    copy_tree_reader(entries=...), and the bytes of its regular files."""
+    entries = list(fs.iter_tree())
+    return entries, sum(e[3]["size"] for e in entries if e[1] == "file")
+
+
+def copy_tree_reader(fs, dst, objs, progress=None, entries=None):
     """copy_tree() for a partition read in user space: the same tree, the
-    same objects, the same owners, modes and times."""
+    same objects, the same owners, modes and times. *entries* is a walk
+    reader_walk() already made, so the tree is not read twice."""
     files = nbytes = 0
     dirs = []
     os.makedirs(dst, exist_ok=True)
     root = fs.read_inode(2)
     dirs.append((dst, root))
-    for rel, kind, ino, inode in fs.iter_tree():
+    for rel, kind, ino, inode in (fs.iter_tree() if entries is None else entries):
         d = os.path.join(dst, rel)
         m = inode["mode"]
         if kind == "dir":
@@ -438,12 +466,54 @@ def copy_tree_reader(fs, dst, objs, progress=None):
 # --------------------------------------------------------------------------
 # the object store
 # --------------------------------------------------------------------------
+class Meter:
+    """How far a build is through the bytes it has to read (PAD-1238). The
+    games partition is ~10 GB read at ~9 MB/s off a Windows drive, and the
+    per-500-files lines came minutes apart, so the Emulate tab sat at 2%.
+    Every *every* seconds it prints one line the tab follows:
+
+        [s3store] progress <pct> <done MB> <total MB> <seconds left|->
+    """
+
+    def __init__(self, total, every=2.0, out=None, clock=time.monotonic):
+        self.total = max(0, int(total))
+        self.done = 0
+        self.every = every
+        self.out = out or (lambda s: print(s, flush=True))
+        self.clock = clock
+        self.t0 = clock()
+        self.last = None
+
+    def add(self, n):
+        self.done += n
+        now = self.clock()
+        if self.last is None or now - self.last >= self.every:
+            self.last = now
+            self.out(self.line(now))
+
+    def line(self, now=None):
+        now = self.clock() if now is None else now
+        total = max(self.total, self.done, 1)
+        pct = min(100, self.done * 100 // total)
+        el = now - self.t0
+        # the rate settles after a few seconds and the first MB is not it
+        eta = ("%d" % ((total - self.done) * el / self.done)
+               if el >= 5 and self.done >= (8 << 20) else "-")
+        return "[s3store] progress %d %d %d %s" % (
+            pct, self.done // 1000000, total // 1000000, eta)
+
+
 class Objects:
-    def __init__(self, store):
+    def __init__(self, store, meter=None):
         self.dir = os.path.join(store, "objects")
         self.tmp = os.path.join(store, "objects", "tmp")
         os.makedirs(self.tmp, exist_ok=True)
         self.new_files = self.new_bytes = self.shared_files = self.shared_bytes = 0
+        self.meter = meter
+
+    def _tick(self, n):
+        if self.meter is not None:
+            self.meter.add(n)
 
     def put(self, src, st):
         """Copy *src* in (sparse-aware, one read pass, hashed as it goes) unless
@@ -457,6 +527,7 @@ class Objects:
                     b = fi.read(CHUNK)
                     if not b:
                         break
+                    self._tick(len(b))
                     h.update(b)
                     if b == ZERO[:len(b)]:
                         fo.seek(len(b), os.SEEK_CUR)   # keep holes holes
@@ -497,6 +568,7 @@ class Objects:
             with os.fdopen(fd, "wb") as fo:
                 fd = None
                 for b in chunks:
+                    self._tick(len(b))
                     h.update(b)
                     size += len(b)
                     if b == ZERO[:len(b)]:
@@ -671,39 +743,58 @@ def cmd_build(a):
         if os.path.exists(part):
             shutil.rmtree(part)
         os.makedirs(part)
-        objs = Objects(store)
         roles = {}
         t0 = time.time()
-        for idx, role, start, count, luks in plist:
-            if a.roles and role not in a.roles:
-                continue
-            t1 = time.time()
-            name = "pad_s3_%d_%d" % (os.getpid(), idx)
-            mnt = "/run/pad-s3store/%s" % name
-            nf0, nb0 = objs.new_files, objs.new_bytes
-
-            def prog(files, nbytes, role=role):
-                print("[s3store]   %s: %d files, %.0f MB" % (role, files, nbytes / 1e6), flush=True)
-            if use_kernel:
-                with OpenPartition(img, start, count, key, name, mnt, luks=luks) as op:
-                    files, nbytes = copy_tree(op.mnt, os.path.join(part, role), objs, prog)
+        # every partition is opened FIRST, so the meter knows the whole job's
+        # bytes before the first one is read (PAD-1238)
+        with contextlib.ExitStack() as stack:
+            opened = []
+            for idx, role, start, count, luks in plist:
+                if a.roles and role not in a.roles:
+                    continue
+                if use_kernel:
+                    name = "pad_s3_%d_%d" % (os.getpid(), idx)
+                    mnt = "/run/pad-s3store/%s" % name
+                    op = stack.enter_context(
+                        OpenPartition(img, start, count, key, name, mnt, luks=luks))
                     sv = os.statvfs(op.mnt)
                     used = (sv.f_blocks - sv.f_bfree) * sv.f_frsize
-            else:
-                with UserPartition(img, start, count, key, luks=luks) as up:
-                    files, nbytes = copy_tree_reader(up.fs, os.path.join(part, role), objs, prog)
+                    walk, nb = None, file_bytes(op.mnt)
+                else:
+                    op = stack.enter_context(
+                        UserPartition(img, start, count, key, luks=luks))
                     used = None
-            roles[role] = {
-                "index": idx, "luks": luks, "files": files, "bytes": nbytes,
-                "partition_bytes": count * SECTOR,
-                "fs_used_bytes": used,
-                "new_files": objs.new_files - nf0, "new_bytes": objs.new_bytes - nb0,
-                "seconds": round(time.time() - t1, 1)}
-            r = roles[role]
-            print("[s3store] p%d %-12s %6d files %8.1f MB  new %8.1f MB  (%.0f s)" % (
-                idx, role, files, nbytes / 1e6, r["new_bytes"] / 1e6, r["seconds"]), flush=True)
-            _report(None, "%s %s: %d files, %.2f GB, %.2f GB new" % (
-                cid, role, files, nbytes / 1e9, r["new_bytes"] / 1e9))
+                    walk, nb = reader_walk(op.fs)
+                opened.append((idx, role, count, luks, op, used, walk, nb))
+            meter = Meter(sum(o[7] for o in opened))
+            objs = Objects(store, meter)
+            print(meter.line(), flush=True)
+            for idx, role, count, luks, op, used, walk, _nb in opened:
+                t1 = time.time()
+                nf0, nb0 = objs.new_files, objs.new_bytes
+
+                def prog(files, nbytes, role=role):
+                    print("[s3store]   %s: %d files, %.0f MB" % (role, files, nbytes / 1e6),
+                          flush=True)
+                dst = os.path.join(part, role)
+                if use_kernel:
+                    files, nbytes = copy_tree(op.mnt, dst, objs, prog)
+                else:
+                    files, nbytes = copy_tree_reader(op.fs, dst, objs, prog, entries=walk)
+                roles[role] = {
+                    "index": idx, "luks": luks, "files": files, "bytes": nbytes,
+                    "partition_bytes": count * SECTOR,
+                    "fs_used_bytes": used,
+                    "new_files": objs.new_files - nf0, "new_bytes": objs.new_bytes - nb0,
+                    "seconds": round(time.time() - t1, 1)}
+                r = roles[role]
+                print("[s3store] p%d %-12s %6d files %8.1f MB  new %8.1f MB  (%.0f s)" % (
+                    idx, role, files, nbytes / 1e6, r["new_bytes"] / 1e6, r["seconds"]),
+                    flush=True)
+                _report(None, "%s %s: %d files, %.2f GB, %.2f GB new" % (
+                    cid, role, files, nbytes / 1e9, r["new_bytes"] / 1e9))
+            meter.total = meter.done            # the last line says 100
+            print(meter.line(), flush=True)
         doc = {"format": STORE_FORMAT, "tree_rev": TREE_REV, "card_id": cid,
                "image": img, "image_bytes": os.path.getsize(img),
                "image_mtime": int(os.path.getmtime(img)),

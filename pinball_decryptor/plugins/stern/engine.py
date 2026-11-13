@@ -9823,7 +9823,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             _left = sorted(c for c in bank_plan.retired
                            if c not in {c2 for c2, _p in bank_plan.files})
             if _left:
-                _empty = os.path.join(work, "pad_retired_bank.empty")
+                # (beside the staged banks, which last until the copy)
+                _empty = os.path.join(os.path.dirname(bank_plan.files[0][1]),
+                                      "pad_retired_bank.empty")
                 open(_empty, "wb").close()
                 bank_new += [("%s/%s" % (_gdir, bank_plan.retired[c][0]) if _gdir
                               else bank_plan.retired[c][0], _empty) for c in _left]

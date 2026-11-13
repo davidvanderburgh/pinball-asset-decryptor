@@ -10141,6 +10141,23 @@ static int stepper_status(unsigned nid, unsigned k, unsigned char *p)
  * inputs 38 and 32 - PAD-237's end-stop model already answers its cmd 53 / 54,
  * and 90 s from Start the game sent the fin no move at all.
  *
+ * NOT a motor either (PAD-1239): a HELD coil that a switch lets go. Rush LE's
+ * TROUGH LOCK (node 9 coil 0) is held up until a ball crosses SIDE SCOOP OPTO
+ * (input 16), re-sent with a short 40 every ~258 ms while it waits:
+ *
+ *   cmd 41 `41 00 ff 03 00 50 2c 01 .. [26]=00 .. [30]=d0 ..`
+ *          pulse ff for 3 ticks, then HOLD at 0x50 (byte 7, 300 ticks), and
+ *          byte 30 = 0x80|0x40|16
+ *
+ * Played as a motor, the opto closed 600 ms after the ball landed on LOWER
+ * SIDE SCOOP and stayed closed: the game never kicked the scoop and called
+ * it SIDE SCOOP DEVICE MALFUNCTION (emulator, rush_le 1.19; the reporter's
+ * photos). Every motor rule seen - jaws_le's shark `5a e8 03 00`, rush_le's
+ * topper `46 e8 03 00` [30]=44, pokemon_le's balloon on Spike 3 - runs on a
+ * 1000-tick pulse with NO hold and a plain 0x40 stop byte. So a rule with a
+ * hold power, or 0x80 on its stop byte, is a coil the switch releases, and
+ * the model leaves its switch to the ball.
+ *
  * PAD_COIL_MOTOR=0 turns this off (the comparison run). */
 #define COIL_MOTOR_IDX 16
 
@@ -10202,7 +10219,9 @@ static void coil_motor_note(const unsigned char *p, int n)
     coil_motor_tick(nid);
     if (p[2] == 0x41) {
         signed char stop = -1;
-        if (n >= 31 && (p[30] & 0x40) && !(p[26] & 0x40))
+        /* a stop input, no firing input, no hold and no 0x80 on the stop:
+         * a held coil a switch releases is not a motor (PAD-1239) */
+        if (n >= 31 && (p[30] & 0x40) && !(p[30] & 0x80) && !(p[26] & 0x40) && !p[7])
             stop = (signed char)(p[30] & 0x3f);
         if (stop == c->stop) return;        /* the board re-init's re-send */
         if (stop >= 0) {

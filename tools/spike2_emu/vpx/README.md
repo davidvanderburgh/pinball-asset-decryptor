@@ -557,6 +557,24 @@ as a switch's do; a map that needs the originals names the lane trigger in
 `orig_keep`. A table patched with the old wrapper is asked to patch again
 (every such map's `repatch`).
 
+**The table's own playfield sounds come along too** (PAD-1212). A stood-in
+sub carried its DOF but not its sound, so Foo Fighters' drops, targets,
+spinner and trough kick were silent behind the machine (and a cabinet's
+exciters had nothing to shake to). Each stood-in sub's unconditional sound
+statements (`PlaySoundAt "fx_droptarget", dt1`, `PlaySoundAtBall`, a VPW
+table's `RandomSound*` / `Sound*` helpers) follow its pulse, and the trough's
+and saucers' coil subs play what the table played beside its own `.Kick`.
+A `SoundFXDOF(snd, event, state, toy)` in one becomes a `PadDOF` before it and
+`PadFXSound(snd, toy)` in it: the sound plays unless the cabinet's toy stands
+in for it (`DOFeffects` 1), as SoundFXDOF did, and a sound that fails never
+costs the contactor. A sound played AT a wall, ramp or rubber stays out
+(PlaySoundAt reads its `.x`; PAD-992). The drain and the auto plunger play
+their own already. A switch's `"own_sound": false` leaves its sounds to a
+coil's callback (Foo Fighters' kick target); `"also": "<statement>"` runs one
+more thing the stood-in sub did (`LTShake`, the MOD target's paddle). Every
+script carries `SOUNDS_NOTE`; a scripted tribute's copy without it is asked to
+patch again (`vpxsetup.SHADOW_REPATCH`).
+
 **A spinner where the machine has an opto** (PAD-887): a switch's
 `"event": "pass"` takes the spinner's Spin as one pulse a pass, not one a
 spin: every spin restarts a 600 ms quiet time (`PadPassSw`), so the ball

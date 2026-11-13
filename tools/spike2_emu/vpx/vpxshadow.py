@@ -488,19 +488,114 @@ NOT_TILTED_RE = re.compile(r"if\s+(?:not\s*\(?\s*\w*tilt\w*\s*\)?|\(?\s*\w*tilt\
                            re.I)
 
 
-def dof_of_sub(stmts, name):
+#: PAD-1212: the playfield sound a stood-in sub played - `PlaySoundAt
+#: "fx_droptarget", dt1`, `PlaySoundAtBall "fx_target"`, the trough's `PlaySoundAt
+#: SoundFXDOF("fx_Ballrel", 123, DOFPulse, DOFContactors), BallRelease`, a VPW
+#: table's `RandomSoundRubberStrong 1` / `SoundSaucerKick 1, sw9`. Foo Fighters'
+#: drops, targets, spinner and trough kick made no sound behind the machine (and
+#: nothing for a cabinet's exciters to shake to): only their DOF was carried.
+#: The statement is carried as written, so a SoundFXDOF in it fires its DOF and
+#: plays or drops the sound by the cabinet's own DOF settings, as the table did;
+#: the table's music and voices are already silence (vpxsounds.py).
+SOUND_STMT_RE = re.compile(r"^(?:Call\s+)?(?:(?i:PlaySound|RandomSound)\w*|Sound(?!FX)[A-Z]\w*)\b(?!\s*[=(.])"
+                           r"|^(?:Call\s+)?(?i:PlaySound|RandomSound)\w*\s*\(")
+
+
+AT_OBJ_RE = re.compile(r"^(?:Call\s+)?PlaySoundAt\w*\s*\(?.*,\s*(\w+)\s*\)?$", re.I)
+
+
+#: written into every script this patcher makes since PAD-1212: a copy whose
+#: script lacks it was patched before its playfield sounds were carried
+#: (vpxsetup.SHADOW_REPATCH)
+SOUNDS_NOTE = "' PAD: the table's own playfield sounds play beside the machine's switches and coils"
+
+
+def _is_sound(stmt, shapes=()):
+    """A sound statement to carry. Not one played AT a wall, ramp or rubber
+    (`shapes`, lowered names): JP's PlaySoundAt reads the object's .x, which
+    they have not, and Foo Fighters' kick target (a slingshot wall) stopped
+    Visual Pinball on that line (PAD-992)."""
+    if not SOUND_STMT_RE.match(stmt):
+        return False
+    mo = AT_OBJ_RE.match(stmt)
+    return not (mo and mo.group(1).lower() in shapes)
+
+
+def _sound_only(stmt):
+    """A sound statement with each `SoundFXDOF(snd, event, state, toy)` made
+    `PadFXSound(snd, toy)`: the DOF goes as a PadDOF of its own, before it,
+    so a sound that fails (a table helper erroring) never costs the
+    cabinet's contactor; PadFXSound plays or drops the sound by the
+    cabinet's DOF settings as SoundFXDOF did."""
+    out, i = "", 0
+    for mo in FXDOF_RE.finditer(stmt):
+        if mo.start() < i:
+            continue
+        a = _args(stmt[mo.end():])
+        if len(a) != 4:
+            continue
+        depth, inq, j = 0, False, mo.end()
+        while j < len(stmt):                 # the call's closing paren
+            ch = stmt[j]
+            if ch == '"':
+                inq = not inq
+            elif not inq and ch == "(":
+                depth += 1
+            elif not inq and ch == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            j += 1
+        out += stmt[i:mo.start()] + "PadFXSound(%s, %s)" % (a[0], a[3])
+        i = j + 1
+    return out + stmt[i:]
+
+
+def _feedback(stmts, sounds):
+    """The PadDOF calls (and, with `sounds`, the sound statements, PAD-1212)
+    of these statements, in order. `sounds` is True or the table's
+    shapeless objects (see _is_sound)."""
+    out = []
+    shapes = sounds if isinstance(sounds, (set, frozenset)) else ()
+    for s in stmts:
+        out.extend(_dof_in(s))
+        if sounds and _is_sound(s, shapes):
+            out.append(_sound_only(s))
+    out = _dedupe(out)
+    if any(not c.startswith("PadDOF ") for c in out):
+        # a sound statement names the table's own helpers and objects: one
+        # that fails (an ActiveBall a Spin event has not got) never costs the
+        # switch, which went to the machine first
+        i = next(i for i, c in enumerate(out) if not c.startswith("PadDOF "))
+        out.insert(i, "On Error Resume Next")
+    return out
+
+
+def dof_of_sub(stmts, name, sounds=False):
     """The DOF a sub always fires: its own level, no branch (a "not tilted"
-    guard is no branch: NOT_TILTED)."""
-    return _dedupe([c for sub, path, s in stmts if sub == name.lower()
-                    and all(p == NOT_TILTED for p in path) for c in _dof_in(s)])
+    guard is no branch: NOT_TILTED). With `sounds`, its sounds too (PAD-1212)."""
+    return _feedback([s for sub, path, s in stmts if sub == name.lower()
+                      and all(p == NOT_TILTED for p in path)], sounds)
 
 
-def dof_at_fire(stmts, obj):
+def dof_at_fire(stmts, obj, sounds=False):
     """The DOF fired beside `<obj>.Kick` / `.AutoFire` / `.Fire`, in the same
-    branch of the same sub (Rush: `kicker1.Kick 190, 15` then SoundFXDOF 113)."""
+    branch of the same sub (Rush: `kicker1.Kick 190, 15` then SoundFXDOF 113).
+    With `sounds`, the sounds played there too (PAD-1212: Foo Fighters'
+    `fx_Ballrel` beside `BallRelease.Kick 90, 4`)."""
     fire = re.compile(r"\b%s\.(kick\w*|autofire|fire)\b" % re.escape(obj), re.I)
     where = {(sub, path) for sub, path, s in stmts if fire.search(s)}
-    return _dedupe([c for sub, path, s in stmts if (sub, path) in where for c in _dof_in(s)])
+    return _feedback([s for sub, path, s in stmts if (sub, path) in where], sounds)
+
+
+def is_dof(call):
+    return call.startswith("PadDOF ")
+
+
+def _sound_name(stmt):
+    """What a carried sound statement plays, for the patch report."""
+    mo = re.search(r'"([^"]*)"', stmt)
+    return mo.group(1) if mo else stmt.split()[0]
 
 
 def vb(s):
@@ -999,12 +1094,19 @@ def gen(m, had, quiet=None, dof=None):
 
     def fx(handler):
         return "".join(" : " + c for c in dof.get(handler, ()))
+
+    def also(s):
+        # PAD-1212: what else the stood-in sub did that the table still needs,
+        # as a VBScript statement (Foo Fighters' MOD target: `LTShake`, its
+        # paddle's shake; the sub's rules stay out)
+        return " : " + s["also"] if s.get("also") else ""
     lamps = lamp_groups(m) or lamp_calls(m)
 
     def calls_orig(name):
         return _calls_orig(m, name)
     out = ["", "", "'" + "=" * 70, "'==== PAD: the Spike 2 emulator drives this table (vpxshadow.py) ====",
            "'" + "=" * 70,
+           SOUNDS_NOTE,
            "Dim bsTrough"]
     for k in saucers(m):
         out.append("Dim bs%s" % k)
@@ -1027,6 +1129,15 @@ def gen(m, had, quiet=None, dof=None):
                 "\tEnd If",
                 "\tDOF e, s",
                 "End Sub"]
+    if any("PadFXSound(" in c for v in (dof or {}).values() for c in v):
+        # PAD-1212: a carried sound's SoundFXDOF, its DOF gone to PadDOF
+        out += ["Function PadFXSound(snd, toy)   ' SoundFXDOF's sound: none where the cabinet's toy stands in",
+                "\tDim v : v = 0",
+                "\tOn Error Resume Next   ' a table without controller.vbs has no DOFeffects",
+                "\tv = DOFeffects(toy)",
+                "\tOn Error Goto 0",
+                "\tIf v = 1 Then PadFXSound = \"\" Else PadFXSound = snd",
+                "End Function"]
     # ---- Init
     if had.get("PadLoadEM"):
         out += ["", "' PAD-1094: B2S.Server (DOF, the backglass) whatever DMD the table is set to;",
@@ -1204,7 +1315,7 @@ def gen(m, had, quiet=None, dof=None):
             if had.get(name + "_Hit") and calls_orig(name):
                 rest = " : %s_Hit_orig" % name
             else:
-                rest = fx(name + "_Hit")
+                rest = fx(name + "_Hit") + also(s)
             if s.get("up"):
                 # a ramp's opto the ball also rolls back over: one pulse a
                 # shot, on the way up (PAD-907, Rush's time machine); the
@@ -1224,7 +1335,7 @@ def gen(m, had, quiet=None, dof=None):
             if had.get(name + "_Hit") and calls_orig(name):
                 b1 += " : %s_Hit_orig" % name
             else:
-                b1 += fx(name + "_Hit")
+                b1 += fx(name + "_Hit") + also(s)
             if had.get(name + "_UnHit") and calls_orig(name):
                 b0 += " : %s_UnHit_orig" % name
             else:
@@ -1263,14 +1374,14 @@ def gen(m, had, quiet=None, dof=None):
             if had.get(name + "_Spin") and calls_orig(name):
                 body += " : %s_Spin_orig" % name
             else:
-                body += fx(name + "_Spin")
+                body += fx(name + "_Spin") + also(s)
             out.append("Sub %s_Spin : %s : End Sub" % (name, body))
         elif ev == "slingshot":
             body = "vpmTimer.PulseSw %d" % sid
             if had.get(name + "_Slingshot") and calls_orig(name):
                 body += " : %s_Slingshot_orig" % name
             else:
-                body += fx(name + "_Slingshot")
+                body += fx(name + "_Slingshot") + also(s)
             out.append("Sub %s_Slingshot : %s : End Sub" % (name, body))
         elif ev == "drop":
             # PAD-952: a drop target's switch stays as the hit left it until
@@ -1280,7 +1391,7 @@ def gen(m, had, quiet=None, dof=None):
             if had.get(name + "_Hit") and calls_orig(name):
                 body += " : %s_Hit_orig" % name
             else:
-                body += fx(name + "_Hit")
+                body += fx(name + "_Hit") + also(s)
             if helpers:
                 out += ["Sub %s_Hit" % name, guard, "\t" + body, "End Sub"]
             else:
@@ -1664,15 +1775,21 @@ def dof_calls(lines, m):
     script as written, before any sub is renamed or line neutered."""
     stmts = list(_walk(lines))
     dof = {}
+    snd = frozenset(n.lower() for n in m.get("_shapes", ())) or True
     for name, s in m["switches"].items():
         if name != "_":
             for ev in EVENT_SUBS[s.get("event", "hit")]:
-                dof[name + ev] = dof_of_sub(stmts, name + ev)
+                # `own_sound: false`: a coil's callback sounds it (Foo
+                # Fighters' kick target), not the switch's own sub as well
+                dof[name + ev] = dof_of_sub(stmts, name + ev, sounds=s.get("own_sound", True) and snd)
     for name in [m["trough"]["drain"]] + list(saucers(m)):
-        dof[name + "_Hit"] = dof_of_sub(stmts, name + "_Hit")
+        # the drain's stand-in plays fx_drain itself; a saucer's Hit sub is
+        # bsX.AddBall, which plays nothing (its kick sound is below)
+        dof[name + "_Hit"] = dof_of_sub(stmts, name + "_Hit", sounds=name != m["trough"]["drain"] and snd)
     if m.get("plunger"):                 # PAD-1099: the lane's own subs no longer run
         for ev in ("_Hit", "_UnHit"):
-            dof[m["plunger"]["lane_trigger"] + ev] = dof_of_sub(stmts, m["plunger"]["lane_trigger"] + ev)
+            dof[m["plunger"]["lane_trigger"] + ev] = dof_of_sub(stmts, m["plunger"]["lane_trigger"] + ev,
+                                                                sounds=snd)
     fires = {"bsTrough.SolOut": m["trough"]["release"]}
     fires.update({"bs%s.SolOut" % k: k for k in saucers(m)})
     if m.get("plunger"):
@@ -1680,7 +1797,9 @@ def dof_calls(lines, m):
     for num, s in m["solenoids"].items():
         obj = fires.get(s.get("callback")) if num != "_" else None
         if obj:
-            dof["sol:" + num] = dof_at_fire(stmts, obj)
+            # a cvpmBallStack kicks without a sound (no InitExitSnd); the
+            # impulse plunger plays its own (InitExitSnd), so not twice
+            dof["sol:" + num] = dof_at_fire(stmts, obj, sounds=s["callback"] != "PadAutoPlunge" and snd)
     return {k: v for k, v in dof.items() if v}
 
 
@@ -1695,9 +1814,14 @@ def patch(script, m):
     if m.get("plunger") and _calls_orig(m, m["plunger"]["lane_trigger"]):
         for ev in ("_Hit", "_UnHit"):
             dof.pop(m["plunger"]["lane_trigger"] + ev, None)
-    if dof:
+    dofs = {k: [c for c in v if is_dof(c)] for k, v in dof.items()}
+    if any(dofs.values()):
         rep.append("DOF carried into the bridge: %s" % ", ".join(
-            "%s (%s)" % (k, ", ".join(c.split()[1].rstrip(",") for c in v)) for k, v in dof.items()))
+            "%s (%s)" % (k, ", ".join(c.split()[1].rstrip(",") for c in v)) for k, v in dofs.items() if v))
+    snds = {k: [c for c in v if not is_dof(c) and c != "On Error Resume Next"] for k, v in dof.items()}
+    if any(snds.values()):
+        rep.append("sounds carried into the bridge: %s" % ", ".join(
+            "%s (%s)" % (k, ", ".join(_sound_name(c) for c in v)) for k, v in snds.items() if v))
     if m.get("b2s_name"):
         rename_game(lines, m["b2s_name"], rep)
     had = {}
@@ -1895,6 +2019,7 @@ def main(argv):
     for name in sounds_at_shapes(m.get("extra_vbs", ""), info):
         print("WARNING: a sound is played at %s, which has no position (PlaySoundAt reads its .x)" % name)
     m["_lightseqs"] = sorted(n for k, n, _ in info if k == "LightSeq")
+    m["_shapes"] = sorted(n for k, n, _ in info if k in SHAPELESS)
     script, rep = patch(table.script(), m)
     if unlit:
         rep.insert(0, "left out light(s) this copy of the table does not have: %s"

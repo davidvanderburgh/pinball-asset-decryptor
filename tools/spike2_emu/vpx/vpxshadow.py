@@ -72,7 +72,8 @@ SUB_RE = r"^(\s*)(Public\s+|Private\s+)?Sub\s+(%s)\s*(\([^)]*\))?(\s*'.*|\s*:.*)
 #: spinner standing in for the machine's OPTO: a ball through it spins it a
 #: dozen times, and the opto must see one pass, not twelve
 EVENT_SUBS = {"hit": ("_Hit",), "hold": ("_Hit", "_UnHit"), "spin": ("_Spin",),
-              "pass": ("_Spin",), "slingshot": ("_Slingshot",), "drop": ("_Hit",)}
+              "pass": ("_Spin",), "slingshot": ("_Slingshot",), "drop": ("_Hit",),
+              "latch": ("_Hit",)}
 PASS_MS = 600
 
 
@@ -526,6 +527,10 @@ def _argcount(rest):
                 n += 1
             elif ch == "'":
                 break
+            elif ch == ":" and depth == 0:
+                # PAD-1207: the statement ends here; what follows is the
+                # next call, not more arguments
+                break
         if not ch.isspace():
             seen = True
     return (n + 1) if seen else 0
@@ -571,10 +576,15 @@ def pup_stub(lines, rep, force=False):
         if s.startswith("'"):
             continue
         # any case: Aerosmith's PuPInit calls `puplayer.getroot`
-        for m in re.finditer(r"\bPuPlayer\.(\w+)\s*(.*)$", s, re.I):
-            meth, rest = m.groups()
+        # each call on the line on its own (PAD-1207: Batman 66's timer
+        # string `...:puPlayer.LabelSet a,b,c,d,e:puPlayer.LabelSet a,b,c,d,e`
+        # read as one 9-argument call, a false WARNING in every patch log,
+        # and a method called only after another on its line went missing)
+        for m in re.finditer(r"\bPuPlayer\.(\w+)\s*", s, re.I):
+            meth, rest = m.group(1), s[m.end():]
             if rest.startswith("("):
-                inner = rest[1:rest.rfind(")")] if ")" in rest else rest[1:]
+                span = _paren_span(rest, 0)
+                inner = rest[1:span[1]] if span else rest[1:]
                 n = _argcount(inner)
             elif rest.startswith("="):
                 continue
@@ -1272,6 +1282,25 @@ def gen(m, had, quiet=None, dof=None):
             else:
                 body += fx(name + "_Slingshot")
             out.append("Sub %s_Slingshot : %s : End Sub" % (name, body))
+        elif ev == "latch":
+            # PAD-1206: a ball a MECHANISM holds (Iron Maiden's Sarcophagus). The ball
+            # drops onto the trigger, the switch closes and stays closed: a pulse told
+            # the game the lock was empty again at once, so it never counted the lock
+            # and served another ball. No UnHit opens it either - the table switches
+            # the trigger off under the ball as the mechanism turns - so the map's
+            # `call` (a sub of its extra_vbs) notes the ball for the table's own
+            # mechanics and the map's code opens the switch when the ball leaves.
+            body = "Controller.Switch(%d) = True" % sid
+            if s.get("call"):
+                body += " : " + s["call"]
+            if had.get(name + "_Hit") and calls_orig(name):
+                body += " : %s_Hit_orig" % name
+            else:
+                body += fx(name + "_Hit")
+            if helpers:
+                out += ["Sub %s_Hit" % name, guard, "	" + body, "End Sub"]
+            else:
+                out.append("Sub %s_Hit : %s : End Sub" % (name, body))
         elif ev == "drop":
             # PAD-952: a drop target's switch stays as the hit left it until
             # the game resets the bank (drop_resets): open on a machine whose

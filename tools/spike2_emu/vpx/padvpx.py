@@ -585,6 +585,7 @@ def main(argv):
             return 0
         padisplay.save(s)
         d["lcd"] = {"topmost": s["mode"] != "free"}
+        d["layout"] = ""                    # none of the tab's layouts now (PAD-1231)
         padlaunch.kit_save(d)
         print("game window: %s" % padisplay.describe(s, mons))
         return 0

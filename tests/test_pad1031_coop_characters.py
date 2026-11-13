@@ -441,7 +441,8 @@ def test_godzillas_abilities_and_lines_read_off_its_program():
                             "adj:216+10:30:100,adj:218+10:30:100")
     assert CP.action_button(elf) == 34
     lines = CP.character_lines(elf, CP.read_preset(CP.presets()["godzilla"])["characters"])
-    assert lines[:6] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62",
+    assert lines[:7] == ["pick on", "pick_time 30", "left 60", "action 34", "lane 62",
+                         "intro_start 36",    # PAD-1215: a Start while a pick holds a first ball back is a join
                          "character %s SHODAIGOJI|LONGER BALL SAVE, LONGER TIMERS" % LONGER_SAVE]
     assert all(len(ln.split(" ")[1]) <= CP.MAX_CFG for ln in lines if ln.startswith("character "))   # the runtime's token
     text = CP.cfg_text(elf, None, {"pick": True, "list": [{"name": "A", "ability": "heat_ray"}]},
@@ -558,7 +559,8 @@ def test_co_op_alone_puts_the_pick_screens_in_the_hud_and_names_the_scene(tmp_pa
                                                                       and hud + b"+screens", []))
     result = MW.ModePlan(project=project, profile=Prof(), port="", build=None)
     MW.coop_into(result, b"", str(tmp_path / "scratch"), stock_hud=b"HUD", stock_font=b"")
-    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopAward_1"]   # PAD-1028: + the award card
+    # PAD-1028: + the award card; PAD-1219: + the final score's band
+    assert got["names"] == ["PadCoop_1", "PadCoop_Random", "PadCoopAward_1", "PadCoopFinal"]
     (card, src), = result.replaced
     assert card == "godzilla_le/godzilla_le/assets/lcd/auto_loaded/32e6ae28/scene.radium"
     assert open(src, "rb").read() == b"HUD+screens"
@@ -819,7 +821,7 @@ def test_character_lines_carry_the_composed_powers_and_header():
         {"name": "BIOGOJI", "powers": ["maser_lit", "perk_loop_2x"], "header": "LOOPS AND MASER"},
         {"name": "EB", "powers": ["extra_ball_3", "perk_loop_2x"]},
         {"name": "PLAIN", "powers": []}]}, _le_sites(), _le_values())
-    assert lines[5:] == ["character lit:maser=0x8000000,yes:maser,keep:perks|=0x100 BIOGOJI|LOOPS AND MASER",
+    assert lines[6:] == ["character lit:maser=0x8000000,yes:maser,keep:perks|=0x100 BIOGOJI|LOOPS AND MASER",
                          "character eb:3,keep:perks|=0x100 EB|EXTRA BALL AFTER BALL 3, LOOP VALUE 2X",
                          "character - PLAIN|"]
     assert CP.words_for()["perk_loop_2x"] == "LOOP VALUE 2X"

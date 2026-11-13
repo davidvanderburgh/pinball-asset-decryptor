@@ -256,13 +256,18 @@ def test_the_feed_carries_each_clip_after_the_channels():
     import s3vidhost
     h = open(os.path.join(S3, "s3vid.h"), encoding="utf-8").read()
     assert "unsigned clip_frames, clip_rate_num, clip_rate_den;" in h
-    assert "unsigned pad[14];" in h and "#define S3VID_PATH     256" in h
+    # PAD-1213's slot map took ten of the fourteen spare words
+    assert "unsigned pad[4];" in h and "#define S3VID_PATH     256" in h
     assert "char clip[S3VID_CHANNELS][S3VID_PATH];" in h
     assert (s3vidhost.CLIP_FRAMES, s3vidhost.CLIP_RATE_DEN, s3vidhost.PATH) == (15, 17, 256)
     body = re.search(r"struct s3vid_chan \{(.*?)unsigned char extra", h, re.S).group(1)
     body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
     n = 0
     for decl in re.findall(r"unsigned\s+([^;]+);", body):
+        if decl.startswith("char "):     # a byte array: S3VID_SLOTMAP bytes
+            assert "[S3VID_SLOTMAP]" in decl
+            n += s3vidhost.SLOTMAP // 4
+            continue
         for name in decl.split(","):
             size = re.search(r"\[(\d+)\]", name)
             n += int(size.group(1)) if size else 1

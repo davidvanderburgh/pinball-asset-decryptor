@@ -404,6 +404,14 @@ export function CoopCharsDialog({ s, onClose }) {
       <span class="small dim wrap">${ch.intro ? `${ch.intro} opens each co-op and team game, with its own sound. While it plays the flippers choose the language (when the game's Player Language Select is on), and both flipper buttons together skip it. Then the character pick opens, and the ball comes to the shooter lane once a character is taken.` : "Open each co-op and team game with a video of your own, with its own sound. Both flipper buttons skip it."}</span>
     </div>
     <div class="row" style="margin-top:8px; gap:8px">
+      <${Button} size="sm" kind="ghost" icon="film" disabled=${!rows.length || !ch.pick} onClick=${() => call("modes.coop_ceremony", false)}
+        title=${ch.ceremony ? "The video behind the award cards at a co-op game's end: choose another." : "A video of your own that plays behind the award cards at a co-op game's end, in place of the game's End of Ball Bonus loop."}>
+        ${ch.ceremony ? "Awards video ✓" : "Awards video…"}<//>
+      ${ch.ceremony ? html`<${Button} size="xs" kind="ghost" icon="x" title="No video of your own: the game's End of Ball Bonus loop plays behind the award cards."
+        onClick=${() => call("modes.coop_ceremony", true)} />` : null}
+      <span class="small dim wrap">${ch.ceremony ? `${ch.ceremony} plays behind the award cards at a co-op game's end, looped and silent, with the final score along the bottom and the score panels, power-up meter and credits line off the screen.` : "At a co-op game's end the award cards show over the game's End of Ball Bonus loop, with the final score along the bottom and the score panels, power-up meter and credits line off the screen. Choose a video of your own to play there instead."}</span>
+    </div>
+    <div class="row" style="margin-top:8px; gap:8px">
       <${Check} checked=${!!ch.bonus} label="Show each teammate's character on their End of Ball Bonus" disabled=${!rows.length}
         title="Its video (or picture, without one) in a framed window right of the bonus's words while that teammate's bonus counts."
         onChange=${(v) => call("modes.coop_chars_bonus", v)} />

@@ -54,7 +54,15 @@
 #include "s3vid.h"
 
 #define DRM_FORMAT_YUV420 0x32315559u   /* 'YU12' */
-#define MAXPTS 128
+/* PAD-1230: THE PENDING TIMES MUST HOLD EVERY PACKET IN FLIGHT. A frame
+ * takes the smallest time of the packets sent and not yet out as frames;
+ * the table was 128 while the packet ring alone holds S3VID_PKTS (256) and
+ * the host's ffmpeg pipe more. Fallout reads its backbox clip far ahead, so
+ * the times of ~185 packets fell off the end, the next frames came out
+ * labelled ~7.7 s in the future and the game held its picture until its
+ * clock got there: "the background holds ~7 s once a minute". Now ample,
+ * and a full table says so once. */
+#define MAXPTS 4096
 
 static struct s3vid_feed *feed;
 static struct padvid_shm *vshm;
@@ -74,6 +82,8 @@ static struct stream {
     unsigned epoch;                     /* bumped at each (re)open: releases of */
                                         /* older frames are not this ring's */
     unsigned jam_said;                  /* PAD-1213: read_idx+1 last reported jammed */
+    int npts_peak;                      /* PAD-1230: most packet times pending at once */
+    unsigned long pts_lost;             /* and times dropped on a full table */
 } st[S3VID_CHANNELS];
 
 static int slot_fd[S3VID_CHANNELS][PADVID_SLOTS];
@@ -172,6 +182,24 @@ static void sayf(const char *fmt, long a, long b, long c)
 {
     char m[200];
     int n = snprintf(m, sizeof m, fmt, a, b, c);
+    if (n > 0) (void)!write(2, m, (size_t)(n < (int)sizeof m ? n : (int)sizeof m - 1));
+}
+
+/* PAD_S3_VID_TRACE=1 (PAD-1230): one stderr line per frame handed to the
+ * game (R), released by it (F) and bound for drawing (B), with wall-clock
+ * ms, so a held picture can be told apart: frames not handed, handed and
+ * not drawn, or drawn and the same. */
+static int trace = -1;
+static void tracef(const char *k, long a, long b, long c, long d)
+{
+    struct timespec t;
+    char m[120];
+    int n;
+    if (trace < 0) { const char *e = getenv("PAD_S3_VID_TRACE"); trace = e && *e && *e != '0'; }
+    if (!trace) return;
+    clock_gettime(CLOCK_REALTIME, &t);
+    n = snprintf(m, sizeof m, "[vt] %s %ld.%03ld %ld %ld %ld %ld\n", k, (long)t.tv_sec,
+                 t.tv_nsec / 1000000, a, b, c, d);
     if (n > 0) (void)!write(2, m, (size_t)(n < (int)sizeof m ? n : (int)sizeof m - 1));
 }
 
@@ -394,6 +422,10 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
         d->pts_lo = (unsigned)t; d->pts_hi = (unsigned)((uint64_t)t >> 32);
         pthread_mutex_lock(&mu);
         if (st[c].npts < MAXPTS) st[c].pts[st[c].npts++] = t;
+        else if (!st[c].pts_lost++)
+            sayf("[s3vid] ch%ld: %ld packet times pending, the table is full: frames will be mistimed\n",
+                 c, (long)MAXPTS, 0);
+        if (st[c].npts > st[c].npts_peak) st[c].npts_peak = st[c].npts;
         pthread_mutex_unlock(&mu);
     }
     ch->data_w += size;
@@ -418,6 +450,7 @@ static void release(void *opaque, uint8_t *data)
         return;
     }
     s->released[h->n % 64] = h->n + 1;
+    tracef("F", h->c, h->n, h->slot, 0);
     if (feed->ch[h->c].slotmap_host) {  /* PAD-1213: this frame's slot is free */
         __sync_synchronize();
         feed->ch[h->c].slot_busy[h->slot] = 0;
@@ -525,9 +558,13 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
     st[c].frames++;
     pthread_mutex_unlock(&mu);
     frame->pts = frame->best_effort_timestamp = pts;
+    tracef("R", c, n, slot, (long)pts);
     frame->pkt_dts = AV_NOPTS_VALUE;
     if (st[c].frames == 1 || st[c].frames % 600 == 0)
-        sayf("[s3vid] ch%ld: frame %ld (%ld packets in)\n", c, (long)st[c].frames, (long)st[c].packets);
+    {
+        sayf("[s3vid] ch%ld: frame %ld (%ld packets in, ", c, (long)st[c].frames, (long)st[c].packets);
+        sayf("at most %ld packet times pending, %ld lost)\n", (long)st[c].npts_peak, (long)st[c].pts_lost, 0);
+    }
     return 0;
 }
 
@@ -590,6 +627,7 @@ int pad_s3_vid_image(unsigned id, unsigned *off, unsigned *w, unsigned *h, unsig
     v = &vshm->ch[c];
     if (!v->width || !v->height || !v->frame_bytes) return 0;
     *off = c * PADVID_SLOTS * PADVID_SLOT_BYTES + s * PADVID_SLOT_BYTES;
+    tracef("B", (long)c, (long)s, (long)v->write_idx, 0);
     *w = v->width; *h = v->height; *bytes = v->frame_bytes;
     return 1;
 }

@@ -63,6 +63,7 @@ def test_linux_root_steps_resolve_on_the_worker(monkeypatch):
     assert isinstance(argv, R.RootLine) and argv.line == "cd /repo && python3 t.py build"
     sel = mt.root_shell_line("make x", cwd="/repo")
     assert callable(sel) and sel({}).line == "cd /repo && make x"
+    assert step.needs_root and sel.needs_root, "the run asks before step one"
 
 
 def test_the_password_note_knows_sudo_rs():
@@ -228,7 +229,7 @@ class _Panel:
 
 
 def _run(monkeypatch, cmds, preview=False):
-    for name in ("_run_commands", "_start_worker"):
+    for name in ("_run_commands", "_start_worker", "_ask_root_first"):
         monkeypatch.setattr(_Panel, name, getattr(mt.MultibootPanel, name), raising=False)
     monkeypatch.setattr(mt._mac, "enabled", lambda: False)
     p, res = _Panel(), {}
@@ -257,6 +258,111 @@ def test_the_runner_preview_fails_with_a_sentence_not_a_dialog(monkeypatch):
     p, res = _run(monkeypatch, [("prepare", R.linux_argv("x"))], preview=True)
     assert res["rc"] == 1 and res["failed"] == "prepare"
     assert R.PREVIEW_NO_PROMPT in p.out and FakeSession.instances == []
+
+
+# ------------------------------------------------- the password comes first
+class _UserProc:
+    """A user step's Popen: notes whether root was already had when it ran."""
+    log = []
+
+    def __init__(self, argv, **kw):
+        s = R._SESSION[0]
+        _UserProc.log.append((argv[-1], bool(s and s.alive)))
+        self.stdout = iter([b"made\n"])
+        self.returncode = 0
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        pass
+
+
+def _linux_run(monkeypatch, **fake):
+    _fake(monkeypatch, **fake)
+    _route(monkeypatch, "pkexec")
+    monkeypatch.setattr(mt.sys, "platform", "linux")
+    _UserProc.log = []
+    monkeypatch.setattr(mt.subprocess, "Popen", _UserProc)
+    build = R.needs_root(lambda _t: R.linux_argv("cd /r && build"))
+    return [("selector", ["bash", "-lc", "make menu"]),
+            ("media", ["bash", "-lc", "encode clips"]),
+            ("build", build)]
+
+
+def test_a_run_with_a_root_step_asks_for_the_password_before_step_one(monkeypatch):
+    """Brombomb: start the build, walk away.  The dialog came up minutes in,
+    after the user steps, went unanswered, and the build failed."""
+    cmds = _linux_run(monkeypatch)
+    p, res = _run(monkeypatch, cmds)
+    assert res["rc"] == 0 and res["failed"] is None, p.out
+    assert _UserProc.log == [("make menu", True), ("encode clips", True)], \
+        "root was had before the first user step"
+    assert len(FakeSession.instances) == 1, "still one password a run"
+    s = FakeSession.instances[0]
+    assert s.cmds == [":", "env HOME=/home/u bash -lc 'cd /r && build'"]
+    assert s.closed
+    assert any("before the run starts" in ln for ln in p.out)
+    assert p.out.index(next(ln for ln in p.out if "before the run" in ln)) \
+        < p.out.index("$ make menu")
+
+
+def test_a_refused_password_first_starts_no_step(monkeypatch):
+    cmds = _linux_run(monkeypatch, refuse="the password prompt for root was canceled or refused")
+    p, res = _run(monkeypatch, cmds)
+    assert res["rc"] != 0 and res["failed"] == "build"
+    assert _UserProc.log == [], "nothing ran: minutes saved, nothing half-built"
+    assert any("canceled or refused" in ln for ln in p.out)
+
+
+def test_cancel_while_the_first_password_dialog_is_up(monkeypatch):
+    cmds = _linux_run(monkeypatch, prompt_s=5)
+
+    class P:
+        killed = False
+
+        def kill(self):
+            self.killed = True
+    holder = {}
+
+    def cancel_soon():
+        end = time.monotonic() + 3
+        while time.monotonic() < end:
+            proc = holder.get("p") and holder["p"]._proc
+            if proc is not None and FakeSession.instances:
+                FakeSession.instances[0]._proc = P()
+                holder["p"]._cancelled = True
+                proc.kill()
+                return
+            time.sleep(0.01)
+    import threading
+    orig = _Panel.__init__
+
+    def init(self):
+        orig(self)
+        holder["p"] = self
+    monkeypatch.setattr(_Panel, "__init__", init)
+    threading.Thread(target=cancel_soon, daemon=True).start()
+    t0 = time.monotonic()
+    p, res = _run(monkeypatch, cmds)
+    assert time.monotonic() - t0 < 4 and res["failed"] == "build"
+    assert _UserProc.log == [] and FakeSession.instances[0].cmds == []
+
+
+@pytest.mark.parametrize("route", ["root", "sudo", "sudo-tty"])
+def test_routes_without_a_dialog_ask_nothing_first(monkeypatch, route):
+    cmds = _linux_run(monkeypatch)
+    _route(monkeypatch, route)
+    assert R.ask_first() is None
+    assert FakeSession.instances == []
+
+
+def test_a_run_without_a_root_step_or_a_preview_never_asks(monkeypatch):
+    cmds = _linux_run(monkeypatch)
+    p, res = _run(monkeypatch, cmds[:2])
+    assert res["rc"] == 0 and FakeSession.instances == []
+    p, res = _run(monkeypatch, cmds[:2] + [("build", R.linux_argv("b"))], preview=True)
+    assert FakeSession.instances == [], "a preview never opens the dialog"
 
 
 # ------------------------------------------------------- the AppImage copy

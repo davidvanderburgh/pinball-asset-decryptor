@@ -3259,7 +3259,7 @@ def root_command(args, cwd=None, exe="python3"):
         # tools are copied where root can read them first (PAD-1188)
         def linux_later(_texts):
             return wsl_command_root(args, _linux_root_cwd(cwd), exe)
-        return linux_later
+        return _root.needs_root(linux_later)
 
     def later(_texts):
         return wsl_command_root(args, cwd, exe, home=_root_step_home())
@@ -3289,7 +3289,7 @@ def root_shell_line(line, cwd=None):
         def linux_later(_texts):
             return wsl_shell_root("cd %s && %s"
                                   % (_q(_linux_root_cwd(cwd)), line))
-        return linux_later
+        return _root.needs_root(linux_later)
 
     def later(_texts):
         home = wsl_home()
@@ -13656,6 +13656,39 @@ class MultibootPanel:
                            on_tick)
         return True
 
+    def _ask_root_first(self, label, texts):
+        """Open the run's root shell before its first step (see
+        :func:`multiboot_root.ask_first`).  ``(0, None)`` to go on, else
+        ``(rc, label)`` with *label* the root step the run stops for."""
+        try:
+            proc = _root.ask_first()
+        except Exception as exc:                        # noqa: BLE001
+            self._append("%s: %s" % (label, exc))
+            return 1, label
+        if proc is None:
+            return 0, None
+        self._append("Asking for your password now, before the run starts, "
+                     "so it can finish on its own.")
+        self._proc, self._proc_preview = proc, False
+        lines = []
+        try:
+            for raw in proc.stdout:
+                lines.append(raw.decode("utf-8", "replace").rstrip())
+        except Exception:                               # noqa: BLE001
+            pass
+        rc = proc.wait()
+        self._proc = None
+        if self._cancelled:
+            return rc or -9, label
+        if rc != 0:
+            texts[label] = "\n".join(lines)
+            for line in lines:
+                self._append(line)
+            self._append("%s: exit %d" % (label, rc))
+            self._say_once(sudo_password_note(texts[label]))
+            return rc, label
+        return 0, None
+
     def _start_worker(self, cmds, on_step, on_done, quiet, preview, on_tick=None):
         """The worker itself - see :meth:`_run_commands`, which owns the
         guards.  Split out so a queued action can be started from the
@@ -13673,7 +13706,19 @@ class MultibootPanel:
             rc = 0
             failed = None
             texts = {}
-            for label, argv in cmds:
+            steps = cmds
+            first_root = (None if preview or sys.platform == "win32"
+                          or _mac.enabled() else _root.wants_root(cmds))
+            if first_root is not None:
+                # THE PASSWORD FIRST: a run with a root step asks for it
+                # before its first step, so the minutes of user steps and
+                # the build itself run with nobody at the keyboard
+                # (PAD-1188: the dialog came up mid-run, went unanswered,
+                # and the build failed).
+                rc, failed = self._ask_root_first(first_root, texts)
+                if failed is not None:
+                    steps = ()
+            for label, argv in steps:
                 if not preview and self._cancelled:
                     # Cancel was pressed between two steps: stop here rather
                     # than start the next tool.

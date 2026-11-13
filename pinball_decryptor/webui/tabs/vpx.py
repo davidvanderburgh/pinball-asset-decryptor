@@ -192,7 +192,7 @@ class VpxTab(TabService):
                  # PAD-964: what each title's card costs the disk, the cache
                  # itself, and whether a game copies its card into it first
                  space={}, cache_info=None, space_error="", space_busy=False, card_cache=True,
-                 layout="", monitors=0, display=None, runtime_state="unknown",
+                 layout="", lcd_on_top=True, monitors=0, display=None, runtime_state="unknown",
                  runtime_text="Checking…", message="", message_level="info",
                  authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
                  author_titles=[], author_platforms={}, author_title="", author_note="", coverage={},
@@ -956,6 +956,24 @@ class VpxTab(TabService):
             else:
                 self._say("window layout: %s." % preset.get("words", key))
         return self._start("Saving the layout", work)
+
+    @rpc
+    def set_on_top(self, on):
+        """PAD-1231: whether the game's screen stays on top of every other
+        window (on, as it always was) or takes its turn like any window (a
+        desktop player's choice); an open game's window changes at once."""
+        on = bool(on)
+
+        def work():
+            got = self._kit("vpxsetup.py", ["ontop", "on" if on else "off"])
+            if "error" in got:
+                self._say(got["error"], "error")
+                return
+            on_top = bool(got.get("lcd_on_top", on))
+            self.set(lcd_on_top=on_top)
+            self._say("the game's screen %s." % ("stays on top of every other window" if on_top
+                                                 else "goes behind other windows like any window"))
+        return self._start("Saving", work)
 
     # -- for table authors (PAD-941) -----------------------------------------
     @rpc

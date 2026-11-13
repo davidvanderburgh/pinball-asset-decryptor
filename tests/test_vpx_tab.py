@@ -246,6 +246,19 @@ def test_a_layout_is_saved_from_the_presets_the_kit_offered(tab):
     assert args == ["layout", "side", "[0, 0, 720, 1080]", "[720, 0, 1200, 675]"]
 
 
+def test_always_on_top_is_saved_and_shown(tab):
+    """PAD-1231: the Windows row's Always on top asks the kit and shows
+    what it saved."""
+    assert tab.get("lcd_on_top") is True
+    tab.answers[("vpxsetup.py", "ontop")] = {"result": "ok", "lcd_on_top": False, "live": True}
+    assert tab.set_on_top(False)
+    _wait(tab)
+    script, args = [c for c in tab.calls if c[1] and c[1][0] == "ontop"][-1]
+    assert script == "vpxsetup.py" and args == ["ontop", "off"]
+    st = tab.window.ctx.store.d["vpx"]
+    assert st["lcd_on_top"] is False and "behind other windows" in st["message"]
+
+
 def test_the_runtime_row_installs_the_runtime_itself(tab, monkeypatch):
     """PAD-840: "Set it up on the Emulate tab" sent a user round install and
     reboot six times; that tab has no install for a PC with a working Ubuntu.

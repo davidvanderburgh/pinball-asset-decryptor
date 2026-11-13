@@ -4865,6 +4865,7 @@ class Playfield:
         self.slot_labels = {}
         self._state_busy = False
         self._state_msg = None
+        self._slot_msg = None      # the SAVE STATES section's own line (PAD-1237)
         self._stop = threading.Event()
         self._closed = False
         self._run_left = False     # gone(): the run ended first (PAD-1198)
@@ -5028,10 +5029,14 @@ class Playfield:
         def done(r):
             text = helper_message(script, r)
             with self.lock:
-                self.flash(text)
-                if script == "plunge.py" and self.key_panel is not None:
+                # a plunge answer goes in the BALLS note when there is one,
+                # and only there (PAD-1237: it used to show twice)
+                if (script == "plunge.py" and self.key_panel is not None
+                        and self.key_panel.ball_dots is not None):
                     self.key_panel.ball_say("%s: %s" % (arg, text)
                                             if arg else text)
+                else:
+                    self.flash(text)
         if arg is None:
             self.drv.run_script(script, done=done)
         else:
@@ -5054,14 +5059,39 @@ class Playfield:
                 vals.append("%d · %s" % (i + 1, label or "unnamed"))
         return vals
 
+    def slot_say(self, text, secs=8.0):
+        """A save state's own message - "saving state...", the helper's
+        answer, an empty slot - for the SAVE STATES section's line, not the
+        balls' (PAD-1237), for `secs` (None = until replaced)."""
+        self._slot_msg = (text, None if secs is None
+                          else time.monotonic() + secs)
+
+    def slot_msg(self):
+        """[text, seconds left or None]; text is "" once it has run out."""
+        m = self._slot_msg
+        if not m:
+            return ["", None]
+        text, until = m
+        if until is None:
+            return [text, None]
+        left = until - time.monotonic()
+        if left <= 0:
+            self._slot_msg = None
+            return ["", None]
+        return [text, round(left, 1)]
+
+    def slots_payload(self, busy=None):
+        return {"values": self.slot_values(), "labels": self.slot_labels,
+                "busy": self._state_busy if busy is None else busy,
+                "msg": self.slot_msg()}
+
     def slots_refresh(self):
         def work():
             info = state_slots()
             with self.lock:
                 self.slot_labels = {s: info[s] for s in info}
-            self.publish("slots", {"values": self.slot_values(),
-                                   "labels": self.slot_labels,
-                                   "busy": self._state_busy})
+                payload = self.slots_payload()
+            self.publish("slots", payload)
         threading.Thread(target=work, daemon=True).start()
 
     def run_state(self, script, slot, label=None):
@@ -5072,15 +5102,14 @@ class Playfield:
             return False
         self._state_busy = True
         verb = "saving" if script.startswith("save") else "loading"
-        self.flash("%s state..." % verb, None)
-        self.publish("slots", {"values": self.slot_values(),
-                               "labels": self.slot_labels, "busy": True})
+        self.slot_say("%s state..." % verb, None)
+        self.publish("slots", self.slots_payload(busy=True))
 
         def work():
             r = state_run(script, slot, label)
             with self.lock:
                 self._state_busy = False
-                self.flash(state_reply(script, r))
+                self.slot_say(state_reply(script, r))
             self.slots_refresh()
         threading.Thread(target=work, daemon=True).start()
         return True
@@ -5279,6 +5308,7 @@ class Playfield:
                   "rig": {"slot": padpath.slot(), "label": padpath.label()},
                   "savestates": SAVESTATES, "slots": self.slot_values(),
                   "state_busy": self._state_busy,
+                  "slot_msg": self.slot_msg(),
                   "run": self.run.dyn(),
                   "clips": (self.clips.dyn() if self.clips is not None
                             else None),
@@ -5586,8 +5616,9 @@ class Playfield:
             return False
         slot = SLOT_IDS[int(idx)]
         if slot not in self.slot_labels:
-            self.flash("slot %d is empty - nothing to load" % (int(idx) + 1),
-                       5.0)
+            self.slot_say("slot %d is empty - nothing to load" % (int(idx) + 1),
+                          5.0)
+            self.publish("slots", self.slots_payload())
             return False
         return self.run_state("loadgame.sh", slot)
 

@@ -73,7 +73,13 @@ HOW = ("pick CO-OP PLAY on the start menu (both flipper buttons in attract) and 
 TEAMS_HOW = ("pick TEAM PLAY 2 VS 2 on the start menu (both flipper buttons in attract) and one Start adds all "
              "four players: players 1 and 3 against players 2 and 4, each team with its own score and progress, the "
              "teams taking turns; TEAM PLAY 2 VS 1 is the same with three players, players 1 and 3 against player 2, "
-             "who plays both of team 2's turns")
+             "who plays both of team 2's turns; TEAM PLAY 3 VS 1 (PAD-1224) is the four-player one with players 1, "
+             "3 and 4 against player 2, who plays all three of team 2's turns")
+#: PAD-1224: how ENHANCED STANDARD is played, for the tab and the log
+STANDARD_HOW = ("at 2 (Enhanced) the start menu also offers ENHANCED STANDARD: the game's own game for up to four "
+                "competing players, each Start in the first ball adding one, each with their own score and progress "
+                "and nothing shared; each player picks a character at their first ball and its ability holds while "
+                "they are up")
 #: PAD-1065: what Classic is, for the tab and the log (PAD-1073: CO-OP PLAY 1)
 CLASSIC_HOW = ("1 (Classic) plays co-op and the team games with no special abilities: the players still pick a "
                "character, but none of them has its ability; 2 (Enhanced) plays them with the abilities")

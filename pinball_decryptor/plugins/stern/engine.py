@@ -11745,8 +11745,9 @@ class _CoopMenu(_MusicModeMenu):
         self.ok = True
         self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 "
                  "(Classic: a character each, no special abilities) or 2 (Enhanced: with the abilities) and the "
-                 "start menu offers CO-OP PLAY, TEAM PLAY 2 VS 2 (players 1 and 3 against 2 and 4) and TEAM PLAY 2 "
-                 "VS 1 (players 1 and 3 against 2). While it is 1 or 2 most Insider "
+                 "start menu offers CO-OP PLAY, TEAM PLAY 2 VS 2 (players 1 and 3 against 2 and 4), TEAM PLAY 2 "
+                 "VS 1 (players 1 and 3 against 2) and TEAM PLAY 3 VS 1 (players 1, 3 and 4 against 2); at 2 also "
+                 "ENHANCED STANDARD (competing players, a character each). While it is 1 or 2 most Insider "
                  "Connected features are off; at 0 the card reports as it always has (with no modes on it)."
                  % self.setting.where, "info")
 

@@ -6129,6 +6129,7 @@ tab's **Co-op play**):
                      and 3 Classic, no character's ability (PAD-1065)
     teams on         (PAD-1042) every game of two or more players is a Team 2v2 game, no menu row needed
     teams 2v1        (PAD-1042) ... a Team 2v1 game
+    teams 3v1        (PAD-1224) ... a Team 3v1 game
 
 Round 2 (DoomWalrus666): the Modes tab's "Switch it on and off in the service menu" puts a CO-OP PLAY row in the game's
 own menu (menu_settings.COOP_PLAY, on a spare setting, Off to start with) and its live value in coop.cfg. Teammates join
@@ -6245,6 +6246,20 @@ players 2..4 itself on the one Start; `team_play_get_player_score` makes players
   ball (P1, P2, P3, P2); TEAM PLAY 2 VS 1 and one Start adds three (`3 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2:
   P2`), a later Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
   `team_max`). Its scores go on a `TEAM 2V1` board of their own, so a 2v1 champion never sits on the 2v2 board.
+- **Team 3v1** (PAD-1224, DoomWalrus666: "Also please add a 3v1 mode"): TEAM PLAY 3 VS 1 (start-menu kind 5, or
+  `teams 3v1`) is the team game of four whose team 1 is players 1, 3 and 4 against player 2, who plays all three of
+  team 2's turns each ball (P1, P2, P3, P2, P4, P2); one Start adds four (`4 PLAYERS ADDED`, `TEAM 1: P1, P3, P4`,
+  `TEAM 2: P2`). `coop.team_kind` (4, 3, 5) says which team game it is; `coop_team_player_in` / `coop_team_of_in`
+  give 3v1's layout (player 2 must be the game's player 2: the joins fill the teams in Start order). Its scores go on a
+  `TEAM 3V1` board.
+- **Enhanced Standard** (PAD-1224, DoomWalrus666: "standard play but with the ability for players to choose a
+  character with special abilities ... their own scores and gameplay progress as normal, nothing shared"): CO-OP PLAY
+  at Enhanced adds ENHANCED STANDARD (start-menu kind 2) after CO-OP PLAY. It is the game's own game of competing
+  players (`coop.standard`): Starts in ball 1 are the game's own adds (`coop.n` follows its count), the player change
+  is the game's own (`coop_std_change`) and `coop.turn` is the game's player up, so each player's pick (at their
+  first ball) holds while they are up. The abilities' records are the game's player's already. Scores, the score
+  panel, the top line, the "you're up" call, Insider logins, first-ball setup, handicap records and the high score
+  boards stay the game's own; no co-op awards follow it. Classic has no such entry.
 - **Classic** (PAD-1065, DoomWalrus666: "play these modes without any special abilities. The players may select a
   character but none of them will have any special abilities"): CO-OP PLAY 4, 5 and 6 are Co-op, Team 2v2 and Team
   2v1 Classic, the same games as 1, 2 and 3 (now called Enhanced; `coop_menu_game`, `coop_teams_size`). The pick is

@@ -36,6 +36,8 @@ class FakeWorker:
         self.states = {}
         self.replies = []
         self.reply_code = 200
+        self.follow_code = 200
+        self.follow_error = ""
         self._srv = None
         self.url = ""
 
@@ -81,6 +83,18 @@ class FakeWorker:
                         return self._send(403, {"ok": False,
                                                 "error": "Not from the app."})
                     rid = self.path.split("/")[3]
+                    if body.get("follow_up") is True:
+                        if fake.follow_code != 200:
+                            return self._send(fake.follow_code, {
+                                "ok": False, "code": "pending",
+                                "error": fake.follow_error})
+                        fake.replies.append((rid, body))
+                        st = fake.states.setdefault(rid, {})
+                        if st.get("stage") == "question":
+                            st.update(stage="working")
+                        st.update(reply_at=st.get("question_at", 0) + 1)
+                        return self._send(200, {"ok": True, "id": rid,
+                                                "follow_up": True})
                     if fake.reply_code != 200:
                         return self._send(fake.reply_code, {
                             "ok": False, "error": "That question is no "
@@ -662,8 +676,11 @@ def test_a_pasted_picture_is_a_file_of_the_answer(tmp_path, worker,
             w.call("shellx.report_paste", b64, "r-a")
         with pytest.raises(Exception, match="At most 5"):
             w.call("shellx.report_paste", b64, "r-a")
+        # five files leave no place for the app's logs (PAD-1254)
+        with pytest.raises(Exception, match="untick Include the app's logs"):
+            w.call("shellx.report_reply_send", "r-a", "Here.")
         assert w.call("shellx.report_reply_send", "r-a",
-                      "Here.") == {"sent": True}
+                      "Here.", False) == {"sent": True}
         assert until(w, lambda: worker.replies)
         rid, body = worker.replies[0]
         assert len(body["files"]) == 5
@@ -702,7 +719,8 @@ def test_the_board_column_comes_from_the_tracker_or_from_the_state():
     assert e == {"id": "r-1", "title": "Write stopped", "at": 5,
                  "stage": "working", "state": "filed", "ticket": "PAD-914",
                  "progress": 45, "version": "", "message": "", "new": True,
-                 "question": "", "waiting": False, "answer_sent": False}
+                 "question": "", "waiting": False, "answer_sent": False,
+                 "followed": False}
     assert R.board_entry({"progress": 250})["progress"] == -1
     assert R.board_entry({"progress": None})["progress"] == -1
 
@@ -1006,8 +1024,13 @@ def test_a_question_is_a_notice_and_answered_in_the_app(tmp_path, worker,
             "waiting"])
         rid, body = worker.replies[0]
         assert rid == "r-a" and body["message"] == "Here it is."
-        assert [f["name"] for f in body["files"]] == ["DirectOutput.log",
-                                                      "notes.txt"]
+        # the app's logs go too, as the record a report carries (PAD-1254)
+        assert [f["name"] for f in body["files"]] == [
+            "DirectOutput.log", "notes.txt", "pad-report.txt"]
+        rec = base64.b64decode(body["files"][2]["b64"]).decode("utf-8")
+        assert rec.startswith("Pinball Asset Decryptor answer to a question")
+        assert "Their answer\n------------\nHere it is." in rec
+        assert "Log (last " in rec
         sent = base64.b64decode(body["files"][0]["b64"])
         assert sent.startswith(b"[The app trimmed") and sent.endswith(
             b"DOF line 0149999\n")
@@ -1124,3 +1147,156 @@ def test_the_board_script_draws_a_question_and_survives_an_unknown_stage(
     # in the tracker's page: its own ticket, and still asking
     assert "This ticket" in out["tracker"]
     assert "Needs your answer" in out["tracker"]
+
+
+# ------------------------------------------- one report per problem (PAD-1254)
+def test_a_follow_up_goes_onto_a_filed_report_and_says_so(worker):
+    assert R.followable({"id": "a", "state": "filed"})
+    assert R.followable({"id": "a", "state": "released"})
+    assert R.followable({"id": "a", "state": "closed"})
+    assert not R.followable({"id": "a", "state": "received"})
+    assert not R.followable({"id": "a", "state": "unknown"})
+    assert not R.followable({"state": "filed"})
+    files = [{"name": "pad-report.txt", "type": "text/plain", "data": b"r\n"}]
+    out = R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", "again",
+                       files, follow_up=True)
+    assert out == {"ok": True, "id": "r-1", "follow_up": True}
+    assert worker.replies[0][1]["follow_up"] is True
+    # an answer is unchanged: no follow_up key
+    R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", "x", [])
+    assert "follow_up" not in worker.replies[1][1]
+    # the service's own words for a refusal
+    worker.follow_code, worker.follow_error = 409, "Your last message waits."
+    with pytest.raises(R.ReportError, match="Your last message waits"):
+        R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", "x", [],
+                     follow_up=True)
+    # a service from before PAD-1254 refuses it as a closed question
+    worker.follow_error = "That question is no longer open."
+    with pytest.raises(R.ReportError, match="can't add to a report yet"):
+        R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", "x", [],
+                     follow_up=True)
+    worker.follow_code, worker.follow_error = 404, "gone"
+    with pytest.raises(R.ReportError, match="no longer on record"):
+        R.send_reply(worker.url, config.REPORTS_APP_KEY, "r-1", "x", [],
+                     follow_up=True)
+
+
+def test_the_record_goes_as_a_file_and_keeps_its_tail():
+    rep = _report(text="Still broken on the new version.", kind="follow_up")
+    f = R.record_file(rep)
+    assert (f["name"], f["type"], f["trimmed"]) == (
+        "pad-report.txt", "text/plain", False)
+    text = f["data"].decode("utf-8")
+    assert text.startswith("Pinball Asset Decryptor follow-up on a problem "
+                           "report\n=====")
+    assert "What they added\n---------------\nStill broken" in text
+    # too big for the room left: its tail, saying so
+    rep["log"] = ["line %06d %s" % (i, "x" * 60) for i in range(20000)]
+    f = R.record_file(rep, room=200_000)
+    assert f["trimmed"] and len(f["data"]) <= 200_000
+    assert f["data"].startswith(b"[The app trimmed")
+    # no room at all: the words the window shows
+    with pytest.raises(ValueError, match="more than the"):
+        R.record_file(rep, room=1000)
+    # a plain report reads as before
+    assert R.as_text(_report()).startswith(
+        "Pinball Asset Decryptor problem report\n======")
+
+
+def test_the_card_says_follow_up_sent_until_the_report_moves_on():
+    cache = {"mine": [
+        {"id": "a", "title": "x", "state": "filed", "stage": "ready",
+         "seen": True},
+        {"id": "q", "title": "y", "state": "filed", "stage": "question",
+         "question_at": 100, "reply_at": 0, "seen": True}]}
+    R.note_follow_up_sent(cache, "a", now=200)
+    a, q = cache["mine"]
+    assert a["followed"] and R.board_entry(a)["followed"] is True
+    # one about a question waiting on the user is its answer
+    R.note_follow_up_sent(cache, "q", now=200)
+    assert not R.waiting(q) and q["answer_sent"] and not q.get("followed")
+    assert R.note_follow_up_sent(cache, "zz") is None
+    # the same stage: still sent; another: the card says where it is
+    R.apply_status(cache, {"a": {"state": "filed", "version": "",
+                                 "message": "", "answered_at": 0,
+                                 "stage": "ready"}})
+    assert a["followed"]
+    R.apply_status(cache, {"a": {"state": "filed", "version": "",
+                                 "message": "", "answered_at": 0,
+                                 "stage": "working"}})
+    assert not a["followed"] and not R.board_entry(a)["followed"]
+
+
+def test_report_a_problem_about_a_report_adds_to_it_instead_of_a_new_one(
+        app_with_worker):
+    w, worker = app_with_worker
+    svc = w.ctx.registry._methods["shellx.report_board_open"][0].__self__
+    w.run(lambda: svc._rep_cache["mine"].extend([
+        {"id": "r-new", "title": "Just sent", "state": "received",
+         "seen": True},
+        {"id": "r-a", "title": "Batman 66: Bat Phone", "state": "filed",
+         "stage": "ready", "ticket": "PAD-1225", "seen": True},
+        {"id": "r-q", "title": "Batman 66: hurry-up", "state": "filed",
+         "stage": "question", "ticket": "PAD-1240", "question": "Log?",
+         "question_at": 100, "reply_at": 0, "seen": True}]))
+    # what the service says when the window asks after them
+    worker.states.update({
+        "r-a": {"state": "filed", "stage": "ready", "ticket": "PAD-1225"},
+        "r-q": {"state": "filed", "stage": "question", "ticket": "PAD-1240",
+                "question": "Log?", "question_at": 100, "reply_at": 0}})
+    w.run(svc._publish_report)
+    mine = {m["id"]: m for m in w.state("shellx")["report"]["mine"]}
+    assert [mine[i]["followable"] for i in ("r-new", "r-a", "r-q")] == [
+        False, True, True]
+    assert mine["r-a"]["ticket"] == "PAD-1225"
+    # the one waiting on an answer comes picked
+    assert w.call("shellx.report_open", "")["about"] == "r-q"
+    # the preview reads as a follow-up
+    prev = w.call("shellx.report_preview", "It still stops.", "", True, "r-a")
+    assert prev["text"].startswith("Pinball Asset Decryptor follow-up")
+    # not filed yet, or too short: refused before anything goes
+    with pytest.raises(Exception, match="can't take a follow-up"):
+        w.call("shellx.report_send", "It still stops lighting.", "", True,
+               "r-new")
+    with pytest.raises(Exception, match="Say what happened"):
+        w.call("shellx.report_send", "short", "", True, "r-a")
+    w.run(lambda: setattr(svc, "_rep_picture", {
+        "name": "shot", "type": "image/jpeg", "data": b"\xff\xd8pic"}))
+    assert w.call("shellx.report_send", "It still stops lighting after the "
+                  "second hurry-up.", "Mike", True, "r-a") == {"sent": True}
+    assert until(w, lambda: (w.state("shellx")["report"]["last"] or {}).get(
+        "ok"))
+    last = w.state("shellx")["report"]["last"]
+    assert (last["id"], last["follow_up"], last["ticket"]) == (
+        "r-a", True, "PAD-1225")
+    # no new report: one follow-up on r-a, words and the record + picture
+    assert not [p for p in worker.posts if p[0] == "/v1/report"]
+    rid, body = worker.replies[0]
+    assert rid == "r-a" and body["follow_up"] is True
+    assert body["message"].startswith("It still stops lighting")
+    assert [f["name"] for f in body["files"]] == ["pad-report.txt",
+                                                  "picture.jpg"]
+    rec = base64.b64decode(body["files"][0]["b64"]).decode("utf-8")
+    assert "From: Mike" in rec and "Log (last " in rec
+    assert base64.b64decode(body["files"][1]["b64"]) == b"\xff\xd8pic"
+    st = w.state("shellx")["report"]
+    assert st["picture"] is None
+    a = next(m for m in st["mine"] if m["id"] == "r-a")
+    assert a["board"]["followed"] is True and len(st["mine"]) == 3
+    # a refusal says the service's words
+    worker.follow_code, worker.follow_error = 409, "Your last message waits."
+    w.call("shellx.report_send", "One more thing about it.", "", True, "r-q")
+    assert until(w, lambda: (w.state("shellx")["report"]["last"] or {}).get(
+        "ok") is False)
+    assert w.state("shellx")["report"]["last"]["error"] == \
+        "Your last message waits."
+    # once taken, a follow-up about the question is its answer
+    worker.follow_code = 200
+    w.call("shellx.report_send", "One more thing about it.", "", True, "r-q")
+    assert until(w, lambda: len(worker.replies) == 2)
+    assert until(w, lambda: not next(m for m in w.state("shellx")["report"][
+        "mine"] if m["id"] == "r-q")["waiting"])
+    # Something new is a new report, as before
+    w.call("shellx.report_send", "Something else entirely broke.", "", True,
+           "")
+    assert until(w, lambda: [p for p in worker.posts if p[0] == "/v1/report"])

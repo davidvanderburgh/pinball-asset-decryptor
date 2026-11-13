@@ -258,6 +258,8 @@ def test_the_runtime_wiring():
     assert "pm_clip(cpk.clip[c])" in tick
     play = R._lift(src, "static void on_coop_bonus_play(unsigned *r)")
     assert "coop_pick_of[coop.turn]" in play and "r[0] = (unsigned)(unsigned long)ours;" in play
+    # PAD-1243: attract asks for the same loop; after a reset the co-op game still counts, so the swap needs a game on
+    assert play.index("if (!pm_in_game()) {") < play.index("r[0] = (unsigned)(unsigned long)ours;")
     look = R._lift(src, "static void on_sound_lookup(unsigned *r)")
     assert "if (cpk_live && r[1] && cpk_lookup(r)) return;" in look
     line = R._lift(src, "static void coop_line(const char *s)")

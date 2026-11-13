@@ -207,12 +207,17 @@ MAX_VPX_RUN_LINES = 120
 _VPX_RUN_NOISE = re.compile(r"^\[event\] \[sw\] id=|^\[padglhost\] [\d.]+ fps ")
 #: how much of the end of a run log is read (it is appended run after run)
 _VPX_RUN_READ = 2_000_000
+# the shim's mech lines (watch.sh forwards them), kept past the tail
+_VPX_RUN_MECH = "[motor]"
+MAX_VPX_MECH_LINES = 40
 
 
 def vpx_run_log_tail(tab="", max_lines=MAX_VPX_RUN_LINES, now=None):
     """``(file name, lines)`` of the table run log written last
     (``padvpx-*.log``): its last *max_lines* lines, the switch table and
-    frame-rate lines left out, on the same terms as :func:`vpx_log_tail`.
+    frame-rate lines left out, on the same terms as :func:`vpx_log_tail`,
+    and before them the run's last :data:`MAX_VPX_MECH_LINES` mech lines
+    (``[motor]``) that fell outside that tail, in the file's order.
     ``("", [])`` when there is none, or it is old and the report is from
     another tab."""
     folder = os.path.dirname(vpx_log_path())
@@ -231,7 +236,12 @@ def vpx_run_log_tail(tab="", max_lines=MAX_VPX_RUN_LINES, now=None):
     except OSError:
         return "", []
     kept = [ln[:1000] for ln in lines if ln.strip() and not _VPX_RUN_NOISE.match(ln)]
-    return os.path.basename(path), kept[-max_lines:]
+    # PAD-1225: the last mech moves ride along even when a run's video
+    # telemetry has pushed them out of the tail - a Bat Phone report's 120
+    # lines were all clip hand-offs, and none said where the turntable went
+    tail = set(range(max(0, len(kept) - max_lines), len(kept)))
+    mech = [i for i, ln in enumerate(kept) if _VPX_RUN_MECH in ln][-MAX_VPX_MECH_LINES:]
+    return os.path.basename(path), [kept[i] for i in sorted(tail.union(mech))]
 
 
 # --------------------------------------------------------------- the picture

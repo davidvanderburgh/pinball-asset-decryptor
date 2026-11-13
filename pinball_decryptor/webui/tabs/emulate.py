@@ -187,6 +187,36 @@ def write_audio_ctl(gain, muted):
         pass
 
 
+#: s3store.py's byte meter, through s3launch.sh (PAD-1238):
+#: ``[s3store] progress <pct> <done MB> <total MB> <seconds left|->``
+S3_STORE_PROGRESS = re.compile(
+    r"s3launch:\s+\[s3store\] progress (\d+) (\d+) (\d+) (\d+|-)\s*$")
+
+
+def _eta_text(secs):
+    """'about 14 min left' / 'under a minute left'."""
+    if secs < 60:
+        return "under a minute left"
+    mins = (secs + 30) // 60
+    if mins < 90:
+        return "about %d min left" % mins
+    return "about %.1f h left" % (mins / 60.0)
+
+
+def s3_progress_logged(line, decade):
+    """Whether a Spike 3 launcher line goes to the log. The byte meter says
+    where it is every 2 s, which is for the bar; the log gets one line per
+    tenth of the card (*decade* is ``[last tenth logged]``, updated here)."""
+    m = S3_STORE_PROGRESS.match(line)
+    if not m:
+        return True
+    tenth = int(m.group(1)) // 10
+    if tenth == decade[0]:
+        return False
+    decade[0] = tenth
+    return True
+
+
 #: The State word and the button from Cancel until the preparation has
 #: really stopped (PAD-489: a Cancel that went on "Applying your
 #: replacements..." read as a hang).
@@ -3394,13 +3424,17 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._starting = False
                 self._started_here = True
                 self._post(self._paint_run_btn)
+                decade = [-1]               # the last tenth of the decrypt logged
                 for raw in self._proc.stdout:
                     line = raw.decode("utf-8", "replace").rstrip()
-                    self._log("[emulate] " + line)
+                    foot = self._s3_footer_for(line)
+                    if s3_progress_logged(line, decade):
+                        m = S3_STORE_PROGRESS.match(line)
+                        self._log("[emulate] " + ("%s (%s%%)" % (foot[2], m.group(1))
+                                                  if m else line))
                     fields = rig.playfield_launch(line)
                     if fields:                  # the virtual playfield (s3pf.py)
                         self._post(self._open_playfield, fields)
-                    foot = self._s3_footer_for(line)
                     if foot:
                         self._s3_foot = foot
                         self._post(self._footer, *foot)
@@ -3450,14 +3484,15 @@ class EmulateTab(EmulateLogMixin, TabService):
             return m.group(1), int(m.group(2)), m.group(3)
         if line.startswith("s3launch: decrypting"):
             return "copy", 5, "Preparing the Spike 3 card (first time only)…"
-        m = re.match(r"s3launch:\s+\[s3store\]\s+(p\d) (\w+)", line)
-        if m:                                # a partition done: p2 .. p6
-            done = {"p2": 30, "p3": 40, "p5": 45, "p6": 95}.get(m.group(1), 50)
-            return "copy", done, "Preparing the Spike 3 card: %s done" % m.group(2)
-        m = re.match(r"s3launch:\s+\[s3store\]\s+games: \d+ files, (\d+) MB", line)
-        if m:
-            return ("copy", min(90, 45 + int(m.group(1)) // 50),
-                    "Preparing the Spike 3 card: %s MB of the game" % m.group(1))
+        m = S3_STORE_PROGRESS.match(line)
+        if m:       # PAD-1238: the bytes read of the whole card, every 2 s
+            pct, done, total, eta = (int(m.group(1)), int(m.group(2)),
+                                     int(m.group(3)), m.group(4))
+            text = "Preparing the Spike 3 card (first time only): %.1f of %.1f GB" % (
+                done / 1000.0, total / 1000.0)
+            if eta != "-" and pct < 100:
+                text += ", " + _eta_text(int(eta))
+            return "copy", 5 + pct * 90 // 100, text
         if line.startswith("s3launch: building the Spike 3 rig"):
             return "copy", 50, "Building the Spike 3 emulator (first time only)…"
         if line.startswith("s3launch: starting slot"):

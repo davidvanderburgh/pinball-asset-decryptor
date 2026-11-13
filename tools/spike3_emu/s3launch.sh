@@ -181,7 +181,7 @@ check >/dev/null || { echo "s3launch: failed - $(check | sed 's/^s3check: //')";
 [ -f "$CARD" ] || { echo "s3launch: failed - no such card image: $CARD"; exit 1; }
 if ! python3 "$S/s3store.py" path "$CARD" >/dev/null 2>&1; then
     echo "s3launch: decrypting the card into the Spike 3 store (once per card; a few minutes)"
-    if ! python3 "$S/s3store.py" build "$CARD" 2>&1 | sed 's/^/s3launch:   /'; then
+    if ! python3 "$S/s3store.py" build "$CARD" 2>&1 | sed -u 's/^/s3launch:   /'; then
         echo "s3launch: failed - $NOKEY"
         exit 1
     fi
@@ -190,7 +190,7 @@ if ! python3 "$S/s3store.py" path "$CARD" >/dev/null 2>&1; then
 fi
 if ! build_ok; then
     echo "s3launch: building the Spike 3 rig (once per app update; a few minutes)"
-    if ! bash "$S/s3build.sh" "$B" 2>&1 | sed 's/^/s3launch:   /'; then
+    if ! bash "$S/s3build.sh" "$B" 2>&1 | sed -u 's/^/s3launch:   /'; then
         echo "s3launch: failed - the Spike 3 rig did not build"; exit 1
     fi
     build_ok || { echo "s3launch: failed - the Spike 3 rig did not build"; exit 1; }

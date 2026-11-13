@@ -1446,8 +1446,18 @@ def test_shadow_carries_the_tables_dof_into_its_own_subs():
     # ones come along; a branch of the shadow game's rules does not.
     vs = pytest.importorskip("vpxshadow")
     out, rep = vs.patch(DOF_TRIBUTE, _dof_shadow())
+    # PAD-1212: and its playfield sound, its SoundFXDOF's DOF already a PadDOF
     assert ("Sub sw001_Hit : vpmTimer.PulseSw 1053 : PadDOF 107, DOFPulse, Empty"
-            " : PadDOF 141, DOFPulse, DOFContactors : End Sub") in out
+            " : PadDOF 141, DOFPulse, DOFContactors : On Error Resume Next"
+            ' : PlaySoundAt PadFXSound("Bump_" & Int(Rnd * 5) + 1, DOFContactors), sw001 : End Sub') in out
+    # the trough and a saucer kick with the table's own release sound, after
+    # the DOF (a sound that fails never costs the contactor)
+    assert ('Sub PadSol1(e)\n\tbsTrough.SolOut e\n\tIf e Then\n\t\tPadDOF 123, DOFPulse, DOFContactors\n'
+            '\t\tOn Error Resume Next\n\t\tPlaySoundAt PadFXSound("fx_Ballrel", DOFContactors), BallRelease\n'
+            '\tEnd If') in out
+    assert '\t\tPlaySoundAt PadFXSound("fx_kicker", DOFContactors), Kicker1' in out
+    assert "Function PadFXSound(snd, toy)" in out
+    assert "sounds carried into the bridge: sw001_Hit (Bump_), sol:1 (fx_Ballrel), sol:3 (fx_kicker)" in rep
     for n in (99, 98, 97):
         assert "PadDOF %d," % n not in out
     # PAD-1099: the plunger lane's own sub no longer runs either; its
@@ -1459,7 +1469,6 @@ def test_shadow_carries_the_tables_dof_into_its_own_subs():
     assert "\tPlaySoundAt \"fx_drain\", Drain\n\tPadDOF 127, DOFOff, Empty\nEnd Sub" in out
     # the coils: beside kicker1.Kick, BallRelease.Kick (neutered by now) and
     # PlungerIM.AutoFire in the same branch
-    assert "Sub PadSol1(e)\n\tbsTrough.SolOut e\n\tIf e Then\n\t\tPadDOF 123, DOFPulse, DOFContactors\n\tEnd If" in out
     assert "Sub PadSol2(e)\n\tPadAutoPlunge e\n\tIf e Then\n\t\tPadDOF 110, DOFPulse, Empty\n\tEnd If" in out
     assert "Sub PadSol3(e)\n\tbsKicker1.SolOut e\n\tIf e Then\n\t\tPadDOF 113, DOFPulse, DOFContactors" in out
     assert 'SolCallback(1) = "PadSol1"' in out and 'SolCallback(3) = "PadSol3"' in out
@@ -1514,7 +1523,8 @@ def test_munsters_herman_opto_stays_closed_under_the_magnet():
     assert "Sub sw45_Hit\n\tPadIn_sw45 = PadIn_sw45 + 1" in gen
     assert "\tController.Switch(1082) = Not CBool(PadKnocked_sw45)\nEnd Sub" in gen
     assert "Sub sw45_UnHit\n\tPadIn_sw45 = PadIn_sw45 - 1" in gen
-    assert ("Sub Bumper001_Hit : vpmTimer.PulseSw 1086 : PadDOF 109, DOFPulse, DOFContactors : End Sub") in gen
+    assert ("Sub Bumper001_Hit : vpmTimer.PulseSw 1086 : PadDOF 109, DOFPulse, DOFContactors : On Error Resume Next"
+            ' : PlaySoundAt PadFXSound("fx_bumper", DOFContactors), ActiveBall : End Sub') in gen   # PAD-1212
     for r in m["repatch"]:
         if r["since"].startswith("PAD-1117"):
             assert r["old"] not in gen
@@ -1625,6 +1635,141 @@ def test_shadow_carried_dof_reaches_b2s_under_vbscript(tmp_path):
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
     assert r.stdout.strip() == ("sw1053 107=1 107=0 141=1 141=0 | kick 123=1 123=0 kick | "
                                 "fire 110=1 110=0 kick 113=1 113=0 | sw1053 107=1 107=0"), r.stdout + r.stderr
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_carried_sounds_play_as_the_cabinets_dof_settings_say(tmp_path):
+    """PAD-1212: Foo Fighters' drops, targets, spinner and trough kick were
+    silent behind the machine: a stood-in sub carried the table's DOF but not
+    its sound. The sound comes along now; its SoundFXDOF's DOF is a PadDOF of
+    its own, and PadFXSound plays the sound unless the cabinet's toy stands
+    in for it (DOFeffects 1), as SoundFXDOF did."""
+    vs = pytest.importorskip("vpxshadow")
+    out, _ = vs.patch(DOF_TRIBUTE, _dof_shadow())
+    tail = out[out.index("Dim bsTrough"):out.index("Sub PadTestTimer_Timer")]
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log, SolCallback(68), sLLFlipper, sLRFlipper, DOFeffects(9), sw001, BallRelease, Kicker1",
+        "Const DOFOff = 0, DOFOn = 1, DOFPulse = 2, DOFContactors = 1",
+        "Sub DOF(e, s) : Log = Log & e & \" \" : End Sub",
+        "Sub PlaySoundAt(s, o) : Log = Log & \"[\" & s & \"] \" : End Sub",
+        "Class FakeStack", "Public Sub SolOut(e) : Log = Log & \"kick \" : End Sub", "End Class",
+        "Class FakeTimer", "Public Sub PulseSw(n) : Log = Log & \"sw\" & n & \" \" : End Sub", "End Class",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        tail,
+        "Set bsTrough = New FakeStack : Set bsKicker1 = New FakeStack",
+        "Randomize 1",
+        "For Each t In Array(1, 2, 0)",
+        "DOFeffects(DOFContactors) = t",
+        "Execute SolCallback(1) & \" True\" : Execute SolCallback(1) & \" False\" : Log = Log & \"| \"",
+        "Next",
+        "Execute SolCallback(3) & \" True\" : Log = Log & \"| \"",
+        "sw001_Hit",
+        "WScript.Echo Log"]), encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    got = r.stdout.strip()
+    # toy only: the contactor, no sound (an empty name, as SoundFXDOF gave the
+    # table); both; sound only (the toy is off). Only the coil's on edge sounds
+    assert got.startswith("kick 123 [] kick | kick 123 [fx_Ballrel] kick | kick [fx_Ballrel] kick | "
+                          "kick [fx_kicker] | "), got + r.stderr
+    assert re.search(r"\| sw1053 107 \[Bump_\d\]$", got), got + r.stderr
+
+
+def test_a_tribute_patched_before_its_sounds_were_carried_asks_for_a_new_patch(tmp_path):
+    """PAD-1212: every script vpxshadow writes says, in a line of its own,
+    that the table's playfield sounds are carried; a scripted tribute's copy
+    whose script lacks that line was patched before, and its row says Patch
+    again. The ROM tables other patchers make never carry the mark."""
+    vs = pytest.importorskip("vpxshadow")
+    vset = pytest.importorskip("vpxsetup")
+    (mark,) = vset.SHADOW_REPATCH
+    assert mark["absent"] == vs.SOUNDS_NOTE
+    out, _ = vs.patch(DOF_TRIBUTE, _dof_shadow())
+    assert "\n" + vs.SOUNDS_NOTE + "\n" in out
+    name = "T (PAD).vpx"
+    script = tmp_path / "T (PAD).script.vbs"
+    script.write_text(out.replace(vs.SOUNDS_NOTE + "\n", ""), encoding="utf-8")
+    assert vset.missed_fixes(str(tmp_path), name, vset.SHADOW_REPATCH) == [mark["why"]]
+    script.write_text(out, encoding="utf-8")
+    assert vset.missed_fixes(str(tmp_path), name, vset.SHADOW_REPATCH) == []
+    # no script beside the copy: nothing is claimed
+    script.unlink()
+    assert vset.missed_fixes(str(tmp_path), name, vset.SHADOW_REPATCH) == []
+
+
+FOO_DROPS = "\n".join([
+    "Sub dt1_Hit:PlaySoundAt \"fx_droptarget\", dt1:End Sub",
+    "Sub dt2_Hit:PlaySoundAt \"fx_droptarget\", dt2:End Sub",
+    "Sub dt3_Hit:PlaySoundAt \"fx_droptarget\", dt3:End Sub",
+    "Sub dt1_Dropped 'Engine", "    CheckDT", "End Sub",
+    "Sub CheckDT", "    If dt1.IsDropped AND dt2.IsDropped AND dt3.IsDropped Then ResetDTTimer.Enabled = 1", "End Sub",
+    "Sub ResetDT", "    PlaySoundAt \"fx_resetdrop\", dt2", "    dt1.IsDropped = 0", "End Sub",
+    "Sub StartMODulatorFrenzy", "    dt1.IsDropped = 1", "End Sub",
+    "Sub largetarget_Hit", "    PlaySoundAtBall \"fx_target\"", "    If Tilted Then Exit Sub", "    LTShake",
+    "    Addscore 5000", "End Sub",
+    "Sub LTShake:LTShakePos = 8:largetarget.TimerEnabled = 1:End Sub",
+    "Sub LightningTarget_Slingshot", "    PlaySoundAt \"fx_slingshot_EM\", Target004", "End Sub",
+    "Sub Spinner_Spin", "    PlaySoundAt \"fx_spinner\", Spinner", "    Addscore 100", "End Sub"])
+
+
+@pytest.mark.parametrize("title,ids", [("foo_fighters_pro", (87, 88, 89, 90)),
+                                       ("foo_fighters_le", (90, 91, 92, 93))])
+def test_foo_fighters_drops_stay_down_until_the_bank_resets(tmp_path, title, ids):
+    """PAD-1212: the game reads its 3 DROP optos as made while a target is
+    down and holds the bank down for the MOD TARGET behind it (emulator,
+    1.04.0: all three made, no reset; a down one opened, the 3 BANK DROP coil
+    fires). The table pulsed them, so the bank never read down, and JP's
+    paddle behind them (largetarget) reached no switch. JP's own rules that
+    raise or drop the bank are quiet; the machine's coil stands it up."""
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
+    for n in ("dt1", "dt2", "dt3"):
+        assert m["switches"][n]["event"] == "drop" and not m["switches"][n].get("up_closed")
+    assert m["switches"]["largetarget"]["id"] == ids[3]
+    assert m["drop_resets"]["PadDropsUp"] == ["dt1", "dt2", "dt3"]
+    out, rep = vs.patch(FOO_DROPS, m)
+    for i, n in enumerate(("dt1", "dt2", "dt3")):
+        assert ('Sub %s_Hit : Controller.Switch(%d) = True : On Error Resume Next : PlaySoundAt "fx_droptarget", %s'
+                ' : End Sub' % (n, 1000 + ids[i], n)) in out
+    assert ('Sub largetarget_Hit : vpmTimer.PulseSw %d : On Error Resume Next : PlaySoundAtBall "fx_target"'
+            ' : LTShake : End Sub' % (1000 + ids[3])) in out
+    # the kick target's coil sounds it (PAD-1119), not its switch as well
+    assert "Sub LightningTarget_Slingshot : vpmTimer.PulseSw %d : End Sub" % (1000 + ids[3] + 1) in out
+    assert 'Sub Spinner_Spin : vpmTimer.PulseSw' in out and 'PlaySoundAt "fx_spinner", Spinner : End Sub' in out
+    for q in ("dt1_Dropped", "ResetDT", "StartMODulatorFrenzy"):
+        assert "quieted Sub %s (the machine runs that now)" % q in rep
+    (mark,) = [r for r in m["repatch"] if r["since"].startswith("PAD-1212")]
+    assert mark["old"] not in out and mark["old"] == "Sub dt1_Hit : vpmTimer.PulseSw %d : End Sub" % (1000 + ids[0])
+    if not (sys.platform == "win32" and shutil.which("cscript")):
+        return
+    tail = out[out.index("Dim bsTrough"):out.index("Sub PadTestTimer_Timer")]
+    tail = tail[:tail.index("Sub Table1_Init")] + tail[tail.index("Sub Drain_Hit"):]
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Log, SolCallback(68), sLLFlipper, sLRFlipper, LTShakePos",
+        "Class Ctl", "Public Property Let Switch(n, v) : Log = Log & n & \"=\" & CInt(v) & \" \" : End Property",
+        "End Class",
+        "Class Drop", "Public IsDropped, TimerEnabled", "End Class",
+        "Class FakeTimer", "Public Sub PulseSw(n) : Log = Log & \"sw\" & n & \" \" : End Sub", "End Class",
+        "Dim Controller : Set Controller = New Ctl",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim dt1, dt2, dt3, largetarget, Drain, swPlungerRest, plungerIM",
+        "Set dt1 = New Drop : Set dt2 = New Drop : Set dt3 = New Drop : Set largetarget = New Drop",
+        "Sub PlaySoundAt(s, o) : Log = Log & \"[\" & s & \"] \" : End Sub",
+        "Sub PlaySoundAtBall(s) : Log = Log & \"[\" & s & \"] \" : End Sub",
+        "Sub LTShake : Log = Log & \"shake \" : End Sub",
+        tail, m["extra_vbs"],
+        "dt1.IsDropped = 1 : dt1_Hit : dt2.IsDropped = 1 : dt2_Hit : dt3.IsDropped = 1 : dt3_Hit : Log = Log & \"| \"",
+        "largetarget_Hit : Log = Log & \"| \"",
+        "Execute SolCallback(5) & \" True\" : Execute SolCallback(5) & \" False\"",
+        "Log = Log & \"| \" & dt1.IsDropped & dt2.IsDropped & dt3.IsDropped",
+        "WScript.Echo Log"]), encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    a, b, c, d = (1000 + i for i in ids)
+    assert r.stdout.strip() == (
+        "%d=-1 [fx_droptarget] %d=-1 [fx_droptarget] %d=-1 [fx_droptarget] | "
+        "sw%d [fx_target] shake | [fx_resetdrop] %d=0 %d=0 %d=0 | 000" % (a, b, c, d, a, b, c)), r.stdout + r.stderr
 
 
 def test_shadow_flipper_subs_are_found_whole_word_only():
@@ -2711,7 +2856,9 @@ def test_foo_fighters_kick_target_is_the_games_switch_and_kicks_harder(title, si
     patched table's wall kicks at 360 (PAD-1119; 300 by PAD-982) where JP's kicked at 240."""
     vs = pytest.importorskip("vpxshadow")
     m = json.load(open(os.path.join(VPX, title + ".shadow.json"), encoding="utf-8"))
-    assert m["switches"]["LightningTarget"] == {"id": sid, "event": "slingshot", "name": "KICK TARGET"}
+    # PAD-1212: the coil's callback sounds it, not the switch's own sub too
+    assert m["switches"]["LightningTarget"] == {"id": sid, "event": "slingshot", "name": "KICK TARGET",
+                                                "own_sound": False}
     assert m["item_fields"]["LightningTarget"] == {"SLGF": 360.0}
     out = vs.gen(m, {k: False for k in ("Table1_Init", "Table1_KeyDown", "Table1_KeyUp", "Table1_Exit")})
     assert "Sub LightningTarget_Slingshot : vpmTimer.PulseSw %d" % (1000 + sid) in out

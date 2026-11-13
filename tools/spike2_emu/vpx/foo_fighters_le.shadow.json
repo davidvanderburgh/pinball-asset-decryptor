@@ -44,9 +44,10 @@
     "OverlordTarget": {"id": 86, "event": "hit", "name": "OVERLORD HIT TARGET"},
     "PadOverlordOpto": {"id": 85, "event": "hold", "name": "OVERLORD OPTO (where the held ball rests at the fork, PAD-982)"},
     "Trigger009": {"id": 81, "event": "hit", "name": "UFO ROLLOVER"},
-    "dt1": {"id": 90, "event": "hit", "name": "3 DROP LEFT OPTO"},
-    "dt2": {"id": 91, "event": "hit", "name": "3 DROP CENTER OPTO"},
-    "dt3": {"id": 92, "event": "hit", "name": "3 DROP RIGHT OPTO"},
+    "dt1": {"id": 90, "event": "drop", "name": "3 DROP LEFT OPTO", "note": "PAD-1212: made while the target is down, until the 3 BANK DROP coil stands the bank up (emulator: the game holds the bank down for the MOD TARGET and fires the coil when a down target reads open)"},
+    "dt2": {"id": 91, "event": "drop", "name": "3 DROP CENTER OPTO"},
+    "dt3": {"id": 92, "event": "drop", "name": "3 DROP RIGHT OPTO"},
+    "largetarget": {"id": 93, "event": "hit", "name": "MOD TARGET (X2)", "also": "LTShake", "note": "PAD-1212: JP's paddle behind the drops (a Wall, largetargetP its model); LTShake shakes it as JP's own sub did"},
     "Target001": {"id": 47, "event": "hit", "name": "SONIC RADIO-BOTTOM"},
     "Target002": {"id": 46, "event": "hit", "name": "SONIC RADIO-TOP"},
     "Spinner": {"id": 89, "event": "spin", "name": "CENTER SPINNER OPTO"},
@@ -59,7 +60,7 @@
     "ChrisTrigger": {"id": 79, "event": "hit", "name": "RIGHT ORBIT"},
     "LeftSlingShot": {"id": 67, "event": "slingshot", "name": "LEFT SLINGSHOT"},
     "RightSlingShot": {"id": 66, "event": "slingshot", "name": "RIGHT SLINGSHOT"},
-    "LightningTarget": {"id": 94, "event": "slingshot", "name": "KICK TARGET"}
+    "LightningTarget": {"id": 94, "event": "slingshot", "name": "KICK TARGET", "own_sound": false}
   },
   "plunger": {"lane_trigger": "swPlungerRest", "lane_switch": 65, "autoplunge": "plungerIM"},
   "trough": {"release": "BallRelease", "drain": "Drain", "switches": [74, 73, 72, 71, 70, 69, 75], "balls": 6, "kick": [90, 4]},
@@ -73,7 +74,8 @@
     {"old": "PadDim = RGB((v And 255) \\ 14", "why": "the shot arrows stay dark: their colour goes on at a 14th of its brightness", "since": "PAD-1101: a lit arrow's Color is its colour, as JP's own SetLightColor sets it"},
     {"old": "Sub swPlungerRest_UnHit : Controller.Switch(1065) = False : swPlungerRest_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "Sub swPlungerRest_Hit : Controller.Switch(1065) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
-    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}
+    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"},
+    {"old": "Sub dt1_Hit : vpmTimer.PulseSw 1090 : End Sub", "why": "the game never sees its left drop targets stay down and the target behind them does not count, so the drop bank's perk cannot be maxed out", "since": "PAD-1212: the drops stay down for the game, the MOD target counts, the table's own playfield sounds play"}
   ],
   "switch_fakes": {
     "_": "PAD-968: the Overlord fork is a latched post the table has no switch for. FORK RELEASE pops it up (it catches the ball: with capture lit the game arms both coils on the OVERLORD OPTO), FORK DOWN pulls it back onto its latch (the ball goes). The controller follows it, answers OVERLORD FORK UP and hands the table its state as solenoid 60 (up = the posts up, the ball held)",
@@ -101,7 +103,7 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "Sub PadSavePost(e) : SavePost.IsDropped = Not e : End Sub\nSub PadVanPost(e) : VanPost.IsDropped = Not e : End Sub\nSub PadResetDrops(e) : If e Then dt1.IsDropped = 0 : dt2.IsDropped = 0 : dt3.IsDropped = 0 : End If : End Sub\nSub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e : End Sub\nSub PadKickTarget(e) : If e Then PlaySoundAt \"fx_slingshot_EM\", Target004 : DOF 104, DOFPulse : DOF 107, DOFPulse : End If : End Sub\n",
+  "extra_vbs": "Sub PadSavePost(e) : SavePost.IsDropped = Not e : End Sub\nSub PadVanPost(e) : VanPost.IsDropped = Not e : End Sub\nSub PadResetDrops(e) : If e Then PlaySoundAt \"fx_resetdrop\", dt2 : dt1.IsDropped = 0 : dt2.IsDropped = 0 : dt3.IsDropped = 0 : End If : PadDropsUp e : End Sub\nSub PadForkPost(e) : OverPost1.IsDropped = Not e : OverPost2.IsDropped = Not e : End Sub\nSub PadKickTarget(e) : If e Then PlaySoundAt \"fx_slingshot_EM\", Target004 : DOF 104, DOFPulse : DOF 107, DOFPulse : End If : End Sub\n",
   "item_fields": {
     "_": "PAD-982, PAD-1119: the kick target (LightningTarget, a slingshot wall) kicks half again as hard as JP's 240 (300 was still weak): Mike found it weaker than the real one, which can send the ball up the ramp",
     "LightningTarget": {"SLGF": 360.0}
@@ -234,7 +236,13 @@
     "gi024": {"leds": [[8, 0]], "name": "BOTTOM GI-WHT(X15)"},
     "gi021": {"leds": [[8, 0]], "name": "BOTTOM GI-WHT(X15)"}
   },
+  "drop_resets": {"_": "PAD-1212: the 3 BANK DROP coil (PadResetDrops) stands the bank up: every drop switch opens again", "PadDropsUp": ["dt1", "dt2", "dt3"]},
   "quiet_subs": [
+    "dt1_Dropped",
+    "dt2_Dropped",
+    "dt3_Dropped",
+    "ResetDT",
+    "StartMODulatorFrenzy",
     "StartLightSeq",
     "StartRainbow",
     "GiEffect",

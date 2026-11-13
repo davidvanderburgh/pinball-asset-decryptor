@@ -293,6 +293,8 @@ def known_tables(tables_dir=None):
         row["models"][title] = info["model"]
         row["fits"].append((title, info))
         row.setdefault("marks", []).extend(m.get("repatch") or [])
+        if str(info.get("map", "")).endswith(".shadow.json"):
+            row["marks"].extend(SHADOW_REPATCH)
     out = []
     for row in rows.values():
         row.setdefault("marks", []).extend(GENERIC_REPATCH)
@@ -531,11 +533,24 @@ GENERIC_REPATCH = [
 ]
 
 
+#: marks of fixes vpxshadow makes on every SCRIPTED tribute (a .shadow.json
+#: map), not on the ROM tables other patchers make. PAD-1212: a stood-in sub
+#: carried its DOF but not its sound, so Foo Fighters' drops, targets, spinner
+#: and trough kick were silent behind the machine; every script since says so
+#: in a line of its own (`absent`: the mark is a line the copy LACKS).
+SHADOW_REPATCH = [
+    {"absent": "' PAD: the table's own playfield sounds play beside the machine's switches and coils",
+     "why": "its targets, lanes, spinners, bumpers and trough make no sound"},
+]
+
+
 def missed_fixes(tables_dir, out_name, marks):
     """PAD-939: the fixes a (PAD) table was patched before. A map's `repatch`
     lists {"old": a line only an earlier patcher wrote, "why": what patching
     again mends} (The Beatles' six-ball trough, PAD-933); the script written
-    beside the table is read for them. The `why` of each one found."""
+    beside the table is read for them. The `why` of each one found. A mark
+    with `absent` instead is a line every newer script has (PAD-1212): it is
+    missed when the script lacks it."""
     if not marks:
         return []
     try:
@@ -549,7 +564,8 @@ def missed_fixes(tables_dir, out_name, marks):
     # Foo Fighters', PAD-968) carries the same mark in both, and the row
     # gathers every map's
     return list(dict.fromkeys(k["why"] for k in marks
-                              if squash(k.get("old", "")).strip() in text and k.get("old")))
+                              if (k.get("old") and squash(k["old"]).strip() in text)
+                              or (k.get("absent") and squash(k["absent"]).strip() not in text)))
 
 
 def patched_from(tables_dir, out_name):

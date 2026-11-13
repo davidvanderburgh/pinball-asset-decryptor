@@ -137,7 +137,8 @@ def test_the_choice_reads_the_row(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
     # PAD-1073: the start menu's pick sizes the team game (test_pad1073_coop_row_three.py), coop.cfg `teams` its own
     body = R._lift(src, "static unsigned coop_teams_switched_on(void)")
-    assert "return coop.teams_always ? coop.teams_always : tm.size;" in body
+    assert "return team_kind_most(coop_teams_kind());" in body
+    assert "return coop.teams_always ? coop.teams_always : tm.size;" in R._lift(src, "static unsigned coop_teams_kind(void)")
 
 
 def test_one_start_is_the_games_own_one_player_game(tmp_path):
@@ -159,13 +160,13 @@ def test_an_extra_ball_stays_with_the_player_who_earned_it(tmp_path):
 def test_the_top_line_board_and_gate_know_team_play():
     src = RUNTIME.read_text(encoding="utf-8")
     show = R._lift(src, "static void coop_turn_show(void)")
-    assert '"TEAM %u P%u  BALL %%d", coop_team_of(coop.turn), coop.turn' in show
+    assert '"TEAM %u P%u  BALL %%d", coop_team_of_in(coop.team_kind, coop.turn), coop.turn' in show
     board = R._lift(src, "static void coop_board_name(char *out, unsigned n)")
     assert 'pm_snprintf(out, 40, "TEAM PLAY")' in board and 'pm_snprintf(out, 40, "TEAM 2V1")' in board
-    assert "for (t = 1; t <= 5 && n < cap; t++)" in R._lift(
+    assert "for (t = 1; t <= 6 && n < cap; t++)" in R._lift(
         src, "static int coop_page_names(char names[][40], int n, int cap)\n{")
     tick = R._lift(src, "static void coop_tick(void)\n{")
-    assert "if (n && !coop.teams && pm_in_game()) coop_scores_same(n);" in tick   # a team's score is the game's own
+    assert "if (n && !coop.teams && !coop.standard && pm_in_game()) coop_scores_same(n);" in tick   # a team's score is the game's own
     line = R._lift(src, "static void coop_line(const char *s)")
     assert '"teams on")) { coop.teams_always = 4;' in line and '"teams 2v1")) { coop.teams_always = 3;' in line
     assert "return !while_at || coop_row_mode(value) != 0u;" in R._lift(
@@ -271,7 +272,7 @@ def test_co_op_is_a_start_menu_pick_too(tmp_path):
     co-op with no row) puts CO-OP PLAY on the start menu: picked, ball 1 makes a co-op game of one, each Start in ball
     1 adds a teammate with no button held, and the top line says so."""
     src = RUNTIME.read_text(encoding="utf-8")
-    fn = R._lift(src, "static int coop_join_words(unsigned n, unsigned step, char *out, unsigned cap)")
+    fn = R._lift(src, "static int coop_join_words(unsigned n, unsigned step, char *out, unsigned cap)\n{")
     main = "#include <stdio.h>\n#define pm_snprintf snprintf\n" + fn + r"""
 int main(void)
 {

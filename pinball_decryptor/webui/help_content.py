@@ -1502,15 +1502,7 @@ HELP_CONTENT = {
     # The key stays so every notebook tab has an entry.
     "Modes": [],
     "Play Options": [
-        ("What it's for", [
-            "Options for how the game itself plays and what it reports, without making a mode: a handicap for "
-            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
-            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
-            "**Insider Connected keeps working.** Nothing here changes a score, so on a card with these and none "
-            "of your modes or co-op play, players keep Insider Connected as before: scores, high scores and "
-            "achievements. Your own modes and co-op play (on the Modes tab) are what keep a card's scores on the "
-            "machine.",
-        ]),
+        ("What it's for", lambda: _play_options_intro()),
         ("Handicap per player", [
             "**Handicap per player** lets each player of a game pick a handicap from "
             "**-3** (hardest) to **+3** (easiest), so players of different skill can play one game. Tick "
@@ -4126,6 +4118,23 @@ PREVIEW_HELP = {
         ],
     },
 }
+
+
+def _play_options_intro():
+    """The Play Options tab's opening section. The tab rides the game's modes
+    capability, not the mode maker's switch, so it names the Modes tab (and
+    its co-op play) only while the mode maker is on: a copy where it is a
+    preview again, switched off, shows nothing of it."""
+    from ..core import preview
+    text = ("Options for how the game itself plays and what it reports, without making a mode: a handicap for "
+            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
+            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
+            "**Insider Connected keeps working.** Nothing here changes a score, so ")
+    if not preview.enabled("modes"):
+        return [text + "players keep Insider Connected as before: scores, high scores and achievements."]
+    return [text + "on a card with these and none of your modes or co-op play, players keep Insider Connected "
+            "as before: scores, high scores and achievements. Your own modes and co-op play (on the Modes tab) "
+            "are what keep a card's scores on the machine."]
 
 
 def sections_for(tab_name):

@@ -6357,3 +6357,28 @@ def test_register_with_a_log_keeps_what_happened(tmp_path, monkeypatch):
     monkeypatch.setattr(pv, "_register", lambda cmd: print("registered %s" % cmd) or 0)
     assert pv.main(["register", "--log", str(log)]) == 0
     assert log.read_text(encoding="utf-8").split() == ["registered", "register", "exit", "0"]
+
+
+def test_the_log_says_what_the_table_read_of_the_machine_switches(monkeypatch):
+    """PAD-1225: Batman 66's turntable and crane follow the machine by reading
+    its position switches (PadMechTimer, every 50 ms). A player's turntable
+    never moved and nothing in his log could say whether the table read them
+    at all. Each change in what the table reads is logged, once."""
+    pc = pytest.importorskip("padcontroller")
+    logged = []
+    monkeypatch.setattr(pc, "log", logged.append)
+    b = pc.Bridge()
+    b.set_game("batman")
+    b.attached = True
+    plane = bytearray(len(b.mrg))
+    plane[77] = 1                                   # turntable home
+    b.mrg = bytes(plane)
+    for _ in range(20):                             # a second of PadMechTimer
+        assert b.get_switch(1077) and not b.get_switch(1078)
+    plane[77], plane[78] = 0, 1                     # the game turned it to the Bat Phone
+    b.mrg = bytes(plane)
+    for _ in range(20):
+        assert not b.get_switch(1077) and b.get_switch(1078)
+    reads = [ln for ln in logged if ln.startswith("table reads")]
+    assert reads == ["table reads switch 77 = 1", "table reads switch 78 = 0",
+                     "table reads switch 77 = 0", "table reads switch 78 = 1"]

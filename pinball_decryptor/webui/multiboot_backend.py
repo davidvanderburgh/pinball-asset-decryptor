@@ -138,6 +138,12 @@ class MultibootBackend:
     #: also draws the preview.  The tab's update-file words and steps key on
     #: this, not on one platform's name.
     update_file: bool = False
+    #: THE BUILDER TAKES THE SHARED COMMAND LINE (--primary / --extra / --out /
+    #: --selector-dir / --titles ..., and plan / build / verify / inject /
+    #: media) that the update-file tools brought, and its ensure script prints
+    #: the preview's line.  Every update-file backend does; a CARD built that
+    #: way too (Spike 3, PAD-1263), whose words stay a card's.
+    own_tool: bool = False
 
     # ---- pure helpers -----------------------------------------------------
     def device(self, img):
@@ -153,6 +159,8 @@ class MultibootBackend:
             return "GDCraze.x86_64" if img == 0 else "pad_image%d.bin" % img
         if self.key == "jjp":
             return "rootA" if img == 0 else ("rootB" if img == 1 else "rootB:img%d" % img)
+        if self.key == "s3":
+            return "img%d" % img         # mks3multi.py: /games/pad/imgN, bound over /games
         return "p3" if img == 0 else ("p7" if img == 1 else "p7:img%d" % img)
 
     def suggest_title(self, path):
@@ -195,6 +203,18 @@ class MultibootBackend:
             if folder and game.lower() in folder.lower():
                 return folder, ""
             return game, ""
+        if self.key == "s3":
+            # Stern's Spike 3 cards: fallout_le-0_81_0_spike3.Release.64G.sdcard-secure.raw
+            # -> "FALLOUT LE 0.81.0"; a word after the version (a mod PAD wrote,
+            # "pokemon_le-0_82_0 my mod.raw") is the subtitle
+            stem = re.sub(r"\.(raw|img)$", "", b, flags=re.I)
+            stem = re.sub(r"\.Release\..*$", "", stem, flags=re.I)
+            m = re.match(r"^([A-Za-z0-9_]+?)-(\d+(?:_\d+)+)(?:_spike3)?(.*)$", stem)
+            if m:
+                rest = re.sub(r"[_\s]+", " ", m.group(3)).strip(" -.")
+                return ("%s %s" % (m.group(1).replace("_", " ").upper(),
+                                   m.group(2).replace("_", ".")), rest)
+            return re.sub(r"[_\s]+", " ", stem).strip(), ""
         if self.key == "jjp":
             b = re.sub(r"\.(iso|raw|img)$", "", b, flags=re.I)
             return re.sub(r"[_\s]+", " ", b).strip(), ""
@@ -508,7 +528,62 @@ def spooky_game_name(name):
     return re.sub(r"\.[^.]*$", "", name or "")
 
 
-BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF, DP.key: DP, SPOOKY.key: SPOOKY}
+#: STERN SPIKE 3 (PAD-1263): a Spike 3 machine runs /games/game off its
+#: encrypted games partition, so a multi-boot card is image 0's card with every
+#: image's games tree in that partition (/games/pad/imgN) and /games/game the
+#: menu's hook, which binds the chosen tree over /games; the signed boot
+#: partition and the rootfs stay image 0's (tools/spike3_emu/mks3multi.py,
+#: MULTIBOOT.md).  Building maps the card through dm-crypt with the user's own
+#: key, so build / verify / inject run as root.  The menu reads the coin door's
+#: NEXT / PREVIOUS / SELECT and is silent (the amplifier is the game's to
+#: start); the preview draws with a native build of the same menu.
+_S3 = "tools/spike3_emu"
+S3 = MultibootBackend(
+    key="s3", label="Stern Spike 3",
+    tool_dir=_S3, tool=_S3 + "/mks3multi.py",
+    media_tool=(_S3 + "/mks3multi.py", "media"),
+    selector_src=_SPIKE2 + "/codeselect", ensure_tool=_S3 + "/ensures3select.sh",
+    card_flag="--card",
+    image_exts=(".raw", ".img"),
+    image_types=(("Spike 3 card images", "*.raw *.img"), ("All files", "*.*")),
+    image_noun="card image", image_pick_title="Pick a Spike 3 card image for the card",
+    out_ext=".raw", out_suffix=".multi.raw", out_noun="card",
+    out_label="Multi-boot card image:",
+    empty_path_text=("No card yet. Add the Spike 3 card images below - the "
+                     "path fills itself in from the first one - or type where "
+                     "the card should be written."),
+    medium="SD card", medium_needed="SD card needed:", medium_holds="card holds",
+    flash_frame="Flash to an SD card",
+    flash_tick="Write the card onto an SD card (you pick which card next)",
+    flash_detail=("WHICH SD CARD? You pick it in the next dialog: Start opens "
+                  "the SD-card picker the Write tab uses, and nothing is written "
+                  "to any card until you have chosen one there and confirmed. "
+                  "A Spike 3 card image is 64 GB, so it needs a 64 GB card or "
+                  "bigger, and writing it takes a while. The machine's own boot "
+                  "and system partitions are the first image's, unchanged: only "
+                  "the games partition carries the other images and the menu."),
+    build_flash_text="Build / flash card…",
+    overhead_label="The menu and its pictures",
+    sizes=(("64G", "64 GB"), ("128G", "128 GB")),
+    fits_re=re.compile(r"fits SD\s+(\d+G)\s+card size\s+\d+:\s+(YES|NO)\s*\(spare\s+(-?\d+)\)"),
+    total_re=re.compile(r"^card-size\s+(\d+)"),
+    status_checks=(("card", "Card image"), ("images", "Images"),
+                   ("built", "Built"), ("ready", "Ready to flash")),
+    max_cards=9, groups=False, compact=False, machine_volume=False,
+    volume_default=50, volume_max=100, attract_clip=False,
+    update=False, bypass=False, extract=False, read_card=False,
+    selector_default="/var/tmp/s3select",
+    selector_suffix="/s3select", selector_binary="s3select",
+    preview_native=True, conf_font="/var/tmp/s3select/font.ttf",
+    root_steps=frozenset(("selector", "build", "verify", "inject")),
+    sound=False, scores_column=False, emulate=True, flash=True,
+    tab_sub=("Several Spike 3 game images on one SD card, with a boot menu the "
+             "machine shows on power-up."),
+    add_choices=frozenset({"_add_image"}),
+    own_tool=True)
+
+BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF, DP.key: DP, SPOOKY.key: SPOOKY,
+            S3.key: S3}
 
 
 def backend_for(what):

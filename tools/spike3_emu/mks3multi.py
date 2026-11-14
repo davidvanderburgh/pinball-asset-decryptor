@@ -733,6 +733,7 @@ def main(argv=None):
     s = sub.add_parser("inject")
     s.add_argument("--card", required=True)
     s.add_argument("--keyfile")
+    s.add_argument("--default-card", type=int, help="(accepted for the tab; a Spike 3 card has no random cards)")
     s.add_argument("--primary")
     s.add_argument("--extra", action="append", default=[])
     s.add_argument("--cache-dir")

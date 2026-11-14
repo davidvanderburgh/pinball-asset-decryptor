@@ -196,6 +196,9 @@ _SPIKE3_CAPS = Capabilities(
     # (spike3_requests), and Auto-transcribe skips named files.
     transcribe=True,
     music_id=True,
+    # PAD-1263: several Spike 3 card images on one card with a boot menu
+    # (the Multi-boot tab's "s3" platform, tools/spike3_emu/mks3multi.py)
+    multiboot=True,
 )
 
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD

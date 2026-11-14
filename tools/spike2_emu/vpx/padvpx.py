@@ -177,6 +177,8 @@ def patch(table_path, outdir=None, card=None, title=None):
         b2s = copy_backglass(table_path, out)
         if b2s:
             print("backglass: %s" % b2s)
+            for line in cabinet_res(out):
+                print(line)
         remember_patch(out, table_path, title)
         print("open \"%s\" in Visual Pinball; the game starts with it when its card is known" % out)
     return r.returncode
@@ -196,6 +198,20 @@ def remember_patch(out_vpx, table_path, title):
             json.dump({"source": os.path.abspath(table_path), "title": title}, f)
     except OSError:
         pass
+
+
+def cabinet_res(out_vpx, kit=None, mons=None):
+    """PAD-1304: the patched table's <name>.res (the backglass on the screen
+    the Visual Pinball tab's Cabinet row picked) and its B2S DMD, as the
+    kit's cabinet settings say. Words for the log; never in the patch's way."""
+    try:
+        import padcabinet
+        import padisplay
+        kit = padlaunch.kit_load() if kit is None else kit
+        mons = padisplay.monitors() if mons is None else mons
+        return padcabinet.write_res(out_vpx, kit, mons, game_name=padcabinet.rom_name(out_vpx))
+    except Exception as exc:                                # noqa: BLE001
+        return ["backglass screen not set: %s" % exc]
 
 
 def copy_backglass(table_path, out_vpx):

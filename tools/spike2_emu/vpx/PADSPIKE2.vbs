@@ -332,11 +332,16 @@ Private Sub PadStartB2S
 	If Err = 0 Then B2SOnALT = True
 	Err.Clear
 	PadLog "B2S.Server: started as " & name & " err=" & e
+	' PAD-1304: PAD.Controller lights the backglass's bulbs the kit names for
+	' BACKBOX GI (an older controller has no PadB2S: nothing changes)
+	If B2SOnALT Then Controller.PadB2S B2SController
+	Err.Clear
 End Sub
 
 ' the table's exit sub calls this beside Controller.Stop (the patch puts it there)
 Sub PadStopB2S
 	On Error Resume Next
+	Controller.PadB2SFinish
 	If IsObject(B2SController) Then B2SController.Stop
 	B2SOnALT = False
 	If PadDOFOn Then Controller.PadDOFFinish

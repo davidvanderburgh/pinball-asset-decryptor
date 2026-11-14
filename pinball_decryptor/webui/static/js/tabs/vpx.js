@@ -17,7 +17,12 @@
 // playfield out of the (PAD) copy, read by the kit into the app's cache),
 // the large one in its tooltip.
 
-import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, Select, Check, Modal, call, tip, mediaUrl } from "../core/ui.js";
+// PAD-1304: a three-screen cabinet. The Cabinet row puts B2S's backglass on
+// a screen of its own (the game's screen has the backglass monitor), hides
+// B2S's DMD and sends the START and LOCKDOWN button lights to DOF; each
+// patched table's picker names the backglass bulbs BACKBOX GI lights.
+
+import { html, useState, PageHead, Card, Button, Chip, Note, Progress, Spinner, Select, Check, Modal, Field, call, tip, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -112,6 +117,54 @@ function Sheet({ d, onClose }) {
       <table class="vpx-sheet-table">${head(["kind", "count", "objects"])}
         <tbody>${Object.entries(inv.kinds).filter(([, v]) => v.length).map(([k, v]) => html`<tr><td>${k}</td><td class="mono">${v.length}</td>
           <td class="small vpx-wrap">${v.slice(0, 40).join(", ")}${v.length > 40 ? " … (" + v.length + ")" : ""}</td></tr>`)}</tbody></table>` : null}
+  <//>`;
+}
+
+// PAD-1304: the Cabinet row. The backglass: where B2S puts it, or filling a
+// screen (each patched table gets a <name>.res saying so). B2S's own DMD
+// hidden: the game's screen is the DMD. The two buttons' LEDs as DOF E
+// events, blank = not sent (E190 / E191 suggested).
+function CabinetRow({ c, disabled }) {
+  const screens = c.screens || [];
+  const opts = [{ value: "0", label: "Where B2S puts it" }].concat(screens.map((m) => ({
+    value: String(m.n), label: "Screen " + m.n + (m.primary ? " (main)" : "") + ", " + m.w + "×" + m.h })));
+  const dof = (k, label, suggested) => html`<span class="vpx-dof small">${label} E<${Field} sm type="number" width="66px" min="0" max="999"
+      value=${c[k] ? String(c[k]) : ""} placeholder=${String(suggested)} disabled=${disabled}
+      title=${{ head: label + " button light to DOF", lines: ["The DOF event (E number) the button's LED is sent as while a table plays; blank: not sent.",
+        "Give it the same number in your DOF config's line for this button (" + suggested + " is free on most)."] }}
+      onChange=${() => {}}
+      onCommit=${(v) => { const n = parseInt(v, 10) || 0; if (n !== (c[k] || 0)) call("vpx.set_cabinet", { [k]: n }); }} /></span>`;
+  return html`<div class="vpx-strip-row">
+    <span class="h2">Cabinet</span>
+    <span class="small muted" ...${tip({ head: "A cabinet with the game's screen on the backglass monitor.",
+      lines: ["The backglass (B2S) goes to a screen of its own: each patched table gets a <name>.res beside it.",
+        "The start and lockdown button lights go to DOF, and each table's backbox light (BACKBOX GI) to the backglass bulbs you pick on its row."] })}>Backglass on</span>
+    <${Select} sm value=${String(c.backglass || 0)} options=${opts} disabled=${disabled}
+      title="The screen the table's backglass fills. Where B2S puts it: its own ScreenRes.txt, as before."
+      onChange=${(v) => call("vpx.set_cabinet", { backglass: parseInt(v, 10) || 0 })} />
+    <${Check} checked=${!!c.hide_dmd} disabled=${disabled} label="Hide B2S DMD"
+      title=${{ head: "Hide the backglass's own DMD window.", lines: ["The game's screen is the DMD: B2S's (B2STableSettings.xml, per table) only gets in the way."] }}
+      onChange=${(v) => call("vpx.set_cabinet", { hide_dmd: v })} />
+    <span class="sp"></span>
+    ${dof("dof_start", "Start", (c.suggested || {}).start || 190)}
+    ${dof("dof_lockdown", "Lockdown", (c.suggested || {}).lockdown || 191)}
+  </div>`;
+}
+
+// PAD-1304: which of a backglass's bulbs light with the backbox's GI.
+function Bulbs({ b, busy }) {
+  const [on, setOn] = useState(() => new Set(b.chosen || []));
+  const names = b.names || [];
+  const flip = (n, v) => { const x = new Set(on); if (v) x.add(n); else x.delete(n); setOn(x); };
+  return html`<${Modal} title=${"Backglass lights: " + base(b.output).replace(/\.vpx$/i, "")} icon="image" cls="vpx-bulbs"
+    onClose=${() => call("vpx.close_bulbs")}
+    footer=${html`<${Button} kind="ghost" onClick=${() => call("vpx.close_bulbs")}>Cancel<//>
+      <${Button} kind="primary" disabled=${busy || !names.length} onClick=${() => call("vpx.set_bulbs", names.filter((n) => on.has(n)))}>Save<//>`}>
+    ${names.length ? html`<p class="small">The bulbs ticked light while the machine's backbox light (BACKBOX GI) is on, and go out with it.
+      From ${b.backglass}.</p>
+      <div class="vpx-bulb-list">${names.map((n) => html`<${Check} checked=${on.has(n)} label=${n} onChange=${(v) => flip(n, v)} />`)}</div>`
+      : html`<${Note} kind="warn">${b.backglass ? b.backglass + " names no bulbs: nothing on it can follow the backbox light."
+        : "No backglass beside this table: put its .directb2s in the tables folder (Patch again copies it there)."}<//>`}
   <//>`;
 }
 
@@ -287,6 +340,7 @@ export default function Vpx() {
   };
   return html`<div class="page vpx-page">
     ${s.sheet ? html`<${Sheet} d=${s.sheet} onClose=${() => call("vpx.close_sheet")} />` : null}
+    ${s.bulbs ? html`<${Bulbs} b=${s.bulbs} busy=${busy} />` : null}
     <${PageHead} title="Visual Pinball" sub=${(s.intro || "").split("\n").map((l) => html`${l}<br />`)}>
       <span class="small muted">Machine</span>
       <${Select} sm width=${200} value=${platform} options=${filterOpts} cls="vpx-filter"
@@ -332,6 +386,7 @@ export default function Vpx() {
             : html`<${Button} size="sm" kind="ghost" disabled=${busy || !s.ok} ...${tip(p.words)}
                 onClick=${() => call("vpx.layout", p.key)}>${p.short || p.key}<//>`)}
         </div>
+        ${s.cabinet ? html`<${CabinetRow} c=${s.cabinet} disabled=${busy || !s.ok} />` : null}
       </div>`}>
       ${open ? html`
       <${Row} ok=${rtOk} label="The emulator's Linux (PAD runtime)" value=${s.runtime_text || ""}>
@@ -416,7 +471,12 @@ export default function Vpx() {
         <span>${t.download && t.extra ? downloadChip(t.download)
           : !t.patched ? html`<${Chip} sm ...${tip(t.download ? "Your download is in the folder: " + base(t.download) + ". Patch writes its (PAD) copy." : "")}>Not patched<//>`
           : stale(t) || missed(t) ? html`<${Chip} kind="warn" dot sm>Patch again<//>`
-          : html`<${Chip} kind="ok" dot sm>Patched<//>`}</span>
+          : html`<${Chip} kind="ok" dot sm>Patched<//>`}${t.patched && !t.extra && s.cabinet
+            ? html`<${Button} size="sm" kind="ghost" icon="image" cls="vpx-gi-btn" disabled=${busy || !s.ok}
+              title=${{ head: "Backglass lights", lines: [((s.cabinet.gi_bulbs || {})[t.title] || []).length
+                ? "BACKBOX GI lights " + s.cabinet.gi_bulbs[t.title].join(", ") + " on this table's backglass."
+                : "Pick the bulbs of this table's backglass that light with the backbox (BACKBOX GI)."] }}
+              onClick=${() => call("vpx.open_bulbs", t.output, t.title)} />` : null}</span>
         <span class="vpx-cover">${t.extra ? null : coverBtn(t)}</span>
         <span class="vpx-patch">${t.extra ? null
           : patchBtn(t, !t.patched ? "Patch…" : t.source ? "Patch again" : "Patch again…")}</span>

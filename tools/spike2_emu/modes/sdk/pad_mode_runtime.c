@@ -12,6 +12,19 @@
 #include "pad_mode.h"
 #include "pad_stock.h"          /* item 161: the game's own rules in C */
 
+/* PAD-1269: the runtime is built for two machines. Spike 2 is 32-bit ARM (pm_addr and pm_reg are `unsigned`, as they
+ * always were: that build's code is unchanged). Spike 3 is 64-bit ARM (build_mode.sh -a a64): an address in the game,
+ * and a saved register, are 64 bits there. The hook layer for it is hook_a64.h. */
+#if defined(__aarch64__)
+typedef unsigned long pm_addr;  /* an address in the game */
+typedef unsigned long pm_reg;   /* a register a hook saved */
+#define PM_A64 1
+#else
+typedef unsigned pm_addr;
+typedef unsigned pm_reg;
+#define PM_A64 0
+#endif
+
 extern int   open(const char *, int, ...);
 extern long  read(int, void *, __SIZE_TYPE__);
 extern long  write(int, const void *, __SIZE_TYPE__);
@@ -150,7 +163,31 @@ void pm_commas(char *out, unsigned cap, uint64_t v)
  *   callout <role> <id>          scene <role> <40-hex id>
  *   text <name> <rest of line>   anything else a mode may want
  * Looked for at /usr/local/padmode/game.port (a card) then /dump/game.port (the rig). */
+#if PM_A64
+/* PAD-1269: a Spike 3 card carries the runtime on its games partition (the rootfs is the signed image's) */
+static const char *const PORT_FILES[] = { "/games/pad/padmode/game.port", "/dump/game.port" };
+#else
 static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump/game.port" };
+#endif
+
+/* PAD-1269: where the game program is loaded. A Spike 2 game is ET_EXEC (0: the port's addresses are where they are);
+ * a Spike 3 game is a PIE, so every `site` and `data` address the port names is the program's own (its ELF's), and
+ * the load address is added as the port is read. The program's headers say where they are (AT_PHDR) and where the
+ * ELF has them (PT_PHDR's vaddr); the difference is the load address. */
+static unsigned long game_base;
+#if PM_A64
+extern unsigned long getauxval(unsigned long);
+static unsigned long load_base(void)
+{
+    const unsigned char *ph = (const unsigned char *)getauxval(3);         /* AT_PHDR */
+    unsigned long n = getauxval(5), i;                                     /* AT_PHNUM */
+    if (!ph || getauxval(4) != 56) return 0;                               /* AT_PHENT: Elf64_Phdr */
+    for (i = 0; i < n; i++)
+        if (*(const unsigned *)(ph + i * 56) == 6)                         /* PT_PHDR */
+            return (unsigned long)ph - *(const unsigned long *)(ph + i * 56 + 16);   /* p_vaddr */
+    return 0;
+}
+#endif
 
 /* The port is read in PORT_CHUNK pieces, a line at a time, up to PORT_MAX bytes. It was ONE read
  * into a buffer of the port's cap (16 KB, then 32 KB when the lamp lines took Godzilla's past 16 KB);
@@ -171,7 +208,7 @@ static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump
 
 /* Limits a port must keep (port_words.py checks them): names up to 39 characters, a shot
  * name or a text value up to 159. */
-struct site { char name[40]; unsigned addr, w0, w1; int ok; };
+struct site { char name[40]; pm_addr addr; unsigned w0, w1; int ok; };
 struct named { char name[40]; long value; };
 struct shot { char name[160]; uint64_t mask; };
 struct text { char name[40]; char value[160]; };
@@ -230,7 +267,7 @@ static void port_line(const char *s)
     if (str_eq(key, "site") && port.n_site < N_SITES) {
         struct site *x = &port.site[port.n_site];
         s = word(s, x->name, sizeof x->name);
-        x->addr = (unsigned)number(&s, &ok);
+        x->addr = (pm_addr)number(&s, &ok) + (pm_addr)game_base;
         x->w0 = (unsigned)number(&s, 0);
         x->w1 = (unsigned)number(&s, 0);
         if (ok && x->name[0]) port.n_site++;
@@ -243,6 +280,7 @@ static void port_line(const char *s)
         if (*n >= cap) { port.dropped++; return; }
         s = word(s, tab[*n].name, sizeof tab[*n].name);
         tab[*n].value = (long)number(&s, &ok);
+        if (tab == port.data) tab[*n].value += (long)game_base;   /* PAD-1269: a PIE's load address (0 on Spike 2) */
         if (ok && tab[*n].name[0]) (*n)++;
         return;
     }
@@ -305,6 +343,9 @@ static int port_load(void)
     long n, i, j = 0, total = 0;
     unsigned k;
     int fd = -1;
+#if PM_A64
+    game_base = load_base();
+#endif
     for (k = 0; k < sizeof PORT_FILES / sizeof PORT_FILES[0]; k++) {
         fd = open(PORT_FILES[k], O_RDONLY);
         if (fd >= 0) {
@@ -347,7 +388,7 @@ static struct site *site(const char *name)
 }
 
 /* a verified site's address, or 0 */
-static unsigned fn(const char *name)
+static pm_addr fn(const char *name)
 {
     struct site *x = site(name);
     return x && x->ok ? x->addr : 0;
@@ -361,7 +402,7 @@ static long named(const struct named *tab, int n, const char *name, long fallbac
     return fallback;
 }
 
-static unsigned data(const char *name) { return (unsigned)named(port.data, port.n_data, name, 0); }
+static pm_addr data(const char *name) { return (pm_addr)named(port.data, port.n_data, name, 0); }
 
 long pm_port_value(const char *name, long fallback)
 {
@@ -410,8 +451,16 @@ static void maps_line(const char *s, const char *e)
     if (q + 4 > e || q[0] != ' ' || hi <= lo) return;
     if (q[1] == 'r') how |= MAP_R;
     if (q[3] == 'x') how |= MAP_X;
+#if PM_A64
+    /* PAD-1269: on Spike 3 every program of the title is under /games/ (conagent too), so the GAME is the mapping whose
+     * file is named `game` itself */
+    for (p = e; p > q && p[-1] != '/'; p--) ;
+    if (p > q && p + 4 <= e && p[0] == 'g' && p[1] == 'a' && p[2] == 'm' && p[3] == 'e' && (p + 4 == e || p[4] == ' '))
+        how |= MAP_GAME;
+#else
     for (p = q; p + 4 <= e; p++)
         if (p[0] == 'g' && p[1] == 'a' && p[2] == 'm' && p[3] == 'e') { how |= MAP_GAME; break; }
+#endif
     maps[n_maps].lo = lo;
     maps[n_maps].hi = hi;
     maps[n_maps].how = how;
@@ -455,11 +504,12 @@ static int maps_has(unsigned long addr, unsigned long len, unsigned how)
     return 0;
 }
 
-static int is_game_process(unsigned addr)
+static int is_game_process(pm_addr addr)
 {
     return maps_has(addr, 8, MAP_R | MAP_X | MAP_GAME);
 }
 
+#if !PM_A64
 /* ---- rule 2: the words, followed through another preloaded object's trampoline --------
  * Called only for a site inside the game's code (site_check); a hook jump's target is read only
  * when it is mapped readable too. */
@@ -480,8 +530,9 @@ static int words_match(struct site *x)
 }
 
 /* ---- the trampoline --------------------------------------------------------------------- */
-typedef void (*hook_fn)(unsigned *regs);      /* r0..r3, ip, lr, then stack arguments */
+typedef void (*hook_fn)(pm_reg *regs);      /* r0..r3, ip, lr, then stack arguments */
 #define TRAMP_WORDS 4096                /* PAD-363: 256 hooks (a title's mode starts take up to ~60) */
+#define TRAMP_SPAN TRAMP_WORDS          /* PAD-1269: the words a thunk of ours may be in */
 static unsigned tramp[TRAMP_WORDS] __attribute__((aligned(4096)));
 static int tramp_used;
 
@@ -557,7 +608,7 @@ static int hook_full(unsigned addr, hook_fn logger)
  * tools refuse pc-relative words for a hooked site. words_match() in ANOTHER object does not
  * follow this shape (it reads t[14] and t[15] as the moved words), and no other object hooks
  * these sites. (tests read the constants) */
-typedef int (*veto_fn)(unsigned *regs);
+typedef int (*veto_fn)(pm_reg *regs);
 static int hook_veto(unsigned addr, veto_fn logger)
 {
     unsigned *p = (unsigned *)(unsigned long)addr, *t;
@@ -591,7 +642,7 @@ static int hook_veto(unsigned addr, veto_fn logger)
 
 /* PAD-363: a veto whose logger is also told WHICH hook fired (r1 = n, 0-255): the spare nop at t[2] becomes
  * `mov r1, #n`, so one logger serves many starts that carry no object to tell them apart (a plain-C title's) */
-typedef int (*veto_n_fn)(unsigned *regs, unsigned n);
+typedef int (*veto_n_fn)(pm_reg *regs, unsigned n);
 static int hook_veto_bl(unsigned addr, veto_n_fn logger, unsigned n, unsigned refused);
 static int hook_veto_n(unsigned addr, veto_n_fn logger, unsigned n, unsigned refused)
 {
@@ -761,6 +812,10 @@ static unsigned hook_call(unsigned addr, void *wrapper)
     __builtin___clear_cache((char *)p, (char *)(p + 2));
     return target;
 }
+
+#else
+#include "hook_a64.h"           /* PAD-1269: the 64-bit ARM layer (Spike 3) */
+#endif
 
 /* ---- the game, right now ------------------------------------------------------------- */
 unsigned pm_player(void)
@@ -1418,7 +1473,7 @@ static void sound_key_say(const unsigned char *k)
     if (n > 0 && n < (int)sizeof b) write(log_fd, b, (unsigned long)n);
 }
 
-static void on_sound_worker(unsigned *r)
+static void on_sound_worker(pm_reg *r)
 {
     if (worker_log) {
         sound_say(r[0], r[2]);
@@ -1523,7 +1578,7 @@ static int own_on(unsigned request)
     return 0;
 }
 
-static void on_sound_first_active(unsigned *r)
+static void on_sound_first_active(pm_reg *r)
 {
     const unsigned short *l = (const unsigned short *)(unsigned long)r[0];
     static unsigned said;
@@ -1563,21 +1618,21 @@ static int key_is(const unsigned char *a, const unsigned char *b)
     return 1;
 }
 
-static void sndt_lookup(unsigned *r);
+static void sndt_lookup(pm_reg *r);
 static volatile int sndt_live;              /* PAD-565: the lookup hook takes the sounds in turn */
-static int juke_lookup(unsigned *r);       /* PAD-685: the jukebox's songs */
+static int juke_lookup(pm_reg *r);       /* PAD-685: the jukebox's songs */
 static volatile int juke_live;
 static int lookup_hooked;                   /* sound_lookup is hooked (on_sound_lookup), once */
-static int att_lookup(unsigned *r);         /* PAD-641: the flipper buttons' sounds in attract */
+static int att_lookup(pm_reg *r);         /* PAD-641: the flipper buttons' sounds in attract */
 static volatile int att_live;
-static int gms_lookup(unsigned *r);         /* PAD-945: a sound on a shot in one of the game's modes */
+static int gms_lookup(pm_reg *r);         /* PAD-945: a sound on a shot in one of the game's modes */
 static volatile int gms_live;
-static int ci_lookup(unsigned *r);          /* PAD-1114: the co-op intro's sound */
+static int ci_lookup(pm_reg *r);          /* PAD-1114: the co-op intro's sound */
 static volatile int ci_live;
-static int cpk_lookup(unsigned *r);         /* PAD-1123: a co-op character's sound once picked */
+static int cpk_lookup(pm_reg *r);         /* PAD-1123: a co-op character's sound once picked */
 static volatile int cpk_live;
 
-static void on_sound_lookup(unsigned *r)
+static void on_sound_lookup(pm_reg *r)
 {
     if (worker_log && r[1]) sound_key_say((const unsigned char *)(unsigned long)r[1]);   /* PAD-1071 */
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
@@ -3447,7 +3502,7 @@ static int clip2_start(void *surf, const char *name)
 }
 
 /* the game asks the bank's surface for a clip of its own (the surface_set_video hook) */
-static void ck_seen(unsigned *r)
+static void ck_seen(pm_reg *r)
 {
     const unsigned *s = (const unsigned *)(unsigned long)r[1];
     const char *name, *idle = pm_port_text("backdrop_idle");
@@ -3514,7 +3569,7 @@ static void ck_seen(unsigned *r)
 }
 
 /* surface_play(surface, loop, count) from the game while our clip is away: a loop of the game's is a background */
-static void ck_play_seen(unsigned *r)
+static void ck_play_seen(pm_reg *r)
 {
     void *bank;
     if (ck_ours || ck_in || !ck.lost || !r[1] || ck.loop || ck.back) return;   /* (back: its main-play video) */
@@ -3542,7 +3597,7 @@ static void ck_game_loops(void)
     }
 }
 
-static void on_surface_play(unsigned *r)
+static void on_surface_play(pm_reg *r)
 {
     void *bank = 0;
     if (!ck_ours && !ck_in) {
@@ -3629,7 +3684,7 @@ static void ck_tick(void)
  * 133 ms). While the last clip put on the bank's surface is ours, a reel of that surface is handed a reel with no
  * surface (reel_idle), so its tick returns at once; it takes up its own clip again when the game puts one there. */
 static unsigned reel_idle[16];
-static void on_reel_tick(unsigned *r)
+static void on_reel_tick(pm_reg *r)
 {
     const unsigned *reel = (const unsigned *)(unsigned long)r[0];
     void *bank;
@@ -3950,7 +4005,7 @@ static void clip_frames_said(void)
     frame_n = frame_bare = 0;
 }
 
-static void on_frame_end(unsigned *r)
+static void on_frame_end(pm_reg *r)
 {
     frame_pending = 1;
     frame_built = r[0] == 0;                  /* the begin said the renderer was idle: a frame is built */
@@ -3958,7 +4013,7 @@ static void on_frame_end(unsigned *r)
     if (frame_built) frame_builds++;
 }
 
-static void on_frame_kick(unsigned *r)
+static void on_frame_kick(pm_reg *r)
 {
     void *player, *surface, *display;
     (void)r;
@@ -4074,7 +4129,7 @@ static void gbg_copy(char *to, unsigned n, const char *from)
 
 /* the clip_play hook, a clip of the game's: name, loop, crop. A looped one is the background's drawing now (the game
  * plays a background's clip from inside its draw; one that comes up later is put right by gbg_back) */
-static void gbg_seen(const unsigned *r)
+static void gbg_seen(const pm_reg *r)
 {
     static unsigned said;
     gbg.ours = gbg.due = 0;
@@ -4099,10 +4154,10 @@ static void *clip2_surface(void);
  * clip v2 backdrop's idle-video watch) - a site takes one hook */
 static int sv_clipv, sv_bd, sv_hooked, bd2_in;
 static int sv_juke;
-static void juke_set_video(unsigned *r);
-static void on_clipv_set_video(unsigned *r);
-static void bd2_seen(unsigned *r);
-static void on_surface_set_video(unsigned *r)
+static void juke_set_video(pm_reg *r);
+static void on_clipv_set_video(pm_reg *r);
+static void bd2_seen(pm_reg *r);
+static void on_surface_set_video(pm_reg *r)
 {
     if (sv_ck) ck_seen(r);                /* PAD-530: first, before a variant swaps the name */
     if (sv_bd) bd2_seen(r);
@@ -4142,7 +4197,7 @@ static void bd_release(const char *why)
     bd.obj = 0;
 }
 
-static void on_backdrop_draw(unsigned *r)
+static void on_backdrop_draw(pm_reg *r)
 {
     bd.elem = r[0];
 }
@@ -4296,7 +4351,7 @@ int pm_game_words(void)
 }
 
 
-static void scene_show_backdrop(unsigned *r);
+static void scene_show_backdrop(pm_reg *r);
 
 /* ---- PAD-1219: the co-op awards ceremony, the HUD off the glass ------------------------------------------------
  * DoomWalrus666: "During the awards ceremony, please remove the scoreboard, power up bar, and credits/player/ball count
@@ -4307,7 +4362,7 @@ static void scene_show_backdrop(unsigned *r);
 static void *coop_cer_keep, *coop_cer_keep_player;   /* the cards' scene and its scene player: let through */
 static unsigned coop_cer_gone[8], coop_cer_gone_n, coop_cer_vetoes;
 
-static void coop_cer_scene_show(unsigned *r)
+static void coop_cer_scene_show(pm_reg *r)
 {
     unsigned k;
     if (!r[0] || (void *)(unsigned long)r[0] == coop_cer_keep || (void *)(unsigned long)r[0] == coop_cer_keep_player ||
@@ -4323,7 +4378,7 @@ static void coop_cer_scene_show(unsigned *r)
 /* scene_show(scene, layer): a background of the game's let through is on the glass (PAD-662) - not under a full-screen
  * clip of ours, drawn over everything (emulator run block1: KIRYU's ending clip over the barrier moved its HUD for
  * nothing) */
-static void on_scene_show(unsigned *r)
+static void on_scene_show(pm_reg *r)
 {
     unsigned e = bd.elem, sc = e ? *(unsigned *)(unsigned long)(e + (unsigned)pm_port_value("backdrop_scene_at", 0x18)) : 0;
     int bg = e && r[0] && r[0] == sc;
@@ -4333,7 +4388,7 @@ static void on_scene_show(unsigned *r)
 }
 
 /* scene_show(scene, layer): the city's own scene is where the backdrop goes */
-static void scene_show_backdrop(unsigned *r)
+static void scene_show_backdrop(pm_reg *r)
 {
     unsigned e = bd.elem, playing = (unsigned)pm_port_value("surface_playing", 2);
     /* PAD-301: while our full-screen clip plays, the hand-over draws the one video player LAST in every
@@ -4416,7 +4471,7 @@ static void bd2_play(void *surf)
  * (emulator run e3: the intro over, the loop played, and the game's dots took the TV back 30 ms later); while a mode
  * wants its loop that one is no clip to wait out: the loop takes the surface back the next tick. Any other clip of the
  * game's (it means something) is waited out as before. */
-static void bd2_seen(unsigned *r)
+static void bd2_seen(pm_reg *r)
 {
     const unsigned *s = (const unsigned *)(unsigned long)r[1];
     const char *name, *idle = pm_port_text("backdrop_idle");
@@ -4948,14 +5003,14 @@ static void display_tick(void)
 
 /* The layered priority, as the game asks it: only its manager is noted (display_tick reads the foreground
  * there). The answer is the game's own, always. */
-static void on_layered_priority(unsigned *r)
+static void on_layered_priority(pm_reg *r)
 {
     if (r[0]) disp_layered_mgr = (unsigned char *)(unsigned long)r[0];
 }
 
 /* clip_play from anyone but us while our clip draws: the one surface is the game's now */
-static int ci_film_swap(unsigned *r);      /* PAD-1114: the co-op intro in the game's own start film */
-static void on_clip_play(unsigned *r)
+static int ci_film_swap(pm_reg *r);      /* PAD-1114: the co-op intro in the game's own start film */
+static void on_clip_play(pm_reg *r)
 {
     const char *name;
     unsigned i;
@@ -5721,7 +5776,7 @@ static void block_defaults(unsigned *m)
 }
 
 static void wizard_refused(unsigned start);   /* PAD-436: the game's mini-wizards, below */
-static int place_take(unsigned *r, unsigned id);   /* PAD-710: a mode in the place of one of the game's, below */
+static int place_take(pm_reg *r, unsigned id);   /* PAD-710: a mode in the place of one of the game's, below */
 /* PAD-715: a mode whose block_start is a check before its start (James Bond's lock multiballs: the lock-open check the
  * lamps ask too, and the lock handler at every lock) names the start itself, `site place_start_<id>` (the function
  * that sets its flags, mode_framework.plain_books): its place is taken there, hooked on its own, never at the check.
@@ -5790,7 +5845,7 @@ static void lit_hold_check(unsigned id)
     for (k = 0; k < BLOCK_WORDS; k++) lit_said[k] = 0;
 }
 
-static int on_block_start(unsigned *r, unsigned hook_n)
+static int on_block_start(pm_reg *r, unsigned hook_n)
 {
     unsigned id;
     for (id = 0; id < BLOCK_IDS; id++)          /* this start's mode: its object, or the start is its own */
@@ -5826,7 +5881,7 @@ static int on_block_start(unsigned *r, unsigned hook_n)
 }
 
 /* PAD-715: the start a port names for a mode whose block_start is a check: a claimed place is taken here */
-static int on_place_start(unsigned *r, unsigned id)
+static int on_place_start(pm_reg *r, unsigned id)
 {
     return id < BLOCK_IDS && place_from[id] && place_take(r, id);
 }
@@ -5945,7 +6000,7 @@ int pm_block_game_modes(int on)
  * that is not lit and a scoop with no battle lit, so the scoop kicks the ball out as it always does
  * then. Nothing of the handler is skipped and nothing else it sees changes; a battle lit before the mode
  * stays lit for after it. */
-static void on_battle_shots(unsigned *r)
+static void on_battle_shots(pm_reg *r)
 {
     unsigned lo = (unsigned)pm_port_value("block_battle_lo", 0), hi = (unsigned)pm_port_value("block_battle_hi", 0);
     if (!block_live() || !pm_in_game()) return;
@@ -5967,7 +6022,7 @@ static void on_battle_shots(unsigned *r)
  * they score nothing while a mode blocks; emulator, 2026-10-04). */
 #define BLOCK_RULES 32                       /* PAD-398: every rule of the game's (Godzilla names 24) */
 
-static void on_rule_shots(unsigned *r, unsigned n)
+static void on_rule_shots(pm_reg *r, unsigned n)
 {
     char key[28];
     unsigned lo, hi;
@@ -5996,7 +6051,7 @@ static void on_rule_shots(unsigned *r, unsigned n)
  * game's "nothing of mine in the way" (its multiballs, its mini-wizards), which is how the game's own mini-wizards
  * stop them. `value block_rule_gate_<n> 1` makes `site block_rule_<n>` that check: refused with 0 while a mode of
  * ours blocks, unless the mode keeps that rule counting - the rule then does what it does under the game's own. */
-static int on_rule_gate(unsigned *r, unsigned n)
+static int on_rule_gate(pm_reg *r, unsigned n)
 {
     char key[28];
     const char *nm;
@@ -6012,8 +6067,9 @@ static int on_rule_gate(unsigned *r, unsigned n)
     return 1;                                    /* refused: the check answers 0, "not now" */
 }
 
+#if !PM_A64                                  /* hook_a64.h has its own */
 /* a plain hook whose logger is told which (r1 = n), as hook_veto_n's */
-typedef void (*hook_n_fn)(unsigned *regs, unsigned n);
+typedef void (*hook_n_fn)(pm_reg *regs, unsigned n);
 static int hook_n(unsigned addr, hook_n_fn logger, unsigned n)
 {
     unsigned *t;
@@ -6023,6 +6079,7 @@ static int hook_n(unsigned addr, hook_n_fn logger, unsigned n)
     __builtin___clear_cache((char *)t, (char *)(t + 16));
     return 1;
 }
+#endif
 
 /* every tick, from clip_tick: a block ends with the mode that asked for it */
 static void block_tick(void)
@@ -7816,7 +7873,7 @@ int pm_shield_position(void)
 
 /* PAD-409: the motor's own pass (`site shield_update`, its v[0]): skipped while the mode holds the shield - the
  * shield motor only, and never while one of the game's own modes or multiballs has the stage. 1 = skip it. */
-static int shield_update_veto(unsigned *r)
+static int shield_update_veto(pm_reg *r)
 {
     unsigned obj = shield_obj();
     if (!shd.hold || !obj || r[0] != obj || !running || pm_aside()) return 0;
@@ -8034,7 +8091,7 @@ static int building_raise_refused(int sending, int running_mode, int in_game, in
     return !sending && running_mode && in_game && !aside && closed_by_us && !putting_back && floor > 0;
 }
 
-static int building_move_veto(unsigned *r)
+static int building_move_veto(pm_reg *r)
 {
     static unsigned said;
     unsigned obj = building_obj();
@@ -9057,7 +9114,7 @@ int pm_game_wizard_named(const char *name, int how)
 /* PAD-457: the game's own lighting (`site wizard_light`: every one not played lit, one of them selected) leaves a
  * claimed one to its mode. It lights the rest as it would; refused (our copy ran instead) when it would light a
  * claimed one. Nothing claimed: it runs as it always has. */
-static int wizard_light_veto(unsigned *r)
+static int wizard_light_veto(pm_reg *r)
 {
     unsigned p = pm_player(), *st, all, mine, keep, k;
     (void)r;
@@ -9274,7 +9331,7 @@ static int wizf_starting;
 
 /* the game's own "has the player earned it" check, hooked (wizf_arm): yes while the runtime starts that one, the
  * game's own answer otherwise */
-static int wizf_earned(unsigned *regs, unsigned n)
+static int wizf_earned(pm_reg *regs, unsigned n)
 {
     (void)regs;
     return wizf_starting && (unsigned)wizf_starting == n;
@@ -10930,7 +10987,11 @@ extern const struct pm_mode *const __stop_pm_modes[] __attribute__((weak, visibi
 /* Which thread each callback runs on, logged once each: pad_mode.h's promises about
  * callbacks not overlapping rest on this, so it is measured on every boot, not assumed. */
 extern long syscall(long, ...);
+#if PM_A64
+#define SYS_GETTID 178                                   /* aarch64 */
+#else
 #define SYS_GETTID 224                                   /* ARM EABI */
+#endif
 
 static void note_thread(const char *what, int *said)
 {
@@ -10957,7 +11018,7 @@ static void chg_pages_tick(void);         /* PAD-663 */
 
 static void coop_tick(void);                /* PAD-1017, below */
 static void hand_tick(void);                /* PAD-1033, below */
-static void on_tick(unsigned *r)
+static void on_tick(pm_reg *r)
 {
     static int started, said;
     const struct pm_mode *m;
@@ -11010,7 +11071,7 @@ static void on_tick(unsigned *r)
     lamps_tick();                             /* named inserts: their patterns (lights section) */
 }
 
-static void on_shot(unsigned *r)
+static void on_shot(pm_reg *r)
 {
     static int said;
     const struct pm_mode *m;
@@ -11094,7 +11155,7 @@ static void roster_owed_ball_end(void);   /* item 146 */
 static void more_ball_end(void);          /* PAD-707 */
 static void roster_late_run(const char *why);
 static void place_ball_end(void);         /* PAD-710 */
-static void on_ball_end(unsigned *r)
+static void on_ball_end(pm_reg *r)
 {
     static int said;
     const struct pm_mode *m;
@@ -11554,16 +11615,16 @@ void pm_roster_done(void)
 
 /* PAD-706: the selection screen's "the cursor landed on a slot" (r0 = the screen, its slot at +roster_cursor_at):
  * logged, so a rig run can walk the cursor to the slot it wants */
-static void on_roster_cursor(unsigned *r)
+static void on_roster_cursor(pm_reg *r)
 {
     long at = pm_port_value("roster_cursor_at", -1);
     if (at >= 0 && r[0]) say("roster: the cursor is on slot %u", rw(r[0] + (unsigned)at));
 }
 
-static void roster_take(unsigned *r, unsigned slot, unsigned id, const char *how);
+static void roster_take(pm_reg *r, unsigned slot, unsigned id, const char *how);
 static int roster_resuming;             /* PAD-707: roster_take's pick is the city pick's restart */
 
-static void on_roster_start(unsigned *r)
+static void on_roster_start(pm_reg *r)
 {
     const unsigned *vec;
     unsigned slot, n = (unsigned)pm_roster_slots(), id = r[1];
@@ -11581,7 +11642,7 @@ static void on_roster_start(unsigned *r)
 
 /* The pick of a claimed slot (or, PAD-706, the city pick's restart of its battle): the mode's on_pick decides, and a
  * pick it takes swaps the battle the game is about to START (r0) for an object whose every virtual is a no-op */
-static void roster_take(unsigned *r, unsigned slot, unsigned id, const char *how)
+static void roster_take(pm_reg *r, unsigned slot, unsigned id, const char *how)
 {
     const struct pm_mode *was = current;
     int took;
@@ -11627,7 +11688,7 @@ static void roster_take(unsigned *r, unsigned slot, unsigned id, const char *how
  * place. `site roster_resume` is the START's load there (the same two words as roster_start's; r0 = the battle): a
  * battle a mode holds the slot of is taken as a pick of that slot again - the mode runs once more, as the game's own
  * battle would, until it is won. */
-static void on_roster_resume(unsigned *r)
+static void on_roster_resume(pm_reg *r)
 {
     const unsigned *vec;
     unsigned slot, n = (unsigned)pm_roster_slots(), id = 0;
@@ -12186,7 +12247,7 @@ static int more_open_place(int place)
 
 /* the screen's switch handler (r0 = the screen, r1 = the switch): 1 = the runtime moved the cursor (the game's
  * handler does not run) */
-static int on_roster_keys(unsigned *r)
+static int on_roster_keys(pm_reg *r)
 {
     unsigned screen = r[0], sw = r[1];
     unsigned left = (unsigned)pm_port_value("roster_screen_left", 137), right = (unsigned)pm_port_value("roster_screen_right", 139);
@@ -12220,7 +12281,7 @@ static int on_roster_keys(unsigned *r)
 }
 
 /* the screen opens (r0 = the screen): the cursor starts on the game's place, our nodes as they were left */
-static void on_roster_open(unsigned *r)
+static void on_roster_open(pm_reg *r)
 {
     more.screen = r[0];
     more.keep = -1;
@@ -12259,7 +12320,8 @@ static void more_open_first(unsigned screen)
 
 static unsigned more_open_wrap(unsigned screen, unsigned a1, unsigned a2, unsigned a3)
 {
-    unsigned regs[4] = { screen, a1, a2, a3 }, r;
+    pm_reg regs[4] = { screen, a1, a2, a3 };
+    unsigned r;
     on_roster_open(regs);
     r = more_open_orig(screen, a1, a2, a3);
     more_open_first(screen);
@@ -12270,7 +12332,7 @@ static unsigned more_open_wrap(unsigned screen, unsigned a1, unsigned a2, unsign
  * monster is briefly shown before the screen transition"): the screen stays on the glass for its close after the pick,
  * so a picked new monster stays drawn - its tile and portrait, the place's own portrait hidden - until it is gone (the
  * port's roster_start_after_ms; the next opening, the ball's or the game's end, if sooner) */
-static void on_roster_pick(unsigned *r)
+static void on_roster_pick(pm_reg *r)
 {
     (void)r;
     more.picked = more.open ? more.cur : -1;
@@ -12450,8 +12512,8 @@ static unsigned place_vfn_at(unsigned obj, long slot)
     if (!obj || (obj & 3) || slot < 0 || slot > 255 || !maps_has(obj, 4, MAP_R)) return 0;
     vt = rw(obj);
     if (!vt || (vt & 3) || !maps_has(vt, 4 * (unsigned long)(slot + 1), MAP_R)) return 0;
-    if (rw(vt + 4u * (unsigned)slot) >= (unsigned)(unsigned long)tramp
-        && rw(vt + 4u * (unsigned)slot) < (unsigned)(unsigned long)(tramp + TRAMP_WORDS))
+    if (!PM_A64 && rw(vt + 4u * (unsigned)slot) >= (unsigned)(unsigned long)tramp
+        && rw(vt + 4u * (unsigned)slot) < (unsigned)(unsigned long)(tramp + TRAMP_SPAN))
         return rw(vt + 4u * (unsigned)slot);        /* PAD-747: a thunk of ours in the slot, on its way to the STOP */
     return maps_has(rw(vt + 4u * (unsigned)slot), 8, MAP_R | MAP_X | MAP_GAME) ? rw(vt + 4u * (unsigned)slot) : 0;
 }
@@ -12635,7 +12697,7 @@ static int place_end(unsigned p, int won)
 }
 
 /* from on_block_start (the game's START of mode id, r0 its object on the C++ titles): 1 = taken, the start refused */
-static int place_take(unsigned *r, unsigned id)
+static int place_take(pm_reg *r, unsigned id)
 {
     const struct pm_mode *was = current;
     unsigned up;
@@ -12963,7 +13025,7 @@ static void done_mark(unsigned id, unsigned p, const char *how)
 }
 
 /* a game mode's STOP entered: (mode, reason) */
-static void done_stop_seen(unsigned *r, const char *how)
+static void done_stop_seen(pm_reg *r, const char *how)
 {
     unsigned obj = r[0], id, p;
     if (!r[1] || !obj || !pm_in_game()) return;
@@ -12974,11 +13036,11 @@ static void done_stop_seen(unsigned *r, const char *how)
     done_mark(id, p, how);
 }
 
-static void on_done_stop(unsigned *r) { done_stop_seen(r, "its stop, completed"); }
-static void on_done_slot(unsigned *r) { done_stop_seen(r, "its stop through its vtable, completed"); }
+static void on_done_stop(pm_reg *r) { done_stop_seen(r, "its stop, completed"); }
+static void on_done_slot(pm_reg *r) { done_stop_seen(r, "its stop through its vtable, completed"); }
 
 /* the framework's audit add: (audit, amount) */
-static void on_done_audit(unsigned *r)
+static void on_done_audit(pm_reg *r)
 {
     int k;
     if (!r[1] || !pm_in_game()) return;
@@ -13012,6 +13074,7 @@ static int done_movable(unsigned f)
  * first): its object's vtable slot is pointed at a thunk instead - push {r0-r3,ip,lr}; mov r0,sp; blx <logger>; pop;
  * ldr pc,<the STOP> - so every call through the vtable (the framework's, the runtime's pm_place_over) is seen; a
  * direct `bl` to that class's stop is not. One thunk per function; each vtable patched once. */
+#if !PM_A64
 static unsigned done_thunk(unsigned f)
 {
     unsigned *t;
@@ -13029,6 +13092,10 @@ static unsigned done_thunk(unsigned f)
     __builtin___clear_cache((char *)t, (char *)(t + 16));
     return (unsigned)(unsigned long)t;
 }
+#else
+/* PAD-1269: a vtable thunk on 64-bit ARM is not written yet (the STOPs' slots are 8 bytes there): refused */
+static unsigned done_thunk(unsigned f) { (void)f; (void)on_done_slot; return 0; }
+#endif
 
 static const char *done_slots_said(unsigned n)
 {
@@ -13455,7 +13522,7 @@ static int challenge_takes(int held, int on, int picked)
     return held && on == 1 && picked == 1;
 }
 
-static int challenge_veto(unsigned *r, unsigned n)
+static int challenge_veto(pm_reg *r, unsigned n)
 {
     char key[24];
     const struct pm_mode *was = current;
@@ -13843,7 +13910,7 @@ static void chg_page_back(void)
 
 /* the game runs its processes on threads of their own, one at a time: another process's yield while the page sets up
  * is not the page's (the first rig run put the title back before the page read it) - only the page's own puts it back */
-static void chg_page_yield(unsigned *r)
+static void chg_page_yield(pm_reg *r)
 {
     (void)r;
     if (chg_page_ent && *chg_page_cur == chg_page_proc) chg_page_back();
@@ -14001,7 +14068,7 @@ static const char *chg_pages_titles[8];
 /* the entry lookup's logger: which category the game's page call showed - its first read of one of the table's. After
  * a game the page reads more after the row it shows: Jaws category 39 entry 3 and 63 entry 0 (a list of the game's
  * own, not one of the table's 40), Godzilla 53 entry 1 */
-static void chg_lookup_seen(unsigned *r)
+static void chg_lookup_seen(pm_reg *r)
 {
     if (chg_pages_tid && syscall(SYS_GETTID) == chg_pages_tid) {
         if (chg_pages_cat0 < 0) { chg_pages_cat0 = (int)r[0]; chg_pages_n0 = (int)r[1]; }
@@ -14580,11 +14647,11 @@ static int own_entry(const unsigned *ent)
     return own_entry_at((const unsigned char *)ent, 0, 8);
 }
 
-static void challenge_menu_built(unsigned *r)
+static void challenge_menu_built(pm_reg *r)
 {
     long creg = pm_port_value("challenge_menu_count_reg", -1);  /* PAD-619: Elvira - the count in a register */
     unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp: above what was pushed */
-    unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    unsigned *count = creg >= 0 && creg <= 12 ? (unsigned *)&r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
     unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), first = (unsigned)pm_port_value("challenge_menu_kind", 3);
     unsigned es = (unsigned)pm_port_value("challenge_menu_entry", 12);
@@ -14635,7 +14702,7 @@ static void challenge_menu_built(unsigned *r)
     }
 }
 
-static void challenge_menu_picked(unsigned *r)
+static void challenge_menu_picked(pm_reg *r)
 {
     long back = pm_port_value("challenge_menu_pick_back", 0);
     unsigned ptrk[3], *ent = back > 0 ? (unsigned *)(unsigned long)(r[3] - (unsigned)back) : ptrk;
@@ -14700,7 +14767,7 @@ static int challenge_frame_arrive(int n, int from_before)
     return n <= 0 ? 0 : from_before ? 0 : n - 1;
 }
 
-static void challenge_menu_frame(unsigned *r)
+static void challenge_menu_frame(pm_reg *r)
 {
     unsigned char *sp = (unsigned char *)(r + 14);
     unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("challenge_menu_frame_list_at", 300));
@@ -14896,7 +14963,7 @@ static void challenge_ball_start(void)
     }
 }
 
-static int challenge_balls_veto(unsigned *r, unsigned n)
+static int challenge_balls_veto(pm_reg *r, unsigned n)
 {
     static int said;
     (void)r; (void)n;
@@ -14910,7 +14977,7 @@ static int challenge_balls_veto(unsigned *r, unsigned n)
 /* PAD-619: `site challenge_extra_ball` - the game's take-an-extra-ball test (the count byte: non-zero takes one and the
  * ball is played again, before the balls-per-game getter is ever asked). A mode's challenge game is one ball: an extra
  * ball earned in it is not played (Star Wars ELG 1.10 earned one 17 s into the ball and played it as a second) */
-static int challenge_extra_veto(unsigned *r, unsigned n)
+static int challenge_extra_veto(pm_reg *r, unsigned n)
 {
     static int said;
     (void)r; (void)n;
@@ -15253,10 +15320,10 @@ static int ball_end_event = -1;
 static int coop_bonus_id;                   /* PAD-1028 round 3, the co-op section */
 static void coop_bonus_end(void);
 
-static void on_team_dispatch(unsigned *r);       /* PAD-1052, the co-op section */
+static void on_team_dispatch(pm_reg *r);       /* PAD-1052, the co-op section */
 static int events_bus_hooked;                    /* PAD-1052: events_arm hooked the bus (on_event_dispatch runs) */
 
-static void on_event_dispatch(unsigned *r)
+static void on_event_dispatch(pm_reg *r)
 {
     static volatile int said;
     if (r[0] < N_BUS_IDS) __sync_fetch_and_add(&event_fired[r[0]], 1u);
@@ -15277,7 +15344,7 @@ static void on_event_dispatch(unsigned *r)
 
 /* one counter per site event slot: the trampoline hands a logger only the registers, so each slot has its own
  * logger, and it counts every event on that site whose arg (r0) matches (PAD-428) */
-static void site_event_fire(int k, const unsigned *r)
+static void site_event_fire(int k, const pm_reg *r)
 {
     int i;
     for (i = 0; i < n_event_names; i++)
@@ -15285,7 +15352,7 @@ static void site_event_fire(int k, const unsigned *r)
             && (event_names[i].arg < 0 || r[0] == (unsigned)event_names[i].arg))
             __sync_fetch_and_add(&event_fired[event_names[i].id], 1u);
 }
-#define SITE_EVENT(k) static void on_site_event##k(unsigned *r) { site_event_fire(k, r); }
+#define SITE_EVENT(k) static void on_site_event##k(pm_reg *r) { site_event_fire(k, r); }
 SITE_EVENT(0) SITE_EVENT(1) SITE_EVENT(2) SITE_EVENT(3) SITE_EVENT(4) SITE_EVENT(5) SITE_EVENT(6) SITE_EVENT(7)
 static const hook_fn site_event_hooks[N_SITE_EVENTS] = {
     on_site_event0, on_site_event1, on_site_event2, on_site_event3,
@@ -15397,7 +15464,7 @@ static volatile unsigned switch_fired[N_SWITCH_IDS];
 static unsigned switch_delivered[N_SWITCH_IDS];
 static unsigned switch_at;                    /* the register holding the switch id */
 
-static void on_switch_hit(unsigned *r)
+static void on_switch_hit(pm_reg *r)
 {
     static volatile int said;
     unsigned id = r[switch_at];
@@ -15773,7 +15840,7 @@ static void edge_take_held(unsigned id)
         "(handler bits 0x%04x held back)", id, edge_hid[k].bits);
 }
 
-static void on_switch_edge(unsigned *r)
+static void on_switch_edge(pm_reg *r)
 {
     static volatile int said, bad;
     unsigned id = r[0], lr = r[5], base, rec, st, level, desc, flags, pol, mask;
@@ -16020,7 +16087,7 @@ static char team_name_3v1[] = "TEAM PLAY 3 VS 1", team_name_std[] = "ENHANCED ST
 static unsigned team_menu_kinds(unsigned *kinds);
 static const char *team_kind_name(unsigned k);
 static void team_frame_restore(void);
-static void on_team_dispatch(unsigned *r);
+static void on_team_dispatch(pm_reg *r);
 static unsigned (*coop_change_game)(unsigned, unsigned, unsigned, unsigned);
 static int coop_scores;                  /* the game's end-of-game high scores are wrapped (PAD-640/663) */
 static int coop_ball_msg = -1;           /* the message table's line that says "BALL %d" (-1: none found) */
@@ -16061,7 +16128,7 @@ static struct {
     unsigned long join_at;               /* PAD-1221: a Start press while ball 1 waits (`| 1`), for ci_quiet */
     const char *why;
 } ci;
-static void ci_find_seen(unsigned *r);   /* PAD-1114 round 2, below */
+static void ci_find_seen(pm_reg *r);   /* PAD-1114 round 2, below */
 /* PAD-1123: a co-op character's clip and sound once picked (below, "once picked"), and its copy of the game's End of
  * Ball Bonus loop (below, "on the bonus") */
 #define CPK_CHARS 16                     /* = COOP_CHARS */
@@ -16395,7 +16462,7 @@ static void coop_awards_begin(void)
 }
 
 /* the game counts an audit (id r0, amount r1): the teammate up's */
-static void coop_audit_seen(unsigned *r)
+static void coop_audit_seen(pm_reg *r)
 {
     int i;
     unsigned k;
@@ -17027,7 +17094,7 @@ static void coop_cache_let_go(void)
 }
 
 /* the methods that copy an adjustment into a rule's record: hooked before they run, to learn the rule's object */
-static void coop_cache_seen(int i, unsigned *r)
+static void coop_cache_seen(int i, pm_reg *r)
 {
     if (i < coop_cache_n && coop_cache[i].obj != r[0]) {
         coop_cache[i].obj = r[0];
@@ -17035,10 +17102,10 @@ static void coop_cache_seen(int i, unsigned *r)
         say("co-op: adjustment %u's record is the rule at 0x%08x", coop_cache[i].id, r[0]);
     }
 }
-static void coop_cache_seen0(unsigned *r) { coop_cache_seen(0, r); }
-static void coop_cache_seen1(unsigned *r) { coop_cache_seen(1, r); }
-static void coop_cache_seen2(unsigned *r) { coop_cache_seen(2, r); }
-static void coop_cache_seen3(unsigned *r) { coop_cache_seen(3, r); }
+static void coop_cache_seen0(pm_reg *r) { coop_cache_seen(0, r); }
+static void coop_cache_seen1(pm_reg *r) { coop_cache_seen(1, r); }
+static void coop_cache_seen2(pm_reg *r) { coop_cache_seen(2, r); }
+static void coop_cache_seen3(pm_reg *r) { coop_cache_seen(3, r); }
 
 /* the title's "add n" call (Godzilla: power-ups), wrapped when a character has a boost */
 static unsigned coop_boost_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
@@ -17053,17 +17120,17 @@ static unsigned coop_boost_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned 
 }
 
 /* the shot handlers of the rules a lit: names: hooked before they run, to learn the rule's object */
-static void coop_lit_seen(int i, unsigned *r)
+static void coop_lit_seen(int i, pm_reg *r)
 {
     if (i < coop_lit_n && coop_lit[i].obj != r[0]) {
         coop_lit[i].obj = r[0];
         say("co-op: the %s lit shot's rule is at 0x%08x", coop_lit[i].name, r[0]);
     }
 }
-static void coop_lit_seen0(unsigned *r) { coop_lit_seen(0, r); }
-static void coop_lit_seen1(unsigned *r) { coop_lit_seen(1, r); }
-static void coop_lit_seen2(unsigned *r) { coop_lit_seen(2, r); }
-static void coop_lit_seen3(unsigned *r) { coop_lit_seen(3, r); }
+static void coop_lit_seen0(pm_reg *r) { coop_lit_seen(0, r); }
+static void coop_lit_seen1(pm_reg *r) { coop_lit_seen(1, r); }
+static void coop_lit_seen2(pm_reg *r) { coop_lit_seen(2, r); }
+static void coop_lit_seen3(pm_reg *r) { coop_lit_seen(3, r); }
 
 /* the rule's lit mask for the player up: the framework's u64 at this + stock_field + 8 x player */
 static volatile unsigned *coop_lit_field(int i)
@@ -17281,22 +17348,22 @@ static void coop_double_tick(void)
 }
 
 /* the methods that clear a count at the game's start: hooked before they run, to learn the rule's object */
-static void coop_count_seen(int i, unsigned *r)
+static void coop_count_seen(int i, pm_reg *r)
 {
     if (i < coop_count_n && coop_count[i].obj != r[0]) {
         coop_count[i].obj = r[0];
         say("co-op: the %s count is the rule at 0x%08x's", coop_count[i].name, r[0]);
     }
 }
-static void coop_count_seen0(unsigned *r) { coop_count_seen(0, r); }
-static void coop_count_seen1(unsigned *r) { coop_count_seen(1, r); }
-static void coop_count_seen2(unsigned *r) { coop_count_seen(2, r); }
-static void coop_count_seen3(unsigned *r) { coop_count_seen(3, r); }
-static void coop_count_seen4(unsigned *r) { coop_count_seen(4, r); }
-static void coop_count_seen5(unsigned *r) { coop_count_seen(5, r); }
-static void coop_count_seen6(unsigned *r) { coop_count_seen(6, r); }
-static void coop_count_seen7(unsigned *r) { coop_count_seen(7, r); }
-static void (*const cseen_fns[COOP_COUNTS])(unsigned *) = { coop_count_seen0, coop_count_seen1, coop_count_seen2,
+static void coop_count_seen0(pm_reg *r) { coop_count_seen(0, r); }
+static void coop_count_seen1(pm_reg *r) { coop_count_seen(1, r); }
+static void coop_count_seen2(pm_reg *r) { coop_count_seen(2, r); }
+static void coop_count_seen3(pm_reg *r) { coop_count_seen(3, r); }
+static void coop_count_seen4(pm_reg *r) { coop_count_seen(4, r); }
+static void coop_count_seen5(pm_reg *r) { coop_count_seen(5, r); }
+static void coop_count_seen6(pm_reg *r) { coop_count_seen(6, r); }
+static void coop_count_seen7(pm_reg *r) { coop_count_seen(7, r); }
+static void (*const cseen_fns[COOP_COUNTS])(pm_reg *) = { coop_count_seen0, coop_count_seen1, coop_count_seen2,
                                                            coop_count_seen3, coop_count_seen4, coop_count_seen5,
                                                            coop_count_seen6, coop_count_seen7 };
 
@@ -17525,7 +17592,7 @@ static int coop_language_veto(unsigned sw, unsigned left_key, unsigned right_key
     return id && (coop_hides(id) || (edge_hid_n && edge_hidden(id) >= 0));
 }
 
-static int on_language_keys(unsigned *r)
+static int on_language_keys(pm_reg *r)
 {
     static int said;
     if (!coop_language_veto(r[1], (unsigned)pm_port_value("language_keys_left", 137),
@@ -18308,7 +18375,7 @@ static void coop_char_line(const char *s)
 /* armed with co-op: the adjustment getter wrapped when a character asks for one, the switch edges for the pick */
 static void coop_chars_arm(struct site *e)
 {
-    static void (*const seen[COOP_CACHES])(unsigned *) = { coop_cache_seen0, coop_cache_seen1, coop_cache_seen2,
+    static void (*const seen[COOP_CACHES])(pm_reg *) = { coop_cache_seen0, coop_cache_seen1, coop_cache_seen2,
                                                            coop_cache_seen3 };
     int i, adj = 0, save = 0, boost = 0, gift = 0;
     unsigned k;
@@ -18463,7 +18530,7 @@ static void coop_chars_arm(struct site *e)
         }
     for (i = 0; i < coop_ch_n; i++)                              /* the rules whose lit mask holds a bit */
         for (k = 0; k < coop_ch[i].n_lit && coop_lit_n < COOP_LITS; k++) {
-            static void (*const lseen[COOP_LITS])(unsigned *) = { coop_lit_seen0, coop_lit_seen1, coop_lit_seen2,
+            static void (*const lseen[COOP_LITS])(pm_reg *) = { coop_lit_seen0, coop_lit_seen1, coop_lit_seen2,
                                                                    coop_lit_seen3 };
             int j;
             for (j = 0; j < coop_lit_n && !str_eq(coop_lit[j].name, coop_ch[i].lit_name[k]); j++) ;
@@ -18668,7 +18735,7 @@ static int ci_film_due(void)
                                      || (coop_teammates() && ci.game != chg_game_now() + 1));
 }
 
-static int ci_film_swap(unsigned *r)
+static int ci_film_swap(pm_reg *r)
 {
     const char *name = (const char *)(unsigned long)r[0], *list = pm_port_text("start_film_clips"), *p;
     unsigned n;
@@ -18734,7 +18801,7 @@ static void coop_intro_begin(const char *why)
 }
 
 /* the record lookup (any thread): the carrier's own record takes the intro's sound while it plays. 1 = swapped */
-static int ci_lookup(unsigned *r)
+static int ci_lookup(pm_reg *r)
 {
     const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
     if (!ci.request || (long)(ci.swap_until - pm_ms()) <= 0 || !key_is(k, ci.key)) return 0;
@@ -18957,7 +19024,7 @@ static void ci_film_words(int hide)
 
 /* the game's own node finders (`site find_node` / `find_text`: r1 the scene, r2 the path, a std::string): the intro
  * screen's scene, the first time the game looks one of its words up */
-static void ci_find_seen(unsigned *r)
+static void ci_find_seen(pm_reg *r)
 {
     const char *path, *want;
     unsigned i;
@@ -19163,7 +19230,7 @@ static void coop_intro_tick(void)
 #define CPK_WAIT_MS   8000ul             /* a clip whose card never goes in this long is dropped */
 
 /* the record lookup (any thread): the carrier's own record takes the picked character's sound while it plays */
-static int cpk_lookup(unsigned *r)
+static int cpk_lookup(pm_reg *r)
 {
     const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
     int c = cpk.snd;
@@ -19296,7 +19363,7 @@ static const char *cb_pick(const char *name, const char *loop, int c, const char
     return clips[c];
 }
 
-static void on_coop_bonus_play(unsigned *r)
+static void on_coop_bonus_play(pm_reg *r)
 {
     const char *name = (const char *)(unsigned long)r[0], *ours;
     int c;
@@ -19622,7 +19689,7 @@ static void coop_name_arm(void)
                    armed == 1 ? "" : "s");
 }
 
-static int on_coop_award(unsigned *r);       /* below the Insider Connected gate */
+static int on_coop_award(pm_reg *r);       /* below the Insider Connected gate */
 
 static void coop_users_arm(void)
 {
@@ -19766,7 +19833,7 @@ static int team_pick_live(int pending, unsigned long seen, unsigned long now)
  * handlers would. It is called by the runtime's own bus hook (on_event_dispatch; team_menu_arm arms it): a second
  * hook of the bus never ran on Godzilla LE 1.16 (emulator), so only a card whose events left the bus alone hooks it
  * for this. */
-static void on_team_dispatch(unsigned *r)
+static void on_team_dispatch(pm_reg *r)
 {
     int want;
     unsigned kind, added;
@@ -20710,7 +20777,7 @@ static unsigned hand_adj_answer(unsigned id, unsigned own)
 }
 
 /* the methods that copy an adjustment into each player's record at the game's start: hooked to learn the object */
-static void hand_cache_seen(int i, unsigned *r)
+static void hand_cache_seen(int i, pm_reg *r)
 {
     static int calls;
     int k;
@@ -20725,7 +20792,7 @@ static void hand_cache_seen(int i, unsigned *r)
         hand_cache[k].obj = r[0];
     }
 }
-#define HAND_SEEN(n) static void hand_cache_seen##n(unsigned *r) { hand_cache_seen(n, r); }
+#define HAND_SEEN(n) static void hand_cache_seen##n(pm_reg *r) { hand_cache_seen(n, r); }
 HAND_SEEN(0) HAND_SEEN(1) HAND_SEEN(2) HAND_SEEN(3) HAND_SEEN(4) HAND_SEEN(5) HAND_SEEN(6) HAND_SEEN(7)
 HAND_SEEN(8) HAND_SEEN(9) HAND_SEEN(10) HAND_SEEN(11) HAND_SEEN(12) HAND_SEEN(13) HAND_SEEN(14) HAND_SEEN(15)
 
@@ -20861,7 +20928,7 @@ static void hand_tick(void)
 }
 
 /* the tick of a card of handicaps and nothing else (on_tick calls hand_tick on any other) */
-static void on_hand_tick(unsigned *r)
+static void on_hand_tick(pm_reg *r)
 {
     (void)r;
     if (hand.on) hand_tick();
@@ -21052,7 +21119,7 @@ static unsigned idle_song_step(unsigned song, unsigned player, unsigned at, int 
     return *held;
 }
 
-static void on_idle_score(unsigned *r)
+static void on_idle_score(pm_reg *r)
 {
     (void)r;
     idle_score_ms = pm_ms();
@@ -21216,11 +21283,11 @@ static int comp_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
         || name == (unsigned)(unsigned long)comp_name_off;
 }
 
-static void comp_menu_built(unsigned *r)
+static void comp_menu_built(pm_reg *r)
 {
     long creg = pm_port_value("challenge_menu_count_reg", -1);
     unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp */
-    unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    unsigned *count = creg >= 0 && creg <= 12 ? (unsigned *)&r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
     unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), es = (unsigned)pm_port_value("challenge_menu_entry", 12);
     unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
@@ -21263,7 +21330,7 @@ static void comp_menu_built(unsigned *r)
     }
 }
 
-static void comp_menu_picked(unsigned *r)
+static void comp_menu_picked(pm_reg *r)
 {
     long back = pm_port_value("challenge_menu_pick_back", 0);
     unsigned char *e8 = back > 0 ? (unsigned char *)(unsigned long)(r[3] - (unsigned)back) - MENU_KIND_AT : 0;
@@ -21305,7 +21372,7 @@ static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, un
     return cursor;
 }
 
-static void comp_menu_frame(unsigned *r)
+static void comp_menu_frame(pm_reg *r)
 {
     unsigned char *sp = (unsigned char *)(r + 14);
     unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
@@ -21358,7 +21425,7 @@ static void comp_menu_frame(unsigned *r)
 static unsigned long comp_obj_menu;              /* the menu object our entry went into */
 static unsigned comp_obj_at;                     /* its place in the vector */
 
-static void comp_menu_obj_built(unsigned *r)
+static void comp_menu_obj_built(pm_reg *r)
 {
     unsigned reg = (unsigned)pm_port_value("comp_menu_obj_reg", 13), vec = (unsigned)pm_port_value("comp_menu_obj_vec", 0);
     unsigned (*add)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned)
@@ -21380,7 +21447,7 @@ static void comp_menu_obj_built(unsigned *r)
     say("prolonged competition: on the start menu as entry %u of %u (%s)", n + 1, n + 1, comp_name());
 }
 
-static void comp_menu_obj_pick(unsigned *r)
+static void comp_menu_obj_pick(pm_reg *r)
 {
     unsigned reg = (unsigned)pm_port_value("comp_menu_obj_pick_reg", 13);
     unsigned at = (unsigned)pm_port_value("comp_menu_obj_index", 0);
@@ -21410,7 +21477,7 @@ static void comp_game_start(void)
             comp.on ? "plays as Competition" : "starts (prolonged is off)", comp.flag, flag);
 }
 
-static void on_comp_dispatch(unsigned *r)
+static void on_comp_dispatch(pm_reg *r)
 {
     if (r[0] == comp.game_id) comp_game_start();
     else if (r[0] == comp.over_id && comp.games)            /* for the log: what the game ended as */
@@ -21926,14 +21993,14 @@ static void feed_queue(const struct feed_report *r, const char *why)
     feed.head++;
 }
 
-static void on_feed_dispatch(unsigned *r)
+static void on_feed_dispatch(pm_reg *r)
 {
     if (r[0] == feed.game_id) __sync_fetch_and_add(&feed.games, 1u);
     else if (r[0] == feed.ball_id) __sync_fetch_and_add(&feed.balls, 1u);
     else if (r[0] == feed.over_id) __sync_fetch_and_add(&feed.overs, 1u);
 }
 
-static void on_feed_tick(unsigned *regs)
+static void on_feed_tick(pm_reg *regs)
 {
     unsigned games = feed.games, balls = feed.balls, overs = feed.overs, p = pm_player();
     int in_game = pm_in_game();
@@ -22127,11 +22194,11 @@ static unsigned team_entry_at(const unsigned char *ent, unsigned kat, unsigned n
         : name == (unsigned)(unsigned long)team_name_3v1 ? 5u : 0u;
 }
 
-static void team_menu_built(unsigned *r)
+static void team_menu_built(pm_reg *r)
 {
     long creg = pm_port_value("challenge_menu_count_reg", -1);
     unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp */
-    unsigned *count = creg >= 0 && creg <= 12 ? &r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    unsigned *count = creg >= 0 && creg <= 12 ? (unsigned *)&r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
     unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), es = (unsigned)pm_port_value("challenge_menu_entry", 12);
     unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT;
@@ -22159,7 +22226,7 @@ static void team_menu_built(unsigned *r)
             j > 1 ? " and the team games" : "", n0 + 1, n0 + j);
 }
 
-static void team_menu_picked(unsigned *r)
+static void team_menu_picked(pm_reg *r)
 {
     long back = pm_port_value("challenge_menu_pick_back", 0);
     unsigned char *e8 = back > 0 ? (unsigned char *)(unsigned long)(r[3] - (unsigned)back) - MENU_KIND_AT : 0;
@@ -22189,7 +22256,7 @@ static void team_frame_restore(void)
     team_frame_msg = 0;
 }
 
-static void team_menu_frame(unsigned *r)
+static void team_menu_frame(pm_reg *r)
 {
     unsigned char *sp = (unsigned char *)(r + 14);
     unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
@@ -22537,7 +22604,7 @@ static int achq_find(unsigned begin)
     return -1;
 }
 
-static void on_agent_header(unsigned *r)
+static void on_agent_header(pm_reg *r)
 {
     const char *s = (const char *)(unsigned long)r[1];
     if (s && s[0] == '/') str_copy(insider_endpoint, sizeof insider_endpoint, s, INSIDER_ENDPOINT_MAX - 1);
@@ -22555,7 +22622,7 @@ static int insider_holding(unsigned while_at, unsigned value)
     return !while_at || coop_row_mode(value) != 0u;          /* PAD-1073: Classic or Enhanced */
 }
 
-static int on_agent_begin(unsigned *r)
+static int on_agent_begin(pm_reg *r)
 {
     int i;
     unsigned n;
@@ -22587,7 +22654,7 @@ static int attract_wanted(void);                 /* PAD-782, below */
 
 /* PAD-1108: the game's achievement award (coop.cfg `achievements`): refused while the gate holds back - the game shows
  * no NEW INSIDER ACHIEVEMENT! for a list it was given before CO-OP PLAY went on */
-static int on_coop_award(unsigned *r)
+static int on_coop_award(pm_reg *r)
 {
     unsigned n;
     (void)r;
@@ -22875,7 +22942,7 @@ static void clipv_heard(const char *name, const char *where, unsigned surface)
 }
 
 /* clip_play(name, loop, crop): the name in r0 */
-static void on_clipv_play(unsigned *r)
+static void on_clipv_play(pm_reg *r)
 {
     struct clipv *v = clipv_find((const char *)(unsigned long)r[0]);
     unsigned k;
@@ -22900,7 +22967,7 @@ static void *clipv_scene_surface(const char *id)
 
 /* clip v2: surface_set_video(surface, &name), on the bank's surface only (a scene's own surface
  * may have a clip of the same name, and none of ours) - the port's video_bank's, or an sclip line's scene's */
-static void on_clipv_set_video(unsigned *r)
+static void on_clipv_set_video(pm_reg *r)
 {
     const unsigned *s = (const unsigned *)(unsigned long)r[1];
     struct clipv *v;
@@ -22927,7 +22994,7 @@ static void on_clipv_set_video(unsigned *r)
 }
 
 /* PAD-723: the clip layer (Deadpool): layer_video(obj, &name, loop), on the video layer's own video object only */
-static void on_clipv_layer(unsigned *r)
+static void on_clipv_layer(pm_reg *r)
 {
     const unsigned *s = (const unsigned *)(unsigned long)r[1];
     struct clipv *v;
@@ -23323,7 +23390,7 @@ static void att_worker(unsigned request)
 }
 
 /* the record lookup (any thread): the carrier's own record takes the file it plays now. 1 = swapped */
-static int att_lookup(unsigned *r)
+static int att_lookup(pm_reg *r)
 {
     const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
     int c = att.cur;
@@ -23415,7 +23482,7 @@ static void att_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
  * `site challenge_menu` (PAD-619's generic menus: the loop's every-frame point) on every frame; each gets a hook of
  * its own here that only notes the time - hook() chains onto a site the challenge menu hooks as well, either order.
  * Emulator, Bond LE 1.06 before this: 4 of 4 presses stepping the menu each played a sound. */
-static void att_menu_seen(unsigned *r)
+static void att_menu_seen(pm_reg *r)
 {
     (void)r;
     att.menu_ms = pm_ms() | 1;
@@ -23659,7 +23726,7 @@ static const char *gms_name(unsigned id)
 }
 
 /* the record lookup (any thread): the carrier's own record takes the file it plays now. 1 = swapped */
-static int gms_lookup(unsigned *r)
+static int gms_lookup(pm_reg *r)
 {
     const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
     int c = gms.cur;
@@ -23790,7 +23857,7 @@ static void gms_edge(unsigned id, unsigned level, unsigned flags, unsigned polar
 }
 
 /* the tick (its own hook): the carrier stopped once the file has played, so its silence holds no bus */
-static void gms_tick(unsigned *r)
+static void gms_tick(pm_reg *r)
 {
     unsigned long at = gms.stop_at, now = pm_ms();
     unsigned k;
@@ -24099,21 +24166,21 @@ static struct jsong *juke_song(unsigned m)
     return e->pick < 0 ? 0 : &jsong[e->pick];
 }
 
-static void on_juke_start(unsigned *r, unsigned m)
+static void on_juke_start(pm_reg *r, unsigned m)
 {
     if (m < n_jmode) juke_start(m, jmode[m].site);
 }
-#define JUKE_HOOK(n) static void on_juke_start_##n(unsigned *r) { on_juke_start(r, n); }
+#define JUKE_HOOK(n) static void on_juke_start_##n(pm_reg *r) { on_juke_start(r, n); }
 JUKE_HOOK(0) JUKE_HOOK(1) JUKE_HOOK(2) JUKE_HOOK(3) JUKE_HOOK(4) JUKE_HOOK(5) JUKE_HOOK(6) JUKE_HOOK(7)
 JUKE_HOOK(8) JUKE_HOOK(9) JUKE_HOOK(10) JUKE_HOOK(11) JUKE_HOOK(12) JUKE_HOOK(13) JUKE_HOOK(14) JUKE_HOOK(15)
-static void (*const juke_hooks[JUKE_MODES])(unsigned *) = {
+static void (*const juke_hooks[JUKE_MODES])(pm_reg *) = {
     on_juke_start_0, on_juke_start_1, on_juke_start_2, on_juke_start_3,
     on_juke_start_4, on_juke_start_5, on_juke_start_6, on_juke_start_7,
     on_juke_start_8, on_juke_start_9, on_juke_start_10, on_juke_start_11,
     on_juke_start_12, on_juke_start_13, on_juke_start_14, on_juke_start_15,
 };
 
-static int juke_lookup(unsigned *r)
+static int juke_lookup(pm_reg *r)
 {
     const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
     struct jsong *g;
@@ -24128,7 +24195,7 @@ static int juke_lookup(unsigned *r)
     return 0;
 }
 
-static void juke_set_video(unsigned *r)
+static void juke_set_video(pm_reg *r)
 {
     const unsigned *s = (const unsigned *)(unsigned long)r[1];
     const char *name;
@@ -24354,7 +24421,7 @@ static unsigned char sndt_next(struct sndt *t)
 
 /* PAD-565: the record the game looks up for a sound with files in turn - the next one, or the same
  * when it looks it up again within SNDT_GAP ms (a slot whose files skip a number plays its own there) */
-static void sndt_lookup(unsigned *r)
+static void sndt_lookup(pm_reg *r)
 {
     const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
     unsigned j;

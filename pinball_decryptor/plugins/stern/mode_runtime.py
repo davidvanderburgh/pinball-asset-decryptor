@@ -22,6 +22,10 @@ import sys
 
 #: The files the pinned object is made from, in SOURCES.sha256's order.
 SOURCES = ("pad_mode.h", "pad_stock.h", "pad_mode_runtime.c", "mode_file.c", "build_mode.sh")
+#: PAD-1269: the 64-bit ARM object the Spike 3 machine loads (prebuilt/mode64.so) adds the
+#: 64-bit hook layer pad_mode_runtime.c includes there.
+SOURCES_A64 = ("pad_mode.h", "pad_stock.h", "hook_a64.h", "pad_mode_runtime.c", "mode_file.c",
+               "build_mode.sh")
 BUILDER = "tools/spike2_emu/modes/sdk/build_prebuilt.sh"
 
 
@@ -51,18 +55,21 @@ def sdk_dir():
     return str(here)
 
 
-def prebuilt_object():
-    """The pinned ``mode.so`` (the runtime + the mode-file interpreter), as a path.
-    Raises FileNotFoundError, naming the builder, when it is missing."""
-    path = os.path.join(sdk_dir(), "prebuilt", "mode.so")
+def prebuilt_object(arch="arm"):
+    """The pinned mode runtime object (the runtime + the mode-file interpreter), as a path:
+    ``mode.so`` for Spike 2 (32-bit ARM) or, for ``arch="a64"``, ``mode64.so`` for Spike 3
+    (64-bit ARM). Raises FileNotFoundError, naming the builder, when it is missing."""
+    name = "mode64.so" if arch == "a64" else "mode.so"
+    path = os.path.join(sdk_dir(), "prebuilt", name)
     if not os.path.isfile(path):
-        raise FileNotFoundError("the pinned mode runtime %s is missing - rebuild it with %s"
-                                % (path, BUILDER))
+        raise FileNotFoundError("the pinned mode runtime %s is missing - rebuild it with %s%s"
+                                % (path, BUILDER, " -a a64" if arch == "a64" else ""))
     return path
 
 
-def sources_file():
-    return os.path.join(sdk_dir(), "prebuilt", "SOURCES.sha256")
+def sources_file(arch="arm"):
+    name = "SOURCES64.sha256" if arch == "a64" else "SOURCES.sha256"
+    return os.path.join(sdk_dir(), "prebuilt", name)
 
 
 def port_dirs():
@@ -187,10 +194,10 @@ def _sha256(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def recorded():
-    """SOURCES.sha256 as ``({name: sha256}, compiler line)``."""
+def recorded(arch="arm"):
+    """The arch's SOURCES file as ``({name: sha256}, compiler line)``."""
     sums, compiler = {}, ""
-    with open(sources_file(), "r", encoding="utf-8") as f:
+    with open(sources_file(arch), "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -204,33 +211,38 @@ def recorded():
     return sums, compiler
 
 
-def stale_reasons():
-    """Why the pinned object may not match the SDK's sources, as sentences that name
+def stale_reasons(arch="arm"):
+    """Why the arch's pinned object may not match the SDK's sources, as sentences that name
     the builder. Empty = current. The sources are hashed with CRs stripped, as the
     builder hashes them, so a CRLF checkout of unchanged sources is still current."""
     sdk = sdk_dir()
+    sources = SOURCES_A64 if arch == "a64" else SOURCES
+    obj_name = "mode64.so" if arch == "a64" else "mode.so"
+    sums_name = "SOURCES64.sha256" if arch == "a64" else "SOURCES.sha256"
+    flag = " -a a64" if arch == "a64" else ""
     try:
-        sums, _compiler = recorded()
+        sums, _compiler = recorded(arch)
     except OSError:
-        return ["prebuilt/SOURCES.sha256 is missing - run %s" % BUILDER]
+        return ["prebuilt/%s is missing - run %s%s" % (sums_name, BUILDER, flag)]
     out = []
-    for name in SOURCES:
+    for name in sources:
         path = os.path.join(sdk, name)
         if name not in sums:
-            out.append("SOURCES.sha256 does not list %s - run %s" % (name, BUILDER))
+            out.append("%s does not list %s - run %s%s" % (sums_name, name, BUILDER, flag))
         elif not os.path.isfile(path):
             out.append("the SDK has no %s" % name)
         elif _sha256_lf(path) != sums[name]:
-            out.append("%s changed since prebuilt/mode.so was built - run %s and commit "
-                       "prebuilt/" % (name, BUILDER))
-    obj = os.path.join(sdk, "prebuilt", "mode.so")
+            out.append("%s changed since prebuilt/%s was built - run %s%s and commit "
+                       "prebuilt/" % (name, obj_name, BUILDER, flag))
+    obj = os.path.join(sdk, "prebuilt", obj_name)
     if not os.path.isfile(obj):
-        out.append("prebuilt/mode.so is missing - run %s" % BUILDER)
-    elif sums.get("mode.so") != _sha256(obj):
-        out.append("prebuilt/mode.so is not the object SOURCES.sha256 records - run %s" % BUILDER)
+        out.append("prebuilt/%s is missing - run %s%s" % (obj_name, BUILDER, flag))
+    elif sums.get(obj_name) != _sha256(obj):
+        out.append("prebuilt/%s is not the object %s records - run %s%s"
+                   % (obj_name, sums_name, BUILDER, flag))
     return out
 
 
-def prebuilt_is_current():
-    """True when the pinned object was built from the SDK sources as they are now."""
-    return not stale_reasons()
+def prebuilt_is_current(arch="arm"):
+    """True when the arch's pinned object was built from the SDK sources as they are now."""
+    return not stale_reasons(arch)

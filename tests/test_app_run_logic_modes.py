@@ -3154,3 +3154,26 @@ def test_modes_help_stays_behind_the_switch_and_its_which_games_never_raises(mon
     # a section whose body fails to render is left out, never a traceback in the window
     monkeypatch.setitem(HD.HELP_CONTENT, "Modes", [("Broken", lambda: 1 / 0), ("Kept", "words")])
     assert HD.sections_for("Modes") == [("Kept", "words")]
+
+
+def test_modes_tab_names_a_spike3_card_and_says_modes_are_not_on_it_yet(tmp_path):
+    """PAD-1269: Try it's card verdict tells a Stern Spike 3 card apart from a Spike 2 one.
+
+    The mode maker builds modes onto Spike 2 cards. A Spike 3 card used to fall through to
+    a generic failure; now it is recognised (a partition-table peek) and the footer says
+    plainly that modes are not built onto Spike 3 yet, so the user is not left guessing.
+    """
+    from tests.test_spike3 import _build_spike3_disk
+
+    s3 = tmp_path / "walking_dead_le-0_92_0.Release.64G.sdcard-secure.raw"
+    s3.write_bytes(_build_spike3_disk().getvalue())
+
+    project = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, project)
+        svc = _svc(w)
+        verdict = w.run(lambda: svc._card_verdict(str(s3)))
+    text, kind, tip = verdict
+    assert text == "a Spike 3 card"
+    assert kind == "info"
+    assert "Spike 3" in tip and "does not build" in tip

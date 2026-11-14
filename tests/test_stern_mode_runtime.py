@@ -123,6 +123,33 @@ def test_sources_file_lists_every_source_and_the_compiler():
     assert "arm-linux-gnueabihf-gcc" in compiler
 
 
+def test_prebuilt_a64_object_is_an_aarch64_shared_object():
+    # PAD-1269: the Spike 3 machine is 64-bit ARM, so its pinned runtime is an aarch64 .so.
+    path = MR.prebuilt_object("a64")
+    with open(path, "rb") as f:
+        head = f.read(52)
+    assert head[:4] == b"ELF"
+    assert head[4] == 2, "ELFCLASS64"
+    assert head[5] == 1, "little endian"
+    e_type, e_machine = struct.unpack_from("<HH", head, 16)
+    assert e_type == 3, "ET_DYN (a shared object the game preloads)"
+    assert e_machine == 183, "EM_AARCH64"
+
+
+def test_prebuilt_a64_object_is_current():
+    reasons = MR.stale_reasons("a64")
+    assert not reasons, "the pinned Spike 3 mode runtime is STALE: " + "; ".join(reasons)
+    assert MR.prebuilt_is_current("a64")
+
+
+def test_a64_sources_file_lists_every_source_including_the_hook_layer():
+    sums, compiler = MR.recorded("a64")
+    for name in MR.SOURCES_A64 + ("mode64.so",):
+        assert re.fullmatch(r"[0-9a-f]{64}", sums.get(name, "")), name
+    assert "hook_a64.h" in MR.SOURCES_A64
+    assert "aarch64" in compiler
+
+
 def _copy_sdk(tmp_path):
     sdk = tmp_path / "sdk"
     (sdk / "prebuilt").mkdir(parents=True)

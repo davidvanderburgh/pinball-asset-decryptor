@@ -17,36 +17,51 @@
 # and compiled there by build_mode.sh (so the flags are exactly a hand build's). Only the
 # basenames reach the object's symbol table, never the checkout's path, so the same sources
 # and the same compiler give the same bytes from any checkout, CRLF or LF.
+#
+# PAD-1269: -a a64 pins the 64-bit ARM object the Spike 3 machine loads (prebuilt/mode64.so,
+# recorded in prebuilt/SOURCES64.sha256), built with the rig's aarch64 cross gcc from xgcc.sh.
+# Its source set adds hook_a64.h (the 64-bit hook layer pad_mode_runtime.c includes there). The
+# default, arm, is unchanged, so prebuilt/mode.so stays byte-for-byte what it always was.
+#   wsl.exe -e bash -c 'CC=$(bash .../xgcc.sh) bash .../build_prebuilt.sh -a a64'
 set -euo pipefail
 SDK=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 OUT_DIR=$SDK/prebuilt
-while getopts "o:" opt; do
+ARCH=arm
+while getopts "o:a:" opt; do
     case $opt in
         o) OUT_DIR=$OPTARG ;;
-        *) echo "usage: build_prebuilt.sh [-o DIR]" >&2; exit 2 ;;
+        a) ARCH=$OPTARG ;;
+        *) echo "usage: build_prebuilt.sh [-a arm|a64] [-o DIR]" >&2; exit 2 ;;
     esac
 done
-CC=${CC:-arm-linux-gnueabihf-gcc}
-command -v "$CC" >/dev/null || { echo "build_prebuilt.sh: $CC not found (run it in the PAD-Runtime distro)" >&2; exit 1; }
-# the files the object is made from, in the order SOURCES.sha256 lists them
-SOURCES="pad_mode.h pad_stock.h pad_mode_runtime.c mode_file.c build_mode.sh"
+# the files the object is made from, in the order the SOURCES file lists them, and the object's name
+case $ARCH in
+    arm) CC=${CC:-arm-linux-gnueabihf-gcc}
+         SOURCES="pad_mode.h pad_stock.h pad_mode_runtime.c mode_file.c build_mode.sh"
+         OBJ=mode.so; SUMS=SOURCES.sha256 ;;
+    a64) CC=${CC:-$(bash "$SDK/../../../spike3_emu/xgcc.sh")}
+         SOURCES="pad_mode.h pad_stock.h hook_a64.h pad_mode_runtime.c mode_file.c build_mode.sh"
+         OBJ=mode64.so; SUMS=SOURCES64.sha256 ;;
+    *)   echo "build_prebuilt.sh: unknown -a $ARCH (arm or a64)" >&2; exit 2 ;;
+esac
+command -v "$CC" >/dev/null || { echo "build_prebuilt.sh: $CC not found (run it in the PAD-Runtime distro, or with CC from xgcc.sh for a64)" >&2; exit 1; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 for f in $SOURCES; do
     tr -d '\r' < "$SDK/$f" > "$work/$f"
 done
-(cd "$work" && CC="$CC" bash build_mode.sh -o mode.so mode_file.c)
+(cd "$work" && CC="$CC" bash build_mode.sh -a "$ARCH" -o "$OBJ" mode_file.c)
 mkdir -p "$OUT_DIR"
-cp "$work/mode.so" "$OUT_DIR/mode.so.tmp"
-mv -f "$OUT_DIR/mode.so.tmp" "$OUT_DIR/mode.so"
+cp "$work/$OBJ" "$OUT_DIR/$OBJ.tmp"
+mv -f "$OUT_DIR/$OBJ.tmp" "$OUT_DIR/$OBJ"
 {
-    echo "# prebuilt/mode.so was built by build_prebuilt.sh from these files (CRs stripped before"
+    echo "# prebuilt/$OBJ was built by build_prebuilt.sh from these files (CRs stripped before"
     echo "# hashing and compiling). tests/test_stern_mode_runtime.py compares them with the SDK."
     for f in $SOURCES; do
         echo "$(sha256sum "$work/$f" | cut -d' ' -f1)  $f"
     done
-    echo "$(sha256sum "$OUT_DIR/mode.so" | cut -d' ' -f1)  mode.so"
+    echo "$(sha256sum "$OUT_DIR/$OBJ" | cut -d' ' -f1)  $OBJ"
     echo "compiler $("$CC" --version | head -1)"
-} > "$OUT_DIR/SOURCES.sha256.tmp"
-mv -f "$OUT_DIR/SOURCES.sha256.tmp" "$OUT_DIR/SOURCES.sha256"
-echo "pinned $OUT_DIR/mode.so ($(stat -c %s "$OUT_DIR/mode.so") bytes) and SOURCES.sha256"
+} > "$OUT_DIR/$SUMS.tmp"
+mv -f "$OUT_DIR/$SUMS.tmp" "$OUT_DIR/$SUMS"
+echo "pinned $OUT_DIR/$OBJ ($(stat -c %s "$OUT_DIR/$OBJ") bytes) and $SUMS"

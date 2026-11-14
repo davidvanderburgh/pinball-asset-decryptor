@@ -126,7 +126,7 @@ int main(void)
 
 
 def test_the_runtime_refuses_a_check_only_while_a_mode_of_ours_blocks_in_a_game(tmp_path):
-    fn = R._lift(RUNTIME.read_text(encoding="utf-8"), "static int on_rule_gate(unsigned *r, unsigned n)")
+    fn = R._lift(RUNTIME.read_text(encoding="utf-8"), "static int on_rule_gate(pm_reg *r, unsigned n)")
     out = R._host_run(tmp_path, GATE_MAIN.replace("@FN@", fn)).splitlines()
     assert out == ["idle 0", "attract 0", "blocks 1 1 1 said 1", "kept 0 1", "range 0", "after 0"]
 

@@ -201,7 +201,7 @@ def test_a_modes_clip_comes_back_where_it_would_be_after_the_games(tmp_path):
     parts = [_ck_struct(src)] + [_lift(src, s) for s in (
         "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
         "static void ck_drop(const char *why)", "static int clip2_start(void *surf, const char *name)",
-        "static void ck_seen(unsigned *r)", "static void ck_play_seen(unsigned *r)", "static void ck_tick(void)\n{", "int pm_clip(const char *name)")]
+        "static void ck_seen(pm_reg *r)", "static void ck_play_seen(pm_reg *r)", "static void ck_tick(void)\n{", "int pm_clip(const char *name)")]
     out = _host_run(tmp_path, PRELUDE + "\n".join(parts) + MAIN, flags=("-no-pie", "-fno-pie")).splitlines()
     if not out:
         pytest.skip("this host links above 4 GB even with -no-pie")
@@ -246,7 +246,7 @@ def test_the_runtime_hooks_it_on_clip_v2_with_the_ports_seek_only():
     assert '"surface_seek", "surface_position", 0' in arm and "!clip_v2" in arm   # PAD-725: the length is optional
     assert 'hook(fn("surface_play"), on_surface_play)' in arm and src.count('hook(fn("surface_play")') == 1
     assert "ck_arm();" in src and "ck_tick();" in _lift(src, "static void clip_tick(void)")
-    one = _lift(src, "static void on_surface_set_video(unsigned *r)")
+    one = _lift(src, "static void on_surface_set_video(pm_reg *r)")
     assert one.index("ck_seen(r)") < one.index("on_clipv_set_video(r)")   # before a variant swaps the name
     assert src.count('hook(fn("surface_set_video")') == 1                  # a site takes one hook
     # the backdrop's own asks of the surface are ours, not a clip of the game's
@@ -339,7 +339,7 @@ def test_a_port_without_the_length_still_puts_the_clip_back(tmp_path):
     parts = [_ck_struct(src)] + [_lift(src, s) for s in (
         "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
         "static void ck_drop(const char *why)", "static int clip2_start(void *surf, const char *name)",
-        "static void ck_seen(unsigned *r)", "static void ck_play_seen(unsigned *r)", "static void ck_tick(void)\n{",
+        "static void ck_seen(pm_reg *r)", "static void ck_play_seen(pm_reg *r)", "static void ck_tick(void)\n{",
         "int pm_clip(const char *name)")]
     out = _host_run(tmp_path, PRELUDE + "\n".join(parts) + NODUR_MAIN, flags=("-no-pie", "-fno-pie")).splitlines()
     if not out:
@@ -412,7 +412,7 @@ def test_the_games_main_play_video_comes_back_when_ours_ends(tmp_path):
     parts = [_ck_struct(src)] + [_lift(src, s) for s in (
         "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
         "static void ck_drop(const char *why)", "static int clip2_start(void *surf, const char *name)",
-        "static void ck_seen(unsigned *r)", "static void ck_play_seen(unsigned *r)", "static void ck_tick(void)\n{",
+        "static void ck_seen(pm_reg *r)", "static void ck_play_seen(pm_reg *r)", "static void ck_tick(void)\n{",
         "int pm_clip(const char *name)")]
     idle = _lift(src, "static void ck_idle_tick(void)\n{")
     pre = PRELUDE.replace("static void ck_seen(unsigned *r);", "static void ck_seen(unsigned *r);\nstatic void ck_idle_tick(void);")
@@ -438,7 +438,7 @@ def test_the_idle_watch_runs_from_the_tick_and_a_backdrop_counts_as_ours():
     src = RUNTIME.read_text(encoding="utf-8")
     assert "ck_idle_tick();" in _lift(src, "static void clip_tick(void)")
     assert "ck_last_ours = 1;" in _lift(src, "static void bd2_play(void *surf)")
-    seen = _lift(src, "static void ck_seen(unsigned *r)")
+    seen = _lift(src, "static void ck_seen(pm_reg *r)")
     assert seen.index("ck_last_ours = 0;") < seen.index("if (!ck.name[0]) return;")   # recorded with no clip of ours too
 
 
@@ -518,7 +518,7 @@ def test_a_clip_under_a_display_effect_of_the_games_stays_until_it_ends(tmp_path
     parts = [_ck_struct(src)] + [_lift(src, s) for s in (
         "static long long ck_ms(const char *which, void *surf)", "static int ck_mode_runs(void)",
         "static void ck_drop(const char *why)", "static int clip2_start(void *surf, const char *name)",
-        "static void ck_seen(unsigned *r)", "static void ck_play_seen(unsigned *r)", "static void ck_tick(void)\n{",
+        "static void ck_seen(pm_reg *r)", "static void ck_play_seen(pm_reg *r)", "static void ck_tick(void)\n{",
         "int pm_clip(const char *name)")]
     out = _host_run(tmp_path, PRELUDE + "\n".join(parts) + SPIN_MAIN, flags=("-no-pie", "-fno-pie")).splitlines()
     if not out:
@@ -648,7 +648,7 @@ def test_the_games_reel_waits_while_a_clip_of_ours_has_the_surface(tmp_path):
     """PAD-725: Aerosmith's and Guardians' reel (a clip kept in step with a song) paused a clip of ours 50-100 ms in and
     restarted the backdrop loop every half second; its tick is handed a reel with no surface while ours has the surface"""
     src = RUNTIME.read_text(encoding="utf-8")
-    out = _host_run(tmp_path, REEL_MAIN % _lift(src, "static void on_reel_tick(unsigned *r)"),
+    out = _host_run(tmp_path, REEL_MAIN % _lift(src, "static void on_reel_tick(pm_reg *r)"),
                     flags=("-no-pie", "-fno-pie")).splitlines()
     if not out:
         pytest.skip("this host links above 4 GB even with -no-pie")

@@ -144,7 +144,7 @@ def test_it_never_waits_on_the_network_inside_the_game():
         assert banned not in code, banned
     assert "0x800" in code and "SOCK_NONBLOCK" in sec                  # the socket never blocks
     assert "0x4000 | 0x40" in code and "MSG_NOSIGNAL" in sec            # nor does a send, nor a hang-up's SIGPIPE
-    tick = R._lift(sec, "static void on_feed_tick(unsigned *regs)")
+    tick = R._lift(sec, "static void on_feed_tick(pm_reg *regs)")
     assert "feed_send_step();" in tick
     for weak in ("socket", "connect", "send", "__errno_location"):
         assert re.search(r"extern [^;]*\b%s\(.*__attribute__\(\(weak\)\);" % re.escape(weak), sec), weak
@@ -162,7 +162,7 @@ def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
 def test_the_end_of_a_game(tmp_path):
     """game_over where the port names it; else play stopped for FEED_QUIET_MS with no new ball."""
     sec = _section(RUNTIME.read_text(encoding="utf-8"))
-    tick = R._lift(sec, "static void on_feed_tick(unsigned *regs)")
+    tick = R._lift(sec, "static void on_feed_tick(pm_reg *regs)")
     assert 'feed_queue(&r, "the game\'s game_over")' in tick
     assert "!feed.over_named && feed.pending && pm_ms() - feed.fall_ms >= FEED_QUIET_MS" in tick
     assert "feed_scores_fell(feed.kept.scores, now, feed.kept.players)" in tick

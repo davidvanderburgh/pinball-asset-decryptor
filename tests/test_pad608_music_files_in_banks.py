@@ -287,7 +287,7 @@ def test_the_runtime_points_the_request_at_the_bank_s_id_at_the_play_worker():
     play = c[c.index("static void blist_play(unsigned request)"):]
     assert "cur != e->orig && cur != (unsigned)(unsigned long)e->list[0]" in play
     # a turn the worker moves on is not moved again by the record lookup
-    look = c[c.index("static void sndt_lookup(unsigned *r)\n{"):]
+    look = c[c.index("static void sndt_lookup(pm_reg *r)\n{"):]
     assert look.index("if (t->by_worker)") < look.index("now = pm_ms();")
 
 

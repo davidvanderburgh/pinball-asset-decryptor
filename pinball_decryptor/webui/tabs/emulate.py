@@ -3157,7 +3157,9 @@ class EmulateTab(EmulateLogMixin, TabService):
                         os.path.basename(self._card()) or "this card",
                         " (%s)" % self._spike3_why if self._spike3_why else ""))
                 return
-            self._start_spike3()
+            self._start_spike3(prepare)
+            # PAD-1272: a Try it (launch_with) on a Spike 3 card runs its prepare there
+            self._launch_accepted = prepare is not None
             return
         # A TICKET'S RIG IS TAKEN NOW, for this run, and given back at Stop
         # (core/rigslot.py claim_for_run). Nothing changes without a ticket.
@@ -3352,16 +3354,48 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._launch_accepted = prepare is not None
         self._thread(guarded)
 
+    def _s3_prepare(self, prepare, card):
+        """PAD-1272: Try it's preparation for a Spike 3 run (the Spike 2 start's
+        protocol): its env lines, or None when it refused or was canceled
+        (said, as there)."""
+        self._preparing = "Preparing your modes…"
+        self._preparing_kind = "modes"
+        self._post(self._repaint_preparing)
+        try:
+            more = prepare(card)
+        except Exception as exc:                     # noqa: BLE001
+            self._log("[emulate] the run could not be prepared: %s" % exc)
+            more = None
+        finally:
+            self._preparing = None
+            self._preparing_pct = None
+            self._preparing_kind = None
+            self._post(self._paint_run_btn)
+        if more is None:
+            reason = getattr(prepare, "last_reason", "")
+            self.prepare_refuse(reason or "the run was not prepared (the Modes tab "
+                                          "says why)", say=not reason)
+            return None
+        if self._cancel_prepare:
+            self.prepare_refuse("the preparation was canceled; nothing was started")
+            return None
+        return list(more)
+
     # -- PAD-1090: a Spike 3 card, on the Spike 3 rig ----------------------
     #: How long a Spike 3 run may last before the rig ends it itself, like
     #: the Spike 2 run's BACKSTOP_MIN.
     S3_MINUTES = 240
 
-    def _start_spike3(self):
+    def _start_spike3(self, prepare=None):
         """Check the Spike 3 rig, take a rig slot, and run the card in its
         window (s3launch.sh: the card into the store the first time, then
         s3run.sh --window). The run's lines go to the log; the button is
-        Stop while it runs; Stop asks s3launch.sh --stop."""
+        Stop while it runs; Stop asks s3launch.sh --stop.
+
+        PAD-1272: *prepare* (Try it, :meth:`launch_with`) is called with the
+        card once the rig is checked; its ``PAD_S3_MODE_SO`` /
+        ``PAD_S3_MODE_FILES`` lines become the launcher's ``--mode-so`` /
+        ``--mode-files``. None from it refuses the run, as on Spike 2."""
         from ...core import rigslot
         slot = rigslot.claim_for_run()
         if slot is None:
@@ -3383,6 +3417,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         except OSError:
             pass
         self._starting = True
+        self._cancel_prepare = False
         self._s3_slot = slot
         self._s3_label = "Starting Spike 3…"
         self._s3_foot = ("boot", 40, "Starting the Spike 3 emulator")
@@ -3427,11 +3462,24 @@ class EmulateTab(EmulateLogMixin, TabService):
                 keyfile = rig.spike3_keyfile(card, project=self._assets() or None)
                 if keyfile:
                     self._log("[emulate] Spike 3 key: %s" % keyfile)
+                mode_so = mode_files = None
+                if prepare is not None:
+                    more = self._s3_prepare(prepare, card)
+                    if more is None:
+                        self._starting = False
+                        self._s3_slot = self._s3_label = None
+                        rigslot.release_claimed()
+                        self._post(lambda: (self._set("state", "Not running"),
+                                            self._paint_run_btn()))
+                        return
+                    kv = dict(e.split("=", 1) for e in more if "=" in e)
+                    mode_so, mode_files = kv.get("PAD_S3_MODE_SO"), kv.get("PAD_S3_MODE_FILES")
                 restore, self._s3_restore = self._s3_restore, None
                 cmd = rig.spike3_launch_cmd(card, slot, self.S3_MINUTES, audio=audio,
                                             keyfile=keyfile,
                                             audio_ctl=audio_ctl_file() if audio else None,
-                                            restore=restore)
+                                            restore=None if mode_so else restore,
+                                            mode_so=mode_so, mode_files=mode_files)
                 self._log("[emulate] %s" % " ".join(str(c) for c in cmd))
                 self._proc = self._popen(cmd, stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT)

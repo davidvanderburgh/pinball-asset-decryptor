@@ -99,7 +99,7 @@ FNS = ("static unsigned short chg_rec_check(const unsigned char *rec)",
        "static void coop_award_credit(unsigned long long *last, unsigned long long now, unsigned long long *got)",
        "static void coop_awards_read(unsigned t, unsigned p)",
        "static void coop_awards_begin(void)",
-       "static void coop_audit_seen(unsigned *r)",
+       "static void coop_audit_seen(pm_reg *r)",
        "static unsigned long long coop_award_winner(const unsigned long long *got, unsigned n, char *who)",
        "static void coop_awards_end(unsigned n)",
        "static int coop_award_names(char names[][40], int n, int cap)",
@@ -353,7 +353,7 @@ def test_the_cards_show_over_the_bonuss_own_loop():
     the game does not draw the HUD during its bonus, so the cards stay at the game's end and the backdrop plays the
     loop the game's bonus played (recorded at the bus's bonus_end) behind them, at its own crop, given back after."""
     src = RUNTIME.read_text(encoding="utf-8")
-    disp = R._lift(src, "static void on_event_dispatch(unsigned *r)")
+    disp = R._lift(src, "static void on_event_dispatch(pm_reg *r)")
     assert "r[0] == (unsigned)coop_bonus_id) coop_bonus_end();" in disp
     bonus = R._lift(src, "static void coop_bonus_end(void)\n{")
     assert "const char *name = gbg.name;" in bonus and "name[k]" in bonus and "gbg.crop[k]" in bonus  # the game's own

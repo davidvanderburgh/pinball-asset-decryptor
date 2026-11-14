@@ -422,7 +422,7 @@ def test_the_runtime_asks_for_a_pick_at_each_first_ball_and_reads_the_lines():
         assert w in line
     assert "coop_chars_arm(e);" in R._lift(src, "static void coop_arm(void)")
     assert "coop_chars_tick();" in R._lift(src, "static void coop_tick(void)\n{")
-    assert "if (coop_live) coop_edge(id, level, flags, pol);" in R._lift(src, "static void on_switch_edge(unsigned *r)")
+    assert "if (coop_live) coop_edge(id, level, flags, pol);" in R._lift(src, "static void on_switch_edge(pm_reg *r)")
     arm = R._lift(src, "static void coop_chars_arm(struct site *e)")
     assert "adj_wrap_arm()" in arm and "adj_coop_on = 1;" in arm      # PAD-1033: the one wrap, answered in turn
 

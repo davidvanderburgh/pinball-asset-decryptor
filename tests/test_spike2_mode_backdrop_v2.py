@@ -151,10 +151,10 @@ def test_the_games_main_play_video_gives_the_loop_the_surface_back():
     watches the game's asks (one shared hook on surface_set_video, with PAD-446's clip variants) and takes the surface
     back for the loop; any other clip of the game's is waited out."""
     src = RUNTIME.read_text(encoding="utf-8")
-    seen = _lift(src, "static void bd2_seen(unsigned *r)\n{")
+    seen = _lift(src, "static void bd2_seen(pm_reg *r)\n{")
     assert 'pm_port_text("backdrop_idle")' in seen and "bd.pending = 1;" in seen
     assert "(unsigned)(unsigned long)bank != r[0]" in seen               # the bank's surface only
-    one = _lift(src, "static void on_surface_set_video(unsigned *r)")
+    one = _lift(src, "static void on_surface_set_video(pm_reg *r)")
     assert "bd2_seen(r)" in one and "on_clipv_set_video(r)" in one
     assert src.count('hook(fn("surface_set_video")') == 1                # a site takes one hook
     port = (RUNTIME.parent / "ports" / "james_bond_le-1.06.port").read_text(encoding="utf-8")

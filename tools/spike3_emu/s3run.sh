@@ -112,6 +112,16 @@ if [ -f "$TREE/games/pad/images.conf" ]; then
     # /data overlay (the machine keeps it in /tmp)
     export PADSELECT_LOG=/data/padselect.log
 fi
+# PAD-1272: the game PROGRAM, what the readers on this side (switch list, bridge, playfield) read: the file
+# /games/game names. On a card with modes /games/game is the hook (pad/padmode/padmode.sh) and the stock
+# link is kept in pad/padmode/game.target.
+GL=$(readlink "$GT/game")
+[ "$GL" = pad/padmode/padmode.sh ] && GL=$(cat "$GT/pad/padmode/game.target" 2>/dev/null)
+case "$GL" in
+    /games/*) GPROG=$GT/${GL#/games/} ;;
+    /*|"")    GPROG=$GT/game ;;
+    *)        GPROG=$GT/$GL ;;
+esac
 SD=/var/tmp/pad-s3/slot$SLOT
 LOG=$SD/run.log
 [ "$FRESH" = 1 ] && rm -rf "$SD"
@@ -190,7 +200,7 @@ if [ "$BRIDGE" = 1 ]; then
     # two slingshots, a flipper EOS. The stale list goes; the new one is the
     # bridge's own derivation, written again (the same) when the bridge starts.
     rm -rf "$SD/tables" "$SD/switches.json"; mkdir -p "$SD/tables"
-    python3 "$S/s3bridge.py" --switches "$SD" "$GT/game" 2>&1 | tail -1
+    python3 "$S/s3bridge.py" --switches "$SD" "$GPROG" 2>&1 | tail -1
     # 40 frames, or unbounded with --bus: s3press.py autoguide prunes them
     MAXFR=40; [ "$BUS" = 1 ] && MAXFR=1000000
     # --window: the game on screen, in Spike 2's renderer window, whose
@@ -289,7 +299,7 @@ if [ "$BUS" = 1 ]; then
         BUSPIDS="$!"
     fi
     [ "$WINDOW" = 1 ] && export PAD_S3_PADLED="$SD/dump/padled" PAD_S3_SWTRACE=${PAD_S3_SWTRACE:-1}
-    python3 "$S/s3bridge.py" "$SD" "$GT/spike3/netbridge/netbridge.elf" "$GT/game" > "$SD/s3bridge.out" 2>&1 &
+    python3 "$S/s3bridge.py" "$SD" "$GT/spike3/netbridge/netbridge.elf" "$GPROG" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     # the video decoder (stage 5): s3vid.so hands the game's HEVC/H.264
     # packets to it and its I420 frames go to padglhost through padvid.shm
@@ -339,9 +349,9 @@ if [ "$BUS" = 1 ]; then
         # window is a Windows program the app opens on this line, as for a
         # Spike 2 run whose WSL cannot start one itself.
         if [ "${PAD_S3_PLAYFIELD:-1}" = 1 ]; then
-            TITLE=$(basename "$(dirname "$(readlink "$GT/game")")")
+            TITLE=$(basename "$(dirname "$GPROG")")
             for i in $(seq 1 50); do [ -s "$SD/tables/game/switch_list.txt" ] && break; sleep 0.1; done
-            python3 "$S/s3pf.py" "$GT/game" "$TREE" "$TITLE" "$SD/tables/$TITLE" \
+            python3 "$S/s3pf.py" "$GPROG" "$TREE" "$TITLE" "$SD/tables/$TITLE" \
                 "$SD/tables/game/switch_list.txt" 2>&1 | sed 's/^/[s3run] /'
             chmod -R a+rX "$SD/tables" 2>/dev/null
             if [ -s "$SD/tables/$TITLE/device_xy.txt" ]; then
@@ -538,6 +548,23 @@ if [ -n "${PAD_S3_MODE_SO:-}" ]; then
         chmod 666 "$R/connectivity/dump"/* 2>/dev/null
     fi
     echo "[s3run] mode: $PAD_S3_MODE_SO preloaded, files from ${PAD_S3_MODE_FILES:-(none)} in /dump"
+fi
+# PAD-1272: A CARD WITH MODES (plugins/stern/spike3_modes.py): /games/game -> pad/padmode/padmode.sh, the hook
+# that preloads the card's /games/pad/padmode/mode.so into the game and execs it. A plain run (binfmt) runs the
+# card's own hook, as game_monitor does on the machine. A checkpointable run or the explicit qemu executes
+# programs only, so the hook's two steps are done here: the game program it names (game.target), the card's
+# mode.so preloaded last. With PAD_S3_MODE_SO (Try it) that object is the mode: the card's is not loaded too.
+if [ "$PROG" = /games/game ] && [ "$(readlink "$R/games/game")" = pad/padmode/padmode.sh ]; then
+    if [ "$PIVOT" = 1 ] || [ "$DEVMODE" = kernel ] || [ -n "${PAD_S3_QEMU:-}" ] || [ -n "${PAD_S3_MODE_SO:-}" ]; then
+        MT=$(cat "$R/games/pad/padmode/game.target" 2>/dev/null)
+        case "$MT" in /*) PROG=$MT ;; ?*) PROG=/games/$MT ;; esac
+        if [ -z "${PAD_S3_MODE_SO:-}" ] && [ -f "$R/games/pad/padmode/mode.so" ]; then
+            PRELOAD="${PRELOAD:+$PRELOAD:}/games/pad/padmode/mode.so"
+        fi
+        echo "[s3run] card with modes: $PROG, the card's mode.so ${PAD_S3_MODE_SO:+not }preloaded (the hook's steps)"
+    else
+        echo "[s3run] card with modes: its hook (/games/$(readlink "$R/games/game")) starts the game"
+    fi
 fi
 [ -n "$PRELOAD" ] && PRELOAD="env LD_PRELOAD=$PRELOAD"
 [ -n "$PRELOAD" ] && [ "$DEVMODE" != kernel ] && PRELOAD="$PRELOAD PAD_S3_SPI_IN=/run/padspi"

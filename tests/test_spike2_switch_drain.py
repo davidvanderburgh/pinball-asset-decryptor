@@ -158,7 +158,7 @@ def test_a_switch_edge_is_a_hit_on_the_edge_the_game_acts_on(tmp_path, gen):
 # ---- maps_has across contiguous mappings -------------------------------------------------------------
 def test_a_range_may_cross_contiguous_mappings_never_a_hole(tmp_path):
     src = _src()
-    maps = _between(src, "#define N_MAPS", "/* ---- rule 2:")
+    maps = _between(src, "#define N_MAPS", "#if !PM_A64\n/* ---- rule 2:")   # PAD-1269: rule 2 is Spike 2's
     code = r"""
 #include <stdio.h>
 #include <string.h>

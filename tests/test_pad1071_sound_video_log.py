@@ -261,7 +261,7 @@ def test_the_runtime_arms_the_sound_log_right_after_the_port_gate_and_stops_ther
     # its own allowance: mode.log's 40000 lines would end a long session's list
     assert "sound_say(r[0], r[2]);" in src
     # round 2: the recording it played - the record key looked up just after the request, as the game asked
-    look = src[src.index("static void on_sound_lookup(unsigned *r)"):]
+    look = src[src.index("static void on_sound_lookup(pm_reg *r)"):]
     first = look.split("\n")[2]
     assert "sound_key_say" in first and "worker_log" in first          # before any swap re-points r[1]
     assert "hook(fn(\"sound_lookup\"), on_sound_lookup)" in arm

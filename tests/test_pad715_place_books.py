@@ -111,7 +111,7 @@ def test_restore_power_is_read_off_the_program():
 # ---- the runtime ---------------------------------------------------------------------------------
 def test_the_check_takes_nothing_and_the_start_takes_the_place():
     rt = _src("pad_mode_runtime.c")
-    hook = rt[rt.index("static int on_block_start(unsigned *r, unsigned hook_n)"):]
+    hook = rt[rt.index("static int on_block_start(pm_reg *r, unsigned hook_n)"):]
     hook = hook[:hook.index("\n}\n")]
     assert "!place_check[id] && place_take(r, id)" in hook
     for want in ('pm_snprintf(name, sizeof name, "place_start_%u", id);',

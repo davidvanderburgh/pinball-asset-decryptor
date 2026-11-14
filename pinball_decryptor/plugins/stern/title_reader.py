@@ -32,6 +32,11 @@ STEP_WORDS = {
 }
 
 
+#: PAD-1272: why a Spike 3 build's own modes are not listed (the stock step reads Spike 2's)
+SPIKE3_NO_STOCK = ("The game's own modes are read on Spike 2 cards only, so a mode here cannot "
+                   "take the place of one of them yet.")
+
+
 class Cancelled(Exception):
     """The reader was asked to stop."""
 
@@ -102,10 +107,43 @@ def _check(cancel):
         raise Cancelled()
 
 
+def spike3_game_program(card):
+    """PAD-1272: ``(game_dir, version, elf_bytes)`` of a Stern Spike 3 card image, read-only:
+    the program ``/games/game`` names on its games partition (a card with modes keeps the
+    stock link in ``pad/padmode/game.target``), opened with the user's own key."""
+    from . import mode_project as MP, spike3_card, spike3_modes
+    from .ext4 import Ext4Reader
+    game, version = MP.card_from_name(card) or ("", "")
+    try:
+        vol = spike3_card.open_games(card)
+    except Exception as e:                              # noqa: BLE001 - no key, unreadable
+        raise TitleReadError("The Spike 3 card %s could not be opened: %s"
+                             % (os.path.basename(card), e)) from None
+    try:
+        reader = Ext4Reader(vol, 0, vol.size)
+        state, target = spike3_modes.card_state(reader)
+        node = spike3_modes.game_program(reader, target) if target else None
+        if node is None:
+            raise TitleReadError("%s has no game program at /games/game (%s)."
+                                 % (os.path.basename(card), state))
+        if not game:
+            game = target.split("/")[-2] if "/" in target else ""
+        elf = bytes(reader.read_file_bytes(node))
+    finally:
+        vol.close()
+    if not game:
+        raise TitleReadError("%s does not say which game it is." % os.path.basename(card))
+    return game, version, elf
+
+
 def game_program(card):
-    """``(game_dir, version, elf_bytes)`` of a Spike 2 card image, read-only."""
+    """``(game_dir, version, elf_bytes)`` of a Spike 2 card image, read-only. PAD-1272: a
+    Spike 3 card's from its games partition (:func:`spike3_game_program`)."""
     from .explorer import CardImage
     from .mode_tryit import card_title, TryItError
+    from . import spike3
+    if spike3.is_spike3_card(card):
+        return spike3_game_program(card)
     try:
         game, version, part = card_title(card)
     except TryItError as e:
@@ -155,6 +193,14 @@ def read_elf(elf, game, version, progress=None, cancel=None):
     _check(cancel)
     t = time.monotonic()
     _say(progress, "stock", 0.0)
+    if elf[4:5] == b"\x02":
+        # PAD-1272: a Spike 3 game (64-bit); the game's own modes are read off Spike 2's only
+        out.stock_notes = (SPIKE3_NO_STOCK,)
+        out.notes = tuple(notes) + out.stock_notes
+        out.timings["stock"] = time.monotonic() - t
+        _say(progress, "stock", 1.0)
+        out.seconds = time.monotonic() - t0
+        return out
     tr = stock_reader.ensure_table(elf, game, version,
                                    progress=lambda f, s="": _say(progress, "stock", f, s),
                                    cancel=cancel)

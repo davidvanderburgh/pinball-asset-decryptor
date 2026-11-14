@@ -434,7 +434,7 @@ def test_the_runtime_points_a_request_at_one_sid_and_fades():
         assert decl[:-1] + "\n{" in c
     assert "*(unsigned *)(rec + 8) = (unsigned)(unsigned long)sid_slot[i].list;" in c
     assert "*(unsigned *)(rec + 8) = sid_slot[i].orig;" in c
-    tick = c[c.index("static void on_tick(unsigned *r)"):]
+    tick = c[c.index("static void on_tick(pm_reg *r)"):]
     assert tick.index("sound_fades_tick();") < tick.index("m->tick();")
     assert "sound_fade_finish(request);" in c[c.index("int pm_sound(unsigned request)"):]
 
@@ -483,7 +483,7 @@ def test_the_mode_music_ducks_under_its_own_calls():
     c = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
     decl = "int pm_sound_duck(unsigned request, unsigned steps, unsigned ms);"
     assert decl in h and decl[:-1] + chr(10) + "{" in c
-    tick = c[c.index("static void on_tick(unsigned *r)"):]
+    tick = c[c.index("static void on_tick(pm_reg *r)"):]
     assert tick.index("sound_fades_tick();") < tick.index("sound_ducks_tick();") < tick.index("m->tick();")
     ducks = c[c.index("static void sound_ducks_tick(void)"):]
     ducks = ducks[:ducks.index(chr(10) + "}" + chr(10))]
@@ -634,6 +634,6 @@ def test_mode_file_c_and_code_modes_swap_the_carrier_key_right_before_playing():
     call = assets[assets.index("static PA_UNUSED int pa_call("):]
     assert call.index("pm_sound_swap(c->request, swap, swap + 8,") < call.index("pa_try(a, c->request")
     rt = open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8").read()
-    hook = rt[rt.index("static void on_sound_lookup(unsigned *r)"):]
+    hook = rt[rt.index("static void on_sound_lookup(pm_reg *r)"):]
     assert hook.index("key_is(k, swaps[i].stock)") < hook.index("if (!sound_armed || !sound_key) return;")
     assert "sound_swaps_tick();" in rt

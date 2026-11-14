@@ -53,6 +53,35 @@ extern int   mprotect(void *, __SIZE_TYPE__, int);
 #define CLOCK_MONOTONIC 1
 #define U __attribute__((unused))
 
+#if PM_A64
+/* PAD-1272: a Spike 3 card carries the runtime's files (game.port, the mode files, every .cfg, a code mode's
+ * .assets) on its games partition, in /games/pad/padmode: its rootfs is the signed image's, and a Write changes
+ * only /games. Every path in these sources names Spike 2's /usr/local/padmode; on Spike 3 an open of one goes to
+ * the games partition's folder instead. The rig's /dump is untouched. Spike 2's build has none of this. */
+static int pm_card_open(const char *path, int flags, ...)
+{
+    static const char sp2[] = "/usr/local/padmode/", sp3[] = "/games/pad/padmode/";
+    char buf[192];
+    unsigned i = 0, k;
+    int mode = 0;
+    if (flags & O_CREAT) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+    while (i < sizeof sp2 - 1 && path[i] == sp2[i]) i++;
+    if (i == sizeof sp2 - 1) {
+        for (k = 0; k < sizeof sp3 - 1; k++) buf[k] = sp3[k];
+        while (path[i] && k < sizeof buf - 1) buf[k++] = path[i++];
+        buf[k] = 0;
+        if (!path[i]) path = buf;          /* a name too long for buf keeps its own path */
+    }
+    return open(path, flags, mode);
+}
+#define open pm_card_open
+#endif
+
 /* ---- the log ---------------------------------------------------------------------- */
 static int log_fd = -1, log_lines;
 static struct { long s, ns; } t0;

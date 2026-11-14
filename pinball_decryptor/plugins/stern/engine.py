@@ -8296,7 +8296,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # stop the Write), one sentence says they are left out, and the build goes
     # on exactly as one without the family would.
     from . import mode_write as _MW
-    _family = _mode_family_on() and "modes" not in _left
+    # PAD-1272: a Spike 3 volume's modes are spike3_write's (spike3_modes), never this build's
+    _family = _mode_family_on() and "modes" not in _left and not _is_spike3(disk_f)
     # The own-sound gate, decided ONCE for this build.  A caller that closes
     # it (Try it's fast run) passes sound_ok=False, so a quick set can be
     # built beside a full Write without either touching the environment the
@@ -8313,6 +8314,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                      else {"ext4_available": _override_needs_no_mount})
     if "modes" in _left:
         pass                    # said once above, with the rest this run leaves out
+    elif _is_spike3(disk_f):
+        pass                    # PAD-1272: spike3_modes.plan says what the card takes
     elif not _family:
         _off = _MW.preview_left_out(assets_dir)
         if _off:
@@ -8463,6 +8466,29 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     stime_lines, stime_prof = _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_device, log,
                                                       cancel, **_mode_gate_kw)
     _stime_on = bool(stime_lines)
+    if _is_spike3(disk_f):
+        # PAD-1272: a Spike 3 card's modes are spike3_write's (its games partition, the 64-bit
+        # runtime: spike3_modes). What else rides the modes' Spike 2 delivery (the runtime on
+        # p2 and its files there, the game program's own patches) has no road onto a Spike 3
+        # card yet: left out, with one sentence naming what the project asked for.
+        _s3_off = [w for w, on in (
+            ("random clips", bool(variant_slots)), ("music modes", sound_modes is not None),
+            ("editions", bool(editions)), ("picture settings", picture_prof is not None),
+            ("attract items", _attract_on), ("co-op play", _coop_on),
+            ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),
+            ("expression light shows", _cabs_on), ("Prolonged Competition", _comp_on),
+            ("the score feed", _feed_on), ("screen times", _stime_on)) if on]
+        if _s3_off:
+            log("The project's %s are left out of this build: they go on Spike 2 cards only."
+                % ", ".join(_s3_off), "warning")
+        variant_slots, variant_prof, sound_modes, sound_modes_prof = {}, None, None, None
+        _juke_clips = _clips_on = False
+        editions, picture_prof = [], None
+        attract_prof = coop_prof = idle_prof = hand_prof = comp_prof = None
+        _attract_on = _coop_on = _idle_on = _hand_on = _comp_on = False
+        cabs_prof, cabs_shows, _cabs_on = None, [], False
+        feed_prof, feed_url, _feed_on = None, "", False
+        stime_lines, stime_prof, _stime_on = [], None, False
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits

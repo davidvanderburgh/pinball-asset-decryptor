@@ -160,7 +160,7 @@ def _runtime():
 
 def test_the_runtime_counts_a_drawn_background_of_the_games_that_is_not_the_city():
     src = _runtime()
-    body = src[src.index("static void on_scene_show(unsigned *r)"):]
+    body = src[src.index("static void on_scene_show(pm_reg *r)"):]
     body = body[:body.index("\n}\n")]
     # the background's own scene, let through (not swapped for a mode's clip in its place), and not the city
     assert "scene_show_backdrop(r);" in body

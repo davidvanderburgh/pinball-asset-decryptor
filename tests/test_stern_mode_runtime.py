@@ -264,6 +264,9 @@ _READER = r"""
 #include <fcntl.h>
 #include <unistd.h>
 #include "pad_mode.h"
+typedef unsigned pm_addr;            /* PAD-1269: the 32-bit build's address and register types */
+typedef unsigned pm_reg;
+static unsigned long game_base;      /* PAD-1269: a PIE's load address, 0 on Spike 2 */
 static const char *PORT_FILES[2];
 static int events, lamps, rules;
 static void event_line(const char *s) { events++; }

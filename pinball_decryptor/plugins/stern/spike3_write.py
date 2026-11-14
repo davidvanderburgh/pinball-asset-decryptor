@@ -351,6 +351,28 @@ def _sidx_refresh(vol, reader, card_path, node, staged, log):
     return True
 
 
+def _plan_modes(assets_dir, reader, work, log):
+    """PAD-1272: ``(plan, remove)`` - the project's modes for this card
+    (:func:`.spike3_modes.plan`, or None), and whether the card carries an
+    earlier build's modes that this build, with none, takes off.  A mode that
+    cannot be built stops the Write before anything is copied."""
+    from . import mode_write as MW, spike3_modes
+    try:
+        mplan = spike3_modes.plan(assets_dir, reader, os.path.join(work, "modes"),
+                                  log)
+    except MW.ModeWriteError as e:
+        raise PipelineError("Encode", "Modes: %s. Nothing was written." % e) from None
+    if mplan is not None:
+        for line in mplan.lines:
+            log("Modes: %s" % line, "info")
+        return mplan, False
+    try:
+        state, _target = spike3_modes.card_state(reader)
+    except Exception:                                   # noqa: BLE001 - no link read: stock
+        state = ""
+    return None, state == "modes"
+
+
 def write_card(original_path, assets_dir, output_path, log=None,
                progress=None, cancel=None, phase=None, key_source=None):
     """Build *output_path* from the Spike 3 card *original_path* with the
@@ -404,7 +426,11 @@ def write_card(original_path, assets_dir, output_path, log=None,
                     "container goes onto the card whole with them added."
                     % (p.folder, len(p.grown)), "info")
         n_audio_c, n_video, n_image, n_text = tuple(counts)[:4]
-        if not writes and not sounds and not (grow_plan or {}).get("jobs"):
+        # PAD-1272: the project's modes, onto the games partition (spike3_modes); a card an
+        # earlier build put modes on, written with none now, has them taken off
+        mplan, mremove = _plan_modes(assets_dir, reader, work, log)
+        if not writes and not sounds and not (grow_plan or {}).get("jobs") \
+                and mplan is None and not mremove:
             raise engine.NothingToWrite(
                 "Nothing to write: no sound, video, image, scene or text in "
                 "this project differs from the card it was extracted from.")
@@ -423,6 +449,8 @@ def write_card(original_path, assets_dir, output_path, log=None,
                 out.write(b)
             out_reader = Ext4Reader(out, 0, out.size)
             jobs = list((grow_plan or {}).get("jobs") or [])
+            if mplan is not None:
+                jobs += mplan.jobs        # the title's scenes the modes' screens and clips rewrite
             for p in sounds:
                 if p.staged:
                     jobs.append((p.card_path.lstrip("/"), p.staged))
@@ -474,6 +502,17 @@ def write_card(original_path, assets_dir, output_path, log=None,
                     "%d of %d file(s) that had to grow could not be copied "
                     "onto the card (see the log), so this card is not "
                     "complete." % (len(jobs) - grown, len(jobs)))
+        if mplan is not None or mremove:
+            from . import mode_write as MW, spike3_modes
+            vol = dict(luks, part_offset=poff, part_size=psize)
+            try:
+                if mplan is not None:
+                    spike3_modes.install(output_path, vol, mplan, log)
+                else:
+                    spike3_modes.remove(output_path, vol, log)
+            except MW.ModeWriteError as e:
+                raise PipelineError("Write card", "Modes: %s, so this card is not complete."
+                                    % e) from None
         _write_record(output_path, original_path, complete=True,
                       counts=(n_audio, n_video, n_image, n_text))
         log("Wrote the Spike 3 card in %.0f s: %s (%d sound(s), %d video(s), "

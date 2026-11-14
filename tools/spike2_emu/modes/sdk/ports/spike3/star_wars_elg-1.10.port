@@ -10,6 +10,11 @@
 # Sounds emulator-proven 2026-11-14 (PAD-1282, slot 82, muted, the PCM kept): a mode played request 153, callout 168
 # and the countdown 170 -> 166 ("One!" .. "Five!", step -1) through the sites below, each taken by the game's worker,
 # and sound_active / sound_stop / a fade on the 64-bit channel values answered as the PCM did.
+# Lamps and light shows emulator-proven 2026-11-14 (PAD-1283, slot 1, hidden, muted, the bridge's dump/padled): a mode's
+# light_insert blinked DEATH STAR (X2) / LEFT OUTLANE / RAMP 6 on the playfield board from its start to its end,
+# light_all held all 67 inserts at 255, light_shots blinked the 3 tied to its scoring shots; the game's shows 1-5
+# played as process 13201 (stopped at their length through event_cancel), and the game's layer list lost each show's
+# group as it ended (the exit hook at +0x138 calling lamp_free_owner).
 
 game           star_wars_elg
 version        1.10
@@ -29,8 +34,10 @@ site score_add        0x0019dd40 0x900027e3 0xf942ec63
 site callout          0x0020dc70 0xf0002928 0x910c8108
 #   callout_nth: its calls and callers (score 3.0)
 site callout_nth      0x0020dd40 0xf0002928 0x910c8108
-# not carried yet (its feature is 32-bit): site lamp_group       0x001a0470 0xa9be53f3 0x92403c14
-# not carried yet (its feature is 32-bit): site show_priority    0x0041a270 0xf00013e1 0xf9466821
+#   lamp_group: its calls and callers (score 4.8)
+site lamp_group       0x001a0470 0xa9be53f3 0x92403c14
+#   show_priority: its calls and callers (score 3.0)
+site show_priority    0x0041a270 0xf00013e1 0xf9466821
 # not carried yet (its feature is 32-bit): site award_screen     0x001b4120 0xa9be53f3 0x12003c13
 # site string_new       NOT PLACED: mid-way into a function on Spike 2 (0x0 + 0x16810)
 # site dynamic_cast     NOT PLACED: mid-way into a function on Spike 2 (0x0 + 0x1621c)
@@ -59,9 +66,12 @@ site hook_dispatch    0x002274e0 0xa9be53f3 0x71033c1f
 # not carried yet (its feature is 32-bit): site display_effect_start 0x003b01f0 0xb0001745 0xf94684a5
 # site display_effect_next NOT PLACED: mid-way into a function on Spike 2 (0x3aacf0 + 0x408)
 # site display_priority_now NOT PLACED: mid-way into a function on Spike 2 (0x3aacf0 + 0x890)
-# not carried yet (its feature is 32-bit): site show_start       0x0041a000 0xa9bc53f3 0x72003c14
-# not carried yet (its feature is 32-bit): site event_post_replacing 0x003151f0 0xa9be53f3 0x12003c14
-# not carried yet (its feature is 32-bit): site event_cancel     0x003150f0 0xa9bc53f3 0xa9015bf5
+#   show_start: its calls and callers (score 4.0)
+site show_start       0x0041a000 0xa9bc53f3 0x72003c14
+#   event_post_replacing: its calls and callers (score 6.0)
+site event_post_replacing 0x003151f0 0xa9be53f3 0x12003c14
+#   event_cancel: its calls and callers (score 9.0)
+site event_cancel     0x003150f0 0xa9bc53f3 0xa9015bf5
 # site switch_edge      NOT PLACED: no counterpart found
 # not carried yet (its feature is 32-bit): site switch_drain     0x003085c0 0xa9ba53f3 0xa9036bf9
 # not carried yet (its feature is 32-bit): site surface_find     0x004e4c70 0xb0000da2 0xf9468442
@@ -81,21 +91,17 @@ site agent_begin      0x00551e80 0xaa0003e4 0xaa0103e0
 # site block_start_0    NOT PLACED: no counterpart found
 # site block_start_1    NOT PLACED: no counterpart found
 # not carried yet (its feature is 32-bit): site block_start_2    0x00173430 0xf81f0ffe 0x94001473
-# not carried yet (its feature is 32-bit): site proc_exists      0x003156d0 0x900021a2 0x910f4042
-# not carried yet (its feature is 32-bit): site proc_create      0x00314e80 0xb00021a4 0x910f4084
+#   proc_exists: its calls and callers (score 5.0)
+site proc_exists      0x003156d0 0x900021a2 0x910f4042
+#   proc_create: its calls and callers (score 2.0)
+site proc_create      0x00314e80 0xb00021a4 0x910f4084
 # not carried yet (its feature is 32-bit): site proc_sleep       0x00315000 0x900021a1 0x910f4021
 # not carried yet (its feature is 32-bit): site adjustment       0x0042cb90 0x72003c00 0x540000c0
 # not carried yet (its feature is 32-bit): site coil_fire        0x00312b70 0x72003c00 0x12001c21
 # site coil_take        NOT PLACED: no counterpart found
 # site coil_give        NOT PLACED: mid-way into a function on Spike 2 (0x7aa14 + 0xc4)
-# site lamp_free_owner  NOT PLACED: mid-way into a function on Spike 2 (0x1b2398 + 0x9c)
-# not carried yet (its feature is 32-bit): site show_1           0x00185ab0 0xa9bb53f3 0xa9036bf9
-# not carried yet (its feature is 32-bit): site show_2           0x00157190 0xa9be53f3 0xf9000bfe
-# site show_3           NOT PLACED: mid-way into a function on Spike 2 (0x2f6a8 + 0xe4)
-# site show_4           NOT PLACED: no counterpart found
-# site show_5           NOT PLACED: no counterpart found
-# site show_6           NOT PLACED: no counterpart found
-# site show_7           NOT PLACED: mid-way into a function on Spike 2 (0x2f880 + 0x280)
+#   lamp_free_owner: read off the lamp layer's code (PAD-1283)
+site lamp_free_owner  0x00236d30 0xa9bf7bf3 0xaa0003f3
 # site challenge_balls  NOT PLACED: no counterpart found
 # site challenge_extra_ball NOT PLACED: no counterpart found
 # site challenge_menu   NOT PLACED: mid-way into a function on Spike 2 (0x41d80 + 0xd7c)
@@ -114,13 +120,39 @@ site agent_begin      0x00551e80 0xaa0003e4 0xaa0103e0
 # not carried yet (its feature is 32-bit): site coop_add_player  0x00417710 0xa9be53f3 0x52800a20
 # site coop_first_ball  NOT PLACED: mid-way into a function on Spike 2 (0x1016c0 + 0x24)
 
+# ---- the game's own light shows (PAD-1283): the Spike 2 port's shows, each at the same record of
+# the show table on both builds (its body, kind and flags), renumbered from 1; played as process show_proc
+# (an id this program never uses either), its lamp groups freed as it ends (lamp_free_owner) ----
+site show_1            0x00185ab0 0xa9bb53f3 0xa9036bf9   # Spike 2's show_1, record 80 of the show table; 74 lights in its lamp groups, 0 light-runner commands, no colour given, 7.8 s
+text show_name_1          Wide fast strobe
+text show_kind_1          flashy
+value show_secs_1         8
+site show_2            0x00157190 0xa9be53f3 0xf9000bfe   # Spike 2's show_2, record 15 of the show table; 72 lights in its lamp groups, 0 light-runner commands, no colour given, 6.4 s
+text show_name_2          Wide strobe
+text show_kind_2          flashy
+value show_secs_2         8
+site show_3            0x00148a20 0xa9bd53f3 0xf90017fe   # Spike 2's show_3, record 104 of the show table; 70 lights in its lamp groups, 0 light-runner commands, no colour given, 7.5 s
+text show_name_3          Wide chase
+text show_kind_3          flashy
+value show_secs_3         8
+site show_4            0x00148b10 0xa9bd53f3 0xa9015bf5   # Spike 2's show_4, record 106 of the show table; 16 lights in its lamp groups, 0 light-runner commands, no colour given, 7.7 s
+text show_name_4          Small fast strobe
+text show_kind_4          flashy
+value show_secs_4         8
+# show 5 of the Spike 2 port (Small strobe) not carried: past the 128 shows of Spike 3's table
+# show 6 of the Spike 2 port (Small glow) not carried: past the 128 shows of Spike 3's table
+site show_5            0x00148d30 0xa9bc53f3 0xa9015bf5   # Spike 2's show_7, record 108 of the show table; 57 lights in its lamp groups, 0 light-runner commands, no colour given, 1.7 s
+text show_name_5          Fast strobe
+text show_kind_5          accent
+value show_secs_5         2
+
 # ---- globals: data <name> <address> ----
 data cur_player             0x006b1a1a   # 2 of 3 paired functions that load it
 data scores                 0x007122c0   # 5 of 5 paired functions that load it
 data score_mult             0x006a7f30   # 8 of 8 paired functions that load it
 data mode_mask              0x0079206c   # 100 of 105 paired functions that load it
-# data event_head             NOT PLACED: 19 of 27 paired functions agree
-# not carried yet: data event_current          0x007493e0   # 89 of 97 paired functions that load it
+data event_head             0x007493d8   # read in the lamp layer's / processes' own code (PAD-1283)
+data event_current          0x007493e0   # read in the lamp layer's / processes' own code (PAD-1283)
 # data resource_manager       NOT PLACED: 0 of 0 paired functions agree
 # data display_holder         NOT PLACED: 10 of 15 paired functions agree
 # data typeinfo_resource      NOT PLACED: 0 of 0 paired functions agree
@@ -130,8 +162,8 @@ data sound_channels         0x00733340   # read in the sound engine's own code (
 # data sound_queue            NOT PLACED: 1 of 1 paired functions agree
 data sound_requests         0x006fd360   # read in the sound engine's own code (PAD-1282)
 data sound_request_count    0x005a38c8   # read in the sound engine's own code (PAD-1282)
-# data lamp_layers            NOT PLACED: 2 of 2 paired functions agree
-# data light_count            NOT PLACED: 11 of 11 paired functions agree
+data lamp_layers            0x00735e68   # read in the lamp layer's / processes' own code (PAD-1283)
+data light_count            0x0073ec88   # read in the lamp layer's / processes' own code (PAD-1283)
 # data switch_records         NOT PLACED: 5 of 5 paired functions agree
 # data switch_count           NOT PLACED: 8 of 8 paired functions agree
 # not carried yet: data game_flags             0x00749630   # 4 of 4 paired functions that load it
@@ -152,10 +184,6 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value node_visible_vfn      0xa8
 # not carried (64-bit layout, measure it): value surface_playing       2
 # not carried (64-bit layout, measure it): value clip_layer            0
-# not carried (64-bit layout, measure it): value event_next            0x84
-# not carried (64-bit layout, measure it): value event_flags           0x2
-# not carried (64-bit layout, measure it): value event_show_flag       0x20
-# not carried (64-bit layout, measure it): value event_show_id         0x96
 # not carried (64-bit layout, measure it): value stock_slot_shot   42
 # not carried (64-bit layout, measure it): value stock_slot_active 14
 # not carried (64-bit layout, measure it): value stock_slot_lit    25
@@ -210,13 +238,6 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value switch_flags_at       0x1a
 # not carried (64-bit layout, measure it): value switch_polarity_at    0x1c
 # not carried (64-bit layout, measure it): value backdrop_surface 1
-# not carried (64-bit layout, measure it): value lamp_slot_size       40
-# not carried (64-bit layout, measure it): value lamp_slot_level      2
-# not carried (64-bit layout, measure it): value lamp_slot_alpha      3
-# not carried (64-bit layout, measure it): value lamp_slot_fade       8
-# not carried (64-bit layout, measure it): value lamp_slot_used       36
-# not carried (64-bit layout, measure it): value lamp_group_prio      4
-# not carried (64-bit layout, measure it): value lamp_group_next      20
 # not carried (64-bit layout, measure it): value lamp_fade            3
 # not carried (64-bit layout, measure it): value game_flags_at         4
 # not carried (64-bit layout, measure it): value mode_flag_1           86
@@ -227,16 +248,6 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value right_gate_ctl      32
 # not carried (64-bit layout, measure it): value right_gate_devoff   4
 # not carried (64-bit layout, measure it): value right_gate_off_slot 30
-# not carried (64-bit layout, measure it): value proc_exit_hooks      0xd0
-# not carried (64-bit layout, measure it): value proc_exit_slots      4
-# not carried (64-bit layout, measure it): value show_proc            13201
-# not carried (64-bit layout, measure it): value show_secs_1         8
-# not carried (64-bit layout, measure it): value show_secs_2         8
-# not carried (64-bit layout, measure it): value show_secs_3         8
-# not carried (64-bit layout, measure it): value show_secs_4         8
-# not carried (64-bit layout, measure it): value show_secs_5         8
-# not carried (64-bit layout, measure it): value show_secs_6         8
-# not carried (64-bit layout, measure it): value show_secs_7         2
 # not carried (64-bit layout, measure it): value challenge_on_flag   18
 # not carried (64-bit layout, measure it): value challenge_menu_list_at   268
 # not carried (64-bit layout, measure it): value challenge_menu_count_at  44
@@ -267,6 +278,20 @@ value sound_channel_voices      276    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_bus         277    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_voice_ptrs  144    # the 64-bit sound engine's (PAD-1282)
 value sound_voice_volume        56    # the 64-bit sound engine's (PAD-1282)
+value lamp_group_next           32    # read off the program's own code (PAD-1283)
+value lamp_group_prio           8    # read off the program's own code (PAD-1283)
+value lamp_slot_size            40    # read off the program's own code (PAD-1283)
+value lamp_slot_level           2    # read off the program's own code (PAD-1283)
+value lamp_slot_alpha           3    # read off the program's own code (PAD-1283)
+value lamp_slot_fade            8    # read off the program's own code (PAD-1283)
+value lamp_slot_used            36    # read off the program's own code (PAD-1283)
+value event_next                232    # read off the program's own code (PAD-1283)
+value proc_exit_hooks           312    # read off the program's own code (PAD-1283)
+value proc_exit_slots           4    # read off the program's own code (PAD-1283)
+value event_flags               2    # read off the program's own code (PAD-1283)
+value event_show_flag           0x20    # read off the program's own code (PAD-1283)
+value event_show_id             258    # read off the program's own code (PAD-1283)
+value show_proc                 13201    # read off the program's own code (PAD-1283)
 value ball_end_event 0x34    # the end of a ball, from the bus (no ball_end site on Spike 3)
 
 # ---- events: the framework's bus ids (the dispatch's range is the same on both builds) ----
@@ -313,7 +338,78 @@ switch 59   0x20000000         Yoda mystery target
 callout countdown           170
 value countdown_step -1
 
+# ---- lamps (PAD-1283): the Spike 2 port's lamp lines by name - a lamp of Spike 3's device table (its
+# I/O group and index written from it), the same light ids one of the light table's records holds ----
+lamp 66           0x2            DEATH STAR (X2)  # lamp 3, I/O group 6 index 51, at 49,60; tie: Death star target
+lamp 67           0              PLAYFIELD GI 1  # lamp 4, I/O group 6 index 0, at 0,0
+lamp 68           0              PLAYFIELD GI 2  # lamp 5, I/O group 6 index 1, at 0,0
+lamp 69           0              PLAYFIELD GI 3  # lamp 6, I/O group 6 index 2, at 0,0
+lamp 3            0x10000        LEFT OUTLANE  # lamp 7, I/O group 6 index 3, at 21,353; tie: Left outlane
+lamp 4            0x20000        LEFT RETURN LANE  # lamp 8, I/O group 6 index 4, at 39,342; tie: Left return lane
+lamp 5            0x40000        RIGHT RETURN LANE  # lamp 9, I/O group 6 index 5, at 181,342; tie: Right return lane
+lamp 6            0x80000        RIGHT OUTLANE  # lamp 10, I/O group 6 index 6, at 199,353; tie: Right outlane
+lamp 7            0              SHOOT AGAIN  # lamp 11, I/O group 6 index 7, at 110,448
+lamp 13           0              BONUS 1  # lamp 12, I/O group 6 index 8, at 72,353
+lamp 14           0              BONUS 2  # lamp 13, I/O group 6 index 9, at 80,353
+lamp 15           0              BONUS 3  # lamp 14, I/O group 6 index 10, at 89,353
+lamp 16           0              BONUS 4  # lamp 15, I/O group 6 index 11, at 97,353
+lamp 17           0              BONUS 5  # lamp 16, I/O group 6 index 12, at 106,353
+lamp 18           0              BONUS 10  # lamp 17, I/O group 6 index 13, at 114,353
+lamp 19           0              BONUS 20  # lamp 18, I/O group 6 index 14, at 123,353
+lamp 20           0              BONUS 30  # lamp 19, I/O group 6 index 15, at 131,353
+lamp 21           0              BONUS 40  # lamp 20, I/O group 6 index 16, at 140,353
+lamp 22           0              BONUS ?  # lamp 21, I/O group 6 index 17, at 148,353
+lamp 9            0              HAN  # lamp 22, I/O group 6 index 18, at 80,333
+lamp 10           0              LEIA  # lamp 23, I/O group 6 index 19, at 100,333
+lamp 11           0              R2-D2  # lamp 24, I/O group 6 index 20, at 120,333
+lamp 12           0              LUKE  # lamp 25, I/O group 6 index 21, at 140,333
+lamp 23           0              2X  # lamp 26, I/O group 6 index 22, at 95,371
+lamp 24           0              3X  # lamp 27, I/O group 6 index 23, at 110,371
+lamp 25           0              DOUBLE SCORING  # lamp 28, I/O group 6 index 24, at 124,371
+lamp 26           0              JEDI MULTIBALL  # lamp 29, I/O group 6 index 25, at 110,388
+lamp 29           0              FO(R)CE  # lamp 30, I/O group 6 index 26, at 39,289
+lamp 30           0x10000000     FOR(C)E  # lamp 31, I/O group 6 index 27, at 39,275; tie: Force target top
+lamp 31           0              FORC(E)  # lamp 32, I/O group 6 index 28, at 39,261
+lamp 33           0              LEFT LUKE 10K  # lamp 33, I/O group 6 index 29, at 29,195
+lamp 34           0              LEFT LUKE 25K  # lamp 34, I/O group 6 index 30, at 24,179
+lamp 35           0x8            LEFT LUKE ARROW  # lamp 35, I/O group 6 index 31, at 22,161; tie: Left luke orbit
+lamp 36           0              LEFT HAN 10K  # lamp 36, I/O group 6 index 32, at 43,172
+lamp 37           0              LEFT HAN 25K  # lamp 37, I/O group 6 index 33, at 41,155
+lamp 38           0x1800000      LEFT HAN ARROW  # lamp 38, I/O group 6 index 34, at 40,138; tie: Han ramp enter, Han ramp exit opto
+lamp 43           0x20           TOP LANE LEFT  # lamp 39, I/O group 6 index 35, at 87,34; tie: Top lane left
+lamp 44           0x40           TOP LANE CENTER  # lamp 40, I/O group 6 index 36, at 107,34; tie: Top lane center
+lamp 45           0x80           TOP LANE RIGHT  # lamp 41, I/O group 6 index 37, at 126,34; tie: Top lane right
+lamp 47           0              EXTRA BALL  # lamp 42, I/O group 6 index 38, at 122,171
+lamp 46           0x4200         R2-D2 ARROW  # lamp 43, I/O group 6 index 39, at 122,152; tie: R2-d2 lock 1, R2-d2 lock 2
+# lamp NOT PLACED: no lamp named 'MILLENNIUM FALCON (OPTIONAL)' on Spike 3 (lamp 70           0              MILLENNIUM FALCON (OPTIONAL)  # lamp 44, I/O group 5 index 40, at 69,165)
+lamp 42           0              R2-D2 MULTIBALL  # lamp 45, I/O group 6 index 41, at 112,227
+lamp 41           0x400000       DROP TARGET RIGHT  # lamp 46, I/O group 6 index 42, at 102,212; tie: Drop target right
+lamp 40           0x200000       DROP TARGET CENTER  # lamp 47, I/O group 6 index 43, at 91,220; tie: Drop target center
+lamp 39           0x100000       DROP TARGET LEFT  # lamp 48, I/O group 6 index 44, at 80,228; tie: Drop target left
+lamp 48           0              LEIA SPINNER 10K  # lamp 49, I/O group 6 index 45, at 142,141
+lamp 49           0              LEIA SPINNER 25K  # lamp 50, I/O group 6 index 46, at 142,125
+lamp 50           0x400          LEIA SPINNER ARROW  # lamp 51, I/O group 6 index 47, at 142,108; tie: Leia spinner opto
+lamp 51           0x2000         RIGHT RAMP ARROW  # lamp 52, I/O group 6 index 48, at 163,179; tie: Right ramp target
+lamp 52           0              TIE FIGHTER MULTIBALL  # lamp 53, I/O group 6 index 49, at 161,199
+lamp 53           0              TIE FIGHTER HURRY UP  # lamp 54, I/O group 6 index 50, at 160,215
+lamp 66           0x2            DEATH STAR (X2)  # lamp 55, I/O group 6 index 51, at 49,60; tie: Death star target
+lamp 54           0              LEIA 10K  # lamp 59, I/O group 6 index 55, at 189,150
+lamp 55           0              LEIA 25K  # lamp 60, I/O group 6 index 56, at 193,134
+lamp 56           0x800          LEIA ARROW  # lamp 61, I/O group 6 index 57, at 197,117; tie: Leia orbit
+lamp 57           0x1000         RIGHT LUKE ARROW  # lamp 62, I/O group 6 index 58, at 206,169; tie: Right luke orbit
+lamp 58           0              RIGHT LUKE 25K  # lamp 63, I/O group 6 index 59, at 201,185
+lamp 59           0              RIGHT LUKE 10K  # lamp 64, I/O group 6 index 60, at 196,201
+lamp 32           0x20000000     YODA MYSTERY  # lamp 65, I/O group 6 index 61, at 181,264; tie: Yoda mystery target
+lamp 27           0              (F)ORCE  # lamp 66, I/O group 6 index 62, at 39,316
+lamp 28           0x8000000      F(O)RCE  # lamp 67, I/O group 6 index 63, at 39,302; tie: Force target bottom
+lamp 60           0              RAMP 1  # lamp 68, I/O group 6 index 69, at 69,165
+lamp 61           0              RAMP 2  # lamp 69, I/O group 6 index 68, at 66,150
+lamp 62           0              RAMP 3  # lamp 70, I/O group 6 index 67, at 63,136
+lamp 63           0              RAMP 4  # lamp 71, I/O group 6 index 66, at 60,122
+lamp 64           0              RAMP 5  # lamp 72, I/O group 6 index 65, at 58,107
+lamp 65           0              RAMP 6  # lamp 73, I/O group 6 index 64, at 54,90
+
 # ---- text ----
 text example_start_shot     Death star target
 
-# not carried (to measure on Spike 3): 68 lamp, 3 scene, 21 text
+# not carried (to measure on Spike 3): 3 scene, 7 text

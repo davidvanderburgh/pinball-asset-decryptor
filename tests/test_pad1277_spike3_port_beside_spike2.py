@@ -75,7 +75,10 @@ def test_each_build_has_a_profile_with_a_key_and_label_of_its_own(spike3):
     assert MP.profile_for_card("star_wars_le", "1.31.0", arch="a64") is None
 
 
-def test_the_spike2_builds_emulator_proofs_do_not_carry_over(spike3):
+def test_the_spike2_builds_emulator_proofs_do_not_carry_over(spike3, monkeypatch):
+    # PAD-1283: the Spike 3 build has a lamp proof of its own ("star_wars_elg-1.10/spike3"); without it, the Spike 2
+    # build's proof does not light the Spike 3 profile's inserts
+    monkeypatch.setattr(MP, "LAMPS_PROVEN", MP.LAMPS_PROVEN - {"star_wars_elg-1.10/spike3"})
     profs = MP.profiles()
     s2, s3 = profs["star_wars_elg_1_10"], profs["star_wars_elg_1_10_spike3"]
     assert "star_wars_elg-1.10" in MP.LAMPS_PROVEN and s2.lamps and s2.inserts

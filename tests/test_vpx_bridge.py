@@ -6762,6 +6762,95 @@ def test_a_run_whose_block_never_comes_says_what_its_log_says(tmp_path, monkeypa
     assert pc.run_log_said(str(tmp_path / "gone.log")) == ""
 
 
+def test_block_in_wsl_reads_the_mark_as_wsl_does():
+    """PAD-1247: padled's mark read inside the run's distro, as the default
+    user (\\\\wsl.localhost's), never root."""
+    pc = pytest.importorskip("padcontroller")
+    calls = []
+
+    def runner(answer, rc=0):
+        def run(cmd, **kw):
+            calls.append(cmd)
+            return pc.subprocess.CompletedProcess(cmd, rc, answer, b"")
+        return run
+
+    class Rig:
+        distro, root = "PAD-Runtime", "/mnt/wsl/paddata/spike2/padslots/1/root"
+
+        def wsl_head(self):
+            return ["wsl.exe", "-d", self.distro]
+
+    assert pc.block_in_wsl(Rig(), runner(b" 50 4c 45 44\n")) is True           # PADLED_MAGIC
+    assert calls[-1] == ["wsl.exe", "-d", "PAD-Runtime", "-e", "od", "-An", "-tx1", "-N4",
+                         "/mnt/wsl/paddata/spike2/padslots/1/root/dump/padled"]
+    assert "-u" not in calls[-1]
+    assert pc.block_in_wsl(Rig(), runner(b" 00 00 00 00\n")) is False          # zeroed, no mark
+    assert pc.block_in_wsl(Rig(), runner(b"", rc=1)) is False                  # not there
+    assert pc.block_in_wsl(Rig(), runner(b" zz\n")) is None
+
+    def hung(cmd, **kw):
+        raise pc.subprocess.TimeoutExpired(cmd, 20)
+    assert pc.block_in_wsl(Rig(), hung) is None                                 # WSL did not answer
+    Rig.distro = None
+    assert pc.block_in_wsl(Rig(), runner(b" 50 4c 45 44\n")) is None           # nowhere to ask
+
+
+@pytest.mark.parametrize("in_wsl", [True, False, None])
+def test_a_block_wsl_has_and_windows_cannot_read_stops_the_run(tmp_path, monkeypatch, in_wsl):
+    """PAD-1247: Mike St P's Rush LE (then Batman) booted to attract on
+    v1.427.1, but the block never came up for Windows and its sound never
+    reached the Windows player, five starts in a row; the next WSL restart
+    put it right. Inside WSL the block has its mark while Windows reads none:
+    the run is stopped and the loading window says Restart WSL, instead of
+    the table sitting on "Starting the game" for seven minutes. A block WSL
+    has no mark in either (or WSL not answering) waits on as before."""
+    pc = pytest.importorskip("padcontroller")
+    said, ended, stopped = [], [], []
+    monkeypatch.setattr(pc, "log", said.append)
+    monkeypatch.setattr(pc, "block_in_wsl", lambda rig: in_wsl)
+    logfile = tmp_path / "padvpx-rush_le.log"
+    logfile.write_text("[event] [padplay] no data for 25 s - transport presumed dead\n", encoding="utf-8")
+    led = tmp_path / "padled"
+    led.write_bytes(b"\0" * 64)
+
+    class Rig:
+        how = "rig board slot 1 (rush_le)"
+        dump = str(tmp_path)
+
+        def led_path(self):
+            return str(led)
+
+    class Launch:
+        slot = 1
+        logfile = str(tmp_path / "padvpx-rush_le.log")
+
+        def alive(self):
+            return True
+
+        def stop(self):
+            stopped.append(1)
+
+    b = pc.Bridge()
+    b.title = "rush_le"
+    b.running = True
+    b.launch, b.rig = Launch(), Rig()
+    b.start_t = pc.time.monotonic()
+    monkeypatch.setattr(b, "_loading_end", lambda word, took=None: ended.append(word))
+    b._poll_starting()
+    b._board_t -= b.BLOCK_LATE_S + 1
+    b._poll_starting()
+    assert "(Windows reads 64 bytes with no mark; inside WSL" in said[0]
+    if in_wsl:
+        assert "inside WSL it has its mark" in said[0]
+        assert "WSL's link to Windows is stuck" in said[1]
+        assert ended == ["failed " + pc.WSL_STUCK] and stopped == [1]
+        assert b.launch is None and b.rig is None
+        assert "Restart WSL" in pc.WSL_STUCK
+    else:
+        assert ("it has none either" if in_wsl is False else "WSL did not say") in said[0]
+        assert ended == [] and stopped == [] and b.launch is not None
+
+
 def test_an_unquoted_server_path_with_spaces_is_still_registered(tmp_path):
     # PAD-1229: pywin32 writes LocalServer32 as GetShortPathName(pythonw.exe)
     # unquoted; with 8.3 names off that is the long path, spaces and all,

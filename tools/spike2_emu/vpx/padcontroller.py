@@ -833,6 +833,54 @@ def read_block(path, n):
         return None
 
 
+def block_state(data):
+    """How a Windows read of padled went, in words for the controller log."""
+    if data is None:
+        return "Windows cannot open it"
+    if not data:
+        return "Windows reads it empty"
+    return "Windows reads %d bytes with %s" % (
+        len(data), "its mark" if coilmap.has_magic(data) else "no mark")
+
+
+def block_in_wsl(rig, runner=None, timeout=20):
+    """Does the run's padled carry its mark as WSL ITSELF reads it (PAD-1247)?
+
+    True / False, or None when WSL did not answer. Read as the distro's
+    default user, the one \\\\wsl.localhost serves Windows as, so a file only
+    root could read is not taken for a stuck share. Mike St P's runs on
+    v1.427.1: the game booted to attract, its block never came up for
+    Windows and its sound never reached the Windows player, five starts in a
+    row and across an app restart; the next WSL restart (an update's) put
+    both right with no change to the rig. That is WSL's link to Windows
+    stuck, and Linux reading the mark while Windows cannot is how it is told
+    from a game that never opened its block."""
+    if not (getattr(rig, "root", None) and getattr(rig, "distro", None)):
+        return None
+    path = rig.root.rstrip("/") + "/dump/padled"
+    run = runner or subprocess.run
+    try:
+        r = run(rig.wsl_head() + ["-e", "od", "-An", "-tx1", "-N4", path],
+                stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
+                creationflags=_CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return False
+    try:
+        raw = bytes(int(h, 16) for h in r.stdout.decode("ascii", "replace").split())
+    except ValueError:
+        return None
+    return len(raw) == 4 and coilmap.has_magic(raw)
+
+
+#: what the loading window says when WSL's link to Windows is stuck (PAD-1247)
+WSL_STUCK = ("It is running inside WSL, but Windows cannot reach it, so the table "
+             "cannot play it and its sound does not come through. "
+             "Close Visual Pinball, press Restart WSL… on PAD's Emulate tab, "
+             "then open the table again.")
+
+
 class SwitchPipe:
     """The session's swkeys.py, fed "<id> <level>" lines (playfield.py's
     KeyWriter, minus the per-action fallback: VPX has no mouse to wait on)."""
@@ -1932,9 +1980,22 @@ class Bridge:
             elif (not getattr(self, "_block_said", False) and self.launch.alive()
                   and now - self._board_t > self.BLOCK_LATE_S):
                 self._block_said = True
+                # PAD-1247: and as WSL itself reads it, which tells a stuck
+                # WSL-to-Windows link from a game that never opened its block
+                seen = None if self.slots else block_in_wsl(self.rig)
                 log("the game's output block (%s) is not up %d s after its board record "
-                    "came%s" % (self.rig.led_path(), self.BLOCK_LATE_S,
-                                run_log_said(self.launch.logfile)))
+                    "came (%s; inside WSL %s)%s"
+                    % (self.rig.led_path(), self.BLOCK_LATE_S, block_state(data),
+                       {True: "it has its mark", False: "it has none either",
+                        None: "WSL did not say"}[seen],
+                       run_log_said(self.launch.logfile)))
+                if seen:
+                    log("WSL's link to Windows is stuck: the game is up, Windows cannot "
+                        "read it; stopping the run (Restart WSL clears it)")
+                    self._loading_end("failed " + WSL_STUCK)
+                    failed, self.launch, self.rig = self.launch, None, None
+                    failed.stop()
+                    return
         if not self.launch.alive():
             # A board record can appear before the game is ready. It does
             # not make an exited launcher alive: clean the run we owned,

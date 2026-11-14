@@ -29,8 +29,11 @@ _memo = {}
 
 
 def _stamp(path):
+    # size too: two quick rewrites can share a timestamp tick, and a
+    # stale lock (or none) would then outlive the new reading
     try:
-        return os.stat(path).st_mtime_ns
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size)
     except OSError:
         return None
 

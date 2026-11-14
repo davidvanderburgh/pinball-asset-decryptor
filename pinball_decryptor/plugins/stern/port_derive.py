@@ -1051,6 +1051,8 @@ def ensure_port(elf, game, version, progress=None, cancel=None, workers=None):
     ver = port_version(version)
     label = _label(game, ver)
     say(0.0, "Looking for a port shipped for this build")
+    if bytes(elf[4:5]) == b"\x02":
+        return _spike3_port(elf, game, label, say)
     try:
         tgt = portgen.Elf(elf, "%s %s" % (game, version))
     except portgen.PortgenError as e:
@@ -1067,6 +1069,30 @@ def ensure_port(elf, game, version, progress=None, cancel=None, workers=None):
         say(1.0, "")
         return PortResult(missing=("a port that could be derived",),
                           notes=("The port for %s could not be derived: %s: %s" % (label, type(e).__name__, e),))
+
+
+def _spike3_port(elf, game, label, say):
+    """PAD-1272: a Spike 3 game program (64-bit ARM): the listed port of its game whose every
+    site is this program's own (``mode_write.find_port``'s test), never one derived here -
+    derivation reads Spike 2's 32-bit programs only."""
+    from . import mode_runtime as MR, mode_write as MW
+    for g, _v, path in MR.port_paths():
+        if g != game:
+            continue
+        try:
+            sites = MW.port_sites(path)
+            if sites and not MW.site_mismatches(path, bytes(elf)):
+                say(1.0, "")
+                shipped = os.path.normcase(os.path.dirname(os.path.abspath(path))) == \
+                    os.path.normcase(os.path.abspath(shipped_ports_dir()))
+                return PortResult(path=path, origin="shipped" if shipped else "derived",
+                                  proven=not MW.port_unproven(path))
+        except (OSError, MW.ModeWriteError):
+            continue
+    say(1.0, "")
+    return PortResult(missing=("no port for this build",),   # mode_project's own words for it
+                      notes=("The app does not know yet how to run modes on %s (a Spike 3 "
+                             "build): no port for it ships." % label,))
 
 
 def _ensure(elf, tgt, game, version, say, check, cancel, workers, t0):

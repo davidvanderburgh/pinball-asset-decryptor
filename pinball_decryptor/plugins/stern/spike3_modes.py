@@ -183,7 +183,10 @@ def plan(project, reader, scratch, log=None, real_card=True):
     payload = MW.p2_payload(result, os.path.join(scratch, "modes", "padmode"), project=project,
                             arch="a64")
     names = list(getattr(result, "mode_names", None) or [s.name for _g, s in modes])
-    return Spike3ModePlan(result, payload, names, list(result.lines))
+    # describe() names Spike 2's place for the mode files; this card's is the games partition
+    lines = [l.replace("on the system partition", "in /games/" + MODE_DIR)
+             for l in result.lines]
+    return Spike3ModePlan(result, payload, names, lines)
 
 
 def install_body(files, to_exec):

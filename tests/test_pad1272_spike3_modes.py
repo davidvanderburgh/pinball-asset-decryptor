@@ -351,3 +351,53 @@ def test_a_run_that_cannot_run_the_hook_does_its_steps():
     s = _text("tools", "spike3_emu", "s3run.sh")
     assert '"$(readlink "$R/games/game")" = pad/padmode/padmode.sh' in s
     assert 'PRELOAD="${PRELOAD:+$PRELOAD:}/games/pad/padmode/mode.so"' in s
+
+
+# ---- the Modes tab's card read ------------------------------------------------------------
+def test_a_64_bit_program_takes_a_listed_port_whose_sites_are_its_own(monkeypatch, tmp_path):
+    from pinball_decryptor.plugins.stern import mode_runtime as MR, port_derive as PD
+    elf = _elf64(0x400000, [0xd503233f, 0xa9bf7bfd, 0x910003fd])
+    spike2 = tmp_path / "spike2.port"         # Spike 2's port of the same game folder and build
+    spike2.write_text("game x\nsite tick 0x10000 0xe92d4ff0 0xe24dd01c\n")
+    good = tmp_path / "spike3.port"
+    good.write_text("game x\nsite tick 0x400000 0xd503233f 0xa9bf7bfd\n")
+    monkeypatch.setattr(MR, "port_paths", lambda: [("x", "1.0", str(spike2)), ("x", "1.0", str(good)),
+                                                   ("y", "1.0", str(good))])
+    pr = PD.ensure_port(elf, "x", "1.0.0")
+    assert pr.path == str(good) and pr.origin == "derived" and pr.proven
+    monkeypatch.setattr(MR, "port_paths", lambda: [("x", "1.0", str(spike2))])
+    pr = PD.ensure_port(elf, "x", "1.0.0")
+    assert pr.path == "" and pr.missing == ("no port for this build",)
+
+
+def test_no_port_for_a_spike3_build_reads_as_any_build_with_none():
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    assert MP.no_port_words("Pokemon LE 0.82", ("no port for this build",)) == \
+        MP.NO_PORT_HELP % "Pokemon LE 0.82"
+
+
+def test_a_64_bit_program_skips_the_game_rules_step(monkeypatch):
+    from pinball_decryptor.plugins.stern import port_derive as PD, stock_reader, title_reader as TR
+    monkeypatch.setattr(PD, "ensure_port", lambda *a, **k: PD.PortResult(missing=("no port for this build",)))
+    monkeypatch.setattr(stock_reader, "ensure_table", lambda *a, **k: pytest.fail("read Spike 2's rules"))
+    tr = TR.read_elf(_elf64(0x400000, [1, 2]), "x", "1.0.0")
+    assert tr.stock_build is None and tr.stock_notes == (TR.SPIKE3_NO_STOCK,)
+    assert TR.SPIKE3_NO_STOCK in tr.notes
+
+
+def test_a_spike3_cards_game_program_is_read_off_its_games_partition(monkeypatch):
+    from pinball_decryptor.plugins.stern import ext4, spike3, spike3_card, title_reader as TR
+    closed = []
+
+    class _Vol:
+        size = 1 << 20
+
+        def close(self):
+            closed.append(1)
+    monkeypatch.setattr(spike3, "is_spike3_card", lambda p: True)
+    monkeypatch.setattr(spike3_card, "open_games", lambda p: _Vol())
+    monkeypatch.setattr(ext4, "Ext4Reader", lambda f, off, size: _Reader(_stock_tree(S3M.HOOK_LINK) | {
+        "pad": {"padmode": {"game.target": b"pokemon_le/game\n"}}}))
+    game, version, elf = TR.game_program(r"D:\c\pokemon_le-0_82_0.Release.64G.sdcard-secure.raw")
+    assert (game, version) == ("pokemon_le", "0.82.0") and elf.startswith(b"\x7fELF\x02")
+    assert closed == [1]

@@ -321,6 +321,76 @@ def main():
     if r.returncode != 0 or "card 2/2 (settings)" not in r.stdout:
         fail("(test tile) a card with test= lines and no color_profile= has no SETTINGS tile", r.stdout)
 
+    # 4e. a TEST CARD (testcard=on): no menu, nothing boots - the Settings screens from power-up,
+    # Color correction on its one pseudo-image, no BACK TO THE GAMES, no idle exit; it runs until
+    # it is stopped (SIGTERM here, the power switch on a machine)
+    tconf = os.path.join(t, "testcard.conf")
+    with open(tconf, "w") as f:
+        f.write("image=testcard|TEST CARD|color profile test card||\n"
+                "color_profile=0|1.10 1.20 1.35|1.00 1.00 1.00|0.00 0.00 0.00|0.90|Recommended\n"
+                "testcard=on\ntest=art0.png|Red square\n")
+    tvals = os.path.join(t, "testcard.color")
+    tout = os.path.join(t, "testcard.choice")
+    for q in (tvals, tout):
+        if os.path.exists(q):
+            os.unlink(q)
+    tsw = os.path.join(t, "testcard.padsw")
+    with open(tsw, "wb") as f:
+        f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+    env = dict(os.environ, PAD_SETTINGS_IDLE_MS="2000")
+    tp = subprocess.Popen([qemu, "-L", root, binp, "--headless", os.path.join(t, "testcard.ppm"),
+                           "--conf", tconf, "--input", "padsw", "--padsw", tsw, "--tables", no_list,
+                           "--timeout", "3", "--out", tout, "--last", os.path.join(t, "testcard.last"),
+                           "--font", font, "--no-invert", "--media", media, "--audio", "none",
+                           "--color-file", tvals],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    time.sleep(1.2)
+    # Color correction (row 0 of two) -> START FROM 0, BRIGHTNESS 1: +1 step, SAVE, BACK;
+    # then TEST PICTURES, BACK; then wait past the idle time and the countdown
+    for button in ["start", "right", "start", "right", "start",
+                   "right", "right", "right", "right", "right", "right", "right", "right", "right",
+                   "right",                     # 1 -> 11 = SEE IT ON THE TEST PICTURES
+                   "right", "start",            # 12 = SAVE
+                   "right", "start",            # 13 = BACK
+                   "right", "start",            # TEST PICTURES
+                   "left", "start",             # BACK -> the list
+                   "right", "right"]:           # two entries: round to the same one
+        with open(tsw, "r+b") as f:
+            f.seek(OFF_CAB + CAB_IDX[button])
+            f.write(b"\x01")
+        time.sleep(0.15)
+        with open(tsw, "r+b") as f:
+            f.seek(OFF_CAB + CAB_IDX[button])
+            f.write(b"\x00")
+        time.sleep(0.45)
+    time.sleep(5)
+    alive = tp.poll() is None
+    tp.terminate()
+    try:
+        o, e = tp.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        tp.kill()
+        o, e = tp.communicate()
+    if not alive:
+        fail("(testcard) the test card exited by itself (idle or countdown)", o, e)
+    for want in ("[select] testcard: no menu, nothing boots",
+                 "[select] settings: color correction, 1 adjustable image, on image 0 (TEST CARD)",
+                 "[select] color: image 0 (TEST CARD) saved: ",
+                 "[select] test: open (6 built-in, 1 of the card's own)",
+                 "[select] test: 8/8 Back to settings"):
+        if want not in o:
+            fail("(testcard) no %r" % want, o, e)
+    if "back to the games" in o or os.path.exists(tout) and open(tout).read().strip():
+        fail("(testcard) a test card left for the games or chose one", o, e)
+    tl = lines_of(open(tvals).read() if os.path.exists(tvals) else "")
+    if len(tl) != 1 or not tl[0].startswith("testcard|"):
+        fail("(testcard) the values file holds %r, expected one testcard| line" % tl, o, e)
+    r = subprocess.run([qemu, "-L", root, binp, "--snapshot", os.path.join(t, "testcard_snap.ppm"),
+                        "--conf", tconf, "--font", font, "--media", media, "--no-invert"],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0 or "screen settings" not in r.stdout:
+        fail("(testcard) a test card's snapshot is not its Settings list", r.stdout, r.stderr)
+
     # 5. apply: a synthetic program with three pad_cp in the template, one stock string
     prog = os.path.join(t, "game")
     blob = (b"\x7fELF" + b"\x00" * 60 + b"stock text void main(){}\x00" * 50
@@ -401,7 +471,7 @@ def main():
     if snaps[1][0] == 0 or "out of range (3 cards)" not in snaps[1][1]:
         fail("(off) settings=off still has a fourth card", snaps[1][1])
     print("settings_test: OK (walk, brightness/contrast/saturation, save for every game, a held flipper, "
-          "the idle exit, --apply-color, settings=off)")
+          "the idle exit, test pictures, a test card, --apply-color, settings=off)")
 
 
 if __name__ == "__main__":

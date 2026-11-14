@@ -510,6 +510,11 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 snprintf(c->colour[idx].name, sizeof c->colour[idx].name, "%s",
                          fld[5] ? fld[5] : "");
             }
+        } else if (!strcmp(key, "testcard")) {
+            if (!strcmp(val, "on")) c->testcard = 1;
+            else if (!*val || !strcmp(val, "off")) c->testcard = 0;
+            else conf_warn(c, "%s:%d: testcard=%s is not 'on' or 'off': read as 'off'",
+                           path, lineno, val);
         } else if (!strcmp(key, "test")) {
             /* PAD-1279: <file>|<label> - one of the card's own test pictures,
              * animations or sounds (Settings > Test pictures), a file name in

@@ -2102,6 +2102,8 @@ int main(int argc, char **argv)
         if (!L.th_known) sel_log("theme: '%s' is not a theme, using %s", c.theme, THEME_DEFAULT);
         sel_log("theme: %s (%d of %d colours set by the conf%s)", L.th.name, L.th_set, TH_N, bad);
     }
+    /* a test card has no menu to draw: its picture is the Settings list */
+    if (snapshot && !o.screen && c.testcard) o.screen = "settings";
     if (snapshot && o.screen) {
         struct settings_env se;
         char why[200];
@@ -2113,6 +2115,7 @@ int main(int argc, char **argv)
         se.colour_file = o.colour_file;
         se.media_dir = media_dir(&o, &c);
         se.first_image = hlimg;
+        se.testcard = c.testcard;
         if (settings_snapshot(&se, o.screen, o.screen_row, o.screen_edit, why, sizeof why) < 0) {
             sel_say("error: %s", why);
             rc = 2;
@@ -2296,6 +2299,34 @@ int main(int argc, char **argv)
             c.countdown_word_set ? c.countdown_word : DEF_COUNTDOWN_WORD,
             !c.footer_set ? "the menu's own"
             : *c.footer ? "the conf's own" : "off");
+
+    /* A TEST CARD (PAD-1279): no menu and nothing to boot - the Settings
+     * screens from power-up until the machine is switched off */
+    if (c.testcard) {
+        struct settings_env se;
+        memset(&se, 0, sizeof se);
+        pctx.g = &g;
+        pctx.egl = &egl;
+        pctx.headless = headless;
+        pctx.invert = invert;
+        se.g = &g;
+        se.font = font;
+        se.th = &L.th;
+        se.c = &c;
+        se.in = in;
+        se.au = au;
+        se.move = media.move;
+        se.colour_file = o.colour_file;
+        se.media_dir = media.dir;
+        se.first_image = 0;
+        se.present = present_cb;
+        se.ctx = &pctx;
+        se.stop = &g_stop;
+        se.testcard = 1;
+        sel_say("testcard: no menu, nothing boots: the settings screens until power-off");
+        while (!g_stop) settings_run(&se);
+        goto testcard_done;
+    }
 
     start = sel_now_ms();
     last_key = start;
@@ -2550,6 +2581,7 @@ int main(int argc, char **argv)
 
     /* a level the buttons changed in the last moments before START is kept too */
     if (vol_touched) remember_volume(vol_file, volume, vol_conf, &vol_saved);
+testcard_done:
 
     if (chosen >= 0) {
         /* WHAT THE CARD ACTUALLY BOOTS.  A plain card boots its own image; a

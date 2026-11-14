@@ -116,6 +116,11 @@
  *                            something to set - today, any color_profile=
  *                            line or test= line; 'off' never does.  An unknown word is
  *                            warned about and read as 'on'
+ *   testcard=<on|off>        PAD-1279: 'on' makes this a TEST CARD - no menu
+ *                            and nothing to boot: the Settings screens (Color
+ *                            correction for its image= lines' color_profile=,
+ *                            Test pictures) from power-up to power-off, with
+ *                            no way back to a menu and no idle exit
  *   test=<file>|<label>      one of the card's own test items (PAD-1279), up
  *                            to CONF_MAX_TESTS: a PNG, an animated GIF or a
  *                            WAV in the media directory, shown or played by
@@ -285,6 +290,7 @@ struct conf {
     int ncolour;                     /* images with a usable color_profile= line */
     struct conf_test test[CONF_MAX_TESTS];   /* test= lines, in order (PAD-1279) */
     int ntest;
+    int testcard;                    /* testcard=on: a TEST CARD, no menu, nothing boots (PAD-1279) */
     int settings;                    /* settings=: 1 = offer the tile when it has something to set */
     int settings_card;               /* the tile's card index (always the last), or -1 */
     struct conf_image settings_face; /* what the tile draws */

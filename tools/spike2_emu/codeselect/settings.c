@@ -301,7 +301,7 @@ static int list_items(const struct state *st, int out[3])
     int n = 0;
     if (st->e->c->ncolour > 0) out[n++] = L_COLOR;
     out[n++] = L_TEST;
-    out[n++] = L_BACK;
+    if (!st->e->testcard) out[n++] = L_BACK;    /* a test card has no games to go back to */
     return n;
 }
 
@@ -477,7 +477,8 @@ static void draw_list(struct state *st)
     int y0 = (int)((n > 2 ? 170 : 220) * s);
 
     gfx_fill(e->g, TH(e, BACKGROUND));
-    text_fit(e, "SETTINGS", 60 * s, 30 * s, W - (int)(80 * s), W / 2, (int)(96 * s), 0, TH(e, HEADING));
+    text_fit(e, e->testcard ? "TEST CARD" : "SETTINGS", 60 * s, 30 * s, W - (int)(80 * s), W / 2,
+             (int)(96 * s), 0, TH(e, HEADING));
     for (k = 0; k < n; k++) {
         int on = k == st->list_sel, y = y0 + k * (rh + (int)(30 * s)), i = it[k];
         gfx_round_frame(e->g, x, y, rw, rh, (int)(22 * s), (int)((on ? 8 : 3) * s),
@@ -916,7 +917,7 @@ void settings_run(struct settings_env *e)
         /* the test pictures are looked at, not pressed: a longer wait there
          * (unless the tests shortened every wait) */
         long long wait = st.screen == S_TEST && idle == SETTINGS_IDLE_MS ? TEST_IDLE_MS : idle;
-        if (now - last > wait) {
+        if (!e->testcard && now - last > wait) {
             sel_say("settings: nothing pressed for %lld s: back to the games%s", wait / 1000,
                     st.colour_ready && any_dirty(&st) ? ", unsaved changes dropped" : "");
             break;

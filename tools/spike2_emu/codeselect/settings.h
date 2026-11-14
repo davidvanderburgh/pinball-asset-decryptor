@@ -60,6 +60,8 @@ struct settings_env {
     const struct audio_clip *move;       /* the menu's move sound, or NULL */
     const char *colour_file;             /* the values file (DEF_COLOUR_FILE) */
     const char *media_dir;               /* where test= files are (PAD-1279), or NULL */
+    int testcard;                        /* a TEST CARD (conf testcard=on): no way back to
+                                            a menu, no idle exit, TEST CARD as the heading */
     int first_image;                     /* the image Color correction opens on, or -1 */
     void (*present)(void *ctx);          /* upload what is dirty and swap */
     void *ctx;

@@ -9746,6 +9746,19 @@ static void motor_note(const unsigned char *p, int n)
                      m->stop[1],
                      nb_motor_on() ? "" : " - PAD_NB_MOTOR=0, not answered");
         motor_say(b);
+        /* PAD-1184: an end-stop motor powers up at rest at its cmd 53 end
+         * (HOME), that stop's switch made - where the game left it, and
+         * where a real mech sits. With no switch made batman 1.14 sends the
+         * turntable its test move only on a Guided Setup boot; on every later
+         * boot it never commands it again (no Bat Phone turn in a game), and
+         * switch 77 (TURNTABLE POS. #1 HOME) stays open for good. */
+        if (!m->enc && nb_motor_on() && m->stop[0] >= 0) {
+            m->at = 0;
+            motor_switch(nid, m->stop[0], 1);
+            snprintf(b, sizeof b, "[motor] node %u motor %u at rest at end 0 "
+                     "(input %d made)\n", nid, k, m->stop[0]);
+            motor_say(b);
+        }
         return;
     }
     if (!m->cfg || !nb_motor_on()) return;

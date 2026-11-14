@@ -9,9 +9,18 @@ binary running in the rig (`tools/spike2_emu`, or the app's Emulate tab),
 stock card or custom build, with its own LCD window and sound.
 
 ```
-VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──▶ swkeys.py ──▶ padsw ──▶ hwshim ──▶ the game
-                 ◀─ChangedSolenoids/ChangedLamps── (poll thread) ◀── padled ◀── hwshim ◀── node bus frames
+VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──▶ padlink.py ──▶ padsw ──▶ hwshim ──▶ the game
+                 ◀─ChangedSolenoids/ChangedLamps── (poll thread) ◀── changes ◀── padlink.py ◀── padled ◀── hwshim
 ```
+
+padlink.py (PAD-1306) runs inside WSL beside the game, maps padled and padsw
+there, and pushes only what changed up the wsl.exe pipe the controller started
+it through; the switch lines go down the same pipe, and each one is read back
+off the game's merge and written again until the game has taken it
+(padsw.Confirmer, which swkeys.py uses too). No HELLO, an ERR, or 6 s without a
+ping and the controller falls back to swkeys.py plus re-reading padled over
+\\wsl.localhost, handing over every switch still held. `PAD_VPX_LINK=0` in the
+environment VPX starts in skips the link.
 
 | file | what |
 |---|---|

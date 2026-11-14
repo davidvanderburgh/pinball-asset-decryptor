@@ -347,3 +347,109 @@ def set_spin(m, sw, val):
     struct.pack_into("<I", m, OFF_SPIN_GEN,
                      struct.unpack_from("<I", m, OFF_SPIN_GEN)[0] + 1)
     m.flush()
+
+
+class Confirmer:
+    """`set_confirmed` for a helper that cannot stop and wait (PAD-1306).
+
+    swkeys.py and padlink.py take a flipper edge down a pipe and must be
+    ready for the next one at once, so a 250 ms wait per edge is out. This
+    is the same discipline as a state machine: `set()` writes the level
+    (take-then-set, as before) and remembers it; `tick()`, called often,
+    reads the merge back, and while the game has not taken the level it
+    writes the opposite level for one merge pass and then the level again,
+    until CONFIRM_S has gone by. A switch lost to a collapsed take, a torn
+    read or a write the shim snapshotted as its baseline is put right within
+    a few passes instead of leaving the game a ball short of the table.
+
+    BEFORE THE GAME IS UP (no guest clock yet) a write still goes into
+    scr_held, as it always did, but its check waits: the deadline starts
+    the moment the shim publishes its clock, so a trough a table set at
+    Init is checked against the game's first passes rather than given up
+    on before the game ran. A PAUSED game (padglhost's `paused`) runs no
+    merge pass either: checks wait for it to run again, which is also the
+    one case where a take-then-set is lost every time. A NEW guest clock (the game restarted under the
+    helper) checks every level held again, for the same reason.
+
+    `lost` counts the levels the game never took by the deadline, `again`
+    the re-asserts it took to get the rest; `on_lost(sw, level)` is told of
+    each loss so the helper can say so."""
+
+    def __init__(self, m, confirm_s=None, retry_s=None, clock=time.monotonic, on_lost=None):
+        self.m = m
+        self.confirm_s = CONFIRM_S if confirm_s is None else confirm_s
+        self.retry_s = RETRY_S if retry_s is None else retry_s
+        self.clock = clock
+        self.on_lost = on_lost
+        self.held = {}          # sw -> the level this helper means
+        self.wait = {}          # sw -> [deadline or None, next look, flipped]
+        self.lost = 0
+        self.again = 0
+        self._t0 = None
+
+    def _guest(self):
+        return struct.unpack_from("<I", self.m, OFF_GUEST_T0)[0]
+
+    def set(self, sw, val):
+        want = 1 if val else 0
+        take(self.m, (sw,))
+        set_held(self.m, sw, want)
+        self.held[sw] = want
+        now = self.clock()
+        self.wait[sw] = [now + self.confirm_s if self._guest() else None,
+                         now + self.retry_s, False]
+
+    def pending(self):
+        return len(self.wait)
+
+    def tick(self):
+        t0 = self._guest()
+        if not t0:
+            return
+        now = self.clock()
+        if t0 != self._t0:
+            if self._t0 is not None:        # the game restarted: check them all again
+                for sw in self.held:
+                    self.wait.setdefault(sw, [None, now, False])
+            self._t0 = t0
+        if struct.unpack_from("<I", self.m, OFF_PAUSED)[0]:
+            # FROZEN (Pause / F9): no merge pass runs, so nothing can be taken
+            # and a re-assert now would collapse like the write it repairs.
+            # Each check starts again, deadline and all, once the game runs;
+            # any flip in flight is put back to the level meant first.
+            for sw, st in self.wait.items():
+                if st[2]:
+                    set_held(self.m, sw, self.held[sw])
+                st[0], st[2] = None, False
+            return
+        for sw, st in list(self.wait.items()):
+            want = self.held[sw]
+            if st[0] is None:               # written before the game was up
+                st[0], st[1] = now + self.confirm_s, now
+            if st[2]:                       # the opposite level had its pass
+                if now >= st[1]:
+                    set_held(self.m, sw, want)
+                    st[1], st[2] = now + self.retry_s, False
+                continue
+            if adopted(self.m, sw, want):
+                del self.wait[sw]
+                continue
+            if now >= st[0]:
+                del self.wait[sw]
+                self.lost += 1
+                if self.on_lost:
+                    self.on_lost(sw, want)
+                continue
+            if now >= st[1]:
+                # what the merge already shows, so the game sees nothing move
+                set_held(self.m, sw, 1 - want)
+                self.again += 1
+                st[1], st[2] = now + self.retry_s, True
+
+    def release(self):
+        """Open everything still held closed (the helper's EOF)."""
+        for sw, val in self.held.items():
+            if val:
+                set_held(self.m, sw, 0)
+        self.held.clear()
+        self.wait.clear()

@@ -3010,6 +3010,15 @@ class PadController:
             b.set_pause(args[0])
         elif key == "lamp" or key == "solenoid" or key == "solmask":
             pass
+        elif key == "padnote":
+            # PAD-1251: a table's own call that failed where the patch runs
+            # it under On Error Resume Next (Batman 66's PadMechTimer turning
+            # the tribute's turntable and crane), said in the log. The table
+            # sends each distinct error once; the cap stops a runaway.
+            n = self.props.get("_padnotes", 0)
+            if n < 50:
+                self.props["_padnotes"] = n + 1
+                log("table: %s" % args[-1])
         else:
             self.props[key] = args[-1]
         return None

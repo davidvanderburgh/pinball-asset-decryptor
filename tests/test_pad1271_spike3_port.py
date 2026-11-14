@@ -157,13 +157,20 @@ def _lines(kind):
 
 SOUND_SITES = {"callout", "callout_nth", "sound_play", "sound_nth", "sound_active", "sound_stop",     # PAD-1282
                "sound_worker", "sound_resolve", "sound_lookup"}
+# PAD-1283: the lamp layer and the game's own light shows (tests/test_pad1283_spike3_lights.py)
+LIGHT_SITES = {"lamp_group", "lamp_free_owner", "show_priority", "show_start", "event_post_replacing", "event_cancel",
+               "proc_exists", "proc_create", "show_1", "show_2", "show_3", "show_4", "show_5"}
+LIGHT_VALUES = {"lamp_slot_size", "lamp_slot_level", "lamp_slot_alpha", "lamp_slot_fade", "lamp_slot_used",
+                "lamp_group_prio", "lamp_group_next", "event_next", "event_flags", "event_show_flag", "event_show_id",
+                "proc_exit_hooks", "proc_exit_slots", "show_proc"}
 
 
 def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     sites = {t[1]: t for t in _lines("site")}
     assert set(sites) == {"tick", "hook_dispatch", "score_add", "switch_hit", "switch_hit2",
-                          "agent_header", "agent_begin"} | SOUND_SITES
+                          "agent_header", "agent_begin"} | SOUND_SITES | LIGHT_SITES
     for t in sites.values():
+        t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)
         assert len(t) == 5 and all(re.fullmatch(r"0x[0-9a-f]{8}", x) for x in t[2:])
     assert sites["tick"][2:] == ["0x00247940", "0xd2800001", "0x528006e0"]
     assert sites["hook_dispatch"][2] == "0x002274e0" and sites["hook_dispatch"][4] == "0x71033c1f"   # cmp w0, #0xcf
@@ -171,8 +178,11 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     data = {t[1]: t[2] for t in _lines("data")}
     assert data == {"cur_player": "0x006b1a1a", "scores": "0x007122c0", "score_mult": "0x006a7f30",
                     "mode_mask": "0x0079206c", "sound_channels": "0x00733340", "sound_requests": "0x006fd360",
-                    "sound_request_count": "0x005a38c8"}                         # the sound ones: PAD-1282
-    values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))}
+                    "sound_request_count": "0x005a38c8",                         # the sound ones: PAD-1282
+                    "event_head": "0x007493d8", "event_current": "0x007493e0",   # the lamp layer's: PAD-1283
+                    "lamp_layers": "0x00735e68", "light_count": "0x0073ec88"}
+    values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
+              and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_")}
     assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34"}
 
 
@@ -203,7 +213,8 @@ def test_s3port_values_carried_are_only_the_proven_ones():
     S = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(S)
     assert S.VALUES_PROVEN == ("mode_mask_busy",)
-    assert set(S.SITES_PROVEN) == {"tick", "hook_dispatch", "score_add", "agent_header", "agent_begin"} | SOUND_SITES
+    assert set(S.SITES_PROVEN) == {"tick", "hook_dispatch", "score_add", "agent_header", "agent_begin"} | SOUND_SITES | (
+        LIGHT_SITES - {"lamp_free_owner"} - {"show_%d" % n for n in range(1, 6)})
     assert S.sext(0x3FFFFFF, 26) == -1 and S.sext(0x10, 26) == 16
 
     class T:                                         # site_ok on three first instructions

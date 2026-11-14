@@ -117,10 +117,10 @@ def test_the_runtime_limits():
     # PAD-420: every show it starts frees its lamp groups as it ends - the game's clean-up, from an exit hook of the
     # show's process record (a process the runtime starts is not flagged as a show, so the game's exit skipped it and
     # every show played kept a lamp group: King Kong LE 0.97's pool was gone after 26 plays)
-    assert "rec = ((unsigned (*)(unsigned, void (*)(void), unsigned))" in body and "if (!show_exit_hook(rec)) {" in body
+    assert "rec = ((proc_create_fn)(unsigned long)fn(\"proc_create\"))" in body and "if (!show_exit_hook(rec)) {" in body
     hook = src[src.index("static int show_exit_hook("):]
     hook = hook[:hook.index("\n}\n")]
-    assert "if (slot[0]) continue;" in hook and "slot[0] = (unsigned)(unsigned long)show_exit;" in hook
+    assert "if (slot[0]) continue;" in hook and "slot[0] = (pm_addr)(unsigned long)show_exit;" in hook
     assert 'fn("lamp_free_owner"))(rec);' in src[src.index("static void show_exit("):]
     arm = src[src.index("static void shows_arm("):]
     arm = arm[:arm.index("\n}\n")]

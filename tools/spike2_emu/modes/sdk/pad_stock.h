@@ -125,7 +125,7 @@ void *pm_stock_show(unsigned id);
 int  pm_stock_event(unsigned id, uint64_t value);
 /* A display EVENT record (`site event_post_replacing`), what the stage screens and the stop
  * displays post; returns the record or 0. pm_stock_event_cancel removes one by id (`site event_cancel`). */
-void *pm_stock_display_event(unsigned id, unsigned handler, unsigned flags);
+void *pm_stock_display_event(unsigned id, unsigned long handler, unsigned flags);   /* handler: a code address */
 int   pm_stock_event_cancel(unsigned id);
 /* A callout or a sound: the ordinary pad_mode.h calls (pm_callout, pm_sound). */
 

@@ -57,9 +57,16 @@ VALUES_PROVEN = ("mode_mask_busy",)
 SITES_PROVEN = ("tick", "hook_dispatch", "score_add", "agent_header", "agent_begin",      # + every switch_hit*
                 # PAD-1282: the game's callouts and sounds (a mode played both on Star Wars ELG 1.10's Spike 3 rig)
                 "callout", "callout_nth", "sound_play", "sound_nth", "sound_active", "sound_stop",
-                "sound_worker", "sound_resolve", "sound_lookup")
+                "sound_worker", "sound_resolve", "sound_lookup",
+                # PAD-1283: the lamp layer and the game's own light shows (a mode's named inserts held and let go, and
+                # the game's shows played as a process of the runtime's and stopped, on Star Wars ELG 1.10's Spike 3 rig)
+                "lamp_group", "show_priority", "show_start", "event_post_replacing", "event_cancel",
+                "proc_exists", "proc_create")
 DATA_PROVEN = ("cur_player", "scores", "score_mult", "mode_mask",
-               "sound_channels", "sound_requests", "sound_request_count")
+               "sound_channels", "sound_requests", "sound_request_count",
+               "event_head", "event_current", "lamp_layers", "light_count")
+# PAD-1283: values light_engine() reads but the runtime has no use for (it checks them, the port need not carry them)
+LIGHT_VALUES_UNUSED = ("lamp_group_owner", "proc_record_size")
 # PAD-1282: the sound engine's 64-bit layout (Star Wars ELG 1.10, read in its sound_active / sound_stop / worker:
 # Spike 2's channel with 8-byte pointers - 288 bytes, the request u16 at +272, the voice bits at +276, the bus
 # mask at +277, eight voice pointers at +144; a voice's u16 volume step at +56). The engine is the same code on
@@ -514,10 +521,9 @@ def scores_are_64(t, f, table):
     return any((t.words[i] & 0xFFE00C00) == 0xF8600800 and (t.words[i] >> 12) & 1 for i in range(i0, i0 + n))
 
 
-def switch_ids(t):
-    """{device name (upper case): switch id} from the target's own device table (0x50-byte records, walked out
-    from the one named TROUGH 1): id = the record's rank among the table's switches, from 1 - measured on the rig
-    (PAD-1271: every switch a press reached the mode with matched it)."""
+def device_records(t):
+    """[(name, I/O group, index, class)] of the target's own device table (0x50-byte records, walked out from the one
+    named TROUGH 1), in its order: class 1 a switch, 2 a coil, 3 a lamp"""
     def rec(a):
         n = t.ptr.get(a)
         o = t.off(n) if n else None
@@ -531,29 +537,37 @@ def switch_ids(t):
             return None
         w, = struct.unpack_from("<Q", t.b, o)
         g, idx, cls = w & 0xFFFF, (w >> 16) & 0xFFFF, (w >> 32) & 0xFFFF
-        return (name, cls) if 1 <= g <= 64 and idx < 512 and cls in (1, 2, 3, 5) else None
+        return (name, g, idx, cls) if 1 <= g <= 64 and idx < 512 and cls in (1, 2, 3, 5) else None
     m = re.search(rb"\0TROUGH 1\0", t.b)
     if not m:
-        return {}
+        return []
     o = m.start() + 1
     sva = next((s + o - so for s, so, fs, fl in t.segs if so <= o < so + fs), None)
     for a, v in t.ptr.items():
         r = rec(a) if v == sva else None
-        if r and r[1] == 1:
+        if r and r[3] == 1:
             # the table runs on through every class (Star Wars ELG 1.10: 16 QR scanner inputs, the coils and lights,
-            # then the rest of the switches); a switch's id is its rank among the table's switches
+            # then the rest of the switches)
             lo = a
             while rec(lo - 0x50):
                 lo -= 0x50
-            out, k, n = {}, 0, 0
+            out, k = [], 0
             while rec(lo + 0x50 * k):
-                r = rec(lo + 0x50 * k)
-                if r[1] == 1:
-                    n += 1
-                    out.setdefault(r[0].upper(), n)
+                out.append(rec(lo + 0x50 * k))
                 k += 1
             return out
-    return {}
+    return []
+
+
+def switch_ids(t):
+    """{device name (upper case): switch id} from the target's own device table: id = the record's rank among the
+    table's switches, from 1 - measured on the rig (PAD-1271: every switch a press reached the mode with matched it)."""
+    out, n = {}, 0
+    for name, g, idx, cls in device_records(t):
+        if cls == 1:
+            n += 1
+            out.setdefault(name.upper(), n)
+    return out
 
 
 # ---- the port ------------------------------------------------------------------------------------------
@@ -723,6 +737,385 @@ def sound_engine(t, placed):
     return out
 
 
+# ---- PAD-1283: lamps and light shows ---------------------------------------------------------------------------
+def _ls(w):
+    """an unsigned-offset load / store, or ldp / stp -> (kind, t, n, imm, t2): kind 'ldr' / 'str' / 'ldrb' / 'strb' /
+    'ldrh' / 'strh' / 'ldp' / 'stp' (64-bit registers for ldr / str / ldp / stp), imm in bytes; else None"""
+    for mask, op, kind, scale in ((0xFFC00000, 0xF9400000, "ldr", 8), (0xFFC00000, 0xF9000000, "str", 8),
+                                  (0xFFC00000, 0xB9400000, "ldrw", 4), (0xFFC00000, 0xB9000000, "strw", 4),
+                                  (0xFFC00000, 0x39400000, "ldrb", 1), (0xFFC00000, 0x39000000, "strb", 1),
+                                  (0xFFC00000, 0x79400000, "ldrh", 2), (0xFFC00000, 0x79000000, "strh", 2)):
+        if (w & mask) == op:
+            return kind, w & 31, (w >> 5) & 31, ((w >> 10) & 0xFFF) * scale, None
+    if (w & 0xFFC00000) in (0xA9400000, 0xA9000000):               # ldp / stp x, signed offset
+        return ("ldp" if w & 0x400000 else "stp"), w & 31, (w >> 5) & 31, sext((w >> 15) & 0x7F, 7) * 8, (w >> 10) & 31
+    return None
+
+
+def _tbz_bit(w):
+    """tbz / tbnz wt, #bit -> (t, bit), else None"""
+    return (w & 31, ((w >> 19) & 31) | ((w >> 26) & 0x20)) if (w & 0x7E000000) == 0x36000000 else None
+
+
+def _bodies_after(t, va, n=4, cap=600):
+    """the n function bodies after the one at va, [(start, [(va, word)])]: a body ends where nop padding (or a
+    known function start) begins - the scanner's starts miss a function nothing calls (Star Wars ELG 1.10's
+    lamp_free_owner at 0x236d30, reached through a pointer), so the padding between functions is read too"""
+    out, cur, a, pad = [], None, va, False
+    known = set(t.starts)
+    while len(out) <= n and a < va + 4 * cap * (n + 1):
+        w = t.u32(a)
+        if w is None:
+            break
+        if w == 0xD503201F:                                             # nop
+            pad = True
+        else:
+            if pad or (a in known and a != va):
+                cur = (a, [])
+                out.append(cur)
+            pad = False
+            if cur is not None:
+                cur[1].append((a, w))
+        a += 4
+    return out[:n]
+
+
+def _regs_walk(t, va, cap=80):
+    """(va, word, regs) for the first `cap` words at va, regs: a register's known value ('a', address) for an adrp
+    (+ add), ('g', target) for a GOT slot's pointer loaded through it, ('v', target) for the word that pointer
+    points at (one more ldr), as each word is reached"""
+    reg = {}
+    for a, w in list(_window(t, va, cap))[:cap]:
+        yield a, w, dict(reg)
+        p = _adrp(a, w)
+        if p:
+            reg[p[0]] = ("a", p[1])
+            continue
+        ad = _add_imm(w)
+        if ad and reg.get(ad[1], ("",))[0] == "a":
+            reg[ad[0]] = ("a", reg[ad[1]][1] + ad[2])
+            continue
+        ls = _ls(w)
+        if ls and ls[0] == "ldr":
+            src = reg.get(ls[2])
+            if src and src[0] == "a" and (src[1] + ls[3]) in t.ptr:
+                reg[ls[1]] = ("g", t.ptr[src[1] + ls[3]])
+            elif src and src[0] == "g" and ls[3] == 0:
+                reg[ls[1]] = ("v", src[1])
+            else:
+                reg.pop(ls[1], None)
+        elif ls and ls[0] in ("ldp", "ldrb", "ldrh", "ldrw"):
+            reg.pop(ls[1], None)
+            if ls[4] is not None:
+                reg.pop(ls[4], None)
+        elif _bl(a, w):
+            for r in range(19):
+                reg.pop(r, None)
+
+
+def lamp_layer(t, lamp_group):
+    """the 64-bit lamp layer, read off the game's allocator (the call `lamp_group` makes): {'data': lamp_layers,
+    light_count, event_current; 'value': lamp_group_prio, lamp_group_next, lamp_slot_size, lamp_group_owner;
+    'site': lamp_free_owner} - or {'why': ...}. Star Wars ELG 1.10: 0x735e68 (free list, then the active list, one
+    pointer each), the group's priority byte +8, its event +24, next +32, slots of 40 bytes, the light count u64."""
+    out = {"data": {}, "value": {}, "site": {}, "why": []}
+    alloc = next((b for a, w in _window(t, lamp_group, 40) for b in [_bl(a, w)] if b), None)
+    if not alloc:
+        out["why"].append("lamp_group makes no call")
+        return out
+    prio_reg = None
+    heads = group = None
+    for a, w, reg in _regs_walk(t, alloc, 120):
+        if (w & 0xFFFFFC00) == 0x12001C00 and ((w >> 5) & 31) == 1:      # and w?, w1, #0xff: the priority
+            prio_reg = w & 31
+        ls = _ls(w)
+        if not ls:
+            continue
+        kind, rt, rn, imm, rt2 = ls
+        src = reg.get(rn)
+        if kind == "ldr" and heads is None and src and src[0] == "a" and (src[1] + imm) not in t.ptr:
+            heads, group = src[1] + imm, rt                              # the free list's head: the group taken
+            continue
+        if group is None or rn != group:
+            continue
+        if kind == "ldr" and "lamp_group_next" not in out["value"]:
+            out["value"]["lamp_group_next"] = imm                       # the free list's next, read first
+        elif kind == "strb" and rt == prio_reg:
+            out["value"]["lamp_group_prio"] = imm
+        elif kind == "stp" and reg.get(rt2, ("",))[0] == "v":
+            out["data"]["event_current"], out["value"]["lamp_group_owner"] = reg[rt2][1], imm + 8
+        elif kind == "str" and reg.get(rt, ("",))[0] == "v":
+            out["data"]["event_current"], out["value"]["lamp_group_owner"] = reg[rt][1], imm
+    # the slots: memset(group[0], 0, count * 40) - the count a u64 through the GOT, * 5 then << 3
+    words = list(_window(t, alloc, 120))
+    for k, (a, w) in enumerate(words[:-2]):
+        if (w & 0xFFE0FC00) == 0x8B000800 and (w & 31) == ((w >> 5) & 31) == ((w >> 16) & 31):   # add xd, xd, xd, lsl #2
+            nxt = words[k + 1][1]
+            if (nxt & 0xFFC0FC00) == 0xD340F000 or (nxt & 0xFFFFFC00) == 0xD37DF000:            # lsl #3 (ubfm)
+                out["value"]["lamp_slot_size"] = 40
+            for b, w2, reg in _regs_walk(t, alloc, k + 1):
+                if b == a and reg.get(w & 31, ("",))[0] == "v":
+                    out["data"]["light_count"] = reg[w & 31][1]
+            break
+    if heads is not None:
+        out["data"]["lamp_layers"] = heads
+    # lamp_free_owner: the next functions after the allocator; the one that walks the active list for a group
+    # whose owner (+24) is its argument (the one after it frees one group, the one after that walks the frees)
+    own = out["value"].get("lamp_group_owner")
+    for f, body in (_bodies_after(t, alloc) if own is not None else []):
+        refs_heads = reads_owner = False
+        for a, w, reg in _regs_walk(t, f, len(body)):
+            ls = _ls(w)
+            if not ls:
+                continue
+            src = reg.get(ls[2], ("",))
+            if src[0] == "a" and heads is not None and src[1] + ls[3] in (heads, heads + 8):
+                refs_heads = True
+            if ls[0] in ("ldr", "ldp") and ls[3] == own and src[0] != "a" and ls[2] != 31:
+                reads_owner = True
+        if refs_heads and reads_owner:
+            out["site"]["lamp_free_owner"] = f
+            break
+    for need in ("lamp_layers", "light_count", "event_current"):
+        if need not in out["data"]:
+            out["why"].append("%s not read in the allocator 0x%x" % (need, alloc))
+    for need in ("lamp_group_prio", "lamp_group_next", "lamp_slot_size"):
+        if need not in out["value"]:
+            out["why"].append("%s not read in the allocator 0x%x" % (need, alloc))
+    if "lamp_free_owner" not in out["site"]:
+        out["why"].append("no function after the allocator walks the groups by owner")
+    return out
+
+
+def processes(t, proc_create):
+    """the game's process (event) records, from proc_create: {'data': event_head, event_current; 'value':
+    event_next, proc_exit_hooks, proc_exit_slots, proc_record_size} - Star Wars ELG 1.10: the list at 0x7493d8 (the
+    current record the pointer after it), the next record at +232, 376-byte records, four {fn, arg} exit hooks of 16
+    bytes at +0x138 (the exit at 0x3146d0 calls each as fn(record, arg))."""
+    out = {"data": {}, "value": {}, "site": {}, "why": []}
+    base = creator = None
+    for a, w, reg in _regs_walk(t, proc_create, 40):
+        ls = _ls(w)
+        if ls and ls[0] == "ldr" and reg.get(ls[2], ("",))[0] == "a" and (reg[ls[2]][1] + ls[3]) not in t.ptr:
+            if ls[3] in (8, 16) and base is None:
+                base = reg[ls[2]][1]
+            if base is not None and reg[ls[2]][1] == base:
+                out["data"]["event_head" if ls[3] == 8 else "event_current"] = base + ls[3]
+        elif ls and ls[0] == "ldr" and ls[1] == ls[2] and ls[3] > 16:
+            out["value"].setdefault("event_next", ls[3])
+        if (w & 0xFC000000) == 0x14000000:
+            creator = a + 4 * sext(w & 0x3FFFFFF, 26)
+    if creator:
+        for a, w in _window(t, creator, 40):
+            if (w & 0xFFE0001F) == 0xD2800002:                          # mov x2, #size: memset of the record
+                out["value"]["proc_record_size"] = (w >> 5) & 0xFFFF
+                break
+    # the exit: a loop over the record's hooks, `add xh, xr, #first; add xe, xr, #end; ... blr; add xh, xh, #16`
+    lo, hi = proc_create - 0x3000, proc_create + 0x3000
+    i = bisect.bisect_left(t.starts, lo)
+    while i < len(t.starts) and t.starts[i] < hi and "proc_exit_hooks" not in out["value"]:
+        f = t.starts[i]
+        i += 1
+        body = list(_window(t, f, 60))
+        made = {}                                                       # register -> (base register, #imm)
+        for k, (a, w) in enumerate(body):
+            ad = _add_imm(w)
+            if ad and ad[0] != ad[1]:
+                made[ad[0]] = (ad[1], ad[2])
+            if (w & 0xFFFFFC1F) != 0xD63F0000:                          # blr
+                continue
+            for a2, w2 in body[k + 1:k + 5]:
+                ad2 = _add_imm(w2)
+                if not (ad2 and ad2[0] == ad2[1] and ad2[0] in made and ad2[2] in (8, 16)):
+                    continue
+                base, first = made[ad2[0]]
+                ends = [v for r, (b, v) in made.items() if b == base and r != ad2[0] and v > first]
+                if ends and (min(ends) - first) % ad2[2] == 0 and 1 <= (min(ends) - first) // ad2[2] <= 8:
+                    out["value"]["proc_exit_hooks"] = first
+                    out["value"]["proc_exit_slots"] = (min(ends) - first) // ad2[2]
+                    out["site"]["proc_exit"] = f
+                break
+            break
+    for need in ("event_head", "event_current"):
+        if need not in out["data"]:
+            out["why"].append("%s not read in proc_create" % need)
+    for need in ("event_next", "proc_exit_hooks"):
+        if need not in out["value"]:
+            out["why"].append("%s not read off the program" % need)
+    return out
+
+
+def show_event(t, show_priority):
+    """the show flag and the show id of an event record, read in show_priority: (flags offset, flag, id offset) -
+    Star Wars ELG 1.10: +2 bit 0x20, +258 (Spike 2: +150)"""
+    flags = flag = sid = None
+    for a, w in _window(t, show_priority, 30):
+        ls = _ls(w)
+        tb = _tbz_bit(w)
+        if ls and ls[0] == "ldrh" and flags is None:
+            flags = ls[3]
+        elif tb and flags is not None and flag is None:
+            flag = 1 << tb[1]
+        elif ls and ls[0] == "ldrh" and flag is not None and sid is None:
+            sid = ls[3]
+    return flags, flag, sid
+
+
+def show_table(e, show_start):
+    """(table, count, stride) of the game's show table, read in show_start: Spike 3 through the GOT (16-byte records
+    {body, kind, flags}), Spike 2 the movw/movt address its records (12 bytes) start at"""
+    if e.a64:
+        got = _got_loads(e, show_start, 30)
+        cnt = next((g for g in got if e.off(g) is not None and e.u32(g + 4) == 0 and 1 <= (e.u32(g) or 0) < 4096), None)
+        n = e.u32(cnt) if cnt else 0
+        tab = next((g for g in got if g != cnt and n and sum(1 for k in range(n) if e.in_text(e.ptr.get(g + 16 * k, 0))) * 2 > n), None)
+        return tab, n, 16
+    i0 = (show_start - e.tva) // 4
+    addrs = [a for i in range(i0, i0 + 40) for a in e.refs.get(i, [])]
+    cnt = next((a for a in addrs if e.off(a) is not None and 1 <= (e.u32(a) or 0) < 4096), None)
+    n = e.u32(cnt) if cnt else 0
+    tab = next((a for a in addrs if a != cnt and n and sum(1 for k in range(n) if e.in_text(e.u32(a + 12 * k) or 0)) * 2 > n), None)
+    return tab, n, 12
+
+
+def show_records(e, show_start):
+    """[(body, kind, flags)] of the show table"""
+    tab, n, stride = show_table(e, show_start)
+    if not tab:
+        return []
+    out = []
+    for k in range(n):
+        body = e.ptr.get(tab + 16 * k) if e.a64 else e.u32(tab + 12 * k)
+        out.append((body, e.u32(tab + stride * k + stride - 8), e.u32(tab + stride * k + stride - 4)))
+    return out
+
+
+def lamp_devices(t):
+    """{name (upper case): (I/O group, index)} of the lamps (class 3) in the program's own device table"""
+    out = {}
+    for name, g, idx, cls in device_records(t):
+        if cls == 3:
+            out.setdefault(name.upper(), (g, idx))
+    return out
+
+
+def light_lists(t, setter):
+    """the light table the per-light setter reads (16-byte records {u16 list, kind}): [sorted light ids] per
+    record. Star Wars ELG 1.10: 74 records at 0x6c6638, their count a u64 at 0x5a3808."""
+    got = _got_loads(t, setter, 20)
+    cnt = next((g for g in got if t.off(g) is not None and t.u32(g + 4) == 0 and 1 <= (t.u32(g) or 0) < 4096), None)
+    n = t.u32(cnt) if cnt else 0
+    tab = next((g for g in got if g != cnt and n and all((g + 16 * k) in t.ptr or t.u32(g + 16 * k) == 0 for k in range(n))), None)
+    if not tab:
+        return []
+    out = []
+    for k in range(n):
+        p, ids = t.ptr.get(tab + 16 * k), []
+        while p and len(ids) < 16:
+            o = t.off(p + 2 * len(ids))
+            v = struct.unpack_from("<H", t.b, o)[0] if o is not None else 0
+            if not v:
+                break
+            ids.append(v)
+        out.append(sorted(ids))
+    return out
+
+
+def light_engine(ref, rport_lines, tgt, placed):
+    """PAD-1283: the lamp layer, the game's processes and its light shows on a Spike 3 program - sites, data and
+    values read off its own code (lamp_layer, processes, show_event), the shows the Spike 2 port names carried by
+    their place in the show table (the same record: body, kind and flags), the lamp lines by name (a lamp the
+    device table names, its light ids one of the light table's records). {'site', 'data', 'value', 'show': [port
+    lines], 'lamp': [port lines], 'why': [...]}"""
+    out = {"site": {}, "data": {}, "value": {}, "show": [], "lamp": [], "why": []}
+    rsite = {t[1]: int(t[2], 16) for k, t, s in rport_lines if k == "site" and len(t) >= 3}
+    g = placed.get("lamp_group")
+    if g:
+        ll = lamp_layer(tgt, g)
+        out["data"].update(ll["data"]), out["value"].update(ll["value"]), out["site"].update(ll["site"])
+        out["why"] += ll["why"]
+        if ll["value"].get("lamp_slot_size") == 40:
+            # the slot is the same 40 bytes on both machines (the light id u16 +0, level +2, alpha +3, fade +8, a
+            # callback +16, its time +24, its running flag +32, the used byte +36): read in the compositor
+            out["value"].update(lamp_slot_level=2, lamp_slot_alpha=3, lamp_slot_fade=8, lamp_slot_used=36)
+    pc = placed.get("proc_create")
+    if pc:
+        pr = processes(tgt, pc)
+        for k2, v in pr["data"].items():
+            if k2 in out["data"] and out["data"][k2] != v:
+                out["why"].append("%s: 0x%x in the allocator, 0x%x in proc_create" % (k2, out["data"][k2], v))
+            out["data"][k2] = v
+        out["value"].update(pr["value"])
+        out["why"] += pr["why"]
+    sp = placed.get("show_priority")
+    if sp:
+        fo, fl, sid = show_event(tgt, sp)
+        if None not in (fo, fl, sid):
+            out["value"].update(event_flags=fo, event_show_flag=fl, event_show_id=sid)
+    # the shows: the Spike 2 port's show_<n>, at the same place of the show table on both builds
+    ss, rss = placed.get("show_start"), rsite.get("show_start")
+    shows = sorted((int(t[1][5:]), int(t[2], 16), s) for k, t, s in rport_lines
+                   if k == "site" and len(t) >= 3 and re.match(r"show_\d+$", t[1]))
+    if shows and ss and rss:
+        rrec, trec = show_records(ref, rss), show_records(tgt, ss)
+        texts = {t[1]: s for k, t, s in rport_lines if k in ("text", "value") and len(t) >= 2}
+        n = 0
+        for num, a, s in shows:
+            k = next((i for i, r in enumerate(rrec) if r[0] == a), None)
+            if k is None or k >= len(trec) or trec[k][1:] != rrec[k][1:] or not tgt.in_text(trec[k][0] or 0):
+                why = ("not in Spike 2's show table" if k is None else "past the %d shows of Spike 3's table" % len(trec)
+                       if k >= len(trec) else "Spike 3's record %d is another show" % k)
+                out["show"].append("# show %d of the Spike 2 port (%s) not carried: %s" % (
+                    num, (texts.get("show_name_%d" % num) or "").split(None, 2)[-1], why))
+                continue
+            if "show_call_%d" % num in texts:
+                out["show"].append("# show %d of the Spike 2 port not carried: started by a call of the game's "
+                                   "(show_call), not proven on Spike 3" % num)
+                continue
+            n += 1
+            b = trec[k][0]
+            note = s.split("#", 1)[1].strip() if "#" in s else ""
+            out["show"].append("site show_%-12d 0x%08x 0x%08x 0x%08x   # Spike 2's show_%d, record %d of the show table%s"
+                               % (n, b, tgt.u32(b), tgt.u32(b + 4), num, k, ("; " + note) if note else ""))
+            for key in ("show_name_%d", "show_kind_%d", "show_secs_%d"):
+                line = texts.get(key % num)
+                if line:
+                    out["show"].append(re.sub(r"^(\s*\w+\s+)show_(name|kind|secs)_%d\b" % num,
+                                              lambda m: "%sshow_%s_%d" % (m.group(1), m.group(2), n), line))
+        sp_id = next((int(t[2], 0) for k, t, s in rport_lines if k == "value" and len(t) >= 3 and t[1] == "show_proc"), None)
+        if n and sp_id is not None:
+            # an id the game never uses on this build either: no movz of it anywhere in the program
+            used = sum(1 for x in tgt.words if (x & 0x7FE00000) == 0x52800000 and (x >> 5) & 0xFFFF == sp_id)
+            if used:
+                out["why"].append("show_proc %d is an id the Spike 3 program uses (%d places)" % (sp_id, used))
+            else:
+                out["value"]["show_proc"] = sp_id
+    # the lamp lines: the same light ids, by name
+    calls = [b for a, w in _window(tgt, g, 40) for b in [_bl(a, w)] if b] if g else []
+    setter = calls[1] if len(calls) > 1 else None          # lamp_group: the allocator, then the per-light setter
+    lists = light_lists(tgt, setter) if setter else []
+    devs = lamp_devices(tgt)
+    for k, t, s in rport_lines:
+        if k != "lamp":
+            continue
+        m = re.match(r"\s*lamp\s+(\S+)\s+(\S+)\s+(.*?)\s*(#.*)?$", s)
+        if not m:
+            continue
+        ids, mask, name, note = m.group(1), m.group(2), m.group(3).strip(), (m.group(4) or "")
+        want = sorted(int(x) for x in ids.split(","))
+        dev = devs.get(name.upper())
+        if dev is None or want not in lists:
+            out["lamp"].append("# lamp NOT PLACED: %s (%s)" % (
+                "no lamp named %r on Spike 3" % name if dev is None else "no record of light ids %s in Spike 3's light table" % ids,
+                s.strip()))
+            continue
+        note = re.sub(r"I/O group \d+ index \d+", "I/O group %d index %d" % dev, note)
+        out["lamp"].append(("lamp %-12s %-14s %s  %s" % (ids, mask, name, note)).rstrip())
+    if out["lamp"] and not lists:
+        out["why"].append("the light table was not read (no per-light call in lamp_group)")
+    return out
+
+
 def draft(ref, rport, tgt, game=None, version=None):
     scan(ref)
     scan(tgt)
@@ -750,6 +1143,8 @@ def draft(ref, rport, tgt, game=None, version=None):
         if k != "site" or len(t) < 3:
             continue
         name, a = t[1], int(t[2], 16)
+        if re.match(r"show_\d+$", name):
+            continue
         f = func_of(ref, a)
         if f != a:
             body.append("# site %-16s NOT PLACED: mid-way into a function on Spike 2 (0x%x + 0x%x)" % (name, f or 0, a - (f or 0)))
@@ -790,6 +1185,23 @@ def draft(ref, rport, tgt, game=None, version=None):
         placed[name] = b
         if name in missing:
             missing.remove(name)
+    lit = light_engine(ref, lines, tgt, placed) if tgt.a64 else {"site": {}, "data": {}, "value": {}, "show": [],
+                                                                  "lamp": [], "why": []}
+    for name, b in lit["site"].items():
+        if name == "proc_exit" or name in placed:
+            continue
+        mark = "# site %-16s NOT PLACED" % name
+        at = next((k for k, l in enumerate(body) if l.startswith(mark)), len(body))
+        body[at:at + 1] = ["#   %s: read off the lamp layer's code (PAD-1283)" % name,
+                           "site %-16s 0x%08x 0x%08x 0x%08x" % (name, b, tgt.u32(b), tgt.u32(b + 4))]
+        placed[name] = b
+        if name in missing:
+            missing.remove(name)
+    if lit["show"]:
+        body += ["", "# ---- the game's own light shows (PAD-1283): the Spike 2 port's shows, each at the same record of",
+                 "# the show table on both builds (its body, kind and flags), renumbered from 1; played as process show_proc",
+                 "# (an id this program never uses either), its lamp groups freed as it ends (lamp_free_owner) ----"]
+        body += lit["show"]
     # data
     body += ["", "# ---- globals: data <name> <address> ----"]
     for name, A in data_lines.items():
@@ -798,6 +1210,11 @@ def draft(ref, rport, tgt, game=None, version=None):
         if name in snd["data"]:
             body.append("data %-22s 0x%08x   # read in the sound engine's own code (PAD-1282)" % (name, snd["data"][name]))
             placed["data:" + name] = snd["data"][name]
+            continue
+        if name in lit["data"]:
+            body.append("data %-22s 0x%08x   # read in the lamp layer's / processes' own code (PAD-1283)" % (
+                name, lit["data"][name]))
+            placed["data:" + name] = lit["data"][name]
             continue
         if b is None:
             body.append("# data %-22s NOT PLACED: %d of %d paired functions agree" % (name, agree, of))
@@ -812,11 +1229,21 @@ def draft(ref, rport, tgt, game=None, version=None):
     body += ["", "# ---- values: only those proven on Spike 3; a struct offset or a count is a 32-bit build's ----"]
     events = [(t, s) for k, t, s in lines if k == "event"]
     sound_vals = dict(SOUND_VALUES) if "data:sound_channels" in placed else {}
+    for name, b in lit["data"].items():
+        if "data:" + name not in placed:
+            body.append("data %-22s 0x%08x   # read in the lamp layer's / processes' own code (PAD-1283)" % (name, b))
+            placed["data:" + name] = b
+    lit_vals = {k: v for k, v in lit["value"].items() if k not in LIGHT_VALUES_UNUSED}
     for k, t, s in lines:
-        if k == "value" and t[1] not in sound_vals and not t[1].startswith("countdown_"):
+        if k == "value" and t[1] not in sound_vals and not t[1].startswith("countdown_") and t[1] not in lit_vals \
+                and not (lit["show"] and re.match(r"show_secs_\d+$", t[1])):
             body.append(s if t[1] in VALUES_PROVEN else "# not carried (64-bit layout, measure it): " + s.strip())
     for name, v in sound_vals.items():
         body.append("value %-25s %d    # the 64-bit sound engine's (PAD-1282)" % (name, v))
+    for name, v in lit_vals.items():
+        body.append("value %-25s %s    # read off the program's own code (PAD-1283)" % (
+            name, ("0x%x" % v) if name == "event_show_flag" else v))
+    body += ["# PAD-1283: %s" % w for w in lit["why"]]
     if "ball_end" not in placed and any(t[1] == "ball_end" for t, s in events) and "hook_dispatch" in placed:
         eid = next(t[2] for t, s in events if t[1] == "ball_end")
         body.append("value ball_end_event %s    # the end of a ball, from the bus (no ball_end site on Spike 3)" % eid)
@@ -847,10 +1274,16 @@ def draft(ref, rport, tgt, game=None, version=None):
             body += ["callout %-19s %d" % (t[1], int(t[2], 0) + shift) for t, s in co]
             body += [s for k, t, s in lines if k == "value" and len(t) > 1 and t[1].startswith("countdown_")
                      and not s.lstrip().startswith("#")]
+    if lit["lamp"]:
+        body += ["", "# ---- lamps (PAD-1283): the Spike 2 port's lamp lines by name - a lamp of Spike 3's device table (its",
+                 "# I/O group and index written from it), the same light ids one of the light table's records holds ----"]
+        body += lit["lamp"]
     tx = [s for k, t, s in lines if k == "text" and len(t) > 1 and t[1].startswith("example_")]
     if tx:
         body += ["", "# ---- text ----"] + tx
-    rest = Counter(k for k, t, s in lines if k in ("lamp", "scene", "shot") or (k == "callout" and shift is None) or (k == "text" and not t[1].startswith("example_")))
+    rest = Counter(k for k, t, s in lines if (k in ("scene", "shot") or (k == "lamp" and not lit["lamp"])) or
+                   (k == "callout" and shift is None) or (k == "text" and not t[1].startswith("example_") and
+                                                          not (lit["show"] and re.match(r"show_(name|kind)_\d+$", t[1]))))
     if rest:
         body += ["", "# not carried (to measure on Spike 3): " + ", ".join("%d %s" % (n, k) for k, n in sorted(rest.items()))]
     core_missing = [grp for grp in CORE if not any(n in placed for n in grp) and not

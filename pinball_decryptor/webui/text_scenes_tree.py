@@ -1293,7 +1293,8 @@ class TreeEditMixin:
         if self._game_writes(card, man, n):
             out["locked"] = True                # PAD-513: the game writes it, see below
             from . import game_filled           # PAD-1261: what to change instead
-            out["note"] = game_filled.locked_note(orig, assets_dir=self.assets_dir)
+            out["note"] = game_filled.locked_note(orig, assets_dir=self.assets_dir,
+                                                   short=True)
         return out
 
     def _game_writes(self, card, man, n):

@@ -243,7 +243,8 @@ def test_the_scenes_words_box_keeps_a_box_the_game_writes(tmp_path):
         _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == ids["Title1"])
         words = _tv(w)["props"]["words"]
         assert words["locked"] is True and words["text"] == "KAIJU"
-        assert "the game program row “KAIJU!”" in words["note"]          # PAD-1261
+        assert words["note"] == ("The game writes this line itself as it plays: change the game "
+                                 "program row “KAIJU!” on the Text tab")              # PAD-1261
         assert w.call("text_scenes.tree_words", ids["Title1"], "MONSTER") is False
         # the root's KAIJU is the scene's own: it still takes new words
         w.call("text_scenes.tree_select", ids["Title0"])
@@ -293,3 +294,8 @@ def test_the_note_names_the_games_line_only_when_there_is_one():
     assert "only a stand-in" in G.locked_note("TANK", odd)
     assert G.game_row_for(odd, "T") is None
     assert G.locked_note("", odd) == G.LOCKED_NOTE
+    # the Scenes Words box's short form
+    assert G.locked_note("TANK", odd, short=True) == (
+        "The game writes this line itself as it plays: “TANK” is only a stand-in, with no single"
+        " game line to change")
+    assert G.locked_note("", odd, short=True) == G.SHORT_NOTE

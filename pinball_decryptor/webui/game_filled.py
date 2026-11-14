@@ -120,10 +120,17 @@ def game_row_for(rows, words):
     return near
 
 
-def locked_note(words, rows=None, assets_dir=None):
+# the Scenes Words box has room for a line or two (its tip had the same words before)
+_SHORT_GAME_ROW = "The game writes this line itself as it plays: change the game program row “{}” on the Text tab"
+_SHORT_STAND_IN = ("The game writes this line itself as it plays: “{}” is only a stand-in, with no "
+                   "single game line to change")
+SHORT_NOTE = "The game writes this line itself as it plays: change the game's own line on the Text tab"
+
+
+def locked_note(words, rows=None, assets_dir=None, short=False):
     """The note for a locked scene line reading *words* (PAD-1261): it names the game's own
     line to change when the game program has one reading like it, and otherwise says the
-    words are a stand-in with no single line behind them.  *rows* is the project's manifest
+    words are a stand-in with no single line behind them; *short* for the Scenes Words box.  *rows* is the project's manifest
     (read from *assets_dir* when not given)."""
     from . import text_rules as R
     if rows is None:
@@ -134,8 +141,9 @@ def locked_note(words, rows=None, assets_dir=None):
             rows = []
     r = game_row_for(rows, words)
     if r is not None:
-        return LOCKED_NOTE + _GAME_ROW_NOTE.format(R.stand_in_words(r["original"]))
+        game = R.stand_in_words(r["original"])
+        return _SHORT_GAME_ROW.format(game) if short else LOCKED_NOTE + _GAME_ROW_NOTE.format(game)
     shown = R.stand_in_words(words)
     if not shown:
-        return LOCKED_NOTE
-    return LOCKED_NOTE + _STAND_IN_NOTE.format(shown)
+        return SHORT_NOTE if short else LOCKED_NOTE
+    return _SHORT_STAND_IN.format(shown) if short else LOCKED_NOTE + _STAND_IN_NOTE.format(shown)

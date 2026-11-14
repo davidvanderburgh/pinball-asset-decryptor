@@ -6313,9 +6313,9 @@ achievement drivers and the logged-in test all read them. coop.cfg:
 
 While teammate t is up in a co-op game the game's player 1 holds teammate t's entry and t's place holds player 1's;
 before each of the game's own player changes they go back, so the game's end, its high scores and its session see the
-logins as the players made them (and the tick puts them back after a game ended any other way). A team game is left
-alone: the game counts two players there and clears the entries past its count, so a swapped entry would be lost.
-The award is refused while the gate holds back (the PAD-698 hold on the achievement list only works from boot: a card
+logins as the players made them (and the tick puts them back after a game ended any other way). A team game swaps
+too (PAD-1267): the player up holds their team's game player's place (player 3 the game's player 1, player 4 its
+player 2) - see below for the entries the game clears there. The award is refused while the gate holds back (the PAD-698 hold on the achievement list only works from boot: a card
 of co-op and nothing else holds only while CO-OP PLAY is not Off, and a machine switched to co-op after booting at Off
 already has the list). Every Spike 2 build measured has one manager (the tables at +0x160/+0x164, Beatles and Star
 Wars ELG +0x150/+0x154) and, but for Star Wars ELG, one award.
@@ -6325,6 +6325,36 @@ Emulator, Godzilla LE 1.16 (marker logins planted in both tables from the host, 
 theirs, every entry back as planted after the game; in a team game players 1 and 2 kept theirs and the game itself
 cleared players 3 and 4's at player 3's first turn. A test mode calling the award on a scratch table was refused
 (the entry's earned byte stayed 0); without the `achievements` line the same call ran.
+
+**The score panel's names and a team game's players 3 and 4 (PAD-1267).** DoomWalrus666: "Co-op mode: Active player
+name always appeared on Player 1 scoreboard, while the active highlighted score was the correct score position. Teams
+mode, player 3 and 4 names don't appear on scoreboard after ball 1". The swap put the teammate up's login in place 1,
+and the score panel's box 1 read place 1. The panel's calls that name a BOX's player are port lines:
+
+    site  coop_panel_name[_n]   the panel's calls of the game's "Insider name of player N" - name(out, player,
+                                flags, r3, [sp], [sp + 4]), reaching the user manager's lookup - for a box's
+                                player (portcoop.panel_name_sites: near coop_panel_lit, the out string and the two
+                                stack arguments set up, r1 not the player-up getter's answer)
+
+wrapped where they are made (hook_call; the six-argument wrapper is entered with the caller's stack and passes the
+two stack arguments on) and asked for the place holding that box's player's login now (coop_name_player). The panel's
+call naming the player up, and the bonus's, still read the swapped place: the teammate up's. Godzilla LE / Pro 1.15
+and 1.16 have two (the box frame update, the "who leads" caption), X-Men LE / Pro 0.98 one; Avengers and Jurassic
+Park The Pin name no player in the panel.
+
+A team game counts two game players, and the game clears the first table's entries past its count a tick after each
+of its player changes. The runtime keeps a copy of every player's login (before each of the game's own player changes,
+the logins as made) and puts back a cleared entry past the count with the login that belongs in that place now (the
+swap's, `coop_team_users_back`: in the change, and on the tick); at the team game's end those entries get the game's
+own bytes back, so no login is left over for the next game.
+
+Emulator, Godzilla LE 1.16, marker logins: in a 3-teammate co-op game, with teammate 2 up, box 1 read place 2
+(player 1's marker) and box 2 place 1 (player 2's), and so for teammate 3. Before: in a Team 2v2 game players 3 and
+4's entries in the first table went to 0 as player 3's first turn began and stayed 0 all game; after: the game cleared
+them a tick after each of its six player changes and each time they were put back, then left as the game had them at
+the game's end. With the team swap, player 3's turns had player 3's login in place 1 and, once the game had cleared
+place 3, player 1's put back there (box 1 named player 1's, box 3 player 3's); player 4's turns the same on the game's
+player 2; every login back as made after the game.
 
 ### Co-op awards (PAD-1028)
 

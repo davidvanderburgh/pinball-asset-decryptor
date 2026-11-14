@@ -38,6 +38,10 @@ struct coop_award { int kind; };
 static unsigned long long coop_award_now(const struct coop_award *a, unsigned p) { (void)a; (void)p; return 0; }
 static void coop_awards_end(unsigned n) { (void)n; }
 static void coop_users_put(unsigned g, unsigned p) { (void)g; (void)p; }   /* PAD-1108's login swap: test_pad1108 */
+static unsigned tu_have, tu_put;                            /* PAD-1267: a team game's kept logins (test_pad1267) */
+static void coop_team_users_keep(void) {}
+static void coop_team_users_back(const char *when) { (void)when; }
+static void coop_team_users_end(void) {}
 static struct { int open; unsigned who; } pk;               /* PAD-1031: the characters' pick (test_pad1031_coop_characters.py) */
 static struct { int on; } coop_done;                       /* PAD-1044: the one taken, on the glass */
 static void coop_pick_say(void) {}

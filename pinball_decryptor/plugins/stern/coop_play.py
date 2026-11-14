@@ -197,6 +197,16 @@ def _branch_to(e, k, link):
     return e.text_va + 4 * k + 8 + off
 
 
+def users_lookup(e):
+    """PAD-1267: the va of the user manager's lookup (``_USERS_HEAD``, the one function every read of a player's login
+    goes through), or None when there is not exactly one. ``e``: a portchallenge.Elf."""
+    w = e.words
+    found = [e.text_va + 4 * k for k in range(len(w) - 5)
+             if (w[k] & 0xFFFFF000) == _USERS_HEAD[0] and w[k + 1] == _USERS_HEAD[1]
+             and (w[k + 2] & 0xFFFFF000) == _USERS_HEAD[2] and w[k + 3] == _USERS_HEAD[3]]
+    return found[0] if len(found) == 1 else None
+
+
 def insider_users(game_elf):
     """``(manager, A, B)`` - the game's user manager (a global) and the fields of its two login tables - or None."""
     from .portchallenge import Elf

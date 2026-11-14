@@ -179,3 +179,55 @@ def test_describe():
     assert SE.describe({"op": "anim", "follow": 3, "pulse": 0.4, "period": 20}) == \
         "animated: shows and fades like a game layer, pulses every 20 frames"
     assert "fades in over 5 frames" in SE.describe({"op": "anim", "fade_in": 5})
+
+
+def test_scenes_window_sets_and_shows_the_animation(tmp_path):
+    from PIL import Image
+    from tests.webui_harness import web_app
+    from tests.test_gui_scene_editor import _seed, _open, _tv, _wait, CARD
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    _seed(folder)
+    with web_app(tmp_path, mfr="stern") as w:
+        _open(w, folder)
+        src = tmp_path / "logo.png"
+        Image.new("RGBA", (6, 6), (200, 200, 20, 255)).save(str(src))
+        w.answers = [str(src)]
+        assert w.call("text_scenes.tree_add_picture")
+        assert _wait(w, lambda: any(l["added"] for l in _tv(w)["layers"]))
+        pid = next(l for l in _tv(w)["layers"] if l["added"])["id"]
+        w.call("text_scenes.tree_select", pid)
+        assert _wait(w, lambda: (_tv(w).get("props") or {}).get("anim") is not None)
+        props = _tv(w)["props"]
+        assert props["anim"]["images"] == [] and props["anim"]["fps"] > 0
+        texts = [l for l in _tv(w)["layers"] if l["kind"] == "Text"]
+        assert texts and {texts[0]["id"]} <= {c["id"] for c in props["follow_choices"]}
+
+        def anim():
+            return [o for o in SE.ops_for(str(folder), CARD) if o["op"] == "anim"]
+        assert w.call("text_scenes.tree_anim", pid, {"start": "2", "fade_in": "3",
+                                                     "pulse": 1.7, "period": "10"})
+        assert anim() == [{"op": "anim", "node": pid, "start": 2, "fade_in": 3,
+                           "pulse": 1.0, "period": 10}]
+        # the box changed again: still one edit
+        assert w.call("text_scenes.tree_anim", pid, {"follow": texts[0]["id"]})
+        (op,) = anim()
+        assert op["follow"] == texts[0]["id"] and op["track"] and "start" not in op
+        assert _wait(w, lambda: _tv(w)["props"]["anim"].get("follow") == texts[0]["id"])
+        # a picture shown in turn, then taken out again; the timing is kept
+        frame = tmp_path / "frame2.png"
+        Image.new("RGBA", (6, 6), (20, 20, 200, 255)).save(str(frame))
+        w.answers = [str(frame)]
+        assert w.call("text_scenes.tree_anim_picture", pid)
+        (op,) = anim()
+        assert op["images"][0]["image"].startswith("scene_textures/added/frame2")
+        assert op["every"] == 6 and op["follow"] == texts[0]["id"]
+        assert _wait(w, lambda: len(_tv(w)["props"]["anim"]["images"]) == 1)
+        assert w.call("text_scenes.tree_anim_picture", pid, 0)
+        (op,) = anim()
+        assert "images" not in op
+        assert w.call("text_scenes.tree_anim", pid, {})
+        assert anim() == [{"op": "anim", "node": pid}]
+        # a game layer is not animated here
+        assert w.call("text_scenes.tree_anim", texts[0]["id"], {"fade_in": 3}) is False
+        w.call("text_scenes.close")

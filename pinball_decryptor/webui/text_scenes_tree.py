@@ -997,7 +997,9 @@ class TreeEditMixin:
             "hits": hits, "layers": layers, "sel": sel, "sels": sels,
             "sel_boxes": [[round(b[0]), round(b[1]), round(b[2] - b[0]), round(b[3] - b[1])]
                           for b in map(self._tree_box, sels) if b] if multi else [],
-            "props": self._tree_props(card, man, sel, ops) if sel is not None else None,
+            "props": self._tree_anim_props(card, man, sel, ops,
+                                           self._tree_props(card, man, sel, ops))
+            if sel is not None else None,
             "edits": len(ops), "notes": list(notes), "rev": self._trev,
             # PAD-290: an eye hide is a card edit; the status line names every one
             "hidden_names": [l["name"] for l in layers if l["hidden"]],
@@ -3993,18 +3995,7 @@ class TreeEditMixin:
             compat.messagebox.showerror("Add picture", "That file isn't a picture PAD can "
                                         "read (%s)." % e)
             return False
-        if img.size[0] > 2048 or img.size[1] > 2048:
-            img.thumbnail((2048, 2048))
-        stem = "".join(c if c.isalnum() or c in "-_" else "_"
-                       for c in os.path.splitext(os.path.basename(src))[0])[:40] or "picture"
-        rel_dir = os.path.join("scene_textures", "added")
-        out_dir = os.path.join(self.assets_dir, "images", rel_dir)
-        os.makedirs(out_dir, exist_ok=True)
-        i = 1
-        while os.path.exists(os.path.join(out_dir, "%s_%d.png" % (stem, i))):
-            i += 1
-        name = "%s_%d.png" % (stem, i)
-        img.save(os.path.join(out_dir, name))
+        stem, name = self._save_added_png(src, img)
         ops = self._tree_ops(card)
         nid = scene_edit.new_id(self._tman, ops)
         w, h = img.size
@@ -4014,6 +4005,141 @@ class TreeEditMixin:
             "op": "add_picture", "parent": parent, "index": 1 << 20, "id": nid,
             "name": "PAD_%s" % stem, "image": "scene_textures/added/" + name,
             "w": w, "h": h, "x": x, "y": y})
+
+    def _save_added_png(self, src, img):
+        """Keep picture *img* (opened from *src*) in the project's added pictures:
+        ``(stem, file name)`` under ``images/scene_textures/added``."""
+        if img.size[0] > 2048 or img.size[1] > 2048:
+            img.thumbnail((2048, 2048))
+        stem = "".join(c if c.isalnum() or c in "-_" else "_"
+                       for c in os.path.splitext(os.path.basename(src))[0])[:40] or "picture"
+        out_dir = os.path.join(self.assets_dir, "images", "scene_textures", "added")
+        os.makedirs(out_dir, exist_ok=True)
+        i = 1
+        while os.path.exists(os.path.join(out_dir, "%s_%d.png" % (stem, i))):
+            i += 1
+        name = "%s_%d.png" % (stem, i)
+        img.save(os.path.join(out_dir, name))
+        return stem, name
+
+    # -- an added picture animated (DragonRR, PAD-1278) ------------------------------------
+    #: what the Animation box sets; the rest of an ``anim`` op is made here
+    ANIM_KEYS = ("follow", "start", "end", "fade_in", "fade_out", "pulse", "period", "every")
+
+    def _tree_anim_of(self, ops, node):
+        """The ``anim`` op in force for added picture *node* ({} for none)."""
+        for op in reversed(ops or ()):
+            if op.get("op") == "anim" and op.get("node") == node:
+                return op
+        return {}
+
+    def _tree_anim_props(self, card, man, nid, ops, props):
+        """*props* of the selected layer, with ``anim`` for an added picture: its animation
+        now and the game's layers it can show and fade like (``follow_choices``)."""
+        if not props or not props.get("added") or props.get("kind") != "Bitmap":
+            return props
+        stock = self._tree_card()[1] or man
+        choices = []
+
+        def walk(kids, path):
+            for n in kids:
+                kinds = [(stock["objects"].get(str(oid)) or {}).get("kind")
+                         for _s, oid in n["comps"]]
+                here = path + [n["name"]]
+                if "Text" in kinds or "Bitmap" in kinds:
+                    words = ""
+                    for _s, oid in n["comps"]:
+                        o = stock["objects"].get(str(oid)) or {}
+                        if o.get("kind") == "Text":
+                            words = str(o.get("text") or "")[:30]
+                    choices.append({"id": n["id"], "name": " / ".join(here[-2:]),
+                                    "words": words})
+                for _s, oid in n["comps"]:
+                    o = stock["objects"].get(str(oid)) or {}
+                    if o.get("kids"):
+                        walk(o["kids"], here)
+
+        walk(stock["root"]["kids"], [])
+        op = self._tree_anim_of(ops, nid)
+        anim = {k: op.get(k) for k in self.ANIM_KEYS if op.get(k) is not None}
+        anim["images"] = [im.get("image") for im in op.get("images") or ()]
+        anim["fps"] = float((man.get("stage") or [0, 0, 30])[2] or 30)
+        return dict(props, anim=anim, follow_choices=choices[:400])
+
+    @rpc
+    def tree_anim(self, node, spec=None):
+        """Set added picture *node*'s animation: *spec* holds :attr:`ANIM_KEYS` (a missing or
+        empty one is off); its loop pictures are kept.  ``{}`` takes the animation off."""
+        from ..plugins.stern import scene_edit
+        card, stock = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        ops = self._tree_ops(card)
+        if not any(o.get("op") == "add_picture" and o.get("id") == node for o in ops):
+            return False
+        spec = dict(spec or {})
+        op = {"op": "anim", "node": node}
+        for k in self.ANIM_KEYS:
+            v = spec.get(k)
+            if v in (None, "", False):
+                continue
+            try:
+                op[k] = float(v) if k == "pulse" else int(float(v))
+            except (TypeError, ValueError):
+                continue
+        if "pulse" in op:
+            op["pulse"] = max(0.0, min(1.0, op["pulse"]))
+        imgs = spec.get("images", self._tree_anim_of(ops, node).get("images"))
+        if imgs:
+            op["images"] = [im for im in imgs if isinstance(im, dict) and im.get("image")]
+            if not op.get("every"):
+                op["every"] = 6
+        if op.get("follow") is not None:
+            tr = scene_edit.follow_track(stock, op["follow"])
+            if tr is None:
+                compat.messagebox.showinfo(
+                    "Animation", "That layer never shows in this scene as it plays, so there "
+                    "is nothing to follow.")
+                return False
+            op["track"] = tr
+        return self._tree_add(op)
+
+    @rpc
+    def tree_anim_picture(self, node, drop=None):
+        """Add a picture to added picture *node*'s loop (shown in turn after its own), or
+        with *drop* (an index) take one out."""
+        card, _man = self._tree_card()
+        if card is None:
+            return False
+        node = int(node)
+        cur = self._tree_anim_of(self._tree_ops(card), node)
+        spec = {k: cur.get(k) for k in self.ANIM_KEYS}
+        imgs = [dict(im) for im in cur.get("images") or ()]
+        if drop not in (None, ""):
+            i = int(drop)
+            if not 0 <= i < len(imgs):
+                return False
+            del imgs[i]
+        else:
+            src = self.window.ask_open("scene_add_picture",
+                                       "Add a picture shown in turn",
+                                       filetypes=[("Pictures", "*.png *.jpg *.jpeg *.webp"),
+                                                  ("All files", "*.*")])
+            if not src:
+                return False
+            try:
+                from PIL import Image
+                img = Image.open(src).convert("RGBA")
+            except Exception as e:                       # noqa: BLE001
+                compat.messagebox.showerror("Add picture", "That file isn't a picture PAD "
+                                            "can read (%s)." % e)
+                return False
+            _stem, name = self._save_added_png(src, img)
+            imgs.append({"image": "scene_textures/added/" + name,
+                         "w": img.size[0], "h": img.size[1]})
+        spec["images"] = imgs
+        return self.tree_anim(node, spec)
 
     @rpc
     def tree_add_text(self, text, like=None):

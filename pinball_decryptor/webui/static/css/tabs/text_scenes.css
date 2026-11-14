@@ -326,3 +326,8 @@ html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
 .tree-game .tg-guess .i { width: 13px; height: 13px; vertical-align: -2px; }
 .tree-game.off .tg-guess { opacity: 1; }
 .sc-base-note { display: inline-flex; align-items: center; gap: 4px; cursor: default; }
+/* PAD-1278: an added picture animated */
+.tree-anim { border-top: 1px solid var(--line, rgba(255,255,255,.08)); margin-top: 6px; padding-top: 6px; }
+.tree-anim .tree-row { flex-wrap: wrap; gap: 6px; }
+.tree-anim .tree-num .field { width: 64px; }
+.tree-anim-pics .tag { display: inline-flex; align-items: center; gap: 2px; }

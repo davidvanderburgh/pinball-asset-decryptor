@@ -248,6 +248,8 @@ def add(assets_dir, card, op):
         last["s"] = round(last["s"] * op["s"], 6)
         if abs(last["s"] - 1.0) < 1e-6 and abs(last.get("sy", 1.0) - 1.0) < 1e-6:
             ops.pop()
+    elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "anim":
+        ops[-1] = op                     # PAD-1278: the box changed again: one entry
     elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_align":
         last["align"], last["valign"] = op["align"], op["valign"]
     elif (last and last.get("node") == op.get("node")

@@ -558,7 +558,7 @@ class TextTab(TabService):
         self._current = i
         locked = self._locked(r)
         if locked:
-            note = game_filled.LOCKED_NOTE
+            note = game_filled.locked_note(r["original"], self._text_rows)
         elif R.row_is_scene(r):
             note = R.scene_note(r, self._scene_name(r["path"]))
         else:
@@ -599,7 +599,8 @@ class TextTab(TabService):
         orig = r["original"]
         new = self.text_new_var.get()
         if new != orig and self._locked(r):
-            compat.messagebox.showinfo("The game writes this line", game_filled.LOCKED_NOTE)
+            compat.messagebox.showinfo("The game writes this line",
+                                       game_filled.locked_note(orig, self._text_rows))
             return False
         if R.row_len(r, new) > R.row_budget(r):
             compat.messagebox.showwarning("Replacement too long",
@@ -1361,7 +1362,8 @@ class TextTab(TabService):
             return None
         new = original if new is None else new
         if new != original and self._locked(rows[0]):
-            compat.messagebox.showinfo("The game writes this line", game_filled.LOCKED_NOTE)
+            compat.messagebox.showinfo("The game writes this line",
+                                       game_filled.locked_note(original, self._text_rows))
             return False
         if R.row_len(rows[0], new) > R.row_budget(rows[0]):
             compat.messagebox.showwarning("Replacement too long",

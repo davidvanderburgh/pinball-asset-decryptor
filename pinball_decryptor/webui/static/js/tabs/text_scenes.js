@@ -1730,7 +1730,7 @@ const WORDS_TIP = { head: "Words", lines: [
   "A line of the game's is the same edit as on the Text tab, which lists it too. A line you added keeps its words in this scene (Undo takes a change back).",
   "Type \\n for a line break." ] };
 // PAD-515: greyed out, not gone, on anything whose words cannot be changed here
-const wordsOff = (p) => (p.words && p.words.locked ? GAME_WRITES
+const wordsOff = (p) => (p.words && p.words.locked ? (p.words.note || GAME_WRITES)
   : p.kind === "Text" ? "Its words cannot be changed here" : "Only a line of text has words");
 // PAD-513 (DragonRR): the game writes this box itself, so words typed here would never show
 const GAME_WRITES = "The game writes this line itself as it plays: change the game's own line on the Text tab";

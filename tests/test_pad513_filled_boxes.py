@@ -217,6 +217,8 @@ def test_the_text_tab_keeps_a_line_the_game_writes(tmp_path):
         w.call("text.select", scene)
         assert w.state("text")["locked"] is True
         assert "game writes this line" in w.state("text")["scene_note"]
+        # PAD-1261: the note names the game's own line to change instead
+        assert "the game program row “KAIJU!”" in w.state("text")["scene_note"]
         n = len(w.asked)
         assert w.call("text.apply", "MONSTER") is False
         assert len(w.asked) == n + 1 and rows[scene]["replacement"] == ""
@@ -241,6 +243,7 @@ def test_the_scenes_words_box_keeps_a_box_the_game_writes(tmp_path):
         _wait(w, lambda: (_tv(w).get("props") or {}).get("id") == ids["Title1"])
         words = _tv(w)["props"]["words"]
         assert words["locked"] is True and words["text"] == "KAIJU"
+        assert "the game program row “KAIJU!”" in words["note"]          # PAD-1261
         assert w.call("text_scenes.tree_words", ids["Title1"], "MONSTER") is False
         # the root's KAIJU is the scene's own: it still takes new words
         w.call("text_scenes.tree_select", ids["Title0"])
@@ -262,3 +265,31 @@ def test_without_the_programs_paths_nothing_is_locked(tmp_path):
         assert _tv(w)["props"]["words"].get("locked") is None
         assert w.call("text_scenes.tree_words", layers["Title0"]["id"], "MONSTER") is True
         w.call("text_scenes.close")
+
+
+def test_the_note_names_the_games_line_only_when_there_is_one():
+    """PAD-1261 (DragonRR): Godzilla's award screen 293641e4 holds "IMPOSTER BATTLE" in a title
+    box the game fills with whichever award was won.  The note said "Change the game's own line
+    instead: it is a game program row on the Text tab", but no program line reads IMPOSTER
+    BATTLE (only IMPOSTER BATTLE CHAMPION): it names the line when there is one, and otherwise
+    says the words are a stand-in."""
+    from pinball_decryptor.webui import game_filled as G
+    card = "/godzilla_le/assets/lcd/auto_loaded/293641e4/scene.radium"
+    rows = [{"path": card, "original": "IMPOSTER BATTLE"},
+            {"path": "/godzilla_le/game", "original": "IMPOSTER BATTLE CHAMPION"},
+            {"path": "/godzilla_le/game", "original": "Imposter Battle Champion"}]
+    note = G.locked_note("IMPOSTER BATTLE", rows)
+    assert note.startswith(G.LOCKED_NOTE)
+    assert "“IMPOSTER BATTLE” is only a stand-in" in note and "game program row “" not in note
+    # the same words, case, spacing and a closing ! aside, name the game's line
+    rows.append({"path": "/godzilla_le/game", "original": "Imposter  battle!"})
+    assert "the game program row “Imposter battle!”" in G.locked_note("IMPOSTER BATTLE", rows)
+    rows.append({"path": "/godzilla_le/game", "original": "IMPOSTER BATTLE"})
+    assert "the game program row “IMPOSTER BATTLE”" in G.locked_note("IMPOSTER BATTLE", rows)
+    # a line the game never reads, one mode's own text and a single letter are no line to change
+    odd = [{"path": "/g/game", "original": "TANK", "unused": True},
+           {"path": "/g/game#cmode_x", "original": "TANK"},
+           {"path": "/g/game", "original": " T!"}]
+    assert "only a stand-in" in G.locked_note("TANK", odd)
+    assert G.game_row_for(odd, "T") is None
+    assert G.locked_note("", odd) == G.LOCKED_NOTE

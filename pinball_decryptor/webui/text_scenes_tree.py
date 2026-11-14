@@ -1292,6 +1292,8 @@ class TreeEditMixin:
                "limit": text_rules.row_budget({"path": card, "original": orig})}
         if self._game_writes(card, man, n):
             out["locked"] = True                # PAD-513: the game writes it, see below
+            from . import game_filled           # PAD-1261: what to change instead
+            out["note"] = game_filled.locked_note(orig, assets_dir=self.assets_dir)
         return out
 
     def _game_writes(self, card, man, n):
@@ -1336,7 +1338,7 @@ class TreeEditMixin:
         if words is not None and words != orig and self._game_writes(card, self._tman, n):
             from . import game_filled
             log.info("Scenes: %s keeps its words - %s", n.get("name") or "the line",
-                     game_filled.LOCKED_NOTE)
+                     game_filled.locked_note(orig, assets_dir=self.assets_dir))
             return False
         done = self.tab.set_scene_words(self.assets_dir, card, orig, words)
         if done is None:

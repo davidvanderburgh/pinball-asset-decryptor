@@ -9972,17 +9972,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _feed_on and not _stime_on else "Adding the screen times...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
-                if mode_list:
-                    _mprof = _MW.MP.profile(mode_list[0][1].title)
-                elif code_list:
-                    from . import code_modes as _CM
-                    _mprof = _CM.profile_for(assets_dir, code_list)
-                    if _mprof is None:
-                        raise _MW.ModeWriteError(_CM.NO_TITLE)
-                else:
-                    _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
-                              or idle_prof or hand_prof or cabs_prof or comp_prof or stime_prof
-                              or feed_prof)                           # PAD-1255: a feed-only build crashed here
+                _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
+                    variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -11739,6 +11731,30 @@ def _idle_for_build(assets_dir, dest_is_device, log, ext4_available=None):
         log("Inactivity pauses timers: left out of this build: %s." % why.rstrip("."), "warning")
         return None
     log("Inactivity pauses timers: %s." % _IP.HOW, "info")
+    return prof
+
+
+NO_FEATURE_TITLE = ("the app could not tell which game this build's mode features are for. Extract the "
+                    "card into the project (Extract tab) and build again")
+
+
+def _build_mode_profile(mode_list, code_list, assets_dir, feature_profs):
+    """The title profile a build's mode features go on: the first mode's, the code modes', else the first
+    of *feature_profs* (each mode feature's own, None where it is off). PAD-1255/PAD-1260: a score-feed-only
+    build once fell through a chain that left the feed's profile out, and crashed on ``None.hud_scene``;
+    a build with no title at all now says so in plain words instead."""
+    from . import mode_write as _MW
+    if mode_list:
+        return _MW.MP.profile(mode_list[0][1].title)
+    if code_list:
+        from . import code_modes as _CM
+        prof = _CM.profile_for(assets_dir, code_list)
+        if prof is None:
+            raise _MW.ModeWriteError(_CM.NO_TITLE)
+        return prof
+    prof = next((p for p in feature_profs if p is not None), None)
+    if prof is None:
+        raise _MW.ModeWriteError(NO_FEATURE_TITLE)
     return prof
 
 

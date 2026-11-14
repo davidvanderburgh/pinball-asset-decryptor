@@ -367,12 +367,14 @@ def test_a_64_bit_program_takes_a_listed_port_whose_sites_are_its_own(monkeypatc
     elf = _elf64(0x400000, [0xd503233f, 0xa9bf7bfd, 0x910003fd])
     spike2 = tmp_path / "spike2.port"         # Spike 2's port of the same game folder and build
     spike2.write_text("game x\nsite tick 0x10000 0xe92d4ff0 0xe24dd01c\n")
-    good = tmp_path / "spike3.port"
+    (tmp_path / "spike3").mkdir()              # PAD-1277: the Spike 3 ports' own folder
+    monkeypatch.setattr(MR, "spike3_ports_dir", lambda: str(tmp_path / "spike3"))
+    good = tmp_path / "spike3" / "spike3.port"
     good.write_text("game x\nsite tick 0x400000 0xd503233f 0xa9bf7bfd\n")
     monkeypatch.setattr(MR, "port_paths", lambda: [("x", "1.0", str(spike2)), ("x", "1.0", str(good)),
                                                    ("y", "1.0", str(good))])
     pr = PD.ensure_port(elf, "x", "1.0.0")
-    assert pr.path == str(good) and pr.origin == "derived" and pr.proven
+    assert pr.path == str(good) and pr.origin == "shipped" and pr.proven
     monkeypatch.setattr(MR, "port_paths", lambda: [("x", "1.0", str(spike2))])
     pr = PD.ensure_port(elf, "x", "1.0.0")
     assert pr.path == "" and pr.missing == ("no port for this build",)

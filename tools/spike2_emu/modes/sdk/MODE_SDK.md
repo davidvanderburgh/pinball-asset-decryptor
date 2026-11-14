@@ -18,6 +18,7 @@ with the loop below. Everything you need is in these files.
 | `MODE_PARAMETERS.md` | Every key a mode file takes, every field the Modes tab saves, every call above, and what is measured about each. |
 | `pad_mode_runtime.c` | The runtime, compiled into every mode. You do not edit it. |
 | `ports/<game>-<version>.port` | One per game build: where the game's functions are, plus its shot names, scenes and callouts. |
+| `ports/spike3/<game>-<version>.port` | The same for a Stern Spike 3 build (64-bit ARM). A build Spike 2 also has (Star Wars ELG 1.10) keeps the same file name: the folder says which machine it is for. |
 | `build_mode.sh` | Compiles your modes and the runtime into one `mode.so`. |
 | `port_words.py` | Fills in, or checks, a port's instruction words from the game's program. |
 | `port_tool.py` | Drafts a port for another game or version from one that works. |
@@ -3242,7 +3243,9 @@ The app's Modes tab makes modes as files (`mode_file.c` runs them), and it reads
 same port files: `mode_project.profile_from_port()` turns each one into the title's
 profile. The tab finds the project's card (the extract's record of it, or the project's
 stock image; a renamed card is read from its own `/spk/index/<game>-<version>.sidx`) and
-uses the port whose `game` and `version` match. A card with no port gets a message
+uses the port whose `game` and `version` match - on a Spike 3 card, the one in `ports/spike3`
+(its profile is keyed `<game>_<version>_spike3`, labelled "(Spike 3)", and none of the Spike 2
+build's emulator proofs carry over to it). A card with no port gets a message
 pointing here. What each part of the tab needs from the port:
 
 | Tab section | Needs in the port | Also needs |

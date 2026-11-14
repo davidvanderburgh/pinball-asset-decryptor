@@ -3186,10 +3186,13 @@ def test_modes_tab_takes_a_spike3_card_whose_build_has_a_port_as_any_card(tmp_pa
 
     s3 = tmp_path / "walking_dead_le-0_92_0.Release.64G.sdcard-secure.raw"
     s3.write_bytes(_build_spike3_disk().getvalue())
-    monkeypatch.setattr(MP, "profile_for_card", lambda g, v, ports_dir=None: MP.GODZILLA_PRO_1_15)
+    asked = []
+    monkeypatch.setattr(MP, "profile_for_card", lambda g, v, ports_dir=None, arch="arm":
+                        asked.append((g, arch)) or MP.GODZILLA_PRO_1_15)
     project = tmp_path / "proj"
     with web_app(tmp_path, mfr="stern") as w:
         _project(w, project)
         svc = _svc(w)
         text, _kind, _tip = w.run(lambda: svc._card_verdict(str(s3)))
     assert "Spike 3" not in text
+    assert ("walking_dead_le", "a64") in asked          # PAD-1277: the card's own machine's port

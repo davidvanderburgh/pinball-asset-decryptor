@@ -72,6 +72,31 @@ def sources_file(arch="arm"):
     return os.path.join(sdk_dir(), "prebuilt", name)
 
 
+#: PAD-1277: the shipped ports folder's subfolder of Spike 3 ports (64-bit ARM programs). A
+#: Spike 3 build may be the same game folder and version as a Spike 2 one (Star Wars ELG
+#: 1.10 ships for both), so its port keeps the same ``<game>-<version>.port`` name in here,
+#: and this folder is what says which machine a port is for (:func:`port_arch`).
+SPIKE3_PORTS = "spike3"
+
+
+def spike3_ports_dir():
+    """The shipped Spike 3 ports: ``<sdk>/ports/spike3``."""
+    return os.path.join(sdk_dir(), "ports", SPIKE3_PORTS)
+
+
+def port_arch(path):
+    """``"a64"`` for a port in :func:`spike3_ports_dir` (a Spike 3 build), else ``"arm"``
+    (Spike 2: the shipped ports and every port derived on this machine - derivation reads
+    Spike 2's 32-bit programs only)."""
+    d = os.path.normcase(os.path.dirname(os.path.abspath(path or "")))
+    return "a64" if d == os.path.normcase(os.path.abspath(spike3_ports_dir())) else "arm"
+
+
+def elf_arch(elf):
+    """``"a64"`` for a 64-bit ELF (a Spike 3 game program), else ``"arm"``."""
+    return "a64" if bytes(elf[4:5]) == b"\x02" else "arm"
+
+
 def port_dirs():
     """The folders ports are read from, in the order a lookup tries them: the SDK's shipped
     ``ports`` folder, then this machine's derived ports (:func:`.port_derive.user_ports_dir`,
@@ -86,7 +111,10 @@ def port_dirs():
 
 
 def port_paths():
-    """Every port as ``(game_dir, version, path)``, shipped ones first, each folder sorted. A
+    """Every port as ``(game_dir, version, path)``, shipped ones first, each folder sorted:
+    the SDK's Spike 2 ports, its Spike 3 ports (:func:`spike3_ports_dir`, PAD-1277), then the
+    ones derived here. One build of a game may have a port for each machine; which one a path
+    is for is :func:`port_arch`, and every lookup by build asks for one machine. A
     derived port that is no longer current (:func:`.port_derive.derived_current`: another
     drafting revision, or its reference ports changed) is left out until the card is read
     again.
@@ -100,7 +128,8 @@ def port_paths():
     if cached is not None and cached[0] == stamp:
         return list(cached[1])
     out = []
-    for n, d in enumerate(dirs):
+    scan = dirs[:1] + [spike3_ports_dir()] + dirs[1:] if dirs else []
+    for n, d in enumerate(scan):
         try:
             names = sorted(os.listdir(d))
         except OSError:
@@ -110,7 +139,7 @@ def port_paths():
             path = os.path.join(d, name)
             if not m or not os.path.isfile(path):
                 continue
-            if n > 0:
+            if n > 1:
                 from .port_derive import derived_current
                 if not derived_current(path):
                     continue
@@ -132,9 +161,9 @@ def _ports_stamp(dirs):
     the drafting revision, and which derived_current is in force."""
     from . import port_derive, portgen
     stamp = [tuple(dirs), portgen.REVISION, port_derive.derived_current]
-    folders = (list(dirs) + [os.path.join(dirs[0], "recipes")]) if dirs else []
+    folders = (list(dirs) + [os.path.join(dirs[0], "recipes"), spike3_ports_dir()]) if dirs else []
     for n, d in enumerate(folders):
-        derived = 0 < n < len(dirs)
+        derived = 0 < n < len(dirs)          # the recipes and the Spike 3 ports come after
         try:
             with os.scandir(d) as it:
                 entries = []
@@ -157,7 +186,7 @@ def _ports_stamp(dirs):
     return tuple(stamp)
 
 
-def port_file(game_dir, version):
+def port_file(game_dir, version, arch="arm"):
     """The port for one game build, ``<game_dir>-<version>.port``, or None when there is none
     (then no mode can run on that build). The SDK's shipped ports win; a port derived on this
     machine (:func:`port_dirs`) is found after them.
@@ -166,7 +195,11 @@ def port_file(game_dir, version):
     nonzero third part is kept, so ``1.15.1`` never silently takes ``1.15``'s port. The
     match is by VALUE (:func:`.mode_project.version_key`, the family's one comparison),
     not by the spelling of the file name: ``jaws_le-1.02.port`` is the port for a card
-    whose index says ``1_02_0``."""
+    whose index says ``1_02_0``.
+
+    PAD-1277: ``arch`` is the machine the build runs on - ``"arm"`` Spike 2, ``"a64"`` Spike
+    3 (:func:`port_arch`) - so a Spike 3 build of a game folder and version that Spike 2 also
+    has (Star Wars ELG 1.10) finds its own port, and a Spike 2 lookup never takes it."""
     if not game_dir or not version:
         return None
     from .mode_project import version_key
@@ -174,14 +207,15 @@ def port_file(game_dir, version):
     if not want:
         return None
     for game, named, path in port_paths():
-        if game == game_dir and version_key(named) == want:
+        if game == game_dir and version_key(named) == want and port_arch(path) == arch:
             return path
     return None
 
 
-def ports():
-    """Every ``(game_dir, version)`` there is a port for (shipped or derived here), sorted."""
-    return sorted({(g, v) for g, v, _p in port_paths()})
+def ports(arch="arm"):
+    """Every ``(game_dir, version)`` there is a port for (shipped or derived here) on the
+    ``arch`` machine (:func:`port_file`), sorted."""
+    return sorted({(g, v) for g, v, p in port_paths() if port_arch(p) == arch})
 
 
 def _sha256_lf(path):

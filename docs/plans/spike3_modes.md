@@ -57,9 +57,13 @@ times are left out with one sentence (they ride Spike 2's delivery).
   key and reads `/games/game`'s program. `port_derive.ensure_port` takes, for a 64-bit program,
   the listed port of its game whose every site is the program's own (never one derived here).
   **Star Wars ELG 1.10 has a Spike 2 build of the same game folder and version** whose shipped
-  port is passed over by that test - but `mode_runtime.port_paths` keeps ONE port per
-  (game, version), so a Spike 3 port of that build must not share the Spike 2 port's file name
-  and header (PAD-1271's to settle).
+  port is passed over by that test. PAD-1277: a Spike 3 port ships in `ports/spike3/` under the
+  same `<game>-<version>.port` name; `mode_runtime.port_arch` reads the machine off that folder,
+  `port_paths` lists both, and every lookup by build asks for one machine (`port_file(...,
+  arch)`, `profile_for_card(..., arch)` with `mode_project.card_arch(card)`, `find_port` by the
+  program's ELF class). The Spike 3 profile is keyed `<game>_<version>_spike3`, labelled
+  "(Spike 3)", and reads the proof tables under `<game>-<version>/spike3`, so none of the
+  Spike 2 build's emulator proofs (lamps, multiball, ...) carry over.
 - Try it on a Spike 3 card: the Modes tab builds the same set from the card
   (`_tryit_prepare_s3`), and the Emulate tab's Spike 3 start now runs the prepare (it skipped
   it) and hands `--mode-so` / `--mode-files` to s3launch.sh -> `PAD_S3_MODE_SO` /

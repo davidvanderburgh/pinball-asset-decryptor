@@ -1074,17 +1074,19 @@ def ensure_port(elf, game, version, progress=None, cancel=None, workers=None):
 def _spike3_port(elf, game, label, say):
     """PAD-1272: a Spike 3 game program (64-bit ARM): the listed port of its game whose every
     site is this program's own (``mode_write.find_port``'s test), never one derived here -
-    derivation reads Spike 2's 32-bit programs only."""
+    derivation reads Spike 2's 32-bit programs only. PAD-1277: only the Spike 3 ports
+    (``ports/spike3``, :func:`.mode_runtime.port_arch`) are tried, so a Spike 2 port of the
+    same game folder and build is never even read."""
     from . import mode_runtime as MR, mode_write as MW
     for g, _v, path in MR.port_paths():
-        if g != game:
+        if g != game or MR.port_arch(path) != "a64":   # PAD-1277: the Spike 3 ports only
             continue
         try:
             sites = MW.port_sites(path)
             if sites and not MW.site_mismatches(path, bytes(elf)):
                 say(1.0, "")
                 shipped = os.path.normcase(os.path.dirname(os.path.abspath(path))) == \
-                    os.path.normcase(os.path.abspath(shipped_ports_dir()))
+                    os.path.normcase(os.path.abspath(MR.spike3_ports_dir()))
                 return PortResult(path=path, origin="shipped" if shipped else "derived",
                                   proven=not MW.port_unproven(path))
         except (OSError, MW.ModeWriteError):

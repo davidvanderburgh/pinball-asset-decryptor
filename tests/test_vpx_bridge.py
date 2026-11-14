@@ -1461,6 +1461,94 @@ def test_batmans_control_gate_is_not_the_turntable_diverter(tmp_path):
     assert why not in vsu.missed_fixes(str(tmp_path), "B (PAD).vpx", m["repatch"])
 
 
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's VBScript under cscript")
+def test_batmans_mech_follow_says_when_the_tributes_own_call_fails(tmp_path):
+    # PAD-1251: PadMechTimer follows the machine's turntable and crane
+    # switches under On Error Resume Next, so a call of the tribute's that
+    # failed (TurnTable_Goto here) left the mech still and said nothing; a
+    # reporter's held ball moved neither and his log could not say why.
+    # PadNote hands each distinct error to the controller once, and the rest
+    # of the tick (the crane) still runs.
+    m = json.load(open(os.path.join(VPX, "batman.shadow.json"), encoding="utf-8"))
+    ev = m["extra_vbs"].split("\n")
+
+    def sub(name, kind="Sub"):
+        i = next(k for k, ln in enumerate(ev) if ln.startswith("%s %s" % (kind, name)))
+        return "\n".join(ev[i:ev.index("End %s" % kind, i) + 1])
+
+    def run(name, broken):
+        vbs = tmp_path / name
+        vbs.write_text("\n".join([
+            "Class Trg : Public Enabled : End Class",
+            "Class Tmr : Public Enabled, UserValue : End Class",
+            "Class Ctl",
+            "  Public Notes, Sw",
+            "  Public Property Get Switch(n) : Switch = (InStr(Sw, \",\" & n & \",\") > 0) : End Property",
+            "  Public Property Let PadNote(t) : Notes = Notes & t & \"|\" : End Property",
+            "End Class",
+            "Class VT : Public Sub PulseSw(n) : End Sub : Public Sub AddTimer(a, b) : End Sub : End Class",
+            "Const kTT_TV = -8 : Const kTT_Phone = 49 : Const kTT_Batcave = 174",
+            "Dim trgBallLock1, trgBallLock2, trgBallLock3, tmrTurntable, Controller, vpmTimer",
+            "Set trgBallLock1 = New Trg : Set trgBallLock2 = New Trg : Set trgBallLock3 = New Trg",
+            "Set tmrTurntable = New Tmr : Set Controller = New Ctl : Set vpmTimer = New VT",
+            "Dim CurMechPos, CranePosIdx, discLastPos, discSpinSpeed, Turns",
+            "CurMechPos = kTT_TV : CranePosIdx = 0 : discLastPos = 0 : discSpinSpeed = 0 : Turns = 0",
+            "Dim PadNoteLast, PadGateA, PadGateB, PadTTWant, PadCraneWant, PadDiscLast",
+            "PadTTWant = 0 : PadCraneWant = -1 : PadDiscLast = 0",
+            "Sub PadApplyGate : End Sub",
+            "Sub TurnTable_Goto(p)",
+            "  If p = CurMechPos Then Exit Sub",
+            "  Turns = Turns + 1",
+            "  If %s Then Err.Raise 438, \"stub\", \"Object doesn't support this property or method\"" % broken,
+            "  CurMechPos = p",
+            "End Sub",
+            "Sub CraneGoto(p) : CranePosIdx = p : End Sub",
+            sub("PadSw", "Function"), sub("PadNote"), sub("PadMechTimer_Timer"),
+            "Controller.Sw = \",1077,1087,\"",
+            "PadMechTimer_Timer",
+            "Controller.Sw = \",1078,1082,\"     ' the Bat Phone, the crane away",
+            "Dim i : For i = 1 To 5 : PadMechTimer_Timer : Next",
+            "WScript.Echo CurMechPos & \" \" & CranePosIdx & \" \" & Turns",
+            "WScript.Echo \"[\" & Controller.Notes & \"]\""]), encoding="latin-1")
+        r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout.strip().splitlines()
+
+    import subprocess
+    out = run("broken.vbs", "True")
+    # the turntable could not go (asked again every tick), the crane did
+    assert out[0] == "-8 5 6", out
+    notes = out[1].strip("[]").split("|")[:-1]
+    assert notes == ["TurnTable_Goto 49: VBScript error 438 (Object doesn't support this property or method)",
+                     "turntable to 49: VBScript error 438 (Object doesn't support this property or method)"], out
+    # a table whose calls work follows both and says nothing
+    out = run("ok.vbs", "False")
+    assert out == ["49 5 1", "[]"], out
+    # a table patched before this is asked to patch again; one patched now is not
+    vsu = pytest.importorskip("vpxsetup")
+    why = "when its crane or turntable does not follow the game, the log does not say why"
+    (tmp_path / "B (PAD).script.vbs").write_text("Sub PadMechTimer_Timer\nEnd Sub\n", encoding="utf-8")
+    assert why in vsu.missed_fixes(str(tmp_path), "B (PAD).vpx", m["repatch"])
+    (tmp_path / "B (PAD).script.vbs").write_text(m["extra_vbs"], encoding="utf-8")
+    assert why not in vsu.missed_fixes(str(tmp_path), "B (PAD).vpx", m["repatch"])
+
+
+def test_controller_logs_a_tables_padnote(monkeypatch):
+    # PAD-1251: Controller.PadNote = "..." is a line in the controller log
+    # (capped), not a property kept and never read
+    pc = pytest.importorskip("padcontroller")
+    got = []
+    monkeypatch.setattr(pc, "log", lambda s: got.append(s))
+    c = pc.PadController.__new__(pc.PadController)
+    c.props = {}
+    c.bridge = None
+    c._put("padnote", ("CraneGoto 5: VBScript error 438 (x)",))
+    assert got == ["table: CraneGoto 5: VBScript error 438 (x)"]
+    for _ in range(100):
+        c._put("padnote", ("again",))
+    assert len(got) == 50
+
 DOF_TRIBUTE ="""Option Explicit
 ExecuteGlobal GetTextFile("controller.vbs")
 Const cGameName = "rushle"   ' DOF's name
@@ -7058,3 +7146,26 @@ def test_the_poll_caches_a_rules_switch_and_agrees_with_set_switch(monkeypatch):
     assert b.sol_state[48] == 0
     b._poll_coils(data, 0.0)
     assert b.sol_state[48] == 0
+def test_the_log_says_what_the_table_read_of_the_machine_switches(monkeypatch):
+    """PAD-1225: Batman 66's turntable and crane follow the machine by reading
+    its position switches (PadMechTimer, every 50 ms). A player's turntable
+    never moved and nothing in his log could say whether the table read them
+    at all. Each change in what the table reads is logged, once."""
+    pc = pytest.importorskip("padcontroller")
+    logged = []
+    monkeypatch.setattr(pc, "log", logged.append)
+    b = pc.Bridge()
+    b.set_game("batman")
+    b.attached = True
+    plane = bytearray(len(b.mrg))
+    plane[77] = 1                                   # turntable home
+    b.mrg = bytes(plane)
+    for _ in range(20):                             # a second of PadMechTimer
+        assert b.get_switch(1077) and not b.get_switch(1078)
+    plane[77], plane[78] = 0, 1                     # the game turned it to the Bat Phone
+    b.mrg = bytes(plane)
+    for _ in range(20):
+        assert not b.get_switch(1077) and b.get_switch(1078)
+    reads = [ln for ln in logged if ln.startswith("table reads")]
+    assert reads == ["table reads switch 77 = 1", "table reads switch 78 = 0",
+                     "table reads switch 77 = 0", "table reads switch 78 = 1"]

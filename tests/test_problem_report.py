@@ -7,6 +7,7 @@ import base64
 import io
 import json
 import os
+import re
 import threading
 import time
 import urllib.error
@@ -294,6 +295,34 @@ def test_a_visual_pinball_report_carries_the_run_log(tmp_path, monkeypatch):
     assert "Visual Pinball run log, padvpx-batman.log (last 2 lines)" in text
     assert "[watch] slot 1 <path>" in text
     assert "run log" not in R.as_text(_report())
+
+
+def test_the_run_log_keeps_the_mech_moves_past_the_video_lines(tmp_path, monkeypatch):
+    """PAD-1225: a Bat Phone report's run log was 120 lines of clip
+    hand-offs, so nothing said whether the game ever turned the turntable.
+    The mech lines come along even when the tail has moved past them."""
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    moves = ["[event] [motor] %d ms node 9 motor 2 sent to input 3 (cmd 55), "
+             "arrives in 600 ms" % (1000 * i) for i in range(R.MAX_VPX_MECH_LINES + 5)]
+    vid = ["[event] [vid] ch0 handed the game 48 frames in 2001 ms" for _ in range(500)]
+    (tmp_path / "padvpx-batman.log").write_text(
+        "\n".join(["[watch] batman"] + moves + vid) + "\n", encoding="utf-8")
+    name, tail = R.vpx_run_log_tail("Visual Pinball", max_lines=10)
+    assert name == "padvpx-batman.log"
+    assert tail == moves[-R.MAX_VPX_MECH_LINES:] + vid[-10:]
+    # a mech line already in the tail is not said twice
+    (tmp_path / "padvpx-batman.log").write_text(
+        "\n".join(vid + moves[:3]) + "\n", encoding="utf-8")
+    assert R.vpx_run_log_tail("Visual Pinball", max_lines=10)[1] == vid[-7:] + moves[:3]
+
+
+def test_watch_forwards_the_mech_lines_into_the_run_log():
+    """The table run log is watch.sh's event feed; the shim's [motor] lines
+    have to be in it for a report to carry them."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "tools", "spike2_emu", "watch.sh"), encoding="utf-8").read()
+    assert re.search(r"^\s*/\\\[motor\\\]/\s*\{ print \"\[event\] \" \$0; fflush\(\); next \}",
+                     src, re.M)
 
 
 def test_a_picture_is_shrunk_to_a_small_jpeg():

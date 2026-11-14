@@ -117,6 +117,12 @@ def test_res_puts_the_backglass_on_the_screen_picked(tmp_path):
     assert padcabinet.parse_screenres(res.read_text(encoding="utf-8"))[4] == "@-1280"
     assert b"\r\n" in res.read_bytes()
     assert "screen 3 (1280x1024)" in said[0]
+    # a "# V2" ScreenRes (a background picture) stays a V2 file
+    (tmp_path / "ScreenRes.txt").write_text("# V2\n" + SCREENRES + "0\n0\n10\n10\nC:\\bg.png\n",
+                                            encoding="utf-8")
+    padcabinet.write_res(str(out), kit, MONS, b2s_dirs=[])
+    v2 = res.read_text(encoding="utf-8").splitlines()
+    assert v2[1] == "# V2" and v2[-1] == "C:\\bg.png" and v2[6] == "@-1280"
     # no ScreenRes.txt anywhere: the main screen is the playfield, no DMD
     (tmp_path / "ScreenRes.txt").unlink()
     padcabinet.write_res(str(out), padcabinet.update({}, backglass=2), MONS, b2s_dirs=[])

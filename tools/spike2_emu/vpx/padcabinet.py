@@ -191,7 +191,9 @@ def screenres_source(tables_dir, b2s_dirs=None):
 
 
 def parse_screenres(text):
-    """The values of a ScreenRes.txt / .res, comment lines ('#') left out:
+    """The values of a ScreenRes.txt / .res as B2S.Server reads them
+    (B2SScreen.ReadB2SSettingsFromFile: a line starting '#' is skipped,
+    "@<x>" names the screen at that x), comment lines left out:
     playfield size, backglass size, screen, place, the DMD's size, place and
     flip; any past those (the background picture's) kept as they are."""
     vals = [ln.split("#")[0].strip() if not ln.strip().startswith("#") else None
@@ -244,10 +246,13 @@ def write_res(out_vpx, kit, mons, b2s_dirs=None, game_name=None):
         said.append("backglass: %s is your own; left as it is" % os.path.basename(path))
     else:
         src = screenres_source(os.path.dirname(os.path.abspath(out_vpx)), b2s_dirs)
-        base = parse_screenres(open(src, encoding="utf-8", errors="replace").read()) if src else None
+        text = open(src, encoding="utf-8", errors="replace").read() if src else ""
+        base = parse_screenres(text) if src else None
         vals = res_values(base, mon, mons)
+        # B2S reads a "# V2" file's background lines differently: keep it one
+        v2 = any(ln.replace(" ", "").startswith("#V2") for ln in text.splitlines())
         with open(path, "w", encoding="utf-8", newline="\r\n") as f:
-            f.write(RES_MARK + "\n" + "\n".join(vals) + "\n")
+            f.write(RES_MARK + "\n" + ("# V2\n" if v2 else "") + "\n".join(vals) + "\n")
         said.append("backglass: screen %d (%dx%d), %s" % (
             mon["n"], mon["w"], mon["h"], os.path.basename(path)))
     if game_name:

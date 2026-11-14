@@ -97,12 +97,12 @@ def test_the_runtime_makes_the_call_with_a_shows_limits():
     for limit in ("pm_running()", "!pm_in_game()", "ball_end_at && pm_ms() - ball_end_at < 3000ul",
                   'if (show_now.n || proc_alive(id)) show_kill("another show begins");'):
         assert body.index(limit) < call, limit
-    branch = body[call:body.index("rec = ((unsigned (*)(unsigned, void (*)(void), unsigned))")]
+    branch = body[call:body.index("rec = ((proc_create_fn)")]
     assert "arg = pm_port_value(key, -1);" in branch and "if (arg >= 0) {" in branch
     assert "((void (*)(unsigned))(unsigned long)at)((unsigned)arg);" in branch and "show_now.call = 1;" in branch
     # stopped at its length to the tick, as the game's own caller stops it (no margin, as a process show has)
     assert "* 1000ul : SHOW_MAX_MS;" in branch and "+ 500ul" not in branch
-    assert "show_now.call = 0;" in body[body.index("rec = ((unsigned"):]
+    assert "show_now.call = 0;" in body[body.index("rec = ((proc_create_fn)"):]
     stop = _fn(src, "static void show_call_stop(int n)")
     assert 'fn("show_stop_number")' in stop and '"show_numbers_%d"' in stop
     kill = _fn(src, "static void show_kill(const char *why)")

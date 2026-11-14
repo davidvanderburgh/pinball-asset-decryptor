@@ -2936,6 +2936,14 @@ LAMPS_PROVEN = frozenset((
     # in the LED view AND on the node bus - 13/13 RGB magenta, 94/94 single lit, none before or after; light_shots on
     # the bus only (the LED view showed none: the bulk frames it misses), 6/6 tied RGB inserts cyan, no untied one
     "jaws_pro-1.02",
+    # PAD-1283 2026-11-14 (the Spike 3 rig, slot 1, hidden, muted; the bridge's dump/padled): the Spike 3 card of Star
+    # Wars ELG 1.10 with the 64-bit runtime - a mode file's light_insert held DEATH STAR (X2), LEFT OUTLANE and RAMP 6
+    # blinking on the playfield board (board 8, indices 51 / 3 / 64) from its start to its end, LEFT OUTLANE and RAMP 6
+    # dark before and after, DEATH STAR (X2) back to the game's own blink; light_all ff00ff held all 67 named inserts at
+    # 255 for the whole 12 s (4 lit throughout before, 7 after); light_shots cyan blink blinked the three inserts tied to
+    # the mode's scoring shots at 255 (TOP LANE LEFT and YODA MYSTERY dark before and after, LEFT LUKE ARROW the game's
+    # own 192 blink before and after); the game's layer list (pm_lamp_layers) had the runtime's layer on top
+    "star_wars_elg-1.10/spike3",
 ))
 
 

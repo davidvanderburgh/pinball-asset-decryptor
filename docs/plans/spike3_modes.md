@@ -199,3 +199,48 @@ second), and the card the real Write wrote (`spike3_write.write_card`, 890 s: th
 container grown through dm-crypt, the mode installed) booted through its own hook: the runtime read the
 card's port, the start call and the music were swapped in and heard, the end call was held by 478 (above).
 Tests: tests/test_pad1296_spike3_own_sounds.py.
+
+## Lamps and light shows on Spike 3 (PAD-1283)
+
+The lamp layer (a mode's named inserts: `light_insert`, `light_all`, `light_shots`) and the game's own light shows
+(`show_start` / `show_end` / `show_hit`, played as a process of the runtime's) read the game's structs with 4-byte
+pointers. The Spike 3 engine has the same code with 8-byte ones, read in Star Wars ELG 1.10's own allocator, compositor
+and process code:
+
+| struct | Spike 2 | Spike 3 |
+|---|---|---|
+| lamp layer heads (`data lamp_layers`) | free list, active list: 4 bytes each | 8 bytes each (the active list at +8) |
+| lamp group (48 of them) | slots +0, priority +4, owner event +16, next +20 | slots +0, priority +8, period +12, a callback +16, owner +24, next +32 |
+| lamp slot | 40 bytes: light +0, level +2, alpha +3, fade +8, used +36 | the same 40 bytes (its callback and u64 time were already 8-aligned) |
+| event / process record | next +0x84, show id +0x96, exit hooks {fn, arg} x4 at +0xd0 (8 bytes a hook) | 376 bytes: next +232, show id +258, exit hooks x4 at +0x138 (16 bytes a hook) |
+| light count (`data light_count`) | u32 | u64 |
+
+pad_mode_runtime.c reads every one of those pointers as `pm_addr` (the layer list, a group's slot array and next,
+`event_current`, the show process record `proc_create` returns, the exit-hook slots strided by two pointers), and
+passes the allocator its four arguments pointer-sized: the 64-bit allocator keeps the fourth as a callback at +16 that
+its compositor calls when it is not 0, so a 32-bit 0 there (x3's upper half whatever it held) would be called. The
+stock-rule calls (`show_start`, `event_post_replacing`, `event_cancel`, ...) hold their sites as `pm_addr` too, and
+`pm_stock_display_event` takes its handler as an `unsigned long`. Spike 2's mode.so is byte-identical.
+
+s3port.py reads it all off a Spike 3 program (`light_engine`): the lamp layer from the call `lamp_group` makes (the
+heads, the group's priority / next / owner, the light count and the 40-byte slot from its memset), `lamp_free_owner`
+(the function after the allocator that walks the groups by owner; nothing calls it directly, so the bodies are cut at
+their nop padding), the process list, record and exit hooks from `proc_create` and the exit loop beside it, the show
+flag and id from `show_priority`. The Spike 2 port's shows are carried by their record in the show table (`show_start`
+reads it: Spike 2 137 records of 12 bytes, Spike 3 128 of 16; a show is carried when the same record holds the same
+kind and flags), renumbered from 1 - ELG's show_5 and show_6 are records 130 and 134, past Spike 3's 128, so ELG
+carries five (a mode asks for a show by name). Its `lamp` lines are carried by name: a lamp of Spike 3's device table
+(its I/O group and index written from there) whose light ids one of the light table's records holds - every one of
+ELG's 67 (the light ids are unchanged; MILLENNIUM FALCON (OPTIONAL) is not on the Spike 3 build). The `show_proc` id is
+kept when no instruction of the program loads it.
+
+Proof (2026-11-14, Spike 3 rig slot 1, hidden and MUTED, the bridge publishing dump/padled): a mode file's
+`light_insert white blink 400 DEATH STAR (X2),LEFT OUTLANE,RAMP 6` blinked the three on the playfield board (padled
+board 8, indices 51 / 3 / 64) from the mode's start to its end, LEFT OUTLANE and RAMP 6 dark before and after and
+DEATH STAR (X2) back to the game's own 0.5 s blink; `light_all ff00ff solid` held all 67 inserts at 255 for its 12 s;
+`light_shots cyan blink` blinked the three inserts tied to its scoring shots (LEFT LUKE ARROW at our 255 over the
+game's own 192). The game's shows 1-5 each played as process 13201 at a mode's start or end, the long ones stopped at
+their length through `event_cancel`; a layer watch (pm_lamp_layers twice a second) saw each show's own group appear and
+go as it ended or was stopped, the game's list back to the same five every time. No run crashed. The Modes tab offers
+the sweep, the shot lights and the game's shows on the Spike 3 card (`LAMPS_PROVEN` has `star_wars_elg-1.10/spike3`).
+Tests: tests/test_pad1283_spike3_lights.py.

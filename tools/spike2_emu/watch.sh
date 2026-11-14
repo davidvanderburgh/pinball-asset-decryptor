@@ -2101,9 +2101,14 @@ pad_gl_stop() {
 # that memcpy). Raising the rep movsb/stosb thresholds out of reach makes glibc
 # use its vector copy instead: 35-41 fps on the same box. Only the renderer gets
 # it, only on WSL's d3d12 path where it was measured, only on an x86 CPU without
-# AVX2; a caller who exported GLIBC_TUNABLES keeps theirs.
+# AVX2; a caller who exported GLIBC_TUNABLES keeps theirs. PAD-1302: one switch
+# for it, the same as the BoF rig's (tools/bof_emu/run_game.sh): PAD_MEMCPY_TUNE=0
+# never sets it, =1 sets it on any CPU.
 GL_TUNABLES=${GLIBC_TUNABLES:-}
-if [ -z "$GL_TUNABLES" ] && [ "$IS_WSL" = 1 ] \
+if [ -z "$GL_TUNABLES" ] && [ "${PAD_MEMCPY_TUNE:-}" = 1 ]; then
+    GL_TUNABLES=glibc.cpu.x86_rep_movsb_threshold=0x40000000:glibc.cpu.x86_rep_stosb_threshold=0x40000000
+    echo "[watch] cfg renderer GLIBC_TUNABLES=$GL_TUNABLES (PAD_MEMCPY_TUNE=1)"
+elif [ -z "$GL_TUNABLES" ] && [ "$IS_WSL" = 1 ] && [ "${PAD_MEMCPY_TUNE:-}" != 0 ] \
         && grep -q '^flags.*\bsse2\b' /proc/cpuinfo 2>/dev/null \
         && ! grep -q '^flags.*\bavx2\b' /proc/cpuinfo 2>/dev/null; then
     GL_TUNABLES=glibc.cpu.x86_rep_movsb_threshold=0x40000000:glibc.cpu.x86_rep_stosb_threshold=0x40000000

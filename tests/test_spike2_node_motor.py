@@ -180,18 +180,17 @@ def _run(cbin, steps, **env):
 
 
 def test_home_is_the_first_stop_switch(cbin):
-    """cmd 53 lands on input 4 (CAR MOTOR HOME), 600 ms after it was sent."""
+    """The car powers up at rest on input 4 (CAR MOTOR HOME), the config's
+    first stop (PAD-1184), so the game's cmd 53 finds it there: no move."""
     edges = _run(cbin, ["t1000:9", "f" + CONFIG, "f" + HOME,
                         "t1599:9", "t1600:9"])
-    # Sent at 1000, from BETWEEN the stops: nothing to leave, so the only
-    # edge is the arrival, and not a millisecond early.
-    assert edges == [(1600, 9, 4, 1)]
+    assert edges == [(1000, 9, 4, 1)]
 
 
 def test_away_opens_home_then_makes_away(cbin):
     edges = _run(cbin, ["t0:9", "f" + CONFIG, "f" + HOME, "t600:9",
                         "t5000:9", "f" + AWAY, "t5599:9", "t5600:9"])
-    assert edges == [(600, 9, 4, 1),        # home
+    assert edges == [(0, 9, 4, 1),          # at rest home from the configure
                      (5000, 9, 4, 0),       # leaves home at once
                      (5600, 9, 3, 1)]       # reaches away after the travel
 
@@ -216,13 +215,13 @@ def test_a_resend_while_travelling_is_not_a_new_move(cbin):
     edges = _run(cbin, ["t0:9", "f" + CONFIG, "f" + AWAY,
                         "t300:9", "f" + AWAY, "t500:9", "f" + AWAY,
                         "t600:9", "t900:9"])
-    assert edges == [(600, 9, 3, 1)]
+    assert edges == [(0, 9, 4, 1), (0, 9, 4, 0), (600, 9, 3, 1)]
 
 
 def test_a_move_to_where_it_already_is_moves_nothing(cbin):
     edges = _run(cbin, ["t0:9", "f" + CONFIG, "f" + HOME, "t600:9",
                         "t2000:9", "f" + HOME, "t3000:9"])
-    assert edges == [(600, 9, 4, 1)]
+    assert edges == [(0, 9, 4, 1)]
 
 
 def test_turned_round_mid_travel(cbin):
@@ -230,7 +229,7 @@ def test_turned_round_mid_travel(cbin):
     edges = _run(cbin, ["t0:9", "f" + CONFIG, "f" + HOME, "t600:9",
                         "t1000:9", "f" + AWAY, "t1200:9", "f" + HOME,
                         "t1700:9", "t1800:9"])
-    assert edges == [(600, 9, 4, 1), (1000, 9, 4, 0), (1800, 9, 4, 1)]
+    assert edges == [(0, 9, 4, 1), (1000, 9, 4, 0), (1800, 9, 4, 1)]
 
 
 def test_no_config_no_car(cbin):
@@ -239,9 +238,9 @@ def test_no_config_no_car(cbin):
 
 
 def test_travel_time_knob(cbin):
-    edges = _run(cbin, ["t0:9", "f" + CONFIG, "f" + HOME, "t249:9", "t250:9"],
+    edges = _run(cbin, ["t0:9", "f" + CONFIG, "f" + AWAY, "t249:9", "t250:9"],
                  PAD_MOTOR_MS="250")
-    assert edges == [(250, 9, 4, 1)]
+    assert edges == [(0, 9, 4, 1), (0, 9, 4, 0), (250, 9, 3, 1)]
 
 
 def test_off_moves_nothing(cbin):
@@ -253,8 +252,8 @@ def test_off_moves_nothing(cbin):
 def test_node_and_motor_come_from_the_frame(cbin):
     """Node 10 motor 1, stops 5 and 2: nothing about john_wick is hard-coded."""
     edges = _run(cbin, ["t0:10", "f" + OTHER,
-                        "f8a075301fa14c8004600", "t600:10"])
-    assert edges == [(600, 10, 5, 1)]
+                        "f8a075401fa14c8004600", "t600:10"])
+    assert edges == [(0, 10, 5, 1), (0, 10, 5, 0), (600, 10, 2, 1)]
 
 
 # ---- PAD-249: an ENCODER motor, james_bond_le's JETPACK --------------------
@@ -404,10 +403,10 @@ BAT_TT_HOME = "89075302fa14c8004700"          # cmd 53 on motor 2
 
 
 def test_cmd_55_runs_an_end_stop_motor_to_the_input_it_names(cbin):
-    """The turntable, between its stops at boot, reaches POS. #2 (input 3)."""
+    """The turntable, at rest HOME at boot, reaches POS. #2 (input 3)."""
     edges = _run(cbin, ["t0:9", "f" + BAT_TT, "t1000:9", "f" + BAT_TT_POS2,
                         "t1599:9", "t1600:9"])
-    assert edges == [(1600, 9, 3, 1)]
+    assert edges == [(0, 9, 2, 1), (1000, 9, 2, 0), (1600, 9, 3, 1)]
 
 
 def test_cmd_55_leaves_the_stop_it_was_at(cbin):
@@ -416,7 +415,7 @@ def test_cmd_55_leaves_the_stop_it_was_at(cbin):
     edges = _run(cbin, ["t0:9", "f" + BAT_TT, "f" + BAT_TT_HOME, "t600:9",
                         "t2000:9", "f" + BAT_TT_POS2, "t2600:9",
                         "t4000:9", "f" + BAT_TT_HOME, "t4600:9"])
-    assert edges == [(600, 9, 2, 1),
+    assert edges == [(0, 9, 2, 1),
                      (2000, 9, 2, 0), (2600, 9, 3, 1),
                      (4000, 9, 3, 0), (4600, 9, 2, 1)]
 
@@ -425,7 +424,7 @@ def test_cmd_55_resend_and_already_there_move_nothing(cbin):
     edges = _run(cbin, ["t0:9", "f" + BAT_TT, "f" + BAT_TT_POS2,
                         "t300:9", "f" + BAT_TT_POS2, "t600:9",
                         "t2000:9", "f" + BAT_TT_POS2, "t3000:9"])
-    assert edges == [(600, 9, 3, 1)]
+    assert edges == [(0, 9, 2, 1), (0, 9, 2, 0), (600, 9, 3, 1)]
 
 
 def test_cmd_55_to_a_stop_is_that_end(cbin):
@@ -433,7 +432,7 @@ def test_cmd_55_to_a_stop_is_that_end(cbin):
     edges = _run(cbin, ["t0:9", "f" + BAT_CRANE, "f" + BAT_CRANE_POS6,
                         "t600:9", "t2000:9", "f89075401fa14c8004600",
                         "t3000:9"])
-    assert edges == [(600, 9, 8, 1)]
+    assert edges == [(0, 9, 13, 1), (0, 9, 13, 0), (600, 9, 8, 1)]
 
 
 def test_cmd_55_keeps_the_off_switch(cbin):
@@ -473,7 +472,8 @@ def test_batman_boot_test_move_then_home(cbin):
     POS. #1 HOME, and says done again."""
     steps = ["t0:9", "f" + BAT_CRANE, "f" + BAT_CRANE_POS6, "t600:9", "s9:1",
              "t650:9", "f" + BAT_CRANE_HOME, "s9:1", "t1250:9", "s9:1"]
-    assert _run(cbin, steps) == [(600, 9, 8, 1), (650, 9, 8, 0), (1250, 9, 13, 1)]
+    assert _run(cbin, steps) == [(0, 9, 13, 1), (0, 9, 13, 0), (600, 9, 8, 1),
+                                 (650, 9, 8, 0), (1250, 9, 13, 1)]
     assert _replies(cbin, steps) == [(600, "00002000"), (650, "00000100"),
                                      (1250, "00002000")]
 
@@ -488,4 +488,19 @@ def test_each_motor_reports_its_own_move(cbin):
 def test_cmd_55_without_an_input_flag_is_not_played(cbin):
     """A 55 whose byte 4 names no input (no 0x40) is left alone."""
     assert _run(cbin, ["t0:9", "f" + BAT_TT, "f89095502030080f401025d00",
-                       "t5000:9"]) == []
+                       "t5000:9"]) == [(0, 9, 2, 1)]
+
+
+def test_batman_turntable_is_home_on_a_boot_with_no_test_move(cbin):
+    """PAD-1184. batman 1.14 sends the turntable its test move only on a Guided
+    Setup boot; on every later boot it configures it and sends nothing. With
+    no position switch made it never commanded the turntable again, so no Bat
+    Phone hurry-up ever turned it (Mike St P's v1.429.8 log; the rig on a
+    second boot). Configured, it is at rest HOME: switch 77's input 2 made,
+    the crane's HOME (input 13) the same, and nothing else."""
+    assert _run(cbin, ["t0:9", "f" + BAT_CRANE, "f" + BAT_TT,
+                       "t60000:9"]) == [(0, 9, 13, 1), (0, 9, 2, 1)]
+    # a later move still leaves HOME first, never two places made at once
+    assert _run(cbin, ["t0:9", "f" + BAT_TT, "t9000:9", "f" + BAT_TT_POS2,
+                       "t9600:9"]) == [(0, 9, 2, 1), (9000, 9, 2, 0),
+                                       (9600, 9, 3, 1)]

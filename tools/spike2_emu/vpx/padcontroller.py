@@ -27,6 +27,15 @@ tool uses:
   OUT           by a poll thread (never mapped, never held open: a held
                 handle reads a frozen cache over 9p).
 
+PAD-1306: BOTH NOW GO THROUGH ONE HELPER, padlink.py, run inside WSL beside
+the game. It maps padled and padsw there, compares them every 2 ms and
+pushes only the changes up the wsl.exe pipe (RigLink keeps the copy the poll
+reads), and takes the switch lines swkeys.py took, reading each back off the
+merge and writing it again until the game has it (padsw.Confirmer). The two
+lines above are the fallback: no HELLO, an ERR, or 6 s without a ping and the
+session drops back to them, every held switch handed over. PAD_VPX_LINK=0
+starts there.
+
 The LCD is the game's own window: nothing to bridge. Sound is the rig's.
 
 NUMBERING, shared with PADSPIKE2.vbs and the .vpxmap.json files:
@@ -948,6 +957,210 @@ class SwitchPipe:
         self.held.clear()
 
 
+#: PAD-1306: PAD_VPX_LINK=0 keeps the old way (9p reads + swkeys) for a session
+LINK_ON = os.environ.get("PAD_VPX_LINK", "1") != "0"
+
+
+class RigLink:
+    """The run's padled and merged switches PUSHED from inside WSL (padlink.py),
+    and the switch lines sent back down the same helper (PAD-1306).
+
+    SwitchPipe's interface (set / pause / close / held), plus `blocks()`: the
+    newest (padled, mrg) the helper sent, or None while the link is not up -
+    the poll then reads over 9p as it always did. The link is trusted from
+    its HELLO; it is given up when the helper ends, says ERR, or sends nothing
+    for SILENT_S (it pings every 2 s), and from then on the session runs on
+    SwitchPipe and 9p reads, with every switch still held handed over."""
+
+    HELLO_S = 20.0             # wsl.exe + python3 starting on a busy machine
+    SILENT_S = 6.0
+
+    def __init__(self, rig, spawn=None, clock=time.monotonic):
+        self.rig = rig
+        self.clock = clock
+        self.held = {}
+        self.state = "starting"
+        self.why = ""
+        self.led = None
+        self.mrg = None
+        self.frames = 0
+        self.news = threading.Event()   # set on every change pushed (the poll waits on it)
+        self.sent = 0
+        self.lost = []
+        self._queue = []           # switch lines said before HELLO
+        self._fallback = None
+        self._lock = threading.Lock()
+        self._t = self._last = clock()
+        self._p = None
+        try:
+            self._p = (spawn or self._spawn)()
+        except Exception as exc:                            # noqa: BLE001
+            self._give_up("not started: %s" % exc)
+            return
+        if self._p is not None:
+            threading.Thread(target=self._read, daemon=True).start()
+
+    def _cmd(self):
+        here = padpath.to_wsl(os.path.join(RIG, "padlink.py"), self.rig.distro)
+        return (self.rig.wsl_head() + ["-e", "env"] + self.rig.wsl_env()
+                + ["PAD_LINK_READ=%d" % READ_N, "python3", here])
+
+    def _spawn(self):
+        cmd = self._cmd()
+        log("link: %s" % " ".join(cmd))
+        return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, creationflags=_CREATE_NO_WINDOW)
+
+    # -- what comes up from WSL
+    def _read(self):
+        p = self._p
+        try:
+            for raw in p.stdout:
+                if not self.feed(raw):
+                    break
+        except Exception as exc:                            # noqa: BLE001
+            self._give_up("read failed: %s" % exc)
+            return
+        self._give_up("the helper ended")
+
+    def feed(self, raw):
+        """One line from padlink.py; False once the link is over."""
+        text = raw.decode("ascii", "replace").strip() if isinstance(raw, bytes) else raw.strip()
+        if not text:
+            return True
+        tag, _, rest = text.partition(" ")
+        with self._lock:
+            if self.state == "down":
+                return False
+            self._last = self.clock()
+            try:
+                if tag == "HELLO":
+                    self.state = "hello"
+                elif tag == "F":
+                    self.led = bytearray.fromhex(rest)
+                elif tag == "G":
+                    self.mrg = bytearray.fromhex(rest)
+                elif tag in ("L", "M") and self.led is not None and self.mrg is not None:
+                    into = self.led if tag == "L" else self.mrg
+                    for run in rest.split():
+                        off, _, hx = run.partition(":")
+                        b = bytes.fromhex(hx)
+                        o = int(off)
+                        into[o:o + len(b)] = b
+                    self.frames += 1
+                    self.news.set()
+                elif tag == "LOST":
+                    self.lost.append(rest)
+                    log("link: switch %s never reached the game" % rest)
+                elif tag == "ERR":
+                    pass
+            except ValueError:
+                log("link: a line it could not read: %s" % text[:80])
+                return True
+            up = self.state == "hello" and self.led is not None and self.mrg is not None
+        if tag == "ERR":
+            self._give_up("helper: %s" % rest)
+            return False
+        if up and self.state != "up":
+            self._up()
+        return True
+
+    def _up(self):
+        with self._lock:
+            self.state = "up"
+            queued, self._queue = self._queue, []
+        log("link up after %.1f s: lights, coils and switches pushed from WSL"
+            % (self.clock() - self._t))
+        for ln in queued:
+            self._write(ln)
+
+    # -- what goes down
+    def set(self, sw, level):
+        level = 1 if level else 0
+        if self.held.get(sw) == level:
+            return True
+        self.held[sw] = level
+        self.sent += 1
+        return self._send(b"%d %d\n" % (sw, level))
+
+    def pause(self):
+        return self._send(b"pause\n")
+
+    def _send(self, line):
+        self.alive()
+        with self._lock:
+            if self._fallback is None and self.state != "up":
+                self._queue.append(line)
+                return True
+        if self._fallback is not None:
+            return self._fallback._send(line)
+        return self._write(line)
+
+    def _write(self, line):
+        try:
+            self._p.stdin.write(line)
+            self._p.stdin.flush()
+            return True
+        except Exception as exc:                            # noqa: BLE001
+            self._give_up("write failed: %s" % exc)
+            return self._fallback._send(line) if self._fallback else False
+
+    # -- health
+    def alive(self):
+        """Up and heard from lately; gives the link up when it is not."""
+        now = self.clock()
+        if self.state == "up" and now - self._last > self.SILENT_S:
+            self._give_up("silent %.0f s" % (now - self._last))
+        elif self.state in ("starting", "hello") and now - self._t > self.HELLO_S:
+            self._give_up("no HELLO in %.0f s" % self.HELLO_S)
+        return self.state == "up"
+
+    def blocks(self):
+        if not self.alive():
+            return None
+        with self._lock:
+            return bytes(self.led), bytes(self.mrg)
+
+    def _give_up(self, why):
+        with self._lock:
+            if self.state == "down":
+                return
+            self.state, self.why = "down", why
+            self._queue = []
+        log("link down (%s): back to reading over \\\\wsl.localhost and swkeys" % why)
+        self._kill()
+        fb = SwitchPipe(self.rig)
+        for sw, level in sorted(self.held.items()):
+            fb.set(sw, level)
+        self._fallback = fb
+
+    def _kill(self):
+        p, self._p = self._p, None
+        if p is None:
+            return
+        try:
+            if p.poll() is None:
+                p.stdin.close()            # EOF: the helper releases what it held
+                p.wait(timeout=3)
+        except Exception:                                   # noqa: BLE001
+            try:
+                p.kill()
+            except Exception:                               # noqa: BLE001
+                pass
+
+    def status(self):
+        return {"state": self.state, "why": self.why, "frames": self.frames,
+                "lost": list(self.lost[-8:])}
+
+    def close(self):
+        with self._lock:
+            self.state = "down"
+        self._kill()
+        if self._fallback is not None:
+            self._fallback.close()
+        self.held.clear()
+
+
 # ---------------------------------------------------------------- the bridge
 
 #: how far inside the playfield's edge a press grabs it to resize (the game
@@ -1607,6 +1820,9 @@ class Bridge:
         self.max_id = padsw.MAX_ID         # one past the highest switch id (set_game)
         self.polls = 0
         self.poll_fail = 0
+        self.link_polls = 0             # polls served by the pushed copy (PAD-1306)
+        self.link_idle = 0              # ...and those with nothing new to decode
+        self._link_mark, self._link_t = None, 0.0
         self.last_poll_ms = 0.0
         self._fake = {}                    # name -> state for switch_fakes
         self._early = {}                   # switch id -> level the table set before the run was up
@@ -1752,7 +1968,12 @@ class Bridge:
 
     def _attach(self, data):
         """The run is up: read its tables, open the switch pipe, own the balls."""
-        pipe = self.rigmod.Pipe(self.rig) if self.slots else SwitchPipe(self.rig)
+        if self.slots:
+            pipe = self.rigmod.Pipe(self.rig)
+        elif LINK_ON and sys.platform == "win32" and isinstance(self.rig, Rig):
+            pipe = RigLink(self.rig)       # PAD-1306: pushed from WSL, not read over 9p
+        else:
+            pipe = SwitchPipe(self.rig)
         with self.lock:
             early, self._early = self._early, {}
             self.pipe = pipe
@@ -1790,6 +2011,9 @@ class Bridge:
         log("attached to %s after %.0f s" % (self.rig.how, time.monotonic() - self.start_t))
         if self.launch is not None:
             self._boot_watch()
+
+    #: PAD-1306: the longest a link poll goes without decoding the block
+    LINK_STALE_S = 0.5
 
     # -- PAD-963: a started run is up when the game is in attract
     #: how long a boot log may stay unreadable before the run counts as up
@@ -2059,7 +2283,8 @@ class Bridge:
                 os.remove(self.rig.ballfeed_off_path())
             except OSError:
                 pass
-        log("stop after %d polls (%d failed)" % (self.polls, self.poll_fail))
+        log("stop after %d polls (%d off the link, %d of them idle, %d failed)"
+            % (self.polls, self.link_polls, self.link_idle, self.poll_fail))
         self._loading_end("up")                  # the table closed while the game started
         if self.launch is not None:
             self.launch.stop()           # what this bridge started, it stops
@@ -2225,7 +2450,21 @@ class Bridge:
                 self._watch_focus()
                 self._watch_player()
             self.last_poll_ms = (time.monotonic() - t0) * 1000.0
+            self._poll_wait()
+
+    #: PAD-1306: a poll on the link waits for news, but never closer than this
+    LINK_MIN_S = 0.003
+
+    def _poll_wait(self):
+        """Sleep to the next poll: POLL_S, or on the link until it sends a
+        change (it pushes within ~2 ms of the game), at least LINK_MIN_S on."""
+        news = getattr(self.pipe, "news", None)
+        if news is None or getattr(self.pipe, "state", "") != "up":
             time.sleep(POLL_S)
+            return
+        time.sleep(self.LINK_MIN_S)
+        news.wait(max(0.0, POLL_S - self.LINK_MIN_S))
+        news.clear()
 
     def _find_player(self):
         """The player window of a table that ran the controller without
@@ -2619,7 +2858,28 @@ class Bridge:
     def _poll_once(self):
         if self.slots:
             return self._poll_once_s1()
-        data = read_block(self.rig.led_path(), READ_N)
+        link = self.pipe if hasattr(self.pipe, "blocks") else None
+        pushed = None
+        if link is not None and link.alive():
+            # PAD-1306: the link's copy, no 9p read - and when the link sent
+            # nothing and the table no switch since the last look, nothing
+            # can have moved but a coil's own off time, so the block is not
+            # decoded again (that decode was most of the poll's CPU)
+            now0 = time.monotonic()
+            mark = (getattr(link, "frames", None), getattr(link, "sent", None))
+            if (mark == self._link_mark and now0 - self._link_t < self.LINK_STALE_S
+                    and not any(st.get("moving") and st["moving"] <= now0 for st in self._fake.values())
+                    and not any(self._link_t < t <= now0 for t in self._coil_off_at.values())):
+                self.link_idle += 1
+                return
+            pushed = link.blocks()
+            self._link_mark, self._link_t = mark, now0
+        if pushed:
+            data, mrg = pushed
+            self.link_polls += 1
+        else:
+            data = read_block(self.rig.led_path(), READ_N)
+            mrg = None
         if not data or len(data) < coilmap.DRIVE_READ or not coilmap.has_magic(data):
             self.poll_fail += 1
             return
@@ -2628,11 +2888,14 @@ class Bridge:
             self._read_tables(data)
             if self.sw_ids:
                 log("switch table arrived: %d ids" % len(self.sw_ids))
-        sw = read_block(self.rig.sw_path(), padsw.OFF_MRG + padsw.MAX_ID)
+        if mrg is None:
+            sw = read_block(self.rig.sw_path(), padsw.OFF_MRG + padsw.MAX_ID)
+            if sw and len(sw) >= padsw.OFF_MRG + padsw.MAX_ID:
+                mrg = sw[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
         now = time.monotonic()
         with self.lock:
-            if sw and len(sw) >= padsw.OFF_MRG + padsw.MAX_ID:
-                self.mrg = sw[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
+            if mrg:
+                self.mrg = mrg
             self._poll_lamps(data)
             self._poll_coils(data, now)
             for n, (node, motor) in self.map.mechs.items():
@@ -2942,6 +3205,7 @@ class Bridge:
                 "attached": self.attached,
                 "started": self.launch.slot if self.launch else None,
                 "held": dict(self.pipe.held) if self.pipe else {},
+                "link": (self.pipe.status() if isinstance(self.pipe, RigLink) else None),
                 "lamps_on": sum(1 for v in self.lamp_state.values() if v),
                 "dof": (("up, %d sent" % self.dof.sent) if self.dof.up else self.dof.why)
                 if self.dof else "not asked",

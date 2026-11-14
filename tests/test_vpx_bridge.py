@@ -6851,6 +6851,16 @@ def test_a_block_wsl_has_and_windows_cannot_read_stops_the_run(tmp_path, monkeyp
         assert ended == [] and stopped == [] and b.launch is not None
 
 
+def test_loading_status_that_is_not_utf8_still_reads(tmp_path):
+    # PAD-1247: a status file in the ANSI code page ("…" as 0x85) raised
+    # UnicodeDecodeError in Tk's timer and froze the window on its last step
+    pl = pytest.importorskip("padloading")
+    st = tmp_path / "status.txt"
+    st.write_bytes(b"failed Press Restart WSL\x85 now")
+    assert pl.read_status(str(st)).startswith("failed Press Restart WSL")
+    assert pl.read_status(str(tmp_path / "none.txt")) == ""
+
+
 def test_an_unquoted_server_path_with_spaces_is_still_registered(tmp_path):
     # PAD-1229: pywin32 writes LocalServer32 as GetShortPathName(pythonw.exe)
     # unquoted; with 8.3 names off that is the long path, spaces and all,

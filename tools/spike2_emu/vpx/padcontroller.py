@@ -875,8 +875,8 @@ def block_in_wsl(rig, runner=None, timeout=20):
 
 
 #: what the loading window says when WSL's link to Windows is stuck (PAD-1247)
-WSL_STUCK = ("It is running inside WSL, but Windows cannot reach it, so the table "
-             "cannot play it and its sound does not come through. "
+WSL_STUCK = ("WSL's link to Windows is stuck: the game runs inside WSL, but the "
+             "table cannot reach it and its sound does not come through. "
              "Close Visual Pinball, press Restart WSL… on PAD's Emulate tab, "
              "then open the table again.")
 

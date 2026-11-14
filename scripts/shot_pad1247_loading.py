@@ -66,11 +66,11 @@ def run(name, lines, status_line=""):
     hwnd = find("PAD - starting rush_le")
     print(name, "window:", bool(hwnd), flush=True)
     if status_line:
-        open(status, "w").write(status_line)
+        open(status, "w", encoding="utf-8").write(status_line)
     open(logf, "a").write("\n".join(lines) + "\n")
     time.sleep(2)
     shoot(hwnd, os.path.join(OUT, PRE + name + ".png"))
-    open(status, "w").write("up")
+    open(status, "w", encoding="utf-8").write("up")
     try:
         p.wait(15)
     except subprocess.TimeoutExpired:

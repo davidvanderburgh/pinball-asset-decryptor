@@ -163,12 +163,8 @@ void pm_commas(char *out, unsigned cap, uint64_t v)
  *   callout <role> <id>          scene <role> <40-hex id>
  *   text <name> <rest of line>   anything else a mode may want
  * Looked for at /usr/local/padmode/game.port (a card) then /dump/game.port (the rig). */
-#if PM_A64
-/* PAD-1269: a Spike 3 card carries the runtime on its games partition (the rootfs is the signed image's) */
-static const char *const PORT_FILES[] = { "/games/pad/padmode/game.port", "/dump/game.port" };
-#else
-static const char *const PORT_FILES[] = { "/usr/local/padmode/game.port", "/dump/game.port" };
-#endif
+/* PAD-1269/1272: a Spike 3 card carries it on its games partition (PM_CARD_DIR, pad_mode.h) */
+static const char *const PORT_FILES[] = { PM_CARD_DIR "game.port", "/dump/game.port" };
 
 /* PAD-1269: where the game program is loaded. A Spike 2 game is ET_EXEC (0: the port's addresses are where they are);
  * a Spike 3 game is a PIE, so every `site` and `data` address the port names is the program's own (its ELF's), and
@@ -2741,7 +2737,7 @@ static int str_starts(const char *s, const char *prefix);   /* below */
 #define CABS_MAX     32
 #define CAB_STEPS    128
 #define CABS_REQS    8192
-static const char *const CABS_FILES[] = { "/usr/local/padmode/cabshow.cfg", "/dump/cabshow.cfg" };
+static const char *const CABS_FILES[] = { PM_CARD_DIR "cabshow.cfg", "/dump/cabshow.cfg" };
 #define CAB_SIDS     8
 struct cab_show { char name[32]; unsigned sid[CAB_SIDS]; int n_sid, loop, n[2]; struct cx_step st[2][CAB_STEPS]; };
 static struct cab_show cabs[CABS_MAX];
@@ -9702,7 +9698,7 @@ static void wizf_arm(void)
 
 typedef uint64_t (*stock_vfn8)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
 typedef uint64_t (*stock_vfn1)(unsigned);
-static const char *const STOCK_FILES[] = { "/usr/local/padmode/stock.cfg", "/dump/stock.cfg" };
+static const char *const STOCK_FILES[] = { PM_CARD_DIR "stock.cfg", "/dump/stock.cfg" };
 
 struct stock_rule {
     unsigned id, vt, obj;
@@ -14321,7 +14317,7 @@ static void chg_scores_arm(void)
 #define AIT_ITEMS    48
 #define AIT_ANCHORS  16
 #define AIT_BEAT_MS  600                   /* the page process slept no frame for this long: it is gone */
-static const char *const AIT_FILES[] = { "/usr/local/padmode/attract.cfg", "/dump/attract.cfg" };
+static const char *const AIT_FILES[] = { PM_CARD_DIR "attract.cfg", "/dump/attract.cfg" };
 struct ait_item { unsigned entry, ms; unsigned char after, anchor; char clip[64]; };
 static struct ait_item ait_items[AIT_ITEMS];
 static unsigned ait_n, ait_anchors, ait_bad, ait_said;
@@ -16042,7 +16038,7 @@ static void switches_arm(void)
  * who plays all three of team 2's turns (P1, P2, P3, P2, P4, P2 a ball); one Start adds all four ("4 PLAYERS ADDED",
  * "TEAM 1: P1, P3, P4", "TEAM 2: P2"), and its scores go on a TEAM 3V1 board of their own (coop.team_kind says which
  * team game it is: 4 2v2, 3 2v1, 5 3v1). */
-static const char *const COOP_FILES[] = { "/usr/local/padmode/coop.cfg", "/dump/coop.cfg" };
+static const char *const COOP_FILES[] = { PM_CARD_DIR "coop.cfg", "/dump/coop.cfg" };
 static struct {
     int on;                              /* coop.cfg says so and the sites are hooked */
     unsigned button;                     /* the switch held at Start to add a teammate (0: none) */
@@ -20542,7 +20538,7 @@ static void coop_arm(void)
 #define HAND_CHANGES 48                     /* handicap.py MAX_CHANGES: the owner may customize a level */
 #define HAND_CACHES 16
 #define HAND_MSG_ID 0xC0091u             /* our borrow of the top line (COOP_MSG_ID + 1) */
-static const char *const HAND_FILES[] = { "/usr/local/padmode/handicap.cfg", "/dump/handicap.cfg" };
+static const char *const HAND_FILES[] = { PM_CARD_DIR "handicap.cfg", "/dump/handicap.cfg" };
 static struct hand_change { unsigned id, op, v, lo, hi; } hand_lv[2 * HAND_LEVEL_MAX + 1][HAND_CHANGES];
 static unsigned hand_lv_n[2 * HAND_LEVEL_MAX + 1];
 static struct {
@@ -21074,7 +21070,7 @@ static void hand_arm(void)
 #define IDLE_MS_DEFAULT 6000u
 #define IDLE_SONGS 20u                          /* the songs the tracker knows (the table's rows) */
 #define IDLE_JUMP 88200u                        /* 2 s of a song: more between two calls is a jump, not play */
-static const char *const IDLE_FILES[] = { "/usr/local/padmode/idle.cfg", "/dump/idle.cfg" };
+static const char *const IDLE_FILES[] = { PM_CARD_DIR "idle.cfg", "/dump/idle.cfg" };
 static unsigned (*idle_game)(unsigned, unsigned, unsigned, unsigned);         /* the game's check (its trampoline) */
 static unsigned (*idle_track_game)(unsigned, unsigned, unsigned, unsigned);   /* the song tracker (its trampoline) */
 static volatile unsigned long idle_score_ms;    /* when the last score was */
@@ -21255,7 +21251,7 @@ static void idle_arm(void)
  *   only                 the card carries no modes: armed before the score gate with nothing else (the scores stay on
  *                        Insider Connected, as the game's own Competition keeps them)
  * It scores nothing, so it arms before the score gate. */
-static const char *const COMP_FILES[] = { "/usr/local/padmode/comp.cfg", "/dump/comp.cfg" };
+static const char *const COMP_FILES[] = { PM_CARD_DIR "comp.cfg", "/dump/comp.cfg" };
 #define COMP_KIND 0x200u                         /* the entry's kind until a pick makes it the game's */
 static struct {
     int armed, only, on, pending, said_game;
@@ -21607,7 +21603,7 @@ static void comp_arm(void)
 #define FEED_REQ_MAX    (FEED_JSON_MAX + 384)
 #define FEED_HOST_MAX   96
 #define FEED_PATH_MAX   160
-static const char *const FEED_FILES[] = { "/usr/local/padmode/scorefeed.cfg", "/dump/scorefeed.cfg" };
+static const char *const FEED_FILES[] = { PM_CARD_DIR "scorefeed.cfg", "/dump/scorefeed.cfg" };
 
 extern int  socket(int, int, int) __attribute__((weak));
 extern int  connect(int, const void *, unsigned) __attribute__((weak));
@@ -22742,7 +22738,7 @@ static int insider_arm(void)
 #define CLIPV_SLOTS     512
 #define CLIPV_PICKS     16                  /* the game's own clip and up to 15 more */
 #define CLIPV_SAY_MAX   200
-static const char *const CLIPV_FILES[] = { "/usr/local/padmode/clips.cfg", "/dump/clips.cfg" };
+static const char *const CLIPV_FILES[] = { PM_CARD_DIR "clips.cfg", "/dump/clips.cfg" };
 struct clipv {
     const char *scene;                      /* PAD-723: the bank scene of an sclip line, 0 = the port's video_bank */
     int only;                               /* PAD-723: `*<id>`: the card's only scene with the name */
@@ -23128,7 +23124,7 @@ static void clipv_arm(void)
 #define SNDT_MAX        16                  /* files one sound plays in turn, its own one included */
 #define SNDT_SLOTS      512                 /* sounds that play files in turn */
 #define SNDT_GAP        150                 /* ms: a lookup this soon after the slot's last is the same play */
-static const char *const SNDM_FILES[] = { "/usr/local/padmode/sounds.cfg", "/dump/sounds.cfg" };
+static const char *const SNDM_FILES[] = { PM_CARD_DIR "sounds.cfg", "/dump/sounds.cfg" };
 struct sndm {
     unsigned id;
     unsigned char mode, said;
@@ -24724,7 +24720,7 @@ static void sndm_arm(void)
 extern void *dlopen(const char *, int);
 extern void *dlsym(void *, const char *);
 
-static const char *const PIC_FILES[] = { "/usr/local/padmode/picture.cfg", "/dump/picture.cfg" };
+static const char *const PIC_FILES[] = { PM_CARD_DIR "picture.cfg", "/dump/picture.cfg" };
 enum { PIC_B, PIC_C, PIC_S, PIC_N };
 static const char *const PIC_NAMES[PIC_N] = { "brightness", "contrast", "saturation" };
 enum { PIC_SOURCE, PIC_LINK, PIC_USE, PIC_SWAP, PIC_GOTS };

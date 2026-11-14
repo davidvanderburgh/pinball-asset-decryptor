@@ -56,6 +56,7 @@ class TitleProfile:
     # GODZILLA_PRO_1_15) keeps meaning "this title can do everything the tab offers".
     version: str = ""            # the game build, as its port says ("1.15")
     port: str = ""               # the port's file name in PORTS_DIR (or an absolute path)
+    arch: str = "arm"            # PAD-1277: the machine its build runs on - "arm" Spike 2, "a64" Spike 3
     proven: bool = True          # False: the port was drafted and never run
     proven_note: str = ""        # why it is not proven
     example_start_shot: str = ""
@@ -2466,6 +2467,49 @@ def _hud_is_profiled(md5):
     return md5 in scene_write.PROFILES
 
 
+#: PAD-1277: a Spike 3 profile's key ends in this, after the version (``star_wars_elg_1_10_spike3``):
+#: Star Wars ELG 1.10 is a Spike 2 build AND a Spike 3 build, and a project's modes name their
+#: title by key, so the two must never share one.
+SPIKE3_KEY = "_spike3"
+#: ... and its label ends in this, so the two builds read apart wherever both are named.
+SPIKE3_LABEL = " (Spike 3)"
+
+
+def profile_key(game, version, arch="arm"):
+    """A profile's key: the game dir and the version with its dots as underscores
+    (``turtles_pro_1_59``), and :data:`SPIKE3_KEY` after it for a Spike 3 build."""
+    return "%s_%s%s" % (game, str(version).replace(".", "_"), SPIKE3_KEY if arch == "a64" else "")
+
+
+def table_key(game, version, arch="arm"):
+    """The key the proven-in-the-emulator tables (LAMPS_PROVEN, TITLE_SCENES ...) use for a
+    build: ``<game>-<version>``, with ``/spike3`` after it for a Spike 3 build."""
+    return "%s-%s%s" % (game, version, "/spike3" if arch == "a64" else "")
+
+
+def _key_build(key):
+    """A profile key with :data:`SPIKE3_KEY` taken off (the game dir + version that are left)."""
+    key = str(key or "")
+    return key[:-len(SPIKE3_KEY)] if key.endswith(SPIKE3_KEY) else key
+
+
+#: what a shipped Spike 3 port's name starts with in a profile (:func:`_port_name`)
+SPIKE3_PORT_PREFIX = "spike3/"
+
+
+def _port_name(path):
+    """What a profile records as its port (:func:`port_path` joins it back): the file name for
+    a shipped Spike 2 port, ``spike3/<name>`` for a shipped Spike 3 one, else the whole path."""
+    from . import mode_runtime
+    d = os.path.normcase(os.path.dirname(os.path.abspath(path)))
+    base = os.path.basename(path)
+    if d == os.path.normcase(os.path.abspath(PORTS_DIR)):
+        return base
+    if d == os.path.normcase(os.path.abspath(mode_runtime.spike3_ports_dir())):
+        return SPIKE3_PORT_PREFIX + base
+    return path
+
+
 def profile_from_port(path):
     """A :class:`TitleProfile` derived from one SDK port file (item 148): its shots,
     callout ids, light owner and set, scenes and example shot, what the runtime would arm
@@ -2479,6 +2523,12 @@ def profile_from_port(path):
     game, version = port["game"].strip(), port["version"].strip()
     if not game or not version:
         raise ModeProjectError("%s names no game and version" % base)
+    from . import mode_runtime
+    arch = mode_runtime.port_arch(path)
+    # PAD-1277: what the emulator proved of a build is keyed "<game>-<version>"; a Spike 3
+    # build of a game folder and version Spike 2 also has is another program, so its proofs
+    # are its own ("<game>-<version>/spike3") and none of the Spike 2 build's carry over.
+    tkey = table_key(game, version, arch)
     sites, data, values = port["site"], port["data"], port["value"]
     missing = core_missing(port)
     if missing:
@@ -2492,9 +2542,9 @@ def profile_from_port(path):
                     and all(n in values for n in v))
     if "clips" not in runtime and (_clip_layer(sites, data, values) or _clip_v2(sites, data, values, port["scene"])):
         runtime = tuple(c for c in RUNTIME_NEEDS if c in runtime or c == "clips")
-    label = title_label(game, version)
+    label = title_label(game, version) + (SPIKE3_LABEL if arch == "a64" else "")
     callouts, scenes = port["callout"], port["scene"]
-    measured = TITLE_SCENES.get("%s-%s" % (game, version), {})
+    measured = TITLE_SCENES.get(tkey, {})
     cannot = []
     limits = []
 
@@ -2504,14 +2554,14 @@ def profile_from_port(path):
     if "callout" not in runtime:
         no("countdown", "The app has not found how %(label)s plays its callouts, so the game's "
                         "own voice cannot count down.")
-    elif not callouts.get("countdown") and "%s-%s" % (game, version) in COUNTDOWN_NO_NUMBERS:
+    elif not callouts.get("countdown") and tkey in COUNTDOWN_NO_NUMBERS:
         no("countdown", "%(label)s's voice never says a number on its own (every callout on the "
                         "card was checked), so the game's own voice cannot count down.")
         limits.append("countdown")                 # PAD-479: the game's, and no number is pushed in instead
     elif not callouts.get("countdown"):         # ten_seconds is optional: the count is 5..1 without it
         no("countdown", "The app does not know which of %(label)s's callouts count down, so the "
                         "game's own voice cannot count down.")
-    key = "%s-%s" % (game, version)
+    key = tkey
     stack_note = ""
     inserts_ok = _lamp_route(port) and key in LAMPS_PROVEN
     light_route = ""
@@ -2622,11 +2672,11 @@ def profile_from_port(path):
     by_edge = ("switch_edge" in port["site"] and (port["value"].get("switch_edge_shots", 1) != 0
                                                   or not any(s.startswith("switch_hit") for s in port["site"])))
     seen = SWITCH_EDGE_PROVEN if by_edge else SWITCH_SHOTS_PROVEN
-    if switch_shots and "%s-%s" % (game, version) not in seen:
+    if switch_shots and tkey not in seen:
         switch_note = ("%s's shots from switches (%s) have not been seen reaching a mode in the "
                        "emulator yet." % (label, ", ".join(switch_shots)))
     return TitleProfile(
-        key="%s_%s" % (game, version.replace(".", "_")),
+        key=profile_key(game, version, arch),
         label=label,
         game_dir=game,
         shots=shots,
@@ -2638,7 +2688,8 @@ def profile_from_port(path):
         hud_scene=hud,
         bank_scene=bank,
         version=version,
-        port=path if os.path.dirname(os.path.abspath(path)) != os.path.abspath(PORTS_DIR) else base,
+        port=_port_name(path),
+        arch=arch,
         proven=proven,
         proven_note="" if proven else (
             "what the app knows of %s was drafted and has never run in the emulator, so a mode "
@@ -2651,7 +2702,7 @@ def profile_from_port(path):
         # item 147's events, as pad_mode_runtime.c's events_arm would arm them: a bus event
         # needs hook_dispatch, a site event its site. What each run measured is in the port.
         events=events,
-        sound_note=TITLE_SOUND_UNHEARD.get("%s-%s" % (game, version), ""),
+        sound_note=TITLE_SOUND_UNHEARD.get(tkey, ""),
         score_bits=32 if RUNTIME_CORE_32[0] in sites else 64,
         switch_shots=switch_shots,
         switch_shots_note=switch_note,
@@ -2991,6 +3042,9 @@ def _shots_with_switches(port):
 
 def port_path(p):
     """The port file behind a profile, or "" when it has none."""
+    if p.port.startswith(SPIKE3_PORT_PREFIX):          # PAD-1277: a shipped Spike 3 port
+        from . import mode_runtime
+        return os.path.join(mode_runtime.spike3_ports_dir(), p.port[len(SPIKE3_PORT_PREFIX):])
     return os.path.join(PORTS_DIR, p.port) if p.port else ""
 
 
@@ -3049,6 +3103,8 @@ def profiles(ports_dir=None):
         for d in [x for x in mode_runtime.port_dirs()[1:] if os.path.abspath(x) != os.path.abspath(PORTS_DIR)]:
             out.update({k: p for k, p in _folder_profiles(d).items() if _is_listed(p, listed)})
         out.update({k: p for k, p in _folder_profiles(PORTS_DIR).items() if _is_listed(p, listed)})
+        out.update({k: p for k, p in _folder_profiles(mode_runtime.spike3_ports_dir()).items()
+                    if _is_listed(p, listed)})          # PAD-1277: keyed apart (SPIKE3_KEY)
         out.update(PROFILES)
         return out
     return _folder_profiles(ports_dir)
@@ -3095,22 +3151,46 @@ def version_key(version):
 _version_key = version_key
 
 
-def profile_for_card(game_dir, version, ports_dir=None):
+def profile_for_card(game_dir, version, ports_dir=None, arch="arm"):
     """The profile for a card of ``game_dir`` (``turtles_pro``) at ``version``
-    (``1.59.0`` or ``1.59``), or None when no port is for that build."""
+    (``1.59.0`` or ``1.59``), or None when no port is for that build. ``arch`` is the card's
+    machine (:func:`card_arch`; PAD-1277): a Spike 3 card of a build Spike 2 also has (Star
+    Wars ELG 1.10) takes its Spike 3 port's profile, never the Spike 2 one."""
     game, want = (game_dir or "").lower(), _version_key(version)
     if not game or not want:
         return None
     for p in profiles(ports_dir).values():
-        if p.game_dir == game and _version_key(p.version) == want:
+        if p.game_dir == game and _version_key(p.version) == want and p.arch == arch:
             return p
     if ports_dir is None:
         # a port derived on this machine or found by a card's read: the Modes tab, Write
         # and Try it all resolve a card's port here, so they agree on it
         for p in _machine_profiles().values():
-            if p.game_dir == game and _version_key(p.version) == want:
+            if p.game_dir == game and _version_key(p.version) == want and p.arch == arch:
                 return p
     return None
+
+
+#: card_arch()'s answers, by (path, size, mtime)
+_CARD_ARCH = {}
+
+
+def card_arch(image):
+    """``"a64"`` when ``image`` is a Spike 3 card, else ``"arm"``. A card on this computer is
+    told by its partition table (a few sectors, read once per file); one that is not (moved,
+    deleted) by Stern's name for it: ``..._spike3.Release...`` or ``....sdcard-secure.raw``."""
+    if not image:
+        return "arm"
+    try:
+        k = _probe_key(image)
+    except OSError:
+        n = file_name(image).lower()
+        return "a64" if ("_spike3." in n or n.endswith(".sdcard-secure.raw")) else "arm"
+    got = _CARD_ARCH.get(k)
+    if got is None:
+        from . import spike3
+        got = _CARD_ARCH[k] = "a64" if spike3.is_spike3_card(image) else "arm"
+    return got
 
 
 #: The tab's message for a card whose title and version have no port.
@@ -3483,7 +3563,7 @@ def project_profile(project, probe=False):
         card = project_card(project)
     if card is None or not card.game_dir:
         return card, None
-    return card, profile_for_card(card.game_dir, card.version)
+    return card, profile_for_card(card.game_dir, card.version, arch=card_arch(card.image))
 
 
 # ---- a mode, as the person authors it ----------------------------------------------
@@ -3907,7 +3987,7 @@ def family_of_key(key):
     """:func:`title_family` of a profile key (``godzilla_le_1_16`` -> ``godzilla``): a key
     is the game dir and the version with its dots as underscores, so the version comes off
     first. Answers for a title whose port this machine no longer has, too."""
-    return title_family(re.sub(r"(_\d+)+$", "", str(key or "")))
+    return title_family(re.sub(r"(_\d+)+$", "", _key_build(key)))
 
 
 def same_title(a, b):
@@ -3973,7 +4053,7 @@ MODEL_WORDS = {"pro": "Pro", "le": "Premium/LE", "premium": "Premium", "prem": "
 
 def model_of_key(key):
     """The model word of a profile key (``godzilla_le_1_16`` -> ``le``, ``beatles_1_0`` -> ``""``)."""
-    g = re.sub(r"(_\d+)+$", "", str(key or "")).lower()
+    g = re.sub(r"(_\d+)+$", "", _key_build(key)).lower()
     for s in MODEL_SUFFIXES:
         if g.endswith(s) and len(g) > len(s):
             return s[1:]

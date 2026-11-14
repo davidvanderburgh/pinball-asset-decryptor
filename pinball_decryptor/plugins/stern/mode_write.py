@@ -410,8 +410,9 @@ def find_port(prof, elf):
     one; they are refused, naming the build to make them for."""
     tried, unproven = [], []
     own = MP.port_path(prof)
+    arch = MR.elf_arch(elf)
     for game_dir, version, path in MR.port_paths():
-        if game_dir != prof.game_dir:
+        if game_dir != prof.game_dir or MR.port_arch(path) != arch:   # PAD-1277: this machine's ports
             continue
         sites = port_sites(path)
         bad = site_mismatches(path, elf)

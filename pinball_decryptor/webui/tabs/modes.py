@@ -2976,7 +2976,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             else:
                 # a port already on this machine (shipped, or worked out earlier) is used at
                 # once; a read that runs meanwhile only adds what it finds
-                profile = MP.profile_for_card(card.game_dir, card.version)
+                profile = MP.profile_for_card(card.game_dir, card.version, arch=MP.card_arch(card.image))
                 if profile is not None:
                     note = self._port_note(profile)
                     origin = "shipped" if not os.path.isabs(profile.port) else "derived"
@@ -4615,7 +4615,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         cannot be read from its name: the verdict then goes on as for any card)."""
         game_dir, version = ((run.game_dir, run.version) if run is not None and run.game_dir
                              else (MP.card_from_name(card) or ("", "")))
-        if not game_dir or MP.profile_for_card(game_dir, version) is not None:
+        if not game_dir or MP.profile_for_card(game_dir, version, arch="a64") is not None:
             return ""
         return MP.no_port_words(MP.title_label(game_dir, version))
 

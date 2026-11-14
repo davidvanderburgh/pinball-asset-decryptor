@@ -1612,11 +1612,16 @@ class Bridge:
         self._early = {}                   # switch id -> level the table set before the run was up
         self.dof = None                    # DofHost, when the table asked for DOF
         self._dof_state = {}               # (kind, number) -> value last sent
+        self.own_sols = {}                 # number -> (node, index) the table's script gave (PAD-1303)
 
     # -- lifecycle
     def set_game(self, title):
         self.title = title
         self.map = VpxMap(title)
+        # a coil number the table's own script gave (padvpx stubs, PAD-1303)
+        # outlives the map: tables name their game in Table_Init, after the
+        # stubs' top-level code has said its numbers
+        self.map.solenoids.update(getattr(self, "own_sols", {}))
         # PAD-943: a Spike 1 title's switches are slots up to 1023
         self.max_id = self.rigmod.N_SLOTS if self.slots else padsw.MAX_ID
         log("game %s: map %s (%s): switches=%d solenoids=%d lamp groups=%d"
@@ -1641,6 +1646,26 @@ class Bridge:
     @property
     def spike1(self):
         return getattr(self.map, "platform", "spike2") == "spike1"
+
+    def own_solenoid(self, n, coil):
+        """`Controller.PadSolenoid(n) = Array(node, index)` (PAD-1303): the
+        table's script names a coil the map has no number for, so core.vbs's
+        SolCallback(n) hears it. False (and a log line) when n is not 1 to
+        the map's solenoid_max, or `coil` is not two numbers."""
+        try:
+            n = int(n)
+            node, idx = (int(v) for v in coil)
+        except (TypeError, ValueError):
+            log("PadSolenoid %r = %r: want a number and Array(node, index)" % (n, coil))
+            return False
+        if not 0 < n <= self.map.sol_max or not (0 <= node < 16 and 0 <= idx < 16):
+            log("PadSolenoid %d = (%d, %d): outside 1..%d or not a coil" % (n, node, idx, self.map.sol_max))
+            return False
+        with self.lock:
+            self.own_sols[n] = (node, idx)
+            self.map.solenoids[n] = (node, idx)
+        log("table: coil (%d, %d) is solenoid %d" % (node, idx, n))
+        return True
 
     def _sol_number(self, node, idx):
         return self.rigmod.sol_number(node, idx) if self.slots else sol_number(node, idx)
@@ -3019,6 +3044,8 @@ class PadController:
             b.set_game(str(args[0]))
         elif key == "pause":
             b.set_pause(args[0])
+        elif key == "padsolenoid":
+            b.own_solenoid(args[0], args[-1])
         elif key == "lamp" or key == "solenoid" or key == "solmask":
             pass
         elif key == "padnote":

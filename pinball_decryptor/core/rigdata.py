@@ -165,7 +165,7 @@ def _run(args, timeout=300, distro=None):
         args = ["wsl.exe", "-d", distro, "-u", "root", "-e"] + args
     env = dict(os.environ)
     env["WSL_UTF8"] = "1"
-    return subprocess.run(args, capture_output=True, timeout=timeout, env=env,
+    return subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, env=env,
                           creationflags=_CREATE_FLAGS)
 
 

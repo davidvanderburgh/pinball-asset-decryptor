@@ -27,11 +27,11 @@ shift $((OPTIND - 1))
 # arm-linux-gnueabihf-gcc, hard-float); Spike 3 is 64-bit ARM (-a a64: aarch64-linux-gnu-gcc,
 # which the rig supplies through xgcc.sh, CC overriding this default). The arm branch's gcc
 # command is token-for-token what it always was, so its object stays byte-identical.
-# a64's log lines print some 64-bit addresses through %x (truncated); -Wno-error=format keeps
-# that a warning, not a failure, and changes no code - a follow-up widens the formats.
+# PAD-1273: the runtime prints a 64-bit address through PMA ("lx" on a64), so a64 builds with
+# -Werror=format: a log line that would cut an address to 32 bits fails the build.
 case $ARCH in
     arm) CC=${CC:-arm-linux-gnueabihf-gcc}; ARCHFLAGS="-marm -mfloat-abi=hard"; ARCHWARN=""; NM=${NM:-${CC%gcc}nm} ;;
-    a64) CC=${CC:-aarch64-linux-gnu-gcc};   ARCHFLAGS="";                       ARCHWARN="-Wno-error=format"; NM=${NM:-aarch64-linux-gnu-nm} ;;
+    a64) CC=${CC:-aarch64-linux-gnu-gcc};   ARCHFLAGS="";                       ARCHWARN="-Werror=format"; NM=${NM:-aarch64-linux-gnu-nm} ;;
     *)   echo "build_mode.sh: unknown -a $ARCH (arm or a64)" >&2; exit 2 ;;
 esac
 command -v "$CC" >/dev/null || { echo "build_mode.sh: $CC not found" >&2; exit 1; }

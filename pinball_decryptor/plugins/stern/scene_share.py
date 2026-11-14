@@ -691,6 +691,58 @@ def _digest(data):
     return hashlib.sha1(data).hexdigest()
 
 
+#: where a picture added in Scenes is kept (``images/`` + an add_picture's ``image``)
+ADDED_PREFIX = "images/scene_textures/added/"
+
+
+def _swap_added(assets_dir, rel, blob, keep):
+    """PAD-1301: picture *blob* in place of my added picture *rel* (``images/scene_textures/
+    added/...``): kept beside it under a new name (nothing is overwritten; the same bytes
+    there already are taken as they are), at the added picture's size unless *keep*, and every
+    add of mine showing *rel* shows it.  Returns its rel, or None when no add shows *rel* or
+    *blob* is no picture."""
+    import io
+    from PIL import Image
+    edits = scene_edit.load(assets_dir)
+    img_rel = rel[len("images/"):]
+    users = [(c, i) for c, ops in edits.items() for i, op in enumerate(ops or ())
+             if op.get("op") == "add_picture" and op.get("image") == img_rel]
+    if not users:
+        return None
+    try:
+        pic = Image.open(io.BytesIO(blob)).convert("RGBA")
+        with Image.open(os.path.join(assets_dir, *rel.split("/"))) as old:
+            size = old.size
+    except Exception:                                # noqa: BLE001 - not a picture: a pick
+        return None
+    if not keep and pic.size != size:
+        pic = pic.resize(size, Image.LANCZOS)
+    buf = io.BytesIO()
+    pic.save(buf, "PNG")
+    data = buf.getvalue()
+    folder = os.path.dirname(os.path.join(assets_dir, *rel.split("/")))
+    stem = re.sub(r"_\d+$", "", os.path.splitext(os.path.basename(rel))[0]) or "picture"
+    n = 1
+    while True:
+        dest = os.path.join(folder, "%s_%d.png" % (stem, n))
+        if not os.path.exists(dest):
+            with open(dest, "wb") as f:
+                f.write(data)
+            break
+        with open(dest, "rb") as f:
+            if f.read() == data:
+                break
+        n += 1
+    new = img_rel.rsplit("/", 1)[0] + "/" + os.path.basename(dest)
+    for c, i in users:
+        op = dict(edits[c][i], image=new)
+        op["w"], op["h"] = pic.size
+        edits[c] = list(edits[c])
+        edits[c][i] = op
+    scene_edit.save(assets_dir, edits)
+    return "images/" + new
+
+
 def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, cards_here=None,
                   files_profile=True, counts=None, missing_colored=None, replaced_too=False,
                   replaced_out=None):
@@ -739,6 +791,17 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
                 missing.append(rel)
                 continue
             blob = z.read(p["file"])
+            if rel.startswith(ADDED_PREFIX):
+                # PAD-1301: one of my added pictures (the card the file was saved from has it
+                # as a game picture, which they replaced): the Images tab has no slot for it,
+                # so its edits show the replacement instead
+                new = _swap_added(assets_dir, rel, blob, bool(p.get("keep")))
+                if new is not None:
+                    picks.pop(rel, None)
+                    keep.discard(rel)
+                    _own(new, p)
+                    loaded.append(new)
+                    continue
             name = os.path.basename(p.get("name") or p["file"]) or "picture.png"
             name = re.sub(r"[\\/:*?\"<>|]+", "_", name)
             base, ext = os.path.splitext(name)

@@ -2071,7 +2071,9 @@ def _shows(base, ops, k, states=None):
         if base.count(name) != names.get(name, 0):
             return False
     if states is not None:
-        for nid in {op["node"] for op in ops if _stock_node(op)}:
+        # PAD-1301: and a node an add made that the states know (:func:`_as_mine`)
+        for nid in {op["node"] for op in ops if _stock_node(op) or (
+                isinstance(op.get("node"), int) and str(op["node"]) in states["before"])}:
             want = states["before"].get(str(nid))
             for i in range(k):
                 if ops[i].get("node") == nid and states["after"][i] is not None:
@@ -2169,6 +2171,9 @@ def on_top_of(man, mine, theirs, states):
     st = _states_for(states, theirs)
     if not mine or st is None or man is None or not starts_elsewhere(man, theirs, states):
         return None
+    # PAD-1301: the card it was saved from gave the nodes mine adds ids of its own
+    theirs, states = _as_mine(man, mine, theirs, states)
+    st = _states_for(states, theirs)
     for k in range(len(mine) + 1):
         # the same file loaded before: mine ends with (some of) its edits, applied after mine[:k]
         head, tail = list(mine[:k]), list(mine[k:])
@@ -2187,6 +2192,82 @@ def on_top_of(man, mine, theirs, states):
             k = j
             break
     return _renumbered(theirs[k:], mine)
+
+
+#: the fields of an op that name a node
+_NODE_KEYS = ("node", "parent", "like", "follow")
+
+
+def _as_mine(man, mine, theirs, states):
+    """PAD-1301 (DragonRR and DoomWalrus666): *theirs* and its *states* with the nodes the card
+    they were made on had in place of the ones *mine* adds named as *mine* names them.
+
+    A Write puts each picture, text or shadow *mine* adds on the card as a node of the game's
+    own, numbered after the scene's last (``1247``, ``1250``, ...: three ids a picture); here
+    the same node is still the add's (``FIRST_ADDED_ID`` and up).  A node the file's states
+    know that the scene as shipped does not have is matched to the next node *mine* makes, in
+    the order mine makes them (a Write numbers them in that order), that looks as the file says
+    it did.  Unmatched, *theirs* and *states* come back as they were."""
+    before = (states or {}).get("before") if isinstance(states, dict) else None
+    if not isinstance(before, dict):
+        return theirs, states
+    base = _Base.of_manifest(man)
+    unknown = sorted(int(k) for k in before
+                     if str(k).lstrip("-").isdigit() and base.fp(int(k)) is None)
+    if not unknown:
+        return theirs, states
+    kinds = _kinds(theirs)
+    mine = list(mine)
+    # all of mine, else mine less what the same file added when loaded before (at its end)
+    for k in [len(mine)] + list(range(len(mine) - 1, max(-1, len(mine) - len(theirs) - 1), -1)):
+        remap = _made_as(man, mine[:k], unknown, before, kinds)
+        if remap is not None:
+            break
+    else:
+        return theirs, states
+    out = []
+    for op in theirs:
+        op = dict(op)
+        for key in _NODE_KEYS:
+            v = op.get(key)
+            if isinstance(v, int) and not isinstance(v, bool) and v in remap:
+                op[key] = remap[v]
+        out.append(op)
+    st = dict(states)
+    st["before"] = {str(remap.get(int(k), k)) if str(k).lstrip("-").isdigit() else k: v
+                    for k, v in before.items()}
+    if isinstance(states.get("ops"), list):
+        n = len(theirs)
+        st["ops"] = [out[i] if i < n and states["ops"][i] == theirs[i] else op
+                     for i, op in enumerate(states["ops"])]
+    return out, st
+
+
+def _made_as(man, mine, unknown, before, kinds):
+    """``{node of the file: node *mine* adds}`` for every one of *unknown* (ascending), each
+    the next node mine makes that looks as *before* says it did, or None."""
+    made = []
+    for op in mine:
+        nid = op.get("id") if op.get("op") in _MAKES else None
+        if isinstance(nid, int) and nid not in made:
+            made.append(nid)
+    if len(made) < len(unknown):
+        return None
+    mbase = _Base.of_manifest(apply_manifest(man, mine)[0])
+    remap, j = {}, 0
+    for nid in unknown:
+        want = before[str(nid)]
+        while j < len(made):
+            cand = made[j]
+            j += 1
+            got = mbase.fp(cand)
+            if got is not None and (want is None or _close(
+                    _fp_for(got, kinds.get(nid, ())), want)):
+                remap[nid] = cand
+                break
+        else:
+            return None
+    return remap
 
 
 def _renumbered(ops, mine):

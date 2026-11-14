@@ -48,8 +48,9 @@ import bisect
 import re
 from dataclasses import dataclass, field
 
-#: bumped when what :func:`read` finds changes (2: the modes of every C++ title, PAD-624)
-READ_REV = 2
+#: bumped when what :func:`read` finds changes (2: the modes of every C++ title, PAD-624;
+#: 3: lines with a slash in their words, PAD-1256, which a re-read adds to a project's rows)
+READ_REV = 3
 #: how close (in line numbers) a ``near`` use must be to one of the same mode's ``exact`` ones
 NEAR = 16
 #: the words of one line of the table: five language pointers and a zero

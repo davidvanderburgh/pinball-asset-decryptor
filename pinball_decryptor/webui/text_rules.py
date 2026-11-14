@@ -77,19 +77,56 @@ def stand_in_words(s, loose=False):
     return _STAND_IN_END.sub("", s).rstrip() if loose else s
 
 
+#: a printf fill-in of a game line: a plural choice (``%P1//S/%``), a number or a name
+#: (``%d``, ``%,02llu``, ``%s``) or a literal ``%%``
+_FILL_IN = re.compile(r"%P\d+(?:/[^/%]*)*/%|%[-+ #0,']*\d*(?:\.\d+)?(?:hh|h|ll|l|z|j|t)?"
+                      r"[diouxXeEfgGcsp]|%%")
+
+
+def format_words(s):
+    """The stand-in words (loose) of game line *s* with its printf fill-ins taken out, the
+    words a screen's own text holds in their place (PAD-1256: Godzilla's imposter battle
+    title box holds "IMPOSTER BATTLE" where the game puts ``IMPOSTER BATTLE %d/%d``), or ""
+    when *s* has no fill-in or fewer than two words are left: one word ("SECOND" of
+    ``%d SECOND%P1//S/%``) stands for too many boxes."""
+    s = (s or "").replace("\\n", "\n")
+    if not _FILL_IN.search(s):
+        return ""
+    words = [w for w in _FILL_IN.sub(" ", s).split() if re.search(r"\w", w)]
+    out = stand_in_words(" ".join(words), True).rstrip(":;,-").rstrip()
+    return out if len(out.split()) >= 2 else ""
+
+
+def format_index(rows):
+    """:func:`filled_index` by :func:`format_words`: ``{WORDS (upper case): [(original,
+    [mode label])]}`` over the game-program lines with fill-ins, for a box the game program names
+    whose own words match no line outright (PAD-1256)."""
+    out = {}
+    for r in rows:
+        if row_is_scene(r) or row_part(r) or r.get("unused"):
+            continue
+        words = format_words(r.get("original"))
+        if words:
+            labels = [mode_label(m) for m in r.get("modes") or ()]
+            out.setdefault(words.upper(), []).append((r["original"], labels))
+    return out
+
+
 def stand_in_rows(rows, r):
     """The scene rows of *rows* that hold game-program row *r*'s words: the game fills
     the line into that text box while it runs, so the scene's own words are a stand-in
     (PAD-485).  The rows reading the same come first, then the ones that differ only by
-    a closing ``!``, ``.`` or ``?``, each in list order.  Empty for a scene row and for
-    a line no scene holds."""
+    a closing ``!``, ``.`` or ``?``, then (only when neither found one) the ones holding
+    its words with its printf fill-ins taken out (:func:`format_words`, PAD-1256), each in
+    list order.  Empty for a scene row and for a line no scene holds."""
     if row_is_scene(r):
         return []
     want = stand_in_words(r.get("original"))
     if not want:
         return []
     near_want = stand_in_words(want, True)
-    same, near = [], []
+    fill_want = format_words(r.get("original"))
+    same, near, fill = [], [], []
     for s in rows:
         if not row_is_scene(s):
             continue
@@ -98,7 +135,9 @@ def stand_in_rows(rows, r):
             same.append(s)
         elif near_want and stand_in_words(words, True) == near_want:
             near.append(s)
-    return same + near
+        elif fill_want and stand_in_words(words, True).upper() == fill_want.upper():
+            fill.append(s)
+    return same + near or fill
 
 
 #: words that only hold a place for the game's own (PAD-513): a score or a count
@@ -402,7 +441,35 @@ def program_note(r):
         note += (" Names shown on their own may be the END of a longer "
                  "line; edit both rows so the line ends with the new "
                  "name.")
+    if fill_in_codes(r.get("original")):
+        note += " " + FILL_IN_NOTE
     return note
+
+
+#: the note for a game-program line with printf fill-ins (PAD-1256)
+FILL_IN_NOTE = ("The game fills in each %-code as it plays (%d a number, %s a name, %P a "
+                "plural): keep every one, in the same order.")
+
+
+def fill_in_codes(s):
+    """The '%'-codes of game line *s* the game fills in, as the Write checks them
+    (:func:`.progtext._fmt_tokens`: the character after each '%')."""
+    return tuple(re.findall(r"%(.|$)", (s or "").replace("\\n", "\n")))
+
+
+def fill_in_message(r, new):
+    """Why new words *new* for game-program row *r* are refused, or None: they must keep
+    the line's %-codes, in order, or the Write skips them (PAD-1256: IMPOSTER BATTLE %d/%d
+    typed as RIVAL BATTLE)."""
+    orig = r.get("original") or ""
+    codes = fill_in_codes(orig)
+    if row_is_scene(r) or not new or fill_in_codes(new) == codes:
+        return None
+    if not codes:
+        return ("“%s” has a %% sign the game would read as a fill-in, and “%s” has none: "
+                "leave the %% out." % (new, orig))
+    return ("“%s” has to keep the %%-codes of “%s”: %s. %s"
+            % (new, orig, " ".join("%" + c for c in codes), FILL_IN_NOTE))
 
 
 def budget_readout(r, new):

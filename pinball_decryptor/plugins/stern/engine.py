@@ -2101,27 +2101,7 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
             prog_rows = []
             from ...core import text_manifest as _tm
             for e in entries:
-                # PAD-470: a mode's own text for a line several modes show
-                # is a row of its own, its path naming the mode
-                row = {"path": _tm.join_part(fw_path, e.get("part") or ""),
-                       "original": e["text"],
-                       "replacement": "", "budget": e["budget"]}
-                if e.get("modes"):
-                    row["modes"] = list(e["modes"])
-                # The manifest's 5th-column flags (text_manifest.FLAG_*):
-                # a growable row may take longer text (placed in a new
-                # area of the game program on Write); a row with no
-                # reference found is dead text the game never draws.  The
-                # NOT-growable case is written out too ("fixed"), because
-                # a row with no flags at all has to keep meaning "this
-                # manifest predates the scan" — see FLAG_FIXED.
-                if e.get("growable"):
-                    row["grow"] = True
-                else:
-                    row["fixed"] = True
-                if e.get("unused") or e.get("refs") == 0:
-                    row["unused"] = True
-                prog_rows.append(row)
+                prog_rows.append(_program_row(_tm, fw_path, e))
         except Exception as e:
             log("Couldn't scan the game program for display text (%s); "
                 "program strings skipped." % e, "warning")
@@ -2286,6 +2266,31 @@ def program_mode_scenes(assets_dir):
         return {}
 
 
+def _program_row(text_manifest, fw_path, e):
+    """The manifest row of game-program string *e* (a
+    :func:`.progtext.enumerate_program_strings` entry) of the program at
+    *fw_path*."""
+    # PAD-470: a mode's own text for a line several modes show is a row of
+    # its own, its path naming the mode
+    row = {"path": text_manifest.join_part(fw_path, e.get("part") or ""),
+           "original": e["text"], "replacement": "", "budget": e["budget"]}
+    if e.get("modes"):
+        row["modes"] = list(e["modes"])
+    # The manifest's 5th-column flags (text_manifest.FLAG_*): a growable row
+    # may take longer text (placed in a new area of the game program on
+    # Write); a row with no reference found is dead text the game never
+    # draws.  The NOT-growable case is written out too ("fixed"), because a
+    # row with no flags at all has to keep meaning "this manifest predates
+    # the scan" -- see FLAG_FIXED.
+    if e.get("growable"):
+        row["grow"] = True
+    else:
+        row["fixed"] = True
+    if e.get("unused") or e.get("refs") == 0:
+        row["unused"] = True
+    return row
+
+
 def program_text_needs_refresh(assets_dir, rows):
     """Should :func:`refresh_program_text_flags` re-read the card for the
     manifest *rows* of the project at *assets_dir*: a game-program row with
@@ -2445,6 +2450,15 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None, card=None):
                         "budget": f["budget"], "grow": True,
                         "modes": list(f.get("modes") or ())})
             n += 1
+    # PAD-1256: a line this build offers that the project's scan did not
+    # (IMPOSTER BATTLE %d/%d: a slash once read as a path) joins the rows
+    fw_base = text_manifest.split_part(prog[0].get("path"))[0]
+    for e in entries:
+        if e.get("part") or (e["text"], "") in have:
+            continue
+        have.add((e["text"], ""))
+        out.append(_program_row(text_manifest, fw_base, e))
+        n += 1
     _program_modes_read(assets_dir, prog_ctx.get("scenes"), prog_ctx.get("boxes"),
                         prog_ctx.get("paths"))
     if not n:

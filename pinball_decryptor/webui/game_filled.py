@@ -105,13 +105,14 @@ def is_locked(assets_dir, row):
 
 def game_row_for(rows, words):
     """The game-program row of manifest *rows* that reads like scene line *words* (spacing,
-    case and a closing ``!``/``.``/``?`` aside), the one the game puts on screen in its place,
+    case and a closing ``!``/``.``/``?`` aside, else with the row's printf fill-ins taken
+    out: :func:`.text_rules.format_words`), the one the game puts on screen in its place,
     or None.  One mode's own text and a line the game never reads are not offered."""
     from . import text_rules as R
     want = R.stand_in_words(words, True).upper()
     if len(re.sub(r"\W", "", want)) < 2:          # a letter is no line (PAD-513's T boxes)
         return None
-    near = None
+    near = fill = None
     for r in rows or ():
         if R.row_is_scene(r) or R.row_part(r) or r.get("unused"):
             continue
@@ -120,7 +121,10 @@ def game_row_for(rows, words):
             return r
         if near is None and R.stand_in_words(got, True).upper() == want:
             near = r
-    return near
+        # PAD-1256: the line with its printf fill-ins out (IMPOSTER BATTLE %d/%d)
+        if fill is None and R.format_words(r.get("original")).upper() == want:
+            fill = r
+    return near or fill
 
 
 # the Scenes Words box has room for a line or two (its tip had the same words before)

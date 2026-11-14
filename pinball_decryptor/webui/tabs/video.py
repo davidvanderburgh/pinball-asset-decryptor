@@ -144,6 +144,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         self.video_best_quality_var = self.var("best_quality", "bool", False)
         self._slots = []                 # [VideoSlot] from the last scan
         self._by_rel = {}                # rel -> VideoSlot
+        self._reveal_after_scan = ""     # PAD-1274: a jump waiting on the scan
         self._assign = {}                # rel -> replacement file path
         self._asis = {}                  # rel -> per-clip as-is override
         self._length = {}                # rel -> per-clip length choice
@@ -690,12 +691,27 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         if self._slots:
             self._start_change_scan()
 
+    def _reveal_pending(self, scan_id):
+        """PAD-1274: the slot a jump asked for while the scan ran."""
+        rel = getattr(self, "_reveal_after_scan", "")
+        if not rel or self._scan_id != scan_id:
+            return
+        self._reveal_after_scan = ""
+        if rel in self._by_rel:
+            self.reveal_video_slot(rel)
+
     def reveal_video_slot(self, rel):
         """MainWindow.reveal_video_slot (the Scenes window): show one slot
         on this tab, clearing any filter that would hide it."""
         self.window.select_tab(self.ns)
         if rel not in self._by_rel:
+            # PAD-1274: the tab's first scan is still running (it starts as the
+            # tab is shown): show the slot once it has its list
+            if self.get("scanning") or not self._slots:
+                self._reveal_after_scan = rel
+                return True
             return False
+        self._reveal_after_scan = ""
         i = self._index.get(rel)
         if i is None or i not in set(self.get("view") or []):
             self.video_search_var.set("")
@@ -799,6 +815,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                 return
             self.ctx.loop.post(self._populate_after_scan, slots, scan_id,
                                path, offer)
+            self.ctx.loop.post(self._reveal_pending, scan_id)
 
         self._set_scan_ui(True)
         threading.Thread(target=_work, daemon=True,

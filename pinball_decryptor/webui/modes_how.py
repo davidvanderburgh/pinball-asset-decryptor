@@ -22,6 +22,8 @@ import os
 import re
 import threading
 
+from .tabs.base import rpc
+
 #: the most clips and sounds a page lists before "and N more"
 CLIPS_MAX = 40
 SOUNDS_MAX = 60
@@ -170,6 +172,52 @@ class HowItWorksMixin:
                 "path": os.path.join(project, *files[0].split("/")) if files and project else "",
                 "tip": {"head": text, "lines": lines}}
 
+    @staticmethod
+    def _how_clip(project, name, rel):
+        """One listed clip; ``path`` is its extracted file (PAD-1274: the page plays it on a click)."""
+        path = os.path.join(project, *rel.split("/")) if project and rel else ""
+        if path and not os.path.isfile(path):
+            path = ""
+        lines = [rel] if rel else ["Not in this project's extract"]
+        if path:
+            lines.append("Click to play it")
+        return {"key": name, "text": name, "rel": rel, "path": path, "tip": {"head": name, "lines": lines}}
+
+    @rpc
+    def how_clip_video(self, rel):
+        """PAD-1274: the clip's own slot on the Video tab (the tab is shown and the slot picked)."""
+        video = self.window.service("video")
+        fn = getattr(video, "reveal_video_slot", None)
+        if not rel or fn is None:
+            return False
+        return bool(fn(rel))
+
+    @rpc
+    def clip_proxy(self, path, fmt="mp4"):
+        """PAD-1274: the page's engine can't play a clip it was handed: make the Video tab's preview copy
+        of it (``video_helpers.browser_proxy``, cached) and hand it over as ``clip_proxy``."""
+        if not path or not os.path.isfile(path):
+            return False
+        cur = self.get("clip_proxy") or {}
+        if cur.get("path") == path and (cur.get("busy") or cur.get("proxy")):
+            return True
+        self.set(clip_proxy={"path": path, "busy": True, "proxy": "", "err": ""})
+
+        def _work():
+            from . import video_helpers as vh
+            try:
+                out, err = vh.browser_proxy(path, fmt), ""
+            except Exception as e:                          # noqa: BLE001 - shown on the player
+                out, err = "", str(e) or e.__class__.__name__
+
+            def _apply():
+                if (self.get("clip_proxy") or {}).get("path") == path:
+                    self.set(clip_proxy={"path": path, "busy": False, "proxy": out or "", "err": err})
+            self.ctx.loop.post(_apply)
+
+        threading.Thread(target=_work, daemon=True, name="modes-clip-proxy").start()
+        return True
+
     def _how_for(self, build, mid):
         """``{"starts", "clips", "sounds", ...}`` for the game's mode *mid*: what the page's How it works shows."""
         mode = build.modes.get(mid)
@@ -194,9 +242,8 @@ class HowItWorksMixin:
         for rel, name in clips.name_of.items():
             by_name.setdefault(name, rel)
         names = sorted((n for n in reading.refs if cls in reading.modes_of(n)), key=_natural)
-        out["clips"] = [{"key": n, "text": n, "rel": by_name.get(n, ""),
-                         "tip": {"head": n, "lines": [by_name[n]] if n in by_name else
-                                 ["Not in this project's extract"]}} for n in names[:CLIPS_MAX]]
+        project = self.project() or ""
+        out["clips"] = [self._how_clip(project, n, by_name.get(n, "")) for n in names[:CLIPS_MAX]]
         if len(names) > CLIPS_MAX:
             out["clips_more"] = "And %d more." % (len(names) - CLIPS_MAX)
         sr = clips.sound_reading

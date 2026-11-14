@@ -1145,8 +1145,14 @@ function RewriteSec({ s, g }) {
 
 // PAD-1064: what the app reads off the game program about one of its own modes - what starts it, the clips and the
 // sounds its own code plays - read-only (there is no source to show: the game's modes are compiled into it)
-function HowSec({ h }) {
+function HowSec({ h, onClip }) {
   const starts = h.starts || [], clips = h.clips || [], sounds = h.sounds || [];
+  // PAD-1274: a clip with an extracted file plays on a click, Previous / Next walk the mode's other clips
+  const playable = clips.filter((c) => c.path);
+  const clipEl = (c) => (c.path && onClip
+    ? html`<button type="button" key=${c.key} class="modes-how-clip mono link" ...${tip(c.tip)}
+        onClick=${() => onClip(playable, playable.indexOf(c))}><${Icon} name="play" /> ${c.text}</button>`
+    : html`<span key=${c.key} class="modes-how-clip mono" ...${tip(c.tip)}>${c.text}</span>`);
   return html`<${Sec} title="How it works" tipText=${h.note}>
     <div class="modes-how">
       <div class="modes-how-k">What starts it</div>
@@ -1154,7 +1160,7 @@ function HowSec({ h }) {
         : html`<div class="small muted">The app did not find what starts it in the game program.</div>`}
       ${h.unread ? html`<div class="small muted">${h.unread}</div>` : html`
         <div class="modes-how-k">Clips it plays <span class="muted">(${clips.length || "none found"})</span></div>
-        ${clips.length ? html`<div class="modes-how-clips">${clips.map((c) => html`<span key=${c.key} class="modes-how-clip mono" ...${tip(c.tip)}>${c.text}</span>`)}</div>` : null}
+        ${clips.length ? html`<div class="modes-how-clips">${clips.map(clipEl)}</div>` : null}
         ${h.clips_more ? html`<div class="small muted">${h.clips_more}</div>` : null}
         <div class="modes-how-k">Sounds and callouts it plays <span class="muted">(${sounds.length || "none found"})</span></div>
         ${sounds.length ? html`<ul class="modes-how-list">${sounds.map((x) => html`<li key=${x.key} ...${tip(x.tip)}>
@@ -1165,7 +1171,7 @@ function HowSec({ h }) {
   <//>`;
 }
 
-function GameModePage({ g, s }) {
+function GameModePage({ g, s, onClip }) {
   const rows = g.rows || [];
   return html`<section class="card modes-editor">
     <div class="hd">
@@ -1176,7 +1182,7 @@ function GameModePage({ g, s }) {
     </div>
     <div class="modes-status info" role="status">${g.about}</div>
     <div class="bd modes-editor-bd">
-      ${g.how ? html`<${HowSec} h=${g.how} />` : null}
+      ${g.how ? html`<${HowSec} h=${g.how} onClip=${onClip} />` : null}
       <${Sec} title="Timers and awards">
         ${rows.length ? html`<div class="modes-gm">${rows.map((r) => html`<${GameRow} key=${r.key} r=${r} />`)}</div>`
           : html`<div class="small muted">No numbers to show.</div>`}
@@ -1353,6 +1359,7 @@ export default function ModesTab() {
   const [newMode, setNewMode] = useState(null);      // the wizard: { kind: "" | "blocks" | "c" | "form" }
   const [clip, setClip] = useState(null);
   const showClip = (path, title) => setClip({ path, title });
+  const showClips = (list, at) => setClip({ list, at, path: (list[at] || {}).path });   // PAD-1274
   const withClip = Object.assign({}, s, { _showClip: showClip });
   const hasProject = !!s.project;
   return html`<div class="page modes-page">
@@ -1366,7 +1373,7 @@ export default function ModesTab() {
         onSheet=${() => { setSheet(true); call("modes.sheet_open"); }} onCoopAwards=${() => setCoopAw(true)}
         onCoopChars=${() => setCoopCh(true)}
         onHandLevels=${() => setHandLv(true)} />
-      ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} />`
+      ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} onClip=${showClips} />`
         : s.code && s.code.blocks ? html`<${BlocksPane} s=${withClip} />`
         : s.code ? html`<${CodePane} s=${withClip} />`
         : s.open ? html`<${Editor} s=${s} showClip=${showClip} />`
@@ -1385,6 +1392,7 @@ export default function ModesTab() {
     ${sheet && s.sheet ? html`<${RulesSheetDialog} s=${s} onClose=${() => setSheet(false)} />` : null}
     ${s.film ? html`<${FilmDialog} film=${s.film} key=${s.film.seq} />` : null}
     ${newMode ? html`<${NewModeWizard} s=${s} start=${newMode.kind} onClose=${() => setNewMode(null)} />` : null}
-    ${clip ? html`<${ClipDialog} path=${clip.path} title=${clip.title} onClose=${() => setClip(null)} />` : null}
+    ${clip ? html`<${ClipDialog} path=${clip.path} title=${clip.title} list=${clip.list} at=${clip.at}
+      proxy=${s.clip_proxy} onClose=${() => setClip(null)} />` : null}
   </div>`;
 }

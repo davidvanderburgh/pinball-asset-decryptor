@@ -119,7 +119,7 @@ def test_while_the_card_is_read_the_page_says_so_and_without_a_card_says_why():
 def test_the_page_draws_how_it_works():
     js = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui", "static", "js",
                            "tabs", "modes.js"), encoding="utf-8").read()
-    for bit in ("function HowSec", "<${HowSec} h=${g.how} />", "Sounds and callouts it plays", "What starts it",
+    for bit in ("function HowSec", "<${HowSec} h=${g.how} onClip=${onClip} />", "Sounds and callouts it plays", "What starts it",
                 "Clips it plays", "<${PlayButton} path=${x.path} />"):
         assert bit in js, bit
     py = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui", "tabs",

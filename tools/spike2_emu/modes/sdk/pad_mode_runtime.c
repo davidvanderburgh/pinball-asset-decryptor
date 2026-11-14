@@ -25,6 +25,17 @@ typedef unsigned pm_reg;
 #define PM_A64 0
 #endif
 
+/* PAD-1273: printf length for a pm_addr / pm_reg, so a log line prints the whole value on both machines:
+ * "0x%08" PMA for hex, "%" PMU for decimal. On Spike 2 they are the "x" and "u" those lines always had,
+ * so its strings, and its object, are unchanged. */
+#if PM_A64
+#define PMA "lx"
+#define PMU "lu"
+#else
+#define PMA "x"
+#define PMU "u"
+#endif
+
 extern int   open(const char *, int, ...);
 extern long  read(int, void *, __SIZE_TYPE__);
 extern long  write(int, const void *, __SIZE_TYPE__);
@@ -1621,7 +1632,7 @@ static void on_sound_first_active(pm_reg *r)
     if (!cut) return;
     own_on_list[n] = 0;
     r[0] = (unsigned)(unsigned long)own_on_list;
-    if (said++ < 5) say("sound: request %u plays ours - the game's ask at 0x%08x does not take it for its own sound",
+    if (said++ < 5) say("sound: request %u plays ours - the game's ask at 0x%08" PMA " does not take it for its own sound",
                         cut, r[5] - 4);
 }
 
@@ -3635,7 +3646,7 @@ static void on_surface_play(pm_reg *r)
         ck_in = 0;
     }
     if (bank && (unsigned)(unsigned long)bank == r[0]) {
-        if (ck_log && ck_logged++ < CK_LOG_MAX) say("clip log: the game plays the bank's surface, loop %u", r[1]);
+        if (ck_log && ck_logged++ < CK_LOG_MAX) say("clip log: the game plays the bank's surface, loop %" PMU, r[1]);
         if (r[1]) ck_game_loops();
     }
     ck_play_seen(r);
@@ -3736,7 +3747,7 @@ static void ck_arm(void)
     static const char *const s[] = { "surface_seek", "surface_position", 0 };
     if (!clip_v2) return;
     if (fn("reel_tick") && hook(fn("reel_tick"), on_reel_tick))
-        say("clip: the game's reel at 0x%08x waits while a clip of ours has the bank's surface", fn("reel_tick"));
+        say("clip: the game's reel at 0x%08" PMA " waits while a clip of ours has the bank's surface", fn("reel_tick"));
     if (!have_sites(s)) return;           /* a port without them: silent, the clip is gone as before */
     if ((sv_ck = 1, sv_hook())) {
         ck_can = 1;
@@ -3745,7 +3756,7 @@ static void ck_arm(void)
             ck_log = 1;
             say("clip log: every clip of the game's on the bank's surface (cliplog.on)");
         }
-        say("clip: a mode's clip comes back after a clip of the game's, where it would be by then (seek 0x%08x)%s",
+        say("clip: a mode's clip comes back after a clip of the game's, where it would be by then (seek 0x%08" PMA ")%s",
             fn("surface_seek"), ck_play_hooked ? "; a loop of the game's is shown one pass" : "");
     } else {
         sv_ck = 0;
@@ -4079,7 +4090,7 @@ static void frame_arm(void)
     if (hook(fn("frame_end"), on_frame_end) && hook(fn("frame_kick"), on_frame_kick)) {
         frame_hooked = 1;
         frame_draws = pm_port_value("clip_draw_at_kick", 1) != 0;
-        say("clip: %s (frame end 0x%08x, kick 0x%08x)", frame_draws
+        say("clip: %s (frame end 0x%08" PMA ", kick 0x%08" PMA ")", frame_draws
             ? "a full-screen clip is drawn at the game's frame hand-over"
             : "a full-screen clip is drawn from the tick (clip_draw_at_kick 0); the hand-over only counts its frames",
             fn("frame_end"), fn("frame_kick"));
@@ -4676,7 +4687,7 @@ static void backdrop_arm(void)
     if (hook(fn("backdrop_draw"), on_backdrop_draw) && hook(fn("scene_show"), on_scene_show)) {
         can |= PM_CAN_BACKDROP;
         say("backdrop: on - a mode's clip plays behind the HUD in the main-play background's place "
-            "(draw 0x%08x, scene show 0x%08x)", fn("backdrop_draw"), fn("scene_show"));
+            "(draw 0x%08" PMA ", scene show 0x%08" PMA ")", fn("backdrop_draw"), fn("scene_show"));
     }
 }
 
@@ -4821,7 +4832,7 @@ static void status_bar_arm(void)
         return;
     }
     can |= PM_CAN_STATUS_BAR;
-    say("status bar: on - a mode can put its name, colour and clock in the game's own bar (getter 0x%08x)",
+    say("status bar: on - a mode can put its name, colour and clock in the game's own bar (getter 0x%08" PMA ")",
         fn("status_bar"));
 }
 
@@ -4842,7 +4853,7 @@ unsigned pm_bond_women_mult(void)
 static void bond_women_arm(void)
 {
     if (fn("bond_women_mult"))
-        say("Bond Women multiplier: on - a mode can read the game's own 2X-7X (getter 0x%08x)", fn("bond_women_mult"));
+        say("Bond Women multiplier: on - a mode can read the game's own 2X-7X (getter 0x%08" PMA ")", fn("bond_women_mult"));
     else if (site("bond_women_mult"))
         say("Bond Women multiplier: off - the port's getter does not match this game program");
 }
@@ -6035,7 +6046,7 @@ static void on_battle_shots(pm_reg *r)
     if (!block_live() || !pm_in_game()) return;
     if (!(r[2] & lo) && !(r[3] & hi)) return;
     if (block_battle_said++ < 20)
-        say("block: the battle rule did not see shot 0x%08x_%08x - %s is running (no battle lit, no select screen)",
+        say("block: the battle rule did not see shot 0x%08" PMA "_%08" PMA " - %s is running (no battle lit, no select screen)",
             r[3], r[2], block_who);
     r[2] &= ~lo;
     r[3] &= ~hi;
@@ -6066,7 +6077,7 @@ static void on_rule_shots(pm_reg *r, unsigned n)
     if (!block_rules_said++) {
         pm_snprintf(key, sizeof key, "block_rule_name_%u", n);
         nm = pm_port_text(key);
-        say("block: the game's rules see no shots while %s runs (the first: 0x%08x_%08x, kept from %s and every other "
+        say("block: the game's rules see no shots while %s runs (the first: 0x%08" PMA "_%08" PMA ", kept from %s and every other "
             "rule the port names%s)", block_who, r[3], r[2], nm ? nm : "a rule",
             block_rules_keep ? " but the ones it keeps counting" : "");
     }
@@ -6172,11 +6183,11 @@ static void block_arm(void)
         pm_snprintf(lo, sizeof lo, "block_rule_gate_%d", i);
         if (pm_port_value(lo, 0)) {              /* PAD-1026: the rule's check, refused with 0 */
             if (hook_veto_n(fn(name), on_rule_gate, (unsigned)i, 0)) block_rules_on++;
-            else say("block: %s (0x%08x) could not be hooked", name, fn(name));
+            else say("block: %s (0x%08" PMA ") could not be hooked", name, fn(name));
             continue;
         }
         if (hook_n(fn(name), on_rule_shots, (unsigned)i)) block_rules_on++;
-        else say("block: %s (0x%08x) could not be hooked", name, fn(name));
+        else say("block: %s (0x%08" PMA ") could not be hooked", name, fn(name));
     }
     if (!bm_count(block_named) && !block_battles && !block_rules_on) {
         say("block: off - none of the named starts could be hooked");
@@ -6255,7 +6266,7 @@ static void multiball_arm(void)
     static const char *const mb_s[] = { "multiball_serve", "balls_in_play", 0 };
     if (!have_sites(mb_s)) return;
     can |= PM_CAN_MULTIBALL;
-    say("multiball: a mode's own, through the game's serve at 0x%08x (arg3 0x%lx)", fn("multiball_serve"),
+    say("multiball: a mode's own, through the game's serve at 0x%08" PMA " (arg3 0x%lx)", fn("multiball_serve"),
         pm_port_value("multiball_arg3", 0xbb));
 }
 
@@ -6984,7 +6995,7 @@ static void coils_arm(void)
     }
     if (!n_coils) return;
     can |= PM_CAN_COILS;
-    say("held coils: %d (%s%s%s%s%s%s%s%s%s%s%s) through 0x%08x by processes %u..; each at most %u ms as one command, "
+    say("held coils: %d (%s%s%s%s%s%s%s%s%s%s%s) through 0x%08" PMA " by processes %u..; each at most %u ms as one command, "
         "%u s between holds, %u a minute", n_coils, coils[0].name, n_coils > 1 ? " " : "", n_coils > 1 ? coils[1].name : "",
         n_coils > 2 ? " " : "", n_coils > 2 ? coils[2].name : "", n_coils > 3 ? " " : "",
         n_coils > 3 ? coils[3].name : "", n_coils > 4 ? " " : "", n_coils > 4 ? coils[4].name : "",
@@ -7393,7 +7404,7 @@ static void spare_arm(void)
     if ((have_sites(outs) && data("coil_table") && data("coil_count")) || (!data("coil_table") && have_sites(old_outs)))
         can |= PM_CAN_SPARE_COILS;
     if (can & (PM_CAN_SPARE_SWITCHES | PM_CAN_SPARE_COILS))
-        say("spare inputs %s (%s 0x%08x), spare outputs %s (fire 0x%08x, %s 0x%08x): each command at most %u ms, "
+        say("spare inputs %s (%s 0x%08" PMA "), spare outputs %s (fire 0x%08" PMA ", %s 0x%08" PMA "): each command at most %u ms, "
             "pulse %u ms, %lu ms on in any %lu s", can & PM_CAN_SPARE_SWITCHES ? "armed" : "not here",
             data("sw_struct") ? "switch struct" : "listener table", data("sw_struct") ? data("sw_struct") : data("sw_listen"),
             can & PM_CAN_SPARE_COILS ? "armed" : "not here", fn("coil_frame"), fn("coil_off") ? "off" : "coil query",
@@ -7619,13 +7630,13 @@ static void scoop_tick(void)
             scoop.armed = -1;
             can &= ~PM_CAN_SCOOP;
             say("scoop: switched OFF for this run - the device record at 0x%08x does not point at the "
-                "handler 0x%08x", scoop.slot, fn("scoop_handler"));
+                "handler 0x%08" PMA, scoop.slot, fn("scoop_handler"));
             return;
         }
         scoop.orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)*slot;
         *slot = (unsigned)(unsigned long)scoop_wrap;
         scoop.armed = 1;
-        say("scoop: its handler 0x%08x is wrapped (event %u holds a ball for the mode)", fn("scoop_handler"),
+        say("scoop: its handler 0x%08" PMA " is wrapped (event %u holds a ball for the mode)", fn("scoop_handler"),
             scoop.event);
     }
     if (scoop.until && pm_ms() > scoop.until + 2000ul) scoop.until = 0;   /* the game ended that process */
@@ -7927,7 +7938,7 @@ static void shield_arm(void)
     if (site("shield_update") && !hook_veto(fn("shield_update"), shield_update_veto))
         say("shield: the game's own return to the resting place could not be hooked - it will turn the platform "
             "back now and then");
-    say("shield: a mode may turn the shield platform (motor 0x%08x, move 0x%08x; away = switch %ld, toward = %ld); "
+    say("shield: a mode may turn the shield platform (motor 0x%08" PMA ", move 0x%08" PMA "; away = switch %ld, toward = %ld); "
         "%u.%u s between moves, %u a minute, kept only while %s sees no shots, put back when the mode ends",
         data("shield_motor"), fn("shield_move"), pm_port_value("shield_away", 0), pm_port_value("shield_toward", 0),
         SHIELD_COOL_MS / 1000, SHIELD_COOL_MS % 1000 / 100, SHIELD_PER_MIN,
@@ -8130,7 +8141,7 @@ static int building_move_veto(pm_reg *r)
                                 bld.putback_until != 0, (int)r[1]))
         return 0;
     if (said++ < 3 || said % 20 == 0)
-        say("building: the game's move to floor %u refused - its lock stays closed while %s runs (no up and down "
+        say("building: the game's move to floor %" PMU " refused - its lock stays closed while %s runs (no up and down "
             "under the ball); put back on %d when it ends", r[1], mode_name(running, "the mode"), bld.home);
     return 1;
 }
@@ -8396,7 +8407,7 @@ static void building_arm(void)
     if (!hook_veto(fn("building_move"), building_move_veto))      /* PAD-733 */
         say("building: the game's own moves could not be hooked - while a mode of ours keeps its lock closed, the "
             "game may send it up again");
-    say("building: a mode may move it by floor (stepper 0x%08x, move 0x%08x, floors 0..%ld); %u s between "
+    say("building: a mode may move it by floor (stepper 0x%08" PMA ", move 0x%08" PMA ", floors 0..%ld); %u s between "
         "moves, %u a minute, put back when the mode ends", data("building_stepper"), fn("building_move"),
         pm_port_value("building_floors", 4) - 1, MAGNET_COOL_MS / 1000, MAGNET_PER_MIN);
 }
@@ -8841,7 +8852,7 @@ static void shake_arm(void)
         return;
     }
     can |= PM_CAN_SHAKER;
-    say("shaker: a mode may shake the cabinet through %s 0x%08x (drive %ld, setting %ld); at most "
+    say("shaker: a mode may shake the cabinet through %s 0x%08" PMA " (drive %ld, setting %ld); at most "
         "%u/%u/%u/%u ms at strength 0..3, one at a time (the longer takes over), %u s of the motor running a minute "
         "(the game's shakes too), run out at the mode's end", how[shk.call], fn("shake"), pm_port_value("shake_drive", 0), pm_port_value("shake_adj", 0),
         shk.max_ms[0], shk.max_ms[1], shk.max_ms[2], shk.max_ms[3], SHAKE_ON_MS / 1000);
@@ -9220,7 +9231,7 @@ static void wizards_arm(void)
         e = wizard_entry(n);
         if (e[0] != (unsigned)(n - 1) || e[1] != 1u << (n - 1) || !maps_has(e[3], 8, MAP_R | MAP_X | MAP_GAME) ||
             !maps_has(e[4], 8, MAP_R | MAP_X | MAP_GAME)) {
-            say("game wizards: off - entry %d of the table at 0x%08x is not this build's (%u 0x%x 0x%08x)", n,
+            say("game wizards: off - entry %d of the table at 0x%08" PMA " is not this build's (%u 0x%x 0x%08x)", n,
                 data("wizard_table"), e[0], e[1], e[3]);
             wizards_n = 0;
             return;
@@ -9229,9 +9240,9 @@ static void wizards_arm(void)
     can |= PM_CAN_GAME_WIZARDS;
     wiz_route = 1;
     if (site("wizard_light") && !(wiz_light_hooked = hook_veto(fn("wizard_light"), wizard_light_veto)))
-        say("game wizards: the game's own lighting (0x%08x) could not be hooked - it lights a mode's mini-wizards too",
+        say("game wizards: the game's own lighting (0x%08" PMA ") could not be hooked - it lights a mode's mini-wizards too",
             fn("wizard_light"));
-    say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08x, start 0x%08x%s%s)", wizards_n,
+    say("game wizards: %d of the game's mini-wizards a mode may light or start (state 0x%08" PMA ", start 0x%08" PMA "%s%s)", wizards_n,
         data("wizard_state"), fn("wizard_start"), wiz_light_hooked ? ", its own lighting hooked" : "",
         fn("wizard_way") ? ", its own way check" : "");
 }
@@ -9646,7 +9657,7 @@ static void wizf_arm(void)
     for (n = 1; n <= wizards_n; n++) {
         pm_snprintf(key, sizeof key, "wizard_go_%d", n);
         if (!fn(key)) {
-            say("game wizards: off - %s's start (0x%08x) is not this build's", wizard_name(n),
+            say("game wizards: off - %s's start (0x%08" PMA ") is not this build's", wizard_name(n),
                 site(key) ? site(key)->addr : 0u);
             wizards_n = 0;
             return;
@@ -9658,13 +9669,13 @@ static void wizf_arm(void)
         }
         pm_snprintf(key, sizeof key, "wizard_built_%d", n);
         if (data(key) && !maps_has(data(key), 4, MAP_R)) {
-            say("game wizards: off - %s's object guard (0x%08x) is not in this build's memory", wizard_name(n), data(key));
+            say("game wizards: off - %s's object guard (0x%08" PMA ") is not in this build's memory", wizard_name(n), data(key));
             wizards_n = 0;
             return;
         }
         pm_snprintf(key, sizeof key, "wizard_earned_%d", n);
         if (site(key) && (!fn(key) || !hook_veto_n(fn(key), wizf_earned, (unsigned)n, 1))) {
-            say("game wizards: off - %s's earned check (0x%08x) is not this build's or could not be hooked",
+            say("game wizards: off - %s's earned check (0x%08" PMA ") is not this build's or could not be hooked",
                 wizard_name(n), site(key)->addr);
             wizards_n = 0;
             return;
@@ -12964,7 +12975,7 @@ static void place_arm(void)
         for (id = 0; id < PLACE_IDS; id++) n += bm_has(block_named, id) && !block_obj[id] && place_plain(id);
         if (n)
             say("place: a mode may take the place of %d of the game's modes; %u count as the one they replace through "
-                "the game's own audits and flags (audit add 0x%08x)", bm_count(block_named), n, fn("audit_add"));
+                "the game's own audits and flags (audit add 0x%08" PMA ")", bm_count(block_named), n, fn("audit_add"));
         else
             say("place: a mode may take the place of %d of the game's modes (it counts only as ours: the port names no "
                 "mode framework)", bm_count(block_named));
@@ -14748,7 +14759,7 @@ static void challenge_menu_picked(pm_reg *r)
                 own_challenge[own_pending].name);
     } else {
         if (was >= 0 && own_challenge[was].fn)                    /* PAD-663: say why a pick was not played */
-            say("challenge menu: %s no longer picked (the menu's entry is not ours: kind %u)", own_challenge[was].name,
+            say("challenge menu: %s no longer picked (the menu's entry is not ours: kind %" PMU ")", own_challenge[was].name,
                 back > 0 ? *(const unsigned *)(e8 + MENU_KIND_AT) : r[3]);
         own_pending = -1;
     }
@@ -15149,7 +15160,7 @@ static unsigned plain_call(int k, unsigned a, unsigned b, unsigned c, unsigned d
         char key[24];
         said_game[k] = chg_game_now() + 1;
         pm_snprintf(key, sizeof key, "challenge_plain_%d", k);
-        say("challenge game: a mode's - the game's 0x%08x runs as at a standard ball's start", fn(key));
+        say("challenge game: a mode's - the game's 0x%08" PMA " runs as at a standard ball's start", fn(key));
     }
     game_flag_clear(on);
     ret = plain_orig[k](a, b, c, d);
@@ -15169,10 +15180,10 @@ static void plain_arm(void)
         if (!site(key)) continue;
         plain_orig[k] = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn(key), (void *)plain_wraps[k]);
         if (!plain_orig[k])
-            say("challenges: %s at 0x%08x could not be wrapped - it stays left out of a mode's challenge game", key, fn(key));
+            say("challenges: %s at 0x%08" PMA " could not be wrapped - it stays left out of a mode's challenge game", key, fn(key));
     }
     if (pm_ball_launch_known())
-        say("challenges: a mode's challenge ball is launched for the player at 0x%08x", fn("ball_launch"));
+        say("challenges: a mode's challenge ball is launched for the player at 0x%08" PMA, fn("ball_launch"));
 }
 
 static int event_bus_id(const char *name);
@@ -15196,7 +15207,7 @@ static void challenges_arm(void)
             continue;
         }
         if (!fn(key) || !hook_veto_n(fn(key), challenge_veto, n, 1)) {
-            say("challenge %u: its handler at 0x%08x could not be hooked - no challenge list", n, fn(key));
+            say("challenge %u: its handler at 0x%08" PMA " could not be hooked - no challenge list", n, fn(key));
             challenges_n = 0;
             return;   /* the hooks already placed stay unclaimed, so they pass through */
         }
@@ -15236,7 +15247,7 @@ static void challenges_arm(void)
                                                                     : hook(fn("challenge_menu"), challenge_menu_built))
             && hook(fn("challenge_menu_pick"), challenge_menu_picked)) {
             can |= PM_CAN_CHALLENGE_MENU;
-            say("challenge menu: the start menu at 0x%08x shows our names and up to %ld entries", fn("challenge_menu"),
+            say("challenge menu: the start menu at 0x%08" PMA " shows our names and up to %ld entries", fn("challenge_menu"),
                 pm_port_value("challenge_menu_cap", 0));
         } else {
             say("challenge menu: its sites could not be hooked - the menu stays the game's own");
@@ -15248,7 +15259,7 @@ static void challenges_arm(void)
         && pm_port_value("challenge_menu_frame_count_at", 0) > 0 && pm_port_value("challenge_name_msg_0", 0) > 0) {
         if (fn("challenge_menu_frame") && hook_full(fn("challenge_menu_frame"), challenge_menu_frame)) {
             can |= PM_CAN_CHALLENGE_MENU;
-            say("challenge menu: the start menu's frame at 0x%08x - one MODE CHALLENGE entry (as %s's game-mode index "
+            say("challenge menu: the start menu's frame at 0x%08" PMA " - one MODE CHALLENGE entry (as %s's game-mode index "
                 "%ld) steps through the modes' own challenges", fn("challenge_menu_frame"), pm_challenge_name(0),
                 pm_port_value("challenge_menu_frame_entry", 4));
         } else {
@@ -15960,7 +15971,7 @@ static void switches_arm(void)
             can |= PM_CAN_SWITCH_SHOTS;
             edge_shots = 1;
             say("switch shots: %d switch line(s) hand their shots to the modes; the switch drain's edges (switch_edge "
-                "0x%08x, from the drain 0x%08x..0x%08x%s)", port.n_switch, e->addr, edge.drain, edge.drain_end,
+                "0x%08" PMA ", from the drain 0x%08x..0x%08x%s)", port.n_switch, e->addr, edge.drain, edge.drain_end,
                 edge.mode_mask ? ", the game's mode mask applied" : ", no mode mask");
         } else {
             say("switch shots off: %s", !e->ok ? "switch_edge does not match this build" : why ? why : "switch_edge could not be hooked");
@@ -16752,7 +16763,7 @@ static void coop_up_arm(void)
         return;
     }
     coop_up_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
-    say("co-op: the ball start's \"player N, you're up\" call names the player really up (0x%08x)", fn("coop_up_call"));
+    say("co-op: the ball start's \"player N, you're up\" call names the player really up (0x%08" PMA ")", fn("coop_up_call"));
 }
 
 static void coop_turn_show(void)
@@ -17128,7 +17139,7 @@ static void coop_cache_seen(int i, pm_reg *r)
     if (i < coop_cache_n && coop_cache[i].obj != r[0]) {
         coop_cache[i].obj = r[0];
         coop_cache[i].held = 0;                     /* a new game's record: nothing of ours in it */
-        say("co-op: adjustment %u's record is the rule at 0x%08x", coop_cache[i].id, r[0]);
+        say("co-op: adjustment %u's record is the rule at 0x%08" PMA, coop_cache[i].id, r[0]);
     }
 }
 static void coop_cache_seen0(pm_reg *r) { coop_cache_seen(0, r); }
@@ -17153,7 +17164,7 @@ static void coop_lit_seen(int i, pm_reg *r)
 {
     if (i < coop_lit_n && coop_lit[i].obj != r[0]) {
         coop_lit[i].obj = r[0];
-        say("co-op: the %s lit shot's rule is at 0x%08x", coop_lit[i].name, r[0]);
+        say("co-op: the %s lit shot's rule is at 0x%08" PMA, coop_lit[i].name, r[0]);
     }
 }
 static void coop_lit_seen0(pm_reg *r) { coop_lit_seen(0, r); }
@@ -17381,7 +17392,7 @@ static void coop_count_seen(int i, pm_reg *r)
 {
     if (i < coop_count_n && coop_count[i].obj != r[0]) {
         coop_count[i].obj = r[0];
-        say("co-op: the %s count is the rule at 0x%08x's", coop_count[i].name, r[0]);
+        say("co-op: the %s count is the rule at 0x%08" PMA "'s", coop_count[i].name, r[0]);
     }
 }
 static void coop_count_seen0(pm_reg *r) { coop_count_seen(0, r); }
@@ -17628,7 +17639,7 @@ static int on_language_keys(pm_reg *r)
                             (unsigned)pm_port_value("language_keys_right", 139)))
         return 0;
     if (said < 8 && ++said)
-        say("co-op: flipper key %u kept from the game's language select - the pick has that flipper", r[1]);
+        say("co-op: flipper key %" PMU " kept from the game's language select - the pick has that flipper", r[1]);
     return 1;
 }
 
@@ -18439,10 +18450,10 @@ static void coop_chars_arm(struct site *e)
             if (j < coop_cache_n || !site(name) || !fn(name)) continue;
             coop_cache[coop_cache_n].id = id;
             if (!hook(fn(name), seen[coop_cache_n])) {
-                say("co-op characters: adjustment %u's record cannot be found (%s 0x%08x not hooked)", id, name, fn(name));
+                say("co-op characters: adjustment %u's record cannot be found (%s 0x%08" PMA " not hooked)", id, name, fn(name));
                 continue;
             }
-            say("co-op characters: adjustment %u is copied into a record by 0x%08x (this + player x 4 + 0x%x)", id,
+            say("co-op characters: adjustment %u is copied into a record by 0x%08" PMA " (this + player x 4 + 0x%x)", id,
                 fn(name), coop_cache[coop_cache_n].at);
             coop_cache_n++;
         }
@@ -18481,7 +18492,7 @@ static void coop_chars_arm(struct site *e)
                 say("co-op characters: the %s count is the rule at 0x%08x's (+ player x 4 + 0x%x)",
                     coop_count[coop_count_n].name, coop_count[coop_count_n].obj, coop_count[coop_count_n].at);
             else
-                say("co-op characters: the %s count is cleared by 0x%08x (this + player x 4 + 0x%x)",
+                say("co-op characters: the %s count is cleared by 0x%08" PMA " (this + player x 4 + 0x%x)",
                     coop_count[coop_count_n].name, fn(name), coop_count[coop_count_n].at);
             coop_count_n++;
         }
@@ -18500,7 +18511,7 @@ static void coop_chars_arm(struct site *e)
                 continue;
             }
             str_copy(coop_yes[coop_yes_n].name, 12, coop_ch[i].yes[k], 12);
-            say("co-op characters: the game's %s check (0x%08x) answers yes while its character is up",
+            say("co-op characters: the game's %s check (0x%08" PMA ") answers yes while its character is up",
                 coop_yes[coop_yes_n].name, fn(name));
             coop_yes_n++;
         }
@@ -18576,7 +18587,7 @@ static void coop_chars_arm(struct site *e)
             pm_snprintf(name, sizeof name, "coop_lit_%s_min", coop_ch[i].lit_name[k]);
             coop_lit[coop_lit_n].min = pm_port_value(name, 1);
             pm_snprintf(name, sizeof name, "coop_lit_%s", coop_ch[i].lit_name[k]);
-            say("co-op characters: the %s shot (0x%llx) is held lit while its character is up (its rule's handler 0x%08x)",
+            say("co-op characters: the %s shot (0x%llx) is held lit while its character is up (its rule's handler 0x%08" PMA ")",
                 coop_lit[coop_lit_n].name, (unsigned long long)coop_lit[coop_lit_n].mask, fn(name));
             coop_lit_n++;
         }
@@ -19436,7 +19447,7 @@ static void coop_bonus_chars_arm(void)
         return;
     }
     if (!hook(fn("clip_play"), on_coop_bonus_play)) {
-        say("co-op characters: not on the End of Ball Bonus - clip_play 0x%08x cannot be hooked", fn("clip_play"));
+        say("co-op characters: not on the End of Ball Bonus - clip_play 0x%08" PMA " cannot be hooked", fn("clip_play"));
         return;
     }
     cb.armed = 1;
@@ -20531,8 +20542,8 @@ static void coop_arm(void)
     coop_chars_arm(e);                                        /* PAD-1031 */
     coop_bonus_chars_arm();                                   /* PAD-1123: the characters on the bonus */
     coop_users_arm();                                         /* PAD-1108 */
-    say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08x, player change 0x%08x, "
-        "player 0x%08x, ball 0x%08x, players 0x%08x)", coop.button, fn("coop_add_player"), fn("coop_player_change"),
+    say("co-op: armed - hold switch %u and press Start to add a teammate (add player 0x%08" PMA ", player change 0x%08" PMA ", "
+        "player 0x%08" PMA ", ball 0x%08" PMA ", players 0x%08" PMA ")", coop.button, fn("coop_add_player"), fn("coop_player_change"),
         data("coop_player"), data("coop_player") + 1, data("coop_players"));
 }
 
@@ -20815,7 +20826,7 @@ static void hand_cache_seen(int i, pm_reg *r)
         if (hand_cache[k].addr != hand_cache[i].addr) continue;
         if (calls < 48) {
             calls++;
-            say("handicap: the game copies adjustment %u into the rule at 0x%08x (player %u up, ball %u)",
+            say("handicap: the game copies adjustment %u into the rule at 0x%08" PMA " (player %u up, ball %u)",
                 hand_cache[k].id, r[0], pm_player(), hand_ball());
         }
         hand_cache[k].obj = r[0];
@@ -21042,7 +21053,7 @@ static void hand_arm(void)
         probe.w0 = hand_cache[i].w0;
         probe.w1 = hand_cache[i].w1;
         if (!maps_has(probe.addr, 8, MAP_R | MAP_X | MAP_GAME) || !words_match(&probe) || !hook(probe.addr, seen[i])) {
-            say("handicap: adjustment %u's record is left to the getter - its method 0x%08x %s", hand_cache[i].id,
+            say("handicap: adjustment %u's record is left to the getter - its method 0x%08" PMA " %s", hand_cache[i].id,
                 probe.addr, !maps_has(probe.addr, 8, MAP_R | MAP_X | MAP_GAME) || !words_match(&probe)
                 ? "does not read as handicap.cfg says" : "could not be hooked");
             hand_cache[i].obj = 1u;
@@ -21260,7 +21271,7 @@ static void idle_arm(void)
             : "the timers' check could not be wrapped");
     if (!songs && !check) return;
     say("inactivity: armed - with adjustment %u (ALLOW INACTIVITY TO PAUSE TIMERS) on, %lu ms with no score holds %s "
-        "(score_add 0x%08x%s%s)", idle_adj, idle_ms, songs && check ? "the song clocks and the hurry-ups" : songs
+        "(score_add 0x%08" PMA "%s%s)", idle_adj, idle_ms, songs && check ? "the song clocks and the hurry-ups" : songs
         ? "the song clocks" : "the hurry-ups", fn("score_add"), songs ? ", song tracker" : "", check ? ", check" : "");
 }
 
@@ -21426,7 +21437,7 @@ static void comp_menu_frame(pm_reg *r)
         comp_frame_at = n;
         list[n] = idx;
         *count += 1;
-        say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s; cursor %u)", n + 1,
+        say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s; cursor %" PMU ")", n + 1,
             n + 1, idx, comp_name(), r[creg]);
     }
     /* the cursor this frame draws: the press read just now moves it after this point (left back, right on, both
@@ -21591,7 +21602,7 @@ static void comp_arm(void)
         return;
     }
     comp.armed = 1;
-    say("prolonged competition: armed - on the start menu at 0x%08x (captions %u / %u), flag %u kept set from every "
+    say("prolonged competition: armed - on the start menu at 0x%08" PMA " (captions %u / %u), flag %u kept set from every "
         "game's start (bus 0x%x, ball start 0x%x) while it is on%s", fn(objm ? "comp_menu_obj_built" : frame ? "comp_menu_frame" : "challenge_menu"), comp.caption,
         comp.caption_end, comp.flag, comp.game_id, comp.ball_id, comp.only ? " (comp.cfg: only)" : "");
 }
@@ -22316,7 +22327,7 @@ static void team_menu_frame(pm_reg *r)
         }
         team_frame_n = j;
         *count += j;
-        say("teams: %s%s on the start menu as entries %u-%u (Standard's game-mode index %u; cursor %u)",
+        say("teams: %s%s on the start menu as entries %u-%u (Standard's game-mode index %u; cursor %" PMU ")",
             team_kind_name(kinds[0]), j > 1 ? " and TEAM PLAY" : "", n + 1, n + j, idx, r[creg]);
     }
     /* as Prolonged Competition's: the press read just now moves the cursor after this point */
@@ -22370,7 +22381,7 @@ static void team_menu_arm(void)
     tm.ball_id = (unsigned)ball;
     tm.armed = 1;
     tm.frame = frame;
-    say("teams: TEAM PLAY on the start menu at 0x%08x (%s): picked, one Start makes the team game",
+    say("teams: TEAM PLAY on the start menu at 0x%08" PMA " (%s): picked, one Start makes the team game",
         fn(frame ? "comp_menu_frame" : "challenge_menu"), frame ? "an index menu" : "an entry list");
 }
 
@@ -22435,12 +22446,12 @@ static void core_of_port(const char *s[8], const char *d[4])
 static int site_check(struct site *x)
 {
     if (!maps_has(x->addr, 8, MAP_R | MAP_X | MAP_GAME)) {
-        say("site %s 0x%08x: not in the game's code - not read", x->name, x->addr);
+        say("site %s 0x%08" PMA ": not in the game's code - not read", x->name, x->addr);
         return x->ok = 0;
     }
     x->ok = words_match(x);
     if (!x->ok)
-        say("site %s 0x%08x: expected %08x %08x, found %08x %08x",
+        say("site %s 0x%08" PMA ": expected %08x %08x, found %08x %08x",
             x->name, x->addr, x->w0, x->w1,
             ((const unsigned *)(unsigned long)x->addr)[0], ((const unsigned *)(unsigned long)x->addr)[1]);
     return x->ok;
@@ -22718,7 +22729,7 @@ static int insider_arm(void)
         return 0;
     }
     say("insider: score reports stay on this machine (the game session, high scores and game "
-        "events; agent_header 0x%08x, agent_begin 0x%08x), and the game gets no achievements to "
+        "events; agent_header 0x%08" PMA ", agent_begin 0x%08" PMA "), and the game gets no achievements to "
         "award (the achievement query, message type %d, loaded at 0x%08x, is held back); the login "
         "and the rest of Insider Connected are untouched", fn("agent_header"), fn("agent_begin"),
         insider_achq, insider_achq_at);
@@ -23061,15 +23072,15 @@ static void clipv_arm(void)
         return;
     }
     if (have_sites(v1_s) && hook(fn("clip_play"), on_clipv_play)) {
-        say("clip variants: %u clip(s) play one of several at random (clip_play 0x%08x)", n_clipv, fn("clip_play"));
+        say("clip variants: %u clip(s) play one of several at random (clip_play 0x%08" PMA ")", n_clipv, fn("clip_play"));
     } else if (have_sites(v2_s) && have_data(v2_d) && have_values(v2_v)
                && (pm_scene_id("video_bank") || site("video_surface"))
                && (sv_clipv = 1, sv_hook())) {
-        say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08x, the bank's "
+        say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08" PMA ", the bank's "
             "surface only)", n_clipv, fn("surface_set_video"));
     } else if (site("layer_video") && data("video_layer") && site("string_new")
                && hook(fn("layer_video"), on_clipv_layer)) {
-        say("clip variants: %u clip(s) play one of several at random (layer_video 0x%08x, the video layer only)",
+        say("clip variants: %u clip(s) play one of several at random (layer_video 0x%08" PMA ", the video layer only)",
             n_clipv, fn("layer_video"));
     } else {
         n_clipv = 0;
@@ -23540,11 +23551,11 @@ static void att_arm(void)
     }
     att.attract_bit = (unsigned)pm_port_value("mode_mask_attract", 0x10);
     if (!edge_hooked && !(edge_hooked = hook(e->addr, on_switch_edge))) {
-        say("attract flipper sounds: off - switch_edge 0x%08x cannot be hooked", e->addr);
+        say("attract flipper sounds: off - switch_edge 0x%08" PMA " cannot be hooked", e->addr);
         return;
     }
     if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
-        say("attract flipper sounds: off - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        say("attract flipper sounds: off - sound_lookup 0x%08" PMA " cannot be hooked", fn("sound_lookup"));
         return;
     }
     /* PAD-645: the game's own sound at a press plays the silence - through the sound worker */
@@ -23574,7 +23585,7 @@ static void att_arm(void)
         say("sound log: every request the sound worker takes (soundlog.on)");
     }
     say("attract flipper sounds: %u file(s) on request %u, flipper buttons %u and %u, attract bit 0x%x; "
-        "switch_edge 0x%08x and sound_lookup 0x%08x are hooked%s", att.n, att.request, att.sw[0], att.sw[1],
+        "switch_edge 0x%08" PMA " and sound_lookup 0x%08" PMA " are hooked%s", att.n, att.request, att.sw[0], att.sw[1],
         att.attract_bit, e->addr, fn("sound_lookup"), att.has_quiet ? "; the game's own sound at a press plays "
         "a silence (sound_worker)" : "");
     if (att.gap_ms) say("attract flipper sounds: at most one every %u ms (agap)", att.gap_ms);
@@ -23678,7 +23689,7 @@ static void cpk_sound_arm(void)
         return;
     }
     if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
-        say("co-op characters: no sounds once picked - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        say("co-op characters: no sounds once picked - sound_lookup 0x%08" PMA " cannot be hooked", fn("sound_lookup"));
         cpk.request = 0;
         return;
     }
@@ -23700,7 +23711,7 @@ static void ci_sound_arm(void)
         return;
     }
     if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
-        say("co-op intro: no sound of its own - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        say("co-op intro: no sound of its own - sound_lookup 0x%08" PMA " cannot be hooked", fn("sound_lookup"));
         ci.request = 0;
         return;
     }
@@ -23954,11 +23965,11 @@ static void gms_arm(void)
         return;
     }
     if (!edge_hooked && !(edge_hooked = hook(e->addr, on_switch_edge))) {
-        say("game mode shot sounds: off - switch_edge 0x%08x cannot be hooked", e->addr);
+        say("game mode shot sounds: off - switch_edge 0x%08" PMA " cannot be hooked", e->addr);
         return;
     }
     if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
-        say("game mode shot sounds: off - sound_lookup 0x%08x cannot be hooked", fn("sound_lookup"));
+        say("game mode shot sounds: off - sound_lookup 0x%08" PMA " cannot be hooked", fn("sound_lookup"));
         return;
     }
     if (pm_sound_priority(gms.request, 3, 0) < 0)
@@ -23970,7 +23981,7 @@ static void gms_arm(void)
         say("game mode shot sounds: file %u plays at switch %u in %s (mode %u, object 0x%08x)%s%s", k + 1, gms.sw[k],
             gms_name(gms.mode[k]), gms.mode[k], gms.obj[k], gms.lit[k] ? ", when its shot is " : "",
             gms.lit[k] ? GMS_CLASS_NAMES[gms.lit[k]] : "");
-    say("game mode shot sounds: %u file(s) on request %u, ACTIVE v[%ld]; switch_edge 0x%08x and sound_lookup 0x%08x "
+    say("game mode shot sounds: %u file(s) on request %u, ACTIVE v[%ld]; switch_edge 0x%08" PMA " and sound_lookup 0x%08" PMA " "
         "are hooked", gms.n, gms.request, gms.slot, e->addr, fn("sound_lookup"));
 }
 
@@ -24279,7 +24290,7 @@ static void juke_arm(void)
         say("jukebox: the intro clips cannot be swapped on this build (no surface_set_video) - the songs still are");
     }
     juke_live = 1;
-    say("jukebox: %u song mode(s) (%u start(s) hooked), %u song(s); sound_lookup 0x%08x%s", n_jmode, sites, n_jsong,
+    say("jukebox: %u song mode(s) (%u start(s) hooked), %u song(s); sound_lookup 0x%08" PMA "%s", n_jmode, sites, n_jsong,
         fn("sound_lookup"), sv_juke ? ", the intros on surface_set_video" : "");
 }
 
@@ -24615,13 +24626,13 @@ static void blist_arm(void)
         return;
     }
     if (!worker_hooked && !(worker_hooked = hook(fn("sound_worker"), on_sound_worker))) {
-        say("sound banks: off - sound_worker 0x%08x cannot be hooked; the files in a sound bank do not play",
+        say("sound banks: off - sound_worker 0x%08" PMA " cannot be hooked; the files in a sound bank do not play",
             fn("sound_worker"));
         n_bsid = 0;
         return;
     }
     blist_live = 1;
-    say("sound banks: %u file line(s) play from a sound bank through %u sound request(s)%s; sound_worker 0x%08x "
+    say("sound banks: %u file line(s) play from a sound bank through %u sound request(s)%s; sound_worker 0x%08" PMA " "
         "is hooked", n_bsid, n_blist, lost ? " (some of their sound ids are in no request: those play their own)"
         : "", fn("sound_worker"));
 }
@@ -24636,7 +24647,7 @@ static void sndt_arm(void)
         return;
     }
     if (!lookup_hooked && !hook(fn("sound_lookup"), on_sound_lookup)) {
-        say("sounds in turn: off - sound_lookup 0x%08x cannot be hooked; every sound plays its own",
+        say("sounds in turn: off - sound_lookup 0x%08" PMA " cannot be hooked; every sound plays its own",
             fn("sound_lookup"));
         n_sndt = 0;
         return;
@@ -24647,7 +24658,7 @@ static void sndt_arm(void)
         unsigned j, r = 0;
         for (j = 0; j < n_sndt; j++) r += sndt[j].random;
         say("sounds in turn: %u sound(s) play their files in turn (%u of them at random); sound_lookup "
-            "0x%08x is hooked", n_sndt, r, fn("sound_lookup"));
+            "0x%08" PMA " is hooked", n_sndt, r, fn("sound_lookup"));
     }
 }
 
@@ -24682,12 +24693,12 @@ static void sndm_arm(void)
     }
     sndm_orig = (unsigned (*)(unsigned, unsigned *))hook_wrap(fn("sound_resolve"), (void *)sndm_resolve);
     if (!sndm_orig) {
-        say("music modes: off - sound_resolve 0x%08x cannot be wrapped; every sound plays mode 1's", fn("sound_resolve"));
+        say("music modes: off - sound_resolve 0x%08" PMA " cannot be wrapped; every sound plays mode 1's", fn("sound_resolve"));
         n_sndm = 0;
         return;
     }
     say("music modes: %u sound(s) over %u mode(s), the setting at 0x%08x (now %u)%s; get_asset_descriptor "
-        "0x%08x is wrapped", n_sndm, sndm_n, sndm_live, sndm_live ? *(volatile const unsigned *)(unsigned long)sndm_live : 0,
+        "0x%08" PMA " is wrapped", n_sndm, sndm_n, sndm_live, sndm_live ? *(volatile const unsigned *)(unsigned long)sndm_live : 0,
         sndm_force ? " - FORCED by the file" : "", fn("sound_resolve"));
 }
 
@@ -25270,12 +25281,12 @@ static int soundlog_arm(void)
             say("sound log: every request the sound worker takes (soundlog.on)");
             /* and the record each one played (round 2): the lookup, when the port names it */
             if (fn("sound_lookup") && (lookup_hooked || (lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))))
-                say("sound log: and the recording each one played (sound_lookup at 0x%08x)", fn("sound_lookup"));
+                say("sound log: and the recording each one played (sound_lookup at 0x%08" PMA ")", fn("sound_lookup"));
             else
                 say("sound log: the recording each request played is not logged - the port names no sound_lookup "
                     "that can be hooked");
         } else
-            say("sound log: off - the sound worker at 0x%08x could not be hooked", fn("sound_worker"));
+            say("sound log: off - the sound worker at 0x%08" PMA " could not be hooked", fn("sound_worker"));
     }
     if (only) say("armed: sound log only (soundlog.only) - nothing else is hooked, the game runs stock");
     return only;
@@ -25411,11 +25422,11 @@ static void pad_mode_start(void)
         static const char *const roster_v[] = { "roster_slots", 0 };
         if (have_sites(roster_s) && have_data(roster_d) && have_values(roster_v) && hook(fn("roster_start"), on_roster_start)) {
             can |= PM_CAN_ROSTER;
-            say("roster: %d slots, the battle start at 0x%08x is hooked", pm_roster_slots(), fn("roster_start"));
+            say("roster: %d slots, the battle start at 0x%08" PMA " is hooked", pm_roster_slots(), fn("roster_start"));
             if (fn("roster_cursor") && hook(fn("roster_cursor"), on_roster_cursor))      /* PAD-706 */
                 say("roster: the selection screen's cursor is logged");
             if (fn("roster_resume") && hook(fn("roster_resume"), on_roster_resume))      /* PAD-706 */
-                say("roster: a lost battle the city pick restarts is the mode's again (the resume at 0x%08x is hooked)",
+                say("roster: a lost battle the city pick restarts is the mode's again (the resume at 0x%08" PMA " is hooked)",
                     fn("roster_resume"));
             /* PAD-707: new monsters on the selection screen - its keys, its opening and its pick */
             if (fn("roster_screen_keys") && fn("roster_screen_open") && fn("roster_screen_pick") && fn("roster_cursor")
@@ -25424,13 +25435,13 @@ static void pad_mode_start(void)
                 && (more_open_orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(
                         fn("roster_screen_open"), (void *)more_open_wrap))  /* PAD-733: then the top-left place */
                 && hook(fn("roster_screen_pick"), on_roster_pick))
-                say("roster: the selection screen takes new monsters (its keys at 0x%08x, its pick at 0x%08x)",
+                say("roster: the selection screen takes new monsters (its keys at 0x%08" PMA ", its pick at 0x%08" PMA ")",
                     fn("roster_screen_keys"), fn("roster_screen_pick"));
             if (fn("roster_screen_keys") && fn("roster_portrait_step") && data("roster_portrait_state")    /* PAD-733 */
                 && (more_portrait_orig = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(
                         fn("roster_portrait_step"), (void *)more_portrait_step)))
                 say("roster: a new monster left for another place stays drawn through the game's portrait out (its step "
-                    "at 0x%08x is wrapped)", fn("roster_portrait_step"));
+                    "at 0x%08" PMA " is wrapped)", fn("roster_portrait_step"));
             if (fn("battle_stop"))
                 say("roster: a pick counts as the battle it replaced (its START's bookkeeping at the pick, its STOP at the mode's end)");
         }
@@ -25458,10 +25469,10 @@ static void pad_mode_start(void)
     }
     EACH_MODE(m) modes += m != 0;
     if (fn("score_add32") && data("score_mult"))
-        say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, multiplier byte 0x%08x)", fn("score_add32"),
+        say("scores: 32-bit (score_add32 0x%08" PMA ", scores32 0x%08" PMA ", multiplier byte 0x%08" PMA ")", fn("score_add32"),
             data("scores32"), data("score_mult"));
     else if (fn("score_add32"))
-        say("scores: 32-bit (score_add32 0x%08x, scores32 0x%08x, no score_mult: the multiplier is taken as 1)",
+        say("scores: 32-bit (score_add32 0x%08" PMA ", scores32 0x%08" PMA ", no score_mult: the multiplier is taken as 1)",
             fn("score_add32"), data("scores32"));
     if (!fn("shot_dispatch")) say("shots: from switches only (the port has no shot_dispatch)");
     say("armed: %d mode(s); can%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s", modes,

@@ -1649,7 +1649,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             hint = ""
             if shown_n == 0:
                 hint = ("Nothing matches the Search / Show / Type filters%s."
-                        % (" or Hide unused" if uses_map else ""))
+                        % (" or Show unused" if uses_map else ""))
                 if not query and type_key == "callouts":
                     hint = ("No call-outs identified in this folder yet.\n"
                             "Tick \"Auto-name call-outs\" on the Extract tab "
@@ -1777,8 +1777,9 @@ class AudioTab(FindOriginalsMixin, TabService):
 
     @rpc
     def set_hide_unused(self, on):
-        """PAD-1105: "Hide unused" - leave out the sounds whose Requests read
-        None (remembered between sessions)."""
+        """PAD-1105: leave out the sounds whose Requests read None (remembered
+        between sessions). PAD-1275: the tick reads "Show unused" now, so it
+        sends the opposite of what it shows."""
         self.audio_hide_unused_var.set(bool(on))
         self._remember("audio_hide_unused", bool(on))
         self._save_staged_changes()

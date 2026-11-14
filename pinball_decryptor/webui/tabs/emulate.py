@@ -38,7 +38,7 @@ import tempfile
 import threading
 import time
 
-from ...core import config, rigdata, runtime, staging_work
+from ...core import config, rigdata, runtime, staging_work, timesync
 from .. import compat
 from .. import emulate_rig as rig
 from ..emulate_log import EmulateLogMixin
@@ -3278,6 +3278,7 @@ class EmulateTab(EmulateLogMixin, TabService):
                 env.extend(more)
             env.extend(self._elog_stage_env(env, prepare_card))
             self.last_refusal = ""
+            timesync.quiet_clocks_async(self._log)   # PAD-1307: the clock
             cmd = self._watch_cmd(env)
             self._log("[emulate] %s" % " ".join(str(c) for c in cmd))
             try:

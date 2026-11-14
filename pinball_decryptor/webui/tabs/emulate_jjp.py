@@ -20,7 +20,7 @@ import threading
 import time
 
 from pinball_decryptor.webui import rig as _rig
-from ...core import rigslot
+from ...core import rigslot, timesync
 from ...plugins.jjp import remote_key
 from .. import emulate_jjp_core as jjp
 from .. import compat
@@ -406,6 +406,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
                           "first run — the image has to be restored). Each step "
                           "is shown below as it runs.")
                 args = [iso] if iso else []
+                timesync.quiet_clocks_async(self._log)   # PAD-1307: the clock
                 rc, saw_wrong_key = self._run_launch(
                     jjp.rig_cmd_root(
                         "watch.sh", *args,

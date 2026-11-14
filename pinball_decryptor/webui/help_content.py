@@ -820,8 +820,9 @@ HELP_CONTENT = {
             "asked for in the same part of the program). A sound the game picks at random, "
             "or a clip's own audio track, is not listed.",
             "**A clip's song** (Jersey Jack and others): a song clip carries no sound of its "
-            "own; the game plays the song from a separate file. Under the panes the Video tab "
-            "names that file: a sound in the project named after the same song, both at least "
+            "own; the game plays the song from a separate file. Above the players the Video tab "
+            "names that file on one line (hover **Song:** for how it was matched): a sound in the "
+            "project named after the same song, both at least "
             "30 seconds long and about as long as each other. Tick **Play it with the clip** "
             "and it plays along with either player, following its pause, seek and stop, so the "
             "clip looks and sounds the way the machine shows it.",

@@ -4,6 +4,7 @@ own calls of the player-up getter (`site coop_panel_lit`, `site coop_panel_up[_n
 the teammate up (pad_mode_runtime.c, coop_panel_wrap); every other caller still hears player 1."""
 import glob
 import os
+import re
 import pathlib
 
 import pytest
@@ -75,7 +76,8 @@ ELFS = sorted(p for d in os.environ.get("PAD_GAME_ELFS", "C:/tmp/PAD-1041/elfs;C
 
 @pytest.mark.skipif(not ELFS, reason="no shipped game programs here (PAD_GAME_ELFS)")
 def test_the_shipped_panels_and_no_others():
-    found = {os.path.basename(p): [l.split()[2] for l in portcoop.lines(p)[0] if "coop_panel" in l] for p in ELFS}
+    found = {os.path.basename(p): [l.split()[2] for l in portcoop.lines(p)[0]
+                               if "coop_panel_lit" in l or "coop_panel_up" in l] for p in ELFS}   # PAD-1267: not the names
     assert {k: v for k, v in found.items() if v} == {k: v for k, v in PANELS.items() if k in found}
 
 
@@ -84,7 +86,8 @@ def test_the_latest_ports_carry_the_panel_lines():
                     ("avengers_infinity_pro-1.10", 2), ("jurassic_park_the_pin-1.05", 2),
                     ("uncanny_xmen_le-0.98", 3), ("uncanny_xmen_pro-0.98", 3)):
         text = (PORTS / (port + ".port")).read_text(encoding="utf-8")
-        assert len([l for l in text.splitlines() if l.startswith("site  coop_panel_")]) == n, port
+        assert len([l for l in text.splitlines()
+                    if re.match(r"site  coop_panel_(lit|up)", l)]) == n, port   # PAD-1267: the names apart
 
 
 MAIN = r"""

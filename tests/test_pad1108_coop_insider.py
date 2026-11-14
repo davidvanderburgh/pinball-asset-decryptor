@@ -126,7 +126,8 @@ def test_the_entries_go_back_before_every_game_player_change_and_follow_the_turn
     assert "coop_users_put(1, coop.turn)" in co[co.index("coop.turn = next;"):]
     tm = _body(src, "static unsigned coop_team_change(")
     assert tm.index("coop_users_put(0, 0)") < tm.index("ret = coop_change_game(")
-    assert "coop_users_put(p_after" not in tm and "coop_users_put(1" not in tm    # a team game keeps its logins
+    # PAD-1267: a team game swaps too - the player up holds their team's game player's login - after the change
+    assert tm.index("ret = coop_change_game(") < tm.index("coop_users_put(p_after, coop.turn);")
     tick = _body(src, "static void coop_tick(void)\n{")
     assert re.search(r"if \(cu_g && !\(coop_teammates\(\) && pm_in_game\(\)\)\) coop_users_put\(0, 0\);", tick)
     assert "coop_users_arm();" in _body(src, "static void coop_arm(")

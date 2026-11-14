@@ -756,6 +756,7 @@ site  coop_first_ball    0x001a47b8 0xeb0a2d88 0xe1a04000
 site  coop_panel_lit         0x0010caa8 0xeb0c8ca7 0xe3a04001
 site  coop_panel_up          0x0010c570 0xeb0c8df5 0xe5d43065
 site  coop_panel_up_2        0x0010ff04 0xeb0c7f90 0xe5d43065
+site  coop_panel_name        0x0010c940 0xeb09c6f0 0xe28d0014
 
 # ---- PAD-1017: the end-of-game high scores, for co-op play's own boards (portchallenge.scores_lines) ----
 site  challenge_scores       0x0014e370 0xe92d4ff0 0xe24dd0bc

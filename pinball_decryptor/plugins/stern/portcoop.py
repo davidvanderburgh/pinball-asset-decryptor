@@ -37,6 +37,8 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
   site  audit_add             the game's audit add, whose audits a co-op game's awards count per teammate (PAD-1028)
   site  coop_panel_lit        the score panel's call of the player-up getter that lights the box up (PAD-1043),
   site  coop_panel_up[_n]     and its "player changed" checks' calls: answered with the teammate up
+  site  coop_panel_name[_n]   (PAD-1267) the panel's calls of the game's "Insider name of player N" for a box's player:
+                              answered through the co-op login swap, so each box names its own player
   site  coop_up_call          (PAD-1202) the ball start's "player N, you're up" process's call of the player-up
                               getter: answered with the real player in a co-op or team game
 
@@ -237,6 +239,57 @@ def panel_sites(e, getter):
                                                  for i, q in enumerate(up[:4])]
 
 
+def _reaches(e, f, to, depth, memo):
+    """Does function f call `to` within `depth` calls (each function's words up to the next push {.., lr})?"""
+    w, base = e.words, e.text_va
+    if f == to:
+        return True
+    k = (f - base) // 4
+    if depth == 0 or f & 3 or not 0 <= k < len(w):
+        return False
+    if (f, depth) in memo:
+        return memo[f, depth]
+    memo[f, depth] = False
+    end = next((j for j in range(k + 1, min(k + 3000, len(w))) if w[j] & PUSH_LR_MASK == PUSH_LR), min(k + 3000, len(w)))
+    got = any(t and _reaches(e, t, to, depth - 1, memo) for t in (bl_target(base + 4 * j, w[j]) for j in range(k, end)))
+    memo[f, depth] = got
+    return got
+
+
+def panel_name_sites(e, getter, lit, look):
+    """PAD-1267 (DoomWalrus666, co-op: "Active player name always appeared on Player 1 scoreboard, while the active
+    highlighted score was the correct score position"): the score panel's calls of the game's "Insider name of player
+    N" - name(out string, player, flags, r3, [sp], [sp + 4]), which reaches the user manager's lookup `look` - that
+    name a box's player, as [(name, va)]: `coop_panel_name`, `coop_panel_name_2`, .. In a co-op game the runtime puts
+    the teammate up's login in the game's player 1's place (PAD-1108), so each of these is answered through that swap
+    and every box names its own player. The panel's call that names the player up (r1 is the player-up getter's
+    answer) is not one of them: it is the teammate up's name already. Godzilla (box frame update, the "who leads"
+    caption) and X-Men carry them; Avengers and JP The Pin name no player in the panel."""
+    w, base = e.words, e.text_va
+    if not getter or not lit or not look:
+        return []
+    k0, memo, out = (lit - base) // 4, {}, []
+    for k in range(max(k0 - 0x900, 10), min(k0 + 0x900, len(w) - 1)):
+        t = bl_target(base + 4 * k, w[k])
+        if not t or t == getter:
+            continue
+        before = w[k - 10:k]
+        if not any(x & 0xFFFFF000 == 0xE28D0000 for x in before):                     # add r0, sp, #imm: the out string
+            continue
+        if not any(x & 0xFFFF0FFF == 0xE58D0000 for x in before) \
+                or not any(x & 0xFFFF0FFF == 0xE58D0004 for x in before):              # str rX, [sp] ; str rX, [sp, #4]
+            continue
+        movs = [x for x in before if x & 0xFFFFFFF0 == 0xE1A01000]                     # mov r1, rN
+        if not movs or movs[-1] == 0xE1A01000:                                         # r1 is the getter's answer
+            continue
+        if any(bl_target(base + 4 * q, w[q]) == getter for q in range(k - 10, k)):
+            continue
+        if not _movable(w[k + 1]) or not _reaches(e, t, look, 4, memo):
+            continue
+        out.append(base + 4 * k)
+    return [("coop_panel_name" + ("_%d" % (i + 1) if i else ""), va) for i, va in enumerate(out[:4])]
+
+
 def _movable(x):
     """The word after a call hook_call may move as it is (pad_mode_runtime.c's own test): no branch, nothing that
     reads or writes pc."""
@@ -326,6 +379,11 @@ def lines(elf):
     # PAD-1043: the score panel's own calls of the player-up getter, answered with the teammate up
     getter = player_getter(e, player)
     for name, at in panel_sites(e, getter) if getter else []:
+        out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % (name, at, e.word(at), e.word(at + 4)))
+    # PAD-1267: the panel's calls naming a box's player (Insider name), answered through the co-op login swap
+    from .coop_play import users_lookup
+    lit = next((at for name, at in panel_sites(e, getter) if name == "coop_panel_lit"), None) if getter else None
+    for name, at in panel_name_sites(e, getter, lit, users_lookup(e)) if lit else []:
         out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % (name, at, e.word(at), e.word(at + 4)))
     # PAD-1202: the ball start's "player N, you're up" call, given the real player
     up = up_call(e, player, players)

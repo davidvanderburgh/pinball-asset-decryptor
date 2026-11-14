@@ -19409,10 +19409,11 @@ static void team_menu_arm(void);              /* PAD-1052, with the start menu's
  * the user's 16-byte uuid and a flags word; Godzilla Pro 1.16: manager 0x7b0f50, +0x160 / +0x164), and every user of
  * a player's login reads them (the lookup, game_users_lookup on every build, and the logged-in test beside it). So
  * while teammate t is up, the game's player 1 holds teammate t's entry and teammate t's place holds player 1's: the
- * bonus, and anything else the game does for "player 1", is the teammate's. NOT in a team game (PAD-1042): the game
- * counts two players there and clears the entries past its count (emulator, Godzilla LE 1.16: players 3 and 4's went to
- * 0 in a team game), so player 1's entry swapped into player 3's place was lost - a team game keeps the game's own
- * logins, the team's first players'. Before each of the game's own player changes the entries go
+ * bonus, and anything else the game does for "player 1", is the teammate's. A team game (PAD-1042) too, since PAD-1267:
+ * the game counts two players there and clears the entries past its count (emulator, Godzilla LE 1.16: players 3 and
+ * 4's went to 0), which would lose player 1's entry swapped into player 3's place - the runtime puts back what it
+ * clears (coop_team_users_back, below), and the player up holds their game player's login. Before each of the game's
+ * own player changes the entries go
  * back where they were (so the game's end, its high scores and its session see the logins as the players made them),
  * and they are swapped again for the next turn; a game that ends any other way is put back by the tick.
  * coop.cfg: `users <manager> <A> <B>` (coop_play.insider_users, read off the card's own program).
@@ -19485,6 +19486,142 @@ static void coop_users_put(unsigned g, unsigned p)
     }
 }
 
+/* PAD-1267 (DoomWalrus666: "Teams mode, player 3 and 4 names don't appear on scoreboard after ball 1"): a team game
+ * counts two game players, and the game clears the logins past its count (emulator, Godzilla LE 1.16: players 3 and
+ * 4's entries in the first table went to 0 a tick after each of the game's player changes; the second table kept
+ * them), so the score panel's boxes 3 and 4 lost their names. In a team game the runtime keeps a copy of every player's
+ * login (taken before each of the game's own player changes, the logins as made) and puts back an entry past the count
+ * the game cleared (after the change, and on the tick) with the login that belongs in that place now - with the swap
+ * below, player 3's turn has player 1's login in place 3. At the team game's end the entries go back to what the game had
+ * made of them, so no login is left over for the next game's players 3 and 4. With them kept, a team game swaps too: the
+ * player up holds their team's game player's place (player 3 the game's player 1, player 4 its player 2), so the
+ * bonus and the panel's player-up name are theirs. */
+/* the place holding player p's login while the game's player g holds player q's (g 0: as made; tests lift it verbatim) */
+static unsigned coop_name_player(unsigned p, unsigned g, unsigned q)
+{
+    if (!g || !q || g == q) return p;
+    return p == g ? q : p == q ? g : p;
+}
+static unsigned char tu_made[2][4][COOP_USER_ENTRY];   /* player p's (1..4) login in table k, as made */
+static unsigned char tu_game[2][4][COOP_USER_ENTRY];   /* what the game had put there when it was put back */
+static unsigned tu_have, tu_put;                        /* bit k * 4 + p - 1: kept / put back */
+
+/* an entry with no user: its 16-byte uuid all zero (tests lift it verbatim) */
+static int coop_entry_empty(const volatile unsigned char *x)
+{
+    unsigned i;
+    for (i = 0; i < 16; i++)
+        if (x[i]) return 0;
+    return 1;
+}
+
+/* the places past the game's count, in a team game now (0: none) */
+static unsigned coop_team_users_from(void)
+{
+    unsigned g = coop_players_byte ? *coop_players_byte : 0;
+    if (!cu_mgr || !coop.teams || !coop_teammates() || g < 1 || g >= 4) return 0;
+    return g + 1;
+}
+
+static void coop_team_users_keep(void)
+{
+    unsigned k, p, from = coop_team_users_from(), i;
+    if (!from) return;
+    for (k = 0; k < 2; k++) {
+        unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+        if (!coop_user_table_ok(t)) continue;
+        for (p = 1; p <= coop.n && p <= 4; p++) {   /* every player's: a place past the count may hold any (the swap) */
+            const volatile unsigned char *x = (const volatile unsigned char *)(unsigned long)coop_user_entry(t, p);
+            if (coop_entry_empty(x)) continue;
+            for (i = 0; i < COOP_USER_ENTRY; i++) tu_made[k][p - 1][i] = x[i];
+            tu_have |= 1u << (k * 4 + p - 1);
+        }
+    }
+}
+
+static void coop_team_users_back(const char *when)
+{
+    unsigned k, p, from = coop_team_users_from(), i, n = 0;
+    if (!from || !tu_have) return;
+    for (k = 0; k < 2; k++) {
+        unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+        if (!coop_user_table_ok(t)) continue;
+        for (p = from; p <= coop.n && p <= 4; p++) {
+            unsigned bit = 1u << (k * 4 + p - 1), who = coop_name_player(p, cu_g, cu_p);   /* whose login is here now */
+            volatile unsigned char *x = (volatile unsigned char *)(unsigned long)coop_user_entry(t, p);
+            if (!(tu_have & 1u << (k * 4 + who - 1)) || !coop_entry_empty(x)) continue;
+            if (!(tu_put & bit))
+                for (i = 0; i < COOP_USER_ENTRY; i++) tu_game[k][p - 1][i] = x[i];
+            for (i = 0; i < COOP_USER_ENTRY; i++) x[i] = tu_made[k][who - 1][i];
+            tu_put |= bit;
+            n++;
+        }
+    }
+    if (n) say("co-op insider: team game: the game cleared %u login entr%s past its %u players (%s) - put back "
+               "(player 3 0x%08x, player 4 0x%08x)", n, n == 1 ? "y" : "ies", from - 1, when, coop_user_word(3),
+               coop_user_word(4));
+}
+
+/* the team game is over (or gone): the entries put back go back to what the game had made of them */
+static void coop_team_users_end(void)
+{
+    unsigned k, p, i;
+    if (tu_put && cu_mgr) {
+        for (k = 0; k < 2; k++) {
+            unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+            if (!coop_user_table_ok(t)) continue;
+            for (p = 1; p <= 4; p++) {
+                volatile unsigned char *x = (volatile unsigned char *)(unsigned long)coop_user_entry(t, p);
+                if (!(tu_put & 1u << (k * 4 + p - 1))) continue;
+                for (i = 0; i < COOP_USER_ENTRY; i++) x[i] = tu_game[k][p - 1][i];
+            }
+        }
+        say("co-op insider: team game over - players 3 and 4's logins back as the game left them");
+    }
+    tu_have = tu_put = 0;
+}
+
+/* PAD-1267 (DoomWalrus666, co-op: "Active player name always appeared on Player 1 scoreboard, while the active
+ * highlighted score was the correct score position"): the swap above gave the score panel's box 1 the teammate up's
+ * login too. The panel's calls naming a BOX's player (`site coop_panel_name[_n]`, portcoop.panel_name_sites: the
+ * game's name(out, player, flags, r3, [sp], [sp + 4]) - Godzilla's box frame update and its "who leads" caption, X-Men's
+ * boxes) are wrapped where they are made and asked for the player whose login is in that place now, so every box names
+ * its own player; the panel's call naming the player up, and the bonus's, still read the swapped place (the teammate
+ * up). The two stack arguments are the caller's: the wrapper is entered with its stack (hook_call) and passes them on. */
+static const char *const COOP_NAME_SITES[] = { "coop_panel_name", "coop_panel_name_2", "coop_panel_name_3",
+                                               "coop_panel_name_4", 0 };
+static unsigned (*coop_name_game)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
+
+static unsigned coop_name_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, unsigned s1)
+{
+    static unsigned said[5];
+    unsigned place = coop_name_player(r1, cu_g, cu_p);
+    if (place != r1 && r1 >= 1 && r1 <= 4 && said[r1] != (cu_g << 4 | cu_p)) {   /* once a turn a box */
+        said[r1] = cu_g << 4 | cu_p;
+        say("co-op insider: the score panel's box %u names player %u's login (0x%08x, in place %u while player %u "
+            "is up)", r1, r1, coop_user_word(place), place, cu_p);
+    }
+    return coop_name_game(r0, place, r2, r3, s0, s1);
+}
+
+static void coop_name_arm(void)
+{
+    int i, armed = 0;
+    unsigned at;
+    for (i = 0; COOP_NAME_SITES[i]; i++) {
+        if (!site(COOP_NAME_SITES[i])) continue;
+        if (!fn(COOP_NAME_SITES[i]) || !(at = hook_call(fn(COOP_NAME_SITES[i]), (void *)coop_name_wrap))) {
+            say("co-op insider: the score panel's %s could not be wrapped - its box names the teammate up",
+                COOP_NAME_SITES[i]);
+            continue;
+        }
+        coop_name_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
+        armed++;
+    }
+    if (armed) say("co-op insider: the score panel's boxes name their own players (%d call%s)", armed,
+                   armed == 1 ? "" : "s");
+}
+
 static int on_coop_award(unsigned *r);       /* below the Insider Connected gate */
 
 static void coop_users_arm(void)
@@ -19495,6 +19632,7 @@ static void coop_users_arm(void)
     } else if (cu_mgr) {
         say("co-op insider: the teammate up has the game's player's Insider login (manager 0x%08x, +0x%x +0x%x)",
             cu_mgr, cu_off[0], cu_off[1]);
+        coop_name_arm();                                      /* PAD-1267 */
     }
     if (cu_award) {
         if (is_game_process(cu_award) && hook_veto(cu_award, on_coop_award))
@@ -19509,6 +19647,8 @@ static void coop_tick(void)
 {
     unsigned n;
     if (cu_g && !(coop_teammates() && pm_in_game())) coop_users_put(0, 0);   /* PAD-1108: a game ended another way */
+    if (tu_have && !(coop.teams && coop_teammates())) coop_team_users_end();   /* PAD-1267: a team game ended */
+    else if (tu_have) coop_team_users_back("after its player change");      /* PAD-1267: the game's later clear */
     coop_solo_check();                                        /* PAD-1054 */
     n = coop_teammates();
     if (n && !coop.teams && !coop.standard && pm_in_game()) coop_scores_same(n);   /* PAD-1042: a team game's are the
@@ -19570,6 +19710,7 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         coop.team_n[1] = 1;
         coop.team_n[2] = 0;
         coop.turn = 1;
+        tu_have = tu_put = 0;                                 /* PAD-1267: no logins kept from another game */
         coop.round = 1;
         if (!n) {
             coop_awards_begin();                              /* PAD-1028 */
@@ -19785,7 +19926,10 @@ static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned
     down = p >= g && coop.round < rounds && before > 0;
     if (down) *coop_ball_byte = (unsigned char)(before - 1);
     coop_users_put(0, 0);                                     /* PAD-1108: the game's own change sees the logins as made */
+    coop_team_users_keep();                                   /* PAD-1267: players 3 and 4's logins, before it clears them */
     ret = coop_change_game(r0, r1, r2, r3);
+    if (ret & 0xff) coop_team_users_back("in its player change");   /* PAD-1267 */
+    else coop_team_users_end();
     p_after = coop_ball_byte[-1];
     round = coop_team_round(g, p, p_after, before, *coop_ball_byte, down, coop.round, rounds);
     if (down && p_after == p && *coop_ball_byte == before - 1) *coop_ball_byte = (unsigned char)before;  /* extra ball */
@@ -19798,8 +19942,10 @@ static unsigned coop_team_change(unsigned r0, unsigned r1, unsigned r2, unsigned
     }
     coop.round = round;
     coop.join_n = 0;                                          /* PAD-1052: the fill's lines give way to the next turn */
-    if (p_after >= 1 && p_after <= 2)
+    if (p_after >= 1 && p_after <= 2) {
         coop.turn = coop_team_player_in(coop.team_kind, p_after, coop.team_n[p_after], round);   /* PAD-1224: 3v1 */
+        coop_users_put(p_after, coop.turn);                   /* PAD-1267: the player up has their team's game player's login */
+    }
     say("teams: ball %u, team %u player %u done - %s: team %u player %u, ball %u", before,
         coop_team_of_in(coop.team_kind, was), was,
         p_after == p && *coop_ball_byte == before ? "an extra ball" : down ? "the next round on this ball"

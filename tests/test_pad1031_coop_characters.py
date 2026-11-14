@@ -75,10 +75,13 @@ static struct { int pending; } cpk;
 struct pm_stock_rule;
 static struct pm_stock_rule *pm_stock_rule(unsigned id) { (void)id; return 0; }
 static int pm_stock_active(struct pm_stock_rule *r) { (void)r; return 0; }
-#define PM_STOCK_ANY 0xffu
-static int pm_stock_mode_running(unsigned kinds) { (void)kinds; return 0; }
+#define PM_STOCK_ANY 0x1u
+#define PM_STOCK_MULTIBALL 0x2u
+static int stock_any, stock_mb, balls_now = 1, refuse_add;  /* PAD-1265: a mode of the game's, its multiball */
+static int pm_stock_mode_running(unsigned kinds) { return kinds == PM_STOCK_MULTIBALL ? stock_mb : stock_any; }
+static int pm_balls_in_play(void) { return balls_now; }
 static unsigned added_balls;
-static int pm_multiball_add(unsigned n, unsigned s) { (void)s; added_balls += n; return 1; }
+static int pm_multiball_add(unsigned n, unsigned s) { (void)s; if (refuse_add) return 0; added_balls += n; return 1; }
 static long pm_port_value(const char *n, long f) { (void)n; return f; }
 static uint64_t pm_stock_lit(struct pm_stock_rule *r) { (void)r; return 0; }
 static unsigned more_state(unsigned slot) { (void)slot; return 0; }
@@ -326,6 +329,58 @@ def test_a_launch_is_not_the_saves_double_press_on_any_ball(tmp_path):
     assert "ball 3 taken 10 used 1" in out
     assert "no lane known 10 used 1" in out                         # no lane in coop.cfg: as before, every press
     assert any("at a launch" in line and "not the save's" in line for line in out)
+
+
+ADDBALL_MAIN = r"""
+static void twice(const char *what)
+{
+    added_balls = 0;
+    press(34); now_ms += 300; press(34); coop_chars_tick();
+    printf("%s %u used %d\n", what, added_balls, coop_save_used);
+}
+static void next_turn(void) { coop.turn = 2; coop_chars_turn(); coop.turn = 1; coop_chars_turn(); now_ms += 5000; }
+int main(void)
+{
+    coop_char_line("addball:1 84GOJI|ADD A BALL");
+    coop_char_line("- OTHER|");
+    coop_pick_on = 1; coop.button = 59; coop_left = 60; coop_action = 34;
+    coop.n = 2; coop.turn = 1;
+    coop_chars_begin(); coop_pick_open(1); press(34); coop_chars_tick();
+    coop.turn = 2; coop_chars_turn(); press(34); coop_chars_tick();
+    printf("t1 %d t2 %d\n", coop_pick_of[1], coop_pick_of[2]);
+    next_turn(); stock_any = 1; twice("in a battle");
+    now_ms += 5000; twice("again");
+    next_turn(); stock_any = 0; twice("regular play");
+    next_turn(); stock_any = stock_mb = 1; balls_now = 2; twice("in a multiball");
+    stock_mb = 0; now_ms += 5000; twice("still two balls");
+    stock_any = 0; balls_now = 1; now_ms += 5000; twice("one ball left");
+    next_turn(); refuse_add = 1; twice("refused");
+    refuse_add = 0; now_ms += 5000; twice("taken");
+    coop.turn = 2; coop_chars_turn(); now_ms += 5000; twice("teammate 2");
+    return 0;
+}
+"""
+
+
+def test_add_a_ball_works_in_the_games_modes_but_waits_out_its_multiball(tmp_path):
+    """PAD-1265 (DoomWalrus666, team play): "the add a ball didn't work with double action press on any of my turns".
+    84GOJI's double press added a ball only with none of the game's modes running and was dropped without a word
+    otherwise (emulator, Godzilla LE 1.16 Team 2v2 with Hedorah running: nothing). Now it adds one in any mode with
+    one ball in play; in the game's multiball it waits, unspent; a refused one is still the ball's."""
+    main = MAIN[:MAIN.index("int main(void)")] + ADDBALL_MAIN
+    out = _run(tmp_path, main)
+    assert "t1 0 t2 1" in out
+    assert "in a battle 1 used 1" in out                            # the bug: 0 used 0, a mode of the game's ran
+    assert "again 0 used 1" in out                                  # once a ball
+    assert "regular play 1 used 1" in out
+    assert "in a multiball 0 used 0" in out                         # the game's multiball: it waits, not spent
+    assert "still two balls 0 used 0" in out                        # two balls in play is a multiball too
+    assert "one ball left 1 used 1" in out
+    assert "refused 0 used 0" in out
+    assert "taken 1 used 1" in out
+    assert "teammate 2 0 used 0" in out                             # OTHER has no add-a-ball
+    assert any("add-a-ball waits - the game's multiball runs" in line for line in out)
+    assert any("one a ball, and this ball's is spent" in line for line in out)
 
 
 def test_coop_cfg_reads_the_shooter_lane():

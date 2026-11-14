@@ -268,7 +268,7 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     src = _read(os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c"))
     body = R._lift(src, "static int insider_holding(unsigned while_at, unsigned value)")
     assert "return !while_at || coop_row_mode(value) != 0u;" in body          # no row: always; a row: not Off
-    gate = R._lift(src, "static int on_agent_begin(unsigned *r)")
+    gate = R._lift(src, "static int on_agent_begin(pm_reg *r)")
     assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")
     assert "if (at && !attract_wanted() && maps_has(at, 4, MAP_R))" in arm   # only a card of co-op alone
@@ -330,7 +330,7 @@ def test_the_gate_holds_back_only_while_co_op_play_is_on(tmp_path):
         "static int str_starts(const char *s, const char *prefix)",
         "static int insider_blocked(const char *endpoint)", "static unsigned coop_row_mode(unsigned v)",
         "static int insider_holding(unsigned while_at, unsigned value)")) + "\nstatic unsigned insider_while;\n" + \
-        R._lift(src, "static int on_agent_begin(unsigned *r)")
+        R._lift(src, "static int on_agent_begin(pm_reg *r)")
     out = R._host_run(tmp_path, GATE_MAIN.replace("@BLOCKED@", blocked).replace("@FNS@", fns),
                       flags=("-no-pie",)).splitlines()
     assert out == ["off 0 0 0 0",            # CO-OP PLAY Off: the session, high scores, events and query all go out

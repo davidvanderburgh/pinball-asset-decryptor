@@ -264,6 +264,9 @@ _READER = r"""
 #include <fcntl.h>
 #include <unistd.h>
 #include "pad_mode.h"
+typedef unsigned pm_addr;            /* PAD-1269: the 32-bit build's address and register types */
+typedef unsigned pm_reg;
+static unsigned long game_base;      /* PAD-1269: a PIE's load address, 0 on Spike 2 */
 static const char *PORT_FILES[2];
 static int events, lamps, rules;
 static void event_line(const char *s) { events++; }
@@ -440,3 +443,16 @@ def test_a_port_can_ask_for_the_bus_ids_its_build_fires():
     assert 'if (!pm_port_value("event_census", 0) || pm_ms() < next) return;' in body
     assert "d = event_fired[id] - seen[id];" in body
     assert "event_census();                           /* PAD-420: `value event_census 1` */" in src
+
+
+def test_a64_build_fails_on_a_narrowed_log_format():
+    """PAD-1273: on Spike 3 a pm_addr / pm_reg is 64 bits, and a log line that printed one through %x
+    showed only its low 32 bits. The runtime's lines print them through PMA / PMU ("lx" / "lu" on
+    a64, the "x" / "u" they always had on Spike 2), and the a64 build makes -Wformat an error so a
+    new line that narrows an address fails to build instead of logging the wrong address."""
+    with open(os.path.join(SDK, "build_mode.sh"), encoding="utf-8") as f:
+        a64 = next(l for l in f if l.strip().startswith("a64)"))
+    assert 'ARCHWARN="-Werror=format"' in a64 and "Wno-error=format" not in a64
+    with open(os.path.join(SDK, "pad_mode_runtime.c"), encoding="utf-8") as f:
+        src = f.read()
+    assert re.search(r'#if PM_A64\s+#define PMA "lx"\s+#define PMU "lu"\s+#else\s+#define PMA "x"\s+#define PMU "u"', src)

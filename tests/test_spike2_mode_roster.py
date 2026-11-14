@@ -437,9 +437,15 @@ def _lift(src, signature):
     raise AssertionError("unbalanced: " + signature)
 
 
+# PAD-1269: the runtime's address and saved-register types, as its 32-bit (Spike 2) build has them, so code
+# lifted from it compiles on the host. Repeating them (a harness that includes the whole runtime) is legal C.
+# PAD-1273: and PMA / PMU, the printf lengths of a pm_addr / pm_reg (the runtime's identical #define may follow).
+PM_TYPES = "typedef unsigned pm_addr;\ntypedef unsigned pm_reg;\n#define PM_A64 0\n#define PMA \"x\"\n#define PMU \"u\"\n"
+
+
 def _host_run(tmp_path, code, flags=(), args=()):
     cc = _cc()
-    (tmp_path / "t.c").write_text(code)
+    (tmp_path / "t.c").write_text(PM_TYPES + code)
     r = subprocess.run([cc, "-std=gnu17", "-Wall", "-Wno-unused-parameter", *flags, "-o", str(tmp_path / "t"),
                         str(tmp_path / "t.c")], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr

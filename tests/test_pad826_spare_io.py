@@ -143,7 +143,7 @@ def test_every_end_turns_a_spare_output_off():
     assert 'spare_outs_off("the ball ended")' in src
     tick = _lift(src, "static void spare_tick(")
     assert "!pm_in_game()" in tick and "!running" in tick
-    assert "spare_tick();" in _lift(src, "static void on_tick(unsigned *r)")
+    assert "spare_tick();" in _lift(src, "static void on_tick(pm_reg *r)")
     assert 'fn("coil_off")' in _lift(src, "static void spare_out_off(")
 
 

@@ -148,14 +148,14 @@ int main(void)
 
 def test_the_runtime_takes_flags_at_the_dispatch_and_makes_a_mode_challenge_one_ball():
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
-    disp = src[src.index("static void on_event_dispatch(unsigned *r)"):]
+    disp = src[src.index("static void on_event_dispatch(pm_reg *r)"):]
     disp = disp[:disp.index("\n}\n")]
     assert "challenge_ball_start();" in disp and "challenge_ours = 0;" in disp
     arm = src[src.index("static void challenges_arm(void)"):]
     arm = arm[:arm.index("\n}\n")]
     assert 'hook_veto_n(fn("challenge_balls"), challenge_balls_veto, 0, 1)' in arm
     assert 'event_bus_id("ball_start")' in arm
-    built = src[src.index("static void challenge_menu_built(unsigned *r)"):]
+    built = src[src.index("static void challenge_menu_built(pm_reg *r)"):]
     built = built[:built.index("\n}\n")]
     assert "if (mine) return;" in built                                     # every frame: appended once
     assert 'pm_port_value("challenge_menu_entry", 12)' in built
@@ -261,7 +261,7 @@ def test_the_runtime_reads_a_compare_chain_pick_through_its_entry_and_knows_ours
     own = src[src.index("static int own_entry_at("):]
     own = own[:own.index("\n}\n")]
     assert "name == (unsigned)(unsigned long)own_challenge[k].name" in src
-    pick = src[src.index("static void challenge_menu_picked(unsigned *r)"):]
+    pick = src[src.index("static void challenge_menu_picked(pm_reg *r)"):]
     pick = pick[:pick.index("\n}\n")]
     assert 'pm_port_value("challenge_menu_pick_back", 0)' in pick and "ent[0] = (unsigned)pm_port_value(" in pick
     start = src[src.index("static void challenge_ball_start(void)"):]
@@ -276,7 +276,7 @@ def test_elvira_keeps_its_menu_count_in_a_register_and_the_frame_hook_saves_ever
     full = src[src.index("static int hook_full(unsigned addr, hook_fn logger)"):]
     full = full[:full.index("\n}\n")]
     assert "0xe92d5fffu" in full and "0xe8bd5fffu" in full                  # push / pop {r0-r12, lr}
-    built = src[src.index("static void challenge_menu_built(unsigned *r)"):]
+    built = src[src.index("static void challenge_menu_built(pm_reg *r)"):]
     built = built[:built.index("\n}\n")]
     assert "r + (creg >= 0 ? 14 : 6)" in built and "&r[creg]" in built
 
@@ -312,7 +312,7 @@ def test_tmnt_menu_has_its_fields_moved_and_the_runtime_follows_them(key):
     assert int(v["challenge_menu_entry"]) == 24 and int(v["challenge_menu_kind_at"]) == 4
     assert int(v["challenge_menu_name_at"]) == 12 and int(v["challenge_menu_caption_at"]) == 8
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
-    built = src[src.index("static void challenge_menu_built(unsigned *r)"):]
+    built = src[src.index("static void challenge_menu_built(pm_reg *r)"):]
     built = built[:built.index("\n}\n")]
     assert "list[es * i + k2] = list[es * tmpl + k2]" in built              # ours start as a copy of the game's entry
     assert "*(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)own_challenge[k].name" in built

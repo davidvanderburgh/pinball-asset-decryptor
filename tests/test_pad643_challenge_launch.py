@@ -115,7 +115,7 @@ int main(void)
 
 def test_the_runtime_launches_from_the_tick_and_wraps_the_plain_handlers():
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
-    tick = src[src.index("static void on_tick(unsigned *r)"):]
+    tick = src[src.index("static void on_tick(pm_reg *r)"):]
     tick = tick[:tick.index("\n}\n")]
     assert "launch_tick();" in tick
     began = src[src.index("static void chg_began(void)\n{"):]

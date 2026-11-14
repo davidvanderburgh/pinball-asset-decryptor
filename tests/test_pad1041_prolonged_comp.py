@@ -75,7 +75,7 @@ def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     start = R._lift(src, "static void comp_game_start(void)")
     assert "if (comp.on) game_flag_set(comp.flag);" in start and "else if (was) game_flag_clear(comp.flag);" in start
     # the pick plays as Standard: kind 0 on the kind-jump menus (r3) and written into the entry on the others
-    picked = R._lift(src, "static void comp_menu_picked(unsigned *r)")
+    picked = R._lift(src, "static void comp_menu_picked(pm_reg *r)")
     assert "else r[3] = 0;" in picked and "*(unsigned *)(e8 + MENU_KIND_AT) = 0;" in picked
 
 
@@ -135,7 +135,7 @@ def test_the_runtime_takes_each_kind_of_menu():
     assert 'hook_full(fn("comp_menu_frame"), comp_menu_frame)' in arm
     assert 'hook_full(fn("comp_menu_obj_built"), comp_menu_obj_built)' in arm
     assert 'hook_full(fn("comp_menu_obj_pick"), comp_menu_obj_pick)' in arm
-    frame = R._lift(src, "static void comp_menu_frame(unsigned *r)")
+    frame = R._lift(src, "static void comp_menu_frame(pm_reg *r)")
     assert "unsigned n = *count + last;" in frame and "pm_message_set(msg, comp_name());" in frame
     assert "comp_frame_restore();" in R._lift(src, "static void comp_game_start(void)")
 

@@ -108,7 +108,10 @@ shots no switch table covers.
 
 On a machine, `mode.so` goes in `/usr/local/padmode/` on the card's root filesystem,
 with the game's port as `/usr/local/padmode/game.port`. The app's Write step does this;
-it is not something you copy by hand.
+it is not something you copy by hand. On a Spike 3 card (64-bit ARM, `prebuilt/mode64.so`)
+the same files go in `/games/pad/padmode/` on the games partition, and `/games/game`
+becomes `pad/padmode/padmode.sh`, which preloads the object into the game; the 64-bit
+runtime opens every `/usr/local/padmode/...` path there (docs/plans/spike3_modes.md).
 
 ## The pinned object
 

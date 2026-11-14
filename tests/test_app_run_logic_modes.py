@@ -3156,13 +3156,12 @@ def test_modes_help_stays_behind_the_switch_and_its_which_games_never_raises(mon
     assert HD.sections_for("Modes") == [("Kept", "words")]
 
 
-def test_modes_tab_names_a_spike3_card_and_says_modes_are_not_on_it_yet(tmp_path):
-    """PAD-1269: Try it's card verdict tells a Stern Spike 3 card apart from a Spike 2 one.
-
-    The mode maker builds modes onto Spike 2 cards. A Spike 3 card used to fall through to
-    a generic failure; now it is recognised (a partition-table peek) and the footer says
-    plainly that modes are not built onto Spike 3 yet, so the user is not left guessing.
+def test_modes_tab_says_a_spike3_cards_build_has_no_modes_yet(tmp_path):
+    """PAD-1269/1272: Try it's card verdict on a Stern Spike 3 card. Modes go onto a Spike 3
+    card once the app knows how to run them on its build (its port); until then the footer
+    says so in the same words as for any build with none, rather than letting Try it find out.
     """
+    from pinball_decryptor.plugins.stern import mode_project as MP
     from tests.test_spike3 import _build_spike3_disk
 
     s3 = tmp_path / "walking_dead_le-0_92_0.Release.64G.sdcard-secure.raw"
@@ -3174,6 +3173,23 @@ def test_modes_tab_names_a_spike3_card_and_says_modes_are_not_on_it_yet(tmp_path
         svc = _svc(w)
         verdict = w.run(lambda: svc._card_verdict(str(s3)))
     text, kind, tip = verdict
-    assert text == "a Spike 3 card"
+    assert text == "a Spike 3 card, no modes for its build yet"
     assert kind == "info"
-    assert "Spike 3" in tip and "does not build" in tip
+    assert tip == MP.no_port_words(MP.title_label("walking_dead_le", "0.92.0"))
+
+
+def test_modes_tab_takes_a_spike3_card_whose_build_has_a_port_as_any_card(tmp_path, monkeypatch):
+    """PAD-1272: with a port for its build the Spike 3 card is no special case: the verdict is
+    the one any card gets next to the project's (here: another game build)."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from tests.test_spike3 import _build_spike3_disk
+
+    s3 = tmp_path / "walking_dead_le-0_92_0.Release.64G.sdcard-secure.raw"
+    s3.write_bytes(_build_spike3_disk().getvalue())
+    monkeypatch.setattr(MP, "profile_for_card", lambda g, v, ports_dir=None: MP.GODZILLA_PRO_1_15)
+    project = tmp_path / "proj"
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, project)
+        svc = _svc(w)
+        text, _kind, _tip = w.run(lambda: svc._card_verdict(str(s3)))
+    assert "Spike 3" not in text

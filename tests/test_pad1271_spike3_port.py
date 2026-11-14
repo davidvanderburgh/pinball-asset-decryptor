@@ -99,7 +99,7 @@ def test_the_achievement_query_is_found_in_elg_spike3_code(tmp_path):
     words = ", ".join("0x%08xu" % w for w in ELG_SENDER)
     code = r"""
 #include <stdio.h>
-typedef unsigned long pm_addr;
+#define pm_addr unsigned long   /* the a64 build's (_host_run puts the 32-bit typedef first) */
 static const unsigned W[] = { %s };
 #define BASE 0x295260ul
 static unsigned code_word64(pm_addr at)

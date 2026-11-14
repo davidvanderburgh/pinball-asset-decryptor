@@ -94,7 +94,7 @@ static long pm_port_value(const char *n, long d)
 
 MENU_FNS = ROW_FNS + ("static const char *team_kind_name(unsigned k)\n{", "static unsigned team_kind_of(unsigned kind)",
                       "static unsigned team_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)",
-                      "static void team_menu_built(unsigned *r)", "static void team_menu_picked(unsigned *r)")
+                      "static void team_menu_built(pm_reg *r)", "static void team_menu_picked(pm_reg *r)")
 
 LIST_MAIN = MENU_PRELUDE + r"""
 @FNS@
@@ -135,7 +135,7 @@ def test_the_entry_lists_get_all_three_and_the_pick_says_which(tmp_path):
 
 FRAME_FNS = ROW_FNS + ("static const char *team_kind_name(unsigned k)\n{", "static unsigned team_kind_of(unsigned kind)",
                        "static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, unsigned right)",
-                       "static void team_frame_restore(void)\n{", "static void team_menu_frame(unsigned *r)")
+                       "static void team_frame_restore(void)\n{", "static void team_menu_frame(pm_reg *r)")
 
 FRAME_MAIN = MENU_PRELUDE + r"""
 static unsigned long team_frame_sp;
@@ -175,7 +175,7 @@ def test_the_index_menus_get_all_three_and_the_cursor_says_which(tmp_path):
 
 def test_the_pick_not_the_row_sizes_the_team_game():
     src = _src()
-    disp = R._lift(src, "static void on_team_dispatch(unsigned *r)\n{")
+    disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")
     assert "kind = tm.kind;" in disp and "if (kind == 1u) {" in disp
     assert "tm.size = kind;" in disp and "added = coop_team_fill(0, 0, 0, 0);\n    tm.size = 0;" in disp
     assert "return coop.teams_always ? coop.teams_always : tm.size;" in R._lift(

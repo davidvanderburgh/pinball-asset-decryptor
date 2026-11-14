@@ -121,7 +121,7 @@ def test_the_status_bar_is_armed_from_the_port_and_kept_every_tick():
     src = RUNTIME.read_text(encoding="utf-8")
     arm = _lift(src, "static void status_bar_arm(void)")
     assert 'site("status_bar")' in arm and "can |= PM_CAN_STATUS_BAR;" in arm
-    assert "status_bar_arm();" in src and "    sb_tick();" in _lift(src, "static void on_tick(unsigned *r)")
+    assert "status_bar_arm();" in src and "    sb_tick();" in _lift(src, "static void on_tick(pm_reg *r)")
     port = (RUNTIME.parent / "ports" / "james_bond_le-1.06.port").read_text(encoding="utf-8")
     assert re.search(r"^site status_bar\s+0x001862dc 0xe92d4038 0xe30e48f8$", port, re.M)
 

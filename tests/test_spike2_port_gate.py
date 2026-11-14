@@ -42,10 +42,11 @@ def _port_section(src):
     """The port reader, lifted: its tables, port_line and port_load, then the lookups."""
     helpers = "\n".join(_lift(src, s) for s in (
         "static int str_eq(", "static void str_copy(", "static int hexval(", "static uint64_t number("))
-    reader = _between(src, "/* The port is read in PORT_CHUNK pieces", "static struct site *site(const char *name)")
+    reader = _between(src, "static unsigned long game_base;",    # PAD-1269: from the load address the reader adds
+                      "static struct site *site(const char *name)")
     lookups = "\n".join(_lift(src, s) for s in (
-        "static struct site *site(const char *name)", "static unsigned fn(const char *name)",
-        "static long named(", "static unsigned data(const char *name)", "long pm_port_value("))
+        "static struct site *site(const char *name)", "static pm_addr fn(const char *name)",
+        "static long named(", "static pm_addr data(const char *name)", "long pm_port_value("))
     return helpers + "\n" + reader + "\n" + lookups
 
 
@@ -138,7 +139,7 @@ int main(int argc, char **argv)
 
 def _gate_source():
     src = _src()
-    maps = _between(src, "#define N_MAPS", "/* ---- rule 2:")
+    maps = _between(src, "#define N_MAPS", "#if !PM_A64\n/* ---- rule 2:")   # PAD-1269: rule 2 is Spike 2's
     gate = "\n".join(_lift(src, s) for s in (
         "static int words_match(struct site *x)", "static void core_of_port(", "static int site_check(",
         "static int port_gate(void)"))
@@ -203,7 +204,7 @@ def test_the_core_takes_shots_from_the_switch_drain(tmp_path):
 
 def test_maps_lines_are_read_as_the_kernel_writes_them(tmp_path):
     src = _src()
-    maps = _between(src, "#define N_MAPS", "/* ---- rule 2:")
+    maps = _between(src, "#define N_MAPS", "#if !PM_A64\n/* ---- rule 2:")   # PAD-1269: rule 2 is Spike 2's
     code = r"""
 #include <stdio.h>
 #include <string.h>
@@ -455,7 +456,7 @@ def test_a_32_bit_award_never_wraps_the_score(tmp_path, what, want):
     check (0x15ee7c): pm_score_add cuts an award to the room left, over the port's score_mult, and never
     reads a score_mult outside the process's mappings."""
     src = _src()
-    maps = _between(src, "#define N_MAPS", "/* ---- rule 2:")
+    maps = _between(src, "#define N_MAPS", "#if !PM_A64\n/* ---- rule 2:")   # PAD-1269: rule 2 is Spike 2's
     head = _GATE[:_GATE.index("@GATE@")]
     helper = _between(_GATE, "static void line(const char *fmt, ...)", "static void site_at(")
     code = (head.replace("@PORT@", _port_section(src)).replace("@MAPS@", maps) + helper

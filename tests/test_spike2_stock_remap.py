@@ -211,7 +211,7 @@ def test_the_runtime_reads_rule_lines_and_the_file_beside_the_modes():
     for name in ("pm_stock_rule_hook", "pm_stock_counts_as", "PM_CAN_STOCK_RULES", "pm_stock_shot_fn"):
         assert name in hdr, name
     # the wrap goes in AFTER the modes' ticks, so a probe wrapping the same slot wraps first
-    tick = src[src.index("static void on_tick(unsigned *r)"):]
+    tick = src[src.index("static void on_tick(pm_reg *r)"):]
     tick = tick[:tick.index("\n}\n")]
     assert tick.index("EACH_MODE(m) if (m->tick)") < tick.index("stock_tick();") < tick.index("lamps_tick();")
     assert MR.prebuilt_is_current(), MR.stale_reasons()

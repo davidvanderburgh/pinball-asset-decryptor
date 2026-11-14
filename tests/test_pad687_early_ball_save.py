@@ -47,5 +47,5 @@ def test_the_runtime_keeps_the_count_every_tick_before_the_modes():
     body = body[:body.index("\n}\n")]
     assert "balls_multiball(n, pm_ms(), &two_since)" in body
     assert "n >= 2 &&" not in body
-    tick = src[src.index("static void on_tick(unsigned *r)"):]
+    tick = src[src.index("static void on_tick(pm_reg *r)"):]
     assert tick.index("stock_balls_tick();") < tick.index("EACH_MODE(m) if (m->tick)")

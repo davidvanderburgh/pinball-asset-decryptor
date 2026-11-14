@@ -61,7 +61,7 @@ def test_the_language_select_is_kept_from_a_flipper_the_pick_has(tmp_path):
 def test_the_veto_is_hooked_beside_the_pick():
     src = RUNTIME.read_text(encoding="utf-8")
     assert "hook_veto(fn(\"language_keys\"), on_language_keys)" in src
-    hook = R._lift(src, "static int on_language_keys(unsigned *r)\n{")
+    hook = R._lift(src, "static int on_language_keys(pm_reg *r)\n{")
     assert 'pm_port_value("language_keys_left", 137)' in hook and 'pm_port_value("language_keys_right", 139)' in hook
 
 

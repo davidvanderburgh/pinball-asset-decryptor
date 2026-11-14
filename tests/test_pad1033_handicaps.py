@@ -88,7 +88,7 @@ def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     assert "(clipv_only || sndm_only || pic_only || idle_only || hand_cfg_only() || comp_cfg_only() || (cabs_only && n_cabs))" in src
     # a card of only this has a tick of its own
     assert "if ((hand.on || n_cabs) && !hook(fn(\"tick\"), on_hand_tick))" in src
-    assert "    hand_tick();" in R._lift(src, "static void on_tick(unsigned *r)")
+    assert "    hand_tick();" in R._lift(src, "static void on_tick(pm_reg *r)")
     arm = R._lift(src, "static void hand_arm(void)")
     assert "if (!adj_wrap_arm()) {" in arm and "adj_hand_on = 1;" in arm
     # the getter is wrapped once and each of ours answers in turn (PAD-1031's co-op characters wrap it too)

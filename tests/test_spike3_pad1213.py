@@ -132,7 +132,9 @@ def test_s3run_writes_this_titles_list_before_the_renderer_starts():
     resolution jumper while it booted (Guided Setup at 1360x768)."""
     s = read("s3run.sh")
     clear = s.index('rm -rf "$SD/tables" "$SD/switches.json"')
-    write = s.index('s3bridge.py" --switches "$SD" "$GT/game"')   # PAD-1263: the image's tree
+    # PAD-1263: the image's tree; PAD-1272: the program /games/game names (GPROG: on a card with
+    # modes the hook's kept target)
+    write = s.index('s3bridge.py" --switches "$SD" "$GPROG"')
     renderer = s.index('setsid "$B/padglhost"')
     assert clear < write < renderer
 

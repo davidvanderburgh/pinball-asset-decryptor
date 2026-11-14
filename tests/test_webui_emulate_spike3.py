@@ -154,12 +154,14 @@ def _s3_rig(monkeypatch, check=b"s3check: ok\n"):
                         lambda: ["bash", "s3launch.sh", "--check"])
     monkeypatch.setattr(emulate_rig, "spike3_launch_cmd",
                         lambda card, slot, minutes, audio=False, keyfile=None, audio_ctl=None,
-                        restore=None:
+                        restore=None, mode_so=None, mode_files=None:
                         ["bash", "s3launch.sh", card, str(slot), str(minutes)]
                         + (["--audio"] if audio else [])
                         + (["--keyfile", keyfile] if keyfile else [])
                         + (["--audio-ctl", audio_ctl] if audio_ctl else [])
-                        + (["--restore", restore] if restore else []))
+                        + (["--restore", restore] if restore else [])
+                        + (["--mode-so", mode_so] if mode_so else [])
+                        + (["--mode-files", mode_files] if mode_files else []))
     monkeypatch.setattr(emulate_rig, "spike3_load_cmd",
                         lambda slot, name: ["bash", "s3launch.sh", "--load", str(slot), name])
     monkeypatch.setattr(emulate_rig, "spike3_slots_cmd",
@@ -522,3 +524,63 @@ def test_stop_after_an_app_restart_uses_the_spike3_stop_on_our_slot(tmp_path, mo
         assert stop[-2:] == ["--stop", "1"]
         assert not any("killgame.sh" in " ".join(c) for c in rec.calls)
         _wait(w, lambda: not svc._stopping)
+
+
+# ---- PAD-1272: Try it on a Spike 3 card -------------------------------------------------------
+def test_try_it_on_a_spike3_card_hands_its_mode_build_to_the_launcher(tmp_path, monkeypatch):
+    """launch_with(prepare) on a Spike 3 card used to go straight to the Spike 3 start, which
+    never ran the prepare: the card booted with no modes. Now the prepare runs once the rig is
+    checked, and its PAD_S3_MODE_SO / PAD_S3_MODE_FILES lines become the launcher's flags."""
+    from tests.test_webui_emulate import _Recorder
+    card = tmp_path / "pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    asked = []
+
+    def prepare(c):
+        asked.append(c)
+        return ["PAD_S3_MODE_SO=/w/mode.so", "PAD_S3_MODE_FILES=/w/files"]
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        answers = _s3_rig(monkeypatch)
+        rec = _Recorder(answers=answers, lines=("s3launch: starting slot 1 for 240 min",))
+        monkeypatch.setattr(svc, "_run", rec.run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        _pick(w, svc, card)
+        assert w.run(lambda: svc.launch_with(prepare)) is True
+        _wait(w, lambda: any("--mode-so" in c for c in (" ".join(x) for x in rec.calls)))
+        run = next(x for x in rec.calls if "--mode-so" in x)
+        assert run[run.index("--mode-so") + 1] == "/w/mode.so"
+        assert run[run.index("--mode-files") + 1] == "/w/files"
+        assert asked == [str(card)]
+
+
+def test_a_refused_spike3_try_it_starts_nothing_and_gives_the_rig_back(tmp_path, monkeypatch):
+    from pinball_decryptor.core import rigslot
+    from tests.test_webui_emulate import _Recorder
+    card = tmp_path / "pokemon_le-0_82_0.Release.64G.sdcard-secure.raw"
+    card.write_bytes(b"\0" * 512)
+    released = []
+    monkeypatch.setattr(rigslot, "release_claimed", lambda *a, **k: released.append(1))
+
+    def prepare(_c):
+        return None
+    prepare.last_reason = "none of the project's modes can run on this card"
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        answers = _s3_rig(monkeypatch)
+        rec = _Recorder(answers=answers, lines=())
+        monkeypatch.setattr(svc, "_run", rec.run)
+        monkeypatch.setattr(svc, "_popen", rec.popen)
+        _pick(w, svc, card)
+        w.run(lambda: svc.launch_with(prepare))
+        _wait(w, lambda: released and not svc._starting)
+        assert not any(len(x) > 2 and x[2] == str(card) for x in rec.calls)
+
+
+def test_spike3_launch_cmd_hands_over_a_mode_build(monkeypatch):
+    if sys.platform != "win32":
+        pytest.skip("the WSL argv is Windows-only")
+    monkeypatch.setattr(emulate_core, "_wsl_head", lambda root=False: ["wsl.exe"] + (["-u", "root"] if root else []) + ["-e"])
+    cmd = emulate_core.spike3_launch_cmd(r"D:\cards\x.raw", 3, 240, mode_so=r"C:\w\mode.so",
+                                         mode_files=r"C:\w\files")
+    assert cmd[-4:] == ["--mode-so", "/mnt/c/w/mode.so", "--mode-files", "/mnt/c/w/files"]

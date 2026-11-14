@@ -643,6 +643,9 @@ class TryItMixin:
                 "pick a card image in the Emulate tab first (%s)."
                 % ("a %s card" % prof.label if prof is not None
                    else "the card this project was made from"))
+        from ..plugins.stern import spike3 as _S3
+        if _S3.is_spike3_card(card):
+            return self._tryit_prepare_s3(project, card)      # PAD-1272
         found_modes, broken = MP.list_modes(project) if project else ([], [])
         try:
             with_assets = MT.code_modes_with_assets(project) if project else []
@@ -729,6 +732,54 @@ class TryItMixin:
             return self._tryit_cancelled_refuse()
         self._tryit_set("starting")
         return MT.run_env(ts)
+
+    def _tryit_prepare_s3(self, project, card):
+        """PAD-1272: Try it on a Stern Spike 3 card. The set is what a Write puts in the
+        card's /games/pad/padmode (spike3_modes.plan, from this card's own game program):
+        the 64-bit runtime, preloaded into the game by s3run.sh (PAD_S3_MODE_SO), and the
+        port and mode files in the rig's /dump (PAD_S3_MODE_FILES), where it looks after the
+        card's own folder. The modes run on the game's own screens and sounds here: the
+        screens and clips a title's scenes take go on with a Write."""
+        from ..plugins.stern import mode_write as MW
+        from ..plugins.stern import spike3_card, spike3_modes as S3M
+        from ..plugins.stern.ext4 import Ext4Reader
+        say = lambda m, *_a, **_k: self._say("Try it: " + m)
+        why = MW.card_refusal(project)
+        if why:
+            return self._tryit_refuse(why)
+        self._tryit_set("building")
+        work = os.path.join(self._tryit_base, "spike3")
+        shutil.rmtree(work, ignore_errors=True)
+        try:
+            vol = spike3_card.open_games(card)
+        except Exception as e:                              # noqa: BLE001 - no key, unreadable
+            return self._tryit_refuse("the Spike 3 card could not be opened: %s" % e)
+        try:
+            mplan = S3M.plan(project, Ext4Reader(vol, 0, vol.size), work, log=say,
+                             real_card=False)
+        except (MW.ModeWriteError, MP.ModeProjectError, OSError, ValueError) as e:
+            return self._tryit_refuse(str(e))
+        finally:
+            vol.close()
+        if mplan is None:
+            return self._tryit_refuse("none of the project's modes can run on this card; "
+                                      "the log says why.")
+        if self._tryit_cancelled():
+            return self._tryit_cancelled_refuse()
+        files = os.path.join(work, "files")
+        os.makedirs(files, exist_ok=True)
+        for name, src, _mode in mplan.files():
+            if name != "mode.so":
+                shutil.copyfile(src, os.path.join(files, name))
+        self._tryit_live = None            # no hot reload on the Spike 3 rig: Try it again
+        note = ("%d mode(s) ready (%s). Start a game, then play the starting shots."
+                % (len(mplan.names), ", ".join(mplan.names)))
+        if mplan.jobs:
+            note += (" Their screens and clips are not shown in Try it on a Spike 3 card; "
+                     "a Write puts them on the card.")
+        self._tryit_note(note)
+        self._tryit_set("starting")
+        return ["PAD_S3_MODE_SO=%s" % mplan.payload["so"], "PAD_S3_MODE_FILES=%s" % files]
 
     @staticmethod
     def _tryit_sound_note(names):

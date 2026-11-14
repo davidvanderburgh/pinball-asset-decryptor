@@ -248,18 +248,18 @@ int main(void)
 }
 """
     assert R._host_run(tmp_path, main).strip() == "1 1 0 0"      # shown just before the game; a menu left long ago
-    disp = R._lift(src, "static void on_team_dispatch(unsigned *r)\n{")   # the game's thread, not the tick's
+    disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")   # the game's thread, not the tick's
     assert "want = team_pick_live(tm.pending, tm.seen_ms, pm_ms()) && kind && team_menu_kinds(kinds);" in disp
     assert "if (!tm.armed || r[0] != tm.ball_id || !tm.seen_ms) return;" in disp and "coop_team_fill(0, 0, 0, 0)" in disp
     # through the runtime's own bus hook: a second hook of the bus never ran on Godzilla LE 1.16 (emulator)
-    assert "on_team_dispatch(r);" in R._lift(src, "static void on_event_dispatch(unsigned *r)\n{")
+    assert "on_team_dispatch(r);" in R._lift(src, "static void on_event_dispatch(pm_reg *r)\n{")
     assert "COOP_JOIN_ROUNDS" in R._lift(src, "static void coop_join_tick(void)\n{")   # said twice: a film hid one
     assert "coop_team_fill" not in R._lift(src, "static void coop_tick(void)\n{")
-    built = R._lift(src, "static void team_menu_built(unsigned *r)")
+    built = R._lift(src, "static void team_menu_built(pm_reg *r)")
     assert "*(unsigned *)(list + es * i + kat) = TEAM_KIND + kinds[j];" in built and "if (!nk) return;" in built
-    picked = R._lift(src, "static void team_menu_picked(unsigned *r)")
+    picked = R._lift(src, "static void team_menu_picked(pm_reg *r)")
     assert "else r[3] = 0;" in picked                                  # the game plays it as Standard
-    frame = R._lift(src, "static void team_menu_frame(unsigned *r)")
+    frame = R._lift(src, "static void team_menu_frame(pm_reg *r)")
     assert 'pm_port_value("comp_menu_end_index", 0)' in frame and "pm_message_set(msg, team_kind_name(tm.kind));" in frame
     arm = R._lift(src, "static void team_menu_arm(void)\n{")
     assert 'hook_full(fn("comp_menu_frame"), team_menu_frame)' in arm
@@ -286,7 +286,7 @@ int main(void)
     assert R._host_run(tmp_path, main).strip() == "CO-OP PLAY|START ADDS PLAYERS|UP TO 4 PLAYERS|"   # 19 fit
     kind = R._lift(src, "static unsigned team_menu_kinds(unsigned *kinds)\n{")
     assert "kinds[0] = 1u;\n    if (!coop.setting) return 1;" in kind             # PAD-1073: CO-OP PLAY first
-    disp = R._lift(src, "static void on_team_dispatch(unsigned *r)\n{")
+    disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")
     assert "if (kind == 1u) {" in disp and "coop.n = 1;" in disp and "coop.teams = 0;" in disp
     assert "coop.join_n = 1;" in disp
     wrap = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")

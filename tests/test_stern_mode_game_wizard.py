@@ -475,7 +475,7 @@ def _wiz(tmp_path, *args):
         "static void wizard_pin(unsigned p)", "static void wizard_due_next(unsigned p)",
         "static void wizard_due_start(unsigned p)", "static void wizards_tick(void)",
         "int pm_game_wizard(int n, int how)", "static int wizard_by_name(const char *name)",
-        "int pm_game_wizard_named(const char *name, int how)", "static int wizard_light_veto(unsigned *r)",
+        "int pm_game_wizard_named(const char *name, int how)", "static int wizard_light_veto(pm_reg *r)",
         "int pm_game_wizard_claim(int n)", "int pm_game_wizard_claim_named(const char *name)"))
     due = re.search(r"#define WIZ_DUE_MAX \d+\n", src).group(0) + re.search(
         r"static struct \{\n    unsigned char n\[WIZ_DUE_MAX\];.*?\} wiz_due\[4\];\nstatic unsigned wiz_game;.*?"
@@ -652,7 +652,7 @@ def test_the_runtime_keeps_a_refused_start_lit_and_lights_a_start_while_a_mode_b
     wiz = src[src.index("int pm_game_wizard(int n, int how)"):]
     wiz = wiz[:wiz.index("\n}\n")]
     assert wiz.index("block_live()") < wiz.index('fn("wizard_start")')   # PAD-733: its hold, or its drain to one ball
-    assert "wizards_tick();" in src[src.index("static void on_tick(unsigned *r)"):]
+    assert "wizards_tick();" in src[src.index("static void on_tick(pm_reg *r)"):]
     arm = src[src.index("static void wizards_arm(void)"):]
     arm = arm[:arm.index("\n}\n")]
     assert 'hook_veto(fn("wizard_light"), wizard_light_veto)' in arm     # PAD-457: the game's own lighting

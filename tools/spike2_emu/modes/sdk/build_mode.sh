@@ -11,24 +11,36 @@
 set -euo pipefail
 SDK=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 OUT=
+ARCH=arm
 RUNTIME=$SDK/pad_mode_runtime.c
-while getopts "o:p" opt; do
+while getopts "o:pa:" opt; do
     case $opt in
         o) OUT=$OPTARG ;;
         p) RUNTIME= ;;
-        *) echo "usage: build_mode.sh -o mode.so mode.c [mode.c ...]" >&2; exit 2 ;;
+        a) ARCH=$OPTARG ;;
+        *) echo "usage: build_mode.sh [-a arm|a64] -o mode.so mode.c [mode.c ...]" >&2; exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
-[ -n "$OUT" ] && [ $# -ge 1 ] || { echo "usage: build_mode.sh -o mode.so mode.c [mode.c ...]" >&2; exit 2; }
-CC=${CC:-arm-linux-gnueabihf-gcc}
+[ -n "$OUT" ] && [ $# -ge 1 ] || { echo "usage: build_mode.sh [-a arm|a64] -o mode.so mode.c [mode.c ...]" >&2; exit 2; }
+# PAD-1269: the object is built for the machine's CPU. Spike 2 is 32-bit ARM (the default:
+# arm-linux-gnueabihf-gcc, hard-float); Spike 3 is 64-bit ARM (-a a64: aarch64-linux-gnu-gcc,
+# which the rig supplies through xgcc.sh, CC overriding this default). The arm branch's gcc
+# command is token-for-token what it always was, so its object stays byte-identical.
+# a64's log lines print some 64-bit addresses through %x (truncated); -Wno-error=format keeps
+# that a warning, not a failure, and changes no code - a follow-up widens the formats.
+case $ARCH in
+    arm) CC=${CC:-arm-linux-gnueabihf-gcc}; ARCHFLAGS="-marm -mfloat-abi=hard"; ARCHWARN=""; NM=${NM:-${CC%gcc}nm} ;;
+    a64) CC=${CC:-aarch64-linux-gnu-gcc};   ARCHFLAGS="";                       ARCHWARN="-Wno-error=format"; NM=${NM:-aarch64-linux-gnu-nm} ;;
+    *)   echo "build_mode.sh: unknown -a $ARCH (arm or a64)" >&2; exit 2 ;;
+esac
 command -v "$CC" >/dev/null || { echo "build_mode.sh: $CC not found" >&2; exit 1; }
 # -funwind-tables (PAD-381): the game ENDS a process by throwing a C++ exception through its stack
 # (do_stack_unwind_exception_t), at a tilt or the end of a ball. A frame of ours on that stack - the
 # runtime's magnet grab runs as a game process - must carry unwind tables, or the unwind stops there
 # and the game aborts ("terminate called ..."). They cost a few bytes a function and change no code.
-"$CC" -std=gnu17 -marm -mfloat-abi=hard -fno-stack-protector -fPIC -fvisibility=hidden -shared -O2 -nostdlib     -funwind-tables \
-    -Wall -Wextra -Wno-unused-parameter -Werror=implicit-function-declaration \
+"$CC" -std=gnu17 $ARCHFLAGS -fno-stack-protector -fPIC -fvisibility=hidden -shared -O2 -nostdlib -funwind-tables \
+    -Wall -Wextra -Wno-unused-parameter -Werror=implicit-function-declaration $ARCHWARN \
     -I"$SDK" -Wl,-soname,mode.so \
     -o "$OUT" ${RUNTIME:+"$RUNTIME"} "$@" -lgcc
 # Undefined symbols are resolved from the game's libc when the object loads - so a

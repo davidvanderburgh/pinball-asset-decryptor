@@ -84,3 +84,24 @@ to the cap (61 frames, 6 node boards, its Game Setup screen) with the runtime in
 is hooked; the game runs stock"). Try it: the tab's prepare built the set from the card and the
 stock card ran it with the runtime reading `/dump/game.port` (7 sites). The draft port's own
 crash 0.8 s in (seen in PAD-1271's runs too) is the port's, not the delivery's.
+
+## The first Spike 3 port (PAD-1271)
+
+`ports/spike3/star_wars_elg-1.10.port`, drafted by `tools/spike3_emu/s3port.py` from the
+proven Spike 2 port of the same build (`s3port.py <S2 game> <S2 port> <S3 game> -o <port>`):
+functions paired by vtable slot, unique strings and call-graph growth (both programs are
+stripped), globals by what the paired functions load through the GOT, switches renumbered by
+name from the program's own device table (Spike 3's ids are one lower), scores 64-bit. It
+carries only what the 64-bit runtime has been run with: the tick, event dispatch (ball end is
+bus event 0x34), score_add, the two switch_hit sites, the Insider gate, and cur_player /
+scores / score_mult / mode_mask. Every other placed site is written as a comment with its
+address: the runtime features that use them still read the game's structs at 32-bit offsets,
+and arming them stopped the game (the "crash 0.8 s in" above was the full draft). Each is
+carried when its feature is made 64-bit and proven. The runtime fixes it needed are in
+hook_a64.h (hidden template labels, a branch as a hooked first instruction, a veto read from w0)
+and pad_mode_runtime.c (a 64-bit achievement-query scan, the switch id masked to 16 bits).
+
+Proof: a TRENCH RUN mode (3 trigger shots, 30 s, 5 award shots) on the Spike 3 emulator, slot
+41, muted and hidden, with `prebuilt/mode64.so` and this port: it started on the third trigger,
+scored 1M..5M on five shots (score 26,630 -> 15,080,990) and ended when its time ran out, the
+game running on to the cap. Tests: tests/test_pad1271_spike3_port.py.

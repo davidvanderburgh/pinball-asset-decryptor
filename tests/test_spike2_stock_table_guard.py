@@ -122,7 +122,7 @@ int main(void)
 
 def test_a_mode_table_that_is_not_this_games_is_left_out_not_followed(tmp_path):
     src = _src()
-    maps = _between(src, "#define N_MAPS", "/* ---- rule 2:")
+    maps = _between(src, "#define N_MAPS", "#if !PM_A64\n/* ---- rule 2:")   # PAD-1269: rule 2 is Spike 2's
     maps += "\nstatic void maps_line_s(const char *s) { maps_line(s, s + strlen(s)); }\n"
     guard = "\n".join([
         _lift(src, "static int stock_class(const unsigned *obj)"),

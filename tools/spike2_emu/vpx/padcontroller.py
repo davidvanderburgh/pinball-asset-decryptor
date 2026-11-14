@@ -87,6 +87,7 @@ import bootprog   # noqa: E402  how far a Spike 2 boot is, off the run's own log
 import padlaunch  # noqa: E402  starts a run for a table when none is up
 import s1bridge   # noqa: E402  the Spike 1 rig's files, for a Spike 1 title (PAD-943)
 import spkbridge  # noqa: E402  the Spooky rig's files, for a Spooky title (PAD-952)
+import padcabinet  # noqa: E402  a cabinet's backglass and button lights (PAD-1304)
 SLOT_BRIDGES = {"spike1": s1bridge, "spooky": spkbridge}
 
 try:
@@ -1563,6 +1564,65 @@ class DofHost:
             self._thread.join(timeout=5)
 
 
+class B2SHost:
+    """B2S.Server's bulbs, set by name (PAD-1304): PADSPIKE2.vbs hands the
+    B2S.Server it started over (Controller.PadB2S), and BACKBOX GI lights the
+    bulbs the kit names for the title through B2SSetIllumination. The object
+    lives in Visual Pinball's process, so the calls go from a thread of their
+    own (the poll never waits on Visual Pinball's) with the object marshalled
+    to it; *direct* hands a plain object over as it is (the tests')."""
+
+    def __init__(self, obj, direct=False):
+        self._q = queue.Queue()
+        self.up = True
+        self.sent = 0
+        self.why = ""
+        self._obj = obj
+        self._stream = None
+        if not direct and pythoncom:
+            self._stream = pythoncom.CoMarshalInterThreadInterfaceInStream(pythoncom.IID_IDispatch, obj)
+            self._obj = None
+        self._thread = threading.Thread(target=self._run, name="b2s", daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        b2s = self._obj
+        if self._stream is not None:
+            pythoncom.CoInitialize()
+            try:
+                import win32com.client
+                b2s = win32com.client.Dispatch(pythoncom.CoGetInterfaceAndReleaseStream(
+                    self._stream, pythoncom.IID_IDispatch))
+            except Exception as exc:                        # noqa: BLE001
+                self.up = False
+                self.why = "B2S.Server could not be reached: %s" % exc
+                log(self.why)
+                return
+        failed = False
+        while True:
+            item = self._q.get()
+            if item is None:
+                break
+            try:
+                b2s.B2SSetIllumination(*item)
+                self.sent += 1
+            except Exception as exc:                        # noqa: BLE001
+                if not failed:
+                    log("B2SSetIllumination%r failed: %s" % (item, exc))
+                failed = True
+        b2s = None
+
+    def set(self, name, value):
+        if self.up:
+            self._q.put((str(name), int(value)))
+
+    def finish(self):
+        if self.up:
+            self.up = False
+            self._q.put(None)
+            self._thread.join(timeout=5)
+
+
 class Bridge:
     """Everything that is not COM: the poll thread, the state, the pipe.
     Testable on its own (see --selftest and tests/test_vpx_bridge.py)."""
@@ -1598,6 +1658,13 @@ class Bridge:
         self._coil_off_at = {}             # (node, idx) -> monotonic s
         self.sw_ids = {}                   # (node, input bit) -> switch id
         self._button_coils = {}            # (node, idx) -> button input bit
+        # PAD-1304: the cabinet's own lights (BACKBOX GI, the START and
+        # LOCKDOWN buttons) where the title's tables put them, the kit's
+        # cabinet settings, and the backglass handed over for BACKBOX GI
+        self.cab_leds = {}
+        self.cab = padcabinet.settings({})
+        self.b2s = None
+        self._b2s_state = {}
         # switch id -> [((node, idx), release_now)]: the board-fired coils
         # each switch fires, from the last poll, so set_switch can turn the
         # coil on (and off) at once instead of a poll later
@@ -1716,6 +1783,54 @@ class Bridge:
         for n, leds in m.dof_flashers.items():
             level = max(self._led_level(data, nd, ix) for nd, ix in leds)
             self._dof_set("S", n, level if level >= LAMP_ON else 0)
+        # PAD-1304: the cabinet's buttons as the E events the kit names
+        for key, n in (("start", self.cab["dof_start"]), ("lockdown", self.cab["dof_lockdown"])):
+            leds = self.cab_leds.get(key)
+            if n and leds:
+                level = max(self._led_level(data, nd, ix) for nd, ix in leds)
+                self._dof_set("E", n, level if level >= LAMP_ON else 0)
+
+    def b2s_attach(self, obj, direct=False):
+        """PADSPIKE2.vbs's B2S.Server, once it runs (PAD-1304). A second
+        call (the table's Reset) replaces the first."""
+        self.b2s_finish()
+        try:
+            self.b2s = B2SHost(obj, direct=direct)
+        except Exception as exc:                            # noqa: BLE001
+            log("B2S.Server not taken: %s" % exc)
+            self.b2s = None
+            return False
+        self._b2s_state = {}
+        self._b2s_gi_seen = False
+        log("B2S.Server handed over; BACKBOX GI bulbs for %s: %s"
+            % (self.title, ", ".join(self.cab["gi_bulbs"].get(self.title, [])) or "none named"))
+        return True
+
+    def b2s_finish(self):
+        if self.b2s:
+            self.b2s.finish()
+            self.b2s = None
+
+    def _poll_b2s(self, data):
+        """BACKBOX GI on the backglass: each bulb the kit names for the
+        title lit while the backbox's GI is, out while it is out. Not before
+        the run has shown it lit once: jaws_le's attract never lit it under
+        the emulator (node 0 dark throughout, 2026-11-14), and a backglass
+        put dark by a light the run does not drive would be worse than one
+        left as B2S shows it."""
+        bulbs = self.cab["gi_bulbs"].get(self.title)
+        leds = self.cab_leds.get("backbox_gi")
+        if not bulbs or not leds:
+            return
+        on = 1 if max(self._led_level(data, nd, ix) for nd, ix in leds) >= LAMP_ON else 0
+        if on:
+            self._b2s_gi_seen = True
+        elif not getattr(self, "_b2s_gi_seen", False):
+            return
+        for name in bulbs:
+            if self._b2s_state.get(name) != on:
+                self._b2s_state[name] = on
+                self.b2s.set(name, on)
 
     def run(self):
         """Attach to the title's run, or START one (padlaunch) when none is
@@ -1976,6 +2091,24 @@ class Bridge:
             sid = cab.get(key, 0) - 1000
             if coil and sid in by_id:
                 self._button_coils[coil] = by_id[sid][1]
+        if not self.slots:                 # Spike 2's cabinet and backbox boards
+            try:
+                self._read_cabinet()
+            except Exception as exc:                        # noqa: BLE001
+                log("cabinet lights not read: %s" % exc)
+
+    def _read_cabinet(self, tables_dir=None, kit=None):
+        """The cabinet's lights on this title's boards and the kit's cabinet
+        settings (PAD-1304), read with the run's tables."""
+        if tables_dir is None:
+            tables_dir = os.path.join(self.rig.dump, "tables", self.native_title or "")
+        self.cab_leds = padcabinet.cabinet_leds(tables_dir)
+        self.cab = padcabinet.settings(padlaunch.kit_load() if kit is None else kit)
+        bulbs = self.cab["gi_bulbs"].get(self.title, [])
+        log("cabinet lights: %s; DOF start E%s, lockdown E%s; BACKBOX GI bulbs: %s"
+            % (", ".join("%s %s" % (k, v) for k, v in sorted(self.cab_leds.items())) or "none named",
+               self.cab["dof_start"] or "-", self.cab["dof_lockdown"] or "-",
+               ", ".join(bulbs) or "none"))
 
     #: how long a run started for a table may take to come up (a card copied
     #: into the cache first, then the boot)
@@ -2666,6 +2799,8 @@ class Bridge:
                     self.mech_pos[n] = pos
             if self.dof and self.dof.up:
                 self._poll_dof(data)
+            if self.b2s and self.b2s.up:
+                self._poll_b2s(data)
 
     def _poll_once_s1(self):
         """The Spike 1 rig's block (s1bridge), or the Spooky board's in the
@@ -3006,6 +3141,7 @@ class PadController:
         self.bridge = Bridge()
         self.props = {}
         atexit.register(self.bridge.dof_finish)    # DOF turns the toys off as it goes
+        atexit.register(self.bridge.b2s_finish)
         log("PAD.Controller created")
 
     TRACE = os.path.exists(os.path.join(os.path.dirname(LOG), "padvpx_trace"))
@@ -3122,6 +3258,13 @@ class PadController:
             return None
         if key == "paddoffinish":
             b.dof_finish()
+            return None
+        # the backglass's bulbs (PAD-1304): PADSPIKE2.vbs hands B2S.Server over
+        # once it runs, and takes it back before it stops it
+        if key == "padb2s":
+            return b.b2s_attach(args[0]) if args and args[0] is not None else False
+        if key == "padb2sfinish":
+            b.b2s_finish()
             return None
         return self.props.get(key, 0)
 

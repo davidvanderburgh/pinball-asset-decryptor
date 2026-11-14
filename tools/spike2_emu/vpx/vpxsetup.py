@@ -19,6 +19,11 @@ process:
                                           where the windows go: [x, y, w, h] JSON or null
     vpxsetup.py ontop on|off              whether the game's screen stays on top of every other
                                           window (PAD-1231); an open game's window at once
+    vpxsetup.py cabinet '<json>'          PAD-1304: backglass screen, hide_dmd, dof_start,
+                                          dof_lockdown; rewrites each patched table's .res
+    vpxsetup.py bulbs <output> <title>    a patched table's backglass bulbs, and those
+                                          chosen to follow BACKBOX GI
+    vpxsetup.py gi <title> '<json list>'  the bulbs that follow BACKBOX GI
     vpxsetup.py cache [on|off]            what each title's card costs the emulator's disk before
                                           a game (PAD-964), and whether a game copies its card into
                                           the cache first (on) or reads it where it lies (off)
@@ -45,6 +50,7 @@ for p in (HERE, RIG):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import padcabinet  # noqa: E402
 import padisplay  # noqa: E402
 import padlaunch   # noqa: E402
 import padvpx      # noqa: E402
@@ -704,6 +710,49 @@ def apply_layout(key, player, lcd):
     return "layout %s saved" % key
 
 
+def cabinet_state(kit, mons):
+    """PAD-1304: the Cabinet row: where the backglass goes (0 = where B2S
+    puts it, else a screen), the B2S DMD hidden or not, the DOF events the
+    buttons are sent as (0 = not sent; `suggested` the tab offers), the
+    screens to pick from and the bulbs chosen per title."""
+    c = padcabinet.settings(kit)
+    c["suggested"] = dict(padcabinet.SUGGESTED_DOF)
+    c["screens"] = [{"n": m["n"], "w": m["w"], "h": m["h"], "x": m["x"], "y": m["y"],
+                     "primary": bool(m.get("primary"))} for m in mons]
+    return c
+
+
+def set_cabinet(changes, tables_dir=None, mons=None):
+    """Save cabinet settings and put every patched table's .res and B2S DMD
+    in line with them (a table with no backglass beside it is left alone)."""
+    d = padcabinet.update(padlaunch.kit_load(), **changes)
+    padlaunch.kit_save(d)
+    mons = padisplay.monitors() if mons is None else mons
+    tables_dir = vpx_tables_dir() if tables_dir is None else tables_dir
+    said = []
+    for name in patched_in(tables_dir):
+        out = os.path.join(tables_dir, name)
+        if os.path.isfile(os.path.splitext(out)[0] + ".directb2s"):
+            said += ["%s: %s" % (name, w) for w in padvpx.cabinet_res(out, kit=d, mons=mons)]
+    return {"result": "ok", "cabinet": cabinet_state(d, mons), "said": said}
+
+
+def table_bulbs(output, title, tables_dir=None):
+    """The named bulbs of a patched table's backglass, and the ones chosen
+    to follow BACKBOX GI for *title*."""
+    tables_dir = vpx_tables_dir() if tables_dir is None else tables_dir
+    b2s = os.path.splitext(os.path.join(tables_dir or "", output))[0] + ".directb2s"
+    chosen = padcabinet.settings(padlaunch.kit_load())["gi_bulbs"].get(title, [])
+    return {"names": padcabinet.bulb_names(b2s) if os.path.isfile(b2s) else [],
+            "chosen": chosen, "backglass": os.path.basename(b2s) if os.path.isfile(b2s) else ""}
+
+
+def set_bulbs(title, names):
+    d = padcabinet.set_bulbs(padlaunch.kit_load(), title, names)
+    padlaunch.kit_save(d)
+    return {"result": "ok", "chosen": padcabinet.settings(d)["gi_bulbs"].get(title, [])}
+
+
 def display_for(lcd, mons):
     """The display setting (padisplay) for an LCD rectangle: full screen on a
     monitor it fills, else a borderless window on the monitor holding its
@@ -952,6 +1001,8 @@ def state():
         # PAD-811: where the game's screen goes, as the layout or the
         # Emulate tab last set it
         "display": {"setting": shown, "text": padisplay.describe(shown)},
+        # PAD-1304: the backglass screen, the B2S DMD, the buttons' DOF events
+        "cabinet": cabinet_state(kit, padisplay.monitors()),
     }
 
 
@@ -992,6 +1043,13 @@ def main(argv):
                 return 2
             padlaunch.set_cache_on(rest[0] == "on")
         out = card_space()
+    elif cmd == "cabinet" and len(rest) == 1:
+        # PAD-1304: `cabinet '{"backglass": 2, "hide_dmd": true, ...}'`
+        out = set_cabinet(json.loads(rest[0]))
+    elif cmd == "bulbs" and len(rest) == 2:
+        out = table_bulbs(rest[0], rest[1])
+    elif cmd == "gi" and len(rest) == 2:
+        out = set_bulbs(rest[0], json.loads(rest[1]))
     elif cmd == "open" and len(rest) == 1:
         out = {"result": open_table(rest[0])}
     elif cmd == "open_download" and len(rest) == 1:

@@ -687,7 +687,7 @@ def test_rushs_time_machine_magnet_follows_its_coil():
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the map's VBScript under cscript")
-def test_rushs_time_machine_holds_the_ball_inside_and_lets_it_out_the_back(tmp_path):
+def test_rushs_time_machine_holds_the_ball_inside_and_lets_it_back_down(tmp_path):
     # PAD-1240: the map's own extra_vbs, a ball shot up Ramp011 (y 659 up to
     # 473, 80 units high: gravity pulls it back down; past the top it flies
     # on and bounces off tm1 at y 394), its timer at 10 ms (a slow frame), and
@@ -695,24 +695,33 @@ def test_rushs_time_machine_holds_the_ball_inside_and_lets_it_out_the_back(tmp_p
     # on 20 ms after the ball passes tm2, off 4.1 s later, a 20 ms pulse
     # 0.17 s after that. Every shot from one that barely reaches the trigger
     # to one that flies off the top is pulled in past the ramp's end and held
-    # inside the machine (517,435, at the ramp's height) at 1 s and 4 s, then
-    # leaves out the back onto the wire return (364,418, 75 up), moving down
-    # it. A 60 ms ball-search pulse puts a ball it caught back where it was:
-    # it rolls back down past tm2 as before. No coil: never held. Not Visual
-    # Pinball's physics: the map's logic on a ball that moves like one
+    # inside the machine (517,435, at the ramp's height) at 1 s and 4 s.
+    # PAD-1250: let go, it rolls back down the ramp past tm2 (the reporter's
+    # ask), never out onto the wire return (364,418) as PAD-1240 sent it. A
+    # 60 ms ball-search pulse puts a ball it caught back: back down as well.
+    # No coil: never held. Not Visual Pinball's physics: the map's logic on a
+    # ball that moves like one
     m = json.load(open(os.path.join(VPX, "rush_le.shadow.json"), encoding="utf-8"))
     t = m["retrofit_triggers"]["PadTMMagnet"]
     xs, ys = zip(*t["shape"])
+    # the hold looks its ball up by the trigger's own box
+    assert "b.X > %d And b.X < %d And b.Y > %d And b.Y < %d" % (min(xs), max(xs), min(ys), max(ys)) in m["extra_vbs"]
     vbs = tmp_path / "t.vbs"
     vbs.write_text("\n".join([
-        "Class FakeBall : Public X, Y, Z, VelX, VelY, VelZ : End Class",
-        "Dim ActiveBall, GameTime",
+        "Class FakeBall : Public Dead, mX, Y, Z, VelX, VelY, VelZ",
+        "\tPublic Property Get X : If Dead Then Err.Raise 424 Else X = mX",
+        "\tEnd Property",
+        "\tPublic Property Let X(v) : If Dead Then Err.Raise 424 Else mX = v",
+        "\tEnd Property",
+        "End Class",
+        "Dim ActiveBall, GameTime, Balls",
+        "Function GetBalls : GetBalls = Balls : End Function",
         m["extra_vbs"],
         "Function Shot(v0, xoff, mode)",
         "\tDim b, t, inside, was, tOn, held1, held4, out, back, ok, d",
         "\tSet b = New FakeBall : b.X = 517 + xoff : b.Y = 650 : b.Z = 25 : b.VelX = 0 : b.VelY = -v0 : b.VelZ = 0",
-        "\tSet ActiveBall = b : was = False : tOn = -1 : held1 = False : held4 = False : out = False : back = False",
-        "\tPadTMState = 0 : PadTMIn = Empty : PadTMBall = Empty : PadTMOn = False",
+        "\tSet ActiveBall = b : Balls = Array(b) : was = False : tOn = -1 : held1 = False : held4 = False : out = False : back = False",
+        "\tPadTMState = 0 : Set PadTMBall = Nothing : PadTMOn = False",
         "\tFor t = 0 To 9000",
         "\t\tGameTime = t",
         "\t\tIf b.X > 400 Then",
@@ -722,7 +731,6 @@ def test_rushs_time_machine_holds_the_ball_inside_and_lets_it_out_the_back(tmp_p
         "\t\tEnd If",
         "\t\tinside = b.X > %r And b.X < %r And b.Y > %r And b.Y < %r" % (min(xs), max(xs), min(ys), max(ys)),
         "\t\tIf inside And Not was Then PadTMMagnet_Hit",
-        "\t\tIf was And Not inside Then PadTMMagnet_UnHit",
         "\t\twas = inside",
         "\t\tIf tOn < 0 And b.Y < 589 And b.VelY < 0 Then tOn = t + 20",
         "\t\tIf mode = 1 And t = tOn Then PadTimeMachineMagnet 1",
@@ -734,27 +742,46 @@ def test_rushs_time_machine_holds_the_ball_inside_and_lets_it_out_the_back(tmp_p
         "\t\tIf t Mod 10 = 0 Then PadTMTimer_Timer",
         "\t\tIf tOn > 0 And t = tOn + 1000 Then held1 = Abs(b.X - 517) + Abs(b.Y - 435) + Abs(b.Z - 105) < 1",
         "\t\tIf tOn > 0 And t = tOn + 4000 Then held4 = Abs(b.X - 517) + Abs(b.Y - 435) + Abs(b.Z - 105) < 1",
-        "\t\tIf b.X = 364 And b.Y = 418 And b.Z = 100 And b.VelY > 0 And PadTMState = 0 Then out = True : d = t - tOn : Exit For",
-        "\t\tIf b.Y > 600 And b.VelY > 0 And tOn > 0 Then back = True : d = t - tOn : Exit For",
+        "\t\tIf Abs(b.X - 364) + Abs(b.Y - 418) < 1 Then out = True",
+        "\t\tIf b.Y > 600 And b.VelY > 0 And tOn > 0 And PadTMState = 0 Then back = True : d = t - tOn : Exit For",
         "\tNext",
         "\tShot = held1 & \"/\" & held4 & \"/\" & out & \"/\" & back & \"@\" & Int(d / 100) / 10",
+        "End Function",
+        # PAD-1250: the reporter's runtime error. A ball the trigger saw that
+        # left it by being moved (no UnHit) and then drained is not a ball any
+        # more: the next MAGNET must not reach for it; nor for a ball in play
+        # anywhere but the ramp's top (below it on the playfield, on the wire)
+        "Function Stale",
+        "\tDim b, c, e",
+        "\tPadTMState = 0 : Set PadTMBall = Nothing : PadTMOn = False",
+        "\tSet b = New FakeBall : b.X = 517 : b.Y = 500 : b.Z = 95 : Set ActiveBall = b : Balls = Array(b)",
+        "\tPadTMMagnet_Hit",
+        "\tb.X = 364 : b.Y = 418 : b.Z = 100 : b.Dead = True : Balls = Array()",
+        "\tOn Error Resume Next",
+        "\tPadTimeMachineMagnet 1 : PadTMTimer_Timer : PadTimeMachineMagnet 0",
+        "\te = Err.Number : On Error GoTo 0",
+        "\tSet c = New FakeBall : c.X = 517 : c.Y = 500 : c.Z = 25",
+        "\tSet b = New FakeBall : b.X = 364 : b.Y = 418 : b.Z = 100 : Balls = Array(c, b)",
+        "\tPadTimeMachineMagnet 1 : GameTime = GameTime + 100 : PadTMTimer_Timer",
+        "\tStale = e & \"/\" & PadTMState & \"/\" & c.Y & \"/\" & b.Y : PadTimeMachineMagnet 0",
         "End Function",
         "Dim xoff, v, s",
         "For Each xoff In Array(-12, -3, 6, 11) : For v = 15 To 160 Step 5",
         "\ts = s & v & \"/\" & xoff & \":\" & Shot(v, xoff, 1) & \" \"",
         "Next : Next",
-        "WScript.Echo s & \"search:\" & Shot(60, 6, 2) & \" nocoil:\" & Shot(60, 6, 0)",
+        "WScript.Echo s & \"search:\" & Shot(60, 6, 2) & \" nocoil:\" & Shot(60, 6, 0) & \" stale:\" & Stale",
     ]), encoding="latin-1")
     import subprocess
     r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=120)
     got = r.stdout.split()
-    assert len(got) == 4 * 30 + 2, r.stdout + r.stderr
-    for s in got[:-2]:
+    assert len(got) == 4 * 30 + 3, r.stdout + r.stderr
+    for s in got[:-3]:
         flags, after = s.split(":")[1].split("@")
-        assert flags == "True/True/True/False", s           # held inside at 1 s and 4 s, then out the back
-        assert 4.1 <= float(after) <= 4.5, s                 # onto the wire soon after the magnet let go
-    assert got[-2].split(":")[1].split("@")[0] == "False/False/False/True", got[-2]   # a search pulse: back down
-    assert got[-1].split(":")[1].split("@")[0] == "False/False/False/True", got[-1]   # no coil: straight back down
+        assert flags == "True/True/False/True", s           # held inside at 1 s and 4 s, then back down the ramp
+        assert 4.1 <= float(after) <= 4.9, s                 # rolling down soon after the magnet let go
+    assert got[-3].split(":")[1].split("@")[0] == "False/False/False/True", got[-3]   # a search pulse: back down
+    assert got[-2].split(":")[1].split("@")[0] == "False/False/False/True", got[-2]   # no coil: straight back down
+    assert got[-1] == "stale:0/0/500/418", got[-1]   # no error, nothing held, neither ball moved
 
 
 def test_rushs_side_scoop_rests_on_the_lower_switch():

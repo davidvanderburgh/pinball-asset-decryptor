@@ -525,6 +525,20 @@ if [ -e "$B/s3vid.so" ]; then
     mkdir -p "$R/usr/lib/pad"; cp "$B/s3vid.so" "$R/usr/lib/pad/"
     PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/s3vid.so"
 fi
+# PAD-1269: a mode.so, or a porting probe (s3probe.so), in the game - what Spike 2's modes/cardmodes.sh does for a
+# rig. PAD_S3_MODE_SO=<host .so> is preloaded LAST (after the emulator's own shims); every file in the directory
+# PAD_S3_MODE_FILES (game.port, probe.sites, the mode files) is copied to /dump, where the runtime and the probe
+# look on a rig. Their logs (mode.log, probe.log) land in <slot>/connectivity.up/dump/.
+if [ -n "${PAD_S3_MODE_SO:-}" ]; then
+    [ -f "$PAD_S3_MODE_SO" ] || { echo "[s3run] PAD_S3_MODE_SO $PAD_S3_MODE_SO: no such file" >&2; exit 1; }
+    mkdir -p "$R/usr/lib/pad"; cp "$PAD_S3_MODE_SO" "$R/usr/lib/pad/padmode.so"
+    PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/padmode.so"
+    if [ -n "${PAD_S3_MODE_FILES:-}" ] && [ -d "$PAD_S3_MODE_FILES" ]; then
+        cp "$PAD_S3_MODE_FILES"/* "$R/connectivity/dump/"
+        chmod 666 "$R/connectivity/dump"/* 2>/dev/null
+    fi
+    echo "[s3run] mode: $PAD_S3_MODE_SO preloaded, files from ${PAD_S3_MODE_FILES:-(none)} in /dump"
+fi
 [ -n "$PRELOAD" ] && PRELOAD="env LD_PRELOAD=$PRELOAD"
 [ -n "$PRELOAD" ] && [ "$DEVMODE" != kernel ] && PRELOAD="$PRELOAD PAD_S3_SPI_IN=/run/padspi"
 # SOUND, only when asked (PAD_S3_AUDIO=1): rig runs are muted. s3alsa.so

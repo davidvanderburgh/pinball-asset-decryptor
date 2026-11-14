@@ -2,7 +2,7 @@
 // video cutter ("Cut from a video") and a clip's preview.
 // Python owns the state (modes.stock, modes.film); these only render it and call back.
 
-import { html, useEffect, useState, Modal, Button, Field, Check, Radio, Select, Table, Note,
+import { html, useEffect, useState, Modal, Button, Field, Check, Radio, Select, Seg, Table, Note,
          Spinner, tip, cx, call, mediaUrl } from "../core/ui.js";
 
 const STOCK_TIP = "The timers, awards and shots of the modes the game shipped with. Pick a row, type a new value (or pick a shot) and press Set. Changes are saved with this project and put on the card by Write, like the Defaults tab. A timer that is an operator setting is the same number the Defaults tab shows (a machine still on the game's default takes the new one when it boots). A number the game works out in code, or one the game never uses in play, can't be changed here; the row says why. To rename a mode, edit its title on the Text tab.";
@@ -470,5 +470,103 @@ export function CoopCharsDialog({ s, onClose }) {
     ${ch.videos && rows.some((r) => r.video) ? html`<${Note} kind="info">${ch.videos}<//>` : null}
     ${rows.length ? html`<div class="modes-coop-ch" style="max-height:min(50vh, 520px)">${rows.map((r, i) => html`${row(r, i)}${open === i ? powersOf(r, i) : null}${picking === i ? pickedOf(r, i) : null}`)}</div>`
       : html`<div class="small muted" style="margin-top:8px">No characters yet: press Add${ch.preset ? `, or load ${ch.preset}'s set` : ""}.</div>`}
+  <//>`;
+}
+
+// ------------------------------------------------------------------ records of your own on the high scores (PAD-1280)
+// Peanutsfr: custom high-score entries, including for the machine's own modes - a name, a description, the mode it
+// belongs to, points or a count of the shots and goals picked. Python keeps them in the project
+// (plugins/stern/mode_records.py) and reads what this card's game offers (modes.recs: its modes, the audits and
+// champion counts it keeps); this lists them, edits one, and calls back.
+const REC_BLANK = { key: "", name: "", description: "", mode: "", measure: "points", counts: [], per: "run" };
+
+function RecordEditor({ rs, draft, setDraft, onCancel, onSave }) {
+  const [find, setFind] = useState("");
+  const set = (k, v) => setDraft({ ...draft, [k]: v });
+  const counts = rs.counts || [];
+  const picked = new Set(draft.counts || []);
+  const toggle = (k, on) => set("counts", on ? [...(draft.counts || []), k] : (draft.counts || []).filter((c) => c !== k));
+  const q = find.trim().toLowerCase();
+  const shown = counts.filter((c) => picked.has(c.key) || !q || c.label.toLowerCase().includes(q));
+  const groups = [];
+  for (const c of shown) {
+    const g = groups.find((x) => x.name === c.group);
+    if (g) g.items.push(c); else groups.push({ name: c.group, items: [c] });
+  }
+  const inMode = !!draft.mode;
+  return html`<div class="modes-rec-edit">
+    <div class="modes-rec-grid">
+      <span class="lbl">Name</span>
+      <${Field} value=${draft.name} sm maxLength=${rs.max_words || 27} autoFocus
+        placeholder="KING OF THE MONSTERS" title="The title its champion shows under, on the machine (capitals)."
+        onChange=${(v) => set("name", v.toUpperCase())} />
+      <span class="lbl">Description</span>
+      <${Field} value=${draft.description} sm maxLength=${rs.max_desc || 160}
+        placeholder="Most points in one King of the Monsters" title="A note for you about what it is. The machine does not show it."
+        onChange=${(v) => set("description", v)} />
+      <span class="lbl">Counts during</span>
+      <${Select} sm value=${draft.mode} options=${rs.modes || []}
+        title="The game's own mode, one of your modes, or the whole game: it counts only while that mode runs for the player."
+        onChange=${(v) => setDraft({ ...draft, mode: v, per: v ? draft.per : "game" })} />
+      <span class="lbl">Record of</span>
+      <${Seg} value=${draft.measure} onChange=${(v) => set("measure", v)}
+        options=${[{ value: "points", label: "Points", title: "The points the player scores while it counts." },
+                   { value: "count", label: "Shots and goals", title: "How many of the shots and goals you tick the player makes while it counts." }]} />
+      ${inMode ? html`<span class="lbl">Each player's</span>
+        <${Seg} value=${draft.per} onChange=${(v) => set("per", v)}
+          options=${[{ value: "run", label: "Best single play", title: "The most in one play of the mode, start to end." },
+                     { value: "game", label: "Whole game total", title: "All of it in one game, every play of the mode added up." }]} />` : null}
+    </div>
+    ${draft.measure === "count" ? html`<div class="modes-rec-counts">
+      <div class="row" style="gap:8px">
+        <span class="lbl">Count these</span><span class="small dim">${picked.size} ticked</span><span class="grow"></span>
+        <${Field} value=${find} sm width=${220} placeholder="Find a shot or goal" onChange=${setFind} />
+      </div>
+      <div class="modes-rec-list" style="max-height:min(38vh, 340px)">
+        ${groups.map((g) => html`<div key=${g.name}>
+          <div class="modes-list-grp">${g.name}</div>
+          <div class="modes-rec-checks">${g.items.map((c) => html`<${Check} key=${c.key} checked=${picked.has(c.key)}
+            label=${c.label} onChange=${(v) => toggle(c.key, v)} />`)}</div>
+        </div>`)}
+        ${!groups.length ? html`<div class="small muted">${counts.length ? "Nothing matches." : "The app could not read what this game counts."}</div>` : null}
+      </div>
+    </div>` : null}
+    ${rs.error ? html`<${Note} kind="err">${rs.error}<//>` : null}
+    <div class="row" style="gap:8px; justify-content:flex-end">
+      <${Button} onClick=${onCancel}>Cancel<//>
+      <${Button} kind="primary" icon="save" disabled=${!draft.name.trim()} onClick=${onSave}>Save record<//>
+    </div>
+  </div>`;
+}
+
+export function RecordsDialog({ s, onClose }) {
+  const rs = s.recs || {};
+  const rows = rs.rows || [];
+  const [draft, setDraft] = useState(null);
+  useEffect(() => { call("modes.records_refresh"); }, []);
+  const save = () => call("modes.record_save", draft.key, draft).then((k) => { if (k) setDraft(null); });
+  const full = rows.length >= (rs.max || 12);
+  return html`<${Modal} title=${draft ? (draft.key ? `Edit ${draft.name || "record"}` : "New record") : "High scores of your own"}
+    icon="star" wide onClose=${onClose}
+    footer=${draft ? null : html`<span class="small muted">${rows.length} of ${rs.max || 12}</span><span class="grow"></span>
+      <${Button} icon="plus" disabled=${full || !!rs.why} title=${full ? "A card takes at most " + (rs.max || 12) + " records." : "Make a new record."}
+        onClick=${() => setDraft({ ...REC_BLANK })}>New record<//>
+      <${Button} onClick=${onClose}>Close<//>`}>
+    ${draft ? html`<${RecordEditor} rs=${rs} draft=${draft} setDraft=${setDraft}
+        onCancel=${() => setDraft(null)} onSave=${save} />`
+      : html`<div class="small dim wrap">${rs.how}</div>
+      ${rs.why ? html`<${Note} kind="info">${rs.why}<//>` : null}
+      ${rows.length ? html`<div class="modes-rec-rows">${rows.map((r) => html`<div class="modes-rec-row" key=${r.key}>
+          <div class="modes-rec-main">
+            <b class="mono">${r.name}</b>
+            <span class="small">${r.what}${r.counts_words && r.counts_words.length ? ": " + r.counts_words.join(", ") : ""}</span>
+            ${r.description ? html`<span class="small dim">${r.description}</span>` : null}
+            ${r.note ? html`<span class="small err-ink">${r.note}</span>` : null}
+          </div>
+          <${Button} size="sm" icon="edit" onClick=${() => setDraft({ ...REC_BLANK, ...r })}>Edit<//>
+          <${Button} size="sm" kind="ghost" icon="trash" title="Take this record out of the project."
+            onClick=${() => call("modes.record_delete", r.key)}>Delete<//>
+        </div>`)}</div>`
+        : html`<div class="small muted modes-rec-none">No records of your own yet. New record makes one.</div>`}`}
   <//>`;
 }

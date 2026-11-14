@@ -6911,6 +6911,36 @@ panel showed them, both marker ids in player order; game 2 with the server down:
 apart, dropped, and the machine played on; game 3, server back: posted as game_number 3.
 Elvira 3 1.13 (its port names no game_over), one player, three balls: after the last drain nothing was pressed, and 30 s later `game 1 over (play stopped with no new ball)` posted 2,269,300, the score the game's own end-of-game screen showed; one report, none between balls. An earlier run whose job pressed Start inside the 30 s sent the finished game's 500,100 at the next game's first ball (`the next game started`).
 
+## Records of your own on the high scores (PAD-1280)
+
+The Modes tab's **High scores…** keeps the project's records (`plugins/stern/mode_records.py`, the project sidecar's
+`mode_records`): each a name (the title its champion shows under), a description (the app's note), the mode it counts
+during (the whole game, one of the game's own modes - multiballs too, every mode the stock scanner reads off a C++
+title's program - or a mode of the project's), what it counts (points, or the shots and goals ticked: the game's own
+audits and champion counts) and, in a mode, each player's best single play or the whole game's total. Write puts
+`records.cfg` beside the runtime (a whole install, as co-op play: the score gate holds Insider Connected's reports
+back):
+
+    rec <n> <points|count> <run|game> <-|g<id>:0x<object>|own> <-|a<id>,c<cat>,...> <NAME>
+    own <n> <the mode's name>
+
+- **Counting.** On the game's tick, the player up's score rise (points) or champion counts' rise (`c<cat>`: the
+  category's value getter, `data challenge_scores_table` + 36 x cat + 4) is the record's while its mode ran for that
+  player at the last tick; the game's audit add (`site audit_add`, hooked) adds the audits named (`a<id>`) the same
+  way. A game's mode runs while its object's ACTIVE virtual says so (`value mode_slot_active`, else
+  `stock_slot_active`, else read off `site stock_any_running`); a mode of the card's while it is the mode running.
+  A play ends when its mode is seen stopped while that player is up; a new game forgets every count.
+- **Filing.** At the game's end, after the game's own high scores, the end-of-game function (`site
+  challenge_scores`) runs once more for each record a player beat: `value challenge_scores_cat`'s first entry points
+  at the record (`/dump/pad_challenge_scores`, under `RECORD:<NAME>`), titled with its name, the category's value
+  getter answering the record's values, its list that one entry, the gate (`site challenge_scores_gate`) letting only
+  it through, and no credit awarded. The player enters their initials in the game's own look; the game's own records
+  are neither read nor written.
+- **Shown.** The attract mode shows each record with a champion after the game's own champion pages (with the
+  modes' challenge champions, PAD-660/663), unless the Attract tab's Champions tick is off.
+- mode.log: `records: <NAME> - player 1 <n>, ...` at each game's end, then `... beats ...: the game's initials entry`
+  or `... record stands`.
+
 ## Expression light shows (PAD-1040)
 
 BEN (Led Zeppelin): "if songs are swapped out, the expression lighting is no longer in sync with the replaced audio

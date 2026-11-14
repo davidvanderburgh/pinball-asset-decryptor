@@ -8461,6 +8461,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1204: the score feed - scorefeed.cfg beside the runtime (the modes' delivery)
     feed_prof, feed_url = _feed_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _feed_on = bool(feed_url)
+    # PAD-1280: the owner's records on the game's high scores - records.cfg beside the runtime (the modes' delivery)
+    rec_prof, rec_list = _records_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _rec_on = bool(rec_list)
     # PAD-1115: a game screen that shows a replaced clip for a fixed time lasts as long as the clip - stime lines in
     # clips.cfg beside the runtime (the modes' delivery)
     stime_lines, stime_prof = _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_device, log,
@@ -8477,7 +8480,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             ("attract items", _attract_on), ("co-op play", _coop_on),
             ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),
             ("expression light shows", _cabs_on), ("Prolonged Competition", _comp_on),
-            ("the score feed", _feed_on), ("screen times", _stime_on)) if on]
+            ("the score feed", _feed_on), ("screen times", _stime_on),
+            ("records on the high scores", _rec_on)) if on]
         if _s3_off:
             log("The project's %s are left out of this build: they go on Spike 2 cards only."
                 % ", ".join(_s3_off), "warning")
@@ -8489,6 +8493,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         cabs_prof, cabs_shows, _cabs_on = None, [], False
         feed_prof, feed_url, _feed_on = None, "", False
         stime_lines, stime_prof, _stime_on = [], None, False
+        rec_prof, rec_list, _rec_on = None, [], False
 
     if (not audio_edits and not music_edits and not video_edits
             and not image_edits and not texture_edits and not radimg_edits
@@ -8497,7 +8502,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
-            and not _hand_on and not _cabs_on and not _comp_on and not _feed_on
+            and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -9034,7 +9039,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             retire_touched=(set(_bank_touched.values()) if (
                                 mode_list or code_list or sound_mode_used or _clips_on
                                 or _attract_on or _coop_on or _idle_on or _hand_on
-                                or _cabs_on or _comp_on or _stime_on or _feed_on)
+                                or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on)
                                 else None))
                         if bank_plan is not None:
                             bank_plan.old_map = dict(_old_bank_map)
@@ -9978,13 +9983,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Handicaps" if _hand_on
                 else "Expression lights" if _cabs_on
                 else "Prolonged Competition" if _comp_on
+                else "High score records" if _rec_on and not _feed_on and not _stime_on   # PAD-1280
                 else "Score feed" if _feed_on and not _stime_on
                 else "Screen times")
         _who_hud = _who
         if (bank_plan is not None and bank_plan.retired
                 and not (_modes_on or _clips_on or sound_modes_cfg or picture_cfg
                          or _attract_on or _coop_on or _idle_on or _hand_on or _cabs_on
-                         or _comp_on or _stime_on or _feed_on)):
+                         or _comp_on or _stime_on or _feed_on or _rec_on)):
             # PAD-1235: the earlier Write's runtime files would stay and play the
             # banks this build took the place of
             raise RuntimeError(
@@ -9994,7 +10000,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "card without the earlier build's music modes, or keep a music mode or "
                 "another mode feature in the project.")
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on):
+                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on or _rec_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -10008,13 +10014,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _idle_on else "Adding the handicaps..."
                          if _hand_on else "Adding the expression light shows..."
                          if _cabs_on else "Adding Prolonged Competition..."
-                         if _comp_on else "Adding the score feed..."
+                         if _comp_on else "Adding the records on the high scores..."
+                         if _rec_on and not _feed_on and not _stime_on else "Adding the score feed..."
                          if _feed_on and not _stime_on else "Adding the screen times...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
                 _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
                     variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
-                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof))
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -10092,6 +10099,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     comp=_comp_on, comp_prof=comp_prof,               # PAD-1041
                     screen_times=stime_lines, screen_prof=stime_prof,  # PAD-1115
                     score_feed=feed_url, score_feed_prof=feed_prof,   # PAD-1204
+                    records=rec_list, records_prof=rec_prof,          # PAD-1280
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -10188,6 +10196,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               else "adding the handicaps" if _hand_on
                               else "adding the expression light shows" if _cabs_on
                               else "adding Prolonged Competition" if _comp_on
+                              else "adding the records on the high scores"
+                              if _rec_on and not _feed_on and not _stime_on
                               else "adding the score feed" if _feed_on and not _stime_on
                               else "adding the screen times"), t0)
 
@@ -10502,6 +10512,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "comp": bool(getattr(mode_plan, "comp_file", "")),
                 # PAD-1204: the score feed (the address the reports go to)
                 "score_feed": (feed_url if getattr(mode_plan, "scorefeed_file", "") else ""),
+                # PAD-1280: the owner's records on the game's high scores (their names)
+                "records": ([r["name"] for r in rec_list] if getattr(mode_plan, "records_file", "") else []),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -11587,6 +11599,42 @@ def _attract_for_build(assets_dir, dest_is_device, log, ext4_available=None):
         "" if rec.champions else "; the modes' challenge champions are not shown in attract",
         _AI.INSIDER_WORDS), "info")
     return prof
+
+
+def _records_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1280: ``(profile, records)`` of the card the owner's records go on, or ``(None, [])`` when the project has
+    none or they are left out (one warning says why). The modes' gate, as co-op play's: part of the mode maker, an
+    image file, a host that can add files to it, a title whose high scores the app can reach."""
+    from . import mode_records as _MR
+    from . import mode_write as _MW
+    recs = _MR.load(assets_dir)
+    if not recs:
+        return None, []
+    if not _MW.preview_on():                       # a part of the mode maker, as co-op play
+        log("Records on the high scores: left out of this build: they come with the mode maker, which is not "
+            "switched on.", "warning")
+        return None, []
+    if dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry them"
+    else:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _MR.project_title(assets_dir, probe=True)
+        why = _MR.title_refusal(prof)
+    if why:
+        log("Records on the high scores: left out of this build: %s." % why.rstrip("."), "warning")
+        return None, []
+    log("Records on the high scores: %d (%s)." % (len(recs[:_MR.MAX_RECORDS]),
+                                                   ", ".join(r["name"] for r in recs[:_MR.MAX_RECORDS])), "info")
+    return prof, recs[:_MR.MAX_RECORDS]
 
 
 def _coop_for_build(assets_dir, dest_is_device, log, ext4_available=None):
@@ -13342,7 +13390,7 @@ def _install_modes(output_path, modes, landed, planned, log):
                                                  or modes.get("picture") or modes.get("attract")
                                                  or modes.get("coop") or modes.get("idle")
                                                  or modes.get("handicap") or modes.get("comp")
-                                                 or modes.get("score_feed"))
+                                                 or modes.get("score_feed") or modes.get("records"))
            else "Random clips" if modes.get("variants") else "Music modes"
            if modes.get("music_modes") else "Picture settings" if modes.get("picture")
            else "Attract items" if modes.get("attract")   # PAD-782
@@ -13350,7 +13398,8 @@ def _install_modes(output_path, modes, landed, planned, log):
            else "Inactivity pauses timers" if modes.get("idle")   # PAD-1022
            else "Handicaps" if modes.get("handicap")      # PAD-1033
            else "Prolonged Competition" if modes.get("comp")   # PAD-1041
-           else "Score feed")                             # PAD-1204
+           else "Score feed" if modes.get("score_feed")   # PAD-1204
+           else "High score records")                     # PAD-1280
     if who == "Music modes" and all(t.endswith(" in attract") for t in modes["music_modes"]):
         who = "Attract flipper sounds"   # PAD-641: the same program, its own words
     elif who == "Music modes" and all(t.endswith((" in turn)", " in attract"))
@@ -13440,6 +13489,10 @@ def _install_modes(output_path, modes, landed, planned, log):
         from . import prolonged_comp as _PCo
         log("Prolonged Competition on the card: %s. Like the game's own Competition, it keeps the card on Insider "
             "Connected." % _PCo.HOW, "success")
+    if modes.get("records"):                  # PAD-1280
+        log("Records on the high scores: %s. A player who beats one enters their initials for it after the game, "
+            "and the attract mode shows its champion. Like modes, the card then sends no score reports to Insider "
+            "Connected." % ", ".join(modes["records"]), "success")
     if modes.get("score_feed"):               # PAD-1204
         from . import score_feed as _SF
         log("Score feed on the card: %s. It changes no score: on its own it keeps the card on Insider Connected."
@@ -13447,7 +13500,7 @@ def _install_modes(output_path, modes, landed, planned, log):
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                   or modes.get("picture") or modes.get("attract") or modes.get("coop")
                                   or modes.get("idle") or modes.get("handicap") or modes.get("comp")
-                                  or modes.get("score_feed")):
+                                  or modes.get("score_feed") or modes.get("records")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")

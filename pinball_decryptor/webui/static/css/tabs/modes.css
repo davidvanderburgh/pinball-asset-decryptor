@@ -685,6 +685,18 @@ html.bp-1100 .rs-side { flex-basis: auto; width: 100%; max-height: 40vh; }
 .modes-coop-aw-row { display: grid; grid-template-columns: auto 260px 1fr; align-items: center; gap: 8px; min-height: 28px; }
 /* PAD-1031: the co-op characters dialog - a row a character: its name, its ability, what that does, remove */
 .modes-coop-btns { gap: 6px; flex-wrap: wrap; }
+/* PAD-1280: records of your own on the high scores */
+.modes-rec-btn { gap: 8px; align-items: center; }
+.modes-rec-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; max-height: min(56vh, 520px); overflow-y: auto; }
+.modes-rec-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 6px 8px;
+  border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: 6px; }
+.modes-rec-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.modes-rec-none { margin-top: 10px; }
+.modes-rec-edit { display: flex; flex-direction: column; gap: 12px; }
+.modes-rec-grid { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px 12px; }
+.modes-rec-counts { display: flex; flex-direction: column; gap: 6px; }
+.modes-rec-list { overflow-y: auto; border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: 6px; padding: 6px 8px; }
+.modes-rec-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 10px; margin-bottom: 6px; }
 .modes-coop-ch { overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .modes-coop-ch-row { display: grid; grid-template-columns: 24px 210px 200px 1fr auto; align-items: center; gap: 8px; min-height: 30px; flex: none; }
 html.bp-1100 .modes-coop-ch-row { grid-template-columns: 24px 1fr 1fr auto; }

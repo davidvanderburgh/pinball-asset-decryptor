@@ -614,6 +614,8 @@ class ModePlan:
     comp_file: str = ""
     #: PAD-1204: ``scorefeed.cfg`` beside the mode files, each game's final scores posted to the owner's server ("" = none)
     scorefeed_file: str = ""
+    #: PAD-1280: ``records.cfg`` beside the mode files, the owner's records on the high scores ("" = none)
+    records_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -831,7 +833,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
          cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
-         score_feed_prof=None, code_ok=True):
+         score_feed_prof=None, records=None, records_prof=None, code_ok=True):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -883,7 +885,12 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-1204: *score_feed* (an address) puts ``scorefeed.cfg`` beside the mode files: each game's final scores posted
     there (the logins' tables read off *game_elf*); with nothing else it is a plan of its own, for *score_feed_prof*,
-    and the file says the card has no modes."""
+    and the file says the card has no modes.
+
+    PAD-1280: *records* (:func:`.mode_records.load`'s) put ``records.cfg`` beside the mode files: the owner's records
+    on the game's high scores, each game's mode named by its object read off *game_elf*; with nothing else it is a
+    plan of its own, for *records_prof* (a whole install, as co-op play: the score gate holds Insider's reports
+    back)."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -948,6 +955,12 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                                    or idle_prof or coop_prof or attract_prof or variants_prof or sound_modes_prof
                                    or picture_prof)
             feed_into(result, game_elf, scratch, score_feed, only=True)
+        if records:                                  # PAD-1280: the owner's records, alone or with the above
+            if result is None:
+                result = records_plan(project, game_elf, records_prof or score_feed_prof or screen_prof or comp_prof
+                                      or handicap_prof or idle_prof or coop_prof or attract_prof or variants_prof
+                                      or sound_modes_prof or picture_prof)
+            records_into(result, game_elf, scratch, records)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -1042,7 +1055,57 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         screen_into(result, os.path.join(scratch, "screens"), screen_times, only=False)
     if score_feed:                                   # PAD-1204
         feed_into(result, game_elf, scratch, score_feed, only=False)
+    if records:                                      # PAD-1280
+        records_into(result, game_elf, scratch, records)
     return result
+
+
+# ---- PAD-1280: the owner's records on the game's high scores ---------------------------------------
+def records_plan(project, game_elf, prof):
+    """A plan carrying only the owner's records: no mode, no scene; the runtime and the title's port on p2 with
+    ``records.cfg`` (:func:`records_into`)."""
+    from . import mode_records as MRec
+    why = MRec.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to file high scores on"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def records_into(result, game_elf, scratch, records):
+    """``records.cfg`` for *result*'s card: *records*, each game's mode they count in named by its object read off
+    *game_elf* (:func:`.mode_records.game_modes`); a record whose mode the program has not is left out, said in
+    the plan's lines."""
+    from . import mode_project as MP
+    from . import mode_records as MRec
+    why = MRec.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = MP.read_port(MP.port_path(result.profile))
+    except (OSError, MP.ModeProjectError):
+        raise ModeWriteError(MRec.NO_PORT % result.profile.label) from None
+    modes = MRec.game_modes(game_elf, port)
+    try:
+        text = MRec.cfg_text(records, modes)
+    except MRec.RecordError as e:
+        raise ModeWriteError(str(e)) from None
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, MRec.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.records_file = path
+    names = {"game:%d" % i: n for i, n, _o in modes}
+    for line in text.splitlines():
+        if line.startswith("# ") and " left out: " in line:
+            result.lines.append("records: " + line[2:])
+    for r in records[:MRec.MAX_RECORDS]:
+        if not r["mode"].startswith("game:") or r["mode"] in names:
+            result.lines.append("records: %s - %s" % (r["name"], MRec.describe(r, names)))
 
 
 # ---- PAD-1204: the score feed --------------------------------------------------------------------
@@ -2334,6 +2397,11 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import score_feed as SF
             dst = os.path.join(out_dir, SF.CFG_NAME)
             shutil.copyfile(result.scorefeed_file, dst)
+            extras.append(dst)
+        if getattr(result, "records_file", ""):        # PAD-1280: records.cfg, the owner's records
+            from . import mode_records as MRec
+            dst = os.path.join(out_dir, MRec.CFG_NAME)
+            shutil.copyfile(result.records_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

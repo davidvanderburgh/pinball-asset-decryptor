@@ -237,3 +237,147 @@ def test_team_window(tmp_path):
         w.call("shellx.team_close")
     with open(staged_changes.load(bea)["video"]["video/a.mp4"], "rb") as f:
         assert f.read() == b"clip"
+
+
+# ---------------------------------------------------------------------------------------------
+# a team folder in Git ("Git or Git LFS could be a useful setup as well")
+# ---------------------------------------------------------------------------------------------
+def _git(*args, cwd):
+    import subprocess
+    p = subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout + p.stderr
+    return p.stdout
+
+
+def _git_team(tmp_path, names, seed=True):
+    """A bare repository (the team's GitHub) and one clone per PC, the team folder a
+    subfolder of the clone."""
+    bare = str(tmp_path / "hub.git")
+    _git("init", "-q", "--bare", "-b", "main", bare, cwd=str(tmp_path))
+    if seed:
+        seedd = str(tmp_path / "seed")
+        _git("clone", "-q", bare, seedd, cwd=str(tmp_path))
+        with open(os.path.join(seedd, "README.md"), "w") as f:
+            f.write("GZ team\n")
+        _git("add", ".", cwd=seedd)
+        _git("-c", "user.name=s", "-c", "user.email=s@x", "commit", "-q", "-m", "seed", cwd=seedd)
+        _git("push", "-q", "origin", "HEAD:main", cwd=seedd)
+    out = []
+    for n in names:
+        clone = str(tmp_path / ("pc " + n) / "team repo")
+        os.makedirs(os.path.dirname(clone))
+        _git("clone", "-q", bare, clone, cwd=str(tmp_path))
+        project, glyph = _stock_project(tmp_path, n.lower())
+        assert TS.join(project, os.path.join(clone, "GZ team"), n) == []
+        out.append(project)
+    return bare, out
+
+
+@pytest.mark.parametrize("lfs", [False, True])
+@pytest.mark.parametrize("seed", [True, False])
+def test_a_git_team_folder_pushes_and_pulls_itself(tmp_path, monkeypatch, lfs, seed):
+    from pinball_decryptor.core import team_git
+    if team_git.git_exe() is None:
+        pytest.skip("no git")
+    if lfs and not team_git.has_lfs(str(tmp_path)):
+        pytest.skip("no git lfs")
+    if not lfs:
+        monkeypatch.setattr(team_git, "has_lfs", lambda root: False)
+    bare, (alex, bea) = _git_team(tmp_path, ["Alex", "Bea"], seed=seed)
+    TS.claim(alex, ["videos"])
+    TS.claim(bea, ["sounds"])
+    # a Take goes out with the next regular check, no Share needed
+    assert TS.check(alex) == ([], [])
+    assert TS.check(bea) == ([], [])
+    assert TS.check(alex) == ([], [])          # Alex's next check brings Bea's Take
+    assert TS.owners(TS.load_state(alex)["team"]) == {"videos": "Alex", "sounds": "Bea"}
+    clip = _file(tmp_path / "alex lib" / "intro.mp4", b"alex intro")
+    staged_changes.save(alex, {"video": {"video/intro.mp4": clip},
+                               "replacement_names": {"video/intro.mp4": "intro.mp4"}})
+    roar = _file(tmp_path / "bea lib" / "roar.wav", b"RIFFroar")
+    staged_changes.save(bea, {"audio": {"audio/roar.wav": roar}})
+    # both share before either pulls: Bea's push is turned away once, pulls, goes again
+    ga = TS.share(alex)["git"]
+    gb = TS.share(bea)["git"]
+    assert ga["ok"] and ga["pushed"] and gb["ok"] and gb["pushed"], (ga, gb)
+    news, lines = TS.check(bea)
+    assert lines == [] and [(p, w) for p, w, _s in news] == [("videos", "Alex")]
+    assert TS.receive(alex)["got"] == [("sounds", "Bea")]
+    assert TS.receive(bea)["got"] == [("videos", "Alex")]
+    with open(staged_changes.load(bea)["video"]["video/intro.mp4"], "rb") as f:
+        assert f.read() == b"alex intro"
+    with open(staged_changes.load(alex)["audio"]["audio/roar.wav"], "rb") as f:
+        assert f.read() == b"RIFFroar"
+    # one commit per share, each touching only its member's folder
+    log = _git("log", "--format=%s", "--name-only", "main", cwd=bare)
+    assert "Alex shared Videos" in log and "Bea shared Sounds" in log
+    for block in log.split("\n\n"):
+        files = [ln for ln in block.splitlines()[1:] if ln]
+        assert len({f.split("/")[1] for f in files if f.startswith("GZ team/")}) <= 1, block
+    clone = os.path.dirname(TS.load_state(alex)["team"])
+    tracked = _git("lfs", "ls-files", "-n", cwd=clone) if lfs else ""
+    assert ("GZ team/Alex/Video/intro.mp4" in tracked) == lfs
+    st = TS.status(bea)
+    assert st["git"] and st["git_lfs"] == lfs and st["warnings"] == []
+
+
+def test_a_git_team_that_cannot_push_says_so_and_keeps_the_share(tmp_path):
+    from pinball_decryptor.core import team_git
+    if team_git.git_exe() is None:
+        pytest.skip("no git")
+    bare, (alex,) = _git_team(tmp_path, ["Alex"])
+    TS.claim(alex, ["videos"])
+    clip = _file(tmp_path / "alex lib" / "intro.mp4", b"alex intro")
+    staged_changes.save(alex, {"video": {"video/intro.mp4": clip}})
+    clone = os.path.dirname(TS.load_state(alex)["team"])
+    _git("remote", "set-url", "origin", str(tmp_path / "gone.git"), cwd=clone)
+    out = TS.share(alex)
+    assert out["files"] == 1 and not out["git"]["ok"]
+    assert out["git"]["lines"][0].startswith("Git couldn't get the team's changes")
+    # committed here: the next check that reaches the remote sends it
+    _git("remote", "set-url", "origin", bare, cwd=clone)
+    assert TS.check(alex) == ([], [])
+    assert "Alex shared Videos" in _git("log", "--format=%s", "main", cwd=bare)
+
+
+def test_a_git_repository_without_a_remote_is_warned_about(tmp_path):
+    from pinball_decryptor.core import team_git
+    if team_git.git_exe() is None:
+        pytest.skip("no git")
+    repo = str(tmp_path / "local repo")
+    _git("init", "-q", repo, cwd=str(tmp_path))
+    project, _g = _stock_project(tmp_path, "alex")
+    TS.join(project, os.path.join(repo, "team"), "Alex")
+    st = TS.status(project)
+    assert st["git"] and "no remote" in st["warnings"][0]
+
+
+def test_team_window_on_a_git_team(tmp_path):
+    from pinball_decryptor.core import team_git
+    from tests.test_pad1015_replacement_export import _until
+    from tests.webui_harness import web_app
+    if team_git.git_exe() is None:
+        pytest.skip("no git")
+    bare, (alex, bea) = _git_team(tmp_path, ["Alex", "Bea"])
+    TS.claim(alex, ["videos"])
+    staged_changes.save(alex, {"video": {"video/a.mp4": _file(tmp_path / "a.mp4", b"clip")}})
+    TS.share(alex, game="Godzilla Pro")          # pushed; Bea's clone has not pulled it
+    with web_app(tmp_path / "h", mfr="stern") as w:
+        w.run(lambda: w.window.write_assets_var.set(bea))
+        w.run(w.window.service("shellx").team_check)   # the regular check pulls
+        assert _until(w, lambda: w.state("shellx")["team_news"] == 1)
+        assert w.call("shellx.team_open")
+        assert _until(w, lambda: (w.state("shellx")["team"] or {}).get("parts")
+                      and not w.state("shellx")["team"]["busy"])
+        st = w.state("shellx")["team"]
+        assert st["git"] and st["git_remote"] == "origin" and st["warnings"] == []
+        assert w.call("shellx.team_get")
+        assert _until(w, lambda: w.state("shellx")["job"] is None
+                      and "video" in staged_changes.load(bea))
+        assert w.call("shellx.team_take", "scenes")
+        assert _until(w, lambda: {r["key"]: r for r in w.state("shellx")["team"]["parts"]}
+                      ["scenes"]["mine"])
+        assert w.call("shellx.team_share")
+        assert _until(w, lambda: w.state("shellx")["job"] is None
+                      and "Bea shared Scenes" in _git("log", "--format=%s", "main", cwd=bare))
+        w.call("shellx.team_close")

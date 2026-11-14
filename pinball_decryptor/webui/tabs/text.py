@@ -490,6 +490,20 @@ class TextTab(TabService):
         else:
             extra = "  (%d shown)" % shown if shown != total else ""
             status = "%d string(s), %d edited%s" % (total, edited, extra)
+            # A search the Show / Scene filter narrows (a scene picked
+            # earlier is kept per folder) can come up empty while the
+            # line is right there under All: say so, or the words look
+            # missing from the Text tab altogether (PAD-1261).
+            if query and (want_changed is not None or scene is not None):
+                hidden = sum(1 for r in rows
+                             if R.row_matches(r, query, None, None)) - shown
+                if hidden > 0:
+                    held = [n for n, on in (
+                        ("Show: All", want_changed is not None),
+                        ("Scene: All scenes", scene is not None)) if on]
+                    status += "  %d more match%s with %s" % (
+                        hidden, "" if hidden == 1 else "es",
+                        " and ".join(held))
         self.text_status_var.set(status)
         self.set(view=visible, total=total, edited=edited,
                  sort={"col": col, "desc": desc})

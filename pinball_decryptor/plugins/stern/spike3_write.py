@@ -114,6 +114,7 @@ class SoundPlan:
         self.n_grown = 0
         self.padded = []           # idx shorter than their slot
         self.grown = []            # idx longer than their slot
+        self.appended = []         # idx of the records added (PAD-1296)
 
 
 _MUSIC_STEM_RE = re.compile(r"\bmusic_cat0*(\d+)_0*(\d+)", re.IGNORECASE)
@@ -187,21 +188,27 @@ def read_container(reader, node):
     return hdr, img
 
 
-def plan_sounds(reader, assets_dir, baseline, work_dir, log, cancel=None):
-    """The :class:`SoundPlan` of every container with an edited sound.
+def plan_sounds(reader, assets_dir, baseline, work_dir, log, cancel=None,
+                adds=None):
+    """The :class:`SoundPlan` of every container with an edited sound, or
+    with records to append (*adds*: ``{card_path: [NewRecord, ...]}``, the
+    modes' own sounds, PAD-1296).
 
     Every replacement plays at its own length, as on Spike 2: one no longer
     than its sound goes over that body in place with its record's frame
     count cut to it (the directory and its CRC rewritten in place too); a
     longer one is appended and the container goes on whole
     (:func:`_stage_grown`).  A record's other words - the ids the game
-    finds a sound by - are never changed."""
+    finds a sound by - are never changed.  An appended record (*adds*) is a
+    new one after the last, its body after the old body region: the
+    container goes on whole."""
     np = _np()
     rs = spike3_sound.RECORD_SIZE
     plans = []
     for card_path, node, folder, stem in project_sound_dirs(reader):
         edits = _changed_wavs(assets_dir, folder, baseline, stem)
-        if not edits:
+        news = list((adds or {}).get(card_path) or ())
+        if not edits and not news:
             continue
         hdr, img = read_container(reader, node)
         dir_len = spike3_sound._align16(rs * img.count)
@@ -229,14 +236,22 @@ def plan_sounds(reader, assets_dir, baseline, work_dir, log, cancel=None):
                     plan.padded.append(idx)
             else:
                 grows.append((rec, body, n))
-        if grows:
+        appended = []
+        for nr in news:
+            if cancel:
+                cancel()
+            a = _pcm(nr.wav, nr, np)
+            n = max(len(a), 1)
+            appended.append((nr, _fit_frames(a, n, np).tobytes(), n))
+        if grows or appended:
             plan.staged = os.path.join(
                 work_dir, "%s_%s" % (folder.replace("/", "_"),
                                      os.path.basename(card_path)))
             _stage_grown(reader, node, hdr, img, d, trailer, plan.inplace,
-                         grows, plan.staged, cancel)
+                         grows, plan.staged, cancel, adds=appended)
             plan.n_grown = len(grows)
             plan.grown = [r.index for r, _b, _n in grows]
+            plan.appended = [img.count + k for k in range(len(appended))]
         elif plan.padded:
             struct.pack_into("<I", trailer, 0, dir_crc(d, img.count))
             plan.inplace.append((img.md_off, bytes(d)))
@@ -255,7 +270,7 @@ def dir_crc(d, count):
 
 
 def _stage_grown(reader, node, hdr, img, d, trailer, inplace, grows,
-                 out_path, cancel):
+                 out_path, cancel, adds=()):
     """Write the whole container to *out_path* with the longer bodies
     appended after the old body region and the directory moved past them.
 
@@ -264,14 +279,14 @@ def _stage_grown(reader, node, hdr, img, d, trailer, inplace, grows,
     (already carrying the in-place sounds' lengths) with the grown records
     re-pointed, then the 8-byte trailer with its first word the directory's
     CRC32 (as on every card).  The header words that point at the tail (the
-    directory at 0x40, the trailer's second word at 0x38) move by the same
-    amount."""
-    old_md = img.md_off
-    count = img.count
-    rs = spike3_sound.RECORD_SIZE
-    dir_len = spike3_sound._align16(rs * count)
-    delta = sum(len(b) for _r, b, _n in grows)
-    d = bytearray(d)
+    directory at 0x40, the trailer's second word at 0x38) move with it.
+
+    *adds* (PAD-1296): ``[(NewRecord, body, frames)]`` - records of their
+    own after the last (a mode's own sounds), their bodies after the grown
+    ones; the directory grows by a record each and the header's count with
+    it."""
+    old_md, count = img.md_off, img.count
+    bodies, d, tr, h, moved = _tail(hdr, img, d, trailer, grows, adds)
     with open(out_path, "wb") as out:
         for off, chunk in reader.read_file_chunks(node):
             if off >= old_md:
@@ -283,27 +298,101 @@ def _stage_grown(reader, node, hdr, img, d, trailer, inplace, grows,
             out.seek(off)
             out.write(body)
         out.seek(old_md)
-        pos = old_md
-        moved = {}
-        for rec, body, frames in grows:
+        for body in bodies:
             out.write(body)
-            moved[rec.index] = (pos, frames)
-            pos += len(body)
-        for idx, (off, frames) in moved.items():
-            struct.pack_into("<Q", d, idx * rs, off)
-            struct.pack_into("<I", d, idx * rs + 0x10, frames)
-        out.write(bytes(d))
-        tr = bytearray(trailer)
-        struct.pack_into("<I", tr, 0, dir_crc(d, count))
-        out.write(bytes(tr))
-        h = bytearray(hdr)
-        tail_word = old_md + dir_len + 4
-        for at in range(0, spike3_sound.HEADER_SIZE - 7, 8):
-            v = struct.unpack_from("<Q", h, at)[0]
-            if v in (old_md, tail_word) and at != spike3_sound.COUNT_FIELD:
-                struct.pack_into("<Q", h, at, v + delta)
+        out.write(d)
+        out.write(tr)
         out.seek(0)
-        out.write(bytes(h))
+        out.write(h)
+    _check_grown(out_path, count, moved, adds)
+
+
+def _tail(hdr, img, d, trailer, grows, adds):
+    """The grown container's new tail: ``(bodies, directory, trailer, header,
+    moved)`` - the bodies in order from the old directory's offset, the
+    directory with the grown records re-pointed and the added ones after the
+    last, the trailer (its first word the directory's CRC32), the header
+    with the tail words and the count moved, and ``{idx: (offset, frames)}``
+    of the grown records."""
+    old_md = img.md_off
+    count = img.count
+    rs = spike3_sound.RECORD_SIZE
+    dir_len = spike3_sound._align16(rs * count)
+    new_count = count + len(adds)
+    new_dir_len = spike3_sound._align16(rs * new_count)
+    d = bytearray(d[:rs * count]) + bytearray(new_dir_len - rs * count)
+    pos = old_md
+    moved, bodies = {}, []
+    for rec, body, frames in grows:
+        bodies.append(body)
+        moved[rec.index] = (pos, frames)
+        pos += len(body)
+    for k, (nr, body, frames) in enumerate(adds):
+        bodies.append(body)
+        struct.pack_into("<QIIII", d, (count + k) * rs, pos, nr.flags_lo,
+                         nr.param, frames, nr.param2)
+        pos += len(body)
+    for idx, (off, frames) in moved.items():
+        struct.pack_into("<Q", d, idx * rs, off)
+        struct.pack_into("<I", d, idx * rs + 0x10, frames)
+    tr = bytearray(trailer)
+    struct.pack_into("<I", tr, 0, dir_crc(d, new_count))
+    h = bytearray(hdr)
+    tail_word = old_md + dir_len + 4
+    new_md = pos
+    for at in range(0, spike3_sound.HEADER_SIZE - 7, 8):
+        v = struct.unpack_from("<Q", h, at)[0]
+        if at == spike3_sound.COUNT_FIELD:
+            continue
+        if v == old_md:
+            struct.pack_into("<Q", h, at, new_md)
+        elif v == tail_word:
+            struct.pack_into("<Q", h, at, new_md + new_dir_len + 4)
+    struct.pack_into("<I", h, spike3_sound.COUNT_FIELD, new_count)
+    return bodies, bytes(d), bytes(tr), bytes(h), moved
+
+
+def stage_tail(reader, node, adds, out_dir, name):
+    """PAD-1296: Try it's own sounds on the Spike 3 rig - the container
+    *node* with the records *adds* (``[NewRecord]``) appended, as a PATCH of
+    the card's own file rather than the whole file: ``(cut, head, tail)``,
+    the file is the card's cut at *cut* (its old directory's offset), then
+    the bytes of *tail*, with its first 0x80 bytes those of *head*
+    (``<name>.head`` / ``<name>.tail`` in *out_dir*). s3run.sh builds it in
+    the rig slot's /games overlay from the store's copy (PAD_S3_MODE_FILES's
+    ``games.patch``)."""
+    np = _np()
+    hdr, img = read_container(reader, node)
+    dir_len = spike3_sound._align16(spike3_sound.RECORD_SIZE * img.count)
+    d = reader.read_range(node, img.md_off, dir_len)
+    trailer = reader.read_range(node, img.md_off + dir_len, 8)
+    appended = []
+    for nr in adds:
+        a = _pcm(nr.wav, nr, np)
+        n = max(len(a), 1)
+        appended.append((nr, _fit_frames(a, n, np).tobytes(), n))
+    bodies, d, tr, h, _moved = _tail(hdr, img, d, trailer, [], appended)
+    os.makedirs(out_dir, exist_ok=True)
+    head, tail = os.path.join(out_dir, name + ".head"), os.path.join(out_dir, name + ".tail")
+    with open(tail, "wb") as f:
+        for body in bodies:
+            f.write(body)
+        f.write(d)
+        f.write(tr)
+    with open(head, "wb") as f:
+        f.write(h)
+    # the patched header and directory read back as the grown container
+    size = img.md_off + os.path.getsize(tail)
+    chk = spike3_sound.ImageSound.from_parts(h, d, size)
+    for k, (nr, _b, frames) in enumerate(appended):
+        r = chk.records[img.count + k]
+        if (r.flags_lo, r.param, r.frames) != (nr.flags_lo, nr.param, frames):
+            raise RuntimeError("the sound container's patch did not read back "
+                               "(added sound %d)" % (img.count + k))
+    return img.md_off, head, tail
+
+
+def _check_grown(out_path, count, moved, adds):
     # the result reads back as a container, every body inside the body region
     chk = spike3_sound.ImageSound(out_path)
     chk.validate()
@@ -312,6 +401,78 @@ def _stage_grown(reader, node, hdr, img, d, trailer, inplace, grows,
         if r.offset != off or r.frames != frames:
             raise RuntimeError("the grown sound container did not read back "
                                "(sound %d)" % idx)
+    if chk.count != count + len(adds):
+        raise RuntimeError("the grown sound container did not read back "
+                           "(%d records, not %d)" % (chk.count, count + len(adds)))
+    for k, (nr, _body, frames) in enumerate(adds):
+        r = chk.records[count + k]
+        if (r.flags_lo, r.param, r.frames) != (nr.flags_lo, nr.param, frames):
+            raise RuntimeError("the grown sound container did not read back "
+                               "(added sound %d)" % (count + k))
+
+
+# --------------------------------------------------------------------------
+# Records of their own (PAD-1296: a mode's own sounds)
+# --------------------------------------------------------------------------
+
+class NewRecord:
+    """A record appended to a container: *wav* as *channels* (1 or 2), under
+    the key ``flags_lo | param << 32`` - the 8 bytes the game's record lookup
+    finds it by (a sound id's descriptor names its recordings by them;
+    :func:`.spike3_requests.sound_parts`) - and *param2* (an id, unique per
+    record on every card)."""
+
+    def __init__(self, wav, channels, flags_lo, param, param2):
+        self.wav = wav
+        self.channels = int(channels)
+        self.flags_lo = int(flags_lo) & 0xFFFFFFFF
+        self.param = int(param) & 0xFFFFFFFF
+        self.param2 = int(param2) & 0xFFFFFFFF
+
+    @property
+    def key(self):
+        """The record key as the lookup reads it (its 8 bytes in order)."""
+        return struct.pack("<II", self.flags_lo, self.param)
+
+
+def free_key(records, flags_lo, param, taken=()):
+    """``(flags_lo, param)`` for a new record shaped like the record keyed
+    *flags_lo* / *param* (a carrier's): the same flags word (its channel bit
+    and the rest), and the param nearest *param* that no record of the
+    container (*records*) nor one already handed out (*taken*, pairs) has
+    with it.  Only the param bits some record already varies change, never
+    bits 0-1 (Star Wars ELG 1.10: the 0x100000 steps and the top bits), so
+    the key reads like the card's own."""
+    used = {(r.flags_lo, r.param) for r in records} | {tuple(t) for t in taken}
+    var = 0
+    for r in records:
+        var |= r.param ^ param
+    var &= ~0x3
+    bits = [b for b in range(32) if var >> b & 1][:16]
+    best = None
+    for m in range(1, 1 << len(bits)):
+        v = param
+        for i, b in enumerate(bits):
+            if m >> i & 1:
+                v ^= 1 << b
+        if (flags_lo, v) in used:
+            continue
+        cand = (bin(v ^ param).count("1"), abs(v - param), v)
+        if best is None or cand < best:
+            best = cand
+    if best is None:
+        raise RuntimeError("no free record key beside %08x %08x" % (flags_lo, param))
+    return flags_lo, best[2]
+
+
+def free_param2(records, seed, taken=()):
+    """A *param2* no record of the container has (nor *taken*), from the
+    bytes *seed*."""
+    used = {r.param2 for r in records} | set(taken)
+    v = zlib.crc32(seed) & 0xFFFFFFFF
+    while v in used or v == 0:
+        v = (v * 1103515245 + 12345) & 0xFFFFFFFF
+    return v
 
 
 # --------------------------------------------------------------------------
@@ -414,7 +575,12 @@ def write_card(original_path, assets_dir, output_path, log=None,
         if writes is None:
             raise _Cancelled()
         writes = engine._as_write_list(writes)
-        sounds = plan_sounds(reader, assets_dir, baseline, work, log, check)
+        # PAD-1272: the project's modes, onto the games partition (spike3_modes); a card an
+        # earlier build put modes on, written with none now, has them taken off. Planned
+        # before the sounds: PAD-1296's own sounds are records appended to image.bin.
+        mplan, mremove = _plan_modes(assets_dir, reader, work, log)
+        sounds = plan_sounds(reader, assets_dir, baseline, work, log, check,
+                             adds=mplan.sound_adds if mplan is not None else None)
         n_audio = sum(p.n_fit + p.n_grown for p in sounds)
         for p in sounds:
             if p.padded:
@@ -425,10 +591,12 @@ def write_card(original_path, assets_dir, output_path, log=None,
                 log("%s: %d replacement(s) longer than their sound; the sound "
                     "container goes onto the card whole with them added."
                     % (p.folder, len(p.grown)), "info")
+            if p.appended:
+                log("%s: the modes' %d own sound(s) added to the sound container "
+                    "(records %s); it goes onto the card whole."
+                    % (p.folder, len(p.appended),
+                       ", ".join(str(i) for i in p.appended)), "info")
         n_audio_c, n_video, n_image, n_text = tuple(counts)[:4]
-        # PAD-1272: the project's modes, onto the games partition (spike3_modes); a card an
-        # earlier build put modes on, written with none now, has them taken off
-        mplan, mremove = _plan_modes(assets_dir, reader, work, log)
         if not writes and not sounds and not (grow_plan or {}).get("jobs") \
                 and mplan is None and not mremove:
             raise engine.NothingToWrite(

@@ -35,7 +35,8 @@ The Spike 2 mode.so is byte-identical.
 1. `spike3_modes.plan` - the preview switch, code modes (left out: compiled for Spike 2's
    32-bit ARM), `card_refusal` (no port / no Insider gate), a multi-boot card, then
    `mode_write.plan` against the card's own 64-bit program (`/games/game`'s target; the port
-   check reads ELF64), with no own sounds or end sound (carriers in Spike 2's sound bank).
+   check reads ELF64); a mode's own sounds and end sound go into the card's image.bin
+   (PAD-1296, below).
    `p2_payload(arch="a64")` stages mode64.so as `mode.so`.
 2. A mode that cannot be built stops the Write before the 62 GB copy; a refusal leaves the
    modes out with the reason and writes the rest, as on Spike 2.
@@ -150,5 +151,51 @@ the voice bus 0x02; sound_stop cut 153 within 80 ms; a 1500 ms fade of request 2
 silence over exactly 1.5 s (the voice volume at +56), where a stop of the same sound cut it in under 100 ms.
 Tests: tests/test_pad1282_spike3_sound.py.
 
-Own sounds on a Spike 3 card are still not written (they are carriers in Spike 2's sound bank); the Modes tab says
-so for a Spike 3 card instead of naming a missing callout.
+## A mode's own sounds and end sound on Spike 3 (PAD-1296)
+
+Spike 2 carries them in its whitened sound bank; Spike 3's `image.bin` is plain PCM behind a plaintext directory
+(spike3_replace.md), so each sound is a **record appended to it**, and the mode swaps it in on a carrier exactly
+as item 163 does on Spike 2 (`swap <request> <stock key> <our key>` in the mode file; the 64-bit lookup hook takes
+the key the bank map's find is handed, PAD-1282).
+
+- **The record key is the directory's +0x08/+0x0c words** (flags_lo, param), little-endian: Star Wars ELG 1.10's
+  lookups logged `46000220 02002060`, `4a000220 000060e0` ..., each exactly one record's, and all 1038 pairs on
+  the card are unique. A sound id's descriptor names its recordings by the same 8 bytes (spike3_requests).
+- **The game's bank map takes every directory record**, appended ones too: four records after the last (count
+  1038 -> 1042) were found and played.
+- **A new key** (`spike3_write.free_key`) keeps the carrier's flags word (channel bit and the rest) and takes the
+  nearest param no record has with it, changing only param bits other records already vary, never bits 0-1;
+  param2 (an id) is any unused value.
+- **Appending** (`spike3_write._stage_grown`, `adds`): the bodies after the old body region (after any grown
+  replacement), the directory moved past them with a record per sound, the header's count (0x60), directory
+  (0x40) and tail word (0x38) moved, the trailer's CRC32 over the new directory. The container goes on whole
+  (a grow job), its `.sidx` record refreshed - one file with the project's replaced sounds.
+- **Carriers** (`mode_sounds.TITLES_A64`, `profile_carriers`): requests the game never plays. Star Wars ELG
+  1.10: the Spike 2 build's census carriers two request ids on (request_shift +2), each the same recording -
+  calls 135 202 201 74 238 (mono, 2.40 .. 1.64 s, longest first as on Spike 2), music 70 345 73 78 (Spike 2's
+  344 is 343's record, so 346 is left out: one swap would take both). None was played by the game in the two
+  emulator games run with the sound log on. The stock key is the record the carrier's first sound id names
+  (read off the card).
+- **The end sound always rides a carrier** on Spike 3 (`mode_write.end_on_carrier`): nothing re-points a
+  request of the 64-bit program. So every mode can have its own.
+- **A call plays whole past its carrier's length** (a 3.5 s start call on a 2.4 s carrier was heard to its
+  end), and the music loops past its record (a 20 s file under a 26 s mode).
+- **Try it** carries them too (its "leave out own sounds" box honoured): `spike3_modes.stage_try_it_sounds`
+  stages each container as a PATCH - the card's file cut at its old directory, a tail (bodies, directory,
+  trailer) and a new 0x80-byte header - in the mode files' `games.patch/` (4 MB for ELG, not 1 GB), and s3run.sh
+  builds the file in the rig slot's /games overlay from the store's copy (`games.patched` takes it away at the
+  next run's start). Code modes stay Spike 2's.
+- mode_file.c's "NOT played - the game's own speech held the voice bus" now names what held it (request,
+  priority, bus). A call waits for the voice bus (start and end 1.5 s, shot 0.8 s) and is dropped when the
+  game's own higher-priority sound outlasts that, as on Spike 2: a shot call was held by the mode's own 3.5 s
+  start call; on ELG the end call is held when the game's 13 s line 478 (priority 7) still plays at time-up.
+
+Proof (2026-11-14, Spike 3 rig slot 96, hidden, MUTED, `PAD_S3_AUDIO_OUT=1` keeping the PCM): a SOUND CHECK
+mode whose sounds are pure tones the game never makes - start 1500 Hz 3.5 s, shot 1000 Hz 1 s, end 2500 Hz
+2 s, music 700 Hz 20 s stereo. Each run logged `[pad] sound swap: request N looked up <stock>, took <ours>` for
+135 / 201 / 70 / 202 and the tones were found in the game's own output (end call 95% of it). Runs: a hand-built
+image.bin (two; all four heard in the second), Try it's patch built by s3run (two; all four heard in the
+second), and the card the real Write wrote (`spike3_write.write_card`, 890 s: the four records appended, the
+container grown through dm-crypt, the mode installed) booted through its own hook: the runtime read the
+card's port, the start call and the music were swapped in and heard, the end call was held by 478 (above).
+Tests: tests/test_pad1296_spike3_own_sounds.py.

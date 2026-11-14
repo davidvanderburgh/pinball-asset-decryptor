@@ -754,10 +754,17 @@ class TryItMixin:
             vol = spike3_card.open_games(card)
         except Exception as e:                              # noqa: BLE001 - no key, unreadable
             return self._tryit_refuse("the Spike 3 card could not be opened: %s" % e)
+        # the design's "leave out own sounds" (PAD-1296: a Spike 3 card carries them too)
+        sound_ok = (False, "left out of this run") if self.get("leave_out") else (True, "")
+        files = os.path.join(work, "files")
+        own = 0
         try:
-            mplan = S3M.plan(project, Ext4Reader(vol, 0, vol.size), work, log=say,
-                             real_card=False)
-        except (MW.ModeWriteError, MP.ModeProjectError, OSError, ValueError) as e:
+            reader = Ext4Reader(vol, 0, vol.size)
+            mplan = S3M.plan(project, reader, work, log=say, real_card=False, sound_ok=sound_ok)
+            if mplan is not None and not self._tryit_cancelled():
+                # PAD-1296: the modes' own sounds go into the rig slot's image.bin (s3run.sh)
+                own = S3M.stage_try_it_sounds(reader, mplan, files)
+        except (MW.ModeWriteError, MP.ModeProjectError, OSError, ValueError, RuntimeError) as e:
             return self._tryit_refuse(str(e))
         finally:
             vol.close()
@@ -766,7 +773,6 @@ class TryItMixin:
                                       "the log says why.")
         if self._tryit_cancelled():
             return self._tryit_cancelled_refuse()
-        files = os.path.join(work, "files")
         os.makedirs(files, exist_ok=True)
         for name, src, _mode in mplan.files():
             if name != "mode.so":
@@ -774,6 +780,8 @@ class TryItMixin:
         self._tryit_live = None            # no hot reload on the Spike 3 rig: Try it again
         note = ("%d mode(s) ready (%s). Start a game, then play the starting shots."
                 % (len(mplan.names), ", ".join(mplan.names)))
+        if own:
+            note += " Their own sounds play from the card's sound container in this run."
         if mplan.jobs:
             note += (" Their screens and clips are not shown in Try it on a Spike 3 card; "
                      "a Write puts them on the card.")

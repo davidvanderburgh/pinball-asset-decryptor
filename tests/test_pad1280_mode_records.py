@@ -329,6 +329,46 @@ def test_write_puts_the_projects_records_in_records_cfg(tmp_path, monkeypatch, g
     assert result.build is None and result.records_file.endswith("records.cfg")
 
 
+def test_records_cfg_is_staged_beside_the_runtime(tmp_path):
+    """p2_payload: records.cfg goes beside the runtime on the system partition (the module's alias once shadowed
+    p2_payload's own MR, the mode runtime, and the staging died before it began)."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    cfg = tmp_path / "records.cfg"
+    cfg.write_text("rec 1 points game - - WHOLE GAME\n", encoding="utf-8")
+    plan = MW.ModePlan(project="", profile=None, port=os.path.join(MP.PORTS_DIR, "godzilla_le-1.16.port"), build=None)
+    plan.records_file = str(cfg)
+    out = MW.p2_payload(plan, str(tmp_path / "out"))
+    assert [os.path.basename(x) for x in out["extras"]] == ["records.cfg"]
+    assert (tmp_path / "out" / "records.cfg").read_text(encoding="utf-8") == "rec 1 points game - - WHOLE GAME\n"
+
+
+def test_the_build_takes_the_projects_records_with_the_mode_maker(tmp_path, monkeypatch):
+    """engine._records_for_build: Write and Try it take the project's records with the mode maker on, onto an image
+    file of a title that files champions; each refusal is one warning saying why."""
+    from pinball_decryptor.plugins.stern import engine as E
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    said = []
+    log = lambda text, kind="info": said.append((kind, text))                  # noqa: E731
+    project = str(tmp_path)
+    assert E._records_for_build(project, False, log) == (None, [])          # none: nothing said
+    assert said == []
+    MR.save_record(project, "", {"name": "whole game", "measure": "points"})
+    prof = object()
+    monkeypatch.setattr(MR, "project_title", lambda project, probe=False: prof)
+    monkeypatch.setattr(MR, "title_refusal", lambda p: "" if p is prof else "no")
+    monkeypatch.setattr(MW, "host_refusal", lambda platform=None: "")
+    monkeypatch.setattr(MW, "preview_on", lambda: False)
+    assert E._records_for_build(project, False, log, ext4_available=lambda: (True, "")) == (None, [])
+    assert said[-1][0] == "warning" and "mode maker" in said[-1][1]
+    monkeypatch.setattr(MW, "preview_on", lambda: True)
+    assert E._records_for_build(project, True, log, ext4_available=lambda: (True, "")) == (None, [])
+    assert "direct-SD" in said[-1][1]
+    got_prof, recs = E._records_for_build(project, False, log, ext4_available=lambda: (True, ""))
+    assert got_prof is prof and [r["name"] for r in recs] == ["WHOLE GAME"]
+    assert said[-1] == ("info", "Records on the high scores: 1 (WHOLE GAME).")
+
+
 def test_the_card_and_try_it_carry_records_cfg():
     from tools.spike2_emu import mode_install as MI
     assert ("records.cfg", 0o100644) in MI.EXTRA_FILES and "records.cfg" in MI.STANDALONE_FILES

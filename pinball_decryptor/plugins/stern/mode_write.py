@@ -1064,8 +1064,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 def records_plan(project, game_elf, prof):
     """A plan carrying only the owner's records: no mode, no scene; the runtime and the title's port on p2 with
     ``records.cfg`` (:func:`records_into`)."""
-    from . import mode_records as MR
-    why = MR.title_refusal(prof)
+    from . import mode_records as MRec
+    why = MRec.title_refusal(prof)
     if why:
         raise ModeWriteError(why)
     try:
@@ -1081,21 +1081,21 @@ def records_into(result, game_elf, scratch, records):
     *game_elf* (:func:`.mode_records.game_modes`); a record whose mode the program has not is left out, said in
     the plan's lines."""
     from . import mode_project as MP
-    from . import mode_records as MR
-    why = MR.title_refusal(result.profile)
+    from . import mode_records as MRec
+    why = MRec.title_refusal(result.profile)
     if why:
         raise ModeWriteError(why)
     try:
         port = MP.read_port(MP.port_path(result.profile))
     except (OSError, MP.ModeProjectError):
-        raise ModeWriteError(MR.NO_PORT % result.profile.label) from None
-    modes = MR.game_modes(game_elf, port)
+        raise ModeWriteError(MRec.NO_PORT % result.profile.label) from None
+    modes = MRec.game_modes(game_elf, port)
     try:
-        text = MR.cfg_text(records, modes)
-    except MR.RecordError as e:
+        text = MRec.cfg_text(records, modes)
+    except MRec.RecordError as e:
         raise ModeWriteError(str(e)) from None
     os.makedirs(scratch, exist_ok=True)
-    path = os.path.join(scratch, MR.CFG_NAME)
+    path = os.path.join(scratch, MRec.CFG_NAME)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     result.records_file = path
@@ -1103,9 +1103,9 @@ def records_into(result, game_elf, scratch, records):
     for line in text.splitlines():
         if line.startswith("# ") and " left out: " in line:
             result.lines.append("records: " + line[2:])
-    for r in records[:MR.MAX_RECORDS]:
+    for r in records[:MRec.MAX_RECORDS]:
         if not r["mode"].startswith("game:") or r["mode"] in names:
-            result.lines.append("records: %s - %s" % (r["name"], MR.describe(r, names)))
+            result.lines.append("records: %s - %s" % (r["name"], MRec.describe(r, names)))
 
 
 # ---- PAD-1204: the score feed --------------------------------------------------------------------
@@ -2399,8 +2399,8 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             shutil.copyfile(result.scorefeed_file, dst)
             extras.append(dst)
         if getattr(result, "records_file", ""):        # PAD-1280: records.cfg, the owner's records
-            from . import mode_records as MR
-            dst = os.path.join(out_dir, MR.CFG_NAME)
+            from . import mode_records as MRec
+            dst = os.path.join(out_dir, MRec.CFG_NAME)
             shutil.copyfile(result.records_file, dst)
             extras.append(dst)
     except OSError as e:

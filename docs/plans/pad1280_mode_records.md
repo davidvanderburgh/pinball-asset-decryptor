@@ -40,6 +40,19 @@ objectives (which ones counted is the owner's pick); edit and delete them; kept 
 
 ## Proof (emulator)
 
-TODO next run: Godzilla LE 1.16 rig: a record for points in a game mode and one for an audit count, a game played
-through the mode, the game's end: ENTER INITIALS under the record's title, `/dump/pad_challenge_scores` holds the
-record, the game's own records unchanged, the attract page shows it.
+Godzilla LE 1.16, rig kit `C:/tmp/PAD-1280/rig` (job.sh on rigjob.sh, run.sh = rigbatch -n 1; stage = the pinned
+runtime built with `rec1280_test_mode.c`, an instrument that starts King of the Monsters through the game's own START
+and runs a mode of its own for 3 s scoring 123450 + 5; records.cfg from mode_records.cfg_text off the card):
+
+- armed: `records: 5 on the game's high scores (... category 1's place at the game's end, ACTIVE v[14])`;
+- one game: the instrument's mode, 4 slings + 3 pops, KOTM started with 3 left + 2 right ramps in it, balls tilted
+  away. At the game's end each record went through the game's own initials entry ("PLAYER 1 - ENTER INITIALS / KOTM
+  POINTS" on the machine's screen): KOTM POINTS 22,000,000, KOTM RAMPS 5, SLINGS AND POPS 7, TEST MODE POINTS
+  123,455, WHOLE GAME POINTS 24,353,775, each `new record ..., AAA`, all five in `/dump/pad_challenge_scores`;
+- during each of those calls the gate turned the game's own categories away (`category 29/30 entry 2 is the
+  game's`): the game's own high scores untouched;
+- attract: `the attract mode shows an award or record (..) under "KOTM POINTS"` and the four others, one page each
+  after the game's first champion page (SLINGS AND POPS / AAA / 07 on the screen).
+
+Tests: `tests/test_pad1280_mode_records.py` (the runtime's parser, counting and pages lifted and played through a
+model game; the module, Write's plan and staging, the build's gate, the Modes tab's calls).

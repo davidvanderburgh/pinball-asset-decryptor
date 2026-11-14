@@ -4575,14 +4575,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 made_for, run = None, None
             if not os.path.isfile(card):
                 out = ("not found", "err", "There is no file at %s." % card)
-            elif S3.is_spike3_card(card):
-                # PAD-1269: the mode maker builds modes onto Spike 2 cards. A Spike 3
-                # card is recognised (a quick partition-table peek) and set apart, so the
-                # tab says plainly that modes are not on Spike 3 yet rather than treating
-                # it as an unreadable Spike 2 image.
-                out = ("a Spike 3 card", "info",
-                       "This is a Stern Spike 3 card. The mode maker builds modes onto "
-                       "Spike 2 cards; it does not build them onto Spike 3 yet.")
+            elif S3.is_spike3_card(card) and self._spike3_no_port(card, run):
+                # PAD-1269/1272: a Spike 3 card (a quick partition-table peek) takes modes
+                # once the app knows how to run them on its game build: until then, the
+                # tab says so rather than letting Try it find out
+                out = ("a Spike 3 card, no modes for its build yet", "info",
+                       self._spike3_no_port(card, run))
             elif made_for is not None and made_for.image and \
                     os.path.normcase(os.path.abspath(made_for.image)) == \
                     os.path.normcase(os.path.abspath(card)):
@@ -4609,6 +4607,17 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                     out = ("another game build", "warn", tip)
         self._verdict_cache = (key, out)
         return out
+
+    @staticmethod
+    def _spike3_no_port(card, run):
+        """PAD-1272: why the Spike 3 card *card* (*run*: its title, as project_cards read it)
+        cannot take modes yet - its build has no port - or "" when it can (or its build
+        cannot be read from its name: the verdict then goes on as for any card)."""
+        game_dir, version = ((run.game_dir, run.version) if run is not None and run.game_dir
+                             else (MP.card_from_name(card) or ("", "")))
+        if not game_dir or MP.profile_for_card(game_dir, version) is not None:
+            return ""
+        return MP.no_port_words(MP.title_label(game_dir, version))
 
     _try_on_probing = None
 

@@ -539,6 +539,23 @@ if [ -n "${PAD_S3_MODE_SO:-}" ]; then
     fi
     echo "[s3run] mode: $PAD_S3_MODE_SO preloaded, files from ${PAD_S3_MODE_FILES:-(none)} in /dump"
 fi
+# PAD-1272: A CARD WITH MODES (plugins/stern/spike3_modes.py): /games/game -> pad/padmode/padmode.sh, the hook
+# that preloads the card's /games/pad/padmode/mode.so into the game and execs it. A plain run (binfmt) runs the
+# card's own hook, as game_monitor does on the machine. A checkpointable run or the explicit qemu executes
+# programs only, so the hook's two steps are done here: the game program it names (game.target), the card's
+# mode.so preloaded last. With PAD_S3_MODE_SO (Try it) that object is the mode: the card's is not loaded too.
+if [ "$PROG" = /games/game ] && [ "$(readlink "$R/games/game")" = pad/padmode/padmode.sh ]; then
+    if [ "$PIVOT" = 1 ] || [ "$DEVMODE" = kernel ] || [ -n "${PAD_S3_QEMU:-}" ] || [ -n "${PAD_S3_MODE_SO:-}" ]; then
+        MT=$(cat "$R/games/pad/padmode/game.target" 2>/dev/null)
+        case "$MT" in /*) PROG=$MT ;; ?*) PROG=/games/$MT ;; esac
+        if [ -z "${PAD_S3_MODE_SO:-}" ] && [ -f "$R/games/pad/padmode/mode.so" ]; then
+            PRELOAD="${PRELOAD:+$PRELOAD:}/games/pad/padmode/mode.so"
+        fi
+        echo "[s3run] card with modes: $PROG, the card's mode.so ${PAD_S3_MODE_SO:+not }preloaded (the hook's steps)"
+    else
+        echo "[s3run] card with modes: its hook (/games/$(readlink "$R/games/game")) starts the game"
+    fi
+fi
 [ -n "$PRELOAD" ] && PRELOAD="env LD_PRELOAD=$PRELOAD"
 [ -n "$PRELOAD" ] && [ "$DEVMODE" != kernel ] && PRELOAD="$PRELOAD PAD_S3_SPI_IN=/run/padspi"
 # SOUND, only when asked (PAD_S3_AUDIO=1): rig runs are muted. s3alsa.so

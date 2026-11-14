@@ -321,11 +321,23 @@ def lookup(reader, card_rel):
 
 
 def _elf_segments(elf):
-    if elf[:4] != b"\x7fELF" or elf[4] != 1:
-        raise ModeWriteError("the card's game program is not a 32-bit ELF")
+    """``[(vaddr, file offset, file size)]`` of the program's loaded segments. A Spike 2 game
+    is a 32-bit ELF; PAD-1272: a Spike 3 game is a 64-bit one (aarch64, a PIE: a port's
+    addresses are the program's own, so they are looked up in its segments the same way)."""
+    if elf[:4] != b"\x7fELF" or elf[4] not in (1, 2):
+        raise ModeWriteError("the card's game program is not an ELF")
+    out = []
+    if elf[4] == 2:
+        phoff, = struct.unpack_from("<Q", elf, 0x20)
+        phentsize, phnum = struct.unpack_from("<HH", elf, 0x36)
+        for i in range(phnum):
+            p_type, _fl, p_off, p_vaddr, _pa, p_filesz = struct.unpack_from(
+                "<IIQQQQ", elf, phoff + i * phentsize)
+            if p_type == 1:
+                out.append((p_vaddr, p_off, p_filesz))
+        return out
     phoff, = struct.unpack_from("<I", elf, 0x1C)
     phentsize, phnum = struct.unpack_from("<HH", elf, 0x2A)
-    out = []
     for i in range(phnum):
         p_type, p_off, p_vaddr, _pa, p_filesz, _ms, _fl, _al = struct.unpack_from(
             "<8I", elf, phoff + i * phentsize)
@@ -818,7 +830,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
          cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
-         score_feed_prof=None):
+         score_feed_prof=None, code_ok=True):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -874,7 +886,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
-    code = code_mode_list(project) if modes_on else []   # the code modes' own assets travel too
+    # the code modes' own assets travel too (PAD-1272: code_ok False - a Spike 3 card - leaves them out)
+    code = code_mode_list(project) if modes_on and code_ok else []
     if not modes and not code:
         result = None
         if variants:
@@ -2237,18 +2250,22 @@ def p2_offset(disk_f):
 
 
 # ---- the system partition ---------------------------------------------------------------------
-def p2_payload(result, out_dir, project=None):
+def p2_payload(result, out_dir, project=None, arch="arm"):
     """Stage what goes in ``/usr/local/padmode``: the pinned object as ``mode.so``, the mode
     files in slot order, the port as ``game.port``. Returns ``{"so", "cfgs", "port"}``.
     PAD-432: with ``project``, its modes as Save to a file saves them too (``"bundle"``,
-    :func:`card_bundle`), for another project to load them from the card."""
+    :func:`card_bundle`), for another project to load them from the card.
+    PAD-1272: ``arch="a64"`` stages the Spike 3 runtime (``mode64.so``) as ``mode.so``, for the
+    games partition's ``pad/padmode`` (:mod:`.spike3_modes`)."""
     os.makedirs(out_dir, exist_ok=True)
     so = os.path.join(out_dir, "mode.so")
     # A missing file here is a broken install or staging, never "nothing to write":
     # say so as this module's error, so the build stops with the reason.
     try:
-        # a project with code modes carries the object compiled from them (code_plan)
-        shutil.copyfile(getattr(result, "object", "") or MR.prebuilt_object(), so)
+        # a project with code modes carries the object compiled from them (code_plan); a
+        # Spike 3 build never has one (its code modes are left out), so it is the pinned one
+        obj = getattr(result, "object", "") if arch == "arm" else ""
+        shutil.copyfile(obj or MR.prebuilt_object(arch), so)
         cfgs = []
         for name, src in result.mode_files:
             dst = os.path.join(out_dir, name)

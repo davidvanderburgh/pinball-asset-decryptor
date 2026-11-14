@@ -328,7 +328,8 @@ def _bash_script(loop_off, jobs_exec, image_exec, luks=None,
 _DMPY_EOF = "PAD_DMCRYPT_PY_EOF"
 
 
-def _bash_script_luks(loop_off, jobs_exec, image_exec, luks, part_size):
+def _bash_script_luks(loop_off, jobs_exec, image_exec, luks, part_size,
+                      body=None):
     """:func:`_bash_script` through dm-crypt (PAD-1186): loop -> a dm-crypt
     mapping of the data segment with the volume key -> mount it -> the same
     copies.  The mapping is made by :mod:`.dmcrypt` (its source travels in
@@ -389,7 +390,9 @@ def _bash_script_luks(loop_off, jobs_exec, image_exec, luks, part_size):
         'rm -f "$KF"; KF=',
         'mount "$NODE" "$MP"',
     ]
-    return "\n".join(lines + _job_lines(jobs_exec))
+    # PAD-1272: *body* (lines over the mounted "$MP") in place of the copies
+    return "\n".join(lines + (list(body) if body is not None
+                               else _job_lines(jobs_exec)))
 
 
 def _job_lines(jobs_exec):
@@ -546,6 +549,54 @@ def grow_files(image_path, part_offset, jobs, log=None, cancel=None,
     log("Grew %d file(s) to full size (filesystem left valid)." % grown,
         "success")
     return grown
+
+
+def run_on_luks(image_path, part_offset, body, luks, part_size, timeout=900):
+    """PAD-1272: run *body* - shell lines over the mounted volume ``"$MP"`` -
+    on the LUKS2 ext4 partition at *part_offset* of *image_path* (a Stern
+    Spike 3 card's games partition), through dm-crypt exactly as
+    :func:`grow_files` copies files there.  *body* is ``(to_exec) -> lines``:
+    *to_exec* turns a host path into the Linux's.  Returns the script's
+    output.  Raises :class:`Ext4GrowUnavailable` when this system cannot map
+    the volume (macOS, native Linux, no dm-crypt or python3), or
+    :class:`Ext4GrowError` with the output when the script fails."""
+    if uses_debugfs():
+        raise Ext4GrowUnavailable(
+            "Can't change files on an encrypted card on this system: it needs "
+            "the Linux kernel's dm-crypt, which the app reaches on Windows "
+            "(WSL2).")
+    ex = create_executor()
+    ok, msg = ex.check_available()
+    if not ok:
+        raise Ext4GrowUnavailable("Can't change files on this card on this "
+                                  "system: %s." % msg)
+    reason = loop_unavailable_reason(ex)
+    if reason:
+        raise Ext4GrowUnavailable("Can't change files on this card on this "
+                                  "system: %s." % reason)
+    script = _bash_script_luks(part_offset, (), ex.to_exec_path(image_path),
+                               luks, part_size, body=body(ex.to_exec_path))
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".b64", prefix="pad_luks_")
+    try:
+        os.write(fd, base64.b64encode(script.encode("utf-8")))
+        os.close(fd)
+        try:
+            return ex.run("base64 -d < %s | bash"
+                          % shlex.quote(ex.to_exec_path(tmp)), timeout=timeout)
+        except Exception as e:  # noqa: BLE001 - executor raises CommandError
+            text = str(e)
+            if "PAD_GROW_NOCRYPT" in text:
+                raise Ext4GrowUnavailable(
+                    "Can't change files on an encrypted card on this system: "
+                    "its Linux (WSL2) has no %s."
+                    % ("python3" if "no python3" in text else "dm-crypt")) from e
+            raise Ext4GrowError(text) from e
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------------

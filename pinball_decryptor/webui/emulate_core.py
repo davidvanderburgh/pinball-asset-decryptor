@@ -1569,11 +1569,14 @@ def spike3_keyfile(card, project=None):
 
 
 def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None,
-                      audio_ctl=None, restore=None):
+                      audio_ctl=None, restore=None, mode_so=None,
+                      mode_files=None):
     """The run: the card into the Spike 3 store if needed (decrypted with
     *keyfile*, the user's padkeys.json), then the game in a window on rig
     slot *slot* for *minutes* - started from save state *restore*
-    (``game/slot``, PAD-1147) instead of booted when one is given."""
+    (``game/slot``, PAD-1147) instead of booted when one is given.
+    PAD-1272: *mode_so* / *mode_files* (host paths) - Try it's mode build,
+    preloaded into the game with its files in /dump."""
     conv = _wsl_path if sys.platform == "win32" else (lambda p: p)
     args = [conv(card), int(slot), int(minutes)] + (["--audio"] if audio else [])
     if keyfile:
@@ -1584,6 +1587,10 @@ def spike3_launch_cmd(card, slot, minutes, audio=False, keyfile=None,
         args += ["--audio-ctl", audio_ctl]
     if restore:
         args += ["--restore", restore]
+    if mode_so:
+        args += ["--mode-so", conv(mode_so)]
+        if mode_files:
+            args += ["--mode-files", conv(mode_files)]
     return _s3_argv(*args)
 
 

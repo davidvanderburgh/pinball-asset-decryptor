@@ -10,6 +10,8 @@
 #   s3launch.sh --stop SLOT                 end that slot's run
 #   ... --restore GAME/NAME                 (with the run) start from that save
 #                                           state instead of booting (PAD-1147)
+#   ... --mode-so SO --mode-files DIR      (with the run) Try it: preload a mode
+#                                           build into the game (PAD-1272)
 #   s3launch.sh --load SLOT NAME            load save state NAME into the run
 #                                           on rig slot SLOT
 #   s3launch.sh --slots list|label|delete ...   the Spike 3 save states
@@ -157,7 +159,7 @@ case "${1:-}" in
         PAD_S3_SAVES_LIST=1 exec bash "$S/../spike2_emu/slots.sh" "$@"
         ;;
     ""|-*)
-        sed -n 2,26p "$0"
+        sed -n 2,28p "$0"
         exit 2
         ;;
 esac
@@ -173,6 +175,10 @@ while [ $# -gt 0 ]; do
         # the Emulate tab's volume / Mute file (a Windows path): the sound
         # player follows it live, as on Spike 2 (playaudio.sh's win sink)
         --audio-ctl) export PAD_AUDIO_CTL=${2:-}; shift ;;
+        # PAD-1272: Try it - a mode build's runtime and its files (game.port, mode.cfg ...),
+        # s3run.sh's PAD_S3_MODE_SO / PAD_S3_MODE_FILES (both Linux paths)
+        --mode-so) export PAD_S3_MODE_SO=${2:-}; shift ;;
+        --mode-files) export PAD_S3_MODE_FILES=${2:-}; shift ;;
     esac
     shift
 done

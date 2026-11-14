@@ -130,6 +130,19 @@ door, service buttons, every switch lit while active), sent down one
 `ctl.sh --stream` pipe. Rendering: Godot's OpenGL compatibility renderer,
 identical on these titles, and it needs no Vulkan in the runtime.
 
+## Plugins and Visual Pinball (PAD-1305)
+
+bofhw.py loads observer plugins (`--plugin`, `BOFHW_PLUGINS`, or any `.py`
+in `$BOF_ROOT/plugins/`, which run_game.sh passes): each sees every switch
+change, DL:/TL: line, LED frame (LM@ aliases expanded onto their members,
+alias boards 840/860 filed under 84/86), BICS command and other bus line,
+can set switches and turn PAD's ball model off. PAD's own `bofvpx.py` is
+always loaded: the kit's PAD.Controller files (tools/spike2_emu/vpx/
+bofbridge.py) with a rule plane, and a line stream on TCP
+127.0.0.1:7470+slot for other links. The names a link reads (every LED,
+servo, BICS magnet / coil / flasher) are in each profile, from the title's
+own leds.gd / servos.gd / coils.gd (`gen_profile.py --names`).
+
 ## Proven (emulator-proven)
 
 1. All three titles: no hardware -> the game's own "FAST HARDWARE NOT

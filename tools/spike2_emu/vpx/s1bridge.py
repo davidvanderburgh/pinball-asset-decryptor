@@ -208,6 +208,12 @@ class Spike1Pipe:
     app's switch window writes it the same way, from Windows). `held` is the
     shape padcontroller reads: {slot: level}."""
 
+    #: the slots that are the Spike 1 CPU's own service inputs; a pipe for
+    #: another rig in this layout (spkbridge, bofbridge) has none, or its
+    #: switches 8-11 never reached its board (PAD-1305: Alice Cooper's
+    #: right flippers and launch)
+    SERVICE = frozenset(CPU_SERVICE)
+
     def __init__(self, rig):
         self.rig = rig
         self.held = {}
@@ -222,7 +228,7 @@ class Spike1Pipe:
             return True
         previous = self.held.get(sw)
         self.held[sw] = level
-        if sw in CPU_SERVICE:
+        if sw in self.SERVICE:
             self._service_used = True
             if self._write_cpu():
                 return True

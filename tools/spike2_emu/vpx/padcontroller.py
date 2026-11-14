@@ -2057,7 +2057,11 @@ class Bridge:
             sid = cab.get(key, 0) - 1000
             if coil and sid in by_id:
                 self._button_coils[coil] = by_id[sid][1]
-        self._read_cabinet()
+        if not self.slots:                 # Spike 2's cabinet and backbox boards
+            try:
+                self._read_cabinet()
+            except Exception as exc:                        # noqa: BLE001
+                log("cabinet lights not read: %s" % exc)
 
     def _read_cabinet(self, tables_dir=None, kit=None):
         """The cabinet's lights on this title's boards and the kit's cabinet

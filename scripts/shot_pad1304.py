@@ -74,7 +74,9 @@ def main():
             page.locator(".vpx-top").screenshot(path=os.path.join(out_dir, pre + "vpx_windows.png"))
             st = webui_shot.state(url).get("vpx") or {}
             print("cabinet:", json.dumps(st.get("cabinet"), default=str)[:600], flush=True)
-            btn = page.locator(".vpx-gi-btn").first
+            # a table with a backglass beside it (JAWS's), else the first patched one
+            jaws = page.locator(".vpx-table", has_text="JAWS").locator(".vpx-gi-btn")
+            btn = jaws.first if jaws.count() else page.locator(".vpx-gi-btn").first
             if "--after" in sys.argv and btn.count():
                 btn.click()
                 time.sleep(1.5)

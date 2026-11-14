@@ -4281,36 +4281,75 @@ def test_tmnt_lock_post_held_down_lets_every_locked_ball_out(tmp_path):
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the TMNT table script under cscript")
-def test_tmnt_pro_lair_lane_drops_the_ball_onto_the_lower_lock(tmp_path):
-    # PAD-896: a spelled LAIR lights Training at the LAIR lane, which on the
-    # Pro runs to LOWER LOCK 1 (emulator: a ball there that skipped the upper
-    # section started TRAINING LEVEL 2 and was held ~10 s). A ball going UP
-    # the table's t25 lane goes there; one rolling down is left alone.
+def test_tmnt_pro_lair_shot_rolls_down_onto_the_lower_lock_post(tmp_path):
+    # PAD-1268: the LAIR shot goes in UNDER the upper flipper and rolls DOWN
+    # the lane (Mike's video of the machine; the table's wires agree: the
+    # lane's mouth is under the flipper, the left orbit's rail hooks above it).
+    # On the machine it rests on LOWER LOCK 1 against the LOWER LOCK post: the
+    # game held it 1.7 s (7-10 s starting Training) and dropped the post
+    # (emulator, turtles_pro 1.59). PAD-896 took a ball going UP instead, so
+    # the real shot never reached the game. Now a ball going down arms a
+    # hidden kicker below the trigger; it holds the ball with LOWER LOCK 1
+    # made until the LOWER LOCK coil, then sends it on down the lane.
     out, m = _tmnt_patch("turtles_pro", "Sub t25_Hit:vpmTimer.PulseSw(25):End Sub\n")
     assert "Sub t25_Hit:PadLairIn Me:End Sub" in out
     assert "PulseSw(25)" not in out and "PulseSw(1066)" not in out
-    lines = out.split("\n")
-    a = lines.index("Sub PadLairIn(aTrigger)")
-    subs = "\n".join(lines[a:lines.index("End Sub", a) + 1])
-    vbs = tmp_path / "t.vbs"
-    vbs.write_text("\n".join([
-        "Class FakeStack", "Public Balls", "Public Sub Update : End Sub", "End Class",
+    assert m["lair_lane"]["post"]["name"] == "PadLairPost"
+    got, why = _tmnt_run_vbs(tmp_path, out, [
+        "Class FakePost", "Public Enabled",
+        "Public Sub Kick(a, p) : WScript.Echo \"post kick \" & a : End Sub", "End Class",
         "Class FakeBall", "Public VelY", "End Class",
-        "Class FakeTrigger", "Public Sub DestroyBall : WScript.Echo \"taken\" : End Sub", "End Class",
-        "Dim bsVan, ActiveBall, t25",
-        "Set bsVan = New FakeStack : bsVan.Balls = 0 : Set ActiveBall = New FakeBall",
-        "Set t25 = New FakeTrigger",
-        subs,
-        "ActiveBall.VelY = 4 : PadLairIn t25 : WScript.Echo \"down: lower \" & bsVan.Balls",
-        "ActiveBall.VelY = -6 : PadLairIn t25 : WScript.Echo \"up: lower \" & bsVan.Balls",
-        "PadLairIn t25 : WScript.Echo \"up, lower full: lower \" & bsVan.Balls"]), encoding="latin-1")
-    import subprocess
-    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
-    assert [x.strip() for x in r.stdout.strip().splitlines()] == [
-        "down: lower 0", "taken", "up: lower 1", "up, lower full: lower 1"], r.stdout + r.stderr
-    # the LE map has no lair_lane: its t25 stays as it was
-    out, _ = _tmnt_patch("turtles_le", "Sub t25_Hit:vpmTimer.PulseSw(25):End Sub\n")
-    assert "PadLairIn" not in out
+        "Dim PadLairPost, padLairHeld, ActiveBall, t25",
+        "Set PadLairPost = New FakePost : PadLairPost.Enabled = False : padLairHeld = False",
+        "Set ActiveBall = New FakeBall : Set t25 = Nothing",
+        "Sub Lair(tag) : WScript.Echo tag & \": armed \" & PadLairPost.Enabled & \" held \" & padLairHeld & "
+        "\" lower \" & bsVan.Balls : End Sub",
+        "ActiveBall.VelY = -6 : PadLairIn t25 : Lair \"up the lane\"",
+        "ActiveBall.VelY = 5 : PadLairIn t25 : Lair \"down the lane\"",
+        "PadLairPost_Hit : Lair \"on the post\"",
+        "PadVanOut True : PadVanOut False : Lair \"LOWER LOCK\"",
+        "ActiveBall.VelY = 5 : PadLairIn t25 : vpmTimer.Flush : Lair \"down, never arrived\"",
+        "bsVan.Balls = 1 : PadLairIn t25 : Lair \"down, lower place taken\"",
+        "PadLairPost.Enabled = True : PadLairPost_Hit : Lair \"filled meanwhile\"",
+        "bsVan.Balls = 1 : PadVanOut True : PadVanOut False : Lair \"a van ball\""])
+    assert got == [
+        "up the lane: armed False held False lower 0",      # in from the inlane: not the shot
+        "down the lane: armed True held False lower 0",
+        "on the post: armed True held True lower 1",        # LOWER LOCK 1 made
+        "post kick 180",                                    # on down the lane, not out of the van
+        "LOWER LOCK: armed False held False lower 0",
+        "down, never arrived: armed False held False lower 0",
+        "down, lower place taken: armed False held False lower 1",
+        "post kick 180",
+        "filled meanwhile: armed False held False lower 1",
+        "out", "a van ball: armed False held False lower 0"], why
+    # the item the patcher adds: a hidden kicker cloned from the map's source,
+    # placed mid-lane below the trigger and off until a ball comes down
+    tm = pytest.importorskip("patch_turtles_le")
+    vf = pytest.importorskip("vpxfile")
+    import struct
+
+    def item(kind, name, *extra):
+        return struct.pack("<i", kind) + vf.biff_record("VCEN", struct.pack("<ff", 1, 2)) \
+            + vf.biff_record("NAME", vf.wide(name)) + b"".join(extra) + vf.biff_record("ENDB", b"")
+    on = vf.biff_record("EBLD", struct.pack("<i", 1)) + vf.biff_record("TMON", struct.pack("<i", 1))
+
+    class Table:
+        items = [item(7, m["retrofit_lights"]["clone"]), item(6, "sw14"), item(2, "DiscsTimer", on + vf.biff_record("TMIN", struct.pack("<i", 100))),
+                 item(8, m["lair_lane"]["post"]["clone"], on)]
+        item_info = staticmethod(vf.VpxTable.item_info)
+    posts = [d for d in tm.retrofit_items(Table, m) if vf.VpxTable.item_info(d)[1] == "PadLairPost"]
+    assert len(posts) == 1
+    kind, _, pos = vf.VpxTable.item_info(posts[0])
+    assert (kind, tuple(round(v) for v in pos)) == ("Kicker", (65, 1215))
+    fields = {t: pl for t, pl, _ in vf.item_records(posts[0], 4)}
+    assert struct.unpack("<i", fields["EBLD"])[0] == 0 and struct.unpack("<i", fields["TMON"])[0] == 0
+    # the LE's LAIR shot lands on LOWER LOCK 1 too (emulator: held 1.7 s, 7 s
+    # starting Training): the same lane, the same post, two lower places
+    out, m_le = _tmnt_patch("turtles_le", "Sub t25_Hit:vpmTimer.PulseSw(25):End Sub\n")
+    assert "Sub t25_Hit:PadLairIn Me:End Sub" in out
+    assert "\tIf ActiveBall.VelY > 0 And Not padLairHeld And bsVan.Balls + padVanFalling < 2 Then" in out
+    assert m_le["lair_lane"]["post"] == m["lair_lane"]["post"]
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),

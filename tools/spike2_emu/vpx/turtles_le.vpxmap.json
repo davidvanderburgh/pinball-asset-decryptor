@@ -140,7 +140,7 @@
       "t49a, t32": "the two top-lane rollovers under TOP LANE LEFT / RIGHT (l49a, l32)",
       "t49": "the rollover at the top of the loop lane: the loop is already counted by sw50",
       "t55": "the floor rollover at the top-left of the orbit",
-      "t25": "the lane behind the LAIR bank that orbit and right-ramp balls come DOWN: not a shot",
+      "t25": "the LAIR lane behind the LAIR bank: the shot goes in under the upper flipper and rolls down it to the left inlane; no switch of its own, its post holds the ball on LOWER LOCK 1 (lair_lane). The left orbit's rail hands its balls to the upper flipper, and the left wire ramp runs above the lane",
       "sw50": "the lane right of the pops, under the FOOT COMBO 2 LOOP insert (l22a): CENTER LOOP (GUESS)",
       "sw50a": "the right orbit lane with the spinner and the ROCKSTEADY / TRAINING / WEAPON inserts",
       "sw32": "rides Ramp008, the wire that returns a made left ramp to the left inlane",
@@ -170,6 +170,16 @@
       53,
       54
     ]
+  },
+  "lair_lane": {
+    "_": "the LE's LAIR shot rolls down this lane onto LOWER LOCK 1 like the Pro's: the game holds the ball there ~1.7 s (~7 s when it starts Training) and lets it go on LOWER LOCK (PAD-1268, emulator: turtles_le 1.59, LAIR TRAINING IS LIT, then TRAINING LEVEL 2). See turtles_pro's lair_lane",
+    "trigger": "t25",
+    "post": {
+      "name": "PadLairPost",
+      "clone": "Kicker7",
+      "at": [65, 1215],
+      "why": "mid-lane (wires Ramp026 x 24, Ramp020 x 107), 50 below t25 (y 1105-1165), above the lane's foot (y ~1320)"
+    }
   },
   "switch_extra": {
     "_": "edges the Data East script never sent, added by the patcher in the named sub",

@@ -289,7 +289,7 @@ def test_a_page_is_the_category_it_read_first_of_the_tables():
     """After a game Jaws' page reads category 39 entry 3 and 63 entry 0 after the row it shows, Godzilla 53 entry 1,
     Avengers shows the last scores under 55 (not one of its 38): the first read of one of the table's is the page's."""
     src = RUNTIME.read_text(encoding="utf-8")
-    seen = src[src.index("static void chg_lookup_seen(unsigned *r)\n{"):]
+    seen = src[src.index("static void chg_lookup_seen(pm_reg *r)\n{"):]
     seen = seen[:seen.index("\n}\n")]
     assert "if (chg_pages_cat >= 0 || (int)r[0] <= 0 || (int)r[0] >= chg_pages_count) return;" in seen
     run = _host()._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")

@@ -189,9 +189,9 @@ def test_the_ceremony_keeps_the_hud_off_and_its_clip_behind_the_cards():
     assert "pm_score(1), pm_score(2)" in begin and "pm_show(coop_final, 1);" in begin
     assert "pm_show(coop_final, 0);" in R._lift(src, "static void coop_cer_end(void)\n{")
     assert "pm_show(coop_final, 0);" in R._lift(src, "static void coop_cards_find(void)")   # hidden all game
-    veto = R._lift(src, "static void coop_cer_scene_show(unsigned *r)")
+    veto = R._lift(src, "static void coop_cer_scene_show(pm_reg *r)")
     assert "== coop_cer_keep" in veto and 'fn("video_player")' in veto and "r[0] = 0;" in veto
-    on = R._lift(src, "static void on_scene_show(unsigned *r)")
+    on = R._lift(src, "static void on_scene_show(pm_reg *r)")
     assert on.index("scene_show_backdrop(r);") < on.index("if (coop_cer_on) coop_cer_scene_show(r);")
     assert "|| coop_cer_on) return 1;" in R._lift(src, "static int bd_place_ok(unsigned e)")   # any background's place
     line = R._lift(src, "static void coop_line(const char *s)")

@@ -75,8 +75,7 @@ def test_the_runtime_reads_its_files_where_the_install_puts_them():
         c = f.read()
     block = c[c.index("static int pm_card_open"):c.index("#define open pm_card_open")]
     assert '"/usr/local/padmode/"' in block and '"/games/%s/"' % S3M.MODE_DIR in block
-    assert c.index("#if PM_A64
-/* PAD-1272") < c.index("static int pm_card_open")
+    assert c.index("#if PM_A64\n/* PAD-1272") < c.index("static int pm_card_open")
     with open(os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk", "prebuilt", "mode64.so"), "rb") as f:
         assert b"/games/pad/padmode/" in f.read()
 

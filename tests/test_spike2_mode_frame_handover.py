@@ -120,7 +120,7 @@ def test_the_hand_over_needs_both_lines_and_advances_before_it_draws():
     src = RUNTIME.read_text(encoding="utf-8")
     arm = _lift(src, "static void frame_arm(void)")
     assert '!site("frame_end") || !site("frame_kick")' in arm
-    kick = _lift(src, "static void on_frame_kick(unsigned *r)")
+    kick = _lift(src, "static void on_frame_kick(pm_reg *r)")
     assert "if (!frame_pending) return;" in kick                 # the kick's other caller is not a game frame
     assert "!frame_built" in kick
     assert kick.index("player_advance") < kick.index("display_draw")
@@ -137,7 +137,7 @@ def test_scene_show_settles_our_player_before_the_backdrop():
     """While our full-screen clip plays, nothing of the game's puts the player in the frame first (the
     hand-over draws it last); only then the backdrop's own business."""
     # PAD-662: the hook (on_scene_show) watches the game's own words around it; the backdrop's business is here
-    body = _lift(RUNTIME.read_text(encoding="utf-8"), "static void scene_show_backdrop(unsigned *r)\n{")
+    body = _lift(RUNTIME.read_text(encoding="utf-8"), "static void scene_show_backdrop(pm_reg *r)\n{")
     ours = body.index('fn("video_player"))()) {')
     assert body.index("frame_draws && clip.on") < ours < body.index("if (!e ||")
     assert "r[0] = 0;" in body[ours:body.index("if (!e ||")]

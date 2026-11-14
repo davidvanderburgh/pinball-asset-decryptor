@@ -328,11 +328,11 @@ def test_the_runtime_ends_a_challenge_ball_and_starts_nothing_after():
     now = src[src.index("static void chg_end_ball_now(const char *from)\n{"):]
     now = now[:now.index("\n}\n")]
     assert "__sync_bool_compare_and_swap(&chg_end_owed, 1, 0)" in now and "(1, 1)" in now
-    disp = src[src.index("static void on_event_dispatch(unsigned *r)\n{"):]
+    disp = src[src.index("static void on_event_dispatch(pm_reg *r)\n{"):]
     assert 'chg_end_ball_now("the game\'s bus call")' in disp[:disp.index("\n}\n")]
     # PAD-663: only from a bus call on the game-logic thread (John Wick 1.02 stopped when ended from another)
     assert "chg_end_owed && chg_game_tid && syscall(SYS_GETTID) == chg_game_tid" in disp[:disp.index("\n}\n")]
-    tick = src[src.index("static void on_tick(unsigned *r)\n{"):]
+    tick = src[src.index("static void on_tick(pm_reg *r)\n{"):]
     assert "if (!chg_game_tid) chg_game_tid = syscall(SYS_GETTID);" in tick[:tick.index("\n}\n")]
     assert 'chg_end_ball_now("the tick")' in src
     veto = src[src.index("static int challenge_veto("):]
@@ -608,8 +608,8 @@ def _menu(tmp_path, own):
         + "".join(line + "\n" for line in src.splitlines() if line.startswith("#define MENU_")) \
         + R._lift(src, "static int own_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)") + "\n" \
         + R._lift(src, "static int own_entry(const unsigned *ent)") + "\n" \
-        + R._lift(src, "static void challenge_menu_built(unsigned *r)") + "\n" \
-        + R._lift(src, "static void challenge_menu_picked(unsigned *r)") + MENU_MAIN
+        + R._lift(src, "static void challenge_menu_built(pm_reg *r)") + "\n" \
+        + R._lift(src, "static void challenge_menu_picked(pm_reg *r)") + MENU_MAIN
     return R._host_run(tmp_path, code, args=(str(own),)).splitlines()
 
 

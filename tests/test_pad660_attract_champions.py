@@ -177,7 +177,7 @@ def test_the_page_shows_the_games_own_first_and_puts_the_record_back_before_a_fr
     back = wrap.index("chg_page_back();", again)
     assert own < point < swap < again < back                 # the game's page first; the put-back armed before the swap
     assert "!chg_rec_score(chg_page_rec)" in wrap       # a mode with no champion yet gets no page
-    yld = R._lift(src, "static void chg_page_yield(unsigned *r)")
+    yld = R._lift(src, "static void chg_page_yield(pm_reg *r)")
     assert "chg_page_back();" in yld
     assert "*chg_page_cur == chg_page_proc" in yld            # the page's own yield, not another process's
     assert wrap.index("chg_page_proc = *chg_page_cur;") < swap

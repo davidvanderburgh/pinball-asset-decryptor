@@ -141,7 +141,7 @@ def test_an_entry_is_20_bytes_from_table_plus_4():
 
 def test_the_award_is_refused_only_while_the_gate_holds():
     src = _src()
-    v = _body(src, "static int on_coop_award(unsigned *r)\n{")
+    v = _body(src, "static int on_coop_award(pm_reg *r)\n{")
     assert "insider_holding(insider_while" in v and "return 0;" in v and "return 1;" in v
     assert "hook_veto(cu_award, on_coop_award)" in _body(src, "static void coop_users_arm(void)")
 

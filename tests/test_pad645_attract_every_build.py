@@ -115,7 +115,7 @@ def test_every_shipped_ports_switch_values_are_its_own_programs(name):
 def test_a_record_with_no_pointer_where_the_values_say_turns_the_edges_off_not_the_game():
     with open(RUNTIME, encoding="utf-8") as f:
         c = f.read()
-    edge = c[c.index("static void on_switch_edge(unsigned *r)"):]
+    edge = c[c.index("static void on_switch_edge(pm_reg *r)"):]
     edge = edge[:edge.index("\n}\n")]
     assert "if (st < 0x10000u || desc < 0x10000u) {" in edge and "if (bad ||" in edge
     assert edge.index("st < 0x10000u") < edge.index("level = *(const unsigned char *)")
@@ -368,7 +368,7 @@ def test_the_runtime_has_the_games_own_sound_at_a_press_play_the_silence():
     worker = worker[:worker.index("\n}\n")]
     assert "request == att.request" in worker and "ATT_QUIET_MS" in worker and "pm_in_game()" in worker
     # its record lookups take the silence, never the carrier's own
-    look = c[c.index("static int att_lookup(unsigned *r)\n{"):]
+    look = c[c.index("static int att_lookup(pm_reg *r)\n{"):]
     look = look[:look.index("\n}\n")]
     assert "!key_is(k, att.key)" in look and "r[1] = (unsigned)(unsigned long)att.quiet;" in look
     # the worker is hooked for it; without one the game's sound plays too

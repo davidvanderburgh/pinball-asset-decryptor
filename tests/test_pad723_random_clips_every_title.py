@@ -90,7 +90,7 @@ def test_the_runtime_hooks_the_layer_and_names_the_scene_of_an_sclip():
     arm = arm[:arm.index("\n}\n")]
     assert 'hook(fn("layer_video"), on_clipv_layer)' in arm
     assert arm.index('hook(fn("clip_play")') < arm.index("sv_hook()") < arm.index('fn("layer_video")')
-    sv = src[src.index("static void on_clipv_set_video(unsigned *r)\n{"):]
+    sv = src[src.index("static void on_clipv_set_video(pm_reg *r)\n{"):]
     assert "v && v->scene ? clipv_scene_surface(v->scene) : clip2_surface()" in sv[:sv.index("\n}\n")]
 
 

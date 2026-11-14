@@ -63,7 +63,7 @@ int main(void)
 def test_a_carrier_playing_ours_is_not_the_games_song(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
     decl = src[src.index("static unsigned short own_on_list[256];"):src.index("static int own_on(unsigned request)")]
-    body = _lift(src, "static int own_on(unsigned request)") + "\n" + _lift(src, "static void on_sound_first_active(unsigned *r)")
+    body = _lift(src, "static int own_on(unsigned request)") + "\n" + _lift(src, "static void on_sound_first_active(pm_reg *r)")
     out = _host_run(tmp_path, MAIN % (decl, body), flags=("-no-pie", "-fno-pie")).splitlines()
     if not out:
         pytest.skip("this host links above 4 GB even with -no-pie")

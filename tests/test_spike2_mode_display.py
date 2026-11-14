@@ -126,7 +126,7 @@ def test_the_runtime_never_holds_back_a_display_of_the_games():
     for hooked in ("display_effect_start", "display_priority_now", "layered_waiter"):
         assert 'hook(fn("%s")' % hooked not in arm, hooked
     assert 'hook(fn("layered_priority"), on_layered_priority)' in arm
-    lp = _lift(src, "static void on_layered_priority(unsigned *r)")
+    lp = _lift(src, "static void on_layered_priority(pm_reg *r)")
     assert "r[0] = " not in lp and "disp_layered_mgr = " in lp           # noted, never answered for the game
     for head in ("int pm_display_priority(unsigned priority)", "static void disp_release(const char *why)",
                  "static void display_tick(void)\n{"):

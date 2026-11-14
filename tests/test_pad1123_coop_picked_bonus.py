@@ -1,6 +1,6 @@
 """PAD-1123: a co-op character's clip and sound once picked, and the character on its teammate's End of Ball Bonus -
-the project's files, the clips the build makes (a still as long as its sound; the bonus loop with a framed window right
-of the bonus's words, through the bank's crop), the sound's pseudo modes and sounds.cfg line, coop.cfg's lines, and
+the project's files, the clips the build makes (a still as long as its sound; the bonus loop with the character's photo
+and name on a strip at the foot of the screen, through the bank's crop), the sound's pseudo modes and sounds.cfg line, coop.cfg's lines, and
 the runtime's choices (lifted verbatim from pad_mode_runtime.c)."""
 import os
 import shutil
@@ -126,14 +126,34 @@ def test_the_settings_file_carries_them(tmp_path):
 
 
 # ---- the clips the build makes ---------------------------------------------------------------------------------------
-def test_the_window_lands_right_of_the_bonus_words_on_the_glass():
-    x, y, w, h = CP.bonus_box(SQUARE, 1360, 768)
-    gx, gy = x * SQUARE[0] + SQUARE[12], y * SQUARE[5] + SQUARE[13]           # back on the glass
-    assert abs(gx - CP.BONUS_WINDOW[0]) < 3 and abs(gy - CP.BONUS_WINDOW[1]) < 3
-    assert abs(w * SQUARE[0] - CP.BONUS_WINDOW[2]) < 3 and abs(h * SQUARE[5] - CP.BONUS_WINDOW[3]) < 3
-    assert CP.BONUS_WINDOW[0] > 940                         # the bonus summary ends at x 940 (emulator census)
-    assert CP.BONUS_WINDOW[0] + CP.BONUS_WINDOW[2] + CP.BONUS_BORDER <= 1360
-    assert CP.bonus_box(None, 1360, 768)[:2] == CP.BONUS_WINDOW[:2]          # Normal: 1:1
+def test_the_strip_lands_at_the_foot_under_the_bonus_words_on_the_glass():
+    """Round 2: "put the Character image and their Character name at the BOTTOM of the screen"."""
+    for name in ("84GOJI", "SHODAIGOJI", "MECHAGODZILLA KIRYU THE THIRD"):
+        gx, gy, gw, gh = CP.bonus_strip(name)
+        assert gy > 665 and gy + gh <= CP.GLASS[1] - 4    # below the summary's last line (y 665, emulator census)
+        assert gx + gw / 2 == CP.GLASS[0] / 2 and CP.BONUS_STRIP_W[0] <= gw <= CP.BONUS_STRIP_W[1] and gw % 2 == 0
+        x, y, w, h = CP.bonus_box(SQUARE, 1360, 768, (gx, gy, gw, gh))
+        assert abs(x * SQUARE[0] + SQUARE[12] - gx) < 3 and abs(y * SQUARE[5] + SQUARE[13] - gy) < 3   # back on glass
+        assert abs(w * SQUARE[0] - gw) < 3 and abs(h * SQUARE[5] - gh) < 3
+        assert CP.bonus_box(None, 1360, 768, (gx, gy, gw, gh)) == (gx, gy, gw, gh)                    # Normal: 1:1
+    assert CP.bonus_strip("SHODAIGOJI")[2] > CP.bonus_strip("84GOJI")[2]          # it fits the name
+
+
+def test_the_strip_is_the_award_cards_look_photo_and_name(tmp_path):
+    from PIL import Image
+    pic = _png(tmp_path / "p.png", (20, 200, 40))
+    card = CP.bonus_card("SHODAIGOJI", "#33ccff", picture=pic)
+    assert card.size == CP.bonus_strip("SHODAIGOJI")[2:]
+    px, py, pw, ph = CP.BONUS_PHOTO
+    r, g, b, a = card.getpixel((px + pw // 2, py + ph // 2))     # the photo
+    assert g > 150 and r < 80 and a == 255
+    r, g, b, a = card.getpixel((px, py + ph // 2))               # its lit frame, in the character's colour
+    assert b > 150 and a > 200
+    assert card.getpixel((0, 0))[3] < 60                         # rounded corners
+    name = card.crop((px + pw + 22, 12, card.width - 34, 60)).convert("L")
+    assert name.getextrema()[1] > 200                             # the name, light on the body
+    hole = CP.bonus_card("SHODAIGOJI", "#33ccff")                # a video's: the slot left clear for it
+    assert hole.getpixel((px + pw // 2, py + ph // 2))[3] == 0
 
 
 def test_the_bonus_loop_is_found_by_name_at_its_crop():
@@ -154,26 +174,33 @@ def test_a_still_is_a_clip_as_long_as_asked(tmp_path):
     assert abs(CP.media_seconds(out, ff) - 4.5) < 0.2
 
 
-def test_the_bonus_copy_frames_the_picture_in_its_window(tmp_path):
+def test_the_bonus_copy_puts_the_strip_at_the_foot(tmp_path):
     ff = _ffmpeg()
     from PIL import Image
     loop = str(tmp_path / "loop.mp4")
     subprocess.run([ff, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0x202020:s=1360x768:r=30", "-t", "2",
                     "-pix_fmt", "yuv420p", loop], check=True)
-    out = str(tmp_path / "bonus.mp4")
-    box = CP.bonus_box(SQUARE, 1360, 768)
-    CP.bonus_clip(loop, out, box, ff, picture=_png(tmp_path / "p.png", (20, 200, 40)), colour="#ffb400")
-    assert abs(CP.media_seconds(out, ff) - 2.0) < 0.2       # as long as the loop
-    png = str(tmp_path / "f.png")
-    subprocess.run([ff, "-v", "error", "-y", "-ss", "1", "-i", out, "-frames:v", "1", png], check=True)
-    im = Image.open(png).convert("RGB")
-    x, y, w, h = box
-    r, g, b = im.getpixel((x + w // 2, y + h // 2))         # the picture in the window
-    assert g > 150 and r < 80 and b < 90
-    r, g, b = im.getpixel((x - 2, y + h // 2))              # its frame, in the character's colour
-    assert r > 200 and 140 < g < 220 and b < 60
-    r, g, b = im.getpixel((100, 100))                       # the loop round it
-    assert max(r, g, b) < 60
+    vid = str(tmp_path / "vid.mp4")
+    subprocess.run([ff, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0xc81e1e:s=320x240:r=30", "-t", "1",
+                    "-pix_fmt", "yuv420p", vid], check=True)
+    rect = CP.bonus_strip("SHODAIGOJI")
+    box = CP.bonus_box(None, 1360, 768, rect)
+    for kind, src, want in (("picture", _png(tmp_path / "p.png", (20, 200, 40)), "g"), ("video", vid, "r")):
+        out = str(tmp_path / ("bonus_%s.mp4" % kind))
+        CP.bonus_clip(loop, out, box, ff, colour="#ffb400", name="SHODAIGOJI", **{kind: src})
+        assert abs(CP.media_seconds(out, ff) - 2.0) < 0.2   # as long as the loop
+        assert not [f for f in os.listdir(tmp_path) if f.endswith((".card.png", ".still.png"))]
+        png = str(tmp_path / "f.png")
+        subprocess.run([ff, "-v", "error", "-y", "-ss", "1.5", "-i", out, "-frames:v", "1", png], check=True)
+        im = Image.open(png).convert("RGB")
+        x, y, w, h = box
+        px, py, pw, ph = CP.BONUS_PHOTO
+        r, g, b = im.getpixel((x + px + pw // 2, y + py + ph // 2))   # the photo slot: picture, or the looped video
+        assert (g > 150 and r < 80) if want == "g" else (r > 150 and g < 80), (kind, r, g, b)
+        r, g, b = im.getpixel((x + px, y + py + ph // 2))               # its frame, in the character's colour
+        assert r > 180 and 120 < g < 220 and b < 80, (kind, r, g, b)
+        r, g, b = im.getpixel((680, 400))                               # the loop above it, the words' place
+        assert max(r, g, b) < 60
 
 
 # ---- the sound ------------------------------------------------------------------------------------------------------

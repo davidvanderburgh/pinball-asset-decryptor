@@ -26,7 +26,7 @@ const T = {
   type: "Show only one kind of audio — every row matches the Type column, so a filtered list only ever holds that Type. Music = the game's song/bank tracks. Sound FX = effects named by the game's own Sound Test menu. Callouts = spoken lines found by Auto-name call-outs. Other = the rest — short unnamed effects. On a game that identifies no music at all (some pins store their songs as Sound-Test-named sequences), anything 20 seconds or longer counts as Music instead, and the Type column says so.",
   dups: "Group the slots that carry byte-identical factory audio under one row, so every copy of a sound sits together. The first tick scans the sound banks (about ten seconds). The game may play any copy of a duplicated sound, so mod them together — assign a replacement to one copy, then right-click it and choose \"Apply to all copies\".",
   show: "Narrow the list by what you've already done to it. Changed = the slots with a pending replacement or already changed on disk by a previous build. Unchanged = everything you haven't touched yet, so a part-finished pass is what's left in front of you instead of something to scroll past.",
-  unused: "Leave out the sounds whose Requests column reads None: no sound request in the game's code plays them, so the game program never asks for them and they are most likely leftovers the game does not use. Sounds with a blank Requests cell (a music bank's songs) stay in the list.\n\nThe count beside the buttons says how many are shown.",
+  unused: "Ticked, the list shows every sound. Untick it to leave out the sounds whose Requests column reads None: no sound request in the game's code plays them, so the game program never asks for them and they are most likely leftovers the game does not use. Sounds with a blank Requests cell (a music bank's songs) stay in the list.\n\nThe count beside the buttons says how many are shown.",
   comments: "Show the Comment column: the notes you give sounds in Audio Properties (right-click a row, or F2), such as who says a callout or the mode it belongs to. Click its heading to sort by it, and the search box finds words in comments too.\n\nThe comments themselves live in this project's callouts.csv; this tick only shows or hides the column, and the app remembers it.",
   seq: "When a clip finishes, select and play the next row in the list, following whatever sort, search and Type filter are showing.\n\nStops at the end of the list, and any ■ (or clicking another row) stops it.",
   subst: "While playing sequentially, a row that has a replacement (picked now, or already changed on disk) plays the replacement instead of the original — the whole list sounds the way the built card will.\n\nSo anything that still sounds stock is a clip you haven't replaced yet.\n\nIt applies to the ▶ buttons too: with this ticked, pressing ▶ under Original on a row you have replaced plays your replacement, so what you hear is always what the card will play.\n\nTicking this turns on \"Play sequentially\" as well.",
@@ -992,8 +992,8 @@ export default function AudioTab() {
           onChange=${(v) => call("audio.set_group_dups", v)} />` : null}
         <span class="row aud-seg" ...${tip(T.show)}><span class="lbl">Show</span>
           <${Seg} value=${s.show} options=${SHOWS} onChange=${(v) => call("audio.set_show", v)} /></span>
-        ${s.req_cap ? html`<${Check} checked=${s.hide_unused} label="Hide unused" title=${T.unused}
-          onChange=${(v) => call("audio.set_hide_unused", v)} />` : null}
+        ${s.req_cap ? html`<${Check} checked=${!s.hide_unused} label="Show unused" title=${T.unused}
+          onChange=${(v) => call("audio.set_hide_unused", !v)} />` : null}
         <${Check} checked=${!!s.comments} label="Show comments" title=${T.comments}
           onChange=${(v) => call("audio.set_show_comments", v)} />
         <span class="sp"></span>

@@ -43,7 +43,7 @@ def test_hide_unused_leaves_out_the_none_rows_only(tmp_path):
         assert RELS[1] not in _keys(w)
         w.run(lambda: w.window.service("audio").audio_search_var.set("idx0002"))
         assert _keys(w) == []
-        assert "Hide unused" in w.state("audio")["empty"]
+        assert "Show unused" in w.state("audio")["empty"]
         w.run(lambda: w.window.service("audio").audio_search_var.set(""))
         w.call("audio.set_show", "All")
         assert w.call("audio.set_hide_unused", False) is True
@@ -90,3 +90,14 @@ def test_without_a_request_map_it_hides_nothing(tmp_path):
         assert w.state("audio")["req_cap"] is False
         w.call("audio.set_hide_unused", True)
         assert sorted(_keys(w)) == sorted(RELS)
+
+
+def test_tick_reads_show_unused_and_sends_the_opposite():
+    """PAD-1275: the toolbar tick is worded positively. Ticked = every sound
+    shown, so it shows (and sends) the inverse of the stored hide_unused."""
+    js = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "pinball_decryptor", "webui", "static", "js", "tabs", "audio.js")
+    src = open(js, encoding="utf-8").read()
+    assert "Hide unused" not in src
+    assert 'checked=${!s.hide_unused} label="Show unused"' in src
+    assert 'call("audio.set_hide_unused", !v)' in src

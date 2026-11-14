@@ -156,7 +156,7 @@ def name_of(title):
 
 def read_status(path):
     try:
-        return open(path, encoding="utf-8").read().strip()
+        return open(path, encoding="utf-8", errors="replace").read().strip()
     except OSError:
         return ""
 

@@ -18,6 +18,7 @@ starts a given build - the hook for "play what Write just built".
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 
 from pinball_decryptor.webui import rig as _rig
@@ -27,6 +28,50 @@ from .. import emulate_bof_core as bof
 from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
                                   windows_python)
 from .base import TabService, rpc
+from .emulate import physical
+
+#: PAD-1308: a cabinet's screens.  tools/spike2_emu/vpx/padsplit.py shows
+#: each display of the game's one window on its own monitor (DWM thumbnails)
+#: and the run keeps the window itself under one of them; its setting is
+#: shared with the Visual Pinball kit.  A script beside the rig, loaded by
+#: path like the Stern tab's padisplay.
+_PADSPLIT = {}
+
+
+def _on_windows():
+    """The split is Windows' (DWM thumbnails of a WSLg window)."""
+    return sys.platform == "win32"
+
+
+def padsplit_path():
+    return os.path.join(os.path.dirname(bof.rig_dir()), "spike2_emu", "vpx",
+                        "padsplit.py")
+
+
+def padsplit_mod():
+    """The kit's padsplit module, or None when this install has none."""
+    path = padsplit_path()
+    if path not in _PADSPLIT:
+        mod = None
+        if os.path.isfile(path):
+            try:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("pad_padsplit", path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+            except Exception:                              # noqa: BLE001
+                mod = None
+        _PADSPLIT[path] = mod
+    return _PADSPLIT[path]
+
+
+SPLIT_TIP = ("For a cabinet with a screen per display: the game draws all its "
+             "displays in one window, and each one is shown full screen on the "
+             "monitor picked for it, above everything else. The game's own "
+             "window hides under one of them. Applies when the game starts.")
+
+#: the status bar's steps as the split's loading screens show them
+SPLIT_BOOT = {"copy": 5, "boot": 65, "techalerts": 80}
 
 INTRO = ("Run a Barrels of Fun game on this PC - Dune, Winchester Mystery "
          "House or Labyrinth. The game is a native Linux program, so it runs "
@@ -80,6 +125,9 @@ class EmulateBoFTab(RigTabMixin, TabService):
         self._cancelling = False
         #: the switch window (bofpf.py), when this app opened one
         self._sw_proc = None
+        #: the split's process (padsplit.py) and the status file it reads
+        self._split_proc = None
+        self._split_status = None
         ok = bof.rig_available()
         if not ok:
             note = ("The Barrels of Fun emulator is missing from "
@@ -98,7 +146,8 @@ class EmulateBoFTab(RigTabMixin, TabService):
                  state_label="Checking…", state_hint="", tone="",
                  cells=[{"label": lbl, "key": k, "value": "—"}
                         for lbl, k in CELLS],
-                 note=note, up=False, ready=False, game="")
+                 note=note, up=False, ready=False, game="", split_tip=SPLIT_TIP)
+        self._split_paint()
         self._start_polling()
 
     # ------------------------------------------------------------------
@@ -275,6 +324,133 @@ class EmulateBoFTab(RigTabMixin, TabService):
                 pass
 
     # ------------------------------------------------------------------
+    # PAD-1308: the cabinet's screens
+    # ------------------------------------------------------------------
+    def _split_paint(self):
+        """The Cabinet screens card: the setting and the monitors now."""
+        mod = padsplit_mod() if _on_windows() else None
+        if mod is None:
+            self.set(split=None)
+            return
+        try:
+            s = mod.load()
+            mons = physical(mod.padisplay.monitors)
+        except Exception:                                  # noqa: BLE001
+            self.set(split=None)
+            return
+        opts = [{"value": "0", "label": "Not shown"}] + [
+            {"value": str(m["n"]),
+             "label": "Monitor %d - %dx%d%s" % (m["n"], m["w"], m["h"],
+                                                " (main)" if m["primary"] else "")}
+            for m in mons]
+        for part in mod.PARTS:
+            n = s.get(part) or 0
+            if n and not any(m["n"] == n for m in mons):
+                opts.append({"value": str(n), "label": "Monitor %d - not connected" % n})
+        self.set(split={"on": bool(s["on"]), "main": str(s.get("main") or 0),
+                        "second": str(s.get("second") or 0), "fit": s["fit"],
+                        "mons": opts})
+
+    @rpc
+    def split_set(self, key, value):
+        """One change to the cabinet screens, saved at once; a game already
+        running keeps its windows until it starts again."""
+        mod = padsplit_mod()
+        if mod is None:
+            return False
+        try:
+            if key == "on":
+                change = {"on": bool(value)}
+            elif key in mod.PARTS:
+                change = {key: max(0, int(value))}
+            elif key == "fit" and value in ("keep", "fill"):
+                change = {"fit": value}
+            else:
+                return False
+            mod.save(change)
+        except (OSError, TypeError, ValueError) as exc:
+            self._log("BoF: cabinet screens not saved: %s" % exc)
+            self._split_paint()
+            return False
+        self._split_paint()
+        return True
+
+    def _split_begin(self, fun):
+        """Start the split for a run about to start, when it is on: its
+        windows (a loading screen until the game is up) and watch.sh's
+        environment for it.  [] when off, hidden, or not on Windows."""
+        self._split_end()
+        if not _on_windows() or rigslot.hidden():
+            return []
+        mod = padsplit_mod()
+        py = windows_python()
+        if mod is None or not py:
+            return []
+        try:
+            setting = mod.load()
+            if not mod.active(setting):
+                return []
+            env = physical(mod.place_env, setting)
+        except Exception as exc:                           # noqa: BLE001
+            self._log("BoF: cabinet screens off for this run: %s" % exc)
+            return []
+        title = ""
+        try:
+            from pinball_decryptor.plugins.bof.pipeline import detect_game
+            title = detect_game(fun) or ""
+        except Exception:                                  # noqa: BLE001
+            pass
+        tmp = tempfile.gettempdir()
+        self._split_status = os.path.join(tmp, "pad_bof_split_%d.txt" % os.getpid())
+        try:
+            os.remove(self._split_status)
+        except OSError:
+            pass
+        self._split_say("boot 0 Getting ready")
+        try:
+            self._split_proc = subprocess.Popen(
+                [py, padsplit_path(), "--title", title, "--status", self._split_status,
+                 "--parent", str(os.getpid()), "--focus", "last",
+                 "--log", os.path.join(tmp, "padsplit.log")],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=_rig.CREATE_FLAGS)
+        except Exception as exc:                           # noqa: BLE001
+            self._log("BoF: could not open the cabinet screens: %s" % exc)
+            self._split_proc = None
+            return []
+        self._log("BoF: the game's displays go to their cabinet screens (%s)."
+                  % " ".join(env))
+        return env
+
+    def _split_say(self, line):
+        """A line for the split's status file (its last line is the state)."""
+        if not self._split_status:
+            return
+        try:
+            with open(self._split_status, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+
+    def _split_end(self):
+        """The split ends with the run: told to stop (it closes its windows),
+        and ended outright if it has not within two seconds."""
+        proc, self._split_proc = self._split_proc, None
+        if proc is not None:
+            self._split_say("stop")
+
+            def reap():
+                try:
+                    proc.wait(timeout=2)
+                except Exception:                          # noqa: BLE001
+                    try:
+                        proc.terminate()
+                    except Exception:                      # noqa: BLE001
+                        pass
+            threading.Thread(target=reap, daemon=True, name="pad-bof-split-end").start()
+        self._split_status = None
+
+    # ------------------------------------------------------------------
     # start / stop
     # ------------------------------------------------------------------
     def _set_go(self, label=None, enabled=None):
@@ -322,6 +498,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
         self._started_here = True
         self._set_go("Cancel", True)
         _vol, muted = load_audio_ctl()
+        split_env = self._split_begin(fun)
 
         def work():
             try:
@@ -334,18 +511,26 @@ class EmulateBoFTab(RigTabMixin, TabService):
                         env=["BOF_KEYS=" + bof.title_keys(),
                              "PAD_VISIBLE=1",
                              "PAD_AUDIO=%d" % (0 if muted else 1)]
+                        + split_env
                         + rigslot.board_env() + rigslot.quiet_env()),
                     timeout=1800, on_line=self._footer_line)
                 if self._cancelling:
                     self._started_here = False
                     self._log("BoF: start canceled.")
+                    self._split_end()
                 elif rc not in (0, None):
                     self._log("BoF: start failed (exit %d). %s"
                               % (rc, bof.EXIT_TEXT.get(rc, "")))
+                    # it shows why for a few seconds, then closes itself
+                    self._split_say("failed " + (bof.EXIT_TEXT.get(rc) or "exit %d" % rc))
+                    self._split_proc = None
+                    self._split_status = None
                 else:
+                    self._split_say("up")
                     self._open_switches()
             except Exception as exc:                       # noqa: BLE001
                 self._log("BoF: start failed: %s" % exc)
+                self._split_say("failed %s" % exc)
             finally:
                 self._release()
 
@@ -355,6 +540,8 @@ class EmulateBoFTab(RigTabMixin, TabService):
         for head, kind, pct, text in bof.FOOTER_STEPS:
             if line.startswith(head):
                 self._footer(kind, pct, text)
+                if kind in SPLIT_BOOT:
+                    self._split_say("boot %d %s" % (SPLIT_BOOT[kind], text))
                 return
         if line.startswith("progress "):
             try:
@@ -362,6 +549,8 @@ class EmulateBoFTab(RigTabMixin, TabService):
             except (IndexError, ValueError):
                 return
             self._footer("copy", pct, "Decrypting the game… %d%%" % pct)
+            self._split_say("boot %d Decrypting the game… %d%%"
+                            % (5 + pct * 55 // 100, pct))
 
     def _stop_async(self):
         if self._refuse_off():
@@ -371,6 +560,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
         self._started_here = False
         self._set_go("Stopping…", False)
         self._close_switches()
+        self._split_end()
 
         def work():
             try:
@@ -457,6 +647,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
         self._stopped = True
         self._cancel_poll()
         self._close_switches()
+        self._split_end()
         if rig_off() or not bof.rig_available() or not bof.platform_ok():
             return
         if not self._started_here or not (self._last_up or self._busy):

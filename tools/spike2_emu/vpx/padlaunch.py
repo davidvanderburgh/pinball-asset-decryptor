@@ -279,6 +279,22 @@ def libraries(platform="spike2", kit=None):
     return [d for d in out if os.path.isdir(d)]
 
 
+def is_bof(launch):
+    """Whether a launch runs a Barrels of Fun game (its rig is bof_emu)."""
+    return str(getattr(launch, "rig_wsl", "") or "").rstrip("/").endswith("/bof_emu")
+
+
+def split_env():
+    """A BoF run's environment for the cabinet split (PAD-1308): the shipped
+    borderless window, kept under one of padsplit's part windows; [] when
+    the split is off (or its module can't be read)."""
+    try:
+        import padsplit
+        return padsplit.place_env()
+    except Exception:                                       # noqa: BLE001
+        return []
+
+
 def launch_for(platform, title, card):
     """The launch for a title's platform: Spike 2's Launch, Spike1Launch or
     SpookyLaunch."""
@@ -972,6 +988,8 @@ class SpookyLaunch(Spike1Launch):
         env = ["PAD_LABEL=%s" % LABEL, "PAD_VISIBLE=1", "PAD_AUDIO=1", "PAD_SLOT=%d" % self.slot]
         if sys.platform == "win32":
             env.append("PAD_BOARD=%s" % padpath.to_wsl(BOARD, self.distro))
+        if is_bof(self):
+            env += split_env()
         return env, card
 
     def start(self):

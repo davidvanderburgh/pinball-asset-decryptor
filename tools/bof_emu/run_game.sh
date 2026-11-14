@@ -83,7 +83,7 @@ if [ $VISIBLE = 1 ]; then
     DISP=${DISPLAY:-:0}
 else
     DISP=$BOF_DISPLAY
-    setsid -f Xvfb "$DISP" -screen 0 2560x1440x24 -nolisten tcp \
+    setsid -f Xvfb "$DISP" -screen 0 3840x1440x24 -nolisten tcp \
         < /dev/null > "$BOF_RIG/xvfb.log" 2>&1
     for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${DISP#:}" ] && break; sleep 0.1; done
     pgrep -xf "Xvfb $DISP .*" | head -1 > "$BOF_RIG/xvfb.pid"
@@ -108,8 +108,17 @@ fi
 # centred: centred, a 1110-high window on a shorter screen puts its title bar
 # above the top edge, out of reach.  Only on the desktop: a hidden run stays
 # exactly the build as shipped.
+#
+# PAD_BOF_SPLIT=1 (PAD-1308): the window goes to a cabinet's screens in parts
+# (padsplit.py shows each display on its own monitor through a DWM thumbnail
+# of this window), so it stays the shipped borderless slab at its own size -
+# every part is then at the game's own pixels - and opens off to the left of
+# the desktop; padsplit keeps it there.
 OVR="$(dirname "$BIN")/override.cfg"
-if [ $VISIBLE = 1 ]; then
+if [ $VISIBLE = 1 ] && [ "${PAD_BOF_SPLIT:-0}" = 1 ]; then
+    printf '%s\n' '[display]' 'window/size/borderless=true' \
+        'window/size/resizable=false' 'window/size/no_focus=true' > "$OVR"
+elif [ $VISIBLE = 1 ]; then
     printf '%s\n' '[display]' 'window/size/borderless=false' \
         'window/size/resizable=true' 'window/stretch/mode="canvas_items"' \
         'window/stretch/aspect="keep"' 'window/size/initial_position_type=0' \
@@ -145,6 +154,30 @@ if [ "${PAD_GAMEKEYS:-$VISIBLE}" = 1 ]; then
         --mark "BOFEMU_LOG_DIR=$BOF_RIG" --sock "$BOF_RIG/hw/ctl.sock" \
         --pidfile "$BOF_RIG/game.pid" --bof-profile "$TITLE" \
         < /dev/null > "$BOF_RIG/gamekeys.log" 2>&1
+fi
+# A cabinet split (PAD-1308): the window sits under one of padsplit's part
+# windows, where PAD_BOF_PLACE says - "<title>:X,Y;...;*:X,Y" in Windows'
+# physical pixels, a spot per title (the app only knows the title once the
+# .fun is unpacked), "*" for any other, or a bare "X,Y";  bofplace.py puts it
+# there and keeps it there.  It ends with the game.
+bof_place_at() {
+    local kv at="" any="" parts=()
+    IFS=';' read -r -a parts <<< "$1"
+    for kv in "${parts[@]}"; do
+        case "$kv" in
+            "$2:"*) at=${kv#*:} ;;
+            "*:"*) any=${kv#*:} ;;
+            *:*) ;;
+            *) any=$kv ;;
+        esac
+    done
+    printf '%s' "${at:-$any}"
+}
+PLACE_AT=$(bof_place_at "${PAD_BOF_PLACE:-}" "$TITLE")
+if [ $VISIBLE = 1 ] && [ "${PAD_BOF_SPLIT:-0}" = 1 ] && [ -n "$PLACE_AT" ]; then
+    setsid -f python3 -u "$BOF_TOOLS/bofplace.py" --display "$DISP" \
+        --mark "BOFEMU_LOG_DIR=$BOF_RIG" --pidfile "$BOF_RIG/game.pid" \
+        --at "$PLACE_AT" < /dev/null > "$BOF_RIG/bofplace.log" 2>&1
 fi
 echo "pid=$GP"
 echo "display=$DISP"

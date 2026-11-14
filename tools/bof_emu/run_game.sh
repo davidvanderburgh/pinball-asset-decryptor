@@ -79,6 +79,32 @@ setsid -f runuser -u "$BOF_USER" -- python3 "$BOF_TOOLS/bofhw.py" \
 for _ in $(seq 1 50); do [ -S "$BOF_RIG/hw/ctl.sock" ] && break; sleep 0.1; done
 [ -S "$BOF_RIG/hw/ctl.sock" ] || { echo "run_game.sh: board emulator did not start:" >&2; cat "$BOF_RIG/hw/daemon.out" >&2; exit 3; }
 
+# WHICH GL DRIVER DRAWS A VISIBLE RUN (PAD-1307).  Under WSLg, Mesa in Ubuntu
+# 24.04 picks llvmpipe - software, about four CPU cores for one title - with a
+# working GPU sitting there behind /dev/dxg.  d3d12 is that GPU (Mesa's d3d12
+# gallium driver on WSL's libd3d12core.so), so a visible run asks for it by
+# name, exactly as the Spike 2 rig always has (watch.sh), on the GPU Windows
+# itself ranks first (gpupick.py; one adapter = nothing picked).
+#   * a caller's own GALLIUM_DRIVER wins, as `:-` means everywhere else;
+#   * PAD_GL_DRIVER=mesa keeps Mesa's own choice;
+#   * a hidden run is untouched: Xvfb has no GPU path, llvmpipe it stays;
+#   * off WSL (no /dev/dxg, no WSL D3D12 library) nothing is forced - naming
+#     d3d12 on a Linux desktop is a guaranteed failure (PAD-182).
+# env -i below drops everything else, so the choice is handed over by name.
+GL_ENV=""
+if [ $VISIBLE = 1 ]; then
+    if [ -n "${GALLIUM_DRIVER:-}" ]; then
+        GL_ENV="GALLIUM_DRIVER=$GALLIUM_DRIVER"
+    elif [ "${PAD_GL_DRIVER:-}" != mesa ] && [ -e /dev/dxg ] \
+            && [ -e /usr/lib/wsl/lib/libd3d12core.so ]; then
+        GL_ENV="GALLIUM_DRIVER=d3d12"
+        ADAPTER=${PAD_GL_ADAPTER:-$(python3 "$BOF_TOOLS/../spike2_emu/gpupick.py" 2>/dev/null)}
+        [ "$ADAPTER" = default ] && ADAPTER=""
+        [ -n "$ADAPTER" ] && GL_ENV="$GL_ENV MESA_D3D12_DEFAULT_ADAPTER_NAME=$ADAPTER"
+    fi
+fi
+echo "renderer=${GL_ENV:-mesa-default}"
+
 if [ $VISIBLE = 1 ]; then
     DISP=${DISPLAY:-:0}
 else
@@ -123,7 +149,7 @@ cd "$BOF_RIG" || exit 3
 setsid -f runuser -u "$BOF_USER" -- env -i \
     PATH="$BOF_RIG/bin:/usr/local/bin:/usr/bin:/bin" \
     HOME="$HOMEDIR" USER="$BOF_USER" LANG=C.UTF-8 \
-    DISPLAY="$DISP" XDG_RUNTIME_DIR="$BOF_RIG" $AUDIO_ENV \
+    DISPLAY="$DISP" XDG_RUNTIME_DIR="$BOF_RIG" $AUDIO_ENV $GL_ENV \
     BOFEMU_LOG_DIR="$BOF_RIG" GODOT_SILENCE_ROOT_WARNING=1 \
     LD_PRELOAD="$BOF_RIG/bofhwshim.so" BOFHW_DEV="$BOF_RIG/hw/dev" BOFHW_SYS="$BOF_RIG/hw/sys" \
     "$BIN" --display-driver x11 --rendering-method gl_compatibility \

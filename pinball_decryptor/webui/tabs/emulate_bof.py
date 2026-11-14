@@ -22,7 +22,7 @@ import threading
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
-from ...core import rigslot
+from ...core import rigslot, timesync
 from .. import emulate_bof_core as bof
 from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
                                   windows_python)
@@ -328,6 +328,7 @@ class EmulateBoFTab(RigTabMixin, TabService):
                 self._log("BoF: starting %s (a first start unpacks the build "
                           "- a minute or two; the next is instant)."
                           % os.path.basename(fun))
+                timesync.quiet_clocks_async(self._log)   # PAD-1307: the clock
                 rc = self._run_streaming(
                     bof.rig_cmd_root(
                         "watch.sh", _rig.wsl_path(fun),

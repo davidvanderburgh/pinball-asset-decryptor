@@ -7975,6 +7975,12 @@ def inspect_card(card, media_out=None):
         # PAD-307: null = the card never said, and it has the SETTINGS card whenever an
         # image can be adjusted; "off" = the owner left it out.  ...and which images can
         ("settings", conf.get("settings")),
+        # PAD-1279: the test pictures, each with the source media.json says it was made from
+        ("tests", [collections.OrderedDict([
+            ("file", f), ("label", lab),
+            ("source", next((t.get("source") for t in ((media_man or {}).get("tests") or [])
+                             if isinstance(t, dict) and t.get("file") == f), None))])
+            for f, lab in (conf.get("tests") or [])]),
         ("colours", {str(k): v for k, v in sorted((conf.get("colours") or {}).items())}),
         # null = the card never set one, and the selector draws its own instructions
         # line (the one that follows the buttons); "" = the card asked for no line

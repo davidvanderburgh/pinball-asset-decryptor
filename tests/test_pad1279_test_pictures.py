@@ -224,3 +224,98 @@ def test_the_two_tools_agree_on_the_test_contract(sm, mk):
     assert sm.TEST_PNG_MAX == mk.PNG_MAX
     conf_h = open(os.path.join(RIG, "codeselect", "conf.h"), encoding="utf-8").read()
     assert "#define CONF_MAX_TESTS 16" in conf_h
+
+
+# ---- the app: the Multi-boot tab's Menu settings -----------------------------------------------
+
+from pinball_decryptor.webui import multiboot_core as mbc  # noqa: E402
+
+
+def _app_form(tmp_path, **kw):
+    p = tmp_path / "turtles_pro-1_59_0.Release.8G.sdcard.raw"
+    p.write_bytes(bytes(16))
+    form = mbc.MultibootForm(images=[mbc.ImageRow(path=str(p), title="TMNT")],
+                             out=str(tmp_path / "card.multi.raw"))
+    for k, v in kw.items():
+        setattr(form, k, v)
+    return form
+
+
+@pytest.fixture()
+def _no_wsl(monkeypatch):
+    monkeypatch.setattr(mbc, "wsl", lambda p: "/mnt/c/" + os.path.basename(p))
+
+
+def test_the_build_passes_each_test_picture_and_the_preview_none(tmp_path, _no_wsl):
+    form = _app_form(tmp_path, tests=[(str(tmp_path / "card.png"), "Grey card"),
+                                      (str(tmp_path / "clip.mp4"), "")])
+    args = mbc.prepare_args(form, str(tmp_path / "media"))
+    i = args.index("--test")
+    assert args[i:i + 4] == ["--test", "/mnt/c/card.png|Grey card", "--test", "/mnt/c/clip.mp4"]
+    assert "--test" not in mbc.prepare_args(form, str(tmp_path / "media"), visual_only=True)
+
+
+def test_clean_tests_keeps_what_the_conf_can_carry():
+    got = mbc.clean_tests([("a.png", "one|two"), ["b.png"], {"path": "c.png", "label": "  x \n y "},
+                           ("", "nothing"), 7] + [("f%d.png" % k, "") for k in range(20)])
+    assert got[:3] == [("a.png", "one/two"), ("b.png", ""), ("c.png", "x y")]
+    assert len(got) == mbc.TEST_MAX
+
+
+def test_a_card_read_back_gives_its_test_pictures_by_source():
+    info = {"tests": [{"file": "test0.png", "label": "Card", "source": "C:/pics/card.png"},
+                      {"file": "test1.wav", "label": "Tone", "source": None}]}
+    rows_from = mbc.rows_from_inspect
+    try:
+        mbc.rows_from_inspect = lambda i: ([], [])
+        form, _warn = mbc.form_from_inspect(info, "card.raw")[:2]
+    finally:
+        mbc.rows_from_inspect = rows_from
+    assert form.tests == [("C:/pics/card.png", "Card"), ("test1.wav", "Tone")]
+
+
+def test_changing_the_test_pictures_is_a_menu_change_and_the_summary_says_so(tmp_path):
+    before = _app_form(tmp_path)
+    after = _app_form(tmp_path, tests=[("a.png", "A")])
+    assert "test pictures" in mbc._menu_fields(before, after)
+    assert "test pictures" not in mbc._menu_fields(before, _app_form(tmp_path))
+    assert "1 test picture" in mbc.menu_summary(after)
+    assert "test picture" not in mbc.menu_summary(before)
+
+
+def test_the_preview_draws_the_settings_card_for_test_pictures(tmp_path):
+    conf = mbc.write_preview_conf(_app_form(tmp_path, tests=[("a.png", "A")]))
+    assert "test=preview0.png|A" in conf.splitlines()
+    assert "test=" not in mbc.write_preview_conf(_app_form(tmp_path))
+
+
+def test_a_saved_menu_keeps_its_test_pictures():
+    menu = mbc.menu_from_state({"tests": [["C:/a.png", "A"], ["C:/b.wav", ""]]})
+    assert menu["tests"] == [("C:/a.png", "A"), ("C:/b.wav", "")]
+    assert mbc.menu_from_state({})["tests"] == []
+
+
+def test_the_panel_list_adds_moves_renames_and_removes(tmp_path):
+    """The panel's own list methods, on a stand-in holding only the var."""
+    class Var(object):
+        def __init__(self):
+            self.v = "[]"
+
+        def get(self):
+            return self.v
+
+        def set(self, v):
+            self.v = v
+
+    panel = type("P", (), {})()
+    panel._tests_var = Var()
+    for name in ("test_pictures", "set_test_pictures", "test_add", "test_remove",
+                 "test_move", "test_label"):
+        setattr(panel, name, getattr(mbc.MultibootPanel, name).__get__(panel))
+    a, b = str(tmp_path / "Sunset.png"), str(tmp_path / "tone.wav")
+    assert panel.test_add([a, b, a]) == 2
+    assert panel.test_pictures() == [(a, "Sunset"), (b, "tone")]
+    assert panel.test_move(1, -1) and panel.test_pictures()[0][0] == b
+    assert panel.test_label(1, "Beach at dusk") and panel.test_pictures()[1] == (a, "Beach at dusk")
+    assert panel.test_remove(0) and panel.test_pictures() == [(a, "Beach at dusk")]
+    assert not panel.test_remove(5)

@@ -2359,7 +2359,6 @@
 "Encryptor produced no output. Check dongle and manifest.": "Der Verschlüssler hat keine Ausgabe erzeugt. Prüfen Sie Dongle und Manifest.",
 "End": "Ende",
 "End mode": "Modus beenden",
-"End the menu with a SETTINGS card (adjust each game's color correction on the machine; shown for games built with a color profile)": "Das Menü mit einer Karte EINSTELLUNGEN beenden (die Farbkorrektur jedes Spiels an der Maschine anpassen; wird bei Spielen gezeigt, die mit einem Farbprofil erstellt wurden)",
 "End the mode": "Modus beenden",
 "End whichever of this project's modes is running.": "Beendet den gerade laufenden Modus dieses Projekts, welcher es auch ist.",
 "Ended": "Beendet",
@@ -12919,5 +12918,14 @@
 "The game fills in each %-code as it plays (%d a number, %s a name, %P a plural): keep every one, in the same order.": "Das Spiel füllt jeden %-Code beim Spielen aus (%d eine Zahl, %s ein Name, %P eine Mehrzahl): Behalten Sie jeden davon, in derselben Reihenfolge.",
 "Keep the game's fill-ins": "Die Platzhalter des Spiels behalten",
 "“{}” has to keep the %-codes of “{}”: {}.": "„{}“ muss die %-Codes von „{}“ behalten: {}.",
-"“{}” has a % sign the game would read as a fill-in, and “{}” has none: leave the % out.": "„{}“ enthält ein %-Zeichen, das das Spiel als Platzhalter lesen würde, und „{}“ hat keines: Lassen Sie das % weg."
+"“{}” has a % sign the game would read as a fill-in, and “{}” has none: leave the % out.": "„{}“ enthält ein %-Zeichen, das das Spiel als Platzhalter lesen würde, und „{}“ hat keines: Lassen Sie das % weg.",
+"End the menu with a SETTINGS card (color correction and test pictures on the machine; shown for games built with a color profile, or with test pictures below)": "Das Menü mit einer Karte EINSTELLUNGEN beenden (Farbkorrektur und Testbilder an der Maschine; wird bei Spielen mit Farbprofil gezeigt oder wenn unten Testbilder stehen)",
+"Test pictures ({} of {}):": "Testbilder ({} von {}):",
+"Add test pictures…": "Testbilder hinzufügen…",
+"its name on the machine": "sein Name an der Maschine",
+"Earlier": "Früher",
+"Later": "Später",
+"Take it off the list": "Von der Liste nehmen",
+"The file is not there any more.": "Die Datei ist nicht mehr da.",
+"Shown on the machine under SETTINGS > TEST PICTURES, after the built-in test card, gray and color ramps and sharpness lines: pictures pixel for pixel (a bigger one is fitted to the screen, a smaller one never enlarged), videos as short menu-sized clips, sounds through the machine's speakers. Each can be shown through each game's color correction. Adding any puts the SETTINGS card in the menu.": "Wird an der Maschine unter EINSTELLUNGEN > TESTBILDER gezeigt, nach der eingebauten Testkarte, den Grau- und Farbverläufen und den Schärfelinien: Bilder Pixel für Pixel (ein größeres wird auf den Bildschirm verkleinert, ein kleineres nie vergrößert), Videos als kurze Clips in Menügröße, Töne über die Lautsprecher der Maschine. Jedes lässt sich mit der Farbkorrektur jedes Spiels zeigen. Sobald eines dabei ist, steht die Karte EINSTELLUNGEN im Menü."
 }

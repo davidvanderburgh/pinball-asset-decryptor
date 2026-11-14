@@ -6,7 +6,7 @@
 #include "colour.h"
 
 static const char *const NAME[TP_NBUILTIN] = {
-    "Test card", "Grey ramp", "Color ramps", "Sharpness", "Full white", "Full black",
+    "Test card", "Gray ramp", "Color ramps", "Sharpness", "Full white", "Full black",
 };
 static const char *const HINT[TP_NBUILTIN] = {
     "Grey steps, full and half colors, dark tones and skin tones",

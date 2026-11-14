@@ -3225,7 +3225,7 @@ HELP_CONTENT = {
          "Then **Save for this "
          "game** or **Save for every game**.\n\n"
          "**Settings > Test pictures** shows test patterns full screen, pixel for "
-         "pixel: the test card, a grey ramp with the darkest and lightest steps, "
+         "pixel: the test card, a gray ramp with the darkest and lightest steps, "
          "color ramps, one-pixel lines and checks, full white and full black. The "
          "flippers step through them; START draws them through each game's color "
          "correction in turn, or none. **See it on the test pictures** in Color "

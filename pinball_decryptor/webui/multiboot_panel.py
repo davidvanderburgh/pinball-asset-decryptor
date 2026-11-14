@@ -1039,7 +1039,7 @@ class WebMultibootPanel(_Base):
                  for i, r in enumerate(self._rows)]
         # THE SETTINGS CARD where the selector will draw one (PAD-307): last,
         # and counted, because a fifth card turns the row into a carousel
-        if self._settings_var.get() and self._colour_profiles():
+        if self._settings_var.get() and (self._colour_profiles() or self.test_pictures()):
             cards.append({"i": n, "title": "SETTINGS", "sub": "Color correction, test pictures",
                           "label": "", "settings": True})
         rows = n
@@ -1273,6 +1273,19 @@ class WebMultibootPanel(_Base):
             "default_max": max(0, len(self._rows) - 1),
             "sound_words": list(mt.SOUND_CHOICES),
             "used": self._used(),
+            # PAD-1279: Settings > Test pictures on the machine
+            "tests": [{"path": p, "file": os.path.basename(p), "label": label,
+                       "missing": not os.path.isfile(p)}
+                      for p, label in self.test_pictures()],
+            "tests_max": mt.TEST_MAX,
+            "tests_note": (
+                "Shown on the machine under SETTINGS > TEST PICTURES, after the "
+                "built-in test card, gray and color ramps and sharpness lines: "
+                "pictures pixel for pixel (a bigger one is fitted to the screen, a "
+                "smaller one never enlarged), videos as short menu-sized clips, "
+                "sounds through the machine's speakers. Each can be shown through "
+                "each game's color correction. Adding any puts the SETTINGS card "
+                "in the menu."),
         }
 
     def _pub_build(self, out):

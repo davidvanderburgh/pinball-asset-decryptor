@@ -2359,7 +2359,6 @@
 "Encryptor produced no output. Check dongle and manifest.": "Le chiffreur n'a produit aucune sortie. Vérifiez le dongle et le manifeste.",
 "End": "Fin",
 "End mode": "Terminer le mode",
-"End the menu with a SETTINGS card (adjust each game's color correction on the machine; shown for games built with a color profile)": "Terminer le menu par une carte PARAMÈTRES (ajuster la correction des couleurs de chaque jeu sur la machine ; affichée pour les jeux générés avec un profil de couleur)",
 "End the mode": "Terminer le mode",
 "End whichever of this project's modes is running.": "Termine celui des modes de ce projet qui est en cours.",
 "Ended": "Terminé",
@@ -12919,5 +12918,14 @@
 "The game fills in each %-code as it plays (%d a number, %s a name, %P a plural): keep every one, in the same order.": "Le jeu remplit chaque code % pendant la partie (%d un nombre, %s un nom, %P un pluriel) : gardez-les tous, dans le même ordre.",
 "Keep the game's fill-ins": "Garder les champs que le jeu remplit",
 "“{}” has to keep the %-codes of “{}”: {}.": "« {} » doit garder les codes % de « {} » : {}.",
-"“{}” has a % sign the game would read as a fill-in, and “{}” has none: leave the % out.": "« {} » contient un signe % que le jeu lirait comme un champ à remplir, et « {} » n'en a aucun : retirez le %."
+"“{}” has a % sign the game would read as a fill-in, and “{}” has none: leave the % out.": "« {} » contient un signe % que le jeu lirait comme un champ à remplir, et « {} » n'en a aucun : retirez le %.",
+"End the menu with a SETTINGS card (color correction and test pictures on the machine; shown for games built with a color profile, or with test pictures below)": "Terminer le menu par une carte RÉGLAGES (correction des couleurs et images de test sur la machine ; affichée pour les jeux créés avec un profil de couleur, ou s'il y a des images de test ci-dessous)",
+"Test pictures ({} of {}):": "Images de test ({} sur {}) :",
+"Add test pictures…": "Ajouter des images de test…",
+"its name on the machine": "son nom sur la machine",
+"Earlier": "Plus tôt",
+"Later": "Plus tard",
+"Take it off the list": "La retirer de la liste",
+"The file is not there any more.": "Le fichier n'est plus là.",
+"Shown on the machine under SETTINGS > TEST PICTURES, after the built-in test card, gray and color ramps and sharpness lines: pictures pixel for pixel (a bigger one is fitted to the screen, a smaller one never enlarged), videos as short menu-sized clips, sounds through the machine's speakers. Each can be shown through each game's color correction. Adding any puts the SETTINGS card in the menu.": "Affichées sur la machine sous RÉGLAGES > IMAGES DE TEST, après la carte de test intégrée, les dégradés de gris et de couleur et les lignes de netteté : images pixel pour pixel (une plus grande est ajustée à l'écran, une plus petite jamais agrandie), vidéos en courts clips à la taille du menu, sons par les haut-parleurs de la machine. Chacune peut être affichée avec la correction des couleurs de chaque jeu. En ajouter une met la carte RÉGLAGES dans le menu."
 }

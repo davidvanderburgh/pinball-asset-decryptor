@@ -642,6 +642,35 @@ class MultibootTab(TabService):
             panel._ed_media.set(kind)
         return True
 
+    # -- the test pictures (PAD-1279) -------------------------------------
+    @rpc
+    def test_add(self):
+        """Menu settings, Test pictures: Add files…"""
+        panel = self._live()
+        exts = " ".join("*" + e for e in mt.TEST_EXTS)
+        paths = mbp._FILEDIALOG.askopenfilenames(
+            title="Pick test pictures, videos or sounds",
+            filetypes=[("Pictures, videos and sounds", exts), ("All files", "*.*")])
+        if not paths:
+            return False
+        return self._tests_done(panel.test_add(list(paths)) > 0)
+
+    @rpc
+    def test_remove(self, k):
+        return self._tests_done(self._live().test_remove(int(k)))
+
+    @rpc
+    def test_move(self, k, d):
+        return self._tests_done(self._live().test_move(int(k), int(d)))
+
+    @rpc
+    def test_label(self, k, label):
+        return self._tests_done(self._live().test_label(int(k), str(label or "")))
+
+    def _tests_done(self, changed):
+        self._multiboot_panel._dirty("menu", "checks", "preview")
+        return bool(changed)
+
     # -- the random card's games (PAD-239) --------------------------------
     @rpc
     def member_add(self):

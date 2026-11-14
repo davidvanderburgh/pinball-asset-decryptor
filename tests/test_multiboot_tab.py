@@ -1892,6 +1892,8 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                     "show_footer": True, "footer": "",
                     # ...and PAD-307: one from before the SETTINGS card offers it
                     "settings_tile": True,
+                    # ...and PAD-1279: one from before the test pictures has none
+                    "tests": [],
                     # ...and PAD-495: one from before editions has its menu
                     "editions": False,
                     "theme": "midnight", "colors": {}}

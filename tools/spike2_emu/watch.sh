@@ -2471,6 +2471,11 @@ launch_game() {
                PAD_SOUNDLOG="${PAD_SOUNDLOG:-}" PAD_SOUNDLOG_STAGE="${PAD_SOUNDLOG_STAGE:-}" \
                bash "$RIG/run_game.sh" > "$LOG" 2>&1 &
     GAMEPG=$!
+    # PAD-1225: a game setting that switches a mech off for good (batman's
+    # TURNTABLE MOTOR DISABLED) is set back Off - the emulator's mechs cannot
+    # break, and with it On the turntable never left the TV. It says so in the
+    # game log; PAD_MECHGUARD=0 leaves the settings alone.
+    PAD_GAME="$GAME" python3 "$RIG/mechguard.py" "$GAMEPG" >> "$LOG" 2>&1 < /dev/null &
     if [ -n "${PAD_PIVOT:-}" ] && { [ -z "$GAMEOUTTAIL" ] || ! kill -0 "$GAMEOUTTAIL" 2>/dev/null; }; then
         # -F retries until the guest creates the file a few seconds into the boot.
         # Direct (not a subshell) so $! is the tail itself and teardown's kill hits
@@ -3165,6 +3170,13 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
     # stdbuf -oL because tr into a pipe is block-buffered, and a "live" event
     # feed that arrives four kilobytes at a time is not live (same reasoning
     # as the fflush after every print below).
+    # PAD-1225: [motor] is where the machine sent its mechs and when they got
+    # there (batman's turntable and crane, a jetpack, a building): a Bat Phone
+    # report with the turntable facing away had no line that said whether the
+    # game ever asked for the turn. The shim spends at most 400 a run.
+    # [mechguard] is a mech-off game setting set back Off (mechguard.py).
+    # Both are explained HERE, not inside the awk program: the tests hand that
+    # program to awk as one argument, and Windows cuts a command line near 8 KB.
     tail -q -n 0 -F "$PAD_LOGDIR/padvid.log" "$PAD_LOGDIR/padaudio.log" \
                     "$PAD_LOGDIR/padglhost.log" "$LOG" 2>/dev/null \
         | stdbuf -oL tr -d '\000' | $AWK '
@@ -3191,12 +3203,8 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # PAD-204: every Pause press says what happened to it - a pause that
         # did nothing used to leave no trace in the log the user can send
         /\[pause\]/              { print "[event] " $0; fflush(); next }
-        # PAD-1225: where the machine sent its mechs and when they got there
-        # (batman turntable and crane, a jetpack, a building). A report of a
-        # Bat Phone hurry-up with the turntable facing away came with no line
-        # that could say whether the game ever asked for the turn. The shim
-        # spends at most 400 of these lines a run.
         /\[motor\]/              { print "[event] " $0; fflush(); next }
+        /\[mechguard\]/          { print "[event] " $0; fflush(); next }
         # THE LINE THAT NAMES A BLACK WINDOW, and it is not ours: Mesa prints
         # it, into the renderer log, when the renderer is running as root and
         # cannot attach to the WSLg X server shared memory. The window opens,

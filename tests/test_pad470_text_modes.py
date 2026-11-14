@@ -335,8 +335,11 @@ def test_refresh_adds_the_modes_rows_and_keeps_typed_text(tmp_path, monkeypatch)
     assert engine.program_text_needs_refresh(str(assets), rows)
     assert engine.refresh_program_text_flags(str(assets))
     got = text_manifest.load(str(assets))
-    assert [(r["path"], r["replacement"], r.get("modes")) for r in got] == [
+    assert [(r["path"], r["replacement"], r.get("modes")) for r in got[:3]] == [
         (GAME, "MONSTER AWARD", [A, B]), (GAME + "#" + A, "", [A]), (GAME + "#" + B, "", [B])]
+    # PAD-1256: the program's lines the project never listed come after, untyped
+    assert got[3:] and all(r["path"] == GAME and not r["replacement"] for r in got[3:])
+    assert "KAIJU AWARD" not in {r["original"] for r in got[3:]}
     assert not engine.program_text_needs_refresh(str(assets), got)
     # PAD-485: the screens each mode names are kept beside the rows; a project read before
     # they were is read once more

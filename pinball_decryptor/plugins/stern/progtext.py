@@ -85,6 +85,24 @@ MIN_BARE_LEN = 4
 # tail is what the name-group pointers reference).
 _SPAN_RE = re.compile(rb"(?<=\x00)[\x20-\x7e\n]{2,%d}(?=\x00)" % (MAX_EDIT_LEN,))
 _HEX_RE = re.compile(r"^[0-9a-fA-F]{16,}$")
+# One word of a line that reads as a file path or a URL: from the root (``/games``), a
+# scheme (``http://``), relative (``./``, ``../``), a file name after a slash
+# (``sound/fx.ogg``), a web address (``www.sternpinball.com/EULA``), a folder
+# (``0-0/``), a hash folder (``293641e4.../``) or a media type
+# (``application/octet-stream``).  A slash between words or '%'-tokens (``Up/down``,
+# ``IMPOSTER BATTLE %d/%d``, ``SHOT%P1//S/%``) is wording.
+_PATH_WORD_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.-]*:)?/|^\.\.?/|/.*\.[A-Za-z0-9]{1,5}$"
+                           r"|\.(?:com|org|net)\b|^www\.|/$|^[0-9a-fA-F]{8,}/"
+                           r"|^(?:application|text|image|audio|video|multipart)/[a-z]")
+# a line of an HTTP exchange (``Content-Type: application/octet-stream``)
+_HEADER_RE = re.compile(r"^[A-Z][a-z]+(?:-[A-Z][a-z]+)+: ")
+
+
+def _has_path_word(s):
+    """True when a word of *s* reads as a path (:data:`_PATH_WORD_RE`), or *s* is an HTTP
+    header line; a word holding a '%'-token is a printf line's, never a path."""
+    return bool(_HEADER_RE.match(s)) or any(
+        "/" in w and "%" not in w and _PATH_WORD_RE.search(w) for w in s.split())
 
 
 def encode_text(s):
@@ -115,16 +133,25 @@ def is_display_string(s):
       * identifier-shaped bare tokens (snake_case / dotted / CamelCase)
       * ``SE ``-prefixed sound-event names (the firmware finds sounds by them)
       * path / hash / option-flag shapes
+
+    A slash in a line of words is wording, not a path (PAD-1256): Godzilla's
+    imposter battle screen reads ``IMPOSTER BATTLE %d/%d``, and so does
+    every plural (``%d SKILL SHOT%P1//S/%``) and counter (``SECRET COMBO
+    %d/%d``) line; 400 such lines on Godzilla 1.16 were never offered.  A
+    slash in a string with no space or line break, or in a word that reads
+    as a path (:func:`_has_path_word`), still rules it out.
     """
     if not _has_letter(s):
         return False
     if len(s.strip()) < 2:
         return False
-    if "_" in s or "/" in s or "\\" in s:
+    has_space = " " in s or "\n" in s
+    if "_" in s or "\\" in s:
+        return False
+    if "/" in s and (not has_space or _has_path_word(s)):
         return False
     if s.startswith(("SE ", "-", "--")):
         return False
-    has_space = " " in s or "\n" in s
     if not has_space:
         if len(s) < MIN_BARE_LEN:
             return False

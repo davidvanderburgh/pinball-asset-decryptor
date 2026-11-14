@@ -620,6 +620,10 @@ class TextTab(TabService):
             compat.messagebox.showwarning("Replacement too long",
                                           R.too_long_message(r, new))
             return False
+        why = R.fill_in_message(r, new)
+        if why:
+            compat.messagebox.showwarning("Keep the game's fill-ins", why)
+            return False
         eff = "" if new == orig else new
         if self._apply_all(r):
             # a scene line the game writes itself keeps its words (PAD-513)

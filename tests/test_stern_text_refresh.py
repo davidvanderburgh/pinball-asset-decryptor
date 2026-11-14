@@ -64,7 +64,8 @@ def test_refresh_rewrites_program_budgets_and_flags_from_the_card(
     assets, _card = _project(tmp_path)
     _fake_card(monkeypatch, raw)
 
-    assert engine.refresh_program_text_flags(str(assets)) == 2
+    # the two rows it holds, and (PAD-1256) the card's six lines it never listed
+    assert engine.refresh_program_text_flags(str(assets)) == 8
 
     rows = tm.load(str(assets))
     by = {(r["path"], r["original"]): r for r in rows}
@@ -83,9 +84,12 @@ def test_refresh_rewrites_program_budgets_and_flags_from_the_card(
     assert gone["budget"] == 16 and "grow" not in gone and "fixed" not in gone
     tilt = by[(SCENE, "TILT")]
     assert tilt["replacement"] == "TOLT" and "budget" not in tilt
-    # row order is the manifest's, not the ELF's
-    assert [r["original"] for r in rows] == [
+    # row order is the manifest's, not the ELF's; the lines it lacked come after
+    assert [r["original"] for r in rows[:4]] == [
         "TILT", "GODZILLA VS EBIRAH", "JACKPOT AWARD!", "NOT ON THIS CARD"]
+    added = rows[4:]
+    assert len(added) == 6 and all(r["path"] == GAME and not r["replacement"] for r in added)
+    assert len({r["original"] for r in rows}) == len(rows)
 
 
 def test_refresh_is_a_no_op_when_the_card_is_gone(tmp_path, monkeypatch):

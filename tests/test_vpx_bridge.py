@@ -7208,3 +7208,25 @@ def test_the_log_says_what_the_table_read_of_the_machine_switches(monkeypatch):
     reads = [ln for ln in logged if ln.startswith("table reads")]
     assert reads == ["table reads switch 77 = 1", "table reads switch 78 = 0",
                      "table reads switch 77 = 0", "table reads switch 78 = 1"]
+
+
+def test_tmnt_copy_patched_before_a_fix_is_asked_to_patch_again(tmp_path):
+    # PAD-1276: Mike played a TMNT table patched by v1.429.8, before PAD-1268's
+    # LAIR post (v1.430.5); the tab still called it Patched, so the shot kept
+    # rolling past. Each TMNT fix is marked by a line only its patcher writes:
+    # a script lacking one is asked to patch again, today's script is not.
+    vsu = pytest.importorskip("vpxsetup")
+    src = "Sub t25_Hit:vpmTimer.PulseSw(25):End Sub\n"
+    for title in ("turtles_pro", "turtles_le"):
+        out, m = _tmnt_patch(title, src)
+        marks = m["repatch"]
+        assert {k["since"].split(":")[0] for k in marks} == {"PAD-1268", "PAD-1116", "PAD-897"}
+        name = "T (PAD).vpx"
+        (tmp_path / "T (PAD).script.vbs").write_text(out, encoding="utf-8")
+        missing = [k["absent"] for k in marks if k["absent"] not in out]
+        assert missing == [], (title, missing)
+        assert vsu.missed_fixes(str(tmp_path), name, marks) == []
+        for k in marks:
+            lines = [ln for ln in out.split("\n") if k["absent"] not in ln]
+            (tmp_path / "T (PAD).script.vbs").write_text("\n".join(lines), encoding="utf-8")
+            assert vsu.missed_fixes(str(tmp_path), name, marks) == [k["why"]], (title, k["since"])

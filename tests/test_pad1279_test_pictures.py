@@ -319,3 +319,49 @@ def test_the_panel_list_adds_moves_renames_and_removes(tmp_path):
     assert panel.test_label(1, "Beach at dusk") and panel.test_pictures()[1] == (a, "Beach at dusk")
     assert panel.test_remove(0) and panel.test_pictures() == [(a, "Beach at dusk")]
     assert not panel.test_remove(5)
+
+
+# ---- the test card (mkmulticard.py testcard) -----------------------------------------------------
+
+def test_a_test_card_conf_reads_back_as_one(mk):
+    conf = mk.render_images_conf([mk.TESTCARD_DEVICE], [mk.TESTCARD_TITLE], [mk.TESTCARD_SUBTITLE],
+                                 0, 0, colours={0: dict(mk.TESTCARD_NO_CHANGE)},
+                                 tests=[("test0.png", "Card")], testcard=True)
+    assert "testcard=on" in conf.splitlines()
+    parsed = mk.parse_images_conf(conf)
+    assert parsed["testcard"] is True
+    assert mk.render_images_conf_text(parsed) == conf
+    assert "testcard" not in mk.render_images_conf(["/dev/mmcblk0p3"], ["A"])
+
+
+def test_the_test_card_colour_is_the_conf_fields_or_no_change(mk):
+    assert mk.parse_testcard_colour("") == mk.TESTCARD_NO_CHANGE
+    c = mk.parse_testcard_colour("1.1 1.2 1.35|1 1 1|0 0 0|0.9|Recommended")
+    assert c == {"name": "Recommended", "gamma": [1.1, 1.2, 1.35], "gain": [1.0, 1.0, 1.0],
+                 "lift": [0.0, 0.0, 0.0], "saturation": 0.9}
+    for bad in ("1 1|1 1 1|0 0 0|1", "a b c|1 1 1|0 0 0|1", "1 1 1|1 1 1"):
+        with pytest.raises(mk.Refused):
+            mk.parse_testcard_colour(bad)
+
+
+def test_the_test_card_keeps_boot_and_rootfs_where_they_are_and_the_rest_small(mk):
+    class G(object):
+        def part(self, n):
+            return {1: (0x0C, 8192, 16384), 2: (0x83, 24576, 688128)}[n]
+
+    prims, ext, ext_count, logs, total = mk.testcard_layout(G())
+    assert prims[:2] == [(0x0C, 8192, 16384), (0x83, 24576, 688128)]
+    assert prims[2] == (0x83, 712704, mk.TESTCARD_P3_MIB * 2048)       # where a stock p3 starts
+    (e5, s5, c5), (e6, s6, c6) = logs
+    assert e5 == ext and s5 == e5 + mk.ALIGN and e6 >= s5 + c5 and s6 == e6 + mk.ALIGN
+    assert ext + ext_count == s6 + c6 and total == (s6 + c6) * 512
+    assert total < 1 << 30                                              # under a gigabyte
+
+
+def test_a_card_that_is_not_spike_2_is_refused(mk):
+    class G(object):
+        def part(self, n):
+            return (0x0C, 8192, 16384) if n == 1 else (0x07, 24576, 688128)
+
+    with pytest.raises(mk.Refused, match="not a Spike 2 card"):
+        mk.testcard_layout(G())

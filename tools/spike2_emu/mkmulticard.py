@@ -1929,7 +1929,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
                        groups=None, default_card=None, heading=None, text_size=None,
                        counter=None, countdown_word=None, footer=None, scores=None,
-                       colours=None, settings=None, edition=None, hiscores=None, tests=None):
+                       colours=None, settings=None, edition=None, hiscores=None, tests=None,
+                       testcard=False):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -2088,6 +2089,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     if settings is not None:
         out.append("settings=%s" % check_settings(settings))
     out.extend(conf_test_lines(tests))
+    if testcard:
+        out.append("testcard=on")
     # PAD-495: an editions card - one line, none at all on any other card
     edition = check_edition(edition, len(devices))
     if edition:
@@ -2163,7 +2166,7 @@ def parse_images_conf(text):
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}, "hiscores": {},
-            "colours": {}, "settings": None, "edition": None, "tests": []}
+            "colours": {}, "settings": None, "edition": None, "tests": [], "testcard": False}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -2264,6 +2267,8 @@ def parse_images_conf(text):
                 conf["edition"] = check_edition({"store": store, "key": hexkey, "values": n})
             except (ValueError, Refused):
                 pass
+        elif key == "testcard":
+            conf["testcard"] = val.strip().lower() == "on"
         elif key == "test":
             name, _sep, label = val.partition("|")
             if name.strip() and MEDIA_NAME_RE.match(name.strip()):
@@ -3518,6 +3523,128 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
          "kept" if all(after.get(k) == times.get(k) for k in ("atime", "ctime", "mtime") if k in times) else "changed",
          free >> 10))
     return [card for (_s, card, _m) in items]
+
+
+# ============================================================================= the test card
+#: A TEST CARD (PAD-1279): the boot menu's Settings screens and nothing else, on a card small
+#: enough to write in a minute.  p1 (boot) and p2 (the rootfs, with the selector injected) are
+#: copied from ANY Spike 2 card - the kernel and rootfs are the platform's, not the title's - and
+#: p3 (/games), p5 (/data) and p6 (/dump) are fresh, small and empty: fstab mounts all three by
+#: device, nothing at boot formats or needs them, and the only scripts that read /games (the
+#: game launcher and the updater, /etc/init.d/game's last section) run after the menu, which on a
+#: test card never hands over.  One pseudo-image, TEST CARD, carries the colour profile its
+#: Color correction starts from, so a profile can be tuned on the machine itself.
+TESTCARD_P3_MIB = 64
+TESTCARD_DATA_MIB = 128
+TESTCARD_DUMP_MIB = 128
+TESTCARD_TITLE = "TEST CARD"
+TESTCARD_SUBTITLE = "color profile and test pictures"
+TESTCARD_DEVICE = "/dev/mmcblk0p3"
+#: what Color correction starts from when no profile is given: the screen's own colours
+TESTCARD_NO_CHANGE = {"name": "No change", "gamma": [1.0, 1.0, 1.0], "gain": [1.0, 1.0, 1.0],
+                      "lift": [0.0, 0.0, 0.0], "saturation": 1.0}
+
+
+def parse_testcard_colour(spec):
+    """'GAMMA r g b|GAIN r g b|LIFT r g b|SATURATION[|NAME]' (the conf's own field order) ->
+    the colours dict conf_colour_line takes; '' / None = No change."""
+    if not spec:
+        return dict(TESTCARD_NO_CHANGE)
+    f = [x.strip() for x in str(spec).split("|")]
+    if len(f) < 4:
+        raise Refused("--color %r: expected 'gamma r g b|gain r g b|lift r g b|saturation[|name]'" % spec)
+    try:
+        trio = [[float(v) for v in f[k].split()] for k in range(3)]
+        sat = float(f[3])
+    except ValueError:
+        raise Refused("--color %r: the numbers do not read" % spec)
+    if any(len(t) != 3 for t in trio):
+        raise Refused("--color %r: three numbers each for gamma, gain and lift" % spec)
+    return {"name": f[4] if len(f) > 4 and f[4] else "Your own", "gamma": trio[0], "gain": trio[1],
+            "lift": trio[2], "saturation": sat}
+
+
+def testcard_layout(geom):
+    """-> (prims [(type, start, count)] x3, ext_base, ext_count, logs [(ebr, start, count)] x2,
+    total bytes) for a test card made from `geom`'s p1 and p2."""
+    t1, s1, c1 = geom.part(1)
+    t2, s2, c2 = geom.part(2)
+    if t2 != 0x83:
+        raise Refused("p2 is type 0x%02x, not Linux: not a Spike 2 card" % t2)
+    mib = (1 << 20) // SECTOR
+    p3s = align_up(s2 + c2)
+    p3c = TESTCARD_P3_MIB * mib
+    ext = align_up(p3s + p3c)
+    logs = []
+    ebr = ext
+    for size in (TESTCARD_DATA_MIB, TESTCARD_DUMP_MIB):
+        start = ebr + ALIGN
+        logs.append((ebr, start, size * mib))
+        ebr = align_up(start + size * mib)
+    end = logs[-1][1] + logs[-1][2]
+    prims = [(t1, s1, c1), (t2, s2, c2), (0x83, p3s, p3c)]
+    return prims, ext, end - ext, logs, end * SECTOR
+
+
+def build_testcard(primary, out, selector_dir, media_dir=None, colour=None, workdir=None):
+    """Write the TEST CARD `out` from `primary`'s boot and rootfs, inject the selector with
+    testcard=on, the media set's test pictures and `colour` (parse_testcard_colour's dict).
+    -> the conf text written."""
+    need_tools("mke2fs", "debugfs", "e2fsck")
+    geom = Geometry.from_file(primary)
+    prims, ext, ext_count, logs, total = testcard_layout(geom)
+    media = plan_media(media_dir, 1) if media_dir else None
+    tmp = tempfile.mkdtemp(prefix="mkmulticard.testcard.", dir=workdir)
+    try:
+        say("test card: boot + rootfs from %s, %s in all" % (os.path.basename(primary), _gb(total)))
+        if os.path.exists(out):
+            os.remove(out)
+        with open(out, "wb") as f:
+            f.truncate(total)
+        # the first sectors (u-boot sits in front of p1), p1 and p2, as they are
+        p2_end = (prims[1][1] + prims[1][2]) * SECTOR
+        copy_range(primary, 0, out, 0, p2_end, "boot + rootfs", sparse=True)
+        for what, (start, count) in (("games", prims[2][1:]), ("data", logs[0][1:]), ("dump", logs[1][1:])):
+            # an empty tree each: mke2fs_games_tree removes the one it was given
+            empty = os.path.join(tmp, "empty_" + what)
+            os.mkdir(empty)
+            os.chmod(empty, 0o755)
+            img = os.path.join(tmp, what + ".img")
+            mke2fs_games_tree(empty, img, count, {}, what, label=what)
+            copy_range(img, 0, out, start * SECTOR, count * SECTOR, what, sparse=True, progress=None)
+            os.remove(img)
+        # the tables: p1 p2 p3 and the extended p4 holding p5 and p6
+        with open(out, "r+b") as f:
+            mbr = bytearray(geom.mbr)
+            mbr[0x1BE:0x1FE] = b"".join(entry(t, st, n) for t, st, n in prims) + entry(0x0F, ext, ext_count)
+            mbr[510:512] = b"\x55\xaa"
+            f.seek(0)
+            f.write(bytes(mbr))
+            for i, (ebr, start, count) in enumerate(logs):
+                eb = bytearray(SECTOR)
+                eb[0x1BE:0x1CE] = entry(0x83, start - ebr, count, chs_base=ebr)
+                if i + 1 < len(logs):
+                    nebr, nstart, ncount = logs[i + 1]
+                    eb[0x1CE:0x1DE] = entry(0x05, nebr - ext, nstart + ncount - nebr, chs_base=ext)
+                eb[510:512] = b"\x55\xaa"
+                f.seek(ebr * SECTOR)
+                f.write(bytes(eb))
+        conf = render_images_conf(
+            [TESTCARD_DEVICE], [TESTCARD_TITLE], [TESTCARD_SUBTITLE], 0, 0, SELECT_DIR + "/font.ttf",
+            media["rows"] if media else None, media["sound_move"] if media else None,
+            media["sound_confirm"] if media else None, media["volume"] if media else None,
+            colours={0: colour or dict(TESTCARD_NO_CHANGE)},
+            tests=media["tests"] if media else None, testcard=True)
+        manifests = None
+        if media_dir:
+            with open(os.path.join(media_dir, MEDIA_MANIFEST), "rb") as f:
+                manifests = collections.OrderedDict([(MEDIA_MANIFEST, f.read())])
+        inject_card(out, selector_dir, conf, workdir=tmp, media_files=media["files"] if media else None,
+                    manifests=manifests)
+        say("test card: %s (%s; write it like any card image)" % (out, _gb(total)))
+        return conf
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def inject_card(card, selector_dir, conf_text, workdir=None, media_files=None, replace_media=False,
@@ -6031,7 +6158,7 @@ def render_images_conf_text(conf):
         counter=conf.get("counter"), countdown_word=conf.get("countdown_word"),
         footer=conf.get("footer"), scores=conf.get("scores"),
         colours=conf.get("colours"), settings=conf.get("settings"), hiscores=conf.get("hiscores"),
-        tests=conf.get("tests"))
+        tests=conf.get("tests"), testcard=bool(conf.get("testcard")))
 
 
 # ============================================================================= reading a card back
@@ -9686,6 +9813,17 @@ def main(argv=None):
     s.add_argument("--dd", action="store_true", help="copy the ranges with dd bs=16M conv=sparse instead of python")
     s.add_argument("--force", action="store_true", help="overwrite an existing --out")
     s.add_argument("--workdir", help="scratch directory for the p2 extract and the multi layout's tree + p7 image (default: beside --out)")
+    s = sub.add_parser("testcard", help="PAD-1279: a small TEST CARD - the menu's Settings screens "
+                                        "(Color correction, Test pictures) and no game, made from any "
+                                        "Spike 2 card's boot and rootfs")
+    s.add_argument("--primary", required=True, help="any stock Spike 2 card image (.raw)")
+    s.add_argument("--out", required=True)
+    s.add_argument("--selector-dir", required=True, help="as for build: the built selector to inject")
+    s.add_argument("--media-dir", help="selectmedia.py prepare's output: its test pictures go on the card")
+    s.add_argument("--color", default="", help="the profile Color correction starts from, "
+                                               "'gamma r g b|gain r g b|lift r g b|saturation[|name]' "
+                                               "(default: No change)")
+    s.add_argument("--workdir")
     s = sub.add_parser("inject", help="redo only the p2 injection on an existing multi card (idempotent)")
     s.add_argument("--card", required=True, help="the multi card to modify IN PLACE")
     _add_conf_flags(s)
@@ -9895,6 +10033,10 @@ def main(argv=None):
                 (", %s allocated" % _gb(alloc)) if alloc is not None else "", time.monotonic() - t0))
             if conf:
                 print(conf.rstrip())
+        elif a.cmd == "testcard":
+            build_testcard(a.primary, a.out, a.selector_dir, a.media_dir,
+                           parse_testcard_colour(a.color), a.workdir)
+            return 0
         elif a.cmd == "inject":
             check_output_path(a.card, [a.conf, a.selector_dir, a.media_dir, a.primary] + list(a.extra), must_exist=True)
             check_card_writable(a.card)

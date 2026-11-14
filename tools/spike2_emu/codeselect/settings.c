@@ -481,12 +481,14 @@ static void draw_list(struct state *st)
              (int)(96 * s), 0, TH(e, HEADING));
     for (k = 0; k < n; k++) {
         int on = k == st->list_sel, y = y0 + k * (rh + (int)(30 * s)), i = it[k];
+        const char *sub = i == L_COLOR && e->testcard
+                          ? "Tune the screen's colors; the numbers go in the Color profile tab" : SUBS[i];
         gfx_round_frame(e->g, x, y, rw, rh, (int)(22 * s), (int)((on ? 8 : 3) * s),
                         on ? TH(e, FRAME_HL) : TH(e, FRAME), on ? TH(e, CARD_HL) : TH(e, CARD));
-        if (*SUBS[i]) {
+        if (*sub) {
             text_fit(e, TITLES[i], 40 * s, 24 * s, rw - (int)(60 * s), W / 2, y + (int)(52 * s), 0,
                      on ? TH(e, TITLE_HL) : TH(e, TITLE));
-            text_fit(e, SUBS[i], 24 * s, 18 * s, rw - (int)(60 * s), W / 2, y + (int)(88 * s), 0,
+            text_fit(e, sub, 24 * s, 18 * s, rw - (int)(60 * s), W / 2, y + (int)(88 * s), 0,
                      on ? TH(e, SUBTITLE_HL) : TH(e, SUBTITLE));
         } else {
             text_fit(e, TITLES[i], 40 * s, 24 * s, rw - (int)(60 * s), W / 2, y + (int)(70 * s), 0,
@@ -599,7 +601,7 @@ static void draw_colour(struct state *st)
         colour_lut_build(&lut, v);
         colour_lut_apply(&lut, e->g->px + ((size_t)cy * (size_t)e->g->w + (size_t)cx) * 4, cw, ch,
                          e->g->w * 4);
-        text_fit(e, "Test card, as this game will draw it", 22 * s, 16 * s, cw, cx + cw / 2,
+        text_fit(e, e->testcard ? "Test card, through these numbers" : "Test card, as this game will draw it", 22 * s, 16 * s, cw, cx + cw / 2,
                  cy + ch + (int)(34 * s), 0, TH(e, FOOTER));
         if (st->status[0])
             snprintf(buf, sizeof buf, "%s", st->status);
@@ -692,7 +694,8 @@ static void draw_test(struct state *st)
                  0xF0C040);
         if (test_is_back(st, k)) keys = "LEFT / RIGHT FLIPPER: previous / next      START: back";
         else if (kind == TF_SOUND) keys = "LEFT / RIGHT FLIPPER: previous / next      START: play again";
-        else if (c->ncolour > 0) keys = "LEFT / RIGHT FLIPPER: previous / next      START: another game's colors";
+        else if (c->ncolour > 1) keys = "LEFT / RIGHT FLIPPER: previous / next      START: another game's colors";
+        else if (c->ncolour > 0) keys = "LEFT / RIGHT FLIPPER: previous / next      START: corrected / not";
         else keys = "LEFT / RIGHT FLIPPER: previous / next";
         snprintf(buf, sizeof buf, "%s%s%s", hint, *hint ? "      " : "", keys);
         text_fit(e, buf, 20 * s, 12 * s, W - (int)(60 * s), W / 2, y + (int)(78 * s), 0, 0xB8BCC4);

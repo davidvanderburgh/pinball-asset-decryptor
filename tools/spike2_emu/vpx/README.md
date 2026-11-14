@@ -838,7 +838,38 @@ person's own ROM set already, so nothing for this kit to do, and they are
 not in the catalogue (David, 2026-11-02: no reinventing the wheel; Spike 1,
 Spike 2 and the other modern machines are the point).
 
-**The rest** (JJP, American, Spooky, Dutch, Barrels of Fun, Pinball
+**Barrels of Fun** (`"platform": "bof"`, PAD-1305): Dune, Winchester
+Mystery House and Labyrinth on tools/bof_emu. The boards (bofhw.py) always
+load PAD's plugin `bofvpx.py`, which keeps `vpxhw.state` / `vpxsw.input` in
+the run's hw folder (the board record's `root`, `bof-<slot>.run`) in the
+Spooky layout plus a rule plane, and stands PAD's ball model aside while
+`vpxball.off` is there. Numbering for a map: switch n is `1000 + n + 1`
+(id 0 means none to the controller, and switch 0 is the coin slot), driver d
+is `[d // 64, d % 64]`, an LED is slot `place * 128 + index` written
+`[s // 64, s % 64]` with `"rgb": true` (place = its board's in the profile's
+`led_boards`; the profile's `leds` names every one). The flippers, slings
+and pops are rules the game arms on the Neuron (DL: modes 56 / 5d / 10,
+armed by `TL:<d>,0`, disarmed by `TL:<d>,02`): the controller fires the
+coil from the table's own button edge while the plane says it is armed, and
+not in attract or after a tilt. A run is started like a Spooky one
+(`padlaunch.BofLaunch`: watch.sh with the title's `.fun` from the library's
+`BoF` folder, slots 7-4, the app's own title keys). No table is mapped yet:
+the catalogue's BoF tables are tributes, not the machine's layout.
+
+For a link of your own, two supported ways in, neither touching PAD's files:
+the line stream bofvpx.py serves on `127.0.0.1:7470 + slot` (WSL hands it to
+Windows; `BOF_VPX_PORT` sets the port, 0 turns it off) - `P` pulse, `H`
+hold, `A` rule armed / disarmed, `R` BICS magnet rule, `L` LED by name, `M`
+magnet, `F` flasher, `W` stepper, `V` servo out; `S` switch and `B 0` (the
+table owns the balls) in; the full grammar is bofvpx.py's doc - or a plugin
+of your own next to the boards: a .py with `attach(emu)` dropped into
+`/var/tmp/pad_bof/plugins/` (or named by `BOFHW_PLUGINS`), which sees every
+DL:/TL: line, LED frame and BICS command and sets switches (bofhw.py's doc
+lists the calls). Proven on a Dune run: the stream from Windows, the game's
+flipper rules armed at Start, and a table flipper press fired at once
+through the bridge while the game saw its button.
+
+**The rest** (JJP, American, Dutch, Pinball
 Brothers, Turner, Multimorphic, Chicago Gaming's own titles): no VPinMAME
 core and no rig behind a table yet; `catalog.json` says what tables exist
 (few are the machine's layout) and `platforms[].bridge` is `none`.

@@ -145,6 +145,8 @@ class SpookyRig(s1bridge.Spike1Rig):
 class SpookyPipe(s1bridge.Spike1Pipe):
     """Switches IN: vpxsw.input, rewritten whole on every change."""
 
+    SERVICE = frozenset()               # every switch is the board's own
+
     def pause(self):
         if not self._pause_said:
             self._pause_said = True

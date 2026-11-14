@@ -73,8 +73,20 @@ chown -R "$BOF_USER": "$BOF_RIG" "$HOMEDIR"
 # and stdin is closed.  runuser passes the launching session's hang-up on to
 # its child, so a game started as `runuser ... setsid game &` quit the moment
 # the wsl.exe that ran this returned - i.e. right after watch.sh said Ready.
-setsid -f runuser -u "$BOF_USER" -- python3 "$BOF_TOOLS/bofhw.py" \
-    --dir "$BOF_RIG/hw" --profile "$PROFILE" --build "$(dirname "$BIN")" \
+#
+# Plugins (PAD-1305, bofhw.py's doc): PAD's own Visual Pinball bridge
+# (bofvpx.py: the kit's PAD.Controller and a line stream for other links),
+# then each of BOFHW_PLUGINS (':'-separated) and every *.py in
+# $BOF_ROOT/plugins - a folder no PAD update touches, so a link of your own
+# keeps working however the run is started.
+PLUGINS=(--plugin "$BOF_TOOLS/bofvpx.py")
+IFS=: read -ra EXTRA <<< "${BOFHW_PLUGINS:-}"
+for p in "${EXTRA[@]}" "$BOF_ROOT"/plugins/*.py; do
+    [ -f "$p" ] && PLUGINS+=(--plugin "$p")
+done
+setsid -f runuser -u "$BOF_USER" -- env BOF_SLOT="$BOF_SLOT" BOF_VPX_PORT="${BOF_VPX_PORT:-}" \
+    python3 "$BOF_TOOLS/bofhw.py" \
+    --dir "$BOF_RIG/hw" --profile "$PROFILE" --build "$(dirname "$BIN")" "${PLUGINS[@]}" \
     < /dev/null > "$BOF_RIG/hw/daemon.out" 2>&1
 for _ in $(seq 1 50); do [ -S "$BOF_RIG/hw/ctl.sock" ] && break; sleep 0.1; done
 [ -S "$BOF_RIG/hw/ctl.sock" ] || { echo "run_game.sh: board emulator did not start:" >&2; cat "$BOF_RIG/hw/daemon.out" >&2; exit 3; }
@@ -135,7 +147,7 @@ for _ in $(seq 1 50); do
 done
 [ -n "${GP:-}" ] || { echo "run_game.sh: the game did not start:" >&2; tail -20 "$BOF_RIG/game.log" >&2; exit 4; }
 echo "$GP" > "$BOF_RIG/game.pid"
-rigboard_post bof "$BOF_SLOT" "$GP" "$TITLE" "${PAD_TITLE:-}" "$VISIBLE" "$AUDIO"
+RIGBOARD_ROOT=$BOF_RIG/hw rigboard_post bof "$BOF_SLOT" "$GP" "$TITLE" "${PAD_TITLE:-}" "$VISIBLE" "$AUDIO"
 # The playfield window's keys in the game's own window too (PAD-313): on the
 # desktop (PAD_GAMEKEYS=1 forces it on a hidden run, for tests).  The game's
 # environment carries BOFEMU_LOG_DIR=<this rig>, its mark.  It ends with the

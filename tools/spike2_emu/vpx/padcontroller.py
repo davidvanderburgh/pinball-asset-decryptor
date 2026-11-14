@@ -87,7 +87,8 @@ import bootprog   # noqa: E402  how far a Spike 2 boot is, off the run's own log
 import padlaunch  # noqa: E402  starts a run for a table when none is up
 import s1bridge   # noqa: E402  the Spike 1 rig's files, for a Spike 1 title (PAD-943)
 import spkbridge  # noqa: E402  the Spooky rig's files, for a Spooky title (PAD-952)
-SLOT_BRIDGES = {"spike1": s1bridge, "spooky": spkbridge}
+import bofbridge  # noqa: E402  the Barrels of Fun rig's files (PAD-1305)
+SLOT_BRIDGES = {"spike1": s1bridge, "spooky": spkbridge, "bof": bofbridge}
 
 try:
     import pythoncom
@@ -535,8 +536,8 @@ class VpxMap:
                 leds = [tuple(x) for x in v["leds"]]
                 self.lamp_groups[lamp_number(*leds[0])] = leds
                 # an insert's R, G and B LEDs; or ONE LED that is all three
-                # (a Spooky board's, PAD-952: its colour is in the slot)
-                if v.get("rgb") and (len(leds) == 3 or (len(leds) == 1 and self.platform == "spooky")):
+                # (a Spooky or BoF board's, PAD-952 / PAD-1305: its colour is in the slot)
+                if v.get("rgb") and (len(leds) == 3 or (len(leds) == 1 and self.platform in ("spooky", "bof"))):
                     self.rgb_groups.add(lamp_number(*leds[0]))
                     if isinstance(v["rgb"], str):
                         self.rgb_order[lamp_number(*leds[0])] = v["rgb"]
@@ -1932,8 +1933,10 @@ class Bridge:
             # PAD-943: no rule plane on this rig; a held flipper button is a
             # held flipper coil, and the map's game_on is always armed (the
             # Spooky board publishes its flipper coils itself: no ids needed)
-            log("switch table: %d ids (%s: button coils assumed live)"
-                % (len(self.sw_ids), padlaunch.PLATFORM_NAMES.get(self.map.platform, self.map.platform)))
+            log("switch table: %d ids (%s: %s)"
+                % (len(self.sw_ids), padlaunch.PLATFORM_NAMES.get(self.map.platform, self.map.platform),
+                   "the board's armed rules fire its coils" if hasattr(self.rigmod, "rules")
+                   else "button coils assumed live"))
             ver = 0
         else:
             ver = struct.unpack_from("<I", data, 4)[0]
@@ -2655,6 +2658,10 @@ class Bridge:
             self.poll_fail += 1
             return
         switches, lamps, coils, _ = parts
+        # PAD-1305: a bridge with a rule plane (BoF) says which coils the
+        # board fires itself and on which switch; without one, a held
+        # flipper button is a held flipper coil
+        plane = rm.rules(data) if hasattr(rm, "rules") else None
         self.polls += 1
         if not self.sw_ids and self.polls % 250 == 0:      # ~ every 2 s until the walk wrote it
             self._read_tables(data)
@@ -2687,6 +2694,16 @@ class Bridge:
                 for idx in range(rm.MAX_INDEX):
                     key = (node, idx)
                     on = 1 if coils[rm.slot(node, idx)] else 0
+                    if plane is not None:
+                        sid = plane.get(rm.slot(node, idx))
+                        if sid:
+                            # armed: the coil follows its switch from the
+                            # table's own edge (set_switch), let go with it
+                            rule_coils.setdefault(sid, []).append((key, True))
+                            if self.pipe.held.get(sid) if self.pipe else 0:
+                                on = 1
+                        self._coil_set(key, on)
+                        continue
                     # a flipper button held in this bridge is a held coil
                     # (no rule plane here: the board's reflex is assumed live)
                     bit = self._button_coils.get(key)
@@ -2701,7 +2718,12 @@ class Bridge:
                     self._coil_set(key, on)
             self._rule_coils = rule_coils
             if self.map.game_on:
-                self._sol_set(self.map.game_on[0], 1)
+                num, gcoils = self.map.game_on
+                if plane is None:
+                    self._sol_set(num, 1)
+                else:
+                    self._sol_set(num, 1 if any(rm.slot(nd, ix) in plane
+                                                for nd, ix in gcoils) else 0)
             self._fakes_tick(now)
             if self.dof and self.dof.up:
                 self._poll_dof_s1(lamps, rm)

@@ -314,14 +314,16 @@ def run(title, hidden=False, mute=False):
                          creationflags=_CREATE_NO_WINDOW)
         print("started %s on the Spike 1 rig from %s (log %s)" % (title, card, launch.logfile))
         return 0
-    if platform == "spooky":
+    if platform in ("spooky", "bof"):
         # PAD-952: tools/spooky_emu's watch.sh with the title's update file,
-        # on a Spooky rig slot of the kit's
-        launch = padlaunch.SpookyLaunch(title, card)
+        # on a Spooky rig slot of the kit's; PAD-1305: tools/bof_emu's with
+        # the title's .fun, the same way
+        launch = padlaunch.launch_for(platform, title, card)
+        name = padlaunch.PLATFORM_NAMES[platform]
         other = launch.other_run()
         if other:
-            print("%s is running on the Spooky rig's slot %s (%s); stop it first"
-                  % (title, other.get("slot"), other.get("label") or "the app"))
+            print("%s is running on the %s rig's slot %s (%s); stop it first"
+                  % (title, name, other.get("slot"), other.get("label") or "the app"))
             return 1
         slot = launch.take_slot()
         env, card_wsl = launch.env()
@@ -333,7 +335,7 @@ def run(title, hidden=False, mute=False):
         out = open(launch.logfile, "ab")
         subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
                          creationflags=_CREATE_NO_WINDOW)
-        print("started %s on the Spooky rig's slot %d from %s (log %s)" % (title, slot, card, launch.logfile))
+        print("started %s on the %s rig's slot %d from %s (log %s)" % (title, name, slot, card, launch.logfile))
         return 0
     launch = padlaunch.Launch(title, card)
     slot = launch.take_slot()
@@ -370,20 +372,23 @@ def stop(title):
         launch.stop()
         print("stopped %s on the Spike 1 rig" % title)
         return 0
-    if platform == "spooky":
-        import spkbridge
-        rec = spkbridge.board_record(title)
+    if platform in ("spooky", "bof"):
+        import importlib
+        bridge = importlib.import_module("spkbridge" if platform == "spooky" else "bofbridge")
+        name = padlaunch.PLATFORM_NAMES[platform]
+        rec = bridge.board_record(title)
         if not rec:
-            print("no Spooky run of %s on the board" % title)
+            print("no %s run of %s on the board" % (name, title))
             return 1
         if rec.get("label") != padlaunch.LABEL:
-            print("the Spooky run of %s is %s's, not the kit's; leaving it"
-                  % (title, rec.get("label") or "somebody"))
+            print("the %s run of %s is %s's, not the kit's; leaving it"
+                  % (name, title, rec.get("label") or "somebody"))
             return 1
-        launch = padlaunch.SpookyLaunch(title, "", dist=rec.get("distro"))
+        cls = padlaunch.SpookyLaunch if platform == "spooky" else padlaunch.BofLaunch
+        launch = cls(title, "", dist=rec.get("distro"))
         launch.slot = int(rec.get("slot") or 0)
         launch.stop()
-        print("stopped %s on the Spooky rig's slot %d" % (title, launch.slot))
+        print("stopped %s on the %s rig's slot %d" % (title, name, launch.slot))
         return 0
     rec = Rig.board_run(title)
     if not rec:

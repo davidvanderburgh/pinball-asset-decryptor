@@ -14,8 +14,11 @@
     "tm2 is the time machine: the shot the game starts modes and multiballs on is LIFT RAMP OPTO (82), where its TimeMachineMagnet grabs the ball (PAD-420). It counts on the way up only, as the tribute did; LL3 (the VUK lane, its own VUK switch is Kicker3) no longer stands in for it (PAD-907).",
     "Kicker1 is the side scoop: the ball passes SIDE SCOOP OPTO (78, `enter`) and rests on LOWER SIDE SCOOP (85), where the game fires SIDE SCOOP. Held on 78 the game only held its trough lock and waited, the ball sat until a ball search and the switch read stuck (PAD-910).",
     "The right side has two return lanes: TRightInlane (x 692, lighting I96) is the inner one, RIGHT RETURN LANE-INNER (63); TRightInlane2 (x 761, lighting I97) the outer, RIGHT RETURN LANE (61). They were the other way round and each lit the other's insert (PAD-921).",
-    "The time machine's MAGNET (coil 9): the tribute has no magnet, so its ball ran up Ramp011 over tm2, met tm1 and rolled straight back down while the game held MAGNET ~4.1 s for it (emulator: on at LIFT RAMP OPTO, off, one 60 ms pulse 0.16 s later). PadTMMagnet is a trigger added on Ramp011's top (retrofit_triggers, `surface`), made a cvpmMagnet in extra_vbs that the coil turns on and off: the ball is held there while it is on and rolls back down the ramp when it lets go (PAD-925).",
-    "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847)."
+    "The time machine's MAGNET (coil 9): the tribute has no magnet. With the lift ramp up (the game's own 'shoot into the center of the time machine', node 10 stepper 1 at 94 of 4) the game turns MAGNET on as the ball passes LIFT RAMP OPTO, holds it 4-8 s for a multiball start, lets go and pulses it 20 ms 0.17 s later; with the ramp down it never fires (emulator, PAD-1240). PadTMMagnet, a trigger added on Ramp011's top (retrofit_triggers, `surface`), finds the ball; extra_vbs pulls it in past the ramp's end into the time machine and holds it there (PAD-1240; PAD-925 held it on the ramp, halfway up as a player sees it), and once let go carries it back out to where it was caught to roll back down the ramp (PAD-1250: PAD-1240's out-the-back onto the left wire return looked like the machine spat the ball onto a ramp). The ball to hold is looked up among the live balls by where it is each time: a kept reference to a drained ball stopped the table with a runtime error at the next magnet (PAD-1250).",
+    "TROUGH LOCK (coil 10, node 9 coil 0) is the side scoop's gate: a pulse, then a hold at 0x40 for 5 s. The game either opens it and kicks SIDE SCOOP, or opens it and waits for the ball to roll out past SIDE SCOOP OPTO (78) by itself, a rule that holds the gate until 78 closes. The tribute has no gate, so that ball sat on LOWER SIDE SCOOP; the shim also took the gate's rule for a motor and closed 78 by itself, and the game said SIDE SCOOP DEVICE MALFUNCTION. PadSideScoopGate lets a resting ball out and pulses 78 (emulator, rush_le 1.19: the game cleared its rule 0.6 s later and served no new ball, so the ball is in play) (PAD-1239).",
+    "b2s_name: the script's cGameName is \"rushle\", but the DOF Config Tool lists the table as rush_le, and B2S.Server hands DOF that name (PAD-847).",
+    "The instrument bank (sw13 drumsticks, sw12 guitar, sw11 bass: 3 BANK DROP LEFT/CENT/RIGHT) is three stand-up HitTargets that the tribute's own hit subs hid to make them drops. With those subs out of the way the targets stood like stand-ups and their switches only blinked, so the game never saw the bank down and never let the ball at what is behind it (sw20, SKILL SHOT: the game says SHOOT BEHIND DROPS). A hit now drops the target (PadDrop) and its switch stays made until the game fires 3 BANK DROP, which stands all three up and opens them; the tribute's ResetDropTargets is no longer called, it started its own target-light rules too (PAD-1228).",
+    "The drum clock (Primitive027, the tribute's 12 faces drum_1..drum_12) is the machine's node 10 stepper 0 (home DRUM CLOCK HOME, 94), which the board runs and the table never heard of, so the face stood still. Emulator, rush_le 1.19: home is 6:00, the hand turns the negative way, one game minute a pop and 200 steps an hour (the panel read 7:10 PM at -234, CLOCK 7 lit from -201). `mechs` hands the stepper's place to Controller.GetMech(0) and PadDrumClockTimer shows the hour it points at, the hour of the CLOCK LED the game lights (PAD-1228)."
   ],
   "title": "rush_le",
   "detect": [
@@ -39,9 +42,9 @@
     "sw002": {"id": 54, "event": "hit", "name": "R(U)SH TARGET"},
     "sw003": {"id": 55, "event": "hit", "name": "RU(S)H TARGET"},
     "sw004": {"id": 56, "event": "hit", "name": "RUS(H) TARGET"},
-    "sw13": {"id": 47, "event": "hit", "name": "3 BANK DROP LEFT"},
-    "sw12": {"id": 48, "event": "hit", "name": "3 BANK DROP CENT"},
-    "sw11": {"id": 49, "event": "hit", "name": "3 BANK DROP RIGHT"},
+    "sw13": {"id": 47, "event": "drop", "call": "PadDrop sw13", "name": "3 BANK DROP LEFT"},
+    "sw12": {"id": 48, "event": "drop", "call": "PadDrop sw12", "name": "3 BANK DROP CENT"},
+    "sw11": {"id": 49, "event": "drop", "call": "PadDrop sw11", "name": "3 BANK DROP RIGHT"},
     "Lock1": {"id": 50, "event": "hit", "name": "RT RAMP LT TARGET"},
     "Lock2": {"id": 51, "event": "hit", "name": "RT RAMP RT TARGET"},
     "TLeftOutlane": {"id": 59, "event": "hit", "name": "LEFT OUTLANE"},
@@ -73,6 +76,10 @@
     "Kicker2": {"switch": 93, "dir": 270, "power": 30, "name": "MAIN SCOOP OPTO"},
     "Kicker3": {"switch": 79, "dir": 1, "power": 55, "kickz": 1.4, "name": "VUK"}
   },
+  "mechs": {
+    "_": "Controller.GetMech(n) -> a node board's stepper [node, motor]: its place in steps from home (padled version 8, PAD-1228)",
+    "0": {"stepper": [10, 0], "name": "DRUM CLOCK (home DRUM CLOCK HOME, 94)"}
+  },
   "solenoids": {
     "1": {"coil": [8, 1], "name": "TROUGH", "callback": "bsTrough.SolOut"},
     "2": {"coil": [8, 4], "name": "AUTO PLUNGER", "callback": "PadAutoPlunge"},
@@ -83,7 +90,7 @@
     "7": {"coil": [8, 6], "name": "UP POST", "callback": null},
     "8": {"coil": [9, 6], "name": "RAMP DIVERTER", "callback": null},
     "9": {"coil": [9, 7], "name": "MAGNET", "callback": "PadTimeMachineMagnet"},
-    "10": {"coil": [9, 0], "name": "TROUGH LOCK", "callback": null},
+    "10": {"coil": [9, 0], "name": "TROUGH LOCK", "callback": "PadSideScoopGate"},
     "11": {"coil": [9, 2], "name": "LEFT POP BUMPER", "callback": null},
     "12": {"coil": [9, 3], "name": "RIGHT POP BUMPER", "callback": null},
     "13": {"coil": [9, 4], "name": "BOTTOM POP BUMPER", "callback": null},
@@ -98,14 +105,16 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "Sub PadResetDrops(e) : If e Then ResetDropTargets : End If : End Sub\n' PAD-925: the time machine magnet on PadTMMagnet (Ramp011's top): MAGNET holds the ball there, let go it rolls back down\nDim mPadTM : Set mPadTM = New cvpmMagnet\nWith mPadTM\n\t.InitMagnet PadTMMagnet, 40\n\t.GrabCenter = True\nEnd With\n' cvpmMagnet grabs a ball only inside 20 units, at its 10 ms update: a fast one crossed that between two.\n' A live magnet takes the ball's speed as it comes into the field, so the grab cannot miss\nSub PadTMMagnet_Hit\n\tmPadTM.AddBall ActiveBall\n\tIf mPadTM.MagnetOn Then ActiveBall.VelX = ActiveBall.VelX * 0.2 : ActiveBall.VelY = ActiveBall.VelY * 0.2\nEnd Sub\nSub PadTMMagnet_UnHit : mPadTM.RemoveBall ActiveBall : End Sub\nSub PadTimeMachineMagnet(e) : mPadTM.MagnetOn = CBool(e) : End Sub\n",
+  "extra_vbs": "' PAD-1239: TROUGH LOCK is the side scoop's gate. The game opens it (a pulse, then a hold) and either\n' kicks SIDE SCOOP through it or waits for the ball to roll out past SIDE SCOOP OPTO by itself; the\n' tribute had no gate, so that ball sat and the game called the scoop a DEVICE MALFUNCTION\nSub PadSideScoopGate(e)\n\tIf e Then\n\t\tIf bsKicker1.Balls > 0 Then bsKicker1.ExitSol_On : vpmTimer.PulseSw 1078\n\tEnd If\nEnd Sub\n' PAD-1228: the instrument bank drops. A hit drops the target (the tribute hid them the same way)\n' and its switch stays made (the map's drop event) until 3 BANK DROP stands the three up again.\n' The tribute's ResetDropTargets is not called: it started its own target light rules too.\nSub PadDrop(t) : t.IsDropped = True : t.Visible = 0 : End Sub\nSub PadResetDrops(e)\n\tIf e Then\n\t\tDim t\n\t\tFor Each t In Array(sw13, sw12, sw11) : t.IsDropped = False : t.Visible = 1 : Next\n\t\tController.Switch(1047) = False : Controller.Switch(1048) = False : Controller.Switch(1049) = False\n\t\tDOF 111, DOFPulse\n\tEnd If\nEnd Sub\n' PAD-1228: the drum clock's hand is the machine's node 10 stepper 0 (the map's mechs, GetMech(0)):\n' home is 6 o'clock, 200 steps an hour, the negative way clockwise. The face shows the hour it points at.\nDim PadDrumFace : PadDrumFace = \"\"\nSub PadDrumClockTimer_Timer\n\tDim m, h, f\n\tm = -CLng(Controller.GetMech(0))\n\tm = m Mod 2400 : If m < 0 Then m = m + 2400\n\th = 6 + m \\ 200 : If h > 12 Then h = h - 12\n\tf = \"drum_\" & h\n\tIf f <> PadDrumFace Then Primitive027.Image = f : PadDrumFace = f\nEnd Sub\n' PAD-1240: MAGNET holds the ball INSIDE the time machine, past Ramp011's top (y 473). PadTMMagnet\n' (Ramp011's top) only says a ball came up; the hold pulls it in to 517,435 at the ramp's height (105:\n' the tribute has no floor there, so the hold keeps it up) and keeps it still while the coil is on.\n' PAD-1250: let go, it is carried back out to where it was caught and rolls back down the ramp (PAD-1240\n' sent it out the back onto the left wire return, which looked like the machine spat it onto a ramp).\n' PAD-1250: no ball is kept between holds. The one to grab is looked up among the live balls by where it\n' is, on the ramp's top inside the trigger, so a ball that left it by being moved, or drained since, is\n' never grabbed: a kept reference to a drained ball stopped the table with a runtime error at the next\n' magnet, and one still in play would have been pulled in from wherever it was.\nDim PadTMBall, PadTMOn, PadTMState, PadTMT0, PadTMFrom, PadTMGrabAt\nPadTMState = 0\nSub PadTMMagnet_Hit\n\tIf PadTMOn And PadTMState = 0 Then PadTMGrab\nEnd Sub\nSub PadTMGrab\n\tDim b\n\tFor Each b In GetBalls\n\t\tIf b.X > 482 And b.X < 552 And b.Y > 470 And b.Y < 540 And b.Z > 60 Then\n\t\t\tSet PadTMBall = b\n\t\t\tPadTMGrabAt = Array(b.X, b.Y, b.Z) : PadTMFrom = PadTMGrabAt\n\t\t\tPadTMT0 = GameTime : PadTMState = 1\n\t\t\tPadTMAt b.X, b.Y, b.Z, 0\n\t\t\tExit Sub\n\t\tEnd If\n\tNext\nEnd Sub\nSub PadTMAt(x, y, z, vy)\n\tOn Error Resume Next\n\tPadTMBall.X = x : PadTMBall.Y = y : PadTMBall.Z = z\n\tPadTMBall.VelX = 0 : PadTMBall.VelY = vy : PadTMBall.VelZ = 0\n\tIf Err.Number <> 0 Then PadTMState = 0 : Set PadTMBall = Nothing\n\tOn Error GoTo 0\nEnd Sub\nSub PadTMLetGo\n\tPadTMAt PadTMGrabAt(0), PadTMGrabAt(1), PadTMGrabAt(2), 2\n\tPadTMState = 0 : Set PadTMBall = Nothing\nEnd Sub\nSub PadTimeMachineMagnet(e)\n\tPadTMOn = CBool(e)\n\tIf PadTMOn Then\n\t\tIf PadTMState = 0 Then PadTMGrab\n\tElseIf PadTMState = 1 Or PadTMState = 2 Then\n\t\tIf GameTime - PadTMT0 >= 1000 Then\n\t\t\tPadTMFrom = Array(517, 435, 105) : PadTMT0 = GameTime : PadTMState = 3\n\t\tElse\n\t\t\tPadTMLetGo\n\t\tEnd If\n\tEnd If\nEnd Sub\nSub PadTMTimer_Timer\n\tDim k\n\tIf PadTMState = 1 Then\n\t\tk = (GameTime - PadTMT0) / 250 : If k >= 1 Then k = 1 : PadTMState = 2\n\t\tPadTMAt PadTMFrom(0) + (517 - PadTMFrom(0)) * k, PadTMFrom(1) + (435 - PadTMFrom(1)) * k, PadTMFrom(2) + (105 - PadTMFrom(2)) * k, 0\n\tElseIf PadTMState = 2 Then\n\t\tPadTMAt 517, 435, 105, 0\n\tElseIf PadTMState = 3 Then\n\t\tk = (GameTime - PadTMT0) / 250\n\t\tIf k < 1 Then\n\t\t\tPadTMAt 517 + (PadTMGrabAt(0) - 517) * k, 435 + (PadTMGrabAt(1) - 435) * k, 105 + (PadTMGrabAt(2) - 105) * k, 0\n\t\tElse\n\t\t\tPadTMLetGo\n\t\tEnd If\n\tEnd If\nEnd Sub\n",
   "retrofit_triggers": {
     "_": "no table object: a Trigger cloned from `clone`, given `shape` (its drag points), live and drawn as nothing, on `surface`",
-    "PadTMMagnet": {"clone": "tm2", "surface": "Ramp011", "radius": 40, "shape": [[482, 470], [552, 470], [552, 540], [482, 540]], "name": "the time machine magnet: Ramp011's top 70 units, its whole width (the ramp runs from y 659 up to 473, 80 units high); centre 517,505"}
+    "PadTMMagnet": {"clone": "tm2", "surface": "Ramp011", "shape": [[482, 470], [552, 470], [552, 540], [482, 540]], "name": "finds the ball for the time machine magnet: Ramp011's top 70 units, its whole width (the ramp runs from y 659 up to 473, 80 units high); the hold itself is past the ramp's end, inside the machine"}
   },
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
-    "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100}
+    "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100},
+    "PadDrumClockTimer": {"clone": "PulseTimer", "interval_ms": 100},
+    "PadTMTimer": {"clone": "PulseTimer", "interval_ms": 1}
   },
   "lamps": {
     "_": "table light -> Spike 2 LEDs [node, index] (several = an RGB insert: lit when any is); GUESS = placed by the script's use of the light, not seen on the game",
@@ -226,6 +235,6 @@
   "repatch": [
     {"old": "Sub Trigger1_UnHit : Controller.Switch(1067) = False : Trigger1_UnHit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "Sub Trigger1_Hit : Controller.Switch(1067) = True : Trigger1_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
-    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}
+    {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"}, {"absent": "Sub PadSideScoopGate(e)", "why": "its side scoop can keep the ball and the game calls it a device malfunction", "since": "PAD-1239: TROUGH LOCK, the side scoop's gate, lets the ball out"}, {"absent": "Sub PadTMLetGo", "why": "the time machine magnet can stop the table with a runtime error, and lets the ball out onto the wire ramp instead of back down the ramp", "since": "PAD-1250: the time machine finds its ball each time and lets it roll back down the ramp"}
   ]
 }

@@ -3191,6 +3191,12 @@ if [ "${PAD_EVENTS:-1}" != 0 ]; then
         # PAD-204: every Pause press says what happened to it - a pause that
         # did nothing used to leave no trace in the log the user can send
         /\[pause\]/              { print "[event] " $0; fflush(); next }
+        # PAD-1225: where the machine sent its mechs and when they got there
+        # (batman turntable and crane, a jetpack, a building). A report of a
+        # Bat Phone hurry-up with the turntable facing away came with no line
+        # that could say whether the game ever asked for the turn. The shim
+        # spends at most 400 of these lines a run.
+        /\[motor\]/              { print "[event] " $0; fflush(); next }
         # THE LINE THAT NAMES A BLACK WINDOW, and it is not ours: Mesa prints
         # it, into the renderer log, when the renderer is running as root and
         # cannot attach to the WSLg X server shared memory. The window opens,

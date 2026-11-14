@@ -31,6 +31,8 @@ TABS = (
     ("modes", "modes", "Modes", "Modes", "Make", "modes"),
     ("defaults", "defaults", "Default Settings", "Defaults", "Make",
      "defaults"),
+    # PAD-1204: what changes how the game plays or reports and keeps Insider Connected (Stern Spike 2)
+    ("playopts", "playopts", "Play Options", "Play options", "Make", "gear"),
     # PAD-782: the attract mode editor (Stern Spike 2)
     ("attract", "attract", "Attract", "Attract", "Make", "film"),
     # PAD-1040: the cabinet's expression light shows (Stern Spike 2)

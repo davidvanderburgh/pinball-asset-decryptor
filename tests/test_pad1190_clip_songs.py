@@ -127,7 +127,9 @@ def test_the_video_tab_names_a_jjp_clips_song_and_offers_to_play_it(tmp_path):
         st = _wait(w, lambda st: ((st.get("preview") or {}).get("sounds") or {}).get("rel") == clip,
                    timeout=60)
         snd = st["preview"]["sounds"]
-        assert snd["head"] == VM.SONG_HEAD and snd["sync"] and snd["foot"] == VM.SONG_FOOT
+        # PAD-1266: one row - a short label whose tooltip carries the long head and foot
+        assert snd["head"] == VM.SONG_LABEL and snd["sync"] and snd["inline"] and not snd["foot"]
+        assert snd["head_tip"] == {"head": VM.SONG_HEAD, "lines": [VM.SONG_FOOT]}
         (it,) = snd["items"]
         assert it["rel"] == "sound/music/CivilWar/BG_GnR_BEAT_MAP_CivilWar.ogg"
         assert it["path"] == str(song) and it["sync"]
@@ -143,5 +145,6 @@ def test_the_page_plays_the_song_along_with_the_players():
                            "static", "js", "tabs", "video.js"), encoding="utf-8").read()
     for bit in ('songFollow(e.currentTarget, "play")', 'songFollow(e.currentTarget, "pause")',
                 'songFollow(e.currentTarget, "seek")', 'songFollow(v, "stop")',
-                "pv.sounds.sync", "<${SongSync}", "T.songSync"):
+                "pv.sounds.sync", "<${SongSync}", "T.songSync",
+                "pv.sounds.inline", "tip(pv.sounds.head_tip)"):
         assert bit in js, bit

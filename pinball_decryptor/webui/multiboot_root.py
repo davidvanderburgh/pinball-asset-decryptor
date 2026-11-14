@@ -207,6 +207,34 @@ def start(argv, preview=False):
     return SessionProc(s, cmd)      # no pkexec: RootSession says NO_ROOT
 
 
+def needs_root(fn):
+    """Mark a step callable that resolves to a root step, so the run can ask
+    for the password before its first step rather than at this one."""
+    fn.needs_root = True
+    return fn
+
+
+def wants_root(cmds):
+    """The label of a run's first root step, or None."""
+    for label, argv in cmds:
+        if isinstance(argv, RootLine) or getattr(argv, "needs_root", False):
+            return label
+    return None
+
+
+def ask_first():
+    """Open the run's root shell NOW, before its first step: the password
+    dialog comes up as the user presses Build, not minutes later when the
+    long user steps are done and they have walked away (Brombomb, PAD-1188:
+    the dialog went unanswered and the build failed).  A :class:`SessionProc`
+    running a no-op in the shell (Cancel kills the dialog through it), or
+    None when this machine's route asks no password up front (root,
+    password-free sudo, sudo on a terminal)."""
+    if root_session.route() != "pkexec":
+        return None
+    return SessionProc(_session(create=True), ":")
+
+
 # --------------------------------------------------------- the AppImage copy
 #: Copied without these: build scratch and host byte-code (the macOS stage's
 #: list, multiboot_docker._SKIP).

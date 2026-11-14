@@ -107,12 +107,8 @@ PROGID = "PAD.Controller"
 VERSION = "03060000"            # what core.vbs compares; modulated solenoids off
 
 SW_SRC = "v"                    # padsw.h's writer tag for Visual Pinball
-#: PAD-1184: lines a run may spend on the switches a table reads (a mech's
-#: position switches change a few times a ball; this only caps a table that
-#: polls something that flickers)
-READ_LOG_BUDGET = 2000
 POLL_S = 0.008                  # padled poll; a 9p read is ~1-3 ms
-READ_N = max(coilmap.HI_READ, coilmap.RULE_READ)   # one read takes every plane
+READ_N = max(coilmap.HI_READ, coilmap.STEP_READ)   # one read takes every plane
 LAMP_ON = int(os.environ.get("PAD_VPX_LAMP_ON", "1"))   # LED level that is "lit"
 MIN_PULSE_MS = 40               # a coil pulse shorter than a poll still shows
 FRONT_WATCH_S = 300             # how long after Run a started run's windows are watched
@@ -135,12 +131,57 @@ LOG = os.path.join(os.environ.get("TEMP") or os.environ.get("TMPDIR") or "/tmp",
                    "padcontroller.log")
 
 
-def log(msg):
+# The log is written by one daemon thread, never by the caller: set_switch
+# logs every flipper press inside Visual Pinball's synchronous COM call (its
+# main thread) and _sol_set logs holding the bridge lock, so an open+append
+# there put file I/O in the flipper's path. Lines are queued and written in
+# batches; whatever is still queued at exit is flushed by atexit.
+_LOGQ = queue.Queue()
+_LOG_THREAD = None
+_LOG_START = threading.Lock()
+
+
+def _log_write(lines):
     try:
         with open(LOG, "a", encoding="utf-8") as f:
-            f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+            f.write("".join(lines))
     except OSError:
         pass
+
+
+def _log_drain():
+    lines = []
+    try:
+        while True:
+            lines.append(_LOGQ.get_nowait())
+    except queue.Empty:
+        pass
+    return lines
+
+
+def _log_writer():
+    while True:
+        lines = [_LOGQ.get()] + _log_drain()
+        _log_write(lines)
+
+
+def _log_flush():
+    lines = _log_drain()
+    if lines:
+        _log_write(lines)
+
+
+atexit.register(_log_flush)
+
+
+def log(msg):
+    global _LOG_THREAD
+    _LOGQ.put("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+    if _LOG_THREAD is None:
+        with _LOG_START:
+            if _LOG_THREAD is None:
+                _LOG_THREAD = threading.Thread(target=_log_writer, daemon=True, name="padlog")
+                _LOG_THREAD.start()
 
 
 # ---------------------------------------------------------------- the map --
@@ -437,6 +478,7 @@ class VpxMap:
         self.fakes = {}                     # name -> dict (switch_fakes)
         self.game_on = None                 # (number, [coils]) "flippers armed"
         self.cabinet = {}                   # cabinet switch names -> 1000+id
+        self.mechs = {}                     # GetMech(n) -> (node, motor) of a stepper (PAD-1228)
         self.platform = "spike2"            # which rig the title runs on (PAD-943)
         # core.vbs indexes SolCallback(68) and friends by the number it is
         # handed, so ChangedSolenoids may only carry numbers up to this; a
@@ -499,6 +541,12 @@ class VpxMap:
                     if isinstance(v["rgb"], str):
                         self.rgb_order[lamp_number(*leds[0])] = v["rgb"]
         self.fakes = {k: v for k, v in m.get("switch_fakes", {}).items() if k != "_"}
+        # PAD-1228: a node board's stepper the table shows (Rush LE's drum
+        # clock): Controller.GetMech(n) answers its place in steps from home
+        self.mechs = {}
+        for k, v in m.get("mechs", {}).items():
+            if k != "_":
+                self.mechs[int(k)] = (int(v["stepper"][0]), int(v["stepper"][1]))
         self._load_dof(m)
 
     def _load_dof(self, m):
@@ -752,6 +800,30 @@ class Rig:
             log("switch table for %s not copied from %s: %s" % (title, src, exc))
 
 
+#: the run log's lines that say nothing about why a run stalled or ended
+_RUN_LOG_NOISE = re.compile(r"^\[event\] \[sw\] id=|^\[padglhost\] [\d.]+ fps ")
+
+
+def run_log_tail(path, n=8):
+    """The last *n* telling lines of a started run's log (padlaunch's
+    padvpx-<title>.log, watch.sh's output), [] when it cannot be read."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - 65536))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except (OSError, TypeError):
+        return []
+    return [ln.strip()[:300] for ln in lines
+            if ln.strip() and not _RUN_LOG_NOISE.match(ln)][-n:]
+
+
+def run_log_said(path, n=8):
+    """': its log ends:' and the run log's last lines, one per controller log
+    line, so a report (which leaves paths out) still says why (PAD-1208)."""
+    tail = run_log_tail(path, n)
+    return (": its log ends:\n" + "\n".join("    | " + ln for ln in tail)) if tail else ""
+
+
 def read_block(path, n):
     """One fresh read of `n` bytes, or None (no run, or a 9p hiccup)."""
     try:
@@ -759,6 +831,54 @@ def read_block(path, n):
             return f.read(n)
     except OSError:
         return None
+
+
+def block_state(data):
+    """How a Windows read of padled went, in words for the controller log."""
+    if data is None:
+        return "Windows cannot open it"
+    if not data:
+        return "Windows reads it empty"
+    return "Windows reads %d bytes with %s" % (
+        len(data), "its mark" if coilmap.has_magic(data) else "no mark")
+
+
+def block_in_wsl(rig, runner=None, timeout=20):
+    """Does the run's padled carry its mark as WSL ITSELF reads it (PAD-1247)?
+
+    True / False, or None when WSL did not answer. Read as the distro's
+    default user, the one \\\\wsl.localhost serves Windows as, so a file only
+    root could read is not taken for a stuck share. Mike St P's runs on
+    v1.427.1: the game booted to attract, its block never came up for
+    Windows and its sound never reached the Windows player, five starts in a
+    row and across an app restart; the next WSL restart (an update's) put
+    both right with no change to the rig. That is WSL's link to Windows
+    stuck, and Linux reading the mark while Windows cannot is how it is told
+    from a game that never opened its block."""
+    if not (getattr(rig, "root", None) and getattr(rig, "distro", None)):
+        return None
+    path = rig.root.rstrip("/") + "/dump/padled"
+    run = runner or subprocess.run
+    try:
+        r = run(rig.wsl_head() + ["-e", "od", "-An", "-tx1", "-N4", path],
+                stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
+                creationflags=_CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return False
+    try:
+        raw = bytes(int(h, 16) for h in r.stdout.decode("ascii", "replace").split())
+    except ValueError:
+        return None
+    return len(raw) == 4 and coilmap.has_magic(raw)
+
+
+#: what the loading window says when WSL's link to Windows is stuck (PAD-1247)
+WSL_STUCK = ("WSL's link to Windows is stuck: the game runs inside WSL, but the "
+             "table cannot reach it and its sound does not come through. "
+             "Close Visual Pinball, press Restart WSL… on PAD's Emulate tab, "
+             "then open the table again.")
 
 
 class SwitchPipe:
@@ -1478,19 +1598,18 @@ class Bridge:
         self._coil_off_at = {}             # (node, idx) -> monotonic s
         self.sw_ids = {}                   # (node, input bit) -> switch id
         self._button_coils = {}            # (node, idx) -> button input bit
+        # switch id -> [((node, idx), release_now)]: the board-fired coils
+        # each switch fires, from the last poll, so set_switch can turn the
+        # coil on (and off) at once instead of a poll later
+        self._rule_coils = {}
         self.mrg = bytes(padsw.MAX_ID)     # the guest's merged switch truth
+        self.mech_pos = {}                 # GetMech number -> steps (PAD-1228)
         self.max_id = padsw.MAX_ID         # one past the highest switch id (set_game)
         self.polls = 0
         self.poll_fail = 0
         self.last_poll_ms = 0.0
         self._fake = {}                    # name -> state for switch_fakes
         self._early = {}                   # switch id -> level the table set before the run was up
-        # PAD-1184: switches the TABLE reads (a mech that follows the machine,
-        # Batman's turntable 77-79 and crane 82-87): what it was last told,
-        # and what the machine last said, so a report's log shows both sides
-        self._told = {}                    # switch id -> level last answered to the table
-        self._mach = {}                    # switch id -> the machine's level last seen
-        self._read_log_left = READ_LOG_BUDGET
         self.dof = None                    # DofHost, when the table asked for DOF
         self._dof_state = {}               # (kind, number) -> value last sent
 
@@ -1587,6 +1706,8 @@ class Bridge:
         self.ready_t = 0.0
         self.start_t = time.monotonic()
         self._start_retried = False
+        self._board_t = None           # when the started run's board record came (PAD-1208)
+        self._block_said = False
         self.front_done = False            # the LCD window's first grab is undone once, never again
         self.b2s_handed = set()            # backglass windows whose first grab was undone (PAD-893)
         self.front_tries = {}
@@ -1673,6 +1794,9 @@ class Bridge:
     # -- PAD-963: a started run is up when the game is in attract
     #: how long a boot log may stay unreadable before the run counts as up
     BOOT_LOG_S = 15.0
+    #: a board record whose output block is not up this long after is said, with
+    #: the run log's last lines (PAD-1208: attach normally comes ~20 s after it)
+    BLOCK_LATE_S = 60
 
     def _boot_watch(self):
         """The padled block comes up early in a Spike 2 boot: Batman sat on
@@ -1848,6 +1972,30 @@ class Bridge:
             if self._rig_up(data):
                 self._attach(data)
                 return
+            # PAD-1208: a game is up ~20 s after its board record; one whose
+            # block never came said nothing here, and the table sat idle
+            now = time.monotonic()
+            if getattr(self, "_board_t", None) is None:
+                self._board_t = now
+            elif (not getattr(self, "_block_said", False) and self.launch.alive()
+                  and now - self._board_t > self.BLOCK_LATE_S):
+                self._block_said = True
+                # PAD-1247: and as WSL itself reads it, which tells a stuck
+                # WSL-to-Windows link from a game that never opened its block
+                seen = None if self.slots else block_in_wsl(self.rig)
+                log("the game's output block (%s) is not up %d s after its board record "
+                    "came (%s; inside WSL %s)%s"
+                    % (self.rig.led_path(), self.BLOCK_LATE_S, block_state(data),
+                       {True: "it has its mark", False: "it has none either",
+                        None: "WSL did not say"}[seen],
+                       run_log_said(self.launch.logfile)))
+                if seen:
+                    log("WSL's link to Windows is stuck: the game is up, Windows cannot "
+                        "read it; stopping the run (Restart WSL clears it)")
+                    self._loading_end("failed " + WSL_STUCK)
+                    failed, self.launch, self.rig = self.launch, None, None
+                    failed.stop()
+                    return
         if not self.launch.alive():
             # A board record can appear before the game is ready. It does
             # not make an exited launcher alive: clean the run we owned,
@@ -1863,6 +2011,7 @@ class Bridge:
                 log("retrying %s once after its startup process exited" % self.title)
                 self.start_t = time.monotonic()
                 self.boot, self.ready_t = None, 0.0
+                self._board_t, self._block_said = None, False
                 self.front_done, self.front_tries = False, {}
                 self.lcd_placed = False
                 self.lcd_tries = self.lcd_stable = 0
@@ -1883,8 +2032,8 @@ class Bridge:
                         self.launch = None
                     self._loading_end("failed Startup retry failed: %s" % exc)
                     return
-            log("the run started for %s ended before it came up (see %s)"
-                % (self.title, logfile))
+            log("the run started for %s ended before it came up (see %s)%s"
+                % (self.title, logfile, run_log_said(logfile)))
             self._loading_end("failed The emulator stopped before the game came up. Its log: %s"
                               % logfile)
         elif time.monotonic() - self.start_t > self.START_TIMEOUT_S:
@@ -2013,53 +2162,39 @@ class Bridge:
         if self.pipe.held.get(sid) != (1 if level else 0):
             log("sw %s -> id %d = %d" % (n, sid, 1 if level else 0))
         self.pipe.set(sid, level)
+        # A board-fired coil (a flipper) follows its switch NOW, not on the
+        # next poll (~25-30 ms a cycle over \\wsl.localhost): the same answer
+        # _poll_coils gives from pipe.held, so the next poll agrees with it.
+        rc = (getattr(self, "_rule_coils", None) or {}).get(sid)
+        if rc:
+            now = time.monotonic()
+            with self.lock:
+                for key, release_now in rc:
+                    if level:
+                        self._coil_set(key, 1)
+                    elif release_now and self._coil_off_at.get(key, 0) <= now:
+                        self._coil_set(key, 0)
 
     def get_switch(self, n):
         sid = self.switch_id(n)
         if sid <= 0:
             return False
         if not self.pipe and sid in self._early:
-            return bool(self._early[sid])
-        if self.pipe and sid in self.pipe.held:
-            return bool(self.pipe.held[sid])
-        v = bool(self.mrg[sid]) if sid < len(self.mrg) else False
-        if self.attached:
-            self._note_read(sid, v)
-        return v
-
-    def _note_read(self, sid, v):
-        """PAD-1184: the first read of a machine switch, and every change in
-        what the table is told. A table that follows a mech reads its position
-        switches every tick, so "table reads switch 78" proves its timer runs,
-        and "table told switch 78 = 1" that it heard the machine turn - Mike's
-        report showed a Bat Phone hurry-up with the turntable never turned, and
-        nothing in his log could say which side had not moved."""
-        with self.lock:
-            was = self._told.get(sid)
-            if was == v:
-                return
-            self._told[sid] = v
-            self._mach.setdefault(sid, v)
-            if self._read_log_left <= 0:
-                return
-            self._read_log_left -= 1
-        if was is None:
-            log("table reads switch %d (now %d)" % (sid, v))
+            got = bool(self._early[sid])
+        elif self.pipe and sid in self.pipe.held:
+            got = bool(self.pipe.held[sid])
         else:
-            log("table told switch %d = %d" % (sid, v))
-
-    def _note_machine(self):
-        """PAD-1184: the machine's own changes of the switches the table reads
-        (under the poll's lock). Beside the "table told" lines above, a turn the
-        machine made and the table never asked about shows up as a machine line
-        with no table line after it."""
-        for sid in list(self._told):
-            v = bool(self.mrg[sid]) if sid < len(self.mrg) else False
-            if self._mach.get(sid) != v:
-                self._mach[sid] = v
-                if self._read_log_left > 0:
-                    self._read_log_left -= 1
-                    log("machine switch %d -> %d" % (sid, v))
+            got = bool(self.mrg[sid]) if sid < len(self.mrg) else False
+        # PAD-1225: what the table READ, each time it changes - Batman 66's
+        # turntable and crane follow the machine by reading its position
+        # switches, and a report of a turntable that never moved could not
+        # say whether the table read them at all, or what it was told
+        seen = self.__dict__.setdefault("_reads", {})
+        if seen.get(sid) is not got:
+            seen[sid] = got
+            log("table reads switch %d = %d%s" % (sid, got, "" if self.attached
+                                                    else " (before the game is up)"))
+        return got
 
     # -- the poll
     def _poll_loop(self):
@@ -2170,10 +2305,12 @@ class Bridge:
                     # (and keeps it there as that changes); here only ON TOP
                     # of Visual Pinball, which comes up full screen
                     if key not in self.placed_at:
-                        raise_window(hwnd, bool((setting or {}).get("topmost", True)))
+                        # PAD-1231: on top unless the tab's Always on top is off
+                        on_top = bool((setting or {}).get("topmost", True))
+                        raise_window(hwnd, on_top)
                         self.placed_at[key] = time.monotonic()
-                        log("lcd window left to the display setting (%s), on top"
-                            % shown.get("mode"))
+                        log("lcd window left to the display setting (%s), %s"
+                            % (shown.get("mode"), "on top" if on_top else "not on top"))
                     continue
                 rect = lcd_rect(setting or {}, monitors())
                 if key == "playfield" and not any(k in (setting or {}) for k in ("x", "monitor")):
@@ -2496,9 +2633,12 @@ class Bridge:
         with self.lock:
             if sw and len(sw) >= padsw.OFF_MRG + padsw.MAX_ID:
                 self.mrg = sw[padsw.OFF_MRG:padsw.OFF_MRG + padsw.MAX_ID]
-                self._note_machine()
             self._poll_lamps(data)
             self._poll_coils(data, now)
+            for n, (node, motor) in self.map.mechs.items():
+                pos = coilmap.stepper(data, node, motor)
+                if pos is not None:
+                    self.mech_pos[n] = pos
             if self.dof and self.dof.up:
                 self._poll_dof(data)
 
@@ -2521,6 +2661,7 @@ class Bridge:
             if self.sw_ids:
                 log("switch table arrived: %d ids" % len(self.sw_ids))
         now = time.monotonic()
+        rule_coils = {}
         with self.lock:
             self.mrg = switches
             # Some ROM tables read Lamp(n) as a mechanical position or raw
@@ -2551,9 +2692,14 @@ class Bridge:
                     bit = self._button_coils.get(key)
                     if bit is not None:
                         sid = self.sw_ids.get((node, bit))
+                        if sid:
+                            # the board's own coil state says when it lets
+                            # go, so set_switch only turns it on
+                            rule_coils.setdefault(sid, []).append((key, False))
                         if sid and (self.pipe.held.get(sid) if self.pipe else 0):
                             on = 1
                     self._coil_set(key, on)
+            self._rule_coils = rule_coils
             if self.map.game_on:
                 self._sol_set(self.map.game_on[0], 1)
             self._fakes_tick(now)
@@ -2609,6 +2755,7 @@ class Bridge:
 
     def _poll_coils(self, data, now):
         fires = struct.unpack_from("<I", data, coilmap.DRIVE_FIRES_OFF)[0]
+        rule_coils = {}
         for node in range(16):
             for idx in range(16):
                 key = (node, idx)
@@ -2644,6 +2791,7 @@ class Bridge:
                 if r and r["power"] and r["input"] is not None:
                     sid = self.sw_ids.get((node, r["input"]))
                     if sid:
+                        rule_coils.setdefault(sid, []).append((key, True))
                         made = (self.pipe.held.get(sid) if self.pipe and sid in self.pipe.held
                                 else (self.mrg[sid] if sid < len(self.mrg) else 0))
                         if made:
@@ -2651,6 +2799,7 @@ class Bridge:
                         elif self._coil_off_at.get(key, 0) <= now:
                             on = 0
                 self._coil_set(key, on)
+        self._rule_coils = rule_coils
         if self.map.game_on:
             num, coils = self.map.game_on
             armed = 0
@@ -2774,6 +2923,18 @@ class Bridge:
         with self.lock:
             return bool(self.sol_state.get(int(n or 0), 0))
 
+    def get_mech(self, n):
+        """Controller.GetMech(n): the place of the stepper the map's `mechs`
+        names for n, in steps from home; 0 until the game first homes or moves
+        it, and for a number the map does not name (VPinMAME's answer for a
+        mech a ROM lacks)."""
+        try:
+            n = int(n or 0)
+        except (TypeError, ValueError):
+            return 0
+        with self.lock:
+            return int(self.mech_pos.get(n, 0))
+
     def status(self):
         return {"title": self.title, "running": self.running, "polls": self.polls,
                 "poll_fail": self.poll_fail, "last_poll_ms": round(self.last_poll_ms, 2),
@@ -2860,6 +3021,15 @@ class PadController:
             b.set_pause(args[0])
         elif key == "lamp" or key == "solenoid" or key == "solmask":
             pass
+        elif key == "padnote":
+            # PAD-1251: a table's own call that failed where the patch runs
+            # it under On Error Resume Next (Batman 66's PadMechTimer turning
+            # the tribute's turntable and crane), said in the log. The table
+            # sends each distinct error once; the cap stops a runaway.
+            n = self.props.get("_padnotes", 0)
+            if n < 50:
+                self.props["_padnotes"] = n + 1
+                log("table: %s" % args[-1])
         else:
             self.props[key] = args[-1]
         return None
@@ -2909,7 +3079,9 @@ class PadController:
             return b.title
         if key in ("games", "settings"):
             return _anything()
-        if key in ("getmech", "mech", "dip", "solmask", "rawdmdwidth", "rawdmdheight",
+        if key == "getmech":
+            return b.get_mech(args[0] if args else 0)
+        if key in ("mech", "dip", "solmask", "rawdmdwidth", "rawdmdheight",
                    "timefence"):
             return 0
         if key == "padstatus":
@@ -2963,6 +3135,23 @@ def selftest():
     c.Stop()
 
 
+def quote_local_server():
+    """Put the server's program in quotes (PAD-1229): pywin32 writes it as
+    its 8.3 short name with none, and with short names off on the drive that
+    is the long path with spaces, which Windows has to guess the end of."""
+    import winreg
+    import vpxsetup
+    key = "CLSID\\%s\\LocalServer32" % CLSID
+    try:
+        cmd = winreg.QueryValue(winreg.HKEY_CLASSES_ROOT, key)
+    except OSError:
+        return
+    fixed = vpxsetup.quoted_server_cmd(cmd)
+    if fixed:
+        winreg.SetValue(winreg.HKEY_CLASSES_ROOT, key, winreg.REG_SZ, fixed)
+        print("LocalServer32 quoted: %s" % fixed)
+
+
 def main(argv):
     if "--status" in argv:
         status()
@@ -2974,7 +3163,19 @@ def main(argv):
         # UseCommandLine reads --register / --unregister off sys.argv itself;
         # addnPath lands in the registry as PythonCOMPath, which is how the
         # COM-launched pythonw.exe finds this module.
-        _reg.UseCommandLine(PadController, addnPath=HERE)
+        # PAD-1229: so it is handed THIS argv, not the caller's: `padvpx.py
+        # unregister` (the uninstaller's) has "unregister" with no dashes on
+        # sys.argv, and pywin32 registered again instead of removing it.
+        # --unattended: an access-denied raises here rather than pywin32
+        # opening a second elevation of its own the caller cannot see.
+        saved = sys.argv
+        sys.argv = [saved[0] if saved else "padcontroller.py"] + list(argv) + ["--unattended"]
+        try:
+            _reg.UseCommandLine(PadController, addnPath=HERE)
+        finally:
+            sys.argv = saved
+        if "--register" in argv:
+            quote_local_server()
         return 0
     print(__doc__)
     return 2

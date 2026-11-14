@@ -26,13 +26,14 @@ PRELUDE = r"""
 static struct { unsigned teams_always, setting; } coop;
 static unsigned row;
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";
+static char team_name_3v1[] = "TEAM PLAY 3 VS 1", team_name_std[] = "ENHANCED STANDARD";   /* PAD-1224 */
 """
 
 ROW_MAIN = PRELUDE + r"""
 @FNS@
 static void kinds(const char *tag)
 {
-    unsigned k[3], n = team_menu_kinds(k), i;
+    unsigned k[5], n = team_menu_kinds(k), i;
     printf(" %s:", tag);
     for (i = 0; i < n; i++) printf("%u", k[i]);
 }
@@ -61,11 +62,13 @@ int main(void)
 def test_off_classic_enhanced_and_what_the_menu_offers(tmp_path):
     out = R._host_run(tmp_path, ROW_MAIN.replace("@FNS@", _fns(_src(), *ROW_FNS)), flags=("-no-pie",)).strip()
     # an older row's store: 3 reads Enhanced, 4-6 Classic, past that Off; at 1 or 2 all three games, CO-OP PLAY first
-    assert out == "01221110 0:,00 1:143,11 2:143,10 3:143,10 4:143,11 none:1 teams:3"
+    # PAD-1224: Enhanced adds ENHANCED STANDARD (2) after CO-OP PLAY, and every row TEAM PLAY 3 VS 1 (5) last
+    assert out == "01221110 0:,00 1:1435,11 2:12435,10 3:12435,10 4:1435,11 none:1 teams:3"
 
 
 MENU_PRELUDE = PRELUDE + r"""
 #define TEAM_KIND 0x300u
+#define TEAM_KIND_LAST 5u
 #define MENU_KIND_AT 0u
 #define MENU_CAPTION_AT 4u
 #define MENU_NAME_AT 8u
@@ -89,7 +92,7 @@ static long pm_port_value(const char *n, long d)
 }
 """
 
-MENU_FNS = ROW_FNS + ("static const char *team_kind_name(unsigned k)\n{",
+MENU_FNS = ROW_FNS + ("static const char *team_kind_name(unsigned k)\n{", "static unsigned team_kind_of(unsigned kind)",
                       "static unsigned team_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)",
                       "static void team_menu_built(unsigned *r)", "static void team_menu_picked(unsigned *r)")
 
@@ -109,7 +112,7 @@ int main(void)
     printf("%u", r[4]);
     for (i = 2; i < r[4]; i++)
         printf(" %x/%x/%s", list[3 * i], list[3 * i + 1], team_kind_name(team_entry_at((unsigned char *)(list + 3 * i), 0, 8)));
-    for (i = 0x301; i <= 0x305; i++) {                    /* the pick hands over the kind: it says which */
+    for (i = 0x301; i <= 0x306; i++) {                    /* the pick hands over the kind: it says which */
         r[3] = i;
         team_menu_picked(r);
         printf(" %d%u%x", tm.pending, tm.kind, r[3]);
@@ -125,18 +128,19 @@ int main(void)
 
 def test_the_entry_lists_get_all_three_and_the_pick_says_which(tmp_path):
     out = R._host_run(tmp_path, LIST_MAIN.replace("@FNS@", _fns(_src(), *MENU_FNS)), flags=("-no-pie",)).strip()
-    assert out == ("5 301/c1/CO-OP PLAY 304/c1/TEAM PLAY 2 VS 2 303/c1/TEAM PLAY 2 VS 1"   # Standard's caption each
-                   " 110 01302 130 140 04305 off 2")   # 0x302, 0x305: none of ours, left as they are
+    # row 1 is Classic: no ENHANCED STANDARD on the list; PAD-1224's TEAM PLAY 3 VS 1 last
+    assert out == ("6 301/c1/CO-OP PLAY 304/c1/TEAM PLAY 2 VS 2 303/c1/TEAM PLAY 2 VS 1 305/c1/TEAM PLAY 3 VS 1"
+                   " 110 120 130 140 150 05306 off 2")   # 0x306: none of ours, left as it is
 
 
-FRAME_FNS = ROW_FNS + ("static const char *team_kind_name(unsigned k)\n{",
+FRAME_FNS = ROW_FNS + ("static const char *team_kind_name(unsigned k)\n{", "static unsigned team_kind_of(unsigned kind)",
                        "static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, unsigned right)",
                        "static void team_frame_restore(void)\n{", "static void team_menu_frame(unsigned *r)")
 
 FRAME_MAIN = MENU_PRELUDE + r"""
 static unsigned long team_frame_sp;
 static unsigned team_frame_at, team_frame_msg;
-static unsigned team_frame_n, team_frame_kinds[3];
+static unsigned team_frame_n, team_frame_kinds[5];
 @FNS@
 static unsigned r[64];
 int main(void)
@@ -151,7 +155,7 @@ int main(void)
     team_menu_frame(r);
     printf("%u", *count);
     for (i = 3; i < *count; i++) printf(" %u", list[i]);
-    for (c = 0; c <= 5; c++) {                            /* the cursor over every entry */
+    for (c = 0; c <= 7; c++) {                            /* the cursor over every entry */
         r[5] = c;
         team_menu_frame(r);
         printf(" %u:%d%u:%s", c, tm.pending, tm.pending ? tm.kind : 0, lettered);
@@ -164,7 +168,9 @@ int main(void)
 
 def test_the_index_menus_get_all_three_and_the_cursor_says_which(tmp_path):
     out = R._host_run(tmp_path, FRAME_MAIN.replace("@FNS@", _fns(_src(), *FRAME_FNS)), flags=("-no-pie",)).strip()
-    assert out == ("6 1 1 1 0:00:- 1:00:- 2:00:- 3:11:CO-OP PLAY 4:14:TEAM PLAY 2 VS 2 5:13:TEAM PLAY 2 VS 1 6")
+    # row 2 is Enhanced: PAD-1224's ENHANCED STANDARD after CO-OP PLAY, TEAM PLAY 3 VS 1 last
+    assert out == ("8 1 1 1 1 1 0:00:- 1:00:- 2:00:- 3:11:CO-OP PLAY 4:12:ENHANCED STANDARD 5:14:TEAM PLAY 2 VS 2"
+                   " 6:13:TEAM PLAY 2 VS 1 7:15:TEAM PLAY 3 VS 1 8")
 
 
 def test_the_pick_not_the_row_sizes_the_team_game():
@@ -173,7 +179,8 @@ def test_the_pick_not_the_row_sizes_the_team_game():
     assert "kind = tm.kind;" in disp and "if (kind == 1u) {" in disp
     assert "tm.size = kind;" in disp and "added = coop_team_fill(0, 0, 0, 0);\n    tm.size = 0;" in disp
     assert "return coop.teams_always ? coop.teams_always : tm.size;" in R._lift(
-        src, "static unsigned coop_teams_switched_on(void)")
+        src, "static unsigned coop_teams_kind(void)")                   # PAD-1224: the kind; its most players
+    assert "return team_kind_most(coop_teams_kind());" in R._lift(src, "static unsigned coop_teams_switched_on(void)")
     assert "return !while_at || coop_row_mode(value) != 0u;" in R._lift(
         src, "static int insider_holding(unsigned while_at, unsigned value)")
 

@@ -429,7 +429,13 @@ HELP_CONTENT = {
          "the project's callouts.csv, follows the sound through renames and "
          "Auto-name, shows in a Comment column once a sound has one, is found "
          "by the Search box, and goes out with Export CSV. Tick or untick "
-         "**Show comments** in the toolbar to show or hide that column."),
+         "**Show comments** in the toolbar to show or hide that column.\n\n"
+         "Commenting many at once: fill in the comment column of callouts.csv "
+         "(by hand, in a spreadsheet or with another tool; a header of "
+         "comment, comments or notes all work), save it, then **More > Update "
+         "comments from callouts.csv…** brings every comment in and says how "
+         "many came in, changed or went. Only the comments change: names and "
+         "types stay as they are."),
         ("Blip-free callouts (always on)",
          "Every replaced sound plays your audio all the way through, with no "
          "scrap of the original inside it. There is nothing to switch on.\n\n"
@@ -641,8 +647,15 @@ HELP_CONTENT = {
          "- Needs an image build, not a direct SD write."),
         ("Clip length",
          "Right-click > **This clip's length**: follow the **Trim / pad** box (default), "
-         "match the stock clip, keep your file's full length, or type seconds.\n\n"
+         "match the stock clip, loop your file to it, speed your file to it, keep your "
+         "file's full length, or type seconds.\n\n"
          "- A clip with its own length shows it after the **Length** cell.\n"
+         "- **Vs stock** shows how much longer (+) or shorter (−) your file runs than "
+         "the stock clip and the speed change that would make it run exactly as long, "
+         "like −0.25 s • 2.5% slower. Click its header to sort by it.\n"
+         "- **Speed my file to the stock clip's length** slows a shorter file down (or "
+         "speeds a longer one up) to fill it, with no frozen last frame and no cut; the "
+         "sound keeps its pitch. The Replacement player plays it at that speed.\n"
          "- Trim / pad always measures against the stock clip, even on a replaced "
          "slot.\n"
          "- Clips under a second (a sixth of one Batman card's 6331, down to one-frame "
@@ -807,8 +820,9 @@ HELP_CONTENT = {
             "asked for in the same part of the program). A sound the game picks at random, "
             "or a clip's own audio track, is not listed.",
             "**A clip's song** (Jersey Jack and others): a song clip carries no sound of its "
-            "own; the game plays the song from a separate file. Under the panes the Video tab "
-            "names that file: a sound in the project named after the same song, both at least "
+            "own; the game plays the song from a separate file. Above the players the Video tab "
+            "names that file on one line (hover **Song:** for how it was matched): a sound in the "
+            "project named after the same song, both at least "
             "30 seconds long and about as long as each other. Tick **Play it with the clip** "
             "and it plays along with either player, following its pause, seek and stop, so the "
             "clip looks and sounds the way the machine shows it.",
@@ -1501,6 +1515,101 @@ HELP_CONTENT = {
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
     "Modes": [],
+    "Play Options": [
+        ("What it's for", lambda: _play_options_intro()),
+        ("Handicap per player", [
+            "**Handicap per player** lets each player of a game pick a handicap from "
+            "**-3** (hardest) to **+3** (easiest), so players of different skill can play one game. Tick "
+            "it, then Write. On the machine:\n\n"
+            "1. Start a game and add players as usual.\n"
+            "2. At each player's first ball the top of the screen shows **P1 HANDICAP 0** (P2 for "
+            "player 2, and so on). The **left flipper button** makes it harder, the **right** easier. "
+            "It starts at what that player had in the last game, or at 0 for everyone after a game "
+            "reset with Start and the left flipper button.\n"
+            "3. Plunge: the ball's first score takes the handicap, and it holds for that player until "
+            "the game ends.\n\n"
+            "- **0** is the game's own settings, as the operator set them.\n"
+            "- A level reads the game's own settings easier or harder for that player only: a longer or "
+            "shorter ball save, and the game's difficulty settings (how hard its modes and multiballs "
+            "are to light) a step at a time, more of them at each level. On Godzilla: +1 lights battles "
+            "easier with a longer ball save, +2 adds an easier heat ray and Building Multiball, +3 easier "
+            "tanks, bridge, powerline and jets as well; -1 to -3 the same the other way, and -3 has no "
+            "ball save.\n"
+            "- **Levels…**, under the tick, shows them as a table: a row for each of the game's own "
+            "difficulty settings (the ball save, how hard each mode, multiball and qualifier is, the "
+            "ball save timers) and a column for each level. Each cell says what the app does there "
+            "(app: easier 2); change it to the game's own value, or to any value that setting offers in "
+            "the service menu. **Defaults** puts the app's choices back.\n"
+            "- The machine's settings are never changed: the game reads the player's level while they "
+            "are up.\n"
+            "- The service menu gets a **HANDICAP** row (Adjustments > Machine Settings > Attract Mode, "
+            "or at the end of Standard Adjustments), Off to start with: set it to **On** to play with "
+            "handicaps. Off: no player is asked and the game plays as it always has. A game with no spare "
+            "row left for it has handicaps always on.\n"
+            "- Like the operator's own settings, handicaps keep the card on Insider Connected. With "
+            "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
+            "- In a co-op game each teammate picks one at their first ball.",
+        ]),
+        ("Prolonged Competition", [
+            "**Prolonged Competition** adds the start menu entry Venom and Dungeons & "
+            "Dragons have to any other game whose start menu the app knows. Tick it, then Write:\n\n"
+            "- Hold both flipper buttons in attract to open **CHOOSE YOUR MODE OF PLAY**. The last entry "
+            "reads **COMPETITION / UNTIL POWERED OFF**: pick it with Start and that game and every game "
+            "after it is a Competition game (all randomness removed), exactly as the game's own "
+            "COMPETITION entry makes one game.\n"
+            "- It lasts until the machine is switched off. To end it sooner, pick the same entry again: "
+            "it now reads **STANDARD / ENDS PROLONGED COMPETITION**.\n"
+            "- The machine's settings are never changed.\n"
+            "- On its own it keeps the card on Insider Connected, as the game's own Competition does. With "
+            "modes or co-op play on the same card, the scores stay on the machine as those always do.",
+        ]),
+        ("Score feed", [
+            "**Score feed** has the machine send each game's final scores to a server of "
+            "your own on your network: for a high-score board on a TV, a league sheet, a home automation "
+            "hub. Tick it, type your server's address, then Write:\n\n"
+            "- After every game the machine posts one JSON message to the address: the game, how many "
+            "played, each player's final score, and for each player who was logged in to Insider "
+            "Connected their account's id (the same id every game, so your server can put a name to it). "
+            "A game reset with Start held down mid-game is not sent.\n"
+            "- The address is plain **http://**, your server's **IP address** (like "
+            "`http://192.168.1.50:8080/scores`), as the machine looks no names up and does not do https. "
+            "Your server answers with any 2xx status.\n"
+            "- When the server is off, the machine tries three times, 10 seconds apart, then lets that game "
+            "go. The game itself never waits for it.\n"
+            "- Nothing goes to Stern, and no score is changed. On its own it keeps the card on Insider "
+            "Connected; with modes on the same card, the scores stay off Insider Connected as they always "
+            "do, and still come to your server.\n\n"
+            "A message looks like "
+            "`{\"source\":\"PAD score feed\",\"game\":\"Godzilla Premium/LE 1.16\",\"players\":2,"
+            "\"scores\":[123456780,98765430],\"insider\":[\"3f2a9c1e-...\",null],...}`:\n\n"
+            "| Field | What it holds |\n"
+            "|---|---|\n"
+            "| `game` | the game and its version, as the app names the card |\n"
+            "| `port` | the same, in the app's own short form |\n"
+            "| `game_number` | the games sent since the machine was switched on: 1, 2, 3... |\n"
+            "| `time` | the machine's clock, in Unix seconds (null when it was never set) |\n"
+            "| `players` | how many played |\n"
+            "| `scores` | each player's final score, player 1 first |\n"
+            "| `insider` | each player's Insider Connected account id, null for a player not logged in |\n\n"
+            "**What your server receives (API contract)**, on the Score feed card once it is ticked, shows the "
+            "whole request as the machine sends it to your address, the body laid out, every field with its type, "
+            "and what your server should answer.",
+        ]),
+        ("Inactivity pauses timers", [
+            "**Inactivity pauses timers** shows on Guardians of the Galaxy (Pro and "
+            "LE, 1.15). Its operator menu has the setting **ALLOW INACTIVITY TO PAUSE TIMERS** like every "
+            "Spike 2 game, but the game ignores it. Tick it, then Write, and the card makes it work as "
+            "on Stern's other games:\n\n"
+            "- While the setting is on (it is by default), the missions' clocks and the hurry-ups wait "
+            "when nobody has scored for 6 seconds: a ball held on a flipper, a ball stuck. They run on "
+            "at the next score.\n"
+            "- A mission's clock on this game is its song. The song keeps playing while the clock waits, "
+            "and if a long wait outlasts the song, the clock counts down the rest by itself.\n"
+            "- Turn the setting off in the operator menu and the clocks never wait, as before.\n"
+            "- On its own, it keeps the card's scores on Insider Connected. With modes or co-op play on "
+            "the same card, the scores stay on the machine as those always do.",
+        ]),
+    ],
     "Attract": [
         ("What it's for",
          "Stern Spike 2. Put your own photos, clips and text cards between the screens the game shows in "
@@ -2642,6 +2751,9 @@ HELP_CONTENT = {
             "- **Assets folder** beside it is the Write tab's, shown read only.\n"
             "- **Include my Scenes tab edits** and **Stock colors: leave out my color "
             "profile** appear under it when they apply; hover them for what they do.\n"
+            "- **Leave out of this run** ticks skip chosen kinds of edit (replaced sounds, "
+            "videos or pictures, music modes, random clips, modes) for a quicker Start; a "
+            "Write build always carries everything, and the ticks clear when the app restarts.\n"
             "- **Show it through the machine's screen** draws the game through your "
             "Machine screen (Color profile tab), so this PC shows the colors the "
             "machine's own screen will. It sits next to Boot selector and Topper and "
@@ -2758,7 +2870,10 @@ HELP_CONTENT = {
             "- **Pause** (or F9), in either window or on the bottom bar, freezes the "
             "whole game, video and sound too. **Resume** carries on from that frame. "
             "The bar also has **Restart game** (as on the Emulate tab), Volume and "
-            "Mute.",
+            "Mute.\n"
+            "- **SAVE STATES** in the side panel saves the game into a slot and loads "
+            "it back. What the last ball press or action did shows in the **BALLS** "
+            "section.",
         ]),
         ("Sound and video log", [
             "**Open** beside it under **Windows the emulator opens** shows every sound "
@@ -3148,6 +3263,12 @@ HELP_CONTENT = {
             "round. A card can mix them, say an original with everything of its "
             "own and two variants with their own settings and one table between "
             "them.\n"
+            "- **Share with** under each tick puts the image in the same settings, "
+            "or the same high-score table, as other images you pick: say two "
+            "Original images on one table and four Heisei images on another, two "
+            "of them on one set of settings too. Images are the same game when "
+            "they run the same title (every Godzilla build, stock or modded, is "
+            "Godzilla); images of different games never share.\n"
             "- An image starts from a copy of the shared settings, or of the "
             "shared table, so reset its high scores once in the service menu "
             "when it gets a table of its own.\n"
@@ -3580,12 +3701,13 @@ PREVIEW_HELP = {
                 "button to itself: the game's own language select (PLAYER LANGUAGE SELECT in its "
                 "adjustments) gets the flippers, and the Action button launches, only once the character "
                 "is taken. So: Action picks, the flippers choose the language, then the plunger or Action "
-                "launches; a ball launched before picking takes the one shown. The seconds left count down on the machine, and every flipper press starts them again from the top (so a player can read each character as long as they like; the time only runs out when the flippers are left alone), and the one taken stays on the glass a "
+                "launches. Each player's first ball only comes to the shooter lane once they have picked, so "
+                "neither the Action press that picks nor the game's timed plunger can launch it early. The seconds left count down on the machine, and every flipper press starts them again from the top (so a player can read each character as long as they like; the time only runs out when the flippers are left alone), and the one taken stays on the glass a "
                 "moment saying PICKED. A player on their own gets the pick too: hold the **right flipper button** "
                 "while pressing Start to begin the game (with CO-OP PLAY on, when it is in the service menu). The "
                 "right flipper held through that Start belongs to the pick, so it does not change the game's "
                 "language; let go of it and walk the characters as usual. The machine's top line also says how "
-                "to take one (ACTION/LAUNCH PICKS). The "
+                "to take one (ACTION PICKS). The "
                 "score then goes on the game's own boards, and a Start in ball 1 still adds a teammate. "
                 "**Time to pick** sets how long (30 seconds unless you change it, or "
                 "no time limit). RANDOM picks one nobody has. The box under a character's name takes a smaller "
@@ -3603,10 +3725,16 @@ PREVIEW_HELP = {
                 "it on yet, the dialog says so and the picture shows). **Intro video…** opens each co-op and "
                 "team game with a video of your own, full screen and with its own sound (the video's own "
                 "sound track), in place of the game's own start film; pressing both flipper buttons together "
-                "skips it. Then the ball comes to the shooter lane and waits there; when the game's PLAYER "
-                "LANGUAGE SELECT is on, the top line says the language and the flippers change it, and a few "
-                "seconds after the last press it goes on by itself; and then the character pick opens. It needs no characters: without them the game goes on "
-                "after the language. **When picked…** on a character gives it a short clip (a video, or a "
+                "skips it. On Godzilla it plays in the game's own intro screen, so when the game's PLAYER "
+                "LANGUAGE SELECT is on its language bar shows over the video and a flipper press changes the "
+                "language while it plays. When the intro ends (or is skipped) the character pick opens at "
+                "once, and the first ball comes to the shooter lane only after a character is taken with the "
+                "Action button (then the handicap pick, when handicaps are on). Start adds players while the "
+                "intro plays, as at any other moment before the first ball. It needs no characters: "
+                "without them the ball comes as the intro ends. At a co-op game's end the award cards show "
+                "over the game's End of Ball Bonus loop, with the team's final score in large letters along "
+                "the bottom and the score panels, the power-up meter and the credits line off the screen; "
+                "**Awards video…** plays a video of your own there instead (looped, silent). **When picked…** on a character gives it a short clip (a video, or a "
                 "picture such as a movie poster, shown 3 seconds or as long as its sound, up to 10) that plays "
                 "full screen once a teammate picks it, and a sound (a roar of that era) played at the pick; "
                 "a video with no sound of its own here plays its own. Both flipper buttons cut the clip short. "
@@ -3653,7 +3781,7 @@ PREVIEW_HELP = {
                 "**NO SPECIAL ABILITY**, but none of them changes the game.\n"
                 "- **2 (Enhanced):** the characters' abilities hold, as described above.\n"
                 "- At **1** or **2**, hold both flipper buttons in attract to open the start menu. Besides the "
-                "game's own entries it offers three, each below:\n"
+                "game's own entries it offers these, each below (**ENHANCED STANDARD** at 2 only):\n"
                 "- **CO-OP PLAY:** step to it and press **Start**; each Start in the first ball then adds a "
                 "teammate (or teammates join with the right flipper button held, as above).\n"
                 "- **TEAM PLAY 2 VS 2:** players 1 and 3 play against players 2 and 4, picked the way Stern's "
@@ -3671,71 +3799,20 @@ PREVIEW_HELP = {
                 "who plays both of team 2's turns each ball so both teams get the same number of balls. One Start "
                 "adds all three (**3 PLAYERS ADDED**, **TEAM 1: P1 AND P3**, **TEAM 2: P2**); another Start adds no "
                 "one, and the higher team score goes on a **TEAM 2V1** board of its own.\n"
+                "- **TEAM PLAY 3 VS 1:** the team game for four players: players 1, 3 and 4 against player 2, "
+                "who plays all three of team 2's turns each ball (player 1, player 2, player 3, player 2, player 4, "
+                "player 2). One Start adds all four (**4 PLAYERS ADDED**, **TEAM 1: P1, P3, P4**, **TEAM 2: P2**), "
+                "and the higher team score goes on a **TEAM 3V1** board of its own.\n"
+                "- **ENHANCED STANDARD** (at 2 only): the game's own normal game of competing players, with "
+                "characters. Step to it and press **Start**; each Start in the first ball adds a player, as it "
+                "always does. Every player has their own score and their own progress, nothing shared, and the "
+                "scores go on the game's own high score boards. Each player picks a character at their first ball "
+                "(no two the same), and its ability holds while that player is up.\n"
                 "- A plain **Start** is still a normal one-player game. At 1 or 2 most Insider Connected features "
                 "are off: the card's scores, high scores and achievements stay on the machine.\n"
                 "- **0 (Off):** the game plays and reports to Insider Connected as it always has, on a card "
                 "with no modes. A card that also carries modes keeps its scores off Insider Connected "
                 "either way.",
-            ]),
-            ("Handicap per player", [
-                "**Handicap per player**, under the list, lets each player of a game pick a handicap from "
-                "**-3** (hardest) to **+3** (easiest), so players of different skill can play one game. Tick "
-                "it, then Write. On the machine:\n\n"
-                "1. Start a game and add players as usual.\n"
-                "2. At each player's first ball the top of the screen shows **P1 HANDICAP 0** (P2 for "
-                "player 2, and so on). The **left flipper button** makes it harder, the **right** easier. "
-                "It starts at what that player had in the last game, or at 0 for everyone after a game "
-                "reset with Start and the left flipper button.\n"
-                "3. Plunge: the ball's first score takes the handicap, and it holds for that player until "
-                "the game ends.\n\n"
-                "- **0** is the game's own settings, as the operator set them.\n"
-                "- A level reads the game's own settings easier or harder for that player only: a longer or "
-                "shorter ball save, and the game's difficulty settings (how hard its modes and multiballs "
-                "are to light) a step at a time, more of them at each level. On Godzilla: +1 lights battles "
-                "easier with a longer ball save, +2 adds an easier heat ray and Building Multiball, +3 easier "
-                "tanks, bridge, powerline and jets as well; -1 to -3 the same the other way, and -3 has no "
-                "ball save.\n"
-                "- **Levels…**, under the tick, shows them as a table: a row for each of the game's own "
-                "difficulty settings (the ball save, how hard each mode, multiball and qualifier is, the "
-                "ball save timers) and a column for each level. Each cell says what the app does there "
-                "(app: easier 2); change it to the game's own value, or to any value that setting offers in "
-                "the service menu. **Defaults** puts the app's choices back.\n"
-                "- The machine's settings are never changed: the game reads the player's level while they "
-                "are up.\n"
-                "- The service menu gets a **HANDICAP** row (Adjustments > Machine Settings > Attract Mode, "
-                "or at the end of Standard Adjustments), Off to start with: set it to **On** to play with "
-                "handicaps. Off: no player is asked and the game plays as it always has. A game with no spare "
-                "row left for it has handicaps always on.\n"
-                "- Like the operator's own settings, handicaps keep the card on Insider Connected. With "
-                "modes or co-op play on the same card, the scores stay on the machine as those always do.\n"
-                "- In a co-op game each teammate picks one at their first ball.",
-            ]),
-            ("Prolonged Competition", [
-                "**Prolonged Competition**, under the list, adds the start menu entry Venom and Dungeons & "
-                "Dragons have to any other game whose start menu the app knows. Tick it, then Write:\n\n"
-                "- Hold both flipper buttons in attract to open **CHOOSE YOUR MODE OF PLAY**. The last entry "
-                "reads **COMPETITION / UNTIL POWERED OFF**: pick it with Start and that game and every game "
-                "after it is a Competition game (all randomness removed), exactly as the game's own "
-                "COMPETITION entry makes one game.\n"
-                "- It lasts until the machine is switched off. To end it sooner, pick the same entry again: "
-                "it now reads **STANDARD / ENDS PROLONGED COMPETITION**.\n"
-                "- The machine's settings are never changed.\n"
-                "- On its own it keeps the card on Insider Connected, as the game's own Competition does. With "
-                "modes or co-op play on the same card, the scores stay on the machine as those always do.",
-            ]),
-            ("Inactivity pauses timers", [
-                "**Inactivity pauses timers**, under the list, shows on Guardians of the Galaxy (Pro and "
-                "LE, 1.15). Its operator menu has the setting **ALLOW INACTIVITY TO PAUSE TIMERS** like every "
-                "Spike 2 game, but the game ignores it. Tick it, then Write, and the card makes it work as "
-                "on Stern's other games:\n\n"
-                "- While the setting is on (it is by default), the missions' clocks and the hurry-ups wait "
-                "when nobody has scored for 6 seconds: a ball held on a flipper, a ball stuck. They run on "
-                "at the next score.\n"
-                "- A mission's clock on this game is its song. The song keeps playing while the clock waits, "
-                "and if a long wait outlasts the song, the clock counts down the rest by itself.\n"
-                "- Turn the setting off in the operator menu and the clocks never wait, as before.\n"
-                "- On its own, it keeps the card's scores on Insider Connected. With modes or co-op play on "
-                "the same card, the scores stay on the machine as those always do.",
             ]),
             ("Making a mode", [
                 "**New mode**, over the list, asks how you want to build it, with a "
@@ -4071,6 +4148,23 @@ PREVIEW_HELP = {
         ],
     },
 }
+
+
+def _play_options_intro():
+    """The Play Options tab's opening section. The tab rides the game's modes
+    capability, not the mode maker's switch, so it names the Modes tab (and
+    its co-op play) only while the mode maker is on: a copy where it is a
+    preview again, switched off, shows nothing of it."""
+    from ..core import preview
+    text = ("Options for how the game itself plays and what it reports, without making a mode: a handicap for "
+            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
+            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
+            "**Insider Connected keeps working.** Nothing here changes a score, so ")
+    if not preview.enabled("modes"):
+        return [text + "players keep Insider Connected as before: scores, high scores and achievements."]
+    return [text + "on a card with these and none of your modes or co-op play, players keep Insider Connected "
+            "as before: scores, high scores and achievements. Your own modes and co-op play (on the Modes tab) "
+            "are what keep a card's scores on the machine."]
 
 
 def sections_for(tab_name):

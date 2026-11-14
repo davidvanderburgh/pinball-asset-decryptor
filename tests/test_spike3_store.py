@@ -220,3 +220,56 @@ def test_copy_tree_reader_rebuilds_the_tree_and_shares_objects(tmp_path):
     assert oct(os.stat(t / "tool").st_mode & 0o777) == "0o755"
     assert os.readlink(t / "link") == "sub/a"
     assert objs.new_files == 2 and objs.shared_files == 1
+
+
+def test_the_meter_counts_every_byte_read_and_says_how_long_is_left():
+    """PAD-1238: the Emulate bar sat at 2% through a 20-minute decrypt."""
+    now = [100.0]
+    out = []
+    m = s3store.Meter(100 << 20, every=2.0, out=out.append, clock=lambda: now[0])
+    m.add(1 << 20)                                   # first read: a line at once
+    assert out[-1] == "[s3store] progress 1 1 104 -"
+    now[0] += 1.0
+    m.add(1 << 20)                                   # inside 2 s: no line
+    assert len(out) == 1
+    now[0] += 9.0                                    # 10 s in, 25 MiB read
+    m.add(23 << 20)
+    assert out[-1] == "[s3store] progress 25 26 104 30"
+    m.total = 10                                     # never past 100
+    assert m.line().startswith("[s3store] progress 100 ")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="hardlinks + chown: runs under WSL")
+def test_objects_feed_the_meter_the_bytes_they_read(tmp_path):
+    seen = []
+
+    class _M:
+        def add(self, n):
+            seen.append(n)
+    objs = s3store.Objects(str(tmp_path / "store"), _M())
+    fs = _FakeFs()
+    for n in fs.nodes.values():
+        if "data" in n:
+            n["size"] = len(n["data"])
+    entries, total = s3store.reader_walk(fs)
+    s3store.copy_tree_reader(fs, str(tmp_path / "t"), objs, entries=entries)
+    assert sum(seen) == total == 2 * 10 + 70001
+
+
+@pytest.mark.skipif(os.name != "posix", reason="_FakeFs owns its files by uid: runs under WSL")
+def test_the_total_is_the_bytes_the_copy_reads_not_the_blocks_in_use(tmp_path):
+    """PAD-1238: Fallout's rootfs has 240 MB of blocks and 636 MB of files
+    (hardlinks, holes): the meter's total is the files, read once per name."""
+    fs = _FakeFs()
+    for n in fs.nodes.values():
+        if "data" in n:
+            n["size"] = len(n["data"])
+    entries, nb = s3store.reader_walk(fs)
+    assert nb == 2 * 10 + 70001 and len(entries) == 5
+    src = tmp_path / "src"
+    (src / "lost+found").mkdir(parents=True)
+    (src / "lost+found" / "junk").write_bytes(b"x" * 99)
+    (src / "a").write_bytes(b"12345")
+    (src / "d").mkdir()
+    (src / "d" / "b").write_bytes(b"123")
+    assert s3store.file_bytes(str(src)) == 8

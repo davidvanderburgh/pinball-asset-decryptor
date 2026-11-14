@@ -578,7 +578,7 @@ def _is_card(rec, st, path):
 
 
 def overrides_reason(manifest, card_path, assets_dir, fingerprint,
-                     run_card=None, scene_edits=True):
+                     run_card=None, scene_edits=True, left_out=()):
     """Why the staged override set cannot be reused, or ``""`` if it can.
 
     A sentence rather than a bool: every one of these is worth saying out loud
@@ -615,6 +615,10 @@ def overrides_reason(manifest, card_path, assets_dir, fingerprint,
     if bool(manifest.get("scene_edits", True)) != bool(scene_edits):
         return ("the Scenes tab's edits were switched %s since it was built"
                 % ("on" if scene_edits else "off"))
+    # PAD-1197: the Emulate tab's "Leave out of this run" ticks
+    from ..plugins.stern import run_leave_out
+    if run_leave_out.clean(manifest.get("left_out") or ()) != run_leave_out.clean(left_out):
+        return "what this run leaves out was changed since it was built"
     from ..core import colour_profile
     if str(manifest.get("colour_profile") or "") != colour_profile.signature(
             assets_dir):

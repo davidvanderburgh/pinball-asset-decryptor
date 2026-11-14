@@ -184,6 +184,20 @@ def test_scan_lists_rows_and_the_filters_narrow_them(tmp_path):
         assert len(st["view"]) == 3
         assert w.window.text_status_var.get() == \
             "6 string(s), 0 edited  (3 shown)"
+        # PAD-1261: a scene picked earlier hides the game's own lines from
+        # a search; the status says how many more match under All.
+        w.call("text.set_scene", "Game program")
+        assert w.state("text")["view"] == []
+        assert w.window.text_status_var.get() == \
+            "6 string(s), 0 edited  (0 shown)  3 more matches with " \
+            "Scene: All scenes"
+        w.call("ui.set", "text", "search", "rodan")
+        w.call("text.set_show", "Changed")
+        assert w.window.text_status_var.get() == \
+            "6 string(s), 0 edited  (0 shown)  1 more match with " \
+            "Show: All and Scene: All scenes"
+        w.call("text.set_show", "All")
+        w.call("text.set_scene", "All scenes")
         w.call("ui.set", "text", "search", "")
         w.call("text.set_scene", "Game program")
         assert [w.state("text")["rows"][i]["o"]

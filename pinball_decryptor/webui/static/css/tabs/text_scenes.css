@@ -129,6 +129,10 @@
 .scenes-top { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
 .scenes-top > .scenes-contents { flex: 1 1 auto; min-height: 0; }
 .tree-canvas { position: relative; cursor: default; touch-action: none; outline: none; }
+/* PAD-1211: the frame drawn round it, not a border: a border took 2 px off the inside, so the
+   picture (kept to the screen's shape) sat up to a pixel off the outlines and snap guides
+   (stretched to fill it) and a drag's live picture overshot where the drop put it */
+.tree-canvas { border: none; box-shadow: 0 0 0 1px var(--line-2); }
 .tree-canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .tree-canvas img { position: absolute; inset: 0; user-select: none; pointer-events: none; }
 .tree-canvas canvas.tree-frame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }

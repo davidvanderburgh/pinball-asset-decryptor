@@ -1408,16 +1408,51 @@ def _rate_str(bps):
     return "%d kbps" % round(bps / 1000)
 
 
+def atempo_chain(speed):
+    """An ffmpeg audio filter playing sound *speed* times as fast at its
+    own pitch (PAD-1232).  One ``atempo`` takes 0.5-2.0 on older ffmpeg
+    builds, so a bigger change is a chain of them."""
+    parts = []
+    speed = float(speed)
+    while speed > 2.0:
+        parts.append(2.0)
+        speed /= 2.0
+    while speed < 0.5:
+        parts.append(0.5)
+        speed /= 0.5
+    parts.append(speed)
+    return ",".join("atempo=%.6f" % p for p in parts)
+
+
+def speed_words(mine, stock):
+    """How much a *mine*-second clip is slowed down or sped up to run
+    *stock* seconds, the way the Video tab says it: "2.5% slower",
+    "20% faster", "same speed" (PAD-1232)."""
+    if not mine or not stock:
+        return ""
+    pct = (1.0 - float(mine) / float(stock)) * 100.0
+    if abs(pct) < 0.05:
+        return "same speed"
+    n = abs(pct)
+    num = ("%.1f" % n) if n < 10 else ("%d" % round(n))
+    return "%s%% %s" % (num, "slower" if pct > 0 else "faster")
+
+
 def transcode_video_to(src_path, dst_path, original_info,
                        match_length=False, cancel_cb=None, max_bytes=None,
-                       match_bitrate=None, best_quality=False, colour=None):
+                       match_bitrate=None, best_quality=False, colour=None,
+                       loop=False, stretch=False):
     """Transcode *src_path* into *dst_path*, whose extension selects the
     output container / codec.
 
     Resolution, frame rate, and (where the format allows) the alpha channel
     are matched to *original_info* so the result drops into the slot it
     replaces.  When *match_length* is set, the result is trimmed or padded to
-    the original's duration.  *cancel_cb* (returns truthy to abort) is polled
+    the original's duration; with *loop* too, a shorter source is played
+    over and over until it fills that duration (PAD-1226) instead of holding
+    its last frame; with *stretch* instead, the source is slowed down or sped
+    up (picture and sound together, the sound keeping its pitch) so it runs
+    exactly that duration (PAD-1232).  *cancel_cb* (returns truthy to abort) is polled
     during the encode so a user Cancel stops ffmpeg promptly.  Returns
     ``(ok, actions)`` — *actions* is a short human-readable summary; on
     failure *ok* is False and *actions* is an error.
@@ -1504,12 +1539,37 @@ def transcode_video_to(src_path, dst_path, original_info,
     src_dur = probe_duration(src_path)
     enc_dur = src_dur
     cap_to = None
+    looped = False
+    stretched = ""
     if match_length and original_info and original_info.duration > 0:
         target = original_info.duration
-        if src_dur > target + 0.05:
+        if stretch and src_dur and abs(src_dur - target) > 0.05:
+            # PAD-1232: retime the whole source to the slot's length; -t
+            # still cuts at it, so a rounding frame can't run over.
+            factor = target / src_dur
+            vf.insert(0, "setpts=PTS*%.6f" % factor)
+            if original_info.fps > 0:
+                # resampled here, not only by -r: -r alone dropped a slowed
+                # clip's last frame (1 s at 10 fps slowed to 3 s: 2.9 s)
+                vf.insert(1, "fps=%.4f" % original_info.fps)
+            vf.append("tpad=stop_mode=clone:stop_duration=0.25")
+            stretched = atempo_chain(1.0 / factor)
+            cap_to = target
+            enc_dur = target
+            actions.append("%s %.1fs→%.1fs (%s)" % (
+                "slow" if factor > 1 else "speed up", src_dur, target,
+                speed_words(src_dur, target)))
+        elif src_dur > target + 0.05:
             cap_to = target
             enc_dur = target
             actions.append(f"trim {src_dur:.1f}s→{target:.1f}s")
+        elif src_dur and src_dur < target - 0.05 and loop:
+            # PAD-1226: repeat the whole source (-stream_loop before -i)
+            # and cut the endless stream at the slot's length.
+            looped = True
+            cap_to = target
+            enc_dur = target
+            actions.append(f"loop {src_dur:.1f}s→{target:.1f}s")
         elif src_dur and src_dur < target - 0.05:
             vf.append(
                 f"tpad=stop_mode=clone:stop_duration={target - src_dur:.3f}")
@@ -1572,7 +1632,10 @@ def transcode_video_to(src_path, dst_path, original_info,
                 vbps = max(40_000, int(budget * 8 * hr / enc_dur) - abps)
 
             def build_cmd(pass_no, out, _vbps=vbps, _floored=floored):
-                cmd = [ffmpeg, "-y", "-i", src_path]
+                cmd = [ffmpeg, "-y"]
+                if looped:
+                    cmd += ["-stream_loop", "-1"]
+                cmd += ["-i", src_path]
                 if vf:
                     cmd += ["-vf", ",".join(vf)]
                 if original_info and original_info.fps > 0:
@@ -1602,6 +1665,8 @@ def transcode_video_to(src_path, dst_path, original_info,
                 if silent or pass_no == 1:
                     cmd += ["-an"]
                 else:
+                    if stretched:
+                        cmd += ["-af", stretched]
                     cmd += aargs
                     if budget:
                         cmd += ["-b:a", str(abps)]

@@ -690,9 +690,22 @@ pad_card_ns() {                    # <script> [args...]  -> execs, or returns 0/
 # interpreter names stay because arm-binfmt also matches the chroot's busybox
 # sh in the second or two before ./game execs, and qemu-arm covers a container
 # whose binfmt rewrites argv with its own interpreter path.
+#
+# THE INTERPRETER HAS TO BE THE PROGRAM, NOT A WORD ON THE LINE (PAD-1223).
+# The bare `-f 'arm-binfmt|qemu-arm'` matched ANY command line naming qemu -
+# and a PAD_PIVOT boot runs `cp -f /usr/bin/qemu-arm-static $R/.padqemu/game`
+# a moment before the guest exists. On the first start after WSL comes up the
+# page cache is cold, that copy outlives a 0.25 s poll, watch.sh's start wait
+# took it for the game, and its poll loop then found nothing in the gap before
+# /.padqemu/game exec'd: "the game exited", run stopped, the game coming up a
+# second later with nobody left to show it (Batman 66 in VPX, first launch
+# only). So the name must be argv0 - the interpreter's own path, which is how
+# both binfmt (`/usr/libexec/qemu-binfmt/arm-binfmt-P ./game ...`, measured)
+# and an explicit qemu put it; a cp, ldd or file ON qemu has its own argv0.
+PAD_GUEST_INTERP_RE='^[^ ]*(arm-binfmt|qemu-arm)[^ /]*( |$)'
 pad_guest_up() {
     [ -n "$(pad_pids -x game)" ] && return 0
-    [ -n "$(pad_pids -f 'arm-binfmt|qemu-arm')" ]
+    [ -n "$(pad_pids -f "$PAD_GUEST_INTERP_RE")" ]
 }
 
 # ---- THE GAME'S SPEED (PAD-484), FOR THE SHELL HALF OF THE HARNESS --------
@@ -1198,7 +1211,7 @@ pad_glguest_hash() { pad_src_hash "${1:-$RIG}" $PAD_GLGUEST_SRCS; }
 # platform's SRCS reads the FAST Neuron now (PAD-342), and the BOF hooks
 # and the DP / Spooky launchers (padselect_spk.sh, padselect_proc.sh: PAD-980)
 # because the Makefile installs them by name.
-PAD_SELECT_SRCS="codeselect/codeselect.c codeselect/conf.c codeselect/conf.h codeselect/colour.c codeselect/colour.h codeselect/settings.c codeselect/settings.h codeselect/theme.c codeselect/theme.h codeselect/themes.json codeselect/gen_themes.py codeselect/gfx.c codeselect/gfx.h codeselect/egl_stern.c codeselect/egl_stern.h codeselect/input.c codeselect/input.h codeselect/input_hw.c codeselect/input_padsw.c codeselect/input_jjpio.c codeselect/input_fast.c codeselect/input_pipe.c codeselect/egl_x11.c codeselect/stubs_jjp.c codeselect/audio_pulse.c codeselect/jjp_glibc.h codeselect/padselect.sh codeselect/padselect_bof.sh codeselect/padselect_dp.sh codeselect/padselect_spk.sh codeselect/padselect_proc.sh codeselect/pad_install_bof.sh codeselect/log.c codeselect/log.h codeselect/art.c codeselect/art.h codeselect/audio.c codeselect/audio.h codeselect/audio_fifo.c codeselect/audio_alsa.c codeselect/codec.c codeselect/codec.h codeselect/nvm.c codeselect/nvm.h codeselect/scores.c codeselect/scores.h codeselect/Makefile codeselect/select.sh codeselect/materialize.py codeselect/images.conf.example codeselect/third_party/stb_truetype.h codeselect/third_party/stb_image.h"
+PAD_SELECT_SRCS="codeselect/codeselect.c codeselect/conf.c codeselect/conf.h codeselect/colour.c codeselect/colour.h codeselect/settings.c codeselect/settings.h codeselect/theme.c codeselect/theme.h codeselect/themes.json codeselect/gen_themes.py codeselect/gfx.c codeselect/gfx.h codeselect/egl_stern.c codeselect/egl_stern.h codeselect/input.c codeselect/input.h codeselect/input_hw.c codeselect/input_padsw.c codeselect/input_jjpio.c codeselect/input_fast.c codeselect/input_pipe.c codeselect/egl_x11.c codeselect/stubs_jjp.c codeselect/audio_pulse.c codeselect/jjp_glibc.h codeselect/padselect.sh codeselect/padselect_bof.sh codeselect/padselect_dp.sh codeselect/padselect_spk.sh codeselect/padselect_s3.sh codeselect/padselect_proc.sh codeselect/pad_install_bof.sh codeselect/log.c codeselect/log.h codeselect/art.c codeselect/art.h codeselect/audio.c codeselect/audio.h codeselect/audio_fifo.c codeselect/audio_alsa.c codeselect/codec.c codeselect/codec.h codeselect/nvm.c codeselect/nvm.h codeselect/scores.c codeselect/scores.h codeselect/Makefile codeselect/select.sh codeselect/materialize.py codeselect/images.conf.example codeselect/third_party/stb_truetype.h codeselect/third_party/stb_image.h"
 export PAD_SELECT_SRCS
 
 #: The installed selector, and what it was built from - stamped beside it,

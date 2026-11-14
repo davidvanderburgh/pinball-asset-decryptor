@@ -9881,6 +9881,9 @@ struct nb_stepper {
 };
 static struct nb_stepper nb_steppers[64][NB_STEPPERS];
 static unsigned char nb_stepper_cfg[64];
+/* PAD-1228: where each stepper was last sent, into padled (version 8) for a
+ * reader that shows the mechanism - defined beside led_shm below. */
+static void stepper_publish(unsigned nid, unsigned k, long pos);
 
 static int stepper_on(void)
 {
@@ -9979,6 +9982,7 @@ static void stepper_go(unsigned nid, unsigned k, int going, long to)
     if (s->due == s->start) s->due++;
     if (going == 0) s->homes++;
     else s->moves++;
+    stepper_publish(nid, k, to);
     stepper_switches(nid, s);           /* it leaves the switch it was on */
     snprintf(b, sizeof b, "[stepper] %lu ms node %u motor %u %s %ld -> %ld "
              "(%ld steps), %lu ms\n", pad_ms(), nid, k,
@@ -10137,6 +10141,23 @@ static int stepper_status(unsigned nid, unsigned k, unsigned char *p)
  * inputs 38 and 32 - PAD-237's end-stop model already answers its cmd 53 / 54,
  * and 90 s from Start the game sent the fin no move at all.
  *
+ * NOT a motor either (PAD-1239): a HELD coil that a switch lets go. Rush LE's
+ * TROUGH LOCK (node 9 coil 0) is held up until a ball crosses SIDE SCOOP OPTO
+ * (input 16), re-sent with a short 40 every ~258 ms while it waits:
+ *
+ *   cmd 41 `41 00 ff 03 00 50 2c 01 .. [26]=00 .. [30]=d0 ..`
+ *          pulse ff for 3 ticks, then HOLD at 0x50 (byte 7, 300 ticks), and
+ *          byte 30 = 0x80|0x40|16
+ *
+ * Played as a motor, the opto closed 600 ms after the ball landed on LOWER
+ * SIDE SCOOP and stayed closed: the game never kicked the scoop and called
+ * it SIDE SCOOP DEVICE MALFUNCTION (emulator, rush_le 1.19; the reporter's
+ * photos). Every motor rule seen - jaws_le's shark `5a e8 03 00`, rush_le's
+ * topper `46 e8 03 00` [30]=44, pokemon_le's balloon on Spike 3 - runs on a
+ * 1000-tick pulse with NO hold and a plain 0x40 stop byte. So a rule with a
+ * hold power, or 0x80 on its stop byte, is a coil the switch releases, and
+ * the model leaves its switch to the ball.
+ *
  * PAD_COIL_MOTOR=0 turns this off (the comparison run). */
 #define COIL_MOTOR_IDX 16
 
@@ -10198,7 +10219,9 @@ static void coil_motor_note(const unsigned char *p, int n)
     coil_motor_tick(nid);
     if (p[2] == 0x41) {
         signed char stop = -1;
-        if (n >= 31 && (p[30] & 0x40) && !(p[26] & 0x40))
+        /* a stop input, no firing input, no hold and no 0x80 on the stop:
+         * a held coil a switch releases is not a motor (PAD-1239) */
+        if (n >= 31 && (p[30] & 0x40) && !(p[30] & 0x80) && !(p[26] & 0x40) && !p[7])
             stop = (signed char)(p[30] & 0x3f);
         if (stop == c->stop) return;        /* the board re-init's re-send */
         if (stop >= 0) {
@@ -12016,11 +12039,22 @@ struct padled_shm {
      * input the board fires it from) - the twin of padled.h; keep in step. */
     unsigned char rule_pwr[16][16], rule_in[16][16];
     unsigned rule_sets;
+    /* Version 8 (PAD-1228), each node-board stepper's place - the twin of
+     * padled.h, which carries the meaning; keep the two in step. */
+    unsigned char step_cfg[16];
+    int step_pos[16][4];
 };
 #define PADLED_MAGIC 0x44454c50u
 
 static struct padled_shm *led_shm;
 static unsigned led_shm_len;                 /* 4096 (v3), 8192 (v5), 16384 (v6) */
+
+static void stepper_publish(unsigned nid, unsigned k, long pos)
+{
+    if (!led_shm || led_shm_len < 16384 || nid >= 16 || k >= 4) return;
+    led_shm->step_pos[nid][k] = (int)pos;
+    led_shm->step_cfg[nid] |= (unsigned char)(1u << k);
+}
 static unsigned char led_known[16][96];      /* seen in the boot enumeration */
 /* The same enumeration IN ORDER, which is what a bitmap frame indexes into:
  * led_order[node][k] is the LED index the board announced k-th. */
@@ -12101,10 +12135,11 @@ static void led_map(void)
     led_shm->magic = PADLED_MAGIC;
     /* 4 adds the addressed plane, 5 the coil drive block (PAD-381), 6 the
      * strip boards' banks past the first (PAD-500), 7 each coil's firing rule
-     * (PAD-775); see padled.h. A reader tells them apart by this number, so
-     * it must not claim one over a mapping too small to hold it: 4 and 5 fit
-     * in two pages, 6 and 7 need four. */
-    led_shm->version = (led_shm_len >= 16384) ? 7 : (led_shm_len >= 8192) ? 5 : 3;
+     * (PAD-775), 8 each stepper's place (PAD-1228); see padled.h. A reader
+     * tells them apart by this number, so it must not claim one over a
+     * mapping too small to hold it: 4 and 5 fit in two pages, 6 to 8 need
+     * four. */
+    led_shm->version = (led_shm_len >= 16384) ? 8 : (led_shm_len >= 8192) ? 5 : 3;
 }
 
 /* ★ A BANKED STRIP FRAME'S LEVELS, INTO VERSION 6's `hi` PLANE (PAD-500).

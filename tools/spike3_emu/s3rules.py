@@ -24,7 +24,10 @@ and the byte count it sums to 0 mod 256 like every node frame:
   [24]     0x40 | the input whose closing fires the coil
   [27]     0x40 | a second input: on both flippers their EOS switch
   [28]     0x40 | the input that STOPS a motor run (a cam motor: no [24];
-           the short cmd 40 starts it, [3..4] is then its time limit)
+           the short cmd 40 starts it, [3..4] is then its time limit). With
+           a hold [5] or 0x80 set it is a HELD coil the switch lets go, not a
+           motor (PAD-1239: Spike 2 rush_le's TROUGH LOCK, `ff 03 00 50 2c 01`,
+           [28] = 0xd0, SIDE SCOOP OPTO)
 
   RIGHT FLIPPER  n8 #0  f5 / 4 ticks, hold 1e  in 24 RIGHT FLIPPER BUTTON, EOS 31
   LEFT FLIPPER   n8 #5  f5 / 4 ticks, hold 1e  in 25 LEFT FLIPPER BUTTON,  EOS 16
@@ -75,7 +78,19 @@ def parse(data):
     return {"coil": data[1],
             "pwr": data[2], "pulse": data[3] | data[4] << 8,
             "hold_pwr": data[5], "hold": data[6] | data[7] << 8,
-            "trig": _inp(data[24]), "eos": _inp(data[27]), "stop": _inp(data[28])}
+            "trig": _inp(data[24]), "eos": _inp(data[27]), "stop": _inp(data[28]),
+            "stop_hi": bool(data[28] & 0x80)}
+
+
+def is_motor(r):
+    """A cam motor run to a switch: a stop input, no firing input - and NO
+    hold, and no 0x80 on the stop byte (PAD-1239). Rush LE's TROUGH LOCK is
+    held at 0x50 until a ball crosses SIDE SCOOP OPTO, stop byte 0x80|0x40|16;
+    played as a motor the opto closed with no ball and the game called the
+    scoop a device malfunction. Every motor seen (pokemon_le's balloon,
+    jaws_le's shark, rush_le's topper) runs a 1000-tick pulse, no hold, 0x40."""
+    return (r["stop"] is not None and r["trig"] is None
+            and not r["hold_pwr"] and not r["stop_hi"])
 
 
 def frame_ok(addr, data):
@@ -158,7 +173,8 @@ class Rules:
                 (", hold %d/255" % r["hold_pwr"]) if r["hold_pwr"] else "",
                 (", fired by input %d" % r["trig"]) if r["trig"] is not None else "",
                 (", EOS input %d" % r["eos"]) if r["eos"] is not None else "",
-                (", runs to input %d" % r["stop"]) if r["stop"] is not None else ""))
+                (", %s input %d" % ("runs to" if is_motor(r) else "let go by", r["stop"]))
+                if r["stop"] is not None else ""))
         elif data[0] == 0x40 and len(data) == 3:
             # the short 40: run that coil by its rule, now
             key = (node, data[1])
@@ -166,7 +182,7 @@ class Rules:
             if r is None:
                 return
             self._fire(key, r, "by the game (short cmd 40)")
-            if r["stop"] is not None and r["trig"] is None:
+            if is_motor(r):
                 m = self.motors.setdefault(key, [None, None, 0.0])
                 if m[1] == r["stop"] or (m[1] is None and m[0] == r["stop"]):
                     return                           # already there / on its way

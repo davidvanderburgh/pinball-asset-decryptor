@@ -218,7 +218,31 @@ from .theme import THEMES
 # ISO.  Every builder below takes its backend from the form (``platform``),
 # the panel from the manufacturer the app switched to, and the default is
 # Stern - so every argv the Stern tests pin is unchanged.
-from pinball_decryptor.webui.multiboot_backend import BACKENDS, BOF, DP, JJP, SPOOKY, backend_for
+from pinball_decryptor.webui.multiboot_backend import BACKENDS, BOF, DP, JJP, S3, SPOOKY, backend_for
+
+
+def own_tool(be):
+    """Does *be*'s builder take the shared command line (``--primary`` /
+    ``--extra`` / ``--out`` / ``--selector-dir`` ...; plan / build / verify /
+    inject / media)?  Every update-file tool does, and the Spike 3 card's
+    (PAD-1263)."""
+    be = backend_for(be)
+    return bool(be.update_file or be.own_tool)
+
+
+def s3_key_args(be):
+    """``--keyfile <the user's padkeys.json>`` for a Spike 3 builder step
+    (PAD-1263): it runs as root in the Linux, where ``~/.pad`` is root's, so
+    the path the app keeps (spike3_key.find_keyfile) is handed over.  Only
+    the PATH travels; the key never leaves the file."""
+    if backend_for(be).key != "s3":
+        return []
+    try:
+        from pinball_decryptor.webui.spike3_key import find_keyfile
+        kf = find_keyfile()
+    except Exception:                                    # pragma: no cover
+        kf = None
+    return ["--keyfile", wsl(kf)] if kf else []
 
 #: Where the JJP builder keeps its scratch (a loop-mounted copy of root A, the
 #: re-imaged pieces): a Linux path, never beside the output on a Windows drive.
@@ -2336,6 +2360,19 @@ SCORES_NOTE = (
     "table, so reset its high scores once in the service menu.")
 #: The group name of a title's shared high-score table (PAD-1194).
 SHARED_SCORES = "shared"
+#: PAD-1196: the 'Share with' choice 'No other image': a store or table
+#: this image holds alone - the name it has while no other image holds it,
+#: a new one when it leaves a group.  Never a name on the card (it does not
+#: pass SCORES_NAME_RE).
+NEW_GROUP = "+new"
+#: PAD-1196's 'Share with' label and note in the Edit dialog.
+SHARE_WITH_LABEL = "Share with:"
+SHARE_NOTE = (
+    "Share with puts this image in the same settings store, or the same "
+    "high-score table, as other images (pb_lawww: two Original images on "
+    "one table and four Heisei images on another). Images only share when "
+    "they are the same game: an image of another game named here keeps "
+    "its own.")
 
 
 def row_own_settings(row):
@@ -2343,43 +2380,135 @@ def row_own_settings(row):
     return bool((row.own_scores or "").strip())
 
 
-def row_own_hiscores(row):
-    """PAD-1194: does this image keep a high-score table of its own?  Its
-    ``hiscores`` when that says, else whatever its settings do."""
+def row_store(row):
+    """PAD-1196: the name of the settings store this image boots, "" = the
+    title's shared one.  Images given the same name share that store."""
+    return (row.own_scores or "").strip()
+
+
+def row_table(row):
+    """PAD-1196: the high-score table this image plays into, by name:
+    :data:`SHARED_SCORES` for the title's shared table, else the group
+    (its own store's name when its scores simply go with its settings).
+    Images given the same name share that table."""
     h = (row.hiscores or "").strip()
     if not h:
-        return row_own_settings(row)
-    return h != SHARED_SCORES
+        return row_store(row) or SHARED_SCORES
+    return h
 
 
-def set_row_scores(row, own_settings, own_hiscores, others, title=""):
+def row_own_hiscores(row):
+    """PAD-1194: does this image keep a high-score table of its own (alone
+    or with the images it shares a named table with)?"""
+    return row_table(row) != SHARED_SCORES
+
+
+def _share_name(row, kind):
+    """PAD-1196: the store ('settings') or own table ('scores') *row* is in
+    by name, "" when it shares the title's."""
+    if kind == "settings":
+        return row_store(row)
+    return row_table(row) if row_own_hiscores(row) else ""
+
+
+def set_row_scores(row, own_settings, own_hiscores, others, title="",
+                   settings_with="", scores_with=""):
     """PAD-1194: the two ticks -> the row's ``own_scores`` (its store) and
     ``hiscores`` (its table, when that is not simply its store's).  Names are
     made from the title the first time and KEPT, so renaming the image never
     strands what the machine holds; ``others`` are the rows whose names this
-    one must not take."""
+    one must not take.
+
+    PAD-1196: ``settings_with`` / ``scores_with`` are the 'Share with'
+    choices: "" keeps the name the row has (a new one when it has none),
+    :data:`NEW_GROUP` one no other row holds (the one it has when nobody
+    else does), and any other name puts it in that store / table beside the
+    images that hold it.  Calling it again with the same choices changes
+    nothing, so the dialog can write through on every keystroke."""
+    others = list(others)
     taken = {SHARED_SCORES}
     for r in others:
         taken.add((r.own_scores or "").strip())
         taken.add((r.hiscores or "").strip())
     taken.discard("")
+    base = title or row.title
+    had_table = _share_name(row, "scores")
+    old_store = row_store(row)
+
+    def held(name):
+        return any(name in (_share_name(r, "settings"), _share_name(r, "scores"))
+                   for r in others)
+
+    def fresh():
+        name = scores_name_for(base, taken)
+        taken.add(name)
+        return name
+
+    sw = (settings_with or "").strip()
     if not own_settings:
         row.own_scores = ""
-    elif not (row.own_scores or "").strip():
-        row.own_scores = scores_name_for(title or row.title, taken)
-        taken.add(row.own_scores)
-    if own_hiscores == own_settings:
-        row.hiscores = ""
+    elif sw == NEW_GROUP:
+        if not old_store or held(old_store):
+            row.own_scores = fresh()
+    elif sw and SCORES_NAME_RE.match(sw):
+        row.own_scores = sw
+    elif not old_store:
+        row.own_scores = fresh()
+    taken.add(row_store(row))
+    store = row_store(row) or SHARED_SCORES
+
+    tw = (scores_with or "").strip()
+    if not own_hiscores:
+        table = SHARED_SCORES
+    elif tw == NEW_GROUP:
+        if had_table and not held(had_table):
+            table = had_table
+        elif row_store(row) and not held(row_store(row)):
+            table = row_store(row)
+        else:
+            table = fresh()
+    elif tw and SCORES_NAME_RE.match(tw):
+        table = tw
+    elif had_table and had_table != old_store:
+        table = had_table           # a named table it already plays into
     elif own_settings:
-        row.hiscores = SHARED_SCORES
-    elif (row.hiscores or "").strip() in ("", SHARED_SCORES):
-        row.hiscores = scores_name_for(title or row.title, taken)
+        table = store
+    else:
+        table = fresh()
+    row.hiscores = "" if table == store else table
 
 
 def scores_split(row):
     """PAD-1194: True when this image's high scores do not follow its
     settings - the case that needs the selector to hand the table over."""
-    return row_own_hiscores(row) != row_own_settings(row)
+    return row_table(row) != (row_store(row) or SHARED_SCORES)
+
+
+def share_choices(rows, row, kind):
+    """PAD-1196: the Edit dialog's 'Share with' options for *row* (``kind``
+    'settings' or 'scores') as ``[{value, label}]``: 'No other image'
+    (:data:`NEW_GROUP`), then each store or table other images hold, named
+    by those images.  The value is the name on the card."""
+    groups = {}
+    for i, r in enumerate(rows):
+        if r is row or (is_group(r) and r.keep):
+            continue
+        n = _share_name(r, kind)
+        if n:
+            groups.setdefault(n, []).append(
+                (r.title or "").strip() or "image %d" % i)
+    return ([{"value": NEW_GROUP, "label": "No other image"}]
+            + [{"value": n, "label": ", ".join(t)} for n, t in groups.items()])
+
+
+def share_choice_of(rows, row, kind):
+    """PAD-1196: the 'Share with' value the dialog opens on: the name of the
+    store / table *row* shares with another image, else 'No other image'."""
+    n = _share_name(row, kind)
+    if n and any(_share_name(r, kind) == n for r in rows if r is not row
+                 and not (is_group(r) and r.keep)):
+        return n
+    return NEW_GROUP
 
 
 def hiscores_from_card(im):
@@ -2449,13 +2578,7 @@ def hiscores_args(form):
         row = form.images[ri]
         name = ""
         if split:
-            h = (row.hiscores or "").strip()
-            if not row_own_hiscores(row):
-                name = SHARED_SCORES
-            elif h and h != SHARED_SCORES:
-                name = h
-            else:
-                name = (row.own_scores or "").strip()
+            name = row_table(row)
         names.append(name if SCORES_NAME_RE.match(name) else "")
     return ["--hiscores", ";".join(names)] if names else []
 
@@ -2593,7 +2716,7 @@ def prepare_args(form, media_dir, visual_only=False):
     goes to :func:`_jjp_media_args` (the same manifest out of the JJP tool)."""
     if backend_for(form).key == "jjp":
         return _jjp_media_args(form, media_dir, visual_only)
-    if backend_for(form).update_file:
+    if own_tool(form):
         return _bof_media_args(form, media_dir, visual_only)
     args = [SELECTMEDIA, "prepare"] + _media_image_args(form) + [
         "--out", wsl(media_dir),
@@ -2651,8 +2774,8 @@ def plan_args(form):
     Writes nothing.  (``mkjjpmulti.py plan`` for a JJP form: the two ISOs'
     pieces and which USB stick they fit.)"""
     be = backend_for(form)
-    if be.key == "jjp" or be.update_file:
-        args = [be.tool, "plan"] + _image_args(form) + group_roll_args(form)
+    if be.key == "jjp" or own_tool(be):
+        args = [be.tool, "plan"] + _image_args(form) + group_roll_args(form) + s3_key_args(be)
         if form.media_dir:
             args += ["--media-dir", wsl(form.media_dir)]
         if be.key == "dp" and (form.out or "").strip():
@@ -2717,7 +2840,7 @@ def _bof_build_args(form):
         "--volume", str(int(form.volume)),
     ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
         + theme_args(form)
-    args += default_card_args(form)
+    args += default_card_args(form) + s3_key_args(be)
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.media_dir:
@@ -2733,7 +2856,7 @@ def build_args(form):
     to :func:`_jjp_build_args`."""
     if backend_for(form).key == "jjp":
         return _jjp_build_args(form)
-    if backend_for(form).update_file:
+    if own_tool(form):
         return _bof_build_args(form)
     titles, subtitles = game_titles(form)
     args = [MKMULTICARD, "build"] + _image_args(form) + group_roll_args(form) + [
@@ -2786,7 +2909,14 @@ def verify_args(form):
         # the deep check restores root A to scratch: the Linux side, as build
         return ([be.tool, "verify", "--iso", wsl(form.out.strip().strip('"'))]
                 + _image_args(form) + ["--workdir", JJP_WORKDIR + "_verify"])
-    if be.update_file:
+    if be.key == "s3":
+        # a Spike 3 card (PAD-1263): its links, its menu against the installed
+        # one, and every games tree against the card it came from, file by file
+        return ([be.tool, "verify", be.card_flag, wsl(form.out.strip().strip('"'))]
+                + _image_args(form)
+                + ["--selector-dir", platform_selector_dir(form.selector_dir, be)]
+                + s3_key_args(be))
+    if own_tool(be):
         # BOF: the update unpacked as the machine's updater will, every image
         # rebuilt by the paddelta it carries and checked against its md5; a Big
         # Lebowski zip: every member's CRC, the launcher, every card's build
@@ -2814,7 +2944,7 @@ def inject_args(form, card):
     record) - subtitles included, so clearing them clears them."""
     be = backend_for(form)
     titles, subtitles = game_titles(form, be.key)
-    if be.update_file:
+    if own_tool(be):
         # mkbofmulti.py inject --fun: the update unpacked, its menu rewritten,
         # packed and encrypted again over the same file (PAD-342); mkdpmulti.py
         # inject --zip: the zip's menu rewritten, the builds copied across
@@ -2826,7 +2956,7 @@ def inject_args(form, card):
                 "--timeout", str(int(form.timeout)),
                 "--default", str(row_first_image(form, int(form.default))),
                 "--volume", str(int(form.volume))]
-        args += default_card_args(form)
+        args += default_card_args(form) + s3_key_args(be)
         args += (heading_args(form) + text_size_args(form)
                  + menu_text_args(form) + theme_args(form))
         if form.media_dir:
@@ -3160,7 +3290,7 @@ def root_command(args, cwd=None, exe="python3"):
         # tools are copied where root can read them first (PAD-1188)
         def linux_later(_texts):
             return wsl_command_root(args, _linux_root_cwd(cwd), exe)
-        return linux_later
+        return _root.needs_root(linux_later)
 
     def later(_texts):
         return wsl_command_root(args, cwd, exe, home=_root_step_home())
@@ -3190,7 +3320,7 @@ def root_shell_line(line, cwd=None):
         def linux_later(_texts):
             return wsl_shell_root("cd %s && %s"
                                   % (_q(_linux_root_cwd(cwd)), line))
-        return linux_later
+        return _root.needs_root(linux_later)
 
     def later(_texts):
         home = wsl_home()
@@ -3285,8 +3415,9 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
     filesystem at all: see the comment below, where ensureselect.sh unpacks
     one and does install a selector, because nothing can be compiled until
     it has.  No ``$``: wsl.exe would eat it."""
-    if backend_for(platform).update_file:
-        # ensurebofselect.sh / ensuredpselect.sh build the static menu natively - nothing of
+    if own_tool(platform):
+        # ensurebofselect.sh / ensuredpselect.sh build the static menu natively
+        # (ensures3select.sh: the card's aarch64 menu and a native one for this) - nothing of
         # the machine is needed - and, with --preview, never rebuilds an
         # installed one (PAD-342)
         be = backend_for(platform)
@@ -3440,7 +3571,7 @@ def install_selector_line(selector_dir, card="", tool=ENSURESELECT, platform="st
     prints the same ready line, and the preview's, so one step serves both.
     """
     be = backend_for(platform)
-    if be.update_file:
+    if own_tool(be):
         return "bash %s %s %s" % (_q(be.ensure_tool), _q(card or ""),
                                   _q(platform_selector_dir(selector_dir, be)))
     if be.key == "jjp":
@@ -4720,7 +4851,7 @@ def _menu_fields(before, after):
             changed.add("confirm sound")
         # PAD-226: images.conf's scores= lines, which an inject rewrites
         if ((b.own_scores or "").strip() != (a.own_scores or "").strip()
-                or row_own_hiscores(b) != row_own_hiscores(a)):
+                or row_table(b) != row_table(a)):
             changed.add("high scores")
     if _media_value(before.sound_move) != _media_value(after.sound_move):
         changed.add("move sound")
@@ -6775,6 +6906,30 @@ class MultibootPanel:
         "costs its own update zip's files. The gray band at the end is the menu "
         "and the launcher. A FAT32 stick holds at most 4 GB in one file, and the "
         "machine's USB update wants 2.5 times the unpacked size free on its drive.")
+    #: ...and on a Stern Spike 3 machine (PAD-1263).
+    ABOUT_TIP_S3 = ("Builds ONE Spike 3 SD card that holds several card images - "
+                    "two versions of a game, the stock code and your own build - "
+                    "and a menu the machine shows at power-up: NEXT and PREVIOUS "
+                    "on the coin door choose, SELECT boots, and a countdown boots "
+                    "the remembered choice. The first row's card is the base: its "
+                    "boot and system partitions are used as they are, and every "
+                    "image's games go into its games partition, so the card is "
+                    "the same 64 GB as the first one. Building needs your own "
+                    "board's Spike 3 key, the one Extract and Emulate use. "
+                    "Settings and scores are one set for every image. Nothing "
+                    "here touches the card images you pick.")
+    ADD_ROW_TEXT_S3 = "Add another Spike 3 card image…"
+    LIST_TIP_S3 = ("Each row carries its own icons: ✎ edits the image, − takes it "
+                   "out of the card, ▲ / ▼ move it in the menu's order (the "
+                   "outlined arrow means that row cannot go further). The first "
+                   "row is the base card: its boot and system partitions are the "
+                   "new card's. Every row is a Spike 3 card image (.raw) - Stern's, "
+                   "or one PAD wrote.")
+    SIZE_TIP_S3 = (
+        "How full the new card's games partition gets - measured inside the "
+        "card images themselves. The first image's games are already there; "
+        "every other image costs its own games. The gray band is the menu. The "
+        "card image is the same size as the first one (64 GB).")
     #: ...and on a Spooky Pinball game (PAD-980).
     ABOUT_TIP_SPK = ("Builds ONE update of the game's own kind (a .scooby, a "
                      ".beetlejuice, a .looney, an .ed, a tcm or code .pkg) that "
@@ -7164,6 +7319,10 @@ class MultibootPanel:
         #: and PAD-1194's that gives it settings and audits of its own
         self._ed_own_scores = tk.BooleanVar(value=False)
         self._ed_own_settings = tk.BooleanVar(value=False)
+        #: PAD-1196: which other images each of those shares with (a name
+        #: on the card, or NEW_GROUP for one of its own) - share_choices
+        self._ed_settings_with = tk.StringVar(value=NEW_GROUP)
+        self._ed_scores_with = tk.StringVar(value=NEW_GROUP)
         #: What the tick said while it was still a question, so coming back
         #: off a shuffle is the round trip it looks like.  None = nothing to
         #: put back.
@@ -7177,7 +7336,8 @@ class MultibootPanel:
                                self._ed_video, self._ed_anim_start)
         for var in (self._ed_title, self._ed_sub, self._ed_music,
                     self._ed_confirm, self._ed_roll, self._ed_roll_norepeat,
-                    self._ed_own_scores, self._ed_own_settings):
+                    self._ed_own_scores, self._ed_own_settings,
+                    self._ed_settings_with, self._ed_scores_with):
             var.trace_add("write", lambda *_a: self._editor_changed())
         # ...and a write to what the image SHOWS is the one time the row's
         # art and animation are derived again from the dialog's choice.
@@ -7506,7 +7666,8 @@ class MultibootPanel:
     def about_tip(self):
         """The badge's words for the platform the tab is on."""
         return {"jjp": self.ABOUT_TIP_JJP, "bof": self.ABOUT_TIP_BOF,
-                "dp": self.ABOUT_TIP_DP, "spooky": self.ABOUT_TIP_SPK}.get(
+                "dp": self.ABOUT_TIP_DP, "spooky": self.ABOUT_TIP_SPK,
+                "s3": self.ABOUT_TIP_S3}.get(
             self._backend.key, self.ABOUT_TIP)
 
     def _apply_platform_words(self):
@@ -7524,11 +7685,12 @@ class MultibootPanel:
         if sel is not None:
             cur = sel.get().strip()
             defaults = (DEFAULT_SELECTOR_DIR, JJP.selector_default, BOF.selector_default,
-                        DP.selector_default, SPOOKY.selector_default)
+                        DP.selector_default, SPOOKY.selector_default, S3.selector_default)
             if be.key != "stern" and (not cur or cur in defaults):
                 sel.set(be.selector_default)
             elif be.key == "stern" and cur in (JJP.selector_default, BOF.selector_default,
-                                               DP.selector_default, SPOOKY.selector_default):
+                                               DP.selector_default, SPOOKY.selector_default,
+                                               S3.selector_default):
                 sel.set(os.environ.get("PAD_MULTIBOOT_SELECTOR") or DEFAULT_SELECTOR_DIR)
         about = getattr(getattr(self, "_about_badge", None), "icon_tip", None)
         if about is not None:
@@ -7538,7 +7700,8 @@ class MultibootPanel:
         # compact layout or in-place update to explain.  Instance attributes
         # over the class's, so a Stern panel keeps the texts its tests pin.
         cls = type(self)
-        suffix = {"jjp": "_JJP", "bof": "_BOF", "dp": "_DP", "spooky": "_SPK"}.get(be.key, "")
+        suffix = {"jjp": "_JJP", "bof": "_BOF", "dp": "_DP", "spooky": "_SPK",
+                  "s3": "_S3"}.get(be.key, "")
         self.ADD_ROW_TEXT = getattr(cls, "ADD_ROW_TEXT" + suffix)
         self.LIST_TIP = getattr(cls, "LIST_TIP" + suffix)
         self.SIZE_TIP = getattr(cls, "SIZE_TIP" + suffix)
@@ -8411,6 +8574,22 @@ class MultibootPanel:
         return "shared"
 
     def _scores_tip(self, row):
+        tip = self._scores_tip_alone(row)
+        if not tip:
+            return tip
+        # PAD-1196: the other images it shares a named store or table with
+        for kind, what in (("settings", "Shares its settings and audits with: %s."),
+                           ("scores", "Shares its high-score table with: %s.")):
+            mine = share_choice_of(self._rows, row, kind)
+            if mine == NEW_GROUP:
+                continue
+            with_ = [c["label"] for c in share_choices(self._rows, row, kind)
+                     if c["value"] == mine]
+            if with_:
+                tip += " " + what % with_[0]
+        return tip
+
+    def _scores_tip_alone(self, row):
         cell = self._scores_cell(row)
         runs = ("Runs custom modes (%s). " % row.modes) if (row.modes or "").strip() else ""
         if cell == "own":
@@ -8566,6 +8745,10 @@ class MultibootPanel:
             self._ed_roll_norepeat.set(roll_no_repeat(row_roll(row)))
             self._ed_own_settings.set(row_own_settings(row))
             self._ed_own_scores.set(row_own_hiscores(row))
+            self._ed_settings_with.set(
+                share_choice_of(self._rows, row, "settings"))
+            self._ed_scores_with.set(
+                share_choice_of(self._rows, row, "scores"))
             # A still taken off a video with no clip yet (an older form)
             # keeps its second as the clip's start.
             self._ed_anim_start.set(row.anim_start or (
@@ -8640,7 +8823,9 @@ class MultibootPanel:
         set_row_scores(row, bool(self._ed_own_settings.get()),
                        bool(self._ed_own_scores.get()),
                        [r for r in self._rows if r is not row],
-                       row.title or self._ed_title.get())
+                       row.title or self._ed_title.get(),
+                       settings_with=self._ed_settings_with.get(),
+                       scores_with=self._ed_scores_with.get())
 
     def _apply_media(self, i, row):
         """Row *i*'s art and animation <- the dialog's one choice.  'card'
@@ -8760,7 +8945,7 @@ class MultibootPanel:
             # card, and its own music while it is highlighted (mkbofmulti.py
             # media pulls both out of the .fun); the menu-wide confirm sound
             row.art, row.anim, row.music, row.confirm = "auto", "auto", "auto", ""
-        elif be.key in ("dp", "spooky"):
+        elif be.key in ("dp", "spooky", "s3"):
             # PAD-853: a Big Lebowski update has no still or clip the tools can
             # take, so a card is its words until a picture is given; the
             # menu-wide confirm sound.  A Spooky update the same (PAD-980)
@@ -13530,6 +13715,39 @@ class MultibootPanel:
                            on_tick)
         return True
 
+    def _ask_root_first(self, label, texts):
+        """Open the run's root shell before its first step (see
+        :func:`multiboot_root.ask_first`).  ``(0, None)`` to go on, else
+        ``(rc, label)`` with *label* the root step the run stops for."""
+        try:
+            proc = _root.ask_first()
+        except Exception as exc:                        # noqa: BLE001
+            self._append("%s: %s" % (label, exc))
+            return 1, label
+        if proc is None:
+            return 0, None
+        self._append("Asking for your password now, before the run starts, "
+                     "so it can finish on its own.")
+        self._proc, self._proc_preview = proc, False
+        lines = []
+        try:
+            for raw in proc.stdout:
+                lines.append(raw.decode("utf-8", "replace").rstrip())
+        except Exception:                               # noqa: BLE001
+            pass
+        rc = proc.wait()
+        self._proc = None
+        if self._cancelled:
+            return rc or -9, label
+        if rc != 0:
+            texts[label] = "\n".join(lines)
+            for line in lines:
+                self._append(line)
+            self._append("%s: exit %d" % (label, rc))
+            self._say_once(sudo_password_note(texts[label]))
+            return rc, label
+        return 0, None
+
     def _start_worker(self, cmds, on_step, on_done, quiet, preview, on_tick=None):
         """The worker itself - see :meth:`_run_commands`, which owns the
         guards.  Split out so a queued action can be started from the
@@ -13547,7 +13765,19 @@ class MultibootPanel:
             rc = 0
             failed = None
             texts = {}
-            for label, argv in cmds:
+            steps = cmds
+            first_root = (None if preview or sys.platform == "win32"
+                          or _mac.enabled() else _root.wants_root(cmds))
+            if first_root is not None:
+                # THE PASSWORD FIRST: a run with a root step asks for it
+                # before its first step, so the minutes of user steps and
+                # the build itself run with nobody at the keyboard
+                # (PAD-1188: the dialog came up mid-run, went unanswered,
+                # and the build failed).
+                rc, failed = self._ask_root_first(first_root, texts)
+                if failed is not None:
+                    steps = ()
+            for label, argv in steps:
                 if not preview and self._cancelled:
                     # Cancel was pressed between two steps: stop here rather
                     # than start the next tool.

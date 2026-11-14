@@ -72,3 +72,16 @@ are greyed. A card run without a keyfile detects but reports "no key" cleanly.
   work on it: edits go back through the card's own encryption, nothing is
   re-signed (only the boot partition is signed, and it is never touched).
   See `spike3_replace.md`.
+- **Done (PAD-1244):** sounds named and requests mapped as on Spike 2, with no
+  emulator (`spike3_requests.py`). The aarch64 PIE game keeps Spike 2's tables
+  behind `R_AARCH64_RELATIVE` relocations: the registry `{table, count, 32}`
+  finds the request table (last record's list pointer = the table's end), the
+  Sound Test is 48-byte name groups plus a 16-byte `{group, node id}` array
+  (node id = request). `image.bin`'s descriptors are plaintext: header u64
+  @0x20 ends 5 equal pointers per sound id, and each op-11 marker names its
+  record by the directory's `flags_lo | param << 32`. Extract names the files
+  from the Sound Test (Fallout 0.82: 2029 of 2870) and writes
+  `sound_requests.tsv` (2186 of 2298 requests); Auto-transcribe and Auto-name
+  music are on for Spike 3. Read on all six cards on hand (Star Wars ELG,
+  Pokemon and Star Wars 2025 Pro carry only the template Sound Test, so
+  Auto-transcribe does their naming).

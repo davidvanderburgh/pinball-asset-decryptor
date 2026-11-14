@@ -514,6 +514,27 @@ cat "$D/mac/clips_seen_2.jsonl" "$D/mac/sounds_seen_2.jsonl"
 
 
 @needs_bash
+def test_the_windows_stop_reaches_the_tab_for_its_slot():
+    """PAD-1198: the window's Stop emulator (or its X) in the box, as the
+    Mac app's stop_emulator_<slot>.req."""
+    d = _fresh_dir()
+    rc, text = _run_sync(d, r"""
+PAD_SLOT=2
+touch "$D/up"
+ctl_sync & CS=$!
+upto '[ -d "$D/box" ]'
+echo 0 > "$D/box/stop_emulator_0.req"
+upto '[ -f "$D/mac/stop_emulator_2.req" ]' && echo STOP-OUT
+box_down; kill $CS; wait $CS 2>/dev/null
+[ -e "$D/box/stop_emulator_0.req" ] || echo STOP-TAKEN
+echo "STOP=$(cat "$D/mac/stop_emulator_2.req")"
+""")
+    for word in ("STOP-OUT", "STOP-TAKEN", "STOP=2"):
+        assert word in text, (word, text)
+    assert "the playfield window asked to stop the emulator" in text, text
+
+
+@needs_bash
 def test_no_volume_file_setting_syncs_nothing():
     d = _fresh_dir()
     rc, text = _run_sync(d, r"""

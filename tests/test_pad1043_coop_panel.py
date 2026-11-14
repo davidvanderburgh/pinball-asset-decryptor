@@ -91,7 +91,7 @@ MAIN = r"""
 #include <stdio.h>
 static int in_game;
 static unsigned teammates;
-static struct { unsigned turn; int teams; } coop;
+static struct { unsigned turn; int teams; int standard; } coop;   /* standard: PAD-1224 */
 static int pm_in_game(void) { return in_game; }
 static unsigned coop_teammates(void) { return teammates; }
 static unsigned game_getter(unsigned a, unsigned b, unsigned c, unsigned d) { return 1; }   /* the game plays player 1 */

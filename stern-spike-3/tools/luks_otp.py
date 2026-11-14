@@ -78,32 +78,82 @@ def aes_ecb_encrypt(key, data):
     raise RuntimeError("No AES backend available")
 
 
-def aes_xts_decrypt(key, data, sector_no, sector_size=512):
+def aes_xts_decrypt(key, data, sector_no, sector_size=512, tweak_step=1):
     """
     AES-XTS decrypt `data`, broken into `sector_size` chunks, where the first
-    chunk uses tweak = sector_no, the next sector_no+1, etc. (plain64 tweak).
+    chunk uses tweak = sector_no, the next sector_no+tweak_step, etc. (plain64
+    tweak; LUKS steps it by sector_size // 512).
     `key` is the full XTS key (key1||key2), so 64 bytes for AES-256-XTS.
     Returns plaintext.
     """
+    return _xts_run(key, data, sector_no, sector_size, tweak_step, False)
+
+
+def aes_xts_encrypt(key, data, sector_no, sector_size=512, tweak_step=1):
+    return _xts_run(key, data, sector_no, sector_size, tweak_step, True)
+
+
+try:
+    import numpy as _np
+except Exception:                                   # noqa: BLE001
+    _np = None
+
+#: Units from which the whole buffer goes through _xts_bulk (two AES-ECB
+#: calls) instead of one XTS cipher per unit: a cipher per 512 bytes held a
+#: Spike 3 card's first decrypt to ~38 MB/s of CPU (PAD-1238).
+_BULK_MIN_UNITS = 4
+
+
+def _xts_run(key, data, sector_no, sector_size, tweak_step, encrypt):
     assert len(data) % sector_size == 0, "data must be a multiple of sector_size"
+    units = len(data) // sector_size
+    # The bulk path needs only AES-ECB, which pycryptodome has too. The
+    # installed app ships pycryptodome WITHOUT cryptography, and pycryptodome
+    # has no XTS mode, so gating this on cryptography sent every unit to the
+    # pure-Python XTS loop: 2.56 MB/s, a Fallout card's videos took 38 min
+    # (PAD-1241). Without cryptography even one unit goes through here.
+    if (_np is not None and sector_size % 16 == 0 and units
+            and (_BACKEND == "cryptography" or _HAVE_PCD)
+            and (units >= _BULK_MIN_UNITS or _BACKEND != "cryptography")):
+        return _xts_bulk(key, data, sector_no, sector_size, tweak_step, encrypt)
     out = bytearray()
     n = sector_no
     for off in range(0, len(data), sector_size):
         chunk = data[off:off + sector_size]
-        out += _xts_one_unit(key, chunk, n)
-        n += 1
+        out += _xts_one_unit(key, chunk, n, encrypt=encrypt)
+        n += tweak_step
     return bytes(out)
 
 
-def aes_xts_encrypt(key, data, sector_no, sector_size=512):
-    assert len(data) % sector_size == 0, "data must be a multiple of sector_size"
-    out = bytearray()
-    n = sector_no
-    for off in range(0, len(data), sector_size):
-        chunk = data[off:off + sector_size]
-        out += _xts_one_unit(key, chunk, n, encrypt=True)
-        n += 1
-    return bytes(out)
+def _xts_bulk(key, data, sector_no, sector_size, tweak_step, encrypt):
+    """IEEE 1619 XTS over every unit of *data* at once: E_k2 of all the
+    plain64 tweaks in one AES-ECB call, each block's tweak (x alpha per block,
+    GF(2^128), little-endian) in numpy, then one AES-ECB call over the whole
+    buffer with k1. Same bytes as _xts_one_unit, unit for unit."""
+    u8 = _np.dtype("<u8")
+    half = len(key) // 2
+    k1, k2 = key[:half], key[half:]
+    n = len(data) // sector_size
+    m = sector_size // 16                               # blocks per unit
+    tw = _np.zeros((n, 2), dtype=u8)
+    tw[:, 0] = ((_np.arange(n, dtype=u8) * _np.uint64(tweak_step))
+                + _np.uint64(sector_no & 0xFFFFFFFFFFFFFFFF))
+    t0 = _ecb(k2, tw.tobytes(), True)
+    T = _np.empty((n, m, 2), dtype=u8)
+    T[:, 0, :] = _np.frombuffer(t0, dtype=u8).reshape(n, 2)
+    one, sixty3, poly = _np.uint64(1), _np.uint64(63), _np.uint64(0x87)
+    for i in range(1, m):                               # t = t * alpha
+        lo, hi = T[:, i - 1, 0], T[:, i - 1, 1]
+        T[:, i, 1] = (hi << one) | (lo >> sixty3)
+        T[:, i, 0] = (lo << one) ^ ((hi >> sixty3) * poly)
+    x = _np.frombuffer(data, dtype=u8).reshape(n, m, 2) ^ T
+    y = _ecb(k1, x.tobytes(), encrypt)
+    return (_np.frombuffer(y, dtype=u8).reshape(n, m, 2) ^ T).tobytes()
+
+
+def _ecb(key, data, encrypt):
+    """Raw AES-ECB over *data*, from whichever backend is there."""
+    return aes_ecb_encrypt(key, data) if encrypt else _aes_ecb_decrypt(key, data)
 
 
 def _xts_one_unit(key, unit, tweak_no, encrypt=False, sector_size=512):

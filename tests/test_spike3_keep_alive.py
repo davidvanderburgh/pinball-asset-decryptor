@@ -130,10 +130,12 @@ def test_somebody_playing_is_not_tapped_over(fast):
     _launch(b)
     end = time.time() + 1.5
     taps, was = 0, False
-    k = 0
+    hit = time.time()
     while time.time() < end:
-        k += 1
-        if k % 20 == 0:                             # a playfield hit every ~0.1 s
+        # a playfield hit every 0.1 s by the clock: counted in loop turns it ran past
+        # ALIVE_S on a macOS runner, whose 5 ms sleeps run long
+        if time.time() - hit >= 0.1:
+            hit = time.time()
             b.set((9, 3), not b.made((9, 3)))
         b.tick()
         on = any(b.made(nb) for nb in SLINGS)

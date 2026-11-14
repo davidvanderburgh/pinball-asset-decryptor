@@ -1567,3 +1567,177 @@ def test_a_clip_can_choose_its_own_length(tmp_path):
     assert staged == 2 and failures == []
     assert got("a") > 2.7                  # full, whatever the box says
     assert got("b") < 1.3                  # box on: the stock 1 s
+
+
+def test_loop_repeats_a_shorter_source_instead_of_holding_its_last_frame(
+        monkeypatch, tmp_path):
+    # PAD-1226: a 1:29 clip for a 4:56 slot is played over and over to fill
+    # it: -stream_loop before the input, cut at the slot's length, no tpad.
+    from pinball_decryptor.core import video as _video
+    seen = {}
+
+    def _fake_run(cmd, limit, cancel_cb=None):
+        seen["cmd"] = list(cmd)
+        return 0, "", None
+    monkeypatch.setattr(_video, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(_video, "_run_ffmpeg_watched", _fake_run)
+    monkeypatch.setattr(_video, "probe_duration", lambda _p: 89.0)
+    dst = tmp_path / "out.mov"
+    dst.write_bytes(b"x")
+    info = _video.VideoInfo(path="slot.mov", vcodec="h264", width=1360,
+                            height=768, fps=30.0, duration=296.0,
+                            has_audio=False, pix_fmt="yuv420p")
+    ok, detail = _video.transcode_video_to(str(tmp_path / "src.mp4"),
+                                           str(dst), info, match_length=True,
+                                           loop=True)
+    cmd = seen["cmd"]
+    assert ok and "loop 89.0s→296.0s" in detail
+    i = cmd.index("-stream_loop")
+    assert cmd[i + 1] == "-1" and cmd[i + 2] == "-i"
+    assert cmd[cmd.index("-t") + 1] == "296.000"
+    assert not any("tpad" in c for c in cmd)
+    # without loop the same clip still holds its last frame
+    _video.transcode_video_to(str(tmp_path / "src.mp4"), str(dst), info,
+                              match_length=True)
+    assert "-stream_loop" not in seen["cmd"]
+    assert any("tpad" in c for c in seen["cmd"])
+
+
+def test_a_clip_can_loop_to_the_stock_length(tmp_path):
+    # PAD-1226: "loop" fills a longer slot by repeating the replacement, cuts
+    # a longer replacement like "stock" does, and switching a clip between
+    # "stock" and "loop" converts it again rather than keeping the last one.
+    from pinball_decryptor.core.video import (detect_video_info, find_ffmpeg,
+                                              find_ffprobe)
+    if not (find_ffmpeg() and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    assets = str(tmp_path / "assets")
+    for name in ("long", "short"):
+        if not _make_testsrc(os.path.join(assets, "video", name + ".mov"),
+                             seconds=3.0 if name == "long" else 1.0,
+                             ext="mov"):
+            pytest.skip("ffmpeg could not render the test clip")
+    rep1 = str(tmp_path / "one.mp4")
+    rep2 = str(tmp_path / "two.mp4")
+    if not (_make_testsrc(rep1, seconds=1.0, width=320, height=240)
+            and _make_testsrc(rep2, seconds=2.0, width=320, height=240)):
+        pytest.skip("ffmpeg could not render the replacement clips")
+    rels = {"video/long.mov": rep1, "video/short.mov": rep2}
+    got = lambda n: detect_video_info(
+        os.path.join(assets, "video", n + ".mov")).duration
+
+    slots = {s.rel_path: s for s in scan_video_slots(assets)}
+    logs = []
+    staged, failures = stage_replacements(
+        slots, rels, assets_dir=assets,
+        length_overrides={rel: "loop" for rel in rels},
+        log_cb=lambda t, l="info": logs.append(t))
+    assert staged == 2 and failures == []
+    assert any("loop 1.0s→3.0s" in t for t in logs), logs
+    assert any("trim 2.0s→1.0s" in t for t in logs), logs
+    assert 2.8 < got("long") < 3.3          # 1 s looped three times
+    assert 0.8 < got("short") < 1.3         # a longer file is still cut
+
+    slots = {s.rel_path: s for s in scan_video_slots(assets)}
+    logs = []
+    stage_replacements(slots, rels, assets_dir=assets,
+                       length_overrides={rel: "stock" for rel in rels},
+                       log_cb=lambda t, l="info": logs.append(t))
+    assert any("pad 1.0s→3.0s" in t for t in logs), logs
+    assert 2.8 < got("long") < 3.3
+
+
+def test_stretch_retimes_the_source_to_the_slot_length(monkeypatch, tmp_path):
+    # PAD-1232: a 9.75 s clip for a 10 s slot is slowed 2.5% (setpts on the
+    # picture, atempo on the sound so it keeps its pitch) and cut at the
+    # slot's length; a longer one is sped up the same way instead of cut.
+    from pinball_decryptor.core import video as _video
+    seen = {}
+
+    def _fake_run(cmd, limit, cancel_cb=None):
+        seen["cmd"] = list(cmd)
+        return 0, "", None
+    monkeypatch.setattr(_video, "find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(_video, "_run_ffmpeg_watched", _fake_run)
+    dst = tmp_path / "out.mp4"
+    dst.write_bytes(b"x")
+    info = _video.VideoInfo(path="slot.mp4", vcodec="h264", width=1360,
+                            height=768, fps=30.0, duration=10.0,
+                            has_audio=True, pix_fmt="yuv420p")
+    monkeypatch.setattr(_video, "probe_duration", lambda _p: 9.75)
+    ok, detail = _video.transcode_video_to(str(tmp_path / "src.mp4"),
+                                           str(dst), info, match_length=True,
+                                           stretch=True)
+    cmd = seen["cmd"]
+    assert ok and "slow 9.8s→10.0s (2.5% slower)" in detail, detail
+    vf = cmd[cmd.index("-vf") + 1]
+    assert vf.startswith("setpts=PTS*1.025641,fps=30.0000,")
+    assert cmd[cmd.index("-af") + 1] == "atempo=0.975000"
+    assert cmd[cmd.index("-t") + 1] == "10.000"
+    monkeypatch.setattr(_video, "probe_duration", lambda _p: 12.5)
+    ok, detail = _video.transcode_video_to(str(tmp_path / "src.mp4"),
+                                           str(dst), info, match_length=True,
+                                           stretch=True)
+    assert "speed up 12.5s→10.0s (25% faster)" in detail
+    assert "trim" not in detail
+    # a silent slot drops the sound, so no atempo either
+    info.has_audio = False
+    _video.transcode_video_to(str(tmp_path / "src.mp4"), str(dst), info,
+                              match_length=True, stretch=True)
+    assert "-af" not in seen["cmd"]
+
+
+def test_atempo_chain_and_speed_words():
+    from pinball_decryptor.core.video import atempo_chain, speed_words
+    assert atempo_chain(0.975) == "atempo=0.975000"
+    assert atempo_chain(0.2) == "atempo=0.500000,atempo=0.500000,atempo=0.800000"
+    assert atempo_chain(5.0) == "atempo=2.000000,atempo=2.000000,atempo=1.250000"
+    assert speed_words(9.75, 10.0) == "2.5% slower"
+    assert speed_words(12.0, 10.0) == "20% faster"
+    assert speed_words(10.0, 10.0) == "same speed"
+    assert speed_words(0, 10.0) == ""
+
+
+def test_a_clip_can_be_retimed_to_the_stock_length(tmp_path):
+    # PAD-1232: "stretch" slows a shorter replacement down and speeds a
+    # longer one up to the stock clip's length, and switching a clip from
+    # "stock" to "stretch" converts it again rather than keeping the last one.
+    from pinball_decryptor.core.video import (detect_video_info, find_ffmpeg,
+                                              find_ffprobe)
+    if not (find_ffmpeg() and find_ffprobe()):
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    assets = str(tmp_path / "assets")
+    for name in ("long", "short"):
+        if not _make_testsrc(os.path.join(assets, "video", name + ".mov"),
+                             seconds=3.0 if name == "long" else 1.0,
+                             ext="mov"):
+            pytest.skip("ffmpeg could not render the test clip")
+    rep1 = str(tmp_path / "one.mp4")
+    rep2 = str(tmp_path / "two.mp4")
+    if not (_make_testsrc(rep1, seconds=1.0, width=320, height=240)
+            and _make_testsrc(rep2, seconds=2.0, width=320, height=240)):
+        pytest.skip("ffmpeg could not render the replacement clips")
+    rels = {"video/long.mov": rep1, "video/short.mov": rep2}
+    got = lambda n: detect_video_info(
+        os.path.join(assets, "video", n + ".mov")).duration
+
+    slots = {s.rel_path: s for s in scan_video_slots(assets)}
+    logs = []
+    stage_replacements(slots, rels, assets_dir=assets,
+                       length_overrides={rel: "stock" for rel in rels},
+                       log_cb=lambda t, l="info": logs.append(t))
+    assert any("pad 1.0s→3.0s" in t for t in logs), logs
+
+    slots = {s.rel_path: s for s in scan_video_slots(assets)}
+    logs = []
+    staged, failures = stage_replacements(
+        slots, rels, assets_dir=assets,
+        length_overrides={rel: "stretch" for rel in rels},
+        log_cb=lambda t, l="info": logs.append(t))
+    assert staged == 2 and failures == []
+    assert any("slow 1.0s→3.0s (67% slower)" in t for t in logs), logs
+    assert any("speed up 2.0s→1.0s (100% faster)" in t for t in logs), logs
+    assert 2.95 < got("long") < 3.05     # every frame, none dropped
+    assert 0.95 < got("short") < 1.05

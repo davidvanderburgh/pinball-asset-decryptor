@@ -33,6 +33,15 @@ State: ``shellx.report`` = ``{"available", "busy", "last", "picture",
 and ``hide_paths``, what the form remembers, through the
 ``on_report_change`` callback; the reports themselves in
 ``reports_cache.json`` beside settings.json.
+
+One report per problem (PAD-1254): Report a problem asks what it is about,
+"Something new" or one of the user's filed reports (the one waiting on
+their answer picked).  About a report, the send is a follow-up on it
+(``problem_report.send_reply(follow_up=True)``): the words, and as files
+the record (facts and the three log tails, ``record_file``) and the
+picture, so it lands on that report's ticket instead of filing a new one.
+The answer box sends the same record with the answer unless "Include the
+app's logs" is unticked.
 """
 
 import logging
@@ -101,6 +110,8 @@ class ReportMixin:
                         "message": m.get("message") or "",
                         "seen": m.get("seen", True),
                         "waiting": problem_report.waiting(m),
+                        "followable": problem_report.followable(m),
+                        "ticket": m.get("ticket") or "",
                         "board": problem_report.board_entry(m)})
         return out
 
@@ -205,7 +216,7 @@ class ReportMixin:
                 out.append(path)
         return out
 
-    def _report_record(self, text, name, hide_paths):
+    def _report_record(self, text, name, hide_paths, kind=""):
         tab = ""
         try:
             tab = self.window.current_tab_key()
@@ -217,10 +228,26 @@ class ReportMixin:
                 "facts": self._report_facts(),
                 "log": problem_report.log_tail(),
                 "vpx_log": problem_report.vpx_log_tail(tab),
+                "vpx_run_log": dict(zip(("name", "lines"),
+                                        problem_report.vpx_run_log_tail(tab))),
                 "text": text or "", "name": name or "",
                 "hide_paths": bool(hide_paths),
                 "paths": self._report_paths(),
-                "picture": self._rep_picture, "at": time.time()}
+                "picture": self._rep_picture, "at": time.time(),
+                "kind": kind}
+
+    def _report_entry(self, rid):
+        for m in self._rep_cache.get("mine") or ():
+            if m.get("id") == rid:
+                return m
+        return None
+
+    def _report_default_about(self):
+        """The report Report a problem is about when it opens: the newest
+        one waiting on the user's answer, else none (Something new)."""
+        asks = [m.get("id") for m in self._rep_cache.get("mine") or ()
+                if problem_report.waiting(m) and problem_report.followable(m)]
+        return asks[-1] if asks else ""
 
     # -------------------------------------------------------------- calls
     @rpc
@@ -242,13 +269,15 @@ class ReportMixin:
                 "name": self._rep_settings.get("name") or "",
                 "hide_paths": bool(self._rep_settings.get("hide_paths", True)),
                 "prefill": prefill or "",
+                "about": self._report_default_about(),
                 "picture": self.get("report", {}).get("picture"),
                 "capture": self._report_can_capture()}
 
     @rpc
-    def report_preview(self, text="", name="", hide_paths=True):
+    def report_preview(self, text="", name="", hide_paths=True, about=""):
         """The record exactly as it would be sent."""
-        report = self._report_record(text, name, hide_paths)
+        report = self._report_record(text, name, hide_paths,
+                                     "follow_up" if about else "")
         return {"text": problem_report.as_text(report)}
 
     @rpc
@@ -353,18 +382,22 @@ class ReportMixin:
                             "kb": (len(data) + 512) // 1024}}
 
     @rpc
-    def report_send(self, text="", name="", hide_paths=True):
+    def report_send(self, text="", name="", hide_paths=True, about=""):
         """Send the report.  Bad input is an :class:`RpcError` with the
         words the form shows.  The send runs off the loop: reached, the
         report joins Your reports and a toast says so; unreachable, the
-        window is told and offers the file."""
+        window is told and offers the file.  *about* a report of the
+        user's, it is a follow-up on that one (PAD-1254)."""
         if self._rep_busy:
             raise RpcError("A report is already on its way.")
-        report = self._report_record(text, name, hide_paths)
+        report = self._report_record(text, name, hide_paths,
+                                     "follow_up" if about else "")
         try:
             problem_report.validate(report)
         except ValueError as e:
             raise RpcError(str(e))
+        if about:
+            return self._report_follow_up(about, report, hide_paths)
         self._save_report_settings(name=report["name"],
                                    hide_paths=bool(hide_paths))
         url = self._report_url()
@@ -394,6 +427,75 @@ class ReportMixin:
         threading.Thread(target=_run, daemon=True,
                          name="pad-problem-report").start()
         return {"sent": True}
+
+    def _report_follow_up(self, rid, report, hide_paths):
+        """Report a problem about one of the user's reports: the words go
+        as the follow-up's message, the record and the picture as its
+        files, off the loop."""
+        m = self._report_entry(rid)
+        if m is None or not problem_report.followable(m):
+            raise RpcError("That report can't take a follow-up. Pick "
+                           "Something new to send this as a report of its "
+                           "own.")
+        self._save_report_settings(name=report["name"],
+                                   hide_paths=bool(hide_paths))
+        url = self._report_url()
+        if not url:
+            raise RpcError("No report service is configured. Save the "
+                           "report as a file instead.")
+        files = []
+        room = problem_report.REPLY_MAX_BYTES
+        p = report.get("picture")
+        if p and p.get("data"):
+            ext = ".jpg" if (p.get("type") or "").endswith("jpeg") else ".png"
+            files.append({"name": "picture" + ext, "type": p.get("type") or "",
+                          "data": p["data"], "size": len(p["data"]),
+                          "trimmed": False})
+            room -= len(p["data"])
+        try:
+            files.insert(0, problem_report.record_file(report, room))
+        except ValueError as e:
+            raise RpcError(str(e))
+        self._rep_busy = True
+        self._rep_last = None
+        self._publish_report()
+        key = config.REPORTS_APP_KEY
+        message = report["text"]
+
+        def _run():
+            try:
+                problem_report.send_reply(url, key, rid, message, files,
+                                          follow_up=True)
+            except problem_report.ReportError as e:
+                self.ctx.loop.post(self._report_failed, str(e), False)
+                return
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                log.info("follow-up not sent: %s", e)
+                self.ctx.loop.post(
+                    self._report_failed,
+                    "The report service can't be reached right now. Save "
+                    "the report as a file and attach it to a message "
+                    "instead.", True)
+                return
+            self.ctx.loop.post(self._report_followed, rid)
+        threading.Thread(target=_run, daemon=True,
+                         name="pad-problem-follow-up").start()
+        return {"sent": True}
+
+    def _report_followed(self, rid):
+        self._rep_busy = False
+        self._rep_picture = None
+        m = self._report_entry(rid) or {}
+        self._rep_last = {"ok": True, "id": rid, "follow_up": True,
+                          "title": m.get("title") or "",
+                          "ticket": m.get("ticket") or ""}
+        # a follow-up that answers a question is that answer
+        self._rep_replies.pop(rid, None)
+        problem_report.note_follow_up_sent(self._rep_cache, rid)
+        problem_report.save_cache(self._rep_path, self._rep_cache)
+        self._publish_report()
+        self._report_show_news()
+        self.toast("Added to your report. Thank you.", "success")
 
     def _report_sent(self, report, out):
         self._rep_busy = False
@@ -624,10 +726,12 @@ class ReportMixin:
         return self._report_replies_view().get(rid)
 
     @rpc
-    def report_reply_send(self, rid="", message=""):
+    def report_reply_send(self, rid="", message="", logs=True):
         """Send the answer to *rid*'s question off the UI loop.  Sent, the
         card says so and the report is back to being worked on; a question
-        no longer open says so and asks after the reports again."""
+        no longer open says so and asks after the reports again.  *logs*
+        (PAD-1254, on unless the box is unticked): the record a report
+        carries, its facts and three log tails, goes as one more file."""
         if not self._report_waiting(rid):
             raise RpcError("This question is no longer open.")
         r = self._report_reply(rid)
@@ -643,11 +747,28 @@ class ReportMixin:
         url = self._report_url()
         if not url:
             raise RpcError("No report service is configured.")
+        files = list(r["files"])
+        if logs:
+            if len(files) >= problem_report.REPLY_FILES:
+                raise RpcError("At most %d files go with an answer: remove "
+                               "one, or untick Include the app's logs."
+                               % problem_report.REPLY_FILES)
+            room = problem_report.REPLY_MAX_BYTES - sum(
+                len(f["data"]) for f in files)
+            report = self._report_record(
+                message, self._rep_settings.get("name") or "",
+                self._rep_settings.get("hide_paths", True), "answer")
+            report["picture"] = None        # the answer's own files carry those
+            try:
+                files.append(problem_report.record_file(report, room))
+            except ValueError:
+                raise RpcError("The files leave no room for the app's logs: "
+                               "remove one, or untick Include the app's "
+                               "logs.")
         r["busy"] = True
         r["error"] = None
         self._publish_report()
         key = config.REPORTS_APP_KEY
-        files = list(r["files"])
 
         def _run():
             try:

@@ -38,7 +38,7 @@ Every Spike 2 card carries a `.sidx`, and every PAD build rewrites the records o
 2. Each file's real size comes from its inode, which is free because the walk already read it. A size that disagrees with the manifest's record marks the file changed. This is the quick check that Card details runs.
 3. Deep check (the after-Extract stamp): every file whose size still agrees is hashed too. That catches same-size swaps; Heisei had one more video, 542 in all, in about 7 s from NVMe.
 4. Diff the result against the release its sidx names. Read the changed radiums to count their pictures that are not in the stock picture set.
-5. Count the manifest records that disagree with the card's files. When there are any, the app says the card's manifest still lists them as Stern's, so PAD did not build it.
+5. Count the manifest records that disagree with the card's files. When there are any, the app says the card's manifest still lists them as Stern's. That does not say who built the card: PAD's own Spike 2 builds left the records of the videos they copied on whole as Stern's until PAD-1242.
 
 The result is "official" or "modified", with counts of scenes, pictures, videos, the sound bank, music banks, the program and other files. A sidx the table does not know is "unknown", and the app says so rather than guessing.
 
@@ -46,7 +46,7 @@ Caveat: the sound bank is repacked by every build, so "the sound bank differs" m
 
 ## Where the app says it
 
-- **Select card / Card details**, Firmware section: an "Official release" row. For example, "Official Godzilla LE 1.16 - every file matches the card Stern released (by the card's manifest and file sizes).", or "Godzilla LE 1.16, modified: differs from the official card in 27 scenes, 66 pictures, 541 videos, the sound bank, the game program. Its own manifest still lists 541 changed files as Stern's, so it was not built by PAD."
+- **Select card / Card details**, Firmware section: an "Official release" row. For example, "Official Godzilla LE 1.16 - every file matches the card Stern released (by the card's manifest and file sizes).", or "Godzilla LE 1.16, modified: differs from the official card in 27 scenes, 66 pictures, 541 videos, the sound bank, the game program. Its own manifest still lists 541 changed files as Stern's."
 - **Extract**: when an extract finishes, the deep check runs in the background. Its verdict is logged ("Source card: ...") and stamped into the project's `.extract_source.json` as `stock`.
 - **Extract / This project**: a "Stock" row. It shows the stamped verdict. An older project with no stamp is answered from its `radium_images.txt` picture names against the release named by its `card_version`. With no version, only an exact match names a release.
 

@@ -19,12 +19,24 @@
  *                      SECOND, on pokemon_le 0.82.0 (glWindow, 0x926c9c:
  *                      index < count_connectors, then connection == 1, else
  *                      "failed to get DRM connector for display_number N")
- *   gbm_bo             a struct of our own; get_fd hands out a dup'd memfd so
- *                      every bo has a distinct fd the EGL shim can map back
- *                      (pad_s3_bo_by_fd) when the game makes an EGL image
+ *   gbm_bo             a struct of our own, each its own memfd; get_fd hands
+ *                      out a dup of it, which the EGL shim maps back to the bo
+ *                      by the file's inode (pad_s3_bo_by_fd, PAD-1201: not by
+ *                      the fd number, which the game closes and gets again)
  *   page flip          pad_s3_flip(bo) -> the GL bridge presents the texture
  *                      that bo's EGL image was bound to (s3gl.c), then the
  *                      flip event is queued and the eventfd made readable
+ *   two screens        PAD-1199: Fallout drives BOTH outputs - its backbox
+ *                      on HDMI-A-2 (display_number 1, opened first) and the
+ *                      Pip-Boy screen on HDMI-A-1 - flipping them in turn.
+ *                      Every flip used to go to the one window, so the two
+ *                      pictures alternated in it frame by frame. Each flip
+ *                      now says which screen it is: the crtc the game shows
+ *                      FIRST is the main window (display 0) and any other
+ *                      crtc is the second window (display 1), so a one-screen
+ *                      title is unchanged whichever output it picks. The
+ *                      flip event hands back the crtc it was asked for, and
+ *                      each crtc keeps its own current fb.
  *
  * Nothing here talks to the host renderer itself; it calls weak hooks in the
  * game's libGLESv2 (the bridge), so a run without the bridge still boots and
@@ -40,6 +52,7 @@
 #include <string.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
@@ -105,6 +118,7 @@ struct gbm_bo {
     struct gbm_device *dev;
     uint32_t w, h, stride, format, flags, handle;
     int dmafd;                    /* our memfd, what gbm_bo_get_fd dups      */
+    dev_t dev_id; ino_t ino;      /* that memfd's identity (pad_s3_bo_by_fd) */
     void *map;                    /* gbm_bo_map's pixels, made on demand     */
     void *user_data;
     void (*destroy_user_data)(struct gbm_bo *, void *);
@@ -113,15 +127,16 @@ union gbm_bo_handle { void *ptr; int32_t s32; uint32_t u32; int64_t s64; uint64_
 
 #define MAXBO 64
 static struct gbm_bo *bos[MAXBO];
-static int bo_fds[MAXBO][8];      /* every fd handed out for each bo         */
 static uint32_t fb_bo[256];       /* fb id -> bo handle                      */
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 
 static int card_fd = -1;          /* the eventfd standing in for card1       */
 static int pend_n;                /* flips queued for drmHandleEvent         */
 static void *pend_data[8];
+static uint32_t pend_crtc[8];     /* the crtc each queued flip was for   */
 static unsigned flip_seq, flips;
-static uint32_t cur_fb;
+static uint32_t cur_fb[NOUT];     /* each crtc's current fb (GetCrtc)        */
+static uint32_t main_crtc;        /* the first crtc shown: the main window   */
 static int scr_w = 1920, scr_h = 1080;
 
 static void say(const char *fmt, ...)
@@ -129,6 +144,22 @@ static void say(const char *fmt, ...)
     char b[400]; va_list ap; int n;
     va_start(ap, fmt); n = vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
     if (n > 0) { if (n > (int)sizeof b - 1) n = sizeof b - 1; (void)!write(2, b, n); }
+}
+
+/* PAD-1201 diagnostic, PAD_S3_KMS_TRACE=N: N lines of flip timing (ms on the
+ * monotonic clock, the calling thread) once the run is past its first 3000
+ * flips, so a run says when the game flips each screen and when it is told
+ * the flip finished. */
+static void ktrace(const char *what, uint32_t crtc, int n)
+{
+    static int left = -1;
+    struct timespec t;
+    if (left < 0) { const char *e = getenv("PAD_S3_KMS_TRACE"); left = e ? atoi(e) : 0; }
+    if (!left || flips < 3000) return;
+    left--;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    say("[s3kms] t %ld.%06ld tid %ld %s crtc %u n %d\n", (long)(t.tv_sec % 1000),
+        t.tv_nsec / 1000,(long)syscall(SYS_gettid), what, crtc, n);
 }
 
 static void init_once(void)
@@ -144,7 +175,8 @@ static void init_once(void)
 
 /* hooks into the bridge (s3gl.c, in the game's libGLESv2); weak so the shim
  * works without one */
-extern void pad_s3_present_bo(uint32_t handle, uint32_t w, uint32_t h) __attribute__((weak));
+extern void pad_s3_present_bo(uint32_t handle, uint32_t w, uint32_t h,
+                              uint32_t disp) __attribute__((weak));
 
 /* ---- the device node ---------------------------------------------------- */
 static int is_card(const char *p)
@@ -258,7 +290,7 @@ drmModeCrtc *drmModeGetCrtc(int fd, uint32_t id)
     (void)fd;
     if (id < CRTC_ID || id >= CRTC_ID + NOUT) return NULL;
     c = calloc(1, sizeof *c);
-    c->crtc_id = id; c->buffer_id = cur_fb;
+    c->crtc_id = id; c->buffer_id = cur_fb[id - CRTC_ID];
     c->width = scr_w; c->height = scr_h; c->mode_valid = 1; fill_mode(&c->mode);
     c->gamma_size = 256;
     return c;
@@ -292,35 +324,56 @@ int drmModeRmFB(int fd, uint32_t fb)
     return 0;
 }
 
-static void show_fb(uint32_t fb)
+/* Which window a crtc's pictures go to: 0 = the main one (the first crtc the
+ * game shows), 1 = the second. An id that is no crtc of ours is the main. */
+static uint32_t disp_of(uint32_t crtc)
+{
+    if (crtc < CRTC_ID || crtc >= CRTC_ID + NOUT) return 0;
+    if (!main_crtc) {
+        main_crtc = crtc;
+        say("[s3kms] crtc %u (HDMI-A-%u) is the main window\n", crtc, 1 + crtc - CRTC_ID);
+    }
+    if (crtc == main_crtc) return 0;
+    {
+        static int said;
+        if (!said++)
+            say("[s3kms] crtc %u (HDMI-A-%u) shows too: a second screen, its own window\n",
+                crtc, 1 + crtc - CRTC_ID);
+    }
+    return 1;
+}
+
+static void show_fb(uint32_t crtc, uint32_t fb)
 {
     uint32_t h = (fb >= 100 && fb < 356) ? fb_bo[fb - 100] : 0;
     struct gbm_bo *bo = bo_by_handle(h);
-    cur_fb = fb;
+    uint32_t d = disp_of(crtc);
+    if (crtc >= CRTC_ID && crtc < CRTC_ID + NOUT) cur_fb[crtc - CRTC_ID] = fb;
     flips++;
     if (flips == 1 || flips == 60 || flips % 1800 == 0)
-        say("[s3kms] flip %u: fb %u (bo %u %ux%u)%s\n", flips, fb, h,
-            bo ? bo->w : 0, bo ? bo->h : 0,
+        say("[s3kms] flip %u: crtc %u fb %u (bo %u %ux%u) display %u%s\n", flips, crtc, fb, h,
+            bo ? bo->w : 0, bo ? bo->h : 0, d,
             pad_s3_present_bo ? "" : " - no bridge, nothing shown");
-    if (bo && pad_s3_present_bo) pad_s3_present_bo(h, bo->w, bo->h);
+    if (bo && pad_s3_present_bo) pad_s3_present_bo(h, bo->w, bo->h, d);
 }
 
 int drmModeSetCrtc(int fd, uint32_t crtc, uint32_t fb, uint32_t x, uint32_t y,
                    uint32_t *conns, int count, drmModeModeInfo *mode)
 {
-    (void)fd; (void)crtc; (void)x; (void)y; (void)conns; (void)count; (void)mode;
-    say("[s3kms] SetCrtc fb %u\n", fb);
-    if (fb) show_fb(fb);
+    (void)fd; (void)x; (void)y; (void)conns; (void)count; (void)mode;
+    say("[s3kms] SetCrtc %u fb %u\n", crtc, fb);
+    if (fb) show_fb(crtc, fb);
     return 0;
 }
 
 int drmModePageFlip(int fd, uint32_t crtc, uint32_t fb, uint32_t flags, void *data)
 {
     uint64_t one = 1;
-    (void)fd; (void)crtc; (void)flags;
-    show_fb(fb);
+    (void)fd; (void)flags;
+    ktrace("flip", crtc, 0);
+    show_fb(crtc, fb);
     pthread_mutex_lock(&mu);
-    if (pend_n < 8) pend_data[pend_n++] = data;
+    if (pend_n < 8) { pend_crtc[pend_n] = crtc; pend_data[pend_n++] = data; }
     pthread_mutex_unlock(&mu);
     (void)!write(card_fd, &one, sizeof one);
     return 0;
@@ -330,18 +383,20 @@ int drmHandleEvent(int fd, drmEventContext *ctx)
 {
     uint64_t v;
     void *d[8];
+    uint32_t c[8];
     int n, i;
     struct timespec ts;
     (void)fd;
     (void)!read(card_fd, &v, sizeof v);
     pthread_mutex_lock(&mu);
-    n = pend_n; memcpy(d, pend_data, sizeof d); pend_n = 0;
+    n = pend_n; memcpy(d, pend_data, sizeof d); memcpy(c, pend_crtc, sizeof c); pend_n = 0;
     pthread_mutex_unlock(&mu);
     clock_gettime(CLOCK_MONOTONIC, &ts);
+    ktrace("event", n ? c[0] : 0, n);
     for (i = 0; i < n; i++) {
         flip_seq++;
         if (ctx->version >= 3 && ctx->page_flip_handler2)
-            ctx->page_flip_handler2(card_fd, flip_seq, ts.tv_sec, ts.tv_nsec / 1000, CRTC_ID + 1, d[i]);
+            ctx->page_flip_handler2(card_fd, flip_seq, ts.tv_sec, ts.tv_nsec / 1000, c[i], d[i]);
         else if (ctx->page_flip_handler)
             ctx->page_flip_handler(card_fd, flip_seq, ts.tv_sec, ts.tv_nsec / 1000, d[i]);
     }
@@ -371,8 +426,11 @@ struct gbm_bo *gbm_bo_create(struct gbm_device *dev, uint32_t w, uint32_t h,
     bo->dev = dev; bo->w = w; bo->h = h; bo->format = format; bo->flags = flags;
     bo->stride = w * 4; bo->handle = (uint32_t)i + 1;
     bo->dmafd = (int)syscall(SYS_memfd_create, "pad-s3-bo", 0);
+    {
+        struct stat st;
+        if (bo->dmafd >= 0 && fstat(bo->dmafd, &st) == 0) { bo->dev_id = st.st_dev; bo->ino = st.st_ino; }
+    }
     bos[i] = bo;
-    memset(bo_fds[i], -1, sizeof bo_fds[i]);
     pthread_mutex_unlock(&mu);
     say("[s3kms] gbm_bo_create %ux%u fmt %.4s flags 0x%x -> bo %u\n",
         w, h, (const char *)&format, flags, bo->handle);
@@ -381,12 +439,10 @@ struct gbm_bo *gbm_bo_create(struct gbm_device *dev, uint32_t w, uint32_t h,
 
 void gbm_bo_destroy(struct gbm_bo *bo)
 {
-    int k;
     if (!bo) return;
     if (bo->destroy_user_data) bo->destroy_user_data(bo, bo->user_data);
     pthread_mutex_lock(&mu);
     bos[bo->handle - 1] = NULL;
-    for (k = 0; k < 8; k++) bo_fds[bo->handle - 1][k] = -1;
     pthread_mutex_unlock(&mu);
     if (bo->map) free(bo->map);
     close(bo->dmafd);
@@ -404,26 +460,31 @@ void gbm_bo_set_user_data(struct gbm_bo *bo, void *d, void (*fn)(struct gbm_bo *
 { bo->user_data = d; bo->destroy_user_data = fn; }
 void *gbm_bo_get_user_data(struct gbm_bo *bo) { return bo->user_data; }
 
-int gbm_bo_get_fd(struct gbm_bo *bo)
-{
-    int fd = dup(bo->dmafd), k;
-    pthread_mutex_lock(&mu);
-    for (k = 0; k < 8; k++)
-        if (bo_fds[bo->handle - 1][k] < 0) { bo_fds[bo->handle - 1][k] = fd; break; }
-    pthread_mutex_unlock(&mu);
-    return fd;
-}
+int gbm_bo_get_fd(struct gbm_bo *bo) { return dup(bo->dmafd); }
 
-/* The EGL shim's way back from a dma-buf fd to the bo it is (0 = not ours). */
+/* The EGL shim's way back from a dma-buf fd to the bo it is (0 = not ours).
+ *
+ * BY THE FILE, NOT THE FD NUMBER (PAD-1201). This kept a table of the fd
+ * numbers each bo had handed out and matched the number. The game gets a bo's
+ * fd, makes its EGL image and CLOSES the fd before asking for the next bo's -
+ * so dup() hands the next bo the same number, and the stale entry of the
+ * first bo matched it first. Every image of a triple-buffered screen became
+ * bo 1's (fallout_le: "EGL image of bo 1" three times, then bo 4 three
+ * times); bos 2, 3, 5 and 6 never had a texture and their flips were dropped
+ * in pad_s3_present_bo, so each screen showed one frame in three: 20 fps of
+ * the game's 60, the stutter. Each bo is its own memfd, so the fd's inode
+ * says which bo it is whatever its number. */
 uint32_t pad_s3_bo_by_fd(int fd, uint32_t *w, uint32_t *h)
 {
-    int i, k;
+    int i;
     uint32_t r = 0;
+    struct stat st;
+    if (fstat(fd, &st) != 0) return 0;
     pthread_mutex_lock(&mu);
     for (i = 0; i < MAXBO && !r; i++)
-        if (bos[i])
-            for (k = 0; k < 8; k++)
-                if (bo_fds[i][k] == fd) { r = bos[i]->handle; *w = bos[i]->w; *h = bos[i]->h; break; }
+        if (bos[i] && bos[i]->ino == st.st_ino && bos[i]->dev_id == st.st_dev) {
+            r = bos[i]->handle; *w = bos[i]->w; *h = bos[i]->h;
+        }
     pthread_mutex_unlock(&mu);
     return r;
 }

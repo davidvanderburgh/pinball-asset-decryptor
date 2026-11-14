@@ -178,6 +178,12 @@ card you start from matters:
   table it shares with the other images of the game, or the other way
   round. For example: an original with everything of its own, plus two
   variants that each have their own settings but one table between them.
+- **Share with** under each tick puts the image in the same settings, or
+  the same high-score table, as other images you pick: say two Original
+  images on one table and four Heisei images on another, two of them on
+  one set of settings too. Images are the same game when they run the
+  same title (every Godzilla build, stock or modded, is Godzilla); images
+  of different games never share.
 - An image starts from a copy of the shared settings, or of the shared
   table, so reset its high scores once in the service menu when it gets a
   table of its own.
@@ -274,6 +280,27 @@ here, say). Halloween and Ultraman are one machine, so those two can share one m
 |---|---|
 | Beetlejuice, Scooby-Doo, Evil Dead, Texas Chainsaw Massacre, Looney Tunes, Halloween, Ultraman, Rick and Morty, Alice Cooper's Nightmare Castle | Yes |
 | America's Most Haunted, Rob Zombie, Domino's, Jetsons | No: the game board holds one game, and only the game can read the flippers |
+
+## Stern Spike 3
+
+Pick a Spike 3 card in the app and the Multi-boot tab takes Spike 3 card images
+(`.raw`): Stern's own, or ones you wrote here, say the stock code and your build, or
+two versions of a game. **Build / flash card…** writes one SD card image the same size
+as the first one (64 GB) and can write it to an SD card.
+
+1. **Flash it** onto a 64 GB (or bigger) SD card and put it in the machine.
+2. **Every power-up**: NEXT and PREVIOUS on the coin door choose, SELECT boots, and the
+   countdown boots the image you chose last.
+
+- Building needs your own board's Spike 3 key, the one Extract and Emulate use.
+- The first row's card is the base: the new card keeps its boot and system partitions
+  unchanged. Every image runs on that system.
+- The menu reads only the coin-door buttons (the flippers and START only work once a
+  game is running) and has no sound.
+- All the images share one set of settings and scores.
+- If anything goes wrong, the machine starts the first image.
+- **Run in emulator** boots the card on the Spike 3 emulator, menu first.
+- Building a Spike 3 card needs Windows with WSL2, or Linux.
 
 ## Building on a Mac
 

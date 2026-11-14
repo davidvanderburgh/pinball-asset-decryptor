@@ -34,6 +34,8 @@ ok_name() { case "$1" in ""|*[!A-Za-z0-9_.-]*|.|..) return 1 ;; esac; }
 title_of() {
     local tree
     tree=$(awk '$5 == "/games" {print}' "/proc/$1/mountinfo" | tr ',' '\n' | sed -n 's/^lowerdir=//p' | head -1)
+    # a multi-boot card (PAD-1263): `game` is the menu's hook; img0 names the title
+    if [ -f "$tree/pad/images.conf" ]; then tree=$tree/pad/img0; fi
     basename "$(dirname "$(readlink "$tree/game" 2>/dev/null)")" 2>/dev/null
 }
 

@@ -320,6 +320,12 @@ export default function Vpx() {
             lines: [s.display && s.display.text ? "The game's screen: " + s.display.text + ". The Emulate tab's Game display changes it, live." : ""] })}>
             ${inUse ? inUse.words + "." : "Where you left them: each window opens where you last moved it."}</span>
           <span class="sp"></span>
+          <${Check} checked=${s.lcd_on_top !== false} disabled=${busy || !s.ok} label="Always on top"
+            title=${{ head: "Whether the game's screen stays over every other window.",
+              lines: ["On: over everything, Visual Pinball's full-screen playfield too.",
+                "Off: it goes behind whatever you click, like any window (handy on a desktop).",
+                "An open game's screen changes at once."] }}
+            onChange=${(v) => call("vpx.set_on_top", v)} />
           ${presets.length ? html`<span class="small muted">Set them out:</span>` : null}
           ${presets.map((p) => s.layout === p.key
             ? html`<${Chip} kind="ok" dot sm ...${tip(p.words)}>${p.short || p.key}<//>`

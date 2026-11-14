@@ -22,6 +22,7 @@ const T = {
   csv: "Save the whole audio table (every slot, not just the filtered view) as a CSV — name, length, format, type, replacement and changed-on-disk status — for tracking a big replacement project in a spreadsheet.",
   callouts: "Rename every sound to the words in the text column of this project's callouts.csv, the file Auto-name call-outs writes. Correct the words there (by hand or in a spreadsheet), save it in the project folder, then press this to bring them all back in one go. Each sound keeps its idx number, characters a file name can't hold become _, and the names are remembered for future extracts like a rename in Audio Properties.",
   updCallouts: "The other way round: write every sound's name as it is now into this project's callouts.csv, so names you gave in Audio Properties are kept there too. A row whose sound was renamed gets the new file name and words, a named sound with no row gets one, and rows for sounds this project doesn't have are kept as they are. Makes the file if the project has none. A rename in Audio Properties also updates its own row from now on.",
+  comCallouts: "Take every sound's comment from the comment column of this project's callouts.csv as it is now, after you filled it in by hand, in a spreadsheet or with another tool. Each row finds its sound by its file name, or its idx number when the sound was renamed since. Only the comments change: names, types and the other columns stay as they are. A header of comment, comments or notes all work.",
   type: "Show only one kind of audio — every row matches the Type column, so a filtered list only ever holds that Type. Music = the game's song/bank tracks. Sound FX = effects named by the game's own Sound Test menu. Callouts = spoken lines found by Auto-name call-outs. Other = the rest — short unnamed effects. On a game that identifies no music at all (some pins store their songs as Sound-Test-named sequences), anything 20 seconds or longer counts as Music instead, and the Type column says so.",
   dups: "Group the slots that carry byte-identical factory audio under one row, so every copy of a sound sits together. The first tick scans the sound banks (about ten seconds). The game may play any copy of a duplicated sound, so mod them together — assign a replacement to one copy, then right-click it and choose \"Apply to all copies\".",
   show: "Narrow the list by what you've already done to it. Changed = the slots with a pending replacement or already changed on disk by a previous build. Unchanged = everything you haven't touched yet, so a part-finished pass is what's left in front of you instead of something to scroll past.",
@@ -941,13 +942,15 @@ export default function AudioTab() {
       ${s.shots ? html`<${ShotsButton} g=${s.shots} onOpen=${openShots} />` : null}
       ${s.adv_cap ? html`<${Button} kind="ghost" icon="gear" title=${T.adv} onClick=${openAdv}>${s.adv_marker ? "Advanced…*" : "Advanced…"}<//>` : null}
       <${Button} kind="ghost" icon="more" label="More" busy=${s.profile_busy}
-        title=${"More: Export CSV, Rename from callouts.csv, Update callouts.csv, Clear replacements…, Save / load settings" + (s.modes_share ? ", Save / load music modes" : "") + (s.adv_full ? ", Profile vs stock" : "")}
+        title=${"More: Export CSV, Rename from callouts.csv, Update callouts.csv, Update comments, Clear replacements…, Save / load settings" + (s.modes_share ? ", Save / load music modes" : "") + (s.adv_full ? ", Profile vs stock" : "")}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: T.csv, onClick: () => call("audio.export_csv") },
           { label: "Rename from callouts.csv…", icon: "edit", title: T.callouts, disabled: s.running,
             onClick: () => call("audio.rename_from_callouts") },
           { label: "Update callouts.csv from the names…", icon: "upload", title: T.updCallouts, disabled: s.running,
             onClick: () => call("audio.update_callouts") },
+          { label: "Update comments from callouts.csv…", icon: "edit", title: T.comCallouts,
+            onClick: () => call("audio.comments_from_callouts") },
           { label: "Clear replacements…", icon: "trash", title: T.clear, disabled: !s.can_clear || s.running,
             onClick: () => call("audio.clear_all") },
           { sep: true },

@@ -499,6 +499,18 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   (`{"LightningTarget": {"SLGF": 300.0}}`: Foo Fighters' kick target kicks
   harder; a JSON float is written as a float, an int as an int). The object's
   GameItem stream is replaced, which the MAC does not cover.
+* **Drop targets the tribute made from stand-ups** (PAD-1228). drhotwing's
+  Rush hides three stand-up HitTargets in its own hit subs to make its
+  instrument bank drop; with those subs out of the way the targets stood and
+  the switch only blinked. A `drop` switch may name a `call`, a sub of the
+  map's `extra_vbs` run after the switch is made (`PadDrop sw11`: hide it the
+  tribute's way); the reset coil's sub stands them up and opens the switches.
+* **A mechanism the board turns itself** (PAD-1228). A node board runs its
+  steppers and the game hears only their end switches, so Rush's drum clock
+  stood still. The shim writes each stepper's place into padled (version 8,
+  `coilmap.stepper`); a map's `mechs` (`{"0": {"stepper": [10, 0]}}`) makes
+  `Controller.GetMech(0)` answer it in steps from home, and a map timer turns
+  the table's object by it.
 * **A sound played at a wall stops the table** (PAD-992). JP's
   `PlaySoundAt` pans by the object's `.x`, which a wall, ramp or rubber has
   not: Foo Fighters' first KICK TARGET coil stopped Visual Pinball with
@@ -511,16 +523,33 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   down. A retrofit trigger can sit on a ramp (`surface`; on the playfield a
   ball 80 units up the ramp never meets it) with a `radius`, the reach
   core.vbs's cvpmMagnet takes from it. `PadTMMagnet` is one on Ramp011's top,
-  made a cvpmMagnet in `extra_vbs` that the coil turns on and off. Its own Hit
-  sub takes most of a ball's speed as it comes into a live magnet's field:
-  cvpmMagnet grabs only inside 20 units, at its 10 ms update, and a fast ball
-  crossed that window between two updates.
+  made a cvpmMagnet in `extra_vbs` that the coil turns on and off.
+  PAD-1240: that held the ball on the ramp, halfway up as a player sees it,
+  and let it roll back down at the player. Now the trigger only finds the
+  ball: the map's own hold (a 1 ms `PadTMTimer`) pulls it in past the ramp's
+  end into the time machine and keeps it there at the ramp's height (no
+  floor under it in the tribute). Let go after a real hold (the multiball
+  start: lift ramp up, MAGNET 4-8 s, then a 20 ms pulse; emulator) it is
+  carried back out to where it was caught and rolls back down the ramp
+  (PAD-1250; PAD-1240 sent it out the back onto the left wire return, which
+  read as the machine spitting it onto a ramp); a short ball-search pulse
+  puts a caught ball back at once. PAD-1250: no ball is kept between holds;
+  the one to grab is looked up in `GetBalls` by where it is. A reference kept
+  from the trigger's Hit outlived the ball (moving a ball out of a trigger
+  need not fire UnHit), and the next MAGNET read a drained ball: a runtime
+  error that froze the table.
 * **A scoop the ball passes an opto into** (PAD-910). Rush's side scoop is
   SIDE SCOOP OPTO on the way in and LOWER SIDE SCOOP where the ball rests;
   the game fires SIDE SCOOP only from the lower one. The saucer held the
   opto: the game held its trough lock and waited, the ball sat until a ball
   search, and the opto read stuck. A saucer's `enter` is the opto: the
   kicker pulses it as the ball comes in and holds `switch`.
+* **A gate the game opens instead of kicking** (PAD-1239). Rush's TROUGH
+  LOCK is the side scoop's gate. Sometimes the game holds it open and waits
+  for the ball to roll out past SIDE SCOOP OPTO without firing SIDE SCOOP at
+  all. With no callback the ball sat and the game called the scoop a DEVICE
+  MALFUNCTION. Before you leave a coil's `callback` null, check in a trace
+  what the game waits for after it fires that coil.
 * **Use the RIG's switch table.** The first Rush map came from an older
   reading of the title that numbered every switch one higher: the table
   pressed Tournament Start for Start and filled the jam opto, and the game
@@ -556,6 +585,24 @@ launch over the machine's lights. Their unconditional DOF calls come along
 as a switch's do; a map that needs the originals names the lane trigger in
 `orig_keep`. A table patched with the old wrapper is asked to patch again
 (every such map's `repatch`).
+
+**The table's own playfield sounds come along too** (PAD-1212). A stood-in
+sub carried its DOF but not its sound, so Foo Fighters' drops, targets,
+spinner and trough kick were silent behind the machine (and a cabinet's
+exciters had nothing to shake to). Each stood-in sub's unconditional sound
+statements (`PlaySoundAt "fx_droptarget", dt1`, `PlaySoundAtBall`, a VPW
+table's `RandomSound*` / `Sound*` helpers) follow its pulse, and the trough's
+and saucers' coil subs play what the table played beside its own `.Kick`.
+A `SoundFXDOF(snd, event, state, toy)` in one becomes a `PadDOF` before it and
+`PadFXSound(snd, toy)` in it: the sound plays unless the cabinet's toy stands
+in for it (`DOFeffects` 1), as SoundFXDOF did, and a sound that fails never
+costs the contactor. A sound played AT a wall, ramp or rubber stays out
+(PlaySoundAt reads its `.x`; PAD-992). The drain and the auto plunger play
+their own already. A switch's `"own_sound": false` leaves its sounds to a
+coil's callback (Foo Fighters' kick target); `"also": "<statement>"` runs one
+more thing the stood-in sub did (`LTShake`, the MOD target's paddle). Every
+script carries `SOUNDS_NOTE`; a scripted tribute's copy without it is asked to
+patch again (`vpxsetup.SHADOW_REPATCH`).
 
 **A spinner where the machine has an opto** (PAD-887): a switch's
 `"event": "pass"` takes the spinner's Spin as one pulse a pass, not one a

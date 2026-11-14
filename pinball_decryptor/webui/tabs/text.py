@@ -490,6 +490,20 @@ class TextTab(TabService):
         else:
             extra = "  (%d shown)" % shown if shown != total else ""
             status = "%d string(s), %d edited%s" % (total, edited, extra)
+            # A search the Show / Scene filter narrows (a scene picked
+            # earlier is kept per folder) can come up empty while the
+            # line is right there under All: say so, or the words look
+            # missing from the Text tab altogether (PAD-1261).
+            if query and (want_changed is not None or scene is not None):
+                hidden = sum(1 for r in rows
+                             if R.row_matches(r, query, None, None)) - shown
+                if hidden > 0:
+                    held = [n for n, on in (
+                        ("Show: All", want_changed is not None),
+                        ("Scene: All scenes", scene is not None)) if on]
+                    status += "  %d more match%s with %s" % (
+                        hidden, "" if hidden == 1 else "es",
+                        " and ".join(held))
         self.text_status_var.set(status)
         self.set(view=visible, total=total, edited=edited,
                  sort={"col": col, "desc": desc})
@@ -558,7 +572,7 @@ class TextTab(TabService):
         self._current = i
         locked = self._locked(r)
         if locked:
-            note = game_filled.LOCKED_NOTE
+            note = game_filled.locked_note(r["original"], self._text_rows)
         elif R.row_is_scene(r):
             note = R.scene_note(r, self._scene_name(r["path"]))
         else:
@@ -599,11 +613,16 @@ class TextTab(TabService):
         orig = r["original"]
         new = self.text_new_var.get()
         if new != orig and self._locked(r):
-            compat.messagebox.showinfo("The game writes this line", game_filled.LOCKED_NOTE)
+            compat.messagebox.showinfo("The game writes this line",
+                                       game_filled.locked_note(orig, self._text_rows))
             return False
         if R.row_len(r, new) > R.row_budget(r):
             compat.messagebox.showwarning("Replacement too long",
                                           R.too_long_message(r, new))
+            return False
+        why = R.fill_in_message(r, new)
+        if why:
+            compat.messagebox.showwarning("Keep the game's fill-ins", why)
             return False
         eff = "" if new == orig else new
         if self._apply_all(r):
@@ -1361,7 +1380,8 @@ class TextTab(TabService):
             return None
         new = original if new is None else new
         if new != original and self._locked(rows[0]):
-            compat.messagebox.showinfo("The game writes this line", game_filled.LOCKED_NOTE)
+            compat.messagebox.showinfo("The game writes this line",
+                                       game_filled.locked_note(original, self._text_rows))
             return False
         if R.row_len(rows[0], new) > R.row_budget(rows[0]):
             compat.messagebox.showwarning("Replacement too long",

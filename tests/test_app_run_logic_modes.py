@@ -3089,8 +3089,7 @@ def test_modes_help_names_every_port_and_the_tab_as_it_is(tmp_path):
 
     sections = HD.sections_for("Modes")
     assert [t for t, _b in sections] == [
-        "What it's for", HD.MODES_LIMITS_TITLE, "Which games", "Co-op play", "Handicap per player",
-        "Prolonged Competition", "Inactivity pauses timers", "Making a mode", "Try it",
+        "What it's for", HD.MODES_LIMITS_TITLE, "Which games", "Co-op play", "Making a mode", "Try it",
         "Several modes", "Modes made of blocks", "Modes written in C", "The game's own modes",
         "Cut from a video", "Copy and share", "The rules sheet", "Five things people ask for",
         "Why your mode always gives way", "Sizes", "Before you flash a real machine",

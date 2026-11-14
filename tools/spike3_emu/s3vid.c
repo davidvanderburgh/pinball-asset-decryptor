@@ -54,7 +54,15 @@
 #include "s3vid.h"
 
 #define DRM_FORMAT_YUV420 0x32315559u   /* 'YU12' */
-#define MAXPTS 128
+/* PAD-1230: THE PENDING TIMES MUST HOLD EVERY PACKET IN FLIGHT. A frame
+ * takes the smallest time of the packets sent and not yet out as frames;
+ * the table was 128 while the packet ring alone holds S3VID_PKTS (256) and
+ * the host's ffmpeg pipe more. Fallout reads its backbox clip far ahead, so
+ * the times of ~185 packets fell off the end, the next frames came out
+ * labelled ~7.7 s in the future and the game held its picture until its
+ * clock got there: "the background holds ~7 s once a minute". Now ample,
+ * and a full table says so once. */
+#define MAXPTS 4096
 
 static struct s3vid_feed *feed;
 static struct padvid_shm *vshm;
@@ -72,7 +80,19 @@ static struct stream {
     unsigned long frames, packets;
     unsigned session;                   /* the host run this stream was opened on */
     unsigned epoch;                     /* bumped at each (re)open: releases of */
-} st[S3VID_CHANNELS];                   /* older frames are not this ring's */
+                                        /* older frames are not this ring's */
+    unsigned jam_said;                  /* PAD-1213: read_idx+1 last reported jammed */
+    int npts_peak;                      /* PAD-1230: most packet times pending at once */
+    unsigned long pts_lost;             /* and times dropped on a full table */
+    long drain_since;                   /* PAD-1234: ms (monotonic) a drain began waiting, 0 = not */
+    unsigned eof_flush;                 /* the drain is a teardown (send_packet(NULL)) */
+    unsigned eof_said;                  /* an early EOF reported */
+} st[S3VID_CHANNELS];
+
+/* PAD-1234: how long a drained stream with frames still owed waits for the
+ * next one before it is called ended - well past the host's first frame
+ * (40-60 ms) and the game's own ~275 ms Play() wait */
+#define EOF_WAIT_MS 400
 
 static int slot_fd[S3VID_CHANNELS][PADVID_SLOTS];
 
@@ -173,6 +193,65 @@ static void sayf(const char *fmt, long a, long b, long c)
     if (n > 0) (void)!write(2, m, (size_t)(n < (int)sizeof m ? n : (int)sizeof m - 1));
 }
 
+/* PAD_S3_VID_TRACE=1 (PAD-1230): one stderr line per frame handed to the
+ * game (R), released by it (F) and bound for drawing (B), with wall-clock
+ * ms, so a held picture can be told apart: frames not handed, handed and
+ * not drawn, or drawn and the same. */
+static int trace = -1;
+static void tracef(const char *k, long a, long b, long c, long d)
+{
+    struct timespec t;
+    char m[120];
+    int n;
+    if (trace < 0) { const char *e = getenv("PAD_S3_VID_TRACE"); trace = e && *e && *e != '0' ? (*e == '2' ? 2 : 1) : 0; }
+    if (!trace) return;
+    clock_gettime(CLOCK_REALTIME, &t);
+    n = snprintf(m, sizeof m, "[vt] %s %ld.%03ld %ld %ld %ld %ld\n", k, (long)t.tv_sec,
+                 t.tv_nsec / 1000000, a, b, c, d);
+    if (n > 0) (void)!write(2, m, (size_t)(n < (int)sizeof m ? n : (int)sizeof m - 1));
+}
+
+/* PAD_S3_VID_TRACE=2 (PAD-1234): who released a frame - the words on the
+ * stack that are return addresses into the game's own code (each follows a
+ * BL/BLR there), as offsets into /games/<title>/game, up to six. Names which
+ * of the game's routines threw a frame away. */
+#include <link.h>
+static uintptr_t game_bias, game_lo, game_hi;
+static int game_text(struct dl_phdr_info *i, size_t sz, void *u)
+{
+    int k;
+    (void)sz; (void)u;
+    for (k = 0; k < i->dlpi_phnum; k++)
+        if (i->dlpi_phdr[k].p_type == PT_LOAD && (i->dlpi_phdr[k].p_flags & PF_X)) {
+            uintptr_t a = i->dlpi_addr + i->dlpi_phdr[k].p_vaddr;
+            if (!game_lo || a < game_lo) game_lo = a;
+            if (a + i->dlpi_phdr[k].p_memsz > game_hi) game_hi = a + i->dlpi_phdr[k].p_memsz;
+        }
+    game_bias = i->dlpi_addr;
+    return 1;                                   /* the first object is the program */
+}
+static void trace_callers(const char *k)
+{
+    uintptr_t *sp = (uintptr_t *)__builtin_frame_address(0);
+    char m[200];
+    int n, got = 0, i;
+    if (trace != 2) return;
+    if (!game_hi) dl_iterate_phdr(game_text, 0);
+    n = snprintf(m, sizeof m, "[vt] %s<", k);
+    for (i = 0; i < 1024 && got < 6; i++) {
+        uintptr_t a = sp[i];
+        if (a >= game_lo + 4 && a < game_hi && !(a & 3)) {
+            uint32_t ins = *(uint32_t *)(a - 4);
+            if ((ins & 0xFC000000u) == 0x94000000u || (ins & 0xFFFFFC1Fu) == 0xD63F0000u) {
+                n += snprintf(m + n, sizeof m - (size_t)n, " %lx", (unsigned long)(a - game_bias));
+                got++;
+            }
+        }
+    }
+    n += snprintf(m + n, sizeof m - (size_t)n, "\n");
+    (void)!write(2, m, (size_t)n);
+}
+
 static void *map(const char *path, unsigned long bytes)
 {
     int fd = open(path, O_RDWR);
@@ -245,6 +324,7 @@ static int host_open(int c)
     ch->extra_size = n;
     if (n) memcpy(ch->extra, ctx->extradata, n);
     ch->closed = 0;
+    ch->slotmap_guest = 1;              /* PAD-1213: slots freed as released */
     vshm->ch[c].read_idx = 0;
     st[c].session = feed->session;
     __sync_synchronize();
@@ -366,6 +446,13 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
     if (ch->pkt_w - ch->pkt_r >= S3VID_PKTS) return AVERROR(EAGAIN);
     d = &ch->pkt[ch->pkt_w % S3VID_PKTS];
     if (!pkt || !pkt->data || pkt->size <= 0) {         /* drain */
+        /* PAD-1234: WHO DRAINS. Stern's player drains in two places: its
+         * decode loop at the end of the input, with its own (empty) packet,
+         * and SpiVideoStreamDecoderBase::FlushDecoder, a teardown that sends
+         * NULL and then reads up to 99 frames, freeing each, 0.5 ms apart.
+         * The first must get every frame before EOF; the second must get
+         * its EOF at once, or a stop or seek waits out the whole clip. */
+        if (!pkt) st[c].eof_flush = 1;
         if (st[c].eof_sent) return AVERROR_EOF;
         d->pos = ch->data_w; d->size = 0; d->flags = S3VID_PKT_EOF;
         d->pts_lo = d->pts_hi = 0;
@@ -391,6 +478,10 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
         d->pts_lo = (unsigned)t; d->pts_hi = (unsigned)((uint64_t)t >> 32);
         pthread_mutex_lock(&mu);
         if (st[c].npts < MAXPTS) st[c].pts[st[c].npts++] = t;
+        else if (!st[c].pts_lost++)
+            sayf("[s3vid] ch%ld: %ld packet times pending, the table is full: frames will be mistimed\n",
+                 c, (long)MAXPTS, 0);
+        if (st[c].npts > st[c].npts_peak) st[c].npts_peak = st[c].npts;
         pthread_mutex_unlock(&mu);
     }
     ch->data_w += size;
@@ -400,7 +491,8 @@ int avcodec_send_packet(AVCodecContext *ctx, const AVPacket *pkt)
     return 0;
 }
 
-struct held { int c; unsigned n, epoch; };
+struct held { int c; unsigned n, epoch, slot; };
+typedef char s3vid_slotmap_fits[(int)(S3VID_SLOTMAP - PADVID_SLOTS) + 1];
 
 static void release(void *opaque, uint8_t *data)
 {
@@ -414,11 +506,33 @@ static void release(void *opaque, uint8_t *data)
         return;
     }
     s->released[h->n % 64] = h->n + 1;
+    tracef("F", h->c, h->n, h->slot, 0);
+    trace_callers("F");
+    if (feed->ch[h->c].slotmap_host) {  /* PAD-1213: this frame's slot is free */
+        __sync_synchronize();
+        feed->ch[h->c].slot_busy[h->slot] = 0;
+    }
     /* read_idx follows the frames released IN ORDER: a slot is reused only
      * once every frame before it is gone too */
     while (vshm->ch[h->c].read_idx < s->handed &&
            s->released[vshm->ch[h->c].read_idx % 64] == vshm->ch[h->c].read_idx + 1)
         vshm->ch[h->c].read_idx++;
+    /* PAD-1213: A JAMMED RING SAYS SO. Every slot handed out and the oldest
+     * one still held: the host has nowhere to put the next frame, so the
+     * decoder stops and the game's packets back up ("Unexpected busy error
+     * when SENDING PACKET"). Whether the later frames are already released
+     * tells a game holding ONE frame from one queueing them all. */
+    if (!feed->ch[h->c].slotmap_host &&
+        s->handed - vshm->ch[h->c].read_idx >= PADVID_SLOTS &&
+        s->jam_said != vshm->ch[h->c].read_idx + 1) {
+        unsigned r = vshm->ch[h->c].read_idx, k;
+        long ahead = 0;
+        for (k = r + 1; k < s->handed; k++)
+            if (s->released[k % 64] == k + 1) ahead++;
+        s->jam_said = r + 1;
+        sayf("[s3vid] ch%ld: ring full - frame %ld still held, ", h->c, (long)r, 0);
+        sayf("%ld of the %ld after it released\n", ahead, (long)(s->handed - r - 1), 0);
+    }
     pthread_mutex_unlock(&mu);
     free(data);
     free(h);
@@ -443,24 +557,65 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
         /* DRAINING (send_packet(NULL)): the game reads until AVERROR_EOF
          * against a short timeout of its own ("SpiVideoStreamDecoderBase::
          * FlushDecoder while loop timeout" when the end waited for the host
-         * ffmpeg to exit). So: a frame still coming out gets a moment, and
-         * then the end is the end. */
-        int i;
-        for (i = 0; i < 25 && v->write_idx == st[c].handed && !v->eos; i++) {
+         * ffmpeg to exit), so the end must not wait for that exit.
+         *
+         * PAD-1234: BUT EOF ONLY WHEN THE FRAMES ARE ALL OUT. A short clip
+         * (Transformers' battle and mode clips, 55-100 frames) is sent whole,
+         * drain included, a few ms after its open - before the host has
+         * decoded anything (its first frame comes 40-60 ms after the open).
+         * EOF after a fixed 25 ms told the game's decode thread the clip was
+         * over before it began: it tore the stream down and freed every
+         * frame as it came, its Play() waited 250 polls for a first frame
+         * and gave up ("Play while loop timeout"), and the game opened the
+         * next clip, four a second, the screen black and the game at 6 fps.
+         * Every packet sent leaves a time in the pending table until its
+         * frame comes out, so frames are owed while it is not empty: answer
+         * EAGAIN (the game's decode loop sleeps and asks again), and EOF once
+         * it is empty, the host's decoder has ended, or nothing has come for
+         * EOF_WAIT_MS (a packet that never makes a frame). */
+        struct timespec now;
+        long ms;
+        int owed;
+        if (st[c].eof_flush) {                  /* a teardown: the end is the end */
+            for (i = 0; i < 25 && v->write_idx == st[c].handed && !v->eos; i++) {
+                struct timespec ts = { 0, 1000000 };
+                nanosleep(&ts, 0);
+            }
+            if (v->write_idx == st[c].handed) return AVERROR_EOF;
+            goto frame;
+        }
+        for (i = 0; i < 5 && v->write_idx == st[c].handed && !v->eos; i++) {
             struct timespec ts = { 0, 1000000 };
             nanosleep(&ts, 0);
         }
-        if (v->write_idx == st[c].handed) return AVERROR_EOF;
+        if (v->write_idx == st[c].handed) {
+            pthread_mutex_lock(&mu);
+            owed = st[c].npts;
+            pthread_mutex_unlock(&mu);
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            ms = now.tv_sec * 1000L + now.tv_nsec / 1000000;
+            if (!st[c].drain_since) st[c].drain_since = ms;
+            if (!owed || v->eos || ms - st[c].drain_since >= EOF_WAIT_MS) {
+                if (owed && !st[c].eof_said++)
+                    sayf("[s3vid] ch%ld: drained with %ld frames never decoded (%ld ms)\n",
+                         c, (long)owed, ms - st[c].drain_since);
+                return AVERROR_EOF;
+            }
+            return AVERROR(EAGAIN);
+        }
     }
     if (v->write_idx == st[c].handed) return AVERROR(EAGAIN);
+frame:
+    st[c].drain_since = 0;                      /* a frame: the wait starts over */
     __sync_synchronize();
     n = st[c].handed;
-    slot = n % PADVID_SLOTS;
+    slot = feed->ch[c].slotmap_host ? feed->ch[c].slot_of[n % S3VID_SLOTMAP] % PADVID_SLOTS
+                                    : n % PADVID_SLOTS;
     w = v->width; h = v->height;
     desc = calloc(1, sizeof *desc);
     hd = malloc(sizeof *hd);
     if (!desc || !hd) { free(desc); free(hd); return AVERROR(ENOMEM); }
-    hd->c = c; hd->n = n; hd->epoch = st[c].epoch;
+    hd->c = c; hd->n = n; hd->epoch = st[c].epoch; hd->slot = slot;
     desc->nb_objects = 1;
     desc->objects[0].fd = slot_fd[c][slot];
     desc->objects[0].size = v->frame_bytes;
@@ -500,9 +655,13 @@ int avcodec_receive_frame(AVCodecContext *ctx, AVFrame *frame)
     st[c].frames++;
     pthread_mutex_unlock(&mu);
     frame->pts = frame->best_effort_timestamp = pts;
+    tracef("R", c, n, slot, (long)pts);
     frame->pkt_dts = AV_NOPTS_VALUE;
     if (st[c].frames == 1 || st[c].frames % 600 == 0)
-        sayf("[s3vid] ch%ld: frame %ld (%ld packets in)\n", c, (long)st[c].frames, (long)st[c].packets);
+    {
+        sayf("[s3vid] ch%ld: frame %ld (%ld packets in, ", c, (long)st[c].frames, (long)st[c].packets);
+        sayf("at most %ld packet times pending, %ld lost)\n", (long)st[c].npts_peak, (long)st[c].pts_lost, 0);
+    }
     return 0;
 }
 
@@ -519,6 +678,8 @@ void avcodec_flush_buffers(AVCodecContext *ctx)
     pthread_mutex_lock(&mu);
     st[c].npts = 0;
     st[c].eof_sent = 0;
+    st[c].eof_flush = 0;
+    st[c].drain_since = 0;
     st[c].last_pts = AV_NOPTS_VALUE;           /* a seek: time starts over */
     ch->flush_base = st[c].handed;
     __sync_synchronize();
@@ -565,6 +726,7 @@ int pad_s3_vid_image(unsigned id, unsigned *off, unsigned *w, unsigned *h, unsig
     v = &vshm->ch[c];
     if (!v->width || !v->height || !v->frame_bytes) return 0;
     *off = c * PADVID_SLOTS * PADVID_SLOT_BYTES + s * PADVID_SLOT_BYTES;
+    tracef("B", (long)c, (long)s, (long)v->write_idx, 0);
     *w = v->width; *h = v->height; *bytes = v->frame_bytes;
     return 1;
 }

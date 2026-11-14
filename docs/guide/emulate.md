@@ -80,6 +80,7 @@ is never written to.
   about how long, and asks first when it is a minute or more. Converted
   files are kept, so the next Start redoes only what changed.
 - **The first Start with edits is the longest.** It lays down the edited files for this card and project, and the State line says "Preparing your edits (first time: the longest)". Later Starts on the same card and project only patch what changed, and app updates keep the converted pictures.
+- **Leave out of this run** ticks skip chosen kinds of edit (replaced sounds, videos or pictures, music modes, random clips, modes), so a quick test does not wait on the rest. Write builds always carry everything, and the ticks clear when the app restarts.
 - **Only the files your edits touch are copied** (e.g. `image.bin` and its
   `.sidx` for a replaced sound). A repeat run reuses them.
 - **On a card the app built,** the edits are prepared from the card your
@@ -137,6 +138,7 @@ every insert lit live and every switch clickable.
   clickable switch-list schematic instead, with the same buttons.
 - **Pause** (the Pause key or F9, in either window) freezes the whole game,
   video and sound too. The next press carries on from that frame.
+- **Stop emulator** (bottom left, outlined red) stops the run as the tab's Stop does. Closing the playfield window stops it too.
 
 ### Save states
 
@@ -212,11 +214,13 @@ black, so restarting WSL won't help.
 A Spike 3 card runs much like a Spike 2 one, save states included:
 **Save state** and **Load state** on the playfield window, and the tab's
 slot list (Launch, Rename, Delete), work the same way, ten slots per game.
-A slot is about the size of a Spike 2 one once packed. A load replaces
-the game in the run that is up, or **Launch** starts a new run straight
-from the slot. They need the same `busybox-static` and `criu` as Spike 2's,
-which the first Spike 3 setup on a PC fetches and builds; without them the
-game still runs and the log says save states are off.
+A slot is about the size of a Spike 2 one once packed.
+
+A load replaces the game in the run that is up, or **Launch** starts a new
+run straight from the slot. They need the same `busybox-static` and `criu`
+as Spike 2's, which the first Spike 3 setup on a PC fetches and builds;
+without them the game still runs and the log says save states are off.
+
 The differences:
 
 - **Your own OTP key unlocks it.** The Emulate and Compare tabs stay locked
@@ -226,6 +230,10 @@ The differences:
   identity, so the game asks for Guided Setup; the app walks it for you and
   the game reaches attract in about a minute. Some titles list their
   switches in the playfield window instead of a cabinet photo.
+- **A second screen gets its own window.** Fallout's Pip-Boy screen opens
+  in a smaller window beside the game window.
+- **Game display applies here too.** The game window takes the monitor,
+  full screen or set window you picked, as on Spike 2.
 
 ## Jersey Jack Pinball
 

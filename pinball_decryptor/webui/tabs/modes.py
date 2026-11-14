@@ -410,6 +410,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  hand_tip=self.HAND_TIP)
         self.set(comp_on=False, comp_note="", comp_note_kind="", comp_shown=False,   # PAD-1041
                  comp_tip=self.COMP_TIP)
+        from ...plugins.stern import mode_project as _MPk
+        self.set(keeps_ic_head=_MPk.KEEPS_IC_HEAD, keeps_ic_note=_MPk.KEEPS_IC_NOTE)   # PAD-1204: their own group
+        self.set(feed_on=False, feed_url="", feed_note="", feed_note_kind="", feed_shown=False,   # PAD-1204
+                 feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="", feed_contract=None)
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -677,6 +681,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._publish_idle(project)                          # PAD-1022
         self._publish_handicap(project)                      # PAD-1033
         self._publish_comp(project)                          # PAD-1041
+        self._publish_feed(project)                          # PAD-1204
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
         if select_game is not None and select_game in game:
@@ -737,8 +742,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. At 1 "
                         "(Classic) or 2 (Enhanced) the game's start menu (both flipper buttons in attract) offers "
                         "CO-OP PLAY (each Start then adds a teammate; or the right flipper button + Start adds one), "
-                        "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four) "
-                        "and TEAM PLAY 2 VS 1 (players 1 and 3 against player 2). Classic: the players pick "
+                        "TEAM PLAY 2 VS 2 (players 1 and 3 a team against players 2 and 4, one Start adding all four), "
+                        "TEAM PLAY 2 VS 1 (players 1 and 3 against player 2) and TEAM PLAY 3 VS 1 (players 1, 3 "
+                        "and 4 against player 2); at 2 also ENHANCED STANDARD (a normal game of competing players, "
+                        "each with their own score and progress and a character). Classic: the players pick "
                         "characters, but none has a special ability; Enhanced: with the abilities. With characters, a "
                         "player starting a game alone with the right flipper button held picks one too. 1 or 2 "
                         "disables most "
@@ -766,10 +773,13 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     COOP_MENU_TIP = (
         "Adds CO-OP PLAY to the game's own service menu: 0 Off, 1 Classic (characters picked, no special "
         "abilities), 2 Enhanced (with the abilities). At 1 or 2 the game's start menu (both flipper buttons in "
-        "attract) offers three games. CO-OP PLAY: picked, each Start in the first ball adds a teammate; or teammates "
+        "attract) offers the games below. CO-OP PLAY: picked, each Start in the first ball adds a teammate; or teammates "
         "join with the right flipper button and Start. TEAM PLAY 2 VS 2: players 1 and 3 play as a team against "
         "players 2 and 4, each team with its own score and progress, taking turns; one Start "
-        "adds all four. TEAM PLAY 2 VS 1: players 1 and 3 against player 2, who plays both of team 2's turns. A "
+        "adds all four. TEAM PLAY 2 VS 1: players 1 and 3 against player 2, who plays both of team 2's turns. "
+        "TEAM PLAY 3 VS 1: players 1, 3 and 4 against player 2, who plays all three of team 2's turns. ENHANCED "
+        "STANDARD (at 2 only): the game's own game of competing players, each Start in the first ball adding one, "
+        "each with their own score and progress, and each picking a character at their first ball. A "
         "plain Start stays a one-player game. 1 or 2 disables most Insider "
         "Connected features (the "
         "card's scores, high scores and achievements stay on the machine). At 0 the game plays and "
@@ -904,6 +914,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
                           "look": self._coop_look(project, chars),                              # PAD-1079
                           "intro": os.path.basename(_CP.intro_path(project, chars)) if project else "",   # PAD-1114
+                          # PAD-1219: the awards ceremony's own video
+                          "ceremony": os.path.basename(_CP.ceremony_path(project, chars)) if project else "",
                           "bonus": bool(chars.get("bonus")),                                     # PAD-1123
                           "picked_max": _CP.PICKED_MAX_SECONDS, "still_s": _CP.PICKED_STILL_SECONDS,
                           "videos": "" if prof is None or _CP.can_video(prof) else (
@@ -1094,6 +1106,32 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._say(str(e))
                 return False
             self._say("co-op intro: %s opens each co-op and team game" % os.path.basename(path))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_ceremony(self, clear=False):
+        """PAD-1219: Awards video...: a video of the owner's that plays behind the co-op award cards at a co-op game's
+        end (looped, silent, the game's HUD off the glass); *clear* takes it off (the game's End of Ball Bonus loop
+        plays there instead)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        if clear:
+            _CP.save_ceremony(project, None)
+            self._say("co-op awards: no video of your own - the game's End of Ball Bonus loop plays behind the cards")
+        else:
+            path = self.window.ask_open("modes_file", "Choose the co-op awards ceremony's background video",
+                                        [("Videos", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_ceremony(project, path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op awards: %s plays behind the award cards" % os.path.basename(path))
         self._publish_coop_chars(project)
         return True
 
@@ -1507,6 +1545,56 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         history_log.record(project, [hist] if hist else [])
         self._say("prolonged competition: %s" % ("the card gets it at the next Write" if on else "not on the card"))
         self._publish_comp(project)
+        return True
+
+    #: PAD-1204: the score feed (plugins/stern/score_feed.py): each game's final scores posted to the owner's own server,
+    #: for a scoreboard of their own (C0untDeM0net: "a high score display external from the games running on a TV")
+    FEED_TIP = (
+        "After every game the machine sends the players' final scores, and the Insider Connected account of each "
+        "player who was logged in, to a server of your own on your network (a high-score board on a TV, a "
+        "spreadsheet, a home automation hub...). It is one JSON message a game, posted to the address you give. "
+        "Nothing goes to Stern, and the game's own scoring is not touched. Write puts it on the card.")
+    FEED_URL_TIP = (
+        "Where the machine posts each game's scores: http://, your server's IP address on your network, its port "
+        "and path, like http://192.168.1.50:8080/scores. The machine looks no names up and does not do https.")
+
+    def _publish_feed(self, project):
+        """PAD-1204: the Score feed tick, shown for a game whose end the app can see, its address box once ticked, and
+        under it what the card does, or in red why it cannot."""
+        from ...plugins.stern import score_feed as _SF
+        prof = _SF.project_title(project) if project else None
+        shown = bool(project) and prof is not None and not _SF.title_refusal(prof)
+        on, url = _SF.load(project) if project else (False, "")
+        note, kind = "", ""
+        if on:
+            why = _SF.title_refusal(prof) or _SF.url_problem(url)
+            if why:
+                note, kind = why, "err"
+            else:
+                note = _SF.NOTE
+        self.set(feed_shown=shown or on, feed_on=on, feed_url=url, feed_note=note, feed_note_kind=kind,
+                 feed_placeholder=_SF.PLACEHOLDER, feed_contract=_SF.contract(url))   # the Play options tab shows it
+
+    @rpc
+    def set_score_feed(self, on, url=None):
+        """Tick or untick the score feed for this project, or (*url*) change where it posts (PAD-1204)."""
+        from ...core import history_log
+        from ...plugins.stern import score_feed as _SF
+        project = self.project()
+        if not project:
+            return False
+        was_on, was_url = _SF.save(project, bool(on), url)
+        now_on, now_url = _SF.load(project)
+        hist = [h for h in (
+            history_log.diff_scalar("modes  score feed", "on" if was_on else "off", "on" if now_on else "off"),
+            history_log.diff_scalar("modes  score feed address", was_url or "(none)", now_url or "(none)"))
+            if h]
+        history_log.record(project, hist)
+        why = _SF.url_problem(now_url)
+        self._say("score feed: %s" % ("not on the card" if not now_on
+                                      else "the card gets it at the next Write (posting to %s)" % now_url if not why
+                                      else "not on the card until the address is right: %s" % why))
+        self._publish_feed(project)
         return True
 
     #: PAD-1033: a handicap for each player (plugins/stern/handicap.py): the game's own settings read easier or harder
@@ -2913,7 +3001,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if profile is not None and not profile.insider_gate:
             no_port = note = MP.insider_gate_words(profile.label)   # item 166: no gate, no modes
         elif profile is not None:
-            insider_note = MP.INSIDER_NOTE
+            insider_note = MP.INSIDER_TAB_NOTE              # PAD-1204: says what keeps Insider Connected
         self._no_port = no_port
         self._profile = profile
         self._card_bound = bool(card is not None and card.game_dir and profile is not None)

@@ -71,6 +71,10 @@ function fakeDb() {
             stage: r.stage, ticket: r.ticket, progress: r.progress, question: r.question,
             question_at: r.question_at, reply_at: r.reply_at } : null;
         }
+        if (sql.startsWith("SELECT state, reply_pending FROM reports WHERE id = ?")) {
+          const r = reports.find((x) => x.id === args[0]);
+          return r ? { state: r.state, reply_pending: r.reply_pending } : null;
+        }
         if (sql.startsWith("SELECT COUNT(*) AS n FROM reply_log WHERE ip_hash")) {
           return { n: replyLog.filter((r) => r.ip_hash === args[0] && r.at > args[1]).length };
         }
@@ -109,6 +113,14 @@ function fakeDb() {
             && x.reply_at < x.question_at);
           if (r) Object.assign(r, { reply: args[0], reply_files: args[1], reply_at: args[2], reply_pending: 1,
             stage: "working" });
+          return { meta: { changes: r ? 1 : 0 } };
+        }
+        if (sql.startsWith("UPDATE reports SET reply = ?, reply_files = ?, reply_at = ?, reply_pending = 1, " +
+                           "stage = CASE WHEN stage = 'question' THEN 'working' ELSE stage END " +
+                           "WHERE id = ? AND reply_pending = 0 AND state != 'received'")) {
+          const r = reports.find((x) => x.id === args[3] && x.reply_pending === 0 && x.state !== "received");
+          if (r) Object.assign(r, { reply: args[0], reply_files: args[1], reply_at: args[2], reply_pending: 1,
+            stage: r.stage === "question" ? "working" : r.stage });
           return { meta: { changes: r ? 1 : 0 } };
         }
         if (sql.startsWith("UPDATE reports SET reply = '', reply_files = '[]', reply_pending = 0 WHERE id = ?")) {
@@ -673,4 +685,50 @@ test("an answer counts against the reports' hourly limit for its address", async
 test("anything else is not found", async () => {
   assert.equal((await get(env(), "/v1/nope"))[0], 404);
   assert.equal((await get(env(), "/v1/admin/list"))[0], 403);
+});
+
+// ---- follow-ups (PAD-1254) --------------------------------------------------
+test("a follow-up goes onto a filed report in any stage, one at a time, and the tracker collects it", async () => {
+  const e = env();
+  const id = await asked(e);
+  const row = e.DB.reports[0];
+  // an answer still needs a question: an older app is unchanged
+  assert.equal((await reply(e, id, { message: "more" })).status, 409);
+  // a follow-up while it is being worked on: words and files, stage left alone
+  await admin(e, "/v1/admin/reports/" + id + "/stage", { stage: "ready", ticket: "PAD-1225", progress: 100 });
+  const files = [{ name: "pad-report.txt", type: "text/plain", b64: "bG9nCg==" },
+                 { name: "picture.jpg", type: "image/jpeg", b64: "/9j/" }];
+  let r = await reply(e, id, { message: "Still happens.", files, follow_up: true });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { ok: true, id, follow_up: true });
+  assert.deepEqual([row.stage, row.reply_pending, row.reply], ["ready", 1, "Still happens."]);
+  // one waiting at a time: the next waits for the tracker
+  r = await reply(e, id, { message: "And again.", follow_up: true });
+  assert.equal(r.status, 409);
+  assert.equal((await r.json()).code, "pending");
+  let [, list] = await get(e, "/v1/admin/replies", { "X-PAD-Admin": "adm" });
+  assert.deepEqual([list.rows[0].id, list.rows[0].ticket, list.rows[0].message, list.rows[0].files.length],
+    [id, "PAD-1225", "Still happens.", 2]);
+  await admin(e, "/v1/admin/reports/" + id + "/reply-taken");
+  // released: still takes one, and the answer the app has stays
+  await admin(e, "/v1/admin/reports/" + id + "/answer", { state: "released", version: "1.428.0", message: "Fixed." });
+  assert.equal((await reply(e, id, { message: "Not fixed for me.", follow_up: true })).status, 200);
+  assert.deepEqual([row.state, row.version, row.reply_pending], ["released", "1.428.0", 1]);
+  await admin(e, "/v1/admin/reports/" + id + "/reply-taken");
+  // a question it answers moves on, as an answer does
+  await admin(e, "/v1/admin/reports/" + id + "/stage", { stage: "question", question: "Log?" });
+  row.question_at -= 10;
+  assert.equal((await reply(e, id, { message: "Here.", follow_up: true })).status, 200);
+  assert.equal(row.stage, "working");
+  assert.ok(row.reply_at >= row.question_at);
+  // not yet filed, or gone
+  const [, fresh] = await postReport(e, { body: RECORD });
+  r = await reply(e, fresh.id, { message: "x", follow_up: true });
+  assert.equal(r.status, 409);
+  assert.equal((await r.json()).code, "not_filed");
+  r = await reply(e, "f".repeat(32), { message: "x", follow_up: true });
+  assert.equal(r.status, 404);
+  assert.equal((await r.json()).code, "gone");
+  // the same limits as an answer
+  assert.equal((await reply(e, id, { message: "x", follow_up: true }, { "CF-Connecting-IP": "7.7.7.7" })).status, 403);
 });

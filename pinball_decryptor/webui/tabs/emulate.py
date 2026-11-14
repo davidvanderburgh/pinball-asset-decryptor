@@ -145,10 +145,23 @@ def audio_ctl_file():
 RESTART_REQ_S = 30
 
 
-def restart_req_file():
+def restart_req_file(n=None):
+    """``n``: the rig the window is on, when not this app's (a Spike 3 run
+    on rig 1 from an app on rig 0 - PAD-1198)."""
     from ...core import rigslot
     return os.path.join(os.path.dirname(config.SETTINGS_FILE),
-                        "restart_game_%d.req" % rigslot.slot())
+                        "restart_game_%d.req"
+                        % (rigslot.slot() if n is None else n))
+
+
+def stop_req_file(n=None):
+    """PAD-1198: the playfield window's Stop emulator (and its X) asks
+    through this file, one per rig, beside the restart one (playfield.py's
+    stop_req_path names it the same way); the status poll acts on it."""
+    from ...core import rigslot
+    return os.path.join(os.path.dirname(config.SETTINGS_FILE),
+                        "stop_emulator_%d.req"
+                        % (rigslot.slot() if n is None else n))
 
 
 def load_audio_ctl():
@@ -172,6 +185,36 @@ def write_audio_ctl(gain, muted):
         os.replace(tmp, path)
     except OSError:
         pass
+
+
+#: s3store.py's byte meter, through s3launch.sh (PAD-1238):
+#: ``[s3store] progress <pct> <done MB> <total MB> <seconds left|->``
+S3_STORE_PROGRESS = re.compile(
+    r"s3launch:\s+\[s3store\] progress (\d+) (\d+) (\d+) (\d+|-)\s*$")
+
+
+def _eta_text(secs):
+    """'about 14 min left' / 'under a minute left'."""
+    if secs < 60:
+        return "under a minute left"
+    mins = (secs + 30) // 60
+    if mins < 90:
+        return "about %d min left" % mins
+    return "about %.1f h left" % (mins / 60.0)
+
+
+def s3_progress_logged(line, decade):
+    """Whether a Spike 3 launcher line goes to the log. The byte meter says
+    where it is every 2 s, which is for the bar; the log gets one line per
+    tenth of the card (*decade* is ``[last tenth logged]``, updated here)."""
+    m = S3_STORE_PROGRESS.match(line)
+    if not m:
+        return True
+    tenth = int(m.group(1)) // 10
+    if tenth == decade[0]:
+        return False
+    decade[0] = tenth
+    return True
 
 
 #: The State word and the button from Cancel until the preparation has
@@ -230,6 +273,9 @@ class EmulateTab(EmulateLogMixin, TabService):
         self.emulate_overrides_var = self.var("overrides", "bool", False)
         # PAD-251 (DragonRR): the Scenes tab's edits have their own on/off under the opt-in
         self.emulate_scene_edits_var = self.var("scene_edits", "bool", True)
+        # PAD-1197 (DragonRR): kinds of edit left out of the next runs, a comma
+        # list of run_leave_out keys.  Not remembered: each session has them all.
+        self.emulate_leave_out_var = self.var("leave_out", "str", "")
         # PAD-305: run with the stock colours, skipping the Color profile tab's
         # correction (the profile is made for the machine's screen, and the
         # emulator is watched on the PC's).  Not remembered: off each session.
@@ -371,6 +417,8 @@ class EmulateTab(EmulateLogMixin, TabService):
         self.emulate_overrides_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
         self.emulate_scene_edits_var.trace_add(
+            "write", lambda *_a: self._overrides_paint())
+        self.emulate_leave_out_var.trace_add(
             "write", lambda *_a: self._overrides_paint())
         self.emulate_colour_stock_var.trace_add(
             "write", lambda *_a: self._on_colour_stock())
@@ -1046,7 +1094,8 @@ class EmulateTab(EmulateLogMixin, TabService):
         # into the project folder at Start, and neither may hide behind a
         # hover (must survive #4).
         self.set(assets=assets, ovr_hint=text, ovr_refused=False,
-                 scene_edits_offer=bool(assets) and self._project_has_scene_edits(assets))
+                 scene_edits_offer=bool(assets) and self._project_has_scene_edits(assets),
+                 leave_out_offer=self._leave_out_offer(assets))
         self._refresh_colour_note()
 
     def _refresh_colour_note(self):
@@ -1059,6 +1108,38 @@ class EmulateTab(EmulateLogMixin, TabService):
         except Exception:                                # noqa: BLE001
             on = False
         self.set(colour_offer=on)
+
+    def _leave_out(self):
+        """PAD-1197: the kinds this run leaves out (run_leave_out keys)."""
+        from ...plugins.stern import run_leave_out
+        try:
+            return run_leave_out.clean(self.emulate_leave_out_var.get())
+        except Exception:                                # noqa: BLE001
+            return ()
+
+    def _leave_out_offer(self, assets):
+        """PAD-1197: ``[{key, label, tip, on}]``, a tick for each kind the
+        project can leave out of a run.  A kind left out stays offered while
+        it is, so it can always be put back."""
+        from ...plugins.stern import run_leave_out
+        try:
+            keys = set(run_leave_out.offered(assets)) | set(self._leave_out())
+        except Exception:                                # noqa: BLE001
+            return []
+        left = set(self._leave_out())
+        return [{"key": k, "label": label, "tip": tip, "on": k in left}
+                for k, label, tip in run_leave_out.KINDS if k in keys]
+
+    @rpc
+    def set_leave_out(self, key, on):
+        """PAD-1197: a "Leave out of this run" tick was flipped."""
+        from ...plugins.stern import run_leave_out
+        left = set(self._leave_out())
+        if on:
+            left.add(str(key))
+        else:
+            left.discard(str(key))
+        self.emulate_leave_out_var.set(",".join(run_leave_out.clean(left)))
 
     def _project_has_scene_edits(self, assets):
         try:
@@ -2421,8 +2502,9 @@ class EmulateTab(EmulateLogMixin, TabService):
         fp = rig.assets_fingerprint(assets)
         manifest = stern_engine.read_override_manifest(out)
         scenes_on = self._scene_edits_on()
+        left = self._leave_out()
         why = rig.overrides_reason(manifest, card, assets, fp, run_card=picked,
-                                   scene_edits=scenes_on)
+                                   scene_edits=scenes_on, left_out=left)
         if not why:
             why = rig.preview_modes_reason(manifest, assets)
         if not why:
@@ -2451,6 +2533,7 @@ class EmulateTab(EmulateLogMixin, TabService):
         try:
             counts, _mode, _val, files = stern_engine.write_overrides(
                 card, assets, out, scene_edits=scenes_on, progress=progress,
+                **({"leave_out": left} if left else {}),
                 log=lambda msg, level="info": self._log("[emulate] " + msg),
                 cancel=lambda: (self._stopping or self._stopped
                                 or self._cancel_prepare),
@@ -2631,8 +2714,12 @@ class EmulateTab(EmulateLogMixin, TabService):
         try:
             # "Runs on the caller's worker thread" (App's docstring), as
             # the Tk panel called it
+            # PAD-1197: a kind left out is not converted (only named when one is:
+            # the stand-ins for the App's callback keep its older signature)
+            left = self._leave_out()
             got = stage(assets, cancel_cb=cancelled, progress_cb=progress,
-                        confirm_cb=confirm)
+                        confirm_cb=confirm,
+                        **({"leave_out": left} if left else {}))
         except Exception as exc:                         # noqa: BLE001
             self._overrides_refuse(
                 "The replacements you assigned could not be applied to %s: %s"
@@ -2976,6 +3063,20 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._select_hint()
         self.start()
 
+    def launch_spike3_card(self, path):
+        """PAD-1263, the Multi-boot tab's Run in emulator for a Spike 3
+        multi-boot card: the tab already knows it is a Spike 3 card, so it is
+        started on the Spike 3 rig at once rather than after the probe
+        answers.  The rig runs the card's /games/game, which is its boot menu,
+        so the menu comes up first as on the machine."""
+        self.emulate_card_var.set(path or "")
+        # marked after the card is set: the card's own probe, if it ran,
+        # finds it probed already (and would only say the same)
+        self._spike3_probed = self._card()
+        self._spike3 = True
+        self._spike3_why = ""
+        self.start()
+
     def launch_with(self, prepare):
         """Item 127, Try it: Start with a caller's one-shot preparation.
         Returns whether the launch was accepted; ``last_refusal`` says why
@@ -3020,6 +3121,10 @@ class EmulateTab(EmulateLogMixin, TabService):
         if self._starting or self._stopping:
             self._refuse_start("the emulator is already starting or stopping")
             return
+        try:            # PAD-1198: a Stop the last run's window left behind
+            os.remove(stop_req_file())
+        except OSError:
+            pass
         if self._launched():
             # the watch.sh this tab started is still up: a second one would
             # be a second launcher (must survive #0)
@@ -3273,6 +3378,10 @@ class EmulateTab(EmulateLogMixin, TabService):
         # runs that are always silent (a session's, a hidden one: PAD-309)
         from ...core import rigslot as _rs
         audio = not _rs.muted()
+        try:            # PAD-1198: a Stop an earlier window left on this rig
+            os.remove(stop_req_file(slot))
+        except OSError:
+            pass
         self._starting = True
         self._s3_slot = slot
         self._s3_label = "Starting Spike 3…"
@@ -3329,13 +3438,17 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._starting = False
                 self._started_here = True
                 self._post(self._paint_run_btn)
+                decade = [-1]               # the last tenth of the decrypt logged
                 for raw in self._proc.stdout:
                     line = raw.decode("utf-8", "replace").rstrip()
-                    self._log("[emulate] " + line)
+                    foot = self._s3_footer_for(line)
+                    if s3_progress_logged(line, decade):
+                        m = S3_STORE_PROGRESS.match(line)
+                        self._log("[emulate] " + ("%s (%s%%)" % (foot[2], m.group(1))
+                                                  if m else line))
                     fields = rig.playfield_launch(line)
                     if fields:                  # the virtual playfield (s3pf.py)
                         self._post(self._open_playfield, fields)
-                    foot = self._s3_footer_for(line)
                     if foot:
                         self._s3_foot = foot
                         self._post(self._footer, *foot)
@@ -3385,14 +3498,15 @@ class EmulateTab(EmulateLogMixin, TabService):
             return m.group(1), int(m.group(2)), m.group(3)
         if line.startswith("s3launch: decrypting"):
             return "copy", 5, "Preparing the Spike 3 card (first time only)…"
-        m = re.match(r"s3launch:\s+\[s3store\]\s+(p\d) (\w+)", line)
-        if m:                                # a partition done: p2 .. p6
-            done = {"p2": 30, "p3": 40, "p5": 45, "p6": 95}.get(m.group(1), 50)
-            return "copy", done, "Preparing the Spike 3 card: %s done" % m.group(2)
-        m = re.match(r"s3launch:\s+\[s3store\]\s+games: \d+ files, (\d+) MB", line)
-        if m:
-            return ("copy", min(90, 45 + int(m.group(1)) // 50),
-                    "Preparing the Spike 3 card: %s MB of the game" % m.group(1))
+        m = S3_STORE_PROGRESS.match(line)
+        if m:       # PAD-1238: the bytes read of the whole card, every 2 s
+            pct, done, total, eta = (int(m.group(1)), int(m.group(2)),
+                                     int(m.group(3)), m.group(4))
+            text = "Preparing the Spike 3 card (first time only): %.1f of %.1f GB" % (
+                done / 1000.0, total / 1000.0)
+            if eta != "-" and pct < 100:
+                text += ", " + _eta_text(int(eta))
+            return "copy", 5 + pct * 90 // 100, text
         if line.startswith("s3launch: building the Spike 3 rig"):
             return "copy", 50, "Building the Spike 3 emulator (first time only)…"
         if line.startswith("s3launch: starting slot"):
@@ -3636,19 +3750,49 @@ class EmulateTab(EmulateLogMixin, TabService):
         start the run itself (Stop closes it), so it leaves a request beside
         the volume file, one per rig, and this poll acts on it. A request
         older than RESTART_REQ_S is from a run that is gone and is dropped."""
-        path = restart_req_file()
-        try:
-            age = time.time() - os.stat(path).st_mtime
-        except OSError:
-            return
-        try:
-            os.remove(path)
-        except OSError:
-            return
-        if age > RESTART_REQ_S:
+        age = self._take_req(restart_req_file)
+        if age is None or age > RESTART_REQ_S:
             return
         if self.restart():
             self.log("[emulate] (asked for by the playfield window)")
+
+    def _take_req(self, name):
+        """A playfield window's request file, taken (removed) - its age in
+        seconds, or None with none there. Looked for under this app's rig
+        AND the rig its Spike 3 run is on: an app on rig 0 runs Spike 3 on
+        rig 1 (``slot or 1``), and the window names its files by its own rig
+        (PAD-1198: Restart game and Stop from a Spike 3 window went unread)."""
+        from ...core import rigslot
+        rigs = [rigslot.slot()]
+        s3 = getattr(self, "_s3_slot", None)
+        if s3 is not None and s3 not in rigs:
+            rigs.append(s3)
+        got = None
+        for n in rigs:
+            path = name(n)
+            try:
+                age = time.time() - os.stat(path).st_mtime
+                os.remove(path)
+            except OSError:
+                continue
+            got = age if got is None else min(got, age)
+        return got
+
+    def _follow_stop_req(self):
+        """The playfield window's Stop emulator, or its X (PAD-1198): the
+        same request-file shape as Restart game. Acted on only while this
+        tab's run is up and not already stopping - a request left by a
+        window that closed with its run (or older than RESTART_REQ_S) ends
+        nothing, least of all the next run."""
+        age = self._take_req(stop_req_file)
+        if age is None or age > RESTART_REQ_S or self._stopping:
+            return False
+        if not (self._last_up or self._launched()
+                or self._s3_slot is not None):
+            return False
+        self.log("[emulate] stopping: asked for by the playfield window")
+        self.stop()
+        return True
 
     def _restart_when_down(self):
         """After a Try-it or Restart game Stop: Start once the rig says
@@ -4018,6 +4162,7 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._apply(info)
                 self._follow_audio_ctl()
                 self._follow_restart_req()
+                self._follow_stop_req()
                 self.set(rigs=rigs)
             self._post(apply_and_release)
 

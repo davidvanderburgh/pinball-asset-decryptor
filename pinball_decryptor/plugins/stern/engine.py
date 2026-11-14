@@ -550,6 +550,9 @@ _SCENE_BASES = threading.local()
 # PAD-251: the Emulate tab can run a set WITHOUT the Scenes tab's edits (its own tick); set only
 # around write_overrides' patch computation.
 _SKIP_SCENE_EDITS = threading.local()
+# PAD-1197: the kinds the Emulate tab leaves out of this run's set (``.kinds``, keys of
+# :data:`.run_leave_out.KEYS`); set only around write_overrides' patch computation.
+_LEAVE_OUT = threading.local()
 # PAD-306: why this thread's last patch computation left the project's modes out (``.why``),
 # so write_overrides can put it in the set's manifest and Try it can say it, rather than
 # "the log says why" over a nine-minute log.
@@ -2098,27 +2101,7 @@ def extract_radium_text(reader, output_dir, log=None, progress=None, cancel=None
             prog_rows = []
             from ...core import text_manifest as _tm
             for e in entries:
-                # PAD-470: a mode's own text for a line several modes show
-                # is a row of its own, its path naming the mode
-                row = {"path": _tm.join_part(fw_path, e.get("part") or ""),
-                       "original": e["text"],
-                       "replacement": "", "budget": e["budget"]}
-                if e.get("modes"):
-                    row["modes"] = list(e["modes"])
-                # The manifest's 5th-column flags (text_manifest.FLAG_*):
-                # a growable row may take longer text (placed in a new
-                # area of the game program on Write); a row with no
-                # reference found is dead text the game never draws.  The
-                # NOT-growable case is written out too ("fixed"), because
-                # a row with no flags at all has to keep meaning "this
-                # manifest predates the scan" — see FLAG_FIXED.
-                if e.get("growable"):
-                    row["grow"] = True
-                else:
-                    row["fixed"] = True
-                if e.get("unused") or e.get("refs") == 0:
-                    row["unused"] = True
-                prog_rows.append(row)
+                prog_rows.append(_program_row(_tm, fw_path, e))
         except Exception as e:
             log("Couldn't scan the game program for display text (%s); "
                 "program strings skipped." % e, "warning")
@@ -2283,6 +2266,31 @@ def program_mode_scenes(assets_dir):
         return {}
 
 
+def _program_row(text_manifest, fw_path, e):
+    """The manifest row of game-program string *e* (a
+    :func:`.progtext.enumerate_program_strings` entry) of the program at
+    *fw_path*."""
+    # PAD-470: a mode's own text for a line several modes show is a row of
+    # its own, its path naming the mode
+    row = {"path": text_manifest.join_part(fw_path, e.get("part") or ""),
+           "original": e["text"], "replacement": "", "budget": e["budget"]}
+    if e.get("modes"):
+        row["modes"] = list(e["modes"])
+    # The manifest's 5th-column flags (text_manifest.FLAG_*): a growable row
+    # may take longer text (placed in a new area of the game program on
+    # Write); a row with no reference found is dead text the game never
+    # draws.  The NOT-growable case is written out too ("fixed"), because a
+    # row with no flags at all has to keep meaning "this manifest predates
+    # the scan" -- see FLAG_FIXED.
+    if e.get("growable"):
+        row["grow"] = True
+    else:
+        row["fixed"] = True
+    if e.get("unused") or e.get("refs") == 0:
+        row["unused"] = True
+    return row
+
+
 def program_text_needs_refresh(assets_dir, rows):
     """Should :func:`refresh_program_text_flags` re-read the card for the
     manifest *rows* of the project at *assets_dir*: a game-program row with
@@ -2442,6 +2450,15 @@ def refresh_program_text_flags(assets_dir, log=None, cancel=None, card=None):
                         "budget": f["budget"], "grow": True,
                         "modes": list(f.get("modes") or ())})
             n += 1
+    # PAD-1256: a line this build offers that the project's scan did not
+    # (IMPOSTER BATTLE %d/%d: a slash once read as a path) joins the rows
+    fw_base = text_manifest.split_part(prog[0].get("path"))[0]
+    for e in entries:
+        if e.get("part") or (e["text"], "") in have:
+            continue
+        have.add((e["text"], ""))
+        out.append(_program_row(text_manifest, fw_base, e))
+        n += 1
     _program_modes_read(assets_dir, prog_ctx.get("scenes"), prog_ctx.get("boxes"),
                         prog_ctx.get("paths"))
     if not n:
@@ -5222,6 +5239,79 @@ def _scene_with_overlay(reader, node, overlays):
     return bytes(buf)
 
 
+def _pad_leftover_scenes(assets_dir):
+    """PAD-1255: the card paths (no leading slash) of the scenes a PAD build may have put screens in on the
+    project's title - its HUD, its video bank and Godzilla's battle selection - or [] when the title is not known."""
+    from . import clip_variants as _CVL
+    prof = _CVL.project_title(assets_dir, probe=True)
+    if prof is None:
+        return []
+    out = []
+    for scene, which in ((getattr(prof, "hud_scene", ""), "hud"), (getattr(prof, "bank_scene", ""), "bank")):
+        try:
+            rel = "%s/%s/scene.radium" % (prof.game_dir, prof.lcd(which)) if scene else ""
+        except Exception:                               # noqa: BLE001 - a port naming no such scene
+            rel = ""
+        if rel and rel not in out:
+            out.append(rel)
+    from . import battle_select as _BSL
+    out.append("%s/%s" % (prof.game_dir, _BSL.REL))
+    return out
+
+
+def _pad_leftover_writes(reader, assets_dir, radium_overlays, log):
+    """PAD-1255: a card built from one a PAD build made keeps that build's scenes, and the screens it put in them are
+    authored SHOWING (scene_write: the runtime hides them). Built without the feature that hid them (DragonRR: co-op
+    off on DoomWalrus666's co-op card), they sat on the glass all game. Each such screen still drawn is switched off
+    in place (its keyframes, as the Scenes window's hide) - a build that puts them in again cuts the old set out
+    first (:func:`scene_write.without_pad`). Returns the flat writes; the file-relative patch joins
+    *radium_overlays*."""
+    from . import scene_write as _SWL
+    from . import mode_write as _MWL
+    writes = []
+    try:
+        rels = _pad_leftover_scenes(assets_dir)
+    except Exception as e:                              # noqa: BLE001 - never the reason a build fails
+        log("Scenes left by an earlier build: the title could not be read (%s), so none were looked for." % e,
+            "warning")
+        return writes
+    for rel in rels:
+        try:
+            node = _MWL.lookup(reader, rel)
+            data = _scene_with_overlay(reader, node, radium_overlays) if node is not None else b""
+            patch = _SWL.pad_hidden_patch(data) if data else {}
+        except Exception as e:                          # noqa: BLE001 - never the reason a build fails
+            log("Scenes left by an earlier build: %s could not be read (%s), so it was not looked at." % (rel, e),
+                "warning")
+            continue
+        if not patch:
+            continue
+        for off, payload in sorted(patch.items()):
+            writes.extend(_place(reader, node, off, payload))
+        radium_overlays.setdefault(bytes(node["i_block"]), (node, {}))[1].update(patch)
+        names = sorted({n.name for n in _SWL.pad_nodes(data)})
+        log("%s still carries %d screen(s) an earlier PAD build put in (%s%s); they are switched off, so only "
+            "a feature this build puts in shows its own." % (rel, len(names), ", ".join(names[:4]),
+                                                              ", ..." if len(names) > 4 else ""), "info")
+    return writes
+
+
+def _pad_stock_scene(data, rel, log):
+    """PAD-1255: the scene a build puts its screens in, with those an earlier PAD build left cut back out (the stock
+    scene), so it carries one set, not a new set over the old; *data* as it is when nothing was left or the cut is
+    not a scene the app knows (the build then refuses it with :func:`scene_write.profile_for`'s words)."""
+    from . import scene_write as _SWL
+    if not data:
+        return data
+    out = _SWL.without_pad(data)
+    if out is None:
+        return data
+    if out is not data:
+        log("%s: the screens an earlier PAD build put in were taken back out before this build's go in."
+            % rel, "info")
+    return out
+
+
 def _regrow_over_modes(src, start, card_path, entry, tree_ops, grow_dir, assets_dir, log):
     """PAD-1035: the project's own edits of a scene that GROW it (longer text, resized pictures,
     the Scenes window's edits; *entry* is its ``grown_radium`` one, *tree_ops* its
@@ -6651,13 +6741,13 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                         "bitmaps": len(_rg.image_refs(data, im["data_off"],
                                                       imgs)), "fills": []}
                         for im in imgs}
-                scenes[radium_path] = (atlas, draws)
+                scenes[radium_path] = (atlas, draws, sc)
             except Exception:
                 scenes[radium_path] = None
         facts = scenes[radium_path]
         if facts is None:
             return "its scene couldn't be read"
-        atlas, draws = facts
+        atlas, draws, _sc = facts
         if data_off in atlas:
             return ("it is a font atlas, and its letters are measured in its "
                     "pixels")
@@ -6674,6 +6764,29 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
         fills = ((facts[1].get(data_off) or {}).get("fills") if facts
                  else None)
         return max(fills, key=lambda s: s[0] * s[1]) if fills else None
+
+    def _kept_size(radium_path, data_off, w, h, pad_w, pad_h):
+        """``(w, h)`` the picture kept at its own size at *data_off* is written at
+        (PAD-1200, :func:`radium_grow.kept_texture_size`): shrunk once, properly, to twice
+        the box the game fits it into, when every place that draws it is fitted (so its
+        place on the glass stays put), else its own *w* x *h*."""
+        from . import radium_grow as _rg
+        facts = scenes.get(radium_path)
+        sc = facts[2] if facts else None
+        if sc is None or os.environ.get("PAD_KEEP_SIZE_FULL") == "1":
+            return w, h
+        how = facts[1].get(data_off) or {}
+        want = _rg.kept_texture_size(w, h, [(pad_w, pad_h)] + list(how.get("fills") or ()))
+        if want is None:
+            return w, h
+        own = ()
+        if assets_dir:
+            from . import scene_edit as _scene_edit
+            own = _scene_edit.own_size_nodes(assets_dir, radium_path)
+        tids = {tid for tid, t in sc.textures.items() if t.get("data_off") == data_off}
+        if not _rg.every_draw_fitted(sc, tids, own):
+            return w, h
+        return want
 
     moved = {}                     # card path -> outputs whose record isn't there
     # The block encodes run on a pool (PAD-599): a BC3 encode of a screen
@@ -6744,23 +6857,38 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                         why = _resize_refusal(radium_path, node, data_off)
                         ok = not why
                     if ok:
-                        got = resized.get((staged, fmt))
+                        tw, th = _kept_size(radium_path, data_off, w, h, pad_w,
+                                            pad_h)
+                        got = resized.get((staged, fmt, tw, th))
                         if got is None:
-                            grid = Image.new("RGBA", (_padded4(w), _padded4(h)),
+                            src = im
+                            if (tw, th) != (w, h):
+                                # resized in premultiplied colour, so the
+                                # clear pixels round it don't bleed into its
+                                # edges
+                                src = im.convert("RGBa").resize(
+                                    (tw, th), Image.LANCZOS).convert("RGBA")
+                                log("Radium image %s is %dx%d, far bigger than "
+                                    "the %dx%d place the game draws it in, which "
+                                    "it would shrink unsmoothed (grainy, jagged): "
+                                    "written at %dx%d instead, smoothed, in the "
+                                    "same place and size on the screen."
+                                    % (output, w, h, pad_w, pad_h, tw, th), "info")
+                            grid = Image.new("RGBA", (_padded4(tw), _padded4(th)),
                                              (0, 0, 0, 0))
-                            grid.paste(im, (0, 0))
+                            grid.paste(src, (0, 0))
                             arr = _premultiplied(
                                 np.asarray(grid, dtype=np.uint8), output,
                                 radium_path, node, data_off, length, pad_w,
                                 pad_h, fmt)
-                            got = resized[(staged, fmt)] = (
-                                w, h, _dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
+                            got = resized[(staged, fmt, tw, th)] = (
+                                tw, th, _dds.encode_bc1(arr) if fmt == _DXT1_FORMAT
                                 else _dds.encode_bc3(arr))
                         grown.setdefault(radium_path, (node, {}))[1][data_off] = got
                         patched_outputs.add(output)
                         log("Radium image %s is %dx%d, not the original %dx%d: "
                             "the scene (%s) is re-serialized around its new "
-                            "size." % (output, w, h, pad_w, pad_h, radium_path),
+                            "size." % (output, tw, th, pad_w, pad_h, radium_path),
                             "info")
                         box = _fill_box(radium_path, data_off)
                         if box:
@@ -6768,7 +6896,7 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
                                 "and the box keeps its size: the picture shows "
                                 "at the same place and size, with %dx%d pixels "
                                 "for where the scene zooms in on it."
-                                % ((output,) + box + (w, h)), "info")
+                                % ((output,) + box + (tw, th)), "info")
                         continue
                 if override is not None:
                     log("Radium image %s is %dx%d but must stay %dx%d; skipped "
@@ -6914,7 +7042,8 @@ def _merge_radium_overlays(dst, src):
 
 def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
                          full_repl, radium_overlays, log,
-                         fw_node=None, fw_patched_path=None, grown_files=None):
+                         fw_node=None, fw_patched_path=None, grown_files=None,
+                         whole_files=None):
     """Produce the on-disk writes that refresh the ``.sidx`` manifest records for
     every file this Write changed, so the card passes Stern SD validation.
 
@@ -6924,8 +7053,11 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
     ``radium_overlays`` (``{i_block: (node, {file_off: bytes})}``), the
     rebuilt firmware (*fw_node* / *fw_patched_path*) and any other file this
     write replaces WHOLE at a new length (*grown_files*, ``{i_block: staged
-    path}`` — a re-serialised scene); the last two get their stored size
-    rewritten alongside the digests."""
+    path}`` — a re-serialised scene) and the files the ext4 driver copies
+    on whole (*whole_files*, ``[(card_rel, source path)]``: the videos
+    replaced intact.  PAD-1242: their records used to stay Stern's, so a card
+    PAD built read as one whose manifest lies); the last three get their
+    stored size rewritten alongside the digests."""
     from . import sidx
     sidx_path, sidx_node = sidx.find_sidx(reader)
     if sidx_node is None:
@@ -6968,6 +7100,10 @@ def _compute_sidx_writes(reader, disk_f, img_node, audio_patches, music_patches,
         if p:
             modified[p] = sidx.digests_file(_lp(staged))
             resized[p] = os.path.getsize(_lp(staged))
+    for rel, staged in (whole_files or ()):
+        p = rel.lstrip("/")
+        modified[p] = sidx.digests_file(_lp(staged))
+        resized[p] = os.path.getsize(_lp(staged))
     if music_patches:
         banks = {}
         for sc_node, body_off, body in music_patches:
@@ -7440,7 +7576,14 @@ class _SpaceCard:
         try:
             with open(_lp(path), "rb") as f:
                 # (a card made as small as it can be grows too: PAD-593)
-                layout = cs.read_growing_layout(f, grow_to)
+                try:
+                    layout = cs.read_growing_layout(f, grow_to)
+                except cs.CardSizeError:
+                    if grow_to:
+                        raise
+                    # PAD-1235: one at its own size still has the bigger
+                    # sizes' room to offer when it doesn't fit
+                    layout = cs.read_layout(f, any_size=True)
         except (cs.CardSizeError, OSError):
             layout = None            # not Stern-shaped: measured as it is
         self.at = grow_to if layout is not None else None
@@ -8121,6 +8264,23 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # nothing staged, but the card this is built from may hold our words
         stock_mode_edits = _stock_mode_words_to_restore(disk_f, parts,
                                                         assets_dir)
+    # PAD-1197: what the Emulate tab leaves out of this run, gone before anything is built
+    _left = frozenset(getattr(_LEAVE_OUT, "kinds", ()) or ())
+    if _left:
+        from . import run_leave_out as _RLO
+        log("Left out of this run (Emulate tab): %s. A card you build still carries them."
+            % _RLO.said(_left), "info")
+        if "sounds" in _left:
+            audio_edits, music_edits = type(audio_edits)(), type(music_edits)()
+        if "videos" in _left:
+            video_edits = type(video_edits)()
+        if "pictures" in _left:
+            image_edits = type(image_edits)()
+            texture_edits = type(texture_edits)()
+            radimg_edits = type(radimg_edits)()
+            glyph_edits = type(glyph_edits)()
+        if "modes" in _left:
+            own_clips = type(own_clips)()
     _save_hashcache(assets_dir)
     _stage_done(log, "scanning the assets for changes (checksumming every "
                 "sound and video against the Extract baseline)", t_scan)
@@ -8136,7 +8296,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # stop the Write), one sentence says they are left out, and the build goes
     # on exactly as one without the family would.
     from . import mode_write as _MW
-    _family = _mode_family_on()
+    _family = _mode_family_on() and "modes" not in _left
     # The own-sound gate, decided ONCE for this build.  A caller that closes
     # it (Try it's fast run) passes sound_ok=False, so a quick set can be
     # built beside a full Write without either touching the environment the
@@ -8151,7 +8311,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-306: an override set (boot_screen=False) is written into a folder, not mounted
     _mode_gate_kw = ({} if boot_screen
                      else {"ext4_available": _override_needs_no_mount})
-    if not _family:
+    if "modes" in _left:
+        pass                    # said once above, with the rest this run leaves out
+    elif not _family:
         _off = _MW.preview_left_out(assets_dir)
         if _off:
             log(_off, "warning")
@@ -8258,12 +8420,12 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-446: the clips that play one of several at random ride the modes'
     # delivery (the runtime, its port and clips.cfg on p2) but not the mode
     # maker's preview switch: a card of random clips carries no mode.
-    variant_slots, variant_prof = _variants_for_build(
-        assets_dir, dest_is_device, log, **_mode_gate_kw)
+    variant_slots, variant_prof = (({}, None) if "random_clips" in _left else _variants_for_build(
+        assets_dir, dest_is_device, log, **_mode_gate_kw))
     # PAD-494: a slot's files for the other music modes ride the same delivery, as
     # records of their own in the bank and MUSIC MODE in the operator menu
-    sound_modes, sound_modes_prof = _sound_modes_for_build(
-        assets_dir, dest_is_device, log, **_mode_gate_kw)
+    sound_modes, sound_modes_prof = ((None, None) if "music_modes" in _left else _sound_modes_for_build(
+        assets_dir, dest_is_device, log, **_mode_gate_kw))
     # PAD-685: the jukebox's intro videos go into the video bank by the random clips' road
     from . import clip_variants as _CVj
     _juke_clips = bool(sound_modes is not None and sound_modes.juke_rel
@@ -8293,6 +8455,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1041: Prolonged Competition on the start menu - comp.cfg beside the runtime (the modes' delivery)
     comp_prof = _comp_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _comp_on = comp_prof is not None
+    # PAD-1204: the score feed - scorefeed.cfg beside the runtime (the modes' delivery)
+    feed_prof, feed_url = _feed_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
+    _feed_on = bool(feed_url)
     # PAD-1115: a game screen that shows a replaced clip for a fixed time lasts as long as the clip - stime lines in
     # clips.cfg beside the runtime (the modes' delivery)
     stime_lines, stime_prof = _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_device, log,
@@ -8306,7 +8471,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not boot_edits and not mode_list and not code_list
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
-            and not _hand_on and not _cabs_on and not _comp_on
+            and not _hand_on and not _cabs_on and not _comp_on and not _feed_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -8837,7 +9002,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                             space_chk, log, game_sids=_game_ok,
                             game_why=_game_why, sm_frags=_sm_frags,
                             game_seqs=_game_seqs, sm_seqs=_sm_seqs,
-                            sm_hold=_sm_turn_hosts(sound_mode_used, _sm_frags))
+                            sm_hold=_sm_turn_hosts(sound_mode_used, _sm_frags),
+                            # PAD-1235: the mode runtime's files go on again, so an
+                            # earlier Write's banks of its sounds are this one's to replace
+                            retire_touched=(set(_bank_touched.values()) if (
+                                mode_list or code_list or sound_mode_used or _clips_on
+                                or _attract_on or _coop_on or _idle_on or _hand_on
+                                or _cabs_on or _comp_on or _stime_on or _feed_on)
+                                else None))
                         if bank_plan is not None:
                             bank_plan.old_map = dict(_old_bank_map)
                             _user_grows = {i: g for i, g in _user_grows.items()
@@ -9682,6 +9854,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # so their in-place edits (all at stock offsets) fold into the grown
         # bytes; the grown scene is then written whole and its in-place
         # writes are dropped.
+        # PAD-1255: screens an earlier PAD build left in the card's scenes, switched off (before the scene edits
+        # below, so a scene they grow keeps them off too)
+        pad_left_writes = _pad_leftover_writes(reader, assets_dir, radium_overlays, log)
         tree_writes, n_tree, tree_whole = [], 0, {}
         if tree_edits:
             if progress:
@@ -9713,6 +9888,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 color_writes = _drop_writes_in(color_writes, reader, _gnode)
                 layout_writes = _drop_writes_in(layout_writes, reader, _gnode)
                 tree_writes = _drop_writes_in(tree_writes, reader, _gnode)
+                pad_left_writes = _drop_writes_in(pad_left_writes, reader, _gnode)
                 radimg_writes = _drop_writes_in(radimg_writes, reader, _gnode)
         # A grown sound bank rides the same mechanism: a whole-file copy with
         # its manifest record's size rewritten alongside its digests.
@@ -9741,6 +9917,20 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             bank_new = [("%s/%s" % (_gdir, os.path.basename(_bp)) if _gdir
                          else os.path.basename(_bp), _bp)
                         for _cat, _bp in bank_plan.files]
+            # PAD-1235: an earlier Write's bank no bank of this one's took the name of is
+            # emptied (image.bin no longer names it, so the game never opens it)
+            _left = sorted(c for c in bank_plan.retired
+                           if c not in {c2 for c2, _p in bank_plan.files})
+            if _left:
+                # (beside the staged banks, which last until the copy)
+                _empty = os.path.join(os.path.dirname(bank_plan.files[0][1]),
+                                      "pad_retired_bank.empty")
+                open(_empty, "wb").close()
+                bank_new += [("%s/%s" % (_gdir, bank_plan.retired[c][0]) if _gdir
+                              else bank_plan.retired[c][0], _empty) for c in _left]
+                log("%d sound bank(s) an earlier Write put on this card that this build "
+                    "needs no more are emptied: %s." % (
+                        len(_left), ", ".join(bank_plan.retired[c][0] for c in _left)), "info")
 
         # Item 149: the modes' screens and clips, built from this card's STOCK
         # HUD and bank scenes (never on top of an earlier build), plus the
@@ -9762,10 +9952,23 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else "Handicaps" if _hand_on
                 else "Expression lights" if _cabs_on
                 else "Prolonged Competition" if _comp_on
+                else "Score feed" if _feed_on and not _stime_on
                 else "Screen times")
         _who_hud = _who
+        if (bank_plan is not None and bank_plan.retired
+                and not (_modes_on or _clips_on or sound_modes_cfg or picture_cfg
+                         or _attract_on or _coop_on or _idle_on or _hand_on or _cabs_on
+                         or _comp_on or _stime_on or _feed_on)):
+            # PAD-1235: the earlier Write's runtime files would stay and play the
+            # banks this build took the place of
+            raise RuntimeError(
+                "This build takes the place of the sound banks an earlier build put on this "
+                "card, but it does not put the mode runtime's files on the card again, so "
+                "the earlier build's music modes would play the wrong sounds. Build from a "
+                "card without the earlier build's music modes, or keep a music mode or "
+                "another mode feature in the project.")
         if (_modes_on or _clips_on or sound_modes_cfg or picture_cfg or _attract_on or _coop_on or _idle_on
-                or _hand_on or _cabs_on or _comp_on or _stime_on):
+                or _hand_on or _cabs_on or _comp_on or _stime_on or _feed_on):
             t0 = time.monotonic()
             if progress:
                 progress(91, 100, "Building the project's modes..." if _modes_on
@@ -9779,19 +9982,13 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if _idle_on else "Adding the handicaps..."
                          if _hand_on else "Adding the expression light shows..."
                          if _cabs_on else "Adding Prolonged Competition..."
-                         if _comp_on else "Adding the screen times...")
+                         if _comp_on else "Adding the score feed..."
+                         if _feed_on and not _stime_on else "Adding the screen times...")
             grow_work = grow_work or _work_dir(label, base="spike2_grow_")
             try:
-                if mode_list:
-                    _mprof = _MW.MP.profile(mode_list[0][1].title)
-                elif code_list:
-                    from . import code_modes as _CM
-                    _mprof = _CM.profile_for(assets_dir, code_list)
-                    if _mprof is None:
-                        raise _MW.ModeWriteError(_CM.NO_TITLE)
-                else:
-                    _mprof = (variant_prof or sound_modes_prof or picture_prof or attract_prof or coop_prof
-                              or idle_prof or hand_prof or cabs_prof or comp_prof or stime_prof)
+                _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
+                    variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -9840,8 +10037,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 from . import attract_items as _AIS     # PAD-782: a clip v2 title's attract scene
                 mode_plan = _MW.plan(
                     assets_dir,
-                    _scene_with_overlay(reader, _mnodes[_hud_rel], grown_overlays) if _hud_rel else b"",
-                    _scene_with_overlay(reader, _mnodes[_bank_rel], grown_overlays) if _bank_rel else b"",
+                    _pad_stock_scene(_scene_with_overlay(reader, _mnodes[_hud_rel], grown_overlays), _hud_rel, log)
+                    if _hud_rel else b"",                    # PAD-1255: an earlier build's screens cut out
+                    _pad_stock_scene(_scene_with_overlay(reader, _mnodes[_bank_rel], grown_overlays), _bank_rel, log)
+                    if _bank_rel else b"",
                     bytes(reader.read_file_bytes(fw_node)),
                     os.path.join(grow_work, "modes"), log=log,
                     end_sound=mode_sound_used, own_sounds=mode_own_used,
@@ -9866,6 +10065,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     cabs_sids=_cabs_sids,
                     comp=_comp_on, comp_prof=comp_prof,               # PAD-1041
                     screen_times=stime_lines, screen_prof=stime_prof,  # PAD-1115
+                    score_feed=feed_url, score_feed_prof=feed_prof,   # PAD-1204
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -9900,6 +10100,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                         layout_writes = _drop_writes_in(layout_writes, reader, _node)
                         tree_writes = _drop_writes_in(tree_writes, reader, _node)
                         radimg_writes = _drop_writes_in(radimg_writes, reader, _node)
+                        pad_left_writes = _drop_writes_in(pad_left_writes, reader, _node)
                         log("%s: this project's own edits of %s go on in the scene they are built "
                             "into." % (_who_hud, _rel), "info")
                 _ipath = {bytes(n["i_block"]): p.lstrip("/")
@@ -9961,6 +10162,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                               else "adding the handicaps" if _hand_on
                               else "adding the expression light shows" if _cabs_on
                               else "adding Prolonged Competition" if _comp_on
+                              else "adding the score feed" if _feed_on and not _stime_on
                               else "adding the screen times"), t0)
 
         # PAD-444: the own copies' bank entries and files, on the bank the
@@ -10059,7 +10261,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 and not texture_patches and not radimg_writes
                 and not text_writes and not color_writes
                 and not layout_writes and not tree_writes
-                and not radium_grow_jobs
+                and not pad_left_writes and not radium_grow_jobs
                 and not boot_writes and boot_grow is None
                 and patched_gr is None and mode_plan is None
                 and not clip_files
@@ -10078,7 +10280,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # Display-text writes are already (disk_offset, bytes) (the radium-text
         # helper resolved them through disk_ranges itself).
         writes = (list(text_writes) + list(color_writes) + list(layout_writes)
-                  + list(radimg_writes) + list(tree_writes))
+                  + list(radimg_writes) + list(tree_writes) + list(pad_left_writes))
         writes += stock_mode_writes          # the game's own modes (item 145)
         writes += score_writes               # the score panel's colours (PAD-507)
         writes += sound_list_writes          # the request lists' bank sids (PAD-606)
@@ -10152,7 +10354,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 reader, disk_f, img_node, audio_inplace, music_patches,
                 full_repl, radium_overlays, log,
                 fw_node=fw_node, fw_patched_path=patched_gr,
-                grown_files=grown_files)
+                grown_files=grown_files, whole_files=video_grow_jobs)
         except Exception as e:
             log("SD-validation manifest update failed (%s); the card may report "
                 "a validation error until re-validated." % e, "warning")
@@ -10215,11 +10417,16 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 _folded, writes = _MW.fold_writes(
                     writes, reader.disk_ranges(_man_node, 0,
                                                _man_node["size"]))
+                _man_bytes = bytes(reader.read_file_bytes(_man_node))
+                # PAD-1235: a bank that takes the name of an earlier Write's (or empties
+                # it) refreshes that bank's record; the others are new records
+                _had = set(_sidx.parse_records(_man_bytes)[0]) if bank_new else set()
                 _new_man = _MW.compose_manifest(
-                    bytes(reader.read_file_bytes(_man_node)), inplace=_folded,
+                    _man_bytes, inplace=_folded,
                     refreshed=_m_replaced + [r for r in _c_replaced
-                                             if r[0] not in _m_rels],
-                    new=_m_new + _c_new + bank_new)
+                                             if r[0] not in _m_rels]
+                    + [r for r in bank_new if r[0] in _had],
+                    new=_m_new + _c_new + [r for r in bank_new if r[0] not in _had])
                 _man_src = os.path.join(
                     grow_work, "modes" if mode_plan is not None else "own_clips",
                     os.path.basename(_man_path))
@@ -10234,7 +10441,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             except _MW.ModeWriteError as e:
                 raise RuntimeError("%s: %s. Nothing was written." % (_who, e)) \
                     from None
-            _added = [r for r, _s in _m_new + _c_new + bank_new]
+            _added = [r for r, _s in _m_new + _c_new + bank_new if r not in _had]
             log("%s: the SD-validation manifest gains %d record(s) (%s) "
                 "and %d in-place record refresh(es) are folded into it; it is "
                 "copied onto the card whole."
@@ -10267,6 +10474,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 "cabs": bool(getattr(mode_plan, "cabshow_file", "")),
                 # PAD-1041: Prolonged Competition on the start menu
                 "comp": bool(getattr(mode_plan, "comp_file", "")),
+                # PAD-1204: the score feed (the address the reports go to)
+                "score_feed": (feed_url if getattr(mode_plan, "scorefeed_file", "") else ""),
                 "lines": list(mode_plan.lines),
                 "added": [r for r, _s in mode_plan.new] + [r for r, _s in bank_new],
                 "rewritten": ([r for r, _s in mode_plan.replaced]
@@ -11539,6 +11748,62 @@ def _idle_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     return prof
 
 
+NO_FEATURE_TITLE = ("the app could not tell which game this build's mode features are for. Extract the "
+                    "card into the project (Extract tab) and build again")
+
+
+def _build_mode_profile(mode_list, code_list, assets_dir, feature_profs):
+    """The title profile a build's mode features go on: the first mode's, the code modes', else the first
+    of *feature_profs* (each mode feature's own, None where it is off). PAD-1255/PAD-1260: a score-feed-only
+    build once fell through a chain that left the feed's profile out, and crashed on ``None.hud_scene``;
+    a build with no title at all now says so in plain words instead."""
+    from . import mode_write as _MW
+    if mode_list:
+        return _MW.MP.profile(mode_list[0][1].title)
+    if code_list:
+        from . import code_modes as _CM
+        prof = _CM.profile_for(assets_dir, code_list)
+        if prof is None:
+            raise _MW.ModeWriteError(_CM.NO_TITLE)
+        return prof
+    prof = next((p for p in feature_profs if p is not None), None)
+    if prof is None:
+        raise _MW.ModeWriteError(NO_FEATURE_TITLE)
+    return prof
+
+
+def _feed_for_build(assets_dir, dest_is_device, log, ext4_available=None):
+    """PAD-1204: ``(profile, address)`` of the card the score feed goes on, or ``(None, "")`` when the project does not
+    ask for it or it is left out (one warning says why). The modes' gate, as inactivity pausing the timers'."""
+    from . import score_feed as _SF
+    from . import mode_write as _MW
+    on, url = _SF.load(assets_dir)
+    if not on:
+        return None, ""
+    why = _SF.url_problem(url)
+    if not why and dest_is_device:
+        why = "a direct-SD write cannot add files to the card; build an image file to carry it"
+    elif not why:
+        why = _MW.host_refusal()
+        if not why:
+            if ext4_available is None:
+                from ...core import ext4_grow
+                ext4_available = ext4_grow.available
+            ok, e4 = ext4_available()
+            if not ok:
+                why = "this system cannot write new files into the card image (%s)" % e4
+    prof = None
+    if not why:
+        prof = _SF.project_title(assets_dir, probe=True)
+        why = _SF.title_refusal(prof)
+    if why:
+        log("Score feed: left out of this build: %s." % why.rstrip("."), "warning")
+        return None, ""
+    url = url.strip()
+    log("Score feed: %s." % (_SF.HOW % url), "info")
+    return prof, url
+
+
 def _handicap_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     """PAD-1033: the title of the card the players' handicaps go on, or ``None`` when the project does not ask for them
     or they are left out (one warning says why). The modes' gate, as co-op play's."""
@@ -11644,8 +11909,9 @@ class _CoopMenu(_MusicModeMenu):
         self.ok = True
         self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 "
                  "(Classic: a character each, no special abilities) or 2 (Enhanced: with the abilities) and the "
-                 "start menu offers CO-OP PLAY, TEAM PLAY 2 VS 2 (players 1 and 3 against 2 and 4) and TEAM PLAY 2 "
-                 "VS 1 (players 1 and 3 against 2). While it is 1 or 2 most Insider "
+                 "start menu offers CO-OP PLAY, TEAM PLAY 2 VS 2 (players 1 and 3 against 2 and 4), TEAM PLAY 2 "
+                 "VS 1 (players 1 and 3 against 2) and TEAM PLAY 3 VS 1 (players 1, 3 and 4 against 2); at 2 also "
+                 "ENHANCED STANDARD (competing players, a character each). While it is 1 or 2 most Insider "
                  "Connected features are off; at 0 the card reports as it always has (with no modes on it)."
                  % self.setting.where, "info")
 
@@ -13049,14 +13315,16 @@ def _install_modes(output_path, modes, landed, planned, log):
     who = ("Modes" if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                                  or modes.get("picture") or modes.get("attract")
                                                  or modes.get("coop") or modes.get("idle")
-                                                 or modes.get("handicap") or modes.get("comp"))
+                                                 or modes.get("handicap") or modes.get("comp")
+                                                 or modes.get("score_feed"))
            else "Random clips" if modes.get("variants") else "Music modes"
            if modes.get("music_modes") else "Picture settings" if modes.get("picture")
            else "Attract items" if modes.get("attract")   # PAD-782
            else "Co-op play" if modes.get("coop")         # PAD-1017
            else "Inactivity pauses timers" if modes.get("idle")   # PAD-1022
            else "Handicaps" if modes.get("handicap")      # PAD-1033
-           else "Prolonged Competition")                  # PAD-1041
+           else "Prolonged Competition" if modes.get("comp")   # PAD-1041
+           else "Score feed")                             # PAD-1204
     if who == "Music modes" and all(t.endswith(" in attract") for t in modes["music_modes"]):
         who = "Attract flipper sounds"   # PAD-641: the same program, its own words
     elif who == "Music modes" and all(t.endswith((" in turn)", " in attract"))
@@ -13146,9 +13414,14 @@ def _install_modes(output_path, modes, landed, planned, log):
         from . import prolonged_comp as _PCo
         log("Prolonged Competition on the card: %s. Like the game's own Competition, it keeps the card on Insider "
             "Connected." % _PCo.HOW, "success")
+    if modes.get("score_feed"):               # PAD-1204
+        from . import score_feed as _SF
+        log("Score feed on the card: %s. It changes no score: on its own it keeps the card on Insider Connected."
+            % (_SF.HOW % modes["score_feed"]), "success")
     if modes.get("names") or not (modes.get("variants") or modes.get("music_modes")
                                   or modes.get("picture") or modes.get("attract") or modes.get("coop")
-                                  or modes.get("idle") or modes.get("handicap") or modes.get("comp")):
+                                  or modes.get("idle") or modes.get("handicap") or modes.get("comp")
+                                  or modes.get("score_feed")):
         log("Modes: %d mode(s) on the card: %s."
             % (len(modes.get("names") or ()), ", ".join(modes.get("names") or ())),
             "success")
@@ -13849,7 +14122,8 @@ def _colour_signature(assets_dir):
 
 
 def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
-                    cancel=None, label=None, run_card=None, sound_ok=None, scene_edits=True):
+                    cancel=None, label=None, run_card=None, sound_ok=None, scene_edits=True,
+                    leave_out=()):
     """Build an OVERRIDE SET: the card files the user's edits touch, patched,
     and nothing else — so the emulator can run those edits without a rebuild.
 
@@ -13893,6 +14167,11 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
     own sounds out with a reason in the log.  A parameter rather than the
     environment because a Try it can run beside a Write in the same process.
 
+    *leave_out* names the kinds of edit this set goes without (PAD-1197: the
+    Emulate tab's "Leave out of this run" ticks, :mod:`.run_leave_out`), so a
+    test of one picture is not a rebuild of the sound bank.  Recorded in the
+    manifest (``left_out``).
+
     *out_dir* is emptied first when it cannot be patched, and only if it is
     empty or already an override set (it carries :data:`OVERRIDE_MANIFEST`)
     — a stale file left behind would still be bound over the card, so "what is
@@ -13933,6 +14212,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         _KEEP_EXTRACTS.on = bool(getattr(_KEEP_EXTRACTS, "wanted", False))
         _SCENE_BASES.store = scene_bases = {}
         _SKIP_SCENE_EDITS.on = not scene_edits
+        from . import run_leave_out as _RLO
+        _LEAVE_OUT.kinds = frozenset(_RLO.clean(leave_out))
         _MODES_LEFT_OUT.why = ""
         # PAD-505: a set's files are plain files, so an edit may fill a hole
         _HOLE_WRITES.writes = held = []
@@ -13948,6 +14229,7 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
             _KEEP_EXTRACTS.on = False
             _SCENE_BASES.store = None
             _SKIP_SCENE_EDITS.on = False
+            _LEAVE_OUT.kinds = frozenset()
             modes_left_out = getattr(_MODES_LEFT_OUT, "why", "") or ""
             _MODES_LEFT_OUT.why = ""
             _HOLE_WRITES.writes = None
@@ -14191,6 +14473,8 @@ def write_overrides(original_path, assets_dir, out_dir, log=None, progress=None,
         "removed": removed,
         # PAD-251: whether the Scenes tab's edits are in this set (the Emulate tab's tick)
         "scene_edits": bool(scene_edits),
+        # PAD-1197: the kinds the Emulate tab left out of this set
+        "left_out": list(_RLO.clean(leave_out)),
         # PAD-305: the color profile the set's pictures and clips carry
         "colour_profile": _colour_signature(assets_dir),
         # PAD-938: how its image.bin was built (a set from before the fix is built again)
@@ -21182,6 +21466,8 @@ class _BankPlan(object):
         # PAD-777: the most image.bin may come to beside the banks the game can play
         # from at once (soundbank.MAPPED_MAX less the biggest of them)
         self.image_room = None
+        # PAD-1235: an earlier Write's banks this one takes the place of, {cat: (name, size)}
+        self.retired = {}
         # the card's banks' sid maps, {bank sid: game sid} (an earlier Write's)
         self.old_map = {}
         # PAD-608: the music modes' files and the sounds in turn in the banks,
@@ -21843,7 +22129,8 @@ def _sm_turn_hosts(used, banked=()):
 
 def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows, used,
                       reader, img_node, space_chk, log, game_sids=None, game_why=None,
-                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=()):
+                      sm_frags=None, game_seqs=None, sm_seqs=None, sm_hold=(),
+                      retire_touched=None):
     """Decide which of the modes' own sounds leave ``image.bin`` for a sound
     bank of their own (PAD-595), and take them out of *grows* and
     *audio_edits*.  Returns ``(plan or None, audio_edits, grows)``.
@@ -21871,7 +22158,14 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
     build whose sounds all fit is exactly the build it was, unless it has music modes'
     files a bank can hold (PAD-749): then every bankable sound goes into a bank but the
     music modes' files *sm_hold* (hosts with files in turn of their own, PAD-638, which play
-    only from a record in image.bin)."""
+    only from a record in image.bin).
+
+    *retire_touched* (PAD-1235), when the build puts the mode runtime's files on the card
+    again: the game sids this build edits.  A sound bank an earlier Write of this app put on
+    the card (a shared card built with music modes, written again with them) whose game sounds
+    are all among them holds nothing this card still plays once this build is on it, so it
+    is RETIRED: its name and its place in image.bin's list are this build's to use again,
+    and a retired bank no new one takes is emptied (``plan.retired``)."""
     from . import bank_build as BB
     from .spike2 import masterdir as MD
     from .spike2 import soundbank as SB
@@ -21928,7 +22222,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
         _grown_body_bytes(byidx[i], g[1])
         for i, g in sorted(kept.items()) + sorted(spilled.items())])
     # the bank files: one per 2 GiB, the lowest category ids the card lacks
-    on_card, vendor = [], []
+    on_card, vendor, retired = [], [], {}
     dir_rel = ""
     try:
         for path, _ino, _node in reader.iter_regular_files(min_size=1):
@@ -21936,14 +22230,29 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             if base.startswith("image-sc") and base.endswith(".bin"):
                 on_card.append(base)
                 size = int(_node["size"])
-                if not SB.is_pad_bank_at(
-                        lambda off, k, _n=_node: reader.read_range(_n, off, k), size):
+                _read = (lambda off, k, _n=_node: reader.read_range(_n, off, k))
+                if not SB.is_pad_bank_at(_read, size):
                     vendor.append(size)
+                elif retire_touched is not None and SB.category_of(base) is not None:
+                    # PAD-1235: an earlier Write's bank this one builds again
+                    left = set(SB.read_sid_map_at(_read, size).values()) - set(retire_touched)
+                    if not left:
+                        retired[int(SB.category_of(base))] = (base, size)
         if img_node is not None:
             dir_rel = os.path.dirname(_card_rel_path(reader, img_node) or "")
     except Exception:  # noqa: BLE001 - the ids then avoid image.bin's list alone
         pass
     _c, ids, _room = SB.category_slots(head)
+    if retired:
+        # (their names and their places in image.bin's list are free for this build's banks)
+        on_card = [b for b in on_card if b not in {n for n, _s in retired.values()}]
+        _room += sum(1 for i in ids if int(i) in retired)
+        ids = [i for i in ids if int(i) not in retired]
+        log("%d sound bank(s) an earlier Write of this app put on this card (%s, %d MB) hold "
+            "only the music modes' and the modes' own sounds and sounds this build puts in "
+            "again: this build's banks take their place." % (
+                len(retired), ", ".join(n for _c2, (n, _s) in sorted(retired.items())),
+                sum(s2 for _n, s2 in retired.values()) // 10**6), "info")
     stride = SB.fragment_stride(head)
     # PAD-1005: a game that ships sound banks of its own (Deadpool 16, Metallica 24, D&D 29) plays
     # from them beside ours: its biggest takes one of the sound channels' places, and what is left
@@ -22281,6 +22590,7 @@ def _plan_sound_banks(gr_path, img_path, params, audio_edits, grows, user_grows,
             % (len(group), SB.bank_name(cat), size / 1e6, why,
                ", ".join(_named(e.idx) for e in group)), "info")
     plan = _BankPlan(banks, wavs, spilled, dir_rel)
+    plan.retired = dict(retired)
     plan.game = {i: game_sids[i] for i in spilled if i in game_sids}
     # PAD-777: the most image.bin may come to beside the banks: the user's longer sounds
     # that stay in it are trimmed to this
@@ -22902,7 +23212,8 @@ def _build_sound_banks(gr_path, img_path, params, sites, plan, used, loop_idx, g
                 "%#x; the mode points its carrier, request %d, at it." % (
                     u.get("name"), _MW_sound_words(u.get("key")), SB.bank_name(cat), r["idx"],
                     (int(r["length"]) - BLOCK) / 44100.0, sid, int(u["request"])), "info")
-    writes = BB.image_header_writes(img_path, [c for c, _p in plan.files])
+    writes = BB.image_header_writes(img_path, [c for c, _p in plan.files],
+                                    drop=sorted(plan.retired))
     with open(_lp(img_path), "r+b") as f:
         for off, data in sorted(writes.items()):
             f.seek(off)

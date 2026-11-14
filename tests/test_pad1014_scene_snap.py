@@ -17,7 +17,7 @@ _TABS = os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor",
 
 _RUN = r"""
 const m = await import("./tabs/text_scenes.js");
-const { snapMove, snapPoint, snapScale, snapDrag, boxOfPts, dragTo, SNAP_HANDLES } = m;
+const { snapMove, snapPoint, snapScale, snapDrag, boxOfPts, dragTo, SNAP_HANDLES, exactBox, r3 } = m;
 const out = { handles: SNAP_HANDLES.map(([k]) => k) };
 const W = 1360, H = 768;
 const other = { x: 400, y: 200, w: 100, h: 60 };          // edges 400/450/500 across, 200/230/260 down
@@ -54,6 +54,14 @@ out.off = snapDrag(d, null) === d;
 out.notStarted = snapDrag(press, base) === press;
 out.on = snapDrag(d, base);
 out.box = boxOfPts([[3, 9], [10, 2], [7, 4]]);
+// PAD-1211: a part whose left edge is at 485.7 snaps onto 400 by an exact move (-85.7), and the
+// grid puts it on 480 (-5.7), not a whole-pixel move that leaves it 0.3 off
+const fb = { x: 485.7, y: 189, w: 346.2, h: 476.3 };
+out.fracPart = snapMove(fb, -82, 0, { ...base, others: [other] });
+out.fracGrid = snapMove(fb, -3, 0, { ...base, objects: false, grid: true, size: 10 });
+out.exact = exactBox({ x: 486, y: 189, w: 346, h: 476, box: [485.7, 189, 346.2, 476.3] });
+out.shown = exactBox({ x: 486, y: 189, w: 346, h: 476 });
+out.r3 = [r3(-85.70000000001), r3(0.1 + 0.2)];
 console.log(JSON.stringify(out));
 """
 
@@ -83,6 +91,11 @@ def test_snapping_math(tmp_path):
                          capture_output=True, text=True, timeout=60, cwd=str(tmp_path))
     assert run.returncode == 0, run.stderr
     g = json.loads(run.stdout)
+    # which ways each snapped (PAD-1211: the drop keeps those exact)
+    snapped = {k: v.pop("snapped") for k, v in g.items() if isinstance(v, dict) and "snapped" in v}
+    assert snapped["autoLeft"] == [True, False] and snapped["free"] == [False, False]
+    assert snapped["grid"] == [True, True] and snapped["both"] == [True, True]
+    assert snapped["point"] == [True, True] and snapped["on"] == [True, False]
     assert g["handles"] == ["tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br"]
     assert g["autoLeft"] == {"dx": 300, "dy": 0, "guides": [{"x": 400}]}
     assert g["autoRight"] == {"dx": 310, "dy": 0, "guides": [{"x": 450}]}
@@ -104,6 +117,13 @@ def test_snapping_math(tmp_path):
     assert g["notStarted"] is True
     assert g["on"]["dx"] == 300 and g["on"]["guides"] == [{"x": 400}]
     assert g["box"] == {"x": 3, "y": 2, "w": 7, "h": 7}
+    # PAD-1211: fractional edges land exactly on the line / grid
+    assert snapped["fracPart"] == [True, False] and snapped["fracGrid"] == [True, True]
+    assert abs(g["fracPart"]["dx"] - -85.7) < 1e-9 and g["fracPart"]["guides"] == [{"x": 400}]
+    assert abs(g["fracGrid"]["dx"] - -5.7) < 1e-9 and g["fracGrid"]["dy"] == 1
+    assert g["exact"] == {"x": 485.7, "y": 189, "w": 346.2, "h": 476.3}
+    assert g["shown"] == {"x": 486, "y": 189, "w": 346, "h": 476}
+    assert g["r3"] == [-85.7, 0.3]
 
 
 def test_canvas_snaps_every_drag_and_offers_the_menu():
@@ -116,3 +136,28 @@ def test_canvas_snaps_every_drag_and_offers_the_menu():
     assert "<${SnapButton} />" in tree_actions[:2000]
     # the settings are the viewer's own and kept (and survive storage that throws)
     assert 'const SNAP_KEY = "pad.scenes.snap"' in src
+
+
+def test_a_snapped_drop_lands_on_the_line():
+    """PAD-1211 (DragonRR: "after letting go of the mouse there always seems to be a few pixels
+    shift left of the snapped asset"): the drop rounded the snapped move to whole pixels and a
+    selected part snapped by the rounded box the panel shows, so a part at 485.7 landed up to a
+    pixel off the line (a few pixels on a zoomed preview).  A way that snapped now keeps the
+    move exact; one dragged freely still moves by whole pixels."""
+    src = _src()
+    up = src[src.index("  const up = () => {\n    const d = drag;"):]
+    up = up[:up.index("  const key = (e) =>")]
+    assert "sn[0] ? r3(d.dx) : Math.round(d.dx)" in up
+    assert "sn[1] ? r3(d.dy) : Math.round(d.dy)" in up
+    assert "if (dx || dy) send(" in up                 # a snap under a pixel still moves it
+    assert "x: r3(b.x), y: r3(b.y), w: r3(b.w), h: r3(b.h)" in up
+    # the selection (what a drag snaps by, the corners a resize keeps) is the exact box
+    assert "const selBox = boxLive || (p && !multi && p.x != null ? exactBox(p) : null);" in src
+    # X and Y in the panel move to the number typed, from the exact box
+    assert 'r3(Number(v) - exactBox(p).x)' in src and 'r3(Number(v) - exactBox(p).y)' in src
+    # the pointer is read inside the canvas's border, where the picture and outlines are
+    to = src[src.index("  const toStage = (e) =>"):]
+    assert "el.clientLeft" in to[:400] and "r.width - 2 * bx" in to[:400]
+    css = open(os.path.join(_TABS, "..", "..", "css", "tabs", "text_scenes.css"),
+               encoding="utf-8").read()
+    assert ".tree-canvas { border: none; box-shadow: 0 0 0 1px var(--line-2); }" in css

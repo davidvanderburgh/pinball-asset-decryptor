@@ -95,6 +95,23 @@ export PAD_S3_I2C
 
 TREE=$(python3 "$S/s3store.py" path "$CARD") || {
     echo "[s3run] the card is not in the Spike 3 store yet: s3store.py build $CARD" >&2; exit 1; }
+# A MULTI-BOOT CARD (PAD-1263, MULTIBOOT.md): /games/game is the boot menu's
+# hook and every image's games tree is whole under games/pad/imgN. The game
+# itself still starts from /games/game (the hook runs the menu and becomes the
+# chosen image's game); the readers on this side (switch list, bridge,
+# playfield) read the tree of PAD_S3_IMAGE, else the menu's default= image.
+GT=$TREE/games
+if [ -f "$TREE/games/pad/images.conf" ]; then
+    MB_IMG=${PAD_S3_IMAGE:-$(awk -F= '/^[ 	]*default[ 	]*=/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "$TREE/games/pad/images.conf")}
+    MB_DIR=$(awk -F'|' -v want="${MB_IMG:-0}" '/^[ 	]*image[ 	]*=/ { if (i == want) { sub(/^[ 	]*image[ 	]*=[ 	]*/, "", $1); gsub(/[ 	]+$/, "", $1); print $1; exit } i++ }' "$TREE/games/pad/images.conf")
+    case "$MB_DIR" in ""|*/*|.*) MB_DIR=img0 ;; esac
+    [ -e "$TREE/games/pad/$MB_DIR/game" ] || MB_DIR=img0
+    GT=$TREE/games/pad/$MB_DIR
+    echo "[s3run] multi-boot card: the menu runs first; the host side reads image ${MB_IMG:-0} ($MB_DIR)"
+    # the hook's and the menu's log where this side can read it: the slot's
+    # /data overlay (the machine keeps it in /tmp)
+    export PADSELECT_LOG=/data/padselect.log
+fi
 SD=/var/tmp/pad-s3/slot$SLOT
 LOG=$SD/run.log
 [ "$FRESH" = 1 ] && rm -rf "$SD"
@@ -164,6 +181,16 @@ if [ "$BRIDGE" = 1 ]; then
         [ -e "$B/$f" ] || { echo "[s3run] --bridge needs $B/$f: bash s3build.sh" >&2; exit 1; }
     done
     rm -rf "$SD/frames" "$SD/padgl.ring"; mkdir -p "$SD/frames"
+    # THIS TITLE'S SWITCH LIST BEFORE THE WINDOW OPENS (PAD-1213). The window
+    # binds its keys by it and latches the coin door and the trough as it
+    # opens; the bridge only writes it a second or so later, so the window
+    # used to open on the slot's list from the LAST run - another title's -
+    # and hold those ids closed while this game booted: on Transformers its
+    # JUMPER LVDS RESOLUTION 1 (Guided Setup came up at the other resolution),
+    # two slingshots, a flipper EOS. The stale list goes; the new one is the
+    # bridge's own derivation, written again (the same) when the bridge starts.
+    rm -rf "$SD/tables" "$SD/switches.json"; mkdir -p "$SD/tables"
+    python3 "$S/s3bridge.py" --switches "$SD" "$GT/game" 2>&1 | tail -1
     # 40 frames, or unbounded with --bus: s3press.py autoguide prunes them
     MAXFR=40; [ "$BUS" = 1 ] && MAXFR=1000000
     # --window: the game on screen, in Spike 2's renderer window, whose
@@ -182,9 +209,31 @@ if [ "$BRIDGE" = 1 ]; then
         ln -sfn "$SD/tables" "$SD/dump/tables"
         # PAD_PAUSE_KEEPER=1 (PAD-1183): Pause / F9 - in this window or the
         # playfield's - is asked of s3keys.py, which runs as root beside the
-        # game and stops it; the renderer is the desktop user and may not
+        # game and stops it; the renderer is the desktop user and may not.
+        #
+        # A second screen (PAD-1199: Fallout's Pip-Boy, on the other HDMI
+        # output) gets the renderer's display-2 window, opened at half the
+        # render size beside the game window - it renders 1920x1080 like the
+        # backbox, and a second full-size window would cover the desktop.
+        W2=${PAD_GL2_WIN_W:-$(( ${PAD_S3_W:-1920} / 2 ))}
+        H2=${PAD_GL2_WIN_H:-$(( ${PAD_S3_H:-1080} / 2 ))}
+        # WHERE THE GAME WINDOW GOES (PAD-1201; Spike 2's PAD-811, watch.sh):
+        # the Emulate tab's display setting - full screen on a monitor, a
+        # rectangle, borderless - is display.conf on the rig board, read live
+        # by padglhost. Spike 3 never passed it, so its backbox always opened
+        # as a framed 1920x1080 window wherever the desktop put it, whatever
+        # the user had chosen. A hidden run (PAD_HIDDEN=1, a private display)
+        # leaves it alone, as watch.sh does.
+        # PAD_SLOT: the renderer remembers where its window was left in
+        # ~/.pad_windows.rig<N> by its slot, and without it every Spike 3
+        # run - a hidden one on a private display too - wrote the base rig's
+        # ~/.pad_windows, the spot David's own game window comes back to.
+        if [ "${PAD_HIDDEN:-0}" != 1 ] && [ -z "${PAD_DISPLAY_CONF:-}" ] && type pad_board_dir >/dev/null 2>&1; then
+            PAD_DISPLAY_CONF="$(pad_board_dir)/display.conf"
+        fi
         RENV=(PAD_GL_WINDOW=1 PAD_SW_SHM="$SD/dump/padsw" PAD_TABLES="$SD/tables" PAD_GAME=game
-              PAD_PAUSE_KEEPER=1)
+              PAD_GL2_WIN_W=$W2 PAD_GL2_WIN_H=$H2 PAD_DISPLAY_CONF="${PAD_DISPLAY_CONF:-}"
+              PAD_SLOT="$SLOT" PAD_PAUSE_KEEPER=1)
         # AS THE DESKTOP'S USER, NOT ROOT (watch.sh learned it first): as
         # root, padglhost cannot attach to the WSLg X server's shared memory -
         # "MESA: error: Failed to attach to x11 shm" on repeat, 0.5 fps, a
@@ -240,7 +289,7 @@ if [ "$BUS" = 1 ]; then
         BUSPIDS="$!"
     fi
     [ "$WINDOW" = 1 ] && export PAD_S3_PADLED="$SD/dump/padled" PAD_S3_SWTRACE=${PAD_S3_SWTRACE:-1}
-    python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
+    python3 "$S/s3bridge.py" "$SD" "$GT/spike3/netbridge/netbridge.elf" "$GT/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     # the video decoder (stage 5): s3vid.so hands the game's HEVC/H.264
     # packets to it and its I420 frames go to padglhost through padvid.shm
@@ -290,9 +339,9 @@ if [ "$BUS" = 1 ]; then
         # window is a Windows program the app opens on this line, as for a
         # Spike 2 run whose WSL cannot start one itself.
         if [ "${PAD_S3_PLAYFIELD:-1}" = 1 ]; then
-            TITLE=$(basename "$(dirname "$(readlink "$TREE/games/game")")")
+            TITLE=$(basename "$(dirname "$(readlink "$GT/game")")")
             for i in $(seq 1 50); do [ -s "$SD/tables/game/switch_list.txt" ] && break; sleep 0.1; done
-            python3 "$S/s3pf.py" "$TREE/games/game" "$TREE" "$TITLE" "$SD/tables/$TITLE" \
+            python3 "$S/s3pf.py" "$GT/game" "$TREE" "$TITLE" "$SD/tables/$TITLE" \
                 "$SD/tables/game/switch_list.txt" 2>&1 | sed 's/^/[s3run] /'
             chmod -R a+rX "$SD/tables" 2>/dev/null
             if [ -s "$SD/tables/$TITLE/device_xy.txt" ]; then
@@ -338,12 +387,21 @@ if [ "${PAD_S3_AUDIO:-0}" = 1 ]; then
         # holds. PAD_S3_AUDIO_LAG_MS (default 90) is the player pre-roll;
         # raise it if a run crackles (an underrun), lower it for less lag.
         LAG=${PAD_S3_AUDIO_LAG_MS:-90}
+        # AND THE LAG MUST NOT STAY (PAD-1213, David: "audio lag from
+        # input"). The player drops a backlog only once its queue has sat above
+        # PAD_AUDIO_MAX_LATE_MS for 2 s - 750 ms by default, set for Spike 2's
+        # bursty guest. Spike 3's sound comes out at exactly 1.000x (measured
+        # over a whole Transformers game), so any backlog is the PC's: a
+        # player held up by a busy desktop, a slow start. Under the 750 ms
+        # rule David's run sat 0.2-0.85 s late, saw-toothing for minutes, and a
+        # single 600 ms hiccup stayed as 660-690 ms of lag for good. At 200 ms
+        # the queue goes back to the 90 ms cushion within about 2 s.
         # the player's TCP hop (WSL -> the Windows speaker, or a relay) gets
         # a port of this slot's own: Spike 2 rigs hold 45997+slot, so a
         # Spike 3 slot of the same number would take theirs
         PAD_AUDIO_PORT=${PAD_AUDIO_PORT:-$((46100 + SLOT))} \
         PAD_AUDIO_PREBUFFER_MS=${PAD_AUDIO_PREBUFFER_MS:-$LAG} \
-        PAD_AUDIO_LATENCY_MS=${PAD_AUDIO_LATENCY_MS:-40} \
+        PAD_AUDIO_LATENCY_MS=${PAD_AUDIO_LATENCY_MS:-40}         PAD_AUDIO_MAX_LATE_MS=${PAD_AUDIO_MAX_LATE_MS:-200} \
         "${AS_USER[@]}" setsid bash "$S/../spike2_emu/playaudio.sh" "$SD/audio/audio.fifo" 44100 2 \
             "$SD/audio/audio.fmt" > "$SD/playaudio.log" 2>&1 &
         AUDPID=$!
@@ -502,6 +560,22 @@ T0=$(date +%s.%N)
 # flush) ever wrote it: a 30 s boot left game.out EMPTY (PAD-1090, second
 # sweep). `script` gives it a terminal, so it is line-buffered as on the
 # machine's console. stderr stays its own file. TERM at the cap, KILL 5 s on.
+# A MULTI-BOOT CARD IN A CHECKPOINTABLE RUN (PAD-1263): /games/game is the
+# boot menu's hook, a shell script, and the explicit qemu below runs programs
+# only. So the hook runs FIRST, here, under binfmt with the same shims, in its
+# menu-only mode (PADSELECT_NOEXEC: the menu, the choice, the chosen tree bound
+# over /games in this namespace), and the game is then started as any card's:
+# /games/game is by then the chosen image's own program. No bind at all (the
+# hook's exit 3): image 0's game, straight from its directory.
+if [ "$PIVOT" = 1 ] && [ "$PROG" = /games/game ] && [ -f "$R/games/pad/images.conf" ]; then
+    echo "[s3run] multi-boot card: the boot menu first (the game starts once it has chosen)"
+    chroot "$R" ${PRELOAD:-env} PADSELECT_NOEXEC=1 /bin/sh /games/pad/padselect.sh < /dev/null
+    MB_RC=$?
+    if [ "$MB_RC" != 0 ] || [ "$(readlink "$R/games/game")" = pad/padselect.sh ]; then
+        PROG=/games/pad/img0/game
+    fi
+    echo "[s3run] boot menu done (exit $MB_RC): starting $PROG"
+fi
 printf '%q ' "$PROG" "$@" > "$SD/.argv"
 if [ "$PIVOT" = 1 ]; then
     # THE CHECKPOINTABLE EXEC: everything the game holds must be inside its

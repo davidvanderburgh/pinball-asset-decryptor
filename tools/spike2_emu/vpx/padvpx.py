@@ -430,6 +430,14 @@ def status():
     return 0
 
 
+def _register(cmd):
+    import padcontroller
+    d = padlaunch.kit_load()
+    d["rig"] = RIG
+    padlaunch.kit_save(d)
+    return padcontroller.main(["--" + cmd])
+
+
 def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
@@ -577,6 +585,7 @@ def main(argv):
             return 0
         padisplay.save(s)
         d["lcd"] = {"topmost": s["mode"] != "free"}
+        d["layout"] = ""                    # none of the tab's layouts now (PAD-1231)
         padlaunch.kit_save(d)
         print("game window: %s" % padisplay.describe(s, mons))
         return 0
@@ -587,11 +596,23 @@ def main(argv):
         print("library: %s" % d["library"])
         return 0
     if cmd in ("register", "unregister"):
-        import padcontroller
-        d = padlaunch.kit_load()
-        d["rig"] = RIG
-        padlaunch.kit_save(d)
-        return padcontroller.main(["--" + cmd])
+        log = rest[rest.index("--log") + 1] if "--log" in rest[:-1] else None
+        if log is None:
+            return _register(cmd)
+        # PAD-1229: the tab's Register runs this elevated, where its output
+        # has nowhere to go; it said "was the administrator prompt declined?"
+        # whatever went wrong.  --log keeps what happened for the tab to say.
+        import contextlib
+        import traceback
+        with open(log, "w", encoding="utf-8", errors="replace") as f, \
+                contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
+            try:
+                rc = _register(cmd)
+            except BaseException as exc:                    # noqa: BLE001
+                traceback.print_exc()
+                rc = exc.code if isinstance(exc, SystemExit) and isinstance(exc.code, int) else 1
+            print("exit %s" % rc)
+        return rc
     if cmd == "run" and rest:
         return run(rest[0], hidden="--hidden" in rest, mute="--mute" in rest)
     if cmd == "stop" and rest:

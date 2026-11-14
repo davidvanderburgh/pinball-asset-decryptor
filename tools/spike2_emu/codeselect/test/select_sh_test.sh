@@ -336,6 +336,21 @@ export CODESELECT_CONF="$W/conf_hs_bad"
 hook hs_badgroup 0 0 ""
 grep -q "bad hiscores group '../x'" "$W/out" || { echo "select_sh_test: FAIL (hs_badgroup) message"; cat "$W/out"; exit 1; }
 grep -q -- "--scores-load" "$SCOREARGS" && { echo "select_sh_test: FAIL (hs_badgroup) loaded"; exit 1; }
+# 7. PAD-1196: a NAMED table between images with stores of their own (pb_lawww: four Heisei
+# images on table 'heisei'): Heisei color 3 ball booted last from its store; Heisei b/w 3 ball
+# (store orch3, which another image shares too) boots - the table is carried from one to the other
+{ cat "$W/conf"; echo "scores=0|heisei-col3"; echo "hiscores=0|heisei"; } > "$W/conf_hs_col3"
+{ cat "$W/conf"; echo "scores=0|orch3"; echo "hiscores=0|heisei"; } > "$W/conf_hs_orch3"
+rm -rf "$HS"; : > "$SCOREARGS"
+export CODESELECT_CONF="$W/conf_hs_col3"
+hook hs_named_a 0 0 "" "mount --bind $NVO/heisei-col3/godzilla_pro $NVD/godzilla_pro"
+[ "$(cat "$HS/last.godzilla_pro")" = "heisei|$NVO/heisei-col3/godzilla_pro" ]     || { echo "select_sh_test: FAIL (hs_named_a) last"; cat "$HS/last.godzilla_pro"; exit 1; }
+: > "$SCOREARGS"
+export CODESELECT_CONF="$W/conf_hs_orch3"
+hook hs_named_b 0 0 "" "mount --bind $NVO/orch3/godzilla_pro $NVD/godzilla_pro"
+[ "$(cat "$SCOREARGS")" = "--scores-save --store $NVO/heisei-col3/godzilla_pro --to $HS/heisei/godzilla_pro
+--scores-load --from $HS/heisei/godzilla_pro --store $NVD/godzilla_pro" ]     || { echo "select_sh_test: FAIL (hs_named_b) calls"; cat "$SCOREARGS"; cat "$W/out"; exit 1; }
+[ "$(cat "$HS/last.godzilla_pro")" = "heisei|$NVO/orch3/godzilla_pro" ]     || { echo "select_sh_test: FAIL (hs_named_b) last"; cat "$HS/last.godzilla_pro"; exit 1; }
 unset CODESELECT_NV_HS
 rm -rf "$HS"
 rm -f "$G/game"; : > "$G/game"

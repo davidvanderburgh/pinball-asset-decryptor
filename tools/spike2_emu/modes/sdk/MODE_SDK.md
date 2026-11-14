@@ -618,7 +618,7 @@ yours at the carriers' stock priority 2 is dropped while any other speech plays.
 
 | To... | Call |
 |---|---|
-| change how a request competes | `pm_sound_priority(request, priority, flags)` - -1 leaves one as it is; returns the old `priority << 8 \| flags`, or -1 without `data sound_requests` / `sound_request_count` in the port |
+| change how a request competes | `pm_sound_priority(request, priority, flags)` - -1 leaves one as it is; returns the old `priority << 8 \| flags`, or -1 without `data sound_requests` / `sound_request_count` in the port, or on a record whose priority byte is past 9 that it never changed (real ones go up to 255: Godzilla's "player added" is 196; one it changed itself it takes past 9 and back, PAD-1220) |
 | give a request its own priority and flags back (PAD-682) | `pm_sound_priority_stock(request)` - as `pm_sound_priority` first found them, also on a swap still armed on it; a mode's music carrier gets them back once its music has faded at the end, since a carrier can still be one the game plays (Bond LE 1.06: 94 is Bird One Multiball's music, and with its steal flag left cleared the game's next music could not take the bus from it) |
 
 start and end calls to priority 4, shot calls to priority 3, all three without the steal flag
@@ -6129,6 +6129,7 @@ tab's **Co-op play**):
                      and 3 Classic, no character's ability (PAD-1065)
     teams on         (PAD-1042) every game of two or more players is a Team 2v2 game, no menu row needed
     teams 2v1        (PAD-1042) ... a Team 2v1 game
+    teams 3v1        (PAD-1224) ... a Team 3v1 game
 
 Round 2 (DoomWalrus666): the Modes tab's "Switch it on and off in the service menu" puts a CO-OP PLAY row in the game's
 own menu (menu_settings.COOP_PLAY, on a spare setting, Off to start with) and its live value in coop.cfg. Teammates join
@@ -6171,6 +6172,15 @@ or the game's end). So the game ends after the last teammate's last ball.
   changed" checks (the getter, then `ldrb rA, [this, #count + 1] ; cmp rA, r0`; X-Men has two). No other title's
   program has a panel of this shape, and those get no lines. A Team 2v2 game (below) is left the game's own: it
   plays a game player per team, so its own player up already lights the team's box.
+- **"Player N, you're up" (PAD-1202, DoomWalrus666):** at a ball's start, with more than one player, the game starts a
+  process that waits a moment, asks the player-up getter who is up and plays that player's call (Godzilla 1.16:
+  `callout_nth(0x470 or 0x471, player - 1)`). With the game playing player 1 (a team game its player 1 or 2) it named
+  player one for every teammate. The process's getter call is wrapped where it is made (`hook_call`) and answers the
+  player really up: the teammate in a co-op game, the player (1-4) in a team game; mode.log says `co-op: "player N,
+  you're up" names player n (the game's player m)`. The process is found by its start: `bl <players getter> ; cmp
+  r0, #1 ; (cmphi r4, #1 ;) bls`, then its address into r1 - on Godzilla, Avengers, D&D, Foo Fighters, Iron Maiden,
+  Bond, Jaws, Jurassic Park, King Kong, Led Zeppelin, Mandalorian, Star Wars and Venom. Elvira's process of that
+  shape is handed the player COUNT ("n-player game") and reads no getter; the other titles have none.
 
 Port lines (portcoop.py; one framework shape on every Spike 2 build, the older ones' count at +0x50 of a struct):
 
@@ -6181,6 +6191,7 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
     site  coop_first_ball     the ball start's call of the ball getter that tells a first ball (PAD-1046)
     site  coop_panel_lit      (PAD-1043) the score panel's frame update's call of the player-up getter (hook_call)
     site  coop_panel_up[_n]   (PAD-1043) its "player changed" checks' calls (hook_call; _2 .. _4 for more than one)
+    site  coop_up_call        (PAD-1202) the ball start's "player N, you're up" process's getter call (hook_call)
 
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).
@@ -6235,6 +6246,20 @@ players 2..4 itself on the one Start; `team_play_get_player_score` makes players
   ball (P1, P2, P3, P2); TEAM PLAY 2 VS 1 and one Start adds three (`3 PLAYERS ADDED`, `TEAM 1: P1 AND P3`, `TEAM 2:
   P2`), a later Start adding no one (`coop_teams_size`: 4 for 2, 3 for 3; the game keeps its own
   `team_max`). Its scores go on a `TEAM 2V1` board of their own, so a 2v1 champion never sits on the 2v2 board.
+- **Team 3v1** (PAD-1224, DoomWalrus666: "Also please add a 3v1 mode"): TEAM PLAY 3 VS 1 (start-menu kind 5, or
+  `teams 3v1`) is the team game of four whose team 1 is players 1, 3 and 4 against player 2, who plays all three of
+  team 2's turns each ball (P1, P2, P3, P2, P4, P2); one Start adds four (`4 PLAYERS ADDED`, `TEAM 1: P1, P3, P4`,
+  `TEAM 2: P2`). `coop.team_kind` (4, 3, 5) says which team game it is; `coop_team_player_in` / `coop_team_of_in`
+  give 3v1's layout (player 2 must be the game's player 2: the joins fill the teams in Start order). Its scores go on a
+  `TEAM 3V1` board.
+- **Enhanced Standard** (PAD-1224, DoomWalrus666: "standard play but with the ability for players to choose a
+  character with special abilities ... their own scores and gameplay progress as normal, nothing shared"): CO-OP PLAY
+  at Enhanced adds ENHANCED STANDARD (start-menu kind 2) after CO-OP PLAY. It is the game's own game of competing
+  players (`coop.standard`): Starts in ball 1 are the game's own adds (`coop.n` follows its count), the player change
+  is the game's own (`coop_std_change`) and `coop.turn` is the game's player up, so each player's pick (at their
+  first ball) holds while they are up. The abilities' records are the game's player's already. Scores, the score
+  panel, the top line, the "you're up" call, Insider logins, first-ball setup, handicap records and the high score
+  boards stay the game's own; no co-op awards follow it. Classic has no such entry.
 - **Classic** (PAD-1065, DoomWalrus666: "play these modes without any special abilities. The players may select a
   character but none of them will have any special abilities"): CO-OP PLAY 4, 5 and 6 are Co-op, Team 2v2 and Team
   2v1 Classic, the same games as 1, 2 and 3 (now called Enhanced; `coop_menu_game`, `coop_teams_size`). The pick is
@@ -6386,6 +6411,8 @@ PAD-1114: the co-op and team games' intro (the dialog's **Intro video...**), wit
     intro PadCoopIntro 12000                  the intro's clip (a full-screen clip the build added) and its length
                                               in ms; sounds.cfg `cintro <request> <carrier key> <its key> <ms>` is
                                               its sound, on a carrier the game never plays (as PAD-945's shot sounds)
+                                              - at priority 255 while the intro plays, so the game's own sounds (a
+                                              Start's "player added") cannot take its bus; 3 again after (PAD-1220)
 
 A game that begins as co-op or team (the right flipper held at Start, the start menu's CO-OP PLAY / TEAM PLAY, a
 team game's filling Start, a teammate joining before ball 1 is out) plays it once: full-screen over the game's own
@@ -6399,6 +6426,35 @@ top line says `LANGUAGE: ENGLISH`, each flipper press flips every player's langu
 4 x player; `text language_<n>` names them), and 6 s after the last press it goes on by itself (not on Action: Godzilla
 launches the ball at an Action press the runtime holds back, so an Action press, or any launch, ends it too); then the
 first pick, held back until here. Godzilla's own bar over its start film is under the intro, so this window is where the language is chosen.
+
+**Round 2: in the game's own intro screen; the ball after the pick.** DoomWalrus666: "add language selection during
+the intro video in a small dialogue", "Ball must NOT go to the shooter lane until video, language, and character
+selection are all completed". On a port that names its start films (`text start_film_clips`, Godzilla's
+intro1/3/4/6, played by its BDLGameIntro screen at a Start), a Start about to be co-op or team (the right flipper held
+within 1.5 s with characters to pick, the start menu's entry just picked, or a co-op game already waiting for its
+film) has the game's film ask answered with the intro's clip: the game plays it in its own intro screen, with its own
+PLAYER LANGUAGE SELECT bar over it, and the flippers flip the language as on a stock Start (the right flipper held
+through Start is not a flip). Its own words over the film (`text intro_hide_<k>`: the place, the date, the Japanese
+date art) are hidden; the screen's scene is demand-loaded, so its root is the one the game passes its node finders
+(`site find_node` / `find_text`) when it looks those words up. The screen is up while the game's state word reads
+`value intro_state_up` (`data intro_state` -> + `value intro_state_at`; Godzilla 0, then 4); a film the screen closes
+before its end goes on full screen as the runtime's clip. Both flipper buttons stop the film, and the game closes its
+screen. A co-op game that formed before the game asked for its film waits up to 2 s for it, then plays full screen as
+above. Then the first pick opens at once - no ball wait, no language window. BALL 1'S SERVE (`site serve_ball`: the
+ball start's call of the framework's serve, Godzilla LE 0x2a77ec) waits on the game's own process, a tick at a time
+(`site proc_sleep`), through the intro and the first pick until a character is taken (or the start menu's
+players-added lines and the pick after them); while it waits the pick has the flippers and Action (no ball to launch:
+its top line says ACTION PICKS). Not earlier in the ball start: held at its first-ball check the game never put its
+intro screen up. The handicap pick (PAD-1033) already waits for the character's.
+
+**PAD-1221: a Start press in the intro adds a player with no sound.** The game answers an add with its own sound about 0.5 s later (Godzilla LE 1.16: request 1161, bus 0x2), which the intro's 250 ms fade let be heard. A Start press while ball 1 waits sets `ci.join_at`, and `ci_quiet` stops outright (`ci_join_cut`) any non-music sound first seen within 3 s of it. (Every teammate's pick holding their serve is PAD-1215's, below.)
+
+**Round 3: players added during the intro; the pick at once.** The game takes Start on its own process, which waits
+in the serve, so a Start in the intro was lost: while ball 1's serve waits, a press of the Start button (coop.cfg
+`intro_start <id>`, the program's START BUTTON; not with the left flipper held, the game's reset; not the press that
+began the game) is the game's own add, called through the co-op wrap (a teammate, or the team game's next player).
+The start menu's players-added lines (about 18 s, more while the logo plays) are dropped when an intro played: the
+pick opens the moment the intro ends or is skipped.
 
 PAD-1123: a character's clip and sound once picked (the dialog's **When picked...**), and the character on its
 teammate's End of Ball Bonus (the dialog's **Show each teammate's character on their End of Ball Bonus**):
@@ -6422,6 +6478,19 @@ teammate whose ball ended - the turn moves on only at the player change, after t
 A teammate with no character, or one with no picture or video, gets the game's own loop. The award cards' backdrop
 (PAD-1028 round 3) plays the game's own loop, never a teammate's copy. The build makes the copies from the project's
 own file of the loop (the stock one extracted, or the owner's replacement of it), else the card's.
+
+**The awards ceremony (PAD-1219).** DoomWalrus666 saw the cards over a battle's clip on his machine and asked for the
+HUD off and the final score along the bottom. A bonus end seen during the game is no longer needed: the build names
+what plays behind the cards in coop.cfg, `ceremony <clip> <crop>` - the owner's Awards video (made into
+`PadCoopCeremony`, a silent full-screen clip of the bank's size, crop `Normal`) or else the bank's End of Ball Bonus
+loop at its own crop - and the backdrop takes ANY background's place while the cards show (a battle's included, which
+bd_place_ok refused before). While they show, `on_scene_show` keeps every scene but the cards' own (the HUD scene the
+build put them in) and the video player out of the frame: the score panels, the top bar's words, the background's own
+words; the power-up meter goes with them. The build adds `PadCoopFinal` beside the cards, a band across the glass's
+foot (y 596, 1360x160) whose words the runtime writes at x1.4 (28 characters fill the glass; x2.1 cut the words' ends on the emulator):
+"FINAL SCORE  <player 1's>" in co-op, "TEAM 1  <p1>   TEAM 2  <p2>" in a team game ("T1 <p1>  T2 <p2>" when that is
+too long). Emulator, Godzilla LE 1.16: see the ticket's after shots. A port with no
+backdrop (`scene_show` unhooked) keeps the HUD and says so.
 
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 
@@ -6474,6 +6543,21 @@ the pick also hides from a new game's start (`game_start`) until its first ball 
 line's turn (name, what it does) ends with how to take one: `ACTION/LAUNCH PICKS` (`ACTION PICKS` on a port
 with no plunger flags; nothing with no `action`).
 Co-op, Team 2v2 and Team 2v1 share the pick. A port without the flags, or the ball out: as before.
+
+PAD-1215 (DoomWalrus666, Team 2v2: "using the action button to pick a character on Player 2, 3, or 4 launched the
+ball ... letting the character select timeout to 0 also launched the ball"): hiding was never enough - a hidden Action
+press still launches (PAD-1114), and the game's TIMED PLUNGER lets a waiting ball go on its own. Ball 1 of player 1
+escaped only behind an intro's serve hold. Now the ball start's serve (`site serve_ball`, hooked whenever there is a
+pick, intro or not) waits for any turn whose player has a pick to make (`coop_pick_hold`, the game's process asleep a
+tick at a time as in PAD-1114's `ci_ball_hold`): no ball is in the lane until the character is taken, and the top
+line says `ACTION PICKS`. A pick not open yet is waited for while the start menu's players-added lines run, else
+1.5 s; a Start meanwhile is still a join (`intro_start`, now written whenever there is a pick). Emulator, Godzilla LE
+1.16, Team 2v2, TIMED PLUNGER 10 s: on main player 2's Action pick and player 3's wait both launched the ball; fixed,
+player 1's ball waited 20 s for its pick, player 2's was served at the Action pick and waited for a second press, player 3's came at the time-out and was still in the lane 8 s later.
+
+    co-op: player 2's ball waits to be served until their character is picked
+    co-op: player 2's ball is served after 4513 ms (the character is taken)
+
 PAD-1045's guard (an Action press at a launch is not half of the save's double press) reads the same flags: Godzilla
 LE's shooter lane level byte reads the opposite sense to its flippers', so the lane said "out" while the ball waited and
 a press there counted toward x2 (emulator). Without the flags it reads `lane` as before.
@@ -6732,6 +6816,64 @@ there is nothing for a mode to call. The Modes tab's **Prolonged Competition** p
 
 Proven (emulator, Deadpool Pro 1.16): picked, two Competition games, picked again, off; the sweep over the latest builds
 is in docs/plans/pad1041_prolonged_comp.md.
+
+## The score feed (PAD-1204)
+
+C0untDeM0net (Pinside): "a high score display external from the games running on a TV ... capture the end game scores
+and user info if logged in, then push them to an external server separate from IC". Nothing for a mode to call: the
+Play options tab's **Score feed** puts `scorefeed.cfg` beside the runtime (`plugins/stern/score_feed.py`), and at the end of
+each game the runtime posts one JSON object to the owner's server:
+
+    {"source":"PAD score feed","game":"Godzilla LE 1.16","port":"godzilla_le 1.16","game_number":1,
+     "time":1794510083,"players":2,"scores":[1657980,1657980],
+     "insider":["11111111-2222-3333-4444-555555555555","aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]}
+
+`game` is the `title` line (the app's name for the card), `port` the port's own game and version, `game_number` the
+games reported since boot, `time` the machine's clock in Unix seconds (null below 2017: never set), `scores` each
+player's final score (`pm_score`, 64- or 32-bit), and `insider` each player's Insider Connected user id, the 16 bytes
+at the user manager's table + 20p + 4 (co-op's `users` line, PAD-1108; first table, then the second), in memory
+order as 8-4-4-4-12 hex, null for a player not logged in. The players are the most `pm_player()` seen up while
+`pm_in_game()` in that game.
+
+    feed http://192.168.1.50:8080/scores   where to post: http://, an IPv4 address, a port, a path (the app refuses
+                                           https, a name, 127.x and 0.0.0.0)
+    title Godzilla Premium/LE 1.16         the report's game
+    users 0x007bf878 0x160 0x164           the logins' tables (coop_play.insider_users), when the finder sees them
+    only                                   the card has no modes: armed before the score gate with nothing else
+
+**When a game has ended.** The tick keeps the scores and logins when `pm_in_game()` falls with players known. A port
+that names `game_over` (58 of 70) sends at that event, re-reading the scores and keeping any login the game cleared
+since the fall; the fall alone is never a game's end there (James Bond's `in_game` also falls at each multiball's
+end). A port without it (Elvira 3, D&D, King Kong, TMNT Pro: 12 of 70) sends once play has stayed stopped
+`FEED_QUIET_MS` (30 s) with no new ball. On either, a ball start that finds a score below the one kept is the next
+game (the game zeroes them) and the kept report goes then; a ball start with every score kept or higher is the same
+game going on, and the kept report is dropped. A game reset with Start held mid-game is never reported.
+
+**How it is sent: never waiting.** Rules 1 and 2 hold for the runtime too (`build_mode.sh` refuses `pthread_*`,
+sleeping, `poll` and `select`), so the send is a state machine stepped once a tick on the game's tick: a
+`SOCK_NONBLOCK` socket whose `connect` is asked again each tick until `EISCONN` (or an error), the request sent with
+`MSG_NOSIGNAL | MSG_DONTWAIT` as the socket takes it, the answer's status line read as it comes; 5 s for each, then
+up to 3 tries 10 s apart, then the report is dropped. 8 reports wait at most. A name lookup would block, hence the IP
+address. `socket`, `connect`, `send` and `__errno_location` are weak: a game process without them logs `score feed:
+off - the game's process has no network calls`. The game's scoring is never touched, so it arms before the score
+gate; on a card of only this, Insider Connected is left as it was.
+
+mode.log:
+
+    score feed: armed - each game's final scores and Insider logins are posted to http://127.0.0.1:18208/pinball/scores
+      (at the game's game_over; bus 0x4d game, 0x25 ball, game_over) (scorefeed.cfg: only)
+    score feed: game 1 over (the game's game_over) - 2 player(s): 1657980 1657980 0 0, logged in 1100
+    score feed: game 1 posted to http://127.0.0.1:18208/pinball/scores (HTTP 200): {...}
+    score feed: game 2 not taken on try 1 of 3 - the server refused the connection (nothing listens on that port)
+    score feed: game 2 DROPPED after 3 tries
+
+**Proof** (emulator, rig kit `C:\tmp\PAD-1204\rig`: `feed.sh` builds the runtime, installs it with `scorefeed.cfg`
+and the port, and runs `feedlisten.py`, a stand-in server on 127.0.0.1; the rig shares the distro's network).
+Godzilla LE 1.16, 1 ball a game, ball save off: game 1, two players with marker logins planted in both tables
+(`loginpoke.py`), posted at its game_over (HTTP 200): players 2, scores 1,657,980 and 1,657,980 as the game's own score
+panel showed them, both marker ids in player order; game 2 with the server down: refused, refused, refused 10 s
+apart, dropped, and the machine played on; game 3, server back: posted as game_number 3.
+Elvira 3 1.13 (its port names no game_over), one player, three balls: after the last drain nothing was pressed, and 30 s later `game 1 over (play stopped with no new ball)` posted 2,269,300, the score the game's own end-of-game screen showed; one report, none between balls. An earlier run whose job pressed Start inside the 30 s sent the finished game's 500,100 at the next game's first ball (`the next game started`).
 
 ## Expression light shows (PAD-1040)
 

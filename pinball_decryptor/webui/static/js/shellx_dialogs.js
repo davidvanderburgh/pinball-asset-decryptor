@@ -827,6 +827,84 @@ function ExportFilesDialog({ close, folder }) {
 }
 registerDialog("project_export_files", ExportFilesDialog);
 
+// ------------------------------------------------------- Team (PAD-1236)
+// Several PCs on one project: a team folder a sync service keeps the same on
+// every PC, each part of the project owned by one member, who shares it; the
+// others get it (webui/shellx_team.py, core/team_sync.py).  Floating like Export.
+function TeamDialog({ close }) {
+  const dup = useSingleton("project_team", close);
+  const sx = useNs("shellx");
+  const [ready, setReady] = useState(false);
+  const [team, setTeam] = useState(null);
+  const [name, setName] = useState(null);
+  const [widths, setWidths] = useState(null);
+  const tm = sx.team;
+  useEffect(() => {
+    if (dup) return;
+    call("shellx.team_open").then((r) => { if (!r) close(); else setReady(true); });
+    return () => { call("shellx.team_close"); };
+  }, []);
+  if (dup || !ready || !tm) return null;
+  const teamShown = team == null ? tm.default_team || "" : team;
+  const nameShown = name == null ? tm.default_name || "" : name;
+  const browse = async () => { const p = await call("shellx.team_browse"); if (p) setTeam(p); };
+  const join = async () => { if (await call("shellx.team_join", teamShown, nameShown)) { setTeam(null); setName(null); } };
+  const busy = !!tm.busy || !!sx.job;
+  if (!tm.joined) {
+    return html`<${FloatWin} title="Team" icon="refresh" onClose=${close} cls="sx-team"
+      footer=${html`<span class="grow"></span>
+        <${Button} kind="primary" disabled=${!teamShown.trim() || !nameShown.trim()} onClick=${join}>Join<//>
+        <${Button} onClick=${close}>Close<//>`}>
+      <div class="sx-p">${tm.intro}</div>
+      <div class="row">
+        <span class="lbl nw">Team folder</span>
+        <${Field} value=${teamShown} onChange=${setTeam} mono cls="grow" placeholder="A folder your sync service shares, e.g. OneDrive\\Godzilla team" />
+        <${Button} drop onClick=${browse}>Browse...<//>
+      </div>
+      <div class="row">
+        <span class="lbl nw">Your name</span>
+        <${Field} value=${nameShown} onChange=${setName} cls="grow" />
+      </div>
+      <div class="small muted sx-wrap">The first person to join makes the team; the others pick the same folder on their PC, each with their own name. Then each takes the parts they work on.</div>
+    <//>`;
+  }
+  const act = (r) => r.mine
+    ? html`<${Button} size="sm" disabled=${busy} onClick=${() => call("shellx.team_let_go", r.key)}
+        title=${{ head: "Let go", lines: [["Click", "nobody owns " + r.label + " until someone takes them; nobody gets yours from then on"]] }}>Let go<//>`
+    : html`<${Button} size="sm" disabled=${busy} onClick=${() => call("shellx.team_take", r.key)}
+        title=${{ head: "Take", lines: [["Click", r.owner ? "take " + r.label + " over from " + r.owner + ": from then on the others get yours" : "make " + r.label + " yours: you share them, the others get them"]] }}>Take<//>`;
+  const cols = [
+    { key: "label", label: "Part", width: "minmax(0,1fr)", render: (r) => html`<span class=${cx("sx-cell", r.mine && "ok-ink")}>${r.label}</span>` },
+    { key: "owner", label: "Whose", width: "120px", render: (r) => html`<span class="ellip sx-cell notr">${r.mine ? "Yours" : r.owner || "Nobody"}</span>` },
+    { key: "state", label: "", width: "minmax(0,2.2fr)", render: (r) => html`<span class=${cx("small ellip sx-cell", r.news && "acc-ink", r.changed_here && "warn-ink")} title=${r.state}>${r.state}</span>` },
+    { key: "act", label: "", width: "90px", render: act },
+  ];
+  const who = (tm.members || []).map((m) => m.name + (m.me ? " (you)" : "")
+    + (m.parts.length ? ": " + m.parts.join(", ") : ": no parts")
+    + (m.shared ? ", shared " + m.shared : "") + (m.arriving ? ", still arriving here" : "")).join("  ·  ");
+  return html`<${FloatWin} title="Team" icon="refresh" onClose=${close} cls="sx-team"
+    footer=${html`<${Button} size="sm" disabled=${busy} onClick=${() => call("shellx.team_leave")}>Leave team<//>
+      <span class="grow"></span>
+      ${tm.busy ? html`<${Spinner} />` : null}
+      <${Button} kind=${tm.news ? "primary" : ""} disabled=${busy || !tm.news} onClick=${() => call("shellx.team_get")}
+        title=${{ head: "Get from the team", lines: [["Click", "put the parts other people shared since you last got them into this project; each part is replaced by its owner's"]] }}>Get from the team${tm.news ? " (" + tm.news + ")" : ""}<//>
+      <${Button} kind=${tm.to_share && !tm.news ? "primary" : ""} disabled=${busy} onClick=${() => call("shellx.team_share")}
+        title=${{ head: "Share my parts", lines: [["Click", "copy the parts you own to your folder in the team folder, for the others to get"]] }}>Share my parts<//>
+      <${Button} onClick=${close}>Close<//>`}>
+    <div class="row small">
+      <span class="lbl nw">Team folder</span><span class="mono ellip grow notr" title=${tm.team}>${tm.team}</span>
+      <span class="lbl nw">You</span><span class="notr">${tm.me}</span>
+    </div>
+    ${tm.git && tm.git_remote && !(tm.warnings || []).length ? html`<${Note} kind="info">Kept in step by Git: Share my parts pushes, the team is pulled every 30 seconds${tm.git_lfs ? ", videos, sounds and pictures go through Git LFS" : ""}.<//>` : null}
+    ${(tm.warnings || []).map((w) => html`<${Note} kind="warn">${w}<//>`)}
+    <${Table} columns=${cols} rows=${tm.parts || []} rowKey=${(r) => r.key} cls="card sx-fill"
+      resizable widths=${widths} onResize=${setWidths}
+      empty=${html`<div class="empty small">${tm.busy ? "Looking at the team folder…" : "Nothing here."}</div>`} />
+    <div class="small muted sx-wrap notr">${who || "Nobody has joined yet."}</div>
+  <//>`;
+}
+registerDialog("project_team", TeamDialog);
+
 // ------------------------------------------- state-driven windows
 // A project copy / archive in progress (projects_ui._ProgressDialog) and
 // the update download (MainWindow.open_update_download_dialog).
@@ -1291,6 +1369,9 @@ function ReportDialog({ close, prefill = "" }) {
   const [busy, setBusy] = useState(false);
   const [hidden, setHidden] = useState(false);      // while the window is being shot
   const [sentId, setSentId] = useState(null);
+  // PAD-1254: one of the user's own reports this is about ("" = something
+  // new); the one waiting on their answer comes picked
+  const [about, setAbout] = useState("");
   useEffect(() => {
     (async () => {
       const i = await call("shellx.report_open", prefill || "");
@@ -1298,16 +1379,17 @@ function ReportDialog({ close, prefill = "" }) {
       setInfo(i);
       setName(i.name || ""); setHidePaths(i.hide_paths !== false);
       if (i.prefill && !text) setText(i.prefill);
+      if (i.about) setAbout(i.about);
     })();
   }, []);
   useEffect(() => {
     if (!showPreview) return undefined;
     const id = setTimeout(async () => {
-      const p = await call("shellx.report_preview", text, name, hidePaths);
+      const p = await call("shellx.report_preview", text, name, hidePaths, about);
       if (p) setPreview(p.text);
     }, 300);
     return () => clearTimeout(id);
-  }, [showPreview, text, name, hidePaths]);
+  }, [showPreview, text, name, hidePaths, about]);
   useEffect(() => {
     // the send finished off the loop: the service's answer, or why not
     if (!r.last || busy === false) return;
@@ -1336,12 +1418,19 @@ function ReportDialog({ close, prefill = "" }) {
   };
   const send = async () => {
     setErr(null); setBusy(true);
-    const ok = await act(() => call("shellx.report_send", text, name, hidePaths));
+    const ok = await act(() => call("shellx.report_send", text, name, hidePaths, about));
     if (!ok) setBusy(false);
   };
   const save = () => act(() => call("shellx.report_save", text, name, hidePaths));
   // the reports this app sent are a board of their own (PAD-914)
   const mine = r.mine || [];
+  // newest first, under where each one is
+  const open = mine.filter((m) => m.followable).slice().reverse();
+  const aboutOpts = [{ value: "", label: "Something new" }].concat(open.map((m) => ({
+    value: m.id, group: m.waiting ? "Needs your answer" : m.state === "filed" ? "Open" : "Finished",
+    label: (m.ticket ? m.ticket + ": " : "") + (m.title || "A problem report") })));
+  const aboutM = about ? open.find((m) => m.id === about) : null;
+  const fu = r.last && r.last.ok && r.last.follow_up ? r.last : null;
   const hasNews = !!mine.find((m) => m.seen === false);
   const asked = !!mine.find((m) => m.waiting);
   const board = () => { close(); openDialog("reports"); };
@@ -1354,7 +1443,8 @@ function ReportDialog({ close, prefill = "" }) {
   if (sentId) {
     return html`<${Modal} title="Report a problem" icon="flag" onClose=${onClose} cls=${"sx-report " + uid}
       footer=${html`<${Button} onClick=${board}>See your reports<//><${Button} kind="primary" onClick=${close}>Close<//>`}>
-      <${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. Your reports shows where it is in the queue, and when a release addresses it this app tells you with a notice at the top.<//>
+      ${fu ? html`<${Note} kind="ok">Added to your report "${fu.title || "your report"}"${fu.ticket ? ` (${fu.ticket})` : ""}, with the log and the card's details attached. It goes to the same ticket, not a new one. Your reports shows where it is.<//>`
+        : html`<${Note} kind="ok">Sent. Thank you: it goes straight into the developer's queue, with the log and the card's details attached. Your reports shows where it is in the queue, and when a release addresses it this app tells you with a notice at the top.<//>`}
     <//>`;
   }
   // ticked, the table shows the facts the way the record will carry them
@@ -1366,9 +1456,15 @@ function ReportDialog({ close, prefill = "" }) {
       <${Button} kind="primary" onClick=${send} busy=${busy} disabled=${busy || !r.available}>${busy ? "Sending…" : "Send"}<//>`}>
     <div class="stack" style="gap:10px">
       <p class="sx-p">Say what went wrong and what you expected. The app adds its version, your system, the card and project it has open, and the last ${(info && info.log_lines) || 0} lines of its log, so you don't have to.</p>
-      <label class="lbl" for="sx-rep-text">What happened</label>
+      ${open.length ? html`<div class="row wrap sx-rep-about" style="gap:10px">
+        <label class="lbl" for="sx-rep-about">This is about</label>
+        <${Select} id="sx-rep-about" value=${about} options=${aboutOpts} onChange=${setAbout} width=${460} />
+        <span class="small muted">${aboutM ? "It goes onto that report, with the log and your picture, instead of starting a new one."
+          : "Something you sent before? Pick it so it stays one report."}</span>
+      </div>` : null}
+      <label class="lbl" for="sx-rep-text">${aboutM ? "What's new about it" : "What happened"}</label>
       <textarea id="sx-rep-text" class="area" rows="5" value=${text} autoFocus
-        placeholder="I pressed Write on the Godzilla card and it stopped at 40% with…"
+        placeholder=${aboutM ? "I tried it again on the new version and…" : "I pressed Write on the Godzilla card and it stopped at 40% with…"}
         onInput=${(e) => setText(e.target.value)}></textarea>
       <div class="row wrap" style="gap:14px">
         <span class="stack" style="gap:4px"><span class="lbl">Your name (optional)</span>
@@ -1410,6 +1506,9 @@ function AnswerBox({ m, reply, focus }) {
   const files = rp.files || [];
   const [text, setText] = useState("");
   const [err, setErr] = useState(null);
+  // PAD-1254: the log tails a report carries go with the answer too
+  const [logs, setLogs] = useState(true);
+  const most = logs ? 4 : 5;
   const ref = useRef(null);
   useEffect(() => {
     if (!focus || !ref.current) return;
@@ -1423,11 +1522,11 @@ function AnswerBox({ m, reply, focus }) {
   };
   const attach = () => act(() => call("shellx.report_reply_attach", m.id));
   const remove = (i) => act(() => call("shellx.report_reply_remove", m.id, i));
-  const send = () => act(() => call("shellx.report_reply_send", m.id, text));
+  const send = () => act(() => call("shellx.report_reply_send", m.id, text, logs));
   const b = m.board || {};
   const busy = !!rp.busy;
   const onPaste = (e) => {
-    if (busy || files.length >= 5) return;
+    if (busy || files.length >= most) return;
     setErr(null); pastePicture(e, m.id, setErr);
   };
   return html`<section class="sx-ask" ref=${ref} data-id=${m.id} onPaste=${onPaste}>
@@ -1441,14 +1540,16 @@ function AnswerBox({ m, reply, focus }) {
     <textarea class="area" rows="4" value=${text} disabled=${busy} aria-label="Your answer"
       placeholder="Your answer…" onInput=${(e) => setText(e.target.value)}></textarea>
     <div class="row wrap" style="gap:8px;margin-top:6px">
-      <${Button} size="sm" onClick=${attach} disabled=${busy || files.length >= 5}>Attach files…<//>
+      <${Button} size="sm" onClick=${attach} disabled=${busy || files.length >= most}>Attach files…<//>
       ${files.map((f, i) => html`<span class="chip acc sm notr" title=${f.trimmed ? "Too big to send whole: its last part goes" : f.name}>${f.name} · ${f.kb} KB${f.trimmed ? " (trimmed)" : ""}
         <button class="sx-ask-x" aria-label=${"Remove " + f.name} disabled=${busy} onClick=${() => remove(i)}>×</button></span>`)}
       <span class="grow"></span>
       <${Button} kind="primary" size="sm" onClick=${send} busy=${busy}
         disabled=${busy || (!text.trim() && !files.length)}>${busy ? "Sending…" : "Send"}<//>
     </div>
-    <div class="small muted" style="margin-top:4px">Any file helps, such as a log; paste a picture into the box with Ctrl+V. Up to 5 files, about 1 MB in all; a log too big to send whole keeps its last part.</div>
+    <${Check} checked=${logs} onChange=${setLogs} disabled=${busy} cls="sx-ask-logs"
+      label="Include the app's logs" title="The app's log, and the Visual Pinball logs when you played a table, the same as a report carries" />
+    <div class="small muted" style="margin-top:4px">Any file helps, such as a log; paste a picture into the box with Ctrl+V. Up to ${most} files${logs ? " besides the logs" : ""}, about 1 MB in all; a log too big to send whole keeps its last part.</div>
     <${ErrorNote} text=${err || rp.error} />
   </section>`;
 }

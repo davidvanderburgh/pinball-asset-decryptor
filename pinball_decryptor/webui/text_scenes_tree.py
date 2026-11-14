@@ -1039,6 +1039,10 @@ class TreeEditMixin:
                 "x": round(box[0]) if box else None, "y": round(box[1]) if box else None,
                 "w": round(box[2] - box[0]) if box else None,
                 "h": round(box[3] - box[1]) if box else None,
+                # PAD-1211: the box as it is (x, y, w, h), not rounded: what a drag snaps by and
+                # what X and Y move from, so a part at 485.7 lands on the line, not 0.3 off it
+                "box": [round(box[0], 3), round(box[1], 3), round(box[2] - box[0], 3),
+                        round(box[3] - box[1], 3)] if box else None,
                 "scale": round(scale * 100), "scale_y": round(scale_y * 100),
                 "rotate": round(rotate, 2),
                 "game_turn": self._tree_game_turn(nid, rotate),
@@ -1166,12 +1170,12 @@ class TreeEditMixin:
                 for cls, keys in engine.program_mode_scenes(self.assets_dir).items():
                     for key in keys:
                         screens.setdefault(key, set()).add(R.mode_label(cls))
-                index = (R.filled_index(rows), boxes, screens,
+                index = ((R.filled_index(rows), R.format_index(rows)), boxes, screens,
                          engine.program_node_paths(self.assets_dir))
             except Exception:                        # noqa: BLE001
-                index = ({}, {}, {}, None)
+                index = (({}, {}), {}, {}, None)
             self._filled_memo = (key, memo[1], index)
-        lines, boxes, screens, known = index
+        (lines, fills), boxes, screens, known = index
         d = card.replace("\\", "/").rsplit("/", 1)[0]
         named, own = {}, set()
         for key, per in boxes.items():
@@ -1201,7 +1205,9 @@ class TreeEditMixin:
                 if paths[n["id"]] not in known:
                     continue
                 words = R.stand_in_words(_text_of(man, n, "Text"), True)
-                hits = lines.get(words) if words else None
+                # the box the game is known to fill: its line outright, else one whose words
+                # with the fill-ins out are the box's (IMPOSTER BATTLE %d/%d, PAD-1256)
+                hits = (lines.get(words) or fills.get(words.upper())) if words else None
                 hits = sorted(hits or (), key=lambda h: not own & set(h[1]))
                 out[n["id"]] = ({"line": hits[0][0], "modes": list(hits[0][1])} if hits else
                                 {"line": None, "modes": list(mode_named[n["id"]] or sorted(own))})
@@ -1288,6 +1294,9 @@ class TreeEditMixin:
                "limit": text_rules.row_budget({"path": card, "original": orig})}
         if self._game_writes(card, man, n):
             out["locked"] = True                # PAD-513: the game writes it, see below
+            from . import game_filled           # PAD-1261: what to change instead
+            out["note"] = game_filled.locked_note(orig, assets_dir=self.assets_dir,
+                                                   short=True)
         return out
 
     def _game_writes(self, card, man, n):
@@ -1332,7 +1341,7 @@ class TreeEditMixin:
         if words is not None and words != orig and self._game_writes(card, self._tman, n):
             from . import game_filled
             log.info("Scenes: %s keeps its words - %s", n.get("name") or "the line",
-                     game_filled.LOCKED_NOTE)
+                     game_filled.locked_note(orig, assets_dir=self.assets_dir))
             return False
         done = self.tab.set_scene_words(self.assets_dir, card, orig, words)
         if done is None:

@@ -17,6 +17,8 @@ process:
                                           Visual Pinball's own tables folder)
     vpxsetup.py layout <key> <player> <lcd>
                                           where the windows go: [x, y, w, h] JSON or null
+    vpxsetup.py ontop on|off              whether the game's screen stays on top of every other
+                                          window (PAD-1231); an open game's window at once
     vpxsetup.py cache [on|off]            what each title's card costs the emulator's disk before
                                           a game (PAD-964), and whether a game copies its card into
                                           the cache first (on) or reads it where it lies (off)
@@ -91,11 +93,51 @@ def registered_here(path):
         return False
 
 
+def server_exe(server_cmd):
+    """The program a LocalServer32 command starts.
+
+    PAD-1229: pywin32 writes that command as ``GetShortPathName(pythonw.exe)``
+    with NO quotes, and on a PC with 8.3 short names off (common on a second
+    drive, and on some Windows installs) the "short" name is the long one,
+    spaces and all: ``C:\\Program Files\\Pinball Asset Decryptor\\python\\
+    pythonw.exe "...localserver.py" {clsid}``.  Cut at the first space that
+    read "C:\\Program", the check said not registered, and Register said
+    "was the administrator prompt declined?" on a PC where it had worked.
+    So an unquoted command is read up to the first ``.exe`` the way Windows
+    reads it, not to the first space."""
+    cmd = (server_cmd or "").strip()
+    if cmd.startswith('"'):
+        return cmd[1:].split('"', 1)[0]
+    low = cmd.lower()
+    at = 0
+    while True:
+        i = low.find(".exe", at)
+        if i < 0:
+            break
+        end = i + 4
+        if end == len(cmd) or cmd[end] in " \t":
+            return cmd[:end]
+        at = end
+    return cmd.split(" ", 1)[0]
+
+
+def quoted_server_cmd(server_cmd):
+    """*server_cmd* with its program in quotes when it has a space and none
+    (PAD-1229, see server_exe): Windows has to guess where an unquoted path
+    with spaces ends.  None when nothing needs changing."""
+    cmd = (server_cmd or "").strip()
+    if not cmd or cmd.startswith('"'):
+        return None
+    exe = server_exe(cmd)
+    if " " not in exe:
+        return None
+    return '"%s"%s' % (exe, cmd[len(exe):])
+
+
 def registration_ok(com_path, server_cmd):
     """The registered folder holds padcontroller.py, and the python the
     server command starts exists."""
-    exe = server_cmd.strip()
-    exe = exe[1:].split('"', 1)[0] if exe.startswith('"') else exe.split(" ", 1)[0]
+    exe = server_exe(server_cmd)
     return (bool(com_path) and os.path.isfile(os.path.join(com_path, "padcontroller.py"))
             and bool(exe) and os.path.isfile(exe))
 
@@ -251,6 +293,8 @@ def known_tables(tables_dir=None):
         row["models"][title] = info["model"]
         row["fits"].append((title, info))
         row.setdefault("marks", []).extend(m.get("repatch") or [])
+        if str(info.get("map", "")).endswith(".shadow.json"):
+            row["marks"].extend(SHADOW_REPATCH)
     out = []
     for row in rows.values():
         row.setdefault("marks", []).extend(GENERIC_REPATCH)
@@ -489,11 +533,24 @@ GENERIC_REPATCH = [
 ]
 
 
+#: marks of fixes vpxshadow makes on every SCRIPTED tribute (a .shadow.json
+#: map), not on the ROM tables other patchers make. PAD-1212: a stood-in sub
+#: carried its DOF but not its sound, so Foo Fighters' drops, targets, spinner
+#: and trough kick were silent behind the machine; every script since says so
+#: in a line of its own (`absent`: the mark is a line the copy LACKS).
+SHADOW_REPATCH = [
+    {"absent": "' PAD: the table's own playfield sounds play beside the machine's switches and coils",
+     "why": "its targets, lanes, spinners, bumpers and trough make no sound"},
+]
+
+
 def missed_fixes(tables_dir, out_name, marks):
     """PAD-939: the fixes a (PAD) table was patched before. A map's `repatch`
     lists {"old": a line only an earlier patcher wrote, "why": what patching
     again mends} (The Beatles' six-ball trough, PAD-933); the script written
-    beside the table is read for them. The `why` of each one found."""
+    beside the table is read for them. The `why` of each one found. A mark
+    with `absent` instead is a line every newer script has (PAD-1212): it is
+    missed when the script lacks it."""
     if not marks:
         return []
     try:
@@ -507,7 +564,8 @@ def missed_fixes(tables_dir, out_name, marks):
     # Foo Fighters', PAD-968) carries the same mark in both, and the row
     # gathers every map's
     return list(dict.fromkeys(k["why"] for k in marks
-                              if squash(k.get("old", "")).strip() in text and k.get("old")))
+                              if (k.get("old") and squash(k["old"]).strip() in text)
+                              or (k.get("absent") and squash(k["absent"]).strip() not in text)))
 
 
 def patched_from(tables_dir, out_name):
@@ -562,12 +620,59 @@ def layout_presets(mons):
     return out
 
 
+def lcd_on_top(kit):
+    """PAD-1231: whether the game's screen stays on top of every other
+    window - the kit's `lcd.topmost`, on unless turned off (the window has
+    always opened on top of Visual Pinball, which comes up full screen)."""
+    return bool((kit.get("lcd") or {}).get("topmost", True))
+
+
+def set_on_top(on):
+    """PAD-1231 (a desktop player: the game's screen over everything got in
+    the way of the rest of the desktop): keep the choice in the kit, where
+    the controller reads it as the game's window opens, and put an open
+    game's window on top (or not) at once."""
+    d = padlaunch.kit_load()
+    if "layout" not in d:
+        d["layout"] = "centre" if _old_centre(d) else ""
+    lcd = dict(d.get("lcd") or {})
+    lcd["topmost"] = bool(on)
+    d["lcd"] = lcd
+    padlaunch.kit_save(d)
+    live = False
+    if sys.platform == "win32":
+        try:
+            import padcontroller
+            hwnd = padcontroller.find_lcd_window()
+            if hwnd:
+                padcontroller.raise_window(hwnd, bool(on))
+                live = True
+        except Exception:                                   # noqa: BLE001
+            pass
+    return {"result": "ok", "lcd_on_top": bool(on), "live": live}
+
+
+def _old_centre(kit):
+    """A kit saved before PAD-1231 told the centre layout (no rectangles)
+    apart by its LCD's bare {"topmost": true}."""
+    return "player" not in kit and kit.get("lcd") == {"topmost": True}
+
+
 def layout_key(kit, presets):
-    """Which preset the kit's saved player / lcd rectangles are, or ""."""
-    player, lcd = kit.get("player"), kit.get("lcd")
+    """Which preset the kit's saved player / lcd rectangles are, or "".
+    Whether the screen is on top is a choice of its own (PAD-1231), so the
+    centre layout, which has no rectangles, is the one the kit says it took
+    (`layout`, which apply_layout writes)."""
+    player = kit.get("player")
+    lcd = {k: v for k, v in (kit.get("lcd") or {}).items() if k != "topmost"}
     for key, _, p, q in presets:
         want_p = {"x": p[0], "y": p[1], "w": p[2], "h": p[3]} if p else None
-        want_q = dict({"x": q[0], "y": q[1], "w": q[2], "h": q[3]}, topmost=True) if q else {"topmost": True}
+        if not q:
+            taken = kit.get("layout") == key if "layout" in kit else _old_centre(kit)
+            if taken and player == want_p and not lcd:
+                return key
+            continue
+        want_q = {"x": q[0], "y": q[1], "w": q[2], "h": q[3]}
         if player == want_p and lcd == want_q:
             return key
     return ""
@@ -584,11 +689,14 @@ def apply_layout(key, player, lcd):
     else:
         d.pop("player", None)
         padvpx.vpx_ini_set({"FullScreen": "0"})
+    # PAD-1231: a layout moves the windows; on top or not stays as chosen
+    on_top = lcd_on_top(d)
+    d["layout"] = key
     if lcd:
         x, y, w, h = [int(v) for v in lcd]
-        d["lcd"] = {"x": x, "y": y, "w": w, "h": h, "topmost": True}
+        d["lcd"] = {"x": x, "y": y, "w": w, "h": h, "topmost": on_top}
     else:
-        d["lcd"] = {"topmost": True}
+        d["lcd"] = {"topmost": on_top}
     padlaunch.kit_save(d)
     # PAD-811: the game's renderer places its own window from the display
     # setting, live; CONF named here so a test can point it elsewhere
@@ -839,6 +947,8 @@ def state():
         "presets": [{"key": k, "words": w, "short": LAYOUT_SHORT.get(k, k), "player": p, "lcd": q}
                     for k, w, p, q in presets],
         "layout": layout_key(kit, presets),
+        # PAD-1231: the game's screen on top of every other window, or not
+        "lcd_on_top": lcd_on_top(kit),
         # PAD-811: where the game's screen goes, as the layout or the
         # Emulate tab last set it
         "display": {"setting": shown, "text": padisplay.describe(shown)},
@@ -855,6 +965,8 @@ def main(argv):
         out = {"result": "ok", "cards": set_library(os.path.abspath(rest[0]))}
     elif cmd == "layout" and len(rest) == 3:
         out = {"result": apply_layout(rest[0], json.loads(rest[1]), json.loads(rest[2]))}
+    elif cmd == "ontop" and len(rest) == 1 and rest[0] in ("on", "off"):
+        out = set_on_top(rest[0] == "on")
     elif cmd == "downloads":
         # PAD-943: read the downloads in the tables folder (or the one given)
         tables = rest[0] if rest else vpx_tables_dir()

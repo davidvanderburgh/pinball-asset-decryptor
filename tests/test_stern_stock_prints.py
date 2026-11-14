@@ -341,7 +341,8 @@ def test_a_replaced_file_its_manifest_still_calls_stock_is_caught(
     got = sp.check_card(built)                 # sizes only: still caught
     assert got["status"] == "modified"
     assert got["diff"]["videos"] == 1 and got["stale"] == 1
-    assert "not built by PAD" in got["text"]
+    assert "manifest still lists 1 changed file as Stern's." in got["text"]
+    assert "not built by PAD" not in got["text"]     # PAD-1242: no proof
 
 
 def test_a_same_size_replacement_needs_the_deep_check(tmp_path, monkeypatch):

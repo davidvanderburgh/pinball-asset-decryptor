@@ -449,10 +449,20 @@ def test_restart_game_on_a_spike3_run_is_stop_then_start(tmp_path, monkeypatch):
      ("run", 100, "Running - the game is in attract")),
     ("s3launch: decrypting the card into the Spike 3 store (once per card; a few minutes)",
      ("copy", 5, "Preparing the Spike 3 card (first time only)…")),
+    # PAD-1238: the byte meter moves the bar; a partition or 500 files no longer do
     ("s3launch:   [s3store] p2 rootfs         4794 files    636.0 MB  new    226.3 MB  (60 s)",
-     ("copy", 30, "Preparing the Spike 3 card: rootfs done")),
-    ("s3launch:   [s3store]   games: 500 files, 2170 MB",
-     ("copy", 88, "Preparing the Spike 3 card: 2170 MB of the game")),
+     None),
+    ("s3launch:   [s3store]   games: 500 files, 2170 MB", None),
+    ("s3launch:   [s3store] progress 0 0 11002 -",
+     ("copy", 5, "Preparing the Spike 3 card (first time only): 0.0 of 11.0 GB")),
+    ("s3launch:   [s3store] progress 26 2870 11002 890",
+     ("copy", 28, "Preparing the Spike 3 card (first time only): 2.9 of 11.0 GB, "
+                  "about 15 min left")),
+    ("s3launch:   [s3store] progress 99 10990 11002 12",
+     ("copy", 94, "Preparing the Spike 3 card (first time only): 11.0 of 11.0 GB, "
+                  "under a minute left")),
+    ("s3launch:   [s3store] progress 100 11002 11002 0",
+     ("copy", 95, "Preparing the Spike 3 card (first time only): 11.0 of 11.0 GB")),
     ("s3launch: building the Spike 3 rig (once; a few minutes)",
      ("copy", 50, "Building the Spike 3 emulator (first time only)…")),
     ("[s3run] exec /games/game  (14400s cap)", None),
@@ -460,6 +470,18 @@ def test_restart_game_on_a_spike3_run_is_stop_then_start(tmp_path, monkeypatch):
 def test_spike3_lines_become_footer_steps(line, expect):
     from pinball_decryptor.webui.tabs.emulate import EmulateTab as EmulateService
     assert EmulateService._s3_footer_for(line) == expect
+
+
+def test_the_decrypt_meter_logs_one_line_per_tenth():
+    """PAD-1238: a meter line every 2 s is for the bar; the log keeps one a
+    tenth, and every other launcher line as it was."""
+    from pinball_decryptor.webui.tabs.emulate import s3_progress_logged
+    decade = [-1]
+    lines = ["s3launch:   [s3store] progress %d 0 100 -" % p
+             for p in (0, 3, 9, 10, 14, 26, 27, 100)]
+    kept = [ln.split()[3] for ln in lines if s3_progress_logged(ln, decade)]
+    assert kept == ["0", "10", "26", "100"]
+    assert s3_progress_logged("s3launch: decrypting the card", decade)
 
 
 def test_a_spike3_run_paints_its_own_footer_not_the_spike2_poll(tmp_path, monkeypatch):

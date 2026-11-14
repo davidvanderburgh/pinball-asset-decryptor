@@ -126,6 +126,8 @@ build.
 - **Comment** on any sound (right-click > **Properties…** or **Comment…**).
   Comments are kept in the extract's `callouts.csv`, show in a Comment
   column, and the search box finds them.
+  If you edited the comments in `callouts.csv`, **More > Update comments
+  from callouts.csv…** reads them back in.
 - **Show comments**: untick it to hide the Comment column (the search
   still finds comment text); the choice is remembered.
 
@@ -384,7 +386,7 @@ selected clip, read from its program.
 For JJP and the other makers, a long clip lists the song whose name ends the same way and runs about as long.
 
 - **Play it with the clip** starts, pauses, seeks and stops the song with whichever player plays.
-- The callout shows how the two lengths compare and links the song on the **Audio** tab.
+- One line above the players names the song, shows how the two lengths compare and links it on the **Audio** tab; hover **Song:** for how it was matched.
 
 ### Undo and redo
 
@@ -583,6 +585,27 @@ it again restores the whole setup.
   with a `replacements.json`, plus the Scenes edits (`Scenes.zip`), the
   modes (`Modes.zip`), text edits, defaults and font changes; **Import
   replacements…** puts all of it back on a fresh extract.
+- **Team…** (folder button) lets several people work on one project, each
+  on their own PC.
+  - Everyone extracts the same card and picks the same team folder, one
+    that OneDrive, Dropbox, Google Drive or a network drive keeps the same
+    on every PC.
+  - Each part of the project (Videos, Images, Sounds, Scenes, Text, Fonts,
+    Modes, Color profiles, Defaults and attract) belongs to whoever
+    **Take**s it.
+  - **Share my parts** copies yours into your own folder of the team
+    folder; **Get from the team** replaces each other part with its
+    owner's, files copied into the project's `Team files` folder. Nobody
+    writes into anyone else's folder, so the sync service never makes
+    conflict copies.
+  - When someone shares, a **Team: N new** chip shows in the top bar.
+  - The team folder can instead be a clone of a Git repository the team
+    shares (GitHub, GitLab, your own server). The app does the Git work:
+    **Share my parts** commits your folder and pushes it, **Get from the
+    team** and the regular check pull.
+  - With Git LFS installed, videos, sounds and pictures go into LFS.
+    Everyone needs Git (and Git LFS if the team uses it) and a clone they
+    can push to.
 - **Recent paths:** every file and folder box keeps a dropdown of your
   recent paths, per manufacturer.
 - **Drag and drop:** drop a file or folder from the desktop on any

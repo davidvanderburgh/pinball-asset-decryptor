@@ -45,7 +45,8 @@ import time
 from dataclasses import replace
 
 from .. import compat
-from ...core.video_slots import LENGTH_FULL, LENGTH_STOCK, length_seconds
+from ...core.video_slots import (LENGTH_FULL, LENGTH_LOOP, LENGTH_STOCK,
+                                 LENGTH_STRETCH, length_seconds)
 from .. import look_switches
 from .. import video_helpers as vh
 from ..colour_save import ColourSaveMixin
@@ -61,7 +62,8 @@ _LABEL = "Replace Video"          # MainWindow._REPLACE_LABELS["video"]
 
 def _length_ok(choice):
     """A per-clip length choice worth keeping from a sidecar."""
-    return choice in (LENGTH_STOCK, LENGTH_FULL) or bool(
+    return choice in (LENGTH_STOCK, LENGTH_FULL, LENGTH_LOOP,
+                      LENGTH_STRETCH) or bool(
         length_seconds(choice))
 
 
@@ -77,6 +79,28 @@ def _variants_from(raw, by_rel):
             if keep:
                 out[rel] = keep
     return out
+
+
+def _clock(seconds):
+    """*seconds* as the players show it: 0:03, 4:56."""
+    s = int(round(seconds or 0))
+    return "%d:%02d" % (s // 60, s % 60)
+
+
+def _gap_words(mine, stock):
+    """PAD-1232: how a *mine*-second replacement compares with the
+    *stock*-second clip it replaces, for the Vs stock column: "−0.25 s •
+    2.5% slower" (the speed change that would make it run exactly as
+    long), "same length" within a frame or two."""
+    from ...core.video import speed_words
+    diff = mine - stock
+    if abs(diff) < 0.05:
+        return "same length"
+    n = abs(diff)
+    size = (("%.2f s" % n) if n < 10 else ("%.1f s" % n) if n < 60
+            else _clock(n))
+    return "%s%s • %s" % ("−" if diff < 0 else "+", size,
+                              speed_words(mine, stock))
 
 
 def _length_key(choice):
@@ -150,6 +174,9 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         self._foreign = set()
         self._twins = {}
         self._conv_cache = {}
+        # PAD-1232: seconds per file, {(path, size, mtime_ns): seconds}
+        self._secs = {}
+        self._secs_busy = set()
         self._conv_pass = 0
         self._conv_kick = False
         self._unplayable_warned = set()
@@ -1281,7 +1308,8 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             return length
         secs = length_seconds(choice)
         word = ("%g s" % secs if secs else
-                "stock" if choice == LENGTH_STOCK else "full")
+                {LENGTH_STOCK: "stock", LENGTH_LOOP: "loop",
+                 LENGTH_STRETCH: "speed"}.get(choice, "full"))
         return "%s • %s" % (length, word)
 
     def _asis_for(self, rel):
@@ -1358,6 +1386,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                 "len": self._length_cell(rel, length), "res": res,
                 "fmt": fmt, "fmt_bad": fmt.endswith("⚠"), "aud": aud,
                 "rep": rep_disp, "rep_cls": cls, "conv": conv,
+                **self._fit_row(rel, rep),
                 "conv_cls": self._conv_cls(conv),
                 "col": self._color_state(rel), "col_own": rel in self._color,
                 "col_lock": self._color_locked(rel),
@@ -1365,6 +1394,138 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                                   and not self._assign.get(rel)),
                 **self._scr_row(rel, s, rep, is_changed),
                 **self._m_row(rel)}
+
+    # -- Vs stock: the replacement's length against the stock clip's -----
+    @staticmethod
+    def _file_key(path):
+        try:
+            st = os.stat(path)
+        except (OSError, TypeError, ValueError):
+            return None
+        return (path, st.st_size, st.st_mtime_ns)
+
+    def _secs_of(self, path, probe=False):
+        """How long *path* runs, from the cache (None while unknown), or
+        probed now with *probe*.  0.0 for a file ffprobe can't read."""
+        key = self._file_key(path) if path else None
+        if key is None:
+            return None
+        secs = self._secs.get(key)
+        if secs is None and probe:
+            from ...core.video import probe_duration
+            try:
+                secs = float(probe_duration(path) or 0.0)
+            except Exception:                           # noqa: BLE001
+                secs = 0.0
+            self._secs[key] = secs
+        return secs
+
+    def _stock_secs(self, rel, probe=False):
+        """How long the game's own clip in *rel* runs: its ``.orig/``
+        snapshot once a build has staged over it (the slot then holds the
+        replacement), else the slot's own probe."""
+        snap = self._stock_path(rel)
+        if snap and os.path.isfile(snap):
+            return self._secs_of(snap, probe=probe)
+        slot = self._by_rel.get(rel)
+        if slot is None or (slot.info is None and not slot.probed):
+            return None
+        return slot.duration or 0.0
+
+    def _fit_secs(self, rel, rep):
+        """``(mine, stock)`` seconds of *rel*'s replacement *rep* and its
+        stock clip, from what is known already; None until both are."""
+        if not rep:
+            return None
+        mine = self._secs_of(rep)
+        stock = self._stock_secs(rel)
+        if not mine or not stock:
+            return None
+        return mine, stock
+
+    def _fit_row(self, rel, rep):
+        """PAD-1232 (DoomWalrus666): the Vs stock column, how much shorter
+        or longer the chosen file runs than the clip it replaces and the
+        speed change that would make it run exactly as long."""
+        if not rep:
+            return {"fit": "", "fit_tip": None, "fit_cls": ""}
+        got = self._fit_secs(rel, rep)
+        if got is None:
+            key = self._file_key(rep)
+            unread = key is not None and self._secs.get(key) == 0.0
+            return {"fit": "" if unread else "…", "fit_tip": None,
+                    "fit_cls": ""}
+        from ...core.video import speed_words
+        mine, stock = got
+        text = _gap_words(mine, stock)
+        same = text == "same length"
+        lines = ["Your file runs %.2f s and the stock clip %.2f s."
+                 % (mine, stock)]
+        on = self._length.get(rel) == LENGTH_STRETCH
+        if not same:
+            lines.append(
+                "To run exactly as long it would play %s. Right-click "
+                "→ This clip's length → Speed my file to the stock "
+                "clip's length does that." % speed_words(mine, stock))
+            if on:
+                lines.append("This clip is set to do that.")
+        return {"fit": text,
+                "fit_tip": {"head": "Your file against the stock clip",
+                            "lines": lines},
+                "fit_cls": ("on" if on and not same else
+                            "short" if mine < stock - 0.05 else "")}
+
+    def _fit_key(self, rel):
+        """Vs stock's sort: by how much longer the replacement runs (the
+        most short first ascending), rows with nothing to compare last."""
+        got = self._fit_secs(rel, self._assign.get(rel))
+        return (0, got[0] - got[1]) if got else (1, 0.0)
+
+    def _probe_secs_async(self):
+        """Read the lengths Vs stock needs off the loop: each chosen file's
+        and each staged slot's ``.orig/`` snapshot's, once per file."""
+        want = []
+        for rel, rep in sorted(self._assign.items()):
+            for path in (rep, self._stock_path(rel)):
+                if not path or path in self._secs_busy:
+                    continue
+                key = self._file_key(path)
+                if key is not None and key not in self._secs:
+                    want.append((rel, path))
+        if not want:
+            return
+        self._secs_busy.update(p for _r, p in want)
+
+        def _work():
+            from ...core.video import probe_duration
+            got = []
+            for rel, path in want:
+                key = self._file_key(path)
+                try:
+                    secs = float(probe_duration(path) or 0.0)
+                except Exception:                       # noqa: BLE001
+                    secs = 0.0
+                got.append((rel, path, key, secs))
+            self.ctx.loop.post(self._apply_secs, got)
+
+        threading.Thread(target=_work, daemon=True,
+                         name="video-lengths").start()
+
+    def _apply_secs(self, got):
+        rels = set()
+        for rel, path, key, secs in got:
+            self._secs_busy.discard(path)
+            if key is not None:
+                self._secs[key] = secs
+            rels.add(rel)
+        if self._sort and self._sort[0] == "fit":
+            self._refresh_list()
+            return
+        for rel in rels:
+            i = self._index.get(rel)
+            slot = self._by_rel.get(rel)
+            if i is not None and slot is not None:
+                self._put_row(i, self._row(slot))
 
     # -- the chosen-files colour profile (PAD-312) ------------------------
     def _per_file_colour(self):
@@ -1626,6 +1787,8 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                 if rep:
                     return (0, os.path.basename(rep).lower())
                 return (1, "") if s.rel_path in changed else (2, "")
+            if col == "fit":                    # PAD-1232
+                return self._fit_key(s.rel_path) + (s.rel_path.lower(),)
             if col == "conv":
                 mode = self._conv_cached(s.rel_path,
                                          self._assign.get(s.rel_path))
@@ -1686,6 +1849,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             pass
         self._update_clear_all()
         self._probe_conv_async()
+        self._probe_secs_async()
         self._update_note()
         self._cmp_sync()
 
@@ -1914,6 +2078,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                 return False
             self._m_publish()
         self._assign[rel] = path
+        self._offer_loop(rel, path)
         self._save_staged()
         note = vh.conversion_note(self._by_rel.get(rel), rel, path,
                                   self._asis_for(rel),
@@ -1956,12 +2121,55 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             self._update_note(rel)
         return True
 
+    def _stock_seconds(self, rel):
+        """How long the game's own clip in *rel* runs: its ``.orig/``
+        snapshot once a build has staged over it, else the slot's probe."""
+        return self._stock_secs(rel, probe=True) or 0.0
+
+    def _offer_loop(self, rel, path):
+        """PAD-1226: a replacement shorter than the clip it replaces is
+        offered a loop to the stock clip's length, rather than holding its
+        last frame (or ending early).  Asked only when the clip has no
+        length of its own picked yet (or "match the stock clip"), and not
+        for a clip going on as-is, whose length can't be changed.  Not asked
+        for a file within a second of the stock clip either (Ben, both
+        3:20): looping that would only flash its opening at the end."""
+        choice = self._length.get(rel)
+        if choice not in (None, LENGTH_STOCK) or self._asis_for(rel):
+            return
+        mine = self._secs_of(path, probe=True) or 0.0
+        stock = self._stock_seconds(rel)
+        # A file only a few frames short (both read 3:20) would loop just a
+        # flash of its opening: ask only when it is a second or more short
+        # and the two lengths read differently.
+        if (not mine or not stock or stock - mine < 1.0
+                or _clock(mine) == _clock(stock)):
+            return
+        held = choice == LENGTH_STOCK or bool(self.video_trim_var.get())
+        if compat.messagebox.askyesno(
+                "Shorter than the clip it replaces",
+                "%s runs %s and the clip it replaces (%s) runs %s.\n\n"
+                "Loop your file so it plays over and over until it fills "
+                "the %s?\n\nNo: %s.  You can change this later: right-click "
+                "the clip → This clip's length."
+                % (os.path.basename(path), _clock(mine),
+                   os.path.basename(rel), _clock(stock), _clock(stock),
+                   "it plays once and holds its last frame to the end"
+                   if held else "it plays once, %s long" % _clock(mine))):
+            self._length[rel] = LENGTH_LOOP
+            self.log("Replace Video: %s will loop %s to fill the stock "
+                     "clip's %s." % (rel, os.path.basename(path),
+                                     _clock(stock)), "info")
+
     @rpc
     @undoable("the length of %s")
     def set_length(self, rel, value):
         """This clip's own length (PAD-215): None follows the Trim / pad
-        box, "stock" cuts or pads to the stock clip, "full" keeps the
-        replacement's own length, "custom" asks for a number of seconds."""
+        box, "stock" cuts or pads to the stock clip, "loop" cuts a longer
+        replacement to it and plays a shorter one over and over to fill it
+        (PAD-1226), "stretch" slows the replacement down or speeds it up to
+        run exactly the stock clip's length (PAD-1232), "full" keeps the replacement's own length, "custom"
+        asks for a number of seconds."""
         slot = self._by_rel.get(rel)
         if slot is None:
             return False
@@ -1981,10 +2189,14 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
             self._length.pop(rel, None)
             self.log("Replace Video: %s follows the Trim / pad box again."
                      % rel, "info")
-        elif value in (LENGTH_STOCK, LENGTH_FULL) or length_seconds(value):
+        elif _length_ok(value):
             self._length[rel] = value
             what = ("%g s" % value if length_seconds(value) else
                     "the stock clip's length" if value == LENGTH_STOCK
+                    else "the stock clip's length, your file looped to fill "
+                    "it" if value == LENGTH_LOOP
+                    else "the stock clip's length, your file %s to fit it"
+                    % self._speed_note(rel) if value == LENGTH_STRETCH
                     else "your file's own length")
             self.log("Replace Video: %s will run %s, whatever the Trim / "
                      "pad box says." % (rel, what), "info")
@@ -1999,7 +2211,17 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         self._refresh_list()
         if rel == self._current:
             self._update_note(rel)
+            self._reload_rep_pane(rel)  # PAD-1232: its player's speed
         return True
+
+    def _speed_note(self, rel):
+        """"played 2.5% slower" for a clip set to fit by speed (PAD-1232),
+        "slowed down or sped up" while its lengths aren't known."""
+        from ...core.video import speed_words
+        mine = self._secs_of(self._assign.get(rel), probe=True)
+        stock = self._stock_seconds(rel)
+        words = speed_words(mine, stock) if mine and stock else ""
+        return ("played " + words) if words else "slowed down or sped up"
 
     # ---- clearing (the shared Replace-tab clear, kind "video") ---------
     def _applied_rels(self, rels=None):
@@ -3013,6 +3235,10 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
         if rpath and os.path.isfile(rpath):
             pane = self._pane("rep", "Replacement", rpath,
                               label=os.path.basename(rpath))
+            # PAD-1232: a clip set to fit by speed plays at that speed here,
+            # the page working the rate out from its own length
+            if self._length.get(rel) == LENGTH_STRETCH:
+                pane["fit_to"] = self._stock_seconds(rel) or None
         elif self._stock_coloured(rel):
             # built with its profile or not, it is the game's own clip
             pane = self._pane("rep", "Replacement", hint=STOCK_ON_ORIG)
@@ -3568,7 +3794,8 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
     # content; the page fits the others, as _autosize_tree_columns did)
     # ==================================================================
     _WIDTHS_KEY = "video_web"
-    _WIDTH_COLS = ("rel", "len", "res", "fmt", "aud", "rep", "col", "conv")
+    _WIDTH_COLS = ("rel", "len", "res", "fmt", "aud", "rep", "fit", "col",
+                   "conv")
 
     def _all_widths(self):
         s = getattr(self.app, "_settings", None) if self.app else None

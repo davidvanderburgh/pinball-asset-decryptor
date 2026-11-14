@@ -4659,6 +4659,17 @@ def restart_req_path(ctl_path):
                         "restart_game_%d.req" % padpath.slot())
 
 
+def stop_req_path(ctl_path):
+    """The Stop emulator request file (PAD-1198), beside the Restart one and
+    one per rig: the Emulate tab's stop_req_file() names the same. The window
+    cannot end the run itself - the run is the app's, Spike 2 or Spike 3 - so
+    it asks, as Restart game does."""
+    if not ctl_path:
+        return None
+    return os.path.join(os.path.dirname(ctl_path),
+                        "stop_emulator_%d.req" % padpath.slot())
+
+
 class RunCtl:
     """The status bar's Pause button and volume (PAD-204): what the page shows
     for them, polled every RUN_POLL_S. The pause flag is padglhost's, read off
@@ -4672,6 +4683,7 @@ class RunCtl:
         self._mtime = self._stat()
         self._next = 0.0
         self.restarting = False
+        self.stopping = False      # Stop emulator asked (PAD-1198)
         self._restart_t = None     # when Restart game was asked
         self._taken_t = None       # when that request was last seen in flight
         self._booted_again = False  # the old boot's log is gone since then
@@ -4796,9 +4808,26 @@ class RunCtl:
         self.restarting = True
         return True
 
+    def ask_stop(self):
+        """PAD-1198: Stop emulator - asked of the app that launched this run,
+        whose Stop ends it (and this window with it, when the run goes).
+        False with no app to ask."""
+        path = stop_req_path(self.ctl_path)
+        if not path:
+            return False
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("%d\n" % padpath.slot())
+        except OSError:
+            return False
+        self.stopping = True
+        return True
+
     def dyn(self):
         return {"paused": self.paused,
                 "restart": bool(self.ctl_path),
+                "stop": bool(self.ctl_path),
+                "stopping": self.stopping,
                 "restarting": self.restarting,
                 "boot": self.boot,
                 "audio": ({"gain": self.audio[0], "muted": self.audio[1]}
@@ -4836,8 +4865,10 @@ class Playfield:
         self.slot_labels = {}
         self._state_busy = False
         self._state_msg = None
+        self._slot_msg = None      # the SAVE STATES section's own line (PAD-1237)
         self._stop = threading.Event()
         self._closed = False
+        self._run_left = False     # gone(): the run ended first (PAD-1198)
         self.pos = {}
         self.lcd = LcdPanel(GAME, on_build=self._open_lcd)
         self.lcd.drv = self.drv
@@ -4998,10 +5029,14 @@ class Playfield:
         def done(r):
             text = helper_message(script, r)
             with self.lock:
-                self.flash(text)
-                if script == "plunge.py" and self.key_panel is not None:
+                # a plunge answer goes in the BALLS note when there is one,
+                # and only there (PAD-1237: it used to show twice)
+                if (script == "plunge.py" and self.key_panel is not None
+                        and self.key_panel.ball_dots is not None):
                     self.key_panel.ball_say("%s: %s" % (arg, text)
                                             if arg else text)
+                else:
+                    self.flash(text)
         if arg is None:
             self.drv.run_script(script, done=done)
         else:
@@ -5024,14 +5059,39 @@ class Playfield:
                 vals.append("%d · %s" % (i + 1, label or "unnamed"))
         return vals
 
+    def slot_say(self, text, secs=8.0):
+        """A save state's own message - "saving state...", the helper's
+        answer, an empty slot - for the SAVE STATES section's line, not the
+        balls' (PAD-1237), for `secs` (None = until replaced)."""
+        self._slot_msg = (text, None if secs is None
+                          else time.monotonic() + secs)
+
+    def slot_msg(self):
+        """[text, seconds left or None]; text is "" once it has run out."""
+        m = self._slot_msg
+        if not m:
+            return ["", None]
+        text, until = m
+        if until is None:
+            return [text, None]
+        left = until - time.monotonic()
+        if left <= 0:
+            self._slot_msg = None
+            return ["", None]
+        return [text, round(left, 1)]
+
+    def slots_payload(self, busy=None):
+        return {"values": self.slot_values(), "labels": self.slot_labels,
+                "busy": self._state_busy if busy is None else busy,
+                "msg": self.slot_msg()}
+
     def slots_refresh(self):
         def work():
             info = state_slots()
             with self.lock:
                 self.slot_labels = {s: info[s] for s in info}
-            self.publish("slots", {"values": self.slot_values(),
-                                   "labels": self.slot_labels,
-                                   "busy": self._state_busy})
+                payload = self.slots_payload()
+            self.publish("slots", payload)
         threading.Thread(target=work, daemon=True).start()
 
     def run_state(self, script, slot, label=None):
@@ -5042,15 +5102,14 @@ class Playfield:
             return False
         self._state_busy = True
         verb = "saving" if script.startswith("save") else "loading"
-        self.flash("%s state..." % verb, None)
-        self.publish("slots", {"values": self.slot_values(),
-                               "labels": self.slot_labels, "busy": True})
+        self.slot_say("%s state..." % verb, None)
+        self.publish("slots", self.slots_payload(busy=True))
 
         def work():
             r = state_run(script, slot, label)
             with self.lock:
                 self._state_busy = False
-                self.flash(state_reply(script, r))
+                self.slot_say(state_reply(script, r))
             self.slots_refresh()
         threading.Thread(target=work, daemon=True).start()
         return True
@@ -5208,6 +5267,7 @@ class Playfield:
     def gone(self):
         """The run ended (its LED block went): save first - leaving with the
         run is the COMMON way this window closes - then close everything."""
+        self._run_left = True      # closing now is not a Stop (PAD-1198)
         self.save_state()
         self.publish("close")
         self._stop.set()
@@ -5248,6 +5308,7 @@ class Playfield:
                   "rig": {"slot": padpath.slot(), "label": padpath.label()},
                   "savestates": SAVESTATES, "slots": self.slot_values(),
                   "state_busy": self._state_busy,
+                  "slot_msg": self.slot_msg(),
                   "run": self.run.dyn(),
                   "clips": (self.clips.dyn() if self.clips is not None
                             else None),
@@ -5402,6 +5463,26 @@ class Playfield:
         """The status bar's Restart game (PAD-735)."""
         return self.run.ask_restart()
 
+    def api_stop(self):
+        """The status bar's Stop emulator (PAD-1198)."""
+        ok = self.run.ask_stop()
+        if ok:
+            self.publish("run", self.run.dyn())
+        return ok
+
+    def closed_by_user(self):
+        """The window's own close (its X): the run goes with it (PAD-1198),
+        as closing the game window ends it - unless the run left first
+        (gone(): the app's Stop, or the game ending), which closes this
+        window too and must not ask for a second Stop. A window that never
+        came up is not closed by anyone."""
+        if not self._run_left and not self._closed and \
+                getattr(self.host, "_ready", True):
+            if self.run.ask_stop():
+                print("playfield: window closed; asked the app to stop the "
+                      "emulator", flush=True)
+        self.bye()
+
     def api_volume(self, pct):
         ok = self.run.set_audio(gain=float(pct) / 100.0)
         if ok:
@@ -5535,8 +5616,9 @@ class Playfield:
             return False
         slot = SLOT_IDS[int(idx)]
         if slot not in self.slot_labels:
-            self.flash("slot %d is empty - nothing to load" % (int(idx) + 1),
-                       5.0)
+            self.slot_say("slot %d is empty - nothing to load" % (int(idx) + 1),
+                          5.0)
+            self.publish("slots", self.slots_payload())
             return False
         return self.run_state("loadgame.sh", slot)
 
@@ -5578,7 +5660,7 @@ def main():
     host.start()
     ctl.start()
     try:
-        host.run(ctl.window_spec(), on_close=ctl.bye)
+        host.run(ctl.window_spec(), on_close=ctl.closed_by_user)
     finally:
         ctl.bye()
         ctl.stop()

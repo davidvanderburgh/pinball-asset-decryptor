@@ -611,15 +611,46 @@ static void glEGLImageTargetTexture2DOES(unsigned target, void *image)
 static void glEGLImageTargetRenderbufferStorageOES(unsigned target, void *image)
 { (void)target; (void)image; FIRST("glEGLImageTargetRenderbufferStorageOES"); }
 
-/* s3kms.c's page flip: show the texture this bo stands for. */
-void pad_s3_present_bo(unsigned handle, unsigned w, unsigned h)
+/* s3kms.c's page flip: show the texture this bo stands for, in the window of
+ * the screen it was flipped to (disp: 0 = main, 1 = the second screen -
+ * PAD-1199, Fallout's Pip-Boy). */
+struct s3_ts { long sec, nsec; };
+extern int clock_gettime(int, struct s3_ts *);
+static double s3_now(void)
 {
-    unsigned v[3];
-    if (!bridge_init() || handle >= MAXS3BO || !tex_of_bo[handle]) return;
-    v[0] = tex_of_bo[handle]; v[1] = w; v[2] = h;
+    struct s3_ts t;
+    clock_gettime(1 /* CLOCK_MONOTONIC */, &t);
+    return (double)t.sec + (double)t.nsec * 1e-9;
+}
+
+void pad_s3_present_bo(unsigned handle, unsigned w, unsigned h, unsigned disp)
+{
+    unsigned v[4];
+    /* PAD-1201: where a flip's time goes. Every ~10 s: flips per second per
+     * screen and the share of the wall the game spent parked here waiting
+     * for the renderer - near 0 means the game itself is the limit (qemu),
+     * a big share means the renderer is. */
+    static double t_win, t_wait;
+    static unsigned n_flip[2];
+    double t0;
+    if (!bridge_init()) return;
+    if (handle >= MAXS3BO || !tex_of_bo[handle]) {
+        /* a flip nobody can show - say so, once a bo, rather than drop it
+         * silently: fallout_le's bos 2/3/5/6 were dropped like this, unseen (PAD-1201) */
+        static unsigned char said[MAXS3BO];
+        if (handle < MAXS3BO && !said[handle]++) {
+            char m[120];
+            snprintf(m, sizeof m, "[s3gl] flip of bo %u, which has no texture: not shown\n", handle);
+            say(m);
+        }
+        return;
+    }
+    v[0] = tex_of_bo[handle]; v[1] = w; v[2] = h; v[3] = disp;
     frame_no++;
-    emit_u(PADGL_PRESENTTEX, v, 3);
+    emit_u(PADGL_PRESENTTEX, v, 4);
     hdr->frame_seq++;
+    t0 = s3_now();
+    if (!t_win) t_win = t0;
     {
         static int inflight = -1;
         int spins = 0;
@@ -627,6 +658,22 @@ void pad_s3_present_bo(unsigned handle, unsigned w, unsigned h)
         while (hdr->frame_seq - hdr->frame_ack > (unsigned long long)inflight) {
             if (++spins > 200000) { bridge_dead = 1; break; }
             host_wait();
+        }
+    }
+    {
+        double t1 = s3_now();
+        t_wait += t1 - t0;
+        n_flip[disp ? 1 : 0]++;
+        if (t1 - t_win >= 10.0) {
+            char m[200];
+            double dt = t1 - t_win;
+            snprintf(m, sizeof m, "[s3gl] flips/s: main %d.%d, display 2 %d.%d; "
+                     "waiting on the renderer %d%% of the time\n",
+                     (int)(n_flip[0] / dt), (int)(n_flip[0] * 10 / dt) % 10,
+                     (int)(n_flip[1] / dt), (int)(n_flip[1] * 10 / dt) % 10,
+                     (int)(t_wait * 100 / dt));
+            say(m);
+            t_win = t1; t_wait = 0; n_flip[0] = n_flip[1] = 0;
         }
     }
 }

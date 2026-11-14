@@ -69,13 +69,15 @@ def _entry(ptype, start, count):
             + bytes.fromhex("03e0ff") + struct.pack("<II", start, count))
 
 
-def make_card(path, cls="8G", size=None):
+def make_card(path, cls="8G", size=None, cut=0):
     """A sparse Stern-shaped Spike 2 card image of class *cls*: only the MBR
     and the two EBRs are written; the file costs a few KB on any disk.
     *size* makes the FILE longer than its table (a dump of a whole bigger SD
-    card)."""
+    card).  *cut* sectors off the games partition and the file: a card made
+    as small as it can be (PAD-467), at no Stern size."""
     p3c, p4s = TABLES[cls]
-    sparse_image(str(path), size or cs.CARD_SIZES[cls])
+    p3c, p4s = p3c - cut, p4s - cut
+    sparse_image(str(path), size or cs.CARD_SIZES[cls] - cut * 512)
     mbr = bytearray(512)
     mbr[446:462] = _entry(0x0C, 8192, 16384)
     mbr[462:478] = _entry(0x83, 24576, 688128)
@@ -227,6 +229,35 @@ def test_an_8g_original_offers_16_and_32(tmp_path):
         assert w.state("write")["card_size_note"].endswith(
             "The built image is 30.36 GB and needs an SD card of at least "
             "32 GB; flashing it takes longer.")
+
+
+def test_a_card_made_as_small_as_it_can_be_offers_every_size(tmp_path):
+    """PAD-1235: a shared custom image made as small as it can be is
+    Stern's table at no Stern size.  The build grows it (PAD-593), so the
+    control is shown for it with every bigger size, and the as-small-as-it-
+    can-be box under it."""
+    card = make_card(tmp_path / "gz.raw", "8G", cut=2048 * 400)
+    with web_app(tmp_path, mfr="stern") as w:
+        point_at(w, card)
+        assert wait_for(w, lambda: w.state("write")["card_size_cap"])
+        s = w.state("write")
+        assert values(s) == ["", "16S", "16G", "32G"]
+        assert s["card_size_note"] == (
+            "The original is a card image made as small as it can be "
+            "(7.44 GB), not one of Stern's card sizes.")
+        assert s["card_size_note_kind"] == ""
+        assert s["card_fit_cap"]
+        w.call("ui.set", "write", "card_size", "16G")
+        s = w.state("write")
+        assert s["card_size_shown"] == "16G" and s["card_size_note_kind"] == ""
+
+
+def test_the_question_for_a_card_made_as_small_as_it_can_be():
+    assert cs.offer_question(None, "16G") == (
+        "Your assets no longer fit on this card image, which was made as "
+        "small as it can be. Would you like to change the size requirement "
+        "to 16 GB so that you don't have to compress any assets?\n\nThe SD "
+        "card in the machine has to be 16 GB or bigger.")
 
 
 def test_a_16g_original_offers_only_32(tmp_path):
@@ -1164,7 +1195,7 @@ def test_no_keeps_the_size_and_builds_nothing(tmp_path, monkeypatch):
 @pytest.mark.parametrize("kw", [
     {"fits": None, "largest": "32G", "largest_room": 22_500_000_000},
     {"fixed": True},                   # a port: it can't take a size
-    {"current": None},                 # not measured at a Stern size
+    {"current": None, "fits": None},   # not measured at a Stern size
     {"current": "16G", "fits": "16G"},  # nothing bigger to offer
 ], ids=["nothing-fits", "port", "no-size", "not-bigger"])
 def test_no_question_when_a_bigger_card_isnt_the_answer(tmp_path,

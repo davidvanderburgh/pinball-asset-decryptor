@@ -172,7 +172,7 @@ def test_configure_tracker_ignores_the_maximized_rectangle():
     app = types.SimpleNamespace(_last_normal_geometry=None, _settings={})
     ctx = types.SimpleNamespace(app=app)
     host = types.SimpleNamespace(window=types.SimpleNamespace(x=40, y=30),
-                                 _maximized=False)
+                                 _maximized=False, fullscreen=False)
     host_mod._remember_geometry(ctx, host, 900, 1000)
     normal = app._last_normal_geometry
     assert normal == "900x1000+40+30"

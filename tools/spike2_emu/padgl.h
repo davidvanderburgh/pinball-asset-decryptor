@@ -155,7 +155,13 @@ enum {
      * does (present, frame_ack). Appended, so every op above keeps its
      * number; Spike 2 never sends it.
      *
-     * u32 guest texture name, width, height */
+     * u32 guest texture name, width, height [, display]
+     *
+     * PAD-1199: the optional fourth word is the screen the flip was for (0 =
+     * main window, nonzero = the second display's window, the same one
+     * PADGL_TARGET opens). A two-screen title (Fallout: backbox + Pip-Boy)
+     * flips both outputs in turn; without it they alternated in one window.
+     * Three words is display 0, so an older guest still works. */
     PADGL_PRESENTTEX,
     /* PAD-1090, SPIKE 3: THE REST OF GLES 3 THAT GODOT 4 USES. Until these
      * the Spike 3 guest answered each with a stub that did nothing, so an

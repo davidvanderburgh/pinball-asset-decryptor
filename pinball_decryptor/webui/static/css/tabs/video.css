@@ -172,6 +172,13 @@ html.bp-1020 .vcm-grid.n2, html.bp-1020 .vcm-grid.n3, html.bp-1020 .vcm-grid.n4 
 a.vid-sound-go { color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
 a.vid-sound-go:hover { color: var(--accent); }
 .vid-song-sync { margin: 2px 0 4px; }
+/* PAD-1266 (Ben): a clip's song is one row - label, song(s), the Play-along box */
+.vid-sounds.inline .note { padding: 5px 12px; align-items: center; }
+.vid-sounds.inline .note > .i { margin-top: 0; }
+.vid-song-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; white-space: normal; }
+.vid-song-label { color: var(--ink-2); cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
+.vid-sound-list.inline { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; padding: 0; list-style: none; }
+.vid-song-row .vid-song-sync { margin: 0; }
 /* a mode's own row of a clip another mode plays too, under that mode's row */
 .vid-pairmark { color: var(--accent); margin-right: 6px; }
 .vid-rep.follow { color: var(--ink-3); font-style: italic; }

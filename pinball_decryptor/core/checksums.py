@@ -58,10 +58,14 @@ RANDOM_CLIP_FILES_DIR = "Random clip files"
 # "Attract files" holds the photos and clips a mod pack carried for a project's
 # attract items (core.modpack, PAD-782), never slots of their own.
 ATTRACT_FILES_DIR = "Attract files"
+# "Team files" holds the files a project took from its team (core.team_sync,
+# PAD-1236): the teammates' own picks for the card's slots, never slots of
+# their own.
+TEAM_FILES_DIR = "Team files"
 NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
                             ".write_cache", SHARED_PICTURES_DIR,
                             MUSIC_MODE_FILES_DIR, RANDOM_CLIP_FILES_DIR,
-                            ATTRACT_FILES_DIR})
+                            ATTRACT_FILES_DIR, TEAM_FILES_DIR})
 
 # What the app keeps in a project folder for itself and no edit lives in, left
 # out of the "have the edits moved since the emulator's set was built?" walks
@@ -74,7 +78,9 @@ NON_ASSET_DIRS = frozenset({"build", ".hydrate", "card_files", "logs",
 # picture color-corrected rebuilt 1,243 files on each one.
 FINGERPRINT_SKIP_DIRS = frozenset({"logs", "build", ".write_cache"})
 FINGERPRINT_SKIP_FILES = frozenset({".hashcache.json", ".probecache.json",
-                                    ".history.log"})
+                                    ".history.log",
+                                    # core.team_sync's record of the project's team
+                                    ".team_sync.json"})
 
 
 def is_other_extract(path):

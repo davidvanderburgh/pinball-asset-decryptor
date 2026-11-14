@@ -90,7 +90,7 @@ def _container_order(rel):
     return (d, int(m.group(1)) if m else -1, name)
 
 
-def decode_sound_containers(pipe, items, rel_of, extract_to):
+def decode_sound_containers(pipe, items, rel_of, extract_to, game_of=None):
     """Extract each sound container in *items* and decode it to WAVs
     (PAD-1077; the ``image-scNN.bin`` banks too, PAD-1185).
 
@@ -98,7 +98,11 @@ def decode_sound_containers(pipe, items, rel_of, extract_to):
     image.bin"); *extract_to(item, out_path)* writes its bytes. The WAVs go to
     ``<output>/sound/<dir of rel>/audio/``, and the container is removed once
     they are all written; a container that fails to decode is left in place
-    (with a warning) so nothing is lost. Returns ``(sounds, seconds)``."""
+    (with a warning) so nothing is lost. Returns ``(sounds, seconds)``.
+
+    *game_of(dir of rel)* gives the bytes of the ``game`` program in that
+    folder, or ``None``: an ``image.bin``'s sounds are then named from its
+    Sound Test menu (PAD-1244, :mod:`.spike3_requests`)."""
     base = os.path.join(pipe.output_dir, "sound")
     sounds, seconds = 0, 0.0
     # image.bin first, then the banks in number order
@@ -130,6 +134,8 @@ def decode_sound_containers(pipe, items, rel_of, extract_to):
             pipe._log("%s could not be decoded to WAVs (%s); the container "
                       "is kept as it is." % (rel, e), "warn")
             continue
+        if stem is None and game_of is not None:
+            _name_sounds(pipe, game_of(os.path.dirname(rel)), out, audio)
         try:
             os.remove(out)
         except OSError:
@@ -458,6 +464,9 @@ class Spike3ExtractPipeline(BasePipeline):
                     self._log("%s could not be decoded to WAVs (%s)."
                               % (card_path, e), "warn")
                     continue
+                if stem is None:
+                    self._map_sounds(reader, card_path, tmp, dest,
+                                     folder == spike3_write.GAME_SOUNDS)
             finally:
                 try:
                     os.remove(tmp)
@@ -471,10 +480,59 @@ class Spike3ExtractPipeline(BasePipeline):
                       "success")
         return sounds, seconds
 
+    def _map_sounds(self, reader, card_path, image_path, audio_dir, main):
+        """PAD-1244: an ``image.bin``'s sounds as a Spike 2 extract leaves them - named from
+        the Sound Test menu of the ``game`` program beside it and, for the game's own (*main*),
+        ``sound_requests.tsv`` for the Audio tab's Requests column (:mod:`.spike3_requests`).
+        A previous extract's map goes first, so a card it cannot be read from says so."""
+        from . import clip_sounds
+        if main:
+            try:
+                os.remove(os.path.join(self.output_dir, clip_sounds.REQUESTS_TSV))
+            except OSError:
+                pass
+        node = _node_at(reader, os.path.dirname(card_path.rstrip("/")) + "/game")
+        _name_sounds(self, reader.read_file_bytes(node) if node else None, image_path,
+                     audio_dir, self.output_dir if main else None)
+
     def _summary(self, counts):
         bits = summary_bits(counts)
         got = ", ".join(bits) if bits else "no"
         return "Extracted %s file(s) to %s" % (got, self.output_dir)
+
+
+def _name_sounds(pipe, game_raw, image_path, audio_dir, map_dir=None):
+    """Name the sounds decoded from *image_path* into *audio_dir* from the Sound Test menu of
+    the game program *game_raw* (``None``: none beside it), and with *map_dir* write the
+    request map there (:func:`.spike3_requests.map_sounds`)."""
+    from . import spike3_requests
+    if not game_raw:
+        pipe._log("No game program beside %s, so its sounds keep their idx names."
+                  % os.path.basename(audio_dir), "info")
+        return
+    pipe._progress(0, 1, "Reading the game's Sound Test names")
+    spike3_requests.map_sounds(game_raw, image_path, map_dir, audio_dir=audio_dir,
+                               log=pipe._log)
+
+
+def _node_at(reader, path):
+    """The inode of the regular file at *path* on the volume (``/fallout_le/game``), or
+    ``None``."""
+    from .ext4 import S_IFMT, S_IFREG
+    ino = 2
+    for part in [p for p in path.split("/") if p]:
+        try:
+            node = reader.read_inode(ino)
+        except Exception:                                    # noqa: BLE001
+            return None
+        ino = next((c for n, c, _t in reader._iter_dir(node) if n == part), None)
+        if ino is None:
+            return None
+    try:
+        node = reader.read_inode(ino)
+    except Exception:                                        # noqa: BLE001
+        return None
+    return node if (node["mode"] & S_IFMT) == S_IFREG else None
 
 
 def _count_files(root, exts, skip=()):

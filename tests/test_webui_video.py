@@ -997,3 +997,125 @@ def test_random_clips_are_not_offered_where_the_plugin_has_none(tmp_path):
         assert w.call("video.row_menu", ["video/intro.mp4"])["variants"] is None
         assert w.call("video.add_variants", "video/intro.mp4") is False
         assert _row(w.state("video"), "video/intro.mp4")["var"] == 0
+
+
+def test_a_shorter_pick_is_offered_a_loop(tmp_path, monkeypatch):
+    # PAD-1226: a replacement shorter than the clip it replaces asks whether
+    # to loop it to the stock clip's length; Yes sets the clip's length to
+    # "loop" (the row menu's new choice), No leaves it as it was, and a clip
+    # with its own length already picked is not asked.
+    from pinball_decryptor.core import video as core_video
+    from pinball_decryptor.webui.tabs.video import VideoTab
+    monkeypatch.setattr(core_video, "probe_duration", lambda _p: 89.0)
+    monkeypatch.setattr(VideoTab, "_stock_seconds", lambda self, rel: 296.0)
+    proj = _project(tmp_path)
+    mine = _mine(tmp_path)
+    rel = "video/intro.mp4"
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        w.answers += [str(mine), "yes"]
+        assert w.call("video.choose", rel) is True
+        q = w.asked[-1]
+        assert q["title"] == "Shorter than the clip it replaces"
+        assert "runs 1:29" in q["message"] and "runs 4:56" in q["message"]
+        assert w.call("video.row_menu", [rel])["length"] == "loop"
+        assert _row(w.state("video"), rel)["len"].endswith("• loop")
+        assert w.window.pending_video_assignments(str(proj))[5] == {rel: "loop"}
+
+        # No keeps the clip following the box
+        assert w.call("video.set_length", rel, None) is True
+        w.answers += [str(mine), "no"]
+        n = len(w.asked)
+        assert w.call("video.choose", rel) is True
+        assert len(w.asked) == n + 2
+        assert w.call("video.row_menu", [rel])["length"] == "box"
+
+        # a clip whose length is already its own is not asked
+        assert w.call("video.set_length", rel, "full") is True
+        w.answers.append(str(mine))
+        n = len(w.asked)
+        assert w.call("video.choose", rel) is True
+        assert len(w.asked) == n + 1
+        assert w.call("video.row_menu", [rel])["length"] == "full"
+
+        # a file only a fraction of a second short (both read 3:20) is not
+        # asked: looping it would only flash its opening
+        assert w.call("video.set_length", rel, None) is True
+        for near in (199.6, 199.2):
+            monkeypatch.setattr(VideoTab, "_stock_seconds",
+                                lambda self, rel: 200.1)
+            monkeypatch.setattr(core_video, "probe_duration",
+                                lambda _p, n=near: n)
+            # a file of its own: the tab keeps each file's probed length
+            # (PAD-1232), so re-picking mine.mp4 would still read 1:29
+            w.answers.append(str(_mine(tmp_path, "near%d.mp4" % (near * 10))))
+            n = len(w.asked)
+            assert w.call("video.choose", rel) is True
+            assert len(w.asked) == n + 1
+            assert w.call("video.row_menu", [rel])["length"] == "box"
+
+        # and the row menu sets it directly, surviving a fresh session
+        assert w.call("video.set_length", rel, "loop") is True
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        _scan(w, proj)
+        assert w.call("video.row_menu", [rel])["length"] == "loop"
+
+
+def test_vs_stock_column_sorts_and_speed_choice(tmp_path, monkeypatch):
+    # PAD-1232 (DoomWalrus666): each picked file says how much shorter or
+    # longer it runs than the stock clip and the speed change that would
+    # make it run exactly as long; the column sorts by it; "stretch" is the
+    # row menu's new length choice, shown in Length, kept with the project,
+    # and the Replacement player is told the stock length to play it at.
+    import os as _os
+    from pinball_decryptor.core import video as core_video
+    from pinball_decryptor.webui.tabs.video import VideoTab
+    secs = {"short.mp4": 9.75, "long.mp4": 12.5}
+    monkeypatch.setattr(core_video, "probe_duration",
+                        lambda p: secs.get(_os.path.basename(str(p)), 0.0))
+    monkeypatch.setattr(VideoTab, "_stock_secs",
+                        lambda self, rel, probe=False: 10.0)
+    proj = _project(tmp_path)
+    short, long_ = _mine(tmp_path, "short.mp4"), _mine(tmp_path, "long.mp4")
+    a, b = "video/attract.mp4", "video/intro.mp4"
+    with web_app(tmp_path, mfr="stern") as w:
+        _scan(w, proj)
+        assert _row(w.state("video"), a)["fit"] == ""
+        w.answers.append(str(long_))
+        assert w.call("video.choose", a) is True
+        w.answers.append(str(short))
+        assert w.call("video.choose", b) is True   # 0.25 s short: no loop asked
+        st = _wait(w, lambda st: _row(st, a)["fit"] not in ("", "…")
+                   and _row(st, b)["fit"] not in ("", "…"))
+        assert _row(st, b)["fit"] == "−0.25 s • 2.5% slower"
+        assert _row(st, a)["fit"] == "+2.50 s • 25% faster"
+        assert "2.5% slower" in " ".join(_row(st, b)["fit_tip"]["lines"])
+
+        assert w.call("video.sort", "fit") is True
+        order = [r for r in _rels(w.state("video")) if r in (a, b)]
+        assert order == [b, a]                      # the most short first
+        w.call("video.sort", "fit")
+        order = [r for r in _rels(w.state("video")) if r in (a, b)]
+        assert order == [a, b]
+
+        w.call("video.select", b)
+        assert w.state("video")["preview"]["rep"].get("fit_to") is None
+        assert w.call("video.set_length", b, "stretch") is True
+        st = w.state("video")
+        assert _row(st, b)["len"].endswith("• speed")
+        assert _row(st, b)["fit_cls"] == "on"
+        assert w.call("video.row_menu", [b])["length"] == "stretch"
+        assert st["preview"]["rep"]["fit_to"] == 10.0
+        assert w.window.pending_video_assignments(str(proj))[5] == {
+            b: "stretch"}
+    with web_app(tmp_path / "again", mfr="stern") as w:
+        _scan(w, proj)
+        assert w.call("video.row_menu", [b])["length"] == "stretch"
+
+
+def test_gap_words():
+    from pinball_decryptor.webui.tabs.video import _gap_words
+    assert _gap_words(9.75, 10.0) == "−0.25 s • 2.5% slower"
+    assert _gap_words(10.02, 10.0) == "same length"
+    assert _gap_words(30.0, 15.0) == "+15.0 s • 100% faster"
+    assert _gap_words(100.0, 200.0) == "−1:40 • 50% slower"

@@ -227,6 +227,7 @@ const GAP2 = "\u00a0\u00a0", GAP4 = GAP2 + GAP2;
 export function projectMenuItems(shell) {
   const running = !!shell.running;
   const recents = (shell.recent_projects || []).filter((r) => r && r.folder);
+  const teamNews = (state.shellx || {}).team_news || 0;
   const proj = shell.project || {};
   const have = !!(proj.folder && shell.mfr);
   const base = (f) => (f || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || f;
@@ -251,6 +252,9 @@ export function projectMenuItems(shell) {
       title: { head: "Export replacement files", lines: [["Click", "copy every video, sound and picture this project uses into one folder (Video, Audio, Images), with a file that puts them back on a fresh extract"]] } },
     { label: "Import replacements…", disabled: running || !have, onClick: () => call("shellx.import_replacements"),
       title: { head: "Import replacements", lines: [["Click", "pick the replacements.json an export left: its files go on this project's slots, with the random clips, music modes and loudness"]] } },
+    // PAD-1236: several PCs on one project, each person's parts shared through one synced folder
+    { label: "Team…" + (teamNews ? GAP2 + "(" + teamNews + " new)" : ""), disabled: running || !have, onClick: () => openDialog("project_team"),
+      title: { head: "Team", lines: [["Click", "work on this project with other people on their own PCs: each person owns parts (videos, scenes, sounds...), shares them through one synced folder, and gets the others'"]] } },
     // PAD-576: here rather than a top-bar button, where it pulled the eye from the rest of the app
     { sep: true },
     { label: "Reset…", disabled: running || !have || shell.view !== "mfr", onClick: () => openDialog("reset"),
@@ -415,6 +419,8 @@ function TopBar({ shell }) {
       <span class="muted">▾</span>
     </button>
     <span class="grow"></span>
+    ${working && sx.team_news ? html`<${Chip} kind="acc" dot onClick=${() => openDialog("project_team")}
+        title=${{ head: "Team", lines: [["Click", "open Project > Team: other people shared new parts of this project"]] }}>Team: ${sx.team_news} new<//>` : null}
     ${pyChanged.length ? html`<${Chip} kind="warn" dot onClick=${() => call("shell.dev_restart")}
         title=${"Python files changed since this app started:\n" + pyChanged.slice(0, 12).join("\n") + (pyChanged.length > 12 ? "\n…" : "") + "\n\nClick to restart the app with them (development checkout only)."}>Python changed · Restart<//>` : null}
     ${!connected ? html`<${Chip} kind="err" dot>Reconnecting…<//>` : null}

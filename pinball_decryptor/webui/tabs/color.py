@@ -525,9 +525,16 @@ class ColorTab(TabService):
                 out.append(d)
         return out
 
-    def _preset_on(self, p, assets):
-        """The starting point the profile on show is, or ""."""
+    def _preset_on(self, p, assets, in_use=True):
+        """The starting point the profile on show is, or "".  PAD-1217: in
+        the Files mode none is lit while nothing is attached (a file whose
+        switch is off, or the project's files profile never picked and on
+        no file): the Recommended one waiting there is not in use."""
         ok = bool(assets and os.path.isdir(assets))
+        if not in_use and self._assets_mode() and (
+                self._file_mode() is not None
+                or not (ok and cp.asset_stored(assets))):
+            return ""
         try:
             if self._screen_mode():
                 if ok and cp.screen_follows(assets):
@@ -628,6 +635,14 @@ class ColorTab(TabService):
                           and sum(state["asset_counts"].values()))
         else:
             active = self._prof is not None
+        # PAD-1217: the profile this mode really applies now, by name, or ""
+        # when it applies none (the Start from row's In use / None set)
+        if self._screen_mode():
+            in_use = p.label()
+        elif fstate is not None:
+            in_use = p.label() if fstate["on"] is not False else ""
+        else:
+            in_use = p.label() if active else ""
         if self._screen_mode():
             presets = [{"key": k,
                         "label": cp.SCREEN_PRESET_LABELS.get(k)
@@ -664,7 +679,8 @@ class ColorTab(TabService):
             **state,
             has_project=bool(assets and os.path.isdir(assets)),
             presets=presets,
-            preset_on=self._preset_on(p, assets),
+            preset_on=self._preset_on(p, assets, bool(in_use)),
+            in_use=in_use,
             saved=saved, saved_on=saved_on,
             parts=self._parts(assets),
             limits={k: list(v) for k, v in LIMITS.items()},

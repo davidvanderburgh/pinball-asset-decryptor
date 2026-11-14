@@ -130,6 +130,30 @@ Built (`s3build.sh` -> `~/.pad-s3/build`, `s3run.sh --bridge` runs it):
   `display_number` = 1, the second - glWindow at 0x926c9c checks index <
   count_connectors and `connection == 1`); GBM bos with memfd dma-buf fds;
   AddFB/SetCrtc/PageFlip present the bo, flip events through drmHandleEvent.
+  **Two screens (PAD-1199)**: fallout_le drives BOTH outputs - the backbox
+  on HDMI-A-2 (crtc 52, opened first, bos 1-3) and the Pip-Boy screen on
+  HDMI-A-1 (crtc 51, bos 4-6) - flipping them in turn. Every flip used to go
+  to the one window, so the two pictures alternated in it frame by frame.
+  Each flip now carries its screen: the first crtc shown is the main window,
+  any other is display 2 (`PADGL_PRESENTTEX`'s optional fourth word), which
+  padglhost shows in Spike 2's display-2 window (opened at half the render
+  size by `s3run.sh --window`) and dumps headless as `frames/display2.png`.
+  The flip event reports the crtc it was for. One-screen titles (pokemon_le:
+  crtc 52 only) are unchanged.
+  **Every buffer shown (PAD-1201)**: each screen was a flat 20 fps (the
+  game makes 60) - fallout_le gets a bo's dma-buf fd, makes its EGL image
+  and closes the fd before the next bo's, so dup() handed every bo the same
+  fd NUMBER and `pad_s3_bo_by_fd`, matching numbers, found bo 1 each time
+  ("EGL image of bo 1" x3, then bo 4 x3). Bos 2/3/5/6 never had a texture
+  and `pad_s3_present_bo` dropped their flips: one frame in three. The fd
+  is matched by its memfd's inode now (tests/test_spike3_kms_buffers.py
+  replays the game's order). Found by: the game at 30% of a core, a steady
+  19.8 flips/s a screen and 1% of the time waiting on the renderer
+  (`[s3gl] flips/s` every 10 s), then `PAD_S3_KMS_TRACE=N` (flip times per
+  crtc): the game flipped ~40/s a screen and never called drmHandleEvent.
+  Same run: s3run now hands the renderer the Emulate tab's display.conf
+  (not on a hidden run) and PAD_SLOT, so the game window obeys Game display
+  and remembers its spot per rig, not in rig 0's ~/.pad_windows.
 - `s3egl.c` (libEGL.so.1): GBM platform display, surfaceless contexts, TWO
   configs (XR24 and AR24 native visual ids - with only AR24 the game logged
   `failed to find egl config for gbm format` and retried create_window),
@@ -828,3 +852,103 @@ level change with a fade into padled's fade ring as a one-way envelope, which
 playfield.py already ramps. Unit 10 ms (`PAD_FADE_B_UNIT_MS`), a guess: the
 node firmware .hex images are encrypted (entropy 7.99), and Pokemon's B=60
 chase steps every 0.600 s exactly.
+
+## David's four (PAD-1213, 2026-11-12)
+
+**Guided Setup not full screen (Transformers, in a window).** The game window
+binds its keys and LATCHES the coin door and trough as it opens, by the ids in
+the slot's `tables/game/switch_list.txt`. Only the bridge wrote that, a second
+after the window was up, so the window opened on the previous run's list:
+after Star Wars 2025 LE/Pro or The Walking Dead, their coin-door id (9) is
+Transformers' JUMPER LVDS RESOLUTION 1 (SPI bit 12), and their trough ids
+were both flipper buttons and the shooter lanes. The game reads the jumper
+at boot and draws at 1360x768 - in the corner of the 1920x1080 screen. s3run
+now clears the slot's tables and writes the title's own list
+(`s3bridge.py --switches DIR GAME`, 0.8 s) before the renderer starts.
+
+**Sound lag.** s3alsa's output measures 1.0000x of real time over a whole
+Transformers game (a counter on the fifo, no player). The lag is the Windows
+player's queue: padplay.py drops a backlog only when it has sat above
+PAD_AUDIO_MAX_LATE_MS (750) for 2 s. David's run saw-toothed 0.2-0.85 s late
+for minutes; on the bench a 600 ms hiccup stayed as 660-690 ms of lag. Spike
+3 runs set 200 ms: the hiccup comes back to 110-140 ms; a source 3% faster
+than the speaker stays within 170-270 ms (a ~100 ms skip every few seconds)
+instead of climbing to 780.
+
+**Video: clip starts.** s3vidhost decodes with slice threads, never ffmpeg's
+default HEVC frame threading (the first frame waited for 15 packets, 589 ms,
+on a 10-core PC), and keeps a warm ffmpeg per (codec, size) of the last three
+opened, so an open or flush does not wait on a process start. First frames
+23-65 ms after open in the game (log: `first frame N ms after open|seek`),
+was 114-589 ms. `PAD_S3_VID_THREADS`, `PAD_S3_VID_WARM=0`.
+
+**Video: the frozen backbox (Fallout) and the crawling intro (Transformers).**
+The ring put frame n in slot n % 16 and freed slots IN ORDER (padvid
+read_idx). Fallout keeps the frame its main screen shows and releases the
+rest: s3vid.c's new jam line read "frame 164 still held, 15 of the 15 after it
+released" - a full ring with 15 free slots, the decoder stopped, packets
+backed up ("Unexpected busy error when SENDING PACKET") and the background
+video froze for good. Now a slot is free when its own frame is released: the
+guest opts in at open (`slotmap_guest`), the host answers (`slotmap_host`),
+writes each frame to the next free slot round robin and publishes it in
+`slot_of[n % 16]`; the guest clears `slot_busy[slot]` on release. A flush
+frees only the frames the game never took. Proven by grabbing the X screen of
+a window run at 4 fps: Fallout's main screen changed in 18 of 239 grabs
+before, 211 after. Transformers' intro clip (24 fps) came out at 11.6 fps
+before, 19.3 after, the game drawing 30-32 fps through it (was 12); the
+renderer then gets 20-24 new video frames a second.
+
+Still seen then: one ~7 s hold of Fallout's background in 60 s of attract
+(explained in PAD-1230 below); and the Transformers intro scene itself keeps the game near
+30 fps (59-70% waiting on the renderer), a cost of drawing that scene on
+this GPU, not of the video.
+
+## The background that held ~7 s once a minute (PAD-1230, 2026-11-13)
+
+A frame's time is not the host's: ffmpeg's pipe carries no pts, so s3vid.c
+gives each frame the smallest time of the packets sent and not yet out as
+frames. That table held 128 times. Every clip opens with 271-326 packets in
+before its first frame (the game reads ahead; the host feeds ffmpeg's pipe),
+so the times past the 128th were dropped, silently. Frames 0-127 were timed
+right; frame 128 of Fallout's backbox clip (92.asset) took pts 160256 where
+65536 had just gone (12288 ticks/s: 7.7 s ahead), and the game stopped taking
+frames until its clock got there, then raced through the late ones. A 4 min
+attract with `PAD_S3_VID_TRACE=1` (one `[vt] R|F|B` line per frame handed,
+released, bound for drawing, wall-clock ms) showed it at each of the clip's
+starts: R 0 for 7-8 s while the renderer kept binding the one frame, every
+hold starting at a pts jump and none elsewhere. The table is now 4096, a full
+one says so once, and the every-600-frames line gives the most times ever
+pending and how many were lost. Any Spike 3 clip over 128 frames on any title
+had the same jump ~5 s in.
+
+## Battle clips that never showed (PAD-1234, 2026-11-13)
+
+Transformers' battle and mode screens (Solar Needle, Autobot Run, Golden
+Lagoon: clips of 55-100 frames) had a black centre. The game opened each
+clip, closed it ~0.27 s later and opened the next, four a second, printing
+"SpiVideoStreamDecoderBase::Play while loop timeout" each time, and its frame
+rate fell from ~58 to ~6. Short one-shot clips (829, 1026, 409, 503) closed
+the same way.
+
+From the game binary (stripped; found by the strings' xrefs): Play() starts
+the stream and polls a "frame received" byte 250 times, usleep(1000) apart.
+The decode thread sets it on each received frame, and on AVERROR_EOF with
+two or fewer frames queued it treats the clip as finished and tears it down,
+freeing the queue. A short clip is read whole, its end-of-input drain
+included, a few ms after the open, before the host's first frame (40-60 ms).
+s3vid answered EOF 25 ms into a drain, so the clip "ended" before it began.
+`PAD_S3_VID_TRACE=2` (new) adds, to each release, the game return addresses
+on the stack: every frame of a cycling clip was freed by that teardown, in
+the millisecond it was handed over.
+
+The player drains in two places, told apart by the packet: its decode loop at
+the end of the input sends its own EMPTY packet, and FlushDecoder (a stop or
+seek) sends NULL, then reads up to 99 frames, freeing each, 0.5 ms apart. A
+NULL drain keeps the quick EOF. An empty-packet drain gets EAGAIN while
+frames are owed (packet times still pending) and EOF once none are, the
+host's decoder has ended, or nothing has come for EOF_WAIT_MS (400). Proven
+on a hidden rig replaying the switches that started Solar Needle: before, 18
+Play timeouts in 10 s and no frame ever bound for drawing; after, none, each
+clip played its full length with its first frame drawn ~52 ms after the open,
+57 fps throughout. FlushDecoder timeouts (a long clip torn down mid-play) are
+unchanged: 7 in a 7-minute run before, 5 in a 4-minute run after.

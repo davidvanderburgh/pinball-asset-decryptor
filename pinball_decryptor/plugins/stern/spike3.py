@@ -252,26 +252,59 @@ class DecryptingSegmentReader:
             self._f.seek(0, os.SEEK_END)
             self.size = max(0, self._f.tell() - self._phys_base)
         self._pos = 0
+        # sector -> plaintext, oldest first (a dict keeps insertion order)
         self._cache = {}
-        self._cache_order = []
         self._cache_cap = cache_sectors
 
-    # -- cache of decrypted sectors ------------------------------------------
+    #: A read this many sectors or more is a file's data, read once: it goes
+    #: to the card in one request and is not cached. Smaller reads (inodes,
+    #: directories, extent blocks) fetch a READ_AHEAD-aligned window and
+    #: cache it. One request per 512-byte sector over WSL's share to a
+    #: Windows drive held a Spike 3 card's first decrypt to ~9 MB/s (PAD-1238).
+    BULK_SECTORS = 64
+    READ_AHEAD = 128
+
+    # -- decrypting runs of sectors ------------------------------------------
+    def _plain_run(self, first, count):
+        """Plaintext of *count* sectors from *first*, in one read + one decrypt."""
+        ss = self._sector
+        self._f.seek(self._phys_base + first * ss)
+        ct = self._f.read(count * ss)
+        if len(ct) < count * ss:
+            ct = ct + b"\x00" * (count * ss - len(ct))
+        return self._xts(self._mk, ct, first * self._iv_step, ss, self._iv_step)
+
+    def _remember(self, first, plain):
+        ss = self._sector
+        for i in range(len(plain) // ss):
+            self._cache[first + i] = plain[i * ss:(i + 1) * ss]
+        while len(self._cache) > self._cache_cap:
+            del self._cache[next(iter(self._cache))]
+
     def _sector_plain(self, sec):
         hit = self._cache.get(sec)
         if hit is not None:
             return hit
-        self._f.seek(self._phys_base + sec * self._sector)
-        ct = self._f.read(self._sector)
-        if len(ct) < self._sector:
-            ct = ct + b"\x00" * (self._sector - len(ct))
-        pt = self._xts(self._mk, ct, sec * self._iv_step, self._sector)
-        self._cache[sec] = pt
-        self._cache_order.append(sec)
-        if len(self._cache_order) > self._cache_cap:
-            old = self._cache_order.pop(0)
-            self._cache.pop(old, None)
-        return pt
+        self._fill(sec, sec + 1)
+        return self._cache[sec]
+
+    def _fill(self, first, end):
+        """Cache sectors [first, end): each missing run in one request,
+        reading READ_AHEAD sectors past a miss (the next inode, the rest of
+        the directory). A cached sector is never re-read: it may hold a
+        write the volume made (spike3_card.GamesVolume)."""
+        n_secs = max(1, (self.size + self._sector - 1) // self._sector)
+        sec = first
+        while sec < end:
+            if sec in self._cache:
+                sec += 1
+                continue
+            hi = min(max(end, sec + self.READ_AHEAD), max(n_secs, end))
+            run = sec + 1
+            while run < hi and run not in self._cache:
+                run += 1
+            self._remember(sec, self._plain_run(sec, run - sec))
+            sec = run
 
     # -- file-like interface -------------------------------------------------
     def seek(self, off, whence=os.SEEK_SET):
@@ -296,20 +329,28 @@ class DecryptingSegmentReader:
         n = min(n, self.size - self._pos)
         start = self._pos
         end = start + n
-        first = start // self._sector
-        last = (end - 1) // self._sector
-        out = bytearray()
-        for sec in range(first, last + 1):
-            pt = self._sector_plain(sec)
-            lo = start - sec * self._sector if sec == first else 0
-            hi = end - sec * self._sector if sec == last else self._sector
-            out += pt[lo:hi]
+        ss = self._sector
+        first = start // ss
+        last = (end - 1) // ss
+        lo = start - first * ss
         self._pos = end
+        if last - first + 1 >= self.BULK_SECTORS:
+            # a file's data: one request, one decrypt, nothing cached. The
+            # card is the truth even after a write (written sectors are
+            # re-encrypted onto it as they go)
+            return self._plain_run(first, last - first + 1)[lo:lo + n]
+        self._fill(first, last + 1)
+        c = self._cache
+        if first == last:
+            return c[first][lo:lo + n]
+        out = bytearray(c[first][lo:])
+        for sec in range(first + 1, last):
+            out += c[sec]
+        out += c[last][:end - last * ss]
         return bytes(out)
 
     def close(self):
         self._cache.clear()
-        self._cache_order.clear()
 
 
 def header_part_sectors(header, part_base_lba, fileobj):

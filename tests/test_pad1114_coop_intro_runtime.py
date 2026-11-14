@@ -22,12 +22,18 @@ int main(void)
     c = ci_skip(0, 0, &freed);
     d = ci_skip(1, 1, &freed);
     printf("skip %d %d %d %d freed %d\n", a, b, c, d, freed);
+    {   /* round 3: Start while ball 1 waits - the game's own Start still down is no join, nor Start + left flipper */
+        int was = 1, e1 = ci_start_edge(1, &was, 0), e2 = ci_start_edge(0, &was, 0), e3 = ci_start_edge(1, &was, 0),
+            e4 = ci_start_edge(0, &was, 0), e5 = ci_start_edge(1, &was, 1);
+        printf("start %d %d %d %d %d\n", e1, e2, e3, e4, e5);
+    }
     return 0;
 }
 """
 
 SIGS = ("static int ci_wanted(int have, unsigned played_game, unsigned game, unsigned ball, int unserved, int waits)",
-        "static int ci_skip(int left, int right, int *freed)")
+        "static int ci_skip(int left, int right, int *freed)",
+        "static int ci_start_edge(int now_down, int *was_down, int left_down)")
 
 
 def _run(tmp_path):
@@ -40,23 +46,28 @@ def test_the_intro_plays_once_a_game_before_its_first_ball_is_out(tmp_path):
     assert "wanted 1 1 0 0 0 0" in _run(tmp_path)
 
 
+def test_a_start_while_ball_1_waits_is_a_join_but_not_the_games_own_start(tmp_path):
+    assert "start 0 0 1 0 0" in _run(tmp_path)
+
+
 def test_both_flippers_skip_it_once_each_was_let_go(tmp_path):
     assert "skip 0 0 0 1 freed 3" in _run(tmp_path)
 
 
 def _elf():
     import os
-    path = r"C:/tmp/PAD-1108/elfs/godzilla_le-1_16_0_spike2.elf"
-    if not os.path.isfile(path):
+    from tests.test_pad1031_coop_characters import GZ_ELF
+    if not GZ_ELF or not os.path.isfile(GZ_ELF):
         import pytest
         pytest.skip("the Godzilla LE 1.16 game program is not on this machine")
-    with open(path, "rb") as f:
+    with open(GZ_ELF, "rb") as f:
         return f.read()
 
 
 def test_an_intro_alone_writes_the_buttons_and_no_pick():
     lines = CP.character_lines(_elf(), {"pick": False, "list": [], "intro": "coop/intro_video.mp4"})
-    assert lines == ["left 60", "action 34", "lane 62", "intro_hold 96"]   # TIMED PLUNGER held off
+    assert lines == ["left 60", "action 34", "lane 62", "intro_hold 96",   # TIMED PLUNGER held off
+                     "intro_start 36"]                                     # round 3: Starts while ball 1 waits
 
 
 def test_the_timed_plunger_is_read_off_the_program():
@@ -84,3 +95,53 @@ def test_the_intro_sound_is_a_file_built_whole_and_kept_out_of_the_record():
     rec = SM.card_record(m, [{"mode": SM.INTRO_MODE, "lines": 1, "rel": "audio/idx1725.wav", "slot": 1725,
                               "host": 369}])
     assert len(rec) == 1                                   # the heading only: the intro is co-op's to keep
+
+
+CARDS_MAIN = r"""
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+struct pm_mode { const char *name; };
+static const struct pm_mode his_mode = { "HIS MODE" };
+static const struct pm_mode *current, *running;
+#define PM_CAN_BACKDROP 0x10u
+static unsigned can = PM_CAN_BACKDROP;
+static char coop_bonus_crop[32], bd_crop_next[32], asked[96];
+static int showing, gave_back;
+static void say(const char *f, ...) { va_list a; va_start(a, f); vprintf(f, a); va_end(a); printf("\n"); }
+static unsigned long pm_ms(void) { static unsigned long t; return t += 100; }
+static int pm_backdrop_showing(void) { return showing; }
+static unsigned long fn(const char *n) { (void)n; return 0; }
+static const char *pm_port_text(const char *k) { return strcmp(k, "bonus_loop_crop") ? 0 : "SquareCrop"; }
+static void str_copy(char *d, unsigned cap, const char *s, unsigned n) { (void)n; snprintf(d, cap, "%s", s); }
+/* the runtime's rule: refused while another of the card's modes runs (the backdrop is that mode's) */
+static int pm_backdrop(const char *name)
+{
+    if (running && running != current) return 0;
+    if (!name || !*name) { gave_back++; asked[0] = 0; return 1; }
+    snprintf(asked, sizeof asked, "%s", name);
+    showing = 1;
+    return 1;
+}
+@FN@
+int main(void)
+{
+    int up;
+    running = &his_mode;                 /* a mode of the card's still runs at the game's end */
+    current = 0;                         /* the cards are the runtime's, no mode's callback */
+    up = coop_cards_backdrop("EndOfBallBonus_BackgroundLoop");
+    printf("up %d asked [%s] crop [%s] current back %d\n", up, asked, bd_crop_next, current == 0);
+    coop_cards_backdrop(0);
+    printf("given back %d current back %d\n", gave_back, current == 0);
+    return 0;
+}
+"""
+
+
+def test_the_award_cards_take_the_backdrop_from_a_mode_still_running_at_the_games_end(tmp_path):
+    src = T.RUNTIME.read_text(encoding="utf-8")
+    fn = R._lift(src, "static int coop_cards_backdrop(const char *name)\n{")
+    out = R._host_run(tmp_path, CARDS_MAIN.replace("@FN@", fn)).splitlines()
+    assert "up 1 asked [EndOfBallBonus_BackgroundLoop] crop [SquareCrop] current back 1" in out
+    assert "given back 1 current back 1" in out
+    assert "if (running && running != current) return 0;" in R._lift(src, "int pm_backdrop(const char *name)")

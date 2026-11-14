@@ -5080,11 +5080,106 @@ static void pic2_check(void)
     }
 }
 
+/* item 44's first sighting of a second display, shared by PADGL_TARGET
+ * (Spike 2) and PADGL_PRESENTTEX's display word (Spike 3, PAD-1199): size
+ * its render target and panel from the env, open its window, create the
+ * target. Runs once; tgt2_disp says which display index holds the slot. */
+static void disp2_setup(int d)
+{
+    tgt2_disp = d;
+    fb2_w = fb_w; fb2_h = fb_h;
+    {   /* BOTH or NEITHER, matching the guest's
+         * fbGetDisplayGeometry exactly: with only one set, the
+         * host would size the texture the game was never told
+         * about, and the scene and its target would disagree on
+         * one axis. */
+        const char *ew = getenv("PAD_GL2_W");
+        const char *eh = getenv("PAD_GL2_H");
+        int w2 = ew ? atoi(ew) : 0, h2 = eh ? atoi(eh) : 0;
+        if (w2 > 0 && h2 > 0) { fb2_w = w2; fb2_h = h2; }
+    }
+    {   /* THE PANEL, host side only - watch.sh reads it out of
+         * the title's own framebuffer timing record. BOTH or
+         * NEITHER for the same reason as above: one axis from the
+         * panel and one from the render size is a shape neither
+         * machine nor game ever has. Bounded because this is a
+         * window size and a typo here is a window nobody can
+         * find; out of range falls back to the render size. */
+        const char *er = getenv("PAD_GL2_ROT");
+        int r = er ? atoi(er) : 0;
+        r = ((r % 360) + 360) % 360;
+        win2_rot = (r % 90) ? 0 : r;   /* only quarter turns */
+    }
+    {
+        const char *ew = getenv("PAD_GL2_WIN_W");
+        const char *eh = getenv("PAD_GL2_WIN_H");
+        int w2 = ew ? atoi(ew) : 0, h2 = eh ? atoi(eh) : 0;
+        if (w2 >= 160 && h2 >= 120 && w2 <= 7680 && h2 <= 4320) {
+            win2_want_w = w2; win2_want_h = h2;
+        } else if (w2 || h2) {
+            fprintf(stderr, "[padglhost] display %d: ignoring "
+                    "PAD_GL2_WIN_%s=%dx%d - out of range; its "
+                    "window opens at the render size\n",
+                    d, (w2 && h2) ? "W/H" : "W or H", w2, h2);
+        }
+    }
+    fprintf(stderr, "[padglhost] display %d targeted by the "
+            "guest; routing it to its own %dx%d texture and "
+            "window\n", d, fb2_w, fb2_h);
+    if (win2_want_w > 0)
+        fprintf(stderr, "[padglhost] display %d: its panel is "
+                "%dx%d, so the window opens at that and the "
+                "%dx%d render is scaled into it\n",
+                d, win2_want_w, win2_want_h, fb2_w, fb2_h);
+    win2_open(d);
+    if (!tgt2_create() && win2_on) {
+        /* Window up, render target failed: hide the window
+         * rather than let it swap a texture nothing can ever
+         * render into (the review's finding - undefined
+         * contents, oracle silent). The unmap makes the degrade
+         * VISIBLE on the desktop as well as in the log. */
+        fprintf(stderr, "[padglhost] display %d: render target "
+                "failed, hiding its window; its feed decodes "
+                "but is not presented\n", d);
+        XUnmapWindow(xdpy, xwin2);
+        XFlush(xdpy);
+        win2_on = 0;
+    }
+}
+
+/* PAD-1199: what display 2 shows, for a headless run (PAD_GL_DUMP), on the
+ * same schedule as the main screen's frames - ONE file, display2.png,
+ * overwritten, so it never grows a run's frames dir and never reads as a
+ * main-screen frame_*.png to the tools that walk those. */
+static void dump2(void)
+{
+    static long dumped2;
+    unsigned char *px;
+    char path[600];
+    int prev = 0;
+    if (!dump_dir || !fbo_screen2 || fb2_w <= 0 || fb2_h <= 0) return;
+    if (frames2_done % dump_every) return;
+    if (dumped2 >= dump_max) return;
+    px = malloc((size_t)fb2_w * fb2_h * 4);
+    if (!px) return;
+    dumped2++;
+    p_glGetIntegerv(0x8CA6, &prev);
+    p_glBindFramebuffer(0x8D40, fbo_screen2);
+    p_glReadPixels(0, 0, fb2_w, fb2_h, 0x1908, 0x1401, px);
+    p_glBindFramebuffer(0x8D40, (unsigned)prev);
+    snprintf(path, sizeof path, "%s/display2.png", dump_dir);
+    write_png(path, px, fb2_w, fb2_h);
+    free(px);
+    if (dumped2 == 1)
+        fprintf(stderr, "[padglhost] display 2: writing %s\n", path);
+}
+
 static void present2(void)
 {
     frames2_done++;
     win2_present();
     pic2_check();
+    dump2();
 }
 
 static void present(void)
@@ -5685,15 +5780,29 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         int keep_draw = 0, keep_read = 0;
         unsigned t = u[0] < MAXNAME ? map_tex[u[0]] : 0;
         int w = (int)u[1], h = (int)u[2];
+        /* PAD-1199: the fourth word is the screen (0 = main). A second screen
+         * (Fallout's Pip-Boy) goes to display 2's own texture and window -
+         * the one PADGL_TARGET opens - instead of taking turns with the
+         * main screen in the main window. */
+        int d = len >= 16 ? (int)u[3] : 0;
+        unsigned dst = fbo_screen;
+        int dw = fb_w, dh = fb_h;
+        if (d) {
+            if (tgt2_disp < 0) disp2_setup(d);
+            dst = fbo_screen2; dw = fb2_w; dh = fb2_h;
+        }
         if (flipy < 0) { const char *e = getenv("PAD_S3_FLIPY"); flipy = !(e && e[0] == '0'); }
-        if (t && p_glBlitFramebuffer && w > 0 && h > 0) {
+        if (d && !dst) {
+            /* display 2's target failed (logged when it did): drop its
+             * frames rather than mix them into the main window */
+        } else if (t && p_glBlitFramebuffer && w > 0 && h > 0) {
             if (!rfbo) p_glGenFramebuffers(1, &rfbo);
             p_glGetIntegerv(0x8CA6, &keep_draw);       /* DRAW_FRAMEBUFFER_BINDING */
             p_glGetIntegerv(0x8CAA, &keep_read);       /* READ_FRAMEBUFFER_BINDING */
             p_glBindFramebuffer(0x8CA8, rfbo);         /* READ_FRAMEBUFFER */
             p_glFramebufferTexture2D(0x8CA8, 0x8CE0, 0x0DE1, t, 0);
-            p_glBindFramebuffer(0x8CA9, fbo_screen);   /* DRAW_FRAMEBUFFER */
-            p_glBlitFramebuffer(0, 0, w, h, 0, flipy ? fb_h : 0, fb_w, flipy ? 0 : fb_h,
+            p_glBindFramebuffer(0x8CA9, dst);          /* DRAW_FRAMEBUFFER */
+            p_glBlitFramebuffer(0, 0, w, h, 0, flipy ? dh : 0, dw, flipy ? 0 : dh,
                                 0x4000, 0x2601);       /* COLOR, LINEAR */
             p_glBindFramebuffer(0x8CA8, (unsigned)keep_read);
             p_glBindFramebuffer(0x8CA9, (unsigned)keep_draw);
@@ -5703,9 +5812,9 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
                 fprintf(stderr, "[padglhost] PRESENTTEX: guest texture %u has no host "
                         "texture (or no glBlitFramebuffer) - frame not shown\n", u[0]);
         }
-        present();
+        if (d) { present2(); swap2_total++; }
+        else   { present();  swap_total++;  }
         hdr->frame_ack++;
-        swap_total++;
         swap_vidmask = 0; swap_draws = 0;
         jgl_poll(0, 0);
         break;
@@ -5864,65 +5973,7 @@ static void dispatch(unsigned op, const unsigned char *pl, unsigned len)
         int d = (int)u[0];
         if (d != 0) {
             if (tgt2_disp < 0) {
-                tgt2_disp = d;
-                fb2_w = fb_w; fb2_h = fb_h;
-                {   /* BOTH or NEITHER, matching the guest's
-                     * fbGetDisplayGeometry exactly: with only one set, the
-                     * host would size the texture the game was never told
-                     * about, and the scene and its target would disagree on
-                     * one axis. */
-                    const char *ew = getenv("PAD_GL2_W");
-                    const char *eh = getenv("PAD_GL2_H");
-                    int w2 = ew ? atoi(ew) : 0, h2 = eh ? atoi(eh) : 0;
-                    if (w2 > 0 && h2 > 0) { fb2_w = w2; fb2_h = h2; }
-                }
-                {   /* THE PANEL, host side only - watch.sh reads it out of
-                     * the title's own framebuffer timing record. BOTH or
-                     * NEITHER for the same reason as above: one axis from the
-                     * panel and one from the render size is a shape neither
-                     * machine nor game ever has. Bounded because this is a
-                     * window size and a typo here is a window nobody can
-                     * find; out of range falls back to the render size. */
-                    const char *er = getenv("PAD_GL2_ROT");
-                    int r = er ? atoi(er) : 0;
-                    r = ((r % 360) + 360) % 360;
-                    win2_rot = (r % 90) ? 0 : r;   /* only quarter turns */
-                }
-                {
-                    const char *ew = getenv("PAD_GL2_WIN_W");
-                    const char *eh = getenv("PAD_GL2_WIN_H");
-                    int w2 = ew ? atoi(ew) : 0, h2 = eh ? atoi(eh) : 0;
-                    if (w2 >= 160 && h2 >= 120 && w2 <= 7680 && h2 <= 4320) {
-                        win2_want_w = w2; win2_want_h = h2;
-                    } else if (w2 || h2) {
-                        fprintf(stderr, "[padglhost] display %d: ignoring "
-                                "PAD_GL2_WIN_%s=%dx%d - out of range; its "
-                                "window opens at the render size\n",
-                                d, (w2 && h2) ? "W/H" : "W or H", w2, h2);
-                    }
-                }
-                fprintf(stderr, "[padglhost] display %d targeted by the "
-                        "guest; routing it to its own %dx%d texture and "
-                        "window\n", d, fb2_w, fb2_h);
-                if (win2_want_w > 0)
-                    fprintf(stderr, "[padglhost] display %d: its panel is "
-                            "%dx%d, so the window opens at that and the "
-                            "%dx%d render is scaled into it\n",
-                            d, win2_want_w, win2_want_h, fb2_w, fb2_h);
-                win2_open(d);
-                if (!tgt2_create() && win2_on) {
-                    /* Window up, render target failed: hide the window
-                     * rather than let it swap a texture nothing can ever
-                     * render into (the review's finding - undefined
-                     * contents, oracle silent). The unmap makes the degrade
-                     * VISIBLE on the desktop as well as in the log. */
-                    fprintf(stderr, "[padglhost] display %d: render target "
-                            "failed, hiding its window; its feed decodes "
-                            "but is not presented\n", d);
-                    XUnmapWindow(xdpy, xwin2);
-                    XFlush(xdpy);
-                    win2_on = 0;
-                }
+                disp2_setup(d);
             } else if (d != tgt2_disp) {
                 static int said;
                 if (!said++)
@@ -6942,6 +6993,16 @@ int main(int argc, char **argv)
                         nf ? conv_us / nf / 1000.0 : 0.0,
                         nf ? up_us / nf / 1000.0 : 0.0,
                         nf ? swap_us / nf / 1000.0 : 0.0, vid_texsub);
+                /* PAD-1201: a second screen's own rate beside the main one's
+                 * (Fallout's Pip-Boy), so a run says which screen the frames
+                 * went to - "fps" above is the main window only. */
+                {
+                    static long last_f2;
+                    if (frames2_done != last_f2)
+                        fprintf(stderr, "[padglhost] display 2: %.1f fps (%ld frames total)\n",
+                                (frames2_done - last_f2) / dt, frames2_done);
+                    last_f2 = frames2_done;
+                }
                 last_up = vid_uploads; last_dist = vid_distinct;
                 conv_us = up_us = swap_us = 0;
                 if (vid_back || vid_skip) {

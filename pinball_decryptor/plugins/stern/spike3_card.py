@@ -82,11 +82,7 @@ class GamesVolume(_s3.DecryptingSegmentReader):
         else:
             buf += data
         plain = bytes(buf)
-        ct = self._enc(self.master_key, plain, first * self._iv_step, sec) \
-            if self._iv_step == 1 else b"".join(
-                self._enc(self.master_key, plain[i * sec:(i + 1) * sec],
-                          (first + i) * self._iv_step, sec)
-                for i in range(last - first + 1))
+        ct = self._enc(self.master_key, plain, first * self._iv_step, sec, self._iv_step)
         self._f.seek(self._phys_base + first * sec)
         self._f.write(ct)
         for i in range(last - first + 1):

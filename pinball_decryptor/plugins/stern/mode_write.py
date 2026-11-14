@@ -599,6 +599,8 @@ class ModePlan:
     cabshow_file: str = ""
     #: PAD-1041: ``comp.cfg`` beside the mode files, Prolonged Competition on the start menu ("" = none)
     comp_file: str = ""
+    #: PAD-1204: ``scorefeed.cfg`` beside the mode files, each game's final scores posted to the owner's server ("" = none)
+    scorefeed_file: str = ""
     #: PAD-446: the names of the modes on the card ([] for a card of random clips only)
     mode_names: list = field(default_factory=list)
 
@@ -815,7 +817,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          sound_modes_prof=None, picture="", picture_prof=None, read_card=None, scan_card=None,
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
-         cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None):
+         cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
+         score_feed_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -863,7 +866,11 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
 
     PAD-1115: *screen_times* (``clips.cfg``'s ``stime`` lines, :func:`.screen_time.cfg_lines`) make the game's
     screens that show a replaced clip last as long as it; with nothing else they are a plan of their own, for
-    *screen_prof*."""
+    *screen_prof*.
+
+    PAD-1204: *score_feed* (an address) puts ``scorefeed.cfg`` beside the mode files: each game's final scores posted
+    there (the logins' tables read off *game_elf*); with nothing else it is a plan of its own, for *score_feed_prof*,
+    and the file says the card has no modes."""
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
@@ -921,6 +928,12 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                                      or coop_prof or attract_prof or variants_prof or sound_modes_prof
                                      or picture_prof)
             screen_into(result, os.path.join(scratch, "screens"), screen_times, only=True)
+        if score_feed:                               # PAD-1204: the score feed, alone or with the above
+            if result is None:
+                result = feed_plan(project, game_elf, score_feed_prof or screen_prof or comp_prof or handicap_prof
+                                   or idle_prof or coop_prof or attract_prof or variants_prof or sound_modes_prof
+                                   or picture_prof)
+            feed_into(result, game_elf, scratch, score_feed, only=True)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -1013,6 +1026,45 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
         comp_into(result, game_elf, scratch, only=False)
     if screen_times:                                 # PAD-1115
         screen_into(result, os.path.join(scratch, "screens"), screen_times, only=False)
+    if score_feed:                                   # PAD-1204
+        feed_into(result, game_elf, scratch, score_feed, only=False)
+    return result
+
+
+# ---- PAD-1204: the score feed --------------------------------------------------------------------
+def feed_plan(project, game_elf, prof):
+    """A plan carrying only the score feed: no mode, no scene; the runtime and the title's port on p2 with
+    ``scorefeed.cfg`` (:func:`feed_into`)."""
+    from . import score_feed as SF
+    why = SF.title_refusal(prof)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to see a game's end on"
+                             % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
+def feed_into(result, game_elf, scratch, url, only):
+    """``scorefeed.cfg`` for *result*'s card: *url*, the game's name, the logins' tables read off *game_elf*; *only*
+    when the card carries no modes (the runtime then arms this alone)."""
+    from . import score_feed as SF
+    why = SF.title_refusal(result.profile)
+    if why:
+        raise ModeWriteError(why)
+    try:
+        text = SF.cfg_text(url, getattr(result.profile, "label", ""), game_elf, only)
+    except SF.ScoreFeedError as e:
+        raise ModeWriteError(str(e)) from None
+    os.makedirs(scratch, exist_ok=True)
+    path = os.path.join(scratch, SF.CFG_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    result.scorefeed_file = path
+    result.lines.append("score feed: %s%s" % (SF.HOW % url, "" if "\nusers " in text
+                                              else " (this game's Insider logins are not known: the reports name none)"))
     return result
 
 
@@ -1359,6 +1411,49 @@ def coop_intro_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
     return CP.INTRO_CLIP, ms
 
 
+def coop_ceremony_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
+    """PAD-1219: what plays behind the co-op award cards, filling the glass with the game's HUD off it. The owner's
+    awards ceremony video (coop_play.ceremony_path), made into a silent full-screen clip of the bank's size
+    (coop_play.intro_clip) and added to the bank scene the build has so far, at the bank's "Normal" crop; else the
+    game's own End of Ball Bonus loop at the crop the game plays it at. Returns ``(clip name, crop)`` for coop.cfg's
+    ``ceremony`` line, or None when there is neither (the runtime keeps the city under the cards, HUD off)."""
+    from . import coop_play as CP
+    from . import video_bank as VB
+    from ...core.video import detect_video_info
+    project = getattr(result, "project", "")
+    src = CP.ceremony_path(project) if project else ""
+    if not src:
+        loop = CP.bonus_loop(stock_bank) if stock_bank else None
+        if loop is None:
+            result.lines.append("co-op awards: the cards show over the main play, the HUD off it - %s's video bank "
+                                "has no End of Ball Bonus loop the app knows" % result.profile.label)
+            return None
+        result.lines.append("co-op awards: the cards show over the game's End of Ball Bonus loop (%s)" % loop[0])
+        return loop
+    bank_card, bank, bank_src = _coop_bank(result, stock_bank, "the co-op awards ceremony video")
+    ffmpeg = _ffmpeg_for(ffmpeg, "the co-op awards ceremony video")
+    if progress is not None:
+        progress(0, 1, "Making the co-op awards ceremony video...")
+    w, h = VB.clip_frame(stock_bank)
+    folder = os.path.join(scratch, "coop_clips")
+    os.makedirs(folder, exist_ok=True)
+    made = os.path.join(folder, "%s.mp4" % CP.CEREMONY_CLIP)
+    try:
+        CP.intro_clip(src, made, w, h, ffmpeg)
+    except CP.CoopError as e:
+        raise ModeWriteError(str(e)) from None
+    info = detect_video_info(made)
+    try:
+        bank, got = VB.add_clip(bank, CP.CEREMONY_CLIP, os.path.getsize(made))
+    except VB.VideoBankError as e:
+        raise ModeWriteError("the co-op awards ceremony video could not be added to the video bank (%s)" % e) from None
+    result.new.append((bank_card[:-len("scene.radium")] + "scene.assets/" + got["path"], made))
+    _coop_bank_put(result, scratch, bank_card, bank, bank_src)
+    result.lines.append("co-op awards: %s (%.1f s, looped) plays behind the award cards"
+                        % (os.path.basename(src), float(getattr(info, "duration", 0) or 0) if info else 0.0))
+    return CP.CEREMONY_CLIP, "Normal"
+
+
 def _coop_bank(result, stock_bank, what):
     """``(bank card path, the bank scene as the build has it so far, its scratch file or "")``."""
     from . import clip_variants as CV
@@ -1547,6 +1642,9 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
             text += "award_cards on\n"            # PAD-1028 round 2: the awards on the winners' cards
+            ceremony = coop_ceremony_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)
+            if ceremony:
+                text += "ceremony %s %s\n" % ceremony               # PAD-1219: behind the cards, the HUD off
             clips = coop_clips_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)
             for n, name in clips:
                 text += "char_clip %d %s\n" % (n, name)             # PAD-1079: its video, behind its card
@@ -1572,10 +1670,12 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
     result.lines.append("co-op play: %s" % CP.HOW)
     if setting:
         result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Classic, 2 Enhanced; "
-                            "CO-OP PLAY, TEAM PLAY 2 VS 2 and 2 VS 1 on the start menu at 1 or 2); %s" % (
+                            "CO-OP PLAY, TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1 on the start menu at 1 or 2, "
+                            "ENHANCED STANDARD at 2); %s" % (
             "Insider Connected is off only while it is 1 or 2" if only
             else "the card's modes keep its scores off Insider Connected either way"))
-        result.lines.append("co-op play: Team 2v2 and 2v1: %s" % CP.TEAMS_HOW)    # PAD-1042
+        result.lines.append("co-op play: Team 2v2, 2v1 and 3v1: %s" % CP.TEAMS_HOW)    # PAD-1042
+        result.lines.append("co-op play: %s" % CP.STANDARD_HOW)                   # PAD-1224
         result.lines.append("co-op play: %s" % CP.CLASSIC_HOW)                     # PAD-1065
     got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
     result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))
@@ -2211,6 +2311,11 @@ def p2_payload(result, out_dir, project=None):
             from . import prolonged_comp as PCo
             dst = os.path.join(out_dir, PCo.CFG_NAME)
             shutil.copyfile(result.comp_file, dst)
+            extras.append(dst)
+        if getattr(result, "scorefeed_file", ""):      # PAD-1204: scorefeed.cfg, the score feed
+            from . import score_feed as SF
+            dst = os.path.join(out_dir, SF.CFG_NAME)
+            shutil.copyfile(result.scorefeed_file, dst)
             extras.append(dst)
     except OSError as e:
         raise ModeWriteError("the modes' system-partition files could not be staged (%s)"

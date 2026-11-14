@@ -295,7 +295,8 @@ def test_each_character_has_an_award_card_with_its_portrait(tmp_path):
     Image.new("RGBA", (300, 200), (10, 120, 10, 255)).save(pic)
     CP.save_picture(project, 1, str(pic))
     cards = CP.award_screens(project)
-    assert [c["name"] for c in cards] == ["PadCoopAward_1", "PadCoopAward_2"]
+    assert [c["name"] for c in cards] == ["PadCoopAward_1", "PadCoopAward_2", "PadCoopFinal"]   # PAD-1219: its band
+    cards = cards[:-1]
     for c in cards:
         assert c["art_rgba"].shape == (CP.AWARD_SIZE[1], CP.AWARD_SIZE[0], 4) and c["words"] == " "
         assert c["words_name"] == c["name"] + "_Words" and (c["x"], c["y"]) == CP.AWARD_AT

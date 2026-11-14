@@ -3,7 +3,7 @@
 // Python owns the state (modes.stock, modes.film); these only render it and call back.
 
 import { html, useEffect, useState, Modal, Button, Field, Check, Radio, Select, Table, Note,
-         tip, cx, call, mediaUrl } from "../core/ui.js";
+         Spinner, tip, cx, call, mediaUrl } from "../core/ui.js";
 
 const STOCK_TIP = "The timers, awards and shots of the modes the game shipped with. Pick a row, type a new value (or pick a shot) and press Set. Changes are saved with this project and put on the card by Write, like the Defaults tab. A timer that is an operator setting is the same number the Defaults tab shows (a machine still on the game's default takes the new one when it boots). A number the game works out in code, or one the game never uses in play, can't be changed here; the row says why. To rename a mode, edit its title on the Text tab.";
 
@@ -137,12 +137,56 @@ export function FilmDialog({ film }) {
 }
 
 // ------------------------------------------------------------------ a clip's preview
-export function ClipDialog({ path, title, onClose }) {
-  return html`<${Modal} title=${title || "Clip"} icon="video" wide onClose=${onClose}
-    footer=${html`<span class="small mono muted grow ellip">${path}</span><${Button} onClick=${onClose}>Close<//>`}>
-    <div class="thumb" style="height:min(56vh, 480px)">
-      <video src=${mediaUrl(path)} controls autoplay style="width:100%;height:100%"></video>
+// PAD-1274: one clip, or one of a list (the game's own mode's "Clips it plays"): Previous / Next and a pick of
+// the list switch clips in place, "Open on the Video tab" shows its slot there; a clip the page's engine can't
+// play is played from the Video tab's preview copy (modes.clip_proxy).
+const H264 = 'video/mp4; codecs="avc1.42E01E"';
+const proxyFormat = () => (document.createElement("video").canPlayType(H264) ? "mp4" : "webm");
+
+export function ClipDialog({ path, title, onClose, list, at = 0, proxy }) {
+  const items = list && list.length ? list : [{ key: path, path, text: title || "Clip" }];
+  const [i, setI] = useState(Math.min(Math.max(at, 0), items.length - 1));
+  const [failed, setFailed] = useState(false);
+  const cur = items[i] || items[0];
+  const many = items.length > 1;
+  const px = proxy && proxy.path === cur.path ? proxy : null;
+  const src = px && px.proxy ? px.proxy : failed ? "" : cur.path;
+  useEffect(() => setFailed(false), [cur.path]);
+  const go = (d) => setI((n) => (n + d + items.length) % items.length);
+  useEffect(() => {
+    if (!many) return undefined;
+    const onKey = (e) => {
+      if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [many, items.length]);
+  const onError = () => {
+    if (px && px.proxy) return;
+    setFailed(true);
+    call("modes.clip_proxy", cur.path, proxyFormat());
+  };
+  const toVideo = () => { call("modes.how_clip_video", cur.rel); onClose(); };
+  let hint = null;
+  if (!src && px && px.err) hint = html`<div class="hint err-ink">This clip can't be played here: ${px.err}</div>`;
+  else if (!src) hint = html`<div class="hint"><${Spinner} /><span>Preparing a preview copy…</span></div>`;
+  return html`<${Modal} title=${many ? cur.text : (title || cur.text || "Clip")} icon="video" wide onClose=${onClose}
+    footer=${html`<span class="small mono muted grow ellip">${cur.rel || cur.path}</span>
+      ${many ? html`<${Button} icon="prev" title="The clip before (Left arrow)" onClick=${() => go(-1)}>Previous<//>
+        <span class="small muted">${i + 1} of ${items.length}</span>
+        <${Button} icon="next" title="The clip after (Right arrow)" onClick=${() => go(1)}>Next<//>` : null}
+      ${cur.rel ? html`<${Button} icon="external" title="Show this clip on the Video tab, picked in its list."
+        onClick=${toVideo}>Open on the Video tab<//>` : null}
+      <${Button} onClick=${onClose}>Close<//>`}>
+    <div class="thumb modes-clip-player" style="height:min(56vh, 480px)">
+      ${src ? html`<video key=${src} src=${mediaUrl(src)} controls autoplay playsinline onError=${onError}
+        aria-label=${cur.text} style="width:100%;height:100%"></video>` : hint}
     </div>
+    ${many ? html`<div class="modes-how-clips modes-clip-pick" role="listbox" aria-label="Clips">${items.map((c, n) =>
+      html`<button type="button" key=${c.key} role="option" aria-selected=${n === i}
+        class=${cx("modes-how-clip mono", n === i && "on")} onClick=${() => setI(n)}>${c.text}</button>`)}</div>` : null}
   <//>`;
 }
 

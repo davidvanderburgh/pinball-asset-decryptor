@@ -178,6 +178,13 @@ html.bp-1280 .nmw-tiles.compact { grid-template-columns: minmax(0, 1fr); }
 .modes-how-list li { overflow-wrap: anywhere; padding: 1px 0; }
 .modes-how-clips { display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .modes-how-clip { font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; overflow-wrap: anywhere; }
+/* PAD-1274: a clip with a file plays on a click */
+button.modes-how-clip { background: none; color: inherit; font-family: var(--mono); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; text-align: left; }
+button.modes-how-clip svg.i { width: 10px; height: 10px; flex: none; opacity: .7; }
+button.modes-how-clip:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+button.modes-how-clip.on { border-color: var(--accent-line); background: var(--accent-soft); font-weight: 600; }
+.modes-clip-pick { margin-top: 8px; max-height: 96px; overflow-y: auto; }
+.modes-clip-player .hint { display: flex; gap: 8px; align-items: center; justify-content: center; height: 100%; }
 .modes-gm { display: flex; flex-direction: column; gap: 0; }
 .modes-gm-row { display: grid; grid-template-columns: minmax(180px, 1.2fr) max-content minmax(260px, 1.4fr); gap: 6px 18px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .modes-gm-row:last-child { border-bottom: 0; }

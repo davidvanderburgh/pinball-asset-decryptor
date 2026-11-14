@@ -123,9 +123,8 @@ def test_the_engine_logs_and_cuts_on_the_modes_path(monkeypatch):
 
 def test_a_feed_only_build_names_a_title():
     """Found proving this ticket: a build whose one PAD feature was the score feed fell over on a None title."""
-    src = open(E.__file__, encoding="utf-8").read()
-    at = src.index("_mprof = (variant_prof or sound_modes_prof")
-    assert "feed_prof)" in src[at:at + 300]
+    feed = object()
+    assert E._build_mode_profile([], [], "", (None,) * 10 + (feed,)) is feed   # PAD-1260 made it a helper
 
 
 def test_the_real_co_op_hud_comes_back_byte_for_byte():

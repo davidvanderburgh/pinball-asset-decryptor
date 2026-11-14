@@ -2180,10 +2180,21 @@ class Bridge:
         if sid <= 0:
             return False
         if not self.pipe and sid in self._early:
-            return bool(self._early[sid])
-        if self.pipe and sid in self.pipe.held:
-            return bool(self.pipe.held[sid])
-        return bool(self.mrg[sid]) if sid < len(self.mrg) else False
+            got = bool(self._early[sid])
+        elif self.pipe and sid in self.pipe.held:
+            got = bool(self.pipe.held[sid])
+        else:
+            got = bool(self.mrg[sid]) if sid < len(self.mrg) else False
+        # PAD-1225: what the table READ, each time it changes - Batman 66's
+        # turntable and crane follow the machine by reading its position
+        # switches, and a report of a turntable that never moved could not
+        # say whether the table read them at all, or what it was told
+        seen = self.__dict__.setdefault("_reads", {})
+        if seen.get(sid) is not got:
+            seen[sid] = got
+            log("table reads switch %d = %d%s" % (sid, got, "" if self.attached
+                                                    else " (before the game is up)"))
+        return got
 
     # -- the poll
     def _poll_loop(self):

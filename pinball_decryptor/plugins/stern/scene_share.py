@@ -164,11 +164,10 @@ def gather(assets_dir, cards, trees):
                                                None if cards is None else rels)
     added = {}
     for ops in edits.values():
-        for op in ops:
-            img = op.get("image") if op.get("op") == "add_picture" else None
+        for img, own in scene_edit.picture_rels(ops):     # PAD-1278: a loop's pictures too
             if not img or img in added:
                 continue
-            on = cp.asset_applies(settings, "images", img, own=op.get("color"))
+            on = cp.asset_applies(settings, "images", img, own=own)
             added[img] = {"color": on, "profile": _profile_raw(data, img) if on else None}
     # PAD-438: the lines of text with the colour profile on, per scene, by node: the game's
     # own (switched on behind the unlock) and the added ones (their switch rides in their
@@ -238,8 +237,9 @@ def export_all(assets_dir, zip_path, cards, trees, counts=None):
             or extras["lines"]):
         raise scene_edit.SceneEditError(
             "there are no scene edits, replaced pictures, color profiles or text edits to save")
-    added_files = sorted({op["image"] for ops in edits.values() for op in ops
-                          if op["op"] == "add_picture" and scene_edit._safe_rel(op.get("image"))})
+    added_files = sorted({rel for ops in edits.values()
+                          for rel, _c in scene_edit.picture_rels(ops)
+                          if scene_edit._safe_rel(rel)})
     pictures = {}
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for i, (rel, p) in enumerate(sorted(extras["pictures"].items())):

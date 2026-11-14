@@ -17,8 +17,8 @@
  * changes, to `b <slot>`, and only that instruction moves into the slot. One aligned word is written, so a
  * thread running the function sees the old instruction or the branch, never half of each - the 32-bit layer's
  * two-word patch could not promise that. A site whose first instruction reads the pc cannot move as it is:
- * `adrp`/`adr` are rewritten as a literal load of the address they make; a branch, a compare-and-branch or a
- * literal load is refused (the port tools refuse such sites too).
+ * `adrp`/`adr` are rewritten as a literal load of the address they make; a b, b.cond, cbz/cbnz or tbz/tbnz is
+ * re-aimed at a far jump in the slot to where it went (PAD-1271); a bl or a literal load is refused.
  *
  * THE REGISTERS A LOGGER SEES (pm_reg *r): r[0..7] = x0..x7 (the arguments), r[8] = x8 (the indirect result
  * register), r[9] = x30 (the return address), r + 10 = the caller's sp (its stack arguments). q0-q7 are saved
@@ -72,7 +72,7 @@ __asm__(
     "    mov  x1, #0\n"                    /* patched: movz x1, #n */
     "    ldr  x16, pm_a64_tpl_logger\n"
     "    blr  x16\n"
-    "    mov  x17, x0\n"
+    "    mov  w17, w0\n"                  /* PAD-1271: a veto answers an int; the top half of x0 is not its */
     "    ldp  q0, q1, [sp, #0]\n"
     "    ldp  q2, q3, [sp, #32]\n"
     "    ldp  q4, q5, [sp, #64]\n"
@@ -108,9 +108,15 @@ __asm__(
     "pm_a64_jmp_end:\n"
     ".previous\n");
 
+/* PAD-1271: HIDDEN, so the compiler makes each label's address pc-relative (adrp + add). As plain externs it loaded
+ * them from the GOT, and the assembler, the labels being local to the block above, wrote every one of those GOT
+ * loads against `.text + offset`: the linker gave them all ONE GOT entry, every label read as the same address,
+ * TPL_AT was 0 for each, and no slot got its template - the first hooked call ran into the literals (SIGILL). */
+#pragma GCC visibility push(hidden)
 extern const unsigned pm_a64_tpl[], pm_a64_tpl_n[], pm_a64_tpl_veto[], pm_a64_tpl_moved[],
     pm_a64_tpl_logger[], pm_a64_tpl_back[], pm_a64_tpl_lit[], pm_a64_tpl_end[],
     pm_a64_jmp[], pm_a64_jmp_to[], pm_a64_jmp_end[];
+#pragma GCC visibility pop
 
 #define TPL_AT(sym) ((int)((sym) - pm_a64_tpl))           /* a template label's word index */
 
@@ -226,13 +232,49 @@ static void put_quad(unsigned *t, int word, unsigned long v)
     t[word + 1] = (unsigned)(v >> 32);
 }
 
+/* PAD-1271: where a b / b.cond / cbz / cbnz / tbz / tbnz at `at` goes when taken (0: not one of those) */
+static unsigned long a64_cond_target(unsigned long at, unsigned w)
+{
+    long off;
+    if ((w & 0xfc000000u) == 0x14000000u) {                              /* b */
+        off = (long)(w & 0x03ffffffu);
+        if (off & (1l << 25)) off -= 1l << 26;
+    } else if ((w & 0xff000010u) == 0x54000000u || (w & 0x7e000000u) == 0x34000000u) {   /* b.cond, cbz/cbnz */
+        off = (long)((w >> 5) & 0x7ffffu);
+        if (off & (1l << 18)) off -= 1l << 19;
+    } else if ((w & 0x7e000000u) == 0x36000000u) {                       /* tbz/tbnz */
+        off = (long)((w >> 5) & 0x3fffu);
+        if (off & (1l << 13)) off -= 1l << 14;
+    } else
+        return 0;
+    return at + (unsigned long)(off * 4);
+}
+/* the same branch re-aimed from `at` to `to` (in the slot, a few words away), or 0 when it does not reach */
+static unsigned a64_cond_retarget(unsigned long at, unsigned long to, unsigned w)
+{
+    long d = (long)(to - at) >> 2;
+    if ((w & 0xfc000000u) == 0x14000000u) return 0x14000000u | ((unsigned)d & 0x03ffffffu);
+    if ((w & 0x7e000000u) == 0x36000000u)
+        return d >= -(1l << 13) && d < (1l << 13) ? (w & 0xfff8001fu) | (((unsigned)d & 0x3fffu) << 5) : 0;
+    return d >= -(1l << 18) && d < (1l << 18) ? (w & 0xff00001fu) | (((unsigned)d & 0x7ffffu) << 5) : 0;
+}
+
 /* The site's instruction as it is to run from t[at]: itself, or an adrp/adr as a literal load of its address
- * (t[lit] the literal). 0 = it cannot move. */
+ * (t[lit] the literal), or (PAD-1271) a b / b.cond / cbz / cbnz / tbz / tbnz re-aimed at a far jump to where it
+ * went, t[lit + 2] and t[lit + 3] (`ldr x16, t[lit]; br x16`: x16 is the slot's own, as the ABI leaves it to
+ * veneers): Spike 3's agent_header opens with a `cbz x0`. A bl or a literal load still cannot move: 0. */
 static unsigned moved_word(unsigned long addr, unsigned w, unsigned *t, int at, int lit)
 {
+    unsigned long to;
     if (a64_is_adrp(w) || a64_is_adr(w)) {
         put_quad(t, lit, a64_adr_value(addr, w));
         return a64_ldr_lit((unsigned long)(t + at), (unsigned long)(t + lit), w & 31u);
+    }
+    if (!a64_is_bl(w) && (to = a64_cond_target(addr, w)) != 0) {
+        put_quad(t, lit, to);
+        t[lit + 2] = a64_ldr_lit((unsigned long)(t + lit + 2), (unsigned long)(t + lit), 16);
+        t[lit + 3] = 0xd61f0200u;                                         /* br x16 */
+        return t[lit + 2] ? a64_cond_retarget((unsigned long)(t + at), (unsigned long)(t + lit + 2), w) : 0;
     }
     return a64_pc_bound(w) ? 0 : w;
 }

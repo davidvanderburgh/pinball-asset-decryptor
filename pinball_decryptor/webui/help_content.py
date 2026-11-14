@@ -919,6 +919,17 @@ HELP_CONTENT = {
             "Select it and **Show this look** switches the part to that look.\n"
             "- A grayed layer isn't drawn at this moment: click it to show and edit it. "
             "Edits hold at every moment.",
+            "### Animating a picture you added\n"
+            "Select a picture you added and use its **Animation** box:\n"
+            "- **Shows**: all the time, **between frames** (with a fade in and out, in the "
+            "scene's own frames), or **like a layer of the game**: it comes on and fades "
+            "exactly as that layer does. To put a picture in place of a line of words, "
+            "pick that line, then hide the line with its red stop sign.\n"
+            "- **Pulse** fades it down and back up, over and over.\n"
+            "- **In turn**: more pictures shown one after the other in its place, a "
+            "flip-book.\n"
+            "- A pulse and pictures in turn keep going for as long as it shows, the scene "
+            "resting on its last frame included. Play shows it moving.",
             "### Eyes and hiding",
             {"cards": [
                 {"icon": "eye", "tone": "info", "title": "The eye",

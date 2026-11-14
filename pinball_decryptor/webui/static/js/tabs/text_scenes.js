@@ -1018,6 +1018,73 @@ function LookNote({ k }) {
       onClick=${() => call("text_scenes.tree_state", k.part, back ? "" : k.frame)}>${back ? "As it rests" : "Show this look"}<//>`}
   </div>`;
 }
+// PAD-1278 (DragonRR): an added picture animated. When it shows (all the time, between two
+// frames with a fade, or as one of the game's layers does), a pulse, and pictures in turn.
+// The pulse and the pictures loop as long as the picture shows, the scene resting included.
+function AnimBox({ p }) {
+  const a = p.anim;
+  if (!a) return null;
+  const fps = a.fps || 30;
+  const mode = a.follow != null ? "follow" : (a.start || a.end || a.fade_in || a.fade_out) ? "frames" : "always";
+  const set = (patch) => {
+    const next = { ...a, ...patch };
+    delete next.fps;
+    delete next.images;
+    call("text_scenes.tree_anim", p.id, next);
+  };
+  const secs = (n) => (n ? ` (${(n / fps).toFixed(n / fps < 10 ? 1 : 0)} s)` : "");
+  const numIn = (label, key, title, min = 1, max = 99999) => html`<label class="tree-num" ...${tip(title)}>
+    <span class="lbl">${label}</span>
+    <div class="field sm"><input type="number" min=${min} max=${max} value=${a[key] ?? ""}
+      onChange=${(e) => set({ [key]: e.target.value === "" ? null : e.target.value })} /></div>
+  </label>`;
+  const choices = [{ value: "", label: "Pick a layer of the game..." }].concat(
+    (p.follow_choices || []).map((c) => ({ value: String(c.id), label: c.words ? `${c.name}: ${c.words}` : c.name })));
+  const imgs = a.images || [];
+  return html`<div class="tree-anim" id="ts-anim">
+    <span class="eyebrow">Animation</span>
+    <div class="tree-row">
+      <span class="lbl">Shows</span>
+      <${Select} sm value=${mode} title="When the picture is on the glass: all the time, between two frames of the scene (with a fade in and out if you like), or exactly when one of the game's own layers is, fading as it fades"
+        options=${[{ value: "always", label: "All the time" }, { value: "frames", label: "Between frames" }, { value: "follow", label: "Like a layer of the game" }]}
+        onChange=${(v) => set(v === "always" ? { follow: null, start: null, end: null, fade_in: null, fade_out: null }
+          : v === "frames" ? { follow: null, start: a.start || 1, fade_in: a.fade_in || Math.round(fps / 2) }
+          : { start: null, end: null, fade_in: null, fade_out: null, follow: (p.follow_choices || [])[0] ? p.follow_choices[0].id : null })} />
+    </div>
+    ${mode === "frames" ? html`<div class="tree-row tree-anim-nums">
+      ${numIn("From", "start", "The frame of the scene it comes on at (the Frame box above counts them)")}
+      ${numIn("To", "end", "The last frame it shows on; empty: to the end of the scene, and on while the scene rests")}
+      ${numIn("Fade in", "fade_in", `Frames it takes to fade in, from nothing to full (${fps} frames = 1 second)`, 0)}
+      ${numIn("Fade out", "fade_out", "Frames it takes to fade out before its last frame (needs a To frame)", 0)}
+    </div>` : null}
+    ${mode === "follow" ? html`<div class="tree-row">
+      <${Select} sm value=${a.follow != null ? String(a.follow) : ""} options=${choices}
+        title="It comes on, fades in and out and goes off exactly as this layer does as the scene plays. To put the picture in place of a line of words, pick that line here, then hide the line in the game with its red stop sign in Layers"
+        onChange=${(v) => v && set({ follow: v })} />
+    </div>` : null}
+    <div class="tree-row">
+      <${Check} checked=${a.pulse != null} label="Pulse" title="Fade down and back up, over and over, for as long as it shows (the scene resting on its last frame too)"
+        onChange=${(v) => set({ pulse: v ? 0.3 : null, period: v ? (a.period || fps) : null })} />
+      ${a.pulse != null ? html`
+        <label class="tree-num" ...${tip("How faint it gets at the bottom of each pulse")}>
+          <span class="lbl">Down to</span>
+          <div class="field sm"><input type="number" min="0" max="100" value=${Math.round(a.pulse * 100)}
+            onChange=${(e) => set({ pulse: Math.max(0, Math.min(100, +e.target.value || 0)) / 100 })} /></div><span class="small muted">%</span>
+        </label>
+        ${numIn("Every", "period", "Frames one pulse takes, down and back up", 2)}
+        <span class="small muted">${secs(a.period)}</span>` : null}
+    </div>
+    <div class="tree-row tree-anim-pics">
+      <span class="lbl" ...${tip("Pictures shown one after the other in its place, the picture itself first, looping for as long as it shows: a flip-book. Make them the same size so they line up")}>In turn</span>
+      ${imgs.map((rel, i) => html`<span class="tag sm" title=${rel}>${rel.split("/").pop()}
+        <${Button} size="xs" kind="ghost" icon="x" label="Take this picture out of the loop" onClick=${() => call("text_scenes.tree_anim_picture", p.id, i)} /></span>`)}
+      <${Button} size="xs" icon="plus" title="Add a picture shown after this one, in turn" onClick=${() => call("text_scenes.tree_anim_picture", p.id)}>Picture...<//>
+      ${imgs.length ? html`${numIn("Each", "every", "Frames each picture shows for", 1)}<span class="small muted">${secs(a.every)}</span>` : null}
+    </div>
+    <div class="small muted">Frames are the scene's own, ${fps} a second. Press Play to see it move.</div>
+  </div>`;
+}
+
 const filledFinds = (f) => !!(f && (f.line || (f.modes || []).length));
 const rowTip = (l, cs) => ({
   head: `${l.name}${l.added ? " (added)" : ""}`,
@@ -1856,6 +1923,7 @@ function TreeSide({ t, play, playFrame, openFont, find, searching, from }) {
           title=${p.pic ? "Draw the picture pixel for pixel (100%), keeping its top-left corner where it is" : "Only a picture is drawn 1:1"}
           onClick=${() => call("text_scenes.tree_one_to_one", p.id)}>Draw 1:1<//>
       </div>
+      <${AnimBox} p=${p} />
       ${p.x != null ? null : html`<div class="small muted">Not on the glass at this moment.</div>`}
       <div class="tree-row">
         ${num("X", p.x, (v) => call("text_scenes.tree_move", p.id, r3(Number(v) - exactBox(p).x), 0), "Left edge on the glass (px)", p.x == null)}

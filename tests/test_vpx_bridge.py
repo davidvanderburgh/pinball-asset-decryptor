@@ -4106,6 +4106,34 @@ def test_tmnt_shooter_lane_top_switch_ends_the_turtle_select():
         assert "Sub PadUpperShooter_unHit : Controller.Switch(%d) = 0 : End Sub" % (1000 + sid) in out
 
 
+def test_tmnt_plunger_key_is_the_tables_plunger_not_the_action_button(tmp_path):
+    # PAD-1281: the plunger key pulled the table's plunger AND pressed the
+    # Action button, so the game fired its AUTO PLUNGER as the key went down
+    # and a pulled plunger never launched the ball. The lockbar key is the
+    # Action button; the plunger key is left to the table's own plunger.
+    tm = pytest.importorskip("patch_turtles_le")
+    vs = pytest.importorskip("vpxsetup")
+    src = ("Sub Table1_KeyDown(ByVal keycode)\n\tIf keycode = PlungerKey Then\n\t\tPlunger.PullBack\n\tEnd If\nEnd Sub\n"
+           "Sub Table1_KeyUp(ByVal keycode)\n\tIf keycode = PlungerKey Then\n\t\tPlunger.Fire\n\tEnd If\nEnd Sub\n")
+    for name in ("turtles_pro", "turtles_le"):
+        out, m = _tmnt_patch(name, src)
+        launch = [ln for ln in out.split("\n") if "Controller.Switch(swLaunch)" in ln]
+        assert len(launch) == 2, launch
+        heads = [ln.strip() for ln in out.split("\n") if "keycode = LockBarKey" in ln or "Or keycode" in ln]
+        assert heads == ["If keycode = LockBarKey Then"] * 2, heads
+        assert "Plunger.PullBack" in out and "Plunger.Fire" in out
+        assert tm.PLUNGER_MARK in out
+        # a table patched before is asked to patch again; one patched now is not
+        tables = tmp_path / name
+        tables.mkdir()
+        script = tables / "x (PAD).script.vbs"
+        script.write_text(out.replace(tm.PLUNGER_MARK, ""), encoding="utf-8")
+        why = vs.missed_fixes(str(tables), "x (PAD).vpx", m["repatch"])
+        assert "pulling its plunger fires the auto plunger at once instead of launching the ball" in why
+        script.write_text(out, encoding="utf-8")
+        assert not any("plunger" in w for w in vs.missed_fixes(str(tables), "x (PAD).vpx", m["repatch"]))
+
+
 def test_tmnt_dof_hears_data_easts_numbers():
     # PAD-896: tmnt_104's DOF config is keyed by Data East's solenoids, not
     # the small numbers the patched script calls the Stern coils by (S11 was
@@ -7216,11 +7244,11 @@ def test_tmnt_copy_patched_before_a_fix_is_asked_to_patch_again(tmp_path):
     # rolling past. Each TMNT fix is marked by a line only its patcher writes:
     # a script lacking one is asked to patch again, today's script is not.
     vsu = pytest.importorskip("vpxsetup")
-    src = "Sub t25_Hit:vpmTimer.PulseSw(25):End Sub\n"
+    src = "Sub t25_Hit:vpmTimer.PulseSw(25):End Sub\nSub Table1_KeyDown(ByVal keycode)\nEnd Sub\n"
     for title in ("turtles_pro", "turtles_le"):
         out, m = _tmnt_patch(title, src)
         marks = m["repatch"]
-        assert {k["since"].split(":")[0] for k in marks} == {"PAD-1268", "PAD-1116", "PAD-897"}
+        assert {k["since"].split(":")[0] for k in marks} == {"PAD-1281", "PAD-1268", "PAD-1116", "PAD-897"}
         name = "T (PAD).vpx"
         (tmp_path / "T (PAD).script.vbs").write_text(out, encoding="utf-8")
         missing = [k["absent"] for k in marks if k["absent"] not in out]

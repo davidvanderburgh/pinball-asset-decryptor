@@ -65,9 +65,10 @@ def test_a_scene_naming_its_clips_twice_outside_the_library_is_refused():
 
 
 def test_every_shipped_build_but_turtles_pro_158_has_a_route():
+    # PAD-1271: the Spike 3 port of Star Wars ELG 1.10 shares the Spike 2 port's title key and has no route yet
+    spike3 = [p for p in MP.profiles().values() if p.arch == "a64"]
+    assert [CV.title_key(p) for p in spike3 if not CV.route_of(p)] == ["star_wars_elg-1.10"]
     routes = {CV.title_key(p): CV.route_of(p) for p in MP.profiles().values() if p.arch != "a64"}
-    # a Spike 3 card's Write leaves random clips out (docs/plans/spike3_modes.md): never offered there
-    assert all(CV.title_refusal(p) for p in MP.profiles().values() if p.arch == "a64")
     assert {k for k, r in routes.items() if not r} == {"turtles_pro-1.58"}
     assert {routes[k] for k in ("deadpool_le-1.14", "deadpool_le-1.16", "deadpool_pro-1.16")} == {"layer"}
     assert routes["batman-1.14"] == routes["venom_pro-1.07"] == "surface"

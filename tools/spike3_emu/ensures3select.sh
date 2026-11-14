@@ -37,8 +37,10 @@ if [ "$installed" = 1 ]; then
     echo "[selector] out of date: the sources are newer than $SEL/s3select"
 fi
 command -v make >/dev/null 2>&1 || fail "no make in this Linux to build the menu program with"
-CC=$(bash "$HERE/xgcc.sh" 2>"$BUILD.xgcc.log") || { mkdir -p "$BUILD"; fail "no aarch64 cross gcc ($(tail -1 "$BUILD.xgcc.log" 2>/dev/null))"; }
 mkdir -p "$BUILD" "$SEL" || fail "cannot create $BUILD or $SEL"
+# the log inside BUILD: a file of another user's straight in sticky /var/tmp
+# is one root itself may not reopen (fs.protected_regular)
+CC=$(bash "$HERE/xgcc.sh" 2>"$BUILD/xgcc.log") || fail "no aarch64 cross gcc ($(tail -1 "$BUILD/xgcc.log" 2>/dev/null))"
 log=$BUILD/make.log
 if ! make -C "$SRC" PLATFORM=s3 S3CC="$CC" BUILD="$BUILD" all >"$log" 2>&1; then
     tail -15 "$log" | sed 's/^/[selector]   /'

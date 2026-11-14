@@ -82,7 +82,7 @@ elif [ ! -x "$BIN" ]; then
     log "no $BIN: booting img0"
 else
     rm -f "$OUT"
-    "$BIN" --conf "$CONF" --out "$OUT" --input hw ${LOG:+--log "$LOG"} </dev/null
+    "$BIN" --conf "$CONF" --out "$OUT" --input hw --audio none ${LOG:+--log "$LOG"} </dev/null
     rc=$?
     idx=$(head -n 1 "$OUT" 2>/dev/null | tr -cd '0-9')
     [ -n "$idx" ] || log "the menu left no choice (exit $rc): booting img0"

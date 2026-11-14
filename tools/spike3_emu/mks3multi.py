@@ -530,6 +530,63 @@ def build_card(a):
     return 0
 
 
+# ============================================================================== inject
+def inject_card(a):
+    """The menu alone, rewritten into an existing multi-boot card: s3select,
+    padselect.sh, font.ttf, images.conf (from the flags, or the card's own
+    titles when none are given) and media/. The games trees are not touched.
+    Works on the card where it is (a Windows drive too, as Write's grow step
+    does): only a few MB are written."""
+    _need_root()
+    check_selector_dir(a.selector_dir)
+    card = Card(a.card, a.keyfile)
+    tmp = tempfile.mkdtemp(prefix="pad_s3inject_", dir="/var/tmp")
+    try:
+        with games_mounted(card, card.path, True, os.path.join(tmp, "card")) as m:
+            pad = os.path.join(m, PAD)
+            conf_p = os.path.join(pad, "images.conf")
+            if not os.path.isfile(conf_p):
+                raise Refused("%s has no /games/pad/images.conf: not a Spike 3 multi-boot card" % a.card)
+            with open(conf_p, encoding="utf-8") as f:
+                old = parse_conf(f.read())
+            dirs = [p for p, _t, _s in old["images"]]
+            media = mkc.plan_media(a.media_dir, len(dirs)) if a.media_dir else None
+            if a.titles is None:
+                a.titles = ";".join(t for _p, t, _s in old["images"])
+            if a.subtitles is None:
+                a.subtitles = ";".join(s for _p, _t, s in old["images"])
+            stand_ins = [type("C", (), {"label": lambda self: "", "path": d})() for d in dirs]
+            conf = conf_from_args(a, stand_ins, media)
+            for name, (mode, _req) in SELECTOR_FILES.items():
+                src = os.path.join(a.selector_dir, name) if name != "font.ttf" else _font_src(a.selector_dir)
+                shutil.copyfile(src, os.path.join(pad, name + ".new"))
+                os.chmod(os.path.join(pad, name + ".new"), mode)
+                os.replace(os.path.join(pad, name + ".new"), os.path.join(pad, name))
+            with open(conf_p + ".new", "w", encoding="utf-8", newline="\n") as f:
+                f.write(conf)
+            os.replace(conf_p + ".new", conf_p)
+            if media:
+                md = os.path.join(pad, "media")
+                shutil.rmtree(md, ignore_errors=True)
+                os.makedirs(md)
+                for fn in media["files"]:
+                    shutil.copyfile(os.path.join(a.media_dir, fn), os.path.join(md, fn))
+            _link_top(m)
+            say("the menu rewritten on %s (%d images)" % (a.card, len(dirs)))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    rec = card.path + ".pad-build.json"
+    doc = {}
+    with contextlib.suppress(OSError, ValueError):
+        with open(rec, encoding="utf-8") as f:
+            doc = json.load(f)
+    doc.update({"build_id": uuid.uuid4().hex, "tool": TOOL, "multiboot": True,
+                "injected": datetime.datetime.now().isoformat(timespec="seconds")})
+    with open(rec, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=1)
+    return 0
+
+
 # ============================================================================== verify
 def verify_card(a):
     _need_root()
@@ -673,6 +730,13 @@ def main(argv=None):
             s.add_argument("--force", action="store_true")
             s.add_argument("--workdir", help="a Linux folder for the card while it is built when --out is on "
                            "a Windows drive (default /var/tmp/pad_s3multi)")
+    s = sub.add_parser("inject")
+    s.add_argument("--card", required=True)
+    s.add_argument("--keyfile")
+    s.add_argument("--primary")
+    s.add_argument("--extra", action="append", default=[])
+    s.add_argument("--cache-dir")
+    _add_conf_flags(s)
     s = sub.add_parser("verify")
     s.add_argument("--card", required=True)
     s.add_argument("--primary")
@@ -706,6 +770,8 @@ def main(argv=None):
             return 0
         if a.cmd == "build":
             return build_card(a)
+        if a.cmd == "inject":
+            return inject_card(a)
         if a.cmd == "verify":
             return verify_card(a)
         if a.cmd == "conf":

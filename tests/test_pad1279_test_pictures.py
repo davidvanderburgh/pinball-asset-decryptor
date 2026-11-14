@@ -365,3 +365,33 @@ def test_a_card_that_is_not_spike_2_is_refused(mk):
 
     with pytest.raises(mk.Refused, match="not a Spike 2 card"):
         mk.testcard_layout(G())
+
+
+# ---- the app: Build test card… -------------------------------------------------------------------
+
+def _words(argv):
+    import shlex
+    if callable(argv):
+        argv = argv({})
+    return shlex.split(argv[-1])
+
+
+def test_build_test_card_runs_the_selector_the_test_pictures_and_testcard(tmp_path, monkeypatch, _no_wsl):
+    monkeypatch.setattr(mbc, "wsl_home", lambda: "/home/x")
+    monkeypatch.setattr(mbc, "wsl_account", lambda: ("x", "/home/x"))
+    form = _app_form(tmp_path, tests=[(str(tmp_path / "card.png"), "Grey card")])
+    form.colour_profiles = {0: {"name": "Recommended", "gamma": [1.1, 1.2, 1.35],
+                                "gain": [1, 1, 1], "lift": [0, 0, 0], "saturation": 0.9}}
+    cmds = mbc.testcard_commands(form, str(tmp_path / "pad_test_card.raw"), str(tmp_path / "m"))
+    assert [label for label, _a in cmds][-2:] == ["prepare", "testcard"]
+    prep = _words(cmds[-2][1])
+    assert "--test" in prep and prep[prep.index("--test") + 1] == "/mnt/c/card.png|Grey card"
+    for k in ("--art", "--anim", "--music"):
+        assert prep[prep.index(k) + 1] == "0=none"
+    tc = _words(cmds[-1][1])
+    assert tc[tc.index("testcard") + 1:tc.index("testcard") + 3] == ["--primary", "/mnt/c/" + os.path.basename(form.images[0].path)]
+    assert tc[tc.index("--color") + 1] == "1.1000 1.2000 1.3500|1.0000 1.0000 1.0000|0.0000 0.0000 0.0000|0.9000|Recommended"
+
+
+def test_a_test_card_without_a_built_profile_starts_from_no_change(tmp_path):
+    assert mbc.testcard_colour_arg(_app_form(tmp_path)) == []

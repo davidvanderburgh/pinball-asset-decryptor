@@ -1278,6 +1278,12 @@ class WebMultibootPanel(_Base):
                        "missing": not os.path.isfile(p)}
                       for p, label in self.test_pictures()],
             "tests_max": mt.TEST_MAX,
+            "testcard_note": (
+                "A small card (under 1 GB) that opens on TEST CARD: Color "
+                "correction and these test pictures, and no game. It works in "
+                "any Spike 2 machine; the first image on the list only lends "
+                "its boot and system partitions. Tune the colors there and "
+                "copy the numbers into the Color profile tab."),
             "tests_note": (
                 "Shown on the machine under SETTINGS > TEST PICTURES, after the "
                 "built-in test card, gray and color ramps and sharpness lines: "

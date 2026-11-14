@@ -667,6 +667,23 @@ class MultibootTab(TabService):
     def test_label(self, k, label):
         return self._tests_done(self._live().test_label(int(k), str(label or "")))
 
+    @rpc
+    def build_test_card(self):
+        """Test pictures box: Build test card…"""
+        panel = self._live()
+        start = panel.testcard_default_path()
+        out = mbp._FILEDIALOG.asksaveasfilename(
+            title="Save the test card as",
+            initialdir=os.path.dirname(start) or None,
+            initialfile=os.path.basename(start),
+            defaultextension=".raw",
+            filetypes=[("Card images", "*.raw"), ("All files", "*.*")])
+        if not out:
+            return False
+        ok = panel.build_test_card(out)
+        self._multiboot_panel._dirty("menu", "checks", "busy")
+        return bool(ok)
+
     def _tests_done(self, changed):
         self._multiboot_panel._dirty("menu", "checks", "preview")
         return bool(changed)

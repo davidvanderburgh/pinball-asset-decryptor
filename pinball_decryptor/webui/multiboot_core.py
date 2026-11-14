@@ -4104,6 +4104,46 @@ def build_commands(form, cwd=None, prepare=False):
         ("verify", step_command("verify", verify_args(form), form, cwd))]
 
 
+# ---------------------------------------------------------------- the test card
+#: THE TEST CARD (PAD-1279): a small card that boots straight into the menu's
+#: Settings - Color correction and Test pictures - and never into a game, made
+#: from any Spike 2 image's boot and rootfs (``mkmulticard.py testcard``).
+TESTCARD_NAME = "pad_test_card.raw"
+TESTCARD_LABEL = "testcard"
+
+
+def testcard_colour_arg(form):
+    """``--color`` for the test card: the first image's own built colour
+    profile when it has one (what that game would draw), else none - the
+    card then starts from No change."""
+    col = (form.colour_profiles or {}).get(0) or (form.colour_profiles or {}).get("0")
+    if not col:
+        return []
+    try:
+        trio = ["%.4f %.4f %.4f" % tuple(float(v) for v in col[k]) for k in ("gamma", "gain", "lift")]
+        return ["--color", "%s|%s|%s|%.4f|%s" % (trio[0], trio[1], trio[2], float(col["saturation"]),
+                                               (col.get("name") or "").replace("|", "/"))]
+    except (KeyError, TypeError, ValueError):
+        return []
+
+
+def testcard_commands(form, out, media_dir, cwd=None):
+    """'Build test card…': the selector, the test pictures (``prepare`` with
+    nothing else to render: no art, no clips, no sounds), then ``testcard``.
+    The first image on the list is only where the boot and rootfs come from."""
+    primary = wsl(form.images[0].path)
+    prep = [SELECTMEDIA, "prepare", "--primary", primary, "--art", "0=none", "--anim", "0=none",
+            "--music", "0=none", "--sound-move", "none", "--sound-confirm", "none",
+            "--cards", "1", "--out", wsl(media_dir)] + test_args(form) + [
+            "--volume", str(int(form.volume))]
+    tc = [MKMULTICARD, "testcard", "--primary", primary, "--out", wsl(out),
+          "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
+          "--media-dir", wsl(media_dir)] + testcard_colour_arg(form)
+    return install_selector_commands(form, cwd) + [
+        ("prepare", step_command("prepare", prep, form, cwd)),
+        (TESTCARD_LABEL, step_command(TESTCARD_LABEL, tc, form, cwd))]
+
+
 #: The label of the size check's second step: ``update --dry-run`` on the
 #: loaded card, whose rows say what an in-place update would write.
 DRY_RUN = "dry-run"
@@ -10978,6 +11018,55 @@ class MultibootPanel:
                                why or "see the tool output."))
         self._run_kind = "build"
         return self._run_commands(cmds, on_step=self._plan_step, on_done=done)
+
+    def testcard_default_path(self):
+        """Beside the card image the tab builds, else beside the first image."""
+        out = (self._out_var.get() or "").strip().strip('"')
+        base = os.path.dirname(out) if out else (
+            os.path.dirname(self._rows[0].path) if self._rows else "")
+        return os.path.join(base, TESTCARD_NAME) if base else TESTCARD_NAME
+
+    def build_test_card(self, out):
+        """'Build test card…' (PAD-1279): a small card that opens on the
+        menu's Settings - Color correction and the test pictures - and boots
+        no game.  The first image on the list lends its boot and rootfs."""
+        form = self.form()
+        if not self._backend.settings_tile:
+            self._error("A test card is a Stern Spike 2 card.")
+            return False
+        if not form.images or is_group(form.images[0]) or not source_exists(form.images[0].path):
+            self._error("Add a Stern Spike 2 card image to the list first: the test card "
+                        "borrows its boot and system partitions (any title will do; "
+                        "nothing of its game goes on the test card).")
+            return False
+        out = (out or "").strip().strip('"')
+        if not out:
+            return False
+        if _norm(out) in {_norm(r.path) for r in form.images} or (
+                self._loaded_card and _norm(out) == _norm(self._loaded_card)):
+            self._error("Pick a new file for the test card, not one of the card images.")
+            return False
+        media_dir = os.path.join(os.path.dirname(out) or ".", "pad_test_card_media")
+        os.makedirs(media_dir, exist_ok=True)
+        n = len(clean_tests(form.tests))
+        self._ok("Building the test card %s (%d test picture%s of your own)…"
+                 % (out, n, "" if n == 1 else "s"))
+
+        def done(rc, failed, texts):
+            if rc == 0:
+                size = os.path.getsize(out) if os.path.exists(out) else 0
+                self._ok("Test card built: %s (%.2f GB). Write it to an SD card like any "
+                         "card image; on the machine it opens on TEST CARD: Color "
+                         "correction and Test pictures." % (out, size / 1e9))
+            elif self.run_cancelled():
+                self._ok("Test card canceled. %s is unfinished." % out)
+            else:
+                why = parse_refusal(texts.get(failed, ""), out)
+                self._error("%s failed (exit %d) - %s" % (failed or "the test card", rc,
+                                                          why or "see the tool output."))
+        self._run_kind = "build"
+        self._run_commands(testcard_commands(form, out, media_dir), on_done=done)
+        return True
 
     def _confirm_overwrite(self, path):
         """The one gate between Build & verify and a card that is already

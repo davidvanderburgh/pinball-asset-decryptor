@@ -573,7 +573,8 @@ function TestPictures({ md }) {
         <${Button} sm onClick=${() => call("multiboot.test_remove", k)} ...${tip("Take it off the list")}>✕<//>
       </div>`)}
     </div>` : null}
-    <div class="row"><${Button} drop disabled=${tests.length >= md.tests_max} onClick=${() => call("multiboot.test_add")}>Add test pictures…<//></div>
+    <div class="row"><${Button} drop disabled=${tests.length >= md.tests_max} onClick=${() => call("multiboot.test_add")}>Add test pictures…<//>
+      <${Button} onClick=${() => call("multiboot.build_test_card")} ...${tip({ head: "Build test card…", lines: [md.testcard_note] })}>Build test card…<//></div>
     <span class="small muted">${md.tests_note}</span>
   </div>`;
 }

@@ -291,6 +291,12 @@ GIF_MAX = (512, 288)
 GIF_MAX_FRAMES = 150
 GIF_MAX_BYTES = 10 << 20                      # 10 MiB
 WAV_RATE = 44100
+#: THE TEST PICTURES (PAD-1279): the card's own files for the menu's Settings > Test
+#: pictures, one test= line each (selectmedia.py's contract: a PNG up to the screen, a GIF
+#: under the menu's own GIF caps, a WAV).  No card owns them, so they count with the
+#: menu-wide sounds; at most TEST_MAX (codeselect conf.h CONF_MAX_TESTS).
+TEST_MAX = 16
+TEST_LABEL_MAX = 199
 P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 #: images.conf v2: a device is '/dev/mmcblk0pN' (parts layout),
 #: '/dev/mmcblk0pN:<subdir>' (multi layout) or the emulator's 'pN' / 'pN:<subdir>' tokens.
@@ -1660,6 +1666,27 @@ def has_hook(text):
 
 
 # ============================================================================= images.conf
+def conf_test_lines(tests):
+    """[(file, label)] -> the `test=<file>|<label>` lines (PAD-1279), refusing what the
+    selector would drop: more than TEST_MAX, a name that is not a flat media name, a label
+    with a '|' or a line break or longer than the selector keeps."""
+    tests = list(tests or [])
+    if len(tests) > TEST_MAX:
+        raise Refused("images.conf: %d test pictures; the menu takes at most %d" % (len(tests), TEST_MAX))
+    out = []
+    for k, t in enumerate(tests):
+        name, label = (t[0], t[1] if len(t) > 1 else "") if not isinstance(t, str) else (t, "")
+        name = _media_name_ok(name, "test picture %d" % k)
+        if not name:
+            raise Refused("images.conf: test picture %d names no file" % k)
+        label = (label or "").strip()
+        if "|" in label or "\n" in label or "\r" in label or len(label.encode("utf-8")) > TEST_LABEL_MAX:
+            raise Refused("images.conf: test picture %d's label %r: one line, at most %d bytes, no '|'"
+                          % (k, label[:40], TEST_LABEL_MAX))
+        out.append("test=%s|%s" % (name, label) if label else "test=%s" % name)
+    return out
+
+
 def _media_name_ok(name, what):
     """A media file name as it goes into a conf field: flat, ^[A-Za-z0-9._-]+$ (so never a '|',
     a ':' or a '/'), or empty."""
@@ -1902,7 +1929,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        media_dir=None, theme=None, colors=None, machine_volume=None, debug_log=False,
                        groups=None, default_card=None, heading=None, text_size=None,
                        counter=None, countdown_word=None, footer=None, scores=None,
-                       colours=None, settings=None, edition=None, hiscores=None):
+                       colours=None, settings=None, edition=None, hiscores=None, tests=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1922,7 +1949,9 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
     :func:`tree_colour`): one `color_profile=` line each, which is what puts the SETTINGS tile in
     the menu; `settings` ('on' / 'off', None = no key) is the tile's own switch.  `edition`
     (PAD-495, :func:`check_edition`) makes the card one of EDITIONS: no menu, the game's EDITION
-    setting picks the image; it takes no group and no image with high scores of its own."""
+    setting picks the image; it takes no group and no image with high scores of its own.
+    `tests` (PAD-1279, :func:`conf_test_lines`) is [(media file, label)]: the card's own test
+    pictures, one `test=` line each, which also puts the SETTINGS tile in the menu."""
     devices = list(devices)
     if not devices:
         raise Refused("images.conf: no images")
@@ -2058,6 +2087,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append(conf_colour_line(int(i), col))
     if settings is not None:
         out.append("settings=%s" % check_settings(settings))
+    out.extend(conf_test_lines(tests))
     # PAD-495: an editions card - one line, none at all on any other card
     edition = check_edition(edition, len(devices))
     if edition:
@@ -2084,7 +2114,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append("mixer_volume=%d" % mixer_volume)
     if media_dir:
         out.append("media=%s" % media_dir)
-    elif any_media or sound_move or sound_confirm:
+    elif any_media or sound_move or sound_confirm or tests:
         out.append("media=%s" % MEDIA_DIR)
     if theme:
         out.append("theme=%s" % theme)
@@ -2133,7 +2163,7 @@ def parse_images_conf(text):
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}, "hiscores": {},
-            "colours": {}, "settings": None, "edition": None}
+            "colours": {}, "settings": None, "edition": None, "tests": []}
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -2234,6 +2264,10 @@ def parse_images_conf(text):
                 conf["edition"] = check_edition({"store": store, "key": hexkey, "values": n})
             except (ValueError, Refused):
                 pass
+        elif key == "test":
+            name, _sep, label = val.partition("|")
+            if name.strip() and MEDIA_NAME_RE.match(name.strip()):
+                conf["tests"].append((name.strip(), label.strip()))
         elif key == "settings":
             conf["settings"] = val.strip().lower() or None
             if conf["settings"] not in SETTINGS_WORDS:
@@ -2380,6 +2414,11 @@ def check_media_file(path, kind):
             raise Refused("media %s: WAV is fmt %d / %d ch / %d Hz / %d-bit; the selector plays pcm_s16le %d Hz 1-2 ch only"
                           % (name, tag, ch, rate, bits, WAV_RATE))
         return "wav %d Hz %d ch" % (rate, ch), size
+    if kind == "test":
+        ext = name.lower().rsplit(".", 1)[-1]
+        if ext in ("png", "gif", "wav"):
+            return check_media_file(path, {"png": "art", "gif": "anim", "wav": "wav"}[ext])
+        raise Refused("media %s: a test picture is a .png, .gif or .wav" % name)
     raise Refused("media %s: unknown kind %r" % (name, kind))
 
 
@@ -2460,7 +2499,19 @@ def plan_media(media_dir, n_images):
                            take(e.get("anim"), "anim", "groups[%d].anim" % gi),
                            take(e.get("music"), "wav", "groups[%d].music" % gi),
                            take(e.get("confirm"), "wav", "groups[%d].confirm" % gi)))
-    out = {"rows": rows, "group_rows": group_rows,
+    # THE TEST PICTURES (PAD-1279): [{"file", "label"}], in the menu's order
+    tsrc = man.get("tests")
+    if tsrc is not None and not isinstance(tsrc, list):
+        raise Refused("%s: 'tests' must be a list" % MEDIA_MANIFEST)
+    tests = []
+    for k, e in enumerate(tsrc or []):
+        if not isinstance(e, dict):
+            raise Refused("%s: tests[%d] must be an object" % (MEDIA_MANIFEST, k))
+        name = take(e.get("file"), "test", "tests[%d].file" % k)
+        if not name:
+            raise Refused("%s: tests[%d] names no file" % (MEDIA_MANIFEST, k))
+        tests.append((name, str(e.get("label") or "")))
+    out = {"rows": rows, "group_rows": group_rows, "tests": tests,
            "sound_move": take(man.get("sound_move"), "wav", "sound_move") or None,
            "sound_confirm": take(man.get("sound_confirm"), "wav", "sound_confirm") or None,
            "volume": None, "mixer_volume": None, "files": files, "total": total, "kinds": kinds,
@@ -2490,8 +2541,10 @@ def media_costs(media):
         names = [n for n in row if n and n in sizes]
         big = max(names, key=lambda n: sizes[n]) if names else None
         rows.append((i, sum(sizes[n] for n in names), big, sizes[big] if big else 0))
-    shared = sum(sizes[n] for n in (media.get("sound_move"), media.get("sound_confirm"))
-                 if n and n in sizes)
+    # the menu-wide sounds and (PAD-1279) the test pictures: no card owns them
+    shared_names = [media.get("sound_move"), media.get("sound_confirm")] + \
+        [n for n, _label in (media.get("tests") or [])]
+    shared = sum(sizes[n] for n in set(shared_names) if n and n in sizes)
     rows.sort(key=lambda r: -r[1])
     return rows, shared
 
@@ -3687,7 +3740,10 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
     if media is not None:
         rows, move, confirm = media["rows"], media["sound_move"], media["sound_confirm"]
         volume, mixer = media["volume"], media["mixer_volume"]
+        tests = media.get("tests") or []
     else:
+        # the test pictures belong to no image: they ride along whatever the count
+        tests = list(ex.get("tests") or [])
         rows = list(ex.get("media") or [])[:n] if same_n else []
         move, confirm = ex.get("sound_move"), ex.get("sound_confirm")
         volume, mixer = ex.get("volume"), ex.get("mixer_volume")
@@ -3799,7 +3855,8 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
                               groups=groups, default_card=default_card, heading=heading,
                               text_size=text_size, counter=counter,
                               countdown_word=countdown_word, footer=footer, scores=scores,
-                              colours=colours, settings=settings, edition=edition, hiscores=hiscores)
+                              colours=colours, settings=settings, edition=edition, hiscores=hiscores,
+                              tests=tests)
 
 
 # ============================================================================= the JSON sidecars
@@ -5973,7 +6030,8 @@ def render_images_conf_text(conf):
         heading=conf.get("heading"), text_size=conf.get("text_size"),
         counter=conf.get("counter"), countdown_word=conf.get("countdown_word"),
         footer=conf.get("footer"), scores=conf.get("scores"),
-        colours=conf.get("colours"), settings=conf.get("settings"), hiscores=conf.get("hiscores"))
+        colours=conf.get("colours"), settings=conf.get("settings"), hiscores=conf.get("hiscores"),
+        tests=conf.get("tests"))
 
 
 # ============================================================================= reading a card back

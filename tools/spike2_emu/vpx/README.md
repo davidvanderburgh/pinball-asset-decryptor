@@ -529,9 +529,15 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   ball: the map's own hold (a 1 ms `PadTMTimer`) pulls it in past the ramp's
   end into the time machine and keeps it there at the ramp's height (no
   floor under it in the tribute). Let go after a real hold (the multiball
-  start: lift ramp up, MAGNET 4-8 s, then a 20 ms pulse; emulator) it leaves
-  out the back onto the left wire return (Ramp007/Ramp012's join), past no
-  game switch; a short ball-search pulse puts a caught ball back and lets go.
+  start: lift ramp up, MAGNET 4-8 s, then a 20 ms pulse; emulator) it is
+  carried back out to where it was caught and rolls back down the ramp
+  (PAD-1250; PAD-1240 sent it out the back onto the left wire return, which
+  read as the machine spitting it onto a ramp); a short ball-search pulse
+  puts a caught ball back at once. PAD-1250: no ball is kept between holds;
+  the one to grab is looked up in `GetBalls` by where it is. A reference kept
+  from the trigger's Hit outlived the ball (moving a ball out of a trigger
+  need not fire UnHit), and the next MAGNET read a drained ball: a runtime
+  error that froze the table.
 * **A scoop the ball passes an opto into** (PAD-910). Rush's side scoop is
   SIDE SCOOP OPTO on the way in and LOWER SIDE SCOOP where the ball rests;
   the game fires SIDE SCOOP only from the lower one. The saucer held the

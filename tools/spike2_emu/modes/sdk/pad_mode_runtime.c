@@ -1084,6 +1084,36 @@ int pm_running(void) { return running && running == current; }
 int pm_other_running(void) { return running && running != current; }   /* PAD-675 */
 
 /* ---- sound ---------------------------------------------------------------------------------- */
+/* PAD-1282: the sound engine's structs on either machine. A request record is three pointers, then
+ * the same 8 bytes (+4 priority, +5 flags, +7 0 on a record): 20 bytes on Spike 2, 32 on Spike 3's
+ * 64-bit ARM (Star Wars ELG 1.10: the 8 bytes of every request match the Spike 2 build's). The sid
+ * list (u32 ids, 0 ended) is the third pointer. A channel's voices are pointers, PM_PTR bytes each. */
+#define PM_PTR    ((int)sizeof(pm_addr))
+#define REQ_PTRS  (3u * (unsigned)sizeof(pm_addr))
+#define REQ_SIZE  (REQ_PTRS + 8u)
+#define REQ_PRIO  (REQ_PTRS + 4u)
+#define REQ_FLAGS (REQ_PTRS + 5u)
+#define REQ_CHECK (REQ_PTRS + 7u)
+#define REQ_LIST(rec)   (*(pm_addr *)((rec) + 2u * (unsigned)sizeof(pm_addr)))
+#define REQ_LIST_V(rec) (*(volatile pm_addr *)((rec) + 2u * (unsigned)sizeof(pm_addr)))
+/* The record lookup's key (sound_lookup, item 130): Spike 2's takes the 8-byte key's address in r1,
+ * Spike 3's (the bank map's find) the key itself in x1. LOOKUP_KEY is its 8 bytes either way and
+ * LOOKUP_TAKE(r, k) makes the lookup look up the 8 bytes at k instead. */
+#if PM_A64
+#define LOOKUP_KEY(r) ((const unsigned char *)&(r)[1])
+static pm_reg lookup_word(const unsigned char *k)
+{
+    pm_reg v = 0;
+    int i;
+    for (i = 7; i >= 0; i--) v = v << 8 | k[i];
+    return v;
+}
+#define LOOKUP_TAKE(r, k) ((r)[1] = lookup_word((const unsigned char *)(k)))
+#else
+#define LOOKUP_KEY(r) ((const unsigned char *)(unsigned long)(r)[1])
+#define LOOKUP_TAKE(r, k) ((r)[1] = (unsigned)(unsigned long)(k))
+#endif
+
 unsigned pm_callout_id(const char *role)
 {
     return (unsigned)named(port.callout, port.n_callout, role, 0);
@@ -1183,26 +1213,26 @@ static struct { unsigned request; int pair; } prio_stock[PRIO_STOCK_MAX];
 
 int pm_sound_priority(unsigned request, int priority, int flags)
 {
-    unsigned table = data("sound_requests"), count = data("sound_request_count");
+    pm_addr table = data("sound_requests"), count = data("sound_request_count");
     unsigned char *rec;
     int old, i;
     if (!table || !count || !request || request >= *(unsigned *)(unsigned long)count) return -1;
-    rec = (unsigned char *)(unsigned long)(table + request * 20);
+    rec = (unsigned char *)(unsigned long)(table + request * REQ_SIZE);
     for (i = 0; i < PRIO_STOCK_MAX && prio_stock[i].request && prio_stock[i].request != request; i++) ;
     /* the record check: a priority past 9 is not taken for a record - unless it is one changed here before (PAD-1220:
      * the co-op intro's carrier goes up to 255 while it plays, and comes back down after) */
-    if (!*(unsigned *)(rec + 8) || rec[19] != 0
-        || (rec[16] > 9 && !(i < PRIO_STOCK_MAX && prio_stock[i].request == request))) return -1;
-    old = rec[16] << 8 | rec[17];
-    if ((priority >= 0 && priority != rec[16]) || (flags >= 0 && flags != rec[17])) {
+    if (!REQ_LIST(rec) || rec[REQ_CHECK] != 0
+        || (rec[REQ_PRIO] > 9 && !(i < PRIO_STOCK_MAX && prio_stock[i].request == request))) return -1;
+    old = rec[REQ_PRIO] << 8 | rec[REQ_FLAGS];
+    if ((priority >= 0 && priority != rec[REQ_PRIO]) || (flags >= 0 && flags != rec[REQ_FLAGS])) {
         for (i = 0; i < PRIO_STOCK_MAX && prio_stock[i].request && prio_stock[i].request != request; i++) ;
         if (i < PRIO_STOCK_MAX && !prio_stock[i].request) {
             prio_stock[i].pair = old;
             prio_stock[i].request = request;
         }
     }
-    if (priority >= 0) rec[16] = (unsigned char)priority;
-    if (flags >= 0) rec[17] = (unsigned char)flags;
+    if (priority >= 0) rec[REQ_PRIO] = (unsigned char)priority;
+    if (flags >= 0) rec[REQ_FLAGS] = (unsigned char)flags;
     return old;
 }
 
@@ -1212,35 +1242,35 @@ int pm_sound_priority(unsigned request, int priority, int flags)
  * plays a different bed for every mode (each bed a sid the build bound to an appended record,
  * a sid no request names). The request's own list is kept and put back with sid 0. */
 #define SID_SLOTS 8
-static struct { unsigned request, orig; unsigned list[2]; } sid_slot[SID_SLOTS];
+static struct { unsigned request; pm_addr orig; unsigned list[2]; } sid_slot[SID_SLOTS];
 
 int pm_sound_sid(unsigned request, unsigned sid)
 {
-    unsigned table = data("sound_requests"), count = data("sound_request_count");
+    pm_addr table = data("sound_requests"), count = data("sound_request_count");
     unsigned char *rec;
     int i, free_i = -1;
     if (!table || !count || !request || request >= *(unsigned *)(unsigned long)count) return 0;
-    rec = (unsigned char *)(unsigned long)(table + request * 20);
+    rec = (unsigned char *)(unsigned long)(table + request * REQ_SIZE);
     for (i = 0; i < SID_SLOTS; i++) {
         if (sid_slot[i].request == request) break;
         if (!sid_slot[i].request && free_i < 0) free_i = i;
     }
     if (!sid) {                                      /* put the request's own list back */
         if (i < SID_SLOTS) {
-            *(unsigned *)(rec + 8) = sid_slot[i].orig;
+            REQ_LIST(rec) = sid_slot[i].orig;
             sid_slot[i].request = 0;
         }
         return 1;
     }
     if (i == SID_SLOTS) {
-        if (!*(unsigned *)(rec + 8) || rec[16] > 9 || rec[19] != 0 || free_i < 0) return 0;
+        if (!REQ_LIST(rec) || rec[REQ_PRIO] > 9 || rec[REQ_CHECK] != 0 || free_i < 0) return 0;
         i = free_i;
         sid_slot[i].request = request;
-        sid_slot[i].orig = *(unsigned *)(rec + 8);
+        sid_slot[i].orig = REQ_LIST(rec);
     }
     sid_slot[i].list[0] = sid;
     sid_slot[i].list[1] = 0;
-    *(unsigned *)(rec + 8) = (unsigned)(unsigned long)sid_slot[i].list;
+    REQ_LIST(rec) = (pm_addr)(unsigned long)sid_slot[i].list;
     return 1;
 }
 
@@ -1293,7 +1323,7 @@ static int fade_voices(unsigned request, int step)
             unsigned char *v;
             unsigned short *vol;
             if (!(bits >> b & 1u)) continue;
-            v = (unsigned char *)(unsigned long)*(unsigned *)(c + o_vp + 4 * b);
+            v = (unsigned char *)(unsigned long)*(pm_addr *)(c + o_vp + PM_PTR * b);
             if (!v) continue;
             vol = (unsigned short *)(v + o_vol);
             if (first < 0) first = *vol;
@@ -1390,7 +1420,7 @@ static void set_voices(unsigned request, int step)
         for (b = 0; b < 8; b++) {
             unsigned char *v;
             if (!(bits >> b & 1u)) continue;
-            v = (unsigned char *)(unsigned long)*(unsigned *)(c + o_vp + 4 * b);
+            v = (unsigned char *)(unsigned long)*(pm_addr *)(c + o_vp + PM_PTR * b);
             if (v) *(unsigned short *)(v + o_vol) = (unsigned short)step;
         }
     }
@@ -1515,15 +1545,22 @@ static void sound_key_say(const unsigned char *k)
     if (n > 0 && n < (int)sizeof b) write(log_fd, b, (unsigned long)n);
 }
 
+#if PM_A64
+#define WORKER_REQ(r) ((unsigned)(r)[0] & 0xffffu)   /* PAD-1282: the request is w0's u16, the variant w2's byte */
+#define WORKER_N(r)   ((unsigned)(r)[2] & 0xffu)
+#else
+#define WORKER_REQ(r) ((r)[0])
+#define WORKER_N(r)   ((r)[2])
+#endif
 static void on_sound_worker(pm_reg *r)
 {
     if (worker_log) {
-        sound_say(r[0], r[2]);
+        sound_say(WORKER_REQ(r), WORKER_N(r));
         sound_last = pm_ms() ? pm_ms() : 1;
     }
-    if (cabs_live) cabs_worker(r[0]);         /* PAD-1040: a song with an expression light show of the card's */
-    if (att_live) att_worker(r[0]);           /* PAD-645: the game's own sound at an attract press */
-    if (blist_live) blist_play(r[0]);
+    if (cabs_live) cabs_worker(WORKER_REQ(r));   /* PAD-1040: a song with an expression light show of the card's */
+    if (att_live) att_worker(WORKER_REQ(r));     /* PAD-645: the game's own sound at an attract press */
+    if (blist_live) blist_play(WORKER_REQ(r));
 }
 
 /* ---- item 163: a carrier's STOCK key swapped for an appended record's key, for one play --------
@@ -1640,7 +1677,11 @@ static void on_sound_first_active(pm_reg *r)
 
 static void own_on_arm(void)
 {
-    unsigned a = fn("sound_active"), *w;
+    unsigned a, *w;
+#if PM_A64
+    return;     /* PAD-1282: the 'which of these plays' match is 32-bit ARM's instructions */
+#endif
+    a = fn("sound_active");
     if (!a || !(can & PM_CAN_OWN_SOUND)) return;
     w = (unsigned *)(unsigned long)(a + 0x40);
     if ((w[0] & 0xFFFFF000u) != 0xE59FC000u || w[1] != 0xE52DE004u || (w[2] & 0xFFFFF000u) != 0xE28CE000u
@@ -1676,7 +1717,7 @@ static volatile int cpk_live;
 
 static void on_sound_lookup(pm_reg *r)
 {
-    if (worker_log && r[1]) sound_key_say((const unsigned char *)(unsigned long)r[1]);   /* PAD-1071 */
+    if (worker_log && r[1]) sound_key_say(LOOKUP_KEY(r));   /* PAD-1071 */
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
     if (ci_live && r[1] && ci_lookup(r)) return;     /* PAD-1114: the co-op intro's sound */
@@ -1684,11 +1725,11 @@ static void on_sound_lookup(pm_reg *r)
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
     if (sndt_live && r[1]) sndt_lookup(r);   /* PAD-565: a sound's files in turn */
     if (swaps_live && r[1]) {
-        const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+        const unsigned char *k = LOOKUP_KEY(r);
         int i;
         for (i = 0; i < SWAPS_MAX; i++)
             if (swaps[i].request && key_is(k, swaps[i].stock)) {
-                r[1] = (unsigned)(unsigned long)swaps[i].ours;
+                LOOKUP_TAKE(r, swaps[i].ours);
                 if (!swaps[i].looked) {         /* once per record armed: the proof it was the one played */
                     swaps[i].looked = 1;
                     say("sound swap: request %u looked up %02x%02x%02x%02x%02x%02x%02x%02x, took "
@@ -1703,7 +1744,7 @@ static void on_sound_lookup(pm_reg *r)
     }
     if (!sound_armed || !sound_key) return;
     sound_armed = 0;
-    r[1] = (unsigned)(unsigned long)sound_key;
+    LOOKUP_TAKE(r, sound_key);
 }
 
 /* ---- lights ------------------------------------------------------------------------------------
@@ -2822,8 +2863,8 @@ static long cab_voice_count(unsigned request)
         for (b = 0; b < 8; b++) {
             unsigned char *v;
             if (!(bits >> b & 1u)) continue;
-            v = (unsigned char *)(unsigned long)*(unsigned *)(c + o_vp + 4 * b);
-            if (v && maps_has((unsigned)(unsigned long)v + (unsigned)o_pos, 4, MAP_R))
+            v = (unsigned char *)(unsigned long)*(pm_addr *)(c + o_vp + PM_PTR * b);
+            if (v && maps_has((unsigned long)v + (unsigned)o_pos, 4, MAP_R))
                 return (long)(*(volatile unsigned *)(v + o_pos) & 0x7fffffffu);
         }
     }
@@ -3001,16 +3042,17 @@ static void cabs_worker(unsigned request)
 /* the requests that play each show's sound, once the game has its request table */
 static void cabs_requests(void)
 {
-    unsigned table = data("sound_requests"), count = data("sound_request_count"), n, r, i, hits = 0;
+    pm_addr table = data("sound_requests"), count = data("sound_request_count");
+    unsigned n, r, i, hits = 0;
     int c;
     if (cabs_reqs_done) return;
     if (!table || !count || !maps_has(count, 4, MAP_R) || !(n = *(volatile const unsigned *)(unsigned long)count))
         return;
     cabs_reqs_done = 1;
     for (r = 1; r < n && r < CABS_REQS; r++) {
-        unsigned char *rec = (unsigned char *)(unsigned long)(table + r * 20);
-        const unsigned *ids = (const unsigned *)(unsigned long)*(volatile unsigned *)(rec + 8);
-        if (!ids || !maps_has((unsigned)(unsigned long)ids, 4, MAP_R)) continue;
+        unsigned char *rec = (unsigned char *)(unsigned long)(table + r * REQ_SIZE);
+        const unsigned *ids = (const unsigned *)(unsigned long)REQ_LIST_V(rec);
+        if (!ids || !maps_has((unsigned long)ids, 4, MAP_R)) continue;
         for (i = 0; i < 64 && ids[i]; i++)
             for (c = 0; c < n_cabs; c++) {
                 int j;
@@ -18852,9 +18894,9 @@ static void coop_intro_begin(const char *why)
 /* the record lookup (any thread): the carrier's own record takes the intro's sound while it plays. 1 = swapped */
 static int ci_lookup(pm_reg *r)
 {
-    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    const unsigned char *k = LOOKUP_KEY(r);
     if (!ci.request || (long)(ci.swap_until - pm_ms()) <= 0 || !key_is(k, ci.key)) return 0;
-    r[1] = (unsigned)(unsigned long)ci.host;
+    LOOKUP_TAKE(r, ci.host);
     if (!ci.looked) {
         ci.looked = 1;
         say("co-op intro: request %u looked up its record, took the intro's sound", ci.request);
@@ -19281,10 +19323,10 @@ static void coop_intro_tick(void)
 /* the record lookup (any thread): the carrier's own record takes the picked character's sound while it plays */
 static int cpk_lookup(pm_reg *r)
 {
-    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    const unsigned char *k = LOOKUP_KEY(r);
     int c = cpk.snd;
     if (c < 0 || c >= CPK_CHARS || (long)(cpk.swap_until - pm_ms()) <= 0 || !key_is(k, cpk.key)) return 0;
-    r[1] = (unsigned)(unsigned long)cpk.host[c];
+    LOOKUP_TAKE(r, cpk.host[c]);
     if (!cpk.looked) {
         cpk.looked = 1;
         say("co-op characters: request %u looked up its record, took character %d's sound once picked", cpk.request,
@@ -23272,7 +23314,9 @@ struct bsid {
 static struct bsid bsid[BSID_MAX];
 static unsigned n_bsid;
 struct blist {                              /* a request whose list names one: its own list and two copies */
-    unsigned request, orig, n;
+    unsigned request;
+    pm_addr orig;
+    unsigned n;
     unsigned list[2][BLIST_LEN + 1];
     unsigned char which;
 };
@@ -23498,17 +23542,17 @@ static void att_worker(unsigned request)
 /* the record lookup (any thread): the carrier's own record takes the file it plays now. 1 = swapped */
 static int att_lookup(pm_reg *r)
 {
-    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    const unsigned char *k = LOOKUP_KEY(r);
     int c = att.cur;
     if (att.quiet_until && (long)(att.quiet_until - pm_ms()) > 0 && !key_is(k, att.key)) {
-        r[1] = (unsigned)(unsigned long)att.quiet;   /* PAD-645: the game's own sound at the press */
+        LOOKUP_TAKE(r, att.quiet);   /* PAD-645: the game's own sound at the press */
         if (att.quiets++ < 40)
             say("attract flipper sounds: the game's own request %u at a flipper button plays the silence",
                 att.quiet_req);
         return 1;
     }
     if (c < 0 || (long)(att.swap_until - pm_ms()) <= 0 || !key_is(k, att.key)) return 0;
-    r[1] = (unsigned)(unsigned long)att.host[c];
+    LOOKUP_TAKE(r, att.host[c]);
     if (!att.looked) {                      /* once per play: the proof it was the one played */
         att.looked = 1;
         say("attract flipper sounds: request %u looked up its record, took file %d's", att.request, c + 1);
@@ -23834,10 +23878,10 @@ static const char *gms_name(unsigned id)
 /* the record lookup (any thread): the carrier's own record takes the file it plays now. 1 = swapped */
 static int gms_lookup(pm_reg *r)
 {
-    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    const unsigned char *k = LOOKUP_KEY(r);
     int c = gms.cur;
     if (c < 0 || (long)(gms.swap_until - pm_ms()) <= 0 || !key_is(k, gms.key)) return 0;
-    r[1] = (unsigned)(unsigned long)gms.host[c];
+    LOOKUP_TAKE(r, gms.host[c]);
     if (!gms.looked) {                      /* once per play: the proof it was the one played */
         gms.looked = 1;
         say("game mode shot sounds: request %u looked up its record, took file %d's", gms.request, c + 1);
@@ -24288,14 +24332,14 @@ static void (*const juke_hooks[JUKE_MODES])(pm_reg *) = {
 
 static int juke_lookup(pm_reg *r)
 {
-    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    const unsigned char *k = LOOKUP_KEY(r);
     struct jsong *g;
     unsigned m, j;
     for (m = 0; m < n_jmode; m++)
         for (j = 0; j < jmode[m].n_key; j++)
             if (key_is(k, jmode[m].key[j])) {
                 if (!(g = juke_song(m))) return 0;
-                r[1] = (unsigned)(unsigned long)g->key;
+                LOOKUP_TAKE(r, g->key);
                 return 1;
             }
     return 0;
@@ -24529,7 +24573,7 @@ static unsigned char sndt_next(struct sndt *t)
  * when it looks it up again within SNDT_GAP ms (a slot whose files skip a number plays its own there) */
 static void sndt_lookup(pm_reg *r)
 {
-    const unsigned char *k = (const unsigned char *)(unsigned long)r[1];
+    const unsigned char *k = LOOKUP_KEY(r);
     unsigned j;
     unsigned long now;
     struct sndt *t = 0;
@@ -24538,7 +24582,7 @@ static void sndt_lookup(pm_reg *r)
     if (!t || t->n < 2) return;
     if (t->by_worker) {                     /* PAD-608: the worker moved the turn on at the play */
         if (t->pick && (t->host[t->pick][0] | t->host[t->pick][1] | t->host[t->pick][2] | t->host[t->pick][3]))
-            r[1] = (unsigned)(unsigned long)t->host[t->pick];
+            LOOKUP_TAKE(r, t->host[t->pick]);
         return;
     }
     now = pm_ms();
@@ -24554,7 +24598,7 @@ static void sndt_lookup(pm_reg *r)
     }
     t->last = now;
     if (t->pick && (t->host[t->pick][0] | t->host[t->pick][1] | t->host[t->pick][2] | t->host[t->pick][3]))
-        r[1] = (unsigned)(unsigned long)t->host[t->pick];
+        LOOKUP_TAKE(r, t->host[t->pick]);
 }
 
 /* PAD-608: a play of a slot whose turn the worker moves on (a file of it is in a sound bank): the next
@@ -24613,14 +24657,15 @@ static unsigned bsid_now(unsigned id, unsigned m)
  * was pointed at (pm_sound_sid) is left alone. */
 static void blist_play(unsigned request)
 {
-    unsigned table = data("sound_requests"), cur, m, i, j, n_sub = 0, *own, *out;
+    pm_addr table = data("sound_requests"), cur;
+    unsigned m, i, j, n_sub = 0, *own, *out;
     unsigned char *rec;
     struct blist *e;
     if (request >= BLIST_REQS || !blist_of[request] || !table) return;
     e = &blist[blist_of[request] - 1];
-    rec = (unsigned char *)(unsigned long)(table + request * 20);
-    cur = *(volatile unsigned *)(rec + 8);
-    if (cur != e->orig && cur != (unsigned)(unsigned long)e->list[0] && cur != (unsigned)(unsigned long)e->list[1])
+    rec = (unsigned char *)(unsigned long)(table + request * REQ_SIZE);
+    cur = REQ_LIST_V(rec);
+    if (cur != e->orig && cur != (pm_addr)(unsigned long)e->list[0] && cur != (pm_addr)(unsigned long)e->list[1])
         return;
     own = (unsigned *)(unsigned long)e->orig;
     m = sndm_mode();
@@ -24641,17 +24686,18 @@ static void blist_play(unsigned request)
     }
     out[e->n] = 0;
     if (!n_sub) {
-        if (cur != e->orig) *(volatile unsigned *)(rec + 8) = e->orig;
+        if (cur != e->orig) REQ_LIST_V(rec) = e->orig;
         return;
     }
     e->which ^= 1;
-    *(volatile unsigned *)(rec + 8) = (unsigned)(unsigned long)out;
+    REQ_LIST_V(rec) = (pm_addr)(unsigned long)out;
 }
 
 /* PAD-608: find every request whose sid list names a game id with a bank id, and hook the worker */
 static void blist_arm(void)
 {
-    unsigned table = data("sound_requests"), count = data("sound_request_count"), n, r, i, j, lost = 0;
+    pm_addr table = data("sound_requests"), count = data("sound_request_count");
+    unsigned n, r, i, j, lost = 0;
     if (!n_bsid) return;
     if (!table || !count || !fn("sound_worker") || !maps_has(count, 4, MAP_R)) {
         say("sound banks: off - the port has no sound_worker or request table for this build; the %u file "
@@ -24661,19 +24707,19 @@ static void blist_arm(void)
     }
     n = *(volatile const unsigned *)(unsigned long)count;
     for (r = 1; r < n && r < BLIST_REQS; r++) {
-        unsigned char *rec = (unsigned char *)(unsigned long)(table + r * 20);
+        unsigned char *rec = (unsigned char *)(unsigned long)(table + r * REQ_SIZE);
         unsigned *own, len;
         int hit = 0;
-        if (!maps_has(table + r * 20, 20, MAP_R)) break;
-        own = (unsigned *)(unsigned long)*(unsigned *)(rec + 8);
+        if (!maps_has(table + r * REQ_SIZE, REQ_SIZE, MAP_R)) break;
+        own = (unsigned *)(unsigned long)REQ_LIST(rec);
         if (!own) continue;                 /* (any priority: Godzilla LE 1.16's request 12 has 253) */
-        for (len = 0; len < BLIST_LEN && maps_has((unsigned)(unsigned long)(own + len), 4, MAP_R) && own[len]; len++)
+        for (len = 0; len < BLIST_LEN && maps_has((unsigned long)(own + len), 4, MAP_R) && own[len]; len++)
             for (j = 0; j < n_bsid && !hit; j++)
                 hit = bsid[j].id == own[len];
         if (!hit || len == BLIST_LEN) continue;
         if (n_blist >= BLIST_MAX) { sndm_dropped++; continue; }
         blist[n_blist].request = r;
-        blist[n_blist].orig = (unsigned)(unsigned long)own;
+        blist[n_blist].orig = (pm_addr)(unsigned long)own;
         blist[n_blist].n = len;
         blist_of[r] = (unsigned short)(++n_blist);
     }
@@ -24757,6 +24803,11 @@ static void sndm_arm(void)
         n_sndm = 0;
         return;
     }
+#if PM_A64
+    say("music modes: off - the asset descriptors are 32-bit ARM's on this runtime; every sound plays mode 1's");
+    n_sndm = 0;
+    return;
+#endif
     sndm_orig = (unsigned (*)(unsigned, unsigned *))hook_wrap(fn("sound_resolve"), (void *)sndm_resolve);
     if (!sndm_orig) {
         say("music modes: off - sound_resolve 0x%08" PMA " cannot be wrapped; every sound plays mode 1's", fn("sound_resolve"));

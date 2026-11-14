@@ -179,7 +179,7 @@ def test_the_runtime_reads_cablamp_lines_and_cabshow_cfg():
     rt = _read(os.path.join(SDK, "pad_mode_runtime.c"))
     assert 'if (str_eq(key, "cablamp")) { cab_line(s); return; }' in rt
     assert '"/usr/local/padmode/cabshow.cfg", "/dump/cabshow.cfg"' in rt
-    assert "if (cabs_live) cabs_worker(r[0]);" in rt                 # the sound worker says which request started
+    assert "if (cabs_live) cabs_worker(WORKER_REQ(r));" in rt                 # the sound worker says which request started
     assert "cabs_tick();" in rt.split("static void on_tick(pm_reg *r)")[1].split("\n}\n")[0]
     hdr = _read(os.path.join(SDK, "pad_mode.h"))
     for fn in ("pm_cab_count", "pm_cab_at", "pm_cab_xy", "pm_cab_paint", "pm_cab_release_all", "pm_cab_show",

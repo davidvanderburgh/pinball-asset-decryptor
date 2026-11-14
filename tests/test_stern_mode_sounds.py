@@ -432,8 +432,8 @@ def test_the_runtime_points_a_request_at_one_sid_and_fades():
                  "int pm_sound_playing(unsigned *requests, unsigned *buses, int max);"):
         assert decl in h
         assert decl[:-1] + "\n{" in c
-    assert "*(unsigned *)(rec + 8) = (unsigned)(unsigned long)sid_slot[i].list;" in c
-    assert "*(unsigned *)(rec + 8) = sid_slot[i].orig;" in c
+    assert "REQ_LIST(rec) = (pm_addr)(unsigned long)sid_slot[i].list;" in c
+    assert "REQ_LIST(rec) = sid_slot[i].orig;" in c
     tick = c[c.index("static void on_tick(pm_reg *r)"):]
     assert tick.index("sound_fades_tick();") < tick.index("m->tick();")
     assert "sound_fade_finish(request);" in c[c.index("int pm_sound(unsigned request)"):]
@@ -510,7 +510,7 @@ def test_the_music_carrier_gets_its_own_steal_flag_back():
     assert decl in h and decl[:-1] + chr(10) + "{" in c
     prio = c[c.index("int pm_sound_priority(unsigned request, int priority, int flags)" + chr(10)):]
     prio = prio[:prio.index(chr(10) + "}" + chr(10))]
-    assert "prio_stock[i].pair = old;" in prio and prio.index("prio_stock[i].pair = old;") < prio.index("rec[16] = ")
+    assert "prio_stock[i].pair = old;" in prio and prio.index("prio_stock[i].pair = old;") < prio.index("rec[REQ_PRIO] = ")
     stock = c[c.index("int pm_sound_priority_stock(unsigned request)" + chr(10)):]
     stock = stock[:stock.index(chr(10) + "}" + chr(10))]
     assert "swaps[j].old = pair;" in stock and "pm_sound_priority(request, pair >> 8, pair & 0xff)" in stock

@@ -578,6 +578,14 @@ if [ "${PAD_S3_AUDIO:-0}" = 1 ] && [ -n "$PRELOAD" ] && [ -d "$SD/audio" ]; then
     mount --bind "$SD/audio" "$R/run/padaudio" && echo "[s3run] /run/padaudio -> $SD/audio"
     PRELOAD="$PRELOAD PAD_S3_AUDIO_PLAY=/run/padaudio/audio.fifo PAD_S3_AUDIO_FMT=/run/padaudio/audio.fmt"
 fi
+# PAD-1282: PAD_S3_AUDIO_OUT=1 keeps the game's sound, still MUTED: s3alsa.so writes each sound card's raw PCM
+# to the slot's connectivity.up/dump/pcm.<card> (no player), for a proof that a sound played - its level is
+# read from the file, nobody hears it.
+if [ "${PAD_S3_AUDIO_OUT:-0}" = 1 ] && [ -n "$PRELOAD" ]; then
+    rm -f "$SD"/connectivity.up/dump/pcm.*
+    PRELOAD="$PRELOAD PAD_S3_AUDIO_OUT=/connectivity/dump/pcm"
+    echo "[s3run] sound: muted, the PCM kept in $SD/connectivity.up/dump/pcm.<card>"
+fi
 # The audio amp talks over /dev/i2c-10 with the Linux i2c-dev ioctls, which
 # stock qemu-user does not translate (it answers ENOTTY and the amp thread dies
 # -> xifo.cpp:72). A patched qemu-aarch64 that understands those ioctls lives at

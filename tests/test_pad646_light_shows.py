@@ -216,7 +216,7 @@ def _node_run(tmp_path, text):
     node = NODE or shutil.which("node.exe")
     if node is None:
         pytest.skip("needs Node.js")
-    if node.lower().endswith(".exe") and os.path.isdir("/mnt/c/tmp"):
+    if node.lower().endswith(".exe") and os.name != "nt" and os.path.isdir("/mnt/c/tmp"):   # WSL (not a Windows C:/mnt)
         import tempfile
         d = tempfile.mkdtemp(prefix="pad646-", dir="/mnt/c/tmp")
         path = os.path.join(d, "fx.mjs")

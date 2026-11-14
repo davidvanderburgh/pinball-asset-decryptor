@@ -61,6 +61,7 @@ static unsigned hexnum(const char *s)
     return v;
 }
 
+#if !defined(__aarch64__)
 /* the port's `data sound_channels` address, or 0 */
 static unsigned channels_address(void)
 {
@@ -78,6 +79,7 @@ static unsigned channels_address(void)
     }
     return 0;
 }
+#endif
 
 static unsigned dump_ms, dump_last_ms, chan_table, vol_watch;
 static unsigned long vol_until;
@@ -85,6 +87,24 @@ static unsigned key_watch;             /* item 163: key.play's request, until it
 static unsigned long key_until;
 static char dump_last[512];
 
+#if defined(__aarch64__)
+/* PAD-1282: on a Spike 3 game (a PIE, the 64-bit channel layout in the port's values) the channel table is the
+ * runtime's to read: the requests playing and their buses, from pm_sound_playing */
+static void dump_channels(void)
+{
+    char line[512];
+    unsigned reqs[8], buses[8], c, o = 0;
+    int n = pm_sound_playing(reqs, buses, 8), i;
+    line[0] = 0;
+    if (n < 0) o = (unsigned)pm_snprintf(line, sizeof line, " (no channel table in the port)");
+    for (i = 0; i < n && i < 8 && o < sizeof line - 24; i++)
+        o += (unsigned)pm_snprintf(line + o, sizeof line - o, " %u b%02x", reqs[i], buses[i]);
+    for (c = 0; line[c] == dump_last[c] && line[c]; c++) ;
+    if (line[c] == dump_last[c]) return;
+    for (c = 0; (dump_last[c] = line[c]) != 0; c++) ;
+    pm_log("ch%s", line[0] ? line : " (none playing)");
+}
+#else
 static void dump_channels(void)
 {
     char line[512];
@@ -104,6 +124,7 @@ static void dump_channels(void)
     for (c = 0; (dump_last[c] = line[c]) != 0; c++) ;
     pm_log("ch%s", line[0] ? line : " (none playing)");
 }
+#endif
 
 /* 16 hex digits -> 8 bytes; the text after them, or 0 */
 static const char *hex_key(const char *s, unsigned char out[8])
@@ -157,7 +178,11 @@ static void on_tick(void)
     }
     if (pm_trigger_text("sound.dump", text, sizeof text)) {
         dump_ms = number(text);
+#if defined(__aarch64__)
+        chan_table = 1;                       /* PAD-1282: the runtime reads it (dump_channels) */
+#else
         if (!chan_table) chan_table = channels_address();
+#endif
         dump_last[0] = 1; dump_last[1] = 0;   /* log the first dump whatever it holds */
         pm_log("dump every %u ms (channels at 0x%08x)", dump_ms, chan_table);
     }
@@ -223,7 +248,15 @@ static void on_tick(void)
             key_watch = 0;
         }
     }
+#if defined(__aarch64__)
+    if (vol_watch) {                          /* PAD-1282: active or not, twice a second */
+        pm_log("vol %u: active %d", vol_watch, pm_sound_active(vol_watch));
+        if (pm_ms() > vol_until) vol_watch = 0;
+    }
+    if (0) {
+#else
     if (vol_watch && chan_table) {
+#endif
         char line[160];
         unsigned c, b, o = 0;
         for (c = 0; c < 8; c++) {

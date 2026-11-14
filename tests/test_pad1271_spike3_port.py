@@ -155,10 +155,14 @@ def _lines(kind):
     return out
 
 
+SOUND_SITES = {"callout", "callout_nth", "sound_play", "sound_nth", "sound_active", "sound_stop",     # PAD-1282
+               "sound_worker", "sound_resolve", "sound_lookup"}
+
+
 def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     sites = {t[1]: t for t in _lines("site")}
     assert set(sites) == {"tick", "hook_dispatch", "score_add", "switch_hit", "switch_hit2",
-                          "agent_header", "agent_begin"}
+                          "agent_header", "agent_begin"} | SOUND_SITES
     for t in sites.values():
         assert len(t) == 5 and all(re.fullmatch(r"0x[0-9a-f]{8}", x) for x in t[2:])
     assert sites["tick"][2:] == ["0x00247940", "0xd2800001", "0x528006e0"]
@@ -166,8 +170,9 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     assert sites["agent_header"][3] == "0xb40002a0"                                                 # cbz x0
     data = {t[1]: t[2] for t in _lines("data")}
     assert data == {"cur_player": "0x006b1a1a", "scores": "0x007122c0", "score_mult": "0x006a7f30",
-                    "mode_mask": "0x0079206c"}
-    values = {t[1]: t[2] for t in _lines("value")}
+                    "mode_mask": "0x0079206c", "sound_channels": "0x00733340", "sound_requests": "0x006fd360",
+                    "sound_request_count": "0x005a38c8"}                         # the sound ones: PAD-1282
+    values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))}
     assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34"}
 
 
@@ -198,7 +203,7 @@ def test_s3port_values_carried_are_only_the_proven_ones():
     S = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(S)
     assert S.VALUES_PROVEN == ("mode_mask_busy",)
-    assert set(S.SITES_PROVEN) == {"tick", "hook_dispatch", "score_add", "agent_header", "agent_begin"}
+    assert set(S.SITES_PROVEN) == {"tick", "hook_dispatch", "score_add", "agent_header", "agent_begin"} | SOUND_SITES
     assert S.sext(0x3FFFFFF, 26) == -1 and S.sext(0x10, 26) == 16
 
     class T:                                         # site_ok on three first instructions

@@ -54,8 +54,19 @@ VALUES_PROVEN = ("mode_mask_busy",)
 # runtime features that use one read the game's structs at 32-bit offsets, and the first of them to arm with the
 # rest of the draft (after display priority) stopped the game with a segfault. A feature's sites are carried when
 # that feature is made 64-bit and proven.
-SITES_PROVEN = ("tick", "hook_dispatch", "score_add", "agent_header", "agent_begin")      # + every switch_hit*
-DATA_PROVEN = ("cur_player", "scores", "score_mult", "mode_mask")
+SITES_PROVEN = ("tick", "hook_dispatch", "score_add", "agent_header", "agent_begin",      # + every switch_hit*
+                # PAD-1282: the game's callouts and sounds (a mode played both on Star Wars ELG 1.10's Spike 3 rig)
+                "callout", "callout_nth", "sound_play", "sound_nth", "sound_active", "sound_stop",
+                "sound_worker", "sound_resolve", "sound_lookup")
+DATA_PROVEN = ("cur_player", "scores", "score_mult", "mode_mask",
+               "sound_channels", "sound_requests", "sound_request_count")
+# PAD-1282: the sound engine's 64-bit layout (Star Wars ELG 1.10, read in its sound_active / sound_stop / worker:
+# Spike 2's channel with 8-byte pointers - 288 bytes, the request u16 at +272, the voice bits at +276, the bus
+# mask at +277, eight voice pointers at +144; a voice's u16 volume step at +56). The engine is the same code on
+# every Spike 3 title; sound_engine() checks the request and voice offsets against the program's own code.
+SOUND_VALUES = (("sound_channel_count", 8), ("sound_channel_size", 288), ("sound_channel_request", 272),
+                ("sound_channel_voices", 276), ("sound_channel_bus", 277), ("sound_channel_voice_ptrs", 144),
+                ("sound_voice_volume", 56))
 # the gate's core (pad_mode_runtime.c core_of_port): any one of each group
 CORE = (("tick",), ("shot_dispatch", "switch_hit", "switch_edge"), ("ball_end", "hook_dispatch"),
         ("score_add", "score_add32"))
@@ -568,6 +579,150 @@ def site_ok(t, va):
     return ""
 
 
+# ---- PAD-1282: the sound engine, read off the 64-bit program from its callout ------------------------------
+def _window(t, va, cap=1200):
+    """(va, word) from va to the next function start (or cap words)"""
+    i = bisect.bisect_right(t.starts, va)
+    end = t.starts[i] if i < len(t.starts) else va + 4 * cap
+    for a in range(va, min(end, va + 4 * cap), 4):
+        w = t.u32(a)
+        if w is None:
+            return
+        yield a, w
+
+
+def _bl(va, w):
+    return va + 4 * sext(w & 0x3FFFFFF, 26) if (w & 0xFC000000) == 0x94000000 else None
+
+
+def _adrp(va, w):
+    """adrp xd, page -> (d, page), else None"""
+    if (w & 0x9F000000) != 0x90000000:
+        return None
+    imm = ((w >> 29) & 3) | (((w >> 5) & 0x7FFFF) << 2)
+    return w & 31, (va & ~0xFFF) + (sext(imm, 21) << 12)
+
+
+def _add_imm(w):
+    """add xd, xn, #imm (no shift) -> (d, n, imm), else None"""
+    if (w & 0xFFC00000) != 0x91000000:
+        return None
+    return w & 31, (w >> 5) & 31, (w >> 10) & 0xFFF
+
+
+def _addrs(t, va, cap=40):
+    """the addresses the first `cap` words at va make with adrp / add #imm, in order (one per add)"""
+    reg, out = {}, []
+    for a, w in list(_window(t, va))[:cap]:
+        p = _adrp(a, w)
+        if p:
+            reg[p[0]] = p[1]
+            continue
+        ad = _add_imm(w)
+        if ad and ad[1] in reg:
+            reg[ad[0]] = reg[ad[1]] + ad[2]
+            out.append(reg[ad[0]])
+    return out
+
+
+def _got_loads(t, va, cap=60):
+    """the pointers the code at va loads from the GOT (adrp; ldr xd, [xd, #off]), as their RELATIVE targets"""
+    reg, out = {}, []
+    for a, w in list(_window(t, va))[:cap]:
+        p = _adrp(a, w)
+        if p:
+            reg[p[0]] = p[1]
+            continue
+        if (w & 0xFFC00000) == 0xF9400000 and ((w >> 5) & 31) in reg:      # ldr xt, [xn, #imm*8]
+            slot = reg[(w >> 5) & 31] + ((w >> 10) & 0xFFF) * 8
+            if slot in t.ptr:
+                out.append(t.ptr[slot])
+    return out
+
+
+def _const_ids(e, target):
+    """the constant first argument of every call to `target` (mov r0/w0 #imm within the 4 words before)"""
+    out = Counter()
+    for i, tg in e.calls.items():
+        if tg != target:
+            continue
+        for j in range(i - 1, max(-1, i - 5), -1):
+            x = e.words[j]
+            if e.a64:
+                if (x & 0xFFE0001F) == 0x52800000:                         # movz w0, #imm16
+                    out[(x >> 5) & 0xFFFF] += 1
+                    break
+            elif (x & 0xFFFFF000) == 0xE3A00000:                            # mov r0, #rot imm8
+                r, v = ((x >> 8) & 15) * 2, x & 0xFF
+                out[((v >> r) | (v << (32 - r))) & 0xFFFFFFFF] += 1
+                break
+            elif (x & 0xFFF0F000) == 0xE3000000:                            # movw r0, #imm16
+                out[((x >> 4) & 0xF000) | (x & 0xFFF)] += 1
+                break
+    return out
+
+
+def request_shift(ref, rcallout, tgt, tcallout):
+    """(k, hits, of): Spike 3's request id = Spike 2's + k, read from the constant ids both builds' code passes to
+    the callout (Star Wars ELG 1.10: +2 - two requests added early in the Spike 3 build's table). k None when no
+    shift explains most of them."""
+    a, b = _const_ids(ref, rcallout), _const_ids(tgt, tcallout)
+    if len(a) < 10 or len(b) < 10:
+        return None, 0, len(a)
+    k, hits = max(((k, sum(1 for x in a if x + k in b)) for k in range(-16, 17)), key=lambda kh: kh[1])
+    return (k if hits * 2 > len(a) else None), hits, len(a)
+
+
+def sound_engine(t, placed):
+    """sites, data and values of the 64-bit sound engine, from the placed callout / sound_active / sound_stop:
+    {'site': {name: va}, 'data': {name: va}, 'why': [what could not be read]}"""
+    out, why = {"site": {}, "data": {}, "why": []}, []
+    callout = placed.get("callout") or placed.get("sound_play")
+    if not callout:
+        out["why"].append("no callout placed")
+        return out
+    worker = next((b for a, w in _window(t, callout) for b in [_bl(a, w)] if b), None)
+    if not worker:
+        out["why"].append("the callout makes no call")
+        return out
+    out["site"]["sound_worker"] = worker
+    words = list(_window(t, worker, 1000))
+    callers = Counter(t.calls.values())
+    for k, (a, w) in enumerate(words):             # resolve: the worker's call with x1 = a stack slot (its out)
+        b = _bl(a, w)
+        if b and callers[b] >= 3 and any((x & 0xFFC003FF) == 0x910003E1 for _, x in words[max(0, k - 5):k]):
+            out["site"]["sound_resolve"] = b
+            break
+    look = Counter()                                # lookup: the find that takes the key the bank bits went into
+    for i, tg in t.calls.items():
+        if i >= 1 and (t.words[i - 1] & 0xFFE0FFFF) == 0xAA008821:       # orr x1, x1, xN, lsl #34
+            look[tg] += 1
+    if look and look.most_common(1)[0][1] >= 2:
+        out["site"]["sound_lookup"] = look.most_common(1)[0][0]
+    # the request count (a u64 the worker checks the request against) and the table after it (32-byte records,
+    # Stern's .flash on Star Wars ELG 1.10), both through the GOT
+    got = _got_loads(t, worker)
+    writable = lambda a: any(va <= a < va + fs and fl & 2 for va, off, fs, fl in t.segs)
+    for k, cnt in enumerate(got):
+        lo, hi = t.u32(cnt), t.u32(cnt + 4)
+        if lo is None or hi != 0 or not 1 <= lo < 0x10000:
+            continue
+        table = next((a for a in got[k + 1:] if a != cnt and writable(a)), None)
+        if table is not None and t.u32(table + 32 * (lo - 1) + 28) is not None:
+            out["data"]["sound_request_count"], out["data"]["sound_requests"] = cnt, table
+        break
+    stop, active = placed.get("sound_stop"), placed.get("sound_active")
+    if stop and active:
+        st, ac = _addrs(t, stop), _addrs(t, active)
+        base = st[1] if len(st) >= 2 else None       # adrp + #lo, then + the first channel's offset
+        if base is not None and ac and ac[1:2] == [base + 272]:
+            out["data"]["sound_channels"] = base
+        else:
+            why.append("the channel table's request offset is not +272 in sound_active")
+    out["why"] = why
+    return out
+
+
 def draft(ref, rport, tgt, game=None, version=None):
     scan(ref)
     scan(tgt)
@@ -622,11 +777,28 @@ def draft(ref, rport, tgt, game=None, version=None):
         else:
             body.append("# not carried yet (its feature is 32-bit): " + line)
             later.append(out)
+    snd = sound_engine(tgt, placed) if tgt.a64 else {"site": {}, "data": {}, "why": []}
+    for name, b in snd["site"].items():
+        if name in placed or site_ok(tgt, b):
+            continue
+        how = {"sound_worker": "the callout's call", "sound_resolve": "the worker's call that takes a stack slot",
+               "sound_lookup": "the call after the record key's bank bits"}[name]
+        mark = "# site %-16s NOT PLACED" % name
+        at = next((k for k, l in enumerate(body) if l.startswith(mark)), len(body))
+        body[at:at + 1] = ["#   %s: %s (PAD-1282)" % (name, how),
+                           "site %-16s 0x%08x 0x%08x 0x%08x" % (name, b, tgt.u32(b), tgt.u32(b + 4))]
+        placed[name] = b
+        if name in missing:
+            missing.remove(name)
     # data
     body += ["", "# ---- globals: data <name> <address> ----"]
     for name, A in data_lines.items():
         b, agree, of = tdata[name]
         out = "scores" if name == "scores32" and "score_add" in placed else name
+        if name in snd["data"]:
+            body.append("data %-22s 0x%08x   # read in the sound engine's own code (PAD-1282)" % (name, snd["data"][name]))
+            placed["data:" + name] = snd["data"][name]
+            continue
         if b is None:
             body.append("# data %-22s NOT PLACED: %d of %d paired functions agree" % (name, agree, of))
             continue
@@ -639,9 +811,12 @@ def draft(ref, rport, tgt, game=None, version=None):
     # values, events
     body += ["", "# ---- values: only those proven on Spike 3; a struct offset or a count is a 32-bit build's ----"]
     events = [(t, s) for k, t, s in lines if k == "event"]
+    sound_vals = dict(SOUND_VALUES) if "data:sound_channels" in placed else {}
     for k, t, s in lines:
-        if k == "value":
+        if k == "value" and t[1] not in sound_vals and not t[1].startswith("countdown_"):
             body.append(s if t[1] in VALUES_PROVEN else "# not carried (64-bit layout, measure it): " + s.strip())
+    for name, v in sound_vals.items():
+        body.append("value %-25s %d    # the 64-bit sound engine's (PAD-1282)" % (name, v))
     if "ball_end" not in placed and any(t[1] == "ball_end" for t, s in events) and "hook_dispatch" in placed:
         eid = next(t[2] for t, s in events if t[1] == "ball_end")
         body.append("value ball_end_event %s    # the end of a ball, from the bus (no ball_end site on Spike 3)" % eid)
@@ -661,10 +836,21 @@ def draft(ref, rport, tgt, game=None, version=None):
                 body.append("# switch NOT PLACED: no device named %r on Spike 3 (%s)" % (nm, s.strip()))
             else:
                 body.append("switch %-4d %-18s %s" % (nid, m.group(2), nm))
+    co = [(t, s) for k, t, s in lines if k == "callout" and len(t) >= 3]
+    shift = None
+    if co and "callout" in placed:
+        rco = next((int(t[2], 16) for k, t, s in lines if k == "site" and len(t) >= 3 and t[1] == "callout"), None)
+        shift, hits, of = request_shift(ref, rco, tgt, placed["callout"]) if rco else (None, 0, 0)
+        if shift is not None:
+            body += ["", "# ---- callouts: request ids + %d on Spike 3 (%d of the %d constant ids Spike 2's code passes to "
+                     "the callout are there at + %d) ----" % (shift, hits, of, shift)]
+            body += ["callout %-19s %d" % (t[1], int(t[2], 0) + shift) for t, s in co]
+            body += [s for k, t, s in lines if k == "value" and len(t) > 1 and t[1].startswith("countdown_")
+                     and not s.lstrip().startswith("#")]
     tx = [s for k, t, s in lines if k == "text" and len(t) > 1 and t[1].startswith("example_")]
     if tx:
         body += ["", "# ---- text ----"] + tx
-    rest = Counter(k for k, t, s in lines if k in ("lamp", "scene", "callout", "shot") or (k == "text" and not t[1].startswith("example_")))
+    rest = Counter(k for k, t, s in lines if k in ("lamp", "scene", "shot") or (k == "callout" and shift is None) or (k == "text" and not t[1].startswith("example_")))
     if rest:
         body += ["", "# not carried (to measure on Spike 3): " + ", ".join("%d %s" % (n, k) for k, n in sorted(rest.items()))]
     core_missing = [grp for grp in CORE if not any(n in placed for n in grp) and not

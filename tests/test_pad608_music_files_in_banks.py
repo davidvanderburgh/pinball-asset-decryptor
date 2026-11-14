@@ -274,7 +274,7 @@ def test_the_runtime_points_the_request_at_the_bank_s_id_at_the_play_worker():
     assert "bsid_line(f[1], 0, f[2], f[3], 0);" in c        # (PAD-1005: tsid's 6th field, a mode)
     assert "bsid_line(f[1], f[2], f[3], f[4], n >= 6 ? f[5] : 0);" in c
     # one hook on the worker for the sound log and the banks
-    assert "if (blist_live) blist_play(r[0]);" in c
+    assert "if (blist_live) blist_play(WORKER_REQ(r));" in c
     # every place that hooks it goes through the one worker_hooked (PAD-645 adds the attract silence's and the
     # sound log's on a card of attract sounds alone)
     sites = c.count('hook(fn("sound_worker"), on_sound_worker)')
@@ -285,7 +285,7 @@ def test_the_runtime_points_the_request_at_the_bank_s_id_at_the_play_worker():
     assert arm.index("blist_arm();") < arm.index("if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request) return;")   # PAD-641, PAD-1114, PAD-1123
     # a pointer someone else put there (a mode's carrier, pm_sound_sid) is left alone
     play = c[c.index("static void blist_play(unsigned request)"):]
-    assert "cur != e->orig && cur != (unsigned)(unsigned long)e->list[0]" in play
+    assert "cur != e->orig && cur != (pm_addr)(unsigned long)e->list[0]" in play
     # a turn the worker moves on is not moved again by the record lookup
     look = c[c.index("static void sndt_lookup(pm_reg *r)\n{"):]
     assert look.index("if (t->by_worker)") < look.index("now = pm_ms();")

@@ -7,6 +7,9 @@
 # in play TARGET RUSH started on three Death star target hits (switch 26), scored 8 shots through the game's
 # score_add (+36,000,000: the score table read 26,500 -> 36,083,880), ended on its clock, and got the end of
 # ball from the bus (event 0x34). Program sha1 ceb8d70b73a63698d06afddfe571c1bbab775c0a (games/game).
+# Sounds emulator-proven 2026-11-14 (PAD-1282, slot 82, muted, the PCM kept): a mode played request 153, callout 168
+# and the countdown 170 -> 166 ("One!" .. "Five!", step -1) through the sites below, each taken by the game's worker,
+# and sound_active / sound_stop / a fade on the 64-bit channel values answered as the PCM did.
 
 game           star_wars_elg
 version        1.10
@@ -15,13 +18,17 @@ version        1.10
 #   tick: its calls and callers (score 2.0)
 site tick             0x00247940 0xd2800001 0x528006e0
 # site ball_end         NOT PLACED: no counterpart found
-# site sound_lookup     NOT PLACED: no counterpart found
-# site sound_resolve    NOT PLACED: no counterpart found
+#   sound_lookup: the call after the record key's bank bits (PAD-1282)
+site sound_lookup     0x002084f0 0xf9400c02 0xb5000142
+#   sound_resolve: the worker's call that takes a stack slot (PAD-1282)
+site sound_resolve    0x00208700 0xaa0103e2 0xa9bd53f3
 #   score_add: Spike 2's score_add32; the Spike 3 build adds 64-bit points into u64 scores
 #   score_add: its calls and callers (score 5.7)
 site score_add        0x0019dd40 0x900027e3 0xf942ec63
-# not carried yet (its feature is 32-bit): site callout          0x0020dc70 0xf0002928 0x910c8108
-# not carried yet (its feature is 32-bit): site callout_nth      0x0020dd40 0xf0002928 0x910c8108
+#   callout: its calls and callers (score 30.1)
+site callout          0x0020dc70 0xf0002928 0x910c8108
+#   callout_nth: its calls and callers (score 3.0)
+site callout_nth      0x0020dd40 0xf0002928 0x910c8108
 # not carried yet (its feature is 32-bit): site lamp_group       0x001a0470 0xa9be53f3 0x92403c14
 # not carried yet (its feature is 32-bit): site show_priority    0x0041a270 0xf00013e1 0xf9466821
 # not carried yet (its feature is 32-bit): site award_screen     0x001b4120 0xa9be53f3 0x12003c13
@@ -37,11 +44,16 @@ site score_add        0x0019dd40 0x900027e3 0xf942ec63
 site switch_hit       0x0042b250 0xd0001361 0xf9468421
 #   switch_hit2: its calls and callers (score 3.7)
 site switch_hit2      0x0042b380 0xd0001361 0xf9468421
-# not carried yet (its feature is 32-bit): site sound_play       0x0020dc70 0xf0002928 0x910c8108
-# not carried yet (its feature is 32-bit): site sound_nth        0x0020dd40 0xf0002928 0x910c8108
-# not carried yet (its feature is 32-bit): site sound_active     0x0020b070 0x90002943 0x91088063
-# not carried yet (its feature is 32-bit): site sound_stop       0x0020b220 0xa9bc53f3 0xa9015bf5
-# site sound_worker     NOT PLACED: no counterpart found
+#   sound_play: its calls and callers (score 30.1)
+site sound_play       0x0020dc70 0xf0002928 0x910c8108
+#   sound_nth: its calls and callers (score 3.0)
+site sound_nth        0x0020dd40 0xf0002928 0x910c8108
+#   sound_active: its calls and callers (score 6.0)
+site sound_active     0x0020b070 0x90002943 0x91088063
+#   sound_stop: its calls and callers (score 7.2)
+site sound_stop       0x0020b220 0xa9bc53f3 0xa9015bf5
+#   sound_worker: the callout's call (PAD-1282)
+site sound_worker     0x0020d2e0 0x90002468 0xf9468508
 #   hook_dispatch: its calls and callers (score 17.0)
 site hook_dispatch    0x002274e0 0xa9be53f3 0x71033c1f
 # not carried yet (its feature is 32-bit): site display_effect_start 0x003b01f0 0xb0001745 0xf94684a5
@@ -114,10 +126,10 @@ data mode_mask              0x0079206c   # 100 of 105 paired functions that load
 # data typeinfo_resource      NOT PLACED: 0 of 0 paired functions agree
 # data typeinfo_scene_player  NOT PLACED: 0 of 0 paired functions agree
 # not carried yet: data award_screen_arg       0x006a2c50   # 114 of 117 paired functions that load it
-# not carried yet: data sound_channels         0x00733220   # 6 of 6 paired functions that load it
+data sound_channels         0x00733340   # read in the sound engine's own code (PAD-1282)
 # data sound_queue            NOT PLACED: 1 of 1 paired functions agree
-# data sound_requests         NOT PLACED: 0 of 0 paired functions agree
-# data sound_request_count    NOT PLACED: 0 of 0 paired functions agree
+data sound_requests         0x006fd360   # read in the sound engine's own code (PAD-1282)
+data sound_request_count    0x005a38c8   # read in the sound engine's own code (PAD-1282)
 # data lamp_layers            NOT PLACED: 2 of 2 paired functions agree
 # data light_count            NOT PLACED: 11 of 11 paired functions agree
 # data switch_records         NOT PLACED: 5 of 5 paired functions agree
@@ -140,13 +152,6 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value node_visible_vfn      0xa8
 # not carried (64-bit layout, measure it): value surface_playing       2
 # not carried (64-bit layout, measure it): value clip_layer            0
-# not carried (64-bit layout, measure it): value sound_channel_count       8
-# not carried (64-bit layout, measure it): value sound_channel_size        196
-# not carried (64-bit layout, measure it): value sound_channel_request     184
-# not carried (64-bit layout, measure it): value sound_channel_voices      188
-# not carried (64-bit layout, measure it): value sound_channel_bus         189
-# not carried (64-bit layout, measure it): value sound_channel_voice_ptrs  92
-# not carried (64-bit layout, measure it): value sound_voice_volume        48
 # not carried (64-bit layout, measure it): value event_next            0x84
 # not carried (64-bit layout, measure it): value event_flags           0x2
 # not carried (64-bit layout, measure it): value event_show_flag       0x20
@@ -204,7 +209,6 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value switch_desc_via       0x8
 # not carried (64-bit layout, measure it): value switch_flags_at       0x1a
 # not carried (64-bit layout, measure it): value switch_polarity_at    0x1c
-# not carried (64-bit layout, measure it): value countdown_step -1
 # not carried (64-bit layout, measure it): value backdrop_surface 1
 # not carried (64-bit layout, measure it): value lamp_slot_size       40
 # not carried (64-bit layout, measure it): value lamp_slot_level      2
@@ -256,6 +260,13 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value place_flag_completed_2       68
 # not carried (64-bit layout, measure it): value done_flag_0                  66
 # not carried (64-bit layout, measure it): value coop_ball_msg          1255
+value sound_channel_count       8    # the 64-bit sound engine's (PAD-1282)
+value sound_channel_size        288    # the 64-bit sound engine's (PAD-1282)
+value sound_channel_request     272    # the 64-bit sound engine's (PAD-1282)
+value sound_channel_voices      276    # the 64-bit sound engine's (PAD-1282)
+value sound_channel_bus         277    # the 64-bit sound engine's (PAD-1282)
+value sound_channel_voice_ptrs  144    # the 64-bit sound engine's (PAD-1282)
+value sound_voice_volume        56    # the 64-bit sound engine's (PAD-1282)
 value ball_end_event 0x34    # the end of a ball, from the bus (no ball_end site on Spike 3)
 
 # ---- events: the framework's bus ids (the dispatch's range is the same on both builds) ----
@@ -298,7 +309,11 @@ switch 57   0x8000000          Force target bottom
 switch 58   0x10000000         Force target top
 switch 59   0x20000000         Yoda mystery target
 
+# ---- callouts: request ids + 2 on Spike 3 (112 of the 130 constant ids Spike 2's code passes to the callout are there at + 2) ----
+callout countdown           170
+value countdown_step -1
+
 # ---- text ----
 text example_start_shot     Death star target
 
-# not carried (to measure on Spike 3): 1 callout, 68 lamp, 3 scene, 21 text
+# not carried (to measure on Spike 3): 68 lamp, 3 scene, 21 text

@@ -259,7 +259,7 @@ def test_the_runtime_arms_the_sound_log_right_after_the_port_gate_and_stops_ther
     arm = src[src.index("static int soundlog_arm(void)"):src.index("static void pad_mode_start(void)")]
     assert 'pm_trigger("soundlog.only")' in arm and 'pm_trigger("soundlog.on")' in arm
     # its own allowance: mode.log's 40000 lines would end a long session's list
-    assert "sound_say(r[0], r[2]);" in src
+    assert "sound_say(WORKER_REQ(r), WORKER_N(r));" in src
     # round 2: the recording it played - the record key looked up just after the request, as the game asked
     look = src[src.index("static void on_sound_lookup(pm_reg *r)"):]
     first = look.split("\n")[2]

@@ -2611,7 +2611,10 @@ def profile_from_port(path):
     elif not measured.get("clip_proven"):
         no("clip", "A clip added to %(label)s's video bank has not been seen on the screen in "
                    "the emulator yet.")
-    if "own-sound" not in runtime:
+    if arch == "a64":                         # PAD-1282: spike3_modes writes no own sound (Spike 2's sound bank)
+        no("own_sound", "A sound of the mode's own cannot go on a %(label)s card yet: the app builds "
+                        "those into Spike 2's sound bank. The game's own callouts and sounds play.")
+    elif "own-sound" not in runtime:
         no("own_sound", "The app has not found how %(label)s looks up its sounds, so a sound of "
                         "the mode's own cannot play.")
     elif not callouts.get("time_up") and not end_sound_carried(game, version):

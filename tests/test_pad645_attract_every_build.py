@@ -363,14 +363,14 @@ def test_the_runtime_has_the_games_own_sound_at_a_press_play_the_silence():
     edge = edge[:edge.index("\n}\n")]
     assert edge.index("att.edge_at = now;") < edge.index("/* the release */")
     # the worker's entry: any request but the carrier, within ATT_QUIET_MS of the edge, not in a game
-    assert "if (att_live) att_worker(r[0]);" in c
+    assert "if (att_live) att_worker(WORKER_REQ(r));" in c
     worker = c[c.index("static void att_worker(unsigned request)\n{"):]
     worker = worker[:worker.index("\n}\n")]
     assert "request == att.request" in worker and "ATT_QUIET_MS" in worker and "pm_in_game()" in worker
     # its record lookups take the silence, never the carrier's own
     look = c[c.index("static int att_lookup(pm_reg *r)\n{"):]
     look = look[:look.index("\n}\n")]
-    assert "!key_is(k, att.key)" in look and "r[1] = (unsigned)(unsigned long)att.quiet;" in look
+    assert "!key_is(k, att.key)" in look and "LOOKUP_TAKE(r, att.quiet);" in look
     # the worker is hooked for it; without one the game's sound plays too
     arm = c[c.index("static void att_arm(void)"):]
     arm = arm[:arm.index("\n}\n")]

@@ -109,3 +109,46 @@ Proof: a TRENCH RUN mode (3 trigger shots, 30 s, 5 award shots) on the Spike 3 e
 41, muted and hidden, with `prebuilt/mode64.so` and this port: it started on the third trigger,
 scored 1M..5M on five shots (score 26,630 -> 15,080,990) and ended when its time ran out, the
 game running on to the cap. Tests: tests/test_pad1271_spike3_port.py.
+
+## Callouts and sounds on Spike 3 (PAD-1282)
+
+The six sound sites (callout, callout_nth, sound_play, sound_nth, sound_active, sound_stop) are plain calls into
+the game with a u16 request in w0 and were 64-bit already; what crashed was the runtime's sound features around
+them, which read the engine's structs at Spike 2's offsets. The Spike 3 engine has the same structs with 8-byte
+pointers, read in Star Wars ELG 1.10's own code and the same in Pokemon LE 0.82, Fallout LE 0.82 and Star Wars
+2025 LE 0.96 (every Spike 3 title in the library):
+
+| struct | Spike 2 | Spike 3 |
+|---|---|---|
+| request record | 20 bytes: 3 pointers, sid list at +8, priority +16, flags +17, +19 = 0 | 32 bytes: sid list at +16, priority +28, flags +29, +31 = 0 (the same 8 tail bytes as the Spike 2 build's, for every request) |
+| channel (8 of them) | 196 bytes: request +184, voice bits +188, bus +189, voice pointers (4 bytes) +92 | 288 bytes: request +272, voice bits +276, bus +277, voice pointers (8 bytes) +144 |
+| voice | volume step u16 +48 | +56 |
+
+pad_mode_runtime.c takes the record layout from `REQ_*` (pointer-sized, so Spike 2's constants fold to what they
+were), reads the voice pointers as `pm_addr`, holds the request table in a `pm_addr` (a PIE's addresses do not fit
+an `unsigned`), and masks the worker's request to w0's u16. **sound_lookup** on Spike 3 is the bank map's find,
+and takes the 8-byte record key BY VALUE in x1 (Spike 2: its address in r1): every lookup hook reads and swaps
+the key through `LOOKUP_KEY` / `LOOKUP_TAKE`. Two 32-bit-only pieces stay off on 64-bit, each logging so: the
+own-sound "which of these plays" patch (32-bit instruction match) and music modes (32-bit asset descriptors;
+music modes ride Spike 2's delivery anyway). Spike 2's mode.so is byte-identical.
+
+s3port.py could not pair sound_worker / sound_resolve / sound_lookup; `sound_engine()` reads them off the program
+from the placed callout (the worker is the callout's call; resolve the worker's call that takes a stack slot;
+lookup the find called after the record key's bank bits are ORed in), with the request table and count (the
+worker's GOT loads) and the channel table (sound_stop's, checked against sound_active's +272). The channel values
+are carried with it. Spike 3's request ids are Spike 2's + 2 on ELG 1.10 (two requests added early):
+`request_shift` reads that off the constant ids both builds pass to the callout (112 of 130 at +2), and the
+callouts are carried renumbered (countdown 168 -> 170, step -1).
+
+Proof (2026-11-14, Spike 3 rig slot 82, hidden and MUTED, `PAD_S3_AUDIO_OUT=1` keeping the PCM): a mode file
+SOUND CHECK (prebuilt mode64.so) started on three Death Star hits, played request 153 at its start (sound_play;
+its record read priority 3 flags 1, the card's bytes), callout 168 at 15 s left and the countdown 166..170 at
+5..1 s (callout_nth), each taken by the game's own worker (`[pad] sound <request>`, the 64-bit worker hook) with
+the engine's record lookups after them (the 64-bit lookup hook). The SDK's sound_fire_mode.c in attract: request
+153 on bus 0x04 active while it played and 0 after; callout 168 and callout_nth 170 n=2 / n=4 (= 168 / 166) on
+the voice bus 0x02; sound_stop cut 153 within 80 ms; a 1500 ms fade of request 24 ramped the PCM from 67 dB to
+silence over exactly 1.5 s (the voice volume at +56), where a stop of the same sound cut it in under 100 ms.
+Tests: tests/test_pad1282_spike3_sound.py.
+
+Own sounds on a Spike 3 card are still not written (they are carriers in Spike 2's sound bank); the Modes tab says
+so for a Spike 3 card instead of naming a missing callout.

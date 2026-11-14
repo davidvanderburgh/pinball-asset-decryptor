@@ -877,7 +877,7 @@ int pm_in_game(void)
  * refuses the port (NOT THIS GAME'S PORT) instead of passing 64-bit points into a 32-bit function. */
 uint64_t pm_score(unsigned player)
 {
-    unsigned s32 = data("scores32"), s64 = data("scores");
+    pm_addr s32 = data("scores32"), s64 = data("scores");
     if (player < 1 || player > 4) return 0;
     if (s32) return ((const unsigned *)(unsigned long)s32)[player - 1];
     if (!s64) return 0;
@@ -891,7 +891,8 @@ uint64_t pm_score(unsigned player)
  * (tests lift it verbatim) */
 static unsigned score32_points(unsigned player, uint64_t points)
 {
-    unsigned s32 = data("scores32"), at = data("score_mult"), mult = 1;
+    pm_addr s32 = data("scores32"), at = data("score_mult");
+    unsigned mult = 1;
     uint64_t room;
     if (!s32 || player < 1 || player > 4) return 0;
     room = 0xffffffffull - ((const unsigned *)(unsigned long)s32)[player - 1];
@@ -902,7 +903,8 @@ static unsigned score32_points(unsigned player, uint64_t points)
 
 uint64_t pm_score_add(unsigned player, uint64_t points)
 {
-    unsigned f32 = fn("score_add32"), f = fn("score_add"), n;
+    pm_addr f32 = fn("score_add32"), f = fn("score_add");
+    unsigned n;
     if (player < 1 || player > 4) return 0;
     if (f32) {
         n = score32_points(player, points);
@@ -918,7 +920,7 @@ uint64_t pm_score_add(unsigned player, uint64_t points)
  * multiplier, which a 64-bit port does not name: a loss equal to the score would pass 0. */
 uint64_t pm_score_sub(unsigned player, uint64_t points)
 {
-    unsigned s32 = data("scores32"), s64 = data("scores"), f32 = fn("score_add32"), f = fn("score_add");
+    pm_addr s32 = data("scores32"), s64 = data("scores"), f32 = fn("score_add32"), f = fn("score_add");
     uint64_t have = pm_score(player), take = points < have ? points : have;
     if (player < 1 || player > 4 || !take) return 0;
     if (s32) {                           /* the table pm_score reads: the game's own RW data */
@@ -1089,13 +1091,13 @@ unsigned pm_callout_id(const char *role)
 
 void pm_callout(unsigned id)
 {
-    unsigned f = fn("callout");
+    pm_addr f = fn("callout");
     if (f && id) ((void (*)(unsigned))(unsigned long)f)(id);
 }
 
 void pm_callout_nth(unsigned id, unsigned n)
 {
-    unsigned f = fn("callout_nth");
+    pm_addr f = fn("callout_nth");
     /* item 163: a title whose countdown list opens with something else names the clip "one" is
      * in (Iron Maiden 1.16's request 351: a sting, then "One." .. "Five"): `value countdown_first 1`.
      * A title that says each number with a request of its own names the "one" request and the id
@@ -1122,7 +1124,7 @@ static void sound_fade_finish(unsigned request);   /* item 150 follow-up, below 
 
 int pm_sound(unsigned request)
 {
-    unsigned f = fn("sound_play");
+    pm_addr f = fn("sound_play");
     if (!f || !request) return 0;
     sound_fade_finish(request);      /* a fade still running on this request ends first */
     ((int (*)(unsigned))(unsigned long)f)(request);
@@ -1161,13 +1163,13 @@ int pm_hit_sound(int n)
 
 int pm_sound_active(unsigned request)
 {
-    unsigned f = fn("sound_active");
+    pm_addr f = fn("sound_active");
     return f && request ? ((int (*)(unsigned))(unsigned long)f)(request) != 0 : 0;
 }
 
 int pm_sound_stop(unsigned request)
 {
-    unsigned f = fn("sound_stop");
+    pm_addr f = fn("sound_stop");
     return f && request ? ((int (*)(unsigned))(unsigned long)f)(request) != 0 : 0;
 }
 
@@ -1247,7 +1249,7 @@ int pm_sound_sid(unsigned request, unsigned sid)
  * each, 0 = full, 255 = -86 dB, the codec's own table) the codec reads for every block. */
 static unsigned char *sound_channel(int i)
 {
-    unsigned base = data("sound_channels");
+    pm_addr base = data("sound_channels");
     long size = pm_port_value("sound_channel_size", 0), n = pm_port_value("sound_channel_count", 8);
     if (!base || size <= 0 || i < 0 || i >= n) return 0;
     return (unsigned char *)(unsigned long)(base + (unsigned)i * (unsigned)size);
@@ -1973,7 +1975,7 @@ static unsigned char *lamp_group_new(unsigned prio)
 /* the game's active layers, bottom to top: the list head is the word after the free list's */
 static unsigned char *lamp_first_layer(void)
 {
-    unsigned heads = data("lamp_layers");
+    pm_addr heads = data("lamp_layers");
     return heads ? (unsigned char *)(unsigned long)*(unsigned *)(unsigned long)(heads + 4) : 0;
 }
 
@@ -3505,7 +3507,7 @@ static unsigned ck_game_display(void)
 
 static long long ck_ms(const char *which, void *surf)
 {
-    unsigned f = fn(which);               /* PAD-725: a port without the length (a derived one) says 0: not known */
+    pm_addr f = fn(which);               /* PAD-725: a port without the length (a derived one) says 0: not known */
     return f ? ((long long (*)(void *))(unsigned long)f)(surf) : 0;
 }
 
@@ -7543,7 +7545,7 @@ static int intro_on(unsigned long t_close, unsigned long *started, int *seen)
 /* PAD-733: the game's ball search put off for a tick of a hold of ours, as its own holds do (above) */
 static void scoop_search_off(void)
 {
-    unsigned at = data("ball_search_time");
+    pm_addr at = data("ball_search_time");
     if (fn("ball_search_delay") && at && maps_has(at, 1, MAP_R | MAP_GAME))
         ((void (*)(unsigned))(unsigned long)fn("ball_search_delay"))(*(volatile unsigned char *)(unsigned long)at);
 }
@@ -7714,7 +7716,7 @@ static struct {
 
 static unsigned shield_obj(void)
 {
-    unsigned obj = data("shield_motor");
+    pm_addr obj = data("shield_motor");
     if (!(can & PM_CAN_SHIELD) || !obj) return 0;
     if (*(const unsigned *)(unsigned long)obj != (unsigned)pm_port_value("shield_motor_vptr", 0)) return 0;
     return obj;
@@ -7983,7 +7985,7 @@ static struct {
 
 static unsigned building_obj(void)
 {
-    unsigned obj = data("building_stepper");
+    pm_addr obj = data("building_stepper");
     if (!(can & PM_CAN_BUILDING) || !obj) return 0;
     if (*(const unsigned *)(unsigned long)obj != (unsigned)pm_port_value("building_vptr", 0)) return 0;
     return obj;
@@ -8338,7 +8340,7 @@ int pm_game_show(int n)
     arg = pm_port_value(key, -1);
     pm_snprintf(key, sizeof key, "show_%d", n);
     if (arg >= 0) {                                     /* PAD-642: the game's own call starts this one */
-        unsigned at = fn(key);
+        pm_addr at = fn(key);
         ((void (*)(unsigned))(unsigned long)at)((unsigned)arg);
         show_now.n = n;
         show_now.call = 1;
@@ -8346,7 +8348,7 @@ int pm_game_show(int n)
         pm_snprintf(key, sizeof key, "show_secs_%d", n);       /* stopped at its length to the tick, as the game's */
         show_now.limit = pm_port_value(key, 0) > 0 ? (unsigned long)pm_port_value(key, 0) * 1000ul : SHOW_MAX_MS;
         if (show_now.limit > SHOW_MAX_MS) show_now.limit = SHOW_MAX_MS;   /* own caller stops it (0x139448: 2 s) */
-        say("show %d (%s): the game's own light show, started by its own call (0x%08x, %ld)", n,
+        say("show %d (%s): the game's own light show, started by its own call (0x%08" PMA ", %ld)", n,
             name ? name : "unnamed", at, arg);
         return 1;
     }
@@ -8918,7 +8920,7 @@ int pm_game_wizards(void)
  * there in the middle of a henchman mode, which the game's own mini-wizards wait out: its start waits on this now. */
 int pm_game_wizard_way(void)
 {
-    unsigned f = fn("wizard_way");
+    pm_addr f = fn("wizard_way");
     if (!f || !pm_in_game()) return -1;
     return ((int (*)(void))(unsigned long)f)() ? 1 : 0;
 }
@@ -10567,13 +10569,13 @@ static long stock161_value(const char *name)
 }
 static unsigned stock161_site(const char *name)
 {
-    unsigned f = fn(name);
+    pm_addr f = fn(name);
     if (!f) stock161_missing(name);
     return f;
 }
 static unsigned stock161_data(const char *name)
 {
-    unsigned d = data(name);
+    pm_addr d = data(name);
     if (!d) stock161_missing(name);
     return d;
 }
@@ -11471,7 +11473,7 @@ static unsigned roster_city_rec(unsigned idx, long vec_at, unsigned rec)
 static unsigned roster_city_of(unsigned p)
 {
     long at = pm_port_value("roster_city_index_at", -1);
-    unsigned rc = data("rule_cities");
+    pm_addr rc = data("rule_cities");
     return rc && at >= 0 && p >= 1 && p <= 4 ? rw(rc + (unsigned)at + 4 * p) : 64;
 }
 
@@ -12639,7 +12641,7 @@ static int place_flag_set(long n)
 
 static void place_audit(long n)
 {
-    unsigned f = fn("audit_add");
+    pm_addr f = fn("audit_add");
     if (f && n > 0) ((void (*)(unsigned, unsigned))(unsigned long)f)((unsigned)n, 1u);
 }
 
@@ -13412,7 +13414,7 @@ static void chg_began(void)
 static void chg_mode_ended(int ran)
 {
     int is_taker = ran && current && current == chg.by, state = chg_state();
-    unsigned f = fn("challenge_end_ball");
+    pm_addr f = fn("challenge_end_ball");
     if (state != 2 || !is_taker) return;
     chg.state = 3;
     if (!chg_ends_ball(state, is_taker, pm_in_game(), beh.asking)) {
@@ -13423,7 +13425,7 @@ static void chg_mode_ended(int ran)
         say("challenge: its mode ended - this port has no challenge_end_ball, so the ball plays on");
         return;
     }
-    say("challenge: its mode ended - the ball ends now, as the game's own challenges do (0x%08x)", f);
+    say("challenge: its mode ended - the ball ends now, as the game's own challenges do (0x%08" PMA ")", f);
     chg_end_owed_ms = pm_ms();
     chg_end_owed = 1;                /* made from the game's next bus call (on_event_dispatch), else the tick's */
 }
@@ -13435,7 +13437,7 @@ static void chg_mode_ended(int ran)
  * second), and from the tick as before only when none comes within a second. */
 static void chg_end_ball_now(const char *from)
 {
-    unsigned f = fn("challenge_end_ball");
+    pm_addr f = fn("challenge_end_ball");
     if (!__sync_bool_compare_and_swap(&chg_end_owed, 1, 0)) return;
     if (!f || !pm_in_game()) return;
     say("challenge: the ball ended from %s, %lu ms after the mode", from, pm_ms() - chg_end_owed_ms);
@@ -14131,7 +14133,7 @@ static void chg_pages_back(void)
  * its last scores on the same page function under a category of its own, 55 - not one of the table's 38 */
 static int chg_scores_count(void)
 {
-    unsigned at = data("challenge_scores_count");
+    pm_addr at = data("challenge_scores_count");
     unsigned n = at && maps_has(at, 4, MAP_R) ? *(const unsigned *)(unsigned long)at : 64u;
     return n > 64u || n < 2u ? 64 : (int)n;                      /* not counted yet: no limit */
 }
@@ -14572,7 +14574,7 @@ static void attract_arm(void)
     {   /* clip v2: the attract video element, when the port names it */
         static const char *const v_s[] = { "attract_video_play", "attract_video_playing", "attract_video_update",
                                            "attract_video_draw", "attract_video_yield", 0 };
-        unsigned at = data("attract_video");
+        pm_addr at = data("attract_video");
         if (at && have_sites(v_s) && maps_has(at, 4, MAP_R)) {
             for (k = 0; v_s[k] && fn(v_s[k]); k++) ;
             if (!v_s[k]) {
@@ -15503,11 +15505,17 @@ static void events_arm(void)
 static volatile unsigned switch_fired[N_SWITCH_IDS];
 static unsigned switch_delivered[N_SWITCH_IDS];
 static unsigned switch_at;                    /* the register holding the switch id */
+static long hit_log_left;                     /* PAD-1271: value switch_hit_log N: log the first N hits (proving a port) */
 
 static void on_switch_hit(pm_reg *r)
 {
     static volatile int said;
-    unsigned id = r[switch_at];
+    unsigned id = (unsigned)r[switch_at];
+#if PM_A64
+    id &= 0xffffu;    /* PAD-1271: a u16 argument; 64-bit ARM leaves the register's upper bits to the caller */
+#endif
+    if (hit_log_left > 0 && __sync_sub_and_fetch(&hit_log_left, 1) >= 0)
+        say("switch hit: switch %u", id);
     if (id < N_SWITCH_IDS) lit_hold_check(id);           /* PAD-503 */
     if (id < N_SWITCH_IDS) __sync_fetch_and_add(&switch_fired[id], 1u);
     if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
@@ -15608,7 +15616,7 @@ static unsigned dto_shooter_hits(void)
 
 static void dto_flippers(int on)
 {
-    unsigned f = fn(on ? "flippers_on" : "flippers_off");
+    pm_addr f = fn(on ? "flippers_on" : "flippers_off");
     if (f) ((void (*)(void))(unsigned long)f)();
 }
 
@@ -15618,7 +15626,7 @@ static void dto_flippers(int on)
  * countdown at +0 (ticks; the serve only ever raises it) and a grace span after it at +4 (0xbb); both 0 = no save */
 static void dto_save_off(void)
 {
-    unsigned at = data("multiball_record");
+    pm_addr at = data("multiball_record");
     volatile unsigned *r;
     if (!at || !maps_has(at, 8, MAP_R)) return;      /* the game's .bss: no file of its own (not MAP_GAME) */
     r = (volatile unsigned *)(unsigned long)at;
@@ -15962,6 +15970,7 @@ static void switches_arm(void)
     const char *why = 0;
     if (!port.n_switch) return;                  /* a switch_hit site with no switch lines: nothing to hand on */
     switch_at = at >= 0 && at <= 3 ? (unsigned)at : 0;
+    hit_log_left = pm_port_value("switch_hit_log", 0);
     for (id = 0; id < N_SWITCH_IDS; id++) switch_delivered[id] = switch_fired[id];
     for (i = 0; i < port.n_site; i++) sites += is_switch_hit(port.site[i].name);
     /* PAD-645: `value switch_edge_shots 0` = the drain is there for the flipper buttons' sounds in attract alone
@@ -16679,7 +16688,7 @@ static int coop_msg_find(const char *words)
 static void coop_ball_find(void)
 {
     long v = pm_port_value("coop_ball_msg", -1);              /* the port's (portcoop.py), checked by its words */
-    unsigned t = data("message_table");
+    pm_addr t = data("message_table");
     const char **group;
     if (v >= 0 && v < 20000 && t && maps_has(t + 4u * (unsigned)v, 4, MAP_R)) {
         group = *(const char ***)(unsigned long)(t + 4u * (unsigned)v);
@@ -18936,7 +18945,7 @@ static void ci_language_say(void)
 
 static volatile unsigned *ci_language_word(unsigned p)
 {
-    unsigned base = data("language_player");
+    pm_addr base = data("language_player");
     return base ? (volatile unsigned *)(unsigned long)(base + 4u * p) : 0;
 }
 
@@ -22548,9 +22557,10 @@ static int insider_blocked(const char *endpoint)
 /* ---- PAD-698: the achievement query's message type, out of the game's own code ---------------- */
 static const char INSIDER_ACHQ_WORDS[] = "Failed to begin construction of GAME_ACHIEVEMENT_QUERY message";
 static int insider_achq = -1;             /* agent_begin's r2 for the achievement query; -1 = not found */
-static unsigned insider_achq_at;          /* where its sender loads those words */
+static pm_addr insider_achq_at;           /* where its sender loads those words */
 static unsigned insider_achq_held;
 
+#if !PM_A64                               /* PAD-1271: the 32-bit look; 64-bit ARM has its own below */
 /* a word of the game's code, 0 when it is not mapped readable */
 static unsigned code_word(unsigned at)
 {
@@ -22608,37 +22618,93 @@ static int achq_type_before(unsigned at, unsigned begin)
     return -1;
 }
 
+#endif
+#if PM_A64
+/* PAD-1271: the same two looks on 64-bit ARM (Spike 3). The sender makes the words' address with an adrp and an
+ * `add xN, xN, #lo12` (the add is `at`), and calls agent_begin a few instructions before with `mov w2, #type`
+ * (Star Wars ELG 1.10: mov w2, #0x1c; 13 instructions; bl; 5 instructions; adrp .. add). */
+static unsigned code_word64(pm_addr at)
+{
+    return maps_has(at, 4, MAP_R) ? *(const unsigned *)at : 0;
+}
+
+/* 1 when the instruction at `at` is `add xN, xN, #lo12(str)` and an `adrp xN, page(str)` is up to 8 before it
+ * (tests lift it verbatim) */
+static int achq_loads_a64(pm_addr at, pm_addr str)
+{
+    unsigned w = code_word64(at), rn, j, w2;
+    long imm;
+    if ((w & 0xffc00000u) != 0x91000000u || ((w >> 10) & 0xfffu) != (unsigned)(str & 0xfffu)) return 0;
+    rn = (w >> 5) & 31u;
+    for (j = 1; j <= 8; j++) {
+        w2 = code_word64(at - 4 * j);
+        if ((w2 & 0x9f00001fu) != (0x90000000u | rn)) continue;
+        imm = (long)((((w2 >> 5) & 0x7ffffu) << 2) | ((w2 >> 29) & 3u));
+        if (imm & (1l << 20)) imm -= 1l << 21;
+        return ((at - 4 * j) & ~(pm_addr)0xfff) + (pm_addr)(imm << 12) == (str & ~(pm_addr)0xfff);
+    }
+    return 0;
+}
+
+/* from `at`, back up to 16 instructions to `bl agent_begin`, then up to 16 more to the `mov w2, #type` (a movz of
+ * w2 or x2) it was called with. The type, or -1. (tests lift it verbatim) */
+static int achq_type_before_a64(pm_addr at, pm_addr begin)
+{
+    unsigned b, m, w;
+    long off;
+    for (b = 1; b <= 16; b++) {
+        w = code_word64(at - 4 * b);
+        if ((w & 0xfc000000u) != 0x94000000u) continue;              /* bl */
+        off = (long)(w & 0x03ffffffu);
+        if (off & (1l << 25)) off -= 1l << 26;
+        if (at - 4 * b + (pm_addr)(off * 4) != begin) continue;
+        for (m = 1; m <= 16; m++) {
+            w = code_word64(at - 4 * b - 4 * m);
+            if ((w & 0x7fe0001fu) == 0x52800002u) return (int)((w >> 5) & 0xffffu);   /* movz w2/x2, #imm */
+        }
+        return -1;
+    }
+    return -1;
+}
+#endif
+
 /* the achievement query's type on this game: the words in the game's code mappings, then the one
  * instruction that loads them with `bl agent_begin` and `mov r2, #type` before it. -1 = not found. */
-static int achq_find(unsigned begin)
+static int achq_find(pm_addr begin)
 {
     const unsigned how = MAP_R | MAP_X | MAP_GAME;
+    /* PAD-1271: a Spike 3 game's words are in its read-only data, a mapping of its own that is not executable */
+    const unsigned str_how = PM_A64 ? MAP_R | MAP_GAME : how;
     const unsigned n = sizeof INSIDER_ACHQ_WORDS - 1;
-    unsigned str = 0, at;
+    pm_addr str = 0, at;
     int i, t;
     for (i = 0; i < n_maps && !str; i++) {
         const char *p, *e;
-        if ((maps[i].how & how) != how || maps[i].hi - maps[i].lo < n) continue;
+        if ((maps[i].how & str_how) != str_how || maps[i].hi - maps[i].lo < n) continue;
         p = (const char *)maps[i].lo;
         e = (const char *)maps[i].hi - n;
         for (; p <= e; p++)
             if (*p == 'F' && p[n - 1] == 'e') {
                 unsigned k;
                 for (k = 1; k < n && p[k] == INSIDER_ACHQ_WORDS[k]; k++) ;
-                if (k == n) { str = (unsigned)(unsigned long)p; break; }
+                if (k == n) { str = (pm_addr)(unsigned long)p; break; }
             }
     }
     if (!str) return -1;
     for (i = 0; i < n_maps; i++) {
         if ((maps[i].how & how) != how) continue;
-        for (at = (unsigned)maps[i].lo; at + 4 <= maps[i].hi; at += 4) {
+        for (at = (pm_addr)maps[i].lo; at + 4 <= maps[i].hi; at += 4) {
             unsigned w = *(const unsigned *)(unsigned long)at;      /* a cheap look before achq_loads */
+#if PM_A64
+            if ((w & 0xffc00000u) != 0x91000000u || ((w >> 10) & 0xfffu) != (unsigned)(str & 0xfffu)) continue;
+            if (!achq_loads_a64(at, str) || (t = achq_type_before_a64(at, begin)) < 0) continue;
+#else
             if (!((w & 0x0ff00000u) == 0x03000000u && (w & 0xfffu) == (str & 0xfffu)) &&
                 (w & 0x0f7f0000u) != 0x051f0000u) continue;
-            if (achq_loads(at, str) && (t = achq_type_before(at, begin)) >= 0) {
-                insider_achq_at = at;
-                return t;
-            }
+            if (!achq_loads(at, str) || (t = achq_type_before(at, begin)) < 0) continue;
+#endif
+            insider_achq_at = at;
+            return t;
         }
     }
     return -1;
@@ -22730,7 +22796,7 @@ static int insider_arm(void)
     }
     say("insider: score reports stay on this machine (the game session, high scores and game "
         "events; agent_header 0x%08" PMA ", agent_begin 0x%08" PMA "), and the game gets no achievements to "
-        "award (the achievement query, message type %d, loaded at 0x%08x, is held back); the login "
+        "award (the achievement query, message type %d, loaded at 0x%08" PMA ", is held back); the login "
         "and the rest of Insider Connected are untouched", fn("agent_header"), fn("agent_begin"),
         insider_achq, insider_achq_at);
     {   /* round 2: a card of co-op and nothing else holds back only while CO-OP PLAY says On */

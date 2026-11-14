@@ -95,6 +95,20 @@ export PAD_S3_I2C
 
 TREE=$(python3 "$S/s3store.py" path "$CARD") || {
     echo "[s3run] the card is not in the Spike 3 store yet: s3store.py build $CARD" >&2; exit 1; }
+# A MULTI-BOOT CARD (PAD-1263, MULTIBOOT.md): /games/game is the boot menu's
+# hook and every image's games tree is whole under games/pad/imgN. The game
+# itself still starts from /games/game (the hook runs the menu and becomes the
+# chosen image's game); the readers on this side (switch list, bridge,
+# playfield) read the tree of PAD_S3_IMAGE, else the menu's default= image.
+GT=$TREE/games
+if [ -f "$TREE/games/pad/images.conf" ]; then
+    MB_IMG=${PAD_S3_IMAGE:-$(awk -F= '/^[ 	]*default[ 	]*=/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "$TREE/games/pad/images.conf")}
+    MB_DIR=$(awk -F'|' -v want="${MB_IMG:-0}" '/^[ 	]*image[ 	]*=/ { if (i == want) { sub(/^[ 	]*image[ 	]*=[ 	]*/, "", $1); gsub(/[ 	]+$/, "", $1); print $1; exit } i++ }' "$TREE/games/pad/images.conf")
+    case "$MB_DIR" in ""|*/*|.*) MB_DIR=img0 ;; esac
+    [ -e "$TREE/games/pad/$MB_DIR/game" ] || MB_DIR=img0
+    GT=$TREE/games/pad/$MB_DIR
+    echo "[s3run] multi-boot card: the menu runs first; the host side reads image ${MB_IMG:-0} ($MB_DIR)"
+fi
 SD=/var/tmp/pad-s3/slot$SLOT
 LOG=$SD/run.log
 [ "$FRESH" = 1 ] && rm -rf "$SD"
@@ -173,7 +187,7 @@ if [ "$BRIDGE" = 1 ]; then
     # two slingshots, a flipper EOS. The stale list goes; the new one is the
     # bridge's own derivation, written again (the same) when the bridge starts.
     rm -rf "$SD/tables" "$SD/switches.json"; mkdir -p "$SD/tables"
-    python3 "$S/s3bridge.py" --switches "$SD" "$TREE/games/game" 2>&1 | tail -1
+    python3 "$S/s3bridge.py" --switches "$SD" "$GT/game" 2>&1 | tail -1
     # 40 frames, or unbounded with --bus: s3press.py autoguide prunes them
     MAXFR=40; [ "$BUS" = 1 ] && MAXFR=1000000
     # --window: the game on screen, in Spike 2's renderer window, whose
@@ -272,7 +286,7 @@ if [ "$BUS" = 1 ]; then
         BUSPIDS="$!"
     fi
     [ "$WINDOW" = 1 ] && export PAD_S3_PADLED="$SD/dump/padled" PAD_S3_SWTRACE=${PAD_S3_SWTRACE:-1}
-    python3 "$S/s3bridge.py" "$SD" "$TREE/games/spike3/netbridge/netbridge.elf" "$TREE/games/game" > "$SD/s3bridge.out" 2>&1 &
+    python3 "$S/s3bridge.py" "$SD" "$GT/spike3/netbridge/netbridge.elf" "$GT/game" > "$SD/s3bridge.out" 2>&1 &
     BUSPIDS="$BUSPIDS $!"
     # the video decoder (stage 5): s3vid.so hands the game's HEVC/H.264
     # packets to it and its I420 frames go to padglhost through padvid.shm
@@ -322,9 +336,9 @@ if [ "$BUS" = 1 ]; then
         # window is a Windows program the app opens on this line, as for a
         # Spike 2 run whose WSL cannot start one itself.
         if [ "${PAD_S3_PLAYFIELD:-1}" = 1 ]; then
-            TITLE=$(basename "$(dirname "$(readlink "$TREE/games/game")")")
+            TITLE=$(basename "$(dirname "$(readlink "$GT/game")")")
             for i in $(seq 1 50); do [ -s "$SD/tables/game/switch_list.txt" ] && break; sleep 0.1; done
-            python3 "$S/s3pf.py" "$TREE/games/game" "$TREE" "$TITLE" "$SD/tables/$TITLE" \
+            python3 "$S/s3pf.py" "$GT/game" "$TREE" "$TITLE" "$SD/tables/$TITLE" \
                 "$SD/tables/game/switch_list.txt" 2>&1 | sed 's/^/[s3run] /'
             chmod -R a+rX "$SD/tables" 2>/dev/null
             if [ -s "$SD/tables/$TITLE/device_xy.txt" ]; then

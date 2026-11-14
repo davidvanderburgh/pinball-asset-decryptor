@@ -38,6 +38,8 @@ _VERSION = (4, 0, 0)
 
 _DEV_CREATE, _DEV_REMOVE, _DEV_SUSPEND, _TABLE_LOAD = 3, 4, 6, 9
 _EXISTS_FLAG = 1 << 2
+#: DM_READONLY_FLAG: the table maps a read-only device (a ``losetup -r`` loop)
+_READONLY_FLAG = 1 << 0
 
 CONTROL = "/dev/mapper/control"
 
@@ -86,14 +88,17 @@ def _decode_dev(dev):
 
 
 def open_crypt(name, device, offset_sectors, length_sectors, key,
-               sector_size=512, node_dir="/dev/mapper"):
-    """Map *device* through dm-crypt as *name*; returns the block node path."""
+               sector_size=512, node_dir="/dev/mapper", readonly=False):
+    """Map *device* through dm-crypt as *name*; returns the block node path.
+    *readonly*: a read-only mapping (needed over a ``losetup -r`` loop, which
+    the kernel will not open for writing; PAD-1263 reads source cards so)."""
     out = _call(_DEV_CREATE, _header(name, _DM_SIZE))
     dev = struct.unpack(_DM_FMT, out)[10]
     try:
         table = crypt_table(device, offset_sectors, length_sectors, key,
                             sector_size=sector_size)
-        _call(_TABLE_LOAD, _header(name, _DM_SIZE + len(table), 1) + table)
+        _call(_TABLE_LOAD, _header(name, _DM_SIZE + len(table), 1,
+                                   flags=_READONLY_FLAG if readonly else 0) + table)
         _call(_DEV_SUSPEND, _header(name, _DM_SIZE))           # resume
     except BaseException:
         close_crypt(name)

@@ -244,6 +244,8 @@ def test_bridge_lights_the_backglass_bulbs_with_backbox_gi(tmp_path):
     pc, b = _bridge(tmp_path, kit)
     fake = FakeB2S()
     assert b.b2s_attach(fake, direct=True)
+    b._poll_b2s(_data(pc, {}))                              # never lit yet: the backglass as B2S has it
+    assert fake.got == []
     b._poll_b2s(_data(pc, {(0, 0): 200}))
     b._poll_b2s(_data(pc, {(0, 0): 180}))                   # still on: nothing again
     b._poll_b2s(_data(pc, {}))

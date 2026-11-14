@@ -1776,6 +1776,7 @@ class Bridge:
             self.b2s = None
             return False
         self._b2s_state = {}
+        self._b2s_gi_seen = False
         log("B2S.Server handed over; BACKBOX GI bulbs for %s: %s"
             % (self.title, ", ".join(self.cab["gi_bulbs"].get(self.title, [])) or "none named"))
         return True
@@ -1787,12 +1788,20 @@ class Bridge:
 
     def _poll_b2s(self, data):
         """BACKBOX GI on the backglass: each bulb the kit names for the
-        title lit while the backbox's GI is, out while it is out."""
+        title lit while the backbox's GI is, out while it is out. Not before
+        the run has shown it lit once: jaws_le's attract never lit it under
+        the emulator (node 0 dark throughout, 2026-11-14), and a backglass
+        put dark by a light the run does not drive would be worse than one
+        left as B2S shows it."""
         bulbs = self.cab["gi_bulbs"].get(self.title)
         leds = self.cab_leds.get("backbox_gi")
         if not bulbs or not leds:
             return
         on = 1 if max(self._led_level(data, nd, ix) for nd, ix in leds) >= LAMP_ON else 0
+        if on:
+            self._b2s_gi_seen = True
+        elif not getattr(self, "_b2s_gi_seen", False):
+            return
         for name in bulbs:
             if self._b2s_state.get(name) != on:
                 self._b2s_state[name] = on

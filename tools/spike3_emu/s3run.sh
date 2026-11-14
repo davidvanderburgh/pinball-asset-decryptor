@@ -108,6 +108,9 @@ if [ -f "$TREE/games/pad/images.conf" ]; then
     [ -e "$TREE/games/pad/$MB_DIR/game" ] || MB_DIR=img0
     GT=$TREE/games/pad/$MB_DIR
     echo "[s3run] multi-boot card: the menu runs first; the host side reads image ${MB_IMG:-0} ($MB_DIR)"
+    # the hook's and the menu's log where this side can read it: the slot's
+    # /data overlay (the machine keeps it in /tmp)
+    export PADSELECT_LOG=/data/padselect.log
 fi
 SD=/var/tmp/pad-s3/slot$SLOT
 LOG=$SD/run.log

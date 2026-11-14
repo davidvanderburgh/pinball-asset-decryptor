@@ -560,6 +560,22 @@ T0=$(date +%s.%N)
 # flush) ever wrote it: a 30 s boot left game.out EMPTY (PAD-1090, second
 # sweep). `script` gives it a terminal, so it is line-buffered as on the
 # machine's console. stderr stays its own file. TERM at the cap, KILL 5 s on.
+# A MULTI-BOOT CARD IN A CHECKPOINTABLE RUN (PAD-1263): /games/game is the
+# boot menu's hook, a shell script, and the explicit qemu below runs programs
+# only. So the hook runs FIRST, here, under binfmt with the same shims, in its
+# menu-only mode (PADSELECT_NOEXEC: the menu, the choice, the chosen tree bound
+# over /games in this namespace), and the game is then started as any card's:
+# /games/game is by then the chosen image's own program. No bind at all (the
+# hook's exit 3): image 0's game, straight from its directory.
+if [ "$PIVOT" = 1 ] && [ "$PROG" = /games/game ] && [ -f "$R/games/pad/images.conf" ]; then
+    echo "[s3run] multi-boot card: the boot menu first (the game starts once it has chosen)"
+    chroot "$R" ${PRELOAD:-env} PADSELECT_NOEXEC=1 /bin/sh /games/pad/padselect.sh < /dev/null
+    MB_RC=$?
+    if [ "$MB_RC" != 0 ] || [ "$(readlink "$R/games/game")" = pad/padselect.sh ]; then
+        PROG=/games/pad/img0/game
+    fi
+    echo "[s3run] boot menu done (exit $MB_RC): starting $PROG"
+fi
 printf '%q ' "$PROG" "$@" > "$SD/.argv"
 if [ "$PIVOT" = 1 ]; then
     # THE CHECKPOINTABLE EXEC: everything the game holds must be inside its

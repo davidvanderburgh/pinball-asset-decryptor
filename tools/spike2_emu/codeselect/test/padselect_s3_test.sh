@@ -72,6 +72,24 @@ run "GAME img0 ARG" "no images.conf boots img0" CHOICE=1
 printf 'image=../x|A|a\nimage=img1|B|b\n' > "$T/games/pad/images.conf"
 run "GAME img0 ARG" "a directory name with a slash is refused" CHOICE=0
 conf_ok
+# PADSELECT_NOEXEC (the emulator's checkpointable run): bind, then stop - no game
+noexec() {  # noexec WANT_RC WANT_MOUNT LABEL [VAR=value ...]
+    local want_rc=$1 want_mount=$2 label=$3; shift 3
+    rm -f "$T/mounts" "$T/out" "$T/bound"
+    out=$(env CHOICE= MOUNT_FAIL= PADSELECT_NOEXEC=1 PADSELECT_DIR="$T/games/pad" PADSELECT_GAMES="$T/gamesdir" \
+        PADSELECT_BIN="$T/sel" PADSELECT_OUT="$T/out" PADSELECT_MOUNTCMD="$T/mount" \
+        PADSELECT_PKILL=true PADSELECT_LOG= "$@" sh "$HERE/padselect_s3.sh" 2>/dev/null)
+    rc=$?
+    got=$( [ -f "$T/mounts" ] && tr '\n' ' ' < "$T/mounts" | sed 's/ $//')
+    if [ "$rc" = "$want_rc" ] && [ -z "$out" ] && [ "$got" = "$want_mount" ]; then
+        echo "ok   $label"
+    else
+        echo "FAIL $label: rc=$rc out=[$out] mounts=[$got] want=[$want_mount]"
+        fails=$((fails + 1))
+    fi
+}
+noexec 0 "$T/games/pad/img1" "menu-only: choice 1 binds img1 and starts no game" CHOICE=1
+noexec 3 "" "menu-only: no bind at all exits 3 for the caller" CHOICE=1 MOUNT_FAIL=img
 rm "$T/games/pad/img1/game"
 run "GAME img0 ARG" "an image directory without a game boots img0" CHOICE=1
 if [ "$fails" = 0 ]; then echo "padselect_s3_test: OK"; else echo "padselect_s3_test: $fails failed"; exit 1; fi

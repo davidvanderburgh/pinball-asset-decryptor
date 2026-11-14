@@ -26,6 +26,11 @@
 # Any failure (no menu, no choice, no such image, the bind refused) boots
 # image 0 the same way, and if even that bind fails, image 0's game straight
 # from its directory: the card degrades to a stock card, never to a brick.
+#
+# PADSELECT_NOEXEC=1 (PAD's emulator only): steps 1-3 and stop - exit 0 once
+# the chosen tree is bound, 3 when no bind could be made - and the caller
+# starts the game itself. A checkpointable emulator run starts the game under
+# an explicit qemu, which runs programs, not this script (s3run.sh).
 P=${PADSELECT_DIR:-/games/pad}
 GAMES=${PADSELECT_GAMES:-/games}
 CONF=${PADSELECT_CONF:-$P/images.conf}
@@ -68,6 +73,9 @@ boot() {
         # restarts it within a second, from the tree the game now sees
         $PKILL -x conagent 2>/dev/null
         cd /
+        # PADSELECT_NOEXEC=1 (PAD's emulator, a checkpointable run): the
+        # caller starts /games/game itself once the bind is in place
+        [ "${PADSELECT_NOEXEC:-0}" = 1 ] && exit 0
         exec "$GAMES/game" "$@"
     fi
     log "binding $P/$d over $GAMES failed"
@@ -101,4 +109,5 @@ fi
 [ "$dir" = img0 ] || boot img0 "$@"
 # the last resort: img0's game from its own directory, without the bind
 log "starting $P/img0/game without a bind"
+[ "${PADSELECT_NOEXEC:-0}" = 1 ] && exit 3       # the caller starts img0's game
 exec "$P/img0/game" "$@"

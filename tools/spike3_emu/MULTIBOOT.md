@@ -104,6 +104,27 @@ and `press SLOT 0` SELECT. The host-side readers (the switch list, the bridge, t
 playfield) read `PAD_S3_IMAGE`'s tree, else the menu's `default=` image's. On a
 multi-boot card the hook's log goes to the slot's `/data/padselect.log`.
 
+A **checkpointable run** (the Emulate tab's, through `s3launch.sh`: pivot_root and an
+explicit static qemu, so save states work) starts the game as a program under that
+qemu, which cannot run the hook's shell script. There `s3run.sh` runs the hook first,
+under binfmt with the same shims, in its menu-only mode (`PADSELECT_NOEXEC=1`: the
+menu, the choice, the bind - then exit 0, or 3 when no bind could be made), and then
+starts `/games/game` as for any card: by then it is the chosen image's own program,
+checkpointable like any game.
+
+## Proven (2026-11-13, the emulator, real cards)
+
+A card built by `mks3multi.py build` from `fallout_le-0_81_0` + `fallout_le-0_82_0`
+(20 min, `verify` OK: both games trees identical file for file to their cards):
+
+- binfmt run (`s3run.sh --bus --bridge`): the menu on HDMI-A-2 at 1920x1080 through
+  the KMS/EGL-image path, the coin-door footer; the countdown booted image 0 from
+  `/pad/img0`; NEXT then SELECT booted image 1, the game's `/games` bound from
+  `/pad/img1` (Fallout's screens running);
+- the app's launcher (`s3launch.sh`, hidden, checkpointable): the menu first, then the
+  game as the process `game` under the explicit qemu, `/games` from the chosen tree;
+  the next power-up's highlight was the image chosen last.
+
 ## Running it
 
 ```

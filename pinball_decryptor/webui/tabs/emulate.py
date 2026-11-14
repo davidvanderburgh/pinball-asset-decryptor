@@ -3063,6 +3063,20 @@ class EmulateTab(EmulateLogMixin, TabService):
         self._select_hint()
         self.start()
 
+    def launch_spike3_card(self, path):
+        """PAD-1263, the Multi-boot tab's Run in emulator for a Spike 3
+        multi-boot card: the tab already knows it is a Spike 3 card, so it is
+        started on the Spike 3 rig at once rather than after the probe
+        answers.  The rig runs the card's /games/game, which is its boot menu,
+        so the menu comes up first as on the machine."""
+        self.emulate_card_var.set(path or "")
+        # marked after the card is set: the card's own probe, if it ran,
+        # finds it probed already (and would only say the same)
+        self._spike3_probed = self._card()
+        self._spike3 = True
+        self._spike3_why = ""
+        self.start()
+
     def launch_with(self, prepare):
         """Item 127, Try it: Start with a caller's one-shot preparation.
         Returns whether the launch was accepted; ``last_refusal`` says why

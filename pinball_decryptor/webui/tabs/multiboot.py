@@ -17,6 +17,22 @@ import os
 from ..rpc import RpcError
 from .base import TabService, rpc
 
+
+def multiboot_platform(mfr):
+    """The Multi-boot platform for a manufacturer: its own key, except a
+    Stern card of the Spike 3 era, whose multi-boot card is built another way
+    (PAD-1263: the "s3" platform)."""
+    key = getattr(mfr, "key", "stern") or "stern"
+    if key == "stern":
+        era = getattr(mfr, "current_era", None)
+        try:
+            era = era() if callable(era) else getattr(mfr, "_era", None)
+        except Exception:                               # noqa: BLE001
+            era = None
+        if era == "spike3":
+            return "s3"
+    return key
+
 log = logging.getLogger(__name__)
 
 # THE PANEL MAY NOT LOAD, AND THE TAB MUST STILL BE BUILT.  A build missing
@@ -201,6 +217,19 @@ class MultibootTab(TabService):
             self.window.append_log("[multi-boot] the Emulate DP tab runs one build "
                                    "and has no boot-menu step yet")
             return
+        if getattr(self._multiboot_panel, "platform", "stern") == "s3":
+            # PAD-1263: a Spike 3 card boots on the Spike 3 rig, which runs
+            # /games/game - the card's own menu first - like any Spike 3 card
+            target = getattr(self.window, "_emulate_panel", None) \
+                or self.window.service("emulate")
+            fn = getattr(target, "launch_spike3_card", None)
+            if fn is None:
+                self.window.append_log("[multi-boot] the Emulate tab is not "
+                                       "built; cannot start the Spike 3 rig")
+                return
+            self._show_tab("emulate")
+            fn(path)
+            return
         if getattr(self._multiboot_panel, "platform", "stern") == "jjp":
             target = getattr(self.window, "_jjp_emulate_panel", None) \
                 or self.window.service("emulate_jjp")
@@ -234,7 +263,7 @@ class MultibootTab(TabService):
             return
         panel = self._multiboot_panel
         if getattr(getattr(mfr, "capabilities", None), "multiboot", False):
-            panel.set_platform(getattr(mfr, "key", "stern"))
+            panel.set_platform(multiboot_platform(mfr))
         panel._apply_platform_words()
         panel.flush_now()
 

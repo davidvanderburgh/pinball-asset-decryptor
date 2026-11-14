@@ -33,6 +33,16 @@
 #                           $(BUILD)/spksw, the static button reader for the
 #                           Warden / Pinotaur board (spksw.c), which feeds it
 #                           input_pipe's lines.  tools/spooky_emu/MULTIBOOT.md.
+#   make PLATFORM=s3        a Stern Spike 3 machine (PAD-1263): aarch64 for the
+#                           card's Buildroot rootfs (glibc 2.39), built with
+#                           tools/spike3_emu/xgcc.sh's cross gcc (S3CC) and
+#                           linked against the card's own libEGL / libGLESv2 /
+#                           libgbm / libdrm ($(S3ROOT), a card's decrypted
+#                           rootfs), as $(BUILD)/s3select.  egl_kms.c (KMS +
+#                           GBM, the game's own display path) and stubs_s3.c
+#                           (the coin door's SPI chain; no codecs, no sound)
+#                           stand in for the Spike 2 hardware files.
+#                           tools/spike3_emu/MULTIBOOT.md.
 #
 # THE STERN BUILD.  The card rootfs copy ($(ROOT)) is used as the sysroot BY
 # HAND: the cross gcc searches its own tooldir /usr/arm-linux-gnueabihf/
@@ -62,6 +72,8 @@ else ifeq ($(PLATFORM),dp)
 BUILD    ?= build-dp
 else ifeq ($(PLATFORM),spk)
 BUILD    ?= build-spk
+else ifeq ($(PLATFORM),s3)
+BUILD    ?= build-s3
 else
 BUILD    ?= build
 endif
@@ -194,6 +206,45 @@ AUDLIBS   =
 LIBC      = -lpthread -lm
 SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c fb_linux.c x11_raw.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_dp.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
 HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h x11_raw.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
+else ifeq ($(PLATFORM),s3)
+# ---- Stern Spike 3: aarch64, the cross gcc from xgcc.sh, the card's own GL ----
+# The cross libc is Ubuntu 24.04's glibc 2.39, the same as the cards' Buildroot
+# 2024.08.1 rootfs (measured on all eleven cards in the store), so the menu is
+# built against it as it is and linked against the CARD's libraries, which
+# PAD's emulator swaps for its own shims at run time exactly as for the game.
+S3CC     ?= $(shell bash ../../spike3_emu/xgcc.sh 2>/dev/null)
+S3ROOT   ?=
+CC        = $(S3CC)
+CROSS     =
+BINNAME   = s3select
+PREFIX   ?= /games/pad
+QEMU     ?= qemu-aarch64-static
+export QEMU
+# SEL_COIN_DOOR: the menu's own words name the coin door's buttons (the
+# preview's native build in ensures3select.sh is given it too)
+CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector \
+            -DSEL_COIN_DOOR \
+            -DDEF_CONF='"$(PREFIX)/images.conf"' \
+            -DDEF_OUT='"/tmp/padselect.choice"' \
+            -DDEF_LAST='"/data/padselect.last"' \
+            -DDEF_FONT='"$(PREFIX)/font.ttf"' \
+            -DDEF_MEDIA='"$(PREFIX)/media"' \
+            -DDEF_COLOUR_FILE='"/data/padselect.color"' \
+            -DCARD_FONT='"$(PREFIX)/font.ttf"' \
+            -I$(BUILD) $(EXTRA_CFLAGS)
+LDPRE     =
+# LINKED against stubs of the four display libraries (s3_stublibs.sh: their
+# names and the symbols the menu imports), so a build needs no card; RUN
+# against the card's own. `make check S3ROOT=<a card's rootfs>` proves every
+# import resolves in a card's real libraries.
+S3STUBS   = $(BUILD)/stublibs
+LDPOST    = -L$(S3STUBS) -Wl,--allow-shlib-undefined
+GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2 -l:libgbm.so.1 -l:libdrm.so.2
+AUDLIBS   =
+LIBC      = -lpthread -lm
+SRCS = codeselect.c conf.c colour.c settings.c theme.c gfx.c egl_kms.c input.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c stubs_s3.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 else
 # ---- Stern: the ARM cross build against the card rootfs ----
 CC        = $(CROSS)gcc
@@ -314,6 +365,12 @@ $(BUILD)/%.o: %.c $(HDRS) | $(BUILD)
 $(BUILD)/gfx.o: third_party/stb_truetype.h
 $(BUILD)/art.o: third_party/stb_image.h
 
+ifeq ($(PLATFORM),s3)
+$(S3STUBS)/libdrm.so.2: $(OBJS) s3_stublibs.sh
+> bash s3_stublibs.sh "$(CC)" "$(S3STUBS)" $(OBJS)
+$(BIN): $(S3STUBS)/libdrm.so.2
+endif
+
 # a failed link deletes its output: never leave a stale binary behind
 $(BIN): $(OBJS)
 > $(CC) $(CFLAGS) $(LDPRE) $(OBJS) $(LDPOST) $(GLLIBS) $(AUDLIBS) $(LIBC) -o $@ || { rm -f $@; exit 1; }
@@ -384,6 +441,21 @@ install: $(BIN) $(SPKSW) $(PROCSW)
 > install -m 755 padselect_spk.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > install -m 755 padselect_proc.sh "$(DESTDIR)$(PREFIX)/padselect_proc.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
+else ifeq ($(PLATFORM),s3)
+check: $(BIN)
+> @test -n "$(S3ROOT)" || { echo "check: S3ROOT=<a Spike 3 card's rootfs> is needed"; exit 1; }
+> bash test/check_elf_s3.sh "$(BIN)" "$(S3ROOT)"
+> bash -n padselect_s3.sh && bash test/padselect_s3_test.sh
+> @echo "check: OK (s3)"
+
+check-hw:
+> @echo "check-hw: the node-bus test is Spike 2's; the Spike 3 menu is proven in the emulator (MULTIBOOT.md)"
+
+install: $(BIN)
+> install -d "$(DESTDIR)$(PREFIX)"
+> install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/s3select"
+> install -m 755 padselect_s3.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
+> if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the menu has no font"; exit 1; fi
 else ifeq ($(PLATFORM),jjp)
 check: $(BIN) capbin
 > bash test/check_elf_jjp.sh "$(BIN)" "$(JJPROOT)"

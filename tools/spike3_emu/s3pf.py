@@ -69,6 +69,13 @@ def find_picture(card_root, title, name):
     and the title's words pick it (whole words: "scaLEd" is not LE)."""
     roots = []
     g = os.path.join(card_root, "games", title)
+    if not os.path.isdir(g):
+        # a multi-boot card (PAD-1263): every image's tree is under games/pad/imgN
+        pad = os.path.join(card_root, "games", "pad")
+        for d in sorted(os.listdir(pad)) if os.path.isdir(pad) else ():
+            if os.path.isdir(os.path.join(pad, d, title)):
+                g = os.path.join(pad, d, title)
+                break
     for base in (os.path.join(g, "assets"), os.path.join(g, "spike3", "spike_menu", "assets")):
         if os.path.isdir(base):
             roots += [os.path.join(base, d, "images") for d in sorted(os.listdir(base))]

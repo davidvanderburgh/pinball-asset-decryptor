@@ -856,14 +856,11 @@ def pending_pictures(assets_dir, bake=True, paths=True, identity=False):
         try:
             from . import scene_edit
             for ops in scene_edit.load(assets_dir).values():
-                for op in ops or ():
-                    if not (isinstance(op, dict) and op.get("op") == "add_picture"):
-                        continue
-                    rel = op.get("image") or ""
+                # PAD-1278: an animated picture's more pictures as its own
+                for rel, own in scene_edit.picture_rels(ops):
                     if not rel or rel in out:
                         continue
-                    on = colour_profile.asset_applies(settings, "images", rel,
-                                                      own=op.get("color"))
+                    on = colour_profile.asset_applies(settings, "images", rel, own=own)
                     prof = prof_of(rel) if on else None
                     if prof is not None:
                         path = os.path.join(assets_dir, "images", *rel.split("/"))

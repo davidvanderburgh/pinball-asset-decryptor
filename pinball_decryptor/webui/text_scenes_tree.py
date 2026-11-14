@@ -3726,8 +3726,8 @@ class TreeEditMixin:
                     got.pop(c, None)
                 drop = {rel for rel in clash["pictures"] if "picture:" + rel not in take}
                 # the colour switch of a picture a kept scene adds stays mine too
-                adds = {op.get("image") for c in skip_scenes for op in over[c][1]
-                        if op.get("op") == "add_picture"}
+                adds = {rel for c in skip_scenes
+                        for rel, _c in scene_edit.picture_rels(over[c][1])}
                 extras = dict(extras, pictures={r: p for r, p in extras["pictures"].items()
                                                 if r not in drop},
                               added={r: a for r, a in extras["added"].items() if r not in adds})
@@ -3757,6 +3757,10 @@ class TreeEditMixin:
                         for op in rest:
                             if op.get("op") == "add_picture" and op.get("image") in renamed:
                                 op["image"] = renamed[op["image"]]
+                            for im in (op.get("images") or ()) if op.get("op") == "anim" \
+                                    else ():
+                                if isinstance(im, dict) and im.get("image") in renamed:
+                                    im["image"] = renamed[im["image"]]
                         edits[c] = list(mine[c]) + rest
                     scene_edit.save(self.assets_dir, edits)
                 # PAD-403: a scene here that already shows the file's edits (the card was

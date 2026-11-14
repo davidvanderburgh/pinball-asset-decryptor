@@ -360,6 +360,18 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
                     out.append(dict(common, kind="flip", m=compose(w, tuple(fr["m"])),
                                     image=fr.get("image"), w=fr["w"], h=fr["h"]))
             run(o.get("kids") or (), lf, w, t, path, only)
+        elif k == "Bitmap" and n.get("loop"):
+            # PAD-1278: an added picture's own loop (a nested Sprite on the card), drawn as
+            # the one layer it is: its picture of the moment, at its pulse's alpha
+            lp = n["loop"]
+            lf = (f - first_visible(n)) % max(1, int(lp["frames"])) + 1
+            ims = lp.get("images") or [{"image": o.get("image"), "w": o["w"], "h": o["h"]}]
+            im = ims[((lf - 1) // max(1, int(lp["every"]))) % len(ims)]
+            mul = list(common["mul"])
+            if lp.get("alpha"):
+                mul[3] = mul[3] * lp["alpha"][(lf - 1) % len(lp["alpha"])]
+            out.append(dict(common, kind="bitmap", mul=tuple(mul), image=im.get("image"),
+                            w=im.get("w") or o["w"], h=im.get("h") or o["h"]))
         elif k == "Bitmap":
             out.append(dict(common, kind="bitmap", image=o.get("image"), w=o["w"], h=o["h"]))
         elif k == "Shape":

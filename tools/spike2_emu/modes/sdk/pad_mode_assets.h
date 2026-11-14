@@ -330,7 +330,7 @@ static PA_UNUSED void pa_parse_line(struct pa_assets *a, const char *s)
  * after boot is still found). 1 = the mode has its file. */
 static PA_UNUSED int pa_load(struct pa_assets *a)
 {
-    static const char *const dirs[2] = { PM_CARD_DIR, "/dump/" };
+    static const char *const dirs[2] = { "/usr/local/padmode/", "/dump/" };
     char path[128], buf[PA_FILE_MAX];
     long n = -1;
     unsigned d, i;

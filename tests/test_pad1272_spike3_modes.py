@@ -69,10 +69,16 @@ def test_the_hook_preloads_the_runtime_last_and_becomes_the_game():
 
 
 def test_the_runtime_reads_its_files_where_the_install_puts_them():
-    with open(os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk", "pad_mode.h")) as f:
-        h = f.read()
-    assert '#define PM_CARD_DIR "/games/pad/padmode/"' in h
-    assert "/games/" + S3M.MODE_DIR + "/" in h
+    """The 64-bit runtime turns every open of Spike 2's /usr/local/padmode/<file> into the games
+    partition's /games/pad/padmode/<file>; the sources (and the Spike 2 build) keep their paths."""
+    with open(os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c")) as f:
+        c = f.read()
+    block = c[c.index("static int pm_card_open"):c.index("#define open pm_card_open")]
+    assert '"/usr/local/padmode/"' in block and '"/games/%s/"' % S3M.MODE_DIR in block
+    assert c.index("#if PM_A64
+/* PAD-1272") < c.index("static int pm_card_open")
+    with open(os.path.join(ROOT, "tools", "spike2_emu", "modes", "sdk", "prebuilt", "mode64.so"), "rb") as f:
+        assert b"/games/pad/padmode/" in f.read()
 
 
 def _sh():

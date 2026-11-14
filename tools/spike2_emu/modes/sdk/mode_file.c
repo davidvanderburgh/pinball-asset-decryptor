@@ -24,7 +24,7 @@
  */
 #include "pad_mode.h"
 
-static const char *const MODE_DIRS[] = { PM_CARD_DIR, "/dump/" };
+static const char *const MODE_DIRS[] = { "/usr/local/padmode/", "/dump/" };
 #define MODE_DIRS_N     2
 #define MODES_MAX       64          /* high enough never to be the limit a person meets */
 #define TICKS_PER_S     60

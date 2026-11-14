@@ -37,15 +37,6 @@
 #include <stdarg.h>
 #include <stdint.h>
 
-/* PAD-1272: the folder a CARD carries the runtime's files in (game.port, the mode files, every .cfg), looked in
- * before the rig's /dump. Spike 2 (32-bit ARM): the system partition's /usr/local/padmode. Spike 3 (64-bit ARM):
- * the games partition's pad/padmode - its rootfs is the signed image's, and a Write changes only /games. */
-#if defined(__aarch64__)
-#define PM_CARD_DIR "/games/pad/padmode/"
-#else
-#define PM_CARD_DIR "/usr/local/padmode/"
-#endif
-
 /* ---- a mode: define one of these and register it ----------------------------------
  * Every callback is optional (leave it 0). All of them run on the game's own threads -
  * which ones is logged at every boot (MODE_SDK.md, "What is measured").

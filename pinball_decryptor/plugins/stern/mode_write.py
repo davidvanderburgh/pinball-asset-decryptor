@@ -2265,7 +2265,7 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
         # a project with code modes carries the object compiled from them (code_plan); a
         # Spike 3 build never has one (its code modes are left out), so it is the pinned one
         obj = getattr(result, "object", "") if arch == "arm" else ""
-        shutil.copyfile(obj or MR.prebuilt_object(arch), so)
+        shutil.copyfile(obj or (MR.prebuilt_object(arch) if arch != "arm" else MR.prebuilt_object()), so)
         cfgs = []
         for name, src in result.mode_files:
             dst = os.path.join(out_dir, name)

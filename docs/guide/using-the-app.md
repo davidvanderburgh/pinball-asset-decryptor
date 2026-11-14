@@ -602,9 +602,10 @@ it again restores the whole setup.
   - The team folder can instead be a clone of a Git repository the team
     shares (GitHub, GitLab, your own server). The app does the Git work:
     **Share my parts** commits your folder and pushes it, **Get from the
-    team** and the regular check pull. With Git LFS installed, videos,
-    sounds and pictures go into LFS. Everyone needs Git (and Git LFS if
-    the team uses it) and a clone they can push to.
+    team** and the regular check pull.
+  - With Git LFS installed, videos, sounds and pictures go into LFS.
+    Everyone needs Git (and Git LFS if the team uses it) and a clone they
+    can push to.
 - **Recent paths:** every file and folder box keeps a dropdown of your
   recent paths, per manufacturer.
 - **Drag and drop:** drop a file or folder from the desktop on any

@@ -8,6 +8,19 @@
  * of the darkest shades, the same controls the Color profile tab has, with a
  * test card on the screen corrected live as the numbers move.
  *
+ * TEST PICTURES (PAD-1279) is the second entry: the built-in patterns
+ * (testpics.h) and then the card's own test= pictures, animations and sounds,
+ * one at a time, FULL SCREEN and pixel for pixel, drawn through the colour
+ * correction of the game START picks (the numbers as the Color correction
+ * screen has them now, saved or not) or through none.  A caption along the
+ * bottom says what is up and hides itself after TEST_CAPTION_MS, so the
+ * picture can be photographed whole; any key brings it back.
+ *
+ *   LEFT / RIGHT flipper (or Service - / +)   previous / next
+ *   START / ACTION (or Service Select)        the next game's correction / none
+ *                                             (on a sound: play it again;
+ *                                             on BACK TO SETTINGS: back)
+ *
  *   LEFT / RIGHT flipper (or Service - / +)   move between rows
  *   START / ACTION (or Service Select)        change the row / do it
  *   ...while changing a value: LEFT / RIGHT   less / more (held = repeats)
@@ -33,6 +46,9 @@
 #include "theme.h"
 
 #define SETTINGS_IDLE_MS 120000
+/* ...and inside Test pictures, where looking without pressing is the point */
+#define TEST_IDLE_MS 600000
+#define TEST_CAPTION_MS 5000
 
 struct settings_env {
     struct gfx *g;
@@ -43,6 +59,9 @@ struct settings_env {
     struct audio *au;
     const struct audio_clip *move;       /* the menu's move sound, or NULL */
     const char *colour_file;             /* the values file (DEF_COLOUR_FILE) */
+    const char *media_dir;               /* where test= files are (PAD-1279), or NULL */
+    int testcard;                        /* a TEST CARD (conf testcard=on): no way back to
+                                            a menu, no idle exit, TEST CARD as the heading */
     int first_image;                     /* the image Color correction opens on, or -1 */
     void (*present)(void *ctx);          /* upload what is dirty and swap */
     void *ctx;
@@ -54,8 +73,10 @@ struct settings_env {
 void settings_run(struct settings_env *e);
 
 /* --snapshot --screen: draw one screen once, as it comes up - `screen` is
- * "settings" or "color"; `row` the highlighted row (-1 = the first), `editing`
- * whether that row is being changed.  0 ok, -1 an unknown screen (in why). */
+ * "settings", "color" or "test"; `row` the highlighted row (-1 = the first),
+ * or for "test" the item (the built-in patterns first); `editing` whether that
+ * row is being changed, or for "test" that the caption is hidden.  0 ok, -1 an
+ * unknown screen (in why). */
 int settings_snapshot(struct settings_env *e, const char *screen, int row, int editing,
                       char *why, int whylen);
 

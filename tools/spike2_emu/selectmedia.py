@@ -129,6 +129,16 @@ GIF_MAX_FPS = 50
 GIF_MAX_BYTES = 10 << 20                    # 10 MB
 GIF_MAX_W, GIF_MAX_H = 512, 288
 GIF_DEFAULT_DELAY_MS = 100                  # what the selector uses when a frame says 0
+#: THE TEST PICTURES (PAD-1279): the card's own files for the boot menu's Settings >
+#: Test pictures, one test= line each in images.conf.  A picture is kept PIXEL FOR
+#: PIXEL - never enlarged, only fitted down to the screen - because judging a screen
+#: is the point; a video or an animated GIF becomes a clip under the menu's own GIF
+#: contract (the menu decodes GIF frames on the CPU, so a bigger one would crawl: it is
+#: a preview, not a frame-rate test); any sound becomes the menu's WAV.
+TEST_MAX = 16                               # codeselect conf.h CONF_MAX_TESTS
+TEST_PNG_MAX = (1360, 768)                  # the screen
+TEST_AUDIO_EXTS = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".opus", ".wma", ".aif", ".aiff")
+TEST_LABEL_MAX = 199                        # codeselect CONF_STR - 1
 WAV_RATE = 44100
 #: THE SELECTOR'S OWN CARD GEOMETRY at the 1360x768 LCD (codeselect.c
 #: layout_compute), mirrored here so a clip is rendered at EXACTLY the
@@ -201,6 +211,7 @@ ANIM_PARAMS_RE = re.compile(r"^(%s)(?::(%s)(?::(\d+))?)?$" % (_NUM_RE, _NUM_RE))
 ART_AT_RE = re.compile(r"^%s$" % _NUM_RE)                                             # T
 SOUND_AT_RE = re.compile(r"^\d+$")                                                    # auto@IDX
 STALE_FULL_RE = re.compile(r"^(?:(?:art|anim|music)\d+\.(?:png|gif|wav)"
+                           r"|test\d+\.(?:png|gif|wav)"
                            r"|confirm\d+\.wav|(?:move|confirm)\.wav"
                            r"|gart\d+\.png|ganim\d+\.gif"
                            r"|(?:gmusic|gconfirm)\d+\.wav)$")
@@ -713,12 +724,27 @@ def validate_manifest(m):
     vol = m.get("volume", DEFAULT_VOLUME)
     if not isinstance(vol, int) or isinstance(vol, bool) or not (0 <= vol <= 100):
         raise Refused("media.json: volume must be an integer 0..100")
+    # PAD-1279: the test pictures, [{"file", "label", "source"}] (absent: none)
+    tests = m.get("tests")
+    if tests is not None:
+        if not isinstance(tests, list) or len(tests) > TEST_MAX:
+            raise Refused("media.json: 'tests' must be a list of at most %d" % TEST_MAX)
+        for k, t in enumerate(tests):
+            if not isinstance(t, dict) or not isinstance(t.get("file"), str)                     or not isinstance(t.get("label", ""), str):
+                raise Refused("media.json: tests[%d] must be {\"file\", \"label\"}" % k)
+            check_media_name(t["file"])
+            extra = set(t) - {"file", "label", "source"}
+            if extra:
+                raise Refused("media.json: tests[%d] has unknown keys %s" % (k, sorted(extra)))
     return m
 
 
 def manifest_files(m):
     """Every media name the manifest references, in order, without duplicates."""
     names = []
+    for t in (m.get("tests") or []):
+        if t.get("file") and t["file"] not in names:
+            names.append(t["file"])
     for im in m["images"]:
         for k in ("art", "anim", "music", "confirm"):
             if im.get(k) and im[k] not in names:
@@ -751,8 +777,9 @@ def media_costs(m, sizes):
         names = [n for n in names if n and n in sizes]
         big = max(names, key=lambda n: sizes[n]) if names else None
         rows.append((i, sum(sizes[n] for n in names), big, sizes[big] if big else 0))
-    shared = sum(sizes[n] for n in (m.get("sound_move"), m.get("sound_confirm"))
-                 if n and n in sizes)
+    # the menu-wide sounds and (PAD-1279) the test pictures: no card owns them
+    shared_names = [m.get("sound_move"), m.get("sound_confirm")] +         [t.get("file") for t in (m.get("tests") or [])]
+    shared = sum(sizes[n] for n in set(shared_names) if n and n in sizes)
     rows.sort(key=lambda r: -r[1])
     return rows, shared
 
@@ -2871,6 +2898,106 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
     return names
 
 
+def parse_test_spec(spec):
+    """'PATH' or 'PATH|LABEL' -> (path, label); the label defaults to the file's name."""
+    path, sep, label = str(spec).partition("|")
+    path = path.strip()
+    label = (label.strip() if sep else "") or os.path.splitext(os.path.basename(path))[0]
+    if not path:
+        raise Refused("--test %r: expected PATH or PATH|LABEL" % spec)
+    if "\n" in label or "|" in label or len(label.encode("utf-8")) > TEST_LABEL_MAX:
+        raise Refused("--test %r: a label is one line of at most %d bytes, without '|'"
+                      % (spec, TEST_LABEL_MAX))
+    if not os.path.isfile(path):
+        raise Refused("--test %s: not a file" % path)
+    return path, label
+
+
+def test_kind(path):
+    """'picture', 'anim' (a video or an animated GIF) or 'sound', from the file itself
+    where it can tell (a still's signature, a GIF's frame count), else its name."""
+    kind = still_kind(path)
+    if kind == "GIF":
+        with open(path, "rb") as f:
+            info = gif_info(f.read())
+        return "anim" if info and info.get("frames", 1) > 1 else "picture"
+    if kind:
+        return "picture"
+    ext = os.path.splitext(path)[1].lower()
+    if ext in TEST_AUDIO_EXTS:
+        return "sound"
+    if is_video_path(path):
+        return "anim"
+    raise Refused("--test %s: not a picture, a video or a sound this tool can read" % path)
+
+
+def _test_png(src, out):
+    """A still as the menu draws it: the file's own pixels when it is a PNG that fits the
+    screen, else re-encoded and fitted DOWN (never enlarged)."""
+    with open(src, "rb") as f:
+        data = f.read()
+    if is_png(data):
+        d = png_size(data)
+        if d and d[0] <= TEST_PNG_MAX[0] and d[1] <= TEST_PNG_MAX[1]:
+            with open(out, "wb") as f:
+                f.write(trim_png(data))
+            return "as it is, %dx%d" % d
+    try:
+        from PIL import Image
+    except ImportError:
+        scale_png(src, out, TEST_PNG_MAX)
+        return "fitted to %dx%d" % TEST_PNG_MAX
+    im = Image.open(src)
+    im.load()
+    im = im.convert("RGBA" if "A" in im.getbands() else "RGB")
+    w, h = im.size
+    if w > TEST_PNG_MAX[0] or h > TEST_PNG_MAX[1]:
+        f = min(TEST_PNG_MAX[0] / float(w), TEST_PNG_MAX[1] / float(h))
+        im = im.resize((max(1, int(round(w * f))), max(1, int(round(h * f)))), Image.LANCZOS)
+    im.save(out, "PNG")
+    return "%dx%d%s" % (im.size[0], im.size[1], "" if im.size == (w, h) else " (fitted down from %dx%d)" % (w, h))
+
+
+def _prepare_test(k, path, out, work, log=say):
+    """Test item k -> its file name in *out* (test<k>.png / .gif / .wav), converted only
+    when the source or its kind changed since the last run (the sidecar)."""
+    kind = test_kind(path)
+    ext = {"picture": ".png", "anim": ".gif", "sound": ".wav"}[kind]
+    name = "test%d%s" % (k, ext)
+    target = os.path.join(out, name)
+    stamp = source_stamp(path)
+    params = {"test": kind}
+    if os.path.isfile(target) and cache_matches(read_sidecar(target), stamp, params):
+        log("  test %d: %s (kept, %s unchanged)" % (k, name, os.path.basename(path)))
+        return name
+    for other in (".png", ".gif", ".wav"):
+        stale = os.path.join(out, "test%d%s" % (k, other))
+        if other != ext and os.path.exists(stale):
+            os.remove(stale)
+            drop_sidecar(stale)
+    if kind == "picture":
+        how = _test_png(path, target)
+    elif kind == "sound":
+        normalise_wav(path, target)
+        how = "sound"
+    else:
+        with open(path, "rb") as f:
+            head = f.read()
+        info = gif_info(head) if still_kind(path) == "GIF" else None
+        if info and gif_fits(info) is None:
+            shutil.copyfile(path, target)
+            how = "as it is"
+        else:
+            plan = gif_native_plan((GIF_MAX_W, GIF_MAX_H),
+                                   probe_fps(path, default=GIF_MAX_NATIVE_FPS,
+                                             stream=video_stream(path) or 0))
+            _info, used, _tries = gif_fit(path, target, plan, 0.0, work, log=log)
+            how = "clip %dx%d" % (used.w, used.h)
+    write_sidecar(target, stamp, params)
+    log("  test %d: %s <- %s (%s)" % (k, name, os.path.basename(path), how))
+    return name
+
+
 def cmd_prepare(a):
     images = [a.primary] + list(a.extra or [])
     n = len(images)
@@ -2908,6 +3035,9 @@ def cmd_prepare(a):
         if not os.path.isfile(path):
             raise Refused("--logo %s: %s is not a file" % (idx, path))
         logo_files[int(idx)] = path
+    tests_in = [parse_test_spec(t) for t in (getattr(a, "test", None) or [])]
+    if len(tests_in) > TEST_MAX:
+        raise Refused("--test: %d test pictures; the menu takes at most %d" % (len(tests_in), TEST_MAX))
     visual_only = bool(getattr(a, "visual_only", False))
     say("prepare: %d image%s, panel %dx%d, out %s%s"
         % (n, "" if n == 1 else "s", size[0], size[1], out, " (visual only)" if visual_only else ""))
@@ -2951,6 +3081,13 @@ def cmd_prepare(a):
                                      CONFIRM_FADE_MS, "chime", os.path.join(out, "confirm.wav"), say)
             for i, img in enumerate(images):
                 rows[i][3] = _prepare_confirm(i, img, confirm_each[i], out, sources, say)
+        # THE TEST PICTURES (PAD-1279): a visual-only run (the GUI's preview) has no use
+        # for them - the menu's own picture never shows them
+        tests_out = []
+        if not visual_only:
+            for k, (path, label) in enumerate(tests_in):
+                tests_out.append({"file": _prepare_test(k, path, out, work), "label": label,
+                                  "source": path})
     finally:
         for s in sources.values():
             s.close()
@@ -2982,6 +3119,8 @@ def cmd_prepare(a):
                        sound_move_source=(None if visual_only else a.sound_move),
                        sound_confirm_source=(None if visual_only else confirm_wide),
                        groups=man_groups)
+    if tests_out:
+        m["tests"] = tests_out
     with open(os.path.join(out, "media.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
         f.write("\n")
@@ -3059,6 +3198,11 @@ def main(argv=None):
                         "and faded out - the selector loops it, and the whole "
                         "media set must fit the budget"
                         % MUSIC_MAX_SECONDS)
+    s.add_argument("--test", action="append", default=[], metavar="PATH[|LABEL]",
+                   help="a test picture, video or sound for the menu's Settings > Test "
+                        "pictures (PAD-1279), in order, up to %d; a picture is kept pixel "
+                        "for pixel (only fitted down to the screen), a video becomes a "
+                        "menu-sized clip" % TEST_MAX)
     s.add_argument("--sound-move", default="auto", metavar="PATH|auto|synth|none")
     s.add_argument("--sound-confirm", action="append", default=[],
                    metavar="PATH|auto|synth|none | N=PATH|auto|synth|none",

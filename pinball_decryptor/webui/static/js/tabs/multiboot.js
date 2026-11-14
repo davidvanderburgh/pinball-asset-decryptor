@@ -558,6 +558,27 @@ function CardPreview({ card }) {
     <span class="small muted">${card.note}</span>`;
 }
 
+// PAD-1279: the card's own test pictures, for SETTINGS > TEST PICTURES
+function TestPictures({ md }) {
+  const tests = md.tests || [];
+  return html`<div class="mb-tests">
+    <span class="k">${"Test pictures (" + tests.length + " of " + md.tests_max + "):"}</span>
+    ${tests.length ? html`<div class="mb-tests-list">
+      ${tests.map((t, k) => html`<div class="row mb-test" key=${t.path}>
+        <span class=${cx("small mb-test-file", t.missing && "bad")} ...${tip({ head: t.file, lines: [t.path, t.missing ? "The file is not there any more." : ""].filter(Boolean) })}>${t.file}</span>
+        <${Field} cls="mb-test-label" sm value=${t.label} placeholder="its name on the machine"
+          onChange=${() => {}} onCommit=${(v) => call("multiboot.test_label", k, v)} />
+        <${Button} sm disabled=${k === 0} onClick=${() => call("multiboot.test_move", k, -1)} ...${tip("Earlier")}>↑<//>
+        <${Button} sm disabled=${k === tests.length - 1} onClick=${() => call("multiboot.test_move", k, 1)} ...${tip("Later")}>↓<//>
+        <${Button} sm onClick=${() => call("multiboot.test_remove", k)} ...${tip("Take it off the list")}>✕<//>
+      </div>`)}
+    </div>` : null}
+    <div class="row"><${Button} drop disabled=${tests.length >= md.tests_max} onClick=${() => call("multiboot.test_add")}>Add test pictures…<//>
+      <${Button} onClick=${() => call("multiboot.build_test_card")} ...${tip({ head: "Build test card…", lines: [md.testcard_note] })}>Build test card…<//></div>
+    <span class="small muted">${md.tests_note}</span>
+  </div>`;
+}
+
 // --------------------------------------------------------- Menu settings…
 function MenuDialog({ s, w }) {
   const md = s.md;
@@ -589,7 +610,8 @@ function MenuDialog({ s, w }) {
       <${Check} ns=${NS} k="same_text" checked=${s.same_text} wrap label="Same text size on every card (a long name is not shrunk on its own)" />
       <${Check} ns=${NS} k="counter" checked=${s.counter} wrap label="Count the cards under them (the “<  3 / 7  >” line; five cards or more)" />
       ${w.settings_tile ? html`<${Check} ns=${NS} k="settings_tile" checked=${s.settings_tile} wrap
-        label="End the menu with a SETTINGS card (adjust each game's color correction on the machine; shown for games built with a color profile)" />` : null}
+        label="End the menu with a SETTINGS card (color correction and test pictures on the machine; shown for games built with a color profile, or with test pictures below)" />` : null}
+      ${w.settings_tile ? html`<${TestPictures} md=${md} />` : null}
       ${w.editions ? html`<${Check} ns=${NS} k="editions" checked=${s.editions} wrap
         label="No menu: boot the edition the game's EDITION setting names (every image an edition of one game, edition 1 first)"
         title=${md.editions_tip} />` : null}

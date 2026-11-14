@@ -972,6 +972,10 @@ class MultibootForm:
     #: menu").  On, the card ends the menu whenever an image's game can be
     #: adjusted (built with a color profile); off, the menu never shows it.
     settings_tile: bool = True
+    #: THE TEST PICTURES (PAD-1279): [(path, label)] - the owner's own
+    #: pictures, videos and sounds for the menu's Settings > Test pictures,
+    #: in order (selectmedia.py --test).  A Stern card's alone.
+    tests: list = field(default_factory=list)
     #: EDITIONS, NO MENU (PAD-495; a tester: "user could switch between standard
     #: color and 70th Anniversary settings" in the service menu).  On, every
     #: image is an edition of one game, in order, and the game's own EDITION
@@ -2705,6 +2709,43 @@ def _bof_media_args(form, media_dir, visual_only=False):
     return args
 
 
+#: the most test pictures a card carries (codeselect conf.h CONF_MAX_TESTS)
+TEST_MAX = 16
+TEST_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff",
+             ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v",
+             ".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac")
+
+
+def clean_tests(tests):
+    """[(path, label)] as the form keeps it: at most TEST_MAX, a path each,
+    the label on one line without a '|' (the conf's field separator) - an
+    empty label is the file's own name on the machine."""
+    out = []
+    for t in tests or []:
+        if isinstance(t, dict):
+            path, label = t.get("path") or t.get("source") or "", t.get("label") or ""
+        elif isinstance(t, (list, tuple)) and t:
+            path, label = t[0], (t[1] if len(t) > 1 else "")
+        else:
+            continue
+        path = str(path or "").strip()
+        if not path:
+            continue
+        label = " ".join(str(label or "").replace("|", "/").split())[:120]
+        out.append((path, label))
+    return out[:TEST_MAX]
+
+
+def test_args(form):
+    """``--test PATH[|LABEL]`` per test picture, in order (PAD-1279)."""
+    if not backend_for(form).settings_tile:
+        return []
+    args = []
+    for path, label in clean_tests(form.tests):
+        args += ["--test", wsl(path) + ("|" + label if label else "")]
+    return args
+
+
 def prepare_args(form, media_dir, visual_only=False):
     """``selectmedia.py prepare``: the images (the tool pulls 'auto' art and
     clips off them), then ``--art/--anim/--music N=<value>`` for EVERY image
@@ -2760,6 +2801,8 @@ def prepare_args(form, media_dir, visual_only=False):
         for i, _path, ri, mi in form_trees(form):
             args += ["--sound-confirm", "%d=%s"
                      % (i, confirm_spec(form.images[ri]) if mi is None else "none")]
+        # the menu's own picture never shows them: the preview leaves them out
+        args += test_args(form)
     args += ["--volume", str(int(form.volume))]
     return args
 
@@ -3907,6 +3950,10 @@ def write_preview_conf(form):
                 lines.append(line)
         if not form.settings_tile:
             lines.append("settings=off")
+        # PAD-1279: the test pictures put the card there too; the preview only
+        # needs the lines, never the files
+        for k, (_path, label) in enumerate(clean_tests(form.tests)):
+            lines.append("test=preview%d.png|%s" % (k, label or "test %d" % (k + 1)))
     lines += theme_conf_lines(form)
     return "\n".join(lines) + "\n"
 
@@ -4055,6 +4102,46 @@ def build_commands(form, cwd=None, prepare=False):
         ("plan", step_command("plan", plan_args(form), form, cwd)),
         ("build", step_command("build", build_args(form), form, cwd)),
         ("verify", step_command("verify", verify_args(form), form, cwd))]
+
+
+# ---------------------------------------------------------------- the test card
+#: THE TEST CARD (PAD-1279): a small card that boots straight into the menu's
+#: Settings - Color correction and Test pictures - and never into a game, made
+#: from any Spike 2 image's boot and rootfs (``mkmulticard.py testcard``).
+TESTCARD_NAME = "pad_test_card.raw"
+TESTCARD_LABEL = "testcard"
+
+
+def testcard_colour_arg(form):
+    """``--color`` for the test card: the first image's own built colour
+    profile when it has one (what that game would draw), else none - the
+    card then starts from No change."""
+    col = (form.colour_profiles or {}).get(0) or (form.colour_profiles or {}).get("0")
+    if not col:
+        return []
+    try:
+        trio = ["%.4f %.4f %.4f" % tuple(float(v) for v in col[k]) for k in ("gamma", "gain", "lift")]
+        return ["--color", "%s|%s|%s|%.4f|%s" % (trio[0], trio[1], trio[2], float(col["saturation"]),
+                                               (col.get("name") or "").replace("|", "/"))]
+    except (KeyError, TypeError, ValueError):
+        return []
+
+
+def testcard_commands(form, out, media_dir, cwd=None):
+    """'Build test card…': the selector, the test pictures (``prepare`` with
+    nothing else to render: no art, no clips, no sounds), then ``testcard``.
+    The first image on the list is only where the boot and rootfs come from."""
+    primary = wsl(form.images[0].path)
+    prep = [SELECTMEDIA, "prepare", "--primary", primary, "--art", "0=none", "--anim", "0=none",
+            "--music", "0=none", "--sound-move", "none", "--sound-confirm", "none",
+            "--cards", "1", "--out", wsl(media_dir)] + test_args(form) + [
+            "--volume", str(int(form.volume))]
+    tc = [MKMULTICARD, "testcard", "--primary", primary, "--out", wsl(out),
+          "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
+          "--media-dir", wsl(media_dir)] + testcard_colour_arg(form)
+    return install_selector_commands(form, cwd) + [
+        ("prepare", step_command("prepare", prep, form, cwd)),
+        (TESTCARD_LABEL, step_command(TESTCARD_LABEL, tc, form, cwd))]
 
 
 #: The label of the size check's second step: ``update --dry-run`` on the
@@ -4782,6 +4869,10 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
         show_counter=(info.get("counter") != COUNTER_OFF),
         # ...and the SETTINGS card: null = the card never said, which is "on"
         settings_tile=(info.get("settings") != "off"),
+        # PAD-1279: the card's test pictures, by the source each was made from
+        # (a card from before media.json kept them has only the file's name)
+        tests=clean_tests([(t.get("source") or t.get("file"), t.get("label"))
+                           for t in (info.get("tests") or []) if isinstance(t, dict)]),
         # PAD-495: a card of editions boots by the game's EDITION setting
         editions=bool(info.get("edition")),
         countdown_word=(DEF_COUNTDOWN_WORD if info.get("countdown_word") is None
@@ -4872,6 +4963,8 @@ def _menu_fields(before, after):
         changed.add("card counter")
     if bool(before.settings_tile) != bool(after.settings_tile):
         changed.add("settings card")
+    if clean_tests(before.tests) != clean_tests(after.tests):
+        changed.add("test pictures")
     if bool(before.editions) != bool(after.editions):
         changed.add("editions")
     if ((before.countdown_word or "").strip()
@@ -5497,6 +5590,8 @@ def menu_from_state(menu):
             "show_counter": bool(menu.get("show_counter", True)),
             # ...and a state from before the SETTINGS card offers it (PAD-307)
             "settings_tile": bool(menu.get("settings_tile", True)),
+            # ...and one from before the test pictures has none (PAD-1279)
+            "tests": clean_tests(menu.get("tests") or []),
             # ...and one from before editions describes a card with its menu
             "editions": bool(menu.get("editions", False)),
             "countdown_word": str(menu.get("countdown_word",
@@ -6427,6 +6522,9 @@ def menu_summary(form):
                 + ("" if form.show_counter else "  ·  no card counter")
                 + ("" if form.settings_tile or not backend_for(form).settings_tile
                    else "  ·  no settings card")
+                + ("" if not form.tests or not backend_for(form).settings_tile
+                   else "  ·  %d test picture%s" % (
+                       len(form.tests), "" if len(form.tests) == 1 else "s"))
                 + ("" if word == DEF_COUNTDOWN_WORD else
                    "  ·  countdown says %s" % (
                        "just the game and the seconds" if not word
@@ -7269,6 +7367,10 @@ class MultibootPanel:
         self._counter_var = tk.BooleanVar(value=True)
         #: The SETTINGS card (PAD-307): on, as the selector has it.
         self._settings_var = tk.BooleanVar(value=True)
+        #: PAD-1279: the test pictures, [[path, label], ...] as JSON - a var,
+        #: so the list is a menu field like the rest (traced, backed up while
+        #: Menu settings is open, put back on Cancel)
+        self._tests_var = tk.StringVar(value="[]")
         #: PAD-495: editions, no menu - off, as every card before it was
         self._editions_var = tk.BooleanVar(value=False)
         self._countdown_word_var = tk.StringVar(value=DEF_COUNTDOWN_WORD)
@@ -7351,7 +7453,8 @@ class MultibootPanel:
                     self._heading_var, self._same_text_var, self._counter_var,
                     self._settings_var, self._editions_var,
                     self._countdown_word_var, self._footer_var,
-                    self._footer_text_var, self._default_var):
+                    self._footer_text_var, self._default_var,
+                    self._tests_var):
             var.trace_add("write", lambda *_a: self._menu_changed())
         # Item 100: the compact tick beside the size strip.  Not a menu field
         # (an inject never changes a card's layout: diff_forms puts it in the
@@ -7546,7 +7649,7 @@ class MultibootPanel:
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._heading_var, self._same_text_var,
                     self._counter_var, self._settings_var, self._editions_var,
-                    self._countdown_word_var,
+                    self._tests_var, self._countdown_word_var,
                     self._footer_var, self._footer_text_var,
                     self._default_var, self._out_var, self._selector_var,
                     self._theme_var) + tuple(self._color_vars.values()):
@@ -9951,7 +10054,8 @@ class MultibootPanel:
                              self._default_var.get(),
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
-                              for role, var in self._color_vars.items()})
+                              for role, var in self._color_vars.items()},
+                             self._tests_var.get())
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
         return self._menu_dialog.show()
 
@@ -9965,7 +10069,7 @@ class MultibootPanel:
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, heading, same_text,
              counter, settings, editions, word, foot_on, foot_text, default, selector,
-             theme, colors) = self._menu_backup
+             theme, colors, tests) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
@@ -9976,6 +10080,7 @@ class MultibootPanel:
             self._same_text_var.set(same_text)
             self._counter_var.set(counter)
             self._settings_var.set(settings)
+            self._tests_var.set(tests)
             self._editions_var.set(editions)
             self._countdown_word_var.set(word)
             self._footer_var.set(foot_on)
@@ -10150,6 +10255,7 @@ class MultibootPanel:
             same_text_size=bool(self._same_text_var.get()),
             show_counter=bool(self._counter_var.get()),
             settings_tile=bool(self._settings_var.get()),
+            tests=self.test_pictures(),
             editions=bool(self._editions_var.get()),
             show_footer=bool(self._footer_var.get()),
             # NOT `or` anything: an empty box with the tick on is the
@@ -10167,6 +10273,59 @@ class MultibootPanel:
             platform=self._backend.key,
             theme=theme, colors=colors,
             colour_profiles=self._colour_profiles())
+
+    # -- the test pictures (PAD-1279) -----------------------------------
+    def test_pictures(self):
+        """[(path, label)] as the menu dialog has them."""
+        try:
+            return clean_tests(json.loads(self._tests_var.get() or "[]"))
+        except ValueError:
+            return []
+
+    def set_test_pictures(self, tests):
+        self._tests_var.set(json.dumps([list(t) for t in clean_tests(tests)]))
+
+    def test_add(self, paths):
+        """Add files to the end, skipping one already on the list; -> how many."""
+        have = self.test_pictures()
+        known = {os.path.normcase(os.path.abspath(p)) for p, _l in have}
+        added = 0
+        for p in paths:
+            if len(have) >= TEST_MAX:
+                break
+            key = os.path.normcase(os.path.abspath(p))
+            if key in known:
+                continue
+            known.add(key)
+            have.append((p, os.path.splitext(os.path.basename(p))[0]))
+            added += 1
+        self.set_test_pictures(have)
+        return added
+
+    def test_remove(self, k):
+        have = self.test_pictures()
+        if not 0 <= k < len(have):
+            return False
+        del have[k]
+        self.set_test_pictures(have)
+        return True
+
+    def test_move(self, k, d):
+        have = self.test_pictures()
+        j = k + d
+        if not (0 <= k < len(have) and 0 <= j < len(have)):
+            return False
+        have[k], have[j] = have[j], have[k]
+        self.set_test_pictures(have)
+        return True
+
+    def test_label(self, k, label):
+        have = self.test_pictures()
+        if not 0 <= k < len(have):
+            return False
+        have[k] = (have[k][0], label)
+        self.set_test_pictures(have)
+        return True
 
     def _colour_profiles(self):
         """``{image index: built colour profile}`` for the images known to be
@@ -10283,6 +10442,7 @@ class MultibootPanel:
                      "same_text_size": bool(self._same_text_var.get()),
                      "show_counter": bool(self._counter_var.get()),
                      "settings_tile": bool(self._settings_var.get()),
+                     "tests": [list(t) for t in self.test_pictures()],
                      "editions": bool(self._editions_var.get()),
                      "show_footer": bool(self._footer_var.get()),
                      "footer": self._footer_text_var.get().strip(),
@@ -10412,6 +10572,7 @@ class MultibootPanel:
             # countdown word existed: both come back as the selector's own
             self._counter_var.set(bool(menu.get("show_counter", True)))
             self._settings_var.set(bool(menu.get("settings_tile", True)))
+            self.set_test_pictures(menu.get("tests") or [])
             self._editions_var.set(bool(menu.get("editions", False)))
             self._countdown_word_var.set(menu.get("countdown_word",
                                                   DEF_COUNTDOWN_WORD))
@@ -10858,6 +11019,55 @@ class MultibootPanel:
         self._run_kind = "build"
         return self._run_commands(cmds, on_step=self._plan_step, on_done=done)
 
+    def testcard_default_path(self):
+        """Beside the card image the tab builds, else beside the first image."""
+        out = (self._out_var.get() or "").strip().strip('"')
+        base = os.path.dirname(out) if out else (
+            os.path.dirname(self._rows[0].path) if self._rows else "")
+        return os.path.join(base, TESTCARD_NAME) if base else TESTCARD_NAME
+
+    def build_test_card(self, out):
+        """'Build test card…' (PAD-1279): a small card that opens on the
+        menu's Settings - Color correction and the test pictures - and boots
+        no game.  The first image on the list lends its boot and rootfs."""
+        form = self.form()
+        if not self._backend.settings_tile:
+            self._error("A test card is a Stern Spike 2 card.")
+            return False
+        if not form.images or is_group(form.images[0]) or not source_exists(form.images[0].path):
+            self._error("Add a Stern Spike 2 card image to the list first: the test card "
+                        "borrows its boot and system partitions (any title will do; "
+                        "nothing of its game goes on the test card).")
+            return False
+        out = (out or "").strip().strip('"')
+        if not out:
+            return False
+        if _norm(out) in {_norm(r.path) for r in form.images} or (
+                self._loaded_card and _norm(out) == _norm(self._loaded_card)):
+            self._error("Pick a new file for the test card, not one of the card images.")
+            return False
+        media_dir = os.path.join(os.path.dirname(out) or ".", "pad_test_card_media")
+        os.makedirs(media_dir, exist_ok=True)
+        n = len(clean_tests(form.tests))
+        self._ok("Building the test card %s (%d test picture%s of your own)…"
+                 % (out, n, "" if n == 1 else "s"))
+
+        def done(rc, failed, texts):
+            if rc == 0:
+                size = os.path.getsize(out) if os.path.exists(out) else 0
+                self._ok("Test card built: %s (%.2f GB). Write it to an SD card like any "
+                         "card image; on the machine it opens on TEST CARD: Color "
+                         "correction and Test pictures." % (out, size / 1e9))
+            elif self.run_cancelled():
+                self._ok("Test card canceled. %s is unfinished." % out)
+            else:
+                why = parse_refusal(texts.get(failed, ""), out)
+                self._error("%s failed (exit %d) - %s" % (failed or "the test card", rc,
+                                                          why or "see the tool output."))
+        self._run_kind = "build"
+        self._run_commands(testcard_commands(form, out, media_dir), on_done=done)
+        return True
+
     def _confirm_overwrite(self, path):
         """The one gate between Build & verify and a card that is already
         there - and it SAYS WHAT IT WOULD DESTROY.
@@ -11063,6 +11273,7 @@ class MultibootPanel:
             self._same_text_var.set(bool(form.same_text_size))
             self._counter_var.set(bool(form.show_counter))
             self._settings_var.set(bool(form.settings_tile))
+            self.set_test_pictures(form.tests)
             self._editions_var.set(bool(form.editions))
             self._countdown_word_var.set(form.countdown_word)
             self._footer_var.set(bool(form.show_footer))
@@ -11218,6 +11429,7 @@ class MultibootPanel:
             self._same_text_var.set(bool(menu.get("same_text_size", True)))
             self._counter_var.set(bool(menu.get("show_counter", True)))
             self._settings_var.set(bool(menu.get("settings_tile", True)))
+            self.set_test_pictures(menu.get("tests") or [])
             self._editions_var.set(bool(menu.get("editions", False)))
             self._countdown_word_var.set(menu["countdown_word"])
             self._footer_var.set(bool(menu.get("show_footer", True)))

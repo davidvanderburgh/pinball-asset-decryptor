@@ -49,6 +49,9 @@ image=p7:img1|TMNT 1987|upscaled cartoon retheme|art1.png|anim1.gif|
 image=p7:img2|TMNT 1987 BW|black and white edition|art0.png||
 color_profile=1|1.10 1.20 1.35|1.00 1.00 1.00|0.00 0.00 0.00|0.90|Recommended
 color_profile=2|1.00 1.00 1.00|1.00 1.00 1.00|0.00 0.00 0.00|0.00|Black and white
+test=art0.png|Red square
+test=anim1.gif|Moving
+test=confirm.wav|Tone
 default=1
 timeout=4
 """
@@ -145,17 +148,18 @@ def main():
         return [ln for ln in (vals or "").splitlines() if ln and not ln.startswith("#")]
 
     # the colour screen's rows (two adjustable images): GAME 0, START FROM 1, BRIGHTNESS 2,
-    # CONTRAST 3, SATURATION 4, MIDDLE SHADES 5-7, COLOR LEVEL 8-10, DARKEST SHADES 11, SAVE 12,
-    # SAVE FOR EVERY GAME 13, BACK 14
+    # CONTRAST 3, SATURATION 4, MIDDLE SHADES 5-7, COLOR LEVEL 8-10, DARKEST SHADES 11,
+    # SEE IT ON THE TEST PICTURES 12 (PAD-1279), SAVE 13, SAVE FOR EVERY GAME 14, BACK 15;
+    # the Settings list: COLOR CORRECTION 0, TEST PICTURES 1, BACK TO THE GAMES 2
     # 1. walk: card 1 (the default) -> RIGHT RIGHT = the tile (card 4 of 4)
     walk = ["right", "right", "start",          # the tile opens Settings
             "start",                            # Color correction, on image 1
             "right", "right", "right", "right", "right",   # -> 5 = MIDDLE SHADES red
             "start", "right", "right", "start",  # +2 steps: 1.10 -> 1.20
-            "right", "right", "right", "right", "right", "right", "right",   # 5 -> 12 = SAVE
+            "right", "right", "right", "right", "right", "right", "right", "right",   # 5 -> 13 = SAVE
             "start",
-            "right", "right", "start",          # 12 -> 14 = BACK (nothing unsaved)
-            "right", "start"]                   # BACK TO THE GAMES
+            "right", "right", "start",          # 13 -> 15 = BACK (nothing unsaved)
+            "right", "right", "start"]          # BACK TO THE GAMES
     rc, o, e, vals, ch = run("walk", walk)
     for want in ("[select] settings: open",
                  "[select] settings: color correction, 2 adjustable images, on image 1 (TMNT 1987)",
@@ -178,9 +182,9 @@ def main():
              "right", "right", "start", "right", "right", "start",            # 2 BRIGHTNESS
              "right", "start", "right", "right", "right", "start",            # 3 CONTRAST
              "right", "start", "left", "left", "start",                       # 4 SATURATION
-             "right", "right", "right", "right", "right", "right", "right", "right",   # 4 -> 12 SAVE
+             "right", "right", "right", "right", "right", "right", "right", "right", "right",   # 4 -> 13 SAVE
              "start",
-             "right", "right", "start", "right", "start"]
+             "right", "right", "start", "right", "right", "start"]
     rc, o, e, vals, ch = run("plain", plain)
     want_line = ("p7:img1|1.1000 1.2000 1.3500|1.0000 1.0000 1.0000|0.0000 0.0000 0.0000|0.8000"
                  "|1.1000 1.1500")
@@ -193,10 +197,10 @@ def main():
     # then SAVE FOR EVERY GAME
     allg = ["right", "right", "start", "start",
             "right", "start", "right", "right", "right", "start",   # START FROM -> Black and white
-            "left", "left", "left",            # 1 -> 0 -> 12 -> 11 = SAVE FOR EVERY GAME
+            "left", "left", "left",            # 1 -> 0 -> 15 -> 14 = SAVE FOR EVERY GAME
             "start",
-            "right", "start",                  # 12 = BACK
-            "right", "start"]
+            "right", "start",                  # 15 = BACK
+            "right", "right", "start"]
     rc, o, e, vals, ch = run("all", allg)
     got = sorted(lines_of(vals))
     want = ["p7:img1|1.0000 1.0000 1.0000|1.0000 1.0000 1.0000|0.0000 0.0000 0.0000|0.0000"]
@@ -210,8 +214,8 @@ def main():
     # 3. hold: change the red middle shades and HOLD the right flipper 1.5 s
     hold = ["right", "right", "start", "start", "right", "right", "right", "right", "right", "start",
             ("right", 1.5), "start",
-            "right", "right", "right", "right", "right", "right", "right", "start",   # 5 -> 12 SAVE
-            "right", "right", "start", "right", "start"]
+            "right", "right", "right", "right", "right", "right", "right", "right", "start",   # 5 -> 13 SAVE
+            "right", "right", "start", "right", "right", "start"]
     rc, o, e, vals, ch = run("hold", hold)
     m = re.search(r"saved: (\d\.\d+) ", o)
     if not m:
@@ -226,6 +230,166 @@ def main():
         fail("(idle) Settings did not close by itself", o, e)
     if rc != 0 or ch != "1" or vals is not None:
         fail("(idle) rc %s choice %r values %r" % (rc, ch, vals), o, e)
+
+    # 4b. test pictures (PAD-1279): from the list - the built-in patterns, then the card's own
+    # (a picture, an animation, a sound) and BACK; START on a picture steps the correction
+    # through each adjustable game and none; BACK returns to the list
+    n_items = 6 + 3 + 1
+    tp = ["right", "right", "start",            # the tile
+          "right", "start",                     # TEST PICTURES
+          "start", "start", "start",            # image 1 -> image 2 -> none -> (wraps) image 1
+          "left",                               # 0 -> BACK (the last)
+          "left", "left", "left",               # the sound, the animation, the picture
+          "right", "right", "right",            # back to BACK
+          "start",                              # back to the list
+          "right", "start"]                     # BACK TO THE GAMES
+    rc, o, e, vals, ch = run("testpics", tp)
+    for want in ("[select] test: open (6 built-in, 3 of the card's own)",
+                 "[select] test: 1/%d Test card" % n_items,
+                 "[select] test: color TMNT 1987 BW",
+                 "[select] test: color not corrected",
+                 "[select] test: %d/%d Back to settings" % (n_items, n_items),
+                 "[select] test: 9/%d Tone (confirm.wav)" % n_items,
+                 "[select] test: 8/%d Moving (anim1.gif)" % n_items,
+                 "[select] test: 7/%d Red square (art0.png)" % n_items,
+                 "[select] test: closed",
+                 "[select] settings: back to the games",
+                 "[select] settings: closed"):
+        if want not in o:
+            fail("(testpics) no %r" % want, o, e)
+    if rc != 0 or ch != "1" or vals is not None:
+        fail("(testpics) rc %s choice %r values %r" % (rc, ch, vals), o, e)
+
+    if not re.search(r"\[select\] test: color TMNT 1987$", o, re.M):
+        fail("(testpics) the correction did not come back round to image 1", o, e)
+
+    # 4c. from Color correction: SEE IT ON THE TEST PICTURES shows the numbers being changed,
+    # unsaved, and BACK lands on Color correction again, where they are saved
+    tc = ["right", "right", "start", "start",   # Color correction on image 1
+          "right", "right", "right", "right", "right",   # -> 5 MIDDLE SHADES red
+          "start", "right", "start",            # 1.10 -> 1.15, unsaved
+          "right", "right", "right", "right", "right", "right", "right",   # 5 -> 12 TEST
+          "start",                              # the test pictures
+          "left", "start",                      # BACK -> Color correction
+          "right", "start",                     # 13 SAVE
+          "right", "right", "start", "right", "right", "start"]
+    rc, o, e, vals, ch = run("testcolor", tc)
+    if "[select] test: 10/10 Back to color correction" not in o or "[select] test: closed" not in o:
+        fail("(testcolor) the test pictures did not open from Color correction", o, e)
+    if lines_of(vals) != ["p7:img1|1.1500 1.2000 1.3500|1.0000 1.0000 1.0000|0.0000 0.0000 0.0000|0.9000"]:
+        fail("(testcolor) after the test pictures the change was not still there to save: %r" % vals, o, e)
+
+    # 4d. the pictures themselves, by snapshot, caption hidden: a built-in pattern is exact,
+    # the card's own picture is its own pixels uncorrected and the game's numbers corrected
+    def snap_test(name, conf_path, row):
+        out = os.path.join(t, "test_%s.ppm" % name)
+        r = subprocess.run([qemu, "-L", root, binp, "--snapshot", out, "--conf", conf_path, "--font", font,
+                            "--media", media, "--no-invert", "--screen", "test", "--screen-row", str(row),
+                            "--screen-edit"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if r.returncode != 0:
+            fail("(test snapshot %s) rc %d" % (name, r.returncode), r.stdout, r.stderr)
+        w, h, data = mkmedia.read_ppm(out)
+        return w, h, (lambda x, y: tuple(data[(y * w + x) * 3:(y * w + x) * 3 + 3]))
+    plain_conf = os.path.join(t, "testonly.conf")
+    with open(plain_conf, "w") as f:
+        f.write("image=p3|STERN STOCK|original Stern code||\n"
+                "test=art0.png|Red square\ntest=nosuch.png|Missing\ntest=notes.txt|Not a picture\n")
+    w, h, px = snap_test("grey", plain_conf, 1)
+    if (w, h) != (1360, 768):
+        fail("(test snapshot) %dx%d" % (w, h))
+    # the grey ramp: the darkest band holds 0..15 in 16 steps, the lightest 240..255
+    band = h // 4
+    for k in (0, 1, 7, 15):
+        x = k * w // 16 + w // 32
+        got = px(x, 2 * band + band // 2)
+        if got != (k, k, k):
+            fail("(test grey) dark step %d at x %d is %r" % (k, x, got))
+        got = px(x, 3 * band + band // 2)
+        if got != (240 + k,) * 3:
+            fail("(test grey) light step %d at x %d is %r" % (k, x, got))
+    w, h, px = snap_test("own", plain_conf, 6)
+    own = px(w // 2, h // 2)
+    w, h, px2 = snap_test("own_corrected", conf, 6)
+    if px2(w // 2, h // 2) == own:
+        fail("(test own) the corrected picture is the same as the plain one: %r" % (own,))
+    w, h, px = snap_test("missing", plain_conf, 7)
+    w, h, px = snap_test("notpic", plain_conf, 8)
+    r = subprocess.run([qemu, "-L", root, binp, "--snapshot", os.path.join(t, "tile_tests.ppm"),
+                        "--conf", plain_conf, "--font", font, "--media", media, "--no-invert",
+                        "--highlight-card", "1"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0 or "card 2/2 (settings)" not in r.stdout:
+        fail("(test tile) a card with test= lines and no color_profile= has no SETTINGS tile", r.stdout)
+
+    # 4e. a TEST CARD (testcard=on): no menu, nothing boots - the Settings screens from power-up,
+    # Color correction on its one pseudo-image, no BACK TO THE GAMES, no idle exit; it runs until
+    # it is stopped (SIGTERM here, the power switch on a machine)
+    tconf = os.path.join(t, "testcard.conf")
+    with open(tconf, "w") as f:
+        f.write("image=testcard|TEST CARD|color profile test card||\n"
+                "color_profile=0|1.10 1.20 1.35|1.00 1.00 1.00|0.00 0.00 0.00|0.90|Recommended\n"
+                "testcard=on\ntest=art0.png|Red square\n")
+    tvals = os.path.join(t, "testcard.color")
+    tout = os.path.join(t, "testcard.choice")
+    for q in (tvals, tout):
+        if os.path.exists(q):
+            os.unlink(q)
+    tsw = os.path.join(t, "testcard.padsw")
+    with open(tsw, "wb") as f:
+        f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
+    env = dict(os.environ, PAD_SETTINGS_IDLE_MS="2000")
+    tp = subprocess.Popen([qemu, "-L", root, binp, "--headless", os.path.join(t, "testcard.ppm"),
+                           "--conf", tconf, "--input", "padsw", "--padsw", tsw, "--tables", no_list,
+                           "--timeout", "3", "--out", tout, "--last", os.path.join(t, "testcard.last"),
+                           "--font", font, "--no-invert", "--media", media, "--audio", "none",
+                           "--color-file", tvals],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    time.sleep(1.2)
+    # Color correction (row 0 of two) -> START FROM 0, BRIGHTNESS 1: +1 step, SAVE, BACK;
+    # then TEST PICTURES, BACK; then wait past the idle time and the countdown
+    for button in ["start", "right", "start", "right", "start",
+                   "right", "right", "right", "right", "right", "right", "right", "right", "right",
+                   "right",                     # 1 -> 11 = SEE IT ON THE TEST PICTURES
+                   "right", "start",            # 12 = SAVE
+                   "right", "start",            # 13 = BACK
+                   "right", "start",            # TEST PICTURES
+                   "left", "start",             # BACK -> the list
+                   "right", "right"]:           # two entries: round to the same one
+        with open(tsw, "r+b") as f:
+            f.seek(OFF_CAB + CAB_IDX[button])
+            f.write(b"\x01")
+        time.sleep(0.15)
+        with open(tsw, "r+b") as f:
+            f.seek(OFF_CAB + CAB_IDX[button])
+            f.write(b"\x00")
+        time.sleep(0.45)
+    time.sleep(5)
+    alive = tp.poll() is None
+    tp.terminate()
+    try:
+        o, e = tp.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        tp.kill()
+        o, e = tp.communicate()
+    if not alive:
+        fail("(testcard) the test card exited by itself (idle or countdown)", o, e)
+    for want in ("[select] testcard: no menu, nothing boots",
+                 "[select] settings: color correction, 1 adjustable image, on image 0 (TEST CARD)",
+                 "[select] color: image 0 (TEST CARD) saved: ",
+                 "[select] test: open (6 built-in, 1 of the card's own)",
+                 "[select] test: 8/8 Back to settings"):
+        if want not in o:
+            fail("(testcard) no %r" % want, o, e)
+    if "back to the games" in o or os.path.exists(tout) and open(tout).read().strip():
+        fail("(testcard) a test card left for the games or chose one", o, e)
+    tl = lines_of(open(tvals).read() if os.path.exists(tvals) else "")
+    if len(tl) != 1 or not tl[0].startswith("testcard|"):
+        fail("(testcard) the values file holds %r, expected one testcard| line" % tl, o, e)
+    r = subprocess.run([qemu, "-L", root, binp, "--snapshot", os.path.join(t, "testcard_snap.ppm"),
+                        "--conf", tconf, "--font", font, "--media", media, "--no-invert"],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0 or "screen settings" not in r.stdout:
+        fail("(testcard) a test card's snapshot is not its Settings list", r.stdout, r.stderr)
 
     # 5. apply: a synthetic program with three pad_cp in the template, one stock string
     prog = os.path.join(t, "game")
@@ -307,7 +471,7 @@ def main():
     if snaps[1][0] == 0 or "out of range (3 cards)" not in snaps[1][1]:
         fail("(off) settings=off still has a fourth card", snaps[1][1])
     print("settings_test: OK (walk, brightness/contrast/saturation, save for every game, a held flipper, "
-          "the idle exit, --apply-color, settings=off)")
+          "the idle exit, test pictures, a test card, --apply-color, settings=off)")
 
 
 if __name__ == "__main__":

@@ -510,6 +510,29 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 snprintf(c->colour[idx].name, sizeof c->colour[idx].name, "%s",
                          fld[5] ? fld[5] : "");
             }
+        } else if (!strcmp(key, "testcard")) {
+            if (!strcmp(val, "on")) c->testcard = 1;
+            else if (!*val || !strcmp(val, "off")) c->testcard = 0;
+            else conf_warn(c, "%s:%d: testcard=%s is not 'on' or 'off': read as 'off'",
+                           path, lineno, val);
+        } else if (!strcmp(key, "test")) {
+            /* PAD-1279: <file>|<label> - one of the card's own test pictures,
+             * animations or sounds (Settings > Test pictures), a file name in
+             * the media directory.  A name with a path in it, or beyond
+             * CONF_MAX_TESTS, is dropped out loud. */
+            char *fld[7];
+            split_fields(val, fld);
+            if (!fld[0] || !*fld[0] || strchr(fld[0], '/')) {
+                conf_warn(c, "%s:%d: test=%s is not a file name in the media directory: dropped",
+                          path, lineno, fld[0] ? fld[0] : "");
+            } else if (c->ntest >= CONF_MAX_TESTS) {
+                conf_warn(c, "%s:%d: more than %d test= lines: %s dropped", path, lineno,
+                          CONF_MAX_TESTS, fld[0]);
+            } else {
+                copy_field(c->test[c->ntest].file, fld[0]);
+                copy_field(c->test[c->ntest].label, fld[1] && *fld[1] ? fld[1] : fld[0]);
+                c->ntest++;
+            }
         } else if (!strcmp(key, "settings")) {
             if (!*val || !strcmp(val, "on")) c->settings = 1;
             else if (!strcmp(val, "off")) c->settings = 0;
@@ -617,14 +640,18 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             c->ncolour++;
         }
     }
-    if (c->settings && c->ncolour > 0) {
+    /* the tile, when it has something on it: a game to correct, or the
+     * card's own test pictures (PAD-1279) - and, once it is there, the built-in
+     * test patterns always ride along under Test pictures */
+    if (c->settings && (c->ncolour > 0 || c->ntest > 0)) {
         c->settings_card = c->ncards;
         c->cards[c->ncards].image = -1;
         c->cards[c->ncards].group = -1;
         c->ncards++;
         copy_field(c->settings_face.device, "settings");
         copy_field(c->settings_face.title, "SETTINGS");
-        copy_field(c->settings_face.subtitle, "Color correction");
+        copy_field(c->settings_face.subtitle, c->ncolour > 0 ? "Color correction, test pictures"
+                                                             : "Test pictures");
     }
     return 0;
 }

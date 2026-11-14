@@ -14,7 +14,7 @@ import { html, useEffect, useRef, useState, Button, Field, Select, Check, Radio,
          InfoBadge, Icon, Progress, tip, cx, call, setField, openMenu, mediaUrl, fmtClock } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { StockDialog, FilmDialog, ClipDialog, PlayButton, CoopAwardsDialog, CoopCharsDialog,
-         HandicapLevelsDialog } from "./modes_dialogs.js";
+         HandicapLevelsDialog, RecordsDialog } from "./modes_dialogs.js";
 import { NewModeWizard, KindTiles } from "./modes_new.js";
 import { BlocksEditor, BlocksCode, ProgramBar, useModeProgram } from "./modes_blocks.js";
 import { PlayfieldView } from "./modes_playfield.js";
@@ -238,7 +238,7 @@ function ListRow({ r, i, selIdx, isSel }) {
 // GAME_FOLD_AT of them (a person's choice to open or fold them is kept in this browser).
 const GAME_FOLD_AT = 6;
 
-function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, onHandLevels }) {
+function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, onHandLevels, onRecords }) {
   const [fold, setFold] = useStored("pad.modes.game_fold2", "auto");
   const sel = s.sel || {};
   const allGame = s.game_rows || [];
@@ -298,6 +298,11 @@ function ModeList({ s, onNew, onAllNumbers, onSheet, onCoopAwards, onCoopChars, 
         </div>` : null}
       </div>` : null}
       ${s.cap_text ? html`<span class="small muted">${s.cap_text}</span>` : null}
+      ${s.recs_shown ? html`<div class="row modes-rec-btn">
+        <${Button} size="sm" icon="star" onClick=${onRecords}
+          title="Records of your own on the game's high-score table: points or shots during one of the game's modes, one of yours, or the whole game. A player who beats one enters their initials for it after the game.">High scores…<//>
+        ${s.recs_n ? html`<span class="small dim">${s.recs_n} record${s.recs_n === 1 ? "" : "s"}</span>` : null}
+      </div>` : null}
       <div class="row modes-list-acts">
         <${Button} size="sm" disabled=${!s.dup_ok} onClick=${() => call("modes.duplicate")}>Duplicate<//>
         <${Button} drop size="sm" disabled=${!s.copy_ok} onClick=${() => call("modes.copy_to")}
@@ -1353,6 +1358,7 @@ export default function ModesTab() {
   if (s.spin) SPIN = s.spin;
   const [stock, setStock] = useState(false);
   const [coopAw, setCoopAw] = useState(false);                                // PAD-1028
+  const [recs, setRecs] = useState(false);                                    // PAD-1280
   const [coopCh, setCoopCh] = useState(false);                                // PAD-1031
   const [handLv, setHandLv] = useState(false);                                // PAD-1033
   const [sheet, setSheet] = useState(false);        // PAD-664: the rules sheet dialog
@@ -1371,7 +1377,7 @@ export default function ModesTab() {
     <div class="modes-body">
       <${ModeList} s=${s} onNew=${(k) => setNewMode({ kind: k })} onAllNumbers=${() => setStock(true)}
         onSheet=${() => { setSheet(true); call("modes.sheet_open"); }} onCoopAwards=${() => setCoopAw(true)}
-        onCoopChars=${() => setCoopCh(true)}
+        onCoopChars=${() => setCoopCh(true)} onRecords=${() => setRecs(true)}
         onHandLevels=${() => setHandLv(true)} />
       ${s.game_mode ? html`<${GameModePage} g=${s.game_mode} s=${s} onClip=${showClips} />`
         : s.code && s.code.blocks ? html`<${BlocksPane} s=${withClip} />`
@@ -1387,6 +1393,7 @@ export default function ModesTab() {
     <${TryFooter} s=${s} />
     ${stock ? html`<${StockDialog} s=${s} onClose=${() => setStock(false)} />` : null}
     ${coopAw ? html`<${CoopAwardsDialog} s=${s} onClose=${() => setCoopAw(false)} />` : null}
+    ${recs ? html`<${RecordsDialog} s=${s} onClose=${() => setRecs(false)} />` : null}
     ${coopCh ? html`<${CoopCharsDialog} s=${s} onClose=${() => setCoopCh(false)} />` : null}
     ${handLv ? html`<${HandicapLevelsDialog} s=${s} onClose=${() => setHandLv(false)} />` : null}
     ${sheet && s.sheet ? html`<${RulesSheetDialog} s=${s} onClose=${() => setSheet(false)} />` : null}

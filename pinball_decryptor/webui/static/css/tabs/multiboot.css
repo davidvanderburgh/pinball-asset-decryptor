@@ -161,3 +161,11 @@ html.bp-760 .mb-hint { display: none; }
 .mb-fullview .bd { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .mb-fullbox { width: 100%; display: flex; justify-content: center; }
 .mb-screen.mb-full { cursor: default; }
+
+/* PAD-1279: Menu settings, the card's own test pictures */
+.mb-tests { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; }
+.mb-tests-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.mb-test { gap: 6px; align-items: center; }
+.mb-test-file { flex: 0 0 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-test-file.bad { color: var(--err); }
+.mb-test-label { flex: 1 1 auto; min-width: 120px; }

@@ -404,6 +404,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                  coop_ch={"why": "", "note": "", "pick": False, "rows": [], "abilities": [], "preset": "",
                           "max_name": 27, "max": 16}, coop_chars_tip="",                      # PAD-1031
                  coop_tip=self.COOP_TIP)
+        self.set(recs_shown=False, recs_n=0,                                                   # PAD-1280
+                 recs={"why": "", "how": "", "rows": [], "modes": [], "counts": [], "max": 12, "max_words": 27,
+                       "error": "", "saved": ""})
         self.set(idle_on=False, idle_note="", idle_note_kind="", idle_shown=False,   # PAD-1022
                  idle_tip=self.IDLE_TIP)
         self.set(hand_on=False, hand_note="", hand_note_kind="", hand_shown=False,   # PAD-1033
@@ -683,6 +686,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self._publish_handicap(project)                      # PAD-1033
         self._publish_comp(project)                          # PAD-1041
         self._publish_feed(project)                          # PAD-1204
+        self._publish_records_count(project)                 # PAD-1280
         codes = [s for s, _n in self._code_list]
         game = self._game_ids()
         if select_game is not None and select_game in game:
@@ -864,6 +868,91 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         history_log.record(project, [hist] if hist else [])
         self._publish_coop_awards(project)
         return True
+
+    # ---- PAD-1280: records of the owner's own on the game's high scores (plugins/stern/mode_records.py) ----
+    def _publish_records_count(self, project):
+        """The High scores button under the mode list: shown for a project, with the number of its records."""
+        from ...plugins.stern import mode_records as _MR
+        self.set(recs_shown=bool(project), recs_n=len(_MR.load(project)) if project else 0)
+
+    def _own_mode_choices(self):
+        """The project's own modes a record can count in: ``own:<the name the runtime gives it>``, each once."""
+        out, seen = [], set()
+        for r in self.get("rows") or []:
+            name = " ".join(str(r.get("name") or "").split())
+            if name and name.upper() not in seen:
+                seen.add(name.upper())
+                out.append({"value": "own:" + name, "label": name})
+        return out
+
+    def _publish_records(self, project, error="", saved=""):
+        from ...plugins.stern import mode_records as _MR
+        why, got = _MR.project_choices(project) if project else (_MR.NO_TITLE, {"modes": [], "counts": []})
+        own = self._own_mode_choices()
+        names = {m["value"]: m["label"] for m in (got.get("modes") or []) + own}
+        counts = {c["key"]: c["label"] for c in got.get("counts") or []}
+        rows = []
+        for r in _MR.load(project) if project else []:
+            gone = r["mode"] and r["mode"] not in names
+            rows.append(dict(r, what=_MR.describe(r, names),
+                             counts_words=[counts.get(c, c) for c in r["counts"]],
+                             note=("Its mode is not in this project's game any more: the record is left off the card."
+                                   if gone and r["mode"].startswith("game:") else
+                                   "No mode of this project is called that any more: it never counts." if gone
+                                   else "")))
+        self.set(recs={"why": why, "how": _MR.HOW, "rows": rows,
+                       "modes": [{"value": "", "label": "The whole game"}]
+                       + [dict(m, group="The game's own modes") for m in got.get("modes") or []]
+                       + [dict(m, group="Your modes") for m in own],
+                       "counts": got.get("counts") or [], "max": _MR.MAX_RECORDS, "max_words": _MR.MAX_WORDS,
+                       "max_desc": _MR.MAX_DESC, "error": error, "saved": saved},
+                 recs_shown=bool(project), recs_n=len(rows))
+
+    @rpc
+    def records_refresh(self):
+        """PAD-1280: the High scores dialog's records and what this card's game offers them (read off the card,
+        cached)."""
+        self._publish_records(self.project())
+        return True
+
+    @rpc
+    def record_save(self, key, rec):
+        """PAD-1280: keep a record of the owner's (a new one when *key* is empty). False with the reason in the
+        dialog's ``error`` when it cannot be kept."""
+        from ...core import history_log
+        from ...plugins.stern import mode_records as _MR
+        project = self.project()
+        if not project or not isinstance(rec, dict):
+            return False
+        was = next((r for r in _MR.load(project) if r["key"] == key), None) if key else None
+        try:
+            got = _MR.save_record(project, key or "", rec)
+        except _MR.RecordError as e:
+            self._publish_records(project, error=str(e))
+            return False
+        now = next((r for r in _MR.load(project) if r["key"] == got), None) or {}
+        hist = history_log.diff_scalar("modes  high score record %s" % (now.get("name") or got),
+                                       _MR.describe(was) if was else "none", _MR.describe(now) if now else "none")
+        history_log.record(project, [hist] if hist else [])
+        self._say("high scores: %s %s" % ("changed" if was else "added", now.get("name") or got))
+        self._publish_records(project, saved=got)
+        return got
+
+    @rpc
+    def record_delete(self, key):
+        """PAD-1280: take a record of the owner's out of the project."""
+        from ...core import history_log
+        from ...plugins.stern import mode_records as _MR
+        project = self.project()
+        if not project or not key:
+            return False
+        gone = _MR.delete_record(project, key)
+        if gone is not None:
+            hist = history_log.diff_scalar("modes  high score record %s" % gone["name"], _MR.describe(gone), "none")
+            history_log.record(project, [hist] if hist else [])
+            self._say("high scores: deleted %s" % gone["name"])
+        self._publish_records(project)
+        return gone is not None
 
     #: PAD-1031: co-op characters (plugins/stern/coop_play.py "co-op characters")
     COOP_CHARS_TIP = (
@@ -1194,8 +1283,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
 
     @rpc
     def coop_chars_bonus(self, on):
-        """PAD-1123: whether each teammate's character shows on their End of Ball Bonus (its picture, or its video, in a
-        window right of the bonus's words)."""
+        """PAD-1123: whether each teammate's character shows on their End of Ball Bonus (its picture, or its video, and its
+        name on a strip along the bottom of the screen)."""
         from ...plugins.stern import coop_play as _CP
         project = self.project()
         if not project or not _CP.load_characters(project)["list"]:

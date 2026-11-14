@@ -156,7 +156,10 @@ def test_the_card_builder_parses_what_the_tab_sends():
     assert seen["build"].titles == "FALLOUT LE 0.81.0;FALLOUT LE 0.82.0"
 
 
-def test_root_steps_and_the_selector_step():
+def test_root_steps_and_the_selector_step(monkeypatch):
+    # a Mac runs root steps through the docker worker as a ready argv, not a
+    # callable the worker resolves: this is the Windows/Linux shape
+    monkeypatch.setattr(mt._mac, "enabled", lambda: False)
     cmds = dict(mt.build_commands(s3_form(media_dir=r"D:\m"), cwd="/repo", prepare=True))
     assert list(cmds) == ["selector", "prepare", "plan", "build", "verify"]
     for label in ("selector", "build", "verify"):

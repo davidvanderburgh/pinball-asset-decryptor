@@ -175,7 +175,7 @@ struct opts {
      * --scores-save --store DIR --to FILE | --scores-load --from FILE --store DIR */
     int scores_op;                      /* 0, 1 = save, 2 = load */
     const char *scores_store, *scores_from;
-    /* --snapshot --screen settings|color [--screen-row N] [--screen-edit]:
+    /* --snapshot --screen settings|color|test [--screen-row N] [--screen-edit]:
      * a settings screen instead of the menu (tests, the preview, screenshots) */
     const char *screen;
     int screen_row, screen_edit;
@@ -266,7 +266,7 @@ static void usage(FILE *f)
         "                     first of the --frames K run\n"
         "  --audio-dump FILE  raw s16le 44100 Hz stereo of everything mixed\n"
         "  --color-file PATH  the color correction set on this machine (default " DEF_COLOUR_FILE ")\n"
-        "  --screen settings|color  --snapshot only: draw that settings screen instead of the menu,\n"
+        "  --screen settings|color|test  --snapshot only: draw that settings screen instead of the menu,\n"
         "                     --screen-row N highlighted (--screen-edit: being changed)\n"
         "  --apply-color --image N --program PATH --to OUT   the boot hook's step: when the values\n"
         "                     file sets image N's colors, write a copy of PATH with them in its\n"
@@ -2102,6 +2102,8 @@ int main(int argc, char **argv)
         if (!L.th_known) sel_log("theme: '%s' is not a theme, using %s", c.theme, THEME_DEFAULT);
         sel_log("theme: %s (%d of %d colours set by the conf%s)", L.th.name, L.th_set, TH_N, bad);
     }
+    /* a test card has no menu to draw: its picture is the Settings list */
+    if (snapshot && !o.screen && c.testcard) o.screen = "settings";
     if (snapshot && o.screen) {
         struct settings_env se;
         char why[200];
@@ -2111,7 +2113,9 @@ int main(int argc, char **argv)
         se.th = &L.th;
         se.c = &c;
         se.colour_file = o.colour_file;
+        se.media_dir = media_dir(&o, &c);
         se.first_image = hlimg;
+        se.testcard = c.testcard;
         if (settings_snapshot(&se, o.screen, o.screen_row, o.screen_edit, why, sizeof why) < 0) {
             sel_say("error: %s", why);
             rc = 2;
@@ -2296,6 +2300,34 @@ int main(int argc, char **argv)
             !c.footer_set ? "the menu's own"
             : *c.footer ? "the conf's own" : "off");
 
+    /* A TEST CARD (PAD-1279): no menu and nothing to boot - the Settings
+     * screens from power-up until the machine is switched off */
+    if (c.testcard) {
+        struct settings_env se;
+        memset(&se, 0, sizeof se);
+        pctx.g = &g;
+        pctx.egl = &egl;
+        pctx.headless = headless;
+        pctx.invert = invert;
+        se.g = &g;
+        se.font = font;
+        se.th = &L.th;
+        se.c = &c;
+        se.in = in;
+        se.au = au;
+        se.move = media.move;
+        se.colour_file = o.colour_file;
+        se.media_dir = media.dir;
+        se.first_image = 0;
+        se.present = present_cb;
+        se.ctx = &pctx;
+        se.stop = &g_stop;
+        se.testcard = 1;
+        sel_say("testcard: no menu, nothing boots: the settings screens until power-off");
+        while (!g_stop) settings_run(&se);
+        goto testcard_done;
+    }
+
     start = sel_now_ms();
     last_key = start;
     deadline = timeout > 0 ? start + (long long)timeout * 1000LL : 0;
@@ -2404,6 +2436,7 @@ int main(int argc, char **argv)
             se.au = au;
             se.move = media.move;
             se.colour_file = o.colour_file;
+            se.media_dir = media.dir;
             se.first_image = lastimg;
             se.present = present_cb;
             se.ctx = &pctx;
@@ -2548,6 +2581,7 @@ int main(int argc, char **argv)
 
     /* a level the buttons changed in the last moments before START is kept too */
     if (vol_touched) remember_volume(vol_file, volume, vol_conf, &vol_saved);
+testcard_done:
 
     if (chosen >= 0) {
         /* WHAT THE CARD ACTUALLY BOOTS.  A plain card boots its own image; a

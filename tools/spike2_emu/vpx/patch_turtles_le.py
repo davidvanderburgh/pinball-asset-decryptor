@@ -39,7 +39,9 @@ turtles_le.vpxmap.json:
            outputs; the lamp arrays grow to 3000;
            slingshots, the left ramp entry, the van entry and the right
            ramp exit send the edges the Data East script never did;
-           Plunger key and Lockbar key hold the Action button (launch);
+           the Lockbar key holds the Action button (launch); the Plunger key
+           is the table's own plunger, so a pulled plunger launches the ball
+           and the AUTO PLUNGER fires only when the game fires it (PAD-1281);
            the shooter lane's upper switch (UPPER SHOOTER LANE on the Pro,
            SKILL SHOT on the LE) on a trigger of its own: the game keeps the
            turtle select open until the launched ball crosses it (PAD-897).
@@ -211,6 +213,10 @@ def roll_in_sub(up):
         lines.append("\t\tvpmTimer.AddTimer %d, \"PadVanRest '\"" % (t + VAN_CROSS_MS // 2))
     return lines + ["\tEnd Select", "End Sub", ""]
 
+
+#: the key-down line that says whose the plunger key is; a table patched before
+#: PAD-1281 lacks it (the maps' `repatch`)
+PLUNGER_MARK = "' PAD: the plunger key is the table's own plunger, the lockbar key the Action button (launch)"
 
 #: how long the LAIR post waits, armed, for a ball that crossed the switch going down
 LAIR_ARM_MS = 2000
@@ -572,12 +578,16 @@ def patch_script(src, m):
             edges += 1
             continue
 
-        # ---- the keys: the Action button (launch) on the plunger and lockbar keys,
-        # the upper flipper's own button on the left key (the machine's button closes both)
+        # ---- the keys: the Action button (launch) on the lockbar key, the upper
+        # flipper's own button on the left key (the machine's button closes both).
+        # The plunger key stays the table's own plunger: it also pressed the
+        # Action button, so the game fired its AUTO PLUNGER the moment the key
+        # went down and a pulled plunger never launched a ball (PAD-1281)
         if re.match(r"^sub\s+table1_keydown\b", low):
             out.append(line)
             out += [
-                "\tIf keycode = PlungerKey Or keycode = LockBarKey Then",
+                "\t" + PLUNGER_MARK,
+                "\tIf keycode = LockBarKey Then",
                 "\t\tController.Switch(swLaunch) = 1",
                 "\tEnd If",
                 "\tIf keycode = LeftFlipperKey Then",
@@ -588,7 +598,7 @@ def patch_script(src, m):
         if re.match(r"^sub\s+table1_keyup\b", low):
             out.append(line)
             out += [
-                "\tIf keycode = PlungerKey Or keycode = LockBarKey Then",
+                "\tIf keycode = LockBarKey Then",
                 "\t\tController.Switch(swLaunch) = 0",
                 "\tEnd If",
                 "\tIf keycode = LeftFlipperKey Then",

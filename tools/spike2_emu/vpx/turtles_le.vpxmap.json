@@ -1167,6 +1167,11 @@
       "UPPER LEFT FLIPPER 8/6 (LeftFlipper1 follows the LEFT FLIPPER coil, as the table had it)"
     ]
   },
+  "repatch": [
+    {"absent": "Sub PadLairDisarm", "why": "its LAIR shot rolls past the post instead of stopping on it, so the game never counts it", "since": "PAD-1268: the LAIR ball rolls down its lane onto the LOWER LOCK post"},
+    {"absent": "Sub PadVanRollIn(place)", "why": "its lock can stop lighting and call UPPER LOCK and LOWER LOCK a device malfunction", "since": "PAD-1116: the lock empties when the game holds its post"},
+    {"absent": "Sub PadUpperShooter_Hit", "why": "the turtle select keeps cycling after the ball is launched", "since": "PAD-897: the shooter lane's upper switch ends the turtle select"}
+  ],
   "preferred": false,
   "patcher_takes_map": true
 }

@@ -1396,7 +1396,14 @@ export default function VideoTab() {
           <${Note} kind="info" action=${pv.modes.back ? html`<${Button} size="sm" onClick=${() => call("video.shared_again", pv.modes.rel)}
             disabled=${running}>Use the same clip as ${pv.modes.back} again…<//>` : null}>${pv.modes.text}<//>
         </div>` : null}
-        ${pv.sounds && pv.sounds.rel === currentRel ? html`<div class="vid-sounds">
+        ${pv.sounds && pv.sounds.rel === currentRel && pv.sounds.inline ? html`<div class="vid-sounds inline">
+          <${Note} kind="info"><div class="vid-song-row">
+            <span class="vid-song-label" ...${tip(pv.sounds.head_tip)}>${pv.sounds.head}</span>
+            <ul class="vid-sound-list inline">${(pv.sounds.items || []).map((it) => html`
+              <${SoundItem} key=${it.rel || it.text} it=${it} />`)}</ul>
+            ${pv.sounds.sync && (pv.sounds.items || []).length ? html`<${SongSync} key=${pv.sounds.items[0].path} it=${pv.sounds.items[0]} />` : null}
+          </div><//>
+        </div>` : pv.sounds && pv.sounds.rel === currentRel ? html`<div class="vid-sounds">
           <${Note} kind="info"><div>
             ${pv.sounds.head ? html`<span>${pv.sounds.head}</span>` : null}
             ${(pv.sounds.items || []).length ? html`<ul class="vid-sound-list">${pv.sounds.items.map((it) => html`

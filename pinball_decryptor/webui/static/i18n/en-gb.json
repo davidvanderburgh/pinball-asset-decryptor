@@ -223,6 +223,7 @@
 "How bright the colors in the range are.": "How bright the colours in the range are.",
 "How bright this screen shows each color's middle shades. Scenes not blue enough? Turn blue brighter.": "How bright this screen shows each colour's middle shades. Scenes not blue enough? Turn blue brighter.",
 "How each color's shades are remapped": "How each colour's shades are remapped",
+"How full the new card's games partition gets - measured inside the card images themselves. The first image's games are already there; every other image costs its own games. The gray band is the menu. The card image is the same size as the first one ({} GB).": "How full the new card's games partition gets - measured inside the card images themselves. The first image's games are already there; every other image costs its own games. The grey band is the menu. The card image is the same size as the first one ({} GB).",
 "How gently the range fades out on each side, so there is no hard edge between colors.": "How gently the range fades out on each side, so there is no hard edge between colours.",
 "How much color a pixel needs before the range touches it fully. Grays and pixels with less color than this are left alone or only partly changed.": "How much colour a pixel needs before the range touches it fully. Greys and pixels with less colour than this are left alone or only partly changed.",
 "How strong the colors in the range are.": "How strong the colours in the range are.",

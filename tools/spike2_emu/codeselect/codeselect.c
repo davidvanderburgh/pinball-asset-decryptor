@@ -127,6 +127,20 @@
  * button: see draw_menu(). They are named constants on their own lines so
  * anything outside this program that has to quote the footer (the GUI's
  * Multi-boot preview) can lift the text from here instead of retyping it. */
+#ifdef SEL_COIN_DOOR
+/* A Stern Spike 3 machine (PAD-1263, make PLATFORM=s3 and its preview build):
+ * the menu reads only the coin door's NEXT / PREVIOUS / SELECT (stubs_s3.c) -
+ * the flippers and START are node-bus switches only the game brings up - so
+ * its own words name those buttons. */
+#define FOOT_START   "NEXT / PREVIOUS: choose      SELECT: boot"
+#define FOOT_ACTION  FOOT_START
+#define FOOT_SETTINGS        "NEXT / PREVIOUS: choose      SELECT: settings"
+#define FOOT_SETTINGS_ACTION FOOT_SETTINGS
+#define PRESS_START  "press SELECT to boot "
+#define PRESS_ACTION PRESS_START
+#define PRESS_SETTINGS        "press SELECT for the settings"
+#define PRESS_SETTINGS_ACTION PRESS_SETTINGS
+#else
 #define FOOT_START   "LEFT / RIGHT FLIPPER: choose      START: boot"
 #define FOOT_ACTION  "LEFT / RIGHT FLIPPER: choose      START or ACTION: boot"
 /* ...and the menu's own footer while the SETTINGS tile is highlighted, which
@@ -138,6 +152,7 @@
 /* ...and the same line on the SETTINGS tile, which boots nothing (PAD-307) */
 #define PRESS_SETTINGS        "press START for the settings"
 #define PRESS_SETTINGS_ACTION "press START or ACTION for the settings"
+#endif
 /* ...and the line across the top, which images.conf's heading= replaces. Same
  * reason it is a named constant here: the GUI offers it as the field's
  * placeholder rather than retyping it. */

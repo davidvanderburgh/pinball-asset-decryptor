@@ -571,7 +571,7 @@ _MULTIBALL_SAVES = (
 #: ("perk", id): one of the game's own power-ups owned from the pick (Godzilla: the perks picked at the scoop, one bit
 #: each in the word the port's ``coop_keep_perks_obj`` names; the rules test their own bits), ("eb", ball): an extra
 #: ball as the character's ball n begins (the game's own award, the port's ``coop_eb_award``), ("save", seconds),
-#: ("addball", n): Action twice in regular play serves n more balls, ("spot", rules value name), ("unlock", adjustment
+#: ("addball", n): Action twice with one ball in play (modes too, PAD-1265) serves n more balls, ("spot", rules value name), ("unlock", adjustment
 #: name, rules value name or None), ("lit", name) + ("yes", name): a shot held lit / a check of the game's answering
 #: yes (the port's ``coop_lit_<name>`` / ``coop_yes_<name>``), or ("many", [hows]): all of them or none.
 _MB_SAVES = tuple((m, lo, hi) for m, lo, hi in _MULTIBALL_SAVES if m != "AD_ADD_A_BALL_SAVE_TIMER")
@@ -593,8 +593,9 @@ POWERS = (
      "The Oxygen Destroyer timer runs twice its setting.", ("adj", "AD_O2_DESTROYER_TIMER", "x200:8:40")),
     ("action_save", "Action button", "ACTION BUTTON BALL SAVE", "Press Action twice for a 10 second ball save, once a ball.",
      "A 10 second ball save when they press the Action button twice quickly, once a ball.", ("save", 10)),
-    ("addball", "Action button", "ADD A BALL", "Press Action twice in regular play to add a ball, once a ball.",
-     "Two quick presses of the Action button in regular play put a second ball in play, once a ball.", ("addball", 1)),
+    ("addball", "Action button", "ADD A BALL", "Press Action twice to add a ball, once a ball, not in multiball.",
+     "Two quick presses of the Action button put another ball in play, once a ball - in a battle or other mode too, "
+     "not during a multiball.", ("addball", 1)),
     ("spot", "Action button", "SPOT A BATTLE SHOT", "Press Action twice in a battle to hit its next shot, once per battle.",
      "Two quick presses of the Action button during a battle count as its next lit shot, once in each battle they start "
      "(every ball, every battle).", ("spot", "coop_battle_rules")),
@@ -738,8 +739,8 @@ ABILITIES = (
      "timer gets 10 seconds more.", ["spot", "battle_timers_10"]),
     ("tier2", "TIER 2 ALWAYS OPEN", "Every battle on the selection screen is open while they are up, tier 2 included "
      "(the game's UNLOCK ALL MONSTER BATTLES reads On for them).", ["tier2"]),
-    ("addball", "ADD A BALL", "Two quick presses of the Action button in regular play put a second ball in play, "
-     "once a ball.", ["addball"]),
+    ("addball", "ADD A BALL", "Two quick presses of the Action button put another ball in play, once a ball - in a battle "
+     "or other mode too, not during a multiball.", ["addball"]),
     ("maser", "MASER, MAGNA GRAB, AND DESTRUCTION JACKPOT LIT, DOUBLE POWERLINES AND POP HITS", "The Maser cannon "
      "target is lit the whole time they are up (in regular play and for all of Tank Attack), Magna Grab is kept lit, "
      "every powerline target hit counts as two targets, every pop bumper hit counts twice toward Saucer Attack, and "

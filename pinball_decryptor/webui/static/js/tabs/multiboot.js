@@ -128,9 +128,9 @@ function FullView({ s, w, busy, onClose }) {
   return html`<${Modal} title="Boot menu, full size" onClose=${onClose} xwide cls="mb-dlg mb-fullview" footer=${footer}>
     <div class="mb-fullbox"><${Screen} pv=${pv} tipText="" busy=${busy} openFull=${() => {}} full /></div>
     <div class="row mb-flips" onKeyDown=${flipKeys}>
-      <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", -1)}>◂ Left flipper<//>
+      <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", -1)}>${w.flip_left || "◂ Left flipper"}<//>
       <${Button} size="sm" title=${w.select_tip} onClick=${() => call("multiboot.press_select")}>Select<//>
-      <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", 1)}>Right flipper ▸<//>
+      <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", 1)}>${w.flip_right || "Right flipper ▸"}<//>
     </div>
   <//>`;
 }
@@ -149,9 +149,9 @@ function MenuCard({ s, w, busy }) {
     ${full ? html`<${FullView} s=${s} w=${w} busy=${busy} onClose=${() => setFull(false)} />` : null}
     <div class="row wrap mb-strip">
       <div class="row mb-flips" onKeyDown=${flipKeys}>
-        <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", -1)}>◂ Left flipper<//>
+        <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", -1)}>${w.flip_left || "◂ Left flipper"}<//>
         <${Button} size="sm" title=${w.select_tip} onClick=${() => call("multiboot.press_select")}>Select<//>
-        <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", 1)}>Right flipper ▸<//>
+        <${Button} size="sm" disabled=${!s.flippers} title=${w.flipper_tip} onClick=${() => call("multiboot.flip", 1)}>${w.flip_right || "Right flipper ▸"}<//>
       </div>
       <span class="grow"></span>
       ${silent ? null : html`<div class="row mb-vol" ...${tip(w.volume_tip)}>

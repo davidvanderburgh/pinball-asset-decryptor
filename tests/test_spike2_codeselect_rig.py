@@ -1305,7 +1305,7 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  "egl_x11.c", "stubs_jjp.c", "audio_pulse.c",
                  # PAD-980: the Makefile installs the Spooky launchers by name
                  "jjp_glibc.h", "padselect.sh", "padselect_bof.sh", "padselect_dp.sh",
-                 "padselect_spk.sh", "padselect_proc.sh", "pad_install_bof.sh",
+                 "padselect_spk.sh", "padselect_s3.sh", "padselect_proc.sh", "pad_install_bof.sh",
                  "log.c", "log.h",
                  "art.c", "art.h", "audio.c", "audio.h", "audio_fifo.c", "audio_alsa.c",
                  "codec.c", "codec.h",

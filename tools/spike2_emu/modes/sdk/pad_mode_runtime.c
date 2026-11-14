@@ -16717,7 +16717,8 @@ static void coop_join_show(void)
  *   unlock:<id>[@<rules>]            the game's adjustment <id> reads 1 while the teammate is up - always, or once one
  *                                    of the rules in <rules> has STARTED on their turn this game (Godzilla: UNLOCK ALL
  *                                    MONSTER BATTLES: every battle on the selection screen open, tier 2 included)
- *   addball:<n>                      two Action presses within 0.6 s in regular play (none of the game's modes runs)
+ *   addball:<n>                      two Action presses within 0.6 s with one ball in play (a mode of the game's may
+ *                                    run, not its multiball; PAD-1265)
  *                                    serve n more balls through the game's own serve (pm_multiball_add), once a ball
  *   yes:<name>                       a check of the game's (`site coop_yes_<name>`, (this) -> 0/1) answers 1 while the
  *                                    teammate is up (Godzilla: the tank rule's "in the Maser phase": the Maser lit)
@@ -18096,12 +18097,23 @@ static void coop_chars_tick(void)
                 : "the game did not take it");
         } else say("co-op: %s - no extra ball as ball %u begins: the port names no coop_eb_award", c->name, c->eb);
     }
-    if (coop_save_ask && (c = coop_char_up()) && c->addball && !coop_save_used
-        && pm_stock_mode_running(PM_STOCK_ANY) <= 0) {
-        coop_save_ask = 0;
-        coop_save_used = 1;
-        say("co-op: %s's Action button add-a-ball (%u more, teammate %u): %s", c->name, c->addball, coop.turn,
-            pm_multiball_add(c->addball, 0) ? "the game serves it" : "the game refused");
+    if (coop_save_ask && (c = coop_char_up()) && c->addball) {
+        /* PAD-1265: any time ONE ball is in play - a battle or a timed mode of the game's too (DoomWalrus666, team
+         * play: "didn't work with double action press on any of my turns" - Godzilla is in a mode for much of a ball,
+         * and the press was dropped without a word). Not in the game's own multiball (its serve restarts that one);
+         * a refused press is not spent, and the log says why. */
+        int in_play = pm_balls_in_play();                 /* spent or held back: the press goes on to a spot/save */
+        if (coop_save_used)
+            say("co-op: %s's add-a-ball - one a ball, and this ball's is spent (teammate %u)", c->name, coop.turn);
+        else if (in_play > 1 || pm_stock_mode_running(PM_STOCK_MULTIBALL) > 0)
+            say("co-op: %s's add-a-ball waits - the game's multiball runs (%d balls in play); it is still there once "
+                "one ball is left (teammate %u)", c->name, in_play, coop.turn);
+        else if ((coop_save_ask = 0), pm_multiball_add(c->addball, 0)) {
+            coop_save_used = 1;
+            say("co-op: %s's Action button add-a-ball (%u more, teammate %u, %s): the game serves it", c->name,
+                c->addball, coop.turn, pm_stock_mode_running(PM_STOCK_ANY) > 0 ? "in a mode of the game's" : "regular play");
+        } else say("co-op: %s's add-a-ball - the game refused (%d ball(s) in play); still there this ball (teammate %u)",
+                   c->name, in_play, coop.turn);
     }
     if ((c = coop_char_up()) && c->spot) {                          /* one spot each time a battle begins (round 5) */
         int running = coop_rule_running(c->spot);

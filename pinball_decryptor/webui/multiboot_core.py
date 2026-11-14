@@ -218,7 +218,31 @@ from .theme import THEMES
 # ISO.  Every builder below takes its backend from the form (``platform``),
 # the panel from the manufacturer the app switched to, and the default is
 # Stern - so every argv the Stern tests pin is unchanged.
-from pinball_decryptor.webui.multiboot_backend import BACKENDS, BOF, DP, JJP, SPOOKY, backend_for
+from pinball_decryptor.webui.multiboot_backend import BACKENDS, BOF, DP, JJP, S3, SPOOKY, backend_for
+
+
+def own_tool(be):
+    """Does *be*'s builder take the shared command line (``--primary`` /
+    ``--extra`` / ``--out`` / ``--selector-dir`` ...; plan / build / verify /
+    inject / media)?  Every update-file tool does, and the Spike 3 card's
+    (PAD-1263)."""
+    be = backend_for(be)
+    return bool(be.update_file or be.own_tool)
+
+
+def s3_key_args(be):
+    """``--keyfile <the user's padkeys.json>`` for a Spike 3 builder step
+    (PAD-1263): it runs as root in the Linux, where ``~/.pad`` is root's, so
+    the path the app keeps (spike3_key.find_keyfile) is handed over.  Only
+    the PATH travels; the key never leaves the file."""
+    if backend_for(be).key != "s3":
+        return []
+    try:
+        from pinball_decryptor.webui.spike3_key import find_keyfile
+        kf = find_keyfile()
+    except Exception:                                    # pragma: no cover
+        kf = None
+    return ["--keyfile", wsl(kf)] if kf else []
 
 #: Where the JJP builder keeps its scratch (a loop-mounted copy of root A, the
 #: re-imaged pieces): a Linux path, never beside the output on a Windows drive.
@@ -2692,7 +2716,7 @@ def prepare_args(form, media_dir, visual_only=False):
     goes to :func:`_jjp_media_args` (the same manifest out of the JJP tool)."""
     if backend_for(form).key == "jjp":
         return _jjp_media_args(form, media_dir, visual_only)
-    if backend_for(form).update_file:
+    if own_tool(form):
         return _bof_media_args(form, media_dir, visual_only)
     args = [SELECTMEDIA, "prepare"] + _media_image_args(form) + [
         "--out", wsl(media_dir),
@@ -2750,8 +2774,8 @@ def plan_args(form):
     Writes nothing.  (``mkjjpmulti.py plan`` for a JJP form: the two ISOs'
     pieces and which USB stick they fit.)"""
     be = backend_for(form)
-    if be.key == "jjp" or be.update_file:
-        args = [be.tool, "plan"] + _image_args(form) + group_roll_args(form)
+    if be.key == "jjp" or own_tool(be):
+        args = [be.tool, "plan"] + _image_args(form) + group_roll_args(form) + s3_key_args(be)
         if form.media_dir:
             args += ["--media-dir", wsl(form.media_dir)]
         if be.key == "dp" and (form.out or "").strip():
@@ -2816,7 +2840,7 @@ def _bof_build_args(form):
         "--volume", str(int(form.volume)),
     ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
         + theme_args(form)
-    args += default_card_args(form)
+    args += default_card_args(form) + s3_key_args(be)
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.media_dir:
@@ -2832,7 +2856,7 @@ def build_args(form):
     to :func:`_jjp_build_args`."""
     if backend_for(form).key == "jjp":
         return _jjp_build_args(form)
-    if backend_for(form).update_file:
+    if own_tool(form):
         return _bof_build_args(form)
     titles, subtitles = game_titles(form)
     args = [MKMULTICARD, "build"] + _image_args(form) + group_roll_args(form) + [
@@ -2885,7 +2909,14 @@ def verify_args(form):
         # the deep check restores root A to scratch: the Linux side, as build
         return ([be.tool, "verify", "--iso", wsl(form.out.strip().strip('"'))]
                 + _image_args(form) + ["--workdir", JJP_WORKDIR + "_verify"])
-    if be.update_file:
+    if be.key == "s3":
+        # a Spike 3 card (PAD-1263): its links, its menu against the installed
+        # one, and every games tree against the card it came from, file by file
+        return ([be.tool, "verify", be.card_flag, wsl(form.out.strip().strip('"'))]
+                + _image_args(form)
+                + ["--selector-dir", platform_selector_dir(form.selector_dir, be)]
+                + s3_key_args(be))
+    if own_tool(be):
         # BOF: the update unpacked as the machine's updater will, every image
         # rebuilt by the paddelta it carries and checked against its md5; a Big
         # Lebowski zip: every member's CRC, the launcher, every card's build
@@ -2913,7 +2944,7 @@ def inject_args(form, card):
     record) - subtitles included, so clearing them clears them."""
     be = backend_for(form)
     titles, subtitles = game_titles(form, be.key)
-    if be.update_file:
+    if own_tool(be):
         # mkbofmulti.py inject --fun: the update unpacked, its menu rewritten,
         # packed and encrypted again over the same file (PAD-342); mkdpmulti.py
         # inject --zip: the zip's menu rewritten, the builds copied across
@@ -2925,7 +2956,7 @@ def inject_args(form, card):
                 "--timeout", str(int(form.timeout)),
                 "--default", str(row_first_image(form, int(form.default))),
                 "--volume", str(int(form.volume))]
-        args += default_card_args(form)
+        args += default_card_args(form) + s3_key_args(be)
         args += (heading_args(form) + text_size_args(form)
                  + menu_text_args(form) + theme_args(form))
         if form.media_dir:
@@ -3384,8 +3415,9 @@ def ensure_selector_line(selector_dir, src_dir, build_dir=PREVIEW_BUILD_DIR,
     filesystem at all: see the comment below, where ensureselect.sh unpacks
     one and does install a selector, because nothing can be compiled until
     it has.  No ``$``: wsl.exe would eat it."""
-    if backend_for(platform).update_file:
-        # ensurebofselect.sh / ensuredpselect.sh build the static menu natively - nothing of
+    if own_tool(platform):
+        # ensurebofselect.sh / ensuredpselect.sh build the static menu natively
+        # (ensures3select.sh: the card's aarch64 menu and a native one for this) - nothing of
         # the machine is needed - and, with --preview, never rebuilds an
         # installed one (PAD-342)
         be = backend_for(platform)
@@ -3539,7 +3571,7 @@ def install_selector_line(selector_dir, card="", tool=ENSURESELECT, platform="st
     prints the same ready line, and the preview's, so one step serves both.
     """
     be = backend_for(platform)
-    if be.update_file:
+    if own_tool(be):
         return "bash %s %s %s" % (_q(be.ensure_tool), _q(card or ""),
                                   _q(platform_selector_dir(selector_dir, be)))
     if be.key == "jjp":
@@ -6874,6 +6906,30 @@ class MultibootPanel:
         "costs its own update zip's files. The gray band at the end is the menu "
         "and the launcher. A FAT32 stick holds at most 4 GB in one file, and the "
         "machine's USB update wants 2.5 times the unpacked size free on its drive.")
+    #: ...and on a Stern Spike 3 machine (PAD-1263).
+    ABOUT_TIP_S3 = ("Builds ONE Spike 3 SD card that holds several card images - "
+                    "two versions of a game, the stock code and your own build - "
+                    "and a menu the machine shows at power-up: NEXT and PREVIOUS "
+                    "on the coin door choose, SELECT boots, and a countdown boots "
+                    "the remembered choice. The first row's card is the base: its "
+                    "boot and system partitions are used as they are, and every "
+                    "image's games go into its games partition, so the card is "
+                    "the same 64 GB as the first one. Building needs your own "
+                    "board's Spike 3 key, the one Extract and Emulate use. "
+                    "Settings and scores are one set for every image. Nothing "
+                    "here touches the card images you pick.")
+    ADD_ROW_TEXT_S3 = "Add another Spike 3 card image…"
+    LIST_TIP_S3 = ("Each row carries its own icons: ✎ edits the image, − takes it "
+                   "out of the card, ▲ / ▼ move it in the menu's order (the "
+                   "outlined arrow means that row cannot go further). The first "
+                   "row is the base card: its boot and system partitions are the "
+                   "new card's. Every row is a Spike 3 card image (.raw) - Stern's, "
+                   "or one PAD wrote.")
+    SIZE_TIP_S3 = (
+        "How full the new card's games partition gets - measured inside the "
+        "card images themselves. The first image's games are already there; "
+        "every other image costs its own games. The gray band is the menu. The "
+        "card image is the same size as the first one (64 GB).")
     #: ...and on a Spooky Pinball game (PAD-980).
     ABOUT_TIP_SPK = ("Builds ONE update of the game's own kind (a .scooby, a "
                      ".beetlejuice, a .looney, an .ed, a tcm or code .pkg) that "
@@ -7610,7 +7666,8 @@ class MultibootPanel:
     def about_tip(self):
         """The badge's words for the platform the tab is on."""
         return {"jjp": self.ABOUT_TIP_JJP, "bof": self.ABOUT_TIP_BOF,
-                "dp": self.ABOUT_TIP_DP, "spooky": self.ABOUT_TIP_SPK}.get(
+                "dp": self.ABOUT_TIP_DP, "spooky": self.ABOUT_TIP_SPK,
+                "s3": self.ABOUT_TIP_S3}.get(
             self._backend.key, self.ABOUT_TIP)
 
     def _apply_platform_words(self):
@@ -7628,11 +7685,12 @@ class MultibootPanel:
         if sel is not None:
             cur = sel.get().strip()
             defaults = (DEFAULT_SELECTOR_DIR, JJP.selector_default, BOF.selector_default,
-                        DP.selector_default, SPOOKY.selector_default)
+                        DP.selector_default, SPOOKY.selector_default, S3.selector_default)
             if be.key != "stern" and (not cur or cur in defaults):
                 sel.set(be.selector_default)
             elif be.key == "stern" and cur in (JJP.selector_default, BOF.selector_default,
-                                               DP.selector_default, SPOOKY.selector_default):
+                                               DP.selector_default, SPOOKY.selector_default,
+                                               S3.selector_default):
                 sel.set(os.environ.get("PAD_MULTIBOOT_SELECTOR") or DEFAULT_SELECTOR_DIR)
         about = getattr(getattr(self, "_about_badge", None), "icon_tip", None)
         if about is not None:
@@ -7642,7 +7700,8 @@ class MultibootPanel:
         # compact layout or in-place update to explain.  Instance attributes
         # over the class's, so a Stern panel keeps the texts its tests pin.
         cls = type(self)
-        suffix = {"jjp": "_JJP", "bof": "_BOF", "dp": "_DP", "spooky": "_SPK"}.get(be.key, "")
+        suffix = {"jjp": "_JJP", "bof": "_BOF", "dp": "_DP", "spooky": "_SPK",
+                  "s3": "_S3"}.get(be.key, "")
         self.ADD_ROW_TEXT = getattr(cls, "ADD_ROW_TEXT" + suffix)
         self.LIST_TIP = getattr(cls, "LIST_TIP" + suffix)
         self.SIZE_TIP = getattr(cls, "SIZE_TIP" + suffix)
@@ -8886,7 +8945,7 @@ class MultibootPanel:
             # card, and its own music while it is highlighted (mkbofmulti.py
             # media pulls both out of the .fun); the menu-wide confirm sound
             row.art, row.anim, row.music, row.confirm = "auto", "auto", "auto", ""
-        elif be.key in ("dp", "spooky"):
+        elif be.key in ("dp", "spooky", "s3"):
             # PAD-853: a Big Lebowski update has no still or clip the tools can
             # take, so a card is its words until a picture is given; the
             # menu-wide confirm sound.  A Spooky update the same (PAD-980)

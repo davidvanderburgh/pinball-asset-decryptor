@@ -90,8 +90,10 @@ TOP_LINKS = collections.OrderedDict([
     ("spike3", PAD + "/img0/spike3"),
     ("spk", PAD + "/img0/spk"),
 ])
-#: the coin door's service buttons are what the menu reads (stubs_s3.c)
-FOOTER = "NEXT / PREVIOUS to choose      SELECT to start"
+#: the coin door's service buttons are what the menu reads (stubs_s3.c); the
+#: Spike 3 menu's OWN footer says this (codeselect.c SEL_COIN_DOOR), so a card
+#: whose conf names no footer= draws it too
+FOOTER = "NEXT / PREVIOUS: choose      SELECT: boot"
 CONF_HEADER = [
     "# images.conf - the Spike 3 boot menu (s3select + padselect.sh); written by mks3multi.py",
     "# image=<dir>|<title>|<subtitle>[|<art>|<anim>|<music>[|<confirm>]]   index = order (0-based);",
@@ -283,7 +285,8 @@ def conf_from_args(a, cards, media):
         rows, move, confirm, volume = media["rows"], media["sound_move"], media["sound_confirm"], media["volume"]
     if a.volume is not None:
         volume = a.volume
-    footer = None if a.footer_own else (a.footer if a.footer is not None else FOOTER)
+    # no footer= at all: the menu's own, which on Spike 3 names the coin door
+    footer = None if a.footer_own else a.footer
     return render_conf(dirs, titles, subtitles, a.default or 0, 15 if a.timeout is None else a.timeout,
                        rows, move, confirm, volume, theme=a.theme, colors=mkc.parse_color_flags(a.color),
                        heading=a.heading, text_size=a.text_size, counter=a.counter,

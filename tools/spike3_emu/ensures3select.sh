@@ -60,7 +60,8 @@ if ! make -C "$SRC" PLATFORM=s3 S3CC="$CC" BUILD="$BUILD/s3" all >"$log" 2>&1; t
     fi
     fail "the menu program did not build (make PLATFORM=s3; the log is $log)"
 fi
-if ! make -C "$SRC" PLATFORM=dp BUILD="$BUILD/preview" "$BUILD/preview/dpselect" >"$log.preview" 2>&1; then
+if ! make -C "$SRC" PLATFORM=dp BUILD="$BUILD/preview" EXTRA_CFLAGS=-DSEL_COIN_DOOR \
+        "$BUILD/preview/dpselect" >"$log.preview" 2>&1; then
     tail -15 "$log.preview" | sed 's/^/[selector]   /'
     fail "the preview's menu program did not build (make PLATFORM=dp; the log is $log.preview)"
 fi

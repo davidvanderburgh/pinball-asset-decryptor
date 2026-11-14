@@ -843,6 +843,10 @@ class WebMultibootPanel(_Base):
             "preview_tip": self.PREVIEW_TIP,
             "select_tip": self.SELECT_TIP,
             "flipper_tip": self.FLIPPER_TIP,
+            # the preview's two move buttons, named for the machine's own: a
+            # Spike 3 menu moves on the coin door's PREVIOUS / NEXT (PAD-1263)
+            "flip_left": "◂ Previous" if self._backend.key == "s3" else "◂ Left flipper",
+            "flip_right": "Next ▸" if self._backend.key == "s3" else "Right flipper ▸",
             "volume_tip": self.VOLUME_TIP,
             "media_tip": self.MEDIA_TIP,
             "build_tip": self.BUILD_FLASH_TIP,
@@ -1057,7 +1061,9 @@ class WebMultibootPanel(_Base):
         foot = ""
         if self._footer_var.get():
             foot = (self._footer_text_var.get().strip()
-                    or "LEFT / RIGHT FLIPPER: choose    START: boot")
+                    or ("NEXT / PREVIOUS: choose    SELECT: boot"
+                        if self._backend.key == "s3"           # the coin door (PAD-1263)
+                        else "LEFT / RIGHT FLIPPER: choose    START: boot"))
         return {
             "heading": self._heading_var.get().strip(),
             "cards": cards, "counter": counter,

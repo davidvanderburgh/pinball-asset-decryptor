@@ -220,7 +220,19 @@ BINNAME   = s3select
 PREFIX   ?= /games/pad
 QEMU     ?= qemu-aarch64-static
 export QEMU
-CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration             -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector             -DDEF_CONF='"$(PREFIX)/images.conf"'             -DDEF_OUT='"/tmp/padselect.choice"'             -DDEF_LAST='"/data/padselect.last"'             -DDEF_FONT='"$(PREFIX)/font.ttf"'             -DDEF_MEDIA='"$(PREFIX)/media"'             -DDEF_COLOUR_FILE='"/data/padselect.color"'             -DCARD_FONT='"$(PREFIX)/font.ttf"'             -I$(BUILD) $(EXTRA_CFLAGS)
+# SEL_COIN_DOOR: the menu's own words name the coin door's buttons (the
+# preview's native build in ensures3select.sh is given it too)
+CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
+            -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector \
+            -DSEL_COIN_DOOR \
+            -DDEF_CONF='"$(PREFIX)/images.conf"' \
+            -DDEF_OUT='"/tmp/padselect.choice"' \
+            -DDEF_LAST='"/data/padselect.last"' \
+            -DDEF_FONT='"$(PREFIX)/font.ttf"' \
+            -DDEF_MEDIA='"$(PREFIX)/media"' \
+            -DDEF_COLOUR_FILE='"/data/padselect.color"' \
+            -DCARD_FONT='"$(PREFIX)/font.ttf"' \
+            -I$(BUILD) $(EXTRA_CFLAGS)
 LDPRE     =
 # LINKED against stubs of the four display libraries (s3_stublibs.sh: their
 # names and the symbols the menu imports), so a build needs no card; RUN

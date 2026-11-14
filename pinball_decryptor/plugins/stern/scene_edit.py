@@ -84,6 +84,25 @@ Operations (``op`` and its fields)::
                                   every node drawing the Text scaled (sx, 1) about the rect's
                                   top-left, the rect's width shrunk by 1/*sx*
 
+    anim    node[, follow, track][, start][, end][, fade_in][, fade_out][, pulse, period]
+            [, images, every]
+                                  an ADDED picture animated (DragonRR, PAD-1278).  On its
+                                  group's timeline: *follow* (a node of the game's) - it shows
+                                  and fades as that node does on the glass, *track*
+                                  ``[[frame, visible, alpha], ...]`` (:func:`follow_track`,
+                                  its groups' fades in it; without one, the node's own
+                                  keyframes and alpha); else it shows from frame *start*
+                                  to *end* (None: to the end), fading in over its first
+                                  *fade_in* frames and out over its last *fade_out*.  And on a
+                                  loop of its own that runs as long as it shows (the scene
+                                  resting on its last frame included): *pulse* (its lowest
+                                  alpha) every *period* frames, and/or *images*
+                                  (``[{image, w, h}, ...]``, more PNG rels) shown in turn after
+                                  its own, *every* frames each.  A loop is written as a nested
+                                  Sprite (no labels, so the game plays it round and round) in
+                                  the picture's place (the preview draws it as the one layer).
+                                  The last anim of a node wins
+
 ``id`` of an added node is the one it has in the preview; the writer gives it a fresh id in
 the card's own id space.
 """
@@ -229,6 +248,8 @@ def add(assets_dir, card, op):
         last["s"] = round(last["s"] * op["s"], 6)
         if abs(last["s"] - 1.0) < 1e-6 and abs(last.get("sy", 1.0) - 1.0) < 1e-6:
             ops.pop()
+    elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "anim":
+        ops[-1] = op                     # PAD-1278: the box changed again: one entry
     elif last and last.get("node") == op.get("node") and last["op"] == op["op"] == "text_align":
         last["align"], last["valign"] = op["align"], op["valign"]
     elif (last and last.get("node") == op.get("node")
@@ -400,8 +421,8 @@ def export_edits(assets_dir, zip_path, cards=None):
         edits = {c: edits[c] for c in cards if edits.get(c)}
     if not edits:
         raise SceneEditError("there are no scene edits to save")
-    pictures = sorted({op["image"] for ops in edits.values() for op in ops
-                       if op["op"] == "add_picture" and _safe_rel(op.get("image"))})
+    pictures = sorted({rel for ops in edits.values() for rel, _c in picture_rels(ops)
+                       if _safe_rel(rel)})
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         doc = {"format": 1, "kind": SHARE_KIND, "scenes": edits}
         states = states_to_save(assets_dir, edits, trees_of(assets_dir))
@@ -510,8 +531,8 @@ def import_edits(assets_dir, zip_path, cards_here=None, renamed=None, skip=()):
     with zipfile.ZipFile(zip_path) as z:
         members = set(z.namelist())
         for ops in scenes.values():
-            for op in ops:
-                rel = _safe_rel(op.get("image")) if op["op"] == "add_picture" else None
+            for rel, _c in picture_rels(ops):
+                rel = _safe_rel(rel)
                 if rel is None or rel in renamed or "images/" + rel not in members:
                     continue
                 data = z.read("images/" + rel)
@@ -534,6 +555,10 @@ def import_edits(assets_dir, zip_path, cards_here=None, renamed=None, skip=()):
         for op in ops:
             if op["op"] == "add_picture" and op.get("image") in renamed:
                 op["image"] = renamed[op["image"]]
+            elif op["op"] == "anim":
+                for im in op.get("images") or ():
+                    if isinstance(im, dict) and im.get("image") in renamed:
+                        im["image"] = renamed[im["image"]]
     if scenes:
         edits = load(assets_dir)
         edits.update(scenes)
@@ -669,8 +694,7 @@ def colour_marks(assets_dir, identity=False):
                 if rel in coloured:
                     add(cols[1], "images/" + rel, coloured[rel])
         for card, ops in load(assets_dir).items():
-            for op in ops:
-                rel = op.get("image") if op.get("op") == "add_picture" else None
+            for rel, _c in picture_rels(ops):
                 if rel in coloured:
                     add(card, "images/" + rel, coloured[rel])
     data = staged_changes.peek(assets_dir)
@@ -807,6 +831,22 @@ def describe(op):
                                        " (colors corrected)" if op.get("color") else "")
     if k == "add_text":
         return 'added text "%s"' % op["text"]
+    if k == "anim":
+        bits = []
+        if op.get("follow") is not None:
+            bits.append("shows and fades like a game layer")
+        else:
+            if op.get("fade_in"):
+                bits.append("fades in over %d frames" % op["fade_in"])
+            if op.get("fade_out") and op.get("end"):
+                bits.append("fades out over %d frames" % op["fade_out"])
+            if op.get("start") or op.get("end"):
+                bits.append("shows frames %s-%s" % (op.get("start") or 1, op.get("end") or "end"))
+        if op.get("pulse") is not None:
+            bits.append("pulses every %d frames" % int(op.get("period") or 30))
+        if op.get("images"):
+            bits.append("%d pictures in turn" % (len(op["images"]) + 1))
+        return "animated: " + (", ".join(bits) or "no animation")
     if k == "rotate":
         return "turned %+g°" % op["deg"]
     if k == "shadow":
@@ -850,6 +890,155 @@ def new_id(man, ops=()):
         if op.get("id"):
             used.append(int(op["id"]))
     return max(used) + 2      # +2: the node and its component object
+
+
+# ---------------------------------------------------------------------------------------------
+# an added picture animated (PAD-1278)
+# ---------------------------------------------------------------------------------------------
+#: the longest loop of its own an animated picture gets, in frames (a pulse and a flipbook
+#: of lengths with no small common multiple loop on the flipbook's length instead)
+ANIM_MAX_LOOP = 3600
+
+
+def picture_rels(ops):
+    """``[(rel, color), ...]``: every PNG the edits *ops* draw from ``images/`` (an added
+    picture's, and the more pictures an ``anim`` shows in turn, under the picture's own
+    ``color`` choice)."""
+    colour = {}
+    out = []
+    for op in ops or ():
+        if not isinstance(op, dict):
+            continue
+        if op.get("op") == "add_picture" and op.get("image"):
+            colour[op.get("id")] = op.get("color")
+            out.append((op["image"], op.get("color")))
+        elif op.get("op") == "anim":
+            for im in op.get("images") or ():
+                if isinstance(im, dict) and im.get("image"):
+                    out.append((im["image"], colour.get(op.get("node"))))
+    return out
+
+
+def _anim_timing(op, follow, kf0, col0):
+    """``(keyframes, colours)`` of an animated picture on its group's timeline, as plain
+    lists.  *follow* is ``(keyframes, colours)`` of the node it follows (as the card had them,
+    before any edit) or None; *kf0* / *col0* are its own before the anim."""
+    mul0 = [float(v) for v in (col0[0][1] if col0 else (1.0, 1.0, 1.0, 1.0))]
+    add0 = [float(v) for v in (col0[0][2] if col0 else (0.0, 0.0, 0.0, 0.0))]
+    if kf0 and all(not v for _f, v in kf0):
+        kf = [[int(f), int(v)] for f, v in kf0]           # hidden by the user: stays hidden
+    else:
+        kf = None
+
+    def key(f, a):
+        return [int(f), mul0[:3] + [round(mul0[3] * max(0.0, min(1.0, a)), 5)], list(add0)]
+
+    if op.get("track"):
+        # PAD-1278: what the game draws of the layer it follows, frame by frame (its groups'
+        # timelines in it: a line of text fades as the sprite holding it does)
+        tr = [(int(f), int(v), float(a)) for f, v, a in op["track"]]
+        if kf is None:
+            kf = [[f, v] for f, v, _a in tr] or [[1, 1]]
+        return kf, [key(f, a) for f, _v, a in tr]
+    if follow is not None:
+        fkf, fcol = follow
+        if kf is None:
+            kf = [[int(f), int(v)] for f, v in fkf] or [[1, 1]]
+        # only its ALPHA: a red line's red is not the picture's
+        col = [key(f, float(m[3])) for f, m, _a in fcol]
+        return kf, (col or [list(c) for c in col0])
+    start = max(1, int(op.get("start") or 1))
+    end = int(op["end"]) if op.get("end") else None
+    if end is not None and end < start:
+        end = None
+    if kf is None:
+        kf = [[start, 1]] + ([[end + 1, 0]] if end is not None else [])
+    fi = max(0, int(op.get("fade_in") or 0))
+    fo = max(0, int(op.get("fade_out") or 0)) if end is not None else 0
+    alpha = {}
+    if fi:
+        for i in range(fi + 1):
+            alpha[start + i] = i / float(fi)
+    if fo:
+        for i in range(fo + 1):
+            f = end - fo + i
+            if f >= start:
+                alpha[f] = min(alpha.get(f, 1.0), 1.0 - i / float(fo))
+    if not alpha:
+        return kf, [list(c) for c in col0]
+    if start not in alpha:
+        alpha[start] = 1.0
+    return kf, [key(f, alpha[f]) for f in sorted(alpha)]
+
+
+def follow_track(man, node, frames=None):
+    """``[[frame, visible, alpha], ...]`` (a key where either changes): how the layer *node*
+    of manifest *man* shows on the glass over the scene, PLAYING (its groups' timelines and
+    fades in it), for an ``anim`` that follows it.  None when it never shows."""
+    from . import scene_eval
+    frames = int(frames or man["root"].get("frames") or 1)
+    out, last, seen = [], None, False
+    settled = {}
+    for f in range(1, frames + 1):
+        alphas = [d["mul"][3] for d in scene_eval.draw_list(man, f, play=True,
+                                                             _settled=settled)
+                  if d["node"] == node]
+        now = (1, round(max(alphas), 3)) if alphas else (0, 0.0)
+        seen = seen or bool(alphas)
+        if now != last:
+            out.append([f, now[0], now[1]])
+            last = now
+    return out if seen else None
+
+
+def anim_loop(op):
+    """The loop of its own an ``anim`` op gives its picture, or None:
+    ``{"frames": L, "every": e, "count": n, "alpha": [per frame] | None, "images": [...]}``.
+    Frame *f* (1..L) of it shows picture ``((f - 1) // e) % n`` (0: the picture's own, then
+    *images*) at ``alpha[f - 1]`` of its alpha.  A pulse starts bright."""
+    imgs = [im for im in (op.get("images") or ()) if isinstance(im, dict) and im.get("image")]
+    pulse = op.get("pulse")
+    if not imgs and pulse is None:
+        return None
+    n = len(imgs) + 1
+    every = max(1, int(op.get("every") or 1)) if imgs else 0
+    period = max(2, int(op.get("period") or 30)) if pulse is not None else 0
+    flip = every * n
+    if imgs and period:
+        both = flip * period // math.gcd(flip, period)
+        frames = both if both <= ANIM_MAX_LOOP else flip
+    else:
+        frames = flip if imgs else period
+    frames = max(1, min(ANIM_MAX_LOOP, frames))
+    alpha = None
+    if pulse is not None:
+        lo = max(0.0, min(1.0, float(pulse)))
+        alpha = [round(lo + (1.0 - lo) * (0.5 + 0.5 * math.cos(2 * math.pi * (f % period)
+                                                               / period)), 4)
+                 for f in range(frames)]
+    return {"frames": frames, "every": every or frames, "count": n, "alpha": alpha,
+            "images": [{"image": im["image"], "w": int(im.get("w") or 0),
+                        "h": int(im.get("h") or 0)} for im in imgs]}
+
+
+def _loop_children(loop):
+    """Per picture of a loop: ``(keyframes, colours)`` on the loop's own timeline (frame 1 =
+    the loop's first), so a nested Sprite plays it."""
+    frames, every, n = loop["frames"], loop["every"], loop["count"]
+    out = []
+    for i in range(n):
+        kf, last = [], None
+        for s in range(1, frames + 1, every):
+            v = 1 if ((s - 1) // every) % n == i else 0
+            if v != last:
+                kf.append([s, v])
+                last = v
+        if kf and kf[0][0] != 1:
+            kf.insert(0, [1, 0])
+        col = ([[f + 1, [1.0, 1.0, 1.0, a], [0.0, 0.0, 0.0, 0.0]]
+                for f, a in enumerate(loop["alpha"])] if loop["alpha"] else [])
+        out.append((kf, col))
+    return out
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1010,8 +1199,10 @@ def _man_kids_of(man, index, parent):
 
 def apply_manifest(man, ops):
     """A copy of manifest *man* with *ops* applied; ``(manifest, [skipped op notes])``."""
+    man0 = man
     man = copy.deepcopy(man)
     notes = []
+    stock = None                     # PAD-1278: every node's timeline before the edits
     for op in ops or ():
         index = _man_index(man)
         k = op.get("op")
@@ -1121,6 +1312,35 @@ def apply_manifest(man, ops):
                                 o.pop("art", None)
                             else:
                                 o["art"] = {"profile": op["profile"], "mul": op.get("mul")}
+            elif k == "anim":
+                got = index.get(op["node"])
+                if got is None or not got[0].get("added"):
+                    notes.append("anim: node %s is not a picture added in this scene"
+                                 % op["node"])
+                    continue
+                n = got[0]
+                pic = [(st, oid) for st, oid in n["comps"]
+                       if (man["objects"].get(str(oid)) or {}).get("kind") == "Bitmap"]
+                if not pic:
+                    notes.append("anim: node %s is not a picture" % op["node"])
+                    continue
+                if stock is None:
+                    stock = {i: (copy.deepcopy(m["kf"]), copy.deepcopy(m["col"]))
+                             for i, (m, _s) in _man_index(copy.deepcopy(man0)).items()}
+                n.setdefault("_anim0", (copy.deepcopy(n["kf"]), copy.deepcopy(n["col"])))
+                fol = op.get("follow")
+                follow = stock.get(int(fol)) if fol not in (None, "") else None
+                if fol not in (None, "") and follow is None:
+                    notes.append("anim: the layer to follow (%s) is not in this scene" % fol)
+                n["kf"], n["col"] = _anim_timing(op, follow, *n["_anim0"])
+                loop = anim_loop(op)
+                if loop is None:
+                    n.pop("loop", None)
+                else:
+                    first = man["objects"].get(str(pic[0][1])) or {}
+                    loop["images"].insert(0, {"image": first.get("image"),
+                                              "w": first.get("w"), "h": first.get("h")})
+                    n["loop"] = loop
             elif k in ("add_picture", "add_text"):
                 kids = _man_kids_of(man, index, op.get("parent"))
                 if kids is None:
@@ -1311,6 +1531,12 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
         nxt[0] += 1
         return v
 
+    anim0 = {}                               # PAD-1278: an animated picture as it was added
+    stock_tl = {}                            # ... and every node's timeline before the edits
+    if any(op.get("op") == "anim" for op in ops or ()):
+        stock_tl = {i: (list(m.keyframes), list(m.colors), m.name)
+                    for i, (m, _s) in _tree_index(scene).items()}
+
     for op in ops or ():
         k = op.get("op")
         index = _tree_index(scene)
@@ -1439,6 +1665,71 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                         notes.append(note)
                         continue
                 applied += 1
+            elif k == "anim":
+                nid = fresh.get(op["node"])
+                got = index.get(nid) if nid is not None else None
+                if got is None:
+                    notes.append("anim: the added picture %s is not on this card's scene; "
+                                 "left alone" % op["node"])
+                    continue
+                n = got[0]
+                if nid not in anim0:
+                    bmp = [c for c in n.components if c.obj.kind == "Bitmap"]
+                    if not bmp:
+                        notes.append("anim: node %s is not a picture; left alone" % op["node"])
+                        continue
+                    anim0[nid] = (list(n.keyframes), list(n.colors), bmp[0])
+                kf0, col0, bmp = anim0[nid]
+                fol = op.get("follow")
+                follow = None
+                if fol not in (None, ""):
+                    follow = stock_tl.get(int(fol))
+                    want = names.get(int(fol))
+                    if follow is None or (want is not None and follow[2] != want):
+                        notes.append("anim: the layer to follow (%s) is not on this card's "
+                                     "scene; the picture shows all the time" % (want or fol))
+                        follow = None
+                    else:
+                        follow = follow[:2]
+                kf, col = _anim_timing(op, follow, kf0, col0)
+                n.keyframes = [(int(f), int(v)) for f, v in kf]
+                n.colors = [(int(f), [float(v) for v in m], [float(v) for v in a])
+                            for f, m, a in col]
+                loop = anim_loop(op)
+                if loop is None:
+                    n.components = [bmp]
+                else:
+                    src = next((o for o in ops if o.get("op") == "add_picture"
+                                and o.get("id") == op["node"]), {})
+                    from ...core import colour_profile
+                    pics = [bmp.obj]
+                    for im in loop["images"]:
+                        w, h, fmt, blob = _texture_from_png(
+                            os.path.join(assets_dir, "images", *im["image"].split("/")),
+                            colour=colour_profile.added_picture_colour(
+                                assets_dir, {"image": im["image"], "color": src.get("color")}))
+                        tid = alloc()
+                        scene.textures[tid] = dict(w=w, h=h, fmt=fmt, name="", blob=blob,
+                                                   data_off=None)
+                        pics.append(T.Obj(alloc(), "Bitmap",
+                                          dict(sym=bmp.obj.body["sym"], name="", w=w, h=h,
+                                               tex=tid)))
+                    kids = []
+                    for i, (ckf, ccol) in enumerate(_loop_children(loop)):
+                        kids.append(T.Node(
+                            alloc(), "%s_%d" % (n.name, i + 1), 1,
+                            [(int(f), int(v)) for f, v in ckf],
+                            [(int(f), list(m), list(a)) for f, m, a in ccol],
+                            [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])],
+                            [T.Component(1, bmp.cls, pics[i])]))
+                    sym = _symbol_of(scene, "Sprite")
+                    if sym is None:
+                        sym = scene.root.get("sym", 0)
+                    spr = T.Obj(alloc(), "Sprite", dict(sym=sym, name="",
+                                                        frames=loop["frames"], kids=kids,
+                                                        labels=[]))
+                    n.components = [T.Component(1, _class(scene, "Sprite"), spr)]
+                applied += 1
             elif k in ("add_picture", "add_text"):
                 parent = op.get("parent")
                 kids = _tree_kids_of(index, fresh, parent, scene)
@@ -1447,10 +1738,14 @@ def apply_scene(scene, ops, assets_dir=None, names=None):
                                  % (k, parent))
                     continue
                 if k == "add_picture":
+                    # PAD-1278: a scene of words only (143 of Godzilla's 194) has no Bitmap
+                    # to copy the symbol key from: 0, the key every scene's root has
                     sym = _symbol_of(scene, "Bitmap")
-                    if sym is None or not assets_dir:
-                        notes.append("add_picture: this scene draws no picture of its own to "
-                                     "take the kind from; not added")
+                    if sym is None:
+                        sym = 0
+                    if not assets_dir:
+                        notes.append("add_picture: no project folder to take the picture "
+                                     "from; not added")
                         continue
                     from ...core import colour_profile
                     w, h, fmt, blob = _texture_from_png(

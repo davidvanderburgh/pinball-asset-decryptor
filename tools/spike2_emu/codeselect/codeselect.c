@@ -175,7 +175,7 @@ struct opts {
      * --scores-save --store DIR --to FILE | --scores-load --from FILE --store DIR */
     int scores_op;                      /* 0, 1 = save, 2 = load */
     const char *scores_store, *scores_from;
-    /* --snapshot --screen settings|color [--screen-row N] [--screen-edit]:
+    /* --snapshot --screen settings|color|test [--screen-row N] [--screen-edit]:
      * a settings screen instead of the menu (tests, the preview, screenshots) */
     const char *screen;
     int screen_row, screen_edit;
@@ -266,7 +266,7 @@ static void usage(FILE *f)
         "                     first of the --frames K run\n"
         "  --audio-dump FILE  raw s16le 44100 Hz stereo of everything mixed\n"
         "  --color-file PATH  the color correction set on this machine (default " DEF_COLOUR_FILE ")\n"
-        "  --screen settings|color  --snapshot only: draw that settings screen instead of the menu,\n"
+        "  --screen settings|color|test  --snapshot only: draw that settings screen instead of the menu,\n"
         "                     --screen-row N highlighted (--screen-edit: being changed)\n"
         "  --apply-color --image N --program PATH --to OUT   the boot hook's step: when the values\n"
         "                     file sets image N's colors, write a copy of PATH with them in its\n"
@@ -2111,6 +2111,7 @@ int main(int argc, char **argv)
         se.th = &L.th;
         se.c = &c;
         se.colour_file = o.colour_file;
+        se.media_dir = media_dir(&o, &c);
         se.first_image = hlimg;
         if (settings_snapshot(&se, o.screen, o.screen_row, o.screen_edit, why, sizeof why) < 0) {
             sel_say("error: %s", why);
@@ -2404,6 +2405,7 @@ int main(int argc, char **argv)
             se.au = au;
             se.move = media.move;
             se.colour_file = o.colour_file;
+            se.media_dir = media.dir;
             se.first_image = lastimg;
             se.present = present_cb;
             se.ctx = &pctx;

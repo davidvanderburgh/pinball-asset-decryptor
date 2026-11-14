@@ -7,6 +7,8 @@
 #include <math.h>
 #include "settings.h"
 #include "colour.h"
+#include "testpics.h"
+#include "art.h"
 #include "log.h"
 
 #define TH(e, role) ((e)->th->rgb[TH_##role])
@@ -47,10 +49,16 @@ static void preset_colour(int k, struct colour *out)
 }
 
 enum row_kind { R_GAME, R_PRESET, R_BRIGHT, R_CONTRAST, R_SAT, R_GAMMA, R_GAIN, R_LIFT,
-                R_SAVE, R_SAVE_ALL, R_LEAVE };
+                R_SAVE, R_TEST, R_SAVE_ALL, R_LEAVE };
 struct row { int kind, ch; };
 
-enum screen { S_LIST, S_COLOR, S_DONE };
+enum screen { S_LIST, S_COLOR, S_TEST, S_DONE };
+
+/* the Settings list's entries (PAD-1279: Test pictures joined Color correction) */
+enum { L_COLOR, L_TEST, L_BACK };
+
+/* the frames a test= animation may have; the app makes them fit */
+#define TEST_ANIM_FRAMES 600
 
 struct state {
     struct settings_env *e;
@@ -68,6 +76,20 @@ struct state {
     int hold_ev;                             /* the key being held while editing, or 0 */
     long long next_rep;
     int move_voice;
+    /* the TEST PICTURES screen (PAD-1279) */
+    int colour_ready;                        /* colour_open has filled imgs / work */
+    int t_item;                              /* what is up: TP_* first, then c->test[], then BACK */
+    int t_col;                               /* the correction it is drawn through: imgs[t_col], -1 none */
+    int t_from;                              /* the screen BACK goes to: S_LIST or S_COLOR */
+    int t_caption;                           /* the caption is up... */
+    long long t_caption_until;               /* ...until then (0: for good - a snapshot) */
+    struct art_image *t_img;                 /* the picture up, or NULL */
+    struct art_anim *t_anim;                 /* the animation up, or NULL */
+    int t_frame;
+    long long t_next_ms;                     /* when its next frame is due */
+    struct audio_clip *t_clip[CONF_MAX_TESTS];   /* sounds, loaded when first played */
+    int t_voice;
+    char t_err[240];                         /* why the item up cannot be shown, or "" */
 };
 
 static const char *const CH_NAME[3] = { "RED", "GREEN", "BLUE" };
@@ -214,6 +236,8 @@ static void build_rows(struct state *st)
     for (k = 0; k < 3; k++) st->rows[n++] = (struct row){ R_GAMMA, k };
     for (k = 0; k < 3; k++) st->rows[n++] = (struct row){ R_GAIN, k };
     st->rows[n++] = (struct row){ R_LIFT, 0 };
+    /* PAD-1279: these numbers on the test pictures, full screen, unsaved */
+    st->rows[n++] = (struct row){ R_TEST, 0 };
     st->rows[n++] = (struct row){ R_SAVE, 0 };
     if (st->nimg > 1) st->rows[n++] = (struct row){ R_SAVE_ALL, 0 };
     st->rows[n++] = (struct row){ R_LEAVE, 0 };
@@ -234,6 +258,7 @@ static void colour_open(struct state *st)
         st->work[i] = st->saved[i];
     }
     st->cur = first;
+    st->colour_ready = 1;
     build_rows(st);
     st->sel = 0;
     st->editing = 0;
@@ -269,6 +294,151 @@ static int save_image(struct state *st, int img, const struct colour *v)
     return 0;
 }
 
+/* the Settings list as this card has it: Color correction only when an image
+ * can be corrected; Test pictures always (the built-in patterns need nothing) */
+static int list_items(const struct state *st, int out[3])
+{
+    int n = 0;
+    if (st->e->c->ncolour > 0) out[n++] = L_COLOR;
+    out[n++] = L_TEST;
+    out[n++] = L_BACK;
+    return n;
+}
+
+/* ------------------------------------------------------------ test pictures */
+
+static int test_count(const struct state *st)
+{
+    return TP_NBUILTIN + st->e->c->ntest + 1;      /* + BACK */
+}
+
+static const struct conf_test *test_own(const struct state *st, int k)
+{
+    int j = k - TP_NBUILTIN;
+    return j >= 0 && j < st->e->c->ntest ? &st->e->c->test[j] : NULL;
+}
+
+static int test_is_back(const struct state *st, int k)
+{
+    return k == test_count(st) - 1;
+}
+
+static int test_kind(const struct state *st, int k)
+{
+    const struct conf_test *t = test_own(st, k);
+    return t ? testpics_kind(t->file) : TF_UNKNOWN;
+}
+
+static const char *test_name(const struct state *st, int k)
+{
+    const struct conf_test *t = test_own(st, k);
+    if (k < TP_NBUILTIN) return testpics_name(k);
+    if (t) return t->label;
+    return st->t_from == S_COLOR ? "Back to color correction" : "Back to settings";
+}
+
+static void test_unload(struct state *st)
+{
+    if (st->t_img) { art_image_free(st->t_img); st->t_img = NULL; }
+    if (st->t_anim) { art_anim_free(st->t_anim); st->t_anim = NULL; }
+    if (st->t_voice >= 0) { audio_stop(st->e->au, st->t_voice); st->t_voice = -1; }
+    st->t_err[0] = 0;
+}
+
+static int anim_delay(const struct art_anim *a, int k)
+{
+    if (a->period_ms > 0) return (int)lroundf(a->period_ms);
+    return a->delay_ms[k % a->n];
+}
+
+static void test_play(struct state *st)
+{
+    int j = st->t_item - TP_NBUILTIN;
+    if (st->t_voice >= 0) { audio_stop(st->e->au, st->t_voice); st->t_voice = -1; }
+    if (j >= 0 && j < CONF_MAX_TESTS && st->t_clip[j] && st->e->au)
+        st->t_voice = audio_play(st->e->au, st->t_clip[j], 0);
+}
+
+/* the item up, read from the card (pictures and animations again each time:
+ * one at a time in RAM; sounds once, kept until Settings closes) */
+static void test_load(struct state *st, long long now)
+{
+    struct settings_env *e = st->e;
+    const struct conf_test *t = test_own(st, st->t_item);
+    char path[2 * CONF_STR + 2];
+    test_unload(st);
+    if (t) {
+        snprintf(path, sizeof path, "%s/%s", e->media_dir && *e->media_dir ? e->media_dir : ".",
+                 t->file);
+        switch (testpics_kind(t->file)) {
+        case TF_PICTURE:
+            st->t_img = art_load_png(path, e->g->w, e->g->h, st->t_err, sizeof st->t_err);
+            break;
+        case TF_ANIM:
+            st->t_anim = art_anim_open(path, e->g->w, e->g->h, TEST_ANIM_FRAMES, st->t_err,
+                                       sizeof st->t_err);
+            st->t_frame = 0;
+            if (st->t_anim) st->t_next_ms = now + anim_delay(st->t_anim, 0);
+            break;
+        case TF_SOUND: {
+            int j = st->t_item - TP_NBUILTIN;
+            if (!st->t_clip[j]) st->t_clip[j] = audio_load_wav(path, st->t_err, sizeof st->t_err);
+            test_play(st);
+            break;
+        }
+        default:
+            snprintf(st->t_err, sizeof st->t_err, "%s is not a PNG, GIF or WAV", t->file);
+        }
+    }
+    sel_say("test: %d/%d %s%s%s%s", st->t_item + 1, test_count(st), test_name(st, st->t_item),
+            t ? " (" : "", t ? t->file : "", t ? ")" : "");
+    if (st->t_err[0]) sel_say("test: %s", st->t_err);
+}
+
+static void colour_open(struct state *st);
+
+static void test_open(struct state *st, int from, long long now)
+{
+    const struct conf *c = st->e->c;
+    /* from the list the games draw as they will next start (their saved
+     * numbers); from Color correction, with the numbers being changed */
+    if (from == S_LIST && c->ncolour > 0) colour_open(st);
+    st->t_from = from;
+    st->t_col = c->ncolour > 0 ? st->cur : -1;
+    st->t_item = 0;
+    st->t_voice = -1;
+    st->t_caption = 1;
+    st->t_caption_until = now + TEST_CAPTION_MS;
+    st->screen = S_TEST;
+    sel_say("test: open (%d built-in, %d of the card's own)", TP_NBUILTIN, c->ntest);
+    test_load(st, now);
+}
+
+static void test_close(struct state *st)
+{
+    test_unload(st);
+    st->screen = st->t_from;
+    sel_say("test: closed");
+}
+
+/* one animation tick: 0 nothing, 1 the frame changed (only the frame's own
+ * rectangle needs drawing), 2 the caption went (the whole screen does) */
+static int test_tick(struct state *st, long long now)
+{
+    int changed = 0;
+    if (st->t_anim && st->t_anim->n > 1 && now >= st->t_next_ms) {
+        st->t_frame = (st->t_frame + 1) % st->t_anim->n;
+        st->t_next_ms += anim_delay(st->t_anim, st->t_frame);
+        if (st->t_next_ms < now) st->t_next_ms = now;      /* fell behind: no catch-up burst */
+        changed = 1;
+    }
+    if (st->t_caption && st->t_caption_until && now >= st->t_caption_until) {
+        st->t_caption = 0;
+        changed = 2;
+    }
+    return changed;
+}
+
 /* ------------------------------------------------------------------ draw */
 
 static float S(const struct settings_env *e)
@@ -299,24 +469,26 @@ static void draw_list(struct state *st)
 {
     struct settings_env *e = st->e;
     float s = S(e);
-    int W = e->g->w, k;
-    static const char *const TITLES[2] = { "COLOR CORRECTION", "BACK TO THE GAMES" };
-    static const char *const SUBS[2] = { "How the screen shows each game's colors", "" };
-    int rw = (int)(760 * s), rh = (int)(110 * s), x = (W - rw) / 2, y0 = (int)(220 * s);
+    int W = e->g->w, k, it[3], n = list_items(st, it);
+    static const char *const TITLES[3] = { "COLOR CORRECTION", "TEST PICTURES", "BACK TO THE GAMES" };
+    static const char *const SUBS[3] = { "How the screen shows each game's colors",
+                                         "Patterns and the card's own pictures, full screen", "" };
+    int rw = (int)(760 * s), rh = (int)(110 * s), x = (W - rw) / 2;
+    int y0 = (int)((n > 2 ? 170 : 220) * s);
 
     gfx_fill(e->g, TH(e, BACKGROUND));
     text_fit(e, "SETTINGS", 60 * s, 30 * s, W - (int)(80 * s), W / 2, (int)(96 * s), 0, TH(e, HEADING));
-    for (k = 0; k < 2; k++) {
-        int on = k == st->list_sel, y = y0 + k * (rh + (int)(30 * s));
+    for (k = 0; k < n; k++) {
+        int on = k == st->list_sel, y = y0 + k * (rh + (int)(30 * s)), i = it[k];
         gfx_round_frame(e->g, x, y, rw, rh, (int)(22 * s), (int)((on ? 8 : 3) * s),
                         on ? TH(e, FRAME_HL) : TH(e, FRAME), on ? TH(e, CARD_HL) : TH(e, CARD));
-        if (*SUBS[k]) {
-            text_fit(e, TITLES[k], 40 * s, 24 * s, rw - (int)(60 * s), W / 2, y + (int)(52 * s), 0,
+        if (*SUBS[i]) {
+            text_fit(e, TITLES[i], 40 * s, 24 * s, rw - (int)(60 * s), W / 2, y + (int)(52 * s), 0,
                      on ? TH(e, TITLE_HL) : TH(e, TITLE));
-            text_fit(e, SUBS[k], 24 * s, 18 * s, rw - (int)(60 * s), W / 2, y + (int)(88 * s), 0,
+            text_fit(e, SUBS[i], 24 * s, 18 * s, rw - (int)(60 * s), W / 2, y + (int)(88 * s), 0,
                      on ? TH(e, SUBTITLE_HL) : TH(e, SUBTITLE));
         } else {
-            text_fit(e, TITLES[k], 40 * s, 24 * s, rw - (int)(60 * s), W / 2, y + (int)(70 * s), 0,
+            text_fit(e, TITLES[i], 40 * s, 24 * s, rw - (int)(60 * s), W / 2, y + (int)(70 * s), 0,
                      on ? TH(e, TITLE_HL) : TH(e, TITLE));
         }
     }
@@ -336,6 +508,7 @@ static const char *row_label(const struct state *st, const struct row *r)
     case R_LIFT: return "DARKEST SHADES";
     case R_SAVE: return st->nimg > 1 ? "SAVE FOR THIS GAME" : "SAVE";
     case R_SAVE_ALL: return "SAVE FOR EVERY GAME";
+    case R_TEST: return "SEE IT ON THE TEST PICTURES";
     case R_LEAVE: return any_dirty(st) ? "LEAVE WITHOUT SAVING" : "BACK";
     }
     return "";
@@ -349,7 +522,8 @@ static void draw_colour(struct state *st)
     int W = e->g->w, img = st->imgs[st->cur], k;
     const struct colour *v = &st->work[img];
     int px = (int)(36 * s), pw = (int)(600 * s), y0 = (int)(124 * s);
-    int rh = st->nrows > 14 ? (int)(36 * s) : st->nrows > 12 ? (int)(39 * s) : (int)(42 * s);
+    int rh = st->nrows > 15 ? (int)(34 * s) : st->nrows > 14 ? (int)(36 * s)
+           : st->nrows > 12 ? (int)(39 * s) : (int)(42 * s);
     float tpx = 22 * s;
     char buf[300], val[120];
 
@@ -446,10 +620,112 @@ static void draw_colour(struct state *st)
         draw_footer(e, "LEFT / RIGHT FLIPPER: move      START: change");
 }
 
+/* THE TEST PICTURE UP, full screen, through the correction picked; then the
+ * caption, which is never corrected */
+static void draw_test(struct state *st)
+{
+    struct settings_env *e = st->e;
+    const struct conf *c = e->c;
+    float s = S(e);
+    int W = e->g->w, H = e->g->h, k = st->t_item, kind = test_kind(st, k), visual = 1;
+    char buf[400], col[260];
+
+    gfx_fill(e->g, 0x000000);
+    if (k < TP_NBUILTIN) {
+        testpics_draw(k, e->g->px, W * 4, W, H);
+    } else if (test_is_back(st, k)) {
+        visual = 0;
+        gfx_fill(e->g, TH(e, BACKGROUND));
+        text_fit(e, st->t_from == S_COLOR ? "BACK TO COLOR CORRECTION" : "BACK TO SETTINGS",
+                 56 * s, 28 * s, W - (int)(80 * s), W / 2, H / 2, 0, TH(e, HEADING));
+        text_fit(e, "press START", 30 * s, 18 * s, W - (int)(80 * s), W / 2, H / 2 + (int)(60 * s), 0,
+                 TH(e, SUBTITLE));
+    } else if (st->t_err[0]) {
+        visual = 0;
+        gfx_fill(e->g, TH(e, BACKGROUND));
+        text_fit(e, test_name(st, k), 44 * s, 24 * s, W - (int)(80 * s), W / 2, H / 2 - (int)(30 * s), 0,
+                 TH(e, HEADING));
+        text_fit(e, st->t_err, 24 * s, 14 * s, W - (int)(80 * s), W / 2, H / 2 + (int)(30 * s), 0,
+                 TH(e, SUBTITLE));
+    } else if (kind == TF_SOUND) {
+        visual = 0;
+        gfx_fill(e->g, TH(e, BACKGROUND));
+        text_fit(e, "SOUND", 40 * s, 24 * s, W - (int)(80 * s), W / 2, H / 2 - (int)(80 * s), 0,
+                 TH(e, SUBTITLE));
+        text_fit(e, test_name(st, k), 56 * s, 28 * s, W - (int)(80 * s), W / 2, H / 2, 0, TH(e, HEADING));
+        text_fit(e, !e->au ? "the menu has no sound on this machine"
+                 : audio_playing(e->au, st->t_voice) ? "playing" : "press START to play it again",
+                 28 * s, 18 * s, W - (int)(80 * s), W / 2, H / 2 + (int)(60 * s), 0, TH(e, TITLE));
+    } else {
+        const struct art_image *im = st->t_img ? st->t_img
+                                   : st->t_anim ? art_anim_frame(st->t_anim, st->t_frame) : NULL;
+        if (im) gfx_blit(e->g, (W - im->w) / 2, (H - im->h) / 2, im->rgba, im->w, im->h);
+    }
+    if (visual && st->t_col >= 0) {
+        struct colour_lut lut;
+        colour_lut_build(&lut, &st->work[st->imgs[st->t_col]]);
+        colour_lut_apply(&lut, e->g->px, W, H, W * 4);
+    }
+    if (!st->t_caption) return;
+
+    if (!visual) {
+        col[0] = 0;                            /* nothing on this one is colored */
+    } else if (st->t_col < 0) {
+        snprintf(col, sizeof col, "%s", c->ncolour > 0 ? "Color: not corrected" : "Color: as the file has it");
+    } else {
+        int img = st->imgs[st->t_col];
+        snprintf(col, sizeof col, "Color: %s, %s", c->img[img].title,
+                 image_dirty(st, img) ? "as changed, not saved"
+                 : st->has_saved[img] ? "as set on this machine" : "as built");
+    }
+    {
+        int bh = (int)(96 * s), y = H - bh, line = (int)(2 * s) > 0 ? (int)(2 * s) : 1;
+        const char *hint = k < TP_NBUILTIN ? testpics_hint(k) : "";
+        const char *keys;
+        gfx_rect(e->g, 0, y, W, bh, 0x101114);
+        gfx_rect(e->g, 0, y, W, line, TH(e, FRAME_HL));
+        snprintf(buf, sizeof buf, "%d / %d   %s", k + 1, test_count(st), test_name(st, k));
+        text_fit(e, buf, 26 * s, 16 * s, W / 2 - (int)(40 * s), (int)(30 * s), y + (int)(38 * s), -1,
+                 0xF0F0F0);
+        text_fit(e, col, 22 * s, 14 * s, W / 2 - (int)(40 * s), W - (int)(30 * s), y + (int)(38 * s), 1,
+                 0xF0C040);
+        if (test_is_back(st, k)) keys = "LEFT / RIGHT FLIPPER: previous / next      START: back";
+        else if (kind == TF_SOUND) keys = "LEFT / RIGHT FLIPPER: previous / next      START: play again";
+        else if (c->ncolour > 0) keys = "LEFT / RIGHT FLIPPER: previous / next      START: another game's colors";
+        else keys = "LEFT / RIGHT FLIPPER: previous / next";
+        snprintf(buf, sizeof buf, "%s%s%s", hint, *hint ? "      " : "", keys);
+        text_fit(e, buf, 20 * s, 12 * s, W - (int)(60 * s), W / 2, y + (int)(78 * s), 0, 0xB8BCC4);
+    }
+}
+
+/* THE NEXT ANIMATION FRAME alone: the frame's rectangle, corrected, and the
+ * caption's band put back over it - a whole-screen pass per frame is a
+ * million pixels through the LUT and a whole-screen upload */
+static void draw_test_frame(struct state *st)
+{
+    struct settings_env *e = st->e;
+    int W = e->g->w, H = e->g->h, x, y, bottom;
+    const struct art_image *im;
+    if (!st->t_anim || st->t_err[0]) return;
+    im = art_anim_frame(st->t_anim, st->t_frame);
+    if (!im) return;
+    x = (W - im->w) / 2;
+    y = (H - im->h) / 2;
+    gfx_blit(e->g, x, y, im->rgba, im->w, im->h);
+    if (st->t_col >= 0) {
+        struct colour_lut lut;
+        colour_lut_build(&lut, &st->work[st->imgs[st->t_col]]);
+        colour_lut_apply(&lut, e->g->px + ((size_t)y * (size_t)W + (size_t)x) * 4, im->w, im->h, W * 4);
+    }
+    bottom = y + im->h;
+    if (st->t_caption && bottom > H - (int)(96 * S(e))) draw_test(st);   /* under the caption: all of it */
+}
+
 static void draw(struct state *st)
 {
     if (st->screen == S_LIST) draw_list(st);
     else if (st->screen == S_COLOR) draw_colour(st);
+    else if (st->screen == S_TEST) draw_test(st);
 }
 
 /* ----------------------------------------------------------------- input */
@@ -467,12 +743,28 @@ static void activate(struct state *st)
 {
     const struct conf *c = st->e->c;
     if (st->screen == S_LIST) {
-        if (st->list_sel == 0) {
+        int it[3], n = list_items(st, it), i = it[st->list_sel < n ? st->list_sel : n - 1];
+        if (i == L_COLOR) {
             st->screen = S_COLOR;
             colour_open(st);
+        } else if (i == L_TEST) {
+            test_open(st, S_LIST, sel_now_ms());
         } else {
             sel_say("settings: back to the games");
             st->screen = S_DONE;
+        }
+        return;
+    }
+    if (st->screen == S_TEST) {
+        if (test_is_back(st, st->t_item)) {
+            test_close(st);
+        } else if (test_kind(st, st->t_item) == TF_SOUND) {
+            test_play(st);
+        } else if (c->ncolour > 0) {
+            /* none -> each adjustable game in turn -> none */
+            st->t_col = st->t_col + 1 >= st->nimg ? -1 : st->t_col + 1;
+            sel_say("test: color %s", st->t_col < 0 ? "not corrected"
+                                                    : c->img[st->imgs[st->t_col]].title);
         }
         return;
     }
@@ -498,6 +790,9 @@ static void activate(struct state *st)
                      st->nimg);
         break;
     }
+    case R_TEST:
+        test_open(st, S_COLOR, sel_now_ms());
+        break;
     case R_LEAVE:
         if (any_dirty(st)) sel_say("settings: left color correction, unsaved changes dropped");
         else sel_say("settings: left color correction");
@@ -519,8 +814,23 @@ static void key(struct state *st, int ev, long long now)
     int dir = (ev == EV_LEFT || ev == EV_MINUS) ? -1 : (ev == EV_RIGHT || ev == EV_PLUS) ? 1 : 0;
     int go = ev == EV_START || ev == EV_ACTION || ev == EV_SELECT;
     if (st->screen == S_LIST) {
-        if (dir) { st->list_sel = (st->list_sel + 2 + dir) % 2; click(st); }
+        int it[3], n = list_items(st, it);
+        if (dir) { st->list_sel = (st->list_sel + n + dir) % n; click(st); }
         else if (go) activate(st);
+        return;
+    }
+    if (st->screen == S_TEST) {
+        /* any key brings the caption back; the one that does still counts */
+        st->t_caption = 1;
+        st->t_caption_until = now + TEST_CAPTION_MS;
+        if (dir) {
+            int n = test_count(st);
+            st->t_item = (st->t_item + n + dir) % n;
+            click(st);
+            test_load(st, now);
+        } else if (go) {
+            activate(st);
+        }
         return;
     }
     if (st->editing) {
@@ -568,6 +878,7 @@ void settings_run(struct settings_env *e)
     st.e = e;
     st.screen = S_LIST;
     st.move_voice = -1;
+    st.t_voice = -1;
     sel_say("settings: open");
     draw(&st);
     last = sel_now_ms();
@@ -597,14 +908,37 @@ void settings_run(struct settings_env *e)
                 last = now;
             }
         }
-        if (now - last > idle) {
-            sel_say("settings: nothing pressed for %lld s: back to the games%s", idle / 1000,
-                    st.screen == S_COLOR && any_dirty(&st) ? ", unsaved changes dropped" : "");
+        if (st.screen == S_TEST && !dirty) {
+            int tick = test_tick(&st, now);
+            if (tick == 1) draw_test_frame(&st);
+            else if (tick) dirty = 1;
+        }
+        /* the test pictures are looked at, not pressed: a longer wait there
+         * (unless the tests shortened every wait) */
+        long long wait = st.screen == S_TEST && idle == SETTINGS_IDLE_MS ? TEST_IDLE_MS : idle;
+        if (now - last > wait) {
+            sel_say("settings: nothing pressed for %lld s: back to the games%s", wait / 1000,
+                    st.colour_ready && any_dirty(&st) ? ", unsaved changes dropped" : "");
             break;
         }
         audio_pump(e->au, now);
         if (dirty) draw(&st);
         e->present(e->ctx);
+    }
+    /* the test sounds outlive their voices by a fade: let it end first */
+    test_unload(&st);
+    {
+        int k;
+        long long until = sel_now_ms() + 200;
+        while (e->au && sel_now_ms() < until) {
+            int busy = 0;
+            for (k = 0; k < CONF_MAX_TESTS && !busy; k++)
+                if (st.t_clip[k]) busy = 1;
+            if (!busy) break;
+            audio_pump(e->au, sel_now_ms());
+        }
+        for (k = 0; k < CONF_MAX_TESTS; k++)
+            if (st.t_clip[k]) audio_clip_free(st.t_clip[k]);
     }
     sel_say("settings: closed");
 }
@@ -618,7 +952,23 @@ int settings_snapshot(struct settings_env *e, const char *screen, int row, int e
     st.move_voice = -1;
     if (!strcmp(screen, "settings")) {
         st.screen = S_LIST;
-        st.list_sel = row >= 0 && row < 2 ? row : 0;
+        int it[3], n = list_items(&st, it);
+        st.list_sel = row >= 0 && row < n ? row : 0;
+    } else if (!strcmp(screen, "test")) {
+        int k;
+        st.t_voice = -1;
+        test_open(&st, S_LIST, 0);
+        st.t_caption_until = 0;                /* a snapshot: the caption stays */
+        if (row >= 0 && row < test_count(&st) && row != st.t_item) {
+            st.t_item = row;
+            test_load(&st, 0);
+        }
+        st.t_caption = !editing;
+        draw(&st);
+        test_unload(&st);
+        for (k = 0; k < CONF_MAX_TESTS; k++)
+            if (st.t_clip[k]) audio_clip_free(st.t_clip[k]);
+        return 0;
     } else if (!strcmp(screen, "color")) {
         if (e->c->ncolour < 1) {
             snprintf(why, (size_t)whylen, "--screen color: this conf has no color_profile= line");
@@ -629,7 +979,7 @@ int settings_snapshot(struct settings_env *e, const char *screen, int row, int e
         st.sel = row >= 0 && row < st.nrows ? row : 0;
         st.editing = editing && st.rows[st.sel].kind < R_SAVE;
     } else {
-        snprintf(why, (size_t)whylen, "--screen %s: not settings or color", screen);
+        snprintf(why, (size_t)whylen, "--screen %s: not settings, color or test", screen);
         return -1;
     }
     draw(&st);

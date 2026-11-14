@@ -3224,10 +3224,18 @@ HELP_CONTENT = {
          "level per channel and darkest shades, with a test card corrected live. "
          "Then **Save for this "
          "game** or **Save for every game**.\n\n"
+         "**Settings > Test pictures** shows test patterns full screen, pixel for "
+         "pixel: the test card, a grey ramp with the darkest and lightest steps, "
+         "color ramps, one-pixel lines and checks, full white and full black. The "
+         "flippers step through them; START draws them through each game's color "
+         "correction in turn, or none. **See it on the test pictures** in Color "
+         "correction shows them with the numbers you are changing, before you "
+         "save. The caption hides itself after a few seconds so the screen can be "
+         "photographed whole.\n\n"
          "- The new values reach the game at its next start. The game files on the "
          "card are never written; on any failure the game runs as built.\n"
          "- No countdown runs inside Settings, and two idle minutes leave it "
-         "without saving."),
+         "without saving (ten on the test pictures)."),
         ("Editions: no menu",
          "**No menu: boot the edition the game's EDITION setting names** (Menu "
          "settings; Stern) is for a card whose images are all editions of one game, "

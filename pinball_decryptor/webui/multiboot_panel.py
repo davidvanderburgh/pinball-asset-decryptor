@@ -1040,7 +1040,7 @@ class WebMultibootPanel(_Base):
         # THE SETTINGS CARD where the selector will draw one (PAD-307): last,
         # and counted, because a fifth card turns the row into a carousel
         if self._settings_var.get() and self._colour_profiles():
-            cards.append({"i": n, "title": "SETTINGS", "sub": "Color correction",
+            cards.append({"i": n, "title": "SETTINGS", "sub": "Color correction, test pictures",
                           "label": "", "settings": True})
         rows = n
         n = len(cards)

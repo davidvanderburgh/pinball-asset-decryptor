@@ -114,8 +114,14 @@
  *   settings=<on|off>        the SETTINGS tile at the end of the menu (PAD-307):
  *                            'on' (the default) offers it whenever it has
  *                            something to set - today, any color_profile=
- *                            line; 'off' never does.  An unknown word is
+ *                            line or test= line; 'off' never does.  An unknown word is
  *                            warned about and read as 'on'
+ *   test=<file>|<label>      one of the card's own test items (PAD-1279), up
+ *                            to CONF_MAX_TESTS: a PNG, an animated GIF or a
+ *                            WAV in the media directory, shown or played by
+ *                            Settings > Test pictures after the built-in
+ *                            patterns (testpics.h).  The label defaults to the
+ *                            file name; a name with a '/' is dropped
  *   key_left=<byte>.<bit>    JJP only (--input jjpio): where the LEFT flipper
  *   key_right=<byte>.<bit>   / RIGHT flipper / START / Volume+ / Volume- sit
  *   key_start=<byte>.<bit>   in the I/O board's 64-byte frame, active low.
@@ -260,6 +266,14 @@ struct conf_colour {
     char name[64];
 };
 
+/* ONE OF THE CARD'S OWN TEST ITEMS (PAD-1279): a media file name and what
+ * Settings > Test pictures calls it */
+#define CONF_MAX_TESTS 16
+struct conf_test {
+    char file[CONF_STR];
+    char label[CONF_STR];
+};
+
 struct conf {
     struct conf_image img[CONF_MAX_IMAGES];
     int n;
@@ -269,6 +283,8 @@ struct conf {
     int ncards;                      /* the settings tile included, when there is one */
     struct conf_colour colour[CONF_MAX_IMAGES];
     int ncolour;                     /* images with a usable color_profile= line */
+    struct conf_test test[CONF_MAX_TESTS];   /* test= lines, in order (PAD-1279) */
+    int ntest;
     int settings;                    /* settings=: 1 = offer the tile when it has something to set */
     int settings_card;               /* the tile's card index (always the last), or -1 */
     struct conf_image settings_face; /* what the tile draws */

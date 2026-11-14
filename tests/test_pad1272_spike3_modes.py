@@ -356,6 +356,9 @@ def test_a_run_that_cannot_run_the_hook_does_its_steps():
     s = _text("tools", "spike3_emu", "s3run.sh")
     assert '"$(readlink "$R/games/game")" = pad/padmode/padmode.sh' in s
     assert 'PRELOAD="${PRELOAD:+$PRELOAD:}/games/pad/padmode/mode.so"' in s
+    # the host-side readers read the program the hook names, never the hook script
+    assert '[ "$GL" = pad/padmode/padmode.sh ] && GL=$(cat "$GT/pad/padmode/game.target"' in s
+    assert '"$GT/game"' not in s.replace('GL=$(readlink "$GT/game")', "").replace("GPROG=$GT/game", "")
 
 
 # ---- the Modes tab's card read ------------------------------------------------------------

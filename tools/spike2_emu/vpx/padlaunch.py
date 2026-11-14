@@ -310,7 +310,7 @@ def card_places(title, platform="spike2"):
 
 def distros():
     try:
-        r = subprocess.run(["wsl.exe", "-l", "-q"], capture_output=True, timeout=20,
+        r = subprocess.run(["wsl.exe", "-l", "-q"], stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
                            creationflags=_CREATE_NO_WINDOW)
     except Exception:                                       # noqa: BLE001
         return []
@@ -540,7 +540,7 @@ def account(dist=None):
 
 
 def _run(args, timeout=60):
-    return subprocess.run(args, capture_output=True, timeout=timeout,
+    return subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
                           creationflags=_CREATE_NO_WINDOW)
 
 

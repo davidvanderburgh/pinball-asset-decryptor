@@ -103,3 +103,8 @@
 @keyframes vpx-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .vpx-cat-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .vpx-cat-needs { padding: 0 4px 6px; color: var(--ink-2); }
+
+/* PAD-1304: the Cabinet row and the backglass-lights picker */
+.vpx-dof { display: inline-flex; align-items: center; gap: 4px; }
+.vpx-gi-btn { margin-left: 4px; }
+.vpx-bulb-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 4px 12px; max-height: 50vh; overflow: auto; }

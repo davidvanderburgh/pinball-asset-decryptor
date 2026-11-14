@@ -114,7 +114,7 @@ def _wsl(args, distro=None):
         cmd += ["-d", distro]
     cmd += ["-e"] + list(args)
     try:
-        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                            timeout=20,
                            creationflags=_CREATE_NO_WINDOW if _WIN else 0)
     except (OSError, subprocess.SubprocessError):

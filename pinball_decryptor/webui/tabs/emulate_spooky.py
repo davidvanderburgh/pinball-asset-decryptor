@@ -33,7 +33,7 @@ import time
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
-from ...core import rigslot
+from ...core import rigslot, timesync
 from .. import emulate_spooky_core as spk
 from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
                                   windows_python,
@@ -543,6 +543,7 @@ class EmulateSpookyTab(RigTabMixin, TabService):
                     self._log("Spooky: on a Mac the game runs in a Linux "
                               "container; the very first start also builds "
                               "it and downloads the games' Python.")
+                timesync.quiet_clocks_async(self._log)   # PAD-1307: the clock
                 rc = self._run_streaming(
                     spk.rig_cmd_root(
                         "watch.sh", _rig.wsl_path(path),

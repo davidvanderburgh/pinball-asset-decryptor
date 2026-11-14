@@ -1764,6 +1764,11 @@ static unsigned char *live_show_event(void)
     return 0;
 }
 
+/* PAD-1283: the game's lamp group allocator, (owner, priority, period, callback). Every argument is pointer-sized: the
+ * 64-bit allocator keeps the fourth as an 8-byte callback at +16 of the group, which its compositor calls when it is
+ * not 0, so a 32-bit 0 there (its upper half whatever x3 held) would be called. */
+typedef pm_addr (*lamp_group_fn)(pm_addr, pm_addr, pm_addr, pm_addr);
+
 int pm_lights(const char *command)
 {
     return pm_lights_as((unsigned)pm_port_value("light_owner", 0), command);
@@ -1773,7 +1778,8 @@ int pm_lights_as(unsigned owner, const char *command)
 {
     static void *group;
     unsigned char *ev, *old = 0;
-    unsigned prio = 0, cur = data("event_current");
+    unsigned prio = 0;
+    pm_addr cur = data("event_current");
     if (!(can & PM_CAN_LIGHTS) || !command || !*command || !owner) return 0;
     ev = live_show_event();
     if (ev) {
@@ -1782,8 +1788,7 @@ int pm_lights_as(unsigned owner, const char *command)
         prio = ((unsigned (*)(void))(unsigned long)fn("show_priority"))();
     }
     if (!group)
-        group = ((void *(*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)fn("lamp_group"))
-                (0u, prio & 0xffu, 0u, 0u);
+        group = (void *)(unsigned long)((lamp_group_fn)(unsigned long)fn("lamp_group"))(0, prio & 0xffu, 0, 0);
     if (group)
         ((int (*)(unsigned, void *, const char *, unsigned))(unsigned long)fn("light_run"))
             (owner, group, command, 0u);
@@ -1979,10 +1984,10 @@ int pm_lamp_find(const char *name)
 /* the slot of `light` in a group: group[0] + light * lamp_slot_size, bounded by the light count */
 static unsigned char *lamp_slot(unsigned char *group, unsigned light)
 {
-    unsigned count = data("light_count"), n = count ? *(unsigned *)(unsigned long)count : 0, base;
+    pm_addr count = data("light_count"), n = count ? *(pm_addr *)(unsigned long)count : 0, base;
     if (!group || !light || (n && light >= n)) return 0;
-    base = *(unsigned *)group;
-    return base ? (unsigned char *)(unsigned long)(base + light * (unsigned)pm_port_value("lamp_slot_size", 40)) : 0;
+    base = *(pm_addr *)group;
+    return base ? (unsigned char *)(unsigned long)(base + light * (pm_addr)pm_port_value("lamp_slot_size", 40)) : 0;
 }
 
 static void lamp_slot_put(unsigned char *group, unsigned light, int level, int hold)
@@ -2001,28 +2006,27 @@ static void lamp_slot_put(unsigned char *group, unsigned light, int level, int h
 /* A new group from the game's allocator at `prio`, with NO current event, so no show's end frees it. */
 static unsigned char *lamp_group_new(unsigned prio)
 {
-    unsigned cur = data("event_current"), f = fn("lamp_group"), old = 0;
-    unsigned long g;
+    pm_addr cur = data("event_current"), f = fn("lamp_group"), old = 0, g;
     if (!f) return 0;
     if (cur) {
-        old = *(unsigned *)(unsigned long)cur;
-        *(unsigned *)(unsigned long)cur = 0;
+        old = *(pm_addr *)(unsigned long)cur;
+        *(pm_addr *)(unsigned long)cur = 0;
     }
-    g = ((unsigned long (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)f)(0u, prio & 0xffu, 0u, 0u);
-    if (cur) *(unsigned *)(unsigned long)cur = old;
-    return (unsigned char *)g;
+    g = ((lamp_group_fn)(unsigned long)f)(0, prio & 0xffu, 0, 0);
+    if (cur) *(pm_addr *)(unsigned long)cur = old;
+    return (unsigned char *)(unsigned long)g;
 }
 
-/* the game's active layers, bottom to top: the list head is the word after the free list's */
+/* the game's active layers, bottom to top: the list head is the pointer after the free list's */
 static unsigned char *lamp_first_layer(void)
 {
     pm_addr heads = data("lamp_layers");
-    return heads ? (unsigned char *)(unsigned long)*(unsigned *)(unsigned long)(heads + 4) : 0;
+    return heads ? (unsigned char *)(unsigned long)*(pm_addr *)(unsigned long)(heads + PM_PTR) : 0;
 }
 
 static unsigned char *lamp_next_layer(unsigned char *g)
 {
-    return (unsigned char *)(unsigned long)*(unsigned *)(g + pm_port_value("lamp_group_next", 20));
+    return (unsigned char *)(unsigned long)*(pm_addr *)(g + pm_port_value("lamp_group_next", 20));
 }
 
 int pm_lamp_layers(unsigned *priorities, int max)
@@ -2627,10 +2631,11 @@ static void lamps_arm(void)
 static int lamps_checked(void)
 {
     static int done;
-    unsigned count = data("light_count"), n;
+    pm_addr count = data("light_count");
+    unsigned n;
     int k, c, bad = 0;
     if (done) return done > 0;
-    n = count ? *(unsigned *)(unsigned long)count : 0;
+    n = count ? (unsigned)*(pm_addr *)(unsigned long)count : 0;
     if (!n) return 1;
     for (k = LAMP_FIRST; k < LAMP_END; k = LAMP_NEXT(k))
         for (c = 0; c < 3; c++)
@@ -6509,6 +6514,9 @@ static struct held_coil coils[COILS_MAX];
 static int n_coils;
 static void coil_clear_countdown(const struct held_coil *c);   /* PAD-621: below */
 
+/* the game's process start: (id, body, flags) -> the process record, a pointer (PAD-1283: 8 bytes on 64-bit ARM) */
+typedef pm_addr (*proc_create_fn)(unsigned, void (*)(void), unsigned);
+
 static int proc_alive(unsigned id)
 {
     return (((unsigned (*)(unsigned))(unsigned long)fn("proc_exists"))(id) & 0xffu) != 0;
@@ -6870,8 +6878,7 @@ int pm_coil_hold(const char *name, unsigned ms)
     c->why = 0;
     c->started = now;
     c->until = now + cmd.draw_ms + cmd.hold_ms;
-    if (!((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
-            c->id, coil_procs[c - coils], 0)) {
+    if (!((proc_create_fn)(unsigned long)fn("proc_create"))(c->id, coil_procs[c - coils], 0)) {
         c->until = 0;
         say("%s: no hold - the game would not start its process %u", c->name, c->id);
         return 0;
@@ -8281,7 +8288,8 @@ static void show_call_stop(int n)
 {
     char key[24];
     const char *t;
-    unsigned stop = fn("show_stop_number"), v;
+    pm_addr stop = fn("show_stop_number");
+    unsigned v;
     pm_snprintf(key, sizeof key, "show_numbers_%d", n);
     t = pm_port_text(key);
     while (stop && t && *t) {
@@ -8332,21 +8340,23 @@ static void shows_tick(void)
  * runtime gives its show process an exit hook, as the game gives its own processes theirs (a free {fn, arg} slot of
  * the record: `value proc_exit_hooks`, the slots' offset, `value proc_exit_slots`, how many): the game's exit runs it
  * as the show ends or is stopped, before the record is reused, and it frees that record's groups. */
-static void show_exit(unsigned rec, unsigned arg)
+/* PAD-1283: a hook slot is {fn, arg}, two pointers (8 bytes a slot on Spike 2, 16 on Spike 3's 64-bit ARM, where
+ * Star Wars ELG 1.10's process exit at 0x3146d0 calls the four at +0x138 as fn(record, arg)) */
+static void show_exit(pm_addr rec, pm_addr arg)
 {
     (void)arg;
-    ((void (*)(unsigned))(unsigned long)fn("lamp_free_owner"))(rec);
+    ((void (*)(pm_addr))(unsigned long)fn("lamp_free_owner"))(rec);
 }
 
-static int show_exit_hook(unsigned rec)
+static int show_exit_hook(pm_addr rec)
 {
     unsigned off = (unsigned)pm_port_value("proc_exit_hooks", 0), n = (unsigned)pm_port_value("proc_exit_slots", 0), i;
     if (!rec || !off || n < 1 || n > 8) return 0;
     for (i = 0; i < n; i++) {
-        unsigned *slot = (unsigned *)(unsigned long)(rec + off + 8u * i);
+        pm_addr *slot = (pm_addr *)(unsigned long)(rec + off + 2u * (unsigned)PM_PTR * i);
         if (slot[0]) continue;
         slot[1] = 0;
-        slot[0] = (unsigned)(unsigned long)show_exit;
+        slot[0] = (pm_addr)(unsigned long)show_exit;
         return 1;
     }
     return 0;
@@ -8356,7 +8366,8 @@ int pm_game_show(int n)
 {
     char key[24];
     const char *name;
-    unsigned id = (unsigned)pm_port_value("show_proc", 0), rec;
+    unsigned id = (unsigned)pm_port_value("show_proc", 0);
+    pm_addr rec;
     long arg;
     if (!(can & PM_CAN_GAME_SHOWS)) return 0;
     pm_snprintf(key, sizeof key, "show_%d", n);
@@ -8394,8 +8405,7 @@ int pm_game_show(int n)
             name ? name : "unnamed", at, arg);
         return 1;
     }
-    rec = ((unsigned (*)(unsigned, void (*)(void), unsigned))(unsigned long)fn("proc_create"))(
-        id, (void (*)(void))(unsigned long)fn(key), 0);
+    rec = ((proc_create_fn)(unsigned long)fn("proc_create"))(id, (void (*)(void))(unsigned long)fn(key), 0);
     if (!rec) {
         say("show %d: not played - the game would not start its process %u", n, id);
         return 0;
@@ -10609,13 +10619,13 @@ static long stock161_value(const char *name)
     if (v < 0) stock161_missing(name);
     return v;
 }
-static unsigned stock161_site(const char *name)
+static pm_addr stock161_site(const char *name)
 {
     pm_addr f = fn(name);
     if (!f) stock161_missing(name);
     return f;
 }
-static unsigned stock161_data(const char *name)
+static pm_addr stock161_data(const char *name)
 {
     pm_addr d = data(name);
     if (!d) stock161_missing(name);
@@ -10846,7 +10856,8 @@ int pm_stock_b_get(struct pm_stock_rule *r, long at, int *out)
 typedef uint64_t (*stock161_award_fn)(unsigned, unsigned, unsigned, unsigned, unsigned);
 static uint64_t stock161_pay(const char *site_name, unsigned obj, uint64_t value)
 {
-    unsigned f = stock161_site(site_name), award;
+    pm_addr f = stock161_site(site_name);
+    unsigned award;
     long at = stock161_value("stock_award_at");
     if (!f || at < 0 || !obj) return 0;
     award = *(volatile const unsigned *)(unsigned long)(obj + (unsigned)at);
@@ -10871,13 +10882,13 @@ uint64_t pm_stock_build(struct pm_stock_rule *r, uint64_t value)
 
 void *pm_stock_show(unsigned id)
 {
-    unsigned f = stock161_site("show_start");
+    pm_addr f = stock161_site("show_start");
     return f ? ((void *(*)(unsigned))(unsigned long)f)(id) : 0;
 }
 
 int pm_stock_event(unsigned id, uint64_t value)
 {
-    unsigned f = stock161_site("game_event");
+    pm_addr f = stock161_site("game_event");
     if (!f) return 0;
     /* (id, _, value lo, hi, [sp] a, pad, [sp+8] b lo, hi): b is a u64, so the eighth word is its high half */
     ((void (*)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned))(unsigned long)f)(
@@ -10885,15 +10896,15 @@ int pm_stock_event(unsigned id, uint64_t value)
     return 1;
 }
 
-void *pm_stock_display_event(unsigned id, unsigned handler, unsigned flags)
+void *pm_stock_display_event(unsigned id, unsigned long handler, unsigned flags)
 {
-    unsigned f = stock161_site("event_post_replacing");
-    return f ? ((void *(*)(unsigned, unsigned, unsigned))(unsigned long)f)(id, handler, flags) : 0;
+    pm_addr f = stock161_site("event_post_replacing");
+    return f ? ((void *(*)(unsigned, unsigned long, unsigned))(unsigned long)f)(id, handler, flags) : 0;
 }
 
 int pm_stock_event_cancel(unsigned id)
 {
-    unsigned f = stock161_site("event_cancel");
+    pm_addr f = stock161_site("event_cancel");
     if (!f) return 0;
     ((void (*)(unsigned, unsigned))(unsigned long)f)(id, 0xffffu);
     return 1;
@@ -11015,7 +11026,7 @@ int pm_tank_level(struct pm_stock_rule *r, unsigned player)
 int pm_tank_maser_phase(struct pm_stock_rule *r)
 {
     struct stock_rule *x = stock161_of(r);
-    unsigned f = stock161_site("tank_maser_phase");
+    pm_addr f = stock161_site("tank_maser_phase");
     if (!x || !x->obj || !f) return 0;
     return (int)(((stock_vfn1)(unsigned long)f)(x->obj) & 0xffu);
 }
@@ -11030,7 +11041,7 @@ int pm_tank_destroy(struct pm_stock_rule *r, int index, int credit)
 static int stock161_tank_call(struct pm_stock_rule *r, const char *site_name)
 {
     struct stock_rule *x = stock161_of(r);
-    unsigned f = stock161_site(site_name);
+    pm_addr f = stock161_site(site_name);
     if (!x || !x->obj || !f) return 0;
     ((void (*)(unsigned))(unsigned long)f)(x->obj);
     return 1;

@@ -43,6 +43,26 @@ name the card a title boots, start or stop a run by hand.
         that table has and every part the kit's map for it leaves out, or a
         starter map when the kit has none. From the title's device tables
         (vpxauthor.py), so the title must have run once on this PC.
+    padvpx probe <title> [--for SECS] [--press NAME[=MS]]... [--levels] [--json]
+        From the checklist to the running game (PAD-1303): attaches to the
+        title's run and prints each change as it happens, by name - every
+        LED and unnamed channel that lights (GI too), each coil the game
+        fires with its pulse and hold, every switch that moves and who
+        moved it (PAD's ball feed and helpers, the keyboard, the probe).
+        --press closes a switch by name or id; while it runs, stdin takes
+        `press NAME [MS]`, `hold NAME`, `release NAME`, `quit` (vpxprobe.py).
+    padvpx match-leds <title> --table "<file.vpx>" [--into MAP.json] [--confirm]
+        Proposes the machine's LED for each Light in the table by where it
+        stands (device_xy.txt laid over the table), for the author to
+        confirm: "<table> - LED matches.json", a `lamps` section with the
+        unsure ones marked GUESS; --confirm asks about each, --into adds
+        them to a map (vpxstubs.py).
+    padvpx stubs <title> --table "<file.vpx>" [--out FILE] [--print]
+        Appends a sub to the table's script for every switch, coil and
+        insert it has not got (sw_<NAME>_Hit, a default per coil kind -
+        magnet, drop bank, kicker, post, gate, trough - and l_<NAME>
+        lights), writing "<name> (stubs).vpx": placing an object with the
+        stub's name is then enough (vpxstubs.py).
     padvpx titles                         the titles whose device tables are on this PC
 
 A run started here or by the controller takes a rig slot as PAD-VPX, visible
@@ -177,6 +197,8 @@ def patch(table_path, outdir=None, card=None, title=None):
         b2s = copy_backglass(table_path, out)
         if b2s:
             print("backglass: %s" % b2s)
+            for line in cabinet_res(out):
+                print(line)
         remember_patch(out, table_path, title)
         print("open \"%s\" in Visual Pinball; the game starts with it when its card is known" % out)
     return r.returncode
@@ -196,6 +218,20 @@ def remember_patch(out_vpx, table_path, title):
             json.dump({"source": os.path.abspath(table_path), "title": title}, f)
     except OSError:
         pass
+
+
+def cabinet_res(out_vpx, kit=None, mons=None):
+    """PAD-1304: the patched table's <name>.res (the backglass on the screen
+    the Visual Pinball tab's Cabinet row picked) and its B2S DMD, as the
+    kit's cabinet settings say. Words for the log; never in the patch's way."""
+    try:
+        import padcabinet
+        import padisplay
+        kit = padlaunch.kit_load() if kit is None else kit
+        mons = padisplay.monitors() if mons is None else mons
+        return padcabinet.write_res(out_vpx, kit, mons, game_name=padcabinet.rom_name(out_vpx))
+    except Exception as exc:                                # noqa: BLE001
+        return ["backglass screen not set: %s" % exc]
 
 
 def copy_backglass(table_path, out_vpx):
@@ -627,6 +663,12 @@ def main(argv):
     if cmd == "checklist" and rest:
         import vpxauthor
         return vpxauthor.main(["checklist"] + rest)
+    if cmd == "probe" and rest:
+        import vpxprobe
+        return vpxprobe.main(rest)
+    if cmd in ("match-leds", "stubs") and rest:
+        import vpxstubs
+        return vpxstubs.main([cmd] + rest)
     if cmd == "titles":
         import vpxauthor
         return vpxauthor.main(["titles"])

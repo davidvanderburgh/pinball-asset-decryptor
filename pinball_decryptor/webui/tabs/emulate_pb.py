@@ -39,7 +39,7 @@ import time
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
-from ...core import rigslot, runtime
+from ...core import rigslot, runtime, timesync
 from .. import emulate_pb_core as pb
 from .. import runtime_prompt as _runtime_ui
 from ..emulate_jjp_common import (RigTabMixin, rig_off, audio_ctl_file,
@@ -650,6 +650,7 @@ class EmulatePBTab(RigTabMixin, TabService):
                                                 first))
                 if pb.TITLE_NOTES.get(title):
                     self._log("PB: " + pb.TITLE_NOTES[title])
+                timesync.quiet_clocks_async(self._log)   # PAD-1307: the clock
                 rc = self._run_streaming(
                     pb.rig_cmd_root("watch.sh", _rig.wsl_path(path),
                                     kind=kind, env=env),

@@ -25,7 +25,7 @@ import threading
 
 from pinball_decryptor.webui import rig as _rig
 from .. import compat
-from ...core import rigslot
+from ...core import rigslot, timesync
 from .. import emulate_dp_core as dp
 from ..emulate_jjp_common import (RigTabMixin, rig_off, load_audio_ctl,
                                   windows_python,
@@ -348,6 +348,7 @@ class EmulateDPTab(RigTabMixin, TabService):
                           "off the image - a few minutes; the next is quick)."
                           % (os.path.basename(img),
                              " + " + os.path.basename(upd) if upd else ""))
+                timesync.quiet_clocks_async(self._log)   # PAD-1307: the clock
                 rc = self._run_streaming(
                     dp.rig_cmd_root(
                         "watch.sh", *args,

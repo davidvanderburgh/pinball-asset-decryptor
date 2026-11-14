@@ -235,6 +235,9 @@ def _isolate_title_cache_session(tmp_path_factory):
     derived is never read by a test (every port lookup reads that folder) and a test's
     is never left in ``%LOCALAPPDATA%``. A test that wants its own sets the variable."""
     os.environ["PAD_TITLE_CACHE"] = str(tmp_path_factory.mktemp("title_cache"))
+    # PAD-1307: a test that starts a rig must never turn off timesyncd in the
+    # developer's own distros (core/timesync.py runs real wsl.exe calls).
+    os.environ["PAD_KEEP_TIMESYNC"] = "1"
 
 
 

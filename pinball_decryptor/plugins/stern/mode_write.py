@@ -663,8 +663,9 @@ _SPEC_FIELD = {"sound_end": "end_sound"}
 def end_on_carrier(prof):
     """item 164: a title whose time-up callout is not known carries a mode's END sound on a
     carrier too (mode_file.c ``sound_end``), one per mode, instead of re-pointing the time-up
-    request - :func:`.mode_project.end_sound_carried`."""
-    return not prof.callout_time_up
+    request - :func:`.mode_project.end_sound_carried`. A Spike 3 build always does (PAD-1296: its
+    sounds are swapped in; nothing re-points a request of its program)."""
+    return not prof.callout_time_up or getattr(prof, "arch", "arm") == "a64"
 
 
 def carried_keys(prof):
@@ -737,7 +738,8 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
         return []
     from . import mode_sounds as MS
     game, version = MS.title_version(prof.key)
-    if MS.carriers(game, version) is None:
+    c = MS.profile_carriers(prof.key)
+    if c is None:
         log("Modes: the start sound, shot sound and music of %s are not put on this card: no "
             "stock requests to carry them have been measured for %s yet."
             % (_names(wanted), prof.label), "warning")
@@ -745,7 +747,6 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
     taken = [int(end_sound["request"])] if end_sound and end_sound.get("request") else []
     taken_beds = []
     out = []
-    c = MS.carriers(game, version)
     for slug, spec, key in wanted:
         if MS.swapped(c, key):
             # hud-layers: a carrier shared with the other modes; the engine picks which
@@ -770,7 +771,7 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
             entry["sid"] = int(got["music_sid"])
             entry["seconds"] = int(getattr(spec, "seconds", 0) or 0)
             taken_beds.append(entry["sid"])
-        if MS.carriers(game, version).swap:
+        if c.swap:
             entry["swap"] = True        # item 163: swapped in at run time, no stock sound id changes
         out.append(entry)
     out, dropped = _share_swapped(out, c, taken)

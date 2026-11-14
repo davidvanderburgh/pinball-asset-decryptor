@@ -46,6 +46,7 @@ extern int ioctl(int, unsigned long, ...);
  * unanswerable question in the middle of an audio investigation. */
 extern void pad_say(const char *);
 static void say(const char *s) { pad_say(s); }
+static long play_scaled(int fd, const void *buf, unsigned long bytes);
 
 /* Forward declaration: snd_pcm_hw_params_get_buffer_size() below reports this
  * and is defined long before it. Without this the call compiles as an implicit
@@ -558,7 +559,7 @@ long snd_pcm_writei(void *pcm, const void *buf, unsigned long frames)
 
     if (play_fd < 0) play_open();
     if (play_fd >= 0 && buf) {
-        long r = write(play_fd, buf, bytes);
+        long r = play_scaled(play_fd, buf, bytes);
         if (r < 0) {
             int e = *__errno_location();
             if (e == E_PIPE) {           /* player exited - stop and retry later */
@@ -623,42 +624,248 @@ unsigned long pad_pcm_fifo_ms(void)
     return bps ? (unsigned long)n * 1000UL / bps : 0;
 }
 
-/* ---------------- mixer ---------------- */
+/* ---------------- mixer ----------------
+ *
+ * PAD-1302: THE SERVICE-MENU VOLUME. The game sets its volume the way it does
+ * on the machine: alsa-lib's simple mixer, the SGTL5000's PCM volume on ctl
+ * `backbox` and on ctl `cabinet`, at bring-up and on every change from the
+ * menu or the coin-door buttons (codeselect/audio_alsa.c: the godzilla_pro
+ * recipe 0x1fa490 writes 192*(v/63)^0.2). This mixer used to be one shared
+ * fake element that said its range was 0..100 and threw every value away, so
+ * a run always played at full level whatever the menu said.
+ *
+ * Now each mixer remembers the ctl it was attached to and each element its
+ * name, the range is the codec's own 0..192 (0xfc - 0x3c), and a value is read
+ * the way the codec reads it: 192 = 0 dB, every step below is 0.5 dB quieter,
+ * 0 = mute. That gain scales ONLY what goes to the speakers (the FIFO), never
+ * the PAD_AUDIO_OUT capture, which stays the game's own full-level PCM for
+ * every tool that matches it against the sound banks. Card 0 (`backbox`, the
+ * one we play) takes its gain from ctl backbox. PAD_GAME_VOLUME=0 plays full
+ * level as before. "Line Out Mute" is recorded and logged but never mutes:
+ * the machine's real speaker gate is the SPI amplifier enable (codeselect
+ * input_hw.c), and this switch read ON on David's machine either way.
+ */
 
-static char mixer_obj[64];
-static char elem_obj[64];
+#define MIX_MAX   8
+#define ELEM_MAX  16
+#define PCM_VOL_MAX 192L
+
+struct fake_mixer { int used; int card; char ctl[32]; };
+struct fake_elem  { int used; int card; char name[48]; long vol; int sw; };
+static struct fake_mixer mixers[MIX_MAX];
+static struct fake_elem  elems[ELEM_MAX];
+static struct fake_elem  elem_spare;      /* table full: the old behaviour */
+
+/* The gain each card's PCM is scaled by on its way to the speakers, Q16
+ * (65536 = the game's full level). Written by the mixer, read by
+ * snd_pcm_writei; an aligned int is never torn on ARM. */
+static int card_gain_q16[NPCM] = { 65536, 65536, 65536, 65536 };
+
+static int str_eq(const char *a, const char *b)
+{
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+static void str_cpy(char *d, const char *s, unsigned n)
+{
+    unsigned i = 0;
+    if (!n) return;
+    while (s && s[i] && i + 1 < n) { d[i] = s[i]; i++; }
+    d[i] = 0;
+}
+static int has_word(const char *s, const char *w)
+{
+    for (; s && *s; s++) {
+        const char *a = s, *b = w;
+        while (*a && *b && *a == *b) { a++; b++; }
+        if (!*b) return 1;
+    }
+    return 0;
+}
+
+/* Which of our PCM cards a mixer ctl is. The game's own names first
+ * (asound.conf: ctl backbox = card 0 sgtl5000main, ctl cabinet = card 1
+ * sgtl5000center), then the raw spellings a title might use instead.
+ * -1: none we know. */
+static int ctl_card(const char *ctl)
+{
+    if (!ctl || !*ctl) return -1;
+    if (has_word(ctl, "backbox") || has_word(ctl, "main") || str_eq(ctl, "hw:0")
+        || str_eq(ctl, "default") || has_word(ctl, "CARD=0"))
+        return 0;
+    if (has_word(ctl, "cabinet") || has_word(ctl, "center") || str_eq(ctl, "hw:1")
+        || has_word(ctl, "CARD=1"))
+        return 1;
+    return -1;
+}
+
+static int game_volume_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("PAD_GAME_VOLUME");
+        on = !(e && e[0] == '0' && !e[1]);
+        if (!on) say("[alsa] PAD_GAME_VOLUME=0: the game's volume is ignored, full level\n");
+    }
+    return on;
+}
+
+/* The codec's curve, without libm (this .so is -nostdlib): 0.5 dB a step
+ * below 192, so the gain is 10^(-0.025) to the power of the steps. */
+int pad_pcm_vol_gain_q16(long v)
+{
+    double g = 65536.0;
+    long k;
+    if (v <= 0) return 0;
+    if (v >= PCM_VOL_MAX) return 65536;
+    for (k = v; k < PCM_VOL_MAX; k++) g *= 0.94406087628592;   /* -0.5 dB */
+    return (int)(g + 0.5);
+}
+
+static void mixer_apply(struct fake_elem *el)
+{
+    char line[200];
+    int q, tenths;
+    if (el->card < 0 || el->card >= NPCM) return;
+    q = game_volume_on() ? pad_pcm_vol_gain_q16(el->vol) : 65536;
+    /* ONLY "PCM" is the speakers' volume. Godzilla also sets "Headphone" on
+     * ctl backbox (48/192 at boot): the codec's headphone amplifier, which
+     * the speakers never pass through - letting it set card 0's gain put a
+     * run 72 dB down. Every other element is logged and left alone. */
+    if (!str_eq(el->name, "PCM")) {
+        snprintf(line, sizeof line, "[alsa] game volume: \"%s\" on card #%d = %ld/%ld (not the speakers: logged only)\n",
+                 el->name, el->card, el->vol, PCM_VOL_MAX);
+        say(line);
+        return;
+    }
+    card_gain_q16[el->card] = q;
+    tenths = (int)((PCM_VOL_MAX - el->vol) * 5);      /* 0.5 dB = 5 tenths */
+    if (el->vol <= 0)
+        snprintf(line, sizeof line, "[alsa] game volume: \"%s\" on card #%d = 0/%ld (mute)%s\n",
+                 el->name, el->card, PCM_VOL_MAX, el->card ? " (card not played)" : "");
+    else
+        snprintf(line, sizeof line,
+                 "[alsa] game volume: \"%s\" on card #%d = %ld/%ld (-%d.%d dB, gain %d/65536)%s\n",
+                 el->name, el->card, el->vol, PCM_VOL_MAX, tenths / 10, tenths % 10, q,
+                 el->card ? " (card not played)" : "");
+    say(line);
+}
 
 int snd_mixer_open(void **mixer, int mode)
 {
+    int i;
     (void)mode;
-    if (mixer) *mixer = mixer_obj;
+    for (i = 0; i < MIX_MAX && mixers[i].used; i++) ;
+    if (i == MIX_MAX) i = MIX_MAX - 1;         /* reuse the last: never fail the game */
+    mixers[i].used = 1;
+    mixers[i].card = -1;
+    mixers[i].ctl[0] = 0;
+    if (mixer) *mixer = &mixers[i];
     say("[alsa] snd_mixer_open -> fake mixer\n");
     return 0;
 }
-int snd_mixer_close(void *m) { (void)m; return 0; }
-int snd_mixer_attach(void *m, const char *card) { (void)m; (void)card; return 0; }
+int snd_mixer_close(void *m)
+{
+    struct fake_mixer *x = m;
+    if (x >= mixers && x < mixers + MIX_MAX) x->used = 0;
+    return 0;
+}
+int snd_mixer_attach(void *m, const char *card)
+{
+    struct fake_mixer *x = m;
+    if (x >= mixers && x < mixers + MIX_MAX) {
+        str_cpy(x->ctl, card, sizeof x->ctl);
+        x->card = ctl_card(card);
+    }
+    return 0;
+}
 int snd_mixer_selem_register(void *m, void *opts, void **classp)
 { (void)m; (void)opts; (void)classp; return 0; }
 int snd_mixer_load(void *m) { (void)m; return 0; }
 
+/* The id is the game's own buffer of this size (alloca of the sizeof), so
+ * the name it sets is kept IN it, for find_selem to read back. */
 unsigned long snd_mixer_selem_id_sizeof(void) { return 128; }
-void snd_mixer_selem_id_set_name(void *id, const char *name) { (void)id; (void)name; }
+void snd_mixer_selem_id_set_name(void *id, const char *name)
+{ if (id) str_cpy((char *)id, name, 64); }
 void snd_mixer_selem_id_set_index(void *id, unsigned idx) { (void)id; (void)idx; }
 
 void *snd_mixer_find_selem(void *m, const void *id)
 {
-    (void)m; (void)id;
-    return elem_obj;               /* never NULL: the game does not check */
+    struct fake_mixer *x = m;
+    int known = x >= mixers && x < mixers + MIX_MAX;
+    const char *name = id ? (const char *)id : "";
+    int card = known ? x->card : -1;
+    int i, fr = -1;
+    char line[160];
+    for (i = 0; i < ELEM_MAX; i++) {
+        if (!elems[i].used) { if (fr < 0) fr = i; continue; }
+        if (elems[i].card == card && str_eq(elems[i].name, name)) return &elems[i];
+    }
+    if (fr < 0) return &elem_spare;            /* never NULL: the game does not check */
+    elems[fr].used = 1;
+    elems[fr].card = card;
+    elems[fr].vol = PCM_VOL_MAX;
+    elems[fr].sw = 1;
+    str_cpy(elems[fr].name, name, sizeof elems[fr].name);
+    snprintf(line, sizeof line, "[alsa] mixer element \"%s\" on ctl %s (card #%d)\n",
+             elems[fr].name, known && x->ctl[0] ? x->ctl : "?", card);
+    say(line);
+    return &elems[fr];
 }
 
+/* The SGTL5000's own range for its PCM volume, as the machine reports it. */
 int snd_mixer_selem_get_playback_volume_range(void *elem, long *min, long *max)
 {
     (void)elem;
     if (min) *min = 0;
-    if (max) *max = 100;
+    if (max) *max = PCM_VOL_MAX;
     return 0;
 }
 int snd_mixer_selem_set_playback_volume_all(void *elem, long value)
-{ (void)elem; (void)value; return 0; }
+{
+    struct fake_elem *el = elem;
+    if (!(el >= elems && el < elems + ELEM_MAX)) return 0;
+    if (value < 0) value = 0;
+    if (value > PCM_VOL_MAX) value = PCM_VOL_MAX;
+    if (el->used > 1 && el->vol == value) return 0;   /* the same again: no log line */
+    el->vol = value;
+    el->used = 2;
+    mixer_apply(el);
+    return 0;
+}
 int snd_mixer_selem_set_playback_switch_all(void *elem, int value)
-{ (void)elem; (void)value; return 0; }
+{
+    struct fake_elem *el = elem;
+    char line[160];
+    if (!(el >= elems && el < elems + ELEM_MAX)) return 0;
+    if (el->sw != !!value) {
+        el->sw = !!value;
+        snprintf(line, sizeof line, "[alsa] mixer switch \"%s\" on card #%d -> %s (logged only)\n",
+                 el->name, el->card, value ? "on" : "off");
+        say(line);
+    }
+    return 0;
+}
+
+/* Card 0's PCM at the game's volume, for the speakers only. A short write
+ * returns what went, like write() itself. */
+static long play_scaled(int fd, const void *buf, unsigned long bytes)
+{
+    static short tmp[4096];
+    const short *in = buf;
+    unsigned long n = bytes / 2, done = 0;
+    int q = card_gain_q16[0];
+    if (q >= 65536) return write(fd, buf, bytes);
+    while (done < n) {
+        unsigned long c = n - done, i;
+        long r;
+        if (c > sizeof tmp / sizeof *tmp) c = sizeof tmp / sizeof *tmp;
+        for (i = 0; i < c; i++) tmp[i] = (short)(((long long)in[done + i] * q + 32768) >> 16);   /* nearest */
+        r = write(fd, tmp, c * 2);
+        if (r < 0) return done ? (long)(done * 2) : r;
+        done += (unsigned long)r / 2;
+        if ((unsigned long)r < c * 2) break;
+    }
+    return (long)(done * 2);
+}

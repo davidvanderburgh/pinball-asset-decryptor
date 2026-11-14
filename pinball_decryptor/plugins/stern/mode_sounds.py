@@ -298,6 +298,34 @@ for (_g, _v), (_m, _c, _mu, _st) in _SWAP.items():
     TITLES[(_g, _v)] = Carriers(key_mask=_m, calls=_c, music=_mu, status=_st, swap=True)
 
 
+# PAD-1296: Spike 3 builds (64-bit; a mode profile key ending ``_spike3``). Every sound of a mode's own is
+# SWAPPED in: spike3_modes appends its record to the card's image.bin, keyed beside its carrier's record,
+# and the runtime's lookup hook takes that key while the mode plays it (the same item 163 route). A
+# carrier is a request of the build the game never plays. Star Wars ELG 1.10: the Spike 2 build's census
+# carriers two request ids on (its sound requests are Spike 2's + 2: PAD-1282's request_shift), each the
+# same recording (mono calls 2.40 s .. 1.64 s, longest first as on Spike 2; stereo music), and none heard
+# from the game in two emulator games (slot 96, 2026-11-14) in which a mode played its start, shot, end
+# and music on 135 / 201 / 202 / 70. Spike 2's 344 (= 346 here) is left out: it plays the same record as
+# 345, so one swap would take both.
+TITLES_A64 = {
+    ("star_wars_elg", "1.10"): Carriers(key_mask=0, calls=(135, 202, 201, 74, 238), music=(70, 345, 73, 78),
+                                        status="census", swap=True),
+}
+
+
+def profile_carriers(profile_key):
+    """The :class:`Carriers` of a mode profile key (``star_wars_elg_1_10``, or a Spike 3 build's
+    ``star_wars_elg_1_10_spike3``), or ``None`` when none have been measured for that build."""
+    key = str(profile_key)
+    arch = "a64" if key.endswith(SPIKE3_SUFFIX) else "arm"
+    game, version = title_version(key[:-len(SPIKE3_SUFFIX)] if arch == "a64" else key)
+    return carriers(game, version, arch) if game else None
+
+
+#: mode_project.SPIKE3_KEY (not imported: mode_project imports this module)
+SPIKE3_SUFFIX = "_spike3"
+
+
 def swapped(c, key):
     """True when a sound of *key* ("music" or a call's) is SWAPPED in on this title's carriers (item
     163), so a carrier can take several modes' sounds, each its own record (hud-layers)."""
@@ -321,9 +349,10 @@ class ModeSoundError(ValueError):
     """Own sounds that cannot be carried or built as asked."""
 
 
-def carriers(game, version):
-    """The title's :class:`Carriers`, or ``None`` when no carrier has been measured for it."""
-    return TITLES.get((game, str(version)))
+def carriers(game, version, arch="arm"):
+    """The title's :class:`Carriers`, or ``None`` when no carrier has been measured for it. *arch*
+    "a64" is its Spike 3 build's (:data:`TITLES_A64`, PAD-1296)."""
+    return (TITLES_A64 if arch == "a64" else TITLES).get((game, str(version)))
 
 
 def assign(game, version, wants, taken=(), taken_beds=()):

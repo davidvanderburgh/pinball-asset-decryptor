@@ -1911,13 +1911,13 @@ STACK_BALLS_PROVEN = frozenset({
 })
 
 
-def end_sound_carried(game, version):
+def end_sound_carried(game, version, arch="arm"):
     """item 164: a title whose time-up callout is not known can still end a mode with a sound
     of its own - on a CARRIER, swapped in while the mode plays (item 163's key swap, the route
     its start and shot sounds take); mode_file.c's ``sound_end`` plays it when time runs out.
-    True when the title has swap carriers measured (mode_sounds)."""
+    True when the title has swap carriers measured (mode_sounds; *arch* "a64": its Spike 3 build's)."""
     from . import mode_sounds as MS
-    c = MS.carriers(game, version)
+    c = MS.carriers(game, version, arch)
     return bool(c and c.swap and c.calls)
 
 
@@ -1937,12 +1937,12 @@ TIME_UP_NONE = frozenset({
 })
 
 
-def own_music_none(game, version):
+def own_music_none(game, version, arch="arm"):
     """PAD-479: True when a mode's own music cannot ride on title ``game`` ``version`` because the game
     has no spare music: its carriers were measured (item 163's census) and every stereo music request is
     one the game plays, and no music bed is free either (The Beatles, Deadpool) - a game limit."""
     from . import mode_sounds as MS
-    c = MS.carriers(game, version)
+    c = MS.carriers(game, version, arch)
     return bool(c is not None and c.swap and not c.music and not c.beds)
 
 
@@ -2611,13 +2611,14 @@ def profile_from_port(path):
     elif not measured.get("clip_proven"):
         no("clip", "A clip added to %(label)s's video bank has not been seen on the screen in "
                    "the emulator yet.")
-    if arch == "a64":                         # PAD-1282: spike3_modes writes no own sound (Spike 2's sound bank)
-        no("own_sound", "A sound of the mode's own cannot go on a %(label)s card yet: the app builds "
-                        "those into Spike 2's sound bank. The game's own callouts and sounds play.")
+    if arch == "a64" and not end_sound_carried(game, version, arch):
+        # PAD-1296: spike3_modes appends a mode's own sounds to the card's image.bin, swapped in on carriers
+        no("own_sound", "The app has not found spare sounds on %(label)s to carry a sound of the mode's own "
+                        "yet. The game's own callouts and sounds play.")
     elif "own-sound" not in runtime:
         no("own_sound", "The app has not found how %(label)s looks up its sounds, so a sound of "
                         "the mode's own cannot play.")
-    elif not callouts.get("time_up") and not end_sound_carried(game, version):
+    elif not callouts.get("time_up") and not end_sound_carried(game, version, arch):
         no("own_sound", "The app does not know %(label)s's time-up callout, the one a sound of "
                         "the mode's own plays in place of.")
     if all(n in sites for n in STACK_NEEDS[0]) and all(data.get(n) for n in STACK_NEEDS[1]):
@@ -2712,7 +2713,7 @@ def profile_from_port(path):
         drain_shot=DRAIN_SHOT if DRAIN_SHOT in _internal_shots(port) else "",
         stack_note=stack_note,
         limits=tuple(limits) + (("end_game",) if not callouts.get("time_up") and key in TIME_UP_NONE else ())
-        + (("own_music",) if own_music_none(game, version) else ())
+        + (("own_music",) if own_music_none(game, version, arch) else ())
         + (("magnet",) if key in MAGNET_GAME_LIMIT and key not in MAGNET_PROVEN else ()),   # PAD-475
         game_modes=_game_modes(port),
         game_rules=_game_rules(port),                        # PAD-398
@@ -2935,6 +2936,14 @@ LAMPS_PROVEN = frozenset((
     # in the LED view AND on the node bus - 13/13 RGB magenta, 94/94 single lit, none before or after; light_shots on
     # the bus only (the LED view showed none: the bulk frames it misses), 6/6 tied RGB inserts cyan, no untied one
     "jaws_pro-1.02",
+    # PAD-1283 2026-11-14 (the Spike 3 rig, slot 1, hidden, muted; the bridge's dump/padled): the Spike 3 card of Star
+    # Wars ELG 1.10 with the 64-bit runtime - a mode file's light_insert held DEATH STAR (X2), LEFT OUTLANE and RAMP 6
+    # blinking on the playfield board (board 8, indices 51 / 3 / 64) from its start to its end, LEFT OUTLANE and RAMP 6
+    # dark before and after, DEATH STAR (X2) back to the game's own blink; light_all ff00ff held all 67 named inserts at
+    # 255 for the whole 12 s (4 lit throughout before, 7 after); light_shots cyan blink blinked the three inserts tied to
+    # the mode's scoring shots at 255 (TOP LANE LEFT and YODA MYSTERY dark before and after, LEFT LUKE ARROW the game's
+    # own 192 blink before and after); the game's layer list (pm_lamp_layers) had the runtime's layer on top
+    "star_wars_elg-1.10/spike3",
 ))
 
 

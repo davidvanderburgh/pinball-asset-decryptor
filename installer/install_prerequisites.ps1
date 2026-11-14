@@ -400,6 +400,26 @@ function Set-WslOrdinaryUser {
     }
 }
 
+# --- No second clock-setter in the distro (PAD-1307) -------------------------
+# WSL keeps the guest clock on Windows time; systemd-timesyncd setting it from
+# NTP as well fights that (the clock has run up to 2.5% fast), and the
+# emulator's sound, paced on that clock, drifts and breaks up.  The clock is
+# shared by every distro, so a rig in PAD-Runtime hears Ubuntu's.  Turned off
+# here, where Ubuntu is set up; the app also does it at every run start
+# (core/timesync.py) for a distro set up some other way.  Same script.
+function Disable-WslTimesyncd {
+    $def = Get-WslDefaultDistro
+    if ($null -eq $def) { return }
+    $name = $def.Name
+    $script = "[ -d /run/systemd/system ] || exit 0; command -v systemctl >/dev/null || exit 0; " +
+              "systemctl is-active --quiet systemd-timesyncd || systemctl is-enabled --quiet systemd-timesyncd 2>/dev/null || exit 0; " +
+              "systemctl disable --now systemd-timesyncd >/dev/null 2>&1 && echo PAD_TIMESYNC_OFF"
+    $out = ((& wsl -d $name -u root -e sh -c $script 2>$null | Out-String) -replace "`0", "")
+    if ($out -match 'PAD_TIMESYNC_OFF') {
+        Write-Installed ("{0}: systemd-timesyncd turned off (WSL keeps the clock; the two fought and the sound drifted)" -f $name)
+    }
+}
+
 # --- Firmware virtualization probe ---------------------------------------
 # WSL2 boots a real utility VM, so with virtualization switched off in the
 # BIOS/UEFI every install/first-launch dies with 0x80370102 ("virtualization
@@ -1314,7 +1334,7 @@ if ($needsWsl) {
         Write-SKIP "Ubuntu (WSL2 not available yet)"
     }
 
-    if ($wslAvailable -and $ubuntuFound) { Set-WslOrdinaryUser }
+    if ($wslAvailable -and $ubuntuFound) { Set-WslOrdinaryUser; Disable-WslTimesyncd }
 
     # --- Is that distro WSL 2? -------------------------------------------
     # Only asked when something in the plan loop-mounts an image (Stern's

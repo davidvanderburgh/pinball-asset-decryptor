@@ -386,7 +386,7 @@ selected clip, read from its program.
 For JJP and the other makers, a long clip lists the song whose name ends the same way and runs about as long.
 
 - **Play it with the clip** starts, pauses, seeks and stops the song with whichever player plays.
-- The callout shows how the two lengths compare and links the song on the **Audio** tab.
+- One line above the players names the song, shows how the two lengths compare and links it on the **Audio** tab; hover **Song:** for how it was matched.
 
 ### Undo and redo
 

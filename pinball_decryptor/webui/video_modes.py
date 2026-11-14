@@ -76,6 +76,9 @@ SONG_HEAD = "The song that goes with this clip (a sound named after it, about as
 SONG_FOOT = ("Matched by the files' names and lengths. Tick \"Play it with the clip\" to hear "
              "it while either player plays.")
 SONGS_MAX = 3
+#: PAD-1266 (Ben): the song note is one row - this label, the song, the "Play it with the clip" box -
+#: and SONG_HEAD / SONG_FOOT are the label's tooltip instead of two lines of their own
+SONG_LABEL = "Song:"
 SOUNDS_FOOT = ("Extract the card again to see which sound files these are: the extract writes "
                "sound_requests.tsv.")
 #: PAD-827: the callout's part for what the emulator saw the game do with the clip
@@ -661,8 +664,9 @@ class ModesMixin:
                                                           % (CS.clock(ssecs), CS.clock(secs))]},
                           "rel": srel, "path": os.path.join(self._scan_dir, *srel.split("/")),
                           "sync": True})
-        return {"rel": rel, "head": SONG_HEAD, "items": items, "more": "", "maybe_head": "",
-                "maybe": [], "maybe_more": "", "none": "", "foot": SONG_FOOT, "sync": True}
+        return {"rel": rel, "head": SONG_LABEL, "head_tip": {"head": SONG_HEAD, "lines": [SONG_FOOT]},
+                "items": items, "more": "", "maybe_head": "", "maybe": [], "maybe_more": "",
+                "none": "", "foot": "", "sync": True, "inline": True}
 
     @rpc
     def open_sound(self, rel):

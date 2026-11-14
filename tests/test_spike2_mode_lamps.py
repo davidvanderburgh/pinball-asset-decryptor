@@ -178,6 +178,9 @@ RT_HARNESS = r"""
 #include <stdarg.h>
 #include "pad_mode.h"
 
+typedef unsigned pm_addr;            /* PAD-1269: the 32-bit (Spike 2) build's address and register types */
+typedef unsigned pm_reg;
+
 static unsigned can;
 static const struct pm_mode *current;
 static unsigned long now_ms;

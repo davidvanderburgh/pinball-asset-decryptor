@@ -104,6 +104,9 @@ def test_every_build_with_a_route_offers_random_clips():
     seen = set()
     for prof in MP.profiles().values():
         key = CV.title_key(prof)
+        if prof.arch == "a64":                      # PAD-1271: a Spike 3 port has no clip route yet
+            assert CV.route_of(prof) == "" and CV.title_refusal(prof), key
+            continue
         if key in NO_ROUTE:
             assert CV.title_refusal(prof) == CV.NO_ROUTE % prof.label
             seen.add(key)

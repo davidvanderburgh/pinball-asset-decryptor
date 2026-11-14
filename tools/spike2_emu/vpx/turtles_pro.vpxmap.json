@@ -145,7 +145,7 @@
       "t49a, t32": "the two top-lane rollovers under TOP LANE LEFT / RIGHT (l49a, l32)",
       "t49": "the rollover at the top of the loop lane: the loop is already counted by sw50",
       "t55": "the floor rollover at the top-left of the orbit",
-      "t25": "the LAIR lane behind the LAIR bank, under the upper flipper, entered above the left outlane: no switch of its own on the Pro (lair_lane)",
+      "t25": "the LAIR lane behind the LAIR bank: the shot goes in under the upper flipper and rolls down it to the left inlane; no switch of its own on the Pro, its post holds the ball on LOWER LOCK 1 (lair_lane)",
       "sw50": "the lane right of the pops, under the FOOT COMBO 2 LOOP insert (l22a): CENTER LOOP (GUESS)",
       "sw50a": "the right orbit lane with the spinner and the ROCKSTEADY / TRAINING / WEAPON inserts",
       "sw32": "rides Ramp008, the wire that returns a made left ramp to the left inlane",
@@ -176,8 +176,14 @@
     ]
   },
   "lair_lane": {
-    "_": "the Pro's LAIR lane runs to the lock's lower place: with Training lit, a ball onto LOWER LOCK 1 that did not pass the upper section starts it, and the game holds it ~10 s before LOWER LOCK lets it out (PAD-896, emulator). A ball going UP this trigger's lane is taken into bsVan (PadLairIn); one coming down is left alone",
-    "trigger": "t25"
+    "_": "the Pro's LAIR shot goes in UNDER the upper flipper and rolls DOWN this lane onto LOWER LOCK 1, where the LOWER LOCK post holds it: the game holds it ~1.7 s (~7-10 s when it starts Training), drops the post, and the ball rolls on to the left flipper (PAD-1268, emulator). A ball crossing `trigger` going down arms `post`, a hidden kicker cloned below it that catches the ball, makes LOWER LOCK 1 (it shares bsVan's count) and kicks it on down on the LOWER LOCK coil; a ball coming up the lane from the inlane rolls on. The left orbit's rail hooks above the lane and hands its balls to the upper flipper, not into the lane",
+    "trigger": "t25",
+    "post": {
+      "name": "PadLairPost",
+      "clone": "Kicker7",
+      "at": [65, 1215],
+      "why": "mid-lane (wires Ramp026 x 24, Ramp020 x 107), 50 below t25 (y 1105-1165), above the lane's foot (y ~1320)"
+    }
   },
   "switch_extra": {
     "_": "edges the Data East script never sent, added by the patcher in the named sub",

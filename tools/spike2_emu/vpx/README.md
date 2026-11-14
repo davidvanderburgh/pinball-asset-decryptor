@@ -441,12 +441,26 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   drops it to LOWER LOCK, the LOWER LOCK coil lets it out. The table put
   the ball straight onto LOWER LOCK 1 and the game let it out again: no lock,
   no Ninja Pizza Multiball. On the emulator, balls on the upper section read
-  BALL ONE LOCKED and three started the multiball. The Pro's LAIR lane, where
-  a spelled LAIR lights Training, runs to the same lock's LOWER place: a ball
-  on LOWER LOCK 1 that skipped the upper section started TRAINING LEVEL 2,
-  held ~10 s before LOWER LOCK let it out. So a ball going UP the table's
-  t25 lane (behind the LAIR bank, above the left outlane) goes there
-  (`lair_lane`), and comes back out of the parlor.
+  BALL ONE LOCKED and three started the multiball. The LAIR lane, where a
+  spelled LAIR lights Training, runs to the same lock's LOWER place (below).
+* **The LAIR shot rolls DOWN its lane onto the LOWER LOCK post** (PAD-1268).
+  On the machine the shot goes in under the upper flipper, rolls down the
+  lane behind the LAIR bank and rests on LOWER LOCK 1 against the LOWER LOCK
+  post: a momentary lock. On the emulator (turtles_pro and turtles_le 1.59)
+  the game held such a ball 1.7 s, and 7-10 s when it started Training
+  (LAIR TRAINING IS LIT, then TRAINING LEVEL 2), before LOWER LOCK dropped
+  the post (8/7: 30 ms pulse, 180 ms hold). The table agrees: its t25 lane
+  runs between two playfield wires from under the upper flipper (at rest it
+  hangs down across the lane's mouth) to the left inlane, and the left
+  orbit's rail hooks above it and hands its balls to the upper flipper.
+  PAD-896 had it the other way round: it took a ball going UP t25 into the
+  van and let one coming down roll through, so the real shot never reached
+  the game. Now a ball crossing t25 going down arms `lair_lane.post`, a
+  hidden kicker cloned (disabled) from Kicker7 mid-lane below t25; it holds
+  the ball with LOWER LOCK 1 made (it shares bsVan's count) and sends it on
+  down the lane to the left flipper on the LOWER LOCK coil. A ball coming up
+  from the inlane rolls on; with the lower place full the shot rolls through.
+  Both maps (Pro and LE) have it.
 * **UPPER LOCK is a post, held down to empty the lock** (PAD-1116). The game
   calls a lock that does not empty a DEVICE MALFUNCTION (UPPER LOCK, LOWER
   LOCK) once its kick's tries run out (`kickproc` 0x298380 in the 1.54

@@ -30,9 +30,9 @@ turtles_le.vpxmap.json:
            the van kicker (the Pro's Ninja Pizza Parlor) -> the lock's two
            sections: a ball goes into the UPPER one (UPPER LOCK 1..3), the
            UPPER LOCK coil drops it into the lower one (LOWER LOCK 1/2, a
-           cvpmBallStack), the LOWER LOCK coil lets it out; a ball going up
-           the LAIR lane (lair_lane) drops straight into the lower one, as on
-           the Pro; KRANG shakes Krang;
+           cvpmBallStack), the LOWER LOCK coil lets it out; a ball rolling
+           down the LAIR lane (lair_lane) stops on a post there, LOWER LOCK 1,
+           and rolls on on that coil; KRANG shakes Krang;
            UpdateLamps' inserts -> their Stern LEDs (1000 + node * 100 +
            index), the flasher domes LampFlasher drives -> the Stern flash
            LEDs; GI follows the GI LEDs, the pizza turntable the SPIN DISC
@@ -212,22 +212,62 @@ def roll_in_sub(up):
     return lines + ["\tEnd Select", "End Sub", ""]
 
 
+#: how long the LAIR post waits, armed, for a ball that crossed the switch going down
+LAIR_ARM_MS = 2000
+
+
+def lair_post_name(m):
+    """The kicker the patcher adds in the LAIR lane (the map's lair_lane.post), or None."""
+    lane = m.get("lair_lane") or {}
+    return (lane.get("post") or {}).get("name") if lane.get("trigger") else None
+
+
 def lair_subs(m, van):
-    """The Pro's LAIR lane runs under the playfield to the lock's lower place:
-    with Training lit, a ball landing on LOWER LOCK 1 without passing the upper
-    section starts it, and the game holds the ball through its start before
-    LOWER LOCK lets it out (emulator, PAD-896). A ball coming DOWN the lane is
-    not a shot into it."""
-    if not (m.get("lair_lane") or {}).get("trigger"):
+    """The Pro's LAIR lane: the shot goes in UNDER the upper flipper and rolls
+    DOWN the lane, over the trigger, onto LOWER LOCK 1, where the LOWER LOCK
+    post holds it; the game holds it there ~1.7 s (~7-10 s when it starts
+    Training), drops the post, and the ball rolls on down to the left flipper
+    (emulator, PAD-1268). A ball crossing the trigger going down arms the post
+    (a hidden kicker below it, the map's lair_lane.post); the post catches it,
+    makes LOWER LOCK 1, and lets it go on the LOWER LOCK coil. A ball coming UP
+    the lane from the inlane rolls on. PAD-896 had the lane the other way
+    round: it took a ball going UP into the van and never counted the shot."""
+    post = lair_post_name(m)
+    if not post:
         return []
+    n = len(van)
     return [
-        "' the LAIR lane: a ball going up it drops onto LOWER LOCK, where the game holds it",
+        "' the LAIR lane: a ball rolling down it (in under the upper flipper) arms the post below the switch",
         "Sub PadLairIn(aTrigger)",
-        "\tIf ActiveBall.VelY < 0 And bsVan.Balls + padVanFalling < %d Then" % len(van),
-        "\t\taTrigger.DestroyBall",
-        "\t\tbsVan.Balls = bsVan.Balls + 1",
-        "\t\tbsVan.Update",
+        "\tIf ActiveBall.VelY > 0 And Not padLairHeld And bsVan.Balls + padVanFalling < %d Then" % n,
+        "\t\t%s.Enabled = True" % post,
+        "\t\tvpmTimer.AddTimer %d, \"PadLairDisarm '\"" % LAIR_ARM_MS,
         "\tEnd If",
+        "End Sub",
+        "",
+        "Sub PadLairDisarm",
+        "\tIf Not padLairHeld Then %s.Enabled = False" % post,
+        "End Sub",
+        "",
+        "' the LOWER LOCK post holds the LAIR ball on LOWER LOCK 1",
+        "Sub %s_Hit" % post,
+        "\tIf padLairHeld Or bsVan.Balls + padVanFalling >= %d Then" % n,
+        "\t\t%s.Kick 180, 3        ' the place filled meanwhile: on through" % post,
+        "\t\t%s.Enabled = False" % post,
+        "\t\tExit Sub",
+        "\tEnd If",
+        "\tpadLairHeld = True",
+        "\tbsVan.Balls = bsVan.Balls + 1",
+        "\tbsVan.Update",
+        "End Sub",
+        "",
+        "' LOWER LOCK with the LAIR ball on LOWER LOCK 1: the post drops, it rolls on to the left flipper",
+        "Sub PadLairOut",
+        "\tpadLairHeld = False",
+        "\tbsVan.Balls = bsVan.Balls - 1",
+        "\tbsVan.Update",
+        "\t%s.Kick 180, 3" % post,
+        "\t%s.Enabled = False" % post,
         "End Sub",
         "",
     ]
@@ -316,7 +356,10 @@ def pad_subs(m):
         "' LOWER LOCK: the van gives back one ball (LOWER LOCK %s); with the post" % "/".join(str(x) for x in van),
         "' still down the next one rolls on",
         "Sub PadVanOut(Enabled)",
-        "\tIf Enabled Then",
+        "\tIf Enabled And padLairHeld Then",
+        "\t\tPadLairOut",
+        "\t\tPadVanFlow",
+        "\tElseIf Enabled Then",
         "\t\tIf bsVan.Balls > 0 Then",
         "\t\t\tpizzavanshake",
         "\t\t\tpizzavan.blenddisablelighting = 0.1",
@@ -435,9 +478,10 @@ def patch_script(src, m):
             rom = re.search(r'cgamename\s*=\s*"([^"]*)"', low)
             if rom:   # the backglass (B2S, DOF) knows the table by its ROM
                 out.append('PadB2SName = "%s"' % rom.group(1))
-            out.append("Dim bsTrough, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, padGiState, padDiscOn")
+            out.append("Dim bsTrough, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, padGiState, padDiscOn, "
+                       "padLairHeld")
             out.append("padVanUp = 0 : padVanComing = 0 : padVanFalling = 0 : padVanPost = False : "
-                       "padGiState = -1 : padDiscOn = 0")
+                       "padGiState = -1 : padDiscOn = 0 : padLairHeld = False")
             continue
         if low.startswith("loadvpm "):
             out.append('LoadVPM "01000000","PADSPIKE2.vbs",3.10')
@@ -561,8 +605,8 @@ def patch_script(src, m):
             out.append(line.replace("UBound(BOT)", "PadMin(UBound(BOT), tnob)"))
             continue
 
-        # ---- the LAIR lane (the map's lair_lane): a ball going up it drops into the
-        # lock's lower place, as the Pro's lane does
+        # ---- the LAIR lane (the map's lair_lane): a ball rolling down it stops on
+        # the lock's lower place, LOWER LOCK 1, as on the machine (PAD-1268)
         lair = (m.get("lair_lane") or {}).get("trigger", "")
         if lair and one_liner and sub_low == lair.lower() + "_hit":
             out.append("Sub %s:PadLairIn Me:End Sub   ' PAD: the LAIR lane" % msub.group(1))
@@ -654,6 +698,12 @@ def retrofit_items(table, m):
         kind, src = by_name[v["clone"].lower()]
         assert kind == "Trigger", v["clone"]
         items.append(vpxfile.clone_item(src, name, *v["at"]))
+    post = (m.get("lair_lane") or {}).get("post")
+    if post:   # the LAIR lane's LOWER LOCK post: a hidden kicker, off until a ball comes down
+        kind, src = by_name[post["clone"].lower()]
+        assert kind == "Kicker", post["clone"]
+        items.append(vpxfile.set_fields(vpxfile.clone_item(src, post["name"], *post["at"]),
+                                        {"EBLD": struct.pack("<i", 0), "TMON": struct.pack("<i", 0)}))
     for name, v in m.get("retrofit_timers", {}).items():
         if name.startswith("_"):
             continue

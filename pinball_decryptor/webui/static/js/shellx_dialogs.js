@@ -895,6 +895,7 @@ function TeamDialog({ close }) {
       <span class="lbl nw">Team folder</span><span class="mono ellip grow notr" title=${tm.team}>${tm.team}</span>
       <span class="lbl nw">You</span><span class="notr">${tm.me}</span>
     </div>
+    ${tm.git && tm.git_remote && !(tm.warnings || []).length ? html`<${Note} kind="info">Kept in step by Git: Share my parts pushes, the team is pulled every 30 seconds${tm.git_lfs ? ", videos, sounds and pictures go through Git LFS" : ""}.<//>` : null}
     ${(tm.warnings || []).map((w) => html`<${Note} kind="warn">${w}<//>`)}
     <${Table} columns=${cols} rows=${tm.parts || []} rowKey=${(r) => r.key} cls="card sx-fill"
       resizable widths=${widths} onResize=${setWidths}

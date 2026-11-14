@@ -20,7 +20,8 @@ CHECK_SECS = 30
 
 INTRO = ("Work on this project with other people, each on their own PC. Everyone extracts "
          "the same card and picks the same team folder: a folder OneDrive, Dropbox, Google "
-         "Drive or a network drive keeps the same on every PC. Each part of the project "
+         "Drive or a network drive keeps the same on every PC, or a clone of a Git repository the "
+         "team shares (the app pulls and pushes it, with videos in Git LFS). Each part of the project "
          "belongs to one person, who shares it; the others get it. Nobody's work is mixed "
          "into anybody else's.")
 
@@ -67,19 +68,25 @@ class TeamMixin:
         def work():
             from ..core import team_sync as TS
             try:
-                got = TS.news(folder)
+                got, git = TS.check(folder)
             except Exception:                           # noqa: BLE001
                 log.exception("team: news")
-                got = []
-            self.ctx.loop.post(self._team_checked, folder, got)
+                got, git = [], []
+            self.ctx.loop.post(self._team_checked, folder, got, git)
 
         threading.Thread(target=work, name="pad-shellx-team-check", daemon=True).start()
 
-    def _team_checked(self, folder, got):
+    def _team_checked(self, folder, got, git=()):
         from ..core import team_sync as TS
         if not same_path(folder, self._active_folder()):
             return
         self.set(team_news=len(got))
+        # a Git team folder that can't sync (offline, no rights) is said once, not every check
+        said = tuple(git or ())
+        if said and self._team_told.get((folder, "git")) != said:
+            for ln in said:
+                self.window.append_log(ln, "warning")
+        self._team_told[(folder, "git")] = said
         fresh = {}
         for part, who, stamp in got:
             if self._team_told.get((folder, part)) != stamp:
@@ -247,6 +254,12 @@ class TeamMixin:
                        out["copied"], human_size(out["bytes"])))
             history_log.record(folder, [line])
             self.window.append_log(line, "success")
+            git = out.get("git")
+            if git is not None:
+                for ln in git["lines"]:
+                    self.window.append_log("  " + ln, "warning")
+                if git["pushed"]:
+                    self.window.append_log("  Pushed to the team's Git repository.", "info")
             if out.get("gone"):
                 self.window.append_log(
                     "  %d file(s) the project names are not on this PC and were left out: "

@@ -31,6 +31,11 @@ sees two PCs change one file, the case where OneDrive and Dropbox make
 has not finished arriving on this PC (:func:`_complete`) is waited for, not
 half applied.
 
+The team folder can also be a clone of a Git repository the team shares
+(:mod:`.team_git`): then the app commits, pulls and pushes it itself (Share
+pushes, Get and the regular check pull), with the media in Git LFS when it is
+installed.
+
 The project remembers its team, its member name and what it last took and
 shared in :data:`STATE_NAME`.
 """
@@ -44,7 +49,7 @@ import re
 import shutil
 import time
 
-from . import project_reset, staged_changes
+from . import project_reset, staged_changes, team_git
 from .atomic_file import write_json_atomic
 from .checksums import TEAM_FILES_DIR
 
@@ -282,6 +287,9 @@ def join(project, team, name):
         st = {"team": team, "me": me, "got": {}, "fp": {}}
     save_state(project, st)
     warn = []
+    g = team_git.sync(team, me, "%s joined the team" % me)
+    if g is not None:
+        warn += g["lines"]
     for n, m in members(team).items():
         other = m.get("source_name") or ""
         if n != me and src and other and other != src:
@@ -496,6 +504,12 @@ def status(project, cancel=None):
                                "service on?" % team)
         return out
     out["ok"] = True
+    git = team_git.status(team)
+    out["git"] = bool(git)
+    if git:
+        out["git_remote"] = git["remote"]
+        out["git_lfs"] = git["lfs"]
+        out["warnings"] += git["warnings"]
     cards = members(team)
     own = owners(team, cards)
     src = _source_name(project)
@@ -559,7 +573,7 @@ def _rel(path, base):
     return os.path.relpath(path, base).replace("\\", "/")
 
 
-def _files_under(base, skip=(MEMBER_NAME, SHARE_NAME)):
+def _files_under(base, skip=(MEMBER_NAME, SHARE_NAME, team_git.ATTRIBUTES)):
     out = {}
     for d, _dirs, files in os.walk(base):
         for n in files:
@@ -584,6 +598,12 @@ def _remove(path):
 
 
 def share(project, game="", progress=None, cancel=None):
+    """See :func:`_share`; one at a time with the team's Git work (:data:`.team_git.LOCK`)."""
+    with team_git.LOCK:
+        return _share(project, game, progress, cancel)
+
+
+def _share(project, game="", progress=None, cancel=None):
     """Write the parts this member owns into their folder of the team.  Returns ``{"parts",
     "files", "copied", "bytes", "gone", "cancelled"}`` (*gone*: files the project names
     that are not on this PC, left out)."""
@@ -663,7 +683,25 @@ def share(project, game="", progress=None, cancel=None):
         fps[p] = fingerprint(part_content(project, p, staged, changed_all))
     st["fp"] = fps
     save_state(project, st)
+    result["git"] = team_git.sync(team, me, "%s shared %s" % (
+        me, ", ".join(LABELS[p] for p in parts)))
     return result
+
+
+def check(project):
+    """The regular look at the team: a Git team folder is synced first (your Take and Let
+    go go out, the others' shares come in).  ``(news, git lines)``."""
+    st = load_state(project)
+    team, me = st.get("team"), st.get("me")
+    lines = []
+    if team and me and os.path.isdir(team) and team_git.LOCK.acquire(blocking=False):
+        try:                                 # (a Share or Get running syncs itself)
+            g = team_git.sync(team, me, "%s's parts" % me)
+        finally:
+            team_git.LOCK.release()
+        if g is not None:
+            lines = g["lines"]
+    return news(project), lines
 
 
 # ---------------------------------------------------------------------------------------------
@@ -742,6 +780,12 @@ def _import_text(project, edits):
 
 
 def receive(project, parts=None, progress=None, import_text=None):
+    """See :func:`_receive`; one at a time with the team's Git work."""
+    with team_git.LOCK:
+        return _receive(project, parts, progress, import_text)
+
+
+def _receive(project, parts=None, progress=None, import_text=None):
     """Take the parts other members own and have shared into *project*: each is put back
     as extracted, then the owner's records, files and edits go on.  *parts*: which (all
     with news when ``None``).  *import_text*: ``fn(project, edits)`` for the Text tab's
@@ -749,6 +793,7 @@ def receive(project, parts=None, progress=None, import_text=None):
     owner)], "waiting": [(owner, files on the way)], "lines": [str], "notes": [str]}``."""
     from . import replacement_export as rx
     st, team, me = _team_of(project)
+    g = team_git.sync(team, me, "%s's parts" % me)
     cards = members(team)
     own = owners(team, cards)
     if parts is None:
@@ -758,7 +803,7 @@ def receive(project, parts=None, progress=None, import_text=None):
         who = own.get(p)
         if who and who != me:
             by_owner.setdefault(who, []).append(p)
-    result = {"got": [], "waiting": [], "lines": [], "notes": []}
+    result = {"got": [], "waiting": [], "lines": [], "notes": list(g["lines"]) if g else []}
     ready = {}
     for who, ps in by_owner.items():
         rec, missing = _complete(team, who, cards[who])

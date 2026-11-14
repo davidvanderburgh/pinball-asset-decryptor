@@ -1653,9 +1653,9 @@ def intro_audio(src, out, ffmpeg, max_seconds=None):
 # :data:`PICKED_STILL_SECONDS`) and a sound (any audio file, or a video's sound); a Write makes the clip full-screen in the
 # video bank (:data:`PICKED_CLIP`, fitted whole like the intro) and the sound a sound of the card's own on the intro's
 # carrier, and the runtime plays both when the character is picked (pad_mode_runtime.c "PAD-1123"). With ``bonus`` on,
-# the build makes the game's own End of Ball Bonus loop again per character with its picture (or video) in a window to the
-# right of the bonus's words (:data:`BONUS_CLIP`), and the runtime plays the copy of the teammate up's character when the
-# game asks for its loop.
+# the build makes the game's own End of Ball Bonus loop again per character with its picture (or video) and its name on a
+# strip along the foot of the screen in the award card's look (:data:`BONUS_CLIP`, round 2; round 1 had a window right of
+# the bonus's words), and the runtime plays the copy of the teammate up's character when the game asks for its loop.
 #: a character's picked clip in the video bank (1-based)
 PICKED_CLIP = "PadCoopPicked%d"
 #: the project's files (their extension the source's)
@@ -1669,13 +1669,18 @@ PICKED_STILL_SECONDS = 3
 SOUND_EXTS = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus")
 #: a character's copy of the bonus loop in the video bank (1-based)
 BONUS_CLIP = "PadCoopBonus%d"
-#: the window on the glass (x, y, w, h), the portrait frame's shape: right of the bonus's summary (Godzilla LE 1.16,
-#: emulator census, a frame every 0.75 s: PLAYER 1 - the Insider name there when logged in -, TOTAL BONUS and TOTAL
-#: SCORE run x 425-940, y 140-665). The count's widest lines (GODZILLA POWERUP EARNED, x 135-1230) are drawn over the
-#: window's left part, outlined as always: no window this size clears them
-BONUS_WINDOW = (964, 236, 360, 290)
-#: its frame, glass pixels
-BONUS_BORDER = 5
+#: round 2 (the reporter: "put the Character image and their Character name at the BOTTOM of the screen ... Sort of like
+#: how it appears in the award ceremony"): the strip on the glass the character's photo and name go on, centred along
+#: the foot of the screen. Godzilla LE 1.16, emulator census, a frame every 0.75 s: the bonus's words end at y 665 (its
+#: summary, PLAYER - the Insider name there when logged in - / TOTAL BONUS / TOTAL SCORE, x 425-940 y 140-665; the
+#: count's lines higher up) and the game draws nothing below them, no score panel. Its top and height, glass pixels:
+BONUS_STRIP_Y, BONUS_STRIP_H = 672, 90
+#: its width's least and most: it fits the name
+BONUS_STRIP_W = (420, 1100)
+#: the photo's slot on the strip (x, y, w, h, the strip's glass pixels): the left end, a 4:3 frame
+BONUS_PHOTO = (10, 9, 96, 72)
+#: the name's largest and least size (glass pixels)
+BONUS_NAME_PX = (60, 30)
 
 
 def picked_clip_path(project, character):
@@ -1855,46 +1860,115 @@ def bonus_loop(bank_data, bank=None):
     return got[0], "SquareCrop" if "SquareCrop" in labels else "Normal"
 
 
-def bonus_box(transform, w, h):
-    """:data:`BONUS_WINDOW` (on the glass) in the loop's own pixels on a clip of w x h, through the crop's
-    *transform* (:func:`.video_bank.crop_transform`'s 16 floats; None: Normal): ``(x, y, width, height)``, even. The
-    clip is stretched over the :data:`GLASS`, then the crop scales and moves it."""
+def bonus_strip(name):
+    """The strip for a character called *name* on the glass, ``(x, y, w, h)``, x and w even: as wide as its photo and name
+    need (within :data:`BONUS_STRIP_W`), centred, at :data:`BONUS_STRIP_Y`."""
+    from PIL import Image, ImageDraw
+    text = str(name or "?")
+    d = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+    lead = BONUS_PHOTO[0] + BONUS_PHOTO[2] + 22                 # the photo, then the name
+    f = _fit(d, text, _DISPLAY_FONTS, BONUS_STRIP_W[1] - lead - 34, BONUS_NAME_PX[0], BONUS_NAME_PX[1])
+    w = max(BONUS_STRIP_W[0], min(BONUS_STRIP_W[1], lead + int(d.textlength(text, font=f)) + 34 + 48))  # + the rule
+    w += -w % 4                                                  # centred on an even x
+    return ((GLASS[0] - w) // 2, BONUS_STRIP_Y, w, BONUS_STRIP_H)
+
+
+def bonus_box(transform, w, h, rect=None):
+    """*rect* on the glass (default: a short name's :func:`bonus_strip`) in the loop's own pixels on a clip of w x h,
+    through the crop's *transform* (:func:`.video_bank.crop_transform`'s 16 floats; None: Normal): ``(x, y, width,
+    height)``, even. The clip is stretched over the :data:`GLASS`, then the crop scales and moves it."""
     sx, sy, tx, ty = (transform[0], transform[5], transform[12], transform[13]) if transform else (1.0, 1.0, 0.0, 0.0)
     ev = lambda v: int(round(v / 2.0)) * 2                                    # noqa: E731
-    gx, gy, gw, gh = BONUS_WINDOW
+    gx, gy, gw, gh = rect or bonus_strip("")
     kx, ky = w / GLASS[0], h / GLASS[1]
     return (ev((gx - tx) / sx * kx), ev((gy - ty) / sy * ky), max(2, ev(gw / sx * kx)), max(2, ev(gh / sy * ky)))
 
 
-def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400", seconds=None, size=(1360, 768)):
+def bonus_card(name, colour="#ffb400", theme=None, picture="", project="", scale=2):
+    """The strip as an RGBA PIL image, :func:`bonus_strip`'s size in glass pixels: the award card's look (its body,
+    a lit frame in *colour*) with *picture* (a still's path) in the photo slot - without one the slot is left clear,
+    for a video under it - and *name* big beside it on the theme's rules."""
+    from PIL import Image, ImageDraw, ImageFilter
+    th = theme_of(theme)
+    acc = clean_colour(colour) or th["accent"]
+    A, A2 = _hex(acc), _hex(th["accent2"])
+    S = scale
+    gw = bonus_strip(name)[2]
+    W, H = gw * S, BONUS_STRIP_H * S
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=16 * S, fill=255)
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    img.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
+    img.paste(_body(project, th, W, H, S), (0, 0), mask)
+    img = _glow(img, (3 * S, 3 * S, W - 4 * S, H - 4 * S), 15 * S, A[:3] + (200,), 4 * S, 3 * S)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((2 * S, 2 * S, W - 3 * S, H - 3 * S), radius=15 * S, outline=A[:3] + (255,), width=2 * S)
+    px, py, pw, ph = (v * S for v in BONUS_PHOTO)
+    img = _glow(img, (px - 2 * S, py - 2 * S, px + pw + 2 * S, py + ph + 2 * S), 9 * S, A[:3] + (230,), 4 * S, 3 * S)
+    pm = Image.new("L", (pw, ph), 0)
+    ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=8 * S, fill=255)
+    if picture:
+        with Image.open(picture) as im:
+            photo = _cover(im.convert("RGBA"), pw, ph)
+        img.paste(Image.alpha_composite(Image.new("RGBA", (pw, ph), (0, 0, 0, 255)), photo), (px, py), pm)
+    else:                                                       # the video goes under it
+        img.paste(Image.new("RGBA", (pw, ph), (0, 0, 0, 0)), (px, py), pm)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=8 * S, outline=A[:3] + (255,), width=2 * S)
+    text = str(name or "?")
+    ix = px + pw + 22 * S
+    iw = W - ix - 34 * S
+    nf = _fit(d, text, _DISPLAY_FONTS, iw, BONUS_NAME_PX[0] * S, BONUS_NAME_PX[1] * S)
+    by = 58 * S
+    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).text((ix + 3 * S, by + 4 * S), text, font=nf, fill=(0, 0, 0, 220), anchor="ls")
+    img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(3 * S)))
+    d = ImageDraw.Draw(img)
+    d.text((ix, by), text, font=nf, fill=_hex(th["name"]), anchor="ls", stroke_width=max(1, S),
+           stroke_fill=(0, 0, 0, 255))
+    nw = min(iw - 40 * S, d.textlength(text, font=nf))
+    d.rectangle((ix, 68 * S, ix + nw, 73 * S), fill=A[:3] + (255,))
+    d.rectangle((ix + nw + 8 * S, 68 * S, ix + nw + 40 * S, 73 * S), fill=A2[:3] + (255,))
+    return img.resize((gw, BONUS_STRIP_H), Image.LANCZOS)
+
+
+def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400", seconds=None, size=(1360, 768),
+               name="", theme=None, project=""):
     """The game's bonus loop *loop_src* (at *size*, the bank's clip frame: an owner's replacement of another size is
-    scaled to it first) made again at *out* with a character's *video* (looped) or *picture* in a window at *box* (the
-    loop's pixels, :func:`bonus_box`), framed in *colour*, as long as the loop (or *seconds*), 30 fps, silent."""
+    scaled to it first) made again at *out* with a character's strip (:func:`bonus_card`: its *picture*, or its
+    *video* looped in the photo slot, and its *name*, framed in *colour*) over *box* (the loop's pixels: :func:`bonus_box`
+    of the name's :func:`bonus_strip`), as long as the loop (or *seconds*), 30 fps, silent."""
     import os
     from . import mode_assets as MA
     x, y, bw, bh = box
-    b = max(2, int(round(BONUS_BORDER * bw / BONUS_WINDOW[2])))
-    head, tail = MA._encode_args(ffmpeg, out)
-    if video:
-        src = ["-stream_loop", "-1", "-i", video]
-    elif picture:
-        still = _clean_still(picture, out)
-        src = ["-loop", "1", "-framerate", str(MA.FPS), "-i", still]
-    else:
-        raise CoopError("a bonus window needs the character's picture or video")
-    col = "0x" + clean_colour(colour).lstrip("#") if clean_colour(colour) else "0xffb400"
-    fc = ("[1:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1,fps=%d[w];"
-          "[0:v]scale=%d:%d,setsar=1,fps=%d,drawbox=x=%d:y=%d:w=%d:h=%d:color=%s:t=fill[b];"
-          "[b][w]overlay=%d:%d:shortest=0:eof_action=repeat,format=yuv420p[v]"
-          % (bw, bh, bw, bh, MA.FPS, size[0], size[1], MA.FPS, x - b, y - b, bw + 2 * b, bh + 2 * b, col, x, y))
-    t = seconds or media_seconds(loop_src, ffmpeg) or 8.0
-    cmd = head + ["-i", loop_src] + src + ["-filter_complex", fc, "-map", "[v]", "-t", "%.3f" % t] + tail
+    if not (video or picture):
+        raise CoopError("a bonus strip needs the character's picture or video")
+    still = "" if video else _clean_still(picture, out)
+    card_png = out + ".card.png"
     try:
-        r = _ffmpeg_run(cmd, "the bonus window's clip of %s" % os.path.basename(video or picture))
+        card = bonus_card(name, colour, theme, picture=still, project=project)
+        kx, ky = bw / float(card.width), bh / float(card.height)
+        card.resize((bw, bh)).save(card_png)
+        sx, sy = x + int(round(BONUS_PHOTO[0] * kx)), y + int(round(BONUS_PHOTO[1] * ky))
+        sw, sh = max(2, int(BONUS_PHOTO[2] * kx) // 2 * 2), max(2, int(BONUS_PHOTO[3] * ky) // 2 * 2)
+        ins = ["-i", loop_src, "-loop", "1", "-framerate", str(MA.FPS), "-i", card_png]
+        fc = "[0:v]scale=%d:%d,setsar=1,fps=%d[b];" % (size[0], size[1], MA.FPS)
+        under = "[b]"
+        if video:                                               # the video in the slot, the strip over it
+            ins += ["-stream_loop", "-1", "-i", video]
+            fc += ("[2:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1,fps=%d[w];"
+                   "[b][w]overlay=%d:%d:shortest=0:eof_action=repeat[bv];" % (sw, sh, sw, sh, MA.FPS, sx, sy))
+            under = "[bv]"
+        fc += "[1:v]format=rgba[c];%s[c]overlay=%d:%d,format=yuv420p[v]" % (under, x, y)
+        head, tail = MA._encode_args(ffmpeg, out)
+        t = seconds or media_seconds(loop_src, ffmpeg) or 8.0
+        cmd = head + ins + ["-filter_complex", fc, "-map", "[v]", "-t", "%.3f" % t] + tail
+        r = _ffmpeg_run(cmd, "the bonus strip's clip of %s" % os.path.basename(video or picture))
     finally:
-        _drop(src[-1] if picture and not video else "")
+        _drop(still)
+        _drop(card_png)
     if r.returncode != 0:
-        raise CoopError("ffmpeg could not make the bonus window's clip: %s" % (r.stderr or "").strip()[-300:])
+        raise CoopError("ffmpeg could not make the bonus strip's clip: %s" % (r.stderr or "").strip()[-300:])
     return out
 
 

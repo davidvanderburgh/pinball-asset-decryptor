@@ -1548,9 +1548,9 @@ def coop_picked_into(result, stock_bank, scratch, ffmpeg=None, progress=None):
 
 
 def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, progress=None):
-    """PAD-1123: the game's End of Ball Bonus loop made again for each co-op character with its picture or video in a
-    window right of the bonus's words (coop_play.bonus_clip), added to the bank scene the build has so far. The loop is
-    the project's own file of it (the stock one extracted, or the owner's replacement) or else the card's. Returns
+    """PAD-1123: the game's End of Ball Bonus loop made again for each co-op character with its picture (or video) and
+    name on a strip at the foot of the screen (coop_play.bonus_clip), added to the bank scene the build has so far. The
+    loop is the project's own file of it (the stock one extracted, or the owner's replacement) or else the card's. Returns
     ``(the game's loop name, [(character number, clip name)])`` for coop.cfg's ``bonus_loop`` / ``char_bonus`` lines,
     or None when the characters' bonus is off, or the bank has no bonus loop (one line says so)."""
     from . import clip_variants as CV
@@ -1593,7 +1593,7 @@ def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, pr
             f.write(blob)
     ffmpeg = _ffmpeg_for(ffmpeg, "the co-op characters on the bonus")
     w, h = VB.clip_frame(stock_bank, stock)
-    box = CP.bonus_box(VB.crop_transform(stock_bank, crop, stock), w, h)
+    transform = VB.crop_transform(stock_bank, crop, stock)
     chars = CP.load_characters(project)
     theme = CP.theme_of(chars.get("theme"))
     seconds = CP.media_seconds(src, ffmpeg) or None
@@ -1602,9 +1602,12 @@ def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, pr
         if progress is not None:
             progress(k, len(got), "Putting the co-op characters on the bonus (%d of %d)..." % (k + 1, len(got)))
         made = os.path.join(folder, "%s.mp4" % name)
+        who = chars["list"][i]["name"]
+        box = CP.bonus_box(transform, w, h, CP.bonus_strip(who))     # round 2: a strip at the foot, its photo + name
         try:
             CP.bonus_clip(src, made, box, ffmpeg, picture=pic, video=vid, size=(w, h), seconds=seconds,
-                          colour=chars["list"][i].get("colour") or theme["accent"])
+                          colour=chars["list"][i].get("colour") or theme["accent"], name=who,
+                          theme=chars.get("theme"), project=project)
         except CP.CoopError as e:
             raise ModeWriteError(str(e)) from None
         try:
@@ -1615,7 +1618,7 @@ def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, pr
         result.new.append((assets + added["path"], made))
         out.append((i + 1, name))
     _coop_bank_put(result, scratch, bank_card, bank, bank_src)
-    result.lines.append("co-op characters: on their teammate's End of Ball Bonus (%s, a window right of its words) "
+    result.lines.append("co-op characters: on their teammate's End of Ball Bonus (%s, its photo and name on a strip at the foot) "
                         "for %s" % (loop_name, ", ".join(chars["list"][n - 1]["name"] for n, _name in out)))
     return loop_name, out
 

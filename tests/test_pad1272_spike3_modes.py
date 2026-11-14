@@ -230,7 +230,7 @@ def test_the_plan_is_mode_writes_own_with_the_64_bit_runtime(gates, monkeypatch,
     monkeypatch.setattr(MW, "p2_payload", payload)
     mp = S3M.plan("proj", _Reader(_stock_tree()), str(tmp_path))
     assert seen["arch"] == "a64" and seen["code_ok"] is False
-    assert seen["own_sounds"] == () and seen["end_sound"] is None
+    assert list(seen["own_sounds"]) == [] and seen["end_sound"] is None     # PAD-1296: no profile, no carriers
     assert seen["elf"].startswith(b"\x7fELF\x02")       # the card's own 64-bit program
     assert mp.jobs == [("pokemon_le/assets/lcd/auto_loaded/h/scene.radium", "/s/hud")]
     assert [(n, m) for n, _p, m in mp.files()] == [("mode.so", 0o755), ("mode.cfg", 0o644),

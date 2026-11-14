@@ -127,6 +127,33 @@ LOG=$SD/run.log
 [ "$FRESH" = 1 ] && rm -rf "$SD"
 mkdir -p "$SD"
 echo "[s3run] card tree $TREE, slot $SLOT ($SD)"
+# PAD-1296: TRY IT'S OWN SOUNDS. A mode's own sounds are records appended to the card's image.bin
+# (plugins/stern/spike3_modes.py); Try it hands them over as a patch in its mode files,
+# $PAD_S3_MODE_FILES/games.patch/patches: one "<path in /games>|<cut>|<head>|<tail>" line per file -
+# the card's file cut at <cut>, then <tail>, its first 0x80 bytes <head>. It is built here in the
+# slot's /games overlay from the store's copy (a local copy, not 1 GB over 9p), and taken away
+# again at the next run's start (games.patched), so a later run sees the card's own file.
+if [ -f "$SD/games.patched" ]; then
+    while IFS= read -r f; do [ -n "$f" ] && rm -f "$SD/games.up/$f"; done < "$SD/games.patched"
+    rm -f "$SD/games.patched"
+fi
+GPATCH=${PAD_S3_MODE_FILES:+$PAD_S3_MODE_FILES/games.patch}
+if [ -n "${PAD_S3_MODE_SO:-}" ] && [ -n "$GPATCH" ] && [ -f "$GPATCH/patches" ]; then
+    while IFS='|' read -r rel cut head tail; do
+        case "$rel" in ""|/*|*..*) continue ;; esac
+        case "$cut" in ""|*[!0-9]*) continue ;; esac
+        dst=$SD/games.up/$rel
+        mkdir -p "$(dirname "$dst")"
+        if cp "$TREE/games/$rel" "$dst" && truncate -s "$cut" "$dst" && cat "$GPATCH/$tail" >> "$dst" \
+                && dd if="$GPATCH/$head" of="$dst" conv=notrunc status=none; then
+            echo "$rel" >> "$SD/games.patched"
+            echo "[s3run] /games/$rel: the modes' own sounds added ($(stat -c %s "$dst") bytes)"
+        else
+            rm -f "$dst"
+            echo "[s3run] /games/$rel: the modes' own sounds could NOT be added; the card's own file runs" >&2
+        fi
+    done < "$GPATCH/patches"
+fi
 
 # PAD_S3_PIVOT=1: a CHECKPOINTABLE run (PAD-1147, save states). criu cannot
 # dump a chroot'd task ("The root task has another root than mntns"), nor one
@@ -544,7 +571,7 @@ if [ -n "${PAD_S3_MODE_SO:-}" ]; then
     mkdir -p "$R/usr/lib/pad"; cp "$PAD_S3_MODE_SO" "$R/usr/lib/pad/padmode.so"
     PRELOAD="${PRELOAD:+$PRELOAD:}/usr/lib/pad/padmode.so"
     if [ -n "${PAD_S3_MODE_FILES:-}" ] && [ -d "$PAD_S3_MODE_FILES" ]; then
-        cp "$PAD_S3_MODE_FILES"/* "$R/connectivity/dump/"
+        find "$PAD_S3_MODE_FILES" -maxdepth 1 -type f -exec cp {} "$R/connectivity/dump/" \;
         chmod 666 "$R/connectivity/dump"/* 2>/dev/null
     fi
     echo "[s3run] mode: $PAD_S3_MODE_SO preloaded, files from ${PAD_S3_MODE_FILES:-(none)} in /dump"

@@ -18,10 +18,12 @@ the game with ``exec``, so game_monitor reads the game's own code, exactly as Sp
 multi-boot's ``padselect.sh`` does from the same link. The runtime reads its files from
 ``PM_CARD_DIR`` (pad_mode.h: ``/games/pad/padmode/`` on aarch64) and logs to /dump.
 
-What a Spike 3 build carries: the modes made in the form, on the game's own sounds. The
-Spike 2 parts of a build stay Spike 2's: code modes (compiled for its 32-bit ARM), a mode's
-own sounds and end sound (carriers in Spike 2's sound bank), and the rest of the family
-(co-op, handicap, attract items ...), which the engine leaves out on a Spike 3 volume.
+What a Spike 3 build carries: the modes made in the form, with their own start, shot and end
+sounds and music where the title's carriers are known (PAD-1296, :func:`own_sounds`: each sound
+a record appended to the card's ``image.bin``, swapped in on a carrier while the mode plays it).
+The Spike 2 parts of a build stay Spike 2's: code modes (compiled for its 32-bit ARM), and the
+rest of the family (co-op, handicap, attract items ...), which the engine leaves out on a Spike
+3 volume.
 
 The build itself is :func:`.mode_write.plan` - the same port lookup (64-bit programs
 read too), the same mode files, and the screens and clips built into the title's own
@@ -30,6 +32,7 @@ scenes, which a Spike 3 card carries as Spike 2's asset tree does - so a title's
 """
 import os
 import shlex
+import struct
 
 from . import mode_project as MP
 from . import mode_write as MW
@@ -109,11 +112,14 @@ def game_program(reader, target):
 class Spike3ModePlan:
     """What a Spike 3 Write puts on the card for the project's modes."""
 
-    def __init__(self, result, payload, names, lines):
+    def __init__(self, result, payload, names, lines, sound_adds=None):
         self.result = result            # mode_write.ModePlan
         self.payload = payload          # mode_write.p2_payload's dict, mode.so the 64-bit one
         self.names = names              # the modes' names
         self.lines = lines              # what the build says of them
+        #: PAD-1296: ``{container card path: [spike3_write.NewRecord]}`` - the modes' own sounds,
+        #: appended to the game's image.bin (spike3_write.plan_sounds ``adds``)
+        self.sound_adds = sound_adds or {}
         # the title's scenes the modes' screens and clips rewrite, and any new file: whole
         self.jobs = [(rel.lstrip("/"), src) for rel, src in
                      list(result.replaced) + list(result.new)]
@@ -128,7 +134,151 @@ class Spike3ModePlan:
         return out
 
 
-def plan(project, reader, scratch, log=None, real_card=True):
+class _NodeFile:
+    """A read-only file over the volume file *node* (what :func:`.spike3_requests.sound_parts`
+    reads: the header, the descriptor block and the directory, never the bodies)."""
+
+    def __init__(self, reader, node):
+        self.reader, self.node, self.pos = reader, node, 0
+
+    def seek(self, off, whence=0):
+        self.pos = off if whence == 0 else (self.node["size"] + off if whence == 2 else self.pos + off)
+        return self.pos
+
+    def read(self, n):
+        n = max(0, min(n, self.node["size"] - self.pos))
+        b = bytes(self.reader.read_range(self.node, self.pos, n)) if n else b""
+        self.pos += len(b)
+        return b
+
+
+def _wav_ms(path, channels):
+    from . import mode_sounds as MS
+    ms = MS.sound_ms(path)
+    if ms:
+        return ms
+    from . import spike3_write
+    import math
+
+    class _R:
+        pass
+    r = _R()
+    r.channels = channels
+    n = len(spike3_write._pcm(path, r, spike3_write._np()))
+    return int(math.ceil(n * 1000.0 / 44100)) if n else 0
+
+
+def own_sounds(project, modes, reader, game_raw, prof, log=None):
+    """PAD-1296: a Spike 3 card's own sounds for *modes*: ``(used, adds)``.
+
+    The sounds :func:`.mode_write.choose_own_sounds` picks (start, shot and music, and the end
+    sound: a Spike 3 build always carries it, :func:`.mode_write.end_on_carrier`) each go on the
+    card as a record of their own appended to the game's ``image.bin``, keyed beside its carrier's
+    record (:func:`.spike3_write.free_key`), and the mode swaps the carrier's key for it while it
+    plays (``swap <request> <stock key> <our key>``, the item 163 route; pad_mode_runtime.c's
+    lookup hook takes the 64-bit find's key). A carrier is a request of the build the game never
+    plays (:data:`.mode_sounds.TITLES_A64`); its stock key is the record its first sound id's
+    descriptor names. *used* is the engine's carried list for :func:`.mode_write.plan`
+    (``slug``, ``key``, ``request``, ``ms``, ``stock_key``, ``our_key``); *adds* is
+    ``{container card path: [NewRecord]}`` for :func:`.spike3_write.plan_sounds`. A sound that
+    cannot be carried is left out with its reason in the log; the mode plays the game's own."""
+    log = log or (lambda *a, **k: None)
+    from . import mode_sounds as MS
+    from . import spike3_requests as Q
+    from . import spike3_write as W
+    from .info import container_counts
+    wanted = MW.choose_own_sounds(project, modes, (True, ""), end_sound=None, log=log)
+    if not wanted:
+        return [], {}
+    conts = W.project_sound_dirs(reader)
+    if not conts:
+        log("Modes: the modes' own sounds are not put on this card: it has no sound container.",
+            "warning")
+        return [], {}
+    card_path, node = conts[0][0], conts[0][1]
+    _hdr, img = W.read_container(reader, node)
+    f = _NodeFile(reader, node)
+    fragments, _count = container_counts(f.read(0x100))
+    try:
+        lists = Q.request_table(Q.Program(bytes(game_raw)), fragments)
+    except ValueError:
+        lists = []
+    parts = Q.sound_parts(f) if lists else {}
+    if not lists or not parts:
+        log("Modes: the modes' own sounds are not put on this card: its sound requests could not "
+            "be read off the game program and %s." % card_path, "warning")
+        return [], {}
+
+    def stock_record(request):
+        sids = lists[request] if 0 < request < len(lists) else []
+        idx = (parts.get(sids[0]) or [None])[0] if sids else None
+        return img.records[idx] if idx is not None and idx < img.count else None
+
+    used, adds, taken, p2s = [], [], [], []
+    mine = {}                           # slug -> carriers this mode already took (distinct within one)
+    for e in wanted:
+        cands = list(e.get("candidates") or [e["request"]])
+        cands = [r for r in cands if r not in mine.get(e["slug"], ())] or cands
+        rec, req = None, 0
+        for r in cands:
+            rec = stock_record(int(r))
+            if rec is not None:
+                req = int(r)
+                break
+        if rec is None:
+            log("Modes: %s's %s is not put on this card: none of %s's carriers (%s) names a "
+                "recording of %s." % (e["name"], MW.SOUND_WORDS[e["key"]], prof.label,
+                                      ", ".join(str(r) for r in cands), card_path), "warning")
+            continue
+        flags, param = W.free_key(img.records, rec.flags_lo, rec.param, taken)
+        taken.append((flags, param))
+        p2 = W.free_param2(img.records, ("%s|%s|%d" % (e["slug"], e["key"], req)).encode(), p2s)
+        p2s.append(p2)
+        nr = W.NewRecord(e["wav"], rec.channels, flags, param, p2)
+        adds.append(nr)
+        mine.setdefault(e["slug"], []).append(req)
+        u = {"slug": e["slug"], "name": e["name"], "key": e["key"], "request": req,
+             "wav": e["wav"], "music": e["key"] == "music",
+             "stock_key": struct.pack("<II", rec.flags_lo, rec.param).hex(),
+             "our_key": nr.key.hex(), "idx": img.count + len(adds) - 1}
+        if e["key"] != "music":
+            u["ms"] = _wav_ms(e["wav"], rec.channels)
+        used.append(u)
+    for u in used:
+        log("Modes: %s's own %s rides request %d (its record %d, appended to %s)."
+            % (u["name"], MW.SOUND_WORDS[u["key"]], u["request"], u["idx"], card_path), "info")
+    return used, ({card_path: adds} if adds else {})
+
+
+#: Try it's image.bin patches, in its mode files folder (s3run.sh applies them in the rig slot)
+GAMES_PATCH = "games.patch"
+
+
+def stage_try_it_sounds(reader, mplan, files_dir):
+    """PAD-1296: the modes' own sounds of *mplan* for Try it on the Spike 3 rig: each container
+    they go into as a patch of the card's own file (:func:`.spike3_write.stage_tail`) in
+    ``<files_dir>/games.patch``, with its ``patches`` list (``<path in /games>|<cut>|<head>|<tail>``)
+    that s3run.sh builds the slot's file from. Returns the number of containers (0: nothing)."""
+    from . import spike3_write as W
+    if not mplan.sound_adds:
+        return 0
+    out = os.path.join(files_dir, GAMES_PATCH)
+    os.makedirs(out, exist_ok=True)
+    nodes = {p: n for p, n, _f, _s in W.project_sound_dirs(reader)}
+    lines = []
+    for k, (card_path, adds) in enumerate(sorted(mplan.sound_adds.items())):
+        node = nodes.get(card_path)
+        if node is None:
+            raise MW.ModeWriteError("the card has no %s for the modes' own sounds" % card_path)
+        cut, head, tail = W.stage_tail(reader, node, adds, out, "c%d" % k)
+        lines.append("%s|%d|%s|%s" % (card_path.lstrip("/"), cut, os.path.basename(head),
+                                      os.path.basename(tail)))
+    with open(os.path.join(out, "patches"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return len(lines)
+
+
+def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")):
     """The project's modes for the Spike 3 games volume *reader*, built into *scratch*, or
     None when it has none this card can carry (each reason said in the log, as a Spike 2
     Write leaves modes out: the rest of the project is still written). Raises
@@ -175,9 +325,15 @@ def plan(project, reader, scratch, log=None, real_card=True):
     def scene(rel):
         node = MW.lookup(reader, rel) if rel else None
         return bytes(reader.read_file_bytes(node)) if node is not None else b""
-    result = MW.plan(project, scene(hud_rel), scene(bank_rel), bytes(reader.read_file_bytes(fw)),
+    game_raw = bytes(reader.read_file_bytes(fw))
+    used, adds = [], {}
+    if prof is not None and sound_ok[0]:
+        used, adds = own_sounds(project, modes, reader, game_raw, prof, log)
+    elif prof is not None:
+        MW.choose_own_sounds(project, modes, sound_ok, log=log)       # says they are left out, and why
+    result = MW.plan(project, scene(hud_rel), scene(bank_rel), game_raw,
                      os.path.join(scratch, "modes"), sound_ok=(False, "a Spike 3 card"), log=log,
-                     end_sound=None, own_sounds=(), code_ok=False)
+                     end_sound=None, own_sounds=used, code_ok=False)
     if result is None:
         return None
     payload = MW.p2_payload(result, os.path.join(scratch, "modes", "padmode"), project=project,
@@ -186,7 +342,7 @@ def plan(project, reader, scratch, log=None, real_card=True):
     # describe() names Spike 2's place for the mode files; this card's is the games partition
     lines = [l.replace("on the system partition", "in /games/" + MODE_DIR)
              for l in result.lines]
-    return Spike3ModePlan(result, payload, names, lines)
+    return Spike3ModePlan(result, payload, names, lines, sound_adds=adds)
 
 
 def install_body(files, to_exec):

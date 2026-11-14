@@ -3323,8 +3323,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import mode_sounds as MS
         if p is None:
             return ""
-        game, version = MS.title_version(p.key)
-        if game and MS.carriers(game, version) is not None:
+        if MS.profile_carriers(p.key) is not None:
             return ""
         return ("the app has not found spare sounds on %s to carry a mode's own start sound, "
                 "shot sound and music, so they cannot be picked here." % p.label)
@@ -3336,11 +3335,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import mode_sounds as MS
         if p is None:
             return ""
-        game, version = MS.title_version(p.key)
-        c = MS.carriers(game, version)
+        c = MS.profile_carriers(p.key)
         if c is None or c.music:
             return ""
-        if MP.own_music_none(game, version):            # PAD-479: a game limit
+        if MP.own_music_none(p.game_dir, p.version, p.arch):            # PAD-479: a game limit
             return ("every piece of music on %s is one the game itself plays, so none is spare to carry a "
                     "mode's own music, and the game's music plays on under the mode." % p.label)
         return ("the app has not found a stock tune on %s to carry a mode's own music, so it "

@@ -891,8 +891,17 @@ static void own_calls_tick(void)
         } else if (got < 0) {
             own_calls[i].request = 0;
         } else if (now >= own_calls[i].deadline) {
-            pm_log("own sound: %s %u NOT played - the game's own speech held the voice bus", own_calls[i].what,
-                   own_calls[i].request);
+            /* PAD-1296: say what held it (request, its priority, the channel's bus) */
+            unsigned reqs[8], buses[8];
+            char held[96];
+            int n = pm_sound_playing(reqs, buses, 8), k, at = 0;
+            held[0] = 0;
+            for (k = 0; k < n && k < 8 && at < (int)sizeof held - 24; k++)
+                if ((buses[k] & BUS_VOICE) && reqs[k] != own_calls[i].request)
+                    at += pm_snprintf(held + at, sizeof held - (unsigned)at, " %u (priority %d, bus %02x)", reqs[k],
+                                   request_prio(reqs[k]), buses[k]);
+            pm_log("own sound: %s %u NOT played - the game's own speech held the voice bus:%s", own_calls[i].what,
+                   own_calls[i].request, held[0] ? held : " (nothing playing now)");
             own_calls[i].request = 0;
         } else {
             own_calls[i].due = now + 70;

@@ -15,6 +15,10 @@
 # after the save ended the mode with the ball; the control with no save (slot 65) ended on its first drain, 5.9 s in.
 # Multiball emulator-proven 2026-11-15 (PAD-1288, slot 66): `multiball 3 10` through the game's serve, 2 more balls
 # ejected to 3 in play, 3 shots (+6,000,000), its 40 s clock, drains 3 -> 2 -> 1 and the multiball handed back.
+# Switch edges (PAD-1322's 64-bit source, carried at the merge with main) emulator-proven 2026-11-15 (PAD-1288,
+# slots 63/64, this build's mode64.so): switch_edge 0x71b8b4 hooked in the drain's loop; with it the clock run above gave
+# the same result (6 shots, +21,000,000, ended on its 25 s clock); PROOF=edge with `value switch_edge_log 400` logged the
+# flipper buttons (24, 25) in attract, the Right slingshot (23, no handler bits) and every Junk target hit in play.
 # Not carried: the game's own mode flags (Star Wars ELG's mode books), held coils (no coil_take counterpart), lamps,
 # shows, screens and clips - this title's own work.
 
@@ -95,6 +99,14 @@ site coil_fire        0x009022c0 0x72003c00 0x12001c21
 # not carried (coil_take has no counterpart, armed only together): site coil_give        0x0046e780 0xa9bf7bf3 0xaa0003f3
 #   lamp_free_owner: 0x236ca0 + 0x90 lined up in its pair 0x901410 (100% alike)
 site lamp_free_owner  0x009014a0 0xa9bf7bf3 0xaa0003f3
+#   switch_edge: the 64-bit drain's per-edge point - every switch edge passes it after its level is written, before its handler bits are read (PAD-1322)
+site switch_edge      0x0071b8b4 0xf9400a78 0x79405f1c
+value switch_record_reg         19    # read off the drain's own code (PAD-1322)
+value switch_id_at              0x20    # read off the drain's own code (PAD-1322)
+value switch_level_at           0x28    # read off the drain's own code (PAD-1322)
+value switch_desc_via           0x10    # read off the drain's own code (PAD-1322)
+value switch_flags_at           0x2e    # read off the drain's own code (PAD-1322)
+value switch_polarity_at        0x30    # read off the drain's own code (PAD-1322)
 
 # ---- globals: data <name> <address> ----
 data cur_player             0x065c1a8e   # 10 of 10 lined-up instructions

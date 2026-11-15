@@ -94,6 +94,14 @@ site coil_fire        0x0045a0f0 0x72003c00 0x12001c21
 # site coil_give        NOT PLACED: no counterpart found
 #   lamp_free_owner: 0x236ca0 + 0x90 lined up in its pair 0x3ca470 (100% alike)
 site lamp_free_owner  0x003ca500 0xa9bf7bf3 0xaa0003f3
+#   switch_edge: the 64-bit drain's per-edge point - every switch edge passes it after its level is written, before its handler bits are read (PAD-1322)
+site switch_edge      0x002c6c94 0xf9400a78 0x79405f1c
+value switch_record_reg         19    # read off the drain's own code (PAD-1322)
+value switch_id_at              0x20    # read off the drain's own code (PAD-1322)
+value switch_level_at           0x28    # read off the drain's own code (PAD-1322)
+value switch_desc_via           0x10    # read off the drain's own code (PAD-1322)
+value switch_flags_at           0x2e    # read off the drain's own code (PAD-1322)
+value switch_polarity_at        0x30    # read off the drain's own code (PAD-1322)
 
 # ---- globals: data <name> <address> ----
 data cur_player             0x007b8f10   # 10 of 10 lined-up instructions

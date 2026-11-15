@@ -16521,11 +16521,18 @@ static void on_switch_edge(pm_reg *r)
 
 /* The switch_edge site's tables, checked against the process's mappings (read at the gate: the game's
  * own globals are mapped by then). 0 with *why when the port lacks one or one is not mapped. */
+#if PM_A64
+static int edge64_arm(const char **why);
+#endif
 static int edge_arm(const char **why)
 {
     struct site *d = site("switch_drain");
     static const char *const need[] = { "switch_drain_size", "switch_record_size", "switch_level_at",
                                         "switch_flags_at", "switch_polarity_at", 0 };
+#if PM_A64
+    (void)d; (void)need;
+    return edge64_arm(why);
+#endif
     edge.records = data("switch_records");
     edge.count = data("switch_count");
     edge.mode_mask = data("mode_mask");
@@ -16548,6 +16555,124 @@ static int edge_arm(const char **why)
     return 1;
 }
 
+#if PM_A64
+/* ---- PAD-1322: the switch edges on Spike 3 ----------------------------------------------------------------------
+ * Spike 3's 64-bit drain makes no per-switch call: it takes the list of switch records the node boards' reader queued
+ * (Star Wars ELG 1.10: 0x3085c0, the list's head at its state + 88) and, for each, writes the edge's level into the
+ * record and then, by the descriptor's handler bits and the mode mask, runs the switch's handler and calls switch_hit /
+ * switch_hit2 itself. The port's `site switch_edge` is therefore a point INSIDE the drain's loop that every edge passes
+ * after the level is written and before the handler bits are read (ELG: 0x308684, `ldr x24, [x19, #16]`), hooked with
+ * hook_callee, whose logger reads the record from the register the loop keeps it in:
+ *   value switch_record_reg <n>       the record's register there (x19 on ELG; 0..8 or 19..28)
+ *   value switch_id_at <offset>       the record's u16 switch id (0x20)
+ *   value switch_level_at <offset>    its level byte, the edge's new level (0x28)
+ *   value switch_desc_via <offset>    its pointer to the switch's descriptor (0x10)
+ *   value switch_flags_at <offset>    the descriptor's u16 handler bits: 0x400 = on the level-0 edge, 0x800 = the
+ *                                     level-1 edge (0x2e)
+ *   value switch_polarity_at <offset> the descriptor's u16 whose bit 2 says the switch is active high (0x30)
+ *   data  mode_mask                   the u16 the drain tests before a handler, as on Spike 2
+ * A hit is Spike 2's rule (edge_is_hit) and the consumers are the same (the shots, PAD-641's attract buttons, PAD-945's
+ * shot sounds, co-op's picks). There is no drain / return-address test: the site is only ever reached in the drain.
+ * Each switch's record is remembered as its edges pass, so switch_held reads a button's level byte live, as Spike 2's
+ * does from its table. PAD-1051's hiding stays Spike 2's (it is traced on that generation's 32-bit tables). */
+static struct { pm_addr mask; long reg, id_at, level_at, desc_via, flags_at, polarity_at; } edge64;
+static volatile pm_addr edge64_rec[N_SWITCH_IDS];   /* each switch's record, as its edges passed */
+
+static void on_switch_edge64(pm_reg *r, pm_reg *x)
+{
+    static volatile int said, bad;
+    pm_addr rec, desc;
+    unsigned id, level, flags, pol, mask;
+    int hit, playing;
+    if (bad) return;
+    rec = edge64.reg < 9 ? r[edge64.reg] : x[edge64.reg - 19];
+    if (rec < 0x10000u) {
+        if (__sync_bool_compare_and_swap(&bad, 0, 1))
+            say("switch edges off: x%ld holds 0x%" PMA " at switch_edge, not a switch record - the port's "
+                "switch_record_reg is not this build's", edge64.reg, rec);
+        return;
+    }
+    id = *(const unsigned short *)(rec + (pm_addr)edge64.id_at);
+    if (!id || id >= N_SWITCH_IDS) return;
+    desc = *(const pm_addr *)(rec + (pm_addr)edge64.desc_via);
+    if (desc < 0x10000u) {
+        if (__sync_bool_compare_and_swap(&bad, 0, 1))
+            say("switch edges off: switch %u's record holds 0x%" PMA " where switch_desc_via points - the port's "
+                "switch_* values are not this build's", id, desc);
+        return;
+    }
+    edge64_rec[id] = rec;
+    level = *(const unsigned char *)(rec + (pm_addr)edge64.level_at) & 1u;
+    flags = *(const unsigned short *)(desc + (pm_addr)edge64.flags_at);
+    pol = *(const unsigned short *)(desc + (pm_addr)edge64.polarity_at);
+    mask = edge64.mask ? *(const unsigned short *)edge64.mask : 0u;
+    hit = edge_is_hit(level, flags, pol, edge64.mask != 0, mask);
+    if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
+    if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
+    if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
+    playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
+    if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
+        say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level,
+            flags, pol, mask, playing, hit && playing ? " - a hit" : "");
+    if (!hit || !playing || !edge_shots) return;
+    lit_hold_check(id);                      /* PAD-503: before the game's own handler for it */
+    __sync_fetch_and_add(&switch_fired[id], 1u);
+    if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
+        say("switch edges run on thread %ld (first hit: switch %u)", syscall(SYS_GETTID), id);
+}
+
+static int edge64_arm(const char **why)
+{
+    static const char *const need[] = { "switch_record_reg", "switch_id_at", "switch_level_at", "switch_desc_via",
+                                        "switch_flags_at", "switch_polarity_at", 0 };
+    if (!have_values(need)) { *why = "the port lacks a switch_* value"; return 0; }
+    edge64.reg = pm_port_value("switch_record_reg", -1);
+    edge64.id_at = pm_port_value("switch_id_at", 0);
+    edge64.level_at = pm_port_value("switch_level_at", 0);
+    edge64.desc_via = pm_port_value("switch_desc_via", 0);
+    edge64.flags_at = pm_port_value("switch_flags_at", 0);
+    edge64.polarity_at = pm_port_value("switch_polarity_at", 0);
+    edge64.mask = data("mode_mask");
+    if (edge64.mask && !maps_has(edge64.mask, 2, MAP_R)) edge64.mask = 0;
+    edge.mode_mask = edge64.mask ? 1u : 0u;  /* the consumers' "the port has a mode mask" (the address is edge64's) */
+    edge_log_left = pm_port_value("switch_edge_log", 0);
+    if (!((edge64.reg >= 0 && edge64.reg <= 8) || (edge64.reg >= 19 && edge64.reg <= 28))) {
+        *why = "switch_record_reg is not a register the hook can read (x0-x8, x19-x28)";
+        return 0;
+    }
+    if (edge64.id_at < 0 || edge64.id_at > 4094 || edge64.level_at < 0 || edge64.level_at > 4095
+        || edge64.desc_via < 0 || edge64.desc_via > 4088 || edge64.flags_at < 0 || edge64.flags_at > 4094
+        || edge64.polarity_at < 0 || edge64.polarity_at > 4094) {
+        *why = "a switch_* value is out of range";
+        return 0;
+    }
+    return 1;
+}
+
+/* switch `id` held now: its record's level byte, closed as its descriptor says (0 until an edge of it has passed) */
+static int edge64_held(unsigned id)
+{
+    pm_addr rec, desc;
+    if (!id || id >= N_SWITCH_IDS || !(rec = edge64_rec[id])) return 0;
+    desc = *(const pm_addr *)(rec + (pm_addr)edge64.desc_via);
+    if (desc < 0x10000u) return 0;
+    return (*(const unsigned char *)(rec + (pm_addr)edge64.level_at) & 1u)
+           == ((*(const unsigned short *)(desc + (pm_addr)edge64.polarity_at) & 4u) ? 1u : 0u);
+}
+#endif
+
+/* the drain's hook, once for every feature that rides it (the shots, PAD-641, PAD-945, PAD-1031) */
+static int edge_hook(struct site *e)
+{
+    if (edge_hooked) return 1;
+#if PM_A64
+    (void)on_switch_edge;                    /* Spike 2's drain call */
+    return edge_hooked = hook_callee(e->addr, on_switch_edge64);
+#else
+    return edge_hooked = hook(e->addr, on_switch_edge);
+#endif
+}
+
 static void switches_arm(void)
 {
     long at = pm_port_value("switch_hit_at", 0);
@@ -16563,12 +16688,18 @@ static void switches_arm(void)
     /* PAD-645: `value switch_edge_shots 0` = the drain is there for the flipper buttons' sounds in attract alone
      * (The Beatles 1.29): its switch_hit sites keep the shots */
     if (e && (!sites || pm_port_value("switch_edge_shots", 1))) {   /* the drain's edges: every switch */
-        if (e->ok && edge_arm(&why) && (edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
+        if (e->ok && edge_arm(&why) && edge_hook(e)) {
             can |= PM_CAN_SWITCH_SHOTS;
             edge_shots = 1;
+#if PM_A64
+            say("switch shots: %d switch line(s) hand their shots to the modes; the switch drain's edges (switch_edge "
+                "0x%08" PMA " in the drain's loop, the record in x%ld%s)", port.n_switch, e->addr, edge64.reg,
+                edge.mode_mask ? ", the game's mode mask applied" : ", no mode mask");
+#else
             say("switch shots: %d switch line(s) hand their shots to the modes; the switch drain's edges (switch_edge "
                 "0x%08" PMA ", from the drain 0x%08x..0x%08x%s)", port.n_switch, e->addr, edge.drain, edge.drain_end,
                 edge.mode_mask ? ", the game's mode mask applied" : ", no mode mask");
+#endif
         } else {
             say("switch shots off: %s", !e->ok ? "switch_edge does not match this build" : why ? why : "switch_edge could not be hooked");
         }
@@ -16952,6 +17083,9 @@ static int switch_held(unsigned id)
 {
     unsigned base, rec, st, desc, pol, level;
     int k;
+#if PM_A64
+    return edge64_held(id);                  /* PAD-1322: Spike 3 keeps no per-switch table we read */
+#endif
     if (!id || !edge.records || id >= N_SWITCH_IDS) return 0;
     base = *(const unsigned *)(unsigned long)edge.records;
     if (!base) return 0;
@@ -19313,7 +19447,7 @@ static void coop_chars_arm(struct site *e)
         say("co-op characters: the gifts are off - the port names no coop_adj_changed");
         for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_gift = 0;
     }
-    if ((coop_pick_on || save || ci.clip[0]) && !(edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
+    if ((coop_pick_on || save || ci.clip[0]) && !edge_hook(e)) {
         say("co-op characters: off - the switch drain could not be hooked, so no pick could be made");
         coop_ch_n = 0;
         return;
@@ -24381,7 +24515,7 @@ static void att_arm(void)
         return;
     }
     att.attract_bit = (unsigned)pm_port_value("mode_mask_attract", 0x10);
-    if (!edge_hooked && !(edge_hooked = hook(e->addr, on_switch_edge))) {
+    if (!edge_hook(e)) {
         say("attract flipper sounds: off - switch_edge 0x%08" PMA " cannot be hooked", e->addr);
         return;
     }
@@ -24830,7 +24964,7 @@ static void gms_arm(void)
             ? "switch_edge does not match this build" : why ? why : "the switch drain's tables are not there");
         return;
     }
-    if (!edge_hooked && !(edge_hooked = hook(e->addr, on_switch_edge))) {
+    if (!edge_hook(e)) {
         say("game mode shot sounds: off - switch_edge 0x%08" PMA " cannot be hooked", e->addr);
         return;
     }

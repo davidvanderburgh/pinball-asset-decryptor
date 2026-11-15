@@ -2413,6 +2413,124 @@ def start_differences(man, ops, states):
     return out
 
 
+def _placed_fix(nid, got, want):
+    """PAD-1320 (DragonRR, round 2): a move and a resize that take node *nid* from the place
+    the scene shows it in (*got*, a fingerprint) to the one a file's edits leave it in
+    (*want*), or None when its look differs otherwise (another text box, colour, hidden) or a
+    turn or a skew would be needed."""
+    if got is None or want is None:
+        return None
+    rest = {k: v for k, v in want.items() if k != "m"}
+    if not _close(dict(got, m=want.get("m") or []), dict(rest, m=want.get("m") or [])):
+        return None
+    ident = [[1, 0, 0, 1, 0, 0]]
+    gm, wm = got.get("m") or ident, want.get("m") or ident
+    if len(gm) != len(wm):
+        gm = gm * len(wm) if len(gm) == 1 else gm
+        if len(gm) != len(wm):
+            return None
+    a, b, c, d = gm[0][:4]
+    det = a * d - b * c
+    if abs(det) < 1e-9:
+        return None
+    # the local scale that takes the first keyframe's linear part to the wanted one
+    wa, wb, wc, wd = wm[0][:4]
+    la, lb = (d * wa - c * wb) / det, (-b * wa + a * wb) / det
+    lc, ld = (d * wc - c * wd) / det, (-b * wc + a * wd) / det
+    if abs(lb) > 1e-4 or abs(lc) > 1e-4 or la <= 0 or ld <= 0:
+        return None
+    s, sy = round(la, 6), round(ld, 6)
+    scaled = abs(s - 1.0) > 1e-6 or abs(sy - 1.0) > 1e-6
+    # the local offset of the first keyframe's wanted place from its own
+    ex, ey = wm[0][4] - gm[0][4], wm[0][5] - gm[0][5]
+    ltx, lty = (d * ex - c * ey) / det, (-b * ex + a * ey) / det
+
+    def scale(px, py):
+        op = {"op": "scale", "node": nid, "px": round(px, 3), "py": round(py, 3), "s": s}
+        if abs(sy - s) > 1e-6:
+            op["sy"] = sy
+        return op
+
+    def then_move(ops):
+        m0 = tuple(gm[0])
+        for op in ops:
+            m0 = _scaled(m0, op["s"], op["px"], op["py"], op.get("sy"))
+        dx, dy = round(wm[0][4] - m0[4], 3), round(wm[0][5] - m0[5], 3)
+        return ops + ([{"op": "move", "node": nid, "dx": dx, "dy": dy}] if dx or dy else [])
+
+    tries = []
+    if scaled and abs(1.0 - s) > 1e-6 and abs(1.0 - sy) > 1e-6:
+        # about the node's own point, as the Scenes window resizes it
+        tries.append(then_move([scale(ltx / (1.0 - s), lty / (1.0 - sy))]))
+    tries.append(then_move([scale(0.0, 0.0)] if scaled else []))
+    for ops in tries:
+        if all(_near_affine([_r(v) for v in _ops_on(g, ops)], w) for g, w in zip(gm, wm)):
+            return ops
+    return None
+
+
+def _ops_on(m6, ops):
+    """Affine *m6* with :func:`_placed_fix`'s moves and resizes applied."""
+    m = tuple(m6)
+    for op in ops:
+        m = (_scaled(m, op["s"], op["px"], op["py"], op.get("sy")) if op["op"] == "scale"
+             else _moved(m, op["dx"], op["dy"]))
+    return m
+
+
+def rebased(man, ops, states):
+    """PAD-1320 (DragonRR, round 2): *ops* (a loaded file's, with its *states*) as edits to the
+    scene *man* that already shows a version of them, or None.
+
+    A card built with a file, whose file was then changed (his map dragged on: the drag folds
+    into the edit it follows, so the file still has 136), shows no run of the file's edits
+    from its first: :func:`shown_count` found none, and all 136 went on a second time, doubled
+    in place and size.  Here each node is looked at on its own: the edits of it the scene
+    already shows are left out; one it shows in another place or size than any of the file's
+    steps gets the move and resize that take it to where the file's last step leaves it.  The
+    scene must show at least one node as the file's edits changed it (else it is a scene of
+    another card, PAD-552); a node of the file's that this scene does not have, or one of an
+    add, leaves it to that."""
+    ops = [dict(op) for op in ops or ()]
+    st = _states_for(states, ops)
+    if man is None or st is None or len(st["ops"]) != len(ops):
+        return None
+    if not ops or not all(_stock_node(op) for op in ops):
+        return None
+    base = _Base.of_manifest(man)
+    kinds = _kinds(ops)
+    steps = {}
+    for i, op in enumerate(ops):
+        steps.setdefault(op["node"], []).append(i)
+    keep, extra, built = set(), {}, 0
+    for nid, idx in steps.items():
+        got = _fp_for(base.fp(nid), kinds[nid])
+        if got is None:
+            return None
+        looks = [st["before"].get(str(nid))] + [st["after"][i] for i in idx]
+        j = next((j for j in range(len(looks) - 1, -1, -1)
+                  if looks[j] is not None and _close(got, looks[j])), None)
+        if j is not None:
+            keep.update(idx[j:])
+            if j and not _close(looks[j], looks[0]):
+                built += 1
+            continue
+        fix = (_placed_fix(nid, got, looks[-1])
+               if kinds[nid] <= {"move", "scale"} and looks[-1] is not None else None)
+        if fix is None:
+            keep.update(idx)
+        else:
+            extra[idx[-1]] = fix
+    if not built:
+        return None
+    out = []
+    for i, op in enumerate(ops):
+        if i in keep:
+            out.append(op)
+        out.extend(extra.get(i, ()))
+    return None if out == ops else out
+
+
 def _base_info(base, ops):
     """What *base* shows of the nodes *ops* touch, to know the same scene again."""
     kinds = _kinds(ops)
@@ -2481,8 +2599,8 @@ def _trees_stamp(assets_dir):
 
 #: What a project's finding of the edits its scenes already show was worked out with: one
 #: older (none = before PAD-1320, whose too-tight positions found a built scene showing none
-#: of them) is worked out again once
-CARRIED_REV = 2
+#: of them; 2 = before :func:`rebased`) is worked out again once
+CARRIED_REV = 3
 
 
 def _look_again(assets_dir):
@@ -2495,7 +2613,22 @@ def _look_again(assets_dir):
         return
     trees = trees_of(assets_dir)
     edits = load(assets_dir)
-    note_shown(assets_dir, {c: trees[c] for c in edits if c in trees}, edits=edits)
+    found = note_shown(assets_dir, {c: trees[c] for c in edits if c in trees}, edits=edits)
+    # PAD-1320 (round 2): a scene a loaded file's edits went on whole, that already showed a
+    # version of them (a card built with the file before it was changed), gets only what it
+    # lacked: the project heals itself
+    states, healed = _carried_load(assets_dir)["states"], {}
+    for c, k in found.items():
+        st = states.get(c)
+        if k or not st or not starts_elsewhere(trees[c], edits[c], st):
+            continue
+        ops = rebased(trees[c], edits[c], st)
+        if ops:
+            edits[c] = ops
+            healed[c] = states_of(trees[c], ops)
+    if healed:
+        save(assets_dir, edits)
+        note_shown(assets_dir, {c: trees[c] for c in healed}, states=healed, edits=edits)
     data = _carried_load(assets_dir)
     data["trees"] = stamp
     data["rev"] = CARRIED_REV
@@ -2518,10 +2651,11 @@ def to_apply(assets_dir, card, man, ops=None):
     """*card*'s edits (or *ops*) less the leading ones its preview manifest *man* already
     shows.  The first look at the project's scenes, or at scenes read again off a card, finds
     them; a scene first edited after that is looked at on its own."""
+    if man is not None:
+        _look_again(assets_dir)        # PAD-1320: it can change the list (:func:`rebased`)
     ops = ops_for(assets_dir, card) if ops is None else list(ops)
     if not ops or man is None:
         return ops
-    _look_again(assets_dir)
     rec = _carried_load(assets_dir)["carried"].get(card)
     if rec is None or not _same_base(_Base.of_manifest(man), rec):
         note_shown(assets_dir, {card: man}, edits={card: ops})

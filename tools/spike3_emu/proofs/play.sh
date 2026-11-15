@@ -5,12 +5,17 @@
 #   mb        trigger the mode, plunge the balls it serves, shoot, drain them one by one
 #   coil      trigger the mode, shoot through its holds
 #   stackmb   start the game's own multiball, trigger a `stack no` mode inside it, drain until it starts
+#   edge      (PAD-1322) the flipper buttons in attract, then in play the trigger, the scoring shots, a slingshot, a
+#             pop bumper and the flipper buttons: with `value switch_edge_log N` in the port, every edge is logged
 # The title's switch names (Star Wars ELG 1.10's by default) - each list is `|`-separated:
 TRIGGER_SW=${TRIGGER_SW:-TOP LANE CENTER}                   # the mode files' trigger (0x40 x3 on ELG)
 SHOT_SWS=${SHOT_SWS:-CENTER TARGET|HIDDEN TARGET|LEFT LUKE ORBIT}  # three of its scoring shots (0x20000138)
 EARLY_SWS=${EARLY_SWS:-LEFT LUKE ORBIT|HIDDEN TARGET}       # starts the game's own ball save right after the plunge
 GAME_MB_SW=${GAME_MB_SW:-DEATH STAR TARGET}                 # x3 starts the game's own multiball
+FLIP_SWS=${FLIP_SWS:-L FLIPPER BUTTON|R FLIPPER BUTTON}      # the flipper buttons (PROOF=edge)
+NOHANDLER_SWS=${NOHANDLER_SWS:-LEFT SLINGSHOT|RIGHT POP BUMPER}   # switches the drain runs no handler for (PROOF=edge)
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
+COINS=${COINS:-0}                                           # credits first (Walking Dead Remastered's fresh settings: 4)
 SLOT=${1:-88}
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 P="python3 $REPO/tools/spike3_emu/s3press.py"
@@ -21,7 +26,12 @@ plunge() { $P plunge "$SLOT" 2>&1 | tail -1; }
 drain() { $P drain "$SLOT" 2>&1 | tail -1; }
 
 sleep 5; for i in $(seq 1 240); do grep -q "ready on\|\[mode\]\|armed" $L 2>/dev/null && break; sleep 1; done
-echo "[play] ready after ${i}s"; sleep 20
+echo "[play] ready after ${i}s"; sleep "${ATTRACT_WAIT:-20}"   # Walking Dead Remastered takes a Start only ~60 s on
+if [ "${PROOF:-game}" = edge ]; then
+  echo "[play] attract: the flipper buttons at $(date +%T)"; IFS='|' read -r -a fl <<< "$FLIP_SWS"
+  for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 400; sleep 2; done
+fi
+[ "$COINS" -gt 0 ] && { $P coin "$SLOT" "$COINS"; sleep 3; }
 for k in $(seq 1 8); do
   [ "$START_HOLD_MS" -gt 0 ] && { $P sw "$SLOT" "START BUTTON" "$START_HOLD_MS"; sleep 7; }
   $P sw "$SLOT" "START BUTTON"; sleep 8
@@ -77,5 +87,16 @@ stackmb)
     grep -q "STACK MB START" $L && { echo "[play] started after drain $round"; break; }
   done
   sleep 25 ;;
+edge)
+  sleep 4
+  for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done
+  echo "[play] triggers in at $(date +%T)"; sleep 3
+  for r in 1 2; do
+    echo "[play] round $r: shots"; sws "$SHOT_SWS" 2
+    echo "[play] round $r: no-handler switches"; sws "$NOHANDLER_SWS" 2
+    echo "[play] round $r: flipper buttons"; IFS='|' read -r -a fl <<< "$FLIP_SWS"
+    for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 600; sleep 2; done
+  done
+  sleep 10 ;;
 esac
 echo "[play] done"

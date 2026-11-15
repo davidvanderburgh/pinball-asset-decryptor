@@ -180,6 +180,7 @@ RT_HARNESS = r"""
 
 typedef unsigned pm_addr;            /* PAD-1269: the 32-bit (Spike 2) build's address and register types */
 typedef unsigned pm_reg;
+@TYPES@
 
 static unsigned can;
 static const struct pm_mode *current;
@@ -316,7 +317,10 @@ def runtime(tmp_path_factory):
     end = src.index("/* ---- LAMPS END */")
     helpers = "\n".join(_function(src, r) for r in (
         r"static int str_eq\(", r"static int hexval\(", r"static uint64_t number\(", r"static void rest\("))
-    c = RT_HARNESS.replace("@HELPERS@", helpers).replace("@SECTION@", src[start:end])
+    # PAD-1282 / PAD-1283: the runtime's PM_PTR and lamp_group_fn, which the section uses but sit outside it
+    types = "\n".join(ln for ln in src.splitlines()
+                      if ln.startswith(("#define PM_PTR ", "typedef pm_addr (*lamp_group_fn)")))
+    c = RT_HARNESS.replace("@TYPES@", types).replace("@HELPERS@", helpers).replace("@SECTION@", src[start:end])
     d = tmp_path_factory.mktemp("lamps")
     (d / "rt.c").write_text(c)
     exe = d / "rt"

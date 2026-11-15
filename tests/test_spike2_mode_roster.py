@@ -440,7 +440,15 @@ def _lift(src, signature):
 # PAD-1269: the runtime's address and saved-register types, as its 32-bit (Spike 2) build has them, so code
 # lifted from it compiles on the host. Repeating them (a harness that includes the whole runtime) is legal C.
 # PAD-1273: and PMA / PMU, the printf lengths of a pm_addr / pm_reg (the runtime's identical #define may follow).
-PM_TYPES = "typedef unsigned pm_addr;\ntypedef unsigned pm_reg;\n#define PM_A64 0\n#define PMA \"x\"\n#define PMU \"u\"\n"
+# PAD-1284: and a pm_str / PM_STR, a std::string as Spike 2 hands it (one word, its address taken).
+PM_TYPES = ("typedef unsigned pm_addr;\ntypedef unsigned pm_reg;\n#define PM_A64 0\n#define PMA \"x\"\n#define PMU \"u\"\n"
+            "typedef unsigned pm_str;\n#define PM_STR(s) ((void *)&(s))\n")
+# PAD-1282: the sound engine's request-record layout (PM_PTR, REQ_*), lifted from the runtime's own #defines so a
+# lifted pm_sound_* function compiles; the identical #define in a harness holding the whole runtime is legal C.
+_rt_src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
+PM_TYPES += "\n".join(ln for ln in _rt_src.splitlines()
+                      if re.match(r"#define (PM_PTR|REQ_PTRS|REQ_SIZE|REQ_PRIO|REQ_FLAGS|REQ_CHECK|REQ_LIST|REQ_LIST_V)\b", ln)) + "\n"
+del _rt_src
 
 
 def _host_run(tmp_path, code, flags=(), args=()):

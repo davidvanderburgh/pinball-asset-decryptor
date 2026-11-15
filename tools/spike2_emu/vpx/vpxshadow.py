@@ -55,6 +55,7 @@ a PinMAMETimer (core.vbs's) and a PadTestTimer (vpxkeys.py) cloned from an
 existing timer.
 """
 import json
+import math
 import os
 import re
 import shutil
@@ -2007,16 +2008,46 @@ def item_fields(table, m):
     JSON float is written as a float, an int as an int (VPX's bools are
     ints). GameItems are not in the MAC, so each stream is replaced."""
     want = {k.lower(): v for k, v in m.get("item_fields", {}).items() if k != "_"}
+    rounds = {k.lower() for k in m.get("round_lights", []) if k != "_"}
     out = {}
     for i, data in enumerate(table.items):
-        kind, name, _ = table.item_info(data)
+        kind, name, pos = table.item_info(data)
         fields = want.pop(name.lower(), None)
         if fields is not None:
-            out["GameItem%d" % i] = vpxfile.set_fields(data, {
+            data = out["GameItem%d" % i] = vpxfile.set_fields(data, {
                 tag: struct.pack("<f" if isinstance(v, float) else "<i", v) for tag, v in fields.items()})
-    if want:
-        raise KeyError("the table has no object named %s" % ", ".join(sorted(want)))
+        if name.lower() in rounds:
+            rounds.discard(name.lower())
+            out["GameItem%d" % i] = round_light(data, pos)
+    if want or rounds:
+        raise KeyError("the table has no object named %s" % ", ".join(sorted(set(want) | rounds)))
     return out
+
+
+def round_light(data, pos):
+    """PAD-1331: a Light's drag points as a regular polygon about its centre
+    whose inscribed circle is its falloff. A bulb's halo is drawn inside its
+    outline, so a falloff reaching past a boxy outline stops dead at its
+    edge: JAWS 50th's sling GI (gi001/gi006, halo 55 over the plastics,
+    falloff 110 in an outline 33 from the centre) hung a square of light
+    over each sling. Round, it fades out as the table's other GI bulbs do.
+    The same number of points, so the item's records stay as they were."""
+    n = 0
+    radius = None
+    depth = 0
+    for tag, payload, _ in vpxfile.item_records(data, 4):
+        if tag == "DPNT":
+            depth += 1
+            n += 1
+        elif tag == "ENDB" and depth:
+            depth -= 1
+        elif tag == "RADI" and depth == 0:
+            radius = struct.unpack_from("<f", payload)[0]
+    if n < 3 or not radius or pos is None:
+        raise ValueError("not a light with an outline and a falloff")
+    r = radius / math.cos(math.pi / n)
+    return vpxfile.reshape_item(data, [(pos[0] + r * math.cos(2 * math.pi * k / n),
+                                        pos[1] + r * math.sin(2 * math.pi * k / n)) for k in range(n)])
 
 
 SHAPELESS = ("Wall", "Ramp", "Rubber")

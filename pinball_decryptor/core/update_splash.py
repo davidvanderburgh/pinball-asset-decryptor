@@ -28,9 +28,11 @@ helper is (CREATE_NO_WINDOW, never DETACHED_PROCESS: PAD-1029).
 The playfield is a little game that plays itself, at 60 frames a second:
 a ball under gravity with a shadow and a short trail, three pop bumpers
 that glow and pulse when hit, slingshots, arrow inserts that light as the
-ball passes, a score that counts, and two flippers that flip when the ball
-comes down to them - and miss now and then, so the ball drains and is
-plunged again.  A slim moving line under the table says the wait is alive
+ball passes, and two flippers that flip when the ball comes down to them -
+and miss now and then, so the ball drains and is fed again.  The ball comes
+in from one of five feeds (PAD-1312: one picked at random each time the
+window opens, and a different one for every new ball), so no two waits look
+the same; there is no score.  A slim moving line under the table says the wait is alive
 even when the ball is between plunges.
 
 IT NEVER TRAPS THE USER.  Escape closes it at any time; after HINT_AFTER
@@ -214,15 +216,6 @@ $rail.Width = 400; $rail.Height = 210; $rail.RadiusX = 16; $rail.RadiusY = 16
 $rail.Stroke = (Brush '#3B5A8C'); $rail.StrokeThickness = 2.5
 Add-Shape $rail 9
 
-# the score, top right of the table
-$score = New-Object System.Windows.Controls.TextBlock
-$score.FontFamily = New-Object System.Windows.Media.FontFamily('Consolas'); $score.FontSize = 13
-$score.Foreground = (Brush '#F2C230'); $score.Opacity = 0.9; $score.Text = '0'
-$score.Width = 90; $score.TextAlignment = 'Right'
-Place $score 294 10
-Add-Shape $score 2
-$S.scoreBlock = $score; $S.score = 0; $S.scoreShown = -1
-
 # fixed walls: the outlane guides down to the flippers and the slingshots
 $S.segs = @(
   (Seg 1 112 110 186 0), (Seg 399 112 290 186 0),
@@ -332,13 +325,31 @@ $gb.Freeze(); $ball.Fill = $gb
 Add-Shape $ball 8
 $S.ball = $ball
 $S.rnd = New-Object System.Random
-$S.x = 380.0; $S.y = 14.0; $S.vx = -2.5; $S.vy = 0.5; $S.r = 7.0; $S.wait = 0; $S.slow = 0
+$S.r = 7.0; $S.wait = 0; $S.slow = 0
 $S.markX = 0.0; $S.markY = 0.0; $S.markT = 0
 
+# the ball feeds (PAD-1312): where a ball comes into play, and how - x, y,
+# then vx and vy each as a base plus a random spread.  Each opening of the
+# window starts at one picked at random, and every new ball after a drain
+# comes from a different one, so the animation is never the same twice.
+$S.feeds = @(
+  @(380.0, 14.0, -2.0, -2.5, 0.3, 0.0),     # the plunger lane, top right
+  @(20.0, 14.0, 2.0, 2.5, 0.3, 0.0),        # a kickout, top left
+  @(200.0, 10.0, -1.0, 2.0, 0.0, 0.5),      # dropped onto the centre bumper
+  @(386.0, 74.0, -3.0, -2.0, -2.0, -1.0),   # an eject on the right side
+  @(14.0, 74.0, 3.0, 2.0, -2.0, -1.0))      # an eject on the left side
+$S.feed = -1
+
 function Plunge {
-  $S.x = 380.0; $S.y = 14.0; $S.vx = -(2.0 + 2.5 * $S.rnd.NextDouble()); $S.vy = 0.3; $S.slow = 0
+  $k = $S.rnd.Next($S.feeds.Count)
+  if ($k -eq $S.feed) { $k = ($k + 1 + $S.rnd.Next($S.feeds.Count - 1)) %% $S.feeds.Count }
+  $S.feed = $k; $f = $S.feeds[$k]
+  $S.x = $f[0]; $S.y = $f[1]
+  $S.vx = $f[2] + $f[3] * $S.rnd.NextDouble(); $S.vy = $f[4] + $f[5] * $S.rnd.NextDouble()
+  $S.slow = 0; $S.markX = $S.x; $S.markY = $S.y; $S.markT = 0
   $S.history.Clear()
 }
+Plunge
 function BatPoints($f) {
   # the bat: a wide round end at the pivot, a narrow one at the tip (set on
   # the flipper itself: a collection returned would be unrolled)
@@ -390,7 +401,6 @@ function Physics {
       $vn = $S.vx * $nx + $S.vy * $ny
       if ($vn -lt 0) { $S.vx = $S.vx - 2 * $vn * $nx; $S.vy = $S.vy - 2 * $vn * $ny }
       $S.vx = $S.vx + $nx * 4.0; $S.vy = $S.vy + $ny * 4.0
-      if ($b.hit -eq 0) { $S.score += 100 }
       $b.hit = 10
     }
   }
@@ -398,7 +408,7 @@ function Physics {
   # is not tested against them (the calls are what the frame costs)
   if ($S.y -gt 94) {
     foreach ($g in $S.segs) {
-      if (Bounce $g.x1 $g.y1 $g.x2 $g.y2 $g.kick) { if ($g.kick -gt 0) { if ($g.hit -eq 0) { $S.score += 10 }; $g.hit = 8 } }
+      if (Bounce $g.x1 $g.y1 $g.x2 $g.y2 $g.kick) { if ($g.kick -gt 0) { $g.hit = 8 } }
     }
   }
   if ($S.y -gt 150) {
@@ -449,11 +459,10 @@ function Step {
   }
   foreach ($n in $S.inserts) {
     $dx = $S.x - $n.x; $dy = $S.y - $n.y
-    if ($dx * $dx + $dy * $dy -lt 420) { if ($n.b -lt 0.5) { $S.score += 50 }; $n.b = 1.0 }
+    if ($dx * $dx + $dy * $dy -lt 420) { $n.b = 1.0 }
     elseif ($n.b -gt 0.01) { $n.b = $n.b * 0.94 } else { $n.b = 0 }
     $n.e.Opacity = 0.22 + 0.78 * $n.b; $n.e.Effect.Opacity = $n.b
   }
-  if ($S.score -ne $S.scoreShown) { $S.scoreShown = $S.score; $S.scoreBlock.Text = ('{0:N0}' -f $S.score) }
   # the ball, its shadow and its trail
   Place $S.ball ($S.x - $S.r) ($S.y - $S.r)
   Place $S.shadow ($S.x - 9 + 2) ($S.y - 6 + 5)

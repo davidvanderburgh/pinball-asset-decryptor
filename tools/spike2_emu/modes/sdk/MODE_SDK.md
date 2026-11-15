@@ -6362,6 +6362,28 @@ the game's end. With the team swap, player 3's turns had player 3's login in pla
 place 3, player 1's put back there (box 1 named player 1's, box 3 player 3's); player 4's turns the same on the game's
 player 2; every login back as made after the game.
 
+PAD-1315 (DoomWalrus666: "In co-op mode, Player 1's user icon moves to the scoreboard position of the active player
+next to their username"). The boxes' Insider icons are not drawn with the names but by the score frame's Insider
+overlay (NetScoreFrameOverlay, every Spike 2 build), whose loop over the four boxes calls its drawer once a box as
+draw(this, logins, player 1..4, r3, [sp]; the box's rectangle in s0-s3); the drawer reads that player's login state
+and login (the swapped entries) and draws that user's avatar in that user's colour. And re-pointing the name's player
+made a guest's box (no login: "PLAYER %d" of the number given) read the number of the place its entry was in.
+
+    site  coop_icon_draw        the overlay's one call of its per-box drawer (portcoop.score_icon_sites: the drawer
+                                gives its r2 as r1 to a call reaching the framework's login read and then to the
+                                login read, table + 20 * p + 4, itself) - answered with the place holding the box's
+                                own player's login; the four floats and the stack word are passed on as they came
+    site  coop_panel_name_user  the user-for-player call inside the name function coop_panel_name calls
+                                (portcoop.name_user_site) - with it the name is asked for the box's own number and
+                                only this lookup is re-pointed while the box's name is made
+
+Godzilla Pro 1.16: drawer 0x483c14 called from 0x484440, the name's user lookup 0x3bc944. All 53 latest builds have
+the drawer call; the four with box names (Godzilla LE / Pro, X-Men LE / Pro) the name's lookup. Emulator, Godzilla LE
+1.16, marker logins (no Insider user behind them, so the names fall back to "PLAYER n"): teammate 2 up, before box 1
+read PLAYER 2 and box 2 PLAYER 1, after PLAYER 1 and PLAYER 2. The emulator has no Insider session, so the overlay
+never draws there (its draw gates on the session's state and a feature check); the drawer call's hook arms and full
+co-op games run with it.
+
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the
@@ -6502,7 +6524,8 @@ teammate's End of Ball Bonus (the dialog's **Show each teammate's character on t
     bonus_loop EndOfBallBonus_BackgroundLoop  the clip the game's bonus loops (found in the bank by name; Godzilla 1.15
                                               and 1.16, at SquareCrop: x1.29, moved -197,-126)
     char_bonus 1 PadCoopBonus1                that loop made again with character 1's video (or picture) and name on
-                                              a strip along the foot (glass y 672-762, centred, as wide as the name)
+                                              a 360x290 portrait bottom-left (glass 6,472) and a
+                                              name plate beside it along the foot (y 672-762)
 
 When the teammate up takes a character (its PICKED card on the glass) its sound plays at once; its clip waits until
 the card has had its 2.5 s and the card's own video behind it has been given back (the bank's one surface), then plays
@@ -6527,6 +6550,15 @@ foot (y 596, 1360x160) whose words the runtime writes at x1.4 (28 characters fil
 "FINAL SCORE  <player 1's>" in co-op, "TEAM 1  <p1>   TEAM 2  <p2>" in a team game ("T1 <p1>  T2 <p2>" when that is
 too long). Emulator, Godzilla LE 1.16: see the ticket's after shots. A port with no
 backdrop (`scene_show` unhooked) keeps the HUD and says so.
+
+**The awards ceremony's music (PAD-1317).** DoomWalrus666 asked for a custom audio track during the ceremony. The
+Characters dialog's Awards music... keeps a sound file (or a video, its sound taken) as `coop/ceremony_music.<ext>`; a
+Write makes it a sound of the card's own (at most 60 s, `coop_play.CEREMONY_SOUND_MAX_SECONDS`: the ceremony is 42 s at
+most) built under the pseudo mode `sound_modes.CEREMONY_MODE` (4017) on the co-op intro's carrier, and sounds.cfg names
+it: `ccer <request> <carrier key> <its key> <ms>`. As the ceremony begins (`coop_cer_begin`) the runtime fades the
+game's sounds playing then (each once, 250 ms), lifts the carrier to priority 255 and plays it, the record lookup
+swapped to the music's (as the intro's); the cards' loop fades any sound the game starts while they show, every 100 ms;
+at `coop_cer_end` the music fades out over 1.5 s and the carrier goes back to priority 3.
 
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 

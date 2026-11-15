@@ -548,8 +548,8 @@ def _sidx_new_files(reader, jobs, work, log):
 
 
 def _plan_modes(assets_dir, reader, work, log):
-    """PAD-1272: ``(plan, remove)`` - the project's modes for this card
-    (:func:`.spike3_modes.plan`, or None), and whether the card carries an
+    """PAD-1272: ``(plan, remove)`` - the project's modes for this card, and its score
+    feed (:func:`.spike3_modes.plan`, or None), and whether the card carries an
     earlier build's modes that this build, with none, takes off.  A mode that
     cannot be built stops the Write before anything is copied."""
     from . import mode_write as MW, spike3_modes
@@ -560,7 +560,8 @@ def _plan_modes(assets_dir, reader, work, log):
         raise PipelineError("Encode", "Modes: %s. Nothing was written." % e) from None
     if mplan is not None:
         for line in mplan.lines:
-            log("Modes: %s" % line, "info")
+            # PAD-1297: the score feed's line names itself
+            log(line if line.startswith("Score feed:") else "Modes: %s" % line, "info")
         return mplan, False
     try:
         state, _target = spike3_modes.card_state(reader)

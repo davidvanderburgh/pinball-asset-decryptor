@@ -1728,12 +1728,15 @@ static int ci_lookup(pm_reg *r);          /* PAD-1114: the co-op intro's sound *
 static volatile int ci_live;
 static int cpk_lookup(pm_reg *r);         /* PAD-1123: a co-op character's sound once picked */
 static volatile int cpk_live;
+static int ccer_lookup(pm_reg *r);        /* PAD-1317: the co-op awards ceremony's music */
+static volatile int ccer_live;
 
 static void on_sound_lookup(pm_reg *r)
 {
     if (worker_log && r[1]) sound_key_say(LOOKUP_KEY(r));   /* PAD-1071 */
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
+    if (ccer_live && r[1] && ccer_lookup(r)) return;   /* PAD-1317: the co-op awards ceremony's music */
     if (ci_live && r[1] && ci_lookup(r)) return;     /* PAD-1114: the co-op intro's sound */
     if (cpk_live && r[1] && cpk_lookup(r)) return;   /* PAD-1123: a co-op character's sound once picked */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
@@ -18353,6 +18356,98 @@ static int coop_cards_backdrop(const char *name);
 static char coop_cer_clip[96], coop_cer_crop[32];      /* PAD-1219: coop.cfg `ceremony <clip> <crop>` */
 static void coop_cer_begin(void);
 static void coop_cer_end(void);
+static void ccer_quiet(void);
+
+/* ---- PAD-1317: the co-op awards ceremony's own music ----------------------------------------------------------
+ * DoomWalrus666: "Please add an option in the mode tab in the characters builder to add a custom audio track to play
+ * during the award ceremony". sounds.cfg `ccer <request> <carrier key> <the music's key> <ms>`: the owner's track, a
+ * sound of the card's own on the co-op intro's carrier (the record lookup swapped as the intro's is). As the ceremony
+ * begins (coop_cer_begin) the game's sounds playing then are faded (each once, CCER_QUIET_MS) and the carrier plays
+ * at the top priority (CCER_PRIO_PLAYING, as the intro's: over the game's own) with the music; the cards' loop fades any
+ * the game starts while they show; at its end the music is faded out over CCER_FADE_MS and the carrier's priority
+ * set back. */
+#define CCER_QUIET_MS 250u
+#define CCER_FADE_MS  1500u
+#define CCER_QUIET_EVERY_MS 100ul
+#define CCER_QUIET_N 12
+#define CCER_PRIO_IDLE    3      /* as the intro's carrier (CI_PRIO_IDLE / CI_PRIO_PLAYING) */
+#define CCER_PRIO_PLAYING 255
+static struct {
+    unsigned request, sound_ms;
+    unsigned char key[8], host[8];
+    volatile unsigned long swap_until;
+    volatile int looked;
+    int on;
+    unsigned long at, quiet_at;
+    unsigned quiet[CCER_QUIET_N];
+    unsigned n_quiet;
+} ccer;
+
+/* the record lookup (any thread): the carrier's own record takes the ceremony's music while it is asked for */
+static int ccer_lookup(pm_reg *r)
+{
+    const unsigned char *k = LOOKUP_KEY(r);
+    if (!ccer.request || (long)(ccer.swap_until - pm_ms()) <= 0 || !key_is(k, ccer.key)) return 0;
+    LOOKUP_TAKE(r, ccer.host);
+    if (!ccer.looked) {
+        ccer.looked = 1;
+        say("co-op awards: request %u looked up its record, took the ceremony's music", ccer.request);
+    }
+    return 1;
+}
+
+/* whether the ceremony has music of its own to play (tests lift it verbatim) */
+static int ccer_has(unsigned request, int live)
+{
+    return request != 0 && live;
+}
+
+/* the game's sounds playing now, but the music, faded (each once); from the ceremony's start and its cards' loop */
+static void ccer_quiet(void)
+{
+    unsigned reqs[8], buses[8], k;
+    int n, i;
+    if (!ccer.on) return;
+    ccer.quiet_at = pm_ms();
+    n = pm_sound_playing(reqs, buses, 8);
+    for (i = 0; i < n && i < 8; i++) {
+        if (!reqs[i] || reqs[i] == ccer.request) continue;
+        for (k = 0; k < ccer.n_quiet && ccer.quiet[k] != reqs[i]; k++) ;
+        if (k < ccer.n_quiet) continue;                       /* faded already (a fade asked for again starts over) */
+        if (ccer.n_quiet < CCER_QUIET_N) ccer.quiet[ccer.n_quiet++] = reqs[i];
+        if (pm_sound_fade(reqs[i], CCER_QUIET_MS))
+            say("co-op awards: the game's sound %u (bus 0x%x) faded under the ceremony's music", reqs[i], buses[i]);
+    }
+}
+
+static void ccer_begin(void)
+{
+    unsigned long now = pm_ms();
+    if (!ccer_has(ccer.request, ccer_live)) return;
+    ccer.on = 1;
+    ccer.n_quiet = 0;
+    ccer_quiet();
+    if (pm_sound_active(ccer.request)) pm_sound_stop(ccer.request);
+    ccer.looked = 0;
+    ccer.at = now;
+    ccer.swap_until = now + ccer.sound_ms + 1000ul;
+    pm_sound_priority(ccer.request, CCER_PRIO_PLAYING, 0);
+    pm_sound(ccer.request);
+    say("co-op awards: the ceremony's music (%u ms) plays on request %u", ccer.sound_ms, ccer.request);
+}
+
+static void ccer_end(void)
+{
+    if (!ccer.on) return;
+    ccer.on = 0;
+    ccer.swap_until = 0;
+    if (pm_sound_active(ccer.request)) {
+        if (!pm_sound_fade(ccer.request, CCER_FADE_MS)) pm_sound_stop(ccer.request);
+        say("co-op awards: the ceremony's music faded out after %lu ms", pm_ms() - ccer.at);
+    } else
+        say("co-op awards: the ceremony's music had ended by itself (%lu ms in)", pm_ms() - ccer.at);
+    pm_sound_priority(ccer.request, CCER_PRIO_IDLE, 0);
+}
 
 /* the game is over (coop_change_wrap, the game's thread): each award on each winner's card in turn */
 static void coop_cards_show(unsigned n)
@@ -18393,8 +18488,10 @@ static void coop_cards_show(unsigned n)
             if (coop_card_words[c]) pm_set_text(coop_card_words[c], words);
             pm_show(coop_card[c], 1);
             say("co-op awards: %s on %s's card", words, coop_ch[c].name);
-            for (at = pm_ms(); pm_ms() - at < COOP_CARD_MS; )
+            for (at = pm_ms(); pm_ms() - at < COOP_CARD_MS; ) {
                 ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+                if (ccer.on && pm_ms() - ccer.quiet_at >= CCER_QUIET_EVERY_MS) ccer_quiet();   /* PAD-1317 */
+            }
             pm_show(coop_card[c], 0);
             shown++;
         }
@@ -18435,6 +18532,7 @@ static void coop_cer_begin(void)
     if (coop_final) pm_show(coop_final, 1);
     coop_cer_gone_n = coop_cer_vetoes = 0;
     coop_cer_on = coop_cer_keep != 0 && (can & PM_CAN_BACKDROP);
+    ccer_begin();                                             /* PAD-1317: the ceremony's own music */
     say("co-op awards: the cards' scene 0x%08x, its player 0x%08x", (unsigned)(unsigned long)coop_cer_keep,
         (unsigned)(unsigned long)coop_cer_keep_player);
     say("co-op awards: the ceremony - %s; %s", coop_cer_on ? "the game's HUD off the glass" :
@@ -18445,6 +18543,7 @@ static void coop_cer_begin(void)
 static void coop_cer_end(void)
 {
     unsigned k;
+    ccer_end();                                               /* PAD-1317 */
     if (coop_final) pm_show(coop_final, 0);
     if (coop_cer_on) {
         say("co-op awards: the ceremony is over - %u scene show(s) of %u scene(s) kept off the glass, the HUD back",
@@ -20298,16 +20397,73 @@ static const char *const COOP_NAME_SITES[] = { "coop_panel_name", "coop_panel_na
                                                "coop_panel_name_4", 0 };
 static unsigned (*coop_name_game)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
 
+/* PAD-1315 (DoomWalrus666, co-op: "Player 1's user icon moves to the scoreboard position of the active player"): the
+ * boxes' Insider avatars are not drawn with the names above but by the score frame's Insider overlay
+ * (NetScoreFrameOverlay, every Spike 2 build), which calls its drawer once a box as draw(this, logins, player 1..4, r3,
+ * [sp]; the box's rectangle in s0-s3) (Godzilla Pro 1.16 0x483c14 from 0x484440). The drawer reads the player's login
+ * state and login (the entry the swap above moves) and draws that user's avatar in that user's colour - so box 1 drew
+ * the teammate up's icon and the teammate up's box player 1's. Its call (`site coop_icon_draw`,
+ * portcoop.score_icon_sites) is answered with the place holding the box's own player's login. The rectangle travels
+ * in s0-s3: the wrapper takes the four floats and passes them on (hard-float: they stay in s0-s3), the stack word
+ * with them. */
+static unsigned (*coop_icon_game)(unsigned, unsigned, unsigned, unsigned, unsigned, float, float, float, float);
+
+static unsigned coop_icon_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, float x, float y,
+                               float w, float h)
+{
+    static unsigned said[5];
+    unsigned place = r2 >= 1 && r2 <= 4 ? coop_name_player(r2, cu_g, cu_p) : r2;
+    if (place != r2 && said[r2] != (cu_g << 4 | cu_p)) {     /* once a turn a box */
+        said[r2] = cu_g << 4 | cu_p;
+        say("co-op insider: the score panel's box %u shows player %u's icon (login 0x%08x, in place %u while player "
+            "%u is up)", r2, r2, coop_user_word(place), place, cu_p);
+    }
+    return coop_icon_game(r0, r1, place, r3, s0, x, y, w, h);
+}
+
+static void coop_icon_arm(void)
+{
+    unsigned at;
+    if (!site("coop_icon_draw")) return;
+    if (!fn("coop_icon_draw") || !(at = hook_call(fn("coop_icon_draw"), (void *)coop_icon_wrap))) {
+        say("co-op insider: the score frame's icon draw could not be wrapped - box 1 shows the teammate up's icon");
+        return;
+    }
+    coop_icon_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, float, float, float, float))
+        (unsigned long)at;
+    say("co-op insider: the score panel's boxes show their own players' icons");
+}
+
+/* PAD-1315: the name wrapper re-pointed the PLAYER the game's name was asked for, and the name of a player with no
+ * login (a guest) is "PLAYER %d" of that number - so with player 1 logged in and teammate 2 a guest, teammate 2's box read
+ * "PLAYER 1" on their turn. Where the name's own user lookup is found (`site coop_panel_name_user`,
+ * portcoop.name_user_site: its call of user-for-player(player, ..), Godzilla Pro 1.16 0x3bc944), the box's name is asked
+ * for its own player and only that lookup is re-pointed (while the box's call runs), so a login reads from its place
+ * and a guest keeps their own number. */
+static unsigned (*coop_name_user_game)(unsigned, unsigned, unsigned, unsigned);
+static volatile unsigned cn_box, cn_place;              /* the box whose name is being made, and its login's place */
+
+static unsigned coop_name_user_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    if (cn_box && r0 == cn_box) r0 = cn_place;
+    return coop_name_user_game(r0, r1, r2, r3);
+}
+
 static unsigned coop_name_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, unsigned s1)
 {
     static unsigned said[5];
-    unsigned place = coop_name_player(r1, cu_g, cu_p);
+    unsigned place = coop_name_player(r1, cu_g, cu_p), ret;
     if (place != r1 && r1 >= 1 && r1 <= 4 && said[r1] != (cu_g << 4 | cu_p)) {   /* once a turn a box */
         said[r1] = cu_g << 4 | cu_p;
         say("co-op insider: the score panel's box %u names player %u's login (0x%08x, in place %u while player %u "
             "is up)", r1, r1, coop_user_word(place), place, cu_p);
     }
-    return coop_name_game(r0, place, r2, r3, s0, s1);
+    if (!coop_name_user_game || place == r1) return coop_name_game(r0, place, r2, r3, s0, s1);
+    cn_place = place;
+    cn_box = r1;
+    ret = coop_name_game(r0, r1, r2, r3, s0, s1);           /* PAD-1315: its own number, the login from its place */
+    cn_box = 0;
+    return ret;
 }
 
 static void coop_name_arm(void)
@@ -20326,6 +20482,15 @@ static void coop_name_arm(void)
     }
     if (armed) say("co-op insider: the score panel's boxes name their own players (%d call%s)", armed,
                    armed == 1 ? "" : "s");
+    if (armed && site("coop_panel_name_user")) {             /* PAD-1315 */
+        if (fn("coop_panel_name_user") && (at = hook_call(fn("coop_panel_name_user"), (void *)coop_name_user_wrap))) {
+            coop_name_user_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
+            say("co-op insider: a box's name keeps its own number (a guest reads its own PLAYER n)");
+        } else
+            say("co-op insider: the names' user lookup could not be wrapped - a guest's box reads the number of its "
+                "login's place");
+    }
+    coop_icon_arm();                                          /* PAD-1315 */
 }
 
 static int on_coop_award(pm_reg *r);       /* below the Insider Connected gate */
@@ -24366,6 +24531,41 @@ static void cpk_sound_arm(void)
         cpk.request);
 }
 
+/* PAD-1317: sounds.cfg `ccer <request> <carrier's key> <the music's key> <ms>` (the intro's carrier) */
+static int ccer_bad;
+static void ccer_sound_line(const char *rs, const char *ks, const char *hs, const char *mss)
+{
+    const char *p = rs;
+    int ok, ok2;
+    unsigned r = (unsigned)number(&p, &ok), ms;
+    p = mss;
+    ms = (unsigned)number(&p, &ok2);
+    if (!ok || !ok2 || !r || !key_hex(ks, ccer.key) || !key_hex(hs, ccer.host)) { ccer_bad++; return; }
+    ccer.request = r;
+    ccer.sound_ms = ms;
+}
+
+/* from sndm_arm: the record lookup's hook for the ceremony's music */
+static void ccer_sound_arm(void)
+{
+    if (ccer_bad) say("co-op awards: the ceremony's music line in sounds.cfg not read");
+    if (!ccer.request) return;
+    if (!fn("sound_play") || !fn("sound_lookup")) {
+        say("co-op awards: no music of its own - the port has no sound_play or sound_lookup for this build");
+        ccer.request = 0;
+        return;
+    }
+    if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+        say("co-op awards: no music of its own - sound_lookup 0x%08" PMA " cannot be hooked", fn("sound_lookup"));
+        ccer.request = 0;
+        return;
+    }
+    if (pm_sound_priority(ccer.request, CCER_PRIO_IDLE, 0) < 0)
+        say("co-op awards: the carrier's priority stays its own - the port has no request table");
+    ccer_live = 1;
+    say("co-op awards: the ceremony's music (%u ms) rides request %u", ccer.sound_ms, ccer.request);
+}
+
 /* from sndm_arm: the record lookup's hook for the intro's sound */
 static void ci_sound_arm(void)
 {
@@ -25034,6 +25234,10 @@ static void sndm_line(char *s)
         ci_sound_line(f[1], f[2], f[3], f[4]);
         return;
     }
+    if (n >= 5 && str_eq(f[0], "ccer")) {     /* PAD-1317: the co-op awards ceremony's music */
+        ccer_sound_line(f[1], f[2], f[3], f[4]);
+        return;
+    }
     if (n >= 6 && str_eq(f[0], "cpick")) {    /* PAD-1123: a co-op character's sound once picked */
         cpk_sound_line(f[1], f[2], f[3], f[4], f[5]);
         return;
@@ -25348,9 +25552,10 @@ static void sndm_arm(void)
     gms_arm();                                /* PAD-945: nor a sound on a shot in one of the game's modes */
     ci_sound_arm();                           /* PAD-1114: nor the co-op intro's sound */
     cpk_sound_arm();                          /* PAD-1123: nor the co-op characters' sounds once picked */
+    ccer_sound_arm();                         /* PAD-1317: nor the co-op awards ceremony's music */
     juke_arm();                               /* PAD-685: nor the jukebox */
     if (!n_sndm) {
-        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request) return;
+        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request || ccer.request) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }

@@ -456,10 +456,18 @@ export function CoopCharsDialog({ s, onClose }) {
       <span class="small dim wrap">${ch.ceremony ? `${ch.ceremony} plays behind the award cards at a co-op game's end, looped and silent, with the final score along the bottom and the score panels, power-up meter and credits line off the screen.` : "At a co-op game's end the award cards show over the game's End of Ball Bonus loop, with the final score along the bottom and the score panels, power-up meter and credits line off the screen. Choose a video of your own to play there instead."}</span>
     </div>
     <div class="row" style="margin-top:8px; gap:8px">
+      <${Button} size="sm" kind="ghost" icon="wave" disabled=${!rows.length || !ch.pick} onClick=${() => call("modes.coop_ceremony_sound", false)}
+        title=${ch.ceremony_sound ? "The music that plays while the award cards show at a co-op or team game's end: choose another." : "A music track of your own (a sound file, or a video's sound) that plays while the award cards show at a co-op or team game's end."}>
+        ${ch.ceremony_sound ? "Awards music ✓" : "Awards music…"}<//>
+      ${ch.ceremony_sound ? html`<${Button} size="xs" kind="ghost" icon="x" title="No music of your own: the award cards show with the game's own sounds."
+        onClick=${() => call("modes.coop_ceremony_sound", true)} />` : null}
+      <span class="small dim wrap">${ch.ceremony_sound ? `${ch.ceremony_sound} plays as the award cards come up at a co-op or team game's end, the game's own sounds faded under it, and fades out when the last card is done (up to ${ch.ceremony_max || 60} seconds of it).` : "Play a music track of your own while the award cards show at a co-op or team game's end."}</span>
+    </div>
+    <div class="row" style="margin-top:8px; gap:8px">
       <${Check} checked=${!!ch.bonus} label="Show each teammate's character on their End of Ball Bonus" disabled=${!rows.length}
-        title="Its picture (or video) and its name on a strip along the bottom of the screen, as on the award cards, while that teammate's bonus counts."
+        title="Its picture (or video) in a big frame in the bottom-left corner, its name beside it along the bottom, as on the award cards, while that teammate's bonus counts."
         onChange=${(v) => call("modes.coop_chars_bonus", v)} />
-      <span class="small dim wrap">${ch.bonus ? "Its video plays in the strip's frame, or its picture shows when it has no video, with its name beside it. A character with neither keeps the game's own bonus." : ""}</span>
+      <span class="small dim wrap">${ch.bonus ? "Its video plays in the frame bottom-left, or its picture shows when it has no video, with its name beside it. A character with neither keeps the game's own bonus." : ""}</span>
     </div>
     ${looking && ch.look ? html`<${CoopLook} look=${ch.look} />` : null}
     ${ch.preview ? html`<div class="modes-coop-ch-pv">

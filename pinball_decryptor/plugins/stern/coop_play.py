@@ -1114,6 +1114,8 @@ def _characters(got):
         out["intro"] = str(got["intro"])
     if got.get("ceremony"):                             # PAD-1219: the awards ceremony's background video
         out["ceremony"] = str(got["ceremony"])
+    if got.get("ceremony_sound"):                       # PAD-1317: the awards ceremony's own music
+        out["ceremony_sound"] = str(got["ceremony_sound"])
     if got.get("bonus"):                                # PAD-1123: the teammate's character on their End of Ball Bonus
         out["bonus"] = True
     if theme:
@@ -1128,7 +1130,7 @@ def save_characters(project, characters):
     chars = _characters(characters)
     data = staged_changes.load(project)
     raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
-    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("ceremony") or chars.get("bonus"):
+    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "bonus")):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)
@@ -1594,6 +1596,57 @@ def save_ceremony(project, source=None):
     return _save_game_video(project, source, "ceremony", CEREMONY_FILE)
 
 
+# ---- PAD-1317: the awards ceremony's own music ---------------------------------------------------------------------
+# DoomWalrus666: "Please add an option in the mode tab in the characters builder to add a custom audio track to play
+# during the award ceremony". A sound file of the owner's (or a video's own sound), made by a Write into a sound of the
+# card's own on the co-op intro's carrier (sound_modes "the co-op awards ceremony's music"); sounds.cfg names it
+# (``ccer``) and the runtime plays it as the award cards come up, the game's own sounds faded under it, and fades it
+# out when they are done (pad_mode_runtime.c "PAD-1317"). The cards show COOP_CARD_MS each, COOP_CARDS_MAX_MS at most.
+#: the project's file (its extension the source's)
+CEREMONY_SOUND_FILE = "ceremony_music"
+#: the longest ceremony music a card takes: the ceremony itself is 42 s at most (pad_mode_runtime.c COOP_CARDS_MAX_MS)
+CEREMONY_SOUND_MAX_SECONDS = 60
+
+
+def ceremony_sound_path(project, characters=None):
+    """The absolute path of the project's awards ceremony music (``""`` when it has none, or it is gone)."""
+    chars = _characters(characters) if characters is not None else load_characters(project)
+    return picture_path(project, {"picture": chars.get("ceremony_sound") or ""})
+
+
+def save_ceremony_sound(project, source=None):
+    """Copy *source* (a sound file, or a video whose sound is taken) into the project as the music the co-op awards
+    ceremony plays, or with None forget it (the ceremony plays with the game's own sounds); returns the characters as
+    stored. Raises :class:`CoopError` when the file is not one the app takes."""
+    import os
+    import shutil
+    chars = load_characters(project)
+    folder = os.path.join(project, PICTURE_DIR)
+    if source is not None:
+        ext = os.path.splitext(source)[1].lower()
+        if ext not in SOUND_EXTS + VIDEO_EXTS or not os.path.isfile(source):
+            raise CoopError("That is not a sound file the app can take (%s)." % ", ".join(SOUND_EXTS + VIDEO_EXTS))
+    if os.path.isdir(folder):
+        for f in os.listdir(folder):                    # one of it: another extension's goes
+            if os.path.splitext(f)[0] == CEREMONY_SOUND_FILE and (
+                    source is None or f != CEREMONY_SOUND_FILE + os.path.splitext(source)[1].lower()):
+                os.remove(os.path.join(folder, f))
+    if source is None:
+        chars.pop("ceremony_sound", None)
+        return save_characters(project, chars)
+    os.makedirs(folder, exist_ok=True)
+    ext = os.path.splitext(source)[1].lower()
+    shutil.copyfile(source, os.path.join(folder, CEREMONY_SOUND_FILE + ext))
+    chars["ceremony_sound"] = "%s/%s%s" % (PICTURE_DIR, CEREMONY_SOUND_FILE, ext)
+    return save_characters(project, chars)
+
+
+def ceremony_audio(src, out, ffmpeg):
+    """*src*'s sound (a sound file, or a video's own) as a 44.1 kHz 16-bit stereo WAV at *out*, no longer than
+    :data:`CEREMONY_SOUND_MAX_SECONDS`; ``""`` when it has none. Raises :class:`CoopError` when ffmpeg cannot read it."""
+    return intro_audio(src, out, ffmpeg, max_seconds=CEREMONY_SOUND_MAX_SECONDS)
+
+
 #: PAD-1192: the longest any one co-op clip's or sound's ffmpeg run may take. Each is at most INTRO_MAX_SECONDS of
 #: video made in seconds; a run past this is stuck (a looped input it cannot decode never ends) and a Write's Cancel
 #: cannot reach into it, so it is stopped and the build says which file
@@ -1654,8 +1707,9 @@ def intro_audio(src, out, ffmpeg, max_seconds=None):
 # video bank (:data:`PICKED_CLIP`, fitted whole like the intro) and the sound a sound of the card's own on the intro's
 # carrier, and the runtime plays both when the character is picked (pad_mode_runtime.c "PAD-1123"). With ``bonus`` on,
 # the build makes the game's own End of Ball Bonus loop again per character with its picture (or video) and its name on a
-# strip along the foot of the screen in the award card's look (:data:`BONUS_CLIP`, round 2; round 1 had a window right of
-# the bonus's words), and the runtime plays the copy of the teammate up's character when the game asks for its loop.
+# card in the bottom-left corner in the award card's look, the name along the foot beside it (:data:`BONUS_CLIP`, round 3;
+# round 1 had a window right of the bonus's words, round 2 a small photo on a strip centred along the foot), and the
+# runtime plays the copy of the teammate up's character when the game asks for its loop.
 #: a character's picked clip in the video bank (1-based)
 PICKED_CLIP = "PadCoopPicked%d"
 #: the project's files (their extension the source's)
@@ -1669,18 +1723,34 @@ PICKED_STILL_SECONDS = 3
 SOUND_EXTS = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus")
 #: a character's copy of the bonus loop in the video bank (1-based)
 BONUS_CLIP = "PadCoopBonus%d"
-#: round 2 (the reporter: "put the Character image and their Character name at the BOTTOM of the screen ... Sort of like
-#: how it appears in the award ceremony"): the strip on the glass the character's photo and name go on, centred along
-#: the foot of the screen. Godzilla LE 1.16, emulator census, a frame every 0.75 s: the bonus's words end at y 665 (its
-#: summary, PLAYER - the Insider name there when logged in - / TOTAL BONUS / TOTAL SCORE, x 425-940 y 140-665; the
-#: count's lines higher up) and the game draws nothing below them, no score panel. Its top and height, glass pixels:
-BONUS_STRIP_Y, BONUS_STRIP_H = 672, 90
-#: its width's least and most: it fits the name
-BONUS_STRIP_W = (420, 1100)
-#: the photo's slot on the strip (x, y, w, h, the strip's glass pixels): the left end, a 4:3 frame
-BONUS_PHOTO = (10, 9, 96, 72)
+#: round 3 (the reporter: "The character portrait during the end of ball bonus is too small now that is at the bottom.
+#: Could we please display the end of ball bonus character portrait in the left bottom corner of the screen in the size
+#: it was originally displayed. Please put the characters name directly next to the portrait along the bottom of the
+#: screen"; round 2 had a small photo on a strip centred along the foot, round 1 a 360 x 290 window right of the words):
+#: the card is the portrait at round 1's size in the bottom-left corner, in the award card's look, with a name plate
+#: along the foot of the screen beside it. Godzilla LE 1.16, emulator census, a frame every 0.75 s: the summary's words
+#: (PLAYER - the Insider name there when logged in - / TOTAL BONUS / TOTAL SCORE) run x 425-940 y 140-665, the count's
+#: widest lines (GODZILLA POWERUP EARNED, x 135-1230) end above y 460, and the game draws nothing below them, no score
+#: panel: the portrait (x 6-366, y 472-762) and the plate (y 672-762) clear them all. The card's left edge and the
+#: margin under it, glass pixels:
+BONUS_CARD_X, BONUS_CARD_FOOT = 6, 6
+#: the portrait (x, y, w, h, the card's pixels): round 1's window, 360 x 290 with its frame; it is the card's height
+BONUS_PHOTO = (5, 5, 350, 280)
+#: the name plate's height, along the card's foot; it starts under the portrait's right edge
+BONUS_PLATE_H = 90
+#: the card's least and most width: it fits the name
+BONUS_CARD_W = (620, 1348)
 #: the name's largest and least size (glass pixels)
-BONUS_NAME_PX = (60, 30)
+BONUS_NAME_PX = (64, 30)
+
+
+def _bonus_card_h():
+    return BONUS_PHOTO[1] * 2 + BONUS_PHOTO[3]
+
+
+def _bonus_name_x():
+    """Where the name starts on the card (its pixels): just right of the portrait."""
+    return BONUS_PHOTO[0] + BONUS_PHOTO[2] + 24
 
 
 def picked_clip_path(project, character):
@@ -1861,16 +1931,18 @@ def bonus_loop(bank_data, bank=None):
 
 
 def bonus_strip(name):
-    """The strip for a character called *name* on the glass, ``(x, y, w, h)``, x and w even: as wide as its photo and name
-    need (within :data:`BONUS_STRIP_W`), centred, at :data:`BONUS_STRIP_Y`."""
+    """The card for a character called *name* on the glass, ``(x, y, w, h)``, x and w even: the portrait in the
+    bottom-left corner and the name plate beside it along the foot, as wide as the name needs (within
+    :data:`BONUS_CARD_W`)."""
     from PIL import Image, ImageDraw
     text = str(name or "?")
     d = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
-    lead = BONUS_PHOTO[0] + BONUS_PHOTO[2] + 22                 # the photo, then the name
-    f = _fit(d, text, _DISPLAY_FONTS, BONUS_STRIP_W[1] - lead - 34, BONUS_NAME_PX[0], BONUS_NAME_PX[1])
-    w = max(BONUS_STRIP_W[0], min(BONUS_STRIP_W[1], lead + int(d.textlength(text, font=f)) + 34 + 48))  # + the rule
-    w += -w % 4                                                  # centred on an even x
-    return ((GLASS[0] - w) // 2, BONUS_STRIP_Y, w, BONUS_STRIP_H)
+    lead = _bonus_name_x()
+    f = _fit(d, text, _DISPLAY_FONTS, BONUS_CARD_W[1] - lead - 34 - 48, BONUS_NAME_PX[0], BONUS_NAME_PX[1])
+    w = max(BONUS_CARD_W[0], min(BONUS_CARD_W[1], lead + int(d.textlength(text, font=f)) + 34 + 48))  # + the rule
+    w += w % 2
+    h = _bonus_card_h()
+    return (BONUS_CARD_X, GLASS[1] - BONUS_CARD_FOOT - h, w, h)
 
 
 def bonus_box(transform, w, h, rect=None):
@@ -1885,28 +1957,39 @@ def bonus_box(transform, w, h, rect=None):
 
 
 def bonus_card(name, colour="#ffb400", theme=None, picture="", project="", scale=2):
-    """The strip as an RGBA PIL image, :func:`bonus_strip`'s size in glass pixels: the award card's look (its body,
-    a lit frame in *colour*) with *picture* (a still's path) in the photo slot - without one the slot is left clear,
-    for a video under it - and *name* big beside it on the theme's rules."""
+    """The card as an RGBA PIL image, :func:`bonus_strip`'s size in glass pixels, in the award card's look (its body,
+    lit frames in *colour*): *picture* (a still's path) in the portrait - without one the portrait is left clear, for a
+    video under it - and the name plate along the foot right of it, *name* big on the theme's rules. Above the plate
+    the card is clear (the bonus's own picture)."""
     from PIL import Image, ImageDraw, ImageFilter
     th = theme_of(theme)
     acc = clean_colour(colour) or th["accent"]
     A, A2 = _hex(acc), _hex(th["accent2"])
     S = scale
     gw = bonus_strip(name)[2]
-    W, H = gw * S, BONUS_STRIP_H * S
-    mask = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=16 * S, fill=255)
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    img.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
-    img.paste(_body(project, th, W, H, S), (0, 0), mask)
-    img = _glow(img, (3 * S, 3 * S, W - 4 * S, H - 4 * S), 15 * S, A[:3] + (200,), 4 * S, 3 * S)
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle((2 * S, 2 * S, W - 3 * S, H - 3 * S), radius=15 * S, outline=A[:3] + (255,), width=2 * S)
+    W, H = gw * S, _bonus_card_h() * S
     px, py, pw, ph = (v * S for v in BONUS_PHOTO)
-    img = _glow(img, (px - 2 * S, py - 2 * S, px + pw + 2 * S, py + ph + 2 * S), 9 * S, A[:3] + (230,), 4 * S, 3 * S)
+    fw = px * 2 + pw                                            # the portrait's frame, the card's height
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+
+    def panel(img, x0, y0, x1, y1, r):                          # the award card's body in a lit frame
+        mask = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((x0, y0, x1 - 1, y1 - 1), radius=r, fill=255)
+        img.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
+        body = _body(project, th, x1 - x0, y1 - y0, S)
+        full = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        full.paste(body, (x0, y0))
+        img.paste(full, (0, 0), mask)
+        img = _glow(img, (x0 + 3 * S, y0 + 3 * S, x1 - 4 * S, y1 - 4 * S), r - S, A[:3] + (200,), 4 * S, 3 * S)
+        ImageDraw.Draw(img).rounded_rectangle((x0 + 2 * S, y0 + 2 * S, x1 - 3 * S, y1 - 3 * S), radius=r - S,
+                                              outline=A[:3] + (255,), width=2 * S)
+        return img
+
+    top = H - BONUS_PLATE_H * S                                 # the plate, from under the portrait's right edge
+    img = panel(img, fw - 24 * S, top, W, H, 16 * S)
+    img = panel(img, 0, 0, fw, H, 14 * S)                       # the portrait's frame over the plate's end
     pm = Image.new("L", (pw, ph), 0)
-    ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=8 * S, fill=255)
+    ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=10 * S, fill=255)
     if picture:
         with Image.open(picture) as im:
             photo = _cover(im.convert("RGBA"), pw, ph)
@@ -1914,12 +1997,12 @@ def bonus_card(name, colour="#ffb400", theme=None, picture="", project="", scale
     else:                                                       # the video goes under it
         img.paste(Image.new("RGBA", (pw, ph), (0, 0, 0, 0)), (px, py), pm)
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=8 * S, outline=A[:3] + (255,), width=2 * S)
+    d.rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=10 * S, outline=A[:3] + (255,), width=2 * S)
     text = str(name or "?")
-    ix = px + pw + 22 * S
+    ix = _bonus_name_x() * S
     iw = W - ix - 34 * S
-    nf = _fit(d, text, _DISPLAY_FONTS, iw, BONUS_NAME_PX[0] * S, BONUS_NAME_PX[1] * S)
-    by = 58 * S
+    nf = _fit(d, text, _DISPLAY_FONTS, iw - 48 * S, BONUS_NAME_PX[0] * S, BONUS_NAME_PX[1] * S)
+    by = top + 60 * S
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(shadow).text((ix + 3 * S, by + 4 * S), text, font=nf, fill=(0, 0, 0, 220), anchor="ls")
     img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(3 * S)))
@@ -1927,22 +2010,22 @@ def bonus_card(name, colour="#ffb400", theme=None, picture="", project="", scale
     d.text((ix, by), text, font=nf, fill=_hex(th["name"]), anchor="ls", stroke_width=max(1, S),
            stroke_fill=(0, 0, 0, 255))
     nw = min(iw - 40 * S, d.textlength(text, font=nf))
-    d.rectangle((ix, 68 * S, ix + nw, 73 * S), fill=A[:3] + (255,))
-    d.rectangle((ix + nw + 8 * S, 68 * S, ix + nw + 40 * S, 73 * S), fill=A2[:3] + (255,))
-    return img.resize((gw, BONUS_STRIP_H), Image.LANCZOS)
+    d.rectangle((ix, top + 69 * S, ix + nw, top + 74 * S), fill=A[:3] + (255,))
+    d.rectangle((ix + nw + 8 * S, top + 69 * S, ix + nw + 40 * S, top + 74 * S), fill=A2[:3] + (255,))
+    return img.resize((gw, H // S), Image.LANCZOS)
 
 
 def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400", seconds=None, size=(1360, 768),
                name="", theme=None, project=""):
     """The game's bonus loop *loop_src* (at *size*, the bank's clip frame: an owner's replacement of another size is
-    scaled to it first) made again at *out* with a character's strip (:func:`bonus_card`: its *picture*, or its
-    *video* looped in the photo slot, and its *name*, framed in *colour*) over *box* (the loop's pixels: :func:`bonus_box`
-    of the name's :func:`bonus_strip`), as long as the loop (or *seconds*), 30 fps, silent."""
+    scaled to it first) made again at *out* with a character's card (:func:`bonus_card`: its *picture*, or its
+    *video* looped in the portrait, and its *name* beside it, framed in *colour*) over *box* (the loop's pixels:
+    :func:`bonus_box` of the name's :func:`bonus_strip`), as long as the loop (or *seconds*), 30 fps, silent."""
     import os
     from . import mode_assets as MA
     x, y, bw, bh = box
     if not (video or picture):
-        raise CoopError("a bonus strip needs the character's picture or video")
+        raise CoopError("a bonus card needs the character's picture or video")
     still = "" if video else _clean_still(picture, out)
     card_png = out + ".card.png"
     try:
@@ -1954,7 +2037,7 @@ def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400
         ins = ["-i", loop_src, "-loop", "1", "-framerate", str(MA.FPS), "-i", card_png]
         fc = "[0:v]scale=%d:%d,setsar=1,fps=%d[b];" % (size[0], size[1], MA.FPS)
         under = "[b]"
-        if video:                                               # the video in the slot, the strip over it
+        if video:                                               # the video in the portrait, the card over it
             ins += ["-stream_loop", "-1", "-i", video]
             fc += ("[2:v]scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1,fps=%d[w];"
                    "[b][w]overlay=%d:%d:shortest=0:eof_action=repeat[bv];" % (sw, sh, sw, sh, MA.FPS, sx, sy))
@@ -1963,12 +2046,12 @@ def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400
         head, tail = MA._encode_args(ffmpeg, out)
         t = seconds or media_seconds(loop_src, ffmpeg) or 8.0
         cmd = head + ins + ["-filter_complex", fc, "-map", "[v]", "-t", "%.3f" % t] + tail
-        r = _ffmpeg_run(cmd, "the bonus strip's clip of %s" % os.path.basename(video or picture))
+        r = _ffmpeg_run(cmd, "the bonus card's clip of %s" % os.path.basename(video or picture))
     finally:
         _drop(still)
         _drop(card_png)
     if r.returncode != 0:
-        raise CoopError("ffmpeg could not make the bonus strip's clip: %s" % (r.stderr or "").strip()[-300:])
+        raise CoopError("ffmpeg could not make the bonus card's clip: %s" % (r.stderr or "").strip()[-300:])
     return out
 
 
@@ -2784,7 +2867,8 @@ def export_settings(project, path):
                                           os.path.splitext(src)[1].lower())
             pictures.append((src, c[field]))
     for key, stem, path_of in (("intro", INTRO_FILE, intro_path),          # PAD-1114: the co-op games' intro video
-                               ("ceremony", CEREMONY_FILE, ceremony_path)):   # PAD-1219: the awards' background
+                               ("ceremony", CEREMONY_FILE, ceremony_path),    # PAD-1219: the awards' background
+                               ("ceremony_sound", CEREMONY_SOUND_FILE, ceremony_sound_path)):   # PAD-1317: music
         got = path_of(project, chars)
         chars.pop(key, None)
         if got:
@@ -2940,11 +3024,13 @@ def import_settings(project, path):
                 f.write(blob)
             c[field] = "%s/%s" % (PICTURE_DIR, name)
             pictures += 1
-    for key, stem in (("intro", INTRO_FILE), ("ceremony", CEREMONY_FILE)):   # PAD-1114 / PAD-1219: the videos
+    for key, stem, exts in (("intro", INTRO_FILE, VIDEO_EXTS), ("ceremony", CEREMONY_FILE, VIDEO_EXTS),
+                            # PAD-1114 / PAD-1219: the videos; PAD-1317: the ceremony's music
+                            ("ceremony_sound", CEREMONY_SOUND_FILE, SOUND_EXTS + VIDEO_EXTS)):
         rel = chars.pop(key, "") or ""
         blob = read(rel) if read and rel else None
         ext = os.path.splitext(rel)[1].lower()
-        if blob and ext in VIDEO_EXTS:
+        if blob and ext in exts:
             os.makedirs(folder, exist_ok=True)
             for f in os.listdir(folder):
                 if os.path.splitext(f)[0] == stem:
@@ -2985,7 +3071,7 @@ def import_settings(project, path):
                 awards[str(k)] = a
         if awards:
             raw["awards"] = awards
-    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("ceremony") or chars.get("bonus"):
+    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "bonus")):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)

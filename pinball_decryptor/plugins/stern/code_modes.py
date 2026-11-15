@@ -429,9 +429,11 @@ def describe(slug, spec, carried=None, prof=None):
         u = got.get("music")
         if carried is None:
             parts.append("its own music %s" % spec.music)
-        elif u:
+        elif u and u.get("sid"):
             parts.append("its own music %s (request %d, its own bed: sound id %s)"
-                         % (spec.music, u["request"], u.get("sid", "-")))
+                         % (spec.music, u["request"], u["sid"]))
+        elif u:                         # PAD-1295: swapped in on its carrier (no bed sid: Spike 3's)
+            parts.append("its own music %s (request %d)" % (spec.music, u["request"]))
         else:
             parts.append("not its own music (this card cannot carry it; the log says why)")
     calls = spec.call_list()

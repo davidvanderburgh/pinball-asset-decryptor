@@ -252,3 +252,39 @@ def test_the_real_splash_gives_up_in_time():
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+def test_no_score_and_five_ball_feeds():
+    """PAD-1312: the score is gone and the ball has five places to come in."""
+    s = sp.splash_script("9.9.9")
+    assert "score" not in s.lower()
+    feeds = s.split("$S.feeds = @(", 1)[1].split("$S.feed = -1", 1)[0]
+    assert feeds.count("@(") == 5
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows PowerShell")
+def test_every_new_ball_comes_from_another_feed(tmp_path):
+    """PAD-1312: the script's own Plunge, run 200 times without the window:
+    it uses all five feeds, never the same one twice in a row, and puts the
+    ball where that feed says."""
+    s = sp.splash_script("9.9.9")
+    body = s.split("$S.feeds = @(", 1)[1].split("\nPlunge\n", 1)[0]
+    ps = tmp_path / "plunge.ps1"
+    ps.write_text(
+        "$S = @{ rnd = (New-Object System.Random);"
+        " history = (New-Object System.Collections.ArrayList) }\n"
+        "$S.feeds = @(" + body + "\n"
+        "$out = @(); for ($i = 0; $i -lt 200; $i++) { Plunge;"
+        " $out += ('{0} {1} {2}' -f $S.feed, $S.x, $S.y) }\n"
+        "$out -join ';'\n", encoding="utf-8")
+    out = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive",
+         "-ExecutionPolicy", "Bypass", "-File", str(ps)],
+        capture_output=True, text=True, timeout=120).stdout.strip()
+    rows = [r.split() for r in out.split(";")]
+    assert len(rows) == 200, out[-500:]
+    picks = [int(r[0]) for r in rows]
+    assert set(picks) == {0, 1, 2, 3, 4}
+    assert all(a != b for a, b in zip(picks, picks[1:]))
+    starts = {int(r[0]): (float(r[1]), float(r[2])) for r in rows}
+    assert len(set(starts.values())) == 5

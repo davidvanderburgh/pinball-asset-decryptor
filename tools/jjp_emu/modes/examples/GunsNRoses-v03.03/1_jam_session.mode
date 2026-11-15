@@ -1,0 +1,16 @@
+name = Jam Session
+title = JAM SESSION
+start = switch_target_jam
+shots = switch_target_jam switch_ramp_left_made switch_prox_ramp_right_made
+points = 1000000
+seconds = 25
+complete = 3
+complete_points = 5000000
+sound_start = se_FX_GnR_GenericCrowds_IncreasinglyLargerCheerExcitement_3
+sound_shot = se_Fanfare_GnR_Amps_Jackpot
+sound_complete = se_Fanfare_GnR_Amps_TripleJackpot
+sound_end = se_FX_GnR_GenericCrowds_DifferentLengthCheers_3sec
+lamps = lp_target_jam lp_center_loop_arrow
+lamp_color = ff2000
+lamp_blink = 4
+panel_color = 600000c8

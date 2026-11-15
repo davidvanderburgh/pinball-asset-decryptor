@@ -1,0 +1,79 @@
+{
+ "format": 1,
+ "elf": "HarryPotter-v01.26.elf",
+ "game": "HarryPotter",
+ "exported_symbols": 233,
+ "can_run_modes": false,
+ "missing_required": [
+  "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_",
+  "_ZTV4Mode",
+  "_ZN4Mode5startEv",
+  "_ZN4Mode3endEv",
+  "_ZN4Mode8set_timeEi",
+  "_ZN4Mode10is_runningEv",
+  "_ZN4Mode15is_timer_pausedEv",
+  "_ZN4Mode15score_and_totalEy",
+  "_ZN4Mode14hook_tick_workEi",
+  "_ZN4Mode25hook_do_mode_start_choreoEv",
+  "_Z14jjpe_state_getv",
+  "_ZN11SoundEffect4playEv"
+ ],
+ "mode_vtable": {},
+ "sdk": {
+  "mode": {
+   "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": false,
+   "_ZTV4Mode": false,
+   "_ZN4Mode5startEv": false,
+   "_ZN4Mode3endEv": false,
+   "_ZN4Mode8set_timeEi": false,
+   "_ZN4Mode10is_runningEv": false,
+   "_ZN4Mode15is_timer_pausedEv": false,
+   "_ZN4Mode15score_and_totalEy": false,
+   "_ZN4Mode14hook_tick_workEi": false,
+   "_ZN4Mode25hook_do_mode_start_choreoEv": false,
+   "_ZN4Mode25hook_do_mode_total_choreoEv": false
+  },
+  "game": {
+   "_Z14jjpe_state_getv": false,
+   "_Z16proc_am_i_a_procv": false,
+   "_Z26game_flow_get_ball_in_playv": false
+  },
+  "yield": {
+   "_Z28mb_get_logical_balls_in_playv": false,
+   "_Z20mb_get_balls_in_playv": false
+  },
+  "sound": {
+   "_ZN11SoundEffect4playEv": false
+  },
+  "lamps": {
+   "_ZN10LampBufferC1EiPFvPS_EPKc9lb_flag_t": false,
+   "_ZN4Lamp3setER10LampBufferhhhh": false,
+   "_ZN4Lamp11transparentER10LampBuffer": false,
+   "_ZN10LampBuffer10render_allEv": false,
+   "_ZTV4Lamp": false
+  },
+  "screen": {
+   "_ZN8JJPEFont4fontEv": false,
+   "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": false
+  }
+ },
+ "switch_object_bytes": null,
+ "lamp_object_bytes": null,
+ "defaults": {
+  "start": "",
+  "shots": "",
+  "lamps": "",
+  "font_title": "",
+  "font_value": "",
+  "font_timer": "",
+  "sound_start": "",
+  "sound_shot": "",
+  "sound_end": ""
+ },
+ "mode_classes": [],
+ "switches": [],
+ "lamps": [],
+ "lamp_groups": [],
+ "fonts": [],
+ "sounds": []
+}

@@ -1,0 +1,12 @@
+name = Orbit Rush
+title = ORBIT RUSH
+start = switch_orbit_left_hi
+start_count = 2
+shots = switch_orbit_left_hi switch_orbit_right_hi
+points = 750000
+seconds = 15
+sound_start = se_FX_GnR_RockItMeter_CanonFire_ImpactExplosion
+sound_shot = se_Fanfare_GnR_Amps_DoubleJackpot
+lamp_color = 0060ff
+panel_color = 001860c8
+game_modes = end

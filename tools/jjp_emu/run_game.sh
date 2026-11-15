@@ -62,20 +62,28 @@ if [ "${JJP_SHIM:-0}" = "1" ]; then
     [ -n "${JJP_SHIM_DEBUG:-}" ] && SHIM_ENV="$SHIM_ENV; export JJP_SHIM_DEBUG=1"
 fi
 
-# Our custom-modes library (PAD-1335, jjpmodes.c), opt-in: JJP_MODS_SO=<path>.
-# Preloaded beside the hardware shim; its constructor waits for the game to
-# finish starting and then registers our modes with the game's ModeManager.
-# Its log goes to /jjpe/temp/jjpmodes.log inside the jail.
+# The JJP mode SDK runtime (PAD-1335/1337, jjpmodes.c), opt-in: JJP_MODS_SO=<path>
+# and JJP_MODS_DIR=<folder of title.cfg + *.mode>.  Both are copied into the
+# jail as /tmp/padmodes/jjpmodes.so + /tmp/padmodes/modes/ - the layout a
+# PAD-written install ISO puts at $JJPEDIR/padmodes - and preloaded beside the
+# hardware shim.  Its log goes to /jjpe/temp/jjpmodes.log inside the jail.
+# An image that carries the SDK itself (scripts/padmodes.sh, written by
+# mkjjpmodes.py) needs neither: the RUN below sources that hook exactly where
+# the machine's rungame.sh does.  JJP_MODS_SO wins over an image's own copy.
+MODS_ENV=
 if [ -n "${JJP_MODS_SO:-}" ]; then
     [ -f "$JJP_MODS_SO" ] || { echo "run_game.sh: JJP_MODS_SO=$JJP_MODS_SO is missing" >&2; exit 5; }
-    cp -f "$JJP_MODS_SO" "$JJP_JAIL/tmp/jjpmodes.so"
-    if [ -n "$SHIM_ENV" ]; then
-        SHIM_ENV="$SHIM_ENV; export LD_PRELOAD=\"\$LD_PRELOAD /tmp/jjpmodes.so\""
-    else
-        SHIM_ENV='export LD_PRELOAD=/tmp/jjpmodes.so'
+    rm -rf "$JJP_JAIL/tmp/padmodes"; mkdir -p "$JJP_JAIL/tmp/padmodes/modes"
+    cp -f "$JJP_MODS_SO" "$JJP_JAIL/tmp/padmodes/jjpmodes.so"
+    if [ -n "${JJP_MODS_DIR:-}" ]; then
+        [ -d "$JJP_MODS_DIR" ] || { echo "run_game.sh: JJP_MODS_DIR=$JJP_MODS_DIR is not a folder" >&2; exit 5; }
+        cp -f "$JJP_MODS_DIR"/* "$JJP_JAIL/tmp/padmodes/modes/" 2>/dev/null
     fi
-    [ -n "${JJP_MODS_ARGS:-}" ] && SHIM_ENV="$SHIM_ENV; export JJP_MODS_ARGS='$JJP_MODS_ARGS'"
+    MODS_ENV='export PADMODES_RIG=1; export JJP_MODS_DIR=/tmp/padmodes/modes; export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD }/tmp/padmodes/jjpmodes.so"'
+    # proof runs only: start a game mode from a switch (jjpmodes.c, test_hook)
+    [ -n "${JJP_MODS_TEST_GAMEMODE:-}" ] && MODS_ENV="$MODS_ENV; export JJP_MODS_TEST_GAMEMODE='$JJP_MODS_TEST_GAMEMODE' JJP_MODS_TEST_SWITCH='${JJP_MODS_TEST_SWITCH:-}'"
 fi
+rm -f "$JJP_JAIL/jjpe/temp/jjpmodes.log"
 
 # PAD multi-boot (item 117).  JJP_SELECT is the three-way switch padpath.sh
 # documents; it rides into the chroot as an export so the RUN can read it.
@@ -150,7 +158,15 @@ RUN='
   export PULSE_SERVER='"$RUN_PULSE"'
   export HOME=/root
   '"$SHIM_ENV"'
+  '"$MODS_ENV"'
   '"$SELECT_ENV"'
+  # PAD custom modes (PAD-1337): the hook a mode install ISO adds to rungame.sh,
+  # sourced at the same point (after runonce.sh, before the game loop).  It
+  # exports LD_PRELOAD for ./game.  A rig run with JJP_MODS_SO set skips it.
+  if [ -z "${PADMODES_RIG:-}" ] && [ -r $JJPEDIR/scripts/padmodes.sh ]; then
+    . $JJPEDIR/scripts/padmodes.sh
+    echo "[rig] image hook padmodes.sh: LD_PRELOAD=$LD_PRELOAD"
+  fi
   # PAD multi-boot (item 117): the hook root A carries on a multi-boot install
   # (padselect.sh, item 115), run at the point the machine'"'"'s rungame.sh runs it -
   # display up, before ./game - and in the mount namespace of THIS run (the

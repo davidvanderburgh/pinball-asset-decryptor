@@ -45,7 +45,10 @@ ctl.!default {
     type null
 }
 ASOUND
-    rm -f "$JJP_JAIL$JJPEDIR/$(jjp_title)/allegro5.cfg"
+    rm -f "$JJP_JAIL$JJPEDIR/$(jjp_title)/allegro5.cfg" "$JJP_JAIL/root/.config/pulse/cookie"
+    # ...and that alone did NOT mute it (PAD-1340): Allegro tries PulseAudio
+    # before ALSA, so run_game.sh also hands a muted run a Pulse server that
+    # does not exist.
     echo "audio: muted (PAD_AUDIO=1 to hear it) - ALSA default is the null device"
     exit 0
 fi

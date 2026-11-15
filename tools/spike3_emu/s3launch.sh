@@ -109,7 +109,7 @@ setup() {
 
 build_ok() {
     local f
-    for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3dev.so s3vid.so padglhost; do
+    for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3dev.so s3vid.so pad_nosync.so padglhost; do
         [ -e "$B/$f" ] || return 1
     done
     # built from these sources? (s3build.sh --sum: an app update that changed

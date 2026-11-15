@@ -98,13 +98,56 @@ if [ -n "${JJP_SELECT_DUMP:-}" ]; then
     rm -f "$JJP_JAIL/jjpe/temp/jjpselect.mix.raw"
 fi
 
+# NO GLOBAL sync() (PAD-1340).  The game's NVRAM and scene-preload threads call
+# libc sync() (syscall 162) after they write.  Under WSL2 sync(2) is GLOBAL: it
+# also flushes the virtiofs mounts of the Windows drives, waits on the Windows
+# side (ksys_sync -> fuse_sync_fs -> request_wait_answer) and never returns.
+# The thread sits in D state, SIGKILL cannot finish it, the run is left as a
+# zombie whose PulseAudio stream stays open, and only `wsl --shutdown` clears
+# it.  PAD-1337 left nine of them on 2026-11-15, and every later run queued
+# behind them in super_lock.  The Spike 2 rig's no-op sync (pad_nosync.c, the
+# same source) built for x86-64 and preloaded for EVERY process in the jail via
+# its /etc/ld.so.preload (the overlay's upper layer: the image is never
+# written), so the game's scripts' `sync` is covered too.  syncfs()/fsync() are
+# left alone, and they are all the NVRAM's durability needs on a tmpfs upper.
+jjp_nosync() {
+    local src="$HERE/../spike2_emu/pad_nosync.c" so="${JJP_NOSYNC_SO:-/var/tmp/pad_nosync_x86_64.so}"
+    if [ ! -f "$so" ] || [ "$src" -nt "$so" ]; then
+        gcc -std=gnu17 -fno-stack-protector -fPIC -shared -O2 -nostdlib \
+            -Wl,-soname,pad_nosync.so -o "$so.tmp" "$src" && mv -f "$so.tmp" "$so" || {
+            echo "run_game.sh: WARNING - could not build $so; the game's sync() can wedge this run" >&2
+            return 0; }
+    fi
+    install -m 0755 "$so" "$JJP_JAIL/lib/pad_nosync.so"
+    touch "$JJP_JAIL/etc/ld.so.preload"
+    grep -qx /lib/pad_nosync.so "$JJP_JAIL/etc/ld.so.preload" \
+        || echo /lib/pad_nosync.so >> "$JJP_JAIL/etc/ld.so.preload"
+}
+jjp_nosync
+
+# MUTED UNLESS ASKED (PAD-1340).  audio.sh's PAD_AUDIO=0 null asound.conf was
+# not enough: Allegro's autodetect tries PulseAudio BEFORE ALSA, and with
+# PULSE_SERVER pointing at WSLg and the desktop cookie in the jail it reached
+# the speakers directly - every hidden PAD-1337 run played Guns N' Roses on
+# David's speakers.  A muted run now gets a Pulse server that does not exist and
+# no cookie, so Allegro falls through to ALSA's null device, and any
+# allegro5.cfg an earlier audible run left (driver=pulseaudio, which does NOT
+# fall back) is removed.  PAD_AUDIO=1 (the app's Emulate JJP tab) is unchanged.
+if [ "${PAD_AUDIO:-0}" = "1" ]; then
+    RUN_PULSE=$JJP_PULSE
+else
+    RUN_PULSE=unix:/nonexistent/pad-muted
+    rm -f "$JJP_JAIL/root/.config/pulse/cookie" "$JJP_JAIL$JJPEDIR/$(jjp_title)/allegro5.cfg"
+    echo "run_game.sh: audio MUTED (PAD_AUDIO=1 to hear it)"
+fi
+
 RUN='
   export JJPEDIR='"$JJPEDIR"'
   . $JJPEDIR/setenv.sh
   export GAMENAME
   export GAMEDIR=$JJPEDIR/$GAMENAME
   export DISPLAY='"$JJP_DISPLAY"'
-  export PULSE_SERVER='"$JJP_PULSE"'
+  export PULSE_SERVER='"$RUN_PULSE"'
   export HOME=/root
   '"$SHIM_ENV"'
   '"$SELECT_ENV"'

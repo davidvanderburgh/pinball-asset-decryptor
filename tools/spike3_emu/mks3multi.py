@@ -80,7 +80,7 @@ SELECTOR_FILES = collections.OrderedDict([
     ("s3select", (0o755, True)),
     ("padselect.sh", (0o755, True)),
     ("font.ttf", (0o644, False)),
-    # PAD-1309: preloaded into the game by padselect.sh - BACK held 5 s restarts into the menu
+    # PAD-1309: preloaded into the game by padselect.sh - BACK held 3 s (Hold BACK, back_hold=) restarts into the menu
     # (not required: a selector dir built before it still makes a card, one without the way back)
     ("padmenu.so", (0o755, False)),
 ])
@@ -293,7 +293,8 @@ def conf_from_args(a, cards, media):
     return render_conf(dirs, titles, subtitles, a.default or 0, 15 if a.timeout is None else a.timeout,
                        rows, move, confirm, volume, theme=a.theme, colors=mkc.parse_color_flags(a.color),
                        heading=a.heading, text_size=a.text_size, counter=a.counter,
-                       countdown_word=a.countdown_word, footer=footer)
+                       countdown_word=a.countdown_word, footer=footer,
+                       back_hold=getattr(a, "back_hold", None))
 
 
 def check_selector_dir(d):
@@ -574,6 +575,9 @@ def inject_card(a):
                 a.titles = ";".join(t for _p, t, _s in old["images"])
             if a.subtitles is None:
                 a.subtitles = ";".join(s for _p, _t, s in old["images"])
+            # PAD-1309: the card's own BACK hold rides through a menu-only inject
+            if getattr(a, "back_hold", None) is None:
+                a.back_hold = old.get("back_hold")
             stand_ins = [type("C", (), {"label": lambda self: "", "path": d})() for d in dirs]
             conf = conf_from_args(a, stand_ins, media)
             for name, (mode, _req) in SELECTOR_FILES.items():
@@ -627,6 +631,8 @@ def verify_card(a):
                 conf = parse_conf(f.read())
             dirs = [p for p, _t, _s in conf["images"]]
             print("images: %s" % " ".join(dirs))
+            if conf.get("back_hold") is not None:
+                print("back_hold=%d" % conf["back_hold"])
             for name, target in TOP_LINKS.items():
                 got = os.readlink(os.path.join(m, name)) if os.path.islink(os.path.join(m, name)) else None
                 print("link /games/%s -> %s: %s" % (name, got, "OK" if got == target else "WRONG"))
@@ -723,6 +729,8 @@ def _add_conf_flags(s):
     s.add_argument("--titles", help="';'-separated titles, one per image (index order)")
     s.add_argument("--subtitles", help="';'-separated subtitles, one per image")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
+    s.add_argument("--back-hold", dest="back_hold", type=int, default=None,
+                   help="seconds BACK held in a game restarts into the menu (0 = off; card default 3)")
     s.add_argument("--heading", metavar="TEXT")
     s.add_argument("--footer", metavar="TEXT")
     s.add_argument("--footer-own", action="store_true")

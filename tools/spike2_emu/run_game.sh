@@ -291,7 +291,7 @@ if [ -n "${PAD_CARD:-}" ]; then
             # ...and counter= / countdown_word= / footer= (PAD-190), same reason:
             # a card whose counter line is off and whose countdown says
             # 'Launching' must preview as that card, not as the default menu.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|color_[a-z_]+)[[:space:]]*=' \
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|back_hold|color_[a-z_]+)[[:space:]]*=' \
                 | grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true
             # ★ PAD-307: EACH IMAGE'S BUILT COLOR PROFILE, the lines that put the SETTINGS tile
             # in the menu. They name IMAGE INDEXES, so they ride on the group lines' gate: only
@@ -1021,7 +1021,7 @@ fi
 # (modehook.MENU_HOOK_LINES); this rig execs ./game itself, so it puts the same
 # object in front here, ahead of the shim (which answers the cabinet SPI word
 # padmenu.so reads). Holding BACK (the coin door's, on the playfield's service
-# keys) for 5 s then runs the card's own select.sh --reboot, and the reboot it
+# keys) for the card's back_hold= seconds (3 s unless set) then runs the card's own select.sh --reboot, and the reboot it
 # asks for is this rig's: dump/reboot.req, which watch.sh's poll turns into a
 # boot of the guest from the menu (restartgame.sh's path). PAD_MENU_BACK=0
 # leaves it out.
@@ -1030,7 +1030,9 @@ if [ -n "$SEL_DIRS" ] && [ "${PAD_MENU_BACK:-1}" != 0 ] && [ -f "$R/usr/local/co
     PAD_MENU_SO=/usr/local/codeselect/padmenu.so
     # padmenu.restart: what asked for it, kept (reboot.req is taken the moment it lands)
     export CODESELECT_REBOOT="touch /dump/padmenu.restart /dump/reboot.req"
-    echo "[select] holding BACK on the coin door for 5 s restarts into the menu, as on the card"
+    # the card's own Hold BACK seconds (back_hold=): the rig's copy of its images.conf
+    export PADMENU_CONF=/dump/codeselect.conf
+    echo "[select] holding BACK on the coin door (the card's back_hold=, else 3 s) restarts into the menu, as on the card"
 fi
 
 # ★ ITEM 45 - THIS TITLE'S PANEL IS BOLTED IN UPSIDE DOWN AND OUR MONITOR IS NOT.

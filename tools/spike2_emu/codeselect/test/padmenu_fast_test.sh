@@ -65,6 +65,24 @@ run notserial "$T/data/x" '-L:05\r' 64 0
 run rig       "$T/dev/ttyACM0" '-L:05\r' 64 0 BOFHW_DEV=/tmp/hw
 grep -q "not restarting" "$T/err" || { echo "padmenu_fast_test: FAIL rig: nothing said"; fail=1; }
 
+# HOW LONG: the card's back_hold= (seconds; 0 = off) when nothing is handed in
+conf_run() {   # conf_run NAME BACK_HOLD_LINE WANT [ENV...]
+    local name=$1 line=$2 want=$3; shift 3
+    rm -f "$T/calls"
+    printf '%s\n' "image=a|A" "$line" > "$T/images.conf"
+    printf -- '-L:05\r' > "$T/dev/ttyACM0"
+    env LD_PRELOAD="$SO" PADMENU_CONF="$T/images.conf" PADMENU_CMD="$T/reboot.sh" \
+        CODESELECT_REBOOT="touch /x" "$@" "$T/driver" "$T/dev/ttyACM0" 64 1800 2> "$T/err"
+    sleep 0.3
+    got=$( [ -f "$T/calls" ] && wc -l < "$T/calls" || echo 0)
+    if [ "$got" -ne "$want" ]; then echo "padmenu_fast_test: FAIL $name: $got restart(s), wanted $want"; fail=1
+    else echo "padmenu_fast_test: ok $name ($got restart)"; fi
+}
+conf_run conf-1s  "back_hold=1" 1
+conf_run conf-off "back_hold=0" 0
+conf_run conf-3s  "back_hold = 3" 0
+conf_run env-wins "back_hold=0" 1 PADMENU_HOLD_MS=400
+
 # SPOOKY: the Warden (BACK 94 = 0x5e) and the Pinotaur (BACK 63 = 0x3f), binary, a message at a time
 W=(CODESELECT_REBOOT="touch /x" PADMENU_PROTO=warden PADMENU_SWITCH=94)
 P=(CODESELECT_REBOOT="touch /x" PADMENU_PROTO=pinotaur PADMENU_SWITCH=63)

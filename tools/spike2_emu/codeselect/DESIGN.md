@@ -646,7 +646,7 @@ image the editions boot had remembered; on again, the card booted by EDITION.
 ## Back to the menu without a power cycle (PAD-1309)
 
 A tester: "a way to call up the multi-boot menu without having to turn the machine off and
-then back on".  **Hold BACK on the coin door for 5 s during a game** and the machine restarts
+then back on".  **Hold BACK on the coin door for 3 s during a game** (Menu settings: Hold BACK, the card's `back_hold=`; 0 = off) and the machine restarts
 into the menu, as at power-up.
 
 **How the game's own button is seen.**  `padmenu.so` (padmenu.c) is preloaded into THE GAME by
@@ -657,7 +657,7 @@ It passes every call through.  It remembers the fd the game opens for the cabine
 own 8-byte SPI_IOC_MESSAGE transfers on it reads rx[1] bit 3, Service Back, active low - the
 hardware, so the same on every title and version.  It never sends a byte (the tx half drives
 the amplifier enable).  Only that device counts: another SPI device's bytes read as BACK would
-restart a machine nobody asked to.  An unbroken 5 s hold runs `select.sh --reboot` (`sync;
+restart a machine nobody asked to.  An unbroken hold runs `select.sh --reboot` (`sync;
 reboot`) once, detached, with no LD_PRELOAD.  A 2 s press (autoattract's, a tech's tap) does
 nothing.
 

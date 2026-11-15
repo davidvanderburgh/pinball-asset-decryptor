@@ -6,7 +6,7 @@
  * GAME (the multi-boot form of the game_monitor hook, modehook.MENU_HOOK_LINES)
  * and gives the coin door a way back instead:
  *
- *     hold BACK on the coin door for HOLD_MS (5 s)
+ *     hold BACK on the coin door for HOLD_MS (3 s; the card's back_hold=, PAD-1309)
  *         -> select.sh --reboot: sync, then reboot
  *         -> the machine boots again, and the menu comes up as at power-up
  *
@@ -69,7 +69,7 @@
  * read off the game's own fast_stem.gd).  The coin door's EXIT is switch 5 on
  * every BOF title (Labyrinth, Dune, Winchester profiles), so this reads the
  * lines the game itself reads and times EXIT.  Lines come only on a change,
- * so the 5 s is timed by a thread of ours, started on the first press.  The
+ * so the hold is timed by a thread of ours, started on the first press.  The
  * game runs as pinball, whose sudo needs no password: `sync; sudo -n reboot`.
  *
  * SPOOKY (the same x86-64 object, `make PLATFORM=spk`): padselect_spk.sh starts
@@ -110,7 +110,18 @@ __asm__(".symver pthread_create,pthread_create@GLIBC_2.2.5");
 #ifndef O_TMPFILE
 #define O_TMPFILE 0
 #endif
-#define HOLD_MS_DEFAULT 5000
+/* HOW LONG.  3 s unless the card says otherwise: images.conf's back_hold=<seconds> (the
+ * Multi-boot tab's Menu settings; 0 = off), read from CONF_PATH where the game can see it
+ * (Spike 2, Barrels of Fun), or handed in as PADMENU_HOLD_MS=<ms> by the launchers that
+ * start the game themselves (Spike 3, Spooky).  PADMENU_CONF names another file (tests). */
+#define HOLD_MS_DEFAULT 3000
+#if defined(PADMENU_FAST)
+#define CONF_PATH       "/home/pinball/extracted/decrypt/padselect/images.conf"
+#elif defined(PADMENU_S3)
+#define CONF_PATH       ""
+#else
+#define CONF_PATH       "/usr/local/codeselect/images.conf"
+#endif
 #define SPI_MAGIC       0x6b            /* 'k', SPI_IOC_MAGIC */
 #define MAX_FD          1024
 #define BACK_BIT        3
@@ -578,11 +589,51 @@ int ioctl(int fd, unsigned long req, ...)
 }
 #endif
 
+/* back_hold=<seconds> in an images.conf -> ms, or -1 when the file or the line is not there */
+static long conf_hold_ms(const char *path)
+{
+    FILE *f;
+    char line[256];
+    long ms = -1;
+    if (!path || !*path || !(f = fopen(path, "r")))
+        return -1;
+    while (fgets(line, sizeof line, f)) {
+        const char *p = line;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (strncmp(p, "back_hold", 9))
+            continue;
+        p += 9;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p != '=')
+            continue;
+        p++;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p >= '0' && *p <= '9') {
+            long v = 0;
+            while (*p >= '0' && *p <= '9' && v < 1000)
+                v = v * 10 + (*p++ - '0');
+            ms = v * 1000;
+        }
+    }
+    fclose(f);
+    return ms;
+}
+
 __attribute__((constructor))
 static void padmenu_init(void)
 {
     const char *h = getenv("PADMENU_HOLD_MS");
-    hold_ms = h && *h ? strtol(h, NULL, 10) : HOLD_MS_DEFAULT;
+    const char *c = getenv("PADMENU_CONF");
+    long ms;
+    if (h && *h)
+        hold_ms = strtol(h, NULL, 10);
+    else if ((ms = conf_hold_ms(c && *c ? c : CONF_PATH)) >= 0)
+        hold_ms = ms;
+    else
+        hold_ms = HOLD_MS_DEFAULT;
 #ifdef PADMENU_FAST
     h = getenv("PADMENU_PROTO");           /* Spooky's launcher; BOF sets nothing: FAST */
     if (h && !strcmp(h, "warden"))
@@ -595,4 +646,5 @@ static void padmenu_init(void)
 #endif
     /* the game's own children (system()) inherit LD_PRELOAD: nothing here for them */
     unsetenv("PADMENU_HOLD_MS");
+    unsetenv("PADMENU_CONF");
 }

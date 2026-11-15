@@ -76,7 +76,7 @@ SELECTOR_FILES = collections.OrderedDict([      # name in --selector-dir -> (mod
     ("spksw", (0o755, True)),
     ("padselect.sh", (0o755, True)),
     ("font.ttf", (0o644, False)),
-    # PAD-1309: padselect.sh preloads it into the game - BACK held 5 s restarts into the menu.
+    # PAD-1309: padselect.sh preloads it into the game - BACK held 3 s (Hold BACK, back_hold=) restarts into the menu.
     # Not required: a selector dir built before it still makes an update without it.
     ("padmenu.so", (0o755, False)),
 ])
@@ -496,7 +496,8 @@ def conf_from_args(a, targets, media, titles_default, subtitles_default):
                        rows, move, confirm, volume, theme=a.theme, colors=mkc.parse_color_flags(a.color),
                        heading=a.heading, text_size=a.text_size, counter=a.counter,
                        countdown_word=a.countdown_word, footer=footer, learn=bool(getattr(a, "learn", False)),
-                       default_card=getattr(a, "default_card", None))
+                       default_card=getattr(a, "default_card", None),
+                       back_hold=getattr(a, "back_hold", None))
 
 
 def spk_conf(title, keys=None):
@@ -899,7 +900,8 @@ def inspect_update(path, media_out=None):
         ("tool", build.get("tool")), ("tool_version", build.get("version")), ("written", build.get("written")),
         ("hook", b"multi-boot launcher" in start), ("install_step", b"multi-boot launcher" in start),
         ("builds", dict(builds)), ("images", images), ("groups", []), ("default_card", conf.get("default_card")),
-        ("timeout", conf["timeout"]), ("default", conf["default"]), ("heading", conf.get("heading")),
+        ("timeout", conf["timeout"]), ("back_hold", conf.get("back_hold")),
+        ("default", conf["default"]), ("heading", conf.get("heading")),
         ("text_size", conf.get("text_size")), ("counter", conf.get("counter")),
         ("countdown_word", conf.get("countdown_word")), ("footer", conf.get("footer")),
         ("volume", conf["volume"]), ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
@@ -924,7 +926,9 @@ def print_inspect(rep):
     for im in rep["images"]:
         print("image %d %s '%s' '%s' art=%s source=%s"
               % (im["index"], im["device"], im["title"], im["subtitle"], im["art"], im["source"]))
-    print("timeout=%s default=%s theme=%s" % (rep["timeout"], rep["default"], rep["theme"]))
+    print("timeout=%s default=%s theme=%s%s" % (rep["timeout"], rep["default"], rep["theme"],
+                                              "" if rep.get("back_hold") is None
+                                              else " back_hold=%s" % rep["back_hold"]))
     for w in rep["warnings"]:
         print("warning: " + w)
 
@@ -1033,7 +1037,8 @@ def inject_update(a):
                     with open(os.path.join(media_dir, n.split("/", 1)[-1]), "wb") as f:
                         f.write(data)
         media = mkc.plan_media(media_dir, len(targets)) if media_dir else None
-        for k in ("timeout", "default", "volume", "heading", "text_size", "counter", "countdown_word", "theme"):
+        for k in ("timeout", "back_hold", "default", "volume", "heading", "text_size", "counter", "countdown_word",
+                  "theme"):
             if getattr(a, k, None) is None and old.get(k) is not None:
                 setattr(a, k, old[k])
         if not a.footer_own and a.footer is None and old.get("footer") is not None:
@@ -1193,6 +1198,8 @@ def _add_conf_flags(s):
     s.add_argument("--titles", help="';'-separated titles, one per image (index order)")
     s.add_argument("--subtitles", help="';'-separated subtitles, one per image")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
+    s.add_argument("--back-hold", dest="back_hold", type=int, default=None,
+                   help="seconds BACK held in a game restarts into the menu (0 = off; card default 3)")
     s.add_argument("--heading", metavar="TEXT")
     s.add_argument("--footer", metavar="TEXT")
     s.add_argument("--footer-own", action="store_true")

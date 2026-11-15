@@ -53,7 +53,7 @@ try the menu and each game on your PC first.
 - From five games on, the menu scrolls three at a time and shows a counter
   under the cards.
 - **Back to the menu without switching off:** during a game, hold **BACK** on
-  the coin door for 5 seconds. The machine restarts and the menu comes up, as
+  the coin door for 3 seconds. The machine restarts and the menu comes up, as
   at power-up. A card built with an older version of the app gets this the
   next time you **Apply to card** or rebuild it.
 
@@ -85,6 +85,7 @@ build.
 | **Same text size on every card** | Draws every title at one size, so a long name doesn't end up smaller than its neighbours. |
 | **Move / confirm sounds** | *auto* takes a click and a stinger from the primary image, *synth* makes tones, or pick a WAV. |
 | **Countdown** | Seconds before the countdown boots. 0 waits for START. |
+| **Hold BACK** | Seconds BACK (EXIT on some machines) must be held during a game to restart into the menu. 3 unless you change it; 0 turns it off. Not on Jersey Jack or The Big Lebowski. |
 | **End the menu with a SETTINGS card** | See [The SETTINGS card](#the-settings-card). |
 
 Every sound box has a **▶ Play** button so you can hear it on the spot. Each
@@ -237,7 +238,7 @@ under the game's own name (`lab.fun` for Labyrinth).
   come to about 3.2 GB. The size strip tells you if it won't fit.
 - All the builds share one set of settings and scores.
 - **Back to the menu without switching off:** during a game, hold **EXIT** on
-  the coin door for 5 seconds. The machine restarts into the menu.
+  the coin door for 3 seconds. The machine restarts into the menu.
 - Installing any normal update afterwards removes the menu.
 
 | Game | Supported |
@@ -271,7 +272,7 @@ here, say). Halloween and Ultraman are one machine, so those two can share one m
 2. **Every power-up**: the flippers choose, START boots, and the countdown boots the
    build you chose last.
 3. **Back to the menu without switching off:** during a game, hold **BACK** on the coin
-   door (**EXIT** on Rick and Morty and Alice Cooper) for 5 seconds. The machine restarts
+   door (**EXIT** on Rick and Morty and Alice Cooper) for 3 seconds. The machine restarts
    into the menu.
 
 - The first row is the stock build: it travels whole, and the machine falls back to it if
@@ -302,7 +303,7 @@ as the first one (64 GB) and can write it to an SD card.
 2. **Every power-up**: NEXT and PREVIOUS on the coin door choose, SELECT boots, and the
    countdown boots the image you chose last.
 3. **Back to the menu without switching off:** during a game, hold **BACK** on the coin
-   door for 5 seconds. The machine restarts into the menu.
+   door for 3 seconds. The machine restarts into the menu.
 
 - Building needs your own board's Spike 3 key, the one Extract and Emulate use.
 - The first row's card is the base: the new card keeps its boot and system partitions

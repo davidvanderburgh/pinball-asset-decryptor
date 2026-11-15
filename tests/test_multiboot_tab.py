@@ -160,6 +160,7 @@ def test_two_image_form_builds_plan_build_verify(monkeypatch, tmp_path):
     assert build[build.index("--layout") + 1] == "auto"
     assert build[build.index("--titles") + 1] == "IMG 0;IMG 1"
     assert build[build.index("--timeout") + 1] == "15"
+    assert build[build.index("--back-hold") + 1] == "3"          # PAD-1309: the default hold
     assert build[build.index("--default") + 1] == "0"
     assert build[build.index("--volume") + 1] == "50"
     assert "--bypass-validation" in build          # on by default (David; item 98 made it safe)
@@ -1874,7 +1875,7 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                             "default": 2, "bypass": False})
     assert menu.pop("compact") is False
     assert menu == {"move": "auto", "confirm": "auto", "volume": 50,
-                    "timeout": 15, "default": 2,
+                    "timeout": 15, "back_hold": 3, "default": 2,
                     "machine_volume": True,
                     # PAD-135: a state written before the field existed
                     # described a menu that said SELECT GAME CODE

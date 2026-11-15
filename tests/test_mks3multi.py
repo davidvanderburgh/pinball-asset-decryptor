@@ -137,6 +137,14 @@ def test_conf_from_the_tabs_flags_and_the_default_titles():
     a.titles, a.subtitles, a.timeout = "One;Two", "x;y", 0
     conf = mk.conf_from_args(a, cards, None).splitlines()
     assert "image=img1|Two|y" in conf and "timeout=0" in conf
+    # PAD-1309: no back_hold= line without the flag; --back-hold N writes one
+    assert not any(ln.startswith("back_hold") for ln in conf)
+    a.back_hold = 4
+    text = mk.conf_from_args(a, cards, None)
+    assert "back_hold=4" in text.splitlines() and mk.parse_conf(text)["back_hold"] == 4
+    a.back_hold = -1
+    with pytest.raises(mk.Refused, match="back_hold"):
+        mk.conf_from_args(a, cards, None)
 
 
 def test_a_card_is_read_from_its_ext4_superblock(monkeypatch, tmp_path):

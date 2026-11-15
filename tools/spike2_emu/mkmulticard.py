@@ -245,7 +245,7 @@ SELECTOR_FILES = collections.OrderedDict([
     # a build that MAKES a delta refuses a selector dir without it (need_materializer)
     ("materialize.py", ("materialize.py", 0o755, False)),
     # PAD-1309: preloaded into the game by the multi-boot game_monitor hook (ensure_menu_hook):
-    # BACK held 5 s on the coin door restarts the machine into the menu.  Not required, so a
+    # BACK held 3 s (Hold BACK, back_hold=) on the coin door restarts the machine into the menu.  Not required, so a
     # selector dir built before it still makes a card (one without the way back).
     ("padmenu.so", ("padmenu.so", 0o755, False)),
 ])
@@ -330,8 +330,10 @@ CONF_LINE_MAX = 1000
 #: here for the same reason (the selector shrinks and then cuts it to the glass anyway,
 #: so this is about the file, not about how much fits on the LCD).
 CONF_STR_MAX = 199
+#: PAD-1309: images.conf back_hold= - the longest hold (seconds) the builders write
+BACK_HOLD_MAX = 60
 DEVICE_RE = re.compile(r"^(/dev/mmcblk0p|p)(\d+)(?::([A-Za-z0-9._-]+))?$")
-CONF_KEYS = ("default", "timeout", "heading", "text_size", "counter", "countdown_word", "footer", "font",
+CONF_KEYS = ("default", "timeout", "back_hold", "heading", "text_size", "counter", "countdown_word", "footer", "font",
              "sound_move", "sound_confirm", "volume",
              "mixer_volume", "media", "theme", "machine_volume")
 
@@ -1935,7 +1937,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        groups=None, default_card=None, heading=None, text_size=None,
                        counter=None, countdown_word=None, footer=None, scores=None,
                        colours=None, settings=None, edition=None, hiscores=None, tests=None,
-                       testcard=False):
+                       testcard=False, back_hold=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -1991,6 +1993,10 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         raise Refused("images.conf: default=%s is not an image index (0..%d)" % (default, len(devices) - 1))
     if int(timeout) < 0:
         raise Refused("images.conf: timeout must be >= 0")
+    # PAD-1309: seconds BACK held in a game restarts into the menu (0 = off); None = no key,
+    # which the selector reads as its own 3 s, so a card that never asked is what it was
+    if back_hold is not None:
+        back_hold = _int_range(back_hold, "back_hold", 0, BACK_HOLD_MAX)
     if volume is not None:
         volume = _int_range(volume, "volume", 0, 100)
     machine_volume = check_machine_volume(machine_volume)
@@ -2053,6 +2059,8 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         # their own, no image index resolves to the group
         out.append("default_card=%d" % int(default_card))
     out.append("timeout=%d" % int(timeout))
+    if back_hold is not None:
+        out.append("back_hold=%d" % back_hold)
     # THE HEADING.  None leaves the key out, so a card that never asked for one
     # is byte for byte what it always was and an older selector reads it; '' is
     # a CHOICE and writes 'heading=', which the selector reads as no line at all.
@@ -2167,7 +2175,7 @@ def parse_images_conf(text):
     if isinstance(text, bytes):
         text = text.decode("utf-8", "replace")
     conf = {"images": [], "media": [], "groups": [], "default": 0, "default_card": None,
-            "timeout": 15, "heading": None, "text_size": None,
+            "timeout": 15, "back_hold": None, "heading": None, "text_size": None,
             "counter": None, "countdown_word": None, "footer": None, "font": None,
             "sound_move": None, "sound_confirm": None, "volume": None, "mixer_volume": None, "media_dir": None,
             "theme": None, "colors": {}, "machine_volume": None, "debug_log": None, "scores": {}, "hiscores": {},
@@ -2211,7 +2219,7 @@ def parse_images_conf(text):
                 conf["default_card"] = int(val.strip())
             except ValueError:
                 raise Refused("images.conf: bad default_card=%r" % val)
-        elif key in ("default", "timeout"):
+        elif key in ("default", "timeout", "back_hold"):
             try:
                 conf[key] = int(val.strip())
             except ValueError:
@@ -3500,7 +3508,7 @@ def ensure_menu_hook(p2_image, stage_dir):
     debugfs_write_script(p2_image, cmds)
     if debugfs_cat(p2_image, mpath) != hooked.encode("utf-8"):
         raise Refused("%s read back differs from the hooked copy" % mpath)
-    say("%s hooked: holding BACK on the coin door for 5 s restarts the machine into the menu"
+    say("%s hooked: holding BACK on the coin door (Hold BACK, back_hold=) restarts the machine into the menu"
         % GAME_MONITOR)
     return True
 
@@ -3878,7 +3886,7 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
             raise Refused("--conf %s lists %r but the card holds %r" % (args.conf, devs, plan.devices()))
         return text
     ex = existing or {"images": [], "media": [], "groups": [], "default": None,
-                      "default_card": None, "timeout": None,
+                      "default_card": None, "timeout": None, "back_hold": None,
                       "heading": None, "text_size": None,
                       "counter": None, "countdown_word": None, "footer": None,
                       "font": None, "sound_move": None, "sound_confirm": None,
@@ -3907,6 +3915,9 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
         hiscores = dict(ex.get("hiscores") or {}) if same_n else {}
     default = args.default if getattr(args, "default", None) is not None else (ex["default"] if ex["default"] is not None else 0)
     timeout = args.timeout if getattr(args, "timeout", None) is not None else (ex["timeout"] if ex["timeout"] is not None else 15)
+    back_hold = getattr(args, "back_hold", None)
+    if back_hold is None:
+        back_hold = ex.get("back_hold")
     font = SELECT_DIR + "/font.ttf"
     sel = getattr(args, "selector_dir", None)
     if sel and not os.path.isfile(os.path.join(sel, "font.ttf")) and not os.path.isfile(HOST_FONT):
@@ -4030,7 +4041,7 @@ def conf_for_plan(plan, args, existing=None, media=None, colours=None):
                               text_size=text_size, counter=counter,
                               countdown_word=countdown_word, footer=footer, scores=scores,
                               colours=colours, settings=settings, edition=edition, hiscores=hiscores,
-                              tests=tests)
+                              tests=tests, back_hold=back_hold)
 
 
 # ============================================================================= the JSON sidecars
@@ -4089,6 +4100,7 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("layout", getattr(plan, "layout", None)),
         ("images", rows),
         ("timeout", conf["timeout"]),
+        ("back_hold", conf.get("back_hold")),
         ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("edition", conf.get("edition")),
@@ -6205,7 +6217,8 @@ def render_images_conf_text(conf):
         counter=conf.get("counter"), countdown_word=conf.get("countdown_word"),
         footer=conf.get("footer"), scores=conf.get("scores"),
         colours=conf.get("colours"), settings=conf.get("settings"), hiscores=conf.get("hiscores"),
-        tests=conf.get("tests"), testcard=bool(conf.get("testcard")))
+        tests=conf.get("tests"), testcard=bool(conf.get("testcard")),
+        back_hold=conf.get("back_hold"))
 
 
 # ============================================================================= reading a card back
@@ -7843,8 +7856,10 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
         for (d, t, s), m in zip(conf["images"], conf["media"]):
             print("    image %s | %s | %s%s"
                   % (d, t, s, "".join(" | %s" % x for x in m) if any(m) else ""))
-        print("    default=%d timeout=%d font=%s log=%s" % (conf["default"], conf["timeout"], conf["font"],
-                                                            conf.get("debug_log") or "off"))
+        print("    default=%d timeout=%d font=%s log=%s%s" % (conf["default"], conf["timeout"], conf["font"],
+                                                              conf.get("debug_log") or "off",
+                                                              "" if conf.get("back_hold") is None
+                                                              else " back_hold=%d" % conf["back_hold"]))
         print("    sound_move=%s sound_confirm=%s volume=%s mixer_volume=%s media=%s"
               % (conf["sound_move"], conf["sound_confirm"], conf["volume"], conf["mixer_volume"], conf["media_dir"]))
         print("    heading=%s text_size=%s counter=%s countdown_word=%s"
@@ -8123,7 +8138,7 @@ def inspect_card(card, media_out=None):
             ("music", g["media"][2] or None), ("confirm", g["media"][3] or None)])
             for gi, g in enumerate(conf.get("groups") or [])]),
         ("default_card", conf.get("default_card")),
-        ("timeout", conf["timeout"]), ("default", conf["default"]),
+        ("timeout", conf["timeout"]), ("back_hold", conf.get("back_hold")), ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("edition", conf.get("edition")),
         ("mixer_volume", conf["mixer_volume"]),
@@ -8188,9 +8203,10 @@ def print_inspect(rep):
     if rep.get("build"):
         print("built      %s by %s %s" % (rep["build"].get("written"), rep["build"].get("tool"),
                                           rep["build"].get("version")))
-    print("menu       default=%s timeout=%s volume=%s mixer_volume=%s sound_move=%s sound_confirm=%s font=%s log=%s"
+    print("menu       default=%s timeout=%s volume=%s mixer_volume=%s sound_move=%s sound_confirm=%s font=%s log=%s%s"
           % (rep["default"], rep["timeout"], rep["volume"], rep["mixer_volume"],
-             rep["sound_move"], rep["sound_confirm"], rep["font"], rep.get("debug_log") or "off"))
+             rep["sound_move"], rep["sound_confirm"], rep["font"], rep.get("debug_log") or "off",
+             "" if rep.get("back_hold") is None else " back_hold=%s" % rep["back_hold"]))
     head = rep.get("heading")
     print("heading    %s" % ("(the selector's own SELECT GAME CODE)" if head is None
                              else "(none - the top of the menu is bare)" if not head
@@ -9819,6 +9835,8 @@ def _add_conf_flags(s):
                         "scores stay with its settings. Kept from an existing card when absent; "
                         "--hiscores '' clears them all")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
+    s.add_argument("--back-hold", dest="back_hold", type=int, default=None,
+                   help="seconds BACK held in a game restarts into the menu (0 = off; card default 3)")
     s.add_argument("--heading", metavar="TEXT",
                    help="images.conf heading=TEXT - the line across the top of the menu (the selector's "
                         "own '%s' when no card ever set one; --heading '' leaves the top bare); an "

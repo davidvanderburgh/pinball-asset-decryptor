@@ -42,7 +42,7 @@ MARK = "PAD_MULTIBOOT_LIVE"
 SELECTOR_FILES = (("spkselect", 0o755), ("dpprocsw", 0o755), ("padselect_proc.sh", 0o755),
                   ("font.ttf", 0o644))
 #: PAD-1309: optional selector files -> where they go under the .pad folder.  padmenu_proc.py
-#: is the game's sitecustomize there (EXIT held 5 s restarts into the menu); a selector dir
+#: is the game's sitecustomize there (EXIT held 3 s (Hold BACK, back_hold=) restarts into the menu); a selector dir
 #: built before it makes an update without it.
 OPTIONAL_FILES = (("padmenu_proc.py", "padmenu_py/sitecustomize.py", 0o644),)
 

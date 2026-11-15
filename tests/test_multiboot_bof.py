@@ -89,6 +89,7 @@ def test_build_args_go_to_mkbofmulti():
     assert args[args.index("--titles") + 1] == "LABYRINTH;SARAH CODE"
     assert args[args.index("--subtitles") + 1] == "Stock;Mod"
     assert args[args.index("--timeout") + 1] == "10"
+    assert args[args.index("--back-hold") + 1] == "3"                 # PAD-1309
     assert args[args.index("--media-dir") + 1] == wsl(r"D:\Pinball\multi\media")
     assert "--force" in args and "--heading" in args
     for not_here in ("--layout", "--bypass-validation", "--machine-volume", "--own-scores", "--workdir"):

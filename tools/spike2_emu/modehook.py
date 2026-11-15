@@ -76,7 +76,7 @@ HOOK_LINES = [
 ]
 
 #: THE MULTI-BOOT FORM (PAD-1309).  A multi-boot card's selector directory carries
-#: padmenu.so - BACK held 5 s on the coin door restarts the machine into the boot
+#: padmenu.so - BACK held 3 s (Hold BACK, back_hold=) on the coin door restarts the machine into the boot
 #: menu - and it has to be preloaded into the game whatever that image is, stock
 #: or with modes of its own.  So a multi-boot card's game_monitor carries this
 #: block instead of HOOK_LINES: each object preloaded when it is there, both when

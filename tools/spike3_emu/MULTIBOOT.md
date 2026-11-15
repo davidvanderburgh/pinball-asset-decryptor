@@ -114,10 +114,10 @@ checkpointable like any game.
 
 ## Back to the menu: hold BACK (PAD-1309)
 
-Holding BACK on the coin door for 5 s during a game restarts the machine into the menu.
+Holding BACK on the coin door for 3 s (images.conf `back_hold=`, Menu settings' Hold BACK) during a game restarts the machine into the menu.
 `padmenu.so` (codeselect/padmenu.c, `make PLATFORM=s3`) sits beside the menu; padselect.sh
 copies it to /tmp before the bind and puts it first in the game's LD_PRELOAD.  It reads byte 0
-bit 3 of the game's own transfers on `/dev/spidev4.0` and, after an unbroken 5 s, runs `sync;
+bit 3 of the game's own transfers on `/dev/spidev4.0` and, after an unbroken hold, runs `sync;
 reboot`.  In `s3run.sh` the restart is a stand-in that leaves
 `<slot>/connectivity.up/dump/padmenu.restart`; `PAD_S3_MENU_SO=<host .so>` puts the object in
 front on any card.  Proven on Fallout LE 0.82 (2026-11-14): a 2 s BACK did nothing, a 6.5 s

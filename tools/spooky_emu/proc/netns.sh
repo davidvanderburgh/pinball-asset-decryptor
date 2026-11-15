@@ -26,7 +26,7 @@ fi
 
 E=$SPP_PY
 # PAD-1309: the multi-boot launcher puts padmenu_proc.py (as sitecustomize) first on the game's
-# PYTHONPATH: EXIT held 5 s restarts the machine into the menu.  A real reboot from the rig is
+# PYTHONPATH: EXIT held 3 s (Hold BACK, back_hold=) restarts the machine into the menu.  A real reboot from the rig is
 # never right, so every run hands it a stand-in that leaves $SPP_RIG/padmenu.restart.
 # SPP_MENU_PY=<a folder holding that sitecustomize.py> tries it on any title.
 printf '#!/bin/sh\n: > %s/padmenu.restart\n' "$SPP_RIG" > "$SPP_RIG/padmenu_reboot"

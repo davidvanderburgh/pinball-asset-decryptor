@@ -95,7 +95,7 @@ HOOK_BLOCK = [
     "# it away (it lives under extracted/) and puts its own profile back.",
     'if [ "$SESSION_TYPE" == "console" ] && [ -f %s/padselect.sh ]; then' % PADSELECT_DIR,
     "  /bin/bash %s/padselect.sh < /dev/null" % PADSELECT_DIR,
-    "  # PAD-1309: EXIT held 5 s on the coin door restarts the machine into the menu.",
+    "  # PAD-1309: EXIT held 3 s (Hold BACK, back_hold=) on the coin door restarts the machine into the menu.",
     '  [ -f %s/padmenu.so ] && export LD_PRELOAD="%s/padmenu.so${LD_PRELOAD:+:$LD_PRELOAD}"'
     % (PADSELECT_DIR, PADSELECT_DIR),
     "fi",
@@ -162,7 +162,7 @@ SELECTOR_FILES = collections.OrderedDict([      # name in --selector-dir -> (mod
     ("padselect.sh", (0o755, True)),
     ("pad_install.sh", (0o755, True)),
     ("font.ttf", (0o644, False)),
-    # PAD-1309: preloaded into the game by the hook block - EXIT held 5 s restarts into the
+    # PAD-1309: preloaded into the game by the hook block - EXIT held 3 s (Hold BACK, back_hold=) restarts into the
     # menu.  Not required: a selector dir built before it still makes an update without it.
     ("padmenu.so", (0o755, False)),
 ])
@@ -547,7 +547,7 @@ def check_update_dir(u):
 def render_conf(programs, titles, subtitles, default, timeout, rows, sound_move, sound_confirm, volume,
                 switches, theme=None, colors=None, heading=None, text_size=None, counter=None,
                 countdown_word=None, footer=None, font=True, learn=False, groups=None, default_card=None,
-                header=None):
+                header=None, back_hold=None):
     """images.conf text.  ``groups`` are RANDOM cards (mkmulticard's check_groups shape: title,
     subtitle, media, members, keep, pos, roll), written as the Stern card writes them: a
     ``group=`` line before the image it sits in front of.  The menu and the hook need nothing
@@ -570,6 +570,10 @@ def render_conf(programs, titles, subtitles, default, timeout, rows, sound_move,
         raise Refused("images.conf: default=%s is not an image index (0..%d)" % (default, n - 1))
     if int(timeout) < 0:
         raise Refused("images.conf: timeout must be >= 0")
+    # PAD-1309: seconds BACK held in a game restarts into the menu (0 = off); None = no
+    # line, which the launcher reads as its own 3 s
+    if back_hold is not None:
+        back_hold = mkc._int_range(back_hold, "back_hold", 0, mkc.BACK_HOLD_MAX)
     theme = mkc.check_theme(theme)
     colors = mkc.check_colors(colors or {})
     text_size = mkc.check_text_size(text_size)
@@ -610,6 +614,8 @@ def render_conf(programs, titles, subtitles, default, timeout, rows, sound_move,
     if default_card is not None:
         out.append("default_card=%d" % int(default_card))
     out.append("timeout=%d" % int(timeout))
+    if back_hold is not None:
+        out.append("back_hold=%d" % back_hold)
     if heading is not None:
         out.append("heading=%s" % mkc.conf_heading(heading))
     if text_size is not None:
@@ -649,7 +655,7 @@ def parse_conf(text):
     """images.conf -> {'images': [(program, title, subtitle)], 'media': [rows], 'groups': [random
     cards, render_conf's shape], 'default', 'default_card', ...}."""
     out = {"images": [], "media": [], "groups": [], "default": None, "default_card": None, "timeout": None,
-           "heading": None, "text_size": None, "counter": None, "countdown_word": None, "footer": None,
+           "back_hold": None, "heading": None, "text_size": None, "counter": None, "countdown_word": None, "footer": None,
            "font": None, "sound_move": None, "sound_confirm": None, "volume": None, "theme": None,
            "colors": {}, "switches": {}, "media_dir": None}
     for line in text.splitlines():
@@ -674,7 +680,7 @@ def parse_conf(text):
             # the DIRECTORY line - not 'media', which is the per-image rows above (a
             # 'key in out' here once replaced those rows with this path)
             out["media_dir"] = val
-        elif key in ("default", "default_card", "timeout", "volume"):
+        elif key in ("default", "default_card", "timeout", "back_hold", "volume"):
             try:
                 out[key] = int(val)
             except ValueError:
@@ -715,7 +721,8 @@ def conf_from_args(a, programs, media, default_titles):
                        colors=mkc.parse_color_flags(a.color), heading=a.heading, text_size=a.text_size,
                        counter=a.counter, countdown_word=a.countdown_word, footer=footer,
                        learn=bool(getattr(a, "learn", False)), groups=groups,
-                       default_card=getattr(a, "default_card", None))
+                       default_card=getattr(a, "default_card", None),
+                       back_hold=getattr(a, "back_hold", None))
 
 
 # ============================================================================== plan
@@ -1078,7 +1085,8 @@ def inspect_fun(fun, media_out=None):
             ("music", g["media"][2] or None), ("confirm", g["media"][3] or None)])
             for gi, g in enumerate(conf["groups"])]),
         ("default_card", conf.get("default_card")),
-        ("timeout", conf["timeout"]), ("default", conf["default"]), ("heading", conf.get("heading")),
+        ("timeout", conf["timeout"]), ("back_hold", conf.get("back_hold")),
+        ("default", conf["default"]), ("heading", conf.get("heading")),
         ("text_size", conf.get("text_size")), ("counter", conf.get("counter")),
         ("countdown_word", conf.get("countdown_word")), ("footer", conf.get("footer")),
         ("volume", conf["volume"]), ("sound_move", conf["sound_move"]), ("sound_confirm", conf["sound_confirm"]),
@@ -1110,8 +1118,10 @@ def print_inspect(rep):
                  "they keep their cards" if g["keep"] else "in their place", g["pos"]))
     if rep["sound_move"] or rep["sound_confirm"] or any(im.get("music") for im in rep["images"]):
         print("sound: move=%s confirm=%s volume=%s" % (rep["sound_move"], rep["sound_confirm"], rep["volume"]))
-    print("timeout=%s default=%s theme=%s switches=%s" % (rep["timeout"], rep["default"], rep["theme"],
-                                                          ",".join("%s=%s" % kv for kv in rep["switches"].items())))
+    print("timeout=%s default=%s theme=%s switches=%s%s"
+          % (rep["timeout"], rep["default"], rep["theme"],
+             ",".join("%s=%s" % kv for kv in rep["switches"].items()),
+             "" if rep.get("back_hold") is None else " back_hold=%s" % rep["back_hold"]))
     for w in rep["warnings"]:
         print("warning: " + w)
 
@@ -1233,7 +1243,8 @@ def inject_fun(a):
         if media_dir:
             media = mkc.plan_media(media_dir, len(programs))
         # every flag the tab sends; the update's own value where one is left off
-        for k in ("timeout", "default", "volume", "heading", "text_size", "counter", "countdown_word", "theme"):
+        for k in ("timeout", "back_hold", "default", "volume", "heading", "text_size", "counter", "countdown_word",
+                  "theme"):
             if getattr(a, k, None) is None and old.get(k) is not None:
                 setattr(a, k, old[k])
         if not a.footer_own and a.footer is None and old.get("footer") is not None:
@@ -1633,6 +1644,8 @@ def _add_conf_flags(s):
     s.add_argument("--titles", help="';'-separated titles, one per image (index order)")
     s.add_argument("--subtitles", help="';'-separated subtitles, one per image")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
+    s.add_argument("--back-hold", dest="back_hold", type=int, default=None,
+                   help="seconds BACK held in a game restarts into the menu (0 = off; card default 3)")
     s.add_argument("--heading", metavar="TEXT", help="images.conf heading=TEXT ('' = no line)")
     s.add_argument("--footer", metavar="TEXT", help="images.conf footer=TEXT ('' = no line)")
     s.add_argument("--footer-own", action="store_true", help="no footer= line: the selector's own wording")

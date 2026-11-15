@@ -200,7 +200,7 @@ if [ "$GL" = d3d12 ]; then
     if [ -n "$LIBS" ]; then LIBS="$LIBS:/usr/lib/wsl/lib"; else LIBS="LD_LIBRARY_PATH=/usr/lib/wsl/lib"; fi
 fi
 
-# PAD-1309: the multi-boot launcher puts padmenu.so in front of the game (BACK held 5 s
+# PAD-1309: the multi-boot launcher puts padmenu.so in front of the game (BACK held 3 s (Hold BACK, back_hold=)
 # restarts the machine into the menu).  A real reboot from the rig is never right, so every
 # run hands it a stand-in that leaves $SPK_RIG/tmp/padmenu.restart (/game/tmp in the run).
 # SPK_MENU_SO=<padmenu.so> with SPK_MENU_PROTO=warden|pinotaur and SPK_MENU_SWITCH=<n>

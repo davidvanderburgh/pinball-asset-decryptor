@@ -5,7 +5,7 @@ On the machine it is .pad/padmenu_py/sitecustomize.py, and the multi-boot launch
 (padselect_proc.sh) puts that folder first on the game's PYTHONPATH, so Python loads it before
 the game.  Python 2.7, as the games are.
 
-    hold the coin door's EXIT for 5 s during a game
+    hold the coin door's EXIT for 3 s during a game (the card's back_hold=)
         -> sync; reboot (as root) or sudo -n reboot
         -> the machine starts again, and the boot menu comes up as at power-up
 
@@ -30,7 +30,8 @@ import sys
 import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_HOLD = float(os.environ.get("PADMENU_HOLD_MS") or 5000) / 1000.0
+#: 3 s, or the card's back_hold= (padselect_proc.sh hands it in as PADMENU_HOLD_MS; 0 = off)
+_HOLD = float(os.environ.get("PADMENU_HOLD_MS") or 3000) / 1000.0
 _NAME = os.environ.get("PADMENU_SWITCH") or "exit"
 _REBOOT_SH = ('sync; if [ "$(id -u)" = 0 ]; then exec ${CODESELECT_REBOOT:-reboot}; '
               'else exec ${CODESELECT_REBOOT:-sudo -n reboot}; fi')
@@ -86,7 +87,7 @@ class _Watch(object):
         return None
 
     def tick(self, board):
-        if self.fired:
+        if self.fired or _HOLD <= 0:
             return
         if _DEBUG and not self.looks and self.switch is None:
             _say("debug: first get_events")

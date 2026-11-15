@@ -635,7 +635,7 @@ fi
 # explicitly, so the shared binfmt interpreter (Spike 2's qemu) stays stock.
 # Absent -> fall back to binfmt. See docs/plans/spike3_emulation.md stage 3.
 # PAD-1309: HOLD BACK TO COME BACK TO THE MENU. A multi-boot card's padselect.sh puts
-# padmenu.so in front of the game's preloads; held 5 s, BACK asks for `sync; reboot`.
+# padmenu.so in front of the game's preloads; held (back_hold=, else 3 s), BACK asks for `sync; reboot`.
 # This rig runs the guest as root on the PC's own Linux, where a reboot is never
 # right, so the restart is a stand-in that leaves connectivity/dump/padmenu.restart
 # (padmenu.so does nothing at all in an emulator that gives it no stand-in). The

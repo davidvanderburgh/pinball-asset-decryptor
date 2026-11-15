@@ -69,7 +69,7 @@
 #
 #   select.sh                     the hook (what /etc/init.d/game calls)
 #   select.sh --reboot            restart the machine into the menu (padmenu.so's
-#                                 call: BACK held 5 s on the coin door, PAD-1309)
+#                                 call: BACK held 3 s (Hold BACK, back_hold=) on the coin door, PAD-1309)
 #   select.sh --lookup N [conf]   print image N's device (without :<sub>)
 #   select.sh --lookup-sub N [conf]   print image N's subdirectory ("" when none)
 #   select.sh --scores N [conf]   print image N's own-scores name ("" when it shares)

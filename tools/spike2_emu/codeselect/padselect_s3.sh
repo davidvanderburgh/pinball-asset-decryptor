@@ -67,7 +67,7 @@ good_dir() {
 }
 
 # boot image directory $1 over /games, then become its game
-# PAD-1309: BACK held 5 s on the coin door restarts the machine into this menu.
+# PAD-1309: BACK held 3 s (Hold BACK, back_hold=) on the coin door restarts the machine into this menu.
 # padmenu.so (beside the menu) is copied out of $P first - the bind below hides
 # /games/pad from the game - and put in front of whatever LD_PRELOAD the game
 # gets (a mode hook appends its own after it).
@@ -78,7 +78,10 @@ menu_back() {
     if cp -f "$MENU_SO" "$MENU_RUN" 2>/dev/null; then
         LD_PRELOAD="$MENU_RUN${LD_PRELOAD:+:$LD_PRELOAD}"
         export LD_PRELOAD
-        log "holding BACK for 5 s restarts into this menu ($MENU_RUN)"
+    # the card's back_hold=<seconds> (Menu settings; 0 = off), else padmenu's own 3 s
+    _bh=$(awk -F= '/^[ \t]*back_hold[ \t]*=/ { v = $2; gsub(/[^0-9]/, "", v); print v }' "$CONF" 2>/dev/null | tail -n 1)
+    [ -n "$_bh" ] && export PADMENU_HOLD_MS=$((_bh * 1000))
+        log "holding BACK (back_hold=, else 3 s) restarts into this menu ($MENU_RUN)"
     else
         log "could not copy $MENU_SO to $MENU_RUN: no way back to the menu without a power cycle"
     fi

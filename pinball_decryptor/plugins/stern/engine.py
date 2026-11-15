@@ -8472,23 +8472,26 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     _rec_on = bool(rec_list)
     # PAD-1115: a game screen that shows a replaced clip for a fixed time lasts as long as the clip - stime lines in
     # clips.cfg beside the runtime (the modes' delivery)
-    stime_lines, stime_prof = _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_device, log,
-                                                      cancel, **_mode_gate_kw)
+    # (PAD-1323: a Spike 3 card's are spike3_modes.plan's, from its 64-bit program: not read here too)
+    stime_lines, stime_prof = (([], None) if _is_spike3(disk_f) else
+                               _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_device, log,
+                                                       cancel, **_mode_gate_kw))
     _stime_on = bool(stime_lines)
     if _is_spike3(disk_f):
         # PAD-1272: a Spike 3 card's modes are spike3_write's (its games partition, the 64-bit
-        # runtime: spike3_modes), and so is the score feed (PAD-1297: files alone). The rest of
+        # runtime: spike3_modes), and so are the score feed (PAD-1297: files alone), the random
+        # clips and the screen times (PAD-1323: spike3_modes.plan builds them). The rest of
         # what rides the modes' Spike 2 delivery needs 64-bit runtime, port or menu work first
         # (the census: docs/plans/spike3_modes.md "The family on Spike 3"): each part the project
         # asked for is left out with its own sentence.
         from . import spike3_modes as _S3M
         for _line in _S3M.family_left_out_lines([w for w, on in (
-                ("random clips", bool(variant_slots)), ("music modes", sound_modes is not None),
+                ("music modes", sound_modes is not None),
                 ("editions", bool(editions)), ("picture settings", picture_prof is not None),
                 ("attract items", _attract_on), ("co-op play", _coop_on),
                 ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),
                 ("expression light shows", _cabs_on), ("Prolonged Competition", _comp_on),
-                ("screen times", _stime_on), ("records on the high scores", _rec_on)) if on]):
+                ("records on the high scores", _rec_on)) if on]):
             log(_line, "warning")
         variant_slots, variant_prof, sound_modes, sound_modes_prof = {}, None, None, None
         _juke_clips = _clips_on = False
@@ -11748,6 +11751,20 @@ def _screen_times_for_build(disk_f, parts, assets_dir, video_edits, dest_is_devi
             _path, _node = _game_program_path(readers[0][1], cancel)
             if _node is not None:
                 elf = bytes(readers[0][1].read_file_bytes(_node))
+    except Exception as e:                                    # noqa: BLE001 - the screens keep the game's times
+        log("Screen times: the game program could not be read (%s); its screens keep their own times." % e,
+            "warning")
+        return [], None
+    return _screen_times_from(elf, assets_dir, video_edits, dest_is_device, log, ext4_available=ext4_available)
+
+
+def _screen_times_from(elf, assets_dir, video_edits, dest_is_device, log, ext4_available=None):
+    """:func:`_screen_times_for_build` for the game program *elf* already read (PAD-1323: a Spike 3 card's, read
+    by :func:`.spike3_modes.plan` off its games volume; 32- or 64-bit, :func:`.screen_time.screens`)."""
+    from . import screen_time as _ST
+    if not video_edits or not _ST.enabled():
+        return [], None
+    try:
         found = _ST.by_clip(_ST.screens(elf)) if elf else {}
     except Exception as e:                                    # noqa: BLE001 - the screens keep the game's times
         log("Screen times: the game program could not be read (%s); its screens keep their own times." % e,

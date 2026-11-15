@@ -49,6 +49,9 @@ extern void *malloc(__SIZE_TYPE__);
 typedef unsigned pm_str;
 #define PM_STR(s) ((void *)&(s))
 #endif
+/* PAD-1284: the 64-bit program has no string constructor - the runtime builds its strings (std_string), so a
+ * feature that needs a std::string asks for a site that is there instead (PAD-1323: the clip variants' too) */
+#define PM_STRING_SITE (PM_A64 ? "resource_get" : "string_new")
 
 extern int   open(const char *, int, ...);
 extern long  read(int, void *, __SIZE_TYPE__);
@@ -23880,7 +23883,10 @@ static void clipv_line(char *s)
  * only written when it still holds the word the build read (another build of the game, or another object that
  * moved it, is left alone and said). */
 #define STIME_MAX 128
-struct stime_ent { unsigned vt, slot, old, ms, calls; const char *clip; };
+/* PAD-1323: the vtable, its slot and the word in it are the program's link-time addresses (screen_time.py reads
+ * them off the file); a Spike 3 program is a PIE, so each is moved by its load address (game_base, 0 on Spike 2),
+ * and the slot is a pointer: 8 bytes there, 4 on Spike 2 */
+struct stime_ent { pm_addr vt, slot, old; unsigned ms, calls; const char *clip; };
 static struct stime_ent stime[STIME_MAX];
 static unsigned n_stime, n_stime_on;
 
@@ -23891,18 +23897,23 @@ static void stime_line(char **f, unsigned n)
     int ok1, ok2, ok3, ok4;
     if (n < 6 || n_stime >= STIME_MAX) return;
     e = &stime[n_stime];
-    p = f[1]; e->vt = (unsigned)number(&p, &ok1);
-    p = f[2]; e->slot = (unsigned)number(&p, &ok2);
-    p = f[3]; e->old = (unsigned)number(&p, &ok3);
+    p = f[1]; e->vt = (pm_addr)number(&p, &ok1);
+    p = f[2]; e->slot = (pm_addr)number(&p, &ok2);
+    p = f[3]; e->old = (pm_addr)number(&p, &ok3);
     p = f[4]; e->ms = (unsigned)number(&p, &ok4);
     e->clip = f[5];
-    if (ok1 && ok2 && ok3 && ok4 && e->vt && e->slot && e->ms) n_stime++;
+    if (!(ok1 && ok2 && ok3 && ok4 && e->vt && e->slot && e->ms)) return;
+    e->vt += (pm_addr)game_base;
+    e->slot += (pm_addr)game_base;
+    e->old += (pm_addr)game_base;
+    n_stime++;
 }
 
 /* the screen's own virtual, in its place: the clip's length, in seconds (a float in s0: -mfloat-abi=hard) */
 static float stime_get(void *self)
 {
-    unsigned vt = self ? *(unsigned *)self : 0, i;
+    pm_addr vt = self ? *(const pm_addr *)self : 0;
+    unsigned i;
     for (i = 0; i < n_stime; i++)
         if (stime[i].vt == vt && stime[i].calls != ~0u) {
             if (stime[i].calls++ < 8)
@@ -23917,15 +23928,16 @@ static void stime_arm(void)
 {
     unsigned i;
     for (i = 0; i < n_stime; i++) {
-        unsigned *w = (unsigned *)(unsigned long)stime[i].slot;
-        if (!stime[i].slot || stime[i].slot & 3 || *w != stime[i].old) {
-            say("screen time: %s left as the game has it - its slot 0x%08x holds 0x%08x, not 0x%08x", stime[i].clip,
-                stime[i].slot, stime[i].slot && !(stime[i].slot & 3) ? *w : 0, stime[i].old);
+        pm_addr *w = (pm_addr *)(unsigned long)stime[i].slot;
+        int odd = !stime[i].slot || (stime[i].slot & (sizeof(pm_addr) - 1));
+        if (odd || *w != stime[i].old) {
+            say("screen time: %s left as the game has it - its slot 0x%08" PMA " holds 0x%08" PMA ", not 0x%08" PMA,
+                stime[i].clip, stime[i].slot, odd ? (pm_addr)0 : *w, stime[i].old);
             stime[i].calls = ~0u;
             continue;
         }
-        mprotect((void *)(unsigned long)(stime[i].slot & ~0xfffu), 0x1000, 7);
-        *w = (unsigned)(unsigned long)stime_get;
+        mprotect((void *)(unsigned long)(stime[i].slot & ~(pm_addr)0xfff), 0x1000, 7);
+        *w = (pm_addr)(unsigned long)stime_get;
         n_stime_on++;
     }
     if (n_stime)
@@ -24009,11 +24021,11 @@ static unsigned clipv_choose(struct clipv *v, void *surface)
 #define CLIPV_CENSUS_MAX 400
 static int clipv_census;
 static unsigned clipv_census_n;
-static void clipv_heard(const char *name, const char *where, unsigned surface)
+static void clipv_heard(const char *name, const char *where, pm_addr surface)
 {
     if (!clipv_census || clipv_census_n >= CLIPV_CENSUS_MAX || !name) return;
     clipv_census_n++;
-    say("clip census: \"%.96s\" asked for (%s 0x%08x)", name, where, surface);
+    say("clip census: \"%.96s\" asked for (%s 0x%08" PMA ")", name, where, surface);
 }
 
 /* clip_play(name, loop, crop): the name in r0 */
@@ -24025,7 +24037,7 @@ static void on_clipv_play(pm_reg *r)
     if (v && v->scene) v = 0;                 /* an sclip line: clip_play plays on the one bank, not its scene */
     if (!v) { clipv_now = 0; return; }
     k = clipv_choose(v, ((void *(*)(void))(unsigned long)fn("video_surface"))());
-    if (k) r[0] = (unsigned)(unsigned long)v->name[k];
+    if (k) r[0] = (pm_reg)(unsigned long)v->name[k];
 }
 
 /* PAD-723: the VideoSurface of a bank scene named by id (an sclip line's), or 0 while that scene is not loaded.
@@ -24052,7 +24064,9 @@ static void *clipv_scene_surface(const char *id)
  * may have a clip of the same name, and none of ours) - the port's video_bank's, or an sclip line's scene's */
 static void on_clipv_set_video(pm_reg *r)
 {
-    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    /* PAD-1323: the name's first word is its characters' address - the COW string on Spike 2, the C++11 string's
+     * _M_p on Spike 3: a pm_addr, never 4 bytes; and a surface is compared at its full width */
+    const pm_addr *s = (const pm_addr *)(unsigned long)r[1];
     struct clipv *v;
     void *bank;
     unsigned k;
@@ -24063,13 +24077,14 @@ static void on_clipv_set_video(pm_reg *r)
     bank = v && v->scene ? clipv_scene_surface(v->scene) : clip2_surface();
     clipv_in = 0;
     if (v && v->scene && v->only && !bank) bank = (void *)(unsigned long)r[0];   /* not looked up: the name says it */
-    clipv_heard((const char *)(unsigned long)s[0], bank && (unsigned)(unsigned long)bank == r[0] ? "the bank's surface"
-                : "another surface", r[0]);
-    if (clipv_census && v && v->scene && (unsigned)(unsigned long)bank != r[0] && clipv_census_n < CLIPV_CENSUS_MAX) {
+    clipv_heard((const char *)(unsigned long)s[0], bank && (pm_reg)(unsigned long)bank == r[0] ? "the bank's surface"
+                : "another surface", (pm_addr)r[0]);
+    if (clipv_census && v && v->scene && (pm_reg)(unsigned long)bank != r[0] && clipv_census_n < CLIPV_CENSUS_MAX) {
         clipv_census_n++;
-        say("clip census: \"%.96s\" is %s's, whose VideoSurface is 0x%08x", v->name[0], v->scene, (unsigned)(unsigned long)bank);
+        say("clip census: \"%.96s\" is %s's, whose VideoSurface is 0x%08" PMA, v->name[0], v->scene,
+            (pm_addr)(unsigned long)bank);
     }
-    if (!v || !bank || (unsigned)(unsigned long)bank != r[0]) return;
+    if (!v || !bank || (pm_reg)(unsigned long)bank != r[0]) return;
     k = clipv_choose(v, bank);
     if (!k) return;
     if (!v->str[k]) v->str[k] = std_string(v->name[k]);
@@ -24079,13 +24094,13 @@ static void on_clipv_set_video(pm_reg *r)
 /* PAD-723: the clip layer (Deadpool): layer_video(obj, &name, loop), on the video layer's own video object only */
 static void on_clipv_layer(pm_reg *r)
 {
-    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    const pm_addr *s = (const pm_addr *)(unsigned long)r[1];          /* PAD-1323: as on_clipv_set_video */
     struct clipv *v;
     unsigned k;
     if (!s) return;
     v = clipv_find((const char *)(unsigned long)s[0]);
-    clipv_heard((const char *)(unsigned long)s[0], "the video layer", r[0]);
-    if (!v || v->scene || (unsigned)(unsigned long)clip_layer_video() != r[0]) return;
+    clipv_heard((const char *)(unsigned long)s[0], "the video layer", (pm_addr)r[0]);
+    if (!v || v->scene || (pm_reg)(unsigned long)clip_layer_video() != r[0]) return;
     if (v == clipv_now && v->last < v->n && site("layer_playing")
         && ((int (*)(void *))(unsigned long)fn("layer_playing"))((void *)(unsigned long)r[0]))
         k = v->last;                          /* asked again while it plays: the same pick */
@@ -24100,7 +24115,7 @@ static void on_clipv_layer(pm_reg *r)
 static void clipv_arm(void)
 {
     static const char *const v1_s[] = { "clip_play", "video_surface", "surface_state", 0 };
-    static const char *const v2_s[] = { "surface_find", "surface_set_video", "surface_state", "string_new",
+    static const char *const v2_s[] = { "surface_find", "surface_set_video", "surface_state", PM_STRING_SITE,
                                         "resource_get", "dynamic_cast", 0 };
     static const char *const v2_d[] = { "resource_manager", "typeinfo_resource", "typeinfo_scene_player", 0 };
     static const char *const v2_v[] = { "scene_player_scene", 0 };
@@ -24121,7 +24136,7 @@ static void clipv_arm(void)
                && (sv_clipv = 1, sv_hook())) {
         say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08" PMA ", the bank's "
             "surface only)", n_clipv, fn("surface_set_video"));
-    } else if (site("layer_video") && data("video_layer") && site("string_new")
+    } else if (site("layer_video") && data("video_layer") && site(PM_STRING_SITE)
                && hook(fn("layer_video"), on_clipv_layer)) {
         say("clip variants: %u clip(s) play one of several at random (layer_video 0x%08" PMA ", the video layer only)",
             n_clipv, fn("layer_video"));
@@ -26438,8 +26453,6 @@ static void pad_mode_start(void)
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };
         static const char *const light_s[] = { "light_run", "lamp_group", "show_priority", 0 };
         static const char *const light_d[] = { "event_head", "event_current", 0 };
-        /* PAD-1284: the 64-bit program has no string constructor - the runtime builds its strings (std_string) */
-#define PM_STRING_SITE (PM_A64 ? "resource_get" : "string_new")
         static const char *const screen_s[] = { PM_STRING_SITE, "resource_get", "dynamic_cast",
                                                 "find_node", "find_text", "set_text", 0 };
         static const char *const screen_d[] = { "resource_manager", "typeinfo_resource",

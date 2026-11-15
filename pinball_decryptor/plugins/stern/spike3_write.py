@@ -560,8 +560,9 @@ def _plan_modes(assets_dir, reader, work, log):
         raise PipelineError("Encode", "Modes: %s. Nothing was written." % e) from None
     if mplan is not None:
         for line in mplan.lines:
-            # PAD-1297: the score feed's line names itself
-            log(line if line.startswith("Score feed:") else "Modes: %s" % line, "info")
+            # PAD-1297: the score feed's line names itself (PAD-1323: and the random clips' and screen times')
+            log(line if line.startswith(("Score feed:", "Random clips:", "Screen times:")) else "Modes: %s" % line,
+                "info")
         return mplan, False
     try:
         state, _target = spike3_modes.card_state(reader)

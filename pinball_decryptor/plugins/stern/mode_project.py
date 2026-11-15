@@ -531,7 +531,12 @@ MULTIBALL_PROVEN = frozenset({
     # PAD-1285 2026-11-14, the Spike 3 card (rig slot 85, hidden, muted, a mode file started on Top lane center x3 - three
     # Death Star hits start the game's own multiball): served 3 through the game's serve, the mode ran its 40 s (the game's
     # Orbits start refused meanwhile), drains 3-2-1, then "ours is over" at one ball
-    "star_wars_elg-1.10/spike3",
+    "star_wars_elg-1.10/spike3",    # PAD-1287 2026-11-15 (Spike 3 rig slot 37, hidden, muted): a mode.cfg `multiball 3 10` on three Tower target hits,
+    # the game served to 3 balls in play (trough 3/6), 3 shots scored, counted 3 -> 2 -> 1 and gave its multiball back
+    "walking_dead_remastered_le-0.92/spike3",
+    # PAD-1288 2026-11-15 (Spike 3 rig slot 66, hidden, muted, s3proof.sh PROOF=mb TITLE=fallout_le): MB TEST on three
+    # Junk target hits served 3 through the game's serve, scored 3 shots, ran its 40 s, drains 3-2-1, "ours is over"
+    "fallout_le-0.82/spike3",
 })
 
 
@@ -632,7 +637,10 @@ BALL_SAVE_PROVEN = frozenset({
     # turned round at the game's first eject retry, so one ball in play): SAVE TEST's 15 s save taken through
     # multiball_serve, the drain 3 s in served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the
     # drain after the save ended it; the control without ball_save ended the ball on its first drain
-    "star_wars_elg-1.10/spike3",
+    "star_wars_elg-1.10/spike3",    # PAD-1288 2026-11-15 (Spike 3 rig slots 64/65, hidden, muted, s3proof.sh PROOF=ballsave TITLE=fallout_le): SAVE
+    # TEST's 15 s save taken, the drain inside it served back (eject + auto plunger 1 s later), 3 shots scored 6,000,000
+    # on that ball, the drain after the save ended it; the control without ball_save ended on its first drain, 5.9 s in
+    "fallout_le-0.82/spike3",
 })
 
 

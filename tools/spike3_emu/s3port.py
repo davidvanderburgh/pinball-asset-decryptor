@@ -2110,9 +2110,14 @@ def draft(ref, rport, tgt, game=None, version=None):
 
 #: a reference site that is its game's own content, never another title's
 GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
-#: reference values that are its game's own (its shows, callouts, held coils, mode flags)
+#: reference values that are its game's own (its shows, callouts, held coils, mode flags, and its mode books: a
+#: place_flag / done_flag is the flag one of the REFERENCE game's modes sets, PAD-1288 - on Fallout the same numbers
+#: line up in the framework's flag code but name none of its modes)
 GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
-                        r"magnet_proc|game_flags_at|block_\w+)$")
+                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\d+|done_audit_\d+)$")
+#: sites only ever armed together: one placed without the other is written as a comment (PAD-1288: Fallout's
+#: coil_give lines up, its coil_take has no counterpart, and the runtime arms held coils on both or neither)
+SITE_PAIRS = (("coil_take", "coil_give"),)
 GAME_DATA = re.compile(r"right_gate_obj$")
 #: the screen and clip features name the title's own hud / video bank scenes (per game): their sites, globals and
 #: values are placed and written as comments until a title's scenes are named
@@ -2451,6 +2456,15 @@ def draft_spike3(ref, rport, tgt, game, version):
                 placed[name] = b
                 if name in missing:
                     missing.remove(name)
+    for pair in SITE_PAIRS:
+        half = [n for n in pair if n in placed]
+        if half and len(half) < len(pair):
+            for name in half:
+                at = next((i for i, l in enumerate(body) if re.match(r"site %-16s " % re.escape(name), l)), None)
+                if at is not None:
+                    body[at] = "# not carried (%s has no counterpart, armed only together): %s" % (
+                        "/".join(n for n in pair if n not in placed), body[at])
+                del placed[name]
     # ---- globals
     body += ["", "# ---- globals: data <name> <address> ----"]
     for k, t, s in proven:

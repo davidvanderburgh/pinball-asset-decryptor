@@ -4,6 +4,8 @@
 # Windows checkout would rewrite them to CRLF and corrupt them (this is
 # exactly what broke the GDRE Tools installer — see installer/install_gdre.sh).
 *.sh text eol=lf
+# the Spike 3 proofs' title files are sourced by bash and their mode files read on the rig (PAD-1288)
+tools/spike3_emu/proofs/** text eol=lf
 
 # Dockerfiles are consumed by `docker build` (macOS Spooky/JJP flows).
 # A CRLF after a `\` line-continuation in a multi-line RUN breaks the

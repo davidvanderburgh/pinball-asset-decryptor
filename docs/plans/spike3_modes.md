@@ -451,6 +451,26 @@ modes start on Top lane center:
   still running 20 s after its multiball.
 Tests: tests/test_pad1285_spike3_play.py.
 
+**Fallout LE 0.82** (`ports/spike3/fallout_le-0.82.port`, program sha1 19081048...; PAD-1288), drafted from ELG's port
+(9,771 of 18,297 functions paired, every core entry placed, 39 shots) and proven 2026-11-15 on the Spike 3 rig (slots
+63-66, hidden, muted, `s3proof.sh TITLE=fallout_le`): CLOCK TEST started on three Junk target hits, scored 6 shots
+through score_add (+21M) and ended on its 25 s clock, twice; BALL_SAVE (the drain inside the save served back, the
+control ended on its first drain) and MULTIBALL (3 served, handed back at one ball) rows as in the table below; a real
+card written with a mode by `write_card` and read back through its encryption (below). What the drafter learned:
+
+- ELG's port gained its mode books (`place_flag_completed_*`, `done_flag_0`: PAD-1286) after Walking Dead was drafted,
+  and the same numbers line up in the framework's flag code on Fallout - but they name ELG's modes, so the runtime
+  would have fired "done" starts on whatever Fallout's flag 66 is. `GAME_VALUE` now counts every mode-book value as
+  the reference game's own.
+- `coil_give` lines up on Fallout but `coil_take` has no counterpart; the runtime arms held coils on both or neither,
+  so `SITE_PAIRS` writes a lone half as a comment.
+- Fallout's start on the rig: its Fat Man steppers home for ~110 s, it is not on free play, and a character select
+  follows Start (ACTION BUTTON). play.sh takes these from the title file (`SETTLE_S`, `COINS`, `AFTER_START_SWS`), and
+  the mode files' ELG shot bits are rewritten from it (`TRIGGER_BITS`, `SHOT_BITS`): `proofs/titles/<game>.env`,
+  sourced by s3proof.sh with `TITLE=<game>`. `PROOF=mode` is the plain one: trigger, shots, the clock ends it.
+- Not proven, so greyed: stacking (needs Fallout's own multiball switch for `PROOF=stackmb`), place / done (no block
+  starts for its own modes), lamps, shows, screens, clips, own sounds - each its own work.
+
 ## The proof pass on a Spike 3 port (PAD-1286)
 
 PAD-1277 keeps a Spike 2 build's proof tables off its Spike 3 twin: every `*_PROVEN` table (mode_project.py) is keyed

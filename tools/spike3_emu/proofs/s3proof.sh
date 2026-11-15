@@ -7,7 +7,7 @@
 #
 # The mode files come from modes/ beside this script (CFG -> mode.cfg, CFG2 -> mode1.cfg); SO defaults to the
 # repo's prebuilt mode64.so, PORT to ports/spike3/<game>-<version>.port by PORTNAME. play.sh plays the game (the
-# title's switch names: title.env, sourced if TITLE names one). Logs land in $OUT: mode_<tag>.log (the runtime's),
+# title's switch names and shot bits: titles/<game>.env, sourced if TITLE names one). Logs land in $OUT: mode_<tag>.log (the runtime's),
 # bridge_<tag>.log (the bus and the ball model's [ball] lines), play_<tag>.out, run_<tag>.out.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -15,11 +15,18 @@ REPO=$(cd "$HERE/../../.." && pwd)
 SLOT=${SLOT:-88}; TAG=${TAG:-run}; OUT=${OUT:-/var/tmp/pad-s3proof}
 CARD=/mnt/d/Pinball/images/Stern/spike3/${CARD:-star_wars_elg-1_10_0_spike3.Release.64G.sdcard-secure.raw}
 PORTNAME=${PORTNAME:-star_wars_elg-1.10.port}
+# the title's switch names for play.sh (titles/<game>.env; Star Wars ELG's are play.sh's defaults)
+if [ -n "${TITLE:-}" ]; then set -a; . "$HERE/titles/$TITLE.env"; set +a; fi
 W=/var/tmp/pad-s3proof/s$SLOT; mkdir -p "$W/files" "$OUT"; rm -f "$W"/files/*
 cp "${SO:-$REPO/tools/spike2_emu/modes/sdk/prebuilt/mode64.so}" "$W/mode64.so"
 cp "${PORT:-$REPO/tools/spike2_emu/modes/sdk/ports/spike3/$PORTNAME}" "$W/files/game.port"
 cp "$HERE/modes/${CFG:-save.cfg}" "$W/files/mode.cfg"
 [ -n "${CFG2:-}" ] && cp "$HERE/modes/$CFG2" "$W/files/mode1.cfg"
+# the mode files name Star Wars ELG's shot bits; a title's own (its port's switch lines) from titles/<game>.env
+for f in "$W"/files/mode*.cfg; do
+  [ -n "${TRIGGER_BITS:-}" ] && sed -i "s/^trigger \+0x[0-9a-fA-F]\+/trigger        $TRIGGER_BITS/" "$f"
+  [ -n "${SHOT_BITS:-}" ] && sed -i "s/^shots .*/shots          $SHOT_BITS/" "$f"
+done
 D=/var/tmp/pad-s3/slot$SLOT/connectivity.up/dump
 rm -f "$D/mode.log"
 ( PROOF=${PROOF:-game} bash "$HERE/play.sh" "$SLOT" > "$W/play_$TAG.out" 2>&1 ) &

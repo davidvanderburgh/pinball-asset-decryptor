@@ -192,12 +192,6 @@ HOOK_LINES = [
 #: left as it is (the menu then shows again after such a reboot).
 MAINT_CASE_MARK = "# maintenance reboot"
 MAINT_CALL = "[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh --maintenance-reboot"
-#: the THIRD patch (PAD-1309): back to the menu without switching off.  The game exits 254 when
-#: Escape is pressed (a USB keyboard on the machine; rungame.sh's own case comment says so) and
-#: stock rungame.sh starts it again; on a multi-boot install that case now restarts the machine
-#: into the menu.  Its own line, first in the case, so strip_hook takes it back out.
-ESC_CASE_MARK = "# pressed escape"
-ESC_CALL = "[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh --menu-reboot"
 #: staged name -> (mode, required); jjpselect + font under PADSELECT_DIR, the hook under scripts/
 SELECTOR_FILES = collections.OrderedDict([
     ("jjpselect", (0o755, True)),
@@ -764,34 +758,18 @@ def mark_maintenance_reboots(text):
     return "\n".join(out)
 
 
-def mark_escape_menu(text):
-    """ESC_CALL as the first line of the case whose label carries ESC_CASE_MARK, indented
-    like a case body (idempotent); a rungame.sh without that case is left alone."""
-    lines = text.split("\n")
-    out = []
-    for i, ln in enumerate(lines):
-        out.append(ln)
-        st = ln.strip()
-        if "#" in st and ESC_CASE_MARK in st[st.index("#"):] and ")" in st[:st.index("#")]:
-            nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
-            if nxt != ESC_CALL:
-                indent = ln[:len(ln) - len(ln.lstrip())]
-                out.append(indent + "    " + ESC_CALL)
-    return "\n".join(out)
-
-
 def hook_rungame(text):
     """rungame.sh with the guarded hook line after runonce.sh and the maintenance-reboot
     cases marked (idempotent).  Refused when the anchor is not there: a rungame.sh this
     tool does not know is not edited blind."""
     if has_hook(text):
-        return mark_escape_menu(mark_maintenance_reboots(text))
+        return mark_maintenance_reboots(text)
     lines = text.split("\n")
     at = [i for i, ln in enumerate(lines) if ln.strip() == RUNONCE_LINE]
     if len(at) != 1:
         raise Refused("rungame.sh: expected exactly one '%s' line to hook after, found %d" % (RUNONCE_LINE, len(at)))
     i = at[0] + 1
-    return mark_escape_menu(mark_maintenance_reboots("\n".join(lines[:i] + HOOK_LINES + lines[i:])))
+    return mark_maintenance_reboots("\n".join(lines[:i] + HOOK_LINES + lines[i:]))
 
 
 def strip_hook(text):
@@ -802,7 +780,7 @@ def strip_hook(text):
         if lines[i:i + len(HOOK_LINES)] == HOOK_LINES:
             i += len(HOOK_LINES)
             continue
-        if lines[i].strip() in (MAINT_CALL, ESC_CALL):
+        if lines[i].strip() == MAINT_CALL:
             i += 1
             continue
         out.append(lines[i])

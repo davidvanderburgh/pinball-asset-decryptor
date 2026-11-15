@@ -125,3 +125,41 @@ def test_a_lookalike_line_is_not_the_anchor():
     spaced = STOCK.replace("\t$1\n", "    $1\n")
     with pytest.raises(modehook.Refused):
         modehook.hook_game_monitor(spaced)
+
+
+# ---- PAD-1309: the multi-boot form (padmenu.so, and mode.so when the image has one) ----
+
+def test_menu_hook_round_trips_to_stock():
+    hooked = modehook.hook_game_monitor(STOCK, menu=True)
+    assert modehook.has_menu_hook(hooked) and modehook.has_hook(hooked)
+    assert modehook.strip_hook(hooked) == STOCK
+    assert "multi-boot" in modehook.describe(hooked)
+
+
+def test_menu_hook_preloads_both_objects_command_scoped():
+    hooked = modehook.hook_game_monitor(STOCK, menu=True)
+    lines = hooked.split("\n")
+    assert "\t[ -f " + modehook.MENU_SO + " ] && PADPRE=" + modehook.MENU_SO in lines
+    # padmenu.so first, mode.so after it when the booted image has one
+    assert ("\t[ -f " + modehook.MODE_SO + " ] && PADPRE=${PADPRE:+$PADPRE:}" + modehook.MODE_SO) in lines
+    assert [l for l in lines if "LD_PRELOAD" in l and not l.lstrip().startswith("#")] == \
+        ["\t\tLD_PRELOAD=$PADPRE $1"]
+    assert not any(l.lstrip().startswith("export") for l in lines)
+    # the restart lines after the block are untouched
+    assert hooked.split("\tfi\n", 1)[1] == STOCK.split("\t$1\n", 1)[1]
+
+
+def test_mode_only_hook_upgrades_to_menu_hook_and_back():
+    """A card hooked for modes (item 128) gets the multi-boot form, and a plain hook call
+    on a multi-boot card keeps it (a mode install must not drop padmenu.so)."""
+    mode_only = modehook.hook_game_monitor(STOCK)
+    assert not modehook.has_menu_hook(mode_only)
+    menu = modehook.hook_game_monitor(mode_only, menu=True)
+    assert menu == modehook.hook_game_monitor(STOCK, menu=True)
+    assert modehook.hook_game_monitor(menu) == menu                  # menu=None keeps the form
+    assert modehook.hook_game_monitor(menu, menu=False) == mode_only
+
+
+def test_mode_only_hook_is_unchanged_by_pad_1309():
+    """mode_install.py's single-card hook stays byte for byte what cards already carry."""
+    assert modehook.hook_game_monitor(STOCK).split("\n")[8:15] == modehook.HOOK_LINES

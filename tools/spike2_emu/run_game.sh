@@ -1016,6 +1016,23 @@ if [ -n "$SEL_DIRS" ]; then
     fi
 fi
 
+# ★ PAD-1309 - HOLD BACK TO COME BACK TO THE MENU, AS THE CARD DOES. A multi-boot
+# card's game_monitor preloads /usr/local/codeselect/padmenu.so into the game
+# (modehook.MENU_HOOK_LINES); this rig execs ./game itself, so it puts the same
+# object in front here, ahead of the shim (which answers the cabinet SPI word
+# padmenu.so reads). Holding BACK (the coin door's, on the playfield's service
+# keys) for 5 s then runs the card's own select.sh --reboot, and the reboot it
+# asks for is this rig's: dump/reboot.req, which watch.sh's poll turns into a
+# boot of the guest from the menu (restartgame.sh's path). PAD_MENU_BACK=0
+# leaves it out.
+PAD_MENU_SO=
+if [ -n "$SEL_DIRS" ] && [ "${PAD_MENU_BACK:-1}" != 0 ] && [ -f "$R/usr/local/codeselect/padmenu.so" ]; then
+    PAD_MENU_SO=/usr/local/codeselect/padmenu.so
+    # padmenu.restart: what asked for it, kept (reboot.req is taken the moment it lands)
+    export CODESELECT_REBOOT="touch /dump/padmenu.restart /dump/reboot.req"
+    echo "[select] holding BACK on the coin door for 5 s restarts into the menu, as on the card"
+fi
+
 # ★ ITEM 45 - THIS TITLE'S PANEL IS BOLTED IN UPSIDE DOWN AND OUR MONITOR IS NOT.
 #
 # james_bond_60th_le ships an 8-byte /games/data/boot_display_cmd holding exactly
@@ -1241,7 +1258,7 @@ if [ -n "$PIVOT" ]; then
         cd /
         /busybox umount -l /oldroot
         cd "/games/$GAME" || exit 1
-        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1}
+        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MENU_SO:+$PAD_MENU_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1}
         # stdio has to point INSIDE the container. The caller's stdout is a file
         # on a host mount ($HOME/gzwatch.log for watch.sh), and that mount leaves
         # the namespace with the pivot - criu then refuses fd 1 ("Can't lookup
@@ -1269,5 +1286,5 @@ fi
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.
 exec chroot "$R" /bin/sh -c \
-  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} exec ./game"
+  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MENU_SO:+$PAD_MENU_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} exec ./game"
 INNER

@@ -244,7 +244,12 @@ SELECTOR_FILES = collections.OrderedDict([
     # card's python2.7); not required, because a card without a delta never calls it -
     # a build that MAKES a delta refuses a selector dir without it (need_materializer)
     ("materialize.py", ("materialize.py", 0o755, False)),
+    # PAD-1309: preloaded into the game by the multi-boot game_monitor hook (ensure_menu_hook):
+    # BACK held 5 s on the coin door restarts the machine into the menu.  Not required, so a
+    # selector dir built before it still makes a card (one without the way back).
+    ("padmenu.so", ("padmenu.so", 0o755, False)),
 ])
+MENU_SO = SELECT_DIR + "/padmenu.so"
 FORBIDDEN_OUTPUT_PREFIXES = ("/mnt/d/Pinball/images", "D:/Pinball/images", "D:\\Pinball\\images",
                              "/mnt/wsl/cards/library")       # the library on the card store (PAD-966)
 
@@ -3460,6 +3465,46 @@ def inject_mode_sets(p2_image, mode_sets, stage_dir):
     return items
 
 
+def ensure_menu_hook(p2_image, stage_dir):
+    """PAD-1309: give GAME_MONITOR the multi-boot preload block (modehook.MENU_HOOK_LINES), so
+    MENU_SO - and an image's own mode.so, when it has one - is preloaded into the game, its
+    clocks put back.  Already there: nothing written.  A card whose game_monitor is not the
+    stock loop keeps it, and the build says that card has no way back to the menu without a
+    power cycle - never a refusal: the menu itself still works.  -> True when hooked."""
+    import modehook
+    try:
+        mpath = p2_file(p2_image, GAME_MONITOR)            # past a link (PAD-742)
+    except Refused:
+        mpath = None
+    mon = debugfs_cat(p2_image, mpath) if mpath else b""
+    if not mon:
+        say("no %s on p2: holding BACK cannot restart this card into the menu" % GAME_MONITOR)
+        return False
+    if modehook.has_menu_hook(mon):
+        return True
+    try:
+        hooked = modehook.hook_game_monitor(mon.decode("utf-8", "replace"), menu=True)
+    except modehook.Refused as e:
+        say("%s - holding BACK cannot restart this card into the menu" % e)
+        return False
+    p = os.path.join(stage_dir, "game_monitor.menu")
+    with open(p, "wb") as f:
+        f.write(hooked.encode("utf-8"))
+    times = debugfs_stat(p2_image, mpath)
+    mon_q = dq(mpath)
+    cmds = ["rm " + mon_q, "write %s %s" % (dq(p), mon_q),
+            "set_inode_field %s mode 0100755" % mon_q,
+            "set_inode_field %s uid 0" % mon_q, "set_inode_field %s gid 0" % mon_q]
+    cmds += ["set_inode_field %s %s @%d" % (mon_q, k, times[k])
+             for k in ("atime", "ctime", "mtime") if k in times]
+    debugfs_write_script(p2_image, cmds)
+    if debugfs_cat(p2_image, mpath) != hooked.encode("utf-8"):
+        raise Refused("%s read back differs from the hooked copy" % mpath)
+    say("%s hooked: holding BACK on the coin door for 5 s restarts the machine into the menu"
+        % GAME_MONITOR)
+    return True
+
+
 def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=None, replace_media=False,
                    manifests=None, mode_sets=None):
     """Modify an extracted rootfs image in place: /usr/local/codeselect/* (+ media/, + the JSON
@@ -3506,6 +3551,8 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
         mdir = os.path.join(stage_dir, "modesets")
         os.makedirs(mdir, exist_ok=True)
         inject_mode_sets(p2_image, mode_sets, mdir)
+    if any(c == MENU_SO for (_s, c, _m) in items):
+        ensure_menu_hook(p2_image, stage_dir)
     rc, txt = e2fsck(p2_image)
     if rc != 0:
         raise Refused("p2 is not clean after injection (e2fsck rc=%d):\n%s" % (rc, txt))

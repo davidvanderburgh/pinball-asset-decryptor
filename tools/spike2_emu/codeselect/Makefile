@@ -346,8 +346,19 @@ $(PROCSW): dpprocsw.c $(BUILD)/libpinproc.so.2.0 | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
 >     -nostartfiles dpprocsw.c $(BUILD)/libpinproc.so.2.0 -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
-else
+else ifneq ($(PLATFORM),stern)
 all: $(BIN)
+else
+# PAD-1309: padmenu.so, preloaded into the game on a multi-boot card - BACK held
+# on the coin door restarts the machine into the menu.  A shared object, built
+# the way the rig's hwshim.so is (build.sh): -nostdlib against the rootfs's own
+# libdl/libc, so it asks nothing newer than the card's glibc 2.21.
+PADMENU = $(BUILD)/padmenu.so
+all: $(BIN) $(PADMENU)
+
+$(PADMENU): padmenu.c | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration     -U_TIME_BITS -U_FILE_OFFSET_BITS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0     -fno-stack-protector -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include     -fPIC -shared -nostdlib -Wl,-soname,padmenu.so padmenu.c     -L$(ROOT)/lib -L$(ROOT)/usr/lib -l:libdl.so.2 -l:libc.so.6 -lgcc -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
 endif
 
 $(BUILD):
@@ -480,8 +491,9 @@ install: $(BIN)
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the card's DejaVuSans-Bold.ttf will be used"; fi
 > if [ -d media ]; then install -d "$(DESTDIR)$(PREFIX)/media"; for f in media/*; do if [ -f "$$f" ]; then install -m 644 "$$f" "$(DESTDIR)$(PREFIX)/media/"; fi; done; fi
 else
-check: $(BIN) capbin
+check: $(BIN) capbin $(PADMENU)
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"
+> bash test/padmenu_test.sh "$(ROOT)" "$(PADMENU)"
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > python3 test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > python3 test/settings_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
@@ -492,9 +504,10 @@ check-hw: $(BIN)
 > python3 test/fakebus_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > @echo "check-hw: OK"
 
-install: $(BIN)
+install: $(BIN) $(PADMENU)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/codeselect"
+> install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
 > install -m 755 select.sh "$(DESTDIR)$(PREFIX)/select.sh"
 > install -m 755 materialize.py "$(DESTDIR)$(PREFIX)/materialize.py"
 > install -m 644 images.conf.example "$(DESTDIR)$(PREFIX)/images.conf.example"

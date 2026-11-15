@@ -122,13 +122,14 @@ def test_the_runtime_reads_the_lines_and_hooks_the_drain_and_the_lookup_once():
     assert "if (att_live) att_edge(id, level, flags, pol, mask);" in c
     # (PAD-945: the sounds on the shots of the game's own modes hook it the same once-only way;
     # PAD-1031: so does the co-op characters' pick)
-    assert c.count("hook(e->addr, on_switch_edge)") == 4 and c.count("edge_hooked = hook(e->addr") == 4
+    # PAD-1322: all four through edge_hook, once (Spike 3's drain hooks with hook_callee there)
+    assert c.count("edge_hook(e)") == 4 and c.count("return edge_hooked = hook(e->addr, on_switch_edge);") == 1
     # only in attract (the mode mask's attract bit, no game), not while the last one still plays
     assert "if (!(mask & att.attract_bit) || pm_in_game()) return;" in c
     assert "if (att.plays && (long)(att.until - now) > 0) return;" in c
     assert 'pm_port_value("mode_mask_attract", 0x10)' in c
     # it works on a card with no modes (`only`): armed with the sounds.cfg it rides
-    assert "att_arm();" in c and "if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request) return;" in c
+    assert "att_arm();" in c and "if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request || ccer.request) return;" in c
 
 
 # ---- the build ------------------------------------------------------------------------------------

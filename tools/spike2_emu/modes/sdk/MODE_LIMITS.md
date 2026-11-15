@@ -216,6 +216,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all | challenges, game mode places, starts on game modes completed |
 | Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Star Wars 2025 LE 0.96 (Spike 3) | no | no | ✓ | no | never waits |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows, challenges, game mode places, starts on game modes completed |
 | Star Wars ELG 1.10 (Spike 3) | ✓ | ✓ | ✓ | shots | mechanisms, light shows, game mode places, starts on game modes completed |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all | challenges, game mode places, starts on game modes completed |

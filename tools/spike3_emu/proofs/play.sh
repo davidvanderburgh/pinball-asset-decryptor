@@ -4,7 +4,8 @@
 #   game      keep the ball in play HOLD s (a probe mode does the rest: place_probe_mode.c)
 #   mb        trigger the mode, plunge the balls it serves, shoot, drain them one by one
 #   coil      trigger the mode, shoot through its holds
-#   mode      the same play for a plain mode: trigger, shoot, let its clock run out (PAD-1289)
+#   mode      trigger the mode, score its shots, keep the ball up until its clock ends it (PAD-1288..1290)
+#   census    press every switch in CENSUS_NAMES once, print the id each reached the modes with (s3census.sh)
 #   stackmb   start the game's own multiball, trigger a `stack no` mode inside it, drain until it starts
 #   edge      (PAD-1322) the flipper buttons in attract, then in play the trigger, the scoring shots, a slingshot, a
 #             pop bumper and the flipper buttons: with `value switch_edge_log N` in the port, every edge is logged
@@ -13,9 +14,11 @@ TRIGGER_SW=${TRIGGER_SW:-TOP LANE CENTER}                   # the mode files' tr
 SHOT_SWS=${SHOT_SWS:-CENTER TARGET|HIDDEN TARGET|LEFT LUKE ORBIT}  # three of its scoring shots (0x20000138)
 EARLY_SWS=${EARLY_SWS:-LEFT LUKE ORBIT|HIDDEN TARGET}       # starts the game's own ball save right after the plunge
 GAME_MB_SW=${GAME_MB_SW:-DEATH STAR TARGET}                 # x3 starts the game's own multiball
+GAME_MB_SWS=${GAME_MB_SWS:-}                                # or these, once each in turn (a title's lock sequence)
 FLIP_SWS=${FLIP_SWS:-L FLIPPER BUTTON|R FLIPPER BUTTON}      # the flipper buttons (PROOF=edge)
 NOHANDLER_SWS=${NOHANDLER_SWS:-LEFT SLINGSHOT|RIGHT POP BUMPER}   # switches the drain runs no handler for (PROOF=edge)
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
+ATTRACT_WAIT=${ATTRACT_WAIT:-${SETTLE_S:-20}}               # after the runtime is up, before the first Start (WDR: ~60)
 COINS=${COINS:-0}                                           # credits first (Walking Dead Remastered's fresh settings: 4; Pokemon LE is not on free play)
 AFTER_START_SWS=${AFTER_START_SWS:-}                        # pressed after each Start (a character select)
 SLOT=${1:-88}
@@ -79,9 +82,26 @@ coil|mode)
   echo "[play] triggers in at $(date +%s)"
   for r in $(seq 1 8); do sleep 4; sws "$SHOT_SWS" 1; done
   sleep 10 ;;
+mode)
+  sleep 4
+  for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done
+  echo "[play] triggers in at $(date +%s)"; sleep 2
+  for r in 1 2; do sws "$SHOT_SWS" 2; done
+  echo "[play] shots in at $(date +%s); waiting out the clock"
+  for k in $(seq 1 90); do grep -qE "END|ended" $L && break; sleep 1; done
+  grep -E "START|END|ended|score" $L | tail -8
+  sleep 10 ;;
+census)
+  sleep 6
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    b=$(grep -c "\[probe\] shot" $L); $P sw "$SLOT" "$n" < /dev/null > /dev/null 2>&1; sleep 1.6
+    m=$(grep "\[probe\] shot" $L | tail -n +$((b+1)) | head -1 | awk '{print $NF}')
+    [ -n "$m" ] && echo "[census] $(python3 -c 'import sys; print(int(sys.argv[1].replace("_", ""), 16).bit_length() - 1 + 64 * int(sys.argv[2]))' "$m" "${CENSUS_HALF:-0}") $n"       || echo "[census] - $n"
+  done < "$CENSUS_NAMES" ;;
 stackmb)
   sleep 4
-  for k in 1 2 3; do $P sw "$SLOT" "$GAME_MB_SW"; sleep 2; done
+  if [ -n "${GAME_MB_SWS:-}" ]; then sws "$GAME_MB_SWS" 2; else for k in 1 2 3; do $P sw "$SLOT" "$GAME_MB_SW"; sleep 2; done; fi
   echo "[play] the game's own multiball asked for at $(date +%s)"
   for k in $(seq 1 6); do sleep 3; echo "[play] mb plunge $k: $(plunge)"; done
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done

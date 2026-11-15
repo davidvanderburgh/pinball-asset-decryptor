@@ -2231,9 +2231,10 @@ def draft(ref, rport, tgt, game=None, version=None):
 
 #: a reference site that is its game's own content, never another title's
 GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
-#: reference values that are its game's own (its shows, callouts, held coils, mode flags, and its mode book's
-#: COMPLETED / done flags - PAD-1289: Star Wars ELG's 66 / 68 turned up at lined-up instructions on Pokemon LE, but
-#: they are the flags of ELG's own modes, and another title's modes are its own port's)
+#: reference values that are its game's own (its shows, callouts, held coils, mode flags, and its mode books: a
+#: place_flag / done_flag is the flag one of the REFERENCE game's modes sets - PAD-1288: on Fallout the same numbers
+#: line up in the framework's flag code but name none of its modes; PAD-1289: Star Wars ELG's 66 / 68 turned up at
+#: lined-up instructions on Pokemon LE, but they are the flags of ELG's own modes)
 GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
                         r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+|done_audit_\d+)$")
 #: sites only ever armed together: one placed without the other is written as a comment (PAD-1288: Fallout's
@@ -2479,10 +2480,28 @@ def _event_votes(ref, tgt, M, A, ids, dispatch):
     return out
 
 
-def spike3_switches(tgt):
+def read_switch_ids(path):
+    """{device name (upper case): switch id} from a rig census (proofs/s3census.sh, PAD-1290): one `<id> <NAME>` line
+    per switch a press reached the modes with; `#` lines are notes."""
+    out = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                sid, name = line.split(None, 1)
+                out[" ".join(name.upper().split())] = int(sid, 0)
+    return out
+
+
+def spike3_switches(tgt, ids=None, unseen=None):
     """[(switch id, shot mask, name)] of the target's playfield switches that are shots, from its own device table:
     the switches the Spike 2 rule (portswitch.NOT_SHOTS) keeps, none of the service buttons' I/O group, one shot bit
-    each from bit 0 (up to 64). Star Wars ELG 1.10: the 30 its proven port names, every one."""
+    each from bit 0 (up to 64). Star Wars ELG 1.10: the 30 its proven port names, every one.
+
+    A switch's id is its rank among the table's switches - true on ELG and Walking Dead Remastered, NOT on every title:
+    Star Wars 2025 LE 0.96 numbers its RIGHT TARGET last (87) and every switch after it one lower (PAD-1290, measured
+    on the rig; nothing in the table says so). *ids* (read_switch_ids, a rig census) gives the measured ids instead:
+    a switch it does not name never reached the modes on the rig and is left out (its name appended to *unseen*)."""
     root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
     if root not in sys.path:
         sys.path.insert(0, root)
@@ -2491,8 +2510,15 @@ def spike3_switches(tgt):
     svc = {g for name, g, idx, cls in recs if re.match(r"SERVICE\b", name.upper())}
     shots = []
     for sid, (name, g, idx, cls) in enumerate(recs, 1):     # a switch's id: its rank among the table's switches
-        if g in svc or portswitch.NOT_SHOTS.search(" ".join(name.upper().split())):
+        key = " ".join(name.upper().split())
+        if g in svc or portswitch.NOT_SHOTS.search(key):
             continue
+        if ids is not None:
+            if key not in ids:
+                if unseen is not None:
+                    unseen.append(portswitch.nice(name))
+                continue
+            sid = ids[key]
         shots.append((sid, name))
     shots = shots[:portswitch.MAX_SWITCH_SHOTS]
     names = Counter(portswitch.nice(n) for s, n in shots)
@@ -2503,7 +2529,7 @@ def spike3_switches(tgt):
     return out
 
 
-def draft_spike3(ref, rport, tgt, game, version):
+def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
     """A Spike 3 port of `tgt` from `rport`, the proven port of the Spike 3 program `ref` (another title). Returns
     (text, matcher, core groups missing, sites not written)."""
     scan(ref)
@@ -2691,10 +2717,16 @@ def draft_spike3(ref, rport, tgt, game, version):
                     % placed["event:ball_end"])
         placed["ball_end_event"] = placed["event:ball_end"]
     # ---- switches: this program's own
-    sw = spike3_switches(tgt)
+    unseen = []
+    sw = spike3_switches(tgt, switch_ids, unseen)
     if sw:
         body += ["", "# ---- switches: the playfield switches of this program's own device table that are shots "
                  "(switch <id> <shot mask> <name>) ----"]
+        if switch_ids is not None:
+            body.append("# ids measured on the rig (a census: each switch pressed in a game, the id it reached the "
+                        "modes with), not the table's ranks")
+            if unseen:
+                body.append("# not carried - no id reached the modes when pressed on the rig: %s" % ", ".join(unseen))
         body += ["switch %-4d %-18s %s" % (sid, "0x%x" % mask, nm) for sid, mask, nm in sw]
         ex = next((nm for sid, mask, nm in sw if re.search(r"\b(target|tgt)\b", nm, re.I)), sw[0][2])
         body += ["", "# ---- text ----", "text example_start_shot     %s" % ex]
@@ -2726,6 +2758,7 @@ def main(argv=None):
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--game")
     ap.add_argument("--version")
+    ap.add_argument("--switch-ids", help="a rig census (proofs/s3census.sh): the switch lines' ids as measured")
     a = ap.parse_args(argv)
     ref, tgt = Elf(a.ref_elf), Elf(a.target_elf)
     if not tgt.a64:
@@ -2735,7 +2768,8 @@ def main(argv=None):
         if not (a.game and a.version):
             print("s3port.py: from a Spike 3 reference, name the target's --game and --version", file=sys.stderr)
             return 2
-        text, M, core_missing, missing = draft_spike3(ref, a.ref_port, tgt, a.game, a.version)
+        text, M, core_missing, missing = draft_spike3(ref, a.ref_port, tgt, a.game, a.version,
+                                                             read_switch_ids(a.switch_ids) if a.switch_ids else None)
     else:
         text, M, core_missing, missing = draft(ref, a.ref_port, tgt, a.game, a.version)
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:

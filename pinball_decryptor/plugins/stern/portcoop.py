@@ -45,6 +45,9 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
                               place holding the box's own player's login (co-op swap), so each box shows its own icon
   site  coop_up_call          (PAD-1202) the ball start's "player N, you're up" process's call of the player-up
                               getter: answered with the real player in a co-op or team game
+  site  coop_start_game       (PAD-1316) the framework's game start, handed the Insider lobby's size (its fifth word)
+  site  coop_lobby_add        and its loop's call of the Start button's add for lobby players 2..n, made only after
+                              ball 1's start (and so after a co-op intro and pick): the runtime adds them earlier
 
 and, for the team's own high score boards, the end-of-game high scores' lines (portchallenge.scores_lines).
 
@@ -455,6 +458,42 @@ def up_call(e, player, players):
             found.add(base + 4 * q)
     return found.pop() if len(found) == 1 else None
 
+def lobby_sites(e, add):
+    """PAD-1316: (game start va, va of its loop's call of the Start button's add) or None. The Start button's add
+    (`full`) is the one function that calls the framework's add-a-player; the game start calls it in a loop with its
+    own four words moved back - `mov r0, rA ; mov r1, rB ; mov r2, rC ; mov r3, rD ; bl full` - after the framework's
+    can-add test, and reads its fifth word (the Insider lobby's size) off the stack in its opening:
+    `push {..} ; .. ; ldr rN, [sp, #4 * pushed]`. The word after the call must be one hook_call can move and nothing
+    may branch to it. Godzilla Pro 1.16: 0x45a08c and 0x45a1b4 (full 0x459c48)."""
+    w, base = e.words, e.text_va
+    calls = [k for k in range(len(w)) if bl_target(base + 4 * k, w[k]) == add]
+    if len(calls) != 1:
+        return None
+    full_i = _function_start(w, calls[0], back=80)
+    if full_i is None:
+        return None
+    full = base + 4 * full_i
+    found = set()
+    for k in range(4, len(w) - 1):
+        if bl_target(base + 4 * k, w[k]) != full:
+            continue
+        if any(w[k - 4 + d] & 0xFFFFFFF0 != 0xE1A00000 | d << 12 or (w[k - 4 + d] & 0xF) < 4 for d in range(4)):
+            continue                                                        # mov r0-r3, r4.. (its own words)
+        start = _function_start(w, k, back=160)
+        if start is None or not _movable(w[k + 1]):
+            continue
+        pushed = bin(w[start] & 0xFFFF).count("1")
+        if not any(w[q] & 0xFFFF0FFF == 0xE59D0000 | 4 * pushed for q in range(start + 1, start + 12)):
+            continue                                                        # ldr rN, [sp, #4 * pushed]: a fifth word
+        end = next((q for q in range(k + 1, min(k + 200, len(w))) if w[q] & PUSH_LR_MASK == PUSH_LR), k + 200)
+        into = base + 4 * (k + 1)
+        if any(w[b] & 0x0E000000 == 0x0A000000 and bl_target(base + 4 * b, 0xEB000000 | w[b] & 0xFFFFFF) == into
+               for b in range(start, min(end, len(w)))):
+            continue
+        found.add((base + 4 * start, base + 4 * k))
+    return found.pop() if len(found) == 1 else None
+
+
 def lines(elf):
     """(lines, notes): the co-op port lines of `elf` (the game program's bytes or its path), and what was not found."""
     e = Elf(elf)
@@ -506,6 +545,11 @@ def lines(elf):
         out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % ("coop_panel_name_user", inner, e.word(inner), e.word(inner + 4)))
     for name, at in score_icon_sites(e):
         out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % (name, at, e.word(at), e.word(at + 4)))
+    # PAD-1316: the game start's late adds of the Insider lobby's players, made while ball 1 waits instead
+    lobby = lobby_sites(e, add)
+    if lobby:
+        for name, at in zip(("coop_start_game", "coop_lobby_add"), lobby):
+            out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % (name, at, e.word(at), e.word(at + 4)))
     # PAD-1202: the ball start's "player N, you're up" call, given the real player
     up = up_call(e, player, players)
     if up:

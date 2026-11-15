@@ -21085,6 +21085,83 @@ static void ci_start_poll(int formed)
         coop_teammates());
 }
 
+/* PAD-1316 (DoomWalrus666, Godzilla Pro 1.16, CO-OP PLAY from the start menu with two players logged in to Insider
+ * Connected: "a 2nd start button press to add player 3 doesn't show until after action button"): a game begun from
+ * the Insider lobby is handed the lobby's size (`site coop_start_game`, the framework's game start - its fifth word,
+ * on the stack), starts the game, runs ball 1's start - the serve, which the intro and the character pick hold - and
+ * only once that returns adds lobby players 2..n, a call each of the Start button's own add (`site coop_lobby_add`,
+ * the call in its loop). So while ball 1 waited the lobby's players were not in the game: the panel showed the last
+ * one's box as PRESS START, a Start in the intro took that player's place and number, and Action brought one more
+ * (emulator, Pro 1.16: the add came 25 s late). The game start is wrapped to learn the lobby and the add's own
+ * words; once the hold has a co-op game, the lobby's players are added there, in the game's order before any Start
+ * of the intro, and the game's loop finds each add done (answered "added" without adding). (tests lift
+ * coop_lobby_due verbatim) */
+static struct {
+    unsigned a[4], size, armed, added, done;
+} lb;
+static unsigned (*lb_start_game)(unsigned, unsigned, unsigned, unsigned, unsigned);
+static unsigned (*lb_add_game)(unsigned, unsigned, unsigned, unsigned);
+
+static unsigned coop_lobby_due(unsigned armed, unsigned size, unsigned done, int formed)
+{
+    return armed && size > 1 && size <= 4 && !done && formed ? size - 1 : 0;
+}
+
+static unsigned coop_start_game_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0)
+{
+    unsigned ret;
+    lb.a[0] = r0; lb.a[1] = r1; lb.a[2] = r2; lb.a[3] = r3;
+    lb.size = s0 & 0xff; lb.armed = 1; lb.added = 0; lb.done = 0;
+    if (lb.size > 1) say("co-op lobby: the game begins with %u players from the Insider lobby", lb.size);
+    ret = lb_start_game(r0, r1, r2, r3, s0);
+    lb.armed = 0; lb.added = 0;
+    return ret;
+}
+
+static unsigned coop_lobby_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    if (lb.armed && lb.added) {                               /* added while ball 1 waited */
+        lb.added--;
+        return 1;
+    }
+    return lb_add_game(r0, r1, r2, r3);
+}
+
+static void coop_lobby_now(int formed)
+{
+    unsigned k, n = coop_lobby_due(lb.armed, lb.size, lb.done, formed && coop_teammates()), got;
+    if (!n || !lb_add_game) return;
+    lb.done = 1;
+    for (k = 0; k < n; k++) {
+        got = lb_add_game(lb.a[0], lb.a[1], lb.a[2], lb.a[3]);
+        if (!(got & 0xff)) break;
+        lb.added++;
+    }
+    say("co-op lobby: ball 1 waits - the lobby's %u other player%s added now (%u), not after the wait", n,
+        n == 1 ? "" : "s", lb.added);
+}
+
+static void coop_lobby_arm(void)
+{
+    unsigned at;
+    if (!site("coop_start_game") || !site("coop_lobby_add")) return;
+    if (!fn("coop_start_game") || !fn("coop_lobby_add")
+        || !(at = hook_call(fn("coop_lobby_add"), (void *)coop_lobby_add_wrap))) {
+        say("co-op lobby: the game's add of the lobby's players could not be wrapped - with Insider players in the "
+            "lobby, they join after ball 1's intro and pick");
+        return;
+    }
+    lb_add_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
+    if (!(lb_start_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned))hook_wrap(
+              fn("coop_start_game"), (void *)coop_start_game_wrap))) {
+        say("co-op lobby: the game start could not be wrapped - with Insider players in the lobby, they join after "
+            "ball 1's intro and pick");
+        lb_add_game = 0;
+        return;
+    }
+    say("co-op lobby: the Insider lobby's players join while ball 1 waits for the intro and pick");
+}
+
 static void ci_ball_hold(unsigned ball)
 {
     unsigned long t0 = pm_ms(), most, intro_end = 0;
@@ -21111,6 +21188,7 @@ static void ci_ball_hold(unsigned ball)
             else if (now - intro_end > 1500ul) { why = "no character pick"; break; }
         }
         if (!said++) say("co-op intro: ball 1's serve waits - the intro, the language and the character pick first");
+        coop_lobby_now(ci.game == chg_game_now() + 1);       /* PAD-1316: the lobby's players before any join */
         ci_start_poll(ci.game == chg_game_now() + 1);
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
     }
@@ -21156,6 +21234,7 @@ static void coop_pick_hold(void)
         if (open && pk.left && !pk.held) t0 = now;          /* a pick under way: its own time limits it */
         if (now - t0 >= most) { why = "the pick ran past its time"; break; }
         if (!said++) say("co-op: player %u's ball waits to be served until their character is picked", t);
+        coop_lobby_now(1);                                    /* PAD-1316 */
         ci_start_poll(1);
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
     }
@@ -21419,6 +21498,7 @@ static void coop_arm(void)
                 "back", !fb ? "not in the port" : !fb->ok ? "not this build's" : "not wrapped");
     }
     coop_panel_arm();                                         /* PAD-1043 */
+    coop_lobby_arm();                                         /* PAD-1316 */
     coop_up_arm();                                            /* PAD-1202 */
     coop_ball_find();
     if (coop_ball_msg < 0) say("co-op: the game's \"BALL %%d\" line was not found - the screen does not say whose turn it is");

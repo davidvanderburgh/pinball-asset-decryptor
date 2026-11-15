@@ -845,6 +845,10 @@ site  coop_icon_draw         0x0021b6f8 0xebfffdf3 0xe1560004
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 data  message_table          0x06f7f294
 value coop_ball_msg          1255
+
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x0027af20 0xe92d47f0 0xe30e49a2
+site  coop_lobby_add         0x0027b048 0xebfffea3 0xe2506000
 # PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again
 site  comp_menu_frame        0x000ed55c 0xe083310a 0xe5133154
 value comp_menu_frame_list_at    652

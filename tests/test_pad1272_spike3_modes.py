@@ -187,12 +187,30 @@ def test_a_build_with_no_port_leaves_the_modes_out_with_the_reason(gates, monkey
                for k, m in said)
 
 
-def test_code_modes_are_left_out_of_a_spike3_build_and_said_so(gates, monkeypatch, tmp_path):
+def test_a_code_mode_only_project_is_planned_for_the_64_bit_card(gates, monkeypatch, tmp_path):
+    """PAD-1295: code modes are no longer left out of a Spike 3 build: a project of code modes
+    alone is planned, compiled for a64 (mode_write.plan code_ok + arch)."""
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    from types import SimpleNamespace
     monkeypatch.setattr(MW, "project_modes", lambda p: [])
-    monkeypatch.setattr(MW, "code_mode_list", lambda p: [("c", object())])
+    monkeypatch.setattr(MW, "code_mode_list", lambda p: [("c", SimpleNamespace(name="CODEY"))])
+    monkeypatch.setattr(MP, "project_profile", lambda p, probe=False: (None, None))
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    monkeypatch.setattr(CM, "profile_for", lambda p, code=(): None)
+    seen = {}
+
+    class _Result:
+        replaced, new, lines, mode_names = [], [], [], ["CODEY"]
+
+    monkeypatch.setattr(MW, "plan", lambda *a, **kw: seen.update(kw) or _Result())
+    monkeypatch.setattr(MW, "p2_payload", lambda result, out_dir, project=None, arch="arm": {
+        "so": "/o/mode.so", "cfgs": [], "port": "/o/game.port", "assets": [], "extras": [], "bundle": ""})
     said, log = _logged()
-    assert S3M.plan("proj", _Reader(_stock_tree()), str(tmp_path), log=log) is None
-    assert any(S3M.CODE_MODES_WORDS in m for _k, m in said)
+    mp = S3M.plan("proj", _Reader(_stock_tree()), str(tmp_path), log=log)
+    assert mp is not None and mp.names == ["CODEY"]
+    assert seen["code_ok"] is True and seen["arch"] == "a64"
+    assert any("CODEY (code mode)" in m for _k, m in said)
+    assert not any("left out" in m for _k, m in said)
 
 
 def test_a_multiboot_card_takes_no_modes(gates, tmp_path):
@@ -229,7 +247,7 @@ def test_the_plan_is_mode_writes_own_with_the_64_bit_runtime(gates, monkeypatch,
     monkeypatch.setattr(MW, "plan", plan)
     monkeypatch.setattr(MW, "p2_payload", payload)
     mp = S3M.plan("proj", _Reader(_stock_tree()), str(tmp_path))
-    assert seen["arch"] == "a64" and seen["code_ok"] is False
+    assert seen["arch"] == "a64" and seen["code_ok"] is True       # PAD-1295: code modes go on too
     assert list(seen["own_sounds"]) == [] and seen["end_sound"] is None     # PAD-1296: no profile, no carriers
     assert seen["elf"].startswith(b"\x7fELF\x02")       # the card's own 64-bit program
     assert mp.jobs == [("pokemon_le/assets/lcd/auto_loaded/h/scene.radium", "/s/hud")]

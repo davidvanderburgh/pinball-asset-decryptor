@@ -32,8 +32,8 @@ The Spike 2 mode.so is byte-identical.
 
 ## Write (spike3_write -> spike3_modes)
 
-1. `spike3_modes.plan` - the preview switch, code modes (left out: compiled for Spike 2's
-   32-bit ARM), `card_refusal` (no port / no Insider gate), a multi-boot card, then
+1. `spike3_modes.plan` - the preview switch, code modes (PAD-1295: compiled for the card's
+   64-bit ARM, below), `card_refusal` (no port / no Insider gate), a multi-boot card, then
    `mode_write.plan` against the card's own 64-bit program (`/games/game`'s target; the port
    check reads ELF64); a mode's own sounds and end sound go into the card's image.bin
    (PAD-1296, below).
@@ -184,7 +184,7 @@ the key the bank map's find is handed, PAD-1282).
   stages each container as a PATCH - the card's file cut at its old directory, a tail (bodies, directory,
   trailer) and a new 0x80-byte header - in the mode files' `games.patch/` (4 MB for ELG, not 1 GB), and s3run.sh
   builds the file in the rig slot's /games overlay from the store's copy (`games.patched` takes it away at the
-  next run's start). Code modes stay Spike 2's.
+  next run's start). Code modes' own sounds go the same way (PAD-1295).
 - mode_file.c's "NOT played - the game's own speech held the voice bus" now names what held it (request,
   priority, bus). A call waits for the voice bus (start and end 1.5 s, shot 0.8 s) and is dropped when the
   game's own higher-priority sound outlasts that, as on Spike 2: a shot call was held by the mode's own 3.5 s
@@ -353,3 +353,45 @@ modes start on Top lane center:
   started by its trigger file): main's mode.so ended it 3.08 s in ("the game's own mode began"); this build's was
   still running 20 s after its multiball.
 Tests: tests/test_pad1285_spike3_play.py.
+
+
+## Code modes on Spike 3 (PAD-1295)
+
+PAD-1272 left a project's code modes out of a Spike 3 build: they were compiled for Spike 2's 32-bit ARM and the
+app's Linux had no aarch64 compiler (the dev rig's `xgcc.sh` `apt-get download`ed one, which the shipped runtime
+cannot do: its image keeps no apt lists). Now:
+
+- **The kit**: `tools/spike3_emu/xgcc.pins` pins the aarch64 gcc 13.3.0 and binutils 2.42 packages by SHA-256, from
+  the Ubuntu snapshot the PAD Runtime is built from (`SNAPSHOT=20260801T000000Z`), at the runtime's own toolchain
+  versions (its arm cross gcc is 13.3.0-6ubuntu2~24.04.1, binutils 2.42-4ubuntu2.10), so every library they load
+  is already in runtime-7. `xgcc.sh` fetches the eight .debs (about 41 MB) once, checks each hash, `dpkg-deb -x`es
+  them into `/var/lib/pad-s3/xgcc` (stamped with the pins file's hash, one unpack at a time under flock) and prints
+  `s3cc`, with `s3nm` beside it. binutils comes in the kit, so nothing needs installing; off x86-64 a system
+  aarch64 gcc is used. The same kit builds the Spike 3 rig's shims (s3build.sh, ensures3select.sh), which on a
+  user's runtime had the same dead `apt-get download`. It rebuilds `prebuilt/mode64.so` byte-identical.
+- **The build**: `spike3_modes.plan` takes code modes (a code-mode-only project too) and calls `mode_write.plan`
+  with `code_ok=True, arch="a64"`; `code_plan` -> `compile_code_object(..., arch="a64")` runs `build_mode.sh -a a64`,
+  which with no CC takes the kit's `s3cc`. The kept object's key carries the machine and the pins file.
+  `p2_payload` stages the compiled object for any machine (the pinned mode64.so without code modes).
+- **build_mode.sh's nm check never ran on a64**: its nm name was derived as `${CC%gcc}nm`, nothing for `s3cc`. It
+  runs now (the kit's `s3nm`), and on a64 the banned-call rule (MODE_SDK.md rule 2) is read off the modes' own
+  sources compiled alone: the 64-bit runtime itself calls `malloc` for the game's std::string objects
+  (`std_string`, PAD-1284), on purpose. Both prebuilt objects are byte-for-byte unchanged (only build_mode.sh's
+  hash moved in SOURCES*.sha256).
+- **Their sounds**: a code mode's music and calls ride carriers like the form modes' (PAD-1296):
+  `spike3_modes.own_sounds(..., code=)` adds `choose_code_sounds`'s entries, each a record appended to image.bin
+  and swapped in by key (`swap <request> <stock> <ours> call:<cue>` in `<slug>.assets`). `choose_code_sounds`
+  read Spike 2's carrier table (`MS.carriers(game, version)`), so a `_spike3` profile had none; it takes
+  `profile_carriers(prof.key)` now. A swapped music is described as "(request N)", not Spike 2's bed sid.
+- Try it's note names the code modes built in, as on Spike 2.
+
+Proof (2026-11-15, Spike 3 rig slot 95, hidden, MUTED, Star Wars ELG 1.10 from the library): a project holding
+one CODE mode, BOUNTY HUNT (3 Death Star target hits start it; every named shot scores a bounty growing 250,000 a
+shot; 20 s), built by `spike3_modes.plan` (`real_card=False`, Try it's) - compiled in the PAD Runtime by the kit
+from a fresh unpack - and run by s3run.sh with PAD_S3_MODE_SO / PAD_S3_MODE_FILES: it started on the third hit,
+scored +250,000 / +500,000 / +750,000 / +1,000,000 on four shots and ended on time 20.2 s later (score 26,630 ->
+2,563,700). With its own music (700 Hz), start call (1500 Hz) and shot call (1000 Hz) in assets.json
+(`PAD_S3_AUDIO_OUT=1` keeping the PCM): carried on requests 70 / 135 / 202, each `[pad] sound swap` logged, and
+every tone found in the game's own output at its logged moment (the start call until the first shot call faded
+it, the four shot calls, the music under them). The Write's plan (`real_card=True`) builds the same set.
+Tests: tests/test_pad1295_spike3_code_modes.py (the real a64 compile under a POSIX shell).

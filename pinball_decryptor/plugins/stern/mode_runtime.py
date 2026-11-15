@@ -55,6 +55,14 @@ def sdk_dir():
     return str(here)
 
 
+def xgcc_script():
+    """PAD-1295: ``tools/spike3_emu/xgcc.sh``, which unpacks the pinned aarch64 cross compiler
+    (``xgcc.pins``) in the app's Linux and prints its ``s3cc``: Spike 3's code modes are
+    compiled with it. Beside ``tools/spike2_emu`` in a checkout, an install and a frozen build."""
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(sdk_dir()))),
+                        "spike3_emu", "xgcc.sh")
+
+
 def prebuilt_object(arch="arm"):
     """The pinned mode runtime object (the runtime + the mode-file interpreter), as a path:
     ``mode.so`` for Spike 2 (32-bit ARM) or, for ``arch="a64"``, ``mode64.so`` for Spike 3

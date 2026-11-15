@@ -1,55 +1,113 @@
 #!/bin/bash
-# xgcc.sh - an aarch64 cross gcc for the Spike 3 shims, with no package installed.
+# xgcc.sh - the aarch64 cross gcc for Spike 3: the rig's shims and a project's code modes.
 #
 #   bash xgcc.sh            # make sure it is there; prints the s3cc wrapper's path
 #   $(bash xgcc.sh) -shared -fPIC -o x.so x.c
 #
-# The Spike 2 rig builds its ARM shims with the system's arm-linux-gnueabihf-gcc.
-# Spike 3's game is aarch64 and gcc-aarch64-linux-gnu is not on the rig, so this
-# does what the README does for fuse2fs: `apt-get download` the cross compiler's
-# packages and `dpkg-deb -x` them into a private prefix under $HOME (no root, no
-# dpkg database touched). binutils-aarch64-linux-gnu is already a dependency of
-# the rig (qemu tooling) and supplies `as`/`ld`.
+# The Spike 2 side builds with the PAD Runtime's arm-linux-gnueabihf-gcc. Spike 3's game is
+# aarch64 and no aarch64 gcc is in the runtime image, so this unpacks one into a private
+# prefix: the packages xgcc.pins names (PAD-1295), each fetched from the Ubuntu snapshot the
+# runtime itself is built from and checked against its SHA-256 before `dpkg-deb -x` (no root
+# needed, no dpkg database touched). It used to `apt-get download` whatever the distro's
+# lists offered, which the shipped runtime cannot do at all (its image keeps no apt lists)
+# and which gave each machine the compiler of its own day. Now every machine gets the same
+# bytes: gcc 13.3.0 and binutils 2.42, the versions of the runtime's own toolchains, whose
+# libraries are therefore already there. binutils comes in the kit too, so `as`/`ld`/`nm`
+# need nothing installed.
+#
+# The kit is unpacked once per pins file (the stamp is the file's SHA-256); a changed pin
+# unpacks the new set. PAD_XGCC_DEBS=<dir> takes the .debs from a folder instead of the
+# network (each still checked). Off x86-64 (an arm64 Mac's container) the pinned host
+# binaries cannot run, so a system aarch64-linux-gnu-gcc - or the host's own gcc on an
+# aarch64 host - is used instead.
 #
 # The wrapper passes --sysroot (the cross libc's linker script names absolute
 # /usr/aarch64-linux-gnu paths) and the -B paths gcc needs to find cc1, crt*.o
-# and the assembler in a prefix it was not built for.
+# and the assembler in a prefix it was not built for. s3nm beside it is the kit's nm
+# (build_mode.sh's check of what an object leaves undefined).
 #
 # GLIBC: the cross libc is Ubuntu 24.04's 2.39, and the cards' Buildroot rootfs
 # is also glibc 2.39 (pokemon_le 0.82.0, measured), so a shim built here asks
 # for no symbol version the card lacks. A card on a newer OS build could differ:
 # `readelf -V` the .so against the card's libc if one ever refuses to load.
 set -eu
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PINS=$HERE/xgcc.pins
 P=${PAD_S3_XGCC:-${PAD_S3_HOME:-/var/lib/pad-s3}/xgcc}
-CC=$P/root/usr/bin/aarch64-linux-gnu-gcc-13
 W=$P/s3cc
-if [ ! -x "$CC" ]; then
-    command -v aarch64-linux-gnu-as >/dev/null || {
-        echo "xgcc.sh: binutils-aarch64-linux-gnu is missing (apt install binutils-aarch64-linux-gnu)" >&2; exit 1; }
+say() { echo "xgcc.sh: $*" >&2; }
+
+# Off x86-64: the system's compiler (the pinned kit is amd64 programs).
+if [ "$(uname -m)" != x86_64 ]; then
+    for c in aarch64-linux-gnu-gcc aarch64-linux-gnu-gcc-13 aarch64-linux-gnu-gcc-12; do
+        command -v "$c" >/dev/null && { command -v "$c"; exit 0; }
+    done
+    [ "$(uname -m)" = aarch64 ] && command -v gcc >/dev/null && { command -v gcc; exit 0; }
+    say "no aarch64 gcc on this $(uname -m) machine (install gcc-aarch64-linux-gnu)"; exit 1
+fi
+
+STAMP=$(sha256sum "$PINS" | cut -d' ' -f1)
+CC=$P/root/usr/bin/aarch64-linux-gnu-gcc-13
+
+unpack() {
+    local base= sum size path f got n=0 new=$P/root.new
     mkdir -p "$P/debs"
-    ( cd "$P/debs" && apt-get download \
-        gcc-13-aarch64-linux-gnu cpp-13-aarch64-linux-gnu gcc-13-aarch64-linux-gnu-base \
-        libgcc-13-dev-arm64-cross libc6-dev-arm64-cross libc6-arm64-cross \
-        linux-libc-dev-arm64-cross libgcc-s1-arm64-cross libatomic1-arm64-cross \
-        libasan8-arm64-cross libhwasan0-arm64-cross liblsan0-arm64-cross \
-        libtsan2-arm64-cross libubsan1-arm64-cross libitm1-arm64-cross \
-        libgomp1-arm64-cross >&2 )
-    for d in "$P"/debs/*.deb; do dpkg-deb -x "$d" "$P/root"; done
+    rm -rf "$new"
+    mkdir -p "$new"
+    while read -r sum size path; do
+        case $sum in ''|'#'*) continue ;; snapshot) base=$size; continue ;; esac
+        f=$P/debs/${path##*/}
+        if [ ! -f "$f" ] || [ "$(sha256sum "$f" | cut -d' ' -f1)" != "$sum" ]; then
+            rm -f "$f"
+            if [ -n "${PAD_XGCC_DEBS:-}" ] && [ -f "$PAD_XGCC_DEBS/${path##*/}" ]; then
+                cp "$PAD_XGCC_DEBS/${path##*/}" "$f.part"
+            elif command -v curl >/dev/null; then
+                curl -fsSL --retry 5 --retry-delay 3 -o "$f.part" "$base/$path" \
+                    || { say "could not download ${path##*/} from the Ubuntu snapshot archive"; return 1; }
+            else
+                wget -q -t 5 -O "$f.part" "$base/$path" \
+                    || { say "could not download ${path##*/} from the Ubuntu snapshot archive"; return 1; }
+            fi
+            got=$(sha256sum "$f.part" | cut -d' ' -f1)
+            [ "$got" = "$sum" ] || { rm -f "$f.part"; say "${path##*/} is not the pinned file (sha256 $got)"; return 1; }
+            mv "$f.part" "$f"
+        fi
+        dpkg-deb -x "$f" "$new"
+        n=$((n + 1))
+    done < "$PINS"
+    [ -x "$new/usr/bin/aarch64-linux-gnu-gcc-13" ] || { say "the kit unpacked without its gcc"; return 1; }
+    rm -rf "$P/root"
+    mv "$new" "$P/root"
+    echo "$STAMP" > "$P/stamp"
+    say "unpacked the pinned aarch64 compiler ($n packages) into $P"
+}
+
+if [ "$(cat "$P/stamp" 2>/dev/null)" != "$STAMP" ] || [ ! -x "$CC" ]; then
+    mkdir -p "$P"
+    # one unpack at a time (rigs and a Write can ask at once); the second finds it done
+    exec 9>"$P/.lock"
+    command -v flock >/dev/null && flock 9
+    if [ "$(cat "$P/stamp" 2>/dev/null)" != "$STAMP" ] || [ ! -x "$CC" ]; then
+        say "getting the pinned aarch64 compiler (about 41 MB, once)"
+        unpack || exit 1
+    fi
 fi
 # THE WRAPPER FINDS ITS COMPILER BESIDE ITSELF (PAD-1090): it used to name the
 # prefix it was made in, and a rig home moved (/var/tmp/... -> /var/lib/pad-s3)
-# left a wrapper exec-ing a gcc that was not there. Rewritten when it is an
-# old one (no "self-located" mark) or missing.
-if ! grep -qs "self-located" "$W"; then
-    cat > "$W" <<'EOF'
+# left a wrapper exec-ing a gcc that was not there. Rewritten when it is not this
+# version's (no "pinned kit" mark: the kit's own binutils first, PAD-1295) or missing.
+if ! grep -qs "pinned kit" "$W" || [ ! -x "$P/s3nm" ]; then
+    cat > "$W.tmp" <<'EOF'
 #!/bin/sh
-# s3cc - self-located: the aarch64 gcc unpacked beside this file (xgcc.sh)
+# s3cc - self-located, pinned kit: the aarch64 gcc and binutils unpacked beside this file (xgcc.sh)
 P=$(cd "$(dirname "$0")" && pwd)
 G=$P/root/usr/lib/gcc-cross/aarch64-linux-gnu/13
-exec "$P/root/usr/bin/aarch64-linux-gnu-gcc-13" -B/usr/aarch64-linux-gnu/bin/ -B"$G"/ -B"$P"/root/usr/aarch64-linux-gnu/lib/ \
+exec "$P/root/usr/bin/aarch64-linux-gnu-gcc-13" -B"$P"/root/usr/aarch64-linux-gnu/bin/ -B"$G"/ -B"$P"/root/usr/aarch64-linux-gnu/lib/ \
     --sysroot="$P"/root -isystem "$G"/include -isystem "$P"/root/usr/aarch64-linux-gnu/include \
     -L"$P"/root/usr/aarch64-linux-gnu/lib "$@"
 EOF
-    chmod +x "$W"
+    printf '#!/bin/sh\n# s3nm - the pinned kit'"'"'s aarch64 nm (xgcc.sh)\nexec "$(cd "$(dirname "$0")" && pwd)/root/usr/bin/aarch64-linux-gnu-nm" "$@"\n' > "$P/s3nm"
+    chmod +x "$W.tmp" "$P/s3nm"
+    mv "$W.tmp" "$W"
 fi
 echo "$W"

@@ -48,9 +48,61 @@ The Spike 2 mode.so is byte-identical.
    (`/games/game` back to `game.target`, `pad/padmode` gone).
 
 The engine (`_compute_patches`) no longer builds the Spike 2 mode family onto a Spike 3 volume:
-modes are spike3_write's; random clips, music modes, editions, picture settings, attract
-items, co-op, idle, handicaps, light shows, Prolonged Competition, the score feed and screen
-times are left out with one sentence (they ride Spike 2's delivery).
+modes are spike3_write's, and so is the score feed (PAD-1297, below); every other part a project
+asks for is left out with a sentence of its own (`spike3_modes.FAMILY_LEFT_OUT`).
+
+## The family on Spike 3 (PAD-1297)
+
+On Spike 2 thirteen parts ride the modes' delivery: the runtime on p2 with a cfg of their own
+beside it, and for some a game-program patch (an operator-menu row) or bank records. On Spike 3
+the runtime and its files go in `/games/pad/padmode` (above) and each cfg is read there through
+`pm_card_open`; what decides is whether the 64-bit runtime can do the part and whether the Python
+that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_elg-1.10.port`
+(the only Spike 3 port) and pad_mode_runtime.c, 2026-11-15:
+
+| part | Spike 2 card pieces | on Spike 3 | what it needs |
+|---|---|---|---|
+| **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live. Only the Insider login ids are 32-bit (the user-manager finder `coop_play.insider_users`, an `unsigned` address in `feed_login`): reports name no logins, and the log says so |
+| random clips | clips.cfg, clips in the video bank | left out | the clip v2 route's `string_new` site (64-bit builds its own strings), the clip name read as a 4-byte pointer, surface compares cut to 32 bits |
+| screen times | `stime` lines in clips.cfg | left out | rides random clips' arm; the vtable slot read and written as 4 bytes; screen_time.py reads 32-bit vtables |
+| music modes | sounds.cfg, bank records, MUSIC MODE row | left out | off on 64-bit by design (32-bit asset descriptors); Spike 3's songs are image.bin records (PAD-1296 appends them); a 64-bit menu row |
+| editions | EDITION row, codeselect's `edition=` | left out | no runtime: a 64-bit operator-menu row (adjustments.py refuses ELF64) and the Spike 3 multi-boot reading EDITION |
+| picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
+| co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | every switch edge (`switch_edge`: Spike 3's drain makes none), the player sites, a 64-bit message table, the menu row |
+| handicaps | handicap.cfg, HANDICAP row | left out | flipper edges (as co-op), `coop_player`, the menu row; handicap.py reads 32-bit code |
+| Prolonged Competition | comp.cfg | left out | the challenge-menu sites (not placed); `hook_full`, 0 on 64-bit; 4-byte entry name, 32-bit frame |
+| records on the high scores | records.cfg | left out | the champion framework's sites (not placed) and its 64-bit record |
+| attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
+| inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
+| expression light shows | cabshow.cfg | left out | `cablamp` lines (ELG has no cabinet lights), the game's show table as 64-bit, voice count measured |
+
+The operator-menu rows (MUSIC MODE, EDITION, CO-OP PLAY, HANDICAP, the picture rows) all wait on
+one piece: adjustments.py / menu_settings.py writing a 64-bit program. Co-op, handicaps and the
+attract / shot sounds of music modes wait on a 64-bit switch-edge source. So the order the rest
+lands in: the 64-bit menu rows; the switch-edge source; random clips with screen times; music
+modes; editions; co-op with handicaps (and the feed's logins, the same user-manager finder);
+Prolonged Competition with records; attract items, idle and light shows with the first Spike 3
+title whose port has them. Picture settings stay off on every card.
+
+**The score feed on Spike 3.** `spike3_modes.feed_wanted` is the feed's own gate, quiet (the
+engine's `_feed_for_build` has said why one is left out); `spike3_modes.plan` hands it to
+`mode_write.plan` with the modes, or alone (`modes_on=False`: a card of the feed by itself gets
+the runtime, the port and scorefeed.cfg with `only`, and the hook). It needs no mode-maker
+preview, as on Spike 2; a multi-boot card takes none, said in its own sentence.
+
+Proof (2026-11-15, Spike 3 rig slot 1, hidden and MUTED): the set planned by `spike3_modes.plan`
+from the library's Star Wars ELG 1.10 card (mode.so = prebuilt/mode64.so, game.port, scorefeed.cfg
+`only`), the address 10.77.0.1 put on the game's own loopback (s3run's private network) with a
+stand-in server listening there. The runtime armed it alone (`armed: score feed only (scorefeed.cfg
+says the card has no modes) - nothing else is hooked`, at the game's game_over; bus 0x4d game, 0x25
+ball, game_over); one player, every ball drained (`s3press.py drain`); at the game's own game_over
+`game 1 over - 1 player(s): 208740` and 0.1 s later `game 1 posted ... (HTTP 200)`, the server
+receiving `{"source":"PAD score feed","game":"Star Wars ELG 1.10 (Spike 3)","port":"star_wars_elg
+1.10","game_number":1,...,"players":1,"scores":[208740],"insider":[null]}` - the score the game's
+own attract screen then showed as Player 1's. (A first try with the server down said `no way to the
+server's address` on each try, and the game played on.) A rig note: every Start press in a game adds
+a player, so a job starts one game with one held Start (first-boot GAME SETUP) and one press.
+Tests: tests/test_pad1297_spike3_family.py.
 
 ## The Modes tab and Try it
 

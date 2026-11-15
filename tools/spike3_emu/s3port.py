@@ -2225,9 +2225,11 @@ def draft(ref, rport, tgt, game=None, version=None):
 
 #: a reference site that is its game's own content, never another title's
 GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
-#: reference values that are its game's own (its shows, callouts, held coils, mode flags)
+#: reference values that are its game's own (its shows, callouts, held coils, mode flags, and the books of its modes:
+#: PAD-1292, Star Wars ELG's Captive Multiball / Ramps COMPLETED flags 66 / 68 lined up on Walking Dead Remastered,
+#: whose 66 / 68 are its right spinner lit and a skill-shot speech flag)
 GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
-                        r"magnet_proc|game_flags_at|block_\w+)$")
+                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\d+)$")
 GAME_DATA = re.compile(r"right_gate_obj$")
 #: the screen and clip features name the title's own hud / video bank scenes (per game): their sites, globals and
 #: values are placed and written as comments until a title's scenes are named

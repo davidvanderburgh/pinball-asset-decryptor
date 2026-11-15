@@ -145,3 +145,14 @@ def test_redrafting_walking_dead_gives_the_proven_port():
     assert _entries(text) == _entries(WD_PORT.read_text(encoding="utf-8"))
     # a layout that moved is read off this program, not copied: the process's exit hooks (Star Wars ELG's at 312)
     assert re.search(r"^value proc_exit_hooks\s+392\b", text, re.M)
+
+
+def test_the_reference_games_mode_books_are_never_carried_by_their_numbers():
+    """PAD-1292: Star Wars ELG's Captive Multiball / Ramps COMPLETED flags (66 / 68) lined up on Walking Dead
+    Remastered, whose 66 / 68 are other flags: a book's flag is the reference game's own, like its mode flags"""
+    S = _s3port()
+    for name in ("done_flag_0", "place_flag_completed_2", "place_flag_played_1", "mode_flag_1", "block_name_0"):
+        assert S.GAME_VALUE.match(name), name
+    for name in ("proc_exit_hooks", "event_flags", "game_flag_count"):
+        assert not S.GAME_VALUE.match(name), name
+    assert not re.search(r"^value (done_flag|place_flag)_", WD_PORT.read_text(encoding="utf-8"), re.M)

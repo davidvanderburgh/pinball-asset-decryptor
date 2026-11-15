@@ -196,7 +196,7 @@ switch 68   0x80000000         Left drop top
 # ---- text ----
 text example_start_shot     Tower target
 
-# not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 16 text, 16 value
+# not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 17 text, 20 value
 
 # ---- checks ----
 # value sound_channel_voice_ptrs: 1 of the 5 lined-up instructions holding 144 on the reference hold 112 here

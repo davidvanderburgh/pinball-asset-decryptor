@@ -36,7 +36,7 @@ from pinball_decryptor.webui.multiboot_core import (
     host_path, inject_commands, inspect_commands, list_title,
     loaded_media_dir, media_fingerprint, media_specs_changed,
     eta_text, menu_summary, parse_anim_frames, parse_inspect, parse_plan,
-    parse_progress, parse_refusal,
+    parse_failed_checks, failure_why, parse_progress, parse_refusal,
     parse_selector_path, plan_commands, prepare_commands, preview_box,
     selector_card,
     preview_fingerprint, preview_prepare_args, preview_snapshot_args,
@@ -1532,6 +1532,46 @@ def test_parse_inspect_finds_the_report_and_the_refusal():
     assert parse_refusal("reading\nrefused: not a multi card\n") == \
         "not a multi card"
     assert parse_refusal("all fine") == ""
+
+
+def test_a_failed_verify_is_named_by_its_failed_checks():
+    """PAD-1336: a verify prints a row per check and no refusal line, so the
+    failed build said only "see the tool output".  The rows that FAILED are
+    the reason, in each verify tool's own spelling."""
+    def row(label, good, detail=""):          # mkmulticard verify_card's check()
+        return "%-58s %s%s" % (label, "OK" if good else "FAIL",
+                               ("  " + detail) if detail else "")
+    passed = "\n".join([row("MBR entries", True),
+                        row("e2fsck -fn p3 (4 s)", True),
+                        "    NOTE image 0: this tree carries 4 .sidx packages",
+                        "VERIFY /mnt/c/x/Godzilla 3.multi.raw PASS"])
+    assert parse_failed_checks(passed) == ""
+    one = passed.replace("PASS", "FAIL") + "\n" + row(
+        "image 1 /dev/mmcblk0p7:img1 content: 900 of 900 files re-hashed", False,
+        "differ: ['godzilla_le/game']")
+    assert parse_failed_checks(one) == (
+        "the check that failed: image 1 /dev/mmcblk0p7:img1 content: 900 of 900 "
+        "files re-hashed (differ: godzilla_le/game)")
+    # five paths are the first and 'and others': the line is one line
+    modes = parse_failed_checks(row("image 1 /dev/mmcblk0p7:img1 file mode/owner", False,
+                                    repr(["godzilla_le/a.png", "godzilla_le/b.png"])))
+    assert modes == ("the check that failed: image 1 /dev/mmcblk0p7:img1 file mode/owner "
+                     "(godzilla_le/a.png and others)")
+    many = one + "\n" + "\n".join(row("EBR for p%d @1" % n, False) for n in (5, 6, 7))
+    got = parse_failed_checks(many)
+    assert got.startswith("4 checks failed: image 1 ") and \
+        got.endswith("; EBR for p5 @1; EBR for p6 @1; and 1 more in the tool output"), got
+    long = parse_failed_checks(row("e2fsck -fn p7 (9 s)", False, "x" * 500))
+    assert long.endswith("x\u2026)") and len(long) < 220
+    # mkjjpmulti and mks3multi spell a failed check their own way
+    assert parse_failed_checks("ok: a\nFAIL: p3 md5 - got abc\n"
+                               "verify: FAIL (2 check(s), 1 failed)") == \
+        "the check that failed: p3 md5 (got abc)"
+    assert parse_failed_checks("verify: FAILED (image 1, menu x)") == \
+        "the check that failed: image 1, menu x"
+    # a refusal line, when there is one, is still THE reason
+    assert failure_why(one + "\nrefused: not a multi card") == "not a multi card"
+    assert failure_why(one).startswith("the check that failed:")
 
 
 def test_media_specs_come_back_as_the_specs_that_made_them(monkeypatch,

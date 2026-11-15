@@ -67,6 +67,15 @@ ARGS=("$@")
 play() {        # start the game in the folder: never returns when it starts
     if [ -n "${PADSELECT_DRY:-}" ]; then echo "would start '$START' in $G"; say "dry run"; exit 0; fi
     say "starting: $START"
+    # PAD-1309: EXIT held 3 s (Hold BACK, back_hold=) on the coin door restarts the machine into this menu - the
+    # Python hook (padmenu_proc.py) goes first on the game's PYTHONPATH as sitecustomize
+    if [ -f "$P/padmenu_py/sitecustomize.py" ]; then
+        export PYTHONPATH="$P/padmenu_py${PYTHONPATH:+:$PYTHONPATH}"
+    # the card's back_hold=<seconds> (Menu settings; 0 = off), else padmenu's own 3 s
+    _bh=$(awk -F= '/^[ \t]*back_hold[ \t]*=/ { v = $2; gsub(/[^0-9]/, "", v); print v }' "$CONF" 2>/dev/null | tail -n 1)
+    [ -n "$_bh" ] && export PADMENU_HOLD_MS=$((_bh * 1000))
+        say "EXIT held 3 s (Hold BACK, back_hold=) restarts into this menu"
+    fi
     exec 3>&-
     cd "$G" || exit 1
     exec bash -c "$START"

@@ -648,6 +648,10 @@ function MenuDialog({ s, w }) {
         <label class="k" for=${fid("default")}>Default image:</label>
         <div class="row wrap"><${Field} id=${fid("default")} ns=${NS} k="default" value=${s.default} ...${num} max=${md.default_max} />
           <span class="small muted">highlighted at power-up (the last choice wins once one was made)</span></div>
+        ${md.back_hold_ok !== false && html`
+        <label class="k" for=${fid("back_hold")}>Hold BACK (s):</label>
+        <div class="row wrap"><${Field} id=${fid("back_hold")} ns=${NS} k="back_hold" value=${s.back_hold} ...${num} max=${60} />
+          <span class="small muted">in a game, holding the coin door's BACK (EXIT on some machines) this long restarts into this menu; 0 = off</span></div>`}
       </div>
     <//>
     </div>

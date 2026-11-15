@@ -290,6 +290,30 @@ def _list_physical_drives_linux():
     return _parse_linux_lsblk(result.stdout)
 
 
+#: How much of a USB stick's printed size a FAT32 install stick can count
+#: on: sticks sold as "8 GB" hold a little under 8 x 10^9 bytes, and the
+#: format takes its FAT tables and cluster slack out of that (PAD-1314).
+_STICK_USABLE = 0.95
+
+
+def stick_class(n):
+    """The smallest stick size (GB, as printed on the packaging: 1, 2, 4,
+    8 ...) whose files room holds *n* bytes, or None for no size."""
+    if not n:
+        return None
+    gb = 1
+    while n > gb * 10 ** 9 * _STICK_USABLE:
+        gb *= 2
+    return gb
+
+
+def stick_words(n, noun="stick"):
+    """'a 4 GB stick or larger' / 'an 8 GB ...' for *n* bytes (PAD-1314)."""
+    gb = stick_class(n)
+    return "%s %d GB %s or larger" % ("an" if str(gb)[0] == "8" else "a",
+                                       gb, noun)
+
+
 def list_physical_drives():
     """Enumerate physical drives on the current platform.
 

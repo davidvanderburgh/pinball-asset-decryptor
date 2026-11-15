@@ -62,7 +62,7 @@ def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
                      r"\s*feed_arm\(\);[^\n]*\n"
                      r"\s*if \(\(\(clipv_only \|\| sndm_only \|\| pic_only \|\| idle_only \|\| hand_cfg_only\(\) \|\| comp_cfg_only\(\)"
                      r" \|\| \(cabs_only && n_cabs\)\)\s*\|\| feed_cfg_only\(\)\)"
-                     r"\s*&& !attract_wanted\(\) && !coop_wanted\(\)\) \{.*?"
+                     r"\s*&& !attract_wanted\(\) && !coop_wanted\(\) && !rec_wanted\(\)\) \{.*?"
                      r"if \(\(hand\.on \|\| n_cabs\) && !hook\(fn\(\"tick\"\), on_hand_tick\)\) \{[^{}]*\}\s*return;"
                      r"\s*\}\s*\n\s*if \(!insider_arm\(\)\) return;",
                      src, re.S)

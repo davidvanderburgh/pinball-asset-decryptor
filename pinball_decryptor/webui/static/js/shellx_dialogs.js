@@ -533,6 +533,11 @@ function newProjectPreview(parent, name, stock) {
   };
 }
 
+// PAD-1319: the whole project path under Folder name, so the name is never read alone.
+function joinPath(parent, name, sep = "\\") {
+  return /[\\/]$/.test(parent) ? parent + name : parent + sep + name;
+}
+
 // PAD-435: opened for the card just picked on Select card (extract.new_card_project), it
 // comes filled in for that card and says why: the open project is another card's.
 function NewProjectDialog({ close, stock: forCard = "", name: suggested = "", parent: near = "", mfr: cardMfr = "", why = null }) {
@@ -562,13 +567,18 @@ function NewProjectDialog({ close, stock: forCard = "", name: suggested = "", pa
   };
   return html`<${Modal} title=${why ? "New project for this card" : "New project"} icon="plus" wide onClose=${onClose} cls=${uid}
     footer=${html`<${Button} onClick=${close}>${why && why.project ? "Stay in " + why.project : "Cancel"}<//><${Button} kind="primary" busy=${busy} disabled=${busy} onClick=${create}>Create<//>`}>
-    ${why ? html`<${Note} kind="warn">The card you picked, <b>${why.card}</b>, is not the one ${why.project ? html`project <b>${why.project}</b>` : "this project"} was extracted from${why.project_card ? html` (${why.project_card})` : ""}. Make a project of its own for it, so the tabs work on this card's files.<//>` : null}
+    ${why ? html`<${Note} kind="warn"><span>The card you picked - <b>${why.card}</b> - is not part of your previous project${why.project ? html`, <b>${why.project}</b>` : ""}. Choose the new project's location and folder structure below.</span>
+      <span class="small muted" style="display:block;margin-top:4px">Closed this? <b>New project for this card…</b> on the Card tab brings it back.</span><//>` : null}
     <div class="sx-form">
       <${Row} label="Location:"><div class="row">
         <${Field} value=${parent} onChange=${(v) => { setParent(v); setErr(""); }} mono cls="grow" placeholder="The folder the project folder goes in" />
         <${Button} drop onClick=${async () => { const p = await call("shellx.browse_location", parent); if (p) setParent(p); }}>Browse...<//></div><//>
-      <${Row} label="Folder name:"><${Field} value=${name} onChange=${(v) => { setName(v); setErr(""); }} autoFocus
-        bad=${!!name && BAD_NAME.test(name)} placeholder="TMNT 1.59 upscale" /><//>
+      <${Row} label="Folder name:"><div class="stack" style="gap:4px"><div class="row">
+        <${Field} value=${name} onChange=${(v) => { setName(v); setErr(""); }} autoFocus cls="grow"
+          bad=${!!name && BAD_NAME.test(name)} placeholder="TMNT 1.59 upscale" />
+        <${Button} drop title="Pick the project folder itself (one you made already, or a new one)"
+          onClick=${async () => { const r = await call("shellx.browse_project_folder", parent.trim(), name.trim()); if (r && r.parent) { setParent(r.parent); setName(r.name || ""); setErr(""); } }}>Browse...<//></div>
+        ${parent.trim() && name.trim() ? html`<span class="small muted mono" title="The project folder Create makes">${joinPath(parent.trim(), name.trim(), form.sep)}</span>` : null}</div><//>
       <${Row} label="Manufacturer:"><${Select} value=${mfr} onChange=${setMfr}
         options=${form.mfrs.map((m) => ({ value: m.key, label: m.display }))} /><//>
       <${Row} label="Stock image:"><div class="row">

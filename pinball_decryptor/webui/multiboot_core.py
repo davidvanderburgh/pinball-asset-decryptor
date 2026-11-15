@@ -948,6 +948,9 @@ class MultibootForm:
     #: byte for byte what the tool made before the tick existed.
     compact: bool = False
     timeout: int = 15              # 0 = wait for START
+    # PAD-1309: seconds the coin door's BACK (EXIT on some machines) held in a game restarts
+    # the machine into the menu; 0 = off.  images.conf back_hold= (not on JJP / DP)
+    back_hold: int = 3
     #: The line across the top of the menu (C FB, PAD-135: "Can there be an
     #: option to change this text?").  '' is a real answer and means no line at
     #: all, so the field always names what the card will say - the selector's
@@ -1868,6 +1871,8 @@ def validate_form(form, sources=True):
         errs.append(volume_range_error(form))
     if int(form.timeout) < 0:
         errs.append("The countdown cannot be negative (0 = wait for START).")
+    if not 0 <= int(form.back_hold) <= 60:
+        errs.append("Hold BACK to restart takes 0 to 60 seconds (0 = off).")
     head = (form.heading or "").strip()
     # A NEWLINE WOULD END THE KEY in images.conf and turn the rest of the line
     # into an unknown one, so it is refused here rather than half-written; the
@@ -2879,6 +2884,7 @@ def _bof_build_args(form):
         "--selector-dir", platform_selector_dir(form.selector_dir, be),
         "--titles", ";".join(titles),
         "--timeout", str(int(form.timeout)),
+        "--back-hold", str(int(form.back_hold)),
         "--default", str(row_first_image(form, int(form.default))),
         "--volume", str(int(form.volume)),
     ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
@@ -2908,6 +2914,7 @@ def build_args(form):
         "--layout", "store" if form_compact(form) else "auto",
         "--titles", ";".join(titles),
         "--timeout", str(int(form.timeout)),
+        "--back-hold", str(int(form.back_hold)),
         # --default names an IMAGE (so does the choice file, and so does the
         # menu's own memory); the tab's number is the highlighted ROW.  A row
         # that is a consuming group is named by its first member, and the
@@ -2997,6 +3004,7 @@ def inject_args(form, card):
                 "--titles", ";".join(titles),
                 "--subtitles", ";".join(subtitles),
                 "--timeout", str(int(form.timeout)),
+                "--back-hold", str(int(form.back_hold)),
                 "--default", str(row_first_image(form, int(form.default))),
                 "--volume", str(int(form.volume))]
         args += default_card_args(form) + s3_key_args(be)
@@ -3028,6 +3036,7 @@ def inject_args(form, card):
             "--titles", ";".join(titles),
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
+            "--back-hold", str(int(form.back_hold)),
             "--default", str(row_first_image(form, int(form.default))),
             "--volume", str(int(form.volume))]
     args += default_card_args(form)
@@ -3058,6 +3067,7 @@ def update_args(form, card, dry_run=False, expect_bytes=None):
             "--titles", ";".join(titles),
             "--subtitles", ";".join(subtitles),
             "--timeout", str(int(form.timeout)),
+            "--back-hold", str(int(form.back_hold)),
             # an IMAGE, as build's is (the tab's number is the ROW)
             "--default", str(row_first_image(form, int(form.default))),
             "--volume", str(int(form.volume))]
@@ -4851,6 +4861,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
     form = MultibootForm(
         images=rows, out=card, sound_move=move, sound_confirm=confirm,
         volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
+        back_hold=_int_of("back_hold", 3),
         machine_volume=(info.get("volume") == "machine"),
         compact=(info.get("layout") == "store"),
         # THE CARD'S OWN HEADING.  null in the report = the card never set
@@ -4952,6 +4963,7 @@ def _menu_fields(before, after):
                        ("machine volume", before.machine_volume,
                         after.machine_volume),
                        ("countdown", before.timeout, after.timeout),
+                       ("hold BACK", before.back_hold, after.back_hold),
                        ("default", before.default, after.default)):
         if int(b) != int(a):
             changed.add(name)
@@ -5578,6 +5590,7 @@ def menu_from_state(menu):
             "machine_volume": bool(menu.get("machine_volume", True)),
             "compact": bool(menu.get("compact", False)),
             "timeout": max(0, _as_int("timeout", 15)),
+            "back_hold": max(0, _as_int("back_hold", 3)),
             # A STATE WRITTEN BEFORE THE FIELD EXISTED has no key, and the
             # menu it describes said SELECT GAME CODE - so the absent key is
             # that, not "no heading" (PAD-135).
@@ -7354,6 +7367,7 @@ class MultibootPanel:
         self._volume_var = tk.StringVar(value=str(self._backend.volume_default))
         self._machine_vol_var = tk.BooleanVar(value=True)
         self._timeout_var = tk.StringVar(value="15")
+        self._back_hold_var = tk.StringVar(value="3")
         #: The line across the top of the menu (PAD-135).  It STARTS as the
         #: selector's own wording rather than empty, because the box has to
         #: read as what the menu says: emptying it is how somebody asks for
@@ -7449,7 +7463,7 @@ class MultibootPanel:
         # ...and the menu's own fields, so the 'what would Apply write' line
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
-                    self._machine_vol_var, self._timeout_var,
+                    self._machine_vol_var, self._timeout_var, self._back_hold_var,
                     self._heading_var, self._same_text_var, self._counter_var,
                     self._settings_var, self._editions_var,
                     self._countdown_word_var, self._footer_var,
@@ -7647,7 +7661,7 @@ class MultibootPanel:
                     self._ed_confirm, self._ed_roll,
                     self._ed_roll_norepeat) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
-                    self._timeout_var, self._heading_var, self._same_text_var,
+                    self._timeout_var, self._back_hold_var, self._heading_var, self._same_text_var,
                     self._counter_var, self._settings_var, self._editions_var,
                     self._tests_var, self._countdown_word_var,
                     self._footer_var, self._footer_text_var,
@@ -9595,6 +9609,7 @@ class MultibootPanel:
             self._volume_var.set(str(self._backend.volume_default))
             self._machine_vol_var.set(True)
             self._timeout_var.set("15")
+            self._back_hold_var.set("3")
             self._heading_var.set(DEF_HEADING)
             self._same_text_var.set(True)
             self._counter_var.set(True)
@@ -10055,7 +10070,8 @@ class MultibootPanel:
                              self._selector_var.get(), self._theme_var.get(),
                              {role: var.get()
                               for role, var in self._color_vars.items()},
-                             self._tests_var.get())
+                             self._tests_var.get(),
+                             self._back_hold_var.get())
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
         return self._menu_dialog.show()
 
@@ -10069,13 +10085,14 @@ class MultibootPanel:
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, heading, same_text,
              counter, settings, editions, word, foot_on, foot_text, default, selector,
-             theme, colors, tests) = self._menu_backup
+             theme, colors, tests, back_hold) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
             self._volume_var.set(vol)
             self._machine_vol_var.set(machine)
             self._timeout_var.set(timeout)
+            self._back_hold_var.set(back_hold)
             self._heading_var.set(heading)
             self._same_text_var.set(same_text)
             self._counter_var.set(counter)
@@ -10249,6 +10266,7 @@ class MultibootPanel:
             machine_volume=bool(self._machine_vol_var.get()),
             compact=bool(self._compact_var.get()),
             timeout=_int(self._timeout_var, 15),
+            back_hold=_int(self._back_hold_var, 3),
             # NOT `or DEF_HEADING`: an empty box is a menu with no heading,
             # which is a thing somebody can ask for (PAD-135)
             heading=self._heading_var.get().strip(),
@@ -10438,6 +10456,7 @@ class MultibootPanel:
                      "machine_volume": bool(self._machine_vol_var.get()),
                      "compact": bool(self._compact_var.get()),
                      "timeout": _int(self._timeout_var, 15),
+                     "back_hold": _int(self._back_hold_var, 3),
                      "heading": self._heading_var.get().strip(),
                      "same_text_size": bool(self._same_text_var.get()),
                      "show_counter": bool(self._counter_var.get()),
@@ -10564,6 +10583,7 @@ class MultibootPanel:
             self._machine_vol_var.set(bool(menu.get("machine_volume", True)))
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
+            self._back_hold_var.set(str(menu.get("back_hold", 3)))
             self._heading_var.set(menu["heading"])
             # a document written before the tick existed is a menu the
             # selector drew at one size anyway, so it comes back ticked
@@ -11269,6 +11289,7 @@ class MultibootPanel:
             self._machine_vol_var.set(bool(form.machine_volume))
             self._compact_var.set(bool(form.compact))
             self._timeout_var.set(str(int(form.timeout)))
+            self._back_hold_var.set(str(int(form.back_hold)))
             self._heading_var.set(form.heading)
             self._same_text_var.set(bool(form.same_text_size))
             self._counter_var.set(bool(form.show_counter))
@@ -11425,6 +11446,7 @@ class MultibootPanel:
             self._machine_vol_var.set(bool(menu.get("machine_volume", True)))
             self._compact_var.set(bool(menu.get("compact", False)))
             self._timeout_var.set(str(menu["timeout"]))
+            self._back_hold_var.set(str(menu.get("back_hold", 3)))
             self._heading_var.set(menu["heading"])
             self._same_text_var.set(bool(menu.get("same_text_size", True)))
             self._counter_var.set(bool(menu.get("show_counter", True)))
@@ -11525,6 +11547,8 @@ class MultibootPanel:
         if int(form.timeout) < 0:
             errs.append("The countdown cannot be negative (0 = wait for "
                         "START).")
+        if not 0 <= int(form.back_hold) <= 60:
+            errs.append("Hold BACK to restart takes 0 to 60 seconds (0 = off).")
         if n and not 0 <= int(form.default) < n:
             errs.append("The default image must be one of 0..%d." % (n - 1))
         return errs

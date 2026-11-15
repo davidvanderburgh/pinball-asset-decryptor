@@ -634,6 +634,34 @@ fi
 # PAD_S3_QEMU (default ~/.pad-s3/qemu-aarch64); run the game through it
 # explicitly, so the shared binfmt interpreter (Spike 2's qemu) stays stock.
 # Absent -> fall back to binfmt. See docs/plans/spike3_emulation.md stage 3.
+# PAD-1309: HOLD BACK TO COME BACK TO THE MENU. A multi-boot card's padselect.sh puts
+# padmenu.so in front of the game's preloads; held (back_hold=, else 3 s), BACK asks for `sync; reboot`.
+# This rig runs the guest as root on the PC's own Linux, where a reboot is never
+# right, so the restart is a stand-in that leaves connectivity/dump/padmenu.restart
+# (padmenu.so does nothing at all in an emulator that gives it no stand-in). The
+# checkpointable run starts the game itself, so there the object goes in front here.
+# PAD_S3_MENU_SO=<host .so> puts a padmenu.so in front on any card (a test of the
+# object on a single-image card: the rig then starts the game with it itself).
+MENU_SO=""
+menu_first() {
+    case "$PRELOAD" in
+        *LD_PRELOAD=*) PRELOAD=${PRELOAD/LD_PRELOAD=/LD_PRELOAD=$MENU_SO:} ;;
+        *) PRELOAD="${PRELOAD:-env} LD_PRELOAD=$MENU_SO" ;;
+    esac
+}
+MENU_SRC=${PAD_S3_MENU_SO:-}
+[ -z "$MENU_SRC" ] && [ -f "$R/games/pad/images.conf" ] && [ -f "$R/games/pad/padmenu.so" ] \
+    && MENU_SRC=$R/games/pad/padmenu.so
+if [ -n "$MENU_SRC" ]; then
+    mkdir -p "$R/usr/lib/pad" && cp -f "$MENU_SRC" "$R/usr/lib/pad/padmenu.so"
+    printf '#!/bin/sh\n: > /connectivity/dump/padmenu.restart\n' > "$R/usr/lib/pad/padmenu_reboot"
+    chmod 755 "$R/usr/lib/pad/padmenu_reboot"
+    rm -f "$SD/connectivity.up/dump/padmenu.restart"
+    PRELOAD="${PRELOAD:-env} CODESELECT_REBOOT=/usr/lib/pad/padmenu_reboot"
+    MENU_SO=/usr/lib/pad/padmenu.so
+    [ -f "$R/games/pad/images.conf" ] || menu_first     # no menu run to wait for
+    echo "[s3run] holding BACK 5 s in the game asks for a restart (connectivity/dump/padmenu.restart)"
+fi
 QEMU_INTERP=""
 PQ="${PAD_S3_QEMU:-$(dirname "$B")/qemu-aarch64}"
 if [ "$DEVMODE" != kernel ] && [ -z "${PAD_S3_QEMU:-}" ]; then
@@ -666,6 +694,8 @@ if [ "$PIVOT" = 1 ] && [ "$PROG" = /games/game ] && [ -f "$R/games/pad/images.co
         PROG=/games/pad/img0/game
     fi
     echo "[s3run] boot menu done (exit $MB_RC): starting $PROG"
+    # the game, not the menu, gets padmenu.so (the menu reads the same SPI word)
+    [ -n "$MENU_SO" ] && menu_first
 fi
 printf '%q ' "$PROG" "$@" > "$SD/.argv"
 if [ "$PIVOT" = 1 ]; then

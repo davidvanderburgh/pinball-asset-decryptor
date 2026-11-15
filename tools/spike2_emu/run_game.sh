@@ -291,7 +291,7 @@ if [ -n "${PAD_CARD:-}" ]; then
             # ...and counter= / countdown_word= / footer= (PAD-190), same reason:
             # a card whose counter line is off and whose countdown says
             # 'Launching' must preview as that card, not as the default menu.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|color_[a-z_]+)[[:space:]]*=' \
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|back_hold|color_[a-z_]+)[[:space:]]*=' \
                 | grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true
             # ★ PAD-307: EACH IMAGE'S BUILT COLOR PROFILE, the lines that put the SETTINGS tile
             # in the menu. They name IMAGE INDEXES, so they ride on the group lines' gate: only
@@ -1016,6 +1016,25 @@ if [ -n "$SEL_DIRS" ]; then
     fi
 fi
 
+# ★ PAD-1309 - HOLD BACK TO COME BACK TO THE MENU, AS THE CARD DOES. A multi-boot
+# card's game_monitor preloads /usr/local/codeselect/padmenu.so into the game
+# (modehook.MENU_HOOK_LINES); this rig execs ./game itself, so it puts the same
+# object in front here, ahead of the shim (which answers the cabinet SPI word
+# padmenu.so reads). Holding BACK (the coin door's, on the playfield's service
+# keys) for the card's back_hold= seconds (3 s unless set) then runs the card's own select.sh --reboot, and the reboot it
+# asks for is this rig's: dump/reboot.req, which watch.sh's poll turns into a
+# boot of the guest from the menu (restartgame.sh's path). PAD_MENU_BACK=0
+# leaves it out.
+PAD_MENU_SO=
+if [ -n "$SEL_DIRS" ] && [ "${PAD_MENU_BACK:-1}" != 0 ] && [ -f "$R/usr/local/codeselect/padmenu.so" ]; then
+    PAD_MENU_SO=/usr/local/codeselect/padmenu.so
+    # padmenu.restart: what asked for it, kept (reboot.req is taken the moment it lands)
+    export CODESELECT_REBOOT="touch /dump/padmenu.restart /dump/reboot.req"
+    # the card's own Hold BACK seconds (back_hold=): the rig's copy of its images.conf
+    export PADMENU_CONF=/dump/codeselect.conf
+    echo "[select] holding BACK on the coin door (the card's back_hold=, else 3 s) restarts into the menu, as on the card"
+fi
+
 # ★ ITEM 45 - THIS TITLE'S PANEL IS BOLTED IN UPSIDE DOWN AND OUR MONITOR IS NOT.
 #
 # james_bond_60th_le ships an 8-byte /games/data/boot_display_cmd holding exactly
@@ -1241,7 +1260,7 @@ if [ -n "$PIVOT" ]; then
         cd /
         /busybox umount -l /oldroot
         cd "/games/$GAME" || exit 1
-        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1}
+        export LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MENU_SO:+$PAD_MENU_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1}
         # stdio has to point INSIDE the container. The caller's stdout is a file
         # on a host mount ($HOME/gzwatch.log for watch.sh), and that mount leaves
         # the namespace with the pivot - criu then refuses fd 1 ("Can't lookup
@@ -1269,5 +1288,5 @@ fi
 # LD_PRELOAD is applied to the game alone: the busybox tools in this rootfs do
 # not link libdl and fail to start with the shim forced on them.
 exec chroot "$R" /bin/sh -c \
-  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} exec ./game"
+  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}${PAD_MENU_SO:+$PAD_MENU_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} exec ./game"
 INNER

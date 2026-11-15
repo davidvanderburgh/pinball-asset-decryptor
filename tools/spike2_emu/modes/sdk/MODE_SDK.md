@@ -6524,7 +6524,8 @@ teammate's End of Ball Bonus (the dialog's **Show each teammate's character on t
     bonus_loop EndOfBallBonus_BackgroundLoop  the clip the game's bonus loops (found in the bank by name; Godzilla 1.15
                                               and 1.16, at SquareCrop: x1.29, moved -197,-126)
     char_bonus 1 PadCoopBonus1                that loop made again with character 1's video (or picture) and name on
-                                              a strip along the foot (glass y 672-762, centred, as wide as the name)
+                                              a 360x290 portrait bottom-left (glass 6,472) and a
+                                              name plate beside it along the foot (y 672-762)
 
 When the teammate up takes a character (its PICKED card on the glass) its sound plays at once; its clip waits until
 the card has had its 2.5 s and the card's own video behind it has been given back (the bank's one surface), then plays
@@ -6549,6 +6550,15 @@ foot (y 596, 1360x160) whose words the runtime writes at x1.4 (28 characters fil
 "FINAL SCORE  <player 1's>" in co-op, "TEAM 1  <p1>   TEAM 2  <p2>" in a team game ("T1 <p1>  T2 <p2>" when that is
 too long). Emulator, Godzilla LE 1.16: see the ticket's after shots. A port with no
 backdrop (`scene_show` unhooked) keeps the HUD and says so.
+
+**The awards ceremony's music (PAD-1317).** DoomWalrus666 asked for a custom audio track during the ceremony. The
+Characters dialog's Awards music... keeps a sound file (or a video, its sound taken) as `coop/ceremony_music.<ext>`; a
+Write makes it a sound of the card's own (at most 60 s, `coop_play.CEREMONY_SOUND_MAX_SECONDS`: the ceremony is 42 s at
+most) built under the pseudo mode `sound_modes.CEREMONY_MODE` (4017) on the co-op intro's carrier, and sounds.cfg names
+it: `ccer <request> <carrier key> <its key> <ms>`. As the ceremony begins (`coop_cer_begin`) the runtime fades the
+game's sounds playing then (each once, 250 ms), lifts the carrier to priority 255 and plays it, the record lookup
+swapped to the music's (as the intro's); the cards' loop fades any sound the game starts while they show, every 100 ms;
+at `coop_cer_end` the music fades out over 1.5 s and the carrier goes back to priority 3.
 
 Up to 16 characters, `<name>|<what it does>` 27 characters each. Abilities, comma-separated (`-` none):
 

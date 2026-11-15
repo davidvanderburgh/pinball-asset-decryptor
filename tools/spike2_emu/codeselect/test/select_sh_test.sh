@@ -495,5 +495,15 @@ EOF
 else
     real="no python on this host: materialize.py's own run skipped"
 fi
+# PAD-1309: --reboot (padmenu.so's call, BACK held on the coin door) runs the reboot command -
+# CODESELECT_REBOOT here - and nothing else: no menu, no mount, no choice file.
+printf '#!/bin/sh\necho "reboot $*" >> "$FAKELOG"\nexit 0\n' > "$W/fakereboot"
+chmod 755 "$W/fakereboot"
+: > "$FAKELOG"; rm -f "$SELARGS" "$W/choice"
+CODESELECT_REBOOT="$W/fakereboot now" sh select.sh --reboot > "$W/out" 2>&1 || {
+    echo "select_sh_test: FAIL --reboot exited non-zero"; cat "$W/out"; exit 1; }
+[ "$(cat "$FAKELOG")" = "reboot now" ] || { echo "select_sh_test: FAIL --reboot calls:"; cat "$FAKELOG"; exit 1; }
+[ ! -e "$SELARGS" ] && [ ! -e "$W/choice" ] || { echo "select_sh_test: FAIL --reboot ran the menu"; exit 1; }
+grep -q "restarting the machine into the boot menu" "$W/out" || { echo "select_sh_test: FAIL --reboot said nothing"; cat "$W/out"; exit 1; }
 rm -rf "$W"
-echo "select_sh_test: OK ($awks; the hook against fake mounts: 26 cases; $real)"
+echo "select_sh_test: OK ($awks; the hook against fake mounts: 26 cases; --reboot; $real)"

@@ -80,6 +80,9 @@ SELECTOR_FILES = collections.OrderedDict([
     ("s3select", (0o755, True)),
     ("padselect.sh", (0o755, True)),
     ("font.ttf", (0o644, False)),
+    # PAD-1309: preloaded into the game by padselect.sh - BACK held 3 s (Hold BACK, back_hold=) restarts into the menu
+    # (not required: a selector dir built before it still makes a card, one without the way back)
+    ("padmenu.so", (0o755, False)),
 ])
 #: the top-level links of a multi-boot games partition: the hook, and what
 #: S95game / conagent_monitor look for before the menu has bound a tree
@@ -290,7 +293,8 @@ def conf_from_args(a, cards, media):
     return render_conf(dirs, titles, subtitles, a.default or 0, 15 if a.timeout is None else a.timeout,
                        rows, move, confirm, volume, theme=a.theme, colors=mkc.parse_color_flags(a.color),
                        heading=a.heading, text_size=a.text_size, counter=a.counter,
-                       countdown_word=a.countdown_word, footer=footer)
+                       countdown_word=a.countdown_word, footer=footer,
+                       back_hold=getattr(a, "back_hold", None))
 
 
 def check_selector_dir(d):
@@ -299,6 +303,17 @@ def check_selector_dir(d):
     for name, (_mode, required) in SELECTOR_FILES.items():
         if required and not os.path.isfile(os.path.join(d, name)):
             raise Refused("--selector-dir %s has no %s (ensures3select.sh installs it)" % (d, name))
+
+
+def _selector_src(selector_dir, name):
+    """Where selector file `name` comes from, or None for an optional one the dir lacks
+    (padmenu.so from a selector built before PAD-1309)."""
+    if name == "font.ttf":
+        return _font_src(selector_dir)
+    src = os.path.join(selector_dir, name)
+    if not SELECTOR_FILES[name][1] and not os.path.isfile(src):
+        return None
+    return src
 
 
 def _font_src(selector_dir):
@@ -419,7 +434,9 @@ def _lay_out(mnt, conf, selector_dir, media, media_dir, build_doc):
     if not os.path.lexists(os.path.join(img0, "game")):
         raise Refused("image 0's games partition has no `game` link: not a Spike 3 games tree")
     for name, (mode, _req) in SELECTOR_FILES.items():
-        src = os.path.join(selector_dir, name) if name != "font.ttf" else _font_src(selector_dir)
+        src = _selector_src(selector_dir, name)
+        if src is None:
+            continue
         shutil.copyfile(src, os.path.join(pad, name))
         os.chmod(os.path.join(pad, name), mode)
     with open(os.path.join(pad, "images.conf"), "w", encoding="utf-8", newline="\n") as f:
@@ -558,10 +575,15 @@ def inject_card(a):
                 a.titles = ";".join(t for _p, t, _s in old["images"])
             if a.subtitles is None:
                 a.subtitles = ";".join(s for _p, _t, s in old["images"])
+            # PAD-1309: the card's own BACK hold rides through a menu-only inject
+            if getattr(a, "back_hold", None) is None:
+                a.back_hold = old.get("back_hold")
             stand_ins = [type("C", (), {"label": lambda self: "", "path": d})() for d in dirs]
             conf = conf_from_args(a, stand_ins, media)
             for name, (mode, _req) in SELECTOR_FILES.items():
-                src = os.path.join(a.selector_dir, name) if name != "font.ttf" else _font_src(a.selector_dir)
+                src = _selector_src(a.selector_dir, name)
+                if src is None:
+                    continue
                 shutil.copyfile(src, os.path.join(pad, name + ".new"))
                 os.chmod(os.path.join(pad, name + ".new"), mode)
                 os.replace(os.path.join(pad, name + ".new"), os.path.join(pad, name))
@@ -609,12 +631,17 @@ def verify_card(a):
                 conf = parse_conf(f.read())
             dirs = [p for p, _t, _s in conf["images"]]
             print("images: %s" % " ".join(dirs))
+            if conf.get("back_hold") is not None:
+                print("back_hold=%d" % conf["back_hold"])
             for name, target in TOP_LINKS.items():
                 got = os.readlink(os.path.join(m, name)) if os.path.islink(os.path.join(m, name)) else None
                 print("link /games/%s -> %s: %s" % (name, got, "OK" if got == target else "WRONG"))
                 if got != target:
                     bad.append("link " + name)
-            for name in SELECTOR_FILES:
+            for name, (_mode, required) in SELECTOR_FILES.items():
+                if not required and not os.path.isfile(os.path.join(pad, name)) and not (
+                        a.selector_dir and os.path.isfile(os.path.join(a.selector_dir, name))):
+                    continue                      # an optional file neither side has
                 ok = os.path.isfile(os.path.join(pad, name))
                 if a.selector_dir and name != "font.ttf" and ok:
                     ok = _sha(os.path.join(pad, name)) == _sha(os.path.join(a.selector_dir, name))
@@ -702,6 +729,8 @@ def _add_conf_flags(s):
     s.add_argument("--titles", help="';'-separated titles, one per image (index order)")
     s.add_argument("--subtitles", help="';'-separated subtitles, one per image")
     s.add_argument("--timeout", type=int, help="images.conf timeout in seconds (default 15; 0 = wait for ever)")
+    s.add_argument("--back-hold", dest="back_hold", type=int, default=None,
+                   help="seconds BACK held in a game restarts into the menu (0 = off; card default 3)")
     s.add_argument("--heading", metavar="TEXT")
     s.add_argument("--footer", metavar="TEXT")
     s.add_argument("--footer-own", action="store_true")

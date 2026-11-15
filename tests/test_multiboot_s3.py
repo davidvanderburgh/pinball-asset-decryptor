@@ -108,6 +108,7 @@ def test_plan_build_verify_inject_go_to_mks3multi():
     assert _values(build, "--titles") == ["FALLOUT LE 0.81.0;FALLOUT LE 0.82.0"]
     assert _values(build, "--subtitles") == ["Stock;Newer code"]
     assert _values(build, "--timeout") == ["20"] and _values(build, "--keyfile") == [wsl(KEYS)]
+    assert _values(build, "--back-hold") == ["3"]                       # PAD-1309
     assert _values(build, "--media-dir") == [wsl(r"D:\m")]
     assert "--bypass-validation" not in build          # a Spike 2 card's, not this one's
     verify = mt.verify_args(form)

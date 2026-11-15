@@ -282,16 +282,17 @@ def table_image(table):
                 name = payload[4:].decode("latin1").lower()
                 break
         if name == want:
-            for magic in (b"\x89PNG", b"\xff\xd8\xff", b"RIFF"):
-                k = data.find(magic)
-                if k >= 0:
-                    try:
-                        img = Image.open(io.BytesIO(data[k:])).convert("RGB")
-                    except Exception:           # noqa: BLE001 - a raw BITS picture, or WebP PIL lacks
-                        img = None
+            # the picture starts at the FIRST magic: a WebP's bytes can hold a
+            # stray JPEG marker further in (JAWS 50th's "pf", PAD-1311)
+            found = sorted((k, m) for m in (b"\x89PNG", b"\xff\xd8\xff", b"RIFF")
+                           for k in [data.find(m)] if k >= 0)
+            img = None
+            for k, _ in found:
+                try:
+                    img = Image.open(io.BytesIO(data[k:])).convert("RGB")
                     break
-            else:
-                img = None
+                except Exception:               # noqa: BLE001 - a raw BITS picture, or WebP PIL lacks
+                    img = None
             break
         i += 1
     else:

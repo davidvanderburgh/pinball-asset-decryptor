@@ -25,7 +25,7 @@ if [ "${1:-}" = "--preview" ]; then PREVIEW=1; shift; fi
 SEL=${2:-${S3_SELECTOR_DIR:-/var/tmp/s3select}}
 BUILD=${S3_SELECTOR_BUILD:-/var/tmp/s3select_build.$(id -u)}
 DEJAVU=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
-FILES="s3select padselect.sh s3preview"
+FILES="s3select padselect.sh padmenu.so s3preview"
 ok() {
     if [ ! -f "$SEL/font.ttf" ] && [ -f "$DEJAVU" ]; then
         cp "$DEJAVU" "$SEL/font.ttf" && chmod 644 "$SEL/font.ttf"
@@ -67,6 +67,7 @@ if ! make -C "$SRC" PLATFORM=dp BUILD="$BUILD/preview" EXTRA_CFLAGS=-DSEL_COIN_D
 fi
 install -m 755 "$BUILD/s3/s3select" "$SEL/s3select.new" && mv -f "$SEL/s3select.new" "$SEL/s3select" \
     && install -m 755 "$SRC/padselect_s3.sh" "$SEL/padselect.sh" \
+    && install -m 755 "$BUILD/s3/padmenu.so" "$SEL/padmenu.so" \
     && install -m 755 "$BUILD/preview/dpselect" "$SEL/s3preview" \
     || fail "cannot install into $SEL"
 ok

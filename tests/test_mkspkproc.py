@@ -84,10 +84,10 @@ def _rm(tmp_path):
     return stock, _pkg(tmp_path / "m" / "rm-gamecode-20220902.pkg", mod, "rm_pkg")
 
 
-def _build(stock, mod, out, sel):
+def _build(stock, mod, out, sel, *args):
     os.makedirs(out, exist_ok=True)
     assert mk.main(["build", "--primary", stock, "--extra", mod, "--out", out, "--selector-dir", sel,
-                    "--timeout", "9", "--titles", "STOCK;MINE"]) == 0
+                    "--timeout", "9", "--titles", "STOCK;MINE"] + list(args)) == 0
     return os.path.join(out, os.path.basename(stock))
 
 
@@ -159,12 +159,16 @@ def test_alice_cooper_package(tmp_path, sel):
 
 def test_inject_keeps_the_builds_and_the_stamp(tmp_path, sel):
     stock, mod = _rm(tmp_path)
-    path = _build(stock, mod, str(tmp_path / "multi"), sel)
-    stamp = _members(path, tmp_path)["PAD_MULTIBOOT_LIVE"][1]
+    path = _build(stock, mod, str(tmp_path / "multi"), sel, "--back-hold", "6")
+    built = _members(path, tmp_path)
+    stamp = built["PAD_MULTIBOOT_LIVE"][1]
+    # PAD-1309: a P-ROC build carries back_hold= in its images.conf too...
+    assert "back_hold=6" in built["PAD_MULTIBOOT/images.conf"][1].decode().splitlines()
     assert mk.main(["inject", "--update", path, "--titles", "NEW;NAMES", "--timeout", "4"]) == 0
     m = _members(path, tmp_path / "again")
     conf = m["PAD_MULTIBOOT/images.conf"][1].decode()
     assert "image=b0|NEW|" in conf and "timeout=4" in conf
+    assert "back_hold=6" in conf.splitlines()    # ...and an inject without the flag keeps it
     assert m["PAD_MULTIBOOT_LIVE"][1] == stamp, "a new stamp would make the machine throw its builds away"
     assert m["PAD_MULTIBOOT/d1/assets/dmd/a.png"][1] == b"MINE" and m["RMGame.pyc"][1] == b"stock code"
     assert m["PAD_MULTIBOOT/run-on-update.stock.sh"][1] == b"#!/bin/bash\necho spooky's own\n"

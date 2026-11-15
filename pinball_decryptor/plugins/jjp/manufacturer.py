@@ -274,6 +274,9 @@ class JJPManufacturer(Manufacturer):
         "cannot read a raw Etcher/dd-imaged stick). Formatting erases "
         "the stick and needs Administrator.")
     flash_medium_noun = "USB stick"
+    # the stick is formatted and the ISO's files copied on, so the dialog
+    # names the printed stick size that holds them (PAD-1314)
+    flash_size_class = True
     # USB install sticks are small removable media, and the pick is a
     # FORMAT target: the strict usb_stick kind never auto-selects a drive
     # that looks like an SSD/HDD (the game SSD / backup disks) and leaves

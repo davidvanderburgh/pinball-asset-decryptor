@@ -69,6 +69,30 @@ def test_profile_gets_the_hook_before_the_loop_and_rm_before_the_repair():
     assert "\n".join(unhooked).replace(mb.HEAL_RM, "") + "\n" == PROFILE
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="runs the profile in bash (Linux)")
+def test_the_hook_block_hands_padmenu_to_the_game(tmp_path):
+    """PAD-1309: the profile's loop starts the game with padmenu.so preloaded when the update
+    carries it (EXIT held 5 s restarts into the menu), and with nothing when it does not."""
+    home = tmp_path / "home"
+    pad = home / "extracted" / "decrypt" / "padselect"
+    pad.mkdir(parents=True)
+    (home / "craze").mkdir()
+    (pad / "padselect.sh").write_text("exit 0\n")
+    start = home / "startgame"
+    start.write_text('#!/bin/sh\necho "PRE=$LD_PRELOAD"\n')
+    start.chmod(0o755)
+    prof = mb.patch_profile(PROFILE).replace("/home/pinball", str(home))
+
+    def game_env():
+        r = subprocess.run(["bash", "-c", prof], cwd=str(home), capture_output=True, text=True,
+                           env={"HOME": str(home), "PATH": "/usr/bin:/bin"})
+        return [ln for ln in r.stdout.splitlines() if ln.startswith("PRE=")]
+
+    assert game_env() == ["PRE="]
+    (pad / "padmenu.so").write_bytes(b"")        # ld.so skips a bad object with a warning
+    assert game_env() == ["PRE=%s/padmenu.so" % pad]
+
+
 def test_profile_patch_keeps_crlf_and_refuses_what_it_does_not_know():
     crlf = mb.patch_profile(PROFILE.replace("\n", "\r\n"))
     assert "\r\n" in crlf and "\n" not in crlf.replace("\r\n", "")
@@ -104,11 +128,26 @@ def test_conf_names_the_programs_and_the_switches():
     assert not any(ln.startswith(("sound_", "media=")) for ln in lines)
     back = mb.parse_conf(text)
     assert back["images"] == [("GDCraze.x86_64", "LABYRINTH", "Stock"), ("pad_image1.bin", "SARAH", "")]
+    # PAD-1309: no back_hold= line unless one was given
+    assert not any(ln.startswith("back_hold") for ln in lines) and back["back_hold"] is None
     assert back["default"] == 1 and back["switches"]["switch_start"] == "14,20"
     with pytest.raises(Refused):
         mb.render_conf(["a", "b"], ["x|y"], [], 0, 10, [], None, None, None, sw)
     with pytest.raises(Refused):
         mb.render_conf(["a", "b"], [], [], 2, 10, [], None, None, None, sw)
+
+
+def test_conf_back_hold_round_trips_and_is_range_checked():
+    """PAD-1309: back_hold=N right after timeout= when given, read back as an int; a negative
+    or an over-long hold is refused like a negative timeout."""
+    sw = mb.TITLES["labyrinth"]["switches"]
+    text = mb.render_conf(["a", "b"], [], [], 0, 10, [], None, None, None, sw, back_hold=4)
+    lines = text.splitlines()
+    assert lines[lines.index("timeout=10") + 1] == "back_hold=4"
+    assert mb.parse_conf(text)["back_hold"] == 4
+    for bad in (-1, 61):
+        with pytest.raises(Refused, match="back_hold"):
+            mb.render_conf(["a", "b"], [], [], 0, 10, [], None, None, None, sw, back_hold=bad)
 
 
 def test_conf_random_cards_and_sounds_round_trip():
@@ -353,7 +392,7 @@ def test_a_whole_build_from_two_synthetic_updates(tmp_path, capsys):
     plan = capsys.readouterr().out
     assert "fat32: fits" in plan and "image-size 1 pad_image1.bin" in plan and "2026.01.30" in plan
     assert mb.main(["build"] + common + ["--out", str(out), "--selector-dir", str(sel),
-                                         "--titles", "STOCK;MOD", "--timeout", "7"]) == 0
+                                         "--titles", "STOCK;MOD", "--timeout", "7", "--back-hold", "4"]) == 0
     # the archive as the machine's updater sees it
     dec = subprocess.run(["gpg", "--batch", "--quiet", "--pinentry-mode", "loopback", "--passphrase", "funkey",
                           "-d", str(out)], stdout=subprocess.PIPE, check=True).stdout
@@ -365,7 +404,7 @@ def test_a_whole_build_from_two_synthetic_updates(tmp_path, capsys):
     assert [n for n in names if n.endswith(".x86_64")] == ["GDCraze_linux_20260130.x86_64"]
     assert names[0].startswith("update") and names[-1] == "GDCraze_linux_20260130.x86_64"
     assert "pad_image1.delta" in names and "padselect/bofselect" in names and "padselect/build.json" in names
-    assert mb.HOOK_MARK in profile and "timeout=7" in conf
+    assert mb.HOOK_MARK in profile and "timeout=7" in conf and "back_hold=4" in conf.splitlines()
     md5s = dict((ln.split()[1], ln.split()[3]) for ln in programs.splitlines())
     assert md5s == {"GDCraze.x86_64": hashlib.md5(stock).hexdigest(),
                     "pad_image1.bin": hashlib.md5(mod).hexdigest()}
@@ -380,6 +419,7 @@ def test_a_whole_build_from_two_synthetic_updates(tmp_path, capsys):
     assert mb.main(["inspect", "--fun", str(out), "--json"]) == 0
     rep = json.loads(capsys.readouterr().out)
     assert [i["title"] for i in rep["images"]] == ["ONE", "TWO"] and rep["timeout"] == 7
+    assert rep["back_hold"] == 4                 # an inject without --back-hold keeps the card's
     # a RANDOM CARD over both, at the top, as the tab sends it (--group-over ...@0): the
     # conf carries it, inspect reports it, and an inject keeps it
     assert mb.main(["build"] + common + ["--group-over", "0-1@0|SURPRISE|", "--group-roll", "0=any",
@@ -391,6 +431,7 @@ def test_a_whole_build_from_two_synthetic_updates(tmp_path, capsys):
         conf = tf.extractfile("padselect/images.conf").read().decode()
     body = [ln for ln in conf.splitlines() if not ln.startswith("#")]
     assert body[0] == "group=+any:0-1|SURPRISE|" and "default_card=0" in body
+    assert not any(ln.startswith("back_hold") for ln in body)   # a build without the flag: no line
     assert mb.main(["inject", "--fun", str(out), "--titles", "A;B", "--cache-dir", str(cache)]) == 0
     capsys.readouterr()
     assert mb.main(["inspect", "--fun", str(out), "--json"]) == 0

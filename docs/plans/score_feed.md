@@ -33,6 +33,18 @@ Emulator (rig kit `C:\tmp\PAD-1204\rig`), see MODE_SDK.md: Godzilla LE 1.16 (gam
 retried and dropped with the game playing on, post again; marker logins read back), Elvira 3 1.13 (a port with no
 game_over). Tests: `tests/test_pad1204_score_feed.py`.
 
+## The game's type (PAD-1344)
+
+C0untDeM0net (Discord): "the scores for the mini games started from the game selection menu, like 'the shark is
+broken' on jaws, are indistinguishable from standard games". Each report now carries `game_type` (`standard`,
+`challenge`, `competition`, `tournament`, `head_to_head`, `team`, `cooperation`) and `challenge` (the challenge's
+name), read by the runtime while the game runs from the flags the start menu's entries set and the port's Challenge
+list (PAD-615/619: a challenge's flag, or the GamePlayModes index). `scorefeed.cfg` gains `type <flag> <name>` lines
+off the card's flag names (`score_feed.type_lines`), so a port with no Challenge list still tells a challenge game
+(unnamed). Jaws' menu also has Cooperation and Team Play, with flags of their own: they are types too, not standard.
+Details: MODE_SDK.md "The score feed". Tests: `tests/test_pad1204_score_feed.py` (the JSON, the type rule, the type
+lines). Emulator: Jaws Premium/LE 1.02 (kit `C:\tmp\PAD-1344\rig`).
+
 ## Play options tab (David's follow-ups)
 
 - "users see the banner at the top and assume they lose IC access": the options that change no score (Handicap per

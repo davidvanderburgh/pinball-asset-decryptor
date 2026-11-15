@@ -148,6 +148,36 @@ def users_line(game_elf):
     return "users 0x%08x 0x%x 0x%x" % u if u else ""
 
 
+#: PAD-1344: the start menu's game types (CHOOSE YOUR MODE OF PLAY), each the game flag its entry sets, the strongest
+#: first: a game with two set is reported as the first (the runtime's game_type). Every Spike 2 build names its own
+#: subset (Jaws LE 1.02: TOURNAMENT 16, COMPETITION 17, CHALLENGE 18, COOP 19, TEAM_2P 22, TEAM_3P 23).
+GAME_TYPES = (
+    ("challenge", ("FG_PLAYER_CHALLENGE_MODE_ACTIVE",)),
+    ("competition", ("FG_PLAYER_COMPETITION_MODE_ACTIVE",)),
+    ("tournament", ("FG_PLAYER_TOURNAMENT_MODE_ON_START_ACTIVE", "FG_PLAYER_TOURNAMENT_MODE_ACTIVE")),
+    ("head_to_head", ("FG_PLAYER_HEAD_TO_HEAD_ACTIVE",)),
+    ("team", ("FG_PLAYER_TEAM_2P_ACTIVE", "FG_PLAYER_TEAM_3P_ACTIVE", "FG_PLAYER_TEAM_MODE_ACTIVE")),
+    ("cooperation", ("FG_PLAYER_COOP_MODE_ACTIVE",)),
+)
+#: the runtime's FEED_TYPES: the most type lines it reads
+MAX_TYPES = 8
+
+
+def type_lines(game_elf):
+    """PAD-1344: ``type <flag> <name>`` lines, one per game-type flag the card's game program names (the FG_ name
+    table's index), the strongest first; ``[]`` when it names none or cannot be read (the reports' game_type then
+    rests on the port's challenge flag alone, or is null)."""
+    from . import portchallenge as PC
+    try:
+        names = list(PC.flag_names(PC.Elf(game_elf))) if game_elf else []
+    except Exception:                                   # noqa: BLE001 - a build the reader cannot read
+        names = []
+    out = []
+    for kind, flags in GAME_TYPES:
+        out += ["type %d %s" % (names.index(f), kind) for f in flags if f in names and names.index(f) > 0]
+    return out[:MAX_TYPES]
+
+
 def cfg_text(url, title, game_elf, only):
     """``scorefeed.cfg``: the address, the game's name for the reports, the logins' tables when *game_elf* shows them;
     *only* when the card carries no modes (the runtime then arms this and nothing else)."""
@@ -155,10 +185,10 @@ def cfg_text(url, title, game_elf, only):
     if why:
         raise ScoreFeedError(why)
     title = " ".join((title or "").split())[:63]
-    users = users_line(game_elf)
+    users, types = users_line(game_elf), type_lines(game_elf)
     return ("# PAD-1204: each game's final scores, posted to the owner's own server\n"
             "feed %s\n" % url.strip() + ("title %s\n" % title if title else "") + (users + "\n" if users else "")
-            + ("only\n" if only else ""))
+            + "".join(t + "\n" for t in types) + ("only\n" if only else ""))
 
 
 #: PAD-1204 (David: "I'd like to see the sample API contract for the scores API"): what the machine sends and what it
@@ -168,6 +198,13 @@ FIELDS = (
     ("game", "string", "the game and its version, as the app names the card"),
     ("port", "string", "the same in the app's short form (game key and version)"),
     ("game_number", "integer", "games sent since the machine was switched on: 1, 2, 3..."),
+    ("game_type", "string or null",
+     'what the start menu (CHOOSE YOUR MODE OF PLAY) made the game: "standard", "challenge", "competition", '
+     '"tournament", "head_to_head", "team" or "cooperation" (each game offers its own few); null when the machine '
+     "cannot tell"),
+    ("challenge", "string or null",
+     'the challenge played, as the game names it (e.g. "The Shark Is Broken"); null when it is not a challenge game '
+     "or its name is not known"),
     ("time", "integer or null", "the machine's clock in Unix seconds; null when the clock was never set"),
     ("players", "integer", "how many played, 1 to 4"),
     ("scores", "array of integers", "each player's final score, player 1 first (one per player)"),
@@ -177,7 +214,7 @@ FIELDS = (
 )
 #: a game's report as the machine sends it (two players, player 1 logged in)
 SAMPLE = {"source": "PAD score feed", "game": "Godzilla Premium/LE 1.16", "port": "godzilla_le 1.16",
-          "game_number": 3, "time": 1794510083, "players": 2, "scores": [123456780, 98765430],
+          "game_number": 3, "game_type": "challenge", "challenge": "King of the Monsters", "time": 1794510083, "players": 2, "scores": [123456780, 98765430],
           "insider": ["3f2a9c1e-5b7d-4e20-8a61-0c9d2b4f7e13", None]}
 #: what the server answers, and what the machine does when it does not
 ANSWER = ("Answer with any 2xx status (200 or 204); the body is not read. Anything else, no answer within 5 s, or a "

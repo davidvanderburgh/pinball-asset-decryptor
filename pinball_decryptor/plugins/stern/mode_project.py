@@ -532,6 +532,10 @@ MULTIBALL_PROVEN = frozenset({
     # Death Star hits start the game's own multiball): served 3 through the game's serve, the mode ran its 40 s (the game's
     # Orbits start refused meanwhile), drains 3-2-1, then "ours is over" at one ball
     "star_wars_elg-1.10/spike3",
+    # PAD-1289 2026-11-15, Pokemon LE's Spike 3 card (rig slot 129, hidden, muted, s3proof.sh TITLE=pokemon_le PROOF=mb,
+    # a mode file started on Berry target left x3): 3 balls asked for, served through the game's serve (trough 3/6),
+    # 3 shots scored 6,000,000, balls in play 3 -> 2, the mode ended on its 40 s clock, then "ours is over" at one ball
+    "pokemon_le-0.82/spike3",
     "star_wars_2025_pro-0.84/spike3",    # PAD-1291 2026-11-15 (Spike 3 rig slot 240, hidden, muted): MB TEST served 3 balls through the game's serve, scored 3 shots (+6,000,000), "ours is over" at one ball
 })
 
@@ -634,6 +638,11 @@ BALL_SAVE_PROVEN = frozenset({
     # multiball_serve, the drain 3 s in served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the
     # drain after the save ended it; the control without ball_save ended the ball on its first drain
     "star_wars_elg-1.10/spike3",
+    # PAD-1289 2026-11-15, Pokemon LE's Spike 3 card (rig slot 129, hidden, muted, s3proof.sh TITLE=pokemon_le
+    # PROOF=ballsave): SAVE TEST's 15 s save taken through multiball_serve, the drain 3 s in served back (trough eject +
+    # auto plunger), 3 shots scored 6,000,000 on that ball, the drain after the save ended it; SAVE CONTROL (no
+    # ball_save) ended the ball on its first drain, 5.9 s in
+    "pokemon_le-0.82/spike3",
     "star_wars_2025_pro-0.84/spike3",    # PAD-1291 2026-11-15 (Spike 3 rig slot 241, hidden, muted): SAVE TEST's 15 s save, the drain inside it served back (eject, auto plunger), 3 shots +6,000,000 on that ball, the drain after it ended the ball; SAVE CONTROL ended on its first drain (6 s)
 })
 
@@ -2151,10 +2160,19 @@ BUS_IDS = 208
 #: proven (:attr:`TitleProfile.switch_shots_note`).
 #: beatles-1.29: emulator-proven 2026-09-23, each of 73-76 and 48-51 gave exactly one shot in play, the
 #: slingshots none, and a mode file started on Target 1 and scored on Target 2-4 and the return lanes.
-#: star_wars_2025_pro-0.84/spike3: PAD-1291 2026-11-15 (Spike 3 rig slot 240, hidden, muted): a mode file with all 27 of
-#: its port's switch lines as shots (proofs/modes/allshots.cfg) took 54 shots for 54 presses (each switch twice) and ended
-#: on its clock; its ids are the ones the game sent in a census (proofs/titles/star_wars_2025_pro.switches).
-SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_2025_pro-0.84/spike3"})
+#: The Spike 3 ports have no shot dispatch: every shot is a switch line through the two switch_hit sites
+#: (PAD-1289 2026-11-15, the banner was still up on all three):
+#: star_wars_elg-1.10/spike3: PAD-1271 (slot 41) TRENCH RUN started on its third trigger hit and scored five shots;
+#: walking_dead_remastered_le-0.92/spike3: PAD-1287 (slot 37) TARGET RUSH started on the third Tower target hit
+#: (switch 54) and scored 6 shots;
+#: pokemon_le-0.82/spike3: PAD-1289 (slot 129, `value switch_hit_log`) Berry target left 36, Left orbit 48, Rear ramp
+#: made 50, Captive ball-target 71 each one hit and one shot, a mode started on Berry target left x3 and scored on the
+#: other three, and the written card's mode scored on Left outlane and Left return lane;
+#: star_wars_2025_pro-0.84/spike3: PAD-1291 2026-11-15 (Spike 3 rig slot 240, hidden, muted): a mode file with all
+#: 27 of its port's switch lines as shots (proofs/modes/allshots.cfg) took 54 shots for 54 presses (each switch twice)
+#: and ended on its clock; its ids are the ones the game sent in a census (proofs/titles/star_wars_2025_pro.switches).
+SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3",
+                                 "pokemon_le-0.82/spike3", "star_wars_2025_pro-0.84/spike3"})
 #: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
 #: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
 #: 1.29 and Star Wars ELG 1.10 of generation B, Batman 66 1.13 and Rush LE 1.18 of generation A).
@@ -2167,9 +2185,15 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_2025_pro-0.84/spike3
 #: one shot per press, in play, each on its own bit (the outlanes 59 and 62 too); Coffin lock 1-3 (89-91) gave none,
 #: even held 2.5 s - their descriptor flags are 0x0020 (the playfield's 0x0003), which the drain does not pass in
 #: play, the same switch table as 1.03's.
+#: PAD-1322 (2026-11-15, Spike 3 rig slots 91 / 92, PROOF=edge): the two Spike 3 ports that carry the 64-bit switch_edge
+#: source - Star Wars ELG 1.10 (Top lane center x3 started EDGE TEST, Center / Hidden target and Left Luke orbit scored
+#: one hit per press, the slingshots and Right pop bumper too) and Walking Dead Remastered LE 0.92 (Tower target x3
+#: started it, Left loop / Right loop / Right spinner scored six shots); keyed here by PAD-1289, whose merge found the
+#: "not seen reaching a mode" banner back on both once their shots came from the edges.
 SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
                                 "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16",
-                                "metallica_spike-1.04"})
+                                "metallica_spike-1.04",
+                                "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3"})
 
 
 def _core_names(port):

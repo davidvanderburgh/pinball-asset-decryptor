@@ -212,6 +212,9 @@ stick…** turns them into one multi-boot install stick.
 - At power-up the flippers choose and START (or **Action**) boots. The
   volume buttons set the menu's volume. A maintenance reboot boots the same
   game again without the menu.
+- **Back to the menu without switching off:** plug a USB keyboard into the
+  computer in the backbox and press **Escape** during a game. The machine
+  restarts into the menu.
 - The **Onto:** row can install straight onto the game's SSD in a dock on
   this PC, with no stick. On an SSD that already has the install, **Write:**
   can replace only the boot menu or only one game, and keeps the settings

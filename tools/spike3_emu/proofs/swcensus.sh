@@ -25,7 +25,7 @@ L=/var/tmp/pad-s3/slot$SLOT/connectivity.up/dump/mode.log; rm -f "$L"
 mapfile -t NAMES < <(awk '$1 == "switch" { $1 = $2 = $3 = ""; sub(/^ +/, ""); print toupper($0) }' "$PORT")
 : > "$OUT/census.txt"
 (
-  sleep 5; for i in $(seq 1 240); do grep -q "armed" "$L" 2>/dev/null && break; sleep 1; done; sleep "${SETTLE_S:-20}"
+  sleep 5; for i in $(seq 1 240); do grep -q "armed" "$L" 2>/dev/null && break; sleep 1; done; sleep "${ATTRACT_WAIT:-20}"
   for k in 1 2 3 4 5 6; do
     [ "${COINS:-0}" -gt 0 ] && { $P coin "$SLOT" "$COINS" >/dev/null; sleep 2; }
     [ "${START_HOLD_MS:-0}" -gt 0 ] && { $P sw "$SLOT" "START BUTTON" "$START_HOLD_MS"; sleep 7; }

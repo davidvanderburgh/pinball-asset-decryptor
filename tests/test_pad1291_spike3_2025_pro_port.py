@@ -144,7 +144,15 @@ def test_redrafting_the_pro_from_its_census_gives_the_shipped_port():
     ref, tgt = S.Elf(_prog("star_wars_elg")), S.Elf(_prog("star_wars_2025_pro"))
     text, M, core, missing = S.draft_spike3(ref, str(ELG_PORT), tgt, "star_wars_2025_pro", "0.84", str(CENSUS))
     assert not core
-    assert _entries(text) == _entries(PRO_PORT.read_text(encoding="utf-8"))
+    # the shipped port is what the rig proved: shots from the two switch_hit sites, at the census's ids. A draft also
+    # writes PAD-1322's 64-bit switch_edge source (merged after this port was proven, as for Pokemon LE); the Pro
+    # carries those lines once a run proves them there, so the redraft is the shipped port plus exactly those
+    edge = {("site", "switch_edge"), ("value", "switch_record_reg"), ("value", "switch_id_at"),
+            ("value", "switch_level_at"), ("value", "switch_desc_via"), ("value", "switch_flags_at"),
+            ("value", "switch_polarity_at")}
+    mine, shipped = _entries(text), _entries(PRO_PORT.read_text(encoding="utf-8"))
+    assert set(mine) - set(shipped) == edge
+    assert {k: v for k, v in mine.items() if k not in edge} == shipped
     # the rank the table alone gives is what the census corrected
     plain = dict((n, s) for s, _, n in S.spike3_switches(tgt))
     assert plain["Right target"] == 61 and plain["Left orbit"] == 64

@@ -48,6 +48,10 @@ def read_padmode(image, parts=None, open_disk=None):
     from .formats import linux_partitions
     from . import mode_write as MW
     name = os.path.basename(str(image))
+    if parts is None and open_disk is None:
+        s3 = _read_spike3_padmode(image)
+        if s3 is not None:
+            return s3
     if parts is None:
         try:
             parts = linux_partitions(image)
@@ -73,6 +77,42 @@ def read_padmode(image, parts=None, open_disk=None):
                     out[entry] = bytes(reader.read_file_bytes(inode))
             return out
     return {}
+
+
+def _read_spike3_padmode(image):
+    """PAD-1289: a Spike 3 card keeps its modes in ``/games/pad/padmode`` (spike3_modes.MODE_DIR)
+    inside its encrypted games volume, which ``linux_partitions`` never opens: ``{name: bytes}``
+    read through the card's own key (``{}`` when that folder is not there), or None when
+    ``image`` is not a Spike 3 card. Raises :class:`CardModesError` when no key opens it."""
+    from .ext4 import S_IFDIR, S_IFMT, S_IFREG, Ext4Reader
+    from . import mode_write as MW, spike3, spike3_card, spike3_modes
+    try:
+        if not spike3.is_spike3_card(str(image)):
+            return None
+    except (OSError, ValueError):
+        return None
+    name = os.path.basename(str(image))
+    try:
+        vol = spike3_card.open_games(str(image))
+    except spike3_card.Spike3KeyError as e:
+        raise CardModesError("%s is a Spike 3 card its modes cannot be read from: %s" % (name, e)) from None
+    except (OSError, ValueError) as e:
+        raise CardModesError("%s could not be read as a Spike 3 card (%s)" % (name, e)) from None
+    try:
+        reader = Ext4Reader(vol, 0, vol.size)
+        node = MW.lookup(reader, spike3_modes.MODE_DIR)
+        if node is None or (node["mode"] & S_IFMT) != S_IFDIR:
+            return {}
+        out = {}
+        for entry, child, _t in reader._iter_dir(node):
+            if entry in (".", ".."):
+                continue
+            inode = reader.read_inode(child)
+            if (inode["mode"] & S_IFMT) == S_IFREG:
+                out[entry] = bytes(reader.read_file_bytes(inode))
+        return out
+    finally:
+        vol.close()
 
 
 def bundle_about(data):

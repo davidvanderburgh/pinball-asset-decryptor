@@ -25,3 +25,6 @@ installer/docker/root/** text eol=lf
 
 # The pinned aarch64 kit list xgcc.sh reads under bash (PAD-1295): LF like the script
 *.pins text eol=lf
+# PAD-1289: the Spike 3 proof rig's title files are sourced by bash and its mode files read on the rig: LF
+tools/spike3_emu/proofs/**/*.env text eol=lf
+tools/spike3_emu/proofs/**/*.cfg text eol=lf

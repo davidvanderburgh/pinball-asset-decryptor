@@ -1295,3 +1295,7 @@ value coop_keep_djmult_at     0xc
 # (the 31 names at 0x5fcac0, in reverse id order). keep:perks|=<mask> keeps the character's bits set.
 value coop_keep_perks_obj     0x007b2dd0
 value coop_keep_perks_at      0x44
+
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x002a7934 0xe92d47f0 0xe30d4f9c
+site  coop_lobby_add         0x002a7a5c 0xebfffea3 0xe2506000

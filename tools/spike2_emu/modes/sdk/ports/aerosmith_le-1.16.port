@@ -533,3 +533,7 @@ site  coop_first_ball    0x001f29a4 0xebfd2826 0xe1a04000
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 data  message_table          0x005eb254
 value coop_ball_msg          1255
+
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x001f2bc4 0xe92d47f0 0xe30d48b4
+site  coop_lobby_add         0x001f2cec 0xebfffea3 0xe2506000

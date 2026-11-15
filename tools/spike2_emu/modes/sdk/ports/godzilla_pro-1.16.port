@@ -1179,3 +1179,7 @@ value coop_keep_djmult_at     0xc
 # round 6: the power-ups a player owns (LE 0x7b2dd0; the Rodan summon's bit test at Pro 0x11ca04 names the object)
 value coop_keep_perks_obj     0x007a6738
 value coop_keep_perks_at      0x44
+
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x0045a08c 0xe92d47f0 0xe3024f6c
+site  coop_lobby_add         0x0045a1b4 0xebfffea3 0xe2506000

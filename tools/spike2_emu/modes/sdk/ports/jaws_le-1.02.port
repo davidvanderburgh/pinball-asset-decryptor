@@ -749,6 +749,10 @@ site  coop_first_ball    0x00474044 0xebf8b9c7 0xe1a04000
 # ---- PAD-1202: co-op play - the ball start's "player N, you're up" call's read of the player up (portcoop.py) ----
 site  coop_up_call           0x00056374 0xeb0930d6 0xe3404086
 
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x00474290 0xe92d47f0 0xe308454c
+site  coop_lobby_add         0x004743b8 0xebfffe98 0xe2506000
+
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x0036b8fc 0xe92d43f0 0xe2505000
 # PAD-1041: the start menu of game-mode table indices - Prolonged Competition's entry is Competition's index again

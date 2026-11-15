@@ -6198,6 +6198,9 @@ Port lines (portcoop.py; one framework shape on every Spike 2 build, the older o
     site  coop_panel_lit      (PAD-1043) the score panel's frame update's call of the player-up getter (hook_call)
     site  coop_panel_up[_n]   (PAD-1043) its "player changed" checks' calls (hook_call; _2 .. _4 for more than one)
     site  coop_up_call        (PAD-1202) the ball start's "player N, you're up" process's getter call (hook_call)
+    site  coop_start_game     (PAD-1316) the game start, handed the Insider lobby's size as its fifth word (hook_wrap)
+    site  coop_lobby_add      (PAD-1316) its loop's call adding lobby players 2..n after ball 1's start (hook_call):
+                              the runtime adds them while the intro and pick hold ball 1, so the panel shows them
 
 plus PAD-640/663's `challenge_scores*` lines for the boards. Emulator-proven on Godzilla LE 1.16 (2 and 4 teammates:
 every teammate played balls 1-3 in turn, the game ended after the last, and the team's score went on its own board).

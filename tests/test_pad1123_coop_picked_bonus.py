@@ -1,6 +1,6 @@
 """PAD-1123: a co-op character's clip and sound once picked, and the character on its teammate's End of Ball Bonus -
 the project's files, the clips the build makes (a still as long as its sound; the bonus loop with the character's photo
-and name, its portrait bottom-left and its name along the foot, through the bank's crop), the sound's pseudo modes and sounds.cfg line, coop.cfg's lines, and
+and name, its portrait bottom-right with its name across its foot, through the bank's crop), the sound's pseudo modes and sounds.cfg line, coop.cfg's lines, and
 the runtime's choices (lifted verbatim from pad_mode_runtime.c)."""
 import os
 import shutil
@@ -126,42 +126,54 @@ def test_the_settings_file_carries_them(tmp_path):
 
 
 # ---- the clips the build makes ---------------------------------------------------------------------------------------
-def test_the_card_sits_bottom_left_portrait_at_round_ones_size_name_along_the_foot():
-    """Round 3: "display the end of ball bonus character portrait in the left bottom corner of the screen in the size it
-    was originally displayed. Please put the characters name directly next to the portrait along the bottom"."""
+def test_the_card_sits_bottom_right_portrait_at_round_ones_size():
+    """Round 4: "Could you please move it to the bottom right corner, and stack the text on the picture along the
+    bottom"; the portrait stays round 1's size (round 3: "in the size it was originally displayed")."""
     px, py, pw, ph = CP.BONUS_PHOTO
     assert (px * 2 + pw, py * 2 + ph) == (360, 290)                 # round 1's window, frame and all
     for name in ("84GOJI", "SHODAIGOJI", "MECHAGODZILLA KIRYU THE THIRD"):
         gx, gy, gw, gh = CP.bonus_strip(name)
-        assert gx <= 8 and gy + gh >= CP.GLASS[1] - 8 and gh == 290 # the bottom-left corner
-        assert gx + px * 2 + pw < 425                               # left of the summary's words (x 425-940)
+        assert (gw, gh) == (360, 290)                               # the name is on the picture: no wider card
+        assert gx + gw >= CP.GLASS[0] - 8 and gy + gh >= CP.GLASS[1] - 8   # the bottom-right corner
+        assert gx + gw <= CP.GLASS[0] and gy + gh <= CP.GLASS[1]
+        assert gx > 940                                             # right of the summary's words (x 425-940)
         assert gy > 460                                             # under the count's widest lines
-        assert gy + gh - CP.BONUS_PLATE_H > 665                     # the plate: under the summary's last line
-        assert gx + gw <= CP.GLASS[0] - 6 and gw % 2 == 0 and gx % 2 == 0
+        assert gw % 2 == 0 and gx % 2 == 0
         x, y, w, h = CP.bonus_box(SQUARE, 1360, 768, (gx, gy, gw, gh))
         assert abs(x * SQUARE[0] + SQUARE[12] - gx) < 3 and abs(y * SQUARE[5] + SQUARE[13] - gy) < 3   # back on glass
         assert abs(w * SQUARE[0] - gw) < 3 and abs(h * SQUARE[5] - gh) < 3
         assert CP.bonus_box(None, 1360, 768, (gx, gy, gw, gh)) == (gx, gy, gw, gh)                    # Normal: 1:1
-    assert CP.bonus_strip("MECHAGODZILLA KIRYU THE THIRD")[2] > CP.bonus_strip("SHODAIGOJI")[2]   # it fits the name
 
 
-def test_the_card_is_the_award_cards_look_portrait_and_name(tmp_path):
+def test_a_name_fits_across_the_picture_on_one_line_or_two():
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+    room = CP.BONUS_PHOTO[2] - 2 * CP.BONUS_NAME_PAD
+    lines, f = CP.bonus_name_lines(d, "DESUGOJI")
+    assert lines == ["DESUGOJI"] and f.size == CP.BONUS_NAME_PX[0]   # a short name as big as it goes
+    lines, f = CP.bonus_name_lines(d, "KING GHIDORAH OF THE MONSTER ZERO")
+    assert len(lines) == 2 and " ".join(lines) == "KING GHIDORAH OF THE MONSTER ZERO"
+    assert all(d.textlength(t, font=f) <= room for t in lines) and f.size >= CP.BONUS_NAME_PX[2]
+
+
+def test_the_card_is_the_portrait_with_its_name_on_its_foot(tmp_path):
     pic = _png(tmp_path / "p.png", (20, 200, 40))
     card = CP.bonus_card("SHODAIGOJI", "#33ccff", picture=pic)
     assert card.size == CP.bonus_strip("SHODAIGOJI")[2:]
     px, py, pw, ph = CP.BONUS_PHOTO
-    r, g, b, a = card.getpixel((px + pw // 2, py + ph // 2))     # the portrait
+    r, g, b, a = card.getpixel((px + pw // 2, py + ph // 3))     # the portrait, untouched above the name
     assert g > 150 and r < 80 and a == 255
     r, g, b, a = card.getpixel((px, py + ph // 2))               # its lit frame, in the character's colour
     assert b > 150 and a > 200
     assert card.getpixel((0, 0))[3] < 60                         # rounded corners
-    assert card.getpixel((card.width - 40, 40))[3] == 0          # clear above the plate: the bonus shows there
-    top = card.height - CP.BONUS_PLATE_H
-    assert card.getpixel((card.width - 20, top + 45))[3] == 255  # the plate along the foot
-    name = card.crop((px + pw + 24, top + 12, card.width - 34, top + 62)).convert("L")
-    assert name.getextrema()[1] > 200                             # the name beside the portrait, light on the body
+    foot = card.crop((px + 10, py + ph - 70, px + pw - 10, py + ph - 8)).convert("RGB")
+    lum = foot.convert("L")
+    assert lum.getextrema()[1] > 200                             # the name, light, on the picture's foot
+    r, g, b = foot.getpixel((2, foot.height - 4))                # under it the picture fades dark
+    assert g < 90
     hole = CP.bonus_card("SHODAIGOJI", "#33ccff")                # a video's: the portrait left clear for it
-    assert hole.getpixel((px + pw // 2, py + ph // 2))[3] == 0
+    assert hole.getpixel((px + pw // 2, py + ph // 3))[3] == 0
+    assert hole.getpixel((px + 4, py + ph - 6))[3] > 150         # but the fade and name sit over the video
 
 
 def test_the_bonus_loop_is_found_by_name_at_its_crop():
@@ -182,7 +194,7 @@ def test_a_still_is_a_clip_as_long_as_asked(tmp_path):
     assert abs(CP.media_seconds(out, ff) - 4.5) < 0.2
 
 
-def test_the_bonus_copy_puts_the_card_bottom_left(tmp_path):
+def test_the_bonus_copy_puts_the_card_bottom_right(tmp_path):
     ff = _ffmpeg()
     from PIL import Image
     loop = str(tmp_path / "loop.mp4")
@@ -203,7 +215,7 @@ def test_the_bonus_copy_puts_the_card_bottom_left(tmp_path):
         im = Image.open(png).convert("RGB")
         x, y, w, h = box
         px, py, pw, ph = CP.BONUS_PHOTO
-        r, g, b = im.getpixel((x + px + pw // 2, y + py + ph // 2))   # the photo slot: picture, or the looped video
+        r, g, b = im.getpixel((x + px + pw // 2, y + py + ph // 3))   # the photo slot: picture, or the looped video
         assert (g > 150 and r < 80) if want == "g" else (r > 150 and g < 80), (kind, r, g, b)
         r, g, b = im.getpixel((x + px, y + py + ph // 2))               # its frame, in the character's colour
         assert r > 180 and 120 < g < 220 and b < 80, (kind, r, g, b)

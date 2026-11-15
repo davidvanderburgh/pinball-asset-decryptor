@@ -1314,7 +1314,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
     @rpc
     def coop_chars_bonus(self, on):
         """PAD-1123: whether each teammate's character shows on their End of Ball Bonus (its picture, or its video, and its
-        name beside it along the bottom: the portrait in the bottom-left corner)."""
+        name across the picture's foot: the portrait in the bottom-right corner)."""
         from ...plugins.stern import coop_play as _CP
         project = self.project()
         if not project or not _CP.load_characters(project)["list"]:

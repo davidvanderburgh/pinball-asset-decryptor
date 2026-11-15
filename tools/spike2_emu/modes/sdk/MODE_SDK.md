@@ -6534,8 +6534,8 @@ teammate's End of Ball Bonus (the dialog's **Show each teammate's character on t
     bonus_loop EndOfBallBonus_BackgroundLoop  the clip the game's bonus loops (found in the bank by name; Godzilla 1.15
                                               and 1.16, at SquareCrop: x1.29, moved -197,-126)
     char_bonus 1 PadCoopBonus1                that loop made again with character 1's video (or picture) and name on
-                                              a 360x290 portrait bottom-left (glass 6,472) and a
-                                              name plate beside it along the foot (y 672-762)
+                                              a 360x290 portrait bottom-right (glass 994,472), the
+                                              name across the picture's foot
 
 When the teammate up takes a character (its PICKED card on the glass) its sound plays at once; its clip waits until
 the card has had its 2.5 s and the card's own video behind it has been given back (the bank's one surface), then plays

@@ -18,7 +18,7 @@ GAME_MB_SWS=${GAME_MB_SWS:-}                                # or these, once eac
 FLIP_SWS=${FLIP_SWS:-L FLIPPER BUTTON|R FLIPPER BUTTON}      # the flipper buttons (PROOF=edge)
 NOHANDLER_SWS=${NOHANDLER_SWS:-LEFT SLINGSHOT|RIGHT POP BUMPER}   # switches the drain runs no handler for (PROOF=edge)
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
-SETTLE_S=${SETTLE_S:-${ATTRACT_WAIT:-20}}                   # after the runtime is up, before the first Start (WDR: ~60)
+ATTRACT_WAIT=${ATTRACT_WAIT:-${SETTLE_S:-20}}               # after the runtime is up, before the first Start (WDR: ~60)
 COINS=${COINS:-0}                                           # credits first (Walking Dead Remastered's fresh settings: 4; Pokemon LE is not on free play)
 AFTER_START_SWS=${AFTER_START_SWS:-}                        # pressed after each Start (a character select)
 SLOT=${1:-88}
@@ -31,7 +31,7 @@ plunge() { $P plunge "$SLOT" 2>&1 | tail -1; }
 drain() { $P drain "$SLOT" 2>&1 | tail -1; }
 
 sleep 5; for i in $(seq 1 240); do grep -q "ready on\|\[mode\]\|armed" $L 2>/dev/null && break; sleep 1; done
-echo "[play] ready after ${i}s"; sleep "$SETTLE_S"         # Walking Dead Remastered takes a Start only ~60 s on
+echo "[play] ready after ${i}s"; sleep "${ATTRACT_WAIT:-20}"   # Walking Dead Remastered takes a Start only ~60 s on
 if [ "${PROOF:-game}" = edge ]; then
   echo "[play] attract: the flipper buttons at $(date +%T)"; IFS='|' read -r -a fl <<< "$FLIP_SWS"
   for s in "${fl[@]}"; do $P sw "$SLOT" "$s" 400; sleep 2; done

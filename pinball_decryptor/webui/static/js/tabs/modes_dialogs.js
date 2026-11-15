@@ -465,9 +465,9 @@ export function CoopCharsDialog({ s, onClose }) {
     </div>
     <div class="row" style="margin-top:8px; gap:8px">
       <${Check} checked=${!!ch.bonus} label="Show each teammate's character on their End of Ball Bonus" disabled=${!rows.length}
-        title="Its picture (or video) in a big frame in the bottom-left corner, its name beside it along the bottom, as on the award cards, while that teammate's bonus counts."
+        title="Its picture (or video) in a big lit frame in the bottom-right corner, its name across the bottom of the picture, while that teammate's bonus counts."
         onChange=${(v) => call("modes.coop_chars_bonus", v)} />
-      <span class="small dim wrap">${ch.bonus ? "Its video plays in the frame bottom-left, or its picture shows when it has no video, with its name beside it. A character with neither keeps the game's own bonus." : ""}</span>
+      <span class="small dim wrap">${ch.bonus ? "Its video plays in the frame bottom-right, or its picture shows when it has no video, with its name across the bottom of it. A character with neither keeps the game's own bonus." : ""}</span>
     </div>
     ${looking && ch.look ? html`<${CoopLook} look=${ch.look} />` : null}
     ${ch.preview ? html`<div class="modes-coop-ch-pv">

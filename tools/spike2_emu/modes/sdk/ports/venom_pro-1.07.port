@@ -775,5 +775,9 @@ site  coop_icon_draw         0x0025c984 0xebfffdf3 0xe1560004
 # ---- PAD-1202: co-op play - the ball start's "player N, you're up" call's read of the player up (portcoop.py) ----
 site  coop_up_call           0x000d43c8 0xeb061d7f 0xe3500003
 
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x003837e8 0xe92d47f0 0xe3084490
+site  coop_lobby_add         0x00383910 0xebfffea3 0xe2506000
+
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x003ea3f8 0xe92d43f0 0xe2505000

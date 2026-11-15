@@ -1707,8 +1707,9 @@ def intro_audio(src, out, ffmpeg, max_seconds=None):
 # video bank (:data:`PICKED_CLIP`, fitted whole like the intro) and the sound a sound of the card's own on the intro's
 # carrier, and the runtime plays both when the character is picked (pad_mode_runtime.c "PAD-1123"). With ``bonus`` on,
 # the build makes the game's own End of Ball Bonus loop again per character with its picture (or video) and its name on a
-# card in the bottom-left corner in the award card's look, the name along the foot beside it (:data:`BONUS_CLIP`, round 3;
-# round 1 had a window right of the bonus's words, round 2 a small photo on a strip centred along the foot), and the
+# card in the bottom-right corner in the award card's look, the name across the picture's foot (:data:`BONUS_CLIP`,
+# round 4; round 1 had a window right of the bonus's words, round 2 a small photo on a strip centred along the foot,
+# round 3 the portrait bottom-left with a name plate beside it), and the
 # runtime plays the copy of the teammate up's character when the game asks for its loop.
 #: a character's picked clip in the video bank (1-based)
 PICKED_CLIP = "PadCoopPicked%d"
@@ -1723,34 +1724,46 @@ PICKED_STILL_SECONDS = 3
 SOUND_EXTS = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma", ".opus")
 #: a character's copy of the bonus loop in the video bank (1-based)
 BONUS_CLIP = "PadCoopBonus%d"
-#: round 3 (the reporter: "The character portrait during the end of ball bonus is too small now that is at the bottom.
-#: Could we please display the end of ball bonus character portrait in the left bottom corner of the screen in the size
-#: it was originally displayed. Please put the characters name directly next to the portrait along the bottom of the
-#: screen"; round 2 had a small photo on a strip centred along the foot, round 1 a 360 x 290 window right of the words):
-#: the card is the portrait at round 1's size in the bottom-left corner, in the award card's look, with a name plate
-#: along the foot of the screen beside it. Godzilla LE 1.16, emulator census, a frame every 0.75 s: the summary's words
-#: (PLAYER - the Insider name there when logged in - / TOTAL BONUS / TOTAL SCORE) run x 425-940 y 140-665, the count's
-#: widest lines (GODZILLA POWERUP EARNED, x 135-1230) end above y 460, and the game draws nothing below them, no score
-#: panel: the portrait (x 6-366, y 472-762) and the plate (y 672-762) clear them all. The card's left edge and the
-#: margin under it, glass pixels:
-BONUS_CARD_X, BONUS_CARD_FOOT = 6, 6
-#: the portrait (x, y, w, h, the card's pixels): round 1's window, 360 x 290 with its frame; it is the card's height
+#: round 4 (the reporter: "Could you please move it to the bottom right corner, and stack the text on the picture along
+#: the bottom like in the attached?", a mockup with the name in big gold letters across the foot of the portrait; round
+#: 3 had the portrait bottom-left with a name plate beside it, round 2 a small photo on a strip centred along the foot,
+#: round 1 a 360 x 290 window right of the words): the card is the portrait alone at round 1's size in the bottom-right
+#: corner, in the award card's lit frame, the name written across the picture's foot over a dark fade. Godzilla LE 1.16,
+#: emulator census, a frame every 0.75 s: the summary's words (PLAYER - the Insider name there when logged in - / TOTAL
+#: BONUS / TOTAL SCORE) run x 425-940 y 140-665, the count's widest lines (GODZILLA POWERUP EARNED, x 135-1230) end
+#: above y 460, and the game draws nothing below them, no score panel: the card (x 994-1354, y 472-762) clears them all.
+#: The margins right of the card and under it, glass pixels:
+BONUS_CARD_RIGHT, BONUS_CARD_FOOT = 6, 6
+#: the portrait (x, y, w, h, the card's pixels): round 1's window, 360 x 290 with its frame
 BONUS_PHOTO = (5, 5, 350, 280)
-#: the name plate's height, along the card's foot; it starts under the portrait's right edge
-BONUS_PLATE_H = 90
-#: the card's least and most width: it fits the name
-BONUS_CARD_W = (620, 1348)
-#: the name's largest and least size (glass pixels)
-BONUS_NAME_PX = (64, 30)
+#: the name's largest and least size on one line, and the least on two (glass pixels)
+BONUS_NAME_PX = (56, 30, 24)
+#: the name's room across the portrait (glass pixels each side) and its baseline above the portrait's foot
+BONUS_NAME_PAD, BONUS_NAME_FOOT = 14, 14
 
 
-def _bonus_card_h():
-    return BONUS_PHOTO[1] * 2 + BONUS_PHOTO[3]
+def _bonus_card_size():
+    return BONUS_PHOTO[0] * 2 + BONUS_PHOTO[2], BONUS_PHOTO[1] * 2 + BONUS_PHOTO[3]
 
 
-def _bonus_name_x():
-    """Where the name starts on the card (its pixels): just right of the portrait."""
-    return BONUS_PHOTO[0] + BONUS_PHOTO[2] + 24
+def bonus_name_lines(draw, name, scale=1):
+    """*name* as the card writes it across the portrait's foot: ``(lines, font)``, one line as big as fits (down to
+    :data:`BONUS_NAME_PX`'s least), else split in two at the word break that fits the biggest."""
+    text = str(name or "?")
+    room = (BONUS_PHOTO[2] - 2 * BONUS_NAME_PAD) * scale
+    big, one, two = (v * scale for v in BONUS_NAME_PX)
+    f = _fit(draw, text, _DISPLAY_FONTS, room, big, one)
+    words = text.split()
+    if draw.textlength(text, font=f) <= room or len(words) < 2:
+        return [text], f
+    best = None
+    for i in range(1, len(words)):
+        pair = [" ".join(words[:i]), " ".join(words[i:])]
+        wide = max(pair, key=lambda t: draw.textlength(t, font=f))
+        g = _fit(draw, wide, _DISPLAY_FONTS, room, one, two)
+        if best is None or g.size > best[1].size:
+            best = (pair, g)
+    return best
 
 
 def picked_clip_path(project, character):
@@ -1930,19 +1943,11 @@ def bonus_loop(bank_data, bank=None):
     return got[0], "SquareCrop" if "SquareCrop" in labels else "Normal"
 
 
-def bonus_strip(name):
-    """The card for a character called *name* on the glass, ``(x, y, w, h)``, x and w even: the portrait in the
-    bottom-left corner and the name plate beside it along the foot, as wide as the name needs (within
-    :data:`BONUS_CARD_W`)."""
-    from PIL import Image, ImageDraw
-    text = str(name or "?")
-    d = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
-    lead = _bonus_name_x()
-    f = _fit(d, text, _DISPLAY_FONTS, BONUS_CARD_W[1] - lead - 34 - 48, BONUS_NAME_PX[0], BONUS_NAME_PX[1])
-    w = max(BONUS_CARD_W[0], min(BONUS_CARD_W[1], lead + int(d.textlength(text, font=f)) + 34 + 48))  # + the rule
-    w += w % 2
-    h = _bonus_card_h()
-    return (BONUS_CARD_X, GLASS[1] - BONUS_CARD_FOOT - h, w, h)
+def bonus_strip(name=""):
+    """The card on the glass, ``(x, y, w, h)``, x and w even: the portrait in the bottom-right corner (its name is
+    written on it, so *name* does not change it)."""
+    w, h = _bonus_card_size()
+    return (GLASS[0] - BONUS_CARD_RIGHT - w, GLASS[1] - BONUS_CARD_FOOT - h, w, h)
 
 
 def bonus_box(transform, w, h, rect=None):
@@ -1958,69 +1963,66 @@ def bonus_box(transform, w, h, rect=None):
 
 def bonus_card(name, colour="#ffb400", theme=None, picture="", project="", scale=2):
     """The card as an RGBA PIL image, :func:`bonus_strip`'s size in glass pixels, in the award card's look (its body,
-    lit frames in *colour*): *picture* (a still's path) in the portrait - without one the portrait is left clear, for a
-    video under it - and the name plate along the foot right of it, *name* big on the theme's rules. Above the plate
-    the card is clear (the bonus's own picture)."""
+    a lit frame in *colour*): *picture* (a still's path) in the portrait - without one the portrait is left clear, for a
+    video under it - and *name* big in the theme's name colour across the portrait's foot, over a dark fade."""
     from PIL import Image, ImageDraw, ImageFilter
     th = theme_of(theme)
     acc = clean_colour(colour) or th["accent"]
-    A, A2 = _hex(acc), _hex(th["accent2"])
+    A = _hex(acc)
     S = scale
-    gw = bonus_strip(name)[2]
-    W, H = gw * S, _bonus_card_h() * S
+    gw, gh = _bonus_card_size()
+    W, H = gw * S, gh * S
     px, py, pw, ph = (v * S for v in BONUS_PHOTO)
-    fw = px * 2 + pw                                            # the portrait's frame, the card's height
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-
-    def panel(img, x0, y0, x1, y1, r):                          # the award card's body in a lit frame
-        mask = Image.new("L", (W, H), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((x0, y0, x1 - 1, y1 - 1), radius=r, fill=255)
-        img.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
-        body = _body(project, th, x1 - x0, y1 - y0, S)
-        full = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        full.paste(body, (x0, y0))
-        img.paste(full, (0, 0), mask)
-        img = _glow(img, (x0 + 3 * S, y0 + 3 * S, x1 - 4 * S, y1 - 4 * S), r - S, A[:3] + (200,), 4 * S, 3 * S)
-        ImageDraw.Draw(img).rounded_rectangle((x0 + 2 * S, y0 + 2 * S, x1 - 3 * S, y1 - 3 * S), radius=r - S,
-                                              outline=A[:3] + (255,), width=2 * S)
-        return img
-
-    top = H - BONUS_PLATE_H * S                                 # the plate, from under the portrait's right edge
-    img = panel(img, fw - 24 * S, top, W, H, 16 * S)
-    img = panel(img, 0, 0, fw, H, 14 * S)                       # the portrait's frame over the plate's end
+    r = 14 * S
+    mask = Image.new("L", (W, H), 0)                            # the award card's body in a lit frame
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=r, fill=255)
+    img.paste(Image.new("RGBA", (W, H), (12, 14, 22, 255)), (0, 0), mask)
+    img.paste(_body(project, th, W, H, S), (0, 0), mask)
+    img = _glow(img, (3 * S, 3 * S, W - 4 * S, H - 4 * S), r - S, A[:3] + (200,), 4 * S, 3 * S)
+    ImageDraw.Draw(img).rounded_rectangle((2 * S, 2 * S, W - 3 * S, H - 3 * S), radius=r - S, outline=A[:3] + (255,),
+                                          width=2 * S)
     pm = Image.new("L", (pw, ph), 0)
     ImageDraw.Draw(pm).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=10 * S, fill=255)
     if picture:
         with Image.open(picture) as im:
             photo = _cover(im.convert("RGBA"), pw, ph)
-        img.paste(Image.alpha_composite(Image.new("RGBA", (pw, ph), (0, 0, 0, 255)), photo), (px, py), pm)
+        photo = Image.alpha_composite(Image.new("RGBA", (pw, ph), (0, 0, 0, 255)), photo)
     else:                                                       # the video goes under it
-        img.paste(Image.new("RGBA", (pw, ph), (0, 0, 0, 0)), (px, py), pm)
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=10 * S, outline=A[:3] + (255,), width=2 * S)
-    text = str(name or "?")
-    ix = _bonus_name_x() * S
-    iw = W - ix - 34 * S
-    nf = _fit(d, text, _DISPLAY_FONTS, iw - 48 * S, BONUS_NAME_PX[0] * S, BONUS_NAME_PX[1] * S)
-    by = top + 60 * S
-    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(shadow).text((ix + 3 * S, by + 4 * S), text, font=nf, fill=(0, 0, 0, 220), anchor="ls")
-    img = Image.alpha_composite(img, shadow.filter(ImageFilter.GaussianBlur(3 * S)))
-    d = ImageDraw.Draw(img)
-    d.text((ix, by), text, font=nf, fill=_hex(th["name"]), anchor="ls", stroke_width=max(1, S),
-           stroke_fill=(0, 0, 0, 255))
-    nw = min(iw - 40 * S, d.textlength(text, font=nf))
-    d.rectangle((ix, top + 69 * S, ix + nw, top + 74 * S), fill=A[:3] + (255,))
-    d.rectangle((ix + nw + 8 * S, top + 69 * S, ix + nw + 40 * S, top + 74 * S), fill=A2[:3] + (255,))
-    return img.resize((gw, H // S), Image.LANCZOS)
+        photo = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+    lines, nf = bonus_name_lines(ImageDraw.Draw(img), name, S)
+    asc, desc = nf.getmetrics()
+    step = asc + desc // 2
+    base = ph - BONUS_NAME_FOOT * S                             # the last line's baseline, the portrait's pixels
+    ys = [base - step * (len(lines) - 1 - k) for k in range(len(lines))]
+    fade_h = min(ph, ph - (ys[0] - asc) + 28 * S)
+    fade = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))            # dark under the name, clear above it
+    fd = ImageDraw.Draw(fade)
+    for i in range(fade_h):
+        t = min(1.0, (i + 1) / float(fade_h) * 1.6)
+        fd.line((0, ph - fade_h + i, pw, ph - fade_h + i), fill=(0, 0, 0, int(210 * t)))
+    photo = Image.alpha_composite(photo, fade)
+    shadow = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    for t, y in zip(lines, ys):
+        sd.text((pw // 2 + 3 * S, y + 4 * S), t, font=nf, fill=(0, 0, 0, 230), anchor="ms")
+    photo = Image.alpha_composite(photo, shadow.filter(ImageFilter.GaussianBlur(3 * S)))
+    pd = ImageDraw.Draw(photo)
+    for t, y in zip(lines, ys):
+        pd.text((pw // 2, y), t, font=nf, fill=_hex(th["name"]), anchor="ms", stroke_width=max(1, S),
+                stroke_fill=(0, 0, 0, 255))
+    img.paste(photo, (px, py), pm)
+    ImageDraw.Draw(img).rounded_rectangle((px, py, px + pw - 1, py + ph - 1), radius=10 * S, outline=A[:3] + (255,),
+                                          width=2 * S)
+    return img.resize((gw, gh), Image.LANCZOS)
 
 
 def bonus_clip(loop_src, out, box, ffmpeg, picture="", video="", colour="#ffb400", seconds=None, size=(1360, 768),
                name="", theme=None, project=""):
     """The game's bonus loop *loop_src* (at *size*, the bank's clip frame: an owner's replacement of another size is
     scaled to it first) made again at *out* with a character's card (:func:`bonus_card`: its *picture*, or its
-    *video* looped in the portrait, and its *name* beside it, framed in *colour*) over *box* (the loop's pixels:
-    :func:`bonus_box` of the name's :func:`bonus_strip`), as long as the loop (or *seconds*), 30 fps, silent."""
+    *video* looped in the portrait, and its *name* across the portrait's foot, framed in *colour*) over *box* (the
+    loop's pixels: :func:`bonus_box` of :func:`bonus_strip`), as long as the loop (or *seconds*), 30 fps, silent."""
     import os
     from . import mode_assets as MA
     x, y, bw, bh = box

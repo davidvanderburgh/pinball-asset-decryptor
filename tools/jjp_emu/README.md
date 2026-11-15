@@ -490,9 +490,11 @@ window. It opens no switch matrix but still refreshes the device dump. Press
 switches with `jjppoke.py <name>` (`--list <text>` finds names). Audio is muted
 unless `PAD_AUDIO=1`.
 
-`JJP_MODS_SO=/var/tmp/jjpmodes.so` (built by `buildmods.sh`) loads a custom
-mode into the game without patching it. `jjpmodelist.py` lists the game's own
-live modes. See `docs/plans/jjp_custom_modes.md`.
+`JJP_MODS_SO=/var/tmp/jjpmodes.so` (built by `buildmods.sh`) with
+`JJP_MODS_DIR=<mode folder>` loads custom modes into the game without patching
+it; a mode install ISO written by `mkjjpmodes.py` loads them through its own
+`rungame.sh` hook. Writing modes: `MODES.md` (PAD-1337). `jjpmodelist.py`
+lists the game's own live modes. See `docs/plans/jjp_custom_modes.md`.
 
 The rig's scripts only count and kill `game` processes rooted in the JJP jail
 (`jjp_rig_pids`): a Spike 2 rig slot's process has the same name.

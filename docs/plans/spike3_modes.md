@@ -63,8 +63,8 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | part | Spike 2 card pieces | on Spike 3 | what it needs |
 |---|---|---|---|
 | **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live. Only the Insider login ids are 32-bit (the user-manager finder `coop_play.insider_users`, an `unsigned` address in `feed_login`): reports name no logins, and the log says so |
-| random clips | clips.cfg, clips in the video bank | left out | the clip v2 route's `string_new` site (64-bit builds its own strings), the clip name read as a 4-byte pointer, surface compares cut to 32 bits |
-| screen times | `stime` lines in clips.cfg | left out | rides random clips' arm; the vtable slot read and written as 4 bytes; screen_time.py reads 32-bit vtables |
+| random clips | clips.cfg, clips in the video bank | **goes on (PAD-1323)** | done: the clip v2 route asks for no `string_new` (the runtime builds the name), the name read as an 8-byte pointer, surfaces compared at full width. A port with the clip v2 lines: Star Wars ELG's today |
+| screen times | `stime` lines in clips.cfg | **goes on (PAD-1323)** | done: the slot read and written as 8 bytes, moved by the PIE's load address; screen_time.py reads 64-bit programs (Fallout LE, Pokemon LE, Transformers LE have the screens) |
 | music modes | sounds.cfg, bank records, MUSIC MODE row | left out | off on 64-bit by design (32-bit asset descriptors); Spike 3's songs are image.bin records (PAD-1296 appends them); a 64-bit menu row |
 | editions | EDITION row, codeselect's `edition=` | left out | no runtime: a 64-bit operator-menu row (adjustments.py refuses ELF64) and the Spike 3 multi-boot reading EDITION |
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
@@ -103,6 +103,38 @@ own attract screen then showed as Player 1's. (A first try with the server down 
 server's address` on each try, and the game played on.) A rig note: every Start press in a game adds
 a player, so a job starts one game with one held Start (first-boot GAME SETUP) and one press.
 Tests: tests/test_pad1297_spike3_family.py.
+
+## Random clips and screen times on Spike 3 (PAD-1323)
+
+Both go on now, beside the runtime as on Spike 2 (`clips.cfg`), built by `spike3_modes.plan` like the score
+feed: `variants_wanted` (quiet: the engine's `_variants_for_build` has said why not) puts the project's clips in
+the title's video bank, read off the card's games volume, and `screen_times_wanted` reads the card's own 64-bit
+program for the screens that show a replaced clip for a fixed time (the engine's `_screen_times_from`, so the
+log says the same lines; on Spike 3 the engine leaves them to this build). A multi-boot card takes none, said.
+
+- **The runtime.** `clipv_arm`'s clip v2 route asks for `PM_STRING_SITE` (resource_get on 64-bit: the program
+  imports no string constructor and `std_string` builds the C++11 object), `on_clipv_set_video` /
+  `on_clipv_layer` read the name's first word as a `pm_addr` (the COW string on Spike 2, `_M_p` on Spike 3) and
+  compare the surface as a `pm_reg`, `on_clipv_play` hands the name back in the whole register. A `stime` line's
+  vtable, slot and word are link-time addresses: each is moved by `game_base` (0 on Spike 2), the slot is a
+  `pm_addr` (8 bytes, 8-aligned on Spike 3) and gets `stime_get`'s whole address.
+- **The clip route.** `clip_variants.hook_route` needs `resource_get` in place of `string_new` on a Spike 3 port
+  (`mode_runtime.port_arch`), so Star Wars ELG's offers random clips on the Video tab (671 of its 932 clips; the
+  rest are not played by name). The drafted Spike 3 ports carry no clip v2 lines yet: their titles say so.
+- **The screens, 64-bit** (`screen_time.screens_a64`). Godzilla's screen framework is on Fallout LE 0.82 (25
+  screens, 14 that end on their time), Pokemon LE 0.82 (12, 5) and Transformers LE (5, 1); the Star Wars titles
+  and Walking Dead have none. Read the same way as the 32-bit one, AArch64 encodings: string getters `adrp x0 /
+  add x0, x0 / ret`, float getters `fmov s0, #imm / ret` (or a word moved in), the length field from the
+  whole-function done checks `ldp s0, s1, [x0, #f] / fcmpe s1, s0 / cset w0, gt / ret` (Fallout +0xe0, Pokemon
+  +0xc8: Pokemon has more unrelated float compares than screens), the time slot from the start code that loads it
+  (`ldr x1, [x2, #0xe0]` = slot 28 on Fallout, 26 on Pokemon), compares it with the base's own getter and stores
+  `s0` there. Vtables are R_AARCH64_RELATIVE relocations (the file's words are 0). Fallout names clip / crop /
+  loop flag in slots 17 / 18 / 19; Pokemon has no crop, so its loop flag is the slot after the clip.
+- **The Video tab** reads a Spike 3 card's program (`title_reader.spike3_game_program`) for the screen-time tag,
+  and its other-bank check opens the card's encrypted games volume.
+
+Tests: tests/test_pad1323_spike3_clips_stime.py (a synthetic 64-bit program; the real Fallout / Pokemon programs
+with PAD_S3_PROGRAMS).
 
 ## The Modes tab and Try it
 

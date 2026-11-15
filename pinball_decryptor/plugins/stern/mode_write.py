@@ -1668,7 +1668,7 @@ def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, pr
             progress(k, len(got), "Putting the co-op characters on the bonus (%d of %d)..." % (k + 1, len(got)))
         made = os.path.join(folder, "%s.mp4" % name)
         who = chars["list"][i]["name"]
-        box = CP.bonus_box(transform, w, h, CP.bonus_strip(who))     # round 3: portrait bottom-left, name along the foot
+        box = CP.bonus_box(transform, w, h, CP.bonus_strip(who))     # round 4: portrait bottom-right, name on its foot
         try:
             CP.bonus_clip(src, made, box, ffmpeg, picture=pic, video=vid, size=(w, h), seconds=seconds,
                           colour=chars["list"][i].get("colour") or theme["accent"], name=who,
@@ -1683,7 +1683,7 @@ def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, pr
         result.new.append((assets + added["path"], made))
         out.append((i + 1, name))
     _coop_bank_put(result, scratch, bank_card, bank, bank_src)
-    result.lines.append("co-op characters: on their teammate's End of Ball Bonus (%s, its portrait bottom-left, its name along the foot beside it) "
+    result.lines.append("co-op characters: on their teammate's End of Ball Bonus (%s, its portrait bottom-right, its name across the picture's foot) "
                         "for %s" % (loop_name, ", ".join(chars["list"][n - 1]["name"] for n, _name in out)))
     return loop_name, out
 

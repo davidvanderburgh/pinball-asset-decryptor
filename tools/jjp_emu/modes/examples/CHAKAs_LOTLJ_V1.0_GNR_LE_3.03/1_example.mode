@@ -1,0 +1,15 @@
+# A first custom mode for CHAKAs_LOTLJ_V1.0_GNR_LE_3.03.  Every key: tools/jjp_emu/MODES.md
+name = PAD Mode
+title = PAD MODE
+start = switch_target_jam
+shots = switch_target_jam switch_orbit_left_hi switch_orbit_right_hi
+points = 1000000
+seconds = 20
+complete = 5
+complete_points = 5000000
+sound_start = se_FX_GnR_AM_AFD_Intro
+sound_shot = se_Fanfare_GnR_Amps_Jackpot
+sound_end = se_FX_GnR_GenericCrowds_DifferentLengthCheers_3sec
+lamps = lp_target_jam
+lamp_color = ff2000
+lamp_blink = 4

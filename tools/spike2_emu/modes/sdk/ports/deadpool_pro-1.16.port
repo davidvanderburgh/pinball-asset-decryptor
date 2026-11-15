@@ -628,5 +628,9 @@ site  coop_icon_draw         0x002e3c88 0xebfffdf3 0xe1560004
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 value coop_ball_msg          1255
 
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x003420dc 0xe92d47f0 0xe30a4591
+site  coop_lobby_add         0x00342204 0xebfffea3 0xe2506000
+
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x0036b530 0xe92d43f0 0xe2505000

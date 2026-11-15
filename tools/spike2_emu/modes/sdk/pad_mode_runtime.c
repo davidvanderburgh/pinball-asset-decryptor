@@ -49,6 +49,9 @@ extern void *malloc(__SIZE_TYPE__);
 typedef unsigned pm_str;
 #define PM_STR(s) ((void *)&(s))
 #endif
+/* PAD-1284: the 64-bit program has no string constructor - the runtime builds its strings (std_string), so a
+ * feature that needs a std::string asks for a site that is there instead (PAD-1323: the clip variants' too) */
+#define PM_STRING_SITE (PM_A64 ? "resource_get" : "string_new")
 
 extern int   open(const char *, int, ...);
 extern long  read(int, void *, __SIZE_TYPE__);
@@ -21085,6 +21088,83 @@ static void ci_start_poll(int formed)
         coop_teammates());
 }
 
+/* PAD-1316 (DoomWalrus666, Godzilla Pro 1.16, CO-OP PLAY from the start menu with two players logged in to Insider
+ * Connected: "a 2nd start button press to add player 3 doesn't show until after action button"): a game begun from
+ * the Insider lobby is handed the lobby's size (`site coop_start_game`, the framework's game start - its fifth word,
+ * on the stack), starts the game, runs ball 1's start - the serve, which the intro and the character pick hold - and
+ * only once that returns adds lobby players 2..n, a call each of the Start button's own add (`site coop_lobby_add`,
+ * the call in its loop). So while ball 1 waited the lobby's players were not in the game: the panel showed the last
+ * one's box as PRESS START, a Start in the intro took that player's place and number, and Action brought one more
+ * (emulator, Pro 1.16: the add came 25 s late). The game start is wrapped to learn the lobby and the add's own
+ * words; once the hold has a co-op game, the lobby's players are added there, in the game's order before any Start
+ * of the intro, and the game's loop finds each add done (answered "added" without adding). (tests lift
+ * coop_lobby_due verbatim) */
+static struct {
+    unsigned a[4], size, armed, added, done;
+} lb;
+static unsigned (*lb_start_game)(unsigned, unsigned, unsigned, unsigned, unsigned);
+static unsigned (*lb_add_game)(unsigned, unsigned, unsigned, unsigned);
+
+static unsigned coop_lobby_due(unsigned armed, unsigned size, unsigned done, int formed)
+{
+    return armed && size > 1 && size <= 4 && !done && formed ? size - 1 : 0;
+}
+
+static unsigned coop_start_game_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0)
+{
+    unsigned ret;
+    lb.a[0] = r0; lb.a[1] = r1; lb.a[2] = r2; lb.a[3] = r3;
+    lb.size = s0 & 0xff; lb.armed = 1; lb.added = 0; lb.done = 0;
+    if (lb.size > 1) say("co-op lobby: the game begins with %u players from the Insider lobby", lb.size);
+    ret = lb_start_game(r0, r1, r2, r3, s0);
+    lb.armed = 0; lb.added = 0;
+    return ret;
+}
+
+static unsigned coop_lobby_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    if (lb.armed && lb.added) {                               /* added while ball 1 waited */
+        lb.added--;
+        return 1;
+    }
+    return lb_add_game(r0, r1, r2, r3);
+}
+
+static void coop_lobby_now(int formed)
+{
+    unsigned k, n = coop_lobby_due(lb.armed, lb.size, lb.done, formed && coop_teammates()), got;
+    if (!n || !lb_add_game) return;
+    lb.done = 1;
+    for (k = 0; k < n; k++) {
+        got = lb_add_game(lb.a[0], lb.a[1], lb.a[2], lb.a[3]);
+        if (!(got & 0xff)) break;
+        lb.added++;
+    }
+    say("co-op lobby: ball 1 waits - the lobby's %u other player%s added now (%u), not after the wait", n,
+        n == 1 ? "" : "s", lb.added);
+}
+
+static void coop_lobby_arm(void)
+{
+    unsigned at;
+    if (!site("coop_start_game") || !site("coop_lobby_add")) return;
+    if (!fn("coop_start_game") || !fn("coop_lobby_add")
+        || !(at = hook_call(fn("coop_lobby_add"), (void *)coop_lobby_add_wrap))) {
+        say("co-op lobby: the game's add of the lobby's players could not be wrapped - with Insider players in the "
+            "lobby, they join after ball 1's intro and pick");
+        return;
+    }
+    lb_add_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
+    if (!(lb_start_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned))hook_wrap(
+              fn("coop_start_game"), (void *)coop_start_game_wrap))) {
+        say("co-op lobby: the game start could not be wrapped - with Insider players in the lobby, they join after "
+            "ball 1's intro and pick");
+        lb_add_game = 0;
+        return;
+    }
+    say("co-op lobby: the Insider lobby's players join while ball 1 waits for the intro and pick");
+}
+
 static void ci_ball_hold(unsigned ball)
 {
     unsigned long t0 = pm_ms(), most, intro_end = 0;
@@ -21111,6 +21191,7 @@ static void ci_ball_hold(unsigned ball)
             else if (now - intro_end > 1500ul) { why = "no character pick"; break; }
         }
         if (!said++) say("co-op intro: ball 1's serve waits - the intro, the language and the character pick first");
+        coop_lobby_now(ci.game == chg_game_now() + 1);       /* PAD-1316: the lobby's players before any join */
         ci_start_poll(ci.game == chg_game_now() + 1);
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
     }
@@ -21156,6 +21237,7 @@ static void coop_pick_hold(void)
         if (open && pk.left && !pk.held) t0 = now;          /* a pick under way: its own time limits it */
         if (now - t0 >= most) { why = "the pick ran past its time"; break; }
         if (!said++) say("co-op: player %u's ball waits to be served until their character is picked", t);
+        coop_lobby_now(1);                                    /* PAD-1316 */
         ci_start_poll(1);
         ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
     }
@@ -21419,6 +21501,7 @@ static void coop_arm(void)
                 "back", !fb ? "not in the port" : !fb->ok ? "not this build's" : "not wrapped");
     }
     coop_panel_arm();                                         /* PAD-1043 */
+    coop_lobby_arm();                                         /* PAD-1316 */
     coop_up_arm();                                            /* PAD-1202 */
     coop_ball_find();
     if (coop_ball_msg < 0) say("co-op: the game's \"BALL %%d\" line was not found - the screen does not say whose turn it is");
@@ -23939,7 +24022,10 @@ static void clipv_line(char *s)
  * only written when it still holds the word the build read (another build of the game, or another object that
  * moved it, is left alone and said). */
 #define STIME_MAX 128
-struct stime_ent { unsigned vt, slot, old, ms, calls; const char *clip; };
+/* PAD-1323: the vtable, its slot and the word in it are the program's link-time addresses (screen_time.py reads
+ * them off the file); a Spike 3 program is a PIE, so each is moved by its load address (game_base, 0 on Spike 2),
+ * and the slot is a pointer: 8 bytes there, 4 on Spike 2 */
+struct stime_ent { pm_addr vt, slot, old; unsigned ms, calls; const char *clip; };
 static struct stime_ent stime[STIME_MAX];
 static unsigned n_stime, n_stime_on;
 
@@ -23950,18 +24036,23 @@ static void stime_line(char **f, unsigned n)
     int ok1, ok2, ok3, ok4;
     if (n < 6 || n_stime >= STIME_MAX) return;
     e = &stime[n_stime];
-    p = f[1]; e->vt = (unsigned)number(&p, &ok1);
-    p = f[2]; e->slot = (unsigned)number(&p, &ok2);
-    p = f[3]; e->old = (unsigned)number(&p, &ok3);
+    p = f[1]; e->vt = (pm_addr)number(&p, &ok1);
+    p = f[2]; e->slot = (pm_addr)number(&p, &ok2);
+    p = f[3]; e->old = (pm_addr)number(&p, &ok3);
     p = f[4]; e->ms = (unsigned)number(&p, &ok4);
     e->clip = f[5];
-    if (ok1 && ok2 && ok3 && ok4 && e->vt && e->slot && e->ms) n_stime++;
+    if (!(ok1 && ok2 && ok3 && ok4 && e->vt && e->slot && e->ms)) return;
+    e->vt += (pm_addr)game_base;
+    e->slot += (pm_addr)game_base;
+    e->old += (pm_addr)game_base;
+    n_stime++;
 }
 
 /* the screen's own virtual, in its place: the clip's length, in seconds (a float in s0: -mfloat-abi=hard) */
 static float stime_get(void *self)
 {
-    unsigned vt = self ? *(unsigned *)self : 0, i;
+    pm_addr vt = self ? *(const pm_addr *)self : 0;
+    unsigned i;
     for (i = 0; i < n_stime; i++)
         if (stime[i].vt == vt && stime[i].calls != ~0u) {
             if (stime[i].calls++ < 8)
@@ -23976,15 +24067,16 @@ static void stime_arm(void)
 {
     unsigned i;
     for (i = 0; i < n_stime; i++) {
-        unsigned *w = (unsigned *)(unsigned long)stime[i].slot;
-        if (!stime[i].slot || stime[i].slot & 3 || *w != stime[i].old) {
-            say("screen time: %s left as the game has it - its slot 0x%08x holds 0x%08x, not 0x%08x", stime[i].clip,
-                stime[i].slot, stime[i].slot && !(stime[i].slot & 3) ? *w : 0, stime[i].old);
+        pm_addr *w = (pm_addr *)(unsigned long)stime[i].slot;
+        int odd = !stime[i].slot || (stime[i].slot & (sizeof(pm_addr) - 1));
+        if (odd || *w != stime[i].old) {
+            say("screen time: %s left as the game has it - its slot 0x%08" PMA " holds 0x%08" PMA ", not 0x%08" PMA,
+                stime[i].clip, stime[i].slot, odd ? (pm_addr)0 : *w, stime[i].old);
             stime[i].calls = ~0u;
             continue;
         }
-        mprotect((void *)(unsigned long)(stime[i].slot & ~0xfffu), 0x1000, 7);
-        *w = (unsigned)(unsigned long)stime_get;
+        mprotect((void *)(unsigned long)(stime[i].slot & ~(pm_addr)0xfff), 0x1000, 7);
+        *w = (pm_addr)(unsigned long)stime_get;
         n_stime_on++;
     }
     if (n_stime)
@@ -24068,11 +24160,11 @@ static unsigned clipv_choose(struct clipv *v, void *surface)
 #define CLIPV_CENSUS_MAX 400
 static int clipv_census;
 static unsigned clipv_census_n;
-static void clipv_heard(const char *name, const char *where, unsigned surface)
+static void clipv_heard(const char *name, const char *where, pm_addr surface)
 {
     if (!clipv_census || clipv_census_n >= CLIPV_CENSUS_MAX || !name) return;
     clipv_census_n++;
-    say("clip census: \"%.96s\" asked for (%s 0x%08x)", name, where, surface);
+    say("clip census: \"%.96s\" asked for (%s 0x%08" PMA ")", name, where, surface);
 }
 
 /* clip_play(name, loop, crop): the name in r0 */
@@ -24084,7 +24176,7 @@ static void on_clipv_play(pm_reg *r)
     if (v && v->scene) v = 0;                 /* an sclip line: clip_play plays on the one bank, not its scene */
     if (!v) { clipv_now = 0; return; }
     k = clipv_choose(v, ((void *(*)(void))(unsigned long)fn("video_surface"))());
-    if (k) r[0] = (unsigned)(unsigned long)v->name[k];
+    if (k) r[0] = (pm_reg)(unsigned long)v->name[k];
 }
 
 /* PAD-723: the VideoSurface of a bank scene named by id (an sclip line's), or 0 while that scene is not loaded.
@@ -24111,7 +24203,9 @@ static void *clipv_scene_surface(const char *id)
  * may have a clip of the same name, and none of ours) - the port's video_bank's, or an sclip line's scene's */
 static void on_clipv_set_video(pm_reg *r)
 {
-    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    /* PAD-1323: the name's first word is its characters' address - the COW string on Spike 2, the C++11 string's
+     * _M_p on Spike 3: a pm_addr, never 4 bytes; and a surface is compared at its full width */
+    const pm_addr *s = (const pm_addr *)(unsigned long)r[1];
     struct clipv *v;
     void *bank;
     unsigned k;
@@ -24122,13 +24216,14 @@ static void on_clipv_set_video(pm_reg *r)
     bank = v && v->scene ? clipv_scene_surface(v->scene) : clip2_surface();
     clipv_in = 0;
     if (v && v->scene && v->only && !bank) bank = (void *)(unsigned long)r[0];   /* not looked up: the name says it */
-    clipv_heard((const char *)(unsigned long)s[0], bank && (unsigned)(unsigned long)bank == r[0] ? "the bank's surface"
-                : "another surface", r[0]);
-    if (clipv_census && v && v->scene && (unsigned)(unsigned long)bank != r[0] && clipv_census_n < CLIPV_CENSUS_MAX) {
+    clipv_heard((const char *)(unsigned long)s[0], bank && (pm_reg)(unsigned long)bank == r[0] ? "the bank's surface"
+                : "another surface", (pm_addr)r[0]);
+    if (clipv_census && v && v->scene && (pm_reg)(unsigned long)bank != r[0] && clipv_census_n < CLIPV_CENSUS_MAX) {
         clipv_census_n++;
-        say("clip census: \"%.96s\" is %s's, whose VideoSurface is 0x%08x", v->name[0], v->scene, (unsigned)(unsigned long)bank);
+        say("clip census: \"%.96s\" is %s's, whose VideoSurface is 0x%08" PMA, v->name[0], v->scene,
+            (pm_addr)(unsigned long)bank);
     }
-    if (!v || !bank || (unsigned)(unsigned long)bank != r[0]) return;
+    if (!v || !bank || (pm_reg)(unsigned long)bank != r[0]) return;
     k = clipv_choose(v, bank);
     if (!k) return;
     if (!v->str[k]) v->str[k] = std_string(v->name[k]);
@@ -24138,13 +24233,13 @@ static void on_clipv_set_video(pm_reg *r)
 /* PAD-723: the clip layer (Deadpool): layer_video(obj, &name, loop), on the video layer's own video object only */
 static void on_clipv_layer(pm_reg *r)
 {
-    const unsigned *s = (const unsigned *)(unsigned long)r[1];
+    const pm_addr *s = (const pm_addr *)(unsigned long)r[1];          /* PAD-1323: as on_clipv_set_video */
     struct clipv *v;
     unsigned k;
     if (!s) return;
     v = clipv_find((const char *)(unsigned long)s[0]);
-    clipv_heard((const char *)(unsigned long)s[0], "the video layer", r[0]);
-    if (!v || v->scene || (unsigned)(unsigned long)clip_layer_video() != r[0]) return;
+    clipv_heard((const char *)(unsigned long)s[0], "the video layer", (pm_addr)r[0]);
+    if (!v || v->scene || (pm_reg)(unsigned long)clip_layer_video() != r[0]) return;
     if (v == clipv_now && v->last < v->n && site("layer_playing")
         && ((int (*)(void *))(unsigned long)fn("layer_playing"))((void *)(unsigned long)r[0]))
         k = v->last;                          /* asked again while it plays: the same pick */
@@ -24159,7 +24254,7 @@ static void on_clipv_layer(pm_reg *r)
 static void clipv_arm(void)
 {
     static const char *const v1_s[] = { "clip_play", "video_surface", "surface_state", 0 };
-    static const char *const v2_s[] = { "surface_find", "surface_set_video", "surface_state", "string_new",
+    static const char *const v2_s[] = { "surface_find", "surface_set_video", "surface_state", PM_STRING_SITE,
                                         "resource_get", "dynamic_cast", 0 };
     static const char *const v2_d[] = { "resource_manager", "typeinfo_resource", "typeinfo_scene_player", 0 };
     static const char *const v2_v[] = { "scene_player_scene", 0 };
@@ -24180,7 +24275,7 @@ static void clipv_arm(void)
                && (sv_clipv = 1, sv_hook())) {
         say("clip variants: %u clip(s) play one of several at random (surface_set_video 0x%08" PMA ", the bank's "
             "surface only)", n_clipv, fn("surface_set_video"));
-    } else if (site("layer_video") && data("video_layer") && site("string_new")
+    } else if (site("layer_video") && data("video_layer") && site(PM_STRING_SITE)
                && hook(fn("layer_video"), on_clipv_layer)) {
         say("clip variants: %u clip(s) play one of several at random (layer_video 0x%08" PMA ", the video layer only)",
             n_clipv, fn("layer_video"));
@@ -26497,8 +26592,6 @@ static void pad_mode_start(void)
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };
         static const char *const light_s[] = { "light_run", "lamp_group", "show_priority", 0 };
         static const char *const light_d[] = { "event_head", "event_current", 0 };
-        /* PAD-1284: the 64-bit program has no string constructor - the runtime builds its strings (std_string) */
-#define PM_STRING_SITE (PM_A64 ? "resource_get" : "string_new")
         static const char *const screen_s[] = { PM_STRING_SITE, "resource_get", "dynamic_cast",
                                                 "find_node", "find_text", "set_text", 0 };
         static const char *const screen_d[] = { "resource_manager", "typeinfo_resource",

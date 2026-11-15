@@ -7,10 +7,18 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/padpath.sh"
-mountpoint -q "$JJP_JAIL" || { echo "buildmods.sh: jail not mounted; run jail.sh" >&2; exit 3; }
+# JJP_MODS_LIBDIR=<dir with libc.so.6 [libpthread.so.0 libdl.so.2]>: link against
+# those instead of the mounted title's.  The library that goes on every title's
+# ISO is linked against an image glibc (every JJP image in the library has 2.34, MODES.md "Titles"); a newer one would need the OLDEST image: symbols
+# keep their old versions on a newer glibc, never the other way round.
+if [ -n "${JJP_MODS_LIBDIR:-}" ]; then
+    CHROOT_LIB=$JJP_MODS_LIBDIR
+else
+    mountpoint -q "$JJP_JAIL" || { echo "buildmods.sh: jail not mounted; run jail.sh (or set JJP_MODS_LIBDIR)" >&2; exit 3; }
+fi
 OUT=${JJP_MODS_SO:-/var/tmp/jjpmodes.so}
 OBJ=/var/tmp/jjpmodes.o
-CHROOT_LIB="$JJP_JAIL/lib/x86_64-linux-gnu"
+CHROOT_LIB=${CHROOT_LIB:-"$JJP_JAIL/lib/x86_64-linux-gnu"}
 # A running game maps the copy run_game.sh put in the jail, never $OUT, so a
 # rebuild here cannot SIGBUS it.  -std=gnu11 keeps glibc 2.38+ headers from
 # redirecting strtol to __isoc23_strtol, which the image's glibc lacks.
@@ -23,4 +31,9 @@ done
 gcc -shared -nostdlib -o "$OUT" "$OBJ" $LIBS -lgcc || exit 1
 BADVER=$(objdump -T "$OUT" 2>/dev/null | grep -oE 'GLIBC_2\.3[5-9]|GLIBC_2\.[4-9][0-9]' | sort -u)
 [ -z "$BADVER" ] || { echo "FAIL: needs glibc newer than the image's: $BADVER" >&2; exit 5; }
+# glibc 2.38+ headers route strtol & co to __isoc23_* (unversioned when linked
+# against the image's libc, so the check above misses them): the game then
+# dies at load with "undefined symbol: __isoc23_strtol".
+C23=$(nm -D --undefined-only "$OUT" 2>/dev/null | grep -o '__isoc23_[a-z]*' | sort -u)
+[ -z "$C23" ] || { echo "FAIL: imports the image's glibc lacks: $C23" >&2; exit 5; }
 echo "built $OUT ($(stat -c%s "$OUT") bytes)"

@@ -554,6 +554,10 @@ site  coop_icon_draw         0x002f5e94 0xebfffdf3 0xe1560004
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 data  message_table          0x005bf178
 value coop_ball_msg          1255
+
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x0023c3c4 0xe92d47f0 0xe3014478
+site  coop_lobby_add         0x0023c4ec 0xebfffea3 0xe2506000
 # ---- PAD-1022: inactivity pauses the game's timers (pad_mode_runtime.c "inactivity pauses the game's timers"). The
 # game shows ALLOW INACTIVITY TO PAUSE TIMERS (AD_INACTIVE_TIMER, id 175) and never reads it. Its missions' clocks are
 # their songs: the song tracker (0x000fb758) writes where each song is into song_positions, by player, and the clock is

@@ -1,0 +1,15 @@
+# A first custom mode for Wonka-v03.03.  Every key: tools/jjp_emu/MODES.md
+name = PAD Mode
+title = PAD MODE
+start = switch_target_tv
+shots = switch_target_tv switch_ramp_center_made switch_ramp_left_made
+points = 1000000
+seconds = 20
+complete = 5
+complete_points = 5000000
+sound_start = se_Fanfare_GobMB_Intro
+sound_shot = se_Fanfare_Jackpot
+sound_end = se_Fanfare_wonka_Pure_Imagination_Mode_SummaryTotal
+lamps = lp_gi_tv
+lamp_color = ff2000
+lamp_blink = 4

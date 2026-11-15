@@ -711,7 +711,12 @@ stand-in), `select_sh_test.sh --reboot`, `padselect_s3_test.sh`, mkmulticard sel
   Proven on the real Guns N' Roses 3.03 rungame.sh in a private overlay of the image, with a
   stand-in game exiting 254 and a stand-in `reboot`: stock restarted the game 13,217 times in
   6 s and never rebooted; patched, each boot went menu, game, 254, reboot, and the next boot
-  showed the menu again.
+  showed the menu again.  And on the real game, 2026-11-15, in the JJP rig with the Sentinel
+  key (hidden, muted): from attract, Guns N' Roses 3.03 exited 254 within a second of an Escape
+  press, in two runs (a 500 ms hold, then a single 150 ms press on a fresh game).  An instant XTEST tap (`xdotool key`, down and up in
+  microseconds) is not seen; a human press is.  Rig catch: Sentinel calls any `DISPLAY` above
+  `:1` a remote session and stops with "Terminal services detected (H0027)", so a hidden JJP
+  run needs its Xephyr on `:1` (`:0` is WSLg), not a high display number.
 
 Proven on the real games in each rig: Dune (BoF), Looney Tunes (Warden), Halloween (Pinotaur),
 Rick and Morty and Alice Cooper (P-ROC): a 2 s press did nothing, a 6.5 s hold asked for the

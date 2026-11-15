@@ -151,6 +151,26 @@ def test_maintenance_reboots_tell_the_hook_first(mj):
     assert "--maintenance-reboot" in mj.MAINT_CALL and mj.MAINT_CALL.startswith("[ -x ")
 
 
+#: Guns N' Roses 3.03's own rungame.sh case for exit 254 (read off the image, 2026-11-14)
+RUNGAME_ESC = RUNGAME_CASES.replace("  esac\n", "   254) # pressed escape\n        ;;\n"
+                                    "     *) # unexpected exit\n        ;;\n  esac\n")
+
+
+def test_escape_restarts_into_the_menu(mj):
+    """PAD-1309: the game exits 254 on Escape and stock rungame.sh starts it again; a
+    multi-boot rungame.sh restarts the machine into the menu from that case instead,
+    idempotently, and strip_hook gives the stock text back."""
+    hooked = mj.hook_rungame(RUNGAME_ESC)
+    lines = hooked.split("\n")
+    i = lines.index("   254) # pressed escape")
+    assert lines[i + 1].strip() == mj.ESC_CALL and lines[i + 2].strip() == ";;"
+    assert hooked.count(mj.ESC_CALL) == 1
+    assert mj.hook_rungame(hooked) == hooked
+    assert mj.strip_hook(hooked) == RUNGAME_ESC
+    assert mj.mark_escape_menu(RUNGAME) == RUNGAME                    # no such case: untouched
+    assert "--menu-reboot" in mj.ESC_CALL and mj.ESC_CALL.startswith("[ -x ")
+
+
 def test_hook_line_is_executed_not_sourced(mj):
     # an `exit` in a sourced file would take rungame.sh down and loop jjp.service (item 115)
     assert mj.HOOK_LINES[-1] == "[ -x $JJPEDIR/scripts/padselect.sh ] && $JJPEDIR/scripts/padselect.sh"

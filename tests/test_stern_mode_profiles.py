@@ -294,6 +294,7 @@ def test_clip_v2_needs_are_what_the_runtime_checks():
 
     def names(var):
         body = re.search(r"%s\[\] = \{(.*?)\};" % var, src, re.S).group(1)
+        body = body.replace("PM_STRING_SITE", '"string_new"')     # PAD-1284: Spike 2's; resource_get on 64-bit
         return tuple(re.findall(r'"([a-z_0-9]+)"', body))
     assert MP.CLIP_V2_NEEDS == (names("clip2_s"), names("clip2_d"), names("clip2_v"))
     assert MP.CLIP_LAYER_NEEDS == (names("clip3_s"), names("clip3_d"), names("clip3_v"))

@@ -2256,6 +2256,10 @@ TITLE_SCENES = {
     "munsters_pro-1.28": dict(screen_proven=True, hud="056ab46ff95f247af8217f23eae382df", bank="056ab46ff95f247af8217f23eae382df", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen and clip seen on the glass (magenta 87% clip, 6.5% screen, 0.0% before)
     "rush_le-1.19": dict(screen_proven=True, hud="85f8f187e7bffe0d434076d406d7366c", bank="85f8f187e7bffe0d434076d406d7366c", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass over the song video (magenta 73%) in a Video grafted into the HUD
     "rush_pro-1.19": dict(screen_proven=True, hud="4509258cd7d67da57a14d337ae421721", bank="4509258cd7d67da57a14d337ae421721", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 3) (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass over the song video (magenta 73%) in a Video grafted into the HUD
+    # PAD-1284: the Spike 3 build. Its video bank is the Spike 2 build's file; its HUD differs from it in 3 bytes of
+    # one texture block (scene_write.PROFILES carries it as its own)
+    "star_wars_elg-1.10/spike3": dict(hud="be374b87996e190f23897bd33dffbf23", screen_proven=True,
+                                      bank="895f74e53622cf5acfa55a1df89a8fc8", clip_proven=True),
     "star_wars_le-1.31": dict(screen_proven=True, hud="9183de0da4e6ed603f16064ec7a8493b", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (stock card, hidden, muted; the ball-start hero / path choice confirmed with the Action Button first): our screen and clip seen on the glass (magenta 44% clip, 45% screen, 0.0% before)
     "star_wars_pro-1.31": dict(screen_proven=True, hud="101c344663e5acdcf0e9e5d42ef0f2ae", bank="8d984a6a6e50a1d50241c80c0edab0b5", clip_proven=True),   # PAD-420 2026-10-08 media proof (round 4: two playfield switches first, its ball-start path/hero choice off the glass) (stock card, hidden, muted): our screen and clip seen on the glass (magenta 44% clip, 45.1% screen, 0.0% before)
     "stranger_things-1.13": dict(screen_proven=True, hud="e3bb429535838471027451e9f6f86950", bank="e3bb429535838471027451e9f6f86950", clip_proven=True),   # PAD-420 2026-10-07 media proof (stock card, hidden, muted): our screen seen on the glass (magenta 6.5% screen, 0.0% before); the clip not yet; PAD-420 2026-10-08 media proof (round 7, no census): the clip seen on the glass (magenta 75%) in a Video grafted into the HUD - its HUD draws no video bank in play
@@ -2537,10 +2541,13 @@ def profile_from_port(path):
     shots, switch_shots = _shots_with_switches(port)
     if not shots:
         raise ModeProjectError("%s names no shots" % base)
+    # PAD-1284: the 64-bit runtime builds its std::strings itself (the program's are the C++11 ABI and it
+    # imports no constructor), so a Spike 3 port's screens and clips need no string_new site
+    have = set(sites) | ({"string_new"} if arch == "a64" else set())
     runtime = tuple(cap for cap, (s, d, v) in RUNTIME_NEEDS.items()
-                    if all(n in sites for n in s) and all(data.get(n) for n in d)
+                    if all(n in have for n in s) and all(data.get(n) for n in d)
                     and all(n in values for n in v))
-    if "clips" not in runtime and (_clip_layer(sites, data, values) or _clip_v2(sites, data, values, port["scene"])):
+    if "clips" not in runtime and (_clip_layer(have, data, values) or _clip_v2(have, data, values, port["scene"])):
         runtime = tuple(c for c in RUNTIME_NEEDS if c in runtime or c == "clips")
     label = title_label(game, version) + (SPIKE3_LABEL if arch == "a64" else "")
     callouts, scenes = port["callout"], port["scene"]

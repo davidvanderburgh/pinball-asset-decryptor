@@ -512,6 +512,41 @@ def _sidx_refresh(vol, reader, card_path, node, staged, log):
     return True
 
 
+def _sidx_new_files(reader, jobs, work, log):
+    """PAD-1284: the files of *jobs* (``[(card rel, source)]``) the card's ``.sidx`` manifest has
+    no record of - a mode's clip, a new file on the card - and the manifest with a record of
+    each appended (:func:`.mode_write.compose_manifest`, as Spike 2's mode Write does: a file
+    the manifest does not list fails Stern's SD validation), staged in *work* as a whole-file
+    job. Returns ``(new rels, job or None)``; ``([], None)`` when every file has a record, or
+    the card has no manifest this app can read (the existing refresh says so)."""
+    from . import mode_write as MW, sidx
+    log = log or (lambda *a, **k: None)
+    if not jobs:
+        return [], None
+    sidx_path, sidx_node = sidx.find_sidx(reader)
+    if sidx_node is None:
+        return [], None
+    stock = bytes(reader.read_file_bytes(sidx_node))
+    recs, _crc, _fmt = sidx.parse_records(stock)
+    if not recs:
+        return [], None
+    new = [(rel.lstrip("/"), src) for rel, src in jobs if rel.lstrip("/") not in recs]
+    if not new:
+        return [], None
+    try:
+        man = MW.compose_manifest(stock, new=new)
+    except MW.ModeWriteError as e:
+        raise PipelineError("Write card", "the SD-validation manifest could not take the new "
+                                          "file(s): %s" % e) from None
+    staged = os.path.join(work, "sidx", os.path.basename(sidx_path))
+    os.makedirs(os.path.dirname(staged), exist_ok=True)
+    with open(staged, "wb") as f:
+        f.write(man)
+    log("Added %d new file(s) to the SD-validation manifest: %s."
+        % (len(new), ", ".join(os.path.basename(r) for r, _s in new)), "info")
+    return [r for r, _s in new], (sidx_path.lstrip("/"), staged)
+
+
 def _plan_modes(assets_dir, reader, work, log):
     """PAD-1272: ``(plan, remove)`` - the project's modes for this card
     (:func:`.spike3_modes.plan`, or None), and whether the card carries an
@@ -640,9 +675,19 @@ def write_card(original_path, assets_dir, output_path, log=None,
                 if not p.staged:
                     n_rec += _sidx_refresh(out, out_reader, p.card_path,
                                            p.node, None, log)
+            # PAD-1284: a file new on the card (a mode's clip) has no record to
+            # refresh: the manifest, with one appended, goes on whole after them
+            fresh, man_job = _sidx_new_files(out_reader, jobs, work, None)
             for rel, whole in jobs:
+                if rel.lstrip("/") in fresh:
+                    continue
                 n_rec += _sidx_refresh(out, out_reader, "/" + rel.lstrip("/"),
                                        None, whole, log)
+            if man_job is not None:
+                out.flush()
+                # the in-place refreshes above are in the card's manifest: rebuilt from it
+                _fresh, man_job = _sidx_new_files(Ext4Reader(out, 0, out.size), jobs, work, log)
+                jobs.append(man_job)
             if n_rec:
                 log("Refreshed %d more SD-validation manifest record(s) for "
                     "the files written whole or in the sound containers."

@@ -738,8 +738,9 @@ class TryItMixin:
         card's /games/pad/padmode (spike3_modes.plan, from this card's own game program):
         the 64-bit runtime, preloaded into the game by s3run.sh (PAD_S3_MODE_SO), and the
         port and mode files in the rig's /dump (PAD_S3_MODE_FILES), where it looks after the
-        card's own folder. The modes run on the game's own screens and sounds here: the
-        screens and clips a title's scenes take go on with a Write."""
+        card's own folder. PAD-1296: the modes' own sounds, and PAD-1284: the scenes their
+        screens and clips rewrite (and a clip's new file), go into the rig slot's /games for
+        the run (s3run.sh games.patch)."""
         from ..plugins.stern import mode_write as MW
         from ..plugins.stern import spike3_card, spike3_modes as S3M
         from ..plugins.stern.ext4 import Ext4Reader
@@ -757,13 +758,14 @@ class TryItMixin:
         # the design's "leave out own sounds" (PAD-1296: a Spike 3 card carries them too)
         sound_ok = (False, "left out of this run") if self.get("leave_out") else (True, "")
         files = os.path.join(work, "files")
-        own = 0
+        own = shown = 0
         try:
             reader = Ext4Reader(vol, 0, vol.size)
             mplan = S3M.plan(project, reader, work, log=say, real_card=False, sound_ok=sound_ok)
             if mplan is not None and not self._tryit_cancelled():
                 # PAD-1296: the modes' own sounds go into the rig slot's image.bin (s3run.sh)
                 own = S3M.stage_try_it_sounds(reader, mplan, files)
+                shown = S3M.stage_try_it_scenes(mplan, files)        # PAD-1284
         except (MW.ModeWriteError, MP.ModeProjectError, OSError, ValueError, RuntimeError) as e:
             return self._tryit_refuse(str(e))
         finally:
@@ -782,9 +784,8 @@ class TryItMixin:
                 % (len(mplan.names), ", ".join(mplan.names)))
         if own:
             note += " Their own sounds play from the card's sound container in this run."
-        if mplan.jobs:
-            note += (" Their screens and clips are not shown in Try it on a Spike 3 card; "
-                     "a Write puts them on the card.")
+        if shown:
+            note += " Their screens and clips show from the card's scenes in this run."
         self._tryit_note(note)
         self._tryit_set("starting")
         return ["PAD_S3_MODE_SO=%s" % mplan.payload["so"], "PAD_S3_MODE_FILES=%s" % files]

@@ -165,10 +165,17 @@ LIGHT_VALUES = {"lamp_slot_size", "lamp_slot_level", "lamp_slot_alpha", "lamp_sl
                 "proc_exit_hooks", "proc_exit_slots", "show_proc"}
 
 
+# PAD-1284: a mode's screen, its words and its clip
+SCENE_SITES = {"dynamic_cast", "resource_get", "find_node", "find_text", "set_text", "surface_find",
+               "surface_set_video", "surface_play", "surface_stop", "surface_state", "surface_position",
+               "surface_duration"}
+SCENE_VALUES = {"scene_player_scene", "node_visible_vfn", "surface_playing"}
+
+
 def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     sites = {t[1]: t for t in _lines("site")}
     assert set(sites) == {"tick", "hook_dispatch", "score_add", "switch_hit", "switch_hit2",
-                          "agent_header", "agent_begin"} | SOUND_SITES | LIGHT_SITES
+                          "agent_header", "agent_begin"} | SOUND_SITES | LIGHT_SITES | SCENE_SITES
     for t in sites.values():
         t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)
         assert len(t) == 5 and all(re.fullmatch(r"0x[0-9a-f]{8}", x) for x in t[2:])
@@ -180,9 +187,11 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                     "mode_mask": "0x0079206c", "sound_channels": "0x00733340", "sound_requests": "0x006fd360",
                     "sound_request_count": "0x005a38c8",                         # the sound ones: PAD-1282
                     "event_head": "0x007493d8", "event_current": "0x007493e0",   # the lamp layer's: PAD-1283
-                    "lamp_layers": "0x00735e68", "light_count": "0x0073ec88"}
+                    "lamp_layers": "0x00735e68", "light_count": "0x0073ec88",
+                    "resource_manager": "0x00712bf8", "typeinfo_resource": "0x0068b850",  # the scene lookup's: PAD-1284
+                    "typeinfo_scene_player": "0x0068fb48"}
     values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
-              and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_")}
+              and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES}
     assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34"}
 
 

@@ -141,6 +141,21 @@ GPATCH=${PAD_S3_MODE_FILES:+$PAD_S3_MODE_FILES/games.patch}
 if [ -n "${PAD_S3_MODE_SO:-}" ] && [ -n "$GPATCH" ] && [ -f "$GPATCH/patches" ]; then
     while IFS='|' read -r rel cut head tail; do
         case "$rel" in ""|/*|*..*) continue ;; esac
+        # PAD-1284: "<path>|whole|<file>|": a scene the modes' screens and clips rewrote, or a new file
+        # (a mode's clip), put in whole - and taken away at the next run's start like a patch
+        if [ "$cut" = whole ]; then
+            case "$head" in ""|/*|*..*) continue ;; esac
+            dst=$SD/games.up/$rel
+            mkdir -p "$(dirname "$dst")"
+            if cp "$GPATCH/$head" "$dst"; then
+                echo "$rel" >> "$SD/games.patched"
+                echo "[s3run] /games/$rel: the modes' screens and clips put in ($(stat -c %s "$dst") bytes)"
+            else
+                rm -f "$dst"
+                echo "[s3run] /games/$rel: the modes' screens and clips could NOT be put in; the card's own file runs" >&2
+            fi
+            continue
+        fi
         case "$cut" in ""|*[!0-9]*) continue ;; esac
         dst=$SD/games.up/$rel
         mkdir -p "$(dirname "$dst")"

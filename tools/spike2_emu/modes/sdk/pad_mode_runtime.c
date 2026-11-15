@@ -36,6 +36,20 @@ typedef unsigned pm_reg;
 #define PMU "u"
 #endif
 
+/* PAD-1284: a std::string the runtime hands the game. Spike 2's libstdc++ is the COW ABI: a string is one pointer,
+ * made by the game's own constructor (`site string_new`), and a call takes the address of that word. The 64-bit
+ * program's is the C++11 ABI - 32 bytes {data, length, local buffer or capacity} - and it imports no constructor
+ * (it builds its strings inline), so on Spike 3 the runtime builds the object itself (std_string) and a pm_str is
+ * its address. PM_STR(s) is what a call takes: `&s` on Spike 2, as it always was (its object is unchanged). */
+#if PM_A64
+typedef pm_addr pm_str;
+#define PM_STR(s) ((void *)(s))
+extern void *malloc(__SIZE_TYPE__);
+#else
+typedef unsigned pm_str;
+#define PM_STR(s) ((void *)&(s))
+#endif
+
 extern int   open(const char *, int, ...);
 extern long  read(int, void *, __SIZE_TYPE__);
 extern long  write(int, const void *, __SIZE_TYPE__);
@@ -3261,17 +3275,52 @@ const char *pm_scene_id(const char *role)
     return 0;
 }
 
+#if PM_A64
+/* PAD-1284: a C++11 std::string of `s` (see pm_str): the words in a malloc'd copy - never the local buffer, so the
+ * object stays a valid string wherever it is copied - with capacity = length. Every game call that takes one takes
+ * `const std::string &` and copies it (resource_get, the node finders, set_text, surface_set_video: read in Star Wars
+ * ELG 1.10's own code), so nothing of the game's frees ours; like Spike 2's, they are leaked on purpose. */
+static pm_str std_string(const char *s)
+{
+    unsigned long n = 0, i;
+    unsigned long *o;
+    char *p;
+    while (s[n]) n++;
+    o = (unsigned long *)malloc(32);
+    p = (char *)malloc(n + 1);
+    if (!o || !p) return 0;
+    for (i = 0; i <= n; i++) p[i] = s[i];
+    o[0] = (unsigned long)p;                  /* _M_p */
+    o[1] = n;                                 /* _M_string_length */
+    o[2] = n;                                 /* _M_allocated_capacity */
+    o[3] = 0;
+    return (pm_str)o;
+}
+
+/* PAD-1284: a node finder of the 64-bit program (find_node, find_text, surface_find) returns its
+ * std::shared_ptr<Node> through x8 (AAPCS64: a result that is not trivially copyable goes to memory the caller
+ * names in x8), where Spike 2's takes that memory as its first argument. C returns a struct of more than 16 bytes
+ * the same way, so the call is typed to return one; the finder writes the node and its control block. */
+struct pm_found { pm_addr node, ctrl, pad; };
+
+static pm_addr find_x8(pm_addr finder, void *root, pm_str name)
+{
+    struct pm_found r = ((struct pm_found (*)(void *, void *))(unsigned long)finder)(root, PM_STR(name));
+    return r.node;
+}
+#else
 static unsigned std_string(const char *s)
 {
     unsigned str = 0, alloc = 0;
     ((void (*)(unsigned *, const char *, unsigned *))(unsigned long)fn("string_new"))(&str, s, &alloc);
     return str;
 }
+#endif
 
 static void *scene(const char *which)
 {
     const char *id = pm_scene_id(which);
-    unsigned str;
+    pm_str str;
     void *res, *player, *manager;
     long at = pm_port_value("scene_player_scene", 0);
     if (!id) id = which;
@@ -3279,10 +3328,10 @@ static void *scene(const char *which)
     manager = *(void **)(unsigned long)data("resource_manager");
     if (!manager) return 0;                     /* the game has not made it yet */
     str = std_string(id);
-    res = ((void *(*)(void *, unsigned *, unsigned))(unsigned long)fn("resource_get"))
-          (manager, &str, 0u);
+    res = ((void *(*)(void *, void *, unsigned))(unsigned long)fn("resource_get"))
+          (manager, PM_STR(str), 0u);
     if (!res) return 0;
-    player = ((void *(*)(void *, unsigned, unsigned, int))(unsigned long)fn("dynamic_cast"))
+    player = ((void *(*)(void *, pm_addr, pm_addr, int))(unsigned long)fn("dynamic_cast"))
              (res, data("typeinfo_resource"), data("typeinfo_scene_player"), 0);
     return player ? *(void **)((char *)player + at) : 0;
 }
@@ -3291,29 +3340,37 @@ static void *scene(const char *which)
 static void *scene_player_of(const char *which)
 {
     const char *id = pm_scene_id(which);
-    unsigned str;
+    pm_str str;
     void *res, *manager;
     if (!id) id = which;
     if (!id || !*id) return 0;
     manager = *(void **)(unsigned long)data("resource_manager");
     if (!manager) return 0;
     str = std_string(id);
-    res = ((void *(*)(void *, unsigned *, unsigned))(unsigned long)fn("resource_get"))(manager, &str, 0u);
+    res = ((void *(*)(void *, void *, unsigned))(unsigned long)fn("resource_get"))(manager, PM_STR(str), 0u);
     if (!res) return 0;
-    return ((void *(*)(void *, unsigned, unsigned, int))(unsigned long)fn("dynamic_cast"))
+    return ((void *(*)(void *, pm_addr, pm_addr, int))(unsigned long)fn("dynamic_cast"))
            (res, data("typeinfo_resource"), data("typeinfo_scene_player"), 0);
 }
 
-static void *find_with(unsigned finder, const char *where, const char *path)
+static void *find_with(pm_addr finder, const char *where, const char *path)
 {
+#if PM_A64
+    pm_str str;
+#else
     unsigned str, out[2] = { 0, 0 };
+#endif
     void *sc;
     if (!(can & PM_CAN_SCREENS) || !finder || !path || !*path) return 0;
     sc = scene(where);
     if (!sc) return 0;
     str = std_string(path);
+#if PM_A64
+    return str ? (void *)find_x8(finder, sc, str) : 0;
+#else
     ((void (*)(unsigned *, void *, unsigned *))(unsigned long)finder)(out, sc, &str);
     return (void *)(unsigned long)out[0];
+#endif
 }
 
 void *pm_node(const char *where, const char *path) { return find_with(fn("find_node"), where, path); }
@@ -3323,7 +3380,8 @@ void pm_show(void *node, int on)
 {
     long slot = pm_port_value("node_visible_vfn", -1);
     if (!(can & PM_CAN_SCREENS) || !node || slot < 0) return;
-    ((void (*)(void *, unsigned))(unsigned long)(*(void ***)node)[slot / 4])(node, on ? 1u : 0u);
+    /* PAD-1284: the value is the slot's byte offset in the vtable: 4 bytes a slot on Spike 2, 8 on Spike 3 */
+    ((void (*)(void *, unsigned))(unsigned long)(*(void ***)node)[slot / (long)sizeof(void *)])(node, on ? 1u : 0u);
 }
 
 /* item 154 display: the words each text node was last given. pm_set_text writes only a CHANGE, so
@@ -3350,11 +3408,12 @@ static int text_unchanged(void *text, const char *words)
 
 void pm_set_text(void *text, const char *words)
 {
-    unsigned str;
+    pm_str str;
     if (!(can & PM_CAN_SCREENS) || !text || !words) return;
     if (text_unchanged(text, words)) return;
     str = std_string(words);
-    ((void (*)(void *, unsigned *))(unsigned long)fn("set_text"))(text, &str);
+    if (PM_A64 && !str) return;
+    ((void (*)(void *, void *))(unsigned long)fn("set_text"))(text, PM_STR(str));
 }
 
 /* ---- clips --------------------------------------------------------------------------------------
@@ -3419,7 +3478,11 @@ static void clip_layer_out(void)
 
 static void *clip2_surface(void)
 {
+#if PM_A64
+    pm_str str;
+#else
     unsigned str, out[2] = { 0, 0 };
+#endif
     void *root;
     if (site("video_surface"))                /* the game's own getter: it loads a demand_loaded bank */
         return ((void *(*)(void))(unsigned long)fn("video_surface"))();   /* (JP LE); never cached */
@@ -3427,8 +3490,12 @@ static void *clip2_surface(void)
     root = scene("video_bank");
     if (!root) return 0;
     str = std_string(pm_port_value("clip_surface_hide", 0) ? "PadMode_Clips.VideoSurface" : "VideoSurface");
+#if PM_A64
+    clip2_surf = str ? (void *)find_x8(fn("surface_find"), root, str) : 0;
+#else
     ((void (*)(unsigned *, void *, unsigned *))(unsigned long)fn("surface_find"))(out, root, &str);
     clip2_surf = (void *)(unsigned long)out[0];
+#endif
     return clip2_surf;
 }
 /* item 154 display: our own clip_play calls are marked, so the clip_play hook can tell the game's
@@ -3576,10 +3643,10 @@ static void ck_drop(const char *why)
 /* set and play `name` on the bank's surface: 0 when the bank has no such clip */
 static int clip2_start(void *surf, const char *name)
 {
-    unsigned str = std_string(name);
+    pm_str str = std_string(name);
     int ok;
     ck_ours = 1;
-    ok = ((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str);
+    ok = ((int (*)(void *, void *))(unsigned long)fn("surface_set_video"))(surf, PM_STR(str));
     if (ok) {
         ck_gl_ms = 0;                     /* PAD-725: ours on the surface, not the game's loop */
         clip2_show(1);
@@ -3848,11 +3915,11 @@ static void ck_wait_tick(void)
 int pm_game_clip(const char *name, int loop)
 {
     void *surf;
-    unsigned str;
+    pm_str str;
     int ok;
     if (!(can & PM_CAN_CLIPS) || !clip_v2 || !name || !*name || !(surf = clip2_surface())) return 0;
     str = std_string(name);
-    ok = ((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str);
+    ok = ((int (*)(void *, void *))(unsigned long)fn("surface_set_video"))(surf, PM_STR(str));
     if (ok) ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, loop ? 1 : 0, -1);
     say("clip: \"%s\" put on the bank's surface as the game's own%s, for a test%s", name, loop ? ", looped" : "",
         ok ? "" : " - the video bank has no such clip");
@@ -3880,14 +3947,14 @@ int pm_clip(const char *name)
     }
     if (clip_layer) {
         void *video = clip_layer_video();
-        unsigned str;
+        pm_str str;
         if (!video) { say("clip: the video layer has no video yet - \"%s\" not played", name); return 0; }
         if (!clip_layer_in)
             ((void (*)(unsigned, unsigned, unsigned))(unsigned long)fn("layer_add"))
                 (data("layer_stack"), data("video_layer"), (unsigned)pm_port_value("clip_layer_priority", 5));
         clip_layer_in = 1;
         str = std_string(name);
-        ((void (*)(void *, unsigned *, int))(unsigned long)fn("layer_video"))(video, &str, 0);
+        ((void (*)(void *, void *, int))(unsigned long)fn("layer_video"))(video, PM_STR(str), 0);
         clip.on = 1;
         clip.seen = 0;
         clip.started = clip.last = pm_ms();
@@ -4525,7 +4592,7 @@ static void bd2_play(void *surf)
 {
     const char *name = bd.once[0] ? bd.once : bd.loop;
     int once = name == bd.once;
-    unsigned str;
+    pm_str str;
     char was[96];
     unsigned i;
     if (!name[0]) return;
@@ -4536,7 +4603,7 @@ static void bd2_play(void *surf)
     bd.since = pm_ms();
     str = std_string(was);
     ck_ours = 1;                          /* PAD-530: ours, not a clip of the game's */
-    i = (unsigned)((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str);
+    i = (unsigned)((int (*)(void *, void *))(unsigned long)fn("surface_set_video"))(surf, PM_STR(str));
     ck_ours = 0;
     if (!i) {
         say("backdrop: the video bank has no clip \"%s\"", was);
@@ -4617,7 +4684,7 @@ static void bd2_tick(void)
 static void ck_idle_tick(void)
 {
     void *surf;
-    unsigned str;
+    pm_str str;
     static unsigned said;
     if (!ck_can || !ck_last_ours || !ck_idle[0] || clip.on || ck.lost || (bd_v2 && bd.on) || !pm_in_game()) {
         ck_idle_due = 0;
@@ -4635,7 +4702,7 @@ static void ck_idle_tick(void)
     ck_last_ours = 0;
     str = std_string(ck_idle);
     ck_ours = 1;
-    if (((int (*)(void *, unsigned *))(unsigned long)fn("surface_set_video"))(surf, &str))
+    if (((int (*)(void *, void *))(unsigned long)fn("surface_set_video"))(surf, PM_STR(str)))
         ((int (*)(void *, int, int))(unsigned long)fn("surface_play"))(surf, 1, -1);
     ck_ours = 0;
     if (said++ < 20)
@@ -4776,8 +4843,8 @@ static void sb_send(unsigned char *o)
     float r = (float)((sb.rgb >> 16) & 255u) / 255.0f, g = (float)((sb.rgb >> 8) & 255u) / 255.0f,
           b = (float)(sb.rgb & 255u) / 255.0f;
     if (text) {
-        unsigned str = std_string(sb.words);
-        ((void (*)(void *, unsigned *))(unsigned long)fn("set_text"))(text, &str);
+        pm_str str = std_string(sb.words);
+        ((void (*)(void *, void *))(unsigned long)fn("set_text"))(text, PM_STR(str));
     }
     if (bar) {
         unsigned *vt = (unsigned *)(unsigned long)*(unsigned *)bar;
@@ -14908,10 +14975,10 @@ static void ait_line(char *s)
 static void ait_play_video(const struct ait_item *it)
 {
     void *el = *ait_video_ptr;
-    unsigned str;
+    pm_str str;
     if (!el) return;
     str = std_string(it->clip);
-    ((void (*)(void *, unsigned *, int, int))(unsigned long)fn("attract_video_play"))(el, &str, 0, 1);
+    ((void (*)(void *, void *, int, int))(unsigned long)fn("attract_video_play"))(el, PM_STR(str), 0, 1);
     while (pm_ms() - ait_began < it->ms && !pm_in_game()
            && ((int (*)(void *))(unsigned long)fn("attract_video_playing"))(el)) {
         ait_beat = pm_ms();
@@ -16653,7 +16720,7 @@ static struct {
     unsigned long lang_until;            /* ... until then */
     unsigned long film_seen;             /* pm_ms() the game's intro screen was last seen up */
     void *film_hide[3];                  /* the screen's own words over the film, hidden while it is ours */
-    volatile unsigned film_root;         /* the intro screen's scene, seen as the game looks its words up */
+    volatile pm_addr film_root;          /* the intro screen's scene, seen as the game looks its words up */
     volatile int flips, go, go_down;
     unsigned music[CI_MUSIC], n_music, faded, quiet[8], n_quiet;
     unsigned long join_at;               /* PAD-1221: a Start press while ball 1 waits (`| 1`), for ci_quiet */
@@ -19533,7 +19600,7 @@ static int ci_film_up(void)
 static void ci_film_words(int hide)
 {
     int k;
-    unsigned root = ci.film_root;
+    pm_addr root = ci.film_root;
     if (!root || !(can & PM_CAN_SCREENS)) return;
     for (k = 0; k < 3; k++) {
         char key[20];
@@ -19541,9 +19608,15 @@ static void ci_film_words(int hide)
         pm_snprintf(key, sizeof key, "intro_hide_%d", k);
         if (!(path = pm_port_text(key))) continue;
         if (!ci.film_hide[k]) {
+#if PM_A64
+            pm_str str = std_string(path);
+            pm_addr out[1] = { 0 };
+            if (fn("find_node") && str) out[0] = find_x8(fn("find_node"), (void *)root, str);
+#else
             unsigned str = std_string(path), out[2] = { 0, 0 };
             /* the boxes are nodes: pm_show on a text instance (its own vtable) faulted the game (emulator) */
             if (fn("find_node")) ((void (*)(unsigned *, unsigned, unsigned *))(unsigned long)fn("find_node"))(out, root, &str);
+#endif
             ci.film_hide[k] = (void *)(unsigned long)out[0];
             say("co-op intro: the intro screen's %s %s", path, out[0] ? "found - hidden while the film is ours"
                 : "not found in its scene");
@@ -19559,14 +19632,14 @@ static void ci_find_seen(pm_reg *r)
 {
     const char *path, *want;
     unsigned i;
-    if (!r[1] || !r[2]) return;
-    path = *(const char **)(unsigned long)r[2];
+    if (!r[1 - PM_A64] || !r[2 - PM_A64]) return;        /* PAD-1284: 64-bit: (root, &name) in x0/x1, x8 = the result */
+    path = *(const char **)(unsigned long)r[2 - PM_A64];
     want = pm_port_text("intro_hide_0");
     if (!path || !want) return;
     for (i = 0; want[i] && want[i] != '.' && path[i] == want[i]; i++) ;
     if (want[i] && want[i] != '.') return;                    /* not the screen's first box */
-    if (ci.film_root != r[1]) {
-        ci.film_root = r[1];
+    if (ci.film_root != r[1 - PM_A64]) {
+        ci.film_root = r[1 - PM_A64];
         ci.film_hide[0] = ci.film_hide[1] = ci.film_hide[2] = 0;
     }
 }
@@ -23335,7 +23408,7 @@ struct clipv {
     const char *scene;                      /* PAD-723: the bank scene of an sclip line, 0 = the port's video_bank */
     int only;                               /* PAD-723: `*<id>`: the card's only scene with the name */
     const char *name[CLIPV_PICKS];          /* [0] the game's own name */
-    unsigned str[CLIPV_PICKS];              /* clip v2: each name as a std::string, made at first use */
+    pm_str str[CLIPV_PICKS];                /* clip v2: each name as a std::string, made at first use */
     unsigned n, last, plays;
 };
 static char clipv_raw[CLIPV_FILE_MAX + 1];
@@ -23545,12 +23618,20 @@ static void on_clipv_play(pm_reg *r)
  * Looked up at each ask, never kept: a demand-loaded bank's scene goes and comes back. */
 static void *clipv_scene_surface(const char *id)
 {
+#if PM_A64
+    pm_str str;
+#else
     unsigned str, out[2] = { 0, 0 };
+#endif
     void *root = scene(id);
     if (!root) return 0;
     str = std_string("VideoSurface");
+#if PM_A64
+    return str ? (void *)find_x8(fn("surface_find"), root, str) : 0;
+#else
     ((void (*)(unsigned *, void *, unsigned *))(unsigned long)fn("surface_find"))(out, root, &str);
     return (void *)(unsigned long)out[0];
+#endif
 }
 
 /* clip v2: surface_set_video(surface, &name), on the bank's surface only (a scene's own surface
@@ -23578,7 +23659,7 @@ static void on_clipv_set_video(pm_reg *r)
     k = clipv_choose(v, bank);
     if (!k) return;
     if (!v->str[k]) v->str[k] = std_string(v->name[k]);
-    if (v->str[k]) r[1] = (unsigned)(unsigned long)&v->str[k];
+    if (v->str[k]) r[1] = (pm_reg)(unsigned long)PM_STR(v->str[k]);
 }
 
 /* PAD-723: the clip layer (Deadpool): layer_video(obj, &name, loop), on the video layer's own video object only */
@@ -23598,7 +23679,7 @@ static void on_clipv_layer(pm_reg *r)
         k = clipv_choose(v, 0);
     if (!k) return;
     if (!v->str[k]) v->str[k] = std_string(v->name[k]);
-    if (v->str[k]) r[1] = (unsigned)(unsigned long)&v->str[k];
+    if (v->str[k]) r[1] = (pm_reg)(unsigned long)PM_STR(v->str[k]);
 }
 
 /* from the constructor, after the port gate: read clips.cfg and hook the game's ask */
@@ -24588,7 +24669,7 @@ struct jmode {
 struct jsong {
     unsigned char key[8];
     const char *clip;
-    unsigned str;                           /* the clip's name as a std::string, made at first use */
+    pm_str str;                             /* the clip's name as a std::string, made at first use */
     unsigned char weight;
     unsigned char pool;                     /* PAD-1007 */
     unsigned short same;                    /* PAD-1012: one song's copies in several pools, 0 none */
@@ -24806,7 +24887,7 @@ static void juke_set_video(pm_reg *r)
     if (!(g = juke_song(m)) || !g->clip) return;
     if (!g->str) g->str = std_string(g->clip);
     if (!g->str) return;
-    r[1] = (unsigned)(unsigned long)&g->str;
+    r[1] = (pm_reg)(unsigned long)PM_STR(g->str);
     if (juke_says < 200) {                /* PAD-1007: which intro showed which song's */
         juke_says++;
         say("jukebox: song mode %u's intro %s shows %s", m + 1, name, g->clip);
@@ -25903,7 +25984,9 @@ static void pad_mode_start(void)
         static const char *const callout_s[] = { "callout", "callout_nth", 0 };
         static const char *const light_s[] = { "light_run", "lamp_group", "show_priority", 0 };
         static const char *const light_d[] = { "event_head", "event_current", 0 };
-        static const char *const screen_s[] = { "string_new", "resource_get", "dynamic_cast",
+        /* PAD-1284: the 64-bit program has no string constructor - the runtime builds its strings (std_string) */
+#define PM_STRING_SITE (PM_A64 ? "resource_get" : "string_new")
+        static const char *const screen_s[] = { PM_STRING_SITE, "resource_get", "dynamic_cast",
                                                 "find_node", "find_text", "set_text", 0 };
         static const char *const screen_d[] = { "resource_manager", "typeinfo_resource",
                                                 "typeinfo_scene_player", 0 };
@@ -25923,11 +26006,11 @@ static void pad_mode_start(void)
         if (have_sites(light_s) && have_data(light_d) && have_values(light_v)) can |= PM_CAN_LIGHTS;
         if (have_sites(screen_s) && have_data(screen_d) && have_values(screen_v)) can |= PM_CAN_SCREENS;
         static const char *const clip2_s[] = { "surface_find", "surface_set_video", "surface_play", "surface_stop",
-                                               "surface_state", "string_new", "resource_get", "dynamic_cast", 0 };
+                                               "surface_state", PM_STRING_SITE, "resource_get", "dynamic_cast", 0 };
         static const char *const clip2_d[] = { "resource_manager", "typeinfo_resource", "typeinfo_scene_player", 0 };
         static const char *const clip2_v[] = { "surface_playing", "scene_player_scene", 0 };
         static const char *const clip3_s[] = { "layer_add", "layer_remove", "layer_video", "layer_playing",
-                                               "string_new", 0 };
+                                               PM_STRING_SITE, 0 };
         static const char *const clip3_d[] = { "layer_stack", "video_layer", 0 };
         static const char *const clip3_v[] = { "clip_layer_priority", "layer_video_at", 0 };
         if (have_sites(clip_s) && have_data(clip_d) && have_values(clip_v)) can |= PM_CAN_CLIPS;

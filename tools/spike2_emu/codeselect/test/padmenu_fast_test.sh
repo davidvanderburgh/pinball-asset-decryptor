@@ -39,11 +39,13 @@ echo "\$* rb=\$CODESELECT_REBOOT" >> "$T/calls"
 EOF
 chmod +x "$T/reboot.sh"
 fail=0
-run() {   # run NAME FILE CONTENT CHUNK WANT [ENV]
-    local name=$1 file=$2 content=$3 chunk=$4 want=$5 envarg=${6:-CODESELECT_REBOOT=touch /x}
+run() {   # run NAME FILE CONTENT CHUNK WANT [ENV...]
+    local name=$1 file=$2 content=$3 chunk=$4 want=$5
+    shift 5
+    [ $# -gt 0 ] || set -- "CODESELECT_REBOOT=touch /x"
     rm -f "$T/calls"
     printf -- "$content" > "$file"
-    env LD_PRELOAD="$SO" PADMENU_HOLD_MS=400 PADMENU_CMD="$T/reboot.sh" "$envarg" \
+    env LD_PRELOAD="$SO" PADMENU_HOLD_MS=400 PADMENU_CMD="$T/reboot.sh" "$@" \
         "$T/driver" "$file" "$chunk" 1200 2> "$T/err" || { echo "padmenu_fast_test: FAIL $name: driver"; fail=1; return; }
     sleep 0.3
     got=$( [ -f "$T/calls" ] && wc -l < "$T/calls" || echo 0)
@@ -62,5 +64,18 @@ run other     "$T/dev/ttyACM0" '-L:04\r' 64 0
 run notserial "$T/data/x" '-L:05\r' 64 0
 run rig       "$T/dev/ttyACM0" '-L:05\r' 64 0 BOFHW_DEV=/tmp/hw
 grep -q "not restarting" "$T/err" || { echo "padmenu_fast_test: FAIL rig: nothing said"; fail=1; }
+
+# SPOOKY: the Warden (BACK 94 = 0x5e) and the Pinotaur (BACK 63 = 0x3f), binary, a message at a time
+W=(CODESELECT_REBOOT="touch /x" PADMENU_PROTO=warden PADMENU_SWITCH=94)
+P=(CODESELECT_REBOOT="touch /x" PADMENU_PROTO=pinotaur PADMENU_SWITCH=63)
+run w-push      "$T/dev/WARDEN" '\x3c\x97WARDEN\x00\x3c\x01\x5e' 3 1 "${W[@]}"
+run w-reply     "$T/dev/WARDEN" '\x3c\xd4\x03\x3c\x98\x5e\x01' 64 1 "${W[@]}"
+run w-released  "$T/dev/WARDEN" '\x3c\x01\x5e\x3c\x00\x5e' 64 0 "${W[@]}"
+run w-in-config "$T/dev/WARDEN" '\x3c\xa8\x3c\x01\x5e\x00\x00' 64 0 "${W[@]}"
+run w-other     "$T/dev/WARDEN" '\x3c\x01\x5d' 64 0 "${W[@]}"
+run p-push      "$T/dev/pinheck" '\x3e\x00Pinotaur\x00\x3e\x59\xbf' 64 1 "${P[@]}"
+run p-reply     "$T/dev/pinheck" '\x3e\x58\x3f\x01' 1 1 "${P[@]}"
+run p-in-row    "$T/dev/pinheck" '\x3e\x28\x3e\x59\xbf\x3e\x59\xbf\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' 64 0 "${P[@]}"
+run p-nochange  "$T/dev/pinheck" '\x3e\x59\x7f' 64 0 "${P[@]}"
 [ $fail -eq 0 ] && echo "padmenu_fast_test: OK"
 exit $fail

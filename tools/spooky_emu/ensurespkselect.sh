@@ -31,7 +31,7 @@ BUILD=${SPK_SELECTOR_BUILD:-/var/tmp/spkselect_build}
 # a build folder another user made (a rig run as root) is not ours to write the log into
 if [ -e "$BUILD" ] && [ ! -w "$BUILD" ]; then BUILD=$BUILD.$(id -u); fi
 DEJAVU=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
-FILES="spkselect spksw padselect.sh dpprocsw padselect_proc.sh"
+FILES="spkselect spksw padselect.sh dpprocsw padselect_proc.sh padmenu.so"
 
 ok() {
     if [ ! -f "$SEL/font.ttf" ] && [ -f "$DEJAVU" ]; then
@@ -70,6 +70,7 @@ if ! make -C "$SRC" PLATFORM=spk BUILD="$BUILD" all >"$log" 2>&1; then
 fi
 install -m 755 "$BUILD/spkselect" "$SEL/spkselect.new" && mv -f "$SEL/spkselect.new" "$SEL/spkselect" \
     && install -m 755 "$BUILD/spksw" "$SEL/spksw" \
+    && install -m 755 "$BUILD/padmenu.so" "$SEL/padmenu.so" \
     && install -m 755 "$SRC/padselect_spk.sh" "$SEL/padselect.sh" \
     && install -m 755 "$BUILD/dpprocsw" "$SEL/dpprocsw" \
     && install -m 755 "$SRC/padselect_proc.sh" "$SEL/padselect_proc.sh" \

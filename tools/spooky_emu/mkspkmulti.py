@@ -76,7 +76,12 @@ SELECTOR_FILES = collections.OrderedDict([      # name in --selector-dir -> (mod
     ("spksw", (0o755, True)),
     ("padselect.sh", (0o755, True)),
     ("font.ttf", (0o644, False)),
+    # PAD-1309: padselect.sh preloads it into the game - BACK held 5 s restarts into the menu.
+    # Not required: a selector dir built before it still makes an update without it.
+    ("padmenu.so", (0o755, False)),
 ])
+#: PAD-1309: the coin door's BACK per board (spktitles.py: Warden "back" 94, Pinotaur 63)
+BACK_SWITCH = {"warden": 94, "pinotaur": 63}
 VOLUME_DEFAULT = 50
 HOST_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 SWITCHES = collections.OrderedDict()
@@ -499,7 +504,8 @@ def spk_conf(title, keys=None):
     (title=b<k> <key>), with the files in /game each game keeps its own (own=, seed=)."""
     l, r, s = title["sw"]
     lines = ["# spk.conf - the machine, for the launcher; written by mkspkmulti.py",
-             "board=%s" % title["board"], "L=%d" % l, "R=%d" % r, "S=%d" % s]
+             "board=%s" % title["board"], "L=%d" % l, "R=%d" % r, "S=%d" % s,
+             "B=%d" % BACK_SWITCH[title["board"]]]
     lines += ["root=%s %s" % kv for kv in title["roots"]]
     if keys and len(set(keys)) > 1:
         lines += ["title=b%d %s" % kv for kv in enumerate(keys)]
@@ -603,6 +609,8 @@ def _write_menu(out, a, conf, title, n, manifest, media, media_dir, removed, key
         if name == "padselect.sh":
             continue
         src = _font_src(a.selector_dir) if name == "font.ttf" else os.path.join(a.selector_dir, name)
+        if name != "font.ttf" and not SELECTOR_FILES[name][1] and not os.path.isfile(src):
+            continue                      # an optional file this selector dir lacks
         out.file(pad + name, src, mode)
     out.data(pad + "images.conf", conf.encode("utf-8"))
     out.data(pad + "builds.txt", builds_text(n).encode("utf-8"))

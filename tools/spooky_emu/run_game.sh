@@ -200,6 +200,23 @@ if [ "$GL" = d3d12 ]; then
     if [ -n "$LIBS" ]; then LIBS="$LIBS:/usr/lib/wsl/lib"; else LIBS="LD_LIBRARY_PATH=/usr/lib/wsl/lib"; fi
 fi
 
+# PAD-1309: the multi-boot launcher puts padmenu.so in front of the game (BACK held 5 s
+# restarts the machine into the menu).  A real reboot from the rig is never right, so every
+# run hands it a stand-in that leaves $SPK_RIG/tmp/padmenu.restart (/game/tmp in the run).
+# SPK_MENU_SO=<padmenu.so> with SPK_MENU_PROTO=warden|pinotaur and SPK_MENU_SWITCH=<n>
+# tries the object on any title (no launcher in the way).
+printf '#!/bin/sh\n: > /game/tmp/padmenu.restart\n' > "$SPK_RIG/padmenu_reboot"
+chmod 755 "$SPK_RIG/padmenu_reboot"
+rm -f "$SPK_RIG/tmp/padmenu.restart"
+MENU_PRE=""
+MENU_ENV="CODESELECT_REBOOT=$SPK_RIG/padmenu_reboot"
+if [ -n "${SPK_MENU_SO:-}" ] && [ -f "$SPK_MENU_SO" ]; then
+    cp -f "$SPK_MENU_SO" "$SPK_RIG/padmenu.so" && chmod 755 "$SPK_RIG/padmenu.so"
+    MENU_PRE="$SPK_RIG/padmenu.so:"
+    MENU_ENV="$MENU_ENV PADMENU_PROTO=${SPK_MENU_PROTO:-warden} PADMENU_SWITCH=${SPK_MENU_SWITCH:-94}"
+    echo "run_game.sh: holding BACK ($SPK_MENU_PROTO switch $SPK_MENU_SWITCH) 5 s asks for a restart"
+fi
+
 cat > "$SPK_RIG/ns.sh" <<EOF
 hostname pad-rig-$SPK_SLOT
 mkdir -p /game && mount --bind "$NV/game" /game || exit 1
@@ -215,7 +232,7 @@ cd /game/code/uptest || exit 1
 exec runuser -u $SPK_USER -- env -i PATH=$SPK_RIG/bin:/usr/local/bin:/usr/bin:/bin \\
     HOME=$NV/home USER=$SPK_USER LANG=C.UTF-8 DISPLAY=$DISP $AUDIO_ENV \\
     SPK_MARK=$SPK_RIG LP_NUM_THREADS=${SPK_LP_THREADS:-4} $GL_ENV \\
-    SPK_WARDEN=$TTY LD_PRELOAD=$SPK_RIG/spkshim.so $LIBS \\
+    SPK_WARDEN=$TTY LD_PRELOAD=$MENU_PRE$SPK_RIG/spkshim.so $MENU_ENV $LIBS \\
     $RUN
 EOF
 # Detached whole (setsid -f, stdin closed): a child of runuser dies with the

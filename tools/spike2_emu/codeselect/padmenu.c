@@ -70,10 +70,22 @@
  * every BOF title (Labyrinth, Dune, Winchester profiles), so this reads the
  * lines the game itself reads and times EXIT.  Lines come only on a change,
  * so the 5 s is timed by a thread of ours, started on the first press.  The
- * game runs as pinball, whose sudo needs no password: `sync; sudo -n reboot`. */
+ * game runs as pinball, whose sudo needs no password: `sync; sudo -n reboot`.
+ *
+ * SPOOKY (the same x86-64 object, `make PLATFORM=spk`): padselect_spk.sh starts
+ * the game with PADMENU_PROTO=warden|pinotaur and PADMENU_SWITCH=<its BACK>
+ * (Warden titles 94, Halloween/Ultraman 63: tools/spooky_emu/spktitles.py).
+ * Those boards speak binary on /dev/WARDEN or /dev/pinheck, every message the
+ * board sends of a known size per opcode (spkwarden.py, spkpinotaur.py, read
+ * off the games' own Warden.cs / Pinotar.cs), so the stream is followed a
+ * MESSAGE at a time and only a switch message is ever read: a byte inside a
+ * coil config or an LED row can never pass for BACK.  An opcode it does not
+ * know drops it back to looking for the next start byte.  The game runs as
+ * root or as a user with password-less sudo. */
 #if defined(PADMENU_FAST)
 #define CMD_DEFAULT     ""
-#define REBOOT_SH       "sync; exec ${CODESELECT_REBOOT:-sudo -n reboot}"
+#define REBOOT_SH       "sync; if [ \"$(id -u)\" = 0 ]; then exec ${CODESELECT_REBOOT:-reboot}; " \
+                        "else exec ${CODESELECT_REBOOT:-sudo -n reboot}; fi"
 #define BACK_SW_DEFAULT 5
 #elif defined(PADMENU_S3)
 #define CMD_DEFAULT     ""
@@ -138,8 +150,10 @@ static int is_cab_path(const char *p)
 {
 #ifdef PADMENU_FAST
     /* every USB serial port: the NET port answers among them, and only it
-     * sends -L:/L: lines (a test's own directory may come before /dev) */
-    return p && (strstr(p, "/dev/ttyACM") || strstr(p, "/dev/ttyUSB"));
+     * sends -L:/L: lines (a test's own directory may come before /dev);
+     * Spooky's boards by their udev names */
+    return p && (strstr(p, "/dev/ttyACM") || strstr(p, "/dev/ttyUSB") ||
+                 strstr(p, "/dev/WARDEN") || strstr(p, "/dev/pinheck"));
 #else
     size_t n, k = strlen(CAB_DEV);
     if (!p)
@@ -149,10 +163,14 @@ static int is_cab_path(const char *p)
 #endif
 }
 
+static void fd_reset(int fd);              /* a reader's per-fd state, afresh */
+
 static void note_open(int fd, const char *path)
 {
-    if (fd >= 0 && fd < MAX_FD)
+    if (fd >= 0 && fd < MAX_FD) {
         fd_kind[fd] = is_cab_path(path) ? 1 : 0;
+        fd_reset(fd);
+    }
 }
 
 #ifndef PADMENU_FAST
@@ -216,8 +234,10 @@ int close(int fd)
 {
     static int (*next)(int);
     if (!next && !(next = (int (*)(int))dlsym(RTLD_NEXT, "close"))) { errno = ENOSYS; return -1; }
-    if (fd >= 0 && fd < MAX_FD)
+    if (fd >= 0 && fd < MAX_FD) {
         fd_kind[fd] = 0;
+        fd_reset(fd);
+    }
     return next(fd);
 }
 
@@ -248,7 +268,7 @@ static void ask_for_reboot(void)
      * a run that did not (its shims' variables set, no stand-in) does nothing. */
     if (!(rb && *rb) && (getenv("PAD_AUDIO_OUT") || getenv("PAD_S3_SPI_IN") ||
                          getenv("PAD_GL_BRIDGE") || getenv("PAD_SW_SHM") ||
-                         getenv("BOFHW_DEV"))) {
+                         getenv("BOFHW_DEV") || getenv("SPK_WARDEN"))) {
         say("padmenu: in the emulator with no CODESELECT_REBOOT - not restarting\n");
         return;
     }
@@ -341,7 +361,7 @@ static void line_done(const char *s)
         set_back(active);
 }
 
-static void feed(int fd, const char *b, ssize_t n)
+static void feed_lines(int fd, const char *b, ssize_t n)
 {
     ssize_t k;
     for (k = 0; k < n; k++) {
@@ -357,6 +377,116 @@ static void feed(int fd, const char *b, ssize_t n)
             llen[fd] = 0;                     /* not a switch line: drop it */
         }
     }
+}
+
+/* SPOOKY'S BOARDS, a message at a time.  Per fd: what is expected next. */
+enum { PROTO_FAST, PROTO_WARDEN, PROTO_PINOTAUR };
+static int proto = PROTO_FAST;
+enum { B_START, B_OP, B_SKIP, B_TEXT, B_SW };
+static struct bstate {
+    unsigned char st, op, need, got;
+    unsigned char a[2];
+} bs[MAX_FD];
+
+static void switch_level(int sw, int on)
+{
+    if (sw == back_sw)
+        set_back(on);
+}
+
+/* the payload size of a board message by its opcode: -1 unknown, -2 a NUL-ended
+ * text, 100 + k a switch message of k bytes */
+static int payload(int op)
+{
+    if (proto == PROTO_WARDEN) {
+        switch (op) {
+        case 0x00: case 0x01: return 101;     /* <0|1> <sw> */
+        case 0x98: return 102;                /* <sw> <level> */
+        case 0xA8: return 5;                  /* coil config */
+        case 0x96: case 0x97: return -2;      /* firmware / hardware text */
+        case 0xD4: return 1;                  /* stepper state */
+        }
+    } else {
+        switch (op) {
+        case 0x58: return 102;                /* <sw> <level> */
+        case 0x59: return 101;                /* <0x80|sw>, 0x7F nothing */
+        case 0x00: return 9;
+        case 0x01: case 0x02: return 5;
+        case 0x6F: return 3;
+        case 0x28: return 32;
+        case 0x25: case 0x2B: return 0;
+        case 0x20: return 5;
+        case 0x0F: return 2;
+        }
+    }
+    return -1;
+}
+
+static void feed_board(int fd, const unsigned char *b, ssize_t n)
+{
+    struct bstate *s = &bs[fd];
+    unsigned char start = proto == PROTO_WARDEN ? 0x3C : 0x3E;
+    ssize_t k;
+    for (k = 0; k < n; k++) {
+        unsigned char c = b[k];
+        int p;
+        switch (s->st) {
+        case B_START:
+            if (c == start)
+                s->st = B_OP;
+            break;
+        case B_OP:
+            s->op = c;
+            p = payload(c);
+            if (p == -1) {
+                s->st = c == start ? B_OP : B_START;
+            } else if (p == -2) {
+                s->st = B_TEXT;
+            } else if (p >= 100) {
+                s->st = B_SW;
+                s->need = (unsigned char)(p - 100);
+                s->got = 0;
+            } else {
+                s->need = (unsigned char)p;
+                s->st = p ? B_SKIP : B_START;
+            }
+            break;
+        case B_SKIP:
+            if (--s->need == 0)
+                s->st = B_START;
+            break;
+        case B_TEXT:
+            if (!c)
+                s->st = B_START;
+            break;
+        case B_SW:
+            s->a[s->got++] = c;
+            if (s->got < s->need)
+                break;
+            s->st = B_START;
+            if (proto == PROTO_WARDEN)
+                switch_level(s->a[0], s->op == 0x98 ? s->a[1] : s->op);  /* 0x00/0x01: the op is the level */
+            else if (s->op == 0x58)
+                switch_level(s->a[0], s->a[1]);
+            else if (s->a[0] != 0x7F)
+                switch_level(s->a[0] & 0x7F, (s->a[0] & 0x80) != 0);
+            break;
+        }
+    }
+}
+
+static void fd_reset(int fd)
+{
+    llen[fd] = 0;
+    memset(&bs[fd], 0, sizeof bs[fd]);
+}
+
+static void feed(int fd, const char *b, ssize_t n)
+{
+    if (proto == PROTO_FAST)
+        feed_lines(fd, b, n);
+    else
+        feed_board(fd, (const unsigned char *)b, n);
 }
 
 ssize_t read(int fd, void *buf, size_t n)
@@ -381,6 +511,7 @@ ssize_t __read_chk(int fd, void *buf, size_t n, size_t buflen)
     return r;
 }
 #else /* the SPI word: Spike 2 and Spike 3 */
+static void fd_reset(int fd) { (void)fd; }
 static void sample(const unsigned char *rx)
 {
     int back = !((rx[BACK_BYTE] >> BACK_BIT) & 1);    /* active low */
@@ -453,7 +584,12 @@ static void padmenu_init(void)
     const char *h = getenv("PADMENU_HOLD_MS");
     hold_ms = h && *h ? strtol(h, NULL, 10) : HOLD_MS_DEFAULT;
 #ifdef PADMENU_FAST
-    h = getenv("PADMENU_SWITCH");          /* the tests; every BOF title's EXIT is 5 */
+    h = getenv("PADMENU_PROTO");           /* Spooky's launcher; BOF sets nothing: FAST */
+    if (h && !strcmp(h, "warden"))
+        proto = PROTO_WARDEN;
+    else if (h && !strcmp(h, "pinotaur"))
+        proto = PROTO_PINOTAUR;
+    h = getenv("PADMENU_SWITCH");          /* Spooky's BACK; every BOF title's EXIT is 5 */
     if (h && *h)
         back_sw = (int)strtol(h, NULL, 10);
 #endif

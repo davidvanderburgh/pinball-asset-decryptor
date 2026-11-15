@@ -342,7 +342,14 @@ else ifeq ($(PLATFORM),spk)
 # machine's own libpinproc (padselect_proc.sh)
 SPKSW = $(BUILD)/spksw
 PROCSW = $(BUILD)/dpprocsw
-all: $(BIN) $(SPKSW) $(PROCSW)
+PADMENU = $(BUILD)/padmenu.so
+all: $(BIN) $(SPKSW) $(PROCSW) $(PADMENU)
+
+# PAD-1309: padmenu.so, the BOF build's object (x86-64, glibc 2.17 at most); padselect.sh
+# starts the game with it and PADMENU_PROTO=warden|pinotaur: BACK held 5 s restarts into the menu
+$(PADMENU): padmenu.c jjp_glibc.h | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -include jjp_glibc.h -DPADMENU_FAST -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -lpthread -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
 
 $(SPKSW): spksw.c | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -static spksw.c -o $@ || { rm -f $@; exit 1; }
@@ -464,10 +471,11 @@ check: $(BIN) $(SPKSW) $(PROCSW)
 check-hw:
 > @echo "check-hw: the node-bus test is Stern's; spksw is proven on the rig's boards (tools/spooky_emu/MULTIBOOT.md)"
 
-install: $(BIN) $(SPKSW) $(PROCSW)
+install: $(BIN) $(SPKSW) $(PROCSW) $(PADMENU)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/spkselect"
 > install -m 755 "$(SPKSW)" "$(DESTDIR)$(PREFIX)/spksw"
+> install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
 > install -m 755 "$(PROCSW)" "$(DESTDIR)$(PREFIX)/dpprocsw"
 > install -m 755 padselect_spk.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > install -m 755 padselect_proc.sh "$(DESTDIR)$(PREFIX)/padselect_proc.sh"

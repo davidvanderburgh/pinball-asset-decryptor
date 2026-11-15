@@ -30,6 +30,7 @@
 #      working directory the game always had.
 #
 #   pad/spk.conf     the machine: board=warden|pinotaur, dev=, L=, R=, S= (switch numbers),
+#                    B= the coin door's BACK (padmenu.so, PAD-1309: held 5 s restarts into the menu),
 #                    exe= (the program under a build, default uptest/main.x86_64), root= lines;
 #                    two games: title=b<k> <title> per build, own=<globs in /game>,
 #                    seed=<file in /game> <file in a build> (copied in when /game lacks it)
@@ -207,6 +208,16 @@ boot() {        # boot b<k>: never returns when it starts something
     prog=$P/$b/$EXE
     if [ -n "${PADSELECT_DRY:-}" ]; then echo "would start $prog ${ARGS[*]}"; say "dry run: $b"; exit 0; fi
     say "starting $b: $prog"
+    # PAD-1309: BACK held 5 s on the coin door restarts the machine into this menu: padmenu.so
+    # first in the game's preloads, told the board and its BACK switch (spk.conf B=)
+    if [ -f "$P/padmenu.so" ]; then
+        local brd
+        brd=$(conf board warden)
+        export LD_PRELOAD="$P/padmenu.so${LD_PRELOAD:+:$LD_PRELOAD}"
+        export PADMENU_PROTO=$brd
+        if [ "$brd" = pinotaur ]; then export PADMENU_SWITCH=$(conf B 63); else export PADMENU_SWITCH=$(conf B 94); fi
+        say "BACK (switch $PADMENU_SWITCH) held 5 s restarts into this menu"
+    fi
     exec 3>&-
     chmod +x "$prog" 2>/dev/null
     cd "$TOP" 2>/dev/null

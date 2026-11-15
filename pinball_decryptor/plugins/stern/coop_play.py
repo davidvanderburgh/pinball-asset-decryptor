@@ -1114,6 +1114,8 @@ def _characters(got):
         out["intro"] = str(got["intro"])
     if got.get("ceremony"):                             # PAD-1219: the awards ceremony's background video
         out["ceremony"] = str(got["ceremony"])
+    if got.get("ceremony_sound"):                       # PAD-1317: the awards ceremony's own music
+        out["ceremony_sound"] = str(got["ceremony_sound"])
     if got.get("bonus"):                                # PAD-1123: the teammate's character on their End of Ball Bonus
         out["bonus"] = True
     if theme:
@@ -1128,7 +1130,7 @@ def save_characters(project, characters):
     chars = _characters(characters)
     data = staged_changes.load(project)
     raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
-    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("ceremony") or chars.get("bonus"):
+    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "bonus")):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)
@@ -1592,6 +1594,57 @@ def save_ceremony(project, source=None):
     """Copy *source* (a video file) into the project as the co-op awards ceremony's background, or with None forget
     it (the game's own End of Ball Bonus loop goes behind the cards); returns the characters as stored."""
     return _save_game_video(project, source, "ceremony", CEREMONY_FILE)
+
+
+# ---- PAD-1317: the awards ceremony's own music ---------------------------------------------------------------------
+# DoomWalrus666: "Please add an option in the mode tab in the characters builder to add a custom audio track to play
+# during the award ceremony". A sound file of the owner's (or a video's own sound), made by a Write into a sound of the
+# card's own on the co-op intro's carrier (sound_modes "the co-op awards ceremony's music"); sounds.cfg names it
+# (``ccer``) and the runtime plays it as the award cards come up, the game's own sounds faded under it, and fades it
+# out when they are done (pad_mode_runtime.c "PAD-1317"). The cards show COOP_CARD_MS each, COOP_CARDS_MAX_MS at most.
+#: the project's file (its extension the source's)
+CEREMONY_SOUND_FILE = "ceremony_music"
+#: the longest ceremony music a card takes: the ceremony itself is 42 s at most (pad_mode_runtime.c COOP_CARDS_MAX_MS)
+CEREMONY_SOUND_MAX_SECONDS = 60
+
+
+def ceremony_sound_path(project, characters=None):
+    """The absolute path of the project's awards ceremony music (``""`` when it has none, or it is gone)."""
+    chars = _characters(characters) if characters is not None else load_characters(project)
+    return picture_path(project, {"picture": chars.get("ceremony_sound") or ""})
+
+
+def save_ceremony_sound(project, source=None):
+    """Copy *source* (a sound file, or a video whose sound is taken) into the project as the music the co-op awards
+    ceremony plays, or with None forget it (the ceremony plays with the game's own sounds); returns the characters as
+    stored. Raises :class:`CoopError` when the file is not one the app takes."""
+    import os
+    import shutil
+    chars = load_characters(project)
+    folder = os.path.join(project, PICTURE_DIR)
+    if source is not None:
+        ext = os.path.splitext(source)[1].lower()
+        if ext not in SOUND_EXTS + VIDEO_EXTS or not os.path.isfile(source):
+            raise CoopError("That is not a sound file the app can take (%s)." % ", ".join(SOUND_EXTS + VIDEO_EXTS))
+    if os.path.isdir(folder):
+        for f in os.listdir(folder):                    # one of it: another extension's goes
+            if os.path.splitext(f)[0] == CEREMONY_SOUND_FILE and (
+                    source is None or f != CEREMONY_SOUND_FILE + os.path.splitext(source)[1].lower()):
+                os.remove(os.path.join(folder, f))
+    if source is None:
+        chars.pop("ceremony_sound", None)
+        return save_characters(project, chars)
+    os.makedirs(folder, exist_ok=True)
+    ext = os.path.splitext(source)[1].lower()
+    shutil.copyfile(source, os.path.join(folder, CEREMONY_SOUND_FILE + ext))
+    chars["ceremony_sound"] = "%s/%s%s" % (PICTURE_DIR, CEREMONY_SOUND_FILE, ext)
+    return save_characters(project, chars)
+
+
+def ceremony_audio(src, out, ffmpeg):
+    """*src*'s sound (a sound file, or a video's own) as a 44.1 kHz 16-bit stereo WAV at *out*, no longer than
+    :data:`CEREMONY_SOUND_MAX_SECONDS`; ``""`` when it has none. Raises :class:`CoopError` when ffmpeg cannot read it."""
+    return intro_audio(src, out, ffmpeg, max_seconds=CEREMONY_SOUND_MAX_SECONDS)
 
 
 #: PAD-1192: the longest any one co-op clip's or sound's ffmpeg run may take. Each is at most INTRO_MAX_SECONDS of
@@ -2814,7 +2867,8 @@ def export_settings(project, path):
                                           os.path.splitext(src)[1].lower())
             pictures.append((src, c[field]))
     for key, stem, path_of in (("intro", INTRO_FILE, intro_path),          # PAD-1114: the co-op games' intro video
-                               ("ceremony", CEREMONY_FILE, ceremony_path)):   # PAD-1219: the awards' background
+                               ("ceremony", CEREMONY_FILE, ceremony_path),    # PAD-1219: the awards' background
+                               ("ceremony_sound", CEREMONY_SOUND_FILE, ceremony_sound_path)):   # PAD-1317: music
         got = path_of(project, chars)
         chars.pop(key, None)
         if got:
@@ -2970,11 +3024,13 @@ def import_settings(project, path):
                 f.write(blob)
             c[field] = "%s/%s" % (PICTURE_DIR, name)
             pictures += 1
-    for key, stem in (("intro", INTRO_FILE), ("ceremony", CEREMONY_FILE)):   # PAD-1114 / PAD-1219: the videos
+    for key, stem, exts in (("intro", INTRO_FILE, VIDEO_EXTS), ("ceremony", CEREMONY_FILE, VIDEO_EXTS),
+                            # PAD-1114 / PAD-1219: the videos; PAD-1317: the ceremony's music
+                            ("ceremony_sound", CEREMONY_SOUND_FILE, SOUND_EXTS + VIDEO_EXTS)):
         rel = chars.pop(key, "") or ""
         blob = read(rel) if read and rel else None
         ext = os.path.splitext(rel)[1].lower()
-        if blob and ext in VIDEO_EXTS:
+        if blob and ext in exts:
             os.makedirs(folder, exist_ok=True)
             for f in os.listdir(folder):
                 if os.path.splitext(f)[0] == stem:
@@ -3015,7 +3071,7 @@ def import_settings(project, path):
                 awards[str(k)] = a
         if awards:
             raw["awards"] = awards
-    if chars["list"] or chars["pick"] or chars.get("intro") or chars.get("ceremony") or chars.get("bonus"):
+    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "bonus")):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)

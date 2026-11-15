@@ -213,7 +213,8 @@ def test_the_bonus_copy_puts_the_card_bottom_left(tmp_path):
 
 # ---- the sound ------------------------------------------------------------------------------------------------------
 def test_a_characters_sound_rides_the_intros_carrier():
-    assert SM.is_intro(SM.INTRO_MODE) and SM.is_intro(SM.INTRO_MODE + 16) and not SM.is_intro(SM.INTRO_MODE + 17)
+    assert SM.is_intro(SM.INTRO_MODE) and SM.is_intro(SM.INTRO_MODE + 16) and not SM.is_intro(SM.INTRO_MODE + 18)
+    assert SM.is_ceremony(SM.INTRO_MODE + 17) and SM.picked_of(SM.INTRO_MODE + 17) == 0   # PAD-1317: the awards music
     assert SM.picked_of(SM.INTRO_MODE) == 0 and SM.picked_of(SM.INTRO_MODE + 3) == 3
     assert not SM.is_juke(SM.INTRO_MODE + 16) and not SM.is_shot(SM.INTRO_MODE + 1)
     assert SM.who(SM.INTRO_MODE + 2) == "Co-op characters" and SM.who(SM.INTRO_MODE) == "Co-op intro"

@@ -1006,6 +1006,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "intro": os.path.basename(_CP.intro_path(project, chars)) if project else "",   # PAD-1114
                           # PAD-1219: the awards ceremony's own video
                           "ceremony": os.path.basename(_CP.ceremony_path(project, chars)) if project else "",
+                          # PAD-1317: and its own music
+                          "ceremony_sound": os.path.basename(_CP.ceremony_sound_path(project, chars)) if project else "",
+                          "ceremony_max": _CP.CEREMONY_SOUND_MAX_SECONDS,
                           "bonus": bool(chars.get("bonus")),                                     # PAD-1123
                           "picked_max": _CP.PICKED_MAX_SECONDS, "still_s": _CP.PICKED_STILL_SECONDS,
                           "videos": "" if prof is None or _CP.can_video(prof) else (
@@ -1250,6 +1253,33 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                 self._say(str(e))
                 return False
             self._say("co-op characters: %s shows %s once picked" % (name, os.path.basename(path)))
+        self._publish_coop_chars(project)
+        return True
+
+    @rpc
+    def coop_ceremony_sound(self, clear=False):
+        """PAD-1317: Awards music...: a music track of the owner's (a sound file, or a video's sound) played while the
+        co-op award cards show at a co-op or team game's end; *clear* takes it off (the cards show with the game's own
+        sounds)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        if clear:
+            _CP.save_ceremony_sound(project, None)
+            self._say("co-op awards: no music of your own - the award cards show with the game's own sounds")
+        else:
+            path = self.window.ask_open("modes_file", "Choose the music the co-op awards ceremony plays",
+                                        [("Sounds", " ".join("*" + e for e in _CP.SOUND_EXTS)),
+                                         ("A video's sound", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+            if not path:
+                return False
+            try:
+                _CP.save_ceremony_sound(project, path)
+            except _CP.CoopError as e:
+                self._say(str(e))
+                return False
+            self._say("co-op awards: %s plays while the award cards show" % os.path.basename(path))
         self._publish_coop_chars(project)
         return True
 

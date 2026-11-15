@@ -68,8 +68,8 @@ times are left out with one sentence (they ride Spike 2's delivery).
 - Try it on a Spike 3 card: the Modes tab builds the same set from the card
   (`_tryit_prepare_s3`), and the Emulate tab's Spike 3 start now runs the prepare (it skipped
   it) and hands `--mode-so` / `--mode-files` to s3launch.sh -> `PAD_S3_MODE_SO` /
-  `PAD_S3_MODE_FILES`. Screens and clips are not shown in Try it on Spike 3 (no override set
-  on that rig); a Write puts them on the card.
+  `PAD_S3_MODE_FILES`. PAD-1284: the scenes the modes' screens and clips rewrite (and a clip's
+  new file) go into the rig slot's /games for the run, whole (`games.patch`, below).
 - s3run.sh on a card with modes: a plain run (binfmt) runs the card's own hook; a
   checkpointable run or the explicit qemu runs programs only, so s3run does the hook's two
   steps (the target program, the card's mode.so preloaded); with `PAD_S3_MODE_SO` (Try it) the
@@ -244,3 +244,54 @@ their length through `event_cancel`; a layer watch (pm_lamp_layers twice a secon
 go as it ended or was stopped, the game's list back to the same five every time. No run crashed. The Modes tab offers
 the sweep, the shot lights and the game's shows on the Spike 3 card (`LAMPS_PROVEN` has `star_wars_elg-1.10/spike3`).
 Tests: tests/test_pad1283_spike3_lights.py.
+
+## Screens, words and clips on Spike 3 (PAD-1284)
+
+A mode's own screen (a node the build grafts into the game's `hud` scene), its words (set_text on the screen's text
+node) and its clip (the video bank's `VideoSurface`, clip v2) ran on Spike 2's 32-bit idioms. Star Wars ELG 1.10's
+64-bit program has the same scene engine with these differences, read in its own code:
+
+| what | Spike 2 | Spike 3 |
+|---|---|---|
+| std::string | the COW ABI: one pointer, made by the imported constructor (`site string_new`) | the C++11 ABI: 32 bytes {data, length, capacity}, no constructor imported (built inline) |
+| a node finder's result (find_node, find_text, surface_find) | its shared_ptr into memory named by the first argument | through x8 (AAPCS64: not trivially copyable) |
+| the scene lookup | resource_get(manager, &id, 0), __dynamic_cast 6IScene -> 11RadiumScene, the scene at +0x10 (its mutex +0x18) | the same (resource_get 0x217030, the manager at 0x712bf8 behind a logging wrapper), the scene at +0x38 (its mutex +0x48) |
+| the node visibility setter | Sprite vtable slot 42 (`strb r1, [r0, #296]`), value 0xa8 | slot 42 (`strb w1, [x0, #464]`), 8 bytes a slot: 0x150 |
+| the video surface | set_video / play / stop / state / seek / duration / position | the same calls (set_video 0x4dcc40, position 0x4d77d0, duration 0x4d7b50) and **no seek**: the player's clock is set by its own decoder thread only |
+
+- **The runtime** (pad_mode_runtime.c): a `pm_str` is the COW word on Spike 2 (`&s` passed, as it always was) and on
+  Spike 3 the address of a C++11 string `std_string` builds (the words in a malloc'd copy, capacity = length, leaked
+  as Spike 2's are); every game call that takes one takes `const std::string &` and copies it (resource_get, the
+  finders, set_text, surface_set_video). The finders are called through `find_x8`, typed to return a struct of more
+  than 16 bytes so C passes x8; `pm_show` indexes the vtable by pointer size; the screen / clip gates name
+  `resource_get` where Spike 2's name `string_new` (`PM_STRING_SITE`). The co-op intro's finder hook reads (root,
+  name) in x0/x1 on 64-bit. Spike 2's mode.so is byte-identical.
+- **s3port.py** `scene_engine` reads it all off a 64-bit program: the `__dynamic_cast` PLT stub; the two typeinfos by
+  the Spike 2 port's names; the game's own scene lookups (casts from the resource typeinfo to the scene player's), the
+  wrapper called before them and in it the first call on a manager loaded from a global (resource_get, checked by its
+  `cmp w2, #2` mode switch); the scene field read under the player's mutex after a cast; the Sprite vtable's
+  setter / getter pair at Spike 2's slot; the surface's set_video (the call before surface_play that tests the same
+  "set up" byte as the surface's other methods), position and duration (the game's progress read: two such calls,
+  then surface_state and `cmp w0, #2`, which is surface_playing); the hud and video_bank scene ids when the program
+  names them. The matcher's find_node / find_text / set_text / surface_* placements are carried with them. A site
+  no feature uses on the Spike 2 port of the same build either says so (Star Wars ELG: award_screen and display
+  priority lack their values there, display_draw / player_advance belong to the clip_play path it does not use).
+- **The scenes**: the Spike 3 card's video bank is the Spike 2 build's file (895f74e5...); its HUD differs from the
+  Spike 2 build's in 3 bytes of one texture block (0x7eaf7), so `scene_write.PROFILES` carries it (be374b87...) with
+  the Spike 2 profile's shape, and `TITLE_SCENES["star_wars_elg-1.10/spike3"]` names both.
+- **The Write**: a mode's clip is the first file a Spike 3 Write puts on the card new, and a file the `.sidx` manifest
+  does not list fails Stern's SD validation; `spike3_write._sidx_new_files` appends its record
+  (`mode_write.compose_manifest`, as Spike 2's mode Write does) and the manifest goes on whole with the other files.
+- **Try it**: `spike3_modes.stage_try_it_scenes` stages the rewritten scenes and the new files whole in
+  `games.patch` (`<path>|whole|<file>|`), which s3run.sh puts in the slot's /games for the run and takes away at
+  the next run's start, like the sound patches.
+
+Proof (2026-11-14, Spike 3 rig slot 84, hidden and MUTED): a mode SCREEN TEST (three Death Star target hits, 40 s, a
+generated magenta screen with its words, a 6 s title clip at its start). Try it on the library card (this build's
+prebuilt mode64.so and port, the three files staged whole): the runtime armed `screens clips`, found the screen and
+its text node in the HUD, played the clip ("still drawing 1 s after it started") and hid the screen after the end;
+in the frames the clip filled 44% of the glass in magenta, then the screen 18% (its words under it), off where the
+game's own multiball video covers the HUD. The card `write_card` wrote (the HUD and bank grown, the clip's asset
+added, the mode installed), started through its own hook: the same log and the same frames (6 clip, 16 screen).
+The same mode with the previous runtime and port: `can callout own-sound game-shows`, "own screen not found", no
+magenta in any frame. Tests: tests/test_pad1284_spike3_screens.py.

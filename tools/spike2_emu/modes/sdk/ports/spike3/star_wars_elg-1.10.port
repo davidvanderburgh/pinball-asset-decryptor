@@ -15,6 +15,10 @@
 # light_all held all 67 inserts at 255, light_shots blinked the 3 tied to its scoring shots; the game's shows 1-5
 # played as process 13201 (stopped at their length through event_cancel), and the game's layer list lost each show's
 # group as it ended (the exit hook at +0x138 calling lamp_free_owner).
+# Screens, words and clips emulator-proven 2026-11-14 (PAD-1284, slot 84, hidden, muted): a mode's own screen and its
+# words were found in the HUD (find_node / find_text through x8, the scene at +0x38) and shown over the game's HUD for
+# the mode (the Sprite's slot 42), and its title clip played full screen on the video bank's surface at its start
+# (surface_find, surface_set_video, surface_play), on Try it and on a card write_card wrote.
 
 game           star_wars_elg
 version        1.10
@@ -38,15 +42,20 @@ site callout_nth      0x0020dd40 0xf0002928 0x910c8108
 site lamp_group       0x001a0470 0xa9be53f3 0x92403c14
 #   show_priority: its calls and callers (score 3.0)
 site show_priority    0x0041a270 0xf00013e1 0xf9466821
-# not carried yet (its feature is 32-bit): site award_screen     0x001b4120 0xa9be53f3 0x12003c13
-# site string_new       NOT PLACED: mid-way into a function on Spike 2 (0x0 + 0x16810)
-# site dynamic_cast     NOT PLACED: mid-way into a function on Spike 2 (0x0 + 0x1621c)
-# site resource_get     NOT PLACED: no counterpart found
-# not carried yet (its feature is 32-bit): site find_node        0x004e49b0 0xb0000da2 0xf9468442
-# not carried yet (its feature is 32-bit): site set_text         0x004ca610 0xa9bc7bfd 0x910003fd
-# not carried yet (its feature is 32-bit): site surface_state    0x004d6010 0xf9464400 0x91002000
-# not carried yet (its feature is 32-bit): site player_advance   0x001b4a70 0xaa0003e1 0xb4000080
-# not carried yet (its feature is 32-bit): site display_draw     0x002d6a30 0xf0001e03 0xf9468463
+# not carried - no feature uses it on the Spike 2 port either (the award screen needs award_message_at / _value_at / _count_at, which it lacks): site award_screen     0x001b4120 0xa9be53f3 0x12003c13
+# site string_new       NOT NEEDED: the 64-bit program's strings are the C++11 ABI and it imports no constructor; the runtime builds them itself (PAD-1284)
+#   dynamic_cast: the PLT stub of __dynamic_cast (PAD-1284)
+site dynamic_cast     0x0010d3b0 0xf0002c50 0xf9453211
+#   resource_get: the scene lookup's first call, on the resource manager (PAD-1284)
+site resource_get     0x00217030 0xd0002403 0xf9468463
+#   find_node: matched (PAD-1284)
+site find_node        0x004e49b0 0xb0000da2 0xf9468442
+#   set_text: matched (PAD-1284)
+site set_text         0x004ca610 0xa9bc7bfd 0x910003fd
+#   surface_state: matched (PAD-1284)
+site surface_state    0x004d6010 0xf9464400 0x91002000
+# not carried - no feature uses it on the Spike 2 port either (the clip_play clip path it belongs to is not this title's (its clips are the surface's)): site player_advance   0x001b4a70 0xaa0003e1 0xb4000080
+# not carried - no feature uses it on the Spike 2 port either (the clip_play clip path it belongs to is not this title's (its clips are the surface's)): site display_draw     0x002d6a30 0xf0001e03 0xf9468463
 #   switch_hit: its calls and callers (score 2.5)
 site switch_hit       0x0042b250 0xd0001361 0xf9468421
 #   switch_hit2: its calls and callers (score 3.7)
@@ -63,7 +72,7 @@ site sound_stop       0x0020b220 0xa9bc53f3 0xa9015bf5
 site sound_worker     0x0020d2e0 0x90002468 0xf9468508
 #   hook_dispatch: its calls and callers (score 17.0)
 site hook_dispatch    0x002274e0 0xa9be53f3 0x71033c1f
-# not carried yet (its feature is 32-bit): site display_effect_start 0x003b01f0 0xb0001745 0xf94684a5
+# not carried - no feature uses it on the Spike 2 port either (display priority needs data display_effects and the display_host / _now_at / _priority_at values): site display_effect_start 0x003b01f0 0xb0001745 0xf94684a5
 # site display_effect_next NOT PLACED: mid-way into a function on Spike 2 (0x3aacf0 + 0x408)
 # site display_priority_now NOT PLACED: mid-way into a function on Spike 2 (0x3aacf0 + 0x890)
 #   show_start: its calls and callers (score 4.0)
@@ -74,15 +83,22 @@ site event_post_replacing 0x003151f0 0xa9be53f3 0x12003c14
 site event_cancel     0x003150f0 0xa9bc53f3 0xa9015bf5
 # site switch_edge      NOT PLACED: no counterpart found
 # not carried yet (its feature is 32-bit): site switch_drain     0x003085c0 0xa9ba53f3 0xa9036bf9
-# not carried yet (its feature is 32-bit): site surface_find     0x004e4c70 0xb0000da2 0xf9468442
-# site surface_set_video NOT PLACED: no counterpart found
-# not carried yet (its feature is 32-bit): site surface_play     0x004d8f10 0xb0000e03 0xf9468463
-# not carried yet (its feature is 32-bit): site surface_stop     0x004d7430 0xd0000e01 0xf9468421
-# site surface_seek     NOT PLACED: no counterpart found
-# site surface_duration NOT PLACED: no counterpart found
-# site surface_position NOT PLACED: no counterpart found
+#   surface_find: matched (PAD-1284)
+site surface_find     0x004e4c70 0xb0000da2 0xf9468442
+#   surface_set_video: the surface call before surface_play (PAD-1284)
+site surface_set_video 0x004dcc40 0xb0000de2 0xf9468442
+#   surface_play: matched (PAD-1284)
+site surface_play     0x004d8f10 0xb0000e03 0xf9468463
+#   surface_stop: matched (PAD-1284)
+site surface_stop     0x004d7430 0xd0000e01 0xf9468421
+# site surface_seek     NOT PLACED: the 64-bit video surface has no seek - its clock is set by the player's own decoder thread only (PAD-1284)
+#   surface_duration: the game's progress read: position, duration, then surface_state (PAD-1284)
+site surface_duration 0x004d7b50 0xd0000e01 0xf9468421
+#   surface_position: the game's progress read: position, duration, then surface_state (PAD-1284)
+site surface_position 0x004d77d0 0xd0000e01 0xf9468421
 # not carried yet (its feature is 32-bit): site balls_in_play    0x0031ee60 0xa9be53f3 0xf0002153
-# not carried yet (its feature is 32-bit): site find_text        0x004e44a0 0xb0000da2 0xf9468442
+#   find_text: matched (PAD-1284)
+site find_text        0x004e44a0 0xb0000da2 0xf9468442
 #   agent_header: its calls and callers (score 14.2)
 site agent_header     0x005488f0 0xb40002a0 0x4f000400
 #   agent_begin: its calls and callers (score 37.0)
@@ -153,10 +169,10 @@ data score_mult             0x006a7f30   # 8 of 8 paired functions that load it
 data mode_mask              0x0079206c   # 100 of 105 paired functions that load it
 data event_head             0x007493d8   # read in the lamp layer's / processes' own code (PAD-1283)
 data event_current          0x007493e0   # read in the lamp layer's / processes' own code (PAD-1283)
-# data resource_manager       NOT PLACED: 0 of 0 paired functions agree
+data resource_manager       0x00712bf8   # read in the game's own scene lookups (PAD-1284)
 # data display_holder         NOT PLACED: 10 of 15 paired functions agree
-# data typeinfo_resource      NOT PLACED: 0 of 0 paired functions agree
-# data typeinfo_scene_player  NOT PLACED: 0 of 0 paired functions agree
+data typeinfo_resource      0x0068b850   # read in the game's own scene lookups (PAD-1284)
+data typeinfo_scene_player  0x0068fb48   # read in the game's own scene lookups (PAD-1284)
 # not carried yet: data award_screen_arg       0x006a2c50   # 114 of 117 paired functions that load it
 data sound_channels         0x00733340   # read in the sound engine's own code (PAD-1282)
 # data sound_queue            NOT PLACED: 1 of 1 paired functions agree
@@ -180,9 +196,6 @@ data light_count            0x0073ec88   # read in the lamp layer's / processes'
 
 # ---- values: only those proven on Spike 3; a struct offset or a count is a 32-bit build's ----
 value mode_mask_busy        0x210
-# not carried (64-bit layout, measure it): value scene_player_scene    0x10
-# not carried (64-bit layout, measure it): value node_visible_vfn      0xa8
-# not carried (64-bit layout, measure it): value surface_playing       2
 # not carried (64-bit layout, measure it): value clip_layer            0
 # not carried (64-bit layout, measure it): value stock_slot_shot   42
 # not carried (64-bit layout, measure it): value stock_slot_active 14
@@ -292,6 +305,9 @@ value event_flags               2    # read off the program's own code (PAD-1283
 value event_show_flag           0x20    # read off the program's own code (PAD-1283)
 value event_show_id             258    # read off the program's own code (PAD-1283)
 value show_proc                 13201    # read off the program's own code (PAD-1283)
+value scene_player_scene        0x38    # read off the program's own code (PAD-1284)
+value node_visible_vfn          0x150    # read off the program's own code (PAD-1284)
+value surface_playing           0x2    # read off the program's own code (PAD-1284)
 value ball_end_event 0x34    # the end of a ball, from the bus (no ball_end site on Spike 3)
 
 # ---- events: the framework's bus ids (the dispatch's range is the same on both builds) ----
@@ -409,7 +425,12 @@ lamp 63           0              RAMP 4  # lamp 71, I/O group 6 index 66, at 60,
 lamp 64           0              RAMP 5  # lamp 72, I/O group 6 index 65, at 58,107
 lamp 65           0              RAMP 6  # lamp 73, I/O group 6 index 64, at 54,90
 
+# ---- scenes (PAD-1284): a mode's screen goes in hud, its clip on video_bank's surface - the same ids
+# the program names ----
+scene hud                  7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a/835949dafb924a7cfeb0ec0fe2a3a4d8696d4aea
+scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
+
 # ---- text ----
 text example_start_shot     Death star target
 
-# not carried (to measure on Spike 3): 3 scene, 7 text
+# not carried (to measure on Spike 3): 1 scene, 7 text

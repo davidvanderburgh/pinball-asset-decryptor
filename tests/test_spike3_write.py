@@ -492,6 +492,7 @@ def test_write_card_runs_through_and_closes_the_original(tmp_path, monkeypatch):
     monkeypatch.setattr(W, "_Copier", lambda s, d: NS(wait=lambda *a: None,
                                                       join=lambda: None))
     refreshed = []
+    monkeypatch.setattr(W, "_sidx_new_files", lambda r, jobs, work, log: ([], None))   # PAD-1284: no new file
     monkeypatch.setattr(W, "_sidx_refresh", lambda vol, r, path, node, staged, log:
                         refreshed.append((path, staged)) or True)
     grown = {}

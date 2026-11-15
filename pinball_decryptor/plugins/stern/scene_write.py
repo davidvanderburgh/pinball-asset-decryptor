@@ -550,6 +550,16 @@ PROFILES = {
         root_frames=4, root_count_at=0x11F384D, root_count=10,
         insert_at=0x1208CB9, insert_before=(0x80000D86, 'IconGroup4_Instance'),
         first_free_id=0x1100, in_game=True, origin=(280.0, 40.0)),
+    "be374b87996e190f23897bd33dffbf23": SceneProfile(
+        label='Star Wars ELG 1.10 (Spike 3) in-game 7b4db7ef (PAD-1284: the Spike 2 build with 3 bytes of one texture block at 0x7eaf7 changed)',
+        scene_id='7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a/835949dafb924a7cfeb0ec0fe2a3a4d8696d4aea', tree='auto_loaded',
+        md5='be374b87996e190f23897bd33dffbf23', size=18946356,
+        poly={'bitmap': 2, 'sprite': 3, 'text': 4},
+        symbol={'sprite': 63, 'bitmap': 9, 'text': 116},
+        font=(798, ''), text_align=1, text_spacing=(2.0, 0.0), text_tail=(0, 0),
+        root_frames=4, root_count_at=0x11F384D, root_count=10,
+        insert_at=0x1208CB9, insert_before=(0x80000D86, 'IconGroup4_Instance'),
+        first_free_id=0x1100, in_game=True, origin=(280.0, 40.0)),
     "2ce488d819e6f9d8b02e2e28ebc284e0": SceneProfile(
         label='Deadpool LE 1.14 in-game c3328c39 (item 164, read statically)',
         scene_id='c3328c39b0e29f78e9ff45db674248b1d245887d/0d167902e97be9e342b1950754601e41c79f615e', tree='auto_loaded',

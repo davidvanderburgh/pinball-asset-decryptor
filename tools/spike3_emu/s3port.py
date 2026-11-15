@@ -1116,6 +1116,254 @@ def light_engine(ref, rport_lines, tgt, placed):
     return out
 
 
+# ---- PAD-1284: scenes, text and the video surface --------------------------------------------------------------
+#: the engine's Sprite class (Radium's own, in every title): its vtable holds the visibility setter pm_show calls
+SPRITE_TYPE = b"N6Radium6SpriteE"
+#: the sites the screen and clip features call that the matcher places; carried when scene_engine read the rest
+SCREEN_SITES = ("find_node", "find_text", "set_text")
+CLIP_SITES = ("surface_find", "surface_state", "surface_play", "surface_stop")
+#: the scenes a mode's screen (hud) and clip (video_bank) go in, copied when the program names the same ids
+SCENES_CARRIED = ("hud", "video_bank")
+
+
+def _va_of(t, off):
+    for s, o, fs, fl in t.segs:
+        if o <= off < o + fs:
+            return s + off - o
+    return None
+
+
+def _typeinfo(t, name):
+    """the typeinfo object whose mangled name is `name` (b'6IScene') in a 64-bit program - the object whose name
+    pointer (+8) points at the string - or None"""
+    o = t.b.find(b"\0" + name + b"\0")
+    while o >= 0:
+        va = _va_of(t, o + 1)
+        hit = sorted(p - 8 for p, a in t.ptr.items() if a == va) if va is not None else []
+        if hit:
+            return hit[0]
+        o = t.b.find(b"\0" + name + b"\0", o + 1)
+    return None
+
+
+def _ref_typeinfo_name(ref, va):
+    """a 32-bit program's typeinfo object at va -> its mangled name (bytes), or None"""
+    p = ref.ptr.get(va + 4)
+    s = ref.cstr(p) if p else None
+    return s.encode() if s else None
+
+
+def _mov_reg(w):
+    """mov xd, xn (orr xd, xzr, xn) -> (d, n), else None"""
+    return (w & 31, (w >> 16) & 31) if (w & 0xFFE0FFE0) == 0xAA0003E0 else None
+
+
+def _walk_mem(t, va, cap=160):
+    """(va, word, regs) for the first `cap` words at va: a register's value ('a', address) for an adrp (+ add),
+    ('m', address) for the word one ldr loads from such an address, copied by mov; x0-x18 forgotten at a call,
+    and any other register an instruction writes"""
+    reg = {}
+    for a, w in list(_window(t, va, cap))[:cap]:
+        yield a, w, dict(reg)
+        p, ad, ls, mv = _adrp(a, w), _add_imm(w), _ls(w), _mov_reg(w)
+        if p:
+            reg[p[0]] = ("a", p[1])
+        elif ad and reg.get(ad[1], ("",))[0] == "a":
+            reg[ad[0]] = ("a", reg[ad[1]][1] + ad[2])
+        elif ls and ls[0] == "ldr" and reg.get(ls[2], ("",))[0] == "a":
+            reg[ls[1]] = ("m", reg[ls[2]][1] + ls[3])
+        elif mv:
+            if mv[1] in reg:
+                reg[mv[0]] = reg[mv[1]]
+            else:
+                reg.pop(mv[0], None)
+        elif _bl(a, w):
+            for r in range(19):
+                reg.pop(r, None)
+        elif ls:
+            if ls[0].startswith("ld"):
+                reg.pop(ls[1], None)
+                if ls[4] is not None:
+                    reg.pop(ls[4], None)
+        else:
+            reg.pop(w & 31, None)
+
+
+def _ready_byte(t, va):
+    """the byte a video-surface method tests first (ldrb wN, [x0, #imm] in its first 16 words: the surface's 'set
+    up' flag, the same in every method), or None"""
+    for a, w in list(_window(t, va, 16))[:16]:
+        if (w & 0xFFC003E0) == 0x39400000:
+            return (w >> 10) & 0xFFF
+    return None
+
+
+def _calls_before(t, i, n, back):
+    """the targets of the last `n` calls (bl to code, not to a PLT stub) in the `back` words before word i, nearest
+    first"""
+    out = []
+    for j in range(i - 1, max(-1, i - back), -1):
+        tg = t.calls.get(j)
+        if tg is not None and tg not in t.plt:
+            out.append(tg)
+            if len(out) == n:
+                break
+    return out
+
+
+def scene_engine(ref, rlines, tgt, at):
+    """what the screen and clip features need, read off the 64-bit program: {'site', 'data', 'value': {name: v},
+    'scene': [port lines], 'screens': bool, 'clips': bool, 'why': [what could not be read]}. `at`: the matcher's
+    placements of SCREEN_SITES / CLIP_SITES (name -> address)."""
+    out = {"site": {}, "data": {}, "value": {}, "scene": [], "screens": False, "clips": False, "why": []}
+    why = out["why"]
+    rdata = {t[1]: int(t[2], 16) for k, t, s in rlines if k == "data" and len(t) >= 3}
+    rval = {t[1]: int(t[2], 0) for k, t, s in rlines if k == "value" and len(t) >= 3}
+    cast = next((a for a, n in tgt.plt.items() if n == "__dynamic_cast"), None)
+    if cast is None:
+        why.append("the program imports no __dynamic_cast")
+        return out
+    out["site"]["dynamic_cast"] = cast
+    tis = {}
+    for name in ("typeinfo_resource", "typeinfo_scene_player"):
+        nm = _ref_typeinfo_name(ref, rdata[name]) if name in rdata else None
+        ti = _typeinfo(tgt, nm) if nm else None
+        if ti is None:
+            why.append("%s: %s" % (name, "the Spike 2 port names none" if not nm else
+                                   "no typeinfo named %s in the program" % nm.decode()))
+            return out
+        tis[name] = ti
+        out["data"][name] = ti
+    # the game's own scene lookups: (a wrapper of) resource_get, then __dynamic_cast(res, resource, scene player)
+    wrappers, scene_at = Counter(), Counter()
+    for i, tg in tgt.calls.items():
+        if tg != cast:
+            continue
+        va = tgt.tva + 4 * i
+        regs = next((r for a, w, r in _regs_walk(tgt, va - 48, 13) if a == va), None)
+        if not regs or {regs.get(1, ("",))[1:], regs.get(2, ("",))[1:]} != {(tis["typeinfo_resource"],),
+                                                                              (tis["typeinfo_scene_player"],)}:
+            continue
+        if regs[1][1] != tis["typeinfo_resource"]:
+            continue
+        prev = _calls_before(tgt, i, 1, 24)
+        if prev:
+            wrappers[prev[0]] += 1
+        held, locked = {0}, False                 # after the cast: the scene field read under the player's mutex
+        for a, w in list(_window(tgt, va + 4, 20))[:20]:
+            mv = _mov_reg(w)
+            if mv and mv[1] in held:
+                held.add(mv[0])
+                continue
+            b = _bl(a, w)
+            if b is not None:
+                if tgt.plt.get(b) == "pthread_mutex_lock":
+                    locked = True
+                    continue
+                if locked:
+                    break
+                held = {r for r in held if r >= 19}
+                continue
+            ls = _ls(w)
+            if locked and ls and ls[0] == "ldr" and ls[2] in held:
+                scene_at[ls[3]] += 1
+                break
+    if not wrappers:
+        why.append("no scene lookup (__dynamic_cast from %s to %s) in the program" % tuple(
+            _ref_typeinfo_name(ref, rdata[n]).decode() for n in ("typeinfo_resource", "typeinfo_scene_player")))
+        return out
+    wrap = wrappers.most_common(1)[0][0]
+    got = None
+    for a, w, regs in _walk_mem(tgt, wrap):
+        b = _bl(a, w)
+        if b is not None and b not in tgt.plt:
+            if regs.get(0, ("",))[0] == "m":
+                got = (b, regs[0][1])
+            break
+    if got is None:
+        why.append("the scene lookup's resource_get (0x%x's first call, on the manager) could not be read" % wrap)
+        return out
+    rg, mgr = got
+    if not any((w & 0xFFFFFC1F) == 0x7100081F and ((w >> 5) & 31) == 2 for a, w in list(_window(tgt, rg, 12))[:12]):
+        why.append("0x%x does not switch on its mode argument (cmp w2, #2) as resource_get does" % rg)
+        return out
+    out["site"]["resource_get"], out["data"]["resource_manager"] = rg, mgr
+    if not scene_at:
+        why.append("the scene player's scene field could not be read after a lookup")
+        return out
+    out["value"]["scene_player_scene"] = scene_at.most_common(1)[0][0]
+    # the node visibility setter: Spike 2's vtable slot, in the Sprite vtable that holds the setter / getter pair
+    slot = rval.get("node_visible_vfn", -1) // 4
+    ti = _typeinfo(tgt, SPRITE_TYPE)
+    vis = None
+    for p in sorted(p for p, a in tgt.ptr.items() if a == ti) if ti is not None and slot >= 0 else ():
+        vt = p - 8
+        st, gt = tgt.ptr.get(vt + 16 + 8 * slot), tgt.ptr.get(vt + 24 + 8 * slot)
+        if st is None or gt is None:
+            continue
+        ws, wg = tgt.u32(st), tgt.u32(gt)
+        if ws is not None and wg is not None and (ws & 0xFFC003FF) == 0x39000001 and tgt.u32(st + 4) == 0xD65F03C0 \
+                and (wg & 0xFFC003FF) == 0x39400000 and (wg >> 10) & 0xFFF == (ws >> 10) & 0xFFF:
+            vis = 8 * slot
+            break
+    if vis is None:
+        why.append("the Sprite vtable's visibility setter (slot %d: strb w1 / ldrb w0 of one byte) was not found"
+                   % slot)
+    else:
+        out["value"]["node_visible_vfn"] = vis
+    ids = {t[1]: t[2] for k, t, s in rlines if k == "scene" and len(t) >= 3}
+    for name in SCENES_CARRIED:
+        sid = ids.get(name)
+        if sid and all(len(x) == 40 and tgt.b.find(x.encode()) >= 0 for x in sid.split("/")):
+            out["scene"].append("scene %-20s %s" % (name, sid))
+    out["screens"] = vis is not None and all(n in at for n in SCREEN_SITES) and any(
+        l.split()[1] == "hud" for l in out["scene"])
+    if not out["screens"]:
+        why.append("screens: %s" % ("no hud scene the program names" if vis is not None and
+                                    all(n in at for n in SCREEN_SITES) else "the node finders or the visibility "
+                                    "setter are missing"))
+    # the video surface: every method tests the same 'set up' byte first
+    if not all(n in at for n in CLIP_SITES):
+        why.append("clips: the matcher did not place %s" % ", ".join(n for n in CLIP_SITES if n not in at))
+        return out
+    ready = _ready_byte(tgt, at["surface_stop"])
+    if ready is None:
+        why.append("clips: surface_stop tests no 'set up' byte")
+        return out
+    sv = Counter()
+    for i, tg in tgt.calls.items():
+        if tg == at["surface_play"]:
+            for c in _calls_before(tgt, i, 4, 40):
+                if _ready_byte(tgt, c) == ready:
+                    sv[c] += 1
+                    break
+    pair, playing = Counter(), Counter()
+    for i, tg in tgt.calls.items():           # the game's progress read: position, duration, then the state
+        if tg != at["surface_state"]:
+            continue
+        prev = _calls_before(tgt, i, 2, 10)
+        if len(prev) == 2 and prev[0] != prev[1] and all(_ready_byte(tgt, c) == ready for c in prev):
+            pair[(prev[1], prev[0])] += 1
+            for j in range(i + 1, i + 4):
+                w = tgt.words[j]
+                if (w & 0xFFC003FF) == 0x7100001F:                 # cmp w0, #imm
+                    playing[(w >> 10) & 0xFFF] += 1
+                    break
+    if not sv or not pair or not playing:
+        why.append("clips: %s could not be read" % ", ".join(n for n, c in (("surface_set_video", sv),
+                                                                             ("surface_position/duration", pair),
+                                                                             ("surface_playing", playing)) if not c))
+        return out
+    out["site"]["surface_set_video"] = sv.most_common(1)[0][0]
+    pos, dur = pair.most_common(1)[0][0]
+    out["site"]["surface_position"], out["site"]["surface_duration"] = pos, dur
+    out["value"]["surface_playing"] = playing.most_common(1)[0][0]
+    out["clips"] = any(l.split()[1] == "video_bank" for l in out["scene"])
+    if not out["clips"]:
+        why.append("clips: no video bank scene the program names")
+    return out
+
+
 def draft(ref, rport, tgt, game=None, version=None):
     scan(ref)
     scan(tgt)
@@ -1132,7 +1380,7 @@ def draft(ref, rport, tgt, game=None, version=None):
             "# Written: the core and the globals the 64-bit runtime has run with (SITES_PROVEN, DATA_PROVEN); every other",
             "# entry placed is a comment with its address, for when its runtime feature is made 64-bit.",
             "", "game           %s" % g, "version        %s" % v, ""]
-    body, missing, placed, later = [], [], {}, []
+    body, missing, placed, later, later_at = [], [], {}, [], {}
     data_lines = {t[1]: int(t[2], 16) for k, t, s in lines if k == "data" and len(t) >= 3}
     tdata = {}
     for name, A in data_lines.items():
@@ -1172,6 +1420,7 @@ def draft(ref, rport, tgt, game=None, version=None):
         else:
             body.append("# not carried yet (its feature is 32-bit): " + line)
             later.append(out)
+            later_at[out] = b
     snd = sound_engine(tgt, placed) if tgt.a64 else {"site": {}, "data": {}, "why": []}
     for name, b in snd["site"].items():
         if name in placed or site_ok(tgt, b):
@@ -1197,6 +1446,63 @@ def draft(ref, rport, tgt, game=None, version=None):
         placed[name] = b
         if name in missing:
             missing.remove(name)
+    scn = scene_engine(ref, lines, tgt, later_at) if tgt.a64 else {"site": {}, "data": {}, "value": {},
+                                                                     "scene": [], "screens": False, "clips": False,
+                                                                     "why": []}
+    carry = (SCREEN_SITES if scn["screens"] else ()) + (CLIP_SITES if scn["clips"] else ())
+    for name in carry:                        # the matcher's placements, now that their features are 64-bit
+        b = later_at[name]
+        mark = "# not carried yet (its feature is 32-bit): site %-16s 0x%08x" % (name, b)
+        at = next(k for k, l in enumerate(body) if l.startswith(mark))
+        body[at:at + 1] = ["#   %s: matched (PAD-1284)" % name, body[at][len("# not carried yet (its feature is 32-bit): "):]]
+        placed[name] = b
+        later.remove(name)
+    how3 = {"dynamic_cast": "the PLT stub of __dynamic_cast",
+            "resource_get": "the scene lookup's first call, on the resource manager",
+            "surface_set_video": "the surface call before surface_play",
+            "surface_position": "the game's progress read: position, duration, then surface_state",
+            "surface_duration": "the game's progress read: position, duration, then surface_state"}
+    need = {"dynamic_cast": scn["screens"] or scn["clips"], "resource_get": scn["screens"] or scn["clips"],
+            "surface_set_video": scn["clips"], "surface_position": scn["clips"], "surface_duration": scn["clips"]}
+    for name, b in scn["site"].items():
+        if not need[name] or name in placed:
+            continue
+        mark = "# site %-16s NOT PLACED" % name
+        at = next((k for k, l in enumerate(body) if l.startswith(mark)), len(body))
+        body[at:at + 1] = ["#   %s: %s (PAD-1284)" % (name, how3[name]),
+                           "site %-16s 0x%08x 0x%08x 0x%08x" % (name, b, tgt.u32(b), tgt.u32(b + 4))]
+        placed[name] = b
+        if name in missing:
+            missing.remove(name)
+    # PAD-1284: a placed site no feature uses on the Spike 2 port of this build either says why, not "32-bit"
+    rsites = {t[1] for k, t, s in lines if k == "site" and len(t) >= 3}
+    rdat = {t[1] for k, t, s in lines if k == "data" and len(t) >= 3}
+    rvals = {t[1] for k, t, s in lines if k == "value" and len(t) >= 2}
+    idle = {}
+    if not {"award_message_at", "award_value_at", "award_count_at"} <= rvals:
+        idle["award_screen"] = "the award screen needs award_message_at / _value_at / _count_at, which it lacks"
+    if "display_effects" not in rdat or not {"display_host", "display_now_at", "display_priority_at"} <= rvals:
+        for n in ("display_effect_start", "display_effect_next", "display_priority_now"):
+            idle[n] = "display priority needs data display_effects and the display_host / _now_at / _priority_at values"
+    if not {"clip_play", "video_player", "video_surface"} <= rsites:
+        for n in ("display_draw", "player_advance"):
+            idle[n] = "the clip_play clip path it belongs to is not this title's (its clips are the surface's)"
+    for k, l in enumerate(body):
+        m = re.match(r"# not carried yet \(its feature is 32-bit\): (site (\S+) .*)$", l)
+        if m and m.group(2) in idle:
+            body[k] = "# not carried - no feature uses it on the Spike 2 port either (%s): %s" % (idle[m.group(2)],
+                                                                                              m.group(1))
+    for name, why3 in (("string_new", "NOT NEEDED: the 64-bit program's strings are the C++11 ABI and it imports no "
+                                      "constructor; the runtime builds them itself (PAD-1284)"),
+                       ("surface_seek", "NOT PLACED: the 64-bit video surface has no seek - its clock is set by the "
+                                        "player's own decoder thread only (PAD-1284)")):
+        if scn["screens"] or scn["clips"]:
+            mark = "# site %-16s NOT PLACED" % name
+            at = next((k for k, l in enumerate(body) if l.startswith(mark)), None)
+            if at is not None:
+                body[at] = "# site %-16s %s" % (name, why3)
+                if name == "string_new" and name in missing:
+                    missing.remove(name)
     if lit["show"]:
         body += ["", "# ---- the game's own light shows (PAD-1283): the Spike 2 port's shows, each at the same record of",
                  "# the show table on both builds (its body, kind and flags), renumbered from 1; played as process show_proc",
@@ -1216,6 +1522,11 @@ def draft(ref, rport, tgt, game=None, version=None):
                 name, lit["data"][name]))
             placed["data:" + name] = lit["data"][name]
             continue
+        if name in scn["data"] and (scn["screens"] or scn["clips"]):
+            body.append("data %-22s 0x%08x   # read in the game's own scene lookups (PAD-1284)" % (
+                name, scn["data"][name]))
+            placed["data:" + name] = scn["data"][name]
+            continue
         if b is None:
             body.append("# data %-22s NOT PLACED: %d of %d paired functions agree" % (name, agree, of))
             continue
@@ -1234,8 +1545,12 @@ def draft(ref, rport, tgt, game=None, version=None):
             body.append("data %-22s 0x%08x   # read in the lamp layer's / processes' own code (PAD-1283)" % (name, b))
             placed["data:" + name] = b
     lit_vals = {k: v for k, v in lit["value"].items() if k not in LIGHT_VALUES_UNUSED}
+    scn_vals = {k: v for k, v in scn["value"].items()
+                if (k == "surface_playing" and scn["clips"]) or (k != "surface_playing" and (scn["screens"] or
+                                                                                            scn["clips"]))}
     for k, t, s in lines:
         if k == "value" and t[1] not in sound_vals and not t[1].startswith("countdown_") and t[1] not in lit_vals \
+                and t[1] not in scn_vals \
                 and not (lit["show"] and re.match(r"show_secs_\d+$", t[1])):
             body.append(s if t[1] in VALUES_PROVEN else "# not carried (64-bit layout, measure it): " + s.strip())
     for name, v in sound_vals.items():
@@ -1244,6 +1559,9 @@ def draft(ref, rport, tgt, game=None, version=None):
         body.append("value %-25s %s    # read off the program's own code (PAD-1283)" % (
             name, ("0x%x" % v) if name == "event_show_flag" else v))
     body += ["# PAD-1283: %s" % w for w in lit["why"]]
+    for name, v in scn_vals.items():
+        body.append("value %-25s 0x%x    # read off the program's own code (PAD-1284)" % (name, v))
+    body += ["# PAD-1284: %s" % w for w in scn["why"]]
     if "ball_end" not in placed and any(t[1] == "ball_end" for t, s in events) and "hook_dispatch" in placed:
         eid = next(t[2] for t, s in events if t[1] == "ball_end")
         body.append("value ball_end_event %s    # the end of a ball, from the bus (no ball_end site on Spike 3)" % eid)
@@ -1278,10 +1596,15 @@ def draft(ref, rport, tgt, game=None, version=None):
         body += ["", "# ---- lamps (PAD-1283): the Spike 2 port's lamp lines by name - a lamp of Spike 3's device table (its",
                  "# I/O group and index written from it), the same light ids one of the light table's records holds ----"]
         body += lit["lamp"]
+    if scn["scene"]:
+        body += ["", "# ---- scenes (PAD-1284): a mode's screen goes in hud, its clip on video_bank's surface - the same ids",
+                 "# the program names ----"]
+        body += scn["scene"]
     tx = [s for k, t, s in lines if k == "text" and len(t) > 1 and t[1].startswith("example_")]
     if tx:
         body += ["", "# ---- text ----"] + tx
-    rest = Counter(k for k, t, s in lines if (k in ("scene", "shot") or (k == "lamp" and not lit["lamp"])) or
+    scn_names = {l.split()[1] for l in scn["scene"]}
+    rest = Counter(k for k, t, s in lines if (k == "shot" or (k == "scene" and t[1] not in scn_names) or (k == "lamp" and not lit["lamp"])) or
                    (k == "callout" and shift is None) or (k == "text" and not t[1].startswith("example_") and
                                                           not (lit["show"] and re.match(r"show_(name|kind)_\d+$", t[1]))))
     if rest:

@@ -32,6 +32,7 @@ scenes, which a Spike 3 card carries as Spike 2's asset tree does - so a title's
 """
 import os
 import shlex
+import shutil
 import struct
 
 from . import mode_project as MP
@@ -274,6 +275,26 @@ def stage_try_it_sounds(reader, mplan, files_dir):
         lines.append("%s|%d|%s|%s" % (card_path.lstrip("/"), cut, os.path.basename(head),
                                       os.path.basename(tail)))
     with open(os.path.join(out, "patches"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return len(lines)
+
+
+def stage_try_it_scenes(mplan, files_dir):
+    """PAD-1284: the title's scenes the modes' screens and clips rewrote, and their new files (a
+    mode's clip), for Try it on the Spike 3 rig: each staged whole in ``<files_dir>/games.patch``
+    and named in its ``patches`` list as ``<path in /games>|whole|<file>|`` (after any sound
+    container :func:`stage_try_it_sounds` wrote there), which s3run.sh puts in the slot's /games.
+    Returns the number of files (0: nothing)."""
+    if not mplan.jobs:
+        return 0
+    out = os.path.join(files_dir, GAMES_PATCH)
+    os.makedirs(out, exist_ok=True)
+    lines = []
+    for k, (rel, src) in enumerate(mplan.jobs):
+        name = "w%d" % k
+        shutil.copyfile(src, os.path.join(out, name))
+        lines.append("%s|whole|%s|" % (rel.lstrip("/"), name))
+    with open(os.path.join(out, "patches"), "a", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     return len(lines)
 

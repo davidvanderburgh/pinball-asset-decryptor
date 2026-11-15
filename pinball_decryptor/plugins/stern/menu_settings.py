@@ -49,6 +49,14 @@ own: each takes whichever DEPRECATED one the card's other settings of ours leave
 names None for them), so a card with neither MUSIC MODE nor EDITION has all three, one with both
 has BRIGHTNESS only. Their range is 1..9 with 5 (normal) the default, and their help is a line of
 their own rather than a list of names.
+
+PAD-1321: a Spike 3 game program (64-bit ARM, ``AdjustmentTable(raw, wide_ok=True)``) is read the
+same way: the same DEPRECATED settings (ids 31/33/35 on Star Wars ELG 1.10), a 64-byte descriptor
+whose fields the table names (``table.fields``), its row caption a five-pointer line the descriptor
+points at (``+0x28``), and the menu's category records (111 on ELG, the same ``{category, kind, id}``)
+found through the ``adrp``/``add`` that address them. :func:`plan` gives the same-size writes; the
+category table cannot be grown on a 64-bit program yet (:class:`WideCategoryTable` refuses, with the
+reason), so :func:`offered` says no for one whose menu does not already list the setting.
 """
 from __future__ import annotations
 
@@ -197,6 +205,40 @@ class StandardList:
                                              (w1 & ~0x000F0FFF) | ((hi & 0xF000) << 4) | (hi & 0xFFF))}
 
 
+@dataclass(frozen=True)
+class WideCategoryTable:
+    """PAD-1321: the category records of a 64-bit (Spike 3) program, read only. The menu manager
+    copies them at start as Spike 2's does (``adrp``/``add x1`` names them, ``mov x2, #size`` the
+    copy); growing them is not built for this program kind, so :meth:`writes` refuses."""
+    va: int
+    records: tuple
+
+    def has(self, category, ident):
+        return any(c == category and k == KIND_ADJUSTMENT and i == ident for c, k, i in self.records)
+
+    def lists(self, ident):
+        return any(k == KIND_ADJUSTMENT and i == ident for c, k, i in self.records)
+
+    def where(self, category):
+        return "Adjustments"
+
+    def blob(self, *settings):
+        recs = list(self.records) + [(s.category, KIND_ADJUSTMENT, s.id) for s in settings
+                                     if not self.has(s.category, s.id)]
+        return b"".join(struct.pack("<3I", *r) for r in recs)
+
+    def records_with(self, *settings):
+        return len(self.records) + sum(1 for s in settings if not self.has(s.category, s.id))
+
+    def writes(self, table, new_va, *settings):
+        raise MenuSettingError(WIDE_GROW_REFUSAL)
+
+
+#: why a 64-bit program's menu takes no new row yet
+WIDE_GROW_REFUSAL = ("a new row cannot be added to a Spike 3 game's operator menu yet (its page "
+                     "list cannot be grown)")
+
+
 #: the category names (the menu's 37-line text table) of the pages our settings go on
 CATEGORY_NAMES = {11: "LCD/Lamp", 13: "Audio Content", 16: "Attract Mode"}
 
@@ -256,10 +298,13 @@ ANY_MENU_PATH = {
 }
 
 
-def _refs(data, va, consts=None):
+def _refs(data, va, consts=None, wide=False, skip=()):
     """How many times the program names address *va*: as a literal word, and (with *consts*, the
-    menu reading's movw/movt map) as an address it builds."""
-    n = data.count(struct.pack("<I", va))
+    menu reading's movw/movt map, or a 64-bit program's adrp/add one) as an address it builds.
+    *skip* is the file ranges left out: a 64-bit PIE's relocation tables, which repeat every
+    pointer they relocate as an addend (:func:`rela_spans`)."""
+    pat = struct.pack("<Q" if wide else "<I", va)
+    n = data.count(pat) - sum(data.count(pat, a, b) for a, b in skip)
     if consts is not None:
         n += len(consts.get(va, ()))
     return n
@@ -275,7 +320,9 @@ def _room(table, va, consts):
     if end < 0:
         return 0
     k = end + 1
-    while k < len(table.data) and table.data[k] == 0 and not _refs(table.data, table._va(k), consts):
+    wide = getattr(table, "wide", False)
+    skip = rela_spans(table) if wide else ()
+    while k < len(table.data) and table.data[k] == 0 and not _refs(table.data, table._va(k), consts, wide, skip):
         k += 1
     return k - o - 1
 
@@ -284,6 +331,106 @@ def _imm12(w):
     rot = ((w >> 8) & 0xF) * 2
     v = w & 0xFF
     return ((v >> rot) | (v << (32 - rot))) & 0xFFFFFFFF if rot else v
+
+
+def rela_spans(table):
+    """PAD-1321: the file ranges of a 64-bit program's relocation tables (``DT_RELA``/``DT_RELASZ``
+    and ``DT_JMPREL``/``DT_PLTRELSZ`` of its ``PT_DYNAMIC``). Every pointer the loader relocates is
+    stored in place AND as the addend of its relocation, so counting who names an address leaves
+    these out."""
+    spans = getattr(table, "_rela_spans", None)
+    if spans is not None:
+        return spans
+    data = table.data
+    e_phoff = struct.unpack_from("<Q", data, 0x20)[0]
+    e_phentsize, e_phnum = struct.unpack_from("<HH", data, 0x36)
+    dyn = None
+    for i in range(e_phnum):
+        o = e_phoff + i * e_phentsize
+        if struct.unpack_from("<I", data, o)[0] == 2:                       # PT_DYNAMIC
+            dyn = struct.unpack_from("<Q", data, o + 8)[0], struct.unpack_from("<Q", data, o + 0x20)[0]
+    tags = {}
+    if dyn:
+        for k in range(dyn[1] // 16):
+            tag, val = struct.unpack_from("<2Q", data, dyn[0] + 16 * k)
+            if tag == 0:
+                break
+            tags[tag] = val
+    spans = []
+    for at, size in ((7, 8), (23, 2)):                    # DT_RELA/DT_RELASZ, DT_JMPREL/DT_PLTRELSZ
+        if at in tags and size in tags and table._off(tags[at]) is not None:
+            a = table._off(tags[at])
+            spans.append((a, a + tags[size]))
+    table._rela_spans = tuple(spans)
+    return table._rela_spans
+
+
+def wide_consts(table):
+    """PAD-1321: ``{va: [file offsets]}`` of every address a 64-bit program's code builds as
+    ``adrp xd`` then ``add xd, xd, #lo12`` within the next eight instructions (how it names a
+    string or a table), over its executable segments."""
+    cached = getattr(table, "_wide_consts", None)
+    if cached is not None:
+        return cached
+    import numpy as np
+    data = table.data
+    out = {}
+    for po, pv, fsz in table._loads:
+        base = (po + 3) & ~3
+        n = (po + fsz - base) // 4
+        if n <= 0:
+            continue
+        w = np.frombuffer(data, dtype="<u4", count=n, offset=base)
+        adrp = np.flatnonzero((w & 0x9F000000) == 0x90000000)
+        if not len(adrp):
+            continue
+        rd = w[adrp] & 0x1F
+        imm = (((w[adrp] >> 29) & 3) | (((w[adrp] >> 5) & 0x7FFFF) << 2)).astype(np.int64)
+        imm[imm >= (1 << 20)] -= 1 << 21
+        pc = pv + (base - po) + 4 * adrp.astype(np.int64)
+        page = (pc & ~0xFFF) + (imm << 12)
+        for step in range(1, 9):
+            k = adrp + step
+            ok = k < n
+            kk, rr, pp = k[ok], rd[ok], page[ok]
+            a = w[kk]
+            hit = ((a & 0xFFC00000) == 0x91000000) & ((a & 0x1F) == rr) & (((a >> 5) & 0x1F) == rr)
+            for o, va in zip((base + 4 * kk[hit]).tolist(), (pp[hit] + ((a[hit] >> 10) & 0xFFF)).tolist()):
+                out.setdefault(int(va), []).append(int(o))
+    table._wide_consts = out
+    return out
+
+
+def wide_category_table(table, consts=None):
+    """The :class:`WideCategoryTable` of a 64-bit program, or ``None``: an address its code builds
+    into ``x1`` whose ``mov x2, #size`` follows within four instructions, *size* / 12 records
+    ``{category < 64, kind 1..8, id < count}`` there (50 to 500 of them), exactly one such."""
+    consts = wide_consts(table) if consts is None else consts
+    data = table.data
+    found = {}
+    for va, offs in consts.items():
+        o = table._off(va)
+        if o is None:
+            continue
+        for off in offs:
+            if data[off] & 0x1F != 1:
+                continue
+            for q in range(1, 5):
+                if off + 4 * q + 4 > len(data):
+                    break
+                m = struct.unpack_from("<I", data, off + 4 * q)[0]
+                if (m & 0xFFE0001F) != 0xD2800002:            # movz x2, #imm16
+                    continue
+                size = (m >> 5) & 0xFFFF
+                if size % REC or not 50 * REC <= size <= 500 * REC or o + size > len(data):
+                    continue
+                recs = tuple(struct.unpack_from("<3I", data, o + REC * r) for r in range(size // REC))
+                if all(c < 64 and 1 <= kd <= 8 and i < table.count for c, kd, i in recs):
+                    found[va] = recs
+    if len(found) != 1:
+        return None
+    va, recs = next(iter(found.items()))
+    return WideCategoryTable(va, recs)
 
 
 def category_table(table):
@@ -358,17 +505,33 @@ def standard_list(table):
     return StandardList(r0.value, tuple(ids), go)
 
 
-def menu_table(table):
+def menu_table(table, consts=None):
     """The menu this program lists its adjustments by: its :class:`CategoryTable`, else its
-    :class:`StandardList` (PAD-724), else ``None``."""
+    :class:`StandardList` (PAD-724), else ``None``. PAD-1321: a 64-bit program's
+    :class:`WideCategoryTable`."""
+    if getattr(table, "wide", False):
+        return wide_category_table(table, consts)
     return category_table(table) or standard_list(table)
 
 
 def _row_caption_line(table, i):
     """``(file offset of the string, its text)`` of adjustment *i*'s row caption: line
     ``count - 1 - i`` of the text table of exactly ``count`` lines (five language pointers and a
-    zero each), when all five name one string; else ``None``."""
+    zero each), when all five name one string; else ``None``. PAD-1321: a 64-bit descriptor points
+    at its line itself (``+0x28``)."""
     data = table.data
+    if getattr(table, "wide", False):
+        line = table._off(table.word(table.field_off(i, "row")))
+        if line is None or line + 48 > len(data):
+            return None
+        ptrs = struct.unpack_from("<6Q", data, line)
+        if ptrs[5] != 0 or len(set(ptrs[:5])) != 1:
+            return None
+        o = table._off(ptrs[0])
+        if o is None:
+            return None
+        end = data.find(b"\x00", o)
+        return o, data[o:end].decode("latin1")
     for po, pv, fsz in table._loads:
         base = (po + 3) & ~3
         n = (po + fsz - base) // 4
@@ -451,13 +614,27 @@ OFF_KIND = 0x24
 ONOFF_ROW = "AD_CUSTOM_MESSAGE"
 
 
+def _kind_elem(table):
+    """The descriptor size that carries a display kind: 44 bytes on Spike 2, 64 on Spike 3."""
+    return 64 if getattr(table, "wide", False) else 44
+
+
+def _kind_at(table, i):
+    """Descriptor *i*'s display kind: a u32 on Spike 2, the u16 below the category on Spike 3."""
+    return struct.unpack_from("<H" if table.wide else "<I", table.data, table.field_off(i, "kind"))[0]
+
+
+def _kind_bytes(table, kind):
+    return struct.pack("<H" if table.wide else "<I", kind)
+
+
 def onoff_kind(table):
     """The display kind of the game's own Off/On row (CUSTOM MESSAGE), or raise :class:`MenuSettingError`."""
-    if table.elem != 44 or ONOFF_ROW not in table.by_name:
+    if table.elem != _kind_elem(table) or ONOFF_ROW not in table.by_name:
         raise MenuSettingError("the game has no Off/On setting to show this one like")
     i = table.by_name[ONOFF_ROW]
-    desc = table._off(table.table_va + i * table.elem)
-    low, high, kind = (struct.unpack_from("<I", table.data, desc + o)[0] for o in (OFF_MIN, OFF_MAX, OFF_KIND))
+    low, high = (struct.unpack_from("<I", table.data, table.field_off(i, f))[0] for f in ("min", "max"))
+    kind = _kind_at(table, i)
     if (low, high) != (0, 1) or not 0 < kind < 64:
         raise MenuSettingError("the game's own Off/On setting reads %d..%d, kind %d" % (low, high, kind))
     return kind
@@ -470,11 +647,9 @@ NUMBER_ROW = "AD_GAME_ID"
 
 def number_kind(table):
     """The display kind of the game's own plain-number row (GAME ID), or raise :class:`MenuSettingError`."""
-    if table.elem != 44 or NUMBER_ROW not in table.by_name:
+    if table.elem != _kind_elem(table) or NUMBER_ROW not in table.by_name:
         raise MenuSettingError("the game has no numbered setting to show this one like")
-    i = table.by_name[NUMBER_ROW]
-    desc = table._off(table.table_va + i * table.elem)
-    kind = struct.unpack_from("<I", table.data, desc + OFF_KIND)[0]
+    kind = _kind_at(table, table.by_name[NUMBER_ROW])
     if not 0 < kind < 64:
         raise MenuSettingError("the game's own numbered setting reads kind %d" % kind)
     return kind
@@ -512,20 +687,29 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
         raise MenuSettingError("the game has no %s to take over" % ad)
     i = table.by_name[ad]
     desc = table._off(table.table_va + i * table.elem)
+    f = getattr(table, "fields", None) or {"default": OFF_DEFAULT, "min": OFF_MIN, "max": OFF_MAX,
+                                            "step": OFF_STEP, "label": OFF_MENU_LABEL,
+                                            "help": OFF_MENU_HELP, "kind": OFF_KIND}
+    wide = getattr(table, "wide", False)
     label = menu_label(table, i)
     # a previous Write's caption of ours (PAD-537: a spare one may have held another of ours)
     ours = label in {v[1] for v in SETTINGS.values()}
     if not ours and not label.upper().startswith(DEPRECATED):
         raise MenuSettingError("the game's %s is \"%s\", not a setting it says it no longer uses"
                                % (ad, label))
-    reading = MV.MenuVisibility(table)
-    reading._scan()
-    consts = reading._consts
+    skip = ()
+    if wide:
+        consts = wide_consts(table)
+        skip = rela_spans(table)
+    else:
+        reading = MV.MenuVisibility(table)
+        reading._scan()
+        consts = reading._consts
     data = table.data
-    live = struct.unpack_from("<I", data, desc)[0]
-    if _refs(data, live, consts) != 1:
+    live = table.word(desc) if wide else struct.unpack_from("<I", data, desc)[0]
+    if _refs(data, live, consts, wide, skip) != 1:
         raise MenuSettingError("the game's program reads %s's value directly" % ad)
-    cat = menu_table(table)
+    cat = menu_table(table, consts) if wide else menu_table(table)
     if cat is None:
         raise MenuSettingError("the game's operator menu pages could not be read")
     if not ours and cat.lists(i):
@@ -533,13 +717,16 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     row = _row_caption_line(table, i)
     if row is None:
         raise MenuSettingError("the game's menu captions could not be read")
-    cap_va = struct.unpack_from("<I", data, desc + OFF_MENU_LABEL)[0]
-    help_va = struct.unpack_from("<I", data, desc + OFF_MENU_HELP)[0]
+    if wide:
+        cap_va, help_va = table.word(desc + f["label"]), table.word(desc + f["help"])
+    else:
+        cap_va = struct.unpack_from("<I", data, desc + OFF_MENU_LABEL)[0]
+        help_va = struct.unpack_from("<I", data, desc + OFF_MENU_HELP)[0]
     for what, va in (("caption", cap_va), ("help line", help_va)):
-        if table._off(va) is None or _refs(data, va, consts) != 1:
+        if table._off(va) is None or _refs(data, va, consts, wide, skip) != 1:
             raise MenuSettingError("%s's %s is shared with other settings" % (ad, what))
     row_va = table._va(row[0])
-    if _refs(data, row_va, consts) != 5:
+    if _refs(data, row_va, consts, wide, skip) != 5:
         raise MenuSettingError("%s's row caption is shared with other text" % ad)
     cap_room, help_room = _room(table, cap_va, consts), _room(table, help_va, consts)
     row_room = _room(table, row_va, consts)
@@ -557,9 +744,11 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
         row[0]: row_caption.encode("ascii") + b"\x00" * (row_room + 1 - len(row_caption)),
         table._off(help_va): text.encode("ascii", "replace") + b"\x00" * (help_room + 1 - len(text)),
     }
-    for off, v in ((OFF_DEFAULT, int(default) - 1 + low), (OFF_MIN, low), (OFF_MAX, values - 1 + low),
-                   (OFF_STEP, 1)) + (((OFF_KIND, kind),) if kind else ()):
+    for off, v in ((f["default"], int(default) - 1 + low), (f["min"], low), (f["max"], values - 1 + low),
+                   (f["step"], 1)):
         writes[desc + off] = struct.pack("<i", v)
+    if kind:
+        writes[desc + f["kind"]] = _kind_bytes(table, kind) if wide else struct.pack("<i", kind)
     setting = MenuSetting(key, i, row_caption, text, values, live, category, int(default) - 1 + low,
                           cat.where(category), low, kind)
     return setting, writes, (None if cat.has(category, i) else cat)
@@ -641,10 +830,9 @@ def check(raw, setting):
     from .adjustments import AdjustmentTable
     bad = []
     try:
-        t = AdjustmentTable(raw)
+        t = AdjustmentTable(raw, wide_ok=True)
         e = t.entry(setting.id)
-        desc = t._off(t.table_va + setting.id * t.elem)
-        got_help = t._cstr(struct.unpack_from("<I", raw, desc + OFF_MENU_HELP)[0], 200)
+        got_help = t._cstr(t.word(t.field_off(setting.id, "help")), 200)
         cat = menu_table(t)
         row = _row_caption_line(t, setting.id)
     except Exception as ex:                                   # noqa: BLE001
@@ -652,7 +840,7 @@ def check(raw, setting):
     if (e["default"], e["min"], e["max"], e["step"]) != (setting.default, setting.low,
                                                           setting.values - 1 + setting.low, 1):
         bad.append("its range reads %d..%d" % (e["min"], e["max"]))
-    if setting.kind and struct.unpack_from("<I", raw, desc + OFF_KIND)[0] != setting.kind:
+    if setting.kind and _kind_at(t, setting.id) != setting.kind:
         bad.append("it does not show its values as written")
     if menu_label(t, setting.id) != SETTINGS[setting.key][1]:
         bad.append("its caption reads \"%s\"" % menu_label(t, setting.id))
@@ -669,7 +857,9 @@ def offered(elf_bytes, key=MUSIC_MODE):
     """``""`` when this program can take setting *key*, else the reason it cannot."""
     from .adjustments import AdjustmentTable
     try:
-        plan(AdjustmentTable(elf_bytes), key, 2)
+        _s, _w, cat = plan(AdjustmentTable(elf_bytes, wide_ok=True), key, 2)
+        if isinstance(cat, WideCategoryTable):
+            return WIDE_GROW_REFUSAL
     except MenuSettingError as e:
         return str(e)
     except ValueError as e:

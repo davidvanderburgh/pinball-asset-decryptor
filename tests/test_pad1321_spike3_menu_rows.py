@@ -76,33 +76,46 @@ def test_elg_takes_music_mode_edition_and_coop_rows():
     settings, writes, cat, refused = M.plan_many(t, wanted)
     assert refused == {}
     assert {s.key: s.id for s in settings} == {"music_mode": 31, "edition": 33, "coop_play": 35}
-    # every write is the same size as the bytes it replaces: nothing moves in the program
+    # every descriptor/caption/help write is the same size as the bytes it replaces
     assert all(0 <= o < len(elf) for o in writes)
     buf = bytearray(elf)
     for o, b in writes.items():
         buf[o:o + len(b)] = b
     assert len(buf) == len(elf)
-    # the descriptor, captions, help and display kind all read back; only the page listing is
-    # missing, because growing the category table is the next ticket
-    for s in settings:
-        assert M.check(bytes(buf), s) == ["no menu page lists it"]
     co = next(s for s in settings if s.key == "coop_play")
     assert co.low == 0 and co.help == "Two players share a game"
 
 
-def test_elg_menu_grow_is_refused_until_the_program_can_grow():
+def test_elg_grows_the_menu_so_the_row_is_listed():
     _g, _v, elf = program("star_wars_elg")
-    why = M.offered(elf, M.MUSIC_MODE)
-    assert why == M.WIDE_GROW_REFUSAL
+    assert M.offered(elf, M.MUSIC_MODE) == ""      # growable, so no longer refused
     t = AdjustmentTable(elf, wide_ok=True)
-    cat = M.menu_table(t)
-    assert isinstance(cat, M.WideCategoryTable)
-    assert cat.lists(31) is False                 # id 31 is on no page as shipped
+    s, writes, _c = M.plan(t, M.MUSIC_MODE, 2, names=["Standard", "Orchestral"])
+    buf = bytearray(elf)
+    for o, b in writes.items():
+        buf[o:o + len(b)] = b
+    t2 = AdjustmentTable(bytes(buf), wide_ok=True)
+    cat = M.menu_table(t2)
+    assert cat.lists(s.id) is False                 # id 31 is on no page as shipped
+    grown = M.grow_wide_program(t2, cat, s)
+    assert len(grown) > len(elf)                     # a read-only segment was appended
+    t3 = AdjustmentTable(grown, wide_ok=True)
+    cat3 = M.menu_table(t3)
+    assert cat3.lists(s.id) and len(cat3.records) == len(cat.records) + 1
+    assert M.check(grown, s) == []                   # descriptor, captions, help AND the page listing
+
+
+def test_a_menu_copy_that_cannot_be_read_is_refused_not_mangled():
+    # a table address the program never forms must raise, never silently mis-patch
+    _g, _v, elf = program("star_wars_elg")
+    t = AdjustmentTable(elf, wide_ok=True)
+    real = M.menu_table(t)
+    bogus = M.WideCategoryTable(real.va + 0x4000, real.records)   # a va no adrp/add forms
     with pytest.raises(M.MenuSettingError):
-        cat.writes(t, cat.va + 0x10000, *[])
+        M.wide_copy_sites(t, bogus)
 
 
-# --- the same reader over every Spike 3 library card ---
+# --- the same reader + grow over every Spike 3 library card ---
 
 @pytest.mark.parametrize("key", sorted(CARDS))
 def test_every_spike3_program_reads_and_either_takes_rows_or_says_why(key):
@@ -111,8 +124,8 @@ def test_every_spike3_program_reads_and_either_takes_rows_or_says_why(key):
     assert t.wide and t.elem == 64 and t.sane()
     cat = M.menu_table(t)
     assert isinstance(cat, M.WideCategoryTable) and 50 <= len(cat.records) <= 500
-    # MUSIC MODE is taken when the program has a DEPRECATED setting whose value nothing else reads,
-    # else refused with a sentence; never a crash, never a wrong-size write
+    # MUSIC MODE is taken and the menu grown when the program has a spare DEPRECATED setting whose
+    # value nothing else reads AND a menu-copy we can read; else refused with a sentence; no crash
     settings, writes, _c, refused = M.plan_many(t, [(M.MUSIC_MODE, 2, ["A", "B"])])
     assert settings or refused
     if settings:
@@ -121,4 +134,6 @@ def test_every_spike3_program_reads_and_either_takes_rows_or_says_why(key):
         for o, b in writes.items():
             buf[o:o + len(b)] = b
         assert len(buf) == len(elf)
-        assert M.check(bytes(buf), s) == ["no menu page lists it"]
+        t2 = AdjustmentTable(bytes(buf), wide_ok=True)
+        grown = M.grow_wide_program(t2, M.menu_table(t2), s)
+        assert M.check(grown, s) == []

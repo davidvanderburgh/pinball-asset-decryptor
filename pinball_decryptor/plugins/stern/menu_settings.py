@@ -207,9 +207,12 @@ class StandardList:
 
 @dataclass(frozen=True)
 class WideCategoryTable:
-    """PAD-1321: the category records of a 64-bit (Spike 3) program, read only. The menu manager
-    copies them at start as Spike 2's does (``adrp``/``add x1`` names them, ``mov x2, #size`` the
-    copy); growing them is not built for this program kind, so :meth:`writes` refuses."""
+    """PAD-1321: the category records of a 64-bit (Spike 3) program. The menu manager copies them at
+    start as Spike 2's does (``adrp``/``add x1`` names them, ``mov x2, #size`` the copy), so a row is
+    added by giving the table one more record in an appended read-only segment and re-pointing the
+    copy (:func:`grow_wide_program`) - there is no same-size ``writes`` as there is for Spike 2
+    (the append and the re-point are one step, they need the new segment's address), so
+    :meth:`writes` is not used for this kind."""
     va: int
     records: tuple
 
@@ -231,12 +234,13 @@ class WideCategoryTable:
         return len(self.records) + sum(1 for s in settings if not self.has(s.category, s.id))
 
     def writes(self, table, new_va, *settings):
-        raise MenuSettingError(WIDE_GROW_REFUSAL)
+        # a 64-bit program's menu is grown by :func:`grow_wide_program`, not a same-size write
+        raise MenuSettingError("use grow_wide_program for a Spike 3 menu")
 
 
-#: why a 64-bit program's menu takes no new row yet
-WIDE_GROW_REFUSAL = ("a new row cannot be added to a Spike 3 game's operator menu yet (its page "
-                     "list cannot be grown)")
+#: the default reason a 64-bit program's menu cannot take a new row (a build whose menu-copy does
+#: not match the compiler's pattern :func:`wide_copy_sites` reads; the finder gives a specific one)
+WIDE_GROW_REFUSAL = "this Spike 3 game's operator-menu copy could not be read to add a row"
 
 
 #: the category names (the menu's 37-line text table) of the pages our settings go on
@@ -431,6 +435,206 @@ def wide_category_table(table, consts=None):
         return None
     va, recs = next(iter(found.items()))
     return WideCategoryTable(va, recs)
+
+
+# ---------------------------------------------------------------------------
+# PAD-1321: grow a 64-bit (Spike 3) program's menu by one or more records.
+#
+# The menu manager copies the category table (a literal run of {category, kind, id}) into a
+# std::vector at start-up: ``adrp``/``add`` forms the table address, ``movz x2, #size`` and
+# ``movz x0, #size`` give the ``memcpy`` and the ``operator new`` sizes, ``add x21, x0, #size`` the
+# vector's end, and the table is staged through a stack buffer (``sub sp, sp, #F``) before the heap.
+# The three Spike 3 row-taking builds (Star Wars ELG, Fallout, Transformers) share this exact
+# codegen. To add a record: append the grown table as a read-only segment, re-point the ``adrp``/
+# ``add`` at it, and raise the three size constants.
+#
+# The one hazard is the stack buffer: the compiler puts the function's STACK CANARY in the eight
+# bytes at the top of that buffer (``[sp, #F-8]``), written at the prologue and re-checked on EVERY
+# exit path (the normal return AND the exception landing pad). A longer copy would overwrite it, so
+# the frame is grown by ``D`` (16-aligned) and the canary - every one of its accesses - moves up
+# with it. A build whose menu-copy does not match this pattern, or that keeps some other local in
+# the bytes the longer copy would cover, is refused rather than mis-patched.
+# ---------------------------------------------------------------------------
+_W_PAGE = 0x1000
+
+
+def _w_adrp(rd, pc, tgt):
+    d = ((tgt & ~0xFFF) - (pc & ~0xFFF)) >> 12
+    return 0x90000000 | ((d & 3) << 29) | (((d >> 2) & 0x7FFFF) << 5) | rd
+
+
+def _w_adrp_target(w, pc):
+    d = (((w >> 5) & 0x7FFFF) << 2) | ((w >> 29) & 3)
+    if d >= (1 << 20):
+        d -= 1 << 21
+    return (pc & ~0xFFF) + (d << 12)
+
+
+def _w_is_addimm(w):
+    return (w & 0xFFC00000) == 0x91000000
+
+
+def _w_addimm_fields(w):
+    return (w >> 10) & 0xFFF, (w >> 5) & 0x1F, w & 0x1F
+
+
+def _w_is_movz(w):
+    return (w & 0xFFE00000) == 0xD2800000
+
+
+def _w_is_ldst_sp(w):
+    return (w & 0xFFC003E0) in (0xF90003E0, 0xF94003E0)       # str/ldr x, [sp, #imm*8]
+
+
+def _w_ldst_off(w):
+    return ((w >> 10) & 0xFFF) * 8
+
+
+def _w_set_imm12(w, imm):                                     # add/sub #imm12, or scaled ld/st off
+    return (w & ~(0xFFF << 10)) | ((imm & 0xFFF) << 10)
+
+
+def _w_set_movz(w, imm16):
+    return (w & ~(0xFFFF << 5)) | ((imm16 & 0xFFFF) << 5)
+
+
+def wide_copy_sites(table, cat):
+    """Everything :func:`grow_wide_program` must patch to give *cat* one more record, read from the
+    ELF, or raise :class:`MenuSettingError` when the build does not match the compiler's menu-copy
+    pattern (so it is left alone rather than mis-patched). PAD-1321."""
+    import numpy as np
+    data = table.data
+    va, size = cat.va, len(cat.records) * REC
+    # the single adrp/add pair that forms the table address, and the segment it is in
+    pairs, seg_of = [], {}
+    for po, pv, fsz in table._loads:
+        b = (po + 3) & ~3
+        nn = (po + fsz - b) // 4
+        if nn <= 0:
+            continue
+        ww = np.frombuffer(data, dtype="<u4", count=nn, offset=b)
+        for k in np.flatnonzero((ww & 0x9F000000) == 0x90000000).tolist():
+            pc = pv + (b - po) + 4 * k
+            page, rd = _w_adrp_target(int(ww[k]), pc), int(ww[k]) & 0x1F
+            for j in range(k + 1, min(nn, k + 9)):
+                if _w_is_addimm(int(ww[j])):
+                    imm, rn, rdj = _w_addimm_fields(int(ww[j]))
+                    if rn == rd and rdj == rd and page + imm == va:
+                        pairs.append((b + 4 * k, b + 4 * j))
+                        seg_of[b + 4 * j] = (po, b, nn, ww)
+                        break
+    if len(pairs) != 1:
+        raise MenuSettingError("the menu table's address is formed %d times, not once" % len(pairs))
+    adrp_off, add_off = pairs[0]
+    _po, base, n, w = seg_of[add_off]
+    ai = (add_off - base) // 4
+    # the memcpy/alloc sizes and the vector-end add, in the window after the address is formed
+    size_offs = []
+    for j in range(ai + 1, min(n, ai + 24)):
+        wj = int(w[j])
+        if _w_is_movz(wj) and ((wj >> 5) & 0xFFFF) == size:
+            size_offs.append(("movz", base + 4 * j))
+        elif _w_is_addimm(wj) and _w_addimm_fields(wj)[0] == size:
+            size_offs.append(("add", base + 4 * j))
+    kinds = [k for k, _ in size_offs]
+    if kinds.count("movz") < 2 or kinds.count("add") < 1:
+        raise MenuSettingError("the menu copy's size constants do not match the known pattern")
+    # the stack buffer frame and its canary (the slot at F-8, checked on every exit path)
+    sub_i = next((j for j in range(ai, max(0, ai - 400), -1) if (int(w[j]) & 0xFFC003FF) == 0xD10003FF), None)
+    if sub_i is None:
+        raise MenuSettingError("the menu copy's stack buffer could not be found")
+    F = ((int(w[sub_i]) >> 10) & 0xFFF)
+    add_sp_i = next((j for j in range(ai, min(n, ai + 400))
+                     if (int(w[j]) & 0xFFC003FF) == 0x910003FF and ((int(w[j]) >> 10) & 0xFFF) == F), None)
+    if add_sp_i is None:
+        raise MenuSettingError("the menu copy's stack frame restore could not be found")
+    canary_off = F - 8
+    end = add_sp_i
+    for j in range(add_sp_i + 1, min(n, ai + 600)):
+        if (int(w[j]) & 0xFFE003E0) == 0xA98003E0:            # the next function's prologue
+            break
+        end = j
+    saved, intruder = [], []
+    for j in range(sub_i + 1, end + 1):
+        wj = int(w[j])
+        if _w_is_ldst_sp(wj):
+            o = _w_ldst_off(wj)
+            if o == canary_off:
+                saved.append(base + 4 * j)
+            elif size <= o < F:
+                intruder.append(o)
+    if intruder:
+        raise MenuSettingError("the menu copy keeps a local where the longer table would go")
+    if not saved:
+        raise MenuSettingError("the menu copy's stack canary could not be found")
+    return {"adrp": adrp_off, "add": add_off, "size_offs": size_offs,
+            "F": F, "canary_off": canary_off, "sub": base + 4 * sub_i,
+            "add_sp": base + 4 * add_sp_i, "saved": saved}
+
+
+def _wide_append_segment(buf, blob):
+    """Append *blob* (page-padded) to *buf* and map it read-only at an unclaimed vaddr above every
+    PT_LOAD (so the load order stays ascending), repurposing PT_GNU_STACK, else PT_NOTE. Returns the
+    virtual address. Raises :class:`MenuSettingError` when there is no advisory header to reuse."""
+    e_phoff = struct.unpack_from("<Q", buf, 0x20)[0]
+    phes, phn = struct.unpack_from("<HH", buf, 0x36)
+    slot = hi = None
+    for want in (0x6474E551, 4):                               # PT_GNU_STACK, then PT_NOTE
+        for i in range(phn):
+            o = e_phoff + i * phes
+            if struct.unpack_from("<I", buf, o)[0] == want:
+                slot = o
+                break
+        if slot is not None:
+            break
+    if slot is None:
+        raise MenuSettingError("the program has no advisory header to map the grown menu table")
+    hi = 0
+    for i in range(phn):
+        o = e_phoff + i * phes
+        if struct.unpack_from("<I", buf, o)[0] == 1:
+            hi = max(hi, struct.unpack_from("<Q", buf, o + 16)[0] + struct.unpack_from("<Q", buf, o + 40)[0])
+    new_va = (hi + _W_PAGE - 1) & ~(_W_PAGE - 1)
+    off = (len(buf) + _W_PAGE - 1) & ~(_W_PAGE - 1)
+    want_sz = (len(blob) + _W_PAGE - 1) & ~(_W_PAGE - 1)
+    buf.extend(b"\0" * (off - len(buf)))
+    buf.extend(bytearray(blob) + b"\0" * (want_sz - len(blob)))
+    struct.pack_into("<II", buf, slot, 1, 4)                   # p_type=PT_LOAD, p_flags=R
+    struct.pack_into("<QQQQQ", buf, slot + 8, off, new_va, new_va, want_sz, want_sz)
+    struct.pack_into("<Q", buf, slot + 48, _W_PAGE)
+    return new_va
+
+
+def grow_wide_program(table, cat, *settings):
+    """Return a copy of the 64-bit program *table* whose operator menu lists *settings*' rows: the
+    grown category table in an appended read-only segment, the start-up copy re-pointed at it, its
+    size constants raised and its stack frame grown so the longer copy clears the canary. Raises
+    :class:`MenuSettingError` when the build cannot be grown (:func:`wide_copy_sites`). PAD-1321."""
+    add = [s for s in settings if not cat.has(s.category, s.id)]
+    if not add:
+        return bytes(table.data)
+    sites = wide_copy_sites(table, cat)
+    buf = bytearray(table.data)
+    blob = cat.blob(*settings)
+    new_size = len(cat.records) * REC + len(add) * REC
+    new_va = _wide_append_segment(buf, blob)
+    # re-point the copy at the grown table
+    struct.pack_into("<I", buf, sites["adrp"], _w_adrp(1, sites["adrp"], new_va))
+    aw = struct.unpack_from("<I", buf, sites["add"])[0]
+    struct.pack_into("<I", buf, sites["add"], _w_set_imm12(aw, new_va & 0xFFF))
+    for kind, o in sites["size_offs"]:
+        wv = struct.unpack_from("<I", buf, o)[0]
+        struct.pack_into("<I", buf, o, _w_set_movz(wv, new_size) if kind == "movz" else _w_set_imm12(wv, new_size))
+    # grow the frame so the longer copy does not reach the canary, moving every canary access up
+    F, canary = sites["F"], sites["canary_off"]
+    D = (((new_size - canary) + 15) & ~15) if new_size > canary else 0
+    if D:
+        for off in (sites["sub"], sites["add_sp"]):
+            struct.pack_into("<I", buf, off, _w_set_imm12(struct.unpack_from("<I", buf, off)[0], F + D))
+        for off in sites["saved"]:
+            wv = struct.unpack_from("<I", buf, off)[0]
+            struct.pack_into("<I", buf, off, _w_set_imm12(wv, (canary + D) // 8))
+    return bytes(buf)
 
 
 def category_table(table):
@@ -857,9 +1061,12 @@ def offered(elf_bytes, key=MUSIC_MODE):
     """``""`` when this program can take setting *key*, else the reason it cannot."""
     from .adjustments import AdjustmentTable
     try:
-        _s, _w, cat = plan(AdjustmentTable(elf_bytes, wide_ok=True), key, 2)
+        t = AdjustmentTable(elf_bytes, wide_ok=True)
+        _s, _w, cat = plan(t, key, 2)
+        # PAD-1321: a 64-bit program's menu must be growable too (the row is placed by growing the
+        # category table, not a same-size write) - check its menu-copy matches the known pattern
         if isinstance(cat, WideCategoryTable):
-            return WIDE_GROW_REFUSAL
+            wide_copy_sites(t, cat)
     except MenuSettingError as e:
         return str(e)
     except ValueError as e:

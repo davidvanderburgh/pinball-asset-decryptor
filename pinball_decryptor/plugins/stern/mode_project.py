@@ -662,6 +662,11 @@ BALL_SAVE_PROVEN = frozenset({
     # that ball and the drain after the save ended it; SAVE CONTROL (no ball_save) ended the ball on its first drain, 5.8 s in
     "star_wars_2025_le-0.96/spike3",
     "star_wars_2025_pro-0.84/spike3",    # PAD-1291 2026-11-15 (Spike 3 rig slot 241, hidden, muted): SAVE TEST's 15 s save, the drain inside it served back (eject, auto plunger), 3 shots +6,000,000 on that ball, the drain after it ended the ball; SAVE CONTROL ended on its first drain (6 s)
+    # PAD-1292 2026-11-15, Walking Dead Remastered LE 0.92 (Spike 3 rig slot 93, hidden, muted, s3proof.sh
+    # PROOF=ballsave CFG=save_wdr.cfg / savectl_wdr.cfg): SAVE TEST's 15 s save taken ("the game is saving"), the drain
+    # inside it served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the drain after the save
+    # ended it; the control without ball_save ended the ball on its first drain
+    "walking_dead_remastered_le-0.92/spike3",
 })
 
 

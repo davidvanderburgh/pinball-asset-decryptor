@@ -242,6 +242,19 @@ clips, callouts, held coils and the game's mode books are this title's own work,
 reference's own mode books (place_flag / done_flag / done_audit) and a held-coil pair placed only half (PAD-1288) out.
 Tests: tests/test_pad1291_spike3_2025_pro_port.py.
 
+PAD-1292 (Walking Dead Remastered LE 0.92's own pass): the multiball and ball save proven on slot 93
+(`s3proof.sh` with `modes/mb_wdr.cfg`, `save_wdr.cfg`, `savectl_wdr.cfg`: ELG's files with WDR's Tower target trigger
+0x40000 and Left loop / Right loop / Right spinner shots 0x480040; `TRIGGER_SW="TOWER TARGET"`,
+`SHOT_SWS="LEFT LOOP|RIGHT LOOP|RIGHT SPINNER"`, `ATTRACT_WAIT=60 COINS=4 START_HOLD_MS=0`) and in MULTIBALL_PROVEN /
+BALL_SAVE_PROVEN. The Write: `spike3_write.write_card` put a mode on a copy of the card (2103 s, scratch on D:), read
+back through its own encryption, and that card (into the rig's store with `PAD_SPIKE3_KEYFILE` naming the user's
+`~/.pad/spike3_padkeys.json`: the copy has no sidecar) booted through its own hook and ran the mode to its clock.
+Owed: STACK_BALLS (no switch route started WDR's own Blood Bath / Prison / Well multiball; play.sh's
+`PROOF=explore EXPLORE_SEQ="SWITCH*hits|..."` reports the trough after each step, for the next try). The redraft
+had given WDR Star Wars ELG's mode-book flags by number (`done_flag_0 66`, `place_flag_completed_2 68`: WDR's right
+spinner lit and a skill-shot speech flag); PAD-1288/1289's GAME_VALUE (below) leaves them out, and
+test_pad1287's redraft check holds again.
+
 ## Callouts and sounds on Spike 3 (PAD-1282)
 
 The six sound sites (callout, callout_nth, sound_play, sound_nth, sound_active, sound_stop) are plain calls into

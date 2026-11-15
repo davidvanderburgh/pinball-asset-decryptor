@@ -1,5 +1,5 @@
 # play.sh SLOT - plays one proof on a running Spike 3 slot (s3proof.sh starts it beside the run; PAD-1286).
-# PROOF picks what is played after a game is started and its first ball plunged:
+# PROOF picks what is played after a game is started and its first ball plunged (explore: EXPLORE_SEQ, PAD-1292):
 #   ballsave  wait out the game's own save, trigger the mode, drain inside its save, shoot the served ball, drain again
 #   game      keep the ball in play HOLD s (a probe mode does the rest: place_probe_mode.c)
 #   mb        trigger the mode, plunge the balls it serves, shoot, drain them one by one
@@ -115,6 +115,14 @@ stackmb)
     grep -q "STACK MB START" $L && { echo "[play] started after drain $round"; break; }
   done
   sleep 25 ;;
+explore)   # PAD-1292: what starts a title's own multiball - EXPLORE_SEQ="SWITCH*hits|..." , the trough after each
+  sleep 4; IFS='|' read -r -a steps <<< "$EXPLORE_SEQ"
+  for e in "${steps[@]}"; do
+    s=${e%\**}; n=${e##*\*}; [ "$n" = "$e" ] && n=1
+    for k in $(seq 1 "$n"); do $P sw "$SLOT" "$s"; sleep 2; done
+    sleep 3; echo "[play] after $s x$n: $(plunge)"
+  done
+  sleep 10 ;;
 edge)
   sleep 4
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done

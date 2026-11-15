@@ -3770,19 +3770,30 @@ class TreeEditMixin:
                 find = scene_edit.card_finder(states.keys())
                 trees = self._load_trees()
                 # PAD-552: a scene here that starts out otherwise than where the file was saved,
-                # and what of it does (the load report)
+                # and what of it does (the load report). PAD-1320 (DragonRR, round 2): unless
+                # it already shows a version of the file's edits (a card built with the file
+                # before it was changed): then it gets only what it lacks
+                fixed, edits = {}, None
                 for c in got:
                     if (c in trees and c not in ontop and find(c) in states
                             and scene_edit.starts_elsewhere(
                             trees[c], got[c], states[find(c)])):
+                        ops = scene_edit.rebased(trees[c], got[c], states[find(c)])
+                        if ops:
+                            edits = scene_edit.load(self.assets_dir) if edits is None else edits
+                            edits[c] = ops
+                            fixed[c] = scene_edit.states_of(trees[c], ops)
+                            continue
                         differs[c] = scene_edit.start_differences(trees[c], got[c],
                                                                   states[find(c)])
+                if fixed:
+                    scene_edit.save(self.assets_dir, edits)
                 elsewhere = len(differs)
                 shown_k = scene_edit.note_shown(
                     self.assets_dir, {c: trees[c] for c in got if c in trees},
-                    states={c: states[find(c)] for c in got
-                            if find(c) in states and c not in ontop})
-                shown = sum(1 for k in shown_k.values() if k)
+                    states=dict({c: states[find(c)] for c in got
+                                 if find(c) in states and c not in ontop}, **fixed))
+                shown = sum(1 for c, k in shown_k.items() if k or c in fixed)
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
                                                        renamed=renamed, overlay=overlay,

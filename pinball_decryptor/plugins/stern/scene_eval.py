@@ -349,6 +349,8 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
         common = {"node": n["id"], "path": path, "m": w, "mul": t[0], "add": t[1]}
         if n.get("own"):
             common["own"] = True            # a kept picture laid out at its own size (PAD-981)
+            if n.get("own_box"):
+                common["own_box"] = n["own_box"]    # ... over a picture since replaced (PAD-1301)
         if only is not None and k not in ("Sprite", "StreamingFlipbook"):
             return                                  # only the way through to *show*
         if k in ("Sprite", "StreamingFlipbook"):
@@ -382,7 +384,10 @@ def draw_list(man, frame=None, pins=None, hidden=(), origin=(0.0, 0.0), matrix=N
             rw, rh = right - x, bottom - y
             if fill is not None and fill.get("w") and fill.get("h"):
                 sx, sy = rw / float(fill["w"]), rh / float(fill["h"])
-                out.append(dict(common, kind="bitmap", image=fill.get("image"),
+                # the Write fits a kept picture into a Shape's box whoever laid it out
+                # (radium_grow.keep_boxes), so PAD-981's own size is not for a fill (PAD-1301)
+                fcommon = {k_: v for k_, v in common.items() if k_ not in ("own", "own_box")}
+                out.append(dict(fcommon, kind="bitmap", image=fill.get("image"),
                                 w=fill["w"], h=fill["h"],
                                 m=compose(w, (sx, 0.0, 0.0, sy, x, y))))
         elif k == "Text":

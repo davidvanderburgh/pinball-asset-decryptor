@@ -773,6 +773,21 @@ def picture_sizes(assets_dir):
     return out
 
 
+def _kept_box(d, size, want):
+    """The ``(w, h)`` box a picture of *size* kept at its own size is fitted into where the
+    bitmap draw *d* shows it, or None to draw it at its own size: the original's box (PAD-865),
+    or for a node laid out over a picture at its own size (PAD-981, ``own``) the box of that
+    picture once another has taken its place (PAD-1301, ``own_box``)."""
+    if d.get("kind") != "bitmap" or not (d.get("w") and d.get("h")) or not own_size(size, want):
+        return None
+    if not d.get("own"):
+        return d["w"], d["h"]
+    box = d.get("own_box")
+    if box and tuple(int(v) for v in box) != tuple(size):
+        return int(box[0]), int(box[1])
+    return None
+
+
 def own_size(size, want):
     """Is a project-folder picture of *size* written at that size rather than fitted to the
     card texture's *want*?  A Write takes the project's file as it is and regrows the scene
@@ -1404,12 +1419,11 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
                 continue
             m = d["m"]
             want = (sizes or {}).get(d.get("image"))
-            if d["kind"] == "bitmap" and d.get("w") and d.get("h") and not d.get("own") \
-                    and own_size(img.size, want):
+            box = _kept_box(d, img.size, want)
+            if box:
                 # kept at its own size: in the original's place and size, fitted and
                 # centred, as the Write lays it out (PAD-865, radium_grow.keep_boxes)
-                m = ev.compose(m, radium_grow.fit_box(img.size[0], img.size[1],
-                                                      d["w"], d["h"]))
+                m = ev.compose(m, radium_grow.fit_box(img.size[0], img.size[1], *box))
             got = _warp(img, m, w, h)
             if got is not None:
                 _composite(canvas, got[0], got[1], got[2], d["mul"], d["add"])

@@ -698,9 +698,13 @@ ADDED_PREFIX = "images/scene_textures/added/"
 def _swap_added(assets_dir, rel, blob, keep):
     """PAD-1301: picture *blob* in place of my added picture *rel* (``images/scene_textures/
     added/...``): kept beside it under a new name (nothing is overwritten; the same bytes
-    there already are taken as they are), at the added picture's size unless *keep*, and every
-    add of mine showing *rel* shows it.  Returns its rel, or None when no add shows *rel* or
-    *blob* is no picture."""
+    there already are taken as they are), at the added picture's size, and every add of mine
+    showing *rel* shows it.  My moves and resizes of the add were made over a picture of that
+    size, so it stays the add's box: a picture kept at its own size (*keep*) is fitted and
+    centred in it, shape kept, as the card it came from fits it into that picture's place
+    (DoomWalrus666: DragonRR's 4211x602 title kept its size and drew twice as wide); else it
+    is stretched to it, as a replaced picture is.  Returns its rel, or None when no add shows
+    *rel* or *blob* is no picture."""
     import io
     from PIL import Image
     edits = scene_edit.load(assets_dir)
@@ -715,8 +719,16 @@ def _swap_added(assets_dir, rel, blob, keep):
             size = old.size
     except Exception:                                # noqa: BLE001 - not a picture: a pick
         return None
-    if not keep and pic.size != size:
+    if pic.size != size and not keep:
         pic = pic.resize(size, Image.LANCZOS)
+    elif pic.size != size:
+        from . import radium_grow
+        s, _b, _c, _d, tx, ty = radium_grow.fit_box(pic.size[0], pic.size[1], *size)
+        fitted = pic.convert("RGBa").resize(
+            (max(1, int(round(pic.size[0] * s))), max(1, int(round(pic.size[1] * s)))),
+            Image.LANCZOS).convert("RGBA")
+        pic = Image.new("RGBA", size, (0, 0, 0, 0))
+        pic.paste(fitted, (int(round(tx)), int(round(ty))))
     buf = io.BytesIO()
     pic.save(buf, "PNG")
     data = buf.getvalue()
@@ -741,6 +753,59 @@ def _swap_added(assets_dir, rel, blob, keep):
         edits[c][i] = op
     scene_edit.save(assets_dir, edits)
     return "images/" + new
+
+
+def pin_own_boxes(assets_dir, rels, picks, keep):
+    """PAD-1301: before the game pictures *rels* (``images/...``) are replaced, each node laid
+    out over one of them at its own size (PAD-981, :func:`scene_edit.own_size_nodes`) keeps
+    the size of the picture it draws now (*picks*, ``{rel: file}``, and *keep*, the rels kept
+    at their own size, as they are now) as its box (:func:`scene_edit.own_boxes`), so the new
+    picture is fitted into it instead of drawn at its own size."""
+    own_of = scene_edit._own_of(scene_edit._raw(assets_dir))
+    if not own_of or not rels:
+        return
+    from .scene_render import own_size, picture_sizes
+    want = {r[len("images/"):] if r.startswith("images/") else r for r in rels}
+    try:
+        with open(os.path.join(assets_dir, "images", "scene_textures", "scene_tree.json"),
+                  encoding="utf-8") as f:
+            trees = json.load(f)
+    except (OSError, ValueError):
+        return
+    sizes = picture_sizes(assets_dir)
+
+    def size_of(path):
+        from PIL import Image
+        try:
+            with Image.open(path) as im:
+                return im.size
+        except Exception:                            # noqa: BLE001 - gone or no picture
+            return None
+
+    def drawn(rel, o):
+        key = "images/" + rel
+        got = size_of(picks[key]) if picks.get(key) and key in keep else None
+        if got is None and (not picks.get(key) or key in keep):
+            # no pick, or its file gone: the project's own file, which a Write made that size
+            got = size_of(os.path.join(assets_dir, "images", *rel.split("/")))
+            if got is not None and not own_size(got, sizes.get(rel)):
+                got = None
+        return got or (o.get("w"), o.get("h"))
+    out = {}
+    for card in own_of:
+        man = trees.get(card) if isinstance(trees, dict) else None
+        own = scene_edit.own_size_nodes(assets_dir, card) if man else ()
+        for nid in own:
+            got = scene_edit._man_index(man).get(nid)
+            if got is None:
+                continue
+            for _s, oid in got[0]["comps"]:
+                o = man["objects"].get(str(oid)) or {}
+                if o.get("kind") == "Bitmap" and o.get("image") in want:
+                    w, h = drawn(o["image"], o)
+                    if w and h:
+                        out.setdefault(card, {})[nid] = (w, h)
+    scene_edit.pin_own_boxes(assets_dir, out)
 
 
 def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, cards_here=None,
@@ -775,6 +840,13 @@ def import_extras(assets_dir, zip_path, extras, renamed=None, overlay=True, card
     slots_on = dict(data.get(cp.IMAGE_SLOTS_KEY) or {})
     owns = dict(cp._own_dicts(data, "images"))
     loaded, missing = [], []
+    # PAD-1301: a node laid out over a picture at its own size keeps that picture's box
+    try:
+        pin_own_boxes(assets_dir, [r for r in extras["pictures"]
+                                   if not r.startswith(ADDED_PREFIX) and _here(assets_dir, r)],
+                      picks, keep)
+    except Exception:                                # noqa: BLE001 - the load goes on
+        pass
 
     def _own(rel, a):
         if a.get("color") is None:

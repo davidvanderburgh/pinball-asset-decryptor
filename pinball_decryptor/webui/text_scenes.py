@@ -1978,8 +1978,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                         from ..plugins.stern import scene_edit
                         man, _n = scene_edit.apply_manifest(
                             tman, scene_edit.to_apply(self.assets_dir, tcard, tman))
-                        scene_edit.mark_own(man, scene_edit.own_size_nodes(self.assets_dir,
-                                                                           tcard))
+                        scene_edit.mark_own_of(man, self.assets_dir, tcard)
                         img = scene_render.render_tree(
                             self.assets_dir, man, fonts=self._fonts, background=bg,
                             colors=self._pending_colors(tcard),
@@ -2134,8 +2133,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
                         man, _notes = scene_edit.apply_manifest(
                             j["stock"], scene_edit.to_apply(self.assets_dir, j["card"],
                                                             j["stock"]))
-                        scene_edit.mark_own(man, scene_edit.own_size_nodes(self.assets_dir,
-                                                                           j["card"]))
+                        scene_edit.mark_own_of(man, self.assets_dir, j["card"])
                         tj = {"man": man, "pins": j["pins"],
                               "frames": self._tree_frame_count(man),
                               "fps": self._tree_fps(man), "bg": bg,

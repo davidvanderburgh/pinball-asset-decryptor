@@ -23,7 +23,7 @@ PORTS3 = ROOT / "tools" / "spike2_emu" / "modes" / "sdk" / "ports" / "spike3"
 ELG_PORT = PORTS3 / "star_wars_elg-1.10.port"
 PRO_PORT = PORTS3 / "star_wars_2025_pro-0.84.port"
 PROOFS = ROOT / "tools" / "spike3_emu" / "proofs"
-CENSUS = PROOFS / "titles" / "star_wars_2025_pro.switches"
+CENSUS = PROOFS / "titles" / "star_wars_2025_pro-0.84.switch_ids"
 TITLE_ENV = PROOFS / "titles" / "star_wars_2025_pro.env"
 PROGS = os.environ.get("PAD_S3_PROGRAMS", "")
 SHA = {"star_wars_elg": "ceb8d70b73a63698d06afddfe571c1bbab775c0a",
@@ -53,11 +53,12 @@ def _switch_lines(text):
 
 
 # ---- measured switch ids ----------------------------------------------------------------------------------------
-def test_a_census_is_read_as_name_to_id_with_no_hit_as_none(tmp_path):
+def test_the_pro_census_is_read_in_the_shared_format():
+    # PAD-1290's format (s3census.sh), which swcensus.sh writes too: `<id> <NAME>`, a switch with no hit a `#` note
     S = _s3port()
-    p = tmp_path / "c.switches"
-    p.write_text("# a comment\n83 RIGHT TARGET\n- LEFT SLINGSHOT\n61  Left spinner opto\n", encoding="utf-8")
-    assert S.read_switch_ids(str(p)) == {"RIGHT TARGET": 83, "LEFT SLINGSHOT": None, "LEFT SPINNER OPTO": 61}
+    ids = S.read_switch_ids(str(CENSUS))
+    assert len(ids) == 27 and ids["RIGHT TARGET"] == 83 and ids["LEFT SPINNER OPTO"] == 61
+    assert "LEFT SLINGSHOT" not in ids and "# no switch hit: LEFT SLINGSHOT" in CENSUS.read_text(encoding="utf-8")
 
 
 def test_measured_ids_replace_the_rank_and_unmeasured_switches_are_left_out(monkeypatch):
@@ -68,11 +69,11 @@ def test_measured_ids_replace_the_rank_and_unmeasured_switches_are_left_out(monk
     # unmeasured: the rank, as before
     assert S.spike3_switches(object()) == [(2, 0x1, "Right target"), (3, 0x2, "Left slingshot"),
                                            (4, 0x4, "Left orbit"), (5, 0x8, "Top vuk")]
-    left = []
-    sw = S.spike3_switches(object(), {"RIGHT TARGET": 83, "LEFT SLINGSHOT": None, "LEFT ORBIT": 3}, left)
+    unseen = []
+    sw = S.spike3_switches(object(), {"RIGHT TARGET": 83, "LEFT ORBIT": 3}, unseen)
     # each its measured id, the shot bits packed over the switches written
     assert sw == [(83, 0x1, "Right target"), (3, 0x2, "Left orbit")]
-    assert left == [("LEFT SLINGSHOT", "no switch hit in the census"), ("TOP VUK", "not in the census")]
+    assert unseen == ["Left slingshot", "Top vuk"]
 
 
 # ---- the shipped port, proven on the rig ------------------------------------------------------------------------
@@ -86,13 +87,11 @@ def test_the_pro_port_carries_the_core_and_its_measured_switches():
         assert ("data", name) in e, name
     assert e[("value", "ball_end_event")] == "0x34"
     assert e[("event", "game_over")] == "0x46"          # 0x47 on ELG and Walking Dead Remastered
-    census = {n: i for n, i in ((ln.split(None, 1)[1].strip(), ln.split(None, 1)[0])
-                                for ln in CENSUS.read_text(encoding="utf-8").splitlines()
-                                if ln.strip() and not ln.startswith("#"))}
+    census = _s3port().read_switch_ids(str(CENSUS))
     lines = _switch_lines(text)
-    assert len(lines) == 27 == sum(1 for v in census.values() if v.isdigit())
+    assert len(lines) == 27 == len(census)
     for sid, mask, name in lines:
-        assert census[name.upper()] == str(sid), name
+        assert census[name.upper()] == sid, name
     assert ("Right target" in {n for _, _, n in lines}) and dict((n, s) for s, _, n in lines)["Right target"] == 83
     assert [m for _, m, _ in lines] == [1 << k for k in range(27)]
     assert re.search(r"^text example_start_shot\s+Right target$", text, re.M)
@@ -142,7 +141,8 @@ def _prog(game):
 def test_redrafting_the_pro_from_its_census_gives_the_shipped_port():
     S = _s3port()
     ref, tgt = S.Elf(_prog("star_wars_elg")), S.Elf(_prog("star_wars_2025_pro"))
-    text, M, core, missing = S.draft_spike3(ref, str(ELG_PORT), tgt, "star_wars_2025_pro", "0.84", str(CENSUS))
+    text, M, core, missing = S.draft_spike3(ref, str(ELG_PORT), tgt, "star_wars_2025_pro", "0.84",
+                                         S.read_switch_ids(str(CENSUS)))
     assert not core
     # the shipped port is what the rig proved: shots from the two switch_hit sites, at the census's ids. A draft also
     # writes PAD-1322's 64-bit switch_edge source (merged after this port was proven, as for Pokemon LE); the Pro

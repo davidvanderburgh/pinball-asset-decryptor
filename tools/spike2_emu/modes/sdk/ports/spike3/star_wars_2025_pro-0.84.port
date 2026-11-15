@@ -6,7 +6,7 @@
 # callouts, scenes, held coils, its modes) is not this title's: written as comments, for its own port.
 # Switch ids MEASURED (PAD-1291): the game does not number its switches by their rank in the device table here - it
 # numbers Right target after every other playfield switch (83, rank 61) and each switch after it one lower - so the
-# switch lines are written from a census on the rig (proofs/swcensus.sh -> proofs/titles/star_wars_2025_pro.switches,
+# switch lines are written from a census on the rig (proofs/swcensus.sh -> proofs/titles/star_wars_2025_pro-0.84.switch_ids,
 # s3port.py --switch-ids): 27 switches sent their id; the slingshots, pop bumpers and drop target opto sent no hit.
 # Emulator-proven 2026-11-15 (PAD-1291) on the Spike 3 rig (s3proof.sh, slots 240-242, hidden, muted; prebuilt
 # mode64.so): the runtime took this port (29 sites, 27 shots, the Insider gate, 4 events, both switch_hit sites); CLOCK
@@ -151,7 +151,7 @@ event game_over    0x46   # 1 of 1 lined-up places
 value ball_end_event 0x34    # the end of a ball, from the bus (no ball_end site on Spike 3)
 
 # ---- switches: the playfield switches of this program's own device table that are shots (switch <id> <shot mask> <name>) ----
-# ids as the game sent them to its switch_hit site in a census on the rig (star_wars_2025_pro.switches), not the table's rank
+# ids as the game sent them to its switch_hit site in a census on the rig (star_wars_2025_pro-0.84.switch_ids), not the table's rank
 switch 38   0x1                Left outlane
 switch 39   0x2                Left return lane-left
 switch 40   0x4                Left return lane-right

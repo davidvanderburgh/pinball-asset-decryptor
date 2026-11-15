@@ -7,7 +7,8 @@
 # its Right target after every other playfield switch, and each one after it one lower. This boots the card with the
 # draft port (its switch_hit sites hooked, `value switch_hit_log` on), starts a game, then presses each switch the draft
 # names, one at a time, and waits for the runtime's `switch hit: switch N` line before the next: $OUT/census.txt gets
-# `<id> <NAME>` per switch, `- <NAME>` for one the game sent no hit for. `s3port.py ... --switch-ids census.txt`
+# `<id> <NAME>` per switch, `# no switch hit: <NAME>` for one the game sent none for (s3census.sh's format: kept as
+# titles/<game>-<version>.switch_ids). `s3port.py ... --switch-ids census.txt`
 # writes the port's switch lines from it. Logs: $OUT/census_mode.log, census_run.out.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -37,16 +38,16 @@ mapfile -t NAMES < <(awk '$1 == "switch" { $1 = $2 = $3 = ""; sub(/^ +/, ""); pr
   for s in "${NAMES[@]}"; do
     before=$(grep -c "switch hit:" "$L")
     $P sw "$SLOT" "$s" >/dev/null
-    id=-
+    id=
     for t in $(seq 1 30); do
       sleep 0.1
       n=$(grep -c "switch hit:" "$L")
       [ "$n" -gt "$before" ] && { id=$(grep "switch hit:" "$L" | sed -n "$((before + 1))p" | awk '{print $NF}'); break; }
     done
-    echo "$id $s" >> "$OUT/census.txt"
+    if [ -n "$id" ]; then echo "$id $s"; else echo "# no switch hit: $s"; fi >> "$OUT/census.txt"
     sleep 1.5
     # a late hit (a slow switch) must not be read as the next one's
-    while [ "$(grep -c "switch hit:" "$L")" -gt "$((before + 1))" ] || { [ "$id" = - ] && [ "$(grep -c "switch hit:" "$L")" -gt "$before" ]; }; do
+    while [ "$(grep -c "switch hit:" "$L")" -gt "$((before + 1))" ] || { [ -z "$id" ] && [ "$(grep -c "switch hit:" "$L")" -gt "$before" ]; }; do
       echo "# a late hit after $s: $(grep "switch hit:" "$L" | tail -1 | awk '{print $NF}')" >> "$OUT/census.txt"; break
     done
   done

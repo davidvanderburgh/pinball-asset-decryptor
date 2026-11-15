@@ -4,9 +4,10 @@
 #   game      keep the ball in play HOLD s (a probe mode does the rest: place_probe_mode.c)
 #   mb        trigger the mode, plunge the balls it serves, shoot, drain them one by one
 #   coil      trigger the mode, shoot through its holds
-#   mode      the same play for a plain mode: trigger, shoot, let its clock run out (PAD-1289)
-#   clock     trigger the mode, score its shots twice over, wait until its clock ends it (PAD-1291: 54 shots
-#             for 54 presses with allshots.cfg; the `mode` play above shoots 8 rounds and does not wait)
+#   mode      trigger the mode, score its shots, keep the ball up until its clock ends it (PAD-1288..1290)
+#   census    press every switch in CENSUS_NAMES once, print the id each reached the modes with (s3census.sh)
+#   clock     the same as `mode`'s wait-out-the-clock play (PAD-1290, PAD-1291: 54 shots for 54 presses with allshots.cfg),
+#             reachable by its own name: `coil|mode)` above is the case bash runs for PROOF=mode
 #   stackmb   start the game's own multiball, trigger a `stack no` mode inside it, drain until it starts
 #   edge      (PAD-1322) the flipper buttons in attract, then in play the trigger, the scoring shots, a slingshot, a
 #             pop bumper and the flipper buttons: with `value switch_edge_log N` in the port, every edge is logged
@@ -14,11 +15,13 @@
 TRIGGER_SW=${TRIGGER_SW:-TOP LANE CENTER}                   # the mode files' trigger (0x40 x3 on ELG)
 SHOT_SWS=${SHOT_SWS:-CENTER TARGET|HIDDEN TARGET|LEFT LUKE ORBIT}  # three of its scoring shots (0x20000138)
 EARLY_SWS=${EARLY_SWS:-LEFT LUKE ORBIT|HIDDEN TARGET}       # starts the game's own ball save right after the plunge
-GAME_MB_SW=${GAME_MB_SW:-DEATH STAR TARGET}                 # x3 starts the game's own multiball (a | list: in turn)
-GAME_MB_TIMES=${GAME_MB_TIMES:-3}                            # how many times GAME_MB_SW is played (PAD-1291)
+GAME_MB_SW=${GAME_MB_SW:-DEATH STAR TARGET}                 # x3 starts the game's own multiball
+GAME_MB_SWS=${GAME_MB_SWS:-}                                # or these, once each in turn (a title's lock sequence)
+GAME_MB_TIMES=${GAME_MB_TIMES:-3}                            # GAME_MB_SW (a | list: in turn) played this many times (PAD-1291)
 FLIP_SWS=${FLIP_SWS:-L FLIPPER BUTTON|R FLIPPER BUTTON}      # the flipper buttons (PROOF=edge)
 NOHANDLER_SWS=${NOHANDLER_SWS:-LEFT SLINGSHOT|RIGHT POP BUMPER}   # switches the drain runs no handler for (PROOF=edge)
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
+ATTRACT_WAIT=${ATTRACT_WAIT:-${SETTLE_S:-20}}               # after the runtime is up, before the first Start (WDR: ~60)
 COINS=${COINS:-0}                                           # credits first (Walking Dead Remastered's fresh settings: 4; Pokemon LE is not on free play)
 AFTER_START_SWS=${AFTER_START_SWS:-}                        # pressed after each Start (a character select)
 SLOT=${1:-88}
@@ -91,9 +94,17 @@ clock)
   for k in $(seq 1 90); do grep -qE "END|ended" $L && break; sleep 1; done
   grep -E "START|END|ended|score" $L | tail -8
   sleep 10 ;;
+census)
+  sleep 6
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    b=$(grep -c "\[probe\] shot" $L); $P sw "$SLOT" "$n" < /dev/null > /dev/null 2>&1; sleep 1.6
+    m=$(grep "\[probe\] shot" $L | tail -n +$((b+1)) | head -1 | awk '{print $NF}')
+    [ -n "$m" ] && echo "[census] $(python3 -c 'import sys; print(int(sys.argv[1].replace("_", ""), 16).bit_length() - 1 + 64 * int(sys.argv[2]))' "$m" "${CENSUS_HALF:-0}") $n"       || echo "[census] - $n"
+  done < "$CENSUS_NAMES" ;;
 stackmb)
   sleep 4
-  for k in $(seq 1 "${GAME_MB_TIMES:-3}"); do sws "$GAME_MB_SW" 2; done
+  if [ -n "${GAME_MB_SWS:-}" ]; then sws "$GAME_MB_SWS" 2; else for k in $(seq 1 "${GAME_MB_TIMES:-3}"); do sws "$GAME_MB_SW" 2; done; fi
   echo "[play] the game's own multiball asked for at $(date +%s)"
   for k in $(seq 1 6); do sleep 3; echo "[play] mb plunge $k: $(plunge)"; done
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done

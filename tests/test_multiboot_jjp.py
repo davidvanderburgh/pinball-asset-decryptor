@@ -125,6 +125,7 @@ def test_build_args_go_to_mkjjpmulti():
     assert args[args.index("--titles") + 1] == "GUNS N' ROSES 3.03;CHAKA'S LOTLJ"
     assert args[args.index("--subtitles") + 1] == "Stock;Retheme"
     assert args[args.index("--timeout") + 1] == "15"
+    assert "--back-hold" not in args                                 # PAD-1309: no hold on JJP
     assert args[args.index("--default") + 1] == "0"
     assert args[args.index("--volume") + 1] == "50"
     assert args[args.index("--media-dir") + 1] == wsl(r"D:\Pinball\multi\media")

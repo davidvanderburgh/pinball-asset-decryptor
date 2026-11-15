@@ -3095,6 +3095,12 @@ HELP_CONTENT = {
                 {"icon": "multiboot", "title": "Power up",
                  "text": "flippers choose, START boots"}]},
             "- The countdown boots the remembered choice by itself.\n"
+            "- **Back to the menu without switching off:** during a game, hold **BACK** "
+            "on the coin door (**EXIT** on Barrels of Fun and on Rick and Morty and Alice "
+            "Cooper) for 3 seconds and the machine restarts into the menu: Stern Spike 2 "
+            "and Spike 3, Barrels of Fun and Spooky. **Hold BACK** in Menu settings sets "
+            "how long (0 = off). On The Big Lebowski, **Version Select** in its service "
+            "menu does it.\n"
             "- The **first image is the primary**: the card boots from its files, and "
             "the machine falls back to it if the menu ever fails.\n"
             "- Up to **16 images** on a Stern card. From five on, the menu scrolls "

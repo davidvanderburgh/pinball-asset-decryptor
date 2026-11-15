@@ -1249,6 +1249,9 @@ class WebMultibootPanel(_Base):
             "footer_example": mt.footer_example(
                 self._footer_var.get(), self._footer_text_var.get()),
             "editions_tip": mt.EDITIONS_TIP,
+            # PAD-1309: Jersey Jack and The Big Lebowski have no BACK hold (Version Select
+            # is The Big Lebowski's way back), so the row is not shown for them
+            "back_hold_ok": self._backend.key not in ("jjp", "dp"),
             "own_note": own,
             "sounds_note": (
                 "auto = a click and a stinger pulled from the primary "

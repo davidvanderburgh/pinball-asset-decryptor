@@ -154,5 +154,22 @@ else
     bad "7 no menu (started '$(started)')"
 fi
 
+# PAD-1309: the Python hook beside the menu (.pad/padmenu_py/sitecustomize.py) goes first on
+# the game's PYTHONPATH; without it the game's PYTHONPATH is left as it was
+setup
+mkdir -p "$P/padmenu_py" && echo "# hook" > "$P/padmenu_py/sitecustomize.py"
+sed -i 's|^start=.*|start=echo "$PYTHONPATH" > '"$T"'/pypath|' "$P/proc.conf"
+rm -f "$T/pypath"
+PYTHONPATH=/x/game run >/dev/null
+if [ "$(cat "$T/pypath" 2>/dev/null)" = "$P/padmenu_py:/x/game" ]; then
+    ok "9 the hook first on the game's PYTHONPATH"
+else
+    bad "9 the game's PYTHONPATH was '$(cat "$T/pypath" 2>&1)'"
+fi
+rm -rf "$P/padmenu_py" "$T/pypath"
+PYTHONPATH=/x/game run >/dev/null
+[ "$(cat "$T/pypath" 2>/dev/null)" = "/x/game" ] && ok "9b no hook: PYTHONPATH as it was" \
+    || bad "9b without the hook the game's PYTHONPATH was '$(cat "$T/pypath" 2>&1)'"
+
 echo "padselect_proc_test: $([ $FAILS = 0 ] && echo OK || echo "$FAILS FAILED")"
 exit $((FAILS > 0))

@@ -311,6 +311,16 @@ all: $(BIN) $(DELTA)
 $(DELTA): paddelta.c | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -static paddelta.c -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
+
+# PAD-1309: padmenu.so, preloaded into the game by the profile's hook - EXIT held 5 s on the
+# coin door restarts the machine into the menu.  Shared (it goes INTO the game), so it cannot
+# be static: jjp_glibc.h and the .symver pins in padmenu.c keep it to the game's glibc 2.33.
+PADMENU = $(BUILD)/padmenu.so
+all: $(PADMENU)
+
+$(PADMENU): padmenu.c jjp_glibc.h | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -include jjp_glibc.h -DPADMENU_FAST -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -lpthread -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
 else ifeq ($(PLATFORM),dp)
 # the button reader: linked to libpinproc.so.2.0 BY NAME (a link-only stub
 # carries the soname; the machine's own library is found at run time through
@@ -332,7 +342,14 @@ else ifeq ($(PLATFORM),spk)
 # machine's own libpinproc (padselect_proc.sh)
 SPKSW = $(BUILD)/spksw
 PROCSW = $(BUILD)/dpprocsw
-all: $(BIN) $(SPKSW) $(PROCSW)
+PADMENU = $(BUILD)/padmenu.so
+all: $(BIN) $(SPKSW) $(PROCSW) $(PADMENU)
+
+# PAD-1309: padmenu.so, the BOF build's object (x86-64, glibc 2.17 at most); padselect.sh
+# starts the game with it and PADMENU_PROTO=warden|pinotaur: BACK held 5 s restarts into the menu
+$(PADMENU): padmenu.c jjp_glibc.h | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -include jjp_glibc.h -DPADMENU_FAST -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -lpthread -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
 
 $(SPKSW): spksw.c | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -static spksw.c -o $@ || { rm -f $@; exit 1; }
@@ -346,8 +363,28 @@ $(PROCSW): dpprocsw.c $(BUILD)/libpinproc.so.2.0 | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
 >     -nostartfiles dpprocsw.c $(BUILD)/libpinproc.so.2.0 -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
-else
+else ifeq ($(PLATFORM),s3)
+# PAD-1309: Spike 3's padmenu.so (-DPADMENU_S3: BACK is byte 0 of /dev/spidev4.0, and the
+# restart is `sync; reboot` itself).  padselect_s3.sh preloads it into the game.
+PADMENU = $(BUILD)/padmenu.so
+all: $(BIN) $(PADMENU)
+
+$(PADMENU): padmenu.c | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -DPADMENU_S3 -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
+else ifneq ($(PLATFORM),stern)
 all: $(BIN)
+else
+# PAD-1309: padmenu.so, preloaded into the game on a multi-boot card - BACK held
+# on the coin door restarts the machine into the menu.  A shared object, built
+# the way the rig's hwshim.so is (build.sh): -nostdlib against the rootfs's own
+# libdl/libc, so it asks nothing newer than the card's glibc 2.21.
+PADMENU = $(BUILD)/padmenu.so
+all: $(BIN) $(PADMENU)
+
+$(PADMENU): padmenu.c | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration     -U_TIME_BITS -U_FILE_OFFSET_BITS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0     -fno-stack-protector -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include     -fPIC -shared -nostdlib -Wl,-soname,padmenu.so padmenu.c     -L$(ROOT)/lib -L$(ROOT)/usr/lib -l:libdl.so.2 -l:libc.so.6 -lgcc -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
 endif
 
 $(BUILD):
@@ -395,10 +432,11 @@ check-hw:
 
 # the menu, the rebuilder, the hook and the install step, all in the update's
 # own padselect folder (the builder copies them from here)
-install: $(BIN) $(DELTA)
+install: $(BIN) $(DELTA) $(PADMENU)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/bofselect"
 > install -m 755 "$(DELTA)" "$(DESTDIR)$(PREFIX)/paddelta"
+> install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
 > install -m 755 padselect_bof.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > install -m 755 pad_install_bof.sh "$(DESTDIR)$(PREFIX)/pad_install.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi
@@ -433,10 +471,12 @@ check: $(BIN) $(SPKSW) $(PROCSW)
 check-hw:
 > @echo "check-hw: the node-bus test is Stern's; spksw is proven on the rig's boards (tools/spooky_emu/MULTIBOOT.md)"
 
-install: $(BIN) $(SPKSW) $(PROCSW)
+install: $(BIN) $(SPKSW) $(PROCSW) $(PADMENU)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/spkselect"
 > install -m 755 "$(SPKSW)" "$(DESTDIR)$(PREFIX)/spksw"
+> install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
+> install -m 644 padmenu_proc.py "$(DESTDIR)$(PREFIX)/padmenu_proc.py"
 > install -m 755 "$(PROCSW)" "$(DESTDIR)$(PREFIX)/dpprocsw"
 > install -m 755 padselect_spk.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > install -m 755 padselect_proc.sh "$(DESTDIR)$(PREFIX)/padselect_proc.sh"
@@ -454,6 +494,7 @@ check-hw:
 install: $(BIN)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/s3select"
+> install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
 > install -m 755 padselect_s3.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the menu has no font"; exit 1; fi
 else ifeq ($(PLATFORM),jjp)
@@ -480,8 +521,9 @@ install: $(BIN)
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the card's DejaVuSans-Bold.ttf will be used"; fi
 > if [ -d media ]; then install -d "$(DESTDIR)$(PREFIX)/media"; for f in media/*; do if [ -f "$$f" ]; then install -m 644 "$$f" "$(DESTDIR)$(PREFIX)/media/"; fi; done; fi
 else
-check: $(BIN) capbin
+check: $(BIN) capbin $(PADMENU)
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"
+> bash test/padmenu_test.sh "$(ROOT)" "$(PADMENU)"
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > python3 test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > python3 test/settings_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
@@ -492,9 +534,10 @@ check-hw: $(BIN)
 > python3 test/fakebus_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > @echo "check-hw: OK"
 
-install: $(BIN)
+install: $(BIN) $(PADMENU)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/codeselect"
+> install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
 > install -m 755 select.sh "$(DESTDIR)$(PREFIX)/select.sh"
 > install -m 755 materialize.py "$(DESTDIR)$(PREFIX)/materialize.py"
 > install -m 644 images.conf.example "$(DESTDIR)$(PREFIX)/images.conf.example"

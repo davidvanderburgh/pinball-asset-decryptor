@@ -301,6 +301,37 @@ def test_images_conf_defaults_and_refusals(mk):
         mk.render_images_conf(["/dev/mmcblk0p3"], timeout=-1)
 
 
+def test_back_hold_is_written_only_when_asked_and_carried_over(mk):
+    """PAD-1309: back_hold= (seconds BACK held in a game restarts into the menu) is a line only
+    when a value was given - a build without it is what it always was - reads back as an int,
+    refuses a negative or an over-long hold, and a menu-only inject keeps the card's own."""
+    import argparse
+    devs = ["/dev/mmcblk0p3", "/dev/mmcblk0p7"]
+    plain = mk.render_images_conf(devs, ["A", "B"])
+    assert not [l for l in plain.splitlines() if l.startswith("back_hold")]
+    assert mk.parse_images_conf(plain)["back_hold"] is None
+    held = mk.render_images_conf(devs, ["A", "B"], back_hold=4)
+    lines = [l for l in held.splitlines() if not l.startswith("#")]
+    assert lines.index("back_hold=4") == lines.index("timeout=15") + 1
+    assert mk.parse_images_conf(held)["back_hold"] == 4
+    assert "back_hold=0" in mk.render_images_conf(devs, ["A", "B"], back_hold=0).splitlines()
+    for bad in (-1, 61):
+        with pytest.raises(mk.Refused, match="back_hold"):
+            mk.render_images_conf(devs, ["A", "B"], back_hold=bad)
+    ap = argparse.ArgumentParser()
+    mk._add_conf_flags(ap)
+    assert ap.parse_args([]).back_hold is None and ap.parse_args(["--back-hold", "4"]).back_hold == 4
+    plan = _two_image_plan(mk)
+    args = argparse.Namespace(titles="A;B", subtitles="", timeout=None, default=0, debug_log=False)
+    assert "back_hold" not in mk.conf_for_plan(plan, args)
+    on_card = mk.parse_images_conf(mk.render_images_conf(plan.devices(), ["A", "B"], back_hold=7))
+    assert mk.parse_images_conf(mk.conf_for_plan(plan, args, existing=on_card))["back_hold"] == 7
+    args.back_hold = 2
+    assert mk.parse_images_conf(mk.conf_for_plan(plan, args, existing=on_card))["back_hold"] == 2
+    # the update path's like-for-like render keeps it too
+    assert "back_hold=7" in mk.render_images_conf_text(on_card).splitlines()
+
+
 def test_the_card_log_is_a_development_switch_the_app_never_sets(mk):
     """The selector's log on the card (/dump/log/codeselect.log) exists only on a card built or
     injected with --debug-log: the plain render carries no log= line (the hook then passes no
@@ -1002,7 +1033,7 @@ def test_build_manifest_records_the_menu_and_where_each_image_came_from(mk):
          "group": None}]
     # it is JSON, and exactly the keys contract A names
     d = json.loads(json.dumps(man))
-    assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "default",
+    assert set(d) == {"tool", "version", "written", "layout", "images", "timeout", "back_hold", "default",
                       "volume", "machine_volume", "edition", "mixer_volume", "sound_move",
                       "sound_confirm", "heading", "text_size", "counter", "settings",
                       "countdown_word", "footer", "theme", "colors", "groups"}

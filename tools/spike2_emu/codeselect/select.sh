@@ -68,6 +68,8 @@
 # never a machine that will not boot.
 #
 #   select.sh                     the hook (what /etc/init.d/game calls)
+#   select.sh --reboot            restart the machine into the menu (padmenu.so's
+#                                 call: BACK held 3 s (Hold BACK, back_hold=) on the coin door, PAD-1309)
 #   select.sh --lookup N [conf]   print image N's device (without :<sub>)
 #   select.sh --lookup-sub N [conf]   print image N's subdirectory ("" when none)
 #   select.sh --scores N [conf]   print image N's own-scores name ("" when it shares)
@@ -337,6 +339,16 @@ image_ready() {
 }
 
 case "$1" in
+    --reboot)
+        # PAD-1309: padmenu.so, preloaded into the game, saw BACK held on the coin
+        # door. A plain restart of the machine: /etc/init.d/game runs this script
+        # again on the way up, and the menu comes back as it does at power-up.
+        # CODESELECT_REBOOT replaces the command for the tests and the rig.
+        log "BACK held in the game: restarting the machine into the boot menu"
+        sync
+        ${CODESELECT_REBOOT:-reboot}
+        exit $?
+        ;;
     --scores)
         [ -n "$2" ] || { echo "usage: select.sh --scores N [conf]" >&2; exit 1; }
         scores_name "$2" "${3:-$CONF}"

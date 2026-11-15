@@ -102,6 +102,7 @@ def test_flat_title_layout(tmp_path, scooby, sel):
     assert "root=" not in spk
     conf = m["pad/images.conf"][1].decode()
     assert "image=b0|SCOOBY|" in conf and "image=b1|MINE|" in conf and "timeout=12" in conf
+    assert "back_hold" not in conf               # PAD-1309: no flag, no line
     for f in ("spkselect", "spksw", "font.ttf"):
         assert "pad/" + f in m
     assert mk.main(["verify", "--zip", path]) == 0
@@ -174,11 +175,14 @@ def test_inject_rewrites_the_menu_keeps_the_builds(tmp_path, scooby, sel):
     stock, mod = scooby
     out = tmp_path / "multi"
     out.mkdir()
-    path = _build(stock, [mod], str(out), sel)
+    path = _build(stock, [mod], str(out), sel, "--back-hold", "4")
+    assert "back_hold=4" in _members(path, tmp_path / "built")["pad/images.conf"][1].decode().splitlines()
     assert mk.main(["inject", "--zip", path, "--titles", "NEW;NAMES", "--timeout", "5"]) == 0
     m = _members(path, tmp_path)
     conf = m["pad/images.conf"][1].decode()
     assert "image=b0|NEW|" in conf and "timeout=5" in conf
+    # PAD-1309: an inject without --back-hold keeps the card's own, and inspect reads it back
+    assert "back_hold=4" in conf.splitlines() and mk.inspect_update(path)["back_hold"] == 4
     assert m["pad/d1/uptest/main_Data/v.ogg"][1] == b"MINE" * 20
     assert m["pad/b0/uptest/old.txt"][1] == b"only stock"
     assert len([n for n in m if n == "pad/images.conf"]) == 1

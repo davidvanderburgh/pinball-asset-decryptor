@@ -332,8 +332,8 @@ code:
   the flag set (`flag_set`) and each Spike 2 block start by the game flag it sets (`mode_starts`).
 - **The Modes tab** offers on the Spike 3 card: Multiball, "Hold the Right control gate", the game's three modes a
   mode keeps from starting, and "waits while the game's modes run" (MULTIBALL_PROVEN, HELD_COILS_PROVEN,
-  STACK_BALLS_PROVEN, STACK_FLAGS_PROVEN). Ball save stays greyed: on this rig the game's trough-eject retry at a
-  game's start is served as another ball, so balls stay in play and no drain ends a ball, with or without a save.
+  STACK_BALLS_PROVEN, STACK_FLAGS_PROVEN). Ball save stayed greyed here: the rig served the game's trough-eject
+  retry at a game's start as another ball (PAD-1286 fixed the rig and proved it, below).
 
 Proof (2026-11-14, Spike 3 rig slots 85-87, hidden and MUTED, this build's prebuilt mode64.so and the drafted port;
 ELG's first-boot GAME SETUP screen takes a held Start). Three Death Star hits start ELG's own multiball, so the
@@ -353,3 +353,57 @@ modes start on Top lane center:
   started by its trigger file): main's mode.so ended it 3.08 s in ("the game's own mode began"); this build's was
   still running 20 s after its multiball.
 Tests: tests/test_pad1285_spike3_play.py.
+
+## The proof pass on a Spike 3 port (PAD-1286)
+
+PAD-1277 keeps a Spike 2 build's proof tables off its Spike 3 twin: every `*_PROVEN` table (mode_project.py) is keyed
+`<game>-<version>/spike3` for a Spike 3 build (`table_key`) and starts empty, so the Modes tab offers a feature on a
+Spike 3 card only once the emulator has seen it there. The pass, per Spike 3 port (Star Wars ELG 1.10 is the worked
+example; PAD-1288..1293 do the others):
+
+1. **The port carries the feature's lines.** s3port.py writes a placed site or value as a comment while its runtime
+   feature still reads 32-bit structs; a feature made 64-bit carries them (PAD-1282 sounds, 1283 lamps, 1284 screens,
+   1285 multiball / held coils / blocks, 1286 the game's mode books). Redraft the port (`s3port.py <S2 game> <S2 port>
+   <S3 game> -o draft.port`), keep the shipped port's proof notes at its head, and check the profile:
+   `mode_project.profile_from_port(<port>).cannot` names each part greyed and why ("has not found" = the port lacks
+   it; "has not yet seen ... in the emulator" = the lines are there, the proof is owed).
+2. **Run the proof** with `tools/spike3_emu/proofs/s3proof.sh` (as root in WSL, hidden and muted, a free Spike 3 rig
+   slot; `PROOF=` picks the play, `CFG=` / `CFG2=` the mode files in `proofs/modes/`; the title's switch names are
+   play.sh's variables at its head - TRIGGER_SW, SHOT_SWS, EARLY_SWS, GAME_MB_SW, START_HOLD_MS). Logs: the runtime's
+   mode.log, the bridge's bridge.log ([ball] lines), the play's own output.
+3. **Add the build to the table** with a comment saying what was seen, as the Spike 2 entries do.
+
+| table | proof | what the logs must show |
+|---|---|---|
+| BALL_SAVE_PROVEN | `PROOF=ballsave CFG=save.cfg`, and the control `CFG=savectl.cfg` | `[pad] ball save: 15 s ... the game is saving`; the drain inside it served back (eject + auto plunger in bridge.log) and the mode running on; shots scored on that ball; the drain after the save `END (ball ended)`. The control: `END (ball ended)` on its first drain. EARLY_SWS starts the game's own start-of-ball save right after the plunge, so it is over (40 s) before the mode starts. |
+| PLACE_PROVEN, DONE_PROVEN | `PROOF=game CFG=place.cfg CFG2=done.cfg SO=<build_probe.sh's .so>` | place_probe_mode.c calls the game's Orbits start (id 1; another title: its port's block id) 25 s in: `PLACE TEST START (in place of the game's mode)`, at its end `COMPLETED flag 67 set` (the port's place_flag_completed_1), `done: player 1 completed`, then `DONE TEST START (1 of the game's modes completed)`. |
+| MULTIBALL_PROVEN | `PROOF=mb CFG=mb.cfg` | `multiball: 3 balls asked for ... the game is serving`, the mode running its clock, `multiball: ours is over (1 ball in play)` |
+| HELD_COILS_PROVEN | `PROOF=coil CFG=coil.cfg` | `HOLD for 2000 ms ... ONE command`, `let go - its time ran out`, a second hold on a shot; no abort |
+| STACK_BALLS_PROVEN | `PROOF=stackmb CFG=stackmb.cfg` | `not started: a multiball is running` in the game's own multiball, then START after drains |
+| STACK_FLAGS_PROVEN | PAD-1285's block_probe_mode.c (the game's Ramps start called while a mode blocks and while none does) | `the game's mode 2 (Ramps) did not start` while blocked; the flag set when not |
+| LAMPS_PROVEN, TITLE_SCENES | PAD-1283 / PAD-1284 (padled from the bridge; the HUD frames) | see those sections |
+
+**The rig's ball model** must serve one ball per eject for any drain-based proof: PAD-1286 found Star Wars ELG reads
+its trough from TROUGH 6 and the model now learns the direction at a game's start (docs/plans/spike3_emulation.md,
+"The trough's direction"). A run's bridge.log says `turned round` when it did.
+
+**Proof (2026-11-15, Star Wars ELG 1.10, rig slots 88-90, hidden, muted, this build's mode64.so and port)**, every row
+above through s3proof.sh:
+- Ball save: SAVE TEST's 15 s save taken through multiball_serve; the drain 3 s in served back (eject, auto plunger);
+  3 shots scored 6,000,000 on that ball; the drain after the save ended it. SAVE CONTROL (no ball_save) ended the ball
+  on its first drain, 5.8 s in.
+- Place / done: the game's Orbits start taken by PLACE TEST, its 8 s clock completed it - the game's COMPLETED flag 67
+  set - and DONE TEST started on that completion 17 ms later; the game played on to the cap.
+- Re-run on the fixed rig (PAD-1285's proofs had run with the extra balls): MB TEST served 3 through the game's serve,
+  ran its 40 s, `ours is over` at one ball; COIL TEST's right_gate held 2015 ms and 1513 ms as ONE command each; STACK MB
+  waited in the game's own multiball and started after its second drain.
+
+**Not offered on the Spike 3 card yet, and why:** spare switch inputs and driver outputs (PAD-826: the switch service
+block, the node-bus fire wrapper and coil_off read at 32-bit offsets; `sw_struct`, `coil_frame`, `coil_off` NOT PLACED)
+and the game's challenges (PAD-619/663: the challenge menu, its pick and the score pages are NOT PLACED - mid-function
+sites with no 64-bit counterpart yet); see the ticket's report for where they go next. The game's "time is up" line
+(TIME_UP_NONE) is not claimed for the Spike 3 build: the option is greyed there anyway (its port has no time-up call),
+and the Spike 3 sound bank is a differently encoded image.bin (the same size, 99.6% of its bytes differ), so PAD-479's
+transcription does not carry over by itself. switch_edge, music modes, editions, menu settings: Spike 2's delivery only
+(above).
+Tests: tests/test_pad1286_spike3_proofs.py, tests/test_spike3_balls.py.

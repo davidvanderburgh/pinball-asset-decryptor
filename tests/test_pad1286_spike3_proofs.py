@@ -114,3 +114,32 @@ def test_mode_books_renumbers_each_flag_by_its_name(monkeypatch):
     # a flag the Spike 3 program does not have is left out, said why
     vals, _t, why = S.mode_books(ref, {"done_flag_0": "66"}, rtext, _Prog(NAMES[:66] + ["FG_OTHER"] * 4, True), {})
     assert vals == {} and any("not one of the Spike 3" in w for w in why)
+
+
+# ---- the recipe's rig jobs ---------------------------------------------------------------------------------------
+PROOFS = ROOT / "tools" / "spike3_emu" / "proofs"
+
+
+def _cfg(name):
+    out = {}
+    for line in (PROOFS / "modes" / name).read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            k, _, v = line.partition(" ")
+            out.setdefault(k, []).append(v.strip())
+    return out
+
+
+def test_the_recipe_jobs_and_their_mode_files_are_there():
+    for f in ("s3proof.sh", "play.sh", "build_probe.sh", "place_probe_mode.c"):
+        assert (PROOFS / f).is_file(), f
+    play = (PROOFS / "play.sh").read_text(encoding="utf-8")
+    for proof in ("ballsave)", "game)", "mb)", "coil)", "stackmb)"):
+        assert "\n" + proof in play
+    assert _cfg("save.cfg")["ball_save"] == ["15"] and "ball_save" not in _cfg("savectl.cfg")
+    assert _cfg("place.cfg")["in_place_of"] == ["1"] and "trigger" not in _cfg("place.cfg")
+    assert _cfg("done.cfg")["starts_on"] == ["completed 1 1"]
+    assert _cfg("mb.cfg")["multiball"] == ["3 10"] and _cfg("stackmb.cfg")["stack"] == ["no"]
+    assert _cfg("coil.cfg")["coil_hold"][0] == "right_gate 2000"
+    assert "pm_game_mode_start(1)" in (PROOFS / "place_probe_mode.c").read_text(encoding="utf-8")
+    for sh in ("s3proof.sh", "play.sh", "build_probe.sh"):
+        assert b"\r\n" not in (PROOFS / sh).read_bytes(), sh          # bash in WSL reads them

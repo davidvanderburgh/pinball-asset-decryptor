@@ -19,6 +19,7 @@ import sys
 import threading
 
 from . import compat
+from ..core.drives import stick_words
 
 
 def _fmt_size(n):
@@ -30,6 +31,19 @@ def _fmt_size(n):
     if n >= 10 ** 6:
         return "%.1f MB" % (n / 10 ** 6)
     return "%d bytes" % n
+
+
+def _size_change(img_size, original_size):
+    """' (0.19 GB more than the original's 3.21 GB)' or "" when the two are
+    within a megabyte or the original's size is unknown."""
+    if not original_size or not img_size:
+        return ""
+    diff = img_size - original_size
+    if abs(diff) < 10 ** 6:
+        return " (the same size as the original)"
+    return (" (%s %s than the original's %s)"
+            % (_fmt_size(abs(diff)), "more" if diff > 0 else "less",
+               _fmt_size(original_size)))
 
 
 def flash_words(mfr):
@@ -51,6 +65,10 @@ def flash_words(mfr):
                         or getattr(mfr, "direct_target_kind", "sd_card")),
         "target_label": (getattr(mfr, "flash_target_label", None)
                          or "Target %s:" % noun),
+        # the medium is formatted and the image's FILES copied onto it (a
+        # JJP install stick), so any stick of the right printed size will
+        # do: the readout names that size (PAD-1314)
+        "size_class": bool(getattr(mfr, "flash_size_class", False)),
         "filetypes": [tuple(ft) for ft in
                       getattr(mfr, "flash_image_filetypes", None)
                       or (("SD-card image", "*.img *.raw *.bin"),
@@ -139,7 +157,8 @@ class FlashDialog:
                  fresh_image=False, flashed_fn=None, image_titles=None,
                  publish=None, ask_open=None, ask_save=None,
                  build_size=None, build_size_hint="", build_refusal=None,
-                 image_size_hint=None):
+                 image_size_hint=None, original_size=None,
+                 original_path=""):
         self._host = host                  # the UI loop (post)
         #: (image path, its size, the card's size) -> what else the user can
         #: do when an image already built won't fit the card ("" for
@@ -159,6 +178,11 @@ class FlashDialog:
         #: what else the user can do when the build won't fit the card: the
         #: words, or (card's size) -> the words, when they depend on it
         self._build_size_hint = build_size_hint or ""
+        # the original image's size (the Write tab's original, PAD-1314):
+        # what a build starts from, and what a built image is set against
+        self._original_size = int(original_size) if original_size else None
+        self._original_path = (os.path.normpath(original_path)
+                               if original_path else "")
         self._mfr = manufacturer
         self._on_flash = on_flash
         self._on_build_flash = on_build_flash
@@ -386,10 +410,32 @@ class FlashDialog:
         card = self.selected
         card_size = card.size_bytes if card else None
         if building and img_size is None:
+            if self._original_size and self.words["size_class"]:
+                if card_size and self._original_size > card_size:
+                    return ("⚠ The original alone is %s, larger than the "
+                            "%s %s, so the build won't fit. Use %s."
+                            % (_fmt_size(self._original_size),
+                               self.words["noun"], _fmt_size(card_size),
+                               self._need(self._original_size)), "err")
+                return ("The build is about the size of the original "
+                        "(%s), plus whatever your changes add: %s. It is "
+                        "checked against the %s before anything is erased."
+                        % (_fmt_size(self._original_size),
+                           self._need(self._original_size),
+                           self.words["noun"]), "gray")
             return ("The image is built first — its size is checked "
                     "against the card before writing.", "gray")
         if img_size is None:
             return "", "gray"
+        # how it sets against the original it was built from (PAD-1314);
+        # with Build ticked and no size known up front, the size is the one
+        # an earlier build left at the build path, so it says so
+        label = ("Last build" if building and not self._build_size
+                 else "Image")
+        change = ""
+        if (not (building and self._build_size) and self._original_size
+                and img and os.path.normpath(img) != self._original_path):
+            change = _size_change(img_size, self._original_size)
         if self.to_disk():
             mode = self.current_disk_mode()
             if card is None:
@@ -413,9 +459,12 @@ class FlashDialog:
                     "installed onto it, as the machine's installer would."
                     % (_fmt_size(img_size), card.display), "gray")
         noun = self.words["noun"]
+        need = (" — needs %s" % self._need(img_size)
+                if self.words["size_class"] else "")
         if card is None:
-            return ("Image: %s  •  pick a target %s."
-                    % (_fmt_size(img_size), noun), "gray")
+            return ("%s: %s%s%s  •  pick a target %s."
+                    % (label, _fmt_size(img_size), change, need, noun),
+                    "gray")
         if card_size and img_size > card_size:
             if building and self._build_size:
                 return ("⚠ The build will be %s, larger than the %s %s — it "
@@ -423,18 +472,30 @@ class FlashDialog:
                         % (_fmt_size(img_size), noun, _fmt_size(card_size),
                            noun, (", " + self._build_hint(card_size))
                            if self._build_hint(card_size) else ""), "err")
+            if self.words["size_class"]:
+                return ("⚠ %s %s%s is larger than the %s %s — it won't "
+                        "fit. Use %s."
+                        % (label, _fmt_size(img_size), change, noun,
+                           _fmt_size(card_size), self._need(img_size)),
+                        "err")
             hint = self._image_hint(img, img_size, card_size)
-            return ("⚠ Image %s is larger than the %s %s — it won't fit. "
-                    "Use a larger %s%s." % (_fmt_size(img_size), noun,
-                                            _fmt_size(card_size), noun,
+            return ("⚠ %s %s%s is larger than the %s %s — it won't fit. "
+                    "Use a larger %s%s." % (label, _fmt_size(img_size), change,
+                                            noun, _fmt_size(card_size), noun,
                                             (", " + hint) if hint else ""),
                     "err")
         if card_size:
-            return ("Image %s  →  %s %s   ✓ fits"
-                    % (_fmt_size(img_size), noun, _fmt_size(card_size)),
-                    "ok")
-        return ("Image %s  →  %s size unknown (it will be checked before "
-                "writing)" % (_fmt_size(img_size), noun), "gray")
+            return ("%s %s%s  →  %s %s   ✓ fits"
+                    % (label, _fmt_size(img_size), change, noun,
+                       _fmt_size(card_size)), "ok")
+        return ("%s %s%s  →  %s size unknown (it will be checked before "
+                "writing)%s" % (label, _fmt_size(img_size), change, noun,
+                                (". It needs %s." % self._need(img_size))
+                                if need else ""), "gray")
+
+    def _need(self, n):
+        """'a 4 GB USB stick or larger' for an image of *n* bytes."""
+        return stick_words(n, self.words["noun"])
 
     def state(self):
         building, writing = self.building, bool(self.write)

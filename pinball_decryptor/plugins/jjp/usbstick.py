@@ -76,6 +76,11 @@ _WIN_FAT32_USABLE = int(_WIN_FAT32_MAX * 0.98)
 
 _COPY_CHUNK = 4 * 1024 * 1024
 
+
+def _stick_words(n):
+    from ...core.drives import stick_words
+    return stick_words(n)
+
 PHASES = ("Check stick", "Format stick", "Copy installer files",
            "Verify", "Eject")
 
@@ -735,6 +740,17 @@ class UsbStickPreparePipeline(BasePipeline):
         self.device_path = device_path
 
     # -- small indirections so tests can monkeypatch the OS layer ----------
+    def _stick_size(self):
+        """The stick's advertised size in bytes, or None when unknown."""
+        try:
+            from ...core.drives import list_physical_drives
+            for d in list_physical_drives():
+                if d.device_path == self.device_path:
+                    return d.size_bytes or None
+        except Exception:                               # noqa: BLE001
+            pass
+        return None
+
     def _format_stick(self):
         fn = {"win32": format_stick_windows,
               "darwin": format_stick_macos}.get(sys.platform,
@@ -790,6 +806,15 @@ class UsbStickPreparePipeline(BasePipeline):
                 "here. Write it with Rufus instead (default settings, 'ISO "
                 "Image mode'): Rufus formats large FAT32 itself."
                 % (iso_size / 1e9))
+        # PAD-1314: a stick smaller than the ISO is refused BEFORE the format
+        # erases it (the free-space check below only runs once it has been)
+        stick = None if premounted else self._stick_size()
+        if stick and iso_size > stick:
+            raise PipelineError(
+                PHASES[0],
+                "The stick is too small: the installer needs %.1f GB but "
+                "the stick is %.1f GB. Use %s. Nothing was written to it."
+                % (iso_size / 1e9, stick / 1e9, _stick_words(iso_size)))
         self._log("Preparing a JJP install stick: the stick is formatted "
                   "FAT32, the ISO's files are copied onto it and its boot "
                   "code is installed, the way Rufus prepares one (never a "

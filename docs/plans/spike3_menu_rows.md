@@ -57,3 +57,45 @@ planned row reads back right in every field but "no menu page lists it". To fini
    This visible change is a GUI proof: before/after shots of the operator-menu page.
 4. Then wire it into the Spike 3 Write (`spike3_modes` / `engine`) so a project's MUSIC MODE etc.
    land on a Spike 3 card, and lift the refusal in the family census for the menu-row parts.
+
+## The grow mechanism, proven on ELG (2026-11-15)
+
+The exact transformation above was carried out by hand on Star Wars ELG 1.10 and PROVEN, as the
+spike that de-risks the generic code. For a +1 record (111 -> 112, size 0x534 -> 0x540):
+
+- the 112-record table is appended page-aligned at EOF and mapped by repurposing PT_GNU_STACK as a
+  read-only PT_LOAD at vaddr 0x7c7000 (just above .bss, so last in vaddr order; p_offset/p_vaddr
+  page-congruent). A PIE adds the same load base to every segment, and the copy is reached by a
+  PC-relative `adrp`/`add`, so an absolute p_vaddr is correct at runtime.
+- nine instruction words patched: `adrp x1`/`add x1` -> 0x7c7000; `movz x2`/`movz x0` -> 0x540;
+  `add x21,x0` -> 0x540; and the frame grown `sub sp`/`add sp` 0x540 -> 0x550 with the saved-arg
+  `str`/`ldr [sp,#1336]` -> `[sp,#1352]` (so the longer copy doesn't clobber the saved register).
+
+Proven three static ways: our own reader parses the 112-record table at 0x7c7000 and reports the
+menu now lists id 31 as `{11,3,31}`; `aarch64-linux-gnu-objdump` confirms all nine patches; the
+descriptor reads back MUSIC MODE / row Music Mode / range 1-2.
+
+Proven on the machine: the patched program boots on the Spike 3 rig and runs at 55 fps through
+GAME SETUP, attract and the coin-door screen with NO crash (frames in
+work/artifacts/PAD-1321/). Reaching attract means the start-up constructor's copy OUT of the new
+segment succeeded (else a boot-time fault), so the segment, the repointed copy and the resized
+frame all work live. The operator-menu page itself was not captured: opening the coin door (needed
+to reach Adjustments) hangs this title's service/connect path in the emulator under heavy rig load
+(load 16+, other sessions), and the harness SIGKILLs the hung game (137, never a SIGSEGV). A
+calmer rig should let the menu page be captured.
+
+## What is left (generic, shipping)
+
+The hand-patch above is a scratch spike, not shipping code. To finish the ticket:
+
+- a generic finder that locates, in ANY Spike 3 build: the table-copy function, the `adrp`/`add`
+  that forms the table pointer, EVERY occurrence of the size immediate and the table address within
+  the enclosing function (so a second size reference cannot be missed), and the frame `sub`/`add`
+  plus the saved-slot `[sp,#off]` accesses that must shift. Carry those offsets on
+  `WideCategoryTable` (as Spike 2's `CategoryTable` does) and implement `writes()` + a 64-bit
+  segment appender in `engine`. Builds whose copy pattern differs (not stack-buffer-then-heap) must
+  be recognised and refused rather than mis-patched.
+- a per-game category for each setting (ELG's category numbers differ from Godzilla's; 13 is unused
+  on ELG). Pick by the category NAME table, not the fixed Spike 2 number.
+- per-build emulator proof of the visible row for each build that takes a row, and the Spike 3
+  Write wiring. Each needs a calmer rig than was available on 2026-11-15.

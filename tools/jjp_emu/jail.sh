@@ -41,8 +41,10 @@ mkdir -p "$JJP_JAIL/tmp" "$JJP_JAIL/jjpe/temp" "$JJP_JAIL/jjpe/perm"
 chmod 1777 "$JJP_JAIL/tmp"
 
 # PulseAudio refuses a root client with "Access denied" unless it has the
-# desktop user's cookie - the socket is theirs, not root's.
-if [ -f "$JJP_PULSE_COOKIE" ]; then
+# desktop user's cookie - the socket is theirs, not root's.  Only for a run
+# that asked for sound (PAD-1340): the cookie is what let a "muted" run reach
+# the speakers.  audio.sh hands it in for PAD_AUDIO=1 as well.
+if [ "${PAD_AUDIO:-0}" = "1" ] && [ -f "$JJP_PULSE_COOKIE" ]; then
     mkdir -p "$JJP_JAIL/root/.config/pulse"
     cp -f "$JJP_PULSE_COOKIE" "$JJP_JAIL/root/.config/pulse/cookie"
     chmod 600 "$JJP_JAIL/root/.config/pulse/cookie"

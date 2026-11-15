@@ -29,7 +29,7 @@ S2=$S/../spike2_emu
 # would otherwise keep running the old bridge (the built files still exist).
 srcsum() {
     cat "$S/s3build.sh" "$S"/*.c "$S"/*.h "$S2/glbridge.c" "$S2/padglhost.c" \
-        "$S2/padgl.h" "$S2/padsw.h" "$S2/padvid.h" "$S2/i420.h" "$S2/padicon.h" 2>/dev/null \
+        "$S2/padgl.h" "$S2/padsw.h" "$S2/padvid.h" "$S2/i420.h" "$S2/padicon.h" "$S2/pad_nosync.c" 2>/dev/null \
         | sha256sum | cut -c1-16
 }
 if [ "${1:-}" = --sum ]; then srcsum; exit 0; fi
@@ -56,6 +56,12 @@ CF="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -Wall -Werror=implicit-fun
 "$CC" $CF -Wl,-soname,s3kms.so -o "$OUT/s3kms.so" "$S/s3kms.c" -ldl -lpthread
 "$CC" $CF -Wl,-soname,s3alsa.so -o "$OUT/s3alsa.so" "$S/s3alsa.c"
 "$CC" $CF -Wl,-soname,s3dev.so -o "$OUT/s3dev.so" "$S/s3dev.c" -ldl
+# the guest's sync() made a no-op (PAD-1340): the Spike 2 rig's pad_nosync.c, for
+# aarch64. A Spike 3 game's nvram and PreLoadScene threads call sync(); qemu hands
+# it to the host, where sync(2) is global, waits on WSL2's virtiofs and never
+# returns - the slot's game sat in D state for good. s3run.sh preloads it for
+# every guest process through the slot root's /etc/ld.so.preload.
+"$CC" $CF -nostdlib -Wl,-soname,pad_nosync.so -o "$OUT/pad_nosync.so" "$S2/pad_nosync.c"
 # s3vid.so builds against the card's own FFmpeg (5.1.6-rpi: libavcodec
 # 59.37.100) - its AVFrame/AVCodecContext layouts - so the headers of that
 # exact release, fetched once beside the build
@@ -84,7 +90,7 @@ gcc -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration $VIDMAX $GLMAX -I
     -o "$OUT/padglhost" "$S2/padglhost.c" -l:libEGL.so.1 -l:libX11.so.6
 
 srcsum > "$OUT/.srcsum"
-for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3dev.so s3vid.so s3spid padglhost; do
+for f in libGLESv2.so.2 libEGL.so.1 s3kms.so s3alsa.so s3dev.so s3vid.so pad_nosync.so s3spid padglhost; do
     [ -e "$OUT/$f" ] || continue
     printf 's3build: %-15s %8d bytes\n' "$f" "$(stat -c%s "$OUT/$f")"
 done

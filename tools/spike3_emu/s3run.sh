@@ -548,6 +548,21 @@ for kv in ${RUNBINDS:-}; do
 done
 # /dump -> /connectivity/dump on the machine (S95game makes it)
 mkdir -p "$R/connectivity/dump/log"
+# NO GLOBAL sync() (PAD-1340): the game's nvram and PreLoadScene threads call
+# sync() after they write, qemu passes it to the host, and under WSL2 sync(2)
+# waits on the Windows drives' virtiofs (fuse_sync_fs) for ever: the slot's game
+# sat in D state, unkillable, until `wsl --shutdown`. The no-op (s3build.sh,
+# from ../spike2_emu/pad_nosync.c) goes in /etc/ld.so.preload of the slot's
+# overlay root - every guest process, the card's scripts included; the store
+# is never written. syncfs()/fsync() are untouched.
+if [ -e "$B/pad_nosync.so" ]; then
+    mkdir -p "$R/usr/lib/pad"; cp -f "$B/pad_nosync.so" "$R/usr/lib/pad/"
+    touch "$R/etc/ld.so.preload"
+    grep -qx /usr/lib/pad/pad_nosync.so "$R/etc/ld.so.preload" \
+        || echo /usr/lib/pad/pad_nosync.so >> "$R/etc/ld.so.preload"
+else
+    echo "[s3run] WARNING: no $B/pad_nosync.so (s3build.sh): the game's sync() can wedge this slot" >&2
+fi
 PRELOAD=""
 if [ "$BRIDGE" = 1 ]; then
     rm -f "$R/usr/lib/libEGL.so.1" "$R/usr/lib/libGLESv2.so.2"

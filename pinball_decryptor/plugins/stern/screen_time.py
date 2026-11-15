@@ -212,8 +212,11 @@ def time_slot(elf):
 
 def screens(game_elf):
     """Every screen of the game that shows a clip of its own for a fixed time, ``[Screen]``, in
-    the order of their vtables. *game_elf*: the program's bytes or a :class:`.portgen.Elf`."""
+    the order of their vtables. *game_elf*: the program's bytes or a :class:`.portgen.Elf`.
+    PAD-1323: a 64-bit program (Spike 3) is read by :func:`screens_a64`."""
     from .portgen import Elf
+    if isinstance(game_elf, (bytes, bytearray, memoryview)) and bytes(game_elf[:5]) == b"\x7fELF\x02":
+        return screens_a64(bytes(game_elf))
     elf = game_elf if isinstance(game_elf, Elf) else Elf(game_elf)
     strings, floats = _getters(elf)
     tslot = time_slot(elf) if strings and floats else None
@@ -271,6 +274,297 @@ def _bool_getter(elf, fn):
     return None
 
 
+# ---- PAD-1323: the 64-bit program (Spike 3) ------------------------------------------------------------
+# The same framework, built for AArch64 (Fallout LE 0.82 and Pokemon LE 0.82 carry it; BDLExtraBall,
+# BDLModeTotal ...): Fallout's screens name their clip in slot 17 and crop in 18, play-it-looped in 19, their
+# "done" check in 16, and the base's start code reads the length from slot 28 (`ldr x1, [x2, #0xe0]`, compared
+# with the base's own 3.0 s getter) into the float at +0xe0, which the check compares with the clock beside it
+# (`ldp s0, s1, [x0, #0xe0]` / `fcmpe s1, s0`). A PIE: a vtable's words are 0 in the file and its entries are
+# R_AARCH64_RELATIVE relocations, read from .rela.dyn; every address here is the program's link-time one (the
+# runtime adds the load address, pad_mode_runtime.c "screen times").
+_A64_RET = 0xD65F03C0
+_A64_RELATIVE = 1027
+
+
+class _Elf64:
+    """The parts of a 64-bit ARM program :func:`screens_a64` reads."""
+
+    def __init__(self, b):
+        self.b = b
+        phoff, = struct.unpack_from("<Q", b, 0x20)
+        shoff, = struct.unpack_from("<Q", b, 0x28)
+        phsz, phn, shsz, shn, shstr = struct.unpack_from("<HHHHH", b, 0x36)
+        self.loads = []
+        for i in range(phn):
+            t, fl, off, va, _pa, fs, _ms, _al = struct.unpack_from("<IIQQQQQQ", b, phoff + i * phsz)
+            if t == 1:
+                self.loads.append((off, va, fs, fl))
+        secs = {}
+        if shoff and shn and shoff + shn * shsz <= len(b):
+            raw = [struct.unpack_from("<IIQQQQIIQQ", b, shoff + i * shsz) for i in range(shn)]
+            so = raw[shstr][4] if shstr < len(raw) else 0
+            for nm, _t, _fl, a, off, sz, *_rest in raw:
+                e = b.find(b"\0", so + nm)
+                secs[b[so + nm:e].decode("ascii", "replace")] = (a, off, sz)
+        text = secs.get(".text")
+        if text is None:
+            ex = [l for l in self.loads if l[3] & 1]
+            if not ex:
+                raise ValueError("no executable code")
+            text = (ex[0][1], ex[0][0], ex[0][2])
+        self.tva, toff, tsz = text
+        self.arr = np.frombuffer(b, dtype="<u4", count=tsz // 4, offset=toff)
+        self.ptr = {}
+        rel = secs.get(".rela.dyn")
+        if rel is not None:
+            r = np.frombuffer(b, dtype="<u8", count=rel[2] // 8 // 3 * 3, offset=rel[1]).reshape(-1, 3)
+            keep = (r[:, 1] & 0xFFFFFFFF) == _A64_RELATIVE
+            self.ptr = dict(zip(r[keep, 0].tolist(), r[keep, 2].tolist()))
+
+    def off(self, va):
+        for off, v, fsz, _f in self.loads:
+            if v <= va < v + fsz:
+                return off + va - v
+        return None
+
+    def u32(self, va):
+        o = self.off(va)
+        return struct.unpack_from("<I", self.b, o)[0] if o is not None and o + 4 <= len(self.b) else None
+
+    def u64(self, va):
+        """The pointer at *va* as the loader leaves it (less the load address): its relocation's addend, else
+        the file's word."""
+        if va in self.ptr:
+            return self.ptr[va]
+        o = self.off(va)
+        return struct.unpack_from("<Q", self.b, o)[0] if o is not None and o + 8 <= len(self.b) else None
+
+
+def _a64_adrp(va, w):
+    imm = ((w >> 29) & 3) | (((w >> 5) & 0x7FFFF) << 2)
+    if imm & (1 << 20):
+        imm -= 1 << 21
+    return (va & ~0xFFF) + (imm << 12)
+
+
+def _a64_fmov_imm(imm8):
+    """The float an ``fmov s0, #imm`` makes (the VFP 8-bit immediate)."""
+    b = (imm8 >> 6) & 1                                   # VFPExpandImm: a:NOT(b):bbbbb:cd:efgh:0...
+    exp8 = ((b ^ 1) << 7) | ((0x1F if b else 0) << 2) | ((imm8 >> 4) & 3)
+    word = ((imm8 >> 7) << 31) | (exp8 << 23) | ((imm8 & 15) << 19)
+    return struct.unpack("<f", struct.pack("<I", word))[0]
+
+
+def _getters_a64(elf):
+    """``({fn: string}, {fn: float})``: ``adrp x0 / add x0, x0 / ret`` and ``fmov s0, #imm / ret`` (or a word
+    moved in: ``mov wN, #hi, lsl 16 [/ movk] / fmov s0, wN / ret``)."""
+    a = elf.arr
+    strings, floats = {}, {}
+    if len(a) < 4:
+        return strings, floats
+    w0, w1, w2 = a[:-2], a[1:-1], a[2:]
+    s_idx = np.nonzero(((w0 & 0x9F00001F) == 0x90000000) & ((w1 & 0xFFC003FF) == 0x91000000) & (w2 == _A64_RET))[0]
+    for i in s_idx.tolist():
+        va = elf.tva + 4 * i
+        s = _cstr(elf, _a64_adrp(va, int(a[i])) + ((int(a[i + 1]) >> 10) & 0xFFF))
+        if s:
+            strings[va] = s
+    for i in np.nonzero(((w0 & 0xFFE01FFF) == 0x1E201000) & (w1 == _A64_RET))[0].tolist():
+        floats[elf.tva + 4 * i] = _a64_fmov_imm((int(a[i]) >> 13) & 0xFF)
+    # mov wN, #hi, lsl #16 ; fmov s0, wN ; ret  (and with a movk of the low half between)
+    for i in np.nonzero(((w0 & 0xFFE00000) == 0x52A00000) & ((w1 & 0xFFFFFC1F) == 0x1E270000) & (w2 == _A64_RET))[0].tolist():
+        if (int(a[i]) & 31) == (int(a[i + 1]) >> 5) & 31:
+            v = struct.unpack("<f", struct.pack("<I", ((int(a[i]) >> 5) & 0xFFFF) << 16))[0]
+            if v == v:
+                floats[elf.tva + 4 * i] = v
+    if len(a) > 4:
+        x0, x1, x2, x3 = a[:-3], a[1:-2], a[2:-1], a[3:]
+        for i in np.nonzero(((x0 & 0xFFE00000) == 0x52800000) & ((x1 & 0xFFE00000) == 0x72A00000)
+                            & ((x2 & 0xFFFFFC1F) == 0x1E270000) & (x3 == _A64_RET))[0].tolist():
+            rd = int(a[i]) & 31
+            if (int(a[i + 1]) & 31) == rd and (int(a[i + 2]) >> 5) & 31 == rd:
+                word = (((int(a[i + 1]) >> 5) & 0xFFFF) << 16) | ((int(a[i]) >> 5) & 0xFFFF)
+                v = struct.unpack("<f", struct.pack("<I", word))[0]
+                if v == v:
+                    floats[elf.tva + 4 * i] = v
+    return strings, floats
+
+
+def _length_fields_a64(elf):
+    """``Counter({field: n})`` of the "clock > length" checks: ``ldp sA, sB, [xN, #f]`` then ``fcmpe sB, sA`` (the
+    length is the compare's second operand), or the two as ``ldr``s."""
+    import collections
+    a = elf.arr
+    out = collections.Counter()
+    for i in np.nonzero((a & 0xFFE0FC1F) == 0x1E202010)[0].tolist():        # fcmpe sN, sM
+        rn, rm = (int(a[i]) >> 5) & 31, (int(a[i]) >> 16) & 31
+        if rn == rm:
+            continue
+        at = {}
+        for j in range(1, 5):
+            if i - j < 0:
+                break
+            w = int(a[i - j])
+            if (w & 0xFFC00000) == 0x2D400000:                              # ldp sT, sT2, [xN, #imm7*4]
+                imm = (w >> 15) & 0x7F
+                imm = (imm - 128 if imm & 64 else imm) * 4
+                base = (w >> 5) & 31
+                at.setdefault(w & 31, (base, imm))
+                at.setdefault((w >> 10) & 31, (base, imm + 4))
+            elif (w & 0xFFC00000) == 0xBD400000:                            # ldr sT, [xN, #imm12*4]
+                at.setdefault(w & 31, ((w >> 5) & 31, ((w >> 10) & 0xFFF) * 4))
+        if rn in at and rm in at and at[rn][0] == at[rm][0] and at[rm][1] > 0:
+            out[at[rm][1]] += 1
+    return out
+
+
+def _done_checks_a64(elf):
+    """``Counter({field: n})`` of the whole-function "done" checks a timed screen's vtable holds:
+    ``ldp s0, s1, [x0, #f]`` / ``fcmpe s1, s0`` / ``cset w0, gt`` / ``ret`` (Fallout +0xe0, Pokemon +0xc8). Other
+    float compares in the program (Pokemon has more of them than screens) do not count here."""
+    import collections
+    a = elf.arr
+    out = collections.Counter()
+    if len(a) < 5:
+        return out
+    m = np.nonzero(((a[:-3] & 0xFFC07FFF) == 0x2D400400) & (a[1:-2] == 0x1E202030)
+                   & (a[2:-1] == 0x1A9FD7E0) & (a[3:] == _A64_RET))[0]
+    for i in m.tolist():
+        imm = (int(a[i]) >> 15) & 0x7F
+        if not imm & 64:
+            out[imm * 4] += 1
+    return out
+
+
+def _time_slot_a64(elf, fields):
+    """The vtable slot the code that stores a length field (``str s0, [xN, #field]``) loads and compares with the
+    base's own function just before (``ldr xD, [xV, #slot*8]`` ... ``cmp xD, xK``)."""
+    import collections
+    a = elf.arr
+    for field, _n in fields.most_common(3):
+        if field % 4 or field // 4 > 0xFFF:
+            continue
+        stores = np.nonzero((a & 0xFFFFFC1F) == (0xBD000000 | (field // 4) << 10))[0]
+        slots = collections.Counter()
+        for i in stores.tolist():
+            for k in range(1, 16):
+                if i - k < 0:
+                    break
+                w = int(a[i - k])
+                if (w & 0xFFC00000) != 0xF9400000:                          # ldr xD, [xN, #imm12*8]
+                    continue
+                off = ((w >> 10) & 0xFFF) * 8
+                if not 0x40 <= off <= 0x400:
+                    continue
+                rd = w & 31
+                if any((int(a[i - j]) & 0xFF20001F) == 0xEB00001F               # cmp xN, xM (subs xzr)
+                       and rd in ((int(a[i - j]) >> 5) & 31, (int(a[i - j]) >> 16) & 31) for j in range(0, k)):
+                    slots[off // 8] += 1
+                    break
+        if slots:
+            return field, slots.most_common(1)[0][0]
+    return None, None
+
+
+def _rtti_head_a64(elf, entry):
+    """``(vtable address point, class name)`` for the vtable *entry* is in: the first pointer above it that a
+    ``[0, typeinfo]`` pair precedes, typeinfo's name (at +8) a mangled one."""
+    for k in range(1, MAX_HEAD_WORDS):
+        top = entry - 8 * k
+        if top - 16 in elf.ptr or elf.u64(top - 16) != 0:
+            continue
+        ti = elf.ptr.get(top - 8)
+        if not ti:
+            continue
+        name_va = elf.u64(ti + 8)
+        name = _cstr(elf, name_va) if name_va else None
+        if name and name[0].isdigit():
+            return top, name.lstrip("0123456789")
+    return None, ""
+
+
+def _reads_field_a64(elf, fn, field, depth=0):
+    """:func:`_reads_field` for AArch64: a ``ldr``/``ldp`` of the float at ``[xN, #field]`` before a ``ret``,
+    or in a function it ``bl``s, one level down."""
+    for k in range(24):
+        w = elf.u32(fn + 4 * k)
+        if w is None:
+            return False
+        if (w & 0xFFC00000) == 0xBD400000 and ((w >> 10) & 0xFFF) * 4 == field:
+            return True
+        if (w & 0xFFC00000) == 0x2D400000:
+            imm = (w >> 15) & 0x7F
+            imm = (imm - 128 if imm & 64 else imm) * 4
+            if field in (imm, imm + 4):
+                return True
+        if w == _A64_RET:
+            return False
+        if (w & 0xFC000000) == 0x94000000 and depth == 0:                   # bl
+            off = w & 0x3FFFFFF
+            off = off - (1 << 26) if off & (1 << 25) else off
+            if _reads_field_a64(elf, fn + 4 * k + 4 * off, field, 1):
+                return True
+    return False
+
+
+def _bool_getter_a64(elf, fn):
+    if not fn:
+        return None
+    w0, w1 = elf.u32(fn), elf.u32(fn + 4)
+    if w0 in (0x52800000, 0x52800020) and w1 == _A64_RET:
+        return w0 == 0x52800020
+    return None
+
+
+def screens_a64(b):
+    """:func:`screens` for a 64-bit ARM program's bytes *b*: the same screens, read the same way."""
+    try:
+        elf = _Elf64(b)
+    except (struct.error, ValueError, IndexError):
+        return []
+    strings, floats = _getters_a64(elf)
+    if not strings or not floats or not elf.ptr:
+        return []
+    lfield, tslot = _time_slot_a64(elf, _done_checks_a64(elf))
+    if tslot is None:
+        lfield, tslot = _time_slot_a64(elf, _length_fields_a64(elf))
+    if tslot is None:
+        return []
+    timed = {}
+    for slot, fn in elf.ptr.items():
+        if fn in floats:
+            vt, cls = _rtti_head_a64(elf, slot)
+            if vt is not None and slot == vt + 8 * tslot:
+                timed[vt] = (cls, slot, fn)
+    at = {}
+    for vt in timed:
+        for k in range(1, tslot):
+            fn = elf.ptr.get(vt + 8 * k)
+            if fn in strings:
+                at.setdefault(k, set()).add(strings[fn])
+    if not at:
+        return []
+    cslot = max(at, key=lambda k: (len(at[k]), -k))
+    out = []
+    for vt in sorted(timed):
+        cls, slot, old = timed[vt]
+        clip_fn = elf.ptr.get(vt + 8 * cslot)
+        if clip_fn not in strings:
+            continue
+        # the play-it-looped flag after the clip's name and its crop (Fallout), or straight after the name on a
+        # framework with no crop (Pokemon: an int getter there, not a string's)
+        crop_fn = elf.ptr.get(vt + 8 * (cslot + 1))
+        loop_at = cslot + LOOP_AFTER_CLIP if crop_fn in strings else cslot + 1
+        loops = _bool_getter_a64(elf, elf.ptr.get(vt + 8 * loop_at))
+        if loops is None:
+            continue                                  # a layout of its own (another family): left alone
+        done = elf.ptr.get(vt + 8 * (cslot - 1))
+        on_time = bool(done and _reads_field_a64(elf, done, lfield))
+        out.append(Screen(clip=strings[clip_fn], crop=strings.get(crop_fn, ""), cls=cls, vt=vt,
+                          slot=slot, old=old, seconds=floats[old], loops=loops, timed=on_time))
+    return out
+
+
 def by_clip(found):
     """``{clip name: [Screen]}``."""
     out = {}
@@ -314,15 +608,20 @@ def project_screens(project):
         return None
     key = (os.path.abspath(card), st.st_size, int(st.st_mtime))
     if key not in _PROJECT_CACHE:
-        from . import engine as E
+        from . import engine as E, spike3
         try:
-            with open(card, "rb") as f:
-                readers = E._open_readers(f, E._linux_partitions(card))
-                elf = b""
-                if readers:
-                    _path, node = E._game_program_path(readers[0][1], lambda: False)
-                    if node is not None:
-                        elf = bytes(readers[0][1].read_file_bytes(node))
+            if spike3.is_spike3_card(card):
+                # PAD-1323: a Spike 3 card's 64-bit program, off its encrypted games partition
+                from .title_reader import spike3_game_program
+                elf = spike3_game_program(card)[2]
+            else:
+                with open(card, "rb") as f:
+                    readers = E._open_readers(f, E._linux_partitions(card))
+                    elf = b""
+                    if readers:
+                        _path, node = E._game_program_path(readers[0][1], lambda: False)
+                        if node is not None:
+                            elf = bytes(readers[0][1].read_file_bytes(node))
             _PROJECT_CACHE[key] = by_clip(screens(elf)) if elf else {}
         except Exception:                                 # noqa: BLE001 - an unreadable card: unknown
             return None

@@ -104,8 +104,13 @@ def test_every_build_with_a_route_offers_random_clips():
     seen = set()
     for prof in MP.profiles().values():
         key = CV.title_key(prof)
-        if prof.arch == "a64":                      # PAD-1271: a Spike 3 port has no clip route yet
-            assert CV.route_of(prof) == "" and CV.title_refusal(prof), key
+        if prof.arch == "a64":
+            # PAD-1323: a Spike 3 port with the clip v2 lines (Star Wars ELG's, PAD-1284) has the surface
+            # route with no string_new (the 64-bit runtime builds the name); the drafted ones carry none yet
+            if key == "star_wars_elg-1.10":
+                assert CV.route_of(prof) == "surface" and CV.title_refusal(prof) == "", key
+            else:
+                assert CV.route_of(prof) == "" and CV.title_refusal(prof), key
             continue
         if key in NO_ROUTE:
             assert CV.title_refusal(prof) == CV.NO_ROUTE % prof.label

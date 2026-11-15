@@ -85,9 +85,9 @@ MULTIBOOT_WORDS = ("this is a multi-boot card; modes go on a card of the one gam
 #: PAD-1297: why each part of the mode family a project can ask for is left out of a Spike 3
 #: build that passed its own checks (a title the part's gate refuses has said why already), in
 #: the engine's words for it. The census behind them is docs/plans/spike3_modes.md, "The family
-#: on Spike 3". The score feed is not here: it goes on (:func:`feed_wanted`).
+#: on Spike 3". The score feed is not here: it goes on (:func:`feed_wanted`), and so do the random clips
+#: (:func:`variants_wanted`) and the screen times (:func:`screen_times_wanted`, PAD-1323).
 FAMILY_LEFT_OUT = {
-    "random clips": "the 64-bit runtime cannot pick a Spike 3 game's clips yet",
     "music modes": "the 64-bit runtime cannot play a Spike 3 game's songs in their place yet",
     "editions": "the EDITION setting cannot be added to a Spike 3 game's operator menu yet",
     "picture settings": "they cannot be added to a Spike 3 game yet",
@@ -97,7 +97,6 @@ FAMILY_LEFT_OUT = {
     "handicaps": "the 64-bit runtime cannot give a Spike 3 game's players handicaps yet",
     "expression light shows": "the 64-bit runtime cannot light a Spike 3 cabinet's expression lights yet",
     "Prolonged Competition": "it cannot be added to a Spike 3 game's start menu yet",
-    "screen times": "the 64-bit runtime cannot change how long a Spike 3 game's screens last yet",
     "records on the high scores": "the 64-bit runtime cannot add records to a Spike 3 game's high scores yet",
 }
 
@@ -353,6 +352,47 @@ def feed_wanted(project, real_card=True):
     return url, prof
 
 
+def variants_wanted(project, real_card=True):
+    """PAD-1323: ``(slots, profile)`` of the random clips (:mod:`.clip_variants`) this Spike 3 build carries,
+    else ``({}, None)``. The 64-bit runtime hooks the game's ask on the video bank's surface (clip v2: a port
+    with surface_find / surface_set_video, and no string_new: it builds the name itself). Quiet: the engine's
+    Write (``_variants_for_build``) has already said why they are left out."""
+    from . import clip_variants as CV
+    slots = CV.load(project)
+    if not slots or not CV.enabled() or MW.host_refusal():
+        return {}, None
+    if real_card:
+        from ...core import ext4_grow
+        if not ext4_grow.available()[0]:
+            return {}, None
+    prof = CV.project_title(project, probe=True)
+    if CV.title_refusal(prof):
+        return {}, None
+    return slots, prof
+
+
+def _changed_videos(project):
+    from . import engine as E
+    from ...core.checksums import read_checksums
+    return E._changed_videos(project, read_checksums(project))
+
+
+def screen_times_wanted(project, game_raw, log, real_card=True):
+    """PAD-1323: ``(stime lines, profile)`` - the screens of the card's game program *game_raw* (64-bit:
+    :func:`.screen_time.screens_a64`) that show one of the project's replaced clips for a fixed time, made to
+    last as long as the clip; ``([], None)`` when none. The engine's own reckoning (``_screen_times_from``),
+    with its log lines: on Spike 3 the engine leaves the screen times to this build."""
+    from . import engine as E
+    from . import screen_time as ST
+    if not ST.enabled():
+        return [], None
+    edits = _changed_videos(project)
+    if not edits:
+        return [], None
+    return E._screen_times_from(game_raw, project, edits, False, log,
+                                ext4_available=None if real_card else (lambda: (True, "")))
+
+
 def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")):
     """The project's modes for the Spike 3 games volume *reader*, built into *scratch*, or
     None when it has none this card can carry (each reason said in the log, as a Spike 2
@@ -361,9 +401,15 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     as on Spike 2). *real_card* False is Try it's build for the emulator: nothing is
     written into a card, and a port derived on this PC that never ran may run there.
     PAD-1297: the project's score feed (:func:`feed_wanted`) goes with them, or alone on a
-    card with no modes (the runtime then arms it and nothing else: ``only`` in its file)."""
+    card with no modes (the runtime then arms it and nothing else: ``only`` in its file).
+    PAD-1323: so do the random clips (:func:`variants_wanted`: their clips into the video bank,
+    ``clips.cfg`` beside the runtime) and the screen times (:func:`screen_times_wanted`: ``stime``
+    lines in it)."""
     log = log or (lambda *a, **k: None)
     feed, feed_prof = feed_wanted(project, real_card=real_card)
+    slots, var_prof = variants_wanted(project, real_card=real_card)
+    from . import screen_time as ST
+    stime_maybe = ST.enabled() and bool(_changed_videos(project))
     modes, code = [], []
     if not MW.preview_on():
         off = MW.preview_left_out(project)
@@ -372,7 +418,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     else:
         modes = MW.project_modes(project)
         code = MW.code_mode_list(project)        # PAD-1295: compiled for the card's 64-bit ARM
-    if not modes and not code and not feed:
+    if not modes and not code and not feed and not slots and not stime_maybe:
         return None
 
     def left(why):
@@ -387,7 +433,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         why = MW.card_refusal(project, real_card=real_card)
         if why:
             modes, code = left(why)
-    if not modes and not code and not feed:
+    if not modes and not code and not feed and not slots and not stime_maybe:
         return None
     state, target = card_state(reader)
     if state == "multiboot":
@@ -396,12 +442,19 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         if feed:
             log("Score feed: left out of this build: %s." % MULTIBOOT_WORDS.replace(
                 "modes go on", "the score feed goes on").replace("they were", "it was"), "warning")
+        if slots:
+            log("Random clips: left out of this build: %s." % MULTIBOOT_WORDS.replace(
+                "modes go on", "random clips go on"), "warning")
         return None
     fw = game_program(reader, target) if target else None
     if fw is None:
         raise MW.ModeWriteError("the card's game program was not found (/games/game names %s)"
                                 % (target or "nothing"))
     game_raw = bytes(reader.read_file_bytes(fw))
+    stime, stime_prof = (screen_times_wanted(project, game_raw, log, real_card=real_card) if stime_maybe
+                         else ([], None))
+    if not modes and not code and not feed and not slots and not stime:
+        return None
     used, adds = [], {}
     hud, bank = b"", b""
     if modes or code:
@@ -423,10 +476,25 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
             MW.choose_own_sounds(project, modes, sound_ok, log=log)   # says they are left out, and why
             if code:
                 MW.choose_code_sounds(project, code, sound_ok, prof, log=log)
+    if slots and not bank:
+        # PAD-1323: the random clips go into the title's video bank (the modes' bank when it has them)
+        _vbank = MW.scene_rels(var_prof)[1]
+        node = MW.lookup(reader, _vbank) if _vbank else None
+        bank = bytes(reader.read_file_bytes(node)) if node is not None else b""
+
+    def read_card(rel):
+        node = MW.lookup(reader, rel)
+        return bytes(reader.read_file_bytes(node)) if node is not None else None
+
+    def scan_card(names):
+        return MW.CV_scene_counts(reader, var_prof.game_dir, names) if var_prof is not None else {}
     result = MW.plan(project, hud, bank, game_raw,
                      os.path.join(scratch, "modes"), sound_ok=(False, "a Spike 3 card"), log=log,
                      end_sound=None, own_sounds=used, code_ok=True, arch="a64",
-                     modes_on=bool(modes or code), score_feed=feed, score_feed_prof=feed_prof)
+                     modes_on=bool(modes or code), score_feed=feed, score_feed_prof=feed_prof,
+                     variants=bool(slots), variants_prof=var_prof,
+                     screen_times=stime, screen_prof=stime_prof,
+                     read_card=read_card, scan_card=scan_card)
     if result is None:
         return None
     payload = MW.p2_payload(result, os.path.join(scratch, "modes", "padmode"), project=project,
@@ -438,6 +506,9 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
              for l in result.lines]
     lines = [("Score feed: " + l[len("score feed: "):]) if l.startswith("score feed: ") else l
              for l in lines]
+    # PAD-1323: and so do the random clips' and the screen times'
+    for low, cap in (("random clips: ", "Random clips: "), ("screen times: ", "Screen times: ")):
+        lines = [(cap + l[len(low):]) if l.startswith(low) else l for l in lines]
     return Spike3ModePlan(result, payload, names, lines, sound_adds=adds)
 
 

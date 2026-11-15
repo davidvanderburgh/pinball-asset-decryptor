@@ -119,7 +119,8 @@ def test_a_multiboot_card_takes_no_feed_and_says_so(build, tmp_path):
 def test_the_write_logs_the_feed_under_its_own_name():
     src = open(os.path.join(ROOT, "pinball_decryptor", "plugins", "stern", "spike3_write.py"),
                encoding="utf-8").read()
-    assert 'line if line.startswith("Score feed:") else "Modes: %s" % line' in src
+    # PAD-1323: with the random clips' and the screen times' lines beside it
+    assert 'line if line.startswith(("Score feed:", "Random clips:", "Screen times:")) else "Modes: %s" % line' in src
 
 
 # ---- feed_wanted: the feed's own gate, quiet ------------------------------------------------
@@ -171,7 +172,8 @@ def _engine_block():
 
 def test_every_part_the_engine_leaves_out_has_its_reason():
     named = re.findall(r'\("([^"]+)", ', _engine_block())
-    assert len(named) == 12 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    # PAD-1323: random clips and screen times go on now - ten parts are left out
+    assert len(named) == 10 and set(named) == set(S3M.FAMILY_LEFT_OUT)
 
 
 def test_the_score_feed_is_not_left_out_any_more():

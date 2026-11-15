@@ -143,6 +143,7 @@ def hook_route(port_path):
     clipv_arm): ``"clip_play"``, ``"surface"`` (clip v2), ``"layer"`` (PAD-723: Deadpool's
     full-screen video layer, asked by name) or ``""`` (it cannot)."""
     from . import mode_project as MP
+    from . import mode_runtime as MR
     try:
         port = MP.read_port(port_path)
     except OSError:
@@ -150,14 +151,17 @@ def hook_route(port_path):
     sites, data, values = port["site"], port["data"], port["value"]
     if all(n in sites for n in ("clip_play", "video_surface", "surface_state")):
         return "clip_play"
-    need_s = ("surface_find", "surface_set_video", "surface_state", "string_new", "resource_get",
+    # PAD-1323: a Spike 3 (64-bit) program imports no string constructor - the runtime builds the
+    # std::string itself (pad_mode_runtime.c PM_STRING_SITE), so its port needs no string_new
+    string_site = "resource_get" if MR.port_arch(port_path) == "a64" else "string_new"
+    need_s = ("surface_find", "surface_set_video", "surface_state", string_site, "resource_get",
               "dynamic_cast")
     need_d = ("resource_manager", "typeinfo_resource", "typeinfo_scene_player")
     if (all(n in sites for n in need_s) and all(data.get(n) for n in need_d)
             and "scene_player_scene" in values
             and (port["scene"].get("video_bank") or "video_surface" in sites)):
         return "surface"
-    if all(n in sites for n in ("layer_video", "string_new")) and data.get("video_layer"):
+    if all(n in sites for n in ("layer_video", string_site)) and data.get("video_layer"):
         return "layer"
     return ""
 
@@ -266,20 +270,33 @@ def card_banks(image, scenes):
     have = _BANKS.setdefault(key, {})
     want = [sc for sc in scenes if sc not in have]
     if want:
-        from . import engine as E, mode_write as MW, video_bank as VB
+        from . import engine as E, mode_write as MW, spike3, video_bank as VB
+
+        def walk(reader):
+            for sc in want:
+                node = MW.lookup(reader, sc)
+                names = {}
+                if node is not None and (node["mode"] & 0xF000) == 0x8000:
+                    try:
+                        names = _bank_names(VB.parse_scene(bytes(reader.read_file_bytes(node))),
+                                            sc[:-len("scene.radium")] + "scene.assets/")
+                    except VB.VideoBankError:
+                        names = {}
+                have[sc] = names
         try:
-            with open(image, "rb") as f:
-                reader, _fw, _img = E._locate(f, E._linux_partitions(image))
-                for sc in want:
-                    node = MW.lookup(reader, sc)
-                    names = {}
-                    if node is not None and (node["mode"] & 0xF000) == 0x8000:
-                        try:
-                            names = _bank_names(VB.parse_scene(bytes(reader.read_file_bytes(node))),
-                                                sc[:-len("scene.radium")] + "scene.assets/")
-                        except VB.VideoBankError:
-                            names = {}
-                    have[sc] = names
+            if spike3.is_spike3_card(image):
+                # PAD-1323: a Spike 3 card's scenes are on its encrypted games partition
+                from . import spike3_card
+                from .ext4 import Ext4Reader
+                vol = spike3_card.open_games(image)
+                try:
+                    walk(Ext4Reader(vol, 0, vol.size))
+                finally:
+                    vol.close()
+            else:
+                with open(image, "rb") as f:
+                    reader, _fw, _img = E._locate(f, E._linux_partitions(image))
+                    walk(reader)
         except Exception:                               # noqa: BLE001 - an unreadable card: unknown
             return None
     return {sc: have[sc] for sc in scenes}

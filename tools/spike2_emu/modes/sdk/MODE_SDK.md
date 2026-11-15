@@ -6910,10 +6910,24 @@ at the user manager's table + 20p + 4 (co-op's `users` line, PAD-1108; first tab
 order as 8-4-4-4-12 hex, null for a player not logged in. The players are the most `pm_player()` seen up while
 `pm_in_game()` in that game.
 
+PAD-1344 (C0untDeM0net: the mini games started from the game selection menu, like "The Shark Is Broken" on Jaws,
+were indistinguishable from standard games): after `game_number` come `"game_type"` - `"standard"`, `"competition"`
+or `"challenge"`, what the start menu (CHOOSE YOUR MODE OF PLAY) made the game, null when the runtime cannot read the
+game's flags - and `"challenge"`, the challenge's name (the port's `text challenge_name_<n>`, or the name of a mode of
+ours that took the pick; null otherwise). The tick reads them four times a second while the game runs
+(`feed_type_sample`): FG_PLAYER_CHALLENGE_MODE_ACTIVE (the port's `value challenge_on_flag`, else the flags line)
+set is a challenge game, and which one is the Challenge list's own reading (`challenge_picked`: the challenge's flag,
+or the GamePlayModes index on Jaws, John Wick, Metallica...); FG_PLAYER_COMPETITION_MODE_ACTIVE set is a competition
+game (Prolonged Competition's too). A type seen once is kept for that game, a challenge over competition over
+standard: the runtime clears a pick it hands to a mode, and a game may clear its flags before its end. mode.log says
+`score feed: this game is a challenge game: The Shark Is Broken` when it learns it.
+
     feed http://192.168.1.50:8080/scores   where to post: http://, an IPv4 address, a port, a path (the app refuses
                                            https, a name, 127.x and 0.0.0.0)
     title Godzilla Premium/LE 1.16         the report's game
     users 0x007bf878 0x160 0x164           the logins' tables (coop_play.insider_users), when the finder sees them
+    flags 17 18                            PAD-1344: FG_PLAYER_COMPETITION_MODE_ACTIVE's and
+                                           FG_PLAYER_CHALLENGE_MODE_ACTIVE's ids, off the card's flag names (0: none)
     only                                   the card has no modes: armed before the score gate with nothing else
 
 **When a game has ended.** The tick keeps the scores and logins when `pm_in_game()` falls with players known. A port

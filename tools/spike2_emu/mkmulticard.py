@@ -6439,13 +6439,63 @@ def holds_symlinks(d):
             pass
 
 
+def holds_modes(d):
+    """True when a file made in `d` keeps the mode it is given.  mke2fs -d takes every file's
+    mode from the staged tree, and a Windows drive mounted into WSL without the metadata
+    option reads every file back 0777 whatever chmod said (PAD-1336: a 3-image Godzilla card
+    built into a folder on C: carried its img1/img2 trees all 0777, and verify's mode/owner
+    check failed every one)."""
+    probe = os.path.join(d, ".mkmulticard-mode-probe-%d" % os.getpid())
+    try:
+        with open(probe, "wb"):
+            pass
+        os.chmod(probe, 0o640)
+        return statmod.S_IMODE(os.stat(probe).st_mode) == 0o640
+    except OSError:
+        return False
+    finally:
+        try:
+            os.unlink(probe)
+        except OSError:
+            pass
+
+
+def holds_case(d):
+    """True when `d` tells 'A' from 'a': a games tree is a Linux tree, and on a Windows folder
+    two names that differ only in case are one file, so the second overwrites the first."""
+    probe = os.path.join(d, ".mkmulticard-case-probe-%d" % os.getpid())
+    try:
+        with open(probe + "A", "wb"):
+            pass
+        return not os.path.exists(probe + "a")
+    except OSError:
+        return False
+    finally:
+        try:
+            os.unlink(probe + "A")
+        except OSError:
+            pass
+
+
+def tree_unfit(d):
+    """Why `d` cannot hold a staged games tree as the card must carry it, or '' when it can."""
+    if not holds_symlinks(d):
+        return "cannot hold symlinks (an exFAT or FAT drive?)"
+    if not holds_modes(d):
+        return "does not keep Linux file permissions (a Windows drive?)"
+    if not holds_case(d):
+        return "does not tell upper from lower case in file names (a Windows drive?)"
+    return ""
+
+
 def tree_scratch(workdir, prefix):
-    """A fresh directory for a games tree: in `workdir` when that can hold symlinks, else on the
-    Linux side (said out loud, since that is where the gigabytes go for a while)."""
+    """A fresh directory for a games tree: in `workdir` when that holds a Linux tree faithfully
+    (symlinks, modes, case), else on the Linux side (said out loud, since that is where the
+    gigabytes go for a while)."""
     base = workdir or tempfile.gettempdir()
-    if not holds_symlinks(base):
-        say("%s cannot hold symlinks (an exFAT or FAT drive?); the games tree is staged under %s instead"
-            % (base, LINUX_SCRATCH))
+    why = tree_unfit(base)
+    if why:
+        say("%s %s; the games tree is staged under %s instead" % (base, why, LINUX_SCRATCH))
         base = LINUX_SCRATCH
     d = tempfile.mkdtemp(prefix=prefix, dir=base)
     # mkdtemp makes it 0700 and mke2fs -d gives the new filesystem's root the tree's mode;

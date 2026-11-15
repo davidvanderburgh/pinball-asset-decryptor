@@ -3200,6 +3200,8 @@ def test_tree_scratch_leaves_a_folder_that_refuses_symlinks(mk, monkeypatch, tmp
     linux.mkdir()
     monkeypatch.setattr(mk, "LINUX_SCRATCH", str(linux))
     monkeypatch.setattr(mk, "holds_symlinks", lambda d: os.path.abspath(d) != str(out_dir))
+    monkeypatch.setattr(mk, "holds_modes", lambda d: True)
+    monkeypatch.setattr(mk, "holds_case", lambda d: True)
     said = []
     monkeypatch.setattr(mk, "say", lambda m: said.append(m))
     d = mk.tree_scratch(str(out_dir), "mkmulticard.tree.")
@@ -3215,3 +3217,46 @@ def test_holds_symlinks_leaves_no_probe_behind(mk, tmp_path):
     mk.holds_symlinks(str(tmp_path))
     assert os.listdir(tmp_path) == []
     assert mk.holds_symlinks(str(tmp_path / "missing")) is False
+
+
+# ---- PAD-1336: a Windows folder keeps neither the modes nor the case of a Linux tree ---------
+@pytest.mark.parametrize("probe, words", [
+    ("holds_modes", "does not keep Linux file permissions"),
+    ("holds_case", "does not tell upper from lower case"),
+])
+def test_tree_scratch_leaves_a_windows_folder(mk, monkeypatch, tmp_path, probe, words):
+    """pb_lawww built a 3-image Godzilla card into a folder on C:.  The two extras' trees were
+    staged beside the card, on a drive WSL reads back 0777 whatever chmod said, mke2fs -d
+    copied those modes into p7, and verify failed the card.  Such a folder now sends the tree
+    to the Linux side, and the build says why."""
+    win = tmp_path / "win"
+    win.mkdir()
+    linux = tmp_path / "linux"
+    linux.mkdir()
+    monkeypatch.setattr(mk, "LINUX_SCRATCH", str(linux))
+    monkeypatch.setattr(mk, "holds_symlinks", lambda d: True)
+    monkeypatch.setattr(mk, "holds_modes", lambda d: True)
+    monkeypatch.setattr(mk, "holds_case", lambda d: True)
+    monkeypatch.setattr(mk, probe, lambda d: os.path.abspath(d) != str(win))
+    said = []
+    monkeypatch.setattr(mk, "say", lambda m: said.append(m))
+    d = mk.tree_scratch(str(win), "mkmulticard.tree.")
+    assert os.path.dirname(d) == str(linux)
+    assert len(said) == 1 and words in said[0] and str(linux) in said[0], said
+    assert mk.tree_unfit(str(linux)) == ""
+
+
+def test_the_mode_and_case_probes_leave_nothing_behind(mk, tmp_path):
+    mk.holds_modes(str(tmp_path))
+    mk.holds_case(str(tmp_path))
+    assert os.listdir(tmp_path) == []
+    assert mk.holds_modes(str(tmp_path / "missing")) is False
+    assert mk.holds_case(str(tmp_path / "missing")) is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a Linux filesystem's own answer")
+def test_a_linux_folder_holds_a_tree(mk, tmp_path):
+    """The Linux side's own disk keeps modes, and /var/tmp (LINUX_SCRATCH) is one."""
+    assert mk.holds_modes(str(tmp_path))
+    if mk.holds_case(str(tmp_path)):         # a case-folding tmp (macOS) is refused, rightly
+        assert mk.tree_unfit(str(tmp_path)) == ""

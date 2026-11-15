@@ -4533,6 +4533,55 @@ def _drop_path_prefix(why, about):
     return why
 
 
+#: A verify check that failed, as each verify tool prints one: mkmulticard
+#: (and the BoF/DP tools on it) pads the label and ends the row ``FAIL`` with
+#: its detail two spaces on; mkjjpmulti leads with ``FAIL: ``; mks3multi
+#: closes on ``verify: FAILED (a, b)``.
+_CHECK_FAIL_RE = re.compile(r"^(?P<label>\S.*?)\s+FAIL(?:\s{2,}(?P<detail>.*))?$")
+_JJP_FAIL_RE = re.compile(r"^FAIL: (?P<label>.+?)(?: - (?P<detail>.*))?$")
+_S3_FAIL_RE = re.compile(r"^verify: FAILED \((?P<label>.+)\)$")
+#: How much of the failed checks the one status line carries.
+_FAILS_SHOWN = 3
+_FAIL_DETAIL_CHARS = 160
+
+
+def parse_failed_checks(text):
+    """The checks a failed verify names, as one sentence, or ''.  A verify
+    gives no refusal line: it prints a row per check and ends ``VERIFY <card>
+    FAIL``, so a failed build said only "see the tool output" and the row
+    that mattered was a screen of OK rows away (PAD-1336: pb_lawww pasted
+    the version table and the verdict, and not the one row that said what
+    was wrong)."""
+    rows = []
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if s.startswith("VERIFY "):
+            continue                       # the verdict, not a check
+        m = _CHECK_FAIL_RE.match(s) or _JJP_FAIL_RE.match(s) or _S3_FAIL_RE.match(s)
+        if not m:
+            continue
+        label = re.sub(r"\s{2,}", " ", m.group("label")).strip()
+        if m.re is _CHECK_FAIL_RE and label.endswith(":"):
+            continue                       # 'verify: FAIL', 'selftest: FAIL': a verdict too
+        detail = (m.groupdict().get("detail") or "").strip()
+        if len(detail) > _FAIL_DETAIL_CHARS:
+            detail = detail[:_FAIL_DETAIL_CHARS - 1].rstrip() + "…"
+        rows.append("%s (%s)" % (label, detail) if detail else label)
+    if not rows:
+        return ""
+    shown = "; ".join(rows[:_FAILS_SHOWN])
+    more = len(rows) - _FAILS_SHOWN
+    return "the check that failed: %s" % shown if len(rows) == 1 else \
+        "%d checks failed: %s%s" % (len(rows), shown,
+                                    "; and %d more in the tool output" % more if more > 0 else "")
+
+
+def failure_why(text, about=""):
+    """Why a step failed, in the tool's own words: its refusal line, else
+    the checks a failed verify names (:func:`parse_failed_checks`), else ''."""
+    return parse_refusal(text, about) or parse_failed_checks(text)
+
+
 _TIME_RE = re.compile(r"^\d+(\.\d+)?$")
 _CLIP_RE = re.compile(r"^\d*(\.\d+)?(:\d*(\.\d+)?){0,2}$")
 
@@ -11032,7 +11081,7 @@ class MultibootPanel:
                 # not a directory" was the one that sent PAD-105 in), and
                 # "see the tool output" made a person read a wall of build
                 # log for a line the app had already been handed.
-                why = parse_refusal(texts.get(failed, ""), form.out)
+                why = failure_why(texts.get(failed, ""), form.out)
                 self._error("%s failed (exit %d) - %s"
                             % (failed or "the build", rc,
                                why or "see the tool output."))
@@ -11081,7 +11130,7 @@ class MultibootPanel:
             elif self.run_cancelled():
                 self._ok("Test card canceled. %s is unfinished." % out)
             else:
-                why = parse_refusal(texts.get(failed, ""), out)
+                why = failure_why(texts.get(failed, ""), out)
                 self._error("%s failed (exit %d) - %s" % (failed or "the test card", rc,
                                                           why or "see the tool output."))
         self._run_kind = "build"
@@ -11629,8 +11678,8 @@ class MultibootPanel:
                 else:
                     # The step's own sentence when it gave one (the selector
                     # step always does) - see _build_card's own done.
-                    why = parse_refusal(texts.get(failed, ""),
-                                        self._loaded_card or "")
+                    why = failure_why(texts.get(failed, ""),
+                                      self._loaded_card or "")
                     self._error("Updating the card failed at %s (exit %d) - %s"
                                 % (failed or "the start", rc,
                                    why or "see the tool output."))
@@ -11733,9 +11782,12 @@ class MultibootPanel:
                                     "image' at a new path to build a fresh "
                                     "card." % (name, why))
                     else:
+                        checks = parse_failed_checks(
+                            texts.get(failed or "update", ""))
                         self._error("Updating the card failed at %s (exit %d) "
-                                    "- see the tool output."
-                                    % (failed or "the start", rc))
+                                    "- %s"
+                                    % (failed or "the start", rc,
+                                       checks or "see the tool output."))
                 self._update_edit_status()
                 return
             self._loaded_form = form

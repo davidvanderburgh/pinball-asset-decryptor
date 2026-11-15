@@ -184,6 +184,7 @@ tool runs overlap either: a build copies ~7 GB per image and the tab is
 busy until the run has said PASS or FAIL.
 """
 
+import ast
 import bisect
 import errno
 import hashlib
@@ -4563,7 +4564,7 @@ def parse_failed_checks(text):
         label = re.sub(r"\s{2,}", " ", m.group("label")).strip()
         if m.re is _CHECK_FAIL_RE and label.endswith(":"):
             continue                       # 'verify: FAIL', 'selftest: FAIL': a verdict too
-        detail = (m.groupdict().get("detail") or "").strip()
+        detail = _short_detail((m.groupdict().get("detail") or "").strip())
         if len(detail) > _FAIL_DETAIL_CHARS:
             detail = detail[:_FAIL_DETAIL_CHARS - 1].rstrip() + "…"
         rows.append("%s (%s)" % (label, detail) if detail else label)
@@ -4574,6 +4575,25 @@ def parse_failed_checks(text):
     return "the check that failed: %s" % shown if len(rows) == 1 else \
         "%d checks failed: %s%s" % (len(rows), shown,
                                     "; and %d more in the tool output" % more if more > 0 else "")
+
+
+def _short_detail(detail):
+    """A check's detail that is a list of paths (``['a/b.png', 'c.png']``, or
+    ``differ: [...]``) as its first path and how many more: the status line
+    is one line, and five full paths pushed the second failed check off it."""
+    m = re.match(r"^(?P<head>[^\[]*?)\s*(?P<list>\[.*\])$", detail)
+    if not m:
+        return detail
+    try:
+        items = ast.literal_eval(m.group("list"))
+    except (ValueError, SyntaxError):
+        return detail
+    if not isinstance(items, list) or not items or \
+            not all(isinstance(x, str) for x in items):
+        return detail
+    head = m.group("head").strip()
+    text = items[0] + (" and others" if len(items) > 1 else "")
+    return "%s %s" % (head, text) if head else text
 
 
 def failure_why(text, about=""):

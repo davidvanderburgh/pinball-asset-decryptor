@@ -1551,7 +1551,12 @@ def test_a_failed_verify_is_named_by_its_failed_checks():
         "differ: ['godzilla_le/game']")
     assert parse_failed_checks(one) == (
         "the check that failed: image 1 /dev/mmcblk0p7:img1 content: 900 of 900 "
-        "files re-hashed (differ: ['godzilla_le/game'])")
+        "files re-hashed (differ: godzilla_le/game)")
+    # five paths are the first and 'and others': the line is one line
+    modes = parse_failed_checks(row("image 1 /dev/mmcblk0p7:img1 file mode/owner", False,
+                                    repr(["godzilla_le/a.png", "godzilla_le/b.png"])))
+    assert modes == ("the check that failed: image 1 /dev/mmcblk0p7:img1 file mode/owner "
+                     "(godzilla_le/a.png and others)")
     many = one + "\n" + "\n".join(row("EBR for p%d @1" % n, False) for n in (5, 6, 7))
     got = parse_failed_checks(many)
     assert got.startswith("4 checks failed: image 1 ") and \

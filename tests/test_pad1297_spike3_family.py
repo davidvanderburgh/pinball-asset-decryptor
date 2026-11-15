@@ -190,3 +190,25 @@ def test_each_left_out_part_reads_as_its_own_sentence():
                      + S3M.FAMILY_LEFT_OUT["Prolonged Competition"] + "."]
     for why in S3M.FAMILY_LEFT_OUT.values():
         assert "—" not in why and not why.endswith(".")
+
+
+def test_the_feed_goes_on_with_code_modes(build, monkeypatch, tmp_path):
+    # PAD-1295 put code modes on Spike 3 cards: they count as the card's modes, and the feed rides along
+    from pinball_decryptor.plugins.stern import code_modes as CM
+    monkeypatch.setattr(MW, "code_mode_list", lambda p: [("c", type("C", (), {"name": "ZAP"})())])
+    monkeypatch.setattr(CM, "profile_for", lambda p, code: None)
+    said, log = _logged()
+    mp = S3M.plan("proj", _Reader(_tree()), str(tmp_path), log=log)
+    assert mp is not None
+    assert build["modes_on"] is True and build["code_ok"] is True and build["arch"] == "a64"
+    assert build["score_feed"] == URL
+    assert any("ZAP (code mode)" in m for _k, m in said)
+
+
+def test_code_modes_left_out_still_leave_the_feed_on(build, monkeypatch, tmp_path):
+    monkeypatch.setattr(MW, "code_mode_list", lambda p: [("c", type("C", (), {"name": "ZAP"})())])
+    monkeypatch.setattr(MW, "card_refusal", lambda p, real_card=False: "no port for this game")
+    said, log = _logged()
+    mp = S3M.plan("proj", _Reader(_tree()), str(tmp_path), log=log)
+    assert mp is not None and mp.names == [] and build["modes_on"] is False and build["score_feed"] == URL
+    assert any("1 mode(s) are left out of this build: no port for this game" in m for _k, m in said)

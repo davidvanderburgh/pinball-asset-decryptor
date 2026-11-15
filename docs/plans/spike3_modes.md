@@ -32,8 +32,8 @@ The Spike 2 mode.so is byte-identical.
 
 ## Write (spike3_write -> spike3_modes)
 
-1. `spike3_modes.plan` - the preview switch, code modes (left out: compiled for Spike 2's
-   32-bit ARM), `card_refusal` (no port / no Insider gate), a multi-boot card, then
+1. `spike3_modes.plan` - the preview switch, code modes (PAD-1295: compiled for the card's
+   64-bit ARM, below), `card_refusal` (no port / no Insider gate), a multi-boot card, then
    `mode_write.plan` against the card's own 64-bit program (`/games/game`'s target; the port
    check reads ELF64); a mode's own sounds and end sound go into the card's image.bin
    (PAD-1296, below).
@@ -163,6 +163,51 @@ Proof: a TRENCH RUN mode (3 trigger shots, 30 s, 5 award shots) on the Spike 3 e
 scored 1M..5M on five shots (score 26,630 -> 15,080,990) and ended when its time ran out, the
 game running on to the cap. Tests: tests/test_pad1271_spike3_port.py.
 
+## A port for a Spike 3-only title (PAD-1287)
+
+Only Star Wars ELG has a Spike 2 build to pair against; every other Spike 3 title is drafted from ELG's proven
+Spike 3 port instead (`s3port.py <ELG game> ports/spike3/star_wars_elg-1.10.port <target game> -o <port> --game G
+--version V`, `draft_spike3`). Every Spike 3 program is the same 64-bit framework built with one compiler around a
+game's rules, so on top of PAD-1271's pairing (vtable slots, strings, call graph) the paired functions are LINED UP
+instruction by instruction (difflib on the instructions with their addresses and immediates masked):
+
+- pairs: functions whose masked instructions are the same and found once on each title seed the pairing, and the
+  n-th call of a paired function pairs its callee with the n-th call of its pair (switch_hit / switch_hit2, which
+  nothing else pairs, come from ELG's switch drain this way). ~9,100-9,900 of ELG's 18,297 functions pair on each of
+  the six Spike 3-only titles, and on each at least half of the pairs line up instruction for instruction.
+- sites: a function the reference port names is placed when its pair is at least 75% alike; a place inside one at
+  the lined-up instruction; a library call by its imported name.
+- globals: the target global the lined-up instructions make, voted over every paired function that makes the
+  reference's (the neighbouring event_head / event_current no longer tie).
+- values: the engines' readers (sound_engine, lamp_layer, processes, show_event) re-read their layouts off the
+  target's own code, and every value is also checked at the lined-up instructions of the placed sites and their
+  callees; a constant the alignment disagrees with is replaced, and the checks are written at the port's end.
+  Layouts do move: the process record's exit hooks are at 312 on ELG, 392 on Walking Dead Remastered, 408 on Star
+  Wars 2025 Pro.
+- bus ids: the constant passed in w0 to a direct call of hook_dispatch, at the lined-up instruction. Only those:
+  the adjustment reader's and the sound calls' ids are ELG's less one on Walking Dead Remastered, its bus ids the
+  same; Star Wars 2025 Pro's game over is 0x46 where the others' is 0x47 (game_start / ball_start have no direct
+  call there and are left out).
+- switches: `spike3_switches` - the target's own device table, the Spike 2 shot rule (portswitch.NOT_SHOTS), none of
+  the service buttons' I/O group, one shot bit each by the switch's rank in the table. On ELG it gives exactly the
+  30 its proven port names; `text example_start_shot` is the first target.
+- left out, for each title's own port: the reference game's shows, lamp lines, callouts, scenes (so the screen and
+  clip sites are placed but written as comments: they need the title's hud / video bank scenes), held coils, mode
+  flags and blocks.
+
+A fresh draft says `NOT RUN` in its header (the app then calls it unproven) until a run proves it. Self-check: ELG
+drafted from itself gives back all 103 framework entries of its proven port, none different.
+
+**Walking Dead Remastered LE 0.92** (`ports/spike3/walking_dead_remastered_le-0.92.port`, program sha1 bcf428e1...),
+proven 2026-11-15 on the Spike 3 rig (slot 37, hidden, muted): the runtime took the draft whole (29 sites, 32
+shots, the Insider gate, 6 events, both switch_hit sites); template_mode.c started on three Tower target hits,
+scored 6 shots through score_add (+21M), ended on the bus's end of ball and, the second time, on its clock, the game
+playing on to the cap; the SDK's sound instrument played, polled, stopped and faded requests on the game's own
+channels and the callout site played one; a mode.cfg `multiball 3 10` (mode_file.c) had the game serve 3 balls and
+followed them down to one. Star Wars 2025 LE/Pro, Transformers, Fallout and Pokemon draft with every core entry
+placed; each needs its own run (and its lamps, screens and callouts) before its port ships. The app still never
+derives a 64-bit port itself (`port_derive._spike3_port`): only a port proven on the rig ships.
+
 ## Callouts and sounds on Spike 3 (PAD-1282)
 
 The six sound sites (callout, callout_nth, sound_play, sound_nth, sound_active, sound_stop) are plain calls into
@@ -236,7 +281,7 @@ the key the bank map's find is handed, PAD-1282).
   stages each container as a PATCH - the card's file cut at its old directory, a tail (bodies, directory,
   trailer) and a new 0x80-byte header - in the mode files' `games.patch/` (4 MB for ELG, not 1 GB), and s3run.sh
   builds the file in the rig slot's /games overlay from the store's copy (`games.patched` takes it away at the
-  next run's start). Code modes stay Spike 2's.
+  next run's start). Code modes' own sounds go the same way (PAD-1295).
 - mode_file.c's "NOT played - the game's own speech held the voice bus" now names what held it (request,
   priority, bus). A call waits for the voice bus (start and end 1.5 s, shot 0.8 s) and is dropped when the
   game's own higher-priority sound outlasts that, as on Spike 2: a shot call was held by the mode's own 3.5 s
@@ -405,3 +450,45 @@ modes start on Top lane center:
   started by its trigger file): main's mode.so ended it 3.08 s in ("the game's own mode began"); this build's was
   still running 20 s after its multiball.
 Tests: tests/test_pad1285_spike3_play.py.
+
+
+## Code modes on Spike 3 (PAD-1295)
+
+PAD-1272 left a project's code modes out of a Spike 3 build: they were compiled for Spike 2's 32-bit ARM and the
+app's Linux had no aarch64 compiler (the dev rig's `xgcc.sh` `apt-get download`ed one, which the shipped runtime
+cannot do: its image keeps no apt lists). Now:
+
+- **The kit**: `tools/spike3_emu/xgcc.pins` pins the aarch64 gcc 13.3.0 and binutils 2.42 packages by SHA-256, from
+  the Ubuntu snapshot the PAD Runtime is built from (`SNAPSHOT=20260801T000000Z`), at the runtime's own toolchain
+  versions (its arm cross gcc is 13.3.0-6ubuntu2~24.04.1, binutils 2.42-4ubuntu2.10), so every library they load
+  is already in runtime-7. `xgcc.sh` fetches the eight .debs (about 41 MB) once, checks each hash, `dpkg-deb -x`es
+  them into `/var/lib/pad-s3/xgcc` (stamped with the pins file's hash, one unpack at a time under flock) and prints
+  `s3cc`, with `s3nm` beside it. binutils comes in the kit, so nothing needs installing; off x86-64 a system
+  aarch64 gcc is used. The same kit builds the Spike 3 rig's shims (s3build.sh, ensures3select.sh), which on a
+  user's runtime had the same dead `apt-get download`. It rebuilds `prebuilt/mode64.so` byte-identical.
+- **The build**: `spike3_modes.plan` takes code modes (a code-mode-only project too) and calls `mode_write.plan`
+  with `code_ok=True, arch="a64"`; `code_plan` -> `compile_code_object(..., arch="a64")` runs `build_mode.sh -a a64`,
+  which with no CC takes the kit's `s3cc`. The kept object's key carries the machine and the pins file.
+  `p2_payload` stages the compiled object for any machine (the pinned mode64.so without code modes).
+- **build_mode.sh's nm check never ran on a64**: its nm name was derived as `${CC%gcc}nm`, nothing for `s3cc`. It
+  runs now (the kit's `s3nm`), and on a64 the banned-call rule (MODE_SDK.md rule 2) is read off the modes' own
+  sources compiled alone: the 64-bit runtime itself calls `malloc` for the game's std::string objects
+  (`std_string`, PAD-1284), on purpose. Both prebuilt objects are byte-for-byte unchanged (only build_mode.sh's
+  hash moved in SOURCES*.sha256).
+- **Their sounds**: a code mode's music and calls ride carriers like the form modes' (PAD-1296):
+  `spike3_modes.own_sounds(..., code=)` adds `choose_code_sounds`'s entries, each a record appended to image.bin
+  and swapped in by key (`swap <request> <stock> <ours> call:<cue>` in `<slug>.assets`). `choose_code_sounds`
+  read Spike 2's carrier table (`MS.carriers(game, version)`), so a `_spike3` profile had none; it takes
+  `profile_carriers(prof.key)` now. A swapped music is described as "(request N)", not Spike 2's bed sid.
+- Try it's note names the code modes built in, as on Spike 2.
+
+Proof (2026-11-15, Spike 3 rig slot 95, hidden, MUTED, Star Wars ELG 1.10 from the library): a project holding
+one CODE mode, BOUNTY HUNT (3 Death Star target hits start it; every named shot scores a bounty growing 250,000 a
+shot; 20 s), built by `spike3_modes.plan` (`real_card=False`, Try it's) - compiled in the PAD Runtime by the kit
+from a fresh unpack - and run by s3run.sh with PAD_S3_MODE_SO / PAD_S3_MODE_FILES: it started on the third hit,
+scored +250,000 / +500,000 / +750,000 / +1,000,000 on four shots and ended on time 20.2 s later (score 26,630 ->
+2,563,700). With its own music (700 Hz), start call (1500 Hz) and shot call (1000 Hz) in assets.json
+(`PAD_S3_AUDIO_OUT=1` keeping the PCM): carried on requests 70 / 135 / 202, each `[pad] sound swap` logged, and
+every tone found in the game's own output at its logged moment (the start call until the first shot call faded
+it, the four shot calls, the music under them). The Write's plan (`real_card=True`) builds the same set.
+Tests: tests/test_pad1295_spike3_code_modes.py (the real a64 compile under a POSIX shell).

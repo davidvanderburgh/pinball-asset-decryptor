@@ -21,10 +21,12 @@ multi-boot's ``padselect.sh`` does from the same link. The runtime reads its fil
 What a Spike 3 build carries: the modes made in the form, with their own start, shot and end
 sounds and music where the title's carriers are known (PAD-1296, :func:`own_sounds`: each sound
 a record appended to the card's ``image.bin``, swapped in on a carrier while the mode plays it).
-The Spike 2 parts of a build stay Spike 2's: code modes (compiled for its 32-bit ARM), and the
-rest of the family (co-op, handicap, attract items ...), which the engine leaves out on a Spike
-3 volume, each with its reason (PAD-1297's census, docs/plans/spike3_modes.md). The score feed
-is the one that goes on as files alone (:func:`feed_wanted`): with the modes, or by itself.
+PAD-1295: code modes too, compiled for the card's 64-bit ARM with the pinned aarch64 gcc
+(``tools/spike3_emu/xgcc.pins``) into the card's ``mode.so``, their music and calls carried as
+the form modes' sounds are. The Spike 2 parts of a build stay Spike 2's: the rest of the family
+(co-op, handicap, attract items ...), which the engine leaves out on a Spike 3 volume, each with
+its reason (PAD-1297's census, docs/plans/spike3_modes.md). The score feed is the one that goes
+on as files alone (:func:`feed_wanted`): with the modes, or by itself.
 
 The build itself is :func:`.mode_write.plan` - the same port lookup (64-bit programs
 read too), the same mode files, and the screens and clips built into the title's own
@@ -75,9 +77,6 @@ fi
 exec "$G" "$@"
 """
 
-#: why a Spike 3 build leaves a project's code modes out
-CODE_MODES_WORDS = ("code modes are built for Spike 2 cards only; a Spike 3 card takes the "
-                    "modes made in the form")
 #: why a multi-boot Spike 3 card takes no modes
 MULTIBOOT_WORDS = ("this is a multi-boot card; modes go on a card of the one game they were "
                    "made for")
@@ -197,7 +196,7 @@ def _wav_ms(path, channels):
     return int(math.ceil(n * 1000.0 / 44100)) if n else 0
 
 
-def own_sounds(project, modes, reader, game_raw, prof, log=None):
+def own_sounds(project, modes, reader, game_raw, prof, log=None, code=()):
     """PAD-1296: a Spike 3 card's own sounds for *modes*: ``(used, adds)``.
 
     The sounds :func:`.mode_write.choose_own_sounds` picks (start, shot and music, and the end
@@ -210,13 +209,20 @@ def own_sounds(project, modes, reader, game_raw, prof, log=None):
     descriptor names. *used* is the engine's carried list for :func:`.mode_write.plan`
     (``slug``, ``key``, ``request``, ``ms``, ``stock_key``, ``our_key``); *adds* is
     ``{container card path: [NewRecord]}`` for :func:`.spike3_write.plan_sounds`. A sound that
-    cannot be carried is left out with its reason in the log; the mode plays the game's own."""
+    cannot be carried is left out with its reason in the log; the mode plays the game's own.
+    PAD-1295: *code* (``[(slug, spec)]``) adds the code modes' music and calls
+    (:func:`.mode_write.choose_code_sounds`, ``call:<cue>`` / ``music:<bed>`` keys), each a
+    record of its own on a carrier the same way."""
     log = log or (lambda *a, **k: None)
     from . import mode_sounds as MS
     from . import spike3_requests as Q
     from . import spike3_write as W
     from .info import container_counts
     wanted = MW.choose_own_sounds(project, modes, (True, ""), end_sound=None, log=log)
+    if code:
+        req, beds = MW.own_sounds_taken(wanted)
+        wanted = list(wanted) + MW.choose_code_sounds(project, code, (True, ""), prof, taken=req,
+                                                      taken_beds=beds, log=log)
     if not wanted:
         return [], {}
     conts = W.project_sound_dirs(reader)
@@ -256,7 +262,7 @@ def own_sounds(project, modes, reader, game_raw, prof, log=None):
                 break
         if rec is None:
             log("Modes: %s's %s is not put on this card: none of %s's carriers (%s) names a "
-                "recording of %s." % (e["name"], MW.SOUND_WORDS[e["key"]], prof.label,
+                "recording of %s." % (e["name"], MW.sound_words(e["key"]), prof.label,
                                       ", ".join(str(r) for r in cands), card_path), "warning")
             continue
         flags, param = W.free_key(img.records, rec.flags_lo, rec.param, taken)
@@ -267,15 +273,15 @@ def own_sounds(project, modes, reader, game_raw, prof, log=None):
         adds.append(nr)
         mine.setdefault(e["slug"], []).append(req)
         u = {"slug": e["slug"], "name": e["name"], "key": e["key"], "request": req,
-             "wav": e["wav"], "music": e["key"] == "music",
+             "wav": e["wav"], "music": bool(e.get("music")),
              "stock_key": struct.pack("<II", rec.flags_lo, rec.param).hex(),
              "our_key": nr.key.hex(), "idx": img.count + len(adds) - 1}
-        if e["key"] != "music":
+        if not e.get("music"):
             u["ms"] = _wav_ms(e["wav"], rec.channels)
         used.append(u)
     for u in used:
         log("Modes: %s's own %s rides request %d (its record %d, appended to %s)."
-            % (u["name"], MW.SOUND_WORDS[u["key"]], u["request"], u["idx"], card_path), "info")
+            % (u["name"], MW.sound_words(u["key"]), u["request"], u["idx"], card_path), "info")
     return used, ({card_path: adds} if adds else {})
 
 
@@ -358,37 +364,34 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     card with no modes (the runtime then arms it and nothing else: ``only`` in its file)."""
     log = log or (lambda *a, **k: None)
     feed, feed_prof = feed_wanted(project, real_card=real_card)
-    modes = []
+    modes, code = [], []
     if not MW.preview_on():
         off = MW.preview_left_out(project)
         if off:
             log(off, "warning")
     else:
         modes = MW.project_modes(project)
-        code = MW.code_mode_list(project)
-        if code:
-            log("Modes: the project's %d code mode(s) are left out of this build: %s."
-                % (len(code), CODE_MODES_WORDS), "warning")
-    if not modes and not feed:
+        code = MW.code_mode_list(project)        # PAD-1295: compiled for the card's 64-bit ARM
+    if not modes and not code and not feed:
         return None
 
     def left(why):
         log("Modes: the project's %d mode(s) are left out of this build: %s."
-            % (len(modes), why.rstrip(".")), "warning")
-        return []
-    if modes and real_card:
+            % (len(modes) + len(code), why.rstrip(".")), "warning")
+        return [], []
+    if (modes or code) and real_card:
         ok, why = MW.gate(dest_is_device=False)
         if not ok:
-            modes = left(why)
-    if modes:
+            modes, code = left(why)
+    if modes or code:
         why = MW.card_refusal(project, real_card=real_card)
         if why:
-            modes = left(why)
-    if not modes and not feed:
+            modes, code = left(why)
+    if not modes and not code and not feed:
         return None
     state, target = card_state(reader)
     if state == "multiboot":
-        if modes:
+        if modes or code:
             left(MULTIBOOT_WORDS)
         if feed:
             log("Score feed: left out of this build: %s." % MULTIBOOT_WORDS.replace(
@@ -401,10 +404,13 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     game_raw = bytes(reader.read_file_bytes(fw))
     used, adds = [], {}
     hud, bank = b"", b""
-    if modes:
-        log("Found %d mode(s) to write: %s." % (len(modes), ", ".join(s.name for _g, s in modes)),
-            "info")
+    if modes or code:
+        log("Found %d mode(s) to write: %s." % (len(modes) + len(code), ", ".join(
+            [s.name for _g, s in modes] + ["%s (code mode)" % c.name for _s, c in code])), "info")
         _card, prof = MP.project_profile(project, probe=True)
+        if prof is None and code:
+            from . import code_modes as CM
+            prof = CM.profile_for(project, code)
         hud_rel, bank_rel = MW.scene_rels(prof) if prof is not None else ("", "")
 
         def scene(rel):
@@ -412,19 +418,21 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
             return bytes(reader.read_file_bytes(node)) if node is not None else b""
         hud, bank = scene(hud_rel), scene(bank_rel)
         if prof is not None and sound_ok[0]:
-            used, adds = own_sounds(project, modes, reader, game_raw, prof, log)
+            used, adds = own_sounds(project, modes, reader, game_raw, prof, log, code=code)
         elif prof is not None:
             MW.choose_own_sounds(project, modes, sound_ok, log=log)   # says they are left out, and why
+            if code:
+                MW.choose_code_sounds(project, code, sound_ok, prof, log=log)
     result = MW.plan(project, hud, bank, game_raw,
                      os.path.join(scratch, "modes"), sound_ok=(False, "a Spike 3 card"), log=log,
-                     end_sound=None, own_sounds=used, code_ok=False, modes_on=bool(modes),
-                     score_feed=feed, score_feed_prof=feed_prof)
+                     end_sound=None, own_sounds=used, code_ok=True, arch="a64",
+                     modes_on=bool(modes or code), score_feed=feed, score_feed_prof=feed_prof)
     if result is None:
         return None
     payload = MW.p2_payload(result, os.path.join(scratch, "modes", "padmode"), project=project,
                             arch="a64")
     names = (list(getattr(result, "mode_names", None) or [s.name for _g, s in modes])
-             if modes else [])
+             if modes or code else [])
     # describe() names Spike 2's place for the mode files; this card's is the games partition
     lines = [l.replace("on the system partition", "in /games/" + MODE_DIR)
              for l in result.lines]

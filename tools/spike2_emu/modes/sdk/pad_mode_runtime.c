@@ -20397,16 +20397,73 @@ static const char *const COOP_NAME_SITES[] = { "coop_panel_name", "coop_panel_na
                                                "coop_panel_name_4", 0 };
 static unsigned (*coop_name_game)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
 
+/* PAD-1315 (DoomWalrus666, co-op: "Player 1's user icon moves to the scoreboard position of the active player"): the
+ * boxes' Insider avatars are not drawn with the names above but by the score frame's Insider overlay
+ * (NetScoreFrameOverlay, every Spike 2 build), which calls its drawer once a box as draw(this, logins, player 1..4, r3,
+ * [sp]; the box's rectangle in s0-s3) (Godzilla Pro 1.16 0x483c14 from 0x484440). The drawer reads the player's login
+ * state and login (the entry the swap above moves) and draws that user's avatar in that user's colour - so box 1 drew
+ * the teammate up's icon and the teammate up's box player 1's. Its call (`site coop_icon_draw`,
+ * portcoop.score_icon_sites) is answered with the place holding the box's own player's login. The rectangle travels
+ * in s0-s3: the wrapper takes the four floats and passes them on (hard-float: they stay in s0-s3), the stack word
+ * with them. */
+static unsigned (*coop_icon_game)(unsigned, unsigned, unsigned, unsigned, unsigned, float, float, float, float);
+
+static unsigned coop_icon_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, float x, float y,
+                               float w, float h)
+{
+    static unsigned said[5];
+    unsigned place = r2 >= 1 && r2 <= 4 ? coop_name_player(r2, cu_g, cu_p) : r2;
+    if (place != r2 && said[r2] != (cu_g << 4 | cu_p)) {     /* once a turn a box */
+        said[r2] = cu_g << 4 | cu_p;
+        say("co-op insider: the score panel's box %u shows player %u's icon (login 0x%08x, in place %u while player "
+            "%u is up)", r2, r2, coop_user_word(place), place, cu_p);
+    }
+    return coop_icon_game(r0, r1, place, r3, s0, x, y, w, h);
+}
+
+static void coop_icon_arm(void)
+{
+    unsigned at;
+    if (!site("coop_icon_draw")) return;
+    if (!fn("coop_icon_draw") || !(at = hook_call(fn("coop_icon_draw"), (void *)coop_icon_wrap))) {
+        say("co-op insider: the score frame's icon draw could not be wrapped - box 1 shows the teammate up's icon");
+        return;
+    }
+    coop_icon_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, float, float, float, float))
+        (unsigned long)at;
+    say("co-op insider: the score panel's boxes show their own players' icons");
+}
+
+/* PAD-1315: the name wrapper re-pointed the PLAYER the game's name was asked for, and the name of a player with no
+ * login (a guest) is "PLAYER %d" of that number - so with player 1 logged in and teammate 2 a guest, teammate 2's box read
+ * "PLAYER 1" on their turn. Where the name's own user lookup is found (`site coop_panel_name_user`,
+ * portcoop.name_user_site: its call of user-for-player(player, ..), Godzilla Pro 1.16 0x3bc944), the box's name is asked
+ * for its own player and only that lookup is re-pointed (while the box's call runs), so a login reads from its place
+ * and a guest keeps their own number. */
+static unsigned (*coop_name_user_game)(unsigned, unsigned, unsigned, unsigned);
+static volatile unsigned cn_box, cn_place;              /* the box whose name is being made, and its login's place */
+
+static unsigned coop_name_user_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    if (cn_box && r0 == cn_box) r0 = cn_place;
+    return coop_name_user_game(r0, r1, r2, r3);
+}
+
 static unsigned coop_name_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, unsigned s1)
 {
     static unsigned said[5];
-    unsigned place = coop_name_player(r1, cu_g, cu_p);
+    unsigned place = coop_name_player(r1, cu_g, cu_p), ret;
     if (place != r1 && r1 >= 1 && r1 <= 4 && said[r1] != (cu_g << 4 | cu_p)) {   /* once a turn a box */
         said[r1] = cu_g << 4 | cu_p;
         say("co-op insider: the score panel's box %u names player %u's login (0x%08x, in place %u while player %u "
             "is up)", r1, r1, coop_user_word(place), place, cu_p);
     }
-    return coop_name_game(r0, place, r2, r3, s0, s1);
+    if (!coop_name_user_game || place == r1) return coop_name_game(r0, place, r2, r3, s0, s1);
+    cn_place = place;
+    cn_box = r1;
+    ret = coop_name_game(r0, r1, r2, r3, s0, s1);           /* PAD-1315: its own number, the login from its place */
+    cn_box = 0;
+    return ret;
 }
 
 static void coop_name_arm(void)
@@ -20425,6 +20482,15 @@ static void coop_name_arm(void)
     }
     if (armed) say("co-op insider: the score panel's boxes name their own players (%d call%s)", armed,
                    armed == 1 ? "" : "s");
+    if (armed && site("coop_panel_name_user")) {             /* PAD-1315 */
+        if (fn("coop_panel_name_user") && (at = hook_call(fn("coop_panel_name_user"), (void *)coop_name_user_wrap))) {
+            coop_name_user_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
+            say("co-op insider: a box's name keeps its own number (a guest reads its own PLAYER n)");
+        } else
+            say("co-op insider: the names' user lookup could not be wrapped - a guest's box reads the number of its "
+                "login's place");
+    }
+    coop_icon_arm();                                          /* PAD-1315 */
 }
 
 static int on_coop_award(pm_reg *r);       /* below the Insider Connected gate */

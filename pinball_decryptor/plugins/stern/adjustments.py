@@ -57,10 +57,43 @@ LANGUAGE_LABELS = ["English", "German", "French", "Spanish", "Italian"]
 ONOFF_LABELS = ["Off", "On"]
 
 
-def _load_segments(data):
+#: PAD-1321: a Spike 3 game program (64-bit ARM, a PIE) holds the same table with 8-byte pointers.
+#: Its descriptor is 64 bytes: the value's address @0, default/min/max/step (i32) @0x08/0x0c/0x10/0x14,
+#: the caption @0x20, the row caption's line (five language pointers and a zero) @0x28, the help @0x30,
+#: and the display kind (u16) @0x38 with the feature category (u16) @0x3a.  Every pointer the loader
+#: relocates is stored in the file as its own value (load base 0), so it reads as written.
+WIDE_FIELDS = {"default": 0x08, "min": 0x0c, "max": 0x10, "step": 0x14,
+               "label": 0x20, "row": 0x28, "help": 0x30, "kind": 0x38}
+NARROW_FIELDS = {"default": OFF_DEFAULT, "min": OFF_MIN, "max": OFF_MAX, "step": OFF_STEP,
+                 "label": OFF_MENU_LABEL, "row": None, "help": OFF_MENU_HELP, "kind": 0x24}
+
+
+def is_wide(data):
+    """True for a little-endian 64-bit ELF (a Spike 3 game program)."""
+    return len(data) >= 0x40 and data[:4] == b"\x7fELF" and data[4] == 2 and data[5] == 1
+
+
+def _load_segments_wide(data):
+    e_phoff = struct.unpack_from("<Q", data, 0x20)[0]
+    e_phentsize, e_phnum = struct.unpack_from("<HH", data, 0x36)
+    segs = []
+    for i in range(e_phnum):
+        base = e_phoff + i * e_phentsize
+        if base + 56 > len(data):
+            break
+        p_type = struct.unpack_from("<I", data, base)[0]
+        p_offset, p_vaddr, _pa, p_filesz = struct.unpack_from("<4Q", data, base + 8)
+        if p_type == 1:
+            segs.append((p_offset, p_vaddr, p_filesz))
+    return segs
+
+
+def _load_segments(data, wide_ok=False):
     """PT_LOAD segments as ``[(file_off, vaddr, filesz), ...]`` from the ELF
     program headers (manual parse — no pyelftools dependency).  Returns [] if
-    it isn't a little-endian 32-bit ELF."""
+    it isn't a little-endian 32-bit ELF (or, with *wide_ok*, a 64-bit one)."""
+    if wide_ok and is_wide(data):
+        return _load_segments_wide(data)
     if len(data) < 0x34 or data[:4] != b"\x7fELF":
         return []
     if data[4] != 1 or data[5] != 1:            # 32-bit, little-endian
@@ -83,11 +116,19 @@ def _load_segments(data):
 class AdjustmentTable:
     """Decode (and patch) the adjustment-default table of a game ELF held in
     memory as ``bytes``.  Raises :class:`ValueError` if the table can't be
-    located (an unrecognised build — the caller falls back to no editor)."""
+    located (an unrecognised build — the caller falls back to no editor).
 
-    def __init__(self, elf_bytes):
+    PAD-1321: *wide_ok* reads a Spike 3 (64-bit) program too; without it one is
+    refused as before, so a caller built for Spike 2's program never meets one.
+    ``wide`` says which it is, ``ptr`` the pointer size, ``fields`` the
+    descriptor's field offsets."""
+
+    def __init__(self, elf_bytes, wide_ok=False):
         self.data = bytes(elf_bytes)
-        self._loads = _load_segments(self.data)
+        self.wide = bool(wide_ok and is_wide(self.data))
+        self.ptr = 8 if self.wide else 4
+        self.fields = WIDE_FIELDS if self.wide else NARROW_FIELDS
+        self._loads = _load_segments(self.data, wide_ok)
         if not self._loads:
             raise ValueError("not a little-endian 32-bit ELF")
         self.names = self._find_names()
@@ -121,6 +162,14 @@ class AdjustmentTable:
             return None
         return s if s.isprintable() else None
 
+    def word(self, off):
+        """The pointer-sized word at file offset *off*."""
+        return struct.unpack_from("<Q" if self.wide else "<I", self.data, off)[0]
+
+    def field_off(self, idx, field):
+        """File offset of *field* (a :data:`WIDE_FIELDS` key) of descriptor *idx*."""
+        return self._off(self.table_va + idx * self.elem) + self.fields[field]
+
     # --- discovery ---
     def _words(self, po, fsz):
         """``(base_offset, memoryview of u32)`` over a PT_LOAD's aligned words.
@@ -130,11 +179,12 @@ class AdjustmentTable:
         ``struct.unpack_from`` there costs seconds, a cast memoryview about a
         fifth of that.
         """
-        base = (po + 3) & ~3
-        n = (po + fsz - base) // 4
+        p, code = (8, "Q") if self.wide else (4, "I")
+        base = (po + p - 1) & ~(p - 1)
+        n = (po + fsz - base) // p
         if n <= 0:
-            return base, memoryview(b"").cast("I")
-        return base, memoryview(self.data)[base:base + n * 4].cast("I")
+            return base, memoryview(b"").cast(code)
+        return base, memoryview(self.data)[base:base + n * p].cast(code)
 
     def _find_names(self):
         ad_va = {}
@@ -150,7 +200,7 @@ class AdjustmentTable:
         # counted (keeps the id index aligned with the descriptor array).
         names, va = [], best[0]
         while True:
-            w = struct.unpack_from("<I", self.data, self._off(va))[0]
+            w = self.word(self._off(va))
             if w in va_set:
                 names.append(ad_va[w])
             else:
@@ -158,7 +208,7 @@ class AdjustmentTable:
                 if names and (not s or not s.startswith("AD_")):
                     break
                 names.append(s or "")
-            va += 4
+            va += self.ptr
             if len(names) > 6000:
                 break
         return names
@@ -170,13 +220,14 @@ class AdjustmentTable:
         numpy over the words rather than a Python loop: 1.5 s on Rush's
         190 MB program, part of what Card details took (PAD-626)."""
         import numpy as np
-        names = np.array(sorted(va_set), dtype=np.uint32)
+        dt = np.uint64 if self.wide else np.uint32
+        names = np.array(sorted(va_set), dtype=dt)
         best = []
         for po, pv, fsz in self._loads:
             base, words = self._words(po, fsz)
             if not len(words) or not len(names):
                 continue
-            w = np.frombuffer(words, dtype=np.uint32)
+            w = np.frombuffer(words, dtype=dt)
             # the names sit together in the string pool: most words are out
             # of their range, and only the rest are looked up
             j = np.flatnonzero((w >= names[0]) & (w <= names[-1]))
@@ -185,8 +236,8 @@ class AdjustmentTable:
             j = j[names[pos] == w[j]]
             if not len(j):
                 continue
-            v = pv + (base - po) + 4 * j
-            cuts = np.flatnonzero(np.diff(v) != 4) + 1
+            v = pv + (base - po) + self.ptr * j
+            cuts = np.flatnonzero(np.diff(v) != self.ptr) + 1
             starts = np.concatenate(([0], cuts))
             ends = np.concatenate((cuts, [len(v)]))
             k = int(np.argmax(ends - starts))          # the first longest
@@ -195,6 +246,8 @@ class AdjustmentTable:
         return best
 
     def _find_section(self):
+        if self.wide:
+            return self._find_section_wide()
         target = len(self.names)
         # The count word is looked for with bytes.find, not a word-by-word
         # walk: the walk was most of the second Card details took (PAD-626).
@@ -222,24 +275,45 @@ class AdjustmentTable:
                         return table, target, elem, node_s, self._va(i)
         raise ValueError("adjustment section record not found")
 
+    def _find_section_wide(self):
+        """The 64-bit record: ``{live, table, count, elem, 0, node}`` in 8-byte words (Star Wars
+        ELG 1.10's at 0x6a0008: table 0x6b4510, 195, 64, 0, "SYS")."""
+        target = len(self.names)
+        pat = struct.pack("<Q", target)
+        for po, pv, fsz in self._loads:
+            stop = po + fsz - 24
+            p = self.data.find(pat, po + 16, stop)
+            while p >= 0:
+                i = p - 16
+                p = self.data.find(pat, p + 1, stop)
+                if (i - po) % 8:
+                    continue
+                table, _n, elem, _z, node = struct.unpack_from("<5Q", self.data, i + 8)
+                if 32 <= elem <= 128 and elem % 8 == 0 and self._off(table) is not None:
+                    node_s = self._cstr(node, 16)
+                    if node_s:
+                        return table, target, elem, node_s, self._va(i)
+        raise ValueError("adjustment section record not found")
+
     # --- read ---
     def _s32(self, off):
         return struct.unpack_from("<i", self.data, off)[0]
 
     def entry(self, idx):
         o = self._off(self.table_va + idx * self.elem)
+        f = self.fields
         return {"id": idx, "name": self.names[idx],
-                "default": self._s32(o + OFF_DEFAULT),
-                "min": self._s32(o + OFF_MIN),
-                "max": self._s32(o + OFF_MAX),
-                "step": self._s32(o + OFF_STEP)}
+                "default": self._s32(o + f["default"]),
+                "min": self._s32(o + f["min"]),
+                "max": self._s32(o + f["max"]),
+                "step": self._s32(o + f["step"])}
 
     def get(self, name):
         return self.entry(self.by_name[name])
 
     def default_file_offset(self, name):
         idx = self.by_name[name]
-        return self._off(self.table_va + idx * self.elem + OFF_DEFAULT)
+        return self._off(self.table_va + idx * self.elem + self.fields["default"])
 
     def sane(self):
         """True iff default in [min,max] for a strong majority of entries — a
@@ -271,9 +345,9 @@ class AdjustmentTable:
             if not (INT32_MIN <= lo <= hi <= INT32_MAX):
                 raise ValueError("%s range [%d, %d] is not a range"
                                  % (name, lo, hi))
-            base = self.default_file_offset(name) - OFF_DEFAULT
-            struct.pack_into("<i", buf, base + OFF_MIN, lo)
-            struct.pack_into("<i", buf, base + OFF_MAX, hi)
+            base = self.default_file_offset(name) - self.fields["default"]
+            struct.pack_into("<i", buf, base + self.fields["min"], lo)
+            struct.pack_into("<i", buf, base + self.fields["max"], hi)
         for name, value in overrides.items():
             if name not in self.by_name:
                 raise ValueError("unknown adjustment %r" % name)
@@ -674,16 +748,18 @@ def _is_caption(text):
 def _caption_at(table, idx):
     """``(direct, indirect)`` caption candidates for one descriptor."""
     off = table._off(table.table_va + idx * table.elem)
-    if off is None or OFF_MENU_LABEL + 4 > table.elem:
+    label = getattr(table, "fields", NARROW_FIELDS)["label"]
+    ptr = getattr(table, "ptr", 4)
+    if off is None or label + ptr > table.elem:
         return None, None
-    va = struct.unpack_from("<I", table.data, off + OFF_MENU_LABEL)[0]
+    va = struct.unpack_from("<Q" if ptr == 8 else "<I", table.data, off + label)[0]
     if not va:
         return None, None
     direct = table._cstr(va, 64)
     indirect = None
     inner = table._off(va)
-    if inner is not None and inner + 4 <= len(table.data):
-        first = struct.unpack_from("<I", table.data, inner)[0]
+    if inner is not None and inner + ptr <= len(table.data):
+        first = struct.unpack_from("<Q" if ptr == 8 else "<I", table.data, inner)[0]
         if first:
             indirect = table._cstr(first, 64)
     return direct, indirect

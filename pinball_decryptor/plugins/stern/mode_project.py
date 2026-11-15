@@ -536,6 +536,12 @@ MULTIBALL_PROVEN = frozenset({
     # a mode file started on Berry target left x3): 3 balls asked for, served through the game's serve (trough 3/6),
     # 3 shots scored 6,000,000, balls in play 3 -> 2, the mode ended on its 40 s clock, then "ours is over" at one ball
     "pokemon_le-0.82/spike3",
+    # PAD-1287 2026-11-15 (Spike 3 rig slot 37, hidden, muted): a mode.cfg `multiball 3 10` on three Tower target hits,
+    # the game served to 3 balls in play (trough 3/6), 3 shots scored, counted 3 -> 2 -> 1 and gave its multiball back
+    "walking_dead_remastered_le-0.92/spike3",
+    # PAD-1288 2026-11-15 (Spike 3 rig slot 66, hidden, muted, s3proof.sh PROOF=mb TITLE=fallout_le): MB TEST on three
+    # Junk target hits served 3 through the game's serve, scored 3 shots, ran its 40 s, drains 3-2-1, "ours is over"
+    "fallout_le-0.82/spike3",
     "star_wars_2025_pro-0.84/spike3",    # PAD-1291 2026-11-15 (Spike 3 rig slot 240, hidden, muted): MB TEST served 3 balls through the game's serve, scored 3 shots (+6,000,000), "ours is over" at one ball
 })
 
@@ -643,6 +649,10 @@ BALL_SAVE_PROVEN = frozenset({
     # auto plunger), 3 shots scored 6,000,000 on that ball, the drain after the save ended it; SAVE CONTROL (no
     # ball_save) ended the ball on its first drain, 5.9 s in
     "pokemon_le-0.82/spike3",
+    # PAD-1288 2026-11-15 (Spike 3 rig slots 64/65, hidden, muted, s3proof.sh PROOF=ballsave TITLE=fallout_le): SAVE
+    # TEST's 15 s save taken, the drain inside it served back (eject + auto plunger 1 s later), 3 shots scored 6,000,000
+    # on that ball, the drain after the save ended it; the control without ball_save ended on its first drain, 5.9 s in
+    "fallout_le-0.82/spike3",
     "star_wars_2025_pro-0.84/spike3",    # PAD-1291 2026-11-15 (Spike 3 rig slot 241, hidden, muted): SAVE TEST's 15 s save, the drain inside it served back (eject, auto plunger), 3 shots +6,000,000 on that ball, the drain after it ended the ball; SAVE CONTROL ended on its first drain (6 s)
 })
 

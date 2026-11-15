@@ -84,18 +84,37 @@ to reach Adjustments) hangs this title's service/connect path in the emulator un
 (load 16+, other sessions), and the harness SIGKILLs the hung game (137, never a SIGSEGV). A
 calmer rig should let the menu page be captured.
 
-## What is left (generic, shipping)
+## Shipped: the generic grow (menu_settings.grow_wide_program)
 
-The hand-patch above is a scratch spike, not shipping code. To finish the ticket:
+The spike above is now shipping code. `wide_copy_sites(table, cat)` reads the copy site, the three
+size constants, the stack-buffer frame and - the hazard the spike exposed - the stack canary at the
+buffer top (`[sp, #F-8]`, written at the prologue and re-checked on the normal return AND the
+exception landing pad). `grow_wide_program(table, cat, *settings)` appends the grown table in a
+read-only segment, re-points the copy, raises the sizes, and grows the frame so the longer copy
+clears the canary, moving every canary access together. A build whose menu-copy does not match this
+compiler's pattern, or that keeps any other local in the bytes the longer copy would cover, is
+refused with a sentence (`offered()` returns it) rather than mis-patched.
 
-- a generic finder that locates, in ANY Spike 3 build: the table-copy function, the `adrp`/`add`
-  that forms the table pointer, EVERY occurrence of the size immediate and the table address within
-  the enclosing function (so a second size reference cannot be missed), and the frame `sub`/`add`
-  plus the saved-slot `[sp,#off]` accesses that must shift. Carry those offsets on
-  `WideCategoryTable` (as Spike 2's `CategoryTable` does) and implement `writes()` + a 64-bit
-  segment appender in `engine`. Builds whose copy pattern differs (not stack-buffer-then-heap) must
-  be recognised and refused rather than mis-patched.
-- a per-game category for each setting (ELG's category numbers differ from Godzilla's; 13 is unused
-  on ELG). Pick by the category NAME table, not the fixed Spike 2 number.
-- per-build emulator proof of the visible row for each build that takes a row, and the Spike 3
-  Write wiring. Each needs a calmer rig than was available on 2026-11-15.
+Proven on all three row-taking builds (Star Wars ELG 1.10, Fallout 0.82, Transformers 0.96): the
+grown program re-reads with the row listed, `check()` clean (descriptor, captions, help AND the
+menu page), the canary's str and both ldr checks shift as one, the disassembly is self-consistent.
+The patched ELG program boots and runs to attract on the rig at 55 fps with no crash.
+`tests/test_pad1321_spike3_menu_rows.py`.
+
+## For the consumers (the menu-based family tickets)
+
+PAD-1321 delivers the capability; PAD-1324 (music modes), PAD-1325 (editions), PAD-1326 (co-op /
+handicaps) USE it. When they do:
+
+- **pick the category per game, by name.** `grow_wide_program` places the row on the category it is
+  given; `SETTINGS` carries the Spike 2 numbers (13 = Audio Content, ...), but a Spike 3 build's
+  category numbers differ (on ELG, 13 is unused and 11/16/... are its own pages). Resolve each
+  setting's page from the game's category-NAME table, or place the row on an existing populated
+  category, so it lands on a real, navigable page. A record on an unused category number is listed
+  but may show on no page.
+- **wire it into the Spike 3 Write** (`spike3_modes` / `engine`) so the row lands on the card.
+- **capture the visible row in the emulator per build.** On 2026-11-15 the ELG operator-menu page
+  could not be shot: reaching Adjustments needs the coin door open, and ELG's door-open service /
+  connect path hangs the emulator under heavy concurrent rig load (SIGKILL, never a program fault;
+  work/artifacts/PAD-1321). A calmer rig should let it be captured; whether the hang is purely load
+  or inherent to ELG's Insider connect under emulation is still open.

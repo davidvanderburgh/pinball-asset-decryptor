@@ -183,6 +183,51 @@ CLEARS = {
 }
 
 
+@needs_bash
+def test_a_zombie_run_is_flagged_stuck():
+    """PAD-1341: a run that lives but no longer progresses still beats (a
+    zombie passes kill -0), so the beater says so in the record."""
+    rc, out, err = _sh(r"""
+command -v setsid >/dev/null && command -v ps >/dev/null && [ -d /proc/self ] || { echo SKIP; exit 0; }
+sh -c 'sleep 0.1 & exec sleep 30' & P=$!
+sleep 30 & OK=$!
+RIGBOARD_BEAT_S=0.2 RIGBOARD_STUCK_BEATS=3 rigboard_post jjp 0 "$P" GunsNRoses "" 0 0
+RIGBOARD_BEAT_S=0.2 RIGBOARD_STUCK_BEATS=3 rigboard_post spike3 1 "$OK" star_wars_le "" 0 0
+for _ in $(seq 1 60); do grep -q '"state":"Z"' "$B/jjp-0.run" && break; sleep 0.1; done
+cat "$B/jjp-0.run" "$B/spike3-1.run"
+kill $P $OK
+""")
+    assert rc == 0, err
+    if out.strip() == "SKIP":
+        pytest.skip("no setsid, ps or /proc")
+    stuck, fine = (json.loads(l) for l in out.splitlines()[:2])
+    assert stuck["state"] == "Z" and stuck["emu"] == "jjp"
+    assert "state" not in fine
+
+
+@needs_bash
+def test_the_stuck_state_is_set_and_cleared_in_place():
+    rc, out, err = _sh(r"""
+echo '{"emu":"jjp","slot":0,"pid":5,"hidden":false}' > "$B/r"
+rigboard_set_state "$B/r" D; cat "$B/r"
+rigboard_set_state "$B/r" Z; cat "$B/r"
+rigboard_set_state "$B/r" ""; cat "$B/r"
+""")
+    assert rc == 0, err
+    a, b, c = (json.loads(l) for l in out.splitlines())
+    assert a["state"] == "D" and b["state"] == "Z" and "state" not in c
+    assert c == {"emu": "jjp", "slot": 0, "pid": 5, "hidden": False}
+
+
+def test_spike3_posts_the_running_games_pid_and_follows_a_load():
+    s = _src("spike3_emu", "s3run.sh")
+    assert 'rigboard_post spike3 "$SLOT" "${INNERPID:-$GPID}"' in s
+    load = s[s.index("serve_load() {"):s.index("rm -f \"$SD/load.req\" \"$SD/load.result\"\nT0=")]
+    assert "s3_board" in load
+    # posted before the run's loop, cleared right after it
+    assert s.index("\ns3_board\n") < s.index("while game_alive; do") < s.index("rigboard_clear spike3")
+
+
 @pytest.mark.parametrize("where,call", sorted(POSTS.items()))
 def test_every_emulator_posts_its_run(where, call):
     assert call in _src(*where)

@@ -5,6 +5,7 @@ tables), and the rig fix that let a ball save be proven at all (s3balls' trough 
 docs/plans/spike3_modes.md "The proof pass on a Spike 3 port (PAD-1286)" is the recipe."""
 import importlib.util
 import os
+import re
 import struct
 from pathlib import Path
 
@@ -133,8 +134,9 @@ def test_the_recipe_jobs_and_their_mode_files_are_there():
     for f in ("s3proof.sh", "play.sh", "build_probe.sh", "place_probe_mode.c"):
         assert (PROOFS / f).is_file(), f
     play = (PROOFS / "play.sh").read_text(encoding="utf-8")
-    for proof in ("ballsave)", "game)", "mb)", "coil)", "stackmb)"):
-        assert "\n" + proof in play
+    for proof in ("ballsave", "game", "mb", "coil", "stackmb"):
+        # a case label, maybe shared with another proof (PAD-1289: `coil|mode)`)
+        assert re.search(r"^(\w+\|)*%s(\|\w+)*\)$" % proof, play, re.M), proof
     assert _cfg("save.cfg")["ball_save"] == ["15"] and "ball_save" not in _cfg("savectl.cfg")
     assert _cfg("place.cfg")["in_place_of"] == ["1"] and "trigger" not in _cfg("place.cfg")
     assert _cfg("done.cfg")["starts_on"] == ["completed 1 1"]

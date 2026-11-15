@@ -278,6 +278,20 @@ hook maintnolast 0 0 "" "$MASK"
 [ -s "$SELARGS" ] || fail maintnolast "the selector did not run with no last choice"
 rm -f "$P/padselect.last" "$P/padselect.maint"
 
+# --- PAD-1309: Escape in the game (exit 254): rungame.sh's patched case calls --menu-reboot,
+# which drops a maintenance mark (the menu must show) and reboots; without a conf, nothing
+date +%s > "$P/padselect.maint"
+rm -f "$W/rebooted"
+PADSELECT_REBOOT="touch $W/rebooted" PADSELECT_REBOOT_WAIT=0 $SH padselect.sh --menu-reboot > "$W/out" 2>&1 \
+    || fail escape "the run exited non-zero"
+[ -f "$W/rebooted" ] || fail escape "no reboot"
+[ -f "$P/padselect.maint" ] && fail escape "the maintenance mark was kept (the menu would not show)"
+grep -q "Escape pressed in the game" "$W/out" || fail escape "message"
+rm -f "$W/rebooted"
+PADSELECT_CONF="$W/none.conf" PADSELECT_REBOOT="touch $W/rebooted" PADSELECT_REBOOT_WAIT=0 \
+    $SH padselect.sh --menu-reboot > "$W/out" 2>&1
+[ -f "$W/rebooted" ] && fail escapenoconf "rebooted with no multi-boot conf"
+
 # --- no selector binary: image 0, one line
 PADSELECT_BIN="$W/nosuch" hook nobin 0 0 "" "$MASK"
 grep -q "no $W/nosuch: booting image 0" "$W/out" || fail nobin "message"

@@ -4,8 +4,8 @@
 #   game      keep the ball in play HOLD s (a probe mode does the rest: place_probe_mode.c)
 #   mb        trigger the mode, plunge the balls it serves, shoot, drain them one by one
 #   coil      trigger the mode, shoot through its holds
+#   mode      the same play for a plain mode: trigger, shoot, let its clock run out (PAD-1289)
 #   stackmb   start the game's own multiball, trigger a `stack no` mode inside it, drain until it starts
-#   mode      trigger the mode, score its shots, then keep the ball up until its clock ends it (PAD-1288)
 #   edge      (PAD-1322) the flipper buttons in attract, then in play the trigger, the scoring shots, a slingshot, a
 #             pop bumper and the flipper buttons: with `value switch_edge_log N` in the port, every edge is logged
 # The title's switch names (Star Wars ELG 1.10's by default) - each list is `|`-separated:
@@ -16,7 +16,7 @@ GAME_MB_SW=${GAME_MB_SW:-DEATH STAR TARGET}                 # x3 starts the game
 FLIP_SWS=${FLIP_SWS:-L FLIPPER BUTTON|R FLIPPER BUTTON}      # the flipper buttons (PROOF=edge)
 NOHANDLER_SWS=${NOHANDLER_SWS:-LEFT SLINGSHOT|RIGHT POP BUMPER}   # switches the drain runs no handler for (PROOF=edge)
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
-COINS=${COINS:-0}                                           # credits first (Walking Dead Remastered's fresh settings: 4)
+COINS=${COINS:-0}                                           # credits first (Walking Dead Remastered's fresh settings: 4; Pokemon LE is not on free play)
 AFTER_START_SWS=${AFTER_START_SWS:-}                        # pressed after each Start (a character select)
 SLOT=${1:-88}
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -35,6 +35,8 @@ if [ "${PROOF:-game}" = edge ]; then
 fi
 [ "$COINS" -gt 0 ] && { $P coin "$SLOT" "$COINS"; sleep 3; }
 for k in $(seq 1 8); do
+  # a retry drops its coins again: coins dropped while the game is still booting are not counted (PAD-1289, Pokemon)
+  [ "$COINS" -gt 0 ] && [ "$k" -gt 1 ] && $P coin "$SLOT" "$COINS" > /dev/null 2>&1
   [ "$START_HOLD_MS" -gt 0 ] && { $P sw "$SLOT" "START BUTTON" "$START_HOLD_MS"; sleep 7; }
   $P sw "$SLOT" "START BUTTON"; sleep 8
   [ -n "$AFTER_START_SWS" ] && sws "$AFTER_START_SWS" 3
@@ -71,20 +73,11 @@ mb)
     grep -E "TEST.*END|ended|ours is over" $L | tail -1
   done
   sleep 10 ;;
-coil)
+coil|mode)
   sleep 4
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done
   echo "[play] triggers in at $(date +%s)"
   for r in $(seq 1 8); do sleep 4; sws "$SHOT_SWS" 1; done
-  sleep 10 ;;
-mode)
-  sleep 4
-  for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done
-  echo "[play] triggers in at $(date +%s)"; sleep 2
-  for r in 1 2; do sws "$SHOT_SWS" 2; done
-  echo "[play] shots in at $(date +%s); waiting out the clock"
-  for k in $(seq 1 60); do grep -qE "TEST END|ended" $L && break; sleep 1; done
-  grep -E "START|END|ended|score" $L | tail -8
   sleep 10 ;;
 stackmb)
   sleep 4

@@ -99,18 +99,22 @@ def test_walking_dead_remastered_s_proven_multiball_is_offered():
 
 # ---- the proof tooling ----------------------------------------------------------------------------------------
 
-def test_the_title_file_names_switches_the_port_has():
-    env = dict(re.findall(r'^(\w+)=("[^"]*"|\S+)', (PROOFS / "titles" / "fallout_le.env").read_text(), re.M))
-    env = {k: v.strip('"') for k, v in env.items()}
+def test_the_title_file_and_mode_files_name_switches_the_port_has():
+    text = (PROOFS / "titles" / "fallout_le.env").read_text()
+    env = {k: v for k, v in re.findall(r"^(\w+)=\$\{\w+:-(.*?)\}", text, re.M)}
     names = {ln.split(None, 3)[3].upper(): int(ln.split()[2], 16)
              for ln in FO_PORT.read_text(encoding="utf-8").splitlines() if ln.startswith("switch ")}
-    assert names[env["TRIGGER_SW"]] == int(env["TRIGGER_BITS"], 16)
-    shots = env["SHOT_SWS"].split("|")
-    assert sum(names[s] for s in shots) == int(env["SHOT_BITS"], 16)
+    assert env["PORTNAME"] == FO_PORT.name and env["MODES"] == "$HERE/modes/fallout_le"
+    trigger, shots = names[env["TRIGGER_SW"]], sum(names[s] for s in env["SHOT_SWS"].split("|"))
     assert all(s in names for s in env["EARLY_SWS"].split("|"))
-    s3proof = (PROOFS / "s3proof.sh").read_text()
-    assert '. "$HERE/titles/$TITLE.env"' in s3proof and "SHOT_BITS" in s3proof
-    assert re.search(r"^mode\)$", (PROOFS / "play.sh").read_text(), re.M)
+    cfgs = sorted((PROOFS / "modes" / "fallout_le").glob("*.cfg"))
+    assert {c.stem for c in cfgs} >= {"clock", "save", "savectl", "mb", "edge"}
+    for c in cfgs:
+        t = c.read_text()
+        assert int(re.search(r"^trigger\s+(0x[0-9a-f]+)", t, re.M).group(1), 16) == trigger, c.name
+        assert int(re.search(r"^shots\s+(0x[0-9a-f]+)", t, re.M).group(1), 16) == shots, c.name
+    assert re.search(r"^(\w+\|)*mode(\|\w+)*\)$", (PROOFS / "play.sh").read_text(), re.M)
+    assert "AFTER_START_SWS" in (PROOFS / "play.sh").read_text()
 
 
 # ---- on the real programs -------------------------------------------------------------------------------------

@@ -95,6 +95,9 @@ HOOK_BLOCK = [
     "# it away (it lives under extracted/) and puts its own profile back.",
     'if [ "$SESSION_TYPE" == "console" ] && [ -f %s/padselect.sh ]; then' % PADSELECT_DIR,
     "  /bin/bash %s/padselect.sh < /dev/null" % PADSELECT_DIR,
+    "  # PAD-1309: EXIT held 5 s on the coin door restarts the machine into the menu.",
+    '  [ -f %s/padmenu.so ] && export LD_PRELOAD="%s/padmenu.so${LD_PRELOAD:+:$LD_PRELOAD}"'
+    % (PADSELECT_DIR, PADSELECT_DIR),
     "fi",
 ]
 HOOK_MARK = "PAD multi-boot (PAD-342)"
@@ -159,6 +162,9 @@ SELECTOR_FILES = collections.OrderedDict([      # name in --selector-dir -> (mod
     ("padselect.sh", (0o755, True)),
     ("pad_install.sh", (0o755, True)),
     ("font.ttf", (0o644, False)),
+    # PAD-1309: preloaded into the game by the hook block - EXIT held 5 s restarts into the
+    # menu.  Not required: a selector dir built before it still makes an update without it.
+    ("padmenu.so", (0o755, False)),
 ])
 VOLUME_DEFAULT = 50
 HOST_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -1127,7 +1133,8 @@ def verify_fun(a):
         bad.append("update/.bash_profile's self-repair copy has no rm -f in front of it")
     if INSTALL_LINE not in upd:
         bad.append("update/update.sh does not run the install step")
-    for name in list(SELECTOR_FILES) + ["images.conf", PROGRAMS]:
+    for name in [n for n, (_m, req) in SELECTOR_FILES.items() if req or n == "font.ttf"] \
+            + ["images.conf", PROGRAMS]:
         if PADSELECT + "/" + name not in got:
             bad.append("padselect/%s is missing" % name)
     progs = []

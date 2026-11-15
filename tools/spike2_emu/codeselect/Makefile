@@ -311,6 +311,16 @@ all: $(BIN) $(DELTA)
 $(DELTA): paddelta.c | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -static paddelta.c -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
+
+# PAD-1309: padmenu.so, preloaded into the game by the profile's hook - EXIT held 5 s on the
+# coin door restarts the machine into the menu.  Shared (it goes INTO the game), so it cannot
+# be static: jjp_glibc.h and the .symver pins in padmenu.c keep it to the game's glibc 2.33.
+PADMENU = $(BUILD)/padmenu.so
+all: $(PADMENU)
+
+$(PADMENU): padmenu.c jjp_glibc.h | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -include jjp_glibc.h -DPADMENU_FAST -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -lpthread -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
 else ifeq ($(PLATFORM),dp)
 # the button reader: linked to libpinproc.so.2.0 BY NAME (a link-only stub
 # carries the soname; the machine's own library is found at run time through
@@ -415,10 +425,11 @@ check-hw:
 
 # the menu, the rebuilder, the hook and the install step, all in the update's
 # own padselect folder (the builder copies them from here)
-install: $(BIN) $(DELTA)
+install: $(BIN) $(DELTA) $(PADMENU)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/bofselect"
 > install -m 755 "$(DELTA)" "$(DESTDIR)$(PREFIX)/paddelta"
+> install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
 > install -m 755 padselect_bof.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > install -m 755 pad_install_bof.sh "$(DESTDIR)$(PREFIX)/pad_install.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the machine's DejaVuSans-Bold.ttf will be used"; fi

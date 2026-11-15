@@ -62,14 +62,38 @@
  * /dev/spidev4.0 (stubs_s3.c), and there is no script to call - padselect_s3.sh
  * lives under /games/pad, which the chosen image's bind over /games hides
  * from the running game - so the restart is `sync; reboot` itself. */
-#ifdef PADMENU_S3
+/* BARRELS OF FUN (-DPADMENU_FAST, `make PLATFORM=bof`): no SPI word.  The
+ * game talks to its FAST Neuron over a USB serial port (/dev/ttyACM*), ASCII
+ * lines ended by '\r', and the board PUSHES a line when a switch the game set
+ * up changes: "-L:<hex>" active, "/L:<hex>" inactive (tools/bof_emu/bofhw.py,
+ * read off the game's own fast_stem.gd).  The coin door's EXIT is switch 5 on
+ * every BOF title (Labyrinth, Dune, Winchester profiles), so this reads the
+ * lines the game itself reads and times EXIT.  Lines come only on a change,
+ * so the 5 s is timed by a thread of ours, started on the first press.  The
+ * game runs as pinball, whose sudo needs no password: `sync; sudo -n reboot`. */
+#if defined(PADMENU_FAST)
 #define CMD_DEFAULT     ""
+#define REBOOT_SH       "sync; exec ${CODESELECT_REBOOT:-sudo -n reboot}"
+#define BACK_SW_DEFAULT 5
+#elif defined(PADMENU_S3)
+#define CMD_DEFAULT     ""
+#define REBOOT_SH       "sync; exec ${CODESELECT_REBOOT:-reboot}"
 #define BACK_BYTE       0
 #define CAB_DEV         "/dev/spidev4.0"
 #else
 #define CMD_DEFAULT     "/usr/local/codeselect/select.sh"
+#define REBOOT_SH       "sync; exec ${CODESELECT_REBOOT:-reboot}"
 #define BACK_BYTE       1
 #define CAB_DEV         "/dev/spidev1.0"
+#endif
+#if defined(PADMENU_FAST) && defined(__x86_64__)
+/* the machine's glibc is whatever its Arch image carried (2.33 at least, the
+ * game's own need): ask for the oldest versions of the two symbols that moved */
+__asm__(".symver dlsym,dlsym@GLIBC_2.2.5");
+__asm__(".symver pthread_create,pthread_create@GLIBC_2.2.5");
+#endif
+#ifdef PADMENU_FAST
+#include <pthread.h>
 #endif
 #ifndef O_TMPFILE
 #define O_TMPFILE 0
@@ -83,7 +107,9 @@ typedef int (*ioctl_fn)(int, unsigned long, ...);
 typedef int (*open_fn)(const char *, int, ...);
 typedef int (*openat_fn)(int, const char *, int, ...);
 
+#ifndef PADMENU_FAST
 static ioctl_fn real_ioctl;
+#endif
 /* per fd: 0 not looked at yet, 1 the cabinet chain, 2 anything else.  Set when
  * the game OPENS CAB_DEV (whatever fd comes back: the rigs' shims answer with a
  * stand-in, Spike 3's with /dev/null), else on its first SPI transfer by the
@@ -110,11 +136,17 @@ static void say(const char *msg)
 
 static int is_cab_path(const char *p)
 {
+#ifdef PADMENU_FAST
+    /* every USB serial port: the NET port answers among them, and only it
+     * sends -L:/L: lines (a test's own directory may come before /dev) */
+    return p && (strstr(p, "/dev/ttyACM") || strstr(p, "/dev/ttyUSB"));
+#else
     size_t n, k = strlen(CAB_DEV);
     if (!p)
         return 0;
     n = strlen(p);            /* a chroot's or a test's prefix is allowed: ends with it */
     return n >= k && !strcmp(p + n - k, CAB_DEV);
+#endif
 }
 
 static void note_open(int fd, const char *path)
@@ -123,6 +155,7 @@ static void note_open(int fd, const char *path)
         fd_kind[fd] = is_cab_path(path) ? 1 : 0;
 }
 
+#ifndef PADMENU_FAST
 static int is_spidev(int fd)
 {
     char link[32], path[128];
@@ -137,6 +170,7 @@ static int is_spidev(int fd)
     }
     return fd_kind[fd] == 1;
 }
+#endif
 
 /* the opens, passed straight on; the fd of CAB_DEV is remembered */
 #define OPEN_MODE(flags, ap, mode) \
@@ -213,7 +247,8 @@ static void ask_for_reboot(void)
      * the game.  Each rig passes CODESELECT_REBOOT (its own restart request);
      * a run that did not (its shims' variables set, no stand-in) does nothing. */
     if (!(rb && *rb) && (getenv("PAD_AUDIO_OUT") || getenv("PAD_S3_SPI_IN") ||
-                         getenv("PAD_GL_BRIDGE") || getenv("PAD_SW_SHM"))) {
+                         getenv("PAD_GL_BRIDGE") || getenv("PAD_SW_SHM") ||
+                         getenv("BOFHW_DEV"))) {
         say("padmenu: in the emulator with no CODESELECT_REBOOT - not restarting\n");
         return;
     }
@@ -225,7 +260,7 @@ static void ask_for_reboot(void)
         cmd = "/bin/sh";
         argv[0] = "sh";
         argv[1] = "-c";
-        argv[2] = "sync; exec ${CODESELECT_REBOOT:-reboot}";
+        argv[2] = REBOOT_SH;
         argv[3] = NULL;
     }
     say("padmenu: BACK held - restarting the machine into the boot menu\n");
@@ -239,6 +274,113 @@ static void ask_for_reboot(void)
         say("padmenu: could not start the restart\n");
 }
 
+#ifdef PADMENU_FAST
+#if defined(__x86_64__)
+__asm__(".symver pthread_detach,pthread_detach@GLIBC_2.2.5");
+#endif
+typedef ssize_t (*read_fn)(int, void *, size_t);
+typedef ssize_t (*read_chk_fn)(int, void *, size_t, size_t);
+static int back_sw = BACK_SW_DEFAULT;
+static volatile int thread_on;
+static char lbuf[MAX_FD][24];           /* the line so far, per serial fd */
+static unsigned char llen[MAX_FD];
+
+/* the timer: lines come only on a change, so the hold is timed here */
+static void *watch(void *unused)
+{
+    struct timespec ts = { 0, 100 * 1000 * 1000 };
+    (void)unused;
+    while (!fired) {
+        long long since = held_since;
+        if (since >= 0 && now_ms() - since >= hold_ms) {
+            fired = 1;
+            ask_for_reboot();
+            break;
+        }
+        nanosleep(&ts, NULL);
+    }
+    return NULL;
+}
+
+static void set_back(int on)
+{
+    pthread_t t;
+    if (fired)
+        return;
+    if (!on) {
+        held_since = -1;
+        return;
+    }
+    if (held_since < 0)
+        held_since = now_ms();
+    if (!thread_on) {
+        thread_on = 1;
+        if (pthread_create(&t, NULL, watch, NULL) == 0)
+            pthread_detach(t);
+        else
+            thread_on = 0;
+    }
+}
+
+/* "-L:05" / "/L:05" (any case, any number of hex digits) */
+static void line_done(const char *s)
+{
+    const char *p = strstr(s, "L:");
+    int n = 0, digits = 0, active;
+    if (!p || p == s || (p[-1] != '-' && p[-1] != '/'))
+        return;
+    active = p[-1] == '-';
+    for (p += 2; *p; p++, digits++) {
+        int c = *p, v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+                        c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        if (v < 0)
+            break;
+        n = n * 16 + v;
+    }
+    if (digits && n == back_sw)
+        set_back(active);
+}
+
+static void feed(int fd, const char *b, ssize_t n)
+{
+    ssize_t k;
+    for (k = 0; k < n; k++) {
+        char c = b[k];
+        if (c == '\r' || c == '\n') {
+            lbuf[fd][llen[fd]] = 0;
+            if (llen[fd])
+                line_done(lbuf[fd]);
+            llen[fd] = 0;
+        } else if (llen[fd] < sizeof lbuf[fd] - 1) {
+            lbuf[fd][llen[fd]++] = c;
+        } else {
+            llen[fd] = 0;                     /* not a switch line: drop it */
+        }
+    }
+}
+
+ssize_t read(int fd, void *buf, size_t n)
+{
+    static read_fn next;
+    ssize_t r;
+    if (!next && !(next = (read_fn)dlsym(RTLD_NEXT, "read"))) { errno = ENOSYS; return -1; }
+    r = next(fd, buf, n);
+    if (r > 0 && fd >= 0 && fd < MAX_FD && fd_kind[fd] == 1 && hold_ms > 0)
+        feed(fd, buf, r);
+    return r;
+}
+
+ssize_t __read_chk(int fd, void *buf, size_t n, size_t buflen)
+{
+    static read_chk_fn next;
+    ssize_t r;
+    if (!next && !(next = (read_chk_fn)dlsym(RTLD_NEXT, "__read_chk"))) { errno = ENOSYS; return -1; }
+    r = next(fd, buf, n, buflen);
+    if (r > 0 && fd >= 0 && fd < MAX_FD && fd_kind[fd] == 1 && hold_ms > 0)
+        feed(fd, buf, r);
+    return r;
+}
+#else /* the SPI word: Spike 2 and Spike 3 */
 static void sample(const unsigned char *rx)
 {
     int back = !((rx[BACK_BYTE] >> BACK_BIT) & 1);    /* active low */
@@ -303,12 +445,18 @@ int ioctl(int fd, unsigned long req, ...)
         look(fd, req, arg);
     return r;
 }
+#endif
 
 __attribute__((constructor))
 static void padmenu_init(void)
 {
     const char *h = getenv("PADMENU_HOLD_MS");
     hold_ms = h && *h ? strtol(h, NULL, 10) : HOLD_MS_DEFAULT;
+#ifdef PADMENU_FAST
+    h = getenv("PADMENU_SWITCH");          /* the tests; every BOF title's EXIT is 5 */
+    if (h && *h)
+        back_sw = (int)strtol(h, NULL, 10);
+#endif
     /* the game's own children (system()) inherit LD_PRELOAD: nothing here for them */
     unsetenv("PADMENU_HOLD_MS");
 }

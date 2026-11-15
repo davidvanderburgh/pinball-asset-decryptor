@@ -69,6 +69,30 @@ def test_profile_gets_the_hook_before_the_loop_and_rm_before_the_repair():
     assert "\n".join(unhooked).replace(mb.HEAL_RM, "") + "\n" == PROFILE
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="runs the profile in bash (Linux)")
+def test_the_hook_block_hands_padmenu_to_the_game(tmp_path):
+    """PAD-1309: the profile's loop starts the game with padmenu.so preloaded when the update
+    carries it (EXIT held 5 s restarts into the menu), and with nothing when it does not."""
+    home = tmp_path / "home"
+    pad = home / "extracted" / "decrypt" / "padselect"
+    pad.mkdir(parents=True)
+    (home / "craze").mkdir()
+    (pad / "padselect.sh").write_text("exit 0\n")
+    start = home / "startgame"
+    start.write_text('#!/bin/sh\necho "PRE=$LD_PRELOAD"\n')
+    start.chmod(0o755)
+    prof = mb.patch_profile(PROFILE).replace("/home/pinball", str(home))
+
+    def game_env():
+        r = subprocess.run(["bash", "-c", prof], cwd=str(home), capture_output=True, text=True,
+                           env={"HOME": str(home), "PATH": "/usr/bin:/bin"})
+        return [ln for ln in r.stdout.splitlines() if ln.startswith("PRE=")]
+
+    assert game_env() == ["PRE="]
+    (pad / "padmenu.so").write_bytes(b"")        # ld.so skips a bad object with a warning
+    assert game_env() == ["PRE=%s/padmenu.so" % pad]
+
+
 def test_profile_patch_keeps_crlf_and_refuses_what_it_does_not_know():
     crlf = mb.patch_profile(PROFILE.replace("\n", "\r\n"))
     assert "\r\n" in crlf and "\n" not in crlf.replace("\r\n", "")

@@ -46,7 +46,8 @@ if [ "$(uname -m)" != x86_64 ]; then
     say "no aarch64 gcc on this $(uname -m) machine (install gcc-aarch64-linux-gnu)"; exit 1
 fi
 
-STAMP=$(sha256sum "$PINS" | cut -d' ' -f1)
+# (CRs dropped: a Windows checkout or copy may have rewritten the list's line ends)
+STAMP=$(tr -d $'\r' < "$PINS" | sha256sum | cut -d' ' -f1)
 CC=$P/root/usr/bin/aarch64-linux-gnu-gcc-13
 
 unpack() {
@@ -74,7 +75,7 @@ unpack() {
         fi
         dpkg-deb -x "$f" "$new"
         n=$((n + 1))
-    done < "$PINS"
+    done < <(tr -d $'\r' < "$PINS")
     [ -x "$new/usr/bin/aarch64-linux-gnu-gcc-13" ] || { say "the kit unpacked without its gcc"; return 1; }
     rm -rf "$P/root"
     mv "$new" "$P/root"

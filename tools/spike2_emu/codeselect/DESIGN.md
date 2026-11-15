@@ -700,9 +700,23 @@ stand-in), `select_sh_test.sh --reboot`, `padselect_s3_test.sh`, mkmulticard sel
   Switch `is_active()` on each `get_events()`.
 * **The Big Lebowski** already has a way back: Version Select in its service menu restarts the
   game into the menu.
-* **Jersey Jack**: not yet.  The game is Sentinel-wrapped (no LD_PRELOAD), and `/dev/jjpio100`
+* **Jersey Jack** (PAD-1318): the game is Sentinel-wrapped (no LD_PRELOAD), and `/dev/jjpio100`
   pairs every read with an OUT frame the game drives at 1 kHz, so a second reader on it is not
-  safe; the way back has to come through the game's own exits (rungame.sh's loop).
+  safe, and its service menu has no reboot item; the way back comes through the game's own
+  exits.  The game exits 254 when Escape is pressed on a USB keyboard (rungame.sh's own
+  `254) # pressed escape` case, which stock leaves empty, so the loop starts the game again).
+  mkjjpmulti's third rungame.sh patch puts `padselect.sh --menu-reboot` first in that case: with
+  a multi-boot conf it drops the maintenance mark (the menu must show), syncs and reboots;
+  without one it returns and the stock loop goes on.  `strip_hook` takes the line back out.
+  Proven on the real Guns N' Roses 3.03 rungame.sh in a private overlay of the image, with a
+  stand-in game exiting 254 and a stand-in `reboot`: stock restarted the game 13,217 times in
+  6 s and never rebooted; patched, each boot went menu, game, 254, reboot, and the next boot
+  showed the menu again.  And on the real game, 2026-11-15, in the JJP rig with the Sentinel
+  key (hidden, muted): from attract, Guns N' Roses 3.03 exited 254 within a second of an Escape
+  press, in two runs (a 500 ms hold, then a single 150 ms press on a fresh game).  An instant XTEST tap (`xdotool key`, down and up in
+  microseconds) is not seen; a human press is.  Rig catch: Sentinel calls any `DISPLAY` above
+  `:1` a remote session and stops with "Terminal services detected (H0027)", so a hidden JJP
+  run needs its Xephyr on `:1` (`:0` is WSLg), not a high display number.
 
 Proven on the real games in each rig: Dune (BoF), Looney Tunes (Warden), Halloween (Pinotaur),
 Rick and Morty and Alice Cooper (P-ROC): a 2 s press did nothing, a 6.5 s hold asked for the

@@ -580,10 +580,11 @@ def test_cli_multiboot_is_one_line_and_an_exit_status(parts, monkeypatch, capsys
 #: The one change since: item 125 (the Mode SDK) put the mode object in the
 #: game's preload list, ``${PAD_MODE_SO:+$PAD_MODE_SO:}``, empty unless a run
 #: names one - the same entry the pivot path's export carries.
+#: PAD-1309 put padmenu.so (hold BACK: back to the boot menu) before it, ``${PAD_MENU_SO:+...}``.
 EXEC_PIVOT = "        exec /.padqemu/game ./game </dev/null >/dump/game.out 2>&1"
 EXEC_CHROOT = ('exec chroot "$R" /bin/sh -c \\\n'
                '  "cd /games/$GAME && LD_PRELOAD=${PAD_TRACE_SO:+$PAD_TRACE_SO:}'
-               '${PAD_MODE_SO:+$PAD_MODE_SO:}'
+               '${PAD_MENU_SO:+$PAD_MENU_SO:}${PAD_MODE_SO:+$PAD_MODE_SO:}'
                '/lib/hwshim.so PAD_AUDIO_OUT=/dump/audio.raw PAD_SEGV_REPORT=${PAD_SEGV_REPORT:-1} '
                'exec ./game"')
 
@@ -732,7 +733,7 @@ def test_the_cards_sound_and_volume_keys_reach_the_emulator_conf_but_media_does_
     outer = _select_outer()
     assert ("grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|"
             "machine_volume|mixer_volume|heading|text_size|counter|countdown_word|"
-            "footer|theme|settings|color_[a-z_]+)[[:space:]]*='") in outer
+            "footer|theme|settings|back_hold|color_[a-z_]+)[[:space:]]*='") in outer
     assert "media=" not in outer.replace("image=", ""), "media= is the card's path; the rig passes --media"
 
 
@@ -1312,6 +1313,8 @@ EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  "nvm.c", "nvm.h",
                  # PAD-1194: the boot hook's high-score hand-over
                  "scores.c", "scores.h",
+                 # PAD-1309: hold BACK / EXIT in a game for the menu (padmenu.so, P-ROC hook)
+                 "padmenu.c", "padmenu_proc.py",
                  "Makefile", "select.sh", "materialize.py", "images.conf.example",
                  "third_party/stb_truetype.h", "third_party/stb_image.h"]
 

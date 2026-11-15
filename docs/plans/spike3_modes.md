@@ -451,6 +451,31 @@ modes start on Top lane center:
   still running 20 s after its multiball.
 Tests: tests/test_pad1285_spike3_play.py.
 
+**Fallout LE 0.82** (`ports/spike3/fallout_le-0.82.port`, program sha1 19081048...; PAD-1288), drafted from ELG's port
+(9,771 of 18,297 functions paired, every core entry placed, 39 shots) and proven 2026-11-15 on the Spike 3 rig (slots
+63-66, hidden, muted, `s3proof.sh TITLE=fallout_le`): CLOCK TEST started on three Junk target hits, scored 6 shots
+through score_add (+21M) and ended on its 25 s clock, twice; BALL_SAVE (the drain inside the save served back, the
+control ended on its first drain) and MULTIBALL (3 served, handed back at one ball) rows as in the table below; a real
+card written with a mode by `write_card` (590 s; VAULT RUN, three Junk target hits) and read back through its own
+encryption: `/games/game -> pad/padmode/padmode.sh`, `game.target = fallout_le/game` (sha1 19081048...), mode.so =
+prebuilt mode64.so and game.port = this port byte for byte, root 0755/0644. Booted (slot 63, the card's own hook,
+`PAD_S3_PIVOT=0`, store built with the app's `~/.pad/spike3_padkeys.json`): the runtime read
+`/games/pad/padmode/game.port`, VAULT RUN started on the third hit, scored 2 shots (+3M) and gave way when the game's
+own mode began (Fallout's modes are not held back: "never waits"). What the drafter learned:
+
+- ELG's port gained its mode books (`place_flag_completed_*`, `done_flag_0`: PAD-1286) after Walking Dead was drafted,
+  and the same numbers line up in the framework's flag code on Fallout - but they name ELG's modes, so the runtime
+  would have fired "done" starts on whatever Fallout's flag 66 is. `GAME_VALUE` now counts every mode-book value as
+  the reference game's own.
+- `coil_give` lines up on Fallout but `coil_take` has no counterpart; the runtime arms held coils on both or neither,
+  so `SITE_PAIRS` writes a lone half as a comment.
+- Fallout's start on the rig: its Fat Man steppers home for ~110 s, it is not on free play, and a character select
+  follows Start (ACTION BUTTON). Its title file (`proofs/titles/fallout_le.env`, PAD-1289's layout: card, port,
+  `MODES=modes/fallout_le` with Fallout's shot bits) sets `ATTRACT_WAIT`, `COINS` and `AFTER_START_SWS`, which play.sh
+  presses after each Start. `PROOF=mode` is the plain one: trigger, shots, the clock ends it.
+- Not proven, so greyed: stacking (needs Fallout's own multiball switch for `PROOF=stackmb`), place / done (no block
+  starts for its own modes), lamps, shows, screens, clips, own sounds - each its own work.
+
 ## The proof pass on a Spike 3 port (PAD-1286)
 
 PAD-1277 keeps a Spike 2 build's proof tables off its Spike 3 twin: every `*_PROVEN` table (mode_project.py) is keyed
@@ -570,7 +595,8 @@ passes after the level is written and before the bits are read: the port's `site
   them into a draft in place of Spike 2's switch_edge / switch_drain / table lines, either reference. ONE point on
   each of the seven Spike 3 programs, the same layout on all: Fallout LE 0x71b8b4, Pokemon LE 0x59e444, Star Wars
   2025 LE 0x593414 / Pro 0x2b94d4, Star Wars ELG 0x308684, Transformers LE 0x4a49b4, Walking Dead Remastered LE
-  0x2c6c94. Both Spike 3 ports carry the lines.
+  0x2c6c94. Both Spike 3 ports carry the lines; Fallout LE 0.82's (PAD-1288) too, proven there with PROOF=edge
+  (flipper buttons in attract, the Right slingshot, the trigger) and its clock run repeated on the edge source.
 - With the site there, a Spike 3 port's switch shots come from the edges (Spike 2's default, `switch_edge_shots` 1),
   not the switch_hit sites: every switch line counts, the slingshots and pop bumpers too (ELG's have no handler bits,
   so switch_hit never saw them).

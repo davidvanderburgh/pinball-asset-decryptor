@@ -17,6 +17,7 @@ FLIP_SWS=${FLIP_SWS:-L FLIPPER BUTTON|R FLIPPER BUTTON}      # the flipper butto
 NOHANDLER_SWS=${NOHANDLER_SWS:-LEFT SLINGSHOT|RIGHT POP BUMPER}   # switches the drain runs no handler for (PROOF=edge)
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
 COINS=${COINS:-0}                                           # credits first (Walking Dead Remastered's fresh settings: 4; Pokemon LE is not on free play)
+AFTER_START_SWS=${AFTER_START_SWS:-}                        # pressed after each Start (a character select)
 SLOT=${1:-88}
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 P="python3 $REPO/tools/spike3_emu/s3press.py"
@@ -38,6 +39,7 @@ for k in $(seq 1 8); do
   [ "$COINS" -gt 0 ] && [ "$k" -gt 1 ] && $P coin "$SLOT" "$COINS" > /dev/null 2>&1
   [ "$START_HOLD_MS" -gt 0 ] && { $P sw "$SLOT" "START BUTTON" "$START_HOLD_MS"; sleep 7; }
   $P sw "$SLOT" "START BUTTON"; sleep 8
+  [ -n "$AFTER_START_SWS" ] && sws "$AFTER_START_SWS" 3
   grep -q "in_game 0 -> 1\|\[probe\] in game" $L && break
 done
 echo "[play] game after $k start press(es)"; sleep 3

@@ -91,6 +91,7 @@ def test_every_build_whose_start_menu_the_app_knows_is_offered_it():
     # every port but Venom's and D&D's (theirs) and three older builds (latest versions only, as co-op)
     assert sorted(set(MP.profiles()) - offered) == [
         "dungeons_and_dragons_le_1_00", "dungeons_and_dragons_le_1_10", "dungeons_and_dragons_pro_1_10",
+        "fallout_le_0_82_spike3",                             # PAD-1288: a Spike 3-only port, its start menu not read
         "godzilla_pro_1_15", "john_wick_le_1_01", "metallica_spike_1_03",
         "pokemon_le_0_82_spike3",                             # PAD-1289: a Spike 3-only port, its start menu not read
         "star_wars_elg_1_10_spike3",                          # PAD-1271: the Spike 3 port, its start menu not read yet

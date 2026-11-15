@@ -21,6 +21,8 @@ fi
 MODES=${MODES:-$HERE/modes}
 CARD=/mnt/d/Pinball/images/Stern/spike3/${CARD:-star_wars_elg-1_10_0_spike3.Release.64G.sdcard-secure.raw}
 PORTNAME=${PORTNAME:-star_wars_elg-1.10.port}
+# the title's switch names for play.sh (titles/<game>.env; Star Wars ELG's are play.sh's defaults)
+if [ -n "${TITLE:-}" ]; then set -a; . "$HERE/titles/$TITLE.env"; set +a; fi
 W=/var/tmp/pad-s3proof/s$SLOT; mkdir -p "$W/files" "$OUT"; rm -f "$W"/files/*
 cp "${SO:-$REPO/tools/spike2_emu/modes/sdk/prebuilt/mode64.so}" "$W/mode64.so"
 cp "${PORT:-$REPO/tools/spike2_emu/modes/sdk/ports/spike3/$PORTNAME}" "$W/files/game.port"

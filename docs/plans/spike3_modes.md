@@ -208,6 +208,40 @@ followed them down to one. Star Wars 2025 LE/Pro, Transformers, Fallout and Poke
 placed; each needs its own run (and its lamps, screens and callouts) before its port ships. The app still never
 derives a 64-bit port itself (`port_derive._spike3_port`): only a port proven on the rig ships.
 
+**Star Wars 2025 Pro 0.84** (`ports/spike3/star_wars_2025_pro-0.84.port`, program sha1 2c9070fb..., PAD-1291) drafted
+the same way, every core entry placed (29 sites; game over is bus event 0x46; game start / ball start have no direct
+call), but its first run never started a mode: **a switch's id is not always its rank in the device table.** The game
+handed its switch_hit site 83 for Right target (rank 61) and one less than the rank for every switch after it - it
+numbers Right target after all the other playfield switches - while ELG and Walking Dead Remastered number by rank.
+Nothing in the static table shows it (the record bytes, name pointers and shared names were checked), so the ids are
+MEASURED:
+
+- `tools/spike3_emu/proofs/swcensus.sh` (TITLE=<game>, as root, hidden, muted) boots the card with the draft port and
+  `value switch_hit_log`, starts a game and presses each switch the draft names, one at a time, waiting for the runtime's
+  `switch hit: switch N` before the next; it writes `<id> <NAME>` (or `# no switch hit: <NAME>`) per switch - the
+  format of PAD-1290's s3census.sh (below), which reads the ids off a probe mode's shots instead of the switch_hit log.
+- `s3port.py ... --switch-ids <census>` writes the switch lines from it: each switch at its measured id, one with no hit
+  or not in the census left out (as a comment), the shot bits packed over the lines written. The Pro's census is
+  `proofs/titles/star_wars_2025_pro-0.84.switch_ids`: 27 switches sent an id; the slingshots, pop bumpers and drop target opto
+  sent none (their descriptors broadcast nothing, as The Beatles' slings on Spike 2).
+
+Run the census for every Spike 3 title before its first proof; a title whose census equals the ranks needs no file.
+Proof (2026-11-15, Spike 3 rig slots 240-242, hidden, muted, prebuilt mode64.so; titles/star_wars_2025_pro.env): CLOCK
+TEST started on the third Right target hit, scored 6 shots through score_add (+21,000,000) and ended on its 25 s clock;
+MB TEST served 3 balls and ended at one; SAVE TEST's save served the drain inside it back, and the drain after it ended
+the ball (SAVE CONTROL: its first drain); a stack no mode waited out the game's own 2-ball multiball (six centre ramp
+shots: JUMP RAMP ENTER / EXIT OPTO, `GAME_MB_TIMES=6`) and started after the drain to one. MULTIBALL_PROVEN,
+BALL_SAVE_PROVEN and STACK_BALLS_PROVEN carry `star_wars_2025_pro-0.84/spike3`; so does SWITCH_SHOTS_PROVEN: ALL SHOTS
+(`PROOF=clock CFG=allshots.cfg SHOT_BITS=0x7ffffff SHOT_SWS=<every switch>`: every switch line a shot,
+`game_modes stack`, `ends_on clock`; the `clock` play shoots the list twice and waits out the clock) took 54 shots for 54
+presses, each switch twice. A card the app Wrote (`spike3_write.write_card`, one Form mode: Right target x3, Left orbit /
+At-at target / Right orbit) read back with /games/game -> pad/padmode/padmode.sh, game.target star_wars_2025_pro/game,
+the mode.cfg (trigger 0x80 x3, shots 0x800c00), and game.port and mode.so byte-identical to the repo's port and
+prebuilt mode64.so. Lamps, shows, screens,
+clips, callouts, held coils and the game's mode books are this title's own work, not carried. s3port.py also leaves the
+reference's own mode books (place_flag / done_flag / done_audit) and a held-coil pair placed only half (PAD-1288) out.
+Tests: tests/test_pad1291_spike3_2025_pro_port.py.
+
 PAD-1292 (Walking Dead Remastered LE 0.92's own pass): the multiball and ball save proven on slot 93
 (`s3proof.sh` with `modes/mb_wdr.cfg`, `save_wdr.cfg`, `savectl_wdr.cfg`: ELG's files with WDR's Tower target trigger
 0x40000 and Left loop / Right loop / Right spinner shots 0x480040; `TRIGGER_SW="TOWER TARGET"`,
@@ -218,8 +252,8 @@ back through its own encryption, and that card (into the rig's store with `PAD_S
 Owed: STACK_BALLS (no switch route started WDR's own Blood Bath / Prison / Well multiball; play.sh's
 `PROOF=explore EXPLORE_SEQ="SWITCH*hits|..."` reports the trough after each step, for the next try). The redraft
 had given WDR Star Wars ELG's mode-book flags by number (`done_flag_0 66`, `place_flag_completed_2 68`: WDR's right
-spinner lit and a skill-shot speech flag): s3port's GAME_VALUE now keeps `done_flag_*` / `place_flag_*` as the
-reference game's own, like its mode flags.
+spinner lit and a skill-shot speech flag); PAD-1288/1289's GAME_VALUE (below) leaves them out, and
+test_pad1287's redraft check holds again.
 
 ## Callouts and sounds on Spike 3 (PAD-1282)
 
@@ -464,6 +498,31 @@ modes start on Top lane center:
   still running 20 s after its multiball.
 Tests: tests/test_pad1285_spike3_play.py.
 
+**Fallout LE 0.82** (`ports/spike3/fallout_le-0.82.port`, program sha1 19081048...; PAD-1288), drafted from ELG's port
+(9,771 of 18,297 functions paired, every core entry placed, 39 shots) and proven 2026-11-15 on the Spike 3 rig (slots
+63-66, hidden, muted, `s3proof.sh TITLE=fallout_le`): CLOCK TEST started on three Junk target hits, scored 6 shots
+through score_add (+21M) and ended on its 25 s clock, twice; BALL_SAVE (the drain inside the save served back, the
+control ended on its first drain) and MULTIBALL (3 served, handed back at one ball) rows as in the table below; a real
+card written with a mode by `write_card` (590 s; VAULT RUN, three Junk target hits) and read back through its own
+encryption: `/games/game -> pad/padmode/padmode.sh`, `game.target = fallout_le/game` (sha1 19081048...), mode.so =
+prebuilt mode64.so and game.port = this port byte for byte, root 0755/0644. Booted (slot 63, the card's own hook,
+`PAD_S3_PIVOT=0`, store built with the app's `~/.pad/spike3_padkeys.json`): the runtime read
+`/games/pad/padmode/game.port`, VAULT RUN started on the third hit, scored 2 shots (+3M) and gave way when the game's
+own mode began (Fallout's modes are not held back: "never waits"). What the drafter learned:
+
+- ELG's port gained its mode books (`place_flag_completed_*`, `done_flag_0`: PAD-1286) after Walking Dead was drafted,
+  and the same numbers line up in the framework's flag code on Fallout - but they name ELG's modes, so the runtime
+  would have fired "done" starts on whatever Fallout's flag 66 is. `GAME_VALUE` now counts every mode-book value as
+  the reference game's own.
+- `coil_give` lines up on Fallout but `coil_take` has no counterpart; the runtime arms held coils on both or neither,
+  so `SITE_PAIRS` writes a lone half as a comment.
+- Fallout's start on the rig: its Fat Man steppers home for ~110 s, it is not on free play, and a character select
+  follows Start (ACTION BUTTON). Its title file (`proofs/titles/fallout_le.env`, PAD-1289's layout: card, port,
+  `MODES=modes/fallout_le` with Fallout's shot bits) sets `ATTRACT_WAIT`, `COINS` and `AFTER_START_SWS`, which play.sh
+  presses after each Start. `PROOF=mode` is the plain one: trigger, shots, the clock ends it.
+- Not proven, so greyed: stacking (needs Fallout's own multiball switch for `PROOF=stackmb`), place / done (no block
+  starts for its own modes), lamps, shows, screens, clips, own sounds - each its own work.
+
 ## The proof pass on a Spike 3 port (PAD-1286)
 
 PAD-1277 keeps a Spike 2 build's proof tables off its Spike 3 twin: every `*_PROVEN` table (mode_project.py) is keyed
@@ -477,11 +536,20 @@ example; PAD-1288..1293 do the others):
    <S3 game> -o draft.port`), keep the shipped port's proof notes at its head, and check the profile:
    `mode_project.profile_from_port(<port>).cannot` names each part greyed and why ("has not found" = the port lacks
    it; "has not yet seen ... in the emulator" = the lines are there, the proof is owed).
-2. **Run the proof** with `tools/spike3_emu/proofs/s3proof.sh` (as root in WSL, hidden and muted, a free Spike 3 rig
+2. **Measure the switch ids** (`proofs/s3census.sh`, PAD-1290, or `proofs/swcensus.sh`, PAD-1291: the same file) and
+   redraft with `--switch-ids` when they are not the ranks.
+3. **Run the proof** with `tools/spike3_emu/proofs/s3proof.sh` (as root in WSL, hidden and muted, a free Spike 3 rig
    slot; `PROOF=` picks the play, `CFG=` / `CFG2=` the mode files in `proofs/modes/`; the title's switch names are
    play.sh's variables at its head - TRIGGER_SW, SHOT_SWS, EARLY_SWS, GAME_MB_SW, START_HOLD_MS). Logs: the runtime's
    mode.log, the bridge's bridge.log ([ball] lines), the play's own output.
-3. **Add the build to the table** with a comment saying what was seen, as the Spike 2 entries do.
+4. **Add the build to the table** with a comment saying what was seen, as the Spike 2 entries do.
+
+Before step 2 on a new title, **take its switch census** (PAD-1290): a drafted switch line's id is the switch's rank in
+the device table, and that is not every title's numbering. `TITLE=<game> DRAFT=<draft port> SLOT=N OUT=<dir> bash
+tools/spike3_emu/proofs/s3census.sh` starts a game twice on the rig with a port that gives every id 0-127 a bit of its
+own and shot_probe_mode.c logging each shot, presses every switch line's switch once and writes `<game>.switch_ids`;
+`s3port.py ... --switch-ids <that file>` redrafts with the measured ids and leaves out a switch that never reached the
+modes. Keep the file in `proofs/titles/` beside the title's `<game>.env` (its card, port, start and switch names).
 
 | table | proof | what the logs must show |
 |---|---|---|
@@ -518,6 +586,59 @@ transcription does not carry over by itself. Music modes, editions, menu setting
 the switch edges: PAD-1322, below.
 Tests: tests/test_pad1286_spike3_proofs.py, tests/test_spike3_balls.py.
 
+### Pokemon LE 0.82 (PAD-1289)
+
+`ports/spike3/pokemon_le-0.82.port`, drafted from Star Wars ELG 1.10's Spike 3 port (`s3port.py`, 9,333 functions
+paired, 29 sites, 45 shot switches; only coil_take / coil_give unplaced). The proof rig takes a title now:
+`TITLE=pokemon_le` sources `proofs/titles/pokemon_le.env` (the card, the port, `proofs/modes/pokemon_le/` for the mode
+files, the switch names) and play.sh drops `COINS` before Start and again on each retry (Pokemon is not on free play: attract says
+CREDITS 0, and coins dropped while the game boots are not counted). `PROOF=mode` is the plain trigger / shots / clock
+play.
+
+What the first runs found, fixed here:
+- **Every switch id was 16 low.** The device table's names are UTF-8; `device_records` read them as Latin-1, so
+  "POKÉ BALL SPOT" had an unprintable `\x89`, the walk stopped there and the 16 QR scanner switches before it were
+  never counted (the rig's `value switch_hit_log` showed Berry target left arrive as 36, the draft said 20). Names are
+  read as UTF-8 now (Latin-1 if they are not). `s3nodes.Elf.cstr` had the same decode: the rig's view of Pokemon's
+  table lacked the POKÉ BALL coil and ~120 playfield lights behind that record. Star Wars ELG reads the same either way.
+- **Star Wars ELG's mode-book flags were carried** (done_flag_0 66, place_flag_completed_2 68: the same numbers sat at
+  lined-up instructions). They are ELG's own modes; `GAME_VALUE` leaves `place_flag_*` / `done_flag_*` out.
+- **Modes off a Spike 3 card**: `mode_from_card.read_padmode` only looked for `/usr/local/padmode` on plain ext4
+  partitions; a Spike 3 card keeps them in `/games/pad/padmode` inside the encrypted games volume. It opens that volume
+  through the card's key now (`spike3_card.open_games`), so the Modes tab's "modes from a card" reads a Spike 3 card.
+
+Proof (2026-11-15, rig slot 129, hidden, MUTED, the library card): POKE TEST (Berry target left x3, 20 s) started on
+the third hit, scored 6 shots through score_add (+21,000,000) and ended on its clock; ball save and its control, and a
+mode's multiball, as in the table above (BALL_SAVE_PROVEN, MULTIBALL_PROVEN carry `pokemon_le-0.82/spike3`). The Write:
+`spike3_write.write_card` with a BERRY RUSH mode (446 s), `card_state` = modes / `pokemon_le/game`, the padmode files
+read back through the card's key, `card_modes_file` gave the modes back whole and `import_modes` loaded them into a
+fresh project; the written card (in the store via `s3store.py build`, `PAD_SPIKE3_KEYFILE` = the app's
+`~/.pad/spike3_padkeys.json`) booted with its own hook and mode.so, and BERRY RUSH started on its trigger, scored and
+ended on its clock. Not proven, so not offered: stacking on the game's own multiball (which shots start Pokemon's own
+multiball is not known yet), held coils (no coil_take / coil_give), the game's own modes (place / done), lamps,
+screens, clips and own sounds (this title's own content). Tests: tests/test_pad1289_pokemon_spike3_port.py.
+
+### Star Wars 2025 LE 0.96 (PAD-1290)
+
+`ports/spike3/star_wars_2025_le-0.96.port` (program sha1 91fb0281...), drafted from ELG's Spike 3 port: every core site
+placed (29), ELG's mode-book flags (place_flag / done_flag) and the coil_take / coil_give pair left out as ELG's own
+(the same s3port.py rule PAD-1288 / 1289 hit). The draft's switch lines put presses on the wrong shots: this program
+numbers its RIGHT TARGET last (87) and every switch after it in the table one lower (Left orbit 63, not 64), and nothing
+in the device table's records says so (the two RIGHT TARGET records are a lamp and a switch, the outlanes share names
+with lamps and keep their ranks, the device objects are in table order). The census measured all 32: 27 reach the
+modes, the slingshots, pop bumpers and drop target never do. The same census on ELG 1.10 and Walking Dead Remastered
+0.92 found every id their ports carry right (titles/*.switch_ids), so the rank rule stays the default.
+
+Proof (2026-11-15, Spike 3 rig slots 190-194, hidden, MUTED, prebuilt/mode64.so): CLOCK TEST (Right target x3, 25 s)
+started on the third hit, scored 6 shots through score_add (+21,000,000) and ended on its clock; ball save (save taken,
+the drain inside it served back, 3 shots on that ball, the next drain ended it) and its control; a mode's 3-ball
+multiball through the game's serve, "ours is over" at one ball. Not proven: a `stack no` mode waiting in the game's own
+multiball - the rig did not start one (Sarlacc pit exit x3, Sarlacc ramp + pit, Death Star target + locks, the locks
+and Top vuk), so STACK_BALLS_PROVEN leaves it out and the tab says so. A card Written with a TRENCH RUN mode (386 s)
+read back through the card's key: `/games/game -> pad/padmode/padmode.sh`, `game.target = star_wars_2025_le/game`,
+root-owned 0755 / 0644, mode.cfg with the census bits, game.port this port byte for byte.
+Tests: tests/test_pad1290_spike3_star_wars_2025_le.py.
+
 ## The switch edges on Spike 3 (PAD-1322)
 
 Spike 2's framework drain calls one small per-switch function for every edge (`site switch_edge`), which the
@@ -551,7 +672,8 @@ passes after the level is written and before the bits are read: the port's `site
   them into a draft in place of Spike 2's switch_edge / switch_drain / table lines, either reference. ONE point on
   each of the seven Spike 3 programs, the same layout on all: Fallout LE 0x71b8b4, Pokemon LE 0x59e444, Star Wars
   2025 LE 0x593414 / Pro 0x2b94d4, Star Wars ELG 0x308684, Transformers LE 0x4a49b4, Walking Dead Remastered LE
-  0x2c6c94. Both Spike 3 ports carry the lines.
+  0x2c6c94. Both Spike 3 ports carry the lines; Fallout LE 0.82's (PAD-1288) too, proven there with PROOF=edge
+  (flipper buttons in attract, the Right slingshot, the trigger) and its clock run repeated on the edge source.
 - With the site there, a Spike 3 port's switch shots come from the edges (Spike 2's default, `switch_edge_shots` 1),
   not the switch_hit sites: every switch line counts, the slingshots and pop bumpers too (ELG's have no handler bits,
   so switch_hit never saw them).

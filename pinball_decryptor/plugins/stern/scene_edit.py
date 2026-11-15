@@ -112,6 +112,7 @@ import copy
 import json
 import math
 import os
+import re
 
 RELDIR = ("images", "scene_textures")
 FILENAME = "scene_edits.json"
@@ -519,8 +520,27 @@ def read_states(zip_path):
     except (OSError, KeyError, ValueError, zipfile.BadZipFile):
         return {}
     states = data.get("states") if isinstance(data, dict) else None
-    return {c: s for c, s in states.items() if isinstance(s, dict)} if isinstance(
+    out = {c: s for c, s in states.items() if isinstance(s, dict)} if isinstance(
         states, dict) else {}
+    # PAD-1320 (round 3): a file saved before its states kept the pictures' sizes (``pics``)
+    # names each picture it replaced as the extract did, its size in the name
+    pictures = data.get("pictures") if isinstance(data, dict) else None
+    named = {}
+    for rel, p in (pictures.items() if isinstance(pictures, dict) else ()):
+        m = _SIZED_NAME.search(os.path.basename(str(rel)))
+        if not m or not isinstance(p, dict):
+            continue
+        for got in p.get("drawn") or ():
+            if (isinstance(got, (list, tuple)) and len(got) == 2 and got[0] in out
+                    and not isinstance(out[got[0]].get("pics"), dict)):
+                named.setdefault(got[0], {})[str(got[1])] = [int(m.group(1)), int(m.group(2))]
+    for card, pics in named.items():
+        out[card] = dict(out[card], pics=pics, pics_named=True)
+    return out
+
+
+#: An extracted scene picture's name: ``radimg_<name>_<w>x<h>_<hash>.png``
+_SIZED_NAME = re.compile(r"_(\d+)x(\d+)_[0-9a-f]{6,}\.png$", re.I)
 
 
 def read_share(zip_path):
@@ -1978,11 +1998,17 @@ class _Base:
     scene tree: a node's *fingerprint* (its tracks' affines, its text box, hidden or not, its
     colour track and its shadows) and how many nodes carry a name."""
 
-    def __init__(self, fps, names):
-        self._fps, self._names = fps, names
+    def __init__(self, fps, names, pics=None):
+        self._fps, self._names, self._pics = fps, names, pics
 
     def fp(self, nid):
         return self._fps(nid)
+
+    def pic(self, nid):
+        """``(bitmap id, w, h)`` of the one picture node *nid* draws (every part of it a
+        Bitmap of the same texture: the nodes a Write fits a picture kept at its own size
+        into, :func:`radium_grow.keep_boxes`), else None."""
+        return self._pics(nid) if self._pics else None
 
     def count(self, name):
         return self._names.get(name, 0)
@@ -2008,7 +2034,14 @@ class _Base:
                     "r": rect, "h": [list(k) for k in n["kf"] or ()] == [[1, 0]],
                     "c": _col_fp(n["col"]),
                     "s": _shadows_before(sibs, n, lambda x: x.get("name"))}
-        return cls(fps, names)
+
+        def pics(nid):
+            got = index.get(nid)
+            objs = [(oid, man["objects"].get(str(oid)) or {}) for _s, oid in got[0]["comps"]] \
+                if got else []
+            return _one_picture([(oid, o.get("kind"), o.get("tex"), o.get("w"), o.get("h"))
+                                 for oid, o in objs])
+        return cls(fps, names, pics)
 
     @classmethod
     def of_tree(cls, scene):
@@ -2029,7 +2062,185 @@ class _Base:
             return {"m": [[_r(v) for v in _m6_of16(m)] for _f, m in n.tracks or ()],
                     "r": rect, "h": [list(k) for k in n.keyframes or ()] == [[1, 0]],
                     "c": _col_fp(n.colors), "s": _shadows_before(sibs, n, lambda x: x.name)}
-        return cls(fps, names)
+
+        def pics(nid):
+            got = index.get(nid)
+            return _one_picture([(c.obj.id, c.obj.kind, c.obj.body.get("tex"),
+                                  c.obj.body.get("w"), c.obj.body.get("h"))
+                                 for c in got[0].components]) if got else None
+        return cls(fps, names, pics)
+
+
+def _one_picture(comps):
+    """``(bitmap id, w, h)`` when *comps* (``(id, kind, tex, w, h)`` each) are all Bitmaps of
+    one texture, else None."""
+    if not comps or any(k != "Bitmap" for _i, k, _t, _w, _h in comps):
+        return None
+    if len({t for _i, _k, t, _w, _h in comps}) != 1:
+        return None
+    oid, _k, _t, w, h = comps[0]
+    return (int(oid), w, h) if w and h else None
+
+
+def _fit_of(base, nid, st, want=None, near=()):
+    """PAD-1320 (DragonRR, round 3): the fit (``a, b, c, d, tx, ty``) a Write put inside node
+    *nid*'s tracks on the scene *base*, against where *st* (a file's states) was made, or None.
+
+    A picture kept at its own size is written at twice the box it shows in (PAD-1200) and
+    fitted into that box by the node that draws it (:func:`radium_grow.keep_boxes`): his
+    Battle Select cards, built into his 2.3 card, read back at half the size his file's edits
+    left them, so each looked moved and resized, and a resize of 200 % went on every one of
+    them.  Only a node drawing one picture the file has a size for (*st*'s ``pics``,
+    ``{bitmap id: [w, h]}``) is looked at.  With the look *want* (a fingerprint) the node
+    should have, the fit is what takes *want* to what the scene shows, when that is a fit: one
+    scale, the picture centred in a box, flush on one side, the box the file's size (a size
+    read off a picture's name, ``pics_named``, is its texture's, a few pixels over) or the
+    picture twice the box.  Else (a node the user changed since) the scale read off the
+    nearest of the looks *near* it shows but for a move, centred in the file's size (read off
+    a name, a pixel or two out); else the fit into that size, when the picture is another."""
+    sizes = (st or {}).get("pics") if isinstance(st, dict) else None
+    if not sizes or base is None:
+        return None
+    if isinstance(st.get("fits"), dict) and nid in st["fits"]:
+        return st["fits"][nid]          # worked out on the card as read (:func:`_card_fits`)
+    got = base.pic(nid)
+    if got is None or str(got[0]) not in sizes:
+        return None
+    try:
+        bw, bh = float(sizes[str(got[0])][0]), float(sizes[str(got[0])][1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    w, h = float(got[1]), float(got[2])
+    named = bool(st.get("pics_named"))
+    fp = base.fp(nid)
+    wm = (want or {}).get("m") if isinstance(want, dict) else None
+    if wm and isinstance(fp, dict) and fp.get("m"):
+        fit = _fit_between(wm[0], fp["m"][0], w, h)
+        if fit is not None and abs(fit[0] - 1.0) < 1e-3 and not (fit[4] or fit[5]):
+            return None                 # it shows the look as it is: no fit inside it
+        if fit is not None:
+            k, _b, _c, _d, tx, ty = fit
+            fw, fh = k * w + 2 * tx, k * h + 2 * ty
+            slack = 6.0 if named else 1.0
+            if ((abs(fw - bw) <= slack and abs(fh - bh) <= slack)
+                    or abs(k * _keep_headroom() - 1.0) <= 0.01):
+                return fit
+    slack = 6.0 if named else 0.5
+    if (abs(w - bw) <= slack and abs(h - bh) <= slack) or bw <= 0 or bh <= 0:
+        return None
+    gm = fp.get("m") if isinstance(fp, dict) else None
+    for look in near:
+        lm = (look or {}).get("m") if isinstance(look, dict) else None
+        if not gm or not lm:
+            continue
+        k = _scale_between(lm[0], gm[0])
+        if k is None or not (abs(k * _keep_headroom() - 1.0) <= 0.01 or (
+                k * w <= bw + slack and k * h <= bh + slack
+                and min(bw - k * w, bh - k * h) <= slack)):
+            continue
+        ox, oy = max(0.0, (bw - k * w) / 2.0), max(0.0, (bh - k * h) / 2.0)
+        return (k, 0.0, 0.0, k, 0.0 if ox <= oy else ox, 0.0 if oy < ox else oy)
+    from . import radium_grow
+    return radium_grow.fit_box(w, h, bw, bh)
+
+
+def _keep_headroom():
+    """How many texture pixels a Write keeps per box pixel of a picture kept at its own size
+    (:data:`radium_grow.KEEP_HEADROOM`)."""
+    from . import radium_grow
+    return radium_grow.KEEP_HEADROOM
+
+
+def _scale_between(want, got):
+    """The one scale ``k`` with which the affine *got* is *want* scaled inside (a move aside),
+    or None."""
+    a, b, c, d = (float(v) for v in want[:4])
+    det = a * d - b * c
+    if abs(det) < 1e-9:
+        return None
+    ga, gb, gc, gd = (float(v) for v in got[:4])
+    la, lb = (d * ga - c * gb) / det, (-b * ga + a * gb) / det
+    lc, ld = (d * gc - c * gd) / det, (-b * gc + a * gd) / det
+    k = (la + ld) / 2.0
+    if k <= 0 or abs(lb) > 2e-3 or abs(lc) > 2e-3 or abs(la - ld) > 2e-3 * max(1.0, k):
+        return None
+    return k
+
+
+def _fit_between(want, got, w, h):
+    """The fit ``(k, 0, 0, k, tx, ty)`` with ``want`` then the fit giving ``got`` (affines), when
+    it is one :func:`radium_grow.fit_box` gives a *w* x *h* picture: one positive scale, the
+    picture centred, flush on one side; else None."""
+    a, b, c, d, tx, ty = (float(v) for v in want[:6])
+    det = a * d - b * c
+    if abs(det) < 1e-9:
+        return None
+    ia, ib, ic, idd = d / det, -b / det, -c / det, a / det
+    inv = (ia, ib, ic, idd, -(ia * tx + ic * ty), -(ib * tx + idd * ty))
+    g = _composed(inv, tuple(float(v) for v in got[:6]))
+    k = (g[0] + g[3]) / 2.0
+    if k <= 0 or abs(g[1]) > 2e-3 or abs(g[2]) > 2e-3 or abs(g[0] - g[3]) > 2e-3 * max(1.0, k):
+        return None
+    ox, oy = g[4], g[5]
+    if min(ox, oy) < -0.75 or min(abs(ox), abs(oy)) > 0.75:
+        return None
+    return (k, 0.0, 0.0, k, ox if abs(ox) > 0.75 else 0.0, oy if abs(oy) > 0.75 else 0.0)
+
+
+def _card_fits(base, ops, st):
+    """``{node: fit or None}`` (:func:`_fit_of`) of the nodes *ops* edit, on the scene *base* as
+    read off the card, each against the look of *st*'s it shows: what judges that scene with
+    edits on it too (a doubled project's 200 % resizes undo the fit, not show the file)."""
+    kinds, steps, out = _kinds(ops), {}, {}
+    for i, op in enumerate(ops):
+        if op.get("node") in kinds:
+            steps.setdefault(op["node"], []).append(i)
+    for nid, idx in steps.items():
+        if base.fp(nid) is None:
+            continue
+        looks = [st["before"].get(str(nid))] + [st["after"][i] for i in idx
+                                                if i < len(st["after"])]
+        j = next((j for j in range(len(looks) - 1, -1, -1)
+                  if looks[j] is not None and _close(
+                      _fp_for(_seen(base, nid, st, looks[j]), kinds[nid]), looks[j])), None)
+        out[nid] = (_fit_of(base, nid, st, looks[j]) if j is not None
+                    else _fit_of(base, nid, st, near=looks[::-1]))
+    return out
+
+
+def _unfit(m6, fit):
+    """Affine *m6* with *fit* (a uniform scale and a shift) taken back out on its right."""
+    s, _b, _c, _d, tx, ty = fit
+    return _composed(tuple(m6), (1.0 / s, 0.0, 0.0, 1.0 / s, -tx / s, -ty / s))
+
+
+def _seen(base, nid, st, want=None):
+    """Node *nid*'s fingerprint on *base* as the edits of *st* would see it (looking for the
+    look *want*): a picture kept at its own size has its fit (:func:`_fit_of`) taken out."""
+    fp = base.fp(nid)
+    fit = _fit_of(base, nid, st, want) if isinstance(fp, dict) and fp.get("m") else None
+    if fit is None:
+        return fp
+    return dict(fp, m=[[_r(v) for v in _unfit(m[:6], fit)] for m in fp["m"]])
+
+
+def _into_fit(op, fit):
+    """Op *op* (one of a node a fit is inside) as it does the same on the scene: a resize's
+    point is in the node's own units, which the fit changed; a move is the parent's."""
+    if fit is None or op.get("op") != "scale":
+        return op
+    s, _b, _c, _d, tx, ty = fit
+    return dict(op, px=round((op["px"] - tx) / s, 3), py=round((op["py"] - ty) / s, 3))
+
+
+def _pic_sizes(base, nids):
+    """``{bitmap id: [w, h]}`` of the pictures the nodes *nids* draw on *base*."""
+    out = {}
+    for nid in nids:
+        got = base.pic(nid)
+        if got is not None:
+            out[str(got[0])] = [got[1], got[2]]
+    return out
 
 
 def _near(x, y):
@@ -2135,7 +2346,7 @@ def states_of(man, ops):
         cur, _n = apply_manifest(cur, [op])
         after.append(_fp_for(_Base.of_manifest(cur).fp(op["node"]), kinds[op["node"]])
                      if _stock_node(op) else None)
-    return {"ops": ops, "before": before, "after": after}
+    return {"ops": ops, "before": before, "after": after, "pics": _pic_sizes(base, kinds)}
 
 
 def _shows(base, ops, k, states=None):
@@ -2155,7 +2366,7 @@ def _shows(base, ops, k, states=None):
             for i in range(k):
                 if ops[i].get("node") == nid and states["after"][i] is not None:
                     want = states["after"][i]
-            if want is not None and not _close(base.fp(nid), want):
+            if want is not None and not _close(_seen(base, nid, states, want), want):
                 return False
         return True
     told = bool(names)
@@ -2183,7 +2394,13 @@ def _states_for(states, ops):
         n += 1
     if n == 0:
         return None
-    return {"ops": ops[:n], "before": states["before"], "after": states["after"][:n]}
+    out = {"ops": ops[:n], "before": states["before"], "after": states["after"][:n]}
+    if isinstance(states.get("pics"), dict):
+        out["pics"] = states["pics"]
+        out["pics_named"] = bool(states.get("pics_named"))
+        if isinstance(states.get("fits"), dict):
+            out["fits"] = states["fits"]
+    return out
 
 
 def _told(states, i):
@@ -2251,6 +2468,10 @@ def on_top_of(man, mine, theirs, states):
     # PAD-1301: the card it was saved from gave the nodes mine adds ids of its own
     theirs, states = _as_mine(man, mine, theirs, states)
     st = _states_for(states, theirs)
+    if st is not None and st.get("pics"):
+        # PAD-1320 (round 3): a picture kept at its own size has its fit in the card's scene
+        states = dict(states, fits=_card_fits(_Base.of_manifest(man), theirs, st))
+        st = _states_for(states, theirs)
     for k in range(len(mine) + 1):
         # the same file loaded before: mine ends with (some of) its edits, applied after mine[:k]
         head, tail = list(mine[:k]), list(mine[k:])
@@ -2382,7 +2603,7 @@ def start_differences(man, ops, states):
     index = _man_index(man)
     out = []
     for nid, want in sorted(st["before"].items(), key=lambda kv: int(kv[0])):
-        got = base.fp(int(nid))
+        got = _seen(base, int(nid), st, want)
         if want is None or _close(got, want):
             continue
         name = (index.get(int(nid)) or ({"name": ""}, None))[0].get("name") or ""
@@ -2502,14 +2723,17 @@ def rebased(man, ops, states):
     steps = {}
     for i, op in enumerate(ops):
         steps.setdefault(op["node"], []).append(i)
-    keep, extra, built = set(), {}, 0
+    keep, extra, built, fits = set(), {}, 0, {}
     for nid, idx in steps.items():
-        got = _fp_for(base.fp(nid), kinds[nid])
-        if got is None:
+        if base.fp(nid) is None:
             return None
         looks = [st["before"].get(str(nid))] + [st["after"][i] for i in idx]
         j = next((j for j in range(len(looks) - 1, -1, -1)
-                  if looks[j] is not None and _close(got, looks[j])), None)
+                  if looks[j] is not None and _close(
+                      _fp_for(_seen(base, nid, st, looks[j]), kinds[nid]), looks[j])), None)
+        fits[nid] = (_fit_of(base, nid, st, looks[j]) if j is not None
+                     else _fit_of(base, nid, st, near=looks[::-1]))
+        got = _fp_for(_seen(base, nid, dict(st, fits=fits)), kinds[nid])
         if j is not None:
             keep.update(idx[j:])
             if j and not _close(looks[j], looks[0]):
@@ -2525,9 +2749,10 @@ def rebased(man, ops, states):
         return None
     out = []
     for i, op in enumerate(ops):
+        fit = fits.get(op.get("node"))
         if i in keep:
-            out.append(op)
-        out.extend(extra.get(i, ()))
+            out.append(_into_fit(op, fit))
+        out.extend(_into_fit(x, fit) for x in extra.get(i, ()))
     return None if out == ops else out
 
 

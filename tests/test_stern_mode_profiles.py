@@ -259,7 +259,7 @@ def test_stack_on_the_titles_with_no_cmode_rules_is_multiballs_only(tmp_path):
     body = src[src.index("static int stock_balls_route"):src.index("int pm_stock_mode_running")]
     assert set(MP.STACK_BALLS_NEEDS) <= set(re.findall(r'fn\("([a-z_]+)"\)', body))
     for key in MP.STACK_BALLS_PROVEN:
-        q = MP.profile(key.replace("-", "_").replace(".", "_"))
+        q = MP.profile(key.replace("/spike3", "_spike3").replace("-", "_").replace(".", "_"))   # PAD-1285: a Spike 3 key
         assert q.can("stack"), key
         if (key in MP.STACK_FLAGS_PROVEN or key in MP.STACK_RECORDS_PROVEN or key in MP.STACK_BYTES_PROVEN
                 or key in MP.STACK_OBJECTS_PROVEN):

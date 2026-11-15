@@ -19,6 +19,11 @@
 # words were found in the HUD (find_node / find_text through x8, the scene at +0x38) and shown over the game's HUD for
 # the mode (the Sprite's slot 42), and its title clip played full screen on the video bank's surface at its start
 # (surface_find, surface_set_video, surface_play), on Try it and on a card write_card wrote.
+# Multiball, held coils and blocks emulator-proven 2026-11-14 (PAD-1285, slot 85, hidden, muted): a mode file's
+# `multiball 3 10` was served through multiball_serve (balls_in_play 3) and ran its full 40 s as the balls drained -
+# no longer taken for one of the game's multiballs; its `coil_hold right_gate 2000` found node 8 coil 2 = the game's
+# device 9, took the gate object (0x711730, control +40) through coil_take, sent ONE command (255 for 64 ms, then
+# 128 for 1936 ms) through coil_fire and gave it back after 2007 ms through coil_give.
 
 game           star_wars_elg
 version        1.10
@@ -26,7 +31,7 @@ version        1.10
 # ---- functions: site <name> <address> <first two instruction words> ----
 #   tick: its calls and callers (score 2.0)
 site tick             0x00247940 0xd2800001 0x528006e0
-# site ball_end         NOT PLACED: no counterpart found
+# site ball_end         NOT NEEDED: the end of a ball is the bus's event (value ball_end_event, through hook_dispatch) - the Spike 2 site is that event's handler (PAD-1285)
 #   sound_lookup: the call after the record key's bank bits (PAD-1282)
 site sound_lookup     0x002084f0 0xf9400c02 0xb5000142
 #   sound_resolve: the worker's call that takes a stack slot (PAD-1282)
@@ -81,8 +86,8 @@ site show_start       0x0041a000 0xa9bc53f3 0x72003c14
 site event_post_replacing 0x003151f0 0xa9be53f3 0x12003c14
 #   event_cancel: its calls and callers (score 9.0)
 site event_cancel     0x003150f0 0xa9bc53f3 0xa9015bf5
-# site switch_edge      NOT PLACED: no counterpart found
-# not carried yet (its feature is 32-bit): site switch_drain     0x003085c0 0xa9ba53f3 0xa9036bf9
+# site switch_edge      NOT ON SPIKE 3: its drain has no per-switch edge call - it calls switch_hit / switch_hit2 itself; every-edge features (attract flipper sounds, game mode shot sounds, co-op) ride Spike 2's delivery (PAD-1285)
+# not carried - the 64-bit drain calls switch_hit / switch_hit2 itself, by the switch's handler bits - the shots come through those sites (PAD-1285): site switch_drain     0x003085c0 0xa9ba53f3 0xa9036bf9
 #   surface_find: matched (PAD-1284)
 site surface_find     0x004e4c70 0xb0000da2 0xf9468442
 #   surface_set_video: the surface call before surface_play (PAD-1284)
@@ -96,26 +101,36 @@ site surface_stop     0x004d7430 0xd0000e01 0xf9468421
 site surface_duration 0x004d7b50 0xd0000e01 0xf9468421
 #   surface_position: the game's progress read: position, duration, then surface_state (PAD-1284)
 site surface_position 0x004d77d0 0xd0000e01 0xf9468421
-# not carried yet (its feature is 32-bit): site balls_in_play    0x0031ee60 0xa9be53f3 0xf0002153
+#   balls_in_play: matched (PAD-1285)
+site balls_in_play    0x0031ee60 0xa9be53f3 0xf0002153
 #   find_text: matched (PAD-1284)
 site find_text        0x004e44a0 0xb0000da2 0xf9468442
 #   agent_header: its calls and callers (score 14.2)
 site agent_header     0x005488f0 0xb40002a0 0x4f000400
 #   agent_begin: its calls and callers (score 37.0)
 site agent_begin      0x00551e80 0xaa0003e4 0xaa0103e0
-# not carried yet (its feature is 32-bit): site multiball_serve  0x0031f0d0 0xd0001bc6 0xf942ecc6
-# site block_start_0    NOT PLACED: no counterpart found
-# site block_start_1    NOT PLACED: no counterpart found
-# not carried yet (its feature is 32-bit): site block_start_2    0x00173430 0xf81f0ffe 0x94001473
+#   multiball_serve: matched (PAD-1285)
+site multiball_serve  0x0031f0d0 0xd0001bc6 0xf942ecc6
+#   block_start_0: the start that sets the game's flag 86 (PAD-1285)
+site block_start_0    0x0017a820 0xa9bf7bf3 0x97fff777
+#   block_start_1: the start that sets the game's flag 88 (PAD-1285)
+site block_start_1    0x001798b0 0xa9bf7bf3 0x97fffb53
+#   block_start_2: the start that sets the game's flag 87 (PAD-1285)
+site block_start_2    0x00173430 0xf81f0ffe 0x94001473
 #   proc_exists: its calls and callers (score 5.0)
 site proc_exists      0x003156d0 0x900021a2 0x910f4042
 #   proc_create: its calls and callers (score 2.0)
 site proc_create      0x00314e80 0xb00021a4 0x910f4084
-# not carried yet (its feature is 32-bit): site proc_sleep       0x00315000 0x900021a1 0x910f4021
-# not carried yet (its feature is 32-bit): site adjustment       0x0042cb90 0x72003c00 0x540000c0
-# not carried yet (its feature is 32-bit): site coil_fire        0x00312b70 0x72003c00 0x12001c21
-# site coil_take        NOT PLACED: no counterpart found
-# site coil_give        NOT PLACED: mid-way into a function on Spike 2 (0x7aa14 + 0xc4)
+#   proc_sleep: matched (PAD-1285)
+site proc_sleep       0x00315000 0x900021a1 0x910f4021
+#   adjustment: matched (PAD-1285)
+site adjustment       0x0042cb90 0x72003c00 0x540000c0
+#   coil_fire: matched (PAD-1285)
+site coil_fire        0x00312b70 0x72003c00 0x12001c21
+#   coil_take: the device take (obj, ticks): waits for its control word, adds the exit hook, keeps the process's id (PAD-1285)
+site coil_take        0x00184180 0xa9be53f3 0xaa0003f4
+#   coil_give: the device give (obj, flag): clears the control word, takes the exit hook off, calls the object's update (PAD-1285)
+site coil_give        0x001842d0 0xa9bf7bf3 0xaa0003f3
 #   lamp_free_owner: read off the lamp layer's code (PAD-1283)
 site lamp_free_owner  0x00236d30 0xa9bf7bf3 0xaa0003f3
 # site challenge_balls  NOT PLACED: no counterpart found
@@ -182,11 +197,11 @@ data lamp_layers            0x00735e68   # read in the lamp layer's / processes'
 data light_count            0x0073ec88   # read in the lamp layer's / processes' own code (PAD-1283)
 # data switch_records         NOT PLACED: 5 of 5 paired functions agree
 # data switch_count           NOT PLACED: 8 of 8 paired functions agree
-# not carried yet: data game_flags             0x00749630   # 4 of 4 paired functions that load it
-# data game_flag_count        NOT PLACED: 0 of 0 paired functions agree
-# not carried yet: data coil_count             0x0073e1d8   # 7 of 7 paired functions that load it
-# data coil_table             NOT PLACED: 3 of 3 paired functions agree
-# data right_gate_obj         NOT PLACED: 1 of 1 paired functions agree
+data game_flags             0x00749630   # read off the program's own code (PAD-1285)
+data game_flag_count        0x005a37c8   # read off the program's own code (PAD-1285)
+data coil_count             0x0073e1d8   # read off the program's own code (PAD-1285)
+data coil_table             0x00749300   # read off the program's own code (PAD-1285)
+data right_gate_obj         0x00711730   # read off the program's own code (PAD-1285)
 # data challenge_scores_table NOT PLACED: 0 of 0 paired functions agree
 # data challenge_scores_count NOT PLACED: 0 of 0 paired functions agree
 # data sw_struct              NOT PLACED: 5 of 5 paired functions agree
@@ -252,15 +267,6 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value switch_polarity_at    0x1c
 # not carried (64-bit layout, measure it): value backdrop_surface 1
 # not carried (64-bit layout, measure it): value lamp_fade            3
-# not carried (64-bit layout, measure it): value game_flags_at         4
-# not carried (64-bit layout, measure it): value mode_flag_1           86
-# not carried (64-bit layout, measure it): value mode_flag_2           88
-# not carried (64-bit layout, measure it): value mode_flag_3           87
-# not carried (64-bit layout, measure it): value magnet_proc          13185
-# not carried (64-bit layout, measure it): value right_gate_dev      9
-# not carried (64-bit layout, measure it): value right_gate_ctl      32
-# not carried (64-bit layout, measure it): value right_gate_devoff   4
-# not carried (64-bit layout, measure it): value right_gate_off_slot 30
 # not carried (64-bit layout, measure it): value challenge_on_flag   18
 # not carried (64-bit layout, measure it): value challenge_menu_list_at   268
 # not carried (64-bit layout, measure it): value challenge_menu_count_at  44
@@ -308,6 +314,15 @@ value show_proc                 13201    # read off the program's own code (PAD-
 value scene_player_scene        0x38    # read off the program's own code (PAD-1284)
 value node_visible_vfn          0x150    # read off the program's own code (PAD-1284)
 value surface_playing           0x2    # read off the program's own code (PAD-1284)
+value magnet_proc               13185    # read off the program's own code (PAD-1285)
+value right_gate_ctl            40    # read off the program's own code (PAD-1285)
+value right_gate_devoff         8    # read off the program's own code (PAD-1285)
+value right_gate_off_slot       30    # read off the program's own code (PAD-1285)
+value right_gate_dev            9    # read off the program's own code (PAD-1285)
+value game_flags_at             0    # read off the program's own code (PAD-1285)
+value mode_flag_1               86    # read off the program's own code (PAD-1285)
+value mode_flag_2               88    # read off the program's own code (PAD-1285)
+value mode_flag_3               87    # read off the program's own code (PAD-1285)
 value ball_end_event 0x34    # the end of a ball, from the bus (no ball_end site on Spike 3)
 
 # ---- events: the framework's bus ids (the dispatch's range is the same on both builds) ----
@@ -430,7 +445,15 @@ lamp 65           0              RAMP 6  # lamp 73, I/O group 6 index 64, at 54,
 scene hud                  7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a/835949dafb924a7cfeb0ec0fe2a3a4d8696d4aea
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
+# ---- PAD-1285: a held coil's names and board address, the game's modes a mode keeps from starting ----
+text right_gate_label     Right control gate
+text right_gate_drive     8 2 255 64 128
+text held_coils           right_gate
+text block_name_0         Inner Loop
+text block_name_1         Orbits
+text block_name_2         Ramps
+
 # ---- text ----
 text example_start_shot     Death star target
 
-# not carried (to measure on Spike 3): 1 scene, 7 text
+# not carried (to measure on Spike 3): 1 scene, 1 text

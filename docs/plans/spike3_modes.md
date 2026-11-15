@@ -295,3 +295,61 @@ game's own multiball video covers the HUD. The card `write_card` wrote (the HUD 
 added, the mode installed), started through its own hook: the same log and the same frames (6 clip, 16 screen).
 The same mode with the previous runtime and port: `can callout own-sound game-shows`, "own screen not found", no
 magenta in any frame. Tests: tests/test_pad1284_spike3_screens.py.
+
+## Multiball, held coils and blocks on Spike 3 (PAD-1285)
+
+The sites a mode's own multiball, a held coil and a block of the game's modes use were placed by s3port.py's matcher
+but written as comments: their features read the game's structs with 4-byte pointers. Read in Star Wars ELG 1.10's own
+code:
+
+| what | Spike 2 | Spike 3 |
+|---|---|---|
+| balls_in_play, multiball_serve, proc_sleep, adjustment, coil_fire | plain calls; the serve's and coil_fire's last two arguments on the stack | the same calls, every argument in w0-w5; the game's own one-ball saves pass (1, 0, 312, 0xbb) as on Spike 2 |
+| the coil records (coil_fire's writer) | 0x68 bytes: request id +0x14, link +0x10, state +0x22, board +0x24, coil +0x1a, powers +0x29..+0x30 | the same record; the table's pointer (0x749300) and its count (a u64, 0x73e1d8) 8 bytes |
+| a device object (the right control gate, a static built by 0x184030(obj, 9, 0, 186)) | device u16 +4, exit hook +28, controlling process +32; update vtable slot 28, "disabled" slot 30 | device +8, exit hook +36, controlling process +40; the same slots, 8 bytes each: slot 30 = adjustment(obj+12) == 1 |
+| coil_take / coil_give | 0x7aa14 / 0x7aad8 | 0x184180 / 0x1842d0 (the same code; two other device families have a pair of this shape: the gate's constructor names its own) |
+| the game's mode starts (block_start_*) | Inner Loop 0x6bcc0 (flag 86), Orbits 0x6ad3c (88), Ramps 0x5eff0 (87) | 0x17a820, 0x1798b0, 0x173430: the same flags, set through 0x316940 |
+| the game flags | the bitmap pointer at holder + 4 | the global is the pointer (`value game_flags_at 0`); count 102 at 0x5a37c8 |
+
+- **The runtime** (pad_mode_runtime.c): a held coil's object and record are `pm_addr`, a vtable is indexed by pointer
+  size, the coil table's pointer read pointer-sized; take / give are typed (pm_addr, unsigned). The block keeps the
+  starts' addresses (`block_hooked`, `place_from`, `block_obj`) as `pm_addr` - the 32-bit `unsigned` cut a PIE's
+  address. Spike 2's code is unchanged by these (the struct keeps its layout there).
+- **A mode's own multiball read as the game's** (Spike 2 too): the count route (`balls_in_play`, titles with no mode
+  table) sees only balls, so three seconds after our serve it said "a multiball is running" and the mode that asked
+  for it ended - "the game's own mode began" - since block / give-way became the default (PAD-398). The runtime now
+  remembers the serve (`ours_mb_at`) and answers no multiball of the game's until the balls are back to one
+  (OURS_MB_GRACE_MS after the serve). PAD-420's Spike 2 notes "our own multiball stopped with its three balls in play"
+  were this.
+- **Not on Spike 3**: `switch_edge` - the 64-bit drain has no per-switch edge call, it calls switch_hit / switch_hit2
+  itself by the switch's handler bits, and the shots come through those sites; the every-edge features (attract
+  flipper sounds, game mode shot sounds, co-op) ride Spike 2's delivery. `ball_end` - the end of a ball is the bus's
+  event 0x34 through hook_dispatch (Spike 2's site is that event's handler). `player_advance` - the clip_play path,
+  not this title's.
+- **s3port.py** `play_engine` reads it all off a 64-bit program: carries the matcher's five plain calls, the coil
+  records off coil_fire's writer (`coil_records`), every take / give pair (`coil_control`), a held coil's object by
+  its constructor's call with its device id and the vtable slot that asks the adjustment getter (`device_object`),
+  the flag set (`flag_set`) and each Spike 2 block start by the game flag it sets (`mode_starts`).
+- **The Modes tab** offers on the Spike 3 card: Multiball, "Hold the Right control gate", the game's three modes a
+  mode keeps from starting, and "waits while the game's modes run" (MULTIBALL_PROVEN, HELD_COILS_PROVEN,
+  STACK_BALLS_PROVEN, STACK_FLAGS_PROVEN). Ball save stays greyed: on this rig the game's trough-eject retry at a
+  game's start is served as another ball, so balls stay in play and no drain ends a ball, with or without a save.
+
+Proof (2026-11-14, Spike 3 rig slots 85-87, hidden and MUTED, this build's prebuilt mode64.so and the drafted port;
+ELG's first-boot GAME SETUP screen takes a held Start). Three Death Star hits start ELG's own multiball, so the
+modes start on Top lane center:
+- a mode file's `multiball 3 10`: served through the game's serve (balls_in_play 3), ran its 40 s, drains 3-2-1,
+  "multiball: ours is over" at one ball; meanwhile the game's Orbits start was refused ("block: the game's mode 1
+  (Orbits) did not start"). Before the fix the same mode ended 3 s in.
+- `coil_hold right_gate 2000` and `... 1500 <shots>`: node 8 coil 2 = the game's device 9, its object taken, ONE
+  command each on the bus (`n8 40 02 ff 06 00 80 c1 00`: 255 for ~60 ms, then 128 for 1.93 s; `.. 8f 00` for a
+  1.5 s hold), given back at its time or 483 ms early as the mode ended; refused while the game's own 20 s commands
+  (`d0 07`) held the gate; no abort. A mode started on Death Star gave way to the game's multiball 3 s in (correct).
+- `stack no` on Top lane center in the game's Death Star multiball: "not started: a multiball is running" twice,
+  then started after two drains. A probe mode (block_probe_mode.c) called the game's Ramps start as its rules do:
+  while a mode blocked, "the game's mode 2 (Ramps) did not start" and flag 87 stayed clear; with none, the start ran,
+  set flag 87, and a `stack no` mode was refused for it 21 times.
+- Spike 2 (Star Wars ELG 1.10's Spike 2 card, rigbatch, 4x, hidden, muted, s2 job: the same `multiball 3 10` mode
+  started by its trigger file): main's mode.so ended it 3.08 s in ("the game's own mode began"); this build's was
+  still running 20 s after its multiball.
+Tests: tests/test_pad1285_spike3_play.py.

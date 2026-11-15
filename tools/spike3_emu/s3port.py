@@ -1364,6 +1364,361 @@ def scene_engine(ref, rlines, tgt, at):
     return out
 
 
+# ---- PAD-1285: a mode's own multiball, held coils, the game's mode starts (blocks) and its game flags ----------------
+# The matcher places balls_in_play / multiball_serve / proc_sleep / adjustment / coil_fire (plain calls with their
+# arguments in w0-w5 on both machines: the serve's two stack words are x4/x5). What their features read is laid out
+# again by the 64-bit framework, read here off the program: the coil records coil_fire's writer fills (the same 0x68
+# bytes, the table's pointer and its u64 count 8 bytes), the device object's take / give (its controlling process
+# at +40 where Spike 2 has +32: the vtable pointer is 8 bytes), a held coil's static object by the device
+# constructor's call with its device id, and each of the game's mode starts by the game flag it sets.
+PLAY_SITES = ("balls_in_play", "multiball_serve", "proc_sleep", "adjustment", "coil_fire")
+COIL_REC_SIZE = 0x68
+
+
+def _movz_w(w):
+    """movz wd, #imm (no shift) -> (d, imm), else None"""
+    return (w & 31, (w >> 5) & 0xFFFF) if (w & 0xFFE00000) == 0x52800000 else None
+
+
+def _mov_x0(w):
+    """mov xd, x0 (orr xd, xzr, x0) -> d, else None"""
+    return w & 31 if (w & 0xFFFFFFE0) == 0xAA0003E0 else None
+
+
+def _b(va, w):
+    return va + 4 * sext(w & 0x3FFFFFF, 26) if (w & 0xFC000000) == 0x14000000 else None
+
+
+def _arm_mov_r0(w):
+    """ARM mov r0, #imm -> imm, else None"""
+    if (w & 0xFFFFF000) != 0xE3A00000:
+        return None
+    rot = 2 * ((w >> 8) & 0xF)
+    v = w & 0xFF
+    return ((v >> rot) | (v << (32 - rot))) & 0xFFFFFFFF if rot else v
+
+
+def coil_records(t, coil_fire):
+    """the coil records coil_fire's writer fills (coil_fire ends in a branch to it): {'data': {coil_table,
+    coil_count}, 'why': [...]} - the table's pointer is the writer's plain load (`ldr x28, [x21, #0x300]`), the count
+    its GOT load, each record COIL_REC_SIZE bytes (`mov w3, #0x68`), the request id stored at +0x14 and the link
+    word read at +0x10, as the runtime's COIL_REC_* say"""
+    out = {"data": {}, "why": []}
+    wr = next((_b(a, w) for a, w in list(_window(t, coil_fire, 16))[:16] if _b(a, w)), None)
+    if not wr:
+        out["why"].append("coil_fire ends in no branch to a record writer")
+        return out
+    page, tab, cnt, size, rid, link = {}, None, None, False, False, False
+    for a, w in list(_window(t, wr, 120))[:120]:
+        p = _adrp(a, w)
+        if p:
+            page[p[0]] = p[1]
+            continue
+        ls = _ls(w)
+        mz = _movz_w(w)
+        if mz and mz[1] == COIL_REC_SIZE:
+            size = True
+        if ls and ls[0] == "ldr" and ls[2] in page:
+            at = page[ls[2]] + ls[3]
+            if at in t.ptr:
+                cnt = cnt or t.ptr[at]
+            elif tab is None and t.is_data(at):
+                tab = at
+        if ls and ls[0] == "strw" and ls[3] == 0x14:
+            rid = True
+        if ls and ls[0] == "ldrw" and ls[3] == 0x10:
+            link = True
+    if not (tab and cnt and size and rid and link):
+        out["why"].append("the coil record writer at 0x%x is not the known shape (table %s, count %s, 0x68 %s, id +0x14 "
+                          "%s, link +0x10 %s)" % (wr, hex(tab or 0), hex(cnt or 0), size, rid, link))
+        return out
+    out["data"].update(coil_table=tab, coil_count=cnt)
+    return out
+
+
+def coil_control(t, proc_sleep):
+    """the device objects' takes (obj, ticks) and gives (obj, flag) - Spike 2's coil_take / coil_give: a take keeps
+    the object (`mov xR, x0`), waits a tick at a time (proc_sleep) while +CTL is held, adds an exit hook (`bl hook;
+    str w0, [xR, #HOOK]`) and stores the process's id at +CTL; its give opens `mov x19, x0; strh wzr, [x0, #CTL];
+    tbnz w1, #0` and calls the object's update through its vtable. Each device family has its own pair (Star Wars
+    ELG 1.10: control at +40, +60, +72); the held coil's constructor says which is its own (play_engine).
+    [{'site': {coil_take, coil_give}, 'value': {ctl, hook, update_slot}}]"""
+    out = []
+    takes = []
+    for f in t.starts:
+        ws = list(_window(t, f, 80))[:80]
+        R = next((_mov_x0(w) for a, w in ws[:3] if _mov_x0(w) is not None), None)
+        if R is None or not any(_bl(a, w) == proc_sleep for a, w in ws):
+            continue
+        for i in range(len(ws) - 1):
+            x, ls = _bl(*ws[i]), _ls(ws[i + 1][1])
+            if not (x and ls and ls[0] == "strw" and ls[1] == 0 and ls[2] == R):
+                continue
+            st = [_ls(w) for a, w in ws[i + 2:i + 8]]
+            c = [s for s in st if s and s[0] == "strh" and s[2] == R]
+            if c:
+                takes.append((f, x, ls[3], c[0][3]))
+                break
+    for take, hook, H, C in takes:
+        gives = []
+        for f in t.starts:
+            ws = list(_window(t, f, 40))[:40]
+            if len(ws) < 6 or _mov_x0(ws[1][1]) != 19 or _ls(ws[2][1]) != ("strh", 31, 0, C, None)                     or _tbz_bit(ws[3][1]) != (1, 0) or not any(_bl(a, w) == hook for a, w in ws):
+                continue
+            slots = [s[3] for s in (_ls(w) for a, w in ws) if s and s[0] == "ldr" and s[2] == s[1] and s[3] >= 8]
+            gives.append((f, slots[0] if slots else None))
+        if len(gives) == 1 and gives[0][1] is not None:
+            out.append({"site": {"coil_take": take, "coil_give": gives[0][0]},
+                        "value": {"ctl": C, "hook": H, "update_slot": gives[0][1] // 8}})
+    return out
+
+
+def _consts(t, va, cap):
+    """(va, word, regs) over cap words, regs a register's address: adrp, add #imm, and `mov xd, xn` kept; x0-x18 lost
+    at a call"""
+    reg = {}
+    for a, w in list(_window(t, va, cap))[:cap]:
+        yield a, w, dict(reg)
+        p = _adrp(a, w)
+        if p:
+            reg[p[0]] = p[1]
+            continue
+        ad = _add_imm(w)
+        if ad:
+            if ad[1] in reg:
+                reg[ad[0]] = reg[ad[1]] + ad[2]
+            else:
+                reg.pop(ad[0], None)
+            continue
+        if (w & 0xFFE0FFE0) == 0xAA0003E0:                               # mov xd, xm
+            m = (w >> 16) & 31
+            if m in reg:
+                reg[w & 31] = reg[m]
+            else:
+                reg.pop(w & 31, None)
+            continue
+        if _bl(a, w):
+            for r in range(19):
+                reg.pop(r, None)
+
+
+def device_object(t, dev, ctl, adjustment):
+    """a held coil's static object: built once by the device constructor (`strh w1, [x19, #DEVOFF]` its device,
+    `strh wzr, [x19, #CTL]` the controlling process cleared) called with x0 = a static address and w1 = the device
+    id, its vtable stored at that address next (`str x3, [x19, #144]`). {'obj', 'devoff', 'vtable', 'off_slot', 'why'}:
+    off_slot = the vtable slot that answers "disabled" (it reads an adjustment id off the object and calls the
+    adjustment getter)"""
+    out = {"why": []}
+    ctors = {}
+    found = []
+    for i0, w0 in enumerate(t.words):
+        if _movz_w(w0) != (1, dev):
+            continue
+        va0 = t.tva + 4 * i0
+        f = func_of(t, va0)
+        if f is None or va0 - f > 4 * 2000:
+            continue
+        ws = list(_consts(t, f, (va0 - f) // 4 + 32))
+        for i, (a, w, reg) in enumerate(ws):
+            if a <= va0 or a > va0 + 24:
+                continue
+            x = _bl(a, w)
+            if not x:
+                continue
+            if 0 not in reg:
+                break
+            if x not in ctors:
+                cw = list(_window(t, x, 24))[:24]
+                R = next((_mov_x0(w2) for a2, w2 in cw[:4] if _mov_x0(w2) is not None), None)
+                st = [_ls(w2) for a2, w2 in cw]
+                d = next((s[3] for s in st if s and s[0] == "strh" and s[1] == 1 and s[2] == R), None)
+                z = any(s and s[0] == "strh" and s[1] == 31 and s[2] == R and s[3] == ctl for s in st)
+                ctors[x] = d if (R is not None and z) else None
+            if ctors[x] is not None:
+                obj = reg[0]
+                vt = None
+                for a2, w2, r2 in ws[i + 1:i + 13]:
+                    s2 = _ls(w2)
+                    if s2 and s2[0] == "str" and s2[2] in r2 and r2[s2[2]] + s2[3] == obj and s2[1] in r2:
+                        vt = r2[s2[1]]
+                        break
+                found.append((obj, ctors[x], vt))
+            break
+    found = sorted(set(found))
+    if len(found) != 1 or found[0][2] is None:
+        out["why"].append("%d static objects of device %d built by its constructor (one is wanted)" % (len(found), dev))
+        return out
+    obj, devoff, vt = found[0]
+    out.update(obj=obj, devoff=devoff, vtable=vt)
+    for slot in range(64):
+        f = t.ptr.get(vt + 8 * slot)
+        if not f or not t.in_text(f):
+            continue
+        ws = list(_window(t, f, 10))[:10]
+        s0 = _ls(ws[0][1]) if ws else None
+        if s0 and s0[0] == "ldrh" and s0[2] == 0 and any(_bl(a, w) == adjustment for a, w in ws):
+            out["off_slot"] = slot
+            break
+    if "off_slot" not in out:
+        out["why"].append("no slot of the object's vtable 0x%x answers 'disabled' through the adjustment getter" % vt)
+    return out
+
+
+def _raw(t, va, n):
+    """(va, word) for n words at va, function starts or not (a short function's branch targets cut _window)"""
+    return [(va + 4 * k, t.u32(va + 4 * k)) for k in range(n) if t.u32(va + 4 * k) is not None]
+
+
+def flag_set(t, game_flags):
+    """the game's flag set: a short function loading the bitmap pointer from game_flags (`ldr x3, [x1, #lo]`) and
+    ORing a bit into it (a register-offset strb). -> (address, the count's GOT target) or (None, None)"""
+    hits = []
+    for f in t.starts:
+        ws = _raw(t, f, 24)
+        page, loads, cnt = {}, False, None
+        for a, w in ws:
+            p = _adrp(a, w)
+            if p:
+                page[p[0]] = p[1]
+                continue
+            ls = _ls(w)
+            if ls and ls[0] == "ldr" and ls[2] in page:
+                at = page[ls[2]] + ls[3]
+                if at == game_flags:
+                    loads = True
+                elif at in t.ptr:
+                    cnt = cnt or t.ptr[at]
+        if loads and any((w & 0xFFE00C00) == 0x38200800 for a, w in ws) and any((w & 0x7F200000) == 0x2A000000
+                                                                                   for a, w in ws)                 and not any((w & 0x7F200000) == 0x0A200000 for a, w in ws):          # a bic: the set-to-value
+            hits.append((f, cnt))
+    return hits[0] if len(hits) == 1 else (None, None)
+
+
+def mode_starts(ref, rlines, t, fset):
+    """the Spike 2 port's block_start_<id> lines on Spike 3, each by the game flag its start sets: the Spike 2 start's
+    `mov r0, #flag` that is one of the port's mode_flag_<n> values, and the one Spike 3 function that opens with a
+    call (the same guard shape) and sets that flag through the flag set within its first 24 words. -> {id: (va,
+    flag)}, [why]"""
+    rsite = {t1[1]: int(t1[2], 16) for k, t1, s in rlines if k == "site" and len(t1) >= 3}
+    flags = {int(t1[2], 0) for k, t1, s in rlines if k == "value" and len(t1) >= 3 and re.match(r"mode_flag_\d+$", t1[1])}
+    want = {}
+    for name, a in rsite.items():
+        m = re.match(r"block_start_(\d+)$", name)
+        if not m:
+            continue
+        got = [v for v in (_arm_mov_r0(ref.u32(a + 4 * k) or 0) for k in range(24)) if v is not None and v in flags]
+        if len(got) == 1:
+            want[int(m.group(1))] = got[0]
+    by_flag = defaultdict(list)
+    for f in t.starts:
+        ws = list(_window(t, f, 24))[:24]
+        if len(ws) < 4 or not _bl(*ws[1]):
+            continue
+        for i, (a, w) in enumerate(ws):
+            mz = _movz_w(w)
+            if mz and mz[0] == 0 and mz[1] in want.values() and any(_bl(a2, w2) == fset for a2, w2 in ws[i + 1:i + 5]):
+                by_flag[mz[1]].append(f)
+                break
+    out, why = {}, []
+    for bid, fl in sorted(want.items()):
+        c = by_flag.get(fl, [])
+        if len(c) == 1:
+            out[bid] = (c[0], fl)
+        else:
+            why.append("block_start_%d (flag %d): %d Spike 3 starts set it" % (bid, fl, len(c)))
+    return out, why
+
+
+def play_engine(ref, rlines, t, later_at, placed):
+    """PAD-1285: what a mode's multiball, its held coils and its blocks need on a Spike 3 program. {'site', 'data',
+    'value', 'text', 'carry' (matcher placements now carried), 'why'}"""
+    out = {"site": {}, "data": {}, "value": {}, "text": [], "carry": [], "flag_of": {}, "why": []}
+    rdata = {t1[1]: int(t1[2], 16) for k, t1, s in rlines if k == "data" and len(t1) >= 3}
+    rval = {t1[1]: t1[2] for k, t1, s in rlines if k == "value" and len(t1) >= 3}
+    rtext = {t1[1]: s.split(None, 2)[2] if len(s.split(None, 2)) > 2 else "" for k, t1, s in rlines if k == "text"}
+    have = {n: later_at[n] for n in PLAY_SITES if n in later_at}
+    if "balls_in_play" in have and "multiball_serve" in have:
+        out["carry"] += ["balls_in_play", "multiball_serve"]
+        arg3 = Counter()
+        for i, tg in t.calls.items():
+            if tg == have["multiball_serve"]:
+                for k in range(1, 9):
+                    mz = _movz_w(t.words[i - k]) if i - k >= 0 else None
+                    if mz and mz[0] == 3:
+                        arg3[mz[1]] += 1
+                        break
+        if arg3 and 0xBB not in arg3:
+            out["value"]["multiball_arg3"] = arg3.most_common(1)[0][0]
+    for n in ("proc_sleep", "adjustment", "coil_fire"):
+        if n in have:
+            out["carry"].append(n)
+    # held coils
+    if "coil_fire" in have and "proc_sleep" in have:
+        cr = coil_records(t, have["coil_fire"])
+        out["why"] += cr["why"]
+        out["data"].update(cr["data"])
+        pairs = coil_control(t, have["proc_sleep"])
+        if not pairs:
+            out["why"].append("no device take / give pair of the known shape")
+        names = rtext.get("held_coils", "").split()
+        cc = None
+        if cr["data"] and pairs and "magnet_proc" in rval:
+            out["value"]["magnet_proc"] = int(rval["magnet_proc"], 0)
+            kept = []
+            for c in names:
+                dev = int(rval.get(c + "_dev", "0"), 0)
+                if c + "_drive" not in rtext or not dev:
+                    out["why"].append("held coil %s: not by its board address with a device on Spike 2" % c)
+                    continue
+                if c + "_obj" in rdata or c + "_ctl" in rval:
+                    if not ("adjustment" in have and int(rval.get(c + "_ctl", "0"), 0)):
+                        out["why"].append("held coil %s: its object needs the adjustment getter and a _ctl" % c)
+                        continue
+                    o, pair = {"why": ["no device take / give pair's constructor builds it"]}, None
+                    for pr in pairs:                     # the family whose constructor builds this coil's object
+                        o2 = device_object(t, dev, pr["value"]["ctl"], have["adjustment"])
+                        if not o2["why"] or len(o2) > 1:
+                            o, pair = o2, pr
+                            break
+                    if o["why"] or ("%s_off_slot" % c in rval and "off_slot" not in o) or (cc and pair is not cc):
+                        out["why"] += ["held coil %s: %s" % (c, w) for w in o["why"] or ["another device family"]]
+                        continue
+                    cc = pair
+                    out["site"].update(cc["site"])
+                    out["data"][c + "_obj"] = o["obj"]
+                    out["value"][c + "_ctl"] = cc["value"]["ctl"]
+                    out["value"][c + "_devoff"] = o["devoff"]
+                    if "%s_off_slot" % c in rval:
+                        out["value"][c + "_off_slot"] = o["off_slot"]
+                out["value"][c + "_dev"] = dev
+                for k in ("label", "drive"):
+                    if c + "_" + k in rtext:
+                        out["text"].append("text %-20s %s" % (c + "_" + k, rtext[c + "_" + k]))
+                kept.append(c)
+            if kept:
+                out["text"].append("text %-20s %s" % ("held_coils", " ".join(kept)))
+    # the game's flags and mode starts
+    gf = later_at.get("data:game_flags")
+    if gf:
+        fset, cnt = flag_set(t, gf)
+        if fset and cnt:
+            out["data"].update(game_flags=gf, game_flag_count=cnt)
+            out["value"]["game_flags_at"] = 0
+            starts, why = mode_starts(ref, rlines, t, fset)
+            out["why"] += why
+            for bid, (va, fl) in starts.items():
+                out["site"]["block_start_%d" % bid] = va
+                out["flag_of"]["block_start_%d" % bid] = fl
+                if "block_name_%d" % bid in rtext:
+                    out["text"].append("text %-20s %s" % ("block_name_%d" % bid, rtext["block_name_%d" % bid]))
+            for k, v in rval.items():
+                if re.match(r"mode_flag_\d+$", k) and int(v, 0) in {fl for va, fl in starts.values()}:
+                    out["value"][k] = int(v, 0)
+        else:
+            out["why"].append("no one flag set loads game_flags 0x%x" % gf)
+    return out
+
+
 def draft(ref, rport, tgt, game=None, version=None):
     scan(ref)
     scan(tgt)
@@ -1474,6 +1829,35 @@ def draft(ref, rport, tgt, game=None, version=None):
         placed[name] = b
         if name in missing:
             missing.remove(name)
+    # PAD-1285: a mode's multiball, held coils and blocks (the matcher's plain calls carried, the rest read off the code)
+    gfl = dict(later_at)
+    if tdata.get("game_flags", (None,))[0]:
+        gfl["data:game_flags"] = tdata["game_flags"][0]
+    pe = play_engine(ref, lines, tgt, gfl, placed) if tgt.a64 else {"site": {}, "data": {}, "value": {}, "text": [],
+                                                                     "carry": [], "flag_of": {}, "why": []}
+    pre = "# not carried yet (its feature is 32-bit): "
+    for name in pe["carry"]:
+        b = later_at[name]
+        at = next(k for k, l in enumerate(body) if l.startswith(pre + "site %-16s 0x%08x" % (name, b)))
+        body[at:at + 1] = ["#   %s: matched (PAD-1285)" % name, body[at][len(pre):]]
+        placed[name] = b
+        later.remove(name)
+    how5 = {"coil_take": "the device take (obj, ticks): waits for its control word, adds the exit hook, keeps the "
+                         "process's id",
+            "coil_give": "the device give (obj, flag): clears the control word, takes the exit hook off, calls the "
+                         "object's update"}
+    for name, b in pe["site"].items():
+        if name in placed and name not in later:
+            continue
+        at = next((k for k, l in enumerate(body) if l.startswith("# site %-16s NOT PLACED" % name)
+                   or l.startswith(pre + "site %-16s " % name)), len(body))
+        how = how5.get(name) or "the start that sets the game's flag %d" % pe["flag_of"].get(name, 0)
+        body[at:at + 1] = ["#   %s: %s (PAD-1285)" % (name, how),
+                           "site %-16s 0x%08x 0x%08x 0x%08x" % (name, b, tgt.u32(b), tgt.u32(b + 4))]
+        placed[name] = b
+        for lst in (missing, later):
+            if name in lst:
+                lst.remove(name)
     # PAD-1284: a placed site no feature uses on the Spike 2 port of this build either says why, not "32-bit"
     rsites = {t[1] for k, t, s in lines if k == "site" and len(t) >= 3}
     rdat = {t[1] for k, t, s in lines if k == "data" and len(t) >= 3}
@@ -1487,9 +1871,30 @@ def draft(ref, rport, tgt, game=None, version=None):
     if not {"clip_play", "video_player", "video_surface"} <= rsites:
         for n in ("display_draw", "player_advance"):
             idle[n] = "the clip_play clip path it belongs to is not this title's (its clips are the surface's)"
+    # PAD-1285: the 64-bit switch drain hands each edge to switch_hit / switch_hit2 itself (by the switch's handler
+    # bits): no per-switch edge call (Spike 2's switch_edge) to hook. The shots come through those two sites; what
+    # needs every edge (the attract flipper sounds, the game mode shot sounds, co-op) rides Spike 2's delivery.
+    hits = {placed[n] for n in placed if n.startswith("switch_hit")}
+    drain = later_at.get("switch_drain")
+    if tgt.a64 and drain and hits and any(_bl(a, w) in hits for a, w in _raw(tgt, drain, 160)):
+        idle["switch_drain"] = ("the 64-bit drain calls switch_hit / switch_hit2 itself, by the switch's handler bits - "
+                                "the shots come through those sites (PAD-1285)")
+        at = next((k for k, l in enumerate(body) if l.startswith("# site %-16s NOT PLACED" % "switch_edge")), None)
+        if at is not None:
+            body[at] = ("# site %-16s NOT ON SPIKE 3: its drain has no per-switch edge call - it calls switch_hit / "
+                        "switch_hit2 itself; every-edge features (attract flipper sounds, game mode shot sounds, co-op) "
+                        "ride Spike 2's delivery (PAD-1285)" % "switch_edge")
+    if (tgt.a64 and "ball_end" not in placed and "hook_dispatch" in placed
+            and any(k == "event" and t[1] == "ball_end" for k, t, s in lines)):
+        at = next((k for k, l in enumerate(body) if l.startswith("# site %-16s NOT PLACED" % "ball_end")), None)
+        if at is not None:
+            body[at] = ("# site %-16s NOT NEEDED: the end of a ball is the bus's event (value ball_end_event, through "
+                        "hook_dispatch) - the Spike 2 site is that event's handler (PAD-1285)" % "ball_end")
     for k, l in enumerate(body):
         m = re.match(r"# not carried yet \(its feature is 32-bit\): (site (\S+) .*)$", l)
-        if m and m.group(2) in idle:
+        if m and m.group(2) == "switch_drain" and tgt.a64:
+            body[k] = "# not carried - %s: %s" % (idle[m.group(2)], m.group(1))
+        elif m and m.group(2) in idle:
             body[k] = "# not carried - no feature uses it on the Spike 2 port either (%s): %s" % (idle[m.group(2)],
                                                                                               m.group(1))
     for name, why3 in (("string_new", "NOT NEEDED: the 64-bit program's strings are the C++11 ABI and it imports no "
@@ -1522,6 +1927,10 @@ def draft(ref, rport, tgt, game=None, version=None):
                 name, lit["data"][name]))
             placed["data:" + name] = lit["data"][name]
             continue
+        if name in pe["data"]:
+            body.append("data %-22s 0x%08x   # read off the program's own code (PAD-1285)" % (name, pe["data"][name]))
+            placed["data:" + name] = pe["data"][name]
+            continue
         if name in scn["data"] and (scn["screens"] or scn["clips"]):
             body.append("data %-22s 0x%08x   # read in the game's own scene lookups (PAD-1284)" % (
                 name, scn["data"][name]))
@@ -1550,7 +1959,7 @@ def draft(ref, rport, tgt, game=None, version=None):
                                                                                             scn["clips"]))}
     for k, t, s in lines:
         if k == "value" and t[1] not in sound_vals and not t[1].startswith("countdown_") and t[1] not in lit_vals \
-                and t[1] not in scn_vals \
+                and t[1] not in scn_vals and t[1] not in pe["value"] \
                 and not (lit["show"] and re.match(r"show_secs_\d+$", t[1])):
             body.append(s if t[1] in VALUES_PROVEN else "# not carried (64-bit layout, measure it): " + s.strip())
     for name, v in sound_vals.items():
@@ -1562,6 +1971,10 @@ def draft(ref, rport, tgt, game=None, version=None):
     for name, v in scn_vals.items():
         body.append("value %-25s 0x%x    # read off the program's own code (PAD-1284)" % (name, v))
     body += ["# PAD-1284: %s" % w for w in scn["why"]]
+    for name, v in pe["value"].items():
+        body.append("value %-25s %s    # read off the program's own code (PAD-1285)" % (
+            name, ("0x%x" % v) if name == "multiball_arg3" else v))
+    body += ["# PAD-1285: %s" % w for w in pe["why"]]
     if "ball_end" not in placed and any(t[1] == "ball_end" for t, s in events) and "hook_dispatch" in placed:
         eid = next(t[2] for t, s in events if t[1] == "ball_end")
         body.append("value ball_end_event %s    # the end of a ball, from the bus (no ball_end site on Spike 3)" % eid)
@@ -1600,12 +2013,17 @@ def draft(ref, rport, tgt, game=None, version=None):
         body += ["", "# ---- scenes (PAD-1284): a mode's screen goes in hud, its clip on video_bank's surface - the same ids",
                  "# the program names ----"]
         body += scn["scene"]
+    if pe["text"]:
+        body += ["", "# ---- PAD-1285: a held coil's names and board address, the game's modes a mode keeps from starting ----"]
+        body += pe["text"]
+    pe_text = {l.split()[1] for l in pe["text"]}
     tx = [s for k, t, s in lines if k == "text" and len(t) > 1 and t[1].startswith("example_")]
     if tx:
         body += ["", "# ---- text ----"] + tx
     scn_names = {l.split()[1] for l in scn["scene"]}
     rest = Counter(k for k, t, s in lines if (k == "shot" or (k == "scene" and t[1] not in scn_names) or (k == "lamp" and not lit["lamp"])) or
                    (k == "callout" and shift is None) or (k == "text" and not t[1].startswith("example_") and
+                                                          t[1] not in pe_text and
                                                           not (lit["show"] and re.match(r"show_(name|kind)_\d+$", t[1]))))
     if rest:
         body += ["", "# not carried (to measure on Spike 3): " + ", ".join("%d %s" % (n, k) for k, n in sorted(rest.items()))]

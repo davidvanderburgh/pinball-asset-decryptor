@@ -528,6 +528,10 @@ MULTIBALL_PROVEN = frozenset({
     "venom_pro-1.07",                    # PAD-420 2026-10-07 mb_job (stock card, hidden, muted): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "batman-1.14",                       # PAD-420 2026-10-08 mb_job (stock card, hidden, muted; the port's 22 block lines in): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
     "munsters_pro-1.28",                 # PAD-480 2026-10-14 mb_job (stock card, hidden, muted; pop bumpers tapped through the multiball, as balls in play hit them - its ball search wrote silent balls off): served 3, jackpots, add-a-ball to 4, drains 4-3-2-1, END (one ball left): counts [3, 4, 3, 2, 1]
+    # PAD-1285 2026-11-14, the Spike 3 card (rig slot 85, hidden, muted, a mode file started on Top lane center x3 - three
+    # Death Star hits start the game's own multiball): served 3 through the game's serve, the mode ran its 40 s (the game's
+    # Orbits start refused meanwhile), drains 3-2-1, then "ours is over" at one ball
+    "star_wars_elg-1.10/spike3",
 })
 
 
@@ -1734,6 +1738,11 @@ HELD_COILS_PROVEN = frozenset({
     ("jaws_pro-1.02", "right_post"),
     ("led_zeppelin_pro-1.22", "control_gates"),  # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 5, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
     ("star_wars_elg-1.10", "right_gate"),        # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 8 coil 2, 255 for 60 ms then 128 (its own); OFF 2014 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
+    # PAD-1285 2026-11-14, the Spike 3 card (rig slots 85/87, hidden, muted): node 8 coil 2 is the game's device 9, its object
+    # (0x711730) taken through coil_take; held 2000 ms at the start and 1500 ms on shots, each ONE command on the bus
+    # (`40 02 ff 06 00 80 c1 00`: 255 for ~60 ms, then 128 for 1.93 s), given back at its time or 483 ms early when the mode
+    # ended; refused while the game's own 20 s commands held it; no abort
+    ("star_wars_elg-1.10/spike3", "right_gate"),
     ("sword_of_rage_le-1.19", "control_gates"),  # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
     ("sword_of_rage_pro-1.19", "control_gates"), # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 0, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1499 ms on; no abort
     ("deadpool_le-1.16", "control_gates"),       # PAD-420 2026-10-07 coil_job (stock card, hidden, muted): node 9 coil 6, 255 for 60 ms then 96 (its own); OFF 2015 ms on; a mode stop 1.5 s in let go 1500 ms on; no abort
@@ -1908,6 +1917,7 @@ STACK_BALLS_PROVEN = frozenset({
     "uncanny_xmen_pro-0.98",             # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
     "aerosmith-1.16",                    # PAD-420 2026-10-07 st_job (stock card, hidden, muted): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
     "batman-1.14",                       # PAD-420 2026-10-08 st_job (stock card, hidden, muted; the port's 22 block lines in): our own multiball stopped with its three balls in play, a stack no mode refused (a multiball is running), then started at one ball: WAITER not started (trigger file): a multiball is running
+    "star_wars_elg-1.10/spike3",         # PAD-1285 2026-11-14 stackmb (Spike 3 rig slot 86, hidden, muted): the game's own Death Star multiball held a stack no mode back twice (a multiball is running); two drains later it started on its trigger
 })
 
 
@@ -1952,6 +1962,7 @@ def own_music_none(game, version, arch="arm"):
 STACK_FLAGS_PROVEN = frozenset({
     "jurassic_park_the_pin-1.05",     # 2026-09-25: Stegosaurus (flag 40) held a stack no mode back
     "star_wars_elg-1.10",             # Inner loop (flag 86)
+    "star_wars_elg-1.10/spike3",      # PAD-1285 2026-11-14 (Spike 3 rig slot 86): the game's Ramps start (flag 87, called as its rules call it) held a stack no mode back 21 times; with nothing running the same start had run
     "stranger_things_le-1.12",        # Bust out (flag 78)
     "james_bond_le-1.06",             # Bust out (flag 102), and the flag cleared when it ended
     "batman-1.13",                    # Shame (flag 71, its start takes one argument), cleared when it ended

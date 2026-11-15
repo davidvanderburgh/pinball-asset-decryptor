@@ -5740,13 +5740,35 @@ static int balls_multiball(unsigned n, unsigned long now, unsigned long *since)
 
 static unsigned long two_since;   /* PAD-687: kept up every tick (stock_balls_tick), not only when asked */
 
+/* PAD-1285: the balls a multiball of OURS put in play (pm_multiball_start) are not one of the game's multiballs. The
+ * count route sees only balls, so it took a mode's own multiball for the game's three seconds after the serve and
+ * ended the mode that asked for it ("the game's own mode began"; Star Wars ELG 1.10, Spike 3 rig). ours_at: pm_ms()
+ * of our serve, 0 = none; it ends when the balls are back to one, after OURS_MB_GRACE_MS (the serve answers the
+ * asked-for count at once, and a saved ball is back within that). 1 while ours is on (tests lift it verbatim). */
+#define OURS_MB_GRACE_MS 2000
+static unsigned long ours_mb_at;
+static int ours_multiball(unsigned n, unsigned long now, unsigned long *ours_at)
+{
+    if (!*ours_at) return 0;
+    if (n < 2 && now - *ours_at >= OURS_MB_GRACE_MS) {
+        *ours_at = 0;
+        return 0;
+    }
+    return 1;
+}
+
 static void stock_balls_tick(void)
 {
+    unsigned n;
     if (!fn("balls_in_play") || !pm_player()) {
         two_since = 0;
+        ours_mb_at = 0;
         return;
     }
-    balls_multiball(((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu, pm_ms(), &two_since);
+    n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
+    if (ours_mb_at && !ours_multiball(n, pm_ms(), &ours_mb_at))
+        say("multiball: ours is over (%u ball in play) - two or more are the game's again", n);
+    balls_multiball(n, pm_ms(), &two_since);
 }
 
 static int stock_balls(unsigned kinds)
@@ -5766,6 +5788,7 @@ static int stock_balls(unsigned kinds)
     if (stock_objects_route() && (kinds & (PM_STOCK_BATTLE | PM_STOCK_ANY)) && stock_objects())
         return (int)PM_STOCK_BATTLE;
     n = ((unsigned (*)(void))(unsigned long)fn("balls_in_play"))() & 0xffu;
+    if (ours_multiball(n, pm_ms(), &ours_mb_at)) return 0;   /* PAD-1285: the balls are a multiball of ours */
     return balls_multiball(n, pm_ms(), &two_since) && (kinds & (PM_STOCK_MULTIBALL | PM_STOCK_ANY))
         ? (int)PM_STOCK_MULTIBALL : 0;
 }
@@ -5892,9 +5915,9 @@ static unsigned block_list[BLOCK_WORDS];      /* the asking mode's own list, set
 static const struct pm_mode *block_list_by;
 static unsigned block_said[BLOCK_WORDS];      /* the ids refused this hold */
 static unsigned block_named[BLOCK_WORDS];     /* the ids whose start is hooked */
-static unsigned block_obj[BLOCK_IDS];         /* each id's object (0: its start is its own, a plain-C title's) */
+static pm_addr block_obj[BLOCK_IDS];          /* each id's object (0: its start is its own, a plain-C title's) */
 static unsigned char block_hook_of[BLOCK_IDS];/* each id's hook, + 1 */
-static unsigned block_hooked[BLOCK_HOOKS];
+static pm_addr block_hooked[BLOCK_HOOKS];     /* PAD-1285: the starts' addresses, 8 bytes on 64-bit ARM */
 static int block_n_hooked;
 static int block_battles;                     /* the battle rule's shot handler is hooked (Godzilla) */
 static unsigned block_battle_said;
@@ -5931,13 +5954,13 @@ static void block_defaults(unsigned *m)
     for (i = 0; i < BLOCK_WORDS; i++) m[i] = block_named[i];
 }
 
-static void wizard_refused(unsigned start);   /* PAD-436: the game's mini-wizards, below */
+static void wizard_refused(pm_addr start);   /* PAD-436: the game's mini-wizards, below */
 static int place_take(pm_reg *r, unsigned id);   /* PAD-710: a mode in the place of one of the game's, below */
 /* PAD-715: a mode whose block_start is a check before its start (James Bond's lock multiballs: the lock-open check the
  * lamps ask too, and the lock handler at every lock) names the start itself, `site place_start_<id>` (the function
  * that sets its flags, mode_framework.plain_books): its place is taken there, hooked on its own, never at the check.
  * place_check: the port names one (the check takes nothing); place_from: its start, 0 when it could not be hooked. */
-static unsigned place_from[BLOCK_IDS];
+static pm_addr place_from[BLOCK_IDS];
 static unsigned char place_check[BLOCK_IDS];
 
 /* ---- PAD-503: a mode lit at a shot claims it --------------------------------------------------------------------
@@ -6249,7 +6272,8 @@ static void block_tick(void)
 static void block_arm(void)
 {
     char name[24], ids[200];
-    unsigned id, a;
+    unsigned id;
+    pm_addr a;
     int i, any = 0;
     for (id = 0; id < BLOCK_IDS && !any; id++) {
         pm_snprintf(name, sizeof name, "block_start_%u", id);
@@ -6270,7 +6294,7 @@ static void block_arm(void)
             pm_snprintf(ret, sizeof ret, "block_ret_%u", id);
             if (block_n_hooked >= BLOCK_HOOKS ||
                 !hook_veto_n(a, on_block_start, (unsigned)block_n_hooked, pm_port_value(ret, 1) == 0 ? 0u : 1u)) {
-                say("block: the start of the game's mode %u (0x%08x) could not be hooked", id, a);
+                say("block: the start of the game's mode %u (0x%08" PMA ") could not be hooked", id, a);
                 continue;
             }
             block_hooked[block_n_hooked++] = a;
@@ -6353,6 +6377,7 @@ int pm_multiball_start(unsigned balls, unsigned ballsave_s)
             (balls, 0, ballsave_s * 62u, arg3, 0, 0);
     say("multiball: %u balls asked for (%d in play now), ball save %u s: the game %s", balls, pm_balls_in_play(),
         ballsave_s, r ? "is serving" : "refused");
+    if (r) ours_mb_at = pm_ms() ? pm_ms() : 1;   /* PAD-1285: these balls are ours, not one of the game's multiballs */
     return r ? 1 : 0;
 }
 
@@ -6556,7 +6581,9 @@ static const char *magnet_refusal(int running_mode, int in_game, int disabled, i
 
 struct held_coil {
     char name[16];
-    unsigned dev, obj, id;                  /* the port's device, the game's object, our process's id */
+    unsigned dev;                           /* the port's device */
+    pm_addr obj;                            /* the game's object (PAD-1285: 8 bytes on 64-bit ARM) */
+    unsigned id;                            /* our process's id */
     unsigned long until;                    /* pm_ms() the hold ends; 0 = not holding */
     unsigned long started, ended;
     unsigned long starts[MAGNET_PER_MIN];
@@ -6573,7 +6600,7 @@ struct held_coil {
     unsigned drv[3];                        /* route 1: pulse power, pulse ms, hold power (or adjustment ids) */
     unsigned drv_adj;                       /* bit i: drv[i] is an adjustment id */
     unsigned cap_ms;                        /* route 1: the game's own longest command on it (0 = MAGNET_MAX_MS) */
-    unsigned rec;                           /* route 1: the game's coil record */
+    pm_addr rec;                            /* route 1: the game's coil record */
     unsigned req;                           /* route 1: the id of our command's request */
     unsigned ctl;                           /* the object's controlling-process offset; 0 = no object control */
 };
@@ -6598,12 +6625,15 @@ static struct held_coil *coil_named(const char *name)
 }
 
 /* The object's virtual `slot`, called with the object (ControlCoil's: v[29] pulse power, v[30] pulse ms,
- * v[31] hold power, v[40] disabled) */
-static unsigned coil_virtual(unsigned obj, unsigned slot)
+ * v[31] hold power, v[40] disabled). PAD-1285: the vtable's slots are pointers (8 bytes on 64-bit ARM). */
+static unsigned coil_virtual(pm_addr obj, unsigned slot)
 {
-    unsigned vt = *(const unsigned *)(unsigned long)obj;
-    return ((unsigned (*)(unsigned))(unsigned long)(*(const unsigned *)(unsigned long)(vt + 4u * slot)))(obj);
+    pm_addr vt = *(const pm_addr *)(unsigned long)obj;
+    return ((unsigned (*)(pm_addr))(unsigned long)(*(const pm_addr *)(unsigned long)(vt + sizeof(pm_addr) * slot)))(obj);
 }
+
+/* PAD-1285: the object's take (obj, ticks to wait) and give (obj, remove the exit hook) */
+typedef unsigned (*coil_take_fn)(pm_addr, unsigned);
 
 /* route 1: a word of the coil's record (0 when the record is not readable) */
 static unsigned coil_rec_word(const struct held_coil *c, unsigned off)
@@ -6700,10 +6730,10 @@ static void magnet_done(struct held_coil *c)
 }
 
 /* the object's take / give (route 0 and a route 1 coil with an object): the coil's own, or the port's */
-static unsigned coil_call(const struct held_coil *c, const char *what)
+static pm_addr coil_call(const struct held_coil *c, const char *what)
 {
     char key[40];
-    unsigned a;
+    pm_addr a;
     pm_snprintf(key, sizeof key, "%s_%s", c->name, what);
     if ((a = fn(key))) return a;
     pm_snprintf(key, sizeof key, "coil_%s", what);
@@ -6733,7 +6763,7 @@ static void magnet_proc(struct held_coil *c)
         magnet_done(c);
         return;
     }
-    if (has_obj && !(((unsigned (*)(unsigned, unsigned))(unsigned long)coil_call(c, "take"))(c->obj, 0) & 0xffu)) {
+    if (has_obj && !(((coil_take_fn)(unsigned long)coil_call(c, "take"))(c->obj, 0) & 0xffu)) {
         say("%s: no hold - a process of the game's controls it", c->name);
         magnet_done(c);
         return;
@@ -6743,7 +6773,7 @@ static void magnet_proc(struct held_coil *c)
     sent = pm_ms();
     if (c->route && !c->req) {              /* the coil service refused it (no such device): nothing was sent */
         say("%s: no hold - the game's coil call refused the command", c->name);
-        if (has_obj) ((unsigned (*)(unsigned, unsigned))(unsigned long)coil_call(c, "give"))(c->obj, 1);
+        if (has_obj) ((coil_take_fn)(unsigned long)coil_call(c, "give"))(c->obj, 1);
         magnet_done(c);
         return;
     }
@@ -6761,7 +6791,7 @@ static void magnet_proc(struct held_coil *c)
     if (c->release && c->why) end = c->why;
     if (has_obj) {
         coil_clear_countdown(c);            /* PAD-621: its own update lowers it, never raises it again */
-        ((unsigned (*)(unsigned, unsigned))(unsigned long)coil_call(c, "give"))(c->obj, 1);
+        ((coil_take_fn)(unsigned long)coil_call(c, "give"))(c->obj, 1);
         say("%s: let go - %s, after %lu ms (%ld ms before the command's own end); control given back, the "
             "game's coil update switches it off", c->name, end, pm_ms() - sent, (long)(c->until - pm_ms()));
     } else {
@@ -6799,12 +6829,13 @@ static void magnet_let_go(const char *why)  /* every held coil (the mode ended, 
 }
 
 /* route 1: the one record with the port's board address, or 0 (none, or more than one) */
-static unsigned coil_find_record(struct held_coil *c)
+static pm_addr coil_find_record(struct held_coil *c)
 {
-    unsigned tab = data("coil_table"), cnt = data("coil_count"), base, n, d, rec, found = 0, dev = 0;
-    if (!tab || !cnt || !maps_has(tab, 4, MAP_R) || !maps_has(cnt, 4, MAP_R)) return 0;
-    base = *(const unsigned *)(unsigned long)tab;
-    n = *(const unsigned *)(unsigned long)cnt;
+    pm_addr tab = data("coil_table"), cnt = data("coil_count"), base, rec;
+    unsigned n, d, found = 0, dev = 0;
+    if (!tab || !cnt || !maps_has(tab, sizeof(pm_addr), MAP_R) || !maps_has(cnt, 4, MAP_R)) return 0;
+    base = *(const pm_addr *)(unsigned long)tab;   /* PAD-1285: the table's pointer, 8 bytes on 64-bit ARM */
+    n = *(const unsigned *)(unsigned long)cnt;     /* (a u64 there: its low word, little-endian) */
     if (!base || !n || n > 512) return 0;
     if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) maps_read();   /* the table is the game's heap, grown since the gate */
     if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) return 0;
@@ -6826,10 +6857,11 @@ static unsigned coil_find_record(struct held_coil *c)
 static int coil_device_ok(struct held_coil *c)
 {
     char key[40];
-    unsigned obj = 0, dev, want, off;
+    pm_addr obj = 0;
+    unsigned dev, want, off;
     if (c->checked) return c->checked > 0;
     pm_snprintf(key, sizeof key, "%s_get", c->name);
-    if (fn(key)) obj = ((unsigned (*)(void))(unsigned long)fn(key))();
+    if (fn(key)) obj = ((pm_addr (*)(void))(unsigned long)fn(key))();
     else if (c->route) {                    /* PAD-420: an object a static initializer built once (no getter to call:
                                              * calling that initializer again would build it again) - its address */
         pm_snprintf(key, sizeof key, "%s_obj", c->name);
@@ -6995,13 +7027,14 @@ int pm_magnet_holding(void) { return pm_coil_holding(magnet_coil_name()); }
 static void coil_list(void)
 {
     static int done;
-    unsigned tab = data("coil_table"), cnt = data("coil_count"), base, n, d, r;
+    pm_addr tab = data("coil_table"), cnt = data("coil_count"), base, r;
+    unsigned n, d;
     char line[300];
     int k = 0;
     if (done || !pm_in_game() || !pm_port_value("coil_list", 0) || !tab || !cnt) return;
     done = 1;
-    if (!maps_has(tab, 4, MAP_R) || !maps_has(cnt, 4, MAP_R)) return;
-    base = *(const unsigned *)(unsigned long)tab;
+    if (!maps_has(tab, sizeof(pm_addr), MAP_R) || !maps_has(cnt, 4, MAP_R)) return;
+    base = *(const pm_addr *)(unsigned long)tab;
     n = *(const unsigned *)(unsigned long)cnt;
     if (!base || !n || n > 512) return;
     if (!maps_has(base, n * COIL_REC_SIZE, MAP_R)) maps_read();
@@ -9060,7 +9093,7 @@ static const char *wizard_name(int n)
 
 /* the block refused the start at `start`: when it is a mini-wizard's, keep the player's words as they are now (the
  * game's start has not touched them yet) */
-static void wizard_refused(unsigned start)
+static void wizard_refused(pm_addr start)
 {
     unsigned p = pm_player(), *st;
     int n;
@@ -12688,7 +12721,7 @@ static unsigned place_vfn(unsigned obj, const char *slot_name)
 }
 
 /* the object's STOP */
-static unsigned place_stop_fn(unsigned obj)
+static unsigned place_stop_fn(pm_addr obj)
 {
     return place_vfn(obj, "mode_slot_stop");
 }
@@ -12768,7 +12801,7 @@ static void place_audit(long n)
 }
 
 /* What the game's START writes for its bookkeeping, for the player up (who is `up` to the runtime) */
-static void place_begin(unsigned obj, unsigned id, unsigned up)
+static void place_begin(pm_addr obj, unsigned id, unsigned up)
 {
     long reason = pm_port_value("mode_reason_at", -1);
     long starts = pm_port_value("mode_starts_at", -1), id_at = pm_port_value("mode_id_at", 4);
@@ -12807,7 +12840,7 @@ static void place_begin(unsigned obj, unsigned id, unsigned up)
     if (f_started && mgr && id_at >= 0)
         ((void (*)(unsigned, unsigned))(unsigned long)f_started)(mgr, rw(obj + (unsigned)id_at));   /* STARTED */
     place_held[up].obj = obj;
-    say("place: the game's %s (mode %u, object 0x%08x) counts as started for player %u - its START's bookkeeping, it "
+    say("place: the game's %s (mode %u, object 0x%08" PMA ") counts as started for player %u - its START's bookkeeping, it "
         "does not run: stopped/reason cleared, starts %u -> %u%s", place_name(id), id, obj, up, was, place_starts(obj, p),
         f_started && mgr ? ", the manager's STARTED notice" : "");
 }
@@ -12974,7 +13007,8 @@ int pm_game_modes_end(const char *why)
     static int said;
     long a_slot = pm_port_value("mode_slot_active", -1), k_slot = pm_port_value("mode_slot_kind", -1);
     const char *beside = pm_port_text("stock_any_beside");
-    unsigned id, p, up = pm_player(), obj, act, kfn, stop;
+    unsigned id, p, up = pm_player(), act, kfn, stop;
+    pm_addr obj;
     int n = 0;
     if (a_slot < 0) a_slot = mode_query_slot(0);
     if (k_slot < 0) k_slot = mode_query_slot(1);
@@ -13027,14 +13061,14 @@ int pm_game_modes_end(const char *why)
 int pm_game_mode_start(unsigned id)
 {
     char key[24];
-    unsigned f;
+    pm_addr f;
     if (!(can & PM_CAN_PLACE) || id >= PLACE_IDS || !bm_has(block_named, id) || !pm_in_game()) return 0;
     if (!block_obj[id] && !place_fn[id]) return 0;
     pm_snprintf(key, sizeof key, "block_start_%u", id);
     if (!(f = place_check[id] ? place_from[id] : fn(key))) return 0;   /* PAD-715: a check's mode, its own start */
-    say("place: the game's %s (mode %u) started for a test (its START at 0x%08x, object 0x%08x)", place_name(id), id, f,
-        block_obj[id]);
-    ((void (*)(unsigned))(unsigned long)f)(block_obj[id]);
+    say("place: the game's %s (mode %u) started for a test (its START at 0x%08" PMA ", object 0x%08" PMA ")", place_name(id),
+        id, f, block_obj[id]);
+    ((void (*)(pm_addr))(unsigned long)f)(block_obj[id]);
     return 1;
 }
 
@@ -13191,7 +13225,8 @@ static void done_mark(unsigned id, unsigned p, const char *how)
 /* a game mode's STOP entered: (mode, reason) */
 static void done_stop_seen(pm_reg *r, const char *how)
 {
-    unsigned obj = r[0], id, p;
+    pm_addr obj = r[0];
+    unsigned id, p;
     if (!r[1] || !obj || !pm_in_game()) return;
     for (id = 0; id < BLOCK_IDS && !(block_obj[id] == obj && bm_has(block_named, id)); id++) ;
     if (id >= BLOCK_IDS) return;
@@ -13266,7 +13301,7 @@ static const char *done_slots_said(unsigned n)
     return n ? " and their vtables' slots" : "";
 }
 
-static int done_slot(unsigned obj, unsigned f)
+static int done_slot(pm_addr obj, unsigned f)
 {
     static unsigned vts[DONE_STOPS * 2], thunks[DONE_STOPS], thunk_of[DONE_STOPS];
     static int nvt, nth;

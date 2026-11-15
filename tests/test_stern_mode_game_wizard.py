@@ -471,7 +471,7 @@ def _wiz(tmp_path, *args):
     from tests.test_spike2_mode_roster import _host_run, _lift
     lifted = "\n".join(_lift(src, sig) for sig in (
         "static unsigned *wizard_entry(int n)", "static const char *wizard_name(int n)",
-        "static void wizard_refused(unsigned start)\n{", "static int wizard_running(int n)",
+        "static void wizard_refused(pm_addr start)\n{", "static int wizard_running(int n)",
         "static void wizard_pin(unsigned p)", "static void wizard_due_next(unsigned p)",
         "static void wizard_due_start(unsigned p)", "static void wizards_tick(void)",
         "int pm_game_wizard(int n, int how)", "static int wizard_by_name(const char *name)",

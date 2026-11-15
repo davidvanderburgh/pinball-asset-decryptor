@@ -101,6 +101,28 @@ installed. To turn the modes off without reinstalling, create
 
 `jjpport.py` reports, per title, whether its engine has every piece the
 runtime needs (`can_run_modes`). `modes/ports/` holds the report for every JJP
-image in the library, and `modes/examples/` a starter folder for each title
-that can run modes. The runtime is linked against the oldest glibc among them,
-so one `jjpmodes.so` loads on every title.
+image in the library and `modes/examples/` a starter folder for each title that
+can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
+
+| Image | Engine exported | Runs modes | Library loads |
+|---|---|---|---|
+| Guns N' Roses 03.03 | 22,265 names | yes, emulator-proven | yes |
+| CHAKA's LOTLJ GnR LE 3.03 | 22,265 | yes | yes |
+| Elton John 02.03 | 22,295 | yes | yes |
+| Godfather 02.03 | 21,498 | yes | yes |
+| Wonka 03.03 | 18,717 | yes | yes |
+| Pirates of the Caribbean 01.01 | 18,693 | yes | yes |
+| Harry Potter 01.26 | 233 (no engine) | **no** | yes |
+| Sonic 00.925, 00.926 | 246 (no engine) | **no** | yes |
+
+"Runs modes" for a title other than GnR means its binary exports every engine
+piece the runtime uses and its Mode vtable resolves to the same slots as GnR's
+(read statically), and its starter modes pass `mkjjpmodes.py check` against its
+report. Only GnR could be run: every title needs its own Sentinel key.
+"Library loads" means the one `jjpmodes.so` loads with every import bound
+(`LD_BIND_NOW`) on that image's own glibc - 2.34 on all nine.
+
+**Harry Potter and Sonic are built without the engine's exports**: their
+binaries export only C library and Allegro names. The runtime finds everything
+by name, and their code is ciphertext until the title's own key decrypts it,
+so nothing can be mapped without that key. Custom modes on them need their keys.

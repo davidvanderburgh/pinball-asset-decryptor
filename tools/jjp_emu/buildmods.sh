@@ -9,7 +9,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/padpath.sh"
 # JJP_MODS_LIBDIR=<dir with libc.so.6 [libpthread.so.0 libdl.so.2]>: link against
 # those instead of the mounted title's.  The library that goes on every title's
-# ISO is linked against the OLDEST image's glibc (MODES.md, "Titles"): symbols
+# ISO is linked against an image glibc (every JJP image in the library has 2.34, MODES.md "Titles"); a newer one would need the OLDEST image: symbols
 # keep their old versions on a newer glibc, never the other way round.
 if [ -n "${JJP_MODS_LIBDIR:-}" ]; then
     CHROOT_LIB=$JJP_MODS_LIBDIR

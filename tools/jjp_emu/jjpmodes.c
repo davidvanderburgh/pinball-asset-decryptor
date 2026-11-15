@@ -1012,11 +1012,12 @@ static void *installer(void *arg)
 }
 
 /* JJP_MODS_SELFTEST=1: resolve the engine, the Mode vtable and every name the
- * mode folder uses, print the verdict, and _exit before the game's own static
- * constructors or main() run.  That proves, for a title whose key we do not
- * have, that this library loads against that image's own glibc and finds what
- * a mode needs - without starting the game (no key needed, nothing on screen,
- * no hostname or reboot side effects).  Exit 0 = ready, 3 = not. */
+ * mode folder uses, print the verdict, and _exit before the game's main()
+ * runs: nothing on screen, no hostname or reboot side effects.  It still needs
+ * the TITLE's key: Sentinel's start-up check runs before any preloaded
+ * constructor, so without the key the game exits H0007 first.  For a title
+ * whose key we lack, the library is load-checked in that image's /bin/true
+ * (LD_BIND_NOW) and the engine side by jjpport.py.  Exit 0 = ready, 3 = not. */
 static void selftest(void)
 {
     int bad = 0;

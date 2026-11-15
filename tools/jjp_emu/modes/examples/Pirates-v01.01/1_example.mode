@@ -1,0 +1,15 @@
+# A first custom mode for Pirates-v01.01.  Every key: tools/jjp_emu/MODES.md
+name = PAD Mode
+title = PAD MODE
+start = switch_upf_target_1
+shots = switch_upf_target_1 switch_l_orbit_hi switch_l_ramp_made
+points = 1000000
+seconds = 20
+complete = 5
+complete_points = 5000000
+sound_start = se_VS_Tortuga_Intro
+sound_shot = se_Fanfare_TreasureHoard_Jackpot
+sound_end = se_Fanfare_Bonus_Total
+lamps = lp_spot_gold_1
+lamp_color = ff2000
+lamp_blink = 4

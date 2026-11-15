@@ -2036,6 +2036,22 @@ def _near(x, y):
     return abs(x - y) <= 0.01 + 1e-5 * abs(y)
 
 
+def _near_px(x, y):
+    """Two positions the same to well under a pixel.  PAD-1320 (DragonRR): a card's 32-bit
+    floats, and a scale kept to 3 decimals in a fingerprint, times a pivot hundreds of pixels
+    away, put a node a Write built 0.02 px off its fingerprint, past :func:`_near`; that one
+    node made the whole scene read as not built, and all 136 edits went on a second time.
+    Edits applied twice are off by their own moves, a pixel and more."""
+    return abs(x - y) <= 0.25 + 1e-4 * abs(y)
+
+
+def _near_affine(p, q):
+    """Two affines ``[a, b, c, d, tx, ty]`` the same: their linear parts by :func:`_near`,
+    their positions by :func:`_near_px`."""
+    return len(p) == len(q) and all(
+        (_near_px if i >= 4 else _near)(x, y) for i, (x, y) in enumerate(zip(p, q)))
+
+
 def _col_fp(steps):
     return [[int(f), [_r(v) for v in m], [_r(v) for v in a]] for f, m, a in _tint_steps(steps)]
 
@@ -2083,8 +2099,7 @@ def _close(a, b):
     if not ma or not mb:                      # no track = the identity
         ma = ma or [[1, 0, 0, 1, 0, 0]] * max(1, len(mb))
         mb = mb or [[1, 0, 0, 1, 0, 0]] * max(1, len(ma))
-    return len(ma) == len(mb) and all(
-        len(p) == len(q) and all(_near(x, y) for x, y in zip(p, q)) for p, q in zip(ma, mb))
+    return len(ma) == len(mb) and all(_near_affine(p, q) for p, q in zip(ma, mb))
 
 
 def _stock_node(op):
@@ -2378,7 +2393,7 @@ def start_differences(man, ops, states):
             gm, wm = got.get("m") or [], want.get("m") or []
             if gm and wm and len(gm[0]) == 6 and len(wm[0]) == 6:
                 dx, dy = gm[0][4] - wm[0][4], gm[0][5] - wm[0][5]
-                if not (_near(gm[0][4], wm[0][4]) and _near(gm[0][5], wm[0][5])):
+                if not (_near_px(gm[0][4], wm[0][4]) and _near_px(gm[0][5], wm[0][5])):
                     words.append("off by %+.1f,%+.1f px" % (dx, dy))
                 ws = (wm[0][0] ** 2 + wm[0][1] ** 2) ** 0.5
                 gs = (gm[0][0] ** 2 + gm[0][1] ** 2) ** 0.5
@@ -2464,18 +2479,26 @@ def _trees_stamp(assets_dir):
     return [st.st_size, st.st_mtime_ns]
 
 
+#: What a project's finding of the edits its scenes already show was worked out with: one
+#: older (none = before PAD-1320, whose too-tight positions found a built scene showing none
+#: of them) is worked out again once
+CARRIED_REV = 2
+
+
 def _look_again(assets_dir):
-    """The project's scenes read (again) off a card since they were last looked at: every
-    edited scene is looked at together (:func:`note_shown`)."""
+    """The project's scenes read (again) off a card since they were last looked at, or looked
+    at by an older :data:`CARRIED_REV`: every edited scene is looked at together
+    (:func:`note_shown`)."""
     stamp = _trees_stamp(assets_dir)
     data = _carried_load(assets_dir)
-    if stamp is None or data.get("trees") == stamp:
+    if stamp is None or (data.get("trees") == stamp and data.get("rev") == CARRIED_REV):
         return
     trees = trees_of(assets_dir)
     edits = load(assets_dir)
     note_shown(assets_dir, {c: trees[c] for c in edits if c in trees}, edits=edits)
     data = _carried_load(assets_dir)
     data["trees"] = stamp
+    data["rev"] = CARRIED_REV
     _carried_save(assets_dir, data)
 
 
@@ -2513,6 +2536,7 @@ def to_apply_on_card(assets_dir, card, scene, ops):
     ops = list(ops or ())
     if not ops or not assets_dir:
         return ops
+    _look_again(assets_dir)            # PAD-1320: a finding of an older rev is redone first
     data = _carried_load(assets_dir)
     base = _Base.of_tree(scene)
     rec = data["carried"].get(card)

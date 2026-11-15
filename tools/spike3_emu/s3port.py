@@ -535,7 +535,13 @@ def device_records(t):
         o = t.off(n) if n else None
         if o is None:
             return None
-        name = t.b[o:t.b.find(b"\0", o, o + 80)].decode("latin1")     # short names too ("GI", "TILT")
+        raw = t.b[o:t.b.find(b"\0", o, o + 80)]                       # short names too ("GI", "TILT")
+        try:
+            # PAD-1289: the names are UTF-8. Pokemon LE's "POKÉ BALL SPOT" read as Latin-1 has an unprintable \x89,
+            # which ended the walk there and lost the 16 QR scanner switches before it: every switch id 16 low
+            name = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            name = raw.decode("latin1")
         if not name or len(name) > 40 or not name.isprintable():
             return None
         o = t.off(a + 0x20)
@@ -2225,9 +2231,11 @@ def draft(ref, rport, tgt, game=None, version=None):
 
 #: a reference site that is its game's own content, never another title's
 GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
-#: reference values that are its game's own (its shows, callouts, held coils, mode flags)
+#: reference values that are its game's own (its shows, callouts, held coils, mode flags, and its mode book's
+#: COMPLETED / done flags - PAD-1289: Star Wars ELG's 66 / 68 turned up at lined-up instructions on Pokemon LE, but
+#: they are the flags of ELG's own modes, and another title's modes are its own port's)
 GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
-                        r"magnet_proc|game_flags_at|block_\w+)$")
+                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+)$")
 GAME_DATA = re.compile(r"right_gate_obj$")
 #: the screen and clip features name the title's own hud / video bank scenes (per game): their sites, globals and
 #: values are placed and written as comments until a title's scenes are named

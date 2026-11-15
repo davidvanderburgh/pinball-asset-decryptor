@@ -505,6 +505,38 @@ transcription does not carry over by itself. Music modes, editions, menu setting
 the switch edges: PAD-1322, below.
 Tests: tests/test_pad1286_spike3_proofs.py, tests/test_spike3_balls.py.
 
+### Pokemon LE 0.82 (PAD-1289)
+
+`ports/spike3/pokemon_le-0.82.port`, drafted from Star Wars ELG 1.10's Spike 3 port (`s3port.py`, 9,333 functions
+paired, 29 sites, 45 shot switches; only coil_take / coil_give unplaced). The proof rig takes a title now:
+`TITLE=pokemon_le` sources `proofs/titles/pokemon_le.env` (the card, the port, `proofs/modes/pokemon_le/` for the mode
+files, the switch names) and play.sh drops `COINS` before Start and again on each retry (Pokemon is not on free play: attract says
+CREDITS 0, and coins dropped while the game boots are not counted). `PROOF=mode` is the plain trigger / shots / clock
+play.
+
+What the first runs found, fixed here:
+- **Every switch id was 16 low.** The device table's names are UTF-8; `device_records` read them as Latin-1, so
+  "POKÉ BALL SPOT" had an unprintable `\x89`, the walk stopped there and the 16 QR scanner switches before it were
+  never counted (the rig's `value switch_hit_log` showed Berry target left arrive as 36, the draft said 20). Names are
+  read as UTF-8 now (Latin-1 if they are not). `s3nodes.Elf.cstr` had the same decode: the rig's view of Pokemon's
+  table lacked the POKÉ BALL coil and ~120 playfield lights behind that record. Star Wars ELG reads the same either way.
+- **Star Wars ELG's mode-book flags were carried** (done_flag_0 66, place_flag_completed_2 68: the same numbers sat at
+  lined-up instructions). They are ELG's own modes; `GAME_VALUE` leaves `place_flag_*` / `done_flag_*` out.
+- **Modes off a Spike 3 card**: `mode_from_card.read_padmode` only looked for `/usr/local/padmode` on plain ext4
+  partitions; a Spike 3 card keeps them in `/games/pad/padmode` inside the encrypted games volume. It opens that volume
+  through the card's key now (`spike3_card.open_games`), so the Modes tab's "modes from a card" reads a Spike 3 card.
+
+Proof (2026-11-15, rig slot 129, hidden, MUTED, the library card): POKE TEST (Berry target left x3, 20 s) started on
+the third hit, scored 6 shots through score_add (+21,000,000) and ended on its clock; ball save and its control, and a
+mode's multiball, as in the table above (BALL_SAVE_PROVEN, MULTIBALL_PROVEN carry `pokemon_le-0.82/spike3`). The Write:
+`spike3_write.write_card` with a BERRY RUSH mode (446 s), `card_state` = modes / `pokemon_le/game`, the padmode files
+read back through the card's key, `card_modes_file` gave the modes back whole and `import_modes` loaded them into a
+fresh project; the written card (in the store via `s3store.py build`, `PAD_SPIKE3_KEYFILE` = the app's
+`~/.pad/spike3_padkeys.json`) booted with its own hook and mode.so, and BERRY RUSH started on its trigger, scored and
+ended on its clock. Not proven, so not offered: stacking on the game's own multiball (which shots start Pokemon's own
+multiball is not known yet), held coils (no coil_take / coil_give), the game's own modes (place / done), lamps,
+screens, clips and own sounds (this title's own content). Tests: tests/test_pad1289_pokemon_spike3_port.py.
+
 ## The switch edges on Spike 3 (PAD-1322)
 
 Spike 2's framework drain calls one small per-switch function for every edge (`site switch_edge`), which the

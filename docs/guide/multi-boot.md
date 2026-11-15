@@ -236,6 +236,8 @@ under the game's own name (`lab.fun` for Labyrinth).
   the file stays under FAT32's 4 GB limit. The stock and Sarah code together
   come to about 3.2 GB. The size strip tells you if it won't fit.
 - All the builds share one set of settings and scores.
+- **Back to the menu without switching off:** during a game, hold **EXIT** on
+  the coin door for 5 seconds. The machine restarts into the menu.
 - Installing any normal update afterwards removes the menu.
 
 | Game | Supported |
@@ -251,6 +253,7 @@ The tab takes the stock version plus more builds of the game, and **Build update
 1. **Install it.** Copy the zip onto a USB stick, then in the service menu pick **USB update** and install it.
 2. **Switch to it.** Service menu, **Version Select**, the new version, **YES**. The game restarts into the menu.
 3. **Every power-up**: the flippers choose, START boots, and the countdown boots the last build you chose.
+4. **Back to the menu without switching off:** Version Select in the service menu, as in step 2.
 
 - All the builds share one set of settings and scores, carried over from the version you switched from.
 - If anything goes wrong, the machine starts the stock version.
@@ -267,6 +270,9 @@ here, say). Halloween and Ultraman are one machine, so those two can share one m
 1. **Install it** the way every update of that game is installed, from a USB stick.
 2. **Every power-up**: the flippers choose, START boots, and the countdown boots the
    build you chose last.
+3. **Back to the menu without switching off:** during a game, hold **BACK** on the coin
+   door (**EXIT** on Rick and Morty and Alice Cooper) for 5 seconds. The machine restarts
+   into the menu.
 
 - The first row is the stock build: it travels whole, and the machine falls back to it if
   anything goes wrong. Every other build carries only the files it changes.

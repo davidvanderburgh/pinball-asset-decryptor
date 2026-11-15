@@ -682,6 +682,33 @@ shims; a 2 s BACK nothing; a 6.5 s hold -> the restart asked 6.1 s in, `padmenu:
 the game's stderr.  `test/padmenu_test.sh` (none / hold / pulse / another device / a rig with no
 stand-in), `select_sh_test.sh --reboot`, `padselect_s3_test.sh`, mkmulticard selftest part 9b.
 
+### The other makers (PAD-1309, run 2)
+
+* **Barrels of Fun** (`make PLATFORM=bof`, `-DPADMENU_FAST`): the game's FAST Neuron port
+  (`/dev/ttyACM*`) pushes `-L:05` / `/L:05` when EXIT (switch 5 on every title) changes;
+  padmenu.so passes `read()` / `__read_chk()` through and reads those lines, and a thread of its
+  own times the hold (lines come only on a change).  The update's `.bash_profile` hook exports
+  LD_PRELOAD for the loop that starts the game.  `sync; sudo -n reboot`.  x86-64, dlsym and
+  pthread pinned to GLIBC_2.2.5: it asks for 2.17 at most.
+* **Spooky** (the same object, `make PLATFORM=spk`): padselect_spk.sh starts the game with it,
+  `PADMENU_PROTO=warden|pinotaur` and `PADMENU_SWITCH` from spk.conf's `B=` (94 / 63).  The
+  boards' binary stream is followed a message at a time by opcode size, so a byte inside a
+  coil config or an LED row is never read as BACK.
+* **Spooky's P-ROC titles** (Rick and Morty, Alice Cooper): Python 2.7 procgame games, and the
+  rig runs a pure-Python pinproc, so the hook is Python (`padmenu_proc.py`, the game's
+  sitecustomize via PYTHONPATH): it wraps `pinproc.PinPROC` and asks the game's own `exit`
+  Switch `is_active()` on each `get_events()`.
+* **The Big Lebowski** already has a way back: Version Select in its service menu restarts the
+  game into the menu.
+* **Jersey Jack**: not yet.  The game is Sentinel-wrapped (no LD_PRELOAD), and `/dev/jjpio100`
+  pairs every read with an OUT frame the game drives at 1 kHz, so a second reader on it is not
+  safe; the way back has to come through the game's own exits (rungame.sh's loop).
+
+Proven on the real games in each rig: Dune (BoF), Looney Tunes (Warden), Halloween (Pinotaur),
+Rick and Morty and Alice Cooper (P-ROC): a 2 s press did nothing, a 6.5 s hold asked for the
+restart 5.1-5.8 s in.  Tests: `test/padmenu_fast_test.sh`, `tests/test_padmenu_proc.py`,
+`padselect_spk_test.sh` 9, `padselect_proc_test.sh` 9/9b, `test_mkbofmulti` (the profile).
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both

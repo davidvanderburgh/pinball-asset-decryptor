@@ -4712,7 +4712,9 @@ class AudioTab(FindOriginalsMixin, TabService):
             "prompt": ("Name for this sound — remembered for future extracts\n"
                        "(blank restores \"%s\" and forgets it):"
                        % (prefix + ext)),
-            "label": label,
+            # PAD-1310: the words as typed (callouts.csv), not the file-safe
+            # name, while they still make it
+            "label": self._callout_words(rel, label),
             "suggestions": self._sound_test_suggestions(),
             "category": self._cats.get(rel) or "other",
             "cats": [{"value": k, "label": v} for k, v in _CAT_NAMES],
@@ -4744,6 +4746,9 @@ class AudioTab(FindOriginalsMixin, TabService):
         prefix, label, ext = parts
         m = re.match(r"^#\d+\s+(.*)$", text or "")
         name = m.group(1) if m else (text or "")
+        # PAD-1310: only the file name loses what Windows can't hold; the
+        # words as typed go into callouts.csv
+        words = " ".join(name.split())
         if new_cat not in dict(_CAT_NAMES):
             new_cat = "other"
         cur_cat = self._cats.get(rel) or "other"
@@ -4762,6 +4767,9 @@ class AudioTab(FindOriginalsMixin, TabService):
                      % len(new_label), "info")
         if new_label == label:
             if new_cat == cur_cat:
+                # the same file name, but the words may differ ("Here?" for
+                # "Here_")
+                self._callouts_follow({rel: rel}, {rel: words})
                 return rel
             md5 = name_memory.baseline_md5(self._scan_dir, rel)
             if md5 is None and rel not in self._changed:
@@ -4779,7 +4787,7 @@ class AudioTab(FindOriginalsMixin, TabService):
                         "no baseline)")
             self.log("Replace Audio: %s Type → %s%s" % (rel, new_cat, note),
                      "info")
-            self._callouts_follow({rel: rel})
+            self._callouts_follow({rel: rel}, {rel: words})
             self._refresh_type_filter()
             self._refresh_list()
             return rel
@@ -4802,7 +4810,7 @@ class AudioTab(FindOriginalsMixin, TabService):
             # the name was cleared but the Type the user picked stays
             name_memory.remember_category(md5, new_cat)
         self._repoint_baseline({rel: new_rel})
-        self._callouts_follow({rel: new_rel})
+        self._callouts_follow({rel: new_rel}, {new_rel: words})
         self._sel = [new_rel]
         self._refresh_type_filter()
         self._refresh_list()
@@ -5074,7 +5082,7 @@ class AudioTab(FindOriginalsMixin, TabService):
     # ------------------------------------------------------------------
     # More > Update callouts.csv from the names (PAD-1048)
     # ------------------------------------------------------------------
-    def _callouts_from_names(self, callouts, rels=None):
+    def _callouts_from_names(self, callouts, rels=None, words=None):
         """Bring *callouts* in step with the names the sounds have now (all
         scanned sounds, or only *rels*): a row whose sound was renamed since
         the CSV was written gets its file and, unless its words already make
@@ -5085,7 +5093,11 @@ class AudioTab(FindOriginalsMixin, TabService):
         from callouts.csv put the old name back (with *rels* None only as
         its row stops being speech: the rows earlier Properties saves left
         behind).  A cleared callout keeps them.  Returns ``(updated,
-        added)``; nothing is saved here."""
+        added)``; nothing is saved here.  PAD-1310: *words* (``{rel: text}``,
+        what was typed in Audio Properties) is the text a row gets in place
+        of the file-safe name while it makes that name ("Who are you?" for
+        "Who are you_"), and gives a sound with no row one when it differs
+        from the name."""
         from ...core import name_memory
         find = self._callout_finder(callouts)
         want = set(self._by_rel if rels is None else rels)
@@ -5118,46 +5130,106 @@ class AudioTab(FindOriginalsMixin, TabService):
                 changed = True
             # the words win while they still make this name ("Kaiju award:
             # 2x" files as "Kaiju award_ 2x"); a blank name keeps them
-            if label and self._fit_label(
-                    rel, name_memory.sanitize_label(text)) != label:
+            # typed words win only while they hold what the file name can't
+            # (typing the plain name keeps "Okay." for "Okay")
+            typed = (words or {}).get(rel, "")
+            if label and typed not in (text, label) and self._words_make(
+                    rel, typed, label):
+                row[keys["text"]] = typed
+                changed = True
+            elif label and not self._words_make(rel, text, label):
                 row[keys["text"]] = label
                 changed = True
             updated += changed
         if rels is not None:
+            for rel in sorted(want - seen, key=str.lower):
+                parts = name_memory.split_decode_name(rel.rpartition("/")[2])
+                typed = (words or {}).get(rel, "")
+                if (parts and parts[1] and typed != parts[1]
+                        and rel in self._by_rel
+                        and self._words_make(rel, typed, parts[1])):
+                    callouts.rows.append(self._new_callout_row(
+                        callouts, rel, typed))
+                    added += 1
             return updated, added
         for rel in sorted(want - seen, key=str.lower):
             parts = name_memory.split_decode_name(rel.rpartition("/")[2])
             if not parts or not parts[1]:
                 continue
-            slot = self._by_rel[rel]
-            row = {keys["file"]: rel.rpartition("/")[2],
-                   keys["text"]: parts[1]}
-            if keys["folder"]:
-                row[keys["folder"]] = rel.rpartition("/")[0]
-            if keys["seconds"]:
-                row[keys["seconds"]] = ("%.3f" % slot.duration
-                                        if slot.duration else "")
-            if keys["classification"]:
-                row[keys["classification"]] = _type_kind(
-                    self._cats.get(rel), "")
-            callouts.rows.append(row)
+            callouts.rows.append(self._new_callout_row(
+                callouts, rel, parts[1]))
             added += 1
         return updated, added
 
-    def _callouts_follow(self, renames):
+    def _new_callout_row(self, callouts, rel, text):
+        """A callouts.csv row for scanned sound *rel* with *text*."""
+        keys = {k: callouts.key(k) for k in
+                ("folder", "file", "seconds", "classification", "text")}
+        slot = self._by_rel[rel]
+        folder, _, fname = rel.rpartition("/")
+        row = {keys["file"]: fname, keys["text"]: text}
+        if keys["folder"]:
+            row[keys["folder"]] = folder
+        if keys["seconds"]:
+            row[keys["seconds"]] = ("%.3f" % slot.duration
+                                    if slot.duration else "")
+        if keys["classification"]:
+            row[keys["classification"]] = _type_kind(self._cats.get(rel), "")
+        return row
+
+    def _words_make(self, rel, text, label):
+        """Whether *text* makes the file name *label* for sound *rel* (the
+        characters Windows can't hold swapped out, shortened to fit)."""
+        from ...core import name_memory
+        return bool(text) and self._fit_label(
+            rel, name_memory.sanitize_label(text)) == label
+
+    def _callout_words(self, rel, label):
+        """The words callouts.csv has for sound *rel* when they make its file
+        name *label* (PAD-1310: "Who are you? Spider-Man: Here!" for "Who are
+        you_ Spider-Man_ Here!"), else *label*."""
+        from ...core.transcribe import CALLOUTS_CSV, CalloutsFile
+        if not label or not self._scan_dir:
+            return label
+        path = os.path.join(self._scan_dir, CALLOUTS_CSV)
+        if not os.path.isfile(path):
+            return label
+        try:
+            callouts = CalloutsFile(path)
+        except (OSError, ValueError, csv.Error):
+            return label
+        find = self._callout_finder(callouts)
+        for row in callouts.rows:
+            if find(row) == rel:
+                text = " ".join(callouts.get(row, "text").split())
+                return text if self._words_make(rel, text, label) else label
+        return label
+
+    def _callouts_follow(self, renames, words=None):
         """A rename in Audio Properties: the project's callouts.csv rows for
         the renamed sounds follow (*renames* is ``{old_rel: new_rel}``), so
         the CSV never names a file that is gone.  Quiet when there is no CSV;
-        an unreadable one is left alone and logged."""
+        an unreadable one is left alone and logged.  PAD-1310: *words* are
+        the words typed for them (see :meth:`_callouts_from_names`); words
+        the file name can't hold make the CSV when there is none."""
+        from ...core import name_memory
         from ...core.transcribe import CALLOUTS_CSV, CalloutsFile
         if not renames or not self._scan_dir:
             return
         path = os.path.join(self._scan_dir, CALLOUTS_CSV)
-        if not os.path.isfile(path):
-            return
+
+        def lost(rel, typed):
+            parts = name_memory.split_decode_name(rel.rpartition("/")[2])
+            return bool(parts and parts[1] and typed and typed != parts[1])
         try:
-            callouts = CalloutsFile(path)
-            if self._callouts_from_names(callouts, renames.values())[0]:
+            if os.path.isfile(path):
+                callouts = CalloutsFile(path)
+            elif any(lost(r, t) for r, t in (words or {}).items()):
+                callouts = CalloutsFile.empty(path)
+            else:
+                return
+            if any(self._callouts_from_names(
+                    callouts, renames.values(), words)):
                 callouts.save()
         except (OSError, ValueError, csv.Error) as e:
             self.log("Replace Audio: renamed the sound, but couldn't update "
@@ -5290,21 +5362,9 @@ class AudioTab(FindOriginalsMixin, TabService):
             find = self._callout_finder(callouts)
             row = next((r for r in callouts.rows if find(r) == rel), None)
             if row is None:
-                keys = {k: callouts.key(k) for k in
-                        ("folder", "file", "seconds", "classification",
-                         "text")}
-                folder, _, fname = rel.rpartition("/")
-                parts = name_memory.split_decode_name(fname)
-                row = {keys["file"]: fname,
-                       keys["text"]: parts[1] if parts else ""}
-                if keys["folder"]:
-                    row[keys["folder"]] = folder
-                if keys["seconds"]:
-                    row[keys["seconds"]] = ("%.3f" % slot.duration
-                                            if slot.duration else "")
-                if keys["classification"]:
-                    row[keys["classification"]] = _type_kind(
-                        self._cats.get(rel), "")
+                parts = name_memory.split_decode_name(rel.rpartition("/")[2])
+                row = self._new_callout_row(callouts, rel,
+                                            parts[1] if parts else "")
                 callouts.rows.append(row)
             row[key] = text
             callouts.save()

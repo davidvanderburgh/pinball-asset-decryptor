@@ -5066,11 +5066,22 @@ def _find_tree_game(root):
                 spath = None
                 idx = os.path.join(root, "spk", "index")
                 if os.path.isdir(idx):
+                    cands, links, other = [], {}, []
                     for s in sorted(os.listdir(idx)):
-                        if s.endswith(".sidx") and os.path.isfile(os.path.join(idx, s)) \
-                                and not os.path.islink(os.path.join(idx, s)):
-                            spath = "spk/index/" + s
-                            break
+                        full = os.path.join(idx, s)
+                        if not s.endswith(".sidx"):
+                            continue
+                        if os.path.islink(full):
+                            links[s] = os.readlink(full)
+                        elif os.path.isfile(full):
+                            m = SIDX_NAME_RE.match(s)
+                            if m:
+                                cands.append((s, m.group("pkg"), version_text(m.group("ver"))))
+                            else:
+                                other.append(s)
+                    order = live_sidx_order(cands, links, name) + other
+                    if order:
+                        spath = "spk/index/" + order[0]
                 return name, "%s/%s" % (name, cand), spath
     raise Refused("no title directory with a game file in %s" % root)
 
@@ -6978,7 +6989,22 @@ def tree_game(reader, root_ino):
 
 
 def tree_sidx(reader, root_ino):
-    """(path relative to the tree root, inode) of the tree's /spk/index/*.sidx, or (None, None)."""
+    """(path relative to the tree root, inode) of the tree's LIVE /spk/index/*.sidx
+    (:func:`live_sidx_order`), or (None, None).  The first one met was a stale package on a card
+    updated on the machine, and the bypass refreshed its record instead of the live one's."""
+    try:
+        try:
+            title = tree_game(reader, root_ino)[0]
+        except Refused:
+            title = None
+        pkgs = tree_packages(reader, root_ino, title)
+        if pkgs:
+            ino = tree_dir_inode(reader, root_ino, "spk", "index")
+            child = _dir_entries(reader, ino).get(pkgs[0][0]) if ino else None
+            if child:
+                return "spk/index/" + pkgs[0][0], reader.read_inode(child[0])
+    except Exception:                        # noqa: BLE001 - an odd index: the walk below
+        pass
     for path, ino, node in reader.iter_regular_files(root_ino=root_ino, max_depth=6, min_size=1):
         if path.endswith(".sidx") and path.lstrip("/").startswith("spk/index/"):
             return path.lstrip("/"), node                   # THIS tree's, never an imgN's beneath a store root
@@ -7223,15 +7249,22 @@ def tree_packages(reader, root_ino, title=None):
     """[(file name, package, '1.59.0', header version or None)] for every REGULAR
     /spk/index/<pkg>-<M_mm_p>.sidx in the tree - Stern's own name for the build, and the version
     the file's own header records (:func:`sidx_header_version`).  The bare '<pkg>.sidx' symlink
-    beside it names no version and is skipped, and so is anything that is not a .sidx.  A tree
-    carrying more than one puts the package named after the TITLE DIRECTORY first: that is the
-    game's own."""
+    beside it names no version and is not listed, and neither is anything that is not a .sidx.
+    A tree carrying more than one puts the LIVE package first (:func:`live_sidx_order`): a card
+    updated on the machine keeps every package it was ever given."""
     _v, _s, ext4, _adj = _stern_plugins()
     ino = tree_dir_inode(reader, root_ino, "spk", "index")
-    out = []
+    out, links = [], {}
     for name, (child, _t) in (sorted(_dir_entries(reader, ino).items()) if ino else []):
         m = SIDX_NAME_RE.match(name)
         if not m:
+            if name.endswith(".sidx"):
+                try:
+                    node = reader.read_inode(child)
+                    if (node["mode"] & ext4.S_IFMT) == ext4.S_IFLNK:
+                        links[name] = reader.read_symlink(node)
+                except Exception:
+                    pass
             continue
         try:
             node = reader.read_inode(child)
@@ -7244,7 +7277,32 @@ def tree_packages(reader, root_ino, title=None):
                 head = b""
             out.append((name, m.group("pkg"), version_text(m.group("ver")),
                         sidx_header_version(head)))
-    return sorted(out, key=lambda r: r[1] != title)
+    order = live_sidx_order([(r[0], r[1], r[2]) for r in out], links, title)
+    return sorted(out, key=lambda r: order.index(r[0]))
+
+
+def _version_key(v):
+    try:
+        return tuple(int(x) for x in (v or "").split("."))
+    except ValueError:
+        return ()
+
+
+def live_sidx_order(cands, links, title):
+    """PURE: the .sidx file names of `cands` [(name, package, version)], the LIVE one first -
+    the package the machine's spk layer checks the game against.
+
+    A card updated on the machine keeps every package it was ever given (PAD-1336: a Godzilla
+    LE updated 1.13 -> 1.16 carried godzilla_le-1_13_0 ... 1_16_0.sidx), and the old ones are
+    leftovers.  The live one is, in order: the target of the bare '<pkg>.sidx' symlink beside
+    them (`links` {link name: target}; the title's own link first), then a package named after
+    the title directory, newest version first."""
+    targets = [os.path.basename(t) for n, t in sorted(links.items(), key=lambda kv: kv[0] != "%s.sidx" % title) if t]
+    def key(c):
+        name, pkg, ver = c
+        linked = targets.index(name) if name in targets else len(targets)
+        return (linked, pkg != title, tuple(-x for x in _version_key(ver)), name)
+    return [c[0] for c in sorted(cands, key=key)]
 
 
 def tree_node_firmware(reader, root_ino, title_dir):
@@ -7292,9 +7350,9 @@ def read_tree(card, part, subdir=None):
     notes = []
     sidx_name, package, sidx_ver, head_ver = pkgs[0] if pkgs else (None, None, None, None)
     if len(pkgs) > 1:
-        notes.append("this tree carries %d .sidx packages (%s); %s is used, as the one named "
-                     "after the title directory"
-                     % (len(pkgs), ", ".join(p[0] for p in pkgs), sidx_name))
+        notes.append("this tree carries %d .sidx packages (%s); %s is the live one, the others "
+                     "are left over from earlier updates and change nothing"
+                     % (len(pkgs), ", ".join(sorted(p[0] for p in pkgs)), sidx_name))
     version, source, more = pick_version(sidx_ver, head_ver, ident)
     notes.extend(more)
     try:

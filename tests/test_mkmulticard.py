@@ -2136,6 +2136,26 @@ def test_an_updated_card_reads_as_the_game_code_it_runs(mk):
     assert mk.version_findings(recs)["version_mismatch"] is None
 
 
+def test_the_live_package_is_the_one_the_link_names_else_the_newest(mk):
+    """PAD-1336: a Godzilla LE updated 1.13 -> 1.16 on the machine keeps all four packages, and
+    the stale 1_13_0 one, first in name order, was read as the tree's own - a NOTE that read as
+    a version mismatch, and the package the validator bypass refreshed.  The live one is the
+    bare link's target, else the title's newest."""
+    cands = [("godzilla_le-1_%02d_0.sidx" % m, "godzilla_le", "1.%d.0" % m) for m in (13, 14, 15, 16)]
+    link = {"godzilla_le.sidx": "godzilla_le-1_16_0.sidx"}
+    assert mk.live_sidx_order(cands, link, "godzilla_le")[0] == "godzilla_le-1_16_0.sidx"
+    # the link wins even over a newer file: it is what the machine reads
+    assert mk.live_sidx_order(cands, {"godzilla_le.sidx": "/spk/index/godzilla_le-1_14_0.sidx"},
+                              "godzilla_le")[0] == "godzilla_le-1_14_0.sidx"
+    # no link: the newest of the title's own, by number not text (1.9 < 1.10)
+    nine = [("godzilla_le-1_09_0.sidx", "godzilla_le", "1.9.0"),
+            ("godzilla_le-1_10_0.sidx", "godzilla_le", "1.10.0")]
+    assert mk.live_sidx_order(nine, {}, "godzilla_le")[0] == "godzilla_le-1_10_0.sidx"
+    # a package of another name never beats the title's own
+    other = cands[:1] + [("zz_other-9_00_0.sidx", "zz_other", "9.0.0")]
+    assert mk.live_sidx_order(other, {}, "godzilla_le")[0] == "godzilla_le-1_13_0.sidx"
+
+
 _GZ_LE = "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw"
 GZ_LE_CARD = next((p for p in (os.path.join("D:\\Pinball\\images\\Stern\\spike2", _GZ_LE),
                                os.path.join("/mnt/d/Pinball/images/Stern/spike2", _GZ_LE))

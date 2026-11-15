@@ -11,6 +11,7 @@
 #   hold    BACK held for the whole run      -> exactly one `<cmd> --reboot`
 #   pulse   BACK 300 ms down / 60 ms up      -> no restart (the hold must be unbroken)
 #   i2c     BACK "held" on /dev/i2c-1        -> no restart (only a spidev counts)
+#   rig-no-standin  held in an emulator with no CODESELECT_REBOOT -> no restart
 set -e
 ROOT=$1
 SO=$2
@@ -58,8 +59,8 @@ int main(int argc, char **argv)
     int fd = open(path, O_RDWR);
     if (fd < 0) { perror(path); return 2; }
     while ((t = ms() - t0) < run_ms) {
-        int back = !strcmp(mode, "hold") || !strcmp(mode, "i2c") ||
-                   (!strcmp(mode, "pulse") && (t % 360) < 300);
+        /* every mode but none and pulse holds BACK the whole run */
+        int back = strcmp(mode, "none") && (strcmp(mode, "pulse") || (t % 360) < 300);
         memset(tx, 0xff, 8);
         if (back) tx[1] &= ~(1 << 3);
         memset(x, 0, 32);
@@ -88,10 +89,11 @@ EOF
 chmod +x "$T/reboot.sh"
 
 fail=0
-run() {   # run NAME DEVICE WANT_CALLS
+run() {   # run NAME DEVICE WANT_CALLS [ENV-ARG]
+    local envarg=${4:-CODESELECT_REBOOT=touch /dump/reboot.req}
     rm -f "$T/calls"
     "$QEMU" -L "$ROOT" -E LD_PRELOAD="$SO:$T/echospi.so" -E PADMENU_HOLD_MS=500 \
-        -E PADMENU_CMD="$T/reboot.sh" -E CODESELECT_REBOOT="touch /dump/reboot.req" \
+        -E PADMENU_CMD="$T/reboot.sh" -E "$envarg" \
         "$T/driver" "$1" "$T/dev/$2" 1500 2>"$T/err" || { echo "padmenu_test: $1: driver failed"; cat "$T/err"; fail=1; return; }
     sleep 0.3
     got=$( [ -f "$T/calls" ] && wc -l < "$T/calls" || echo 0)
@@ -110,5 +112,8 @@ run none spidev1.0 0
 run hold spidev1.0 1
 run pulse spidev1.0 0
 run i2c i2c-1 0
+# in an emulator (its shims' variables set) with no CODESELECT_REBOOT: never a real reboot
+run rig-no-standin spidev1.0 0 PAD_AUDIO_OUT=/dump/audio.raw
+grep -q "not restarting" "$T/err" || { echo "padmenu_test: FAIL rig-no-standin: nothing said"; cat "$T/err"; fail=1; }
 [ $fail -eq 0 ] && echo "padmenu_test: OK"
 exit $fail

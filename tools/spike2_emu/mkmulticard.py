@@ -9565,6 +9565,56 @@ def selftest_modes(d, sel):
     ok &= not debugfs_exists(p2, MODES_DIR)
     ok &= debugfs_exists(p2, SELECT_DIR + "/images.conf") and e2fsck(p2)[0] == 0
     print("SELFTEST part 9 (modes)", "PASS" if ok else "FAIL")
+    ok &= selftest_menu_back(d, sel, A, B, sets, conf)
+    return bool(ok)
+
+
+def selftest_menu_back(d, sel, A, B, sets, conf):
+    """PART 9b (PAD-1309): a selector dir carrying padmenu.so.  inject_into_p2 writes it to
+    MENU_SO (0755) and gives GAME_MONITOR the multi-boot block (MENU_HOOK_LINES) with its
+    clocks kept, whether the images carry modes or not; injecting again writes nothing new; a
+    mode-set inject leaves the block as it is.  Without padmenu.so the card is as before."""
+    import shutil
+    import modehook
+    ok = Checks()
+    print("== PART 9b: hold BACK to come back to the menu (padmenu.so)")
+    selm = os.path.join(d, "seldir menu")
+    if os.path.isdir(selm):
+        shutil.rmtree(selm)
+    shutil.copytree(sel, selm)
+    so = b"\x7fELF synthetic padmenu\n" * 8
+    with open(os.path.join(selm, "padmenu.so"), "wb") as f:
+        f.write(so)
+    geom = Geometry.from_file(A)
+    _t, st, cnt = geom.part(2)
+    p2 = os.path.join(d, "A p2 menu.img")
+    with open(p2, "wb") as f:
+        f.truncate(cnt * SECTOR)
+    copy_range(A, st * SECTOR, p2, 0, cnt * SECTOR, "p2", sparse=False, progress=None)
+    before = debugfs_stat(p2, GAME_MONITOR)
+    for k, mode_sets in enumerate((None, sets, [{}, {}])):
+        stage = os.path.join(d, "stage menu %d" % k)
+        os.makedirs(stage, exist_ok=True)
+        inject_into_p2(p2, selm, conf, stage, mode_sets=mode_sets)
+        mon = debugfs_cat(p2, GAME_MONITOR).decode()
+        ok &= modehook.has_menu_hook(mon), (k, mon)
+        ok &= modehook.strip_hook(mon) == SYNTH_MONITOR, k
+        ok &= debugfs_cat(p2, MENU_SO) == so, k
+        ok &= debugfs_stat(p2, MENU_SO).get("mode") == 0o755, k
+        after = debugfs_stat(p2, GAME_MONITOR)
+        ok &= all(after.get(x) == before.get(x) for x in ("mtime", "ctime", "atime")), (k, before, after)
+        ok &= e2fsck(p2)[0] == 0, k
+    # a card whose selector dir has no padmenu.so: game_monitor stays stock
+    p2s = os.path.join(d, "A p2 plain.img")
+    with open(p2s, "wb") as f:
+        f.truncate(cnt * SECTOR)
+    copy_range(A, st * SECTOR, p2s, 0, cnt * SECTOR, "p2", sparse=False, progress=None)
+    stage = os.path.join(d, "stage plain")
+    os.makedirs(stage, exist_ok=True)
+    inject_into_p2(p2s, sel, conf, stage)
+    ok &= debugfs_cat(p2s, GAME_MONITOR).decode() == SYNTH_MONITOR
+    ok &= not debugfs_exists(p2s, MENU_SO)
+    print("SELFTEST part 9b (menu back)", "PASS" if ok else "FAIL")
     return bool(ok)
 
 

@@ -643,6 +643,45 @@ in greys, and image 1's runtime played mode 2 from the MUSIC MODE the other edit
 store).  Apply to card with the tick off (`--no-editions`) brought the menu back, highlighting the
 image the editions boot had remembered; on again, the card booted by EDITION.
 
+## Back to the menu without a power cycle (PAD-1309)
+
+A tester: "a way to call up the multi-boot menu without having to turn the machine off and
+then back on".  **Hold BACK on the coin door for 5 s during a game** and the machine restarts
+into the menu, as at power-up.
+
+**How the game's own button is seen.**  `padmenu.so` (padmenu.c) is preloaded into THE GAME by
+the multi-boot form of the game_monitor hook (`modehook.MENU_HOOK_LINES`: padmenu.so and the
+booted image's mode.so, each when it is there; `mkmulticard.ensure_menu_hook` on every inject).
+It passes every call through.  It remembers the fd the game opens for the cabinet chain,
+`/dev/spidev1.0` (any fd: the rig's shim answers with a stand-in), and after each of the game's
+own 8-byte SPI_IOC_MESSAGE transfers on it reads rx[1] bit 3, Service Back, active low - the
+hardware, so the same on every title and version.  It never sends a byte (the tx half drives
+the amplifier enable).  Only that device counts: another SPI device's bytes read as BACK would
+restart a machine nobody asked to.  An unbroken 5 s hold runs `select.sh --reboot` (`sync;
+reboot`) once, detached, with no LD_PRELOAD.  A 2 s press (autoattract's, a tech's tap) does
+nothing.
+
+**Spike 3** (`-DPADMENU_S3`, `make PLATFORM=s3`): BACK is rx[0] bit 3 of `/dev/spidev4.0`.
+padselect_s3.sh copies padmenu.so to /tmp before the bind over /games hides /games/pad, and
+puts it first in the game's LD_PRELOAD (a mode hook appends after it); the restart is `sync;
+reboot` itself.  A game restarted by game_monitor after a crash runs without it until the next
+boot.
+
+**In the emulators** a real reboot is never right (the guest runs as root on the PC's Linux):
+each rig passes `CODESELECT_REBOOT`, and padmenu.so does nothing when it sees a rig's
+variables without one.  Spike 2: `run_game.sh` preloads it on menu runs and the restart is
+`dump/reboot.req` (+ `dump/padmenu.restart`, kept), which watch.sh boots from the menu.  Spike
+3: `s3run.sh` leaves `connectivity/dump/padmenu.restart`; `PAD_S3_MENU_SO` tries the object on
+any card.
+
+**Proven in the emulator, 2026-11-14.**  Spike 2: a two-image Godzilla LE 1.16 card built by
+mkmulticard (game_monitor hooked), booted with the menu; in attract a 2 s BACK did nothing; a
+6.5 s hold from 20:46:44 -> padmenu asked at 20:46:49.56 -> watch.sh restarted -> the menu came
+up again -> it booted again.  Spike 3: Fallout LE 0.82 with padmenu.so in front of the rig's
+shims; a 2 s BACK nothing; a 6.5 s hold -> the restart asked 6.1 s in, `padmenu: BACK held` in
+the game's stderr.  `test/padmenu_test.sh` (none / hold / pulse / another device / a rig with no
+stand-in), `select_sh_test.sh --reboot`, `padselect_s3_test.sh`, mkmulticard selftest part 9b.
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both

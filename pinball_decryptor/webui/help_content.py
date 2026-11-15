@@ -3095,6 +3095,9 @@ HELP_CONTENT = {
                 {"icon": "multiboot", "title": "Power up",
                  "text": "flippers choose, START boots"}]},
             "- The countdown boots the remembered choice by itself.\n"
+            "- **Back to the menu without switching off:** during a game, hold **BACK** "
+            "on the coin door for 5 seconds and the machine restarts into the menu "
+            "(Stern Spike 2 and Spike 3).\n"
             "- The **first image is the primary**: the card boots from its files, and "
             "the machine falls back to it if the menu ever fails.\n"
             "- Up to **16 images** on a Stern card. From five on, the menu scrolls "

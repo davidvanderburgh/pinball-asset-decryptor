@@ -90,6 +90,30 @@ noexec() {  # noexec WANT_RC WANT_MOUNT LABEL [VAR=value ...]
 }
 noexec 0 "$T/games/pad/img1" "menu-only: choice 1 binds img1 and starts no game" CHOICE=1
 noexec 3 "" "menu-only: no bind at all exits 3 for the caller" CHOICE=1 MOUNT_FAIL=img
+# PAD-1309: padmenu.so beside the menu is copied out of /games/pad (the bind hides it)
+# and goes FIRST in the game's LD_PRELOAD; the menu-only run leaves both alone
+mkdir -p "$T/games/pad/img2/t2" "$T/run"
+cat > "$T/games/pad/img2/t2/game" <<'EOF'
+#!/bin/sh
+echo "PRE ${LD_PRELOAD:-none}"
+exit 7
+EOF
+chmod +x "$T/games/pad/img2/t2/game"
+ln -s "t2/game" "$T/games/pad/img2/game"
+printf 'image=img0|A|a\nimage=img1|B|b\nimage=img2|C|c\ndefault=0\ntimeout=0\n' > "$T/games/pad/images.conf"
+echo "fake padmenu" > "$T/games/pad/padmenu.so"
+run "PRE $T/run/padmenu.so:/x/shim.so" "padmenu.so first in the game's LD_PRELOAD" \
+    CHOICE=2 PADSELECT_MENU_RUN="$T/run/padmenu.so" LD_PRELOAD=/x/shim.so
+if cmp -s "$T/games/pad/padmenu.so" "$T/run/padmenu.so"; then echo "ok   padmenu.so copied out of /games/pad"
+else echo "FAIL padmenu.so was not copied to the run directory"; fails=$((fails + 1)); fi
+rm -f "$T/run/padmenu.so"
+run "PRE none" "a menu-less build (no padmenu.so) preloads nothing" \
+    CHOICE=2 PADSELECT_MENU_RUN="$T/run/padmenu.so" PADSELECT_MENU_SO="$T/none.so"
+noexec 0 "$T/games/pad/img2" "menu-only: padmenu.so is the caller's to preload" \
+    CHOICE=2 PADSELECT_MENU_RUN="$T/run/padmenu.so"
+[ ! -e "$T/run/padmenu.so" ] || { echo "FAIL menu-only run copied padmenu.so"; fails=$((fails + 1)); }
+rm -f "$T/games/pad/padmenu.so"
+conf_ok
 rm "$T/games/pad/img1/game"
 run "GAME img0 ARG" "an image directory without a game boots img0" CHOICE=1
 if [ "$fails" = 0 ]; then echo "padselect_s3_test: OK"; else echo "padselect_s3_test: $fails failed"; exit 1; fi

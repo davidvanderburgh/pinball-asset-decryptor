@@ -21,7 +21,9 @@
 #   3. conagent is restarted (its monitor loop runs the chosen tree's own);
 #   4. /games/game - now the chosen image's own link - is exec'd: the game
 #      process replaces this shell, so game_monitor reads the game's own exit
-#      code, and every restart after that runs the game directly.
+#      code, and every restart after that runs the game directly;
+#   5. padmenu.so goes in front of the game's LD_PRELOAD (PAD-1309): BACK held
+#      5 s on the coin door restarts the machine into this menu.
 #
 # Any failure (no menu, no choice, no such image, the bind refused) boots
 # image 0 the same way, and if even that bind fails, image 0's game straight
@@ -65,8 +67,25 @@ good_dir() {
 }
 
 # boot image directory $1 over /games, then become its game
+# PAD-1309: BACK held 5 s on the coin door restarts the machine into this menu.
+# padmenu.so (beside the menu) is copied out of $P first - the bind below hides
+# /games/pad from the game - and put in front of whatever LD_PRELOAD the game
+# gets (a mode hook appends its own after it).
+MENU_SO=${PADSELECT_MENU_SO:-$P/padmenu.so}
+MENU_RUN=${PADSELECT_MENU_RUN:-/tmp/padmenu.so}
+menu_back() {
+    [ -f "$MENU_SO" ] || return 0
+    if cp -f "$MENU_SO" "$MENU_RUN" 2>/dev/null; then
+        LD_PRELOAD="$MENU_RUN${LD_PRELOAD:+:$LD_PRELOAD}"
+        export LD_PRELOAD
+        log "holding BACK for 5 s restarts into this menu ($MENU_RUN)"
+    else
+        log "could not copy $MENU_SO to $MENU_RUN: no way back to the menu without a power cycle"
+    fi
+}
 boot() {
     d=$1; shift
+    [ "${PADSELECT_NOEXEC:-0}" = 1 ] || menu_back
     if $MOUNT --bind "$P/$d" "$GAMES" 2>/dev/null || $MOUNT -o bind "$P/$d" "$GAMES" 2>/dev/null; then
         log "$d bound over $GAMES"
         # conagent started from img0's tree before the menu: its monitor
@@ -110,4 +129,5 @@ fi
 # the last resort: img0's game from its own directory, without the bind
 log "starting $P/img0/game without a bind"
 [ "${PADSELECT_NOEXEC:-0}" = 1 ] && exit 3       # the caller starts img0's game
+menu_back
 exec "$P/img0/game" "$@"

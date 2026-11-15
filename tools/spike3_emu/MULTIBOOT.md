@@ -112,6 +112,17 @@ menu, the choice, the bind - then exit 0, or 3 when no bind could be made), and 
 starts `/games/game` as for any card: by then it is the chosen image's own program,
 checkpointable like any game.
 
+## Back to the menu: hold BACK (PAD-1309)
+
+Holding BACK on the coin door for 5 s during a game restarts the machine into the menu.
+`padmenu.so` (codeselect/padmenu.c, `make PLATFORM=s3`) sits beside the menu; padselect.sh
+copies it to /tmp before the bind and puts it first in the game's LD_PRELOAD.  It reads byte 0
+bit 3 of the game's own transfers on `/dev/spidev4.0` and, after an unbroken 5 s, runs `sync;
+reboot`.  In `s3run.sh` the restart is a stand-in that leaves
+`<slot>/connectivity.up/dump/padmenu.restart`; `PAD_S3_MENU_SO=<host .so>` puts the object in
+front on any card.  Proven on Fallout LE 0.82 (2026-11-14): a 2 s BACK did nothing, a 6.5 s
+hold asked for the restart.  codeselect/DESIGN.md has the whole design.
+
 ## Proven (2026-11-13, the emulator, real cards)
 
 A card built by `mks3multi.py build` from `fallout_le-0_81_0` + `fallout_le-0_82_0`

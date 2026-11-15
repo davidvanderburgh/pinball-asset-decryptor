@@ -52,6 +52,10 @@ try the menu and each game on your PC first.
 - A countdown boots the last game you chose if nobody presses anything.
 - From five games on, the menu scrolls three at a time and shows a counter
   under the cards.
+- **Back to the menu without switching off:** during a game, hold **BACK** on
+  the coin door for 5 seconds. The machine restarts and the menu comes up, as
+  at power-up. A card built with an older version of the app gets this the
+  next time you **Apply to card** or rebuild it.
 
 ### Random cards
 
@@ -291,6 +295,8 @@ as the first one (64 GB) and can write it to an SD card.
 1. **Flash it** onto a 64 GB (or bigger) SD card and put it in the machine.
 2. **Every power-up**: NEXT and PREVIOUS on the coin door choose, SELECT boots, and the
    countdown boots the image you chose last.
+3. **Back to the menu without switching off:** during a game, hold **BACK** on the coin
+   door for 5 seconds. The machine restarts into the menu.
 
 - Building needs your own board's Spike 3 key, the one Extract and Emulate use.
 - The first row's card is the base: the new card keeps its boot and system partitions

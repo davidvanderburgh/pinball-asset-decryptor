@@ -80,6 +80,9 @@ SELECTOR_FILES = collections.OrderedDict([
     ("s3select", (0o755, True)),
     ("padselect.sh", (0o755, True)),
     ("font.ttf", (0o644, False)),
+    # PAD-1309: preloaded into the game by padselect.sh - BACK held 5 s restarts into the menu
+    # (not required: a selector dir built before it still makes a card, one without the way back)
+    ("padmenu.so", (0o755, False)),
 ])
 #: the top-level links of a multi-boot games partition: the hook, and what
 #: S95game / conagent_monitor look for before the menu has bound a tree
@@ -301,6 +304,17 @@ def check_selector_dir(d):
             raise Refused("--selector-dir %s has no %s (ensures3select.sh installs it)" % (d, name))
 
 
+def _selector_src(selector_dir, name):
+    """Where selector file `name` comes from, or None for an optional one the dir lacks
+    (padmenu.so from a selector built before PAD-1309)."""
+    if name == "font.ttf":
+        return _font_src(selector_dir)
+    src = os.path.join(selector_dir, name)
+    if not SELECTOR_FILES[name][1] and not os.path.isfile(src):
+        return None
+    return src
+
+
 def _font_src(selector_dir):
     src = os.path.join(selector_dir, "font.ttf")
     if os.path.isfile(src):
@@ -419,7 +433,9 @@ def _lay_out(mnt, conf, selector_dir, media, media_dir, build_doc):
     if not os.path.lexists(os.path.join(img0, "game")):
         raise Refused("image 0's games partition has no `game` link: not a Spike 3 games tree")
     for name, (mode, _req) in SELECTOR_FILES.items():
-        src = os.path.join(selector_dir, name) if name != "font.ttf" else _font_src(selector_dir)
+        src = _selector_src(selector_dir, name)
+        if src is None:
+            continue
         shutil.copyfile(src, os.path.join(pad, name))
         os.chmod(os.path.join(pad, name), mode)
     with open(os.path.join(pad, "images.conf"), "w", encoding="utf-8", newline="\n") as f:
@@ -561,7 +577,9 @@ def inject_card(a):
             stand_ins = [type("C", (), {"label": lambda self: "", "path": d})() for d in dirs]
             conf = conf_from_args(a, stand_ins, media)
             for name, (mode, _req) in SELECTOR_FILES.items():
-                src = os.path.join(a.selector_dir, name) if name != "font.ttf" else _font_src(a.selector_dir)
+                src = _selector_src(a.selector_dir, name)
+                if src is None:
+                    continue
                 shutil.copyfile(src, os.path.join(pad, name + ".new"))
                 os.chmod(os.path.join(pad, name + ".new"), mode)
                 os.replace(os.path.join(pad, name + ".new"), os.path.join(pad, name))
@@ -614,7 +632,10 @@ def verify_card(a):
                 print("link /games/%s -> %s: %s" % (name, got, "OK" if got == target else "WRONG"))
                 if got != target:
                     bad.append("link " + name)
-            for name in SELECTOR_FILES:
+            for name, (_mode, required) in SELECTOR_FILES.items():
+                if not required and not os.path.isfile(os.path.join(pad, name)) and not (
+                        a.selector_dir and os.path.isfile(os.path.join(a.selector_dir, name))):
+                    continue                      # an optional file neither side has
                 ok = os.path.isfile(os.path.join(pad, name))
                 if a.selector_dir and name != "font.ttf" and ok:
                     ok = _sha(os.path.join(pad, name)) == _sha(os.path.join(a.selector_dir, name))

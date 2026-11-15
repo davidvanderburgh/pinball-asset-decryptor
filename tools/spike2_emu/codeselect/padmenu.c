@@ -16,9 +16,10 @@
  * stops (hwshim.c "THE CABINET SWITCHES"; codeselect reads the same word in
  * input_hw.c when it owns the machine).  rx[1] bits 0-3 are Service Select /
  * Plus / Minus / Back, ACTIVE LOW.  That is the hardware, so it is the same on
- * every Spike 2 title and version.  This object interposes ioctl(), passes
- * every call through untouched, and only AFTER the game's own transfer has
- * returned does it read bit 3 of rx[1].  It never sends a byte of its own: the
+ * every Spike 2 title and version.  This object interposes open()/openat()/
+ * close() (to remember which fd is that device) and ioctl(), passes every call
+ * through untouched, and only AFTER the game's own transfer has returned does
+ * it read bit 3 of rx[1].  It never sends a byte of its own: the
  * word's tx half drives the amplifier enable (input_hw.c), and a second master
  * on that wire is how a machine goes quiet.
  *
@@ -32,7 +33,8 @@
  * select.sh's, a plain `sync; reboot` (busybox's, which stops the processes and
  * unmounts as a normal shutdown does).  It never fires twice.  It is inert in
  * any process but the game (the hook preloads it there and nowhere else) and
- * on any fd that is not a spidev - every other ioctl is one extra compare.
+ * on any fd that is not the cabinet chain - every other ioctl is one extra
+ * compare.  Spike 3 builds of it: see "THE TWO MACHINES" below.
  *
  * PADMENU_HOLD_MS=<ms>, PADMENU_CMD=<path> and CODESELECT_REBOOT=<command>
  * exist for the tests and the rig (run_game.sh); a card's game_monitor sets
@@ -63,22 +65,30 @@
 #ifdef PADMENU_S3
 #define CMD_DEFAULT     ""
 #define BACK_BYTE       0
+#define CAB_DEV         "/dev/spidev4.0"
 #else
 #define CMD_DEFAULT     "/usr/local/codeselect/select.sh"
 #define BACK_BYTE       1
+#define CAB_DEV         "/dev/spidev1.0"
+#endif
+#ifndef O_TMPFILE
+#define O_TMPFILE 0
 #endif
 #define HOLD_MS_DEFAULT 5000
 #define SPI_MAGIC       0x6b            /* 'k', SPI_IOC_MAGIC */
-#define SPIDEV_MAJOR    153
 #define MAX_FD          1024
 #define BACK_BIT        3
 
 typedef int (*ioctl_fn)(int, unsigned long, ...);
+typedef int (*open_fn)(const char *, int, ...);
+typedef int (*openat_fn)(int, const char *, int, ...);
 
 static ioctl_fn real_ioctl;
-/* per fd: 0 not looked at yet, 1 a spidev, 2 anything else.  An fd number the
- * game closes and reuses for a spidev keeps its first answer; the game opens
- * /dev/spidev1.0 once, at start, and keeps it. */
+/* per fd: 0 not looked at yet, 1 the cabinet chain, 2 anything else.  Set when
+ * the game OPENS CAB_DEV (whatever fd comes back: the rigs' shims answer with a
+ * stand-in, Spike 3's with /dev/null), else on its first SPI transfer by the
+ * path the fd reads back as.  Only that one device: another SPI device's bytes
+ * read as BACK would restart a machine nobody asked to.  Cleared on close(). */
 static unsigned char fd_kind[MAX_FD];
 static long long held_since = -1;
 static int fired;
@@ -98,12 +108,24 @@ static void say(const char *msg)
     (void)r;
 }
 
-/* A spidev by the path it was opened from (the rule hwshim.c's classify() uses,
- * so the rig's stand-in /dev/spidev1.0 counts), or by its device number. */
+static int is_cab_path(const char *p)
+{
+    size_t n, k = strlen(CAB_DEV);
+    if (!p)
+        return 0;
+    n = strlen(p);            /* a chroot's or a test's prefix is allowed: ends with it */
+    return n >= k && !strcmp(p + n - k, CAB_DEV);
+}
+
+static void note_open(int fd, const char *path)
+{
+    if (fd >= 0 && fd < MAX_FD)
+        fd_kind[fd] = is_cab_path(path) ? 1 : 0;
+}
+
 static int is_spidev(int fd)
 {
     char link[32], path[128];
-    struct stat st;
     ssize_t n;
     if (fd < 0 || fd >= MAX_FD)
         return 0;
@@ -111,11 +133,58 @@ static int is_spidev(int fd)
         snprintf(link, sizeof link, "/proc/self/fd/%d", fd);
         n = readlink(link, path, sizeof path - 1);
         path[n > 0 ? n : 0] = 0;
-        fd_kind[fd] = (strstr(path, "/dev/spidev") ||
-                       (fstat(fd, &st) == 0 && S_ISCHR(st.st_mode) &&
-                        major(st.st_rdev) == SPIDEV_MAJOR)) ? 1 : 2;
+        fd_kind[fd] = is_cab_path(path) ? 1 : 2;
     }
     return fd_kind[fd] == 1;
+}
+
+/* the opens, passed straight on; the fd of CAB_DEV is remembered */
+#define OPEN_MODE(flags, ap, mode) \
+    do { if ((flags) & (O_CREAT | O_TMPFILE)) { va_start(ap, flags); mode = va_arg(ap, int); va_end(ap); } } while (0)
+
+int open(const char *path, int flags, ...)
+{
+    static open_fn next;
+    va_list ap;
+    int mode = 0, fd;
+    OPEN_MODE(flags, ap, mode);
+    if (!next && !(next = (open_fn)dlsym(RTLD_NEXT, "open"))) { errno = ENOSYS; return -1; }
+    fd = next(path, flags, mode);
+    note_open(fd, path);
+    return fd;
+}
+
+int open64(const char *path, int flags, ...)
+{
+    static open_fn next;
+    va_list ap;
+    int mode = 0, fd;
+    OPEN_MODE(flags, ap, mode);
+    if (!next && !(next = (open_fn)dlsym(RTLD_NEXT, "open64"))) { errno = ENOSYS; return -1; }
+    fd = next(path, flags, mode);
+    note_open(fd, path);
+    return fd;
+}
+
+int openat(int dirfd, const char *path, int flags, ...)
+{
+    static openat_fn next;
+    va_list ap;
+    int mode = 0, fd;
+    OPEN_MODE(flags, ap, mode);
+    if (!next && !(next = (openat_fn)dlsym(RTLD_NEXT, "openat"))) { errno = ENOSYS; return -1; }
+    fd = next(dirfd, path, flags, mode);
+    note_open(fd, path);
+    return fd;
+}
+
+int close(int fd)
+{
+    static int (*next)(int);
+    if (!next && !(next = (int (*)(int))dlsym(RTLD_NEXT, "close"))) { errno = ENOSYS; return -1; }
+    if (fd >= 0 && fd < MAX_FD)
+        fd_kind[fd] = 0;
+    return next(fd);
 }
 
 /* Run `<cmd> --reboot` detached: a new session, no LD_PRELOAD, its own
@@ -139,6 +208,15 @@ static void ask_for_reboot(void)
     }
     if (!cmd || !*cmd)
         cmd = CMD_DEFAULT;
+    /* IN ONE OF PAD'S EMULATORS a real `reboot` is never right: the rig runs
+     * the guest as root on the PC's own Linux, so it would restart that, not
+     * the game.  Each rig passes CODESELECT_REBOOT (its own restart request);
+     * a run that did not (its shims' variables set, no stand-in) does nothing. */
+    if (!(rb && *rb) && (getenv("PAD_AUDIO_OUT") || getenv("PAD_S3_SPI_IN") ||
+                         getenv("PAD_GL_BRIDGE") || getenv("PAD_SW_SHM"))) {
+        say("padmenu: in the emulator with no CODESELECT_REBOOT - not restarting\n");
+        return;
+    }
     if (*cmd) {
         argv[0] = (char *)cmd;
         argv[1] = "--reboot";

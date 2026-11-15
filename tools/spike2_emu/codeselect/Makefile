@@ -346,6 +346,15 @@ $(PROCSW): dpprocsw.c $(BUILD)/libpinproc.so.2.0 | $(BUILD)
 > $(CC) -std=gnu17 -O2 -Wall -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fno-pie -no-pie \
 >     -nostartfiles dpprocsw.c $(BUILD)/libpinproc.so.2.0 -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
+else ifeq ($(PLATFORM),s3)
+# PAD-1309: Spike 3's padmenu.so (-DPADMENU_S3: BACK is byte 0 of /dev/spidev4.0, and the
+# restart is `sync; reboot` itself).  padselect_s3.sh preloads it into the game.
+PADMENU = $(BUILD)/padmenu.so
+all: $(BIN) $(PADMENU)
+
+$(PADMENU): padmenu.c | $(BUILD)
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -DPADMENU_S3 >     -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -o $@ || { rm -f $@; exit 1; }
+> @echo "built $@"
 else ifneq ($(PLATFORM),stern)
 all: $(BIN)
 else
@@ -465,6 +474,7 @@ check-hw:
 install: $(BIN)
 > install -d "$(DESTDIR)$(PREFIX)"
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/s3select"
+> install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
 > install -m 755 padselect_s3.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > if [ -f "$(DEJAVU)" ]; then install -m 644 "$(DEJAVU)" "$(DESTDIR)$(PREFIX)/font.ttf"; else echo "no $(DEJAVU): the menu has no font"; exit 1; fi
 else ifeq ($(PLATFORM),jjp)

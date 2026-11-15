@@ -156,6 +156,22 @@ if [ "${1:-}" = "--maintenance-reboot" ]; then
     exit 0
 fi
 
+# ---- PAD-1309: back to the menu without switching off ------------------------------
+# The game exits 254 when Escape is pressed (a USB keyboard on the machine), and stock
+# rungame.sh just starts it again.  The builder's third patch of rungame.sh calls this from
+# that case: the machine restarts, and the menu comes up as at power-up (a maintenance mark
+# left over would skip it, so it goes).  PADSELECT_REBOOT replaces `reboot` (the tests).
+# It does not return before the reboot takes it: rungame.sh would start the game again.
+if [ "${1:-}" = "--menu-reboot" ]; then
+    [ -r "$CONF" ] || exit 0                   # not a multi-boot install: the stock behaviour
+    rm -f "$MAINT" 2>/dev/null
+    hooklog "Escape pressed in the game: restarting the machine into the boot menu"
+    sync
+    ${PADSELECT_REBOOT:-reboot}
+    sleep "${PADSELECT_REBOOT_WAIT:-99}"
+    exit 0
+fi
+
 [ -r "$CONF" ] || exit 0                       # not a multi-boot install: silence
 n=$(count_images)
 [ "$n" -ge 2 ] || exit 0                       # one image: nothing to choose, nothing to mask

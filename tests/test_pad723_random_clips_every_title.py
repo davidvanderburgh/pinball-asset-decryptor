@@ -66,9 +66,9 @@ def test_a_scene_naming_its_clips_twice_outside_the_library_is_refused():
 
 def test_every_shipped_build_but_turtles_pro_158_has_a_route():
     # PAD-1271: the Spike 3 port of Star Wars ELG 1.10 shares the Spike 2 port's title key and has no route yet;
-    # PAD-1287: nor has Walking Dead Remastered's (a Spike 3-only title); PAD-1290: nor Star Wars 2025 LE's
+    # PAD-1287: nor has Walking Dead Remastered's (a Spike 3-only title); PAD-1289 / 1290: nor Pokemon LE's, Star Wars 2025 LE's
     spike3 = [p for p in MP.profiles().values() if p.arch == "a64"]
-    assert sorted(CV.title_key(p) for p in spike3 if not CV.route_of(p)) == ["star_wars_2025_le-0.96",
+    assert sorted(CV.title_key(p) for p in spike3 if not CV.route_of(p)) == ["pokemon_le-0.82", "star_wars_2025_le-0.96",
                                                                               "star_wars_elg-1.10",
                                                                               "walking_dead_remastered_le-0.92"]
     routes = {CV.title_key(p): CV.route_of(p) for p in MP.profiles().values() if p.arch != "a64"}

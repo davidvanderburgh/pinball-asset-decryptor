@@ -535,7 +535,13 @@ def device_records(t):
         o = t.off(n) if n else None
         if o is None:
             return None
-        name = t.b[o:t.b.find(b"\0", o, o + 80)].decode("latin1")     # short names too ("GI", "TILT")
+        raw = t.b[o:t.b.find(b"\0", o, o + 80)]                       # short names too ("GI", "TILT")
+        try:
+            # PAD-1289: the names are UTF-8. Pokemon LE's "POKÉ BALL SPOT" read as Latin-1 has an unprintable \x89,
+            # which ended the walk there and lost the 16 QR scanner switches before it: every switch id 16 low
+            name = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            name = raw.decode("latin1")
         if not name or len(name) > 40 or not name.isprintable():
             return None
         o = t.off(a + 0x20)
@@ -1783,6 +1789,127 @@ def play_engine(ref, rlines, t, later_at, placed):
     return out
 
 
+
+# ---- PAD-1322: the switch edges --------------------------------------------------------------------------------------
+#: the port lines the runtime's 64-bit edge source reads (pad_mode_runtime.c, "the switch edges on Spike 3")
+EDGE_VALUES = ("switch_record_reg", "switch_id_at", "switch_level_at", "switch_desc_via", "switch_flags_at",
+               "switch_polarity_at")
+#: Spike 2's switch_edge lines: a per-switch call and the 32-bit tables it reads - none of them is Spike 3's
+_EDGE_NAMES = ("switch_edge", "switch_drain", "switch_records", "switch_count", "switch_drain_size",
+               "switch_record_size", "switch_level_via", "switch_level_before") + EDGE_VALUES
+_EDGE_LINE = re.compile(r"^(#.*?)?\b(site|data|value)\s+(%s)\b" % "|".join(_EDGE_NAMES))
+_EDGE_HOW = re.compile(r"^#\s+(%s):" % "|".join(_EDGE_NAMES))
+
+
+def switch_edge_point(t):
+    """The 64-bit switch drain's per-edge point (PAD-1322). Spike 3's drain makes no per-switch call: it walks the
+    list of switch records the node boards' reader queued and, for each, writes the edge's level into the record
+    (`strb wL, [xR, #level]`), skips its id table refresh for switch 0 (`cbz wId, X`), and at X loads the
+    descriptor (`ldr xD, [xR, #desc]`) and its two u16 flag words, the handler bits tested at bit 11 / 10 and the
+    other at bit 1 / 2; the id is the `ldrh wId, [xR, #id]` before. X is the point every edge passes after its level
+    is written and before the handler bits are read. Also the mode mask the drain tests, through its GOT slot
+    (`ldrh wA, [xM]`, then `tst wFlags, wA`). -> dict, or None when the shape is not there exactly once."""
+    W, base, hits = t.words, t.tva, []
+    for i in range(24, len(W) - 1):
+        w = W[i]
+        if (w & 0xFFC00000) != 0x39000000:                          # strb wt, [xn, #imm]
+            continue
+        c = W[i + 1]
+        if (c & 0xFF000000) != 0x34000000:                          # cbz w
+            continue
+        rn, rid = (w >> 5) & 31, c & 31
+        x = base + 4 * (i + 1) + 4 * sext((c >> 5) & 0x7FFFF, 19)
+        j = (x - base) // 4
+        if not (i < j < len(W) - 20):
+            continue
+        ld = W[j]
+        if (ld & 0xFFC00000) != 0xF9400000 or ((ld >> 5) & 31) != rn:   # ldr xd, [xR, #imm*8]
+            continue
+        rd = ld & 31
+        hs = [(W[j + k] & 31, ((W[j + k] >> 10) & 0xFFF) * 2) for k in (1, 2)
+              if (W[j + k] & 0xFFC00000) == 0x79400000 and ((W[j + k] >> 5) & 31) == rd]
+        if len(hs) != 2:
+            continue
+        flags = pol = freg = None
+        for k in range(3, 16):
+            b = W[j + k]
+            if (b & 0x7E000000) != 0x36000000:                      # tbz / tbnz
+                continue
+            bit = (((b >> 31) & 1) << 5) | ((b >> 19) & 31)
+            for r, off in hs:
+                if (b & 31) == r and bit in (10, 11):
+                    flags, freg = off, r
+                elif (b & 31) == r and bit in (1, 2):
+                    pol = off
+        idat = next((((W[i - k] >> 10) & 0xFFF) * 2 for k in range(1, 24)
+                     if (W[i - k] & 0xFFC00000) == 0x79400000 and ((W[i - k] >> 5) & 31) == rn
+                     and (W[i - k] & 31) == rid), None)
+        if flags is None or pol is None or idat is None or a64_pc_bound(ld):
+            continue
+        # the mode mask: a GOT load into xM earlier in the drain, `ldrh wA, [xM]` then `tst wFlags, wA`
+        got, mask = {}, None
+        for k in range(max(0, i - 64), j + 24):
+            a, v = base + 4 * k, W[k]
+            p = _adrp(a, v)
+            if p:
+                got[p[0]] = ("page", p[1])
+            elif (v & 0xFFC00000) == 0xF9400000 and got.get((v >> 5) & 31, ("",))[0] == "page":
+                slot = got[(v >> 5) & 31][1] + ((v >> 10) & 0xFFF) * 8
+                if slot in t.ptr:
+                    got[v & 31] = ("ptr", t.ptr[slot])
+            elif k > j and (v & 0xFFFFFC00) == 0x79400000 and got.get((v >> 5) & 31, ("",))[0] == "ptr":
+                nxt = W[k + 1:k + 4]
+                if any((n & 0xFF20001F) == 0x6A00001F and ((n >> 5) & 31) in (freg, v & 31)
+                       and ((n >> 16) & 31) in (freg, v & 31) for n in nxt):
+                    mask = got[(v >> 5) & 31][1]
+        hits.append({"site": x, "reg": rn, "id_at": idat, "level_at": (w >> 10) & 0xFFF, "desc_via": ((ld >> 10) & 0xFFF) * 8,
+                     "flags_at": flags, "polarity_at": pol, "mode_mask": mask})
+    return hits[0] if len(hits) == 1 else None
+
+
+def a64_pc_bound(w):
+    """adrp / adr / a literal load / a branch: an instruction the 64-bit hook cannot move as it is"""
+    return ((w & 0x1F000000) == 0x10000000 or (w & 0x3B000000) == 0x18000000 or (w & 0x7C000000) == 0x14000000
+            or (w & 0xFE000000) == 0x54000000 or (w & 0x7E000000) in (0x34000000, 0x36000000))
+
+
+def edge_lines(t, body, placed, notes):
+    """PAD-1322: the drain's per-edge point and the record layout, read off this program's own code, in place of
+    whatever a draft carried over for switch_edge (Spike 2's per-switch call and its 32-bit tables)."""
+    e = switch_edge_point(t)
+    keep, cut = [], None
+    for l in body:
+        if _EDGE_LINE.match(l) or _EDGE_HOW.match(l):
+            cut = len(keep) if cut is None else cut
+            continue
+        keep.append(l)
+    for n in _EDGE_NAMES:
+        placed.pop(n, None)
+        placed.pop("data:" + n, None)
+    at = next((k for k, l in enumerate(keep) if l.startswith("# ---- globals")), cut if cut is not None else len(keep))
+    while at > 0 and keep[at - 1] == "":
+        at -= 1
+    if not e:
+        block = ["# site %-16s NOT PLACED: the 64-bit drain's per-edge point is not there once (PAD-1322)"
+                 % "switch_edge"]
+    else:
+        block = ["#   switch_edge: the 64-bit drain's per-edge point - every switch edge passes it after its level is "
+                 "written, before its handler bits are read (PAD-1322)",
+                 "site %-16s 0x%08x 0x%08x 0x%08x" % ("switch_edge", e["site"], t.u32(e["site"]), t.u32(e["site"] + 4))]
+        block += ["value %-25s %s    # read off the drain's own code (PAD-1322)"
+                  % (n, e["reg"] if n == "switch_record_reg" else "0x%x" % e[n[len("switch_"):]]) for n in EDGE_VALUES]
+        placed["switch_edge"] = e["site"]
+        mm = placed.get("data:mode_mask")
+        if e["mode_mask"] and mm is None:
+            block.append("data %-22s 0x%08x   # the drain's own (PAD-1322)" % ("mode_mask", e["mode_mask"]))
+            placed["data:mode_mask"] = e["mode_mask"]
+        elif e["mode_mask"] and mm != e["mode_mask"]:
+            notes.append("data mode_mask: 0x%x written, the switch drain tests 0x%x" % (mm, e["mode_mask"]))
+    keep[at:at] = block
+    body[:] = keep
+    return e
+
+
 def draft(ref, rport, tgt, game=None, version=None):
     scan(ref)
     scan(tgt)
@@ -1935,19 +2062,8 @@ def draft(ref, rport, tgt, game=None, version=None):
     if not {"clip_play", "video_player", "video_surface"} <= rsites:
         for n in ("display_draw", "player_advance"):
             idle[n] = "the clip_play clip path it belongs to is not this title's (its clips are the surface's)"
-    # PAD-1285: the 64-bit switch drain hands each edge to switch_hit / switch_hit2 itself (by the switch's handler
-    # bits): no per-switch edge call (Spike 2's switch_edge) to hook. The shots come through those two sites; what
-    # needs every edge (the attract flipper sounds, the game mode shot sounds, co-op) rides Spike 2's delivery.
-    hits = {placed[n] for n in placed if n.startswith("switch_hit")}
-    drain = later_at.get("switch_drain")
-    if tgt.a64 and drain and hits and any(_bl(a, w) in hits for a, w in _raw(tgt, drain, 160)):
-        idle["switch_drain"] = ("the 64-bit drain calls switch_hit / switch_hit2 itself, by the switch's handler bits - "
-                                "the shots come through those sites (PAD-1285)")
-        at = next((k for k, l in enumerate(body) if l.startswith("# site %-16s NOT PLACED" % "switch_edge")), None)
-        if at is not None:
-            body[at] = ("# site %-16s NOT ON SPIKE 3: its drain has no per-switch edge call - it calls switch_hit / "
-                        "switch_hit2 itself; every-edge features (attract flipper sounds, game mode shot sounds, co-op) "
-                        "ride Spike 2's delivery (PAD-1285)" % "switch_edge")
+    # PAD-1285 / PAD-1322: the 64-bit switch drain makes no per-switch call (Spike 2's switch_edge); its per-edge point,
+    # read off this program's own code, is written by edge_lines (below)
     if (tgt.a64 and "ball_end" not in placed and "hook_dispatch" in placed
             and any(k == "event" and t[1] == "ball_end" for k, t, s in lines)):
         at = next((k for k, l in enumerate(body) if l.startswith("# site %-16s NOT PLACED" % "ball_end")), None)
@@ -1956,9 +2072,7 @@ def draft(ref, rport, tgt, game=None, version=None):
                         "hook_dispatch) - the Spike 2 site is that event's handler (PAD-1285)" % "ball_end")
     for k, l in enumerate(body):
         m = re.match(r"# not carried yet \(its feature is 32-bit\): (site (\S+) .*)$", l)
-        if m and m.group(2) == "switch_drain" and tgt.a64:
-            body[k] = "# not carried - %s: %s" % (idle[m.group(2)], m.group(1))
-        elif m and m.group(2) in idle:
+        if m and m.group(2) in idle:
             body[k] = "# not carried - no feature uses it on the Spike 2 port either (%s): %s" % (idle[m.group(2)],
                                                                                               m.group(1))
     for name, why3 in (("string_new", "NOT NEEDED: the 64-bit program's strings are the C++11 ABI and it imports no "
@@ -2094,6 +2208,13 @@ def draft(ref, rport, tgt, game=None, version=None):
                                                           not (lit["show"] and re.match(r"show_(name|kind)_\d+$", t[1]))))
     if rest:
         body += ["", "# not carried (to measure on Spike 3): " + ", ".join("%d %s" % (n, k) for k, n in sorted(rest.items()))]
+    edge_notes = []
+    if tgt.a64:
+        edge_lines(tgt, body, placed, edge_notes)
+        body += ["# " + n for n in edge_notes]
+        if "switch_edge" in placed:
+            missing = [n for n in missing if n not in _EDGE_NAMES]
+            later = [n for n in later if n not in _EDGE_NAMES]
     core_missing = [grp for grp in CORE if not any(n in placed for n in grp) and not
                     (grp == ("ball_end", "hook_dispatch") and "ball_end_event" in placed)]
     core_missing += [grp for grp in CORE_DATA if not any("data:" + n in placed for n in grp)]
@@ -2111,10 +2232,11 @@ def draft(ref, rport, tgt, game=None, version=None):
 #: a reference site that is its game's own content, never another title's
 GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
 #: reference values that are its game's own (its shows, callouts, held coils, mode flags, and its mode books: a
-#: place_flag / done_flag is the flag one of the REFERENCE game's modes sets, PAD-1288 - on Fallout the same numbers
-#: line up in the framework's flag code but name none of its modes)
+#: place_flag / done_flag is the flag one of the REFERENCE game's modes sets - PAD-1288: on Fallout the same numbers
+#: line up in the framework's flag code but name none of its modes; PAD-1289: Star Wars ELG's 66 / 68 turned up at
+#: lined-up instructions on Pokemon LE, but they are the flags of ELG's own modes)
 GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
-                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\d+|done_audit_\d+)$")
+                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+|done_audit_\d+)$")
 #: sites only ever armed together: one placed without the other is written as a comment (PAD-1288: Fallout's
 #: coil_give lines up, its coil_take has no counterpart, and the runtime arms held coils on both or neither)
 SITE_PAIRS = (("coil_take", "coil_give"),)
@@ -2615,6 +2737,9 @@ def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
     if rest:
         body += ["", "# not carried - the reference game's own content, for this title's own port: " +
                  ", ".join("%d %s" % (n, k) for k, n in sorted(rest.items()))]
+    edge_lines(tgt, body, placed, notes)
+    if "switch_edge" in placed:
+        missing = [n for n in missing if n not in _EDGE_NAMES]
     if notes:
         body += ["", "# ---- checks ----"] + ["# " + n for n in notes]
     core_missing = [grp for grp in CORE if not any(n in placed for n in grp) and not

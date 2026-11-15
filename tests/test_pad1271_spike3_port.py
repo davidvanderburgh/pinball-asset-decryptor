@@ -181,7 +181,7 @@ PLAY_VALUES = {"magnet_proc", "right_gate_ctl", "right_gate_devoff", "right_gate
 
 def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     sites = {t[1]: t for t in _lines("site")}
-    assert set(sites) == {"tick", "hook_dispatch", "score_add", "switch_hit", "switch_hit2",
+    assert set(sites) == {"tick", "hook_dispatch", "score_add", "switch_hit", "switch_hit2", "switch_edge",  # PAD-1322
                           "agent_header", "agent_begin"} | SOUND_SITES | LIGHT_SITES | SCENE_SITES | PLAY_SITES
     for t in sites.values():
         t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)
@@ -199,7 +199,7 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                     "typeinfo_scene_player": "0x0068fb48", **PLAY_DATA}
     values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
               and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES
-              and t[1] not in PLAY_VALUES}
+              and t[1] not in PLAY_VALUES and not t[1].startswith("switch_")}   # PAD-1322: the edge source's
     assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34",
                       # PAD-1286: the game's mode books, each flag by its name (the same ids on both builds)
                       "place_flag_completed_0": "69", "place_flag_completed_1": "67", "place_flag_completed_2": "68",

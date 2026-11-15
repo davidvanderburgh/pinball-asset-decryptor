@@ -1,0 +1,199 @@
+# walking_dead_remastered_le 0.92 - Spike 3 (64-bit ARM): drafted by s3port.py (PAD-1287) from the Spike 3 port star_wars_elg-1.10.port (star_wars_elg 1.10).
+# Functions paired across the two titles: 9463 of 18297 reference functions (7964 anchored by vtable slots and strings, 377 through calls that line up, the rest grown through calls); half of them line up 100% or better.
+# Written: what the reference port carries that is the FRAMEWORK's (each site's function at least 75% alike its
+# reference's, each global and offset read at the lined-up instruction, the engines' layouts re-read off this program's
+# own code); the switch lines from this program's own device table. The reference game's own content (shows, lamps,
+# callouts, scenes, held coils, its modes) is not this title's: written as comments, for its own port.
+# Emulator-proven 2026-11-15 (PAD-1287) on the Spike 3 rig (s3run.sh, slot 37, hidden, muted; PAD_S3_MODE_SO = a 64-bit
+# build of template_mode.c): the runtime took this port (29 sites, 32 shots), held back the Insider achievement query
+# (type 28), armed the 6 events with the dispatch hooked and both switch_hit sites; in play TARGET RUSH started on the
+# third Tower target hit (switch 54), scored 6 shots through the game's score_add (+21,000,000: the score table read
+# 90,560 at its start, 22,214,100 at the next) and ended on the end of the ball (bus event 0x34); a second run ended
+# on its clock, and the game played on to the 480 s cap (ball 2, 43,350,600). Program sha1
+# bcf428e162bfec6add82aac519f5f93968d0e283 (games/game).
+# Sounds emulator-proven 2026-11-15 (PAD-1287, slot 37, muted): requests 150, 160 and 170 played on the game's own channels
+# (buses b02 / b04 in the runtime's channel read), sound_active answered 1 while each played, sound_stop and a fade over
+# 800 ms ended them (active 0 within a second), and the callout site played 160.
+# Multiball emulator-proven 2026-11-15 (PAD-1287): a mode.cfg `multiball 3 10` started on three Tower target hits, the
+# game served to 3 balls in play (trough 3/6), the mode scored 3 shots (+6,000,000), counted 3 -> 2 -> 1 balls and gave
+# the game its multiball back. Lamps (no lamp lines yet), the game's shows, screens and clips are this title's own work.
+
+game           walking_dead_remastered_le
+version        0.92
+
+# ---- functions: site <name> <address> <first two instruction words> ----
+#   tick: its calls and callers (score 16.0) (98% alike)
+site tick             0x004c4540 0xd2800001 0x528006e0
+#   sound_lookup: the same instructions, found once on each (100% alike)
+site sound_lookup     0x003a5800 0xf9400c02 0xb5000142
+#   sound_resolve: the same instructions, found once on each (100% alike)
+site sound_resolve    0x003a5a10 0xaa0103e2 0xa9bd53f3
+#   score_add: the same instructions, found once on each (100% alike)
+site score_add        0x00424d30 0xb0001c23 0xf942f063
+#   callout: its calls and callers (score 45.5) (76% alike)
+site callout          0x003aaed0 0x90002708 0x91170108
+#   callout_nth: the same instructions, found once on each (100% alike)
+site callout_nth      0x003aafa0 0x90002708 0x91170108
+#   lamp_group: the same instructions, found once on each (100% alike)
+site lamp_group       0x004d85d0 0xa9be53f3 0x92403c14
+#   show_priority: the same instructions, found once on each (100% alike)
+site show_priority    0x00323a60 0xd0002421 0xf9467021
+# not carried - the screen and clip features name this title's hud / video bank scenes: site dynamic_cast     0x0015fd50 0xb0003250 0xf9453211
+# not carried - the screen and clip features name this title's hud / video bank scenes: site resource_get     0x00411350 0x90001cc3 0xf9468463
+# not carried - the screen and clip features name this title's hud / video bank scenes: site find_node        0x005c5810 0x90000f22 0xf9468442
+# not carried - the screen and clip features name this title's hud / video bank scenes: site set_text         0x005ab470 0xa9bc7bfd 0x910003fd
+# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_state    0x005b6e70 0xf9464400 0x91002000
+#   switch_hit: the call that lines up in a paired function (2 places) (95% alike)
+site switch_hit       0x004b2360 0xf00017a1 0xf9468421
+#   switch_hit2: the call that lines up in a paired function (2 places) (94% alike)
+site switch_hit2      0x004b23f0 0xf00017a1 0xf9468421
+#   sound_play: its calls and callers (score 45.5) (76% alike)
+site sound_play       0x003aaed0 0x90002708 0x91170108
+#   sound_nth: the same instructions, found once on each (100% alike)
+site sound_nth        0x003aafa0 0x90002708 0x91170108
+#   sound_active: the same instructions, found once on each (100% alike)
+site sound_active     0x003a81a0 0xb0002703 0x91130063
+#   sound_stop: the same instructions, found once on each (100% alike)
+site sound_stop       0x003a8350 0xa9bc53f3 0xa9015bf5
+#   sound_worker: read off the sound engine's code
+site sound_worker     0x003aa550 0xf0001fe8 0xf9468508
+#   hook_dispatch: the same instructions, found once on each (100% alike)
+site hook_dispatch    0x0030eb30 0xa9be53f3 0x71033c1f
+#   show_start: the same instructions, found once on each (100% alike)
+site show_start       0x003237f0 0xa9bc53f3 0x72003c14
+#   event_post_replacing: the same instructions, found once on each (100% alike)
+site event_post_replacing 0x00399e60 0xa9be53f3 0x12003c14
+#   event_cancel: the same instructions, found once on each (100% alike)
+site event_cancel     0x00399d60 0xa9bc53f3 0xa9015bf5
+# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_find     0x005c5ad0 0x90000f22 0xf9468442
+# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_set_video 0x005bdaa0 0x90000f62 0xf9468442
+# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_play     0x005b9d70 0x90000f83 0xf9468463
+# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_stop     0x005b8290 0xb0000f81 0xf9468421
+# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_duration 0x005b89b0 0xb0000f81 0xf9468421
+# not carried - the screen and clip features name this title's hud / video bank scenes: site surface_position 0x005b8630 0xb0000f81 0xf9468421
+#   balls_in_play: the same instructions, found once on each (100% alike)
+site balls_in_play    0x0036b8d0 0xa9be53f3 0xf00028d3
+# not carried - the screen and clip features name this title's hud / video bank scenes: site find_text        0x005c5300 0x90000f22 0xf9468442
+#   agent_header: the same instructions, found once on each (100% alike)
+site agent_header     0x006296c0 0xb40002a0 0x4f000400
+#   agent_begin: its calls and callers (score 36.0) (100% alike)
+site agent_begin      0x00632c50 0xaa0003e4 0xaa0103e0
+#   multiball_serve: the same instructions, found once on each (100% alike)
+site multiball_serve  0x0036bb40 0xd00021e6 0xf942f0c6
+#   proc_exists: the same instructions, found once on each (100% alike)
+site proc_exists      0x0039a340 0xd0002762 0x912a8042
+#   proc_create: the same instructions, found once on each (100% alike)
+site proc_create      0x00399ae0 0xf0002764 0x912a8084
+#   proc_sleep: the same instructions, found once on each (100% alike)
+site proc_sleep       0x00399c70 0xf0002761 0x912a8021
+#   adjustment: the same instructions, found once on each (100% alike)
+site adjustment       0x003fdf10 0x72003c00 0x540000c0
+#   coil_fire: the same instructions, found once on each (100% alike)
+site coil_fire        0x0045a0f0 0x72003c00 0x12001c21
+# site coil_take        NOT PLACED: no counterpart found
+# site coil_give        NOT PLACED: no counterpart found
+#   lamp_free_owner: 0x236ca0 + 0x90 lined up in its pair 0x3ca470 (100% alike)
+site lamp_free_owner  0x003ca500 0xa9bf7bf3 0xaa0003f3
+
+# ---- globals: data <name> <address> ----
+data cur_player             0x007b8f10   # 10 of 10 lined-up instructions
+data scores                 0x008969b0   # 13 of 13 lined-up instructions
+data score_mult             0x007b9aa6   # 4 of 4 lined-up instructions
+data mode_mask              0x0088f590   # 256 of 256 lined-up instructions
+data event_head             0x00888aa8   # read off the engine's own code
+data event_current          0x00888ab0   # read off the engine's own code
+# not carried (screens/clips): data resource_manager       0x0085cc58   # 11 of 11 lined-up instructions
+# not carried (screens/clips): data typeinfo_resource      0x0079bd70   # 12 of 12 lined-up instructions
+# not carried (screens/clips): data typeinfo_scene_player  0x0079f830   # 8 of 8 lined-up instructions
+data sound_channels         0x008895e0   # read off the engine's own code
+data sound_requests         0x0083e998   # read off the engine's own code
+data sound_request_count    0x006942f8   # read off the engine's own code
+data lamp_layers            0x008946b0   # read off the engine's own code
+data light_count            0x00896d20   # read off the engine's own code
+data game_flags             0x00895f70   # 10 of 10 lined-up instructions
+data game_flag_count        0x006941e8   # 29 of 29 lined-up instructions
+data coil_count             0x0089af58   # 61 of 61 lined-up instructions
+data coil_table             0x00897250   # 47 of 47 lined-up instructions
+# data right_gate_obj         not carried: the reference game's own (data right_gate_obj         0x00711730)
+
+# ---- values: the reference's framework offsets and counts, each read at the lined-up instruction or off the engine's own code ----
+value mode_mask_busy            0x210    # 8 of 8 lined-up instructions of the placed sites
+value sound_channel_count       8    # the engine's layout, 94 of 94 lined-up instructions
+value sound_channel_size        288    # the engine's layout, 8 of 8 lined-up instructions
+value sound_channel_request     272    # the engine's layout, 6 of 6 lined-up instructions
+value sound_channel_voices      276    # the engine's layout, 3 of 3 lined-up instructions
+value sound_channel_bus         277    # the engine's layout, 1 of 1 lined-up instructions
+value sound_channel_voice_ptrs  144    # the engine's layout, 4 of 5 lined-up instructions
+value sound_voice_volume        56    # the engine's layout, 20 of 20 lined-up instructions
+value lamp_group_next           32    # read off this program's own code, 160 of 160 lined-up instructions
+value lamp_group_prio           8    # read off this program's own code, 94 of 94 lined-up instructions
+value lamp_slot_size            40    # read off this program's own code, 31 of 31 lined-up instructions
+value lamp_slot_level           2    # the engine's layout, 29 of 30 lined-up instructions
+value lamp_slot_alpha           3    # the engine's layout, 18 of 18 lined-up instructions
+value lamp_slot_fade            8    # the engine's layout, 94 of 94 lined-up instructions
+value lamp_slot_used            36    # the engine's layout, 4 of 4 lined-up instructions
+value event_next                232    # read off this program's own code, 18 of 18 lined-up instructions
+value proc_exit_hooks           392    # read off this program's own code, 4 of 5 lined-up instructions
+value proc_exit_slots           4    # read off this program's own code, 40 of 41 lined-up instructions
+value event_flags               2    # read off this program's own code, 29 of 30 lined-up instructions
+value event_show_flag           0x20    # read off this program's own code, 160 of 160 lined-up instructions
+value event_show_id             258    # read off this program's own code, 7 of 7 lined-up instructions
+# not carried (screens/clips): value scene_player_scene        0x38    # 20 of 20 lined-up instructions of the placed sites
+# not carried (screens/clips): value node_visible_vfn          0x150    # 5 of 5 lined-up instructions of the placed sites
+# not carried (screens/clips): value surface_playing           0x2    # 29 of 30 lined-up instructions of the placed sites
+
+# ---- events: the framework's bus ids (each one the constant the lined-up code passes here) ----
+event game_start   0x4d   # 1 of 1 lined-up places
+event ball_start   0x25   # 1 of 1 lined-up places
+event ball_end     0x34   # 1 of 1 lined-up places
+event bonus_start  0x27   # 1 of 1 lined-up places
+event bonus_end    0x28   # 1 of 1 lined-up places
+event game_over    0x47   # 1 of 1 lined-up places
+value ball_end_event 0x34    # the end of a ball, from the bus (no ball_end site on Spike 3)
+
+# ---- switches: the playfield switches of this program's own device table that are shots (switch <id> <shot mask> <name>) ----
+switch 17   0x1                Left outlane
+switch 18   0x2                Left return lane
+switch 19   0x4                Right return lane
+switch 20   0x8                Right outlane
+switch 21   0x10               Left slingshot
+switch 22   0x20               Right slingshot
+switch 36   0x40               Right spinner
+switch 37   0x80               Right ramp enter
+switch 38   0x100              Right ramp exit
+switch 39   0x200              Left spinner
+switch 41   0x400              Crossbow mark
+switch 47   0x800              Right drop
+switch 48   0x1000             Left pop bumper
+switch 49   0x2000             Right pop bumper
+switch 50   0x4000             Top pop bumper
+switch 51   0x8000             Well walker
+switch 52   0x10000            Left top lane
+switch 53   0x20000            Right top lane
+switch 54   0x40000            Tower target
+switch 55   0x80000            Right loop
+switch 56   0x100000           Left ramp exit
+switch 57   0x200000           Center lane
+switch 58   0x400000           Left loop
+switch 59   0x800000           Bicycle girl hit
+switch 60   0x1000000          Left ramp enter
+switch 61   0x2000000          Prison entrance
+switch 62   0x4000000          Left prison target
+switch 63   0x8000000          Right prison target
+switch 65   0x10000000         Prison walker hit
+switch 66   0x20000000         Left drop bottom
+switch 67   0x40000000         Left drop middle
+switch 68   0x80000000         Left drop top
+
+# ---- text ----
+text example_start_shot     Tower target
+
+# not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 16 text, 16 value
+
+# ---- checks ----
+# value sound_channel_voice_ptrs: 1 of the 5 lined-up instructions holding 144 on the reference hold 112 here
+# value lamp_slot_level: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here
+# value proc_exit_hooks: 1 of the 5 lined-up instructions holding 312 on the reference hold 312 here
+# value proc_exit_hooks: 312 on the reference, 392 here
+# value proc_exit_slots: 1 of the 41 lined-up instructions holding 4 on the reference hold 1 here
+# value event_flags: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here

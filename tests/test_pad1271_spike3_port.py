@@ -200,7 +200,10 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
               and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES
               and t[1] not in PLAY_VALUES}
-    assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34"}
+    assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34",
+                      # PAD-1286: the game's mode books, each flag by its name (the same ids on both builds)
+                      "place_flag_completed_0": "69", "place_flag_completed_1": "67", "place_flag_completed_2": "68",
+                      "done_flag_0": "66"}
 
 
 def test_elg_spike3_switch_ids_are_the_ones_the_rig_measured():

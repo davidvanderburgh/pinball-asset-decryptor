@@ -577,6 +577,15 @@ static void pad_tick_work(void *self, int arg)
     pm_t *m = pm_of(self);
     if (!m) return;
     m->secs = *(int *)((char *)self + mode_seconds_off);
+    /* The lamps, from the mode's own run proc (the game's proc thread, ~125
+     * ticks a second, where the game sets its own lamps) - not from the frame
+     * hook, whose rate is the renderer's (about 1 a second on a busy hidden
+     * rig, which aliased a 1/s blink into solid).  lamp_blink = flashes a
+     * second by the clock; 0 = solid. */
+    if (!m->paused && !m->want_end) {
+        long half = m->lamp_blink > 0 ? 500L / m->lamp_blink : 0;
+        lamps_show(m, half == 0 || ((now_ms() / (half ? half : 1)) & 1) == 0);
+    }
     const char *why = m->want_end;
     if (why) {      /* in the mode's own run proc: where the game itself ends a mode */
         m->want_end = NULL;
@@ -756,6 +765,18 @@ static swd_t wrappers[MAX_SW] = { R8(0), R8(1), R8(2), R8(3), R8(4), R8(5), R8(6
 _Static_assert(sizeof wrappers / sizeof *wrappers == MAX_SW, "one wrapper per shot slot");
 
 /* ---- per frame: pause / end rules, lamps, screen --------------------------- */
+/* A mode that stopped running (time, completion, or the game stopping it at
+ * ball end): lamps back to the game, the end sound, the log.  Runs in every
+ * game state, so the lamps go back during the bonus, not at the next ball. */
+static void mode_over(pm_t *m)
+{
+    if (!m->running_seen || running(m)) return;
+    m->running_seen = 0; m->paused = 0;
+    lamps_release(m);
+    play(m->snd_end);
+    lg("\"%s\" over: %d hits, mode total %lld", m->name, m->hits, m->total);
+}
+
 static int was_ingame, last_state = -1, attract_state = -1;
 static unsigned long frames;
 static long bg_snapshot_at = -1;      /* ms clock */
@@ -805,7 +826,10 @@ static void per_frame(void)
         lg("ball over");
     }
     was_ingame = ig;
-    if (!ig) return;
+    if (!ig) {
+        for (int i = 0; i < npm; i++) mode_over(&pms[i]);
+        return;
+    }
     if (bg_snapshot_at >= 0 && now_ms() >= bg_snapshot_at) {
         bg_snapshot_at = -1;
         if (!any_ours_running())
@@ -834,17 +858,7 @@ static void per_frame(void)
             }
         }
         if (r && m->paused) lamps_release(m);          /* the game mode has the lamps */
-        else if (r) {
-            /* lamp_blink = flashes a second, by the clock (the frame rate is the
-             * game's business: the hidden rig draws ~7 a second); 0 = solid */
-            long half = m->lamp_blink > 0 ? 500L / m->lamp_blink : 0;
-            lamps_show(m, half == 0 || ((now_ms() / (half ? half : 1)) & 1) == 0);
-        } else if (m->running_seen) {
-            m->running_seen = 0; m->paused = 0;
-            lamps_release(m);
-            play(m->snd_end);
-            lg("\"%s\" over: %d hits, mode total %lld", m->name, m->hits, m->total);
-        }
+        else if (!r) mode_over(m);          /* lamps are lit from pad_tick_work */
     }
 }
 

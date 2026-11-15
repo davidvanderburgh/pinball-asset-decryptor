@@ -96,6 +96,10 @@ PICTURES_TIP = ("The table's own playfield picture, read from your (PAD) copy on
                 "(the app ships no picture of any table). Hover over it for the large one.")
 
 
+def base_name(path):
+    return os.path.splitext(os.path.basename(path or ""))[0]
+
+
 def kit_dir():
     return os.path.join(emulate_core.rig_dir(), "vpx")
 
@@ -193,6 +197,8 @@ class VpxTab(TabService):
                  # itself, and whether a game copies its card into it first
                  space={}, cache_info=None, space_error="", space_busy=False, card_cache=True,
                  layout="", lcd_on_top=True, monitors=0, display=None, runtime_state="unknown",
+                 # PAD-1304: the Cabinet row, and the backglass-lights picker
+                 cabinet=None, bulbs=None,
                  runtime_text="Checking…", message="", message_level="info",
                  authors_intro=AUTHORS_INTRO, authors_titles_tip=AUTHORS_TITLES_TIP,
                  author_titles=[], author_platforms={}, author_title="", author_note="", coverage={},
@@ -973,6 +979,72 @@ class VpxTab(TabService):
             self.set(lcd_on_top=on_top)
             self._say("the game's screen %s." % ("stays on top of every other window" if on_top
                                                  else "goes behind other windows like any window"))
+        return self._start("Saving", work)
+
+    # -- a cabinet's backglass and button lights (PAD-1304) -------------------
+    @rpc
+    def set_cabinet(self, changes):
+        """The Cabinet row: the screen the backglass fills (0: where B2S puts
+        it), the B2S DMD hidden, the DOF events the START and LOCKDOWN
+        buttons are sent as (0: not sent). Every patched table's <name>.res
+        follows at once; a game picks the rest up as it starts."""
+        keys = ("backglass", "hide_dmd", "dof_start", "dof_lockdown")
+        changes = {k: v for k, v in dict(changes or {}).items() if k in keys}
+        if not changes:
+            return False
+
+        def work():
+            got = self._kit("vpxsetup.py", ["cabinet", json.dumps(changes)])
+            if "error" in got:
+                self._say(got["error"], "error")
+                return
+            self.set(cabinet=got.get("cabinet"))
+            said = got.get("said") or []
+            self._say("cabinet saved%s" % ((": " + "; ".join(said)) if said else "."))
+        return self._start("Saving", work)
+
+    @rpc
+    def open_bulbs(self, output, title):
+        """The picker of the bulbs that follow BACKBOX GI, for one patched
+        table: its backglass's named bulbs, the chosen ones ticked."""
+        def work():
+            got = self._kit("vpxsetup.py", ["bulbs", output, title])
+            if "error" in got:
+                self._say(got["error"], "error")
+                return
+            self.set(bulbs={"output": output, "title": title, "names": got.get("names") or [],
+                            "chosen": got.get("chosen") or [], "backglass": got.get("backglass") or ""})
+        return self._start("Reading the backglass", work)
+
+    @rpc
+    def close_bulbs(self):
+        self.set(bulbs=None)
+        return True
+
+    @rpc
+    def set_bulbs(self, names):
+        b = self.get("bulbs")
+        if not b:
+            return False
+        names = [str(n) for n in (names or []) if str(n) in b["names"]]
+
+        def work():
+            got = self._kit("vpxsetup.py", ["gi", b["title"], json.dumps(names)])
+            if "error" in got:
+                self._say(got["error"], "error")
+                return
+            cab = dict(self.get("cabinet") or {})
+            gi = dict(cab.get("gi_bulbs") or {})
+            if got.get("chosen"):
+                gi[b["title"]] = got["chosen"]
+            else:
+                gi.pop(b["title"], None)
+            cab["gi_bulbs"] = gi
+            self.set(cabinet=cab, bulbs=None)
+            n = len(got.get("chosen") or [])
+            self._say("%s: %s follow%s BACKBOX GI." % (
+                base_name(b["output"]), "%d bulb%s" % (n, "" if n == 1 else "s") if n else "no bulbs",
+                "s" if n == 1 else ""))
         return self._start("Saving", work)
 
     # -- for table authors (PAD-941) -----------------------------------------

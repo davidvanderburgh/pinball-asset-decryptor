@@ -266,9 +266,14 @@ def apply_names(audio_dir, name_map, log=None):
 def sound_parts(image_path):
     """``{sid: [idx, ...]}``: the master-directory records (Extract's ``idxNNNN.wav``) each sound
     id of the plaintext Spike 3 ``image.bin`` at *image_path* plays, its first part first.
-    ``{}`` when the container's descriptor table is not where its header says."""
+    ``{}`` when the container's descriptor table is not where its header says. *image_path* may
+    be an open binary file (PAD-1296: one read off a card's volume)."""
+    import contextlib
     from .info import container_counts
-    with open(image_path, "rb") as f:
+    opened = (open(image_path, "rb") if isinstance(image_path, (str, bytes, os.PathLike))
+              else contextlib.nullcontext(image_path))
+    with opened as f:
+        f.seek(0)
         head = f.read(0x100)
         fragments, count = container_counts(head)
         if not fragments or not count:
@@ -276,7 +281,7 @@ def sound_parts(image_path):
         md = struct.unpack_from("<Q", head, 0x40)[0]
         tend = struct.unpack_from("<Q", head, _DESC_TABLE_END)[0]
         tstart = tend - 8 * _PTRS_PER_SID * fragments
-        size = os.fstat(f.fileno()).st_size
+        size = f.seek(0, 2)
         if not 0x80 <= tstart < tend <= md or md + 24 * count > size:
             return {}
         f.seek(tstart)

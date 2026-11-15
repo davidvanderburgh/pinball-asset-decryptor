@@ -43,6 +43,26 @@ name the card a title boots, start or stop a run by hand.
         that table has and every part the kit's map for it leaves out, or a
         starter map when the kit has none. From the title's device tables
         (vpxauthor.py), so the title must have run once on this PC.
+    padvpx probe <title> [--for SECS] [--press NAME[=MS]]... [--levels] [--json]
+        From the checklist to the running game (PAD-1303): attaches to the
+        title's run and prints each change as it happens, by name - every
+        LED and unnamed channel that lights (GI too), each coil the game
+        fires with its pulse and hold, every switch that moves and who
+        moved it (PAD's ball feed and helpers, the keyboard, the probe).
+        --press closes a switch by name or id; while it runs, stdin takes
+        `press NAME [MS]`, `hold NAME`, `release NAME`, `quit` (vpxprobe.py).
+    padvpx match-leds <title> --table "<file.vpx>" [--into MAP.json] [--confirm]
+        Proposes the machine's LED for each Light in the table by where it
+        stands (device_xy.txt laid over the table), for the author to
+        confirm: "<table> - LED matches.json", a `lamps` section with the
+        unsure ones marked GUESS; --confirm asks about each, --into adds
+        them to a map (vpxstubs.py).
+    padvpx stubs <title> --table "<file.vpx>" [--out FILE] [--print]
+        Appends a sub to the table's script for every switch, coil and
+        insert it has not got (sw_<NAME>_Hit, a default per coil kind -
+        magnet, drop bank, kicker, post, gate, trough - and l_<NAME>
+        lights), writing "<name> (stubs).vpx": placing an object with the
+        stub's name is then enough (vpxstubs.py).
     padvpx titles                         the titles whose device tables are on this PC
 
 A run started here or by the controller takes a rig slot as PAD-VPX, visible
@@ -177,6 +197,8 @@ def patch(table_path, outdir=None, card=None, title=None):
         b2s = copy_backglass(table_path, out)
         if b2s:
             print("backglass: %s" % b2s)
+            for line in cabinet_res(out):
+                print(line)
         remember_patch(out, table_path, title)
         print("open \"%s\" in Visual Pinball; the game starts with it when its card is known" % out)
     return r.returncode
@@ -196,6 +218,20 @@ def remember_patch(out_vpx, table_path, title):
             json.dump({"source": os.path.abspath(table_path), "title": title}, f)
     except OSError:
         pass
+
+
+def cabinet_res(out_vpx, kit=None, mons=None):
+    """PAD-1304: the patched table's <name>.res (the backglass on the screen
+    the Visual Pinball tab's Cabinet row picked) and its B2S DMD, as the
+    kit's cabinet settings say. Words for the log; never in the patch's way."""
+    try:
+        import padcabinet
+        import padisplay
+        kit = padlaunch.kit_load() if kit is None else kit
+        mons = padisplay.monitors() if mons is None else mons
+        return padcabinet.write_res(out_vpx, kit, mons, game_name=padcabinet.rom_name(out_vpx))
+    except Exception as exc:                                # noqa: BLE001
+        return ["backglass screen not set: %s" % exc]
 
 
 def copy_backglass(table_path, out_vpx):
@@ -314,14 +350,16 @@ def run(title, hidden=False, mute=False):
                          creationflags=_CREATE_NO_WINDOW)
         print("started %s on the Spike 1 rig from %s (log %s)" % (title, card, launch.logfile))
         return 0
-    if platform == "spooky":
+    if platform in ("spooky", "bof"):
         # PAD-952: tools/spooky_emu's watch.sh with the title's update file,
-        # on a Spooky rig slot of the kit's
-        launch = padlaunch.SpookyLaunch(title, card)
+        # on a Spooky rig slot of the kit's; PAD-1305: tools/bof_emu's with
+        # the title's .fun, the same way
+        launch = padlaunch.launch_for(platform, title, card)
+        name = padlaunch.PLATFORM_NAMES[platform]
         other = launch.other_run()
         if other:
-            print("%s is running on the Spooky rig's slot %s (%s); stop it first"
-                  % (title, other.get("slot"), other.get("label") or "the app"))
+            print("%s is running on the %s rig's slot %s (%s); stop it first"
+                  % (title, name, other.get("slot"), other.get("label") or "the app"))
             return 1
         slot = launch.take_slot()
         env, card_wsl = launch.env()
@@ -333,7 +371,7 @@ def run(title, hidden=False, mute=False):
         out = open(launch.logfile, "ab")
         subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
                          creationflags=_CREATE_NO_WINDOW)
-        print("started %s on the Spooky rig's slot %d from %s (log %s)" % (title, slot, card, launch.logfile))
+        print("started %s on the %s rig's slot %d from %s (log %s)" % (title, name, slot, card, launch.logfile))
         return 0
     launch = padlaunch.Launch(title, card)
     slot = launch.take_slot()
@@ -370,20 +408,23 @@ def stop(title):
         launch.stop()
         print("stopped %s on the Spike 1 rig" % title)
         return 0
-    if platform == "spooky":
-        import spkbridge
-        rec = spkbridge.board_record(title)
+    if platform in ("spooky", "bof"):
+        import importlib
+        bridge = importlib.import_module("spkbridge" if platform == "spooky" else "bofbridge")
+        name = padlaunch.PLATFORM_NAMES[platform]
+        rec = bridge.board_record(title)
         if not rec:
-            print("no Spooky run of %s on the board" % title)
+            print("no %s run of %s on the board" % (name, title))
             return 1
         if rec.get("label") != padlaunch.LABEL:
-            print("the Spooky run of %s is %s's, not the kit's; leaving it"
-                  % (title, rec.get("label") or "somebody"))
+            print("the %s run of %s is %s's, not the kit's; leaving it"
+                  % (name, title, rec.get("label") or "somebody"))
             return 1
-        launch = padlaunch.SpookyLaunch(title, "", dist=rec.get("distro"))
+        cls = padlaunch.SpookyLaunch if platform == "spooky" else padlaunch.BofLaunch
+        launch = cls(title, "", dist=rec.get("distro"))
         launch.slot = int(rec.get("slot") or 0)
         launch.stop()
-        print("stopped %s on the Spooky rig's slot %d" % (title, launch.slot))
+        print("stopped %s on the %s rig's slot %d" % (title, name, launch.slot))
         return 0
     rec = Rig.board_run(title)
     if not rec:
@@ -622,6 +663,12 @@ def main(argv):
     if cmd == "checklist" and rest:
         import vpxauthor
         return vpxauthor.main(["checklist"] + rest)
+    if cmd == "probe" and rest:
+        import vpxprobe
+        return vpxprobe.main(rest)
+    if cmd in ("match-leds", "stubs") and rest:
+        import vpxstubs
+        return vpxstubs.main([cmd] + rest)
     if cmd == "titles":
         import vpxauthor
         return vpxauthor.main(["titles"])

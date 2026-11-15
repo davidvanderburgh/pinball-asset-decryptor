@@ -27,15 +27,56 @@ Control: a unix socket at <dir>/ctl.sock taking one command per line:
   drain             one ball in play drains into the trough
   state             JSON: switches, balls, driver actions, board status
   leds              JSON: every LED the game has set, "<board>:<index>" -> rrggbb
+  balls <on|off>    PAD's ball model on or off (off: whatever sets the
+                    switches owns the balls: a table, a test)
   quit
+
+Plugins (PAD-1305): a supported way for another program to follow the boards
+and drive the switches without replacing this file or run_game.sh.  Each
+plugin is a Python file (or an importable module name) with
+
+    def attach(emu):            # called once the ports are built
+        return observer         # any object; None = nothing to observe
+
+named by --plugin (repeatable), by BOFHW_PLUGINS (paths split on ':'), or
+dropped into $BOF_ROOT/plugins/*.py (/var/tmp/pad_bof/plugins: run_game.sh
+passes every one, so a run the app starts loads them too, and a PAD update
+leaves them be).  The observer's methods are all optional; each is called on
+this daemon's one thread, and one that raises is logged and keeps being
+called:
+
+    on_switch(n, active, source)        a switch changed (1 = active)
+    on_driver_config(driver, fields)    a DL: line: driver number (int) and
+                                        its fields after the number (hex str)
+    on_driver(driver, fields)           a TL: line, the same way
+    on_leds(board, changes, kind)       LEDs set on an expansion board:
+                                        [(index, r, g, b)], kind RD/RL/RA
+    on_exp_line(line)                   any other expansion bus line
+    on_bics(line, reply)                a BICS command and the reply sent
+    on_net_line(line)                   any Neuron line but WD:
+    on_audio(line)                      a FAST audio board line
+    tick(now)                           every turn of the loop (<= 50 ms)
+    poll_s                              (attribute) the longest wait it wants
+    fds()                               sockets / fds to watch for reading
+    on_readable(fd)                     one of those is readable
+    on_stop()                           the daemon is ending
+
+An observer drives the game through the Emulator: emu.set_switch(n, active,
+"mylink"), emu.ball_model = False (the trough, shooter lane and drains are
+then the observer's to report), emu.profile, emu.leds, emu.drivers,
+emu.bics, emu.root, emu.log().  PAD's own Visual Pinball bridge (bofvpx.py)
+is one.
 """
 import argparse
 import heapq
+import importlib
+import importlib.util
 import json
 import os
 import re
 import select
 import socket
+import sys
 import time
 
 NET, EXP, BICS, AUDIO = "net", "exp", "bics", "audio"
@@ -101,7 +142,15 @@ def with_firmware(id_reply, version):
     return id_reply.rsplit(",", 1)[0] + "," + version
 
 
-NUM_SWITCH_BYTES = 16        # SA: reply covers switches 0..127
+def led_board(board):
+    """The board an LED lives on: an alias's board "840" (board 84,
+    breakout 0 named explicitly) is "84", where its members are listed
+    (Dune / Winchester leds.gd)."""
+    board = board.lower()
+    return board[:2] if len(board) == 3 and board.endswith("0") else board
+
+
+NUM_SWITCH_BYTES = 16       # SA: reply covers switches 0..127
 NAMED_POS = {"HOME": 0, "DOWN": 1, "FLUSH": 2, "UP": 3}
 
 
@@ -133,6 +182,7 @@ class Emulator:
         self.drivers = {}           # DL: config lines by driver hex
         self.driver_log = []        # recent TL: actions
         self.leds = {}              # (board, index) -> (r, g, b)
+        self.led_aliases = {}       # (board, alias index) -> member indexes (LM@)
         self.exp_config = []
         self.status = {"net_id": False, "configured": False, "nodes": False,
                        "exp": set(), "bics_id": False, "watchdog": 0,
@@ -148,6 +198,45 @@ class Emulator:
         self.shooter = profile.get("shooter_switch")
         self.in_trough = sum(1 for n in self.trough if self.switches.get(n))
         self.in_play = 0
+        self.observers = []         # (name, observer) from plugins (PAD-1305)
+        self._ball_model = True
+        self._obs_errors = {}
+
+    # -------------------------------------------------------------- plugins
+    def add_observer(self, name, obs):
+        if obs is not None:
+            self.observers.append((name, obs))
+            self.log("plugin %s attached" % name)
+
+    def notify(self, event, *args):
+        """Call `event` on every observer that has it; a raise is logged
+        (the first few times per plugin and event) and the loop goes on."""
+        for name, obs in self.observers:
+            fn = getattr(obs, event, None)
+            if fn is None:
+                continue
+            try:
+                fn(*args)
+            except Exception as e:      # noqa: BLE001 - a plugin never stops the boards
+                n = self._obs_errors.get((name, event), 0) + 1
+                self._obs_errors[(name, event)] = n
+                if n <= 3:
+                    self.log("ERROR in plugin %s %s: %r" % (name, event, e))
+
+    @property
+    def ball_model(self):
+        """PAD's ball model: the trough feeding the shooter lane on the
+        eject coil, the launch coil plunging, ctl's plunge / drain.  Off,
+        something else (a Visual Pinball table) reports those switches."""
+        return self._ball_model
+
+    @ball_model.setter
+    def ball_model(self, on):
+        on = bool(on)
+        if on != self._ball_model:
+            self._ball_model = on
+            self.log("ball model %s" % ("on" if on else
+                                        "off: the switches' owner has the balls"))
 
     # ---------------------------------------------------------------- setup
     def build(self):
@@ -209,6 +298,7 @@ class Emulator:
         self.switches[n] = active
         self.log("SW %d -> %s (%s)" % (n, "active" if active else "inactive",
                                        source))
+        self.notify("on_switch", n, active, source)
         bics_sw = self.profile.get("bics_switches", {}).get(str(n))
         if bics_sw:
             # A BICS switch: its own index, and the prefix that means active
@@ -240,6 +330,8 @@ class Emulator:
             self.set_switch(n, i < self.in_trough, "ball")
 
     def trough_eject(self):
+        if not self.ball_model:
+            return
         if self.in_trough == 0 or self.shooter is None:
             return
         if self.switches.get(self.shooter):
@@ -249,6 +341,8 @@ class Emulator:
         self.after(0.3, self.set_switch, self.shooter, 1, "ball")
 
     def plunge(self):
+        if not self.ball_model:
+            return False
         if self.shooter is None or not self.switches.get(self.shooter):
             return False
         self.set_switch(self.shooter, 0, "ball")
@@ -256,6 +350,8 @@ class Emulator:
         return True
 
     def drain(self):
+        if not self.ball_model:
+            return False
         if self.in_play == 0 or self.in_trough >= len(self.trough):
             return False
         self.in_play -= 1
@@ -287,6 +383,7 @@ class Emulator:
             return
         if cmd not in ("SL", "DL", "TL"):
             self.log("NET <- %s" % line)
+        self.notify("on_net_line", line)
         if cmd == "ID":
             self.status["net_id"] = True
             # Parsed as split(" "): [1] board, [3] firmware -> the double space.
@@ -315,12 +412,23 @@ class Emulator:
         elif cmd == "DL":
             self.drivers[arg.split(",")[0]] = arg
             self.send(NET, "DL:P\r")
+            parts = arg.split(",")
+            try:
+                drv = int(parts[0], 16)
+            except ValueError:
+                return
+            self.notify("on_driver_config", drv, parts[1:])
         elif cmd == "TL":
             parts = arg.split(",")
             self.driver_log.append((round(time.monotonic() - self.t0, 3), arg))
             del self.driver_log[:-200]
             self.send(NET, "TL:P\r")
             self.on_driver(parts)
+            try:
+                drv = int(parts[0], 16)
+            except ValueError:
+                return
+            self.notify("on_driver", drv, parts[1:])
         else:
             self.send(NET, "%s:P\r" % cmd)
 
@@ -340,12 +448,19 @@ class Emulator:
                 end = colon + 2 + count * width
                 if len(buf) < end:
                     break
-                board = buf[3:colon].decode("latin-1")
+                board = led_board(buf[3:colon].decode("latin-1"))
                 body = buf[colon + 2:end]
+                changes = []
                 for i in range(count):
                     e = body[i * width:(i + 1) * width]
-                    self.leds[(board, e[0])] = (e[1], e[2], e[3])
+                    # an alias (LM@) sets every LED it names (PAD-1305)
+                    for idx in self.led_aliases.get((board, e[0]), (e[0],)):
+                        self.leds[(board, idx)] = (e[1], e[2], e[3])
+                        changes.append((idx, e[1], e[2], e[3]))
+                kind = "RD" if width == 4 else "RL"
                 buf = buf[end:]
+                if changes:
+                    self.notify("on_leds", board, changes, kind)
                 continue
             cr = buf.find(b"\r")
             if cr < 0:
@@ -364,16 +479,29 @@ class Emulator:
                 self.send(EXP, "ID:EXP FP-EXP-%s  %s\r" % (board.upper(), fw))
         elif line.startswith(("ER@", "LM@", "RF@", "em@")):
             self.exp_config.append(line)
-        elif line.startswith("RA@"):
-            board, _, col = line[3:].partition(":")
-            for key in [k for k in self.leds if k[0] == board]:
+            if line.startswith("LM@"):
+                # LM@<board>:<alias hex>,<led hex>,... (leds.gd set_up_aliases)
+                board, _, rest = line[3:].partition(":")
                 try:
-                    self.leds[key] = (int(col[0:2], 16), int(col[2:4], 16),
-                                      int(col[4:6], 16))
+                    alias, *members = [int(x, 16) for x in rest.split(",") if x.strip()]
+                    self.led_aliases[(led_board(board), alias)] = tuple(members)
                 except ValueError:
                     pass
+            self.notify("on_exp_line", line)
+        elif line.startswith("RA@"):
+            board, _, col = line[3:].partition(":")
+            board = led_board(board)
+            try:
+                rgb = (int(col[0:2], 16), int(col[2:4], 16), int(col[4:6], 16))
+            except ValueError:
+                return
+            keys = [k for k in self.leds if k[0] == board]
+            for key in keys:
+                self.leds[key] = rgb
+            self.notify("on_leds", board, [(k[1],) + rgb for k in keys], "RA")
         elif line:
             self.log("EXP <- %s" % line)
+            self.notify("on_exp_line", line)
 
     # ----------------------------------------------------------------- BICS
     def on_bics_line(self, line):
@@ -386,6 +514,7 @@ class Emulator:
             reply = self.bics_generic(line, dialect)
         if reply:
             self.send(BICS, reply + "\r\n")
+        self.notify("on_bics", line, reply)
 
     def bics_generic(self, line, dialect):
         cmd, _, arg = line.partition(":")
@@ -410,6 +539,9 @@ class Emulator:
             elif len(bits) >= 2:
                 ms = list(b["pos"]) if motor == "ALL" else [motor]
                 targets = [(m, bits[1]) for m in ms]
+            elif len(b["pos"]) == 1 and motor not in b["pos"]:
+                # Winchester's set_hall_angle: MOVE:STEPPER <angle>, no name
+                targets = [(next(iter(b["pos"])), motor)]
             else:
                 targets = []
             for m, pos in targets:
@@ -446,6 +578,7 @@ class Emulator:
     # ---------------------------------------------------------------- AUDIO
     def on_audio_line(self, line):
         self.log("AUDIO <- %s" % line)
+        self.notify("on_audio", line)
 
     # ---------------------------------------------------------------- lines
     @staticmethod
@@ -473,6 +606,8 @@ class Emulator:
             "leds_known": len(self.leds),
             "status": dict(self.status, exp=sorted(self.status["exp"])),
             "bics": self.bics,
+            "ball_model": self.ball_model,
+            "plugins": [name for name, _ in self.observers],
         }
 
     def on_ctl(self, conn, line):
@@ -499,6 +634,9 @@ class Emulator:
                 conn.sendall((json.dumps({"%s:%d" % k: "%02x%02x%02x" % v
                                           for k, v in self.leds.items()})
                               + "\n").encode())
+            elif words[0] == "balls" and len(words) > 1 and words[1] in ("on", "off"):
+                self.ball_model = words[1] == "on"
+                conn.sendall(b"ok\n")
             elif words[0] == "quit":
                 conn.sendall(b"bye\n")
                 raise SystemExit(0)
@@ -506,6 +644,20 @@ class Emulator:
                 conn.sendall(b"err unknown command\n")
         except (ValueError, IndexError) as e:
             conn.sendall(("err %s\n" % e).encode())
+
+    def plugin_fds(self):
+        """{fd: (name, observer)} of what the plugins want watched."""
+        out = {}
+        for name, obs in self.observers:
+            fds = getattr(obs, "fds", None)
+            if fds is None or getattr(obs, "on_readable", None) is None:
+                continue
+            try:
+                for fd in fds() or ():
+                    out[fd] = (name, obs)
+            except Exception as e:      # noqa: BLE001
+                self.log("ERROR in plugin %s fds: %r" % (name, e))
+        return out
 
     # ----------------------------------------------------------------- loop
     def run(self):
@@ -534,10 +686,16 @@ class Emulator:
                     fn(*args)
                 except Exception as e:      # noqa: BLE001
                     self.log("ERROR in timer %s: %r" % (fn.__name__, e))
+            if self.observers:
+                self.notify("tick", now)
             timeout = 0.05
+            for _, obs in self.observers:
+                # a plugin polling files (bofvpx.py) asks for a shorter wait
+                timeout = min(timeout, getattr(obs, "poll_s", timeout))
             if self.timers:
                 timeout = max(0.0, min(timeout, self.timers[0][0] - now))
-            rlist = [srv] + list(by_fd) + list(clients)
+            plugin_fds = self.plugin_fds()
+            rlist = [srv] + list(by_fd) + list(clients) + list(plugin_fds)
             wlist = [p.master for p in self.ports.values() if p.tx]
             r, w, _ = select.select(rlist, wlist, [], timeout)
             for fd in w:
@@ -550,6 +708,13 @@ class Emulator:
                 except OSError:
                     p.tx = b""
             for fd in r:
+                if fd in plugin_fds:
+                    name, obs = plugin_fds[fd]
+                    try:
+                        obs.on_readable(fd)
+                    except Exception as e:      # noqa: BLE001
+                        self.log("ERROR in plugin %s on_readable: %r" % (name, e))
+                    continue
                 if fd is srv:
                     c, _ = srv.accept()
                     clients[c] = b""
@@ -586,12 +751,44 @@ class Emulator:
                     p.rx = b""
 
 
+def load_plugins(emu, specs):
+    """Attach each plugin named in specs (a .py path or a module name), once
+    each; one that fails to load is logged and the boards run without it."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    seen = set()
+    for spec in specs:
+        spec = spec.strip()
+        if not spec:
+            continue
+        is_file = spec.endswith(".py") or "/" in spec
+        key = os.path.realpath(spec) if is_file else spec
+        if key in seen:
+            continue
+        seen.add(key)
+        name = os.path.splitext(os.path.basename(spec))[0] if is_file else spec
+        try:
+            if is_file:
+                mspec = importlib.util.spec_from_file_location("bofhw_plugin_" + name, spec)
+                mod = importlib.util.module_from_spec(mspec)
+                mspec.loader.exec_module(mod)
+            else:
+                if here not in sys.path:
+                    sys.path.insert(0, here)
+                mod = importlib.import_module(spec)
+            emu.add_observer(name, mod.attach(emu))
+        except Exception as e:      # noqa: BLE001 - the boards run without it
+            emu.log("ERROR plugin %s not loaded: %r" % (spec, e))
+
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap =argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--dir", required=True, help="rig dir (dev/, sys/, ctl.sock)")
     ap.add_argument("--profile", help="per-title JSON profile")
     ap.add_argument("--build", help="the game build's folder: the BICS board "
                     "claims the firmware version shipped there")
+    ap.add_argument("--plugin", action="append", metavar="FILE|MODULE",
+                    help="load an observer plugin (repeatable; see the module "
+                    "doc); BOFHW_PLUGINS adds more, ':'-separated")
     args = ap.parse_args()
     profile = {}
     if args.profile:
@@ -604,10 +801,15 @@ def main():
     log.flush()
     emu = Emulator(args.dir, profile, log, bics_fw)
     emu.build()
+    specs = list(args.plugin or [])
+    specs += [s for s in os.environ.get("BOFHW_PLUGINS", "").split(":") if s.strip()]
+    load_plugins(emu, specs)
     try:
         emu.run()
-    except SystemExit:
+    except (SystemExit, KeyboardInterrupt):
         pass
+    finally:
+        emu.notify("on_stop")
 
 
 if __name__ == "__main__":

@@ -566,7 +566,44 @@ BOARD_BEAT=0
 # or mismatched file"), written only to /dump/debug_log.txt; other titles
 # lose their settings and audits silently. Nothing in the run can repair it
 # (root's files), so refuse with the one command that does.
+#
+# ★ REPAIRED FIRST, REFUSED ONLY IF THAT FAILS (PAD-1307). The cause is known
+# and the cure is safe - give the rig user back what is under its own rig - so
+# making the user do it in a shell was asking them to fix what they did not
+# break. Root is reached WITHOUT ASKING: `sudo -n` where sudo needs no password
+# (PAD's own Ubuntu user is set up that way), else WSL interop - `wsl.exe -u
+# root` is root for any Windows user, no password, by design. Only files this
+# user does not own are touched (-xdev: never into a mount below), and the log
+# says how many. The card cache and the run records are included: the game
+# never writes them, but a root-owned one stops cardmount and riglock in the
+# same way. The refusal below is still the answer when no root could be had.
+pad_root_noask() {
+    [ "$(id -u)" = 0 ] && { "$@"; return; }
+    if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        sudo -n "$@"; return
+    fi
+    [ -n "${WSL_DISTRO_NAME:-}" ] || return 1
+    local w
+    w=$(command -v wsl.exe 2>/dev/null || echo /mnt/c/Windows/System32/wsl.exe)
+    [ -x "$w" ] || return 1
+    timeout 120 "$w" -d "$WSL_DISTRO_NAME" -u root --cd / -e "$@" < /dev/null
+}
 if [ "$(id -u)" != 0 ]; then
+    own_dirs=""
+    for d in "$ROOT/data" "$ROOT/dump" "$PAD_HOME/cardcache" "$PAD_HOME/.pad-rig"; do
+        [ -d "$d" ] && own_dirs="$own_dirs $d"
+    done
+    # shellcheck disable=SC2086
+    if [ -n "$own_dirs" ] && [ -n "$(find $own_dirs -xdev ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+        # shellcheck disable=SC2086
+        n=$(pad_root_noask find $own_dirs -xdev ! -user "$(id -u)" -print \
+                -exec chown -h "$(id -u):$(id -g)" {} + 2>/dev/null | wc -l)
+        if [ "${n:-0}" -gt 0 ]; then
+            echo "[watch] gave $(id -un) back $n file(s) an elevated run had left to root (data, dump, card cache, run records)"
+        else
+            echo "[watch] files under the rig are owned by root and could not be given back (no sudo -n, no wsl.exe)" >&2
+        fi
+    fi
     nv_bad=""
     for p in "$ROOT/data/nv/$GAME" "$ROOT/data/nvram-$GAME.bin"; do
         [ -e "$p" ] || continue
@@ -585,8 +622,27 @@ if [ "$(id -u)" != 0 ]; then
         echo "[watch] REFUSING: this title's NVRAM is not owned by $(id -un):$nv_bad" >&2
         echo "[watch]   an elevated rig step left it to root, and the game cannot write it (Beatles" >&2
         echo "[watch]   exits with FATAL error 256 in seconds; other titles lose their settings)." >&2
+        echo "[watch]   PAD could not reach root to give it back (sudo asks for a password, no wsl.exe)." >&2
         echo "[watch]   Fix: wsl -u root chown -R $(id -un):$(id -gn) $ROOT/data $ROOT/dump" >&2
         exit 1
+    fi
+fi
+
+# ★ NO SECOND CLOCK-SETTER IN THIS DISTRO (PAD-1307, PAD-932). WSL keeps the
+# guest clock on Windows time; systemd-timesyncd setting it from NTP as well
+# fights that, and the clock has been seen running up to 2.5% fast - which is
+# the clock PulseAudio paces the sound on, so the sound drifts and breaks up.
+# WSL only (on a Linux desktop timesyncd IS the clock's keeper), only where
+# systemd runs it; PAD_KEEP_TIMESYNC=1 keeps it. The app does the same for
+# every running distro (core/timesync.py) - the clock is shared between them.
+if pad_is_wsl && [ "${PAD_KEEP_TIMESYNC:-}" != 1 ] && [ -d /run/systemd/system ] \
+        && command -v systemctl >/dev/null 2>&1 \
+        && { systemctl is-active --quiet systemd-timesyncd \
+             || systemctl is-enabled --quiet systemd-timesyncd 2>/dev/null; }; then
+    if pad_root_noask systemctl disable --now systemd-timesyncd >/dev/null 2>&1; then
+        echo "[watch] turned off systemd-timesyncd: it fights WSL's own clock and the sound drifts (PAD_KEEP_TIMESYNC=1 keeps it)"
+    else
+        echo "[watch] systemd-timesyncd is running and fights WSL's clock (sound can drift); no root to turn it off" >&2
     fi
 fi
 
@@ -2101,9 +2157,14 @@ pad_gl_stop() {
 # that memcpy). Raising the rep movsb/stosb thresholds out of reach makes glibc
 # use its vector copy instead: 35-41 fps on the same box. Only the renderer gets
 # it, only on WSL's d3d12 path where it was measured, only on an x86 CPU without
-# AVX2; a caller who exported GLIBC_TUNABLES keeps theirs.
+# AVX2; a caller who exported GLIBC_TUNABLES keeps theirs. PAD-1302: one switch
+# for it, the same as the BoF rig's (tools/bof_emu/run_game.sh): PAD_MEMCPY_TUNE=0
+# never sets it, =1 sets it on any CPU.
 GL_TUNABLES=${GLIBC_TUNABLES:-}
-if [ -z "$GL_TUNABLES" ] && [ "$IS_WSL" = 1 ] \
+if [ -z "$GL_TUNABLES" ] && [ "${PAD_MEMCPY_TUNE:-}" = 1 ]; then
+    GL_TUNABLES=glibc.cpu.x86_rep_movsb_threshold=0x40000000:glibc.cpu.x86_rep_stosb_threshold=0x40000000
+    echo "[watch] cfg renderer GLIBC_TUNABLES=$GL_TUNABLES (PAD_MEMCPY_TUNE=1)"
+elif [ -z "$GL_TUNABLES" ] && [ "$IS_WSL" = 1 ] && [ "${PAD_MEMCPY_TUNE:-}" != 0 ] \
         && grep -q '^flags.*\bsse2\b' /proc/cpuinfo 2>/dev/null \
         && ! grep -q '^flags.*\bavx2\b' /proc/cpuinfo 2>/dev/null; then
     GL_TUNABLES=glibc.cpu.x86_rep_movsb_threshold=0x40000000:glibc.cpu.x86_rep_stosb_threshold=0x40000000

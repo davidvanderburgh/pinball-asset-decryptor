@@ -177,7 +177,8 @@ def _version_key(path):
 
 
 #: what a title's map says it runs on (`platform`), and the rig that is
-PLATFORM_NAMES = {"spike2": "Spike 2", "spike1": "Spike 1", "spooky": "Spooky"}
+PLATFORM_NAMES = {"spike2": "Spike 2", "spike1": "Spike 1", "spooky": "Spooky",
+                  "bof": "Barrels of Fun"}
 #: the card images a platform's library holds, by glob after `<title>-`
 CARD_GLOBS = {"spike2": ("*.sdcard.raw",), "spike1": ("*.iso",)}
 #: PAD-952: a Spooky title boots its UPDATE file (tools/spooky_emu prepares
@@ -188,6 +189,10 @@ SPOOKY_UPDATES = {"h78": ("code_H78*.pkg",), "um": ("code_UM*.pkg",), "ac": ("ac
 #: the Spooky titles that run on the P-ROC rig, not the Warden board: their
 #: rig profile is the machine yaml in the prepared build (PAD-954)
 SPOOKY_PROC = {"ac": "config/alice.yaml"}
+#: PAD-1305: a Barrels of Fun title boots its update file (dune.fun; a
+#: Labyrinth one is lab.fun), the rig's title key (its profile) -> globs
+BOF_UPDATES = {"dune": ("dune*.fun",), "winchester": ("winchester*.fun",),
+               "labyrinth": ("lab*.fun", "labyrinth*.fun")}
 
 
 def table_map(title):
@@ -242,6 +247,8 @@ def card_for(title, platform="spike2"):
         # for got_le, and Linux/macOS glob tells the cases apart (PAD-951)
         if platform == "spooky":
             pats = [g.lower() for g in SPOOKY_UPDATES.get(game, ())]
+        elif platform == "bof":
+            pats = [g.lower() for g in BOF_UPDATES.get(game, ())]
         else:
             pats = [("%s-%s" % (game, g)).lower() for g in CARD_GLOBS.get(platform, CARD_GLOBS["spike2"])]
         found = [os.path.join(lib, n) for n in sorted(os.listdir(lib))
@@ -270,10 +277,11 @@ def libraries(platform="spike2", kit=None):
     lib = kit.get("library")
     if lib:
         out.append(lib)
-        if platform == "spooky":
+        if platform in ("spooky", "bof"):
             # PAD-952: the maker's own folder beside Stern's (David's library:
-            # images/Stern/spike2 and images/Spooky)
-            out.append(os.path.join(os.path.dirname(os.path.dirname(lib.rstrip("\\/"))), "Spooky"))
+            # images/Stern/spike2 and images/Spooky; PAD-1305: images/BoF)
+            out.append(os.path.join(os.path.dirname(os.path.dirname(lib.rstrip("\\/"))),
+                                    "Spooky" if platform == "spooky" else "BoF"))
         elif platform != "spike2":
             out.append(os.path.join(os.path.dirname(lib.rstrip("\\/")), platform))
     return [d for d in out if os.path.isdir(d)]
@@ -302,6 +310,8 @@ def launch_for(platform, title, card):
         return Spike1Launch(title, card)
     if platform == "spooky":
         return SpookyLaunch(title, card)
+    if platform == "bof":
+        return BofLaunch(title, card)
     return Launch(title, card)
 
 
@@ -316,7 +326,7 @@ def card_places(title, platform="spike2"):
 
 def distros():
     try:
-        r = subprocess.run(["wsl.exe", "-l", "-q"], capture_output=True, timeout=20,
+        r = subprocess.run(["wsl.exe", "-l", "-q"], stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
                            creationflags=_CREATE_NO_WINDOW)
     except Exception:                                       # noqa: BLE001
         return []
@@ -546,7 +556,7 @@ def account(dist=None):
 
 
 def _run(args, timeout=60):
-    return subprocess.run(args, capture_output=True, timeout=timeout,
+    return subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
                           creationflags=_CREATE_NO_WINDOW)
 
 
@@ -1026,6 +1036,107 @@ class SpookyLaunch(Spike1Launch):
             log("stopped %s on the Spooky rig's slot %s" % (self.title, self.slot))
         except Exception as exc:                            # noqa: BLE001
             log("stop of the Spooky run failed: %s" % exc)
+        if self.proc is not None:
+            try:
+                self.proc.wait(timeout=10)
+            except Exception:                               # noqa: BLE001
+                pass
+        self.proc = None
+
+
+# ---------------------------------------------------------- Barrels of Fun --
+
+def bof_keys():
+    """`title:passphrase,...` for the BoF rig's watch.sh, from the app's own
+    game table (plugins/bof/games.py beside the kit) - the rig never
+    hard-codes one, and neither does the kit. "" when there is no app."""
+    app = os.path.dirname(os.path.dirname(os.path.abspath(rig_dir())))
+    path = os.path.join(app, "pinball_decryptor", "plugins", "bof", "games.py")
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("pad_bof_games", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        db = mod.GAME_DB
+    except Exception as exc:                                # noqa: BLE001
+        log("no BoF game table beside the kit (%s)" % exc)
+        return ""
+    return ",".join("%s:%s" % (k, v["passphrase"]) for k, v in sorted(db.items())
+                    if v.get("passphrase"))
+
+
+class BofLaunch(SpookyLaunch):
+    """One Barrels of Fun run started for a table (PAD-1305): tools/bof_emu's
+    watch.sh with the title's update file (dune.fun), as the app's BoF
+    Emulate tab starts one (`wsl -u root`, the app's title keys), visible and
+    with sound, on a rig slot no other BoF run holds. The game draws its own
+    screen in its own window; watch.sh returns once the game has found its
+    boards, and the run lives on. The boards always load bofvpx.py, which
+    keeps the files bofbridge reads."""
+
+    def __init__(self, title, card, dist=None, minutes=240):
+        super().__init__(title, card, dist, minutes)
+        self.rig_wsl = padpath.to_wsl(os.path.join(os.path.dirname(rig_dir()), "bof_emu"),
+                                      self.distro)
+
+    def other_run(self):
+        import bofbridge
+        rec = bofbridge.board_record(self.title)
+        if rec and rec.get("label") != LABEL:
+            return rec
+        return None
+
+    def take_slot(self):
+        import bofbridge
+        for n in self.SLOTS:
+            if bofbridge.board_record(slot=n) is None:
+                self.slot = n
+                return n
+        raise RuntimeError("every BoF rig slot the kit uses (%s) is running a game; stop one "
+                           "first" % ", ".join(str(n) for n in self.SLOTS))
+
+    def env(self):
+        env, card = super().env()
+        env.append("BOF_TITLE=%s" % self.title)
+        keys = bof_keys()
+        if keys:
+            env.append("BOF_KEYS=%s" % keys)
+        return env, card
+
+    def start(self):
+        why = no_linux(self.distro)
+        if why:
+            log(why)
+            raise RuntimeError(why)
+        other = self.other_run()
+        if other:
+            raise RuntimeError("%s is running on the BoF rig's slot %s (%s); stop it first"
+                               % (other.get("title") or self.title, other.get("slot"),
+                                  other.get("label") or "the app"))
+        if self.slot is None:
+            self.take_slot()
+        env, card = self.env()
+        cmd = self.head() + env + ["bash", "%s/watch.sh" % self.rig_wsl, card]
+        out = open(self.logfile, "ab")
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                                     creationflags=_CREATE_NO_WINDOW)
+        log("started %s on the BoF rig's slot %d from %s (distro %s, log %s)"
+            % (self.title, self.slot, self.card, self.distro or "default", self.logfile))
+        return self.slot
+
+    def alive(self):
+        if self.proc is not None and self.proc.poll() is None:
+            return True
+        import bofbridge
+        return bofbridge.board_record(self.title, slot=self.slot) is not None
+
+    def stop(self):
+        try:
+            _run(self.head() + ["PAD_SLOT=%d" % (self.slot or 0), "bash", "%s/stop.sh" % self.rig_wsl],
+                 timeout=120)
+            log("stopped %s on the BoF rig's slot %s" % (self.title, self.slot))
+        except Exception as exc:                            # noqa: BLE001
+            log("stop of the BoF run failed: %s" % exc)
         if self.proc is not None:
             try:
                 self.proc.wait(timeout=10)

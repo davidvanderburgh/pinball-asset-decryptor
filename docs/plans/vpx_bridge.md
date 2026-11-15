@@ -37,10 +37,13 @@ A VPX table talks to its brain through one COM object with a fixed shape
 that object, backed by the rig instead of a ROM:
 
 * **PAD.Controller** (`padcontroller.py`): switches in through the rig's
-  `padsw` block - written from INSIDE WSL by one `swkeys.py` per session,
-  because a Windows write to the guest's mmap races it across 9p (the
-  playfield window's rule); lamps and coils out by re-reading `padled` over
-  `\\wsl.localhost` ~100 times a second. The LCD is the game's own window.
+  `padsw` block - written from INSIDE WSL, because a Windows write to the
+  guest's mmap races it across 9p (the playfield window's rule); lamps and
+  coils out of `padled`. Since PAD-1306 both go through one `padlink.py` per
+  session, which maps the blocks inside WSL and pushes only the changes up
+  its wsl.exe pipe; the old way (`swkeys.py`, and re-reading `padled` over
+  `\\wsl.localhost` ~100 times a second) is the fallback. The LCD is the
+  game's own window.
 * **One numbering** for every table: switch 1000+id, solenoid 1000+node*16+
   index, lamp 1000+node*100+index. Below 1000 the title's map translates.
 * **The table is patched, not rewritten**: `vpxfile.py` reads the compound

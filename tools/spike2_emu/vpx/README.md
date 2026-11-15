@@ -9,9 +9,18 @@ binary running in the rig (`tools/spike2_emu`, or the app's Emulate tab),
 stock card or custom build, with its own LCD window and sound.
 
 ```
-VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──▶ swkeys.py ──▶ padsw ──▶ hwshim ──▶ the game
-                 ◀─ChangedSolenoids/ChangedLamps── (poll thread) ◀── padled ◀── hwshim ◀── node bus frames
+VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──▶ padlink.py ──▶ padsw ──▶ hwshim ──▶ the game
+                 ◀─ChangedSolenoids/ChangedLamps── (poll thread) ◀── changes ◀── padlink.py ◀── padled ◀── hwshim
 ```
+
+padlink.py (PAD-1306) runs inside WSL beside the game, maps padled and padsw
+there, and pushes only what changed up the wsl.exe pipe the controller started
+it through; the switch lines go down the same pipe, and each one is read back
+off the game's merge and written again until the game has taken it
+(padsw.Confirmer, which swkeys.py uses too). No HELLO, an ERR, or 6 s without a
+ping and the controller falls back to swkeys.py plus re-reading padled over
+\\wsl.localhost, handing over every switch still held. `PAD_VPX_LINK=0` in the
+environment VPX starts in skips the link.
 
 | file | what |
 |---|---|
@@ -36,6 +45,7 @@ VPX table script ──Switch(n)=1──▶ PAD.Controller ──"<id> 1"──�
 | `padsplit.py` | a Barrels of Fun game's one window on a cabinet's screens (PAD-1308): each display (main; the playfield strip, or Winchester's reflected one) full screen on its own monitor through a DWM thumbnail, a loading screen there until the game is up, the game's own window kept under one of them (`tools/bof_emu/bofplace.py`), the focus handed back to Visual Pinball. Its setting is `~/.pad-rig/split.json`, shared with the app's Emulate tab. Design and measurements: `docs/plans/bof_cabinet_split.md`. |
 | `vpxpicture.py` | a picture of each table for the app's Visual Pinball tab (PAD-942): `vpxpicture.py <out_dir> <table.vpx>...` reads the playfield picture out of the table itself (GameData's IMAG image; when that is not a picture, an image named like a playfield, then the author's TableInfo screenshot, then the backglass image, so a table with a baked playfield still shows the game's art) and writes it as a JPEG, one `picture {json}` line per table and a JSON object last. The app ships no picture of any table: the tab reads them from the person's own (PAD) copies into its cache. |
 | `vpxauthor.py` | for whoever builds or finishes a table (PAD-941): `padvpx checklist <title> [--table x.vpx]` writes a Markdown checklist of every switch, coil and insert the game has (its number, its kind, its place on the game's drawing, what a table does for it) from the title's device tables; against a table, every part the kit's map leaves out (switches with no object, coils nothing fires, inserts no light shows, GUESS marks, map ids the run numbers otherwise), or a starter `<title>.starter.shadow.json` when the kit has no map for it. The app's Visual Pinball tab shows it as a sheet ("For table authors", and each table row's Coverage cell) with CSV and Markdown export; `data` is the JSON the sheet reads, `coverage` the per-title percentages. |
+| `vpxprobe.py`, `vpxstubs.py` | the checklist's next steps (PAD-1303). `padvpx probe <title>` attaches to the title's run and prints each change as it happens, by name: every LED and unnamed channel that lights (GI too), each coil command with its pulse and hold, every switch that moves and who moved it (the ball feed, another PAD helper, the keyboard, the probe); `--press NAME` and stdin `press / hold / release NAME` close switches, a press letting go once the game has seen it; `--only WORD` thins an attract show. `padvpx match-leds <title> --table x.vpx` proposes an LED for each table light by position (the device drawing scaled to the table, then pulled in on the lights that are each other's nearest; anchored on objects named as switches when there are enough), for the author to confirm: a `lamps` section in "<table> - LED matches.json", the unsure ones with a GUESS note, `--confirm` asking about each and `--into` adding them to a map. `padvpx stubs <title> --table x.vpx` writes "<table> (stubs).vpx" with a sub for every switch, coil and insert the table has not got (`sw_<NAME>_Hit` by switch kind, a default per coil kind: cvpmMagnet on `mag_<NAME>`, a drop bank raised or tripped, the saucer's own Kicker kicked, a post, a gate, the trough, the auto plunger; `l_<NAME>` lights), every object found by name under On Error so an unplaced part changes nothing; run again, the block is replaced. A stub coil's number reaches the controller as `Controller.PadSolenoid(n) = Array(node, index)`, kept through `GameName`. |
 | `vpxgen.py`, `vpxgen_protos.json` | a table GENERATED from a title's own device tables (switch, coil and LED positions over the game's playfield drawing), for a title with no tribute; the prototypes are Visual Pinball's example table's objects with their strings blanked. |
 | `test_controller.vbs` | `cscript //nologo test_controller.vbs [run]` - the controller from VPX's own script engine, with no VPX installed; `run` presses Start and a flipper through a live rig and expects the coils back. |
 
@@ -839,7 +849,38 @@ person's own ROM set already, so nothing for this kit to do, and they are
 not in the catalogue (David, 2026-11-02: no reinventing the wheel; Spike 1,
 Spike 2 and the other modern machines are the point).
 
-**The rest** (JJP, American, Spooky, Dutch, Barrels of Fun, Pinball
+**Barrels of Fun** (`"platform": "bof"`, PAD-1305): Dune, Winchester
+Mystery House and Labyrinth on tools/bof_emu. The boards (bofhw.py) always
+load PAD's plugin `bofvpx.py`, which keeps `vpxhw.state` / `vpxsw.input` in
+the run's hw folder (the board record's `root`, `bof-<slot>.run`) in the
+Spooky layout plus a rule plane, and stands PAD's ball model aside while
+`vpxball.off` is there. Numbering for a map: switch n is `1000 + n + 1`
+(id 0 means none to the controller, and switch 0 is the coin slot), driver d
+is `[d // 64, d % 64]`, an LED is slot `place * 128 + index` written
+`[s // 64, s % 64]` with `"rgb": true` (place = its board's in the profile's
+`led_boards`; the profile's `leds` names every one). The flippers, slings
+and pops are rules the game arms on the Neuron (DL: modes 56 / 5d / 10,
+armed by `TL:<d>,0`, disarmed by `TL:<d>,02`): the controller fires the
+coil from the table's own button edge while the plane says it is armed, and
+not in attract or after a tilt. A run is started like a Spooky one
+(`padlaunch.BofLaunch`: watch.sh with the title's `.fun` from the library's
+`BoF` folder, slots 7-4, the app's own title keys). No table is mapped yet:
+the catalogue's BoF tables are tributes, not the machine's layout.
+
+For a link of your own, two supported ways in, neither touching PAD's files:
+the line stream bofvpx.py serves on `127.0.0.1:7470 + slot` (WSL hands it to
+Windows; `BOF_VPX_PORT` sets the port, 0 turns it off) - `P` pulse, `H`
+hold, `A` rule armed / disarmed, `R` BICS magnet rule, `L` LED by name, `M`
+magnet, `F` flasher, `W` stepper, `V` servo out; `S` switch and `B 0` (the
+table owns the balls) in; the full grammar is bofvpx.py's doc - or a plugin
+of your own next to the boards: a .py with `attach(emu)` dropped into
+`/var/tmp/pad_bof/plugins/` (or named by `BOFHW_PLUGINS`), which sees every
+DL:/TL: line, LED frame and BICS command and sets switches (bofhw.py's doc
+lists the calls). Proven on a Dune run: the stream from Windows, the game's
+flipper rules armed at Start, and a table flipper press fired at once
+through the bridge while the game saw its button.
+
+**The rest** (JJP, American, Dutch, Pinball
 Brothers, Turner, Multimorphic, Chicago Gaming's own titles): no VPinMAME
 core and no rig behind a table yet; `catalog.json` says what tables exist
 (few are the machine's layout) and `platforms[].bridge` is `none`.

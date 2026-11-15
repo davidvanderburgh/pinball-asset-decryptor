@@ -470,6 +470,13 @@ example; PAD-1288..1293 do the others):
    mode.log, the bridge's bridge.log ([ball] lines), the play's own output.
 3. **Add the build to the table** with a comment saying what was seen, as the Spike 2 entries do.
 
+Before step 2 on a new title, **take its switch census** (PAD-1290): a drafted switch line's id is the switch's rank in
+the device table, and that is not every title's numbering. `TITLE=<game> DRAFT=<draft port> SLOT=N OUT=<dir> bash
+tools/spike3_emu/proofs/s3census.sh` starts a game twice on the rig with a port that gives every id 0-127 a bit of its
+own and shot_probe_mode.c logging each shot, presses every switch line's switch once and writes `<game>.switch_ids`;
+`s3port.py ... --switch-ids <that file>` redrafts with the measured ids and leaves out a switch that never reached the
+modes. Keep the file in `proofs/titles/` beside the title's `<game>.env` (its card, port, start and switch names).
+
 | table | proof | what the logs must show |
 |---|---|---|
 | BALL_SAVE_PROVEN | `PROOF=ballsave CFG=save.cfg`, and the control `CFG=savectl.cfg` | `[pad] ball save: 15 s ... the game is saving`; the drain inside it served back (eject + auto plunger in bridge.log) and the mode running on; shots scored on that ball; the drain after the save `END (ball ended)`. The control: `END (ball ended)` on its first drain. EARLY_SWS starts the game's own start-of-ball save right after the plunge, so it is over (40 s) before the mode starts. |
@@ -504,6 +511,27 @@ and the Spike 3 sound bank is a differently encoded image.bin (the same size, 99
 transcription does not carry over by itself. switch_edge, music modes, editions, menu settings: Spike 2's delivery only
 (above).
 Tests: tests/test_pad1286_spike3_proofs.py, tests/test_spike3_balls.py.
+
+## Star Wars 2025 LE 0.96 (PAD-1290)
+
+`ports/spike3/star_wars_2025_le-0.96.port` (program sha1 91fb0281...), drafted from ELG's Spike 3 port: every core site
+placed (29), ELG's mode-book flags (place_flag / done_flag) and the coil_take / coil_give pair left out as ELG's own
+(the same s3port.py rule PAD-1288 / 1289 hit). The draft's switch lines put presses on the wrong shots: this program
+numbers its RIGHT TARGET last (87) and every switch after it in the table one lower (Left orbit 63, not 64), and nothing
+in the device table's records says so (the two RIGHT TARGET records are a lamp and a switch, the outlanes share names
+with lamps and keep their ranks, the device objects are in table order). The census measured all 32: 27 reach the
+modes, the slingshots, pop bumpers and drop target never do. The same census on ELG 1.10 and Walking Dead Remastered
+0.92 found every id their ports carry right (titles/*.switch_ids), so the rank rule stays the default.
+
+Proof (2026-11-15, Spike 3 rig slots 190-194, hidden, MUTED, prebuilt/mode64.so): CLOCK TEST (Right target x3, 25 s)
+started on the third hit, scored 6 shots through score_add (+21,000,000) and ended on its clock; ball save (save taken,
+the drain inside it served back, 3 shots on that ball, the next drain ended it) and its control; a mode's 3-ball
+multiball through the game's serve, "ours is over" at one ball. Not proven: a `stack no` mode waiting in the game's own
+multiball - the rig did not start one (Sarlacc pit exit x3, Sarlacc ramp + pit, Death Star target + locks, the locks
+and Top vuk), so STACK_BALLS_PROVEN leaves it out and the tab says so. A card Written with a TRENCH RUN mode (386 s)
+read back through the card's key: `/games/game -> pad/padmode/padmode.sh`, `game.target = star_wars_2025_le/game`,
+root-owned 0755 / 0644, mode.cfg with the census bits, game.port this port byte for byte.
+Tests: tests/test_pad1290_spike3_star_wars_2025_le.py.
 
 ## Code modes on Spike 3 (PAD-1295)
 

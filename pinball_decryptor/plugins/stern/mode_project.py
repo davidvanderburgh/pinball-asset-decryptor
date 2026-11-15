@@ -532,6 +532,10 @@ MULTIBALL_PROVEN = frozenset({
     # Death Star hits start the game's own multiball): served 3 through the game's serve, the mode ran its 40 s (the game's
     # Orbits start refused meanwhile), drains 3-2-1, then "ours is over" at one ball
     "star_wars_elg-1.10/spike3",
+    # PAD-1290 2026-11-15, the Spike 3 card (rig slot 192, hidden, muted, s3proof.sh PROOF=mb, a mode file started on Right
+    # target x3): "3 balls asked for (3 in play now) ... the game is serving" through the game's serve, the mode ran its
+    # 40 s and scored 3 shots, then "ours is over (1 ball in play)"
+    "star_wars_2025_le-0.96/spike3",
 })
 
 
@@ -633,6 +637,10 @@ BALL_SAVE_PROVEN = frozenset({
     # multiball_serve, the drain 3 s in served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the
     # drain after the save ended it; the control without ball_save ended the ball on its first drain
     "star_wars_elg-1.10/spike3",
+    # PAD-1290 2026-11-15 (Spike 3 rig slots 190/191, hidden, muted, s3proof.sh PROOF=ballsave): SAVE TEST's 15 s save taken
+    # ("the game is saving"), the drain inside it served back (trough eject + auto plunger), 3 shots scored 6,000,000 on
+    # that ball and the drain after the save ended it; SAVE CONTROL (no ball_save) ended the ball on its first drain, 5.8 s in
+    "star_wars_2025_le-0.96/spike3",
 })
 
 
@@ -2148,7 +2156,11 @@ BUS_IDS = 208
 #: proven (:attr:`TitleProfile.switch_shots_note`).
 #: beatles-1.29: emulator-proven 2026-09-23, each of 73-76 and 48-51 gave exactly one shot in play, the
 #: slingshots none, and a mode file started on Target 1 and scored on Target 2-4 and the return lanes.
-SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29"})
+#: PAD-1290 (2026-11-15, Spike 3 rig slot 190, hidden, muted): Star Wars 2025 LE 0.96's - proofs/s3census.sh pressed
+#: each of its 32 drafted switches in a game, 27 reached the modes on ids of their own (the port's lines are those ids:
+#: the table's ranks were wrong from its RIGHT TARGET on), and a mode file started on Right target x3 and scored on Left
+#: orbit, At-at target and Right orbit.
+SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_2025_le-0.96/spike3"})
 #: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
 #: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
 #: 1.29 and Star Wars ELG 1.10 of generation B, Batman 66 1.13 and Rush LE 1.18 of generation A).

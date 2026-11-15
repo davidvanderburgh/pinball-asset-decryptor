@@ -25,3 +25,5 @@ installer/docker/root/** text eol=lf
 
 # The pinned aarch64 kit list xgcc.sh reads under bash (PAD-1295): LF like the script
 *.pins text eol=lf
+# Spike 3 proof titles: s3proof.sh sources them under bash (PAD-1290), so a CR would end up in every value
+tools/spike3_emu/proofs/titles/*.env text eol=lf

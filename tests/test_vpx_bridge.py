@@ -684,7 +684,7 @@ def test_jaws_shark_and_fin_follow_the_machine():
     vbs = m["extra_vbs"]
     assert "PadFins = Array(%s)" % ", ".join(fins) in vbs
     assert "PadSw(1105 - i)" in vbs and "PadSw(1079)" in vbs and "PadSw(1080)" in vbs
-    assert "Targetshark1.Visible = False" in vbs and "PadSharkMotor" not in vbs
+    assert "PadNewtonTick" in vbs and "PadSharkMotor" not in vbs
     assert m["solenoids"]["6"]["callback"] == "PadFinUpDown"
     assert m["solenoids"]["3"]["callback"] is None
     assert m["retrofit_timers"]["PadMechTimer"]["interval_ms"] == 50
@@ -714,6 +714,117 @@ def test_jaws_center_ramp_reel_and_upper_deck_lights():
     assert retro["PadUpperPfFlash"]["at"] == [127, 392] and retro["PadUpperPfFlash"]["clone"] == "Light14"
     assert {"gi001", "gi006"} <= set(m["round_lights"])
     assert any(r["old"] == "Sub PyramidKicker_Hit : vpmTimer.PulseSw 1090" for r in m["repatch"])
+
+
+def test_jaws_no_kickback_no_loop_kicker_round_sling_glow():
+    # PAD-1339: JP's bait bucket (KsaveR) under the left outlane fired the ball
+    # back up while the green save arrow (Lightsave) was lit, and KrampBoucle on
+    # the Scars lane's top channel swallowed every ball and fired a new one round
+    # the loop at 30: the machine has neither. The sling GI pairs lit half
+    # circles cut 31-41 units from the bulb (the square yellow glow), and the
+    # lanterns' falloff ran 3-5x past their outlines
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    f = m["item_fields"]
+    assert f["KsaveR"] == {"EBLD": 0} and f["KrampBoucle"] == {"EBLD": 0}
+    assert "Lightsave" in m["dark"] and "Lightsave" not in m["lamps"]
+    assert {"gi1", "gi2", "gi4", "gi5"} <= set(m["round_lights"])
+    assert all(f[g]["BWTH"] < 25 for g in ("gi1", "gi2", "gi4", "gi5"))
+    for n in range(1, 5):
+        assert f["Lightlantern%d" % n]["RADI"] <= 10 and f["Lightlantern%d" % n]["BWTH"] <= 60
+    assert "If Not Rsaveball.Collidable Then Rsaveball.Collidable = True" in m["extra_vbs"]
+    assert any(r["old"] == "PadStand Targetshark1, PadSharkSt(0), PadSharkUp" for r in m["repatch"])
+    assert "PadStand Targetshark1" not in m["extra_vbs"]
+
+
+JAWS_TABLE = r"C:\tmp\vpx_new\JAWS_50Th_Anniversary.3.2\JAWS_50Th_Anniversary.vpx"
+
+
+@pytest.mark.skipif(not os.path.exists(JAWS_TABLE), reason="JP's JAWS 50th 3.2 is not on this machine")
+def test_jaws_real_table_has_no_hard_glow_edge():
+    # PAD-1339 on the real table: after item_fields (round_lights included), no
+    # GI bulb and no lantern stops its glow at an outline while it is still
+    # bright - the falloff at the outline's nearest edge, times the intensity
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    t = vf.VpxTable(JAWS_TABLE)
+    items = list(t.items)
+    for k, data in vs.item_fields(t, m).items():
+        items[int(k[len("GameItem"):])] = data
+
+    def seg(p, a, b):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        u = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ((dx * dx + dy * dy) or 1)))
+        return math.hypot(a[0] + u * dx - p[0], a[1] + u * dy - p[1])
+
+    seen = set()
+    for data in items:
+        kind, name, pos = vf.VpxTable.item_info(data)
+        if kind != "Light" or not (name.lower().startswith("gi") or name.startswith("Lightlantern")):
+            continue
+        pts, f, first = [], {}, True
+        for tag, p, _ in vf.item_records(data):
+            if tag == "VCEN" and len(p) >= 8:
+                if first:
+                    first = False
+                    continue
+                pts.append(struct.unpack_from("<ff", p))
+            elif tag in ("RADI", "FAPO", "BWTH"):
+                f[tag] = struct.unpack_from("<f", p)[0]
+        near = min(seg(pos, pts[i], pts[i - 1]) for i in range(len(pts)))
+        edge = f["BWTH"] * max(0.0, 1 - near / f["RADI"]) ** f["FAPO"]
+        assert edge < 0.5, "%s: glow %.2f where its outline cuts it" % (name, edge)
+        seen.add(name)
+    assert {"gi1", "gi2", "gi4", "gi5", "Lightlantern1", "Lightlantern4"} <= seen
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the map's VBScript under cscript")
+def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
+    # PAD-1339: SHARK HIT is the newton ball (JP's captive ball beside
+    # CaptiveKick) being knocked while the shark is up - not two unseen targets
+    # standing at the ends of the SHARK! insert. One pulse per knock; nothing
+    # while the shark is down; the other captive ball is not it; the pop-up
+    # targets stay down and JP's outlane save wire stays shut
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    vbs = m["extra_vbs"].replace("On Error Resume Next", "")     # an error ends the run here
+    tick = "\n".join(["Sub Tick : PadMechTimer_Timer : End Sub"])
+    script = "\n".join([
+        "Dim Log, Sw(2000), Balls",
+        "Class FakeObj : Public IsDropped, Visible, Enabled, Collidable, Name : End Class",
+        "Class FakeBall : Public X, Y, VelX, VelY : End Class",
+        "Class FakeController : Public Default Property Get Switch(n) : Switch = Sw(n) : End Property : End Class",
+        "Class FakeTimer : Public Sub PulseSw(n) : Log = Log & \"pulse\" & n & \" \" : End Sub : End Class",
+        "Function GetBalls : GetBalls = Balls : End Function",
+        "Function Obj(d) : Set Obj = New FakeObj : Obj.IsDropped = d : Obj.Collidable = True : End Function",
+        "Function Ball(x, y) : Set Ball = New FakeBall : Ball.X = x : Ball.Y = y : Ball.VelX = 0 : Ball.VelY = 0 : End Function",
+        "Dim Controller : Set Controller = New FakeController",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim o_",
+        "\n".join("Dim %s : Set %s = Obj(False)" % (n, n) for n in (
+            "Tquick1", "Tquick2", "Tquick3", "Tquick4", "Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot",
+            "Tsharkfinal", "Thammerfinal", "Tsmimerfinal", "Targetshark1", "Targetshark2", "Targetshark3",
+            "Targetshark4", "shark", "Rsaveball", "lockpostG", "lockpostD")),
+        vbs, tick,
+        "Dim newton, other : Set newton = Ball(546, 490) : Set other = Ball(325, 582)",
+        "Balls = Array(other, newton)",
+        "Tick",                                                   # finds the newton ball
+        "newton.VelY = -12 : Tick : Log = Log & \"down \"",      # shark down: no SHARK HIT
+        "newton.VelY = 0 : Sw(1079) = 1 : Tick : Sw(1079) = 0",  # SHARK UP-MAG: up
+        "other.VelX = 20 : Tick : other.VelX = 0 : Log = Log & \"other \"",
+        "newton.VelY = -12 : Dim i : For i = 1 To 20 : Tick : Next",          # one knock, however long it swings
+        "newton.VelY = 9 : Tick : newton.VelY = -3 : Tick : Log = Log & \"knock \"",
+        "newton.VelY = 0 : Tick : newton.VelY = -15 : Tick : Log = Log & \"again \"",   # settled, knocked again
+        "Rsaveball.Collidable = False : Tick",                   # JP's Targetsave_Hit opened it
+        "Log = Log & Targetshark1.IsDropped & Targetshark2.IsDropped & Targetshark3.IsDropped & Targetshark4.IsDropped",
+        "Log = Log & \" \" & Rsaveball.Collidable",
+        "WScript.Echo Log & \" |\""])
+    (tmp_path / "t.vbs").write_text(script, encoding="latin-1")
+    import subprocess
+    r = subprocess.run(["cscript", "//nologo", str(tmp_path / "t.vbs")], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and not r.stderr, r.stdout + r.stderr
+    assert r.stdout.split() == ["down", "other", "pulse1081", "knock", "pulse1081", "again",
+                                "TrueTrueTrueTrue", "True", "|"], r.stdout
 
 
 def test_round_lights_gives_a_light_a_round_outline():

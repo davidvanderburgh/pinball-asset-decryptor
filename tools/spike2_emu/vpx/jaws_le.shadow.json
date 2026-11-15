@@ -5,8 +5,8 @@
     "game. The LE card, not the Pro: the table has the LE's fourth flipper (the upper",
     "one, LeftFlipperG, on the right button as Stern's UP P/F R FLIP is) and its shark",
     "rising out of the lagoon. PAD-1311: the shark shows while the machine's SHARK UP-MAG",
-    "is made (the Targetshark pair in front of it unseen, standing while it is up: the",
-    "machine has no pop-up targets there), and the fin is the chum line's seven targets,",
+    "is made (PAD-1339: the tribute's pop-up targets in front of it stay down; SHARK HIT is the",
+    "newton ball in its mouth being knocked), and the fin is the chum line's seven targets,",
     "the one at SHARK POSITION 1..7 standing while SHARK FIN UP/DOWN holds it up.",
     "The five shark-shaped shot arrows (Lnight) are the beaches' RGB; JP's fireball bulbs",
     "over the shark (fcroco) stay dark. PAD-1331: the middle lane's own trigger (Target2) is CENTER RAMP MADE",
@@ -114,7 +114,7 @@
     "BallRelease.Kick",
     "PlungerIM.AutoFire"
   ],
-  "extra_vbs": "' the quickshot lane's four triggers are the machine's switches: always live\nTquick1.Enabled = 1 : Tquick2.Enabled = 1 : Tquick3.Enabled = 1 : Tquick4.Enabled = 1\nSub PadPostL(e) : lockpostG.IsDropped = Not e : End Sub\nSub PadPostR(e) : lockpostD.IsDropped = Not e : End Sub\n' ---- PAD-1311: the shark and the fin follow the machine\n' The shark rises and sinks with the machine's SHARK UP-MAG / DOWN-MAG switches. The ball hits the shark itself\n' (SHARK HIT): the tribute's two pop-up targets in front of it stay unseen and stand again after a hit, so nothing\n' pops up or sinks into the playfield (the machine has no targets there).\n' The fin is the tribute's seven chum line targets, one per SHARK POSITION 1..7 (switches 104 down to 98): the one\n' where the fin is stands while SHARK FIN UP/DOWN holds it up, and a hit is SHARK FIN TGT.\nDim PadSharkUp, PadFinUp, PadFinAt, PadFins, PadFinSt(6), PadSharkSt(1)\nPadSharkUp = False : PadFinUp = False : PadFinAt = 1\nPadFins = Array(Tbeachfinal, Tnightfinal, Tbarrelshark, Tjackpot, Tsharkfinal, Thammerfinal, Tsmimerfinal)\nFunction PadSw(n)   ' the machine's switch plane; False when the controller cannot say\n\tPadSw = False\n\tOn Error Resume Next\n\tPadSw = CBool(Controller.Switch(n + 0))\nEnd Function\nSub PadFinUpDown(e) : PadFinUp = CBool(e) : End Sub\nSub PadStand(o, ByRef st, want)   ' a drop target held up (want) or down. st: 0 held down, 1 standing, 2+ knocked down that many ticks ago\n\tIf Not want Then\n\t\tst = 0\n\t\tIf Not o.IsDropped Then o.IsDropped = True\n\tElseIf st = 0 Then\n\t\to.IsDropped = False : st = 1\n\tElseIf o.IsDropped Then\n\t\tst = st + 1\n\t\tIf st >= 7 Then o.IsDropped = False : st = 1   ' up again 300 ms after the ball knocked it down\n\tElse\n\t\tst = 1\n\tEnd If\nEnd Sub\nSub PadMechTimer_Timer\n\tOn Error Resume Next\n\tDim i, at\n\tIf PadSw(1079) Then PadSharkUp = True\n\tIf PadSw(1080) Then PadSharkUp = False\n\tIf shark.Visible <> PadSharkUp Then shark.Visible = PadSharkUp\n\tTargetshark1.Visible = False : Targetshark2.Visible = False\n\tPadStand Targetshark1, PadSharkSt(0), PadSharkUp\n\tPadStand Targetshark2, PadSharkSt(1), PadSharkUp\n\tIf Not Targetshark3.IsDropped Then Targetshark3.IsDropped = True\n\tIf Not Targetshark4.IsDropped Then Targetshark4.IsDropped = True\n\tat = 0\n\tFor i = 1 To 7\n\t\tIf PadSw(1105 - i) Then at = i\n\tNext\n\tIf at > 0 Then PadFinAt = at\n\tFor i = 0 To 6\n\t\tPadStand PadFins(i), PadFinSt(i), PadFinUp And PadFinAt = i + 1\n\tNext\nEnd Sub\n",
+  "extra_vbs": "' the quickshot lane's four triggers are the machine's switches: always live\nTquick1.Enabled = 1 : Tquick2.Enabled = 1 : Tquick3.Enabled = 1 : Tquick4.Enabled = 1\nSub PadPostL(e) : lockpostG.IsDropped = Not e : End Sub\nSub PadPostR(e) : lockpostD.IsDropped = Not e : End Sub\n' ---- PAD-1311: the shark and the fin follow the machine\n' The shark rises and sinks with the machine's SHARK UP-MAG / DOWN-MAG switches. The ball hits the shark itself\n' PAD-1339: SHARK HIT is the newton ball in its mouth (JP's captive ball, made by CaptiveKick) being knocked while the\n' shark is up. The tribute's four pop-up targets in front of it stay down: PAD-1311 stood two of them unseen at the\n' ends of the SHARK! insert, and the ball bounced off nothing short of the newton ball.\n' The fin is the tribute's seven chum line targets, one per SHARK POSITION 1..7 (switches 104 down to 98): the one\n' where the fin is stands while SHARK FIN UP/DOWN holds it up, and a hit is SHARK FIN TGT.\nDim PadSharkUp, PadFinUp, PadFinAt, PadFins, PadFinSt(6), PadNewton, PadNewtonLook, PadNewtonStill\nPadSharkUp = False : PadFinUp = False : PadFinAt = 1\nSet PadNewton = Nothing : PadNewtonLook = 0 : PadNewtonStill = True\nSub PadNewtonTick   ' the newton ball: found once, beside CaptiveKick (544, 485), before any ball is served\n\tDim b\n\tIf PadNewton Is Nothing Then\n\t\tIf PadNewtonLook >= 100 Then Exit Sub\n\t\tPadNewtonLook = PadNewtonLook + 1\n\t\tFor Each b In GetBalls\n\t\t\tIf Abs(b.X - 544) < 30 And b.Y > 430 And b.Y < 570 Then Set PadNewton = b\n\t\tNext\n\t\tExit Sub\n\tEnd If\n\tDim v : v = PadNewton.VelX * PadNewton.VelX + PadNewton.VelY * PadNewton.VelY\n\tIf v < 1 Then\n\t\tPadNewtonStill = True\n\tElseIf v > 4 And PadNewtonStill Then   ' knocked from rest: one hit, however long it swings\n\t\tPadNewtonStill = False\n\t\tIf PadSharkUp Then vpmTimer.PulseSw 1081   ' SHARK HIT\n\tEnd If\nEnd Sub\nPadFins = Array(Tbeachfinal, Tnightfinal, Tbarrelshark, Tjackpot, Tsharkfinal, Thammerfinal, Tsmimerfinal)\nFunction PadSw(n)   ' the machine's switch plane; False when the controller cannot say\n\tPadSw = False\n\tOn Error Resume Next\n\tPadSw = CBool(Controller.Switch(n + 0))\nEnd Function\nSub PadFinUpDown(e) : PadFinUp = CBool(e) : End Sub\nSub PadStand(o, ByRef st, want)   ' a drop target held up (want) or down. st: 0 held down, 1 standing, 2+ knocked down that many ticks ago\n\tIf Not want Then\n\t\tst = 0\n\t\tIf Not o.IsDropped Then o.IsDropped = True\n\tElseIf st = 0 Then\n\t\to.IsDropped = False : st = 1\n\tElseIf o.IsDropped Then\n\t\tst = st + 1\n\t\tIf st >= 7 Then o.IsDropped = False : st = 1   ' up again 300 ms after the ball knocked it down\n\tElse\n\t\tst = 1\n\tEnd If\nEnd Sub\nSub PadMechTimer_Timer\n\tOn Error Resume Next\n\tDim i, at, o\n\tIf PadSw(1079) Then PadSharkUp = True\n\tIf PadSw(1080) Then PadSharkUp = False\n\tIf shark.Visible <> PadSharkUp Then shark.Visible = PadSharkUp\n\tFor Each o In Array(Targetshark1, Targetshark2, Targetshark3, Targetshark4)\n\t\tIf Not o.IsDropped Then o.IsDropped = True\n\tNext\n\tPadNewtonTick\n\tIf Not Rsaveball.Collidable Then Rsaveball.Collidable = True   ' PAD-1339: JP's outlane save never opens\n\tat = 0\n\tFor i = 1 To 7\n\t\tIf PadSw(1105 - i) Then at = i\n\tNext\n\tIf at > 0 Then PadFinAt = at\n\tFor i = 0 To 6\n\t\tPadStand PadFins(i), PadFinSt(i), PadFinUp And PadFinAt = i + 1\n\tNext\nEnd Sub\n",
   "retrofit_timers": {
     "PinMAMETimer": {"clone": "PulseTimer", "interval_ms": 1},
     "PadTestTimer": {"clone": "PulseTimer", "interval_ms": 100},
@@ -272,7 +272,19 @@
       "PadUpperPfRadio": {"leds": [[9, 86]], "name": "UPPER PF RADIO (PAD-1331: the deck's upper red circle)", "clone": "Light14", "at": [85, 342]}
     }
   },
-  "round_lights": ["gi001", "gi006", "gi002", "gi003", "gi004", "gi005", "gi008"],
+  "round_lights": ["gi001", "gi006", "gi002", "gi003", "gi004", "gi005", "gi008", "gi1", "gi2", "gi4", "gi5"],
+  "item_fields": {
+    "_": ["PAD-1339: the sling GI pairs gi1/gi2 and gi4/gi5 (falloff 230) each lit half a circle, cut along a straight line 31-41 units from",
+      "the bulb at a third of its brightness: the square yellow glow over each sling. Round now (round_lights), each at 18 not 25 so the pair",
+      "is no brighter than JP's halves. The sling lanterns (Lightlantern1-4, intensity 200) had a falloff 3-5x their outline: a hard yellow",
+      "disc on each post; their falloff ends at the outline now, at 60. KsaveR (JP's bait bucket under the left outlane, which fired the ball",
+      "back up when the green save arrow was lit) and KrampBoucle (on the Scars lane's top channel: it swallowed every ball that got there and",
+      "fired a new one round the loop at 30) are off: the machine has neither."],
+    "gi1": {"BWTH": 18.0}, "gi2": {"BWTH": 18.0}, "gi4": {"BWTH": 18.0}, "gi5": {"BWTH": 18.0},
+    "Lightlantern1": {"RADI": 9.0, "BWTH": 60.0}, "Lightlantern2": {"RADI": 9.0, "BWTH": 60.0},
+    "Lightlantern3": {"RADI": 9.0, "BWTH": 60.0}, "Lightlantern4": {"RADI": 9.0, "BWTH": 60.0},
+    "KsaveR": {"EBLD": 0}, "KrampBoucle": {"EBLD": 0}
+  },
   "dark": [
     "fcroco",
     "fcroco1",
@@ -282,7 +294,8 @@
     "Light26",
     "Light44",
     "Light49",
-    "Light50"
+    "Light50",
+    "Lightsave"
   ],
   "quiet_subs": [
     "StartLightSeq",
@@ -306,6 +319,7 @@
     {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"},
     {"old": "If KeyCode = PlungerKey Then Controller.Switch(1034) = True", "why": "the plunger key pressed the Action Button: only the auto plunger launched, and the manual plunger never pulled", "since": "PAD-1128: the plunger key pulls the table's plunger, the Action Button is the lockbar key"},
     {"old": "Sub PadSharkMotor(e)", "why": "its shark-shaped shot arrows never lit, the fin target did not follow the machine, pop-up targets showed in front of the shark and a huge glow covered it", "since": "PAD-1311: the shot arrows, the shark and the fin follow the machine; the fireball bulbs stay dark"},
-    {"old": "Sub PyramidKicker_Hit : vpmTimer.PulseSw 1090", "why": "the middle shot to the upper playfield and the fishing reel's spins never reached the game, the upper deck's lights sat off their inserts, and a square of light hung over each slingshot", "since": "PAD-1331: the center ramp and the reel reach the game, the deck's lights sit on its arrows and circles, the sling GI glows round"}
+    {"old": "Sub PyramidKicker_Hit : vpmTimer.PulseSw 1090", "why": "the middle shot to the upper playfield and the fishing reel's spins never reached the game, the upper deck's lights sat off their inserts, and a square of light hung over each slingshot", "since": "PAD-1331: the center ramp and the reel reach the game, the deck's lights sit on its arrows and circles, the sling GI glows round"},
+    {"old": "PadStand Targetshark1, PadSharkSt(0), PadSharkUp", "why": "a square yellow glow hung over each slingshot, the left outlane fired the ball back up, a slow ball up the Scars lane was fired round the loop, and unseen targets beside the SHARK! insert stopped balls short of the shark", "since": "PAD-1339: round sling glow, no outlane kickback, the loop keeps the ball's own speed, the newton ball is SHARK HIT"}
   ]
 }

@@ -532,6 +532,10 @@ MULTIBALL_PROVEN = frozenset({
     # Death Star hits start the game's own multiball): served 3 through the game's serve, the mode ran its 40 s (the game's
     # Orbits start refused meanwhile), drains 3-2-1, then "ours is over" at one ball
     "star_wars_elg-1.10/spike3",
+    # PAD-1292 2026-11-15, Walking Dead Remastered LE 0.92 (Spike 3 rig slot 93, hidden, muted, s3proof.sh PROOF=mb
+    # CFG=mb_wdr.cfg: Tower target x3): 3 balls asked for and served through the game's serve (trough 3/6), the mode
+    # scored 3 shots (+6,000,000) and ended on its 40 s clock, drains to one ball, then "ours is over"
+    "walking_dead_remastered_le-0.92/spike3",
 })
 
 
@@ -633,6 +637,11 @@ BALL_SAVE_PROVEN = frozenset({
     # multiball_serve, the drain 3 s in served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the
     # drain after the save ended it; the control without ball_save ended the ball on its first drain
     "star_wars_elg-1.10/spike3",
+    # PAD-1292 2026-11-15, Walking Dead Remastered LE 0.92 (Spike 3 rig slot 93, hidden, muted, s3proof.sh
+    # PROOF=ballsave CFG=save_wdr.cfg / savectl_wdr.cfg): SAVE TEST's 15 s save taken ("the game is saving"), the drain
+    # inside it served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the drain after the save
+    # ended it; the control without ball_save ended the ball on its first drain
+    "walking_dead_remastered_le-0.92/spike3",
 })
 
 

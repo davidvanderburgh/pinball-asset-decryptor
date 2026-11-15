@@ -1,5 +1,5 @@
 # play.sh SLOT - plays one proof on a running Spike 3 slot (s3proof.sh starts it beside the run; PAD-1286).
-# PROOF picks what is played after a game is started and its first ball plunged:
+# PROOF picks what is played after a game is started and its first ball plunged (explore: EXPLORE_SEQ, PAD-1292):
 #   ballsave  wait out the game's own save, trigger the mode, drain inside its save, shoot the served ball, drain again
 #   game      keep the ball in play HOLD s (a probe mode does the rest: place_probe_mode.c)
 #   mb        trigger the mode, plunge the balls it serves, shoot, drain them one by one
@@ -12,6 +12,7 @@ TRIGGER_SW=${TRIGGER_SW:-TOP LANE CENTER}                   # the mode files' tr
 SHOT_SWS=${SHOT_SWS:-CENTER TARGET|HIDDEN TARGET|LEFT LUKE ORBIT}  # three of its scoring shots (0x20000138)
 EARLY_SWS=${EARLY_SWS:-LEFT LUKE ORBIT|HIDDEN TARGET}       # starts the game's own ball save right after the plunge
 GAME_MB_SW=${GAME_MB_SW:-DEATH STAR TARGET}                 # x3 starts the game's own multiball
+GAME_MB_HITS=${GAME_MB_HITS:-3}                             # how many GAME_MB_SW hits start it (PAD-1292)
 FLIP_SWS=${FLIP_SWS:-L FLIPPER BUTTON|R FLIPPER BUTTON}      # the flipper buttons (PROOF=edge)
 NOHANDLER_SWS=${NOHANDLER_SWS:-LEFT SLINGSHOT|RIGHT POP BUMPER}   # switches the drain runs no handler for (PROOF=edge)
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
@@ -76,7 +77,7 @@ coil)
   sleep 10 ;;
 stackmb)
   sleep 4
-  for k in 1 2 3; do $P sw "$SLOT" "$GAME_MB_SW"; sleep 2; done
+  for k in $(seq 1 "$GAME_MB_HITS"); do $P sw "$SLOT" "$GAME_MB_SW"; sleep 2; done
   echo "[play] the game's own multiball asked for at $(date +%s)"
   for k in $(seq 1 6); do sleep 3; echo "[play] mb plunge $k: $(plunge)"; done
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done
@@ -87,6 +88,14 @@ stackmb)
     grep -q "STACK MB START" $L && { echo "[play] started after drain $round"; break; }
   done
   sleep 25 ;;
+explore)   # PAD-1292: what starts a title's own multiball - EXPLORE_SEQ="SWITCH*hits|..." , the trough after each
+  sleep 4; IFS='|' read -r -a steps <<< "$EXPLORE_SEQ"
+  for e in "${steps[@]}"; do
+    s=${e%\**}; n=${e##*\*}; [ "$n" = "$e" ] && n=1
+    for k in $(seq 1 "$n"); do $P sw "$SLOT" "$s"; sleep 2; done
+    sleep 3; echo "[play] after $s x$n: $(plunge)"
+  done
+  sleep 10 ;;
 edge)
   sleep 4
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done

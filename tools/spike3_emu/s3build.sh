@@ -48,7 +48,11 @@ LIBC=$ROOTFS/lib
 VIDMAX="-DPADVID_MAX_W=2048 -DPADVID_MAX_H=1152 -DPADVID_SLOTS=16"
 # GL programs: Godot 4 builds well past the Spike 2 bridge's 128 (glbridge.c/padglhost.c must agree)
 GLMAX="-DMAXPROG=1024"
-CF="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -Wall -Werror=implicit-function-declaration"
+# -static-libgcc (PAD-1340): gcc links a -shared object against libgcc_s.so.1 by
+# default, and the pinned kit (xgcc.pins, PAD-1295) deliberately carries none, so
+# s3kms/s3alsa/s3dev/s3vid failed to link ("cannot find libgcc_s.so.1") and no
+# rebuild could finish. libgcc.a is in the kit; the shims then need only libc.
+CF="-std=gnu17 -fno-stack-protector -shared -fPIC -O2 -static-libgcc -Wall -Werror=implicit-function-declaration"
 "$CC" $CF $GLMAX -nostdlib -I"$S2" -Wl,-soname,libGLESv2.so.2 -o "$OUT/libGLESv2.so.2" \
     "$S/s3gl.c" -L"$LIBC" -l:libc.so.6
 "$CC" $CF -nostdlib -Wl,-soname,libEGL.so.1 -o "$OUT/libEGL.so.1" \

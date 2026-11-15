@@ -208,6 +208,40 @@ followed them down to one. Star Wars 2025 LE/Pro, Transformers, Fallout and Poke
 placed; each needs its own run (and its lamps, screens and callouts) before its port ships. The app still never
 derives a 64-bit port itself (`port_derive._spike3_port`): only a port proven on the rig ships.
 
+**Star Wars 2025 Pro 0.84** (`ports/spike3/star_wars_2025_pro-0.84.port`, program sha1 2c9070fb..., PAD-1291) drafted
+the same way, every core entry placed (29 sites; game over is bus event 0x46; game start / ball start have no direct
+call), but its first run never started a mode: **a switch's id is not always its rank in the device table.** The game
+handed its switch_hit site 83 for Right target (rank 61) and one less than the rank for every switch after it - it
+numbers Right target after all the other playfield switches - while ELG and Walking Dead Remastered number by rank.
+Nothing in the static table shows it (the record bytes, name pointers and shared names were checked), so the ids are
+MEASURED:
+
+- `tools/spike3_emu/proofs/swcensus.sh` (TITLE=<game>, as root, hidden, muted) boots the card with the draft port and
+  `value switch_hit_log`, starts a game and presses each switch the draft names, one at a time, waiting for the runtime's
+  `switch hit: switch N` before the next; it writes `<id> <NAME>` (or `# no switch hit: <NAME>`) per switch - the
+  format of PAD-1290's s3census.sh (below), which reads the ids off a probe mode's shots instead of the switch_hit log.
+- `s3port.py ... --switch-ids <census>` writes the switch lines from it: each switch at its measured id, one with no hit
+  or not in the census left out (as a comment), the shot bits packed over the lines written. The Pro's census is
+  `proofs/titles/star_wars_2025_pro-0.84.switch_ids`: 27 switches sent an id; the slingshots, pop bumpers and drop target opto
+  sent none (their descriptors broadcast nothing, as The Beatles' slings on Spike 2).
+
+Run the census for every Spike 3 title before its first proof; a title whose census equals the ranks needs no file.
+Proof (2026-11-15, Spike 3 rig slots 240-242, hidden, muted, prebuilt mode64.so; titles/star_wars_2025_pro.env): CLOCK
+TEST started on the third Right target hit, scored 6 shots through score_add (+21,000,000) and ended on its 25 s clock;
+MB TEST served 3 balls and ended at one; SAVE TEST's save served the drain inside it back, and the drain after it ended
+the ball (SAVE CONTROL: its first drain); a stack no mode waited out the game's own 2-ball multiball (six centre ramp
+shots: JUMP RAMP ENTER / EXIT OPTO, `GAME_MB_TIMES=6`) and started after the drain to one. MULTIBALL_PROVEN,
+BALL_SAVE_PROVEN and STACK_BALLS_PROVEN carry `star_wars_2025_pro-0.84/spike3`; so does SWITCH_SHOTS_PROVEN: ALL SHOTS
+(`PROOF=clock CFG=allshots.cfg SHOT_BITS=0x7ffffff SHOT_SWS=<every switch>`: every switch line a shot,
+`game_modes stack`, `ends_on clock`; the `clock` play shoots the list twice and waits out the clock) took 54 shots for 54
+presses, each switch twice. A card the app Wrote (`spike3_write.write_card`, one Form mode: Right target x3, Left orbit /
+At-at target / Right orbit) read back with /games/game -> pad/padmode/padmode.sh, game.target star_wars_2025_pro/game,
+the mode.cfg (trigger 0x80 x3, shots 0x800c00), and game.port and mode.so byte-identical to the repo's port and
+prebuilt mode64.so. Lamps, shows, screens,
+clips, callouts, held coils and the game's mode books are this title's own work, not carried. s3port.py also leaves the
+reference's own mode books (place_flag / done_flag / done_audit) and a held-coil pair placed only half (PAD-1288) out.
+Tests: tests/test_pad1291_spike3_2025_pro_port.py.
+
 ## Callouts and sounds on Spike 3 (PAD-1282)
 
 The six sound sites (callout, callout_nth, sound_play, sound_nth, sound_active, sound_stop) are plain calls into
@@ -489,11 +523,13 @@ example; PAD-1288..1293 do the others):
    <S3 game> -o draft.port`), keep the shipped port's proof notes at its head, and check the profile:
    `mode_project.profile_from_port(<port>).cannot` names each part greyed and why ("has not found" = the port lacks
    it; "has not yet seen ... in the emulator" = the lines are there, the proof is owed).
-2. **Run the proof** with `tools/spike3_emu/proofs/s3proof.sh` (as root in WSL, hidden and muted, a free Spike 3 rig
+2. **Measure the switch ids** (`proofs/s3census.sh`, PAD-1290, or `proofs/swcensus.sh`, PAD-1291: the same file) and
+   redraft with `--switch-ids` when they are not the ranks.
+3. **Run the proof** with `tools/spike3_emu/proofs/s3proof.sh` (as root in WSL, hidden and muted, a free Spike 3 rig
    slot; `PROOF=` picks the play, `CFG=` / `CFG2=` the mode files in `proofs/modes/`; the title's switch names are
    play.sh's variables at its head - TRIGGER_SW, SHOT_SWS, EARLY_SWS, GAME_MB_SW, START_HOLD_MS). Logs: the runtime's
    mode.log, the bridge's bridge.log ([ball] lines), the play's own output.
-3. **Add the build to the table** with a comment saying what was seen, as the Spike 2 entries do.
+4. **Add the build to the table** with a comment saying what was seen, as the Spike 2 entries do.
 
 Before step 2 on a new title, **take its switch census** (PAD-1290): a drafted switch line's id is the switch's rank in
 the device table, and that is not every title's numbering. `TITLE=<game> DRAFT=<draft port> SLOT=N OUT=<dir> bash

@@ -2500,7 +2500,7 @@ def spike3_switches(tgt, ids=None, unseen=None):
 
     A switch's id is its rank among the table's switches - true on ELG and Walking Dead Remastered, NOT on every title:
     Star Wars 2025 LE 0.96 numbers its RIGHT TARGET last (87) and every switch after it one lower (PAD-1290, measured
-    on the rig; nothing in the table says so). *ids* (read_switch_ids, a rig census) gives the measured ids instead:
+    on the rig; nothing in the table says so), Star Wars 2025 Pro 0.84 its Right target (83, PAD-1291). *ids* (read_switch_ids, a rig census) gives the measured ids instead:
     a switch it does not name never reached the modes on the rig and is left out (its name appended to *unseen*)."""
     root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
     if root not in sys.path:
@@ -2758,7 +2758,7 @@ def main(argv=None):
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--game")
     ap.add_argument("--version")
-    ap.add_argument("--switch-ids", help="a rig census (proofs/s3census.sh): the switch lines' ids as measured")
+    ap.add_argument("--switch-ids", help="a rig census (proofs/s3census.sh or proofs/swcensus.sh): the switch lines' ids as measured")
     a = ap.parse_args(argv)
     ref, tgt = Elf(a.ref_elf), Elf(a.target_elf)
     if not tgt.a64:

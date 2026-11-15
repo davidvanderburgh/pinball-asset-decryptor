@@ -6,6 +6,8 @@
 #   coil      trigger the mode, shoot through its holds
 #   mode      trigger the mode, score its shots, keep the ball up until its clock ends it (PAD-1288..1290)
 #   census    press every switch in CENSUS_NAMES once, print the id each reached the modes with (s3census.sh)
+#   clock     the same as `mode`'s wait-out-the-clock play (PAD-1290, PAD-1291: 54 shots for 54 presses with allshots.cfg),
+#             reachable by its own name: `coil|mode)` above is the case bash runs for PROOF=mode
 #   stackmb   start the game's own multiball, trigger a `stack no` mode inside it, drain until it starts
 #   edge      (PAD-1322) the flipper buttons in attract, then in play the trigger, the scoring shots, a slingshot, a
 #             pop bumper and the flipper buttons: with `value switch_edge_log N` in the port, every edge is logged
@@ -15,6 +17,7 @@ SHOT_SWS=${SHOT_SWS:-CENTER TARGET|HIDDEN TARGET|LEFT LUKE ORBIT}  # three of it
 EARLY_SWS=${EARLY_SWS:-LEFT LUKE ORBIT|HIDDEN TARGET}       # starts the game's own ball save right after the plunge
 GAME_MB_SW=${GAME_MB_SW:-DEATH STAR TARGET}                 # x3 starts the game's own multiball
 GAME_MB_SWS=${GAME_MB_SWS:-}                                # or these, once each in turn (a title's lock sequence)
+GAME_MB_TIMES=${GAME_MB_TIMES:-3}                            # GAME_MB_SW (a | list: in turn) played this many times (PAD-1291)
 FLIP_SWS=${FLIP_SWS:-L FLIPPER BUTTON|R FLIPPER BUTTON}      # the flipper buttons (PROOF=edge)
 NOHANDLER_SWS=${NOHANDLER_SWS:-LEFT SLINGSHOT|RIGHT POP BUMPER}   # switches the drain runs no handler for (PROOF=edge)
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
@@ -82,7 +85,7 @@ coil|mode)
   echo "[play] triggers in at $(date +%s)"
   for r in $(seq 1 8); do sleep 4; sws "$SHOT_SWS" 1; done
   sleep 10 ;;
-mode)
+clock)
   sleep 4
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done
   echo "[play] triggers in at $(date +%s)"; sleep 2
@@ -101,7 +104,7 @@ census)
   done < "$CENSUS_NAMES" ;;
 stackmb)
   sleep 4
-  if [ -n "${GAME_MB_SWS:-}" ]; then sws "$GAME_MB_SWS" 2; else for k in 1 2 3; do $P sw "$SLOT" "$GAME_MB_SW"; sleep 2; done; fi
+  if [ -n "${GAME_MB_SWS:-}" ]; then sws "$GAME_MB_SWS" 2; else for k in $(seq 1 "${GAME_MB_TIMES:-3}"); do sws "$GAME_MB_SW" 2; done; fi
   echo "[play] the game's own multiball asked for at $(date +%s)"
   for k in $(seq 1 6); do sleep 3; echo "[play] mb plunge $k: $(plunge)"; done
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done

@@ -112,6 +112,9 @@ typedef void (*plot_os_t)(const void *font, ALLEGRO_COLOR c, ALLEGRO_COLOR outli
 static mode_ctor_t mode_ctor;
 static int_fn_t state_get, balls_in_play;
 static int ingame_state = 5;
+static int ingame_explicit;            /* title.cfg set ingame_state */
+static int ingame_learned;             /* ...or the runtime learned it (learn_ingame) */
+static int (*ball_flag)(void);         /* game_flow_get_ball_in_play: 0 in attract, 1 with a ball in play */
 
 /* Mode vtable slot byte offsets (from the vptr), found at install. */
 static int VT_START = -1, VT_END = -1, VT_SET_TIME = -1, VT_IS_RUNNING = -1,
@@ -275,7 +278,7 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     else if (!strcmp(k, "game_modes"))
         m->game_modes = !strcmp(v, "end") ? POLICY_END : !strcmp(v, "ignore") ? POLICY_IGNORE : POLICY_PAUSE;
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : 0;
-    else if (!strcmp(k, "ingame_state")) ingame_state = (int)num(v);
+    else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
     else if (!strcmp(k, "game")) snprintf(game_name, sizeof game_name, "%s", v);
     else if (!strcmp(k, "background_modes")) {
         background_explicit = 1;
@@ -762,9 +765,28 @@ static long bg_snapshot_at = -1;      /* ms clock */
  * mode, as it ends the game's own: the game stops the mode's run proc there
  * whatever we do.  Start-shot counts reset when a new game leaves attract (the
  * state seen when we installed). */
+/* 5 is the ball-in-play state on Guns N' Roses.  On a title whose engine
+ * numbers its states otherwise (and whose title.cfg does not say), learn it:
+ * the state that holds for a second, away from attract, while the game's own
+ * ball-in-play flag is set. */
+static void learn_ingame(int st)
+{
+    static int cand = -1; static long since;
+    if (ingame_explicit || ingame_learned || !ball_flag) return;
+    if (!ball_flag() || st == attract_state) { cand = -1; return; }
+    if (st != cand) { cand = st; since = now_ms(); return; }
+    if (now_ms() - since >= 1000) {
+        ingame_learned = 1;
+        if (st != ingame_state) lg("ball-in-play state is %d on this title (not %d)", st, ingame_state);
+        else lg("ball-in-play state %d confirmed", st);
+        ingame_state = st;
+    }
+}
+
 static void per_frame(void)
 {
     int st = state_get();
+    learn_ingame(st);
     if (st != last_state) {
         lg("game state %d -> %d", last_state, st);
         if (last_state == attract_state && st != attract_state)
@@ -947,6 +969,7 @@ static void *installer(void *arg)
     balls_in_play = (int_fn_t)sym("_Z28mb_get_logical_balls_in_playv");
     if (!balls_in_play) balls_in_play = (int_fn_t)sym("_Z20mb_get_balls_in_playv");
     am_proc = (int (*)(void))sym("_Z16proc_am_i_a_procv");
+    ball_flag = (int (*)(void))sym("_Z26game_flow_get_ball_in_playv");
     if (!resolve_vtable() || !mode_ctor || !state_get) { lg("FAIL: this game's engine lacks what a mode needs"); return NULL; }
     find_game_modes();
     if (getenv("JJP_MODS_TEST_GAMEMODE") && getenv("JJP_MODS_TEST_SWITCH")) {

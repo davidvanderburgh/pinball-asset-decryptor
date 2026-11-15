@@ -47,6 +47,7 @@ SDK = [
     ("mode", "_ZN4Mode25hook_do_mode_total_choreoEv", False),
     ("game", "_Z14jjpe_state_getv", True),
     ("game", "_Z16proc_am_i_a_procv", False),
+    ("game", "_Z26game_flow_get_ball_in_playv", False),
     ("yield", "_Z28mb_get_logical_balls_in_playv", False),
     ("yield", "_Z20mb_get_balls_in_playv", False),
     ("sound", "_ZN11SoundEffect4playEv", True),

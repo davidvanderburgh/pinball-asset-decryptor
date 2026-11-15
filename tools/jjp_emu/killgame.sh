@@ -51,6 +51,24 @@ if [ "$AFTER" != "0" ]; then
 fi
 
 echo "killed $(( BEFORE - AFTER )); still running: $AFTER"
+# A killed game whose thread is stuck in the kernel (D state) is a zombie that
+# keeps ALL its memory; the jail check above cannot see it (its root is gone).
+# PAD-1337: in a WSL whose sync() hangs (one superblock never answers; all
+# distros share the kernel) the game's persistence thread blocks in sync(2) -
+# called through an import the protected binary resolves itself, so no
+# preload can catch it - and every killed game stays behind like this: ~20
+# held 15 GB.  Say so instead of reporting clean.
+STUCK=0; STUCK_KB=0
+for p in $(ps -eo pid=,stat=,comm= | awk '$3=="game" && $2 ~ /^Z/ {print $1}'); do
+    for t in /proc/$p/task/*; do
+        if [ "$(cut -d' ' -f3 "$t/stat" 2>/dev/null)" = "D" ]; then
+            STUCK=$((STUCK + 1))
+            STUCK_KB=$((STUCK_KB + $(awk '/VmRSS/{print $2}' "$t/status" 2>/dev/null || echo 0)))
+            break
+        fi
+    done
+done
+[ "$STUCK" = 0 ] || echo "WARNING: $STUCK killed game(s) stuck in the kernel still hold $((STUCK_KB / 1024)) MB; only restarting WSL (wsl --shutdown) frees it" >&2
 [ "$AFTER" = "0" ] || { echo "REFUSING TO REPORT CLEAN - $AFTER game process(es) survived." >&2; exit 1; }
 rigboard_clear jjp 0
 

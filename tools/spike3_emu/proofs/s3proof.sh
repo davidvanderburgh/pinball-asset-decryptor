@@ -1,7 +1,7 @@
 # s3proof.sh - one emulator proof run of a Spike 3 port (PAD-1286; the recipe: docs/plans/spike3_modes.md,
 # "The proof pass on a Spike 3 port"). As root in WSL, hidden and muted, on rig slot $SLOT:
 #
-#   [TITLE=pokemon_le] PROOF=ballsave|game|mb|coil|mode|stackmb  CARD=<name in D:\Pinball\images\Stern\spike3>  SLOT=88 \
+#   [TITLE=pokemon_le] PROOF=ballsave|game|mb|coil|mode|stackmb|edge  CARD=<name in D:\Pinball\images\Stern\spike3>  SLOT=88 \
 #   CFG=save.cfg [CFG2=done.cfg] [SO=<a mode64.so>] [PORT=<a port>] TAG=<name> OUT=<a Windows dir as /mnt/c/...> \
 #     bash s3proof.sh
 #

@@ -2179,9 +2179,15 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10/spike3", "w
 #: one shot per press, in play, each on its own bit (the outlanes 59 and 62 too); Coffin lock 1-3 (89-91) gave none,
 #: even held 2.5 s - their descriptor flags are 0x0020 (the playfield's 0x0003), which the drain does not pass in
 #: play, the same switch table as 1.03's.
+#: PAD-1322 (2026-11-15, Spike 3 rig slots 91 / 92, PROOF=edge): the two Spike 3 ports that carry the 64-bit switch_edge
+#: source - Star Wars ELG 1.10 (Top lane center x3 started EDGE TEST, Center / Hidden target and Left Luke orbit scored
+#: one hit per press, the slingshots and Right pop bumper too) and Walking Dead Remastered LE 0.92 (Tower target x3
+#: started it, Left loop / Right loop / Right spinner scored six shots); keyed here by PAD-1289, whose merge found the
+#: "not seen reaching a mode" banner back on both once their shots came from the edges.
 SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
                                 "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16",
-                                "metallica_spike-1.04"})
+                                "metallica_spike-1.04",
+                                "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3"})
 
 
 def _core_names(port):

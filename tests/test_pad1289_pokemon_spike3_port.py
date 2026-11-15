@@ -251,7 +251,15 @@ def test_redrafting_pokemon_gives_the_proven_port():
     ref, tgt = S.Elf(_prog("star_wars_elg")), S.Elf(_prog("pokemon_le"))
     text, M, core, missing = S.draft_spike3(ref, str(ELG_PORT), tgt, "pokemon_le", "0.82")
     assert not core
-    assert _entries(text) == _entries(PK_PORT.read_text(encoding="utf-8"))
+    # the shipped port is what the rig proved: shots from the two switch_hit sites. A draft now also writes PAD-1322's
+    # 64-bit switch_edge source (merged after this port was proven); Pokemon carries those lines once a run proves them
+    # there, so the redraft is the shipped port plus exactly those and nothing else
+    edge = {("site", "switch_edge"), ("value", "switch_record_reg"), ("value", "switch_id_at"),
+            ("value", "switch_level_at"), ("value", "switch_desc_via"), ("value", "switch_flags_at"),
+            ("value", "switch_polarity_at")}
+    mine, shipped = _entries(text), _entries(PK_PORT.read_text(encoding="utf-8"))
+    assert set(mine) - set(shipped) == edge
+    assert {k: v for k, v in mine.items() if k not in edge} == shipped
 
 
 def test_pokemons_whole_device_table_is_walked():

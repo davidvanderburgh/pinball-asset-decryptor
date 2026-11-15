@@ -2945,6 +2945,13 @@ button's RGB light (LOCKDOWN BUTTON-R/G/B in the light table), tied to the butto
 flip is a hit, so a flipper button as a scoring shot pays on every flip. The three Godzilla ports
 carry these lines (`portswitch.switch_source` read their drains).
 
+On Spike 3 (PAD-1322) the 64-bit drain has no per-switch call: `site switch_edge` is a point inside its loop
+that every edge passes (hooked so the logger reads the switch's record from a callee-saved register), with
+`value switch_record_reg`, `switch_id_at`, `switch_level_at`, `switch_desc_via`, `switch_flags_at` and
+`switch_polarity_at` in place of Spike 2's drain and table lines; `s3port.py` reads them off the program's own
+drain. The flipper buttons there carry flags 0 as on Godzilla (docs/plans/spike3_modes.md, "The switch edges on
+Spike 3").
+
 Emulator-proven 2026-09-27 on Godzilla Pro 1.15, Pro 1.16 and Premium/LE 1.16, one boot each in a
 rig slot (`value switch_edge_log` on): in play the game's mode mask is 0, so every press is ONE hit,
 on its press edge (level 0; the release is level 1 and no hit); a mode scored the left and right

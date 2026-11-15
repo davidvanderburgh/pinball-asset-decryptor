@@ -68,8 +68,8 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | music modes | sounds.cfg, bank records, MUSIC MODE row | left out | off on 64-bit by design (32-bit asset descriptors); Spike 3's songs are image.bin records (PAD-1296 appends them); a 64-bit menu row |
 | editions | EDITION row, codeselect's `edition=` | left out | no runtime: a 64-bit operator-menu row (adjustments.py refuses ELF64) and the Spike 3 multi-boot reading EDITION |
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
-| co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | every switch edge (`switch_edge`: Spike 3's drain makes none), the player sites, a 64-bit message table, the menu row |
-| handicaps | handicap.cfg, HANDICAP row | left out | flipper edges (as co-op), `coop_player`, the menu row; handicap.py reads 32-bit code |
+| co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
+| handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
 | Prolonged Competition | comp.cfg | left out | the challenge-menu sites (not placed); `hook_full`, 0 on 64-bit; 4-byte entry name, 32-bit frame |
 | records on the high scores | records.cfg | left out | the champion framework's sites (not placed) and its 64-bit record |
 | attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
@@ -78,8 +78,8 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 
 The operator-menu rows (MUSIC MODE, EDITION, CO-OP PLAY, HANDICAP, the picture rows) all wait on
 one piece: adjustments.py / menu_settings.py writing a 64-bit program. Co-op, handicaps and the
-attract / shot sounds of music modes wait on a 64-bit switch-edge source. So the order the rest
-lands in: the 64-bit menu rows; the switch-edge source; random clips with screen times; music
+attract / shot sounds of music modes waited on a 64-bit switch-edge source too: PAD-1322 (below) is it. So
+the order the rest lands in: the 64-bit menu rows; random clips with screen times; music
 modes; editions; co-op with handicaps (and the feed's logins, the same user-manager finder);
 Prolonged Competition with records; attract items, idle and light shows with the first Spike 3
 title whose port has them. Picture settings stay off on every card.
@@ -418,9 +418,9 @@ code:
   remembers the serve (`ours_mb_at`) and answers no multiball of the game's until the balls are back to one
   (OURS_MB_GRACE_MS after the serve). PAD-420's Spike 2 notes "our own multiball stopped with its three balls in play"
   were this.
-- **Not on Spike 3**: `switch_edge` - the 64-bit drain has no per-switch edge call, it calls switch_hit / switch_hit2
-  itself by the switch's handler bits, and the shots come through those sites; the every-edge features (attract
-  flipper sounds, game mode shot sounds, co-op) ride Spike 2's delivery. `ball_end` - the end of a ball is the bus's
+- **Not on Spike 3**: `switch_edge` as Spike 2 has it - the 64-bit drain has no per-switch edge call, it calls
+  switch_hit / switch_hit2 itself by the switch's handler bits (PAD-1322 hooks a point inside its loop instead:
+  "The switch edges on Spike 3", below). `ball_end` - the end of a ball is the bus's
   event 0x34 through hook_dispatch (Spike 2's site is that event's handler). `player_advance` - the clip_play path,
   not this title's.
 - **s3port.py** `play_engine` reads it all off a 64-bit program: carries the matcher's five plain calls, the coil
@@ -501,8 +501,8 @@ and the game's challenges (PAD-619/663: the challenge menu, its pick and the sco
 sites with no 64-bit counterpart yet); see the ticket's report for where they go next. The game's "time is up" line
 (TIME_UP_NONE) is not claimed for the Spike 3 build: the option is greyed there anyway (its port has no time-up call),
 and the Spike 3 sound bank is a differently encoded image.bin (the same size, 99.6% of its bytes differ), so PAD-479's
-transcription does not carry over by itself. switch_edge, music modes, editions, menu settings: Spike 2's delivery only
-(above).
+transcription does not carry over by itself. Music modes, editions, menu settings: Spike 2's delivery only (above);
+the switch edges: PAD-1322, below.
 Tests: tests/test_pad1286_spike3_proofs.py, tests/test_spike3_balls.py.
 
 ### Pokemon LE 0.82 (PAD-1289)
@@ -510,7 +510,7 @@ Tests: tests/test_pad1286_spike3_proofs.py, tests/test_spike3_balls.py.
 `ports/spike3/pokemon_le-0.82.port`, drafted from Star Wars ELG 1.10's Spike 3 port (`s3port.py`, 9,333 functions
 paired, 29 sites, 45 shot switches; only coil_take / coil_give unplaced). The proof rig takes a title now:
 `TITLE=pokemon_le` sources `proofs/titles/pokemon_le.env` (the card, the port, `proofs/modes/pokemon_le/` for the mode
-files, the switch names) and play.sh drops `COINS` before each Start (Pokemon is not on free play: attract says
+files, the switch names) and play.sh drops `COINS` before Start and again on each retry (Pokemon is not on free play: attract says
 CREDITS 0, and coins dropped while the game boots are not counted). `PROOF=mode` is the plain trigger / shots / clock
 play.
 
@@ -536,6 +536,62 @@ fresh project; the written card (in the store via `s3store.py build`, `PAD_SPIKE
 ended on its clock. Not proven, so not offered: stacking on the game's own multiball (which shots start Pokemon's own
 multiball is not known yet), held coils (no coil_take / coil_give), the game's own modes (place / done), lamps,
 screens, clips and own sounds (this title's own content). Tests: tests/test_pad1289_pokemon_spike3_port.py.
+
+## The switch edges on Spike 3 (PAD-1322)
+
+Spike 2's framework drain calls one small per-switch function for every edge (`site switch_edge`), which the
+runtime hooks: every switch's every edge, read off the game's tables (the shots from switches, PAD-641's attract
+flipper sounds, PAD-945's shot sounds, co-op's picks, PAD-1033's held buttons). Spike 3's 64-bit drain has no such
+call. Star Wars ELG 1.10's, 0x3085c0, under its mutex (state 0x7477e0): it takes the list of switch records the
+node boards' reader queued (head at state + 88, next at record + 8) and for each record x19:
+
+| record (x19) | |
+|---|---|
+| +0x20 u16 | switch id (w23) |
+| +0x22 / +0x24 | bit and board of the raw input; +0x26 u16 the edges still queued |
+| +0x28 u8 | the edge's level, WRITTEN here (0x308654) before anything reads the handler bits |
+| +0x10 | the descriptor (x24): +0x2e u16 handler bits (0x800 runs on level 1, 0x400 on level 0, 0x2000 / 0x1000 call switch_hit / switch_hit2), +0x30 u16 the other flag word (bit 2 = active high, as Spike 2's polarity) |
+
+then, by the mode mask (GOT slot -> 0x79206c, `tst` with the handler bits) and the handler bits, runs the switch's
+handler and calls switch_hit / switch_hit2 itself. 0x308684 (`ldr x24, [x19, #16]`) is where every iteration
+passes after the level is written and before the bits are read: the port's `site switch_edge` on Spike 3.
+
+- **hook_a64.h `hook_callee`**: the logger needs x19, which a plain 64-bit logger cannot see (r[0..8] = x0..x8). It is
+  hook_n through one shared step (`pm_a64_callee`) that stores x19..x28 as they are, hands the C logger (r, x) with
+  x[0..9] = x19..x28 and loads them back. The 32-bit hook_full's layout (r4-r12 at r[4..12]) stays Spike 2's.
+- **The runtime**: `on_switch_edge64` reads id / level / descriptor off the record in `value switch_record_reg`
+  (19) at `switch_id_at` 0x20, `switch_level_at` 0x28, `switch_desc_via` 0x10, `switch_flags_at` 0x2e,
+  `switch_polarity_at` 0x30, with `data mode_mask`; a hit is Spike 2's rule (edge_is_hit) and the consumers are the
+  same. No drain range test (the site is only in the drain). `edge_hook` hooks it once for all four features.
+  `switch_held` reads a switch's record as its last edge left it (remembered per id). PAD-1051's hiding stays Spike
+  2's (it rewrites that generation's 32-bit descriptor table).
+- **s3port.py `switch_edge_point`** reads the point and the layout off any 64-bit program's own drain (strb level;
+  cbz id; ldr descriptor; the two ldrh tested at bits 11/10 and 1/2; the mode mask's GOT load) and `edge_lines` writes
+  them into a draft in place of Spike 2's switch_edge / switch_drain / table lines, either reference. ONE point on
+  each of the seven Spike 3 programs, the same layout on all: Fallout LE 0x71b8b4, Pokemon LE 0x59e444, Star Wars
+  2025 LE 0x593414 / Pro 0x2b94d4, Star Wars ELG 0x308684, Transformers LE 0x4a49b4, Walking Dead Remastered LE
+  0x2c6c94. Both Spike 3 ports carry the lines.
+- With the site there, a Spike 3 port's switch shots come from the edges (Spike 2's default, `switch_edge_shots` 1),
+  not the switch_hit sites: every switch line counts, the slingshots and pop bumpers too (ELG's have no handler bits,
+  so switch_hit never saw them).
+
+What still keeps co-op, handicaps and the music modes' attract / shot sounds off Spike 3 is the rest of each (table
+above): the menu rows, the player sites, the 64-bit asset descriptors.
+
+Proof (2026-11-15, Spike 3 rig slots 91 and 92, hidden and MUTED; `tools/spike3_emu/proofs` PROOF=edge, the port's
+copy with `value switch_edge_log 400`, this build's prebuilt mode64.so):
+- **Star Wars ELG 1.10** (modes/edge.cfg): `switch shots: 30 switch line(s) ...; the switch drain's edges (switch_edge
+  0x...8684 in the drain's loop, the record in x19, the game's mode mask applied)`; 119 edges logged. In attract the
+  flipper buttons (49 / 50, flags 0, polarity 0x20) pressed at level 0 with mode mask 0x0110 (its attract bit 0x10),
+  in game 0 - no hits. In play TOP LANE CENTER (31, flags 0x2400) x3 started EDGE TEST; CENTER TARGET (33), HIDDEN
+  TARGET (29) and LEFT LUKE ORBIT (28, flags 0x1400) scored +1M .. +6M, one hit per press on its level-0 edge, the
+  release no hit; the slingshots (54 / 55) and RIGHT POP BUMPER (25), flags 0, were hits too; the game's Orbits start
+  was held off as before; the mode ended on its clock.
+- **Walking Dead Remastered LE 0.92** (modes/edge_wdr.cfg; a fresh WDR takes a Start only with credits and ~60 s into
+  attract: COINS=4 ATTRACT_WAIT=60): TOWER TARGET (54, flags 0x1400) x3 started EDGE TEST, LEFT LOOP / RIGHT LOOP /
+  RIGHT SPINNER scored six shots (+21,000,000 into the game's score), the mode ended on its clock; LEFT SLINGSHOT and
+  TOP POP BUMPER (flags 0x2400 here) were edges as well.
+Tests: tests/test_pad1322_spike3_switch_edges.py.
 
 ## Code modes on Spike 3 (PAD-1295)
 

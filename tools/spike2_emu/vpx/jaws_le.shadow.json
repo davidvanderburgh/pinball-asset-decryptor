@@ -9,7 +9,10 @@
     "machine has no pop-up targets there), and the fin is the chum line's seven targets,",
     "the one at SHARK POSITION 1..7 standing while SHARK FIN UP/DOWN holds it up.",
     "The five shark-shaped shot arrows (Lnight) are the beaches' RGB; JP's fireball bulbs",
-    "over the shark (fcroco) stay dark. The lower playfield's inserts sit where Stern's do (the drawing fits",
+    "over the shark (fcroco) stay dark. PAD-1331: the middle lane's own trigger (Target2) is CENTER RAMP MADE",
+    "(Tcloseshark sits on the shark's return wire above it), JP's reel in THE POND's U-turn (Spinner2) is the",
+    "FISHING REEL MAG SW the machine counts its reel's turns on, and the sling GI bulbs' outlines are round",
+    "(round_lights): boxy ones cut their glow into a square over each sling. The lower playfield's inserts sit where Stern's do (the drawing fits",
     "X = (x - 15) * 3.34, Y = (y - 15) * 3.13 below the boat); the upper third is JP's",
     "own layout, so the switches up there are matched by what the script does with",
     "them and the GUESS ones want a look at the machine. The table has no eject coils",
@@ -72,15 +75,16 @@
     "Tsharkfinal": {"id": 105, "event": "hit", "name": "SHARK FIN TGT (PAD-1311: the fin at SHARK POSITION 5)"},
     "Thammerfinal": {"id": 105, "event": "hit", "name": "SHARK FIN TGT (PAD-1311: the fin at SHARK POSITION 6)"},
     "Tsmimerfinal": {"id": 105, "event": "hit", "name": "SHARK FIN TGT (PAD-1311: the fin at SHARK POSITION 7)"},
-    "Spinner4": {"id": 83, "event": "spin", "name": "SPINNER OPTO (GUESS: JP's left spinner)"},
+    "Spinner4": {"id": 83, "event": "spin", "name": "SPINNER OPTO (JP's left-loop reel, at the top of the left lanes)"},
+    "Spinner2": {"id": 90, "event": "spin", "name": "FISHING REEL MAG SW (PAD-1331: JP's reel in THE POND's U-turn; the machine counts its reel's turns on this switch)"},
     "sw8": {"id": 78, "event": "hit", "name": "LEFT LOOP ENTRANCE (GUESS)"},
     "LeftRampDone": {"id": 67, "event": "hit", "name": "LEFT RAMP MADE OPTO"},
     "RightRampDone": {"id": 68, "event": "hit", "name": "RIGHT RAMP  MADE OPTO"},
     "Tcloseshark": {"id": 94, "event": "hit", "name": "CENTER RAMP MADE (GUESS)"},
     "lock": {"id": 92, "event": "hit", "name": "UP PF SHIP WHEEL MAG (GUESS: JP's lock hole, self-ejecting)"},
+    "Target2": {"id": 94, "event": "hit", "name": "CENTER RAMP MADE (PAD-1331: the middle lane's own trigger, where it bends up to the upper playfield)"},
     "sw5": {"id": 93, "event": "hit", "name": "UP PF RAMP MADE (GUESS)"},
-    "Target3": {"id": 91, "event": "hit", "name": "UP  PF TGT (GUESS: the raised target top left)"},
-    "PyramidKicker": {"id": 90, "event": "hit", "name": "FISHING REEL MAG SW (GUESS: Quint's hole, self-ejecting)"}
+    "Target3": {"id": 91, "event": "hit", "name": "UP  PF TGT (GUESS: the raised target top left)"}
   },
   "plunger": {"lane_trigger": "swPlungerRest", "lane_switch": 56, "autoplunge": "plungerIM"},
   "trough": {"release": "BallRelease", "drain": "Drain", "switches": [65, 64, 63, 62, 61, 60, 66], "balls": 6, "kick": [90, 4]},
@@ -197,7 +201,8 @@
     "Lswimmer4": {"leds": [[9, 35]], "name": "THE POND RESCUE TOP (PAD-1311: the beachgoers light)"},
     "Lswimmer10": {"leds": [[9, 45]], "name": "EAST BEACH RESCUE RIGHT (PAD-1311: the beach ball)"},
     "Lswimmer5": {"leds": [[9, 43]], "name": "EAST BEACH RESCUE TOP (PAD-1311: the beachgoers light)"},
-    "Light14": {"leds": [[9, 80], [9, 81], [9, 82]], "rgb": true, "name": "UPPER PF RAMP (GUESS)"},
+    "Light14": {"leds": [[9, 80], [9, 81], [9, 82]], "rgb": true, "name": "UPPER PF RAMP (PAD-1331: the upper deck's lower arrow)"},
+    "Light48": {"leds": [[9, 83], [9, 84], [9, 85]], "rgb": true, "name": "UPPER PF SHIP WHEEL (PAD-1331: the upper deck's upper arrow)"},
     "Light27a": {"leds": [[9, 83], [9, 84], [9, 85]], "rgb": true, "name": "UPPER PF SHIP WHEEL (GUESS: JP's lock-lit light)"},
     "Light26a": {"leds": [[9, 87]], "name": "UPPER PF SHIP WHEEL FLASH (GUESS)"},
     "Light51": {"leds": [[8, 26]], "name": "TARGET 2 (PAD-859: the free light 0 px from it)"},
@@ -263,10 +268,11 @@
       "PadRightReturn2": {"leds": [[8, 17]], "name": "RIGHT RETURN 2", "clone": "LightShootAgaina", "at": [691, 1705]},
       "PadRightReturn3": {"leds": [[8, 18]], "name": "RIGHT RETURN 3", "clone": "LightShootAgaina", "at": [733, 1675]},
       "PadSharkBb1Top": {"leds": [[8, 75], [8, 76], [8, 77], [8, 78]], "name": "SHARK BB 1 TOP + SHARK BB 2 + SHARK BB 3 + SHARK BB 4 BOT", "clone": "Lshark1", "at": [460, 323]},
-      "PadUpperPfFlash": {"leds": [[9, 88]], "name": "UPPER PF FLASH", "clone": "Lswimmer3", "at": [293, 412]},
-      "PadUpperPfRadio": {"leds": [[9, 86]], "name": "UPPER PF RADIO", "clone": "Light14", "at": [112, 392]}
+      "PadUpperPfFlash": {"leds": [[9, 88]], "name": "UPPER PF FLASH (PAD-1331: the deck's lower red circle)", "clone": "Light14", "at": [127, 392]},
+      "PadUpperPfRadio": {"leds": [[9, 86]], "name": "UPPER PF RADIO (PAD-1331: the deck's upper red circle)", "clone": "Light14", "at": [85, 342]}
     }
   },
+  "round_lights": ["gi001", "gi006", "gi002", "gi003", "gi004", "gi005", "gi008"],
   "dark": [
     "fcroco",
     "fcroco1",
@@ -299,6 +305,7 @@
     {"old": "Sub swPlungerRest_Hit : Controller.Switch(1056) = True : swPlungerRest_Hit_orig : End Sub", "why": "the table's own rules ran at every launch: its skill shot, songs and light effects, over the machine's lights", "since": "PAD-1099: the plunger lane's own subs stay out of the way"},
     {"old": "If o.ColorFull <> v Then o.ColorFull = v", "why": "its colour inserts (the shot arrows and the like) never light", "since": "PAD-1113: a light's colour is read the way Visual Pinball hands it over"},
     {"old": "If KeyCode = PlungerKey Then Controller.Switch(1034) = True", "why": "the plunger key pressed the Action Button: only the auto plunger launched, and the manual plunger never pulled", "since": "PAD-1128: the plunger key pulls the table's plunger, the Action Button is the lockbar key"},
-    {"old": "Sub PadSharkMotor(e)", "why": "its shark-shaped shot arrows never lit, the fin target did not follow the machine, pop-up targets showed in front of the shark and a huge glow covered it", "since": "PAD-1311: the shot arrows, the shark and the fin follow the machine; the fireball bulbs stay dark"}
+    {"old": "Sub PadSharkMotor(e)", "why": "its shark-shaped shot arrows never lit, the fin target did not follow the machine, pop-up targets showed in front of the shark and a huge glow covered it", "since": "PAD-1311: the shot arrows, the shark and the fin follow the machine; the fireball bulbs stay dark"},
+    {"old": "Sub PyramidKicker_Hit : vpmTimer.PulseSw 1090", "why": "the middle shot to the upper playfield and the fishing reel's spins never reached the game, the upper deck's lights sat off their inserts, and a square of light hung over each slingshot", "since": "PAD-1331: the center ramp and the reel reach the game, the deck's lights sit on its arrows and circles, the sling GI glows round"}
   ]
 }

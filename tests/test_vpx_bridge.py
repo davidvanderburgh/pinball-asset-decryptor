@@ -23,6 +23,7 @@ What is worth failing on, none of it needing Windows, VPX or a run:
 import glob
 import json
 import os
+import math
 import re
 import shutil
 import subprocess
@@ -687,6 +688,69 @@ def test_jaws_shark_and_fin_follow_the_machine():
     assert m["solenoids"]["6"]["callback"] == "PadFinUpDown"
     assert m["solenoids"]["3"]["callback"] is None
     assert m["retrofit_timers"]["PadMechTimer"]["interval_ms"] == 50
+
+
+def test_jaws_center_ramp_reel_and_upper_deck_lights():
+    # PAD-1331: the middle (SCARS / NORTH BEACH) shot runs up JP's middle lane
+    # through Target2 to the upper playfield - Tcloseshark is on the shark's
+    # return wire above it, where no shot from the flippers passes - so
+    # CENTER RAMP MADE never fired; JP's reel in THE POND's U-turn (Spinner2)
+    # spun with no switch; the deck's RADIO/FLASH lights sat beside and off
+    # its red circles, and its upper arrow was dark
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    sw = m["switches"]
+    assert sw["Target2"] == {"id": 94, "event": "hit", "name": sw["Target2"]["name"]}
+    assert sw["Spinner2"]["id"] == 90 and sw["Spinner2"]["event"] == "spin"
+    assert sw["Spinner4"]["id"] == 83 and sw["Spinner4"]["event"] == "spin"
+    assert "PyramidKicker" not in sw, "Quint's hole is not the reel"
+    assert "PyramidKicker" in m["orig_keep"], "it still ejects on its own"
+    assert [k for k, v in sw.items() if k != "_" and v["id"] == 90] == ["Spinner2"]
+    lamps = m["lamps"]
+    assert lamps["Light48"]["leds"] == [[9, 83], [9, 84], [9, 85]] and lamps["Light48"]["rgb"]
+    assert lamps["Light14"]["leds"] == [[9, 80], [9, 81], [9, 82]]
+    retro = m["retrofit_lights"]["lights"]
+    # on the deck (a clone of a deck light), centred on its two red circles
+    assert retro["PadUpperPfRadio"]["at"] == [85, 342] and retro["PadUpperPfRadio"]["clone"] == "Light14"
+    assert retro["PadUpperPfFlash"]["at"] == [127, 392] and retro["PadUpperPfFlash"]["clone"] == "Light14"
+    assert {"gi001", "gi006"} <= set(m["round_lights"])
+    assert any(r["old"] == "Sub PyramidKicker_Hit : vpmTimer.PulseSw 1090" for r in m["repatch"])
+
+
+def test_round_lights_gives_a_light_a_round_outline():
+    # PAD-1331: a bulb's halo is drawn inside its outline; JAWS 50th's sling GI
+    # (falloff 110, a box 33 from its centre) hung a square of light over each
+    # sling. round_lights: the same number of drag points, a regular polygon
+    # about the centre whose inscribed circle is the falloff
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+
+    def light(name, centre, radius, pts):
+        out = struct.pack("<i", 7) + vf.biff_record("NAME", struct.pack("<I", 2 * len(name)) + name.encode("utf-16-le"))
+        out += vf.biff_record("VCEN", struct.pack("<ff", *centre)) + vf.biff_record("RADI", struct.pack("<f", radius))
+        for p in pts:
+            out += vf.biff_record("DPNT", b"") + vf.biff_record("VCEN", struct.pack("<ff", *p)) + vf.biff_record("ENDB", b"")
+        return out + vf.biff_record("BHHI", struct.pack("<f", 55.0)) + vf.biff_record("ENDB", b"")
+
+    box = [(160, 1500), (230, 1500), (230, 1580), (160, 1580), (150, 1540)]
+
+    class Table:
+        items = [light("gi1", (100, 100), 50.0, [(50, 50), (150, 50), (100, 150)]),
+                 light("gi001", (190, 1541), 110.0, box)]
+        item_info = staticmethod(vf.VpxTable.item_info)
+
+    streams = vs.item_fields(Table, {"round_lights": ["GI001"]})
+    assert list(streams) == ["GameItem1"]
+    recs = list(vf.item_records(streams["GameItem1"]))
+    cen = [struct.unpack_from("<ff", p) for t, p, _ in recs if t == "VCEN"]
+    assert len(cen) == 1 + len(box), "the same drag points, one each"
+    cx, cy = cen[0]
+    assert (round(cx), round(cy)) == (190, 1541), "the halo's centre stays"
+    n = len(box)
+    for x, y in cen[1:]:
+        assert abs(math.hypot(x - cx, y - cy) - 110.0 / math.cos(math.pi / n)) < 0.01
+    assert struct.unpack("<f", [p for t, p, _ in recs if t == "BHHI"][0])[0] == 55.0, "the rest as it was"
+    with pytest.raises(KeyError):
+        vs.item_fields(Table, {"round_lights": ["NoSuchLight"]})
 
 
 def test_vpxlamps_reads_a_webp_holding_a_jpeg_marker():
@@ -6957,7 +7021,7 @@ def test_jaws_plunger_key_pulls_the_plunger_and_lockbar_is_action(tmp_path):
         old, _ = vs.patch(PULL_TRIBUTE, dict(m, cabinet=dict(m["cabinet"], launch_key="PlungerKey"),
                                                 keys_skip_orig=m["keys_skip_orig"] + ["PlungerKey"]))
         script.write_text(old, encoding="utf-8")
-        why = m["repatch"][-1]["why"]
+        why = [r["why"] for r in m["repatch"] if r["since"].startswith("PAD-1128")][0]
         assert why in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
         script.write_text(out, encoding="utf-8")
         assert why not in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t

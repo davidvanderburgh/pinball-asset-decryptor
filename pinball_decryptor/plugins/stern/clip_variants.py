@@ -62,7 +62,7 @@ CACHE_DIR = os.path.join(".write_cache", "video_variants")
 CACHE_FILE = os.path.join(".write_cache", "video_variants.json")
 
 #: why a slot cannot vary, as the tab's menu says it
-NOT_STERN = "Only a Stern Spike 2 game can play one of several clips at random."
+NOT_STERN = "Only a Stern Spike 2 or Spike 3 game can play one of several clips at random."
 NO_TITLE = ("The app cannot tell which game this project is for, so it cannot tell which "
             "clips the game plays by name.")
 NO_ROUTE = ("%s asks for its clips through a call the app cannot hook on this build, so random "

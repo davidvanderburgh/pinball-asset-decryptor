@@ -10,7 +10,10 @@
 # A run of emulator <emu> on its rig <n> is one line of JSON in
 #
 #   <emu>-<n>.run   {"emu","slot","game","title","label","distro","pid",
-#                    "started","hidden","audio"}
+#                    "started","hidden","audio"[,"state"]}
+#
+# "state" is there only while the run is STUCK (PAD-1341): "D" when its
+# process tree has been blocked in the kernel for a minute, "Z" a zombie.
 #
 # keyed by emulator AND rig because the rigs are numbered per emulator (AP
 # rig 1 and Spike 2 rig 1 are two different machines).  Spike 2 keeps its own
@@ -124,15 +127,54 @@ rigboard_post() {                   # <emu> <slot> <pid> <game> <title> <visible
     # run's: a new run on the same rig has rewritten it with another pid.
     # Detached whole (setsid -f, stdin closed), or it dies with the wsl.exe
     # that ran the launcher (tools/bof_emu learned that).
+    # A run that LIVES but no longer progresses (PAD-1341) still beats: a
+    # zombie passes kill -0, a game blocked in the kernel (D state) keeps its
+    # /proc. So each beat also looks at the run's process tree, and a tree
+    # that has been D or Z for RIGBOARD_STUCK_BEATS beats running (a minute)
+    # puts "state":"D"/"Z" in the record; the dashboard flags the run STUCK.
+    export -f rigboard_tree_state rigboard_set_state
     setsid -f bash -c '
-        f=$1; p=$2; t=$3
+        f=$1; p=$2; t=$3; k=$4; n=0; was=
         mine() { grep -q "\"pid\":$p," "$f" 2>/dev/null; }
         # /proc first: kill -0 says "no" for a live pid of another user.
         alive() { [ -d "/proc/$p" ] || kill -0 "$p" 2>/dev/null; }
-        while alive && mine; do sleep "$t"; touch -c "$f" 2>/dev/null; done
+        while alive && mine; do
+            sleep "$t"
+            s=$(rigboard_tree_state "$p")
+            if [ -n "$s" ]; then n=$((n + 1)); else n=0; fi
+            [ "$n" -ge "$k" ] || s=
+            if [ "$s" != "$was" ] && mine; then rigboard_set_state "$f" "$s" && was=$s; fi
+            touch -c "$f" 2>/dev/null
+        done
         mine && rm -f "$f"
-    ' rigboard-beat "$f" "$pid" "${RIGBOARD_BEAT_S:-10}" < /dev/null > /dev/null 2>&1
+    ' rigboard-beat "$f" "$pid" "${RIGBOARD_BEAT_S:-10}" "${RIGBOARD_STUCK_BEATS:-6}" \
+        < /dev/null > /dev/null 2>&1
     return 0
+}
+
+#: D when any process in <pid>'s tree is blocked in the kernel, else Z when
+#: one is a zombie, else nothing. One ps per beat.
+rigboard_tree_state() {             # <pid>
+    ps -e -o pid=,ppid=,stat= 2>/dev/null | awk -v r="$1" '
+        { par[$1] = $2; st[$1] = substr($3, 1, 1) }
+        END {
+            for (p in par) {
+                q = p; n = 0
+                while (q != r && (q + 0) > 1 && n < 64) { q = par[q]; n++ }
+                if (q == r) { if (st[p] == "D") d = 1; else if (st[p] == "Z") z = 1 }
+            }
+            if (d) print "D"; else if (z) print "Z"
+        }'
+}
+
+#: The record's "state", set (D/Z) or cleared (empty), in place.
+rigboard_set_state() {              # <file> <state>
+    local f=$1 s=$2
+    { if [ -n "$s" ]; then
+          sed -e 's/,"state":"[A-Z]*"//' -e 's/}[[:space:]]*$/,"state":"'"$s"'"}/' "$f"
+      else
+          sed -e 's/,"state":"[A-Z]*"//' "$f"
+      fi; } > "$f.st" 2>/dev/null && mv -f "$f.st" "$f" 2>/dev/null
 }
 
 rigboard_clear() {                  # <emu> <slot>

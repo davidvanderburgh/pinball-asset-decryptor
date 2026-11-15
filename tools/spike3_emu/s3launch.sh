@@ -149,6 +149,9 @@ case "${1:-}" in
         pkill -9 -f "$SD/|s3press.py (auto|watch)guide $SLOT( |$)|s3keys.py $SLOT( |\$)" 2>/dev/null
         [ "${left:-0}" -gt 0 ] && echo "s3launch: cleared $left leftover helper(s) in slot $SLOT"
         rm -f "$SD/dump/padled"
+        # and its pill on the rig board (PAD-1341), at once rather than at
+        # the beater's next look
+        [ -f "$S/../rigboard.sh" ] && { . "$S/../rigboard.sh"; rigboard_clear spike3 "$SLOT"; }
         exit 0
         ;;
     --load)

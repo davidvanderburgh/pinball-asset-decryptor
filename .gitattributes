@@ -22,3 +22,6 @@ tools/spike2_emu/modes/sdk/prebuilt/mode.so binary
 # The Docker image's own files (PAD-837) run in the container: scripts with
 # no .sh to match above, and a CR would break their #! lines.
 installer/docker/root/** text eol=lf
+
+# The pinned aarch64 kit list xgcc.sh reads under bash (PAD-1295): LF like the script
+*.pins text eol=lf

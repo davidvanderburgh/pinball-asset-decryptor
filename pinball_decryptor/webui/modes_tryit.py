@@ -736,7 +736,7 @@ class TryItMixin:
     def _tryit_prepare_s3(self, project, card):
         """PAD-1272: Try it on a Stern Spike 3 card. The set is what a Write puts in the
         card's /games/pad/padmode (spike3_modes.plan, from this card's own game program):
-        the 64-bit runtime, preloaded into the game by s3run.sh (PAD_S3_MODE_SO), and the
+        the 64-bit runtime (with the project's code modes compiled in, PAD-1295), preloaded into the game by s3run.sh (PAD_S3_MODE_SO), and the
         port and mode files in the rig's /dump (PAD_S3_MODE_FILES), where it looks after the
         card's own folder. PAD-1296: the modes' own sounds, and PAD-1284: the scenes their
         screens and clips rewrite (and a clip's new file), go into the rig slot's /games for
@@ -782,6 +782,8 @@ class TryItMixin:
         self._tryit_live = None            # no hot reload on the Spike 3 rig: Try it again
         note = ("%d mode(s) ready (%s). Start a game, then play the starting shots."
                 % (len(mplan.names), ", ".join(mplan.names)))
+        # PAD-1295: the code modes are compiled into this run's mode.so for the card's 64-bit ARM
+        note += self._tryit_code_note([(s, None) for s, _c in (getattr(mplan.result, "code", None) or ())])
         if own:
             note += " Their own sounds play from the card's sound container in this run."
         if shown:

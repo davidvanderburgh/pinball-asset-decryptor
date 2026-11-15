@@ -1178,6 +1178,8 @@ site  coop_panel_lit         0x001ae4e0 0xeb0628c2 0xe5943070
 site  coop_panel_up          0x001ae3a4 0xeb062911 0xe5d431b5
 site  coop_panel_name        0x001ade70 0xeb0474be 0xe28d101c
 site  coop_panel_name_2      0x001ae740 0xeb04728a 0xe28d0030
+site  coop_panel_name_user   0x002cadc8 0xebfffbb6 0xe250a000
+site  coop_icon_draw         0x003e1a10 0xebfffdf3 0xe1560004
 
 # ---- PAD-1017: more for co-op play (the message table and its BALL line; the end-of-game high scores) ----
 value coop_ball_msg          1255

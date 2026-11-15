@@ -111,6 +111,51 @@ Proof: a TRENCH RUN mode (3 trigger shots, 30 s, 5 award shots) on the Spike 3 e
 scored 1M..5M on five shots (score 26,630 -> 15,080,990) and ended when its time ran out, the
 game running on to the cap. Tests: tests/test_pad1271_spike3_port.py.
 
+## A port for a Spike 3-only title (PAD-1287)
+
+Only Star Wars ELG has a Spike 2 build to pair against; every other Spike 3 title is drafted from ELG's proven
+Spike 3 port instead (`s3port.py <ELG game> ports/spike3/star_wars_elg-1.10.port <target game> -o <port> --game G
+--version V`, `draft_spike3`). Every Spike 3 program is the same 64-bit framework built with one compiler around a
+game's rules, so on top of PAD-1271's pairing (vtable slots, strings, call graph) the paired functions are LINED UP
+instruction by instruction (difflib on the instructions with their addresses and immediates masked):
+
+- pairs: functions whose masked instructions are the same and found once on each title seed the pairing, and the
+  n-th call of a paired function pairs its callee with the n-th call of its pair (switch_hit / switch_hit2, which
+  nothing else pairs, come from ELG's switch drain this way). ~9,100-9,900 of ELG's 18,297 functions pair on each of
+  the six Spike 3-only titles, and on each at least half of the pairs line up instruction for instruction.
+- sites: a function the reference port names is placed when its pair is at least 75% alike; a place inside one at
+  the lined-up instruction; a library call by its imported name.
+- globals: the target global the lined-up instructions make, voted over every paired function that makes the
+  reference's (the neighbouring event_head / event_current no longer tie).
+- values: the engines' readers (sound_engine, lamp_layer, processes, show_event) re-read their layouts off the
+  target's own code, and every value is also checked at the lined-up instructions of the placed sites and their
+  callees; a constant the alignment disagrees with is replaced, and the checks are written at the port's end.
+  Layouts do move: the process record's exit hooks are at 312 on ELG, 392 on Walking Dead Remastered, 408 on Star
+  Wars 2025 Pro.
+- bus ids: the constant passed in w0 to a direct call of hook_dispatch, at the lined-up instruction. Only those:
+  the adjustment reader's and the sound calls' ids are ELG's less one on Walking Dead Remastered, its bus ids the
+  same; Star Wars 2025 Pro's game over is 0x46 where the others' is 0x47 (game_start / ball_start have no direct
+  call there and are left out).
+- switches: `spike3_switches` - the target's own device table, the Spike 2 shot rule (portswitch.NOT_SHOTS), none of
+  the service buttons' I/O group, one shot bit each by the switch's rank in the table. On ELG it gives exactly the
+  30 its proven port names; `text example_start_shot` is the first target.
+- left out, for each title's own port: the reference game's shows, lamp lines, callouts, scenes (so the screen and
+  clip sites are placed but written as comments: they need the title's hud / video bank scenes), held coils, mode
+  flags and blocks.
+
+A fresh draft says `NOT RUN` in its header (the app then calls it unproven) until a run proves it. Self-check: ELG
+drafted from itself gives back all 103 framework entries of its proven port, none different.
+
+**Walking Dead Remastered LE 0.92** (`ports/spike3/walking_dead_remastered_le-0.92.port`, program sha1 bcf428e1...),
+proven 2026-11-15 on the Spike 3 rig (slot 37, hidden, muted): the runtime took the draft whole (29 sites, 32
+shots, the Insider gate, 6 events, both switch_hit sites); template_mode.c started on three Tower target hits,
+scored 6 shots through score_add (+21M), ended on the bus's end of ball and, the second time, on its clock, the game
+playing on to the cap; the SDK's sound instrument played, polled, stopped and faded requests on the game's own
+channels and the callout site played one; a mode.cfg `multiball 3 10` (mode_file.c) had the game serve 3 balls and
+followed them down to one. Star Wars 2025 LE/Pro, Transformers, Fallout and Pokemon draft with every core entry
+placed; each needs its own run (and its lamps, screens and callouts) before its port ships. The app still never
+derives a 64-bit port itself (`port_derive._spike3_port`): only a port proven on the rig ships.
+
 ## Callouts and sounds on Spike 3 (PAD-1282)
 
 The six sound sites (callout, callout_nth, sound_play, sound_nth, sound_active, sound_stop) are plain calls into

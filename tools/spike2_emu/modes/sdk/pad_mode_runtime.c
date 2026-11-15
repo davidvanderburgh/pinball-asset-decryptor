@@ -22518,14 +22518,15 @@ static void comp_arm(void)
  * null when the clock was never set); an insider entry is null for a player who was not logged in.
  * PAD-1344 (C0untDeM0net: "the scores for the mini games started from the game selection menu, like 'the shark is
  * broken' on jaws, are indistinguishable from standard games"): game_type is what the start menu (CHOOSE YOUR MODE OF
- * PLAY) made the game - "standard", "competition" or "challenge" - and challenge the challenge's name, as the port
- * names it (`text challenge_name_<n>`, or the name of a mode of ours that took the pick); null when the runtime cannot
- * tell. Read while the game runs (feed_type_sample, four times a second), from the game's own flags:
- * FG_PLAYER_CHALLENGE_MODE_ACTIVE (the port's `value challenge_on_flag`, else scorefeed.cfg's flags line) and
- * FG_PLAYER_COMPETITION_MODE_ACTIVE (the flags line); which challenge, as the Challenge list reads it
- * (challenge_picked: its flag, or the GamePlayModes index). A type seen once is kept for that game (a challenge
- * outranks competition, competition standard): the runtime clears a pick it hands to a mode, and the game may clear
- * its flags before its end.
+ * PLAY) made the game - "standard", or one of the types scorefeed.cfg's type lines name ("challenge", "competition",
+ * "tournament", "team", "cooperation"), each a game flag the menu's entry sets (FG_PLAYER_<x>_ACTIVE) - and challenge
+ * the challenge's name, as the port names it (`text challenge_name_<n>`, or the name of a mode of ours that took the
+ * pick); game_type null when the runtime cannot read the game's flags. Read while the game runs (feed_type_sample,
+ * four times a second). A challenge game is FG_PLAYER_CHALLENGE_MODE_ACTIVE (its type line, else the port's `value
+ * challenge_on_flag`) or a pick a mode of ours took; which challenge, as the Challenge list reads it
+ * (challenge_picked: its flag, or the GamePlayModes index). A type seen once is kept for that game, and the higher of
+ * two (a challenge first, then the type lines' order): the runtime clears a pick it hands to a mode, and a game may
+ * clear its flags before its end.
  * WHEN a game has ended: the tick watches pm_in_game() fall with a game's players known (the most players seen up in
  * it). A port that names game_over sends at that event (a game reset with Start + the left flipper fires none and is
  * not reported; James Bond's in_game also falls at each multiball's end, and only game_over is a game's end there);
@@ -22544,8 +22545,8 @@ static void comp_arm(void)
  *   feed <http://host[:port][/path]>   where to post
  *   title <words>                      the game's name for the report (the app's own name for the card)
  *   users <manager> <A> <B>            optional: the logins' tables (coop_play.insider_users)
- *   flags <competition> <challenge>    optional (PAD-1344): the game's FG_PLAYER_COMPETITION_MODE_ACTIVE and
- *                                      FG_PLAYER_CHALLENGE_MODE_ACTIVE ids (0: the program names none)
+ *   type <flag> <name>                 optional, up to FEED_TYPES (PAD-1344): a start-menu game type's flag id and
+ *                                      the report's name for it, the first the strongest (score_feed.type_lines)
  *   only                               the card carries no modes: armed before the score gate with nothing else (the
  *                                      scores stay on Insider Connected too; the feed changes no score)
  * It scores nothing, so it arms before the score gate. */
@@ -22575,11 +22576,13 @@ extern int *__errno_location(void) __attribute__((weak));
 
 enum { FEED_IDLE, FEED_WAIT, FEED_CONNECTING, FEED_SENDING, FEED_READING };
 
-enum { FEED_TYPE_UNKNOWN, FEED_TYPE_STANDARD, FEED_TYPE_COMPETITION, FEED_TYPE_CHALLENGE };   /* PAD-1344 */
+#define FEED_TYPES      8                        /* PAD-1344: scorefeed.cfg's type lines */
+#define FEED_RANK_STANDARD  1                    /* a game type's rank: 0 unknown, 1 standard, then the type lines' */
+#define FEED_RANK_CHALLENGE (FEED_TYPES + 2)     /* a challenge game outranks every type line */
 
 struct feed_report {
     unsigned players, number;
-    int type;                                   /* PAD-1344: FEED_TYPE_* */
+    char type[16];                              /* PAD-1344: the game type ("" = not known) */
     char challenge[48];                         /* its name ("" = not known) */
     uint64_t scores[4];
     unsigned char ids[4][16];
@@ -22591,9 +22594,10 @@ static struct {
     char host[FEED_HOST_MAX], path[FEED_PATH_MAX], title[64];
     unsigned port;
     unsigned mgr, off[2];                       /* the logins' tables (0: not known) */
-    unsigned comp_flag, chg_flag;               /* PAD-1344: scorefeed.cfg's flags line (0: not known) */
-    int type;                                   /* PAD-1344: this game's type as seen so far (FEED_TYPE_*) */
-    char challenge[48];
+    unsigned type_flag[FEED_TYPES], n_types;    /* PAD-1344: scorefeed.cfg's type lines, the strongest first */
+    char type_name[FEED_TYPES][16];
+    int rank;                                   /* PAD-1344: this game's type as seen so far (its rank) */
+    char type[16], challenge[48];
     unsigned long type_ms;                      /* when it was last read */
     unsigned game_id, ball_id, over_id;
     volatile unsigned games, balls, overs;      /* counted on the bus, read on the tick */
@@ -22708,13 +22712,13 @@ static unsigned feed_json(char *out, unsigned cap, const struct feed_report *r, 
     if (m <= 0 || (unsigned)m >= cap) return 0;
     n = (unsigned)m;
     /* PAD-1344: what the start menu made the game */
-    m = r->type == FEED_TYPE_UNKNOWN ? feed_fmt(out + n, cap - n, "\"game_type\":null,")
-        : feed_fmt(out + n, cap - n, "\"game_type\":\"%s\",", r->type == FEED_TYPE_CHALLENGE ? "challenge"
-                   : r->type == FEED_TYPE_COMPETITION ? "competition" : "standard");
+    feed_json_str(t, sizeof t, r->type);
+    m = t[0] ? feed_fmt(out + n, cap - n, "\"game_type\":\"%s\",", t) : feed_fmt(out + n, cap - n, "\"game_type\":null,");
     if (m <= 0 || (unsigned)m >= cap - n) return 0;
     n += (unsigned)m;
+    i = (unsigned)str_eq(r->type, "challenge");
     feed_json_str(t, sizeof t, r->challenge);
-    m = r->type == FEED_TYPE_CHALLENGE && t[0] ? feed_fmt(out + n, cap - n, "\"challenge\":\"%s\",", t)
+    m = i && t[0] ? feed_fmt(out + n, cap - n, "\"challenge\":\"%s\",", t)
         : feed_fmt(out + n, cap - n, "\"challenge\":null,");
     if (m <= 0 || (unsigned)m >= cap - n) return 0;
     n += (unsigned)m;
@@ -22940,7 +22944,7 @@ static void feed_snapshot(struct feed_report *r)
 {
     unsigned p;
     r->players = feed.max_player > 4 ? 4 : feed.max_player;
-    r->type = feed.type;                                /* PAD-1344 */
+    for (p = 0; p < sizeof r->type; p++) r->type[p] = feed.type[p];             /* PAD-1344 */
     for (p = 0; p < sizeof r->challenge; p++) r->challenge[p] = feed.challenge[p];
     for (p = 0; p < 4; p++) {
         r->scores[p] = p < r->players ? pm_score(p + 1) : 0;
@@ -22965,12 +22969,11 @@ static void feed_queue(const struct feed_report *r, const char *why)
     feed.head++;
 }
 
-/* PAD-1344: the game type, from the flags alone (tests lift it verbatim): on = the challenge flag (1/0, -1 unknown),
- * comp = the competition flag's, ours = a mode of ours took this game's challenge pick; was = the type seen so far */
-static int feed_type_of(int was, int on, int comp, int ours)
+/* PAD-1344: the game type's rank, from the flags alone (tests lift it verbatim): set = the rank of the strongest type
+ * whose flag is set (0: none), seen = any type's flag could be read; was = the rank seen so far in this game */
+static int feed_rank_of(int was, int set, int seen)
 {
-    int now = ours || on == 1 ? FEED_TYPE_CHALLENGE : comp == 1 ? FEED_TYPE_COMPETITION
-              : on == 0 || comp == 0 ? FEED_TYPE_STANDARD : FEED_TYPE_UNKNOWN;
+    int now = set > 0 ? set : seen ? FEED_RANK_STANDARD : 0;
     return now > was ? now : was;
 }
 
@@ -22978,12 +22981,23 @@ static int feed_type_of(int was, int on, int comp, int ours)
 static void feed_type_sample(void)
 {
     long pf = pm_port_value("challenge_on_flag", 0);
-    unsigned chf = pf > 0 ? (unsigned)pf : feed.chg_flag;
-    int on = chf ? game_flag(chf) : -1, comp = feed.comp_flag ? game_flag(feed.comp_flag) : -1, ours = 0, n, was;
-    const char *name = 0;
+    int set = 0, seen = 0, on, k, n, was = feed.rank;
+    const char *name = 0, *type = 0;
     char key[24];
+    for (k = 0; k < (int)feed.n_types; k++) {
+        on = game_flag(feed.type_flag[k]);
+        if (on >= 0) seen = 1;
+        if (on == 1 && !set) {
+            set = str_eq(feed.type_name[k], "challenge") ? FEED_RANK_CHALLENGE : FEED_TYPES + 1 - k;
+            type = feed.type_name[k];
+        }
+    }
+    if (set < FEED_RANK_CHALLENGE && pf > 0 && (on = game_flag((unsigned)pf)) >= 0) {   /* the port's challenge flag */
+        seen = 1;
+        if (on == 1) set = FEED_RANK_CHALLENGE, type = "challenge";
+    }
     if (chg_state() && chg.pick >= 0) {                 /* a mode of ours took the pick: the runtime cleared the game's */
-        ours = 1;
+        set = FEED_RANK_CHALLENGE, type = "challenge";
         if (chg.pick >= CHALLENGE_OWN && chg.pick < CHALLENGE_OWN + N_OWN_CHALLENGE)
             name = own_challenge[chg.pick - CHALLENGE_OWN].name;
         else if (chg.pick < N_CHALLENGE && challenge_title[chg.pick][0]) name = challenge_title[chg.pick];
@@ -22991,7 +23005,7 @@ static void feed_type_sample(void)
             pm_snprintf(key, sizeof key, "challenge_name_%u", (unsigned)chg.pick);
             name = pm_port_text(key);
         }
-    } else if (on == 1) {
+    } else if (set == FEED_RANK_CHALLENGE) {
         for (n = 0; n < N_CHALLENGE && !name; n++) {
             pm_snprintf(key, sizeof key, "challenge_flag_%u", (unsigned)n);
             if (pm_port_value(key, 0) <= 0) {
@@ -23004,17 +23018,23 @@ static void feed_type_sample(void)
             }
         }
     }
-    was = feed.type;
-    feed.type = feed_type_of(was, on, comp, ours);
-    if (feed.type == FEED_TYPE_CHALLENGE && name && name[0] && !feed.challenge[0]) {
-        unsigned k;
-        for (k = 0; name[k] && k + 1 < sizeof feed.challenge; k++) feed.challenge[k] = name[k];
+    feed.rank = feed_rank_of(was, set, seen);
+    if (feed.rank == was) {
+        if (feed.rank == FEED_RANK_CHALLENGE && name && name[0] && !feed.challenge[0]) {
+            for (k = 0; name[k] && k + 1 < (int)sizeof feed.challenge; k++) feed.challenge[k] = name[k];
+            feed.challenge[k] = 0;
+            say("score feed: this game's challenge is %s", feed.challenge);
+        }
+        return;
+    }
+    if (!type) type = "standard";
+    for (k = 0; type[k] && k + 1 < (int)sizeof feed.type; k++) feed.type[k] = type[k];
+    feed.type[k] = 0;
+    if (feed.rank == FEED_RANK_CHALLENGE && name && name[0] && !feed.challenge[0]) {
+        for (k = 0; name[k] && k + 1 < (int)sizeof feed.challenge; k++) feed.challenge[k] = name[k];
         feed.challenge[k] = 0;
     }
-    if (feed.type != was)
-        say("score feed: this game is %s%s%s", feed.type == FEED_TYPE_CHALLENGE ? "a challenge game"
-            : feed.type == FEED_TYPE_COMPETITION ? "a competition game" : "a standard game",
-            feed.challenge[0] ? ": " : "", feed.challenge);
+    say("score feed: this game is a %s game%s%s", feed.type, feed.challenge[0] ? ": " : "", feed.challenge);
 }
 
 static void on_feed_dispatch(pm_reg *r)
@@ -23048,14 +23068,14 @@ static void on_feed_tick(pm_reg *regs)
         if (feed.pending && !feed.reported) feed_queue(&feed.kept, "the next game started");
         feed.pending = feed.reported = 0;
         feed.max_player = 0;
-        feed.type = FEED_TYPE_UNKNOWN;                  /* PAD-1344: the new game's type is read afresh */
-        feed.challenge[0] = 0;
+        feed.rank = 0;                                  /* PAD-1344: the new game's type is read afresh */
+        feed.type[0] = feed.challenge[0] = 0;
     }
     if (in_game && p > feed.max_player) {
         if (feed.reported) {                            /* a game the bus did not announce (first after boot) */
             feed.reported = 0;
-            feed.type = FEED_TYPE_UNKNOWN;
-            feed.challenge[0] = 0;
+            feed.rank = 0;
+            feed.type[0] = feed.challenge[0] = 0;
         }
         feed.max_player = p;
     }
@@ -23135,12 +23155,17 @@ static void feed_arm(void)
             if (ok) feed.off[0] = (unsigned)number(&p, &ok);
             if (ok) feed.off[1] = (unsigned)number(&p, &ok);
             if (!ok) feed.mgr = 0;
-        } else if (str_starts(raw + i, "flags ")) {     /* PAD-1344 */
-            long c, h;
-            p = raw + i + 6;
-            c = number(&p, &ok);
-            h = ok ? number(&p, &ok) : 0;
-            if (ok && c >= 0 && h >= 0) feed.comp_flag = (unsigned)c, feed.chg_flag = (unsigned)h;
+        } else if (str_starts(raw + i, "type ") && feed.n_types < FEED_TYPES) {   /* PAD-1344 */
+            unsigned id, m = 0;
+            p = raw + i + 5;
+            id = (unsigned)number(&p, &ok);
+            while (*p == ' ') p++;
+            for (; ok && id && *p && *p != '\n' && *p != '\r' && *p != ' ' && m + 1 < sizeof feed.type_name[0]; p++)
+                feed.type_name[feed.n_types][m++] = *p;
+            if (ok && id && m) {
+                feed.type_name[feed.n_types][m] = 0;
+                feed.type_flag[feed.n_types++] = id;
+            }
         }
     }
     if (!feed_parse_url(url, feed.host, sizeof feed.host, &feed.port, feed.path, sizeof feed.path)) {
@@ -23178,9 +23203,18 @@ static void feed_arm(void)
         feed.mgr ? " and Insider logins" : "", feed.host, feed.port, feed.path,
         feed.over_named ? "at the game's game_over" : "once play has stopped 30 s with no new ball",
         feed.game_id, feed.ball_id, feed.over_named ? ", game_over" : "", feed.only ? " (scorefeed.cfg: only)" : "");
-    say("score feed: game type from flag %ld (challenge) and %u (competition)%s", pm_port_value("challenge_on_flag", 0) > 0
-        ? pm_port_value("challenge_on_flag", 0) : (long)feed.chg_flag, feed.comp_flag,
-        data("game_flags") ? "" : " - the port names no game flags: game_type is null");
+    {
+        char list[FEED_TYPES * 24];
+        unsigned m = 0;
+        list[0] = 0;
+        for (k = 0; k < feed.n_types; k++) {
+            int w = feed_fmt(list + m, sizeof list - m, "%s%s %u", k ? ", " : "", feed.type_name[k], feed.type_flag[k]);
+            if (w > 0 && (unsigned)w < sizeof list - m) m += (unsigned)w;
+        }
+        say("score feed: game types by flag: %s%s%s", m ? list : "none named", pm_port_value("challenge_on_flag", 0) > 0
+            ? " (and the port's challenge flag)" : "",
+            data("game_flags") ? "" : " - the port names no game flags: game_type is null");
+    }
 }
 
 /* ---- PAD-1052: TEAM PLAY on the start menu ------------------------------------------------------------------

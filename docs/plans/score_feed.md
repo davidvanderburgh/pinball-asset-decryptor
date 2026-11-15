@@ -37,12 +37,13 @@ game_over). Tests: `tests/test_pad1204_score_feed.py`.
 
 C0untDeM0net (Discord): "the scores for the mini games started from the game selection menu, like 'the shark is
 broken' on jaws, are indistinguishable from standard games". Each report now carries `game_type` (`standard`,
-`competition`, `challenge`) and `challenge` (the challenge's name), read by the runtime while the game runs from the
-game's own Challenge and Competition flags and the port's Challenge list (PAD-615/619: a challenge's flag, or the
-GamePlayModes index). `scorefeed.cfg` gains `flags <competition> <challenge>` off the card's flag names
-(`score_feed.flags_line`), so a port with no Challenge list still tells a challenge game (unnamed) and Competition.
-Details: MODE_SDK.md "The score feed". Tests: `tests/test_pad1204_score_feed.py` (the JSON, the type rule, the
-flags line).
+`challenge`, `competition`, `tournament`, `head_to_head`, `team`, `cooperation`) and `challenge` (the challenge's
+name), read by the runtime while the game runs from the flags the start menu's entries set and the port's Challenge
+list (PAD-615/619: a challenge's flag, or the GamePlayModes index). `scorefeed.cfg` gains `type <flag> <name>` lines
+off the card's flag names (`score_feed.type_lines`), so a port with no Challenge list still tells a challenge game
+(unnamed). Jaws' menu also has Cooperation and Team Play, with flags of their own: they are types too, not standard.
+Details: MODE_SDK.md "The score feed". Tests: `tests/test_pad1204_score_feed.py` (the JSON, the type rule, the type
+lines). Emulator: Jaws Premium/LE 1.02 (kit `C:\tmp\PAD-1344\rig`).
 
 ## Play options tab (David's follow-ups)
 

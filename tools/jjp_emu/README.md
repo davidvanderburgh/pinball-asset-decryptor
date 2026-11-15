@@ -483,6 +483,22 @@ needed on a FAT copy; and a global `sync()` under WSL2 waits on the virtiofs
 Windows drives and never came back, so the tool only ever `syncfs`es the one
 mount it wrote (`sync -f`). Booting the result in the emulator is item 117.
 
+## Hidden runs and custom modes (PAD-1335)
+
+`PAD_HIDDEN=1` runs the game on a private Xvfb instead of a desktop Xephyr
+window. It opens no switch matrix but still refreshes the device dump. Press
+switches with `jjppoke.py <name>` (`--list <text>` finds names). Audio is muted
+unless `PAD_AUDIO=1`.
+
+`JJP_MODS_SO=/var/tmp/jjpmodes.so` (built by `buildmods.sh`) with
+`JJP_MODS_DIR=<mode folder>` loads custom modes into the game without patching
+it; a mode install ISO written by `mkjjpmodes.py` loads them through its own
+`rungame.sh` hook. Writing modes: `MODES.md` (PAD-1337). `jjpmodelist.py`
+lists the game's own live modes. See `docs/plans/jjp_custom_modes.md`.
+
+The rig's scripts only count and kill `game` processes rooted in the JJP jail
+(`jjp_rig_pids`): a Spike 2 rig slot's process has the same name.
+
 ## See also
 
 `plans/jjp_pc_emulation_plan.md` — the full architecture and phased plan,

@@ -1761,6 +1761,7 @@ function GameFills({ p, proven = true }) {
     <div class="small ellip tg-what">${!f ? "Not this one"
       : f.line ? html`With <b>${f.line}</b>${who ? ` (${who})` : ""}` : who ? html`During <b>${who}</b>`
         : "With words of its own"}</div>
+    ${f && p.try ? html`<${TryWords} id=${p.id} t=${p.try} />` : null}
     ${proven ? null : html`<div class="tree-row tg-guess">
       <span class="small warn-ink grow" ...${tip({ head: "Guessed, not read off the card", lines: GUESS_LINES })}>
         <${Icon} name="warn" /> A guess until the card is read</span>
@@ -1768,6 +1769,28 @@ function GameFills({ p, proven = true }) {
         title="Read the game program off the card this project came from, for the boxes the game fills in"
         onClick=${() => call("text_scenes.read_program")}>${reading ? "Reading…" : "Re-read from card"}<//>
     </div>`}
+  </div>`;
+}
+// PAD-1338 (DragonRR): a box the game fills holds only a stand-in ("Inactive Player"); the
+// preview can draw it with words the game puts there ("PLAYER 2 - LOG IN"), to see how they sit
+// in the box on the machine.  The preview only: nothing is written to the card.
+const TRY_TIP = { head: "Show it with", lines: [
+  "The machine never shows this box's own words: the game writes its own in as it plays. Pick one of the game's lines (or type any words) to see it here as the machine would, laid out by this box's alignment and its Shrink to fit.",
+  "Only the preview changes: nothing is written to the card, and other boxes keep their own words.",
+  ["Its own", "back to the words in the box"] ] };
+function TryWords({ id, t }) {
+  const [v, setV] = useState(t.words || "");
+  useEffect(() => setV(t.words || ""), [id, t.words]);
+  const go = (w) => { if ((w || "").trim() !== (t.words || "")) call("text_scenes.tree_try_words", id, (w || "").trim() || null); };
+  const listId = `tree-try-${id}`;
+  return html`<div class="tree-row tg-try" ...${tip(TRY_TIP)}>
+    <span class="small lbl">Show it with</span>
+    <${Field} value=${v} list=${listId} placeholder="its own words" cls="grow"
+      onChange=${(x) => { setV(x); if ((t.options || []).includes(x)) go(x); }}
+      onCommit=${go} />
+    <datalist id=${listId}>${(t.options || []).map((x) => html`<option value=${x} />`)}</datalist>
+    <${Button} size="xs" kind="ghost" disabled=${!t.words} title="Back to the words in the box"
+      onClick=${() => { setV(""); go(""); }}>Its own<//>
   </div>`;
 }
 export function GameColors({ g }) {

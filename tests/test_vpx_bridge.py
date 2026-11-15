@@ -4336,20 +4336,28 @@ _TMNT_VBS_FAKES = [
     "Public Property Let Switch(n, v)",
     "If v And Not St.Item(n) Then Made.Item(n) = Made.Item(n) + 1",
     "St.Item(n) = CBool(v)",
-    "End Property", "End Class",
-    # vpmTimer: AddTimer queues; Flush runs the queue in time order (40 ms ticks)
-    "Class FakeTimer", "Public Q, Now",
-    "Private Sub Class_Initialize : Set Q = CreateObject(\"Scripting.Dictionary\") : Now = 0 : End Sub",
-    "Public Sub AddTimer(d, c) : Q.Add Q.Count & \"_\" & Rnd, Array(Now + d \\ 40, c) : End Sub",
+    "End Property",
+    "Public Property Let PadNote(t) : WScript.Echo \"note: \" & t : End Property",
+    "End Class",
+    # vpmTimer: AddTimer queues; Flush runs the queue in time order (40 ms ticks),
+    # GameTime following it; Lose = a word: the next timer naming it is dropped,
+    # as core.vbs drops every timer past its 50th (PAD-1334)
+    "Class FakeTimer", "Public Q, Now, Lose",
+    "Private Sub Class_Initialize : Set Q = CreateObject(\"Scripting.Dictionary\") : Now = 0 : Lose = \"\" : End Sub",
+    "Public Sub AddTimer(d, c)",
+    "If Lose <> \"\" And InStr(c, Lose) > 0 Then Lose = \"\" : Exit Sub",
+    "Q.Add Q.Count & \"_\" & Rnd, Array(Now + d \\ 40, c)",
+    "End Sub",
     "Public Sub Flush",
     "Dim k, best, t",
     "Do While Q.Count > 0",
     "best = \"\" : t = 1E9",
     "For Each k In Q.Keys : If Q.Item(k)(0) < t Then t = Q.Item(k)(0) : best = k",
     "Next",
-    "Now = t : c = Q.Item(best)(1) : Q.Remove best : ExecuteGlobal c",
+    "Now = t : GameTime = t * 40 : c = Q.Item(best)(1) : Q.Remove best : ExecuteGlobal c",
     "Loop", "End Sub", "End Class",
-    "Dim c",
+    "Dim c, GameTime : GameTime = 0",
+    "Sub Wait(ms) : GameTime = GameTime + ms : vpmTimer.Now = GameTime \\ 40 : End Sub",
     "Class FakeStack", "Public Balls",
     "Public Sub Update : End Sub",
     "Public Sub ExitSol_On : If Balls > 0 Then Balls = Balls - 1 : WScript.Echo \"out\"",
@@ -4357,7 +4365,8 @@ _TMNT_VBS_FAKES = [
     "Class FakeKicker", "Public Sub DestroyBall : End Sub",
     "Public Sub Kick(a, p) : WScript.Echo \"kicked back\" : End Sub", "End Class",
     "Class FakeVan", "Public blenddisablelighting", "End Class",
-    "Dim Controller, vpmTimer, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, sw41, pizzavan",
+    "Dim Controller, vpmTimer, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, sw41, pizzavan, "
+    "padVanComeT, padVanFallT",
     "Set Controller = New FakeCtl : Set vpmTimer = New FakeTimer : Set bsVan = New FakeStack",
     "bsVan.Balls = 0 : padVanUp = 0 : padVanComing = 0 : padVanFalling = 0 : padVanPost = False",
     "Set sw41 = New FakeKicker : Set pizzavan = New FakeVan",
@@ -4445,6 +4454,42 @@ def test_tmnt_lock_post_held_down_lets_every_locked_ball_out(tmp_path):
         "post up: upper 1 lower 0 sw 100 made 344"], why    # post up: it locks again
     # the roll down takes a moment: LOWER LOCK closes after UPPER LOCK opens
     assert "vpmTimer.AddTimer 240, \"PadVanLand '\"" in out
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the TMNT table script under cscript")
+def test_tmnt_lock_step_lost_from_the_timer_queue_is_taken_by_the_next_coil(tmp_path):
+    # PAD-1334: core.vbs drops every vpmTimer past its 50th. A lost PadVanLand
+    # left padVanFalling at 1, so no ball ever dropped again: the game fired
+    # UPPER LOCK over and over, called a malfunction and kept the next game
+    # back until Visual Pinball restarted (emulator, turtles_pro 1.59). The
+    # next lock coil a second later takes the lost step; a late timer after
+    # that changes nothing.
+    out, _ = _tmnt_patch("turtles_pro", "")
+    got, why = _tmnt_run_vbs(tmp_path, out, [
+        "PadVanIn sw41 : PadVanIn sw41 : vpmTimer.Flush : Show \"two in\"",
+        "vpmTimer.Lose = \"PadVanLand\"",
+        "PadVanDrop True : PadVanDrop False : vpmTimer.Flush : Show \"land lost\"",
+        "PadVanDrop True : PadVanDrop False : PadVanOut True : PadVanOut False : vpmTimer.Flush : Show \"at once\"",
+        "Wait 1500 : PadVanDrop True : PadVanDrop False : vpmTimer.Flush : Show \"a second on\"",
+        "PadVanOut True : PadVanOut False : vpmTimer.Flush : Show \"out\"",
+        "PadVanLand : PadVanRest : Show \"late timers\"",
+        "PadVanDrop True : PadVanDrop False : vpmTimer.Flush : PadVanOut True : PadVanOut False : Show \"last\""])
+    assert got == [
+        "two in: upper 2 lower 0 sw 110 made 121",
+        "land lost: upper 1 lower 0 sw 100 made 121",       # rolling down, for good
+        "at once: upper 1 lower 0 sw 100 made 121",         # not overdue yet
+        "note: lock: a ball rolling down never reached LOWER LOCK; put there now",
+        "a second on: upper 1 lower 1 sw 100 made 121",
+        "out", "out: upper 1 lower 0 sw 100 made 121",
+        "late timers: upper 1 lower 0 sw 100 made 121",     # nothing moved twice
+        "out", "last: upper 0 lower 0 sw 000 made 121"], why
+    assert "Sub PadVanHeal" in out and "\tPadVanHeal" in out
+    # the table declares the step times with the lock's counts: undeclared,
+    # VBScript makes each a local of the sub that sets it and the heal fires
+    # on every coil
+    head, _ = _tmnt_patch("turtles_pro", "Const cGameName = \"tmnt_104\"\n")
+    assert re.search(r"^Dim bsTrough, .*padVanComeT, padVanFallT\s*$", head, re.M), head[:600]
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),

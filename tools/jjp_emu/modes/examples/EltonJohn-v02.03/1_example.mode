@@ -1,0 +1,15 @@
+# A first custom mode for EltonJohn-v02.03.  Every key: tools/jjp_emu/MODES.md
+name = PAD Mode
+title = PAD MODE
+start = switch_target_left
+shots = switch_target_left switch_ramp_left_made switch_ramp_right_made
+points = 1000000
+seconds = 20
+complete = 5
+complete_points = 5000000
+sound_start = se_Fanfare_ChampMB_Intro
+sound_shot = se_Fanfare_ChampMB_SuperJackpot
+sound_end = se_SFX_AlbumTotal
+lamps = lp_inlane_left
+lamp_color = ff2000
+lamp_blink = 4

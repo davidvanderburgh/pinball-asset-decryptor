@@ -548,6 +548,21 @@ for kv in ${RUNBINDS:-}; do
 done
 # /dump -> /connectivity/dump on the machine (S95game makes it)
 mkdir -p "$R/connectivity/dump/log"
+# NO GLOBAL sync() (PAD-1340): the game's nvram and PreLoadScene threads call
+# sync() after they write, qemu passes it to the host, and under WSL2 sync(2)
+# waits on the Windows drives' virtiofs (fuse_sync_fs) for ever: the slot's game
+# sat in D state, unkillable, until `wsl --shutdown`. The no-op (s3build.sh,
+# from ../spike2_emu/pad_nosync.c) goes in /etc/ld.so.preload of the slot's
+# overlay root - every guest process, the card's scripts included; the store
+# is never written. syncfs()/fsync() are untouched.
+if [ -e "$B/pad_nosync.so" ]; then
+    mkdir -p "$R/usr/lib/pad"; cp -f "$B/pad_nosync.so" "$R/usr/lib/pad/"
+    touch "$R/etc/ld.so.preload"
+    grep -qx /usr/lib/pad/pad_nosync.so "$R/etc/ld.so.preload" \
+        || echo /usr/lib/pad/pad_nosync.so >> "$R/etc/ld.so.preload"
+else
+    echo "[s3run] WARNING: no $B/pad_nosync.so (s3build.sh): the game's sync() can wedge this slot" >&2
+fi
 PRELOAD=""
 if [ "$BRIDGE" = 1 ]; then
     rm -f "$R/usr/lib/libEGL.so.1" "$R/usr/lib/libGLESv2.so.2"
@@ -767,6 +782,7 @@ serve_load() {
     if [ -n "$GPID" ]; then
         echo "[s3run] the game is back from the save state (pid $GPID)"
         echo ok > "$SD/load.result"
+        s3_board                  # the board follows the restored game's pid
         # criu is done with the images once the game runs: the unpacked copy
         # (s3state.sh's, ~1.2 GB) goes
         [ "$dir" = "$SD.load" ] && rm -rf "$SD.load"
@@ -778,6 +794,20 @@ serve_load() {
 }
 rm -f "$SD/load.req" "$SD/load.result"
 T0=$(date +%s)
+# THE RIG BOARD (PAD-1341): the run is on %USERPROFILE%\.pad-rig as
+# spike3-<slot>.run (tools/rigboard.sh), so the triage dashboard's rig pill
+# counts and names it - a hidden Spike 3 run used to play with no pill
+# anywhere. Its beater flags a game stuck in D state or a zombie. A load
+# re-posts it (the game's pid changes); the end of the run clears it.
+s3_board() {
+    [ -n "${INNERPID:-$GPID}" ] && type rigboard_post >/dev/null 2>&1 || return 0
+    local game vis=0
+    game=$(basename "$CARD"); game=${game%%.*}; game=${game%%-*}
+    [ "$WINDOW" = 1 ] && [ "${PAD_HIDDEN:-0}" != 1 ] && vis=1
+    RIGBOARD_ROOT=$SD rigboard_post spike3 "$SLOT" "${INNERPID:-$GPID}" "$game" "${PAD_TITLE:-}" "$vis" "${PAD_S3_AUDIO:-0}"
+}
+[ -f "$S/../rigboard.sh" ] && . "$S/../rigboard.sh"
+s3_board
 trap 'end_game' TERM INT HUP
 while game_alive; do
     [ -s "$SD/load.req" ] && [ "$SAVES" = 1 ] && serve_load
@@ -787,6 +817,7 @@ while game_alive; do
     sleep 0.3
 done
 trap - TERM INT HUP
+type rigboard_clear >/dev/null 2>&1 && rigboard_clear spike3 "$SLOT"
 if [ -n "$INNERPID" ]; then
     wait "$INNERPID" 2>/dev/null; RC=$?
 else

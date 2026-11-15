@@ -585,6 +585,10 @@ data  coop_players       0x00626f6c
 site  coop_first_ball    0x0034324c 0xeb00c305 0xe1a04000
 site  coop_icon_draw         0x0034c4c8 0xebfffdf3 0xe1560004
 
+# ---- PAD-1316: co-op play - the game start's adds of the Insider lobby's players, made while ball 1 waits (portcoop.py) ----
+site  coop_start_game        0x0034346c 0xe92d47f0 0xe30549e1
+site  coop_lobby_add         0x00343594 0xebfffea3 0xe2506000
+
 # ---- PAD-1028: co-op awards - the game's audit add (portcoop.py, read off this build's program) ----
 site  audit_add              0x0039e3ac 0xe92d43f0 0xe2505000
 # PAD-1041: the game's flags (Prolonged Competition sets FG_PLAYER_COMPETITION_MODE_ACTIVE)

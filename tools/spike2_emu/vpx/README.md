@@ -485,6 +485,17 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   broken and stops lighting locks. The bridge reports a coil pulse that came
   and went between two ChangedSolenoids reads ON, then OFF (the lower kick is
   ~20 ms; a slow 4K frame missed it).
+* **A lock step lost from vpmTimer is taken by the next lock coil**
+  (PAD-1334). core.vbs keeps 50 timers at most and drops the rest without a
+  word; the lock's steps (a ball reaching its place, a ball rolling down to
+  LOWER LOCK) ride that queue. One lost left the ball between two places
+  for the session: the game fired UPPER LOCK 20 times and LOWER LOCK 5,
+  nothing came out, and it played on short of those balls (emulator,
+  turtles_pro 1.59; Mike St P saw a malfunction, cured by restarting Visual
+  Pinball). Now each lock coil takes any step overdue by a second
+  (PadVanHeal) and says so in the controller log ("table: lock: ..."); a
+  late timer after that moves nothing twice. Same run, healed: both balls
+  out, the next game started.
 * **TMNT's slings reach DOF as Data East's switches 21/22** (PAD-1116).
   Data East's tables send their slings as switch 21 (left) and 22 (right),
   and a DOF config may fire the sling toys on those rather than on S20/S21;

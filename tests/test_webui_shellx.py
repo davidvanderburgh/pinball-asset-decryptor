@@ -958,3 +958,26 @@ def test_every_form_field_belongs_to_its_project(tmp_path):
         w.drain()
         assert fields() == defaults
         assert w.window.write_output_var.get() == os.path.join(b, "build")
+
+
+def test_top_bar_names_a_run_without_administrator_rights(tmp_path, monkeypatch):
+    """PAD-1336: a Windows start that skipped launcher.vbs ran plain, and nothing said so."""
+    from pinball_decryptor.core import admin
+    from pinball_decryptor.webui.tabs import shell_extras
+    monkeypatch.setattr(shell_extras.sys, "platform", "win32")
+    monkeypatch.setattr(admin, "is_admin", lambda: False)
+    assert shell_extras.not_elevated_on_windows() is True
+    monkeypatch.setattr(admin, "is_admin", lambda: True)
+    assert shell_extras.not_elevated_on_windows() is False
+    # Linux and a Mac never show it, whatever the euid
+    monkeypatch.setattr(admin, "is_admin", lambda: False)
+    for plat in ("linux", "darwin"):
+        monkeypatch.setattr(shell_extras.sys, "platform", plat)
+        assert shell_extras.not_elevated_on_windows() is False
+    monkeypatch.undo()
+    monkeypatch.setattr(shell_extras, "not_elevated_on_windows", lambda: True)
+    with web_app(tmp_path, mfr="stern") as w:
+        assert w.state("shell")["not_admin"] is True
+    js = open(os.path.join(os.path.dirname(shell_extras.__file__), "..", "static", "js", "shell.js"),
+              encoding="utf-8").read()
+    assert "shell.not_admin ?" in js and ">Not administrator<" in js

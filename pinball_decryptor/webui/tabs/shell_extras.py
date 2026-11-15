@@ -83,6 +83,19 @@ AGENT_ACCESS_TIP = (
     "running as you on this PC can reach it.")
 
 
+def not_elevated_on_windows():
+    """True when this is Windows and the app runs WITHOUT Administrator rights (PAD-1336).
+
+    The shipped build starts elevated through launcher.vbs; a shortcut or a run that skips it
+    starts plain, and card writes, USB passthrough and some WSL work then fail or ask for UAC
+    one by one.  The top bar names it.  Never on Linux or a Mac, where nothing asks for root up
+    front."""
+    if sys.platform != "win32":
+        return False
+    from ...core.admin import is_admin
+    return not is_admin()
+
+
 def update_action_verb(installer):
     """main_window._update_action_verb: Linux downloads an AppImage and
     installs nothing, so its button says so."""
@@ -188,7 +201,8 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin
         # both, back when nothing on a Mac was probed for real; now a Mac's
         # host tools are (Barrels of Fun's gpg, PAD-220) and Install Missing
         # installs them with Homebrew or MacPorts (core.mac_install).
-        self.ctx.store.set("shell", prereq_buttons=True, help_items=[])
+        self.ctx.store.set("shell", prereq_buttons=True, help_items=[],
+                           not_admin=not_elevated_on_windows())
         self.publish_settings_items()
         # PAD-754: the paw chip's total, from the cache at once and the
         # service in the background

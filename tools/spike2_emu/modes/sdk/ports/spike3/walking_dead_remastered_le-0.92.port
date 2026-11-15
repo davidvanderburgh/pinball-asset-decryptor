@@ -17,6 +17,15 @@
 # Multiball emulator-proven 2026-11-15 (PAD-1287): a mode.cfg `multiball 3 10` started on three Tower target hits, the
 # game served to 3 balls in play (trough 3/6), the mode scored 3 shots (+6,000,000), counted 3 -> 2 -> 1 balls and gave
 # the game its multiball back. Lamps (no lamp lines yet), the game's shows, screens and clips are this title's own work.
+# PAD-1292 2026-11-15 (Spike 3 rig slot 93, hidden, muted): multiball again (3 served, +6,000,000, its clock, handed back
+# at one ball) and the ball save (15 s save taken, the drain inside it served back, 3 shots +6,000,000, the drain after
+# it ended the ball; the control ended on its first drain). The Write: write_card put WALKER RUSH (Tower target x3,
+# Left loop / Right loop / Right spinner, 25 s) on a copy of the card, read back through its own encryption
+# (/games/game -> pad/padmode/padmode.sh, game.target walking_dead_remastered_le/game); that card booted through its
+# own hook, the runtime read this port off it, the mode started on the third Tower target hit, scored 9 shots
+# (90,560 -> 45,341,900) and ended on its clock. Not proven: a mode waiting out the game's own multiball (no switch
+# route tried started one of Blood Bath / Prison / Well). This port carries no mode books of Star Wars ELG's (PAD-1292:
+# s3port lined its flags 66 / 68 up by number, which are other flags here).
 
 game           walking_dead_remastered_le
 version        0.92
@@ -196,7 +205,7 @@ switch 68   0x80000000         Left drop top
 # ---- text ----
 text example_start_shot     Tower target
 
-# not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 16 text, 16 value
+# not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 17 text, 20 value
 
 # ---- checks ----
 # value sound_channel_voice_ptrs: 1 of the 5 lined-up instructions holding 144 on the reference hold 112 here

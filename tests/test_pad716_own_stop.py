@@ -136,7 +136,7 @@ def test_the_jurassic_park_ports_name_them_and_no_other_generation_does():
 
 def test_the_take_clears_and_the_end_reads_stopped_through_them():
     rt = _read("pad_mode_runtime.c")
-    begin = rt[rt.index("static void place_begin(unsigned obj, unsigned id, unsigned up)"):]
+    begin = rt[rt.index("static void place_begin(pm_addr obj, unsigned id, unsigned up)"):]
     begin = begin[:begin.index("\n}\n")]
     assert "place_set_stopped(obj, p, 0);" in begin
     assert "mode_stopped_at" not in begin                 # never the framework's byte directly

@@ -170,12 +170,19 @@ SCENE_SITES = {"dynamic_cast", "resource_get", "find_node", "find_text", "set_te
                "surface_set_video", "surface_play", "surface_stop", "surface_state", "surface_position",
                "surface_duration"}
 SCENE_VALUES = {"scene_player_scene", "node_visible_vfn", "surface_playing"}
+# PAD-1285: a mode's multiball, its held coil (the right control gate) and its blocks of the game's three modes
+PLAY_SITES = {"balls_in_play", "multiball_serve", "proc_sleep", "adjustment", "coil_fire", "coil_take", "coil_give",
+              "block_start_0", "block_start_1", "block_start_2"}
+PLAY_DATA = {"game_flags": "0x00749630", "game_flag_count": "0x005a37c8", "coil_count": "0x0073e1d8",
+             "coil_table": "0x00749300", "right_gate_obj": "0x00711730"}
+PLAY_VALUES = {"magnet_proc", "right_gate_ctl", "right_gate_devoff", "right_gate_off_slot", "right_gate_dev",
+               "game_flags_at", "mode_flag_1", "mode_flag_2", "mode_flag_3"}
 
 
 def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     sites = {t[1]: t for t in _lines("site")}
     assert set(sites) == {"tick", "hook_dispatch", "score_add", "switch_hit", "switch_hit2",
-                          "agent_header", "agent_begin"} | SOUND_SITES | LIGHT_SITES | SCENE_SITES
+                          "agent_header", "agent_begin"} | SOUND_SITES | LIGHT_SITES | SCENE_SITES | PLAY_SITES
     for t in sites.values():
         t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)
         assert len(t) == 5 and all(re.fullmatch(r"0x[0-9a-f]{8}", x) for x in t[2:])
@@ -189,9 +196,10 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                     "event_head": "0x007493d8", "event_current": "0x007493e0",   # the lamp layer's: PAD-1283
                     "lamp_layers": "0x00735e68", "light_count": "0x0073ec88",
                     "resource_manager": "0x00712bf8", "typeinfo_resource": "0x0068b850",  # the scene lookup's: PAD-1284
-                    "typeinfo_scene_player": "0x0068fb48"}
+                    "typeinfo_scene_player": "0x0068fb48", **PLAY_DATA}
     values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
-              and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES}
+              and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES
+              and t[1] not in PLAY_VALUES}
     assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34"}
 
 

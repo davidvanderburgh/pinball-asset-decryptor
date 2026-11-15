@@ -628,6 +628,11 @@ BALL_SAVE_PROVEN = frozenset({
     "deadpool_le-1.14",                  # PAD-589 2026-10-15 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 2 shots, awarded 3000000
     "iron_maiden_le-1.16",               # PAD-589 2026-10-15 bs_job (stock card, hidden, muted): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
     "turtles_le-1.59",                   # PAD-420 2026-10-08 bs_job3 (stock card, hidden, muted, fresh NVRAM; the rig's van stocked with two balls - PAD_BALL_VAN_STOCK=2: the TMNT LE has 8, and the game serves a saved ball from the van): the save taken, the drain inside it served back, the next drain ended the ball; no control run: END (ball ended): 4 shots, awarded 10000000
+    # PAD-1286 2026-11-15 (Spike 3 rig slots 88/89, hidden, muted, C:/tmp/PAD-1286 play_bs.sh; the rig's trough
+    # turned round at the game's first eject retry, so one ball in play): SAVE TEST's 15 s save taken through
+    # multiball_serve, the drain 3 s in served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the
+    # drain after the save ended it; the control without ball_save ended the ball on its first drain
+    "star_wars_elg-1.10/spike3",
 })
 
 

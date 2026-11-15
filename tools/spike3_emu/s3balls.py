@@ -76,6 +76,18 @@ import re
 import time
 
 EJECT_GAP = 0.6       # a second eject inside this window is the game's retry
+#: PAD_S3_BALLS_TRACE=1: log every trough eject frame with its timing (PAD-1286)
+TRACE = os.environ.get("PAD_S3_BALLS_TRACE") == "1"
+#: PAD-1286: the game firing its trough eject again this soon after one we
+#: served - the ball in the shooter lane, nothing drained - is its retry of an
+#: eject it read as failed off the trough switches: the stack is the other way
+#: round on this title (turn_round). Only at a game's start - the run's first
+#: eject, from a full trough - where no second ball is ever asked for (a
+#: multiball has a ball in play); Star Wars ELG's retries come every 0.58 s.
+RETRY_WINDOW = (EJECT_GAP, 3.0)
+#: PAD_S3_TROUGH_REVERSE=1 / 0: the eject end is TROUGH N / TROUGH 1, no
+#: learning; unset, the model starts at TROUGH 1 and learns it (TURN_ROUND).
+REVERSE = os.environ.get("PAD_S3_TROUGH_REVERSE", "")
 #: A returning ball covers each open trough switch it rolls over for ROLL_S,
 #: ROLL_GAP_S apart (Spike 2's ballmodel.ROLL_S / ROLL_GAP_S; same knobs).
 ROLL_S = float(os.environ.get("PAD_BALL_ROLL_MS") or 60) / 1000.0
@@ -138,7 +150,8 @@ def resolve(devs):
                                      or n == "AUTOLAUNCH"):
                 launch = (node, idx)
     alive = next((sorted(set(g)) for g in groups if g), [])
-    return dict(trough=[trough[k] for k in sorted(trough)], shooter=shooter,
+    order = sorted(trough, reverse=REVERSE == "1")
+    return dict(trough=[trough[k] for k in order], shooter=shooter,
                 eject=eject, launch=launch, optos=sorted(set(optos)),
                 alive=[[nd, ix, nm] for nd, ix, nm in alive],
                 playfield=sorted([nd, ix] for nd, ix in playfield))
@@ -150,6 +163,15 @@ class Balls:
         self.configured = set()
         self.due = []                    # (time, fn, why)
         self.last_eject = 0.0
+        self.lane_at = 0.0               # when a ball last reached the shooter lane
+        self.drained_at = 0.0            # when a ball last came home
+        self.first_full = False          # the first eject came from a full trough
+        self.turned_at = 0.0             # when turn_round ran
+        # PAD-1286: the trough's direction is settled once the game accepts an
+        # eject (or PAD_S3_TROUGH_REVERSE says it); until then a retry turns it
+        self.direction_known = REVERSE in ("0", "1")
+        self.eject_end = len(where["trough"]) if REVERSE == "1" else 1     # its TROUGH number
+        self.balls_json = os.path.join(d, "balls.json") if d else None
         self.in_play = 0
         self.busy_until = 0.0            # a move (a drain's roll) still playing
         self.queue = []                  # moves waiting for it: (verb, tag)
@@ -162,9 +184,7 @@ class Balls:
         if d:
             dump = os.path.join(d, "dump")
             self.req_dir = dump if os.path.isdir(dump) else d
-        if d:
-            with open(os.path.join(d, "balls.json"), "w") as f:
-                json.dump(where, f)
+        self.write_where()
         if os.environ.get("PAD_S3_BALLS_HOME", "1") != "0":
             for nb in where["trough"]:
                 self.set(nb, True)
@@ -192,6 +212,34 @@ class Balls:
                      "tap %s" % (ALIVE_S, ", ".join(nm for _, _, nm in self.alive)))
         elif ALIVE_S > 0:
             self.say("keep-alive: no slingshot, return lane or pop bumper switch - off")
+
+    def write_where(self):
+        """DIR/balls.json: what was resolved (s3press.py reads the trough
+        order from it, eject end first)."""
+        if self.balls_json:
+            with open(self.balls_json, "w") as f:
+                json.dump(self.w, f)
+
+    def turn_round(self):
+        """PAD-1286: the game reads this trough from the other end - Star Wars
+        ELG on Spike 3 (its Spike 2 rules) rests its balls against TROUGH 6,
+        where every newer Spike 3 title rests them against TROUGH 1 (the
+        position beside TROUGH JAM on both). The balls home move to the other
+        end in one step and the eject end is the other one from now on."""
+        tr = self.w["trough"]
+        k = self.home()
+        for nb in tr:
+            self.set(nb, False)
+        tr.reverse()
+        for nb in tr[:k]:
+            self.set(nb, True)
+        self.direction_known = True
+        self.turned_at = time.time()
+        self.write_where()
+        self.eject_end = len(tr) + 1 - self.eject_end
+        self.say("the game fired its trough eject again with the ball in the shooter lane: it reads "
+                 "the trough from the other end - turned round, the eject end is TROUGH %d now "
+                 "(%d home)" % (self.eject_end, k))
 
     @classmethod
     def for_game(cls, game, sw, log=None, d=None):
@@ -312,6 +360,12 @@ class Balls:
                 self.configured.add((node, idx))
                 return
         if (node, idx) == self.w["eject"]:
+            if TRACE:
+                sh = self.w["shooter"]
+                self.say("eject frame %s at %.3f: %.3f s after the last eject, lane %s since %.3f s, %d home"
+                         % (bytes(data).hex(" "), time.time() % 1000, time.time() - self.last_eject,
+                            "made" if sh and self.made(sh) else "open", time.time() - self.lane_at,
+                            self.home()))
             self.on_eject()
         elif (node, idx) == self.w["launch"]:
             self.on_launch()
@@ -332,18 +386,30 @@ class Balls:
             self.say("trough eject fired with the trough empty")
             return "the trough is empty - nothing to eject"
         if sh and self.made(sh):
+            if (not force and not self.direction_known and self.fed == 1 and self.first_full
+                    and RETRY_WINDOW[0] <= now - self.last_eject <= RETRY_WINDOW[1]
+                    and self.lane_at > self.last_eject and self.drained_at < self.last_eject):
+                self.turn_round()
+                return "the game's retry: the trough turned round"
+            if not force and time.time() - self.turned_at <= RETRY_WINDOW[1]:
+                return "a retry of the eject from before the trough turned round"
             if not self.eject_held:
                 self.say("trough eject fired with a ball already in the shooter lane - "
                          "held until the lane clears")
             self.eject_held = True
             return "a ball is already in the shooter lane"
         self.last_eject = now
+        if not self.fed:
+            self.first_full = len(made) == len(self.w["trough"])   # a game's start: every ball home
         self.fed += 1
         top = made[-1]
         self.after(0.15, lambda: self.set(top, False),
                    "trough eject: a ball leaves (%d left home)" % (len(made) - 1))
         if sh:
-            self.after(LANE_FLIGHT_S, lambda: self.set(sh, True), "the ball reaches the shooter lane")
+            def land():
+                self.set(sh, True)
+                self.lane_at = time.time()
+            self.after(LANE_FLIGHT_S, land, "the ball reaches the shooter lane")
         self.busy_until = max(self.busy_until, now + LANE_FLIGHT_S + 0.05)
         return None
 
@@ -354,6 +420,7 @@ class Balls:
         def go():
             self.set(sh, False)
             self.in_play += 1
+            self.direction_known = True
         self.after(0.05, go, "auto plunger: ball launched into play")
 
     # ---- the window's ball moves (PAD-1181) ----------------------------------
@@ -410,6 +477,7 @@ class Balls:
         if sh and self.made(sh):
             self.set(sh, False)
             self.in_play += 1
+            self.direction_known = True
             self.say("plunged: the ball in the shooter lane is launched into play")
             return "shooter lane opened (ball launched)"
         if self.out() > 0:
@@ -444,6 +512,7 @@ class Balls:
                        " over %d position%s" % (passed, "" if passed == 1 else "s") if passed else "",
                        home, len(tr)))
         self.in_play = max(0, self.in_play - 1)
+        self.drained_at = time.time()
         self.busy_until = time.time() + t + ROLL_GAP_S
         return "trough %d closed (ball drained home, %d/%d)" % (k + 1, home, len(tr))
 

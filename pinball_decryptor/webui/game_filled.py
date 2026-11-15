@@ -154,3 +154,92 @@ def locked_note(words, rows=None, assets_dir=None, short=False):
     if not shown:
         return SHORT_NOTE if short else LOCKED_NOTE
     return _SHORT_STAND_IN.format(shown) if short else LOCKED_NOTE + _STAND_IN_NOTE.format(shown)
+
+
+# ---------------------------------------------------------------------------------------------
+# PAD-1338 (DragonRR): "Is there a way to show what the machine might show in this location - it
+# just shows 'Inactive Player' but the machine CAN display PLAYER 2 - LOG IN".  A box the game
+# fills holds only a stand-in; the Scenes preview can draw it with words the game puts there
+# instead (the preview only: nothing is written to the card), offered from the game program.
+# ---------------------------------------------------------------------------------------------
+_WORD = re.compile(r"[A-Za-z]{3,}")
+_PLAYER_NO = re.compile(r"(?:^|[._])P(\d)_")
+TRY_MAX = 40            # suggestions offered for one box
+TRY_LONGEST = 60        # a longer line is help text, not a box's words
+
+
+def sample_line(line, number="1"):
+    """Game-program *line* as the machine might show it: its printf fill-ins filled with a
+    sample (*number* for a number, the plural form for ``%P``, ``NAME`` for a name)."""
+    from . import text_rules as R
+
+    def fill(m):
+        s = m.group(0)
+        if s == "%%":
+            return "%"
+        if s.startswith("%P"):
+            forms = s[2:-2].split("/")[1:]         # %P1//S/% -> ["", "S"]
+            return (forms[-1] if number != "1" else forms[0]) if forms else ""
+        if s[-1] in "sp":
+            return "NAME"
+        if s[-1] == "c":
+            return "A"
+        return number
+    return " ".join(R._FILL_IN.sub(fill, (line or "").replace("\n", " ")).split())
+
+
+def try_lines(rows, words, path=""):
+    """What the game might write into a box whose own words are the stand-in *words*, for
+    the Scenes "Show it with" list: the game-program lines of manifest *rows* sharing a word
+    with the stand-in, most words shared first (lines with fill-ins, then the shorter, ahead),
+    each filled with a sample (:func:`sample_line`; a player's number from a ``P<n>_`` part of
+    the box's dotted *path*).  The game line reading like the stand-in itself leads."""
+    from . import text_rules as R
+    want = {w.upper() for w in _WORD.findall(R.stand_in_words(words))}
+    got = _PLAYER_NO.search(path or "")
+    number = got.group(1) if got else "1"
+    own = game_row_for(rows, words)
+    ranked = []
+    for i, r in enumerate(rows or ()):
+        if R.row_is_scene(r) or R.row_part(r) or r.get("unused"):
+            continue
+        orig = r.get("original") or ""
+        if "&" in orig or "\n" in orig or "\n" in orig:
+            continue                        # markup or several lines: not a box's one line
+        shared = len(want & {w.upper() for w in _WORD.findall(R._FILL_IN.sub(" ", orig))})
+        if r is not own and not shared:
+            continue
+        shown = sample_line(orig, number)
+        if not shown or len(shown) > TRY_LONGEST:
+            continue
+        ranked.append(((r is not own, -shared, not R._FILL_IN.search(orig), len(shown), i),
+                       shown))
+    out, seen = [], set()
+    for _k, shown in sorted(ranked):
+        if shown not in seen:
+            seen.add(shown)
+            out.append(shown)
+        if len(out) >= TRY_MAX:
+            break
+    return out
+
+
+def try_lines_for(assets_dir, words, path=""):
+    """:func:`try_lines` over the project's manifest in *assets_dir* (read once until it
+    changes)."""
+    if not assets_dir:
+        return []
+    from ..core import text_manifest
+    mpath = text_manifest.manifest_path(assets_dir)
+    stamp = _stamp(mpath)
+    got = _memo.get(("try", assets_dir))
+    if got is None or got[0] != stamp:
+        try:
+            rows = text_manifest.load(assets_dir)
+        except (OSError, ValueError):
+            rows = []
+        got = _memo[("try", assets_dir)] = (stamp, rows, {})
+    key = (words, path)
+    if key not in got[2]:
+        got[2][key] = try_lines(got[1], words, path)
+    return got[2][key]

@@ -1441,7 +1441,9 @@ def render_tree(assets_dir, man, frame=None, pins=None, hidden=(), fonts=None,
             font = fr.font_at_size(by_key.get(d.get("font") or ""), d.get("font_px") or 0)
             if font is None or not d["text"]:
                 continue
-            shown = _unpadded(text_manifest.edit_for(text_edits, d["text"]) or d["text"])
+            # PAD-1338: words the Scenes preview was asked to show in a box the game fills
+            shown = d.get("shown") or _unpadded(text_manifest.edit_for(text_edits, d["text"])
+                                                or d["text"])
             rgba = list(d.get("rgba") or (1, 1, 1, 1))
             if d.get("styled"):
                 rgba = [1.0, 1.0, 1.0, rgba[3]]          # the game ignores it (see scene_eval)

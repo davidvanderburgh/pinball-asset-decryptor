@@ -61,9 +61,10 @@ def test_words_that_make_the_name_are_kept(tmp_path, boxes):  # noqa: F811
         assert w.call("audio.rename_from_callouts") is True    # nothing to do
         assert w.call("audio.rename", "audio/idx0002 - Kai Joo award.wav",
                       "Kaiju award: 2x", "callouts") is True
-        # the Properties rename already moved its row; the words stay as typed
+        # the Properties rename already moved its row; the words stay as
+        # typed, colon and all (PAD-1310)
         assert _csv(assets)[1] == ("audio", "idx0002 - Kaiju award_ 2x.wav",
-                                   "speech", "Kaiju award_ 2x")
+                                   "speech", "Kaiju award: 2x")
         _run(w)
         assert "already has every sound's name" in boxes[-1]
     # a hand-typed colon in the CSV survives an update

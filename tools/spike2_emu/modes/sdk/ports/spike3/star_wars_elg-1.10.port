@@ -285,10 +285,6 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value challenge_record_score_at   80
 # not carried (64-bit layout, measure it): value challenge_record_score_size 4
 # not carried (64-bit layout, measure it): value challenge_page_title_max 18
-# not carried (64-bit layout, measure it): value place_flag_completed_0       69
-# not carried (64-bit layout, measure it): value place_flag_completed_1       67
-# not carried (64-bit layout, measure it): value place_flag_completed_2       68
-# not carried (64-bit layout, measure it): value done_flag_0                  66
 # not carried (64-bit layout, measure it): value coop_ball_msg          1255
 value sound_channel_count       8    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_size        288    # the 64-bit sound engine's (PAD-1282)
@@ -323,6 +319,10 @@ value game_flags_at             0    # read off the program's own code (PAD-1285
 value mode_flag_1               86    # read off the program's own code (PAD-1285)
 value mode_flag_2               88    # read off the program's own code (PAD-1285)
 value mode_flag_3               87    # read off the program's own code (PAD-1285)
+value done_flag_0               66    # the game's flag of the same name on Spike 3 (PAD-1286)
+value place_flag_completed_0    69    # the game's flag of the same name on Spike 3 (PAD-1286)
+value place_flag_completed_1    67    # the game's flag of the same name on Spike 3 (PAD-1286)
+value place_flag_completed_2    68    # the game's flag of the same name on Spike 3 (PAD-1286)
 value ball_end_event 0x34    # the end of a ball, from the bus (no ball_end site on Spike 3)
 
 # ---- events: the framework's bus ids (the dispatch's range is the same on both builds) ----
@@ -445,15 +445,17 @@ lamp 65           0              RAMP 6  # lamp 73, I/O group 6 index 64, at 54,
 scene hud                  7b4db7ef1fa23cfb5e115a2a2c89d46a6a2ebc4a/835949dafb924a7cfeb0ec0fe2a3a4d8696d4aea
 scene video_bank           60ed7e5036b8ce09d35a3e101ea6fc1380b37d97
 
-# ---- PAD-1285: a held coil's names and board address, the game's modes a mode keeps from starting ----
+# ---- PAD-1285: a held coil's names and board address, the game's modes a mode keeps from starting;
+# PAD-1286: the game's modes whose books a mode of ours may wait on (done_name) ----
 text right_gate_label     Right control gate
 text right_gate_drive     8 2 255 64 128
 text held_coils           right_gate
 text block_name_0         Inner Loop
 text block_name_1         Orbits
 text block_name_2         Ramps
+text done_name_0          Captive Multiball
 
 # ---- text ----
 text example_start_shot     Death star target
 
-# not carried (to measure on Spike 3): 1 scene, 1 text
+# not carried (to measure on Spike 3): 1 scene

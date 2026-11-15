@@ -1600,6 +1600,61 @@ def flag_set(t, game_flags):
     return hits[0] if len(hits) == 1 else (None, None)
 
 
+def flag_names(e):
+    """PAD-1286: the program's game flag names by id (`FG_INVALID` first: the pointer table that names it, 8 bytes an
+    entry on Spike 3, 4 on Spike 2), or []."""
+    i = e.b.find(b"\0FG_INVALID\0")
+    va = _va_of(e, i + 1) if i >= 0 else None
+    if va is None:
+        return []
+    step = 8 if e.a64 else 4
+    best = []
+    for at in [a for a, v in e.ptr.items() if v == va]:
+        names = []
+        while at + step * len(names) in e.ptr:
+            nm = e.cstr(e.ptr[at + step * len(names)])
+            if not nm or not nm.startswith("FG_"):
+                break
+            names.append(nm)
+        if len(names) > len(best):
+            best = names
+    return best if len(best) > 8 else []
+
+
+#: PAD-1286: the game's books of its modes the Spike 2 port names by flag (mode_framework.plain_books / done_books): a
+#: mode in one's place sets its PLAYED / COMPLETED flags, a mode waiting for some completed watches a COMPLETED flag
+BOOK_FLAG = re.compile(r"(place_flag_(?:played|completed)_(\d+)|done_flag_(\d+))$")
+
+
+def mode_books(ref, rval, rtext, t, starts):
+    """PAD-1286: the Spike 2 port's flag books on Spike 3, each flag by its NAME in the two programs' flag tables
+    (Star Wars ELG's are the same ids on both; another title's need not be): the place_flag_* lines of the block starts
+    carried, the done_flag_<n> lines with their done_name_<n>. -> ({name: flag id}, [text lines], [why])"""
+    rn, tn = flag_names(ref), flag_names(t)
+    if not rn or not tn:
+        return {}, [], ["no FG_ flag name table in the %s program" % ("Spike 2" if not rn else "Spike 3")]
+    tid = {n: i for i, n in enumerate(tn)}
+    vals, text, why = {}, [], []
+    for k, v in sorted(rval.items()):
+        m = BOOK_FLAG.match(k)
+        if not m:
+            continue
+        if m.group(2) is not None and int(m.group(2)) not in starts:
+            why.append("%s: the game's mode %s has no start on Spike 3" % (k, m.group(2)))
+            continue
+        if m.group(3) is not None and not rtext.get("done_name_%s" % m.group(3), "").strip():
+            continue
+        fl = int(v, 0)
+        nm = rn[fl] if fl < len(rn) else None
+        if nm not in tid:
+            why.append("%s: flag %d (%s) is not one of the Spike 3 program's" % (k, fl, nm))
+            continue
+        vals[k] = tid[nm]
+        if m.group(3) is not None:
+            text.append("text %-20s %s" % ("done_name_" + m.group(3), rtext["done_name_" + m.group(3)].strip()))
+    return vals, text, why
+
+
 def mode_starts(ref, rlines, t, fset):
     """the Spike 2 port's block_start_<id> lines on Spike 3, each by the game flag its start sets: the Spike 2 start's
     `mov r0, #flag` that is one of the port's mode_flag_<n> values, and the one Spike 3 function that opens with a
@@ -1638,7 +1693,7 @@ def mode_starts(ref, rlines, t, fset):
 def play_engine(ref, rlines, t, later_at, placed):
     """PAD-1285: what a mode's multiball, its held coils and its blocks need on a Spike 3 program. {'site', 'data',
     'value', 'text', 'carry' (matcher placements now carried), 'why'}"""
-    out = {"site": {}, "data": {}, "value": {}, "text": [], "carry": [], "flag_of": {}, "why": []}
+    out = {"site": {}, "data": {}, "value": {}, "text": [], "carry": [], "flag_of": {}, "why": [], "books": {}}
     rdata = {t1[1]: int(t1[2], 16) for k, t1, s in rlines if k == "data" and len(t1) >= 3}
     rval = {t1[1]: t1[2] for k, t1, s in rlines if k == "value" and len(t1) >= 3}
     rtext = {t1[1]: s.split(None, 2)[2] if len(s.split(None, 2)) > 2 else "" for k, t1, s in rlines if k == "text"}
@@ -1720,6 +1775,9 @@ def play_engine(ref, rlines, t, later_at, placed):
             for k, v in rval.items():
                 if re.match(r"mode_flag_\d+$", k) and int(v, 0) in {fl for va, fl in starts.values()}:
                     out["value"][k] = int(v, 0)
+            out["books"], btext, bwhy = mode_books(ref, rval, rtext, t, starts)
+            out["text"] += btext
+            out["why"] += bwhy
         else:
             out["why"].append("no one flag set loads game_flags 0x%x" % gf)
     return out
@@ -1965,7 +2023,7 @@ def draft(ref, rport, tgt, game=None, version=None):
                                                                                             scn["clips"]))}
     for k, t, s in lines:
         if k == "value" and t[1] not in sound_vals and not t[1].startswith("countdown_") and t[1] not in lit_vals \
-                and t[1] not in scn_vals and t[1] not in pe["value"] \
+                and t[1] not in scn_vals and t[1] not in pe["value"] and t[1] not in pe.get("books", {}) \
                 and not (lit["show"] and re.match(r"show_secs_\d+$", t[1])):
             body.append(s if t[1] in VALUES_PROVEN else "# not carried (64-bit layout, measure it): " + s.strip())
     for name, v in sound_vals.items():
@@ -1980,6 +2038,8 @@ def draft(ref, rport, tgt, game=None, version=None):
     for name, v in pe["value"].items():
         body.append("value %-25s %s    # read off the program's own code (PAD-1285)" % (
             name, ("0x%x" % v) if name == "multiball_arg3" else v))
+    for name, v in pe.get("books", {}).items():
+        body.append("value %-25s %d    # the game's flag of the same name on Spike 3 (PAD-1286)" % (name, v))
     body += ["# PAD-1285: %s" % w for w in pe["why"]]
     if "ball_end" not in placed and any(t[1] == "ball_end" for t, s in events) and "hook_dispatch" in placed:
         eid = next(t[2] for t, s in events if t[1] == "ball_end")
@@ -2020,7 +2080,8 @@ def draft(ref, rport, tgt, game=None, version=None):
                  "# the program names ----"]
         body += scn["scene"]
     if pe["text"]:
-        body += ["", "# ---- PAD-1285: a held coil's names and board address, the game's modes a mode keeps from starting ----"]
+        body += ["", "# ---- PAD-1285: a held coil's names and board address, the game's modes a mode keeps from starting;",
+                 "# PAD-1286: the game's modes whose books a mode of ours may wait on (done_name) ----"]
         body += pe["text"]
     pe_text = {l.split()[1] for l in pe["text"]}
     tx = [s for k, t, s in lines if k == "text" and len(t) > 1 and t[1].startswith("example_")]

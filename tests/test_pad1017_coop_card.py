@@ -32,7 +32,8 @@ def test_offered_on_every_latest_title_without_its_own_coop():
     latest = _latest()
     own = [p for p in latest if SMo.title_key(p).startswith(CP.OWN_COOP)]
     offered = [p for p in latest if not CP.title_refusal(p)]
-    assert len(latest) == 54 and len(own) == 15       # PAD-1287: + Walking Dead Remastered (Spike 3), refused
+    assert len(latest) == 55 and len(own) == 15       # PAD-1287: + Walking Dead Remastered (Spike 3), refused;
+    # PAD-1289: + Pokemon LE (Spike 3), refused
     assert len(offered) == 38
     assert {SMo.title_key(p) for p in offered} >= {"godzilla_le-1.16", "james_bond_le-1.06", "jurassic_park_the_pin-1.05"}
     for p in own:

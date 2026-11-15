@@ -532,6 +532,10 @@ MULTIBALL_PROVEN = frozenset({
     # Death Star hits start the game's own multiball): served 3 through the game's serve, the mode ran its 40 s (the game's
     # Orbits start refused meanwhile), drains 3-2-1, then "ours is over" at one ball
     "star_wars_elg-1.10/spike3",
+    # PAD-1289 2026-11-15, Pokemon LE's Spike 3 card (rig slot 129, hidden, muted, s3proof.sh TITLE=pokemon_le PROOF=mb,
+    # a mode file started on Berry target left x3): 3 balls asked for, served through the game's serve (trough 3/6),
+    # 3 shots scored 6,000,000, balls in play 3 -> 2, the mode ended on its 40 s clock, then "ours is over" at one ball
+    "pokemon_le-0.82/spike3",
 })
 
 
@@ -633,6 +637,11 @@ BALL_SAVE_PROVEN = frozenset({
     # multiball_serve, the drain 3 s in served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the
     # drain after the save ended it; the control without ball_save ended the ball on its first drain
     "star_wars_elg-1.10/spike3",
+    # PAD-1289 2026-11-15, Pokemon LE's Spike 3 card (rig slot 129, hidden, muted, s3proof.sh TITLE=pokemon_le
+    # PROOF=ballsave): SAVE TEST's 15 s save taken through multiball_serve, the drain 3 s in served back (trough eject +
+    # auto plunger), 3 shots scored 6,000,000 on that ball, the drain after the save ended it; SAVE CONTROL (no
+    # ball_save) ended the ball on its first drain, 5.9 s in
+    "pokemon_le-0.82/spike3",
 })
 
 
@@ -2148,7 +2157,16 @@ BUS_IDS = 208
 #: proven (:attr:`TitleProfile.switch_shots_note`).
 #: beatles-1.29: emulator-proven 2026-09-23, each of 73-76 and 48-51 gave exactly one shot in play, the
 #: slingshots none, and a mode file started on Target 1 and scored on Target 2-4 and the return lanes.
-SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29"})
+#: The Spike 3 ports have no shot dispatch: every shot is a switch line through the two switch_hit sites
+#: (PAD-1289 2026-11-15, the banner was still up on all three):
+#: star_wars_elg-1.10/spike3: PAD-1271 (slot 41) TRENCH RUN started on its third trigger hit and scored five shots;
+#: walking_dead_remastered_le-0.92/spike3: PAD-1287 (slot 37) TARGET RUSH started on the third Tower target hit
+#: (switch 54) and scored 6 shots;
+#: pokemon_le-0.82/spike3: PAD-1289 (slot 129, `value switch_hit_log`) Berry target left 36, Left orbit 48, Rear ramp
+#: made 50, Captive ball-target 71 each one hit and one shot, a mode started on Berry target left x3 and scored on the
+#: other three, and the written card's mode scored on Left outlane and Left return lane.
+SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3",
+                                 "pokemon_le-0.82/spike3"})
 #: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
 #: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
 #: 1.29 and Star Wars ELG 1.10 of generation B, Batman 66 1.13 and Rush LE 1.18 of generation A).

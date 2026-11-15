@@ -4,6 +4,7 @@
 #   game      keep the ball in play HOLD s (a probe mode does the rest: place_probe_mode.c)
 #   mb        trigger the mode, plunge the balls it serves, shoot, drain them one by one
 #   coil      trigger the mode, shoot through its holds
+#   mode      the same play for a plain mode: trigger, shoot, let its clock run out (PAD-1289)
 #   stackmb   start the game's own multiball, trigger a `stack no` mode inside it, drain until it starts
 # The title's switch names (Star Wars ELG 1.10's by default) - each list is `|`-separated:
 TRIGGER_SW=${TRIGGER_SW:-TOP LANE CENTER}                   # the mode files' trigger (0x40 x3 on ELG)
@@ -11,6 +12,7 @@ SHOT_SWS=${SHOT_SWS:-CENTER TARGET|HIDDEN TARGET|LEFT LUKE ORBIT}  # three of it
 EARLY_SWS=${EARLY_SWS:-LEFT LUKE ORBIT|HIDDEN TARGET}       # starts the game's own ball save right after the plunge
 GAME_MB_SW=${GAME_MB_SW:-DEATH STAR TARGET}                 # x3 starts the game's own multiball
 START_HOLD_MS=${START_HOLD_MS:-6000}                        # ELG's first-boot GAME SETUP screen takes a held Start
+COINS=${COINS:-0}                                           # coins dropped before Start: a title not on free play
 SLOT=${1:-88}
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 P="python3 $REPO/tools/spike3_emu/s3press.py"
@@ -23,6 +25,8 @@ drain() { $P drain "$SLOT" 2>&1 | tail -1; }
 sleep 5; for i in $(seq 1 240); do grep -q "ready on\|\[mode\]\|armed" $L 2>/dev/null && break; sleep 1; done
 echo "[play] ready after ${i}s"; sleep 20
 for k in $(seq 1 8); do
+  # each try drops its coins first: coins dropped while the game is still booting are not counted
+  [ "$COINS" -gt 0 ] && $P coin "$SLOT" "$COINS" > /dev/null 2>&1
   [ "$START_HOLD_MS" -gt 0 ] && { $P sw "$SLOT" "START BUTTON" "$START_HOLD_MS"; sleep 7; }
   $P sw "$SLOT" "START BUTTON"; sleep 8
   grep -q "in_game 0 -> 1\|\[probe\] in game" $L && break
@@ -58,7 +62,7 @@ mb)
     grep -E "TEST.*END|ended|ours is over" $L | tail -1
   done
   sleep 10 ;;
-coil)
+coil|mode)
   sleep 4
   for k in 1 2 3; do $P sw "$SLOT" "$TRIGGER_SW"; sleep 2; done
   echo "[play] triggers in at $(date +%s)"

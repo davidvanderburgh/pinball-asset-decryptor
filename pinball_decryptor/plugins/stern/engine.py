@@ -8477,20 +8477,19 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     _stime_on = bool(stime_lines)
     if _is_spike3(disk_f):
         # PAD-1272: a Spike 3 card's modes are spike3_write's (its games partition, the 64-bit
-        # runtime: spike3_modes). What else rides the modes' Spike 2 delivery (the runtime on
-        # p2 and its files there, the game program's own patches) has no road onto a Spike 3
-        # card yet: left out, with one sentence naming what the project asked for.
-        _s3_off = [w for w, on in (
-            ("random clips", bool(variant_slots)), ("music modes", sound_modes is not None),
-            ("editions", bool(editions)), ("picture settings", picture_prof is not None),
-            ("attract items", _attract_on), ("co-op play", _coop_on),
-            ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),
-            ("expression light shows", _cabs_on), ("Prolonged Competition", _comp_on),
-            ("the score feed", _feed_on), ("screen times", _stime_on),
-            ("records on the high scores", _rec_on)) if on]
-        if _s3_off:
-            log("The project's %s are left out of this build: they go on Spike 2 cards only."
-                % ", ".join(_s3_off), "warning")
+        # runtime: spike3_modes), and so is the score feed (PAD-1297: files alone). The rest of
+        # what rides the modes' Spike 2 delivery needs 64-bit runtime, port or menu work first
+        # (the census: docs/plans/spike3_modes.md "The family on Spike 3"): each part the project
+        # asked for is left out with its own sentence.
+        from . import spike3_modes as _S3M
+        for _line in _S3M.family_left_out_lines([w for w, on in (
+                ("random clips", bool(variant_slots)), ("music modes", sound_modes is not None),
+                ("editions", bool(editions)), ("picture settings", picture_prof is not None),
+                ("attract items", _attract_on), ("co-op play", _coop_on),
+                ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),
+                ("expression light shows", _cabs_on), ("Prolonged Competition", _comp_on),
+                ("screen times", _stime_on), ("records on the high scores", _rec_on)) if on]):
+            log(_line, "warning")
         variant_slots, variant_prof, sound_modes, sound_modes_prof = {}, None, None, None
         _juke_clips = _clips_on = False
         editions, picture_prof = [], None

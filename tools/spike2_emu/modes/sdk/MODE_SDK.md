@@ -6362,6 +6362,28 @@ the game's end. With the team swap, player 3's turns had player 3's login in pla
 place 3, player 1's put back there (box 1 named player 1's, box 3 player 3's); player 4's turns the same on the game's
 player 2; every login back as made after the game.
 
+PAD-1315 (DoomWalrus666: "In co-op mode, Player 1's user icon moves to the scoreboard position of the active player
+next to their username"). The boxes' Insider icons are not drawn with the names but by the score frame's Insider
+overlay (NetScoreFrameOverlay, every Spike 2 build), whose loop over the four boxes calls its drawer once a box as
+draw(this, logins, player 1..4, r3, [sp]; the box's rectangle in s0-s3); the drawer reads that player's login state
+and login (the swapped entries) and draws that user's avatar in that user's colour. And re-pointing the name's player
+made a guest's box (no login: "PLAYER %d" of the number given) read the number of the place its entry was in.
+
+    site  coop_icon_draw        the overlay's one call of its per-box drawer (portcoop.score_icon_sites: the drawer
+                                gives its r2 as r1 to a call reaching the framework's login read and then to the
+                                login read, table + 20 * p + 4, itself) - answered with the place holding the box's
+                                own player's login; the four floats and the stack word are passed on as they came
+    site  coop_panel_name_user  the user-for-player call inside the name function coop_panel_name calls
+                                (portcoop.name_user_site) - with it the name is asked for the box's own number and
+                                only this lookup is re-pointed while the box's name is made
+
+Godzilla Pro 1.16: drawer 0x483c14 called from 0x484440, the name's user lookup 0x3bc944. All 53 latest builds have
+the drawer call; the four with box names (Godzilla LE / Pro, X-Men LE / Pro) the name's lookup. Emulator, Godzilla LE
+1.16, marker logins (no Insider user behind them, so the names fall back to "PLAYER n"): teammate 2 up, before box 1
+read PLAYER 2 and box 2 PLAYER 1, after PLAYER 1 and PLAYER 2. The emulator has no Insider session, so the overlay
+never draws there (its draw gates on the session's state and a feature check); the drawer call's hook arms and full
+co-op games run with it.
+
 ### Co-op awards (PAD-1028)
 
 After a co-op game the machine shows who of the team did best at each award: most points, most ball saves, the

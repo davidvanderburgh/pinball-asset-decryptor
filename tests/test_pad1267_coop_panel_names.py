@@ -118,6 +118,8 @@ int main(void)
 def test_each_box_names_its_own_player(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
     fns = ("static unsigned (*coop_name_game)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);\n"
+           "static unsigned (*coop_name_user_game)(unsigned, unsigned, unsigned, unsigned);\n"   # PAD-1315
+           "static volatile unsigned cn_box, cn_place;\n"
            + "\n".join(R._lift(src, sig) for sig in (
                "static unsigned coop_name_player(unsigned p, unsigned g, unsigned q)",
                "static unsigned coop_name_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, "
@@ -258,12 +260,13 @@ def test_the_shipped_panels():
         name = os.path.basename(p)
         if name not in NAME_SITES:
             continue
-        got = [int(l.split()[2], 16) for l in portcoop.lines(p)[0] if "coop_panel_name" in l]
+        got = [int(l.split()[2], 16) for l in portcoop.lines(p)[0]
+               if "coop_panel_name" in l and "coop_panel_name_user" not in l]   # PAD-1315: its own line
         assert got == NAME_SITES[name], name
 
 
 def test_the_latest_ports_carry_the_lines():
-    have = {p.stem: [l for l in p.read_text(encoding="utf-8").splitlines() if l.startswith("site  coop_panel_name")]
+    have = {p.stem: [l for l in p.read_text(encoding="utf-8").splitlines() if l.startswith("site  coop_panel_name") and not l.startswith("site  coop_panel_name_user")]   # PAD-1315
             for p in sorted(PORTS.glob("*.port"))}
     have = {k: v for k, v in have.items() if v}
     assert sorted(have) == ["godzilla_le-1.16", "godzilla_pro-1.16", "uncanny_xmen_le-0.98", "uncanny_xmen_pro-0.98"]

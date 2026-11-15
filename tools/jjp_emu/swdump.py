@@ -189,13 +189,20 @@ class LiveMem:
         return b[:z if z >= 0 else limit].decode('latin1', 'replace')
 
 
-def find_pid():
-    """The renderer process - a JJP launch is three, and only one is fat."""
+def find_pid(jail=None):
+    """The renderer process - a JJP launch is three, and only one is fat.
+
+    Only a game rooted in the JJP jail: a Spike 2 rig's process is ALSO named
+    `game`, and with rig slots several run at once - the fattest `game` on the
+    machine can be a Turtles run, not the JJP title (PAD-1335)."""
+    jail = jail or os.environ.get('JJP_JAIL', '/var/tmp/jjp_run')
     out = subprocess.run(['pgrep', '-x', 'game'], capture_output=True, text=True)
     best, best_rss = None, -1
     for tok in out.stdout.split():
         p = int(tok)
         try:
+            if os.readlink(f'/proc/{p}/root') != jail:
+                continue
             rss = int(open(f'/proc/{p}/statm').read().split()[1])
         except OSError:
             continue

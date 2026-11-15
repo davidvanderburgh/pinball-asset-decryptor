@@ -62,6 +62,21 @@ if [ "${JJP_SHIM:-0}" = "1" ]; then
     [ -n "${JJP_SHIM_DEBUG:-}" ] && SHIM_ENV="$SHIM_ENV; export JJP_SHIM_DEBUG=1"
 fi
 
+# Our custom-modes library (PAD-1335, jjpmodes.c), opt-in: JJP_MODS_SO=<path>.
+# Preloaded beside the hardware shim; its constructor waits for the game to
+# finish starting and then registers our modes with the game's ModeManager.
+# Its log goes to /jjpe/temp/jjpmodes.log inside the jail.
+if [ -n "${JJP_MODS_SO:-}" ]; then
+    [ -f "$JJP_MODS_SO" ] || { echo "run_game.sh: JJP_MODS_SO=$JJP_MODS_SO is missing" >&2; exit 5; }
+    cp -f "$JJP_MODS_SO" "$JJP_JAIL/tmp/jjpmodes.so"
+    if [ -n "$SHIM_ENV" ]; then
+        SHIM_ENV="$SHIM_ENV; export LD_PRELOAD=\"\$LD_PRELOAD /tmp/jjpmodes.so\""
+    else
+        SHIM_ENV='export LD_PRELOAD=/tmp/jjpmodes.so'
+    fi
+    [ -n "${JJP_MODS_ARGS:-}" ] && SHIM_ENV="$SHIM_ENV; export JJP_MODS_ARGS='$JJP_MODS_ARGS'"
+fi
+
 # PAD multi-boot (item 117).  JJP_SELECT is the three-way switch padpath.sh
 # documents; it rides into the chroot as an export so the RUN can read it.
 # JJP_SELECT_LOG=1 makes the hook hand the selector `--log /jjpe/temp/jjpselect.log`

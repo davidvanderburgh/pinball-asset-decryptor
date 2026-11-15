@@ -96,7 +96,7 @@ jjp_multiboot() {
 # How many selectors are RUNNING.  The menu is a live rig too: a run sits in it
 # for up to the conf's timeout before a single game process exists.
 jjp_select_count() {
-    ps -eo stat,comm 2>/dev/null | awk '$2=="jjpselect" && $1 !~ /Z/ { n++ } END { print n+0 }'
+    jjp_rig_pids jjpselect | wc -l
 }
 
 # How many game processes are actually RUNNING.
@@ -123,8 +123,21 @@ key_visible() {
     return 1
 }
 
+# The live processes named $1 that belong to THIS rig: their root is the JJP
+# jail.  A Spike 2 game is ALSO called `game` (rig slots run several at once,
+# rooted under ~/padslots/N/root), and a bare `pkill -x game` here SIGKILLed
+# them - status.sh counted a Turtles run as a JJP game (PAD-1335).
+jjp_rig_pids() {
+    local p st
+    for p in $(pgrep -x "$1" 2>/dev/null); do
+        st=$(awk '{print $3}' "/proc/$p/stat" 2>/dev/null)
+        [ -n "$st" ] && [ "$st" != "Z" ] || continue
+        [ "$(readlink "/proc/$p/root" 2>/dev/null)" = "$JJP_JAIL" ] && echo "$p"
+    done
+}
+
 jjp_game_count() {
-    ps -eo stat,comm 2>/dev/null         | awk '$2=="game" && $1 !~ /Z/ { n++ } END { print n+0 }'
+    jjp_rig_pids game | wc -l
 }
 
 # Logs, on the WSL side (outside the jail) so a wedged run is still readable.

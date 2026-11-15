@@ -373,6 +373,59 @@ static int hook_n(pm_addr addr, hook_n_fn logger, unsigned n)
     return slot_go(addr, t);
 }
 
+/* ---- PAD-1322: a hook whose logger also sees x19..x28 ----------------------------------------------------------
+ * A site INSIDE a function (Spike 3's switch drain, at the point each switch edge passes) finds what it needs in the
+ * callee-saved registers - the loop's record pointer - which a plain logger cannot see. hook_callee(addr, logger) is
+ * hook_n through one shared step: the slot calls pm_a64_callee (x0 = the saved registers, x1 = the logger's index),
+ * which stores x19..x28 as they are (the template touches none of them), hands the C logger (r, x) with x[0..9] =
+ * x19..x28, and loads them back from x, so a logger may change one. The logger runs with the rest as a plain hook's.
+ * (The 32-bit hook_full gives r4-r12 at r[4..12]; that layout's users are Spike 2's, so the 64-bit hook_full stays 0.) */
+typedef void (*callee_fn)(pm_reg *regs, pm_reg *x19);
+#define N_CALLEE 8
+static callee_fn callee_tab[N_CALLEE];
+static int callee_used;
+
+__attribute__((used, visibility("hidden"))) void pm_a64_callee_call(pm_reg *r, unsigned n, pm_reg *x)
+{
+    if (n < N_CALLEE && callee_tab[n]) callee_tab[n](r, x);
+}
+
+__asm__(
+    ".text\n"
+    ".balign 16\n"
+    "pm_a64_callee:\n"
+    "    stp  x29, x30, [sp, #-96]!\n"
+    "    stp  x19, x20, [sp, #16]\n"
+    "    stp  x21, x22, [sp, #32]\n"
+    "    stp  x23, x24, [sp, #48]\n"
+    "    stp  x25, x26, [sp, #64]\n"
+    "    stp  x27, x28, [sp, #80]\n"
+    "    add  x2, sp, #16\n"
+    "    bl   pm_a64_callee_call\n"
+    "    ldp  x19, x20, [sp, #16]\n"
+    "    ldp  x21, x22, [sp, #32]\n"
+    "    ldp  x23, x24, [sp, #48]\n"
+    "    ldp  x25, x26, [sp, #64]\n"
+    "    ldp  x27, x28, [sp, #80]\n"
+    "    ldp  x29, x30, [sp], #96\n"
+    "    ret\n"
+    ".previous\n");
+#pragma GCC visibility push(hidden)
+extern void pm_a64_callee(pm_reg *regs, unsigned n);
+#pragma GCC visibility pop
+
+static int hook_callee(pm_addr addr, callee_fn logger)
+{
+    int k;
+    for (k = 0; k < callee_used; k++)
+        if (callee_tab[k] == logger) break;
+    if (k == callee_used) {
+        if (callee_used == N_CALLEE) return 0;
+        callee_tab[callee_used++] = logger;
+    }
+    return hook_n(addr, (hook_n_fn)pm_a64_callee, (unsigned)k);
+}
+
 /* A wrap: the site jumps to the wrapper (through the slot's far jump), and the slot's other half - the moved
  * instruction, then on to addr + 4 - is the original, returned for the wrapper to call. */
 static void *hook_wrap_at(pm_addr addr, void *wrapper, int opens_with_push)

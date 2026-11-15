@@ -141,16 +141,74 @@ def test_serve_ejects_lands_and_launches():
 
 
 def test_multiball_eject_held_until_the_lane_clears():
-    """A manual-plunger multiball: the game ejects while ball 1 waits in the
-    lane - held, not dropped; each Plunge brings the next ball."""
+    """A manual-plunger multiball: with a ball in play the game ejects while
+    ball 2 waits in the lane - held, not dropped; each Plunge brings the next
+    ball (and the trough is never turned round: PAD-1286's rule is a game's
+    start only)."""
     _sw, b = _balls()
+    b.ask("take")                                            # ball 1 in play
     _serve(b)
-    b.coil(8, bytes([0x40, 1, 0xE1, 6] + [0] * 7))           # the 2nd ball, lane full
+    b.coil(8, bytes([0x40, 1, 0xE1, 6] + [0] * 7))           # the 3rd ball, lane full
     _run(b, 0.7)
-    assert b.home() == 5 and b.eject_held
+    assert b.home() == 4 and b.eject_held and b.w["trough"] == TROUGH
     b.ask("plunge")
     _run(b, 0.8)
-    assert b.home() == 4 and b.made(LANE) and not b.eject_held and b.out() == 1
+    assert b.home() == 3 and b.made(LANE) and not b.eject_held and b.out() == 2
+
+
+def _retry(b, n=2):
+    """Star Wars ELG's start of game on Spike 3: the same eject again every 0.58 s."""
+    for _ in range(n):
+        _run(b, 0.58)
+        b.coil(8, bytes([0x40, 1, 0xE1, 6] + [0] * 7))
+
+
+def test_game_start_retry_turns_the_trough_round(tmp_path):
+    """PAD-1286: a title that reads its trough from TROUGH 6 re-fires its first
+    eject with the ball in the lane; the model turns the stack round once (the
+    balls home move to TROUGH 6's end), holds nothing, and the plunge leaves
+    exactly one ball in play with the drain coming home at the new eject end."""
+    _sw, b = _balls(tmp_path)
+    _serve(b)
+    assert flags(b) == [True] * 5 + [False]
+    _retry(b, 3)
+    _run(b, 0.1)
+    assert b.w["trough"] == TROUGH[::-1] and flags(b) == [False] + [True] * 5
+    assert not b.eject_held and b.home() == 5 and b.made(LANE)
+    import json
+    assert json.load(open(tmp_path / "balls.json"))["trough"] == [list(nb) for nb in TROUGH[::-1]]
+    assert any("eject end is TROUGH 6" in m for m in b.recent)
+    b.ask("plunge")
+    _run(b, 0.7)                                             # no held eject served
+    assert b.home() == 5 and not b.made(LANE) and b.out() == 1
+    b.ask("drain")
+    _run(b, 0.6)
+    assert flags(b) == [True] * 6
+
+
+def test_trough_kept_when_the_game_accepts_its_eject():
+    """Pokemon and the other newer titles: one eject, no retry - TROUGH 1 stays
+    the eject end, and a later eject with the lane full is a held ball."""
+    _sw, b = _balls()
+    _serve(b)
+    b.ask("plunge")
+    _run(b, 0.1)
+    assert b.direction_known
+    _serve(b)
+    b.coil(8, bytes([0x40, 1, 0xE1, 6] + [0] * 7))
+    _run(b, 0.7)
+    assert b.w["trough"] == TROUGH and b.eject_held
+
+
+@pytest.mark.parametrize("val, order", [("1", TROUGH[::-1]), ("0", TROUGH)])
+def test_trough_reverse_override(monkeypatch, val, order):
+    monkeypatch.setattr(s3balls, "REVERSE", val)
+    _sw, b = _balls()
+    assert b.w["trough"] == order and b.direction_known
+    _serve(b)
+    _retry(b, 2)
+    _run(b, 0.1)
+    assert b.w["trough"] == order
 
 
 def test_auto_plunger_multiball_serves_every_ball():

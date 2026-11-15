@@ -135,8 +135,8 @@ def test_elg_spike3_port_carries_the_lamp_lines_by_name():
     assert all("I/O group 6 index" in l for l in lamps)
     assert any(l.startswith("lamp 66 ") and "DEATH STAR (X2)" in l and "index 51" in l for l in lamps)
     assert "# lamp NOT PLACED: no lamp named 'MILLENNIUM FALCON (OPTIONAL)' on Spike 3" in text
-    assert "not carried (to measure on Spike 3): 1 scene, 1 text" in text       # PAD-1284 carries hud, video_bank;
-    #                                                                            PAD-1285 the held coil's and block names
+    assert "not carried (to measure on Spike 3): 1 scene\n" in text            # PAD-1284 carries hud, video_bank;
+    #                                       PAD-1285 the held coil's and block names, PAD-1286 done_name_0
 
 
 # ---- the drafter ----------------------------------------------------------------------------------------------
@@ -189,5 +189,7 @@ def test_the_spike3_build_offers_inserts_and_the_games_shows():
     assert s3.lamps and len(s3.inserts) == 66                      # DEATH STAR (X2) has two lamp lines
     from pinball_decryptor.webui import help_content as H
     row = [r for r in H.modes_games_rows() if r[0] == "Star Wars ELG 1.10 (Spike 3)"]
-    assert row == [("Star Wars ELG 1.10 (Spike 3)", "\u2713", "\u2713", "no", "shots",    # PAD-1284: screens
-                    "mechanisms, light shows")]   # PAD-1285: the right gate; it waits for the game's modes
+    assert row == [("Star Wars ELG 1.10 (Spike 3)", "\u2713", "\u2713", "\u2713", "shots",    # PAD-1284: screens;
+                    # PAD-1285: the right gate; it waits for the game's modes. PAD-1286: Ball save, the game's mode
+                    # places, its modes completed
+                    "mechanisms, light shows, game mode places, starts on game modes completed")]

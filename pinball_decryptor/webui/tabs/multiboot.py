@@ -116,7 +116,7 @@ class MultibootTab(TabService):
     _MENU = (
         ("move", "_move_var"), ("confirm", "_confirm_var"),
         ("volume", "_volume_var"), ("machine_vol", "_machine_vol_var"),
-        ("timeout", "_timeout_var"), ("heading", "_heading_var"),
+        ("timeout", "_timeout_var"), ("back_hold", "_back_hold_var"), ("heading", "_heading_var"),
         ("same_text", "_same_text_var"), ("counter", "_counter_var"),
         ("settings_tile", "_settings_var"), ("editions", "_editions_var"),
         ("countdown_word", "_countdown_word_var"),

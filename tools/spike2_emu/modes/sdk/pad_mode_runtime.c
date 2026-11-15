@@ -1728,12 +1728,15 @@ static int ci_lookup(pm_reg *r);          /* PAD-1114: the co-op intro's sound *
 static volatile int ci_live;
 static int cpk_lookup(pm_reg *r);         /* PAD-1123: a co-op character's sound once picked */
 static volatile int cpk_live;
+static int ccer_lookup(pm_reg *r);        /* PAD-1317: the co-op awards ceremony's music */
+static volatile int ccer_live;
 
 static void on_sound_lookup(pm_reg *r)
 {
     if (worker_log && r[1]) sound_key_say(LOOKUP_KEY(r));   /* PAD-1071 */
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
+    if (ccer_live && r[1] && ccer_lookup(r)) return;   /* PAD-1317: the co-op awards ceremony's music */
     if (ci_live && r[1] && ci_lookup(r)) return;     /* PAD-1114: the co-op intro's sound */
     if (cpk_live && r[1] && cpk_lookup(r)) return;   /* PAD-1123: a co-op character's sound once picked */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
@@ -16518,11 +16521,18 @@ static void on_switch_edge(pm_reg *r)
 
 /* The switch_edge site's tables, checked against the process's mappings (read at the gate: the game's
  * own globals are mapped by then). 0 with *why when the port lacks one or one is not mapped. */
+#if PM_A64
+static int edge64_arm(const char **why);
+#endif
 static int edge_arm(const char **why)
 {
     struct site *d = site("switch_drain");
     static const char *const need[] = { "switch_drain_size", "switch_record_size", "switch_level_at",
                                         "switch_flags_at", "switch_polarity_at", 0 };
+#if PM_A64
+    (void)d; (void)need;
+    return edge64_arm(why);
+#endif
     edge.records = data("switch_records");
     edge.count = data("switch_count");
     edge.mode_mask = data("mode_mask");
@@ -16545,6 +16555,124 @@ static int edge_arm(const char **why)
     return 1;
 }
 
+#if PM_A64
+/* ---- PAD-1322: the switch edges on Spike 3 ----------------------------------------------------------------------
+ * Spike 3's 64-bit drain makes no per-switch call: it takes the list of switch records the node boards' reader queued
+ * (Star Wars ELG 1.10: 0x3085c0, the list's head at its state + 88) and, for each, writes the edge's level into the
+ * record and then, by the descriptor's handler bits and the mode mask, runs the switch's handler and calls switch_hit /
+ * switch_hit2 itself. The port's `site switch_edge` is therefore a point INSIDE the drain's loop that every edge passes
+ * after the level is written and before the handler bits are read (ELG: 0x308684, `ldr x24, [x19, #16]`), hooked with
+ * hook_callee, whose logger reads the record from the register the loop keeps it in:
+ *   value switch_record_reg <n>       the record's register there (x19 on ELG; 0..8 or 19..28)
+ *   value switch_id_at <offset>       the record's u16 switch id (0x20)
+ *   value switch_level_at <offset>    its level byte, the edge's new level (0x28)
+ *   value switch_desc_via <offset>    its pointer to the switch's descriptor (0x10)
+ *   value switch_flags_at <offset>    the descriptor's u16 handler bits: 0x400 = on the level-0 edge, 0x800 = the
+ *                                     level-1 edge (0x2e)
+ *   value switch_polarity_at <offset> the descriptor's u16 whose bit 2 says the switch is active high (0x30)
+ *   data  mode_mask                   the u16 the drain tests before a handler, as on Spike 2
+ * A hit is Spike 2's rule (edge_is_hit) and the consumers are the same (the shots, PAD-641's attract buttons, PAD-945's
+ * shot sounds, co-op's picks). There is no drain / return-address test: the site is only ever reached in the drain.
+ * Each switch's record is remembered as its edges pass, so switch_held reads a button's level byte live, as Spike 2's
+ * does from its table. PAD-1051's hiding stays Spike 2's (it is traced on that generation's 32-bit tables). */
+static struct { pm_addr mask; long reg, id_at, level_at, desc_via, flags_at, polarity_at; } edge64;
+static volatile pm_addr edge64_rec[N_SWITCH_IDS];   /* each switch's record, as its edges passed */
+
+static void on_switch_edge64(pm_reg *r, pm_reg *x)
+{
+    static volatile int said, bad;
+    pm_addr rec, desc;
+    unsigned id, level, flags, pol, mask;
+    int hit, playing;
+    if (bad) return;
+    rec = edge64.reg < 9 ? r[edge64.reg] : x[edge64.reg - 19];
+    if (rec < 0x10000u) {
+        if (__sync_bool_compare_and_swap(&bad, 0, 1))
+            say("switch edges off: x%ld holds 0x%" PMA " at switch_edge, not a switch record - the port's "
+                "switch_record_reg is not this build's", edge64.reg, rec);
+        return;
+    }
+    id = *(const unsigned short *)(rec + (pm_addr)edge64.id_at);
+    if (!id || id >= N_SWITCH_IDS) return;
+    desc = *(const pm_addr *)(rec + (pm_addr)edge64.desc_via);
+    if (desc < 0x10000u) {
+        if (__sync_bool_compare_and_swap(&bad, 0, 1))
+            say("switch edges off: switch %u's record holds 0x%" PMA " where switch_desc_via points - the port's "
+                "switch_* values are not this build's", id, desc);
+        return;
+    }
+    edge64_rec[id] = rec;
+    level = *(const unsigned char *)(rec + (pm_addr)edge64.level_at) & 1u;
+    flags = *(const unsigned short *)(desc + (pm_addr)edge64.flags_at);
+    pol = *(const unsigned short *)(desc + (pm_addr)edge64.polarity_at);
+    mask = edge64.mask ? *(const unsigned short *)edge64.mask : 0u;
+    hit = edge_is_hit(level, flags, pol, edge64.mask != 0, mask);
+    if (att_live) att_edge(id, level, flags, pol, mask);   /* PAD-641: a flipper button in attract */
+    if (gms_live) gms_edge(id, level, flags, pol);         /* PAD-945: a shot in one of the game's modes */
+    if (coop_live) coop_edge(id, level, flags, pol);       /* PAD-1031: a co-op character's pick, its save */
+    playing = pm_in_game();                  /* attract, a tilt: no player up for a mode to score */
+    if (edge_log_left > 0 && __sync_sub_and_fetch(&edge_log_left, 1) >= 0)
+        say("edge: switch %u level %u (flags 0x%04x, polarity 0x%04x, mode mask 0x%04x, in game %d)%s", id, level,
+            flags, pol, mask, playing, hit && playing ? " - a hit" : "");
+    if (!hit || !playing || !edge_shots) return;
+    lit_hold_check(id);                      /* PAD-503: before the game's own handler for it */
+    __sync_fetch_and_add(&switch_fired[id], 1u);
+    if (!said && __sync_bool_compare_and_swap(&said, 0, 1))
+        say("switch edges run on thread %ld (first hit: switch %u)", syscall(SYS_GETTID), id);
+}
+
+static int edge64_arm(const char **why)
+{
+    static const char *const need[] = { "switch_record_reg", "switch_id_at", "switch_level_at", "switch_desc_via",
+                                        "switch_flags_at", "switch_polarity_at", 0 };
+    if (!have_values(need)) { *why = "the port lacks a switch_* value"; return 0; }
+    edge64.reg = pm_port_value("switch_record_reg", -1);
+    edge64.id_at = pm_port_value("switch_id_at", 0);
+    edge64.level_at = pm_port_value("switch_level_at", 0);
+    edge64.desc_via = pm_port_value("switch_desc_via", 0);
+    edge64.flags_at = pm_port_value("switch_flags_at", 0);
+    edge64.polarity_at = pm_port_value("switch_polarity_at", 0);
+    edge64.mask = data("mode_mask");
+    if (edge64.mask && !maps_has(edge64.mask, 2, MAP_R)) edge64.mask = 0;
+    edge.mode_mask = edge64.mask ? 1u : 0u;  /* the consumers' "the port has a mode mask" (the address is edge64's) */
+    edge_log_left = pm_port_value("switch_edge_log", 0);
+    if (!((edge64.reg >= 0 && edge64.reg <= 8) || (edge64.reg >= 19 && edge64.reg <= 28))) {
+        *why = "switch_record_reg is not a register the hook can read (x0-x8, x19-x28)";
+        return 0;
+    }
+    if (edge64.id_at < 0 || edge64.id_at > 4094 || edge64.level_at < 0 || edge64.level_at > 4095
+        || edge64.desc_via < 0 || edge64.desc_via > 4088 || edge64.flags_at < 0 || edge64.flags_at > 4094
+        || edge64.polarity_at < 0 || edge64.polarity_at > 4094) {
+        *why = "a switch_* value is out of range";
+        return 0;
+    }
+    return 1;
+}
+
+/* switch `id` held now: its record's level byte, closed as its descriptor says (0 until an edge of it has passed) */
+static int edge64_held(unsigned id)
+{
+    pm_addr rec, desc;
+    if (!id || id >= N_SWITCH_IDS || !(rec = edge64_rec[id])) return 0;
+    desc = *(const pm_addr *)(rec + (pm_addr)edge64.desc_via);
+    if (desc < 0x10000u) return 0;
+    return (*(const unsigned char *)(rec + (pm_addr)edge64.level_at) & 1u)
+           == ((*(const unsigned short *)(desc + (pm_addr)edge64.polarity_at) & 4u) ? 1u : 0u);
+}
+#endif
+
+/* the drain's hook, once for every feature that rides it (the shots, PAD-641, PAD-945, PAD-1031) */
+static int edge_hook(struct site *e)
+{
+    if (edge_hooked) return 1;
+#if PM_A64
+    (void)on_switch_edge;                    /* Spike 2's drain call */
+    return edge_hooked = hook_callee(e->addr, on_switch_edge64);
+#else
+    return edge_hooked = hook(e->addr, on_switch_edge);
+#endif
+}
+
 static void switches_arm(void)
 {
     long at = pm_port_value("switch_hit_at", 0);
@@ -16560,12 +16688,18 @@ static void switches_arm(void)
     /* PAD-645: `value switch_edge_shots 0` = the drain is there for the flipper buttons' sounds in attract alone
      * (The Beatles 1.29): its switch_hit sites keep the shots */
     if (e && (!sites || pm_port_value("switch_edge_shots", 1))) {   /* the drain's edges: every switch */
-        if (e->ok && edge_arm(&why) && (edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
+        if (e->ok && edge_arm(&why) && edge_hook(e)) {
             can |= PM_CAN_SWITCH_SHOTS;
             edge_shots = 1;
+#if PM_A64
+            say("switch shots: %d switch line(s) hand their shots to the modes; the switch drain's edges (switch_edge "
+                "0x%08" PMA " in the drain's loop, the record in x%ld%s)", port.n_switch, e->addr, edge64.reg,
+                edge.mode_mask ? ", the game's mode mask applied" : ", no mode mask");
+#else
             say("switch shots: %d switch line(s) hand their shots to the modes; the switch drain's edges (switch_edge "
                 "0x%08" PMA ", from the drain 0x%08x..0x%08x%s)", port.n_switch, e->addr, edge.drain, edge.drain_end,
                 edge.mode_mask ? ", the game's mode mask applied" : ", no mode mask");
+#endif
         } else {
             say("switch shots off: %s", !e->ok ? "switch_edge does not match this build" : why ? why : "switch_edge could not be hooked");
         }
@@ -16949,6 +17083,9 @@ static int switch_held(unsigned id)
 {
     unsigned base, rec, st, desc, pol, level;
     int k;
+#if PM_A64
+    return edge64_held(id);                  /* PAD-1322: Spike 3 keeps no per-switch table we read */
+#endif
     if (!id || !edge.records || id >= N_SWITCH_IDS) return 0;
     base = *(const unsigned *)(unsigned long)edge.records;
     if (!base) return 0;
@@ -18353,6 +18490,98 @@ static int coop_cards_backdrop(const char *name);
 static char coop_cer_clip[96], coop_cer_crop[32];      /* PAD-1219: coop.cfg `ceremony <clip> <crop>` */
 static void coop_cer_begin(void);
 static void coop_cer_end(void);
+static void ccer_quiet(void);
+
+/* ---- PAD-1317: the co-op awards ceremony's own music ----------------------------------------------------------
+ * DoomWalrus666: "Please add an option in the mode tab in the characters builder to add a custom audio track to play
+ * during the award ceremony". sounds.cfg `ccer <request> <carrier key> <the music's key> <ms>`: the owner's track, a
+ * sound of the card's own on the co-op intro's carrier (the record lookup swapped as the intro's is). As the ceremony
+ * begins (coop_cer_begin) the game's sounds playing then are faded (each once, CCER_QUIET_MS) and the carrier plays
+ * at the top priority (CCER_PRIO_PLAYING, as the intro's: over the game's own) with the music; the cards' loop fades any
+ * the game starts while they show; at its end the music is faded out over CCER_FADE_MS and the carrier's priority
+ * set back. */
+#define CCER_QUIET_MS 250u
+#define CCER_FADE_MS  1500u
+#define CCER_QUIET_EVERY_MS 100ul
+#define CCER_QUIET_N 12
+#define CCER_PRIO_IDLE    3      /* as the intro's carrier (CI_PRIO_IDLE / CI_PRIO_PLAYING) */
+#define CCER_PRIO_PLAYING 255
+static struct {
+    unsigned request, sound_ms;
+    unsigned char key[8], host[8];
+    volatile unsigned long swap_until;
+    volatile int looked;
+    int on;
+    unsigned long at, quiet_at;
+    unsigned quiet[CCER_QUIET_N];
+    unsigned n_quiet;
+} ccer;
+
+/* the record lookup (any thread): the carrier's own record takes the ceremony's music while it is asked for */
+static int ccer_lookup(pm_reg *r)
+{
+    const unsigned char *k = LOOKUP_KEY(r);
+    if (!ccer.request || (long)(ccer.swap_until - pm_ms()) <= 0 || !key_is(k, ccer.key)) return 0;
+    LOOKUP_TAKE(r, ccer.host);
+    if (!ccer.looked) {
+        ccer.looked = 1;
+        say("co-op awards: request %u looked up its record, took the ceremony's music", ccer.request);
+    }
+    return 1;
+}
+
+/* whether the ceremony has music of its own to play (tests lift it verbatim) */
+static int ccer_has(unsigned request, int live)
+{
+    return request != 0 && live;
+}
+
+/* the game's sounds playing now, but the music, faded (each once); from the ceremony's start and its cards' loop */
+static void ccer_quiet(void)
+{
+    unsigned reqs[8], buses[8], k;
+    int n, i;
+    if (!ccer.on) return;
+    ccer.quiet_at = pm_ms();
+    n = pm_sound_playing(reqs, buses, 8);
+    for (i = 0; i < n && i < 8; i++) {
+        if (!reqs[i] || reqs[i] == ccer.request) continue;
+        for (k = 0; k < ccer.n_quiet && ccer.quiet[k] != reqs[i]; k++) ;
+        if (k < ccer.n_quiet) continue;                       /* faded already (a fade asked for again starts over) */
+        if (ccer.n_quiet < CCER_QUIET_N) ccer.quiet[ccer.n_quiet++] = reqs[i];
+        if (pm_sound_fade(reqs[i], CCER_QUIET_MS))
+            say("co-op awards: the game's sound %u (bus 0x%x) faded under the ceremony's music", reqs[i], buses[i]);
+    }
+}
+
+static void ccer_begin(void)
+{
+    unsigned long now = pm_ms();
+    if (!ccer_has(ccer.request, ccer_live)) return;
+    ccer.on = 1;
+    ccer.n_quiet = 0;
+    ccer_quiet();
+    if (pm_sound_active(ccer.request)) pm_sound_stop(ccer.request);
+    ccer.looked = 0;
+    ccer.at = now;
+    ccer.swap_until = now + ccer.sound_ms + 1000ul;
+    pm_sound_priority(ccer.request, CCER_PRIO_PLAYING, 0);
+    pm_sound(ccer.request);
+    say("co-op awards: the ceremony's music (%u ms) plays on request %u", ccer.sound_ms, ccer.request);
+}
+
+static void ccer_end(void)
+{
+    if (!ccer.on) return;
+    ccer.on = 0;
+    ccer.swap_until = 0;
+    if (pm_sound_active(ccer.request)) {
+        if (!pm_sound_fade(ccer.request, CCER_FADE_MS)) pm_sound_stop(ccer.request);
+        say("co-op awards: the ceremony's music faded out after %lu ms", pm_ms() - ccer.at);
+    } else
+        say("co-op awards: the ceremony's music had ended by itself (%lu ms in)", pm_ms() - ccer.at);
+    pm_sound_priority(ccer.request, CCER_PRIO_IDLE, 0);
+}
 
 /* the game is over (coop_change_wrap, the game's thread): each award on each winner's card in turn */
 static void coop_cards_show(unsigned n)
@@ -18393,8 +18622,10 @@ static void coop_cards_show(unsigned n)
             if (coop_card_words[c]) pm_set_text(coop_card_words[c], words);
             pm_show(coop_card[c], 1);
             say("co-op awards: %s on %s's card", words, coop_ch[c].name);
-            for (at = pm_ms(); pm_ms() - at < COOP_CARD_MS; )
+            for (at = pm_ms(); pm_ms() - at < COOP_CARD_MS; ) {
                 ((void (*)(unsigned))(unsigned long)fn("proc_sleep"))(1);
+                if (ccer.on && pm_ms() - ccer.quiet_at >= CCER_QUIET_EVERY_MS) ccer_quiet();   /* PAD-1317 */
+            }
             pm_show(coop_card[c], 0);
             shown++;
         }
@@ -18435,6 +18666,7 @@ static void coop_cer_begin(void)
     if (coop_final) pm_show(coop_final, 1);
     coop_cer_gone_n = coop_cer_vetoes = 0;
     coop_cer_on = coop_cer_keep != 0 && (can & PM_CAN_BACKDROP);
+    ccer_begin();                                             /* PAD-1317: the ceremony's own music */
     say("co-op awards: the cards' scene 0x%08x, its player 0x%08x", (unsigned)(unsigned long)coop_cer_keep,
         (unsigned)(unsigned long)coop_cer_keep_player);
     say("co-op awards: the ceremony - %s; %s", coop_cer_on ? "the game's HUD off the glass" :
@@ -18445,6 +18677,7 @@ static void coop_cer_begin(void)
 static void coop_cer_end(void)
 {
     unsigned k;
+    ccer_end();                                               /* PAD-1317 */
     if (coop_final) pm_show(coop_final, 0);
     if (coop_cer_on) {
         say("co-op awards: the ceremony is over - %u scene show(s) of %u scene(s) kept off the glass, the HUD back",
@@ -19214,7 +19447,7 @@ static void coop_chars_arm(struct site *e)
         say("co-op characters: the gifts are off - the port names no coop_adj_changed");
         for (i = 0; i < coop_ch_n; i++) coop_ch[i].n_gift = 0;
     }
-    if ((coop_pick_on || save || ci.clip[0]) && !(edge_hooked || (edge_hooked = hook(e->addr, on_switch_edge)))) {
+    if ((coop_pick_on || save || ci.clip[0]) && !edge_hook(e)) {
         say("co-op characters: off - the switch drain could not be hooked, so no pick could be made");
         coop_ch_n = 0;
         return;
@@ -20298,16 +20531,73 @@ static const char *const COOP_NAME_SITES[] = { "coop_panel_name", "coop_panel_na
                                                "coop_panel_name_4", 0 };
 static unsigned (*coop_name_game)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
 
+/* PAD-1315 (DoomWalrus666, co-op: "Player 1's user icon moves to the scoreboard position of the active player"): the
+ * boxes' Insider avatars are not drawn with the names above but by the score frame's Insider overlay
+ * (NetScoreFrameOverlay, every Spike 2 build), which calls its drawer once a box as draw(this, logins, player 1..4, r3,
+ * [sp]; the box's rectangle in s0-s3) (Godzilla Pro 1.16 0x483c14 from 0x484440). The drawer reads the player's login
+ * state and login (the entry the swap above moves) and draws that user's avatar in that user's colour - so box 1 drew
+ * the teammate up's icon and the teammate up's box player 1's. Its call (`site coop_icon_draw`,
+ * portcoop.score_icon_sites) is answered with the place holding the box's own player's login. The rectangle travels
+ * in s0-s3: the wrapper takes the four floats and passes them on (hard-float: they stay in s0-s3), the stack word
+ * with them. */
+static unsigned (*coop_icon_game)(unsigned, unsigned, unsigned, unsigned, unsigned, float, float, float, float);
+
+static unsigned coop_icon_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, float x, float y,
+                               float w, float h)
+{
+    static unsigned said[5];
+    unsigned place = r2 >= 1 && r2 <= 4 ? coop_name_player(r2, cu_g, cu_p) : r2;
+    if (place != r2 && said[r2] != (cu_g << 4 | cu_p)) {     /* once a turn a box */
+        said[r2] = cu_g << 4 | cu_p;
+        say("co-op insider: the score panel's box %u shows player %u's icon (login 0x%08x, in place %u while player "
+            "%u is up)", r2, r2, coop_user_word(place), place, cu_p);
+    }
+    return coop_icon_game(r0, r1, place, r3, s0, x, y, w, h);
+}
+
+static void coop_icon_arm(void)
+{
+    unsigned at;
+    if (!site("coop_icon_draw")) return;
+    if (!fn("coop_icon_draw") || !(at = hook_call(fn("coop_icon_draw"), (void *)coop_icon_wrap))) {
+        say("co-op insider: the score frame's icon draw could not be wrapped - box 1 shows the teammate up's icon");
+        return;
+    }
+    coop_icon_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned, unsigned, float, float, float, float))
+        (unsigned long)at;
+    say("co-op insider: the score panel's boxes show their own players' icons");
+}
+
+/* PAD-1315: the name wrapper re-pointed the PLAYER the game's name was asked for, and the name of a player with no
+ * login (a guest) is "PLAYER %d" of that number - so with player 1 logged in and teammate 2 a guest, teammate 2's box read
+ * "PLAYER 1" on their turn. Where the name's own user lookup is found (`site coop_panel_name_user`,
+ * portcoop.name_user_site: its call of user-for-player(player, ..), Godzilla Pro 1.16 0x3bc944), the box's name is asked
+ * for its own player and only that lookup is re-pointed (while the box's call runs), so a login reads from its place
+ * and a guest keeps their own number. */
+static unsigned (*coop_name_user_game)(unsigned, unsigned, unsigned, unsigned);
+static volatile unsigned cn_box, cn_place;              /* the box whose name is being made, and its login's place */
+
+static unsigned coop_name_user_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)
+{
+    if (cn_box && r0 == cn_box) r0 = cn_place;
+    return coop_name_user_game(r0, r1, r2, r3);
+}
+
 static unsigned coop_name_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3, unsigned s0, unsigned s1)
 {
     static unsigned said[5];
-    unsigned place = coop_name_player(r1, cu_g, cu_p);
+    unsigned place = coop_name_player(r1, cu_g, cu_p), ret;
     if (place != r1 && r1 >= 1 && r1 <= 4 && said[r1] != (cu_g << 4 | cu_p)) {   /* once a turn a box */
         said[r1] = cu_g << 4 | cu_p;
         say("co-op insider: the score panel's box %u names player %u's login (0x%08x, in place %u while player %u "
             "is up)", r1, r1, coop_user_word(place), place, cu_p);
     }
-    return coop_name_game(r0, place, r2, r3, s0, s1);
+    if (!coop_name_user_game || place == r1) return coop_name_game(r0, place, r2, r3, s0, s1);
+    cn_place = place;
+    cn_box = r1;
+    ret = coop_name_game(r0, r1, r2, r3, s0, s1);           /* PAD-1315: its own number, the login from its place */
+    cn_box = 0;
+    return ret;
 }
 
 static void coop_name_arm(void)
@@ -20326,6 +20616,15 @@ static void coop_name_arm(void)
     }
     if (armed) say("co-op insider: the score panel's boxes name their own players (%d call%s)", armed,
                    armed == 1 ? "" : "s");
+    if (armed && site("coop_panel_name_user")) {             /* PAD-1315 */
+        if (fn("coop_panel_name_user") && (at = hook_call(fn("coop_panel_name_user"), (void *)coop_name_user_wrap))) {
+            coop_name_user_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)at;
+            say("co-op insider: a box's name keeps its own number (a guest reads its own PLAYER n)");
+        } else
+            say("co-op insider: the names' user lookup could not be wrapped - a guest's box reads the number of its "
+                "login's place");
+    }
+    coop_icon_arm();                                          /* PAD-1315 */
 }
 
 static int on_coop_award(pm_reg *r);       /* below the Insider Connected gate */
@@ -24296,7 +24595,7 @@ static void att_arm(void)
         return;
     }
     att.attract_bit = (unsigned)pm_port_value("mode_mask_attract", 0x10);
-    if (!edge_hooked && !(edge_hooked = hook(e->addr, on_switch_edge))) {
+    if (!edge_hook(e)) {
         say("attract flipper sounds: off - switch_edge 0x%08" PMA " cannot be hooked", e->addr);
         return;
     }
@@ -24444,6 +24743,41 @@ static void cpk_sound_arm(void)
     cpk_live = 1;
     say("co-op characters: %u character sound(s) once picked ride request %u", (unsigned)__builtin_popcount(cpk.have_sound),
         cpk.request);
+}
+
+/* PAD-1317: sounds.cfg `ccer <request> <carrier's key> <the music's key> <ms>` (the intro's carrier) */
+static int ccer_bad;
+static void ccer_sound_line(const char *rs, const char *ks, const char *hs, const char *mss)
+{
+    const char *p = rs;
+    int ok, ok2;
+    unsigned r = (unsigned)number(&p, &ok), ms;
+    p = mss;
+    ms = (unsigned)number(&p, &ok2);
+    if (!ok || !ok2 || !r || !key_hex(ks, ccer.key) || !key_hex(hs, ccer.host)) { ccer_bad++; return; }
+    ccer.request = r;
+    ccer.sound_ms = ms;
+}
+
+/* from sndm_arm: the record lookup's hook for the ceremony's music */
+static void ccer_sound_arm(void)
+{
+    if (ccer_bad) say("co-op awards: the ceremony's music line in sounds.cfg not read");
+    if (!ccer.request) return;
+    if (!fn("sound_play") || !fn("sound_lookup")) {
+        say("co-op awards: no music of its own - the port has no sound_play or sound_lookup for this build");
+        ccer.request = 0;
+        return;
+    }
+    if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+        say("co-op awards: no music of its own - sound_lookup 0x%08" PMA " cannot be hooked", fn("sound_lookup"));
+        ccer.request = 0;
+        return;
+    }
+    if (pm_sound_priority(ccer.request, CCER_PRIO_IDLE, 0) < 0)
+        say("co-op awards: the carrier's priority stays its own - the port has no request table");
+    ccer_live = 1;
+    say("co-op awards: the ceremony's music (%u ms) rides request %u", ccer.sound_ms, ccer.request);
 }
 
 /* from sndm_arm: the record lookup's hook for the intro's sound */
@@ -24710,7 +25044,7 @@ static void gms_arm(void)
             ? "switch_edge does not match this build" : why ? why : "the switch drain's tables are not there");
         return;
     }
-    if (!edge_hooked && !(edge_hooked = hook(e->addr, on_switch_edge))) {
+    if (!edge_hook(e)) {
         say("game mode shot sounds: off - switch_edge 0x%08" PMA " cannot be hooked", e->addr);
         return;
     }
@@ -25114,6 +25448,10 @@ static void sndm_line(char *s)
         ci_sound_line(f[1], f[2], f[3], f[4]);
         return;
     }
+    if (n >= 5 && str_eq(f[0], "ccer")) {     /* PAD-1317: the co-op awards ceremony's music */
+        ccer_sound_line(f[1], f[2], f[3], f[4]);
+        return;
+    }
     if (n >= 6 && str_eq(f[0], "cpick")) {    /* PAD-1123: a co-op character's sound once picked */
         cpk_sound_line(f[1], f[2], f[3], f[4], f[5]);
         return;
@@ -25428,9 +25766,10 @@ static void sndm_arm(void)
     gms_arm();                                /* PAD-945: nor a sound on a shot in one of the game's modes */
     ci_sound_arm();                           /* PAD-1114: nor the co-op intro's sound */
     cpk_sound_arm();                          /* PAD-1123: nor the co-op characters' sounds once picked */
+    ccer_sound_arm();                         /* PAD-1317: nor the co-op awards ceremony's music */
     juke_arm();                               /* PAD-685: nor the jukebox */
     if (!n_sndm) {
-        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request) return;
+        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request || ccer.request) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }

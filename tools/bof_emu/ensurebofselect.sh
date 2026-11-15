@@ -32,7 +32,7 @@ if [ "${1:-}" = "--preview" ]; then PREVIEW=1; shift; fi
 SEL=${2:-${BOF_SELECTOR_DIR:-/var/tmp/bofselect}}
 BUILD=${BOF_SELECTOR_BUILD:-/var/tmp/bofselect_build}
 DEJAVU=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
-FILES="bofselect paddelta padselect.sh pad_install.sh"
+FILES="bofselect paddelta padselect.sh pad_install.sh padmenu.so"
 
 ok() {
     if [ ! -f "$SEL/font.ttf" ] && [ -f "$DEJAVU" ]; then
@@ -71,6 +71,7 @@ if ! make -C "$SRC" PLATFORM=bof BUILD="$BUILD" all >"$log" 2>&1; then
 fi
 install -m 755 "$BUILD/bofselect" "$SEL/bofselect.new" && mv -f "$SEL/bofselect.new" "$SEL/bofselect" \
     && install -m 755 "$BUILD/paddelta" "$SEL/paddelta" \
+    && install -m 755 "$BUILD/padmenu.so" "$SEL/padmenu.so" \
     && install -m 755 "$SRC/padselect_bof.sh" "$SEL/padselect.sh" \
     && install -m 755 "$SRC/pad_install_bof.sh" "$SEL/pad_install.sh" \
     || fail "cannot install into $SEL"

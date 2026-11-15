@@ -548,6 +548,21 @@ for kv in ${RUNBINDS:-}; do
 done
 # /dump -> /connectivity/dump on the machine (S95game makes it)
 mkdir -p "$R/connectivity/dump/log"
+# NO GLOBAL sync() (PAD-1340): the game's nvram and PreLoadScene threads call
+# sync() after they write, qemu passes it to the host, and under WSL2 sync(2)
+# waits on the Windows drives' virtiofs (fuse_sync_fs) for ever: the slot's game
+# sat in D state, unkillable, until `wsl --shutdown`. The no-op (s3build.sh,
+# from ../spike2_emu/pad_nosync.c) goes in /etc/ld.so.preload of the slot's
+# overlay root - every guest process, the card's scripts included; the store
+# is never written. syncfs()/fsync() are untouched.
+if [ -e "$B/pad_nosync.so" ]; then
+    mkdir -p "$R/usr/lib/pad"; cp -f "$B/pad_nosync.so" "$R/usr/lib/pad/"
+    touch "$R/etc/ld.so.preload"
+    grep -qx /usr/lib/pad/pad_nosync.so "$R/etc/ld.so.preload" \
+        || echo /usr/lib/pad/pad_nosync.so >> "$R/etc/ld.so.preload"
+else
+    echo "[s3run] WARNING: no $B/pad_nosync.so (s3build.sh): the game's sync() can wedge this slot" >&2
+fi
 PRELOAD=""
 if [ "$BRIDGE" = 1 ]; then
     rm -f "$R/usr/lib/libEGL.so.1" "$R/usr/lib/libGLESv2.so.2"
@@ -634,6 +649,34 @@ fi
 # PAD_S3_QEMU (default ~/.pad-s3/qemu-aarch64); run the game through it
 # explicitly, so the shared binfmt interpreter (Spike 2's qemu) stays stock.
 # Absent -> fall back to binfmt. See docs/plans/spike3_emulation.md stage 3.
+# PAD-1309: HOLD BACK TO COME BACK TO THE MENU. A multi-boot card's padselect.sh puts
+# padmenu.so in front of the game's preloads; held (back_hold=, else 3 s), BACK asks for `sync; reboot`.
+# This rig runs the guest as root on the PC's own Linux, where a reboot is never
+# right, so the restart is a stand-in that leaves connectivity/dump/padmenu.restart
+# (padmenu.so does nothing at all in an emulator that gives it no stand-in). The
+# checkpointable run starts the game itself, so there the object goes in front here.
+# PAD_S3_MENU_SO=<host .so> puts a padmenu.so in front on any card (a test of the
+# object on a single-image card: the rig then starts the game with it itself).
+MENU_SO=""
+menu_first() {
+    case "$PRELOAD" in
+        *LD_PRELOAD=*) PRELOAD=${PRELOAD/LD_PRELOAD=/LD_PRELOAD=$MENU_SO:} ;;
+        *) PRELOAD="${PRELOAD:-env} LD_PRELOAD=$MENU_SO" ;;
+    esac
+}
+MENU_SRC=${PAD_S3_MENU_SO:-}
+[ -z "$MENU_SRC" ] && [ -f "$R/games/pad/images.conf" ] && [ -f "$R/games/pad/padmenu.so" ] \
+    && MENU_SRC=$R/games/pad/padmenu.so
+if [ -n "$MENU_SRC" ]; then
+    mkdir -p "$R/usr/lib/pad" && cp -f "$MENU_SRC" "$R/usr/lib/pad/padmenu.so"
+    printf '#!/bin/sh\n: > /connectivity/dump/padmenu.restart\n' > "$R/usr/lib/pad/padmenu_reboot"
+    chmod 755 "$R/usr/lib/pad/padmenu_reboot"
+    rm -f "$SD/connectivity.up/dump/padmenu.restart"
+    PRELOAD="${PRELOAD:-env} CODESELECT_REBOOT=/usr/lib/pad/padmenu_reboot"
+    MENU_SO=/usr/lib/pad/padmenu.so
+    [ -f "$R/games/pad/images.conf" ] || menu_first     # no menu run to wait for
+    echo "[s3run] holding BACK 5 s in the game asks for a restart (connectivity/dump/padmenu.restart)"
+fi
 QEMU_INTERP=""
 PQ="${PAD_S3_QEMU:-$(dirname "$B")/qemu-aarch64}"
 if [ "$DEVMODE" != kernel ] && [ -z "${PAD_S3_QEMU:-}" ]; then
@@ -666,6 +709,8 @@ if [ "$PIVOT" = 1 ] && [ "$PROG" = /games/game ] && [ -f "$R/games/pad/images.co
         PROG=/games/pad/img0/game
     fi
     echo "[s3run] boot menu done (exit $MB_RC): starting $PROG"
+    # the game, not the menu, gets padmenu.so (the menu reads the same SPI word)
+    [ -n "$MENU_SO" ] && menu_first
 fi
 printf '%q ' "$PROG" "$@" > "$SD/.argv"
 if [ "$PIVOT" = 1 ]; then
@@ -737,6 +782,7 @@ serve_load() {
     if [ -n "$GPID" ]; then
         echo "[s3run] the game is back from the save state (pid $GPID)"
         echo ok > "$SD/load.result"
+        s3_board                  # the board follows the restored game's pid
         # criu is done with the images once the game runs: the unpacked copy
         # (s3state.sh's, ~1.2 GB) goes
         [ "$dir" = "$SD.load" ] && rm -rf "$SD.load"
@@ -748,6 +794,20 @@ serve_load() {
 }
 rm -f "$SD/load.req" "$SD/load.result"
 T0=$(date +%s)
+# THE RIG BOARD (PAD-1341): the run is on %USERPROFILE%\.pad-rig as
+# spike3-<slot>.run (tools/rigboard.sh), so the triage dashboard's rig pill
+# counts and names it - a hidden Spike 3 run used to play with no pill
+# anywhere. Its beater flags a game stuck in D state or a zombie. A load
+# re-posts it (the game's pid changes); the end of the run clears it.
+s3_board() {
+    [ -n "${INNERPID:-$GPID}" ] && type rigboard_post >/dev/null 2>&1 || return 0
+    local game vis=0
+    game=$(basename "$CARD"); game=${game%%.*}; game=${game%%-*}
+    [ "$WINDOW" = 1 ] && [ "${PAD_HIDDEN:-0}" != 1 ] && vis=1
+    RIGBOARD_ROOT=$SD rigboard_post spike3 "$SLOT" "${INNERPID:-$GPID}" "$game" "${PAD_TITLE:-}" "$vis" "${PAD_S3_AUDIO:-0}"
+}
+[ -f "$S/../rigboard.sh" ] && . "$S/../rigboard.sh"
+s3_board
 trap 'end_game' TERM INT HUP
 while game_alive; do
     [ -s "$SD/load.req" ] && [ "$SAVES" = 1 ] && serve_load
@@ -757,6 +817,7 @@ while game_alive; do
     sleep 0.3
 done
 trap - TERM INT HUP
+type rigboard_clear >/dev/null 2>&1 && rigboard_clear spike3 "$SLOT"
 if [ -n "$INNERPID" ]; then
     wait "$INNERPID" 2>/dev/null; RC=$?
 else

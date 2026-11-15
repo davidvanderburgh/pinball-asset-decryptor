@@ -183,7 +183,13 @@ fi
 # The switch matrix comes up WITH the emulator rather than behind a button:
 # it is the control surface for the machine, not an optional extra, and a
 # button that silently did nothing is how this presented the first time.
-if [ "${JJP_NO_MATRIX:-0}" != "1" ]; then
+# A hidden run (PAD_HIDDEN=1) opens no window at all: switches go through the
+# shared memory instead (jjppoke.py), but the device dump is still refreshed -
+# the next boot's rest seed and jjppoke.py both read it (PAD-1335).
+if [ "${PAD_HIDDEN:-0}" = "1" ]; then
+    step "device tables (hidden run)"
+    bash "$HERE/jjpsw_launch.sh" --dump-only || echo "watch.sh: device tables not refreshed"
+elif [ "${JJP_NO_MATRIX:-0}" != "1" ]; then
     step "switch matrix"
     bash "$HERE/jjpsw_launch.sh" || echo "watch.sh: switch matrix did not open"
 fi

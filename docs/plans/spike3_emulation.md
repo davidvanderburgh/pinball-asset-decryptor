@@ -753,6 +753,19 @@ the shooter lane to launch / trough 0/6".
   that meets a ball in the lane is held and served when the lane clears
   (multiball on a manual plunger: each Plunge brings the next ball).
   `dump/padball` (`fed N` + newest lines) feeds the BALLS note.
+- **The trough's direction** (PAD-1286): the newer Spike 3 titles rest their
+  balls against TROUGH 1 (beside TROUGH JAM), Star Wars ELG (its Spike 2
+  rules) against TROUGH 6. With the stack at the wrong end ELG reads its
+  first eject as failed and re-fires it every 0.58 s, and the held-eject rule
+  above served each retry as another ball (2-5 in play, no drain ended a
+  ball). The model now learns it at a game's start: the run's first eject,
+  from a full trough, re-fired 0.6-3 s later with that ball in the lane and
+  nothing drained turns the stack round once (`[ball] ... turned round, the
+  eject end is TROUGH 6 now`; balls.json follows, so the window's dots do);
+  a retry still in flight then is swallowed. A game that takes its eject
+  (the lane cleared by a plunge or the auto plunger) settles it the other
+  way. `PAD_S3_TROUGH_REVERSE=1` / `0` forces a direction;
+  `PAD_S3_BALLS_TRACE=1` logs every eject frame with its timing.
 - `s3press.py drain|plunge|take|serve|reset SLOT` go the same way.
 
 ## What is left for Spike 2 parity

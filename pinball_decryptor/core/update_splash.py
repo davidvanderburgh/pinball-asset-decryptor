@@ -335,7 +335,7 @@ $S.markX = 0.0; $S.markY = 0.0; $S.markT = 0
 $S.feeds = @(
   @(380.0, 14.0, -2.0, -2.5, 0.3, 0.0),     # the plunger lane, top right
   @(20.0, 14.0, 2.0, 2.5, 0.3, 0.0),        # a kickout, top left
-  @(200.0, 10.0, -1.0, 2.0, 0.0, 0.5),      # dropped onto the centre bumper
+  @(200.0, 10.0, -1.0, 2.0, 0.0, 0.5),      # dropped onto the center bumper
   @(386.0, 74.0, -3.0, -2.0, -2.0, -1.0),   # an eject on the right side
   @(14.0, 74.0, 3.0, 2.0, -2.0, -1.0))      # an eject on the left side
 $S.feed = -1

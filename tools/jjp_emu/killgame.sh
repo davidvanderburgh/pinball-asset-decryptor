@@ -28,21 +28,24 @@ if [ -r "${JJP_PID_FILE:-/var/tmp/jjp_game.pid}" ]; then
         [ -n "$PGID" ] && kill -9 -- "-$PGID" 2>/dev/null
     fi
 fi
-# 2. Any supervising bash that still holds a ./game loop, matched on its body.
-pkill -9 -f 'while \[ \$n -lt' 2>/dev/null
+# 2. Any supervising bash that still holds a ./game loop, matched on its body -
+#    only inside the JJP jail: other rigs share this WSL.
+for p in $(pgrep -f 'while \[ \$n -lt' 2>/dev/null); do
+    [ "$(readlink "/proc/$p/root" 2>/dev/null)" = "$JJP_JAIL" ] && kill -9 "$p" 2>/dev/null
+done
 # 3. The game processes themselves - and the boot menu, which on a multi-boot
 #    image is what the run is sitting in before any game process exists (item
 #    117).  It is a client of the nested Xephyr, not of WSLg, so SIGKILL leaves
-#    no ghost.
-pkill -9 -x game 2>/dev/null
-pkill -9 -x jjpselect 2>/dev/null
+#    no ghost.  NEVER `pkill -x game`: a Spike 2 rig's game has the same name
+#    and was killed by it (PAD-1335); jjp_rig_pids keeps to the JJP jail.
+sweep() { kill -9 $(jjp_rig_pids game) $(jjp_rig_pids jjpselect) 2>/dev/null; }
+sweep
 sleep 1
 AFTER=$(( $(jjp_game_count) + $(jjp_select_count) ))
 
 # Second pass for anything that was mid-fork on the first sweep.
 if [ "$AFTER" != "0" ]; then
-    pkill -9 -x game 2>/dev/null
-    pkill -9 -x jjpselect 2>/dev/null
+    sweep
     sleep 1
     AFTER=$(( $(jjp_game_count) + $(jjp_select_count) ))
 fi

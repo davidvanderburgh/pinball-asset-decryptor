@@ -218,6 +218,9 @@ def roll_in_sub(up):
 #: PAD-1281 lacks it (the maps' `repatch`)
 PLUNGER_MARK = "' PAD: the plunger key is the table's own plunger, the lockbar key the Action button (launch)"
 
+#: a lock step this overdue was lost from vpmTimer's queue; the next lock coil takes it (PAD-1334)
+HEAL_MS = 1000
+
 #: how long the LAIR post waits, armed, for a ball that crossed the switch going down
 LAIR_ARM_MS = 2000
 
@@ -314,6 +317,7 @@ def pad_subs(m):
         "\tIf padVanUp + padVanComing < %d Then" % len(up),
         "\t\taKicker.DestroyBall",
         "\t\tpadVanComing = padVanComing + 1",
+        "\t\tpadVanComeT = GameTime",
         "\t\tPadVanRollIn padVanUp + padVanComing",
         "\tElse",
         "\t\taKicker.Kick 190, 7        ' the upper section is full: it comes back out",
@@ -322,6 +326,7 @@ def pad_subs(m):
         "",
     ] + roll_in_sub(up) + [
         "Sub PadVanRest",
+        "\tIf padVanComing <= 0 Then Exit Sub        ' taken already (PadVanHeal): a late timer",
         "\tpadVanComing = padVanComing - 1",
         "\tpadVanUp = padVanUp + 1",
         "\tPadVanUpperSw",
@@ -342,16 +347,37 @@ def pad_subs(m):
         "\tPadVanFlow",
         "End Sub",
         "",
+        "' A step the timer queue lost would leave a ball between two places for good:",
+        "' core.vbs keeps 50 timers at most and drops the rest without a word. The game",
+        "' then fires the lock again and again, calls it a malfunction, and holds the",
+        "' next game back until Visual Pinball restarts (PAD-1334, emulator). Every lock",
+        "' coil takes any step overdue by %d ms, and says so in the controller log" % HEAL_MS,
+        "Sub PadVanHeal",
+        "\tIf padVanComing > 0 And GameTime - padVanComeT > %d Then" % HEAL_MS,
+        "\t\tpadVanComeT = GameTime",
+        "\t\tController.PadNote = \"lock: a ball shot in never reached its place; put there now\"",
+        "\t\tPadVanRest",
+        "\tEnd If",
+        "\tIf padVanFalling > 0 And GameTime - padVanFallT > %d Then" % HEAL_MS,
+        "\t\tpadVanFallT = GameTime",
+        "\t\tController.PadNote = \"lock: a ball rolling down never reached LOWER LOCK; put there now\"",
+        "\t\tPadVanLand",
+        "\tEnd If",
+        "End Sub",
+        "",
         "Sub PadVanFlow",
+        "\tPadVanHeal",
         "\tIf padVanPost And padVanUp > 0 And bsVan.Balls + padVanFalling < %d Then" % len(van),
         "\t\tpadVanUp = padVanUp - 1",
         "\t\tPadVanUpperSw",
         "\t\tpadVanFalling = padVanFalling + 1",
+        "\t\tpadVanFallT = GameTime",
         "\t\tvpmTimer.AddTimer %d, \"PadVanLand '\"   ' the roll down to LOWER LOCK" % VAN_ROLL_MS,
         "\tEnd If",
         "End Sub",
         "",
         "Sub PadVanLand",
+        "\tIf padVanFalling <= 0 Then Exit Sub        ' taken already (PadVanHeal): a late timer",
         "\tpadVanFalling = padVanFalling - 1",
         "\tbsVan.Balls = bsVan.Balls + 1",
         "\tbsVan.Update        ' on LOWER LOCK now, so its coil can let it out at once",
@@ -362,6 +388,7 @@ def pad_subs(m):
         "' LOWER LOCK: the van gives back one ball (LOWER LOCK %s); with the post" % "/".join(str(x) for x in van),
         "' still down the next one rolls on",
         "Sub PadVanOut(Enabled)",
+        "\tIf Enabled Then PadVanHeal",
         "\tIf Enabled And padLairHeld Then",
         "\t\tPadLairOut",
         "\t\tPadVanFlow",
@@ -485,9 +512,10 @@ def patch_script(src, m):
             if rom:   # the backglass (B2S, DOF) knows the table by its ROM
                 out.append('PadB2SName = "%s"' % rom.group(1))
             out.append("Dim bsTrough, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, padGiState, padDiscOn, "
-                       "padLairHeld")
+                       "padLairHeld, padVanComeT, padVanFallT")
             out.append("padVanUp = 0 : padVanComing = 0 : padVanFalling = 0 : padVanPost = False : "
-                       "padGiState = -1 : padDiscOn = 0 : padLairHeld = False")
+                       "padGiState = -1 : padDiscOn = 0 : padLairHeld = False : "
+                       "padVanComeT = 0 : padVanFallT = 0")
             continue
         if low.startswith("loadvpm "):
             out.append('LoadVPM "01000000","PADSPIKE2.vbs",3.10')

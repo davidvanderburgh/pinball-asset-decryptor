@@ -183,6 +183,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Dungeons & Dragons LE 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
 | Dungeons & Dragons Pro 1.10 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
 | Elvira 1.13 | ✓ | no | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Fallout LE 0.82 (Spike 3) | no | no | ✓ | no | never waits |
 | Foo Fighters LE 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Foo Fighters Pro 1.04 | ✓ | ✓ | ✓ | shots | mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Godzilla Premium/LE 1.16 | ✓ | ✓ | ✓ | shots | HUD, buttons, magnet, scoop, mechanisms, shield, building, shaker, light shows, mini-wizards, battle slot, challenges, game mode places, starts on game modes completed |
@@ -211,11 +212,14 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Led Zeppelin Pro 1.22 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Metallica Remastered 1.03 | ✓ | ✓ | ✓ | all | challenges, game mode places, starts on game modes completed |
 | Metallica Remastered 1.04 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Pokemon LE 0.82 (Spike 3) | no | no | ✓ | no | never waits |
 | Rush LE 1.18 | ✓ | ✓ | ✓ | all | challenges, game mode places, starts on game modes completed |
 | Rush LE 1.19 | ✓ | ✓ | ✓ | shots | magnet, scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Rush Pro 1.19 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Star Wars 2025 LE 0.96 (Spike 3) | no | no | ✓ | no | never waits |
+| Star Wars 2025 Pro 0.84 (Spike 3) | no | no | ✓ | no | waits for multiballs only |
 | Star Wars ELG 1.10 | ✓ | ✓ | ✓ | shots | mechanisms, light shows, challenges, game mode places, starts on game modes completed |
-| Star Wars ELG 1.10 (Spike 3) | ✓ | ✓ | no | shots | mechanisms, light shows |
+| Star Wars ELG 1.10 (Spike 3) | ✓ | ✓ | ✓ | shots | mechanisms, light shows, game mode places, starts on game modes completed |
 | Star Wars LE 1.30 | ✓ | ✓ | ✓ | all | challenges, game mode places, starts on game modes completed |
 | Star Wars LE 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Star Wars Pro 1.31 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
@@ -238,6 +242,7 @@ Every build below has played modes in the emulator, and Godzilla Premium/LE 1.16
 | Uncanny X-Men Pro 0.98 | ✓ | ✓ | ✓ | shots | magnet, mechanisms, shaker, light shows, mini-wizards, game mode places, starts on game modes completed |
 | Venom LE 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
 | Venom Pro 1.07 | ✓ | ✓ | ✓ | shots | scoop, mechanisms, shaker, light shows, mini-wizards, challenges, game mode places, starts on game modes completed |
+| Walking Dead Remastered LE 0.92 (Spike 3) | no | no | ✓ | no | never waits |
 
 - **Countdown no:** the game's voice never says a number on its own.
 - **When time is up:** the voice of The Beatles, Deadpool, Elvira, John Wick, Jurassic Park Pin, Led Zeppelin, Star Wars (LE, Pro and ELG), TMNT and Uncanny X-Men has no line saying the time is up, so the game's own call cannot end a mode there; a sound of your own can. The Beatles and Deadpool play every piece of their music themselves, so a mode cannot have music of its own there.

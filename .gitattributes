@@ -4,6 +4,8 @@
 # Windows checkout would rewrite them to CRLF and corrupt them (this is
 # exactly what broke the GDRE Tools installer — see installer/install_gdre.sh).
 *.sh text eol=lf
+# the Spike 3 proofs' title files are sourced by bash and their mode files read on the rig (PAD-1288)
+tools/spike3_emu/proofs/** text eol=lf
 
 # Dockerfiles are consumed by `docker build` (macOS Spooky/JJP flows).
 # A CRLF after a `\` line-continuation in a multi-line RUN breaks the
@@ -22,3 +24,9 @@ tools/spike2_emu/modes/sdk/prebuilt/mode.so binary
 # The Docker image's own files (PAD-837) run in the container: scripts with
 # no .sh to match above, and a CR would break their #! lines.
 installer/docker/root/** text eol=lf
+
+# The pinned aarch64 kit list xgcc.sh reads under bash (PAD-1295): LF like the script
+*.pins text eol=lf
+# PAD-1289: the Spike 3 proof rig's title files are sourced by bash and its mode files read on the rig: LF
+tools/spike3_emu/proofs/**/*.env text eol=lf
+tools/spike3_emu/proofs/**/*.cfg text eol=lf

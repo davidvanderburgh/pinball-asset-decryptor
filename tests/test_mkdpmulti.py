@@ -124,11 +124,12 @@ def test_verify_refuses_a_renamed_file(inputs):
 
 
 def test_inject_rewrites_the_menu_and_keeps_the_builds(inputs):
-    out = _build(inputs)
+    out = _build(inputs, "--back-hold", "4")
     assert md.main(["inject", "--zip", out, "--titles", "A;B;C", "--timeout", "30"]) == 0
     with zipfile.ZipFile(out) as z:
         conf = z.read("9.1234/pad/images.conf").decode()
         assert "image=9.12341|B|" in conf and "timeout=30" in conf
+        assert "back_hold=4" in conf.splitlines()    # PAD-1309: kept through a menu-only inject
         assert z.read("9.1234/pad/b1/assets/a.png") == b"MOD" * 50
         assert z.read("9.1234/start").startswith(b"#!/bin/bash")
     assert md.main(["verify", "--zip", out]) == 0

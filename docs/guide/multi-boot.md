@@ -52,6 +52,10 @@ try the menu and each game on your PC first.
 - A countdown boots the last game you chose if nobody presses anything.
 - From five games on, the menu scrolls three at a time and shows a counter
   under the cards.
+- **Back to the menu without switching off:** during a game, hold **BACK** on
+  the coin door for 3 seconds. The machine restarts and the menu comes up, as
+  at power-up. A card built with an older version of the app gets this the
+  next time you **Apply to card** or rebuild it.
 
 ### Random cards
 
@@ -81,6 +85,7 @@ build.
 | **Same text size on every card** | Draws every title at one size, so a long name doesn't end up smaller than its neighbours. |
 | **Move / confirm sounds** | *auto* takes a click and a stinger from the primary image, *synth* makes tones, or pick a WAV. |
 | **Countdown** | Seconds before the countdown boots. 0 waits for START. |
+| **Hold BACK** | Seconds BACK (EXIT on some machines) must be held during a game to restart into the menu. 3 unless you change it; 0 turns it off. Not on Jersey Jack or The Big Lebowski. |
 | **End the menu with a SETTINGS card** | See [The SETTINGS card](#the-settings-card). |
 
 Every sound box has a **▶ Play** button so you can hear it on the spot. Each
@@ -207,6 +212,9 @@ stick…** turns them into one multi-boot install stick.
 - At power-up the flippers choose and START (or **Action**) boots. The
   volume buttons set the menu's volume. A maintenance reboot boots the same
   game again without the menu.
+- **Back to the menu without switching off:** plug a USB keyboard into the
+  computer in the backbox and press **Escape** during a game. The machine
+  restarts into the menu.
 - The **Onto:** row can install straight onto the game's SSD in a dock on
   this PC, with no stick. On an SSD that already has the install, **Write:**
   can replace only the boot menu or only one game, and keeps the settings
@@ -232,6 +240,8 @@ under the game's own name (`lab.fun` for Labyrinth).
   the file stays under FAT32's 4 GB limit. The stock and Sarah code together
   come to about 3.2 GB. The size strip tells you if it won't fit.
 - All the builds share one set of settings and scores.
+- **Back to the menu without switching off:** during a game, hold **EXIT** on
+  the coin door for 3 seconds. The machine restarts into the menu.
 - Installing any normal update afterwards removes the menu.
 
 | Game | Supported |
@@ -247,6 +257,7 @@ The tab takes the stock version plus more builds of the game, and **Build update
 1. **Install it.** Copy the zip onto a USB stick, then in the service menu pick **USB update** and install it.
 2. **Switch to it.** Service menu, **Version Select**, the new version, **YES**. The game restarts into the menu.
 3. **Every power-up**: the flippers choose, START boots, and the countdown boots the last build you chose.
+4. **Back to the menu without switching off:** Version Select in the service menu, as in step 2.
 
 - All the builds share one set of settings and scores, carried over from the version you switched from.
 - If anything goes wrong, the machine starts the stock version.
@@ -263,6 +274,9 @@ here, say). Halloween and Ultraman are one machine, so those two can share one m
 1. **Install it** the way every update of that game is installed, from a USB stick.
 2. **Every power-up**: the flippers choose, START boots, and the countdown boots the
    build you chose last.
+3. **Back to the menu without switching off:** during a game, hold **BACK** on the coin
+   door (**EXIT** on Rick and Morty and Alice Cooper) for 3 seconds. The machine restarts
+   into the menu.
 
 - The first row is the stock build: it travels whole, and the machine falls back to it if
   anything goes wrong. Every other build carries only the files it changes.
@@ -291,6 +305,8 @@ as the first one (64 GB) and can write it to an SD card.
 1. **Flash it** onto a 64 GB (or bigger) SD card and put it in the machine.
 2. **Every power-up**: NEXT and PREVIOUS on the coin door choose, SELECT boots, and the
    countdown boots the image you chose last.
+3. **Back to the menu without switching off:** during a game, hold **BACK** on the coin
+   door for 3 seconds. The machine restarts into the menu.
 
 - Building needs your own board's Spike 3 key, the one Extract and Emulate use.
 - The first row's card is the base: the new card keeps its boot and system partitions

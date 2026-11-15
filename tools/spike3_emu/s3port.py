@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """s3port.py - draft a Spike 3 (64-bit ARM) PORT from a proven Spike 2 (32-bit ARM) port of the
-same title (PAD-1271).
+same title (PAD-1271), or from another Spike 3 title's proven port (PAD-1287).
 
-    s3port.py <Spike 2 game ELF> <Spike 2 port> <Spike 3 game ELF> -o <draft port> [--report]
+    s3port.py <Spike 2 game ELF> <Spike 2 port> <Spike 3 game ELF> -o <draft port>
+    s3port.py <Spike 3 game ELF> <its Spike 3 port> <Spike 3 game ELF> -o <draft port> --game G --version V
+
+From a Spike 3 reference (a title with no Spike 2 build of its own: draft_spike3, below) the functions are paired as
+here and then LINED UP instruction by instruction, every site, global, offset and bus id read at the lined-up
+instruction; the switch lines come from the target's own device table and the reference game's own content is left
+out. Walking Dead Remastered LE 0.92 from Star Wars ELG 1.10: docs/plans/spike3_modes.md, "PAD-1287".
 
 A port tells the mode runtime where a game's functions and globals are in one build (MODE_SDK.md,
 "Ports"). port_tool.py drafts one from another build of the SAME architecture by instruction
@@ -529,7 +535,13 @@ def device_records(t):
         o = t.off(n) if n else None
         if o is None:
             return None
-        name = t.b[o:t.b.find(b"\0", o, o + 80)].decode("latin1")     # short names too ("GI", "TILT")
+        raw = t.b[o:t.b.find(b"\0", o, o + 80)]                       # short names too ("GI", "TILT")
+        try:
+            # PAD-1289: the names are UTF-8. Pokemon LE's "POKÉ BALL SPOT" read as Latin-1 has an unprintable \x89,
+            # which ended the walk there and lost the 16 QR scanner switches before it: every switch id 16 low
+            name = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            name = raw.decode("latin1")
         if not name or len(name) > 40 or not name.isprintable():
             return None
         o = t.off(a + 0x20)
@@ -1594,6 +1606,61 @@ def flag_set(t, game_flags):
     return hits[0] if len(hits) == 1 else (None, None)
 
 
+def flag_names(e):
+    """PAD-1286: the program's game flag names by id (`FG_INVALID` first: the pointer table that names it, 8 bytes an
+    entry on Spike 3, 4 on Spike 2), or []."""
+    i = e.b.find(b"\0FG_INVALID\0")
+    va = _va_of(e, i + 1) if i >= 0 else None
+    if va is None:
+        return []
+    step = 8 if e.a64 else 4
+    best = []
+    for at in [a for a, v in e.ptr.items() if v == va]:
+        names = []
+        while at + step * len(names) in e.ptr:
+            nm = e.cstr(e.ptr[at + step * len(names)])
+            if not nm or not nm.startswith("FG_"):
+                break
+            names.append(nm)
+        if len(names) > len(best):
+            best = names
+    return best if len(best) > 8 else []
+
+
+#: PAD-1286: the game's books of its modes the Spike 2 port names by flag (mode_framework.plain_books / done_books): a
+#: mode in one's place sets its PLAYED / COMPLETED flags, a mode waiting for some completed watches a COMPLETED flag
+BOOK_FLAG = re.compile(r"(place_flag_(?:played|completed)_(\d+)|done_flag_(\d+))$")
+
+
+def mode_books(ref, rval, rtext, t, starts):
+    """PAD-1286: the Spike 2 port's flag books on Spike 3, each flag by its NAME in the two programs' flag tables
+    (Star Wars ELG's are the same ids on both; another title's need not be): the place_flag_* lines of the block starts
+    carried, the done_flag_<n> lines with their done_name_<n>. -> ({name: flag id}, [text lines], [why])"""
+    rn, tn = flag_names(ref), flag_names(t)
+    if not rn or not tn:
+        return {}, [], ["no FG_ flag name table in the %s program" % ("Spike 2" if not rn else "Spike 3")]
+    tid = {n: i for i, n in enumerate(tn)}
+    vals, text, why = {}, [], []
+    for k, v in sorted(rval.items()):
+        m = BOOK_FLAG.match(k)
+        if not m:
+            continue
+        if m.group(2) is not None and int(m.group(2)) not in starts:
+            why.append("%s: the game's mode %s has no start on Spike 3" % (k, m.group(2)))
+            continue
+        if m.group(3) is not None and not rtext.get("done_name_%s" % m.group(3), "").strip():
+            continue
+        fl = int(v, 0)
+        nm = rn[fl] if fl < len(rn) else None
+        if nm not in tid:
+            why.append("%s: flag %d (%s) is not one of the Spike 3 program's" % (k, fl, nm))
+            continue
+        vals[k] = tid[nm]
+        if m.group(3) is not None:
+            text.append("text %-20s %s" % ("done_name_" + m.group(3), rtext["done_name_" + m.group(3)].strip()))
+    return vals, text, why
+
+
 def mode_starts(ref, rlines, t, fset):
     """the Spike 2 port's block_start_<id> lines on Spike 3, each by the game flag its start sets: the Spike 2 start's
     `mov r0, #flag` that is one of the port's mode_flag_<n> values, and the one Spike 3 function that opens with a
@@ -1632,7 +1699,7 @@ def mode_starts(ref, rlines, t, fset):
 def play_engine(ref, rlines, t, later_at, placed):
     """PAD-1285: what a mode's multiball, its held coils and its blocks need on a Spike 3 program. {'site', 'data',
     'value', 'text', 'carry' (matcher placements now carried), 'why'}"""
-    out = {"site": {}, "data": {}, "value": {}, "text": [], "carry": [], "flag_of": {}, "why": []}
+    out = {"site": {}, "data": {}, "value": {}, "text": [], "carry": [], "flag_of": {}, "why": [], "books": {}}
     rdata = {t1[1]: int(t1[2], 16) for k, t1, s in rlines if k == "data" and len(t1) >= 3}
     rval = {t1[1]: t1[2] for k, t1, s in rlines if k == "value" and len(t1) >= 3}
     rtext = {t1[1]: s.split(None, 2)[2] if len(s.split(None, 2)) > 2 else "" for k, t1, s in rlines if k == "text"}
@@ -1714,9 +1781,133 @@ def play_engine(ref, rlines, t, later_at, placed):
             for k, v in rval.items():
                 if re.match(r"mode_flag_\d+$", k) and int(v, 0) in {fl for va, fl in starts.values()}:
                     out["value"][k] = int(v, 0)
+            out["books"], btext, bwhy = mode_books(ref, rval, rtext, t, starts)
+            out["text"] += btext
+            out["why"] += bwhy
         else:
             out["why"].append("no one flag set loads game_flags 0x%x" % gf)
     return out
+
+
+
+# ---- PAD-1322: the switch edges --------------------------------------------------------------------------------------
+#: the port lines the runtime's 64-bit edge source reads (pad_mode_runtime.c, "the switch edges on Spike 3")
+EDGE_VALUES = ("switch_record_reg", "switch_id_at", "switch_level_at", "switch_desc_via", "switch_flags_at",
+               "switch_polarity_at")
+#: Spike 2's switch_edge lines: a per-switch call and the 32-bit tables it reads - none of them is Spike 3's
+_EDGE_NAMES = ("switch_edge", "switch_drain", "switch_records", "switch_count", "switch_drain_size",
+               "switch_record_size", "switch_level_via", "switch_level_before") + EDGE_VALUES
+_EDGE_LINE = re.compile(r"^(#.*?)?\b(site|data|value)\s+(%s)\b" % "|".join(_EDGE_NAMES))
+_EDGE_HOW = re.compile(r"^#\s+(%s):" % "|".join(_EDGE_NAMES))
+
+
+def switch_edge_point(t):
+    """The 64-bit switch drain's per-edge point (PAD-1322). Spike 3's drain makes no per-switch call: it walks the
+    list of switch records the node boards' reader queued and, for each, writes the edge's level into the record
+    (`strb wL, [xR, #level]`), skips its id table refresh for switch 0 (`cbz wId, X`), and at X loads the
+    descriptor (`ldr xD, [xR, #desc]`) and its two u16 flag words, the handler bits tested at bit 11 / 10 and the
+    other at bit 1 / 2; the id is the `ldrh wId, [xR, #id]` before. X is the point every edge passes after its level
+    is written and before the handler bits are read. Also the mode mask the drain tests, through its GOT slot
+    (`ldrh wA, [xM]`, then `tst wFlags, wA`). -> dict, or None when the shape is not there exactly once."""
+    W, base, hits = t.words, t.tva, []
+    for i in range(24, len(W) - 1):
+        w = W[i]
+        if (w & 0xFFC00000) != 0x39000000:                          # strb wt, [xn, #imm]
+            continue
+        c = W[i + 1]
+        if (c & 0xFF000000) != 0x34000000:                          # cbz w
+            continue
+        rn, rid = (w >> 5) & 31, c & 31
+        x = base + 4 * (i + 1) + 4 * sext((c >> 5) & 0x7FFFF, 19)
+        j = (x - base) // 4
+        if not (i < j < len(W) - 20):
+            continue
+        ld = W[j]
+        if (ld & 0xFFC00000) != 0xF9400000 or ((ld >> 5) & 31) != rn:   # ldr xd, [xR, #imm*8]
+            continue
+        rd = ld & 31
+        hs = [(W[j + k] & 31, ((W[j + k] >> 10) & 0xFFF) * 2) for k in (1, 2)
+              if (W[j + k] & 0xFFC00000) == 0x79400000 and ((W[j + k] >> 5) & 31) == rd]
+        if len(hs) != 2:
+            continue
+        flags = pol = freg = None
+        for k in range(3, 16):
+            b = W[j + k]
+            if (b & 0x7E000000) != 0x36000000:                      # tbz / tbnz
+                continue
+            bit = (((b >> 31) & 1) << 5) | ((b >> 19) & 31)
+            for r, off in hs:
+                if (b & 31) == r and bit in (10, 11):
+                    flags, freg = off, r
+                elif (b & 31) == r and bit in (1, 2):
+                    pol = off
+        idat = next((((W[i - k] >> 10) & 0xFFF) * 2 for k in range(1, 24)
+                     if (W[i - k] & 0xFFC00000) == 0x79400000 and ((W[i - k] >> 5) & 31) == rn
+                     and (W[i - k] & 31) == rid), None)
+        if flags is None or pol is None or idat is None or a64_pc_bound(ld):
+            continue
+        # the mode mask: a GOT load into xM earlier in the drain, `ldrh wA, [xM]` then `tst wFlags, wA`
+        got, mask = {}, None
+        for k in range(max(0, i - 64), j + 24):
+            a, v = base + 4 * k, W[k]
+            p = _adrp(a, v)
+            if p:
+                got[p[0]] = ("page", p[1])
+            elif (v & 0xFFC00000) == 0xF9400000 and got.get((v >> 5) & 31, ("",))[0] == "page":
+                slot = got[(v >> 5) & 31][1] + ((v >> 10) & 0xFFF) * 8
+                if slot in t.ptr:
+                    got[v & 31] = ("ptr", t.ptr[slot])
+            elif k > j and (v & 0xFFFFFC00) == 0x79400000 and got.get((v >> 5) & 31, ("",))[0] == "ptr":
+                nxt = W[k + 1:k + 4]
+                if any((n & 0xFF20001F) == 0x6A00001F and ((n >> 5) & 31) in (freg, v & 31)
+                       and ((n >> 16) & 31) in (freg, v & 31) for n in nxt):
+                    mask = got[(v >> 5) & 31][1]
+        hits.append({"site": x, "reg": rn, "id_at": idat, "level_at": (w >> 10) & 0xFFF, "desc_via": ((ld >> 10) & 0xFFF) * 8,
+                     "flags_at": flags, "polarity_at": pol, "mode_mask": mask})
+    return hits[0] if len(hits) == 1 else None
+
+
+def a64_pc_bound(w):
+    """adrp / adr / a literal load / a branch: an instruction the 64-bit hook cannot move as it is"""
+    return ((w & 0x1F000000) == 0x10000000 or (w & 0x3B000000) == 0x18000000 or (w & 0x7C000000) == 0x14000000
+            or (w & 0xFE000000) == 0x54000000 or (w & 0x7E000000) in (0x34000000, 0x36000000))
+
+
+def edge_lines(t, body, placed, notes):
+    """PAD-1322: the drain's per-edge point and the record layout, read off this program's own code, in place of
+    whatever a draft carried over for switch_edge (Spike 2's per-switch call and its 32-bit tables)."""
+    e = switch_edge_point(t)
+    keep, cut = [], None
+    for l in body:
+        if _EDGE_LINE.match(l) or _EDGE_HOW.match(l):
+            cut = len(keep) if cut is None else cut
+            continue
+        keep.append(l)
+    for n in _EDGE_NAMES:
+        placed.pop(n, None)
+        placed.pop("data:" + n, None)
+    at = next((k for k, l in enumerate(keep) if l.startswith("# ---- globals")), cut if cut is not None else len(keep))
+    while at > 0 and keep[at - 1] == "":
+        at -= 1
+    if not e:
+        block = ["# site %-16s NOT PLACED: the 64-bit drain's per-edge point is not there once (PAD-1322)"
+                 % "switch_edge"]
+    else:
+        block = ["#   switch_edge: the 64-bit drain's per-edge point - every switch edge passes it after its level is "
+                 "written, before its handler bits are read (PAD-1322)",
+                 "site %-16s 0x%08x 0x%08x 0x%08x" % ("switch_edge", e["site"], t.u32(e["site"]), t.u32(e["site"] + 4))]
+        block += ["value %-25s %s    # read off the drain's own code (PAD-1322)"
+                  % (n, e["reg"] if n == "switch_record_reg" else "0x%x" % e[n[len("switch_"):]]) for n in EDGE_VALUES]
+        placed["switch_edge"] = e["site"]
+        mm = placed.get("data:mode_mask")
+        if e["mode_mask"] and mm is None:
+            block.append("data %-22s 0x%08x   # the drain's own (PAD-1322)" % ("mode_mask", e["mode_mask"]))
+            placed["data:mode_mask"] = e["mode_mask"]
+        elif e["mode_mask"] and mm != e["mode_mask"]:
+            notes.append("data mode_mask: 0x%x written, the switch drain tests 0x%x" % (mm, e["mode_mask"]))
+    keep[at:at] = block
+    body[:] = keep
+    return e
 
 
 def draft(ref, rport, tgt, game=None, version=None):
@@ -1871,19 +2062,8 @@ def draft(ref, rport, tgt, game=None, version=None):
     if not {"clip_play", "video_player", "video_surface"} <= rsites:
         for n in ("display_draw", "player_advance"):
             idle[n] = "the clip_play clip path it belongs to is not this title's (its clips are the surface's)"
-    # PAD-1285: the 64-bit switch drain hands each edge to switch_hit / switch_hit2 itself (by the switch's handler
-    # bits): no per-switch edge call (Spike 2's switch_edge) to hook. The shots come through those two sites; what
-    # needs every edge (the attract flipper sounds, the game mode shot sounds, co-op) rides Spike 2's delivery.
-    hits = {placed[n] for n in placed if n.startswith("switch_hit")}
-    drain = later_at.get("switch_drain")
-    if tgt.a64 and drain and hits and any(_bl(a, w) in hits for a, w in _raw(tgt, drain, 160)):
-        idle["switch_drain"] = ("the 64-bit drain calls switch_hit / switch_hit2 itself, by the switch's handler bits - "
-                                "the shots come through those sites (PAD-1285)")
-        at = next((k for k, l in enumerate(body) if l.startswith("# site %-16s NOT PLACED" % "switch_edge")), None)
-        if at is not None:
-            body[at] = ("# site %-16s NOT ON SPIKE 3: its drain has no per-switch edge call - it calls switch_hit / "
-                        "switch_hit2 itself; every-edge features (attract flipper sounds, game mode shot sounds, co-op) "
-                        "ride Spike 2's delivery (PAD-1285)" % "switch_edge")
+    # PAD-1285 / PAD-1322: the 64-bit switch drain makes no per-switch call (Spike 2's switch_edge); its per-edge point,
+    # read off this program's own code, is written by edge_lines (below)
     if (tgt.a64 and "ball_end" not in placed and "hook_dispatch" in placed
             and any(k == "event" and t[1] == "ball_end" for k, t, s in lines)):
         at = next((k for k, l in enumerate(body) if l.startswith("# site %-16s NOT PLACED" % "ball_end")), None)
@@ -1892,9 +2072,7 @@ def draft(ref, rport, tgt, game=None, version=None):
                         "hook_dispatch) - the Spike 2 site is that event's handler (PAD-1285)" % "ball_end")
     for k, l in enumerate(body):
         m = re.match(r"# not carried yet \(its feature is 32-bit\): (site (\S+) .*)$", l)
-        if m and m.group(2) == "switch_drain" and tgt.a64:
-            body[k] = "# not carried - %s: %s" % (idle[m.group(2)], m.group(1))
-        elif m and m.group(2) in idle:
+        if m and m.group(2) in idle:
             body[k] = "# not carried - no feature uses it on the Spike 2 port either (%s): %s" % (idle[m.group(2)],
                                                                                               m.group(1))
     for name, why3 in (("string_new", "NOT NEEDED: the 64-bit program's strings are the C++11 ABI and it imports no "
@@ -1959,7 +2137,7 @@ def draft(ref, rport, tgt, game=None, version=None):
                                                                                             scn["clips"]))}
     for k, t, s in lines:
         if k == "value" and t[1] not in sound_vals and not t[1].startswith("countdown_") and t[1] not in lit_vals \
-                and t[1] not in scn_vals and t[1] not in pe["value"] \
+                and t[1] not in scn_vals and t[1] not in pe["value"] and t[1] not in pe.get("books", {}) \
                 and not (lit["show"] and re.match(r"show_secs_\d+$", t[1])):
             body.append(s if t[1] in VALUES_PROVEN else "# not carried (64-bit layout, measure it): " + s.strip())
     for name, v in sound_vals.items():
@@ -1974,6 +2152,8 @@ def draft(ref, rport, tgt, game=None, version=None):
     for name, v in pe["value"].items():
         body.append("value %-25s %s    # read off the program's own code (PAD-1285)" % (
             name, ("0x%x" % v) if name == "multiball_arg3" else v))
+    for name, v in pe.get("books", {}).items():
+        body.append("value %-25s %d    # the game's flag of the same name on Spike 3 (PAD-1286)" % (name, v))
     body += ["# PAD-1285: %s" % w for w in pe["why"]]
     if "ball_end" not in placed and any(t[1] == "ball_end" for t, s in events) and "hook_dispatch" in placed:
         eid = next(t[2] for t, s in events if t[1] == "ball_end")
@@ -2014,7 +2194,8 @@ def draft(ref, rport, tgt, game=None, version=None):
                  "# the program names ----"]
         body += scn["scene"]
     if pe["text"]:
-        body += ["", "# ---- PAD-1285: a held coil's names and board address, the game's modes a mode keeps from starting ----"]
+        body += ["", "# ---- PAD-1285: a held coil's names and board address, the game's modes a mode keeps from starting;",
+                 "# PAD-1286: the game's modes whose books a mode of ours may wait on (done_name) ----"]
         body += pe["text"]
     pe_text = {l.split()[1] for l in pe["text"]}
     tx = [s for k, t, s in lines if k == "text" and len(t) > 1 and t[1].startswith("example_")]
@@ -2027,10 +2208,546 @@ def draft(ref, rport, tgt, game=None, version=None):
                                                           not (lit["show"] and re.match(r"show_(name|kind)_\d+$", t[1]))))
     if rest:
         body += ["", "# not carried (to measure on Spike 3): " + ", ".join("%d %s" % (n, k) for k, n in sorted(rest.items()))]
+    edge_notes = []
+    if tgt.a64:
+        edge_lines(tgt, body, placed, edge_notes)
+        body += ["# " + n for n in edge_notes]
+        if "switch_edge" in placed:
+            missing = [n for n in missing if n not in _EDGE_NAMES]
+            later = [n for n in later if n not in _EDGE_NAMES]
     core_missing = [grp for grp in CORE if not any(n in placed for n in grp) and not
                     (grp == ("ball_end", "hook_dispatch") and "ball_end_event" in placed)]
     core_missing += [grp for grp in CORE_DATA if not any("data:" + n in placed for n in grp)]
     return "\n".join(head + body) + "\n", M, core_missing, missing + later
+
+
+# ---- PAD-1287: a Spike 3 port from another Spike 3 title's proven port ---------------------------------------
+# Every Spike 3 program is the same 64-bit framework (sound engine, lamp layer, processes, event bus, switch drain,
+# scores, the Insider agent) built with the same compiler around one game's rules, so a framework function's
+# instructions on one title are the same instructions on another, give or take its addresses and offsets: the
+# reference's port carries over by LINING UP the paired functions' instructions, not just by pairing functions. What
+# a port names of the GAME (its shows, lamps tied to shots, callouts, scenes, held coils, the game's modes) is the
+# reference's own and is never carried; the switch lines are made from the target's own device table.
+
+#: a reference site that is its game's own content, never another title's
+GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
+#: reference values that are its game's own (its shows, callouts, held coils, mode flags, and its mode books: a
+#: place_flag / done_flag is the flag one of the REFERENCE game's modes sets - PAD-1288: on Fallout the same numbers
+#: line up in the framework's flag code but name none of its modes; PAD-1289: Star Wars ELG's 66 / 68 turned up at
+#: lined-up instructions on Pokemon LE, but they are the flags of ELG's own modes)
+GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
+                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+|done_audit_\d+)$")
+#: sites only ever armed together: one placed without the other is written as a comment (PAD-1288: Fallout's
+#: coil_give lines up, its coil_take has no counterpart, and the runtime arms held coils on both or neither)
+SITE_PAIRS = (("coil_take", "coil_give"),)
+GAME_DATA = re.compile(r"right_gate_obj$")
+#: the screen and clip features name the title's own hud / video bank scenes (per game): their sites, globals and
+#: values are placed and written as comments until a title's scenes are named
+SCREEN_CLIP_SITES = SCREEN_SITES + CLIP_SITES + ("dynamic_cast", "resource_get", "surface_set_video",
+                                                  "surface_duration", "surface_position", "string_new", "surface_seek")
+SCREEN_CLIP_DATA = ("resource_manager", "typeinfo_resource", "typeinfo_scene_player")
+SCREEN_CLIP_VALUES = ("scene_player_scene", "node_visible_vfn", "surface_playing")
+#: a placed function must be at least this alike its reference (the share of instructions that line up)
+SIM_MIN = 0.75
+
+
+def _loose(w):
+    """one 64-bit instruction with its addresses and immediates masked (two titles' builds of one source line up on
+    it): pc-relative targets, load/store offsets, add/sub and move immediates, logical masks"""
+    if (w & 0x7C000000) == 0x14000000:                   # b, bl
+        return w & 0xFC000000
+    if (w & 0x1F000000) == 0x10000000:                   # adr, adrp
+        return w & 0x9F00001F
+    if (w & 0xFF000010) == 0x54000000 or (w & 0x7E000000) == 0x34000000 or (w & 0x3B000000) == 0x18000000:
+        return w & 0xFF00001F                            # b.cond, cbz/cbnz, ldr literal
+    if (w & 0x7E000000) == 0x36000000:                   # tbz/tbnz: the bit is kept
+        return w & 0xFFF8001F
+    if (w & 0x3B000000) == 0x39000000:                   # ldr/str, unsigned offset
+        return w & ~(0xFFF << 10)
+    if (w & 0x3B200C00) == 0x38000000:                   # ldur/stur
+        return w & ~(0x1FF << 12)
+    if (w & 0x3A000000) == 0x28000000:                   # ldp/stp
+        return w & ~(0x7F << 15)
+    if (w & 0x1F000000) == 0x11000000:                   # add/sub (and cmp/cmn) immediate
+        return w & ~(0x1FFF << 10)
+    if (w & 0x1F800000) in (0x12800000, 0x12000000):    # movz/movn/movk (hw kept), logical immediate
+        return w & ~(0xFFFF << 5) if (w & 0x1F800000) == 0x12800000 else w & ~(0x1FFF << 10)
+    return w
+
+
+def _bitmask(n, immr, imms, size):
+    ln = ((n << 6) | (~imms & 0x3F)).bit_length() - 1
+    if ln < 1:
+        return None
+    es = 1 << ln
+    s, r = imms & (es - 1), immr & (es - 1)
+    if s == es - 1:
+        return None
+    el = (1 << (s + 1)) - 1
+    el = ((el >> r) | (el << (es - r))) & ((1 << es) - 1)
+    return sum(el << (k * es) for k in range(size // es))
+
+
+def _imm(w):
+    """the immediate _loose masks, decoded (a load/store's byte offset, an add's or a move's value, a logical mask),
+    or None"""
+    if (w & 0x3B000000) == 0x39000000:
+        simd = (w >> 26) & 1
+        return ((w >> 10) & 0xFFF) << (4 if simd and (w >> 23) & 1 else w >> 30)
+    if (w & 0x3B200C00) == 0x38000000:
+        return sext((w >> 12) & 0x1FF, 9)
+    if (w & 0x3A000000) == 0x28000000:
+        return sext((w >> 15) & 0x7F, 7) << ((2 + (w >> 31)) if not (w >> 26) & 1 else 2 + ((w >> 30) & 3))
+    if (w & 0x1F000000) == 0x11000000:
+        return ((w >> 10) & 0xFFF) << (12 if w & 0x400000 else 0)
+    if (w & 0x1F800000) == 0x12800000 and (w >> 29) & 3 in (2, 3):     # movz, movk
+        return ((w >> 5) & 0xFFFF) << (16 * ((w >> 21) & 3))
+    if (w & 0x1F800000) == 0x12000000:
+        return _bitmask((w >> 22) & 1, (w >> 16) & 0x3F, (w >> 10) & 0x3F, 64 if w >> 31 else 32)
+    return None
+
+
+class Aligner:
+    """the paired functions' instructions, lined up (difflib on the loose shapes): word index on the reference ->
+    word index on the target, and how alike the two are"""
+
+    def __init__(self, ref, tgt):
+        self.r, self.t = ref, tgt
+        self.lr, self.lt = [_loose(x) for x in ref.words], [_loose(x) for x in tgt.words]
+        self.cache = {}
+
+    def _span(self, e, f):
+        i0 = (f - e.tva) // 4
+        return i0, i0 + e.F[f]["size"]
+
+    def pairs(self, a, b):
+        """((ref index, target index) of every lined-up instruction, the share lined up)"""
+        k = (a, b)
+        if k not in self.cache:
+            import difflib
+            ra, rb = self._span(self.r, a)
+            ta, tb = self._span(self.t, b)
+            sm = difflib.SequenceMatcher(None, self.lr[ra:rb], self.lt[ta:tb], autojunk=False)
+            out = [(ra + x + k2, ta + y + k2) for x, y, n in sm.get_matching_blocks() for k2 in range(n)]
+            self.cache[k] = (out, 2.0 * len(out) / max(1, (rb - ra) + (tb - ta)))
+        return self.cache[k]
+
+    def sim(self, a, b):
+        return self.pairs(a, b)[1]
+
+    def at(self, a, b, va):
+        """the target address of the reference instruction at va inside the pair (a, b), or None"""
+        i = (va - self.r.tva) // 4
+        return next((self.t.tva + 4 * j for x, j in self.pairs(a, b)[0] if x == i), None)
+
+
+def shape_seed(M, A, min_size=6):
+    """pair the functions whose whole loose shape is the same on both titles and found once on each (framework code
+    built from one source: the strongest anchor there is). The number taken."""
+    def index(e, L):
+        h = defaultdict(list)
+        for f, d in e.F.items():
+            if d["size"] >= min_size:
+                i0 = (f - e.tva) // 4
+                h[tuple(L[i0:i0 + d["size"]])].append(f)
+        return h
+    hr, ht = index(M.r, A.lr), index(M.t, A.lt)
+    rev = set(M.m.values())
+    n = 0
+    for k, fr in hr.items():
+        ft = ht.get(k)
+        if len(fr) == 1 and ft and len(ft) == 1 and fr[0] not in M.m and ft[0] not in rev:
+            M.m[fr[0]] = ft[0]
+            M.how[fr[0]] = "the same instructions, found once on each"
+            rev.add(ft[0])
+            n += 1
+    return n
+
+
+def align_grow(M, A, rounds=20, min_sim=0.6):
+    """grow the pairs through the calls that line up: the n-th call of a paired function is to the n-th callee of its
+    pair. A callee is taken when every lined-up call to it agrees and the two are alike."""
+    total = 0
+    for _ in range(rounds):
+        rev = {b: a for a, b in M.m.items()}
+        votes = defaultdict(Counter)
+        for a, b in list(M.m.items()):
+            if a not in M.R or b not in M.T:
+                continue
+            for i, j in A.pairs(a, b)[0]:
+                ca, cb = M.r.calls.get(i), M.t.calls.get(j)
+                if ca is None or cb is None or ca in M.r.plt or cb in M.t.plt:
+                    continue
+                if ca in M.m or cb in rev or ca not in M.R or cb not in M.T:
+                    continue
+                votes[ca][cb] += 1
+        claim = defaultdict(list)
+        for ca, c in votes.items():
+            if len(c) == 1:
+                cb, n = next(iter(c.items()))
+                claim[cb].append((n, ca))
+        new = 0
+        for cb, lst in claim.items():
+            if len(lst) != 1:
+                continue
+            n, ca = lst[0]
+            if A.sim(ca, cb) >= min_sim:
+                M.m[ca] = cb
+                M.how[ca] = "the call that lines up in a paired function (%d place%s)" % (n, "" if n == 1 else "s")
+                new += 1
+        total += new
+        M.grow()
+        if not new:
+            break
+    return total
+
+
+def _place(ref, tgt, M, A, va):
+    """(target address, how, alike) of the reference address va: a library call by its imported name, a function by
+    its pair, a place inside one by the instruction it lines up with; (None, why, 0) when it cannot be"""
+    if va in ref.plt:
+        b = next((x for x, n in tgt.plt.items() if n == ref.plt[va]), None)
+        return (b, "the PLT stub of %s" % ref.plt[va], 1.0) if b else (None, "the program imports no %s" % ref.plt[va], 0)
+    f = func_of(ref, va)
+    if f not in M.m:
+        return None, "no counterpart found", 0
+    b = M.m[f]
+    s = A.sim(f, b)
+    if s < SIM_MIN:
+        return None, "its pair 0x%x is not alike (%.2f of the instructions line up)" % (b, s), s
+    if f == va:
+        return b, M.how.get(f, "matched"), s
+    x = A.at(f, b, va)
+    if x is None:
+        return None, "0x%x + 0x%x lines up with nothing in its pair 0x%x" % (f, va - f, b), s
+    return x, "0x%x + 0x%x lined up in its pair 0x%x" % (f, va - f, b), s
+
+
+def _data_votes(ref, tgt, M, A, addr):
+    """Counter(target global) of every lined-up instruction that makes the reference global addr"""
+    if not hasattr(ref, "made"):
+        ref.made = defaultdict(set)                     # an address -> the functions whose instructions make it
+        for i, vs in ref.refs.items():
+            for v in vs:
+                ref.made[v].add(func_of(ref, ref.tva + 4 * i))
+    c = Counter()
+    for f in ref.made.get(addr, ()):
+        if f not in M.m or f not in M.R or M.m[f] not in M.T:
+            continue
+        b = M.m[f]
+        if A.sim(f, b) < SIM_MIN:
+            continue
+        for i, j in A.pairs(f, b)[0]:
+            if addr in ref.refs.get(i, ()):
+                for v in tgt.refs.get(j, ()):
+                    if tgt.is_data(v) or tgt.in_sec(v, ".rodata"):
+                        c[v] += 1
+    return c
+
+
+def _imm_votes(ref, tgt, A, pairs, v):
+    """Counter(target immediate) of the lined-up instructions in `pairs` whose reference immediate is v"""
+    c = Counter()
+    for a, b in pairs:
+        for i, j in A.pairs(a, b)[0]:
+            x = _imm(ref.words[i])
+            if x == v:
+                c[_imm(tgt.words[j])] += 1
+    return c
+
+
+def _event_votes(ref, tgt, M, A, ids, dispatch):
+    """{reference bus id: Counter(target id)}: the constant moved into w0 just before a call of the bus's dispatch, in
+    every paired function alike enough, read at the lined-up instruction on the target. (Constants passed to other
+    calls are not bus ids: Walking Dead Remastered 0.92's adjustment and sound ids are Star Wars ELG's less one, its
+    bus ids the same; Star Wars 2025 Pro 0.84's game over is 0x46 where the others' is 0x47.)"""
+    out = {v: Counter() for v in ids}
+    posts = {dispatch}
+    for a, b in M.m.items():
+        if a not in M.R or b not in M.T or A.sim(a, b) < 0.85:
+            continue
+        for i, j in A.pairs(a, b)[0]:
+            w = ref.words[i]
+            if (w & 0xFFE0001F) != 0x52800000:                # movz w0, #imm16 (hw 0)
+                continue
+            v = (w >> 5) & 0xFFFF
+            call = next((ref.calls[k] for k in range(i + 1, i + 4) if k in ref.calls), None)
+            if v not in out or call not in posts:
+                continue
+            y = tgt.words[j]
+            if (y & 0xFFE0001F) == 0x52800000 and any(tgt.calls.get(k) == M.m.get(dispatch) for k in range(j + 1, j + 4)):
+                out[v][(y >> 5) & 0xFFFF] += 1
+    return out
+
+
+def read_switch_ids(path):
+    """{device name (upper case): switch id} from a rig census (proofs/s3census.sh, PAD-1290): one `<id> <NAME>` line
+    per switch a press reached the modes with; `#` lines are notes."""
+    out = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                sid, name = line.split(None, 1)
+                out[" ".join(name.upper().split())] = int(sid, 0)
+    return out
+
+
+def spike3_switches(tgt, ids=None, unseen=None):
+    """[(switch id, shot mask, name)] of the target's playfield switches that are shots, from its own device table:
+    the switches the Spike 2 rule (portswitch.NOT_SHOTS) keeps, none of the service buttons' I/O group, one shot bit
+    each from bit 0 (up to 64). Star Wars ELG 1.10: the 30 its proven port names, every one.
+
+    A switch's id is its rank among the table's switches - true on ELG and Walking Dead Remastered, NOT on every title:
+    Star Wars 2025 LE 0.96 numbers its RIGHT TARGET last (87) and every switch after it one lower (PAD-1290, measured
+    on the rig; nothing in the table says so), Star Wars 2025 Pro 0.84 its Right target (83, PAD-1291). *ids* (read_switch_ids, a rig census) gives the measured ids instead:
+    a switch it does not name never reached the modes on the rig and is left out (its name appended to *unseen*)."""
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from pinball_decryptor.plugins.stern import portswitch
+    recs = [r for r in device_records(tgt) if r[3] == 1]
+    svc = {g for name, g, idx, cls in recs if re.match(r"SERVICE\b", name.upper())}
+    shots = []
+    for sid, (name, g, idx, cls) in enumerate(recs, 1):     # a switch's id: its rank among the table's switches
+        key = " ".join(name.upper().split())
+        if g in svc or portswitch.NOT_SHOTS.search(key):
+            continue
+        if ids is not None:
+            if key not in ids:
+                if unseen is not None:
+                    unseen.append(portswitch.nice(name))
+                continue
+            sid = ids[key]
+        shots.append((sid, name))
+    shots = shots[:portswitch.MAX_SWITCH_SHOTS]
+    names = Counter(portswitch.nice(n) for s, n in shots)
+    out = []
+    for k, (sid, name) in enumerate(shots):
+        nm = portswitch.nice(name)
+        out.append((sid, 1 << k, ("%s (%d)" % (nm, sid)) if names[nm] > 1 else nm))
+    return out
+
+
+def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
+    """A Spike 3 port of `tgt` from `rport`, the proven port of the Spike 3 program `ref` (another title). Returns
+    (text, matcher, core groups missing, sites not written)."""
+    scan(ref)
+    scan(tgt)
+    M = Matcher(ref, tgt)
+    M.seed()
+    A = Aligner(ref, tgt)
+    shape_seed(M, A)
+    seeded = len(M.m)
+    M.grow()
+    grown = align_grow(M, A)
+    lines = read_port(rport)
+    rg = next((t[1] for k, t, s in lines if k == "game"), "?")
+    rv = next((t[1] for k, t, s in lines if k == "version"), "?")
+    alike = sorted(A.sim(a, b) for a, b in M.m.items() if a in M.R and b in M.T)
+    head = ["# %s %s - Spike 3 (64-bit ARM): drafted by s3port.py (PAD-1287) from the Spike 3 port %s (%s %s)."
+            % (game, version, os.path.basename(rport), rg, rv),
+            "# Functions paired across the two titles: %d of %d reference functions (%d anchored by vtable slots and "
+            "strings, %d through calls that line up, the rest grown through calls); half of them line up %.0f%% or "
+            "better." % (len(M.m), len(M.R), seeded, grown, 100 * alike[len(alike) // 2] if alike else 0),
+            "# Written: what the reference port carries that is the FRAMEWORK's (each site's function at least %d%% "
+            "alike its" % (100 * SIM_MIN),
+            "# reference's, each global and offset read at the lined-up instruction, the engines' layouts re-read off "
+            "this program's",
+            "# own code); the switch lines from this program's own device table. The reference game's own content "
+            "(shows, lamps,",
+            "# callouts, scenes, held coils, its modes) is not this title's: written as comments, for its own port.",
+            "# NOT RUN: a draft - run a mode with it on this build in the emulator, then write what it proved here.",
+            "", "game           %s" % game, "version        %s" % version, ""]
+    body, placed, missing, notes = [], {}, [], []
+    proven = [(k, t, s) for k, t, s in lines if k and not s.lstrip().startswith("#")]
+    # ---- sites
+    body.append("# ---- functions: site <name> <address> <first two instruction words> ----")
+    for k, t, s in proven:
+        if k != "site" or len(t) < 3:
+            continue
+        name, a = t[1], int(t[2], 16)
+        if GAME_SITE.match(name):
+            continue
+        b, how, sm = _place(ref, tgt, M, A, a)
+        why = site_ok(tgt, b) if b else how
+        if not b or why:
+            body.append("# site %-16s NOT PLACED: %s" % (name, why if b else how))
+            missing.append(name)
+            continue
+        line = "site %-16s 0x%08x 0x%08x 0x%08x" % (name, b, tgt.u32(b), tgt.u32(b + 4))
+        if name in SCREEN_CLIP_SITES:
+            body.append("# not carried - the screen and clip features name this title's hud / video bank scenes: "
+                        + line)
+            continue
+        body.append("#   %s: %s (%.0f%% alike)" % (name, how, 100 * sm))
+        body.append(line)
+        placed[name] = b
+    # the engines read their layouts off this program's own code; where one finds a site too, it must agree
+    snd = sound_engine(tgt, placed)
+    content = [(k, t, s) for k, t, s in proven if k not in ("lamp", "scene", "callout", "switch", "text")
+               and not (k == "site" and GAME_SITE.match(t[1]))]
+    lit = light_engine(ref, content, tgt, placed)
+    for eng, tag in ((snd, "the sound engine"), (lit, "the lamp layer / processes")):
+        for name, b in eng["site"].items():
+            if name in placed and placed[name] != b:
+                notes.append("%s: lined up at 0x%x, %s reads 0x%x - the engine's is written" % (name, placed[name], tag, b))
+            if name in placed and placed[name] != b or name not in placed and name in [t[1] for k, t, s in proven
+                                                                                       if k == "site"]:
+                at = next((i for i, l in enumerate(body) if re.match(r"(# )?site %-16s " % re.escape(name), l)), None)
+                ln = "site %-16s 0x%08x 0x%08x 0x%08x" % (name, b, tgt.u32(b), tgt.u32(b + 4))
+                if at is None:
+                    body += ["#   %s: read off %s's code" % (name, tag), ln]
+                else:
+                    body[at:at + 1] = ["#   %s: read off %s's code" % (name, tag), ln]
+                placed[name] = b
+                if name in missing:
+                    missing.remove(name)
+    for pair in SITE_PAIRS:
+        half = [n for n in pair if n in placed]
+        if half and len(half) < len(pair):
+            for name in half:
+                at = next((i for i, l in enumerate(body) if re.match(r"site %-16s " % re.escape(name), l)), None)
+                if at is not None:
+                    body[at] = "# not carried (%s has no counterpart, armed only together): %s" % (
+                        "/".join(n for n in pair if n not in placed), body[at])
+                del placed[name]
+    # ---- globals
+    body += ["", "# ---- globals: data <name> <address> ----"]
+    for k, t, s in proven:
+        if k != "data" or len(t) < 3:
+            continue
+        name, a = t[1], int(t[2], 16)
+        if GAME_DATA.match(name):
+            body.append("# data %-22s not carried: the reference game's own (%s)" % (name, s.split("#")[0].strip()))
+            continue
+        c = _data_votes(ref, tgt, M, A, a)
+        top = c.most_common(2)
+        eng = snd["data"].get(name, lit["data"].get(name))
+        got = top[0][0] if top and (len(top) < 2 or top[0][1] >= 3 * top[1][1]) else None
+        if eng is not None and got is not None and eng != got:
+            notes.append("data %s: lined up 0x%x, the engine reads 0x%x - the engine's is written" % (name, got, eng))
+        b = eng if eng is not None else got
+        if b is None:
+            body.append("# data %-22s NOT PLACED: %s" % (name, "no lined-up instruction makes it" if not top else
+                                                          "the lined-up instructions disagree (%s)" % ", ".join(
+                                                              "0x%x x%d" % x for x in top)))
+            missing.append("data:" + name)
+            continue
+        how = ("read off the engine's own code" if eng is not None else
+               "%d of %d lined-up instructions" % (top[0][1], sum(c.values())))
+        line = "data %-22s 0x%08x   # %s" % (name, b, how)
+        if name in SCREEN_CLIP_DATA:
+            body.append("# not carried (screens/clips): " + line)
+            continue
+        body.append(line)
+        placed["data:" + name] = b
+    # ---- values
+    body += ["", "# ---- values: the reference's framework offsets and counts, each read at the lined-up instruction "
+             "or off the engine's own code ----"]
+    witness = [(func_of(ref, int(t[2], 16)), placed[t[1]]) for k, t, s in proven
+               if k == "site" and len(t) >= 3 and t[1] in placed]
+    witness = [(a, func_of(tgt, b)) for a, b in witness if a in M.R and func_of(tgt, b) in M.T]
+    for a, b in list(witness):                 # and the functions they call (the engines' own helpers)
+        for c in set(M.R[a]["callees"]):
+            if c in M.m and M.m[c] in M.T and (c, M.m[c]) not in witness and A.sim(c, M.m[c]) >= SIM_MIN:
+                witness.append((c, M.m[c]))
+    read = set(lit["value"]) - {"lamp_slot_level", "lamp_slot_alpha", "lamp_slot_fade", "lamp_slot_used"}
+    engv = dict(SOUND_VALUES) if "data:sound_channels" in placed else {}
+    engv.update({k2: v for k2, v in lit["value"].items() if k2 not in LIGHT_VALUES_UNUSED and k2 != "show_proc"})
+    events = [(t, s) for k, t, s in proven if k == "event" and len(t) >= 3]
+    for k, t, s in proven:
+        if k != "value" or len(t) < 3:
+            continue
+        name = t[1]
+        if GAME_VALUE.match(name) or name == "ball_end_event":
+            continue
+        v = int(t[2], 0)
+        c = _imm_votes(ref, tgt, A, witness, v)
+        top = c.most_common(1)
+        fmt = (lambda x: "0x%x" % x) if t[2].startswith("0x") else str
+        if name in engv:
+            nv = engv[name]
+            agree = c.get(nv, 0), sum(c.values())
+            if name not in read and top and top[0][0] != nv and top[0][1] > c.get(nv, 0):
+                notes.append("value %s: the engines' %s, but %d of %d lined-up instructions hold %s here - that is "
+                             "written" % (name, nv, top[0][1], agree[1], fmt(top[0][0])))
+                nv, agree = top[0][0], (top[0][1], agree[1])
+            elif agree[0] < agree[1]:
+                notes.append("value %s: %d of the %d lined-up instructions holding %s on the reference hold %s here" % (
+                    name, agree[1] - agree[0], agree[1], fmt(v), ", ".join(fmt(x) for x in c if x != nv)))
+            if nv != v:
+                notes.append("value %s: %s on the reference, %s here" % (name, fmt(v), fmt(nv)))
+            line = "value %-25s %s    # %s%s" % (name, fmt(nv), "read off this program's own code" if name in read else
+                                                 "the engine's layout", ", %d of %d lined-up instructions" % agree
+                                                 if agree[1] else "")
+        else:
+            if not top or top[0][1] < 0.75 * sum(c.values()) or top[0][0] is None:
+                body.append("# value %-25s NOT PLACED: %s" % (name, "no lined-up instruction of a placed site holds %s"
+                                                               % t[2] if not c else "the lined-up instructions disagree"))
+                missing.append("value:" + name)
+                continue
+            nv = top[0][0]
+            line = "value %-25s %s    # %d of %d lined-up instructions of the placed sites" % (
+                name, ("0x%x" % nv) if t[2].startswith("0x") else nv, top[0][1], sum(c.values()))
+        if name in SCREEN_CLIP_VALUES:
+            body.append("# not carried (screens/clips): " + line)
+            continue
+        body.append(line)
+        placed["value:" + name] = nv
+    body += ["# PAD-1283: %s" % w for w in lit["why"]]
+    # ---- events: the framework's bus ids, each checked against the constants this program's code passes
+    rdisp = next((int(t[2], 16) for k, t, s in proven if k == "site" and t[1] == "hook_dispatch"), None)
+    ev = _event_votes(ref, tgt, M, A, {int(t[2], 0) for t, s in events}, rdisp)
+    body += ["", "# ---- events: the framework's bus ids (each one the constant the lined-up code passes here) ----"]
+    for t, s in events:
+        v = int(t[2], 0)
+        c = ev[v]
+        top = c.most_common(1)
+        if not top or top[0][1] < 0.8 * sum(c.values()):
+            body.append("# event %-12s NOT PLACED: %s" % (t[1], "no lined-up code passes it" if not c else
+                                                          "the lined-up code passes %s" % dict(c)))
+            missing.append("event:" + t[1])
+            continue
+        nv = top[0][0]
+        body.append("event %-12s 0x%x   # %d of %d lined-up places" % (t[1], nv, top[0][1], sum(c.values())))
+        placed["event:" + t[1]] = nv
+    if "hook_dispatch" in placed and "event:ball_end" in placed:
+        body.append("value ball_end_event 0x%x    # the end of a ball, from the bus (no ball_end site on Spike 3)"
+                    % placed["event:ball_end"])
+        placed["ball_end_event"] = placed["event:ball_end"]
+    # ---- switches: this program's own
+    unseen = []
+    sw = spike3_switches(tgt, switch_ids, unseen)
+    if sw:
+        body += ["", "# ---- switches: the playfield switches of this program's own device table that are shots "
+                 "(switch <id> <shot mask> <name>) ----"]
+        if switch_ids is not None:
+            body.append("# ids measured on the rig (a census: each switch pressed in a game, the id it reached the "
+                        "modes with), not the table's ranks")
+            if unseen:
+                body.append("# not carried - no id reached the modes when pressed on the rig: %s" % ", ".join(unseen))
+        body += ["switch %-4d %-18s %s" % (sid, "0x%x" % mask, nm) for sid, mask, nm in sw]
+        ex = next((nm for sid, mask, nm in sw if re.search(r"\b(target|tgt)\b", nm, re.I)), sw[0][2])
+        body += ["", "# ---- text ----", "text example_start_shot     %s" % ex]
+    # ---- what is the reference game's own
+    rest = Counter(k for k, t, s in proven if k in ("lamp", "scene", "callout") or
+                   (k == "site" and GAME_SITE.match(t[1])) or (k == "text" and t[1] != "example_start_shot") or
+                   (k == "value" and GAME_VALUE.match(t[1])))
+    if rest:
+        body += ["", "# not carried - the reference game's own content, for this title's own port: " +
+                 ", ".join("%d %s" % (n, k) for k, n in sorted(rest.items()))]
+    edge_lines(tgt, body, placed, notes)
+    if "switch_edge" in placed:
+        missing = [n for n in missing if n not in _EDGE_NAMES]
+    if notes:
+        body += ["", "# ---- checks ----"] + ["# " + n for n in notes]
+    core_missing = [grp for grp in CORE if not any(n in placed for n in grp) and not
+                    (grp == ("ball_end", "hook_dispatch") and "ball_end_event" in placed)]
+    if not sw and not any(n in placed for n in ("shot_dispatch", "switch_edge")):
+        core_missing.append(("switch lines",))
+    core_missing += [grp for grp in CORE_DATA if not any("data:" + n in placed for n in grp)]
+    return "\n".join(head + body) + "\n", M, core_missing, missing
 
 
 def main(argv=None):
@@ -2041,13 +2758,20 @@ def main(argv=None):
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--game")
     ap.add_argument("--version")
+    ap.add_argument("--switch-ids", help="a rig census (proofs/s3census.sh or proofs/swcensus.sh): the switch lines' ids as measured")
     a = ap.parse_args(argv)
     ref, tgt = Elf(a.ref_elf), Elf(a.target_elf)
-    if ref.a64 or not tgt.a64:
-        print("s3port.py: the reference must be a Spike 2 (32-bit) program and the target a Spike 3 (64-bit) one",
-              file=sys.stderr)
+    if not tgt.a64:
+        print("s3port.py: the target must be a Spike 3 (64-bit) program", file=sys.stderr)
         return 2
-    text, M, core_missing, missing = draft(ref, a.ref_port, tgt, a.game, a.version)
+    if ref.a64:
+        if not (a.game and a.version):
+            print("s3port.py: from a Spike 3 reference, name the target's --game and --version", file=sys.stderr)
+            return 2
+        text, M, core_missing, missing = draft_spike3(ref, a.ref_port, tgt, a.game, a.version,
+                                                             read_switch_ids(a.switch_ids) if a.switch_ids else None)
+    else:
+        text, M, core_missing, missing = draft(ref, a.ref_port, tgt, a.game, a.version)
     with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     print("%s: %d functions matched; %d port site(s) not written%s" % (a.out, len(M.m), len(missing),

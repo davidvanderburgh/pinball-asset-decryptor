@@ -1,6 +1,6 @@
 """PAD-1123: a co-op character's clip and sound once picked, and the character on its teammate's End of Ball Bonus -
 the project's files, the clips the build makes (a still as long as its sound; the bonus loop with the character's photo
-and name on a strip at the foot of the screen, through the bank's crop), the sound's pseudo modes and sounds.cfg line, coop.cfg's lines, and
+and name, its portrait bottom-left and its name along the foot, through the bank's crop), the sound's pseudo modes and sounds.cfg line, coop.cfg's lines, and
 the runtime's choices (lifted verbatim from pad_mode_runtime.c)."""
 import os
 import shutil
@@ -126,33 +126,41 @@ def test_the_settings_file_carries_them(tmp_path):
 
 
 # ---- the clips the build makes ---------------------------------------------------------------------------------------
-def test_the_strip_lands_at_the_foot_under_the_bonus_words_on_the_glass():
-    """Round 2: "put the Character image and their Character name at the BOTTOM of the screen"."""
+def test_the_card_sits_bottom_left_portrait_at_round_ones_size_name_along_the_foot():
+    """Round 3: "display the end of ball bonus character portrait in the left bottom corner of the screen in the size it
+    was originally displayed. Please put the characters name directly next to the portrait along the bottom"."""
+    px, py, pw, ph = CP.BONUS_PHOTO
+    assert (px * 2 + pw, py * 2 + ph) == (360, 290)                 # round 1's window, frame and all
     for name in ("84GOJI", "SHODAIGOJI", "MECHAGODZILLA KIRYU THE THIRD"):
         gx, gy, gw, gh = CP.bonus_strip(name)
-        assert gy > 665 and gy + gh <= CP.GLASS[1] - 4    # below the summary's last line (y 665, emulator census)
-        assert gx + gw / 2 == CP.GLASS[0] / 2 and CP.BONUS_STRIP_W[0] <= gw <= CP.BONUS_STRIP_W[1] and gw % 2 == 0
+        assert gx <= 8 and gy + gh >= CP.GLASS[1] - 8 and gh == 290 # the bottom-left corner
+        assert gx + px * 2 + pw < 425                               # left of the summary's words (x 425-940)
+        assert gy > 460                                             # under the count's widest lines
+        assert gy + gh - CP.BONUS_PLATE_H > 665                     # the plate: under the summary's last line
+        assert gx + gw <= CP.GLASS[0] - 6 and gw % 2 == 0 and gx % 2 == 0
         x, y, w, h = CP.bonus_box(SQUARE, 1360, 768, (gx, gy, gw, gh))
         assert abs(x * SQUARE[0] + SQUARE[12] - gx) < 3 and abs(y * SQUARE[5] + SQUARE[13] - gy) < 3   # back on glass
         assert abs(w * SQUARE[0] - gw) < 3 and abs(h * SQUARE[5] - gh) < 3
         assert CP.bonus_box(None, 1360, 768, (gx, gy, gw, gh)) == (gx, gy, gw, gh)                    # Normal: 1:1
-    assert CP.bonus_strip("SHODAIGOJI")[2] > CP.bonus_strip("84GOJI")[2]          # it fits the name
+    assert CP.bonus_strip("MECHAGODZILLA KIRYU THE THIRD")[2] > CP.bonus_strip("SHODAIGOJI")[2]   # it fits the name
 
 
-def test_the_strip_is_the_award_cards_look_photo_and_name(tmp_path):
-    from PIL import Image
+def test_the_card_is_the_award_cards_look_portrait_and_name(tmp_path):
     pic = _png(tmp_path / "p.png", (20, 200, 40))
     card = CP.bonus_card("SHODAIGOJI", "#33ccff", picture=pic)
     assert card.size == CP.bonus_strip("SHODAIGOJI")[2:]
     px, py, pw, ph = CP.BONUS_PHOTO
-    r, g, b, a = card.getpixel((px + pw // 2, py + ph // 2))     # the photo
+    r, g, b, a = card.getpixel((px + pw // 2, py + ph // 2))     # the portrait
     assert g > 150 and r < 80 and a == 255
     r, g, b, a = card.getpixel((px, py + ph // 2))               # its lit frame, in the character's colour
     assert b > 150 and a > 200
     assert card.getpixel((0, 0))[3] < 60                         # rounded corners
-    name = card.crop((px + pw + 22, 12, card.width - 34, 60)).convert("L")
-    assert name.getextrema()[1] > 200                             # the name, light on the body
-    hole = CP.bonus_card("SHODAIGOJI", "#33ccff")                # a video's: the slot left clear for it
+    assert card.getpixel((card.width - 40, 40))[3] == 0          # clear above the plate: the bonus shows there
+    top = card.height - CP.BONUS_PLATE_H
+    assert card.getpixel((card.width - 20, top + 45))[3] == 255  # the plate along the foot
+    name = card.crop((px + pw + 24, top + 12, card.width - 34, top + 62)).convert("L")
+    assert name.getextrema()[1] > 200                             # the name beside the portrait, light on the body
+    hole = CP.bonus_card("SHODAIGOJI", "#33ccff")                # a video's: the portrait left clear for it
     assert hole.getpixel((px + pw // 2, py + ph // 2))[3] == 0
 
 
@@ -174,7 +182,7 @@ def test_a_still_is_a_clip_as_long_as_asked(tmp_path):
     assert abs(CP.media_seconds(out, ff) - 4.5) < 0.2
 
 
-def test_the_bonus_copy_puts_the_strip_at_the_foot(tmp_path):
+def test_the_bonus_copy_puts_the_card_bottom_left(tmp_path):
     ff = _ffmpeg()
     from PIL import Image
     loop = str(tmp_path / "loop.mp4")
@@ -199,13 +207,14 @@ def test_the_bonus_copy_puts_the_strip_at_the_foot(tmp_path):
         assert (g > 150 and r < 80) if want == "g" else (r > 150 and g < 80), (kind, r, g, b)
         r, g, b = im.getpixel((x + px, y + py + ph // 2))               # its frame, in the character's colour
         assert r > 180 and 120 < g < 220 and b < 80, (kind, r, g, b)
-        r, g, b = im.getpixel((680, 400))                               # the loop above it, the words' place
+        r, g, b = im.getpixel((680, 400))                               # the loop beside it, the words' place
         assert max(r, g, b) < 60
 
 
 # ---- the sound ------------------------------------------------------------------------------------------------------
 def test_a_characters_sound_rides_the_intros_carrier():
-    assert SM.is_intro(SM.INTRO_MODE) and SM.is_intro(SM.INTRO_MODE + 16) and not SM.is_intro(SM.INTRO_MODE + 17)
+    assert SM.is_intro(SM.INTRO_MODE) and SM.is_intro(SM.INTRO_MODE + 16) and not SM.is_intro(SM.INTRO_MODE + 18)
+    assert SM.is_ceremony(SM.INTRO_MODE + 17) and SM.picked_of(SM.INTRO_MODE + 17) == 0   # PAD-1317: the awards music
     assert SM.picked_of(SM.INTRO_MODE) == 0 and SM.picked_of(SM.INTRO_MODE + 3) == 3
     assert not SM.is_juke(SM.INTRO_MODE + 16) and not SM.is_shot(SM.INTRO_MODE + 1)
     assert SM.who(SM.INTRO_MODE + 2) == "Co-op characters" and SM.who(SM.INTRO_MODE) == "Co-op intro"

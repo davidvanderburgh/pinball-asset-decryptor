@@ -834,7 +834,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
          cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
-         score_feed_prof=None, records=None, records_prof=None, code_ok=True):
+         score_feed_prof=None, records=None, records_prof=None, code_ok=True, arch="arm"):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -895,7 +895,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
     from . import mode_assets
     log = log or (lambda *a, **k: None)
     modes = card_modes(project, project_modes(project)) if modes_on else []
-    # the code modes' own assets travel too (PAD-1272: code_ok False - a Spike 3 card - leaves them out)
+    # the code modes' own assets travel too (code_ok False leaves them out; PAD-1295: a Spike 3
+    # card takes them, compiled for its 64-bit ARM: arch="a64")
     code = code_mode_list(project) if modes_on and code_ok else []
     if not modes and not code:
         result = None
@@ -1029,7 +1030,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             result.lines.append("what the app knows of how to run modes on %s has never run in the "
                                 "emulator, so they may not start on this card" % prof.label)
     if code:
-        code_plan(project, result, code, tree, prof, log=log)
+        code_plan(project, result, code, tree, prof, log=log, arch=arch)
         result.lines += describe_code(code, result, prof=prof, project=project)
     stock_plan(project, result, tree)
     result.mode_names = [spec.name for _s, spec in modes] + [c.name for _s, c in code]
@@ -1667,7 +1668,7 @@ def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, pr
             progress(k, len(got), "Putting the co-op characters on the bonus (%d of %d)..." % (k + 1, len(got)))
         made = os.path.join(folder, "%s.mp4" % name)
         who = chars["list"][i]["name"]
-        box = CP.bonus_box(transform, w, h, CP.bonus_strip(who))     # round 2: a strip at the foot, its photo + name
+        box = CP.bonus_box(transform, w, h, CP.bonus_strip(who))     # round 3: portrait bottom-left, name along the foot
         try:
             CP.bonus_clip(src, made, box, ffmpeg, picture=pic, video=vid, size=(w, h), seconds=seconds,
                           colour=chars["list"][i].get("colour") or theme["accent"], name=who,
@@ -1682,7 +1683,7 @@ def coop_bonus_into(result, stock_bank, scratch, read_card=None, ffmpeg=None, pr
         result.new.append((assets + added["path"], made))
         out.append((i + 1, name))
     _coop_bank_put(result, scratch, bank_card, bank, bank_src)
-    result.lines.append("co-op characters: on their teammate's End of Ball Bonus (%s, its photo and name on a strip at the foot) "
+    result.lines.append("co-op characters: on their teammate's End of Ball Bonus (%s, its portrait bottom-left, its name along the foot beside it) "
                         "for %s" % (loop_name, ", ".join(chars["list"][n - 1]["name"] for n, _name in out)))
     return loop_name, out
 
@@ -2330,9 +2331,9 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
     # A missing file here is a broken install or staging, never "nothing to write":
     # say so as this module's error, so the build stops with the reason.
     try:
-        # a project with code modes carries the object compiled from them (code_plan); a
-        # Spike 3 build never has one (its code modes are left out), so it is the pinned one
-        obj = getattr(result, "object", "") if arch == "arm" else ""
+        # a project with code modes carries the object compiled from them (code_plan, for
+        # the card's machine: PAD-1295 compiles a Spike 3 card's for 64-bit ARM); else the pinned one
+        obj = getattr(result, "object", "")
         shutil.copyfile(obj or (MR.prebuilt_object(arch) if arch != "arm" else MR.prebuilt_object()), so)
         cfgs = []
         for name, src in result.mode_files:
@@ -3095,12 +3096,13 @@ def choose_code_sounds(project, code, sound_ok, prof, taken=(), taken_beds=(), l
             "%s are not put on the card." % (why, ", ".join(sorted({w["name"] for w in wants}))), "info")
         return []
     game, version = MS.title_version(prof.key)
-    if MS.carriers(game, version) is None:
+    # PAD-1295: the profile's own machine (a Spike 3 build's ``_spike3`` key has its own carriers)
+    c = MS.profile_carriers(prof.key)
+    if c is None:
         log("Modes: the music and calls of the code mode(s) are not put on this card: no stock "
             "requests to carry them have been measured for %s yet." % prof.label, "warning")
         return []
     taken, taken_beds, out = [int(t) for t in taken], [int(b) for b in taken_beds], []
-    c = MS.carriers(game, version)
     for w in wants:
         kind = "music" if w["music"] else "sound_start"
         if MS.swapped(c, "music" if w["music"] else "call"):
@@ -3129,7 +3131,7 @@ def choose_code_sounds(project, code, sound_ok, prof, taken=(), taken_beds=(), l
             taken_beds.append(entry["sid"])
         else:                           # PAD-658: a bed shares the music carrier (its own sid): not taken
             taken.append(entry["request"])
-        if MS.carriers(game, version).swap:
+        if c.swap:
             entry["swap"] = True        # item 163: swapped in at run time
         entry.pop("priority", None)
         out.append(entry)
@@ -3151,14 +3153,20 @@ def own_sounds_taken(own):
 BUILD_MODE = "build_mode.sh"
 
 
-def compile_command(ex, out, sources):
+def compile_command(ex, out, sources, arch="arm"):
     """The bash command that builds *sources* (the code modes' .c files) with the mode-file
-    interpreter into *out*, through ``sdk/build_mode.sh`` in the executor's Linux."""
+    interpreter into *out*, through ``sdk/build_mode.sh`` in the executor's Linux.
+    PAD-1295: ``arch="a64"`` builds for a Spike 3 card's 64-bit ARM (``build_mode.sh -a a64``)
+    with the pinned aarch64 gcc :func:`.mode_runtime.xgcc_script` unpacks (once, about 41 MB);
+    Spike 2's command is the one it always was."""
     import shlex
     q = shlex.quote
     ab = os.path.abspath
     sdk = MR.sdk_dir()
-    args = [ex.to_exec_path(ab(os.path.join(sdk, BUILD_MODE))), "-o", ex.to_exec_path(ab(out))]
+    args = [ex.to_exec_path(ab(os.path.join(sdk, BUILD_MODE)))]
+    if arch == "a64":
+        args += ["-a", "a64"]
+    args += ["-o", ex.to_exec_path(ab(out))]
     args += [ex.to_exec_path(ab(s)) for s in sources]
     args.append(ex.to_exec_path(ab(os.path.join(sdk, "mode_file.c"))))
     return "bash " + " ".join(q(a) for a in args)
@@ -3200,7 +3208,7 @@ def _mode_folder_files(folder):
     return got
 
 
-def code_object_key(sources):
+def code_object_key(sources, arch="arm"):
     """The digest an object is kept under: the bytes of every code mode's C file and of every
     other file under its folder a compile could include (:func:`_mode_folder_files`), and of
     everything of the SDK ``build_mode.sh`` compiles in (the runtime, the mode-file interpreter,
@@ -3215,7 +3223,9 @@ def code_object_key(sources):
         files += [(os.path.relpath(p, folder).replace(os.sep, "/"), p)
                   for p in _mode_folder_files(folder)
                   if os.path.normcase(os.path.abspath(p)) != os.path.normcase(os.path.abspath(src))]
-    h = hashlib.sha256(b"pad code object 2\0")
+    if arch == "a64":            # PAD-1295: the pinned compiler that makes the 64-bit object
+        files.append(("xgcc.pins", os.path.join(os.path.dirname(MR.xgcc_script()), "xgcc.pins")))
+    h = hashlib.sha256(b"pad code object 2\0" + (b"a64\0" if arch == "a64" else b""))
     for name, p in files:
         h.update(name.encode("utf-8") + b"\0")
         st = os.stat(p)
@@ -3255,7 +3265,7 @@ def _keep_object(key, built):
         pass
 
 
-def compile_code_object(sources, out, log=None, executor=None, timeout=600):
+def compile_code_object(sources, out, log=None, executor=None, timeout=600, arch="arm"):
     """Build the object a card with code modes carries: the runtime, every code mode and the
     mode-file interpreter (so the project's form modes run beside them). Returns *out*. Raises
     :class:`ModeWriteError` with the compiler's words when it fails.
@@ -3274,7 +3284,7 @@ def compile_code_object(sources, out, log=None, executor=None, timeout=600):
     key = None
     if executor is None and os.environ.get(CODE_CACHE_ENV) != "0":
         try:
-            key = code_object_key(sources)
+            key = code_object_key(sources, arch)
         except OSError:
             key = None
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
@@ -3299,7 +3309,7 @@ def compile_code_object(sources, out, log=None, executor=None, timeout=600):
         from ...core.executor import create_executor
         executor = create_executor()
     try:
-        said = executor.run(compile_command(executor, out, sources), timeout=timeout)
+        said = executor.run(compile_command(executor, out, sources, arch), timeout=timeout)
     except Exception as e:                   # the executor's CommandError, a missing WSL
         raise ModeWriteError("the code modes did not build: %s" % str(e)[-600:]) from None
     if not os.path.isfile(out):
@@ -3307,15 +3317,15 @@ def compile_code_object(sources, out, log=None, executor=None, timeout=600):
                              % (said or "").strip()[-400:])
     if key:
         _keep_object(key, out)
-    say("Modes: built the code mode(s) %s into the card's mode.so with the mode-file interpreter (%d bytes)."
-        % (names, os.path.getsize(out)), "info")
+    say("Modes: built the code mode(s) %s into the card's mode.so with the mode-file interpreter (%d bytes%s)."
+        % (names, os.path.getsize(out), ", for Spike 3's 64-bit ARM" if arch == "a64" else ""), "info")
     return out
 
 
 _compile_code_object = compile_code_object
 
 
-def prefetch_code_object(sources, timeout=600):
+def prefetch_code_object(sources, timeout=600, arch="arm"):
     """Start compiling *sources* in the background now, into the kept objects, so the build's
     own :func:`compile_code_object` of them later finds the object ready (or waits for the rest
     of this compile) instead of compiling at the end of the build. Returns the started thread,
@@ -3328,7 +3338,7 @@ def prefetch_code_object(sources, timeout=600):
     if os.environ.get(CODE_CACHE_ENV) == "0":
         return None
     try:
-        key = code_object_key(sources)
+        key = code_object_key(sources, arch)
     except OSError:
         return None
     with _PENDING_LOCK:
@@ -3342,7 +3352,7 @@ def prefetch_code_object(sources, timeout=600):
         try:
             from ...core.executor import create_executor
             ex = create_executor()
-            ex.run(compile_command(ex, out, sources), timeout=timeout)
+            ex.run(compile_command(ex, out, sources, arch), timeout=timeout)
             if os.path.isfile(out):
                 _keep_object(key, out)
                 with _PENDING_LOCK:
@@ -3362,7 +3372,7 @@ def prefetch_code_object(sources, timeout=600):
     return t
 
 
-def code_plan(project, result, code, tree, prof, log=None):
+def code_plan(project, result, code, tree, prof, log=None, arch="arm"):
     """Fill *result* (a :class:`ModePlan`) with the CODE modes: the compiled object and one
     ``<slug>.assets`` per code mode naming its screen, its clip and the own sounds the engine
     carried (``result.own_sounds``). Code modes' screens and clips are already in ``result.build``."""
@@ -3381,5 +3391,6 @@ def code_plan(project, result, code, tree, prof, log=None):
         result.asset_files.append((slug + CM.RUNTIME_SUFFIX, path))
     result.code = list(code)
     result.object = compile_code_object([CM.source_path(project, s) for s, _c in code],
-                                        os.path.join(tree, "padmode_obj", "mode.so"), log=log)
+                                        os.path.join(tree, "padmode_obj", "mode.so"), log=log,
+                                        **({"arch": arch} if arch != "arm" else {}))
     return result

@@ -246,6 +246,31 @@ def test_a_build_with_no_prepared_media_prepares_it(monkeypatch, tmp_path):
     assert not any("text-only" in s for s in said), said
 
 
+def test_a_failed_verify_says_which_check_failed(monkeypatch, tmp_path):
+    """PAD-1336: a build whose verify failed said "verify failed (exit 1) -
+    see the tool output", and the person who reported it pasted the version
+    table and the verdict - never the one row that said what was wrong.  The
+    error line names the failed check now."""
+    form = MultibootForm(
+        images=[ImageRow(path=ISO0, art="none"),
+                ImageRow(path=ISO1, art="none")],
+        sound_move="none", sound_confirm="none",
+        out=str(tmp_path / "multi.iso"), platform="jjp")
+    panel, ran, said = _build_panel(monkeypatch, tmp_path, form)
+    panel.run_cancelled = lambda: False
+    panel._build_card()
+    said.clear()
+    out = ("ok: partition table\nFAIL: image 1 game md5 - got 3f2a, want 9c01\n"
+           "verify: FAIL (2 check(s), 1 failed)\n")
+    ran["done"](1, "verify", {"verify": out})
+    assert said == ["verify failed (exit 1) - the check that failed: "
+                    "image 1 game md5 (got 3f2a, want 9c01)"], said
+    # ...and a verify that names nothing still points at the output
+    said.clear()
+    ran["done"](1, "verify", {"verify": "verify: FAIL\n"})
+    assert said == ["verify failed (exit 1) - see the tool output."], said
+
+
 def test_a_text_only_form_still_builds_text_only(monkeypatch, tmp_path):
     """...and one that asked for nothing to look at or hear is not handed a
     prepare it has no use for."""

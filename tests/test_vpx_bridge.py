@@ -23,6 +23,7 @@ What is worth failing on, none of it needing Windows, VPX or a run:
 import glob
 import json
 import os
+import math
 import re
 import shutil
 import subprocess
@@ -646,6 +647,145 @@ def test_batmans_unseen_balls_are_helpers():
     m = json.load(open(os.path.join(VPX, "batman.shadow.json"), encoding="utf-8"))
     assert m["helper_balls"] == ["postBall1", "postBall2", "craneBall"]
     assert m["switches"]["trgBallLock3"]["event"] == "hold"
+
+
+def test_jaws_shark_arrows_carry_the_beach_shots():
+    # PAD-1311: the five shark-shaped shot arrows (JP's Lnight lights) never lit:
+    # the beaches' RGB went to the small beachgoer lights under them
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    lamps = m["lamps"]
+    for arrows, base in ((["Lnight1"], 8), (["Lnight4", "Light25"], 16), (["Lnight3"], 24),
+                         (["Lnight5", "Light45a"], 32), (["Lnight2", "Light47"], 40)):
+        for a in arrows:
+            assert lamps[a]["leds"] == [[9, base], [9, base + 1], [9, base + 2]] and lamps[a]["rgb"]
+    # each beach's three round lights are its rescue lights, the sign its SHARK,
+    # the circle its CLOSED X: none of them on the arrow's RGB any more
+    assert lamps["Lswimmer1"]["leds"] == [[9, 11]] and "rgb" not in lamps["Lswimmer1"]
+    assert lamps["Lnightsmim"]["leds"] == [[9, 14]] and lamps["Lbeach1"]["leds"] == [[9, 15]]
+    assert lamps["Lballcaptive"]["leds"] == [[8, 52]] and lamps["Lbounty"]["leds"] == [[8, 53]]
+
+
+def test_jaws_fireball_bulbs_stay_dark():
+    # PAD-1311: JP's five stacked fireball bulbs over the shark (radius up to 380)
+    # were wired to BOAT HIT CENTER/RIGHT: each boat hit bloomed the whole middle
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    for n in ("fcroco", "fcroco1", "fcroco2", "fcroco3", "fcroco4"):
+        assert n not in m["lamps"] and n in m["dark"]
+
+
+def test_jaws_shark_and_fin_follow_the_machine():
+    # PAD-1311: the shark follows SHARK UP-MAG / DOWN-MAG (no visible pop-up
+    # targets in front of it); the fin is the chum line target at SHARK
+    # POSITION 1..7 while SHARK FIN UP/DOWN holds it up, and a hit is SHARK FIN TGT
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    fins = ["Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot", "Tsharkfinal",
+            "Thammerfinal", "Tsmimerfinal"]
+    assert all(m["switches"][f]["id"] == 105 for f in fins)
+    vbs = m["extra_vbs"]
+    assert "PadFins = Array(%s)" % ", ".join(fins) in vbs
+    assert "PadSw(1105 - i)" in vbs and "PadSw(1079)" in vbs and "PadSw(1080)" in vbs
+    assert "Targetshark1.Visible = False" in vbs and "PadSharkMotor" not in vbs
+    assert m["solenoids"]["6"]["callback"] == "PadFinUpDown"
+    assert m["solenoids"]["3"]["callback"] is None
+    assert m["retrofit_timers"]["PadMechTimer"]["interval_ms"] == 50
+
+
+def test_jaws_center_ramp_reel_and_upper_deck_lights():
+    # PAD-1331: the middle (SCARS / NORTH BEACH) shot runs up JP's middle lane
+    # through Target2 to the upper playfield - Tcloseshark is on the shark's
+    # return wire above it, where no shot from the flippers passes - so
+    # CENTER RAMP MADE never fired; JP's reel in THE POND's U-turn (Spinner2)
+    # spun with no switch; the deck's RADIO/FLASH lights sat beside and off
+    # its red circles, and its upper arrow was dark
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    sw = m["switches"]
+    assert sw["Target2"] == {"id": 94, "event": "hit", "name": sw["Target2"]["name"]}
+    assert sw["Spinner2"]["id"] == 90 and sw["Spinner2"]["event"] == "spin"
+    assert sw["Spinner4"]["id"] == 83 and sw["Spinner4"]["event"] == "spin"
+    assert "PyramidKicker" not in sw, "Quint's hole is not the reel"
+    assert "PyramidKicker" in m["orig_keep"], "it still ejects on its own"
+    assert [k for k, v in sw.items() if k != "_" and v["id"] == 90] == ["Spinner2"]
+    lamps = m["lamps"]
+    assert lamps["Light48"]["leds"] == [[9, 83], [9, 84], [9, 85]] and lamps["Light48"]["rgb"]
+    assert lamps["Light14"]["leds"] == [[9, 80], [9, 81], [9, 82]]
+    retro = m["retrofit_lights"]["lights"]
+    # on the deck (a clone of a deck light), centred on its two red circles
+    assert retro["PadUpperPfRadio"]["at"] == [85, 342] and retro["PadUpperPfRadio"]["clone"] == "Light14"
+    assert retro["PadUpperPfFlash"]["at"] == [127, 392] and retro["PadUpperPfFlash"]["clone"] == "Light14"
+    assert {"gi001", "gi006"} <= set(m["round_lights"])
+    assert any(r["old"] == "Sub PyramidKicker_Hit : vpmTimer.PulseSw 1090" for r in m["repatch"])
+
+
+def test_round_lights_gives_a_light_a_round_outline():
+    # PAD-1331: a bulb's halo is drawn inside its outline; JAWS 50th's sling GI
+    # (falloff 110, a box 33 from its centre) hung a square of light over each
+    # sling. round_lights: the same number of drag points, a regular polygon
+    # about the centre whose inscribed circle is the falloff
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+
+    def light(name, centre, radius, pts):
+        out = struct.pack("<i", 7) + vf.biff_record("NAME", struct.pack("<I", 2 * len(name)) + name.encode("utf-16-le"))
+        out += vf.biff_record("VCEN", struct.pack("<ff", *centre)) + vf.biff_record("RADI", struct.pack("<f", radius))
+        for p in pts:
+            out += vf.biff_record("DPNT", b"") + vf.biff_record("VCEN", struct.pack("<ff", *p)) + vf.biff_record("ENDB", b"")
+        return out + vf.biff_record("BHHI", struct.pack("<f", 55.0)) + vf.biff_record("ENDB", b"")
+
+    box = [(160, 1500), (230, 1500), (230, 1580), (160, 1580), (150, 1540)]
+
+    class Table:
+        items = [light("gi1", (100, 100), 50.0, [(50, 50), (150, 50), (100, 150)]),
+                 light("gi001", (190, 1541), 110.0, box)]
+        item_info = staticmethod(vf.VpxTable.item_info)
+
+    streams = vs.item_fields(Table, {"round_lights": ["GI001"]})
+    assert list(streams) == ["GameItem1"]
+    recs = list(vf.item_records(streams["GameItem1"]))
+    cen = [struct.unpack_from("<ff", p) for t, p, _ in recs if t == "VCEN"]
+    assert len(cen) == 1 + len(box), "the same drag points, one each"
+    cx, cy = cen[0]
+    assert (round(cx), round(cy)) == (190, 1541), "the halo's centre stays"
+    n = len(box)
+    for x, y in cen[1:]:
+        assert abs(math.hypot(x - cx, y - cy) - 110.0 / math.cos(math.pi / n)) < 0.01
+    assert struct.unpack("<f", [p for t, p, _ in recs if t == "BHHI"][0])[0] == 55.0, "the rest as it was"
+    with pytest.raises(KeyError):
+        vs.item_fields(Table, {"round_lights": ["NoSuchLight"]})
+
+
+def test_vpxlamps_reads_a_webp_holding_a_jpeg_marker():
+    # PAD-1311: JAWS 50th's playfield is a WebP whose bytes hold a stray JPEG
+    # marker; the picture starts at the FIRST magic, not at the JPEG one
+    sys.path.insert(0, VPX)
+    import vpxfile
+    import vpxlamps
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 80), (10, 200, 30)).save(buf, "WEBP", lossless=True)
+    data = (b"\0" * 4 + vpxfile.biff_record("NAME", struct.pack("<I", 2) + b"pf")
+            + buf.getvalue() + b"\xff\xd8\xff junk")
+
+    class Stream:
+        def read(self):
+            return data
+
+    class Ole:
+        def exists(self, name):
+            return name == "GameStg/Image0"
+
+        def openstream(self, name):
+            return Stream()
+
+    class Table:
+        ole = Ole()
+
+        def gamedata_field(self, tag):
+            return {"IMAG": struct.pack("<I", 2) + b"pf", "RGHT": struct.pack("<f", 40.0),
+                    "BOTM": struct.pack("<f", 80.0)}[tag]
+
+    img, right, bottom = vpxlamps.table_image(Table())
+    assert img.size == (40, 80) and img.getpixel((5, 5))[1] > 150
 
 
 def test_rushs_time_machine_is_the_lift_ramp_opto():
@@ -4196,20 +4336,28 @@ _TMNT_VBS_FAKES = [
     "Public Property Let Switch(n, v)",
     "If v And Not St.Item(n) Then Made.Item(n) = Made.Item(n) + 1",
     "St.Item(n) = CBool(v)",
-    "End Property", "End Class",
-    # vpmTimer: AddTimer queues; Flush runs the queue in time order (40 ms ticks)
-    "Class FakeTimer", "Public Q, Now",
-    "Private Sub Class_Initialize : Set Q = CreateObject(\"Scripting.Dictionary\") : Now = 0 : End Sub",
-    "Public Sub AddTimer(d, c) : Q.Add Q.Count & \"_\" & Rnd, Array(Now + d \\ 40, c) : End Sub",
+    "End Property",
+    "Public Property Let PadNote(t) : WScript.Echo \"note: \" & t : End Property",
+    "End Class",
+    # vpmTimer: AddTimer queues; Flush runs the queue in time order (40 ms ticks),
+    # GameTime following it; Lose = a word: the next timer naming it is dropped,
+    # as core.vbs drops every timer past its 50th (PAD-1334)
+    "Class FakeTimer", "Public Q, Now, Lose",
+    "Private Sub Class_Initialize : Set Q = CreateObject(\"Scripting.Dictionary\") : Now = 0 : Lose = \"\" : End Sub",
+    "Public Sub AddTimer(d, c)",
+    "If Lose <> \"\" And InStr(c, Lose) > 0 Then Lose = \"\" : Exit Sub",
+    "Q.Add Q.Count & \"_\" & Rnd, Array(Now + d \\ 40, c)",
+    "End Sub",
     "Public Sub Flush",
     "Dim k, best, t",
     "Do While Q.Count > 0",
     "best = \"\" : t = 1E9",
     "For Each k In Q.Keys : If Q.Item(k)(0) < t Then t = Q.Item(k)(0) : best = k",
     "Next",
-    "Now = t : c = Q.Item(best)(1) : Q.Remove best : ExecuteGlobal c",
+    "Now = t : GameTime = t * 40 : c = Q.Item(best)(1) : Q.Remove best : ExecuteGlobal c",
     "Loop", "End Sub", "End Class",
-    "Dim c",
+    "Dim c, GameTime : GameTime = 0",
+    "Sub Wait(ms) : GameTime = GameTime + ms : vpmTimer.Now = GameTime \\ 40 : End Sub",
     "Class FakeStack", "Public Balls",
     "Public Sub Update : End Sub",
     "Public Sub ExitSol_On : If Balls > 0 Then Balls = Balls - 1 : WScript.Echo \"out\"",
@@ -4217,7 +4365,8 @@ _TMNT_VBS_FAKES = [
     "Class FakeKicker", "Public Sub DestroyBall : End Sub",
     "Public Sub Kick(a, p) : WScript.Echo \"kicked back\" : End Sub", "End Class",
     "Class FakeVan", "Public blenddisablelighting", "End Class",
-    "Dim Controller, vpmTimer, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, sw41, pizzavan",
+    "Dim Controller, vpmTimer, bsVan, padVanUp, padVanComing, padVanFalling, padVanPost, sw41, pizzavan, "
+    "padVanComeT, padVanFallT",
     "Set Controller = New FakeCtl : Set vpmTimer = New FakeTimer : Set bsVan = New FakeStack",
     "bsVan.Balls = 0 : padVanUp = 0 : padVanComing = 0 : padVanFalling = 0 : padVanPost = False",
     "Set sw41 = New FakeKicker : Set pizzavan = New FakeVan",
@@ -4305,6 +4454,42 @@ def test_tmnt_lock_post_held_down_lets_every_locked_ball_out(tmp_path):
         "post up: upper 1 lower 0 sw 100 made 344"], why    # post up: it locks again
     # the roll down takes a moment: LOWER LOCK closes after UPPER LOCK opens
     assert "vpmTimer.AddTimer 240, \"PadVanLand '\"" in out
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the TMNT table script under cscript")
+def test_tmnt_lock_step_lost_from_the_timer_queue_is_taken_by_the_next_coil(tmp_path):
+    # PAD-1334: core.vbs drops every vpmTimer past its 50th. A lost PadVanLand
+    # left padVanFalling at 1, so no ball ever dropped again: the game fired
+    # UPPER LOCK over and over, called a malfunction and kept the next game
+    # back until Visual Pinball restarted (emulator, turtles_pro 1.59). The
+    # next lock coil a second later takes the lost step; a late timer after
+    # that changes nothing.
+    out, _ = _tmnt_patch("turtles_pro", "")
+    got, why = _tmnt_run_vbs(tmp_path, out, [
+        "PadVanIn sw41 : PadVanIn sw41 : vpmTimer.Flush : Show \"two in\"",
+        "vpmTimer.Lose = \"PadVanLand\"",
+        "PadVanDrop True : PadVanDrop False : vpmTimer.Flush : Show \"land lost\"",
+        "PadVanDrop True : PadVanDrop False : PadVanOut True : PadVanOut False : vpmTimer.Flush : Show \"at once\"",
+        "Wait 1500 : PadVanDrop True : PadVanDrop False : vpmTimer.Flush : Show \"a second on\"",
+        "PadVanOut True : PadVanOut False : vpmTimer.Flush : Show \"out\"",
+        "PadVanLand : PadVanRest : Show \"late timers\"",
+        "PadVanDrop True : PadVanDrop False : vpmTimer.Flush : PadVanOut True : PadVanOut False : Show \"last\""])
+    assert got == [
+        "two in: upper 2 lower 0 sw 110 made 121",
+        "land lost: upper 1 lower 0 sw 100 made 121",       # rolling down, for good
+        "at once: upper 1 lower 0 sw 100 made 121",         # not overdue yet
+        "note: lock: a ball rolling down never reached LOWER LOCK; put there now",
+        "a second on: upper 1 lower 1 sw 100 made 121",
+        "out", "out: upper 1 lower 0 sw 100 made 121",
+        "late timers: upper 1 lower 0 sw 100 made 121",     # nothing moved twice
+        "out", "last: upper 0 lower 0 sw 000 made 121"], why
+    assert "Sub PadVanHeal" in out and "\tPadVanHeal" in out
+    # the table declares the step times with the lock's counts: undeclared,
+    # VBScript makes each a local of the sub that sets it and the heal fires
+    # on every coil
+    head, _ = _tmnt_patch("turtles_pro", "Const cGameName = \"tmnt_104\"\n")
+    assert re.search(r"^Dim bsTrough, .*padVanComeT, padVanFallT\s*$", head, re.M), head[:600]
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
@@ -6881,7 +7066,7 @@ def test_jaws_plunger_key_pulls_the_plunger_and_lockbar_is_action(tmp_path):
         old, _ = vs.patch(PULL_TRIBUTE, dict(m, cabinet=dict(m["cabinet"], launch_key="PlungerKey"),
                                                 keys_skip_orig=m["keys_skip_orig"] + ["PlungerKey"]))
         script.write_text(old, encoding="utf-8")
-        why = m["repatch"][-1]["why"]
+        why = [r["why"] for r in m["repatch"] if r["since"].startswith("PAD-1128")][0]
         assert why in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t
         script.write_text(out, encoding="utf-8")
         assert why not in vset.missed_fixes(str(tmp_path), m["output"], m["repatch"]), t

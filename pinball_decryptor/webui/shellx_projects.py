@@ -167,6 +167,24 @@ class ProjectsMixin:
         return os.path.normpath(p) if p else ""
 
     @rpc
+    def browse_project_folder(self, parent="", name=""):
+        """New project's Browse by Folder name (PAD-1319): pick the project folder
+        itself, one made beforehand or a new one made in the picker.  Returns
+        {"parent", "name"} for the two fields, or {} when cancelled."""
+        start = os.path.join(parent, name) if parent and name else parent
+        if not (start and os.path.isdir(start)):
+            start = parent if parent and os.path.isdir(parent) else None
+        p = _fd().askdirectory(
+            title="Select (or make) the project folder", initialdir=start)
+        if not p:
+            return {}
+        p = os.path.normpath(p)
+        head, tail = os.path.split(p)
+        if not tail:                        # a drive root is a location, not a name
+            return {"parent": p, "name": name or ""}
+        return {"parent": head, "name": tail}
+
+    @rpc
     def browse_stock(self, mfr_key="", current=""):
         mfr = self._mfr_by_key(mfr_key)
         filetypes = [("All files", "*.*")]

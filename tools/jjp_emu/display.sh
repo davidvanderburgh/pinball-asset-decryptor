@@ -41,6 +41,7 @@ case "${1:-}" in
             sleep 0.5
         done
         pkill -9 -f "Xephyr $JJP_NESTED" 2>/dev/null   # only a hung one reaches here
+        pkill -f "Xvfb $JJP_NESTED" 2>/dev/null         # a hidden run's screen (PAD_HIDDEN=1)
         # `pgrep -c` prints 0 AND exits 1, so capture then default - the same
         # trap status.sh and alive.sh already carry.
         LEFT=$(pgrep -fc "Xephyr $JJP_NESTED" 2>/dev/null)
@@ -48,11 +49,30 @@ case "${1:-}" in
         exit 0 ;;
 esac
 
+# One nested server at a time, or the game picks up a stale one - of either kind.
+pkill -f "Xephyr $JJP_NESTED" 2>/dev/null
+pkill -f "Xvfb $JJP_NESTED" 2>/dev/null; sleep 1
+
+# HIDDEN (PAD_HIDDEN=1, the rig-wide knob, PAD-230): the same native-size screen
+# on a private Xvfb, so nothing appears on David's desktop.  grab.sh reads it
+# like the Xephyr root.  Software GL either way - Xephyr's GLX is llvmpipe too.
+if [ "${PAD_HIDDEN:-0}" = "1" ]; then
+    command -v Xvfb >/dev/null || { echo "display.sh: Xvfb missing.  apt-get install -y xvfb" >&2; exit 3; }
+    setsid Xvfb "$JJP_NESTED" -screen 0 "${JJP_MAIN_MODE}x24" +extension GLX -nolisten tcp -ac \
+        >/var/tmp/jjp_xephyr.log 2>&1 &
+    for i in $(seq 1 15); do
+        sleep 1
+        if DISPLAY=$JJP_NESTED xdpyinfo >/dev/null 2>&1; then
+            echo "Xvfb (hidden) up on $JJP_NESTED after ${i}s"
+            exit 0
+        fi
+    done
+    echo "display.sh: Xvfb never came up; see /var/tmp/jjp_xephyr.log" >&2
+    exit 4
+fi
+
 command -v Xephyr >/dev/null || {
     echo "display.sh: Xephyr missing.  apt-get install -y xserver-xephyr" >&2; exit 3; }
-
-# One nested server at a time, or the game picks up a stale one.
-pkill -f "Xephyr $JJP_NESTED" 2>/dev/null; sleep 1
 
 # The window title must be the title actually MOUNTED, not JJP_GAME - that is a
 # hard-coded "Wonka" fallback, so every game's window was labelled "JJP Wonka -

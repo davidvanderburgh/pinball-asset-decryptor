@@ -78,6 +78,8 @@ class TreeEditMixin:
         self._trev = 0               # bumped by every edit: the page knows when an image is new
         self._tshown_card = None     # the scene whose picture the canvas shows
         self._tplay = None           # the playback being drawn: {"cancel": bool, ...}
+        self._ttry = {}              # PAD-1338: card -> {node: words the preview shows in a box
+                                     # the game fills ("Show it with"); never written to the card}
         self._tlive = {}             # card -> (push result, "HH:MM:SS") handed to a running game
         self._tlive_job = None
         self._tlive_lock = threading.Lock()
@@ -264,6 +266,7 @@ class TreeEditMixin:
                                      force=force, through=through, unveil=unveil,
                                      hidden=gone)
         self._fit_kept(draws, worlds)
+        draws = _with_tries(draws, self._ttry.get(card))
         # what the eyes show: a layer the eye turned on is on, even though the plain draw has
         # it off (DragonRR, PAD-280: the eyes stayed crossed); a peek is only while selected
         mine = self._tree_force_set(card) if peek is not None else force
@@ -654,6 +657,7 @@ class TreeEditMixin:
         fps = float((man.get("stage") or [0, 0, 30])[2] or 30)
         state = self._tplay = {"cancel": False}
         job = {"man": man, "pins": pins, "frames": frames, "bg": self._bg,
+               "tries": dict(self._ttry.get(card) or {}),
                "unveil": set(self._tree_hidden(card)),
                "hidden": set(self._tree_view_hidden(card)),
                "text_edits": self._pending_texts(card, None), "colors": self._pending_colors(card),
@@ -688,6 +692,7 @@ class TreeEditMixin:
                     return
                 draws = scene_eval.draw_list(job["man"], f, pins=job["pins"], play=True,
                                              unveil=job["unveil"], hidden=job["hidden"])
+                draws = _with_tries(draws, job.get("tries"))
                 if prev is None or not scene_eval._same(draws, prev):
                     prev = draws
                     scaled = [dict(d, m=scene_eval.compose(shrink, d["m"])) for d in draws]
@@ -1061,6 +1066,7 @@ class TreeEditMixin:
                 "pic": self._tree_pic_props(nid), **self._tree_text_align_of(man, n),
                 "font": self._tree_font_of(man, n, ops),
                 "filled": self._tree_filled(card, man).get(nid),
+                "try": self._tree_try_of(card, man, n),
                 "words": self._tree_words_of(card, man, n, ops),
                 "game_colors": self._tree_game_colors(man, nid),
                 "look": self._tree_look(card, man, nid)}
@@ -1300,6 +1306,52 @@ class TreeEditMixin:
             out["note"] = game_filled.locked_note(orig, assets_dir=self.assets_dir,
                                                    short=True)
         return out
+
+    def _tree_try_of(self, card, man, n):
+        """PAD-1338 (DragonRR): for a box the game fills, the Selected panel's "Show it with":
+        ``{"words": what the preview draws in it now ("" = its own stand-in), "options": lines
+        of the game program it might write there (:func:`.game_filled.try_lines`)}``; None
+        for anything else."""
+        if _kind_of(man, n) != "Text" or n.get("added"):
+            return None
+        if n["id"] not in self._tree_filled(card, man):
+            return None
+        from . import game_filled
+        names = {m["id"]: m.get("name") or "" for m, _p, _d in _walk_man(man)}
+        parts, cur, hops = [], n["id"], 0
+        while cur is not None and hops < 256:
+            parts.append(names.get(cur, ""))
+            cur, hops = self._tparents.get(cur), hops + 1
+        stand_in = _text_of(man, n, "Text") or ""
+        return {"words": (self._ttry.get(card) or {}).get(n["id"], ""),
+                "options": game_filled.try_lines_for(self.assets_dir, stand_in,
+                                                     ".".join(reversed(parts)))}
+
+    @rpc
+    def tree_try_words(self, node, words=None):
+        """PAD-1338: draw box *node* (one the game fills) in the preview with *words*, the way
+        the machine might show it, or with its own stand-in again for None/"".  The preview
+        only: nothing is written, no undo step, and other boxes with the same stand-in keep
+        theirs."""
+        card, _stock = self._tree_card()
+        if card is None or self._tman is None:
+            return False
+        nid = int(node)
+        n = (scene_edit_index(self._tman).get(nid) or (None,))[0]
+        if n is None or _kind_of(self._tman, n) != "Text":
+            return False
+        words = " ".join((words or "").split())
+        mine = self._ttry.setdefault(card, {})
+        if words == mine.get(nid, ""):
+            return False
+        if words:
+            mine[nid] = words
+        else:
+            mine.pop(nid, None)
+        self._trev += 1
+        if self._sel:
+            self._render_tree_preview(self._sel)
+        return True
 
     def _game_writes(self, card, man, n):
         """PAD-513 (DragonRR): does the game write line *n*'s box itself as it plays?  Only by
@@ -3770,19 +3822,30 @@ class TreeEditMixin:
                 find = scene_edit.card_finder(states.keys())
                 trees = self._load_trees()
                 # PAD-552: a scene here that starts out otherwise than where the file was saved,
-                # and what of it does (the load report)
+                # and what of it does (the load report). PAD-1320 (DragonRR, round 2): unless
+                # it already shows a version of the file's edits (a card built with the file
+                # before it was changed): then it gets only what it lacks
+                fixed, edits = {}, None
                 for c in got:
                     if (c in trees and c not in ontop and find(c) in states
                             and scene_edit.starts_elsewhere(
                             trees[c], got[c], states[find(c)])):
+                        ops = scene_edit.rebased(trees[c], got[c], states[find(c)])
+                        if ops:
+                            edits = scene_edit.load(self.assets_dir) if edits is None else edits
+                            edits[c] = ops
+                            fixed[c] = scene_edit.states_of(trees[c], ops)
+                            continue
                         differs[c] = scene_edit.start_differences(trees[c], got[c],
                                                                   states[find(c)])
+                if fixed:
+                    scene_edit.save(self.assets_dir, edits)
                 elsewhere = len(differs)
                 shown_k = scene_edit.note_shown(
                     self.assets_dir, {c: trees[c] for c in got if c in trees},
-                    states={c: states[find(c)] for c in got
-                            if find(c) in states and c not in ontop})
-                shown = sum(1 for k in shown_k.values() if k)
+                    states=dict({c: states[find(c)] for c in got
+                                 if find(c) in states and c not in ontop}, **fixed))
+                shown = sum(1 for c, k in shown_k.items() if k or c in fixed)
             if more:
                 pics, gone = scene_share.import_extras(self.assets_dir, path, extras,
                                                        renamed=renamed, overlay=overlay,
@@ -4378,3 +4441,17 @@ def _font_label(key):
     return name
 
 
+
+
+def scene_edit_index(man):
+    from ..plugins.stern import scene_edit
+    return scene_edit._man_index(man)
+
+
+def _with_tries(draws, tries):
+    """*draws* with the words of each box in *tries* (``{node: words}``, PAD-1338's "Show it
+    with") put in as ``shown``, the words the renderer draws in place of the card's own."""
+    if not tries:
+        return draws
+    return [dict(d, shown=tries[d["node"]]) if d.get("kind") == "text" and d.get("node") in tries
+            else d for d in draws]

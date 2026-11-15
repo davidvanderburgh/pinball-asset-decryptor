@@ -101,7 +101,14 @@ class Elf:
         if o is None:
             return None
         e = self.d.find(b"\0", o, o + 80)
-        return self.d[o:e].decode("latin1") if e > o else None
+        if e <= o:
+            return None
+        try:
+            # PAD-1289: the names are UTF-8 (Pokemon LE's "POKÉ BALL SPOT"); read as Latin-1 the É has an unprintable
+            # \x89 and the device-table walks dropped the record
+            return self.d[o:e].decode("utf-8")
+        except UnicodeDecodeError:
+            return self.d[o:e].decode("latin1")
 
     def ptr(self, va):
         return self.rel.get(va)

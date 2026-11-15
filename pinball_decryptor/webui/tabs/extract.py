@@ -101,15 +101,24 @@ def _same(path):
     return os.path.normcase(os.path.normpath(path)) if path else ""
 
 
-def _project_name_for(caption, card, parent):
+def _project_name_for(caption, card, parent, maker=""):
     """The folder name New project suggests for *card* (PAD-435): the game the title bar
     names for it ("James Bond 007 v1.06.0 LE"), else the card file's own name, never one
-    already in *parent*."""
+    already in *parent*.  PAD-1319 (DragonRR): with the manufacturer in front and
+    " - Extracted" after it ("Stern Pinball, Godzilla - Extracted"), so the folder says
+    what it holds next to the card it came from."""
     from ..shellx_projects import _BAD_NAME_CHARS
-    name = "".join("-" if ch in _BAD_NAME_CHARS else ch for ch in (caption or ""))
-    name = name.strip().rstrip(". ")
+
+    def clean(text):
+        return "".join("-" if ch in _BAD_NAME_CHARS else ch
+                       for ch in (text or "")).strip().rstrip(". ")
+    name = clean(caption)
     if not name:
         name = os.path.splitext(os.path.basename(card or ""))[0].rstrip(". ") or "New project"
+    maker = clean(maker)
+    if maker:
+        name = "%s, %s" % (maker, name)
+    name += " - Extracted"
     base, n = name, 2
     while parent and os.path.exists(os.path.join(parent, name)) and n < 100:
         name, n = "%s (%d)" % (base, n), n + 1
@@ -1587,21 +1596,27 @@ class ExtractTab(TabService):
 
     def _open_card_project_form(self, d):
         """The New project window, filled in for the picked card: the card as its stock
-        image, the card's game as its name, where New project last made one (else beside
-        the open project), and a line saying why it came up."""
+        image, the card's game as its name, the card's own folder as where it goes, and a
+        line saying why it came up.  PAD-1319 (DragonRR): the folder the card sits in,
+        not where New project last made one ("I always organise the folder before I run
+        PAD"); that one, else beside the open project, only when the card's folder is
+        gone.  The line names the card by its whole file name."""
         card = (self.extract_input_var.get() or "").strip()
         if not card:
             return False
         folder = os.path.normpath(self._project_folder()) if self._project_folder() else ""
         settings = getattr(self.app, "_settings", None) or {}
-        parent = settings.get("project_dir") or (os.path.dirname(folder) if folder else "")
+        parent = os.path.dirname(os.path.abspath(card))
+        if not os.path.isdir(parent):
+            parent = settings.get("project_dir") or (os.path.dirname(folder) if folder else "")
         game = d.get("card_game") or ""
         self.ctx.bus.publish("open_dialog", name="project_new", props={
             "stock": card,
-            "name": _project_name_for(game, card, parent),
+            "name": _project_name_for(game, card, parent,
+                                      getattr(self.mfr, "display", "") or ""),
             "parent": parent,
             "mfr": getattr(self.mfr, "key", ""),
-            "why": {"card": game or os.path.basename(card),
+            "why": {"card": os.path.basename(card),
                     "project": os.path.basename(folder) if folder else "",
                     "project_card": d.get("game") or d.get("source_name") or ""}})
         return True

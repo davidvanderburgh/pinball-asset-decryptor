@@ -456,7 +456,12 @@ Tests: tests/test_pad1285_spike3_play.py.
 63-66, hidden, muted, `s3proof.sh TITLE=fallout_le`): CLOCK TEST started on three Junk target hits, scored 6 shots
 through score_add (+21M) and ended on its 25 s clock, twice; BALL_SAVE (the drain inside the save served back, the
 control ended on its first drain) and MULTIBALL (3 served, handed back at one ball) rows as in the table below; a real
-card written with a mode by `write_card` and read back through its encryption (below). What the drafter learned:
+card written with a mode by `write_card` (590 s; VAULT RUN, three Junk target hits) and read back through its own
+encryption: `/games/game -> pad/padmode/padmode.sh`, `game.target = fallout_le/game` (sha1 19081048...), mode.so =
+prebuilt mode64.so and game.port = this port byte for byte, root 0755/0644. Booted (slot 63, the card's own hook,
+`PAD_S3_PIVOT=0`, store built with the app's `~/.pad/spike3_padkeys.json`): the runtime read
+`/games/pad/padmode/game.port`, VAULT RUN started on the third hit, scored 2 shots (+3M) and gave way when the game's
+own mode began (Fallout's modes are not held back: "never waits"). What the drafter learned:
 
 - ELG's port gained its mode books (`place_flag_completed_*`, `done_flag_0`: PAD-1286) after Walking Dead was drafted,
   and the same numbers line up in the framework's flag code on Fallout - but they name ELG's modes, so the runtime

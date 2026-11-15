@@ -37,7 +37,7 @@ int main(void)
 {
     unsigned char ip[4];
     struct feed_report r;
-    char out[768];
+    char out[1024];
     unsigned n;
     uint64_t kept[4] = { 500, 900, 0, 0 }, same[4] = { 500, 950, 0, 0 }, zeroed[4] = { 0, 900, 0, 0 };
     url("http://192.168.1.50:8080/scores");
@@ -64,6 +64,38 @@ int main(void)
     printf("json %u %s\n", n, out);
     n = feed_json(out, sizeof out, &r, "x", "y", 0);
     printf("json0 %u %s\n", n, out);
+    r.type = FEED_TYPE_CHALLENGE;                                  /* PAD-1344 */
+    strcpy(r.challenge, "The Shark \"Is\" Broken");
+    n = feed_json(out, sizeof out, &r, "x", "y", 0);
+    printf("jsonc %u %s\n", n, out);
+    r.challenge[0] = 0;
+    printf("jsonc0 %s\n", feed_json(out, sizeof out, &r, "x", "y", 0) ? out : "-");
+    r.type = FEED_TYPE_COMPETITION;
+    strcpy(r.challenge, "left over");
+    printf("jsonk %s\n", feed_json(out, sizeof out, &r, "x", "y", 0) ? out : "-");
+    r.type = FEED_TYPE_STANDARD;
+    printf("jsons %s\n", feed_json(out, sizeof out, &r, "x", "y", 0) ? out : "-");
+    r.type = FEED_TYPE_UNKNOWN;
+    r.players = 4;
+    for (n = 0; n < 4; n++) { r.scores[n] = 18446744073709551615ull; r.has_id[n] = 1; }
+    memset(r.challenge, 'x', sizeof r.challenge - 1);
+    r.challenge[sizeof r.challenge - 1] = 0;
+    r.type = FEED_TYPE_CHALLENGE;
+    printf("big %u\n", feed_json(out, sizeof out, &r, "Godzilla Premium/LE 1.16 with a long name of sixty-three chars",
+                                  "godzilla_le 1.16", 1794326400l));
+    r.players = 2;
+    r.type = FEED_TYPE_UNKNOWN;
+    r.challenge[0] = 0;
+    {
+        int was, on, comp, ours;
+        printf("type");
+        for (was = 0; was <= 3; was++)
+            for (on = -1; on <= 1; on++)
+                for (comp = -1; comp <= 1; comp++)
+                    for (ours = 0; ours <= 1; ours++)
+                        printf(" %d%d%d%d=%d", was, on + 1, comp + 1, ours, feed_type_of(was, on, comp, ours));
+        printf("\n");
+    }
     r.players = 4;
     printf("small %u\n", feed_json(out, 40, &r, "x", "y", 0));
     printf("fell %d %d\n", feed_scores_fell(kept, same, 2), feed_scores_fell(kept, zeroed, 2));
@@ -81,7 +113,8 @@ def _struct(src, name):
 
 def _run(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
-    fns = "\n".join([_struct(src, "feed_report")] + [R._lift(src, sig) for sig in (
+    i = src.index("enum { FEED_TYPE_UNKNOWN")
+    fns = "\n".join([src[i:src.index(";", i) + 1], _struct(src, "feed_report")] + [R._lift(src, sig) for sig in (
         "static int str_starts(const char *s, const char *prefix)\n{",
         "static int feed_parse_url(const char *u, char *host, unsigned hcap, unsigned *port, char *path, unsigned pcap)",
         "static int feed_ipv4(const char *s, unsigned char out[4])",
@@ -89,7 +122,8 @@ def _run(tmp_path):
         "static unsigned feed_json_str(char *out, unsigned cap, const char *s)",
         "static unsigned feed_json(char *out, unsigned cap, const struct feed_report *r, const char *title,",
         "static int feed_scores_fell(const uint64_t *kept, const uint64_t *now, unsigned players)",
-        "static int feed_status(const char *resp, unsigned len)")])
+        "static int feed_status(const char *resp, unsigned len)",
+        "static int feed_type_of(int was, int on, int comp, int ours)")])
     return R._host_run(tmp_path, MAIN.replace("@FNS@", fns)).splitlines()
 
 
@@ -115,11 +149,76 @@ def test_the_report_is_json_with_every_player(tmp_path):
     assert int(n) == len(text)
     doc = json.loads(text)
     assert doc == {"source": "PAD score feed", "game": 'Godzilla "LE" 1.16\\', "port": "godzilla_le 1.16",
-                   "game_number": 3, "time": 1794326400, "players": 2, "scores": [123456780, 98765430000],
+                   "game_number": 3, "game_type": None, "challenge": None, "time": 1794326400, "players": 2, "scores": [123456780, 98765430000],
                    "insider": ["10111213-1415-1617-1819-1a1b1c1d1e1f", None]}
     doc0 = json.loads(next(l for l in out if l.startswith("json0 ")).split(" ", 2)[2])
     assert doc0["time"] is None                                       # the machine's clock was never set
     assert "small 0" in out                                           # a report that does not fit is not cut short
+
+
+def _doc(out, tag):
+    return json.loads(next(l for l in out if l.startswith(tag + " ")).split(" ", 2 if tag == "jsonc" else 1)[-1])
+
+
+def test_the_report_says_what_the_start_menu_made_the_game(tmp_path):
+    """PAD-1344 (C0untDeM0net: the mini games started from the game selection menu, like "the shark is broken" on
+    Jaws, were indistinguishable from standard games): game_type and the challenge's name."""
+    out = _run(tmp_path)
+    c = _doc(out, "jsonc")
+    assert c["game_type"] == "challenge" and c["challenge"] == 'The Shark "Is" Broken'
+    assert list(c)[:6] == ["source", "game", "port", "game_number", "game_type", "challenge"]
+    assert _doc(out, "jsonc0")["challenge"] is None                    # a challenge whose name is not known
+    k = _doc(out, "jsonk")
+    assert k["game_type"] == "competition" and k["challenge"] is None  # a name only rides with a challenge game
+    assert _doc(out, "jsons")["game_type"] == "standard"
+    big = int(next(l for l in out if l.startswith("big ")).split()[1])
+    assert 0 < big < 1024 - 1                                          # the longest report still fits FEED_JSON_MAX
+
+
+def test_the_game_type_rule(tmp_path):
+    """A challenge (the flag, or a mode of ours that took the pick) outranks competition, competition standard; a
+    type seen once is kept for the game; nothing readable is unknown (null)."""
+    line = next(l for l in _run(tmp_path) if l.startswith("type "))
+    got = dict(t.split("=") for t in line.split()[1:])
+
+    def t(was, on, comp, ours):
+        return int(got["%d%d%d%d" % (was, on + 1, comp + 1, ours)])
+    U, S, K, C = range(4)
+    assert t(U, -1, -1, 0) == U
+    assert t(U, 0, -1, 0) == S and t(U, -1, 0, 0) == S and t(U, 0, 0, 0) == S
+    assert t(U, 0, 1, 0) == K and t(U, -1, 1, 0) == K
+    assert t(U, 1, 1, 0) == C and t(U, 1, -1, 0) == C and t(U, 0, 0, 1) == C and t(U, -1, -1, 1) == C
+    assert t(C, 0, 0, 0) == C and t(K, 0, 0, 0) == K and t(K, 1, 0, 0) == C   # kept, or raised
+
+
+def test_scorefeed_cfg_names_the_game_type_flags(monkeypatch):
+    """PAD-1344: the Competition and Challenge flags' ids, read off the card's own flag names."""
+    from pinball_decryptor.plugins.stern import coop_play as CP
+    from pinball_decryptor.plugins.stern import portchallenge as PC
+    from pinball_decryptor.plugins.stern import score_feed as SF
+    monkeypatch.setattr(CP, "insider_users", lambda elf: None)
+    monkeypatch.setattr(PC, "Elf", lambda data: data)
+    names = ["FG_INVALID"] + ["FG_X%d" % i for i in range(1, 17)] + [SF.COMP_FLAG, SF.CHALLENGE_FLAG]
+    monkeypatch.setattr(PC, "flag_names", lambda e: names)
+    assert SF.flags_line(b"elf") == "flags 17 18"
+    assert "flags 17 18" in SF.cfg_text("http://10.0.0.7/", "x", b"elf", only=True).splitlines()
+    monkeypatch.setattr(PC, "flag_names", lambda e: names[:18])
+    assert SF.flags_line(b"elf") == "flags 17 0"
+    monkeypatch.setattr(PC, "flag_names", lambda e: [])
+    assert SF.flags_line(b"elf") == "" and "flags" not in SF.cfg_text("http://10.0.0.7/", "x", b"elf", only=True)
+
+    def bad(data):
+        raise ValueError("not an ELF")
+    monkeypatch.setattr(PC, "Elf", bad)
+    assert SF.flags_line(b"elf") == ""
+
+
+def test_the_runtime_reads_the_flags_line():
+    src = RUNTIME.read_text(encoding="utf-8")
+    arm = R._lift(src, "static void feed_arm(void)")
+    assert 'str_starts(raw + i, "flags ")' in arm and "feed.comp_flag" in arm and "feed.chg_flag" in arm
+    tick = R._lift(src, "static void on_feed_tick(pm_reg *regs)")
+    assert "feed_type_sample();" in tick and "feed.type = FEED_TYPE_UNKNOWN;" in tick
 
 
 def test_a_lower_score_at_a_ball_start_is_the_next_game(tmp_path):

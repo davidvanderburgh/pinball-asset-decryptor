@@ -23,4 +23,9 @@ done
 gcc -shared -nostdlib -o "$OUT" "$OBJ" $LIBS -lgcc || exit 1
 BADVER=$(objdump -T "$OUT" 2>/dev/null | grep -oE 'GLIBC_2\.3[5-9]|GLIBC_2\.[4-9][0-9]' | sort -u)
 [ -z "$BADVER" ] || { echo "FAIL: needs glibc newer than the image's: $BADVER" >&2; exit 5; }
+# glibc 2.38+ headers route strtol & co to __isoc23_* (unversioned when linked
+# against the image's libc, so the check above misses them): the game then
+# dies at load with "undefined symbol: __isoc23_strtol".
+C23=$(nm -D --undefined-only "$OUT" 2>/dev/null | grep -o '__isoc23_[a-z]*' | sort -u)
+[ -z "$C23" ] || { echo "FAIL: imports the image's glibc lacks: $C23" >&2; exit 5; }
 echo "built $OUT ($(stat -c%s "$OUT") bytes)"

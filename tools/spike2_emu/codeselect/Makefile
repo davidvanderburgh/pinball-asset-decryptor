@@ -353,7 +353,7 @@ PADMENU = $(BUILD)/padmenu.so
 all: $(BIN) $(PADMENU)
 
 $(PADMENU): padmenu.c | $(BUILD)
-> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -DPADMENU_S3 >     -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -o $@ || { rm -f $@; exit 1; }
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -DPADMENU_S3 -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
 else ifneq ($(PLATFORM),stern)
 all: $(BIN)

@@ -2221,6 +2221,7 @@ class Bridge:
         starts: a minute and more of nothing read as broken. Its own
         process (Tk), so nothing here waits on it; Windows only."""
         self._loading = None
+        self._loading_split = False
         if sys.platform != "win32":
             return
         self._loading_file = os.path.join(os.path.dirname(LOG), "padloading-%s.txt" % (self.title or "game"))
@@ -2239,6 +2240,14 @@ class Bridge:
         took = (padlaunch.kit_load().get("start_s") or {}).get(self.title)
         if took:
             cmd += ["--expect", "%d" % took]
+        if padlaunch.is_bof(self.launch) and padlaunch.split_env():
+            # a BoF game on a cabinet's screens (PAD-1308): padsplit is the
+            # loading screen on each of them, then the game's displays, and
+            # gives Visual Pinball back the focus the game's window takes
+            cmd = [exe, os.path.join(HERE, "padsplit.py"), "--title", self.title or "",
+                   "--status", self._loading_file, "--parent", str(os.getpid()),
+                   "--focus", "vpx", "--log", os.path.join(os.path.dirname(LOG), "padsplit.log")]
+            self._loading_split = True
         try:
             self._loading = subprocess.Popen(cmd, cwd=HERE, creationflags=0x08000000)
             log("loading window up for %s%s" % (self.title, " (%d s last time)" % took if took else ""))
@@ -2264,6 +2273,22 @@ class Bridge:
         except OSError:
             pass
 
+    def _split_end(self):
+        """The table closed: a cabinet split ends (its `stop`, then gone),
+        whether the game was up yet or still starting."""
+        if getattr(self, "_loading_split", False) and getattr(self, "_loading", None):
+            self._loading_end("stop")
+        proc, self._split = getattr(self, "_split", None), None
+        if proc is not None:
+            try:
+                with open(self._loading_file, "w", encoding="utf-8") as f:
+                    f.write("stop")
+            except OSError:
+                pass
+            kill = threading.Timer(2.0, self._loading_kill, (proc,))
+            kill.daemon = True
+            kill.start()
+
     def _loading_end(self, word, took=None):
         """`up` closes it; `failed <why>` shows why, then closes it. The time
         a start took paces the next one's bar."""
@@ -2275,11 +2300,17 @@ class Bridge:
                 f.write(word)
         except OSError as exc:
             log("loading window not told %s: %s" % (word, exc))
-        # and gone for sure: `up` at once, a failure once it has been read
-        wait = 0.0 if word == "up" else 10.0
-        kill = threading.Timer(wait, self._loading_kill, (proc,))
-        kill.daemon = True
-        kill.start()
+        if getattr(self, "_loading_split", False) and word == "up":
+            # the split's windows ARE the game's screens now: kept until the
+            # table closes (_split_end)
+            self._split = proc
+        else:
+            # and gone for sure: `up` at once, a failure once it has been
+            # read (`stop`: the split closes itself, given two seconds)
+            wait = {"up": 0.0, "stop": 2.0}.get(word, 10.0)
+            kill = threading.Timer(wait, self._loading_kill, (proc,))
+            kill.daemon = True
+            kill.start()
         if took:
             try:
                 kit = padlaunch.kit_load()
@@ -2446,6 +2477,7 @@ class Bridge:
                 pass
         log("stop after %d polls (%d off the link, %d of them idle, %d failed)"
             % (self.polls, self.link_polls, self.link_idle, self.poll_fail))
+        self._split_end()                        # a BoF game's cabinet screens close with it
         self._loading_end("up")                  # the table closed while the game started
         if self.launch is not None:
             self.launch.stop()           # what this bridge started, it stops

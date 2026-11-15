@@ -10,7 +10,7 @@ DISP=$(cat "$BOF_RIG/display")
 if [ "$(cat "$BOF_RIG/visible" 2>/dev/null)" = 1 ]; then
     SIZE=${BOF_SHOT_SIZE:-1920x1080}
 else
-    SIZE=2560x1440
+    SIZE=3840x1440
 fi
 W=${SIZE%x*}; H=${SIZE#*x}
 FULL=$BOF_RIG/shot_full.png

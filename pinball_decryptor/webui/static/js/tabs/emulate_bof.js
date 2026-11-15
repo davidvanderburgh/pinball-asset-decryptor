@@ -3,11 +3,33 @@
 // own (tools/bof_emu/bofpf.py), as the Stern and JJP rigs' are; it opens by
 // itself when the game is ready, and "Switches window" brings it back.
 
-import { html, PageHead, Card, Button, PathField, Chip, Note, Check, call } from "../core/ui.js";
+import { html, PageHead, Card, Button, PathField, Chip, Note, Check, Select, Seg, tip, call } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { StateChip, introLines } from "./emulate_jjp_shared.js";
 
 export const css = true;
+
+// PAD-1308: a cabinet with a screen per display.  The setting is
+// tools/spike2_emu/vpx/padsplit.py's (shared with the Visual Pinball kit);
+// each change is saved at once and applies when the game next starts.
+function CabinetScreens({ sp, tipText }) {
+  const set = (k) => (v) => call("emulate_bof.split_set", k, v);
+  const off = !sp.on;
+  return html`<${Card} title="Cabinet screens" cls="emu-split">
+    <${Check} checked=${!!sp.on} onChange=${set("on")} title=${tipText}
+      label="Show each display on its own screen" />
+    <div class="kv emu-split-kv">
+      <span class="k">Main display</span>
+      <${Select} sm value=${sp.main} options=${sp.mons} onChange=${set("main")} disabled=${off} />
+      <span class="k" ...${tip("The strip over the playfield on Dune and Labyrinth; the reflected display on Winchester.")}>Second display</span>
+      <${Select} sm value=${sp.second} options=${sp.mons} onChange=${set("second")} disabled=${off} />
+      <span class="k">Picture</span>
+      <${Seg} value=${sp.fit} onChange=${set("fit")} disabled=${off}
+        options=${[{ value: "keep", label: "Keep its shape" }, { value: "fill", label: "Fill the screen" }]} />
+    </div>
+    <span class="small muted">${tipText}</span>
+  <//>`;
+}
 
 export default function EmulateBoF() {
   const s = useNs("emulate_bof");
@@ -35,6 +57,7 @@ export default function EmulateBoF() {
             placeholder="dune.fun, winchester.fun, lab.fun - or a build from Write" onBrowse=${() => call("emulate_bof.browse")} />
           <span class="small muted">${s.fun_tip}</span>
         <//>
+        ${s.split ? html`<${CabinetScreens} sp=${s.split} tipText=${s.split_tip} />` : null}
         ${s.note ? html`<${Note} kind="warn">${s.note}<//>` : null}
       </div>
       <div class="stack emu-col">

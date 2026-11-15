@@ -1,3 +1,7 @@
 /* Emulate (Barrels of Fun): the shared Emulate layout.  The switches live in
    their own window (tools/bof_emu/bofpf.py). */
 @import url("./emulate_jjp.css");
+
+/* PAD-1308: Cabinet screens - a label and its control per row. */
+.emu-split .emu-split-kv { grid-template-columns: max-content minmax(0, 320px);
+  align-items: center; gap: 8px 14px; margin: 10px 0; }

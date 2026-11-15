@@ -476,6 +476,7 @@ install: $(BIN) $(SPKSW) $(PROCSW) $(PADMENU)
 > install -m 755 "$(BIN)" "$(DESTDIR)$(PREFIX)/spkselect"
 > install -m 755 "$(SPKSW)" "$(DESTDIR)$(PREFIX)/spksw"
 > install -m 755 "$(PADMENU)" "$(DESTDIR)$(PREFIX)/padmenu.so"
+> install -m 644 padmenu_proc.py "$(DESTDIR)$(PREFIX)/padmenu_proc.py"
 > install -m 755 "$(PROCSW)" "$(DESTDIR)$(PREFIX)/dpprocsw"
 > install -m 755 padselect_spk.sh "$(DESTDIR)$(PREFIX)/padselect.sh"
 > install -m 755 padselect_proc.sh "$(DESTDIR)$(PREFIX)/padselect_proc.sh"

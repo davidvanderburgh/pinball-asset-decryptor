@@ -48,7 +48,7 @@ for f in $FILES; do [ -f "$SEL/$f" ] || installed=0; done
 if [ "$installed" = 1 ]; then
     [ "$PREVIEW" = 1 ] && ok
     stale=0
-    for f in "$SRC"/*.c "$SRC"/*.h "$SRC"/Makefile "$SRC"/padselect_spk.sh "$SRC"/padselect_proc.sh "$SRC"/themes.json; do
+    for f in "$SRC"/*.c "$SRC"/*.h "$SRC"/Makefile "$SRC"/padselect_spk.sh "$SRC"/padselect_proc.sh "$SRC"/padmenu_proc.py "$SRC"/themes.json; do
         [ -e "$f" ] || continue
         [ "$f" -nt "$SEL/spkselect" ] && { stale=1; break; }
     done
@@ -74,5 +74,6 @@ install -m 755 "$BUILD/spkselect" "$SEL/spkselect.new" && mv -f "$SEL/spkselect.
     && install -m 755 "$SRC/padselect_spk.sh" "$SEL/padselect.sh" \
     && install -m 755 "$BUILD/dpprocsw" "$SEL/dpprocsw" \
     && install -m 755 "$SRC/padselect_proc.sh" "$SEL/padselect_proc.sh" \
+    && install -m 644 "$SRC/padmenu_proc.py" "$SEL/padmenu_proc.py" \
     || fail "cannot install into $SEL"
 ok

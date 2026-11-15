@@ -67,6 +67,12 @@ ARGS=("$@")
 play() {        # start the game in the folder: never returns when it starts
     if [ -n "${PADSELECT_DRY:-}" ]; then echo "would start '$START' in $G"; say "dry run"; exit 0; fi
     say "starting: $START"
+    # PAD-1309: EXIT held 5 s on the coin door restarts the machine into this menu - the
+    # Python hook (padmenu_proc.py) goes first on the game's PYTHONPATH as sitecustomize
+    if [ -f "$P/padmenu_py/sitecustomize.py" ]; then
+        export PYTHONPATH="$P/padmenu_py${PYTHONPATH:+:$PYTHONPATH}"
+        say "EXIT held 5 s restarts into this menu"
+    fi
     exec 3>&-
     cd "$G" || exit 1
     exec bash -c "$START"

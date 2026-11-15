@@ -25,6 +25,13 @@ if [ "${SPP_XVFB:-0}" = 1 ]; then
 fi
 
 E=$SPP_PY
+# PAD-1309: the multi-boot launcher puts padmenu_proc.py (as sitecustomize) first on the game's
+# PYTHONPATH: EXIT held 5 s restarts the machine into the menu.  A real reboot from the rig is
+# never right, so every run hands it a stand-in that leaves $SPP_RIG/padmenu.restart.
+# SPP_MENU_PY=<a folder holding that sitecustomize.py> tries it on any title.
+printf '#!/bin/sh\n: > %s/padmenu.restart\n' "$SPP_RIG" > "$SPP_RIG/padmenu_reboot"
+chmod 755 "$SPP_RIG/padmenu_reboot"
+rm -f "$SPP_RIG/padmenu.restart"
 run_as() {      # <log> <cmd...>: as $SPP_USER, env built from scratch
     local log=$1; shift
     runuser -u "$SPP_USER" -- env -i \
@@ -34,7 +41,7 @@ run_as() {      # <log> <cmd...>: as $SPP_USER, env built from scratch
         PULSE_SERVER="${PULSE_SERVER:-}" PULSE_CLIENTCONFIG="${PULSE_CLIENTCONFIG:-}" \
         SPP_VISIBLE="${SPP_VISIBLE:-0}" \
         LD_LIBRARY_PATH="$E/lib" PYSDL2_DLL_PATH="$E/lib" \
-        PYTHONPATH="$SPP_STUB:$SPP_SITE" PROC_EMU_FPGA="$PROC_EMU_FPGA" SPP_LOG="$SPP_RIG/rig.log" SPP_OSFILES="${SPP_OSFILES:-}" \
+        PYTHONPATH="${SPP_MENU_PY:+$SPP_MENU_PY:}$SPP_STUB:$SPP_SITE" CODESELECT_REBOOT="$SPP_RIG/padmenu_reboot" PROC_EMU_FPGA="$PROC_EMU_FPGA" SPP_LOG="$SPP_RIG/rig.log" SPP_OSFILES="${SPP_OSFILES:-}" \
         SPP_BALLS="${SPP_BALLS:-}" PROC_EMU_CTL="${PROC_EMU_CTL:-}" SPK_MARK="$SPP_RIG" \
         PYGAME_HIDE_SUPPORT_PROMPT=1 \
         "$@" < /dev/null > "$log" 2>&1 &

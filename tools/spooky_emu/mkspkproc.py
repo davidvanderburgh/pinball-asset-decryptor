@@ -41,6 +41,10 @@ PAD_DIR = "PAD_MULTIBOOT"
 MARK = "PAD_MULTIBOOT_LIVE"
 SELECTOR_FILES = (("spkselect", 0o755), ("dpprocsw", 0o755), ("padselect_proc.sh", 0o755),
                   ("font.ttf", 0o644))
+#: PAD-1309: optional selector files -> where they go under the .pad folder.  padmenu_proc.py
+#: is the game's sitecustomize there (EXIT held 5 s restarts into the menu); a selector dir
+#: built before it makes an update without it.
+OPTIONAL_FILES = (("padmenu_proc.py", "padmenu_py/sitecustomize.py", 0o644),)
 
 #: the two titles: their folder, what starts the game there, the machine's libpinproc, the
 #: machine yaml's flipper / START switches, the settings files the game writes in its folder
@@ -324,6 +328,10 @@ def write_menu(out, selector_dir, font, conf, title, builds_txt, manifest, media
     for name, mode in SELECTOR_FILES:
         src = font if name == "font.ttf" else os.path.join(selector_dir, name)
         out.file(pad + ("padselect.sh" if name == "padselect_proc.sh" else name), src, mode)
+    for name, dest, mode in OPTIONAL_FILES:
+        src = os.path.join(selector_dir, name)
+        if os.path.isfile(src):
+            out.file(pad + dest, src, mode)
     out.data(pad + "images.conf", conf.encode("utf-8"))
     out.data(pad + "builds.txt", builds_txt.encode("utf-8"))
     out.data(pad + "proc.conf", proc_conf(title).encode("utf-8"))

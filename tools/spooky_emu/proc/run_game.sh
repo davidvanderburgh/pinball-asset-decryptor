@@ -154,6 +154,7 @@ setsid -f unshare --net --mount --propagation private \
         SPP_BALLS="$BALLS" PROC_EMU_FPGA="$FPGA" PROC_EMU_CTL="$CTL" SPP_VISIBLE=$VISIBLE $AUDIO_ENV \
         SPP_MACHINE_LAUNCH="${SPP_MACHINE_LAUNCH:-}" SPP_MSIM_FIFO="${SPP_MSIM_FIFO:-}" \
         SPP_MSIM_SHIM="${SPP_MSIM_SHIM:-}" SPP_MSIM_LIB="${SPP_MSIM_LIB:-}" \
+        SPP_MENU_PY="${SPP_MENU_PY:-}" \
     bash "$SPP_TOOLS/netns.sh" < /dev/null >> "$SPP_RIG/rig.log" 2>&1
 
 # Up = the game's run loop is going and attract has shown its first page:

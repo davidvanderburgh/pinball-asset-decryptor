@@ -1291,6 +1291,39 @@ def test_pup_stub_counts_each_call_on_a_line_on_its_own():
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the PuP stub under cscript")
+@pytest.mark.parametrize("force", [False, True])
+def test_pup_stub_getroot_is_a_folder_string(tmp_path, force):
+    """PAD-1346: Munsters (Original 2020) reads `PupVideos=PuPlayer.getroot`
+    outside any On Error. The stand-in's getroot returned Nothing, and the
+    patched table stopped at load: "Line 924: Object variable not set". Every
+    table joins getroot with "\\" as PinUP's folder path, so it is a string."""
+    vs = pytest.importorskip("vpxshadow")
+    lines = [   # Munsters 1.05's PuP start, verbatim
+        'Dim HasPup:HasPuP = True', 'Dim pGameName : pGameName="mmunsters"',
+        'Dim cGameName : cGameName="mmunsters"', 'Dim PupVideos, Folder', 'Dim PuPlayer',
+        'Const pBackglass=1',
+        'if HasPuP Then', 'on error resume next',
+        'Set PuPlayer = CreateObject("PinUpPlayer.PinDisplay") ',
+        'PuPlayer.B2SInit "", pGameName', 'on error goto 0',
+        'if not IsObject(PuPlayer) then HasPuP = False', 'end If',
+        'PupVideos=PuPlayer.getroot',
+        'Folder=PupVideos & "\\" &  cGameName & "\\"',
+        'PuPlayer.LabelInit pBackglass',
+        'if HasPuP Then', 'PupVideos=PuPlayer.getroot', 'End if',
+        'WScript.Echo "ok:" & Folder']
+    rep = []
+    stub = vs.pup_stub(lines, rep, force=force)
+    assert 'Public Function getroot() : getroot = "" : End Function' in stub
+    vbs = tmp_path / "pup.vbs"
+    vbs.write_text("\n".join(lines) + "\n" + stub, encoding="utf-8")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    if not force and r.stdout.startswith("ok:") and r.stdout.strip() != "ok:\\mmunsters\\":
+        pytest.skip("PinUP Player is installed here: the stand-in never ran")
+    assert r.stdout.strip() == "ok:\\mmunsters\\", r.stdout + r.stderr
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the PuP stub against a present player under cscript")
 def test_forced_pup_stub_silences_both_creations_when_pinup_is_installed(tmp_path):
     vs = pytest.importorskip("vpxshadow")

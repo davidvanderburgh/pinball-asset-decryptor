@@ -708,9 +708,13 @@ def pup_stub(lines, rep, force=False):
     out = ["", "'---- PAD: PinUP Player's shape, for a machine without it", "Class PadNoPuP"]
     for meth, cs in list(counts.items()):
         if meth in ("getroot",):
-            # a property read (`Set r = PuPlayer.getroot`), not a Sub
+            # a read, not a Sub: PinUP's GetRoot is its folder path, a
+            # string every table joins with "\" (PAD-1346: Munsters reads
+            # `PupVideos=PuPlayer.getroot` outside any On Error, and the
+            # Nothing this used to return stopped the table at load with
+            # "Object variable not set")
             del counts[meth]
-            out.append("\tPublic Function %s() : Set %s = Nothing : End Function"
+            out.append('\tPublic Function %s() : %s = "" : End Function'
                        % (spelling[meth], spelling[meth]))
     for meth, cs in sorted(counts.items()):
         n = max(cs, key=cs.get)

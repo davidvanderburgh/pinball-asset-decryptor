@@ -833,7 +833,8 @@ def clipv_reader(tmp_path_factory):
     sec = src[src.index("/* ---- clip variants (PAD-446)"):src.index("static int clipv_read(void)")]
     defines = "\n".join(l for l in sec.splitlines() if l.startswith("#define CLIPV_"))
     struct = sec[sec.index("struct clipv {"):sec.index("};", sec.index("struct clipv {")) + 2]
-    state = ("#include <stdlib.h>\n" + struct + "\nstatic const char *CLIPV_FILES_0;\n"
+    state = ("#include <stdlib.h>\ntypedef unsigned pm_str;   /* PAD-1284: a std::string as Spike 2 holds it */\n"
+             + struct + "\nstatic const char *CLIPV_FILES_0;\n"
              "static char clipv_raw[CLIPV_FILE_MAX + 1];\nstatic struct clipv clipv[CLIPV_SLOTS];\n"
              "static unsigned n_clipv, clipv_rng;\nstatic int clipv_only, clipv_dropped;\n")
     funcs = [_c_function(src, r) for r in (r"static void clipv_line\(", r"static int clipv_read\(void\)",

@@ -2706,7 +2706,7 @@ def test_the_installer_ships_and_runs_the_user_step():
     assert re.search(r'Source:\s*"wsl_default_user\.sh"', iss), (
         "wsl_default_user.sh is not installed beside install_prerequisites.ps1")
     ps1 = PS1.read_text(encoding="utf-8", errors="replace")
-    call = ps1.index("if ($wslAvailable -and $ubuntuFound) { Set-WslOrdinaryUser }")
+    call = ps1.index("if ($wslAvailable -and $ubuntuFound) { Set-WslOrdinaryUser")
     assert call > ps1.index('Write-Step "Checking for an apt-based WSL distro..."'), (
         "the user step runs before the distro has been found")
 

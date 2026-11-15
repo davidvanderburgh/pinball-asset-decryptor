@@ -340,7 +340,10 @@ def test_a_start_opens_the_split_and_tells_it_how_the_run_goes(tab_split, tmp_pa
 
         def terminate(self):
             pass
+    from pinball_decryptor.webui import theme
     monkeypatch.setattr(emulate_bof.subprocess, "Popen", Proc)
+    # on macOS the window asks `defaults read -g AppleInterfaceStyle` for its theme through that same Popen
+    monkeypatch.setattr(theme, "detect_system_theme", lambda: "light")
     monkeypatch.setattr(emulate_bof, "windows_python", lambda *a, **k: "pythonw.exe")
     monkeypatch.setattr(emulate_bof.rigslot, "hidden", lambda: False)
     monkeypatch.setattr(emulate_bof.tempfile, "gettempdir", lambda: str(tmp_path))

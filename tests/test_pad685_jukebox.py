@@ -290,7 +290,7 @@ def draws(tmp_path_factory):
         src = f.read()
     defs = "\n".join(re.findall(r"^#define JUKE_\w+.*$", src, re.M))
     jsong = src[src.index("struct jsong {"):src.index("};", src.index("struct jsong {")) + 2]
-    state = (defs + "\n" + jsong + "\nstatic struct jsong jsong[JUKE_SONGS];\nstatic unsigned n_jsong;\n"
+    state = (defs + "\ntypedef unsigned pm_str;   /* PAD-1284: a std::string as Spike 2 holds it */\n" + jsong + "\nstatic struct jsong jsong[JUKE_SONGS];\nstatic unsigned n_jsong;\n"
              "static short juke_recent[JUKE_RECENT * JUKE_POOLS];\nstatic unsigned n_juke_recent;\n"
              "static unsigned clipv_rng;\n"
              # PAD-1012: the songs drawn this game; a harness "g" starts a new game

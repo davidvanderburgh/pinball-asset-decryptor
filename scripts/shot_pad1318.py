@@ -1,6 +1,8 @@
 """PAD-1318 proof shot: the Multi-boot help names Escape on a USB keyboard as the Jersey Jack way back to the menu.
 
-    python scripts/shot_pad1318.py <repo> <out.png>
+    python scripts/shot_pad1318.py <repo> <out.png> [<section> <line>]
+
+(help_jjp: "Jersey Jack (install stick or SSD)" "Use a USB port on the computer")
 
 Serves <repo> on an empty scratch project, opens Help on the Multi-boot tab's What it does section and
 centres its bullet list (The countdown boots the remembered choice...). After, the Back to the menu line ends
@@ -27,9 +29,16 @@ sys.exit(host.main())
 '''
 
 
+SECTION = "What it does"
+LINE = "The countdown boots the remembered choice"
+
+
 def main():
     repo = os.path.abspath(sys.argv[1])
     out = os.path.abspath(sys.argv[2])
+    global SECTION, LINE
+    if len(sys.argv) > 3:
+        SECTION, LINE = sys.argv[3], sys.argv[4]
     scratch = tempfile.mkdtemp(prefix="pad1309-")
     project = os.path.join(scratch, "project")
     os.makedirs(project)
@@ -58,9 +67,9 @@ def main():
             time.sleep(2)
             page.locator(".sx-tips .hd select").select_option(value="Multi-boot")
             time.sleep(1.5)
-            page.locator(".sx-tips").get_by_text("What it does", exact=True).first.click()
+            page.locator(".sx-tips").get_by_text(SECTION, exact=True).first.click()
             time.sleep(1)
-            line = page.locator(".sx-tips").get_by_text("The countdown boots the remembered choice", exact=False).first
+            line = page.locator(".sx-tips").get_by_text(LINE, exact=False).first
             line.scroll_into_view_if_needed()
             page.evaluate("(el) => el.scrollIntoView({block: 'center'})", line.element_handle())
             time.sleep(1)

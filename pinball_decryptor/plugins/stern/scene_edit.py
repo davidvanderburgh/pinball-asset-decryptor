@@ -142,6 +142,11 @@ FIT_KEY = "_fit"
 #: ``{card: [node, ...]}``: the nodes laid out over a kept picture at its own size, so they
 #: keep drawing it so (PAD-981)
 OWN_KEY = "_own"
+#: ``{card: {node: [w, h]}}``: PAD-1301, the size of the picture each of those nodes was laid
+#: out over, kept from the moment another picture took its place: the new one is fitted into
+#: that box instead of drawn at its own size (DoomWalrus666: DragonRR's 4000x2860 Battle Select
+#: cards, on his own-size card nodes, drew six times too big)
+OWN_BOX_KEY = "_own_box"
 
 
 def _raw(assets_dir):
@@ -193,14 +198,66 @@ def own_size_nodes(assets_dir, card):
     return frozenset(own & _laid_out((data or {}).get(card))) if own else frozenset()
 
 
-def mark_own(man, nodes):
+def own_boxes(assets_dir, card):
+    """``{node: (w, h)}``: of :func:`own_size_nodes`, the ones whose picture was replaced since
+    their layout was made, each with the size of the picture it was made over (PAD-1301,
+    :data:`OWN_BOX_KEY`): a picture of another size is fitted and centred in that box, the way
+    the layout's own picture filled it."""
+    data = _raw(assets_dir) or {}
+    got = data.get(OWN_BOX_KEY) if isinstance(data.get(OWN_BOX_KEY), dict) else {}
+    boxes = got.get(card) if isinstance(got.get(card), dict) else {}
+    if not boxes:
+        return {}
+    own = own_size_nodes(assets_dir, card)
+    out = {}
+    for k, v in boxes.items():
+        try:
+            nid, w, h = int(k), int(v[0]), int(v[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if nid in own and w > 0 and h > 0:
+            out[nid] = (w, h)
+    return out
+
+
+def pin_own_boxes(assets_dir, boxes):
+    """Keep ``{card: {node: (w, h)}}`` as the boxes of those own-size nodes (:func:`own_boxes`),
+    each only the first time: the size of the picture the layout was made over."""
+    data = _raw(assets_dir)
+    if not isinstance(data, dict) or not boxes:
+        return
+    have = data.get(OWN_BOX_KEY) if isinstance(data.get(OWN_BOX_KEY), dict) else {}
+    have = {k: dict(v) for k, v in have.items() if isinstance(v, dict)}
+    changed = False
+    for card, nodes in boxes.items():
+        cur = have.setdefault(card, {})
+        for nid, (w, h) in nodes.items():
+            if str(nid) not in cur and w and h:
+                cur[str(nid)] = [int(w), int(h)]
+                changed = True
+    if not changed:
+        return
+    data[OWN_BOX_KEY] = {k: v for k, v in have.items() if v}
+    with open(path_of(assets_dir), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=1, sort_keys=True)
+
+
+def mark_own(man, nodes, boxes=None):
     """Preview manifest *man* with each of *nodes* marked ``own`` (its kept picture drawn at
-    its own size, :func:`own_size_nodes`); *man* itself is changed and returned."""
+    its own size, :func:`own_size_nodes`), and ``own_box`` where *boxes* (:func:`own_boxes`)
+    has one; *man* itself is changed and returned."""
     if nodes:
         for n, _sibs in _man_index(man).values():
             if n.get("id") in nodes:
                 n["own"] = True
+                if boxes and n["id"] in boxes:
+                    n["own_box"] = list(boxes[n["id"]])
     return man
+
+
+def mark_own_of(man, assets_dir, card):
+    """:func:`mark_own` with *card*'s own-size nodes and their boxes in *assets_dir*."""
+    return mark_own(man, own_size_nodes(assets_dir, card), own_boxes(assets_dir, card))
 
 
 def save(assets_dir, edits):
@@ -212,11 +269,16 @@ def save(assets_dir, edits):
         except OSError:
             pass
         return
-    own = {k: v for k, v in _own_of(_raw(assets_dir)).items() if k in edits}
+    raw = _raw(assets_dir)
+    own = {k: v for k, v in _own_of(raw).items() if k in edits}
+    boxes = (raw or {}).get(OWN_BOX_KEY) if isinstance((raw or {}).get(OWN_BOX_KEY), dict) else {}
+    boxes = {k: v for k, v in boxes.items() if k in own and isinstance(v, dict) and v}
     data = dict(edits)
     data[FIT_KEY] = 1
     if own:
         data[OWN_KEY] = own
+    if boxes:
+        data[OWN_BOX_KEY] = boxes
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=1, sort_keys=True)

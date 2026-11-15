@@ -913,6 +913,21 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
             return ""
         return self._rep_names.get(rel, "")
 
+    def _pin_own_boxes(self, assets_dir, data):
+        """PAD-1301: a Scenes node laid out over a picture kept at its own size keeps that
+        picture's box before a new pick takes its place (scene_share.pin_own_boxes)."""
+        was, kept = dict(data.get("image") or {}), set(data.get("image_keep_size") or ())
+        now, keep = self._assignments, self._keep_size
+        changed = [r for r in set(was) | set(now)
+                   if was.get(r) != now.get(r) or (r in kept) != (r in keep)]
+        if not changed:
+            return
+        try:
+            from ...plugins.stern import scene_share
+            scene_share.pin_own_boxes(assets_dir, changed, was, kept)
+        except Exception:                            # noqa: BLE001 - the save goes on
+            pass
+
     def _save_staged_changes(self):
         """The image sections of the sidecar (every other tab's sections are
         re-read from the file and written back untouched, so one tab's save
@@ -926,6 +941,7 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
         if self._live(assets_dir):
             hist += history_log.diff_assignments(
                 "image", data.get("image"), self._assignments)
+            self._pin_own_boxes(assets_dir, data)
             data["image"] = dict(self._assignments)
             data["image_keep_size"] = sorted(
                 r for r in self._keep_size if r in self._assignments)

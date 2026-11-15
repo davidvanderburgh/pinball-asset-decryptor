@@ -5168,13 +5168,15 @@ def _stage_grown_radiums(reader, grown_radium, radium_overlays, grow_dir, log,
             # PAD-865: a picture kept at its own size shows in the original's place and
             # size, fitted and centred, over whatever the Scenes window did to its node
             try:
-                own = ()
+                own, boxes = (), {}
                 if assets_dir:
-                    # PAD-981: a layout made over the picture at its own size stays so
+                    # PAD-981: a layout made over the picture at its own size stays so;
+                    # PAD-1301: in that picture's box once another has taken its place
                     from . import scene_edit as _scene_edit
                     own = _scene_edit.own_size_nodes(assets_dir, card_path)
+                    boxes = _scene_edit.own_boxes(assets_dir, card_path)
                 new, n_fit, n_box, n_left = radium_grow.keep_boxes(bytes(buf), new,
-                                                                    got["images"], own)
+                                                                    got["images"], own, boxes)
             except Exception as e:                          # noqa: BLE001
                 n_fit = n_box = n_left = 0
                 log("Scene %s: its resized picture(s) couldn't be fitted to the original's "
@@ -6776,15 +6778,19 @@ def _radium_image_writes(reader, assets_dir, baseline, log, cancel,
         if sc is None or os.environ.get("PAD_KEEP_SIZE_FULL") == "1":
             return w, h
         how = facts[1].get(data_off) or {}
-        want = _rg.kept_texture_size(w, h, [(pad_w, pad_h)] + list(how.get("fills") or ()))
-        if want is None:
-            return w, h
-        own = ()
+        own, boxes = (), {}
         if assets_dir:
             from . import scene_edit as _scene_edit
             own = _scene_edit.own_size_nodes(assets_dir, radium_path)
+            boxes = _scene_edit.own_boxes(assets_dir, radium_path)
         tids = {tid for tid, t in sc.textures.items() if t.get("data_off") == data_off}
-        if not _rg.every_draw_fitted(sc, tids, own):
+        # PAD-1301: an own-size node with its box (scene_edit.own_boxes) is fitted too
+        mine = _rg.nodes_drawing(sc, tids) & set(boxes)
+        want = _rg.kept_texture_size(w, h, [(pad_w, pad_h)] + list(how.get("fills") or ())
+                                     + [boxes[n] for n in mine])
+        if want is None:
+            return w, h
+        if not _rg.every_draw_fitted(sc, tids, set(own) - mine):
             return w, h
         return want
 

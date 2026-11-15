@@ -248,6 +248,14 @@ def kept_texture_size(w, h, boxes, headroom=KEEP_HEADROOM):
     return max(1, int(round(w * s))), max(1, int(round(h * s)))
 
 
+def nodes_drawing(scene, tids):
+    """The ids of the nodes of *scene* (parsed) with a Bitmap of one of the textures *tids*."""
+    from .scene_edit import _tree_index
+    return {n.id for n, _sibs in _tree_index(scene).values()
+            if any(c.obj.kind == "Bitmap" and c.obj.body.get("tex") in tids
+                   for c in n.components)}
+
+
 def every_draw_fitted(scene, tids, own=()):
     """True when every node of *scene* (parsed, stock) that draws one of the textures *tids*
     has :func:`keep_boxes` fit it into its box: none draws it together with something else
@@ -262,7 +270,7 @@ def every_draw_fitted(scene, tids, own=()):
     return True
 
 
-def keep_boxes(stock, grown, offs, own=()):
+def keep_boxes(stock, grown, offs, own=(), own_boxes=None):
     """*grown* (a scene :func:`regrow` resized the pictures at the stock offsets *offs* in)
     with each of those pictures shown in its stock place and size, fitted and centred:
     ``(bytes, n nodes, n shapes, n left)``.  The nodes in *own* were moved or resized in the
@@ -278,7 +286,9 @@ def keep_boxes(stock, grown, offs, own=()):
     picture the Scenes preview draws.  A Shape's fill is squeezed into the Shape's box by
     the game (PAD-857), so its box is narrowed to the picture's shape, centred.  A node
     that also draws something else (another picture over its timeline, text, a group) is
-    left as it was and counted in *n left*."""
+    left as it was and counted in *n left*.  A node of *own* that *own_boxes* (``{node: (w,
+    h)}``, :func:`scene_edit.own_boxes`) gives a box is fitted into that box instead: the size
+    of the picture its layout was made over, since replaced (PAD-1301)."""
     from . import scene_tree
     from .scene_edit import _composed, _m16_with, _m6_of16, _tree_index
     sc0 = scene_tree.parse(stock)
@@ -306,7 +316,13 @@ def keep_boxes(stock, grown, offs, own=()):
             n_left += 1
             continue
         fit = fits.pop()
-        if fit is None or n.id in own:
+        if n.id in own:
+            box = (own_boxes or {}).get(n.id)
+            w, h = mine[0].body["w"], mine[0].body["h"]
+            if not box or not (w and h) or (w, h) == tuple(box):
+                continue
+            fit = fit_box(w, h, box[0], box[1])
+        elif fit is None:
             continue
         tracks = n.tracks or [(1, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])]
         n.tracks = [(f, _m16_with(m, _composed(_m6_of16(m), fit))) for f, m in tracks]

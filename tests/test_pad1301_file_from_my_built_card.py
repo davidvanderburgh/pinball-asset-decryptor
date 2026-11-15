@@ -156,14 +156,17 @@ def test_their_picture_for_my_added_one_is_shown_by_my_add(tmp_path):
     assert not (tmp_path / "images" / "scene_textures" / "added" / "Logo0_3.png").exists()
 
 
-def test_kept_at_its_own_size_the_add_takes_its_size(tmp_path):
+def test_kept_at_its_own_size_the_add_keeps_its_box(tmp_path):
+    # my moves and resizes of the add were made over its 30x8 picture (round 2: DragonRR's
+    # 4211x602 title kept its size and drew twice as wide); test_pad1301_kept_pictures_on_
+    # my_layout checks it is fitted and centred there
     proj = _project(tmp_path)
     X.save(proj, {CARD: _mine()})
     zp = _zip(tmp_path, _png((60, 16), (1, 2, 250, 255)))
     S.import_extras(proj, zp, _extras("images/scene_textures/added/Logo1_1.png", keep=True),
                     cards_here=[CARD])
     op = X.load(proj)[CARD][3]
-    assert (op["w"], op["h"]) == (60, 16)
+    assert (op["w"], op["h"]) == (30, 8)
 
 
 def test_the_page_loads_it_after_mine_with_their_logo(tmp_path):

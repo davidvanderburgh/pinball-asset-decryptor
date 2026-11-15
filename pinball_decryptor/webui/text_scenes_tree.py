@@ -200,7 +200,7 @@ class TreeEditMixin:
         if game:
             edited, _n = scene_edit.apply_manifest(edited, game)
         # PAD-981: a layout made over a kept picture at its own size draws it so
-        scene_edit.mark_own(edited, scene_edit.own_size_nodes(self.assets_dir, card))
+        scene_edit.mark_own_of(edited, self.assets_dir, card)
         return edited, notes
 
     def _tree_default(self, card):
@@ -1436,10 +1436,10 @@ class TreeEditMixin:
                               sizes.get(d["image"]))
             if size is None:
                 continue
-            if d.get("w") and d.get("h") and not d.get("own") \
-                    and scene_render.own_size(size, sizes.get(d["image"])):
-                d["m"] = scene_eval.compose(d["m"], radium_grow.fit_box(
-                    size[0], size[1], d["w"], d["h"]))
+            box = scene_render._kept_box(d, size, sizes.get(d["image"]))
+            if box:
+                d["m"] = scene_eval.compose(d["m"], radium_grow.fit_box(size[0], size[1], *box))
+                d.pop("own_box", None)           # fitted here, not again when drawn (PAD-1301)
             d["w"], d["h"] = size
 
     def _tree_unselect(self):

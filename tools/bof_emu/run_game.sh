@@ -185,6 +185,20 @@ if [ -z "$BOF_TUNABLES" ] && [ "${PAD_MEMCPY_TUNE:-}" != 0 ]; then
     fi
 fi
 
+# PAD-1309: BOF_MENU_SO=<padmenu.so> puts the multi-boot card's EXIT-hold object in front of
+# the port shim, as the profile's hook block does on the machine.  The restart it asks for is a
+# stand-in that leaves $BOF_RIG/padmenu.restart: a real reboot from the rig is never right (and
+# padmenu.so refuses one in a run whose BOFHW_DEV is set and that gives it no stand-in).
+MENU_PRE=""
+MENU_ARGS=()
+if [ -n "${BOF_MENU_SO:-}" ] && [ -f "$BOF_MENU_SO" ]; then
+    cp -f "$BOF_MENU_SO" "$BOF_RIG/padmenu.so" && chmod 755 "$BOF_RIG/padmenu.so"
+    rm -f "$BOF_RIG/padmenu.restart"
+    MENU_PRE="$BOF_RIG/padmenu.so:"
+    MENU_ARGS=("CODESELECT_REBOOT=touch $BOF_RIG/padmenu.restart")
+    echo "run_game.sh: holding EXIT (switch 5) 5 s asks for a restart ($BOF_RIG/padmenu.restart)"
+fi
+
 cd "$BOF_RIG" || exit 3
 # shellcheck disable=SC2086
 setsid -f runuser -u "$BOF_USER" -- env -i \
@@ -193,7 +207,7 @@ setsid -f runuser -u "$BOF_USER" -- env -i \
     HOME="$HOMEDIR" USER="$BOF_USER" LANG=C.UTF-8 \
     DISPLAY="$DISP" XDG_RUNTIME_DIR="$BOF_RIG" $AUDIO_ENV $GL_ENV \
     BOFEMU_LOG_DIR="$BOF_RIG" GODOT_SILENCE_ROOT_WARNING=1 \
-    LD_PRELOAD="$BOF_RIG/bofhwshim.so" BOFHW_DEV="$BOF_RIG/hw/dev" BOFHW_SYS="$BOF_RIG/hw/sys" \
+    "${MENU_ARGS[@]}" LD_PRELOAD="$MENU_PRE$BOF_RIG/bofhwshim.so" BOFHW_DEV="$BOF_RIG/hw/dev" BOFHW_SYS="$BOF_RIG/hw/sys" \
     "$BIN" --display-driver x11 --rendering-method gl_compatibility \
         --audio-driver $AUDIO_ARG < /dev/null > "$BOF_RIG/game.log" 2>&1
 for _ in $(seq 1 50); do

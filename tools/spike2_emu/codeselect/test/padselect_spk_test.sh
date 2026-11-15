@@ -230,5 +230,23 @@ else
     bad "8c Halloween again ($(ls "$G" | tr '\n' ' '), owner $(cat "$P/home_owner" 2>&1))"
 fi
 
+# 9 PAD-1309: padmenu.so beside the menu -> the game starts with it first in LD_PRELOAD and
+#   told its board and the coin door's BACK (spk.conf B=)
+: > "$P/padmenu.so"
+echo "B=63" >> "$P/spk.conf"
+for g in "$P"/b*/uptest/main.x86_64; do
+    rm -f "$g"
+    printf '#!/bin/sh\necho "$LD_PRELOAD|$PADMENU_PROTO|$PADMENU_SWITCH" > %s/env\necho "$0 $(pwd) $*" >> %s/started\n' "$T" "$T" > "$g"
+    chmod +x "$g"
+done
+rm -f "$T/env"
+env -u LD_PRELOAD bash -c "$(declare -f run); T='$T' P='$P' U='$U' RUN_SW='${RUN_SW:-}'; run" >/dev/null
+if [ "$(cat "$T/env" 2>/dev/null)" = "$P/padmenu.so|pinotaur|63" ]; then
+    ok "9 padmenu.so first in the game's LD_PRELOAD, board pinotaur, BACK 63"
+else
+    bad "9 the game's env was '$(cat "$T/env" 2>&1)'"
+fi
+rm -f "$P/padmenu.so"
+
 echo "padselect_spk_test: $([ $FAILS = 0 ] && echo OK || echo "$FAILS FAILED")"
 exit $((FAILS > 0))

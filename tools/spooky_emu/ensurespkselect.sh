@@ -31,7 +31,7 @@ BUILD=${SPK_SELECTOR_BUILD:-/var/tmp/spkselect_build}
 # a build folder another user made (a rig run as root) is not ours to write the log into
 if [ -e "$BUILD" ] && [ ! -w "$BUILD" ]; then BUILD=$BUILD.$(id -u); fi
 DEJAVU=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
-FILES="spkselect spksw padselect.sh dpprocsw padselect_proc.sh"
+FILES="spkselect spksw padselect.sh dpprocsw padselect_proc.sh padmenu.so"
 
 ok() {
     if [ ! -f "$SEL/font.ttf" ] && [ -f "$DEJAVU" ]; then
@@ -48,7 +48,7 @@ for f in $FILES; do [ -f "$SEL/$f" ] || installed=0; done
 if [ "$installed" = 1 ]; then
     [ "$PREVIEW" = 1 ] && ok
     stale=0
-    for f in "$SRC"/*.c "$SRC"/*.h "$SRC"/Makefile "$SRC"/padselect_spk.sh "$SRC"/padselect_proc.sh "$SRC"/themes.json; do
+    for f in "$SRC"/*.c "$SRC"/*.h "$SRC"/Makefile "$SRC"/padselect_spk.sh "$SRC"/padselect_proc.sh "$SRC"/padmenu_proc.py "$SRC"/themes.json; do
         [ -e "$f" ] || continue
         [ "$f" -nt "$SEL/spkselect" ] && { stale=1; break; }
     done
@@ -70,8 +70,10 @@ if ! make -C "$SRC" PLATFORM=spk BUILD="$BUILD" all >"$log" 2>&1; then
 fi
 install -m 755 "$BUILD/spkselect" "$SEL/spkselect.new" && mv -f "$SEL/spkselect.new" "$SEL/spkselect" \
     && install -m 755 "$BUILD/spksw" "$SEL/spksw" \
+    && install -m 755 "$BUILD/padmenu.so" "$SEL/padmenu.so" \
     && install -m 755 "$SRC/padselect_spk.sh" "$SEL/padselect.sh" \
     && install -m 755 "$BUILD/dpprocsw" "$SEL/dpprocsw" \
     && install -m 755 "$SRC/padselect_proc.sh" "$SEL/padselect_proc.sh" \
+    && install -m 644 "$SRC/padmenu_proc.py" "$SEL/padmenu_proc.py" \
     || fail "cannot install into $SEL"
 ok

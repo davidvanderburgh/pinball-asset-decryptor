@@ -643,6 +643,72 @@ in greys, and image 1's runtime played mode 2 from the MUSIC MODE the other edit
 store).  Apply to card with the tick off (`--no-editions`) brought the menu back, highlighting the
 image the editions boot had remembered; on again, the card booted by EDITION.
 
+## Back to the menu without a power cycle (PAD-1309)
+
+A tester: "a way to call up the multi-boot menu without having to turn the machine off and
+then back on".  **Hold BACK on the coin door for 3 s during a game** (Menu settings: Hold BACK, the card's `back_hold=`; 0 = off) and the machine restarts
+into the menu, as at power-up.
+
+**How the game's own button is seen.**  `padmenu.so` (padmenu.c) is preloaded into THE GAME by
+the multi-boot form of the game_monitor hook (`modehook.MENU_HOOK_LINES`: padmenu.so and the
+booted image's mode.so, each when it is there; `mkmulticard.ensure_menu_hook` on every inject).
+It passes every call through.  It remembers the fd the game opens for the cabinet chain,
+`/dev/spidev1.0` (any fd: the rig's shim answers with a stand-in), and after each of the game's
+own 8-byte SPI_IOC_MESSAGE transfers on it reads rx[1] bit 3, Service Back, active low - the
+hardware, so the same on every title and version.  It never sends a byte (the tx half drives
+the amplifier enable).  Only that device counts: another SPI device's bytes read as BACK would
+restart a machine nobody asked to.  An unbroken hold runs `select.sh --reboot` (`sync;
+reboot`) once, detached, with no LD_PRELOAD.  A 2 s press (autoattract's, a tech's tap) does
+nothing.
+
+**Spike 3** (`-DPADMENU_S3`, `make PLATFORM=s3`): BACK is rx[0] bit 3 of `/dev/spidev4.0`.
+padselect_s3.sh copies padmenu.so to /tmp before the bind over /games hides /games/pad, and
+puts it first in the game's LD_PRELOAD (a mode hook appends after it); the restart is `sync;
+reboot` itself.  A game restarted by game_monitor after a crash runs without it until the next
+boot.
+
+**In the emulators** a real reboot is never right (the guest runs as root on the PC's Linux):
+each rig passes `CODESELECT_REBOOT`, and padmenu.so does nothing when it sees a rig's
+variables without one.  Spike 2: `run_game.sh` preloads it on menu runs and the restart is
+`dump/reboot.req` (+ `dump/padmenu.restart`, kept), which watch.sh boots from the menu.  Spike
+3: `s3run.sh` leaves `connectivity/dump/padmenu.restart`; `PAD_S3_MENU_SO` tries the object on
+any card.
+
+**Proven in the emulator, 2026-11-14.**  Spike 2: a two-image Godzilla LE 1.16 card built by
+mkmulticard (game_monitor hooked), booted with the menu; in attract a 2 s BACK did nothing; a
+6.5 s hold from 20:46:44 -> padmenu asked at 20:46:49.56 -> watch.sh restarted -> the menu came
+up again -> it booted again.  Spike 3: Fallout LE 0.82 with padmenu.so in front of the rig's
+shims; a 2 s BACK nothing; a 6.5 s hold -> the restart asked 6.1 s in, `padmenu: BACK held` in
+the game's stderr.  `test/padmenu_test.sh` (none / hold / pulse / another device / a rig with no
+stand-in), `select_sh_test.sh --reboot`, `padselect_s3_test.sh`, mkmulticard selftest part 9b.
+
+### The other makers (PAD-1309, run 2)
+
+* **Barrels of Fun** (`make PLATFORM=bof`, `-DPADMENU_FAST`): the game's FAST Neuron port
+  (`/dev/ttyACM*`) pushes `-L:05` / `/L:05` when EXIT (switch 5 on every title) changes;
+  padmenu.so passes `read()` / `__read_chk()` through and reads those lines, and a thread of its
+  own times the hold (lines come only on a change).  The update's `.bash_profile` hook exports
+  LD_PRELOAD for the loop that starts the game.  `sync; sudo -n reboot`.  x86-64, dlsym and
+  pthread pinned to GLIBC_2.2.5: it asks for 2.17 at most.
+* **Spooky** (the same object, `make PLATFORM=spk`): padselect_spk.sh starts the game with it,
+  `PADMENU_PROTO=warden|pinotaur` and `PADMENU_SWITCH` from spk.conf's `B=` (94 / 63).  The
+  boards' binary stream is followed a message at a time by opcode size, so a byte inside a
+  coil config or an LED row is never read as BACK.
+* **Spooky's P-ROC titles** (Rick and Morty, Alice Cooper): Python 2.7 procgame games, and the
+  rig runs a pure-Python pinproc, so the hook is Python (`padmenu_proc.py`, the game's
+  sitecustomize via PYTHONPATH): it wraps `pinproc.PinPROC` and asks the game's own `exit`
+  Switch `is_active()` on each `get_events()`.
+* **The Big Lebowski** already has a way back: Version Select in its service menu restarts the
+  game into the menu.
+* **Jersey Jack**: not yet.  The game is Sentinel-wrapped (no LD_PRELOAD), and `/dev/jjpio100`
+  pairs every read with an OUT frame the game drives at 1 kHz, so a second reader on it is not
+  safe; the way back has to come through the game's own exits (rungame.sh's loop).
+
+Proven on the real games in each rig: Dune (BoF), Looney Tunes (Warden), Halloween (Pinotaur),
+Rick and Morty and Alice Cooper (P-ROC): a 2 s press did nothing, a 6.5 s hold asked for the
+restart 5.1-5.8 s in.  Tests: `test/padmenu_fast_test.sh`, `tests/test_padmenu_proc.py`,
+`padselect_spk_test.sh` 9, `padselect_proc_test.sh` 9/9b, `test_mkbofmulti` (the profile).
+
 ## What is deliberately NOT in the proof of concept
 
 * Per-image NVRAM snapshots (settings/scores kept apart per image). Both

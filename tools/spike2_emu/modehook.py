@@ -75,6 +75,30 @@ HOOK_LINES = [
     "\tfi",
 ]
 
+#: THE MULTI-BOOT FORM (PAD-1309).  A multi-boot card's selector directory carries
+#: padmenu.so - BACK held 3 s (Hold BACK, back_hold=) on the coin door restarts the machine into the boot
+#: menu - and it has to be preloaded into the game whatever that image is, stock
+#: or with modes of its own.  So a multi-boot card's game_monitor carries this
+#: block instead of HOOK_LINES: each object preloaded when it is there, both when
+#: both are (padmenu.so first: it hands every ioctl on, so mode.so sees the game's
+#: calls exactly as it does without it), the stock line when neither is.  Still
+#: command-scoped, still one block strip_hook puts the stock line back for.
+#: mode_install.py's single-card hook stays HOOK_LINES, byte for byte.
+MENU_SO = "/usr/local/codeselect/padmenu.so"
+MENU_HOOK_LINES = [
+    "\t# padmode (item 128) + padmenu (PAD-1309): preload into THE GAME only.",
+    "\t# Command-scoped, so the restart lines below and conagent never see it.",
+    "\tPADPRE=",
+    "\t[ -f " + MENU_SO + " ] && PADPRE=" + MENU_SO,
+    "\t[ -f " + MODE_SO + " ] && PADPRE=${PADPRE:+$PADPRE:}" + MODE_SO,
+    "\tif [ -n \"$PADPRE\" ]; then",
+    "\t\tLD_PRELOAD=$PADPRE $1",
+    "\telse",
+    "\t\t$1",
+    "\tfi",
+]
+BLOCKS = (MENU_HOOK_LINES, HOOK_LINES)
+
 
 class Refused(Exception):
     """The script is not what we expect, so nothing is written. Never a guess."""
@@ -93,12 +117,20 @@ def strip_hook(text):
     block is not there, so it is safe to call on a stock script.
     """
     lines = _lines(text)
-    n = len(HOOK_LINES)
-    for k in range(len(lines) - n + 1):
-        if lines[k:k + n] == HOOK_LINES:
-            lines[k:k + n] = [RUN_LINE]
-            return "\n".join(lines)
+    for block in BLOCKS:
+        n = len(block)
+        for k in range(len(lines) - n + 1):
+            if lines[k:k + n] == block:
+                lines[k:k + n] = [RUN_LINE]
+                return "\n".join(lines)
     return "\n".join(lines)
+
+
+def has_menu_hook(text):
+    """True when this script carries the multi-boot block (MENU_HOOK_LINES)."""
+    lines = _lines(text)
+    n = len(MENU_HOOK_LINES)
+    return any(lines[k:k + n] == MENU_HOOK_LINES for k in range(len(lines) - n + 1))
 
 
 def has_hook(text):
@@ -114,14 +146,19 @@ def has_hook(text):
     return strip_hook(t) != t
 
 
-def hook_game_monitor(text):
-    """Replace the stock `\\t$1` line with the guarded preload block.
+def hook_game_monitor(text, menu=None):
+    """Replace the stock `\\t$1` line with the guarded preload block: the
+    multi-boot one (MENU_HOOK_LINES) when `menu`, HOOK_LINES when not, and when
+    `menu` is None whichever the script already carries (so a mode install on a
+    multi-boot card keeps padmenu.so preloaded).
 
     Idempotent: an already hooked script comes out the same, because the block is
     stripped first. Anything unexpected about the anchor raises Refused - the
     same discipline as mkmulticard.hook_game_script, which is what keeps a card
     build from editing a script it does not recognise.
     """
+    if menu is None:
+        menu = has_menu_hook(text)
     text = strip_hook(text)
     lines = _lines(text)
     hits = [k for k, l in enumerate(lines) if l == RUN_LINE]
@@ -131,11 +168,14 @@ def hook_game_monitor(text):
             "stock Spike 2 game_monitor and nothing has been written"
             % (RUN_LINE, len(hits)))
     k = hits[0]
-    lines[k:k + 1] = HOOK_LINES
+    lines[k:k + 1] = MENU_HOOK_LINES if menu else HOOK_LINES
     return "\n".join(lines)
 
 
 def describe(text):
     """One line for a log: whether this script carries the mode hook."""
+    if has_menu_hook(text):
+        return ("game_monitor: multi-boot hook present, preloading %s and %s when there"
+                % (MENU_SO, MODE_SO))
     return ("game_monitor: mode hook present, preloading " + MODE_SO
             if has_hook(text) else "game_monitor: stock (no mode hook)")

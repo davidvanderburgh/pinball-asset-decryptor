@@ -51,6 +51,7 @@ done
 # 4. SIGKILL whatever ignored SIGTERM (a hung client is worse than a ghost).
 pkill -9 -f 'jjpsw\.py' 2>/dev/null
 pkill -9 -f "Xephyr $NEST" 2>/dev/null
+pkill -9 -f "Xvfb $NEST" 2>/dev/null       # a hidden run's screen (PAD_HIDDEN=1): no window to ghost
 
 # 5. The boards, the volume follower (jjpvol.py, started by audio.sh) and a
 #    matrix waiting on a game that will not come now (jjpsw_launch.sh

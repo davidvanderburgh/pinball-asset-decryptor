@@ -10,6 +10,8 @@
 #   jjpsw_launch.sh --await-game  detached, while the menu is up: once the game
 #                                 runs, read its tables, and reopen a
 #                                 cabinet-only matrix onto them
+#   jjpsw_launch.sh --dump-only   a hidden run (PAD_HIDDEN=1): refresh the
+#                                 device dump, open nothing
 #
 # Runs as the DESKTOP USER, not root, even though the rest of the rig is root:
 # the UI is a Tk window and needs that user's WSLg session.  The shared block
@@ -267,6 +269,14 @@ if [ "$(id -u)" = "0" ]; then
         open_for_menu
         exit $?
         ;;
+    --dump-only)
+        # A HIDDEN run (PAD_HIDDEN=1) opens no matrix, but the next boot's rest
+        # seed (seed_rest.py) and jjppoke.py read this title's tables from
+        # $DUMP - left stale, a GnR run seeded an EMPTY trough off an older
+        # build's table and Start only asked for money (PAD-1335).
+        read_tables
+        exit $?
+        ;;
     --await-game)
         # Up to ten minutes in the menu, and gone as soon as the run is: a menu
         # that closed with no game after it (a Stop) has nothing to read.
@@ -310,7 +320,7 @@ if [ "$(id -u)" = "0" ]; then
         exit $?
         ;;
     *)
-        echo "usage: jjpsw_launch.sh [--menu | --await-game]" >&2
+        echo "usage: jjpsw_launch.sh [--menu | --await-game | --dump-only]" >&2
         exit 64
         ;;
     esac

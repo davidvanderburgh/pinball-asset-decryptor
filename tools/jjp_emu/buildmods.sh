@@ -7,10 +7,18 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/padpath.sh"
-mountpoint -q "$JJP_JAIL" || { echo "buildmods.sh: jail not mounted; run jail.sh" >&2; exit 3; }
+# JJP_MODS_LIBDIR=<dir with libc.so.6 [libpthread.so.0 libdl.so.2]>: link against
+# those instead of the mounted title's.  The library that goes on every title's
+# ISO is linked against the OLDEST image's glibc (MODES.md, "Titles"): symbols
+# keep their old versions on a newer glibc, never the other way round.
+if [ -n "${JJP_MODS_LIBDIR:-}" ]; then
+    CHROOT_LIB=$JJP_MODS_LIBDIR
+else
+    mountpoint -q "$JJP_JAIL" || { echo "buildmods.sh: jail not mounted; run jail.sh (or set JJP_MODS_LIBDIR)" >&2; exit 3; }
+fi
 OUT=${JJP_MODS_SO:-/var/tmp/jjpmodes.so}
 OBJ=/var/tmp/jjpmodes.o
-CHROOT_LIB="$JJP_JAIL/lib/x86_64-linux-gnu"
+CHROOT_LIB=${CHROOT_LIB:-"$JJP_JAIL/lib/x86_64-linux-gnu"}
 # A running game maps the copy run_game.sh put in the jail, never $OUT, so a
 # rebuild here cannot SIGBUS it.  -std=gnu11 keeps glibc 2.38+ headers from
 # redirecting strtol to __isoc23_strtol, which the image's glibc lacks.

@@ -75,6 +75,12 @@ static void lg(const char *fmt, ...)
     pthread_mutex_unlock(&log_mu);
 }
 
+static long now_ms(void)
+{
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+}
+
 static void *sym(const char *name) { return name && *name ? dlsym(RTLD_DEFAULT, name) : NULL; }
 static void *need(const char *name)
 {
@@ -104,7 +110,7 @@ typedef void (*plot_os_t)(const void *font, ALLEGRO_COLOR c, ALLEGRO_COLOR outli
                           ALLEGRO_COLOR shadow, int so, float x, float y, int flags, const char *t);
 
 static mode_ctor_t mode_ctor;
-static int_fn_t state_get, balls_in_play, ball_number, player_up;
+static int_fn_t state_get, balls_in_play;
 static int ingame_state = 5;
 
 /* Mode vtable slot byte offsets (from the vptr), found at install. */
@@ -139,10 +145,11 @@ typedef struct {
     unsigned lamp_rgb; int lamp_blink;
     void *font_title, *font_value, *font_timer;
     unsigned title_rgba, value_rgba, timer_rgba, panel_rgba;
-    int game_modes, ball_end, panel;     /* panel: 0 middle, 1 bottom, 2 top */
+    int game_modes, panel;     /* panel: 0 middle, 1 bottom, 2 top */
     /* runtime */
     void *mode;
     int count, hits, secs, paused, ended_logged;
+    const char *volatile want_end;     /* an end asked for outside a proc, done in the mode's own tick */
     long long total;
     int running_seen;
 } pm_t;
@@ -156,6 +163,7 @@ static int nwsw;
 
 static char moddir[512];
 static int background_explicit;                 /* title.cfg named them */
+static char game_name[64];                      /* title.cfg `game`: GAMENAME these modes are for */
 static char background_names[1024];
 
 /* ---- config parsing -------------------------------------------------------- */
@@ -266,9 +274,9 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     else if (!strcmp(k, "panel_color")) m->panel_rgba = parse_rgba(v, m->panel_rgba);
     else if (!strcmp(k, "game_modes"))
         m->game_modes = !strcmp(v, "end") ? POLICY_END : !strcmp(v, "ignore") ? POLICY_IGNORE : POLICY_PAUSE;
-    else if (!strcmp(k, "ball_end")) m->ball_end = !strcmp(v, "keep");
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : 0;
     else if (!strcmp(k, "ingame_state")) ingame_state = (int)num(v);
+    else if (!strcmp(k, "game")) snprintf(game_name, sizeof game_name, "%s", v);
     else if (!strcmp(k, "background_modes")) {
         background_explicit = 1;
         snprintf(background_names, sizeof background_names, " %s ", v);
@@ -313,6 +321,14 @@ static void load_modes(void)
     snprintf(base.file, sizeof base.file, "title.cfg");
     snprintf(path, sizeof path, "%s/title.cfg", moddir);
     if (load_file(&base, path)) lg("title defaults from %s", path);
+    /* A mode ISO made from a multi-boot ISO hooks root A's rungame.sh, which
+     * also starts image 1's game: modes written for one title stay out of
+     * another. */
+    const char *gn = getenv("GAMENAME");
+    if (*game_name && gn && *gn && strcmp(gn, game_name)) {
+        lg("these modes are for %s; this game is %s - not loading them", game_name, gn);
+        return;
+    }
     DIR *d = opendir(moddir);
     if (!d) { lg("no mode folder %s", moddir); return; }
     char *names[MAX_MODES * 2]; int nn = 0;
@@ -341,11 +357,10 @@ static void load_modes(void)
         if (!m->nstart) { lg("%s: no start shot found; mode skipped", m->file); continue; }
         if (m->seconds < 1) m->seconds = 1;
         lg("mode %d \"%s\" (%s): %d start shot(s) x%d, %d scoring, %lld a shot, %d s, complete %d (+%lld), "
-           "%d lamp(s), game modes=%s, ball end=%s",
+           "%d lamp(s), game modes=%s",
            npm, m->name, m->file, m->nstart, m->start_count, m->nshot, m->points, m->seconds, m->complete,
            m->complete_points, m->nlamp,
-           m->game_modes == POLICY_END ? "end" : m->game_modes == POLICY_IGNORE ? "ignore" : "pause",
-           m->ball_end ? "keep" : "end");
+           m->game_modes == POLICY_END ? "end" : m->game_modes == POLICY_IGNORE ? "ignore" : "pause");
         npm++;
     }
     for (int i = 0; i < nn; i++) free(names[i]);
@@ -422,12 +437,12 @@ static int gm_running(int i)
 }
 
 /* What a custom mode would be yielding to right now, or NULL. */
-static int multiball_frames;     /* frames in a row with more than one ball in play */
+static long multiball_since;     /* ms clock when more than one ball came into play, 0 = not */
 static const char *game_busy(void)
 {
     /* A multiball is more than one ball for half a second: the count blips
      * (GnR read 6 for one frame while a ball sat in the shooter lane). */
-    if (multiball_frames >= 30) return "multiball";
+    if (multiball_since && now_ms() - multiball_since >= 500) return "multiball";
     for (int i = 0; i < ngm; i++)
         if (!gmode_bg[i] && !is_ours(gmodes[i]) && gm_running(i)) return gmode_sym[i];
     return NULL;
@@ -557,7 +572,14 @@ static void pad_tick_work(void *self, int arg)
 {
     (void)arg;
     pm_t *m = pm_of(self);
-    if (m) m->secs = *(int *)((char *)self + mode_seconds_off);
+    if (!m) return;
+    m->secs = *(int *)((char *)self + mode_seconds_off);
+    const char *why = m->want_end;
+    if (why) {      /* in the mode's own run proc: where the game itself ends a mode */
+        m->want_end = NULL;
+        ((vfn0_t)vslot(self, VT_END))(self);
+        lg("\"%s\" ENDED by %s", m->name, why);
+    }
 }
 static int pad_is_timer_paused(void *self)
 {
@@ -642,9 +664,17 @@ static void start_mode(pm_t *m, int idx)
     lg("\"%s\" STARTED for %d s", m->name, m->seconds);
 }
 
+/* Mode::end runs on the game's proc thread like all the game's own mode
+ * changes: called from a proc (a switch dispatch) it ends the mode at once;
+ * called from the render thread it is handed to the mode's own tick hook. */
+static int (*am_proc)(void);
 static void end_mode(pm_t *m, const char *why)
 {
     if (!running(m)) return;
+    if (am_proc && !am_proc()) {
+        if (!m->want_end) { m->want_end = why; m->paused = 0; lg("\"%s\" ending (%s)", m->name, why); }
+        return;
+    }
     ((vfn0_t)vslot(m->mode, VT_END))(m->mode);
     lg("\"%s\" ENDED by %s", m->name, why);
 }
@@ -723,34 +753,38 @@ static swd_t wrappers[MAX_SW] = { R8(0), R8(1), R8(2), R8(3), R8(4), R8(5), R8(6
 _Static_assert(sizeof wrappers / sizeof *wrappers == MAX_SW, "one wrapper per shot slot");
 
 /* ---- per frame: pause / end rules, lamps, screen --------------------------- */
-static int last_ball = -1, last_player = -1, was_ingame;
+static int was_ingame, last_state = -1, attract_state = -1;
 static unsigned long frames;
-static long bg_snapshot_at = -1;
+static long bg_snapshot_at = -1;      /* ms clock */
 
+/* jjpe_state_get() == ingame_state (5) means a BALL is in play: the state
+ * leaves it between balls (bonus) and in attract.  A ball ending ends a custom
+ * mode, as it ends the game's own: the game stops the mode's run proc there
+ * whatever we do.  Start-shot counts reset when a new game leaves attract (the
+ * state seen when we installed). */
 static void per_frame(void)
 {
-    int ig = in_game();
+    int st = state_get();
+    if (st != last_state) {
+        lg("game state %d -> %d", last_state, st);
+        if (last_state == attract_state && st != attract_state)
+            for (int i = 0; i < npm; i++) pms[i].count = 0;
+        last_state = st;
+    }
+    int ig = st == ingame_state;
     if (ig && !was_ingame) {
-        for (int i = 0; i < npm; i++) pms[i].count = 0;
-        lg("game started");
-    }
-    if (!ig && was_ingame) {
-        for (int i = 0; i < npm; i++) end_mode(&pms[i], "game over");
-        lg("game over");
-    }
-    was_ingame = ig;
-    if (!ig) { last_ball = -1; return; }
-    int b = ball_number ? ball_number() : 0, p = player_up ? player_up() : 0;
-    if (b != last_ball || p != last_player) {
-        if (last_ball >= 0)
-            for (int i = 0; i < npm; i++) if (!pms[i].ball_end) end_mode(&pms[i], "ball end");
-        lg("ball %d, player %d", b, p);
-        last_ball = b; last_player = p;
+        lg("ball in play");
         /* modes running two seconds into a ball, before any of ours, are the
          * title's always-on modes (unless title.cfg named them) */
-        if (!background_explicit) bg_snapshot_at = (long)frames + 120;
+        if (!background_explicit) bg_snapshot_at = now_ms() + 2000;
     }
-    if (bg_snapshot_at >= 0 && (long)frames >= bg_snapshot_at) {
+    if (!ig && was_ingame) {
+        for (int i = 0; i < npm; i++) end_mode(&pms[i], "ball end");
+        lg("ball over");
+    }
+    was_ingame = ig;
+    if (!ig) return;
+    if (bg_snapshot_at >= 0 && now_ms() >= bg_snapshot_at) {
         bg_snapshot_at = -1;
         if (!any_ours_running())
             for (int i = 0; i < ngm; i++)
@@ -761,7 +795,8 @@ static void per_frame(void)
         static int last_bip = -1;
         int bip = balls_in_play ? balls_in_play() : -1;
         if (bip != last_bip) { lg("balls in play: %d", bip); last_bip = bip; }
-        multiball_frames = bip > 1 ? multiball_frames + 1 : 0;
+        if (bip > 1 && !multiball_since) multiball_since = now_ms();
+        else if (bip <= 1) multiball_since = 0;
     }
     for (int i = 0; i < npm; i++) {
         pm_t *m = &pms[i];
@@ -769,7 +804,8 @@ static void per_frame(void)
         int r = running(m);
         if (r) {
             const char *busy = m->game_modes == POLICY_IGNORE ? NULL : game_busy();
-            if (busy && m->game_modes == POLICY_END) { end_mode(m, busy); r = 0; }
+            if (m->want_end) r = 1;                       /* ending: leave it be */
+            else if (busy && m->game_modes == POLICY_END) end_mode(m, busy);
             else {
                 int p2 = busy != NULL;
                 if (p2 != m->paused) { m->paused = p2; lg("\"%s\" %s%s", m->name, p2 ? "PAUSED for " : "RESUMED", p2 ? busy : ""); }
@@ -777,9 +813,10 @@ static void per_frame(void)
         }
         if (r && m->paused) lamps_release(m);          /* the game mode has the lamps */
         else if (r) {
-            /* lamp_blink = flashes a second at ~60 frames a second; 0 = solid */
-            unsigned half = m->lamp_blink > 0 ? (unsigned)(30 / m->lamp_blink) : 0;
-            lamps_show(m, half == 0 || ((frames / (half ? half : 1)) & 1) == 0);
+            /* lamp_blink = flashes a second, by the clock (the frame rate is the
+             * game's business: the hidden rig draws ~7 a second); 0 = solid */
+            long half = m->lamp_blink > 0 ? 500L / m->lamp_blink : 0;
+            lamps_show(m, half == 0 || ((now_ms() / (half ? half : 1)) & 1) == 0);
         } else if (m->running_seen) {
             m->running_seen = 0; m->paused = 0;
             lamps_release(m);
@@ -909,8 +946,7 @@ static void *installer(void *arg)
     state_get = (int_fn_t)need("_Z14jjpe_state_getv");
     balls_in_play = (int_fn_t)sym("_Z28mb_get_logical_balls_in_playv");
     if (!balls_in_play) balls_in_play = (int_fn_t)sym("_Z20mb_get_balls_in_playv");
-    ball_number = (int_fn_t)sym("_Z26game_flow_get_ball_in_playv");
-    player_up = (int_fn_t)sym("_Z23game_flow_get_player_upv");
+    am_proc = (int (*)(void))sym("_Z16proc_am_i_a_procv");
     if (!resolve_vtable() || !mode_ctor || !state_get) { lg("FAIL: this game's engine lacks what a mode needs"); return NULL; }
     find_game_modes();
     if (getenv("JJP_MODS_TEST_GAMEMODE") && getenv("JJP_MODS_TEST_SWITCH")) {
@@ -931,9 +967,41 @@ static void *installer(void *arg)
         lg("shot %s \"%s\": dispatch %p (%s) wrapped", wsw[i].name, label ? label : "?", orig, on);
         hooked++;
     }
-    lg("installed: %d mode(s), %d shot switch(es), in-game state %d", npm, hooked, ingame_state);
+    attract_state = last_state = state_get();
+    lg("installed: %d mode(s), %d shot switch(es), ball-in-play state %d (now %d)", npm, hooked,
+       ingame_state, attract_state);
     installed = 1;
     return NULL;
+}
+
+/* JJP_MODS_SELFTEST=1: resolve the engine, the Mode vtable and every name the
+ * mode folder uses, print the verdict, and _exit before the game's own static
+ * constructors or main() run.  That proves, for a title whose key we do not
+ * have, that this library loads against that image's own glibc and finds what
+ * a mode needs - without starting the game (no key needed, nothing on screen,
+ * no hostname or reboot side effects).  Exit 0 = ready, 3 = not. */
+static void selftest(void)
+{
+    int bad = 0;
+    const char *must[] = { "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_", "_Z14jjpe_state_getv",
+                           "_ZN11SoundEffect4playEv", "_ZN10LampBufferC1EiPFvPS_EPKc9lb_flag_t",
+                           "_ZN4Lamp3setER10LampBufferhhhh", "_ZN4Lamp11transparentER10LampBuffer",
+                           "_ZN10LampBuffer10render_allEv", "_ZN8JJPEFont4fontEv", "al_flip_display" };
+    for (unsigned i = 0; i < sizeof must / sizeof *must; i++)
+        if (!sym(must[i])) { lg("SELFTEST missing %s", must[i]); bad++; }
+    if (!resolve_vtable()) { lg("SELFTEST Mode vtable did not resolve"); bad++; }
+    load_modes();
+    for (int i = 0; i < nwsw; i++)
+        if (!wsw[i].obj) bad++;
+    for (int i = 0; i < npm; i++) {
+        pm_t *m = &pms[i];
+        for (int s2 = 0; s2 < 4; s2++)
+            if (*m->snd_names[s2] && !(s2 == 0 ? m->snd_start : s2 == 1 ? m->snd_shot : s2 == 2 ? m->snd_end : m->snd_complete)) bad++;
+    }
+    lg("SELFTEST %s: pid %d, GAMENAME %s, %d mode(s), %d shot switch(es), %d problem(s)",
+       bad ? "FAIL" : "PASS", getpid(), getenv("GAMENAME") ? getenv("GAMENAME") : "?", npm, nwsw, bad);
+    fprintf(stderr, "jjpmodes selftest: %s (%d mode(s), %d problem(s))\n", bad ? "FAIL" : "PASS", npm, bad);
+    _exit(bad ? 3 : 0);
 }
 
 __attribute__((constructor)) static void jjpmodes_init(void)
@@ -952,6 +1020,7 @@ __attribute__((constructor)) static void jjpmodes_init(void)
         }
     }
     lg("loaded into pid %d", getpid());
+    if (getenv("JJP_MODS_SELFTEST")) selftest();
     pthread_t t;
     if (pthread_create(&t, NULL, installer, NULL) == 0) pthread_detach(t);
 }

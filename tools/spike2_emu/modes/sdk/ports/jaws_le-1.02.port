@@ -745,6 +745,7 @@ site  coop_add_player    0x002a2674 0xe92d4038 0xe3a00051
 data  coop_player        0x007c2098
 data  coop_players       0x00873ffc
 site  coop_first_ball    0x00474044 0xebf8b9c7 0xe1a04000
+site  coop_icon_draw         0x0032de24 0xebfffdf3 0xe1560004
 
 # ---- PAD-1202: co-op play - the ball start's "player N, you're up" call's read of the player up (portcoop.py) ----
 site  coop_up_call           0x00056374 0xeb0930d6 0xe3404086

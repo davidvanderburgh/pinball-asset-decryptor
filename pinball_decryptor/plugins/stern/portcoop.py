@@ -39,6 +39,10 @@ The bytes: the player up (1-4) at <player>, the ball in play at <player> + 1, th
   site  coop_panel_up[_n]     and its "player changed" checks' calls: answered with the teammate up
   site  coop_panel_name[_n]   (PAD-1267) the panel's calls of the game's "Insider name of player N" for a box's player:
                               answered through the co-op login swap, so each box names its own player
+  site  coop_panel_name_user  (PAD-1315) the box names' own user lookup: re-pointed instead of the name's player, so a
+                              guest's box reads its own "PLAYER n"
+  site  coop_icon_draw        (PAD-1315) the score frame overlay's call of its per-box avatar draw: answered with the
+                              place holding the box's own player's login (co-op swap), so each box shows its own icon
   site  coop_up_call          (PAD-1202) the ball start's "player N, you're up" process's call of the player-up
                               getter: answered with the real player in a co-op or team game
 
@@ -290,6 +294,115 @@ def panel_name_sites(e, getter, lit, look):
     return [("coop_panel_name" + ("_%d" % (i + 1) if i else ""), va) for i, va in enumerate(out[:4])]
 
 
+def _r1_from(w, j, k0):
+    """The register the last write of r1 before word j (back to word k0) copied, or None (r1 made any other way).
+    VFP, coprocessor and branch words are passed over."""
+    for q in range(j - 1, max(j - 24, k0), -1):
+        y = w[q]
+        if (y >> 24) & 0xE in (0xC, 0xE) or (y >> 25) & 7 == 5:
+            continue
+        if (y >> 12) & 0xF == 1 and (y >> 26) & 3 in (0, 1) and not ((y >> 26) & 3 == 1 and not (y >> 20) & 1):
+            return y & 0xF if y & 0xFFFFFFF0 == 0xE1A01000 else None
+    return None
+
+
+def login_reader(e):
+    """The framework's "player p's login" read - login(table, player 1..4, uuid out): `sub r3, r1, #1 ; cmp r3, #3`
+    then table + 20 * p + 4 (`add r1, r1, r1, lsl #2 ; add r0, r0, r1, lsl #2`), the entry PAD-1108 swaps - or None
+    when not exactly one (Godzilla Pro 1.16 0x27a840)."""
+    w, base = e.words, e.text_va
+    found = [base + 4 * k for k in range(len(w) - 12) if w[k] & PUSH_LR_MASK == PUSH_LR
+             and all(x in w[k + 1:k + 12] for x in (0xE2413001, 0xE3530003, 0xE0811101, 0xE0800101))]
+    return found[0] if len(found) == 1 else None
+
+
+def score_icon_sites(e):
+    """PAD-1315 (DoomWalrus666, co-op: "Player 1's user icon moves to the scoreboard position of the active player
+    next to their username"): the score frame's Insider overlay (NetScoreFrameOverlay, every Spike 2 build) draws each
+    box's avatar with draw(this, logins, player 1..4, r3, [sp]; the box's rectangle in s0-s3) (Godzilla Pro 1.16
+    0x483c14), which asks its player's login state (a function reading the login, 0x27ae50) and the login itself
+    (`login_reader`, 0x27a840), and draws that user's avatar in that user's colour. Both read the entry PAD-1108 swaps in
+    a co-op game, so box 1 drew the teammate up's icon and the teammate up's box player 1's (PAD-1267 had put the names
+    right). The overlay's one call of the drawer (its loop over the four boxes, 0x484440) is returned as
+    [("coop_icon_draw", va)] and answered with the place holding the box's own player's login, so every box shows its
+    own player's icon. (The login calls inside are not wrapped themselves: Godzilla LE's login call is followed by a
+    word hook_call cannot move.) The drawer: a function giving its r2 (the player) as r1 to a call reaching the login
+    read and then to the login read itself. None, more than one, or a drawer called from more than one place: []."""
+    w, base = e.words, e.text_va
+    login = login_reader(e)
+    if not login:
+        return []
+    drawers, memo = [], {}
+    for k in range(len(w)):
+        if w[k] & PUSH_LR_MASK != PUSH_LR:
+            continue
+        regs, got = {2}, set()
+        for j in range(k + 1, min(k + 60, len(w))):
+            x = w[j]
+            if x & PUSH_LR_MASK == PUSH_LR:
+                break
+            if x & 0xFFFF0FFF == 0xE1A00002:                                               # mov rX, r2
+                regs.add((x >> 12) & 0xF)
+            t = bl_target(base + 4 * j, x)
+            if not t or _r1_from(w, j, k) not in regs:
+                continue
+            if t == login and "state" in got:
+                got.add("login")
+                break
+            if t != login and not got and _reaches(e, t, login, 1, memo):
+                got.add("state")
+        if got == {"state", "login"}:
+            drawers.append(base + 4 * k)
+    if len(drawers) != 1:
+        return []
+    calls = [k for k in range(len(w) - 1) if bl_target(base + 4 * k, w[k]) == drawers[0]]
+    if len(calls) != 1 or not _movable(w[calls[0] + 1]):
+        return []
+    return [("coop_icon_draw", base + 4 * calls[0])]
+
+
+def name_user_site(e, name_call, look):
+    """PAD-1315: the user lookup inside the game's "Insider name of player N" (the function `coop_panel_name` calls, or
+    one of its first callees): its call of a user-for-player function (one calling the user manager's lookup `look`)
+    given the name's own player (r1 at entry; Godzilla Pro 1.16 0x3bc944 in 0x3bc8c4). With it the runtime re-points
+    only the login a box's name reads and leaves the player number the name is given as it is, so a box whose player
+    has no login (a guest) reads "PLAYER 2" from its own number, not from the place the swap moved its entry to. None
+    when not found."""
+    w, base = e.words, e.text_va
+    if not name_call or not look:
+        return None
+    users = set()
+    for k in range(len(w)):
+        if bl_target(base + 4 * k, w[k]) == look:
+            q = k
+            while q > 0 and w[q] & PUSH_LR_MASK != PUSH_LR:
+                q -= 1
+            users.add(base + 4 * q)
+    top = bl_target(name_call, e.word(name_call))
+    if not top:
+        return None
+    fns, k = [top], (top - base) // 4
+    for j in range(k, min(k + 12, len(w))):
+        t = bl_target(base + 4 * j, w[j])
+        if t:
+            fns.append(t)
+    for f in fns:
+        k = (f - base) // 4
+        if not 0 <= k < len(w) or w[k] & PUSH_LR_MASK != PUSH_LR:
+            continue
+        regs = {(w[j] >> 12) & 0xF for j in range(k, k + 12) if w[j] & 0xFFFF0FFF == 0xE1A00001}       # mov rX, r1
+        for j in range(k + 1, min(k + 80, len(w) - 1)):
+            if w[j] & PUSH_LR_MASK == PUSH_LR:
+                break
+            if bl_target(base + 4 * j, w[j]) not in users:
+                continue
+            mov = next((w[q] for q in range(j - 1, max(j - 5, k), -1) if w[q] & 0xFFFFFFF0 == 0xE1A00000), None)
+            if mov is not None and mov & 0xF in regs and _movable(w[j + 1]):
+                return base + 4 * j
+            break
+    return None
+
+
 def _movable(x):
     """The word after a call hook_call may move as it is (pad_mode_runtime.c's own test): no branch, nothing that
     reads or writes pc."""
@@ -384,6 +497,14 @@ def lines(elf):
     from .coop_play import users_lookup
     lit = next((at for name, at in panel_sites(e, getter) if name == "coop_panel_lit"), None) if getter else None
     for name, at in panel_name_sites(e, getter, lit, users_lookup(e)) if lit else []:
+        out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % (name, at, e.word(at), e.word(at + 4)))
+    # PAD-1315: the user lookup inside the box names' function (a guest's box keeps its own "PLAYER n"), and the score
+    # frame overlay's per-box avatar calls (every Spike 2 build), answered through the same swap
+    names = [at for _name, at in panel_name_sites(e, getter, lit, users_lookup(e))] if lit else []
+    inner = name_user_site(e, names[0], users_lookup(e)) if names else None
+    if inner:
+        out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % ("coop_panel_name_user", inner, e.word(inner), e.word(inner + 4)))
+    for name, at in score_icon_sites(e):
         out.append("site  %-22s 0x%08x 0x%08x 0x%08x" % (name, at, e.word(at), e.word(at + 4)))
     # PAD-1202: the ball start's "player N, you're up" call, given the real player
     up = up_call(e, player, players)

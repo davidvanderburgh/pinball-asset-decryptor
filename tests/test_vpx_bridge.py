@@ -648,6 +648,82 @@ def test_batmans_unseen_balls_are_helpers():
     assert m["switches"]["trgBallLock3"]["event"] == "hold"
 
 
+def test_jaws_shark_arrows_carry_the_beach_shots():
+    # PAD-1311: the five shark-shaped shot arrows (JP's Lnight lights) never lit:
+    # the beaches' RGB went to the small beachgoer lights under them
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    lamps = m["lamps"]
+    for arrows, base in ((["Lnight1"], 8), (["Lnight4", "Light25"], 16), (["Lnight3"], 24),
+                         (["Lnight5", "Light45a"], 32), (["Lnight2", "Light47"], 40)):
+        for a in arrows:
+            assert lamps[a]["leds"] == [[9, base], [9, base + 1], [9, base + 2]] and lamps[a]["rgb"]
+    # each beach's three round lights are its rescue lights, the sign its SHARK,
+    # the circle its CLOSED X: none of them on the arrow's RGB any more
+    assert lamps["Lswimmer1"]["leds"] == [[9, 11]] and "rgb" not in lamps["Lswimmer1"]
+    assert lamps["Lnightsmim"]["leds"] == [[9, 14]] and lamps["Lbeach1"]["leds"] == [[9, 15]]
+    assert lamps["Lballcaptive"]["leds"] == [[8, 52]] and lamps["Lbounty"]["leds"] == [[8, 53]]
+
+
+def test_jaws_fireball_bulbs_stay_dark():
+    # PAD-1311: JP's five stacked fireball bulbs over the shark (radius up to 380)
+    # were wired to BOAT HIT CENTER/RIGHT: each boat hit bloomed the whole middle
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    for n in ("fcroco", "fcroco1", "fcroco2", "fcroco3", "fcroco4"):
+        assert n not in m["lamps"] and n in m["dark"]
+
+
+def test_jaws_shark_and_fin_follow_the_machine():
+    # PAD-1311: the shark follows SHARK UP-MAG / DOWN-MAG (no visible pop-up
+    # targets in front of it); the fin is the chum line target at SHARK
+    # POSITION 1..7 while SHARK FIN UP/DOWN holds it up, and a hit is SHARK FIN TGT
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    fins = ["Tbeachfinal", "Tnightfinal", "Tbarrelshark", "Tjackpot", "Tsharkfinal",
+            "Thammerfinal", "Tsmimerfinal"]
+    assert all(m["switches"][f]["id"] == 105 for f in fins)
+    vbs = m["extra_vbs"]
+    assert "PadFins = Array(%s)" % ", ".join(fins) in vbs
+    assert "PadSw(1105 - i)" in vbs and "PadSw(1079)" in vbs and "PadSw(1080)" in vbs
+    assert "Targetshark1.Visible = False" in vbs and "PadSharkMotor" not in vbs
+    assert m["solenoids"]["6"]["callback"] == "PadFinUpDown"
+    assert m["solenoids"]["3"]["callback"] is None
+    assert m["retrofit_timers"]["PadMechTimer"]["interval_ms"] == 50
+
+
+def test_vpxlamps_reads_a_webp_holding_a_jpeg_marker():
+    # PAD-1311: JAWS 50th's playfield is a WebP whose bytes hold a stray JPEG
+    # marker; the picture starts at the FIRST magic, not at the JPEG one
+    sys.path.insert(0, VPX)
+    import vpxfile
+    import vpxlamps
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 80), (10, 200, 30)).save(buf, "WEBP", lossless=True)
+    data = (b"\0" * 4 + vpxfile.biff_record("NAME", struct.pack("<I", 2) + b"pf")
+            + buf.getvalue() + b"\xff\xd8\xff junk")
+
+    class Stream:
+        def read(self):
+            return data
+
+    class Ole:
+        def exists(self, name):
+            return name == "GameStg/Image0"
+
+        def openstream(self, name):
+            return Stream()
+
+    class Table:
+        ole = Ole()
+
+        def gamedata_field(self, tag):
+            return {"IMAG": struct.pack("<I", 2) + b"pf", "RGHT": struct.pack("<f", 40.0),
+                    "BOTM": struct.pack("<f", 80.0)}[tag]
+
+    img, right, bottom = vpxlamps.table_image(Table())
+    assert img.size == (40, 80) and img.getpixel((5, 5))[1] > 150
+
+
 def test_rushs_time_machine_is_the_lift_ramp_opto():
     # PAD-907: the game starts its modes and multiballs at the time machine,
     # LIFT RAMP OPTO (82); the tribute's time machine trigger is tm2. LL3 is

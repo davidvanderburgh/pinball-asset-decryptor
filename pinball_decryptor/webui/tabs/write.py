@@ -2304,8 +2304,14 @@ class WriteTab(TabService):
             # a stale answer to "can this computer grow a card?" is renewed
             # while the SD card is being picked, before the dialog's Start
             self._ask_grow_here()
+        # the original image: what a build starts from, and what a built
+        # one is set against in the readout (PAD-1314)
+        orig = (self.write_upd_var.get() or "").strip()
+        orig_size = (os.path.getsize(orig)
+                     if orig and os.path.isfile(orig) else None)
         self._flash = FlashDialog(
             self.ctx.loop, mfr, on_flash,
+            original_size=orig_size, original_path=orig,
             initial_image=initial,
             on_build_flash=self.window.cb.get("on_build_flash"),
             build_target=target, can_build=can_build,

@@ -2891,6 +2891,7 @@ def _bof_build_args(form):
     ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
         + theme_args(form)
     args += default_card_args(form) + s3_key_args(be)
+    args += editions_args(form)          # PAD-1325: a Spike 3 card of editions
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.media_dir:
@@ -3011,6 +3012,7 @@ def inject_args(form, card):
         args += default_card_args(form) + s3_key_args(be)
         args += (heading_args(form) + text_size_args(form)
                  + menu_text_args(form) + theme_args(form))
+        args += editions_args(form)      # PAD-1325: a Spike 3 card of editions
         if form.media_dir:
             args += ["--media-dir", wsl(form.media_dir)]
         return args

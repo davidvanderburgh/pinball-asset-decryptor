@@ -242,7 +242,10 @@ S3STUBS   = $(BUILD)/stublibs
 LDPOST    = -L$(S3STUBS) -Wl,--allow-shlib-undefined
 GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2 -l:libgbm.so.1 -l:libdrm.so.2
 AUDLIBS   =
-LIBC      = -lpthread -lm
+# -static-libgcc (PAD-1325): the pinned cross kit (xgcc.pins, PAD-1295) carries libgcc.a but no
+# libgcc_s.so.1, which gcc's default dynamic link asks for; the menu throws nothing, so the
+# static helpers are all it needs (the card has libgcc_s, but nothing here loads it)
+LIBC      = -lpthread -lm -static-libgcc
 SRCS = codeselect.c conf.c colour.c settings.c testpics.c theme.c gfx.c egl_kms.c input.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c stubs_s3.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
 HDRS = conf.h colour.h settings.h testpics.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 else
@@ -370,7 +373,7 @@ PADMENU = $(BUILD)/padmenu.so
 all: $(BIN) $(PADMENU)
 
 $(PADMENU): padmenu.c | $(BUILD)
-> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -DPADMENU_S3 -fno-stack-protector -fPIC -shared -Wl,-soname,padmenu.so padmenu.c -o $@ || { rm -f $@; exit 1; }
+> $(CC) -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration -DPADMENU_S3 -fno-stack-protector -fPIC -shared -static-libgcc -Wl,-soname,padmenu.so padmenu.c -o $@ || { rm -f $@; exit 1; }
 > @echo "built $@"
 else ifneq ($(PLATFORM),stern)
 all: $(BIN)

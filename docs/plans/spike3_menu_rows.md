@@ -120,3 +120,16 @@ handicaps) USE it. When they do:
   connect path hangs the emulator under heavy concurrent rig load (SIGKILL, never a program fault;
   work/artifacts/PAD-1321). A calmer rig should let it be captured; whether the hang is purely load
   or inherent to ELG's Insider connect under emulation is still open.
+
+## PAD-1325: the first consumer (EDITION)
+
+- The page is found per game by its name (`menu_settings.wide_category`, PAD-1324): EDITION on
+  Attract Mode (16 on ELG, Fallout, Transformers), MUSIC MODE on Audio Content.
+- With music modes on the card, their grown copy (`game.pad`, run by the modes' hook) carries
+  EDITION too: `spike3_music.menu_program` grows the project's `spike3_menu.rows_wanted` beside
+  MUSIC MODE in the same pass.
+- The Write step is `plugins/stern/spike3_menu.py`: `grow(raw, wanted)` takes the
+  `plan_many` list, so the other rows join EDITION's one grow (one category table for them all).
+- The visible row: on 2026-11-16 the rig (load under 1) reached Adjustments > Machine Settings >
+  Attract Mode without a hang, but no setting page opens on SELECT, on the stock ELG card too
+  (control run): an emulator gap, not the grow. The row is checked from the program instead.

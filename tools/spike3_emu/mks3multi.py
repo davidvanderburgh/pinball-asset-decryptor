@@ -31,6 +31,14 @@ sees exactly the tree it shipped in.
     mks3multi.py verify --card OUT.raw [--primary A.raw --extra ...] [--keyfile K]
     mks3multi.py media  --primary A.raw --extra ... --out DIR [...]
 
+EDITIONS (PAD-1325, --editions): every image is an edition of one game at one
+version, in order, each Written with EDITION in its operator menu
+(plugins/stern/spike3_menu.py). images.conf then carries
+`edition=/data/nv/<title>/NVM|<key>|<n>`: s3select draws nothing and boots the
+image the game's EDITION setting names, read off the store the game keeps its
+settings in (codeselect nvm.c reads Spike 3's layout too); whatever cannot be
+read boots image 0. --no-editions gives the card its menu back.
+
 `build` and `verify` need root (losetup, the dm-crypt mapping, mount);
 `plan` reads the cards with PAD's own decryptor and needs nothing.
 
@@ -255,6 +263,177 @@ def print_plan(plan):
     print("card: %s" % (best or "none: the images do not fit in one games partition"))
 
 
+# ============================================================================== editions (PAD-1325)
+#: where a Spike 3 game keeps its settings (the slot's /data on the emulator), as a Spike 2 one
+EDITION_STORE = "/data/nv/%s/NVM"
+#: a card with modes: /games/game is the modes' hook and the stock link is kept beside it
+MODES_HOOK = PAD + "/padmode/padmode.sh"
+MODES_TARGET = PAD + "/padmode/game.target"
+
+
+def _program_rel(link, read_target):
+    """The game program's path in a games tree from its /games/game link (the modes' hook's
+    target when the tree carries modes)."""
+    rel = (link or "").strip()
+    if rel.startswith("/games/"):
+        rel = rel[len("/games/"):]
+    if rel == MODES_HOOK:
+        rel = (read_target() or "").strip()
+        if rel.startswith("/games/"):
+            rel = rel[len("/games/"):]
+    return rel.lstrip("/")
+
+
+def card_program(card, keyfile=None):
+    """``(rel, program bytes)`` of the game on Spike 3 card *card* (a :class:`Card`), read with
+    PAD's own decryptor (no root)."""
+    from pinball_decryptor.plugins.stern.ext4 import Ext4Reader
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    vol = _card_mod().open_games(card.path, key_source=_key_source(keyfile, card.path))
+    try:
+        r = Ext4Reader(vol, 0, vol.size)
+        node = MW.lookup(r, "game")
+        if node is None or (node["mode"] & 0xF000) != 0xA000:
+            raise Refused("%s: its /games/game is not a link" % os.path.basename(card.path))
+        link = r.read_symlink(node)
+        if link.strip() in (TOP_LINKS["game"], "/games/" + TOP_LINKS["game"]):
+            raise Refused("%s is a multi-boot card itself" % os.path.basename(card.path))
+
+        def target():
+            t = MW.lookup(r, MODES_TARGET)
+            return bytes(r.read_file_bytes(t)).decode("utf-8", "replace") if t is not None else ""
+        rel = _program_rel(link, target)
+        pnode = MW.lookup(r, rel) if rel else None
+        if pnode is None or (pnode["mode"] & 0xF000) != 0x8000:
+            raise Refused("%s: its game program %s is not on the card"
+                          % (os.path.basename(card.path), rel or "?"))
+        return rel, bytes(r.read_file_bytes(pnode))
+    finally:
+        vol.close()
+
+
+def tree_program(tree):
+    """``(rel, program bytes)`` of the game in the games tree directory *tree* (a mounted one)."""
+    g = os.path.join(tree, "game")
+    if not os.path.islink(g):
+        raise Refused("%s has no game link" % tree)
+
+    def target():
+        with contextlib.suppress(OSError):
+            with open(os.path.join(tree, MODES_TARGET), encoding="utf-8") as f:
+                return f.read()
+        return ""
+    rel = _program_rel(os.readlink(g), target)
+    p = os.path.realpath(os.path.join(tree, rel)) if rel else ""
+    if not p or not p.startswith(os.path.realpath(tree) + os.sep) or not os.path.isfile(p):
+        raise Refused("%s: its game program %s is not in the tree" % (tree, rel or "?"))
+    with open(p, "rb") as f:
+        return rel, f.read()
+
+
+def edition_contract(programs):
+    """images.conf's edition= for a card whose images' programs are *programs* (``[(name, rel,
+    version, bytes)]``, image order), or Refused with what is wrong: every image the SAME game at
+    the same version, each one's program carrying EDITION for exactly as many editions as the card
+    has images and naming them alike, every setting captioned alike (one settings store serves
+    them all, and a store that meets a different table may be reset by the game). PAD-495's rule,
+    read from 64-bit programs."""
+    from pinball_decryptor.plugins.stern import editions
+    from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable, menu_label
+    n = len(programs)
+    if n < 2:
+        raise Refused("editions: a card of editions needs two images or more")
+    if n > editions.MAX_EDITIONS:
+        raise Refused("editions: EDITION offers at most %d editions and the card has %d images"
+                      % (editions.MAX_EDITIONS, n))
+    first = None
+    for k, (name, rel, version, elf) in enumerate(programs):
+        ed = editions.in_program(elf)
+        if ed is None:
+            raise Refused("editions: image %d (%s) has no EDITION in its menu; name the editions "
+                          "in its project and Write it again" % (k, name))
+        if ed["values"] != n:
+            raise Refused("editions: image %d (%s)'s EDITION offers %d editions and the card has "
+                          "%d images; every image is one edition, in order" % (k, name, ed["values"], n))
+        try:
+            t = AdjustmentTable(elf, wide_ok=True)
+            captions = [menu_label(t, i) for i in range(t.count)]
+        except Exception as e:                          # noqa: BLE001
+            raise Refused("editions: image %d (%s)'s settings could not be read (%s)" % (k, name, e))
+        mine = {"title": rel.split("/", 1)[0], "version": version, "help": ed["help"],
+                "captions": captions, "name": name}
+        if first is None:
+            first = mine
+            continue
+        if (mine["title"], mine["version"]) != (first["title"], first["version"]):
+            raise Refused("editions: image %d (%s) is %s %s and image 0 (%s) is %s %s; the editions "
+                          "of a card are one game at one version"
+                          % (k, name, mine["title"], mine["version"] or "?", first["name"],
+                             first["title"], first["version"] or "?"))
+        if mine["help"] != first["help"]:
+            raise Refused("editions: image %d (%s) names the editions \"%s\" and image 0 \"%s\"; "
+                          "give every edition's project the same names, in the same order"
+                          % (k, name, mine["help"], first["help"]))
+        diff = [(a, b) for a, b in zip(mine["captions"], first["captions"]) if a != b]
+        if diff or len(mine["captions"]) != len(first["captions"]):
+            a, b = diff[0] if diff else ("(%d settings)" % len(mine["captions"]),
+                                         "(%d settings)" % len(first["captions"]))
+            raise Refused("editions: image %d (%s) captions a setting \"%s\" where image 0 says "
+                          "\"%s\"; the editions share one settings store, so every one must "
+                          "carry the same settings" % (k, name, a, b))
+    return {"store": EDITION_STORE % first["title"], "key": editions.NVM_KEY, "values": n}
+
+
+_EDITION_RE = re.compile(r"^\s*edition\s*=\s*([^|]+)\|([0-9a-fA-F]{40})\|(\d+)\s*$")
+
+
+def conf_edition(text):
+    """The edition= of images.conf *text* (``{"store", "key", "values"}``), or None."""
+    for line in text.splitlines():
+        m = _EDITION_RE.match(line)
+        if m:
+            return {"store": m.group(1).strip(), "key": m.group(2).lower(), "values": int(m.group(3))}
+    return None
+
+
+def with_edition(text, edition):
+    """images.conf *text* with its edition= line replaced by *edition*'s (none when None)."""
+    lines = [ln for ln in text.splitlines()
+             if not re.match(r"^\s*edition\s*=", ln) and not ln.startswith("# PAD-1325: no menu")]
+    if edition:
+        lines.append("# PAD-1325: no menu - the game's EDITION setting picks the image at power-up")
+        lines.append("edition=%s|%s|%d" % (edition["store"], edition["key"], edition["values"]))
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _say_edition(edition):
+    say("editions: no menu; the game's EDITION setting (%s) picks one of %d images at power-up"
+        % (edition["store"], edition["values"]))
+
+
+def card_programs(cards, keyfile=None):
+    """``[(name, rel, version, bytes)]`` of *cards*, for :func:`edition_contract`."""
+    out = []
+    for c in cards:
+        rel, elf = card_program(c, keyfile)
+        out.append((os.path.basename(c.path), rel, c.version, elf))
+    return out
+
+
+def tree_programs(pad, dirs):
+    """``[(name, rel, version, bytes)]`` of a multi-boot card's trees (mounted at *pad*), their
+    versions from the card's build.json."""
+    versions = {}
+    with contextlib.suppress(OSError, ValueError, AttributeError):
+        with open(os.path.join(pad, "build.json"), encoding="utf-8") as f:
+            versions = {im.get("dir"): im.get("version") for im in json.load(f).get("images") or ()}
+    out = []
+    for d in dirs:
+        rel, elf = tree_program(os.path.join(pad, d))
+        out.append((d, rel, versions.get(d), elf))
+    return out
+
+
 # ============================================================================== the conf
 def render_conf(dirs, titles, subtitles, default, timeout, rows, sound_move, sound_confirm, volume, **kw):
     text = bof.render_conf(dirs, titles, subtitles, default, timeout, rows, sound_move, sound_confirm,
@@ -477,6 +656,10 @@ def build_card(a):
     if free < cards[0].size + (1 << 30):
         raise Refused("%s has %s free; the card needs %s" % (os.path.dirname(out), _gb(free), _gb(cards[0].size)))
     conf = conf_from_args(a, cards, media)
+    if getattr(a, "editions", False):
+        edition = edition_contract(card_programs(cards, a.keyfile))
+        conf = with_edition(conf, edition)
+        _say_edition(edition)
     if media:
         for fn in media["files"]:
             if not os.path.isfile(os.path.join(a.media_dir, fn)):
@@ -580,6 +763,16 @@ def inject_card(a):
                 a.back_hold = old.get("back_hold")
             stand_ins = [type("C", (), {"label": lambda self: "", "path": d})() for d in dirs]
             conf = conf_from_args(a, stand_ins, media)
+            # PAD-1325: --editions reads every image's EDITION; without either flag the card keeps
+            # what it says, and --no-editions gives it its menu back
+            with open(conf_p, encoding="utf-8") as f:
+                edition = conf_edition(f.read())
+            if getattr(a, "editions", False):
+                edition = edition_contract(tree_programs(pad, dirs))
+                _say_edition(edition)
+            elif getattr(a, "no_editions", False):
+                edition = None
+            conf = with_edition(conf, edition)
             for name, (mode, _req) in SELECTOR_FILES.items():
                 src = _selector_src(a.selector_dir, name)
                 if src is None:
@@ -633,6 +826,22 @@ def verify_card(a):
             print("images: %s" % " ".join(dirs))
             if conf.get("back_hold") is not None:
                 print("back_hold=%d" % conf["back_hold"])
+            # PAD-1325: a card of editions - every image's program must carry EDITION for them all
+            with open(conf_p, encoding="utf-8") as f:
+                edition = conf_edition(f.read())
+            if edition:
+                from pinball_decryptor.plugins.stern import editions as _Ed
+                print("edition=%s|%s|%d" % (edition["store"], edition["key"], edition["values"]))
+                for d in dirs:
+                    try:
+                        ed = _Ed.in_program(tree_program(os.path.join(pad, d))[1])
+                    except Refused:
+                        ed = None
+                    ok = ed is not None and ed["values"] == edition["values"]
+                    print("edition %s: %s" % (d, ("EDITION 1-%d OK" % ed["values"]) if ok
+                                              else "NO EDITION for %d" % edition["values"]))
+                    if not ok:
+                        bad.append(d + " edition")
             for name, target in TOP_LINKS.items():
                 got = os.readlink(os.path.join(m, name)) if os.path.islink(os.path.join(m, name)) else None
                 print("link /games/%s -> %s: %s" % (name, got, "OK" if got == target else "WRONG"))
@@ -742,6 +951,12 @@ def _add_conf_flags(s):
     s.add_argument("--theme")
     s.add_argument("--color", action="append", metavar="ROLE=RRGGBB")
     s.add_argument("--conf")
+    s.add_argument("--editions", action="store_true",
+                   help="images.conf edition= (PAD-1325): every image is an edition of one game, in order, "
+                        "and the game's own EDITION setting (put in its operator menu by each edition's "
+                        "Write) picks the one that boots at the next power-up; no menu is shown")
+    s.add_argument("--no-editions", action="store_true",
+                   help="take edition= off a card of editions: its menu comes back")
 
 
 def main(argv=None):
@@ -808,7 +1023,11 @@ def main(argv=None):
         if a.cmd == "verify":
             return verify_card(a)
         if a.cmd == "conf":
-            sys.stdout.write(conf_from_args(a, _inputs(a), None))
+            cards = _inputs(a)
+            text = conf_from_args(a, cards, None)
+            if a.editions:
+                text = with_edition(text, edition_contract(card_programs(cards, a.keyfile)))
+            sys.stdout.write(text)
             return 0
         if a.cmd == "media":
             return cmd_media(a)

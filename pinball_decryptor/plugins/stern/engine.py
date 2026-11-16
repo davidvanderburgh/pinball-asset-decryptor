@@ -8444,7 +8444,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     _clips_on = bool(variant_slots) or _juke_clips
     # PAD-495: EDITION in the operator menu, the setting a multi-boot card of
     # this game's editions boots by
-    editions = _editions_for_build(assets_dir, log)
+    # (PAD-1325: a Spike 3 card's is spike3_write's, spike3_menu grows its 64-bit program)
+    editions = [] if _is_spike3(disk_f) else _editions_for_build(assets_dir, log)
     # PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu, which the
     # runtime applies to the whole screen live (the modes' delivery, as the music modes')
     picture_prof = _picture_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
@@ -8482,13 +8483,14 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     if _is_spike3(disk_f):
         # PAD-1272: a Spike 3 card's modes are spike3_write's (its games partition, the 64-bit
         # runtime: spike3_modes), and so are the score feed (PAD-1297: files alone), the random
-        # clips and the screen times (PAD-1323: spike3_modes.plan builds them). The rest of
+        # clips and the screen times (PAD-1323: spike3_modes.plan builds them), and EDITION
+        # (PAD-1325: spike3_menu grows the 64-bit program's menu). The rest of
         # what rides the modes' Spike 2 delivery needs 64-bit runtime, port or menu work first
         # (the census: docs/plans/spike3_modes.md "The family on Spike 3"): each part the project
         # asked for is left out with its own sentence.
         from . import spike3_modes as _S3M
         for _line in _S3M.family_left_out_lines([w for w, on in (
-                ("editions", bool(editions)), ("picture settings", picture_prof is not None),
+                ("picture settings", picture_prof is not None),
                 ("attract items", _attract_on), ("co-op play", _coop_on),
                 ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),
                 ("expression light shows", _cabs_on), ("Prolonged Competition", _comp_on),

@@ -270,7 +270,7 @@ def test_each_slot_goes_into_its_own_folders_image_bin(tmp_path, monkeypatch):
     a = _wav(tmp_path / "a.wav")
     monkeypatch.setattr(SMo, "convert", lambda project, rel, m, src, log=None: src)
     monkeypatch.setattr(S3MU, "title_refusal", lambda prof, turns=False: "")
-    monkeypatch.setattr(S3MU, "menu_program", lambda raw, modes: (type("S", (), {"live": 0x10})(), b"prog"))
+    monkeypatch.setattr(S3MU, "menu_program", lambda raw, modes, extra=(): (type("S", (), {"live": 0x10})(), b"prog"))
     imgs = {"game": _Img(6), "menu": _Img(4)}
     monkeypatch.setattr(W, "project_sound_dirs", lambda reader: [
         ("/fallout_le/image.bin", "game", "audio", None), ("/fallout_le/music_cat01.bin", "bank", "audio", "music_cat01"),

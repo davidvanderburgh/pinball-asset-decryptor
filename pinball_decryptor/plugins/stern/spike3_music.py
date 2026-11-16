@@ -127,27 +127,26 @@ def left_out_lines(project):
     return out
 
 
-def menu_program(game_raw, modes):
+def menu_program(game_raw, modes, extra=()):
     """``(setting, program bytes)``: *game_raw* (the card's 64-bit program) with MUSIC MODE on its
     Audio Content page, values 1..``modes.count`` named by the modes. Raises
-    :class:`Spike3MusicError` when the program cannot take it."""
+    :class:`Spike3MusicError` when the program cannot take it. PAD-1325: *extra* are the card's
+    other rows of ours (:func:`.spike3_menu.rows_wanted`: EDITION), grown in the same pass, because
+    this copy is the program the modes' hook runs (one that lacks a row the card's own program has
+    would leave EDITION out of the running game). One of them refused never stops MUSIC MODE."""
     from . import menu_settings as MS
-    from .adjustments import AdjustmentTable
+    from . import spike3_menu
     try:
-        t = AdjustmentTable(bytes(game_raw), wide_ok=True)
-        setting, writes, cat = MS.plan(t, MS.MUSIC_MODE, modes.count, modes.menu_names())
-        buf = bytearray(t.data)
-        for off, b in writes.items():
-            buf[off:off + len(b)] = b
-        t2 = AdjustmentTable(bytes(buf), wide_ok=True)
-        grown = MS.grow_wide_program(t2, MS.menu_table(t2), setting) if cat is not None else bytes(buf)
+        grown, settings, refused = spike3_menu.grow(
+            game_raw, [(MS.MUSIC_MODE, modes.count, modes.menu_names())] + list(extra))
     except MS.MenuSettingError as e:
         raise Spike3MusicError("MUSIC MODE cannot be added to this game's operator menu: %s" % e) from None
     except ValueError as e:
         raise Spike3MusicError("this game's settings could not be read (%s)" % e) from None
-    bad = MS.check(grown, setting)
-    if bad:
-        raise Spike3MusicError("MUSIC MODE did not read back from the grown program (%s)" % "; ".join(bad))
+    setting = next((s for s in settings if s.key == MS.MUSIC_MODE), None)
+    if setting is None:
+        raise Spike3MusicError("MUSIC MODE cannot be added to this game's operator menu: %s"
+                               % refused.get(MS.MUSIC_MODE, "unknown"))
     return setting, grown
 
 
@@ -254,7 +253,8 @@ def plan(project, modes, prof, reader, game_raw, log=None, only=False, adds=None
     conts = {folder: (cp, node) for cp, node, folder, stem in W.project_sound_dirs(reader) if stem is None}
     if not conts:
         raise Spike3MusicError("this card has no sound container")
-    setting, program = menu_program(game_raw, modes)
+    from . import spike3_menu
+    setting, program = menu_program(game_raw, modes, spike3_menu.rows_wanted(project))
     mswaps, news, used = [], {}, []
     for folder in sorted({rel.rsplit("/", 1)[0] if "/" in rel else "" for rel in modes.slots}):
         sub = dataclasses.replace(modes, slots={r: f for r, f in modes.slots.items()

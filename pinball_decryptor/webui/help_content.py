@@ -1894,6 +1894,51 @@ HELP_CONTENT = {
             "disk is checked to be this install before a byte is written.",
         ]),
     ],
+    # PAD-1279 (DragonRR): the test card, a tab of its own
+    "Test Card": [
+        ("What a test card is",
+         "A small card that boots any Stern Spike 2 machine straight into a "
+         "**TEST CARD** menu, with no game, so a color profile, a picture, a clip or "
+         "a sound can be judged on the machine without building and burning a "
+         "whole game. It is under 1 GB plus your videos and builds in seconds.\n\n"
+         "The menu: **DEFAULT PAD TEST CARD** (the test card, gray and color ramps, "
+         "sharpness lines, full white and full black: always on the card), "
+         "**IMAGES**, **VIDEOS**, **SCENES**, **SOUNDS**, and **COLOR CORRECTION**. "
+         "An entry with nothing on it does nothing."),
+        ("Putting things on it",
+         "Tick **Test** on a row of the Images, Video or Audio tab, or on a scene "
+         "in the Scenes tab's list. A ticked picture or clip goes on with its color "
+         "profile, as the project would put it on the machine; a scene goes on as "
+         "its resting frame (the frame the Scenes preview opens on), with its edits "
+         "and the project's color profile. A scene is drawn when you tick it, and "
+         "again when you build while its project is open.\n\n"
+         "**Add files…** on the Test card tab adds pictures, videos and sounds from "
+         "your PC. They go as they are, with no color profile.\n\n"
+         "The list is yours, not a project's: things from several games can go on "
+         "one card, up to 64. Rename an entry to change its name on the machine; "
+         "the arrows change its place in its list."),
+        ("Building it",
+         "**Pick a Spike 2 card image…**: any Stern Spike 2 card image. The test "
+         "card takes only its boot and system partitions; nothing of its game "
+         "goes on. Then **Build test card…** and write the file to an SD card like "
+         "any card image.\n\n"
+         "- A video plays whole, at its own frame rate up to 60 frames a second and "
+         "in full color, fitted down to the screen, up to five minutes; its sound "
+         "plays with it.\n"
+         "- A picture is kept pixel for pixel, only fitted down when it is bigger "
+         "than the screen."),
+        ("On the machine",
+         "Flippers move between the entries, **START** opens one, **ACTION** goes "
+         "back. In a list, START shows the one picked full screen; the flippers "
+         "then step to the previous and the next, and START switches the color "
+         "correction on and off (on a sound, it plays it again). The caption hides "
+         "itself after a few seconds; any button brings it back.\n\n"
+         "A video's caption shows the frame rate the machine really reaches beside "
+         "the one the video was made at.\n\n"
+         "**COLOR CORRECTION** changes brightness, contrast, saturation and each "
+         "color's shades live, with the test card on the screen. Once it looks "
+         "right, put the same numbers in the Color profile tab."),
+    ],
     "Mod Pack": [
         ("What it's for", [
             "A mod pack is a small zip of only your changed files, to share. It works "
@@ -3249,14 +3294,8 @@ HELP_CONTENT = {
          "correction in turn, or none. **See it on the test pictures** in Color "
          "correction shows them with the numbers you are changing, before you "
          "save. The caption hides itself after a few seconds so the screen can be "
-         "photographed whole. Your own pictures, videos and sounds go after the "
-         "patterns: add them under **Test pictures** in Menu settings.\n\n"
-         "**Build test card…** (beside Add test pictures) makes a small card, "
-         "under 1 GB and built in seconds, that opens on TEST CARD: Color "
-         "correction and the test pictures, with no game. It works in any Spike 2 "
-         "machine; the first image on the list only lends its boot and system "
-         "partitions. Tune the colors on the screen, then copy the numbers into "
-         "the Color profile tab.\n\n"
+         "photographed whole. Your own pictures, videos, scenes and sounds go on "
+         "a card of their own: the **Test card** tab.\n\n"
          "- The new values reach the game at its next start. The game files on the "
          "card are never written; on any failure the game runs as built.\n"
          "- No countdown runs inside Settings, and two idle minutes leave it "

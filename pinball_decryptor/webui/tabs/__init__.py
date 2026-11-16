@@ -40,6 +40,9 @@ TABS = (
     ("write", "write", "Write", "Write", "Build", "write"),
     ("multiboot", "multiboot", "Multi-boot", "Multi-boot", "Build",
      "multiboot"),
+    # PAD-1279: a small card that boots any Spike 2 machine into test pictures, videos,
+    # scenes and sounds (DragonRR: "make it independent" of the multi-boot)
+    ("testcard", "testcard", "Test Card", "Test card", "Build", "palette"),
     ("modpack", "modpack", "Mod Pack", "Mod Pack", "Build", "modpack"),
     ("partitions", "partitions", "Partition Explorer", "Partitions",
      "Inspect", "partitions"),

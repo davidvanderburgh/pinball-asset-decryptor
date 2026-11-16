@@ -150,5 +150,6 @@ int testpics_kind(const char *file)
     if (!strcasecmp(dot, ".png")) return TF_PICTURE;
     if (!strcasecmp(dot, ".gif")) return TF_ANIM;
     if (!strcasecmp(dot, ".wav")) return TF_SOUND;
+    if (!strcasecmp(dot, ".padv")) return TF_VIDEO;
     return TF_UNKNOWN;
 }

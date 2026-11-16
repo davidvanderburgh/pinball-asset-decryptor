@@ -27,8 +27,8 @@ const char *testpics_hint(int k);
 void testpics_draw(int k, unsigned char *px, int stride, int w, int h);
 
 /* What a test= file is, from its name: TF_PICTURE (.png), TF_ANIM (.gif),
- * TF_SOUND (.wav), else TF_UNKNOWN. */
-enum { TF_UNKNOWN, TF_PICTURE, TF_ANIM, TF_SOUND };
+ * TF_SOUND (.wav), TF_VIDEO (.padv, video.h), else TF_UNKNOWN. */
+enum { TF_UNKNOWN, TF_PICTURE, TF_ANIM, TF_SOUND, TF_VIDEO };
 int testpics_kind(const char *file);
 
 #endif

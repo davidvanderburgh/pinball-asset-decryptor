@@ -55,8 +55,13 @@ PHASE_ROW_BY_KEY = {
     "Multi-boot": "multiboot",
     "Replace Audio": None, "Replace Video": None,
     "Replace Images": None, "Replace Text": None, "Scenes": None,
-    "Partition Explorer": None, "Default Settings": None,
+    "Partition Explorer": None, "Default Settings": None, "Test Card": None,
 }
+
+def _testcard_available(mfr):
+    from .testcard_core import available
+    return available(mfr)
+
 
 def _system_theme():
     """No saved theme: follow the OS, as the Tk window did."""
@@ -531,6 +536,8 @@ class WebWindow:
             "Emulate Spooky": g("emulate_spooky"),
             "Emulate PB": g("emulate_pb"),
             "Multi-boot": g("multiboot"),
+            # PAD-1279: a test card is made from a Stern Spike 2 card's boot and system
+            "Test Card": _testcard_available(mfr),
             "Modes": self.modes_preview_on(mfr),
             # PAD-782: the attract mode editor rides the mode runtime (Stern Spike 2)
             "Attract": g("modes"),

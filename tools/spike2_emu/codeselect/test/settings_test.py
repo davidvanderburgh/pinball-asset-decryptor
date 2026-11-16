@@ -321,14 +321,46 @@ def main():
     if r.returncode != 0 or "card 2/2 (settings)" not in r.stdout:
         fail("(test tile) a card with test= lines and no color_profile= has no SETTINGS tile", r.stdout)
 
-    # 4e. a TEST CARD (testcard=on): no menu, nothing boots - the Settings screens from power-up,
-    # Color correction on its one pseudo-image, no BACK TO THE GAMES, no idle exit; it runs until
-    # it is stopped (SIGTERM here, the power switch on a machine)
+    # 4e. a TEST CARD (testcard=on, PAD-1279): nothing boots - the TEST CARD menu from power-up
+    # (DEFAULT PAD TEST CARD, IMAGES, VIDEOS, SCENES, SOUNDS, COLOR CORRECTION), each a list;
+    # START selects, ACTION backs out, an empty list does nothing; Color correction on its one
+    # pseudo-image; no idle exit; it runs until it is stopped (SIGTERM here, the power switch on
+    # a machine).  A video is a .padv (video.h): JPEG frames, played at its own rate.
+    def write_padv(path, frames, fps):
+        import io
+        from PIL import Image
+        blobs = []
+        for rgb in frames:
+            b = io.BytesIO()
+            Image.new("RGB", (64, 48), rgb).save(b, "JPEG", quality=95, subsampling=0)
+            blobs.append(b.getvalue())
+        n = len(blobs)
+        off = 32 + 4 * (n + 1)
+        offs = []
+        for b in blobs:
+            offs.append(off)
+            off += len(b)
+        offs.append(off)
+        with open(path, "wb") as f:
+            f.write(b"PADVJPG1" + struct.pack("<IIIIII", 64, 48, int(fps * 1000), n, 0, 0))
+            f.write(struct.pack("<%dI" % (n + 1), *offs))
+            for b in blobs:
+                f.write(b)
+    # a test card's own files are on its p3, not with the media: test_dir= says where
+    tdir = os.path.join(t, "testdir")
+    os.makedirs(tdir, exist_ok=True)
+    import shutil
+    shutil.copyfile(os.path.join(media, "art0.png"), os.path.join(tdir, "art0.png"))
+    write_padv(os.path.join(tdir, "clip.padv"), [(200, 40, 40)] * 6 + [(40, 40, 200)] * 6, 10)
+    with open(os.path.join(tdir, "bad.padv"), "wb") as f:
+        f.write(b"PADVJPG1" + struct.pack("<IIIIII", 4000, 48, 10000, 1, 0, 0) + bytes(16))
     tconf = os.path.join(t, "testcard.conf")
     with open(tconf, "w") as f:
         f.write("image=testcard|TEST CARD|color profile test card||\n"
                 "color_profile=0|1.10 1.20 1.35|1.00 1.00 1.00|0.00 0.00 0.00|0.90|Recommended\n"
-                "testcard=on\ntest=art0.png|Red square\n")
+                "testcard=on\ntest_dir=%s\ntest_image=art0.png|Red square\ntest_video=clip.padv|Clip\n"
+                "test_video=bad.padv|Too big\ntest_scene=art0.png|Scene one\n"
+                "test_sound=art0.png|Not a sound\n" % tdir)
     tvals = os.path.join(t, "testcard.color")
     tout = os.path.join(t, "testcard.choice")
     for q in (tvals, tout):
@@ -337,7 +369,7 @@ def main():
     tsw = os.path.join(t, "testcard.padsw")
     with open(tsw, "wb") as f:
         f.write(struct.pack("<II", MAGIC, 1) + bytes(4096 - 8))
-    env = dict(os.environ, PAD_SETTINGS_IDLE_MS="2000")
+    env = dict(os.environ, PAD_SETTINGS_IDLE_MS="2000", PAD_VID_THREADS="2")
     tp = subprocess.Popen([qemu, "-L", root, binp, "--headless", os.path.join(t, "testcard.ppm"),
                            "--conf", tconf, "--input", "padsw", "--padsw", tsw, "--tables", no_list,
                            "--timeout", "3", "--out", tout, "--last", os.path.join(t, "testcard.last"),
@@ -345,16 +377,20 @@ def main():
                            "--color-file", tvals],
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
     time.sleep(1.2)
-    # Color correction (row 0 of two) -> START FROM 0, BRIGHTNESS 1: +1 step, SAVE, BACK;
-    # then TEST PICTURES, BACK; then wait past the idle time and the countdown
-    for button in ["start", "right", "start", "right", "start",
-                   "right", "right", "right", "right", "right", "right", "right", "right", "right",
-                   "right",                     # 1 -> 11 = SEE IT ON THE TEST PICTURES
-                   "right", "start",            # 12 = SAVE
-                   "right", "start",            # 13 = BACK
-                   "right", "start",            # TEST PICTURES
-                   "left", "start",             # BACK -> the list
-                   "right", "right"]:           # two entries: round to the same one
+    walk = (["start", "start", "right", "action", "action"]       # the patterns: 1, 2, back, back
+            + ["right", "start", "start", "action", "action"]     # IMAGES: Red square
+            + ["right", "start", "start", "wait", "right", "action", "action"]   # VIDEOS: Clip, Too big
+            + ["right", "start", "start", "action", "action"]     # SCENES: Scene one
+            + ["right", "start", "action"]                        # SOUNDS: none - nothing happens
+            + ["right", "start",                                  # COLOR CORRECTION
+               "right", "start", "right", "start",                # BRIGHTNESS +1
+               ] + ["right"] * 11 + ["start"]                     # 1 -> 12 = SAVE
+            + ["action"]                                          # ACTION: leave, back to the menu
+            + ["right"])                                          # six entries: round to the first
+    for button in walk:
+        if button == "wait":
+            time.sleep(2.5)
+            continue
         with open(tsw, "r+b") as f:
             f.seek(OFF_CAB + CAB_IDX[button])
             f.write(b"\x01")
@@ -373,23 +409,59 @@ def main():
         o, e = tp.communicate()
     if not alive:
         fail("(testcard) the test card exited by itself (idle or countdown)", o, e)
-    for want in ("[select] testcard: no menu, nothing boots",
+    for want in ("[select] testcard: nothing boots: the test card menu until power-off",
+                 "[select] settings: the test card menu",
+                 "[select] menu: DEFAULT PAD TEST CARD (6)",
+                 "[select] test: open DEFAULT PAD TEST CARD (6)",
+                 "[select] test: 2/6 ",
+                 "[select] menu: IMAGES (1)",
+                 "[select] test: 1/1 Red square (art0.png)",
+                 "[select] menu: VIDEOS (2)",
+                 "[select] test: video 12 frames at 10.000 fps, 2 decoders",
+                 "[select] test: 2/2 Too big (bad.padv)",
+                 "[select] test: the video is 4000x48, the screen 1360x768",
+                 "[select] menu: SCENES (1)",
+                 "[select] test: 1/1 Scene one (art0.png)",
+                 "[select] menu: SOUNDS: none on this card",
                  "[select] settings: color correction, 1 adjustable image, on image 0 (TEST CARD)",
                  "[select] color: image 0 (TEST CARD) saved: ",
-                 "[select] test: open (6 built-in, 1 of the card's own)",
-                 "[select] test: 8/8 Back to settings"):
+                 "[select] settings: left color correction"):
         if want not in o:
             fail("(testcard) no %r" % want, o, e)
+    if o.count("[select] menu: back") != 4:
+        fail("(testcard) ACTION backed out to the menu %d times, expected 4" % o.count("[select] menu: back"),
+             o, e)
+    if "not a file that list shows" not in o + e:
+        fail("(testcard) test_sound=art0.png was not refused", o, e)
     if "back to the games" in o or os.path.exists(tout) and open(tout).read().strip():
         fail("(testcard) a test card left for the games or chose one", o, e)
     tl = lines_of(open(tvals).read() if os.path.exists(tvals) else "")
     if len(tl) != 1 or not tl[0].startswith("testcard|"):
         fail("(testcard) the values file holds %r, expected one testcard| line" % tl, o, e)
-    r = subprocess.run([qemu, "-L", root, binp, "--snapshot", os.path.join(t, "testcard_snap.ppm"),
-                        "--conf", tconf, "--font", font, "--media", media, "--no-invert"],
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if r.returncode != 0 or "screen settings" not in r.stdout:
-        fail("(testcard) a test card's snapshot is not its Settings list", r.stdout, r.stderr)
+    # the pictures: the menu (the default), one list, and the video's first frame decoded,
+    # in its own colour and uncorrected (the app built its profile in)
+    for name, screen, want in (("menu", None, "screen settings"), ("pick", "pick:videos", "screen pick:videos")):
+        args = [qemu, "-L", root, binp, "--snapshot", os.path.join(t, "testcard_%s.ppm" % name),
+                "--conf", tconf, "--font", font, "--media", media, "--no-invert"]
+        if screen:
+            args += ["--screen", screen]
+        r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if r.returncode != 0 or want not in r.stdout:
+            fail("(testcard) the %s snapshot" % name, r.stdout, r.stderr)
+    out = os.path.join(t, "testcard_video.ppm")
+    r = subprocess.run([qemu, "-L", root, binp, "--snapshot", out, "--conf", tconf, "--font", font,
+                        "--media", media, "--no-invert", "--screen", "test:videos", "--screen-row", "0",
+                        "--screen-edit"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0:
+        fail("(testcard) the video snapshot: rc %d" % r.returncode, r.stdout, r.stderr)
+    w, h, data = mkmedia.read_ppm(out)
+    cx, cy = w // 2, h // 2
+    got = tuple(data[(cy * w + cx) * 3:(cy * w + cx) * 3 + 3])
+    if any(abs(a - b) > 6 for a, b in zip(got, (200, 40, 40))):
+        fail("(testcard) the video's first frame is %r at the centre, expected about (200, 40, 40)" % (got,),
+             r.stdout)
+    if tuple(data[0:3]) != (0, 0, 0):
+        fail("(testcard) round the video is %r, expected black" % (tuple(data[0:3]),))
 
     # 5. apply: a synthetic program with three pad_cp in the template, one stock string
     prog = os.path.join(t, "game")

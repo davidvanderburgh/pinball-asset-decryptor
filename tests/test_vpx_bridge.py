@@ -827,6 +827,98 @@ def test_jaws_real_table_lanterns_and_sign_order():
         assert leds == sorted(leds), (group, leds)
 
 
+#: PAD-1362: the LEDs jaws_le 1.02 holds lit all game long (emulator, a game
+#: with slings, inlanes and the bumper hit: 99-100% of the time, against
+#: 0-60% in attract) that are not inserts on JP's table
+JAWS_GAME_LONG = {(8, 13): "LEFT RETURN 1", (8, 15): "LEFT RETURN 3", (8, 16): "RIGHT RETURN 1",
+                  (8, 18): "RIGHT RETURN 3", (8, 20): "LOWER LEFT SPOTLIGHT", (8, 21): "LOWER RIGHT SPOTLIGHT",
+                  (8, 56): "MID RIGHT SPOTLIGHT", (8, 70): "ORCA BB LEFT", (8, 71): "ORCA BB RIGHT",
+                  (8, 55): "FISHING REEL FLASH", (9, 88): "UPPER PF FLASH"}
+
+
+def test_jaws_game_long_lights_are_jps_lanterns_and_flashers():
+    # PAD-1362 (Mike: in attract the lights under the playfield sit with the
+    # inserts, once a game starts they are out of whack): the return lanes,
+    # spotlights and Orca board are lit all game, and they were stand-in
+    # lights cloned from inserts and dropped where Stern's are, on bare art -
+    # the right return lanes as three squares (clones of the apron's SHOOT
+    # AGAIN box) beside JP's inlane lanterns. They are his lanterns and his
+    # flashers now; the three stand-ins left (no light of JP's near) are round
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    lamps, retro = m["lamps"], m["retrofit_lights"]["lights"]
+    assert lamps["Lightlantern3"]["leds"] == [[8, 13], [8, 14]] and lamps["Lightlantern4"]["leds"] == [[8, 15]]
+    assert lamps["Lightlantern1"]["leds"] == [[8, 16], [8, 17]] and lamps["Lightlantern2"]["leds"] == [[8, 18]]
+    assert [lamps[k]["leds"] for k in ("f7", "f9", "f2", "f4", "f5")] == \
+        [[[8, 20]], [[8, 21]], [[8, 56]], [[8, 70]], [[8, 71]]]
+    assert sorted(k for k in retro if k != "_") == ["PadFishingReelFlash", "PadUpperPfFlash", "PadUpperPfRadio"]
+    for k, v in retro.items():
+        if k != "_":
+            assert v["round"] is True and v["fields"]["RADI"] <= 20, k
+    # every game-long LED is on one light only, and none of them a stand-in but the round three
+    owners = {}
+    for sect in (lamps, retro):
+        for k, v in sect.items():
+            if k != "_":
+                for led in v["leds"]:
+                    owners.setdefault(tuple(led), []).append(k)
+    for led, what in JAWS_GAME_LONG.items():
+        assert len(owners.get(led, [])) == 1, (what, owners.get(led))
+    # JP's own rules that still ran on a sling or bumper hit and lit lights
+    # the machine never did (Light9, beside OVERBOARD, kept LEFT OUTLANE's state)
+    assert {"ChangeOutlanes", "CheckBumpers"} <= set(m["quiet_subs"])
+    assert m["item_fields"]["f4"] == {"BWTH": 15.0} and m["item_fields"]["f5"] == {"BWTH": 15.0}
+    mark = [r for r in m["repatch"] if r.get("absent")]
+    assert mark[-1]["absent"].startswith("' PAD-1362") and mark[-1]["absent"] in m["extra_vbs"]
+
+
+@pytest.mark.skipif(not os.path.exists(JAWS_TABLE), reason="JP's JAWS 50th 3.2 is not on this machine")
+def test_jaws_real_table_game_long_lights_have_no_hard_edge():
+    # PAD-1362 on the real table: every light that burns all game (the lanterns,
+    # JP's five flashers, the round stand-ins after their `fields` and `round`)
+    # fades out before its outline - no square, no arrow - and each stand-in's
+    # outline is a circle of its new falloff about where it goes
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    t = vf.VpxTable(JAWS_TABLE)
+    items = list(t.items)
+    for k, data in vs.item_fields(t, m).items():
+        items[int(k[len("GameItem"):])] = data
+    items += vs.retrofit_items(t, m)
+    want = {k for sect in (m["lamps"], m["retrofit_lights"]["lights"]) for k, v in sect.items()
+            if k != "_" and any(tuple(x) in JAWS_GAME_LONG for x in v["leds"])}
+
+    def seg(p, a, b):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        u = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ((dx * dx + dy * dy) or 1)))
+        return math.hypot(a[0] + u * dx - p[0], a[1] + u * dy - p[1])
+
+    seen = set()
+    for data in items:
+        kind, name, pos = vf.VpxTable.item_info(data)
+        if kind != "Light" or name not in want:
+            continue
+        pts, f, first = [], {}, True
+        for tag, p, _ in vf.item_records(data):
+            if tag == "VCEN" and len(p) >= 8:
+                if first:
+                    first = False
+                    continue
+                pts.append(struct.unpack_from("<ff", p))
+            elif tag in ("RADI", "FAPO", "BWTH") and tag not in f:
+                f[tag] = struct.unpack_from("<f", p)[0]
+        near = min(seg(pos, pts[i], pts[i - 1]) for i in range(len(pts)))
+        edge = f["BWTH"] * max(0.0, 1 - near / f["RADI"]) ** f["FAPO"]
+        assert edge < 0.5, "%s: glow %.2f where its outline cuts it" % (name, edge)
+        r = m["retrofit_lights"]["lights"].get(name)
+        if r:
+            assert (round(pos[0]), round(pos[1])) == tuple(r["at"]) and f["RADI"] == r["fields"]["RADI"]
+            assert all(abs(math.hypot(x - pos[0], y - pos[1]) - f["RADI"] / math.cos(math.pi / len(pts))) < 0.01
+                       for x, y in pts), name
+        seen.add(name)
+    assert seen == want and len(want) == 11, sorted(want)
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the map's VBScript under cscript")
 def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
@@ -911,6 +1003,45 @@ def test_round_lights_gives_a_light_a_round_outline():
     assert struct.unpack("<f", [p for t, p, _ in recs if t == "BHHI"][0])[0] == 55.0, "the rest as it was"
     with pytest.raises(KeyError):
         vs.item_fields(Table, {"round_lights": ["NoSuchLight"]})
+
+
+def test_retrofit_light_fields_and_round():
+    # PAD-1362: a retrofit light is a clone, and kept its source's outline and
+    # falloff (JAWS 50th's deck lights: arrows lit over round red circles).
+    # `fields` set its records as item_fields does; `round` then makes its
+    # outline a circle of the NEW falloff about where it goes
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    name = "Light14"
+    src = struct.pack("<i", 7) + vf.biff_record("NAME", struct.pack("<I", 2 * len(name)) + name.encode("utf-16-le"))
+    src += vf.biff_record("VCEN", struct.pack("<ff", 100, 100)) + vf.biff_record("RADI", struct.pack("<f", 50.0))
+    src += vf.biff_record("BWTH", struct.pack("<f", 20.0))
+    arrow = [(100, 60), (130, 130), (70, 130)]
+    for p in arrow:
+        src += vf.biff_record("DPNT", b"") + vf.biff_record("VCEN", struct.pack("<ff", *p)) + vf.biff_record("ENDB", b"")
+    src += vf.biff_record("ENDB", b"")
+
+    class Table:
+        items = [src]
+        item_info = staticmethod(vf.VpxTable.item_info)
+
+    lights = {"Plain": {"clone": "Light14", "at": [300, 400]},
+              "Round": {"clone": "Light14", "at": [300, 400], "round": True, "fields": {"RADI": 16.0}}}
+    plain, rnd = vs.retrofit_items(Table, {"retrofit_lights": {"lights": lights}})
+
+    def look(item):
+        recs = list(vf.item_records(item))
+        cen = [struct.unpack_from("<ff", p) for t, p, _ in recs if t == "VCEN"]
+        radi = [struct.unpack_from("<f", p)[0] for t, p, _ in recs if t == "RADI"][0]
+        bwth = [struct.unpack_from("<f", p)[0] for t, p, _ in recs if t == "BWTH"][0]
+        return cen, radi, bwth
+    cen, radi, _ = look(plain)
+    assert cen[1:] == [(x + 200, y + 300) for x, y in arrow] and radi == 50.0, "no keys: the clone as it was"
+    cen, radi, bwth = look(rnd)
+    assert cen[0] == (300, 400) and radi == 16.0 and bwth == 20.0
+    assert len(cen) == 1 + len(arrow)
+    for x, y in cen[1:]:
+        assert abs(math.hypot(x - 300, y - 400) - 16.0 / math.cos(math.pi / len(arrow))) < 0.01
 
 
 def test_vpxlamps_reads_a_webp_holding_a_jpeg_marker():

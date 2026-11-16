@@ -332,7 +332,7 @@ def test_the_engine_no_longer_leaves_them_out():
 def test_the_write_logs_them_under_their_own_names():
     src = open(os.path.join(ROOT, "pinball_decryptor", "plugins", "stern", "spike3_write.py"),
                encoding="utf-8").read()
-    assert '("Score feed:", "Random clips:", "Screen times:")' in src
+    assert '("Score feed:", "Random clips:", "Screen times:", "Prolonged Competition:")' in src   # PAD-1327: and its
 
 
 # ---- the 64-bit runtime ------------------------------------------------------------------------------

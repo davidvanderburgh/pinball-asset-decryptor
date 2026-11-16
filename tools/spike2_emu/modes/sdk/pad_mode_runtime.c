@@ -639,7 +639,11 @@ static int hook(unsigned addr, hook_fn logger)
 
 /* PAD-619: hook() with every register saved - push {r0-r12, lr} - so the logger reads and WRITES r4-r12 as well
  * (regs[0..12], lr at regs[13]; the hooked function's sp is regs + 14). Elvira's start menu keeps its entry count in
- * r5 for the whole loop, and the append changes it. */
+ * r5 for the whole loop, and the append changes it. (PAD-1327: FULL_REG_LAST / FULL_SP name the layout for code
+ * shared with the 64-bit layer's hook_full; HOOK_SP is a plain hook's caller sp.) */
+#define FULL_REG_LAST 12
+#define FULL_SP(r) ((unsigned char *)((r) + 14))
+#define HOOK_SP(r) ((unsigned char *)((r) + 6))
 static int hook_full(unsigned addr, hook_fn logger)
 {
     unsigned *t;
@@ -22296,30 +22300,44 @@ static const char *comp_name(void)
     return comp.on ? comp_name_off : comp_name_on;
 }
 
-/* the entry is ours: by its kind, or - once a pick wrote the game's kind into it - by the name it points to */
+/* the entry is ours: by its kind, or - once a pick wrote the game's kind into it - by the name it points to (PAD-1327:
+ * a whole pointer, 8 bytes on Spike 3) */
 static int comp_entry_at(const unsigned char *ent, unsigned kat, unsigned nat)
 {
-    unsigned name = *(const unsigned *)(ent + nat);
-    return *(const unsigned *)(ent + kat) == COMP_KIND || name == (unsigned)(unsigned long)comp_name_on
-        || name == (unsigned)(unsigned long)comp_name_off;
+    pm_addr name = *(const pm_addr *)(ent + nat);
+    return *(const unsigned *)(ent + kat) == COMP_KIND || name == (pm_addr)(unsigned long)comp_name_on
+        || name == (pm_addr)(unsigned long)comp_name_off;
+}
+
+/* PAD-1327: the menu's entry count - in a register the port names (`challenge_menu_count_reg`, hook_full: r4-r12 on
+ * Spike 2, x19-x28 on Spike 3) or in the menu function's frame (`challenge_menu_count_at`, a plain hook) */
+static unsigned *menu_count_of(pm_reg *r, unsigned char **fsp)
+{
+    long creg = pm_port_value("challenge_menu_count_reg", -1);
+    *fsp = creg >= 0 ? FULL_SP(r) : HOOK_SP(r);            /* the menu function's sp */
+    if (creg >= 0)
+        return creg <= FULL_REG_LAST ? (unsigned *)&r[creg] : 0;
+    return (unsigned *)(*fsp + pm_port_value("challenge_menu_count_at", 0));
 }
 
 static void comp_menu_built(pm_reg *r)
 {
-    long creg = pm_port_value("challenge_menu_count_reg", -1);
-    unsigned char *fsp = (unsigned char *)(r + (creg >= 0 ? 14 : 6));   /* the menu function's sp */
-    unsigned *count = creg >= 0 && creg <= 12 ? (unsigned *)&r[creg] : (unsigned *)(fsp + pm_port_value("challenge_menu_count_at", 0));
+    unsigned char *fsp;
+    unsigned *count = menu_count_of(r, &fsp);
     unsigned char *list = fsp + pm_port_value("challenge_menu_list_at", 0);
     unsigned cap = (unsigned)pm_port_value("challenge_menu_cap", 0), es = (unsigned)pm_port_value("challenge_menu_entry", 12);
     unsigned kat = MENU_KIND_AT, cat = MENU_CAPTION_AT, nat = MENU_NAME_AT, plain = !kat && cat == 4 && nat == 8;
     unsigned short caption = (unsigned short)(comp.on ? comp.caption_end : comp.caption);
-    unsigned i, k, n0 = *count, tmpl = 0;
+    unsigned i, k, n0, tmpl = 0;
     static int room_said, said;
-    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es || nat + 4 > es || cat + 2 > es)
+    if (!count) return;
+    n0 = *count;
+    if (n0 > cap || !n0 || (es != 12 && es != 16 && es != 20 && es != 24) || kat + 4 > es
+        || nat + sizeof(pm_addr) > es || cat + 2 > es || (sizeof(pm_addr) == 8 && (nat & 7)))
         return;                                            /* not the list this hook knows: leave it alone */
     for (i = 0; i < n0; i++) {
         if (comp_entry_at(list + es * i, kat, nat)) {       /* an every-frame site: there already - say what it is now */
-            *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)comp_name();
+            *(pm_addr *)(list + es * i + nat) = (pm_addr)(unsigned long)comp_name();
             *(unsigned short *)(list + es * i + cat) = caption;
             return;
         }
@@ -22332,14 +22350,14 @@ static void comp_menu_built(pm_reg *r)
     i = n0;
     if (!plain)                                            /* another layout - start from the game's entry */
         for (k = 0; k < es; k++) list[es * i + k] = list[es * tmpl + k];
-    else if (es == 16)                                     /* the fourth word: as Standard's */
+    else if (es == 16 && sizeof(pm_addr) == 4)             /* the fourth word: as Standard's (Spike 3's is the name's) */
         *(unsigned *)(list + es * i + 12) = *(unsigned *)(list + es * tmpl + 12);
     *(unsigned *)(list + es * i + kat) = COMP_KIND;
     *(unsigned short *)(list + es * i + cat) = caption;
     if (plain) *(unsigned short *)(list + es * i + 6) = 0;
     else if (pm_port_value("challenge_menu_caption2_at", -1) >= 0)     /* TMNT keeps the caption twice */
         *(unsigned short *)(list + es * i + (unsigned)pm_port_value("challenge_menu_caption2_at", 0)) = caption;
-    *(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)comp_name();
+    *(pm_addr *)(list + es * i + nat) = (pm_addr)(unsigned long)comp_name();
     *count = i + 1;
     if (!said++) {
         char kinds[120];
@@ -22354,12 +22372,15 @@ static void comp_menu_built(pm_reg *r)
 static void comp_menu_picked(pm_reg *r)
 {
     long back = pm_port_value("challenge_menu_pick_back", 0);
+    /* PAD-1327: the register the kind under the cursor is in at the pick (r3 on Spike 2; Star Wars ELG's Spike 3: w1) */
+    long kreg = pm_port_value("challenge_menu_pick_reg", 3);
     unsigned char *e8 = back > 0 ? (unsigned char *)(unsigned long)(r[3] - (unsigned)back) - MENU_KIND_AT : 0;
     int was = comp.pending;       /* the game runs this on every frame of the menu: say only a change */
-    comp.pending = back > 0 ? comp_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : r[3] == COMP_KIND;
+    if (back <= 0 && (kreg < 0 || kreg > (sizeof(pm_addr) == 8 ? 8 : 3))) return;   /* the argument registers a plain hook saves */
+    comp.pending = back > 0 ? comp_entry_at(e8, MENU_KIND_AT, MENU_NAME_AT) : (unsigned)r[kreg] == COMP_KIND;
     if (comp.pending) {                                     /* the game plays it as Standard */
         if (back > 0) *(unsigned *)(e8 + MENU_KIND_AT) = 0;
-        else r[3] = 0;
+        else r[kreg] = 0;
     }
     if (comp.pending != was)
         say("prolonged competition: %s %s on the menu", comp_name(), comp.pending ? "picked" : "no longer picked");

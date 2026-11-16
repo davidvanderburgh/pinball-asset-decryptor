@@ -8480,7 +8480,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     if _is_spike3(disk_f):
         # PAD-1272: a Spike 3 card's modes are spike3_write's (its games partition, the 64-bit
         # runtime: spike3_modes), and so are the score feed (PAD-1297: files alone), the random
-        # clips and the screen times (PAD-1323: spike3_modes.plan builds them). The rest of
+        # clips and the screen times (PAD-1323: spike3_modes.plan builds them) and Prolonged
+        # Competition (PAD-1327: _comp_for_build above has said whether it goes on). The rest of
         # what rides the modes' Spike 2 delivery needs 64-bit runtime, port or menu work first
         # (the census: docs/plans/spike3_modes.md "The family on Spike 3"): each part the project
         # asked for is left out with its own sentence.
@@ -8490,7 +8491,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 ("editions", bool(editions)), ("picture settings", picture_prof is not None),
                 ("attract items", _attract_on), ("co-op play", _coop_on),
                 ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),
-                ("expression light shows", _cabs_on), ("Prolonged Competition", _comp_on),
+                ("expression light shows", _cabs_on),
                 ("records on the high scores", _rec_on)) if on]):
             log(_line, "warning")
         variant_slots, variant_prof, sound_modes, sound_modes_prof = {}, None, None, None

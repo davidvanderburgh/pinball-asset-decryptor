@@ -136,8 +136,13 @@ site coil_give        0x001842d0 0xa9bf7bf3 0xaa0003f3
 site lamp_free_owner  0x00236d30 0xa9bf7bf3 0xaa0003f3
 # site challenge_balls  NOT PLACED: no counterpart found
 # site challenge_extra_ball NOT PLACED: no counterpart found
-# site challenge_menu   NOT PLACED: mid-way into a function on Spike 2 (0x41d80 + 0xd7c)
-# site challenge_menu_pick NOT PLACED: mid-way into a function on Spike 2 (0x42c58 + 0x60)
+# ---- PAD-1327: the start menu (CHOOSE YOUR MODE OF PLAY, both flipper buttons in attract), read off this program's own
+# menu function 0x158bb0: its entries {u32 kind, u16 caption, u64 name} 16 bytes each on its stack at sp+0xf8, room for
+# 7 (0x168 is the next object), the count in w22 until 0x159a10 keeps the LAST index at sp+164 for the loop; every
+# frame 0x159c34 reads the kind under the cursor into w1 and the kind's flags follow (1: COMPETITION, flag 17).
+# Prolonged Competition (comp.cfg) is appended there (hook_full: x22 the count) and played as Standard once picked.
+site challenge_menu      0x00159a10 0x510006c1 0x2a0003f7
+site challenge_menu_pick 0x00159c38 0x7100103f 0x540033c0
 # not carried yet (its feature is 32-bit): site challenge_end_ball 0x00322180 0xf0001ba2 0xf942ec42
 # site ball_launch      NOT PLACED: no counterpart found
 # not carried yet (its feature is 32-bit): site challenge_scores 0x003eecc0 0xf0001542 0xf9468442
@@ -269,10 +274,11 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value backdrop_surface 1
 # not carried (64-bit layout, measure it): value lamp_fade            3
 # not carried (64-bit layout, measure it): value challenge_on_flag   18
-# not carried (64-bit layout, measure it): value challenge_menu_list_at   268
-# not carried (64-bit layout, measure it): value challenge_menu_count_at  44
-# not carried (64-bit layout, measure it): value challenge_menu_cap       7
-# not carried (64-bit layout, measure it): value challenge_menu_entry     12
+value challenge_menu_list_at   248   # PAD-1327: measured on this program (0x158c78 .. 0x158cf8)
+value challenge_menu_count_reg 22
+value challenge_menu_cap       7
+value challenge_menu_entry     16
+value challenge_menu_pick_reg  1
 # not carried (64-bit layout, measure it): value challenge_menu_kind      2
 # not carried (64-bit layout, measure it): value challenge_menu_slot      -1
 # not carried (64-bit layout, measure it): value challenge_menu_caption   1921

@@ -70,7 +70,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
-| Prolonged Competition | comp.cfg | left out | the challenge-menu sites (not placed); `hook_full`, 0 on 64-bit; 4-byte entry name, 32-bit frame |
+| Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on Star Wars ELG | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
 | records on the high scores | records.cfg | left out | the champion framework's sites (not placed) and its 64-bit record |
 | attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
 | inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
@@ -135,6 +135,49 @@ log says the same lines; on Spike 3 the engine leaves them to this build). A mul
 
 Tests: tests/test_pad1323_spike3_clips_stime.py (a synthetic 64-bit program; the real Fallout / Pokemon programs
 with PAD_S3_PROGRAMS).
+
+## Prolonged Competition on Spike 3 (PAD-1327)
+
+Round 1 of "Prolonged Competition with records". Goes on a Star Wars ELG 1.10 Spike 3 card; the five newer Spike 3
+titles (Fallout, Pokemon, Star Wars 2025 LE/Pro, Walking Dead Remastered, Transformers) say "The app does not know
+<title>'s start menu yet" as before.
+
+- **hook_full on 64-bit** (hook_a64.h): PAD-1322's callee step with ONE array by register number - a[0..8] = x0..x8,
+  a[19..28] = x19..x28, a[30] = x30, a[31] = the hooked function's sp - every one but the sp written back. FULL_SP /
+  FULL_REG_LAST name the layout on both machines (32-bit: regs + 14, r12), HOOK_SP a plain hook's caller sp.
+- **Star Wars ELG 1.10's Spike 3 menu** (function 0x158bb0, reached through a pointer): entries {u32 kind, u16
+  caption, u64 name} 16 bytes each at sp+0xf8, room for 7; the count in w22 until 0x159a10 (`sub w1, w22, #1`) keeps
+  the LAST index at sp+164 for the loop - `site challenge_menu` there, once per menu, hook_full, `value
+  challenge_menu_count_reg 22`. Every frame 0x159c34 loads the kind under the cursor into w1 and the kind's flags
+  follow (0 Standard clears 17-20, 1 COMPETITION sets 17, a kind past 6 clears them as Standard does) - `site
+  challenge_menu_pick` at 0x159c38, `value challenge_menu_pick_reg 1` (r3 on every Spike 2 port, the default).
+  The captions are Spike 2's ids (1914 STANDARD, 1919 COMPETITION, 1921 CHALLENGE, ...).
+- **The runtime's menu code** writes and compares the entry's name as a pm_addr (8 bytes, 8-aligned on Spike 3) and
+  copies Standard's "fourth word" only on 32-bit (on Spike 3 it is the name's high half).
+- **comp.cfg off a 64-bit program**: `prolonged_comp.card_lines` reads the FG_ name table (8-byte entries from
+  FG_INVALID) and the message table (one relocated pointer per id to a record whose first pointer is the English
+  text, from CHOOSE YOUR MODE OF PLAY's record). All seven Spike 3 programs read: ELG 17 / 1919 / 1914, Fallout and
+  Transformers 17 / 1920 / 1915, Pokemon and SW 2025 LE 16 / 1913 / 1911, SW 2025 Pro 16 / 1909 / 1907, WDR 17 /
+  1918 / 1913.
+- **The build**: `spike3_modes.comp_wanted` (quiet; the engine's `_comp_for_build` says why one is left out) hands
+  comp.cfg to `mode_write.plan` with the rest, or alone (`only`). The Play options tab offers the tick on ELG's
+  Spike 3 project (its port is `port_ready`).
+- **How the menu is worked on this build** (read off its button reader 0x275cc0): both flipper buttons open it; it
+  stays while the attract timer (operator setting 92, sped up 15x while one flipper is held without the other) or
+  the start-pending timer (9 s, reset by each press) runs; both buttons down with a fresh press answers 0xc0 (leave,
+  with the cancel sound), so letting go of both at once closes it. A rig job holds both, lets go of the right one a
+  second before the left, then steps with the right one.
+
+Proof (2026-11-16, Spike 3 rig slot 132, hidden and MUTED, the library card, the set `spike3_modes.plan` built from
+it: mode64.so, game.port, comp.cfg `flag 17 / caption 1919 / caption_end 1914 / only`): `prolonged competition:
+armed - on the start menu at ...9a10`; the menu opened as `entry 3 of 3 (UNTIL POWERED OFF) - kinds 0 6 512`
+(this fresh card's menu is STANDARD and DJ MIXER), the right flipper stepped Standard -> DJ Mixer -> ours (`UNTIL
+POWERED OFF picked on the menu`), Start: `ON until the machine is switched off - game 1 plays as Competition (flag 17
+was 0)`; at its end `flag 17 is 1; prolonged on`; game 2 from a plain Start `plays as Competition`, at its end flag 17 still 1; the menu again showed the entry as
+STANDARD / ENDS PROLONGED COMPETITION (`ENDS PROLONGED COMPETITION picked on the menu`), Start: `OFF - game 3 plays
+as the menu picked (flag 17 was 0)`.
+Tests: tests/test_pad1327_spike3_prolonged_comp.py (the menu append and the 64-bit hook_full lifted and run at
+Spike 3's word size; the real programs with PAD_S3_PROGRAMS).
 
 ## The Modes tab and Try it
 

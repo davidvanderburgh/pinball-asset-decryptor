@@ -1,4 +1,4 @@
-"""Prolonged Competition on a Spike 2 card's start menu (PAD-1041; sdk/MODE_SDK.md "Prolonged Competition",
+"""Prolonged Competition on a Spike 2 (and, PAD-1327, a Spike 3) card's start menu (PAD-1041; sdk/MODE_SDK.md "Prolonged Competition",
 pad_mode_runtime.c "Prolonged Competition on the start menu").
 
 Joe_Blasi (Pinside): "can the prolonged comp (in player menu) be added to all games?" Venom and Dungeons & Dragons
@@ -105,7 +105,9 @@ def project_title(project, probe=False):
 def card_lines(game_elf):
     """``(flag, caption, caption_end)`` read off the card's game program: the Competition flag's id (the FG_ name
     table's index) and the start menu's COMPETITION and STANDARD caption message ids (the first of each after CHOOSE
-    YOUR MODE OF PLAY's). Raises :class:`CompError`."""
+    YOUR MODE OF PLAY's). Raises :class:`CompError`. PAD-1327: a Spike 3 card's 64-bit program as well."""
+    if _is_a64(game_elf):
+        return _card_lines_a64(game_elf)
     from . import portchallenge as PC
     try:
         e = PC.Elf(game_elf)
@@ -123,6 +125,82 @@ def card_lines(game_elf):
 
     def caption(words):
         return next((i for i in range(head, min(n, head + 40)) if PC.message_text(e, table, i) == words), None)
+    comp, std = caption("COMPETITION"), caption("STANDARD")
+    if comp is None or std is None:
+        raise CompError(NO_CAPTION)
+    return names.index(FLAG), comp, std
+
+
+def _is_a64(game_elf):
+    head = bytes(game_elf[:5]) if isinstance(game_elf, (bytes, bytearray, memoryview)) else b""
+    if not head and isinstance(game_elf, str):
+        try:
+            with open(game_elf, "rb") as f:
+                head = f.read(5)
+        except OSError:
+            return False
+    return head[:4] == b"\x7fELF" and head[4:5] == b"\x02"
+
+
+def _card_lines_a64(raw):
+    """PAD-1327: :func:`card_lines` for a Spike 3 (64-bit) program. Its pointer tables are relocations (the file's
+    words are 0): the FG_ name table 8 bytes an entry from FG_INVALID, the message table one pointer per id to a
+    record whose first pointer is the message's English text, found from CHOOSE YOUR MODE OF PLAY's record."""
+    from . import spike3_requests as S3R
+    if isinstance(raw, str):
+        with open(raw, "rb") as f:
+            raw = f.read()
+    try:
+        p = S3R.Program(bytes(raw))
+    except Exception as ex:                             # noqa: BLE001 - not an ELF the reader knows
+        raise CompError("the card's game program could not be read (%s)" % ex) from None
+    by_val = {}
+    for slot, val in p.rel.items():
+        by_val.setdefault(val, []).append(slot)
+
+    def va_of(text):
+        i = p.raw.find(b"\0" + text + b"\0")
+        if i < 0:
+            return None
+        for vaddr, foff, fsz in p.segs:
+            if foff <= i + 1 < foff + fsz:
+                return vaddr + i + 1 - foff
+        return None
+
+    names = []
+    fva = va_of(b"FG_INVALID")
+    for at in by_val.get(fva, ()) if fva is not None else ():
+        got = []
+        while at + 8 * len(got) in p.rel:
+            nm = p.cstr(p.rel[at + 8 * len(got)], 80)
+            if not nm or not nm.startswith("FG_"):
+                break
+            got.append(nm)
+        if len(got) > len(names):
+            names = got
+    if FLAG not in names:
+        raise CompError(NO_FLAG)
+    hva = va_of(b"CHOOSE YOUR MODE OF PLAY")
+    best = None
+    for rec in by_val.get(hva, ()) if hva is not None else ():
+        for t0 in by_val.get(rec, ()):
+            b = t0
+            while b - 8 in p.rel and p.rel[b - 8] in p.rel:
+                b -= 8
+            n = 0
+            while b + 8 * n in p.rel and p.rel[b + 8 * n] in p.rel:
+                n += 1
+            if best is None or n > best[1]:
+                best = (b, n, (t0 - b) // 8)
+    if best is None:
+        raise CompError(NO_CAPTION)
+    table, n, head = best
+
+    def text(i):
+        return p.cstr(p.rel.get(p.rel.get(table + 8 * i, 0), 0), 200) or ""
+
+    def caption(words):
+        return next((i for i in range(head, min(n, head + 40)) if text(i) == words), None)
     comp, std = caption("COMPETITION"), caption("STANDARD")
     if comp is None or std is None:
         raise CompError(NO_CAPTION)

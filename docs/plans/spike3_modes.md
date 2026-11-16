@@ -179,6 +179,23 @@ as the menu picked (flag 17 was 0)`.
 Tests: tests/test_pad1327_spike3_prolonged_comp.py (the menu append and the 64-bit hook_full lifted and run at
 Spike 3's word size; the real programs with PAD_S3_PROGRAMS).
 
+**Still to do in PAD-1327** (the next runs, in this order):
+1. Prolonged Competition on the five newer titles. Their start menus are menus of game-mode indices (Spike 2's
+   Godzilla shape, `comp_menu_frame`), each in one function found by the code that loads CHOOSE YOUR MODE OF PLAY's
+   message id: Fallout LE 0x484b40 (id 1912 at 0x485ba0), Pokemon LE 0x4cb3f0, Star Wars 2025 LE 0x27d8c0 (and
+   0x1e9000 also names it), Star Wars 2025 Pro 0x1d1220, Walking Dead Remastered LE 0x1ee480, Transformers LE
+   0x27fbd0 (not ported yet). The frame point, list / count / cursor / buttons and the Competition / Standard
+   indices are to be read off each (an `s3port`-style finder, as `prolonged_comp._frame_points` does for 32-bit),
+   and `comp_menu_frame` given the FULL_SP / register layout like `comp_menu_built`; the lettering needs the 64-bit
+   message table (`data message_table` etc., not placed on any Spike 3 port).
+2. Records on the high scores: the champion framework. On ELG the end-of-game high scores (`challenge_scores` /
+   `game_scores`) pair to 0x3eecc0 and the (category, n) entry lookup (`challenge_score_entry`) to 0x3ede80 (s3port's
+   matcher); the gate, the category table and count, the record layout and the attract champion pages are to be
+   measured, and the runtime's champion code (chg_scores_wrap, chg_scores_one_entry, chg_page_*, rec_*) made
+   pm_addr-wide (entry words ent[0] / ent[5] / ent[6], the 36-byte category descriptors, are 32-bit today).
+The rig kit for both: C:/tmp/PAD-1327 (job.sh / play.sh: the menu worked as above; plan_comp.py builds the set from
+the card; dbg/ a scratch runtime with loop probes).
+
 ## The Modes tab and Try it
 
 - The tab's card read (`title_reader`) opens a Spike 3 card's games partition with the user's

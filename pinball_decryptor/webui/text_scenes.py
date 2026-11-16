@@ -317,7 +317,8 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
         """Scene *d* of the open project at its resting frame - the frame the Scenes
         preview opens on, where everything that slides or fades in has come to rest - with
         the project's edits and its whole-screen color profile, as the machine shows it
-        (not the PC's screen simulation), written to *dst* as a PNG."""
+        (not the PC's screen simulation), on black whatever the preview's background is (the
+        machine has nothing behind a scene), written to *dst* as a PNG."""
         from ..core import colour_profile as cp
         from ..plugins.stern import scene_render, fontrender as fr
         assets = self.assets_dir
@@ -327,7 +328,7 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
             man, _notes = self._tree_edited(card, stock)
             img = scene_render.render_tree(
                 assets, man, self._tree_default(card), fonts=fr.load_fonts(assets),
-                background=self._bg, colors=self._pending_colors(card),
+                background="Black", colors=self._pending_colors(card),
                 text_edits=self._pending_texts(card, None), pictures=self._tree_pictures(),
                 sizes=self._tree_sizes(), view=view, as_made=self._as_made(), cache={})
         else:
@@ -335,7 +336,7 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
             if layout is None:
                 raise RuntimeError("the scene does not draw")
             img = self._render_layout(
-                layout, fonts=fr.load_fonts(assets), frame=0, background=self._bg,
+                layout, fonts=fr.load_fonts(assets), frame=0, background="Black",
                 colors=self._pending_colors(card), group=None,
                 layout_edits=self._pending_layouts(card),
                 text_edits=self._pending_texts(card, layout), view=view)

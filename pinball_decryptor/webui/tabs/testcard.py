@@ -207,7 +207,8 @@ class TestCardTab(TabService):
             self._say("test card: %d of %d item%s, and the default PAD test card"
                       % (len(staged), len(items), "" if len(items) == 1 else "s"))
             form = types.SimpleNamespace(images=[types.SimpleNamespace(path=source)], volume=50,
-                                         selector_dir=mbc.DEFAULT_SELECTOR_DIR, tests=[],
+                                         selector_dir=os.environ.get("PAD_MULTIBOOT_SELECTOR") or mbc.DEFAULT_SELECTOR_DIR,
+                                         tests=[],
                                          platform="stern", colour_profiles={})
             media = os.path.join(work, "media")
             cmds = mbc.testcard_commands(form, out, media, test_specs=tc.test_specs(staged, mbc.wsl))
@@ -275,3 +276,6 @@ class TestCardTab(TabService):
         else:
             self._msg = ("bad", "The test card was not built: %s" % why)
         self._pub_soon()
+
+
+TAB = TestCardTab

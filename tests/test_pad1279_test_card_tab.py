@@ -247,3 +247,28 @@ def test_a_failed_step_says_which_and_why(tmp_path, monkeypatch):
     tab._run(_file(tmp_path / "g.raw"), str(tmp_path / "t.raw"), [])
     assert tab.state["msg"] == ["bad", "The test card was not built: converting the files stopped (exit 2): "
                                        "selectmedia: refused: no ffmpeg"]
+
+
+# ---- a scene's tick, through the real Scenes backend --------------------------------------------
+
+def test_a_ticked_scene_is_its_resting_frame_on_black(tmp_path):
+    pytest.importorskip("numpy")
+    from tests.webui_harness import web_app
+    from tests.test_gui_scene_editor import _seed, _open
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed(proj)
+    with web_app(tmp_path / "app", mfr="stern") as w:
+        svc = _open(w, proj)
+        svc._bg = "Magenta"                     # the preview's own background is not the machine's
+        assert w.call("text_scenes.set_test", "/g/scene1", True)
+        w.drain()
+        assert w.state("text_scenes")["test_tags"] == ["/g/scene1"]
+        it = tc.shared().items[0]
+        assert (it.kind, it.rel, it.label) == ("scene", "/g/scene1", "scene1") and os.path.isfile(it.path)
+        on_magenta = open(it.path, "rb").read()
+        svc._bg = "Black"
+        svc.render_resting_frame("/g/scene1", str(tmp_path / "black.png"))
+        assert open(str(tmp_path / "black.png"), "rb").read() == on_magenta
+        assert w.call("text_scenes.set_test", "/g/scene1", False)
+        assert tc.shared().items == []

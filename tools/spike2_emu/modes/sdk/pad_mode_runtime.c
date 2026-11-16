@@ -19606,10 +19606,20 @@ static int ci_skip(int left, int right, int *freed)
  * team (the right flipper held, or the start menu's entry just picked) has the game's own film ask answered with the
  * intro's clip: the game plays it in its own start-film scene, with its own PLAYER LANGUAGE SELECT bar over it. From
  * the clip_play hook (the game's thread, at its Start). 1 = swapped. */
+/* PAD-1361: a Start with the right flipper held is a co-op game of one (PAD-1054) only with characters to pick and
+ * CO-OP PLAY (or a team mode) on - coop_solo_takes' rule. DoomWalrus666: "With co-op OFF in the settings, a co-op mode
+ * was started by holding right flipper. The intro video could not be skipped": the film was swapped for the intro, no
+ * co-op game formed (CO-OP PLAY Off), and the intro's skip is polled only in a co-op game's (tests lift it verbatim) */
+static int ci_film_held(int chars, int held, int switched_on)
+{
+    return chars && held && switched_on;
+}
+
 static int ci_film_due(void)
 {
-    int held = coop_ch_n && coop_pick_on                      /* a held Start is a co-op game of one (PAD-1054) */
-               && (coop_button_held() || (coop.held_ms && pm_ms() - (coop.held_ms & ~1ul) <= CI_HELD_MS));
+    int held = ci_film_held(coop_ch_n && coop_pick_on,
+                            coop_button_held() || (coop.held_ms && pm_ms() - (coop.held_ms & ~1ul) <= CI_HELD_MS),
+                            coop_switched_on() || coop_teams_switched_on() != 0);
     return ci.clip[0] && coop.on && (ci.phase == CI_START || held
                                      || (tm.pending && pm_ms() - tm.seen_ms < TEAM_PICK_MS)
                                      /* the start menu's team fill runs at ball_start, before the film is asked for */
@@ -19648,6 +19658,7 @@ static int ci_film_swap(pm_reg *r)
     ci.film_at = pm_ms() | 1ul;
     if (ci.film_veto != 2) ci.film_veto = coop_button_held();
     ci.film_skip = 0;
+    ci.freed = 0;                                             /* PAD-1361: each flipper let go once before a skip */
     r[0] = (unsigned)(unsigned long)ci.clip;
     say("co-op intro: the game's start film \"%s\" asked for - \"%s\" plays in its place", ci.film_was, ci.clip);
     return 1;
@@ -19974,7 +19985,18 @@ static void coop_intro_tick(void)
         if (!ci.lang_until && ci.phase) ci.lang_until = now + CI_LANG_GUARD_MS;
         if (ci.lang_until && (long)(now - ci.lang_until) >= 0) ci.lang_before = -1, ci.lang_until = 0;
     }
-    if (!ci.phase) return;
+    if (!ci.phase) {
+        /* PAD-1361: the game's start film swapped for the intro, and no co-op game formed for it (the Start was not one
+         * after all): it is the game's own film then, and both flipper buttons still stop it */
+        if (ci.film_at && !ci.film_skip && now - (ci.film_at & ~1ul) < ci.ms + CI_OVER_MS + 9000ul
+            && ci_skip(switch_held(coop_left), switch_held(coop.button), &ci.freed)) {
+            ci.film_skip = 1;
+            ((void (*)(void))(unsigned long)fn("clip_stop"))();
+            say("co-op intro: no co-op game for it - skipped with both flipper buttons after %lu ms, the film stopped",
+                now - (ci.film_at & ~1ul));
+        }
+        return;
+    }
     if (!coop_teammates()) {                                  /* the game is over (or another) */
         if (ci.phase == CI_PLAY) ci_played("cut short: the game ended");
         ci.phase = CI_OFF;

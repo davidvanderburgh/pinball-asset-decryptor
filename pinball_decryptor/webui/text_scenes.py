@@ -292,8 +292,60 @@ def glyph_atlas_rel(assets, rel):
     return None
 
 
-class TextScenesService(ModeLayoutMixin, TreeEditMixin):
+from .testcard_tags import TestTagMixin
+
+class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
     ns = "text_scenes"
+    _tc_kind = "scene"            # PAD-1279: a scene's TEST tick puts its resting frame on the test card
+
+    def _tc_project(self):
+        return self.assets_dir
+
+    def _tc_label(self, rel):
+        return (self._scenes.get(rel) or {}).get("label") or os.path.basename(str(rel).rstrip("/\\"))
+
+    def _tc_made(self, rel, item):
+        """A ticked scene: its resting frame as a picture, kept for the build (which draws
+        it again if the project is still the open one)."""
+        from . import testcard_core as tc
+        dst = tc.scene_png_path(self.assets_dir, rel)
+        self.render_resting_frame(rel, dst)
+        item.path = dst
+        tc.shared().save()
+
+    def render_resting_frame(self, d, dst):
+        """Scene *d* of the open project at its resting frame - the frame the Scenes
+        preview opens on, where everything that slides or fades in has come to rest - with
+        the project's edits and its whole-screen color profile, as the machine shows it
+        (not the PC's screen simulation), written to *dst* as a PNG."""
+        from ..core import colour_profile as cp
+        from ..plugins.stern import scene_render, fontrender as fr
+        assets = self.assets_dir
+        view = cp.machine_view(assets, True, False)
+        card, stock = self._tree_card(d)
+        if stock is not None:
+            man, _notes = self._tree_edited(card, stock)
+            img = scene_render.render_tree(
+                assets, man, self._tree_default(card), fonts=fr.load_fonts(assets),
+                background=self._bg, colors=self._pending_colors(card),
+                text_edits=self._pending_texts(card, None), pictures=self._tree_pictures(),
+                sizes=self._tree_sizes(), view=view, as_made=self._as_made(), cache={})
+        else:
+            card, layout = scene_render.layout_for_scene_dir(self._layouts, d)
+            if layout is None:
+                raise RuntimeError("the scene does not draw")
+            img = self._render_layout(
+                layout, fonts=fr.load_fonts(assets), frame=0, background=self._bg,
+                colors=self._pending_colors(card), group=None,
+                layout_edits=self._pending_layouts(card),
+                text_edits=self._pending_texts(card, layout), view=view)
+        if img is None:
+            raise RuntimeError("the scene does not draw")
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        tmp = dst + ".part.png"
+        img.save(tmp, "PNG")
+        os.replace(tmp, dst)
+        return dst
 
     def __init__(self, tab):
         self.tab = tab
@@ -502,6 +554,7 @@ class TextScenesService(ModeLayoutMixin, TreeEditMixin):
     # data
     # ------------------------------------------------------------------
     def reload(self, preselect=None, focus_text=None):
+        self._tc_publish()           # PAD-1279: the TEST column for this project
         from ..plugins.stern import scene_render
         try:
             self._scenes = collect_scenes(self.assets_dir)

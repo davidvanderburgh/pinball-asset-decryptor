@@ -642,52 +642,6 @@ class MultibootTab(TabService):
             panel._ed_media.set(kind)
         return True
 
-    # -- the test pictures (PAD-1279) -------------------------------------
-    @rpc
-    def test_add(self):
-        """Menu settings, Test pictures: Add files…"""
-        panel = self._live()
-        exts = " ".join("*" + e for e in mt.TEST_EXTS)
-        paths = mbp._FILEDIALOG.askopenfilenames(
-            title="Pick test pictures, videos or sounds",
-            filetypes=[("Pictures, videos and sounds", exts), ("All files", "*.*")])
-        if not paths:
-            return False
-        return self._tests_done(panel.test_add(list(paths)) > 0)
-
-    @rpc
-    def test_remove(self, k):
-        return self._tests_done(self._live().test_remove(int(k)))
-
-    @rpc
-    def test_move(self, k, d):
-        return self._tests_done(self._live().test_move(int(k), int(d)))
-
-    @rpc
-    def test_label(self, k, label):
-        return self._tests_done(self._live().test_label(int(k), str(label or "")))
-
-    @rpc
-    def build_test_card(self):
-        """Test pictures box: Build test card…"""
-        panel = self._live()
-        start = panel.testcard_default_path()
-        out = mbp._FILEDIALOG.asksaveasfilename(
-            title="Save the test card as",
-            initialdir=os.path.dirname(start) or None,
-            initialfile=os.path.basename(start),
-            defaultextension=".raw",
-            filetypes=[("Card images", "*.raw"), ("All files", "*.*")])
-        if not out:
-            return False
-        ok = panel.build_test_card(out)
-        self._multiboot_panel._dirty("menu", "checks", "busy")
-        return bool(ok)
-
-    def _tests_done(self, changed):
-        self._multiboot_panel._dirty("menu", "checks", "preview")
-        return bool(changed)
-
     # -- the random card's games (PAD-239) --------------------------------
     @rpc
     def member_add(self):

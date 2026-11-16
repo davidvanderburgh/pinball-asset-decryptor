@@ -191,6 +191,7 @@ _SHOT_MAX = 32
 from .. import compat
 from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
+from ..testcard_tags import TestTagMixin
 
 #: The tail the count line wears while the change diff runs.
 _CHANGE_SCAN_NOTE = "  ·  still checking…"
@@ -352,7 +353,15 @@ class _ProfileButton:
     pack_forget = pack
 
 
-class AudioTab(FindOriginalsMixin, TabService):
+class AudioTab(TestTagMixin, FindOriginalsMixin, TabService):
+    _tc_kind = "sound"                # PAD-1279: a TEST tick puts the row on the test card
+
+    def _tc_project(self):
+        return self._assets()
+
+    def _tc_file(self, rel):
+        return (self._by_rel.get(rel).abs_path if self._by_rel.get(rel) is not None else None)
+
     ns = "audio"
     key = "Replace Audio"
     label = "Audio"
@@ -633,6 +642,7 @@ class AudioTab(FindOriginalsMixin, TabService):
     def on_show(self):
         self._refresh_ffmpeg_warning()
         self._default_assets_from_extract()
+        self._tc_publish()           # PAD-1279: the TEST column
         self._refresh_folder()
         self._maybe_rescan()
 

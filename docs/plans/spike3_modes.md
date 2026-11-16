@@ -249,10 +249,16 @@ modes yet, so a Spike 3 record counts points, in the whole game or in a mode of 
 Proof (2026-11-16, rig slots 132 / 134, hidden and MUTED, each title's set built by spike3_modes.plan from its card with
 one record, BIG SCORE: points in the whole game): `records: BIG SCORE - <score> beats 0: the game's initials entry under
 its name`, the game's own "Player 1 - Enter Initials / BIG SCORE" screen, and `BIG SCORE's new record ...` kept in
-/dump/pad_challenge_scores - Star Wars ELG (194530), Walking Dead Remastered LE (201190), Pokemon LE (540)RESULTS_MORE.
+/dump/pad_challenge_scores - Star Wars ELG (194530), Walking Dead Remastered LE (201190), Pokemon LE (540), Transformers LE (245220), Star Wars 2025 LE (24464360) and Pro (13962240), Fallout LE (8311590). Rig notes: a
+title's own shot switches (its titles/*.env SHOT_SWS) must be hit after the plunge, or the ball save never starts and every
+drain is served back (Star Wars 2025); Pokemon's frame dumps stop late in a game while the game runs on.
 
-**What is left in PAD-1327:** the attract mode's champion pages for records on Spike 3, and counts (audits, the game's
-own champion counts, the game's own modes) in the records dialog for a 64-bit program.
+**What is left in PAD-1327** (the next runs): (1) the attract mode's champion pages on Spike 3, so a record's champion
+shows in attract as on Spike 2 (chg_page_arm / chg_pages_arm: the page, text and yield wraps and the page table are
+32-bit; measure the 64-bit attract page functions from ELG's pairing and widen them); (2) counts in the records dialog
+for a 64-bit program - the shots and mode audits (an audit_add site and the AUD_ name table on Spike 3), the game's
+own champion counts (coop_play._champions off 64-bit categories: the table object above) and the game's own modes
+(the stock scanner on 64-bit, where it reads them).
 
 ## The Modes tab and Try it
 

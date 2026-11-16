@@ -607,7 +607,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
             adds = dict(adds)
             for cp, news in mus.news.items():
                 adds[cp] = list(adds.get(cp) or ()) + list(news)
-    if not modes and not code and not feed and not slots and not stime and mus is None:
+    if (not modes and not code and not feed and not slots and not stime and mus is None and coop_prof is None
+            and hand_prof is None):                     # PAD-1326: co-op or handicaps alone
         return None
 
     def read_card(rel):

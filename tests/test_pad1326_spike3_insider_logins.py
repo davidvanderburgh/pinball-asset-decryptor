@@ -437,3 +437,16 @@ def test_beside_music_mode_coop_play_keeps_its_setting():
     src = open(os.path.join(os.path.dirname(__file__), "..", "pinball_decryptor", "plugins", "stern",
                             "spike3_modes.py"), encoding="utf-8").read()
     assert "coop_setting = live.get(MS.COOP_PLAY, 0)" in src and "hand_setting = live.get(MS.HANDICAP, 0)" in src
+
+
+def test_every_early_return_of_the_spike3_plan_knows_coop_and_handicaps():
+    """The merge with the music modes added a check after them that returned None for a card of co-op alone (found
+    planning the real ELG card): every 'nothing to carry' check counts co-op and the handicaps."""
+    src = open(os.path.join(os.path.dirname(__file__), "..", "pinball_decryptor", "plugins", "stern",
+                            "spike3_modes.py"), encoding="utf-8").read()
+    body = src[src.index("def plan(project, reader, scratch"):]
+    body = body[:body.index("\ndef ", 10)]
+    checks = re.findall(r"if \(?not modes and not code and not feed and not slots[^:]*:", body, re.S)
+    assert len(checks) == 4
+    for c in checks:
+        assert "coop_prof is None" in c and "hand_prof is None" in c, c

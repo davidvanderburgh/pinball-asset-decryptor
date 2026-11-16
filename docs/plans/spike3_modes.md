@@ -883,6 +883,10 @@ the two add together is the adjustment getter wrapped (handicaps) while co-op's 
 game's change, which reads adjustments; that is where to look to lift the gate. Rig note: a job's play script left
 running after its slot is stopped keeps writing the same output file ("the bridge's ball model did not answer") -
 kill job_coop.sh / play_coop.sh by pid, and give each run its own output.
+After the merge with the music modes (PAD-1324) and the gate: ELG planned through the Write again played a whole co-op
+game (teammate 2 joined, three balls of turns with the logins swapped, `the game's end counts 1 player(s)`), and a
+handicaps-only ELG card opened and took both players' picks (P1 +1, P2 +0). Planning it caught a check the merge added
+after the music modes that returned no plan for a card of co-op alone (fixed; a test pins every such check).
 Rig scripts: C:/tmp/PAD-1326/rig (plan_coop.py, job_coop.sh, play_coop.sh, setval.py, watch_bytes.py, inject.py).
 Tests: tests/test_pad1326_spike3_insider_logins.py.
 

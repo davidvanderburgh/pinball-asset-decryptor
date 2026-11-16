@@ -1955,7 +1955,17 @@ def retrofit_items(table, m):
         if name == "_":
             continue
         kind, src = source(v.get("clone", rl.get("clone")), "Light")
-        items.append(vpxfile.clone_item(src, name, *v["at"]))
+        item = vpxfile.clone_item(src, name, *v["at"])
+        # PAD-1362: a clone keeps its source's outline and falloff - JAWS 50th's
+        # deck lights were arrows lit over round red circles - so `fields` (as
+        # item_fields) and `round` (as round_lights, after the fields so a new
+        # falloff sizes the circle) give the copy a look of its own
+        if v.get("fields"):
+            item = vpxfile.set_fields(item, {
+                tag: struct.pack("<f" if isinstance(x, float) else "<i", x) for tag, x in v["fields"].items()})
+        if v.get("round"):
+            item = round_light(item, tuple(v["at"]))
+        items.append(item)
     # PAD-922: a switch where the table has no object - a Trigger cloned from
     # `clone`, given its own `shape` (drag points), switched on, drawn as
     # nothing and on the playfield (SURF: John Wick's arch triggers sit on a

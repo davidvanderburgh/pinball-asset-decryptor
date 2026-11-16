@@ -1733,6 +1733,10 @@ static int cpk_lookup(pm_reg *r);         /* PAD-1123: a co-op character's sound
 static volatile int cpk_live;
 static int ccer_lookup(pm_reg *r);        /* PAD-1317: the co-op awards ceremony's music */
 static volatile int ccer_live;
+#if PM_A64
+static int msw_lookup(pm_reg *r);         /* PAD-1324: a music mode's record for a stock sound (Spike 3) */
+static volatile int msw_live;
+#endif
 
 static void on_sound_lookup(pm_reg *r)
 {
@@ -1743,6 +1747,9 @@ static void on_sound_lookup(pm_reg *r)
     if (ci_live && r[1] && ci_lookup(r)) return;     /* PAD-1114: the co-op intro's sound */
     if (cpk_live && r[1] && cpk_lookup(r)) return;   /* PAD-1123: a co-op character's sound once picked */
     if (juke_live && r[1] && juke_lookup(r)) return;   /* PAD-685: a song mode's song, the jukebox's */
+#if PM_A64
+    if (msw_live && r[1] && msw_lookup(r)) return;     /* PAD-1324: the music mode's record, Spike 3 */
+#endif
     if (sndt_live && r[1]) sndt_lookup(r);   /* PAD-565: a sound's files in turn */
     if (swaps_live && r[1]) {
         const unsigned char *k = LOOKUP_KEY(r);
@@ -24433,7 +24440,23 @@ struct sndm {
 static char sndm_raw[SNDM_FILE_MAX + 1];
 static struct sndm sndm[SNDM_SOUNDS];
 static const unsigned char sndm_zeros[1024];    /* the keystream our descriptors are read with */
-static unsigned n_sndm, sndm_live, sndm_n, sndm_force;
+static unsigned n_sndm, sndm_n, sndm_force;
+static pm_addr sndm_live;                       /* the setting's value (PAD-1324: moved by a PIE's load address) */
+#if PM_A64
+/* PAD-1324: MUSIC MODES ON SPIKE 3. A Spike 3 sound plays as long as its own RECORD says (its frames in image.bin's
+ * directory; a 20 s file under a 26 s carrier was heard looping past it, PAD-1296), not as a descriptor declares, so
+ * the 64-bit runtime needs no descriptor of the game's: each mode file is a record appended to image.bin, and a line
+ *     mswap <TAB> <m> <TAB> <the slot's record key> <TAB> <mode m's record key>
+ * swaps the key at the record lookup (`site sound_lookup`, the bank map's find, the key by value in x1) while the
+ * setting says m - read at every lookup, so a change in the menu is heard from the next sound the game starts. */
+#define MSW_MAX         2048
+struct msw {
+    unsigned char stock[8], ours[8];
+    unsigned char mode, said;
+};
+static struct msw msw[MSW_MAX];
+static unsigned n_msw;
+#endif
 static int sndm_only, sndm_dropped, sndm_bad;
 static volatile unsigned sndm_last = 1;         /* the mode the last resolve played, for the log */
 static unsigned (*sndm_orig)(unsigned, unsigned *);
@@ -25605,7 +25628,10 @@ static void sndm_line(char *s)
     if (n == 1 && str_eq(f[0], "only")) { sndm_only = 1; return; }
     if (n >= 3 && str_eq(f[0], "setting")) {
         p = f[1];
-        sndm_live = (unsigned)number(&p, &ok);
+        sndm_live = (pm_addr)number(&p, &ok);
+#if PM_A64
+        if (sndm_live) sndm_live += (pm_addr)game_base;   /* PAD-1324: the program's own address, as the port's */
+#endif
         p = f[2];
         m = (unsigned)number(&p, &ok);
         sndm_n = ok && m >= 1 && m <= SNDM_MODES ? m : 0;
@@ -25669,6 +25695,20 @@ static void sndm_line(char *s)
         cpk_sound_line(f[1], f[2], f[3], f[4], f[5]);
         return;
     }
+#if PM_A64
+    if (n >= 4 && str_eq(f[0], "mswap")) {    /* PAD-1324 */
+        struct msw *w;
+        p = f[1];
+        m = (unsigned)number(&p, &ok);
+        if (n_msw >= MSW_MAX) { sndm_dropped++; return; }
+        w = &msw[n_msw];
+        if (!ok || m < 2 || m > SNDM_MODES || !key_hex(f[2], w->stock) || !key_hex(f[3], w->ours)) { sndm_bad++; return; }
+        w->mode = (unsigned char)m;
+        w->said = 0;
+        n_msw++;
+        return;
+    }
+#endif
     if (n >= 3 && str_eq(f[0], "gshot")) {    /* PAD-945 */
         gms_line(f[1], f[2]);
         return;
@@ -25744,6 +25784,34 @@ static unsigned sndm_resolve(unsigned id, unsigned *out)
     out[0] = (unsigned)(unsigned long)sndm_zeros;
     return (unsigned)(unsigned long)e->desc;
 }
+
+#if PM_A64
+/* PAD-1324: the record lookup on Spike 3: the slot's record key swapped for mode m's while the setting says m */
+static int msw_lookup(pm_reg *r)
+{
+    const unsigned char *k = LOOKUP_KEY(r);
+    unsigned m = sndm_mode(), i;
+    if (m != sndm_last) {
+        sndm_last = m;
+        say("music modes: mode %u from here on (record %02x%02x%02x%02x%02x%02x%02x%02x is the first sound it looks up)",
+            m, k[0], k[1], k[2], k[3], k[4], k[5], k[6], k[7]);
+    }
+    if (m < 2) return 0;
+    for (i = 0; i < n_msw; i++)
+        if (msw[i].mode == m && key_is(k, msw[i].stock)) {
+            if (!msw[i].said) {
+                msw[i].said = 1;
+                say("music modes: record %02x%02x%02x%02x%02x%02x%02x%02x plays mode %u's, %02x%02x%02x%02x%02x%02x%02x%02x",
+                    msw[i].stock[0], msw[i].stock[1], msw[i].stock[2], msw[i].stock[3], msw[i].stock[4],
+                    msw[i].stock[5], msw[i].stock[6], msw[i].stock[7], m, msw[i].ours[0], msw[i].ours[1],
+                    msw[i].ours[2], msw[i].ours[3], msw[i].ours[4], msw[i].ours[5], msw[i].ours[6], msw[i].ours[7]);
+            }
+            LOOKUP_TAKE(r, msw[i].ours);
+            return 1;
+        }
+    return 0;
+}
+#endif
 
 /* PAD-565 / PAD-638: the file a new play of sndt `t` takes - the next in turn (its own one first), or
  * at random any but the last one played (sndt_rand stirs the clip variants' generator) */
@@ -25969,7 +26037,7 @@ static void sndm_arm(void)
         say("music modes: %d line(s) not read (the table holds %d sounds), %d not a sound line", sndm_dropped,
             SNDM_SOUNDS, sndm_bad);
     if (sndm_live && !maps_has(sndm_live, 4, MAP_R)) {
-        say("music modes: the setting's value at 0x%08x is not in the game's memory - every sound plays mode 1's",
+        say("music modes: the setting's value at 0x%08" PMA " is not in the game's memory - every sound plays mode 1's",
             sndm_live);
         sndm_live = 0;
     }
@@ -25981,6 +26049,26 @@ static void sndm_arm(void)
     cpk_sound_arm();                          /* PAD-1123: nor the co-op characters' sounds once picked */
     ccer_sound_arm();                         /* PAD-1317: nor the co-op awards ceremony's music */
     juke_arm();                               /* PAD-685: nor the jukebox */
+#if PM_A64
+    if (n_msw) {                              /* PAD-1324: Spike 3's music modes swap records, no descriptors */
+        if (!fn("sound_lookup") || (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup)))) {
+            say("music modes: off - the port's sound_lookup cannot be hooked on this build; every sound plays mode 1's");
+            n_msw = 0;
+        } else {
+            msw_live = 1;
+            say("music modes: %u record(s) over %u mode(s), the setting at 0x%08" PMA " (now %u)%s; sound_lookup 0x%08"
+                PMA " swaps them", n_msw, sndm_n, sndm_live,
+                sndm_live ? *(volatile const unsigned *)(unsigned long)sndm_live : 0,
+                sndm_force ? " - FORCED by the file" : "", fn("sound_lookup"));
+        }
+    }
+    if (n_sndm) {
+        say("music modes: %u descriptor line(s) left alone - a Spike 3 sound plays its own record's length, the "
+            "build writes mswap lines", n_sndm);
+        n_sndm = 0;
+    }
+    return;
+#endif
     if (!n_sndm) {
         if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request || ccer.request) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
@@ -25991,18 +26079,13 @@ static void sndm_arm(void)
         n_sndm = 0;
         return;
     }
-#if PM_A64
-    say("music modes: off - the asset descriptors are 32-bit ARM's on this runtime; every sound plays mode 1's");
-    n_sndm = 0;
-    return;
-#endif
     sndm_orig = (unsigned (*)(unsigned, unsigned *))hook_wrap(fn("sound_resolve"), (void *)sndm_resolve);
     if (!sndm_orig) {
         say("music modes: off - sound_resolve 0x%08" PMA " cannot be wrapped; every sound plays mode 1's", fn("sound_resolve"));
         n_sndm = 0;
         return;
     }
-    say("music modes: %u sound(s) over %u mode(s), the setting at 0x%08x (now %u)%s; get_asset_descriptor "
+    say("music modes: %u sound(s) over %u mode(s), the setting at 0x%08" PMA " (now %u)%s; get_asset_descriptor "
         "0x%08" PMA " is wrapped", n_sndm, sndm_n, sndm_live, sndm_live ? *(volatile const unsigned *)(unsigned long)sndm_live : 0,
         sndm_force ? " - FORCED by the file" : "", fn("sound_resolve"));
 }

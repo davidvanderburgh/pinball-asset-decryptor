@@ -271,7 +271,8 @@ def test_a_spike3_coop_plan_says_what_it_is(tmp_path):
 
 PORTS = {"fallout_le": ("fallout_le-0.82", True), "pokemon_le": ("pokemon_le-0.82", False),
          "star_wars_2025_le": ("star_wars_2025_le-0.96", False), "star_wars_2025_pro": ("star_wars_2025_pro-0.84", False),
-         "star_wars_elg": ("star_wars_elg-1.10", True), "walking_dead_remastered_le": ("walking_dead_remastered_le-0.92", True)}
+         "star_wars_elg": ("star_wars_elg-1.10", True), "walking_dead_remastered_le": ("walking_dead_remastered_le-0.92", True),
+         "transformers_mtmte_le": ("transformers_mtmte_le-0.96", True)}
 
 
 def _port(name):
@@ -312,7 +313,8 @@ def test_coop_goes_on_the_spike3_titles_whose_port_reads_the_button():
     from pinball_decryptor.plugins.stern import mode_project as MP
     profs = {k: p for k, p in MP.profiles().items() if getattr(p, "arch", "") == "a64"}
     on = sorted(k for k, p in profs.items() if not CP.title_refusal(p))
-    assert on == ["fallout_le_0_82_spike3", "star_wars_elg_1_10_spike3", "walking_dead_remastered_le_0_92_spike3"]
+    assert on == ["fallout_le_0_82_spike3", "star_wars_elg_1_10_spike3", "transformers_mtmte_le_0_96_spike3",
+                  "walking_dead_remastered_le_0_92_spike3"]
     for k, p in profs.items():
         if k not in on:
             assert CP.title_refusal(p) == CP.NO_PORT % p.label
@@ -323,7 +325,7 @@ def test_coop_goes_on_the_spike3_titles_whose_port_reads_the_button():
 #: each program's message table and the index of its "BALL %d" line (ELG's is its Spike 2 build's 1255)
 MESSAGES = {"fallout_le": (0x65fbdb8, 1256), "pokemon_le": (0x31c8828, 1252), "star_wars_2025_le": (0x8e2948, 1252),
             "star_wars_2025_pro": (0x7770d8, 1248), "star_wars_elg": (0x6c96e8, 1255),
-            "walking_dead_remastered_le": (0x7e6328, 1254)}
+            "walking_dead_remastered_le": (0x7e6328, 1254), "transformers_mtmte_le": (0xa1c3a8, 1256)}
 
 
 @pytest.mark.parametrize("key", sorted(MESSAGES))
@@ -363,7 +365,8 @@ def test_a_spike3_handicap_cfg():
 def test_handicaps_go_on_the_titles_that_take_coop():
     from pinball_decryptor.plugins.stern import handicap as HC, mode_project as MP, spike3_modes as S3M
     on = sorted(k for k, p in MP.profiles().items() if getattr(p, "arch", "") == "a64" and not HC.title_refusal(p))
-    assert on == ["fallout_le_0_82_spike3", "star_wars_elg_1_10_spike3", "walking_dead_remastered_le_0_92_spike3"]
+    assert on == ["fallout_le_0_82_spike3", "star_wars_elg_1_10_spike3", "transformers_mtmte_le_0_96_spike3",
+                  "walking_dead_remastered_le_0_92_spike3"]
     assert "handicaps" not in S3M.FAMILY_LEFT_OUT
 
 
@@ -408,3 +411,29 @@ def test_the_runtime_refuses_handicaps_beside_coop_on_64bit():
     head = arm[:arm.index("#endif")]
     assert head.lstrip().startswith("static void hand_arm(void)\n{\n#if PM_A64")
     assert "if (coop_wanted()) {" in head and "return;" in head
+
+
+# ---- beside the music modes (PAD-1324): their program is the one the machine runs ----------------------------------
+
+def test_the_music_modes_program_carries_coop_play_and_handicap(monkeypatch):
+    from pinball_decryptor.plugins.stern import menu_settings as MS, spike3_menu
+    monkeypatch.setattr(spike3_menu, "coop_row_asked", lambda p: True)
+    monkeypatch.setattr(spike3_menu, "hand_row_asked", lambda p: True)
+    monkeypatch.setattr("pinball_decryptor.plugins.stern.editions.load", lambda p: [])
+    rows = spike3_menu.rows_wanted("proj")
+    assert [r[0] for r in rows] == [MS.COOP_PLAY, MS.HANDICAP]
+
+
+def test_beside_music_mode_coop_play_keeps_its_setting():
+    """CO-OP PLAY lands on the same setting with MUSIC MODE beside it (ELG: 0x70afd8); spike3_modes reads it off the
+    music modes' grow all the same, the program the machine runs."""
+    from pinball_decryptor.plugins.stern import menu_settings as MS, spike3_menu
+    b = _library_program("star_wars_elg")
+    _o, alone, _r = spike3_menu.grow(b, [spike3_menu._coop_row()])
+    _o, both, _r = spike3_menu.grow(b, [(MS.MUSIC_MODE, 2, ["A", "B"]), spike3_menu._coop_row()])
+    a = {s.key: s.live for s in alone}
+    m = {s.key: s.live for s in both}
+    assert MS.MUSIC_MODE in m and m[MS.COOP_PLAY] == a[MS.COOP_PLAY] == 0x70afd8 != m[MS.MUSIC_MODE]
+    src = open(os.path.join(os.path.dirname(__file__), "..", "pinball_decryptor", "plugins", "stern",
+                            "spike3_modes.py"), encoding="utf-8").read()
+    assert "coop_setting = live.get(MS.COOP_PLAY, 0)" in src and "hand_setting = live.get(MS.HANDICAP, 0)" in src

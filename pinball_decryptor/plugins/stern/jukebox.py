@@ -329,6 +329,9 @@ def title_refusal(prof):
     """Why *prof*'s card cannot have a jukebox, or ``""``."""
     if prof is None:
         return NO_TITLE
+    from .spike3_music import LEFT_OUT as _S3_LEFT, other_refusal as _s3_other
+    if _s3_other(prof, _S3_LEFT["jukebox"]):                     # PAD-1324: Spike 3 carries the music modes only
+        return _s3_other(prof, _S3_LEFT["jukebox"])
     if not song_modes(prof):
         return NOT_OFFERED % prof.label
     return ""

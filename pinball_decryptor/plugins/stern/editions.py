@@ -127,7 +127,7 @@ def in_program(elf_bytes):
         if cat is None:
             return None
         if t.wide:
-            category = _MS.wide_category(t, cat, _MS.EDITION)
+            category = _MS.wide_category(t, _MS.EDITION)
         if not cat.has(category, i):
             return None
         if (e["min"], e["step"]) != (1, 1) or not 2 <= e["max"] <= MAX_EDITIONS:
@@ -211,5 +211,5 @@ def project_menu_path(project):
     return menu_path(project_title(project))
 
 
-#: where a Spike 3 operator finds EDITION (the page :data:`.menu_settings.WIDE_ANCHORS` puts it on)
+#: where a Spike 3 operator finds EDITION (the page :func:`.menu_settings.wide_category` names)
 SPIKE3_MENU_PATH = "Adjustments > Machine Settings > Attract Mode"

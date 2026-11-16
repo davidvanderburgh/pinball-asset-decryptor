@@ -173,8 +173,10 @@ def _engine_block():
 
 def test_every_part_the_engine_leaves_out_has_its_reason():
     named = re.findall(r'\("([^"]+)", ', _engine_block())
-    # PAD-1323: random clips and screen times go on now; PAD-1325: and EDITION; PAD-1326: and co-op and the handicaps
-    assert len(named) == 7 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    # PAD-1323: random clips and screen times go on now; PAD-1324: the music modes; PAD-1325: EDITION;
+    # PAD-1326: co-op and the handicaps - six parts are left out
+    assert len(named) == 6 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    assert "music modes" not in S3M.FAMILY_LEFT_OUT
     assert "handicaps" not in named and "handicaps" not in S3M.FAMILY_LEFT_OUT
     assert "co-op play" not in named and "co-op play" not in S3M.FAMILY_LEFT_OUT
     assert "editions" not in named and "editions" not in S3M.FAMILY_LEFT_OUT

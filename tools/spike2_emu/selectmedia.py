@@ -135,7 +135,16 @@ GIF_DEFAULT_DELAY_MS = 100                  # what the selector uses when a fram
 #: is the point; a video or an animated GIF becomes a clip under the menu's own GIF
 #: contract (the menu decodes GIF frames on the CPU, so a bigger one would crawl: it is
 #: a preview, not a frame-rate test); any sound becomes the menu's WAV.
-TEST_MAX = 16                               # codeselect conf.h CONF_MAX_TESTS
+TEST_MAX = 64                               # codeselect conf.h CONF_MAX_TESTS
+#: THE TEST CARD's lists (PAD-1279, DragonRR): what --test KIND:PATH puts an item under
+TEST_KINDS = ("image", "video", "scene", "sound")
+#: a test video plays WHOLE on the machine (codeselect video.h, a .padv: JPEG frames, 4:4:4)
+#: - up to this long, at its own rate up to this fast; its sound is a WAV beside it
+TEST_VIDEO_MAX_SECONDS = 300
+TEST_VIDEO_MAX_FPS = 60
+#: the JPEG quality of a .padv frame (ffmpeg -q:v: 2 best .. 31 worst)
+PADV_QUALITY = 3
+PADV_MAGIC = b"PADVJPG1"
 TEST_PNG_MAX = (1360, 768)                  # the screen
 TEST_AUDIO_EXTS = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".opus", ".wma", ".aif", ".aiff")
 TEST_LABEL_MAX = 199                        # codeselect CONF_STR - 1
@@ -211,7 +220,7 @@ ANIM_PARAMS_RE = re.compile(r"^(%s)(?::(%s)(?::(\d+))?)?$" % (_NUM_RE, _NUM_RE))
 ART_AT_RE = re.compile(r"^%s$" % _NUM_RE)                                             # T
 SOUND_AT_RE = re.compile(r"^\d+$")                                                    # auto@IDX
 STALE_FULL_RE = re.compile(r"^(?:(?:art|anim|music)\d+\.(?:png|gif|wav)"
-                           r"|test\d+\.(?:png|gif|wav)"
+                           r"|test\d+\.(?:png|gif|wav|padv)"
                            r"|confirm\d+\.wav|(?:move|confirm)\.wav"
                            r"|gart\d+\.png|ganim\d+\.gif"
                            r"|(?:gmusic|gconfirm)\d+\.wav)$")
@@ -733,18 +742,36 @@ def validate_manifest(m):
             if not isinstance(t, dict) or not isinstance(t.get("file"), str)                     or not isinstance(t.get("label", ""), str):
                 raise Refused("media.json: tests[%d] must be {\"file\", \"label\"}" % k)
             check_media_name(t["file"])
-            extra = set(t) - {"file", "label", "source"}
+            if t.get("kind") is not None and t["kind"] not in TEST_KINDS:
+                raise Refused("media.json: tests[%d].kind is %r, not one of %s"
+                              % (k, t["kind"], ", ".join(TEST_KINDS)))
+            if t.get("sound") is not None:
+                if not isinstance(t["sound"], str) or not t["sound"].lower().endswith(".wav"):
+                    raise Refused("media.json: tests[%d].sound must be a .wav name" % k)
+                check_media_name(t["sound"])
+            extra = set(t) - {"file", "label", "source", "kind", "sound"}
             if extra:
                 raise Refused("media.json: tests[%d] has unknown keys %s" % (k, sorted(extra)))
     return m
+
+
+def test_card_files(m):
+    """The files of the TEST CARD's own items (those with a kind, PAD-1279): they ride on
+    the card's own p3, not in the menu's media budget."""
+    out = []
+    for t in (m.get("tests") or []):
+        if t.get("kind"):
+            out += [n for n in (t.get("file"), t.get("sound")) if n]
+    return out
 
 
 def manifest_files(m):
     """Every media name the manifest references, in order, without duplicates."""
     names = []
     for t in (m.get("tests") or []):
-        if t.get("file") and t["file"] not in names:
-            names.append(t["file"])
+        for key in ("file", "sound"):
+            if t.get(key) and t[key] not in names:
+                names.append(t[key])
     for im in m["images"]:
         for k in ("art", "anim", "music", "confirm"):
             if im.get(k) and im[k] not in names:
@@ -1828,6 +1855,9 @@ def check_media_dir(d, log=say):
             raise Refused("media.json names %s but it is not in %s" % (name, d))
         sizes[name] = os.path.getsize(p)
         ext = name.lower().rsplit(".", 1)[-1]
+        if ext == "padv":
+            padv_info(p)                          # refuses a broken one; never read whole
+            continue
         with open(p, "rb") as f:
             data = f.read()
         if ext == "png":
@@ -1844,7 +1874,15 @@ def check_media_dir(d, log=say):
             if why:
                 raise Refused("%s: %s" % (name, why))
         else:
-            raise Refused("%s: only png/gif/wav belong in a media set" % name)
+            raise Refused("%s: only png/gif/wav/padv belong in a media set" % name)
+    # A TEST CARD's own items (a kind said: PAD-1279) go on the card's own p3, sized to
+    # them - mkmulticard.py testcard; they are not the menu's budget
+    apart = test_card_files(m)
+    sizes_all = sizes
+    sizes = {k: v for k, v in sizes_all.items() if k not in apart}
+    if apart:
+        log("test card files: %d, %s (on the card's own partition, not the menu's budget)"
+            % (len(apart), fmt_bytes(sum(sizes_all[k] for k in apart))))
     total = check_budget(sizes, m)
     for name in sizes:
         log(describe(os.path.join(d, name)))
@@ -2899,8 +2937,15 @@ def _prepare_group(g, members, art_style, anim_style, images, size, out, work,
 
 
 def parse_test_spec(spec):
-    """'PATH' or 'PATH|LABEL' -> (path, label); the label defaults to the file's name."""
-    path, sep, label = str(spec).partition("|")
+    """'[KIND:]PATH[|LABEL]' -> (path, label, kind); the label defaults to the file's name,
+    the kind (image, video, scene, sound: the TEST CARD's lists) to None - the file decides
+    where it goes and a video becomes a menu clip, as on a multi-boot card."""
+    spec = str(spec)
+    kind = None
+    head, colon, rest = spec.partition(":")
+    if colon and head in TEST_KINDS:
+        kind, spec = head, rest
+    path, sep, label = spec.partition("|")
     path = path.strip()
     label = (label.strip() if sep else "") or os.path.splitext(os.path.basename(path))[0]
     if not path:
@@ -2910,7 +2955,13 @@ def parse_test_spec(spec):
                       % (spec, TEST_LABEL_MAX))
     if not os.path.isfile(path):
         raise Refused("--test %s: not a file" % path)
-    return path, label
+    if kind:
+        got = test_kind(path)
+        fits = {"image": ("picture",), "scene": ("picture",), "video": ("anim",), "sound": ("sound",)}[kind]
+        if got not in fits:
+            raise Refused("--test %s: a %s is asked for, but it is a %s"
+                          % (path, kind, {"picture": "picture", "anim": "video", "sound": "sound"}[got]))
+    return path, label, kind
 
 
 def test_kind(path):
@@ -2958,27 +3009,50 @@ def _test_png(src, out):
     return "%dx%d%s" % (im.size[0], im.size[1], "" if im.size == (w, h) else " (fitted down from %dx%d)" % (w, h))
 
 
-def _prepare_test(k, path, out, work, log=say):
-    """Test item k -> its file name in *out* (test<k>.png / .gif / .wav), converted only
-    when the source or its kind changed since the last run (the sidecar)."""
+def _prepare_test(k, path, out, work, log=say, want=None):
+    """Test item k -> {"file": its name in *out*, "sound": a video's own WAV or None}:
+    test<k>.png / .gif / .wav, or for a TEST CARD video (want='video') test<k>.padv and
+    test<k>.wav beside it - converted only when the source or its kind changed since the
+    last run (the sidecar)."""
     kind = test_kind(path)
-    ext = {"picture": ".png", "anim": ".gif", "sound": ".wav"}[kind]
+    if want == "video":
+        kind = "padv"
+    ext = {"picture": ".png", "anim": ".gif", "sound": ".wav", "padv": ".padv"}[kind]
     name = "test%d%s" % (k, ext)
     target = os.path.join(out, name)
+    snd = os.path.join(out, "test%d.wav" % k) if kind == "padv" else None
     stamp = source_stamp(path)
     params = {"test": kind}
     if os.path.isfile(target) and cache_matches(read_sidecar(target), stamp, params):
+        side = read_sidecar(target) or {}
+        sound = side.get("params", {}).get("sound") if isinstance(side.get("params"), dict) else None
+        if kind == "padv":
+            sound = os.path.basename(snd) if os.path.isfile(snd) else None
         log("  test %d: %s (kept, %s unchanged)" % (k, name, os.path.basename(path)))
-        return name
-    for other in (".png", ".gif", ".wav"):
+        return {"file": name, "sound": sound}
+    for other in (".png", ".gif", ".wav", ".padv"):
         stale = os.path.join(out, "test%d%s" % (k, other))
-        if other != ext and os.path.exists(stale):
+        if other != ext and os.path.exists(stale) and not (snd and stale == snd):
             os.remove(stale)
             drop_sidecar(stale)
-    if kind == "picture":
+    sound = None
+    if kind == "padv":
+        how = _test_padv(path, target, work, log=log)
+        if snd and os.path.exists(snd):
+            os.remove(snd)
+        try:
+            if audio_stream_count(path):
+                normalise_wav(path, snd, max_seconds=TEST_VIDEO_MAX_SECONDS)
+                sound = os.path.basename(snd)
+                how += ", its sound"
+            else:
+                how += ", no sound"
+        except Exception as exc:                  # a sound that will not convert: the picture still plays
+            how += ", its sound could not be read (%s)" % exc
+    elif kind == "picture":
         how = _test_png(path, target)
     elif kind == "sound":
-        normalise_wav(path, target)
+        normalise_wav(path, target, max_seconds=TEST_VIDEO_MAX_SECONDS)
         how = "sound"
     else:
         with open(path, "rb") as f:
@@ -2995,7 +3069,180 @@ def _prepare_test(k, path, out, work, log=say):
             how = "clip %dx%d" % (used.w, used.h)
     write_sidecar(target, stamp, params)
     log("  test %d: %s <- %s (%s)" % (k, name, os.path.basename(path), how))
-    return name
+    return {"file": name, "sound": sound}
+
+
+# ---- the TEST CARD's videos (PAD-1279): .padv, codeselect video.h ---------------------------
+def padv_info(path):
+    """(width, height, fps, frames) of a .padv, its header and index checked; Refused if broken.
+    Reads the header and the index only - a test video can be hundreds of MB."""
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        hd = f.read(32)
+        if len(hd) != 32 or hd[:8] != PADV_MAGIC:
+            raise Refused("%s is not a test video (.padv)" % os.path.basename(path))
+        w, h, fps1000, n, _r1, _r2 = struct.unpack("<6I", hd[8:])
+        if not (0 < w <= TEST_PNG_MAX[0] and 0 < h <= TEST_PNG_MAX[1]):
+            raise Refused("%s: frames %dx%d, over the screen's %dx%d" % (os.path.basename(path), w, h,
+                                                                         TEST_PNG_MAX[0], TEST_PNG_MAX[1]))
+        if not (0 < n <= 216000) or not (1000 <= fps1000 <= 120000):
+            raise Refused("%s: %d frames at %.3f fps" % (os.path.basename(path), n, fps1000 / 1000.0))
+        idx = f.read(4 * (n + 1))
+    if len(idx) != 4 * (n + 1):
+        raise Refused("%s: the frame index is cut short" % os.path.basename(path))
+    off = struct.unpack("<%dI" % (n + 1), idx)
+    if off[0] < 32 + 4 * (n + 1) or off[-1] > size or any(b <= a for a, b in zip(off, off[1:])):
+        raise Refused("%s: the frame index is broken" % os.path.basename(path))
+    return w, h, fps1000 / 1000.0, n
+
+
+def jpeg_frames(stream, chunk=1 << 20):
+    """The JPEGs of an MJPEG byte stream (ffmpeg -f image2pipe), one bytes each.  A frame is
+    walked by its segment lengths up to the scan, then to the EOI marker: inside the scan an
+    0xFF is always followed by 0x00 or a restart marker, so FF D9 there is the end; before it
+    a table's bytes could hold anything, which is why those are skipped by length."""
+    buf = b""
+    eof = False
+
+    def need(n):
+        nonlocal buf, eof
+        while len(buf) < n and not eof:
+            more = stream.read(chunk)
+            if not more:
+                eof = True
+            buf += more
+        return len(buf) >= n
+
+    while True:
+        if not need(2):
+            if buf.strip(b"\x00"):
+                raise Refused("the video's frames end in %d stray bytes" % len(buf))
+            return
+        if buf[:2] != b"\xff\xd8":
+            raise Refused("the video's frames are not JPEG (%r)" % buf[:4])
+        pos = 2
+        while True:
+            if not need(pos + 4):
+                raise Refused("a JPEG frame is cut short")
+            if buf[pos] != 0xFF:
+                raise Refused("a JPEG frame has a broken header")
+            marker = buf[pos + 1]
+            if marker == 0xFF:
+                pos += 1
+                continue
+            seglen = struct.unpack(">H", buf[pos + 2:pos + 4])[0]
+            if marker == 0xDA:                    # the scan: on to the end marker
+                pos += 2 + seglen
+                break
+            pos += 2 + seglen
+        while True:
+            at = buf.find(b"\xff\xd9", pos)
+            if at >= 0:
+                end = at + 2
+                break
+            pos = max(pos, len(buf) - 1)
+            if eof or not need(len(buf) + 1):
+                raise Refused("a JPEG frame has no end")
+        yield buf[:end]
+        buf = buf[end:]
+
+
+def jpeg_size(data):
+    """(width, height) from a JPEG's SOF segment, or None."""
+    pos = 2
+    while pos + 9 < len(data):
+        if data[pos] != 0xFF:
+            return None
+        marker = data[pos + 1]
+        seglen = struct.unpack(">H", data[pos + 2:pos + 4])[0]
+        if marker in (0xC0, 0xC1, 0xC2):
+            h, w = struct.unpack(">HH", data[pos + 5:pos + 9])
+            return w, h
+        pos += 2 + seglen
+    return None
+
+
+def audio_stream_count(path):
+    """How many sound tracks a file has (ffprobe, else ffmpeg's banner); 0 if it cannot tell."""
+    probe = find_ffmpeg("ffprobe")
+    if probe:
+        r = subprocess.run([probe, "-v", "error", "-select_streams", "a", "-show_entries",
+                            "stream=index", "-of", "csv=p=0", path],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return len([x for x in r.stdout.split() if x.strip()])
+    ff = find_ffmpeg()
+    if not ff:
+        return 0
+    r = subprocess.run([ff, "-hide_banner", "-i", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       text=True)
+    return len(re.findall(r"Stream #\S+.*: Audio:", r.stderr))
+
+
+def write_padv(frames, out, fps):
+    """JPEG frames (an iterable of bytes, every one the same size) -> the .padv `out`.
+    -> (width, height, frame count)."""
+    tmp = out + ".frames"
+    offs = []
+    size = None
+    try:
+        with open(tmp, "wb") as f:
+            for fr in frames:
+                d = jpeg_size(fr)
+                if d is None:
+                    raise Refused("a video frame's JPEG header does not read")
+                if size is None:
+                    size = d
+                elif d != size:
+                    raise Refused("video frames change size (%dx%d, then %dx%d)" % (size + d))
+                offs.append(f.tell())
+                f.write(fr)
+            end = f.tell()
+        n = len(offs)
+        if not n:
+            raise Refused("the video gave no frames")
+        if n > 216000:
+            raise Refused("the video has %d frames, over 216000" % n)
+        base = 32 + 4 * (n + 1)
+        with open(out + ".part", "wb") as o:
+            o.write(PADV_MAGIC + struct.pack("<6I", size[0], size[1], int(round(fps * 1000)), n, 0, 0))
+            o.write(struct.pack("<%dI" % (n + 1), *([base + x for x in offs] + [base + end])))
+            with open(tmp, "rb") as f:
+                shutil.copyfileobj(f, o, 1 << 20)
+        os.replace(out + ".part", out)
+        return size[0], size[1], n
+    finally:
+        for q in (tmp, out + ".part"):
+            if os.path.exists(q):
+                os.remove(q)
+
+
+def _test_padv(src, out, work, log=say):
+    """A video as the TEST CARD plays it: every frame, fitted DOWN to the screen (never
+    enlarged), at its own rate up to TEST_VIDEO_MAX_FPS, the first TEST_VIDEO_MAX_SECONDS,
+    each frame a 4:4:4 JPEG (the colour is not halved) -> 'WxH, N frames at F fps'."""
+    ff = find_ffmpeg()
+    if not ff:
+        raise Refused("a test video needs ffmpeg")
+    fps = probe_fps(src, default=30, stream=video_stream(src) or 0) or 30
+    fps = min(float(fps), float(TEST_VIDEO_MAX_FPS))
+    vf = ("scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease:flags=lanczos,"
+          "fps=%s,format=yuvj444p" % (TEST_PNG_MAX[0], TEST_PNG_MAX[1], ("%.6f" % fps).rstrip("0").rstrip(".")))
+    cmd = [ff, "-v", "error", "-i", src, "-map", "0:v:%d" % 0, "-an", "-sn",
+           "-t", "%d" % TEST_VIDEO_MAX_SECONDS, "-vf", vf, "-c:v", "mjpeg", "-q:v", str(PADV_QUALITY),
+           "-f", "image2pipe", "-"]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        w, h, n = write_padv(jpeg_frames(p.stdout), out, fps)
+    except Exception:
+        p.kill()
+        p.wait()
+        raise
+    err = p.stderr.read().decode("utf-8", "replace").strip()
+    if p.wait() != 0:
+        if os.path.exists(out):
+            os.remove(out)
+        raise Refused("the video does not convert: %s" % (err.splitlines()[-1] if err else "ffmpeg failed"))
+    return "%dx%d, %d frames at %g fps, %s" % (w, h, n, fps, fmt_bytes(os.path.getsize(out)))
 
 
 def cmd_prepare(a):
@@ -3085,9 +3332,14 @@ def cmd_prepare(a):
         # for them - the menu's own picture never shows them
         tests_out = []
         if not visual_only:
-            for k, (path, label) in enumerate(tests_in):
-                tests_out.append({"file": _prepare_test(k, path, out, work), "label": label,
-                                  "source": path})
+            for k, (path, label, kind) in enumerate(tests_in):
+                got = _prepare_test(k, path, out, work, want=kind)
+                ent = {"file": got["file"], "label": label, "source": path}
+                if kind:
+                    ent["kind"] = kind
+                if got.get("sound"):
+                    ent["sound"] = got["sound"]
+                tests_out.append(ent)
     finally:
         for s in sources.values():
             s.close()
@@ -3198,11 +3450,13 @@ def main(argv=None):
                         "and faded out - the selector loops it, and the whole "
                         "media set must fit the budget"
                         % MUSIC_MAX_SECONDS)
-    s.add_argument("--test", action="append", default=[], metavar="PATH[|LABEL]",
+    s.add_argument("--test", action="append", default=[], metavar="[KIND:]PATH[|LABEL]",
                    help="a test picture, video or sound for the menu's Settings > Test "
                         "pictures (PAD-1279), in order, up to %d; a picture is kept pixel "
                         "for pixel (only fitted down to the screen), a video becomes a "
-                        "menu-sized clip" % TEST_MAX)
+                        "menu-sized clip.  KIND (image, video, scene, sound) puts it in that "
+                        "list of a TEST CARD: a video then plays whole, in full colour "
+                        "(a .padv, up to %d s)" % (TEST_MAX, TEST_VIDEO_MAX_SECONDS))
     s.add_argument("--sound-move", default="auto", metavar="PATH|auto|synth|none")
     s.add_argument("--sound-confirm", action="append", default=[],
                    metavar="PATH|auto|synth|none | N=PATH|auto|synth|none",

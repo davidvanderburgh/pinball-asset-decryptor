@@ -300,8 +300,13 @@ WAV_RATE = 44100
 #: pictures, one test= line each (selectmedia.py's contract: a PNG up to the screen, a GIF
 #: under the menu's own GIF caps, a WAV).  No card owns them, so they count with the
 #: menu-wide sounds; at most TEST_MAX (codeselect conf.h CONF_MAX_TESTS).
-TEST_MAX = 16
+TEST_MAX = 64
 TEST_LABEL_MAX = 199
+#: THE TEST CARD's lists (PAD-1279): a test item with a kind is a test_<kind>= line
+TEST_KINDS = ("image", "video", "scene", "sound")
+#: where a TEST CARD's own files go: its p3, mounted at /games before the menu runs
+TESTCARD_TEST_SUBDIR = "testcard"
+PADV_MAGIC = b"PADVJPG1"
 P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 #: images.conf v2: a device is '/dev/mmcblk0pN' (parts layout),
 #: '/dev/mmcblk0pN:<subdir>' (multi layout) or the emulator's 'pN' / 'pN:<subdir>' tokens.
@@ -1673,16 +1678,28 @@ def has_hook(text):
 
 
 # ============================================================================= images.conf
+def test_parts(t):
+    """A test item as the code passes it - a name, or (file, label[, kind[, sound]]) -
+    -> (file, label, kind or None, sound or None)."""
+    if isinstance(t, str):
+        return t, "", None, None
+    t = tuple(t) + (None,) * 4
+    return t[0], t[1] or "", t[2] or None, t[3] or None
+
+
 def conf_test_lines(tests):
-    """[(file, label)] -> the `test=<file>|<label>` lines (PAD-1279), refusing what the
-    selector would drop: more than TEST_MAX, a name that is not a flat media name, a label
-    with a '|' or a line break or longer than the selector keeps."""
+    """[(file, label[, kind[, sound]])] -> the `test=<file>|<label>` lines (PAD-1279), or
+    `test_<kind>=` for a TEST CARD's own lists, refusing what the selector would drop: more
+    than TEST_MAX, a name that is not a flat media name, a label with a '|' or a line break
+    or longer than the selector keeps, a kind it has no list for."""
     tests = list(tests or [])
     if len(tests) > TEST_MAX:
         raise Refused("images.conf: %d test pictures; the menu takes at most %d" % (len(tests), TEST_MAX))
     out = []
     for k, t in enumerate(tests):
-        name, label = (t[0], t[1] if len(t) > 1 else "") if not isinstance(t, str) else (t, "")
+        name, label, kind, _sound = test_parts(t)
+        if kind is not None and kind not in TEST_KINDS:
+            raise Refused("images.conf: test item %d's kind %r is not one of %s" % (k, kind, ", ".join(TEST_KINDS)))
         name = _media_name_ok(name, "test picture %d" % k)
         if not name:
             raise Refused("images.conf: test picture %d names no file" % k)
@@ -1690,7 +1707,8 @@ def conf_test_lines(tests):
         if "|" in label or "\n" in label or "\r" in label or len(label.encode("utf-8")) > TEST_LABEL_MAX:
             raise Refused("images.conf: test picture %d's label %r: one line, at most %d bytes, no '|'"
                           % (k, label[:40], TEST_LABEL_MAX))
-        out.append("test=%s|%s" % (name, label) if label else "test=%s" % name)
+        key = "test_%s" % kind if kind else "test"
+        out.append("%s=%s|%s" % (key, name, label) if label else "%s=%s" % (key, name))
     return out
 
 
@@ -1937,7 +1955,7 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
                        groups=None, default_card=None, heading=None, text_size=None,
                        counter=None, countdown_word=None, footer=None, scores=None,
                        colours=None, settings=None, edition=None, hiscores=None, tests=None,
-                       testcard=False, back_hold=None):
+                       testcard=False, back_hold=None, test_dir=None):
     """images.conf text.  v2 (item 90 media): `media` is one (art, anim, music, confirm) per image
     (names relative to the media dir, '' = none; a 3-tuple without the confirm is accepted).  The
     line is written only as wide as it needs to be: 7 fields when any image names a confirm of its
@@ -2101,6 +2119,10 @@ def render_images_conf(devices, titles=None, subtitles=None, default=0, timeout=
         out.append(conf_colour_line(int(i), col))
     if settings is not None:
         out.append("settings=%s" % check_settings(settings))
+    if test_dir:
+        if "\n" in test_dir or not test_dir.startswith("/"):
+            raise Refused("images.conf: test_dir %r is not an absolute path" % test_dir)
+        out.append("test_dir=%s" % test_dir)
     out.extend(conf_test_lines(tests))
     if testcard:
         out.append("testcard=on")
@@ -2282,10 +2304,14 @@ def parse_images_conf(text):
                 pass
         elif key == "testcard":
             conf["testcard"] = val.strip().lower() == "on"
-        elif key == "test":
+        elif key == "test" or key[5:] in TEST_KINDS and key.startswith("test_"):
             name, _sep, label = val.partition("|")
             if name.strip() and MEDIA_NAME_RE.match(name.strip()):
-                conf["tests"].append((name.strip(), label.strip()))
+                kind = key[5:] if key != "test" else None
+                conf["tests"].append((name.strip(), label.strip(), kind) if kind
+                                     else (name.strip(), label.strip()))
+        elif key == "test_dir":
+            conf["test_dir"] = val.strip() or None
         elif key == "settings":
             conf["settings"] = val.strip().lower() or None
             if conf["settings"] not in SETTINGS_WORDS:
@@ -2391,6 +2417,26 @@ def wav_info(data):
     return None
 
 
+def padv_check(path, name):
+    """A TEST CARD video (codeselect video.h) by its header and index -> 'padv WxH N frames'."""
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        hd = f.read(32)
+        if len(hd) != 32 or hd[:8] != PADV_MAGIC:
+            raise Refused("media %s: not a test video (.padv)" % name)
+        w, h, fps1000, n, _a, _b = struct.unpack("<6I", hd[8:])
+        if not (0 < w <= 1360 and 0 < h <= 768) or not 0 < n <= 216000 or not 1000 <= fps1000 <= 120000:
+            raise Refused("media %s: %dx%d, %d frames at %.3f fps: not one the menu plays"
+                          % (name, w, h, n, fps1000 / 1000.0))
+        idx = f.read(4 * (n + 1))
+    if len(idx) != 4 * (n + 1):
+        raise Refused("media %s: the frame index is cut short" % name)
+    off = struct.unpack("<%dI" % (n + 1), idx)
+    if off[0] < 32 + 4 * (n + 1) or off[-1] > size or any(b <= a for a, b in zip(off, off[1:])):
+        raise Refused("media %s: the frame index is broken" % name)
+    return "padv %dx%d %d frames" % (w, h, n)
+
+
 def check_media_file(path, kind):
     """Refuse a media file the selector could not use; -> (kind word, size).  `kind` is
     'art' (PNG <= 1360x768), 'anim' (GIF <= 10 MB, 512x288, 150 frames) or 'wav' (RIFF
@@ -2401,6 +2447,8 @@ def check_media_file(path, kind):
     if not os.path.isfile(path):
         raise Refused("media %s: %s does not exist" % (name, path))
     size = os.path.getsize(path)
+    if kind == "test" and name.lower().endswith(".padv"):
+        return padv_check(path, name), size        # never read whole: hundreds of MB
     with open(path, "rb") as f:
         data = f.read()
     if kind == "art":
@@ -2436,7 +2484,7 @@ def check_media_file(path, kind):
         ext = name.lower().rsplit(".", 1)[-1]
         if ext in ("png", "gif", "wav"):
             return check_media_file(path, {"png": "art", "gif": "anim", "wav": "wav"}[ext])
-        raise Refused("media %s: a test picture is a .png, .gif or .wav" % name)
+        raise Refused("media %s: a test picture is a .png, .gif, .padv or .wav" % name)
     raise Refused("media %s: unknown kind %r" % (name, kind))
 
 
@@ -2462,12 +2510,15 @@ def read_media_manifest(media_dir):
     return man
 
 
-def plan_media(media_dir, n_images):
+def plan_media(media_dir, n_images, tests_apart=False):
     """Validate DIR/media.json against a card with `n_images` images and check every referenced
     file -> {'rows': [(art, anim, music, confirm)], 'group_rows': [(art, anim)],
     'sound_move', 'sound_confirm', 'volume', 'mixer_volume',
     'files': OrderedDict name -> source path, 'total': bytes, 'kinds': {name: kind word}}.
-    Only referenced files are staged; a missing, misnamed, malformed or over-budget one refuses."""
+    Only referenced files are staged; a missing, misnamed, malformed or over-budget one refuses.
+    tests_apart (a TEST CARD, PAD-1279): the test items with a kind and their sounds are not
+    staged with the media nor counted in its budget - they are 'test_files' {name: path},
+    'test_bytes', for the card's own p3."""
     man = read_media_manifest(media_dir)
     imgs = man["images"]
     if len(imgs) != n_images:
@@ -2522,14 +2573,37 @@ def plan_media(media_dir, n_images):
     if tsrc is not None and not isinstance(tsrc, list):
         raise Refused("%s: 'tests' must be a list" % MEDIA_MANIFEST)
     tests = []
+    test_files = collections.OrderedDict()
+    test_bytes = 0
     for k, e in enumerate(tsrc or []):
         if not isinstance(e, dict):
             raise Refused("%s: tests[%d] must be an object" % (MEDIA_MANIFEST, k))
-        name = take(e.get("file"), "test", "tests[%d].file" % k)
+        kind = e.get("kind") or None
+        if kind is not None and kind not in TEST_KINDS:
+            raise Refused("%s: tests[%d].kind %r is not one of %s" % (MEDIA_MANIFEST, k, kind, ", ".join(TEST_KINDS)))
+        if tests_apart and kind:
+            names = []
+            for key, ck in (("file", "test"), ("sound", "wav")):
+                nm = e.get(key)
+                if not nm:
+                    names.append(None)
+                    continue
+                nm = _media_name_ok(nm, "tests[%d].%s" % (k, key))
+                src = os.path.join(media_dir, nm)
+                if nm not in test_files:
+                    _word, size = check_media_file(src, ck)
+                    test_files[nm] = src
+                    test_bytes += size
+                names.append(nm)
+            name, sound = names
+        else:
+            name = take(e.get("file"), "test", "tests[%d].file" % k)
+            sound = take(e.get("sound"), "wav", "tests[%d].sound" % k) or None
         if not name:
             raise Refused("%s: tests[%d] names no file" % (MEDIA_MANIFEST, k))
-        tests.append((name, str(e.get("label") or "")))
+        tests.append((name, str(e.get("label") or ""), kind, sound))
     out = {"rows": rows, "group_rows": group_rows, "tests": tests,
+           "test_files": test_files, "test_bytes": test_bytes,
            "sound_move": take(man.get("sound_move"), "wav", "sound_move") or None,
            "sound_confirm": take(man.get("sound_confirm"), "wav", "sound_confirm") or None,
            "volume": None, "mixer_volume": None, "files": files, "total": total, "kinds": kinds,
@@ -2561,7 +2635,8 @@ def media_costs(media):
         rows.append((i, sum(sizes[n] for n in names), big, sizes[big] if big else 0))
     # the menu-wide sounds and (PAD-1279) the test pictures: no card owns them
     shared_names = [media.get("sound_move"), media.get("sound_confirm")] + \
-        [n for n, _label in (media.get("tests") or [])]
+        [n for t in (media.get("tests") or []) for n in (test_parts(t)[0], test_parts(t)[3])
+         if n not in (media.get("test_files") or {})]
     shared = sum(sizes[n] for n in set(shared_names) if n and n in sizes)
     rows.sort(key=lambda r: -r[1])
     return rows, shared
@@ -3619,7 +3694,14 @@ def parse_testcard_colour(spec):
             "lift": trio[2], "saturation": sat}
 
 
-def testcard_layout(geom):
+def testcard_p3_mib(test_bytes):
+    """The test card's p3 (/games): TESTCARD_P3_MIB, or room for its own test files - every
+    file rounded to a 4 KiB block, a tenth over for ext4's own tables, 16 MiB spare."""
+    need = int(test_bytes * 1.10) + (16 << 20)
+    return max(TESTCARD_P3_MIB, -(-need // (1 << 20)))
+
+
+def testcard_layout(geom, p3_mib=None):
     """-> (prims [(type, start, count)] x3, ext_base, ext_count, logs [(ebr, start, count)] x2,
     total bytes) for a test card made from `geom`'s p1 and p2."""
     t1, s1, c1 = geom.part(1)
@@ -3628,7 +3710,7 @@ def testcard_layout(geom):
         raise Refused("p2 is type 0x%02x, not Linux: not a Spike 2 card" % t2)
     mib = (1 << 20) // SECTOR
     p3s = align_up(s2 + c2)
-    p3c = TESTCARD_P3_MIB * mib
+    p3c = (p3_mib or TESTCARD_P3_MIB) * mib
     ext = align_up(p3s + p3c)
     logs = []
     ebr = ext
@@ -3647,8 +3729,12 @@ def build_testcard(primary, out, selector_dir, media_dir=None, colour=None, work
     -> the conf text written."""
     need_tools("mke2fs", "debugfs", "e2fsck")
     geom = Geometry.from_file(primary)
-    prims, ext, ext_count, logs, total = testcard_layout(geom)
-    media = plan_media(media_dir, 1) if media_dir else None
+    # its own test files ride on its p3, sized to them (the system partition has no room
+    # for whole videos); the menu's own media stay with the menu
+    media = plan_media(media_dir, 1, tests_apart=True) if media_dir else None
+    test_files = media["test_files"] if media else {}
+    p3_mib = testcard_p3_mib(media["test_bytes"] if media else 0)
+    prims, ext, ext_count, logs, total = testcard_layout(geom, p3_mib)
     tmp = tempfile.mkdtemp(prefix="mkmulticard.testcard.", dir=workdir)
     try:
         say("test card: boot + rootfs from %s, %s in all" % (os.path.basename(primary), _gb(total)))
@@ -3660,10 +3746,24 @@ def build_testcard(primary, out, selector_dir, media_dir=None, colour=None, work
         p2_end = (prims[1][1] + prims[1][2]) * SECTOR
         copy_range(primary, 0, out, 0, p2_end, "boot + rootfs", sparse=True)
         for what, (start, count) in (("games", prims[2][1:]), ("data", logs[0][1:]), ("dump", logs[1][1:])):
-            # an empty tree each: mke2fs_games_tree removes the one it was given
+            # an empty tree each, but /games has the test files: mke2fs_games_tree removes it
             empty = os.path.join(tmp, "empty_" + what)
             os.mkdir(empty)
             os.chmod(empty, 0o755)
+            if what == "games" and test_files:
+                sub = os.path.join(empty, TESTCARD_TEST_SUBDIR)
+                os.mkdir(sub)
+                os.chmod(sub, 0o755)
+                for nm, src in test_files.items():
+                    dst = os.path.join(sub, nm)
+                    try:
+                        os.link(src, dst)
+                    except OSError:
+                        shutil.copyfile(src, dst)
+                    os.chmod(dst, 0o644)
+                say("test card: %d test file%s on /games/%s (%s; p3 %d MiB)"
+                    % (len(test_files), "" if len(test_files) == 1 else "s", TESTCARD_TEST_SUBDIR,
+                       _gb(media["test_bytes"]), p3_mib))
             img = os.path.join(tmp, what + ".img")
             mke2fs_games_tree(empty, img, count, {}, what, label=what)
             copy_range(img, 0, out, start * SECTOR, count * SECTOR, what, sparse=True, progress=None)
@@ -3689,7 +3789,8 @@ def build_testcard(primary, out, selector_dir, media_dir=None, colour=None, work
             media["rows"] if media else None, media["sound_move"] if media else None,
             media["sound_confirm"] if media else None, media["volume"] if media else None,
             colours={0: colour or dict(TESTCARD_NO_CHANGE)},
-            tests=media["tests"] if media else None, testcard=True)
+            tests=media["tests"] if media else None, testcard=True,
+            test_dir=("/games/" + TESTCARD_TEST_SUBDIR) if test_files else None)
         manifests = None
         if media_dir:
             with open(os.path.join(media_dir, MEDIA_MANIFEST), "rb") as f:
@@ -6229,7 +6330,7 @@ def render_images_conf_text(conf):
         footer=conf.get("footer"), scores=conf.get("scores"),
         colours=conf.get("colours"), settings=conf.get("settings"), hiscores=conf.get("hiscores"),
         tests=conf.get("tests"), testcard=bool(conf.get("testcard")),
-        back_hold=conf.get("back_hold"))
+        back_hold=conf.get("back_hold"), test_dir=conf.get("test_dir"))
 
 
 # ============================================================================= reading a card back
@@ -8274,10 +8375,10 @@ def inspect_card(card, media_out=None):
         ("settings", conf.get("settings")),
         # PAD-1279: the test pictures, each with the source media.json says it was made from
         ("tests", [collections.OrderedDict([
-            ("file", f), ("label", lab),
-            ("source", next((t.get("source") for t in ((media_man or {}).get("tests") or [])
-                             if isinstance(t, dict) and t.get("file") == f), None))])
-            for f, lab in (conf.get("tests") or [])]),
+            ("file", test_parts(t)[0]), ("label", test_parts(t)[1]), ("kind", test_parts(t)[2]),
+            ("source", next((m.get("source") for m in ((media_man or {}).get("tests") or [])
+                             if isinstance(m, dict) and m.get("file") == test_parts(t)[0]), None))])
+            for t in (conf.get("tests") or [])]),
         ("colours", {str(k): v for k, v in sorted((conf.get("colours") or {}).items())}),
         # null = the card never set one, and the selector draws its own instructions
         # line (the one that follows the buttons); "" = the card asked for no line

@@ -447,6 +447,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             copy_field(c->font, val);
         } else if (!strcmp(key, "media")) {
             copy_field(c->media, val);
+        } else if (!strcmp(key, "test_dir")) {
+            copy_field(c->test_dir, val);
         } else if (!strcmp(key, "sound_move")) {
             copy_field(c->sound_move, val);
         } else if (!strcmp(key, "sound_confirm")) {

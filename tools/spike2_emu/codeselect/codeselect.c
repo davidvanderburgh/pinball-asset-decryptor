@@ -2113,7 +2113,7 @@ int main(int argc, char **argv)
         se.th = &L.th;
         se.c = &c;
         se.colour_file = o.colour_file;
-        se.media_dir = media_dir(&o, &c);
+        se.media_dir = *c.test_dir ? c.test_dir : media_dir(&o, &c);
         se.first_image = hlimg;
         se.testcard = c.testcard;
         if (settings_snapshot(&se, o.screen, o.screen_row, o.screen_edit, why, sizeof why) < 0) {
@@ -2317,7 +2317,7 @@ int main(int argc, char **argv)
         se.au = au;
         se.move = media.move;
         se.colour_file = o.colour_file;
-        se.media_dir = media.dir;
+        se.media_dir = *c.test_dir ? c.test_dir : media.dir;
         se.first_image = 0;
         se.present = present_cb;
         se.ctx = &pctx;
@@ -2436,7 +2436,7 @@ int main(int argc, char **argv)
             se.au = au;
             se.move = media.move;
             se.colour_file = o.colour_file;
-            se.media_dir = media.dir;
+            se.media_dir = *c.test_dir ? c.test_dir : media.dir;
             se.first_image = lastimg;
             se.present = present_cb;
             se.ctx = &pctx;

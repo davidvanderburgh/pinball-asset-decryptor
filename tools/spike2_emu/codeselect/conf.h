@@ -127,6 +127,10 @@
  *                            Settings > Test pictures after the built-in
  *                            patterns (testpics.h).  The label defaults to the
  *                            file name; a name with a '/' is dropped
+ *   test_dir=<dir>           PAD-1279: where the test files are, when not with
+ *                            the media - a TEST CARD keeps them on its own p3
+ *                            (/games, which fstab mounts before the menu runs),
+ *                            sized to them, as the system partition has no room
  *   test_image=<file>|<label>  the TEST CARD's own lists (PAD-1279, DragonRR:
  *   test_video=<file>|<label>  "DEFAULT PAD TEST CARD / IMAGES / VIDEOS /
  *   test_scene=<file>|<label>  SCENES / SOUNDS"): the same as test= with the
@@ -327,6 +331,7 @@ struct conf {
                                     * empty one can mean that (PAD-190, heading='s rule) */
     char font[CONF_STR];
     char media[CONF_STR];          /* media= ("" when absent) */
+    char test_dir[CONF_STR];       /* test_dir= (PAD-1279): where test files are, "" = media */
     char sound_move[CONF_STR];     /* "" when absent */
     char sound_confirm[CONF_STR];  /* "" when absent */
     int volume;        /* volume= 0..100 (-1 when absent; the program defaults to 50) */

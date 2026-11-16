@@ -346,16 +346,21 @@ def main():
             f.write(struct.pack("<%dI" % (n + 1), *offs))
             for b in blobs:
                 f.write(b)
-    write_padv(os.path.join(media, "clip.padv"), [(200, 40, 40)] * 6 + [(40, 40, 200)] * 6, 10)
-    with open(os.path.join(media, "bad.padv"), "wb") as f:
+    # a test card's own files are on its p3, not with the media: test_dir= says where
+    tdir = os.path.join(t, "testdir")
+    os.makedirs(tdir, exist_ok=True)
+    import shutil
+    shutil.copyfile(os.path.join(media, "art0.png"), os.path.join(tdir, "art0.png"))
+    write_padv(os.path.join(tdir, "clip.padv"), [(200, 40, 40)] * 6 + [(40, 40, 200)] * 6, 10)
+    with open(os.path.join(tdir, "bad.padv"), "wb") as f:
         f.write(b"PADVJPG1" + struct.pack("<IIIIII", 4000, 48, 10000, 1, 0, 0) + bytes(16))
     tconf = os.path.join(t, "testcard.conf")
     with open(tconf, "w") as f:
         f.write("image=testcard|TEST CARD|color profile test card||\n"
                 "color_profile=0|1.10 1.20 1.35|1.00 1.00 1.00|0.00 0.00 0.00|0.90|Recommended\n"
-                "testcard=on\ntest_image=art0.png|Red square\ntest_video=clip.padv|Clip\n"
+                "testcard=on\ntest_dir=%s\ntest_image=art0.png|Red square\ntest_video=clip.padv|Clip\n"
                 "test_video=bad.padv|Too big\ntest_scene=art0.png|Scene one\n"
-                "test_sound=art0.png|Not a sound\n")
+                "test_sound=art0.png|Not a sound\n" % tdir)
     tvals = os.path.join(t, "testcard.color")
     tout = os.path.join(t, "testcard.choice")
     for q in (tvals, tout):

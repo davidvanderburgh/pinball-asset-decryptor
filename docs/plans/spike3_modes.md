@@ -832,12 +832,34 @@ of 2 done - the next teammate, the same ball` / `the game's player 1 has player 
 done - teammate 1, the next ball` ... `ball 3, teammate 2 of 2 done - the game is over`, `the game's end counts 1
 player(s)`. Rig scripts: C:/tmp/PAD-1326/rig (plan_coop.py, job_coop.sh, play_coop.sh, setval.py).
 
-**Still to do (in this order).**
-1. Co-op on the other Spike 3 titles: a 64-bit finder for the player change / add player / player bytes (portcoop's
-   shapes on 64-bit), their lines in each port, a rig game on one more title.
-2. The 64-bit message table (portchallenge.message_table, "0 of 0 paired functions agree" in the draft) and
-   `coop_ball_msg`, the "BALL %d" line.
-3. Handicaps: handicap.py's flipper / outlane readers on 64-bit code (the flipper edges are there since PAD-1322), the
-   HANDICAP row.
-4. Emulator proof of the handicaps on ELG.
+**Co-op on the other titles, the BALL line, handicaps (PAD-1326, run 2).**
+- `portcoop.lines_a64`: the player change / add player / player bytes in any Spike 3 program (the add player is the one
+  byte incremented after an adjustment compare; the change reads the player and the count and compares player + 1;
+  each starts at the bl target before it). Its lines are ELG's paired ones exactly; Fallout and Walking Dead carry
+  them, Pokemon and both Star Wars 2025 as comments (no switch edge source: co-op and handicaps refuse with NO_EDGE).
+- `portcoop.message_lines_a64`: the message table (Spike 2's with 8-byte relocated pointers) and its "BALL %d" index
+  (ELG 1255, its Spike 2 build's number); the runtime steps the table by pointer size (message_borrow / restore /
+  coop_msg_find / coop_ball_find).
+- Handicaps: handicap.py reads the wide settings table and Start off the device table, writes no 32-bit `record`
+  lines; the runtime hooks the flipper edges, moves the HANDICAP word by game_base, masks the getter's id to 16 bits;
+  spike3_menu places HANDICAP; the Modes / Play options tabs say what Spike 3 gets.
 
+Proofs (2026-11-16, Spike 3 rig, hidden and MUTED, planned through spike3_menu.plan + spike3_modes.plan):
+- Fallout LE 0.82 (the finder's sites, its own CO-OP PLAY row at 0x669ff40): teammate 2 joined, `ball 1..3, teammate
+  1/2 of 2 done`, `the game is over`, `the game's end counts 1 player(s)`; both score panels showed the team's 190,190.
+  Rig note: its hit switches must be its own names (POP TARGET-LEFT, RADIO TOWER TARGET, 3 BANK-TOP, JUNK TARGET) or
+  the playfield is never validated and every drain is re-served.
+- ELG with handicaps: the pick walked with the flippers (`player 1's pick +0 / -1 / -2`), the game's own line read
+  `P1 HANDICAP -2` (the 64-bit message table), `the game reads adjustment 165: 2 (its own 1)`; a second player's pick
+  opened at their first ball; co-op's turn line read `PLAYER 1  BALL 1` on the same line.
+
+**Co-op and handicaps not on one Spike 3 card.** With both on, ELG's game stopped at a co-op turn change twice (once
+at teammate 1's end, once at the turn into ball 2; the game's memory went unreadable at that moment, the log stopped).
+Each alone plays out. So spike3_modes.hand_wanted leaves the handicaps off a card with co-op (HAND_WITH_COOP, said on
+the Write and on the Play options tab), and the 64-bit runtime refuses handicaps when coop.cfg is there. The one thing
+the two add together is the adjustment getter wrapped (handicaps) while co-op's player-change wrap calls into the
+game's change, which reads adjustments; that is where to look to lift the gate. Rig note: a job's play script left
+running after its slot is stopped keeps writing the same output file ("the bridge's ball model did not answer") -
+kill job_coop.sh / play_coop.sh by pid, and give each run its own output.
+Rig scripts: C:/tmp/PAD-1326/rig (plan_coop.py, job_coop.sh, play_coop.sh, setval.py, watch_bytes.py, inject.py).
+Tests: tests/test_pad1326_spike3_insider_logins.py.

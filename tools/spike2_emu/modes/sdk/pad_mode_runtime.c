@@ -22004,6 +22004,14 @@ static int hand_cfg_only(void)
 
 static void hand_arm(void)
 {
+#if PM_A64
+    /* PAD-1326: not beside co-op on Spike 3 - with both, the emulator's ELG game stopped at a teammate's turn (the
+     * Write leaves handicap.cfg off such a card; this holds if both are there anyway) */
+    if (coop_wanted()) {
+        say("handicap: off - this card has co-op play, and on Spike 3 the two do not go together yet");
+        return;
+    }
+#endif
     static char raw[16384];                  /* six levels of up to 48 changes, and the records */
     static const hook_fn seen[HAND_CACHES] = {
         hand_cache_seen0, hand_cache_seen1, hand_cache_seen2, hand_cache_seen3, hand_cache_seen4, hand_cache_seen5,

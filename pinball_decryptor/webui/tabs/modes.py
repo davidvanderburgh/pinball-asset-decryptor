@@ -737,12 +737,21 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import coop_play as _CP
         on = bool(project) and _CP.load(project)
         menu = on and _CP.menu_asked(project)
-        why = _CP.title_refusal(_CP.project_title(project)) if project else ""
+        prof = _CP.project_title(project) if project else None
+        why = _CP.title_refusal(prof) if project else ""
+        a64 = getattr(prof, "arch", "arm") == "a64"                      # PAD-1326: a Spike 3 game's co-op
         locked = self._coop_locked(why) and not on
         note, kind = (why, "") if locked else ("", "")
         if on:
             if why:
                 note, kind = why, "err"
+            elif a64:
+                note = (("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. At 1 (On) "
+                         % self.COOP_MENU_WHERE_A64 if menu else "On the card: ")
+                        + (_CP.HOW_A64 if menu else _CP.HOW_A64[0].upper() + _CP.HOW_A64[1:]) + ". "
+                        + ("At 1 most Insider Connected features are off; at 0 the game plays and reports as it "
+                           "always has. " if menu else "Its scores stay off Insider Connected. ")
+                        + _CP.A64_LEFT_OUT[0].upper() + _CP.A64_LEFT_OUT[1:] + ".")
             elif menu:
                 note = ("On the card: CO-OP PLAY in the game's service menu (%s), 0 (Off) to start with. At 1 "
                         "(Classic) or 2 (Enhanced) the game's start menu (both flipper buttons in attract) offers "
@@ -763,7 +772,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.set(coop_shown=bool(project), coop_on=on, coop_locked=locked, coop_menu=menu, coop_note=note,
                  coop_note_kind=kind,
                  coop_menu_tip=self.COOP_MENU_TIP,
-                 coop_awards_ok=on and kind != "err", coop_awards_tip=self.COOP_AWARDS_TIP,   # PAD-1028
+                 coop_awards_ok=on and kind != "err" and not a64,                               # PAD-1028/1326
+                 coop_awards_tip=self.COOP_AWARDS_TIP,
                  coop_chars_tip=self.COOP_CHARS_TIP,                                            # PAD-1031
                  coop_save_tip=self.COOP_SAVE_TIP, coop_load_tip=self.COOP_LOAD_TIP)            # PAD-1053
 
@@ -773,6 +783,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         from ...plugins.stern import coop_play as _CP
         return bool(why) and why != _CP.NO_TITLE
 
+    #: PAD-1326: where a Spike 3 game's CO-OP PLAY row goes (spike3_menu: beside the game's own attract settings)
+    COOP_MENU_WHERE_A64 = "Adjustments > Machine Settings > Attract Mode"
     #: round 2 (DoomWalrus666): co-op switched in the game's own service menu
     COOP_MENU_WHERE = "Adjustments > Machine Settings > Attract Mode, or at the end of Standard Adjustments"
     COOP_MENU_TIP = (
@@ -1740,6 +1752,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         if on:
             if why:
                 note, kind = why, "err"
+            elif getattr(prof, "arch", "arm") == "a64" and _hand_coop_on(project):
+                from ...plugins.stern import spike3_modes as _S3M          # PAD-1326: not beside co-op on Spike 3
+                note, kind = "Left out of the card: " + _S3M.HAND_WITH_COOP + ".", "err"
             else:
                 note = _HC.NOTE
         self.set(hand_shown=bool(project) and (on or not why), hand_on=on, hand_note=note, hand_note_kind=kind)
@@ -5527,3 +5542,12 @@ def _why_words(num):
 
 
 TAB = ModesTab
+
+
+def _hand_coop_on(project):
+    """PAD-1326: whether *project* has co-op play ticked (a Spike 3 card then carries no handicaps)."""
+    from ...plugins.stern import coop_play as _CP
+    try:
+        return bool(_CP.load(project))
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: no co-op
+        return False

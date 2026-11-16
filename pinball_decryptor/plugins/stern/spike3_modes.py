@@ -368,6 +368,12 @@ def coop_wanted(project, real_card=True):
     return prof
 
 
+#: PAD-1326: why a Spike 3 card with co-op play carries no handicaps (with both on, the emulator's ELG game stopped at a
+#: teammate's turn: the handicaps' wrap of the adjustment getter beside co-op's of the player change)
+HAND_WITH_COOP = ("on a Spike 3 game the handicaps do not go on a card that also has co-op play yet; a card of "
+                  "handicaps without co-op takes them")
+
+
 def hand_wanted(project, real_card=True):
     """PAD-1326: the profile the handicaps (:mod:`.handicap`) go on in this Spike 3 build, else None: the 64-bit runtime
     answers the game's adjustment getter with the player's level while they are up, each player picking theirs with
@@ -382,6 +388,8 @@ def hand_wanted(project, real_card=True):
     prof = HC.project_title(project, probe=True)
     if prof is None or HC.title_refusal(prof):
         return None
+    if coop_wanted(project, real_card=real_card) is not None:
+        return None                                     # HAND_WITH_COOP, said by plan()
     return prof
 
 
@@ -446,6 +454,10 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     feed, feed_prof = feed_wanted(project, real_card=real_card)
     coop_prof = coop_wanted(project, real_card=real_card) if coop_ok else None
     hand_prof = hand_wanted(project, real_card=real_card)
+    if hand_prof is None and coop_prof is not None:
+        from . import handicap as HC
+        if HC.load(project):
+            log("Handicaps: left out of this build: %s." % HAND_WITH_COOP, "warning")
     slots, var_prof = variants_wanted(project, real_card=real_card)
     from . import screen_time as ST
     stime_maybe = ST.enabled() and bool(_changed_videos(project))

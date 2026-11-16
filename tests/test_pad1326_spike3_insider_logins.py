@@ -384,3 +384,27 @@ def test_the_runtime_handicap_on_64bit():
     assert "#if PM_A64" in arm and "!edge_hook(e)" in arm
     assert "if (hand.setting) hand.setting += (pm_addr)game_base;" in src
     assert "id &= 0xffffu;" in src[src.index("static unsigned adj_chain(unsigned id)"):][:400]
+
+
+# ---- co-op and handicaps are not put on one Spike 3 card ----------------------------------------------------------
+
+def test_a_spike3_card_with_coop_leaves_the_handicaps_out(monkeypatch):
+    from pinball_decryptor.plugins.stern import handicap as HC, mode_project as MP, mode_write as MW
+    from pinball_decryptor.plugins.stern import spike3_modes as S3M
+    prof = MP.profiles()["star_wars_elg_1_10_spike3"]
+    monkeypatch.setattr(HC, "load", lambda p: True)
+    monkeypatch.setattr(HC, "project_title", lambda p, probe=False: prof)
+    monkeypatch.setattr(MW, "host_refusal", lambda: "")
+    monkeypatch.setattr(S3M, "coop_wanted", lambda p, real_card=True: None)
+    assert S3M.hand_wanted("proj", real_card=False) is prof              # handicaps alone go on
+    monkeypatch.setattr(S3M, "coop_wanted", lambda p, real_card=True: prof)
+    assert S3M.hand_wanted("proj", real_card=False) is None              # beside co-op they do not
+    assert "co-op" in S3M.HAND_WITH_COOP and not S3M.HAND_WITH_COOP.endswith(".")
+
+
+def test_the_runtime_refuses_handicaps_beside_coop_on_64bit():
+    src = _src()
+    arm = src[src.index("static void hand_arm(void)\n{"):]
+    head = arm[:arm.index("#endif")]
+    assert head.lstrip().startswith("static void hand_arm(void)\n{\n#if PM_A64")
+    assert "if (coop_wanted()) {" in head and "return;" in head

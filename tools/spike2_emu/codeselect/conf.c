@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <strings.h>
 #include <errno.h>
 #include <unistd.h>
 #include "conf.h"
@@ -47,6 +48,20 @@ static void conf_warn(struct conf *c, const char *fmt, ...)
 
 /* split a '|'-separated line into up to seven trimmed fields; missing ones
  * come back NULL.  Shared by image= and group=, which carry the same seven. */
+/* the TEST CARD list a test item goes in (PAD-1279): the key says it, and
+ * the file must be one that list shows; test= goes by the file alone */
+static int test_kind_of(const char *key, const char *file)
+{
+    const char *dot = strrchr(file, '.');
+    int png = dot && !strcasecmp(dot, ".png"), gif = dot && !strcasecmp(dot, ".gif");
+    int padv = dot && !strcasecmp(dot, ".padv"), wav = dot && !strcasecmp(dot, ".wav");
+    if (!strcmp(key, "test_image")) return png ? TK_IMAGE : TK_NONE;
+    if (!strcmp(key, "test_scene")) return png ? TK_SCENE : TK_NONE;
+    if (!strcmp(key, "test_video")) return gif || padv ? TK_VIDEO : TK_NONE;
+    if (!strcmp(key, "test_sound")) return wav ? TK_SOUND : TK_NONE;
+    return png ? TK_IMAGE : gif || padv ? TK_VIDEO : wav ? TK_SOUND : TK_NONE;
+}
+
 static void split_fields(char *val, char *fld[7])
 {
     char *p = val;
@@ -515,7 +530,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             else if (!*val || !strcmp(val, "off")) c->testcard = 0;
             else conf_warn(c, "%s:%d: testcard=%s is not 'on' or 'off': read as 'off'",
                            path, lineno, val);
-        } else if (!strcmp(key, "test")) {
+        } else if (!strcmp(key, "test") || !strcmp(key, "test_image") || !strcmp(key, "test_video")
+                   || !strcmp(key, "test_scene") || !strcmp(key, "test_sound")) {
             /* PAD-1279: <file>|<label> - one of the card's own test pictures,
              * animations or sounds (Settings > Test pictures), a file name in
              * the media directory.  A name with a path in it, or beyond
@@ -531,7 +547,14 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             } else {
                 copy_field(c->test[c->ntest].file, fld[0]);
                 copy_field(c->test[c->ntest].label, fld[1] && *fld[1] ? fld[1] : fld[0]);
-                c->ntest++;
+                c->test[c->ntest].kind = test_kind_of(key, fld[0]);
+                if (c->test[c->ntest].kind == TK_NONE && strcmp(key, "test"))
+                    conf_warn(c, "%s:%d: %s=%s: not a file that list shows (%s): dropped", path,
+                              lineno, key, fld[0], !strcmp(key, "test_sound") ? "a .wav"
+                              : !strcmp(key, "test_video") ? "a .padv or .gif"
+                              : "a .png");
+                else
+                    c->ntest++;
             }
         } else if (!strcmp(key, "settings")) {
             if (!*val || !strcmp(val, "on")) c->settings = 1;

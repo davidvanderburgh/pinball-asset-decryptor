@@ -26,10 +26,11 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_GIF
+#define STBI_ONLY_JPEG                 /* the test card's videos (video.h, PAD-1279) */
 #define STBI_NO_STDIO
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
-/* with JPEG compiled out two of stb's overflow helpers go unused */
+/* some of stb's helpers go unused with only these formats in */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #include "third_party/stb_image.h"
@@ -628,4 +629,16 @@ int art_anim_ready(const struct art_anim *a)
 {
     if (!a || !a->caching) return 0;
     return __atomic_load_n(&a->ready, __ATOMIC_ACQUIRE);
+}
+
+/* ONE JPEG FRAME of a test video (video.h): decoded whole, RGBA, malloc'd.
+ * stb's failure reason is thread-local here (C11), so the decoder threads
+ * can call this at once. */
+unsigned char *art_jpeg_decode(const unsigned char *buf, int len, int *w, int *h,
+                               char *err, int errlen)
+{
+    int n = 0;
+    unsigned char *px = stbi_load_from_memory(buf, len, w, h, &n, 4);
+    if (!px) snprintf(err, (size_t)errlen, "a frame does not decode: %s", stbi_failure_reason());
+    return px;
 }

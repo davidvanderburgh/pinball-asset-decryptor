@@ -127,6 +127,13 @@
  *                            Settings > Test pictures after the built-in
  *                            patterns (testpics.h).  The label defaults to the
  *                            file name; a name with a '/' is dropped
+ *   test_image=<file>|<label>  the TEST CARD's own lists (PAD-1279, DragonRR:
+ *   test_video=<file>|<label>  "DEFAULT PAD TEST CARD / IMAGES / VIDEOS /
+ *   test_scene=<file>|<label>  SCENES / SOUNDS"): the same as test= with the
+ *   test_sound=<file>|<label>  list it goes in said.  An image or scene is a
+ *                            PNG, a video a .padv (video.h) or a GIF, a sound
+ *                            a WAV; test= puts a .png under IMAGES, a .gif or
+ *                            .padv under VIDEOS and a .wav under SOUNDS
  *   key_left=<byte>.<bit>    JJP only (--input jjpio): where the LEFT flipper
  *   key_right=<byte>.<bit>   / RIGHT flipper / START / Volume+ / Volume- sit
  *   key_start=<byte>.<bit>   in the I/O board's 64-byte frame, active low.
@@ -273,10 +280,13 @@ struct conf_colour {
 
 /* ONE OF THE CARD'S OWN TEST ITEMS (PAD-1279): a media file name and what
  * Settings > Test pictures calls it */
-#define CONF_MAX_TESTS 16
+#define CONF_MAX_TESTS 64
+/* the TEST CARD menu's lists (TK_NONE: the file is not one any list takes) */
+enum { TK_NONE, TK_IMAGE, TK_VIDEO, TK_SCENE, TK_SOUND };
 struct conf_test {
     char file[CONF_STR];
     char label[CONF_STR];
+    int kind;                        /* TK_* */
 };
 
 struct conf {

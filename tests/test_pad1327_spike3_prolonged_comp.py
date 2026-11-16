@@ -622,11 +622,123 @@ def test_the_champion_lines(port_name):
         assert struct.unpack_from("<II", prog.raw, prog.off(sc)) == tuple(s["challenge_scores"][1:3])
 
 
-def test_records_on_a_64_bit_program_count_points():
+class _Prog64:
+    """a 64-bit program as mode_records reads it (spike3_requests.Program's shape): VA = file offset"""
+
+    def __init__(self, size=0x4000):
+        self.raw, self.rel = bytearray(size), {}
+        self.segs = [(0, 0, size)]
+
+    def off(self, va):
+        return va if 0 <= va < len(self.raw) else None
+
+    def u64(self, va):
+        return struct.unpack_from("<Q", self.raw, va)[0]
+
+    def cstr(self, va, limit=96):
+        end = self.raw.find(b"\0", va, va + limit) if va else -1
+        return self.raw[va:end].decode("latin1") if end > va else None
+
+    def put(self, va, b):
+        self.raw[va:va + len(b)] = b
+        return va
+
+
+def _audit_prog(names, ids):
+    """names at 0x100.., their pointer table at 0x1000, the 48-byte descriptors at 0x2000 (the id at +0x22) and the
+    record {table, count, 48} at 0x3800"""
+    p, at = _Prog64(), 0x100
+    p.put(at - 1, b"\0")
+    for i, n in enumerate(names):
+        p.rel[0x1000 + 8 * i] = p.put(at, n.encode() + b"\0")
+        at += len(n) + 1
+        struct.pack_into("<H", p.raw, 0x2000 + 48 * i + 0x22, ids[i])
+    p.rel[0x3800] = 0x2000
+    struct.pack_into("<QQ", p.raw, 0x3808, len(names), 48)
+    return p
+
+
+def test_the_audit_ids_of_a_64_bit_program_are_its_descriptors():
     from pinball_decryptor.plugins.stern import mode_records as MRec
+    names = ["AUD_INVALID"] + ["AUD_X_%d" % i for i in range(30)] + ["AUD_LEFT_SLINGSHOT", "AUD_SHOT_LEFT_RAMP"]
+    ids = [0] + list(range(1, 31)) + [202, 40]
+    got = MRec.audit_ids_a64(_audit_prog(names, ids))
+    # the id the code hands the audit add, not the name's place (Star Wars ELG: AUD_LEFT_SLINGSHOT 202, the 216th)
+    assert got["AUD_LEFT_SLINGSHOT"] == 202 and got["AUD_SHOT_LEFT_RAMP"] == 40 and "AUD_INVALID" not in got
+    assert MRec.audit_ids_a64(_Prog64()) == {}                        # no names: none
+    p = _audit_prog(names, ids)
+    struct.pack_into("<Q", p.raw, 0x3810, 40)                         # no 48-byte record of the names: none
+    assert MRec.audit_ids_a64(p) == {}
+
+
+def test_the_champion_counts_of_a_64_bit_program_are_its_category_table():
+    from pinball_decryptor.plugins.stern import mode_records as MRec
+    p, table, count_at = _Prog64(), 0x1000, 0x3000
+    names = ["invalid", "HIGHEST SCORES", "COMBO CHAMPION", "FASTEST TIMES", "2P COOP/TEAM HIGH SCORES",
+             "JEDI MULTIBALL CHAMPION", "COMBO CHAMPION"]
+    at = 0x100
+    for c, n in enumerate(names):
+        p.rel[table + 72 * c + 8] = 0x2000 + c                        # the getter
+        p.rel[table + 72 * c + 48] = 0x2800 + 8 * c                   # the titles list ...
+        p.rel[0x2800 + 8 * c] = p.put(at, n.encode() + b"\0")         # ... whose first title is its name
+        at += len(n) + 1
+    struct.pack_into("<Q", p.raw, count_at, len(names))
+    port = {"data": {"challenge_scores_table": table, "challenge_scores_count": count_at},
+            "value": {"challenge_scores_desc_size": 72}}
+    # from category 2; the fastest-time and co-op boards are not counts; a name once
+    assert MRec.champions_a64(p, port) == [(2, "COMBO CHAMPION"), (5, "JEDI MULTIBALL CHAMPION")]
+    assert MRec.champions_a64(p, {"data": {}}) == []
+
+
+def test_records_on_a_64_bit_program_count_its_audits_and_champions(monkeypatch):
+    from pinball_decryptor.plugins.stern import mode_records as MRec
+    from pinball_decryptor.plugins.stern import spike3_requests as S3R
+    names = ["AUD_INVALID"] + ["AUD_X_%d" % i for i in range(30)] + ["AUD_TOTAL_BALLS_SAVED", "AUD_SHOT_LEFT_RAMP_HIT"]
+    prog = _audit_prog(names, [0] + list(range(1, 31)) + [116, 40])
+    monkeypatch.setattr(S3R, "Program", lambda raw: prog)
+    monkeypatch.setattr(MRec, "champions_a64", lambda p, port: [(2, "COMBO CHAMPION")])
     port = MP.read_port(str(ELG3))
-    assert MRec.choices(b"\x7fELF\x02" + b"\0" * 64, port) == {"modes": [], "counts": []}
+    assert "audit_add" in port["site"]
+    got = MRec.choices(b"\x7fELF\x02" + b"\0" * 64, port)
+    assert got["modes"] == []                     # the game's own modes are read off 32-bit code: none on Spike 3
+    assert {(c["key"], c["label"], c["group"]) for c in got["counts"]} == {
+        ("audit:40", "Left Ramp hits", "Shots"), ("audit:116", "Balls saved", "Other"),
+        ("champion:2", "Combo", "The game's own counts")}
+    # no audit add in the port: no audits (they would never count), the champion counts still
+    port["site"].pop("audit_add")
+    assert [c["key"] for c in MRec.choices(b"\x7fELF\x02" + b"\0" * 64, port)["counts"]] == ["champion:2"]
     assert MRec.title_refusal(MP.profiles()["star_wars_elg_1_10_spike3"]) == ""
+
+
+#: each Spike 3 program's audit add (round 6): the callee handed the most distinct audit ids with an amount of 1
+AUDIT_ADD = {"star_wars_elg-1.10.port": 0x42D880, "fallout_le-0.82.port": 0x6E3A80, "pokemon_le-0.82.port": 0x743C20,
+             "star_wars_2025_le-0.96.port": 0x37B5E0, "star_wars_2025_pro-0.84.port": 0x233DC0,
+             "walking_dead_remastered_le-0.92.port": 0x3F7660, "transformers_mtmte_le-0.96.port": 0x644E50}
+
+
+@pytest.mark.parametrize("port_name", sorted(AUDIT_ADD))
+def test_the_audit_add_line(port_name):
+    port = MP.read_port(str(PORTS3 / port_name))
+    assert port["site"]["audit_add"][0] == AUDIT_ADD[port_name]
+    path = os.path.join(PROGS, port_name.split("-")[0] + ".game")
+    if PROGS and os.path.isfile(path):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("s3port", ROOT / "tools" / "spike3_emu" / "s3port.py")
+        S = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(S)
+        e = S.Elf(path)
+        (first, n), (_second, n2) = S.audit_add_a64(e)[:2]
+        assert first == AUDIT_ADD[port_name] and n > 4 * n2
+        assert (e.u32(first), e.u32(first + 4)) == tuple(port["site"]["audit_add"][1:3])
+        from pinball_decryptor.plugins.stern import mode_records as MRec
+        from pinball_decryptor.plugins.stern import spike3_requests as S3R
+        prog = S3R.Program(open(path, "rb").read())
+        ids = MRec.audit_ids_a64(prog)
+        assert ids["AUD_TOTAL_EXTRA_BALLS"] == 73 and ids["AUD_TOTAL_BALLS_SAVED"] in (114, 116)
+        if port_name.startswith("star_wars_elg"):
+            assert ids["AUD_LEFT_SLINGSHOT"] == 202               # as on Spike 2 ELG; its name the 216th
+        champs = MRec.champions_a64(prog, port)
+        assert champs and all(n.isprintable() and "HIGH SCORE" not in n for _c, n in champs)
 
 
 def test_records_ride_the_spike3_build(build, monkeypatch, tmp_path):

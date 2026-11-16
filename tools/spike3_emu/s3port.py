@@ -621,6 +621,27 @@ def _bl(va, w):
     return va + 4 * sext(w & 0x3FFFFFF, 26) if (w & 0xFC000000) == 0x94000000 else None
 
 
+def audit_add_a64(e):
+    """PAD-1327: ``[(callee, distinct ids)]`` best first - the callees handed `movz w0, #id` with `movz w1, #1` in the
+    four instructions before the bl (stock_scan_c.find_audit_add's rule on AArch64). The first is the framework's
+    audit add (`site audit_add`: id w0, amount w1): Star Wars ELG 1.10 hands its 132 ids, the next callee 12."""
+    from collections import defaultdict
+    ids, w = defaultdict(set), e.words
+
+    def movz(x, reg):
+        return (x >> 5) & 0xFFFF if (x & 0xFF80001F) == (0x52800000 | reg) else None
+    for k in range(4, len(w)):
+        if (w[k] & 0xFC000000) != 0x94000000:
+            continue
+        a0 = a1 = None
+        for j in range(k - 1, k - 5, -1):
+            a0 = movz(w[j], 0) if a0 is None else a0
+            a1 = movz(w[j], 1) if a1 is None else a1
+        if a0 is not None and a1 == 1:
+            ids[_bl(e.tva + 4 * k, w[k])].add(a0)
+    return sorted(((t, len(s)) for t, s in ids.items()), key=lambda kv: -kv[1])
+
+
 def _adrp(va, w):
     """adrp xd, page -> (d, page), else None"""
     if (w & 0x9F000000) != 0x90000000:

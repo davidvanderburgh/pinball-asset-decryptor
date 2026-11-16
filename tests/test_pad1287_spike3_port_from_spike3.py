@@ -145,7 +145,7 @@ def test_redrafting_walking_dead_gives_the_proven_port():
     # (PAD-1326's co-op lines are portcoop's, not the draft's: the message table and its BALL line)
     # (and PAD-1327's start menu, measured by hand on this program)
     def own(entries):
-        return {k: v for k, v in entries.items() if not k[1].startswith(("message_", "coop_", "comp_menu_", "challenge_", "game_scores"))}
+        return {k: v for k, v in entries.items() if not k[1].startswith(("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add"))}
     assert own(_entries(text)) == own(_entries(WD_PORT.read_text(encoding="utf-8")))
     # a layout that moved is read off this program, not copied: the process's exit hooks (Star Wars ELG's at 312)
     assert re.search(r"^value proc_exit_hooks\s+392\b", text, re.M)

@@ -221,6 +221,7 @@ data right_gate_obj         0x00711730   # read off the program's own code (PAD-
 # PAD-1327: the categories' table object {base, count, stride 72} at 0x6a3390 (the lookup 0x42eed0): its base, and its count
 data challenge_scores_table   0x006c4b40
 data challenge_scores_count   0x006a3398
+site  audit_add              0x0042d880 0x72003c00 0x54000800   # PAD-1327: the audit add (id w0, amount w1): 132 distinct ids handed it with an amount of 1, the next callee 12
 # data sw_struct              NOT PLACED: 5 of 5 paired functions agree
 data coop_player            0x006b1a1a   # 2 of 3 paired functions that load it
 data coop_players           0x00792200   # 5 of 5 paired functions that load it

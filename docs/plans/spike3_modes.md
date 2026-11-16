@@ -270,10 +270,32 @@ For the last two kinds the records dialog adds `mode_records.NO_ATTRACT` ("the a
 yet: a player who beats one still enters their initials for it, and it is kept"): `attract_note` whenever a title's port
 names no champion page.
 
-**What is left in PAD-1327** (the next run): counts in the records dialog for a 64-bit program - the shots and mode
-audits (an audit_add site and the AUD_ name table on Spike 3), the game's own champion counts (the 64-bit categories
-above) and the game's own modes (the stock scanner on 64-bit, where it reads them). Possibly later: a record's champion
-on the list-page and scene titles' attract screens (a different design: a row or a scene of our own).
+**PAD-1327 round 6: counts on Spike 3 records.** A record can count shots and goals on a Spike 3 card, as on Spike 2:
+- `site audit_add` in all 7 Spike 3 ports: the callee handed the most distinct `movz w0, #id` + `movz w1, #1` pairs
+  (`s3port.audit_add_a64`; Star Wars ELG 0x42d880 takes 132 ids, the next callee 12). The 64-bit hook relocates its
+  opening `adrp` (ELG's `tst; b.eq`), so the records' `on_rec_audit` reads x0 / x1 as on Spike 2.
+- The audits' names and ids: `mode_records.audit_ids_a64` - the AUD_ names' relocated pointer table (from
+  "AUD_INVALID") and the record `{table, count, 48}` of 48-byte descriptors, the id the code passes the halfword at
+  +0x22 (Spike 2: +0x12 of 28). It is not the name's place: ELG's AUD_LEFT_SLINGSHOT is 202 on both machines, its
+  name the 216th on Spike 3.
+- The game's own champion counts: `mode_records.champions_a64` - the port's `challenge_scores_table` (72-byte
+  descriptors, getter +8, titles +48) up to `challenge_scores_count`, from category 2, the high-score, co-op and
+  fastest-time boards left out (Fallout: 23, Star Wars 2025 LE: 33).
+- `choices()` on a 64-bit program offers them (`count_choices(game_elf, port)`; audits only where the port names
+  the audit add); the dialog's choice cache is version 3. Shot labels drop Fallout's `ID_` (AUD_SHOT_ID_LEFT_OUTLANE).
+- Rig (Fallout LE 0.82, slot 3): records of the right slingshot audit (147), slingshot + radio tower (147 + 164) and
+  the JUNK champion. 4 balls, each a radio tower hit and 5 slingshot presses: SLINGS 35, RADIO SLING 39 = 35 + the 4
+  radio tower hits exactly, JUNK 0 (none earned); each filed with the game's initials entry. A control game with no
+  slingshot presses: SLINGS 18 over 5 balls - the game's own slingshot audit rises about 3.6 a ball by itself, so the
+  20 presses were all counted.
+- Rig (Walking Dead Remastered LE 0.92, slot 4): a record of the game's own WALKERS KILLED champion count (category
+  2, its 64-bit getter called per player): 3 balls on the walker targets gave 3, filed as WALKERS with the game's own
+  "PLAYER 1 - ENTER INITIALS" screen.
+
+**Left as it is:** the game's own modes in the dialog (`game:<id>`) stay Spike 2 only - their objects are read by
+the 32-bit stock scanner; a Spike 3 record counts in the whole game or in a mode of the project's own. Possibly later:
+a record's champion on the list-page and scene titles' attract screens (a different design: a row or a scene of our
+own).
 
 ## The Modes tab and Try it
 

@@ -186,7 +186,7 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                           "coop_player_change", "coop_add_player",                  # PAD-1326: co-op play
                           "challenge_menu", "challenge_menu_pick",                  # PAD-1327
                           "challenge_scores", "game_scores", "challenge_score_entry", "challenge_scores_gate",
-                          "challenge_pages_0", "challenge_pages_1",              # PAD-1327: records
+                          "challenge_pages_0", "challenge_pages_1", "audit_add",  # PAD-1327: records
                           } | SOUND_SITES | LIGHT_SITES | SCENE_SITES | PLAY_SITES
     for t in sites.values():
         t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)

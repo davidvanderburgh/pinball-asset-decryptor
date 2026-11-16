@@ -270,20 +270,92 @@ OTHER_AUDITS = (("AUD_TOTAL_BALLS_SAVED", "Balls saved"), ("AUD_TOTAL_EXTRA_BALL
                 ("AUD_TOTAL_SPECIALS", "Specials"), ("AUD_TOTAL_BALL_SEARCHES", "Ball searches"))
 
 
-def count_choices(game_elf):
+def audit_ids_a64(prog):
+    """PAD-1327: ``{AUD name: id}`` on a 64-bit Spike 3 program (a :class:`spike3_requests.Program`): the names'
+    pointer table (the one starting at "AUD_INVALID") and the id the code hands the audit add for each - the halfword
+    at +0x22 of the name's 48-byte descriptor (Spike 2's at +0x12 of 28 bytes; Star Wars ELG's AUD_LEFT_SLINGSHOT is
+    202 on both, its name the 216th on Spike 3), from the record ``{table, count, 48}`` whose entries map the most
+    names. {} without them."""
+    import struct
+    raw = prog.raw
+    at = raw.find(b"\x00AUD_INVALID\x00") + 1
+    sva = next((va + at - off for va, off, fsz in prog.segs if at and off <= at < off + fsz), None)
+    names = []
+    for slot in sorted(s for s, v in prog.rel.items() if v == sva):
+        got = []
+        while True:
+            n = prog.cstr(prog.rel.get(slot + 8 * len(got)) or 0)
+            if not n or not n.startswith("AUD_"):
+                break
+            got.append(n)
+        if len(got) > len(names):
+            names = got
+    if len(names) < 20:
+        return {}
+    best = {}
+    for slot, table in prog.rel.items():
+        o = prog.off(slot + 8)
+        if o is None or o + 16 > len(raw) or struct.unpack_from("<QQ", raw, o) != (len(names), 48):
+            continue
+        got = {}
+        for i, n in enumerate(names):
+            ho = prog.off(table + 48 * i + 0x22)
+            hid = struct.unpack_from("<H", raw, ho)[0] if ho is not None else 0
+            if hid:
+                got.setdefault(n, hid)
+        if len(got) > len(best):
+            best = got
+    return best if len(best) >= len(names) // 3 else {}
+
+
+def champions_a64(prog, port):
+    """PAD-1327: ``[(category, name)]`` - the game's own champion categories that count play on a 64-bit program, read
+    from the port's category table (``data challenge_scores_table``: 72-byte descriptors, the getter at +8, the titles
+    list at +48) and its count (``data challenge_scores_count``); the high score, co-op and fastest-time boards left
+    out as on Spike 2."""
+    from .coop_play import _NOT_AWARDS
+    data = (port or {}).get("data", {})
+    table, count_at = data.get("challenge_scores_table"), data.get("challenge_scores_count")
+    size = (port or {}).get("value", {}).get("challenge_scores_desc_size", 72)
+    if not table or not count_at:
+        return []
+    n = (prog.u64(count_at) or 0) & 0xFFFFFFFF
+    out, seen = [], set()
+    for c in range(2, min(n, 64)):
+        at = table + size * c
+        titles = prog.rel.get(at + 48)
+        name = prog.cstr(prog.rel.get(titles) or 0) if titles else None
+        if not name or any(w in name for w in _NOT_AWARDS) or name in seen or not prog.rel.get(at + 8):
+            continue
+        seen.add(name)
+        out.append((c, name.replace("/'", "'")))
+    return out
+
+
+def count_choices(game_elf, port=None):
     """``[{"key", "label", "group"}]``: what a record of the card's game can count, grouped as the dialog lists them -
     Shots (each AUD_SHOT_* audit), Modes (each mode's started / completed audit), Other (ball saves, extra balls,
-    ...), and The game's own counts (its champion categories that count play)."""
+    ...), and The game's own counts (its champion categories that count play). PAD-1327: on a 64-bit Spike 3
+    program its audits are offered where the port names its audit add (`site audit_add`), and its champion counts
+    are read from the port's category table."""
     from . import coop_play as CP
     from . import stock_scan as S
     from .mode_framework import audit_add
     from .portchallenge import Elf
     out = []
-    ids = CP._audit_ids(S.Program(game_elf)) if audit_add(Elf(game_elf)) else {}
+    if bytes(game_elf[:5]) == b"\x7fELF\x02":
+        from . import spike3_requests as S3R
+        prog = S3R.Program(bytes(game_elf))
+        ids = audit_ids_a64(prog) if "audit_add" in (port or {}).get("site", {}) else {}
+        champs = champions_a64(prog, port)
+    else:
+        ids = CP._audit_ids(S.Program(game_elf)) if audit_add(Elf(game_elf)) else {}
+        champs = None
     by_id = sorted(ids.items(), key=lambda kv: kv[1])
     for n, i in by_id:
         if n.startswith("AUD_SHOT_"):
             tail = n[len("AUD_SHOT_"):]
+            tail = tail[3:] if tail.startswith("ID_") else tail      # Fallout LE: AUD_SHOT_ID_LEFT_OUTLANE
             label = (_words(tail[:-len("_SPIN")]) + " spins" if tail.endswith("_SPIN")
                      else _words(tail[:-len("_HIT")]) + " hits" if tail.endswith("_HIT")
                      else _words(tail))
@@ -296,7 +368,7 @@ def count_choices(game_elf):
     for n, words in OTHER_AUDITS:
         if n in ids:
             out.append({"key": "audit:%d" % ids[n], "label": words, "group": "Other"})
-    for cat, name in CP._champions(game_elf):
+    for cat, name in CP._champions(game_elf) if champs is None else champs:
         words = name[:-len(" CHAMPION")] if name.endswith(" CHAMPION") else name
         out.append({"key": "champion:%d" % cat, "label": words.title().replace("Vs.", "vs."),
                     "group": "The game's own counts"})
@@ -305,11 +377,11 @@ def count_choices(game_elf):
 
 def choices(game_elf, port):
     """Everything the dialog offers for this card: ``{"modes": [{"value", "label"}], "counts": [...]}`` (the game's
-    modes as ``game:<id>``; the project's own are the tab's). PAD-1327: a Spike 3 card's 64-bit program offers neither
-    yet (its audits, champion counts and mode objects are read off 32-bit code): its records count points, in the
-    whole game or in a mode of the project's own."""
+    modes as ``game:<id>``; the project's own are the tab's). PAD-1327: a Spike 3 card's 64-bit program offers its
+    audits and champion counts (:func:`count_choices`) but not the game's modes (their objects are read off 32-bit
+    code): a record counts in the whole game or in a mode of the project's own."""
     if bytes(game_elf[:5]) == b"\x7fELF\x02":
-        return {"modes": [], "counts": []}
+        return {"modes": [], "counts": count_choices(game_elf, port)}
     return {"modes": [{"value": "game:%d" % i, "label": n} for i, n, _o in game_modes(game_elf, port)],
             "counts": count_choices(game_elf)}
 
@@ -339,7 +411,7 @@ def project_choices(project):
     try:
         with open(cache, encoding="utf-8") as f:
             raw = json.load(f)
-        if raw.get("key") == key and raw.get("v") == 1:
+        if raw.get("key") == key and raw.get("v") == 3:   # 3: PAD-1327, Spike 3 counts
             return "", raw["choices"]
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -349,7 +421,7 @@ def project_choices(project):
         return "The game program could not be read from the card: %s" % e, {"modes": [], "counts": []}
     try:
         with open(cache, "w", encoding="utf-8") as f:
-            json.dump({"v": 1, "key": key, "choices": got}, f)
+            json.dump({"v": 3, "key": key, "choices": got}, f)
     except OSError:
         pass
     return "", got

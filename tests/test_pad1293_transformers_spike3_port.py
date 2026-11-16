@@ -144,6 +144,6 @@ def test_redrafting_with_the_census_gives_the_shipped_port():
     assert not core
     # (the lines the port has from elsewhere: PAD-1326's co-op (portcoop) and PAD-1327's start menu, measured by hand)
     def own(entries):
-        return {k: v for k, v in entries.items() if not k[1].startswith(("message_", "coop_", "comp_menu_", "challenge_", "game_scores"))}
+        return {k: v for k, v in entries.items() if not k[1].startswith(("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add"))}
     assert own(_entries(text)) == own(_entries(PORT.read_text(encoding="utf-8")))
     assert re.search(r"^value proc_exit_hooks\s+392\b", text, re.M)

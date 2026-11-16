@@ -257,6 +257,7 @@ site challenge_score_entry   0x007937a0 0xa9bf7bf3 0x2a0103f3
 site challenge_scores_gate   0x00794978 0x94004a46 0x36000600
 data challenge_scores_table   0x065dd318
 data challenge_scores_count   0x019260d0
+site  audit_add              0x006e3a80 0xf00091c2 0xf9474442   # PAD-1327: the audit add (id w0, amount w1): 76 distinct ids handed it with an amount of 1, the next callee 10
 value challenge_scores_cat   1
 value challenge_scores_desc_size    72
 value challenge_scores_gate_id       91

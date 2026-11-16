@@ -986,10 +986,12 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         preset = _CP.preset_for(prof)
         rows = []
         for c in chars["list"]:
-            got = _CP.compose(c["powers"], parts) if pw else {"cfg": "", "line": "", "missing": list(c["powers"]),
-                                                             "over": []}
+            got = _CP.compose(c["powers"], parts, c["times"]) if pw else {
+                "cfg": "", "line": "", "missing": list(c["powers"]), "over": []}
             shown, cut = _CP.badge_on_card(c, wf if pw else None)
             rows.append({"name": c["name"], "sub": c["sub"], "ability": c["ability"], "powers": list(c["powers"]),
+                         # PAD-1367: each timed power's time, its own or the stock one
+                         "times": {k: c["times"].get(k, t[1]) for k, t in _CP.TIMED.items()},
                          "header": c["header"], "words": _CP.character_words(c, wf if pw else None),
                          "badge_cut": shown if cut else "",       # PAD-1083: too long for its card: what shows
                          # PAD-1363: its own card text in place of its powers' lines ("" theirs)
@@ -1015,7 +1017,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "abilities": [{"key": a["key"], "words": a["words"], "does": a["does"], "ok": bool(a["cfg"]),
                                          "why": a["why"], "powers": a.get("powers", [])} for a in abil],
                           "powers": [{"key": p["key"], "group": p["group"], "words": p["words"], "line": p["line"],
-                                      "does": p["does"], "ok": bool(p["cfg"]), "why": p["why"]} for p in pw],
+                                      "does": p["does"], "ok": bool(p["cfg"]), "why": p["why"],
+                                      # PAD-1367: a timed power's drop-down
+                                      "timed": [{"value": v, "label": _CP.time_label(p["key"], v)}
+                                                for v in _CP.TIMED[p["key"]][2]] if p["key"] in _CP.TIMED else []}
+                                     for p in pw],
                           "groups": list(_CP.POWER_GROUPS), "refused": getattr(self, "_coop_refused", ""),
                           "preset": _CP.read_preset(preset)["game"] if preset else "",
                           "preview": self._coop_preview(project, chars),                        # PAD-1031
@@ -1469,6 +1475,29 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         c["powers"] = keys
         c["ability"] = _CP.bundle_of(keys)
         return self._save_coop_chars(project, chars, "%s powers" % c["name"], was, ", ".join(keys) or "none")
+
+    @rpc
+    def coop_char_time(self, i, key, value):
+        """PAD-1367: the time of one of a character's timed powers (coop_play.TIMED: the Action save's seconds, the
+        seconds added to the battle timers, how much longer a ball save or timer lasts)."""
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        chars = _CP.load_characters(project) if project else None
+        key = str(key)
+        if not chars or not 0 <= int(i) < len(chars["list"]) or key not in _CP.TIMED:
+            return False
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return False
+        if value not in _CP.TIMED[key][2]:
+            return False
+        c = chars["list"][int(i)]
+        stock = _CP.TIMED[key][1]
+        was = _CP.time_label(key, c["times"].get(key, stock))
+        c["times"] = dict(c["times"], **{key: value})
+        return self._save_coop_chars(project, chars, "%s %s time" % (c["name"], key), was,
+                                     _CP.time_label(key, value))
 
     @rpc
     def coop_char_add(self):

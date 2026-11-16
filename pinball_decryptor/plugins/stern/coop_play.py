@@ -879,6 +879,110 @@ ABILITIES = (
      "at 4.", ["tanks_4"]),
 )
 _POWER = {p[0]: p for p in POWERS}
+
+#: PAD-1367 (DoomWalrus666: "anytime a power has an associated time, I would like to be able to alter how much time"):
+#: the powers with a time of their own, each one's time set per character in the Characters dialog: (kind, stock
+#: value, the choices). "save": the Action button save's seconds (the runtime takes up to 60); "plus": seconds added to
+#: each timer; "x": how much longer, a percent of the game's own timer (200 = twice). The stock value gives the
+#: power's stock text and runtime text, byte for byte.
+TIMED = {
+    "action_save": ("save", 10, (2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20, 25, 30)),
+    "battle_timers_10": ("plus", 10, (5, 10, 15, 20, 25, 30, 45, 60)),
+    "ball_save_x2": ("x", 200, (150, 200, 250, 300, 400)),
+    "multiball_saves_x2": ("x", 200, (150, 200, 250, 300, 400)),
+    "addball_save_x2": ("x", 200, (150, 200, 250, 300, 400)),
+    "o2_x2": ("x", 200, (150, 200, 250, 300, 400)),
+    "rodan_x2": ("x", 200, (150, 200, 250, 300, 400)),
+}
+_TIMES_WORDS = {150: "one and a half times", 200: "twice", 250: "two and a half times", 300: "three times",
+                400: "four times"}
+#: each timed power's card line and what it does, for a time that is not its stock one (%(n)s the seconds, %(x)s how
+#: many times as long, lower case; %(X)s the same with a capital)
+_TIMED_TEXT = {
+    "action_save": ("Press Action twice for a %(n)s second ball save, once a ball.",
+                    "A %(n)s second ball save when they press the Action button twice quickly, once a ball."),
+    "battle_timers_10": ("%(n)s seconds more on battle timers.", "Every battle timer gets %(n)s seconds more."),
+    "ball_save_x2": ("%(X)s the ball save at the start of every ball.",
+                     "The ball save at each of their balls lasts %(x)s the game's BALL SAVE TIME (at most its top)."),
+    "multiball_saves_x2": ("%(X)s the ball save in multiball modes.",
+                           "Every multiball's and wizard mode's own ball save lasts %(x)s its timer."),
+    "addball_save_x2": ("%(X)s the ball save after every added ball, Anguirus's included.",
+                        "The ball save after any added ball (Anguirus's, a multiball's add-a-ball) lasts %(x)s its ADD "
+                        "A BALL SAVE TIMER."),
+    "o2_x2": ("The Oxygen Destroyer lasts %(x)s as long.", "The Oxygen Destroyer timer runs %(x)s its setting."),
+    "rodan_x2": ("Rodan lasts %(x)s as long.", "Rodan's playfield multiplier runs %(x)s its timer."),
+}
+
+
+def time_label(key, value):
+    """PAD-1367: a timed power's time as the dialog's drop-down names it (``5 seconds``, ``+10 seconds``, ``2x as
+    long``)."""
+    kind = TIMED[key][0]
+    if kind == "save":
+        return "%d second%s" % (value, "" if value == 1 else "s")
+    if kind == "plus":
+        return "+%d seconds" % value
+    return "%sx as long" % ("%g" % (value / 100.0))
+
+
+def clean_times(times, keys=None):
+    """PAD-1367: a character's own times, ``{power key: value}``: timed powers only (and of *keys*, its powers, when
+    given), each one of the power's choices and not its stock value."""
+    out = {}
+    if not isinstance(times, dict):
+        return out
+    for k, v in times.items():
+        k = str(k)
+        if k not in TIMED or (keys is not None and k not in keys):
+            continue
+        try:
+            v = int(v)
+        except (TypeError, ValueError):
+            continue
+        if v in TIMED[k][2] and v != TIMED[k][1]:
+            out[k] = v
+    return out
+
+
+def power_text(key, value=None):
+    """PAD-1367: power *key*'s card line and what it does, ``(line, does)``, at its time *value* (None or its stock
+    time: the stock words)."""
+    p = _POWER[key]
+    if key not in TIMED or value is None or int(value) == TIMED[key][1]:
+        return p[3], p[4]
+    value = int(value)
+    x = _TIMES_WORDS.get(value, "%gx" % (value / 100.0))
+    words = {"n": value, "x": x, "X": x[:1].upper() + x[1:]}
+    line, does = _TIMED_TEXT[key]
+    return line % words, does % words
+
+
+def _retime(key, cfg, value):
+    """PAD-1367: power *key*'s runtime text *cfg* at its time *value*: the Action save's seconds; the seconds added
+    to each timer (the cap past the setting's top grows with them); the percent of the game's timer (its own bounds
+    scaled with it; BALL SAVE TIME stays at most its top)."""
+    kind, stock, _choices = TIMED[key]
+    value = int(value)
+    if value == stock:
+        return cfg
+    out = []
+    for tok in cfg.split(","):
+        if kind == "save" and tok.startswith("save:"):
+            tok = "save:%d" % value
+        elif kind == "plus":
+            m = re.match(r"adj:(\d+)\+(\d+):(\d+):(\d+)$", tok)
+            if m:
+                idx, n, lo, hi = (int(g) for g in m.groups())
+                tok = "adj:%d+%d:%d:%d" % (idx, value, lo, hi + max(0, value - n))
+        elif kind == "x":
+            m = re.match(r"adj:(\d+)x(\d+):(\d+):(\d+)$", tok)
+            if m:
+                idx, pct, lo, hi = (int(g) for g in m.groups())
+                if key != "ball_save_x2":
+                    lo, hi = lo * value // pct, hi * value // pct
+                tok = "adj:%dx%d:%d:%d" % (idx, value, lo, hi)
+        out.append(tok)
+    return ",".join(out)
 #: what the pick's card says each bundle does, in the player's words: its powers' lines
 CARD_LINES = {key: " ".join(_POWER[k][3] for k in keys) for key, _w, _d, keys in ABILITIES}
 #: the most parts of each kind one character takes (the runtime's coop_char_line: COOP_CHAR_ADJ, COOP_GIFTS,
@@ -986,14 +1090,16 @@ def powers(game_elf, label="This game", sites=(), values=None, table=None, actio
     return out
 
 
-def compose(keys, parts):
+def compose(keys, parts, times=None):
     """Round 6: a character's powers *keys* (in order) as one ability for the runtime, from *parts* (:func:`powers`'
-    entries by key): ``{"cfg", "words", "line", "missing", "over", "why"}``. ``cfg`` is the tokens of the powers the
+    entries by key), each timed power at its time in *times* (PAD-1367, :func:`clean_times`' shape; the stock time
+    where it has none): ``{"cfg", "words", "line", "missing", "over", "why"}``. ``cfg`` is the tokens of the powers the
     card has, each once, the perks folded into one ``keep:perks|=<mask>``; ``words`` the badge (their words, comma
     separated) and ``line`` the card's line (their lines) for those; ``missing`` the keys the card cannot have (and
     ``why`` the first one's reason, when the FIRST power is missing: none of the ability then, as a bundle's core);
     ``over`` the kinds past :data:`LIMITS` (the runtime drops the rest of that kind without a word)."""
     toks, words, lines, missing, why, perks = [], [], [], [], "", 0
+    times = times or {}
     for i, k in enumerate(keys):
         p = parts.get(k)
         if not p or not p["cfg"]:
@@ -1001,13 +1107,16 @@ def compose(keys, parts):
             if i == 0:
                 why = (p or {}).get("why") or NO_POWER % k
             continue
-        for tok in p["cfg"].split(","):
+        cfg, line = p["cfg"], p["line"]
+        if times.get(k) is not None and k in TIMED:           # PAD-1367: its own time
+            cfg, line = _retime(k, cfg, times[k]), power_text(k, times[k])[0]
+        for tok in cfg.split(","):
             if tok.startswith("perk:"):
                 perks |= int(tok[5:], 0)
             elif tok not in toks:
                 toks.append(tok)
         words.append(p["words"])
-        lines.append(p["line"])
+        lines.append(line)
     if perks:
         toks.append("keep:perks|=0x%x" % perks)
     if why:
@@ -1127,7 +1236,8 @@ def character_line(character, words_for=None):
     if character.get("text"):
         return character["text"]
     wf = words_for if words_for is not None else {p[0]: p[2] for p in POWERS}
-    return " ".join(_POWER[k][3] for k in character.get("powers") or [] if k in wf and k in _POWER)
+    times = character.get("times") or {}                    # PAD-1367: a timed power's line says its own time
+    return " ".join(power_text(k, times.get(k))[0] for k in character.get("powers") or [] if k in wf and k in _POWER)
 
 
 def _ability_part(how, table, action, sites, values, label):
@@ -1252,6 +1362,7 @@ def _characters(got):
             keys = _powers_of(c)                            # round 6: a list of powers (an old ability: its bundle)
             out.append({"name": clean_name(c.get("name")), "sub": clean_sub(c.get("sub")),
                         "powers": keys, "header": clean_header(c.get("header")),
+                        "times": clean_times(c.get("times"), keys),  # PAD-1367: its timed powers' own times
                         "text": clean_text(c.get("text")),           # PAD-1363: its own card text, "" its powers' lines
                         "ability": bundle_of(keys),         # the bundle these are, for the dialog's starting points
                         "picture": str(c.get("picture") or ""), "colour": clean_colour(c.get("colour")),
@@ -1322,7 +1433,7 @@ def character_lines(game_elf, characters=None, sites=(), values=None):
     parts = {p["key"]: p for p in powers(game_elf, sites=sites, values=values)}
     wf = {k: p["words"] for k, p in parts.items() if p["cfg"]}
     for c in chars["list"]:
-        got = compose(c["powers"], parts)
+        got = compose(c["powers"], parts, c.get("times"))
         out.append("character %s %s|%s" % (got["cfg"] or "-", c["name"],
                                            character_words(c, wf) if got["cfg"] else ""))
     return out

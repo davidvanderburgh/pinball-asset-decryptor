@@ -349,9 +349,15 @@ export function CoopCharsDialog({ s, onClose }) {
       const list = powers.filter((p) => p.group === g);
       return list.length ? html`<div class="modes-coop-ch-grp" key=${g}>
         <div class="modes-list-grp">${g}</div>
-        ${list.map((p) => html`<${Check} key=${p.key} checked=${r.powers.includes(p.key)} disabled=${!p.ok && !r.powers.includes(p.key)}
+        ${list.map((p) => html`<div class="modes-coop-ch-pw" key=${p.key}><${Check} checked=${r.powers.includes(p.key)} disabled=${!p.ok && !r.powers.includes(p.key)}
           label=${p.ok ? p.words : `${p.words} (not on this game)`} title=${powerTitle(p, r.powers.includes(p.key))}
-          onChange=${(v) => call("modes.coop_char_power", i, p.key, v)} />`)}
+          onChange=${(v) => call("modes.coop_char_power", i, p.key, v)} />
+          ${(p.timed || []).length && r.powers.includes(p.key) ? html`<div class="modes-coop-ch-time">
+            <${Select} sm value=${String((r.times || {})[p.key])} width=${150}
+              options=${p.timed.map((t) => ({ value: String(t.value), label: t.label }))}
+              title="How much time this power gives this character. The words on its card follow."
+              onChange=${(v) => call("modes.coop_char_time", i, p.key, Number(v))} />
+          </div>` : null}</div>`)}
       </div>` : null;
     })}
     <div class="row" style="gap:8px;margin-top:6px">

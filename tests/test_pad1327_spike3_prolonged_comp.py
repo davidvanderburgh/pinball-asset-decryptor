@@ -521,3 +521,127 @@ def test_s3port_carries_the_layout_from_a_spike3_reference():
     body = s3[i:s3.index("\ndef ", i + 10)]
     assert 'if name == "game_flags_at":' in body and body.index('if name == "game_flags_at":') < body.index(
         'if GAME_VALUE.match(name) or name == "ball_end_event":')
+
+
+# ---- records on the high scores (round 4) ---------------------------------------------------------------------------
+def test_the_champion_code_is_pointer_wide():
+    src = RUNTIME.read_text(encoding="utf-8")
+    assert "typedef unsigned (*chg_fn4)(pm_reg, pm_reg, pm_reg, pm_reg);" in src
+    assert '#define CHG_DESC_SIZE ((unsigned)pm_port_value("challenge_scores_desc_size", PM_A64 ? 72 : 36))' in src
+    assert "#define CHG_ENT_AWARD(ent) (*(unsigned short *)((unsigned char *)(ent) + (PM_A64 ? 56 : 32)))" in src
+    for sig in ("static unsigned chg_gate_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)",
+                "static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)",
+                "static unsigned scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)",
+                "static void rec_file(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)"):
+        assert sig in src, sig
+    i, j = src.index("#define CHG_SCORES_MAX"), src.index("static void rec_arm(void)")
+    assert "36u" not in src[i:j] and "(ent + 8)" not in src[i:j]
+    # co-op's champion counts read the category through the same getter
+    assert "return rec_cat_value(a->ids[0], p);" in src
+    # the attract pages' wraps are 32-bit yet: not armed on Spike 3
+    arm = R._lift(src, "static void chg_scores_arm(void)")
+    assert arm.index("if (PM_A64) {") < arm.index("chg_page_arm();")
+
+
+CAT_MAIN = r"""
+#include <stdio.h>
+#include <string.h>
+typedef unsigned long pm_addr;
+typedef unsigned long pm_reg;
+#define PM_A64 1
+#define MAP_R 1
+#define MAP_GAME 2
+static long pm_port_value(const char *k, long d) { return d; }
+static pm_addr TABLE;
+static pm_addr data(const char *k) { return !strcmp(k, "challenge_scores_table") ? TABLE : 0; }
+static int maps_has(unsigned long a, unsigned long n, int how) { return a != 0; }
+static int mprotect(void *a, unsigned long n, int p) { return 0; }
+#define CHG_DESC_SIZE ((unsigned)pm_port_value("challenge_scores_desc_size", PM_A64 ? 72 : 36))
+@FNS@
+static unsigned long long getter(unsigned p) { return 1000ull * p + 7; }
+static pm_addr desc[3 * 9] __attribute__((aligned(16)));          /* three 72-byte categories */
+static unsigned short list1[] = { 1, 2, 3, 4, 5, 0 };
+int main(void)
+{
+    pm_addr was = 0, *slot;
+    TABLE = (pm_addr)desc;
+    desc[9 + 1] = (pm_addr)getter;                                /* category 1: getter +8, list +56 */
+    desc[9 + 7] = (pm_addr)list1;
+    printf("value %llu\n", rec_cat_value(1, 3));
+    slot = chg_scores_one_entry(1, &was);
+    printf("one %d %u %u was-list %d\n", slot == &desc[9 + 7], ((unsigned short *)desc[9 + 7])[0],
+           ((unsigned short *)desc[9 + 7])[1], was == (pm_addr)list1);
+    return 0;
+}
+"""
+
+
+def test_a_64_bit_category_reads_its_getter_and_lists_one_entry(tmp_path):
+    src = RUNTIME.read_text(encoding="utf-8")
+    fns = "\n".join(R._lift(src, s) for s in (
+        "static unsigned long long rec_cat_value(unsigned cat, unsigned p)",
+        "static pm_addr *chg_scores_one_entry(long cat, pm_addr *was)"))
+    out = _host(tmp_path, CAT_MAIN.replace("@FNS@", fns)).splitlines()
+    assert out == ["value 3007", "one 1 1 0 was-list 1"]
+
+
+#: each Spike 3 program's champion framework (round 4), read off its own code by tools: the end-of-game high scores,
+#: the entry lookup, the gate (the bus question 91), the categories' base, its count, the record's score place
+CHAMPS = {"star_wars_elg-1.10.port": (0x3EECC0, 0x3EDE80, 0x3EF058, 0x6C4B40, 0x6A3398, 80),
+          "fallout_le-0.82.port": (0x7945E0, 0x7937A0, 0x794978, 0x65DD318, 0x19260D0, 72),
+          "pokemon_le-0.82.port": (0x806540, 0x805700, 0x8068D8, 0x31BC310, 0x3194710, 72),
+          "star_wars_2025_le-0.96.port": (0x5A49F0, 0x5A3BB0, 0x5A4D88, 0x8D51C0, 0x8B4D88, 72),
+          "star_wars_2025_pro-0.84.port": (0x3885A0, 0x387760, 0x388940, 0x771350, 0x7536C0, 72),
+          "walking_dead_remastered_le-0.92.port": (0x362BD0, 0x361D90, 0x362F68, 0x7DCE38, 0x7B4A60, 72),
+          "transformers_mtmte_le-0.96.port": (0x694240, 0x693400, 0x6945D8, 0x9C81E0, 0x9A5CD8, 72)}
+
+
+@pytest.mark.parametrize("port_name", sorted(CHAMPS))
+def test_the_champion_lines(port_name):
+    sc, en, gate, table, count, score_at = CHAMPS[port_name]
+    port = MP.read_port(str(PORTS3 / port_name))
+    from pinball_decryptor.plugins.stern import mode_records as MRec
+    assert MRec.port_ok(port)
+    s, d, v = port["site"], port["data"], port["value"]
+    assert (s["challenge_scores"][0], s["game_scores"][0], s["challenge_score_entry"][0], s["challenge_scores_gate"][0]) \
+        == (sc, sc, en, gate)
+    assert (d["challenge_scores_table"], d["challenge_scores_count"]) == (table, count)
+    assert (v["challenge_scores_cat"], v["challenge_scores_desc_size"], v["challenge_record_score_at"],
+            v["challenge_record_score_size"], v["challenge_record_check_at"]) == (1, 72, score_at, 8, 88)
+    assert (v["challenge_scores_gate_cat_at"], v["challenge_scores_gate_entry_at"]) == (2, 4)
+    assert v["challenge_scores_gate_id"] == (90 if "2025_pro" in port_name else 91)   # Pro's bus ids: one lower past 56
+    path = os.path.join(PROGS, port_name.split("-")[0] + ".game")
+    if PROGS and os.path.isfile(path):              # the categories' table object off the program itself
+        from pinball_decryptor.plugins.stern import spike3_requests as S3R
+        prog = S3R.Program(open(path, "rb").read())
+        obj = count - 8
+        assert prog.rel.get(obj) == table and prog.u64(obj + 16) == 72
+        assert struct.unpack_from("<II", prog.raw, prog.off(sc)) == tuple(s["challenge_scores"][1:3])
+
+
+def test_records_on_a_64_bit_program_count_points():
+    from pinball_decryptor.plugins.stern import mode_records as MRec
+    port = MP.read_port(str(ELG3))
+    assert MRec.choices(b"\x7fELF\x02" + b"\0" * 64, port) == {"modes": [], "counts": []}
+    assert MRec.title_refusal(MP.profiles()["star_wars_elg_1_10_spike3"]) == ""
+
+
+def test_records_ride_the_spike3_build(build, monkeypatch, tmp_path):
+    monkeypatch.setattr(S3M, "comp_wanted", lambda p, real_card=True: None)
+    recs = [{"name": "BIG SCORE", "measure": "points", "per": "game", "mode": "", "counts": [], "key": "r1",
+             "description": ""}]
+    monkeypatch.setattr(S3M, "records_wanted", lambda p, real_card=True: (recs, _Prof))
+    mp = S3M.plan("proj", _Reader(_tree()), str(tmp_path))
+    assert mp is not None and build["records"] == recs and build["records_prof"] is _Prof
+    assert "records on the high scores" not in S3M.FAMILY_LEFT_OUT
+
+
+def test_records_wanted_is_quiet_and_asks_the_title(monkeypatch):
+    from pinball_decryptor.plugins.stern import mode_records as MRec
+    monkeypatch.setattr(MW, "host_refusal", lambda: "")
+    monkeypatch.setattr(MW, "preview_on", lambda: True)
+    monkeypatch.setattr(MRec, "load", lambda p: [{"name": "X"}])
+    monkeypatch.setattr(MRec, "project_title", lambda p, probe=False: MP.profiles()["star_wars_elg_1_10_spike3"])
+    assert S3M.records_wanted("proj", real_card=False)[1].key == "star_wars_elg_1_10_spike3"
+    monkeypatch.setattr(MRec, "load", lambda p: [])
+    assert S3M.records_wanted("proj", real_card=False) == ([], None)

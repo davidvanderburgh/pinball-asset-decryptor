@@ -238,3 +238,22 @@ value challenge_menu_count_reg 22
 value challenge_menu_cap       8
 value challenge_menu_entry     16
 value challenge_menu_pick_reg  0
+
+# ---- PAD-1327: the champion framework (records on the high scores), read off this program by the same shapes as
+# Star Wars ELG 1.10's: the end-of-game high scores (wrapped), the (category, n) entry lookup, the gate - the bus
+# question 91 whose {player +0, category +2, entry +4} the game asks before filing - and the categories' table
+# object {base, count, stride 72} at 0x7b4a58 (64-byte entries; HIGHEST SCORES = category 1)
+site challenge_scores        0x00362bd0 0xf0002222 0xf9468442
+site game_scores             0x00362bd0 0xf0002222 0xf9468442
+site challenge_score_entry   0x00361d90 0xa9bf7bf3 0x2a0103f3
+site challenge_scores_gate   0x00362f68 0x97feaef2 0x36000600
+data challenge_scores_table   0x007dce38
+data challenge_scores_count   0x007b4a60
+value challenge_scores_cat   1
+value challenge_scores_desc_size    72
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+value challenge_record_check_at   88
+value challenge_record_score_at   72
+value challenge_record_score_size 8

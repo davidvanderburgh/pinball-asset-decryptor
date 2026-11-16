@@ -8496,8 +8496,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 ("picture settings", picture_prof is not None),
                 ("attract items", _attract_on),
                 ("inactivity pausing the timers", _idle_on),
-                ("expression light shows", _cabs_on),
-                ("records on the high scores", _rec_on)) if on]):
+                ("expression light shows", _cabs_on)) if on]):
             log(_line, "warning")
         variant_slots, variant_prof, sound_modes, sound_modes_prof = {}, None, None, None
         _juke_clips = _clips_on = False

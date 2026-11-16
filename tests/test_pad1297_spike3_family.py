@@ -121,7 +121,7 @@ def test_the_write_logs_the_feed_under_its_own_name():
                encoding="utf-8").read()
     # PAD-1323: with the random clips' and the screen times' lines beside it
     assert 'line if line.startswith(("Score feed:", "Random clips:", "Screen times:", "Co-op play:", "Handicap",'
-    assert '"Prolonged Competition:"))   # PAD-1327' in src
+    assert '"Prolonged Competition:", "Records on the high scores:"))   # PAD-1327' in src
     assert 'else "Modes: %s" % line' in src
 
 
@@ -176,7 +176,8 @@ def test_every_part_the_engine_leaves_out_has_its_reason():
     named = re.findall(r'\("([^"]+)", ', _engine_block())
     # PAD-1323: random clips and screen times go on now; PAD-1324: the music modes; PAD-1325: EDITION;
     # PAD-1326: co-op and the handicaps ; PAD-1327: Prolonged Competition - five parts are left out
-    assert len(named) == 5 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    # PAD-1327 round 4: the records on the high scores too - four parts are left out
+    assert len(named) == 4 and set(named) == set(S3M.FAMILY_LEFT_OUT)
     assert "music modes" not in S3M.FAMILY_LEFT_OUT
     assert "handicaps" not in named and "handicaps" not in S3M.FAMILY_LEFT_OUT
     assert "co-op play" not in named and "co-op play" not in S3M.FAMILY_LEFT_OUT

@@ -196,8 +196,8 @@ def test_the_records_file_keeps_one_line_per_mode_and_refuses_a_damaged_one(tmp_
 
 def test_the_wrap_points_the_entry_at_the_modes_record_and_puts_it_back():
     src = RUNTIME.read_text(encoding="utf-8")
-    body = _host()._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
-    swap = body.index("ent[0] = (unsigned)(unsigned long)chg_rec;")
+    body = _host()._lift(src, "static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)")
+    swap = body.index("ent[0] = (pm_addr)(unsigned long)chg_rec;")
     call = body.index("ret = chg_scores_game(r0, r1, r2, r3);", swap)        # PAD-663: an early return calls it too
     back = body.index("ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];")
     assert swap < call < back                          # the game's own record is pointed back to before anything else

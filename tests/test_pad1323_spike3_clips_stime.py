@@ -333,7 +333,7 @@ def test_the_write_logs_them_under_their_own_names():
     src = open(os.path.join(ROOT, "pinball_decryptor", "plugins", "stern", "spike3_write.py"),
                encoding="utf-8").read()
     assert '("Score feed:", "Random clips:", "Screen times:", "Co-op play:", "Handicap",' in src   # PAD-1326
-    assert '"Prolonged Competition:"))   # PAD-1327' in src
+    assert '"Prolonged Competition:", "Records on the high scores:"))   # PAD-1327' in src
 
 
 # ---- the 64-bit runtime ------------------------------------------------------------------------------

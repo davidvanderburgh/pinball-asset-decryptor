@@ -567,7 +567,7 @@ def _plan_modes(assets_dir, reader, work, log, coop_setting=0, coop_ok=True, han
             elif line.startswith(("handicaps: ", "handicap ")):   # and the handicaps'
                 line = "Handicaps: " + line[len("handicaps: "):] if line.startswith("handicaps: ") else "H" + line[1:]
             log(line if line.startswith(("Score feed:", "Random clips:", "Screen times:", "Co-op play:", "Handicap",
-                                        "Prolonged Competition:"))   # PAD-1327
+                                        "Prolonged Competition:", "Records on the high scores:"))   # PAD-1327
                 else "Modes: %s" % line,
                 "info")
         return mplan, False

@@ -203,13 +203,14 @@ def test_a_records_champion_shows_in_the_attract_mode(tmp_path):
 
 def test_the_runtime_files_records_after_the_games_own_and_arms_them():
     src = RUNTIME.read_text(encoding="utf-8")
-    wrap = R._lift(src, "static unsigned scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{")
+    # PAD-1327: whole registers and pointer-wide words, so the same code files a Spike 3 game's records
+    wrap = R._lift(src, "static unsigned scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)\n{")
     assert wrap.index("chg_scores_wrap(r0, r1, r2, r3)") < wrap.index("rec_file(r0, r1, r2, r3)")
-    filing = R._lift(src, "static void rec_file(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{")
+    filing = R._lift(src, "static void rec_file(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)\n{")
     # the host entry is the record's, the getter answers its values, one entry, the gate, and everything put back
-    for want in ("ent[0] = (unsigned)(unsigned long)chg_rec;", "desc[1] = (unsigned)(unsigned long)rec_get;",
+    for want in ("ent[0] = (pm_addr)(unsigned long)chg_rec;", "desc[1] = (pm_addr)(unsigned long)rec_get;",
                  "chg_scores_one_entry(cat, &list_was)", "chg_gate_cat = (int)cat;", "desc[1] = get_was;",
-                 "ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];", "*(unsigned short *)(ent + 8) = 0;",
+                 "ent[0] = was[0]; ent[5] = was[1]; ent[6] = was[2];", "CHG_ENT_AWARD(ent) = 0;",
                  "chg_rec_keep(b, n, r->key, chg_rec);"):
         assert want in filing, want
     assert filing.index("desc[1] = get_was;") > filing.index("chg_scores_game(r0, r1, r2, r3);")

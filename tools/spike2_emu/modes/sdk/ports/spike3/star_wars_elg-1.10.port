@@ -145,12 +145,14 @@ site challenge_menu      0x00159a10 0x510006c1 0x2a0003f7
 site challenge_menu_pick 0x00159c38 0x7100103f 0x540033c0
 # not carried yet (its feature is 32-bit): site challenge_end_ball 0x00322180 0xf0001ba2 0xf942ec42
 # site ball_launch      NOT PLACED: no counterpart found
-# not carried yet (its feature is 32-bit): site challenge_scores 0x003eecc0 0xf0001542 0xf9468442
-# not carried yet (its feature is 32-bit): site challenge_score_entry 0x003ede80 0xa9bf7bf3 0x2a0103f3
-# site challenge_scores_gate NOT PLACED: mid-way into a function on Spike 2 (0x118494 + 0x26c)
+# PAD-1327: the end-of-game high scores (wrapped; no arguments of its own), the (category, n) entry lookup and the
+# gate: the bus question (id 91, at 0x3ef058) whose {player +0, category +2, entry +4} the game asks before filing
+site challenge_scores        0x003eecc0 0xf0001542 0xf9468442
+site challenge_score_entry   0x003ede80 0xa9bf7bf3 0x2a0103f3
+site challenge_scores_gate   0x003ef058 0x97f8e122 0x36000600
 # site challenge_pages_0 NOT PLACED: mid-way into a function on Spike 2 (0x1fef8 + 0x34)
 # site challenge_pages_1 NOT PLACED: no counterpart found
-# not carried yet (its feature is 32-bit): site game_scores      0x003eecc0 0xf0001542 0xf9468442
+site game_scores             0x003eecc0 0xf0001542 0xf9468442
 # site coil_frame       NOT PLACED: no counterpart found
 # site coil_off         NOT PLACED: no counterpart found
 site coop_player_change 0x00417b50 0xd0001402 0xf9468442
@@ -214,8 +216,9 @@ data game_flag_count        0x005a37c8   # read off the program's own code (PAD-
 data coil_count             0x0073e1d8   # read off the program's own code (PAD-1285)
 data coil_table             0x00749300   # read off the program's own code (PAD-1285)
 data right_gate_obj         0x00711730   # read off the program's own code (PAD-1285)
-# data challenge_scores_table NOT PLACED: 0 of 0 paired functions agree
-# data challenge_scores_count NOT PLACED: 0 of 0 paired functions agree
+# PAD-1327: the categories' table object {base, count, stride 72} at 0x6a3390 (the lookup 0x42eed0): its base, and its count
+data challenge_scores_table   0x006c4b40
+data challenge_scores_count   0x006a3398
 # data sw_struct              NOT PLACED: 5 of 5 paired functions agree
 data coop_player            0x006b1a1a   # 2 of 3 paired functions that load it
 data coop_players           0x00792200   # 5 of 5 paired functions that load it
@@ -283,13 +286,14 @@ value challenge_menu_pick_reg  1
 # not carried (64-bit layout, measure it): value challenge_menu_caption   1921
 # not carried (64-bit layout, measure it): value ball_launch_flag       12
 # not carried (64-bit layout, measure it): value ball_launch_wait_flag  13
-# not carried (64-bit layout, measure it): value challenge_scores_gate_id       91
-# not carried (64-bit layout, measure it): value challenge_scores_gate_cat_at   2
-# not carried (64-bit layout, measure it): value challenge_scores_gate_entry_at 4
-# not carried (64-bit layout, measure it): value challenge_scores_cat   1
-# not carried (64-bit layout, measure it): value challenge_record_check_at   84
-# not carried (64-bit layout, measure it): value challenge_record_score_at   80
-# not carried (64-bit layout, measure it): value challenge_record_score_size 4
+value challenge_scores_desc_size    72   # PAD-1327: the 64-bit category descriptor
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+value challenge_scores_cat   1   # HIGHEST SCORES (GRAND CHAMPION, HIGH SCORE #1-#4)
+value challenge_record_check_at   88   # PAD-1327: the 64-bit record (0x3ee090 resets it)
+value challenge_record_score_at   80
+value challenge_record_score_size 8
 # not carried (64-bit layout, measure it): value challenge_page_title_max 18
 value sound_channel_count       8    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_size        288    # the 64-bit sound engine's (PAD-1282)

@@ -71,7 +71,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
 | Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
-| records on the high scores | records.cfg | left out | the champion framework's sites (not placed) and its 64-bit record |
+| records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); counts of audits / the game's own modes and the attract champion pages wait on 64-bit readers |
 | attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
 | inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
 | expression light shows | cabshow.cfg | left out | `cablamp` lines (ELG has no cabinet lights), the game's show table as 64-bit, voice count measured |
@@ -230,13 +230,29 @@ Remastered LE (3 of 3 on ELG's route, flag 17), Transformers LE (6 of 6, index 3
 3, flag 16; its game_start 0x4c seen on the bus). Pro's cursor goes from the first entry straight to the last on the LEFT
 flipper and its menu window is short: a rig job steps left at once after the chord.
 
-**What is left in PAD-1327:** records on the high scores, the champion framework. On ELG the end-of-game high scores
-(`challenge_scores` / `game_scores`) pair to 0x3eecc0 and the (category, n) entry lookup (`challenge_score_entry`) to
-0x3ede80 (s3port's matcher); the gate, the category table and count, the record layout and the attract champion pages
-are to be measured, and the runtime's champion code (chg_scores_wrap, chg_scores_one_entry, chg_page_*, rec_*) made
-pm_addr-wide (entry words ent[0] / ent[5] / ent[6], the 36-byte category descriptors, are 32-bit today).
-The rig kit: C:/tmp/PAD-1327 (job2*.sh / play2.sh: per-title proofs, SHORT=1 up to game 1, STEP_LEFT=1 / CHORD_* for Pro;
-plan2.py builds a title's set from its card; clear the slot's mode.log before a run on a reused slot).
+**Round 4: records on the high scores.** The champion framework has the same shapes on all seven Spike 3 programs, its
+words the size of a pointer: a category table object {base, count, stride 72} (the lookup is `base + id * stride`),
+each 72-byte category's value getter at +8 and its entry-id list at +56; 64-byte entries (record +0, default initials
++8, name +40, titles +48, the award u16 +56); 96-byte records with the initials at +32, the score a u64 (at +80 on Star
+Wars ELG, +72 on the others) and the check ~(the byte sum of the first 88) at +88; the end-of-game high scores take no
+arguments of their own; before filing a player the game asks the bus question 91 (90 on Star Wars 2025 Pro) with
+{player +0, category +2, entry +4} - Spike 2's gate. HIGHEST SCORES is category 1 (GRAND CHAMPION, HIGH SCORE #1-#4).
+The runtime's champion code reads categories and entries as pm_addr words (`CHG_DESC_SIZE`, `CHG_ENT_SIZE`,
+`CHG_ENT_AWARD`), the wrapped end-of-game functions and the gate pass whole registers (`chg_fn4`), and co-op's champion
+counts read the getter through `rec_cat_value`. The attract mode's champion pages are not armed on Spike 3 (their page
+and text wraps are 32-bit): a record's champion shows in the game's initials entry and is kept, not yet in attract.
+`tools/.../champ_find.py`-style reading (C:/tmp/PAD-1327/champ_find.py: ELG's two functions paired across by s3port's
+matcher, then the table objects, the record reset and the gate read off each program) gave every port's lines.
+`spike3_modes.records_wanted` carries records.cfg; `mode_records.choices` offers a 64-bit program no counts or game
+modes yet, so a Spike 3 record counts points, in the whole game or in a mode of the owner's.
+
+Proof (2026-11-16, rig slots 132 / 134, hidden and MUTED, each title's set built by spike3_modes.plan from its card with
+one record, BIG SCORE: points in the whole game): `records: BIG SCORE - <score> beats 0: the game's initials entry under
+its name`, the game's own "Player 1 - Enter Initials / BIG SCORE" screen, and `BIG SCORE's new record ...` kept in
+/dump/pad_challenge_scores - Star Wars ELG (194530), Walking Dead Remastered LE (201190), Pokemon LE (540)RESULTS_MORE.
+
+**What is left in PAD-1327:** the attract mode's champion pages for records on Spike 3, and counts (audits, the game's
+own champion counts, the game's own modes) in the records dialog for a 64-bit program.
 
 ## The Modes tab and Try it
 

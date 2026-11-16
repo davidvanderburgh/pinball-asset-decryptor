@@ -189,7 +189,7 @@ def test_the_page_shows_the_games_own_first_and_puts_the_record_back_before_a_fr
         < arm.index('hook_wrap(fn("challenge_page")')
     assert "chg_page_arm();" in R._lift(src, "static void chg_scores_arm(void)")
     # the end of a game never sees an attract page's record
-    scores = R._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    scores = R._lift(src, "static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)")
     assert scores.index("chg_page_back();") < scores.index("ret = chg_scores_game(r0, r1, r2, r3);")
 
 

@@ -101,7 +101,6 @@ FAMILY_LEFT_OUT = {
     "attract items": "the 64-bit runtime cannot add to a Spike 3 game's attract screens yet",
     "inactivity pausing the timers": "the 64-bit runtime cannot pause a Spike 3 game's timers yet",
     "expression light shows": "the 64-bit runtime cannot light a Spike 3 cabinet's expression lights yet",
-    "records on the high scores": "the 64-bit runtime cannot add records to a Spike 3 game's high scores yet",
 }
 
 
@@ -432,6 +431,25 @@ def comp_wanted(project, real_card=True):
     return prof
 
 
+def records_wanted(project, real_card=True):
+    """PAD-1327: ``(records, profile)`` of the owner's records (:mod:`.mode_records`) this Spike 3 build carries, else
+    ``([], None)``: ``records.cfg`` beside the 64-bit runtime, filed through the game's own end-of-game high scores
+    (the port's challenge_scores, challenge_score_entry, challenge_scores_table and the record's 64-bit layout).
+    Quiet: the engine's Write (``_records_for_build``) has already said why they are left out."""
+    from . import mode_records as MRec
+    recs = MRec.load(project)
+    if not recs or not MW.preview_on() or MW.host_refusal():
+        return [], None
+    if real_card:
+        from ...core import ext4_grow
+        if not ext4_grow.available()[0]:
+            return [], None
+    prof = MRec.project_title(project, probe=True)
+    if prof is None or MRec.title_refusal(prof):
+        return [], None
+    return recs, prof
+
+
 def variants_wanted(project, real_card=True):
     """PAD-1323: ``(slots, profile)`` of the random clips (:mod:`.clip_variants`) this Spike 3 build carries,
     else ``({}, None)``. The 64-bit runtime hooks the game's ask on the video bank's surface (clip v2: a port
@@ -509,6 +527,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
             log("Handicaps: left out of this build: %s." % HAND_WITH_COOP, "warning")
     slots, var_prof = variants_wanted(project, real_card=real_card)
     comp_prof = comp_wanted(project, real_card=real_card)
+    recs, recs_prof = records_wanted(project, real_card=real_card)       # PAD-1327
     from . import screen_time as ST
     stime_maybe = ST.enabled() and bool(_changed_videos(project))
     modes, code = [], []
@@ -520,7 +539,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         modes = MW.project_modes(project)
         code = MW.code_mode_list(project)        # PAD-1295: compiled for the card's 64-bit ARM
     if (not modes and not code and not feed and not slots and not stime_maybe and music is None and coop_prof is None
-            and hand_prof is None and comp_prof is None):
+            and hand_prof is None and comp_prof is None and not recs):
         return None
 
     def left(why):
@@ -536,7 +555,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         if why:
             modes, code = left(why)
     if (not modes and not code and not feed and not slots and not stime_maybe and music is None and coop_prof is None
-            and hand_prof is None and comp_prof is None):
+            and hand_prof is None and comp_prof is None and not recs):
         return None
     state, target = card_state(reader)
     if state == "multiboot":
@@ -560,6 +579,9 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         if comp_prof is not None:
             log("Prolonged Competition: left out of this build: %s." % MULTIBOOT_WORDS.replace(
                 "modes go on", "Prolonged Competition goes on").replace("they were", "it was"), "warning")
+        if recs:
+            log("Records on the high scores: left out of this build: %s." % MULTIBOOT_WORDS.replace(
+                "modes go on", "records go on"), "warning")
         return None
     fw = game_program(reader, target) if target else None
     if fw is None:
@@ -569,7 +591,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     stime, stime_prof = (screen_times_wanted(project, game_raw, log, real_card=real_card) if stime_maybe
                          else ([], None))
     if (not modes and not code and not feed and not slots and not stime and music is None and coop_prof is None
-            and hand_prof is None and comp_prof is None):
+            and hand_prof is None and comp_prof is None and not recs):
         return None
     used, adds = [], {}
     hud, bank = b"", b""
@@ -633,7 +655,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
             for cp, news in mus.news.items():
                 adds[cp] = list(adds.get(cp) or ()) + list(news)
     if (not modes and not code and not feed and not slots and not stime and mus is None and coop_prof is None
-            and hand_prof is None and comp_prof is None):   # PAD-1326: co-op or handicaps alone; PAD-1327: or Competition
+            and hand_prof is None and comp_prof is None and not recs):   # PAD-1326: co-op or handicaps alone; PAD-1327: or Competition
         return None
 
     def read_card(rel):
@@ -652,6 +674,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                      coop=coop_prof is not None, coop_prof=coop_prof, coop_setting=coop_setting,   # PAD-1326
                      handicap=hand_prof is not None, handicap_prof=hand_prof, handicap_setting=hand_setting,
                      comp=comp_prof is not None, comp_prof=comp_prof,
+                     records=recs or None, records_prof=recs_prof,                   # PAD-1327
                      read_card=read_card, scan_card=scan_card)
     if result is None:
         return None
@@ -666,7 +689,8 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
              for l in lines]
     # PAD-1323: and so do the random clips' and the screen times'
     for low, cap in (("random clips: ", "Random clips: "), ("screen times: ", "Screen times: "),
-                     ("prolonged competition: ", "Prolonged Competition: ")):   # PAD-1327
+                     ("prolonged competition: ", "Prolonged Competition: "),   # PAD-1327
+                     ("records: ", "Records on the high scores: ")):
         lines = [(cap + l[len(low):]) if l.startswith(low) else l for l in lines]
     if mus is not None:                      # PAD-1324
         lines.append("Music modes: MUSIC MODE (%d modes: %s) goes on the operator menu's %s; %d file(s) "

@@ -283,7 +283,11 @@ def count_choices(game_elf):
 
 def choices(game_elf, port):
     """Everything the dialog offers for this card: ``{"modes": [{"value", "label"}], "counts": [...]}`` (the game's
-    modes as ``game:<id>``; the project's own are the tab's)."""
+    modes as ``game:<id>``; the project's own are the tab's). PAD-1327: a Spike 3 card's 64-bit program offers neither
+    yet (its audits, champion counts and mode objects are read off 32-bit code): its records count points, in the
+    whole game or in a mode of the project's own."""
+    if bytes(game_elf[:5]) == b"\x7fELF\x02":
+        return {"modes": [], "counts": []}
     return {"modes": [{"value": "game:%d" % i, "label": n} for i, n, _o in game_modes(game_elf, port)],
             "counts": count_choices(game_elf)}
 

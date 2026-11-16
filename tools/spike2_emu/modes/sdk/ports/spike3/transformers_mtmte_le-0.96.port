@@ -242,3 +242,22 @@ value comp_menu_end_msg          1916   # NORMAL PLAY
 # the message lookup's: a u64 count, a pointer to the u16 remap (the table is PAD-1326's line above)
 data message_count          0x00834a08
 data message_remap          0x00ae3618
+
+# ---- PAD-1327: the champion framework (records on the high scores), read off this program by the same shapes as
+# Star Wars ELG 1.10's: the end-of-game high scores (wrapped), the (category, n) entry lookup, the gate - the bus
+# question 91 whose {player +0, category +2, entry +4} the game asks before filing - and the categories' table
+# object {base, count, stride 72} at 0x9a5cd0 (64-byte entries; HIGHEST SCORES = category 1)
+site challenge_scores        0x00694240 0xd0001842 0xf9474c42
+site game_scores             0x00694240 0xd0001842 0xf9474c42
+site challenge_score_entry   0x00693400 0xa9bf7bf3 0x2a0103f3
+site challenge_scores_gate   0x006945d8 0x94004676 0x36000600
+data challenge_scores_table   0x009c81e0
+data challenge_scores_count   0x009a5cd8
+value challenge_scores_cat   1
+value challenge_scores_desc_size    72
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+value challenge_record_check_at   88
+value challenge_record_score_at   72
+value challenge_record_score_size 8

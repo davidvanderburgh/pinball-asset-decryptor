@@ -47,6 +47,17 @@ def _entries(text):
     return out
 
 
+#: the lines measured by hand on this program, not drafted from the reference: PAD-1326's co-op (portcoop: the
+#: message table and its BALL line) and PAD-1327's start menu, champion framework and audit add
+HAND = ("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add")
+
+
+def _own(entries):
+    # (and the Pro's game / ball start events, measured on the rig in PAD-1327: its bus ids are one lower past 56)
+    return {k: v for k, v in entries.items() if not k[1].startswith(HAND)
+            and k not in (("event", "game_start"), ("event", "ball_start"))}
+
+
 def _switch_lines(text):
     return [(int(m.group(1)), int(m.group(2), 16), m.group(3).strip())
             for m in re.finditer(r"^switch\s+(\d+)\s+(0x[0-9a-f]+)\s+(.+)$", text, re.M)]
@@ -150,7 +161,7 @@ def test_redrafting_the_pro_from_its_census_gives_the_shipped_port():
     edge = {("site", "switch_edge"), ("value", "switch_record_reg"), ("value", "switch_id_at"),
             ("value", "switch_level_at"), ("value", "switch_desc_via"), ("value", "switch_flags_at"),
             ("value", "switch_polarity_at")}
-    mine, shipped = _entries(text), _entries(PRO_PORT.read_text(encoding="utf-8"))
+    mine, shipped = _own(_entries(text)), _own(_entries(PRO_PORT.read_text(encoding="utf-8")))
     assert set(mine) - set(shipped) == edge
     assert {k: v for k, v in mine.items() if k not in edge} == shipped
     # the rank the table alone gives is what the census corrected

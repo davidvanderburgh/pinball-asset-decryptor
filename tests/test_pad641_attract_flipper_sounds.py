@@ -495,7 +495,7 @@ def test_they_never_play_while_a_high_score_s_initials_are_entered():
     assert 'hook_wrap(fn("challenge_scores")' not in c
     assert "if (chg_scores_on) ret = chg_scores_wrap(r0, r1, r2, r3);" in c
     # PAD-1280: an owner's record's initials, entered in the same call made again, hold it too
-    rec = c[c.index("static void rec_file(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{"):]
+    rec = c[c.index("static void rec_file(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)\n{"):]
     rec = rec[:rec.index("\n}\n")]
     assert rec.index("chg_scores_running = 1;") < rec.index("chg_scores_game(r0, r1, r2, r3);") \
         < rec.index("chg_scores_running = 0;")

@@ -345,7 +345,8 @@ def test_the_message_table_and_its_ball_line(key):
 def test_the_runtime_steps_the_message_table_by_pointer_size():
     src = _src()
     assert "4u * borrow[i].idx" not in src and "4u * idx" not in src and "4u * (unsigned)v" not in src
-    assert src.count('data("message_table") + sizeof(void *) *') == 3     # borrow, restore, find
+    # borrow and restore go through PAD-1327's message_slot (which also makes a 64-bit table page writable), find steps it
+    assert src.count('data("message_table") + sizeof(void *) *') == 2 and "*message_slot(borrow[i].idx) = borrow[i].old;" in src
 
 
 # ---- handicaps on Spike 3 -------------------------------------------------------------------------------------------

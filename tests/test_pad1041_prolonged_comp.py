@@ -76,7 +76,9 @@ def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     assert "if (comp.on) game_flag_set(comp.flag);" in start and "else if (was) game_flag_clear(comp.flag);" in start
     # the pick plays as Standard: kind 0 on the kind-jump menus (r3) and written into the entry on the others
     picked = R._lift(src, "static void comp_menu_picked(pm_reg *r)")
-    assert "else r[3] = 0;" in picked and "*(unsigned *)(e8 + MENU_KIND_AT) = 0;" in picked
+    # PAD-1327: the kind's register is the port's (`challenge_menu_pick_reg`, r3 unless it says; w1 on ELG's Spike 3)
+    assert 'pm_port_value("challenge_menu_pick_reg", 3)' in picked
+    assert "else r[kreg] = 0;" in picked and "*(unsigned *)(e8 + MENU_KIND_AT) = 0;" in picked
 
 
 def _port(name):
@@ -91,20 +93,14 @@ def test_every_build_whose_start_menu_the_app_knows_is_offered_it():
     # every port but Venom's and D&D's (theirs) and three older builds (latest versions only, as co-op)
     assert sorted(set(MP.profiles()) - offered) == [
         "dungeons_and_dragons_le_1_00", "dungeons_and_dragons_le_1_10", "dungeons_and_dragons_pro_1_10",
-        "fallout_le_0_82_spike3",                             # PAD-1288: a Spike 3-only port, its start menu not read
         "godzilla_pro_1_15", "john_wick_le_1_01", "metallica_spike_1_03",
-        "pokemon_le_0_82_spike3",                             # PAD-1289: a Spike 3-only port, its start menu not read
-        "star_wars_2025_le_0_96_spike3",                      # PAD-1290: a Spike 3-only port, its start menu not read
-        "star_wars_2025_pro_0_84_spike3",                     # PAD-1291: a Spike 3-only port, its start menu not read
-        "star_wars_elg_1_10_spike3",                          # PAD-1271: the Spike 3 port, its start menu not read yet
-        "transformers_mtmte_le_0_96_spike3",                  # PAD-1293: a Spike 3-only port, its start menu not read
-        "venom_le_1_07", "venom_pro_1_07",
-        "walking_dead_remastered_le_0_92_spike3"]             # PAD-1287: a Spike 3-only port, its start menu not read
+        "venom_le_1_07", "venom_pro_1_07"]   # PAD-1327: every Spike 3 title with a port has it
     for key in ("deadpool_pro_1_16", "james_bond_le_1_06", "star_wars_pro_1_31", "turtles_pro_1_59",
                 "elvira3_1_13", "mando_pro_1_45", "foo_fighters_le_1_04",            # the menus of entries
                 "godzilla_le_1_16", "jaws_pro_1_02", "john_wick_le_1_02", "king_kong_le_0_97",
                 "metallica_spike_1_04", "uncanny_xmen_le_0_98",                     # round 2: menus of indices
-                "james_bond_60th_le_1_11"):                                          # round 2: Bond 60th's object
+                "james_bond_60th_le_1_11",                                           # round 2: Bond 60th's object
+                "star_wars_elg_1_10_spike3"):                                        # PAD-1327: on Spike 3
         assert key in offered, key
 
 
@@ -144,7 +140,7 @@ def test_the_runtime_takes_each_kind_of_menu():
     assert 'hook_full(fn("comp_menu_obj_built"), comp_menu_obj_built)' in arm
     assert 'hook_full(fn("comp_menu_obj_pick"), comp_menu_obj_pick)' in arm
     frame = R._lift(src, "static void comp_menu_frame(pm_reg *r)")
-    assert "unsigned n = *count + last;" in frame and "pm_message_set(msg, comp_name());" in frame
+    assert "n = *count + last;" in frame and "pm_message_set(msg, comp_name());" in frame
     assert "comp_frame_restore();" in R._lift(src, "static void comp_game_start(void)")
 
 

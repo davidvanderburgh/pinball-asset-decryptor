@@ -6879,6 +6879,10 @@ there is nothing for a mode to call. The Modes tab's **Prolonged Competition** p
   over `UNTIL POWERED OFF`, and once it is on, STANDARD over `ENDS PROLONGED COMPETITION`. Its kind is 0x200 until the
   pick, which plays it as Standard (kind 0: r3 on the kind-jump menus, the entry itself where the port says
   `challenge_menu_pick_back`).
+- PAD-1327, on a Spike 3 card (Star Wars ELG 1.10): the entry's name is a whole pointer (8 bytes at `_name_at`), the
+  count is in a callee-saved register (`value challenge_menu_count_reg 22`: the 64-bit hook_full hands x19..x28 by
+  their numbers, writable) and the kind at the pick is in the register `value challenge_menu_pick_reg` names (1 there;
+  3 when a port says nothing).
 - The next `game_start` on the event bus (`site hook_dispatch`) turns it on or off. While on, the flag is set at every
   game's start, before the game's handlers, and again at a `ball_start` that finds it clear; turned off, it is cleared
   at that game's start. It is the runtime's memory only: switching the machine off ends it.

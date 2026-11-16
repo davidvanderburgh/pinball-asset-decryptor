@@ -53,6 +53,15 @@ def _entries(text):
     return out
 
 
+#: the lines measured by hand on this program, not drafted from the reference: PAD-1326's co-op (portcoop: the
+#: message table and its BALL line) and PAD-1327's start menu, champion framework and audit add
+HAND = ("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add")
+
+
+def _own(entries):
+    return {k: v for k, v in entries.items() if not k[1].startswith(HAND)}
+
+
 # ---- the device table's names are UTF-8 ---------------------------------------------------------------------------
 
 class _FakeElf:
@@ -257,7 +266,7 @@ def test_redrafting_pokemon_gives_the_proven_port():
     edge = {("site", "switch_edge"), ("value", "switch_record_reg"), ("value", "switch_id_at"),
             ("value", "switch_level_at"), ("value", "switch_desc_via"), ("value", "switch_flags_at"),
             ("value", "switch_polarity_at")}
-    mine, shipped = _entries(text), _entries(PK_PORT.read_text(encoding="utf-8"))
+    mine, shipped = _own(_entries(text)), _own(_entries(PK_PORT.read_text(encoding="utf-8")))
     assert set(mine) - set(shipped) == edge
     assert {k: v for k, v in mine.items() if k not in edge} == shipped
 

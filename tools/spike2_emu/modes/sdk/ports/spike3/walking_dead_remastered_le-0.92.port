@@ -129,6 +129,7 @@ data lamp_layers            0x008946b0   # read off the engine's own code
 data light_count            0x00896d20   # read off the engine's own code
 data game_flags             0x00895f70   # 10 of 10 lined-up instructions
 data game_flag_count        0x006941e8   # 29 of 29 lined-up instructions
+value game_flags_at             0    # PAD-1327: the 64-bit flag bitmap's layout (Star Wars ELG's), lost in the draft
 data coil_count             0x0089af58   # 61 of 61 lined-up instructions
 data coil_table             0x00897250   # 47 of 47 lined-up instructions
 # data right_gate_obj         not carried: the reference game's own (data right_gate_obj         0x00711730)
@@ -224,3 +225,40 @@ data coop_players           0x00885e50
 # the message table and its "BALL %d" line (portcoop.message_lines_a64), the line that says whose turn it is
 data message_table          0x007e6328
 value coop_ball_msg          1254
+
+# ---- PAD-1327 (emulator-proven 2026-11-16: entry on the menu, picked, game 1 played as Competition): the start menu (CHOOSE YOUR MODE OF PLAY), read off this program's own menu function 0x1ee480: Star Wars
+# ELG's shape - entries {u32 kind, u16 caption, u64 name} 16 bytes each on its stack at sp+0x128, room for 8 (0x1a8 is
+# the next object), the count in w22 until 0x1ef564 keeps the LAST index at sp+204 for the loop; every frame 0x1ef5ec
+# reads the kind under the cursor into w0 and the kind's flags follow (2: COMPETITION, flag 17). Prolonged
+# Competition (comp.cfg) is appended there (hook_full: x22 the count) and played as Standard once picked.
+site challenge_menu      0x001ef564 0x510006c0 0x52a88e02
+site challenge_menu_pick 0x001ef5f0 0x7100101f 0x54005f20
+value challenge_menu_list_at   296
+value challenge_menu_count_reg 22
+value challenge_menu_cap       8
+value challenge_menu_entry     16
+value challenge_menu_pick_reg  0
+
+# ---- PAD-1327: the champion framework (records on the high scores), read off this program by the same shapes as
+# Star Wars ELG 1.10's: the end-of-game high scores (wrapped), the (category, n) entry lookup, the gate - the bus
+# question 91 whose {player +0, category +2, entry +4} the game asks before filing - and the categories' table
+# object {base, count, stride 72} at 0x7b4a58 (64-byte entries; HIGHEST SCORES = category 1)
+site challenge_scores        0x00362bd0 0xf0002222 0xf9468442
+site game_scores             0x00362bd0 0xf0002222 0xf9468442
+site challenge_score_entry   0x00361d90 0xa9bf7bf3 0x2a0103f3
+site challenge_scores_gate   0x00362f68 0x97feaef2 0x36000600
+data challenge_scores_table   0x007dce38
+data challenge_scores_count   0x007b4a60
+site  audit_add              0x003f7660 0xd0001d82 0xf9468442   # PAD-1327: the audit add (id w0, amount w1): 170 distinct ids handed it with an amount of 1, the next callee 19
+value challenge_scores_cat   1
+value challenge_scores_desc_size    72
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+value challenge_record_check_at   88
+value challenge_record_score_at   72
+value challenge_record_score_size 8
+
+# PAD-1327: the attract mode's champion page for HIGHEST SCORES (category 1; traced on the rig: every category's page asks from 0x1b78b8, in 0x1b7880): a record's champion
+# is shown after it
+site challenge_pages_0      0x001b7880 0xd0002f82 0xf9468442

@@ -114,6 +114,7 @@ data lamp_layers            0x032ac538   # read off the engine's own code
 data light_count            0x03318d50   # read off the engine's own code
 data game_flags             0x03297cc0   # 10 of 10 lined-up instructions
 data game_flag_count        0x025dc348   # 29 of 29 lined-up instructions
+value game_flags_at             0    # PAD-1327: the 64-bit flag bitmap's layout (Star Wars ELG's), lost in the draft
 data coil_count             0x032ace00   # 61 of 61 lined-up instructions
 data coil_table             0x0329a2f0   # 47 of 47 lined-up instructions
 # data right_gate_obj         not carried: the reference game's own (data right_gate_obj         0x00711730)
@@ -223,3 +224,43 @@ text example_start_shot     Berry target left
 # the message table and its "BALL %d" line (portcoop.message_lines_a64), the line that says whose turn it is
 # data message_table          0x031c8828
 # value coop_ball_msg          1252
+
+# ---- PAD-1327 (emulator-proven 2026-11-16: entry on the menu, picked, game 1 played as Competition): the start menu (CHOOSE YOUR MODE OF PLAY), a menu of game-mode table indices read off this program's
+# own menu function 0x4cb3f0; the frame point `ldr w24, [x0, w21, sxtw #2]`: the index under the cursor once the press has moved it (w21), the list sp+0xd8 (room for 12: 0x108 is the next object), the count at sp+136 and the loop's copy of the last index at sp+140.
+# Prolonged Competition (comp.cfg) appends Competition's index again and letters its name message while the cursor
+# is on it; the game itself plays the pick as Competition (Standard's index once it is on).
+site comp_menu_frame     0x004cc050 0xb875d818 0x6b18039f
+value comp_menu_frame_moved      1
+value comp_menu_frame_list_at    216
+value comp_menu_frame_count_at   136
+value comp_menu_frame_last_at    140   # the loop's copy of the last index
+value comp_menu_frame_cap        12
+value comp_menu_frame_cursor_reg 21
+value comp_menu_index            6   # COMPETITION (its flag alone)
+value comp_menu_index_msg        1914   # ALL RANDOMNESS REMOVED
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1912   # NORMAL PLAY
+# the message lookup's: a u64 count, a pointer to the u16 remap, a table of 8-byte record pointers
+data message_count          0x025dc3c0
+data message_remap          0x032f4c30
+data message_table          0x031c8828
+
+# ---- PAD-1327: the champion framework (records on the high scores), read off this program by the same shapes as
+# Star Wars ELG 1.10's: the end-of-game high scores (wrapped), the (category, n) entry lookup, the gate - the bus
+# question 91 whose {player +0, category +2, entry +4} the game asks before filing - and the categories' table
+# object {base, count, stride 72} at 0x3194708 (64-byte entries; HIGHEST SCORES = category 1)
+site challenge_scores        0x00806540 0xf0014bc2 0xf9462042
+site game_scores             0x00806540 0xf0014bc2 0xf9462042
+site challenge_score_entry   0x00805700 0xa9bf7bf3 0x2a0103f3
+site challenge_scores_gate   0x008068d8 0x97f88092 0x36000600
+data challenge_scores_table   0x031bc310
+data challenge_scores_count   0x03194710
+site  audit_add              0x00743c20 0xd00151e2 0xf9462042   # PAD-1327: the audit add (id w0, amount w1): 79 distinct ids handed it with an amount of 1, the next callee 7
+value challenge_scores_cat   1
+value challenge_scores_desc_size    72
+value challenge_scores_gate_id       91
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+value challenge_record_check_at   88
+value challenge_record_score_at   72
+value challenge_record_score_size 8

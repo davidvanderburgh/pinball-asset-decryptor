@@ -111,6 +111,7 @@ data lamp_layers            0x0081f0d0   # read off the engine's own code
 data light_count            0x008205d8   # read off the engine's own code
 data game_flags             0x008182e0   # 10 of 10 lined-up instructions
 data game_flag_count        0x0062e2b0   # 29 of 29 lined-up instructions
+value game_flags_at             0    # PAD-1327: the 64-bit flag bitmap's layout (Star Wars ELG's), lost in the draft
 data coil_count             0x00819c80   # 61 of 61 lined-up instructions
 data coil_table             0x00820490   # 47 of 47 lined-up instructions
 # data right_gate_obj         not carried: the reference game's own (data right_gate_obj         0x00711730)
@@ -144,6 +145,10 @@ value event_show_id             258    # read off this program's own code, 7 of 
 # ---- events: the framework's bus ids (each one the constant the lined-up code passes here) ----
 # event game_start   NOT PLACED: no lined-up code passes it
 # event ball_start   NOT PLACED: no lined-up code passes it
+# PAD-1327: read off the calls into this program's dispatch beside Star Wars 2025 LE 0.96's: the same ids up to 56,
+# from 57 on one lower here (LE's game_over 0x47 is 0x46 here): game_start 0x4d -> 0x4c, ball_start 0x25 as LE's
+event game_start   0x4c
+event ball_start   0x25
 event ball_end     0x34   # 1 of 1 lined-up places
 event bonus_start  0x27   # 1 of 1 lined-up places
 event bonus_end    0x28   # 1 of 1 lined-up places
@@ -208,3 +213,47 @@ text example_start_shot     Right target
 # the message table and its "BALL %d" line (portcoop.message_lines_a64), the line that says whose turn it is
 # data message_table          0x007770d8
 # value coop_ball_msg          1248
+
+# ---- PAD-1327 (emulator-proven 2026-11-16: a LEFT press from the first entry reaches ours, picked, game 1 played as
+# Competition): the start menu (CHOOSE YOUR MODE OF PLAY), a menu of game-mode table indices read off this program's
+# own menu function 0x1d1220; the frame point `ldr w21, [x0, w22, sxtw #2]`: the index under the cursor once the press has moved it (w22), the list sp+0x168 (room for 4: 0x178 is a string), the count at sp+156.
+# Prolonged Competition (comp.cfg) appends Competition's index again and letters its name message while the cursor
+# is on it; the game itself plays the pick as Competition (Standard's index once it is on).
+site comp_menu_frame     0x001d1f1c 0xb876d815 0x94031de4
+value comp_menu_frame_moved      1
+value comp_menu_frame_list_at    360
+value comp_menu_frame_count_at   156
+value comp_menu_frame_cap        4
+value comp_menu_frame_cursor_reg 22
+value comp_menu_index            2   # COMPETITION (its flag alone)
+value comp_menu_index_msg        1910   # ALL RANDOMNESS REMOVED
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1908   # NORMAL PLAY
+# the message lookup's: a u64 count, a pointer to the u16 remap, a table of 8-byte record pointers
+data message_count          0x0062e320
+data message_remap          0x008073a8
+data message_table          0x007770d8
+
+# ---- PAD-1327: the champion framework (records on the high scores), read off this program by the same shapes as
+# Star Wars ELG 1.10's: the end-of-game high scores (wrapped), the (category, n) entry lookup, the gate - the bus
+# question 90 whose {player +0, category +2, entry +4} the game asks before filing - and the categories' table
+# object {base, count, stride 72} at 0x7536b8 (64-byte entries; HIGHEST SCORES = category 1)
+site challenge_scores        0x003885a0 0x90001e02 0xf9467842
+site game_scores             0x003885a0 0x90001e02 0xf9467842
+site challenge_score_entry   0x00387760 0xa9bf7bf3 0x2a0103f3
+site challenge_scores_gate   0x00388940 0x94018308 0x36000600
+data challenge_scores_table   0x00771350
+data challenge_scores_count   0x007536c0
+site  audit_add              0x00233dc0 0xb00028a2 0xf9467842   # PAD-1327: the audit add (id w0, amount w1): 60 distinct ids handed it with an amount of 1, the next callee 12
+value challenge_scores_cat   1
+value challenge_scores_desc_size    72
+value challenge_scores_gate_id       90
+value challenge_scores_gate_cat_at   2
+value challenge_scores_gate_entry_at 4
+value challenge_record_check_at   88
+value challenge_record_score_at   72
+value challenge_record_score_size 8
+
+# PAD-1327: the attract mode's HIGHEST SCORES screen is one list page (all five rows, their labels the scene's
+# own): a record put in its first row would read as GRAND CHAMPION, so no champion page is named - the dialog says
+# records are not shown in attract here. The page (rig-proven to take the record): # site challenge_pages_0      0x00199210 0xd10543ff 0xf0002d60

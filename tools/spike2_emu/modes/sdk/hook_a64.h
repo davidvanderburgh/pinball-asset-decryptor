@@ -328,12 +328,7 @@ static int hook(pm_addr addr, hook_fn logger)
     return t && slot_go(addr, t);
 }
 
-/* hook() with every register for the logger to change: not on 64-bit ARM yet (r4-r12's users are Spike 2 titles) */
-static int hook_full(pm_addr addr, hook_fn logger)
-{
-    (void)addr; (void)logger;
-    return 0;
-}
+static int hook_full(pm_addr addr, hook_fn logger);   /* PAD-1327: below, after hook_callee */
 
 static int hook_veto_at(pm_addr addr, void *logger, unsigned n, unsigned refused)
 {
@@ -379,15 +374,44 @@ static int hook_n(pm_addr addr, hook_n_fn logger, unsigned n)
  * hook_n through one shared step: the slot calls pm_a64_callee (x0 = the saved registers, x1 = the logger's index),
  * which stores x19..x28 as they are (the template touches none of them), hands the C logger (r, x) with x[0..9] =
  * x19..x28, and loads them back from x, so a logger may change one. The logger runs with the rest as a plain hook's.
- * (The 32-bit hook_full gives r4-r12 at r[4..12]; that layout's users are Spike 2's, so the 64-bit hook_full stays 0.) */
+ * PAD-1327: hook_full (below) is the same step with the registers in one array. */
 typedef void (*callee_fn)(pm_reg *regs, pm_reg *x19);
-#define N_CALLEE 8
+#define N_CALLEE 16
 static callee_fn callee_tab[N_CALLEE];
+static hook_fn full_tab[N_CALLEE];    /* PAD-1327: a hook_full logger's index (callee_tab's is 0 there) */
 static int callee_used;
+
+/* ---- PAD-1327: hook_full on 64-bit ARM ------------------------------------------------------------------------------
+ * The 32-bit hook_full hands its logger r0-r12 at regs[0..12] and the hooked function's sp at regs + 14, every one
+ * writable (Elvira's start menu keeps its count in r5). A 64-bit function keeps such a thing in a callee-saved register
+ * (Star Wars ELG 1.10's Spike 3 start menu: the entry count in w22), so the 64-bit hook_full is hook_callee's step with
+ * ONE array, by register number: a[0..8] = x0..x8, a[19..28] = x19..x28, a[30] = x30, and a[31] = the hooked function's
+ * sp (FULL_SP); a[9..18] and a[29] read 0 (x9-x18 are the caller's scratch, x29 its frame). What the logger writes into
+ * a[0..8] and a[19..28] is what the function then runs with. The register numbers a port names (`value
+ * challenge_menu_count_reg 22`) are the machine's own on both. */
+#define FULL_REG_LAST 28
+#define FULL_SP(r) ((unsigned char *)(unsigned long)(r)[31])
+#define HOOK_SP(r) ((unsigned char *)((r) + 10))    /* a plain hook's: the caller's sp */
+
+static void full_call(hook_fn f, pm_reg *r, pm_reg *x)
+{
+    pm_reg a[32];
+    unsigned k;
+    for (k = 0; k < 32; k++) a[k] = 0;
+    for (k = 0; k <= 8; k++) a[k] = r[k];
+    for (k = 0; k < 10; k++) a[19 + k] = x[k];
+    a[30] = r[PM_REG_LR];
+    a[31] = (pm_reg)(unsigned long)(r + 10);
+    f(a);
+    for (k = 0; k <= 8; k++) r[k] = a[k];
+    for (k = 0; k < 10; k++) x[k] = a[19 + k];
+}
 
 __attribute__((used, visibility("hidden"))) void pm_a64_callee_call(pm_reg *r, unsigned n, pm_reg *x)
 {
-    if (n < N_CALLEE && callee_tab[n]) callee_tab[n](r, x);
+    if (n >= N_CALLEE) return;
+    if (full_tab[n]) full_call(full_tab[n], r, x);
+    else if (callee_tab[n]) callee_tab[n](r, x);
 }
 
 __asm__(
@@ -422,6 +446,20 @@ static int hook_callee(pm_addr addr, callee_fn logger)
     if (k == callee_used) {
         if (callee_used == N_CALLEE) return 0;
         callee_tab[callee_used++] = logger;
+    }
+    return hook_n(addr, (hook_n_fn)pm_a64_callee, (unsigned)k);
+}
+
+/* PAD-1327: the logger sees (and may change) every register a function keeps across calls; see full_call above */
+static int hook_full(pm_addr addr, hook_fn logger)
+{
+    int k;
+    if (!addr || !logger) return 0;
+    for (k = 0; k < callee_used; k++)
+        if (full_tab[k] == logger) break;
+    if (k == callee_used) {
+        if (callee_used == N_CALLEE) return 0;
+        full_tab[callee_used++] = logger;
     }
     return hook_n(addr, (hook_n_fn)pm_a64_callee, (unsigned)k);
 }

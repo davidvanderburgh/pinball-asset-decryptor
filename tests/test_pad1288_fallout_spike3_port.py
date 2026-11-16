@@ -42,6 +42,15 @@ def _entries(text):
     return out
 
 
+#: the lines measured by hand on this program, not drafted from the reference: PAD-1326's co-op (portcoop: the
+#: message table and its BALL line) and PAD-1327's start menu, champion framework and audit add
+HAND = ("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add")
+
+
+def _own(entries):
+    return {k: v for k, v in entries.items() if not k[1].startswith(HAND)}
+
+
 # ---- the drafter's rules --------------------------------------------------------------------------------------
 
 def test_the_reference_games_mode_books_are_its_own():
@@ -134,7 +143,7 @@ def test_redrafting_fallout_gives_the_proven_port():
     ref, tgt = S.Elf(_prog("star_wars_elg")), S.Elf(_prog("fallout_le"))
     text, M, core, missing = S.draft_spike3(ref, str(ELG_PORT), tgt, "fallout_le", "0.82")
     assert not core
-    assert _entries(text) == _entries(FO_PORT.read_text(encoding="utf-8"))
+    assert _own(_entries(text)) == _own(_entries(FO_PORT.read_text(encoding="utf-8")))
     # Star Wars ELG's mode books line up in the framework's flag code but are written as its own, and coil_give alone
     assert re.search(r"^# not carried \(coil_take has no counterpart.*site coil_give", text, re.M)
     assert not re.search(r"^value (done|place)_flag", text, re.M)

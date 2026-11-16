@@ -621,6 +621,27 @@ def _bl(va, w):
     return va + 4 * sext(w & 0x3FFFFFF, 26) if (w & 0xFC000000) == 0x94000000 else None
 
 
+def audit_add_a64(e):
+    """PAD-1327: ``[(callee, distinct ids)]`` best first - the callees handed `movz w0, #id` with `movz w1, #1` in the
+    four instructions before the bl (stock_scan_c.find_audit_add's rule on AArch64). The first is the framework's
+    audit add (`site audit_add`: id w0, amount w1): Star Wars ELG 1.10 hands its 132 ids, the next callee 12."""
+    from collections import defaultdict
+    ids, w = defaultdict(set), e.words
+
+    def movz(x, reg):
+        return (x >> 5) & 0xFFFF if (x & 0xFF80001F) == (0x52800000 | reg) else None
+    for k in range(4, len(w)):
+        if (w[k] & 0xFC000000) != 0x94000000:
+            continue
+        a0 = a1 = None
+        for j in range(k - 1, k - 5, -1):
+            a0 = movz(w[j], 0) if a0 is None else a0
+            a1 = movz(w[j], 1) if a1 is None else a1
+        if a0 is not None and a1 == 1:
+            ids[_bl(e.tva + 4 * k, w[k])].add(a0)
+    return sorted(((t, len(s)) for t, s in ids.items()), key=lambda kv: -kv[1])
+
+
 def _adrp(va, w):
     """adrp xd, page -> (d, page), else None"""
     if (w & 0x9F000000) != 0x90000000:
@@ -2236,7 +2257,8 @@ GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
 #: line up in the framework's flag code but name none of its modes; PAD-1289: Star Wars ELG's 66 / 68 turned up at
 #: lined-up instructions on Pokemon LE, but they are the flags of ELG's own modes)
 GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
-                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+|done_audit_\d+)$")
+                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+|done_audit_\d+|"
+                        r"challenge_\w+|comp_menu_\w+)$")   # PAD-1327: a start menu's and the champion framework's numbers are measured per program
 #: sites only ever armed together: one placed without the other is written as a comment (PAD-1288: Fallout's
 #: coil_give lines up, its coil_take has no counterpart, and the runtime arms held coils on both or neither)
 SITE_PAIRS = (("coil_take", "coil_give"),)
@@ -2660,6 +2682,13 @@ def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
         if k != "value" or len(t) < 3:
             continue
         name = t[1]
+        if name == "game_flags_at":
+            # PAD-1327: not the reference game's own - the 64-bit flag bitmap's layout (its pointer at +0), the same on
+            # every Spike 3 program; dropped with GAME_VALUE, the runtime read Spike 2's +4 at the first game start
+            if "data:game_flags" in placed:
+                body.append("value %-25s %s    # the 64-bit flag bitmap's layout, as the reference's" % (name, t[2]))
+                placed["value:" + name] = int(t[2], 0)
+            continue
         if GAME_VALUE.match(name) or name == "ball_end_event":
             continue
         v = int(t[2], 0)

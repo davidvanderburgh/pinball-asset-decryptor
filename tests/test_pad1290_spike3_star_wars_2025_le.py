@@ -43,6 +43,15 @@ def _entries(text):
     return out
 
 
+#: the lines measured by hand on this program, not drafted from the reference: PAD-1326's co-op (portcoop: the
+#: message table and its BALL line) and PAD-1327's start menu, champion framework and audit add
+HAND = ("message_", "coop_", "comp_menu_", "challenge_", "game_scores", "audit_add")
+
+
+def _own(entries):
+    return {k: v for k, v in entries.items() if not k[1].startswith(HAND)}
+
+
 # ---- the census ---------------------------------------------------------------------------------------------------
 def test_measured_ids_renumber_the_switch_lines_and_leave_out_what_never_reached_the_modes(monkeypatch):
     S = _s3port()
@@ -139,6 +148,13 @@ def test_redrafting_with_the_census_gives_the_shipped_port():
     text, M, core, missing = S.draft_spike3(ref, str(ELG_PORT), tgt, "star_wars_2025_le", "0.96",
                                             S.read_switch_ids(str(CENSUS)))
     assert not core
-    assert _entries(text) == _entries(PORT.read_text(encoding="utf-8"))
+    # PAD-1322's 64-bit switch_edge source (merged after this port was proven): the LE carries those lines once a run
+    # proves them there, so the redraft is the shipped port plus exactly those, as for Pokemon LE and the Pro
+    edge = {("site", "switch_edge"), ("value", "switch_record_reg"), ("value", "switch_id_at"),
+            ("value", "switch_level_at"), ("value", "switch_desc_via"), ("value", "switch_flags_at"),
+            ("value", "switch_polarity_at")}
+    mine, shipped = _own(_entries(text)), _own(_entries(PORT.read_text(encoding="utf-8")))
+    assert set(mine) - set(shipped) == edge
+    assert {k: v for k, v in mine.items() if k not in edge} == shipped
     # the process record's exit hooks moved again (ELG 312): read off this program
     assert re.search(r"^value proc_exit_hooks\s+424\b", text, re.M)

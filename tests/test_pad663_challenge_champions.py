@@ -137,13 +137,13 @@ def test_the_gate_lets_only_the_entry_pointed_at_the_modes_record(tmp_path):
 def test_the_wrap_shuts_the_games_records_only_around_its_end_of_game_call():
     R = _host()
     src = RUNTIME.read_text(encoding="utf-8")
-    body = R._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    body = R._lift(src, "static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)")
     shut = body.index("chg_gate_cat = (int)cat;")
     call = body.index("ret = chg_scores_game(r0, r1, r2, r3);", shut)
     open_ = body.index("chg_gate_cat = -1;")
     assert shut < call < open_
-    assert body.index("*(unsigned short *)(ent + 8) = 0;") < call < body.index("*(unsigned short *)(ent + 8) = award;")
-    gate = R._lift(src, "static unsigned chg_gate_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    assert body.index("CHG_ENT_AWARD(ent) = 0;") < call < body.index("CHG_ENT_AWARD(ent) = award;")
+    gate = R._lift(src, "static unsigned chg_gate_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)")
     assert "return 0;" in gate and "return 1;" in gate and "return chg_gate_game(r0, r1, r2, r3);" in gate
     arm = R._lift(src, "static void chg_scores_arm(void)")
     assert 'hook_call(\n                     fn("challenge_scores_gate")' in arm or 'hook_call(fn("challenge_scores_gate")' in arm
@@ -221,17 +221,17 @@ def test_a_modes_page_is_titled_like_the_games_champions_and_follows_the_cycles_
 def test_the_page_repeat_follows_only_an_entrys_first_page_in_the_attract_mode():
     R = _host()
     src = RUNTIME.read_text(encoding="utf-8")
-    run = R._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")
+    run = R._lift(src, "static unsigned chg_pages_run(int k, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3,")
     own = run.index("ret = chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);")
     gate = run.index("pm_in_game() || chg_scores_running || (k != CHG_LIST_PAGE && chg_pages_n != 0)")
-    swap = run.index("ent[0] = (unsigned)(unsigned long)chg_pages_rec;")
+    swap = run.index("ent[0] = (pm_addr)(unsigned long)chg_pages_rec;")
     again = run.index("chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);", swap)
     back = run.index("chg_pages_back();", again)
     assert own < gate < swap < again < back
     # a page cut short gives the entry back on the tick; the end-of-game wrap gives it back first
     tick = src[src.index("static void chg_pages_tick(void)\n{"):]
     assert "chg_pages_back();" in tick[:tick.index("\n}\n")]
-    wrap = R._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    wrap = R._lift(src, "static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)")
     assert wrap.index("chg_pages_back();") < wrap.index("chg_scores_game(r0, r1, r2, r3)")
 
 
@@ -240,9 +240,9 @@ def test_the_host_category_is_its_first_entry_alone_for_the_call():
     place) was beaten (Avengers LE 1.10, the first rig run)."""
     R = _host()
     src = RUNTIME.read_text(encoding="utf-8")
-    one = R._lift(src, "static unsigned *chg_scores_one_entry(long cat, unsigned *was)")
-    assert "one[0] = l[0];" in one and "one[1] = 0;" in one and "desc[7] = (unsigned)(unsigned long)one;" in one
-    wrap = R._lift(src, "static unsigned chg_scores_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
+    one = R._lift(src, "static pm_addr *chg_scores_one_entry(long cat, pm_addr *was)")
+    assert "one[0] = l[0];" in one and "one[1] = 0;" in one and "desc[7] = (pm_addr)(unsigned long)one;" in one
+    wrap = R._lift(src, "static unsigned chg_scores_wrap(pm_reg r0, pm_reg r1, pm_reg r2, pm_reg r3)")
     call = wrap.index("list = chg_scores_one_entry(cat, &list_was);")
     assert call < wrap.index("ret = chg_scores_game(r0, r1, r2, r3);", call) < wrap.index("if (list) *list = list_was;")
 
@@ -292,7 +292,7 @@ def test_a_page_is_the_category_it_read_first_of_the_tables():
     seen = src[src.index("static void chg_lookup_seen(pm_reg *r)\n{"):]
     seen = seen[:seen.index("\n}\n")]
     assert "if (chg_pages_cat >= 0 || (int)r[0] <= 0 || (int)r[0] >= chg_pages_count) return;" in seen
-    run = _host()._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")
+    run = _host()._lift(src, "static unsigned chg_pages_run(int k, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3,")
     assert run.index("chg_pages_count = chg_scores_count();") < run.index("ret = chg_pages_game[k](")
 
 
@@ -304,7 +304,7 @@ def test_a_games_page_cut_short_does_not_leave_the_pages_passed_through():
     tick = tick[:tick.index("\n}\n")]
     clear = tick.index("if (chg_pages_tid && !chg_scores_running && (pm_in_game() || pm_ms() - chg_pages_call_ms > 60000))")
     assert tick.index("chg_pages_tid = 0;", clear) < tick.index("chg_pages_in = 0;", clear + 1)
-    run = _host()._lift(src, "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,")
+    run = _host()._lift(src, "static unsigned chg_pages_run(int k, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3,")
     assert run.index("chg_pages_call_ms = pm_ms();") < run.index("chg_pages_tid = me;")
 
 

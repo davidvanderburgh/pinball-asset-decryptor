@@ -184,6 +184,9 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     assert set(sites) == {"tick", "hook_dispatch", "score_add", "switch_hit", "switch_hit2", "switch_edge",  # PAD-1322
                           "agent_header", "agent_begin",
                           "coop_player_change", "coop_add_player",                  # PAD-1326: co-op play
+                          "challenge_menu", "challenge_menu_pick",                  # PAD-1327
+                          "challenge_scores", "game_scores", "challenge_score_entry", "challenge_scores_gate",
+                          "challenge_pages_0", "challenge_pages_1", "audit_add",  # PAD-1327: records
                           } | SOUND_SITES | LIGHT_SITES | SCENE_SITES | PLAY_SITES
     for t in sites.values():
         t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)
@@ -195,6 +198,7 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     assert data == {"cur_player": "0x006b1a1a", "scores": "0x007122c0", "score_mult": "0x006a7f30",
                     "mode_mask": "0x0079206c", "sound_channels": "0x00733340", "sound_requests": "0x006fd360",
                     "sound_request_count": "0x005a38c8",                         # the sound ones: PAD-1282
+                    "challenge_scores_table": "0x006c4b40", "challenge_scores_count": "0x006a3398",   # PAD-1327
                     "event_head": "0x007493d8", "event_current": "0x007493e0",   # the lamp layer's: PAD-1283
                     "lamp_layers": "0x00735e68", "light_count": "0x0073ec88",
                     "resource_manager": "0x00712bf8", "typeinfo_resource": "0x0068b850",  # the scene lookup's: PAD-1284
@@ -203,7 +207,7 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                     "message_table": "0x006c96e8"}
     values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
               and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES
-              and t[1] not in PLAY_VALUES and not t[1].startswith("switch_")}   # PAD-1322: the edge source's
+              and t[1] not in PLAY_VALUES and not t[1].startswith(("switch_", "challenge_"))}   # PAD-1322 / 1327
     assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34",
                       # PAD-1286: the game's mode books, each flag by its name (the same ids on both builds)
                       "place_flag_completed_0": "69", "place_flag_completed_1": "67", "place_flag_completed_2": "68",

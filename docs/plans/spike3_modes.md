@@ -70,8 +70,8 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
-| Prolonged Competition | comp.cfg | left out | the challenge-menu sites (not placed); `hook_full`, 0 on 64-bit; 4-byte entry name, 32-bit frame |
-| records on the high scores | records.cfg | left out | the champion framework's sites (not placed) and its 64-bit record |
+| Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
+| records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); the champion in attract on ELG and WDR (round 5); counts wait on 64-bit readers |
 | attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
 | inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
 | expression light shows | cabshow.cfg | left out | `cablamp` lines (ELG has no cabinet lights), the game's show table as 64-bit, voice count measured |
@@ -135,6 +135,167 @@ log says the same lines; on Spike 3 the engine leaves them to this build). A mul
 
 Tests: tests/test_pad1323_spike3_clips_stime.py (a synthetic 64-bit program; the real Fallout / Pokemon programs
 with PAD_S3_PROGRAMS).
+
+## Prolonged Competition on Spike 3 (PAD-1327)
+
+Round 1 of "Prolonged Competition with records". Goes on a Star Wars ELG 1.10 Spike 3 card; the five newer Spike 3
+titles (Fallout, Pokemon, Star Wars 2025 LE/Pro, Walking Dead Remastered, Transformers) say "The app does not know
+<title>'s start menu yet" as before.
+
+- **hook_full on 64-bit** (hook_a64.h): PAD-1322's callee step with ONE array by register number - a[0..8] = x0..x8,
+  a[19..28] = x19..x28, a[30] = x30, a[31] = the hooked function's sp - every one but the sp written back. FULL_SP /
+  FULL_REG_LAST name the layout on both machines (32-bit: regs + 14, r12), HOOK_SP a plain hook's caller sp.
+- **Star Wars ELG 1.10's Spike 3 menu** (function 0x158bb0, reached through a pointer): entries {u32 kind, u16
+  caption, u64 name} 16 bytes each at sp+0xf8, room for 7; the count in w22 until 0x159a10 (`sub w1, w22, #1`) keeps
+  the LAST index at sp+164 for the loop - `site challenge_menu` there, once per menu, hook_full, `value
+  challenge_menu_count_reg 22`. Every frame 0x159c34 loads the kind under the cursor into w1 and the kind's flags
+  follow (0 Standard clears 17-20, 1 COMPETITION sets 17, a kind past 6 clears them as Standard does) - `site
+  challenge_menu_pick` at 0x159c38, `value challenge_menu_pick_reg 1` (r3 on every Spike 2 port, the default).
+  The captions are Spike 2's ids (1914 STANDARD, 1919 COMPETITION, 1921 CHALLENGE, ...).
+- **The runtime's menu code** writes and compares the entry's name as a pm_addr (8 bytes, 8-aligned on Spike 3) and
+  copies Standard's "fourth word" only on 32-bit (on Spike 3 it is the name's high half).
+- **comp.cfg off a 64-bit program**: `prolonged_comp.card_lines` reads the FG_ name table (8-byte entries from
+  FG_INVALID) and the message table (one relocated pointer per id to a record whose first pointer is the English
+  text, from CHOOSE YOUR MODE OF PLAY's record). All seven Spike 3 programs read: ELG 17 / 1919 / 1914, Fallout and
+  Transformers 17 / 1920 / 1915, Pokemon and SW 2025 LE 16 / 1913 / 1911, SW 2025 Pro 16 / 1909 / 1907, WDR 17 /
+  1918 / 1913.
+- **The build**: `spike3_modes.comp_wanted` (quiet; the engine's `_comp_for_build` says why one is left out) hands
+  comp.cfg to `mode_write.plan` with the rest, or alone (`only`). The Play options tab offers the tick on ELG's
+  Spike 3 project (its port is `port_ready`).
+- **How the menu is worked on this build** (read off its button reader 0x275cc0): both flipper buttons open it; it
+  stays while the attract timer (operator setting 92, sped up 15x while one flipper is held without the other) or
+  the start-pending timer (9 s, reset by each press) runs; both buttons down with a fresh press answers 0xc0 (leave,
+  with the cancel sound), so letting go of both at once closes it. A rig job holds both, lets go of the right one a
+  second before the left, then steps with the right one.
+
+Proof (2026-11-16, Spike 3 rig slot 132, hidden and MUTED, the library card, the set `spike3_modes.plan` built from
+it: mode64.so, game.port, comp.cfg `flag 17 / caption 1919 / caption_end 1914 / only`): `prolonged competition:
+armed - on the start menu at ...9a10`; the menu opened as `entry 3 of 3 (UNTIL POWERED OFF) - kinds 0 6 512`
+(this fresh card's menu is STANDARD and DJ MIXER), the right flipper stepped Standard -> DJ Mixer -> ours (`UNTIL
+POWERED OFF picked on the menu`), Start: `ON until the machine is switched off - game 1 plays as Competition (flag 17
+was 0)`; at its end `flag 17 is 1; prolonged on`; game 2 from a plain Start `plays as Competition`, at its end flag 17 still 1; the menu again showed the entry as
+STANDARD / ENDS PROLONGED COMPETITION (`ENDS PROLONGED COMPETITION picked on the menu`), Start: `OFF - game 3 plays
+as the menu picked (flag 17 was 0)`.
+Tests: tests/test_pad1327_spike3_prolonged_comp.py (the menu append and the 64-bit hook_full lifted and run at
+Spike 3's word size; the real programs with PAD_S3_PROGRAMS).
+
+**Round 2 (Fallout LE, the index menus).** `comp_menu_frame` takes the Spike 3 index menus: hooked just after the
+frame's press moved the cursor (`value comp_menu_frame_moved 1`, so no buttons are read), the list and count in the
+frame or in a register (`comp_menu_frame_list_reg` / `_count_reg`, hook_full's numbers), and a loop's copy of the
+last index kept in step (`comp_menu_frame_last_at`, Pokemon's sp+140). Lettering UNTIL POWERED OFF needs the 64-bit
+message table: a u64 count (`data message_count`), a pointer variable to the u16 remap (`data message_remap`, as on
+Spike 2) and a table of 8-byte record pointers (`data message_table`; a record is a 0-ended list of per-language
+strings, as Spike 2's). `message_slot` steps it by pointer size and makes a 64-bit table page writable.
+
+| title | frame point | list | count | cursor | room | Competition (name msg) | Standard (name msg) |
+|---|---|---|---|---|---|---|---|
+| Fallout LE 0.82 | 0x485a08 `ldr w23, [x26, w20, sxtw #2]` | sp+0x1b8 (x26) | w22 | w20 | 12 | 2 (1921) | 1 (1916) |
+| Pokemon LE 0.82 | 0x4cc050 `ldr w24, [x0, w21, sxtw #2]` | sp+0xd8 | sp+136, last index sp+140 | w21 | 12 | 6 (1914) | 1 (1912) |
+| Star Wars 2025 LE 0.96 | 0x27e788 `ldr w22, [x24, w20, sxtw #2]` | sp+0x1c0 (x24) | w23 | w20 | 10 | 2 (1914) | 1 (1912) |
+| Star Wars 2025 Pro 0.84 | 0x1d1f1c `ldr w21, [x0, w22, sxtw #2]` | sp+0x168 | sp+156 | w22 | 4 | 2 (1910) | 1 (1908) |
+
+Walking Dead Remastered LE 0.92 has Star Wars ELG's shape instead: entries {kind, caption, name} 16 bytes at sp+0x128
+(room for 8), the count in w22 until 0x1ef564, the kind under the cursor in w0 at 0x1ef5f0 (its kind 2 sets flag 17).
+Star Wars 2025 Pro's bus ids are one lower than LE's from 57 on (read off the calls into its dispatch): game_start 0x4c,
+ball_start 0x25.
+
+**The freeze at Fallout's first game start, and its cause.** With Prolonged Competition armed Fallout stopped with
+DISPATCH TIMEOUT about 10 s after its game_start event, even with a frame logger that did nothing; stock and score-feed
+runs played on. The ports s3port drafted from Star Wars ELG's (Fallout, Pokemon, Star Wars 2025 LE / Pro, Walking Dead
+Remastered, Transformers) had lost `value game_flags_at 0`: GAME_VALUE took it for the reference game's own content,
+so the runtime read the flag bitmap's pointer at Spike 2's +4 when comp_game_start read flag 17. Every Spike 3 port
+carries it now, the 64-bit runtime's default is 0 (`GAME_FLAGS_AT`), and s3port keeps it from a Spike 3 reference (and
+leaves a start menu's numbers, `challenge_menu_*` / `comp_menu_*`, as the reference title's own).
+
+Proof (2026-11-16, Spike 3 rig slot 132, hidden and MUTED, alone on the machine, the set spike3_modes.plan built from
+the library card): `on the start menu as entry 9 of 9 (game-mode index 2, UNTIL POWERED OFF; cursor 0)`, the game's own
+menu showing COMPETITION / UNTIL POWERED OFF on our entry, `UNTIL POWERED OFF picked on the menu`, Start: `ON until
+the machine is switched off - game 1 plays as Competition (flag 17 was 1)` (the game made it a Competition game from
+our duplicated index), the game playing on (ball 1, scoring) where it had frozen. (The rig's drains did not end
+Fallout's ball 1, so the off cycle is ELG's proof and the host test of the index-menu code.)
+
+**Round 3: every Spike 3 title with a port.** The "start menu did not open" finding of round 2 was the rig's: the newer
+titles name their flipper buttons LEFT / RIGHT FLIPPER BUTTON, and the proof script pressed L / R FLIPPER BUTTON, which
+s3press refused (`no switch named`), so the chord never reached Pokemon, Star Wars 2025 LE or Walking Dead Remastered.
+The titles' proof files (`tools/spike3_emu/proofs/titles/*.env`) now name them (FLIP_SWS, which PROOF=edge uses too).
+With the right buttons every title's start menu opened in attract on fresh settings. Transformers LE (its port came
+from main) has Fallout's index shape: frame point 0x2809d0 `ldr w23, [x27, w20, sxtw #2]`, list sp+0x1d0 (room for
+12), count w22, cursor w20, Competition index 3 (name 1921), Standard 1 (1916).
+
+Proof (2026-11-16, Spike 3 rig slots 132 / 134, hidden and MUTED, each title's set built by spike3_modes.plan from its
+library card): each logged `on the start menu as entry N of N`, showed COMPETITION / UNTIL POWERED OFF in the game's own
+menu, `UNTIL POWERED OFF picked on the menu`, and at Start `ON until the machine is switched off - game 1 plays as
+Competition` - Pokemon LE (entry 3 of 3, index 6, flag 16), Star Wars 2025 LE (8 of 8, flag 16), Walking Dead
+Remastered LE (3 of 3 on ELG's route, flag 17), Transformers LE (6 of 6, index 3, flag 17) and Star Wars 2025 Pro (3 of
+3, flag 16; its game_start 0x4c seen on the bus). Pro's cursor goes from the first entry straight to the last on the LEFT
+flipper and its menu window is short: a rig job steps left at once after the chord.
+
+**Round 4: records on the high scores.** The champion framework has the same shapes on all seven Spike 3 programs, its
+words the size of a pointer: a category table object {base, count, stride 72} (the lookup is `base + id * stride`),
+each 72-byte category's value getter at +8 and its entry-id list at +56; 64-byte entries (record +0, default initials
++8, name +40, titles +48, the award u16 +56); 96-byte records with the initials at +32, the score a u64 (at +80 on Star
+Wars ELG, +72 on the others) and the check ~(the byte sum of the first 88) at +88; the end-of-game high scores take no
+arguments of their own; before filing a player the game asks the bus question 91 (90 on Star Wars 2025 Pro) with
+{player +0, category +2, entry +4} - Spike 2's gate. HIGHEST SCORES is category 1 (GRAND CHAMPION, HIGH SCORE #1-#4).
+The runtime's champion code reads categories and entries as pm_addr words (`CHG_DESC_SIZE`, `CHG_ENT_SIZE`,
+`CHG_ENT_AWARD`), the wrapped end-of-game functions and the gate pass whole registers (`chg_fn4`), and co-op's champion
+counts read the getter through `rec_cat_value`. The attract mode's champion pages are not armed on Spike 3 (their page
+and text wraps are 32-bit): a record's champion shows in the game's initials entry and is kept, not yet in attract.
+`tools/.../champ_find.py`-style reading (C:/tmp/PAD-1327/champ_find.py: ELG's two functions paired across by s3port's
+matcher, then the table objects, the record reset and the gate read off each program) gave every port's lines.
+`spike3_modes.records_wanted` carries records.cfg; `mode_records.choices` offers a 64-bit program no counts or game
+modes yet, so a Spike 3 record counts points, in the whole game or in a mode of the owner's.
+
+Proof (2026-11-16, rig slots 132 / 134, hidden and MUTED, each title's set built by spike3_modes.plan from its card with
+one record, BIG SCORE: points in the whole game): `records: BIG SCORE - <score> beats 0: the game's initials entry under
+its name`, the game's own "Player 1 - Enter Initials / BIG SCORE" screen, and `BIG SCORE's new record ...` kept in
+/dump/pad_challenge_scores - Star Wars ELG (194530), Walking Dead Remastered LE (201190), Pokemon LE (540), Transformers LE (245220), Star Wars 2025 LE (24464360) and Pro (13962240), Fallout LE (8311590). Rig notes: a
+title's own shot switches (its titles/*.env SHOT_SWS) must be hit after the plunge, or the ball save never starts and every
+drain is served back (Star Wars 2025); Pokemon's frame dumps stop late in a game while the game runs on.
+
+**Round 5: a record's champion in the attract mode.** PAD-663's champion pages run on Spike 3: the page wraps take and
+pass x0-x7 and read the entry at pointer width (PAD-660's single page, its text and yield wraps 32-bit, stays Spike 2's).
+Each title's attract champion screen was traced on the rig (a scratch runtime logging the entry lookup's and the ask's
+callers in attract), with three shapes:
+- **a page per champion** (Star Wars ELG: 0x13cee0 asks, looks up and reads the titles at +48; Walking Dead Remastered
+  LE: 0x1b7880, every category): named `challenge_pages_0` (ELG also `_1`, 0x16c2a0); the record shows after the Grand
+  Champion's page under its own title. Proven: ELG "BIG SCORE / AAAAAAA / 194,530", WDR "BIG SCORE / AAA / 202,550"
+  between GRAND CHAMPION and HIGH SCORE #1.
+- **one list page** (Star Wars 2025 LE 0x2253f0, Pro 0x199210: all five HIGHEST SCORES rows, their labels the scene's
+  own): run again with the record in the first row it read as GRAND CHAMPION (rig-seen), so no page is named; the page
+  is a comment in the port.
+- **scene screens through binding thunks** (Fallout LE, Pokemon LE, Transformers LE: the champion screens ask each
+  category through small thunks, e.g. Transformers' 0x24d350 .. 0x24d3f0): no page function to run again.
+For the last two kinds the records dialog adds `mode_records.NO_ATTRACT` ("the attract mode does not show these records
+yet: a player who beats one still enters their initials for it, and it is kept"): `attract_note` whenever a title's port
+names no champion page.
+
+**PAD-1327 round 6: counts on Spike 3 records.** A record can count shots and goals on a Spike 3 card, as on Spike 2:
+- `site audit_add` in all 7 Spike 3 ports: the callee handed the most distinct `movz w0, #id` + `movz w1, #1` pairs
+  (`s3port.audit_add_a64`; Star Wars ELG 0x42d880 takes 132 ids, the next callee 12). The 64-bit hook relocates its
+  opening `adrp` (ELG's `tst; b.eq`), so the records' `on_rec_audit` reads x0 / x1 as on Spike 2.
+- The audits' names and ids: `mode_records.audit_ids_a64` - the AUD_ names' relocated pointer table (from
+  "AUD_INVALID") and the record `{table, count, 48}` of 48-byte descriptors, the id the code passes the halfword at
+  +0x22 (Spike 2: +0x12 of 28). It is not the name's place: ELG's AUD_LEFT_SLINGSHOT is 202 on both machines, its
+  name the 216th on Spike 3.
+- The game's own champion counts: `mode_records.champions_a64` - the port's `challenge_scores_table` (72-byte
+  descriptors, getter +8, titles +48) up to `challenge_scores_count`, from category 2, the high-score, co-op and
+  fastest-time boards left out (Fallout: 23, Star Wars 2025 LE: 33).
+- `choices()` on a 64-bit program offers them (`count_choices(game_elf, port)`; audits only where the port names
+  the audit add); the dialog's choice cache is version 3. Shot labels drop Fallout's `ID_` (AUD_SHOT_ID_LEFT_OUTLANE).
+- Rig (Fallout LE 0.82, slot 3): records of the right slingshot audit (147), slingshot + radio tower (147 + 164) and
+  the JUNK champion. 4 balls, each a radio tower hit and 5 slingshot presses: SLINGS 35, RADIO SLING 39 = 35 + the 4
+  radio tower hits exactly, JUNK 0 (none earned); each filed with the game's initials entry. A control game with no
+  slingshot presses: SLINGS 18 over 5 balls - the game's own slingshot audit rises about 3.6 a ball by itself, so the
+  20 presses were all counted.
+- Rig (Walking Dead Remastered LE 0.92, slot 4): a record of the game's own WALKERS KILLED champion count (category
+  2, its 64-bit getter called per player): 3 balls on the walker targets gave 3, filed as WALKERS with the game's own
+  "PLAYER 1 - ENTER INITIALS" screen.
+
+**Left as it is:** the game's own modes in the dialog (`game:<id>`) stay Spike 2 only - their objects are read by
+the 32-bit stock scanner; a Spike 3 record counts in the whole game or in a mode of the project's own. Possibly later:
+a record's champion on the list-page and scene titles' attract screens (a different design: a row or a scene of our
+own).
 
 ## The Modes tab and Try it
 

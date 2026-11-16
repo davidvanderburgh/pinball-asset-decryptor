@@ -247,3 +247,7 @@ value challenge_scores_gate_entry_at 4
 value challenge_record_check_at   88
 value challenge_record_score_at   72
 value challenge_record_score_size 8
+
+# PAD-1327: the attract mode's HIGHEST SCORES screen is one list page (all five rows, their labels the scene's
+# own): a record put in its first row would read as GRAND CHAMPION, so no champion page is named - the dialog says
+# records are not shown in attract here. The page (rig-proven to take the record): # site challenge_pages_0      0x002253f0 0xd104c3ff 0xd0003421

@@ -190,6 +190,28 @@ def title_refusal(prof):
     return "" if port_ok(port) else NO_PORT % prof.label
 
 
+#: PAD-1327: a title whose port names no champion page (Fallout LE, Pokemon LE and Transformers LE on Spike 3: their champion screens
+#: are scenes of their own, not a page function the runtime can run again)
+NO_ATTRACT = ("On %s the attract mode does not show these records yet: a player who beats one still enters their "
+              "initials for it, and it is kept.")
+PAGE_SITES = ("challenge_page", "challenge_pages_", "challenge_list_page")
+
+
+def attract_note(prof):
+    """``""`` when *prof*'s attract mode shows a record's champion (its port names a champion page), else
+    :data:`NO_ATTRACT`'s sentence for it."""
+    if prof is None:
+        return ""
+    from . import mode_project as MP
+    try:
+        port = MP.read_port(MP.port_path(prof))
+    except (OSError, MP.ModeProjectError):
+        return ""
+    if any(s.startswith(PAGE_SITES) for s in port.get("site", {})):
+        return ""
+    return NO_ATTRACT % prof.label
+
+
 def port_ok(port):
     """1 when the port names what the runtime files a record with (the champion framework's names, PAD-663) and
     sees the game's end with."""

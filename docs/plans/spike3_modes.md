@@ -71,7 +71,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
 | Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
-| records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); counts of audits / the game's own modes and the attract champion pages wait on 64-bit readers |
+| records on the high scores | records.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | points records (the whole game or a mode of the owner's); the champion in attract on ELG and WDR (round 5); counts wait on 64-bit readers |
 | attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
 | inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
 | expression light shows | cabshow.cfg | left out | `cablamp` lines (ELG has no cabinet lights), the game's show table as 64-bit, voice count measured |
@@ -253,12 +253,27 @@ its name`, the game's own "Player 1 - Enter Initials / BIG SCORE" screen, and `B
 title's own shot switches (its titles/*.env SHOT_SWS) must be hit after the plunge, or the ball save never starts and every
 drain is served back (Star Wars 2025); Pokemon's frame dumps stop late in a game while the game runs on.
 
-**What is left in PAD-1327** (the next runs): (1) the attract mode's champion pages on Spike 3, so a record's champion
-shows in attract as on Spike 2 (chg_page_arm / chg_pages_arm: the page, text and yield wraps and the page table are
-32-bit; measure the 64-bit attract page functions from ELG's pairing and widen them); (2) counts in the records dialog
-for a 64-bit program - the shots and mode audits (an audit_add site and the AUD_ name table on Spike 3), the game's
-own champion counts (coop_play._champions off 64-bit categories: the table object above) and the game's own modes
-(the stock scanner on 64-bit, where it reads them).
+**Round 5: a record's champion in the attract mode.** PAD-663's champion pages run on Spike 3: the page wraps take and
+pass x0-x7 and read the entry at pointer width (PAD-660's single page, its text and yield wraps 32-bit, stays Spike 2's).
+Each title's attract champion screen was traced on the rig (a scratch runtime logging the entry lookup's and the ask's
+callers in attract), with three shapes:
+- **a page per champion** (Star Wars ELG: 0x13cee0 asks, looks up and reads the titles at +48; Walking Dead Remastered
+  LE: 0x1b7880, every category): named `challenge_pages_0` (ELG also `_1`, 0x16c2a0); the record shows after the Grand
+  Champion's page under its own title. Proven: ELG "BIG SCORE / AAAAAAA / 194,530", WDR "BIG SCORE / AAA / 202,550"
+  between GRAND CHAMPION and HIGH SCORE #1.
+- **one list page** (Star Wars 2025 LE 0x2253f0, Pro 0x199210: all five HIGHEST SCORES rows, their labels the scene's
+  own): run again with the record in the first row it read as GRAND CHAMPION (rig-seen), so no page is named; the page
+  is a comment in the port.
+- **scene screens through binding thunks** (Fallout LE, Pokemon LE, Transformers LE: the champion screens ask each
+  category through small thunks, e.g. Transformers' 0x24d350 .. 0x24d3f0): no page function to run again.
+For the last two kinds the records dialog adds `mode_records.NO_ATTRACT` ("the attract mode does not show these records
+yet: a player who beats one still enters their initials for it, and it is kept"): `attract_note` whenever a title's port
+names no champion page.
+
+**What is left in PAD-1327** (the next run): counts in the records dialog for a 64-bit program - the shots and mode
+audits (an audit_add site and the AUD_ name table on Spike 3), the game's own champion counts (the 64-bit categories
+above) and the game's own modes (the stock scanner on 64-bit, where it reads them). Possibly later: a record's champion
+on the list-page and scene titles' attract screens (a different design: a row or a scene of our own).
 
 ## The Modes tab and Try it
 

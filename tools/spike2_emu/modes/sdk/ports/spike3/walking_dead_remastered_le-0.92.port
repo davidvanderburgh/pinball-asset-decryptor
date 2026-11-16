@@ -257,3 +257,7 @@ value challenge_scores_gate_entry_at 4
 value challenge_record_check_at   88
 value challenge_record_score_at   72
 value challenge_record_score_size 8
+
+# PAD-1327: the attract mode's champion page for HIGHEST SCORES (category 1; traced on the rig: every category's page asks from 0x1b78b8, in 0x1b7880): a record's champion
+# is shown after it
+site challenge_pages_0      0x001b7880 0xd0002f82 0xf9468442

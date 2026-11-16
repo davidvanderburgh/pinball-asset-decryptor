@@ -912,7 +912,8 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                                    if gone and r["mode"].startswith("game:") else
                                    "No mode of this project is called that any more: it never counts." if gone
                                    else "")))
-        self.set(recs={"why": why, "how": _MR.HOW, "rows": rows,
+        note = _MR.attract_note(_MR.project_title(project)) if project else ""     # PAD-1327
+        self.set(recs={"why": why, "how": _MR.HOW + (" " + note if note else ""), "rows": rows,
                        "modes": [{"value": "", "label": "The whole game"}]
                        + [dict(m, group="The game's own modes") for m in got.get("modes") or []]
                        + [dict(m, group="Your modes") for m in own],

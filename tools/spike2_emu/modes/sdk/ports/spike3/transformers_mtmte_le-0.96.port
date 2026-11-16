@@ -261,3 +261,6 @@ value challenge_scores_gate_entry_at 4
 value challenge_record_check_at   88
 value challenge_record_score_at   72
 value challenge_record_score_size 8
+
+# PAD-1327: no champion page function here: the attract mode's champion screens ask each category through binding
+# thunks (0x24d350 .. 0x24d3f0, traced on the rig), as Fallout LE's and Pokemon LE's do

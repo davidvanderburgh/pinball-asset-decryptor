@@ -652,7 +652,21 @@ def test_records_wanted_is_quiet_and_asks_the_title(monkeypatch):
 
 #: the attract mode's champion page functions on Spike 3 (round 5): page(category, n, ...) asks, looks the entry up and
 #: reads its titles; a record's champion is shown after the first category's page
-PAGES = {"star_wars_elg-1.10.port": {"challenge_pages_0": 0x13CEE0, "challenge_pages_1": 0x16C2A0}}
+PAGES = {"star_wars_elg-1.10.port": {"challenge_pages_0": 0x13CEE0, "challenge_pages_1": 0x16C2A0},
+         "walking_dead_remastered_le-0.92.port": {"challenge_pages_0": 0x1B7880}}
+
+
+def test_the_records_dialog_says_where_the_attract_mode_does_not_show_them():
+    from pinball_decryptor.plugins.stern import mode_records as MRec
+    profs = MP.profiles()
+    for key in ("fallout_le_0_82_spike3", "pokemon_le_0_82_spike3",   # champion screens of their own (Godot scenes)
+                "transformers_mtmte_le_0_96_spike3",
+                "star_wars_2025_le_0_96_spike3", "star_wars_2025_pro_0_84_spike3"):   # one list page, its labels its own
+        assert MRec.attract_note(profs[key]) == MRec.NO_ATTRACT % profs[key].label
+    for key in ("star_wars_elg_1_10_spike3", "walking_dead_remastered_le_0_92_spike3", "godzilla_le_1_16"):
+        assert MRec.attract_note(profs[key]) == "", key
+    modes = (ROOT / "pinball_decryptor" / "webui" / "tabs" / "modes.py").read_text(encoding="utf-8")
+    assert '"how": _MR.HOW + (" " + note if note else "")' in modes
 
 
 @pytest.mark.parametrize("port_name", sorted(PAGES))

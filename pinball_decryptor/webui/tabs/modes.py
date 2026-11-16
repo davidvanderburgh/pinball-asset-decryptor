@@ -991,7 +991,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             rows.append({"name": c["name"], "sub": c["sub"], "ability": c["ability"], "powers": list(c["powers"]),
                          "header": c["header"], "words": _CP.character_words(c, wf if pw else None),
                          "badge_cut": shown if cut else "",       # PAD-1083: too long for its card: what shows
-                         "line": got["line"], "missing": got["missing"], "over": got["over"],
+                         # PAD-1363: its own card text in place of its powers' lines ("" theirs)
+                         "text": c["text"], "powers_line": got["line"], "line": c["text"] or got["line"],
+                         "text_cut": _CP.text_on_card(c["text"])[0] if c["text"] and _CP.text_on_card(c["text"])[1]
+                         else "",
+                         "missing": got["missing"], "over": got["over"],
                          "lost": bool(c["powers"]) and not got["cfg"],
                          "picture": bool(_CP.picture_path(project, c)), "colour": c.get("colour") or "",
                          "video": bool(_CP.video_path(project, c)),                          # PAD-1079
@@ -1026,7 +1030,7 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
                           "videos": "" if prof is None or _CP.can_video(prof) else (
                               "%s cannot play a video behind its pick screen yet: a character's video is kept, and "
                               "its picture shows." % prof.label),
-                          "max_name": _CP.MAX_NAME, "max_sub": _CP.MAX_SUB, "max_header": _CP.MAX_HEADER,
+                          "max_name": _CP.MAX_NAME, "max_sub": _CP.MAX_SUB, "max_header": _CP.MAX_HEADER, "max_text": _CP.MAX_TEXT,
                           "max": _CP.MAX_CHARACTERS})
         self._coop_refused = ""
 
@@ -1405,10 +1409,11 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         return self._save_coop_chars(project, chars, "time to pick", name(was), name(chars["time"]))
 
     @rpc
-    def coop_char_set(self, i, name=None, ability=None, sub=None, header=None):
+    def coop_char_set(self, i, name=None, ability=None, sub=None, header=None, text=None):
         """PAD-1031: rename one character, or start it from one of the set abilities ("" none: no powers); PAD-1056:
         or another sub header (the smaller line under its name on its cards, "" none); round 6: or its own header
-        (the badge's words in place of its powers', "" the powers')."""
+        (the badge's words in place of its powers', "" the powers'); PAD-1363: or its own card text (the words under
+        the badge in place of its powers' lines, "" the powers')."""
         from ...plugins.stern import coop_play as _CP
         project = self.project()
         chars = _CP.load_characters(project) if project else None
@@ -1427,6 +1432,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             was, c["header"] = c["header"], _CP.clean_header(header)
             return self._save_coop_chars(project, chars, "%s header" % c["name"], was or "its powers'",
                                          c["header"] or "its powers'")
+        if text is not None:
+            was, c["text"] = c["text"], _CP.clean_text(text)
+            return self._save_coop_chars(project, chars, "%s card text" % c["name"], was or "its powers'",
+                                         c["text"] or "its powers'")
         was = ", ".join(c["powers"]) or "none"
         c["powers"] = list(_CP.ABILITY_POWERS.get(str(ability or ""), []))
         c["ability"] = _CP.bundle_of(c["powers"])

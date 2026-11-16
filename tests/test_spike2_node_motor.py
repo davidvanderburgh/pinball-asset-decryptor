@@ -110,6 +110,16 @@ static void motor_switch(unsigned nid, int bit, int made)
 {
     printf("E %%lu %%u %%d %%d\n", now_ms, nid, bit, made ? 1 : 0);
 }
+/* PAD-1339: the game's switch ids. Node 9 inputs 32..38 are one run, ids
+ * 98..104 (jaws_le's SHARK POSITION 7..1); node 10 has the same stops with an
+ * unrelated switch (id 7) on input 35, which breaks the run. */
+static unsigned motor_switch_id(unsigned nid, unsigned bit)
+{
+    if (bit >= 32 && bit <= 38 && (nid == 9 || nid == 10))
+        return nid == 10 && bit == 35 ? 7 : bit + 66;
+    return 0;
+}
+static const char *motor_switch_name(unsigned nid, unsigned bit) { (void)nid; (void)bit; return 0; }
 
 %s
 
@@ -155,7 +165,9 @@ def cbin(tmp_path_factory):
     body = chr(10).join([_state(), _extract("motor_place_bit"),
                          _extract("nb_motor_on"), _extract("motor_ms"),
                          _extract("motor_say"), _extract("motor_pos"),
-                         _extract("motor_status"), _extract("motor_tick"),
+                         _extract("motor_status"), _extract("motor_sweep_on"),
+                         _extract("motor_sweep"), _extract("motor_path"),
+                         _extract("motor_tick"),
                          _extract("motor_note"), _extract("nb_rx_count_on"),
                          _extract("nb_rx_count_says")])
     src = d / "motor.c"
@@ -172,6 +184,7 @@ def _run(cbin, steps, **env):
     e = dict(os.environ)
     e.pop("PAD_NB_MOTOR", None)
     e.pop("PAD_MOTOR_MS", None)
+    e.pop("PAD_MOTOR_SWEEP", None)
     e.update(env)
     r = subprocess.run([cbin] + steps, capture_output=True, text=True, env=e)
     assert r.returncode == 0, r.stderr
@@ -455,9 +468,13 @@ BAT_CRANE_HOME = "890955014d0080c800067d00"   # crane to input 13 = POS. #1 HOME
 
 
 def test_an_end_stop_motor_not_sent_a_55_keeps_the_switch_byte(cbin):
-    """john_wick_le's car (53/54 only) is answered as PAD-237 measured it."""
+    """john_wick_le's car (53/54 only, stops 4 and 3 in the switch byte) is
+    answered as PAD-237 measured it. PAD-1339: a motor whose stops are both
+    past input 7 - batman's crane (13 / 8), jaws_le's fin - gets the status
+    word from the start; the switch byte says nothing about it (rig, batman
+    1.14: the same moves on main's shim and this one)."""
     assert _replies(cbin, ["t0:9", "f" + CONFIG, "f" + HOME, "s9:0"]) == [(0, "none")]
-    assert _replies(cbin, ["t0:9", "f" + BAT_CRANE, "s9:1"]) == [(0, "none")]
+    assert _replies(cbin, ["t0:9", "f" + BAT_CRANE, "s9:1"]) == [(0, "00002000")]
 
 
 def test_a_55_move_reports_moving_then_done(cbin):
@@ -504,3 +521,64 @@ def test_batman_turntable_is_home_on_a_boot_with_no_test_move(cbin):
     assert _run(cbin, ["t0:9", "f" + BAT_TT, "t9000:9", "f" + BAT_TT_POS2,
                        "t9600:9"]) == [(0, 9, 2, 1), (9000, 9, 2, 0),
                                        (9600, 9, 3, 1)]
+
+
+# ---- PAD-1339: jaws_le's fin (FinMotor), node 9 motor 0 ---------------------
+# The frames jaws_le 1.02 sent (rig 1, PAD_NB_TRACE=1, 2026-11-15): its config
+# names stops 38 (SHARK POSITION 1, cmd 53) and 32 (SHARK POSITION 7, cmd 54);
+# its self-test sends it to POSITION 7 with a cmd 55 naming 0x40|32.
+FIN = "89155100666000000000c84a49230a320000000023006e00"
+FIN10 = "8a155100666000000000c84a49230a320000000023006e00"
+FIN_TO_7 = "8908550060000a640000"
+FIN10_TO_7 = "8a08550060000a640000"
+
+
+def _status(cbin, steps):
+    r = subprocess.run([cbin] + steps, capture_output=True, text=True,
+                       env={k: v for k, v in os.environ.items() if not k.startswith("PAD_")})
+    assert r.returncode == 0, r.stderr
+    return [line.split()[2] for line in r.stdout.splitlines() if line.startswith("S ")]
+
+
+def test_fin_gets_a_status_word_from_boot(cbin):
+    """Before any cmd 55 the fin's cmd 52 got node 9's inputs 0..7 as its
+    flags: other switches' levels read as moving (its self-test waited) or as
+    an error. Stops past input 7: the status word, at rest 0x20."""
+    assert _status(cbin, ["t0:9", "f" + FIN, "s9:0"]) == ["00002000"]
+    assert _status(cbin, ["t0:9", "f" + FIN, "f" + FIN_TO_7, "t100:9", "s9:0",
+                          "t700:9", "s9:0"]) == ["00000100", "00002000"]
+
+
+def test_the_car_keeps_its_switch_byte(cbin):
+    """john_wick_le's car (stops 4 and 3) is answered by the switch byte, as
+    measured (PAD-237): no status word of the model's own."""
+    assert _status(cbin, ["t0:9", "f" + CONFIG, "s9:0"]) == ["none"]
+
+
+def test_fin_passes_positions_2_to_6_on_its_way(cbin):
+    """The self-test wants all seven SHARK POSITION switches seen closing, or
+    every later fin move is refused (jaws_le 0x4c2a8). From 1 to 7 the fin
+    passes 2..6 (inputs 37..33) in order, each made then let go, before 7."""
+    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_TO_7]
+    steps += ["t%d:9" % (1000 + 10 * i) for i in range(1, 61)]
+    edges = _run(cbin, steps)
+    assert edges[0] == (0, 9, 38, 1) and edges[1] == (1000, 9, 38, 0)
+    passed = [(bit, made) for _ms, _n, bit, made in edges[2:-1]]
+    assert passed == [(b, m) for b in (37, 36, 35, 34, 33) for m in (1, 0)]
+    assert edges[-1] == (1600, 9, 32, 1)
+    times = [ms for ms, _n, _b, _m in edges]
+    assert times == sorted(times) and all(1000 < ms < 1600 for ms in times[2:-1])
+
+
+def test_no_sweep_over_a_switch_that_is_not_a_position(cbin):
+    """Same stops, but input 35 is some other switch (its id breaks the run):
+    nothing between the stops is touched."""
+    steps = ["t0:10", "f" + FIN10, "t1000:10", "f" + FIN10_TO_7]
+    steps += ["t%d:10" % (1000 + 10 * i) for i in range(1, 61)]
+    assert _run(cbin, steps) == [(0, 10, 38, 1), (1000, 10, 38, 0), (1600, 10, 32, 1)]
+
+
+def test_sweep_off_jumps_end_to_end(cbin):
+    steps = ["t0:9", "f" + FIN, "t1000:9", "f" + FIN_TO_7]
+    steps += ["t%d:9" % (1000 + 10 * i) for i in range(1, 61)]
+    assert _run(cbin, steps, PAD_MOTOR_SWEEP="0") == [(0, 9, 38, 1), (1000, 9, 38, 0), (1600, 9, 32, 1)]

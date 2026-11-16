@@ -9430,6 +9430,9 @@ struct nb_motor {
     short from, to;             /* the move under way (going >= 0)          */
     unsigned long start;        /* pad_ms() that move began                 */
     unsigned char run55;        /* PAD-971: an end-stop motor sent a cmd 55 */
+    /* PAD-1339: the position switches an end-stop motor passes on the way */
+    signed char path_from, path_to;     /* input bits the move runs between; -1 none */
+    signed char sweep_on;               /* the in-between input made right now; -1 none */
 };
 static struct nb_motor nb_motors[64][NB_MOTORS];
 
@@ -9462,6 +9465,26 @@ static unsigned motor_switch_id(unsigned nid, unsigned bit)
         if (e[20] == nid && *(const unsigned short *)(e + 18) == bit) return id;
     }
     return 0;
+}
+
+/* PAD-1339: the name the game's switch table gives (node, input bit), or 0. */
+static const char *motor_switch_name(unsigned nid, unsigned bit)
+{
+    unsigned st = tread(SW_STRUCT), id = motor_switch_id(nid, bit), nameobj;
+    if (!id || !sw_ok(st)) return 0;
+    nameobj = *(const unsigned *)(unsigned long)(st + id * 32 + 12);
+    if (!sw_ok(nameobj)) return 0;
+    return msg_row(*(const unsigned *)(unsigned long)(nameobj + 16));
+}
+
+static int motor_sweep_on(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("PAD_MOTOR_SWEEP");
+        v = !(e && e[0] == '0');
+    }
+    return v;
 }
 
 /* One edge into the merge, with the bookkeeping sw_shm_merge() does for its
@@ -9522,7 +9545,15 @@ static int motor_status(unsigned nid, unsigned k, unsigned char *p)
     short pos;
     if (nid >= 64 || k >= NB_MOTORS || !nb_motor_on()) return 0;
     m = &nb_motors[nid][k];
-    if (!m->cfg || (!m->enc && !m->run55)) return 0;
+    /* PAD-1339: an end-stop motor whose stops are BOTH past input 7 gets its
+     * status word from the start. The switch byte (inputs 0..7) answers
+     * john_wick's car because its stops sit there; for jaws_le's fin (stops
+     * 38 and 32) it was other switches' levels read as flags - 0x01 "moving"
+     * held its self-test waiting, 0x40 counted an error toward FIN MOTOR
+     * CONSECUTIVE / CUMULATIVE ERRORS/SHUTDOWN (jaws_le 1.02, 0x4ca48: bytes
+     * 2-3 of this reply are FinMotor's flags). */
+    if (!m->cfg || (!m->enc && !m->run55 &&
+                    !(m->stop[0] > 7 && m->stop[1] > 7))) return 0;
     if (m->enc) {
         pos = motor_pos(m);
         p[0] = (unsigned char)(pos & 0xff);
@@ -9677,13 +9708,109 @@ static void disc_reply(unsigned nid, const unsigned char *req, unsigned char *p)
     }
 }
 
+/* ---- PAD-1339: AN END-STOP MOTOR PASSES ITS POSITION SWITCHES ----------
+ *
+ * jaws_le's fin (FinMotor, node 9 motor 0) runs between SHARK POSITION 1
+ * (input 38, cmd 53's stop) and SHARK POSITION 7 (input 32, cmd 54's), with
+ * POSITIONS 2..6 on inputs 37..33 between them. Its self-test (adjustment
+ * FIN MOTOR SELF TEST ENABLED, on by default) sends it to POSITION 7 and back
+ * to 1 and records every position switch it sees close on the way; unless
+ * all seven closed, every later move is refused (jaws_le 1.02: the move,
+ * 0x4b688, asks 0x4c2a8, which counts the bits of the seen mask and wants 7).
+ * The model jumped from one stop to the other, so the fin was seen at 1 and 7
+ * only and never moved again: it stood still in Attach A Barrel and every
+ * other fin mode (Mike St P, PAD-1339; the 45-minute log: one test move at
+ * 156 s, then not a single command).
+ *
+ * So a move made from a known place passes every input between the two, one
+ * after another over the travel time, each made for the first half of its
+ * stretch - the switches a real car runs over. Only when the stops and every
+ * input between them are one unbroken run of the game's switch ids (motor_path):
+ * an unrelated switch that happens to sit between two stop inputs is left
+ * alone. PAD_MOTOR_SWEEP=0 turns it off (the comparison run).
+ *
+ * The status reply (motor_status) is the other half: before this, the fin's
+ * cmd 52 got node 9's inputs 0..7 as its flags, and the self-test waited on a
+ * "moving" bit that was some other switch's level. */
+static void motor_sweep(unsigned nid, unsigned k, struct nb_motor *m)
+{
+    int a = m->path_from, b = m->path_to, step, n, want = -1;
+    unsigned long t = motor_ms(), e;
+    (void)k;
+    if (a >= 0 && b >= 0 && a != b && m->going >= 0 && t) {
+        step = b > a ? 1 : -1;
+        n = (b - a) * step - 1;
+        e = pad_ms() - m->start;
+        if (n > 0 && e < t) {
+            long h = (long)e * (n + 1) * 2 / (long)t;      /* half-stretches gone */
+            if (h % 2 == 0 && h / 2 >= 1 && h / 2 <= n) want = a + step * (int)(h / 2);
+        }
+    }
+    if (want == m->sweep_on) return;
+    if (m->sweep_on >= 0) motor_switch(nid, m->sweep_on, 0);
+    if (want >= 0) motor_switch(nid, want, 1);
+    m->sweep_on = (signed char)want;
+}
+
+/* PAD-1339: set up the switches a move from place `from` to `to` passes. */
+static void motor_path(unsigned nid, unsigned k, struct nb_motor *m, int from, int to)
+{
+    int a, b, step, bit, ida, idb, istep;
+    char line[200];
+    m->path_from = m->path_to = -1;
+    if (m->sweep_on >= 0) motor_switch(nid, m->sweep_on, 0);
+    m->sweep_on = -1;
+    if (!motor_sweep_on() || from < 0 || to < 0) return;
+    a = motor_place_bit(m, from);
+    b = motor_place_bit(m, to);
+    if (a < 0 || b < 0 || a == b || a > 63 || b > 63) return;
+    step = b > a ? 1 : -1;
+    if ((b - a) * step < 2) return;                 /* nothing in between */
+    /* the inputs from one stop to the other are ONE run of the game's switch
+     * ids (jaws_le: inputs 38..32 = SHARK POSITION 1..7 = ids 104..98): the
+     * game declared them together, as one mech's positions. A switch that
+     * merely sits between two stop inputs breaks the run and nothing is
+     * swept. (The names would say it too, but jaws_le's table gives none.) */
+    ida = (int)motor_switch_id(nid, (unsigned)a);
+    idb = (int)motor_switch_id(nid, (unsigned)b);
+    istep = idb > ida ? 1 : -1;
+    if (!ida || !idb || (idb - ida) * istep != (b - a) * step) {
+        static int said;
+        if (said++ < 4) {
+            snprintf(line, sizeof line, "[motor] node %u motor %u: passes no position "
+                     "switches between inputs %d and %d (switch ids %d and %d are no "
+                     "run of their own)\n", nid, k, a, b, ida, idb);
+            motor_say(line);
+        }
+        return;
+    }
+    for (bit = a + step; bit != b; bit += step)
+        if ((int)motor_switch_id(nid, (unsigned)bit) != ida + istep * (bit - a) * step)
+            return;
+    m->path_from = (signed char)a;
+    m->path_to = (signed char)b;
+    {
+        const char *na = motor_switch_name(nid, (unsigned)a), *nb = motor_switch_name(nid, (unsigned)b);
+        snprintf(line, sizeof line, "[motor] %lu ms node %u motor %u passes inputs "
+                 "%d..%d on its way (switches %d..%d%s%s%s%s)\n", pad_ms(), nid, k,
+                 a + step, b - step, ida + istep, idb - istep, na ? ", " : "",
+                 na ? na : "", nb ? " .. " : "", nb ? nb : "");
+    }
+    motor_say(line);
+}
+
 static void motor_tick(unsigned nid)
 {
     unsigned k;
     if (nid >= 64 || !nb_motor_cfg[nid] || !nb_motor_on()) return;
     for (k = 0; k < NB_MOTORS; k++) {
         struct nb_motor *m = &nb_motors[nid][k];
+        if (m->cfg && !m->enc && m->going >= 0) motor_sweep(nid, k, m);
         if (!m->cfg || m->going < 0 || pad_ms() < m->due) continue;
+        if (!m->enc && m->sweep_on >= 0) {          /* PAD-1339: off the last one */
+            motor_switch(nid, m->sweep_on, 0);
+            m->sweep_on = -1;
+        }
         if (m->enc) {                   /* PAD-249: homed, or at a position */
             char b[96];
             m->pos = m->to;
@@ -9733,6 +9860,7 @@ static void motor_note(const unsigned char *p, int n)
         m->stop[1] = (p[5] & 0x40) ? (signed char)(p[5] & 0x3f) : -1;
         m->at = -1;
         m->going = -1;
+        m->path_from = m->path_to = m->sweep_on = -1;            /* PAD-1339 */
         m->enc = n >= 9 && ((p[7] & 0x40) || (p[8] & 0x40));   /* PAD-249 */
         nb_motor_cfg[nid] = 1;
         if (m->enc)
@@ -9810,11 +9938,14 @@ static void motor_note(const unsigned char *p, int n)
             end = p[2] == 0x53 ? 0 : 1;
         }
         if (m->going == end || (m->going < 0 && m->at == end)) return;
+        /* PAD-1339: from a known place it passes the switches between */
+        motor_path(nid, k, m, m->going < 0 ? m->at : -1, end);
         if (m->going < 0 && m->at >= 0)               /* it leaves where it is */
             motor_switch(nid, motor_place_bit(m, m->at), 0);
         m->at = -1;
         m->going = (signed char)end;
-        m->due = pad_ms() + motor_ms();
+        m->start = pad_ms();
+        m->due = m->start + motor_ms();
         if (end < 2)
             snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u sent to end "
                      "%d (cmd %02x), arrives in %lu ms\n", pad_ms(), nid, k,

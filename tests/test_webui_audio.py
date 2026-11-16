@@ -897,10 +897,10 @@ def test_keyboard_moves_from_the_focus_row(tmp_path):
     (tmp_path / "core").mkdir()
     (tmp_path / "tabs" / "audio.js").write_text(src, encoding="utf-8")
     # stand-ins for the modules audio.js imports (keyNav needs none of them)
-    for mod, frm in (("ui", "../core/ui.js"), ("store", "../core/store.js")):
-        m = re.search(r"import \{([^}]*)\} from \"%s\"" % re.escape(frm), src)
+    # (every ../core/ module it imports: ui, store, testtick (PAD-1279), ...)
+    for m in re.finditer(r"import \{([^}]*)\} from \"\.\./core/(\w+)\.js\"", src):
         names = [n.strip() for n in m.group(1).split(",") if n.strip()]
-        (tmp_path / "core" / (mod + ".js")).write_text(
+        (tmp_path / "core" / (m.group(2) + ".js")).write_text(
             "".join("export const %s = () => null;\n" % n for n in names),
             encoding="utf-8")
     # ...and for the tab's own sibling modules (originals.js, PAD-443)

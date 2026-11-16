@@ -1246,7 +1246,7 @@ export default function VideoTab() {
         ? html`<span class="vid-seen-cell" ...${tip({ head: r.seen_head || "When it plays", lines: r.seen_tip || [] })}>${r.seen}</span>`
         : "") },
     // PAD-1279: TEST puts the clip on the test card
-    testCol({ ns: "video", tags: s.test_tags, full: s.test_full, keyOf: (r) => (r.rel ? r.rel : null) }),
+    s.test_on && testCol({ ns: "video", tags: s.test_tags, full: s.test_full, keyOf: (r) => (r.rel ? r.rel : null) }),
     colorCol && { key: "col", label: "Color", width: width("col"), cls: "vid-colorcell", title: COLOR_TIP,
       render: (r) => (r.col_lock
         ? html`<span class="vid-color locked" aria-label="The game's own clip: no color profile can be attached" ...${tip(colorTip(r, colorNs))}><${Icon} name="lock" /></span>`

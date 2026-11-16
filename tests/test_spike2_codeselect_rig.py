@@ -1289,7 +1289,7 @@ def _srcs(var):
 #: audio.c/h + audio_fifo.c + audio_alsa.c (the WAV mixer and its two sinks).
 EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  # PAD-307: the colour correction and the SETTINGS tile's screens
-                 "colour.c", "colour.h", "settings.c", "settings.h", "testpics.c", "testpics.h",
+                 "colour.c", "colour.h", "settings.c", "settings.h", "testpics.c", "testpics.h", "video.c", "video.h",
                  "theme.c", "theme.h", "themes.json", "gen_themes.py",
                  "gfx.c", "gfx.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",

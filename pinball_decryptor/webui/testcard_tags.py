@@ -47,9 +47,10 @@ class TestTagMixin(object):
     def _tc_publish(self):
         """The ticked rows of the open project, for the TEST column."""
         try:
-            project = self._tc_project()
+            on = tc.available(getattr(self.window, "current_mfr", None))
+            project = self._tc_project() if on else ""
             tags = sorted(tc.shared().tagged(self._tc_kind, project)) if project else []
-            self.set(test_tags=tags, test_full=len(tc.shared().items) >= tc.MAX_ITEMS)
+            self.set(test_on=on, test_tags=tags, test_full=len(tc.shared().items) >= tc.MAX_ITEMS)
         except Exception:                                       # noqa: BLE001
             log.exception("test card ticks")
 

@@ -238,6 +238,17 @@ class TestCardList(object):
         return [it for k in KINDS for it in self.items if it.kind == k]
 
 
+def available(mfr):
+    """Whether this manufacturer gets the Test card tab and the TEST ticks: Stern Spike 2
+    (a test card is made from a Spike 2 card's boot and system, and boots a Spike 2
+    machine) - the multi-boot and the mode runtime both, and not the Spike 3 era."""
+    caps = getattr(mfr, "capabilities", None)
+    if caps is None:
+        return False
+    return (bool(getattr(caps, "multiboot", False)) and bool(getattr(caps, "modes", False))
+            and getattr(mfr, "_era", None) != "spike3")
+
+
 _SHARED = []
 
 

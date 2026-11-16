@@ -558,7 +558,7 @@ export default function ImagesTab() {
   // PAD-1279: TEST puts the picture on the test card
   const testColDef = testCol({ ns: "images", tags: s.test_tags, full: s.test_full,
     keyOf: (e) => { const row = typeof e === "number" ? slotAt(s, e) : null; return row && row.r != null ? row.r : null; } });
-  const columns = [thumbCol, nameCol, grouped && countCol, resCol, fmtCol, srcCol, keepCol && keepColDef, colorCol && colorColDef, testColDef, repCol].filter(Boolean);
+  const columns = [thumbCol, nameCol, grouped && countCol, resCol, fmtCol, srcCol, keepCol && keepColDef, colorCol && colorColDef, s.test_on && testColDef, repCol].filter(Boolean);
 
   // the dragged widths (never below the Tk tree's minwidths); the last
   // column always takes what is left

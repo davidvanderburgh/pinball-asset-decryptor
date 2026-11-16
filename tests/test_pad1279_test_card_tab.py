@@ -137,9 +137,14 @@ def test_the_specs_name_each_items_list(tmp_path):
 
 # ---- the TEST tick ----------------------------------------------------------------------------
 
+def _mfr(multiboot=True, modes=True, era="spike2"):
+    return types.SimpleNamespace(capabilities=types.SimpleNamespace(multiboot=multiboot, modes=modes), _era=era)
+
+
 class _Window(object):
     def __init__(self):
         self.tabs = []
+        self.current_mfr = _mfr()
 
 
 class _Tab(tt.TestTagMixin):
@@ -168,6 +173,11 @@ def test_a_tick_puts_the_row_on_the_card_and_every_tab_shows_it(tmp_path):
     tab = _Tab(proj, {"logo.png": f})
     assert tab.set_test("logo.png", True)
     assert tab.state["test_tags"] == ["logo.png"] and tab.state["test_full"] is False
+    assert tab.state["test_on"] is True
+    tab.window.current_mfr = _mfr(modes=False)                  # another maker: no TEST column
+    tab._tc_publish()
+    assert tab.state["test_on"] is False and tab.state["test_tags"] == []
+    tab.window.current_mfr = _mfr()
     it = tc.shared().items[0]
     assert (it.kind, it.label, it.path, it.game) == ("image", "logo", f, "TMNT")
     assert tab.set_test("logo.png", False) and tab.state["test_tags"] == []
@@ -200,7 +210,11 @@ def test_the_tab_is_on_the_rail_for_stern_spike_2_only():
     from pinball_decryptor.webui.tabs import TABS
     assert ("testcard", "testcard", "Test Card", "Test card", "Build", "palette") in TABS
     win = open(os.path.join(ROOT, "pinball_decryptor", "webui", "window.py"), encoding="utf-8").read()
-    assert '"Test Card": g("multiboot") and g("modes") and getattr(mfr, "_era", None) != "spike3"' in win
+    assert '"Test Card": _testcard_available(mfr),' in win
+    assert tc.available(_mfr()) is True
+    assert not tc.available(_mfr(era="spike3"))                 # Spike 3
+    assert not tc.available(_mfr(modes=False))                  # JJP, BoF, DP, Spooky: no mode runtime
+    assert not tc.available(None)
     from pinball_decryptor.webui.tabs.testcard import TestCardTab
     for name in ("add_files", "remove", "move", "rename", "clear", "pick_source", "build", "cancel"):
         assert getattr(getattr(TestCardTab, name), "__pad_rpc__", None) is not None

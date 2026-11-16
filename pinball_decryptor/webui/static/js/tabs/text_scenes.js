@@ -55,7 +55,7 @@ function sceneCols(width, s) {
   const cols = SCENE_COLS.filter((c) => c.key === "label" || keep.includes(c.key));
   // PAD-1279: TEST puts the scene's resting frame on the test card (after the name: kept
   // however narrow the list is; a fixed track, so it may be the last one)
-  if (s) cols.splice(1, 0, testCol({ ns: "text_scenes", tags: s.test_tags, full: s.test_full, keyOf: (r) => r.d }));
+  if (s && s.test_on) cols.splice(1, 0, testCol({ ns: "text_scenes", tags: s.test_tags, full: s.test_full, keyOf: (r) => r.d }));
   // the last column is a fixed track so the Table keeps its width (see SCENE_COLS)
   return cols.map((c, i) => (i === cols.length - 1 && c.key !== "label" && !c.width.startsWith("minmax")
     ? { ...c, width: `minmax(${parseInt(c.width, 10)}px,${parseInt(c.width, 10)}px)` } : c));

@@ -75,15 +75,15 @@ export default function TestCardTab() {
   const c = s.counts || {};
   const sub = "A small card that boots any Stern Spike 2 machine straight into a TEST CARD menu, with no game: "
     + "DEFAULT PAD TEST CARD, IMAGES, VIDEOS, SCENES and SOUNDS, and Color correction to tune the screen.";
-  return html`<div class="page stack">
+  return html`<div class="page">
     <${PageHead} title="Test card" sub=${sub} />
-    <${Card} title="On the card" sub=${(c.image || 0) + " images, " + (c.video || 0) + " videos, " + (c.scene || 0) + " scenes, " + (c.sound || 0) + " sounds"}>
+    <${Card} style="flex:none" title="On the card" sub=${(c.image || 0) + " images, " + (c.video || 0) + " videos, " + (c.scene || 0) + " scenes, " + (c.sound || 0) + " sounds"}>
       <${List} s=${s} />
     <//>
-    <${Card} title="Build">
+    <${Card} style="flex:none" title="Build">
       <${Build} s=${s} />
     <//>
-    <${Card} title="On the machine">
+    <${Card} style="flex:none" title="On the machine">
       <div class="stack small">
         <span>Flippers move between the entries, START opens one, ACTION goes back. An entry with nothing on it does nothing.</span>
         <span>In a list, START shows the one picked full screen; the flippers then step to the previous and next, and START switches the color correction on and off (on a sound: plays it again).</span>

@@ -136,7 +136,7 @@ def test_the_entries_go_back_before_every_game_player_change_and_follow_the_turn
 def test_an_entry_is_20_bytes_from_table_plus_4():
     src = _src()
     assert "#define COOP_USER_ENTRY 20u" in src
-    assert "return t + COOP_USER_ENTRY * p + 4u;" in _body(src, "static unsigned coop_user_entry(")
+    assert "return t + COOP_USER_ENTRY * p + 4u;" in _body(src, "static pm_addr coop_user_entry(")
 
 
 def test_the_award_is_refused_only_while_the_gate_holds():

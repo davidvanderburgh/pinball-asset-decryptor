@@ -113,7 +113,8 @@ rebuild it.
 
 For **every Stern Spike 2 game at its latest version** (not James Bond 007
 Premium/LE, James Bond 60th or Star Wars Premium/LE, whose game programs
-cannot grow), a card can hold several
+cannot grow), and on **Stern Spike 3** for Star Wars ELG 1.10, Fallout 0.81
+and 0.82 and Transformers 0.96, a card can hold several
 *editions* of one game, such as a Standard look and a 70th Anniversary look,
 and skip the menu altogether. The operator picks the edition in the game's
 own menu instead:
@@ -128,7 +129,8 @@ own menu instead:
 On the machine, set **EDITION** under *Adjustments > Machine Settings >
 Attract Mode* (on a game whose Adjustments have *Standard Adjustments*: the
 last row of that list). The chosen edition boots at the next power-up, and edition 1
-boots if nothing has been set. All the editions share the game's settings
+boots if nothing has been set (on Spike 3, Attract Mode is under Machine
+Settings too). All the editions share the game's settings
 and high scores. The build refuses an image that is a different game or
 version, or that has different edition names.
 

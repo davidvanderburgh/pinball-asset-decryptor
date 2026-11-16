@@ -513,3 +513,66 @@ def example_start_shot(mapped):
         if re.search(r"\b(target|tgt)\b", name, re.I):
             return name
     return mapped[0][2] if mapped else ""
+
+
+# ---- PAD-1326: a Spike 3 (64-bit) program's switches ----------------------------------------------------------------
+# A Spike 3 program has no 32-bit static descriptors: its device table is 0x50-byte records (a name pointer at +0, a
+# word at +0x20 holding the I/O group, the index and the class: 1 a switch, 2 a coil, 3 a lamp, 5 other), walked out
+# from the one named TROUGH 1. A switch's id is its rank among the table's switches, from 1 - the ids the 64-bit edge
+# source reports (the port drafter's s3port.switch_ids, measured on the rig, PAD-1271).
+
+def _device_records_a64(e):
+    """[(name, group, index, class)] of the 64-bit program *e*'s (screen_time._Elf64) device table, in its order."""
+    def rec(a):
+        n = e.ptr.get(a)
+        o = e.off(n) if n else None
+        if o is None:
+            return None
+        raw = e.b[o:e.b.find(b"\0", o, o + 80)]
+        try:
+            name = raw.decode("utf-8")          # PAD-1289: Pokemon LE's "POKÉ BALL SPOT" is UTF-8
+        except UnicodeDecodeError:
+            name = raw.decode("latin1")
+        if not name or len(name) > 40 or not name.isprintable():
+            return None
+        w = e.u64(a + 0x20)
+        if w is None:
+            return None
+        g, idx, cls = w & 0xFFFF, (w >> 16) & 0xFFFF, (w >> 32) & 0xFFFF
+        return (name, g, idx, cls) if 1 <= g <= 64 and idx < 512 and cls in (1, 2, 3, 5) else None
+    m = re.search(rb"\0TROUGH 1\0", e.b)
+    if not m:
+        return []
+    o = m.start() + 1
+    sva = next((va + o - off for off, va, fs, _fl in e.loads if off <= o < off + fs), None)
+    for a, v in e.ptr.items():
+        r = rec(a) if v == sva else None
+        if r and r[3] == 1:
+            lo = a
+            while rec(lo - 0x50):
+                lo -= 0x50
+            out, k = [], 0
+            while rec(lo + 0x50 * k):
+                out.append(rec(lo + 0x50 * k))
+                k += 1
+            return out
+    return []
+
+
+def switches_a64(b):
+    """:func:`switches` for a Spike 3 program's bytes *b*: [dict(id, name)] in id order (the first record of a name
+    keeps it), [] when the device table cannot be read."""
+    from .screen_time import _Elf64
+    try:
+        e = _Elf64(bytes(b))
+        recs = _device_records_a64(e)
+    except (struct.error, ValueError, IndexError):
+        return []
+    out, n, seen = [], 0, set()
+    for name, _g, _idx, cls in recs:
+        if cls == 1:
+            n += 1
+            if name.upper() not in seen:
+                seen.add(name.upper())
+                out.append({"id": n, "name": name})
+    return out

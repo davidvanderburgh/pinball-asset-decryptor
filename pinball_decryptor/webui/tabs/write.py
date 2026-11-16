@@ -1719,10 +1719,11 @@ class WriteTab(TabService):
     # PAD-495: Editions
     # ------------------------------------------------------------------
     def _editions_applies(self):
-        """A Stern Spike 2 image build: EDITION grows the game program."""
+        """A Stern Spike 2 image build: EDITION grows the game program. PAD-1325: a Spike 3
+        card's too (its 64-bit program's menu, spike3_menu)."""
         mfr = self.mfr
         return bool(mfr is not None and mfr.key == "stern"
-                    and getattr(mfr, "current_era", "spike2") == "spike2"
+                    and getattr(mfr, "current_era", "spike2") in ("spike2", "spike3")
                     and self.cap("write") and not self._is_direct())
 
     def _publish_editions(self):
@@ -1738,14 +1739,13 @@ class WriteTab(TabService):
                 if _Ed.count(names) else EDITIONS_NONE)
         note, kind = "", ""
         if _Ed.count(names):
-            prof = _Ed.project_title(assets)
-            why = _Ed.title_refusal(prof)
+            why = _Ed.project_refusal(assets)
             if why:
                 note, kind = why, "err"
             else:
                 note = ("The card this builds gets EDITION in its operator menu "
                         "(%s). Put every edition's card on one Multi-boot card in "
-                        "this order." % _Ed.menu_path(prof))
+                        "this order." % _Ed.project_menu_path(assets))
         self.set(editions_cap=True, editions_text=text, editions_note=note,
                  editions_note_kind=kind)
 

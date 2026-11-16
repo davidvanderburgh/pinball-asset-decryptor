@@ -136,6 +136,8 @@ TEAM_MAIN = r"""
 #include <string.h>
 #include <sys/mman.h>
 #define COOP_USER_ENTRY 20u
+#define PM_A64 0
+typedef unsigned pm_addr;          /* Spike 2's (PAD-1326: the runtime's tables are pm_addr-sized) */
 static struct { unsigned teams, n; } coop;
 static unsigned teammates;
 static unsigned coop_teammates(void) { return teammates; }
@@ -203,8 +205,9 @@ def test_a_team_game_keeps_players_3_and_4s_logins(tmp_path):
     src = RUNTIME.read_text(encoding="utf-8")
     fns = "\n".join(R._lift(src, sig) for sig in (
         "static unsigned coop_name_player(unsigned p, unsigned g, unsigned q)",
-        "static unsigned coop_user_entry(unsigned t, unsigned p)",
-        "static int coop_user_table_ok(unsigned t)",
+        "static pm_addr coop_user_entry(pm_addr t, unsigned p)",
+        "static pm_addr coop_user_table(pm_addr mgr, unsigned off)",
+        "static int coop_user_table_ok(pm_addr t)",
         "static unsigned coop_user_word(unsigned p)",
         "static int coop_entry_empty(const volatile unsigned char *x)",
         "static unsigned coop_team_users_from(void)",

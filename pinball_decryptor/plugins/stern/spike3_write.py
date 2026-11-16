@@ -547,7 +547,7 @@ def _sidx_new_files(reader, jobs, work, log):
     return [r for r, _s in new], (sidx_path.lstrip("/"), staged)
 
 
-def _plan_modes(assets_dir, reader, work, log):
+def _plan_modes(assets_dir, reader, work, log, coop_setting=0, coop_ok=True, hand_setting=0):
     """PAD-1272: ``(plan, remove)`` - the project's modes for this card, and its score
     feed (:func:`.spike3_modes.plan`, or None), and whether the card carries an
     earlier build's modes that this build, with none, takes off.  A mode that
@@ -555,13 +555,19 @@ def _plan_modes(assets_dir, reader, work, log):
     from . import mode_write as MW, spike3_modes
     try:
         mplan = spike3_modes.plan(assets_dir, reader, os.path.join(work, "modes"),
-                                  log)
+                                  log, coop_setting=coop_setting, coop_ok=coop_ok,
+                                  hand_setting=hand_setting)
     except MW.ModeWriteError as e:
         raise PipelineError("Encode", "Modes: %s. Nothing was written." % e) from None
     if mplan is not None:
         for line in mplan.lines:
             # PAD-1297: the score feed's line names itself (PAD-1323: and the random clips' and screen times')
-            log(line if line.startswith(("Score feed:", "Random clips:", "Screen times:")) else "Modes: %s" % line,
+            if line.startswith("co-op play: "):         # PAD-1326: co-op's lines under its own name
+                line = "Co-op play: " + line[len("co-op play: "):]
+            elif line.startswith(("handicaps: ", "handicap ")):   # and the handicaps'
+                line = "Handicaps: " + line[len("handicaps: "):] if line.startswith("handicaps: ") else "H" + line[1:]
+            log(line if line.startswith(("Score feed:", "Random clips:", "Screen times:", "Co-op play:", "Handicap"))
+                else "Modes: %s" % line,
                 "info")
         return mplan, False
     try:
@@ -615,10 +621,15 @@ def write_card(original_path, assets_dir, output_path, log=None,
         # PAD-1272: the project's modes, onto the games partition (spike3_modes); a card an
         # earlier build put modes on, written with none now, has them taken off. Planned
         # before the sounds: PAD-1296's own sounds are records appended to image.bin.
-        mplan, mremove = _plan_modes(assets_dir, reader, work, log)
-        # PAD-1325: our operator-menu rows (EDITION): the game program grown, put on whole
-        from . import spike3_menu
+        # PAD-1325: our operator-menu rows (EDITION; PAD-1326: CO-OP PLAY): the game program grown,
+        # put on whole. Planned first: coop.cfg names the CO-OP PLAY row's live value.
+        from . import menu_settings as MS, spike3_menu
         menu = spike3_menu.plan(assets_dir, reader, os.path.join(work, "menu"), log)
+        coop_setting = menu.live(MS.COOP_PLAY) if menu is not None else 0
+        coop_ok = bool(coop_setting) or not spike3_menu.coop_row_asked(assets_dir)
+        hand_setting = menu.live(MS.HANDICAP) if menu is not None else 0
+        mplan, mremove = _plan_modes(assets_dir, reader, work, log, coop_setting=coop_setting,
+                                     coop_ok=coop_ok, hand_setting=hand_setting)
         sounds = plan_sounds(reader, assets_dir, baseline, work, log, check,
                              adds=mplan.sound_adds if mplan is not None else None)
         n_audio = sum(p.n_fit + p.n_grown for p in sounds)

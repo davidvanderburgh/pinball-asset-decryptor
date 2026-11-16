@@ -46,6 +46,8 @@ LABEL = "Handicap per player"
 NO_TITLE = "The app cannot tell which game this project is for, so it cannot give it handicaps."
 NO_PORT = "The app does not know where %s keeps its players and settings yet, so it cannot give it handicaps."
 NO_BUTTON = "The game program names no flipper buttons, so a player could not pick a handicap."
+#: PAD-1326: a Spike 3 title whose port has no switch edge source (PAD-1322) cannot see the flippers walk the pick
+NO_EDGE = "The app cannot read %s's buttons as they are pressed yet, so a player could not pick a handicap."
 NOTHING = "%s has no ball save or difficulty setting a handicap could change."
 #: the service menu's row (menu_settings.HANDICAP): Off/On, Off to start with (DoomWalrus666)
 MENU_VALUES = 2
@@ -171,6 +173,8 @@ def title_refusal(prof):
         return NO_PORT % prof.label
     if not all(s in port.get("site", {}) for s in PORT_SITES) or not all(d in port.get("data", {}) for d in PORT_DATA):
         return NO_PORT % prof.label
+    if getattr(prof, "arch", "arm") == "a64" and "switch_edge" not in port.get("site", {}):
+        return NO_EDGE % prof.label                     # PAD-1326: the flippers are the 64-bit edge hook's
     return ""
 
 
@@ -182,14 +186,14 @@ def project_title(project, probe=False):
 
 def _ranges(game_elf):
     """``{name: (id, lo, hi)}`` of the game's adjustments."""
-    from .adjustments import OFF_MAX, OFF_MIN, AdjustmentTable
-    t = AdjustmentTable(bytes(game_elf))
+    from .adjustments import AdjustmentTable
+    t = AdjustmentTable(bytes(game_elf), wide_ok=True)  # PAD-1326: a Spike 3 program's 64-byte descriptors too
     out = {}
     for name, i in t.by_name.items():
         desc = t._off(t.table_va + i * t.elem)
         if desc is None:
             continue
-        lo, hi = (struct.unpack_from("<i", t.data, desc + o)[0] for o in (OFF_MIN, OFF_MAX))
+        lo, hi = (struct.unpack_from("<i", t.data, desc + t.fields[f])[0] for f in ("min", "max"))
         out[name] = (i, lo, hi)
     return out
 
@@ -285,7 +289,8 @@ def cfg_text(game_elf, title_key="", setting=0, only=False, port=None, custom=No
     lv = levels(game_elf, title_key, custom)
     recs = {}
     site, data = (port or {}).get("site", {}).get("adjustment"), (port or {}).get("data", {}).get("coop_player")
-    if site and data:
+    from .adjustments import is_wide
+    if site and data and not is_wide(bytes(game_elf[:0x40])):   # PAD-1326: the records are read in 32-bit code
         from . import portgen as G
         ids = sorted({c[1] for k in LEVELS for c in lv[k]})
         try:
@@ -306,10 +311,14 @@ def start_button(game_elf):
     the left flipper ends the game (DoomWalrus666), and that left flipper must not walk an open pick."""
     from . import portgen as G
     from . import portswitch as PS
-    try:
-        sws = PS.switches(G.Elf(bytes(game_elf)))
-    except (G.PortgenError, ValueError, struct.error, IndexError):
-        return None
+    from .adjustments import is_wide
+    if is_wide(bytes(game_elf[:0x40])):
+        sws = PS.switches_a64(game_elf)                 # PAD-1326: a Spike 3 program's device table
+    else:
+        try:
+            sws = PS.switches(G.Elf(bytes(game_elf)))
+        except (G.PortgenError, ValueError, struct.error, IndexError):
+            return None
     return next((int(sw["id"]) for sw in sws if " ".join(str(sw["name"]).upper().split()) == "START BUTTON"), None)
 
 

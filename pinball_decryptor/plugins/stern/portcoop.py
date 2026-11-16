@@ -555,3 +555,131 @@ def lines(elf):
     if up:
         out.append("site  coop_up_call           0x%08x 0x%08x 0x%08x" % (up, e.word(up), e.word(up + 4)))
     return out + [line for line in scores if not line.startswith("#")], []
+
+
+# ---- PAD-1326: the same four lines on a Spike 3 (64-bit) program ----------------------------------------------------
+# The framework's player code is the same C++ built for 64-bit ARM (Star Wars ELG 1.10, the port paired from its Spike
+# 2 build: add player 0x417710, player change 0x417b50, player 0x6b1a1a, players 0x792200; every Spike 3 library
+# program has one of each):
+#
+#   add a player:     stp x19, x20, [sp, #-32]! ; mov w0, #<AD_MAX_PLAYERS_PER_GAME> ; adrp xP, <players> ; ...
+#                     bl <adj> ; ldrb w1, [xP, #lo] ; cmp w1, w0, uxtb ; ... ldrb w0, [xP, #lo] ; add w0, w0, #1 ;
+#                     strb w0, [xP, #lo]          - the one byte the program increments after an adjustment compare
+#   the player change: (stack guard) ... ldrb wG, [xR, #<player>] ; ldrb w1, [x0, #<players>] ; add w0, wG, #1 ;
+#                     cmp w1, w0, uxtb           - the next player against the count
+#
+# Each function starts at the call target (bl) at or before its match. The ball in play is the byte after the player's
+# (the player code reads [#player + 1]).
+
+def _a64_reg_page(w, k, reg, tva, back=40):
+    """The page the nearest ``adrp x<reg>`` before word *k* forms, or None."""
+    for j in range(k - 1, max(k - back, -1), -1):
+        x = int(w[j])
+        if (x & 0x9F000000) == 0x90000000 and (x & 31) == reg:
+            imm = (((x >> 5) & 0x7FFFF) << 2) | ((x >> 29) & 3)
+            if imm & 0x100000:
+                imm -= 0x200000
+            return ((tva + 4 * j) & ~0xFFF) + (imm << 12)
+    return None
+
+
+def _a64_byte_at(w, k, tva):
+    """``(rt, address)`` of the ``ldrb`` / ``strb`` at word *k* (its base an adrp page), or None."""
+    x = int(w[k])
+    if (x & 0xFFC00000) not in (0x39400000, 0x39000000):
+        return None
+    page = _a64_reg_page(w, k, (x >> 5) & 31, tva)
+    return None if page is None else (x & 31, page + ((x >> 10) & 0xFFF))
+
+
+def lines_a64(b, player):
+    """The port's co-op lines (``site coop_player_change``, ``site coop_add_player``, ``data coop_player``, ``data
+    coop_players``) for the Spike 3 program's bytes *b*, whose player-up byte is *player* (the port's ``cur_player``),
+    or ``[]`` when the program does not have exactly one of each."""
+    import bisect
+    import numpy as np
+    from .screen_time import _Elf64
+    e = _Elf64(bytes(b))
+    w, tva = e.arr, e.tva
+    n = len(w)
+    calls = sorted({tva + 4 * k + ((int(w[k]) & 0x3FFFFFF) << 2 if not int(w[k]) & 0x2000000
+                                   else ((int(w[k]) & 0x3FFFFFF) << 2) - (1 << 28))
+                    for k in np.nonzero((w & 0xFC000000) == 0x94000000)[0].tolist()})
+
+    def start(k):
+        i = bisect.bisect_right(calls, tva + 4 * k) - 1
+        return calls[i] if i >= 0 else None
+    adds = []
+    for k in np.nonzero((w & 0xFFC00000) == 0x39400000)[0].tolist():   # ldrb; add #1; strb, the same byte
+        if k + 2 >= n or k < 14:
+            continue
+        x = int(w[k])
+        rt = x & 31
+        if int(w[k + 1]) != (0x11000400 | (rt << 5) | rt) or (int(w[k + 2]) & ~0x3FF) != ((x & ~0x3FF) & ~0x400000):
+            continue
+        if ((int(w[k + 2]) >> 5) & 31) != ((x >> 5) & 31) or (int(w[k + 2]) & 31) != rt:
+            continue
+        if not any((int(y) & 0xFFFFFC1F) == 0x6B20001F and ((int(y) >> 16) & 31) == 0 for y in w[k - 14:k]):
+            continue                                                    # cmp wN, w0, uxtb: the adjustment's answer
+        got = _a64_byte_at(w, k, tva)
+        if got:
+            adds.append((start(k), got[1]))
+    if len({a for a in adds}) != 1:
+        return []
+    add_fn, players = adds[0]
+    changes = set()
+    for k in np.nonzero((w & 0xFFC00000) == 0x39400000)[0].tolist():
+        got = _a64_byte_at(w, k, tva)
+        if not got or got[1] != player:
+            continue
+        rg = got[0]
+        win = [int(y) for y in w[k + 1:k + 8]]
+        inc = [y & 31 for y in win if (y & 0xFFFFFFE0) == (0x11000400 | (rg << 5))]          # add wA, wG, #1
+        if not inc or not any((y & 0xFFFFFC1F) == 0x6B20001F and ((y >> 16) & 31) in inc for y in win):
+            continue
+        if not any((_a64_byte_at(w, j, tva) or (0, 0))[1] == players for j in range(k - 6, k + 8) if 0 <= j < n):
+            continue
+        changes.add(start(k))
+    if len(changes) != 1 or None in changes or add_fn is None:
+        return []
+    change = changes.pop()
+    word = lambda va: int(w[(va - tva) // 4])                          # noqa: E731
+    return ["site coop_player_change 0x%08x 0x%08x 0x%08x" % (change, word(change), word(change + 4)),
+            "site coop_add_player  0x%08x 0x%08x 0x%08x" % (add_fn, word(add_fn), word(add_fn + 4)),
+            "data coop_player            0x%08x" % player,
+            "data coop_players           0x%08x" % players]
+
+
+def message_lines_a64(b):
+    """PAD-1326: the message table's lines (``data message_table``, ``value coop_ball_msg``) for the Spike 3 program's
+    bytes *b*: the table is Spike 2's with 8-byte pointers (an entry per message, each to a record of five language
+    strings, every pointer a relative relocation), walked out from the slot of the record of "BALL %d" (Star Wars ELG
+    1.10: 0x6c96e8, BALL %d at 1255 - its Spike 2 build's number); ``[]`` when that is not exactly one slot."""
+    from .screen_time import _Elf64
+    e = _Elf64(bytes(b))
+    d = e.b
+    rev = {}
+    for a, v in e.ptr.items():
+        rev.setdefault(v, []).append(a)
+
+    def text(va):
+        o = e.off(va)
+        if o is None:
+            return False
+        z = d.find(bytes(1), o, o + 400)
+        return z >= 0 and all(32 <= c < 256 or c in (9, 10) for c in d[o:z])
+
+    def entry(t):
+        r = e.ptr.get(t)
+        return r is not None and e.ptr.get(r) is not None and text(e.ptr[r])
+    i = d.find(bytes(1) + b"BALL %d" + bytes(1))
+    if i < 0:
+        return []
+    va = next((v + i + 1 - o for o, v, fs, _fl in e.loads if o <= i + 1 < o + fs), None)
+    slots = [t for r in rev.get(va, []) for t in rev.get(r, [])]
+    if len(slots) != 1:
+        return []
+    lo = slots[0]
+    while entry(lo - 8):
+        lo -= 8
+    return ["data message_table          0x%08x" % lo, "value coop_ball_msg          %d" % ((slots[0] - lo) // 8)]

@@ -1701,7 +1701,8 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
     if why:
         raise ModeWriteError(why)
     project = getattr(result, "project", "")
-    screens = CP.wants_screens(project, result.profile)
+    a64 = getattr(result.profile, "arch", "arm") == "a64"     # PAD-1326: no pick, characters or videos on Spike 3
+    screens = not a64 and CP.wants_screens(project, result.profile)
     if screens and result.build is None:
         if not stock_hud:
             screens = False
@@ -1732,12 +1733,15 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
                 text += "char_clip %d %s\n" % (n, name)             # PAD-1079: its video, behind its card
             if clips:
                 text += "clip_crop %s\n" % CLIP_CROP
-        intro = coop_intro_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress)   # PAD-1114
+        intro = None if a64 else coop_intro_into(result, stock_bank, scratch, ffmpeg=ffmpeg,   # PAD-1114
+                                                 progress=progress)
         if intro:
             text += "intro %s %d\n" % intro
-        for n, name, ms in coop_picked_into(result, stock_bank, scratch, ffmpeg=ffmpeg, progress=progress):
+        for n, name, ms in ([] if a64 else coop_picked_into(result, stock_bank, scratch, ffmpeg=ffmpeg,
+                                                             progress=progress)):
             text += "char_picked %d %s %d\n" % (n, name, ms)           # PAD-1123: full screen once picked
-        bonus = coop_bonus_into(result, stock_bank, scratch, read_card=read_card, ffmpeg=ffmpeg, progress=progress)
+        bonus = None if a64 else coop_bonus_into(result, stock_bank, scratch, read_card=read_card, ffmpeg=ffmpeg,
+                                                 progress=progress)
         if bonus:
             text += "bonus_loop %s\n" % bonus[0]                        # PAD-1123: the teammate's on their bonus
             for n, name in bonus[1]:
@@ -1749,6 +1753,14 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     result.coop_file = path
+    if a64:                                           # PAD-1326: a Spike 3 card's co-op
+        result.lines.append("co-op play: %s" % CP.HOW_A64)
+        if setting:
+            result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 On); %s" % (
+                "Insider Connected is off only while it is 1" if only
+                else "the card's modes keep its scores off Insider Connected either way"))
+        result.lines.append("co-op play: %s" % CP.A64_LEFT_OUT)
+        return result
     result.lines.append("co-op play: %s" % CP.HOW)
     if setting:
         result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Classic, 2 Enhanced; "

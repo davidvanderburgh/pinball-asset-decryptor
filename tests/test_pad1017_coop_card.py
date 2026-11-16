@@ -36,8 +36,9 @@ def test_offered_on_every_latest_title_without_its_own_coop():
     # PAD-1289: + Pokemon LE (Spike 3), refused; PAD-1288: + Fallout LE (Spike 3), refused
     # PAD-1290: + Star Wars 2025 LE (Spike 3), refused
     # PAD-1291: + Star Wars 2025 Pro (Spike 3), refused
-    # PAD-1293: + Transformers LE (Spike 3), refused
-    assert len(offered) == 38
+    # PAD-1293: + Transformers LE (Spike 3), refused; PAD-1326: + Fallout LE and Walking Dead Remastered LE (Spike 3:
+    # their ports read the button) and Transformers LE (Spike 3, the same), offered
+    assert len(offered) == 41
     assert {SMo.title_key(p) for p in offered} >= {"godzilla_le-1.16", "james_bond_le-1.06", "jurassic_park_the_pin-1.05"}
     for p in own:
         assert CP.title_refusal(p) == CP.OWN % p.label
@@ -276,7 +277,8 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     assert gate.index("insider_holding(") < gate.index("insider_achq >= 0")    # Off: nothing held, the query too
     arm = R._lift(src, "static int insider_arm(void)")
     assert "if (at && !attract_wanted() && maps_has(at, 4, MAP_R))" in arm   # only a card of co-op alone
-    assert "return only ? v : 0;" in R._lift(src, "static unsigned coop_setting_wanted(void)\n{")   # ... the build says
+    assert "return only && v ? v + (pm_addr)game_base : 0;" in R._lift(      # ... the build says (PAD-1326: moved)
+        src, "static pm_addr coop_setting_wanted(void)\n{")
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop_switched_on() && coop_button_held()" in add                   # Off: Start adds a competing player
     assert "return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u;" in R._lift(

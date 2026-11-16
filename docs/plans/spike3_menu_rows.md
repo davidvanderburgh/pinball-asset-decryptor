@@ -118,3 +118,15 @@ handicaps) USE it. When they do:
   connect path hangs the emulator under heavy concurrent rig load (SIGKILL, never a program fault;
   work/artifacts/PAD-1321). A calmer rig should let it be captured; whether the hang is purely load
   or inherent to ELG's Insider connect under emulation is still open.
+
+## PAD-1325: the first consumer (EDITION)
+
+- The page is found per game: `menu_settings.WIDE_ANCHORS` names a setting of the game's own whose
+  page the row joins (EDITION, CO-OP PLAY, HANDICAP: CUSTOM MESSAGE, Attract Mode = 16 on ELG,
+  Fallout, Transformers and Pokemon); `plan()` uses it for a 64-bit program. MUSIC MODE has no
+  anchor yet (Spike 3 has no Audio Content page; 12 is Audio Settings): PAD-1324's to pick.
+- The Write step is `plugins/stern/spike3_menu.py`: `grow(raw, wanted)` takes the
+  `plan_many` list, so the other rows join EDITION's one grow (one category table for them all).
+- The visible row: on 2026-11-16 the rig (load under 1) reached Adjustments > Machine Settings >
+  Attract Mode without a hang, but no setting page opens on SELECT, on the stock ELG card too
+  (control run): an emulator gap, not the grow. The row is checked from the program instead.

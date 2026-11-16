@@ -123,6 +123,42 @@ reboot`.  In `s3run.sh` the restart is a stand-in that leaves
 front on any card.  Proven on Fallout LE 0.82 (2026-11-14): a 2 s BACK did nothing, a 6.5 s
 hold asked for the restart.  codeselect/DESIGN.md has the whole design.
 
+## Editions: no menu, the game's EDITION picks (PAD-1325)
+
+A card whose images are editions of one game (a Standard and a Dark Side look of Star Wars ELG,
+say) shows no menu: the game's own EDITION setting (Adjustments > Machine Settings > Attract Mode)
+picks the image at the next power-up, as on a Spike 2 card (PAD-495).
+
+- **Each edition's Write** puts EDITION in the game's operator menu
+  (`plugins/stern/spike3_menu.py`): the 64-bit program's spare setting taken over, the menu's
+  category table grown so the Attract Mode page lists it (`menu_settings.grow_wide_program`,
+  PAD-1321; the page is the one that lists CUSTOM MESSAGE, `menu_settings.wide_category`), read
+  back, and the program put on the card whole. Takers: Star Wars ELG 1.10, Fallout 0.81 / 0.82,
+  Transformers 0.96. Pokemon 0.82, both Star Wars 2025 and Walking Dead 0.92 use every setting
+  EDITION could take and are refused with a sentence.
+- **`mks3multi.py build|inject --editions`** reads every image's program (a card's through PAD's
+  own decryptor; an existing card's trees on inject; a modes card through `pad/padmode/game.target`)
+  and refuses unless every image is the same game at one version, carries EDITION for exactly as
+  many editions as the card has images, names them alike and captions every setting alike (one
+  settings store serves them all). images.conf gets
+  `edition=/data/nv/<title>/NVM|<SHA1("EDITION")>|<n>`; `--no-editions` takes it off, and an
+  inject with neither keeps what the card says. `verify` checks every tree's EDITION.
+- **s3select** (codeselect `edition_boot`) reads the setting off the game's settings store before
+  the game starts and boots that image; nothing read, or a value out of range, boots image 0. A
+  Spike 3 store is Spike 2's export format behind a bigger header: the same `MAP0` counts and
+  44-byte records keyed by the SHA1 of the caption, but its section table is u64 at 0xa8 (Spike 2:
+  u32 at 0x7c) and its adjustments start 8 bytes past 336 + 40 x audits. `nvm.c` takes the
+  adjustments' offset from that table. Each generation's `.crc32` is the CRC-32 of the file.
+
+Proven 2026-11-16 (rig slot 125, hidden, muted; work/artifacts/PAD-1325/rig_proof.txt): the real
+Spike 3 Write of Star Wars ELG 1.10 with editions "Standard, Dark Side" (486 s; the grown program
+went on whole, its SD-validation record refreshed), a card of two editions built and verified with
+`--editions`. A fresh machine booted edition 1 with no menu ("no store"); the game then stored
+EDITION as its own setting (id 33, value 1, range 1-2); with EDITION = 2 in the store the next
+power-up booted image 1 (DARK SIDE) with no menu. The operator menu reaches Machine Settings >
+Attract Mode on the rig, but the Spike 3 emulator opens no setting page at all (the stock card
+too), so the row on the page is checked from the program (`menu_settings.check`).
+
 ## Proven (2026-11-13, the emulator, real cards)
 
 A card built by `mks3multi.py build` from `fallout_le-0_81_0` + `fallout_le-0_82_0`

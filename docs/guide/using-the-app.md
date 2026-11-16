@@ -471,17 +471,19 @@ only the room Stern left: a few hundred MB on a stock 8 GB card.
 - **A build that won't fit** stops before writing anything and names the
   smallest card size that could take it.
 
-### Editions (Stern Spike 2)
+### Editions (Stern Spike 2 and Spike 3)
 
 One card can hold several editions of a game (a Standard and a 70th
 Anniversary look, say), picked by **Edition** under Adjustments > Machine
-Settings > Attract Mode. Same games as music modes.
+Settings > Attract Mode. On Spike 2, the same games as music modes; on
+Spike 3, Star Wars ELG 1.10, Fallout 0.81 and 0.82 and Transformers 0.96
+(the other Spike 3 games use every setting Edition could take).
 
 1. Make each edition its own project from the same card.
 2. On the Write tab, **Name the editions…** gives every project the same
    names in the same order. Write each one.
 3. On the Multi-boot tab, add the images (edition 1 first), tick
-   **Compact build**, and tick **No menu: boot the edition the game's
+   **Compact build** (Spike 2), and tick **No menu: boot the edition the game's
    EDITION setting names** in Menu settings.
 
 The card then shows no menu, and a change to Edition takes effect at the

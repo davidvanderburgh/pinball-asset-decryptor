@@ -890,6 +890,9 @@ MAX_HEADER = 96
 #: PAD-1083: the badge's smallest size on the pick card (px at scale 1) and its words' room there: the card's words
 #: column (CARD_SIZE wide less the portrait and margins, pick_card's iw) less the pill's ends
 BADGE_LEAST = 14
+#: PAD-1363: the longest card text of a character's own (in place of its powers' lines; the pick card wraps it to
+#: three lines at most and cuts the rest with ...)
+MAX_TEXT = 240
 BADGE_ROOM = 1280 - (40 + 380 + 44) - 44 - 40
 
 #: why an ability is not offered on a card
@@ -1053,6 +1056,13 @@ def clean_header(header):
     return " ".join(str(header or "").upper().replace("|", " ").split())[:MAX_HEADER]
 
 
+def clean_text(text):
+    """PAD-1363: a character's own card text (DoomWalrus666: 84GOJI's "Press Action twice to add a ball..." in his
+    words), in place of its powers' lines on its pick card: one space between words, the case it was typed in, at most
+    :data:`MAX_TEXT`."""
+    return " ".join(str(text or "").split())[:MAX_TEXT]
+
+
 def character_words(character, words_for=None):
     """The badge the pick's card shows for *character*: its own header, or its powers' words (*words_for*: key ->
     words, :func:`words_for`; a power not in it is left out)."""
@@ -1092,6 +1102,16 @@ def badge_label(draw, character, label, words_for, room, S):
     return t.rstrip(" ,") + "...", True
 
 
+def text_on_card(text):
+    """PAD-1363: ``(shown, cut)``, a character's card text as its pick card wraps it (:func:`_card_lines` at the
+    card's own width): *shown* the words it gets to, *cut* True when the card stops short with ``...``."""
+    from PIL import Image, ImageDraw
+    S = 2
+    _f, lines, _s = _card_lines(ImageDraw.Draw(Image.new("L", (1, 1))), text, (BADGE_ROOM + 40) * S, S)
+    shown = " ".join(lines)
+    return shown, bool(lines) and lines[-1].endswith("...") and shown != " ".join(str(text).split())
+
+
 def badge_on_card(character, words_for=None):
     """PAD-1083: ``(label, cut)``, the badge the pick card shows for *character* (:func:`badge_label` at the card's
     own size), for the Characters dialog to say when it is too long."""
@@ -1102,7 +1122,10 @@ def badge_on_card(character, words_for=None):
 
 
 def character_line(character, words_for=None):
-    """The card's line for *character*: its powers' lines in the player's words (the powers in *words_for*)."""
+    """The card's line for *character*: its own text (PAD-1363), or its powers' lines in the player's words (the
+    powers in *words_for*)."""
+    if character.get("text"):
+        return character["text"]
     wf = words_for if words_for is not None else {p[0]: p[2] for p in POWERS}
     return " ".join(_POWER[k][3] for k in character.get("powers") or [] if k in wf and k in _POWER)
 
@@ -1229,6 +1252,7 @@ def _characters(got):
             keys = _powers_of(c)                            # round 6: a list of powers (an old ability: its bundle)
             out.append({"name": clean_name(c.get("name")), "sub": clean_sub(c.get("sub")),
                         "powers": keys, "header": clean_header(c.get("header")),
+                        "text": clean_text(c.get("text")),           # PAD-1363: its own card text, "" its powers' lines
                         "ability": bundle_of(keys),         # the bundle these are, for the dialog's starting points
                         "picture": str(c.get("picture") or ""), "colour": clean_colour(c.get("colour")),
                         "video": str(c.get("video") or ""),
@@ -1514,7 +1538,7 @@ def classic_patch(project, characters, index, words_for=None, theme=None, window
     if not chars["list"][index]["powers"]:                  # round 6: a list of powers (none: the card says so)
         return None
     full = pick_card(project, chars, index, words_for, theme, window=window)
-    plain = pick_card(project, dict(chars, list=[dict(c, powers=[], header="") if k == index else c
+    plain = pick_card(project, dict(chars, list=[dict(c, powers=[], header="", text="") if k == index else c
                                                  for k, c in enumerate(chars["list"])]), index, words_for, theme,
                       window=window)
     ys, xs = np.nonzero(np.any(full != plain, axis=2))
@@ -2692,7 +2716,8 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
         label, does = "A SURPRISE", "The machine picks one of the characters nobody has taken yet."
     else:
         label = character_words(c, words_for) or "NO SPECIAL ABILITY"      # round 6: its powers' words, or its own
-        does = character_line(c, words_for) if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
+        does = (c.get("text") or character_line(c, words_for) if label != "NO SPECIAL ABILITY"     # PAD-1363: own text
+                else c.get("text") or "Plays as the game always does.")
         label = badge_label(d, c, label, words_for, iw - 40 * S, S)[0]    # PAD-1083: never past the card's edge
     bf = _fit(d, label, _TEXT_FONTS, iw - 40 * S, 24 * S, BADGE_LEAST * S)  # PAD-1075: a long badge shrinks to the card
     bw = d.textlength(label, font=bf) + 40 * S

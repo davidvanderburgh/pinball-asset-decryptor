@@ -2237,7 +2237,7 @@ GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
 #: lined-up instructions on Pokemon LE, but they are the flags of ELG's own modes)
 GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
                         r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+|done_audit_\d+|"
-                        r"challenge_menu_\w+|comp_menu_\w+)$")   # PAD-1327: a start menu's numbers are its own program's
+                        r"challenge_\w+|comp_menu_\w+)$")   # PAD-1327: a start menu's and the champion framework's numbers are measured per program
 #: sites only ever armed together: one placed without the other is written as a comment (PAD-1288: Fallout's
 #: coil_give lines up, its coil_take has no counterpart, and the runtime arms held coils on both or neither)
 SITE_PAIRS = (("coil_take", "coil_give"),)

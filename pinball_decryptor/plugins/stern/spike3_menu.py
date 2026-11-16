@@ -33,6 +33,23 @@ class MenuPlan:
     def job(self):
         return (self.rel, self.staged)
 
+    def live(self, key):
+        """PAD-1326: the live value's address (the program's own) of row *key*, or 0 when it is not on."""
+        return next((s.live for s in self.settings if s.key == key), 0)
+
+
+def coop_row_asked(project):
+    """PAD-1326: whether this Spike 3 build's co-op play asks for CO-OP PLAY in the operator menu (co-op goes on
+    and the project switches it there: coop_play.menu_asked)."""
+    from . import coop_play as CP
+    from . import spike3_modes
+    return CP.menu_asked(project) and spike3_modes.coop_wanted(project) is not None
+
+
+def _coop_row():
+    from . import coop_play as CP
+    return (MS.COOP_PLAY, CP.MENU_VALUES_A64, (), {"default": 1, "help_text": CP.MENU_HELP_A64, "from_zero": True})
+
 
 def editions_wanted(project, log):
     """The project's edition names when they go on a Spike 3 card, else ``[]`` (said why)."""
@@ -75,26 +92,52 @@ def grow(raw, wanted):
     return out, settings, refused
 
 
+#: PAD-1326: each row's own words when it cannot go on, and once it is on
+_LEFT = {
+    MS.EDITION: ("Editions: EDITION could not be added to the operator menu (%s), so a Multi-boot "
+                 "card cannot pick this card by it."),
+    MS.COOP_PLAY: ("Co-op play: CO-OP PLAY could not be added to the operator menu (%s), so co-op play "
+                   "is left out of this card."),
+}
+
+
+def _placed(s, names, log):
+    if s.key == MS.EDITION:
+        log("Editions: EDITION is in the operator menu (%s), values 1 to %d, its help line \"%s\". "
+            "Put this card on a Multi-boot card with the other editions, in that order, and the "
+            "setting picks the one that boots." % (s.where, s.values, s.help), "info")
+    elif s.key == MS.COOP_PLAY:
+        log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 "
+            "(On) and holding the right flipper button while pressing Start adds a teammate. While it "
+            "is 1 most Insider Connected features are off; at 0 the card reports as it always has "
+            "(with no modes on it)." % s.where, "info")
+
+
 def plan(project, reader, work, log=None):
     """The grown game program for the Spike 3 games volume *reader* (an Ext4Reader over it), or
     None when the project asks for no row this card can take (each reason in the log, as a Spike 2
-    Write leaves EDITION out: the rest of the project is still written)."""
+    Write leaves EDITION out: the rest of the project is still written). PAD-1326: CO-OP PLAY too,
+    when co-op goes on and the project switches it in the menu (its live value goes in coop.cfg:
+    :meth:`MenuPlan.live`)."""
     from . import spike3_modes
     log = log or (lambda *a, **k: None)
     names = editions_wanted(project, log)
-    if not names:
+    coop = coop_row_asked(project)
+    wanted = (([(MS.EDITION, len(names), names)] if names else [])
+              + ([_coop_row()] if coop else []))
+    if not wanted:
         return None
 
-    def left(why):
-        log("Editions: EDITION could not be added to the operator menu (%s), so a Multi-boot "
-            "card cannot pick this card by it." % str(why).rstrip("."), "warning")
+    def left(why, keys=None):
+        for key in keys or [w[0] for w in wanted]:
+            log(_LEFT[key] % str(why).rstrip("."), "warning")
         return None
     try:
         state, target = spike3_modes.card_state(reader)
     except Exception as e:                              # noqa: BLE001 - an unreadable link
         return left("the card's /games/game could not be read: %s" % e)
     if state == "multiboot":
-        return left("this is a multi-boot card; each edition's own card takes it, and the "
+        return left("this is a multi-boot card; each game's own card takes it, and the "
                     "Multi-boot tab puts those cards together")
     if state not in ("stock", "modes") or not target:
         return left("the card's /games/game names no game program")
@@ -103,18 +146,18 @@ def plan(project, reader, work, log=None):
         return left("the game program %s is not on the card" % target)
     raw = bytes(reader.read_file_bytes(node))
     try:
-        out, settings, refused = grow(raw, [(MS.EDITION, len(names), names)])
+        out, settings, refused = grow(raw, wanted)
     except (MS.MenuSettingError, ValueError) as e:
         return left(e)
+    for key, why in refused.items():
+        left(why or "unknown", [key])
     if not settings:
-        return left(refused.get(MS.EDITION) or "unknown")
+        return None
     rel = target[len("/games/"):] if target.startswith("/games/") else target.lstrip("/")
     os.makedirs(work, exist_ok=True)
     staged = os.path.join(work, "game_program")
     with open(staged, "wb") as f:
         f.write(out)
-    s = settings[0]
-    log("Editions: EDITION is in the operator menu (%s), values 1 to %d, its help line \"%s\". "
-        "Put this card on a Multi-boot card with the other editions, in that order, and the "
-        "setting picks the one that boots." % (s.where, s.values, s.help), "info")
+    for s in settings:
+        _placed(s, names, log)
     return MenuPlan(rel, staged, settings)

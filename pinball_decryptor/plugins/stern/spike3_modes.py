@@ -87,12 +87,11 @@ MULTIBOOT_WORDS = ("this is a multi-boot card; modes go on a card of the one gam
 #: the engine's words for it. The census behind them is docs/plans/spike3_modes.md, "The family
 #: on Spike 3". The score feed is not here: it goes on (:func:`feed_wanted`), and so do the random clips
 #: (:func:`variants_wanted`) and the screen times (:func:`screen_times_wanted`, PAD-1323), and EDITION
-#: (:mod:`.spike3_menu`, PAD-1325).
+#: (:mod:`.spike3_menu`, PAD-1325), and co-op play (:func:`coop_wanted`, PAD-1326).
 FAMILY_LEFT_OUT = {
     "music modes": "the 64-bit runtime cannot play a Spike 3 game's songs in their place yet",
     "picture settings": "they cannot be added to a Spike 3 game yet",
     "attract items": "the 64-bit runtime cannot add to a Spike 3 game's attract screens yet",
-    "co-op play": "the 64-bit runtime cannot follow a Spike 3 game's players yet",
     "inactivity pausing the timers": "the 64-bit runtime cannot pause a Spike 3 game's timers yet",
     "handicaps": "the 64-bit runtime cannot give a Spike 3 game's players handicaps yet",
     "expression light shows": "the 64-bit runtime cannot light a Spike 3 cabinet's expression lights yet",
@@ -352,6 +351,24 @@ def feed_wanted(project, real_card=True):
     return url, prof
 
 
+def coop_wanted(project, real_card=True):
+    """PAD-1326: the profile co-op play (:mod:`.coop_play`) goes on in this Spike 3 build, else None: the 64-bit
+    runtime follows the game's players through the port's player change, add player and player bytes (a title whose
+    port has them: title_refusal), a teammate joining with the right flipper button held. Quiet: the engine's Write
+    (``_coop_for_build``) has already said why it is left out."""
+    from . import coop_play as CP
+    if not CP.load(project) or not MW.preview_on() or MW.host_refusal():
+        return None
+    if real_card:
+        from ...core import ext4_grow
+        if not ext4_grow.available()[0]:
+            return None
+    prof = CP.project_title(project, probe=True)
+    if prof is None or CP.title_refusal(prof):
+        return None
+    return prof
+
+
 def variants_wanted(project, real_card=True):
     """PAD-1323: ``(slots, profile)`` of the random clips (:mod:`.clip_variants`) this Spike 3 build carries,
     else ``({}, None)``. The 64-bit runtime hooks the game's ask on the video bank's surface (clip v2: a port
@@ -393,7 +410,7 @@ def screen_times_wanted(project, game_raw, log, real_card=True):
                                 ext4_available=None if real_card else (lambda: (True, "")))
 
 
-def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")):
+def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, ""), coop_setting=0, coop_ok=True):
     """The project's modes for the Spike 3 games volume *reader*, built into *scratch*, or
     None when it has none this card can carry (each reason said in the log, as a Spike 2
     Write leaves modes out: the rest of the project is still written). Raises
@@ -404,9 +421,12 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     card with no modes (the runtime then arms it and nothing else: ``only`` in its file).
     PAD-1323: so do the random clips (:func:`variants_wanted`: their clips into the video bank,
     ``clips.cfg`` beside the runtime) and the screen times (:func:`screen_times_wanted`: ``stime``
-    lines in it)."""
+    lines in it). PAD-1326: so does co-op play (:func:`coop_wanted`: ``coop.cfg``), *coop_setting* the CO-OP
+    PLAY row's live value at the program's own address (spike3_menu placed it; 0: always on), *coop_ok* False
+    when the project asked for the row and the card could not take it (then no co-op, as on Spike 2)."""
     log = log or (lambda *a, **k: None)
     feed, feed_prof = feed_wanted(project, real_card=real_card)
+    coop_prof = coop_wanted(project, real_card=real_card) if coop_ok else None
     slots, var_prof = variants_wanted(project, real_card=real_card)
     from . import screen_time as ST
     stime_maybe = ST.enabled() and bool(_changed_videos(project))
@@ -418,7 +438,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     else:
         modes = MW.project_modes(project)
         code = MW.code_mode_list(project)        # PAD-1295: compiled for the card's 64-bit ARM
-    if not modes and not code and not feed and not slots and not stime_maybe:
+    if not modes and not code and not feed and not slots and not stime_maybe and coop_prof is None:
         return None
 
     def left(why):
@@ -433,7 +453,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         why = MW.card_refusal(project, real_card=real_card)
         if why:
             modes, code = left(why)
-    if not modes and not code and not feed and not slots and not stime_maybe:
+    if not modes and not code and not feed and not slots and not stime_maybe and coop_prof is None:
         return None
     state, target = card_state(reader)
     if state == "multiboot":
@@ -445,6 +465,9 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         if slots:
             log("Random clips: left out of this build: %s." % MULTIBOOT_WORDS.replace(
                 "modes go on", "random clips go on"), "warning")
+        if coop_prof is not None:                   # PAD-1326
+            log("Co-op play: left out of this build: %s." % MULTIBOOT_WORDS.replace(
+                "modes go on", "co-op play goes on").replace("they were", "it was"), "warning")
         return None
     fw = game_program(reader, target) if target else None
     if fw is None:
@@ -453,7 +476,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     game_raw = bytes(reader.read_file_bytes(fw))
     stime, stime_prof = (screen_times_wanted(project, game_raw, log, real_card=real_card) if stime_maybe
                          else ([], None))
-    if not modes and not code and not feed and not slots and not stime:
+    if not modes and not code and not feed and not slots and not stime and coop_prof is None:
         return None
     used, adds = [], {}
     hud, bank = b"", b""
@@ -494,6 +517,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                      modes_on=bool(modes or code), score_feed=feed, score_feed_prof=feed_prof,
                      variants=bool(slots), variants_prof=var_prof,
                      screen_times=stime, screen_prof=stime_prof,
+                     coop=coop_prof is not None, coop_prof=coop_prof, coop_setting=coop_setting,   # PAD-1326
                      read_card=read_card, scan_card=scan_card)
     if result is None:
         return None

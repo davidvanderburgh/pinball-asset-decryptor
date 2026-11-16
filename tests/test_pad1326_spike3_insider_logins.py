@@ -179,3 +179,89 @@ def test_the_runtime_moves_the_manager_by_the_load_address():
     assert re.search(r"pm_addr mgr;\s+/\* the logins' tables", src)
     assert src.count("maps_has(cu_mgr + cu_off[") == 2 and src.count("maps_has(feed.mgr + feed.off[") == 2
     assert "maps_has(cu_mgr + cu_off[0], 4," not in src and "maps_has(feed.mgr + feed.off[0], 4," not in src
+
+
+# ---- co-op play on Spike 3 -----------------------------------------------------------------------------------------
+
+#: the flipper buttons' switch ids (left, right) in each program's own device table
+FLIPPERS = {"fallout_le": [24, 25], "pokemon_le": [23, 24], "star_wars_2025_le": [45, 46],
+            "star_wars_2025_pro": [45, 46], "star_wars_elg": [50, 49], "transformers_mtmte_le": [56, 55],
+            "walking_dead_remastered_le": [23, 24]}
+
+
+@pytest.mark.parametrize("key", sorted(CARDS))
+def test_every_spike3_program_names_its_flipper_buttons(key):
+    from pinball_decryptor.plugins.stern import sound_modes as SM
+    assert SM.flipper_buttons(_library_program(key)) == FLIPPERS[key]
+
+
+def test_a_spike3_coop_cfg_is_the_core_lines():
+    b = _library_program("star_wars_elg")
+    assert CP.cfg_text(b, awards={"x": True}, setting=0x70afd8, only=True).splitlines() == [
+        "coop on", "button 49", "setting 0x0070afd8", "only", "users 0x00710c20 0x190 0x198"]
+
+
+def test_the_coop_play_row_grows_into_the_elg_program():
+    from pinball_decryptor.plugins.stern import menu_settings as MS, spike3_menu
+    from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
+    b = _library_program("star_wars_elg")
+    row = spike3_menu._coop_row()
+    assert row[1] == CP.MENU_VALUES_A64 == 2 and row[3]["help_text"] == CP.MENU_HELP_A64
+    out, settings, refused = spike3_menu.grow(b, [row])
+    assert not refused and [s.key for s in settings] == [MS.COOP_PLAY]
+    s = settings[0]
+    assert s.live == 0x70afd8 and s.where.endswith("Attract Mode") and s.help == CP.MENU_HELP_A64
+    assert MS.check(out, s) == []
+    t = AdjustmentTable(out, wide_ok=True)
+    assert t.wide and len(out) > len(b)
+
+
+def test_the_coop_row_and_an_edition_go_on_together():
+    from pinball_decryptor.plugins.stern import menu_settings as MS, spike3_menu
+    b = _library_program("star_wars_elg")
+    out, settings, refused = spike3_menu.grow(b, [(MS.EDITION, 2, ["A", "B"]), spike3_menu._coop_row()])
+    assert not refused and {s.key for s in settings} == {MS.EDITION, MS.COOP_PLAY}
+    assert len({s.live for s in settings}) == 2
+
+
+def test_the_runtime_arms_coop_on_64bit():
+    src = _src()
+    arm = src[src.index("static void coop_arm(void)\n{"):]
+    arm = arm[:arm.index("\n}\n")]
+    assert "#if PM_A64" in arm and "if (!edge_hook(e)) {" in arm                    # the button's edges, hooked
+    assert "if (coop.setting) coop.setting += (pm_addr)game_base;" in src             # the row's word, moved
+    assert "pm_addr setting;" in src
+    assert "return only && v ? v + (pm_addr)game_base : 0;" in src                    # the Insider gate's too
+    assert "static pm_addr insider_while;" in src and "pm_addr at = coop_setting_wanted();" in src
+    assert src.count("ret = coop_add_game(r0, r1, r2, r3) & 0xffu;") == 2               # a bool in w0
+    for fn in ("static void coop_scores_same(unsigned n)\n{",
+               "static unsigned long long coop_award_now(const struct coop_award *a, unsigned p)\n{"):
+        body = src[src.index(fn):]
+        body = body[:body.index("\n}\n")]
+        assert 'pm_addr s32 = data("scores32"), s64 = data("scores");' in body
+
+
+def test_the_spike3_write_carries_coop():
+    from pinball_decryptor.plugins.stern import spike3_modes as S3M
+    assert "co-op play" not in S3M.FAMILY_LEFT_OUT
+    import inspect
+    sig = inspect.signature(S3M.plan)
+    assert sig.parameters["coop_setting"].default == 0 and sig.parameters["coop_ok"].default is True
+    w = open(os.path.join(os.path.dirname(__file__), "..", "pinball_decryptor", "plugins", "stern", "spike3_write.py"),
+             encoding="utf-8").read()
+    # the menu first: coop.cfg names the CO-OP PLAY row's live value
+    assert w.index("menu = spike3_menu.plan(") < w.index("mplan, mremove = _plan_modes(")
+    assert "coop_setting = menu.live(MS.COOP_PLAY) if menu is not None else 0" in w
+
+
+def test_a_spike3_coop_plan_says_what_it_is(tmp_path):
+    from pinball_decryptor.plugins.stern import mode_project as MP, mode_write as MW
+    prof = MP.profiles()["star_wars_elg_1_10_spike3"]
+    assert prof.arch == "a64" and not CP.title_refusal(prof)          # its port names the player sites
+    b = _library_program("star_wars_elg")
+    r = MW.ModePlan(project=str(tmp_path), profile=prof, port="", build=None)
+    MW.coop_into(r, b, str(tmp_path), setting=0x70afd8, only=True)
+    text = open(r.coop_file).read()
+    assert "setting 0x0070afd8" in text and "screens" not in text and "intro" not in text
+    assert r.lines[0] == "co-op play: " + CP.HOW_A64
+    assert "CO-OP PLAY: 0 Off, 1 On" in r.lines[1] and r.lines[-1] == "co-op play: " + CP.A64_LEFT_OUT

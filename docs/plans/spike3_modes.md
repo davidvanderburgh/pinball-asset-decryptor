@@ -805,16 +805,39 @@ receiving the same body. Rig notes: Spike 3 runs do not show on riglock's board 
 time), and the host's /proc/<pid>/maps names the program `/games/<title>/game` or by its full overlay path depending
 on the run.
 
-**Co-op and handicaps, still to do (in this order).**
-1. The runtime's co-op code on 64-bit: `coop_change_wrap` / the add-player wrap read r0..r3 and 32-bit structs;
-   check each against hook_a64.h's pm_reg, then carry the drafted `coop_player_change` / `coop_add_player` sites and
-   `coop_player` / `coop_players` data (the ELG draft has them, commented out: 0x417b50 / 0x417710, 0x6b1a1a / 0x792200).
+**Co-op play on Spike 3 (PAD-1326, built on PAD-1325's spike3_menu).** The core of co-op goes on: the game plays one
+player for the team, the runtime takes the teammates in turn (the player change and add player wrapped, the player /
+ball / players bytes), every teammate's score panel the team's score, the logins swapped so the teammate up has the
+game's player's. A teammate joins with the right flipper button held and Start (PAD-1017's first route): the start
+menu's CO-OP PLAY / TEAM PLAY entries need the menu's frame hook, 32-bit only (`hook_full` is 0 on 64-bit); the
+characters, abilities, awards and co-op videos read 32-bit code. `coop_play.cfg_text` writes a 64-bit program the core
+lines alone (`coop on`, `button`, `setting`, `only`, `users`), `mode_write.coop_into` adds no pick screens or clips and
+says so (`A64_LEFT_OUT`). CO-OP PLAY is Off / On on Spike 3 (`MENU_VALUES_A64`, the runtime reads 1 as Classic): it goes
+on through `spike3_menu.plan` (beside EDITION; on ELG Adjustments > Machine Settings > Attract Mode, its live value at
+0x70afd8), which spike3_write now plans before the modes so coop.cfg names the value.
+- **The flipper buttons**: `portswitch.switches_a64` reads a Spike 3 program's device table (the port drafter's rig-
+  proven reader, s3port.device_records, shipped): every library program's two buttons (ELG: right 49, left 50).
+- **The runtime**: the button's edges come from the 64-bit edge hook, which co-op now installs itself (`edge_hook`; a
+  card of co-op and no shots had none, so the button never read held); the scores' addresses, the CO-OP PLAY word and
+  the Insider gate's copy of it are `pm_addr`, the two words moved by `game_base`; the add player's bool masked.
+- **The port**: ELG 1.10 carries coop_player_change 0x417b50 / coop_add_player 0x417710 (no arguments, a bool in w0)
+  and coop_player 0x6b1a1a (the ball at +1: the player code reads [#2587]) / coop_players 0x792200.
+
+Proof (2026-11-16, Spike 3 rig slot 134, hidden and MUTED): the set planned by the Write's own calls (spike3_menu.plan
+then spike3_modes.plan) from the library's Star Wars ELG 1.10 card, the grown program staged over the card's. Armed:
+`co-op: armed - hold switch 49 ...`, `switched in the service menu (CO-OP PLAY, value at 0x7c2b8112afd8, now Off)` (the
+program's 0x70afd8 moved), the Insider gate on the same word. CO-OP PLAY set to 1 (its value written, as the menu
+would), Start, then the right flipper held and Start: `co-op: teammate 2 joins`. Every ball drained: `ball 1, teammate 1
+of 2 done - the next teammate, the same ball` / `the game's player 1 has player 2's login` / `ball 1, teammate 2 of 2
+done - teammate 1, the next ball` ... `ball 3, teammate 2 of 2 done - the game is over`, `the game's end counts 1
+player(s)`. Rig scripts: C:/tmp/PAD-1326/rig (plan_coop.py, job_coop.sh, play_coop.sh, setval.py).
+
+**Still to do (in this order).**
+1. Co-op on the other Spike 3 titles: a 64-bit finder for the player change / add player / player bytes (portcoop's
+   shapes on 64-bit), their lines in each port, a rig game on one more title.
 2. The 64-bit message table (portchallenge.message_table, "0 of 0 paired functions agree" in the draft) and
    `coop_ball_msg`, the "BALL %d" line.
-3. `coop_play.cfg_text` for a 64-bit program (awards: audit_add and the champions; abilities read 32-bit code: off,
-   each with its sentence), the spike3_modes gate lifted, the CO-OP PLAY row through `menu_settings.grow_wide_program`
-   on a real page of the game's own categories.
-4. Handicaps: handicap.py's flipper / outlane readers on 64-bit code (the flipper edges are there since PAD-1322), the
+3. Handicaps: handicap.py's flipper / outlane readers on 64-bit code (the flipper edges are there since PAD-1322), the
    HANDICAP row.
-5. Emulator proof on ELG: a two-teammate co-op game, the logins swapped per turn, the row on the menu page.
+4. Emulator proof of the handicaps on ELG.
 

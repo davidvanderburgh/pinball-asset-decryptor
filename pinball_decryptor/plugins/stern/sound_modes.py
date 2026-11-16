@@ -1032,10 +1032,14 @@ def flipper_buttons(game_elf):
     build in the image library names them so (69 of 69, 2026-10-20)."""
     from . import portgen as G
     from . import portswitch as PS
-    try:
-        sws = PS.switches(G.Elf(bytes(game_elf)))
-    except (G.PortgenError, ValueError, struct.error, IndexError):
-        return []
+    from .adjustments import is_wide
+    if is_wide(bytes(game_elf[:0x40])):                 # PAD-1326: a Spike 3 program's device table
+        sws = PS.switches_a64(game_elf)
+    else:
+        try:
+            sws = PS.switches(G.Elf(bytes(game_elf)))
+        except (G.PortgenError, ValueError, struct.error, IndexError):
+            return []
     out = []
     for side in ("L", "R"):
         for sw in sws:

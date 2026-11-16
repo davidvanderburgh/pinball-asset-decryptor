@@ -182,7 +182,9 @@ PLAY_VALUES = {"magnet_proc", "right_gate_ctl", "right_gate_devoff", "right_gate
 def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
     sites = {t[1]: t for t in _lines("site")}
     assert set(sites) == {"tick", "hook_dispatch", "score_add", "switch_hit", "switch_hit2", "switch_edge",  # PAD-1322
-                          "agent_header", "agent_begin"} | SOUND_SITES | LIGHT_SITES | SCENE_SITES | PLAY_SITES
+                          "agent_header", "agent_begin",
+                          "coop_player_change", "coop_add_player",                  # PAD-1326: co-op play
+                          } | SOUND_SITES | LIGHT_SITES | SCENE_SITES | PLAY_SITES
     for t in sites.values():
         t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)
         assert len(t) == 5 and all(re.fullmatch(r"0x[0-9a-f]{8}", x) for x in t[2:])
@@ -196,7 +198,8 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                     "event_head": "0x007493d8", "event_current": "0x007493e0",   # the lamp layer's: PAD-1283
                     "lamp_layers": "0x00735e68", "light_count": "0x0073ec88",
                     "resource_manager": "0x00712bf8", "typeinfo_resource": "0x0068b850",  # the scene lookup's: PAD-1284
-                    "typeinfo_scene_player": "0x0068fb48", **PLAY_DATA}
+                    "typeinfo_scene_player": "0x0068fb48", **PLAY_DATA,
+                    "coop_player": "0x006b1a1a", "coop_players": "0x00792200"}      # PAD-1326: co-op play
     values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
               and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES
               and t[1] not in PLAY_VALUES and not t[1].startswith("switch_")}   # PAD-1322: the edge source's

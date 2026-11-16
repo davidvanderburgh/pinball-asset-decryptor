@@ -67,7 +67,7 @@ def test_hook_callee_hands_the_logger_x19_to_x28_and_loads_them_back():
 # ---- the runtime ------------------------------------------------------------------------------------------------
 def test_every_drain_feature_hooks_through_edge_hook():
     c = _src()
-    assert c.count("edge_hook(e)") == 4
+    assert c.count("edge_hook(e)") == 5                     # PAD-1326: co-op's button on 64-bit too
     assert c.count("hook(e->addr, on_switch_edge)") == 1           # edge_hook's Spike 2 branch
     hook = _lift(c, "static int edge_hook(")
     assert "hook_callee(e->addr, on_switch_edge64)" in hook and "#if PM_A64" in hook

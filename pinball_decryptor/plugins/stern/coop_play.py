@@ -86,6 +86,19 @@ CLASSIC_HOW = ("1 (Classic) plays co-op and the team games with no special abili
                "character, but none of them has its ability; 2 (Enhanced) plays them with the abilities")
 
 
+#: PAD-1326: a Spike 3 card's co-op. The 64-bit runtime cannot add to the game's start menu yet (the menu's frame hook is
+#: 32-bit only), and the characters, their abilities, the awards and the team games' menu entries read 32-bit code: a
+#: teammate joins with the right flipper button held, and CO-OP PLAY is Off / On (the runtime reads 1 as Classic: a
+#: game with no characters plays the same either way)
+MENU_VALUES_A64 = 2
+MENU_HELP_A64 = "0 Off. 1 On: hold right flipper, press Start. Insider off"
+HOW_A64 = ("hold the right flipper button and press Start to add a teammate, up to four (2-4 players share one game, "
+           "taking turns, one score for the team); a plain Start adds a competing player as always")
+#: what a Spike 3 card's co-op leaves out, said once on the Write
+A64_LEFT_OUT = ("on a Spike 3 game the start menu's CO-OP PLAY and TEAM PLAY entries, the characters and their "
+                "abilities, the end-of-game awards and the co-op videos are not added yet")
+
+
 class CoopError(ValueError):
     """The card's game program cannot take co-op play; the message says why."""
 
@@ -163,12 +176,19 @@ def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None, sett
     ``award`` line for each award ticked (*awards*: the project's choices, :func:`load_awards`); and (PAD-1031) the
     characters' lines (*characters*: :func:`load_characters`; *sites* / *values*: the port's site names and value
     lines)."""
+    from .adjustments import is_wide
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) != 2:
         raise CoopError(NO_BUTTON)
-    return ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
+    head = ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
             + ("only\n" if setting and only else "")
-            + "".join(line + "\n" for line in insider_lines(game_elf))
+            + "".join(line + "\n" for line in insider_lines(game_elf)))
+    if is_wide(bytes(game_elf[:0x40])):
+        # PAD-1326: a Spike 3 program - co-op and the team games with the logins swapped; the awards and the
+        # characters read 32-bit code, so they stay off (A64_LEFT_OUT says so on the Write). The setting is the
+        # program's own address: the runtime adds the PIE's load address.
+        return head
+    return (head
             + "".join(line + "\n" for line in award_lines(game_elf, awards))
             + "".join(line + "\n" for line in character_lines(game_elf, characters, sites, values)))
 

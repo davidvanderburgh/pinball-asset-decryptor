@@ -16818,7 +16818,8 @@ static struct {
     unsigned button;                     /* the switch held at Start to add a teammate (0: none) */
     unsigned game;                       /* the game (chg_game_now() + 1) the teammates belong to; 0: none */
     unsigned n, turn;                    /* teammates (2-4) and the one up (1..n) */
-    unsigned setting;                    /* round 2: the CO-OP PLAY row's live value (0: none - always on) */
+    pm_addr setting;                     /* round 2: the CO-OP PLAY row's live value (0: none - always on; PAD-1326: a
+                                          * PIE's moved by game_base) */
     unsigned teams_always;               /* PAD-1042: coop.cfg `teams on` (4: 2v2) or `teams 2v1` (3); `teams 3v1` (5) */
     unsigned teams;                      /* PAD-1042: this game is a team game (coop.n players, turn = the player up) */
     unsigned team_n[3];                  /* PAD-1042: players in team 1 and team 2 */
@@ -17188,7 +17189,7 @@ static unsigned long long coop_award_now(const struct coop_award *a, unsigned p)
 {
     unsigned table, get;
     if (a->kind == COOP_AW_SCORE) {
-        unsigned s32 = data("scores32"), s64 = data("scores");
+        pm_addr s32 = data("scores32"), s64 = data("scores");                 /* PAD-1326: a 64-bit address */
         if (s32) return ((volatile unsigned *)(unsigned long)s32)[p - 1];
         return s64 ? ((volatile uint64_t *)(unsigned long)s64)[p - 1] : 0;
     }
@@ -20695,7 +20696,8 @@ static void coop_tick(void)
 /* every teammate's score is the team's (player 1's): the HUD's panels all show the same */
 static void coop_scores_same(unsigned n)
 {
-    unsigned k, s32 = data("scores32"), s64 = data("scores");
+    unsigned k;
+    pm_addr s32 = data("scores32"), s64 = data("scores");                     /* PAD-1326: a 64-bit address */
     if (n < 2 || n > 4) return;
     if (s32) {
         volatile unsigned *v = (volatile unsigned *)(unsigned long)s32;
@@ -20718,7 +20720,7 @@ static unsigned coop_team_add(unsigned r0, unsigned r1, unsigned r2, unsigned r3
     }
     team = coop_team_of_in(kind, h + 1u);                     /* PAD-1052: 2 is team 2, 3 team 1, 4 team 2 (3v1: 1) */
     g = *coop_players_byte;
-    ret = coop_add_game(r0, r1, r2, r3);
+    ret = coop_add_game(r0, r1, r2, r3) & 0xffu;                              /* PAD-1326: a bool */
     if (!ret) {
         say("teams: Start - the game added no one (credits, or the most players it allows)");
         return ret;
@@ -20907,7 +20909,7 @@ static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3
         say("co-op: Start - the team is full (4)");
         return 0;
     }
-    ret = coop_add_game(r0, r1, r2, r3);
+    ret = coop_add_game(r0, r1, r2, r3) & 0xffu;                              /* PAD-1326: a bool */
     if (!ret) {
         say("co-op: Start - the game added no one (credits, or the most players it allows)");
         return ret;
@@ -21406,18 +21408,20 @@ static void coop_line(const char *s)
     }
     if (str_starts(s, "setting ")) {
         p = s + 8;
-        coop.setting = (unsigned)number(&p, &ok);
+        coop.setting = (pm_addr)number(&p, &ok);
         if (!ok) coop.setting = 0;
+        if (coop.setting) coop.setting += (pm_addr)game_base;           /* PAD-1326: a PIE's (0 on Spike 2) */
     }
 }
 
 /* round 2: the CO-OP PLAY row's live value from coop.cfg when the card carries no modes ("only"), read before the gate
  * is armed (0: none - a card with modes keeps the whole gate) */
-static unsigned coop_setting_wanted(void)
+static pm_addr coop_setting_wanted(void)
 {
     static char raw[1024];
     long n = -1, i;
-    unsigned k, v = 0;
+    unsigned k;
+    pm_addr v = 0;
     const char *p;
     int ok, only = 0;
     for (k = 0; k < sizeof COOP_FILES / sizeof COOP_FILES[0] && n < 0; k++)
@@ -21429,11 +21433,11 @@ static unsigned coop_setting_wanted(void)
         if (str_starts(raw + i, "only")) only = 1;
         if (str_starts(raw + i, "setting ")) {
             p = raw + i + 8;
-            v = (unsigned)number(&p, &ok);
+            v = (pm_addr)number(&p, &ok);
             if (!ok) v = 0;
         }
     }
-    return only ? v : 0;
+    return only && v ? v + (pm_addr)game_base : 0;                          /* PAD-1326: a PIE's (0 on Spike 2) */
 }
 
 /* coop.cfg asks for co-op: the card takes the runtime's whole gate, as attract items do */
@@ -21481,7 +21485,7 @@ static void coop_arm(void)
     }
     if (!coop.button) { say("co-op: off - coop.cfg names no button"); return; }
     if (coop.setting && !maps_has(coop.setting, 4, MAP_R)) {
-        say("co-op: off - the CO-OP PLAY setting's value 0x%08x is not mapped", coop.setting);
+        say("co-op: off - the CO-OP PLAY setting's value 0x%08" PMA " is not mapped", coop.setting);
         return;
     }
     if (!e || !e->ok || !edge_arm(&why)) {
@@ -21489,6 +21493,14 @@ static void coop_arm(void)
             ? "switch_edge does not match this build" : why ? why : "?");
         return;
     }
+#if PM_A64
+    /* PAD-1326: a 64-bit program's switch levels are the edge hook's own record (edge64_held), which only the hook
+     * fills - a card of co-op and no shots has no other hook on switch_edge */
+    if (!edge_hook(e)) {
+        say("co-op: off - the button cannot be read (switch_edge could not be hooked)");
+        return;
+    }
+#endif
     coop_ball_byte = (volatile unsigned char *)(unsigned long)(data("coop_player") + 1);
     coop_players_byte = (volatile unsigned char *)(unsigned long)data("coop_players");
     if (!(coop_add_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))hook_wrap(fn("coop_add_player"),
@@ -21501,7 +21513,7 @@ static void coop_arm(void)
     coop.on = 1;
     {
         struct site *fb = site("coop_first_ball");   /* PAD-1046: the ball start's read of the ball */
-        unsigned at = fn("coop_first_ball"), to = at ? hook_call(at, (void *)coop_first_ball_wrap) : 0;
+        pm_addr at = fn("coop_first_ball"), to = at ? hook_call(at, (void *)coop_first_ball_wrap) : 0;
         coop_ball_game = (unsigned (*)(unsigned, unsigned, unsigned, unsigned))(unsigned long)to;
         if ((ci.clip[0] || (coop_pick_on && coop_ch_n)) && fn("serve_ball") && !ci_serve_game) {
             unsigned st = hook_call(fn("serve_ball"), (void *)ci_serve_wrap);   /* PAD-1114 round 2, PAD-1215 */
@@ -21526,7 +21538,7 @@ static void coop_arm(void)
         say("co-op: no board of its own - the port does not name this build's end-of-game high scores, so a team's "
             "score goes on the game's boards");
     if (coop.setting)
-        say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08x, now %s)", coop.setting,
+        say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08" PMA ", now %s)", coop.setting,
             !coop_switched_on() ? "Off" : coop_classic() ? "Classic" : "Enhanced");
     if (coop.teams_always)
         say("teams: team play is always on (coop.cfg `teams %s`): players 1+3 against %s",
@@ -23849,7 +23861,7 @@ static void on_agent_header(pm_reg *r)
 /* round 2 (PAD-1017, DoomWalrus666): on a card of co-op and nothing else, the gate holds back only while the service
  * menu's CO-OP PLAY is not Off (PAD-1073: Classic or Enhanced, the word at insider_while): Off, the card's Insider Connected is the game's own -
  * the game plays stock then. 0: the whole gate, always (a card with modes). */
-static unsigned insider_while;
+static pm_addr insider_while;                     /* PAD-1326: an address */
 
 /* 1 when the gate holds back now (tests lift it verbatim) */
 static int insider_holding(unsigned while_at, unsigned value)
@@ -23861,7 +23873,7 @@ static int on_agent_begin(pm_reg *r)
 {
     int i;
     unsigned n;
-    if (!insider_holding(insider_while, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
+    if (!insider_holding(insider_while != 0, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
         return 0;                                                   /* CO-OP PLAY Off: the game's own */
     if (insider_achq >= 0 && r[2] == (unsigned)insider_achq) {      /* PAD-698: the achievement list */
         n = ++insider_achq_held;
@@ -23884,7 +23896,7 @@ static int on_agent_begin(pm_reg *r)
     return 1;
 }
 
-static unsigned coop_setting_wanted(void);       /* PAD-1017 round 2, below */
+static pm_addr coop_setting_wanted(void);        /* PAD-1017 round 2, below */
 static int attract_wanted(void);                 /* PAD-782, below */
 
 /* PAD-1108: the game's achievement award (coop.cfg `achievements`): refused while the gate holds back - the game shows
@@ -23893,7 +23905,7 @@ static int on_coop_award(pm_reg *r)
 {
     unsigned n;
     (void)r;
-    if (!insider_holding(insider_while, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
+    if (!insider_holding(insider_while != 0, insider_while ? *(volatile const unsigned *)(unsigned long)insider_while : 0u))
         return 0;                                                   /* CO-OP PLAY Off: the game's own */
     n = ++cu_awards_held;
     if (n == 1 || !(n & (n - 1)))
@@ -23929,12 +23941,12 @@ static int insider_arm(void)
         "and the rest of Insider Connected are untouched", fn("agent_header"), fn("agent_begin"),
         insider_achq, insider_achq_at);
     {   /* round 2: a card of co-op and nothing else holds back only while CO-OP PLAY says On */
-        unsigned at = coop_setting_wanted();          /* the card carries no modes ("only") */
+        pm_addr at = coop_setting_wanted();           /* the card carries no modes ("only") */
         if (at && !attract_wanted() && maps_has(at, 4, MAP_R)) {
             insider_while = at;
             say("insider: a card of co-op and nothing else - all of that only while the service menu's CO-OP PLAY "
-                "says On (value at 0x%08x, now %s); Off, Insider Connected is the game's own",
-                at, insider_holding(at, *(volatile const unsigned *)(unsigned long)at) ? "On" : "Off");
+                "says On (value at 0x%08" PMA ", now %s); Off, Insider Connected is the game's own",
+                at, insider_holding(at != 0, *(volatile const unsigned *)(unsigned long)at) ? "On" : "Off");
         }
     }
     return 1;

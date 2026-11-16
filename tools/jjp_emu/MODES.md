@@ -110,7 +110,7 @@ can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
 | CHAKA's LOTLJ GnR LE 3.03 | 22,265 | yes | yes |
 | Elton John 02.03 | 22,295 | yes | yes |
 | Godfather 02.03 | 21,498 | yes | yes |
-| Wonka 03.03 | 18,717 | yes | yes |
+| Wonka 03.03 | 18,717 | yes, static-matched to GnR | yes |
 | Pirates of the Caribbean 01.01 | 18,693 | yes | yes |
 | Harry Potter 01.26 | 233 (no engine) | **no** | yes |
 | Sonic 00.925, 00.926 | 246 (no engine) | **no** | yes |
@@ -118,7 +118,27 @@ can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
 "Runs modes" for a title other than GnR means its binary exports every engine
 piece the runtime uses and its Mode vtable resolves to the same slots as GnR's
 (read statically), and its starter modes pass `mkjjpmodes.py check` against its
-report. Only GnR could be run: every title needs its own Sentinel key.
+report. Only GnR is emulator-proven: every title needs its own Sentinel key to
+run, and a key is per-title (it carries the AES key that decrypts that game's
+code; GnR's key `H0007`s on Wonka).
+
+**Wonka 03.03 is "static-matched to GnR"** (PAD-1347): its port report was
+diffed against GnR's and is identical for every piece the runtime touches - the
+Mode vtable is byte-identical (`start` 16, `end` 32, `set_time` 40,
+`timer_paused` 56, `is_running` 72, `score` 136, `tick` 168, `start_choreo` 176,
+`total_choreo` 184), the `Switch` object is the same 104 bytes, no required SDK
+piece is missing, and the `Wonka-v03.03` example passes `check --port` with
+every switch, lamp, sound and `font_wba_*` name resolved. What static analysis
+cannot settle is runtime-resolved or runtime-learned and so waits for the live
+run: the lamp-layer `active` byte offset read out of the decrypted
+`LampBuffer::render_all`, the `play` slot in the sound object's vtable, the
+`ingame_state` value, and the always-on `background_modes`. The runtime learns
+the last two on the first ball when `title.cfg` omits them, so Wonka's
+`title.cfg` leaves them out until a run records the proven values. The proof
+harness is staged (`wonka_proof.sh`: start on `switch_target_tv`, scoring on the
+ramps, lamps in the composite, wba fonts, start/shot/end sounds, the 20 s timer,
+yield and drain) and needs only Wonka's dongle plugged in and attached to WSL.
+
 "Library loads" means the one `jjpmodes.so` loads with every import bound
 (`LD_BIND_NOW`) on that image's own glibc - 2.34 on all nine.
 

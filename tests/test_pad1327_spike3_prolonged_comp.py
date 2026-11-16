@@ -341,12 +341,14 @@ FRAMES = {
                           2, 1914, 1, 1912),
     "star_wars_2025_pro": ("star_wars_2025_pro-0.84.port", 0x1D1F1C, (0xB876D815, 0x94031DE4), 360, None, 156, None, 22, 4,
                            2, 1910, 1, 1908),
+    "transformers_mtmte_le": ("transformers_mtmte_le-0.96.port", 0x2809D0, (0xB874DB77, 0x9409BAC3), 464, 22, None, None, 20,
+                              12, 3, 1921, 1, 1916),
 }
 
 
 #: measured, but their start menu did not open on the rig (fresh settings; the player game-mode settings forced on
 #: did not open it either): the lines are in the port as comments until it is reached
-NOT_YET = ("pokemon_le", "star_wars_2025_le", "star_wars_2025_pro")
+NOT_YET = ()   # every Spike 3 title with a port: emulator-proven (2026-11-16)
 
 
 def _uncomment(port_name, tmp_path):
@@ -367,7 +369,7 @@ def test_the_index_menu_lines(game, tmp_path):
     if game in NOT_YET:
         assert "comp_menu_frame" not in port["site"] and not PCo.port_ready(port)
         port = _uncomment(port_name, tmp_path)          # the measured lines themselves
-    assert PCo.port_ready(port) or game == "star_wars_2025_pro"     # (Pro: its bus events wait too)
+    assert PCo.port_ready(port)
     assert tuple(port["site"]["comp_menu_frame"][:3]) == (site,) + words
     v = port["value"]
     assert v["comp_menu_frame_moved"] == 1 and v["comp_menu_frame_list_at"] == la and v["comp_menu_frame_cap"] == cap
@@ -387,8 +389,7 @@ def test_the_index_menu_lines(game, tmp_path):
 
 
 def test_walking_dead_remastered_takes_star_wars_elgs_route(tmp_path):
-    assert not PCo.port_ready(MP.read_port(str(PORTS3 / "walking_dead_remastered_le-0.92.port")))   # not yet (above)
-    port = _uncomment("walking_dead_remastered_le-0.92.port", tmp_path)
+    port = MP.read_port(str(PORTS3 / "walking_dead_remastered_le-0.92.port"))
     assert PCo.port_ready(port)
     assert tuple(port["site"]["challenge_menu"][:3]) == (0x1EF564, 0x510006C0, 0x52A88E02)       # sub w0, w22, #1
     assert tuple(port["site"]["challenge_menu_pick"][:3]) == (0x1EF5F0, 0x7100101F, 0x54005F20)  # cmp w0, #4
@@ -399,12 +400,17 @@ def test_walking_dead_remastered_takes_star_wars_elgs_route(tmp_path):
 
 
 #: the Spike 3 titles Prolonged Competition goes on (Transformers LE has no port yet)
-OFFERED3 = {"star_wars_elg_1_10_spike3", "fallout_le_0_82_spike3"}   # both emulator-proven
+OFFERED3 = {"star_wars_elg_1_10_spike3", "fallout_le_0_82_spike3", "pokemon_le_0_82_spike3",   # each emulator-proven
+            "star_wars_2025_le_0_96_spike3", "walking_dead_remastered_le_0_92_spike3", "star_wars_2025_pro_0_84_spike3",
+            "transformers_mtmte_le_0_96_spike3"}
 
 
 def test_star_wars_2025_pros_bus_events_are_one_lower_past_56():
-    text = (PORTS3 / "star_wars_2025_pro-0.84.port").read_text(encoding="utf-8")   # read off its code, not run yet
-    assert "# event game_start   0x4c" in text and "# event ball_start   0x25" in text and "event game_over    0x46" in text
+    port = MP.read_port(str(PORTS3 / "star_wars_2025_pro-0.84.port"))     # read off its code; game_start seen on the rig
+    ev = {e[0]: e for e in port["event"]}
+    text = (PORTS3 / "star_wars_2025_pro-0.84.port").read_text(encoding="utf-8")
+    assert "\nevent game_start   0x4c" in text and "\nevent ball_start   0x25" in text and "event game_over    0x46" in text
+    assert ev["game_start"][2:] == ev["game_over"][2:] and PCo.port_ready(port)
 
 
 def test_which_spike3_titles_are_offered_it():

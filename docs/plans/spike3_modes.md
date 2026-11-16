@@ -70,7 +70,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
-| Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on Star Wars ELG and Fallout LE | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
+| Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on every Spike 3 title with a port | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
 | records on the high scores | records.cfg | left out | the champion framework's sites (not placed) and its 64-bit record |
 | attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
 | inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
@@ -214,25 +214,29 @@ the machine is switched off - game 1 plays as Competition (flag 17 was 1)` (the 
 our duplicated index), the game playing on (ball 1, scoring) where it had frozen. (The rig's drains did not end
 Fallout's ball 1, so the off cycle is ELG's proof and the host test of the index-menu code.)
 
-**Not offered yet: Pokemon LE, Star Wars 2025 LE / Pro, Walking Dead Remastered LE.** Their lines are measured and
-written into the ports as comments (`# NOT OFFERED YET (PAD-1327)`), because their start menu never opened on the rig:
-not with both flipper buttons in attract (fresh settings), not after Start, and not with AD_PLAYER_GAME_MODE /
-AD_PLAYER_COMPETITION_MODE forced on (a scratch runtime wrapping the adjustment getter: Pokemon 0x6cd340 ids 101 / 102,
-SW 2025 LE 0x51b5b0 99 / 100, Pro 0x4b3d70 97 / 98, WDR 0x3fdf10 101 / 102). The menu functions are launched through a
-process table of {function, argument} pairs (Pokemon's at 0x31badf0), so what launches them is the next thing to read.
+**Round 3: every Spike 3 title with a port.** The "start menu did not open" finding of round 2 was the rig's: the newer
+titles name their flipper buttons LEFT / RIGHT FLIPPER BUTTON, and the proof script pressed L / R FLIPPER BUTTON, which
+s3press refused (`no switch named`), so the chord never reached Pokemon, Star Wars 2025 LE or Walking Dead Remastered.
+The titles' proof files (`tools/spike3_emu/proofs/titles/*.env`) now name them (FLIP_SWS, which PROOF=edge uses too).
+With the right buttons every title's start menu opened in attract on fresh settings. Transformers LE (its port came
+from main) has Fallout's index shape: frame point 0x2809d0 `ldr w23, [x27, w20, sxtw #2]`, list sp+0x1d0 (room for
+12), count w22, cursor w20, Competition index 3 (name 1921), Standard 1 (1916).
 
-**Still to do in PAD-1327** (the next runs, in this order):
-1. Reach the start menu on Pokemon, Star Wars 2025 LE / Pro and Walking Dead Remastered: find the process id of the
-   menu function in each one's process table and what starts that process (the condition), prove the menu with our
-   entry on the rig, then uncomment the lines (and Pro's two events). Transformers LE has no port yet.
-2. Records on the high scores: the champion framework. On ELG the end-of-game high scores (`challenge_scores` /
-   `game_scores`) pair to 0x3eecc0 and the (category, n) entry lookup (`challenge_score_entry`) to 0x3ede80 (s3port's
-   matcher); the gate, the category table and count, the record layout and the attract champion pages are to be
-   measured, and the runtime's champion code (chg_scores_wrap, chg_scores_one_entry, chg_page_*, rec_*) made
-   pm_addr-wide (entry words ent[0] / ent[5] / ent[6], the 36-byte category descriptors, are 32-bit today).
-The rig kit: C:/tmp/PAD-1327 (job2*.sh / play2.sh: per-title proofs, SHORT=1 up to game 1, AFTER_START_MENU=1 tries the
-menu after Start, ADJ=1 the settings-on scratch runtime; plan2.py builds a title's set from its card; clear the slot's
-mode.log before a run on a reused slot, and run one emulated game at a time).
+Proof (2026-11-16, Spike 3 rig slots 132 / 134, hidden and MUTED, each title's set built by spike3_modes.plan from its
+library card): each logged `on the start menu as entry N of N`, showed COMPETITION / UNTIL POWERED OFF in the game's own
+menu, `UNTIL POWERED OFF picked on the menu`, and at Start `ON until the machine is switched off - game 1 plays as
+Competition` - Pokemon LE (entry 3 of 3, index 6, flag 16), Star Wars 2025 LE (8 of 8, flag 16), Walking Dead
+Remastered LE (3 of 3 on ELG's route, flag 17), Transformers LE (6 of 6, index 3, flag 17) and Star Wars 2025 Pro (3 of
+3, flag 16; its game_start 0x4c seen on the bus). Pro's cursor goes from the first entry straight to the last on the LEFT
+flipper and its menu window is short: a rig job steps left at once after the chord.
+
+**What is left in PAD-1327:** records on the high scores, the champion framework. On ELG the end-of-game high scores
+(`challenge_scores` / `game_scores`) pair to 0x3eecc0 and the (category, n) entry lookup (`challenge_score_entry`) to
+0x3ede80 (s3port's matcher); the gate, the category table and count, the record layout and the attract champion pages
+are to be measured, and the runtime's champion code (chg_scores_wrap, chg_scores_one_entry, chg_page_*, rec_*) made
+pm_addr-wide (entry words ent[0] / ent[5] / ent[6], the 36-byte category descriptors, are 32-bit today).
+The rig kit: C:/tmp/PAD-1327 (job2*.sh / play2.sh: per-title proofs, SHORT=1 up to game 1, STEP_LEFT=1 / CHORD_* for Pro;
+plan2.py builds a title's set from its card; clear the slot's mode.log before a run on a reused slot).
 
 ## The Modes tab and Try it
 

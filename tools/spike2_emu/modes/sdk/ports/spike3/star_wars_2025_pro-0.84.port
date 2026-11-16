@@ -147,8 +147,8 @@ value event_show_id             258    # read off this program's own code, 7 of 
 # event ball_start   NOT PLACED: no lined-up code passes it
 # PAD-1327: read off the calls into this program's dispatch beside Star Wars 2025 LE 0.96's: the same ids up to 56,
 # from 57 on one lower here (LE's game_over 0x47 is 0x46 here): game_start 0x4d -> 0x4c, ball_start 0x25 as LE's
-# event game_start   0x4c   (not run yet)
-# event ball_start   0x25   (not run yet)
+event game_start   0x4c
+event ball_start   0x25
 event ball_end     0x34   # 1 of 1 lined-up places
 event bonus_start  0x27   # 1 of 1 lined-up places
 event bonus_end    0x28   # 1 of 1 lined-up places
@@ -214,23 +214,22 @@ text example_start_shot     Right target
 # data message_table          0x007770d8
 # value coop_ball_msg          1248
 
-# NOT OFFERED YET (PAD-1327): measured off this program, but its start menu did not open on the rig with fresh
-# settings, nor with AD_PLAYER_GAME_MODE / AD_PLAYER_COMPETITION_MODE read as on; the lines go live once it is reached.
-# ---- PAD-1327: the start menu (CHOOSE YOUR MODE OF PLAY), a menu of game-mode table indices read off this program's
+# ---- PAD-1327 (emulator-proven 2026-11-16: a LEFT press from the first entry reaches ours, picked, game 1 played as
+# Competition): the start menu (CHOOSE YOUR MODE OF PLAY), a menu of game-mode table indices read off this program's
 # own menu function 0x1d1220; the frame point `ldr w21, [x0, w22, sxtw #2]`: the index under the cursor once the press has moved it (w22), the list sp+0x168 (room for 4: 0x178 is a string), the count at sp+156.
 # Prolonged Competition (comp.cfg) appends Competition's index again and letters its name message while the cursor
 # is on it; the game itself plays the pick as Competition (Standard's index once it is on).
-# site comp_menu_frame     0x001d1f1c 0xb876d815 0x94031de4
-# value comp_menu_frame_moved      1
-# value comp_menu_frame_list_at    360
-# value comp_menu_frame_count_at   156
-# value comp_menu_frame_cap        4
-# value comp_menu_frame_cursor_reg 22
-# value comp_menu_index            2   # COMPETITION (its flag alone)
-# value comp_menu_index_msg        1910   # ALL RANDOMNESS REMOVED
-# value comp_menu_end_index        1   # STANDARD
-# value comp_menu_end_msg          1908   # NORMAL PLAY
+site comp_menu_frame     0x001d1f1c 0xb876d815 0x94031de4
+value comp_menu_frame_moved      1
+value comp_menu_frame_list_at    360
+value comp_menu_frame_count_at   156
+value comp_menu_frame_cap        4
+value comp_menu_frame_cursor_reg 22
+value comp_menu_index            2   # COMPETITION (its flag alone)
+value comp_menu_index_msg        1910   # ALL RANDOMNESS REMOVED
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1908   # NORMAL PLAY
 # the message lookup's: a u64 count, a pointer to the u16 remap, a table of 8-byte record pointers
-# data message_count          0x0062e320
-# data message_remap          0x008073a8
-# data message_table          0x007770d8
+data message_count          0x0062e320
+data message_remap          0x008073a8
+data message_table          0x007770d8

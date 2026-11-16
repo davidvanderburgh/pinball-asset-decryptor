@@ -36,6 +36,7 @@ PLAY 2 VS 2 and TEAM PLAY 2 VS 1 all three (pad_mode_runtime.c "PAD-1073"; a sto
 Enhanced, 4-6 as Classic)."""
 import re
 import struct
+import numpy as np
 
 from . import sound_modes as _SMo
 
@@ -207,10 +208,111 @@ def users_lookup(e):
     return found[0] if len(found) == 1 else None
 
 
+def _adrp(va, w):
+    """The page an ``adrp`` at *va* forms, or None when *w* is not one."""
+    if (w & 0x9F000000) != 0x90000000:
+        return None
+    imm = (((w >> 5) & 0x7FFFF) << 2) | ((w >> 29) & 3)
+    if imm & 0x100000:
+        imm -= 0x200000
+    return (va & ~0xFFF) + (imm << 12)
+
+
+def _a64_branch(va, w, link):
+    """The target of a ``b`` (``bl`` when *link*) at *va*, or None."""
+    if (w & 0xFC000000) != (0x94000000 if link else 0x14000000):
+        return None
+    off = (w & 0x3FFFFFF) << 2
+    if off & 0x8000000:
+        off -= 0x10000000
+    return va + off
+
+
+def _a64_table_lookup(words, k):
+    """True when the function at word *k* is the login-table lookup: player p (1..4) checked as ``sub w, w, #1`` and
+    ``cmp w, #3``, its entry formed as ``mov x, #4`` + ``mov w, #20`` + ``umaddl`` (table + 20p + 4, as on Spike 2)."""
+    win = [int(x) for x in words[k:k + 16]]
+    has = lambda mask, val: any((x & mask) == val for x in win)   # noqa: E731
+    return (has(0xFFFFFC00, 0x51000400) and has(0xFFFFFC1F, 0x71000C1F) and has(0xFFFFFFE0, 0x52800280)
+            and has(0xFFE08000, 0x9BA00000) and has(0xFFFFFFE0, 0xD2800080))
+
+
+def _a64_x0_global(e, words, k):
+    """The global the code before the call at word *k* puts in x0 (``adrp`` + ``add``, maybe through a ``mov``), or
+    None."""
+    reg, lo = 0, None
+    for j in range(k - 1, max(k - 80, -1), -1):
+        w = int(words[j])
+        if lo is None:
+            if (w & 0xFFE0FFFF) == (0xAA0003E0 | reg) and reg != (w >> 16) & 31:   # mov x<reg>, x<m>
+                reg = (w >> 16) & 31
+            elif (w & 0xFFC0001F) == (0x91000000 | reg):                           # add x<reg>, x<n>, #lo
+                lo, reg = (w >> 10) & 0xFFF, (w >> 5) & 31
+        else:
+            page = _adrp(e.tva + 4 * j, w)
+            if page is not None and (w & 31) == reg:
+                return page + lo
+    return None
+
+
+def insider_users_a64(b):
+    """PAD-1326: :func:`insider_users` for a Spike 3 (64-bit ARM) program's bytes *b*: ``(manager, A, B)`` at the
+    program's own (link-time) addresses - the runtime adds the PIE's load address - or None. The same C++ as Spike 2's:
+    the manager's lookup is ``cmp w3, #1; ldp xa, xb, [x0, #A]; csel x0, .., ne; b <table lookup>`` (Star Wars ELG
+    1.10: 0x35dda0, tables +0x190 / +0x198, both read with one ldp, 8 bytes each), the table lookup's entry is
+    table + 20p + 4, and every caller forms the manager - a function's static - with adrp + add (ELG: 0x710c20)."""
+    from .screen_time import _Elf64
+    e = _Elf64(b)
+    w = e.arr
+    n = len(w)
+    found = []
+    for k in np.nonzero((w & 0xFC000000) == 0x14000000)[0].tolist():   # every b: the head ends in one
+        if k < 3:
+            continue
+        head = [int(x) for x in w[k - 3:k]]
+        cmp = [x for x in head if (x & 0xFFFFFC1F) == 0x7100041F]       # cmp w<n>, #1
+        ldp = [x for x in head if (x & 0xFFC003E0) == 0xA9400000]       # ldp x<a>, x<b>, [x0, #off]
+        sel = [x for x in head if (x & 0xFFE00C1F) == 0x9A800000]       # csel x0, x<n>, x<m>, ne / eq
+        if len(cmp) != 1 or len(ldp) != 1 or len(sel) != 1:
+            continue
+        cond = (sel[0] >> 12) & 15
+        if cond not in (0, 1):
+            continue
+        ra, rb, off = ldp[0] & 31, (ldp[0] >> 10) & 31, ((ldp[0] >> 15) & 0x7F) * 8
+        rn, rm = (sel[0] >> 5) & 31, (sel[0] >> 16) & 31
+        field = {ra: off, rb: off + 8}
+        if rn not in field or rm not in field or rn == rm:
+            continue
+        a, bf = (field[rn], field[rm]) if cond == 1 else (field[rm], field[rn])   # A: the table when not player 1
+        to = _a64_branch(e.tva + 4 * k, int(w[k]), False)
+        if to is None or not e.tva <= to < e.tva + 4 * (n - 16) or not _a64_table_lookup(w, (to - e.tva) // 4):
+            continue
+        found.append((e.tva + 4 * (k - 3), a, bf))
+    if len(found) != 1:
+        return None
+    look, a, bf = found[0]
+    calls = np.nonzero((w & 0x7C000000) == 0x14000000)[0].tolist()     # b and bl
+    managers = set()
+    for k in calls:
+        if _a64_branch(e.tva + 4 * k, int(w[k]), True) != look and _a64_branch(e.tva + 4 * k, int(w[k]), False) != look:
+            continue
+        g = _a64_x0_global(e, w, k)
+        if g is not None:
+            managers.add(g)
+    if len(managers) != 1:
+        return None
+    return (managers.pop(), a, bf)
+
+
 def insider_users(game_elf):
-    """``(manager, A, B)`` - the game's user manager (a global) and the fields of its two login tables - or None."""
+    """``(manager, A, B)`` - the game's user manager (a global) and the fields of its two login tables - or None.
+    PAD-1326: a Spike 3 program's (64-bit) is :func:`insider_users_a64`'s."""
     from .portchallenge import Elf
-    e = Elf(game_elf)
+    from .adjustments import is_wide
+    raw = game_elf if isinstance(game_elf, (bytes, bytearray)) else open(game_elf, "rb").read()
+    if is_wide(raw):
+        return insider_users_a64(raw)
+    e = Elf(raw)
     w = e.words
     found = []
     for k in range(len(w) - 5):

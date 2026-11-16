@@ -62,7 +62,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 
 | part | Spike 2 card pieces | on Spike 3 | what it needs |
 |---|---|---|---|
-| **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live. Only the Insider login ids are 32-bit (the user-manager finder `coop_play.insider_users`, an `unsigned` address in `feed_login`): reports name no logins, and the log says so |
+| **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live, and the Insider logins since PAD-1326 (`coop_play.insider_users_a64`; the runtime reads the tables pointer-sized, the manager moved by the PIE's load address) |
 | random clips | clips.cfg, clips in the video bank | **goes on (PAD-1323)** | done: the clip v2 route asks for no `string_new` (the runtime builds the name), the name read as an 8-byte pointer, surfaces compared at full width. A port with the clip v2 lines: Star Wars ELG's today |
 | screen times | `stime` lines in clips.cfg | **goes on (PAD-1323)** | done: the slot read and written as 8 bytes, moved by the PIE's load address; screen_time.py reads 64-bit programs (Fallout LE, Pokemon LE, Transformers LE have the screens) |
 | music modes | sounds.cfg, bank records, MUSIC MODE row | left out | off on 64-bit by design (32-bit asset descriptors); Spike 3's songs are image.bin records (PAD-1296 appends them); a 64-bit menu row |
@@ -768,3 +768,53 @@ scored +250,000 / +500,000 / +750,000 / +1,000,000 on four shots and ended on ti
 every tone found in the game's own output at its logged moment (the start call until the first shot call faded
 it, the four shot calls, the music under them). The Write's plan (`real_card=True`) builds the same set.
 Tests: tests/test_pad1295_spike3_code_modes.py (the real a64 compile under a POSIX shell).
+
+## Insider logins on Spike 3, and what co-op still needs (PAD-1326)
+
+**The logins.** A Spike 3 program keeps its players' Insider logins as Spike 2's does: a user manager (a function's
+static) with two tables, player p's entry at table + 20p + 4 (the 16-byte uuid and a flags word). Only the code's
+shape changed: the manager's lookup is `cmp w3, #1; ldp xa, xb, [x0, #A]; csel x0, .., ne; b <table lookup>` (the two
+tables are 8-byte pointers, read with one ldp), the table lookup checks `sub w, w, #1; and; cmp w, #3; b.hi` and forms
+the entry with `mov x1, #4; mov w0, #20; umaddl`, and every caller forms the manager with `adrp` + `add`.
+`coop_play.insider_users_a64` reads that; `insider_users` hands it a 64-bit program. All seven library programs:
+
+| program | manager | A / B |
+|---|---|---|
+| Fallout LE 0.82 | 0x66ca6e0 | 0x190 / 0x198 |
+| Pokemon LE 0.82 | 0x32973d0 | 0x190 / 0x198 |
+| Star Wars 2025 LE 0.96 | 0x98b9f8 | 0x190 / 0x198 |
+| Star Wars 2025 Pro 0.84 | 0x7e5940 | 0x190 / 0x198 |
+| Star Wars ELG 1.10 | 0x710c20 | 0x190 / 0x198 |
+| Transformers LE 0.96 | 0xad8050 | 0x190 / 0x198 |
+| Walking Dead Remastered LE 0.92 | 0x8859f8 | 0x190 / 0x198 |
+
+The runtime (`coop_user_table`, `coop_user_table_ok`, `coop_user_entry`) reads the tables as `pm_addr` and adds
+`game_base` to the manager of both `users` lines (coop.cfg's and scorefeed.cfg's); Spike 2's object is the same code
+(pm_addr is 32 bits there and game_base 0). Main's runtime on a Spike 3 card says `the user manager 0x00710c20 is not
+mapped` (seen on the rig, a PAD-1324 run on slot 1): the address was the program's own, not where it was loaded.
+Tests: tests/test_pad1326_spike3_insider_logins.py (a synthetic 64-bit program, the seven programs, the runtime).
+
+Proof (2026-11-16, Spike 3 rig slot 133, hidden and MUTED): the score feed set planned by `spike3_modes.plan` from the
+library's Star Wars ELG 1.10 card (scorefeed.cfg `users 0x00710c20 0x190 0x198`, this branch's mode64.so), the
+PAD-1297 stand-in server on the game's loopback. A side script found the game's own load address (one
+R_AARCH64_RELATIVE pointer of its data, minus its addend: qemu-user's guest addresses are not always the host's) and
+kept the uuid 1326c0de-0b1e-4a5e-9a77-00112233aabb in player 1's entry of both tables (manager +0x60 and +0xf8: the
+tables are arrays inside the manager, both entries were all zeros). At the game's game_over: `1 player(s): 207440 0 0 0,
+logged in 1000`, then `posted ... (HTTP 200)` with `"insider":["1326c0de-0b1e-4a5e-9a77-00112233aabb"]`, the server
+receiving the same body. Rig notes: Spike 3 runs do not show on riglock's board (slot 1 was PAD-1324's at the same
+time), and the host's /proc/<pid>/maps names the program `/games/<title>/game` or by its full overlay path depending
+on the run.
+
+**Co-op and handicaps, still to do (in this order).**
+1. The runtime's co-op code on 64-bit: `coop_change_wrap` / the add-player wrap read r0..r3 and 32-bit structs;
+   check each against hook_a64.h's pm_reg, then carry the drafted `coop_player_change` / `coop_add_player` sites and
+   `coop_player` / `coop_players` data (the ELG draft has them, commented out: 0x417b50 / 0x417710, 0x6b1a1a / 0x792200).
+2. The 64-bit message table (portchallenge.message_table, "0 of 0 paired functions agree" in the draft) and
+   `coop_ball_msg`, the "BALL %d" line.
+3. `coop_play.cfg_text` for a 64-bit program (awards: audit_add and the champions; abilities read 32-bit code: off,
+   each with its sentence), the spike3_modes gate lifted, the CO-OP PLAY row through `menu_settings.grow_wide_program`
+   on a real page of the game's own categories.
+4. Handicaps: handicap.py's flipper / outlane readers on 64-bit code (the flipper edges are there since PAD-1322), the
+   HANDICAP row.
+5. Emulator proof on ELG: a two-teammate co-op game, the logins swapped per turn, the row on the menu page.
+

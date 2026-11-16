@@ -20364,21 +20364,34 @@ static void team_menu_arm(void);              /* PAD-1052, with the start menu's
  * teammate's to player 1): `achievements <award>` (coop_play.achievement_award) - the award, refused while the
  * gate holds, so a co-op game shows no NEW INSIDER ACHIEVEMENT! that never reaches Insider Connected. */
 #define COOP_USER_ENTRY 20u                  /* a player's entry: the uuid (16 bytes) and its flags word */
-static unsigned cu_mgr, cu_off[2];          /* coop.cfg `users`: the user manager and its two tables' fields */
+static pm_addr cu_mgr;                      /* coop.cfg `users`: the user manager (a PIE's moved by game_base) */
+static unsigned cu_off[2];                  /* ... and its two tables' fields */
 static unsigned cu_award;                   /* coop.cfg `achievements`: the game's achievement award */
 static unsigned cu_g, cu_p;                 /* the game's player cu_g holds player cu_p's entry now (0: as made) */
 static unsigned cu_awards_held;
 
-/* the entries' place in table t for player p (1..4): t + 20p + 4 (tests lift it verbatim) */
-static unsigned coop_user_entry(unsigned t, unsigned p)
+/* the entries' place in table t for player p (1..4): t + 20p + 4 (tests lift it verbatim). PAD-1326: the same on
+ * Spike 3 (Star Wars ELG 1.10's lookup at 0x277e10: umaddl x0, #20, player, #4) */
+static pm_addr coop_user_entry(pm_addr t, unsigned p)
 {
     return t + COOP_USER_ENTRY * p + 4u;
 }
 
-/* a table the manager points at: the heap (allocated after the gate read the mappings, so only its shape is checked) */
-static int coop_user_table_ok(unsigned t)
+/* PAD-1326: the table at the manager's field off - a pointer of the program's width (Spike 3's lookup reads both
+ * with one ldp: ELG 1.10's manager 0x710c20, +0x190 / +0x198) */
+static pm_addr coop_user_table(pm_addr mgr, unsigned off)
 {
+    return *(volatile const pm_addr *)(unsigned long)(mgr + off);
+}
+
+/* a table the manager points at: the heap (allocated after the gate read the mappings, so only its shape is checked) */
+static int coop_user_table_ok(pm_addr t)
+{
+#if PM_A64
+    return t >= 0x10000ul && !(t & 3ul) && t < (1ul << 48);
+#else
     return t >= 0x10000u && !(t & 3u) && t < 0xbf000000u;
+#endif
 }
 
 /* swap players a's and b's entries in both tables; the tables that cannot be read are left (0: none swapped) */
@@ -20387,7 +20400,7 @@ static int coop_users_swap(unsigned a, unsigned b)
     int k, done = 0;
     unsigned i;
     for (k = 0; k < 2; k++) {
-        unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+        pm_addr t = coop_user_table(cu_mgr, cu_off[k]);
         volatile unsigned char *x, *y;
         if (!coop_user_table_ok(t)) continue;
         x = (volatile unsigned char *)(unsigned long)coop_user_entry(t, a);
@@ -20405,7 +20418,7 @@ static int coop_users_swap(unsigned a, unsigned b)
 /* the first word of player p's uuid in the first table, for the log (0: no login) */
 static unsigned coop_user_word(unsigned p)
 {
-    unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[0]);
+    pm_addr t = coop_user_table(cu_mgr, cu_off[0]);
     if (!coop_user_table_ok(t)) return 0;
     return *(volatile const unsigned *)(unsigned long)coop_user_entry(t, p);
 }
@@ -20470,7 +20483,7 @@ static void coop_team_users_keep(void)
     unsigned k, p, from = coop_team_users_from(), i;
     if (!from) return;
     for (k = 0; k < 2; k++) {
-        unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+        pm_addr t = coop_user_table(cu_mgr, cu_off[k]);
         if (!coop_user_table_ok(t)) continue;
         for (p = 1; p <= coop.n && p <= 4; p++) {   /* every player's: a place past the count may hold any (the swap) */
             const volatile unsigned char *x = (const volatile unsigned char *)(unsigned long)coop_user_entry(t, p);
@@ -20486,7 +20499,7 @@ static void coop_team_users_back(const char *when)
     unsigned k, p, from = coop_team_users_from(), i, n = 0;
     if (!from || !tu_have) return;
     for (k = 0; k < 2; k++) {
-        unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+        pm_addr t = coop_user_table(cu_mgr, cu_off[k]);
         if (!coop_user_table_ok(t)) continue;
         for (p = from; p <= coop.n && p <= 4; p++) {
             unsigned bit = 1u << (k * 4 + p - 1), who = coop_name_player(p, cu_g, cu_p);   /* whose login is here now */
@@ -20510,7 +20523,7 @@ static void coop_team_users_end(void)
     unsigned k, p, i;
     if (tu_put && cu_mgr) {
         for (k = 0; k < 2; k++) {
-            unsigned t = *(volatile const unsigned *)(unsigned long)(cu_mgr + cu_off[k]);
+            pm_addr t = coop_user_table(cu_mgr, cu_off[k]);
             if (!coop_user_table_ok(t)) continue;
             for (p = 1; p <= 4; p++) {
                 volatile unsigned char *x = (volatile unsigned char *)(unsigned long)coop_user_entry(t, p);
@@ -20634,11 +20647,12 @@ static int on_coop_award(pm_reg *r);       /* below the Insider Connected gate *
 
 static void coop_users_arm(void)
 {
-    if (cu_mgr && (!maps_has(cu_mgr + cu_off[0], 4, MAP_R) || !maps_has(cu_mgr + cu_off[1], 4, MAP_R))) {
-        say("co-op insider: the user manager 0x%08x is not mapped - the logins stay player 1's", cu_mgr);
+    if (cu_mgr && (!maps_has(cu_mgr + cu_off[0], sizeof(pm_addr), MAP_R)
+                   || !maps_has(cu_mgr + cu_off[1], sizeof(pm_addr), MAP_R))) {
+        say("co-op insider: the user manager 0x%08" PMA " is not mapped - the logins stay player 1's", cu_mgr);
         cu_mgr = 0;
     } else if (cu_mgr) {
-        say("co-op insider: the teammate up has the game's player's Insider login (manager 0x%08x, +0x%x +0x%x)",
+        say("co-op insider: the teammate up has the game's player's Insider login (manager 0x%08" PMA ", +0x%x +0x%x)",
             cu_mgr, cu_off[0], cu_off[1]);
         coop_name_arm();                                      /* PAD-1267 */
     }
@@ -21369,10 +21383,11 @@ static void coop_line(const char *s)
     }
     if (str_starts(s, "users ")) {                                        /* PAD-1108: the logins' tables */
         p = s + 6;
-        cu_mgr = (unsigned)number(&p, &ok);
+        cu_mgr = (pm_addr)number(&p, &ok);
         if (ok) cu_off[0] = (unsigned)number(&p, &ok);
         if (ok) cu_off[1] = (unsigned)number(&p, &ok);
         if (!ok || !cu_mgr || cu_off[0] > 0x1000u || cu_off[1] > 0x1000u) cu_mgr = cu_off[0] = cu_off[1] = 0;
+        if (cu_mgr) cu_mgr += (pm_addr)game_base;                       /* PAD-1326: a PIE's (0 on Spike 2) */
         return;
     }
     if (str_starts(s, "achievements ")) {                                 /* PAD-1108: the award */
@@ -22676,7 +22691,8 @@ static struct {
     int armed, only, over_named;
     char host[FEED_HOST_MAX], path[FEED_PATH_MAX], title[64];
     unsigned port;
-    unsigned mgr, off[2];                       /* the logins' tables (0: not known) */
+    pm_addr mgr;                                /* the logins' tables (0: not known; a PIE's moved by game_base) */
+    unsigned off[2];
     unsigned type_flag[FEED_TYPES], n_types;    /* PAD-1344: scorefeed.cfg's type lines, the strongest first */
     char type_name[FEED_TYPES][16];
     int rank;                                   /* PAD-1344: this game's type as seen so far (its rank) */
@@ -23010,7 +23026,7 @@ static int feed_login(unsigned p, unsigned char out[16])
     int k, i, any;
     if (!feed.mgr) return 0;
     for (k = 0; k < 2; k++) {
-        unsigned t = *(volatile const unsigned *)(unsigned long)(feed.mgr + feed.off[k]);
+        pm_addr t = coop_user_table(feed.mgr, feed.off[k]);
         const volatile unsigned char *e;
         if (!coop_user_table_ok(t)) continue;
         e = (const volatile unsigned char *)(unsigned long)coop_user_entry(t, p);
@@ -23234,10 +23250,11 @@ static void feed_arm(void)
             feed.title[m] = 0;
         } else if (str_starts(raw + i, "users ")) {
             p = raw + i + 6;
-            feed.mgr = (unsigned)number(&p, &ok);
+            feed.mgr = (pm_addr)number(&p, &ok);
             if (ok) feed.off[0] = (unsigned)number(&p, &ok);
             if (ok) feed.off[1] = (unsigned)number(&p, &ok);
-            if (!ok) feed.mgr = 0;
+            if (!ok || feed.off[0] > 0x1000u || feed.off[1] > 0x1000u) feed.mgr = 0;
+            if (feed.mgr) feed.mgr += (pm_addr)game_base;               /* PAD-1326: a PIE's (0 on Spike 2) */
         } else if (str_starts(raw + i, "type ") && feed.n_types < FEED_TYPES) {   /* PAD-1344 */
             unsigned id, m = 0;
             p = raw + i + 5;
@@ -23269,8 +23286,9 @@ static void feed_arm(void)
             : !fn("tick") ? "the port has no tick" : "the port names no game_start / ball_start event");
         return;
     }
-    if (feed.mgr && (!maps_has(feed.mgr + feed.off[0], 4, MAP_R) || !maps_has(feed.mgr + feed.off[1], 4, MAP_R))) {
-        say("score feed: the user manager 0x%08x is not mapped - the reports name no Insider logins", feed.mgr);
+    if (feed.mgr && (!maps_has(feed.mgr + feed.off[0], sizeof(pm_addr), MAP_R)
+                     || !maps_has(feed.mgr + feed.off[1], sizeof(pm_addr), MAP_R))) {
+        say("score feed: the user manager 0x%08" PMA " is not mapped - the reports name no Insider logins", feed.mgr);
         feed.mgr = 0;
     }
     feed.game_id = (unsigned)game;

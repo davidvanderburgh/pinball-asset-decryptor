@@ -1,6 +1,6 @@
 """PAD-1327 proof shot: Prolonged Competition on a Spike 3 Star Wars ELG 1.10 project (the play options).
 
-    python scripts/shot_pad1327.py <repo> <out.png> [--tick] [--tab playopts]
+    python scripts/shot_pad1327.py <repo> <out.png> [--tick] [--tab playopts|modes] [--records]
 
 Serves <repo>, with the mode maker's preview on, on a scratch project made from the Star Wars ELG 1.10 Spike 3 card (its
 .extract_source.json names it) and shows the play options. Before (main) Prolonged Competition is not offered for it;
@@ -67,6 +67,9 @@ def main():
             time.sleep(2)
             webui_shot.api(url, "ui.select_tab", tab)
             time.sleep(6)
+            if "--records" in sys.argv[3:]:      # round 4: the High scores button under the mode list opens the records
+                page.get_by_text("High scores").first.click()
+                time.sleep(4)
             if tick:
                 webui_shot.api(url, "modes.set_prolonged_comp", True)
                 time.sleep(3)

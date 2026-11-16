@@ -5230,7 +5230,7 @@ static int message_borrow(unsigned id, unsigned idx, const char *words)
     if (!borrow[i].held) {
         borrow[i].id = id;
         borrow[i].idx = idx;
-        slot = (const char ***)(unsigned long)(data("message_table") + 4u * borrow[i].idx);
+        slot = (const char ***)(unsigned long)(data("message_table") + sizeof(void *) * borrow[i].idx);   /* PAD-1326 */
         borrow[i].old = *slot;
         *slot = borrow[i].group;
         borrow[i].held = 1;
@@ -5254,7 +5254,7 @@ void pm_message_restore(unsigned id)
     unsigned i;
     for (i = 0; i < N_BORROW; i++)
         if (borrow[i].held && borrow[i].id == id) {
-            *(const char ***)(unsigned long)(data("message_table") + 4u * borrow[i].idx) = borrow[i].old;
+            *(const char ***)(unsigned long)(data("message_table") + sizeof(void *) * borrow[i].idx) = borrow[i].old;
             borrow[i].held = 0;
         }
 }
@@ -17398,10 +17398,10 @@ static int coop_msg_find(const char *words)
     const char *w;
     if (!(can & PM_CAN_MESSAGES) || !data("message_table") || !data("message_count")) return -1;
     count = *(unsigned *)(unsigned long)data("message_count");
-    if (count > 20000 || !maps_has(data("message_table"), 4u * count, MAP_R)) return -1;
+    if (count > 20000 || !maps_has(data("message_table"), sizeof(void *) * count, MAP_R)) return -1;
     for (idx = 0; idx < count; idx++) {
-        group = *(const char ***)(unsigned long)(data("message_table") + 4u * idx);
-        if (!group || !maps_has((unsigned long)group, 4, MAP_R)) continue;
+        group = *(const char ***)(unsigned long)(data("message_table") + sizeof(void *) * idx);
+        if (!group || !maps_has((unsigned long)group, sizeof(void *), MAP_R)) continue;
         w = group[0];
         if (w && maps_has((unsigned long)w, 8, MAP_R) && str_eq(w, words)) return (int)idx;
     }
@@ -17415,9 +17415,11 @@ static void coop_ball_find(void)
     long v = pm_port_value("coop_ball_msg", -1);              /* the port's (portcoop.py), checked by its words */
     pm_addr t = data("message_table");
     const char **group;
-    if (v >= 0 && v < 20000 && t && maps_has(t + 4u * (unsigned)v, 4, MAP_R)) {
-        group = *(const char ***)(unsigned long)(t + 4u * (unsigned)v);
-        if (group && maps_has((unsigned long)group, 4, MAP_R) && group[0] && maps_has((unsigned long)group[0], 8, MAP_R)
+    /* PAD-1326: a table of pointers - 8 bytes each on Spike 3 */
+    if (v >= 0 && v < 20000 && t && maps_has(t + sizeof(void *) * (unsigned)v, sizeof(void *), MAP_R)) {
+        group = *(const char ***)(unsigned long)(t + sizeof(void *) * (unsigned)v);
+        if (group && maps_has((unsigned long)group, sizeof(void *), MAP_R) && group[0]
+            && maps_has((unsigned long)group[0], 8, MAP_R)
             && str_eq(group[0], "BALL %d")) {
             coop_ball_msg = (int)v;
             return;
@@ -17722,7 +17724,9 @@ static unsigned hand_adj_answer(unsigned id, unsigned own);   /* PAD-1033, below
 static unsigned coop_adj_answer(unsigned id, unsigned own);   /* PAD-1031, below */
 static unsigned adj_chain(unsigned id)
 {
-    unsigned v = adj_game(id);
+    unsigned v;
+    id &= 0xffffu;                       /* PAD-1326: a u16 (`tst w0, #0xffff`); a 64-bit caller's upper bits are not it */
+    v = adj_game(id);
     if (adj_hand_on) v = hand_adj_answer(id, v);
     if (adj_coop_on) v = coop_adj_answer(id, v);
     if (ci.hold_adj && id == ci.hold_adj) {                   /* PAD-1114: the ball stays in the lane */
@@ -21595,7 +21599,8 @@ static struct hand_change { unsigned id, op, v, lo, hi; } hand_lv[2 * HAND_LEVEL
 static unsigned hand_lv_n[2 * HAND_LEVEL_MAX + 1];
 static struct {
     int on, only;
-    unsigned setting, left, right, start;    /* start: the Start button (held: the flippers are not the pick's) */
+    pm_addr setting;                         /* PAD-1326: an address (a PIE's moved by game_base) */
+    unsigned left, right, start;             /* start: the Start button (held: the flippers are not the pick's) */
     int level[5];                            /* player (1-4) -> the level picked (kept for the next game) */
     unsigned picked;                         /* a bit per player: their level holds (their first ball began) */
     unsigned asked;                          /* a bit per player: their pick has shown this game */
@@ -21672,9 +21677,16 @@ static void hand_line(const char *s)
         if (!ok) hand.start = 0;
         return;
     }
-    if (str_starts(s, "setting ") || str_starts(s, "left ") || str_starts(s, "right ")) {
-        unsigned *at = s[0] == 's' ? &hand.setting : s[0] == 'l' ? &hand.left : &hand.right;
-        p = s + (s[0] == 's' ? 8 : s[0] == 'l' ? 5 : 6);
+    if (str_starts(s, "setting ")) {                                      /* PAD-1326: an address */
+        p = s + 8;
+        hand.setting = (pm_addr)number(&p, &ok);
+        if (!ok) hand.setting = 0;
+        if (hand.setting) hand.setting += (pm_addr)game_base;           /* a PIE's (0 on Spike 2) */
+        return;
+    }
+    if (str_starts(s, "left ") || str_starts(s, "right ")) {
+        unsigned *at = s[0] == 'l' ? &hand.left : &hand.right;
+        p = s + (s[0] == 'l' ? 5 : 6);
         *at = (unsigned)number(&p, &ok);
         if (!ok) *at = 0;
         return;
@@ -22024,7 +22036,7 @@ static void hand_arm(void)
         return;
     }
     if (hand.setting && !maps_has(hand.setting, 4, MAP_R)) {
-        say("handicap: off - the HANDICAP setting's value 0x%08x is not mapped", hand.setting);
+        say("handicap: off - the HANDICAP setting's value 0x%08" PMA " is not mapped", hand.setting);
         return;
     }
     if (!hand.left || !hand.right || !edge_arm(&why)) {
@@ -22032,6 +22044,15 @@ static void hand_arm(void)
             ? "handicap.cfg names no flipper buttons" : why ? why : "?");
         return;
     }
+#if PM_A64
+    {   /* PAD-1326: a 64-bit program's switch levels are the edge hook's own record, filled only by the hook */
+        struct site *e = site("switch_edge");
+        if (!e || !e->ok || !edge_hook(e)) {
+            say("handicap: off - the flipper buttons cannot be read (switch_edge could not be hooked)");
+            return;
+        }
+    }
+#endif
     if (!adj_wrap_arm()) {
         say("handicap: off - the adjustment getter could not be wrapped");
         return;

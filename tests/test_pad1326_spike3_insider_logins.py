@@ -265,3 +265,122 @@ def test_a_spike3_coop_plan_says_what_it_is(tmp_path):
     assert "setting 0x0070afd8" in text and "screens" not in text and "intro" not in text
     assert r.lines[0] == "co-op play: " + CP.HOW_A64
     assert "CO-OP PLAY: 0 Off, 1 On" in r.lines[1] and r.lines[-1] == "co-op play: " + CP.A64_LEFT_OUT
+
+
+# ---- the player sites on every Spike 3 port ------------------------------------------------------------------------
+
+PORTS = {"fallout_le": ("fallout_le-0.82", True), "pokemon_le": ("pokemon_le-0.82", False),
+         "star_wars_2025_le": ("star_wars_2025_le-0.96", False), "star_wars_2025_pro": ("star_wars_2025_pro-0.84", False),
+         "star_wars_elg": ("star_wars_elg-1.10", True), "walking_dead_remastered_le": ("walking_dead_remastered_le-0.92", True)}
+
+
+def _port(name):
+    with open(os.path.join(SDK, "ports", "spike3", name + ".port"), encoding="utf-8") as f:
+        return f.read()
+
+
+@pytest.mark.parametrize("key", sorted(PORTS))
+def test_the_finder_names_each_ports_player_sites(key):
+    from pinball_decryptor.plugins.stern import portcoop as PC
+    text = _port(PORTS[key][0])
+    cur = int(re.search(r"^data cur_player\s+(0x[0-9a-f]+)", text, re.M).group(1), 16)
+    lines = PC.lines_a64(_library_program(key), cur)
+    assert len(lines) == 4 and lines[2].split()[-1] == "0x%08x" % cur
+    carried = [l.split("#")[0].split() for l in text.splitlines() if not l.startswith("#")]
+    commented = [l[2:].split() for l in text.splitlines() if l.startswith("# site coop_") or l.startswith("# data coop_")]
+    for line in lines:
+        assert line.split() in (carried if PORTS[key][1] else commented), line
+        assert line.split() not in (commented if PORTS[key][1] else carried), line
+    if not PORTS[key][1]:                               # no switch edge: the button cannot be read
+        assert not re.search(r"^site switch_edge", text, re.M)
+
+
+def test_elgs_paired_lines_are_the_finders():
+    from pinball_decryptor.plugins.stern import portcoop as PC
+    assert PC.lines_a64(_library_program("star_wars_elg"), 0x6b1a1a) == [
+        "site coop_player_change 0x00417b50 0xd0001402 0xf9468442",
+        "site coop_add_player  0x00417710 0xa9be53f3 0x52800a20",
+        "data coop_player            0x006b1a1a", "data coop_players           0x00792200"]
+
+
+def test_a_program_without_the_shapes_names_no_sites():
+    from pinball_decryptor.plugins.stern import portcoop as PC
+    assert PC.lines_a64(_program(), 0x6b1a1a) == []
+
+
+def test_coop_goes_on_the_spike3_titles_whose_port_reads_the_button():
+    from pinball_decryptor.plugins.stern import mode_project as MP
+    profs = {k: p for k, p in MP.profiles().items() if getattr(p, "arch", "") == "a64"}
+    on = sorted(k for k, p in profs.items() if not CP.title_refusal(p))
+    assert on == ["fallout_le_0_82_spike3", "star_wars_elg_1_10_spike3", "walking_dead_remastered_le_0_92_spike3"]
+    for k, p in profs.items():
+        if k not in on:
+            assert CP.title_refusal(p) == CP.NO_PORT % p.label
+
+
+# ---- the message table and its BALL line --------------------------------------------------------------------------
+
+#: each program's message table and the index of its "BALL %d" line (ELG's is its Spike 2 build's 1255)
+MESSAGES = {"fallout_le": (0x65fbdb8, 1256), "pokemon_le": (0x31c8828, 1252), "star_wars_2025_le": (0x8e2948, 1252),
+            "star_wars_2025_pro": (0x7770d8, 1248), "star_wars_elg": (0x6c96e8, 1255),
+            "walking_dead_remastered_le": (0x7e6328, 1254)}
+
+
+@pytest.mark.parametrize("key", sorted(MESSAGES))
+def test_the_message_table_and_its_ball_line(key):
+    from pinball_decryptor.plugins.stern import portcoop as PC
+    t, n = MESSAGES[key]
+    lines = PC.message_lines_a64(_library_program(key))
+    assert lines == ["data message_table          0x%08x" % t, "value coop_ball_msg          %d" % n]
+    text = _port(PORTS[key][0])
+    carried = [l.split("#")[0].split() for l in text.splitlines() if not l.startswith("#")]
+    commented = [l[2:].split() for l in text.splitlines() if l.startswith("# data message_table")
+                 or l.startswith("# value coop_ball_msg")]
+    for line in lines:
+        assert line.split() in (carried if PORTS[key][1] else commented)
+
+
+def test_the_runtime_steps_the_message_table_by_pointer_size():
+    src = _src()
+    assert "4u * borrow[i].idx" not in src and "4u * idx" not in src and "4u * (unsigned)v" not in src
+    assert src.count('data("message_table") + sizeof(void *) *') == 3     # borrow, restore, find
+
+
+# ---- handicaps on Spike 3 -------------------------------------------------------------------------------------------
+
+def test_a_spike3_handicap_cfg():
+    from pinball_decryptor.plugins.stern import handicap as HC, mode_project as MP
+    prof = MP.profiles()["star_wars_elg_1_10_spike3"]
+    assert not HC.title_refusal(prof)
+    port = MP.read_port(MP.port_path(prof))
+    text = HC.cfg_text(_library_program("star_wars_elg"), "star_wars_elg", setting=0x70afe8, only=True, port=port)
+    lines = text.splitlines()
+    assert lines[1:7] == ["handicap on", "left 50", "right 49", "start 60", "setting 0x0070afe8", "only"]
+    assert not any(l.startswith("record ") for l in lines)                 # the records read 32-bit code
+    assert "level +3 adj:94+6:0:15," in text                                 # AD_BALL_SAVE_TIME, 0-15 s
+
+
+def test_handicaps_go_on_the_titles_that_take_coop():
+    from pinball_decryptor.plugins.stern import handicap as HC, mode_project as MP, spike3_modes as S3M
+    on = sorted(k for k, p in MP.profiles().items() if getattr(p, "arch", "") == "a64" and not HC.title_refusal(p))
+    assert on == ["fallout_le_0_82_spike3", "star_wars_elg_1_10_spike3", "walking_dead_remastered_le_0_92_spike3"]
+    assert "handicaps" not in S3M.FAMILY_LEFT_OUT
+
+
+def test_coop_play_and_handicap_rows_grow_together():
+    from pinball_decryptor.plugins.stern import menu_settings as MS, spike3_menu
+    out, settings, refused = spike3_menu.grow(_library_program("star_wars_elg"),
+                                              [spike3_menu._coop_row(), spike3_menu._hand_row()])
+    assert not refused
+    assert {s.key: s.live for s in settings} == {MS.COOP_PLAY: 0x70afd8, MS.HANDICAP: 0x70afe8}
+    for s in settings:
+        assert MS.check(out, s) == []
+
+
+def test_the_runtime_handicap_on_64bit():
+    src = _src()
+    arm = src[src.index("static void hand_arm(void)\n{"):]
+    arm = arm[:arm.index("\n}\n")]
+    assert "#if PM_A64" in arm and "!edge_hook(e)" in arm
+    assert "if (hand.setting) hand.setting += (pm_addr)game_base;" in src
+    assert "id &= 0xffffu;" in src[src.index("static unsigned adj_chain(unsigned id)"):][:400]

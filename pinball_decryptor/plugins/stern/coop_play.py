@@ -56,6 +56,9 @@ NO_TITLE = ("The app cannot tell which game this project is for, so it cannot gi
 OWN = "%s has co-op play of its own, so the app does not add another."
 NO_PORT = ("The app does not know where %s keeps its players yet, so it cannot give it co-op play.")
 NO_BUTTON = "The game program names no right flipper button, so a teammate could not join."
+#: PAD-1326: a Spike 3 title whose port has no switch edge source (PAD-1322) cannot tell a held button
+NO_EDGE = ("The app cannot read %s's buttons as they are pressed yet, so a teammate holding the right flipper button "
+           "could not join.")
 #: round 2: the service menu's row (menu_settings.COOP_PLAY): its values, and its help line in the game's own menu.
 #: PAD-1042: four, 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1 (daveyvandy: "a designated option for 2V1"; the row shows
 #: the number; Off/On had 0 and 1 and v1.360.0's row 0-2, so a pick is kept). PAD-1065: seven, 1-3 the Enhanced
@@ -160,6 +163,8 @@ def title_refusal(prof):
         return NO_PORT % prof.label
     if not all(s in port.get("site", {}) for s in PORT_SITES) or not all(d in port.get("data", {}) for d in PORT_DATA):
         return NO_PORT % prof.label
+    if getattr(prof, "arch", "arm") == "a64" and "switch_edge" not in port.get("site", {}):
+        return NO_EDGE % prof.label                     # PAD-1326: the held button is the 64-bit edge hook's
     return ""
 
 

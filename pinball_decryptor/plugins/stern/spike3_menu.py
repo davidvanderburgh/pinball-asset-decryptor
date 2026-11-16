@@ -46,6 +46,18 @@ def coop_row_asked(project):
     return CP.menu_asked(project) and spike3_modes.coop_wanted(project) is not None
 
 
+def hand_row_asked(project):
+    """PAD-1326: whether this Spike 3 build's handicaps ask for HANDICAP in the operator menu (always, as on Spike 2:
+    with no setting left for it the handicaps are always on)."""
+    from . import spike3_modes
+    return spike3_modes.hand_wanted(project) is not None
+
+
+def _hand_row():
+    from . import handicap as HC
+    return (MS.HANDICAP, HC.MENU_VALUES, (), {"default": 1, "help_text": HC.MENU_HELP, "onoff": True})
+
+
 def _coop_row():
     from . import coop_play as CP
     return (MS.COOP_PLAY, CP.MENU_VALUES_A64, (), {"default": 1, "help_text": CP.MENU_HELP_A64, "from_zero": True})
@@ -98,7 +110,11 @@ _LEFT = {
                  "card cannot pick this card by it."),
     MS.COOP_PLAY: ("Co-op play: CO-OP PLAY could not be added to the operator menu (%s), so co-op play "
                    "is left out of this card."),
+    MS.HANDICAP: ("Handicaps: HANDICAP could not be added to the operator menu (%s), so the handicaps are "
+                  "always on on this card."),
 }
+#: PAD-1326: a row whose absence is no warning (the part goes on without it)
+_QUIET = (MS.HANDICAP,)
 
 
 def _placed(s, names, log):
@@ -111,6 +127,9 @@ def _placed(s, names, log):
             "(On) and holding the right flipper button while pressing Start adds a teammate. While it "
             "is 1 most Insider Connected features are off; at 0 the card reports as it always has "
             "(with no modes on it)." % s.where, "info")
+    elif s.key == MS.HANDICAP:
+        log("Handicaps: HANDICAP is in the operator menu (%s), Off to start with: set it to On and each "
+            "player picks a handicap at their first ball." % s.where, "info")
 
 
 def plan(project, reader, work, log=None):
@@ -123,14 +142,15 @@ def plan(project, reader, work, log=None):
     log = log or (lambda *a, **k: None)
     names = editions_wanted(project, log)
     coop = coop_row_asked(project)
+    hand = hand_row_asked(project)
     wanted = (([(MS.EDITION, len(names), names)] if names else [])
-              + ([_coop_row()] if coop else []))
+              + ([_coop_row()] if coop else []) + ([_hand_row()] if hand else []))
     if not wanted:
         return None
 
     def left(why, keys=None):
         for key in keys or [w[0] for w in wanted]:
-            log(_LEFT[key] % str(why).rstrip("."), "warning")
+            log(_LEFT[key] % str(why).rstrip("."), "info" if key in _QUIET else "warning")
         return None
     try:
         state, target = spike3_modes.card_state(reader)

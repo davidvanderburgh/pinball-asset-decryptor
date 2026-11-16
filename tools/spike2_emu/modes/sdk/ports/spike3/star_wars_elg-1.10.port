@@ -214,7 +214,6 @@ data right_gate_obj         0x00711730   # read off the program's own code (PAD-
 # data sw_struct              NOT PLACED: 5 of 5 paired functions agree
 data coop_player            0x006b1a1a   # 2 of 3 paired functions that load it
 data coop_players           0x00792200   # 5 of 5 paired functions that load it
-# data message_table          NOT PLACED: 0 of 0 paired functions agree
 
 # ---- values: only those proven on Spike 3; a struct offset or a count is a 32-bit build's ----
 value mode_mask_busy        0x210
@@ -286,7 +285,6 @@ value mode_mask_busy        0x210
 # not carried (64-bit layout, measure it): value challenge_record_score_at   80
 # not carried (64-bit layout, measure it): value challenge_record_score_size 4
 # not carried (64-bit layout, measure it): value challenge_page_title_max 18
-# not carried (64-bit layout, measure it): value coop_ball_msg          1255
 value sound_channel_count       8    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_size        288    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_request     272    # the 64-bit sound engine's (PAD-1282)
@@ -460,3 +458,8 @@ text done_name_0          Captive Multiball
 text example_start_shot     Death star target
 
 # not carried (to measure on Spike 3): 1 scene
+
+# PAD-1326: co-op play - the message table and its "BALL %d" line (portcoop.message_lines_a64: the same
+# number as the Spike 2 build's), the line that says whose turn it is
+data message_table          0x006c96e8
+value coop_ball_msg          1255

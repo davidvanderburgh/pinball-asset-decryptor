@@ -199,14 +199,16 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                     "lamp_layers": "0x00735e68", "light_count": "0x0073ec88",
                     "resource_manager": "0x00712bf8", "typeinfo_resource": "0x0068b850",  # the scene lookup's: PAD-1284
                     "typeinfo_scene_player": "0x0068fb48", **PLAY_DATA,
-                    "coop_player": "0x006b1a1a", "coop_players": "0x00792200"}      # PAD-1326: co-op play
+                    "coop_player": "0x006b1a1a", "coop_players": "0x00792200",      # PAD-1326: co-op play
+                    "message_table": "0x006c96e8"}
     values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
               and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES
               and t[1] not in PLAY_VALUES and not t[1].startswith("switch_")}   # PAD-1322: the edge source's
     assert values == {"mode_mask_busy": "0x210", "ball_end_event": "0x34",
                       # PAD-1286: the game's mode books, each flag by its name (the same ids on both builds)
                       "place_flag_completed_0": "69", "place_flag_completed_1": "67", "place_flag_completed_2": "68",
-                      "done_flag_0": "66"}
+                      "done_flag_0": "66",
+                      "coop_ball_msg": "1255"}                  # PAD-1326: its Spike 2 build's number
 
 
 def test_elg_spike3_switch_ids_are_the_ones_the_rig_measured():

@@ -197,3 +197,14 @@ text example_start_shot     Right target
 # value proc_exit_hooks: 312 on the reference, 424 here
 # value proc_exit_slots: 1 of the 41 lined-up instructions holding 4 on the reference hold 1 here
 # value event_flags: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here
+
+# PAD-1326: co-op play - the framework's player change, add player and player bytes, read off the program by
+# portcoop.lines_a64 (the same shapes as Star Wars ELG 1.10's paired lines; the ball is the byte after the player's)
+# not carried yet: the port names no switch_edge, so a teammate's held button cannot be read
+# site coop_player_change 0x00503bd0 0x90001d42 0xf9476442
+# site coop_add_player  0x00503790 0xa9be53f3 0x528009c0
+# data coop_player            0x008ba52e
+# data coop_players           0x009c8240
+# the message table and its "BALL %d" line (portcoop.message_lines_a64), the line that says whose turn it is
+# data message_table          0x008e2948
+# value coop_ball_msg          1252

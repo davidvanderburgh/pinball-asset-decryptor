@@ -144,7 +144,11 @@ def test_the_32_bit_only_sound_pieces_stay_off_on_64_bit_arm():
     src = _src()
     own = _lift(src, "static void own_on_arm(void)")
     assert own.index("#if PM_A64\n    return;") < own.index('a = fn("sound_active");')
-    assert "music modes: off - the asset descriptors are 32-bit ARM's on this runtime" in src
+    # PAD-1324: the music modes' descriptors stay 32-bit ARM's: on 64-bit they swap records (mswap) instead,
+    # and a descriptor line is left alone, never handed the 64-bit resolver
+    arm = _lift(src, "static void sndm_arm(void)")
+    assert arm.index("if (n_msw) {") < arm.index("descriptor line(s) left alone") < arm.index("hook_wrap(")
+    assert "the asset descriptors are 32-bit ARM's on this runtime" not in src
 
 
 # ---- the port -----------------------------------------------------------------------------------------------

@@ -70,6 +70,11 @@ if [ -z "$T" ] || [ ! -x "$G" ]; then
     done
     exit 4
 fi
+# PAD-1324: the game program with the modes' rows in its operator menu (MUSIC MODE), when the
+# build made one: the card's own program stays as it shipped
+if [ -x "$D/game.pad" ]; then
+    G=$D/game.pad
+fi
 if [ -f "$D/mode.so" ]; then
     LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$D/mode.so"
     export LD_PRELOAD
@@ -86,9 +91,9 @@ MULTIBOOT_WORDS = ("this is a multi-boot card; modes go on a card of the one gam
 #: build that passed its own checks (a title the part's gate refuses has said why already), in
 #: the engine's words for it. The census behind them is docs/plans/spike3_modes.md, "The family
 #: on Spike 3". The score feed is not here: it goes on (:func:`feed_wanted`), and so do the random clips
-#: (:func:`variants_wanted`) and the screen times (:func:`screen_times_wanted`, PAD-1323).
+#: (:func:`variants_wanted`) and the screen times (:func:`screen_times_wanted`, PAD-1323), and the music
+#: modes (:mod:`.spike3_music`, PAD-1324).
 FAMILY_LEFT_OUT = {
-    "music modes": "the 64-bit runtime cannot play a Spike 3 game's songs in their place yet",
     "editions": "the EDITION setting cannot be added to a Spike 3 game's operator menu yet",
     "picture settings": "they cannot be added to a Spike 3 game yet",
     "attract items": "the 64-bit runtime cannot add to a Spike 3 game's attract screens yet",
@@ -139,7 +144,7 @@ def game_program(reader, target):
 class Spike3ModePlan:
     """What a Spike 3 Write puts on the card for the project's modes."""
 
-    def __init__(self, result, payload, names, lines, sound_adds=None):
+    def __init__(self, result, payload, names, lines, sound_adds=None, program="", target=""):
         self.result = result            # mode_write.ModePlan
         self.payload = payload          # mode_write.p2_payload's dict, mode.so the 64-bit one
         self.names = names              # the modes' names
@@ -147,6 +152,10 @@ class Spike3ModePlan:
         #: PAD-1296: ``{container card path: [spike3_write.NewRecord]}`` - the modes' own sounds,
         #: appended to the game's image.bin (spike3_write.plan_sounds ``adds``)
         self.sound_adds = sound_adds or {}
+        #: PAD-1324: the game program with MUSIC MODE in its menu (spike3_music.PROGRAM_NAME), or ""
+        self.program = program
+        #: where /games/game pointed on the stock card (the program game.pad stands in for)
+        self.target = target
         # the title's scenes the modes' screens and clips rewrite, and any new file: whole
         self.jobs = [(rel.lstrip("/"), src) for rel, src in
                      list(result.replaced) + list(result.new)]
@@ -155,6 +164,9 @@ class Spike3ModePlan:
         """``[(name on the card, host path, mode)]`` in ``pad/padmode``."""
         p = self.payload
         out = [("mode.so", p["so"], 0o755)]
+        if self.program:
+            from .spike3_music import PROGRAM_NAME
+            out.append((PROGRAM_NAME, self.program, 0o755))
         for path in (list(p["cfgs"]) + list(p.get("assets") or ()) + list(p.get("extras") or ())
                      + [p["port"]] + ([p["bundle"]] if p.get("bundle") else [])):
             out.append((os.path.basename(path), path, 0o644))
@@ -317,13 +329,21 @@ def stage_try_it_scenes(mplan, files_dir):
     mode's clip), for Try it on the Spike 3 rig: each staged whole in ``<files_dir>/games.patch``
     and named in its ``patches`` list as ``<path in /games>|whole|<file>|`` (after any sound
     container :func:`stage_try_it_sounds` wrote there), which s3run.sh puts in the slot's /games.
-    Returns the number of files (0: nothing)."""
-    if not mplan.jobs:
+    Returns the number of files (0: nothing). PAD-1324: the game program with MUSIC MODE in its
+    menu (:attr:`Spike3ModePlan.program`) goes the same way, over the stock program the card's
+    /games/game names (on a card the hook runs it from pad/padmode instead)."""
+    jobs = list(mplan.jobs)
+    prog = getattr(mplan, "program", "")
+    tgt = getattr(mplan, "target", "")
+    if prog and tgt:
+        rel = tgt[len("/games/"):] if tgt.startswith("/games/") else tgt.lstrip("/")
+        jobs.append((rel, prog))
+    if not jobs:
         return 0
     out = os.path.join(files_dir, GAMES_PATCH)
     os.makedirs(out, exist_ok=True)
     lines = []
-    for k, (rel, src) in enumerate(mplan.jobs):
+    for k, (rel, src) in enumerate(jobs):
         name = "w%d" % k
         shutil.copyfile(src, os.path.join(out, name))
         lines.append("%s|whole|%s|" % (rel.lstrip("/"), name))
@@ -404,8 +424,14 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     card with no modes (the runtime then arms it and nothing else: ``only`` in its file).
     PAD-1323: so do the random clips (:func:`variants_wanted`: their clips into the video bank,
     ``clips.cfg`` beside the runtime) and the screen times (:func:`screen_times_wanted`: ``stime``
-    lines in it)."""
+    lines in it). PAD-1324: so do the music modes (:mod:`.spike3_music`: their files appended to
+    image.bin, ``sounds.cfg`` beside the runtime, and ``game.pad``, the program with MUSIC MODE in
+    its operator menu, which the hook runs in the stock one's place)."""
     log = log or (lambda *a, **k: None)
+    from . import spike3_music as S3MU
+    music, music_prof = S3MU.wanted(project, real_card=real_card)
+    for _line in S3MU.left_out_lines(project):
+        log(_line, "warning")
     feed, feed_prof = feed_wanted(project, real_card=real_card)
     slots, var_prof = variants_wanted(project, real_card=real_card)
     from . import screen_time as ST
@@ -418,7 +444,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     else:
         modes = MW.project_modes(project)
         code = MW.code_mode_list(project)        # PAD-1295: compiled for the card's 64-bit ARM
-    if not modes and not code and not feed and not slots and not stime_maybe:
+    if not modes and not code and not feed and not slots and not stime_maybe and music is None:
         return None
 
     def left(why):
@@ -433,7 +459,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         why = MW.card_refusal(project, real_card=real_card)
         if why:
             modes, code = left(why)
-    if not modes and not code and not feed and not slots and not stime_maybe:
+    if not modes and not code and not feed and not slots and not stime_maybe and music is None:
         return None
     state, target = card_state(reader)
     if state == "multiboot":
@@ -445,6 +471,9 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         if slots:
             log("Random clips: left out of this build: %s." % MULTIBOOT_WORDS.replace(
                 "modes go on", "random clips go on"), "warning")
+        if music is not None:
+            log("Music modes: left out of this build: %s." % MULTIBOOT_WORDS.replace(
+                "modes go on", "music modes go on"), "warning")
         return None
     fw = game_program(reader, target) if target else None
     if fw is None:
@@ -453,7 +482,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     game_raw = bytes(reader.read_file_bytes(fw))
     stime, stime_prof = (screen_times_wanted(project, game_raw, log, real_card=real_card) if stime_maybe
                          else ([], None))
-    if not modes and not code and not feed and not slots and not stime:
+    if not modes and not code and not feed and not slots and not stime and music is None:
         return None
     used, adds = [], {}
     hud, bank = b"", b""
@@ -482,6 +511,28 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
         node = MW.lookup(reader, _vbank) if _vbank else None
         bank = bytes(reader.read_file_bytes(node)) if node is not None else b""
 
+    mus, mus_cfg, mus_prog = None, "", ""
+    if music is not None:
+        try:
+            mus = S3MU.plan(project, music, music_prof, reader, game_raw, log, only=not (modes or code),
+                            adds=adds)
+        except S3MU.Spike3MusicError as e:
+            log("Music modes: left out of this build: %s." % str(e).rstrip("."), "warning")
+        if mus is not None:
+            mdir = os.path.join(scratch, "music")
+            os.makedirs(mdir, exist_ok=True)
+            mus_cfg = os.path.join(mdir, "sounds.cfg")
+            with open(mus_cfg, "w", encoding="utf-8", newline="\n") as f:
+                f.write(mus.cfg)
+            mus_prog = os.path.join(mdir, S3MU.PROGRAM_NAME)
+            with open(mus_prog, "wb") as f:
+                f.write(mus.program)
+            adds = dict(adds)
+            for cp, news in mus.news.items():
+                adds[cp] = list(adds.get(cp) or ()) + list(news)
+    if not modes and not code and not feed and not slots and not stime and mus is None:
+        return None
+
     def read_card(rel):
         node = MW.lookup(reader, rel)
         return bytes(reader.read_file_bytes(node)) if node is not None else None
@@ -494,6 +545,7 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
                      modes_on=bool(modes or code), score_feed=feed, score_feed_prof=feed_prof,
                      variants=bool(slots), variants_prof=var_prof,
                      screen_times=stime, screen_prof=stime_prof,
+                     sound_modes=mus_cfg, sound_modes_prof=music_prof if mus is not None else None,
                      read_card=read_card, scan_card=scan_card)
     if result is None:
         return None
@@ -509,7 +561,12 @@ def plan(project, reader, scratch, log=None, real_card=True, sound_ok=(True, "")
     # PAD-1323: and so do the random clips' and the screen times'
     for low, cap in (("random clips: ", "Random clips: "), ("screen times: ", "Screen times: ")):
         lines = [(cap + l[len(low):]) if l.startswith(low) else l for l in lines]
-    return Spike3ModePlan(result, payload, names, lines, sound_adds=adds)
+    if mus is not None:                      # PAD-1324
+        lines.append("Music modes: MUSIC MODE (%d modes: %s) goes on the operator menu's %s; %d file(s) "
+                     "appended to the game's sounds, played in their mode in place of the game's own."
+                     % (mus.count, ", ".join(music.menu_names()), mus.setting.where.split(" > ")[-1],
+                        mus.n_files))
+    return Spike3ModePlan(result, payload, names, lines, sound_adds=adds, program=mus_prog, target=target)
 
 
 def install_body(files, to_exec):

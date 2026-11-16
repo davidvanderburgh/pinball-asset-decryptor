@@ -8433,7 +8433,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         assets_dir, dest_is_device, log, **_mode_gate_kw))
     # PAD-494: a slot's files for the other music modes ride the same delivery, as
     # records of their own in the bank and MUSIC MODE in the operator menu
-    sound_modes, sound_modes_prof = ((None, None) if "music_modes" in _left else _sound_modes_for_build(
+    # (PAD-1324: a Spike 3 card's are spike3_modes.plan's, records swapped at the 64-bit lookup: not built here)
+    _sm_off = "music_modes" in _left or _is_spike3(disk_f)
+    sound_modes, sound_modes_prof = ((None, None) if _sm_off else _sound_modes_for_build(
         assets_dir, dest_is_device, log, **_mode_gate_kw))
     # PAD-685: the jukebox's intro videos go into the video bank by the random clips' road
     from . import clip_variants as _CVj
@@ -8486,7 +8488,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         # asked for is left out with its own sentence.
         from . import spike3_modes as _S3M
         for _line in _S3M.family_left_out_lines([w for w, on in (
-                ("music modes", sound_modes is not None),
                 ("editions", bool(editions)), ("picture settings", picture_prof is not None),
                 ("attract items", _attract_on), ("co-op play", _coop_on),
                 ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),

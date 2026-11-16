@@ -27,13 +27,17 @@ int main(void)
             e4 = ci_start_edge(0, &was, 0), e5 = ci_start_edge(1, &was, 1);
         printf("start %d %d %d %d %d\n", e1, e2, e3, e4, e5);
     }
+    /* PAD-1361: a held right flipper at Start is a co-op Start only with characters and CO-OP PLAY (or a team) on */
+    printf("held %d %d %d %d\n", ci_film_held(1, 1, 1), ci_film_held(1, 1, 0), ci_film_held(0, 1, 1),
+           ci_film_held(1, 0, 1));
     return 0;
 }
 """
 
 SIGS = ("static int ci_wanted(int have, unsigned played_game, unsigned game, unsigned ball, int unserved, int waits)",
         "static int ci_skip(int left, int right, int *freed)",
-        "static int ci_start_edge(int now_down, int *was_down, int left_down)")
+        "static int ci_start_edge(int now_down, int *was_down, int left_down)",
+        "static int ci_film_held(int chars, int held, int switched_on)")
 
 
 def _run(tmp_path):
@@ -48,6 +52,22 @@ def test_the_intro_plays_once_a_game_before_its_first_ball_is_out(tmp_path):
 
 def test_a_start_while_ball_1_waits_is_a_join_but_not_the_games_own_start(tmp_path):
     assert "start 0 0 1 0 0" in _run(tmp_path)
+
+
+def test_a_right_flipper_start_with_co_op_play_off_does_not_take_the_film(tmp_path):
+    """PAD-1361: CO-OP PLAY Off, the right flipper held at Start - the game's own film plays, not the co-op intro
+    (no co-op game forms for it, and its skip lives in a co-op game's intro)."""
+    assert "held 1 0 0 0" in _run(tmp_path)
+
+
+def test_the_film_swap_uses_the_solo_starts_rule_and_an_orphan_intro_still_skips():
+    src = T.RUNTIME.read_text(encoding="utf-8")
+    due = src[src.index("static int ci_film_due(void)\n{"):]
+    due = due[:due.index("\n}\n")]
+    assert "coop_switched_on() || coop_teams_switched_on() != 0" in due
+    tick = src[src.index("static void coop_intro_tick(void)\n{"):]
+    tick = tick[:tick.index("if (!coop_teammates())")]
+    assert "no co-op game for it - skipped with both flipper buttons" in tick
 
 
 def test_both_flippers_skip_it_once_each_was_let_go(tmp_path):

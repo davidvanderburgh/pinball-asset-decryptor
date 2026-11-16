@@ -219,6 +219,16 @@ text example_start_shot     Junk target
 # value proc_exit_slots: 1 of the 41 lined-up instructions holding 4 on the reference hold 1 here
 # value event_flags: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here
 
+# PAD-1326: co-op play - the framework's player change, add player and player bytes, read off the program by
+# portcoop.lines_a64 (the same shapes as Star Wars ELG 1.10's paired lines; the ball is the byte after the player's)
+site coop_player_change 0x008cfce0 0xf0008262 0xf9474442
+site coop_add_player  0x008cf8a0 0xa9be53f3 0x528009e0
+data coop_player            0x065c1a8e
+data coop_players           0x0674d620
+# the message table and its "BALL %d" line (portcoop.message_lines_a64), the line that says whose turn it is
+data message_table          0x065fbdb8
+value coop_ball_msg          1256
+
 # ---- PAD-1327: the start menu (CHOOSE YOUR MODE OF PLAY), a menu of game-mode table indices read off this program's
 # own menu function 0x484b40; the frame point `ldr w23, [x26, w20, sxtw #2]`: the index under the cursor once the press has moved it (w20), the list x26 = sp+0x1b8 (room for 12: 0x1e8 is the next object), the count in w22.
 # Prolonged Competition (comp.cfg) appends Competition's index again and letters its name message while the cursor
@@ -236,4 +246,3 @@ value comp_menu_end_msg          1916   # NORMAL PLAY
 # the message lookup's: a u64 count, a pointer to the u16 remap, a table of 8-byte record pointers
 data message_count          0x00ad16e0
 data message_remap          0x066caec0
-data message_table          0x065fbdb8

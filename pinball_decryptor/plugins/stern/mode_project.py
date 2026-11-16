@@ -547,6 +547,10 @@ MULTIBALL_PROVEN = frozenset({
     # 40 s and scored 3 shots, then "ours is over (1 ball in play)"
     "star_wars_2025_le-0.96/spike3",
     "star_wars_2025_pro-0.84/spike3",    # PAD-1291 2026-11-15 (Spike 3 rig slot 240, hidden, muted): MB TEST served 3 balls through the game's serve, scored 3 shots (+6,000,000), "ours is over" at one ball
+    # PAD-1293 2026-11-16, Transformers LE 0.96 (Spike 3 rig slot 163, hidden, muted, s3proof.sh PROOF=mb
+    # TITLE=transformers_mtmte_le): MB TEST on three Megatron target left hits, "3 balls asked for (3 in play now) ...
+    # the game is serving", 3 shots scored, its 40 s clock ended it and "ours is over (1 ball in play)"
+    "transformers_mtmte_le-0.96/spike3",
 })
 
 
@@ -667,6 +671,11 @@ BALL_SAVE_PROVEN = frozenset({
     # inside it served back (eject + auto plunger), 3 shots scored 6,000,000 on that ball, the drain after the save
     # ended it; the control without ball_save ended the ball on its first drain
     "walking_dead_remastered_le-0.92/spike3",
+    # PAD-1293 2026-11-16, Transformers LE 0.96 (Spike 3 rig slots 161/162, hidden, muted, s3proof.sh PROOF=ballsave
+    # TITLE=transformers_mtmte_le): SAVE TEST's 15 s save taken, the drain inside it served back (trough eject + auto
+    # plunger), 3 shots scored 6,000,000 on that ball, the drain after the save ended it; SAVE CONTROL (no ball_save)
+    # ended the ball on its first drain, 5.9 s in
+    "transformers_mtmte_le-0.96/spike3",
 })
 
 
@@ -2198,9 +2207,13 @@ BUS_IDS = 208
 #: star_wars_2025_pro-0.84/spike3: PAD-1291 2026-11-15 (Spike 3 rig slot 240, hidden, muted): a mode file with all
 #: 27 of its port's switch lines as shots (proofs/modes/allshots.cfg) took 54 shots for 54 presses (each switch twice)
 #: and ended on its clock; its ids are the ones the game sent in a census (proofs/titles/star_wars_2025_pro-0.84.switch_ids).
+#: transformers_mtmte_le-0.96/spike3: PAD-1293 2026-11-16 (Spike 3 rig slot 160, hidden, muted): the census pressed all
+#: 37 of its switch lines in a game and every one reached the modes from the switch drain's edges, each id 3 below its
+#: device-table rank (proofs/titles/transformers_mtmte_le-0.96.switch_ids); a mode file started on Megatron target left
+#: x3 and scored 6 shots on Right orbit, Center loop and Left orbit.
 SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3",
                                  "pokemon_le-0.82/spike3", "star_wars_2025_le-0.96/spike3",
-                                 "star_wars_2025_pro-0.84/spike3"})
+                                 "star_wars_2025_pro-0.84/spike3", "transformers_mtmte_le-0.96/spike3"})
 #: Builds whose shots from the framework's switch drain (site switch_edge, `switch` lines) were seen
 #: reaching a mode in the emulator, each switch once, as ``<game>-<version>`` (2026-09-23: The Beatles
 #: 1.29 and Star Wars ELG 1.10 of generation B, Batman 66 1.13 and Rush LE 1.18 of generation A).
@@ -2218,10 +2231,14 @@ SWITCH_SHOTS_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10/spike3", "w
 #: one hit per press, the slingshots and Right pop bumper too) and Walking Dead Remastered LE 0.92 (Tower target x3
 #: started it, Left loop / Right loop / Right spinner scored six shots); keyed here by PAD-1289, whose merge found the
 #: "not seen reaching a mode" banner back on both once their shots came from the edges.
+#: PAD-1293 (2026-11-16, Spike 3 rig slots 160-163): Transformers LE 0.96's shots come from the same edges ("the switch
+#: drain's edges (switch_edge ... the record in x19, the game's mode mask applied)"): the census above and four modes
+#: started on Megatron target left x3 and scored on Right orbit, Center loop and Left orbit.
 SWITCH_EDGE_PROVEN = frozenset({"beatles-1.29", "star_wars_elg-1.10", "batman-1.13", "rush_le-1.18",
                                 "godzilla_pro-1.15", "godzilla_pro-1.16", "godzilla_le-1.16",
                                 "metallica_spike-1.04",
-                                "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3"})
+                                "star_wars_elg-1.10/spike3", "walking_dead_remastered_le-0.92/spike3",
+                                "transformers_mtmte_le-0.96/spike3"})
 
 
 def _core_names(port):
@@ -2380,6 +2397,7 @@ _TITLE_NAMES = {
     "rush": "Rush",
     "star_wars": "Star Wars",
     "star_wars_elg": "Star Wars ELG",
+    "transformers_mtmte": "Transformers",            # PAD-1293: the Spike 3 card's stem
     "stranger_things": "Stranger Things",
     "sword_of_rage": "Sword of Rage",
     "turtles": "TMNT",

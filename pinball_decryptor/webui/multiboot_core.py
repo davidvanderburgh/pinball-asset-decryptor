@@ -2743,7 +2743,13 @@ def clean_tests(tests):
 
 
 def test_args(form):
-    """``--test PATH[|LABEL]`` per test picture, in order (PAD-1279)."""
+    """``--test PATH[|LABEL]`` per test picture, in order (PAD-1279).
+
+    None any more on a multi-boot card (PAD-1279, DragonRR's second round: the test
+    pictures are the Test card tab's, a card of their own); its SETTINGS card keeps
+    the built-in patterns for Color correction."""
+    if not getattr(form, "keep_tests", False):
+        return []
     if not backend_for(form).settings_tile:
         return []
     args = []
@@ -2891,6 +2897,7 @@ def _bof_build_args(form):
     ] + heading_args(form) + text_size_args(form) + menu_text_args(form) \
         + theme_args(form)
     args += default_card_args(form) + s3_key_args(be)
+    args += editions_args(form)          # PAD-1325: a Spike 3 card of editions
     if any(subtitles):
         args += ["--subtitles", ";".join(subtitles)]
     if form.media_dir:
@@ -3011,6 +3018,7 @@ def inject_args(form, card):
         args += default_card_args(form) + s3_key_args(be)
         args += (heading_args(form) + text_size_args(form)
                  + menu_text_args(form) + theme_args(form))
+        args += editions_args(form)      # PAD-1325: a Spike 3 card of editions
         if form.media_dir:
             args += ["--media-dir", wsl(form.media_dir)]
         return args
@@ -4138,14 +4146,15 @@ def testcard_colour_arg(form):
         return []
 
 
-def testcard_commands(form, out, media_dir, cwd=None):
+def testcard_commands(form, out, media_dir, cwd=None, test_specs=None):
     """'Build test card…': the selector, the test pictures (``prepare`` with
     nothing else to render: no art, no clips, no sounds), then ``testcard``.
     The first image on the list is only where the boot and rootfs come from."""
     primary = wsl(form.images[0].path)
     prep = [SELECTMEDIA, "prepare", "--primary", primary, "--art", "0=none", "--anim", "0=none",
             "--music", "0=none", "--sound-move", "none", "--sound-confirm", "none",
-            "--cards", "1", "--out", wsl(media_dir)] + test_args(form) + [
+            "--cards", "1", "--out", wsl(media_dir)] + (
+                test_args(form) if test_specs is None else list(test_specs)) + [
             "--volume", str(int(form.volume))]
     tc = [MKMULTICARD, "testcard", "--primary", primary, "--out", wsl(out),
           "--selector-dir", form.selector_dir or DEFAULT_SELECTOR_DIR,
@@ -10363,7 +10372,10 @@ class MultibootPanel:
 
     # -- the test pictures (PAD-1279) -----------------------------------
     def test_pictures(self):
-        """[(path, label)] as the menu dialog has them."""
+        """[(path, label)] as the menu dialog has them - none any more (PAD-1279, round 2:
+        the test pictures are the Test card tab's); an older saved menu's are left out."""
+        if not getattr(self, "_keep_tests", False):
+            return []
         try:
             return clean_tests(json.loads(self._tests_var.get() or "[]"))
         except ValueError:

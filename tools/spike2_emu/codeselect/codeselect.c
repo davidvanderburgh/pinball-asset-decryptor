@@ -2102,7 +2102,7 @@ int main(int argc, char **argv)
         if (!L.th_known) sel_log("theme: '%s' is not a theme, using %s", c.theme, THEME_DEFAULT);
         sel_log("theme: %s (%d of %d colours set by the conf%s)", L.th.name, L.th_set, TH_N, bad);
     }
-    /* a test card has no menu to draw: its picture is the Settings list */
+    /* a test card's picture is its own menu (settings_snapshot draws it) */
     if (snapshot && !o.screen && c.testcard) o.screen = "settings";
     if (snapshot && o.screen) {
         struct settings_env se;
@@ -2113,7 +2113,7 @@ int main(int argc, char **argv)
         se.th = &L.th;
         se.c = &c;
         se.colour_file = o.colour_file;
-        se.media_dir = media_dir(&o, &c);
+        se.media_dir = *c.test_dir ? c.test_dir : media_dir(&o, &c);
         se.first_image = hlimg;
         se.testcard = c.testcard;
         if (settings_snapshot(&se, o.screen, o.screen_row, o.screen_edit, why, sizeof why) < 0) {
@@ -2317,13 +2317,13 @@ int main(int argc, char **argv)
         se.au = au;
         se.move = media.move;
         se.colour_file = o.colour_file;
-        se.media_dir = media.dir;
+        se.media_dir = *c.test_dir ? c.test_dir : media.dir;
         se.first_image = 0;
         se.present = present_cb;
         se.ctx = &pctx;
         se.stop = &g_stop;
         se.testcard = 1;
-        sel_say("testcard: no menu, nothing boots: the settings screens until power-off");
+        sel_say("testcard: nothing boots: the test card menu until power-off");
         while (!g_stop) settings_run(&se);
         goto testcard_done;
     }
@@ -2436,7 +2436,7 @@ int main(int argc, char **argv)
             se.au = au;
             se.move = media.move;
             se.colour_file = o.colour_file;
-            se.media_dir = media.dir;
+            se.media_dir = *c.test_dir ? c.test_dir : media.dir;
             se.first_image = lastimg;
             se.present = present_cb;
             se.ctx = &pctx;

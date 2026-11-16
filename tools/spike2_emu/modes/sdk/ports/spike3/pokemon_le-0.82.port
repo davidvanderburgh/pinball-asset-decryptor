@@ -214,6 +214,17 @@ text example_start_shot     Berry target left
 # value proc_exit_slots: 1 of the 41 lined-up instructions holding 4 on the reference hold 1 here
 # value event_flags: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here
 
+# PAD-1326: co-op play - the framework's player change, add player and player bytes, read off the program by
+# portcoop.lines_a64 (the same shapes as Star Wars ELG 1.10's paired lines; the ball is the byte after the player's)
+# not carried yet: the port names no switch_edge, so a teammate's held button cannot be read
+# site coop_player_change 0x007a2830 0xf0014ee2 0xf9462042
+# site coop_add_player  0x007a23f0 0xa9be53f3 0x52800a00
+# data coop_player            0x031a0bc0
+# data coop_players           0x032f4ba0
+# the message table and its "BALL %d" line (portcoop.message_lines_a64), the line that says whose turn it is
+# data message_table          0x031c8828
+# value coop_ball_msg          1252
+
 # NOT OFFERED YET (PAD-1327): measured off this program, but its start menu did not open on the rig with fresh
 # settings, nor with AD_PLAYER_GAME_MODE / AD_PLAYER_COMPETITION_MODE read as on; the lines go live once it is reached.
 # ---- PAD-1327: the start menu (CHOOSE YOUR MODE OF PLAY), a menu of game-mode table indices read off this program's

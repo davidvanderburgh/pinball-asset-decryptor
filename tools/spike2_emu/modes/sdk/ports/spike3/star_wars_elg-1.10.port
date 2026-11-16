@@ -153,8 +153,8 @@ site challenge_menu_pick 0x00159c38 0x7100103f 0x540033c0
 # not carried yet (its feature is 32-bit): site game_scores      0x003eecc0 0xf0001542 0xf9468442
 # site coil_frame       NOT PLACED: no counterpart found
 # site coil_off         NOT PLACED: no counterpart found
-# not carried yet (its feature is 32-bit): site coop_player_change 0x00417b50 0xd0001402 0xf9468442
-# not carried yet (its feature is 32-bit): site coop_add_player  0x00417710 0xa9be53f3 0x52800a20
+site coop_player_change 0x00417b50 0xd0001402 0xf9468442
+site coop_add_player  0x00417710 0xa9be53f3 0x52800a20
 # site coop_first_ball  NOT PLACED: mid-way into a function on Spike 2 (0x1016c0 + 0x24)
 
 # ---- the game's own light shows (PAD-1283): the Spike 2 port's shows, each at the same record of
@@ -217,9 +217,8 @@ data right_gate_obj         0x00711730   # read off the program's own code (PAD-
 # data challenge_scores_table NOT PLACED: 0 of 0 paired functions agree
 # data challenge_scores_count NOT PLACED: 0 of 0 paired functions agree
 # data sw_struct              NOT PLACED: 5 of 5 paired functions agree
-# not carried yet: data coop_player            0x006b1a1a   # 2 of 3 paired functions that load it
-# not carried yet: data coop_players           0x00792200   # 5 of 5 paired functions that load it
-# data message_table          NOT PLACED: 0 of 0 paired functions agree
+data coop_player            0x006b1a1a   # 2 of 3 paired functions that load it
+data coop_players           0x00792200   # 5 of 5 paired functions that load it
 
 # ---- values: only those proven on Spike 3; a struct offset or a count is a 32-bit build's ----
 value mode_mask_busy        0x210
@@ -292,7 +291,6 @@ value challenge_menu_pick_reg  1
 # not carried (64-bit layout, measure it): value challenge_record_score_at   80
 # not carried (64-bit layout, measure it): value challenge_record_score_size 4
 # not carried (64-bit layout, measure it): value challenge_page_title_max 18
-# not carried (64-bit layout, measure it): value coop_ball_msg          1255
 value sound_channel_count       8    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_size        288    # the 64-bit sound engine's (PAD-1282)
 value sound_channel_request     272    # the 64-bit sound engine's (PAD-1282)
@@ -466,3 +464,8 @@ text done_name_0          Captive Multiball
 text example_start_shot     Death star target
 
 # not carried (to measure on Spike 3): 1 scene
+
+# PAD-1326: co-op play - the message table and its "BALL %d" line (portcoop.message_lines_a64: the same
+# number as the Spike 2 build's), the line that says whose turn it is
+data message_table          0x006c96e8
+value coop_ball_msg          1255

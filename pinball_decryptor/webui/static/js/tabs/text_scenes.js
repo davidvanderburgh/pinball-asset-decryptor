@@ -6,6 +6,7 @@ import { html, useState, useEffect, useLayoutEffect, useRef, Button, Field, Sele
          Icon, Progress, Spinner, tip, call, mediaUrl, cx } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 import { LookRow } from "../core/look.js";
+import { testCol } from "../core/testtick.js";
 
 // Load its own sheet once.
 const CSS_HREF = "/static/css/tabs/text_scenes.css";
@@ -49,9 +50,12 @@ const FIND_TIP = "Finds scenes by name, font or the words they show. Enter (or t
 // readable and drops the counts, least useful first (Video, Fonts, then Text and Images).
 const COLS_BY_WIDTH = [[470, ["imgs", "fonts", "texts", "vids"]], [330, ["imgs", "texts"]],
   [250, ["imgs"]], [0, []]];
-function sceneCols(width) {
+function sceneCols(width, s) {
   const keep = (COLS_BY_WIDTH.find(([w]) => width >= w) || [0, []])[1];
   const cols = SCENE_COLS.filter((c) => c.key === "label" || keep.includes(c.key));
+  // PAD-1279: TEST puts the scene's resting frame on the test card (after the name: kept
+  // however narrow the list is; a fixed track, so it may be the last one)
+  if (s && s.test_on) cols.splice(1, 0, testCol({ ns: "text_scenes", tags: s.test_tags, full: s.test_full, keyOf: (r) => r.d }));
   // the last column is a fixed track so the Table keeps its width (see SCENE_COLS)
   return cols.map((c, i) => (i === cols.length - 1 && c.key !== "label" && !c.width.startsWith("minmax")
     ? { ...c, width: `minmax(${parseInt(c.width, 10)}px,${parseInt(c.width, 10)}px)` } : c));
@@ -377,7 +381,7 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
         </div>` : null}
         ${s.edit_list ? html`<${EditList} list=${s.edit_list} t=${s.tree_view} />` : null}
         <div class=${cx("scenes-list-wrap", s.edit_list && "sc-off")} ref=${listRef} ...${tip(tips.list)}>
-          <${Table} key=${sceneCols(listW).length} cls="scenes-list" columns=${sceneCols(listW)}
+          <${Table} key=${sceneCols(listW).length} cls="scenes-list" columns=${sceneCols(listW, s)}
             rowClass=${(r) => (r.state ? "sc-" + r.state : "")} rows=${s.scenes || []} rowKey=${(r) => r.d}
             selected=${s.sel} onSelect=${(r) => call("text_scenes.select", r.d)} rowHeight=${30}
             sort=${{ key: (s.sort || {}).col, desc: (s.sort || {}).rev }}

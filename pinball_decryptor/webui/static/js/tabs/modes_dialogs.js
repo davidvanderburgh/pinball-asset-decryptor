@@ -362,6 +362,11 @@ export function CoopCharsDialog({ s, onClose }) {
         title="Put one of the set abilities' powers on this character in place of its list, as a starting point (No powers: an empty list)."
         onChange=${(v) => { if (v) call("modes.coop_char_set", i, null, v === "-" ? "" : v); }} />
     </div>
+    <div class="row" style="gap:8px;margin-top:6px">
+      <${Field} value=${r.text || ""} sm maxLength=${ch.max_text || 240} width=${588} placeholder=${r.powers_line || "Card text: what it does, in your own words (optional)"}
+        title="The words under the badge on its pick card, in your own words. Empty: its powers' own lines. The card wraps them to three lines at most; past that it stops with ..."
+        onCommit=${(v) => { if (v !== (r.text || "")) call("modes.coop_char_set", i, null, null, null, null, v); }} />
+    </div>
   </div>`;
   // PAD-1123: what plays full screen once a teammate picks it, and the sound with it
   const pickedOf = (r, i) => html`<div class="modes-coop-ch-picked">
@@ -393,10 +398,12 @@ export function CoopCharsDialog({ s, onClose }) {
       title=${r.lost ? "None of this character's powers is on this game yet." : "Its powers: what it does while its teammate is up. Click to tick them on and off."}>
       ${r.powers.length ? `Powers (${r.powers.length})` : "Powers…"}<//>
     <span class=${cx("small wrap modes-coop-ch-does", r.lost ? "warn-ink" : "dim")}>${r.lost ? "Its powers are not on this game yet: none on the card."
-      : r.powers.length ? html`<b>${r.words}</b> ${r.line}${r.missing.length ? html` <span class="warn-ink">(${r.missing.length} not on this game, left off the card)</span>` : null}`
+      : r.powers.length || r.text ? html`<b>${r.words}</b> ${r.line}${r.missing.length ? html` <span class="warn-ink">(${r.missing.length} not on this game, left off the card)</span>` : null}`
       : "Plays as the game always does."}${r.badge_cut ? html` <span class="warn-ink">Too long for its card, which shows
       "${r.badge_cut}". <a href="#" onClick=${(e) => { e.preventDefault(); setOpen(i); }}
-      title="Opens its powers, where the box under them takes the badge's own words.">Write shorter badge words</a>.</span>` : null}</span>
+      title="Opens its powers, where the box under them takes the badge's own words.">Write shorter badge words</a>.</span>` : null}${r.text_cut ? html` <span class="warn-ink">Its card text is too long for its card, which stops at
+      "${r.text_cut}". <a href="#" onClick=${(e) => { e.preventDefault(); setOpen(i); }}
+      title="Opens its powers, where the bottom box takes its card text.">Write shorter card text</a>.</span>` : null}</span>
     <span class="modes-coop-ch-acts">
       <${Well} value=${r.colour || (ch.look ? ch.look.colours[0].value : "")}
         title=${r.colour ? "Its own frame color on its cards: pick another." : "The frame color on its cards (the look's): pick one of its own."}

@@ -865,6 +865,9 @@ def attract_refusal(prof):
     it is built (:func:`.mode_sounds.own_calls`)."""
     if prof is None:
         return NO_TITLE_ATTRACT
+    from .spike3_music import LEFT_OUT as _S3_LEFT, other_refusal as _s3_other
+    if _s3_other(prof, _S3_LEFT["attract"]):               # PAD-1324: a Spike 3 card's are the music modes only
+        return _s3_other(prof, _S3_LEFT["attract"])
     if title_key(prof) in ATTRACT_NO_KEYS:
         return NO_ATTRACT % (prof.label, "the app cannot tell which of its sound records each of its "
                              "sounds plays")
@@ -929,6 +932,9 @@ def shot_refusal(prof):
     (C++ rule titles; a plain-C title's modes have none)."""
     if prof is None:
         return NO_TITLE_SHOTS
+    from .spike3_music import LEFT_OUT as _S3_LEFT, other_refusal as _s3_other
+    if _s3_other(prof, _S3_LEFT["shots"]):                  # PAD-1324
+        return _s3_other(prof, _S3_LEFT["shots"])
     if title_key(prof) in ATTRACT_NO_KEYS:
         return NO_SHOTS % (prof.label, "the app cannot tell which of its sound records each of its "
                            "sounds plays")
@@ -1032,10 +1038,14 @@ def flipper_buttons(game_elf):
     build in the image library names them so (69 of 69, 2026-10-20)."""
     from . import portgen as G
     from . import portswitch as PS
-    try:
-        sws = PS.switches(G.Elf(bytes(game_elf)))
-    except (G.PortgenError, ValueError, struct.error, IndexError):
-        return []
+    from .adjustments import is_wide
+    if is_wide(bytes(game_elf[:0x40])):                 # PAD-1326: a Spike 3 program's device table
+        sws = PS.switches_a64(game_elf)
+    else:
+        try:
+            sws = PS.switches(G.Elf(bytes(game_elf)))
+        except (G.PortgenError, ValueError, struct.error, IndexError):
+            return []
     out = []
     for side in ("L", "R"):
         for sw in sws:
@@ -1052,6 +1062,9 @@ def title_refusal(prof, turns=False):
     if prof is None:
         return NO_TITLE if not turns else NO_TITLE.replace("give it a MUSIC MODE",
                                                            "play its sounds in turn")
+    if getattr(prof, "arch", "arm") == "a64":          # PAD-1324: a Spike 3 build's own rules
+        from . import spike3_music
+        return spike3_music.title_refusal(prof, turns=turns)
     if not turns and title_key(prof) in _MS.NO_ROOM:
         return NO_ROOM % prof.label
     if title_key(prof) not in (TURN_PROVEN if turns else PROVEN) and not (turns_any() if turns else modes_any()):

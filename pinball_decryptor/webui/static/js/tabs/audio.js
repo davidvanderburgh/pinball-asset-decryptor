@@ -8,6 +8,7 @@ import { html, useEffect, useMemo, useRef, useState, Button, Field, Select, Seg,
   Note, Table, Modal, openMenu, tip, Icon, PageHead, Spinner, mediaUrl, call, cx } from "../core/ui.js";
 import { useNs, useEvent, state } from "../core/store.js";
 import { OriginalsWindow } from "./originals.js";
+import { testCol } from "../core/testtick.js";
 
 export const css = true;
 
@@ -908,6 +909,9 @@ export default function AudioTab() {
     // PAD-1069: the user's comments, once a sound has one (Audio Properties)
     ...(s.comments ? [{ key: "cm", label: "Comment", sort: "cm", width: `minmax(${MIN_W.cm}px,0.8fr)`,
       titleOf: (r) => r.cm || undefined, render: (r) => r.cm ? html`<span class="dim">${r.cm}</span>` : "" }] : []),
+    // PAD-1279: TEST puts the sound on the test card
+    ...(s.test_on ? [testCol({ ns: "audio", tags: s.test_tags, full: s.test_full,
+      keyOf: (r) => (r.g || r.k == null || String(r.k).startsWith("::") ? null : r.k) })] : []),
     { key: "rep", label: "Replacement", sort: "rep", width: `minmax(${MIN_W.rep}px,1fr)`, titleOf: (r) => r.rep,
       render: (r) => r.g ? html`<span class="muted">${r.rep}</span>`
         : html`<span class="aud-repcell"><button type="button" class=${cx("aud-rep", r.t === "picked" && "picked", r.t === "ondisk" && "ondisk", r.t === "stray" && "stray", !r.t && "choose")}

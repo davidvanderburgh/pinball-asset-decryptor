@@ -96,6 +96,10 @@ int  art_cache_start(struct art_anim **anims, int n, size_t budget_bytes, char *
  * the menu.  Safe to call with the same set: nothing is freed or re-decoded.
  * art_cache_start is this with the images in index order. */
 int  art_cache_set(struct art_anim **anims, int n, size_t budget_bytes, char *why, int whylen);
+/* Decode one JPEG (a test video's frame, video.h) into a malloc'd w*h*4 RGBA
+ * buffer; NULL + err when it does not decode.  Safe from several threads. */
+unsigned char *art_jpeg_decode(const unsigned char *buf, int len, int *w, int *h,
+                               char *err, int errlen);
 /* stop and join the decoder - before art_anim_free on a cached clip */
 void art_cache_stop(void);
 /* frames of a in the cache so far (a->n = all; 0 = not a cached clip) */

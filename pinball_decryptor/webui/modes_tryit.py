@@ -776,8 +776,9 @@ class TryItMixin:
         if self._tryit_cancelled():
             return self._tryit_cancelled_refuse()
         os.makedirs(files, exist_ok=True)
+        from ..plugins.stern.spike3_music import PROGRAM_NAME as _S3_PROGRAM
         for name, src, _mode in mplan.files():
-            if name != "mode.so":
+            if name not in ("mode.so", _S3_PROGRAM):     # PAD-1324: the program goes in games.patch
                 shutil.copyfile(src, os.path.join(files, name))
         self._tryit_live = None            # no hot reload on the Spike 3 rig: Try it again
         note = ("%d mode(s) ready (%s). Start a game, then play the starting shots."
@@ -788,6 +789,9 @@ class TryItMixin:
             note += " Their own sounds play from the card's sound container in this run."
         if shown:
             note += " Their screens and clips show from the card's scenes in this run."
+        if getattr(mplan, "program", ""):                   # PAD-1324: the music modes
+            note += (" MUSIC MODE is in the operator menu in this run (Adjustments > Machine Settings > "
+                     "Audio Content).")
         self._tryit_note(note)
         self._tryit_set("starting")
         return ["PAD_S3_MODE_SO=%s" % mplan.payload["so"], "PAD_S3_MODE_FILES=%s" % files]

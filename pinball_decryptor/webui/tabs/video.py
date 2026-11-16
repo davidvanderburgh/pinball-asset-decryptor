@@ -54,6 +54,7 @@ from ..video_best import BEST_TIP, BestQualityMixin
 from ..video_modes import ModesMixin
 from ..video_undo import UndoMixin, undoable
 from .base import TabService, rpc
+from ..testcard_tags import TestTagMixin
 
 log = logging.getLogger(__name__)
 
@@ -121,8 +122,16 @@ STOCK_ON_ORIG = ("no replacement assigned: the game's own clip, its color "
                  "profile is on the Original player")
 
 
-class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
+class VideoTab(TestTagMixin, ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
                TabService):
+    _tc_kind = "video"                # PAD-1279: a TEST tick puts the row on the test card
+
+    def _tc_project(self):
+        return self._assets_path()
+
+    def _tc_file(self, rel):
+        return self._cs_source(rel)
+
     ns = "video"
     key = "Replace Video"
     label = "Video"
@@ -291,6 +300,7 @@ class VideoTab(ColourSaveMixin, ModesMixin, BestQualityMixin, UndoMixin,
     def on_show(self):
         """<<NotebookTabChanged>> for Replace Video: the ffmpeg banner, the
         project folder defaulted from Extract, and the auto-scan."""
+        self._tc_publish()           # PAD-1279: the TEST column
         self._refresh_ffmpeg_warning()
         self._default_assets_from_extract()
         self._update_project()

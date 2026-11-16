@@ -1,11 +1,15 @@
 # JJP custom modes (PAD-1335)
 
-Status 2026-11-15: **emulator-proven on Guns N' Roses 3.03** with the GnR key.
-A custom mode, loaded from outside the game binary, runs inside a live game:
-it starts on the Jam Target, plays a game sound, shows a countdown banner,
-scores 1,000,000 a hit through the game's own scoring (the game draws its own
-floating "1,000,000"), and ends on the game's own mode timer. The game plays
-on. No game code is patched.
+Status 2026-11-16: **emulator-proven on two titles, Guns N' Roses 3.03 and
+Wonka 03.03**, each with its own key. A custom mode, loaded from outside the
+game binary, runs inside a live game: it starts on a target, plays a game sound,
+shows a countdown banner, scores 1,000,000 a hit through the game's own scoring
+(the game draws its own floating "1,000,000"), lights a lamp on its own layer
+over the game's and hands it back when it ends, and finishes on the game's own
+mode timer or on completion. The game plays on. No game code is patched. The
+runtime is the one unchanged `jjpmodes.so` on both titles (it finds everything
+by exported name), which is what shows the SDK is generic across JJP games;
+`tools/jjp_emu/MODES.md` has the per-title table (PAD-1347).
 
 ## Why it works on JJP
 
@@ -36,9 +40,9 @@ with name, id and proc id, on any title.
 
 ## The SDK (PAD-1337)
 
-Status 2026-11-15: **modes are data, and a PAD-written install ISO carries
-them to a real machine.** Proven on Guns N' Roses 3.03 in the emulator.
-How to write modes: `tools/jjp_emu/MODES.md`.
+Status 2026-11-16: **modes are data, and a PAD-written install ISO carries
+them to a real machine.** Proven on Guns N' Roses 3.03 and Wonka 03.03 in the
+emulator, same runtime on both. How to write modes: `tools/jjp_emu/MODES.md`.
 
 | Piece | What it does |
 |---|---|

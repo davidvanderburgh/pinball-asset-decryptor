@@ -62,15 +62,15 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 
 | part | Spike 2 card pieces | on Spike 3 | what it needs |
 |---|---|---|---|
-| **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live. Only the Insider login ids are 32-bit (the user-manager finder `coop_play.insider_users`, an `unsigned` address in `feed_login`): reports name no logins, and the log says so |
+| **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live, and the Insider logins since PAD-1326 (`coop_play.insider_users_a64`; the runtime reads the tables pointer-sized, the manager moved by the PIE's load address) |
 | random clips | clips.cfg, clips in the video bank | **goes on (PAD-1323)** | done: the clip v2 route asks for no `string_new` (the runtime builds the name), the name read as an 8-byte pointer, surfaces compared at full width. A port with the clip v2 lines: Star Wars ELG's today |
 | screen times | `stime` lines in clips.cfg | **goes on (PAD-1323)** | done: the slot read and written as 8 bytes, moved by the PIE's load address; screen_time.py reads 64-bit programs (Fallout LE, Pokemon LE, Transformers LE have the screens) |
-| music modes | sounds.cfg, bank records, MUSIC MODE row | left out | off on 64-bit by design (32-bit asset descriptors); Spike 3's songs are image.bin records (PAD-1296 appends them); a 64-bit menu row |
-| editions | EDITION row, codeselect's `edition=` | left out | no runtime: a 64-bit operator-menu row (adjustments.py refuses ELF64) and the Spike 3 multi-boot reading EDITION |
+| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin, the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10 and Fallout LE 0.82 (below) |
+| editions | EDITION row, codeselect's `edition=` | **goes on (PAD-1325)** | done: `spike3_menu` grows the 64-bit program's menu (Attract Mode, found by its name); `mks3multi --editions`; nvm.c reads the Spike 3 store (tools/spike3_emu/MULTIBOOT.md). ELG 1.10, Fallout 0.81/0.82, Transformers 0.96 take it |
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
 | handicaps | handicap.cfg, HANDICAP row | left out | `coop_player`, the menu row; handicap.py reads 32-bit code (the flipper edges are there since PAD-1322) |
-| Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on Star Wars ELG | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
+| Prolonged Competition | comp.cfg | **goes on (PAD-1327)** on Star Wars ELG and Fallout LE | done there: the 64-bit `hook_full`, the menu's sites in its Spike 3 port, an 8-byte entry name, comp.cfg read off 64-bit programs. The newer titles' menus are of game-mode indices (Spike 2's Godzilla shape): their round is next |
 | records on the high scores | records.cfg | left out | the champion framework's sites (not placed) and its 64-bit record |
 | attract items | attract.cfg, clips | left out | `attract_table` / `attract_sleep` (not on ELG's Spike 2 port either), 4-byte table pointers |
 | inactivity pausing | idle.cfg | left out | `timers_paused` / `song_track` (ELG pauses its own timers: its gate says so) |
@@ -179,22 +179,60 @@ as the menu picked (flag 17 was 0)`.
 Tests: tests/test_pad1327_spike3_prolonged_comp.py (the menu append and the 64-bit hook_full lifted and run at
 Spike 3's word size; the real programs with PAD_S3_PROGRAMS).
 
+**Round 2 (Fallout LE, the index menus).** `comp_menu_frame` takes the Spike 3 index menus: hooked just after the
+frame's press moved the cursor (`value comp_menu_frame_moved 1`, so no buttons are read), the list and count in the
+frame or in a register (`comp_menu_frame_list_reg` / `_count_reg`, hook_full's numbers), and a loop's copy of the
+last index kept in step (`comp_menu_frame_last_at`, Pokemon's sp+140). Lettering UNTIL POWERED OFF needs the 64-bit
+message table: a u64 count (`data message_count`), a pointer variable to the u16 remap (`data message_remap`, as on
+Spike 2) and a table of 8-byte record pointers (`data message_table`; a record is a 0-ended list of per-language
+strings, as Spike 2's). `message_slot` steps it by pointer size and makes a 64-bit table page writable.
+
+| title | frame point | list | count | cursor | room | Competition (name msg) | Standard (name msg) |
+|---|---|---|---|---|---|---|---|
+| Fallout LE 0.82 | 0x485a08 `ldr w23, [x26, w20, sxtw #2]` | sp+0x1b8 (x26) | w22 | w20 | 12 | 2 (1921) | 1 (1916) |
+| Pokemon LE 0.82 | 0x4cc050 `ldr w24, [x0, w21, sxtw #2]` | sp+0xd8 | sp+136, last index sp+140 | w21 | 12 | 6 (1914) | 1 (1912) |
+| Star Wars 2025 LE 0.96 | 0x27e788 `ldr w22, [x24, w20, sxtw #2]` | sp+0x1c0 (x24) | w23 | w20 | 10 | 2 (1914) | 1 (1912) |
+| Star Wars 2025 Pro 0.84 | 0x1d1f1c `ldr w21, [x0, w22, sxtw #2]` | sp+0x168 | sp+156 | w22 | 4 | 2 (1910) | 1 (1908) |
+
+Walking Dead Remastered LE 0.92 has Star Wars ELG's shape instead: entries {kind, caption, name} 16 bytes at sp+0x128
+(room for 8), the count in w22 until 0x1ef564, the kind under the cursor in w0 at 0x1ef5f0 (its kind 2 sets flag 17).
+Star Wars 2025 Pro's bus ids are one lower than LE's from 57 on (read off the calls into its dispatch): game_start 0x4c,
+ball_start 0x25.
+
+**The freeze at Fallout's first game start, and its cause.** With Prolonged Competition armed Fallout stopped with
+DISPATCH TIMEOUT about 10 s after its game_start event, even with a frame logger that did nothing; stock and score-feed
+runs played on. The ports s3port drafted from Star Wars ELG's (Fallout, Pokemon, Star Wars 2025 LE / Pro, Walking Dead
+Remastered, Transformers) had lost `value game_flags_at 0`: GAME_VALUE took it for the reference game's own content,
+so the runtime read the flag bitmap's pointer at Spike 2's +4 when comp_game_start read flag 17. Every Spike 3 port
+carries it now, the 64-bit runtime's default is 0 (`GAME_FLAGS_AT`), and s3port keeps it from a Spike 3 reference (and
+leaves a start menu's numbers, `challenge_menu_*` / `comp_menu_*`, as the reference title's own).
+
+Proof (2026-11-16, Spike 3 rig slot 132, hidden and MUTED, alone on the machine, the set spike3_modes.plan built from
+the library card): `on the start menu as entry 9 of 9 (game-mode index 2, UNTIL POWERED OFF; cursor 0)`, the game's own
+menu showing COMPETITION / UNTIL POWERED OFF on our entry, `UNTIL POWERED OFF picked on the menu`, Start: `ON until
+the machine is switched off - game 1 plays as Competition (flag 17 was 1)` (the game made it a Competition game from
+our duplicated index), the game playing on (ball 1, scoring) where it had frozen. (The rig's drains did not end
+Fallout's ball 1, so the off cycle is ELG's proof and the host test of the index-menu code.)
+
+**Not offered yet: Pokemon LE, Star Wars 2025 LE / Pro, Walking Dead Remastered LE.** Their lines are measured and
+written into the ports as comments (`# NOT OFFERED YET (PAD-1327)`), because their start menu never opened on the rig:
+not with both flipper buttons in attract (fresh settings), not after Start, and not with AD_PLAYER_GAME_MODE /
+AD_PLAYER_COMPETITION_MODE forced on (a scratch runtime wrapping the adjustment getter: Pokemon 0x6cd340 ids 101 / 102,
+SW 2025 LE 0x51b5b0 99 / 100, Pro 0x4b3d70 97 / 98, WDR 0x3fdf10 101 / 102). The menu functions are launched through a
+process table of {function, argument} pairs (Pokemon's at 0x31badf0), so what launches them is the next thing to read.
+
 **Still to do in PAD-1327** (the next runs, in this order):
-1. Prolonged Competition on the five newer titles. Their start menus are menus of game-mode indices (Spike 2's
-   Godzilla shape, `comp_menu_frame`), each in one function found by the code that loads CHOOSE YOUR MODE OF PLAY's
-   message id: Fallout LE 0x484b40 (id 1912 at 0x485ba0), Pokemon LE 0x4cb3f0, Star Wars 2025 LE 0x27d8c0 (and
-   0x1e9000 also names it), Star Wars 2025 Pro 0x1d1220, Walking Dead Remastered LE 0x1ee480, Transformers LE
-   0x27fbd0 (not ported yet). The frame point, list / count / cursor / buttons and the Competition / Standard
-   indices are to be read off each (an `s3port`-style finder, as `prolonged_comp._frame_points` does for 32-bit),
-   and `comp_menu_frame` given the FULL_SP / register layout like `comp_menu_built`; the lettering needs the 64-bit
-   message table (`data message_table` etc., not placed on any Spike 3 port).
+1. Reach the start menu on Pokemon, Star Wars 2025 LE / Pro and Walking Dead Remastered: find the process id of the
+   menu function in each one's process table and what starts that process (the condition), prove the menu with our
+   entry on the rig, then uncomment the lines (and Pro's two events). Transformers LE has no port yet.
 2. Records on the high scores: the champion framework. On ELG the end-of-game high scores (`challenge_scores` /
    `game_scores`) pair to 0x3eecc0 and the (category, n) entry lookup (`challenge_score_entry`) to 0x3ede80 (s3port's
    matcher); the gate, the category table and count, the record layout and the attract champion pages are to be
    measured, and the runtime's champion code (chg_scores_wrap, chg_scores_one_entry, chg_page_*, rec_*) made
    pm_addr-wide (entry words ent[0] / ent[5] / ent[6], the 36-byte category descriptors, are 32-bit today).
-The rig kit for both: C:/tmp/PAD-1327 (job.sh / play.sh: the menu worked as above; plan_comp.py builds the set from
-the card; dbg/ a scratch runtime with loop probes).
+The rig kit: C:/tmp/PAD-1327 (job2*.sh / play2.sh: per-title proofs, SHORT=1 up to game 1, AFTER_START_MENU=1 tries the
+menu after Start, ADJ=1 the settings-on scratch runtime; plan2.py builds a title's set from its card; clear the slot's
+mode.log before a run on a reused slot, and run one emulated game at a time).
 
 ## The Modes tab and Try it
 
@@ -731,6 +769,28 @@ read back through the card's key: `/games/game -> pad/padmode/padmode.sh`, `game
 root-owned 0755 / 0644, mode.cfg with the census bits, game.port this port byte for byte.
 Tests: tests/test_pad1290_spike3_star_wars_2025_le.py.
 
+### Transformers LE 0.96 (PAD-1293)
+
+`ports/spike3/transformers_mtmte_le-0.96.port` (program sha1 a3b67ca1..., the card
+`transformers_mtmte_le-0_96_0_spike3`), drafted from ELG's Spike 3 port: 9,883 functions paired, every core site placed
+(30 with the switch edge), only ELG's own coil_take / coil_give left out. The census (`TITLE=transformers_mtmte_le`,
+slot 160) found all 37 switch lines reach the modes, **every id 3 below its device-table rank** (Megatron target right
+42, not 45) - a uniform offset, unlike Star Wars 2025's one late switch - so the port carries the measured ids
+(`titles/transformers_mtmte_le-0.96.switch_ids`). The card had no row in `spike3_games.SPIKE3_DB`, so it read as the
+generic key and "Transformers Mtmte LE"; it is `transformers_mtmte_le`, "Transformers LE", now (mode_project's
+`_TITLE_NAMES` too).
+
+Proof (2026-11-16, Spike 3 rig slots 160-163, hidden, MUTED, prebuilt/mode64.so): CLOCK TEST (Megatron target left x3,
+25 s) started on the third hit, scored 6 shots on Right orbit, Center loop and Left orbit through score_add
+(+21,000,000) and ended on its clock; ball save (the drain inside it served back, 3 shots on that ball, the next drain
+ended it) and its control (ended on its first drain, 5.9 s in); a mode's 3-ball multiball through the game's serve,
+"ours is over" at one ball. The Write: `spike3_write.write_card` with an AUTOBOTS ROLL mode, `card_state` = modes /
+`transformers_mtmte_le/game`, the padmode files read back through the card's key, `card_modes_file` and
+`import_modes` gave the mode back whole; the written card (`s3store.py build`) booted with its own hook and mode.so and
+AUTOBOTS ROLL started on its trigger, scored 6 shots (+21,000,000) and ended on its 20 s clock. Not proven: a
+`stack no` mode waiting in the game's own multiball (the Soundwave locks x4 did not start one on the rig), so
+STACK_BALLS_PROVEN leaves it out. Tests: tests/test_pad1293_transformers_spike3_port.py.
+
 ## The switch edges on Spike 3 (PAD-1322)
 
 Spike 2's framework drain calls one small per-switch function for every edge (`site switch_edge`), which the
@@ -828,3 +888,160 @@ scored +250,000 / +500,000 / +750,000 / +1,000,000 on four shots and ended on ti
 every tone found in the game's own output at its logged moment (the start call until the first shot call faded
 it, the four shot calls, the music under them). The Write's plan (`real_card=True`) builds the same set.
 Tests: tests/test_pad1295_spike3_code_modes.py (the real a64 compile under a POSIX shell).
+
+## Insider logins on Spike 3, and what co-op still needs (PAD-1326)
+
+**The logins.** A Spike 3 program keeps its players' Insider logins as Spike 2's does: a user manager (a function's
+static) with two tables, player p's entry at table + 20p + 4 (the 16-byte uuid and a flags word). Only the code's
+shape changed: the manager's lookup is `cmp w3, #1; ldp xa, xb, [x0, #A]; csel x0, .., ne; b <table lookup>` (the two
+tables are 8-byte pointers, read with one ldp), the table lookup checks `sub w, w, #1; and; cmp w, #3; b.hi` and forms
+the entry with `mov x1, #4; mov w0, #20; umaddl`, and every caller forms the manager with `adrp` + `add`.
+`coop_play.insider_users_a64` reads that; `insider_users` hands it a 64-bit program. All seven library programs:
+
+| program | manager | A / B |
+|---|---|---|
+| Fallout LE 0.82 | 0x66ca6e0 | 0x190 / 0x198 |
+| Pokemon LE 0.82 | 0x32973d0 | 0x190 / 0x198 |
+| Star Wars 2025 LE 0.96 | 0x98b9f8 | 0x190 / 0x198 |
+| Star Wars 2025 Pro 0.84 | 0x7e5940 | 0x190 / 0x198 |
+| Star Wars ELG 1.10 | 0x710c20 | 0x190 / 0x198 |
+| Transformers LE 0.96 | 0xad8050 | 0x190 / 0x198 |
+| Walking Dead Remastered LE 0.92 | 0x8859f8 | 0x190 / 0x198 |
+
+The runtime (`coop_user_table`, `coop_user_table_ok`, `coop_user_entry`) reads the tables as `pm_addr` and adds
+`game_base` to the manager of both `users` lines (coop.cfg's and scorefeed.cfg's); Spike 2's object is the same code
+(pm_addr is 32 bits there and game_base 0). Main's runtime on a Spike 3 card says `the user manager 0x00710c20 is not
+mapped` (seen on the rig, a PAD-1324 run on slot 1): the address was the program's own, not where it was loaded.
+Tests: tests/test_pad1326_spike3_insider_logins.py (a synthetic 64-bit program, the seven programs, the runtime).
+
+Proof (2026-11-16, Spike 3 rig slot 133, hidden and MUTED): the score feed set planned by `spike3_modes.plan` from the
+library's Star Wars ELG 1.10 card (scorefeed.cfg `users 0x00710c20 0x190 0x198`, this branch's mode64.so), the
+PAD-1297 stand-in server on the game's loopback. A side script found the game's own load address (one
+R_AARCH64_RELATIVE pointer of its data, minus its addend: qemu-user's guest addresses are not always the host's) and
+kept the uuid 1326c0de-0b1e-4a5e-9a77-00112233aabb in player 1's entry of both tables (manager +0x60 and +0xf8: the
+tables are arrays inside the manager, both entries were all zeros). At the game's game_over: `1 player(s): 207440 0 0 0,
+logged in 1000`, then `posted ... (HTTP 200)` with `"insider":["1326c0de-0b1e-4a5e-9a77-00112233aabb"]`, the server
+receiving the same body. Rig notes: Spike 3 runs do not show on riglock's board (slot 1 was PAD-1324's at the same
+time), and the host's /proc/<pid>/maps names the program `/games/<title>/game` or by its full overlay path depending
+on the run.
+
+**Co-op play on Spike 3 (PAD-1326, built on PAD-1325's spike3_menu).** The core of co-op goes on: the game plays one
+player for the team, the runtime takes the teammates in turn (the player change and add player wrapped, the player /
+ball / players bytes), every teammate's score panel the team's score, the logins swapped so the teammate up has the
+game's player's. A teammate joins with the right flipper button held and Start (PAD-1017's first route): the start
+menu's CO-OP PLAY / TEAM PLAY entries need the menu's frame hook, 32-bit only (`hook_full` is 0 on 64-bit); the
+characters, abilities, awards and co-op videos read 32-bit code. `coop_play.cfg_text` writes a 64-bit program the core
+lines alone (`coop on`, `button`, `setting`, `only`, `users`), `mode_write.coop_into` adds no pick screens or clips and
+says so (`A64_LEFT_OUT`). CO-OP PLAY is Off / On on Spike 3 (`MENU_VALUES_A64`, the runtime reads 1 as Classic): it goes
+on through `spike3_menu.plan` (beside EDITION; on ELG Adjustments > Machine Settings > Attract Mode, its live value at
+0x70afd8), which spike3_write now plans before the modes so coop.cfg names the value.
+- **The flipper buttons**: `portswitch.switches_a64` reads a Spike 3 program's device table (the port drafter's rig-
+  proven reader, s3port.device_records, shipped): every library program's two buttons (ELG: right 49, left 50).
+- **The runtime**: the button's edges come from the 64-bit edge hook, which co-op now installs itself (`edge_hook`; a
+  card of co-op and no shots had none, so the button never read held); the scores' addresses, the CO-OP PLAY word and
+  the Insider gate's copy of it are `pm_addr`, the two words moved by `game_base`; the add player's bool masked.
+- **The port**: ELG 1.10 carries coop_player_change 0x417b50 / coop_add_player 0x417710 (no arguments, a bool in w0)
+  and coop_player 0x6b1a1a (the ball at +1: the player code reads [#2587]) / coop_players 0x792200.
+
+Proof (2026-11-16, Spike 3 rig slot 134, hidden and MUTED): the set planned by the Write's own calls (spike3_menu.plan
+then spike3_modes.plan) from the library's Star Wars ELG 1.10 card, the grown program staged over the card's. Armed:
+`co-op: armed - hold switch 49 ...`, `switched in the service menu (CO-OP PLAY, value at 0x7c2b8112afd8, now Off)` (the
+program's 0x70afd8 moved), the Insider gate on the same word. CO-OP PLAY set to 1 (its value written, as the menu
+would), Start, then the right flipper held and Start: `co-op: teammate 2 joins`. Every ball drained: `ball 1, teammate 1
+of 2 done - the next teammate, the same ball` / `the game's player 1 has player 2's login` / `ball 1, teammate 2 of 2
+done - teammate 1, the next ball` ... `ball 3, teammate 2 of 2 done - the game is over`, `the game's end counts 1
+player(s)`. Rig scripts: C:/tmp/PAD-1326/rig (plan_coop.py, job_coop.sh, play_coop.sh, setval.py).
+
+**Co-op on the other titles, the BALL line, handicaps (PAD-1326, run 2).**
+- `portcoop.lines_a64`: the player change / add player / player bytes in any Spike 3 program (the add player is the one
+  byte incremented after an adjustment compare; the change reads the player and the count and compares player + 1;
+  each starts at the bl target before it). Its lines are ELG's paired ones exactly; Fallout and Walking Dead carry
+  them, Pokemon and both Star Wars 2025 as comments (no switch edge source: co-op and handicaps refuse with NO_EDGE).
+- `portcoop.message_lines_a64`: the message table (Spike 2's with 8-byte relocated pointers) and its "BALL %d" index
+  (ELG 1255, its Spike 2 build's number); the runtime steps the table by pointer size (message_borrow / restore /
+  coop_msg_find / coop_ball_find).
+- Handicaps: handicap.py reads the wide settings table and Start off the device table, writes no 32-bit `record`
+  lines; the runtime hooks the flipper edges, moves the HANDICAP word by game_base, masks the getter's id to 16 bits;
+  spike3_menu places HANDICAP; the Modes / Play options tabs say what Spike 3 gets.
+
+Proofs (2026-11-16, Spike 3 rig, hidden and MUTED, planned through spike3_menu.plan + spike3_modes.plan):
+- Fallout LE 0.82 (the finder's sites, its own CO-OP PLAY row at 0x669ff40): teammate 2 joined, `ball 1..3, teammate
+  1/2 of 2 done`, `the game is over`, `the game's end counts 1 player(s)`; both score panels showed the team's 190,190.
+  Rig note: its hit switches must be its own names (POP TARGET-LEFT, RADIO TOWER TARGET, 3 BANK-TOP, JUNK TARGET) or
+  the playfield is never validated and every drain is re-served.
+- ELG with handicaps: the pick walked with the flippers (`player 1's pick +0 / -1 / -2`), the game's own line read
+  `P1 HANDICAP -2` (the 64-bit message table), `the game reads adjustment 165: 2 (its own 1)`; a second player's pick
+  opened at their first ball; co-op's turn line read `PLAYER 1  BALL 1` on the same line.
+
+**Co-op and handicaps not on one Spike 3 card.** With both on, ELG's game stopped at a co-op turn change twice (once
+at teammate 1's end, once at the turn into ball 2; the game's memory went unreadable at that moment, the log stopped).
+Each alone plays out. So spike3_modes.hand_wanted leaves the handicaps off a card with co-op (HAND_WITH_COOP, said on
+the Write and on the Play options tab), and the 64-bit runtime refuses handicaps when coop.cfg is there. The one thing
+the two add together is the adjustment getter wrapped (handicaps) while co-op's player-change wrap calls into the
+game's change, which reads adjustments; that is where to look to lift the gate. Rig note: a job's play script left
+running after its slot is stopped keeps writing the same output file ("the bridge's ball model did not answer") -
+kill job_coop.sh / play_coop.sh by pid, and give each run its own output.
+After the merge with the music modes (PAD-1324) and the gate: ELG planned through the Write again played a whole co-op
+game (teammate 2 joined, three balls of turns with the logins swapped, `the game's end counts 1 player(s)`), and a
+handicaps-only ELG card opened and took both players' picks (P1 +1, P2 +0). Planning it caught a check the merge added
+after the music modes that returned no plan for a card of co-op alone (fixed; a test pins every such check).
+Rig scripts: C:/tmp/PAD-1326/rig (plan_coop.py, job_coop.sh, play_coop.sh, setval.py, watch_bytes.py, inject.py).
+Tests: tests/test_pad1326_spike3_insider_logins.py.
+
+## Music modes on Spike 3 (PAD-1324)
+
+Spike 2's music modes (PAD-494, `sound_modes.py`) hand the game a mode's DESCRIPTOR at its resolver, because a Spike 2
+voice plays as long as the descriptor declares. A Spike 3 sound plays as long as its own RECORD says (PAD-1296: a 20 s
+file under a 26 s carrier looped past it), so no descriptor of the game's is needed (and its descriptors are 64-bit):
+
+- **The files** (`spike3_music.records`): each mode file is made into its slot's format (`sound_modes.convert`, its own
+  loudness offset applied) and APPENDED to image.bin as a record of its own, keyed beside the slot's record
+  (`spike3_write.free_key`, after the modes' own sounds' records, whose keys it does not take). One file in several
+  modes of one slot at one loudness is one record. It plays at its own length, as a Spike 3 replacement does.
+- **sounds.cfg**: `setting <the value's address> <n>` (the program's own address: the 64-bit runtime adds the PIE's load
+  address, as it does the port's), an `mswap <m> <slot's key> <mode m's key>` per slot and mode, `only` on a card with no
+  modes, and the record lines an extract reads the modes back from. pad_mode_runtime.c (`#if PM_A64`, so the Spike 2
+  object is byte-identical) swaps the key in the record lookup hook (`msw_lookup`, before the sounds in turn) while the
+  setting says m, read at every lookup. A `sound` descriptor line is left alone on 64-bit, with a sentence.
+- **MUSIC MODE** goes on the Audio Content page, found by the page's NAME: `menu_settings.wide_category_names` reads the
+  64-bit program's page table (32-byte records numbered from INVALID, each pointing at the page's five-language name
+  line; in a PIE through its R_AARCH64_RELATIVE addends; another table that starts with INVALID, ELG's 187 wire colours,
+  is told apart by naming our pages). Audio Content is 13 on Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE
+  0.96, an empty page as shipped; `plan()` takes a 64-bit row's category from it (`wide_category`) and says where it is
+  (`Adjustments > Machine Settings > Audio Content`). The row is the PAD-1321 grow (`grow_wide_program`).
+- **game.pad**: the card's own program is never touched. The grown copy goes in `/games/pad/padmode/game.pad` and the
+  hook runs it in the stock one's place when it is there; a Write without music modes (or Remove) wipes pad/padmode, so
+  the card gets its own program back. No Spike 3 program finds its files from its own path (only absolute /games/...
+  paths; no /proc/self/exe). s3run.sh runs it too when it does the hook's steps. Try it puts it over the stock program in
+  the rig slot's /games (games.patch `whole`), and the records go in as the image.bin patch.
+- **The gate**: `sound_modes.title_refusal` sends a Spike 3 profile (`arch == "a64"`) to `spike3_music.title_refusal`:
+  offered on `spike3_music.PROVEN` (Star Wars ELG 1.10, Fallout LE 0.82: a Spike 3 port naming sound_lookup and a program
+  whose menu takes the row); Pokemon LE, both Star Wars 2025 and Walking Dead Remastered say their menu has no setting the
+  game stopped using; Transformers' program takes the row but has no Spike 3 port. Before, a Spike 3 ELG project passed
+  the Spike 2 gate by its shared `star_wars_elg-1.10` key and the Write then dropped the modes; Fallout's was refused
+  with Spike 2's "update the machine's code". The rest of the sound pane that rides sounds.cfg (sounds in turn, attract
+  and shot sounds, the jukebox) says it is Spike 2's on a Spike 3 title, and a Write logs each one asked as left out.
+
+Proof (2026-11-16, Spike 3 rig slot 1, hidden and MUTED, `PAD_S3_AUDIO_OUT=1` keeping the PCM; Star Wars ELG 1.10 from
+the library): a project giving 42 music beds (every stereo sound of 20 s or more) a 700 Hz tone for mode 2 and an
+1100 Hz tone for mode 3, built by `spike3_modes.plan` (`real_card=False`, Try it's: 84 records appended, game.pad
+over the stock program, sounds.cfg):
+- the operator menu listed **Audio Content** under Machine Settings (absent on the stock card) with the one row **Music
+  Mode**, help `1 = Standard, 2 = Custom A, 3 = Custom B`, Current Value 1; set to 2 it read back 2
+  (work/artifacts/PAD-1324/emulator_elg_*.png).
+- the runtime armed `84 record(s) over 3 mode(s), the setting at 0x...aff8` (the load address added) and said `mode 2
+  from here on` / `mode 3` / `mode 1` the moment each was set in the menu.
+- with the SDK's sound_fire_mode.c beside it (a rig copy of sounds.cfg without `only`, so its tick runs; the fire file
+  written through /proc/<game>/root, the run's private mount namespace): request 64 (idx 569) in mode 2 logged `record
+  4e00022002004080 plays mode 2's, 4e00022002005080` and the PCM 0.5-4.5 s after was 100% 700 Hz; in mode 3 request 66
+  (idx 248) took mode 3's record (the still-looping 64 took mode 3's at its next lookup too) and the PCM was 100% 1100 Hz;
+  back in mode 1 request 75 played the game's own song (no swap, its own spectrum).
+- **Fallout LE 0.82** the same way (its 11 stereo idx sounds of 20 s or more, 22 records; its 107 MB program grown;
+  its Adjustments page starts with Pricing, so Machine Settings is its third row): Audio Content listed with Music Mode
+  (set to 2, Current Value 2), `mode 2/3/1 from here on` as set; request 64 (SE FO MX VOLUME CHANGE, idx 769) in mode 2
+  took `4804020002002040` and the PCM was 100% 700 Hz, request 675 (idx 1030) in mode 3 took mode 3's (91% 1100 Hz),
+  request 1180 in mode 1 played the game's own (no tone).
+- Each slot's record goes into its own folder's image.bin (`audio` the game's, `audio_spike_menu` the system's).
+  Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`), which are not idx files and take no
+  mode files (as on Spike 2: the Audio tab says only an idx sound can).
+Tests: tests/test_pad1324_spike3_music_modes.py.

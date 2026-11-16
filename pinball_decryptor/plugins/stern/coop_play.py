@@ -36,6 +36,7 @@ PLAY 2 VS 2 and TEAM PLAY 2 VS 1 all three (pad_mode_runtime.c "PAD-1073"; a sto
 Enhanced, 4-6 as Classic)."""
 import re
 import struct
+import numpy as np
 
 from . import sound_modes as _SMo
 
@@ -55,6 +56,9 @@ NO_TITLE = ("The app cannot tell which game this project is for, so it cannot gi
 OWN = "%s has co-op play of its own, so the app does not add another."
 NO_PORT = ("The app does not know where %s keeps its players yet, so it cannot give it co-op play.")
 NO_BUTTON = "The game program names no right flipper button, so a teammate could not join."
+#: PAD-1326: a Spike 3 title whose port has no switch edge source (PAD-1322) cannot tell a held button
+NO_EDGE = ("The app cannot read %s's buttons as they are pressed yet, so a teammate holding the right flipper button "
+           "could not join.")
 #: round 2: the service menu's row (menu_settings.COOP_PLAY): its values, and its help line in the game's own menu.
 #: PAD-1042: four, 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1 (daveyvandy: "a designated option for 2V1"; the row shows
 #: the number; Off/On had 0 and 1 and v1.360.0's row 0-2, so a pick is kept). PAD-1065: seven, 1-3 the Enhanced
@@ -83,6 +87,19 @@ STANDARD_HOW = ("at 2 (Enhanced) the start menu also offers ENHANCED STANDARD: t
 #: PAD-1065: what Classic is, for the tab and the log (PAD-1073: CO-OP PLAY 1)
 CLASSIC_HOW = ("1 (Classic) plays co-op and the team games with no special abilities: the players still pick a "
                "character, but none of them has its ability; 2 (Enhanced) plays them with the abilities")
+
+
+#: PAD-1326: a Spike 3 card's co-op. The 64-bit runtime cannot add to the game's start menu yet (the menu's frame hook is
+#: 32-bit only), and the characters, their abilities, the awards and the team games' menu entries read 32-bit code: a
+#: teammate joins with the right flipper button held, and CO-OP PLAY is Off / On (the runtime reads 1 as Classic: a
+#: game with no characters plays the same either way)
+MENU_VALUES_A64 = 2
+MENU_HELP_A64 = "0 Off. 1 On: hold right flipper, press Start. Insider off"
+HOW_A64 = ("hold the right flipper button and press Start to add a teammate, up to four (2-4 players share one game, "
+           "taking turns, one score for the team); a plain Start adds a competing player as always")
+#: what a Spike 3 card's co-op leaves out, said once on the Write
+A64_LEFT_OUT = ("on a Spike 3 game the start menu's CO-OP PLAY and TEAM PLAY entries, the characters and their "
+                "abilities, the end-of-game awards and the co-op videos are not added yet")
 
 
 class CoopError(ValueError):
@@ -146,6 +163,8 @@ def title_refusal(prof):
         return NO_PORT % prof.label
     if not all(s in port.get("site", {}) for s in PORT_SITES) or not all(d in port.get("data", {}) for d in PORT_DATA):
         return NO_PORT % prof.label
+    if getattr(prof, "arch", "arm") == "a64" and "switch_edge" not in port.get("site", {}):
+        return NO_EDGE % prof.label                     # PAD-1326: the held button is the 64-bit edge hook's
     return ""
 
 
@@ -162,12 +181,19 @@ def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None, sett
     ``award`` line for each award ticked (*awards*: the project's choices, :func:`load_awards`); and (PAD-1031) the
     characters' lines (*characters*: :func:`load_characters`; *sites* / *values*: the port's site names and value
     lines)."""
+    from .adjustments import is_wide
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) != 2:
         raise CoopError(NO_BUTTON)
-    return ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
+    head = ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
             + ("only\n" if setting and only else "")
-            + "".join(line + "\n" for line in insider_lines(game_elf))
+            + "".join(line + "\n" for line in insider_lines(game_elf)))
+    if is_wide(bytes(game_elf[:0x40])):
+        # PAD-1326: a Spike 3 program - co-op and the team games with the logins swapped; the awards and the
+        # characters read 32-bit code, so they stay off (A64_LEFT_OUT says so on the Write). The setting is the
+        # program's own address: the runtime adds the PIE's load address.
+        return head
+    return (head
             + "".join(line + "\n" for line in award_lines(game_elf, awards))
             + "".join(line + "\n" for line in character_lines(game_elf, characters, sites, values)))
 
@@ -207,10 +233,111 @@ def users_lookup(e):
     return found[0] if len(found) == 1 else None
 
 
+def _adrp(va, w):
+    """The page an ``adrp`` at *va* forms, or None when *w* is not one."""
+    if (w & 0x9F000000) != 0x90000000:
+        return None
+    imm = (((w >> 5) & 0x7FFFF) << 2) | ((w >> 29) & 3)
+    if imm & 0x100000:
+        imm -= 0x200000
+    return (va & ~0xFFF) + (imm << 12)
+
+
+def _a64_branch(va, w, link):
+    """The target of a ``b`` (``bl`` when *link*) at *va*, or None."""
+    if (w & 0xFC000000) != (0x94000000 if link else 0x14000000):
+        return None
+    off = (w & 0x3FFFFFF) << 2
+    if off & 0x8000000:
+        off -= 0x10000000
+    return va + off
+
+
+def _a64_table_lookup(words, k):
+    """True when the function at word *k* is the login-table lookup: player p (1..4) checked as ``sub w, w, #1`` and
+    ``cmp w, #3``, its entry formed as ``mov x, #4`` + ``mov w, #20`` + ``umaddl`` (table + 20p + 4, as on Spike 2)."""
+    win = [int(x) for x in words[k:k + 16]]
+    has = lambda mask, val: any((x & mask) == val for x in win)   # noqa: E731
+    return (has(0xFFFFFC00, 0x51000400) and has(0xFFFFFC1F, 0x71000C1F) and has(0xFFFFFFE0, 0x52800280)
+            and has(0xFFE08000, 0x9BA00000) and has(0xFFFFFFE0, 0xD2800080))
+
+
+def _a64_x0_global(e, words, k):
+    """The global the code before the call at word *k* puts in x0 (``adrp`` + ``add``, maybe through a ``mov``), or
+    None."""
+    reg, lo = 0, None
+    for j in range(k - 1, max(k - 80, -1), -1):
+        w = int(words[j])
+        if lo is None:
+            if (w & 0xFFE0FFFF) == (0xAA0003E0 | reg) and reg != (w >> 16) & 31:   # mov x<reg>, x<m>
+                reg = (w >> 16) & 31
+            elif (w & 0xFFC0001F) == (0x91000000 | reg):                           # add x<reg>, x<n>, #lo
+                lo, reg = (w >> 10) & 0xFFF, (w >> 5) & 31
+        else:
+            page = _adrp(e.tva + 4 * j, w)
+            if page is not None and (w & 31) == reg:
+                return page + lo
+    return None
+
+
+def insider_users_a64(b):
+    """PAD-1326: :func:`insider_users` for a Spike 3 (64-bit ARM) program's bytes *b*: ``(manager, A, B)`` at the
+    program's own (link-time) addresses - the runtime adds the PIE's load address - or None. The same C++ as Spike 2's:
+    the manager's lookup is ``cmp w3, #1; ldp xa, xb, [x0, #A]; csel x0, .., ne; b <table lookup>`` (Star Wars ELG
+    1.10: 0x35dda0, tables +0x190 / +0x198, both read with one ldp, 8 bytes each), the table lookup's entry is
+    table + 20p + 4, and every caller forms the manager - a function's static - with adrp + add (ELG: 0x710c20)."""
+    from .screen_time import _Elf64
+    e = _Elf64(b)
+    w = e.arr
+    n = len(w)
+    found = []
+    for k in np.nonzero((w & 0xFC000000) == 0x14000000)[0].tolist():   # every b: the head ends in one
+        if k < 3:
+            continue
+        head = [int(x) for x in w[k - 3:k]]
+        cmp = [x for x in head if (x & 0xFFFFFC1F) == 0x7100041F]       # cmp w<n>, #1
+        ldp = [x for x in head if (x & 0xFFC003E0) == 0xA9400000]       # ldp x<a>, x<b>, [x0, #off]
+        sel = [x for x in head if (x & 0xFFE00C1F) == 0x9A800000]       # csel x0, x<n>, x<m>, ne / eq
+        if len(cmp) != 1 or len(ldp) != 1 or len(sel) != 1:
+            continue
+        cond = (sel[0] >> 12) & 15
+        if cond not in (0, 1):
+            continue
+        ra, rb, off = ldp[0] & 31, (ldp[0] >> 10) & 31, ((ldp[0] >> 15) & 0x7F) * 8
+        rn, rm = (sel[0] >> 5) & 31, (sel[0] >> 16) & 31
+        field = {ra: off, rb: off + 8}
+        if rn not in field or rm not in field or rn == rm:
+            continue
+        a, bf = (field[rn], field[rm]) if cond == 1 else (field[rm], field[rn])   # A: the table when not player 1
+        to = _a64_branch(e.tva + 4 * k, int(w[k]), False)
+        if to is None or not e.tva <= to < e.tva + 4 * (n - 16) or not _a64_table_lookup(w, (to - e.tva) // 4):
+            continue
+        found.append((e.tva + 4 * (k - 3), a, bf))
+    if len(found) != 1:
+        return None
+    look, a, bf = found[0]
+    calls = np.nonzero((w & 0x7C000000) == 0x14000000)[0].tolist()     # b and bl
+    managers = set()
+    for k in calls:
+        if _a64_branch(e.tva + 4 * k, int(w[k]), True) != look and _a64_branch(e.tva + 4 * k, int(w[k]), False) != look:
+            continue
+        g = _a64_x0_global(e, w, k)
+        if g is not None:
+            managers.add(g)
+    if len(managers) != 1:
+        return None
+    return (managers.pop(), a, bf)
+
+
 def insider_users(game_elf):
-    """``(manager, A, B)`` - the game's user manager (a global) and the fields of its two login tables - or None."""
+    """``(manager, A, B)`` - the game's user manager (a global) and the fields of its two login tables - or None.
+    PAD-1326: a Spike 3 program's (64-bit) is :func:`insider_users_a64`'s."""
     from .portchallenge import Elf
-    e = Elf(game_elf)
+    from .adjustments import is_wide
+    raw = game_elf if isinstance(game_elf, (bytes, bytearray)) else open(game_elf, "rb").read()
+    if is_wide(raw):
+        return insider_users_a64(raw)
+    e = Elf(raw)
     w = e.words
     found = []
     for k in range(len(w) - 5):
@@ -763,6 +890,9 @@ MAX_HEADER = 96
 #: PAD-1083: the badge's smallest size on the pick card (px at scale 1) and its words' room there: the card's words
 #: column (CARD_SIZE wide less the portrait and margins, pick_card's iw) less the pill's ends
 BADGE_LEAST = 14
+#: PAD-1363: the longest card text of a character's own (in place of its powers' lines; the pick card wraps it to
+#: three lines at most and cuts the rest with ...)
+MAX_TEXT = 240
 BADGE_ROOM = 1280 - (40 + 380 + 44) - 44 - 40
 
 #: why an ability is not offered on a card
@@ -926,6 +1056,13 @@ def clean_header(header):
     return " ".join(str(header or "").upper().replace("|", " ").split())[:MAX_HEADER]
 
 
+def clean_text(text):
+    """PAD-1363: a character's own card text (DoomWalrus666: 84GOJI's "Press Action twice to add a ball..." in his
+    words), in place of its powers' lines on its pick card: one space between words, the case it was typed in, at most
+    :data:`MAX_TEXT`."""
+    return " ".join(str(text or "").split())[:MAX_TEXT]
+
+
 def character_words(character, words_for=None):
     """The badge the pick's card shows for *character*: its own header, or its powers' words (*words_for*: key ->
     words, :func:`words_for`; a power not in it is left out)."""
@@ -965,6 +1102,16 @@ def badge_label(draw, character, label, words_for, room, S):
     return t.rstrip(" ,") + "...", True
 
 
+def text_on_card(text):
+    """PAD-1363: ``(shown, cut)``, a character's card text as its pick card wraps it (:func:`_card_lines` at the
+    card's own width): *shown* the words it gets to, *cut* True when the card stops short with ``...``."""
+    from PIL import Image, ImageDraw
+    S = 2
+    _f, lines, _s = _card_lines(ImageDraw.Draw(Image.new("L", (1, 1))), text, (BADGE_ROOM + 40) * S, S)
+    shown = " ".join(lines)
+    return shown, bool(lines) and lines[-1].endswith("...") and shown != " ".join(str(text).split())
+
+
 def badge_on_card(character, words_for=None):
     """PAD-1083: ``(label, cut)``, the badge the pick card shows for *character* (:func:`badge_label` at the card's
     own size), for the Characters dialog to say when it is too long."""
@@ -975,7 +1122,10 @@ def badge_on_card(character, words_for=None):
 
 
 def character_line(character, words_for=None):
-    """The card's line for *character*: its powers' lines in the player's words (the powers in *words_for*)."""
+    """The card's line for *character*: its own text (PAD-1363), or its powers' lines in the player's words (the
+    powers in *words_for*)."""
+    if character.get("text"):
+        return character["text"]
     wf = words_for if words_for is not None else {p[0]: p[2] for p in POWERS}
     return " ".join(_POWER[k][3] for k in character.get("powers") or [] if k in wf and k in _POWER)
 
@@ -1102,6 +1252,7 @@ def _characters(got):
             keys = _powers_of(c)                            # round 6: a list of powers (an old ability: its bundle)
             out.append({"name": clean_name(c.get("name")), "sub": clean_sub(c.get("sub")),
                         "powers": keys, "header": clean_header(c.get("header")),
+                        "text": clean_text(c.get("text")),           # PAD-1363: its own card text, "" its powers' lines
                         "ability": bundle_of(keys),         # the bundle these are, for the dialog's starting points
                         "picture": str(c.get("picture") or ""), "colour": clean_colour(c.get("colour")),
                         "video": str(c.get("video") or ""),
@@ -1387,7 +1538,7 @@ def classic_patch(project, characters, index, words_for=None, theme=None, window
     if not chars["list"][index]["powers"]:                  # round 6: a list of powers (none: the card says so)
         return None
     full = pick_card(project, chars, index, words_for, theme, window=window)
-    plain = pick_card(project, dict(chars, list=[dict(c, powers=[], header="") if k == index else c
+    plain = pick_card(project, dict(chars, list=[dict(c, powers=[], header="", text="") if k == index else c
                                                  for k, c in enumerate(chars["list"])]), index, words_for, theme,
                       window=window)
     ys, xs = np.nonzero(np.any(full != plain, axis=2))
@@ -2565,7 +2716,8 @@ def pick_card(project, characters, index, words_for=None, theme=None, scale=2, w
         label, does = "A SURPRISE", "The machine picks one of the characters nobody has taken yet."
     else:
         label = character_words(c, words_for) or "NO SPECIAL ABILITY"      # round 6: its powers' words, or its own
-        does = character_line(c, words_for) if label != "NO SPECIAL ABILITY" else "Plays as the game always does."
+        does = (c.get("text") or character_line(c, words_for) if label != "NO SPECIAL ABILITY"     # PAD-1363: own text
+                else c.get("text") or "Plays as the game always does.")
         label = badge_label(d, c, label, words_for, iw - 40 * S, S)[0]    # PAD-1083: never past the card's edge
     bf = _fit(d, label, _TEXT_FONTS, iw - 40 * S, 24 * S, BADGE_LEAST * S)  # PAD-1075: a long badge shrinks to the card
     bw = d.textlength(label, font=bf) + 40 * S

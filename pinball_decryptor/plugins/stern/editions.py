@@ -26,7 +26,6 @@ the time the operator can open the menu.
 from __future__ import annotations
 
 import hashlib
-import struct
 
 from . import menu_settings as _MS
 
@@ -113,22 +112,104 @@ def project_title(project, probe=False):
 # ---- reading a built program back (the Multi-boot side) -----------------------------------------
 def in_program(elf_bytes):
     """``{"values": n, "help": str, "id": i}`` when the game program carries our EDITION setting
-    on a menu page, else ``None``. Never raises."""
-    from .adjustments import AdjustmentTable, OFF_MENU_HELP, menu_label
+    on a menu page, else ``None``. Never raises. PAD-1325: a 64-bit (Spike 3) program too, its
+    page the one :func:`.menu_settings.wide_category` names."""
+    from .adjustments import AdjustmentTable, menu_label
     ad, caption, _row, category = _MS.SETTINGS[_MS.EDITION]
     try:
-        t = AdjustmentTable(bytes(elf_bytes))
+        t = AdjustmentTable(bytes(elf_bytes), wide_ok=True)
         i = t.by_name.get(ad)
         if i is None or menu_label(t, i) != caption:
             return None
         e = t.entry(i)
-        desc = t._off(t.table_va + i * t.elem)
-        help_text = t._cstr(struct.unpack_from("<I", t.data, desc + OFF_MENU_HELP)[0], 200)
+        help_text = t._cstr(t.word(t.field_off(i, "help")), 200)
         cat = _MS.menu_table(t)
-        if cat is None or not cat.has(category, i):
+        if cat is None:
+            return None
+        if t.wide:
+            category = _MS.wide_category(t, _MS.EDITION)
+        if not cat.has(category, i):
             return None
         if (e["min"], e["step"]) != (1, 1) or not 2 <= e["max"] <= MAX_EDITIONS:
             return None
         return {"values": int(e["max"]), "help": help_text, "id": i}
     except Exception:                                   # noqa: BLE001 - not ours, or not readable
         return None
+
+
+# ---- Spike 3 (PAD-1325) ---------------------------------------------------------------------------
+#: ``<game>-<version>`` of the Spike 3 builds whose game program takes EDITION (a setting the game
+#: says it no longer uses, and the menu copy :func:`.menu_settings.grow_wide_program` grows), each
+#: seen working in the emulator: the row on Attract Mode, the value stored, and a multi-boot card of
+#: two editions booting the one it names. The other Spike 3 builds (Pokemon 0.82, both Star Wars
+#: 2025, Walking Dead 0.92) still use all three settings EDITION and its siblings could take.
+SPIKE3_PROVEN = frozenset({
+    "star_wars_elg-1.10",
+    "fallout_le-0.81",
+    "fallout_le-0.82",
+    "transformers_mtmte_le-0.96",
+})
+SPIKE3_NO_SPARE = ("Editions are not offered on %s: its game program uses every setting EDITION "
+                   "could take, so its operator menu cannot take EDITION.")
+SPIKE3_NOT_PROVEN = ("Editions are not offered on %s yet: they work on Star Wars ELG 1.10, Fallout "
+                     "0.81 and 0.82 and Transformers 0.96 (Spike 3).")
+#: the Spike 3 builds read and found to have no setting to spare
+SPIKE3_FULL = frozenset({"pokemon_le-0.82", "star_wars_2025_le-0.96", "star_wars_2025_pro-0.84",
+                         "walking_dead_remastered_le-0.92"})
+
+
+def spike3_key(game_dir, version):
+    """``<game>-<major>.<minor>`` of a Spike 3 build (``fallout_le``, ``0.82.0`` -> ``fallout_le-0.82``)."""
+    parts = str(version or "").split(".")
+    while len(parts) > 2 and parts[-1] in ("0", ""):
+        parts.pop()
+    return "%s-%s" % ((game_dir or "").lower(), ".".join(parts))
+
+
+def spike3_label(game_dir, version):
+    return "%s %s (Spike 3)" % ((game_dir or "?").replace("_", " ").title(), version or "?")
+
+
+def spike3_refusal(game_dir, version):
+    """Why a Spike 3 build cannot have editions, or ``""``."""
+    from .sound_modes import modes_any
+    if not game_dir:
+        return NO_TITLE
+    key = spike3_key(game_dir, version)
+    if key in SPIKE3_FULL:
+        return SPIKE3_NO_SPARE % spike3_label(game_dir, version)
+    if key not in SPIKE3_PROVEN and not modes_any():
+        return SPIKE3_NOT_PROVEN % spike3_label(game_dir, version)
+    return ""
+
+
+def _spike3_card(project):
+    """The project's card when it is a Spike 3 one (its ``game_dir`` / ``version``), else None."""
+    from . import mode_project as MP
+    try:
+        card = MP.project_card(project)
+    except (OSError, ValueError):
+        return None
+    if card is None or not card.image or MP.card_arch(card.image) != "a64":
+        return None
+    return card
+
+
+def project_refusal(project):
+    """Why ``project``'s game cannot have editions, or ``""``: a Spike 3 card's by its build
+    (:func:`spike3_refusal`), a Spike 2 one's by its profile (:func:`title_refusal`)."""
+    card = _spike3_card(project)
+    if card is not None:
+        return spike3_refusal(card.game_dir, card.version)
+    return title_refusal(project_title(project))
+
+
+def project_menu_path(project):
+    """Where the operator sets EDITION on ``project``'s game."""
+    if _spike3_card(project) is not None:
+        return SPIKE3_MENU_PATH
+    return menu_path(project_title(project))
+
+
+#: where a Spike 3 operator finds EDITION (the page :func:`.menu_settings.wide_category` names)
+SPIKE3_MENU_PATH = "Adjustments > Machine Settings > Attract Mode"

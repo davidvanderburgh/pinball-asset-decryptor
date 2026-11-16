@@ -9,6 +9,10 @@
  *   SHA1(menu caption)[20] | default u32 | min u32 | max u32 | id u32
  *   | LIVE VALUE u32 | check u32 (= 0xFF - (value & 0xff))
  *
+ * PAD-1325: a Spike 3 game keeps the same store at the same path, the same
+ * 44-byte records, behind a 336-byte header whose section table (u64 at
+ * 0xa8) says where the adjustments start; nvm.c reads either.
+ *
  * The key is the SHA1 of the caption the menu shows, so it is the same on
  * every version of a title and the tools hand it over in images.conf
  * (machine_volume=<store>|<sha1 hex>|<default>) - nothing here hashes.

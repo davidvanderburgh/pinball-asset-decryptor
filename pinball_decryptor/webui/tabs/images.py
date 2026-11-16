@@ -29,6 +29,7 @@ from .. import compat, look_switches
 from ..colour_save import ColourSaveMixin
 from ..find_originals import FindOriginalsMixin
 from .base import TabService, rpc
+from ..testcard_tags import TestTagMixin
 
 #: Tk's iid prefix for a "Group by scene" header row; the page's id for one.
 GROUP_IID = "::grp::"
@@ -318,7 +319,15 @@ def same_picture(a, b):
 
 
 # ---------------------------------------------------------------------------
-class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
+class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, TabService):
+    _tc_kind = "image"                # PAD-1279: a TEST tick puts the row on the test card
+
+    def _tc_project(self):
+        return self._assets_dir()
+
+    def _tc_file(self, rel):
+        return self._cs_source(rel)
+
     ns = "images"
     key = "Replace Images"
     label = "Images"
@@ -481,6 +490,7 @@ class ImagesTab(ColourSaveMixin, FindOriginalsMixin, TabService):
 
     def on_show(self):
         self._refresh_pillow()
+        self._tc_publish()           # PAD-1279: the TEST column
         self._maybe_rescan_image()
         self.set(pex=self._pex_available())
         # the Color profile tab's profiles change elsewhere (PAD-463)

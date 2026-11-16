@@ -119,8 +119,9 @@ def test_a_multiboot_card_takes_no_feed_and_says_so(build, tmp_path):
 def test_the_write_logs_the_feed_under_its_own_name():
     src = open(os.path.join(ROOT, "pinball_decryptor", "plugins", "stern", "spike3_write.py"),
                encoding="utf-8").read()
-    # PAD-1323: with the random clips' and the screen times' lines beside it; PAD-1327: and Prolonged Competition's
-    assert 'line if line.startswith(("Score feed:", "Random clips:", "Screen times:", "Prolonged Competition:"))' in src
+    # PAD-1323: with the random clips' and the screen times' lines beside it
+    assert 'line if line.startswith(("Score feed:", "Random clips:", "Screen times:", "Co-op play:", "Handicap",'
+    assert '"Prolonged Competition:"))   # PAD-1327' in src
     assert 'else "Modes: %s" % line' in src
 
 
@@ -173,8 +174,14 @@ def _engine_block():
 
 def test_every_part_the_engine_leaves_out_has_its_reason():
     named = re.findall(r'\("([^"]+)", ', _engine_block())
-    # PAD-1323: random clips and screen times go on now; PAD-1327: Prolonged Competition too - nine parts are left out
-    assert len(named) == 9 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    # PAD-1323: random clips and screen times go on now; PAD-1324: the music modes; PAD-1325: EDITION;
+    # PAD-1326: co-op and the handicaps ; PAD-1327: Prolonged Competition - five parts are left out
+    assert len(named) == 5 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    assert "music modes" not in S3M.FAMILY_LEFT_OUT
+    assert "handicaps" not in named and "handicaps" not in S3M.FAMILY_LEFT_OUT
+    assert "co-op play" not in named and "co-op play" not in S3M.FAMILY_LEFT_OUT
+    assert "editions" not in named and "editions" not in S3M.FAMILY_LEFT_OUT
+    assert "Prolonged Competition" not in S3M.FAMILY_LEFT_OUT
 
 
 def test_the_score_feed_is_not_left_out_any_more():
@@ -187,9 +194,8 @@ def test_the_old_blanket_sentence_is_gone():
 
 
 def test_each_left_out_part_reads_as_its_own_sentence():
-    lines = S3M.family_left_out_lines(["co-op play", "handicaps", "not a part"])
-    assert lines == ["Co-op play: left out of this build: " + S3M.FAMILY_LEFT_OUT["co-op play"] + ".",
-                     "Handicaps: left out of this build: " + S3M.FAMILY_LEFT_OUT["handicaps"] + "."]
+    lines = S3M.family_left_out_lines(["attract items", "Prolonged Competition", "not a part", "co-op play"])
+    assert lines == ["Attract items: left out of this build: " + S3M.FAMILY_LEFT_OUT["attract items"] + "."]
     for why in S3M.FAMILY_LEFT_OUT.values():
         assert "—" not in why and not why.endswith(".")
 

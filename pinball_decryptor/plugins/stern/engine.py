@@ -8433,7 +8433,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         assets_dir, dest_is_device, log, **_mode_gate_kw))
     # PAD-494: a slot's files for the other music modes ride the same delivery, as
     # records of their own in the bank and MUSIC MODE in the operator menu
-    sound_modes, sound_modes_prof = ((None, None) if "music_modes" in _left else _sound_modes_for_build(
+    # (PAD-1324: a Spike 3 card's are spike3_modes.plan's, records swapped at the 64-bit lookup: not built here)
+    _sm_off = "music_modes" in _left or _is_spike3(disk_f)
+    sound_modes, sound_modes_prof = ((None, None) if _sm_off else _sound_modes_for_build(
         assets_dir, dest_is_device, log, **_mode_gate_kw))
     # PAD-685: the jukebox's intro videos go into the video bank by the random clips' road
     from . import clip_variants as _CVj
@@ -8442,7 +8444,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     _clips_on = bool(variant_slots) or _juke_clips
     # PAD-495: EDITION in the operator menu, the setting a multi-boot card of
     # this game's editions boots by
-    editions = _editions_for_build(assets_dir, log)
+    # (PAD-1325: a Spike 3 card's is spike3_write's, spike3_menu grows its 64-bit program)
+    editions = [] if _is_spike3(disk_f) else _editions_for_build(assets_dir, log)
     # PAD-537: BRIGHTNESS, CONTRAST and SATURATION in the operator menu, which the
     # runtime applies to the whole screen live (the modes' delivery, as the music modes')
     picture_prof = _picture_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
@@ -8480,17 +8483,19 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     if _is_spike3(disk_f):
         # PAD-1272: a Spike 3 card's modes are spike3_write's (its games partition, the 64-bit
         # runtime: spike3_modes), and so are the score feed (PAD-1297: files alone), the random
-        # clips and the screen times (PAD-1323: spike3_modes.plan builds them) and Prolonged
-        # Competition (PAD-1327: _comp_for_build above has said whether it goes on). The rest of
+        # clips and the screen times (PAD-1323: spike3_modes.plan builds them), and EDITION
+        # (PAD-1325: spike3_menu grows the 64-bit program's menu), and co-op play (PAD-1326:
+        # spike3_modes.coop_wanted, its CO-OP PLAY row spike3_menu's) and the handicaps (hand_wanted,
+        # HANDICAP), and Prolonged Competition (PAD-1327: _comp_for_build above has said
+        # whether it goes on). The rest of
         # what rides the modes' Spike 2 delivery needs 64-bit runtime, port or menu work first
         # (the census: docs/plans/spike3_modes.md "The family on Spike 3"): each part the project
         # asked for is left out with its own sentence.
         from . import spike3_modes as _S3M
         for _line in _S3M.family_left_out_lines([w for w, on in (
-                ("music modes", sound_modes is not None),
-                ("editions", bool(editions)), ("picture settings", picture_prof is not None),
-                ("attract items", _attract_on), ("co-op play", _coop_on),
-                ("inactivity pausing the timers", _idle_on), ("handicaps", _hand_on),
+                ("picture settings", picture_prof is not None),
+                ("attract items", _attract_on),
+                ("inactivity pausing the timers", _idle_on),
                 ("expression light shows", _cabs_on),
                 ("records on the high scores", _rec_on)) if on]):
             log(_line, "warning")
@@ -11678,7 +11683,7 @@ def _coop_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     if why:
         log("Co-op play: left out of this build: %s." % why.rstrip("."), "warning")
         return None
-    log("Co-op play: %s." % _CP.HOW, "info")
+    log("Co-op play: %s." % (_CP.HOW_A64 if getattr(prof, "arch", "arm") == "a64" else _CP.HOW), "info")   # PAD-1326
     return prof
 
 

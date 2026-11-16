@@ -142,7 +142,11 @@ def test_redrafting_walking_dead_gives_the_proven_port():
     ref, tgt = S.Elf(_prog("star_wars_elg")), S.Elf(_prog("walking_dead_remastered_le"))
     text, M, core, missing = S.draft_spike3(ref, str(ELG_PORT), tgt, "walking_dead_remastered_le", "0.92")
     assert not core
-    assert _entries(text) == _entries(WD_PORT.read_text(encoding="utf-8"))
+    # (PAD-1326's co-op lines are portcoop's, not the draft's: the message table and its BALL line)
+    coop = {("data", "message_table"), ("value", "coop_ball_msg"), ("site", "coop_player_change"),
+            ("site", "coop_add_player"), ("data", "coop_player"), ("data", "coop_players")}
+    port = {k: v for k, v in _entries(WD_PORT.read_text(encoding="utf-8")).items() if k not in coop}
+    assert {k: v for k, v in _entries(text).items() if k not in coop} == port
     # a layout that moved is read off this program, not copied: the process's exit hooks (Star Wars ELG's at 312)
     assert re.search(r"^value proc_exit_hooks\s+392\b", text, re.M)
 

@@ -580,6 +580,8 @@ S3 = MultibootBackend(
     tab_sub=("Several Spike 3 game images on one SD card, with a boot menu the "
              "machine shows on power-up."),
     add_choices=frozenset({"_add_image"}),
+    # PAD-1325: a card of editions (each Written with EDITION in its menu) boots by the setting
+    editions=True,
     own_tool=True)
 
 BACKENDS = {STERN.key: STERN, JJP.key: JJP, BOF.key: BOF, DP.key: DP, SPOOKY.key: SPOOKY,

@@ -74,7 +74,7 @@ def test_a_card_without_tests_is_byte_for_byte_what_it_was(mk):
 
 
 @pytest.mark.parametrize("tests, why", [
-    ([("t%d.png" % k, "") for k in range(17)], "at most 16"),
+    ([("t%d.png" % k, "") for k in range(65)], "at most 64"),
     ([("a/b.png", "x")], "plain media file name"),
     ([("t.png", "a|b")], "no '|'"),
     ([("t.png", "two\nlines")], "one line"),
@@ -125,7 +125,8 @@ def test_plan_media_stages_the_test_pictures_and_lists_them(mk, tmp_path):
     _gif(os.path.join(d, "test1.gif"))
     _wav(os.path.join(d, "test2.wav"))
     m = mk.plan_media(d, 1)
-    assert m["tests"] == [("test0.png", "Full screen"), ("test1.gif", "Clip"), ("test2.wav", "Tone")]
+    assert m["tests"] == [("test0.png", "Full screen", None, None), ("test1.gif", "Clip", None, None),
+                          ("test2.wav", "Tone", None, None)]
     assert list(m["files"]) == ["art0.png", "test0.png", "test1.gif", "test2.wav"]
     # no image owns them: they count with the menu-wide sounds
     sizes = m["sizes"]
@@ -141,7 +142,7 @@ def test_plan_media_refuses_a_test_file_the_menu_cannot_show(mk, tmp_path):
     sub.mkdir()
     d3 = _media_dir(sub, [{"file": "notes.txt", "label": ""}])
     open(os.path.join(d3, "notes.txt"), "w").write("x")
-    with pytest.raises(mk.Refused, match="png, .gif or .wav"):
+    with pytest.raises(mk.Refused, match="png, .gif, .padv or .wav"):
         mk.plan_media(d3, 1)
 
 
@@ -149,8 +150,8 @@ def test_plan_media_refuses_a_test_file_the_menu_cannot_show(mk, tmp_path):
 
 def test_a_test_spec_is_a_path_and_an_optional_label(sm, tmp_path):
     p = _png(str(tmp_path / "Sunset photo.png"), 10, 10)
-    assert sm.parse_test_spec(p) == (p, "Sunset photo")
-    assert sm.parse_test_spec(p + "|On the beach") == (p, "On the beach")
+    assert sm.parse_test_spec(p) == (p, "Sunset photo", None)
+    assert sm.parse_test_spec(p + "|On the beach") == (p, "On the beach", None)
     with pytest.raises(sm.Refused):
         sm.parse_test_spec(str(tmp_path / "nope.png"))
 
@@ -170,8 +171,8 @@ def test_a_picture_that_fits_is_kept_pixel_for_pixel(sm, tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     name = sm._prepare_test(0, src, str(out), str(tmp_path), log=lambda *a: None)
-    assert name == "test0.png"
-    assert open(str(out / name), "rb").read() == open(src, "rb").read()
+    assert name == {"file": "test0.png", "sound": None}
+    assert open(str(out / name["file"]), "rb").read() == open(src, "rb").read()
 
 
 def test_a_big_picture_is_fitted_down_and_a_small_one_never_enlarged(sm, tmp_path):
@@ -197,7 +198,7 @@ def test_a_converted_test_file_is_kept_while_its_source_is_unchanged(sm, tmp_pat
     assert "kept" in said[-1]
     # a different kind under the same number replaces the old file
     wav = _wav(str(tmp_path / "b.wav"))
-    assert sm._prepare_test(0, wav, str(out), str(tmp_path), log=said.append) == "test0.wav"
+    assert sm._prepare_test(0, wav, str(out), str(tmp_path), log=said.append)["file"] == "test0.wav"
     assert not (out / "test0.png").exists()
 
 
@@ -219,11 +220,11 @@ def test_the_manifest_carries_tests_and_the_sweep_keeps_their_files(sm, tmp_path
 
 
 def test_the_two_tools_agree_on_the_test_contract(sm, mk):
-    assert sm.TEST_MAX == mk.TEST_MAX == 16
+    assert sm.TEST_MAX == mk.TEST_MAX == 64
     assert sm.TEST_LABEL_MAX == mk.TEST_LABEL_MAX
     assert sm.TEST_PNG_MAX == mk.PNG_MAX
     conf_h = open(os.path.join(RIG, "codeselect", "conf.h"), encoding="utf-8").read()
-    assert "#define CONF_MAX_TESTS 16" in conf_h
+    assert "#define CONF_MAX_TESTS 64" in conf_h
 
 
 # ---- the app: the Multi-boot tab's Menu settings -----------------------------------------------
@@ -246,12 +247,13 @@ def _no_wsl(monkeypatch):
     monkeypatch.setattr(mbc, "wsl", lambda p: "/mnt/c/" + os.path.basename(p))
 
 
-def test_the_build_passes_each_test_picture_and_the_preview_none(tmp_path, _no_wsl):
+def test_a_multi_boot_build_carries_no_test_pictures_any_more(tmp_path, _no_wsl):
+    """Round 2 (DragonRR: "remove this feature from the Multi-boot section"): the test
+    pictures are the Test card tab's; a multi-boot card's SETTINGS keeps only the built-in
+    patterns, and an older saved menu's test pictures are left out."""
     form = _app_form(tmp_path, tests=[(str(tmp_path / "card.png"), "Grey card"),
                                       (str(tmp_path / "clip.mp4"), "")])
-    args = mbc.prepare_args(form, str(tmp_path / "media"))
-    i = args.index("--test")
-    assert args[i:i + 4] == ["--test", "/mnt/c/card.png|Grey card", "--test", "/mnt/c/clip.mp4"]
+    assert "--test" not in mbc.prepare_args(form, str(tmp_path / "media"))
     assert "--test" not in mbc.prepare_args(form, str(tmp_path / "media"), visual_only=True)
 
 
@@ -295,31 +297,26 @@ def test_a_saved_menu_keeps_its_test_pictures():
     assert mbc.menu_from_state({})["tests"] == []
 
 
-def test_the_panel_list_adds_moves_renames_and_removes(tmp_path):
-    """The panel's own list methods, on a stand-in holding only the var."""
+def test_the_multi_boot_tab_has_no_test_pictures_list_any_more():
+    """The list, its buttons and Build test card moved to the Test card tab."""
+    import inspect
+    from pinball_decryptor.webui.tabs import multiboot as mbt
+    src = inspect.getsource(mbt)
+    for gone in ("def test_add", "def test_remove", "def test_move", "def test_label", "def build_test_card"):
+        assert gone not in src
+    js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pinball_decryptor",
+                           "webui", "static", "js", "tabs", "multiboot.js"), encoding="utf-8").read()
+    assert "TestPictures" not in js and "multiboot.build_test_card" not in js
+
     class Var(object):
-        def __init__(self):
-            self.v = "[]"
+        v = json.dumps([["C:/a.png", "A"]])
 
         def get(self):
             return self.v
-
-        def set(self, v):
-            self.v = v
-
     panel = type("P", (), {})()
     panel._tests_var = Var()
-    for name in ("test_pictures", "set_test_pictures", "test_add", "test_remove",
-                 "test_move", "test_label"):
-        setattr(panel, name, getattr(mbc.MultibootPanel, name).__get__(panel))
-    a, b = str(tmp_path / "Sunset.png"), str(tmp_path / "tone.wav")
-    assert panel.test_add([a, b, a]) == 2
-    assert panel.test_pictures() == [(a, "Sunset"), (b, "tone")]
-    assert panel.test_move(1, -1) and panel.test_pictures()[0][0] == b
-    assert panel.test_label(1, "Beach at dusk") and panel.test_pictures()[1] == (a, "Beach at dusk")
-    assert panel.test_remove(0) and panel.test_pictures() == [(a, "Beach at dusk")]
-    assert not panel.test_remove(5)
-
+    panel.test_pictures = mbc.MultibootPanel.test_pictures.__get__(panel)
+    assert panel.test_pictures() == []                 # an older saved menu's are left out
 
 # ---- the test card (mkmulticard.py testcard) -----------------------------------------------------
 
@@ -379,13 +376,16 @@ def _words(argv):
 def test_build_test_card_runs_the_selector_the_test_pictures_and_testcard(tmp_path, monkeypatch, _no_wsl):
     monkeypatch.setattr(mbc, "wsl_home", lambda: "/home/x")
     monkeypatch.setattr(mbc, "wsl_account", lambda: ("x", "/home/x"))
-    form = _app_form(tmp_path, tests=[(str(tmp_path / "card.png"), "Grey card")])
+    form = _app_form(tmp_path, tests=[])
     form.colour_profiles = {0: {"name": "Recommended", "gamma": [1.1, 1.2, 1.35],
                                 "gain": [1, 1, 1], "lift": [0, 0, 0], "saturation": 0.9}}
-    cmds = mbc.testcard_commands(form, str(tmp_path / "pad_test_card.raw"), str(tmp_path / "m"))
+    specs = ["--test", "video:/mnt/c/clip.mp4|Red clip", "--test", "image:/mnt/c/card.png|Grey card"]
+    cmds = mbc.testcard_commands(form, str(tmp_path / "pad_test_card.raw"), str(tmp_path / "m"),
+                                 test_specs=specs)
     assert [label for label, _a in cmds][-2:] == ["prepare", "testcard"]
     prep = _words(cmds[-2][1])
-    assert "--test" in prep and prep[prep.index("--test") + 1] == "/mnt/c/card.png|Grey card"
+    i = prep.index("--test")
+    assert prep[i:i + 4] == specs
     for k in ("--art", "--anim", "--music"):
         assert prep[prep.index(k) + 1] == "0=none"
     tc = _words(cmds[-1][1])

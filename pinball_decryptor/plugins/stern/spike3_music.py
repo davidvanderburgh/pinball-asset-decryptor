@@ -23,9 +23,11 @@ PAD-1296), and its descriptors are 64-bit, so a Spike 3 card needs no descriptor
    (:data:`.spike3_modes.HOOK_SCRIPT`) runs it in the stock one's place, so taking the modes off
    (or a Write without them) gives the card its own program back.
 
-Emulator-proven on Star Wars ELG 1.10 (the row on Audio Content, set to 2 and stored; mode 2's
-record played) - docs/plans/spike3_modes.md "Music modes on Spike 3".
+Emulator-proven on Star Wars ELG 1.10 and Fallout LE 0.82 (the row on Audio Content, set in the menu;
+mode 2's and mode 3's records played, mode 1 the game's own) - docs/plans/spike3_modes.md "Music modes
+on Spike 3".
 """
+import dataclasses
 import os
 import struct
 
@@ -247,16 +249,31 @@ def plan(project, modes, prof, reader, game_raw, log=None, only=False, adds=None
     why = SMo.NO_TITLE if prof is None else title_refusal(prof)
     if why:
         raise Spike3MusicError(why)
-    conts = W.project_sound_dirs(reader)
+    # each slot's own container: the image.bin whose project folder holds its idx file (the game's own, ``audio``,
+    # or the system's menu sounds, ``audio_spike_menu``); a music bank's songs are not idx files
+    conts = {folder: (cp, node) for cp, node, folder, stem in W.project_sound_dirs(reader) if stem is None}
     if not conts:
         raise Spike3MusicError("this card has no sound container")
-    card_path, node = conts[0][0], conts[0][1]
-    _hdr, img = W.read_container(reader, node)
     setting, program = menu_program(game_raw, modes)
-    before = list((adds or {}).get(card_path) or ())
-    mswaps, news, used = records(project, modes, img, log, taken=[(r.flags_lo, r.param) for r in before],
-                                 first_idx=img.count + len(before))
+    mswaps, news, used = [], {}, []
+    for folder in sorted({rel.rsplit("/", 1)[0] if "/" in rel else "" for rel in modes.slots}):
+        sub = dataclasses.replace(modes, slots={r: f for r, f in modes.slots.items()
+                                                if (r.rsplit("/", 1)[0] if "/" in r else "") == folder})
+        if folder not in conts:
+            for rel in sub.slots:
+                log("Music modes: %s is left out: this card has no sound container for %s."
+                    % (SMo.what(rel, 2), folder or "it"), "warning")
+            continue
+        card_path, node = conts[folder]
+        _hdr, img = W.read_container(reader, node)
+        before = list((adds or {}).get(card_path) or ())
+        ms, nw, us = records(project, sub, img, log, taken=[(r.flags_lo, r.param) for r in before],
+                             first_idx=img.count + len(before))
+        mswaps += ms
+        used += us
+        if nw:
+            news[card_path] = nw
     if not mswaps:
         raise Spike3MusicError("none of the modes' files could be made into its sound")
     return Spike3Music(setting, program, cfg_text(setting, modes, mswaps, used, only),
-                       {card_path: news}, modes.count, len(mswaps))
+                       news, modes.count, len(mswaps))

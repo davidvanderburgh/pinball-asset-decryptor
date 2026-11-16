@@ -817,4 +817,12 @@ over the stock program, sounds.cfg):
   4e00022002004080 plays mode 2's, 4e00022002005080` and the PCM 0.5-4.5 s after was 100% 700 Hz; in mode 3 request 66
   (idx 248) took mode 3's record (the still-looping 64 took mode 3's at its next lookup too) and the PCM was 100% 1100 Hz;
   back in mode 1 request 75 played the game's own song (no swap, its own spectrum).
+- **Fallout LE 0.82** the same way (its 11 stereo idx sounds of 20 s or more, 22 records; its 107 MB program grown;
+  its Adjustments page starts with Pricing, so Machine Settings is its third row): Audio Content listed with Music Mode
+  (set to 2, Current Value 2), `mode 2/3/1 from here on` as set; request 64 (SE FO MX VOLUME CHANGE, idx 769) in mode 2
+  took `4804020002002040` and the PCM was 100% 700 Hz, request 675 (idx 1030) in mode 3 took mode 3's (91% 1100 Hz),
+  request 1180 in mode 1 played the game's own (no tone).
+- Each slot's record goes into its own folder's image.bin (`audio` the game's, `audio_spike_menu` the system's).
+  Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`), which are not idx files and take no
+  mode files (as on Spike 2: the Audio tab says only an idx sound can).
 Tests: tests/test_pad1324_spike3_music_modes.py.

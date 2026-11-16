@@ -263,3 +263,24 @@ def test_mswap_lines_are_read_on_64_bit_only():
     src = _runtime()
     i = src.index('str_eq(f[0], "mswap")')
     assert src.rindex("#if PM_A64", 0, i) > src.rindex("#endif", 0, i)
+
+
+def test_each_slot_goes_into_its_own_folders_image_bin(tmp_path, monkeypatch):
+    from pinball_decryptor.plugins.stern import spike3_write as W
+    a = _wav(tmp_path / "a.wav")
+    monkeypatch.setattr(SMo, "convert", lambda project, rel, m, src, log=None: src)
+    monkeypatch.setattr(S3MU, "title_refusal", lambda prof, turns=False: "")
+    monkeypatch.setattr(S3MU, "menu_program", lambda raw, modes: (type("S", (), {"live": 0x10})(), b"prog"))
+    imgs = {"game": _Img(6), "menu": _Img(4)}
+    monkeypatch.setattr(W, "project_sound_dirs", lambda reader: [
+        ("/fallout_le/image.bin", "game", "audio", None), ("/fallout_le/music_cat01.bin", "bank", "audio", "music_cat01"),
+        ("/spike3/menu/image.bin", "menu", "audio_spike_menu", None)])
+    monkeypatch.setattr(W, "read_container", lambda reader, node: (b"", imgs[node]))
+    modes = SMo.Modes(names=[], slots={"audio/idx0002 - A SONG.wav": {2: a}, "audio_spike_menu/idx0001.wav": {2: a}})
+    mus = S3MU.plan(str(tmp_path), modes, object(), None, b"raw", adds={"/fallout_le/image.bin": [
+        W.NewRecord(a, 2, 0x44000220, 0x12345, 7)]})
+    assert sorted(mus.news) == ["/fallout_le/image.bin", "/spike3/menu/image.bin"]
+    assert all(len(v) == 1 for v in mus.news.values())
+    assert "music_cat" not in " ".join(mus.news)
+    hosts = [l.split("\t") for l in mus.cfg.splitlines() if l.startswith("mswap")]
+    assert len(hosts) == 2

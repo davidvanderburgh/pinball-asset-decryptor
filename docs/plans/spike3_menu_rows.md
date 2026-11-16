@@ -106,7 +106,9 @@ The patched ELG program boots and runs to attract on the rig at 55 fps with no c
 PAD-1321 delivers the capability; PAD-1324 (music modes), PAD-1325 (editions), PAD-1326 (co-op /
 handicaps) USE it. When they do:
 
-- **pick the category per game, by name.** `grow_wide_program` places the row on the category it is
+- **pick the category per game, by name.** (PAD-1324: `menu_settings.wide_category_names` / `wide_category` read
+  the page table, and `plan()` uses it for every 64-bit row: MUSIC MODE -> Audio Content 13, EDITION -> Attract Mode 16
+  on all three row-taking builds. An empty page shows once a row is listed on it: proven for Audio Content on ELG.) `grow_wide_program` places the row on the category it is
   given; `SETTINGS` carries the Spike 2 numbers (13 = Audio Content, ...), but a Spike 3 build's
   category numbers differ (on ELG, 13 is unused and 11/16/... are its own pages). Resolve each
   setting's page from the game's category-NAME table, or place the row on an existing populated

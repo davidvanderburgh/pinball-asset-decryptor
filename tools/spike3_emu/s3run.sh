@@ -615,6 +615,8 @@ if [ "$PROG" = /games/game ] && [ "$(readlink "$R/games/game")" = pad/padmode/pa
     if [ "$PIVOT" = 1 ] || [ "$DEVMODE" = kernel ] || [ -n "${PAD_S3_QEMU:-}" ] || [ -n "${PAD_S3_MODE_SO:-}" ]; then
         MT=$(cat "$R/games/pad/padmode/game.target" 2>/dev/null)
         case "$MT" in /*) PROG=$MT ;; ?*) PROG=/games/$MT ;; esac
+        # PAD-1324: the hook runs the program with the modes' menu rows (MUSIC MODE) when the card has one
+        [ -x "$R/games/pad/padmode/game.pad" ] && PROG=/games/pad/padmode/game.pad
         if [ -z "${PAD_S3_MODE_SO:-}" ] && [ -f "$R/games/pad/padmode/mode.so" ]; then
             PRELOAD="${PRELOAD:+$PRELOAD:}/games/pad/padmode/mode.so"
         fi

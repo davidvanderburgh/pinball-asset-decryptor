@@ -369,6 +369,92 @@ def rela_spans(table):
     return table._rela_spans
 
 
+#: PAD-1324: a 64-bit program's menu page record: {name line, 0, help, flags}, each 8 bytes
+_W_PAGE_REC = 32
+#: R_AARCH64_RELATIVE: the loader stores the load address plus the addend
+_R_AARCH64_RELATIVE = 0x403
+
+
+def _relative_addends(table):
+    """PAD-1324: ``{pointer's file-va: addend}`` of every R_AARCH64_RELATIVE relocation of a 64-bit
+    program (its ``DT_RELA`` table): where a PIE's pointer tables really point."""
+    got = getattr(table, "_rel_addends", None)
+    if got is not None:
+        return got
+    out = {}
+    for a, b in rela_spans(table):
+        for r_off, info, addend in struct.iter_unpack("<QQq", table.data[a:a + (b - a) // 24 * 24]):
+            if info == _R_AARCH64_RELATIVE:
+                out[r_off] = addend
+    table._rel_addends = out
+    return out
+
+
+def _page_score(names):
+    """How like the menu's page table a run of names is: the pages of ours it names, then its length
+    (other tables start with INVALID too: ELG's wire colours are 187 records)."""
+    want = {v.lower() for v in CATEGORY_NAMES.values()}
+    return sum(1 for n in names.values() if n.strip().lower() in want), len(names)
+
+
+def wide_category_names(table):
+    """PAD-1324: ``{category number: name}`` of a 64-bit (Spike 3) program's operator-menu pages.
+
+    The menu names each page by a record of :data:`_W_PAGE_REC` bytes, numbered from 0
+    (``INVALID``) in category order: its first word points at the page's five-language name line
+    (``char*[5]``, English first), so record 13 is "Audio Content" on every Spike 3 build that has
+    the page (Star Wars ELG 1.10, Fallout LE 0.82, Transformers LE 0.96), and a title's own pages
+    follow the system's (Fallout's 24.. are its features). In a PIE those pointers are relocations,
+    so they are read off their addends. ``{}`` when the table is not found."""
+    got = getattr(table, "_wide_cat_names", None)
+    if got is not None:
+        return got
+    rel = _relative_addends(table)
+    by_target = {}
+    for at, a in rel.items():
+        by_target.setdefault(a, []).append(at)
+
+    def name(rec):
+        line = rel.get(rec)
+        return table._cstr(rel[line], 80) if line in rel else None
+
+    out = {}
+    o = table.data.find(b"\x00INVALID\x00")
+    while o >= 0 and not out:
+        va = table._va(o + 1)
+        for line in (by_target.get(va) or ()):
+            for rec in by_target.get(line) or ():
+                k, names = 0, {}
+                while True:
+                    n = name(rec + k * _W_PAGE_REC)
+                    if not n:
+                        break
+                    names[k] = n
+                    k += 1
+                if _page_score(names) > _page_score(out):
+                    out = names
+        o = table.data.find(b"\x00INVALID\x00", o + 1)
+    if not _page_score(out)[0]:           # a table that names none of our pages is another one
+        out = {}
+    table._wide_cat_names = out
+    return out
+
+
+def wide_category(table, key):
+    """PAD-1324: the category number a 64-bit program's menu calls the page setting *key* goes on
+    (Spike 2's name for it, :data:`CATEGORY_NAMES`), found by the page's NAME: a Spike 3 build
+    numbers its pages its own way. The first page of that name (Fallout LE 0.82 has two "Attract
+    Mode" pages, the system's and its own). Raises :class:`MenuSettingError` when it has none."""
+    want = CATEGORY_NAMES[SETTINGS[key][3]]
+    names = wide_category_names(table)
+    if not names:
+        raise MenuSettingError("the game's operator menu page names could not be read")
+    for num in sorted(names):
+        if names[num].strip().lower() == want.lower():
+            return num
+    raise MenuSettingError("the game's operator menu has no %s page" % want)
+
+
 def wide_consts(table):
     """PAD-1321: ``{va: [file offsets]}`` of every address a 64-bit program's code builds as
     ``adrp xd`` then ``add xd, xd, #lo12`` within the next eight instructions (how it names a
@@ -874,6 +960,8 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     if key not in SETTINGS:
         raise MenuSettingError("no such setting: %s" % key)
     fixed, caption, row_caption, category = SETTINGS[key]
+    if getattr(table, "wide", False):
+        category = wide_category(table, key)        # PAD-1324: the page by its name on Spike 3
     ad = ad or fixed
     if ad is None:
         raise MenuSettingError("the game has no spare setting left for %s" % caption)
@@ -953,8 +1041,11 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
         writes[desc + off] = struct.pack("<i", v)
     if kind:
         writes[desc + f["kind"]] = _kind_bytes(table, kind) if wide else struct.pack("<i", kind)
+    where = cat.where(category)
+    if wide:            # PAD-1324: the page by its own name (Spike 3 lists it under Machine Settings)
+        where = "Adjustments > Machine Settings > %s" % wide_category_names(table).get(category, "?")
     setting = MenuSetting(key, i, row_caption, text, values, live, category, int(default) - 1 + low,
-                          cat.where(category), low, kind)
+                          where, low, kind)
     return setting, writes, (None if cat.has(category, i) else cat)
 
 

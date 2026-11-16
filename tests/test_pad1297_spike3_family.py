@@ -172,8 +172,9 @@ def _engine_block():
 
 def test_every_part_the_engine_leaves_out_has_its_reason():
     named = re.findall(r'\("([^"]+)", ', _engine_block())
-    # PAD-1323: random clips and screen times go on now - ten parts are left out
-    assert len(named) == 10 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    # PAD-1323: random clips and screen times go on now; PAD-1324: the music modes too - nine parts are left out
+    assert len(named) == 9 and set(named) == set(S3M.FAMILY_LEFT_OUT)
+    assert "music modes" not in S3M.FAMILY_LEFT_OUT
 
 
 def test_the_score_feed_is_not_left_out_any_more():

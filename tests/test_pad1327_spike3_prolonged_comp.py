@@ -114,7 +114,7 @@ def test_the_elg_port_sites_are_the_programs_own_words():
 
 
 # ---- the port and the title -------------------------------------------------------------------------------------
-def test_star_wars_elg_spike3_is_offered_it_and_the_spike3_only_titles_are_not():
+def test_star_wars_elg_spike3_is_offered_it():
     port = MP.read_port(str(ELG3))
     assert PCo.port_ready(port)
     v = port["value"]
@@ -124,9 +124,7 @@ def test_star_wars_elg_spike3_is_offered_it_and_the_spike3_only_titles_are_not()
     assert "challenge_on_flag" not in v and "challenge_menu_slot" not in v
     profs = MP.profiles()
     assert PCo.title_refusal(profs["star_wars_elg_1_10_spike3"]) == ""
-    for key in ("fallout_le_0_82_spike3", "pokemon_le_0_82_spike3", "star_wars_2025_le_0_96_spike3",
-                "star_wars_2025_pro_0_84_spike3", "walking_dead_remastered_le_0_92_spike3"):
-        assert PCo.title_refusal(profs[key]) == PCo.NO_PORT % profs[key].label, key
+    # (round 2, below: the newer titles; Star Wars 2025 Pro's port has no game_start / ball_start event yet)
 
 
 # ---- the runtime: the 64-bit hook_full and the menu at Spike 3's word size -----------------------------------------
@@ -314,8 +312,10 @@ def test_comp_wanted_is_quiet_and_asks_the_title(monkeypatch, tmp_path):
     monkeypatch.setattr(PCo, "load", lambda p: True)
     monkeypatch.setattr(PCo, "project_title", lambda p, probe=False: MP.profiles()["star_wars_elg_1_10_spike3"])
     assert S3M.comp_wanted("proj", real_card=False).key == "star_wars_elg_1_10_spike3"
-    monkeypatch.setattr(PCo, "project_title", lambda p, probe=False: MP.profiles()["pokemon_le_0_82_spike3"])
-    assert S3M.comp_wanted("proj", real_card=False) is None                 # its start menu is not read yet
+    monkeypatch.setattr(PCo, "project_title", lambda p, probe=False: MP.profiles()["star_wars_elg_1_10"])
+    assert S3M.comp_wanted("proj", real_card=False).key == "star_wars_elg_1_10"   # (Spike 2's: the title decides)
+    monkeypatch.setattr(PCo, "project_title", lambda p, probe=False: None)
+    assert S3M.comp_wanted("proj", real_card=False) is None                 # no title known
     monkeypatch.setattr(PCo, "load", lambda p: False)
     assert S3M.comp_wanted("proj", real_card=False) is None
 
@@ -327,3 +327,191 @@ def test_it_is_no_longer_left_out_of_a_spike3_build():
     assert '("Prolonged Competition", _comp_on)' not in eng[i:eng.index("variant_slots, variant_prof", i)]
     w = (ROOT / "pinball_decryptor" / "plugins" / "stern" / "spike3_write.py").read_text(encoding="utf-8")
     assert '"Prolonged Competition:"' in w                                  # its line names itself in the log
+
+
+# ---- round 2: the newer titles (Fallout LE, Pokemon LE, Star Wars 2025 LE: menus of game-mode indices; Walking Dead
+# Remastered LE: Star Wars ELG's entries) ----------------------------------------------------------------------------
+PORTS3 = SDK / "ports" / "spike3"
+# game: (port, frame site, its two words, list_at, count_reg | None, count_at | None, last_at | None, cursor, cap,
+#        Competition index / name message, Standard index / name message)
+FRAMES = {
+    "fallout_le": ("fallout_le-0.82.port", 0x485A08, (0xB874DB57, 0x94116C39), 440, 22, None, None, 20, 12, 2, 1921, 1, 1916),
+    "pokemon_le": ("pokemon_le-0.82.port", 0x4CC050, (0xB875D818, 0x6B18039F), 216, None, 136, 140, 21, 12, 6, 1914, 1, 1912),
+    "star_wars_2025_le": ("star_wars_2025_le-0.96.port", 0x27E788, (0xB874DB16, 0x940562F9), 448, 23, None, None, 20, 10,
+                          2, 1914, 1, 1912),
+    "star_wars_2025_pro": ("star_wars_2025_pro-0.84.port", 0x1D1F1C, (0xB876D815, 0x94031DE4), 360, None, 156, None, 22, 4,
+                           2, 1910, 1, 1908),
+}
+
+
+#: measured, but their start menu did not open on the rig (fresh settings; the player game-mode settings forced on
+#: did not open it either): the lines are in the port as comments until it is reached
+NOT_YET = ("pokemon_le", "star_wars_2025_le", "star_wars_2025_pro")
+
+
+def _uncomment(port_name, tmp_path):
+    text = (PORTS3 / port_name).read_text(encoding="utf-8")
+    assert "# NOT OFFERED YET (PAD-1327)" in text
+    i = text.index("# NOT OFFERED YET (PAD-1327)")
+    live = text[:i] + "\n".join(l[2:] if l.startswith(("# site ", "# value ", "# data ")) else l
+                                for l in text[i:].split("\n"))
+    f = tmp_path / port_name
+    f.write_text(live, encoding="utf-8")
+    return MP.read_port(str(f))
+
+
+@pytest.mark.parametrize("game", sorted(FRAMES))
+def test_the_index_menu_lines(game, tmp_path):
+    port_name, site, words, la, creg, cat, last, cur, cap, ci, cm, si, sm = FRAMES[game]
+    port = MP.read_port(str(PORTS3 / port_name))
+    if game in NOT_YET:
+        assert "comp_menu_frame" not in port["site"] and not PCo.port_ready(port)
+        port = _uncomment(port_name, tmp_path)          # the measured lines themselves
+    assert PCo.port_ready(port) or game == "star_wars_2025_pro"     # (Pro: its bus events wait too)
+    assert tuple(port["site"]["comp_menu_frame"][:3]) == (site,) + words
+    v = port["value"]
+    assert v["comp_menu_frame_moved"] == 1 and v["comp_menu_frame_list_at"] == la and v["comp_menu_frame_cap"] == cap
+    assert v.get("comp_menu_frame_count_reg") == creg and v.get("comp_menu_frame_count_at") == cat
+    assert v.get("comp_menu_frame_last_at") == last and v["comp_menu_frame_cursor_reg"] == cur
+    assert (v["comp_menu_index"], v["comp_menu_index_msg"], v["comp_menu_end_index"], v["comp_menu_end_msg"]) == (ci, cm, si, sm)
+    assert all(d in port["data"] for d in ("message_count", "message_remap", "message_table"))
+    path = os.path.join(PROGS, game + ".game")
+    if PROGS and os.path.isfile(path):              # the words, the frame's ldr and the names, off the program itself
+        from pinball_decryptor.plugins.stern import spike3_requests as S3R
+        prog = S3R.Program(open(path, "rb").read())
+        w0 = struct.unpack_from("<I", prog.raw, prog.off(site))[0]
+        assert (w0 & 0xFFE0FC00) == 0xB860D800 and (w0 >> 16) & 31 == cur     # ldr wt, [xn, w<cursor>, sxtw #2]
+        assert struct.unpack_from("<II", prog.raw, prog.off(site)) == words
+        _flag, comp, std = PCo.card_lines(path)
+        assert (cm, sm) == (comp + 1, std + 1)        # ALL RANDOMNESS REMOVED / NORMAL PLAY follow their captions
+
+
+def test_walking_dead_remastered_takes_star_wars_elgs_route(tmp_path):
+    assert not PCo.port_ready(MP.read_port(str(PORTS3 / "walking_dead_remastered_le-0.92.port")))   # not yet (above)
+    port = _uncomment("walking_dead_remastered_le-0.92.port", tmp_path)
+    assert PCo.port_ready(port)
+    assert tuple(port["site"]["challenge_menu"][:3]) == (0x1EF564, 0x510006C0, 0x52A88E02)       # sub w0, w22, #1
+    assert tuple(port["site"]["challenge_menu_pick"][:3]) == (0x1EF5F0, 0x7100101F, 0x54005F20)  # cmp w0, #4
+    v = port["value"]
+    assert (v["challenge_menu_list_at"], v["challenge_menu_count_reg"], v["challenge_menu_cap"],
+            v["challenge_menu_entry"], v["challenge_menu_pick_reg"]) == (296, 22, 8, 16, 0)
+    assert "challenge_on_flag" not in v
+
+
+#: the Spike 3 titles Prolonged Competition goes on (Transformers LE has no port yet)
+OFFERED3 = {"star_wars_elg_1_10_spike3", "fallout_le_0_82_spike3"}   # both emulator-proven
+
+
+def test_star_wars_2025_pros_bus_events_are_one_lower_past_56():
+    text = (PORTS3 / "star_wars_2025_pro-0.84.port").read_text(encoding="utf-8")   # read off its code, not run yet
+    assert "# event game_start   0x4c" in text and "# event ball_start   0x25" in text and "event game_over    0x46" in text
+
+
+def test_which_spike3_titles_are_offered_it():
+    profs = MP.profiles()
+    offered = {k for k, p in profs.items() if k.endswith("_spike3") and not PCo.title_refusal(p)}
+    assert offered == OFFERED3
+
+
+FRAME_MAIN = r"""
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+typedef unsigned long pm_addr;
+typedef unsigned long pm_reg;
+#define FULL_REG_LAST 28
+#define FULL_SP(r) ((unsigned char *)(unsigned long)(r)[31])
+#define PMU "lu"
+static long V_count_reg = -1, V_count_at = -1, V_last_at = -1;
+static long pm_port_value(const char *k, long d)
+{
+    if (!strcmp(k, "comp_menu_frame_moved")) return 1;
+    if (!strcmp(k, "comp_menu_frame_list_at")) return 216;
+    if (!strcmp(k, "comp_menu_frame_count_reg")) return V_count_reg;
+    if (!strcmp(k, "comp_menu_frame_count_at")) return V_count_at < 0 ? d : V_count_at;
+    if (!strcmp(k, "comp_menu_frame_last_at")) return V_last_at;
+    if (!strcmp(k, "comp_menu_frame_cap")) return 12;
+    if (!strcmp(k, "comp_menu_frame_cursor_reg")) return 21;
+    if (!strcmp(k, "comp_menu_index")) return 6;
+    if (!strcmp(k, "comp_menu_index_msg")) return 1914;
+    if (!strcmp(k, "comp_menu_end_index")) return 1;
+    if (!strcmp(k, "comp_menu_end_msg")) return 1912;
+    return d;
+}
+static void say(const char *f, ...) { va_list a; va_start(a, f); printf("say: "); vprintf(f, a); printf("\n"); va_end(a); }
+static unsigned lettered; static const char *letter;
+static int pm_message_set(unsigned id, const char *w) { lettered = id; letter = w; return 1; }
+static void pm_message_restore(unsigned id) { if (lettered == id) lettered = 0; }
+@FNS@
+static unsigned char frame[0x200] __attribute__((aligned(16)));
+static unsigned char f2[0x200] __attribute__((aligned(16)));
+int main(void)
+{
+    pm_reg a[32] = { 0 };
+    unsigned *list = (unsigned *)(frame + 216), *l2 = (unsigned *)(f2 + 216);
+    comp.caption = 1913; comp.caption_end = 1911;
+    /* Pokemon's shape: the count at sp+136, the loop's last index at sp+140; the menu {1 STANDARD, 4} */
+    V_count_at = 136; V_last_at = 140;
+    list[0] = 1; list[1] = 4; *(unsigned *)(frame + 136) = 2; *(unsigned *)(frame + 140) = 1;
+    a[31] = (pm_reg)frame; a[21] = 0;
+    comp_menu_frame(a);
+    printf("A list %u count %u last %u pending %d lettered %u\n", list[2], *(unsigned *)(frame + 136),
+           *(unsigned *)(frame + 140), comp.pending, lettered);
+    a[21] = 2; comp_menu_frame(a);                       /* the press moved the cursor onto ours */
+    printf("B count %u pending %d lettered %u %s\n", *(unsigned *)(frame + 136), comp.pending, lettered, letter);
+    a[21] = 0; comp_menu_frame(a);
+    printf("C pending %d lettered %u\n", comp.pending, lettered);
+    /* Fallout's shape: the count in x22, no copy; a new menu (another frame), once it is on */
+    V_count_at = -1; V_last_at = -1; V_count_reg = 22;
+    l2[0] = 1; l2[1] = 3; a[31] = (pm_reg)f2; a[22] = 2; a[21] = 1; comp.on = 1;
+    comp_menu_frame(a);
+    printf("D list %u x22 %lu pending %d\n", l2[2], a[22], comp.pending);
+    a[21] = 2; comp_menu_frame(a);
+    printf("E pending %d lettered %u %s\n", comp.pending, lettered, letter);
+    return 0;
+}
+"""
+
+
+def test_the_index_menu_frame_at_spike3s_word_size(tmp_path):
+    src = RUNTIME.read_text(encoding="utf-8")
+    i = src.index("static unsigned long comp_frame_sp;")
+    fns = "\n".join([_comp_block(src), src[i:src.index("\n\n", i)]] + [R._lift(src, s) for s in (
+        "static const char *comp_name(void)", "static void comp_frame_restore(void)",
+        "static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, unsigned right)",
+        "static void comp_menu_frame(pm_reg *r)")])
+    out = _host(tmp_path, FRAME_MAIN.replace("@FNS@", fns)).splitlines()
+    assert "A list 6 count 3 last 2 pending 0 lettered 0" in out          # Competition's index again; the copy kept
+    assert "B count 3 pending 1 lettered 1914 UNTIL POWERED OFF" in out    # its name lettered while the cursor is on it
+    assert "C pending 0 lettered 0" in out                                 # and the game's words back as it leaves
+    assert "D list 1 x22 3 pending 0" in out                               # once on: Standard's index, the count in x22
+    assert "E pending 1 lettered 1912 ENDS PROLONGED COMPETITION" in out
+
+
+def test_the_message_slots_are_pointer_wide():
+    src = RUNTIME.read_text(encoding="utf-8")
+    slot = R._lift(src, "static const char ***message_slot(unsigned idx)")
+    assert 'data("message_table") + sizeof(void *) * idx' in slot and "mprotect(" in slot
+    assert "4u * borrow[i].idx" not in src and 'data("message_table") + 4u * idx' not in src
+
+
+# ---- the flag bitmap's layout on Spike 3 (PAD-1327 found the newer ports without it) ------------------------------
+def test_every_spike3_port_names_the_64_bit_flag_layout():
+    for port_file in sorted(PORTS3.glob("*.port")):
+        port = MP.read_port(str(port_file))
+        if "game_flags" in port.get("data", {}):
+            assert port["value"].get("game_flags_at") == 0, port_file.name
+
+
+def test_the_64_bit_runtime_reads_the_bitmap_at_plus_0_when_a_port_is_silent():
+    src = RUNTIME.read_text(encoding="utf-8")
+    assert "#define GAME_FLAGS_AT (PM_A64 ? 0 : 4)" in src
+    assert 'pm_port_value("game_flags_at", 4)' not in src and src.count('pm_port_value("game_flags_at", GAME_FLAGS_AT)') == 4
+
+
+def test_s3port_carries_the_layout_from_a_spike3_reference():
+    s3 = (ROOT / "tools" / "spike3_emu" / "s3port.py").read_text(encoding="utf-8")
+    i = s3.index("def draft_spike3(")
+    body = s3[i:s3.index("\ndef ", i + 10)]
+    assert 'if name == "game_flags_at":' in body and body.index('if name == "game_flags_at":') < body.index(
+        'if GAME_VALUE.match(name) or name == "ball_end_event":')

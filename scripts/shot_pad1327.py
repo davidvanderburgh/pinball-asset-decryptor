@@ -18,7 +18,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
-CARD = r"D:\Pinball\images\Stern\spike3\star_wars_elg-1_10_0_spike3.Release.64G.sdcard-secure.raw"
+CARD = os.environ.get("PAD1327_CARD") or r"D:\Pinball\images\Stern\spike3\star_wars_elg-1_10_0_spike3.Release.64G.sdcard-secure.raw"
+CARD_VERSION = os.environ.get("PAD1327_VERSION", "1.10.0")   # round 2: Fallout LE 0.82 (PAD1327_CARD)
 LAUNCHER = r'''
 import sys
 sys.path.insert(0, %r)
@@ -40,7 +41,7 @@ def main():
     project = os.path.join(scratch, "project")
     os.makedirs(project)
     with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
-        json.dump({"input_path": CARD, "input_name": os.path.basename(CARD), "card_version": "1.10.0"}, f)
+        json.dump({"input_path": CARD, "input_name": os.path.basename(CARD), "card_version": CARD_VERSION}, f)
     launcher = os.path.join(scratch, "launch1327.py")
     with open(launcher, "w", encoding="utf-8") as f:
         f.write(LAUNCHER % repo)

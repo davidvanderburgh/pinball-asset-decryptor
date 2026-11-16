@@ -76,6 +76,8 @@ def port_ready(port):
     menu = (all(s in sites for s in PORT_SITES) and all(v in values for v in PORT_VALUES)
             and ("challenge_menu_count_at" in values or "challenge_menu_count_reg" in values))
     frame = (FRAME_SITE in sites and all(v in values for v in FRAME_VALUES)     # round 2: a menu of indices,
+             and any(v in values for v in ("comp_menu_frame_list_at", "comp_menu_frame_list_reg"))   # PAD-1327: or
+             and any(v in values for v in ("comp_menu_frame_count_at", "comp_menu_frame_count_reg"))  # a register
              and all(d in port.get("data", {}) for d in ("message_count", "message_remap", "message_table")))   # lettered
     obj = all(s in sites for s in OBJ_SITES) and all(v in values for v in OBJ_VALUES)   # Bond 60th's menu object
     return ((menu or frame or obj) and "hook_dispatch" in sites and "game_flags" in port.get("data", {})
@@ -235,7 +237,7 @@ FRAME_SITE = "comp_menu_frame"
 OBJ_SITES = ("comp_menu_obj_built", "comp_menu_obj_pick", "comp_menu_obj_add_fn")
 OBJ_VALUES = ("comp_menu_obj_reg", "comp_menu_obj_pick_reg", "comp_menu_obj_vec", "comp_menu_obj_index",
               "comp_menu_obj_kind", "comp_menu_obj_end_kind")
-FRAME_VALUES = ("comp_menu_frame_list_at", "comp_menu_frame_count_at", "comp_menu_frame_cap",
+FRAME_VALUES = ("comp_menu_frame_cap",
                 "comp_menu_frame_cursor_reg", "comp_menu_index", "comp_menu_index_msg", "comp_menu_end_index",
                 "comp_menu_end_msg")
 

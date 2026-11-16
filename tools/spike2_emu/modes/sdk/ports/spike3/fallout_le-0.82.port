@@ -125,6 +125,7 @@ data lamp_layers            0x0674e680   # read off the engine's own code
 data light_count            0x06749f80   # read off the engine's own code
 data game_flags             0x0671cc40   # 10 of 10 lined-up instructions
 data game_flag_count        0x00ad1660   # 29 of 29 lined-up instructions
+value game_flags_at             0    # PAD-1327: the 64-bit flag bitmap's layout (Star Wars ELG's), lost in the draft
 data coil_count             0x06721dd8   # 57 of 57 lined-up instructions
 data coil_table             0x0674f598   # 41 of 41 lined-up instructions
 # data right_gate_obj         not carried: the reference game's own (data right_gate_obj         0x00711730)
@@ -217,3 +218,22 @@ text example_start_shot     Junk target
 # value proc_exit_hooks: 312 on the reference, 392 here
 # value proc_exit_slots: 1 of the 41 lined-up instructions holding 4 on the reference hold 1 here
 # value event_flags: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here
+
+# ---- PAD-1327: the start menu (CHOOSE YOUR MODE OF PLAY), a menu of game-mode table indices read off this program's
+# own menu function 0x484b40; the frame point `ldr w23, [x26, w20, sxtw #2]`: the index under the cursor once the press has moved it (w20), the list x26 = sp+0x1b8 (room for 12: 0x1e8 is the next object), the count in w22.
+# Prolonged Competition (comp.cfg) appends Competition's index again and letters its name message while the cursor
+# is on it; the game itself plays the pick as Competition (Standard's index once it is on).
+site comp_menu_frame     0x00485a08 0xb874db57 0x94116c39
+value comp_menu_frame_moved      1
+value comp_menu_frame_list_at    440
+value comp_menu_frame_count_reg  22
+value comp_menu_frame_cap        12
+value comp_menu_frame_cursor_reg 20
+value comp_menu_index            2   # COMPETITION (its flag alone)
+value comp_menu_index_msg        1921   # ALL RANDOMNESS REMOVED
+value comp_menu_end_index        1   # STANDARD
+value comp_menu_end_msg          1916   # NORMAL PLAY
+# the message lookup's: a u64 count, a pointer to the u16 remap, a table of 8-byte record pointers
+data message_count          0x00ad16e0
+data message_remap          0x066caec0
+data message_table          0x065fbdb8

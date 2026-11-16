@@ -2236,7 +2236,8 @@ GAME_SITE = re.compile(r"(show_\d+|block_start_\d+)$")
 #: line up in the framework's flag code but name none of its modes; PAD-1289: Star Wars ELG's 66 / 68 turned up at
 #: lined-up instructions on Pokemon LE, but they are the flags of ELG's own modes)
 GAME_VALUE = re.compile(r"(show_(secs|name|kind|call)_\d+|show_proc|countdown_\w+|mode_flag_\d+|right_gate_\w+|"
-                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+|done_audit_\d+)$")
+                        r"magnet_proc|game_flags_at|block_\w+|place_flag_\w+|done_flag_\w+|done_audit_\d+|"
+                        r"challenge_menu_\w+|comp_menu_\w+)$")   # PAD-1327: a start menu's numbers are its own program's
 #: sites only ever armed together: one placed without the other is written as a comment (PAD-1288: Fallout's
 #: coil_give lines up, its coil_take has no counterpart, and the runtime arms held coils on both or neither)
 SITE_PAIRS = (("coil_take", "coil_give"),)
@@ -2660,6 +2661,13 @@ def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
         if k != "value" or len(t) < 3:
             continue
         name = t[1]
+        if name == "game_flags_at":
+            # PAD-1327: not the reference game's own - the 64-bit flag bitmap's layout (its pointer at +0), the same on
+            # every Spike 3 program; dropped with GAME_VALUE, the runtime read Spike 2's +4 at the first game start
+            if "data:game_flags" in placed:
+                body.append("value %-25s %s    # the 64-bit flag bitmap's layout, as the reference's" % (name, t[2]))
+                placed["value:" + name] = int(t[2], 0)
+            continue
         if GAME_VALUE.match(name) or name == "ball_end_event":
             continue
         v = int(t[2], 0)

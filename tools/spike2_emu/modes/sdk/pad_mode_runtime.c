@@ -5221,6 +5221,17 @@ static void display_arm(void)
 #define N_BORROW 8
 static struct { unsigned id, idx; const char **old; const char *group[6]; char words[96]; int held; } borrow[N_BORROW];
 
+/* PAD-1327: the table's slot for line idx - a pointer each (8 bytes on Spike 3, where the table is the program's own
+ * relocated data: its page is made writable first, as a hooked site's is) */
+static const char ***message_slot(unsigned idx)
+{
+    const char ***slot = (const char ***)(unsigned long)(data("message_table") + sizeof(void *) * idx);
+#if PM_A64
+    mprotect((void *)((unsigned long)slot & ~0xfffUL), 0x1000, 3);
+#endif
+    return slot;
+}
+
 /* the table's line idx shows `words` (every language) until restored by `id` */
 static int message_borrow(unsigned id, unsigned idx, const char *words)
 {
@@ -5234,7 +5245,7 @@ static int message_borrow(unsigned id, unsigned idx, const char *words)
     if (!borrow[i].held) {
         borrow[i].id = id;
         borrow[i].idx = idx;
-        slot = (const char ***)(unsigned long)(data("message_table") + 4u * borrow[i].idx);
+        slot = message_slot(borrow[i].idx);
         borrow[i].old = *slot;
         *slot = borrow[i].group;
         borrow[i].held = 1;
@@ -5258,7 +5269,7 @@ void pm_message_restore(unsigned id)
     unsigned i;
     for (i = 0; i < N_BORROW; i++)
         if (borrow[i].held && borrow[i].id == id) {
-            *(const char ***)(unsigned long)(data("message_table") + 4u * borrow[i].idx) = borrow[i].old;
+            *message_slot(borrow[i].idx) = borrow[i].old;
             borrow[i].held = 0;
         }
 }
@@ -5600,13 +5611,17 @@ static int stock_flags_route(void)
     return data("game_flags") && pm_port_value("mode_flag_1", 0) > 0;
 }
 
+/* PAD-1327: where `data game_flags` keeps the bitmap's pointer when the port does not say: +4 on Spike 2, +0 on Spike 3
+ * (the ports drafted from Star Wars ELG's had lost the value, and the read at the first game start faulted) */
+#define GAME_FLAGS_AT (PM_A64 ? 0 : 4)
+
 /* one of the game's flags, set (1) or not (0); -1 = the port names no bitmap or it is not there yet */
 static int game_flag(unsigned id)
 {
     const unsigned char *bits;
     unsigned count;
     if (!data("game_flags")) return -1;
-    bits = *(const unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
+    bits = *(const unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", GAME_FLAGS_AT));
     if (!bits) return -1;
     count = data("game_flag_count") ? *(const unsigned *)(unsigned long)data("game_flag_count") : 0;
     if (count && id >= count) return -1;
@@ -12791,7 +12806,7 @@ static unsigned char *place_flag_byte(long n)
     if (n <= 0 || !data("game_flags")) return 0;
     count = data("game_flag_count") ? *(const unsigned *)(unsigned long)data("game_flag_count") : 0;
     if (count && (unsigned long)n >= count) return 0;
-    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
+    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", GAME_FLAGS_AT));
     return bits ? bits + (n >> 3) : 0;
 }
 
@@ -15513,7 +15528,7 @@ static void game_flag_clear(unsigned id)
 {
     unsigned char *bits;
     if (!data("game_flags")) return;
-    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
+    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", GAME_FLAGS_AT));
     if (bits) bits[id >> 3] &= (unsigned char)~(1u << (id & 7));
 }
 
@@ -15732,7 +15747,7 @@ static void game_flag_set(unsigned id)
 {
     unsigned char *bits;
     if (!data("game_flags")) return;
-    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", 4));
+    bits = *(unsigned char **)(unsigned long)(data("game_flags") + (unsigned)pm_port_value("game_flags_at", GAME_FLAGS_AT));
     if (bits) bits[id >> 3] |= (unsigned char)(1u << (id & 7));
 }
 
@@ -17401,10 +17416,10 @@ static int coop_msg_find(const char *words)
     const char *w;
     if (!(can & PM_CAN_MESSAGES) || !data("message_table") || !data("message_count")) return -1;
     count = *(unsigned *)(unsigned long)data("message_count");
-    if (count > 20000 || !maps_has(data("message_table"), 4u * count, MAP_R)) return -1;
+    if (count > 20000 || !maps_has(data("message_table"), sizeof(void *) * count, MAP_R)) return -1;
     for (idx = 0; idx < count; idx++) {
-        group = *(const char ***)(unsigned long)(data("message_table") + 4u * idx);
-        if (!group || !maps_has((unsigned long)group, 4, MAP_R)) continue;
+        group = *(const char ***)(unsigned long)(data("message_table") + sizeof(void *) * idx);
+        if (!group || !maps_has((unsigned long)group, sizeof(void *), MAP_R)) continue;
         w = group[0];
         if (w && maps_has((unsigned long)w, 8, MAP_R) && str_eq(w, words)) return (int)idx;
     }
@@ -22414,21 +22429,33 @@ static unsigned comp_frame_cursor(unsigned cursor, unsigned n, unsigned left, un
     return cursor;
 }
 
+/* PAD-1327: the Spike 3 index menus (Fallout LE, Pokemon LE, Star Wars 2025 LE / Pro) are hooked just AFTER the frame's
+ * press has moved the cursor (`value comp_menu_frame_moved 1`: the cursor register is this frame's, no buttons to
+ * read), and keep their list / count in the frame or in a register (`comp_menu_frame_list_reg`,
+ * `comp_menu_frame_count_reg`: hook_full's numbers, x19..x28 on 64-bit); Pokemon also keeps a copy of the LAST index
+ * for its loop (`comp_menu_frame_last_at`), kept in step with the count. */
 static void comp_menu_frame(pm_reg *r)
 {
-    unsigned char *sp = (unsigned char *)(r + 14);
-    unsigned *list = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
-    unsigned *count = (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_count_at", 0));
+    unsigned char *sp = FULL_SP(r);
+    long lreg = pm_port_value("comp_menu_frame_list_reg", -1), nreg = pm_port_value("comp_menu_frame_count_reg", -1);
+    long last_at = pm_port_value("comp_menu_frame_last_at", -1);
+    unsigned *list, *count;
     unsigned last = pm_port_value("comp_menu_frame_count_last", 0) ? 1u : 0u;
+    unsigned moved = pm_port_value("comp_menu_frame_moved", 0) ? 1u : 0u;
     unsigned cap = (unsigned)pm_port_value("comp_menu_frame_cap", 0);
-    unsigned creg = (unsigned)pm_port_value("comp_menu_frame_cursor_reg", 13);
-    unsigned breg = (unsigned)pm_port_value("comp_menu_frame_buttons_reg", 13);
+    unsigned creg = (unsigned)pm_port_value("comp_menu_frame_cursor_reg", 99);
+    unsigned breg = (unsigned)pm_port_value("comp_menu_frame_buttons_reg", moved ? 0 : 99);
     unsigned idx = (unsigned)pm_port_value(comp.on ? "comp_menu_end_index" : "comp_menu_index", 0);
     unsigned msg = (unsigned)pm_port_value(comp.on ? "comp_menu_end_msg" : "comp_menu_index_msg", 0);
-    unsigned n = *count + last;
+    unsigned n;
     static int room_said;
     int was = comp.pending;
-    if (creg > 12 || breg > 12 || !idx || !msg || n > cap) return;
+    if (lreg > FULL_REG_LAST || nreg > FULL_REG_LAST || creg > FULL_REG_LAST || breg > FULL_REG_LAST) return;
+    list = lreg >= 0 ? (unsigned *)(unsigned long)r[lreg]
+                     : (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_list_at", 0));
+    count = nreg >= 0 ? (unsigned *)&r[nreg] : (unsigned *)(sp + (unsigned)pm_port_value("comp_menu_frame_count_at", 0));
+    n = *count + last;
+    if (!idx || !msg || n > cap) return;
     if ((unsigned long)sp != comp_frame_sp || comp_frame_at >= n || list[comp_frame_at] != idx) {   /* a new menu */
         comp_frame_sp = (unsigned long)sp;
         comp_frame_restore();
@@ -22439,12 +22466,15 @@ static void comp_menu_frame(pm_reg *r)
         comp_frame_at = n;
         list[n] = idx;
         *count += 1;
+        if (last_at > 0) *(unsigned *)(sp + last_at) = n;      /* the loop's copy of the last index */
         say("prolonged competition: on the start menu as entry %u of %u (game-mode index %u, %s; cursor %" PMU ")", n + 1,
             n + 1, idx, comp_name(), r[creg]);
     }
     /* the cursor this frame draws: the press read just now moves it after this point (left back, right on, both
-     * wrapping), and the game letters the name as the cursor ARRIVES - so the message is ours from that frame */
-    comp.pending = comp_frame_cursor(r[creg], *count + last, r[breg] & 4u, r[breg] & 2u) == comp_frame_at;
+     * wrapping), and the game letters the name as the cursor ARRIVES - so the message is ours from that frame (a
+     * `moved` site sees the cursor already where it ends) */
+    comp.pending = (moved ? (unsigned)r[creg]
+                          : comp_frame_cursor((unsigned)r[creg], *count + last, r[breg] & 4u, r[breg] & 2u)) == comp_frame_at;
     if (comp.pending) {
         pm_message_set(msg, comp_name());              /* the index's name: ours while the cursor is on our entry */
         comp_frame_msg = msg;
@@ -22568,7 +22598,8 @@ static void comp_arm(void)
         && pm_port_value("comp_menu_obj_vec", 0) > 0 && pm_port_value("comp_menu_obj_index", 0) > 0
         && pm_port_value("comp_menu_obj_kind", 0) > 0 && pm_port_value("comp_menu_obj_end_kind", 0) > 0;
     frame = !objm && site("comp_menu_frame") && pm_port_value("comp_menu_frame_cap", 0) > 0
-        && pm_port_value("comp_menu_frame_list_at", 0) > 0 && pm_port_value("comp_menu_frame_count_at", 0) > 0
+        && (pm_port_value("comp_menu_frame_list_at", 0) > 0 || pm_port_value("comp_menu_frame_list_reg", -1) >= 0)
+        && (pm_port_value("comp_menu_frame_count_at", 0) > 0 || pm_port_value("comp_menu_frame_count_reg", -1) >= 0)
         && pm_port_value("comp_menu_index", 0) > 0 && pm_port_value("comp_menu_index_msg", 0) > 0
         && pm_port_value("comp_menu_end_index", 0) > 0 && pm_port_value("comp_menu_end_msg", 0) > 0;
     if (!objm && !frame && (!site("challenge_menu") || !site("challenge_menu_pick") || pm_port_value("challenge_menu_cap", 0) <= 0

@@ -97,6 +97,7 @@ def test_every_build_whose_start_menu_the_app_knows_is_offered_it():
         "star_wars_2025_le_0_96_spike3",                      # PAD-1290: a Spike 3-only port, its start menu not read
         "star_wars_2025_pro_0_84_spike3",                     # PAD-1291: a Spike 3-only port, its start menu not read
         "star_wars_elg_1_10_spike3",                          # PAD-1271: the Spike 3 port, its start menu not read yet
+        "transformers_mtmte_le_0_96_spike3",                  # PAD-1293: a Spike 3-only port, its start menu not read
         "venom_le_1_07", "venom_pro_1_07",
         "walking_dead_remastered_le_0_92_spike3"]             # PAD-1287: a Spike 3-only port, its start menu not read
     for key in ("deadpool_pro_1_16", "james_bond_le_1_06", "star_wars_pro_1_31", "turtles_pro_1_59",

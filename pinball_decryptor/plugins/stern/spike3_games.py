@@ -33,7 +33,10 @@ SPIKE3_DB = {
     "pokemon_le":              {"display": "Pokemon LE",
                                 "supported": True},
     "walking_dead_remastered_le": {"display": "Walking Dead Remastered LE",
-                                   "supported": True},
+                                   "supported": True},    # PAD-1293: its cards are named transformers_mtmte_le-<version>_spike3; without a row it read
+    # "Transformers Mtmte LE" off the filename
+    "transformers_mtmte_le":   {"display": "Transformers LE",
+                                "supported": True},
 }
 
 #: key used when a Spike 3 card's filename matches no known title.

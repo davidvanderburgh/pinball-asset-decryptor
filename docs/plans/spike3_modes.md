@@ -671,6 +671,28 @@ read back through the card's key: `/games/game -> pad/padmode/padmode.sh`, `game
 root-owned 0755 / 0644, mode.cfg with the census bits, game.port this port byte for byte.
 Tests: tests/test_pad1290_spike3_star_wars_2025_le.py.
 
+### Transformers LE 0.96 (PAD-1293)
+
+`ports/spike3/transformers_mtmte_le-0.96.port` (program sha1 a3b67ca1..., the card
+`transformers_mtmte_le-0_96_0_spike3`), drafted from ELG's Spike 3 port: 9,883 functions paired, every core site placed
+(30 with the switch edge), only ELG's own coil_take / coil_give left out. The census (`TITLE=transformers_mtmte_le`,
+slot 160) found all 37 switch lines reach the modes, **every id 3 below its device-table rank** (Megatron target right
+42, not 45) - a uniform offset, unlike Star Wars 2025's one late switch - so the port carries the measured ids
+(`titles/transformers_mtmte_le-0.96.switch_ids`). The card had no row in `spike3_games.SPIKE3_DB`, so it read as the
+generic key and "Transformers Mtmte LE"; it is `transformers_mtmte_le`, "Transformers LE", now (mode_project's
+`_TITLE_NAMES` too).
+
+Proof (2026-11-16, Spike 3 rig slots 160-163, hidden, MUTED, prebuilt/mode64.so): CLOCK TEST (Megatron target left x3,
+25 s) started on the third hit, scored 6 shots on Right orbit, Center loop and Left orbit through score_add
+(+21,000,000) and ended on its clock; ball save (the drain inside it served back, 3 shots on that ball, the next drain
+ended it) and its control (ended on its first drain, 5.9 s in); a mode's 3-ball multiball through the game's serve,
+"ours is over" at one ball. The Write: `spike3_write.write_card` with an AUTOBOTS ROLL mode, `card_state` = modes /
+`transformers_mtmte_le/game`, the padmode files read back through the card's key, `card_modes_file` and
+`import_modes` gave the mode back whole; the written card (`s3store.py build`) booted with its own hook and mode.so and
+AUTOBOTS ROLL started on its trigger, scored 6 shots (+21,000,000) and ended on its 20 s clock. Not proven: a
+`stack no` mode waiting in the game's own multiball (the Soundwave locks x4 did not start one on the rig), so
+STACK_BALLS_PROVEN leaves it out. Tests: tests/test_pad1293_transformers_spike3_port.py.
+
 ## The switch edges on Spike 3 (PAD-1322)
 
 Spike 2's framework drain calls one small per-switch function for every edge (`site switch_edge`), which the

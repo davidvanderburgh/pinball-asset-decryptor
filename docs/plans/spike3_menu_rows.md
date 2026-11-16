@@ -106,7 +106,9 @@ The patched ELG program boots and runs to attract on the rig at 55 fps with no c
 PAD-1321 delivers the capability; PAD-1324 (music modes), PAD-1325 (editions), PAD-1326 (co-op /
 handicaps) USE it. When they do:
 
-- **pick the category per game, by name.** `grow_wide_program` places the row on the category it is
+- **pick the category per game, by name.** (PAD-1324: `menu_settings.wide_category_names` / `wide_category` read
+  the page table, and `plan()` uses it for every 64-bit row: MUSIC MODE -> Audio Content 13, EDITION -> Attract Mode 16
+  on all three row-taking builds. An empty page shows once a row is listed on it: proven for Audio Content on ELG.) `grow_wide_program` places the row on the category it is
   given; `SETTINGS` carries the Spike 2 numbers (13 = Audio Content, ...), but a Spike 3 build's
   category numbers differ (on ELG, 13 is unused and 11/16/... are its own pages). Resolve each
   setting's page from the game's category-NAME table, or place the row on an existing populated
@@ -121,10 +123,11 @@ handicaps) USE it. When they do:
 
 ## PAD-1325: the first consumer (EDITION)
 
-- The page is found per game: `menu_settings.WIDE_ANCHORS` names a setting of the game's own whose
-  page the row joins (EDITION, CO-OP PLAY, HANDICAP: CUSTOM MESSAGE, Attract Mode = 16 on ELG,
-  Fallout, Transformers and Pokemon); `plan()` uses it for a 64-bit program. MUSIC MODE has no
-  anchor yet (Spike 3 has no Audio Content page; 12 is Audio Settings): PAD-1324's to pick.
+- The page is found per game by its name (`menu_settings.wide_category`, PAD-1324): EDITION on
+  Attract Mode (16 on ELG, Fallout, Transformers), MUSIC MODE on Audio Content.
+- With music modes on the card, their grown copy (`game.pad`, run by the modes' hook) carries
+  EDITION too: `spike3_music.menu_program` grows the project's `spike3_menu.rows_wanted` beside
+  MUSIC MODE in the same pass.
 - The Write step is `plugins/stern/spike3_menu.py`: `grow(raw, wanted)` takes the
   `plan_many` list, so the other rows join EDITION's one grow (one category table for them all).
 - The visible row: on 2026-11-16 the rig (load under 1) reached Adjustments > Machine Settings >

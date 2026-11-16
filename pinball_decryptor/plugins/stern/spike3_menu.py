@@ -49,6 +49,18 @@ def editions_wanted(project, log):
     return names
 
 
+def rows_wanted(project):
+    """The project's rows this module puts on a Spike 3 card (``[(key, values, names)]``, for
+    :func:`grow`), quietly: :func:`plan` says why one is left out. PAD-1324's music modes grow their
+    own copy of the program (``game.pad``, which the modes' hook runs in the card's program's place)
+    with these beside MUSIC MODE, so the program the machine runs carries EDITION either way."""
+    from . import editions as Ed
+    names = Ed.load(project)
+    if not Ed.count(names) or Ed.project_refusal(project):
+        return []
+    return [(MS.EDITION, len(names), names)]
+
+
 def grow(raw, wanted):
     """``(grown program bytes, [MenuSetting], {key: reason})`` for the 64-bit program *raw* with
     *wanted* (``[(key, values, names), ...]``, :func:`.menu_settings.plan_many`'s) in its menu.

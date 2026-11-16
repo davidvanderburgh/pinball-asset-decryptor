@@ -132,20 +132,29 @@ def test_a_spike3_store_is_not_where_spike2s_rule_puts_it():
 
 
 # ---- the page EDITION goes on, per game ------------------------------------------------------
-def _table(pages):
-    return SimpleNamespace(by_name={"AD_CUSTOM_MESSAGE": 1, "AD_GAME_ID": 7}), \
-        SimpleNamespace(records=tuple((c, MS.KIND_ADJUSTMENT, i) for c, i in pages))
+@pytest.mark.parametrize("key", ["star_wars_elg", "fallout_le_081", "fallout_le", "transformers_mtmte_le"])
+def test_edition_goes_on_the_attract_mode_page_by_its_name(key):
+    # PAD-1324's lookup: the page by its name (Fallout has two Attract Mode pages: the system's first)
+    from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
+    _g, _v, elf = program(key)
+    t = AdjustmentTable(elf, wide_ok=True)
+    num = MS.wide_category(t, MS.EDITION)
+    assert MS.wide_category_names(t)[num].strip().lower() == "attract mode"
 
 
-def test_edition_goes_on_the_page_that_lists_custom_message():
-    t, cat = _table([(16, 1), (8, 7)])
-    assert MS.wide_category(t, cat, MS.EDITION) == 16
-    t, cat = _table([(9, 1), (16, 7)])
-    assert MS.wide_category(t, cat, MS.EDITION) == 9          # the game's own number, not Spike 2's
-    assert MS.wide_category(t, cat, MS.MUSIC_MODE) == MS.SETTINGS[MS.MUSIC_MODE][3]
-    t, cat = _table([(8, 7)])
-    with pytest.raises(MS.MenuSettingError, match="Attract Mode page could not be told"):
-        MS.wide_category(t, cat, MS.EDITION)
+def test_music_modes_and_edition_grow_together():
+    # the modes' hook runs the music modes' grown copy (game.pad) in the card's program's place, so
+    # that copy carries EDITION too: one grow, one category table, both rows read back
+    from pinball_decryptor.plugins.stern import spike3_music
+    _g, _v, elf = program("star_wars_elg")
+    modes = SimpleNamespace(count=2, menu_names=lambda: ["Stock", "Rock"])
+    setting, grown = spike3_music.menu_program(elf, modes, [(MS.EDITION, 2, NAMES)])
+    assert setting.key == MS.MUSIC_MODE and not MS.check(grown, setting)
+    ed = Ed.in_program(grown)
+    assert ed is not None and ed["values"] == 2 and ed["help"] == "1 = Standard, 2 = Dark Side"
+    # and with no extra rows it is the music modes' program as before
+    setting2, alone = spike3_music.menu_program(elf, modes)
+    assert not MS.check(alone, setting2) and Ed.in_program(alone) is None
 
 
 # ---- which Spike 3 builds take it -------------------------------------------------------------

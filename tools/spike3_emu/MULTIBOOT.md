@@ -132,7 +132,7 @@ picks the image at the next power-up, as on a Spike 2 card (PAD-495).
 - **Each edition's Write** puts EDITION in the game's operator menu
   (`plugins/stern/spike3_menu.py`): the 64-bit program's spare setting taken over, the menu's
   category table grown so the Attract Mode page lists it (`menu_settings.grow_wide_program`,
-  PAD-1321; the page is the one that lists CUSTOM MESSAGE, `menu_settings.wide_category`), read
+  PAD-1321; the page found by its name, `menu_settings.wide_category`), read
   back, and the program put on the card whole. Takers: Star Wars ELG 1.10, Fallout 0.81 / 0.82,
   Transformers 0.96. Pokemon 0.82, both Star Wars 2025 and Walking Dead 0.92 use every setting
   EDITION could take and are refused with a sentence.

@@ -238,6 +238,8 @@ def test_spike3_key_for_path():
     assert s3g.spike3_key_for_path(f) == "star_wars_2025_pro"
     assert s3g.spike3_key_for_path("walking_dead_remastered_le-0_92_0.x.raw") \
         == "walking_dead_remastered_le"
+    assert s3g.spike3_key_for_path(
+        "transformers_mtmte_le-0_96_0_spike3.Release.64G.sdcard-secure.raw") == "transformers_mtmte_le"
     assert s3g.spike3_key_for_path("mystery_title-1_0_0.raw") \
         == s3g.SPIKE3_GENERIC_KEY
 
@@ -253,7 +255,7 @@ def test_all_titles_supported():
     # the user still supplies the key via their own keyfile.
     unsupported = [k for k, v in s3g.SPIKE3_DB.items() if not v.get("supported")]
     assert unsupported == []
-    assert len(s3g.SPIKE3_DB) == 6
+    assert len(s3g.SPIKE3_DB) == 7                  # PAD-1293: + Transformers LE
 
 
 # --------------------------------------------------------------------------

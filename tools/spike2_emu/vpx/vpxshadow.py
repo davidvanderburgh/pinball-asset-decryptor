@@ -1331,12 +1331,26 @@ def gen(m, had, quiet=None, dof=None):
                 rest = " : %s_Hit_orig" % name
             else:
                 rest = fx(name + "_Hit") + also(s)
-            if s.get("up"):
+            if s.get("unless"):
+                # PAD-1366: `unless`, a VBScript condition under which this hit
+                # is not the machine's switch (the table's own sub still runs).
+                # JAWS 50th's far right ramp re-fires its ball onto the left
+                # ramp's return wire, over the trigger that is LEFT RAMP MADE:
+                # that ball is not a left ramp. Evaluated once per hit, so a
+                # condition that counts something down counts once.
+                pulse = "If Not (%s) Then %s" % (s["unless"], pulse)
+            if s.get("up") and s.get("unless"):
+                out += ["Sub %s_Hit" % name] + ([guard] if helpers else []) + [
+                        "\tIf ActiveBall.VelY < 0 Then", "\t\t" + pulse, "\tEnd If"]
+                if rest:
+                    out.append("\t" + rest[3:])
+                out.append("End Sub")
+            elif s.get("up") or s.get("unless"):
                 # a ramp's opto the ball also rolls back over: one pulse a
                 # shot, on the way up (PAD-907, Rush's time machine); the
                 # table's own sub still runs on every hit
                 out += ["Sub %s_Hit" % name] + ([guard] if helpers else []) + [
-                        "\tIf ActiveBall.VelY < 0 Then %s" % pulse]
+                        "\tIf ActiveBall.VelY < 0 Then %s" % pulse if s.get("up") else "\t" + pulse]
                 if rest:
                     out.append("\t" + rest[3:])
                 out.append("End Sub")
@@ -2015,12 +2029,21 @@ def auto_plunger_item(table, m):
     raise KeyError("the table has no plunger named %s" % p["autoplunge"])
 
 
+def _field_bytes(v):
+    if isinstance(v, list):
+        # PAD-1366: a vector field, floats (a spinner's VCEN moved off the table)
+        return struct.pack("<%df" % len(v), *[float(x) for x in v])
+    return struct.pack("<f" if isinstance(v, float) else "<i", v)
+
+
 def item_fields(table, m):
     """PAD-982: {GameItem stream name: data} for a map's `item_fields`, the
     table's own objects given new field values: {"LightningTarget": {"SLGF":
     300.0}} is Foo Fighters' kick target with a stronger slingshot kick. A
     JSON float is written as a float, an int as an int (VPX's bools are
-    ints). GameItems are not in the MAC, so each stream is replaced."""
+    ints), a list as that many floats ({"VCEN": [-400.0, -400.0]}: JAWS
+    50th's spinner the machine has not, moved off the table, PAD-1366).
+    GameItems are not in the MAC, so each stream is replaced."""
     want = {k.lower(): v for k, v in m.get("item_fields", {}).items() if k != "_"}
     rounds = {k.lower() for k in m.get("round_lights", []) if k != "_"}
     out = {}
@@ -2029,7 +2052,7 @@ def item_fields(table, m):
         fields = want.pop(name.lower(), None)
         if fields is not None:
             data = out["GameItem%d" % i] = vpxfile.set_fields(data, {
-                tag: struct.pack("<f" if isinstance(v, float) else "<i", v) for tag, v in fields.items()})
+                tag: _field_bytes(v) for tag, v in fields.items()})
         if name.lower() in rounds:
             rounds.discard(name.lower())
             out["GameItem%d" % i] = round_light(data, pos)

@@ -867,8 +867,8 @@ def test_jaws_game_long_lights_are_jps_lanterns_and_flashers():
     # the machine never did (Light9, beside OVERBOARD, kept LEFT OUTLANE's state)
     assert {"ChangeOutlanes", "CheckBumpers"} <= set(m["quiet_subs"])
     assert m["item_fields"]["f4"] == {"BWTH": 15.0} and m["item_fields"]["f5"] == {"BWTH": 15.0}
-    mark = [r for r in m["repatch"] if r.get("absent")]
-    assert mark[-1]["absent"].startswith("' PAD-1362") and mark[-1]["absent"] in m["extra_vbs"]
+    mark = [r for r in m["repatch"] if r.get("absent", "").startswith("' PAD-1362")]
+    assert len(mark) == 1 and mark[0]["absent"] in m["extra_vbs"]
 
 
 @pytest.mark.skipif(not os.path.exists(JAWS_TABLE), reason="JP's JAWS 50th 3.2 is not on this machine")
@@ -966,6 +966,178 @@ def test_jaws_newton_ball_is_shark_hit_under_vbscript(tmp_path):
     assert r.returncode == 0 and not r.stderr, r.stdout + r.stderr
     assert r.stdout.split() == ["down", "other", "pulse1081", "knock", "pulse1081", "again",
                                 "TrueTrueTrueTrue", "True", "|"], r.stdout
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_shadow_unless_lets_a_hit_by(tmp_path):
+    # PAD-1366: `unless` - a VBScript condition under which a hit is not the
+    # machine's switch; the table's own sub still runs. Evaluated once a hit
+    # (a condition that counts down counts once), alone and with `up`
+    vs = pytest.importorskip("vpxshadow")
+    m = json.loads(json.dumps(MINI_SHADOW))
+    m["switches"]["sw001"]["unless"] = "Skip()"
+    out, _ = vs.patch(MINI_TRIBUTE, m)
+    lines = out.split("\n")
+    a = lines.index("Sub sw001_Hit")
+    assert lines[a + 1:a + 4] == ["\tIf Not (Skip()) Then vpmTimer.PulseSw 1053", "\tsw001_Hit_orig", "End Sub"]
+    one = "\n".join(lines[a:a + 4])
+    m["switches"]["sw001"]["up"] = True
+    lines2 = vs.patch(MINI_TRIBUTE, m)[0].split("\n")
+    b = lines2.index("Sub sw001_Hit")
+    assert lines2[b + 1:b + 6] == ["\tIf ActiveBall.VelY < 0 Then", "\t\tIf Not (Skip()) Then vpmTimer.PulseSw 1053",
+                                   "\tEnd If", "\tsw001_Hit_orig", "End Sub"]
+    both = "\n".join(lines2[b:b + 6]).replace("sw001_Hit", "sw002_Hit")
+    vbs = tmp_path / "t.vbs"
+    vbs.write_text("\n".join([
+        "Dim Pulses, Skips, Asked, Hits",
+        "Class FakeTimer : Public Sub PulseSw(n) : Pulses = Pulses & n & \" \" : End Sub : End Class",
+        "Class FakeBall : Public VelY : End Class",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim ActiveBall : Set ActiveBall = New FakeBall",
+        "Skips = 1 : Asked = 0 : Hits = 0",
+        "Function Skip() : Asked = Asked + 1 : Skip = Skips > 0 : Skips = Skips - 1 : End Function",
+        "Sub sw001_Hit_orig : Hits = Hits + 1 : End Sub",
+        "Sub sw002_Hit_orig : Hits = Hits + 1 : End Sub",
+        one, both,
+        "sw001_Hit : sw001_Hit",                                   # skipped once, then the switch
+        "Skips = 1 : ActiveBall.VelY = 9 : sw002_Hit",            # on the way down: not even asked
+        "ActiveBall.VelY = -9 : sw002_Hit : sw002_Hit",           # up: skipped once, then the switch
+        "WScript.Echo \"[\" & Pulses & \"] \" & Hits & \" \" & Asked"]), encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(vbs)], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "[1053 1053 ] 5 4", r.stdout + r.stderr
+
+
+def test_item_fields_writes_a_list_as_floats():
+    # PAD-1366: a vector field - JAWS 50th's spinner moved off the table
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    name = "Spinner1"
+    data = (struct.pack("<i", 8) + vf.biff_record("VCEN", struct.pack("<ff", 852.0, 511.0))
+            + vf.biff_record("NAME", struct.pack("<I", 2 * len(name)) + name.encode("utf-16-le"))
+            + vf.biff_record("SVIS", struct.pack("<i", 1)) + vf.biff_record("ENDB", b""))
+
+    class Table:
+        items = [data]
+        item_info = staticmethod(vf.VpxTable.item_info)
+
+    streams = vs.item_fields(Table, {"item_fields": {"Spinner1": {"SVIS": 0, "VCEN": [-400.0, -400]}}})
+    recs = {t: p for t, p, _ in vf.item_records(streams["GameItem0"])}
+    assert struct.unpack("<ff", recs["VCEN"]) == (-400.0, -400.0)
+    assert struct.unpack("<i", recs["SVIS"])[0] == 0
+
+
+def test_jaws_far_right_lane_is_the_right_ramp():
+    # PAD-1366 (Mike): a shot up the far right lane (EAST BEACH, Raft Attack)
+    # only gave what a LEFT ramp gives. JP raises a ramp in that lane at every
+    # ball; the ball climbs into Krampquint, comes back at Krampquint1 on the
+    # left ramp's return wire and rolls over LeftRampDone - nothing in the lane
+    # itself was a switch. The upper deck's helix (RightRampDone) was the
+    # right ramp, sw5 under the deck its stand-in UP PF RAMP MADE, and JP's
+    # spinner at the lane's mouth is not on Stern's game
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    sw = m["switches"]
+    assert sw["Krampquint"]["id"] == 68 and sw["Krampquint"]["also"] == "PadQuintIn"
+    assert sw["LeftRampDone"]["id"] == 67 and sw["LeftRampDone"]["unless"] == "PadQuintBall()"
+    assert sw["RightRampDone"]["id"] == 93
+    assert "sw5" not in sw and "sw5_Hit" in m["quiet_subs"], "JP's own sw5 sub put the Orca board out"
+    assert "Krampquint" not in m["orig_keep"], "its flash is JP's rules; PadQuintIn moves the ball"
+    ids = lambda n: sorted(k for k, v in sw.items() if k != "_" and v["id"] == n)   # noqa: E731
+    assert ids(68) == ["Krampquint"] and ids(67) == ["LeftRampDone"] and ids(93) == ["RightRampDone"]
+    assert m["item_fields"]["Spinner1"] == {"SVIS": 0, "VCEN": [-400.0, -400.0]}
+    assert m["item_fields"]["Primitive89"] == {"TVIS": 0}
+    assert "Spinner1" not in sw
+    mark = "' PAD-1366: the far right ramp is RIGHT RAMP MADE"
+    assert mark in m["extra_vbs"]
+    assert any(r.get("absent", "").startswith(mark) and r["absent"] in m["extra_vbs"] for r in m["repatch"])
+
+
+@pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
+                    reason="runs the generated VBScript under cscript")
+def test_jaws_far_right_ball_is_no_left_ramp_under_vbscript(tmp_path):
+    # PAD-1366: RIGHT RAMP MADE at Krampquint and the ball goes on from
+    # Krampquint1 as JP's did; that ball over LeftRampDone is let by, once a
+    # ball (two far right shots, two balls); a real left ramp after it is the
+    # left ramp, and a far right ball that never came round is forgotten
+    vs = pytest.importorskip("vpxshadow")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    tribute = MINI_TRIBUTE + "Sub Krampquint_Hit : AddScore 1 : End Sub\nSub LeftRampDone_Hit : AddScore 1 : End Sub\n"
+    mini = json.loads(json.dumps(MINI_SHADOW))
+    mini["switches"] = {k: m["switches"][k] for k in ("Krampquint", "LeftRampDone")}
+    mini["orig_hits"] = False
+    out = vs.patch(tribute, mini)[0].split("\n")
+    subs = [ln for ln in out if ln.startswith("Sub Krampquint_Hit ")]
+    a = out.index("Sub LeftRampDone_Hit")
+    subs += out[a:a + 3]
+    assert subs[0].startswith("Sub Krampquint_Hit : vpmTimer.PulseSw 1068") and subs[0].endswith(" : PadQuintIn : End Sub")
+    vbs = m["extra_vbs"]
+    start = vbs.index("' PAD-1366")
+    script = "\n".join([
+        "Dim Log",
+        "Class FakeTimer : Public Sub PulseSw(n) : Log = Log & n & \" \" : End Sub : End Class",
+        "Class FakeKicker : Public Nm",
+        "  Public Sub DestroyBall : Log = Log & Nm & \".destroy \" : End Sub",
+        "  Public Sub CreateBall : Log = Log & Nm & \".create \" : End Sub",
+        "  Public Sub Kick(a, s) : Log = Log & Nm & \".kick\" & a & \"/\" & s & \" \" : End Sub",
+        "End Class",
+        "Dim vpmTimer : Set vpmTimer = New FakeTimer",
+        "Dim Krampquint : Set Krampquint = New FakeKicker : Krampquint.Nm = \"K\"",
+        "Dim Krampquint1 : Set Krampquint1 = New FakeKicker : Krampquint1.Nm = \"K1\"",
+        "Sub PlaySound(s) : End Sub",
+        vbs[start:]] + subs + [
+        "Krampquint_Hit : LeftRampDone_Hit : Log = Log & \"| \"",           # far right: no left ramp
+        "LeftRampDone_Hit : Log = Log & \"| \"",                             # a real left ramp
+        "Krampquint_Hit : Krampquint_Hit : LeftRampDone_Hit : LeftRampDone_Hit : LeftRampDone_Hit : Log = Log & \"| \"",
+        "Krampquint_Hit : PadQuintAt = Timer - 20 : LeftRampDone_Hit",     # never came round: forgotten
+        "WScript.Echo Log"])
+    (tmp_path / "t.vbs").write_text(script, encoding="latin-1")
+    r = subprocess.run(["cscript", "//nologo", str(tmp_path / "t.vbs")], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and not r.stderr, r.stdout + r.stderr
+    k = "1068 K.destroy K1.create K1.kick270/5"
+    assert r.stdout.split() == (k.split() + ["|", "1067", "|"] + k.split() + k.split() + ["1067", "|"]
+                                + k.split() + ["1067"]), r.stdout
+
+
+@pytest.mark.skipif(not os.path.exists(r"C:\tmp\vpx_new\JAWS_50Th_Anniversary.3.2\JAWS_50Th_Anniversary.vpx"),
+                    reason="JP's JAWS 50th 3.2 is not on this machine")
+def test_jaws_real_table_far_right_ramp_and_spinner():
+    # PAD-1366, read off JP's table: Krampquint is on the far right lane's
+    # ramp (Ramphouse); Krampquint1, Quint's hole and LeftRampDone are on one
+    # wire (Ramp051); RightRampDone is on the deck's helix (Ramp026), which
+    # starts on the deck (WallHautJaw, 110 high) the upper flipper plays; the
+    # spinner and its bracket at the lane's mouth leave the table
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    t = vf.VpxTable(r"C:\tmp\vpx_new\JAWS_50Th_Anniversary.3.2\JAWS_50Th_Anniversary.vpx")
+
+    def surf(d):
+        p = [pl for tag, pl, _ in vf.item_records(d) if tag == "SURF"][0]
+        return p[4:4 + struct.unpack_from("<I", p)[0]].decode("latin-1")
+    by = {t.item_info(d)[1]: d for d in t.items}
+    assert surf(by["Krampquint"]) == "Ramphouse"
+    assert {surf(by[n]) for n in ("Krampquint1", "PyramidKicker", "LeftRampDone")} == {"Ramp051"}
+    assert surf(by["RightRampDone"]) == "Ramp026" and surf(by["LeftFlipperG"]) == "WallHautJaw"
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    streams = vs.item_fields(t, m)
+    out = {t.item_info(d)[1]: d for d in streams.values()}
+    recs = {tag: pl for tag, pl, _ in vf.item_records(out["Spinner1"])}
+    x, y = struct.unpack("<ff", recs["VCEN"])
+    assert x < 0 and y < 0 and struct.unpack("<i", recs["SVIS"])[0] == 0
+    recs = {tag: pl for tag, pl, _ in vf.item_records(out["Primitive89"])}
+    assert struct.unpack("<i", recs["TVIS"])[0] == 0
+
+
+def test_jaws_copy_patched_before_the_far_right_ramp_asks_for_a_new_patch(tmp_path):
+    vsu = pytest.importorskip("vpxsetup")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    why = [r["why"] for r in m["repatch"] if "far right lane" in r["why"]]
+    assert len(why) == 1
+    name = "JAWS_50Th_Anniversary (PAD).vpx"
+    (tmp_path / (name[:-4] + ".script.vbs")).write_text("Sub LeftRampDone_Hit : vpmTimer.PulseSw 1067 : End Sub\n",
+                                                        encoding="utf-8")
+    assert why[0] in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
+    (tmp_path / (name[:-4] + ".script.vbs")).write_text(m["extra_vbs"], encoding="utf-8")
+    assert why[0] not in vsu.missed_fixes(str(tmp_path), name, m["repatch"])
 
 
 def test_round_lights_gives_a_light_a_round_outline():

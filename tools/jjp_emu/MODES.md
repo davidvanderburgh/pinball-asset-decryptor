@@ -110,7 +110,7 @@ can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
 | CHAKA's LOTLJ GnR LE 3.03 | 22,265 | yes | yes |
 | Elton John 02.03 | 22,295 | yes | yes |
 | Godfather 02.03 | 21,498 | yes | yes |
-| Wonka 03.03 | 18,717 | yes, static-matched to GnR | yes |
+| Wonka 03.03 | 18,717 | yes, emulator-proven | yes |
 | Pirates of the Caribbean 01.01 | 18,693 | yes | yes |
 | Harry Potter 01.26 | 233 (no engine) | **no** | yes |
 | Sonic 00.925, 00.926 | 246 (no engine) | **no** | yes |
@@ -118,26 +118,34 @@ can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
 "Runs modes" for a title other than GnR means its binary exports every engine
 piece the runtime uses and its Mode vtable resolves to the same slots as GnR's
 (read statically), and its starter modes pass `mkjjpmodes.py check` against its
-report. Only GnR is emulator-proven: every title needs its own Sentinel key to
-run, and a key is per-title (it carries the AES key that decrypts that game's
-code; GnR's key `H0007`s on Wonka).
+report. Each title needs its own Sentinel key to run, and a key is per-title (it
+carries the AES key that decrypts that game's code; GnR's key `H0007`s on Wonka).
 
-**Wonka 03.03 is "static-matched to GnR"** (PAD-1347): its port report was
-diffed against GnR's and is identical for every piece the runtime touches - the
-Mode vtable is byte-identical (`start` 16, `end` 32, `set_time` 40,
-`timer_paused` 56, `is_running` 72, `score` 136, `tick` 168, `start_choreo` 176,
-`total_choreo` 184), the `Switch` object is the same 104 bytes, no required SDK
-piece is missing, and the `Wonka-v03.03` example passes `check --port` with
-every switch, lamp, sound and `font_wba_*` name resolved. What static analysis
-cannot settle is runtime-resolved or runtime-learned and so waits for the live
-run: the lamp-layer `active` byte offset read out of the decrypted
-`LampBuffer::render_all`, the `play` slot in the sound object's vtable, the
-`ingame_state` value, and the always-on `background_modes`. The runtime learns
-the last two on the first ball when `title.cfg` omits them, so Wonka's
-`title.cfg` leaves them out until a run records the proven values. The proof
-harness is staged (`wonka_proof.sh`: start on `switch_target_tv`, scoring on the
-ramps, lamps in the composite, wba fonts, start/shot/end sounds, the 20 s timer,
-yield and drain) and needs only Wonka's dongle plugged in and attached to WSL.
+**Guns N' Roses and Wonka are the two emulator-proven titles** (PAD-1335/1337,
+PAD-1347). The runtime is the same `jjpmodes.so` on both and needed no change
+for Wonka: everything is found by exported name, so a second title boots the
+same code. On Wonka 03.03 with Wonka's own key the `Wonka-v03.03` example
+started on `switch_target_tv`, scored 1,000,000 a shot through the game's own
+scoring (five shots, `COMPLETED` +5,000,000, mode total 10,000,000), ran out the
+20 s game timer when left alone, drew its panel in the game's `font_wba_*` fonts
+(`screen: allegro ok, game text ok`), resolved all three `se_*` sounds, lit
+`lp_gi_tv` our `ff2000` (red, blinking 4/s) in the game's own `lb_rendered`
+composite and handed the lamp back to the game's white when the mode ended,
+yielded a start shot to a running game mode (`yielded to mtv_mode`), and
+confirmed `ingame_state` 5 (a ball in play). The runtime-resolved pieces that
+static analysis could not settle all held on Wonka unchanged: the lamp-layer
+`active` byte offset off the decrypted `render_all`, the `play` slot in the
+sound object's vtable, the `ingame_state` value and the empty `background_modes`
+(no always-on mode on a plain Wonka ball). Proof harness: `wonka_proof.sh`,
+`lamp_yield.sh`, `lamp_lifecycle.sh`.
+
+**The other four "yes" titles** (CHAKA's LOTLJ GnR LE, Elton John, Godfather,
+Pirates) are static-matched: their port reports diff against GnR's with the same
+Mode vtable slots, the same `Switch` object size and every required SDK piece
+present, and their starter folders pass `check --port`. Two independent titles
+booting the one unchanged runtime - GnR and Wonka, built from different games -
+is what shows the SDK is generic, so these four are taken as runs-modes without a
+separate live run each; any one can be run the same way with its own key.
 
 "Library loads" means the one `jjpmodes.so` loads with every import bound
 (`LD_BIND_NOW`) on that image's own glibc - 2.34 on all nine.

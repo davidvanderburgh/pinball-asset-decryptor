@@ -86,10 +86,10 @@ MULTIBOOT_WORDS = ("this is a multi-boot card; modes go on a card of the one gam
 #: build that passed its own checks (a title the part's gate refuses has said why already), in
 #: the engine's words for it. The census behind them is docs/plans/spike3_modes.md, "The family
 #: on Spike 3". The score feed is not here: it goes on (:func:`feed_wanted`), and so do the random clips
-#: (:func:`variants_wanted`) and the screen times (:func:`screen_times_wanted`, PAD-1323).
+#: (:func:`variants_wanted`) and the screen times (:func:`screen_times_wanted`, PAD-1323), and EDITION
+#: (:mod:`.spike3_menu`, PAD-1325).
 FAMILY_LEFT_OUT = {
     "music modes": "the 64-bit runtime cannot play a Spike 3 game's songs in their place yet",
-    "editions": "the EDITION setting cannot be added to a Spike 3 game's operator menu yet",
     "picture settings": "they cannot be added to a Spike 3 game yet",
     "attract items": "the 64-bit runtime cannot add to a Spike 3 game's attract screens yet",
     "co-op play": "the 64-bit runtime cannot follow a Spike 3 game's players yet",

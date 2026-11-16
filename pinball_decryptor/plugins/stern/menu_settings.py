@@ -92,6 +92,16 @@ SETTINGS = {
     COOP_PLAY: (None, "CO-OP PLAY", "Co-op Play", 16),
     HANDICAP: (None, "HANDICAP", "Handicap", 16),
 }
+#: PAD-1325: on a 64-bit (Spike 3) program a setting's page is the one that lists a setting of the
+#: game's own (the category numbers are each build's: PAD-1321). EDITION, CO-OP PLAY and HANDICAP go
+#: beside CUSTOM MESSAGE, on Attract Mode (with TIME FORMAT and the attract tutorial: category 16 on
+#: Star Wars ELG 1.10, Fallout 0.81 / 0.82, Transformers 0.96 and Pokemon 0.82 alike). A setting
+#: with no anchor keeps its :data:`SETTINGS` number.
+WIDE_ANCHORS = {
+    EDITION: "AD_CUSTOM_MESSAGE",
+    COOP_PLAY: "AD_CUSTOM_MESSAGE",
+    HANDICAP: "AD_CUSTOM_MESSAGE",
+}
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
 #: how many values a setting of ours may offer (the picture settings' 9 are their own)
@@ -223,7 +233,9 @@ class WideCategoryTable:
         return any(k == KIND_ADJUSTMENT and i == ident for c, k, i in self.records)
 
     def where(self, category):
-        return "Adjustments"
+        # PAD-1325: the page by its Spike 2 name when it is the same page (WIDE_ANCHORS found it)
+        name = CATEGORY_NAMES.get(category)
+        return "Adjustments > Machine Settings > %s" % name if name else "Adjustments"
 
     def blob(self, *settings):
         recs = list(self.records) + [(s.category, KIND_ADJUSTMENT, s.id) for s in settings
@@ -637,6 +649,22 @@ def grow_wide_program(table, cat, *settings):
     return bytes(buf)
 
 
+def wide_category(table, cat, key):
+    """PAD-1325: the category on whose page a 64-bit program shows setting *key*: the page listing
+    its anchor (:data:`WIDE_ANCHORS`), else the :data:`SETTINGS` number. Raises
+    :class:`MenuSettingError` when the anchor is on no page, or on several."""
+    anchor = WIDE_ANCHORS.get(key)
+    if anchor is None:
+        return SETTINGS[key][3]
+    i = table.by_name.get(anchor)
+    pages = sorted({c for c, k, j in cat.records if k == KIND_ADJUSTMENT and j == i}) if i is not None else []
+    if len(pages) != 1:
+        raise MenuSettingError("the game's %s page could not be told (%s is on %s)"
+                               % (CATEGORY_NAMES.get(SETTINGS[key][3], "menu"), anchor,
+                                  "no page" if not pages else "%d pages" % len(pages)))
+    return pages[0]
+
+
 def category_table(table):
     """The :class:`CategoryTable` of this program, or ``None``: two ``movw rd, #size`` (r0 for the
     allocation, r2 for the copy) a few words apart, a literal load into r1 between them naming a run
@@ -916,6 +944,8 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     cat = menu_table(table, consts) if wide else menu_table(table)
     if cat is None:
         raise MenuSettingError("the game's operator menu pages could not be read")
+    if wide:
+        category = wide_category(table, cat, key)
     if not ours and cat.lists(i):
         raise MenuSettingError("the game's menu already lists %s" % ad)
     row = _row_caption_line(table, i)

@@ -616,6 +616,9 @@ def write_card(original_path, assets_dir, output_path, log=None,
         # earlier build put modes on, written with none now, has them taken off. Planned
         # before the sounds: PAD-1296's own sounds are records appended to image.bin.
         mplan, mremove = _plan_modes(assets_dir, reader, work, log)
+        # PAD-1325: our operator-menu rows (EDITION): the game program grown, put on whole
+        from . import spike3_menu
+        menu = spike3_menu.plan(assets_dir, reader, os.path.join(work, "menu"), log)
         sounds = plan_sounds(reader, assets_dir, baseline, work, log, check,
                              adds=mplan.sound_adds if mplan is not None else None)
         n_audio = sum(p.n_fit + p.n_grown for p in sounds)
@@ -635,7 +638,7 @@ def write_card(original_path, assets_dir, output_path, log=None,
                        ", ".join(str(i) for i in p.appended)), "info")
         n_audio_c, n_video, n_image, n_text = tuple(counts)[:4]
         if not writes and not sounds and not (grow_plan or {}).get("jobs") \
-                and mplan is None and not mremove:
+                and mplan is None and not mremove and menu is None:
             raise engine.NothingToWrite(
                 "Nothing to write: no sound, video, image, scene or text in "
                 "this project differs from the card it was extracted from.")
@@ -656,6 +659,8 @@ def write_card(original_path, assets_dir, output_path, log=None,
             jobs = list((grow_plan or {}).get("jobs") or [])
             if mplan is not None:
                 jobs += mplan.jobs        # the title's scenes the modes' screens and clips rewrite
+            if menu is not None:
+                jobs.append(menu.job)     # PAD-1325: the game program, its menu grown
             for p in sounds:
                 if p.staged:
                     jobs.append((p.card_path.lstrip("/"), p.staged))

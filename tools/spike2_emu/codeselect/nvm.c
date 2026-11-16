@@ -13,11 +13,45 @@
 #define NVM_AUDITS_AT 208
 #define NVM_AUDIT_LEN 40
 #define NVM_ADJ_LEN 44
+/* PAD-1325: the store's own section table - the offsets of its audits and
+ * adjustments.  Spike 2 (32-bit) keeps them as u32 at 0x7c (audits at 208);
+ * Spike 3 (64-bit, the same struct with 8-byte fields) as u64 at 0xa8, its
+ * audits at 336 and its adjustments 8 bytes past their end (Star Wars ELG
+ * 1.10: 231 audits, adjustments at 9584), so 208 + audits * 40 lands 136
+ * bytes short of the first one. */
+#define NVM_S2_TABLE 0x7c
+#define NVM_S3_TABLE 0xa8
 
 static unsigned u16le(const unsigned char *p) { return p[0] | (p[1] << 8); }
 static unsigned u32le(const unsigned char *p)
 {
     return p[0] | (p[1] << 8) | (p[2] << 16) | ((unsigned)p[3] << 24);
+}
+
+static unsigned long long u64le(const unsigned char *p)
+{
+    return (unsigned long long)u32le(p) | ((unsigned long long)u32le(p + 4) << 32);
+}
+
+/* where the adjustment records start in a store of len bytes with n_audits
+ * audits and n_adj adjustments: the section table's word when it is one that
+ * fits, else Spike 2's fixed layout */
+static long adjustments_at(const unsigned char *d, long len, unsigned n_audits, unsigned n_adj)
+{
+    long fixed = NVM_AUDITS_AT + (long)n_audits * NVM_AUDIT_LEN;
+    long need = (long)n_adj * NVM_ADJ_LEN;
+    if (len >= NVM_S2_TABLE + 8 && u32le(d + NVM_S2_TABLE) == NVM_AUDITS_AT) {
+        long a = (long)u32le(d + NVM_S2_TABLE + 4);
+        if (a >= fixed && a + need <= len) return a;
+    }
+    if (len >= NVM_S3_TABLE + 16) {
+        unsigned long long au = u64le(d + NVM_S3_TABLE), ad = u64le(d + NVM_S3_TABLE + 8);
+        if (au >= NVM_S3_TABLE + 16 && au < (unsigned long long)len
+            && ad >= au + (unsigned long long)n_audits * NVM_AUDIT_LEN
+            && ad + (unsigned long long)need <= (unsigned long long)len)
+            return (long)ad;
+    }
+    return fixed;
 }
 
 static int hexval(int c)
@@ -121,7 +155,7 @@ int nvm_read_value(const char *dir, const unsigned char key[20], int *value,
     }
     n_audits = u16le(d + 0x3c);
     n_adj = u16le(d + 0x3e);
-    off = NVM_AUDITS_AT + (long)n_audits * NVM_AUDIT_LEN;
+    off = adjustments_at(d, len, n_audits, n_adj);
     for (i = 0; i < n_adj; i++, off += NVM_ADJ_LEN) {
         const unsigned char *rec = d + off;
         unsigned v, check;

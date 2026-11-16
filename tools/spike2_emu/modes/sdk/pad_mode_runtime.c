@@ -14301,7 +14301,7 @@ static void chg_page_arm(void)
  * back then, and the end-of-game wrap before anything else. */
 #define CHG_PAGES_SITES 5                       /* challenge_pages_0..3, and 4: challenge_list_page */
 #define CHG_LIST_PAGE 4
-typedef unsigned (*chg_pages_fn)(unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned);
+typedef unsigned (*chg_pages_fn)(pm_reg, pm_reg, pm_reg, pm_reg, pm_reg, pm_reg, pm_reg, pm_reg);   /* PAD-1327: x0-x7 */
 static chg_pages_fn chg_pages_game[CHG_PAGES_SITES];
 static volatile long chg_pages_tid;              /* the thread inside a wrapped page call of the game's, 0: none */
 static volatile int chg_pages_cat = -1;          /* the category and entry of that call's first read of the table's */
@@ -14310,8 +14310,8 @@ static volatile int chg_pages_cat0 = -1, chg_pages_n0 = -1;   /* its first read 
 static int chg_pages_first = 1 << 30;            /* the lowest category a page showed: the cycle's first */
 static volatile int chg_pages_count = 64;        /* the table's categories (chg_scores_count, at each page call) */
 static volatile int chg_pages_in;                /* a mode's page runs */
-static unsigned *volatile chg_pages_ent;         /* the entry pointed at a mode's record, until its call returns */
-static unsigned chg_pages_was[3];
+static pm_addr *volatile chg_pages_ent;         /* the entry pointed at a mode's record, until its call returns */
+static pm_addr chg_pages_was[3];
 static unsigned long chg_pages_ms;
 static volatile unsigned long chg_pages_call_ms;     /* when the game's page call in chg_pages_tid began */
 static unsigned char chg_pages_rec[CHG_REC_SIZE] __attribute__((aligned(8)));
@@ -14334,7 +14334,7 @@ static void chg_lookup_seen(pm_reg *r)
 /* the game's record back in the entry */
 static void chg_pages_back(void)
 {
-    unsigned *ent = chg_pages_ent;
+    pm_addr *ent = chg_pages_ent;
     if (!ent) return;
     ent[0] = chg_pages_was[0]; ent[5] = chg_pages_was[1]; ent[6] = chg_pages_was[2];
     chg_pages_ent = 0;
@@ -14378,14 +14378,14 @@ static int chg_pages_follow(int cat, int count, int *first)
     return 1;
 }
 
-static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsigned a3,
-                              unsigned s0, unsigned s1, unsigned s2, unsigned s3)
+static unsigned chg_pages_run(int k, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3,
+                              pm_reg s0, pm_reg s1, pm_reg s2, pm_reg s3)
 {
     static char b[CHG_SCORES_MAX];
     static char names[CHG_PAGES_MAX][40];
     static int said, calls;
-    unsigned ret, *ent;
-    pm_addr *list, list_was = 0;
+    unsigned ret;
+    pm_addr *ent, *list, list_was = 0;
     long n, me = syscall(SYS_GETTID);
     int cat, i, m, j;
     if (chg_pages_in || chg_pages_tid) return chg_pages_game[k](a0, a1, a2, a3, s0, s1, s2, s3);
@@ -14414,8 +14414,8 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
         if (!award) award = rec_page(names[i], b, n, chg_pages_rec, chg_pages_title, sizeof chg_pages_title);  /* PAD-1280 */
         if (award < 0) continue;
         if (!award && (!chg_rec_find(b, n, names[i], chg_pages_rec) || !chg_rec_score(chg_pages_rec))) continue;
-        ent = ((unsigned *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))((unsigned)cat, 0);
-        if (!ent || !maps_has((unsigned long)ent, 28, MAP_R)) return ret;
+        ent = ((pm_addr *(*)(unsigned, unsigned))(unsigned long)fn("challenge_score_entry"))((unsigned)cat, 0);
+        if (!ent || !maps_has((unsigned long)ent, 7 * sizeof(pm_addr), MAP_R)) return ret;
         if (!award) chg_champion_title(chg_pages_title, sizeof chg_pages_title, names[i]);
         for (j = 0; j + 1 < (int)(sizeof chg_pages_titles / sizeof chg_pages_titles[0]); j++)
             chg_pages_titles[j] = chg_pages_title;
@@ -14429,9 +14429,9 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
         chg_pages_was[0] = ent[0]; chg_pages_was[1] = ent[5]; chg_pages_was[2] = ent[6];
         chg_pages_ms = pm_ms();
         chg_pages_ent = ent;
-        ent[0] = (unsigned)(unsigned long)chg_pages_rec;
-        ent[5] = (unsigned)(unsigned long)chg_pages_title;
-        ent[6] = (unsigned)(unsigned long)chg_pages_titles;
+        ent[0] = (pm_addr)(unsigned long)chg_pages_rec;
+        ent[5] = (pm_addr)(unsigned long)chg_pages_title;
+        ent[6] = (pm_addr)(unsigned long)chg_pages_titles;
         chg_pages_in = 1;
         chg_pages_tid = me;                                      /* its reads are not a call of the game's */
         /* a list page (TMNT's HIGHEST SCORES: five rows, each asked of the category's list) shows the one row */
@@ -14445,8 +14445,8 @@ static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, unsigned a2, unsi
     return ret;
 }
 
-#define CHG_PAGES_WRAP(k) static unsigned chg_pages_wrap##k(unsigned a0, unsigned a1, unsigned a2, unsigned a3, \
-    unsigned s0, unsigned s1, unsigned s2, unsigned s3) { return chg_pages_run(k, a0, a1, a2, a3, s0, s1, s2, s3); }
+#define CHG_PAGES_WRAP(k) static unsigned chg_pages_wrap##k(pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3, \
+    pm_reg s0, pm_reg s1, pm_reg s2, pm_reg s3) { return chg_pages_run(k, a0, a1, a2, a3, s0, s1, s2, s3); }
 CHG_PAGES_WRAP(0) CHG_PAGES_WRAP(1) CHG_PAGES_WRAP(2) CHG_PAGES_WRAP(3) CHG_PAGES_WRAP(4)
 static void *const chg_pages_wraps[CHG_PAGES_SITES] = {
     (void *)chg_pages_wrap0, (void *)chg_pages_wrap1, (void *)chg_pages_wrap2, (void *)chg_pages_wrap3,
@@ -14558,12 +14558,8 @@ static void chg_scores_arm(void)
         say("challenge scores: the end-of-game gate could not be wrapped - a mode's challenge game may also file under the game's");
     chg_scores_on = 1;                                           /* PAD-641 round 2: through scores_wrap */
     say("challenge scores: a mode's challenge game keeps its own high score (%s)", CHG_SCORES);
-    if (PM_A64) {                                                /* PAD-1327: their wraps are 32-bit yet */
-        say("challenge scores: the attract mode's champion pages are the game's own on this machine");
-        return;
-    }
-    chg_page_arm();                                              /* PAD-660 */
-    chg_pages_arm();                                             /* PAD-663 */
+    if (!PM_A64) chg_page_arm();                                 /* PAD-660 (its text and yield wraps are 32-bit) */
+    chg_pages_arm();                                             /* PAD-663; PAD-1327: on Spike 3 too, x0-x7 */
 }
 
 /* ---- PAD-1280: records of the owner's own on the game's high-score table ----------------------------------------

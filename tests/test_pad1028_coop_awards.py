@@ -174,8 +174,8 @@ def test_the_runtime_reads_each_turn_before_the_games_change_and_ends_with_the_g
     # the pages: the awards first, then the modes' champions; an award's page needs no scores file
     names = R._lift(src, "static int chg_page_names(char names[][40], int cap)")
     assert "coop_award_names(names, 0, cap)" in names
-    for sig in ("static void chg_page_wrap(void)", "static unsigned chg_pages_run(int k, unsigned a0, unsigned a1, "
-                "unsigned a2, unsigned a3,"):
+    for sig in ("static void chg_page_wrap(void)", "static unsigned chg_pages_run(int k, pm_reg a0, pm_reg a1, "
+                "pm_reg a2, pm_reg a3,"):
         body = R._lift(src, sig)
         assert "coop_award_page(names[i]," in body and "if (n < 0) n = 0;" in body
     arm = R._lift(src, "static void coop_arm(void)")

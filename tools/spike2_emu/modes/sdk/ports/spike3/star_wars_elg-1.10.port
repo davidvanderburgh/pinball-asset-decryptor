@@ -150,8 +150,10 @@ site challenge_menu_pick 0x00159c38 0x7100103f 0x540033c0
 site challenge_scores        0x003eecc0 0xf0001542 0xf9468442
 site challenge_score_entry   0x003ede80 0xa9bf7bf3 0x2a0103f3
 site challenge_scores_gate   0x003ef058 0x97f8e122 0x36000600
-# site challenge_pages_0 NOT PLACED: mid-way into a function on Spike 2 (0x1fef8 + 0x34)
-# site challenge_pages_1 NOT PLACED: no counterpart found
+# PAD-1327: the attract mode's champion page functions (page(category, n, ...): ask, the entry lookup, its titles at
+# +48), each called per category; a record's champion is shown after the first category's page
+site challenge_pages_0      0x0013cee0 0xb0002ae3 0xf9468463
+site challenge_pages_1      0x0016c2a0 0xb0002962 0xf9468442
 site game_scores             0x003eecc0 0xf0001542 0xf9468442
 # site coil_frame       NOT PLACED: no counterpart found
 # site coil_off         NOT PLACED: no counterpart found

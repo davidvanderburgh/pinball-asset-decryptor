@@ -538,9 +538,12 @@ def test_the_champion_code_is_pointer_wide():
     assert "36u" not in src[i:j] and "(ent + 8)" not in src[i:j]
     # co-op's champion counts read the category through the same getter
     assert "return rec_cat_value(a->ids[0], p);" in src
-    # the attract pages' wraps are 32-bit yet: not armed on Spike 3
+    # round 5: PAD-663's champion pages on Spike 3 too (x0-x7 through the wraps); PAD-660's single page stays Spike 2's
     arm = R._lift(src, "static void chg_scores_arm(void)")
-    assert arm.index("if (PM_A64) {") < arm.index("chg_page_arm();")
+    assert "if (!PM_A64) chg_page_arm();" in arm and "    chg_pages_arm();" in arm
+    assert "typedef unsigned (*chg_pages_fn)(pm_reg, pm_reg, pm_reg, pm_reg, pm_reg, pm_reg, pm_reg, pm_reg);" in src
+    run = R._lift(src, "static unsigned chg_pages_run(int k, pm_reg a0, pm_reg a1, pm_reg a2, pm_reg a3,")
+    assert "ent[0] = (pm_addr)(unsigned long)chg_pages_rec;" in run and "pm_addr *ent, *list, list_was = 0;" in run
 
 
 CAT_MAIN = r"""
@@ -645,3 +648,21 @@ def test_records_wanted_is_quiet_and_asks_the_title(monkeypatch):
     assert S3M.records_wanted("proj", real_card=False)[1].key == "star_wars_elg_1_10_spike3"
     monkeypatch.setattr(MRec, "load", lambda p: [])
     assert S3M.records_wanted("proj", real_card=False) == ([], None)
+
+
+#: the attract mode's champion page functions on Spike 3 (round 5): page(category, n, ...) asks, looks the entry up and
+#: reads its titles; a record's champion is shown after the first category's page
+PAGES = {"star_wars_elg-1.10.port": {"challenge_pages_0": 0x13CEE0, "challenge_pages_1": 0x16C2A0}}
+
+
+@pytest.mark.parametrize("port_name", sorted(PAGES))
+def test_the_champion_page_sites(port_name):
+    port = MP.read_port(str(PORTS3 / port_name))
+    for key, va in PAGES[port_name].items():
+        assert port["site"][key][0] == va, key
+        path = os.path.join(PROGS, port_name.split("-")[0] + ".game")
+        if PROGS and os.path.isfile(path):
+            from pinball_decryptor.plugins.stern import spike3_requests as S3R
+            prog = S3R.Program(open(path, "rb").read())
+            w0, w1 = struct.unpack_from("<II", prog.raw, prog.off(va))
+            assert (w0, w1) == tuple(port["site"][key][1:3]) and (w0 & 0xFC000000) != 0x14000000   # not a b left before it

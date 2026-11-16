@@ -725,12 +725,14 @@ def test_jaws_no_kickback_no_loop_kicker_round_sling_glow():
     # lanterns' falloff ran 3-5x past their outlines
     m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
     f = m["item_fields"]
-    assert f["KsaveR"] == {"EBLD": 0} and f["KrampBoucle"] == {"EBLD": 0}
+    assert f["KsaveR"] == {"EBLD": 0}
+    # PAD-1356: KrampBoucle is on again - Mike: a ball cannot make the Scars loop without it
+    assert "KrampBoucle" not in f
     assert "Lightsave" in m["dark"] and "Lightsave" not in m["lamps"]
     assert {"gi1", "gi2", "gi4", "gi5"} <= set(m["round_lights"])
     assert all(f[g]["BWTH"] < 25 for g in ("gi1", "gi2", "gi4", "gi5"))
     for n in range(1, 5):
-        assert f["Lightlantern%d" % n]["RADI"] <= 10 and f["Lightlantern%d" % n]["BWTH"] <= 60
+        assert f["Lightlantern%d" % n]["RADI"] <= 10 and f["Lightlantern%d" % n]["BWTH"] <= 10
     assert "If Not Rsaveball.Collidable Then Rsaveball.Collidable = True" in m["extra_vbs"]
     assert any(r["old"] == "PadStand Targetshark1, PadSharkSt(0), PadSharkUp" for r in m["repatch"])
     assert "PadStand Targetshark1" not in m["extra_vbs"]
@@ -776,6 +778,53 @@ def test_jaws_real_table_has_no_hard_glow_edge():
         assert edge < 0.5, "%s: glow %.2f where its outline cuts it" % (name, edge)
         seen.add(name)
     assert {"gi1", "gi2", "gi4", "gi5", "Lightlantern1", "Lightlantern4"} <= seen
+
+
+def test_jaws_backboard_sign_and_quint_shack_follow_the_machine():
+    # PAD-1356: JP's backboard sign (SHARK ENCOUNTER / COLLECT MYSTERY / SHARK
+    # ATTACK / COLLECT JACKPOT) is four lenses stacked at one place, as Stern's
+    # SHARK BB 1 TOP..4 BOT are; Quint's shack top right (QUINT'S MYSTERY /
+    # BOUNTY HUNT / COLLECT GEAR) is QUINT'S BB 1 TOP..3 BOT. The four SHARK BB
+    # LEDs used to light one stray stand-in light below the sign
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    lamps = m["lamps"]
+    assert [lamps[k]["leds"] for k in ("Lsharkht1", "Light61a", "Lsharkht3", "Lsharkht4")] ==         [[[8, 75]], [[8, 76]], [[8, 77]], [[8, 78]]]
+    assert [lamps[k]["leds"] for k in ("Light61", "Light24", "Light46")] == [[[8, 67]], [[8, 68]], [[8, 69]]]
+    assert "PadSharkBb1Top" not in m["retrofit_lights"]["lights"]
+    mark = [r for r in m["repatch"] if r.get("absent")]
+    assert mark and mark[-1]["absent"] in m["extra_vbs"]
+
+
+@pytest.mark.skipif(not os.path.exists(JAWS_TABLE), reason="JP's JAWS 50th 3.2 is not on this machine")
+def test_jaws_real_table_lanterns_and_sign_order():
+    # PAD-1356 on the real table: the lanterns on the inlane plastics show no
+    # bulb mesh (the bloom), burn steady and dim; the sign's and the shack's
+    # lenses are mapped top to bottom by the height of the wall each stands on
+    vs = pytest.importorskip("vpxshadow")
+    vf = pytest.importorskip("vpxfile")
+    m = json.load(open(os.path.join(VPX, "jaws_le.shadow.json"), encoding="utf-8"))
+    t = vf.VpxTable(JAWS_TABLE)
+    items = list(t.items)
+    for k, data in vs.item_fields(t, m).items():
+        items[int(k[len("GameItem"):])] = data
+    walls, surf, lant = {}, {}, {}
+    for data in items:
+        kind, name, pos = vf.VpxTable.item_info(data)
+        rec = {tag: p for tag, p, _ in vf.item_records(data)}
+        if kind == "Wall" and "HTTP" in rec:
+            walls[name] = struct.unpack_from("<f", rec["HTTP"])[0]
+        if kind == "Light" and "SURF" in rec:
+            surf[name] = rec["SURF"][4:].decode("latin1")
+        if kind == "Light" and name.startswith("Lightlantern"):
+            lant[name] = (struct.unpack_from("<i", rec["SHBM"])[0], struct.unpack_from("<i", rec["STAT"])[0],
+                          struct.unpack_from("<f", rec["STTF"])[0], struct.unpack_from("<f", rec["BWTH"])[0])
+    assert sorted(lant) == ["Lightlantern%d" % n for n in range(1, 5)]
+    assert all(v[0] == 0 and v[1] == 1 and v[2] == 1.0 and v[3] <= 10 for v in lant.values()), lant
+    for group in (("Lsharkht1", "Light61a", "Lsharkht3", "Lsharkht4"), ("Light61", "Light24", "Light46")):
+        heights = [walls[surf[n]] for n in group]
+        assert heights == sorted(heights, reverse=True), (group, heights)
+        leds = [m["lamps"][n]["leds"][0][1] for n in group]
+        assert leds == sorted(leds), (group, leds)
 
 
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),

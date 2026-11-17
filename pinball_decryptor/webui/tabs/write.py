@@ -872,6 +872,7 @@ class WriteTab(TabService):
         self._maybe_default_write_output()
         self._update_write_filename()
         self._refresh_card_size()
+        self._maybe_rescan_write_preview()
 
     def _update_write_badge(self):
         """main_window._set_badge(mode="write"), with the detection (it reads
@@ -2056,7 +2057,9 @@ class WriteTab(TabService):
     def _has_pending_write_changes(self):
         if self._scanning:
             return True
-        return bool(self._rows)
+        assets_path = (self.write_assets_var.get() or "").strip()
+        # Staged intent may have changed since the last completed scan.
+        return bool(self._rows or (assets_path and self._pending(assets_path)))
 
     # ------------------------------------------------------------------
     # Modified Files: the list

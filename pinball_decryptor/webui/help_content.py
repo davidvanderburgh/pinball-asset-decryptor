@@ -1525,6 +1525,75 @@ HELP_CONTENT = {
     # The Modes tab's own tips are in PREVIEW_HELP, read through sections_for;
     # the mode maker is in every copy since PAD-763 (core/preview.RELEASED).
     # The key stays so every notebook tab has an entry.
+    # PR #38 review: what the card does on the owner's home network (webui/tabs/network.py)
+    "Network": [
+        ("What it's for", [
+            "Two things for a machine connected to your home network, by the same cable or Wi-Fi Insider "
+            "Connected uses: the **score feed**, which sends each game's final scores to a computer of yours, and "
+            "**remote access**, which lets a computer of yours log in to the machine. Tick what you want, then "
+            "Write the card.",
+            "Neither changes a score: a card with only these stays on Insider Connected.",
+        ]),
+        ("Score feed", [
+            "**Score feed** has the machine send each game's final scores to a server of "
+            "your own on your network: for a high-score board on a TV, a league sheet, a home automation "
+            "hub. Tick it, type your server's address, then Write:\n\n"
+            "- After every game the machine posts one JSON message to the address: the game, how many "
+            "played, each player's final score, and for each player who was logged in to Insider "
+            "Connected their account's id (the same id every game, so your server can put a name to it). "
+            "A game reset with Start held down mid-game is not sent.\n"
+            "- The address is plain **http://**, your server's **IP address** (like "
+            "`http://192.168.1.50:8080/scores`), as the machine looks no names up and does not do https. "
+            "Your server answers with any 2xx status.\n"
+            "- When the server is off, the machine tries three times, 10 seconds apart, then lets that game "
+            "go. The game itself never waits for it.\n"
+            "- Nothing goes to Stern, and no score is changed. On its own it keeps the card on Insider "
+            "Connected; with modes on the same card, the scores stay off Insider Connected as they always "
+            "do, and still come to your server.\n\n"
+            "A message looks like "
+            "`{\"source\":\"PAD score feed\",\"game\":\"Godzilla Premium/LE 1.16\",\"players\":2,"
+            "\"scores\":[123456780,98765430],\"insider\":[\"3f2a9c1e-...\",null],...}`:\n\n"
+            "| Field | What it holds |\n"
+            "|---|---|\n"
+            "| `game` | the game and its version, as the app names the card |\n"
+            "| `port` | the same, in the app's own short form |\n"
+            "| `game_number` | the games sent since the machine was switched on: 1, 2, 3... |\n"
+            "| `time` | the machine's clock, in Unix seconds (null when it was never set) |\n"
+            "| `players` | how many played |\n"
+            "| `scores` | each player's final score, player 1 first |\n"
+            "| `insider` | each player's Insider Connected account id, null for a player not logged in |\n\n"
+            "**What your server receives (API contract)**, on the Score feed card once it is ticked, shows the "
+            "whole request as the machine sends it to your address, the body laid out, every field with its type, "
+            "and what your server should answer.",
+        ]),
+        ("Remote access (SSH)", [
+            "**Remote access** lets a computer on your home network log in to the machine and copy files to and "
+            "from it, without taking the SD card out. People use it to:\n\n"
+            "- copy the machine's saved settings and high scores off it, as a backup\n"
+            "- read the game's logs when something goes wrong\n"
+            "- run add-on programs of their own on the machine",
+            "**What you need:** an SSH key on your computer. Paste its **public** half (the line that starts "
+            "`ssh-ed25519`, `ssh-rsa` or `ecdsa-`), one per line; a private key is never accepted. Then connect "
+            "as **root** on port **22** at the machine's address on your network.",
+            {"note": "Leave it off if you are not sure you need it. Anyone with a matching key has full control "
+                     "of the machine. There is no password login.", "kind": "warn"},
+            "It works on Stern Spike 2 and Spike 3 cards. A Spike 3 card has to be unlocked with your own key on "
+            "the Extract tab first.",
+        ]),
+        ("Building and changing remote access", [
+            "Remote access alone is a change: Write lists it in **Modified Files** and builds the card even when "
+            "nothing else changed.",
+            "- Build the complete card image, then flash that build. A direct SD/SSD write or an emulator asset "
+            "override cannot put it on the card. Flashing an existing image is allowed only when it already "
+            "matches what is ticked here.\n"
+            "- Changing the keys replaces the ones the next build accepts. The machine keeps its own identity "
+            "(host keys) on its data partition, so your computer does not warn about a new machine.\n"
+            "- Unticking it on a card that already has it turns it off at the next build. Your keys stay in the "
+            "box, ready to use again.\n"
+            "- The setting and keys stay in this project: they never go into a mod pack you export. **Reset…** "
+            "with **Remote access** clears them and goes back to the source card's setting.",
+        ]),
+    ],
     "Modes": [],
     # PAD-1382: the game's service menu with the app's rows in it
     "Service Menu": [
@@ -1614,38 +1683,6 @@ HELP_CONTENT = {
             "- The machine's settings are never changed.\n"
             "- On its own it keeps the card on Insider Connected, as the game's own Competition does. With "
             "modes or co-op play on the same card, the scores stay on the machine as those always do.",
-        ]),
-        ("Score feed", [
-            "**Score feed** has the machine send each game's final scores to a server of "
-            "your own on your network: for a high-score board on a TV, a league sheet, a home automation "
-            "hub. Tick it, type your server's address, then Write:\n\n"
-            "- After every game the machine posts one JSON message to the address: the game, how many "
-            "played, each player's final score, and for each player who was logged in to Insider "
-            "Connected their account's id (the same id every game, so your server can put a name to it). "
-            "A game reset with Start held down mid-game is not sent.\n"
-            "- The address is plain **http://**, your server's **IP address** (like "
-            "`http://192.168.1.50:8080/scores`), as the machine looks no names up and does not do https. "
-            "Your server answers with any 2xx status.\n"
-            "- When the server is off, the machine tries three times, 10 seconds apart, then lets that game "
-            "go. The game itself never waits for it.\n"
-            "- Nothing goes to Stern, and no score is changed. On its own it keeps the card on Insider "
-            "Connected; with modes on the same card, the scores stay off Insider Connected as they always "
-            "do, and still come to your server.\n\n"
-            "A message looks like "
-            "`{\"source\":\"PAD score feed\",\"game\":\"Godzilla Premium/LE 1.16\",\"players\":2,"
-            "\"scores\":[123456780,98765430],\"insider\":[\"3f2a9c1e-...\",null],...}`:\n\n"
-            "| Field | What it holds |\n"
-            "|---|---|\n"
-            "| `game` | the game and its version, as the app names the card |\n"
-            "| `port` | the same, in the app's own short form |\n"
-            "| `game_number` | the games sent since the machine was switched on: 1, 2, 3... |\n"
-            "| `time` | the machine's clock, in Unix seconds (null when it was never set) |\n"
-            "| `players` | how many played |\n"
-            "| `scores` | each player's final score, player 1 first |\n"
-            "| `insider` | each player's Insider Connected account id, null for a player not logged in |\n\n"
-            "**What your server receives (API contract)**, on the Score feed card once it is ticked, shows the "
-            "whole request as the machine sends it to your address, the body laid out, every field with its type, "
-            "and what your server should answer.",
         ]),
         ("Inactivity pauses timers", [
             "**Inactivity pauses timers** shows on Guardians of the Galaxy (Pro and "
@@ -4287,9 +4324,9 @@ def _play_options_intro():
     its co-op play) only while the mode maker is on: a copy where it is a
     preview again, switched off, shows nothing of it."""
     from ..core import preview
-    text = ("Options for how the game itself plays and what it reports, without making a mode: a handicap for "
-            "each player, Prolonged Competition, a score feed to a server of your own, and inactivity pausing the "
-            "timers on a game that ignores its own setting. Tick what you want, then Write the card.\n\n"
+    text = ("Options for how the game itself plays, without making a mode: a handicap for each player, Prolonged "
+            "Competition, and inactivity pausing the timers on a game that ignores its own setting. Tick what "
+            "you want, then Write the card. (The score feed is on the Network tab.)\n\n"
             "**Insider Connected keeps working.** Nothing here changes a score, so ")
     if not preview.enabled("modes"):
         return [text + "players keep Insider Connected as before: scores, high scores and achievements."]

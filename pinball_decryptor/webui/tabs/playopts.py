@@ -2,12 +2,13 @@
 
 David: the Modes tab's banner says a card with modes sends nothing to Insider Connected, so people reading it took
 every tick on that tab to cost them Insider Connected, and the ticks had grown too crammed beside the mode list.
-Handicap per player (PAD-1033), Prolonged Competition (PAD-1041), the score feed (PAD-1204) and inactivity pausing
-the timers (PAD-1022) change no score, so a card carrying only those stays on Insider Connected: they have a tab of
-their own that says so.
+Handicap per player (PAD-1033), Prolonged Competition (PAD-1041) and inactivity pausing the timers (PAD-1022)
+change no score, so a card carrying only those stays on Insider Connected: they have a tab of
+their own that says so. The score feed (PAD-1204) was here until it moved to the Network tab
+(webui/tabs/network.py) with remote access: both only matter on the owner's home network.
 
 The options' state and actions stay the Modes service's (``modes.set_handicap``, ``modes.set_prolonged_comp``,
-``modes.set_score_feed``, ``modes.set_idle_pause``, the handicap levels dialog): this tab asks it to publish them for
+``modes.set_idle_pause``, the handicap levels dialog): this tab asks it to publish them for
 the project and its page draws them from the ``modes`` namespace."""
 
 from .base import TabService
@@ -36,11 +37,11 @@ class PlayOptionsTab(TabService):
         return self.window.service("modes")
 
     def publish(self):
-        """The four options for the project now, from the Modes service (its state, its actions)."""
+        """The three options for the project now, from the Modes service (its state, its actions)."""
         modes = self._modes()
         project = modes.project() if modes is not None else ""
         if modes is not None:
-            for name in ("_publish_handicap", "_publish_comp", "_publish_feed", "_publish_idle"):
+            for name in ("_publish_handicap", "_publish_comp", "_publish_idle"):
                 try:
                     getattr(modes, name)(project)
                 except Exception:                           # noqa: BLE001 - that option just stays as it was

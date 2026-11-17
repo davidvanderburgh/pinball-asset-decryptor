@@ -83,6 +83,7 @@ pyinstaller \
     --icon "$SCRIPT_DIR/build/icon.icns" \
     --paths "$ROOT_DIR" \
     --add-data "$ROOT_DIR/pinball_decryptor/icon.png:pinball_decryptor" \
+    --add-data "$ROOT_DIR/pinball_decryptor/resources/ssh:pinball_decryptor/resources/ssh" \
     `# executor.bundled_e2fsprogs_dir() finds these in <bundle>/e2fsprogs.` \
     --add-binary "$E2FS_DIR/debugfs:e2fsprogs" \
     --add-binary "$E2FS_DIR/e2fsck:e2fsprogs" \

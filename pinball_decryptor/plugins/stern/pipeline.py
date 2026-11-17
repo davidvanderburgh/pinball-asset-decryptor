@@ -451,6 +451,17 @@ class SternWritePipeline(BasePipeline):
 
     def _run(self):
         self._set_phase(0)  # Detect
+        from ...core import ssh_card
+        from ...core.card_extras import ExtrasError
+        try:
+            ssh_config = ssh_card.validate_request(self.original_path, self.assets_dir)
+            recovering_ssh = ssh_card.pending_marker(self.output_path).exists()
+            if ssh_config is not None or recovering_ssh:
+                ssh_card.validate_output(self.original_path, self.output_path)
+            if recovering_ssh:
+                self.update = False
+        except ExtrasError as e:
+            raise PipelineError('Remote access', str(e)) from e
         key = detect_game(self.original_path)
         if key is None:
             raise PipelineError("Detect", _not_a_card(
@@ -476,7 +487,7 @@ class SternWritePipeline(BasePipeline):
                 log=self._log, progress=self._progress,
                 cancel=lambda: self._cancelled,
                 label=display_for_key(key, self.original_path),
-                update=self.update)
+                update=self.update, **({'allow_empty': True} if ssh_config is not None or recovering_ssh else {}))
         except CardSizeError as e:
             # the SD card size option's refusal is an answer, not a crash:
             # its sentence, without the traceback an unexpected error gets.
@@ -514,11 +525,42 @@ class SternWritePipeline(BasePipeline):
                         if _mw.preview_on() else
                         "the original card with the last build's preview content taken "
                         "out (%s)") % ", ".join(had_modes))
-        self._done(True, "Wrote %s to %s%s%s%s"
+        ssh_note = ''
+        if ssh_config is not None:
+            marker = str(ssh_card.pending_marker(self.output_path))
+            try:
+                with open(marker, 'w', encoding='utf-8') as mark:
+                    mark.write('Incomplete SSH preparation; do not flash this image.\n')
+                # The marker protects flash-only paths, while this worker
+                # is the sole owner allowed to prepare the output.
+                ssh_note = ssh_card.apply_to_build(
+                    self.original_path, self.output_path, ssh_config,
+                    log=self._log, cancel=lambda: self._cancelled)
+                self._check_cancel()
+                ssh_card.note_build(self.output_path, self.assets_dir)
+                os.remove(marker)
+            except Exception as e:
+                # The image may contain a partly written system partition.
+                # Never leave it at the successful build/flash destination.
+                if os.path.isfile(self.output_path):
+                    try:
+                        os.replace(self.output_path, self.output_path + '.ssh-incomplete')
+                    except OSError:
+                        pass  # pending marker continues to refuse flashes
+                raise PipelineError('Remote access', str(e)) from e
+        if ssh_note and summary == 'no changes':
+            summary = 'remote access (SSH)'
+        if recovering_ssh and ssh_config is None:
+            self._check_cancel()
+            if not after.get('complete'):
+                raise PipelineError('Remote access', 'The rebuilt image has no complete build record; the previous failure marker was retained.')
+            ssh_card.pending_marker(self.output_path).unlink(missing_ok=True)
+        self._done(True, "Wrote %s to %s%s%s%s%s"
                    % (summary, self.output_path,
                       _image_modes_left_out_note(self.assets_dir, modes),
                       "" if _only_mode_sounds(counts, modes) else _audio_mode_note(audio_mode),
-                      _valpatch_note(valpatch_mode)))
+                      _valpatch_note(valpatch_mode),
+                      ('\n' + ssh_note) if ssh_note else ''))
 
 
 class SternDirectSsdExtractPipeline(BasePipeline):
@@ -606,6 +648,9 @@ class SternDirectSsdWritePipeline(BasePipeline):
 
     def _run(self):
         self._set_phase(0)  # Scan
+        from ...core.card_extras import configuration
+        if configuration(self.assets_dir) is not None:
+            raise PipelineError('Remote access', 'Build a complete image to turn remote access (SSH) on or off, then flash it; Direct-SD cannot change the system partition.')
         if not is_device_path(self.device_path):
             raise PipelineError(
                 "Scan",

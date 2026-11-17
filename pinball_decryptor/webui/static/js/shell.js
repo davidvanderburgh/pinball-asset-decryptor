@@ -258,7 +258,7 @@ export function projectMenuItems(shell) {
     // PAD-576: here rather than a top-bar button, where it pulled the eye from the rest of the app
     { sep: true },
     { label: "Reset…", disabled: running || !have || shell.view !== "mfr", onClick: () => openDialog("reset"),
-      title: { head: "Reset this project", lines: [["Click", "put images, videos, sounds, text, fonts, scenes, colors or modes back as extracted, or everything at once"]] } },
+      title: { head: "Reset this project", lines: [["Click", "put images, videos, sounds, text, fonts, scenes, colors, modes or remote access back as extracted, or everything at once"]] } },
   ];
 }
 function projectMenu(anchor, shell) {

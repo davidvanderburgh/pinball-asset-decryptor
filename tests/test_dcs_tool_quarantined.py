@@ -55,18 +55,24 @@ def test_missing_message_names_the_antivirus(monkeypatch):
     assert "Antivirus" in msg and "reinstall PAD" in msg
 
 
-def test_launch_error_messages():
+@pytest.mark.parametrize('platform, missing', [
+    ('win32', 'is missing'), ('linux', 'is not installed'), ('darwin', 'is not installed')])
+def test_launch_error_messages(monkeypatch, platform, missing):
+    monkeypatch.setattr(sys, 'platform', platform)
     assert "antivirus blocked DCSEncoder.exe" in \
         dcs_decode.launch_error_message("DCSEncoder", _av_error())
-    assert "is missing" in dcs_decode.launch_error_message(
+    assert missing in dcs_decode.launch_error_message(
         "DCSExplorer", FileNotFoundError(2, "gone"))
     assert "failed to launch: boom" in dcs_decode.launch_error_message(
         "DCSExplorer", OSError("boom"))
 
 
-def test_tool_problem_when_missing(fresh_state, monkeypatch):
+@pytest.mark.parametrize('platform, missing', [
+    ('win32', 'is missing'), ('linux', 'is not installed'), ('darwin', 'is not installed')])
+def test_tool_problem_when_missing(fresh_state, monkeypatch, platform, missing):
+    monkeypatch.setattr(sys, 'platform', platform)
     monkeypatch.setattr(dcs_decode, "_dcs_explorer_path", "")
-    assert "missing" in dcs_decode.tool_problem()
+    assert missing in dcs_decode.tool_problem()
     r = dcs_decode.extract_dcs("x.zip", "out")
     assert not r.is_dcs and r.message.startswith("DCS audio skipped: ")
 
@@ -127,4 +133,4 @@ def test_cc_run_blocked_launch_says_antivirus(monkeypatch):
     monkeypatch.setattr(subprocess, "run", blocked)
     with pytest.raises(cc_dcs.DcsRepackError,
                        match="antivirus blocked DCSEncoder.exe"):
-        cc_dcs._run([r"C:\PAD\vendor\DCSEncoder.exe", "--x"], 5)
+        cc_dcs._run([os.path.join('PAD', 'vendor', 'DCSEncoder.exe'), "--x"], 5)

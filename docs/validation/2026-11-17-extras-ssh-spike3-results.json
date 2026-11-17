@@ -1,0 +1,43 @@
+{
+  "source": "fallout_le-0_81_0_spike3.Release.64G.sdcard-secure.raw",
+  "output": "ssh-card.raw",
+  "platform": "stern-spike3",
+  "source_sha256": "cd46ad2c0d9a5f7194c9644522a47ee5b3d784cd9adcfc4806ea8df75119ba93",
+  "output_sha256": "3a7faeaad56aba2f7e5e46179a06e8f4b78822f1f24049a2c605dc5bed44738a",
+  "rootfs_sha256": "7f913709fa0de956f59512b97fb27c8dae3dd823d2130ab2544710b6e8d02221",
+  "container_image": "docker.io/library/pad-spike2-emu:c2977305564",
+  "payload_sha256": {
+    "dropbear": "0a36c26216646d3370cba21a9ebd1eaab08580e4274c6c4790f98195748cacdc",
+    "dropbearkey": "13ba947cd4b3ffb988e8b97e0d9b15952b79685fffec738449b9ab43d3fc3bc4",
+    "sftp-server": "df3f7f979f7002aa5a47b30757715b0f932f08cde0b538dfffccead5409b97d8"
+  },
+  "checks": [
+    "SSH-only card built through the real PAD pipeline",
+    "All authorized key types authenticate as root through installed boot hook",
+    "Unknown key and password-only authentication refused; only publickey advertised",
+    "SFTP upload/download is byte-identical",
+    "Service restart preserves persistent host identity",
+    "Changed key list replaces earlier keys; host identity survives image reboot",
+    "Disabled card has no startup hook, daemon or login; host keys retained",
+    "All bytes outside rootfs data segment match source, including both LUKS headers"
+  ],
+  "scope": "Guest rootfs/QEMU service emulation, not a complete kernel boot",
+  "vendor_sftp_sha256": "120eeb2e0b2b9d755d51ed9676684bdda0a2b0c95ad1b5952f1c3dc99d673c4e",
+  "rootfs_partition": {
+    "start_lba": 131073,
+    "sectors": 1228800,
+    "data_segment_offset": 16777216,
+    "plaintext_bytes": 612368384
+  },
+  "container_image_id": "fd75308115b00cffa2404991b5fffe95c86306c00bfb42943a8356a78fb252b6",
+  "qemu": "qemu-aarch64 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)",
+  "game_emulator": {
+    "image": "ssh-card.raw",
+    "milestone": "run 100 Running - the game is in attract",
+    "nodes": "9 of 9 identified",
+    "video": "1920x1080 HEVC decoded and rendered",
+    "guided_setup": "Save & Exit through existing s3press.autoguide helper",
+    "screenshot": "2026-11-17-extras-ssh-spike3-attract.png",
+    "screenshot_sha256": "a2f60b52d291a6fda2a2374d53956fb13edb736e4a536efe1391eac726f96bdc"
+  }
+}

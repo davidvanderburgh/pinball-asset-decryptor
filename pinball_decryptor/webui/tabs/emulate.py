@@ -2477,6 +2477,13 @@ class EmulateTab(EmulateLogMixin, TabService):
     def _prepare_overrides_inner(self, card, assets, selector=False):
         from ...core.checksums import read_checksums
         from ...plugins.stern import engine as stern_engine
+        from ...core.ssh_card import guard_flash
+        from ...core.card_extras import ExtrasError
+        try:
+            guard_flash(assets, card)
+        except ExtrasError as e:
+            self._overrides_refuse(str(e))
+            return None
         if not os.path.isdir(assets):
             self._overrides_refuse(
                 "There is no assets folder to apply: %s" % (assets or "(none)"))

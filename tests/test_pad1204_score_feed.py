@@ -415,7 +415,7 @@ def test_the_modes_tab_tick_and_its_address(tmp_path, monkeypatch):
     monkeypatch.setattr(SF, "title_refusal", lambda prof: "no port")
     svc._publish_feed(str(tmp_path))
     assert state["feed_shown"] is False                              # a game whose end it cannot see: hidden
-    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "playopts.js").read_text(encoding="utf-8")
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "network.js").read_text(encoding="utf-8")
     assert 'call("modes.set_score_feed", v)' in js and 'call("modes.set_score_feed", true, v)' in js
     assert state["feed_contract"]["fields"][0]["name"] == "source"           # the API contract rides the state
 
@@ -439,16 +439,27 @@ def test_what_keeps_insider_connected_has_a_tab_of_its_own():
     win = (ROOT / "pinball_decryptor" / "webui" / "window.py").read_text(encoding="utf-8")
     assert '"Play Options": g("modes"),' in win
     page = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "playopts.js").read_text(encoding="utf-8")
-    for call in ("modes.set_handicap", "modes.set_prolonged_comp", "modes.set_score_feed", "modes.set_idle_pause"):
+    for call in ("modes.set_handicap", "modes.set_prolonged_comp", "modes.set_idle_pause"):
         assert call in page, call
-    assert "modes.set_coop" not in page and "FeedContract" in page
+    assert "modes.set_coop" not in page
+    # PR #38 review (David): the score feed moved to the Network tab, beside remote access - both only matter on
+    # the owner's home network, and neither changes how the game plays
+    assert "modes.set_score_feed" not in page and "FeedContract" not in page
+    net = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "network.js").read_text(encoding="utf-8")
+    assert "modes.set_score_feed" in net and "FeedContract" in net and "network.configure" in net
+    assert ("network", "network", "Network", "Network", "Make", "globe") in T.TABS
+    assert [t[0] for t in T.TABS].index("network") == [t[0] for t in T.TABS].index("playopts") + 1
+    assert '"Network": g("modes"),' in win
+    assert "Network tab's score feed" in MP.INSIDER_TAB_NOTE
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "tabs" / "modes.js").read_text(encoding="utf-8")
     assert "modes.set_coop" in js
     for call in ("modes.set_handicap", "modes.set_prolonged_comp", "modes.set_score_feed", "modes.set_idle_pause"):
         assert call not in js, call
     from pinball_decryptor.webui import help_content as HD
     assert [t for t, _b in HD.sections_for("Play Options")] == [
-        "What it's for", "Handicap per player", "Prolonged Competition", "Score feed", "Inactivity pauses timers"]
+        "What it's for", "Handicap per player", "Prolonged Competition", "Inactivity pauses timers"]
+    assert [t for t, _b in HD.sections_for("Network")] == [
+        "What it's for", "Score feed", "Remote access (SSH)", "Building and changing remote access"]
 
 
 def test_the_play_options_tab_asks_the_modes_service_to_publish(monkeypatch):
@@ -468,8 +479,34 @@ def test_the_play_options_tab_asks_the_modes_service_to_publish(monkeypatch):
     monkeypatch.setattr(tab, "set", lambda **kw: state.update(kw), raising=False)
     tab.window = type("W", (), {"service": lambda self, ns: Modes() if ns == "modes" else None})()
     tab.on_show()
-    assert sorted(said) == sorted([("_publish_handicap", "P"), ("_publish_comp", "P"), ("_publish_feed", "P"),
+    assert sorted(said) == sorted([("_publish_handicap", "P"), ("_publish_comp", "P"),
                                    ("_publish_idle", "P")]) and state["project"] == "P"
+
+
+def test_the_network_tab_asks_the_modes_service_for_the_score_feed(monkeypatch):
+    """PR #38 review: the score feed is drawn on the Network tab from the Modes service's state, as Play options
+    drew it before."""
+    from pinball_decryptor.webui.tabs import network as NT
+    said, state = [], {}
+
+    class Modes:
+        def project(self):
+            return "P"
+
+        def _publish_feed(self, project):
+            said.append(project)
+
+    class Var:
+        def get(self):
+            return ""
+
+    tab = NT.NetworkTab.__new__(NT.NetworkTab)
+    monkeypatch.setattr(tab, "set", lambda **kw: state.update(kw), raising=False)
+    tab.window = type("W", (), {"service": lambda self, ns: Modes() if ns == "modes" else None,
+                                "write_assets_var": Var(), "write_upd_var": Var()})()
+    monkeypatch.setattr(NT.NetworkTab, "mfr", None, raising=False)
+    tab.on_show()
+    assert said == ["P"] and "home network" in NT.INTRO
 
 
 def test_the_api_contract_is_what_the_machine_sends():

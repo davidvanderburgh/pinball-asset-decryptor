@@ -163,7 +163,10 @@ def test_the_views_read_the_program(tmp_path):
     # PAD-615: a challenge rule in words, and in the waiting box (the pick comes before the mode starts)
     assert got["challenge"] == ["When the player picks the challenge Ahoy Mr. Bond", [0]]
     assert got["words"][EVERY_BLOCK.index({"op": "callout", "role": "ten_seconds"})] == "Say “Ten seconds left”"
-    assert got["family"] == got["stmtClass"] and set(got["family"]) == set(BM.STATEMENTS)
+    from pinball_decryptor.plugins.jjp import block_modes as JBM
+    assert set(got["family"]) == set(BM.STATEMENTS)
+    assert got["family"] == {op: got["stmtClass"][op] for op in BM.STATEMENTS}
+    assert set(got["stmtClass"]) == set(BM.STATEMENTS) | set(JBM.OPS)
     # the Story: RAMP FRENZY waits for its Left ramps, runs its shots and clock, ends on the clock or the drain
     hats = [s["hat"] for s in prog["scripts"]]
     st = got["story"]

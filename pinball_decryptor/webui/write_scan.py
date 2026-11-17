@@ -357,6 +357,22 @@ def pending_rows(window, mfr, assets_path, *, grow_on, direct):
     rows.extend(colour_rows(mfr, assets_path))
     rows.extend(chosen_files_rows(mfr, assets_path))
     rows.extend(score_colour_rows(mfr, assets_path))
+    from ..core import card_extras, ssh_card
+    try:
+        ssh = card_extras.configuration(assets_path)
+        if ssh is not None:
+            source_var = _window_getter(window, 'write_upd_var')
+            source = ssh_card.inspect_image(source_var.get()) if source_var is not None else {}
+            changed = (not source.get('supported')
+                       or ssh['enabled'] != source.get('enabled')
+                       or (ssh['enabled'] and ssh['public_keys'].strip()
+                           != source.get('public_keys', '').strip()))
+            if changed:
+                rows.append(('SSH server — ' + ('enable' if ssh['enabled'] else 'disable'),
+                             'system', 'Pending (Network tab)', 'pending'))
+    except card_extras.ExtrasError:
+        rows.append(('SSH server — invalid configuration', 'system',
+                     'Pending (Network tab: fix the keys)', 'pending'))
     return rows
 
 
@@ -660,6 +676,18 @@ def fingerprint(window, assets_path, epoch, grow_on):
         parts.append(sorted(score_colours.picks(assets_path).items()))
     except Exception:                                   # noqa: BLE001
         parts.append(None)
+    from ..core import card_extras
+    try:
+        source_var = _window_getter(window, 'write_upd_var')
+        source = source_var.get() if source_var is not None else ''
+        try:
+            st = os.stat(source)
+            stamp = (st.st_size, st.st_mtime_ns)
+        except OSError:
+            stamp = None
+        parts.append((source, stamp, card_extras.load(assets_path)))
+    except card_extras.ExtrasError:
+        parts.append('invalid Extras configuration')
     return repr(parts)
 
 

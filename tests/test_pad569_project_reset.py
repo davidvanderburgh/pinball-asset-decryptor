@@ -199,3 +199,19 @@ def test_the_text_list_file_counts_by_its_edits_not_its_bytes(tmp_path):
     assert PR.counts(str(proj), changed=["text/strings.tsv"])["text"] == 0
     text_manifest.save(str(proj), [{"path": "x.radium", "original": "HELLO", "replacement": "HI"}])
     assert PR.counts(str(proj), changed=["text/strings.tsv"])["text"] == 1
+
+
+def test_reset_only_extras_preserves_asset_edits(tmp_path):
+    from pinball_decryptor.core import card_extras, project_reset as PR, staged_changes
+    from tests.test_card_extras import key
+    proj = _project(tmp_path)
+    card_extras.save(str(proj), True, key())
+    before = _state(proj)
+    assert PR.counts(str(proj))['extras'] == 1
+    PR.drop_records(str(proj), ['extras'])
+    PR.restore_snapshots(str(proj), ['extras'])
+    assert card_extras.load(str(proj)) is None
+    after = _state(proj)
+    assert after['files'] == before['files']
+    assert set(after['keys']) == set(before['keys']) - {'extras'}
+    assert staged_changes.load(str(proj))['image']

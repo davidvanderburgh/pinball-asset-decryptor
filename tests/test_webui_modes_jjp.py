@@ -428,6 +428,23 @@ def test_the_stick_defaults_to_a_removable_drive(tmp_path, preview_on, monkeypat
         assert _jjp(w)["stick"]["path"] == str(usb)
 
 
+@pytest.mark.parametrize('selection, probe', [('usb', True), ('usb/folder', True), ('usb-other', False)])
+def test_filesystem_probe_stays_inside_the_removable_root(tmp_path, preview_on, monkeypatch, selection, probe):
+    usb = tmp_path / 'usb'
+    usb.mkdir()
+    target = tmp_path / selection
+    target.mkdir(parents=True, exist_ok=True)
+    asked = []
+    monkeypatch.setattr(CM, 'removable_drives', lambda: [str(usb)])
+    monkeypatch.setattr(CM, 'stick_filesystem', lambda path: asked.append(path) or 'NTFS')
+    with web_app(tmp_path, mfr='jjp') as w:
+        _open_wonka(w)
+        asked.clear()
+        w.call('modes.jjp_set_stick', str(target))
+        assert _jjp(w)['stick']['fs'] == ('NTFS' if probe else '')
+        assert asked == ([str(target)] if probe else [])
+
+
 def test_the_runtime_is_kept_per_iso(tmp_path, monkeypatch):
     from pinball_decryptor.plugins.jjp import custom_modes as CM
     monkeypatch.setenv("PAD_JJP_MODES_DIR", str(tmp_path / "m"))

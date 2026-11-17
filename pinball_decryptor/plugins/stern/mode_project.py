@@ -2183,8 +2183,9 @@ INSIDER_NOTE = ("Insider Connected: players still log in on a card with modes, b
 INSIDER_TAB_NOTE = ("Insider Connected with modes or co-op play on the card: players still log in, but the machine "
                     "sends no game, score, high-score or achievement report to Insider Connected, and the game "
                     "awards no Insider achievements, because a mode's points are not the game's stock scoring. "
-                    "The Play options tab's options (handicaps, Prolonged Competition, the score feed, inactivity "
-                    "pausing the timers) change no score: a card with only those stays fully on Insider Connected.")
+                    "The Play options tab's options (handicaps, Prolonged Competition, inactivity pausing the timers) "
+                    "and the Network tab's score feed change no score: a card with only those stays fully on Insider "
+                    "Connected.")
 #: PAD-1204: the Play options tab's note, the options that change no score
 KEEPS_IC_HEAD = "Insider Connected keeps working"
 KEEPS_IC_NOTE = ("Nothing on this tab changes a score, so a card carrying only these stays on Insider Connected: "

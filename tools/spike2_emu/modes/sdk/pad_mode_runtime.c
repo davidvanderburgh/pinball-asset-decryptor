@@ -4983,7 +4983,8 @@ static void status_bar_arm(void)
  * hook of the game's (0x9d334) adds it to the playfield multiplier score_add multiplies by (data score_mult). */
 unsigned pm_bond_women_mult(void)
 {
-    unsigned f = fn("bond_women_mult"), m;
+    pm_addr f = fn("bond_women_mult");
+    unsigned m;
     if (!f) return 1;
     m = ((unsigned (*)(void))(unsigned long)f)() & 0xff;
     return m ? m : 1;
@@ -5358,7 +5359,7 @@ long pm_read_file(const char *path, char *buf, unsigned long cap)
  * the manager its table is empty, and a query would read through null. */
 static int stock_query(const char *site_name)
 {
-    unsigned f = fn(site_name), mgr = data("stock_mode_manager");
+    pm_addr f = fn(site_name), mgr = data("stock_mode_manager");
     if (!f || !mgr) return -1;
     if (!*(const unsigned *)(unsigned long)mgr) return -1;      /* no vtable yet: not built */
     if (!pm_player()) return 0;                                  /* no game, no game mode */
@@ -10153,7 +10154,8 @@ static int stock_active(const struct stock_rule *x)
  * object's vtable is not the port's word for it */
 static unsigned stock_object(struct stock_rule *x, int say_why)
 {
-    unsigned get = fn("stock_rule_get"), mgr = data("stock_mode_manager"), obj;
+    pm_addr get = fn("stock_rule_get"), mgr = data("stock_mode_manager");
+    unsigned obj;
     if (x->obj) return x->obj;
     if (!get || !mgr || !*(const unsigned *)(unsigned long)mgr) return 0;       /* not built yet */
     obj = (unsigned)(unsigned long)((void *(*)(void *, unsigned))(unsigned long)get)((void *)(unsigned long)mgr, x->id);
@@ -11708,7 +11710,8 @@ static unsigned rw(unsigned a) { return *(const unsigned *)(unsigned long)a; }
 /* the battle's object through the manager, checked against the port's `rule` line for it when there is one */
 static unsigned roster_battle_obj(unsigned id)
 {
-    unsigned get = fn("stock_rule_get"), mgr = data("stock_mode_manager"), obj;
+    pm_addr get = fn("stock_rule_get"), mgr = data("stock_mode_manager");
+    unsigned obj;
     struct stock_rule *x = stock_rule(id);
     if (!get || !mgr || !rw(mgr)) return 0;
     obj = (unsigned)(unsigned long)((void *(*)(void *, unsigned))(unsigned long)get)((void *)(unsigned long)mgr, id);
@@ -11794,7 +11797,8 @@ static void roster_host_begin(unsigned p, unsigned slot, unsigned id)
  * PAD-706 run2 had it 1 five seconds before its stop and travelled on). For the slots of `value battle_beaten_slots`. */
 static void roster_beaten(unsigned p, unsigned city)
 {
-    unsigned f = fn("battle_beaten"), rule = data("battle_beaten_rule"), guard = data("battle_beaten_guard"), rec;
+    pm_addr f = fn("battle_beaten"), rule = data("battle_beaten_rule"), guard = data("battle_beaten_guard");
+    unsigned rec;
     if (f && rule && (!guard || (rw(guard) & 1u)))
         ((void (*)(unsigned))(unsigned long)f)(rule);
     rec = roster_city_rec(city, pm_port_value("roster_city_beaten_vec_at", -1), 4);
@@ -11806,7 +11810,8 @@ static void roster_beaten(unsigned p, unsigned city)
 static int roster_host_end(unsigned p, int won)
 {
     struct roster_host *h;
-    unsigned stop = fn("battle_stop"), obj, v11, *mask, city, was;
+    pm_addr stop = fn("battle_stop");
+    unsigned obj, v11, *mask, city, was;
     long slot_stop = pm_port_value("stock_slot_stop", -1), reason = pm_port_value("battle_reason_at", -1);
     long wins = pm_port_value("battle_wins_at", -1);
     if (p < 1 || p > 4 || !roster_hosts[p].on) return 0;
@@ -12797,7 +12802,8 @@ static const char *place_name(unsigned id)
  * have no getter (they read the player up inline): `data mode_player_at` is the byte itself */
 static unsigned place_player(void)
 {
-    unsigned f = fn("mode_player"), at = data("mode_player_at"), p;
+    pm_addr f = fn("mode_player"), at = data("mode_player_at");
+    unsigned p;
     if (f) p = ((unsigned (*)(void))(unsigned long)f)() & 0xffu;
     else if (at && maps_has(at, 1, MAP_R)) p = *(const unsigned char *)(unsigned long)at;
     else return 0;
@@ -13093,7 +13099,8 @@ void pm_place_over(int won)
  * the field. */
 static long mode_query_slot(int kind_slot)
 {
-    unsigned f = fn("stock_any_running"), i;
+    pm_addr f = fn("stock_any_running");
+    unsigned i;
     const unsigned *w;
     if (!f || !maps_has(f, 4 * 32, MAP_R | MAP_GAME)) return -1;
     w = (const unsigned *)(unsigned long)f;
@@ -13271,7 +13278,7 @@ static unsigned done_game[5];                      /* the game (chg_game_now() +
 static unsigned done_seen[DONE_WORDS];             /* the ids whose completion the runtime can see */
 static struct { unsigned audit; unsigned char id; } done_audit[DONE_AUDITS];
 static int done_audits;
-static unsigned done_stop_fn[DONE_STOPS];
+static pm_addr done_stop_fn[DONE_STOPS];
 static int done_stops, done_stops_tried, done_tries;
 static unsigned done_flag_was[DONE_WORDS], done_flag_player, done_flag_game;
 static int done_has(const unsigned *m, unsigned id) { return id < DONE_IDS && (m[id >> 5] >> (id & 31) & 1u); }
@@ -15089,7 +15096,8 @@ static int ait_video;
  * advancing its player and showing it (Aerosmith's OilProjectorLoop page 0x286a4: player_advance, scene_show(player, 3),
  * the frame yield). An item does the same from its page while its clip plays on the bank's surface. */
 static int ait_show;
-static unsigned ait_show_fn;                /* `site attract_show` (portattract.show_lines), else the port's scene_show */
+static pm_addr ait_show_fn;                 /* `site attract_show` (portattract.show_lines), else the port's scene_show:
+                                             * an address (PAD-1371: 32 bits cut a Spike 3 one to a jump into nothing) */
 
 static void ait_line(char *s)
 {
@@ -15297,13 +15305,13 @@ static void attract_arm(void)
         return;
     }
 #if PM_A64
-    /* PAD-1328: the table, the pages and the process sleep are read 64-bit (below), but no way of putting an item on
-     * a Spike 3 game's glass is proven: on Star Wars ELG 1.10 the scene show from an item's page (attract_show, the
-     * call the game's own clip pages make) never returns - the game's dispatch watchdog ends it (exit 5) - and the
-     * clip on the bank's surface alone is not drawn in attract. docs/plans/spike3_modes.md "Attract items". */
-    if (!ait_video) {
-        say("attract items: off - a Spike 3 game's attract mode cannot show an item yet (its scene show stalls the "
-            "game from an item's page)");
+    /* PAD-1328 / PAD-1371: a Spike 3 game's attract mode never draws the video bank's scene by itself, so an item is
+     * put on the glass only by its page showing that scene each frame (attract_show, as the game's own clip pages do)
+     * or through the attract video element. The show "stalled" Star Wars ELG 1.10 in PAD-1328 only because the
+     * scene show's address was kept in 32 bits (ait_show_fn): the page jumped into nothing and the game's dispatch
+     * watchdog ended it (exit 5). docs/plans/spike3_modes.md "Attract items". */
+    if (!ait_video && !ait_show) {
+        say("attract items: off - this Spike 3 game's port has no way to show its video bank's scene from a page");
         ait_n = 0;
         return;
     }
@@ -17615,7 +17623,8 @@ static void coop_awards_arm(void)
 {
     static const char *const kinds[] = { "", "points scored", "the longest ball", "audit", "champion category" };
     int i, kept = 0, audits = 0;
-    unsigned count = data("challenge_scores_count"), cats;
+    pm_addr count = data("challenge_scores_count");
+    unsigned cats;
     cats = data("challenge_scores_table") && count && maps_has(count, 4, MAP_R) ? *(const unsigned *)(unsigned long)count : 0;
     for (i = 0; i < coop_aw_n; i++) audits |= coop_aw[i].kind == COOP_AW_AUDIT;
     if (audits && fn("audit_add") && hook(fn("audit_add"), coop_audit_seen)) coop_audits = 1;

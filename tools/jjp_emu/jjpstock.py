@@ -140,7 +140,7 @@ class LiveGame:
         out = []
         for line in open("/proc/%d/maps" % self.pid):
             f = line.split()
-            if len(f) < 6 or f[1][0] != "r" or f[1][2] == "x":
+            if len(f) < 6 or f[1][0] != "r":     # the Envelope maps the game's data rwx
                 continue
             path = f[5]
             if path != exe and root + path != exe and path != exe[len(root):]:

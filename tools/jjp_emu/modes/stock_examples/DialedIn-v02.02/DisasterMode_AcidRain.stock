@@ -1,0 +1,8 @@
+# DialedIn-v02.02: the game's own DisasterMode_AcidRain, changed.  Every key: tools/jjp_emu/MODES.md
+# Its timer: Mode::set_time; its points: Mode::score_and_total; shots of its own: yes.
+mode = DisasterMode_AcidRain
+points_x = 2
+# seconds = 45
+# shots_off = <shot>
+# shots_add = <switch>:<shot>
+# Shot names are logged on the machine (jjpmodes.log, "shots:").

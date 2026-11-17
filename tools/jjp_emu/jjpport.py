@@ -351,6 +351,31 @@ def write_example(p, folder, title_label):
             f.write("lamps = %s\nlamp_color = ff2000\nlamp_blink = 4\n" % d["lamps"])
 
 
+def write_stock_example(p, folder, title_label):
+    """A starter .stock file: one of the title's own mode classes with shots of its own
+    (a mode global's name needs a live game, jjpstock.py; a class name works without)."""
+    cl = (p.get("stock") or {}).get("classes") or {}
+    pick = sorted((c for c, v in cl.items() if v["shots"]),
+                  key=lambda c: (not c.endswith("Mode"), v_own(cl[c]), c))
+    if not pick:
+        return None
+    c = pick[0]
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, "%s.stock" % c)
+    with open(path, "w", newline="\n") as f:
+        f.write("# %s: the game's own %s, changed.  Every key: tools/jjp_emu/MODES.md\n" % (title_label, c))
+        f.write("# Its timer: %s; its points: %s; shots of its own: yes.\n" % (cl[c]["timer"], cl[c]["points"]))
+        f.write("mode = %s\npoints_x = 2\n" % c)
+        f.write("# seconds = 45\n# shots_off = <shot>\n# shots_add = <switch>:<shot>\n")
+        f.write("# Shot names are logged on the machine (jjpmodes.log, \"shots:\").\n")
+    return path
+
+
+def v_own(v):
+    """Sort key: classes whose points are their own first (0)."""
+    return 0 if v["points"] != "Mode::score_and_total" else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("elf")
@@ -358,6 +383,7 @@ def main(argv=None):
     ap.add_argument("--out")
     ap.add_argument("--example", help="write a starter mode folder here")
     ap.add_argument("--label", help="title label for the example's comments")
+    ap.add_argument("--stock-example", help="write a starter .stock folder here")
     ap.add_argument("--live", help="a running game's mode globals and shot table (jjpstock.py live) to fold in")
     a = ap.parse_args(argv)
     live = json.load(open(a.live)) if a.live else None
@@ -368,6 +394,8 @@ def main(argv=None):
             f.write("\n")
     if a.example:
         write_example(p, a.example, a.label or a.gamename or p["elf"])
+    if a.stock_example:
+        print("  starter .stock: %s" % write_stock_example(p, a.stock_example, a.label or a.gamename or p["elf"]))
     print("%s: %s; %d exported, %d switches, %d lamps, %d sounds, %d fonts, %d Mode classes%s" % (
         p["elf"], "CAN run modes" if p["can_run_modes"] else "can NOT run modes", p["exported_symbols"],
         len(p["switches"]), len(p["lamps"]), len(p["sounds"]), len(p["fonts"]), len(p["mode_classes"]),

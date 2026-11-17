@@ -145,3 +145,18 @@ def test_normalise_matches_the_runtime():
     assert js.normalise("LEFT SLING") == "left_sling"
     assert js.normalise("  G TARGET!! ") == "g_target"
     assert js.normalise("") == ""
+
+
+def test_starter_stock_file_picks_a_mode_class_with_shots_and_checks_clean(tmp_path):
+    jp = _load("jjpport")
+    mm = _load("mkjjpmodes")
+    p = {"stock": {"classes": {
+        "QuickRule": {"timer": "Mode::set_time", "points": "Mode::score_and_total", "shots": True},
+        "AFDMode": {"timer": "Mode::set_time", "points": "own score_and_total", "shots": True},
+        "BMode": {"timer": "Mode::set_time", "points": "Mode::score_and_total", "shots": True},
+        "AAMode": {"timer": "own set_time", "points": "own score_and_total", "shots": False}}}}
+    path = jp.write_stock_example(p, str(tmp_path), "Test 1.0")
+    assert os.path.basename(path) == "AFDMode.stock"
+    assert mm.check_modes(str(tmp_path), p)[1] == []
+    assert jp.write_stock_example({"stock": {"classes": {"X": dict(p["stock"]["classes"]["AAMode"])}}},
+                                  str(tmp_path / "none"), "T") is None

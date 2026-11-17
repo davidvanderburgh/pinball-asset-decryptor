@@ -1087,7 +1087,7 @@ static void end_mode(pm_t *m, const char *why)
  * pointing at its exported shot_made_<name> handler), found in the game's own
  * data by those handlers' addresses; the runtime logs it. */
 /* -- the shot table ----------------------------------------------------------- */
-static uintptr_t sfn[MAX_SHOT_FNS]; static char sfn_name[MAX_SHOT_FNS][48]; static int nsfn;
+static uintptr_t sfn[MAX_SHOT_FNS], sfn_lo, sfn_hi; static char sfn_name[MAX_SHOT_FNS][48]; static int nsfn;
 static void cb_shot_fns(const char *name, uintptr_t a, size_t sz)
 {
     (void)sz;
@@ -1125,6 +1125,8 @@ static void read_shot_table(void)
 {
     walk_dynsym_type(STT_FUNC, cb_shot_fns);
     if (!nsfn) { lg("shots: no shot_made_* handlers exported; shots are named by number"); return; }
+    sfn_lo = sfn_hi = sfn[0];
+    for (int i = 1; i < nsfn; i++) { if (sfn[i] < sfn_lo) sfn_lo = sfn[i]; if (sfn[i] > sfn_hi) sfn_hi = sfn[i]; }
     char exe[512]; ssize_t L = readlink("/proc/self/exe", exe, sizeof exe - 1);
     if (L <= 0) return;
     exe[L] = 0;
@@ -1134,14 +1136,16 @@ static void read_shot_table(void)
     char line[700];
     while (fgets(line, sizeof line, f) && nh < MAX_HITS) {
         char *dash = strchr(line, '-'), *sp = dash ? strchr(dash, ' ') : NULL;
-        if (!sp || sp[1] != 'r' || sp[3] == 'x') continue;
+        if (!sp || sp[1] != 'r') continue;   /* the Envelope maps the game's data rwx: code segments too */
         char *path = strchr(line, '/');
         if (!path) continue;
         path[strcspn(path, "\n")] = 0;
         if (strcmp(path, exe)) continue;
         uintptr_t lo = hexnum(line), hi = hexnum(dash + 1);
         for (uintptr_t a = (lo + 7) & ~(uintptr_t)7; a + 8 <= hi && nh < MAX_HITS; a += 8) {
-            int i = sfn_index(*(uintptr_t *)a);
+            uintptr_t w = *(uintptr_t *)a;
+            if (w < sfn_lo || w > sfn_hi) continue;
+            int i = sfn_index(w);
             if (i >= 0) { hit[nh] = a; hlo[nh] = lo; hhi[nh] = hi; hfn[nh++] = (short)i; }
         }
     }
@@ -1278,7 +1282,9 @@ static unsigned long long st_score(void *self, unsigned long long amt)
         else if (s->points_x != 1000) a = amt / 1000 * (unsigned long long)s->points_x
                                           + amt % 1000 * (unsigned long long)s->points_x / 1000;
         s->asked += (long long)amt; s->scored += (long long)a; s->nscores++;
-        lg("STOCK %s: award %llu (the game's own %llu)", s->mode, a, amt);
+        int shot = get_shot && am_proc && am_proc() ? get_shot() : -1;
+        lg("STOCK %s: award %llu (the game's own %llu)%s%s", s->mode, a, amt, shot >= 0 ? ", shot " : "",
+           shot >= 0 ? shot_name(shot) : "");
     }
     return c && c->orig_score ? ((unsigned long long (*)(void *, unsigned long long))c->orig_score)(self, a) : 0;
 }

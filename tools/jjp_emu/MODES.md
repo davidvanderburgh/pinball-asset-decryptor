@@ -13,6 +13,9 @@ No game code is patched. How and why it works: `docs/plans/jjp_custom_modes.md`.
 | Starter modes per title | `modes/examples/<title>/` |
 | Install ISO with modes, for a real machine | `mkjjpmodes.py build` |
 | Check a mode folder | `mkjjpmodes.py check --modes DIR --port PORT.json` |
+| Change the game's OWN modes | `<name>.stock` files in the same folder (PAD-1351, below) |
+| A running game's mode globals and shot names | `jjpstock.py live` -> `modes/ports/<title>.live.json` |
+| Starter `.stock` file per title | `modes/stock_examples/<title>/` |
 
 ## A mode folder
 
@@ -74,6 +77,109 @@ lamp_blink = 4
 | `game` | the title's GAMENAME (e.g. `GunsNRoses`). The modes load only into that game: a mode ISO made from a multi-boot ISO hooks root A, which also starts image 1's game |
 | `ingame_state` | the `jjpe_state_get()` value meaning "a ball is in play" (5 on Guns N' Roses). Without it the runtime learns it on the first ball: the state that holds for a second while the game's own ball-in-play flag is set (logged) |
 | `background_modes` | game modes that are always on and must not make a custom mode yield. Without it, the game modes already running two seconds into a ball count as always-on |
+
+## The game's own modes, changed: `.stock` files (PAD-1351)
+
+A `<name>.stock` file in the mode folder changes one of the GAME's modes: its timer,
+its points and which shots count for it. No game code is patched; the runtime points
+a few slots of that mode's class vtable at its own functions, which call the game's.
+A folder may hold `.stock` files only, `.mode` files only, or both (up to 32 `.stock`).
+
+```
+# candy_lane.stock - Wonka 03.03 (modes/stock_examples/Wonka-v03.03)
+mode = cl_mode
+seconds = 60
+points_x = 3
+shots_off = target_ul_flipper
+shots_add = switch_ramp_right_made:target_tv
+```
+
+| Key | Meaning |
+|---|---|
+| `mode` | (required) the game's mode: its global (`cl_mode` is Wonka's Candy Lane; a title's port report lists them under `stock.objects` once read off a live game) or its class (`CandyLaneMode`; every title's report lists them under `stock.classes`) |
+| `seconds` | the mode's timer when it starts, in place of the game's own (Candy Lane's is 45, 30 or 15 by the Wonka Bar timer adjustment) |
+| `points` | every award the mode makes becomes this many points |
+| `points_x` | every award the mode makes times this (`2`, `1.5`, `0.5`); `points` wins if both are set |
+| `shots_off` | shots that no longer count for this mode (the game's other modes still get them) |
+| `shots_add` | `switch:shot` pairs: while the mode runs, hitting the switch also gives the mode that shot |
+
+Shots are the game's own shot names: on Wonka 03.03 the 41 in
+`modes/ports/Wonka-v03.03.live.json` (`ramp_left`, `loop_center`, `target_tv`,
+`g_target`, ...), or a shot's number. On a title read only statically, the runtime
+logs its shot table on the machine (`jjpmodes.log`, the `shots:` line), and
+`mkjjpmodes.py check` leaves shot names unchecked there. Everything the file does is
+logged with `STOCK`: each award with the game's own figure beside it, each shot let by
+or added, and when the mode starts and ends.
+
+How each works, read off Wonka 03.03's decrypted engine:
+
+* **Timer.** `Mode::start` sets a default and each class then sets its own (the Wonka Bar
+  award modes from an adjustment, 60 - 15 x the setting, into a timer the class keeps
+  itself). The mode's run proc is started through the class's `run_proc` slot, so the
+  runtime runs first there and calls the class's own `set_time`. With the run proc
+  alive, `set_time`'s restart does nothing, as when the game sets a time itself. The
+  timer then runs (or holds) by the game's own rules.
+* **Points.** Every award goes through `this->score_and_total`. The game's call sites
+  check whether the slot still holds the class's own function and call the slot when it
+  does not, so the runtime sees every award.
+* **Shots.** A made shot reaches each mode by a direct call to its class's
+  `shot_dispatch`, which reads the shot from its proc argument and first asks
+  `this->is_running` (or `_or_grace`, `_or_grace_grace`) through the vtable. The
+  runtime answers that question "not running" when it comes from inside that class's
+  own `shot_dispatch` (the return address) about a shot in `shots_off`. For `shots_add`
+  it sets the shot id in the switch's proc (`shot_set_proc_shot_id`; Wonka has no
+  setter, so the proc argument `shot_get_proc_shot_id` reads) and calls the class's
+  `shot_dispatch`. A class with no `shot_dispatch` of its own takes no shot keys
+  (the port report's `shots: false`; the runtime logs it).
+* **Shot names.** The game's shot table (one entry per shot id, each pointing at its
+  exported `shot_made_<name>` handler) is ciphertext in the file. The runtime finds it
+  in memory by those handlers' addresses; `jjpstock.py` does the same on a live game.
+  A shot is named after its handler; where several shots share one (Wonka's slings,
+  jets and 3-bank) each takes the game's display name instead (`left_sling`,
+  `top_bumper`, `g_target`).
+
+**Emulator, Wonka 03.03** (hidden, muted, `C:\tmp\PAD-1351\proof.sh`): Candy Lane
+started by the test hook (`JJP_MODS_TEST_GAMEMODE=cl_mode`), then the same shots on two
+boots. Without changes: the game's timer read 30 s (`WonkaBarAwardModes::wba_timer`),
+awards 5,000 at the start and 2,550 a target, the upper-left flipper target scored,
+the right ramp did nothing for it. With `candy_lane.stock`: the timer read 60 s, awards
+15,000 and 7,650 (x3), `target_ul_flipper goes by it`, and `switch_ramp_right_made gives
+it shot target_tv` scored 7,650. The same file naming the class (`mode = CandyLaneMode`)
+does the same. The countdown is the game's own
+`WonkaBarAwardModes::timer_run_proc`, which takes a second off that same `wba_timer`
+each second unless `game_timers_paused()` (the ball saver's pause, with every ball in
+play held in a lock or the shooter lane). On the hidden rig no ball rolls, so the
+game held the timer in both runs alike; the file changed the value it counts down
+from.
+
+### Every title, statically
+
+`jjpport.py` reports, per title, what a `.stock` file can do (`stock` in the port
+report): the vtable slots, how the shot id is read and set, and per Mode class whether
+its timer and points are its own and whether it takes shot keys. Checked 2026-11-16 on
+each title's game program; every one has the same slots as Wonka (run_proc 0x90,
+set_time 0x28, score 0x88, is_running 0x48 / 0x50 / 0x58) and `shot_get_proc_shot_id`:
+
+| Image | Mode classes | Take shot keys | Own timer | Own points | Shot id set by | Shot handlers | Starter |
+|---|---|---|---|---|---|---|---|
+| Wonka 03.03 | 25 | 17 | 5 | 10 | the proc argument | 38 | `candy_lane.stock`, emulator-proven |
+| Guns N' Roses 03.03 | 33 | 30 | 0 | 30 | `shot_set_proc_shot_id` | 51 | `AFDMode.stock` |
+| Elton John 02.03 | 31 | 29 | 0 | 28 | `shot_set_proc_shot_id` | 36 | `PianoRampMode.stock` |
+| Godfather 02.03 | 16 | 13 | 0 | 15 | `shot_set_proc_shot_id` | 57 | `BoxingMode.stock` |
+| Pirates of the Caribbean 01.01 | 2 | 0 | 0 | 0 | `shot_set_proc_shot_id` | 46 | none: its two Mode classes take no shots; its play is multiballs |
+| Dialed In 02.02 | 17 | 14 | 0 | 0 | `shot_set_proc_shot_id` | 27 | `DisasterMode_AcidRain.stock` |
+| The Hobbit 04.02 | 33 | 32 | 0 | 32 | `shot_set_proc_shot_id` | 31 | `BookMode.stock` |
+| Toy Story 02.04 | 21 | 19 | 0 | 16 | `shot_set_proc_shot_id` | 41 | `BottleBlastMode.stock` |
+
+"Own timer 0" means the class times itself through `Mode::set_time` (the engine's own
+timer, which the runtime sets the same way). Each starter folder passes `mkjjpmodes.py
+check` against its title's report, and the runtime loads with every import bound
+(`LD_BIND_NOW`) on each cached image's own glibc 2.34 (Wonka, Guns N' Roses, Dialed In,
+Hobbit, Toy Story). What is generic: the slots, the shot accessors, the shot table rule,
+and the class-name lookup. What needs a live game per title: the mode globals' names
+and the shot names (`jjpstock.py live`), both of which the runtime learns by itself on
+the machine. The CHAKA GnR LE image is a custom Guns N' Roses build and takes GnR's
+files.
 
 ## How a mode behaves
 

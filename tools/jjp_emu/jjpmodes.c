@@ -258,6 +258,27 @@ static int parse_lamps(char *v, void **out)
     return n;
 }
 
+/* `key = value` lines (# and ; comment lines, a trailing ' #' comment) -> fn. */
+static int read_kv(const char *path, void (*fn)(void *ctx, const char *k, char *v), void *ctx)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char line[1200];
+    while (fgets(line, sizeof line, f)) {
+        char *s = trim(line);
+        if (!*s || *s == '#' || *s == ';') continue;
+        char *eq = strchr(s, '=');
+        if (!eq) continue;
+        *eq = 0;
+        char *k = trim(s), *v = trim(eq + 1);
+        char *hash = strstr(v, " #");               /* trailing comment */
+        if (hash) { *hash = 0; v = trim(v); }
+        fn(ctx, k, v);
+    }
+    fclose(f);
+    return 1;
+}
+
 static void apply_kv(pm_t *m, const char *k, char *v)
 {
     char buf[1024]; snprintf(buf, sizeof buf, "%s", v);
@@ -305,25 +326,8 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     } else lg("%s: unknown key %s (ignored)", m->file, k);
 }
 
-static int load_file(pm_t *m, const char *path)
-{
-    FILE *f = fopen(path, "r");
-    if (!f) return 0;
-    char line[1200];
-    while (fgets(line, sizeof line, f)) {
-        char *s = trim(line);
-        if (!*s || *s == '#' || *s == ';') continue;
-        char *eq = strchr(s, '=');
-        if (!eq) continue;
-        *eq = 0;
-        char *k = trim(s), *v = trim(eq + 1);
-        char *hash = strstr(v, " #");               /* trailing comment */
-        if (hash) { *hash = 0; v = trim(v); }
-        apply_kv(m, k, v);
-    }
-    fclose(f);
-    return 1;
-}
+static void mode_kv(void *m, const char *k, char *v) { apply_kv((pm_t *)m, k, v); }
+static int load_file(pm_t *m, const char *path) { return read_kv(path, mode_kv, m); }
 
 static void defaults(pm_t *m)
 {
@@ -334,6 +338,85 @@ static void defaults(pm_t *m)
     m->panel_rgba = 0x000000b0;
     m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;
 }
+
+/* ---- .stock files: the game's own modes, changed (PAD-1351; see below) ----- */
+#define MAX_STOCK 32
+#define MAX_SHOT_IDS 256
+#define MAX_SHOT_FNS 192
+#define NEED_TIMER 1
+#define NEED_POINTS 2
+#define NEED_SHOTS 4
+
+typedef struct {
+    uintptr_t vt;
+    uintptr_t orig_run, orig_score, orig_isr[3];
+    uintptr_t sd_lo, sd_hi;            /* the class's own shot_dispatch */
+    int wired;                          /* NEED_* slots wrapped */
+} sc_t;
+
+typedef struct {
+    char file[64], mode[96];
+    int seconds;                        /* 0 = the game's own */
+    long long points;                   /* 0 = the game's own */
+    long points_x;                      /* thousandths; 1000 = the game's own */
+    char off_names[512];
+    int noff, off[MAX_LIST];
+    int nadd, add_sw[MAX_LIST], add_shot[MAX_LIST];
+    char add_name[MAX_LIST][48];
+    /* runtime */
+    void *obj; sc_t *c; int ok;
+    int was_running, nscores, blocked, added;
+    long started_ms; long long asked, scored;
+} st_t;
+
+static st_t sts[MAX_STOCK]; static int nst;
+static sc_t scs[MAX_STOCK]; static int nsc;
+static volatile int stock_ready;
+static int VT_RUN = -1, VT_ISR[3] = { -1, -1, -1 };
+static int (*get_shot)(void);
+static void (*set_shot_fn)(int);
+static unsigned (*proc_handle)(void);
+static void (*proc_setarg)(unsigned, int, long);
+static int shot_arg = -1;
+typedef struct { int id; char name[48]; } shot_t;
+static shot_t shots[MAX_SHOT_IDS]; static int nshots;
+
+/* "2" -> 2000, "1.5" -> 1500, "0.25" -> 250 (thousandths; own parser, see num) */
+static long milli(const char *v)
+{
+    long whole = 0, frac = 0, scale = 1000;
+    while (*v == ' ') v++;
+    for (; *v >= '0' && *v <= '9'; v++) whole = whole * 10 + (*v - '0');
+    if (*v == '.')
+        for (v++; *v >= '0' && *v <= '9' && scale > 1; v++) { scale /= 10; frac += (*v - '0') * scale; }
+    return whole * 1000 + frac;
+}
+
+static void apply_stock_kv(st_t *s, const char *k, char *v)
+{
+    if (!strcmp(k, "mode")) snprintf(s->mode, sizeof s->mode, "%s", v);
+    else if (!strcmp(k, "seconds")) s->seconds = (int)num(v);
+    else if (!strcmp(k, "points")) s->points = num(v);
+    else if (!strcmp(k, "points_x")) s->points_x = milli(v);
+    else if (!strcmp(k, "shots_off")) snprintf(s->off_names, sizeof s->off_names, "%s", v);
+    else if (!strcmp(k, "shots_add")) {
+        /* switch:shot pairs.  The switch is wrapped at install with the rest,
+         * so it is registered now; the shot is named once the table is read. */
+        char buf[1024]; snprintf(buf, sizeof buf, "%s", v);
+        for (char *t = strtok(buf, " ,\t"); t && s->nadd < MAX_LIST; t = strtok(NULL, " ,\t")) {
+            char *colon = strchr(t, ':');
+            if (!colon || colon == t || !colon[1]) { lg("%s: shots_add wants switch:shot, not %s", s->file, t); continue; }
+            *colon = 0;
+            int si = sw_index(t);
+            if (si < 0) continue;
+            s->add_sw[s->nadd] = si;
+            snprintf(s->add_name[s->nadd], sizeof s->add_name[0], "%s", colon + 1);
+            s->add_shot[s->nadd++] = -1;
+        }
+    } else lg("%s: unknown key %s (ignored)", s->file, k);
+}
+
+static void stock_kv(void *s, const char *k, char *v) { apply_stock_kv((st_t *)s, k, v); }
 
 static int cmp_names(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 
@@ -355,12 +438,28 @@ static void load_modes(void)
     DIR *d = opendir(moddir);
     if (!d) { lg("no mode folder %s", moddir); return; }
     char *names[MAX_MODES * 2]; int nn = 0;
+    char *snames[MAX_STOCK]; int nsn = 0;
     struct dirent *de;
     while ((de = readdir(d)) && nn < MAX_MODES * 2) {
         size_t L = strlen(de->d_name);
         if (L > 5 && !strcmp(de->d_name + L - 5, ".mode")) names[nn++] = strdup(de->d_name);
+        else if (L > 6 && !strcmp(de->d_name + L - 6, ".stock") && nsn < MAX_STOCK) snames[nsn++] = strdup(de->d_name);
     }
     closedir(d);
+    /* the game's own modes, changed (PAD-1351): one .stock file each */
+    qsort(snames, nsn, sizeof *snames, cmp_names);
+    for (int i = 0; i < nsn; i++) {
+        st_t *s = &sts[nst];
+        memset(s, 0, sizeof *s); s->points_x = 1000;
+        snprintf(s->file, sizeof s->file, "%s", snames[i]);
+        snprintf(path, sizeof path, "%s/%s", moddir, snames[i]);
+        read_kv(path, stock_kv, s);
+        free(snames[i]);
+        if (!*s->mode) { lg("%s: no mode = <the game's mode>; file skipped", s->file); continue; }
+        lg("stock %d %s: %s, seconds %d, points %lld, points_x %ld/1000, shots_off [%s], %d added",
+           nst, s->file, s->mode, s->seconds, s->points, s->points_x, s->off_names, s->nadd);
+        nst++;
+    }
     qsort(names, nn, sizeof *names, cmp_names);
     for (int i = 0; i < nn; i++) {
         if (npm >= MAX_MODES) { lg("more than %d modes; %s and after ignored", MAX_MODES, names[i]); break; }
@@ -402,7 +501,12 @@ static int ngm;
 
 /* Walk the main program's dynamic symbol table in memory (DT_HASH nchain is
  * the count, as jjpelf.py reads it).  cb gets every defined object symbol. */
+static void walk_dynsym_type(int type, void (*cb)(const char *name, uintptr_t addr, size_t size));
 static void walk_dynsym(void (*cb)(const char *name, uintptr_t addr, size_t size))
+{
+    walk_dynsym_type(STT_OBJECT, cb);
+}
+static void walk_dynsym_type(int type, void (*cb)(const char *name, uintptr_t addr, size_t size))
 {
     struct link_map *lm = dlopen(NULL, RTLD_NOW | RTLD_NOLOAD);
     if (!lm) return;
@@ -416,7 +520,7 @@ static void walk_dynsym(void (*cb)(const char *name, uintptr_t addr, size_t size
     uint32_t n = hash[1];
     for (uint32_t i = 1; i < n; i++) {
         ElfW(Sym) *s = &symtab[i];
-        if (ELF64_ST_TYPE(s->st_info) != STT_OBJECT || !s->st_value || s->st_shndx == SHN_UNDEF) continue;
+        if (ELF64_ST_TYPE(s->st_info) != type || !s->st_value || s->st_shndx == SHN_UNDEF) continue;
         cb(strtab + s->st_name, (uintptr_t)s->st_value + lm->l_addr, s->st_size);
     }
 }
@@ -693,15 +797,20 @@ static void cb_hold_vts(const char *name, uintptr_t a, size_t sz)
     if (mb) hvt_mbs++; else hvt_modes++;
 }
 
-static void install_hold(void)
+static void types_init(void)
 {
-    for (int i = 0; i < npm; i++) if (pms[i].game_modes == POLICY_HOLD) hold_wanted = 1;
-    if (!hold_wanted) { lg("hold: no mode holds the game off (game_modes pause/end/ignore); the game's starts untouched"); return; }
     ti_mode = (uintptr_t)sym("_ZTI4Mode");
     ti_mbr = (uintptr_t)sym("_ZTI13MultiballRule");
     uintptr_t si = (uintptr_t)sym("_ZTVN10__cxxabiv120__si_class_type_infoE");
     uintptr_t vmi = (uintptr_t)sym("_ZTVN10__cxxabiv121__vmi_class_type_infoE");
     si_ti_vt = si ? si + 16 : 0; vmi_ti_vt = vmi ? vmi + 16 : 0;
+}
+
+static void install_hold(void)
+{
+    for (int i = 0; i < npm; i++) if (pms[i].game_modes == POLICY_HOLD) hold_wanted = 1;
+    if (!hold_wanted) { lg("hold: no mode holds the game off (game_modes pause/end/ignore); the game's starts untouched"); return; }
+    types_init();
     mode_start_fn = (uintptr_t)sym("_ZN4Mode5startEv");
     mb_start_slot = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule5startEv");
     mode_re_slot = byte_off_in("_ZTV4Mode", "_ZN4Mode7restartEv");
@@ -947,6 +1056,412 @@ static void end_mode(pm_t *m, const char *why)
     lg("\"%s\" ENDED by %s", m->name, why);
 }
 
+/* ---- the game's own modes, changed (PAD-1351) ------------------------------
+ * A <name>.stock file in the mode folder names one of the GAME's modes - its
+ * global (Wonka 03.03: cl_mode is Candy Lane) or its class (CandyLaneMode) -
+ * and changes how it plays.  No game code is patched: only slots of that
+ * class's vtable (relocated read-only data, made writable for the store, as
+ * the hold gate does).  Read off Wonka 03.03's decrypted engine:
+ *   timer   Mode::start sets a default and each class then sets its own (the
+ *           Wonka Bar award modes from an adjustment, 60 - 15 x the setting,
+ *           into a timer the class keeps itself).  The mode's run proc is
+ *           Mode::start_run_func, which jumps through the class's run_proc
+ *           slot: ours runs first and calls the class's own set_time (a
+ *           virtual).  With the run proc alive, set_time's restart is a no-op,
+ *           exactly as when the game sets a time.
+ *   points  every award a mode makes goes through this->score_and_total.  The
+ *           game's call sites check the slot still holds the class's own
+ *           function and call the slot when it does not, so ours sees every
+ *           award and scales or replaces it.
+ *   shots   a made shot reaches each mode by a DIRECT call to its class's
+ *           shot_dispatch (no vtable), which reads the shot from its proc's
+ *           argument (shot_get_proc_shot_id) and first asks this->is_running
+ *           (or _or_grace, _or_grace_grace) through the vtable.  Those slots
+ *           are wrapped: asked from inside the class's own shot_dispatch (the
+ *           return address says so) about a shot in shots_off, the mode
+ *           answers "not running" and the shot goes by it.  shots_add gives
+ *           the mode a shot when a switch is hit: from the switch's own proc,
+ *           the shot id is set (shot_set_proc_shot_id, or the proc argument
+ *           shot_get_proc_shot_id reads) and the class's shot_dispatch called.
+ * Shot names come from the game's shot table (one entry per shot id, each
+ * pointing at its exported shot_made_<name> handler), found in the game's own
+ * data by those handlers' addresses; the runtime logs it. */
+/* -- the shot table ----------------------------------------------------------- */
+static uintptr_t sfn[MAX_SHOT_FNS], sfn_lo, sfn_hi; static char sfn_name[MAX_SHOT_FNS][48]; static int nsfn;
+static void cb_shot_fns(const char *name, uintptr_t a, size_t sz)
+{
+    (void)sz;
+    if (strncmp(name, "_Z", 2) || nsfn >= MAX_SHOT_FNS) return;
+    const char *p = name + 2;
+    while (*p >= '0' && *p <= '9') p++;
+    if (strncmp(p, "shot_made_", 10)) return;
+    size_t L = strlen(p + 10);
+    if (L < 2 || p[10 + L - 1] != 'v') return;       /* takes no arguments: one handler per shot */
+    sfn[nsfn] = a;
+    snprintf(sfn_name[nsfn], sizeof sfn_name[0], "%.*s", (int)(L - 1), p + 10);
+    nsfn++;
+}
+static int sfn_index(uintptr_t v) { for (int i = 0; i < nsfn; i++) if (sfn[i] == v) return i; return -1; }
+
+static void normalise(char *out, size_t n, const char *in)
+{
+    size_t o = 0; int us = 0;
+    for (; *in && o + 1 < n; in++) {
+        char c = *in;
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) { out[o++] = c; us = 0; }
+        else if (o && !us) { out[o++] = '_'; us = 1; }
+    }
+    while (o && out[o - 1] == '_') o--;
+    out[o] = 0;
+}
+
+/* The game's shot table, by the addresses of its shot_made_* handlers in the
+ * game's own (non-code) segments: entries of one stride, each with its shot id
+ * a fixed distance from the handler pointer.  jjpstock.py shot_table does the
+ * same on a live game's memory. */
+#define MAX_HITS 1024
+static void read_shot_table(void)
+{
+    walk_dynsym_type(STT_FUNC, cb_shot_fns);
+    if (!nsfn) { lg("shots: no shot_made_* handlers exported; shots are named by number"); return; }
+    sfn_lo = sfn_hi = sfn[0];
+    for (int i = 1; i < nsfn; i++) { if (sfn[i] < sfn_lo) sfn_lo = sfn[i]; if (sfn[i] > sfn_hi) sfn_hi = sfn[i]; }
+    char exe[512]; ssize_t L = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (L <= 0) return;
+    exe[L] = 0;
+    static uintptr_t hit[MAX_HITS], hlo[MAX_HITS], hhi[MAX_HITS]; static short hfn[MAX_HITS]; int nh = 0;
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (!f) return;
+    char line[700];
+    while (fgets(line, sizeof line, f) && nh < MAX_HITS) {
+        char *dash = strchr(line, '-'), *sp = dash ? strchr(dash, ' ') : NULL;
+        if (!sp || sp[1] != 'r') continue;   /* the Envelope maps the game's data rwx: code segments too */
+        char *path = strchr(line, '/');
+        if (!path) continue;
+        path[strcspn(path, "\n")] = 0;
+        if (strcmp(path, exe)) continue;
+        uintptr_t lo = hexnum(line), hi = hexnum(dash + 1);
+        for (uintptr_t a = (lo + 7) & ~(uintptr_t)7; a + 8 <= hi && nh < MAX_HITS; a += 8) {
+            uintptr_t w = *(uintptr_t *)a;
+            if (w < sfn_lo || w > sfn_hi) continue;
+            int i = sfn_index(w);
+            if (i >= 0) { hit[nh] = a; hlo[nh] = lo; hhi[nh] = hi; hfn[nh++] = (short)i; }
+        }
+    }
+    fclose(f);
+    if (nh < 4) { lg("shots: the shot table was not found (%d handler pointers); shots are named by number", nh); return; }
+    /* the stride: the most common gap between neighbouring hits */
+    uintptr_t best_gap = 0; int best_n = 0;
+    for (int i = 1; i < nh; i++) {
+        uintptr_t g = hit[i] - hit[i - 1]; int n = 0;
+        if (g < 16 || g > 512) continue;
+        for (int j = 1; j < nh; j++) if (hit[j] - hit[j - 1] == g) n++;
+        if (n > best_n) { best_n = n; best_gap = g; }
+    }
+    if (!best_gap) { lg("shots: no stride in %d handler pointers; shots are named by number", nh); return; }
+    /* the longest run of hits a whole number of strides apart (missing entries allowed) */
+    int bs = 0, bl = 0;
+    for (int i = 0; i < nh;) {
+        int j = i + 1;
+        while (j < nh && (hit[j] - hit[j - 1]) % best_gap == 0 && (hit[j] - hit[j - 1]) / best_gap <= 8) j++;
+        if (j - i > bl) { bl = j - i; bs = i; }
+        i = j;
+    }
+    /* the id: an int a fixed distance from the pointer that counts up one per entry */
+    int id_at = 0; int found = 0;
+    for (int d = -(int)best_gap + 4; d < (int)best_gap && !found; d += 4) {
+        if (d == 0 || d == 4) continue;
+        int inside = 1;     /* every probe within the mapping its pointer is in */
+        for (int j = bs; inside && j < bs + bl; j++)
+            inside = (intptr_t)hit[j] + d >= (intptr_t)hlo[j] && hit[j] + (uintptr_t)(intptr_t)d + 4 <= hhi[j];
+        if (!inside) continue;
+        int base = *(int *)(hit[bs] + d), ok = base >= 0 && base < MAX_SHOT_IDS;
+        for (int j = bs + 1; ok && j < bs + bl; j++)
+            ok = *(int *)(hit[j] + d) == base + (int)((hit[j] - hit[bs]) / best_gap);
+        if (ok) { id_at = d; found = 1; }
+    }
+    const char *(*disp)(int) = (const char *(*)(int))sym("_Z13get_shot_name9shot_id_t");
+    if (!disp) disp = (const char *(*)(int))sym("_Z13get_shot_name10_shot_id_e");
+    nshots = 0;
+    for (int j = bs; j < bs + bl && nshots < MAX_SHOT_IDS; j++) {
+        int id = found ? *(int *)(hit[j] + id_at) : (int)((hit[j] - hit[bs]) / best_gap);
+        shots[nshots].id = id;
+        snprintf(shots[nshots++].name, sizeof shots[0].name, "%s", sfn_name[hfn[j]]);
+    }
+    /* one handler for several shots (Wonka: slings, jets, the 3-bank): the
+     * game's own display names when each is distinct, else <name>_<id> */
+    static char seen[MAX_SHOT_IDS];
+    memset(seen, 0, sizeof seen);
+    for (int i = 0; i < nshots; i++) {
+        if (seen[i]) continue;
+        int grp[MAX_SHOT_IDS], ng = 0;
+        for (int j = i; j < nshots; j++) if (!strcmp(shots[j].name, shots[i].name)) { grp[ng++] = j; seen[j] = 1; }
+        if (ng < 2) continue;
+        char dn[MAX_SHOT_IDS][48]; int distinct = disp != NULL;
+        for (int g = 0; g < ng && distinct; g++) {
+            const char *s = disp(shots[grp[g]].id);
+            normalise(dn[g], sizeof dn[g], s ? s : "");
+            if (!dn[g][0]) distinct = 0;
+            for (int h = 0; h < g && distinct; h++) if (!strcmp(dn[g], dn[h])) distinct = 0;
+            for (int h = 0; h < nshots && distinct; h++) if (!strcmp(dn[g], shots[h].name)) distinct = 0;
+        }
+        for (int g = 0; g < ng; g++) {
+            shot_t *s = &shots[grp[g]];
+            if (distinct) snprintf(s->name, sizeof s->name, "%s", dn[g]);
+            else if (g) { char t[48]; snprintf(t, sizeof t, "%.40s_%d", s->name, s->id); snprintf(s->name, sizeof s->name, "%s", t); }
+        }
+    }
+    char out[4096]; size_t o = 0; out[0] = 0;
+    for (int i = 0; i < nshots && o < sizeof out - 64; i++)
+        o += snprintf(out + o, sizeof out - o, "%s%d %s", i ? ", " : "", shots[i].id, shots[i].name);
+    lg("shots: %d in the game's table (stride %lu, id %s): %s", nshots, (unsigned long)best_gap,
+       found ? "read from it" : "by position", out);
+}
+
+static int shot_by_name(const char *n)
+{
+    if (*n >= '0' && *n <= '9') return (int)num(n);
+    for (int i = 0; i < nshots; i++) if (!strcmp(shots[i].name, n)) return shots[i].id;
+    return -1;
+}
+static const char *shot_name(int id)
+{
+    for (int i = 0; i < nshots; i++) if (shots[i].id == id) return shots[i].name;
+    static char b[16]; snprintf(b, sizeof b, "#%d", id); return b;
+}
+
+/* -- the wrapped slots ------------------------------------------------------------ */
+static sc_t *sc_of(uintptr_t vt) { for (int i = 0; i < nsc; i++) if (scs[i].vt == vt) return &scs[i]; return NULL; }
+static st_t *st_of(void *self)
+{
+    for (int i = 0; i < nst; i++) if (sts[i].ok && sts[i].obj == self) return &sts[i];
+    return NULL;
+}
+
+static int st_isr(void *self, int k, void *ra)
+{
+    sc_t *c = sc_of(*(uintptr_t *)self);
+    if (!c || !c->orig_isr[k]) return 0;
+    int r = ((vbool_t)c->orig_isr[k])(self) & 0xff;
+    if (!r || !stock_ready || (uintptr_t)ra < c->sd_lo || (uintptr_t)ra >= c->sd_hi || !get_shot) return r;
+    st_t *s = st_of(self);
+    if (!s || !s->noff) return r;
+    int shot = get_shot();
+    for (int i = 0; i < s->noff; i++)
+        if (s->off[i] == shot) {
+            s->blocked++;
+            lg("STOCK %s: shot %s goes by it (shots_off, %s)", s->mode, shot_name(shot), s->file);
+            return 0;
+        }
+    return r;
+}
+static int st_isr0(void *s) { return st_isr(s, 0, __builtin_return_address(0)); }
+static int st_isr1(void *s) { return st_isr(s, 1, __builtin_return_address(0)); }
+static int st_isr2(void *s) { return st_isr(s, 2, __builtin_return_address(0)); }
+static int (*const isr_wrap[3])(void *) = { st_isr0, st_isr1, st_isr2 };
+
+static void st_run(void *self, unsigned arg)
+{
+    sc_t *c = sc_of(*(uintptr_t *)self);
+    st_t *s = st_of(self);
+    if (s && stock_ready && s->seconds > 0 && VT_SET_TIME >= 0) {
+        ((void (*)(void *, int))vslot(self, VT_SET_TIME))(self, s->seconds);
+        lg("STOCK %s: timer set to %d s (%s)", s->mode, s->seconds, s->file);
+    }
+    if (c && c->orig_run) ((void (*)(void *, unsigned))c->orig_run)(self, arg);
+}
+
+static unsigned long long st_score(void *self, unsigned long long amt)
+{
+    sc_t *c = sc_of(*(uintptr_t *)self);
+    st_t *s = st_of(self);
+    unsigned long long a = amt;
+    if (s && stock_ready && amt) {
+        if (s->points > 0) a = (unsigned long long)s->points;
+        else if (s->points_x != 1000) a = amt / 1000 * (unsigned long long)s->points_x
+                                          + amt % 1000 * (unsigned long long)s->points_x / 1000;
+        s->asked += (long long)amt; s->scored += (long long)a; s->nscores++;
+        int shot = get_shot && am_proc && am_proc() ? get_shot() : -1;
+        lg("STOCK %s: award %llu (the game's own %llu)%s%s", s->mode, a, amt, shot >= 0 ? ", shot " : "",
+           shot >= 0 ? shot_name(shot) : "");
+    }
+    return c && c->orig_score ? ((unsigned long long (*)(void *, unsigned long long))c->orig_score)(self, a) : 0;
+}
+
+static int wrap_slot(uintptr_t vt, int off, uintptr_t fn, uintptr_t *orig)
+{
+    if (off < 0) return 0;
+    uintptr_t *slot = (uintptr_t *)(vt + (uintptr_t)off);
+    if (*slot == fn) return 1;
+    *orig = *slot;
+    if (!store_slot(slot, fn)) { *orig = 0; return 0; }
+    return 1;
+}
+
+static sc_t *sc_wire(uintptr_t vt, int need)
+{
+    sc_t *c = sc_of(vt);
+    if (!c) {
+        if (nsc >= MAX_STOCK) return NULL;
+        c = &scs[nsc++]; memset(c, 0, sizeof *c); c->vt = vt;
+        char n[200]; const char *cn = class_name(vt);
+        snprintf(n, sizeof n, "_ZN%zu%s13shot_dispatchEv", strlen(cn), cn);
+        void *sd = sym(n); Dl_info di; ElfW(Sym) *es = NULL;
+        if (sd && dladdr1(sd, &di, (void **)&es, RTLD_DL_SYMENT) && es && es->st_size) {
+            c->sd_lo = (uintptr_t)sd; c->sd_hi = (uintptr_t)sd + es->st_size;
+        }
+    }
+    int w = need & ~c->wired;
+    if ((w & NEED_TIMER) && wrap_slot(vt, VT_RUN, (uintptr_t)st_run, &c->orig_run)) c->wired |= NEED_TIMER;
+    if ((w & NEED_POINTS) && wrap_slot(vt, VT_SCORE, (uintptr_t)st_score, &c->orig_score)) c->wired |= NEED_POINTS;
+    if (w & NEED_SHOTS) {
+        int ok = 1;
+        for (int k = 0; k < 3; k++)
+            if (VT_ISR[k] >= 0) ok &= wrap_slot(vt, VT_ISR[k], (uintptr_t)isr_wrap[k], &c->orig_isr[k]);
+        if (ok) c->wired |= NEED_SHOTS;
+    }
+    return c;
+}
+
+static uintptr_t find_vt; static void *found_obj;
+static void cb_obj_of_vt(const char *name, uintptr_t a, size_t sz)
+{
+    (void)name;
+    if (!found_obj && sz >= 0x60 && *(uintptr_t *)a == find_vt) found_obj = (void *)a;
+}
+
+/* The mode a .stock file names: a game global whose vtable derives Mode, or a
+ * class name (its object found by vtable). */
+static void stock_resolve(st_t *s)
+{
+    uintptr_t vt = 0; void *o = sym(s->mode);
+    if (o && *(uintptr_t *)o) vt = *(uintptr_t *)o;
+    else {
+        char n[200]; snprintf(n, sizeof n, "_ZTV%zu%s", strlen(s->mode), s->mode);
+        uintptr_t v = (uintptr_t)sym(n);
+        if (v) { vt = v + 16; find_vt = vt; found_obj = NULL; walk_dynsym(cb_obj_of_vt); o = found_obj; }
+    }
+    if (!vt || !o) { lg("STOCK %s: no mode called %s in this game (a mode global or its class)", s->file, s->mode); return; }
+    if (!ti_mode || !derives(((uintptr_t *)vt)[-1], ti_mode, 0) || (mode_vt && vt == (uintptr_t)(mode_vt + 2))) {
+        lg("STOCK %s: %s (%s) is not one of the game's modes", s->file, s->mode, class_name(vt));
+        return;
+    }
+    for (int i = 0; i < nst; i++)
+        if (&sts[i] != s && sts[i].ok && sts[i].obj == o) {
+            lg("STOCK %s: %s is already changed by %s; this file ignored", s->file, s->mode, sts[i].file);
+            return;
+        }
+    s->obj = o;
+    /* the shots, now the table is read */
+    char buf[512]; snprintf(buf, sizeof buf, "%s", s->off_names);
+    for (char *t = strtok(buf, " ,\t"); t && s->noff < MAX_LIST; t = strtok(NULL, " ,\t")) {
+        int id = shot_by_name(t);
+        if (id < 0) lg("STOCK %s: no shot called %s in this game (shots_off)", s->file, t);
+        else s->off[s->noff++] = id;
+    }
+    for (int i = 0; i < s->nadd; i++) {
+        s->add_shot[i] = shot_by_name(s->add_name[i]);
+        if (s->add_shot[i] < 0) lg("STOCK %s: no shot called %s in this game (shots_add)", s->file, s->add_name[i]);
+    }
+    int need = (s->seconds > 0 ? NEED_TIMER : 0) | (s->points > 0 || s->points_x != 1000 ? NEED_POINTS : 0)
+             | (s->noff ? NEED_SHOTS : 0) | NEED_POINTS;   /* awards are always logged */
+    s->c = sc_wire(vt, need);
+    if (!s->c) { lg("STOCK %s: too many changed classes (max %d)", s->file, MAX_STOCK); return; }
+    if ((s->noff || s->nadd) && !s->c->sd_lo)
+        lg("STOCK %s: %s has no shot_dispatch of its own; shots_off / shots_add do nothing for it", s->file, class_name(vt));
+    if ((need & ~s->c->wired) & (NEED_TIMER | NEED_POINTS | NEED_SHOTS))
+        lg("STOCK %s: could not wrap every slot it needs (wanted %#x, have %#x)", s->file, need, s->c->wired);
+    s->ok = 1;
+    char pts[64];
+    if (s->points > 0) snprintf(pts, sizeof pts, "%lld an award", s->points);
+    else if (s->points_x != 1000) snprintf(pts, sizeof pts, "x%ld.%03ld", s->points_x / 1000, s->points_x % 1000);
+    else snprintf(pts, sizeof pts, "the game's");
+    lg("STOCK %s: %s (%s, %p): timer %s%d, points %s, %d shot(s) off, %d added%s", s->file, s->mode,
+       class_name(vt), o, s->seconds > 0 ? "" : "the game's/", s->seconds, pts, s->noff, s->nadd,
+       s->c->sd_lo ? "" : " (no shot_dispatch)");
+}
+
+/* Main thread, first frame after install: the game is fully up (its shot
+ * table and objects built), and any engine call here is on a game thread. */
+static void stock_install(void)
+{
+    types_init();
+    VT_RUN = byte_off_in("_ZTV4Mode", "_ZN4Mode8run_procEj");
+    VT_ISR[0] = byte_off_in("_ZTV4Mode", "_ZN4Mode10is_runningEv");
+    VT_ISR[1] = byte_off_in("_ZTV4Mode", "_ZN4Mode19is_running_or_graceEv");
+    VT_ISR[2] = byte_off_in("_ZTV4Mode", "_ZN4Mode25is_running_or_grace_graceEv");
+    get_shot = (int (*)(void))sym("_Z21shot_get_proc_shot_idv");
+    set_shot_fn = (void (*)(int))sym("_Z21shot_set_proc_shot_id9shot_id_t");
+    if (!set_shot_fn) set_shot_fn = (void (*)(int))sym("_Z21shot_set_proc_shot_id10_shot_id_e");
+    proc_handle = (unsigned (*)(void))sym("_Z18proc_get_my_handlev");
+    proc_setarg = (void (*)(unsigned, int, long))sym("_Z12proc_set_argji11proc_args_t");
+    lg("stock: run_proc %#x, score %#x, set_time %#x, is_running %#x/%#x/%#x; shot id %s, set by %s",
+       VT_RUN, VT_SCORE, VT_SET_TIME, VT_ISR[0], VT_ISR[1], VT_ISR[2], get_shot ? "read" : "NOT READABLE",
+       set_shot_fn ? "shot_set_proc_shot_id" : proc_setarg ? "the proc argument" : "nothing");
+    read_shot_table();
+    for (int i = 0; i < nst; i++) stock_resolve(&sts[i]);
+    stock_ready = 1;
+}
+
+static int set_shot(int id)
+{
+    if (set_shot_fn) { set_shot_fn(id); return 1; }
+    if (shot_arg < 0 && get_shot) {
+        /* shot_get_proc_shot_id = proc_get_arg(proc_get_my_handle(), N): N is
+         * its `mov $N,%esi` (be N 00 00 00), readable once the game has called it */
+        const unsigned char *c = (const unsigned char *)get_shot;
+        for (int i = 0; i < 40; i++)
+            if (c[i] == 0xbe && c[i + 2] == 0 && c[i + 3] == 0 && c[i + 4] == 0 && c[i + 1] < 16) { shot_arg = c[i + 1]; break; }
+        if (shot_arg < 0) { shot_arg = -2; lg("stock: the shot's proc argument could not be read; shots_add does nothing"); }
+        else lg("stock: a shot is the proc's argument %d", shot_arg);
+    }
+    if (shot_arg < 0 || !proc_handle || !proc_setarg) return 0;
+    proc_setarg(proc_handle(), shot_arg, id);
+    return 1;
+}
+
+/* A switch hit (its own proc, after the game's dispatch): shots_add. */
+static void stock_on_switch(int si)
+{
+    if (!stock_ready) return;
+    for (int i = 0; i < nst; i++) {
+        st_t *s = &sts[i];
+        if (!s->ok || !s->c || !s->c->sd_lo) continue;
+        for (int k = 0; k < s->nadd; k++) {
+            if (s->add_sw[k] != si || s->add_shot[k] < 0) continue;
+            if (!(((vbool_t)vslot(s->obj, VT_IS_RUNNING))(s->obj) & 0xff)) continue;
+            int old = get_shot ? get_shot() : -1;
+            if (!set_shot(s->add_shot[k])) continue;
+            s->added++;
+            lg("STOCK %s: %s gives it shot %s (shots_add, %s)", s->mode, wsw[si].name, shot_name(s->add_shot[k]), s->file);
+            ((vbool_t)s->c->sd_lo)(s->obj);
+            if (old >= 0) set_shot(old);
+        }
+    }
+}
+
+/* Every frame: install once, then log each changed mode's runs. */
+static void stock_frame(void)
+{
+    if (!nst || !installed) return;
+    if (!stock_ready) { stock_install(); return; }
+    for (int i = 0; i < nst; i++) {
+        st_t *s = &sts[i];
+        if (!s->ok) continue;
+        int r = ((vbool_t)vslot(s->obj, VT_IS_RUNNING))(s->obj) & 0xff;
+        if (r && !s->was_running) {
+            s->started_ms = now_ms(); s->asked = s->scored = 0; s->nscores = s->blocked = s->added = 0;
+            lg("STOCK %s STARTED (the game's own %s)", s->mode, class_name(*(uintptr_t *)s->obj));
+        } else if (!r && s->was_running) {
+            long t = now_ms() - s->started_ms;
+            lg("STOCK %s ENDED after %ld.%ld s: %d award(s), %lld scored (the game's own %lld), %d shot(s) let by, %d added",
+               s->mode, t / 1000, t % 1000 / 100, s->nscores, s->scored, s->asked, s->blocked, s->added);
+        }
+        s->was_running = r;
+    }
+}
+
 /* ---- game state ------------------------------------------------------------ */
 static int in_game(void) { return state_get && state_get() == ingame_state; }
 
@@ -970,6 +1485,7 @@ static void on_switch(int si)
 {
     if (!installed || !in_game()) return;
     test_hook(si);
+    stock_on_switch(si);
     pthread_mutex_lock(&mu);
     int active = -1;
     for (int i = 0; i < npm; i++) if (running(&pms[i])) { active = i; break; }
@@ -1213,6 +1729,7 @@ void al_flip_display(void)
         pthread_mutex_lock(&mu);
         if (!our_lb && npm) build_lamp_buffer();
         per_frame();
+        stock_frame();
         for (int i = 0; i < npm; i++)
             if (running(&pms[i]) && !pms[i].paused) { draw_screen(&pms[i]); break; }
         pthread_mutex_unlock(&mu);
@@ -1226,7 +1743,7 @@ static void *installer(void *arg)
     (void)arg;
     lg("PAD JJP mode SDK %s, modes from %s", SDK_VERSION, moddir);
     load_modes();
-    if (!npm) { lg("no modes to run"); return NULL; }
+    if (!npm && !nst) { lg("no modes to run"); return NULL; }
     /* Wait for the game's static constructors: a Switch gets its dispatch
      * pointer at +0x10 when its ctor runs. */
     for (int t = 0; t < 600; t++) {
@@ -1264,8 +1781,8 @@ static void *installer(void *arg)
         hooked++;
     }
     attract_state = last_state = state_get();
-    lg("installed: %d mode(s), %d shot switch(es), ball-in-play state %d (now %d)", npm, hooked,
-       ingame_state, attract_state);
+    lg("installed: %d mode(s), %d changed game mode file(s), %d shot switch(es), ball-in-play state %d (now %d)", npm, nst,
+       hooked, ingame_state, attract_state);
     installed = 1;
     return NULL;
 }
@@ -1295,8 +1812,14 @@ static void selftest(void)
         for (int s2 = 0; s2 < 4; s2++)
             if (*m->snd_names[s2] && !(s2 == 0 ? m->snd_start : s2 == 1 ? m->snd_shot : s2 == 2 ? m->snd_end : m->snd_complete)) bad++;
     }
-    lg("SELFTEST %s: pid %d, GAMENAME %s, %d mode(s), %d shot switch(es), %d problem(s)",
-       bad ? "FAIL" : "PASS", getpid(), getenv("GAMENAME") ? getenv("GAMENAME") : "?", npm, nwsw, bad);
+    /* .stock files: the game's objects are not built yet (this runs before
+     * main), so a mode is checked by name: its global or its class's vtable */
+    for (int i = 0; i < nst; i++) {
+        char n[200]; snprintf(n, sizeof n, "_ZTV%zu%s", strlen(sts[i].mode), sts[i].mode);
+        if (!sym(sts[i].mode) && !sym(n)) { lg("SELFTEST %s: no mode called %s", sts[i].file, sts[i].mode); bad++; }
+    }
+    lg("SELFTEST %s: pid %d, GAMENAME %s, %d mode(s), %d changed game mode(s), %d shot switch(es), %d problem(s)",
+       bad ? "FAIL" : "PASS", getpid(), getenv("GAMENAME") ? getenv("GAMENAME") : "?", npm, nst, nwsw, bad);
     fprintf(stderr, "jjpmodes selftest: %s (%d mode(s), %d problem(s))\n", bad ? "FAIL" : "PASS", npm, bad);
     _exit(bad ? 3 : 0);
 }

@@ -201,24 +201,62 @@ def guided(slot, max_steps=12):
     return False
 
 
+#: PAD-1360: the "Guided Setup" title's fingerprint - how much of each of 48 equal slices of the
+#: title's width is white, in hundredths, measured off 1920x1080 frames. It is pixel-identical on
+#: every Spike 3 title's Guided Setup, red or blue, in every language (the rows change language,
+#: the title does not): 20 frames from eight rig slots, distance 0.0. The settings pages that
+#: shared the old test's white values measure 0.135 (Coil Settings, Quick Adjustments) and
+#: 0.177 (LCD/Lamp) away.
+GUIDED_TITLE = (46, 26, 23, 37, 0, 41, 13, 28, 25, 9, 52, 0, 36, 22, 35, 36, 8, 39, 18, 31, 1, 39, 19, 43,
+                28, 0, 0, 11, 37, 27, 38, 4, 33, 26, 27, 13, 15, 51, 10, 11, 43, 6, 42, 8, 34, 43, 19, 39)
+GUIDED_TITLE_X = (678, 1241)     # where that title's white starts and ends (centred, 564 px)
+GUIDED_TITLE_SLACK = 6           # px either way, and the fingerprint's mean distance below 0.04
+
+
+def title_fingerprint(a, n=len(GUIDED_TITLE)):
+    """The white page title across the top centre of frame array A (1920x1080 RGB): ``(x0, x1,
+    fingerprint)`` - its white's first and last column and the white share of each of N equal
+    slices between them - or None when there is no white title there."""
+    import numpy as np
+    t = a[40:200, 300:1620]
+    w = (t[:, :, 0] > 220) & (t[:, :, 1] > 220) & (t[:, :, 2] > 220)
+    xs = np.where(w.any(axis=0))[0]
+    if len(xs) < n:
+        return None
+    occ = w[:, xs[0]:xs[-1] + 1].mean(axis=0)
+    k = len(occ)
+    return (int(xs[0]) + 300, int(xs[-1]) + 300,
+            [float(occ[i * k // n:(i + 1) * k // n].mean()) for i in range(n)])
+
+
+def is_guided_title(a):
+    """Whether frame array A's page title is "Guided Setup" (:data:`GUIDED_TITLE`)."""
+    t = title_fingerprint(a)
+    if t is None:
+        return False
+    x0, x1, fp = t
+    if abs(x0 - GUIDED_TITLE_X[0]) > GUIDED_TITLE_SLACK or abs(x1 - GUIDED_TITLE_X[1]) > GUIDED_TITLE_SLACK:
+        return False
+    return sum(abs(v - g / 100.0) for v, g in zip(fp, GUIDED_TITLE)) / len(fp) < 0.04
+
+
 def is_guided_setup(f):
-    """Guided Setup, full screen: the white title across the top centre and a
-    highlighted (cyan) row in the left column. Tech Alerts (an 800x480 panel
-    at the top left) has its title elsewhere, attract has no cyan. The
-    service menu's pages look the same - white title, cyan row - but their
-    right column is a GREY description, where Guided Setup shows each row's
-    value in WHITE (English, U.S.A., Yes): measured 0.06 of that area white
-    on Guided Setup, 0.0 on the main menu and every Diagnostics page.
-    Pressing BACK there threw an operator out of the menu."""
+    """Guided Setup, full screen: its own title, "Guided Setup", across the top
+    centre (:func:`is_guided_title`) and a highlighted (cyan) row in the left
+    column. Tech Alerts (an 800x480 panel at the top left) has its title
+    elsewhere, attract has no cyan.
+
+    The service menu's pages look the same - white title, cyan row - and its
+    SETTINGS pages even show each row's value in white beside it, as Guided
+    Setup does. Until PAD-1360 this told them apart by those white values, so
+    autoguide took every settings page (Quick Adjustments, Coil Settings,
+    LCD/Lamp...) for Guided Setup and pressed BACK about two seconds after
+    SELECT opened it: on the rig no setting page ever stayed open. Pressing
+    BACK there threw an operator out of the menu, so only the title counts."""
     import numpy as np
     from PIL import Image
     a = np.asarray(Image.open(f).convert("RGB")).astype(np.int16)
-    title = a[70:180, 680:1240]
-    white = ((title[:, :, 0] > 220) & (title[:, :, 1] > 220) & (title[:, :, 2] > 220)).mean()
-    if not (white > 0.08 and highlighted_row(f) is not None):
-        return False
-    vals = a[240:700, 800:1400]
-    return ((vals[:, :, 0] > 220) & (vals[:, :, 1] > 220) & (vals[:, :, 2] > 220)).mean() > 0.02
+    return is_guided_title(a) and highlighted_row(f) is not None
 
 
 BOOT_S = 240    # --boot: Guided Setup is the boot's, if it comes at all

@@ -973,7 +973,22 @@ title_dir() {
             [ -f "$s/game" ] && [ ! -L "$s" ] && { basename "$d"; return 0; }
         done
     done
+    # PAD-1279: a PAD TEST CARD's games partition holds no game, only its own
+    # test files under testcard/ - which the card's selector reads as
+    # /games/testcard, so that is the "title" a test card run binds.
+    [ "${PAD_TESTCARD:-}" = 1 ] && [ -d "$m/testcard" ] && [ ! -L "$m/testcard" ]         && { echo testcard; return 0; }
     return 1
+}
+
+# PAD-1279: a test card built with no files of its own has an EMPTY games
+# partition (only the DEFAULT PAD TEST CARD, which lives in the selector). Its
+# run still needs a title directory to bind, so it gets an empty one of the
+# rig's own, one component under its parent like every answer here.
+testcard_none() {
+    local d="$ROOT/dump/testcard_none/testcard"
+    mkdir -p "$d" || return 1
+    echo "[card] a PAD test card with no files of its own: an empty /games/testcard" >&2
+    echo "$d"
 }
 
 # ITEM 77: cache-manager queries. No image argument and no mount - these are
@@ -1215,7 +1230,10 @@ fi
 # mounted from, and the next mount picks the local copy up. Without this, a
 # card mounted before the cache feature ever ran would stay slow forever.
 if [ -d "$MNT" ] && mountpoint -q "$MNT" 2>/dev/null; then
-    T=$(title_dir "$MNT") || die "$MNT is mounted but holds no game"
+    if ! T=$(title_dir "$MNT"); then
+        [ "${PAD_TESTCARD:-}" = 1 ] && { testcard_none; exit $?; }
+        die "$MNT is mounted but holds no game"
+    fi
     # async: the mount in use stays on whatever it was mounted from, so the
     # copy only helps the NEXT mount - a rejoin must not block on it (item 74).
     cache_pick "$IMG" "$LABEL" async >/dev/null
@@ -1281,6 +1299,7 @@ mountpoint -q "$MNT" 2>/dev/null || die "fuse2fs did not mount $(basename "$SRC"
 
 T=$(title_dir "$MNT") || {
     fusermount -u "$MNT" 2>/dev/null
+    [ "${PAD_TESTCARD:-}" = 1 ] && { testcard_none; exit $?; }
     die "mounted, but no directory in it holds a game ELF"
 }
 

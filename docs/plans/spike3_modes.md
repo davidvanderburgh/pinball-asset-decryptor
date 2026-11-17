@@ -65,7 +65,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live, and the Insider logins since PAD-1326 (`coop_play.insider_users_a64`; the runtime reads the tables pointer-sized, the manager moved by the PIE's load address) |
 | random clips | clips.cfg, clips in the video bank | **goes on (PAD-1323)** | done: the clip v2 route asks for no `string_new` (the runtime builds the name), the name read as an 8-byte pointer, surfaces compared at full width. A port with the clip v2 lines: Star Wars ELG's today |
 | screen times | `stime` lines in clips.cfg | **goes on (PAD-1323)** | done: the slot read and written as 8 bytes, moved by the PIE's load address; screen_time.py reads 64-bit programs (Fallout LE, Pokemon LE, Transformers LE have the screens) |
-| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin, the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE 0.96 (PAD-1359) (below) |
+| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin (a music-bank song's to its own bank, PAD-1358), the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE 0.96 (PAD-1359) (below) |
 | editions | EDITION row, codeselect's `edition=` | **goes on (PAD-1325)** | done: `spike3_menu` grows the 64-bit program's menu (Attract Mode, found by its name); `mks3multi --editions`; nvm.c reads the Spike 3 store (tools/spike3_emu/MULTIBOOT.md). ELG 1.10, Fallout 0.81/0.82, Transformers 0.96 take it |
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
@@ -1145,8 +1145,8 @@ over the stock program, sounds.cfg):
   took `4804020002002040` and the PCM was 100% 700 Hz, request 675 (idx 1030) in mode 3 took mode 3's (91% 1100 Hz),
   request 1180 in mode 1 played the game's own (no tone).
 - Each slot's record goes into its own folder's image.bin (`audio` the game's, `audio_spike_menu` the system's).
-  Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`), which are not idx files and take no
-  mode files (as on Spike 2: the Audio tab says only an idx sound can).
+  Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`): PAD-1358 (below) gives them mode
+  files too.
 Tests: tests/test_pad1324_spike3_music_modes.py.
 
 **Transformers LE 0.96 (PAD-1359)**, the same way on Spike 3 slot 251 (2026-11-17, hidden, muted, the PCM kept): its
@@ -1162,6 +1162,45 @@ its 817 requests reach 17% of its 7836 sound ids, yet 746 of them name a recordi
 the most sound ids, taken at half of them, or at a tenth when it reaches three times any other registry table: all
 eight Spike 3 cards in the library map (Transformers 1490 of 1545, Walking Dead Remastered 746 of 817, the rest as before).
 Tests: tests/test_pad1359_transformers_music_modes.py.
+
+## Music modes for bank songs (PAD-1358)
+
+Fallout LE 0.82 keeps most of its game music in 137 songs in 81 music banks (`image-scNN.bin` beside image.bin, decoded
+as `music_catNN_NNNN.wav`, NNNN the record's index in bank NN). Read off the card:
+
+- **A bank is a container of image.bin's own format** (count at 0x60, directory at 0x40, trailer at 0x38) whose
+  header's 0x20 is 0, but it has a **descriptor table of its own**: `0x58`'s high word is its sound-id count, the
+  pointers start at 0x80 and the descriptors sit just before the directory, each naming its records by key with the
+  op-11 marker as image.bin's do (bank 41: sid 0 plays records 1 then 2, sid 1 records 3 then 0). No image.bin
+  descriptor and no program byte names a bank key.
+- **A request plays a bank song as sound id `NN << 16 | n`**: Fallout's request table lists 112 such ids
+  (request 65 = bank 1's sid 0, 66 = bank 2's, 75 = bank 10's, 110 / 112 = bank 41's sid 0 / 1). That is why
+  sound_requests.tsv's idx column is empty for them.
+- **A bank record's key carries its bank**: the params' low 12 bits are `NN << 2` (+ a part number in bits 0-1):
+  bank 02's one song is `0x82600008`, bank 41's `0x006000a4 / 0x826000a4 / 0xc01000a4 / 0xc20000a4`. No key is shared
+  between containers.
+
+So a bank song's mode files are records appended to **its own bank** (the Write's grow, PAD-1185's road for an
+edited bank song; Try it's `games.patch` tail), keyed with `free_key(..., like=<every bank's records>,
+keep=BANK_KEEP)`: the bits the card's bank keys vary (20-31), never the bank's number (a one-song bank varies none
+of its own). The same `mswap` lines swap them at `sound_lookup`; the runtime is unchanged. `sound_modes.offer` now
+offers a `music_catNN_NNNN` slot on a Spike 3 title (`slot_ok`); on Spike 2 it stays refused (its music modes hand
+the resolver a descriptor, a different road). The record lines say `<bank>:<record>` for such a file.
+
+Proof (2026-11-17, Spike 3 rig slot 58, hidden and MUTED, `PAD_S3_AUDIO_OUT=1`; Fallout LE 0.82 from the library,
+staged as Try it does, with sound_fire_mode.c beside the runtime): a project giving bank 02's song
+(`music_cat02_0000`) and one of bank 41's a 700 Hz tone for mode 2 and an 1100 Hz one for mode 3:
+- the runtime armed `5 record(s) over 3 mode(s)`; MUSIC MODE set to 2 on Audio Content; request 66 (bank 02's
+  song) logged `record 4604020008006082 plays mode 2's, 4604020008007082` and the PCM after it was 100% 700 Hz;
+  set to 3, its next lookup took mode 3's `...4082`; back in mode 1 request 66 played the game's own song (no tone).
+- a second run with bank 41's record 1 given the files (sid 0's first part, what request 110 plays): in mode 2
+  request 110 logged `record 46040200a4006082 plays mode 2's, 46040200a4007082`, the PCM 100% 700 Hz for the
+  file's 5 s, then the song's second record (`0xc01000a4`, which sid 0 plays after it) on as the card has it - a
+  file replaces the one record, as an idx part does; in mode 3 request 66 took `...4082`, 100% 1100 Hz; in mode 1
+  request 110 played the game's own song.
+- The Write's grow of the same banks (`plan_sounds` against the card): image-sc02.bin 1 -> 3 records, image-sc41.bin
+  4 -> 6, each directory's CRC right, the new records keyed `...7082` / `...4082` and holding their tones.
+Tests: tests/test_pad1358_spike3_bank_song_modes.py.
 
 ## Spare switch inputs and driver outputs on Spike 3 (PAD-1329)
 

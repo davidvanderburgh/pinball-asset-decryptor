@@ -1,0 +1,8 @@
+# Hobbit-v04.02: the game's own BookMode, changed.  Every key: tools/jjp_emu/MODES.md
+# Its timer: Mode::set_time; its points: own score_and_total; shots of its own: yes.
+mode = BookMode
+points_x = 2
+# seconds = 45
+# shots_off = <shot>
+# shots_add = <switch>:<shot>
+# Shot names are logged on the machine (jjpmodes.log, "shots:").

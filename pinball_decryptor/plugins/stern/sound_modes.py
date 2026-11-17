@@ -244,6 +244,8 @@ NO_SHOTS = "Sounds on the shots of the game's modes are not offered on %s: %s."
 
 #: PAD-1068: or the Extract tab's Length-prefix names, ``audio/02m21s867 - idx0384 - music - ....wav``
 _IDX_RE = re.compile(r"(?:^|/)(?:\d+m\d+s\d+ - )?idx(\d+)")
+#: PAD-1358: a music bank's song, ``audio/music_cat02_0000 - name.wav`` (record 0 of image-sc02.bin)
+_BANK_SLOT_RE = re.compile(r"(?:^|/)(?:\d+m\d+s\d+ - )?music_cat(\d+)_(\d+)", re.IGNORECASE)
 
 
 class SoundModeError(ValueError):
@@ -820,6 +822,22 @@ def slot_idx(rel):
     return int(m.group(1)) if m else None
 
 
+def bank_slot(rel):
+    """PAD-1358: ``(bank, record)`` of a music bank's song (``audio/music_cat02_0000 - ....wav`` -> (2, 0),
+    record 0 of ``image-sc02.bin``), or None."""
+    m = _BANK_SLOT_RE.search(str(rel or "").replace("\\", "/"))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def slot_ok(rel, prof):
+    """Whether slot *rel* can have files for other music modes on title *prof*: a sound of the game's
+    sound bank (an idx file), or on a Spike 3 card also a music bank's song (PAD-1358: its files go
+    into its own bank, :mod:`.spike3_music`)."""
+    if slot_idx(rel) is not None:
+        return True
+    return bank_slot(rel) is not None and getattr(prof, "arch", "arm") == "a64"
+
+
 # ---- which titles -------------------------------------------------------------------------------
 def title_key(prof):
     return "%s-%s" % (prof.game_dir, prof.version) if prof is not None else ""
@@ -1122,7 +1140,7 @@ def offer(project, rels, probe=True):
     why = title_refusal(prof)
     if why:
         return why, {}
-    return "", {rel: ("" if slot_idx(rel) is not None else NOT_SOUND) for rel in rels}
+    return "", {rel: ("" if slot_ok(rel, prof) else NOT_SOUND) for rel in rels}
 
 
 # ---- the files ----------------------------------------------------------------------------------

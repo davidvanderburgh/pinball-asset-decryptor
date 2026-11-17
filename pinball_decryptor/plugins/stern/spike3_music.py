@@ -26,6 +26,13 @@ PAD-1296), and its descriptors are 64-bit, so a Spike 3 card needs no descriptor
 Emulator-proven on Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE 0.96 (the row on Audio Content, set in the menu;
 mode 2's and mode 3's records played, mode 1 the game's own) - docs/plans/spike3_modes.md "Music modes
 on Spike 3".
+
+PAD-1358: a MUSIC BANK's song (``music_catNN_NNNN``, record NNNN of ``image-scNN.bin``; most of Fallout's
+game music) takes mode files too. A bank has a descriptor table of its own naming its records by key, a
+request plays its sound id ``NN << 16 | n``, and the game finds the record at the same lookup, so its mode
+files are records appended to that bank, keyed beside the song with the bank's number (the params' low 12
+bits, :data:`BANK_KEEP`) kept, and swapped by the same ``mswap`` lines - docs/plans/spike3_modes.md "Music
+modes for bank songs".
 """
 import dataclasses
 import os
@@ -45,6 +52,9 @@ PROVEN = frozenset({"star_wars_elg-1.10", "fallout_le-0.82", "transformers_mtmte
 #: (:func:`.menu_settings.offered` refuses them: the siblings of ELG's DEPRECATED rows are live)
 NO_ROW = frozenset({"pokemon_le-0.82", "star_wars_2025_le-0.96", "star_wars_2025_pro-0.84",
                     "walking_dead_remastered_le-0.92"})
+
+#: PAD-1358: the param bits a music bank's new record keeps (the bank's number: ``0x82600008`` in image-sc02.bin)
+BANK_KEEP = 0xFFF
 
 NOT_PROVEN = "Music modes are not offered on %s yet: on Spike 3 they go on the games the app has proven them on."
 NO_ROW_WORDS = ("Music modes are not offered on %s: its operator menu has no setting the game "
@@ -170,26 +180,33 @@ def _gain(wav, db):
     return out
 
 
-def records(project, modes, img, log=None, taken=(), first_idx=None):
+def records(project, modes, img, log=None, taken=(), first_idx=None, bank=None, like=None):
     """``(mswaps, news, used)`` for *modes*' files over the container view *img*
     (:class:`.spike3_sound.ImageSound`): *mswaps* ``[(mode, slot key, record key)]``, *news* the
     :class:`.spike3_write.NewRecord` s to append (after *first_idx*, default the container's
     count), *used* the record lines' entries (:func:`.sound_modes.card_record`). *taken*: record
-    keys other new records of the build already have."""
+    keys other new records of the build already have. PAD-1358: *bank* NN when *img* is the music
+    bank ``image-scNN.bin`` and the slots are its songs (``music_catNN_NNNN``); *like* the records
+    of every bank, whose params say which bits a new key may vary (the bank's number stays)."""
     from . import spike3_write as W
     log = log or (lambda *a, **k: None)
     taken = [tuple(t) for t in taken]
     first = img.count if first_idx is None else int(first_idx)
     mswaps, news, used, made, p2s = [], [], [], {}, []
     for rel in sorted(modes.slots):
-        idx = SMo.slot_idx(rel)
+        if bank is None:
+            idx = SMo.slot_idx(rel)
+        else:
+            b = SMo.bank_slot(rel)
+            idx = b[1] if b is not None and b[0] == int(bank) else None
         for m, src in sorted(modes.slots[rel].items()):
             if idx is None:
                 log("Music modes: %s is left out: %s" % (SMo.what(rel, m), SMo.NOT_SOUND), "warning")
                 continue
             if idx >= img.count:
-                log("Music modes: %s is left out: this card's sound container has only %d sounds."
-                    % (SMo.what(rel, m), img.count), "warning")
+                log("Music modes: %s is left out: this card's %s has only %d sounds."
+                    % (SMo.what(rel, m), "sound container" if bank is None
+                       else "music bank image-sc%02d.bin" % int(bank), img.count), "warning")
                 continue
             rec = img.records[idx]
             try:
@@ -202,7 +219,11 @@ def records(project, modes, img, log=None, taken=(), first_idx=None):
                 wav = _gain(wav, db)
             k = (idx, os.path.abspath(wav))
             if k not in made:
-                flags, param = W.free_key(img.records, rec.flags_lo, rec.param, taken)
+                if bank is None:
+                    flags, param = W.free_key(img.records, rec.flags_lo, rec.param, taken)
+                else:
+                    flags, param = W.free_key(img.records, rec.flags_lo, rec.param, taken,
+                                              like=like or img.records, keep=BANK_KEEP)
                 taken.append((flags, param))
                 p2 = W.free_param2(img.records, ("%s|%d|%s" % (rel, m, wav)).encode(), p2s)
                 p2s.append(p2)
@@ -211,7 +232,10 @@ def records(project, modes, img, log=None, taken=(), first_idx=None):
                 news.append(nr)
             nr, host = made[k]
             mswaps.append((m, struct.pack("<II", rec.flags_lo, rec.param), nr.key))
-            used.append({"rel": rel, "slot": idx, "mode": m, "host": host, "db": db, "lines": 1})
+            u = {"rel": rel, "slot": idx, "mode": m, "host": host, "db": db, "lines": 1}
+            if bank is not None:                        # the record line says ``<bank>:<record>``
+                u.update(bank=int(bank), bank_idx=host)
+            used.append(u)
     return mswaps, news, used
 
 
@@ -248,26 +272,43 @@ def plan(project, modes, prof, reader, game_raw, log=None, only=False, adds=None
     if why:
         raise Spike3MusicError(why)
     # each slot's own container: the image.bin whose project folder holds its idx file (the game's own, ``audio``,
-    # or the system's menu sounds, ``audio_spike_menu``); a music bank's songs are not idx files
-    conts = {folder: (cp, node) for cp, node, folder, stem in W.project_sound_dirs(reader) if stem is None}
-    if not conts:
+    # or the system's menu sounds, ``audio_spike_menu``), or PAD-1358 the music bank image-scNN.bin beside it whose
+    # song it is (``music_catNN_NNNN``: Fallout's game music is mostly in its 137 bank songs)
+    conts = {(folder, stem): (cp, node) for cp, node, folder, stem in W.project_sound_dirs(reader)}
+    if not any(stem is None for _f, stem in conts):
         raise Spike3MusicError("this card has no sound container")
     from . import spike3_menu
     setting, program = menu_program(game_raw, modes, spike3_menu.rows_wanted(project))
+    groups = {}
+    for rel in modes.slots:
+        folder = rel.rsplit("/", 1)[0] if "/" in rel else ""
+        b = SMo.bank_slot(rel) if SMo.slot_idx(rel) is None else None
+        groups.setdefault((folder, None if b is None else "music_cat%02d" % b[0]), []).append(rel)
+    likes = {}
+
+    def bank_like(folder):
+        """Every music bank's records of *folder*: the bits their keys vary."""
+        if folder not in likes:
+            likes[folder] = [r for (f, stem), (_cp, nd) in conts.items() if f == folder and stem
+                             for r in W.read_container(reader, nd)[1].records]
+        return likes[folder]
+
     mswaps, news, used = [], {}, []
-    for folder in sorted({rel.rsplit("/", 1)[0] if "/" in rel else "" for rel in modes.slots}):
-        sub = dataclasses.replace(modes, slots={r: f for r, f in modes.slots.items()
-                                                if (r.rsplit("/", 1)[0] if "/" in r else "") == folder})
-        if folder not in conts:
-            for rel in sub.slots:
+    for (folder, stem), rels in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1] or "")):
+        sub = dataclasses.replace(modes, slots={r: modes.slots[r] for r in rels})
+        if (folder, stem) not in conts:
+            where = ("music bank image-sc%s.bin" % stem[len("music_cat"):]) if stem else (folder or "it")
+            for rel in rels:
                 log("Music modes: %s is left out: this card has no sound container for %s."
-                    % (SMo.what(rel, 2), folder or "it"), "warning")
+                    % (SMo.what(rel, 2), where), "warning")
             continue
-        card_path, node = conts[folder]
+        card_path, node = conts[(folder, stem)]
         _hdr, img = W.read_container(reader, node)
         before = list((adds or {}).get(card_path) or ())
+        bank = int(stem[len("music_cat"):]) if stem else None
         ms, nw, us = records(project, sub, img, log, taken=[(r.flags_lo, r.param) for r in before],
-                             first_idx=img.count + len(before))
+                             first_idx=img.count + len(before), bank=bank,
+                             like=bank_like(folder) if stem else None)
         mswaps += ms
         used += us
         if nw:

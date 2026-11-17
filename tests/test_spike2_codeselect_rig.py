@@ -1115,7 +1115,9 @@ def test_the_extra_mounts_are_owned_and_torn_down_by_the_run():
     text = _read("watch.sh")
     code = _code(text)
     assert "CARD_MNTS=()" in code
-    mount = code[code.index(SEL_GUARD + '\n        SEL_PARTS='):]
+    # PAD-1279: the guard also leaves a test card out (it has no games partitions to list)
+    guard = SEL_GUARD.replace("; then", ' && [ "$PAD_TESTCARD" != 1 ]; then')
+    mount = code[code.index(guard + '\n        SEL_PARTS='):]
     mount = mount[:mount.index("elif [ -n \"${PAD_GAME_DIR:-}\" ]")]
     assert 'cardmount.sh" "$PAD_CARD" --part "$_p"' in mount
     assert '*"already mounted"*) ;;' in mount, "only mounts THIS run created"

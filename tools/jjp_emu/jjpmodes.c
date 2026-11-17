@@ -1017,9 +1017,14 @@ static int in_list(const int *l, int n, int v) { for (int i = 0; i < n; i++) if 
  * JJP_MODS_TEST_GAMEMODE=<Mode global> JJP_MODS_TEST_SWITCH=<switch> starts
  * that game mode (its own Mode::start) when that switch is hit, so a proof run
  * can show a custom mode yielding to it.  Unset on a machine. */
-static void *test_gm; static int test_sw = -1;
+static void *test_gm; static int test_sw = -1, test_end_sw = -1;   /* JJP_MODS_TEST_END_SWITCH ends it (PAD-1354) */
 static void test_hook(int si)
 {
+    if (si == test_end_sw && test_gm && (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff)) {
+        lg("TEST: ending game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
+        ((vfn0_t)vslot(test_gm, VT_END))(test_gm);
+        return;
+    }
     if (si != test_sw || !test_gm) return;
     if (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff) return;
     lg("TEST: starting game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
@@ -1050,6 +1055,7 @@ static hnode_t hnodes[MAX_HOOKS];
 static hdesc_t hdescs[MAX_HOOKS];
 static int nhooks;
 static unsigned events_hooked;          /* bit i = EVENTS[i] has our node */
+static unsigned want_events;            /* bit i = a loaded mode uses EVENTS[i] */
 static long long (*score_get)(int);     /* score_get_player_score(1..4) */
 static int (*player_up)(void);          /* game_flow_get_player_up(): 1..4 */
 static unsigned char gm_was[MAX_GAME_MODES];
@@ -1106,6 +1112,7 @@ static void raise_start(pm_t *m, const char *why)
 }
 
 static int ticking;
+static int multiball_seen;      /* a multiball ran since the last multiball_end (set in per_frame) */
 static void starts_tick(const char *via, int force)
 {
     static long last;
@@ -1166,11 +1173,32 @@ static void starts_tick(const char *via, int force)
     pthread_mutex_unlock(&mu);
 }
 
+static int last_ball_done = -1;  /* the ball last_ball was raised for (player * 1000 + balls completed) */
+static int (*done_balls)(int);   /* score_get_balls_completed(player) */
 static void on_event(int e)
 {
     if (!installed) return;
+    if (!strcmp(EVENTS[e].word, "last_ball")) {
+        int p = player_up ? player_up() : 0, key = p * 1000 + (done_balls && p > 0 ? done_balls(p) : 0);
+        if (key == last_ball_done) return;      /* the game's hook and its count both said it */
+        last_ball_done = key;
+    }
     pthread_mutex_lock(&mu);
-    lg("event %s", EVENTS[e].word);
+    {   /* which ball of which player: the evidence for first/last ball */
+        static int (*left)(void); static int r2;
+        if (!r2) { r2 = 1; left = (int (*)(void))sym("_Z34game_flow_get_balls_left_player_upv"); }
+        int p = player_up ? player_up() : 0;
+        if (p > 0 && done_balls) lg("event %s (player %d, %d ball(s) completed, %d left)", EVENTS[e].word, p,
+                                    done_balls(p), left ? left() : -1);
+        else lg("event %s", EVENTS[e].word);
+    }
+    /* The game runs its multiball-end hook whenever the ball count settles
+     * (MultiballDevice::system_stabilize_proc), one ball or not: it is a
+     * multiball's end only after a multiball (Wonka 03.03, PAD-1354). */
+    if (!strcmp(EVENTS[e].word, "multiball_end")) {
+        if (!multiball_seen) { lg("  (no multiball ran: not a multiball end)"); pthread_mutex_unlock(&mu); return; }
+        multiball_seen = 0;
+    }
     for (int k = 0; k < npm; k++)
         if (pms[k].start_on & (1u << e)) raise_start(&pms[k], EVENTS[e].word);
     pthread_mutex_unlock(&mu);
@@ -1190,6 +1218,7 @@ static int hk_game_start(void *a)
         pm_t *m = &pms[k];
         m->count = 0; m->score_done = 0; m->runs_game = 0; m->runs_ball = 0; m->pending = NULL; m->combo_pos = 0;
     }
+    last_ball_done = -1;
     lg("game start: start counts, score marks and runs reset");
     pthread_mutex_unlock(&mu);
     return 0;
@@ -1205,6 +1234,13 @@ static int hk_ball_start(void *a)
         if (m->count_reset_ball && m->count) { lg("\"%s\": start count %d reset (new ball)", m->name, m->count); m->count = 0; }
     }
     pthread_mutex_unlock(&mu);
+    /* last_ball: the game runs HookLastBall_ just before the last ball (Wonka
+     * 03.03: a list with no node of the game's own); its own count backs that up
+     * on a title that does not, the player up's last ball starting with no balls
+     * left (2, 1, 0 on a 3-ball game).  Either raises it once a ball. */
+    static int (*left)(void); static int r;
+    if (!r) { r = 1; left = (int (*)(void))sym("_Z34game_flow_get_balls_left_player_upv"); }
+    if (left && left() == 0 && (want_events & (1u << 2))) on_event(2);
     return 0;
 }
 static int hk_score(void *a) { (void)a; starts_tick("HookScore_", 0); return 0; }
@@ -1231,8 +1267,10 @@ static void install_rules(void)
     if (!rules_on) { lg("start rules: switches only; no game hooks used"); return; }
     score_get = (long long (*)(int))sym("_Z22score_get_player_scorei");
     player_up = (int (*)(void))sym("_Z23game_flow_get_player_upv");
+    done_balls = (int (*)(int))sym("_Z25score_get_balls_completedi");
     unsigned want = 0; int score = 0;
     for (int k = 0; k < npm; k++) { want |= pms[k].start_on; if (pms[k].start_score > 0) score = 1; }
+    want_events = want;
     hook_add("HookGameStart_", (void *)hk_game_start, "pad game start");
     hook_add("HookBallStart_", (void *)hk_ball_start, "pad ball start");
     for (int e = 0; e < NEVENTS; e++)
@@ -1381,6 +1419,7 @@ static void per_frame(void)
             end_mode(&pms[i], "ball end");
             if (pms[i].pending) { lg("\"%s\" start (%s) dropped: the ball ended first", pms[i].name, pms[i].pending); pms[i].pending = NULL; }
         }
+        multiball_seen = 0;
         lg("ball over");
     }
     was_ingame = ig;
@@ -1400,6 +1439,7 @@ static void per_frame(void)
         int bip = balls_in_play ? balls_in_play() : -1;
         if (bip != last_bip) { lg("balls in play: %d", bip); last_bip = bip; }
         if (bip > 1 && !multiball_since) multiball_since = now_ms();
+        if (multiball_since && now_ms() - multiball_since >= 500) multiball_seen = 1;
         else if (bip <= 1) multiball_since = 0;
     }
     for (int i = 0; i < npm; i++) {
@@ -1553,6 +1593,7 @@ static void *installer(void *arg)
     if (getenv("JJP_MODS_TEST_GAMEMODE") && getenv("JJP_MODS_TEST_SWITCH")) {
         test_gm = sym(getenv("JJP_MODS_TEST_GAMEMODE"));
         test_sw = sw_index(getenv("JJP_MODS_TEST_SWITCH"));
+        if (getenv("JJP_MODS_TEST_END_SWITCH")) test_end_sw = sw_index(getenv("JJP_MODS_TEST_END_SWITCH"));
         lg("TEST hook: %s starts game mode %s (%p)", getenv("JJP_MODS_TEST_SWITCH"), getenv("JJP_MODS_TEST_GAMEMODE"), test_gm);
     }
     int hooked = 0;

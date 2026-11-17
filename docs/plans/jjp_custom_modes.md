@@ -40,14 +40,17 @@ with name, id and proc id, on any title.
 
 ## The SDK (PAD-1337)
 
-Status 2026-11-16: **modes are data, and a PAD-written install ISO carries
-them to a real machine.** Proven on Guns N' Roses 3.03 and Wonka 03.03 in the
-emulator, same runtime on both. How to write modes: `tools/jjp_emu/MODES.md`.
+Status 2026-11-17: **modes are data, and they reach a real machine two ways:
+a USB stick applied through the game's own Update USB hot fix (no reinstall,
+scores kept), or a PAD-written install ISO.** Proven on Guns N' Roses 3.03 and
+Wonka 03.03 in the emulator, same runtime on both; on Wonka both delivery ways
+were run end to end through the game itself (PAD-1349, MODES.md "On a real
+machine"). How to write modes: `tools/jjp_emu/MODES.md`.
 
 | Piece | What it does |
 |---|---|
 | `jjpmodes.c` | The runtime. Reads `title.cfg` + `*.mode` from `JJP_MODS_DIR` (default: `modes/` beside the library) and runs each mode as an engine Mode: start shots and a start count, scoring shots, points, the game's timer, completion, sounds, lamps, the game's fonts, a `game_modes` policy |
-| `mkjjpmodes.py` | `build`: a stock install ISO in, the same ISO out with the runtime, the modes and one guarded `rungame.sh` line; `check`: a mode folder against a title's port report; `inspect`: what an ISO carries |
+| `mkjjpmodes.py` | `build`: a stock install ISO in, the same ISO out with the runtime, the modes and one guarded `rungame.sh` line; `check`: a mode folder against a title's port report; `inspect`: what an ISO carries; `stick`: a USB stick folder whose `hotfix/runme.sh` installs the modes (or turns them off/on, or removes them) when the service menu's USB Update hot fix runs it (hold left flipper, Plus Minus Plus Minus, ENTER ENTER) |
 | `jjpport.py` | What a title offers, statically from its binary: can it run modes, its Mode vtable, shot switches, lamps, sounds, fonts, Mode classes, starter defaults |
 | `modes/ports/`, `modes/examples/` | The report and a starter mode folder per JJP title in the library |
 | `run_game.sh` | `JJP_MODS_SO` + `JJP_MODS_DIR` preload the runtime on the rig; an image carrying `scripts/padmodes.sh` gets it sourced exactly where `rungame.sh` does |
@@ -99,6 +102,38 @@ What was learned on the way, all on GnR 3.03:
   binary resolves itself, so no preload can catch it, and every killed rig game
   stayed a zombie holding its memory (20 held 16 GB, WSL in full swap).
   `killgame.sh` now says so; only `wsl --shutdown` frees it.
+
+## The game's own modes (PAD-1351)
+
+Status 2026-11-16: **a `.stock` file changes one of the game's own modes - its timer,
+its points, which shots count - emulator-proven on Wonka 03.03's Candy Lane** (timer
+30 s to 60 s, awards x3, a shot taken off it, a switch giving it a shot) and mapped
+statically on every title. How to write one: `tools/jjp_emu/MODES.md` ("The game's own
+modes, changed").
+
+What the engine showed (Wonka 03.03, read through `/proc/<pid>/mem` of a running game):
+
+* Each stock mode is one global per class (`cl_mode` CandyLaneMode, `wbc_mode`
+  WonkaBarCraze, `mtv_mode` MikeTeaveeMode, ...). Shots are `shot_id_t` numbers. Each
+  switch's dispatch calls `switch_do_dispatch_work(shot)`, which puts the shot in
+  argument 4 of its proc and calls the table's `shot_made_<name>()`. That function
+  calls every interested mode's `shot_dispatch()` **directly** (Candy Lane hears
+  12 of the 41 shots).
+* Calls a class makes on `this` are speculatively devirtualised: "if the slot still
+  holds my own function, call it inline, else call the slot". Replacing a slot is
+  therefore enough to catch `score_and_total`, `set_time` and the is_running checks
+  from inside a class. A call on a known global (`shot_made_*` -> `X::shot_dispatch`)
+  is fully direct, so `shot_dispatch` itself cannot be caught; its opening
+  `this->is_running*()` can, and the return address says who asked.
+* `Mode::restart` re-creates the run proc only when it is gone, so `set_time` from
+  inside the run proc's first entry (`start_run_func` jumps through the `run_proc`
+  slot) is as safe as the game's own `set_time` right after `start`.
+* The Wonka Bar award modes keep one timer for the class family
+  (`WonkaBarAwardModes::wba_timer`, from `adj_wba_timer_difficulty`: 60 - 15 x the
+  setting) and count it down in `timer_run_proc` unless `game_timers_paused()`.
+* The shot table is ciphertext in the file and lives in an `rwxp` mapping of the game
+  (the Envelope's), so it is found at run time by the handler pointers, never
+  statically.
 
 ## Start rules (PAD-1354)
 

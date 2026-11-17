@@ -244,6 +244,47 @@ def test_vtable_resolution_tells_folded_virtuals_apart():
                   "score": 0x88, "tick": 0xa8, "start_choreo": 0xb0, "total_choreo": 0xb8}
 
 
+def test_a_lamp_group_is_a_lamp_name_too(tmp_path):
+    # PAD-1350: `lamps` takes lp_* lamps or ls_* lamp groups (MODES.md); the checker knew only lamps
+    mm = _load("mkjjpmodes")
+    port = dict(PORT, lamp_groups=["ls_all"])
+    folder = _folder(tmp_path, {"1.mode": "start = switch_target_jam\nlamps = lp_target_jam ls_all\n"})
+    assert mm.check_modes(folder, port)[1] == []
+    (tmp_path / "1.mode").write_text("start = switch_target_jam\nlamps = ls_nope\n")
+    assert "lamps not in" in "\n".join(mm.check_modes(folder, port)[1])
+
+
+def test_every_title_that_can_run_modes_has_a_starter_that_checks_clean():
+    import json
+    mm = _load("mkjjpmodes")
+    ports = os.path.join(RIG, "modes", "ports")
+    can = []
+    for fn in sorted(os.listdir(ports)):
+        if fn.endswith(".live.json"):                   # a running game's read (PAD-1351), not a title
+            continue
+        p = json.load(open(os.path.join(ports, fn), encoding="utf-8"))
+        if not p["can_run_modes"]:
+            continue
+        label = fn[:-5]
+        can.append(label)
+        modes, problems = mm.check_modes(os.path.join(RIG, "modes", "examples", label), p)
+        assert modes and problems == [], (label, problems)
+        # the vtable slots the runtime uses, resolved the same on every title
+        assert {k: p["mode_vtable"][k] for k in ("start", "end", "score", "tick")} == \
+            {"start": 16, "end": 32, "score": 136, "tick": 168}, label
+    assert len(can) == 9, can
+
+
+def test_build_needs_no_prebuilt_runtime():
+    # PAD-1350: left out, --so means "build it against the ISO's own glibc"
+    mm = _load("mkjjpmodes")
+    src = open(os.path.join(RIG, "mkjjpmodes.py"), encoding="utf-8").read()
+    build_parser = src[src.index('sub.add_parser("build"'):src.index('sub.add_parser("inspect"')]
+    assert 'add_argument("--so", help=' in build_parser and "default=SO_DEFAULT" not in build_parser
+    assert "build_runtime(mnt + ROOT_LIBDIR" in src and mm.ROOT_LIBDIR == "/lib/x86_64-linux-gnu"
+    assert "OBJ=\"${OUT%.so}.o\"" in open(os.path.join(RIG, "buildmods.sh"), encoding="utf-8").read()
+
+
 class _MemElf:
     """A sparse address space for jjpport.hold: typeinfos and vtables at chosen addresses."""
 

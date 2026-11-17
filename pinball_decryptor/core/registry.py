@@ -143,6 +143,12 @@ class Capabilities:
     # is up, and an era could have an emulator without a mode runtime.  Used by
     # Stern Spike 2.  See gui/modes_tab.py and tools/spike2_emu/modes.
     modes: bool = False
+    # PAD-1350: the Modes tab's JJP editor - custom modes for the JJP mode SDK
+    # (tools/jjp_emu/MODES.md), one folder of mode files per title, checked
+    # against the title's port report and built into its install ISO.  Its own
+    # flag, never ``modes``: that one also gates the Stern-only Attract, Play
+    # Options and Expression Lights tabs.  Used by JJP.  See webui/modes_jjp.py.
+    jjp_modes: bool = False
     # Auto-transcribe path: run faster-whisper across the extracted
     # audio files and emit a ``callouts.csv`` mapping each WAV to its
     # spoken text (non-speech samples are skipped via VAD).  Used by

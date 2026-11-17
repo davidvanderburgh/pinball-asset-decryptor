@@ -23,7 +23,8 @@ Turning the modes off on a machine without reinstalling: create
 /jjpe/perm/padmodes.off (padmodes.sh checks for it).
 
     mkjjpmodes.py check --modes DIR [--port PORT.json]
-    mkjjpmodes.py build --iso IN.iso --modes DIR --out OUT.iso [--so jjpmodes.so]   (root, WSL)
+    mkjjpmodes.py build --iso IN.iso --modes DIR --out OUT.iso [--port P.json] [--so jjpmodes.so]   (root, WSL)
+        (no --so: the runtime is built from jjpmodes.c against the ISO's own glibc)
     mkjjpmodes.py inspect --iso OUT.iso
 """
 import argparse
@@ -49,6 +50,8 @@ RUNONCE_LINE = "$JJPEDIR/scripts/runonce.sh"
 ISO_MODES_DIR = "/jjp/padmodes"
 OFF_SWITCH = "/jjpe/perm/padmodes.off"
 SO_DEFAULT = "/var/tmp/jjpmodes.so"
+#: the image's glibc, where the runtime is linked against it (buildmods.sh JJP_MODS_LIBDIR)
+ROOT_LIBDIR = "/lib/x86_64-linux-gnu"
 MODES_HOOK_MARK = "# PAD custom modes:"
 MODES_HOOK_LINES = [
     "",
@@ -384,10 +387,14 @@ def check_value(kind, v, port=None):
                                                   " ".join(START_EVENTS[t] for t in missing))
         return None
     if kind == "after":
+        # the game's mode globals are known only from a live map (stock.objects, jjpstock.py
+        # live); without one a name cannot be refused, as a global is not in the file
         names = [t for t in _names(v) if t != "any"]
-        known = set((port or {}).get("game_modes", [])) | set((port or {}).get("mode_classes", []))
-        if port is None or not known or not (port or {}).get("game_modes"):
+        st = (port or {}).get("stock") or {}
+        objects = set(st.get("objects") or ()) | set((port or {}).get("game_modes") or ())
+        if port is None or not objects:
             return None
+        known = objects | set(st.get("classes") or ()) | set(port.get("mode_classes") or ())
         missing = [t for t in names if t not in known]
         return None if not missing else "not a game mode or Mode class of %s: %s" % (
             port.get("title", "this game"), " ".join(missing))
@@ -398,6 +405,9 @@ def check_value(kind, v, port=None):
     if table is None:
         return None
     known = set(port.get(table, []))
+    if table == "lamps":
+        # a mode lights lamps (lp_*) or whole lamp groups (ls_*): MODES.md, jjpmodes.c find_lamps
+        known |= set(port.get("lamp_groups", []))
     if table == "switches":
         known = set(s["symbol"] if isinstance(s, dict) else s for s in port.get("switches", []))
     if not known:
@@ -541,9 +551,24 @@ def sha256_file(p):
     return h.hexdigest()
 
 
+def build_runtime(libdir, out):
+    """jjpmodes.c built by buildmods.sh against the glibc in *libdir* (an image's own) -> out.
+    Raises Refused with the build's last lines when it fails (no gcc, a glibc too new...)."""
+    import subprocess
+    env = dict(os.environ, JJP_MODS_LIBDIR=libdir, JJP_MODS_SO=out)
+    r = subprocess.run(["bash", os.path.join(HERE, "buildmods.sh")], env=env, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True, errors="replace")
+    if r.returncode != 0 or not os.path.isfile(out):
+        tail = " | ".join([ln for ln in (r.stdout or "").splitlines() if ln.strip()][-4:])
+        raise Refused("building the mode runtime failed (rc %d): %s" % (r.returncode, tail))
+    print("runtime: built against the image's glibc (%d bytes)" % os.path.getsize(out), flush=True)
+    return out
+
+
 def stage_modes(mj, raw, so_path, mode_dir, manifest):
     """The SDK + modes into a root image (loop-mounted rw), rungame.sh hooked; e2fsck after.
-    -> {path in the root: sha256}."""
+    *so_path* None builds the runtime against this root's own glibc first (PAD-1350: the app
+    builds with no runtime of its own lying about).  -> {path in the root: sha256}."""
     staged = collections.OrderedDict()
 
     def put(src, rel, mode):
@@ -568,6 +593,9 @@ def stage_modes(mj, raw, so_path, mode_dir, manifest):
         d = mnt + PADMODES_DIR
         if os.path.isdir(d):
             shutil.rmtree(d)
+        if so_path is None:
+            so_path = build_runtime(mnt + ROOT_LIBDIR, os.path.join(os.path.dirname(raw), "jjpmodes.so"))
+        manifest["so_sha256"] = sha256_file(so_path)
         put(so_path, PADMODES_DIR + "/jjpmodes.so", 0o755)
         for fn in sorted(os.listdir(mode_dir)):
             p = os.path.join(mode_dir, fn)
@@ -591,27 +619,45 @@ def stage_modes(mj, raw, so_path, mode_dir, manifest):
     return staged
 
 
+def _stop_on_sigterm():
+    """A SIGTERM (the app's Cancel) raises Refused, so the with-blocks unmount and the
+    finally deletes the scratch, instead of dying with the ISO and the root still mounted."""
+    import signal
+
+    def stop(*_a):
+        raise Refused("cancelled")
+    try:
+        signal.signal(signal.SIGTERM, stop)
+    except (ValueError, OSError):                       # not the main thread
+        pass
+
+
 def build(a):
     import mkjjpmulti as mj
     mj.require_root("build")
+    _stop_on_sigterm()
     mj.need_tools("partclone.ext4", "partclone.restore", "gunzip", "split", "e2fsck", "losetup", "mount",
                   "umount", "debugfs", "xorriso", "cp")
     iso = os.path.abspath(a.iso)
     if not os.path.isfile(iso):
         raise Refused("%s does not exist" % iso)
-    so = os.path.abspath(a.so)
-    if not os.path.isfile(so):
-        raise Refused("%s does not exist - build it with buildmods.sh" % so)
-    with open(so, "rb") as f:
-        if f.read(4) != b"\x7fELF":
-            raise Refused("%s is not an ELF library" % so)
+    so = None
+    if a.so:
+        so = os.path.abspath(a.so)
+        if not os.path.isfile(so):
+            raise Refused("%s does not exist - build it with buildmods.sh (or leave out --so)" % so)
+        with open(so, "rb") as f:
+            if f.read(4) != b"\x7fELF":
+                raise Refused("%s is not an ELF library" % so)
+    else:
+        mj.need_tools("gcc", "objdump", "nm")
     port = json.load(open(a.port)) if a.port else None
     modes, problems = check_modes(a.modes, port)
     for p in problems:
         print("problem: " + p)
     if problems and not a.force:
         raise Refused("%d problem(s) in %s (--force writes it anyway)" % (len(problems), a.modes))
-    out = os.path.abspath(mj.check_output_path(a.out, [iso], force=a.force))
+    out = os.path.abspath(mj.check_output_path(a.out, [iso], force=a.force or a.overwrite))
     work = os.path.abspath(a.workdir) if a.workdir else os.path.join(os.path.dirname(out), ".mkjjpmodes_" + os.path.basename(out))
     os.makedirs(work, exist_ok=True)
     t0 = time.time()
@@ -631,7 +677,8 @@ def build(a):
                            for m_ in modes if not m_.get("stock")]),
                 ("stock", [collections.OrderedDict((k, m_.get(k, "")) for k in ("file",) + tuple(STOCK_KEYS))
                            for m_ in modes if m_.get("stock")]),
-                ("so_sha256", sha256_file(so)),
+                # so_sha256: stage_modes records it - with no --so the runtime is built there,
+                # against the root's own glibc (PAD-1350)
             ])
             staged = stage_modes(mj, work_raw, so, a.modes, manifest)
             chunks = mj.partclone_root(work_raw, os.path.join(work, "chunks"), info.split_size(), None, None)
@@ -698,12 +745,14 @@ def main(argv=None):
     s.add_argument("--iso", required=True)
     s.add_argument("--modes", required=True)
     s.add_argument("--out", required=True)
-    s.add_argument("--so", default=SO_DEFAULT, help="the runtime (default %s, buildmods.sh's)" % SO_DEFAULT)
+    s.add_argument("--so", help="a runtime built already (buildmods.sh's %s); left out, it is built "
+                              "against the ISO's own glibc" % SO_DEFAULT)
     s.add_argument("--port")
     s.add_argument("--cache-dir")
     s.add_argument("--workdir")
     s.add_argument("--keep-work", action="store_true")
-    s.add_argument("--force", action="store_true")
+    s.add_argument("--force", action="store_true", help="write it despite problems in the modes")
+    s.add_argument("--overwrite", action="store_true", help="replace an earlier output")
     s = sub.add_parser("inspect", help="list the modes a mode ISO carries")
     s.add_argument("--iso", required=True)
     s = sub.add_parser("stick", help="write a USB stick folder: the Update USB hot fix installs the modes "

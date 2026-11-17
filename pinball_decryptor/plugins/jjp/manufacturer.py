@@ -187,6 +187,10 @@ class JJPManufacturer(Manufacturer):
         # ISO intermediate).  Surfaces the "From ISO / From SSD"
         # radio on the Extract + Write tabs.
         direct_ssd=True,
+        # PAD-1350: the Modes tab's JJP editor (webui/modes_jjp.py) - custom
+        # modes for every title whose port report can run them, built into
+        # the title's install ISO (tools/jjp_emu/mkjjpmodes.py build).
+        jjp_modes=True,
         # Multi-boot (item 118): the Multi-boot tab with its JJP backend -
         # two install ISOs of the same game code become ONE install stick
         # with a boot menu (tools/jjp_emu/mkjjpmulti.py; the menu is the

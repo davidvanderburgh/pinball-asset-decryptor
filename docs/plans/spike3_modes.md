@@ -65,7 +65,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live, and the Insider logins since PAD-1326 (`coop_play.insider_users_a64`; the runtime reads the tables pointer-sized, the manager moved by the PIE's load address) |
 | random clips | clips.cfg, clips in the video bank | **goes on (PAD-1323)** | done: the clip v2 route asks for no `string_new` (the runtime builds the name), the name read as an 8-byte pointer, surfaces compared at full width. A port with the clip v2 lines: Star Wars ELG's today |
 | screen times | `stime` lines in clips.cfg | **goes on (PAD-1323)** | done: the slot read and written as 8 bytes, moved by the PIE's load address; screen_time.py reads 64-bit programs (Fallout LE, Pokemon LE, Transformers LE have the screens) |
-| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin (a music-bank song's to its own bank, PAD-1358), the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10 and Fallout LE 0.82 (below) |
+| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin (a music-bank song's to its own bank, PAD-1358), the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE 0.96 (PAD-1359) (below) |
 | editions | EDITION row, codeselect's `edition=` | **goes on (PAD-1325)** | done: `spike3_menu` grows the 64-bit program's menu (Attract Mode, found by its name); `mks3multi --editions`; nvm.c reads the Spike 3 store (tools/spike3_emu/MULTIBOOT.md). ELG 1.10, Fallout 0.81/0.82, Transformers 0.96 take it |
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
@@ -337,6 +337,73 @@ ends the ball (four drains in 28 s on a 40 s mode); the first-boot setup screen 
 retry; finish the initials with END (left flipper from A) or the next Start presses add players.
 Tests: tests/test_pad1330_spike3_challenges.py (the menu and the balls compare lifted and run at Spike 3's word size;
 the real program with PAD_S3_PROGRAMS).
+
+## The six other Spike 3 titles' challenges (PAD-1369)
+
+A mode's own challenge on the start menu of Walking Dead Remastered LE 0.92, Fallout LE 0.82, Pokemon LE 0.82, Star Wars
+2025 LE 0.96 / Pro 0.84 and Transformers LE 0.96 (Spike 3), as PAD-1330 did on Star Wars ELG.
+
+**The challenge game's sites, every title.** ELG's PAD-1330 sites were paired across by s3port's matcher (ELG as the
+reference, 64-bit to 64-bit) and each read off the target's own code by shape (C:/tmp/PAD-1369 sites.py): the balls of a
+player and of the current player (whole functions), the ball-number set's two compares, the last-ball test's join and the
+ball's end's join (`challenge_balls_at_0..3`, registers 19 19 19 20 on all six: the same code, setting 79 on WDR and
+Pro's, 80 on the rest); the extra-ball test is the ball's end's first call after its 0x90 (Pro: 0x8f) bus question. The
+matcher's pairs needed help in three places: it paired the ball-number set and the last-ball test to one function (the
+next function is the test), on Star Wars 2025 Pro it paired the ball-number set onto the second balls function, and on
+Fallout, Pokemon, Pro and Transformers its "end of the ball" was not it: the function that ORs 0x202 into the status
+bits opens with an `adrp` and no prologue, so the scanner ran it into the function before (Fallout 0x935490, Pokemon
+0x6d48c0, Pro 0x33ea50, Transformers 0x459c80 - each ~0x58e0 past the launch handler, as on ELG). Every site is the
+program's own words, the extra-ball test ends `sub w1, w1, #1; strb; ret`, the launch handler reads flag 13 and fires
+with 8 (tests/test_pad1369_spike3_challenges.py, with PAD_S3_PROGRAMS).
+
+| title | challenge flag | menu | the end of the ball | launch |
+|---|---|---|---|---|
+| Walking Dead Remastered LE 0.92 | 18 | ELG's: kind 3 sets 18 alone (0x1f01e0), CHALLENGE 1920 | 0x36e4f0 | 0x369010 |
+| Fallout LE 0.82 | 18 | index, CHALLENGE 1922, STANDARD 1915 / NORMAL PLAY 1916 | 0x935490 | 0x92ffb0 |
+| Pokemon LE 0.82 | 17 | index, CHALLENGE 1915, STANDARD 1911 / 1912 | 0x6d48c0 | 0x6cef90 |
+| Star Wars 2025 LE 0.96 | 17 | index, CHALLENGE 1915, STANDARD 1911 / 1912 | 0x378a30 | 0x373550 |
+| Star Wars 2025 Pro 0.84 | 17 | index, CHALLENGE 1911, STANDARD 1907 / 1908 | 0x33ea50 | 0x339570 |
+| Transformers LE 0.96 | 18 | index, CHALLENGE 1922, STANDARD 1915 / 1916 | 0x459c80 | 0x4543a0 |
+
+**The index menus' game-mode tables** (64-bit, C:/tmp/PAD-1369 gpm64.py): the adapter's accessors (`cmp w1, #last;
+ubfiz x1, x1, #6; adrp; add`) give a table of 64-byte entries in .bss {index +0, flag u16 +4, caption +6, name +8, balls
+u32 +12}, filled by one constructor (its stores emulated). Fallout has two challenges of its own (RED MENACE, PIPFALL:
+flag 18, one ball), Star Wars 2025 LE two (ESCAPE BESPIN, NEVER TELL ME THE ODDS: flag 17), Pokemon a CHALLENGE MODE
+entry with Venom's words (DEFEAT KNULL) that its menu does not list, Transformers four one-ball specials with no flag,
+Pro only Standard and Competition. So Godzilla's "the game's own challenge index again" fits two of the five; the entry
+is **Standard's index again** on all five instead: the menu draws it with Standard's caption and name messages, which
+the runtime letters CHALLENGE (the game's own message, `challenge_menu_caption`) and the mode's name while the cursor is
+on it, and the game plays a plain game that the ball's start makes the mode's one-ball challenge game
+(`challenge_menu_sets_on`, `challenge_menu_slot -1`).
+
+**The runtime** (`challenge_menu_frame`, PAD-686's): the list and count in the frame or in registers
+(`challenge_menu_frame_list_reg` / `_count_reg`, hook_full's numbers), Pokemon's copy of the last index
+(`_last_at`), and a `moved` site (`challenge_menu_frame_moved 1`: hooked at Prolonged Competition's point, after the
+frame's press moved the cursor): the press is read off the cursor's change (`challenge_frame_press`), and a press away
+from our entry while a mode is left to step to puts the cursor back and steps the mode instead
+(`challenge_frame_moved`, lifted by the test). The name and caption messages come back as the cursor leaves. A plain
+index menu is armed with a ball-start event and `challenge_menu_frame_name_msg` (`mode_project._plain_index_menu` for the
+app's offer). The two hooks on the one frame point stack (PAD-1330's moved_word).
+
+**The app**: the six are in CHALLENGE_MENU_PROVEN (WDR: the game's own 2 of room for 8) and CHALLENGE_MENU_FRAME_PROVEN
+(the five), so the Mode page offers "A new challenge of its own on the game's start menu". `known_game_dir` now reads the
+shipped `ports/spike3` folder too: a Spike 3-only card (Fallout LE, ...) is named by its Stern file name, as ELG's was,
+not only once the app has opened it.
+
+Proof (2026-11-17, Spike 3 rig slots 136 / 138, hidden and MUTED, each title's set built by spike3_modes.plan from its
+library card with one mode, PAD CHALLENGE, `challenge new`; C:/tmp/PAD-1369 plan_chg.py, job.sh, play_chg.sh): on every
+title the mode was picked on the game's own menu (WDR: `3 entries (1 of the modes' own) - kinds 0 2 256`; the index
+titles: `MODE CHALLENGE appended (entry 9 of 9 / 3 of 3 / 8 of 8 / 3 of 3 / 6 of 6)` and `MODE CHALLENGE shows PAD
+CHALLENGE`), Start: `picked on the start menu: its mode starts as the ball starts`, the ball launched for the player 2 s
+in, the ball ended by the mode's clock (`the ball ends now ... 0x...`) or a drain with it, `an extra ball earned in it is
+not played`, `the balls-per-game getter says 1`, GAME OVER after the one ball (the index titles' Standard plays 4), and
+`PAD CHALLENGE's new high score` filed with the game's own initials entry. Fallout with two modes: the game's own menu
+showed CHALLENGE / PAD CHALLENGE, one right press `MODE CHALLENGE shows PAD SECOND (2 of 2)` with the cursor kept (the
+frame: CHALLENGE / PAD SECOND), and PAD SECOND played. Pokemon with Prolonged Competition beside it: both appended
+(MODE CHALLENGE 3 of 3, UNTIL POWERED OFF 4 of 4), ours picked, Prolonged Competition stayed off, one ball. Control (Star
+Wars 2025 Pro, the port's balls sites taken out): the same pick served balls 2, 3 and 4.
+Rig notes: s3run needs root (`wsl -u root`; as the user the presses find no machine); Pro steps LEFT at once after the
+chord (its window is short) - from STANDARD the left press wraps straight onto our entry.
 
 ## The Modes tab and Try it
 
@@ -1109,7 +1176,8 @@ file under a 26 s carrier looped past it), so no descriptor of the game's is nee
   64-bit program's page table (32-byte records numbered from INVALID, each pointing at the page's five-language name
   line; in a PIE through its R_AARCH64_RELATIVE addends; another table that starts with INVALID, ELG's 187 wire colours,
   is told apart by naming our pages). Audio Content is 13 on Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE
-  0.96, an empty page as shipped; `plan()` takes a 64-bit row's category from it (`wide_category`) and says where it is
+  0.96 (empty as shipped on ELG and Fallout; Transformers' carries Family Mode and Attract Mode Developer Credits
+  Music, under which MUSIC MODE goes first); `plan()` takes a 64-bit row's category from it (`wide_category`) and says where it is
   (`Adjustments > Machine Settings > Audio Content`). The row is the PAD-1321 grow (`grow_wide_program`).
 - **game.pad**: the card's own program is never touched. The grown copy goes in `/games/pad/padmode/game.pad` and the
   hook runs it in the stock one's place when it is there; a Write without music modes (or Remove) wipes pad/padmode, so
@@ -1119,7 +1187,7 @@ file under a 26 s carrier looped past it), so no descriptor of the game's is nee
 - **The gate**: `sound_modes.title_refusal` sends a Spike 3 profile (`arch == "a64"`) to `spike3_music.title_refusal`:
   offered on `spike3_music.PROVEN` (Star Wars ELG 1.10, Fallout LE 0.82: a Spike 3 port naming sound_lookup and a program
   whose menu takes the row); Pokemon LE, both Star Wars 2025 and Walking Dead Remastered say their menu has no setting the
-  game stopped using; Transformers' program takes the row but has no Spike 3 port. Before, a Spike 3 ELG project passed
+  game stopped using; Transformers LE 0.96 joined PROVEN with PAD-1359 once PAD-1293 gave it its port. Before, a Spike 3 ELG project passed
   the Spike 2 gate by its shared `star_wars_elg-1.10` key and the Write then dropped the modes; Fallout's was refused
   with Spike 2's "update the machine's code". The rest of the sound pane that rides sounds.cfg (sounds in turn, attract
   and shot sounds, the jukebox) says it is Spike 2's on a Spike 3 title, and a Write logs each one asked as left out.
@@ -1147,6 +1215,20 @@ over the stock program, sounds.cfg):
   Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`): PAD-1358 (below) gives them mode
   files too.
 Tests: tests/test_pad1324_spike3_music_modes.py.
+
+**Transformers LE 0.96 (PAD-1359)**, the same way on Spike 3 slot 251 (2026-11-17, hidden, muted, the PCM kept): its
+14 stereo idx sounds of 20 s or more given the two tones (28 records, its program grown into game.pad). The runtime armed
+`28 record(s) over 3 mode(s)` with the setting at the program's own address (0xa8c120) and sound_lookup at the port's
+0x51fe30; Adjustments > Machine Settings (its third row, after Pricing) listed Audio Content with Music Mode first, read
+back 2, 3, 1 as set and said `mode 2/3/1 from here on`; request 481 (idx0034) in mode 2 took mode 2's record and the
+PCM was 100% 700 Hz, request 477 (idx2440) in mode 3 100% 1100 Hz, request 478 (idx3945) in mode 1 the game's own
+song (no swap, no tone). Its extract had had no request map: its request table (1545 requests, 32-byte records, the
+list at +16) reaches 66% of its 4945 sound ids, under the 90% `spike3_requests` held a table to (every other Spike 3
+card reaches 96-100%, and no other registry table on any reaches 2%). Walking Dead Remastered LE 0.92 had none either:
+its 817 requests reach 17% of its 7836 sound ids, yet 746 of them name a recording. The table is now the one reaching
+the most sound ids, taken at half of them, or at a tenth when it reaches three times any other registry table: all
+eight Spike 3 cards in the library map (Transformers 1490 of 1545, Walking Dead Remastered 746 of 817, the rest as before).
+Tests: tests/test_pad1359_transformers_music_modes.py.
 
 ## Music modes for bank songs (PAD-1358)
 
@@ -1312,3 +1394,9 @@ Next: what the game reads in those answers (the `ff` status and the `f2` reads; 
 card) so the rig's strip boards take lamp frames; then the proof on padled's node 2 / 7 hi plane, the song timing
 (`value sound_voice_played`: the show did not lock to the voice at 12, it ran on its own clock), the app's Spike 3
 side (spike3_modes carrying cabshow.cfg and the Expression lights tab's layout from the port), and the family line.
+
+**PAD-1370: the strips were never the node bus's.** The game sends nodes 2 / 7 (and Fallout's topper, 14) only their
+bring-up there; every lamp frame for them goes to the netbridge's own WS2812 outputs as host cmd `2f` ([channel] [n]
+[the node frame's cmd + body]), channel 0 = node 7, 1 = node 14, 2 = node 2 (docs/plans/spike3_emulation.md, "The
+cabinet strips are the netbridge's"). s3bridge now feeds them to padled, so the rig's strips light. Left for the
+shows: the song timing, the app's Spike 3 side and the family line above.

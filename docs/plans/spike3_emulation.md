@@ -447,6 +447,34 @@ pricing (1/$1.00, 3/$2.00) when counting: 8 quarters show CREDITS 3.
 padglhost wrote stale frames and slowed later boots to 3x), frame dumps sort
 numerically, autoguide no longer mistakes service-menu pages for Guided Setup.
 
+**Operator-menu setting pages open (PAD-1360).** SELECT on a settings group
+(Quick Adjustments, Machine Settings > Coil Settings, LCD/Lamp, Attract
+Mode...) looked dead on the rig, stock cards too. Under gdb (`PAD_S3_GDB`
+below) the game did open the page - its menu handler (ELG 0x3d1b10) pushed it
+and built every row - and ~2 s later got a BACK nobody pressed, from its
+button dispatcher: autoguide's `is_guided_setup` told Guided Setup from the
+service menu by the white VALUES in the right column, which settings pages
+show too, so it pressed BACK on every one. It now knows Guided Setup by its
+own title, a 48-slice fingerprint of the white "Guided Setup" lettering that
+is pixel-identical on every title, theme and language (20 frames from eight
+slots, distance 0.0; the settings pages 0.135-0.177 away). The window runs'
+`watchguide` uses the same test, so the footer no longer says Guided Setup is
+showing on a settings page either. Proven on ELG 1.10 with autoguide running:
+all four pages stay open, NEXT walks their rows, and a value set through the
+game's own Set new value page is saved (a new NVM generation). On PAD-1325's
+two-edition ELG card the EDITION row shows on Attract Mode (1 = Standard, 2 =
+Dark Side); set to 2 there, the store's next generation read EDITION 2 and
+the next power-up's boot menu chose DARK SIDE by it.
+
+**Debugging the game (PAD-1360).** `PAD_S3_GDB=/connectivity/gdb.sock` puts
+the game (not the `env` in front of it) under qemu's gdb stub, waiting before
+its first instruction. Attach through the game's own root - the overlay's
+upper dir holds a different inode and refuses the connect:
+`gdb-multiarch -ex "target remote /proc/<qemu pid>/root/connectivity/gdb.sock"`;
+the load base is `AT_ENTRY` (`info auxv`) less the ELF's `e_entry`. Python
+breakpoints whose `stop()` logs and returns False trace a live run without
+stopping it.
+
 **The coin door starts shut** (PAD-1142). A headless run (no `--window`)
 left the interlock (SPI bit 15, active low) at rest = OPEN: 48V DISABLED, and
 on a slot with saved settings the game went straight to attract and asked for
@@ -800,9 +828,10 @@ speaker panel and the cabinet strips (node 2: 288/432 channels). s3leds now
 fills padled v6's `hi` plane as Spike 2's shim does (led_hi: levels only,
 `seen`/`decoded` untouched) and stamps the block version 6; the window lights
 them (before/after: Walking Dead's topper bottom row). The strips (node 2)
-and speaker panel (node 7) get no lamp frames in attract on any title - only
-the `72` 96-bit mask and `f2` reads - so they stay dark there by the game's
-choice. A slot whose saved state has the coin door open (48V disabled) sends
+and speaker panel (node 7) get no lamp frames on the node bus on any title -
+only the `72` 96-bit mask and `f2` reads - because their lamps go to the
+netbridge's own WS2812 outputs (host cmd `2f`), not the node bus: see PAD-1370
+below. They were never dark by the game's choice. A slot whose saved state has the coin door open (48V disabled) sends
 no lamp frames at all: judge lamps on a slot in a known state.
 
 ## Every playfield control and readout, wired (PAD-1183, 2026-11-11)
@@ -965,3 +994,37 @@ Play timeouts in 10 s and no frame ever bound for drawing; after, none, each
 clip played its full length with its first frame drawn ~52 ms after the open,
 57 fps throughout. FlushDecoder timeouts (a long clip torn down mid-play) are
 unchanged: 7 in a 7-minute run before, 5 in a 4-minute run after.
+
+## The cabinet strips are the netbridge's (PAD-1370, 2026-11-17)
+
+The cabinet strips (node 2), the speaker rings (node 7) and, where it hangs off
+the bridge, the topper (node 14) are ws2812node boards in the title's node
+directory, and the game does bring them up on the node bus (`fe`, `f9`, `fc`,
+the `f2 00..38` reads, `46 ff 01` / `48 00 00`, the walking-zero `72` mask, the
+`ff` poll). But every lamp frame for them goes to the NETBRIDGE as host
+commands, read off netbridge.elf (unstripped; HOST_Update's jump table at
+0x100011be, cmd - 0x20):
+
+| cmd | firmware | payload |
+|---|---|---|
+| `29` | WS2812_SetNumLEDs | [channel 0..3] then a u16 count (3 bytes) or four u16 part lengths (9) |
+| `2a` | WS2812_SetLEDs | [channel] [u16] [u16] [data] (not seen from the game) |
+| `2b` | WS2812_SetLEDPattern | [channel] [u16] [u16] [u16] [data] (not seen) |
+| `2f` | WS2812_NodeSetLED | [channel] [n] [n bytes: the node-bus lamp frame's cmd + body, no checksum] [pad] |
+| `28` | WS2812_SendData | (not seen) |
+
+`2a`/`2b`/`2f` are dropped by the board unless the channel has LEDs set up. No
+reply to any of them. What every Spike 3 run's bridge.log shows (40 logs, all
+titles): `29 00 78 00` (channel 0, 120 LEDs) and `29 02 b0 01` (channel 2, 432);
+Fallout sends the part form, `29 00 {120}`, `29 01 {144 x 4}`, `29 02 {144, 144,
+72, 72}`. The device tables give the boards: node 7 SPEAKER L/R = 120 channels,
+node 2 CABINET L/R-IN UPPER/LOWER, L/R-OUT = 432, node 14 (Fallout's ETOPPER) =
+276. Decoding a Fallout run's 43,674 `2f` frames with the node-bus grammar
+(leddecode.wide_decode_any) fits every one, channel 0's indices 0..119, 1's
+0..275, 2's 0..431: **channel 0 = node 7, 1 = node 14, 2 = node 2.**
+
+The bridge had answered none of it, so nothing reached padled: the Expression
+lights view and any cabinet show stayed dark on the rig. s3bridge now hands each
+`2f` frame to s3leds as that node's frame (`ws2812_frame`, map overridable with
+PAD_S3_WS2812_NODES) and logs the `29` set-up (`# [ws2812]` lines). Replaying
+the Fallout capture lights all 432 / 120 / 276 channels.

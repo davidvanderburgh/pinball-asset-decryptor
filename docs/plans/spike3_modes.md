@@ -65,7 +65,7 @@ that writes it reads a 64-bit program. Census against `ports/spike3/star_wars_el
 | **score feed** | scorefeed.cfg | **goes on (files alone)** | tick, hook_dispatch, game_start / ball_start / game_over, u64 scores: all live, and the Insider logins since PAD-1326 (`coop_play.insider_users_a64`; the runtime reads the tables pointer-sized, the manager moved by the PIE's load address) |
 | random clips | clips.cfg, clips in the video bank | **goes on (PAD-1323)** | done: the clip v2 route asks for no `string_new` (the runtime builds the name), the name read as an 8-byte pointer, surfaces compared at full width. A port with the clip v2 lines: Star Wars ELG's today |
 | screen times | `stime` lines in clips.cfg | **goes on (PAD-1323)** | done: the slot read and written as 8 bytes, moved by the PIE's load address; screen_time.py reads 64-bit programs (Fallout LE, Pokemon LE, Transformers LE have the screens) |
-| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin (a music-bank song's to its own bank, PAD-1358), the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10 and Fallout LE 0.82 (below) |
+| music modes | sounds.cfg, bank records, MUSIC MODE row | **goes on (PAD-1324)** | done: the files appended to image.bin (a music-bank song's to its own bank, PAD-1358), the record key swapped at the lookup while the setting says the mode (`mswap`), MUSIC MODE on Audio Content (found by name) in game.pad, which the hook runs; Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE 0.96 (PAD-1359) (below) |
 | editions | EDITION row, codeselect's `edition=` | **goes on (PAD-1325)** | done: `spike3_menu` grows the 64-bit program's menu (Attract Mode, found by its name); `mks3multi --editions`; nvm.c reads the Spike 3 store (tools/spike3_emu/MULTIBOOT.md). ELG 1.10, Fallout 0.81/0.82, Transformers 0.96 take it |
 | picture settings | picture.cfg, 3 menu rows | left out | 8-byte GOT writes in a PIE; menu rows; switched off for every card anyway (OFFERED False) |
 | co-op play | coop.cfg, CO-OP PLAY row, HUD screens, clips | left out | the player sites, a 64-bit message table, the menu row (the switch edges are there since PAD-1322) |
@@ -1176,7 +1176,8 @@ file under a 26 s carrier looped past it), so no descriptor of the game's is nee
   64-bit program's page table (32-byte records numbered from INVALID, each pointing at the page's five-language name
   line; in a PIE through its R_AARCH64_RELATIVE addends; another table that starts with INVALID, ELG's 187 wire colours,
   is told apart by naming our pages). Audio Content is 13 on Star Wars ELG 1.10, Fallout LE 0.82 and Transformers LE
-  0.96, an empty page as shipped; `plan()` takes a 64-bit row's category from it (`wide_category`) and says where it is
+  0.96 (empty as shipped on ELG and Fallout; Transformers' carries Family Mode and Attract Mode Developer Credits
+  Music, under which MUSIC MODE goes first); `plan()` takes a 64-bit row's category from it (`wide_category`) and says where it is
   (`Adjustments > Machine Settings > Audio Content`). The row is the PAD-1321 grow (`grow_wide_program`).
 - **game.pad**: the card's own program is never touched. The grown copy goes in `/games/pad/padmode/game.pad` and the
   hook runs it in the stock one's place when it is there; a Write without music modes (or Remove) wipes pad/padmode, so
@@ -1186,7 +1187,7 @@ file under a 26 s carrier looped past it), so no descriptor of the game's is nee
 - **The gate**: `sound_modes.title_refusal` sends a Spike 3 profile (`arch == "a64"`) to `spike3_music.title_refusal`:
   offered on `spike3_music.PROVEN` (Star Wars ELG 1.10, Fallout LE 0.82: a Spike 3 port naming sound_lookup and a program
   whose menu takes the row); Pokemon LE, both Star Wars 2025 and Walking Dead Remastered say their menu has no setting the
-  game stopped using; Transformers' program takes the row but has no Spike 3 port. Before, a Spike 3 ELG project passed
+  game stopped using; Transformers LE 0.96 joined PROVEN with PAD-1359 once PAD-1293 gave it its port. Before, a Spike 3 ELG project passed
   the Spike 2 gate by its shared `star_wars_elg-1.10` key and the Write then dropped the modes; Fallout's was refused
   with Spike 2's "update the machine's code". The rest of the sound pane that rides sounds.cfg (sounds in turn, attract
   and shot sounds, the jukebox) says it is Spike 2's on a Spike 3 title, and a Write logs each one asked as left out.
@@ -1214,6 +1215,20 @@ over the stock program, sounds.cfg):
   Fallout's game music is mostly in its 137 music-bank songs (`music_catNN_NNNN`): PAD-1358 (below) gives them mode
   files too.
 Tests: tests/test_pad1324_spike3_music_modes.py.
+
+**Transformers LE 0.96 (PAD-1359)**, the same way on Spike 3 slot 251 (2026-11-17, hidden, muted, the PCM kept): its
+14 stereo idx sounds of 20 s or more given the two tones (28 records, its program grown into game.pad). The runtime armed
+`28 record(s) over 3 mode(s)` with the setting at the program's own address (0xa8c120) and sound_lookup at the port's
+0x51fe30; Adjustments > Machine Settings (its third row, after Pricing) listed Audio Content with Music Mode first, read
+back 2, 3, 1 as set and said `mode 2/3/1 from here on`; request 481 (idx0034) in mode 2 took mode 2's record and the
+PCM was 100% 700 Hz, request 477 (idx2440) in mode 3 100% 1100 Hz, request 478 (idx3945) in mode 1 the game's own
+song (no swap, no tone). Its extract had had no request map: its request table (1545 requests, 32-byte records, the
+list at +16) reaches 66% of its 4945 sound ids, under the 90% `spike3_requests` held a table to (every other Spike 3
+card reaches 96-100%, and no other registry table on any reaches 2%). Walking Dead Remastered LE 0.92 had none either:
+its 817 requests reach 17% of its 7836 sound ids, yet 746 of them name a recording. The table is now the one reaching
+the most sound ids, taken at half of them, or at a tenth when it reaches three times any other registry table: all
+eight Spike 3 cards in the library map (Transformers 1490 of 1545, Walking Dead Remastered 746 of 817, the rest as before).
+Tests: tests/test_pad1359_transformers_music_modes.py.
 
 ## Music modes for bank songs (PAD-1358)
 

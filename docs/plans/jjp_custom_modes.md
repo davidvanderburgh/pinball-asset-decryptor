@@ -127,13 +127,28 @@ The proof, 2026-11-16, Wonka 03.03 with Wonka's own key:
   gobstopper hit counted "1 of 2", the second STARTED it for 25 s; the panel
   drew GOLDEN TICKET in gold at the bottom with the total and the timer; four
   shots COMPLETED it, mode total 6,000,000 (4 x 750,000 + 3,000,000).
+* Its lamps, sampled from the game's final composite (`lb_rendered`) while it
+  ran: `lp_gobstopper` and the five lights of `ls_golden_tickets`
+  (`lp_ticket_1`..`5`) ffd700 in 37 of 74 samples, black in the rest (2 a
+  second); `lp_gi_tv`, not in the mode, the game's white throughout; no light
+  gold before the mode or after it (handed back to the game).
 
 Fixed on the way: the build's scratch went beside the output on a Windows
 drive (a 16 GB sparse root through WSL's file bridge) - it is in
 `/var/tmp/pad_jjpmodes_work` now; `jail.sh` reused a mounted jail whose lower
 was another image's root (two tickets' runs crossed and the rig booted plain
 Wonka with no error) - it rebuilds it when idle and refuses while a game runs;
-the checker refused lamp groups in `lamps`, which the runtime takes.
+the checker refused lamp groups in `lamps`, which the runtime takes - but the
+runtime lit nothing with them: an `ls_*` group is a `LampString`, not a `Lamp`,
+and `Lamp::set` on one wrote through the wrong layout (on Wonka,
+`lp_gobstopper` beside `ls_golden_tickets` stayed dark for the whole mode,
+while `lp_gobstopper` with `lp_gi_tv` both blinked ffd700 at 2 a second). A
+group now goes through `LampString::on` / `LampString::transparent` (exported
+on every title that can run modes whose binary was at hand: Wonka, Dialed In,
+Hobbit, Toy Story); a game without them drops the group with a log line. And
+the rig booted the old restore of an ISO written again under the same name (the
+Build overwrites `<title>.modes.iso`): `mount.sh` restores it again when the
+ISO is newer than its cached root.
 
 ## Files (PAD-1335 proof, superseded by the SDK above)
 

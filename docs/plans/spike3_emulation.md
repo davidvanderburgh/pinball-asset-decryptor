@@ -447,6 +447,34 @@ pricing (1/$1.00, 3/$2.00) when counting: 8 quarters show CREDITS 3.
 padglhost wrote stale frames and slowed later boots to 3x), frame dumps sort
 numerically, autoguide no longer mistakes service-menu pages for Guided Setup.
 
+**Operator-menu setting pages open (PAD-1360).** SELECT on a settings group
+(Quick Adjustments, Machine Settings > Coil Settings, LCD/Lamp, Attract
+Mode...) looked dead on the rig, stock cards too. Under gdb (`PAD_S3_GDB`
+below) the game did open the page - its menu handler (ELG 0x3d1b10) pushed it
+and built every row - and ~2 s later got a BACK nobody pressed, from its
+button dispatcher: autoguide's `is_guided_setup` told Guided Setup from the
+service menu by the white VALUES in the right column, which settings pages
+show too, so it pressed BACK on every one. It now knows Guided Setup by its
+own title, a 48-slice fingerprint of the white "Guided Setup" lettering that
+is pixel-identical on every title, theme and language (20 frames from eight
+slots, distance 0.0; the settings pages 0.135-0.177 away). The window runs'
+`watchguide` uses the same test, so the footer no longer says Guided Setup is
+showing on a settings page either. Proven on ELG 1.10 with autoguide running:
+all four pages stay open, NEXT walks their rows, and a value set through the
+game's own Set new value page is saved (a new NVM generation). On PAD-1325's
+two-edition ELG card the EDITION row shows on Attract Mode (1 = Standard, 2 =
+Dark Side); set to 2 there, the store's next generation read EDITION 2 and
+the next power-up's boot menu chose DARK SIDE by it.
+
+**Debugging the game (PAD-1360).** `PAD_S3_GDB=/connectivity/gdb.sock` puts
+the game (not the `env` in front of it) under qemu's gdb stub, waiting before
+its first instruction. Attach through the game's own root - the overlay's
+upper dir holds a different inode and refuses the connect:
+`gdb-multiarch -ex "target remote /proc/<qemu pid>/root/connectivity/gdb.sock"`;
+the load base is `AT_ENTRY` (`info auxv`) less the ELF's `e_entry`. Python
+breakpoints whose `stop()` logs and returns False trace a live run without
+stopping it.
+
 **The coin door starts shut** (PAD-1142). A headless run (no `--window`)
 left the interlock (SPI bit 15, active low) at rest = OPEN: 48V DISABLED, and
 on a slot with saved settings the game went straight to attract and asked for

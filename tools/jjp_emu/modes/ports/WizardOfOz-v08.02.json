@@ -17,6 +17,9 @@
   "_ZN4Mode25hook_do_mode_start_choreoEv"
  ],
  "mode_vtable": {},
+ "hold": {
+  "can_hold": false
+ },
  "hooks": {
   "HookBallStart_": true,
   "HookFirstBall_": true,
@@ -45,6 +48,9 @@
   "start_after": true,
   "start_combo": true,
   "start_score": true
+ },
+ "stock": {
+  "can_change": false
  },
  "sdk": {
   "mode": {

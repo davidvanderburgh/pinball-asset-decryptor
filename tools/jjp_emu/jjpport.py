@@ -295,6 +295,35 @@ def object_names(e, prefix, exclude=None, sizes=None):
     return sorted(out)
 
 
+#: words a switch name shares with half the playfield: worth less than a word naming the place
+_KIND_WORDS = {"target", "targets", "ramp", "orbit", "loop", "scoop", "lane", "left", "right", "center",
+               "upper", "lower", "top", "bottom"}
+_NOISE_WORDS = {"made", "hit", "enter", "entry", "exit", "opto", "switch", "sw"}
+#: the short forms switch names use for a lamp's long ones (Godfather switch_u_target_1 = lp_upper_target_1)
+_SHORT_WORDS = {"u": "upper", "l": "left", "r": "right", "c": "center", "lo": "low", "hi": "high"}
+
+
+def _lamp_for(stem, lamps):
+    """The lamp nearest the start shot by name (PAD-1364): the one sharing the most of
+    the switch's words, a word naming the place (`tv`, `jet`) counting double a kind word
+    (`target`, `ramp`, `left`) and `made`/`hit` not at all.  A tie goes to an insert
+    over GI, then to one with the switch's number, then to the shorter name.  '' when no lamp shares a word - better no
+    lamp in a starter than one somewhere else on the playfield."""
+    words = [_SHORT_WORDS.get(w, w) for w in stem.split("_") if w and w not in _NOISE_WORDS]
+    digits = {w for w in words if w.isdigit()}
+    words = [w for w in words if not w.isdigit()]
+    best, best_key = "", None
+    for l in lamps:
+        parts = set(_SHORT_WORDS.get(w, w) for w in l[3:].split("_"))
+        score = sum(1 if w in _KIND_WORDS else 2 for w in words if w in parts)
+        if not any(w in parts for w in words if w not in _KIND_WORDS) and score < 2:
+            continue
+        key = (score, "gi" not in parts, bool(digits & parts), -len(l))
+        if score and (best_key is None or key > best_key):
+            best, best_key = l, key
+    return best
+
+
 def _first(names, patterns):
     for p in patterns:
         r = re.compile(p, re.I)
@@ -337,7 +366,7 @@ def port(elf_path, gamename=None, live=None):
     shot_like = [s for s in switches if not s.startswith("dswitch_")]
     start = _first(shot_like, [r"target", r"ramp.*made", r"orbit", r"loop", r"scoop", r"lane"])
     stem = re.sub(r"^switch_", "", start)
-    lamp = next((l for l in lamps if l == "lp_" + stem), "") or _first([l for l in lamps if stem.split("_")[-1] in l], [r"."])
+    lamp = next((l for l in lamps if l == "lp_" + stem), "") or _lamp_for(stem, lamps)
     defaults = collections.OrderedDict([
         ("start", start),
         ("shots", " ".join([start] + [s for s in shot_like if s != start and re.search(r"ramp.*made|orbit.*hi", s)][:2])),

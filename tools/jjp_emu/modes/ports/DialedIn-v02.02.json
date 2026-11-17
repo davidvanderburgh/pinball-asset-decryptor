@@ -16,6 +16,28 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 17,
+  "multiball_classes": [
+   "10Armageddon",
+   "13MultiballRule",
+   "14QuickMultiball",
+   "16QuantumTheaterMB",
+   "17QEDQuickMultiball",
+   "18OnslaughtMultiball",
+   "19BettyQuickMultiball",
+   "20FinalBattleMultiball",
+   "20UnderAttackMultiball",
+   "28DronesGoneWildQuickMultiball"
+  ]
+ },
  "hooks": {
   "HookBallStart_": true,
   "HookFirstBall_": true,
@@ -44,6 +66,110 @@
   "start_after": true,
   "start_combo": true,
   "start_score": true
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 27,
+  "classes": {
+   "DisasterMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "DisasterMode_AcidRain": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_AlienAttack": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_EMP": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Earthshaker": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Fire": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Meteor": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Singularity": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Sinkhole": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Tidalwave": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Tornado": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Volcano": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "MMEmoji": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "MMLottery": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "MMSelfie": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "MiniMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   }
+  },
+  "live": ""
  },
  "sdk": {
   "mode": {

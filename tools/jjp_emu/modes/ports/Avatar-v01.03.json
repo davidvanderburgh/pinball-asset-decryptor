@@ -19,6 +19,9 @@
   "_ZN11SoundEffect4playEv"
  ],
  "mode_vtable": {},
+ "hold": {
+  "can_hold": false
+ },
  "hooks": {
   "HookBallStart_": false,
   "HookFirstBall_": false,
@@ -39,6 +42,9 @@
   "start_after": false,
   "start_combo": true,
   "start_score": false
+ },
+ "stock": {
+  "can_change": false
  },
  "sdk": {
   "mode": {

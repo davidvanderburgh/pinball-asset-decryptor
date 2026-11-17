@@ -207,7 +207,7 @@
  "defaults": {
   "start": "switch_u_target_1",
   "shots": "switch_u_target_1 switch_l_orbit_hi switch_l_ramp_made",
-  "lamps": "lp_map_1",
+  "lamps": "lp_upper_target_1",
   "font_title": "font_cash_out_mode",
   "font_value": "font_jobs_mode_total_1",
   "font_timer": "font_timer",

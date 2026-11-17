@@ -146,10 +146,30 @@ static inline void *vslot(void *obj, int off) { return *(void **)(*(char **)obj 
 #define POLICY_END 1
 #define POLICY_IGNORE 2
 #define POLICY_HOLD 3     /* PAD-1348, the default: the game's starts are refused while ours runs */
+#define MAX_GAME_MODES 256
+
+/* PAD-1354: start rules from the game's own hook lists.  Each start_on word is
+ * one Hook<...>::list the game runs at that moment; our node on it raises the
+ * start (see "start rules" below). */
+static const struct { const char *word, *hook; } EVENTS[] = {
+    { "ball_start", "HookBallStart_" }, { "first_ball", "HookFirstBall_" }, { "last_ball", "HookLastBall_" },
+    { "valid_playfield", "HookValidPlayfield_" }, { "ball_saved", "HookBallSave_" },
+    { "extra_ball", "HookExtraBallAwarded_" }, { "multiball_end", "HookMultiballEnd_" },
+};
+#define NEVENTS ((int)(sizeof EVENTS / sizeof *EVENTS))
+#define ONCE_NO 0
+#define ONCE_BALL 1
+#define ONCE_GAME 2
 
 typedef struct {
     char file[64], name[48], title[64];
     int nstart, start_sw[MAX_LIST], start_count;
+    unsigned start_on;                    /* bit i = EVENTS[i] (PAD-1354) */
+    char after[512];                      /* start_after: " name name " game mode globals / classes, or any */
+    unsigned char after_sel[MAX_GAME_MODES];
+    long long start_score;                /* the player up's score reaching it starts the mode */
+    int ncombo, combo_sw[MAX_LIST], combo_ms;
+    int count_reset_ball, start_once;     /* start_count_reset = ball; start_once = ONCE_* */
     int nshot, shot_sw[MAX_LIST];
     long long points, complete_points;
     int seconds, complete;
@@ -171,12 +191,31 @@ typedef struct {
     char pic_file[160]; float pic_at[4]; void *pic_bmp; int pic_w, pic_h; int pic_failed;
     char vid_file[160]; float vid_at[4]; int vid_loop;
     struct video *vid;
+    /* balls (PAD-1353), all through the engine's one ball saver (see "balls") */
+    int mb_balls, mb_save;     /* multiball = <balls in play> [ball save s]; 0 = no multiball */
+    int nmb_on, mb_on_sw[MAX_LIST];    /* multiball_on: the balls come at the first hit, not at the start */
+    int nadd, add_sw[MAX_LIST], add_max;   /* add_ball = <switches> [times] */
+    int ball_save;             /* ball_save = <s>, a mode without a multiball */
+    int no_clock;              /* seconds = 0 on a multiball: one ball left ends it, no timer */
+    /* coils (PAD-1353): an index into wcs[], -1 = none */
+    int coil_start, coil_shot, coil_complete, coil_start_ms, coil_shot_ms, coil_complete_ms;
+    int coil_hold, coil_hold_ms, coil_hold_power;
+    int hold_on;               /* coil_hold_on: 0 = the scoring shots, 1 = the start, 2 = its own switches */
+    int nhold_sw, hold_sw[MAX_LIST];
     /* runtime */
     void *mode;
     int count, hits, secs, paused, ended_logged;
     const char *volatile want_end;     /* an end asked for outside a proc, done in the mode's own tick */
     long long total;
     int running_seen;
+    int mb_served, mb_seen2, adds, saver_ours;
+    long mb_served_at, one_ball_since;
+    int saver_cs;              /* the saver's time left (1/100 s) just after our last request */
+    int combo_pos; long combo_t;          /* combo: how far along, and when the last step was */
+    const char *pending;                  /* a start raised by a rule, waiting for a free moment in this ball */
+    long pending_log;
+    unsigned score_done;                  /* start_score: bit p = player p already started it this game */
+    int runs_ball, runs_game;
 } pm_t;
 
 static pm_t pms[MAX_MODES];
@@ -300,6 +339,72 @@ static int parse_switches(char *v, int *out)
 
 static int lamp_like(void *o);
 
+/* ---- coils (PAD-1353): which a mode may touch, decided here, never by the file ----
+ * A JJP coil is a named `Coil` global (coil_magnet_1, coil_vuk_tv...) in the
+ * engine's coil_table: +0x08 its label, +0x10 the pulse ms the game built it
+ * with, +0x28 what it is doing (0 off, 3 a pulse, 4 a duty-cycled hold for
+ * +0x30 ms, 2 a duty-cycled hold with no end), +0x3c the hold's 32-step on/off
+ * pattern.  A hold of ours is always the timed kind (state 4), so the engine
+ * ends it by itself; the watchdog below ends it sooner when it should, and at
+ * its time at the latest.  The lists are
+ * by name, as JJP names its coils on every title, and jjpport.py carries the
+ * same lists (tests hold the two together). */
+static const char *const COIL_NEVER[] = {      /* the game's own ball handling and flippers */
+    "flipper", "trough", "autolaunch", "auto_launch", "autoplunge", "plunger", "sling", "jet", "bumper",
+    "stepper", "relay", "power", "ticket", "null", "motor", NULL };
+static const char *const COIL_ANYWAY[] = {     /* ...except these, whatever else the name says */
+    "shaker", NULL };
+static const char *const COIL_HOLDABLE[] = {   /* built to stay on: magnets, diverters, posts, lights */
+    "magnet", "divert", "post", "gate", "shaker", "flash", "lamp", "light", "led", NULL };
+#define COIL_PULSE_GAP_MS   250     /* between two pulses of one coil */
+#define COIL_PULSES_A_MIN   20      /* per coil */
+#define COIL_PULSE_MAX_MS   1000    /* and never longer than the game's own pulse for it */
+#define COIL_HOLD_MIN_MS    100
+#define COIL_HOLD_MAX_MS    5000    /* Spike 2's longest magnet grab (PAD-381) */
+#define COIL_HOLD_COOL_MS   3000    /* off at least this long between holds */
+#define COIL_HOLDS_A_MIN    6
+#define COIL_HOLD_POWER_MAX 16      /* of 32: at most half on */
+#define COIL_OBJ_STATE 0x28
+#define COIL_OBJ_PATTERN 0x3c
+#define MAX_COILS 32
+
+static int name_has(const char *n, const char *const *list)
+{
+    for (int i = 0; list[i]; i++) if (strstr(n, list[i])) return 1;
+    return 0;
+}
+
+typedef struct {
+    char name[64]; void *obj; int cap_ms; unsigned char pulse_ok, hold_ok;
+    long last_pulse, win_at; int win_n;
+    volatile int holding; void *owner; long held_at, until, hold_end, hwin_at; int hwin_n; unsigned pattern;
+} wc_t;
+static wc_t wcs[MAX_COILS];
+static int nwc;
+static int coil_holds_on;           /* title.cfg coil_holds = on: holds wait for a machine check */
+static volatile int coil_watch_up;  /* the watchdog that ends every hold is running */
+
+static int coil_index(const char *name)
+{
+    for (int i = 0; i < nwc; i++) if (!strcmp(wcs[i].name, name)) return i;
+    if (strncmp(name, "coil_", 5)) { lg("%s is not a coil name (coil_...)", name); return -1; }
+    if (nwc >= MAX_COILS) { lg("too many coils (max %d): %s ignored", MAX_COILS, name); return -1; }
+    if (!sym(name)) { lg("no coil called %s in this game", name); return -1; }
+    snprintf(wcs[nwc].name, sizeof wcs[nwc].name, "%s", name);
+    wcs[nwc].pulse_ok = !name_has(name, COIL_NEVER) || name_has(name, COIL_ANYWAY);
+    wcs[nwc].hold_ok = wcs[nwc].pulse_ok && name_has(name, COIL_HOLDABLE);
+    if (!wcs[nwc].pulse_ok) lg("%s is one of the game's own ball, flipper or power coils: a mode may not fire it", name);
+    return nwc++;
+}
+
+/* "<coil> [ms]" -> index, ms (0 = the coil's own pulse) */
+static int parse_coil(char *v, int *ms)
+{
+    char *t = strtok(v, " ,\t"), *a = strtok(NULL, " ,\t");
+    *ms = a ? (int)num(a) : 0;
+    return t ? coil_index(t) : -1;
+}
+
 static int parse_lamps(char *v, void **out)
 {
     int n = 0;
@@ -382,6 +487,72 @@ static void apply_kv(pm_t *m, const char *k, char *v)
             if (L + strlen(t) + 2 < room) snprintf(o + L, room - L, "%s ", t);
         }
     }
+    else if (!strcmp(k, "multiball")) {            /* <balls in play> [ball save s] */
+        char *a = strtok(buf, " ,\t"), *b = strtok(NULL, " ,\t");
+        m->mb_balls = a ? (int)num(a) : 0; m->mb_save = b ? (int)num(b) : 10;
+        if (m->mb_balls && (m->mb_balls < 2 || m->mb_balls > 6)) {
+            lg("%s: multiball %d: 2-6 balls; %d used", m->file, m->mb_balls, m->mb_balls < 2 ? 2 : 6);
+            m->mb_balls = m->mb_balls < 2 ? 2 : 6;
+        }
+        if (m->mb_save < 0) m->mb_save = 0;
+        if (m->mb_save > 120) m->mb_save = 120;
+    }
+    else if (!strcmp(k, "multiball_on")) m->nmb_on = parse_switches(buf, m->mb_on_sw);
+    else if (!strcmp(k, "add_ball")) {             /* <switches> [times] */
+        char *last = strrchr(buf, ' ');
+        m->add_max = 1;
+        if (last && last[1] >= '0' && last[1] <= '9') { m->add_max = (int)num(last + 1); *last = 0; }
+        if (m->add_max < 1) m->add_max = 1;
+        if (m->add_max > 6) m->add_max = 6;
+        m->nadd = parse_switches(buf, m->add_sw);
+    }
+    else if (!strcmp(k, "ball_save")) {
+        m->ball_save = (int)num(v);
+        if (m->ball_save < 0) m->ball_save = 0;
+        if (m->ball_save > 120) m->ball_save = 120;
+    }
+    else if (!strcmp(k, "coil_start")) m->coil_start = parse_coil(buf, &m->coil_start_ms);
+    else if (!strcmp(k, "coil_shot")) m->coil_shot = parse_coil(buf, &m->coil_shot_ms);
+    else if (!strcmp(k, "coil_complete")) m->coil_complete = parse_coil(buf, &m->coil_complete_ms);
+    else if (!strcmp(k, "coil_hold")) {            /* <coil> <ms> [power of 32] */
+        char *c = strtok(buf, " ,\t"), *a = strtok(NULL, " ,\t"), *p = strtok(NULL, " ,\t");
+        m->coil_hold = c ? coil_index(c) : -1;
+        m->coil_hold_ms = a ? (int)num(a) : 1000;
+        m->coil_hold_power = p ? (int)num(p) : 8;
+        if (m->coil_hold >= 0 && !wcs[m->coil_hold].hold_ok) {
+            lg("%s: %s is not a coil built to stay on (a magnet, diverter, post, gate, shaker or light): no hold",
+               m->file, wcs[m->coil_hold].name);
+            m->coil_hold = -1;
+        }
+    }
+    else if (!strcmp(k, "coil_hold_on")) {
+        if (!strcmp(v, "start")) m->hold_on = 1;
+        else if (!strcmp(v, "shots")) m->hold_on = 0;
+        else { m->hold_on = 2; m->nhold_sw = parse_switches(buf, m->hold_sw); }
+    }
+    else if (!strcmp(k, "coil_holds")) coil_holds_on = !strcmp(v, "on") || !strcmp(v, "yes");
+    else if (!strcmp(k, "start_on")) {
+        m->start_on = 0;
+        for (char *t = strtok(buf, " ,\t"); t; t = strtok(NULL, " ,\t")) {
+            int e = 0;
+            while (e < NEVENTS && strcmp(EVENTS[e].word, t)) e++;
+            if (e < NEVENTS) m->start_on |= 1u << e;
+            else lg("%s: start_on %s is not a start event (ignored)", m->file, t);
+        }
+    }
+    else if (!strcmp(k, "start_after")) {
+        char *o = m->after; size_t room = sizeof m->after; o[0] = ' '; o[1] = 0;
+        for (char *t = strtok(buf, " ,\t"); t; t = strtok(NULL, " ,\t")) {
+            size_t L = strlen(o);
+            if (L + strlen(t) + 2 < room) snprintf(o + L, room - L, "%s ", t);
+        }
+    }
+    else if (!strcmp(k, "start_score")) m->start_score = num(v);
+    else if (!strcmp(k, "start_combo")) m->ncombo = parse_switches(buf, m->combo_sw);
+    else if (!strcmp(k, "combo_seconds")) m->combo_ms = (int)(num(v) * 1000);
+    else if (!strcmp(k, "start_count_reset")) m->count_reset_ball = !strcmp(v, "ball");
+    else if (!strcmp(k, "start_once"))
+        m->start_once = !strcmp(v, "ball") ? ONCE_BALL : !strcmp(v, "game") ? ONCE_GAME : ONCE_NO;
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : !strcmp(v, "none") ? 3 : 0;
     else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
     else if (!strcmp(k, "game")) snprintf(game_name, sizeof game_name, "%s", v);
@@ -405,6 +576,9 @@ static void defaults(pm_t *m)
     m->sound_kind = 2;                                   /* fanfare: what the game's own mode sounds are */
     m->pic_at[2] = m->pic_at[3] = 100; m->vid_at[2] = m->vid_at[3] = 100;   /* the whole screen */
     m->vid_loop = 1;
+    m->coil_start = m->coil_shot = m->coil_complete = m->coil_hold = -1;
+    m->coil_hold_ms = 1000; m->coil_hold_power = 8; m->add_max = 1;
+    m->combo_ms = 5000;
 }
 
 /* ---- .stock files: the game's own modes, changed (PAD-1351; see below) ----- */
@@ -537,7 +711,7 @@ static void load_modes(void)
         snprintf(path, sizeof path, "%s/%s", moddir, names[i]);
         load_file(m, path);
         if (!*m->name) { snprintf(m->name, sizeof m->name, "%.*s", (int)strlen(names[i]) - 5, names[i]); }
-        if (!*m->title) snprintf(m->title, sizeof m->title, "%s", m->name);
+        if (!*m->title) memcpy(m->title, m->name, sizeof m->name);   /* name[48] fits title[64] */
         if (!m->nshot) { m->nshot = m->nstart; memcpy(m->shot_sw, m->start_sw, sizeof m->shot_sw); }
         for (int s = 0; s < 4; s++) {
             void **slot = s == 0 ? &m->snd_start : s == 1 ? &m->snd_shot : s == 2 ? &m->snd_end : &m->snd_complete;
@@ -545,8 +719,24 @@ static void load_modes(void)
             *slot = sym(m->snd_names[s]);
             if (*m->snd_names[s] && !*slot) lg("%s: no sound called %s in this game", m->file, m->snd_names[s]);
         }
-        if (!m->nstart) { lg("%s: no start shot found; mode skipped", m->file); continue; }
+        if (!m->nstart && !m->start_on && !m->after[1] && m->start_score <= 0 && m->ncombo < 2) {
+            lg("%s: no start rule (start, start_on, start_after, start_score or start_combo); mode skipped", m->file);
+            continue;
+        }
+        /* seconds = 0 on a multiball: no clock, one ball left ends it (Spike 2's item 167) */
+        if (m->seconds < 1 && m->mb_balls) { m->no_clock = 1; m->seconds = 600; }
         if (m->seconds < 1) m->seconds = 1;
+        if (m->nmb_on && !m->mb_balls) { lg("%s: multiball_on without a multiball line: ignored", m->file); m->nmb_on = 0; }
+        if (m->nmb_on && m->no_clock) { lg("%s: multiball_on needs seconds (the time to hit it); 30 used", m->file); m->no_clock = 0; m->seconds = 30; }
+        if (m->mb_balls || m->ball_save || m->nadd)
+            lg("%s: balls: multiball %d%s (ball save %d s), add a ball on %d switch(es) up to %d, ball save %d s",
+               m->file, m->mb_balls, m->nmb_on ? " on its switch" : m->mb_balls ? " at the start" : "", m->mb_save,
+               m->nadd, m->add_max, m->ball_save);
+        if (m->coil_start >= 0 || m->coil_shot >= 0 || m->coil_complete >= 0 || m->coil_hold >= 0)
+            lg("%s: coils: start %s, shot %s, complete %s, hold %s %d ms at %d/32 on %s", m->file,
+               m->coil_start >= 0 ? wcs[m->coil_start].name : "-", m->coil_shot >= 0 ? wcs[m->coil_shot].name : "-",
+               m->coil_complete >= 0 ? wcs[m->coil_complete].name : "-", m->coil_hold >= 0 ? wcs[m->coil_hold].name : "-",
+               m->coil_hold_ms, m->coil_hold_power, m->hold_on == 1 ? "the start" : m->hold_on == 2 ? "its switches" : "every shot");
         lg("mode %d \"%s\" (%s): %d start shot(s) x%d, %d scoring, %lld a shot, %d s, complete %d (+%lld), "
            "%d lamp(s), game modes=%s%s%s%s%s%s%s%s",
            npm, m->name, m->file, m->nstart, m->start_count, m->nshot, m->points, m->seconds, m->complete,
@@ -558,13 +748,20 @@ static void load_modes(void)
            m->game_modes == POLICY_HOLD && m->allow[1] ? m->allow : "",
            *m->music_file ? ", music " : "", m->music_file, *m->pic_file ? ", picture " : "", m->pic_file);
         if (*m->vid_file) lg("mode %d \"%s\": video %s (%s)", npm, m->name, m->vid_file, m->vid_loop ? "loops" : "plays once");
+        if (m->start_on || m->after[1] || m->start_score > 0 || m->ncombo >= 2) {
+            char ev[256]; size_t o = 0; ev[0] = 0;
+            for (int e = 0; e < NEVENTS; e++)
+                if (m->start_on & (1u << e)) o += snprintf(ev + o, sizeof ev - o, " %s", EVENTS[e].word);
+            lg("  \"%s\" starts also on:%s%s%s%s%s%s", m->name, ev, m->after[1] ? " after" : "",
+               m->after[1] ? m->after : "", m->start_score > 0 ? " score" : "",
+               m->ncombo >= 2 ? " combo" : "", m->start_once ? (m->start_once == ONCE_BALL ? " (once a ball)" : " (once a game)") : "");
+        }
         npm++;
     }
     for (int i = 0; i < nn; i++) free(names[i]);
 }
 
 /* ---- the game's own modes (for yielding) ----------------------------------- */
-#define MAX_GAME_MODES 256
 static void *gmodes[MAX_GAME_MODES];
 static const char *gmode_sym[MAX_GAME_MODES];
 static unsigned char gmode_bg[MAX_GAME_MODES];
@@ -640,15 +837,17 @@ static int gm_running(int i)
 
 /* What a custom mode would be yielding to right now, or NULL. */
 static long multiball_since;     /* ms clock when more than one ball came into play, 0 = not */
-static const char *game_busy(void)
+static const char *game_busy_except(const pm_t *m)
 {
     /* A multiball is more than one ball for half a second: the count blips
-     * (GnR read 6 for one frame while a ball sat in the shooter lane). */
-    if (multiball_since && now_ms() - multiball_since >= 500) return "multiball";
+     * (GnR read 6 for one frame while a ball sat in the shooter lane).  The
+     * balls a mode of ours asked for (PAD-1353) are its own, not the game's. */
+    if (multiball_since && now_ms() - multiball_since >= 500 && !(m && (m->mb_served || m->adds))) return "multiball";
     for (int i = 0; i < ngm; i++)
         if (!gmode_bg[i] && !is_ours(gmodes[i]) && gm_running(i)) return gmode_sym[i];
     return NULL;
 }
+static const char *game_busy(void) { return game_busy_except(NULL); }
 
 /* Log every change in which game modes run: the evidence for a title's
  * always-on modes, and for every yield. */
@@ -1559,6 +1758,244 @@ static void lamps_release(pm_t *m)
     lb_activate(0);
 }
 
+/* ---- balls (PAD-1353) -------------------------------------------------------
+ * The engine keeps ONE ball saver (proc 0x191 on Wonka 03.03): "keep N balls
+ * in play for T hundredths of a second".  mb_request_balls_into_play(N, T)
+ * starts it or raises either; while it runs it serves balls until N are in
+ * play and serves back any that drain.  Read off the decrypted code: the game's
+ * own ball save is mb_request(balls in play now, s * 100) and its add-a-ball
+ * mb_add_balls_into_play(n, n * 200).  So a mode's multiball, add-a-ball and
+ * ball save are those calls - engine code, the same on every title. */
+static void (*mb_request)(int, int), (*mb_add)(int, int), (*mb_kill_saver)(void);
+static int (*saver_running)(void), (*saver_time)(void), (*balls_known)(void);
+static int in_game(void);
+
+static int ball_api(void) { return mb_request && mb_add && balls_in_play; }
+
+/* Right after a request of ours: the saver's own clock, which only counts down
+ * (in the game's time, not the wall's: the hidden rig runs slow) unless someone
+ * asks again.  A request that did not raise it (the game's ran longer) is not ours. */
+static void saver_note(pm_t *m, int before)
+{
+    int t = saver_time && saver_running && saver_running() ? saver_time() : 0;
+    if (t > before) { m->saver_ours = 1; m->saver_cs = t; }
+}
+static int saver_now(void) { return saver_time && saver_running && saver_running() ? saver_time() : 0; }
+
+static void serve_multiball(pm_t *m, const char *why)
+{
+    if (!ball_api()) { lg("\"%s\": MULTIBALL refused: this game exports no ball saver to ask", m->name); return; }
+    int bip = balls_in_play(), known = balls_known ? balls_known() : -1, before = saver_now();
+    mb_request(m->mb_balls, m->mb_save * 100);
+    m->mb_served = 1; m->mb_served_at = now_ms(); m->one_ball_since = 0;
+    saver_note(m, before);
+    lg("\"%s\" MULTIBALL on %s: %d ball(s) in play asked for (%d in play, %d accounted for), ball save %d s",
+       m->name, why, m->mb_balls, bip, known, m->mb_save);
+}
+
+static void add_a_ball(pm_t *m, const char *sw)
+{
+    if (!ball_api()) { lg("\"%s\": ADD A BALL refused: this game exports no ball saver to ask", m->name); return; }
+    if (m->adds >= m->add_max) { lg("\"%s\" add a ball on %s: already %d this run", m->name, sw, m->adds); return; }
+    int save = m->mb_save > 2 ? m->mb_save : 2;      /* the game's own add-a-ball saves for 2 s */
+    int bip = balls_in_play(), before = saver_now();
+    mb_add(1, save * 100);
+    m->adds++;
+    saver_note(m, before);
+    lg("\"%s\" ADD A BALL on %s (%d of %d): %d in play, ball save %d s", m->name, sw, m->adds, m->add_max, bip, save);
+}
+
+static void ball_save_start(pm_t *m)
+{
+    if (!ball_api()) { lg("\"%s\": BALL SAVE refused: this game exports no ball saver to ask", m->name); return; }
+    int bip = balls_in_play(), before = saver_now();
+    mb_request(bip > 0 ? bip : 1, m->ball_save * 100);
+    saver_note(m, before);
+    lg("\"%s\" BALL SAVE %d s (%d in play)", m->name, m->ball_save, bip);
+}
+
+/* At the mode's end: a ball save of ours still running stops with it.  The
+ * engine has one saver for everyone, so one raised since our last request
+ * (its time left is more than it was then) is the game's, and left to run. */
+static void saver_release(pm_t *m, const char *why)
+{
+    if (!m->saver_ours) return;
+    m->saver_ours = 0;
+    if (!saver_running || !mb_kill_saver || !saver_running()) return;
+    int t = saver_now();
+    if (t > m->saver_cs) {
+        lg("\"%s\": the ball save was raised since ours (%d.%02d s left, %d.%02d after ours): the game's, left to run",
+           m->name, t / 100, t % 100, m->saver_cs / 100, m->saver_cs % 100);
+        return;
+    }
+    mb_kill_saver();
+    lg("\"%s\": ball save ended with the mode (%s, %d.%02d s were left)", m->name, why, t / 100, t % 100);
+}
+
+/* ---- coils (PAD-1353) ------------------------------------------------------- */
+typedef void (*coil_pulse_t)(void *, unsigned);
+typedef void (*coil_duty_t)(void *, unsigned, unsigned, unsigned char);
+static coil_pulse_t c_pulse;
+static coil_duty_t c_duty;
+static vfn0_t c_off;
+static unsigned (*c_pattern)(int);
+static pthread_mutex_t coil_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static int coil_state(wc_t *c) { return *(volatile int *)((char *)c->obj + COIL_OBJ_STATE); }
+
+/* After the game's static constructors: each named coil checked against the
+ * engine's coil_table, its own pulse time read, and the coils the game's trough
+ * and plunger use (hook_*_coil) refused whatever they are called. */
+static void resolve_coils(void)
+{
+    if (!nwc) return;
+    c_pulse = (coil_pulse_t)sym("_ZN4Coil10coil_pulseEj");
+    c_duty = (coil_duty_t)sym("_ZN4Coil9coil_dutyEjjh");
+    c_off = (vfn0_t)sym("_ZN4Coil8coil_offEv");
+    c_pattern = (unsigned (*)(int))sym("_Z21coil_get_duty_patterni");
+    void **tab = sym("coil_table");
+    size_t ntab = 0;
+    {
+        Dl_info di; const ElfW(Sym) *es = NULL;
+        if (tab && dladdr1(tab, &di, (void **)&es, RTLD_DL_SYMENT) && es) ntab = es->st_size / sizeof(void *);
+    }
+    void *ball_coils[3] = { 0 };
+    const char *bc[3] = { "hook_trough_coil", "hook_autoplunger_coil", "hook_trough_jam_coil" };
+    for (int i = 0; i < 3; i++) { void **p = sym(bc[i]); if (p) ball_coils[i] = *p; }
+    if (!c_pulse || !c_off || !tab || !ntab) {
+        lg("coils: FAIL - Coil::coil_pulse %p, coil_off %p, coil_table %p (%zu): modes fire no coils",
+           (void *)c_pulse, (void *)c_off, (void *)tab, ntab);
+        for (int i = 0; i < nwc; i++) wcs[i].pulse_ok = wcs[i].hold_ok = 0;
+        return;
+    }
+    for (int i = 0; i < nwc; i++) {
+        wc_t *c = &wcs[i];
+        void *o = sym(c->name);
+        size_t k = 0;
+        while (k < ntab && tab[k] != o) k++;
+        if (!o || k == ntab) { lg("coils: %s is not in the game's coil table: not fired", c->name); c->pulse_ok = c->hold_ok = 0; continue; }
+        c->obj = o;
+        for (int b = 0; b < 3; b++)
+            if (o == ball_coils[b] && c->pulse_ok) { lg("coils: %s is the game's %s: a mode may not fire it", c->name, bc[b] + 5); c->pulse_ok = c->hold_ok = 0; }
+        int own = *(int *)((char *)o + 0x10);
+        c->cap_ms = own >= 1 && own <= COIL_PULSE_MAX_MS ? own : own > COIL_PULSE_MAX_MS ? COIL_PULSE_MAX_MS : 32;
+        const char *label = *(const char **)((char *)o + 8);
+        lg("coils: %s \"%s\": pulse up to %d ms (the game's own %d)%s%s", c->name, label ? label : "?", c->cap_ms, own,
+           c->pulse_ok ? "" : " - refused", c->hold_ok ? (coil_holds_on && c_duty && c_pattern ? ", holds on" : ", holds off") : "");
+    }
+}
+
+static int within_a_minute(long *at, int *n, int cap, long t)
+{
+    if (t - *at >= 60000) { *at = t; *n = 0; }
+    return *n < cap;
+}
+
+/* A pulse: the coil's own pulse time, or less, never more. */
+static void coil_fire(pm_t *m, int ci, int ms, const char *why)
+{
+    if (ci < 0) return;
+    wc_t *c = &wcs[ci];
+    pthread_mutex_lock(&coil_mu);
+    long t = now_ms();
+    const char *no = NULL;
+    if (!c->obj || !c->pulse_ok || !c_pulse) no = "not a coil a mode may fire";
+    else if (!in_game()) no = "no ball in play";
+    else if (c->holding) no = "a mode holds it";
+    else if (coil_state(c)) no = "the game is driving it";
+    else if (c->last_pulse && t - c->last_pulse < COIL_PULSE_GAP_MS) no = "it fired under 250 ms ago";
+    else if (!within_a_minute(&c->win_at, &c->win_n, COIL_PULSES_A_MIN, t)) no = "20 pulses this minute already";
+    if (no) { lg("\"%s\" %s: %s NOT fired (%s)", m->name, why, c->name, no); pthread_mutex_unlock(&coil_mu); return; }
+    int use = ms > 0 && ms < c->cap_ms ? ms : c->cap_ms;
+    c_pulse(c->obj, (unsigned)use);
+    c->last_pulse = t; c->win_n++;
+    lg("\"%s\" %s: PULSE %s %d ms%s", m->name, why, c->name, use, ms > c->cap_ms ? " (the game's own pulse is the most)" : "");
+    pthread_mutex_unlock(&coil_mu);
+}
+
+/* coil_mu held.  Ends a hold of ours, unless the game drove the coil since:
+ * then it is the game's, and no off is sent over it. */
+static void coil_let_go(wc_t *c, const char *why)
+{
+    if (!c->holding) return;
+    int st = coil_state(c);
+    unsigned pat = *(volatile unsigned *)((char *)c->obj + COIL_OBJ_PATTERN);
+    long held = now_ms() - c->held_at;
+    if (st == 0 && now_ms() >= c->until - 60)
+        lg("%s: hold ended at its time, %ld ms (the engine's own off)", c->name, held);
+    else if ((st != 4 && st != 2) || pat != c->pattern)
+        lg("%s: the game drove it during our hold (state %d after %ld ms): left to the game, no off", c->name, st, held);
+    else {
+        c_off(c->obj);
+        lg("%s: hold OFF after %ld ms (%s)", c->name, held, why);
+    }
+    c->holding = 0; c->owner = NULL; c->hold_end = now_ms();
+}
+
+static void coil_hold(pm_t *m, const char *why)
+{
+    int ci = m->coil_hold;
+    if (ci < 0) return;
+    wc_t *c = &wcs[ci];
+    pthread_mutex_lock(&coil_mu);
+    long t = now_ms();
+    const char *no = NULL;
+    if (!coil_holds_on) no = "coil holds are off on this title until title.cfg says coil_holds = on";
+    else if (!c->obj || !c->hold_ok || !c_duty || !c_pattern || !c_off) no = "not a coil a mode may hold";
+    else if (!coil_watch_up) no = "no watchdog to end it";
+    else if (!in_game()) no = "no ball in play";
+    else if (c->holding) no = "it is held already";
+    else if (coil_state(c)) no = "the game is driving it";
+    else if (c->hold_end && t - c->hold_end < COIL_HOLD_COOL_MS) no = "3 s off between holds";
+    else if (!within_a_minute(&c->hwin_at, &c->hwin_n, COIL_HOLDS_A_MIN, t)) no = "6 holds this minute already";
+    if (no) { lg("\"%s\" %s: %s NOT held (%s)", m->name, why, c->name, no); pthread_mutex_unlock(&coil_mu); return; }
+    int ms = m->coil_hold_ms < COIL_HOLD_MIN_MS ? COIL_HOLD_MIN_MS : m->coil_hold_ms > COIL_HOLD_MAX_MS ? COIL_HOLD_MAX_MS : m->coil_hold_ms;
+    int pw = m->coil_hold_power < 1 ? 1 : m->coil_hold_power > COIL_HOLD_POWER_MAX ? COIL_HOLD_POWER_MAX : m->coil_hold_power;
+    unsigned pat = c_pattern(pw);
+    /* Coil::coil_duty(ms, pattern, steps): the realtime loop plays the pattern
+     * for ms and then turns the coil off itself (state 4, counting +0x30 down;
+     * Wonka 03.03, emulator-measured).  So the engine bounds the hold too, even
+     * if this library stopped; the watchdog ends it earlier when it should. */
+    c_duty(c->obj, (unsigned)ms, pat, 32);
+    c->pattern = *(volatile unsigned *)((char *)c->obj + COIL_OBJ_PATTERN);
+    c->owner = m; c->held_at = t; c->until = t + ms; c->holding = 1; c->hwin_n++;
+    lg("\"%s\" %s: HOLD %s %d ms at %d/32 on (pattern %08x)", m->name, why, c->name, ms, pw, pat);
+    pthread_mutex_unlock(&coil_mu);
+}
+
+static void coil_release_mode(pm_t *m, const char *why)
+{
+    pthread_mutex_lock(&coil_mu);
+    for (int i = 0; i < nwc; i++) if (wcs[i].holding && wcs[i].owner == m) coil_let_go(&wcs[i], why);
+    pthread_mutex_unlock(&coil_mu);
+}
+
+/* The deadline that does not trust the mode to tick: every 5 ms, off at its
+ * time, at the ball's end (the game stops our run proc there), when the mode
+ * stops or pauses, and given up the moment the game drives the coil itself. */
+static void *coil_watch(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        usleep(5000);
+        pthread_mutex_lock(&coil_mu);
+        long t = now_ms();
+        for (int i = 0; i < nwc; i++) {
+            wc_t *c = &wcs[i];
+            if (!c->holding) continue;
+            pm_t *m = c->owner;
+            int st = coil_state(c);
+            unsigned pat = *(volatile unsigned *)((char *)c->obj + COIL_OBJ_PATTERN);
+            const char *why = (st != 4 && st != 2) || pat != c->pattern ? "the game"
+                            : t >= c->until + 20 ? "its time" : !in_game() ? "ball end"
+                            : !m || !running(m) || m->want_end ? "mode end" : m->paused ? "the mode paused" : NULL;
+            if (why) coil_let_go(c, why);
+        }
+        pthread_mutex_unlock(&coil_mu);
+    }
+    return NULL;
+}
+
 /* ---- our virtuals ---------------------------------------------------------- */
 static pm_t *pm_of(void *self) { for (int i = 0; i < npm; i++) if (pms[i].mode == self) return &pms[i]; return NULL; }
 
@@ -1612,7 +2049,8 @@ static void pad_end(void *self)
 static int pad_is_timer_paused(void *self)
 {
     pm_t *m = pm_of(self);
-    return m ? m->paused : 0;
+    /* a multiball with no clock, or one whose balls came on its switch, runs to one ball left */
+    return m ? m->paused || m->no_clock || (m->nmb_on && m->mb_served) : 0;
 }
 
 /* Find each virtual by address.  `nth` picks among equal addresses: the
@@ -1682,6 +2120,8 @@ static void start_mode(pm_t *m, int idx)
 {
     if (!build_mode(m, idx)) return;
     m->hits = 0; m->total = 0; m->paused = 0; m->ended_logged = 0; m->running_seen = 1;
+    m->mb_served = m->mb_seen2 = m->adds = m->saver_ours = m->saver_cs = 0; m->mb_served_at = m->one_ball_since = 0;
+    m->pending = NULL; m->combo_pos = 0; m->runs_ball++; m->runs_game++;
     ((vbool_t)vslot(m->mode, VT_START))(m->mode);
     ((vint_t)vslot(m->mode, VT_SET_TIME))(m->mode, m->seconds);
     /* The seconds field: 0x48 on GnR.  Check it, and find it if a title moved it. */
@@ -1693,7 +2133,13 @@ static void start_mode(pm_t *m, int idx)
             }
     }
     m->secs = m->seconds;
-    lg("\"%s\" STARTED for %d s", m->name, m->seconds);
+    if (m->no_clock) lg("\"%s\" STARTED (no clock: one ball left ends it)", m->name);
+    else lg("\"%s\" STARTED for %d s", m->name, m->seconds);
+    if (m->mb_balls && !m->nmb_on) serve_multiball(m, "the start");
+    else if (m->mb_balls) lg("\"%s\": the multiball waits for its switch (%d s to hit it)", m->name, m->seconds);
+    else if (m->ball_save) ball_save_start(m);
+    coil_fire(m, m->coil_start, m->coil_start_ms, "start");
+    if (m->hold_on == 1) coil_hold(m, "start");
     if (*m->vid_file && !m->vid) m->vid = video_start(m);
     if (m->music) music_reconsider("mode started");
 }
@@ -2122,20 +2568,283 @@ static void stock_frame(void)
 /* ---- game state ------------------------------------------------------------ */
 static int in_game(void) { return state_get && state_get() == ingame_state; }
 
-static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+/* Recursive: the game's score hook fires inside our own scoring (on_switch holds mu). */
+static pthread_mutex_t mu = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 static int in_list(const int *l, int n, int v) { for (int i = 0; i < n; i++) if (l[i] == v) return 1; return 0; }
 
 /* Test hook for the emulator, where no ball can reach a game mode's start:
  * JJP_MODS_TEST_GAMEMODE=<Mode global> JJP_MODS_TEST_SWITCH=<switch> starts
  * that game mode (its own Mode::start) when that switch is hit, so a proof run
  * can show a custom mode yielding to it.  Unset on a machine. */
-static void *test_gm; static int test_sw = -1;
+static void *test_gm; static int test_sw = -1, test_end_sw = -1;   /* JJP_MODS_TEST_END_SWITCH ends it (PAD-1354) */
 static void test_hook(int si)
 {
+    if (si == test_end_sw && test_gm && (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff)) {
+        lg("TEST: ending game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
+        ((vfn0_t)vslot(test_gm, VT_END))(test_gm);
+        return;
+    }
     if (si != test_sw || !test_gm) return;
     if (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff) return;
     lg("TEST: starting game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
     ((vbool_t)vslot(test_gm, VT_START))(test_gm);
+}
+
+/* ---- start rules (PAD-1354) ------------------------------------------------
+ * Besides its start switches a mode can start on a game event (start_on), when
+ * one of the game's modes ends (start_after), when the player up's score
+ * reaches a value (start_score), or on a combo of switches in order
+ * (start_combo).  The events are the game's own hook lists: each
+ * Hook<HookX_, Arg>::list global is a FastLinkedList, head {first, magic 0x45},
+ * node {int prio, desc *, name, next at +0x18}, desc {fn, name}.  The game
+ * walks it (node->desc->fn(arg), stopping at a return > 0) wherever that event
+ * happens.  We add one node of ours at the tail of each list a rule needs (an
+ * aligned pointer store; the game's own nodes run first), and our fn returns 0.
+ *
+ * A rule never starts a mode inside the hook: the ball-start hooks run before
+ * the ball is in play.  It raises the start (start_count counts it), and the
+ * start is done on the game's proc thread at the first moment this ball when
+ * no mode of ours runs and nothing the mode yields to does: our nodes on the
+ * game's lamp-render, update and switch-dispatch hooks are those moments.  A
+ * raised start not done by the ball's end is dropped. */
+typedef struct { void *fn; const char *name; } hdesc_t;
+typedef struct hnode { int prio, pad; hdesc_t *desc; const char *name; struct hnode *next; char room[64]; } hnode_t;
+#define MAX_HOOKS 16
+static hnode_t hnodes[MAX_HOOKS];
+static hdesc_t hdescs[MAX_HOOKS];
+static int nhooks;
+static unsigned events_hooked;          /* bit i = EVENTS[i] has our node */
+static unsigned want_events;            /* bit i = a loaded mode uses EVENTS[i] */
+static long long (*score_get)(int);     /* score_get_player_score(1..4) */
+static int (*player_up)(void);          /* game_flow_get_player_up(): 1..4 */
+static unsigned char gm_was[MAX_GAME_MODES];
+static const char *tick_via;
+static int rules_on;                    /* a loaded mode has a rule needing the hooks */
+
+static char hook_want[80]; static uintptr_t hook_found;
+static void cb_hook(const char *name, uintptr_t a, size_t sz)
+{
+    size_t L = strlen(hook_want), n = strlen(name);
+    if (!hook_found && sz == 16 && !strncmp(name, hook_want, L) && n > 6 && !strcmp(name + n - 6, "4listE")) hook_found = a;
+}
+/* Hook<HookX_, ...>::list by its hook name: the mangled name is
+ * _ZN4HookI<len>HookX_<arg>E4listE, the arg varying per hook. */
+static void **hook_list(const char *hook)
+{
+    snprintf(hook_want, sizeof hook_want, "_ZN4HookI%zu%s", strlen(hook), hook);
+    hook_found = 0;
+    walk_dynsym(cb_hook);
+    return (void **)hook_found;
+}
+static int hook_add(const char *hook, void *fn, const char *name)
+{
+    void **list = hook_list(hook);
+    if (!list) { lg("hooks: this game has no %s list", hook); return 0; }
+    int magic = *(int *)((char *)list + 8);
+    if (magic != 0x45) { lg("hooks: %s list not set up (magic %#x); not used", hook, magic); return 0; }
+    if (nhooks >= MAX_HOOKS) { lg("hooks: too many"); return 0; }
+    hdesc_t *d = &hdescs[nhooks]; hnode_t *n = &hnodes[nhooks]; nhooks++;
+    d->fn = fn; d->name = name;
+    n->prio = 0x7ffffff0; n->desc = d; n->name = name;
+    hnode_t **pp = (hnode_t **)list; int before = 0;
+    while (*pp && (*pp)->prio <= n->prio) { pp = &(*pp)->next; before++; }
+    n->next = *pp;
+    __atomic_store_n(pp, n, __ATOMIC_SEQ_CST);
+    lg("hooks: %s on %s (after the game's %d)", name, hook, before);
+    return 1;
+}
+
+static int game_busy_for(pm_t *m) { return m->game_modes != POLICY_IGNORE && game_busy() != NULL; }
+
+/* A rule raised a start: count it, and leave it for the tick to start. */
+static void raise_start(pm_t *m, const char *why)
+{
+    if ((m->start_once == ONCE_BALL && m->runs_ball) || (m->start_once == ONCE_GAME && m->runs_game)) {
+        lg("\"%s\" %s: already ran this %s (start_once)", m->name, why, m->start_once == ONCE_BALL ? "ball" : "game");
+        return;
+    }
+    if (running(m) || m->pending) return;
+    if (++m->count < m->start_count) { lg("\"%s\" %s: %d of %d", m->name, why, m->count, m->start_count); return; }
+    m->count = 0;
+    m->pending = why; m->pending_log = 0;
+    lg("\"%s\" start raised: %s", m->name, why);
+}
+
+static int ticking;
+static int multiball_seen;      /* a multiball ran since the last multiball_end (set in per_frame) */
+static void starts_tick(const char *via, int force)
+{
+    static long last;
+    if (!installed || !rules_on || ticking || (am_proc && !am_proc())) return;
+    long t = now_ms();
+    if (!force && t - last < 20) return;
+    last = t;
+    pthread_mutex_lock(&mu);
+    ticking = 1;
+    if (!tick_via) { tick_via = via; lg("start rules: ticking on the game's proc thread (first via %s)", via); }
+    int ig = in_game();
+    /* a game mode that ended */
+    for (int i = 0; i < ngm; i++) {
+        if (is_ours(gmodes[i])) continue;
+        int r = gm_running(i);
+        if (gm_was[i] && !r && ig)
+            for (int k = 0; k < npm; k++)
+                if (pms[k].after_sel[i]) {
+                    static char why[MAX_MODES][128];
+                    snprintf(why[k], sizeof why[k], "after %s ended", gmode_sym[i]);
+                    raise_start(&pms[k], why[k]);
+                }
+        gm_was[i] = (unsigned char)r;
+    }
+    /* the player up's score */
+    if (ig && score_get && player_up) {
+        int p = player_up();
+        if (p >= 1 && p <= 8) {
+            long long sc = score_get(p);
+            for (int k = 0; k < npm; k++) {
+                pm_t *m = &pms[k];
+                if (m->start_score > 0 && !(m->score_done & (1u << p)) && sc >= m->start_score) {
+                    m->score_done |= 1u << p;
+                    static char why[MAX_MODES][96];
+                    snprintf(why[k], sizeof why[k], "player %d score %lld reached %lld", p, sc, m->start_score);
+                    raise_start(m, why[k]);
+                }
+            }
+        }
+    }
+    /* do one raised start, if the moment is free */
+    if (ig && !any_ours_running())
+        for (int k = 0; k < npm; k++) {
+            pm_t *m = &pms[k];
+            if (!m->pending) continue;
+            if (game_busy_for(m)) {
+                if (t - m->pending_log > 5000) {
+                    lg("\"%s\" start (%s) waiting for %s", m->name, m->pending, game_busy());
+                    m->pending_log = t;
+                }
+                continue;
+            }
+            lg("\"%s\" starting: %s", m->name, m->pending);
+            start_mode(m, k);
+            break;
+        }
+    ticking = 0;
+    pthread_mutex_unlock(&mu);
+}
+
+static int last_ball_done = -1;  /* the ball last_ball was raised for (player * 1000 + balls completed) */
+static int (*done_balls)(int);   /* score_get_balls_completed(player) */
+static void on_event(int e)
+{
+    if (!installed) return;
+    if (!strcmp(EVENTS[e].word, "last_ball")) {
+        int p = player_up ? player_up() : 0, key = p * 1000 + (done_balls && p > 0 ? done_balls(p) : 0);
+        if (key == last_ball_done) return;      /* the game's hook and its count both said it */
+        last_ball_done = key;
+    }
+    pthread_mutex_lock(&mu);
+    {   /* which ball of which player: the evidence for first/last ball */
+        static int (*left)(void); static int r2;
+        if (!r2) { r2 = 1; left = (int (*)(void))sym("_Z34game_flow_get_balls_left_player_upv"); }
+        int p = player_up ? player_up() : 0;
+        if (p > 0 && done_balls) lg("event %s (player %d, %d ball(s) completed, %d left)", EVENTS[e].word, p,
+                                    done_balls(p), left ? left() : -1);
+        else lg("event %s", EVENTS[e].word);
+    }
+    /* The game runs its multiball-end hook whenever the ball count settles
+     * (MultiballDevice::system_stabilize_proc), one ball or not: it is a
+     * multiball's end only after a multiball (Wonka 03.03, PAD-1354). */
+    if (!strcmp(EVENTS[e].word, "multiball_end")) {
+        if (!multiball_seen) { lg("  (no multiball ran: not a multiball end)"); pthread_mutex_unlock(&mu); return; }
+        multiball_seen = 0;
+    }
+    for (int k = 0; k < npm; k++)
+        if (pms[k].start_on & (1u << e)) raise_start(&pms[k], EVENTS[e].word);
+    pthread_mutex_unlock(&mu);
+    starts_tick(EVENTS[e].hook, 1);
+}
+#define EV(i) static int ev##i(void *a) { (void)a; on_event(i); return 0; }
+EV(0) EV(1) EV(2) EV(3) EV(4) EV(5) EV(6)
+static int (*const ev_fns[])(void *) = { ev0, ev1, ev2, ev3, ev4, ev5, ev6 };
+_Static_assert(sizeof ev_fns / sizeof *ev_fns == NEVENTS, "one fn per start event");
+
+static int hk_game_start(void *a)
+{
+    (void)a;
+    if (!installed) return 0;
+    pthread_mutex_lock(&mu);
+    for (int k = 0; k < npm; k++) {
+        pm_t *m = &pms[k];
+        m->count = 0; m->score_done = 0; m->runs_game = 0; m->runs_ball = 0; m->pending = NULL; m->combo_pos = 0;
+    }
+    last_ball_done = -1;
+    lg("game start: start counts, score marks and runs reset");
+    pthread_mutex_unlock(&mu);
+    return 0;
+}
+static int hk_ball_start(void *a)
+{
+    (void)a;
+    if (!installed) return 0;
+    pthread_mutex_lock(&mu);
+    for (int k = 0; k < npm; k++) {
+        pm_t *m = &pms[k];
+        m->runs_ball = 0; m->combo_pos = 0;
+        if (m->count_reset_ball && m->count) { lg("\"%s\": start count %d reset (new ball)", m->name, m->count); m->count = 0; }
+    }
+    pthread_mutex_unlock(&mu);
+    /* last_ball: the game runs HookLastBall_ just before the last ball (Wonka
+     * 03.03: a list with no node of the game's own); its own count backs that up
+     * on a title that does not, the player up's last ball starting with no balls
+     * left (2, 1, 0 on a 3-ball game).  Either raises it once a ball. */
+    static int (*left)(void); static int r;
+    if (!r) { r = 1; left = (int (*)(void))sym("_Z34game_flow_get_balls_left_player_upv"); }
+    if (left && left() == 0 && (want_events & (1u << 2))) on_event(2);
+    return 0;
+}
+static int hk_score(void *a) { (void)a; starts_tick("HookScore_", 0); return 0; }
+static int hk_tick_lamp(void *a) { (void)a; starts_tick("HookLampRender_", 0); return 0; }
+static int hk_tick_update(void *a) { (void)a; starts_tick("HookUpdate_", 0); return 0; }
+static int hk_tick_sw(void *a) { (void)a; starts_tick("HookSwitchDispatchStart_", 0); return 0; }
+
+static void install_rules(void)
+{
+    for (int k = 0; k < npm; k++) {
+        pm_t *m = &pms[k];
+        if (m->start_on || m->after[1] || m->start_score > 0 || m->start_once || m->count_reset_ball || m->ncombo >= 2)
+            rules_on = 1;
+        if (!m->after[1]) continue;
+        int any = strstr(m->after, " any ") != NULL, hit = 0;
+        for (int i = 0; i < ngm; i++) {
+            char k1[160], k2[160];
+            snprintf(k1, sizeof k1, " %s ", gmode_sym[i]);
+            snprintf(k2, sizeof k2, " %s ", class_name(*(uintptr_t *)gmodes[i]));
+            if ((any && !gmode_bg[i]) || strstr(m->after, k1) || strstr(m->after, k2)) { m->after_sel[i] = 1; hit++; }
+        }
+        lg("\"%s\": start_after%smatches %d game mode(s)", m->name, m->after, hit);
+    }
+    if (!rules_on) { lg("start rules: switches only; no game hooks used"); return; }
+    score_get = (long long (*)(int))sym("_Z22score_get_player_scorei");
+    player_up = (int (*)(void))sym("_Z23game_flow_get_player_upv");
+    done_balls = (int (*)(int))sym("_Z25score_get_balls_completedi");
+    unsigned want = 0; int score = 0;
+    for (int k = 0; k < npm; k++) { want |= pms[k].start_on; if (pms[k].start_score > 0) score = 1; }
+    want_events = want;
+    hook_add("HookGameStart_", (void *)hk_game_start, "pad game start");
+    hook_add("HookBallStart_", (void *)hk_ball_start, "pad ball start");
+    for (int e = 0; e < NEVENTS; e++)
+        if (want & (1u << e)) {
+            if (hook_add(EVENTS[e].hook, (void *)ev_fns[e], EVENTS[e].word)) events_hooked |= 1u << e;
+            else lg("start rules: start_on %s cannot work on this title", EVENTS[e].word);
+        }
+    int ticks = hook_add("HookLampRender_", (void *)hk_tick_lamp, "pad tick")
+              + hook_add("HookUpdate_", (void *)hk_tick_update, "pad tick")
+              + hook_add("HookSwitchDispatchStart_", (void *)hk_tick_sw, "pad tick");
+    if (score) {
+        if (!score_get || !player_up) lg("start rules: start_score cannot work (no score_get_player_score/game_flow_get_player_up)");
+        else hook_add("HookScore_", (void *)hk_score, "pad score");
+    }
+    lg("start rules: %d hook(s) in, %d tick hook(s)%s", nhooks, ticks, ticks ? "" : " - FAIL: no moment to start a raised mode");
 }
 
 static void on_switch(int si)
@@ -2148,7 +2857,12 @@ static void on_switch(int si)
     for (int i = 0; i < npm; i++) if (running(&pms[i])) { active = i; break; }
     if (active >= 0) {
         pm_t *m = &pms[active];
-        if (!m->paused && in_list(m->shot_sw, m->nshot, si)) {
+        if (!m->paused && !m->want_end) {     /* balls and holds first: a switch may also score */
+            if (m->nadd && in_list(m->add_sw, m->nadd, si)) add_a_ball(m, wsw[si].name);
+            if (m->nmb_on && !m->mb_served && in_list(m->mb_on_sw, m->nmb_on, si)) serve_multiball(m, wsw[si].name);
+            if (m->hold_on == 2 && in_list(m->hold_sw, m->nhold_sw, si)) coil_hold(m, wsw[si].name);
+        }
+        if (!m->paused && !m->want_end && in_list(m->shot_sw, m->nshot, si)) {
             ((vull_t)vslot(m->mode, VT_SCORE))(m->mode, (unsigned long long)m->points);
             m->total += m->points; m->hits++;
             lg("\"%s\" shot %s: +%lld (hits %d, mode total %lld)", m->name, wsw[si].name, m->points, m->hits, m->total);
@@ -2159,16 +2873,37 @@ static void on_switch(int si)
                 }
                 lg("\"%s\" COMPLETED (+%lld, mode total %lld)", m->name, m->complete_points, m->total);
                 play(m->snd_complete ? m->snd_complete : m->snd_shot);
+                coil_fire(m, m->coil_complete, m->coil_complete_ms, "completion");
                 end_mode(m, "completion");
-            } else play(m->snd_shot);
+            } else {
+                play(m->snd_shot);
+                coil_fire(m, m->coil_shot, m->coil_shot_ms, wsw[si].name);
+                if (m->hold_on == 0) coil_hold(m, wsw[si].name);
+            }
         } else if (m->paused && in_list(m->shot_sw, m->nshot, si))
             lg("\"%s\" shot %s while paused: not scored", m->name, wsw[si].name);
         pthread_mutex_unlock(&mu);
         return;
     }
+    /* combos: the switches in order, each within combo_seconds of the one before */
+    long t = now_ms();
+    for (int i = 0; i < npm; i++) {
+        pm_t *m = &pms[i];
+        if (m->ncombo < 2 || !in_list(m->combo_sw, m->ncombo, si)) continue;
+        if (m->combo_pos > 0 && t - m->combo_t > m->combo_ms) m->combo_pos = 0;
+        if (m->combo_sw[m->combo_pos] == si) m->combo_pos++;
+        else m->combo_pos = m->combo_sw[0] == si ? 1 : 0;
+        m->combo_t = t;
+        if (m->combo_pos >= m->ncombo) {
+            m->combo_pos = 0;
+            lg("\"%s\" combo made (%d switches)", m->name, m->ncombo);
+            raise_start(m, "combo");
+        } else if (m->combo_pos > 1) lg("\"%s\" combo %d of %d", m->name, m->combo_pos, m->ncombo);
+    }
     for (int i = 0; i < npm; i++) {
         pm_t *m = &pms[i];
         if (!in_list(m->start_sw, m->nstart, si)) continue;
+        if ((m->start_once == ONCE_BALL && m->runs_ball) || (m->start_once == ONCE_GAME && m->runs_game)) continue;
         const char *busy = m->game_modes == POLICY_IGNORE ? NULL : game_busy();
         if (busy) { lg("\"%s\" start shot %s: yielded to %s", m->name, wsw[si].name, busy); continue; }
         if (++m->count < m->start_count) {
@@ -2180,6 +2915,7 @@ static void on_switch(int si)
         break;
     }
     pthread_mutex_unlock(&mu);
+    starts_tick("switch", 1);      /* a combo may just have raised a start */
 }
 
 /* One wrapper per wrapped switch: the dispatch is called with the proc's arg
@@ -2201,6 +2937,8 @@ static void mode_over(pm_t *m)
     m->running_seen = 0; m->paused = 0;
     lamps_release(m);
     if (m->vid) { video_stop(m->vid); m->vid = NULL; }
+    coil_release_mode(m, "mode end");
+    saver_release(m, in_game() ? "mode end" : "ball end");
     play(m->snd_end);
     lg("\"%s\" over: %d hits, mode total %lld", m->name, m->hits, m->total);
 }
@@ -2250,7 +2988,11 @@ static void per_frame(void)
         if (!background_explicit) bg_snapshot_at = now_ms() + 2000;
     }
     if (!ig && was_ingame) {
-        for (int i = 0; i < npm; i++) end_mode(&pms[i], "ball end");
+        for (int i = 0; i < npm; i++) {
+            end_mode(&pms[i], "ball end");
+            if (pms[i].pending) { lg("\"%s\" start (%s) dropped: the ball ended first", pms[i].name, pms[i].pending); pms[i].pending = NULL; }
+        }
+        multiball_seen = 0;
         lg("ball over");
     }
     was_ingame = ig;
@@ -2270,6 +3012,7 @@ static void per_frame(void)
         int bip = balls_in_play ? balls_in_play() : -1;
         if (bip != last_bip) { lg("balls in play: %d", bip); last_bip = bip; }
         if (bip > 1 && !multiball_since) multiball_since = now_ms();
+        if (multiball_since && now_ms() - multiball_since >= 500) multiball_seen = 1;
         else if (bip <= 1) multiball_since = 0;
     }
     for (int i = 0; i < npm; i++) {
@@ -2277,7 +3020,7 @@ static void per_frame(void)
         if (!m->mode) continue;
         int r = running(m);
         if (r) {
-            const char *busy = m->game_modes == POLICY_IGNORE ? NULL : game_busy();
+            const char *busy = m->game_modes == POLICY_IGNORE ? NULL : game_busy_except(m);
             if (m->want_end) r = 1;                       /* ending: leave it be */
             else if (busy && m->game_modes == POLICY_END) end_mode(m, busy);
             else {
@@ -2290,6 +3033,16 @@ static void per_frame(void)
             }
         }
         if (m->vid) m->vid->pause = r && m->paused;
+        if (r && m->mb_balls && m->mb_served && !m->want_end && balls_in_play) {
+            /* item 167's rule: one ball (or none) for 2 s, once the ball save and 3 s more have passed */
+            long t = now_ms();
+            if (balls_in_play() > 1) { m->mb_seen2 = 1; m->one_ball_since = 0; }
+            else {
+                if (!m->one_ball_since) m->one_ball_since = t;
+                if (t - m->mb_served_at >= m->mb_save * 1000L + 3000 && t - m->one_ball_since >= 2000)
+                    end_mode(m, m->mb_seen2 ? "one ball left" : "no second ball was served");
+            }
+        }
         if (r && m->paused) lamps_release(m);          /* the game mode has the lamps */
         else if (!r) mode_over(m);          /* lamps are lit from pad_tick_work */
     }
@@ -2357,7 +3110,8 @@ static void draw_screen(pm_t *m)
         for (int i = 0; i < L; i++) { total[o++] = raw[i]; if ((L - i - 1) % 3 == 0 && i < L - 1) total[o++] = ','; }
         total[o] = 0;
     }
-    snprintf(secs, sizeof secs, "%d", m->secs);
+    if (m->no_clock || (m->nmb_on && m->mb_served)) secs[0] = 0;   /* runs to one ball left */
+    else snprintf(secs, sizeof secs, "%d", m->secs);
     ALLEGRO_COLOR black = { 0, 0, 0, 1 };
     void *ft = m->font_title && jfont ? jfont(m->font_title) : NULL;
     void *fv = m->font_value && jfont ? jfont(m->font_value) : NULL;
@@ -2430,9 +3184,34 @@ static void *installer(void *arg)
     install_music_node();
     {   pthread_t mt;                             /* own sound files, once the game's sounds are in */
         if (pthread_create(&mt, NULL, media_loader, NULL) == 0) pthread_detach(mt); }
+    mb_request = (void (*)(int, int))sym("_Z26mb_request_balls_into_playii");
+    mb_add = (void (*)(int, int))sym("_Z22mb_add_balls_into_playii");
+    mb_kill_saver = (void (*)(void))sym("_Z17mb_kill_ballsaverv");
+    saver_running = (int_fn_t)sym("_Z23mb_ballsaver_is_runningv");
+    saver_time = (int_fn_t)sym("_Z21mb_get_ballsaver_timev");
+    balls_known = (int_fn_t)sym("_Z35ball_search_get_balls_accounted_forv");
+    {
+        int want = 0;
+        for (int i = 0; i < npm; i++) if (pms[i].mb_balls || pms[i].ball_save || pms[i].nadd) want = 1;
+        if (want) lg("balls: the game's ball saver %s (request %p, add %p, kill %p)", ball_api() ? "ok" : "MISSING",
+                     (void *)mb_request, (void *)mb_add, (void *)mb_kill_saver);
+    }
+    resolve_coils();
+    {
+        int holds = 0;
+        for (int i = 0; i < npm; i++) if (pms[i].coil_hold >= 0) holds = 1;
+        if (holds) {
+            if (!coil_holds_on) lg("coils: holds are off on this title until title.cfg says coil_holds = on (a check on the machine comes first)");
+            pthread_t ct;
+            if (pthread_create(&ct, NULL, coil_watch, NULL) == 0) { coil_watch_up = 1; pthread_detach(ct); }
+            else lg("coils: FAIL - no watchdog thread; no holds");
+        }
+    }
+    install_rules();
     if (getenv("JJP_MODS_TEST_GAMEMODE") && getenv("JJP_MODS_TEST_SWITCH")) {
         test_gm = sym(getenv("JJP_MODS_TEST_GAMEMODE"));
         test_sw = sw_index(getenv("JJP_MODS_TEST_SWITCH"));
+        if (getenv("JJP_MODS_TEST_END_SWITCH")) test_end_sw = sw_index(getenv("JJP_MODS_TEST_END_SWITCH"));
         lg("TEST hook: %s starts game mode %s (%p)", getenv("JJP_MODS_TEST_SWITCH"), getenv("JJP_MODS_TEST_GAMEMODE"), test_gm);
     }
     int hooked = 0;
@@ -2475,6 +3254,20 @@ static void selftest(void)
     load_modes();
     for (int i = 0; i < nwsw; i++)
         if (!wsw[i].obj) bad++;
+    unsigned want = 0; int score = 0, ticked = 0;
+    for (int i = 0; i < npm; i++) {
+        want |= pms[i].start_on;
+        if (pms[i].start_score > 0) score = 1;
+        if (pms[i].start_on || pms[i].after[1] || pms[i].start_score > 0 || pms[i].ncombo >= 2) ticked = 1;
+    }
+    for (int e = 0; e < NEVENTS; e++)
+        if ((want & (1u << e)) && !hook_list(EVENTS[e].hook)) { lg("SELFTEST start_on %s: no %s list", EVENTS[e].word, EVENTS[e].hook); bad++; }
+    if (ticked && !hook_list("HookLampRender_") && !hook_list("HookUpdate_") && !hook_list("HookSwitchDispatchStart_")) {
+        lg("SELFTEST no tick hook list: a raised start could never be done"); bad++;
+    }
+    if (score && (!sym("_Z22score_get_player_scorei") || !sym("_Z23game_flow_get_player_upv"))) {
+        lg("SELFTEST start_score: no score_get_player_score / game_flow_get_player_up"); bad++;
+    }
     for (int i = 0; i < npm; i++) {
         pm_t *m = &pms[i];
         for (int s2 = 0; s2 < 4; s2++)
@@ -2496,6 +3289,16 @@ static void selftest(void)
         int uses = m->own_snd[0] | m->own_snd[1] | m->own_snd[2] | m->own_snd[3] | *m->music_file | *m->pic_file | *m->vid_file;
         for (unsigned k = 0; uses && k < sizeof media / sizeof *media; k++)
             if (!sym(media[k])) { lg("SELFTEST %s: own media needs %s, missing", m->file, media[k]); bad++; }
+    }
+    for (int i = 0; i < npm; i++) {
+        pm_t *m = &pms[i];
+        if ((m->mb_balls || m->ball_save || m->nadd) && !(sym("_Z26mb_request_balls_into_playii") && sym("_Z22mb_add_balls_into_playii"))) {
+            lg("SELFTEST %s: balls asked for, but no ball saver exported", m->file); bad++;
+        }
+        if ((m->coil_start >= 0 || m->coil_shot >= 0 || m->coil_complete >= 0 || m->coil_hold >= 0)
+            && !(sym("_ZN4Coil10coil_pulseEj") && sym("_ZN4Coil9coil_dutyEjjh") && sym("_ZN4Coil8coil_offEv") && sym("coil_table"))) {
+            lg("SELFTEST %s: coils named, but no Coil API exported", m->file); bad++;
+        }
     }
     /* .stock files: the game's objects are not built yet (this runs before
      * main), so a mode is checked by name: its global or its class's vtable */

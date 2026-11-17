@@ -83,6 +83,37 @@
    "libavutil.so.56"
   ]
  },
+ "can_balls": true,
+ "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
  "stock": {
   "can_change": true,
   "slots": {
@@ -492,6 +523,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -505,7 +550,9 @@
   "font_timer": "font_wba_timer",
   "sound_start": "se_Fanfare_GobMB_Intro",
   "sound_shot": "se_Fanfare_Jackpot",
-  "sound_end": "se_Fanfare_wonka_Pure_Imagination_Mode_SummaryTotal"
+  "sound_end": "se_Fanfare_wonka_Pure_Imagination_Mode_SummaryTotal",
+  "multiball_start": "switch_ramp_center_made",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "12OompaHurryUp",
@@ -3857,5 +3904,237 @@
   "se_system_test_report",
   "se_trumpets_fanfar_2",
   "se_volume_default"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_diverter_elevator",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_lower_ramp",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flash_bulb_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_top",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kickback",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lamp_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lockup_elevator_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lockup_gobstopper_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_magnet_1",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_2",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_3",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_4",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_5",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_6",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_left_lane",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_gobstopper",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_stepper_1",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_stepper_2",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_stepper_3",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_stepper_4",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_drive_blue",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_drive_green",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_drive_red",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_undercabinet_led_left",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_undercabinet_led_right",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_vuk_elevator",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_gobstopper",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_tv",
+   "pulse": true,
+   "hold": false
+  }
  ]
 }

@@ -113,6 +113,8 @@ function Row({ k, prefix = "", meta, value, j, have }) {
   let input;
   if (m.kind === "switches") input = html`<${NamePick} k=${key} value=${value} names=${names.switches} multi title="The game's switches" />`;
   else if (m.kind === "lamps") input = html`<${NamePick} k=${key} value=${value} names=${names.lamps} multi title="The game's lamps (lp_) and lamp groups (ls_)" />`;
+  else if (m.kind === "events") input = html`<${NamePick} k=${key} value=${value} names=${names.events || []} multi title="The game's own events (its hook lists)" />`;
+  else if (m.kind === "after") input = html`<${NamePick} k=${key} value=${value} names=${names.after || []} multi title="The game's own modes (a global or a class), or any" />`;
   else if (m.kind === "sound") input = html`<${NamePick} k=${key} value=${value} names=${names.sound} sound have=${have} title="The game's sounds" inherit=${inherit} />`;
   else if (m.kind === "sound_or_file") input = html`<${NamePick} k=${key} value=${value} names=${names.sound_or_file} sound have=${have} title="The game's sounds, or a sound file of yours in this game's mode folder" inherit=${inherit} />`;
   else if (m.kind === "sound_file" || m.kind === "picture_file" || m.kind === "video_file") input = html`<${NamePick} k=${key} value=${value} names=${names[m.kind] || []} title="A file of yours in this game's mode folder (Open the mode folder, put it there, then pick it)" inherit=${inherit} />`;

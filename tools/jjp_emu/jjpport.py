@@ -12,7 +12,10 @@ here statically - no key, no running game:
   * the names a mode file can use: named shot switches (`switches`), lamps and
     lamp groups (`lamps`), sounds (`sounds`), the game's fonts (`fonts`), and
     its Mode classes (`mode_classes`);
-  * defaults for a first mode (`defaults`), picked by name.
+  * defaults for a first mode (`defaults`), picked by name;
+  * the coils a mode may pulse or hold (`coils`, PAD-1353), by the runtime's own
+    name rules (COIL_NEVER / COIL_HOLDABLE, the twins of jjpmodes.c's lists), and
+    whether the engine's ball saver and Coil API are there (`can_balls`, `can_coils`).
 
     jjpport.py GAME_ELF [--gamename NAME] [--out PORT.json] [--example DIR]
 
@@ -58,7 +61,45 @@ SDK = [
     ("lamps", "_ZTV4Lamp", False),
     ("screen", "_ZN8JJPEFont4fontEv", False),
     ("screen", "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc", False),
+    ("balls", "_Z26mb_request_balls_into_playii", False),
+    ("balls", "_Z22mb_add_balls_into_playii", False),
+    ("balls", "_Z17mb_kill_ballsaverv", False),
+    ("balls", "_Z23mb_ballsaver_is_runningv", False),
+    ("balls", "_Z21mb_get_ballsaver_timev", False),
+    ("coils", "_ZN4Coil10coil_pulseEj", False),
+    ("coils", "_ZN4Coil9coil_dutyEjjh", False),
+    ("coils", "_ZN4Coil8coil_offEv", False),
+    ("coils", "_Z21coil_get_duty_patterni", False),
+    ("coils", "coil_table", False),
 ]
+#: jjpmodes.c's COIL_NEVER and COIL_HOLDABLE (PAD-1353): a coil whose name has a NEVER
+#: part is the game's own (ball handling, flippers, power, motors the game positions) and
+#: no mode fires it, unless it has a COIL_ANYWAY part; one
+#: with a HOLDABLE part is built to stay on and a mode may hold it, bounded.
+COIL_NEVER = ("flipper", "trough", "autolaunch", "auto_launch", "autoplunge", "plunger", "sling", "jet", "bumper",
+              "stepper", "relay", "power", "ticket", "null", "motor")
+#: ...except these: the shaker motor is a motor a mode may run
+COIL_ANYWAY = ("shaker",)
+COIL_HOLDABLE = ("magnet", "divert", "post", "gate", "shaker", "flash", "lamp", "light", "led")
+
+
+def coil_rules(name):
+    """-> (pulse, hold) a mode may do on the coil called `name` (jjpmodes.c coil_index)."""
+    pulse = not any(k in name for k in COIL_NEVER) or any(k in name for k in COIL_ANYWAY)
+    return pulse, pulse and any(k in name for k in COIL_HOLDABLE)
+
+
+def coils(e):
+    """The named Coil globals (the size most coil_<n> have), each with what a mode may do."""
+    sizes = collections.Counter(s for n, (a, s) in e.syms.items() if re.match(r"^coil_\d+$", n))
+    if not sizes:
+        return []
+    size = sizes.most_common(1)[0][0]
+    out = []
+    for n in object_names(e, "coil_", re.compile(r"^coil_\d+$"), {size}):
+        pulse, hold_ = coil_rules(n)
+        out.append(collections.OrderedDict([("symbol", n), ("pulse", pulse), ("hold", hold_)]))
+    return out
 #: runtime slot -> (mangled, nth among equal addresses, slot it must follow)
 SLOTS = [
     ("start", "_ZN4Mode5startEv", 0, None), ("end", "_ZN4Mode3endEv", 0, None),
@@ -69,6 +110,49 @@ SLOTS = [
     ("total_choreo", "_ZN4Mode25hook_do_mode_total_choreoEv", 0, "start_choreo"),
 ]
 _BARE_SWITCH = re.compile(r"^d?switch_\d+$")
+#: PAD-1354 start rules: the game's Hook<...>::list globals the runtime puts a node on
+#: (start_on events, the per-ball / per-game resets, the score check and the moments a
+#: raised start is done in), and what each is for
+RULE_HOOKS = collections.OrderedDict([
+    ("HookBallStart_", "start_on ball_start; start_once / start_count_reset per ball"),
+    ("HookFirstBall_", "start_on first_ball"), ("HookLastBall_", "start_on last_ball"),
+    ("HookValidPlayfield_", "start_on valid_playfield"), ("HookBallSave_", "start_on ball_saved"),
+    ("HookExtraBallAwarded_", "start_on extra_ball"), ("HookMultiballEnd_", "start_on multiball_end"),
+    ("HookGameStart_", "start counts, score marks and start_once reset per game"),
+    ("HookScore_", "start_score checked as the game scores"),
+    ("HookLampRender_", "tick: a raised start is done here"), ("HookUpdate_", "tick"),
+    ("HookSwitchDispatchStart_", "tick"),
+])
+TICK_HOOKS = ("HookLampRender_", "HookUpdate_", "HookSwitchDispatchStart_")
+
+
+def rule_hooks(e):
+    """{hook: present} for RULE_HOOKS, found as jjpmodes.c hook_list finds them: a 16-byte
+    _ZN4HookI<len><hook>...E4listE object."""
+    out = collections.OrderedDict((h, False) for h in RULE_HOOKS)
+    for n, (a, s) in e.syms.items():
+        if not n.startswith("_ZN4HookI") or not n.endswith("4listE") or s != 16:
+            continue
+        m = re.match(r"_ZN4HookI(\d+)", n)
+        if m:
+            k = int(m.group(1))
+            h = n[m.end():m.end() + k]
+            if h in out:
+                out[h] = True
+    return out
+
+
+def start_rules(e, hooks):
+    score = "_Z22score_get_player_scorei" in e.syms and "_Z23game_flow_get_player_upv" in e.syms
+    tick = any(hooks.get(h) for h in TICK_HOOKS)
+    return collections.OrderedDict([
+        ("can_start_on_rules", tick),
+        ("start_on", [w for w, h in (("ball_start", "HookBallStart_"), ("first_ball", "HookFirstBall_"),
+                                     ("last_ball", "HookLastBall_"), ("valid_playfield", "HookValidPlayfield_"),
+                                     ("ball_saved", "HookBallSave_"), ("extra_ball", "HookExtraBallAwarded_"),
+                                     ("multiball_end", "HookMultiballEnd_")) if tick and hooks.get(h)]),
+        ("start_after", tick), ("start_combo", True), ("start_score", tick and score),
+    ])
 
 
 def mode_vtable(e):
@@ -343,6 +427,7 @@ def port(elf_path, gamename=None, live=None):
         if required and not ok:
             missing_required.append(name)
     vt = mode_vtable(e) if "_ZTV4Mode" in e.syms else {}
+    hooks = rule_hooks(e)
     bad_slots = [k for k, v in vt.items() if v is None and k != "total_choreo"]
     # a Switch is a 104-byte global on GnR; take the size most of the numbered ones have
     sw_sizes = collections.Counter(s for n, (a, s) in e.syms.items() if re.match(r"^switch_\d+$", n))
@@ -377,6 +462,9 @@ def port(elf_path, gamename=None, live=None):
         ("sound_shot", _first(sounds, [r"fanfare.*jackpot$", r"jackpot", r"award", r"hit"])),
         ("sound_end", _first(sounds, [r"cheer", r"applause", r"total", r"end"])),
     ])
+    pulse_ok = [c["symbol"] for c in coils(e) if c["pulse"]]
+    defaults["multiball_start"] = defaults["shots"].split()[1] if len(defaults["shots"].split()) > 1 else start
+    defaults["coil_shot"] = _first(pulse_ok, [r"knocker", r"kick", r"vuk", r"eject"]) if pulse_ok else ""
     return collections.OrderedDict([
         ("format", FORMAT),
         ("elf", os.path.basename(elf_path)),
@@ -387,6 +475,10 @@ def port(elf_path, gamename=None, live=None):
         ("mode_vtable", vt),
         ("hold", hold(e) if "_ZTV4Mode" in e.syms else {"can_hold": False}),
         ("media", media(e)),
+        ("can_balls", all(sdk.get("balls", {}).values()) and bool(sdk.get("balls"))),
+        ("can_coils", all(sdk.get("coils", {}).values()) and bool(sdk.get("coils"))),
+        ("hooks", hooks),
+        ("start_rules", start_rules(e, hooks)),
         ("stock", stock(e, live)),
         ("sdk", sdk),
         ("switch_object_bytes", sw_size),
@@ -398,6 +490,7 @@ def port(elf_path, gamename=None, live=None):
         ("lamp_groups", groups),
         ("fonts", fonts),
         ("sounds", sounds),
+        ("coils", coils(e)),
     ])
 
 
@@ -422,6 +515,24 @@ def write_example(p, folder, title_label):
                 f.write("%s = %s\n" % (k, d[k]))
         if d.get("lamps"):
             f.write("lamps = %s\nlamp_color = ff2000\nlamp_blink = 4\n" % d["lamps"])
+    write_multiball_example(p, folder, title_label)
+
+
+def write_multiball_example(p, folder, title_label):
+    """A second starter (PAD-1353): the mode's own multiball, with a coil pulse per shot."""
+    d = p["defaults"]
+    if not (p.get("can_balls") and d.get("multiball_start")):
+        return
+    with open(os.path.join(folder, "2_multiball.mode"), "w", newline="\n") as f:
+        f.write("# A multiball of the mode's own for %s: 3 balls, 10 s ball save, one ball left\n"
+                "# ends it (seconds = 0: no clock).  Every key: tools/jjp_emu/MODES.md\n" % title_label)
+        f.write("name = PAD Multiball\ntitle = PAD MULTIBALL\n")
+        f.write("start = %s\nshots = %s\n" % (d["multiball_start"], d["shots"]))
+        f.write("points = 2000000\nseconds = 0\nmultiball = 3 10\nadd_ball = %s 1\n" % d["start"])
+        if d.get("coil_shot"):
+            f.write("coil_shot = %s\n" % d["coil_shot"])
+        if d.get("sound_shot"):
+            f.write("sound_shot = %s\n" % d["sound_shot"])
 
 
 def write_stock_example(p, folder, title_label):
@@ -456,6 +567,7 @@ def main(argv=None):
     ap.add_argument("--out")
     ap.add_argument("--example", help="write a starter mode folder here")
     ap.add_argument("--label", help="title label for the example's comments")
+    ap.add_argument("--multiball-example", help="write only the multiball starter (2_multiball.mode) here")
     ap.add_argument("--stock-example", help="write a starter .stock folder here")
     ap.add_argument("--live", help="a running game's mode globals and shot table (jjpstock.py live) to fold in")
     a = ap.parse_args(argv)
@@ -467,6 +579,8 @@ def main(argv=None):
             f.write("\n")
     if a.example:
         write_example(p, a.example, a.label or a.gamename or p["elf"])
+    if a.multiball_example:
+        write_multiball_example(p, a.multiball_example, a.label or a.gamename or p["elf"])
     if a.stock_example:
         print("  starter .stock: %s" % write_stock_example(p, a.stock_example, a.label or a.gamename or p["elf"]))
     print("%s: %s; %d exported, %d switches, %d lamps, %d sounds, %d fonts, %d Mode classes%s" % (
@@ -477,6 +591,13 @@ def main(argv=None):
                                "no (%s)" % " ".join(k for k, v in p["media"]["ok"].items() if not v)))
     print("  vtable %s" % " ".join("%s=%s" % (k, hex(v) if v is not None else "-") for k, v in p["mode_vtable"].items()))
     print("  defaults %s" % json.dumps(p["defaults"]))
+    cs = p["coils"]
+    print("  balls %s, coils %s: %d named, %d a mode may pulse, %d it may hold" % (
+        "yes" if p["can_balls"] else "no", "yes" if p["can_coils"] else "no", len(cs),
+        sum(c["pulse"] for c in cs), sum(c["hold"] for c in cs)))
+    sr = p["start_rules"]
+    print("  start rules: %s; start_on %s%s" % ("yes" if sr["can_start_on_rules"] else "switches and combos only",
+                                             " ".join(sr["start_on"]) or "-", "; start_score" if sr["start_score"] else ""))
     st = p["stock"]
     if st.get("classes"):
         cl = st["classes"]

@@ -35,6 +35,84 @@
    "20TakeAChanceMultiball"
   ]
  },
+ "media": {
+  "can_play_own_media": true,
+  "ok": {
+   "sounds": true,
+   "music": true,
+   "picture": true,
+   "video": true
+  },
+  "pieces": {
+   "sounds": {
+    "_ZN11SoundEffect23create_sample_instancesEPKc": true,
+    "_ZN11SoundEffect7do_playEb": true,
+    "_ZN11SoundEffect9is_loadedEv": true,
+    "_ZN11SoundEffect10is_playingEv": true,
+    "_ZN11SoundEffect17play_audio_streamEv": true,
+    "liballegro_audio.so": true,
+    "liballegro_acodec.so": true
+   },
+   "music": {
+    "_ZN6UpdateI14UpdateBGMusic_PPFvvEE4listE": true,
+    "_Z12update_musicv": true,
+    "_Z13music_requestPFvvE": true
+   },
+   "picture": {
+    "liballegro_image.so": true
+   },
+   "video": {
+    "libavformat.so": true,
+    "libavcodec.so": true,
+    "libavutil.so": true
+   }
+  },
+  "sound_object_bytes": 264,
+  "libraries": [
+   "liballegro.so.5.2",
+   "liballegro_acodec.so.5.2",
+   "liballegro_audio.so.5.2",
+   "liballegro_font.so.5.2",
+   "liballegro_image.so.5.2",
+   "liballegro_memfile.so.5.2",
+   "liballegro_primitives.so.5.2",
+   "liballegro_ttf.so.5.2",
+   "libavcodec.so.58",
+   "libavformat.so.58",
+   "libavutil.so.56"
+  ]
+ },
+ "can_balls": true,
+ "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
  "stock": {
   "can_change": true,
   "slots": {
@@ -195,6 +273,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -208,7 +300,9 @@
   "font_timer": "font_timer",
   "sound_start": "se_Fanfare_WheelAward_Gabby_Start",
   "sound_shot": "se_Fanfare_TAC_Jackpot",
-  "sound_end": "se_SFX_Carnival_Darts_BalloonPop1_Cheer"
+  "sound_end": "se_SFX_Carnival_Darts_BalloonPop1_Cheer",
+  "multiball_start": "switch_left_ramp_diverted_made",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "11BensonsMode",
@@ -4151,5 +4245,222 @@
   "se_tiki_party_sling",
   "se_volume_default",
   "se_wheel"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_backglass_left",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_backglass_right",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_center_scoop_vuk",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_target",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_target_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flash_bulb_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_gabby_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_gabby_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_bot",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_top",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jump_ramp_left_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_jump_ramp_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jump_ramp_right_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_kickback",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lamp_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_left_jet_saucer_kicker",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_left_ramp_diverter",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_left_ramp_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lock_up_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_wheel_drive_1",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_wheel_drive_2",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_jet_saucer_kicker",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_LED_duke",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_LED_ferris_wheel",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_LED_fireworks",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_LED_tent",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_duke_spin",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  }
  ]
 }

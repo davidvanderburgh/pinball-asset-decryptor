@@ -80,7 +80,7 @@ def test_hidden_on_jjp_without_the_preview_switch(tmp_path, monkeypatch):
 def test_a_title_is_seeded_from_its_starter_and_checks_clean(tmp_path, preview_on):
     with web_app(tmp_path, mfr="jjp") as w:
         j = _open_wonka(w)
-        assert [m["file"] for m in j["modes"]] == ["1_example.mode"]
+        assert [m["file"] for m in j["modes"]] == ["1_example.mode", "2_multiball.mode"]   # PAD-1353
         assert j["open"] == "1_example.mode"
         assert j["form"]["start"] == "switch_target_tv"
         assert j["title_cfg"]["game"] == "Wonka"
@@ -132,19 +132,19 @@ def test_new_duplicate_delete(tmp_path, preview_on):
         _open_wonka(w)
         fn = w.call("modes.jjp_new", "Fizzy Lifting")
         j = _jjp(w)
-        assert fn == "2_fizzy_lifting.mode" and j["open"] == fn
+        assert fn == "3_fizzy_lifting.mode" and j["open"] == fn
         assert j["form"]["name"] == "Fizzy Lifting" and j["form"]["start"]      # the port's starter picks
         assert j["check"]["ok"], j["check"]
         w.call("modes.jjp_duplicate")
         j = _jjp(w)
-        assert [m["name"] for m in j["modes"]] == ["PAD Mode", "Fizzy Lifting", "Fizzy Lifting copy"]
+        assert [m["name"] for m in j["modes"]] == ["PAD Mode", "PAD Multiball", "Fizzy Lifting", "Fizzy Lifting copy"]
         w.answers.append("no")
         w.call("modes.jjp_delete")
-        assert len(_jjp(w)["modes"]) == 3
+        assert len(_jjp(w)["modes"]) == 4
         w.answers.append("yes")
         w.call("modes.jjp_delete")
         j = _jjp(w)
-        assert [m["name"] for m in j["modes"]] == ["PAD Mode", "Fizzy Lifting"]
+        assert [m["name"] for m in j["modes"]] == ["PAD Mode", "PAD Multiball", "Fizzy Lifting"]
         assert j["open"] == "1_example.mode"
 
 
@@ -292,3 +292,27 @@ def test_a_modes_own_media_files_are_offered_and_check(tmp_path, preview_on):
         assert _jjp(w)["check"]["ok"], _jjp(w)["check"]
         w.call("modes.jjp_set", "video", "gone.webm")
         assert any("no gone.webm in the mode folder" in p for p in _jjp(w)["check"]["problems"])
+
+
+def test_balls_and_coils_from_the_form(tmp_path, preview_on):
+    """PAD-1353: the Balls and Coils groups write the runtime's keys, and a hold needs the title's coil_holds."""
+    with web_app(tmp_path, mfr="jjp") as w:
+        j = _open_wonka(w)
+        groups = {g["title"]: g["keys"] for g in j["groups"]} if j.get("groups") else dict(
+            (g, list(ks)) for g, ks in CM.FORM_GROUPS)
+        assert "multiball" in groups["Balls"] and "coil_hold" in groups["Coils"]
+        path = os.path.join(j["folder"], j["open"])
+        w.call("modes.jjp_set", "multiball", "3 10")
+        w.call("modes.jjp_set", "coil_shot", "coil_knocker")
+        w.call("modes.jjp_set", "coil_hold", "coil_magnet_1 1500 8")
+        j = _jjp(w)
+        assert any("coil_holds = on" in p for p in j["check"]["problems"]), j["check"]
+        w.call("modes.jjp_set", "title:coil_holds", "on")
+        j = _jjp(w)
+        assert j["check"]["ok"], j["check"]
+        assert j["title_cfg"]["coil_holds"] == "on"
+        lines = open(path, encoding="utf-8").read().splitlines()
+        for line in ("multiball = 3 10", "coil_shot = coil_knocker", "coil_hold = coil_magnet_1 1500 8"):
+            assert line in lines
+        w.call("modes.jjp_set", "coil_shot", "coil_flipper_power_left")
+        assert any("coil_flipper_power_left" in p for p in _jjp(w)["check"]["problems"])

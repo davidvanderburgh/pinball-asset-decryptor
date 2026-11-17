@@ -288,10 +288,36 @@ KEYS = collections.OrderedDict([
     ("game_modes", ("hold", "pause", "end", "ignore")),
     ("hold_multiballs", ("yes", "no")), ("allow_game_modes", "text"),
     ("panel", ("middle", "bottom", "top", "none")),
+    # PAD-1353: balls and coils
+    ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
+    ("coil_start", "coil_pulse"), ("coil_shot", "coil_pulse"), ("coil_complete", "coil_pulse"),
+    ("coil_hold", "coil_hold"), ("coil_hold_on", "hold_on"),
+    # PAD-1354 start rules (jjpmodes.c "start rules")
+    ("start_on", "events"), ("start_after", "after"), ("start_score", "int"),
+    ("start_combo", "switches"), ("combo_seconds", "int"),
+    ("start_count_reset", ("game", "ball")), ("start_once", ("no", "ball", "game")),
 ])
+#: start_on words -> the game's Hook<...>::list each one needs (jjpmodes.c EVENTS)
+START_EVENTS = collections.OrderedDict([
+    ("ball_start", "HookBallStart_"), ("first_ball", "HookFirstBall_"), ("last_ball", "HookLastBall_"),
+    ("valid_playfield", "HookValidPlayfield_"), ("ball_saved", "HookBallSave_"),
+    ("extra_ball", "HookExtraBallAwarded_"), ("multiball_end", "HookMultiballEnd_"),
+])
+#: keys that start a mode on their own
+START_RULES = ("start", "start_on", "start_after", "start_score", "start_combo")
+
+
+def start_text(m):
+    """What starts a mode, for a summary line: its start switches and any start rules."""
+    parts = [m["start"]] if m.get("start") else []
+    for k, label in (("start_on", "on"), ("start_after", "after"), ("start_score", "score"), ("start_combo", "combo")):
+        if m.get(k):
+            parts.append("%s %s" % (label, m[k]))
+    return "; ".join(parts)
 #: keys only title.cfg takes
 TITLE_KEYS = collections.OrderedDict([
     ("game", "text"), ("ingame_state", "int"), ("background_modes", "modes"),
+    ("coil_holds", ("on", "off")),
 ])
 #: keys a .stock file takes (jjpmodes.c apply_stock_kv): one of the GAME's own modes, changed (PAD-1351)
 STOCK_KEYS = collections.OrderedDict([
@@ -346,8 +372,58 @@ def _names(v):
     return [t for t in re.split(r"[ ,\t]+", v) if t]
 
 
+def _coil_problem(name, want, port):
+    """A coil a mode names, against the port's `coils` (jjpport.py coil_rules)."""
+    if not name.startswith("coil_"):
+        return "%s is not a coil name (coil_...)" % name
+    coils = {c["symbol"]: c for c in (port or {}).get("coils", [])}
+    if not coils:
+        return None
+    c = coils.get(name)
+    if c is None:
+        return "not in %s: %s" % (port.get("title", "this game"), name)
+    if not c["pulse"]:
+        return "%s is one of the game's own ball, flipper, power or motor coils: a mode may not fire it" % name
+    if want == "hold" and not c["hold"]:
+        return "%s is not built to stay on (a magnet, diverter, post, gate, shaker or light): a mode may only pulse it" % name
+    return None
+
+
+def _int_in(v, lo, hi, what):
+    if not _INT.match(v):
+        return "%s must be a whole number" % what
+    return None if lo <= int(v.replace(",", "").replace("_", "")) <= hi else "%s must be %d-%d" % (what, lo, hi)
+
+
 def check_value(kind, v, port=None):
     """-> a problem string, or None."""
+    words = _names(v)
+    if kind == "multiball":       # <balls in play 2-6> [ball save s 0-120]
+        if not 1 <= len(words) <= 2:
+            return "must be <balls in play> [ball save seconds]"
+        return _int_in(words[0], 2, 6, "balls") or (len(words) > 1 and _int_in(words[1], 0, 120, "ball save")) or None
+    if kind == "ball_save":
+        return _int_in(v, 1, 120, "seconds")
+    if kind == "add_ball":        # <switches> [times 1-6]
+        if words and _INT.match(words[-1]):
+            p = _int_in(words[-1], 1, 6, "times")
+            if p:
+                return p
+            words = words[:-1]
+        if not words:
+            return "must name a switch"
+        return check_value("switches", " ".join(words), port)
+    if kind == "coil_pulse":      # <coil> [ms]
+        if not 1 <= len(words) <= 2:
+            return "must be <coil> [ms]"
+        return (len(words) > 1 and _int_in(words[1], 1, 1000, "ms")) or _coil_problem(words[0], "pulse", port)
+    if kind == "coil_hold":       # <coil> <ms> [power of 32]
+        if not 2 <= len(words) <= 3:
+            return "must be <coil> <ms> [power of 32]"
+        return (_int_in(words[1], 100, 5000, "ms") or (len(words) > 2 and _int_in(words[2], 1, 16, "power"))
+                or _coil_problem(words[0], "hold", port))
+    if kind == "hold_on":
+        return None if v in ("start", "shots") else check_value("switches", v, port)
     if isinstance(kind, tuple):
         return None if v in kind else "must be one of %s" % ", ".join(kind)
     if kind == "int":
@@ -391,6 +467,29 @@ def check_value(kind, v, port=None):
         h = v.lstrip("#")
         ok = _HEX.match(v) and len(h) in ((6,) if kind == "rgb" else (6, 8))
         return None if ok else "must be %s hex" % ("rrggbb" if kind == "rgb" else "rrggbb or rrggbbaa")
+    if kind == "events":
+        bad = [t for t in _names(v) if t not in START_EVENTS]
+        if bad:
+            return "%s: not a start event (%s)" % (" ".join(bad), ", ".join(START_EVENTS))
+        hooks = (port or {}).get("hooks")
+        if hooks:
+            missing = [t for t in _names(v) if not hooks.get(START_EVENTS[t])]
+            if missing:
+                return "%s: %s has no %s hook" % (" ".join(missing), port.get("title", "this game"),
+                                                  " ".join(START_EVENTS[t] for t in missing))
+        return None
+    if kind == "after":
+        # the game's mode globals are known only from a live map (stock.objects, jjpstock.py
+        # live); without one a name cannot be refused, as a global is not in the file
+        names = [t for t in _names(v) if t != "any"]
+        st = (port or {}).get("stock") or {}
+        objects = set(st.get("objects") or ()) | set((port or {}).get("game_modes") or ())
+        if port is None or not objects:
+            return None
+        known = objects | set(st.get("classes") or ()) | set(port.get("mode_classes") or ())
+        missing = [t for t in names if t not in known]
+        return None if not missing else "not a game mode or Mode class of %s: %s" % (
+            port.get("title", "this game"), " ".join(missing))
     if port is None:
         return None
     table = {"switches": "switches", "lamps": "lamps", "sound": "sounds", "font": "fonts",
@@ -458,12 +557,25 @@ def check_modes(mode_dir, port=None):
             if v and (k in ("music", "picture", "video") or is_sound_file(v)) and media_kind(v) \
                     and "/" not in v and not os.path.isfile(os.path.join(mode_dir, v)):
                 problems.append("%s: %s = %s, but there is no %s in the mode folder" % (fn, k, v, v))
-        if not m.get("start"):
-            problems.append("%s: no start = <switch> (the mode would never start)" % fn)
+        if not any(m.get(k) for k in START_RULES):
+            problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo):"
+                            " the mode would never start" % fn)
+        if m.get("start_combo") and len(_names(m["start_combo"])) < 2:
+            problems.append("%s: start_combo needs two switches or more" % fn)
+        if m.get("start_score") and _INT.match(m["start_score"]) and int(m["start_score"].replace(",", "").replace("_", "")) <= 0:
+            problems.append("%s: start_score must be above 0" % fn)
+        complete = (m.get("complete") or "0").replace(",", "").replace("_", "")
+        if not m.get("start") and not m.get("shots") and _INT.match(complete) and int(complete) > 0:
+            problems.append("%s: complete = %s but no shots = (nothing can score it)" % (fn, m["complete"]))
         m["file"] = fn
         m.setdefault("name", fn[:-5])
-        for k in ("start", "shots"):
-            shot_switches.update(_names(m.get(k, "")))
+        for k in ("start", "shots", "start_combo", "multiball_on", "add_ball", "coil_hold_on"):
+            shot_switches.update(t for t in _names(m.get(k, "")) if t.startswith(("switch_", "dswitch_")))
+        if m.get("multiball_on") and not m.get("multiball"):
+            problems.append("%s: multiball_on without a multiball line (it is ignored)" % fn)
+        if m.get("coil_hold") and title.get("coil_holds") != "on":
+            problems.append("%s: coil_hold is off on this title until title.cfg says coil_holds = on "
+                            "(after a check on the machine)" % fn)
         modes.append(m)
     if len(stocks) > MAX_STOCK:
         problems.append("%d .stock files: the runtime takes %d, the rest are ignored" % (len(stocks), MAX_STOCK))
@@ -723,7 +835,7 @@ def inspect(a):
         print("%s %s: %d custom mode(s), written %s by %s %s" % (man.get("title"), man.get("game_version"),
               len(man.get("modes", [])), man.get("written"), man.get("tool"), man.get("version")))
         for m in man.get("modes", []):
-            print("  %-24s start %-28s %s s, %s a shot" % (m.get("name"), m.get("start"), m.get("seconds") or "20",
+            print("  %-24s start %-28s %s s, %s a shot" % (m.get("name"), start_text(m), m.get("seconds") or "20",
                                                            m.get("points") or "1000000"))
         for m in man.get("stock", []):
             print("  game mode %-14s %s" % (m.get("mode"), ", ".join("%s %s" % (k, m[k]) for k in STOCK_KEYS
@@ -772,7 +884,7 @@ def main(argv=None):
                 if m.get("stock"):
                     print("game mode %-23s %s" % (m.get("mode", "?"), m["file"]))
                 else:
-                    print("mode %-28s start %s" % (m["name"], m.get("start", "")))
+                    print("mode %-28s start %s" % (m["name"], start_text(m)))
             for p in problems:
                 print("problem: " + p)
             print("%d mode(s), %d problem(s)" % (len(modes), len(problems)))

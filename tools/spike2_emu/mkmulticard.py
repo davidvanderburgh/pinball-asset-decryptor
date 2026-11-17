@@ -3500,6 +3500,46 @@ def _existing_mode_sets(p2_image):
     return out
 
 
+def mode_sets_moved(card, mode_sets):
+    """The images (1..N) whose custom modes on the card are not the ones their source carries
+    now (PAD-1386) - an image swapped for another build, or a source whose modes were edited,
+    keeps the OLD image's modes until the menu is injected again, and an update decides that
+    inject from the image list and the menu text alone.  Compared by name and bytes against
+    MODES_DIR/img<N> on the card's p2; an unreadable card counts every image as moved (an
+    inject too many costs seconds, a missed one runs the wrong modes)."""
+    if not mode_sets:
+        return []
+    try:
+        ref = select_ref(card)
+    except Exception:                                    # noqa: BLE001 - see above
+        return [i for i in range(1, len(mode_sets))]
+    return mode_sets_moved_on(ref, mode_sets)
+
+
+def mode_sets_moved_on(ref, mode_sets):
+    """:func:`mode_sets_moved` on a p2 already found (a debugfs reference)."""
+    try:
+        have = _existing_mode_sets(ref) or {}
+    except Exception:                                    # noqa: BLE001
+        return [i for i in range(1, len(mode_sets or []))]
+    moved = []
+    for i, ms in enumerate(mode_sets):
+        if i == 0:
+            continue
+        want = {n: v[0] for n, v in (ms or {}).items()} if carries_modes(ms) else {}
+        sub = "img%d" % i
+        names = sorted(have.get(sub) or [])
+        if names != sorted(want):
+            moved.append(i)
+            continue
+        try:
+            if any(debugfs_cat(ref, "%s/%s/%s" % (MODES_DIR, sub, n)) != want[n] for n in names):
+                moved.append(i)
+        except Exception:                                # noqa: BLE001
+            moved.append(i)
+    return moved
+
+
 def inject_mode_sets(p2_image, mode_sets, stage_dir):
     """Write images 1..N's own mode sets into p2 (MODES_DIR), and - when any extra image carries
     modes - make sure the rootfs can preload them: PADMODE_DIR exists (the bind's mountpoint)
@@ -5958,6 +5998,43 @@ def _update_locked(a, ts, card, dry):
             actions = [swap.get(id(a_), a_) for a_ in actions
                        if a_.action != "remove" or a_.old_index in still_removed]
             by_index = {a_.index: a_ for a_ in actions if a_.action != "remove"}
+    # AN IMAGE SWAPPED FOR ANOTHER IN THE SAME SLOT IS THAT SLOT'S TREE, CHANGED (PAD-1386).
+    # Read as new, the slot's old tree was removed and the new one written whole - every
+    # file copied again, though a new build of the same game (a project's edited image, a
+    # newer code version) shares nearly all of them, and a parts card's partition had no
+    # room for both trees at once.  A new image no path, stamp or tree claimed takes the
+    # removed tree at its own position: the diff then writes only the files that differ
+    # and removes the ones the new image lacks, exactly as for a source edited in place.
+    # Done AFTER the same-tree matching above, so an image that merely moved (another path,
+    # another slot) is still kept or renamed rather than diffed against its neighbour.
+    replaced = set()
+    if any(a_.action == "remove" for a_ in actions):
+        pair, taken = {}, set()
+        for act in [a_ for a_ in actions if a_.action == "new" and a_.index != 0]:
+            rem = next((r for r in actions if r.action == "remove" and r.old_index == act.index
+                        and id(r) not in taken), None)
+            im = rec.image(act.index) if rem is not None else None
+            if im is None:
+                continue
+            taken.add(id(rem))
+            kept = ts.TreeAction(act.index, act.device, im.sub, act.new_sub,
+                                 "keep" if im.sub == act.new_sub else "rename", im.index)
+            t_, st_, uuid_, _old = new_trees[act.index]
+            new_trees[act.index] = (t_, st_, uuid_, im)
+            if im.bypass:
+                # the card holds the bypass's game and .sidx: a new image that is the card's
+                # own content (recovered off it) writes nothing for them
+                on_card = tree_as_on_card(im)
+                if not ts.diff_tree(on_card, t_):
+                    rematched[act.index] = on_card
+            replaced.add(act.index)
+            say("image %d: %s replaces %s - only the files that differ are written"
+                % (act.index, os.path.basename(sources[act.index]),
+                   os.path.basename((im.stamp or {}).get("path", "")) or "the image built there"))
+            pair[id(act)] = kept
+        if pair:
+            actions = [pair.get(id(a_), a_) for a_ in actions if id(a_) not in taken]
+            by_index = {a_.index: a_ for a_ in actions if a_.action != "remove"}
     for act in actions:
         if act.action == "remove":
             im = rec.image(act.old_index)
@@ -6082,6 +6159,8 @@ def _update_locked(a, ts, card, dry):
         n = len([c for c in ch if c.op != "attr_dir"]) + len(pend)
         touched[i] = [c.rel for c in ch if c.op == "write"]
         action = act.action if act.action != "keep" else ("sync" if ch else ("bypass" if pend else "keep"))
+        if i in replaced and action in ("keep", "sync", "rename"):
+            action = "replace"
         u["files"].append((i, act.device, n, adds, action, os.path.basename(path)))
     removed_bytes = 0
     for act in actions:
@@ -6130,7 +6209,14 @@ def _update_locked(a, ts, card, dry):
     list_changed = any(a_.action != "keep" for a_ in actions)
     media = plan_media(a.media_dir, len(newplan.trees)) if a.media_dir else None
     newconf = conf_for_plan(newplan, a, existing=conf_now, media=media, colours=plan_colours(versions))
-    u["inject"] = bool(list_changed or a.media_dir or newconf.strip() != render_images_conf_text(conf_now).strip())
+    # ...and when an image's custom modes are not the ones on the card: a swapped image (or a
+    # source whose modes changed) would otherwise boot the old image's modes (PAD-1386)
+    modes_moved = mode_sets_moved(card, mode_sets) if (mode_sets is not None and not list_changed) else []
+    if modes_moved:
+        say("custom modes changed for image%s %s: the menu is injected again to carry them"
+            % ("s" if len(modes_moved) > 1 else "", ", ".join(str(i) for i in modes_moved)))
+    u["inject"] = bool(list_changed or modes_moved or a.media_dir
+                       or newconf.strip() != render_images_conf_text(conf_now).strip())
     if a.expect_bytes is not None and u["size"] > a.expect_bytes * (1 + UPDATE_SLACK) + UPDATE_SLACK_BYTES:
         u["notes"].append("the update would write %s, more than the %s expected: a source changed since it was measured"
                           % (_gb(u["size"]), _gb(a.expect_bytes)))
@@ -9181,6 +9267,51 @@ def selftest(d, selector_file=None):
     ok &= verify_card(out3, plan3, sel, mode="full")
     print("== update: a parts card refuses a list change")
     ok &= main(["update", "--card", out3, "--primary", v0, "--extra", v2, "--extra", V[1], "--dry-run"]) == 2
+
+    def swap_one(card, primary, extras, slot, title, flags, tag):
+        """PAD-1386: image *slot* swapped for a copy at another path holding one more file
+        -> a 'replace' row writing that one file, not the image again; the card verifies
+        against the new list; then swapped back, which writes nothing and removes it."""
+        good = True
+
+        def check(cond, detail):
+            if not cond:
+                print("swap %s FAILED: %s" % (tag, detail))
+            return bool(cond)
+        src = extras[slot - 1]
+        dst = os.path.join(d, "swap_%s_%d.img" % (tag, slot))
+        shutil.copyfile(src, dst)
+        _t, sts, _cnt = Geometry.from_file(dst).part(3)
+        payload = os.path.join(d, "swap_%s.bin" % tag)
+        with open(payload, "wb") as f:
+            f.write(b"S" * 50000)
+        debugfs_write_script(fs_ref(dst, sts * SECTOR), ["write %s /%s/swapped.bin" % (dq(payload), title),
+                                                         "set_inode_field /%s/swapped.bin mode 0100644" % title])
+        new = list(extras)
+        new[slot - 1] = dst
+        for want_size, lst in ((50000, new), (0, list(extras))):
+            args = ["update", "--card", card, "--primary", primary]
+            for x in lst:
+                args += ["--extra", x]
+            args += ["--selector-dir", sel] + flags
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(args + ["--dry-run"])
+            dry = buf.getvalue()
+            rows = [ln.split() for ln in dry.splitlines() if ln.startswith("update-files ")]
+            row = [r for r in rows if r[1] == str(slot)]
+            good &= check(rc == 0 and len(row) == 1 and row[0][5] == "replace" and row[0][3] == "1", rows)
+            good &= check(bool(row) and int(row[0][4]) == want_size, rows)
+            good &= check(("update-size %d" % want_size) in dry, dry)
+            good &= check(not any(r[5] in ("new", "remove") for r in rows), rows)
+            good &= main(args) == 0
+            good &= verify_card(card, verify_plan(card, [primary] + lst), sel, mode="full")
+            good &= ts.stamps_equal(read_trees(card).images[slot].stamp, ts.source_stamp(lst[slot - 1]))
+        print("== update (%s): image %d swapped for another file and back - one file each way: %s"
+              % (tag, slot, "PASS" if good else "FAIL"))
+        return good
+
+    ok &= swap_one(out3, v0, [v2], 1, "turtles_pro", [], "parts")
     print("== update: a primary that is another build is refused by the gate")
     other = os.path.join(d, "other.img")
     shutil.copyfile(v0, other)
@@ -9266,6 +9397,7 @@ def selftest(d, selector_file=None):
     finally:
         losetup_detach(loop)
         os.rmdir(foreign)
+    ok &= swap_one(out2, A, [C, B], 2, "B_title", ["--allow-version-mismatch"], "multi")
     print("SELFTEST part 5 (update)", "PASS" if ok else "FAIL")
 
     # ------------------------------------------------- part 6: the store layout (item 95), root only
@@ -9403,6 +9535,7 @@ def selftest(d, selector_file=None):
     ok &= debugfs_cat(ref3, "/A_title/newa.bin") == b"C" * 40000
     ok &= i0["A_title/newa.bin"] == i1["C_title/only.bin"] and i0["A_title/newa.bin"][1] == 3
     ok &= verify_card(out6, verify_plan(out6, [A, C, B]), sel, mode="full")
+    ok &= swap_one(out6, A, [C, B], 2, "B_title", ["--allow-version-mismatch"], "store")
     print("== a raw bypass of a store card is refused")
     ok &= main(["bypass", "--card", out6, "--dry-run"]) == 2
     print("SELFTEST part 6 (store)", "PASS" if ok else "FAIL")
@@ -9772,6 +9905,13 @@ def selftest_modes(d, sel):
     # what inspect reports per image off the built p2
     ok &= card_mode_summary(p2, 1) == "1 mode file, 0 code modes", card_mode_summary(p2, 1)
     ok &= card_mode_summary(p2, 0) is None and card_mode_summary(p2, 2) is None
+    print("== PAD-1386: an update knows when an image's modes are not the card's")
+    ok &= mode_sets_moved_on(p2, sets) == []
+    other = [dict(x) for x in sets]
+    other[1]["mode.so"] = (so + b"v38", other[1]["mode.so"][1])
+    ok &= mode_sets_moved_on(p2, other) == [1]
+    ok &= mode_sets_moved_on(p2, [{}, {}]) == [1]
+    ok &= mode_sets_moved_on(p2, [sets[0], sets[1], {}]) == []
     print("== inject again, the same sets: idempotent")
     stage2 = os.path.join(d, "stage two")
     os.makedirs(stage2, exist_ok=True)
@@ -9788,6 +9928,7 @@ def selftest_modes(d, sel):
     os.makedirs(stage4, exist_ok=True)
     inject_into_p2(p2, sel, conf, stage4, mode_sets=[{}, {}])
     ok &= not debugfs_exists(p2, MODES_DIR)
+    ok &= mode_sets_moved_on(p2, [{}, {}]) == [] and mode_sets_moved_on(p2, sets) == [1]
     ok &= debugfs_exists(p2, SELECT_DIR + "/images.conf") and e2fsck(p2)[0] == 0
     print("SELFTEST part 9 (modes)", "PASS" if ok else "FAIL")
     ok &= selftest_menu_back(d, sel, A, B, sets, conf)

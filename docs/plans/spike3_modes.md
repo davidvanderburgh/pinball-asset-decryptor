@@ -1175,3 +1175,27 @@ tables (each pixel's three channel lamps folded into one `R,G,B` line); (2) the 
 on 64-bit (`value sound_voice_played`, 12 on Spike 2); (3) `spike3_modes` carrying `cabshow.cfg` with the song's
 sound ids read off the 64-bit program, and the engine's family line for it dropped; (4) a rig proof read off the node
 bus (`PAD_NB_TRACE`: the speaker panel sends no lamp frames in attract on any title, docs/plans/spike3_emulation.md).
+
+**Round 2 (PAD-1328).** Done: `lampmap.cabinet_role` knows Spike 3's names (`EXPRESSION LIGHTING L/R n` blades,
+`CABINET L/R-IN UPPER|LOWER|OUT n` strips, `SPEAKER L/R n` rings) and `cabinet_strip` / `place_cabinet` give each of
+a Spike 3 cabinet's strips its own run (inner x 22 / 278, outer x 4 / 296, numbered from the top down);
+`s3port.cabinet_lines_a64` drafts the `cablamp` lines off the 64-bit tables: on the six newer titles each colour
+channel is a lamp of the device table and a light's id is its rank among the lamps + 1 (every 3-light record of the
+light table names one fixture's -R/-G/-B that way: Fallout 316/316, SW2025 LE 345/345, WDR 259/259, Pokemon 381/381,
+SW2025 Pro 158/158; Transformers 241 of 261, its cabinet all among them). Six ports carry them: Fallout, Pokemon,
+Transformers and WDR 184 pixels (six 24-pixel strips, two 20-pixel rings), Star Wars 2025 LE / Pro 136 (two
+48-pixel blades, the rings). The runtime's cabinet range is 192 (N_CAB, was 160).
+
+Rig (Fallout LE 0.82, slot 1, hidden, muted, C:/tmp/PAD-1328/cab run_cab.sh: cabshow.cfg `only` with a show on the
+two main-play songs, sids 65536 / 131072): `expression lights: 1 show(s) of the card's over 184 cabinet light(s)`,
+`show "PROOF" plays with sound 65536 and the others that start it (2 request(s))`, at the song's request (119.5 s)
+the show started, our layer on top (priority 255) over all 184 lights, handed back at its end and started again with
+the song. Not yet seen: the light itself. The rig's strip boards (node 2 cabinet, node 7 speakers: ws2812node, both
+claimed) get from the game only `f2` reads at boot, `46 ff 01` / `48 00 00`, one walking-zero `72` channel mask, and
+then the `ff` status poll once a second (answered `2d 00 ...`) - never a lamp frame, for the game's own shows as for
+ours (PAD_S3_NBTRACE=1, nbtrace.log). Fallout's AD_CABINET_EXPRESSION_HARDWARE / AD_SPEAKER_EXPRESSION_HARDWARE
+default to 1 (present), so the game most likely judges the emulated boards to have no strips from their answers.
+Next: what the game reads in those answers (the `ff` status and the `f2` reads; the ws2812node firmware is on the
+card) so the rig's strip boards take lamp frames; then the proof on padled's node 2 / 7 hi plane, the song timing
+(`value sound_voice_played`: the show did not lock to the voice at 12, it ran on its own clock), the app's Spike 3
+side (spike3_modes carrying cabshow.cfg and the Expression lights tab's layout from the port), and the family line.

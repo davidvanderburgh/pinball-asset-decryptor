@@ -1851,7 +1851,8 @@ struct lamp { char name[40]; unsigned light[3]; int mono; uint64_t shot; int x, 
 /* PAD-1040: the cabinet's expression lights (the port's `cablamp` lines) follow the inserts, from CAB0: every
  * insert call (pm_lamp_count, a name, a shot, every insert) sees only [0, n_lamps); what holds, writes, checks and
  * lets go of a light walks both ranges (LAMP_FIRST / LAMP_NEXT / LAMP_END) */
-#define N_CAB        160          /* Led Zeppelin: 96 blade pixels and 23 speaker lights */
+#define N_CAB        192          /* Led Zeppelin: 96 blade pixels and 23 speaker lights; PAD-1328: a Spike 3 cabinet's
+                                      six 24-pixel strips and two 20-pixel speaker rings, 184 */
 #define CAB0         N_LAMPS
 #define N_LAMP_ALL   (N_LAMPS + N_CAB)
 static struct lamp lamps[N_LAMP_ALL];

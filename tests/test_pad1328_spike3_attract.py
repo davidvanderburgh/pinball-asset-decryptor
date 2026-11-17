@@ -163,3 +163,81 @@ def test_each_spike3_title_honours_or_lacks_the_setting(game):
              and S._bl(e.tva + 4 * i + 4, e.words[i + 1]) == adj]
     assert reads == [at]
     assert e.u32(at + 8) == 0x7100041F                         # cmp w0, #1: the game's own should-pause test
+
+
+# ---- expression light shows: the Spike 3 cabinet's lights -------------------------------------------------------
+CAB_COUNTS = {"fallout_le_0_82_spike3": 184, "pokemon_le_0_82_spike3": 184,
+              "walking_dead_remastered_le_0_92_spike3": 184, "transformers_mtmte_le_0_96_spike3": 184,
+              "star_wars_2025_le_0_96_spike3": 136, "star_wars_2025_pro_0_84_spike3": 136,
+              "star_wars_elg_1_10_spike3": 0}
+
+
+def test_spike3_cabinet_names():
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    assert LM.cabinet_role("EXPRESSION LIGHTING L 3") == ("blade", "L", 3)
+    assert LM.cabinet_role("CABINET R-IN LOWER 60") == ("blade", "R", 60)
+    assert LM.cabinet_role("CABINET L-OUT 97") == ("blade", "L", 97)
+    assert LM.cabinet_role("SPEAKER R 20") == ("speaker", "R", 20)
+    assert LM.cabinet_strip("CABINET L-IN UPPER 1") == "IN" and LM.cabinet_strip("CABINET R-OUT 121") == "OUT"
+    assert LM.cabinet_strip("EXPRESSIVE LIGHTING L 3") == ""
+    for name in ("CABINET L-IN", "SPEAKER L", "ETOPPER L DOME LED", "BACKBOX GI", "SPEAKER L 1-R"):
+        assert LM.cabinet_role(name) is None, name
+
+
+def _cablamps(key):
+    import re as _re
+    out = []
+    with open(MP.port_path(MP.profiles()[key]), encoding="utf-8") as f:
+        for line in f:
+            m = _re.match(r"cablamp (\S+)\s+(\d+)\s+(.*?)\s+# .*at (\d+),(\d+)", line)
+            if m:
+                out.append(([int(x) for x in m.group(1).split(",")], int(m.group(2)), m.group(3),
+                            int(m.group(4)), int(m.group(5))))
+    return out
+
+
+@pytest.mark.parametrize("key", sorted(CAB_COUNTS))
+def test_ports_carry_the_cabinet(key):
+    cab = _cablamps(key)
+    assert len(cab) == CAB_COUNTS[key]
+    if not cab:
+        return
+    assert all(len(ids) == 3 and len(set(ids)) == 3 for ids, _u, _n, _x, _y in cab)
+    by = {n: (u, x, y) for _ids, u, n, x, y in cab}
+    assert sum(1 for n in by if n.startswith("SPEAKER L ")) == 20 and sum(1 for n in by if n.startswith("SPEAKER R ")) == 20
+    assert all(y < 140 for n, (u, x, y) in by.items() if n.startswith("SPEAKER"))          # the runtime's speaker lane
+    assert all(y >= 140 for n, (u, x, y) in by.items() if not n.startswith("SPEAKER"))
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    assert all((x < 150) == (LM.cabinet_role(n)[1] == "L") for n, (u, x, y) in by.items())   # the runtime's side
+    if "CABINET L-IN UPPER 1" in by:
+        # a Spike 3 strip is numbered from the top: its first pixel is the strip's top end
+        assert by["CABINET L-IN UPPER 1"][0] > 950 and by["CABINET L-IN LOWER 48"][0] < 50
+        assert by["CABINET L-OUT 97"][1] < by["CABINET L-IN UPPER 1"][1] < 150
+    else:
+        assert by["EXPRESSION LIGHTING L 1"][0] < 50 and by["EXPRESSION LIGHTING R 96"][0] > 950
+
+
+def test_runtime_has_room_for_a_spike3_cabinet():
+    src = open(RUNTIME, encoding="utf-8").read()
+    m = re.search(r"#define N_CAB\s+(\d+)", src)
+    assert m and int(m.group(1)) >= max(CAB_COUNTS.values())
+
+
+@pytest.mark.parametrize("game", ["fallout_le", "star_wars_2025_le", "star_wars_elg"])
+def test_cabinet_lines_off_the_real_programs(game):
+    import s3port as S
+    t = S.Elf(_prog(game))
+    S.scan(t)
+    key = (TABLES.get(game) or (NO_TABLE.get(game),))[0]
+    port = MP.read_port(MP.port_path(MP.profiles()[key]))
+    lg = port["site"]["lamp_group"]
+    lines = S.cabinet_lines_a64(t, {"lamp_group": lg[0] if isinstance(lg, (tuple, list)) else lg})
+    drafted = [l for l in lines if l.startswith("cablamp ")]
+    shipped = [l.rstrip("\n") for l in open(MP.port_path(MP.profiles()[key]), encoding="utf-8")
+               if l.startswith("cablamp ")]
+    assert drafted == shipped
+    devs = [d for d in S.device_records(t) if d[3] == 3]
+    for line in drafted[:10]:
+        ids, name = line.split()[1], line.split("  #")[0].split(None, 3)[3]
+        # a light id is its lamp's rank in the device table + 1: the three channels of the named pixel
+        assert [devs[int(i) - 1][0] for i in ids.split(",")] == [name + "-R", name + "-G", name + "-B"]

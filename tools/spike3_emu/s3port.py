@@ -2119,6 +2119,55 @@ def attract_lines(t, placed):
     return out
 
 
+# ---- PAD-1328: the cabinet's expression lights on a Spike 3 program --------------------------------------------
+def cabinet_a64(t, lamp_group):
+    """the cabinet's expression lights of a 64-bit program, as lampmap.cabinet's dicts (placed on the cabinet drawing),
+    or []. Each colour channel of a Spike 3 pixel is a lamp of its own in the device table (`SPEAKER L 1-R`, `-G`,
+    `-B`), and a light's id is its rank among the table's lamps + 1 (every 3-light record of the light table names
+    one fixture's R, G and B that way on all six titles with cabinet lights); a pixel is the light-table record
+    holding its three channels."""
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    calls = [b for a, w in _window(t, lamp_group, 40) for b in [_bl(a, w)] if b] if lamp_group else []
+    lists = light_lists(t, calls[1]) if len(calls) > 1 else []
+    devs = [d for d in device_records(t) if d[3] == 3]
+    order, out = {"R": 0, "G": 1, "B": 2}, []
+    for k, ids in enumerate(lists):
+        if len(ids) != 3 or not all(0 < i <= len(devs) for i in ids):
+            continue
+        names = [devs[i - 1][0].upper() for i in ids]
+        m = [re.match(r"^(.*)-([RGB])$", n) for n in names]
+        if not all(m) or len({x.group(1) for x in m}) != 1 or sorted(x.group(2) for x in m) != ["B", "G", "R"]:
+            continue
+        name = m[0].group(1)
+        role = LM.cabinet_role(name)
+        if not role:
+            continue
+        rgb = [0, 0, 0]
+        for i, x in zip(ids, m):
+            rgb[order[x.group(2)]] = i
+        g, idx = devs[rgb[0] - 1][1:3]
+        out.append(dict(lamp=k, name=name, lights=rgb, role=role[0], side=role[1], n=role[2], group=g, index=idx,
+                        x=0, y=0))
+    return LM.place_cabinet(out)
+
+
+def cabinet_lines_a64(t, placed):
+    """PAD-1328: the port's `cablamp` lines, read off this program's own device and light tables ([] with no cabinet)"""
+    root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from pinball_decryptor.plugins.stern import lampmap as LM
+    cab = cabinet_a64(t, placed.get("lamp_group"))
+    if not cab:
+        return []
+    lines = LM.cabinet_lines(None, cab=cab)
+    lines[0] = lines[0].replace("read by lamp_map.py", "read off the 64-bit device and light tables (PAD-1328)")
+    return lines
+
+
 def draft(ref, rport, tgt, game=None, version=None):
     scan(ref)
     scan(tgt)
@@ -2961,6 +3010,10 @@ def draft_spike3(ref, rport, tgt, game, version, switch_ids=None):
     att = attract_lines(tgt, placed)
     if att:
         body += [""] + att
+    body[:] = [l for l in body if not l.startswith(("cablamp ", "# cablamp "))]   # the reference's cabinet is its own
+    cab = cabinet_lines_a64(tgt, placed)                                # PAD-1328
+    if cab:
+        body += [""] + cab
     if notes:
         body += ["", "# ---- checks ----"] + ["# " + n for n in notes]
     core_missing = [grp for grp in CORE if not any(n in placed for n in grp) and not

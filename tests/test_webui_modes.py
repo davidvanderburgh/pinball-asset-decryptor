@@ -86,12 +86,13 @@ def _mfr_keys():
 
 
 @pytest.mark.parametrize("mfr", MFRS)
-def test_visible_only_for_spike2_with_the_preview_switch(tmp_path, preview_on, mfr):
+def test_visible_only_for_spike2_and_jjp_with_the_preview_switch(tmp_path, preview_on, mfr):
     if mfr not in _mfr_keys():
         pytest.skip("no %s plugin" % mfr)
     with web_app(tmp_path, mfr=mfr) as w:
         tabs = {t["ns"]: t for t in w.state("shell")["tabs"]}
-        assert tabs["modes"]["visible"] == (mfr == "stern")
+        # PAD-1350: JJP has the tab too - its custom-modes editor (tests/test_webui_modes_jjp.py)
+        assert tabs["modes"]["visible"] == (mfr in ("stern", "jjp"))
         st = w.state("modes")
         if mfr == "stern":
             # no project yet: the Tk tab's no-project state

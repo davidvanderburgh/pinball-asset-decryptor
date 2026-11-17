@@ -244,8 +244,9 @@ NO_TITLE = "The app cannot tell which game this project is for."
 NO_CAB = "%s has no expression lights the app knows: its port names no blades or speaker lights."
 NO_LAYER = "The app does not know how %s lights its lamps yet, so it cannot hold its cabinet's lights."
 #: PAD-1328: a Spike 3 port names its cabinet's lights (cablamp lines off the 64-bit tables) and the runtime holds them
-#: with a song, but no rig run has shown the strips lit yet (the emulated strip boards take no lamp data from the game,
-#: its own shows included): the shows wait for that proof
+#: with a song. PAD-1370: the strips' lamp data is the netbridge's (host cmd 2f), and the rig now lights them, the
+#: game's own shows and a cabshow.cfg show alike; the app's side (spike3_modes carrying cabshow.cfg, the show locked
+#: to its song's voice on 64-bit) is still to build, so the shows stay refused here until it is
 NO_SPIKE3 = ("%s's cabinet lights cannot take shows of your own yet: a Spike 3 cabinet's shows are not proven on the "
              "machine.")
 #: what the runtime needs of the port: the lamp layer (lamps_arm) and, for a show to start with its song, the sound

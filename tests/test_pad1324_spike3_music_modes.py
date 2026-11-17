@@ -103,7 +103,7 @@ def _prof(key):
 
 
 def test_the_audio_tab_offers_them_on_the_proven_spike3_builds():
-    for key in ("star_wars_elg_1_10_spike3", "fallout_le_0_82_spike3"):
+    for key in ("star_wars_elg_1_10_spike3", "fallout_le_0_82_spike3", "transformers_mtmte_le_0_96_spike3"):
         assert SMo.title_refusal(_prof(key)) == ""
 
 

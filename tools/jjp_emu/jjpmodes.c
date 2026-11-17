@@ -848,6 +848,24 @@ static void *our_lb;
 static lamp_set_t lamp_set;
 static lamp_tr_t lamp_tr;
 static uintptr_t lamp_vts[8]; static int nlvt;
+/* A lamp group (ls_*) is a LampString, not a Lamp: Lamp::set on one writes
+ * through a Lamp's layout and lit nothing (PAD-1350, Wonka: lp_gobstopper +
+ * ls_golden_tickets stayed dark for the whole mode, lp_gobstopper alone
+ * blinked).  A LampString has its own on()/transparent() of the same shape. */
+static lamp_set_t ls_on;
+static lamp_tr_t ls_tr;
+static uintptr_t ls_vt;
+static int is_string(void *o) { return ls_vt && *(uintptr_t *)o == ls_vt; }
+static void lamp_put(void *o, unsigned r, unsigned g, unsigned b)
+{
+    if (is_string(o)) ls_on(o, our_lb, r, g, b, 255);
+    else lamp_set(o, our_lb, r, g, b, 255);
+}
+static void lamp_give_back(void *o)
+{
+    if (is_string(o)) ls_tr(o, our_lb);
+    else lamp_tr(o, our_lb);
+}
 
 static int lamp_like(void *o)
 {
@@ -857,6 +875,12 @@ static int lamp_like(void *o)
 }
 
 static void our_lb_render(void *lb) { (void)lb; }
+
+static int v_is(void *o, const char *vtable)
+{
+    void *v = sym(vtable);
+    return v && *(uintptr_t *)o == (uintptr_t)v + 16;
+}
 
 /* LampBuffer::render_all skips a layer whose public `active` bool is false;
  * the game sets that member inline, so no exported call does it.  Its offset
@@ -886,6 +910,9 @@ static void build_lamp_buffer(void)
     const char *vts[] = { "_ZTV4Lamp", "_ZTV10LampString", "_ZTV14MultiLEDInsert", "_ZTV5Light" };
     for (unsigned i = 0; i < sizeof vts / sizeof *vts; i++) { void *v = sym(vts[i]); if (v) lamp_vts[nlvt++] = (uintptr_t)v + 16; }
     if (!ctor || !lamp_set || !lamp_tr) { lg("lamps: LampBuffer/Lamp API missing; modes run without lamps"); return; }
+    ls_on = (lamp_set_t)sym("_ZN10LampString2onER10LampBufferhhhh");
+    ls_tr = (lamp_tr_t)sym("_ZN10LampString11transparentER10LampBuffer");
+    { void *v = sym("_ZTV10LampString"); ls_vt = (v && ls_on && ls_tr) ? (uintptr_t)v + 16 : 0; }
     /* Above the game's mode layers (GnR: ~0x400-0x4ff), below its award,
      * Bluetooth and flasher layers (1e9+). */
     int prio = 0x7fff;
@@ -895,10 +922,13 @@ static void build_lamp_buffer(void)
     lg("lamps: our LampBuffer %p at priority %#x", our_lb, prio);
     for (int i = 0; i < npm; i++)
         for (int l = 0; l < pms[i].nlamp; l++)
-            if (!lamp_like(pms[i].lamp[l])) {
-                lg("%s: lamp #%d is not a Lamp object; dropped", pms[i].file, l);
+            if (!lamp_like(pms[i].lamp[l])
+                || (!ls_vt && v_is(pms[i].lamp[l], "_ZTV10LampString"))) {
+                lg("%s: lamp #%d is not a Lamp object (or a lamp group this game cannot set); dropped",
+                   pms[i].file, l);
                 pms[i].lamp[l] = pms[i].lamp[--pms[i].nlamp]; l--;
-            }
+            } else if (is_string(pms[i].lamp[l]))
+                lg("%s: lamp #%d is a lamp group", pms[i].file, l);
 }
 
 static void lamps_show(pm_t *m, int on)
@@ -907,15 +937,15 @@ static void lamps_show(pm_t *m, int on)
     lb_activate(1);
     unsigned r = (m->lamp_rgb >> 16) & 0xff, g = (m->lamp_rgb >> 8) & 0xff, b = m->lamp_rgb & 0xff;
     for (int l = 0; l < m->nlamp; l++) {
-        if (on) lamp_set(m->lamp[l], our_lb, r, g, b, 255);
-        else lamp_set(m->lamp[l], our_lb, 0, 0, 0, 255);
+        if (on) lamp_put(m->lamp[l], r, g, b);
+        else lamp_put(m->lamp[l], 0, 0, 0);
     }
 }
 
 static void lamps_release(pm_t *m)
 {
     if (!our_lb) return;
-    for (int l = 0; l < m->nlamp; l++) lamp_tr(m->lamp[l], our_lb);
+    for (int l = 0; l < m->nlamp; l++) lamp_give_back(m->lamp[l]);
     lb_activate(0);
 }
 

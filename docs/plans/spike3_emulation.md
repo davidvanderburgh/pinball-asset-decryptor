@@ -828,9 +828,10 @@ speaker panel and the cabinet strips (node 2: 288/432 channels). s3leds now
 fills padled v6's `hi` plane as Spike 2's shim does (led_hi: levels only,
 `seen`/`decoded` untouched) and stamps the block version 6; the window lights
 them (before/after: Walking Dead's topper bottom row). The strips (node 2)
-and speaker panel (node 7) get no lamp frames in attract on any title - only
-the `72` 96-bit mask and `f2` reads - so they stay dark there by the game's
-choice. A slot whose saved state has the coin door open (48V disabled) sends
+and speaker panel (node 7) get no lamp frames on the node bus on any title -
+only the `72` 96-bit mask and `f2` reads - because their lamps go to the
+netbridge's own WS2812 outputs (host cmd `2f`), not the node bus: see PAD-1370
+below. They were never dark by the game's choice. A slot whose saved state has the coin door open (48V disabled) sends
 no lamp frames at all: judge lamps on a slot in a known state.
 
 ## Every playfield control and readout, wired (PAD-1183, 2026-11-11)
@@ -993,3 +994,37 @@ Play timeouts in 10 s and no frame ever bound for drawing; after, none, each
 clip played its full length with its first frame drawn ~52 ms after the open,
 57 fps throughout. FlushDecoder timeouts (a long clip torn down mid-play) are
 unchanged: 7 in a 7-minute run before, 5 in a 4-minute run after.
+
+## The cabinet strips are the netbridge's (PAD-1370, 2026-11-17)
+
+The cabinet strips (node 2), the speaker rings (node 7) and, where it hangs off
+the bridge, the topper (node 14) are ws2812node boards in the title's node
+directory, and the game does bring them up on the node bus (`fe`, `f9`, `fc`,
+the `f2 00..38` reads, `46 ff 01` / `48 00 00`, the walking-zero `72` mask, the
+`ff` poll). But every lamp frame for them goes to the NETBRIDGE as host
+commands, read off netbridge.elf (unstripped; HOST_Update's jump table at
+0x100011be, cmd - 0x20):
+
+| cmd | firmware | payload |
+|---|---|---|
+| `29` | WS2812_SetNumLEDs | [channel 0..3] then a u16 count (3 bytes) or four u16 part lengths (9) |
+| `2a` | WS2812_SetLEDs | [channel] [u16] [u16] [data] (not seen from the game) |
+| `2b` | WS2812_SetLEDPattern | [channel] [u16] [u16] [u16] [data] (not seen) |
+| `2f` | WS2812_NodeSetLED | [channel] [n] [n bytes: the node-bus lamp frame's cmd + body, no checksum] [pad] |
+| `28` | WS2812_SendData | (not seen) |
+
+`2a`/`2b`/`2f` are dropped by the board unless the channel has LEDs set up. No
+reply to any of them. What every Spike 3 run's bridge.log shows (40 logs, all
+titles): `29 00 78 00` (channel 0, 120 LEDs) and `29 02 b0 01` (channel 2, 432);
+Fallout sends the part form, `29 00 {120}`, `29 01 {144 x 4}`, `29 02 {144, 144,
+72, 72}`. The device tables give the boards: node 7 SPEAKER L/R = 120 channels,
+node 2 CABINET L/R-IN UPPER/LOWER, L/R-OUT = 432, node 14 (Fallout's ETOPPER) =
+276. Decoding a Fallout run's 43,674 `2f` frames with the node-bus grammar
+(leddecode.wide_decode_any) fits every one, channel 0's indices 0..119, 1's
+0..275, 2's 0..431: **channel 0 = node 7, 1 = node 14, 2 = node 2.**
+
+The bridge had answered none of it, so nothing reached padled: the Expression
+lights view and any cabinet show stayed dark on the rig. s3bridge now hands each
+`2f` frame to s3leds as that node's frame (`ws2812_frame`, map overridable with
+PAD_S3_WS2812_NODES) and logs the `29` set-up (`# [ws2812]` lines). Replaying
+the Fallout capture lights all 432 / 120 / 276 channels.

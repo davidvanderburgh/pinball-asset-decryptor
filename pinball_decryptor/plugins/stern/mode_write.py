@@ -600,6 +600,8 @@ class ModePlan:
     sounds_file: str = ""
     #: PAD-537: ``picture.cfg`` beside the mode files, the picture settings ("" = none)
     picture_file: str = ""
+    #: PAD-1382: ``settings.cfg`` beside the mode files, the settings sharing the MORE SETTINGS rows ("" = none)
+    settings_file: str = ""
     #: PAD-782: ``attract.cfg`` beside the mode files, the owner's attract items ("" = none)
     attract_file: str = ""
     #: PAD-1017: ``coop.cfg`` beside the mode files, co-op play ("" = none)
@@ -2379,6 +2381,11 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import picture_settings as PS
             dst = os.path.join(out_dir, PS.CFG_NAME)
             shutil.copyfile(result.picture_file, dst)
+            extras.append(dst)
+        if getattr(result, "settings_file", ""):       # PAD-1382: settings.cfg, the shared MORE SETTINGS rows
+            from . import menu_settings as MSet
+            dst = os.path.join(out_dir, MSet.SHARED_CFG)
+            shutil.copyfile(result.settings_file, dst)
             extras.append(dst)
         if getattr(result, "attract_file", ""):        # PAD-782: attract.cfg, the attract items
             from . import attract_items as AI

@@ -148,7 +148,8 @@ def test_the_wrap_shuts_the_games_records_only_around_its_end_of_game_call():
     arm = R._lift(src, "static void chg_scores_arm(void)")
     assert 'hook_call(\n                     fn("challenge_scores_gate")' in arm or 'hook_call(fn("challenge_scores_gate")' in arm
     # a menu of the modes' own challenges (no challenge of the game's a mode may take) keeps their champions too
-    assert re.search(r"if \(challenges_n \|\| site\(\"challenge_menu\"\)\) chg_scores_arm\(\);", src)
+    assert re.search(r"if \(challenges_n \|\| site\(\"challenge_menu\"\)( \|\| site\(\"challenge_menu_frame\"\))?\) "
+                     r"chg_scores_arm\(\);", src)
 
 
 def test_the_score_belongs_to_the_game_its_mode_began_in():

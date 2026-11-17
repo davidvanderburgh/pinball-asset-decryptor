@@ -9709,6 +9709,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     if music_menu is not None or edition_menu is not None
                     or picture_menus or coop_menu is not None or hand_menu is not None else None)
         picture_cfg = ""
+        settings_cfg = ""
         coop_setting = 0
         hand_setting = 0
         if (text_edits or shader_prof is not None or clip_job is not None
@@ -9736,6 +9737,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if hand_menu is not None and hand_menu.ok:
                 # PAD-1033: no HANDICAP row (no spare setting left): the handicaps are always on
                 hand_setting = hand_menu.setting.live
+            # PAD-1382: settings sharing the MORE SETTINGS rows - the runtime's table of them, and MUSIC MODE's
+            # cfg (written before the menu was planned) pointed at the value the menu gave it
+            settings_cfg = _shared_settings_cfg(menu_job, grow_work, log)
+            if music_menu is not None and music_menu.ok and sound_modes_cfg:
+                _point_sounds_cfg(sound_modes_cfg, music_menu.setting.live)
             # PAD-537: the rows that went in, and the runtime's table for them
             picture_cfg = _picture_cfg(picture_menus, grown_text,
                                        not (mode_list or code_list),
@@ -10122,6 +10128,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 if mode_plan is None:
                     raise _MW.ModeWriteError("none of the project's random clips can go on "
                                              "this card")
+                mode_plan.settings_file = settings_cfg      # PAD-1382: the shared rows' table
                 # PAD-1035: the project's own edits of a scene the modes rewrite whole (the co-op
                 # pick's screens in Godzilla's HUD, a mode's screen, random clips in the bank) go
                 # on in the rewritten scene: in-place ones were in the bytes it was built from,
@@ -11566,7 +11573,7 @@ class _PictureMenu(_MusicModeMenu):
         from . import picture_settings as _PS
         self.ok = True
         self.log("Picture settings: %s is in the operator menu (%s), values 1 to %d, %d "
-                 "(no change) to start with." % (self.setting.caption.upper(), _PS.menu_path(),
+                 "(no change) to start with." % (self.setting.caption.upper(), (self.setting.where or _PS.menu_path()),
                                                  self.count, _PS.NORMAL), "info")
 
     def fail(self, why):
@@ -12063,6 +12070,39 @@ def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     return prof
 
 
+def _shared_settings_cfg(menu_job, work, log):
+    """PAD-1382: ``settings.cfg`` in *work* when the settings of *menu_job* that went in share the MORE SETTINGS rows
+    (:func:`.menu_settings.shared_cfg_text`): its path, or ``""``."""
+    if menu_job is None or not menu_job.shared_text or not any(j.ok for j in menu_job.jobs):
+        return ""
+    from . import menu_settings as _MSet
+    shared = [j for j in menu_job.jobs if j.ok and _MSet.is_shared(j.setting)]
+    if not shared:
+        return ""
+    os.makedirs(_lp(work), exist_ok=True)
+    path = os.path.join(work, _MSet.SHARED_CFG)
+    with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write(menu_job.shared_text)
+    log("More settings: the game has too few spare settings for each of ours to have a row, so %s share two: MORE "
+        "SETTINGS picks one and the row under it shows its value (%s). The card keeps each one's value."
+        % (", ".join(_MSet.SETTINGS[j.KEY][1] for j in shared),
+           shared[0].setting.where.rsplit(",", 1)[0]), "info")
+    return path
+
+
+def _point_sounds_cfg(path, live):
+    """PAD-1382: the music modes' ``sounds.cfg`` *path* read MUSIC MODE's value at *live* (its ``setting`` line), the
+    address the menu gave it - a row of its own, or its word on the shared rows."""
+    with open(_lp(path), encoding="utf-8") as f:
+        lines = f.read().split("\n")
+    for k, line in enumerate(lines):
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0] == "setting":
+            lines[k] = "setting\t0x%08x\t%s" % (int(live), parts[2])
+    with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines))
+
+
 def _picture_cfg(menus, grown, only, work, log):
     """PAD-537: ``picture.cfg`` for the rows in *menus* that went into the menu, written
     under *work*; ``""`` when none did or the program cannot be re-pointed (said why)."""
@@ -12101,6 +12141,7 @@ class _MenuJobs:
 
     def __init__(self, *jobs):
         self.jobs = [j for j in jobs if j is not None]
+        self.shared_text = ""      # PAD-1382: settings.cfg when the settings share the MORE SETTINGS rows
 
     @property
     def ok(self):
@@ -12114,6 +12155,8 @@ class _MenuJobs:
         t = AdjustmentTable(raw)
         settings, writes, cat, refused = _MSet.plan_many(
             t, [j.wanted() for j in self.jobs])
+        # PAD-1382: more settings than the game has spare rows share two; the runtime's table of them
+        self.shared_text = _MSet.shared_cfg_text(settings)
         by_key = {s.key: s for s in settings}
         for j in self.jobs:
             j.setting = by_key.get(j.KEY)

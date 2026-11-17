@@ -149,12 +149,19 @@ def test_the_three_take_the_spare_settings_the_others_leave(card):
     assert [s.help for s in alone] == [PS.HELP[k] for k in PS.KEYS]
     music = (MS.MUSIC_MODE, 2, ["Standard", "Orchestral"])
     edition = (MS.EDITION, 2, ["Standard", "70th"])
-    one, _w, _c, refused = MS.plan_many(t, [music] + PS.wanted())
+    # each on a row of its own: what does not fit is refused (share=False, as before PAD-1382)
+    one, _w, _c, refused = MS.plan_many(t, [music] + PS.wanted(), share=False)
     assert [(s.key, s.id) for s in one] == [(MS.MUSIC_MODE, 31), (MS.BRIGHTNESS, 35), (MS.CONTRAST, 33)]
     assert list(refused) == [MS.SATURATION] and "no spare setting" in refused[MS.SATURATION]
-    both, _w, _c, refused = MS.plan_many(t, [music, edition] + PS.wanted())
+    both, _w, _c, refused = MS.plan_many(t, [music, edition] + PS.wanted(), share=False)
     assert [(s.key, s.id) for s in both] == [(MS.MUSIC_MODE, 31), (MS.EDITION, 33), (MS.BRIGHTNESS, 35)]
     assert set(refused) == {MS.CONTRAST, MS.SATURATION}
+    # PAD-1382: they share MORE SETTINGS and the row under it instead, EDITION keeping a row of its own
+    one, _w, _c, refused = MS.plan_many(t, [music] + PS.wanted())
+    assert not refused and [s.key for s in one if MS.is_shared(s)] == [MS.MUSIC_MODE] + list(PS.KEYS)
+    both, _w, _c, refused = MS.plan_many(t, [music, edition] + PS.wanted())
+    assert not refused and [(s.key, s.id) for s in both][0] == (MS.EDITION, 33)
+    assert [s.key for s in both if MS.is_shared(s)] == [MS.MUSIC_MODE] + list(PS.KEYS)
 
 
 @pytest.mark.parametrize("card", [PRO116, LE116], ids=["pro116", "le116"])

@@ -60,6 +60,7 @@ reason), so :func:`offered` says no for one whose menu does not already list the
 """
 from __future__ import annotations
 
+import dataclasses
 import struct
 from dataclasses import dataclass
 
@@ -92,6 +93,25 @@ SETTINGS = {
     COOP_PLAY: (None, "CO-OP PLAY", "Co-op Play", 16),
     HANDICAP: (None, "HANDICAP", "Handicap", 16),
 }
+#: PAD-1382: when a card wants more settings of ours than the game has spare rows, they all SHARE two: MORE SETTINGS
+#: picks one (its help names them) and the row under it is that one's value. The mode runtime keeps every value in a
+#: file on the card (pad_mode_runtime.c "more settings": /dump/pad_settings.state; it writes the picked setting's
+#: caption, help, range and value over the second row, and an accepted change there is that setting's), and each
+#: setting's reader is handed the runtime's word for it (SHARED_BASE + 4 x its number, in the setting's cfg line) in
+#: place of a row's address. On Attract Mode, beside where CO-OP PLAY and HANDICAP sit with rows of their own.
+MORE_SELECT = "more_select"
+MORE_VALUE = "more_value"
+SETTINGS[MORE_SELECT] = (None, "MORE SETTINGS", "More Settings", 16)
+SETTINGS[MORE_VALUE] = (None, "SETTING VALUE", "Setting Value", 16)
+#: never shared: EDITION is read off the board's store before the game (and the runtime) starts (codeselect)
+NOT_SHARED = frozenset({EDITION, MORE_SELECT, MORE_VALUE})
+#: a shared setting's address in its cfg line: SHARED_BASE + 4 x its number on MORE SETTINGS (above the user space of
+#: a 32-bit process, so never a .nonvol address)
+SHARED_BASE = 0xFADE0000
+#: the runtime's table of the shared rows, beside the mode runtime
+SHARED_CFG = "settings.cfg"
+#: the start of the reason a setting gets when every spare row is taken
+NO_SPARE = "the game has no spare setting left for"
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
 #: how many values a setting of ours may offer (the picture settings' 9 are their own)
@@ -122,6 +142,10 @@ class MenuSetting:
     where: str = ""         # PAD-724: where the operator finds it ("Adjustments > ...")
     low: int = 1            # PAD-1017: the lowest value stored (0 for an Off/On one: 0 Off, 1 On)
     kind: int = 0           # PAD-1017: the display kind written (an Off/On one's), 0 when left as it was
+    #: PAD-1382: a setting on the shared rows: (its number on MORE SETTINGS,). MORE_VALUE's own: where the runtime
+    #: rewrites it - (descriptor, help string, help room, row caption string, caption room, default/min/max/kind
+    #: offsets in the descriptor, kind's -1 when it has none)
+    shared: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -945,6 +969,13 @@ def number_kind(table):
     return kind
 
 
+def _help_text(names, values, help_text, room):
+    """A setting's help line in *room* characters: its own line, or its values' names."""
+    if help_text is not None:
+        return " ".join(str(help_text).split())[:room].rstrip()
+    return help_line(list(names)[:values] + ["Mode %d" % (k + 1) for k in range(len(names), values)], room)
+
+
 def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff=False, from_zero=False):
     """``(MenuSetting, {file offset: bytes}, CategoryTable or None)``: the same-size writes that
     make setting *key* (values 1..*values*, its help naming *names*), and the category table to
@@ -1026,11 +1057,7 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
         raise MenuSettingError("%s's caption has no room for \"%s\"" % (ad, row_caption))
     if help_room < 12:
         raise MenuSettingError("%s's help line has no room to name the modes" % ad)
-    if help_text is not None:
-        text = " ".join(str(help_text).split())[:help_room].rstrip()
-    else:
-        text = help_line(list(names)[:values] + ["Mode %d" % (k + 1) for k in range(len(names), values)],
-                         help_room)
+    text = _help_text(names, values, help_text, help_room)
     writes = {
         table._off(cap_va): caption.encode("ascii") + b"\x00" * (cap_room + 1 - len(caption)),
         row[0]: row_caption.encode("ascii") + b"\x00" * (row_room + 1 - len(row_caption)),
@@ -1049,7 +1076,26 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     return setting, writes, (None if cat.has(category, i) else cat)
 
 
-def plan_many(table, wanted):
+def plan_many(table, wanted, share=True):
+    """Several settings of ours at once, each on a row of its own (:func:`_plan_rows`) - or, PAD-1382, when the game
+    has too few spare rows for them, all but EDITION on the two shared rows (:func:`plan_shared`), when it can give
+    those. *share* False never shares. The same ``(settings, writes, cat, refused)``."""
+    settings, writes, cat, refused = _plan_rows(table, wanted)
+    if not share or getattr(table, "wide", False):
+        return settings, writes, cat, refused
+    rows = [tuple(w) + ({},) if len(w) == 3 else tuple(w) for w in wanted]
+    if (not any(str(why).startswith(NO_SPARE) for why in refused.values())
+            or len([r for r in rows if r[0] not in NOT_SHARED]) < 2):
+        return settings, writes, cat, refused
+    try:
+        return plan_shared(table, rows)
+    except MenuSettingError as e:
+        for key in refused:
+            refused[key] = "%s; nor can the settings share two rows: %s" % (str(refused[key]).rstrip("."), e)
+        return settings, writes, cat, refused
+
+
+def _plan_rows(table, wanted):
     """Several settings of ours at once (PAD-495: MUSIC MODE and EDITION on one card).
 
     *wanted* is ``[(key, values, names), ...]``, or ``(key, values, names, options)`` with
@@ -1078,8 +1124,8 @@ def plan_many(table, wanted):
             free = mine + [n for n in free if menu_label(table, table.by_name[n]) not in others
                            and n not in mine]
             if not free:
-                refused[key] = ("the game has no spare setting left for %s (the card's other menu "
-                                "settings of ours use them)" % caption)
+                refused[key] = ("%s %s (the card's other menu settings of ours use them)"
+                                % (NO_SPARE, caption))
                 continue
         # PAD-1017: a spare one this program cannot give (Iron Maiden Pro 1.18's first shares its row caption) is passed
         # over for the next
@@ -1102,6 +1148,108 @@ def plan_many(table, wanted):
     order = [r[0] for r in rows]
     settings.sort(key=lambda st: order.index(st.key))
     return settings, writes, cat, refused
+
+
+def _row_places(table, i):
+    """Where the runtime rewrites row *i* (a Spike 2 program's): ``(descriptor, help string, its room, row caption
+    string, its room)`` as addresses in the running game."""
+    from . import menu_visibility as MV
+    reading = MV.MenuVisibility(table)
+    reading._scan()
+    consts = reading._consts
+    desc = table.table_va + i * table.elem
+    help_va = struct.unpack_from("<I", table.data, table._off(desc) + OFF_MENU_HELP)[0]
+    row = _row_caption_line(table, i)
+    if row is None:
+        raise MenuSettingError("the game's menu captions could not be read")
+    row_va = table._va(row[0])
+    return desc, help_va, _room(table, help_va, consts), row_va, _room(table, row_va, consts)
+
+
+def plan_shared(table, rows):
+    """PAD-1382: the settings of *rows* (``(key, values, names, options)``) on the two shared rows, EDITION on a row of
+    its own: ``(settings, writes, cat, refused)`` as :func:`plan_many`. *settings* holds MORE SETTINGS and the row
+    under it, then each shared setting with ``live`` its runtime word (``SHARED_BASE + 4k``) and ``shared`` ``(k,)``;
+    :func:`shared_cfg_text` writes the runtime's table of them. Raises :class:`MenuSettingError` when the program
+    cannot give the two rows; a setting that cannot be shown on them is refused on its own."""
+    if getattr(table, "wide", False):
+        raise MenuSettingError("a 64-bit game's settings cannot share rows yet")
+    own = [r for r in rows if r[0] in NOT_SHARED]
+    share, refused = [], {}
+    for key, values, names, opts in [r for r in rows if r[0] not in NOT_SHARED]:
+        values, default = int(values), int(opts.get("default", 1))
+        ceiling = MAX_VALUES if opts.get("help_text") is None else VALUES_CEILING
+        try:
+            if key not in SETTINGS:
+                raise MenuSettingError("no such setting: %s" % key)
+            if not 2 <= values <= ceiling:
+                raise MenuSettingError("a setting of ours offers 2 to %d values, not %d" % (ceiling, values))
+            if not 1 <= default <= values:
+                raise MenuSettingError("a default of %s is not one of the values 1 to %d" % (default, values))
+            if opts.get("onoff") and values != 2:
+                raise MenuSettingError("an Off/On setting has two values, not %d" % values)
+            # the row shows each one as its own row would: Off/On, or a plain number
+            kind = (onoff_kind(table) if opts.get("onoff") else number_kind(table)
+                    if table.elem == _kind_elem(table) else 0)
+        except MenuSettingError as e:
+            refused[key] = str(e)
+            continue
+        share.append((key, values, names, opts, kind))
+    if len(share) < 2:
+        raise MenuSettingError("fewer than two of them can be shown there")
+    if len(share) > MAX_VALUES:
+        raise MenuSettingError("more than %d settings of ours cannot share them" % MAX_VALUES)
+    first = share[0]
+    picks = [SETTINGS[k][2] for k, *_ in share]
+    settings, writes, cat, own_refused = _plan_rows(
+        table, own + [(MORE_SELECT, len(share), picks, {}), (MORE_VALUE, first[1], first[2], dict(first[3]))])
+    refused.update({k: v for k, v in own_refused.items() if k not in (MORE_SELECT, MORE_VALUE)})
+    by_key = {st.key: st for st in settings}
+    pick, value = by_key.get(MORE_SELECT), by_key.get(MORE_VALUE)
+    if pick is None or value is None:
+        raise MenuSettingError(own_refused.get(MORE_SELECT) or own_refused.get(MORE_VALUE) or "unknown")
+    desc, help_va, help_room, row_va, row_room = _row_places(table, value.id)
+    kind_off = OFF_KIND if table.elem == _kind_elem(table) else -1
+    value = dataclasses.replace(value, shared=(desc, help_va, help_room, row_va, row_room, OFF_DEFAULT, OFF_MIN,
+                                               OFF_MAX, kind_off))
+    out = [st for st in settings if st.key not in (MORE_SELECT, MORE_VALUE)] + [pick, value]
+    for k, (key, values, names, opts, kind) in enumerate(share, 1):
+        low = 0 if opts.get("onoff") or opts.get("from_zero") else 1
+        out.append(MenuSetting(
+            key, value.id, SETTINGS[key][2][:row_room], _help_text(names, values, opts.get("help_text"), help_room),
+            values, SHARED_BASE + 4 * k, value.category, int(opts.get("default", 1)) - 1 + low,
+            "%s, %s %d" % (pick.where, SETTINGS[MORE_SELECT][1], k), low, kind, (k,)))
+    return out, writes, cat, refused
+
+
+def shared_cfg_text(settings):
+    """``settings.cfg``, the runtime's table of the shared rows (pad_mode_runtime.c "more settings") for *settings*
+    from :func:`plan_many`; ``""`` when none share."""
+    by_key = {st.key: st for st in settings}
+    pick, value = by_key.get(MORE_SELECT), by_key.get(MORE_VALUE)
+    opts = sorted((st for st in settings if is_shared(st)), key=lambda st: st.shared[0])
+    if pick is None or value is None or not opts:
+        return ""
+
+    def clean(t):
+        return " ".join(str(t).replace("\t", " ").split())
+
+    desc, help_va, help_room, row_va, row_room, o_def, o_min, o_max, o_kind = value.shared
+    lines = ["# PAD-1382: settings of ours sharing MORE SETTINGS and the row under it",
+             "select\t0x%08x\t%d" % (pick.live, len(opts)),
+             "value\t0x%08x\t0x%08x\t0x%08x\t%d\t0x%08x\t%d" % (value.live, desc, help_va, help_room, row_va,
+                                                                 row_room),
+             "fields\t%d\t%d\t%d\t%d" % (o_def, o_min, o_max, o_kind)]
+    for st in opts:
+        lines.append("option\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s" % (
+            st.shared[0], st.key, st.low, st.values - 1 + st.low, st.default, st.kind, clean(st.caption) or "Setting",
+            clean(st.help)))
+    return "\n".join(lines) + "\n"
+
+
+def is_shared(setting):
+    """PAD-1382: does *setting* (a :class:`MenuSetting`) live on the shared rows?"""
+    return bool(setting is not None and setting.shared and setting.key not in (MORE_SELECT, MORE_VALUE))
 
 
 def table_blob(cat, *settings):

@@ -30,7 +30,10 @@ lists, so a mode cannot name something the game lacks; an empty key shows what i
 inherits (title.cfg, else the runtime default). Every edit is saved to the `.mode`
 file at once and checked with `check_modes` against the port report. **Hear
 sounds from** points at the title's extract folder: a game's `se_X` is the
-extract's `X.wav` (2,690 of Wonka's 2,723 match). **Build** runs `mkjjpmodes.py
+extract's `X.wav` (2,690 of Wonka's 2,723 match). A mode's own sound, music,
+picture and video files go in that folder (**Open the mode folder**); the sound
+keys then offer them beside the game's sounds, and the **Picture and video** group
+and the music key pick from them (PAD-1352). **Build** runs `mkjjpmodes.py
 build` as root in the app's Linux on the stock ISO it finds beside the Select card
 pick (or `D:\Pinball\images\JJP`), with its scratch in
 `/var/tmp/pad_jjpmodes_work`; Cancel stops it inside Linux, where it unmounts and
@@ -84,14 +87,22 @@ lamp_blink = 4
 | `seconds` | 20 | the game's own mode timer |
 | `complete` | 0 | scoring shots that complete the mode (0 = it runs to time) |
 | `complete_points` | 0 | added on completion |
-| `sound_start`, `sound_shot`, `sound_complete`, `sound_end` | none | the game's `se_*` sounds |
+| `sound_start`, `sound_shot`, `sound_complete`, `sound_end` | none | the game's `se_*` sounds, or a sound file of the mode's own in the folder (`.wav`, `.ogg`, `.flac`, `.opus`) |
+| `sound_channel` | fanfare | the game channel the mode's own sound files play on: `fanfare`, `fx`, `speech` or `music` (its volume and ducking) |
+| `sound_like`, `music_like` | none | a game `se_*` whose settings (channel, gain, play mode) the mode's own sounds or music take, instead of the channel's first |
+| `music` | none | a music file of the mode's own (`.ogg`, `.wav`...): the game's music while the mode runs, the game's own music back after |
+| `picture` | none | a picture of the mode's own (`.png`, `.jpg`), drawn while the mode runs |
+| `picture_at` | 0 0 100 100 | where: `x y w h` in percent of the screen; the picture keeps its shape, centred in that box |
+| `video` | none | a video of the mode's own (`.webm` VP8/VP9, the game's own clip format; `.mkv`, `.mp4` H.264 also play), silent, drawn under the picture |
+| `video_at` | 0 0 100 100 | where, as `picture_at` |
+| `video_loop` | yes | `no` plays it once and keeps its last frame |
 | `lamps` | none | `lp_*` lamps (or `ls_*` lamp groups) the mode lights |
 | `lamp_color` | ffffff | rrggbb |
 | `lamp_blink` | 4 | flashes a second; 0 = solid |
 | `font_title`, `font_value`, `font_timer` | none (built-in font) | the game's `font_*` fonts for the title, the mode total and the seconds left |
 | `title_color`, `value_color`, `timer_color` | ffffff, ffdc00, ffffff | rrggbb or rrggbbaa |
 | `panel_color` | 000000b0 | the panel behind the text, rrggbbaa |
-| `panel` | middle | `middle`, `bottom` or `top` (the game's score panel is at the bottom on most titles) |
+| `panel` | middle | `middle`, `bottom` or `top` (the game's score panel is at the bottom on most titles), or `none` (no text panel: the mode's picture or video says it) |
 | `game_modes` | hold | `hold` (PAD-1348): while this mode runs, a start of the game's that goes through its class's start or restart (on Wonka 03.03: the multiballs, proven with the Gobstopper multiball) is refused and the game carries on as if it was not asked. Some game modes start another way (Wonka's Oompa hurry-up, Wonka Wash Frenzy) and are not held: this mode pauses for them, as `pause` does, and resumes after. Or the older choices for when a game mode or multiball runs: `pause` (timer held, shots not scored, panel hidden, lamps handed back), `end`, or `ignore` (none of these refuse the game's starts) |
 | `hold_multiballs` | yes | with `hold`: `no` lets the game's multiballs start (and pause this mode) |
 | `allow_game_modes` | none | with `hold`: the game's mode globals or classes (e.g. `mtv_mode`, `OompaHurryUp`) that may still start |
@@ -150,6 +161,64 @@ The port report lists every named coil with what a mode may do (`coils`:
 `pulse`, `hold`), by the same name rules (`jjpport.py` `COIL_NEVER`,
 `COIL_HOLDABLE`, `COIL_ANYWAY`; a test keeps them equal to the runtime's), and
 `mkjjpmodes.py check --port` refuses a coil the mode may not use.
+
+## A mode's own sounds, music, picture and video (PAD-1352)
+
+The files sit in the mode folder beside the `.mode` files and travel with them
+(`mkjjpmodes.py build` and `stick` copy every sound, picture and video file in it; `check`
+says when one a mode names is missing).
+
+```
+# 3_candy_rush.mode
+start = switch_target_tv
+sound_start = rush_start.wav       # our own, on the game's fanfare channel
+sound_shot = se_Fanfare_Jackpot    # the game's own still work
+music = rush_loop.ogg
+picture = rush_logo.png
+picture_at = 2 4 30 18
+video = rush.webm
+video_at = 25 4 50 58
+panel = bottom
+```
+
+* **Sounds play through the game's own sound engine.** A sound file becomes a
+  `SoundEffect` of the game's own (a copy of one of its sounds on that channel,
+  holding our sample), played by the game's own `play`, so the game's volume
+  settings, channel levels and ducking treat it like the game's sounds.
+* **Music takes over the game's music the game's way.** The runtime adds one
+  rule at the head of the game's music list (`Update<UpdateBGMusic_>`): while the
+  mode runs it names the mode's music, so the game stops its own and plays ours
+  on the music channel; when the mode ends, pauses for a game mode, or the ball
+  drains, the rule steps aside and the game's own music comes back. Music
+  loops. The whole file is held in memory, so keep it a loop of a minute or two.
+* **Pictures and video** are drawn under the mode's text panel, video first.
+  Video is decoded by the game's own FFmpeg; it pauses with the mode. Keep it
+  the screen's size or smaller (1360x768 on Wonka): decoding a bigger one costs
+  the game frames.
+* Formats: what the game's own libraries read - sounds `.wav` `.ogg` `.flac`
+  `.opus`, pictures `.png` `.jpg` `.bmp` `.tga`, video `.webm` (VP8/VP9),
+  `.mkv`, `.mp4` (H.264). Video has no sound: give the mode a `sound_start` or
+  `music` for that.
+* Every JJP title that runs modes has these pieces (`media` in its port
+  report: `can_play_own_media`).
+
+**Emulator, Wonka 03.03** (hidden, muted; the game's sound measured through
+`audio.sh`'s `JJP_AUDIO_CAPTURE` and `jjpaudiocap.py`, test tones 880 Hz start,
+1500 Hz shot, 330 Hz music). The runtime read the `SoundEffect` layout off the
+game's code itself (sample +0x58, channel +0x18, loaded +0xd8, stream +0xf0, flags
++0x54) and made the two sounds on the fanfare channel and the music on the music
+channel. At the start the 880 Hz tone played; from then on the mix was our 330 Hz
+music alone (the game stopped its own), ducked by the game to a twentieth for
+about 1.5 s when a ramp shot played the 1500 Hz tone with the game's own callouts,
+then back up. The picture and the VP9 clip drew in their boxes (the clip at 30
+frames a second, its counter moving between shots). When the timer ran out, and
+in another run when three shots completed the mode, our rule stepped aside and
+the game's own music came back within a second. With `game_modes = pause` and
+the game's `mtv_mode` started under it, our music handed back at once and the
+screen showed only the game's mode. The other seven titles are matched
+statically: the same exports, the same 264-byte `SoundEffect`, the same FFmpeg 4.4
+and Allegro libraries, and the runtime loads with every import bound on each
+cached root (glibc 2.34).
 
 ## The game's own modes, changed: `.stock` files (PAD-1351)
 

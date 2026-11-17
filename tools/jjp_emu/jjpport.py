@@ -259,6 +259,49 @@ def hold(e):
     ])
 
 
+#: what a mode's own sounds, music, picture and video use (PAD-1352): the game's
+#: SoundEffect (a copy of one of its own plays our sample), its music list, and
+#: the Allegro / FFmpeg libraries the game links (found at run time by name)
+MEDIA_SYMBOLS = [
+    ("sounds", "_ZN11SoundEffect23create_sample_instancesEPKc"),
+    ("sounds", "_ZN11SoundEffect7do_playEb"),
+    ("sounds", "_ZN11SoundEffect9is_loadedEv"),
+    ("sounds", "_ZN11SoundEffect10is_playingEv"),
+    ("sounds", "_ZN11SoundEffect17play_audio_streamEv"),
+    ("music", "_ZN6UpdateI14UpdateBGMusic_PPFvvEE4listE"),
+    ("music", "_Z12update_musicv"),
+    ("music", "_Z13music_requestPFvvE"),
+]
+MEDIA_LIBS = [
+    ("sounds", "liballegro_audio.so"), ("sounds", "liballegro_acodec.so"),
+    ("picture", "liballegro_image.so"),
+    ("video", "libavformat.so"), ("video", "libavcodec.so"), ("video", "libavutil.so"),
+]
+_NEEDED = re.compile(rb"lib[a-z_]+\.so\.[0-9.]+")
+
+
+def media(e):
+    """Can this title play a mode's own sounds, music, picture and video?  Statically: the
+    engine pieces by name, the game's SoundEffect object size (a copy of one is ours), the
+    libraries it links.  The runtime reads the SoundEffect fields off the decrypted code."""
+    needed = sorted(set(m.decode() for m in _NEEDED.findall(e.data[:8 << 20])))
+    have = collections.OrderedDict()
+    for what, name in MEDIA_SYMBOLS:
+        have.setdefault(what, collections.OrderedDict())[name] = name in e.syms
+    for what, lib in MEDIA_LIBS:
+        have.setdefault(what, collections.OrderedDict())[lib] = any(n.startswith(lib) for n in needed)
+    sizes = collections.Counter(s for n, (a, s) in e.syms.items() if n.startswith("se_") and s >= 0x100)
+    ok = {what: all(v.values()) for what, v in have.items()}
+    ok["sounds"] = ok.get("sounds", False) and bool(sizes)
+    return collections.OrderedDict([
+        ("can_play_own_media", all(ok.values())),
+        ("ok", ok),
+        ("pieces", have),
+        ("sound_object_bytes", sizes.most_common(1)[0][0] if sizes else None),
+        ("libraries", [n for n in needed if re.match(r"lib(av|allegro)", n)]),
+    ])
+
+
 def _demangled_class(mangled):
     m = re.match(r"^(\d+)(.*)$", mangled)
     return m.group(2)[:int(m.group(1))] if m else mangled
@@ -431,6 +474,7 @@ def port(elf_path, gamename=None, live=None):
         ("missing_required", missing_required),
         ("mode_vtable", vt),
         ("hold", hold(e) if "_ZTV4Mode" in e.syms else {"can_hold": False}),
+        ("media", media(e)),
         ("can_balls", all(sdk.get("balls", {}).values()) and bool(sdk.get("balls"))),
         ("can_coils", all(sdk.get("coils", {}).values()) and bool(sdk.get("coils"))),
         ("hooks", hooks),
@@ -543,6 +587,8 @@ def main(argv=None):
         p["elf"], "CAN run modes" if p["can_run_modes"] else "can NOT run modes", p["exported_symbols"],
         len(p["switches"]), len(p["lamps"]), len(p["sounds"]), len(p["fonts"]), len(p["mode_classes"]),
         ("; missing " + " ".join(p["missing_required"])) if p["missing_required"] else ""))
+    print("  own media: %s" % ("yes" if p["media"]["can_play_own_media"] else
+                               "no (%s)" % " ".join(k for k, v in p["media"]["ok"].items() if not v)))
     print("  vtable %s" % " ".join("%s=%s" % (k, hex(v) if v is not None else "-") for k, v in p["mode_vtable"].items()))
     print("  defaults %s" % json.dumps(p["defaults"]))
     cs = p["coils"]

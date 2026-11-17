@@ -103,6 +103,49 @@ What was learned on the way, all on GnR 3.03:
   stayed a zombie holding its memory (20 held 16 GB, WSL in full swap).
   `killgame.sh` now says so; only `wsl --shutdown` frees it.
 
+## A mode's own sounds, music, picture and video (PAD-1352)
+
+How to use it: `tools/jjp_emu/MODES.md`. What was learned on Wonka 03.03 (decrypted
+code read through `/proc/<pid>/mem`), and why it is built this way:
+
+* **The game's file manager cannot take a file of ours.** Every asset load goes
+  through one loader (`fm_load_file_blob` -> an unexported core) that XORs the
+  whole file with a keystream seeded from its absolute path
+  (`jcrypt_set_seeds_for_crypto`), drops the lead filler and checks a CRC32
+  against the dongle-encrypted file list. So nothing of ours is loaded through
+  `SoundEffect::do_fileload`, `JJPESprite` or `JJPEMovie`; the runtime loads its
+  files with the same Allegro and FFmpeg the game links.
+* **Sounds: a copy of a game `SoundEffect` with our sample.** A `SoundEffect` (264
+  bytes on all eight titles) keeps its `ALLEGRO_SAMPLE*` (+0x58 on Wonka), its
+  channel `se_type_t` (+0x18: 1 music (OGG, streamed), 2 fanfare, 3/4 speech, 5 fx,
+  6 loops), a loaded byte (+0xd8), a stream flag (+0xf0) and flags (+0x54, bit 2
+  "loaded on demand"). `create_sample_instances` makes its voices from the sample
+  and attaches them to the mixer of the channel object in a table indexed by the
+  type; `do_play` picks a free voice and applies the object's play mode and gain.
+  The runtime copies a resting, resident game sound of the wanted channel, puts
+  our sample in, clears the stream flag and calls `create_sample_instances`, so
+  the game's own `play` plays it on that channel. The field offsets are read off
+  the game's code each run (the `mov disp(%rbx),%rdi` before the call that reaches
+  `al_create_sample_instance` through the PLT; the `movslq disp(%rbx),%rax` that
+  indexes the channel table; `do_play`'s first tests; the `cmpb` whose branch calls
+  `play_audio_stream`), never assumed.
+* **Music: the game's music list.** `update_music()` walks
+  `Update<UpdateBGMusic_>::list` (head `{first, magic 0x45}`, node `{prio, desc,
+  -, next}`, desc `{fn, name}`); the first rule returning nonzero names a music
+  function, and `music_request(fn)` stops the music channel
+  (`JJPSoundChannel::kill_all_sounds`) and calls it; the game's music functions
+  are one `se_X.play()`. Our node heads the list and answers only while a mode
+  with music runs unpaused; the runtime calls `update_music()` at mode start, at
+  its end (our `end` slot) and when a pause starts or ends.
+* **Video: the game's FFmpeg 4.4** (libavformat 58, libavcodec 58 with libvpx
+  VP8/VP9 and H.264, on all eight titles), decoded on a thread of ours, converted
+  to RGBA by our own BT.601 loop, uploaded with `al_lock_bitmap` on the render
+  thread. No FFmpeg headers: the few struct fields read have been stable since
+  FFmpeg 3.4, and the stream's codec parameters are found by their content.
+* **Muted audio proof.** `audio.sh` with `JJP_AUDIO_CAPTURE` wraps the null
+  device in ALSA's file plugin; `jjpaudiocap.py` reads it from a FIFO at real time
+  (the null device alone is unpaced: 178 MB in two minutes) and logs tone levels.
+
 ## In the app (PAD-1350)
 
 Status 2026-11-16: **a mode made only in the app runs on the Wonka emulator

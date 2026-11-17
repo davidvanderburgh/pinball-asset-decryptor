@@ -54,7 +54,8 @@ def test_a_sound_takes_a_file_for_another_music_mode(tmp_path, monkeypatch):
         assert r["md"] == [2]
         assert r["md_tip"] == ("Music modes - the machine's MUSIC MODE setting picks which plays: "
                                "mode 1 (Standard): the game's own sound; "
-                               "mode 2 (Custom A): Orchestral jackpot.wav.")
+                               "mode 2 (Custom A): Orchestral jackpot.wav. MUSIC MODE is not on the card "
+                               "yet: tick Music Mode on the Service menu tab to put it there.")   # PAD-1393 round 3
         # a slot with a mode's file is a change the build makes
         assert w.state("audio")["status"].startswith("1 of 3 slots changed")
         # the modes' names, one line

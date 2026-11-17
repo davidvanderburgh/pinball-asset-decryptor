@@ -74,7 +74,8 @@ def test_the_panel_ticks_music_mode_when_the_card_gets_it(tmp_path):
     os.makedirs(p)
     with open(os.path.join(p, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump({SMo.STAGED_KEY: {"names": ["Standard", "Orchestral"],
-                                    "slots": {"audio/idx2095 - music - x.wav": {"2": "a.wav"}}}}, f)
+                                    "slots": {"audio/idx2095 - music - x.wav": {"2": "a.wav"}}},
+                   "service_menu": {"on": ["music_mode"]}}, f)        # round 3: ticked by the owner
     assert SMo.load(p).count == 2
     with web_app(tmp_path / "app") as w:
         modes = w.window.service("modes")
@@ -103,6 +104,9 @@ def test_the_panel_unticks_music_mode_and_image_set(tmp_path):
         json.dump({SMo.STAGED_KEY: {"names": ["Standard", "Orchestral"],
                                     "slots": {"audio/idx2095 - music - x.wav": {"2": "a.wav"}}},
                    SV.STAGED_KEY: {"names": ["Standard", "Dark"], "scenes": {scene: {"2": {"card": True}}}}}, f)
+    assert SM.wanted(p) == []                               # round 3: both start unticked
+    assert {w[0] for w in SM.wanted(p, honour_off=False)} == {MS.MUSIC_MODE, MS.IMAGE_SET}
+    SM.save(p, {"order": [], "on": ["music_mode", "image_set"]})
     assert {w[0] for w in SM.wanted(p)} == {MS.MUSIC_MODE, MS.IMAGE_SET}
     with web_app(tmp_path / "app") as w:
         modes = w.window.service("modes")
@@ -133,17 +137,90 @@ def test_the_panel_unticks_music_mode_and_image_set(tmp_path):
         assert w.call("svcmenu.set_row", "music_mode", True)
         w.drain()
         assert rows()["music_mode"]["on"] and [x[0] for x in SM.wanted(p)] == [MS.MUSIC_MODE]
-        assert SM.load(p)["off"] == ["image_set"]
+        assert SM.load(p)["on"] == ["music_mode"]
 
 
-def test_the_off_list_keeps_the_order_and_only_known_keys(tmp_path):
+def test_the_on_list_keeps_the_order_and_only_known_keys(tmp_path):
     from pinball_decryptor.plugins.stern import service_menu as SM
     p = str(tmp_path)
-    SM.save(p, {"order": ["handicap"], "off": ["image_set", "handicap", "bogus"]})
-    assert SM.load(p) == {"order": ["handicap"], "off": ["image_set"]}
-    assert SM.off_keys(p) == {"image_set"}
-    SM.save(p, {"order": [], "off": []})
-    assert SM.load(p) == {"order": [], "off": []}
+    assert SM.off_keys(p) == set(SM.OFF_KEYS)               # round 3: everything off until ticked
+    SM.save(p, {"order": ["handicap"], "on": ["image_set", "handicap", "bogus"]})
+    assert SM.load(p) == {"order": ["handicap"], "on": ["image_set"], "coop": False}
+    assert SM.off_keys(p) == {"music_mode", "edition"}
+    SM.save(p, {"order": [], "on": []})
+    assert SM.load(p) == {"order": [], "on": [], "coop": False}
+
+
+def test_round3_every_row_starts_unticked(tmp_path):
+    """Round 3 (DragonRR): "Everything should be unchecked by default". A project with music modes and image sets
+    shows both rows unticked (but tickable), Handicap and Co-op unticked, and the round-2 "off" list is read no
+    more."""
+    from pinball_decryptor.core import staged_changes as SC
+    from pinball_decryptor.plugins.stern import service_menu as SM, sound_modes as SMo, scene_variants as SV
+    from tests.webui_harness import web_app
+    p = str(tmp_path / "proj")
+    os.makedirs(p)
+    scene = "auto_loaded/" + "c" * 40 + "/scene.radium"
+    SC.save(p, {SMo.STAGED_KEY: {"names": ["Standard", "Orchestral"],
+                                 "slots": {"audio/idx2095 - music - x.wav": {"2": "a.wav"}}},
+                SV.STAGED_KEY: {"names": ["Standard", "Dark"], "scenes": {scene: {"2": {"card": True}}}},
+                SM.STAGED_KEY: {"off": ["edition"]}})
+    assert SM.wanted(p) == [] and SM.off_keys(p) == set(SM.OFF_KEYS)
+    with web_app(tmp_path / "app") as w:
+        modes = w.window.service("modes")
+        var = modes._project_var() if modes is not None else None
+        if var is None:
+            pytest.skip("no project folder variable in this window")
+        w.run(lambda: var.set(p))
+        w.drain()
+        w.call("ui.select_tab", "svcmenu")
+        w.drain()
+        r = {x["key"]: x for x in w.state("svcmenu")["settings"]}
+        assert not any(x["on"] for x in r.values()), r
+        assert r["music_mode"]["can"] and r["image_set"]["can"] and not r["edition"]["can"]
+        assert r["music_mode"]["note"].startswith("Off the card")
+
+
+def test_round3_coop_row_ticks_coop_on_and_off(tmp_path, monkeypatch):
+    """Round 3 (DragonRR: "Coop play can't check it"): the Co-op Play row can be ticked with co-op play off; it
+    switches co-op play on with its row, and unticking it switches co-op play off again. Co-op switched on at the
+    Modes tab stays on (always on) when the row is unticked."""
+    from pinball_decryptor.plugins.stern import coop_play as CP, service_menu as SM
+    from tests.webui_harness import web_app
+    monkeypatch.setattr(CP, "title_refusal", lambda prof: "")
+    monkeypatch.setattr(CP, "project_title", lambda project, probe=False: None)
+    p = str(tmp_path / "proj")
+    os.makedirs(p)
+    with web_app(tmp_path / "app") as w:
+        modes = w.window.service("modes")
+        var = modes._project_var() if modes is not None else None
+        if var is None:
+            pytest.skip("no project folder variable in this window")
+        w.run(lambda: var.set(p))
+        w.drain()
+        w.call("ui.select_tab", "svcmenu")
+        w.drain()
+
+        def row():
+            return {x["key"]: x for x in w.state("svcmenu")["settings"]}["coop_play"]
+        assert row()["can"] and not row()["on"]
+        assert w.call("svcmenu.set_row", "coop_play", True)
+        w.drain()
+        assert row()["on"] and CP.load(p) and CP.menu_asked(p) and SM.load(p)["coop"]
+        assert w.call("svcmenu.set_row", "coop_play", False)
+        w.drain()
+        assert not row()["on"] and not CP.load(p) and not SM.load(p)["coop"]
+        CP.save(p, True)                                    # co-op ticked on the Modes tab: always on
+        assert w.call("svcmenu.set_row", "coop_play", True)
+        assert w.call("svcmenu.set_row", "coop_play", False)
+        assert CP.load(p) and not CP.menu_asked(p)
+        w.drain()
+        assert row()["note"].startswith("Not on the card: co-op play is always on")
+        monkeypatch.setattr(CP, "title_refusal", lambda prof: "Godzilla has co-op play of its own.")
+        CP.save(p, False)
+        w.run(lambda: w.window.service("svcmenu").publish())
+        w.drain()
+        assert not row()["can"] and row()["note"].startswith("Godzilla has")
 
 
 def test_an_unticked_music_mode_leaves_the_music_modes_and_keeps_the_other_sounds(tmp_path, monkeypatch):
@@ -162,12 +239,12 @@ def test_an_unticked_music_mode_leaves_the_music_modes_and_keeps_the_other_sound
         logs.clear()
         return E._sound_modes_for_build(p, False, lambda t, lvl="info": logs.append((t, lvl)),
                                         ext4_available=lambda: (True, ""))
+    modes, _prof = build()                                 # round 3: unticked until ticked
+    assert modes is not None and modes.count == 0 and modes.attract == ["b.wav"] and modes.turns
+    assert any("MUSIC MODE is not ticked" in t for t, _l in logs)
+    SM.save(p, {"order": [], "on": ["music_mode"]})
     modes, _prof = build()
     assert modes.count == 2
-    SM.save(p, {"order": [], "off": ["music_mode"]})
-    modes, _prof = build()
-    assert modes is not None and modes.count == 0 and modes.attract == ["b.wav"] and modes.turns
-    assert any("MUSIC MODE is unticked" in t for t, _l in logs)
     assert SMo.load(p).count == 2                          # the project keeps them
 
 
@@ -181,7 +258,7 @@ def test_spike3_honours_the_unticked_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: None)
     SC.save(p, {"sound_modes": {"names": ["Standard", "Orchestral"],
                                 "slots": {"audio/idx2095 - music - x.wav": {"2": "a.wav"}}}})
+    assert S3.rows_wanted(p) == [] and S3M.wanted(p) == (None, None)   # round 3: unticked until ticked
+    SM.save(p, {"order": [], "on": ["edition", "music_mode"]})
     assert [r[0] for r in S3.rows_wanted(p)] == [MS.EDITION]
     assert S3M.wanted(p)[0] is not None
-    SM.save(p, {"order": [], "off": ["edition", "music_mode"]})
-    assert S3.rows_wanted(p) == [] and S3M.wanted(p) == (None, None)

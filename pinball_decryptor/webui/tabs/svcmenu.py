@@ -25,7 +25,8 @@ REAL_NOTE = ("Boots the game in the emulator, hidden and muted, with this projec
 #: each setting of ours, its name, and where it is switched when not here
 SETTINGS = (
     ("music_mode", "Music Mode", "Set on the Audio tab: give a sound more than one music choice."),
-    ("edition", "Edition", "Set on the Write tab (Editions...) for a card that is one of several editions."),
+    ("edition", "Edition", "Only for a card that holds several editions of the game (Write tab, Editions...): a "
+                           "card of one edition has none to pick."),
     ("coop_play", "Co-op Play", ""),
     ("handicap", "Handicap", ""),
     ("image_set", "Image Set", "Set by the project's image sets (scene variants): the operator picks which one the "
@@ -39,6 +40,14 @@ OFF_NOTES = {
     "edition": "Off the card: the card cannot be picked by edition. Tick to add its row.",
     "image_set": "Off the card: the screens show the scenes as the project has them. Tick to add its row.",
 }
+
+
+def _coop_refusal(CP, project):
+    """Why this project's title cannot take co-op play (its row cannot be ticked), or ``""``."""
+    try:
+        return CP.title_refusal(CP.project_title(project))
+    except Exception as e:                              # noqa: BLE001 - said on the row
+        return "Co-op play could not be checked for this game (%s)." % e
 
 
 def project_menu(project):
@@ -106,19 +115,22 @@ class ServiceMenuTab(TabService):
             has = {w[0] for w in SM.wanted(project, honour_off=False)}
         except Exception:                               # noqa: BLE001 - shown as off then
             has = set()
-        off = SM.off_keys(project)
+        ticked = SM.on_keys(project)
         for key, name, where in SETTINGS:
             if key == "brightness" and not PS.OFFERED:
                 continue
             row = {"key": key, "name": name, "where": where, "can": False, "on": False, "note": ""}
             if key in SM.OFF_KEYS:                      # PAD-1393 round 2: ticked/unticked here, once the project has it
-                can = key in has
-                row.update(can=can, on=can and key not in off,
-                           note=OFF_NOTES[key] if can and key in off else "")
-            elif key == "coop_play":
-                on = CP.load(project)
-                row.update(can=on, on=CP.menu_asked(project),
-                           note="" if on else "Tick Co-op play on the Modes tab first, for its row.")
+                can = key in has                        # round 3: unticked until the owner ticks it
+                on = can and key in ticked
+                row.update(can=can, on=on, note=OFF_NOTES[key] if can and not on else "")
+            elif key == "coop_play":                    # round 3: ticking it here switches co-op play on too
+                coop = CP.load(project)
+                why = "" if coop else _coop_refusal(CP, project)
+                on = CP.menu_asked(project)
+                row.update(can=not why, on=on, note=why or ("" if on else (
+                    "Not on the card: co-op play is always on. Tick to let the operator switch it." if coop else
+                    "Not on the card: tick to add its row (and co-op play).")))
             elif key == "handicap":
                 on = HC.load(project)
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")
@@ -156,8 +168,8 @@ class ServiceMenuTab(TabService):
         modes = self._modes()
         if modes is None:
             return False
-        if key == "coop_play":
-            ok = modes.set_coop_menu(bool(on))
+        if key == "coop_play":                          # PAD-1393 round 3: tickable without the Modes tab first
+            ok = self._set_coop(modes, bool(on))
         elif key == "handicap":
             ok = modes.set_handicap(bool(on))
         elif key in SM.OFF_KEYS:                        # PAD-1393 round 2: the row on or off the card, the setting kept
@@ -165,18 +177,40 @@ class ServiceMenuTab(TabService):
             if not project:
                 return False
             data = SM.load(project)
-            off = set(data["off"])
+            ticked = set(data["on"])
             if on:
-                off.discard(key)
+                ticked.add(key)
             else:
-                off.add(key)
-            data["off"] = sorted(off)
+                ticked.discard(key)
+            data["on"] = sorted(ticked)
             name = dict((k, n) for k, n, _w in SETTINGS)[key]
             self._save(project, data, "%s %s" % (name, "on the card" if on else "left off the card"))
             return True
         else:
             return False
         self.publish()
+        return ok
+
+    def _set_coop(self, modes, on):
+        """CO-OP PLAY on or off the card. Ticked while the project has no co-op play, it switches co-op play on (the
+        Modes tab's own switch, which refuses a title that cannot take it) and remembers that it did, so unticking it
+        switches co-op play off again; co-op play switched on at the Modes tab stays on (always on) when unticked."""
+        from ...plugins.stern import coop_play as CP
+        from ...plugins.stern import service_menu as SM
+        project = self._project()
+        if not project:
+            return False
+        data = SM.load(project)
+        if on and not CP.load(project):
+            if not modes.set_coop(True):
+                return False
+            data["coop"] = True
+            SM.save(project, data)
+        ok = modes.set_coop_menu(on)
+        if not on and data["coop"]:
+            data["coop"] = False
+            SM.save(project, data)
+            ok = modes.set_coop(False) and ok
         return ok
 
     # -- the owner's order of the app's rows (round 3) ----------------------------------------------------------------

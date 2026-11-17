@@ -236,3 +236,26 @@ wsl -u root -- python3 tools/jjp_emu/mkjjpmodes.py build --iso <stock>.iso --mod
   no switch matrix, and still refreshes the device dump
   (`jjpsw_launch.sh --dump-only`). A stale dump from an older GnR build had
   seeded an empty trough, so Start only asked for money.
+
+## Balls and coils (PAD-1353)
+
+Read off Wonka 03.03's decrypted code, then proven in the emulator
+(`tools/jjp_emu/MODES.md` "Balls and coils"):
+
+* **One ball saver.** Proc 0x191 keeps a target number of balls in play for a
+  time in hundredths of a second (`mb_request_balls_into_play(N, T)`; a request
+  above 1.99 s gets 2 s of grace). The game's own ball save is that call with the
+  balls in play now; its add-a-ball is `mb_add_balls_into_play(n, n * 200)`.
+  `mb_kill_ballsaver()` ends it, `mb_get_ballsaver_time()` counts it down in the
+  game's time (slower than the wall on the hidden rig, so the runtime compares the
+  saver with itself, never with the clock).
+* **Coils.** A `Coil` is 88 bytes: +0x08 label, +0x10 its own pulse ms, +0x24/+0x25
+  its OUT byte and bit, +0x28 state (0 off, 3 pulse, 4 duty for +0x30 ms, 2 duty with
+  no end), +0x34 the rotating pattern, +0x38 its length, +0x3c the pattern as asked.
+  `coil_duty(ms, pattern, 32)` is a hold the engine ends by itself;
+  `coil_get_duty_pattern(n)` is n of 32 steps on. The on/off hook lists
+  (`HookCoilOn_IRQ_`, `HookCoilOff_IRQ_`) are empty on Wonka and are interrupt-context
+  hooks, so `coil_off` from the runtime's watchdog thread is safe.
+* **The rig.** A hidden run has no ball feeder (it lives in the matrix window), so the
+  proof ran `jjpball.Feeder` headless (`C:\tmp\PAD-1353\feeder.py`) and read coil drives
+  off the shim's OUT frames (`coilsample.py`).

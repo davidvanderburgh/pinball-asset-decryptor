@@ -38,6 +38,8 @@
    "27DeadMenTellNoTalesMultiball"
   ]
  },
+ "can_balls": true,
+ "can_coils": true,
  "hooks": {
   "HookBallStart_": true,
   "HookFirstBall_": true,
@@ -132,6 +134,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -145,7 +161,9 @@
   "font_timer": "font_argh_text_timer",
   "sound_start": "se_VS_Tortuga_Intro",
   "sound_shot": "se_Fanfare_TreasureHoard_Jackpot",
-  "sound_end": "se_Fanfare_Bonus_Total"
+  "sound_end": "se_Fanfare_Bonus_Total",
+  "multiball_start": "switch_l_orbit_hi",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "10PirateMode",
@@ -2447,5 +2465,257 @@
   "se_tab_disc_middle",
   "se_tab_disc_outer",
   "se_volume_default"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_cannon",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_disc_motor",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_disc_relay",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_diverter_cannon",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_maelstrom",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flipper_hold_left_hi",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_left_lo",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right_lo",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upf_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upf_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left_hi",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left_lo",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right_lo",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upf_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upf_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_fork_diverter_release",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_fork_diverter_up",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_left_lane_diverter",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_light_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_orbit",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_singapore_captive",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_ship",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_1",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_1_toy",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_2",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_3",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_3_toy",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_pop_4",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_relay_motor_ship",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_ramp_strip_blue",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_ramp_strip_green",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_ramp_strip_red",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_scoop_left",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_top",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_spotlights",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_topper_lamp",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_topper_motor",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_treasure_chest_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_uppost_mode_select",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_uppost_orbit",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_vuk_lower_right",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_rear",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  }
  ]
 }

@@ -346,6 +346,96 @@ def test_runtime_policies_match_the_checker():
     assert "m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;" in src
 
 
+# ---------------------------------------------------------------- PAD-1353: balls and coils
+COIL_PORT = dict(PORT, coils=[
+    {"symbol": "coil_magnet_1", "pulse": True, "hold": True},
+    {"symbol": "coil_vuk_tv", "pulse": True, "hold": False},
+    {"symbol": "coil_flipper_power_left", "pulse": False, "hold": False},
+])
+
+
+def _c_list(src, name):
+    body = src[src.index("static const char *const %s[] = {" % name):]
+    body = body[:body.index("};")]
+    return tuple(re.findall(r'"([a-z_]+)"', body))
+
+
+def test_runtime_coil_rules_are_the_port_reports():
+    """jjpport.py says which coils a mode may pulse or hold by the same name lists the runtime uses."""
+    jp = _load("jjpport")
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    assert _c_list(src, "COIL_NEVER") == jp.COIL_NEVER
+    assert _c_list(src, "COIL_HOLDABLE") == jp.COIL_HOLDABLE
+    assert _c_list(src, "COIL_ANYWAY") == jp.COIL_ANYWAY
+
+
+@pytest.mark.parametrize("name, pulse, hold", [
+    ("coil_magnet_1", True, True), ("coil_diverter_lower_ramp", True, True), ("coil_motor_shaker", True, True),
+    ("coil_vuk_tv", True, False), ("coil_knocker", True, False), ("coil_kickback", True, False),
+    ("coil_flipper_hold_left", False, False), ("coil_vuk_trough", False, False), ("coil_lockup_trough", False, False),
+    ("coil_autolaunch", False, False), ("coil_auto_launch", False, False), ("coil_sling_left", False, False),
+    ("coil_jet_top", False, False), ("coil_bumper_left", False, False), ("coil_motor_stepper_1", False, False),
+    ("coil_motor_gobstopper", False, False), ("coil_motor_ticket_mech", False, False),
+    ("coil_diverter_ramp_left_power", False, False), ("coil_disk_motor_relay", False, False), ("coil_null", False, False),
+])
+def test_coil_rules_keep_the_games_own_coils_out(name, pulse, hold):
+    jp = _load("jjpport")
+    assert jp.coil_rules(name) == (pulse, hold)
+
+
+def test_check_takes_balls_and_coils_and_names_every_bad_value(tmp_path):
+    mm = _load("mkjjpmodes")
+    good = _folder(tmp_path, {
+        "title.cfg": "game = GunsNRoses\ncoil_holds = on\n",
+        "1_mb.mode": "start = switch_target_jam\nmultiball = 3 15\nmultiball_on = switch_orbit_left_hi\n"
+                     "add_ball = switch_target_jam 2\ncoil_start = coil_vuk_tv\ncoil_shot = coil_magnet_1 20\n"
+                     "coil_hold = coil_magnet_1 1500 8\ncoil_hold_on = shots\n",
+        "2_save.mode": "start = switch_orbit_left_hi\nball_save = 20\ncoil_hold = coil_magnet_1 800\n"
+                       "coil_hold_on = switch_target_jam\n",
+    })
+    modes, problems = mm.check_modes(good, COIL_PORT)
+    assert problems == [], problems
+    assert modes[0]["multiball"] == "3 15"
+    (tmp_path / "3_bad.mode").write_text(
+        "start = switch_target_jam\nmultiball = 9\nadd_ball = switch_target_jam 7\nball_save = 0\n"
+        "coil_start = coil_flipper_power_left\ncoil_shot = coil_typo\ncoil_complete = magnet\n"
+        "coil_hold = coil_vuk_tv 1000\nmultiball_on = switch_nope\n")
+    (tmp_path / "4_bad.mode").write_text("start = switch_target_jam\ncoil_hold = coil_magnet_1 9000 20\n"
+                                         "multiball_on = switch_target_jam\n")
+    _, problems = mm.check_modes(good, COIL_PORT)
+    text = "\n".join(problems)
+    assert "3_bad.mode:2: multiball balls must be 2-6" in text
+    assert "3_bad.mode:3: add_ball times must be 1-6" in text
+    assert "3_bad.mode:4: ball_save seconds must be 1-120" in text
+    assert "coil_flipper_power_left is one of the game's own ball, flipper, power or motor coils" in text
+    assert "3_bad.mode:6: coil_shot not in Guns N' Roses: coil_typo" in text
+    assert "3_bad.mode:7: coil_complete magnet is not a coil name" in text
+    assert "coil_vuk_tv is not built to stay on" in text
+    assert "3_bad.mode:9: multiball_on not in Guns N' Roses: switch_nope" in text
+    assert "4_bad.mode:2: coil_hold ms must be 100-5000" in text
+    assert "4_bad.mode: multiball_on without a multiball line" in text
+
+
+def test_check_wants_title_cfg_to_turn_coil_holds_on(tmp_path):
+    mm = _load("mkjjpmodes")
+    d = _folder(tmp_path, {"1.mode": "start = switch_target_jam\ncoil_hold = coil_magnet_1 1000\n"})
+    _, problems = mm.check_modes(d, COIL_PORT)
+    assert problems == ["1.mode: coil_hold is off on this title until title.cfg says coil_holds = on "
+                        "(after a check on the machine)"]
+
+
+def test_runtime_hard_limits_are_the_documented_ones():
+    """The caps no mode file can raise (PAD-381's guardrails on JJP) are the numbers MODES.md gives."""
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    doc = open(os.path.join(RIG, "MODES.md"), encoding="utf-8").read()
+    lim = dict(re.findall(r"#define (COIL_[A-Z_]+) +(\d+)\b", src))
+    assert lim == {"COIL_PULSE_GAP_MS": "250", "COIL_PULSES_A_MIN": "20", "COIL_PULSE_MAX_MS": "1000",
+                   "COIL_HOLD_MIN_MS": "100", "COIL_HOLD_MAX_MS": "5000", "COIL_HOLD_COOL_MS": "3000",
+                   "COIL_HOLDS_A_MIN": "6", "COIL_HOLD_POWER_MAX": "16"}
+    for phrase in ("250 ms", "20 a minute", "100-5000 ms", "3 s off", "6 a minute", "16 of 32"):
+        assert phrase in doc, phrase
+
+
 def test_starter_lamp_is_the_one_at_the_start_shot():
     """PAD-1364: the starter's lamp shares the start switch's words, not just its last one
     (Hobbit's 'made' found nothing, Godfather's '1' found the map, Toy Story's 'target' a

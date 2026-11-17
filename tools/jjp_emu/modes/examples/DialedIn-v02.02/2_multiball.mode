@@ -1,0 +1,12 @@
+# A multiball of the mode's own for DialedIn-v02.02: 3 balls, 10 s ball save, one ball left
+# ends it (seconds = 0: no clock).  Every key: tools/jjp_emu/MODES.md
+name = PAD Multiball
+title = PAD MULTIBALL
+start = switch_ramp_left_made_far
+shots = switch_target_away switch_ramp_left_made_far switch_ramp_left_made_near
+points = 2000000
+seconds = 0
+multiball = 3 10
+add_ball = switch_target_away 1
+coil_shot = coil_knocker
+sound_shot = se_Fanfare_Arm_SuperJackpot

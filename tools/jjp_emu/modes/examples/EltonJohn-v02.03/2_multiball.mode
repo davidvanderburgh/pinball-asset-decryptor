@@ -1,0 +1,12 @@
+# A multiball of the mode's own for EltonJohn-v02.03: 3 balls, 10 s ball save, one ball left
+# ends it (seconds = 0: no clock).  Every key: tools/jjp_emu/MODES.md
+name = PAD Multiball
+title = PAD MULTIBALL
+start = switch_ramp_left_made
+shots = switch_target_left switch_ramp_left_made switch_ramp_right_made
+points = 2000000
+seconds = 0
+multiball = 3 10
+add_ball = switch_target_left 1
+coil_shot = coil_knocker
+sound_shot = se_Fanfare_ChampMB_SuperJackpot

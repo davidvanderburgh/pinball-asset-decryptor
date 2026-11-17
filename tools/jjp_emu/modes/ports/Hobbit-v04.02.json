@@ -36,6 +36,8 @@
    "24ArkBarrelEscapeMultiball"
   ]
  },
+ "can_balls": true,
+ "can_coils": true,
  "hooks": {
   "HookBallStart_": true,
   "HookFirstBall_": true,
@@ -285,6 +287,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -298,7 +314,9 @@
   "font_timer": "font_ff_timer",
   "sound_start": "se_Fanfare_TABA_start",
   "sound_shot": "se_Fanfare_SuperSpinnerJackpot",
-  "sound_end": "se_VO_H3_LTPCrowd_Cheers"
+  "sound_end": "se_VO_H3_LTPCrowd_Cheers",
+  "multiball_start": "switch_ramp_right_made",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "10BMContract",
@@ -2270,5 +2288,347 @@
   "se_thorin_what_in_durins_name_is_going_on",
   "se_thorin_you_think_thats_funny",
   "se_volume_default"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bumper_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bumper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bumper_upper",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_divert_rampgate",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_smaugfeed",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_subway",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_windlance",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_drop_5bank_1_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_1_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_2_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_2_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_3_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_3_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_4_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_4_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_5_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_5bank_5_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_bottom_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_bottom_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_center_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_center_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_top_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_l3bank_top_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_bottom_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_bottom_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_center_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_center_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_top_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_r3bank_top_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_goblin_hold",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_goblin_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kickback",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_light_jets",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_light_spots_lower",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_light_spots_upper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_light_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_light_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_left",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_ramp",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_right",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_smaug_stepper1",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_smaug_stepper2",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_smaug_stepper3",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_smaug_stepper4",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_orc_hold",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_orc_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_upper",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_spider_hold",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_spider_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_uppost",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_vuk_balin",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_radagast",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_warg_hold",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_warg_power",
+   "pulse": false,
+   "hold": false
+  }
  ]
 }

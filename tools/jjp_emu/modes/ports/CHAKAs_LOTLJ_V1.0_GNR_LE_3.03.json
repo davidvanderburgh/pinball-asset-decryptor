@@ -81,6 +81,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -94,7 +108,9 @@
   "font_timer": "font_cd_mode_timer",
   "sound_start": "se_FX_GnR_AM_AFD_Intro",
   "sound_shot": "se_Fanfare_GnR_Amps_Jackpot",
-  "sound_end": "se_FX_GnR_GenericCrowds_DifferentLengthCheers_3sec"
+  "sound_end": "se_FX_GnR_GenericCrowds_DifferentLengthCheers_3sec",
+  "multiball_start": "switch_orbit_left_hi",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "13SongModeModes",
@@ -4034,5 +4050,174 @@
   "se_system_test_report",
   "se_volume_default",
   "se_warmrails"
+ ],
+ "can_balls": true,
+ "can_coils": true,
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_bass_light",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_coma_down_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_coma_gate",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_ramp_left_hold",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_diverter_ramp_left_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_diverter_ramp_right",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flash_bulb_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flash_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upf",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upf",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_bot",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lamp_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lock_up_release_left",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lock_up_release_right",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_loop_magnet",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_center_scoop",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_upf",
+   "pulse": true,
+   "hold": false
+  }
  ]
 }

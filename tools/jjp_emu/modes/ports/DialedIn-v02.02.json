@@ -16,6 +16,163 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 17,
+  "multiball_classes": [
+   "10Armageddon",
+   "13MultiballRule",
+   "14QuickMultiball",
+   "16QuantumTheaterMB",
+   "17QEDQuickMultiball",
+   "18OnslaughtMultiball",
+   "19BettyQuickMultiball",
+   "20FinalBattleMultiball",
+   "20UnderAttackMultiball",
+   "28DronesGoneWildQuickMultiball"
+  ]
+ },
+ "can_balls": true,
+ "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 27,
+  "classes": {
+   "DisasterMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "DisasterMode_AcidRain": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_AlienAttack": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_EMP": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Earthshaker": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Fire": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Meteor": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Singularity": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Sinkhole": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Tidalwave": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Tornado": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "DisasterMode_Volcano": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "MMEmoji": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "MMLottery": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "MMSelfie": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "MiniMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,
@@ -52,6 +209,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -65,7 +236,9 @@
   "font_timer": "font_timer",
   "sound_start": "se_Fanfare_hack_OnslaughtStart",
   "sound_shot": "se_Fanfare_Arm_SuperJackpot",
-  "sound_end": "se_VO_MANDI2_Tremendous"
+  "sound_end": "se_VO_MANDI2_Tremendous",
+  "multiball_start": "switch_ramp_left_made_far",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "12DisasterMode",
@@ -1949,5 +2122,197 @@
   "se_system_switch_on",
   "se_system_test_report",
   "se_volume_default"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drone1",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drone2",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drone3",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flash_bulb_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_bottom",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kick_big",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_kickback",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lamp_spotlight",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lamp_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lamp_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_grab",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_left",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_right",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_magnet_top",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_statue",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_target",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_ramp_lock_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_relay",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_theater_magnet",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_trap_door_close",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_trap_door_open",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_underground",
+   "pulse": true,
+   "hold": false
+  }
  ]
 }

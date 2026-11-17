@@ -16,6 +16,180 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 21,
+  "multiball_classes": [
+   "11RVMultiball",
+   "13MultiballRule",
+   "17CarnivalMultiball",
+   "18BuzzQuickMultiball",
+   "18TikiPartyMultiball",
+   "19GabbyGabbyMultiball",
+   "20TakeAChanceMultiball"
+  ]
+ },
+ "can_balls": true,
+ "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 41,
+  "classes": {
+   "BensonsMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "BottleBlastMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "CarnivalMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": false
+   },
+   "DragonZoneMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "FerrisWheelMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "FlipballMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "GabbyGabbyFrenzyMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "GabbyGabbyHurryUp": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "HammerTimeMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "HypnosisMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "JetStreamMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "MeetMeAtTheCarousel": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   },
+   "PopDartsMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "RescueForkyMode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": true
+   },
+   "SquirrelDerbyMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "StarAdventurerMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "SuperSpinnerMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "ThrillipedeMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "ToInfinityAndBeyondJetsMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "ZoetropeMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,
@@ -52,6 +226,20 @@
   "screen": {
    "_ZN8JJPEFont4fontEv": true,
    "_Z24font_plot_outline_shadowPK12ALLEGRO_FONT13ALLEGRO_COLORS2_iS2_iffiPKc": true
+  },
+  "balls": {
+   "_Z26mb_request_balls_into_playii": true,
+   "_Z22mb_add_balls_into_playii": true,
+   "_Z17mb_kill_ballsaverv": true,
+   "_Z23mb_ballsaver_is_runningv": true,
+   "_Z21mb_get_ballsaver_timev": true
+  },
+  "coils": {
+   "_ZN4Coil10coil_pulseEj": true,
+   "_ZN4Coil9coil_dutyEjjh": true,
+   "_ZN4Coil8coil_offEv": true,
+   "_Z21coil_get_duty_patterni": true,
+   "coil_table": true
   }
  },
  "switch_object_bytes": 104,
@@ -59,13 +247,15 @@
  "defaults": {
   "start": "switch_jet_target",
   "shots": "switch_jet_target switch_left_ramp_diverted_made switch_right_ramp_made",
-  "lamps": "lp_target_left",
+  "lamps": "lp_jet_bot",
   "font_title": "font_aux_display_carnival_mode_title",
   "font_value": "font_carnival_mode_total_title",
   "font_timer": "font_timer",
   "sound_start": "se_Fanfare_WheelAward_Gabby_Start",
   "sound_shot": "se_Fanfare_TAC_Jackpot",
-  "sound_end": "se_SFX_Carnival_Darts_BalloonPop1_Cheer"
+  "sound_end": "se_SFX_Carnival_Darts_BalloonPop1_Cheer",
+  "multiball_start": "switch_left_ramp_diverted_made",
+  "coil_shot": "coil_knocker"
  },
  "mode_classes": [
   "11BensonsMode",
@@ -4008,5 +4198,222 @@
   "se_tiki_party_sling",
   "se_volume_default",
   "se_wheel"
+ ],
+ "coils": [
+  {
+   "symbol": "coil_autolaunch",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_backglass_left",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_backglass_right",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_center_scoop_vuk",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_target",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_drop_target_release",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flash_bulb_topper",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_flipper_hold_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_hold_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_flipper_power_upper_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_gabby_down",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_gabby_up",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_bot",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jet_top",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jump_ramp_left_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_jump_ramp_power",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_jump_ramp_right_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_kickback",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_knocker",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_lamp_start_button",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_left_jet_saucer_kicker",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_left_ramp_diverter",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_left_ramp_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_lock_up_post",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_shaker",
+   "pulse": true,
+   "hold": true
+  },
+  {
+   "symbol": "coil_motor_ticket_mech",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_wheel_drive_1",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_motor_wheel_drive_2",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_null",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_right_jet_saucer_kicker",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_left",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_sling_right",
+   "pulse": false,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_LED_duke",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_LED_ferris_wheel",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_LED_fireworks",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_LED_tent",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_topper_duke_spin",
+   "pulse": true,
+   "hold": false
+  },
+  {
+   "symbol": "coil_vuk_trough",
+   "pulse": false,
+   "hold": false
+  }
  ]
 }

@@ -19,6 +19,33 @@
   "_ZN11SoundEffect4playEv"
  ],
  "mode_vtable": {},
+ "hold": {
+  "can_hold": false
+ },
+ "hooks": {
+  "HookBallStart_": false,
+  "HookFirstBall_": false,
+  "HookLastBall_": false,
+  "HookValidPlayfield_": false,
+  "HookBallSave_": false,
+  "HookExtraBallAwarded_": false,
+  "HookMultiballEnd_": false,
+  "HookGameStart_": false,
+  "HookScore_": false,
+  "HookLampRender_": false,
+  "HookUpdate_": false,
+  "HookSwitchDispatchStart_": false
+ },
+ "start_rules": {
+  "can_start_on_rules": false,
+  "start_on": [],
+  "start_after": false,
+  "start_combo": true,
+  "start_score": false
+ },
+ "stock": {
+  "can_change": false
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": false,

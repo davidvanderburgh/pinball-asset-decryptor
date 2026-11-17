@@ -110,6 +110,49 @@ SLOTS = [
     ("total_choreo", "_ZN4Mode25hook_do_mode_total_choreoEv", 0, "start_choreo"),
 ]
 _BARE_SWITCH = re.compile(r"^d?switch_\d+$")
+#: PAD-1354 start rules: the game's Hook<...>::list globals the runtime puts a node on
+#: (start_on events, the per-ball / per-game resets, the score check and the moments a
+#: raised start is done in), and what each is for
+RULE_HOOKS = collections.OrderedDict([
+    ("HookBallStart_", "start_on ball_start; start_once / start_count_reset per ball"),
+    ("HookFirstBall_", "start_on first_ball"), ("HookLastBall_", "start_on last_ball"),
+    ("HookValidPlayfield_", "start_on valid_playfield"), ("HookBallSave_", "start_on ball_saved"),
+    ("HookExtraBallAwarded_", "start_on extra_ball"), ("HookMultiballEnd_", "start_on multiball_end"),
+    ("HookGameStart_", "start counts, score marks and start_once reset per game"),
+    ("HookScore_", "start_score checked as the game scores"),
+    ("HookLampRender_", "tick: a raised start is done here"), ("HookUpdate_", "tick"),
+    ("HookSwitchDispatchStart_", "tick"),
+])
+TICK_HOOKS = ("HookLampRender_", "HookUpdate_", "HookSwitchDispatchStart_")
+
+
+def rule_hooks(e):
+    """{hook: present} for RULE_HOOKS, found as jjpmodes.c hook_list finds them: a 16-byte
+    _ZN4HookI<len><hook>...E4listE object."""
+    out = collections.OrderedDict((h, False) for h in RULE_HOOKS)
+    for n, (a, s) in e.syms.items():
+        if not n.startswith("_ZN4HookI") or not n.endswith("4listE") or s != 16:
+            continue
+        m = re.match(r"_ZN4HookI(\d+)", n)
+        if m:
+            k = int(m.group(1))
+            h = n[m.end():m.end() + k]
+            if h in out:
+                out[h] = True
+    return out
+
+
+def start_rules(e, hooks):
+    score = "_Z22score_get_player_scorei" in e.syms and "_Z23game_flow_get_player_upv" in e.syms
+    tick = any(hooks.get(h) for h in TICK_HOOKS)
+    return collections.OrderedDict([
+        ("can_start_on_rules", tick),
+        ("start_on", [w for w, h in (("ball_start", "HookBallStart_"), ("first_ball", "HookFirstBall_"),
+                                     ("last_ball", "HookLastBall_"), ("valid_playfield", "HookValidPlayfield_"),
+                                     ("ball_saved", "HookBallSave_"), ("extra_ball", "HookExtraBallAwarded_"),
+                                     ("multiball_end", "HookMultiballEnd_")) if tick and hooks.get(h)]),
+        ("start_after", tick), ("start_combo", True), ("start_score", tick and score),
+    ])
 
 
 def mode_vtable(e):
@@ -293,6 +336,35 @@ def object_names(e, prefix, exclude=None, sizes=None):
     return sorted(out)
 
 
+#: words a switch name shares with half the playfield: worth less than a word naming the place
+_KIND_WORDS = {"target", "targets", "ramp", "orbit", "loop", "scoop", "lane", "left", "right", "center",
+               "upper", "lower", "top", "bottom"}
+_NOISE_WORDS = {"made", "hit", "enter", "entry", "exit", "opto", "switch", "sw"}
+#: the short forms switch names use for a lamp's long ones (Godfather switch_u_target_1 = lp_upper_target_1)
+_SHORT_WORDS = {"u": "upper", "l": "left", "r": "right", "c": "center", "lo": "low", "hi": "high"}
+
+
+def _lamp_for(stem, lamps):
+    """The lamp nearest the start shot by name (PAD-1364): the one sharing the most of
+    the switch's words, a word naming the place (`tv`, `jet`) counting double a kind word
+    (`target`, `ramp`, `left`) and `made`/`hit` not at all.  A tie goes to an insert
+    over GI, then to one with the switch's number, then to the shorter name.  '' when no lamp shares a word - better no
+    lamp in a starter than one somewhere else on the playfield."""
+    words = [_SHORT_WORDS.get(w, w) for w in stem.split("_") if w and w not in _NOISE_WORDS]
+    digits = {w for w in words if w.isdigit()}
+    words = [w for w in words if not w.isdigit()]
+    best, best_key = "", None
+    for l in lamps:
+        parts = set(_SHORT_WORDS.get(w, w) for w in l[3:].split("_"))
+        score = sum(1 if w in _KIND_WORDS else 2 for w in words if w in parts)
+        if not any(w in parts for w in words if w not in _KIND_WORDS) and score < 2:
+            continue
+        key = (score, "gi" not in parts, bool(digits & parts), -len(l))
+        if score and (best_key is None or key > best_key):
+            best, best_key = l, key
+    return best
+
+
 def _first(names, patterns):
     for p in patterns:
         r = re.compile(p, re.I)
@@ -312,6 +384,7 @@ def port(elf_path, gamename=None, live=None):
         if required and not ok:
             missing_required.append(name)
     vt = mode_vtable(e) if "_ZTV4Mode" in e.syms else {}
+    hooks = rule_hooks(e)
     bad_slots = [k for k, v in vt.items() if v is None and k != "total_choreo"]
     # a Switch is a 104-byte global on GnR; take the size most of the numbered ones have
     sw_sizes = collections.Counter(s for n, (a, s) in e.syms.items() if re.match(r"^switch_\d+$", n))
@@ -334,7 +407,7 @@ def port(elf_path, gamename=None, live=None):
     shot_like = [s for s in switches if not s.startswith("dswitch_")]
     start = _first(shot_like, [r"target", r"ramp.*made", r"orbit", r"loop", r"scoop", r"lane"])
     stem = re.sub(r"^switch_", "", start)
-    lamp = next((l for l in lamps if l == "lp_" + stem), "") or _first([l for l in lamps if stem.split("_")[-1] in l], [r"."])
+    lamp = next((l for l in lamps if l == "lp_" + stem), "") or _lamp_for(stem, lamps)
     defaults = collections.OrderedDict([
         ("start", start),
         ("shots", " ".join([start] + [s for s in shot_like if s != start and re.search(r"ramp.*made|orbit.*hi", s)][:2])),
@@ -360,6 +433,8 @@ def port(elf_path, gamename=None, live=None):
         ("hold", hold(e) if "_ZTV4Mode" in e.syms else {"can_hold": False}),
         ("can_balls", all(sdk.get("balls", {}).values()) and bool(sdk.get("balls"))),
         ("can_coils", all(sdk.get("coils", {}).values()) and bool(sdk.get("coils"))),
+        ("hooks", hooks),
+        ("start_rules", start_rules(e, hooks)),
         ("stock", stock(e, live)),
         ("sdk", sdk),
         ("switch_object_bytes", sw_size),
@@ -474,6 +549,9 @@ def main(argv=None):
     print("  balls %s, coils %s: %d named, %d a mode may pulse, %d it may hold" % (
         "yes" if p["can_balls"] else "no", "yes" if p["can_coils"] else "no", len(cs),
         sum(c["pulse"] for c in cs), sum(c["hold"] for c in cs)))
+    sr = p["start_rules"]
+    print("  start rules: %s; start_on %s%s" % ("yes" if sr["can_start_on_rules"] else "switches and combos only",
+                                             " ".join(sr["start_on"]) or "-", "; start_score" if sr["start_score"] else ""))
     st = p["stock"]
     if st.get("classes"):
         cl = st["classes"]

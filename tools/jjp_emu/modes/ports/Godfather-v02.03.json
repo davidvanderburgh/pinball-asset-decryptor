@@ -38,6 +38,35 @@
  },
  "can_balls": true,
  "can_coils": true,
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
  "stock": {
   "can_change": true,
   "slots": {
@@ -194,7 +223,7 @@
  "defaults": {
   "start": "switch_u_target_1",
   "shots": "switch_u_target_1 switch_l_orbit_hi switch_l_ramp_made",
-  "lamps": "lp_map_1",
+  "lamps": "lp_upper_target_1",
   "font_title": "font_cash_out_mode",
   "font_value": "font_jobs_mode_total_1",
   "font_timer": "font_timer",

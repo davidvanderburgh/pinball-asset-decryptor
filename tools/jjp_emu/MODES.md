@@ -70,8 +70,15 @@ lamp_blink = 4
 |---|---|---|
 | `name` | file name | the mode's name (log, engine Mode name) |
 | `title` | `name` | the line drawn at the top of the mode panel. A game font may lack punctuation: GnR's Slash Solo font draws `-` and `!` as other marks |
-| `start` | (required) | switch(es) that start the mode, space separated |
-| `start_count` | 1 | start-switch hits needed to start it |
+| `start` | none | switch(es) that start the mode, space separated. A mode needs this or one of the start rules below |
+| `start_count` | 1 | starts needed: start-switch hits, or times a start rule fires (e.g. `start_after = gobstopper_mb` with `start_count = 2`: after the second Gobstopper multiball) |
+| `start_count_reset` | game | `game`: the count carries over between balls and resets at a new game; `ball`: it resets every ball |
+| `start_on` | none | start on a game event, any of: `ball_start`, `first_ball`, `last_ball`, `valid_playfield` (the first playfield switch of a ball), `ball_saved`, `extra_ball` (one awarded), `multiball_end` |
+| `start_after` | none | start when one of these game modes ends: the game's mode globals (e.g. `mtv_mode`) or Mode classes, or `any` |
+| `start_score` | none | start when the player up's score reaches this, once per player per game |
+| `start_combo` | none | two or more switches hit in this order, each within `combo_seconds` of the one before |
+| `combo_seconds` | 5 | whole seconds |
+| `start_once` | no | `ball` or `game`: start at most once a ball or once a game |
 | `shots` | `start` | switches that score while it runs |
 | `points` | 1000000 | per scoring shot, through the game's own Mode::score_and_total |
 | `seconds` | 20 | the game's own mode timer |
@@ -252,9 +259,14 @@ files.
 * A custom mode runs while a ball is in play and ends with the ball, as the
   game's own modes do (the game stops a mode's run proc at ball end). Start
   shots counted toward `start_count` carry over between balls and reset when a
-  new game starts.
+  new game starts (`start_count_reset = ball`: every ball).
 * One custom mode runs at a time. A start shot is refused (and logged as
   "yielded to <mode>") while a game mode or a multiball runs.
+* A start rule (`start_on`, `start_after`, `start_score`, `start_combo`) does not
+  start the mode on the spot: it raises the start, and the mode starts at the
+  first moment that ball when the ball is in play, no other custom mode runs and
+  nothing it yields to runs. A raised start not done by the end of the ball is
+  dropped (logged). Several rules on one mode: any of them starts it.
 * A multiball is more than one ball in play for half a second (the count blips).
 * The mode's lamps live in a lamp layer of their own, above the game's mode
   layers and below its award, tilt and diagnostic layers. When the mode ends,
@@ -332,7 +344,7 @@ can never reboot WSL. A proof restarts the game where the machine would reboot.
 runtime needs (`can_run_modes`). `modes/ports/` holds the report for every JJP
 image in the library and `modes/examples/` a starter folder for each title that
 can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`, and
-2026-11-16 on the five added since (PAD-1350):
+2026-11-16 on the five added since (PAD-1350, PAD-1364):
 
 | Image | Engine exported | Runs modes | Library loads |
 |---|---|---|---|
@@ -382,9 +394,18 @@ booting the one unchanged runtime - GnR and Wonka, built from different games -
 is what shows the SDK is generic, so these four are taken as runs-modes without a
 separate live run each; any one can be run the same way with its own key.
 
+**Dialed In!, The Hobbit and Toy Story 4** (PAD-1350, PAD-1364) are mapped from Wonka the same way:
+their Mode vtable slots, hold slots and 104-byte `Switch` match Wonka's, every required
+SDK piece is exported, and their starter folders pass `check --port`. Dialed In has
+84 named shot switches, 216 lamps, 1,286 sounds and 17 Mode classes; The Hobbit
+104, 131, 1,501 and 33; Toy Story 82, 670, 2,231 and 21. Dialed In has no lamp
+named for a target, so its starter lights none (add `lamps =` by hand).
+A starter's lamp is the one whose name shares the most words with the start
+switch (`switch_u_target_1` lights `lp_upper_target_1`), which since PAD-1364 also
+moved Elton John's, Godfather's and Pirates' starter lamps onto their start shots.
+
 "Library loads" means the one `jjpmodes.so` loads with every import bound
-(`LD_BIND_NOW`) on that image's own glibc, checked in a chroot of its root (2.34 on the first
-nine; the five added 2026-11-16 load the same way).
+(`LD_BIND_NOW`) on that image's own glibc, checked in a chroot of its root - 2.34 on all fourteen.
 
 ### Our modes run alone (PAD-1348)
 
@@ -417,10 +438,65 @@ starts this way. Pirates has only two Mode classes: most of what it runs are
 multiballs, which the gate holds. The CHAKA GnR LE image is a custom Guns N' Roses
 build, covered by Guns N' Roses.
 
+### Start rules from the game's hook lists (PAD-1354)
+
+The engine announces its events through about 70 `Hook<HookX_, Arg>::list`
+globals, each a linked list of the game's own callbacks it walks wherever that
+event happens. The runtime adds one node of its own at the end of each list a
+mode's rules need (the game's callbacks run first, ours never stops the walk),
+and starts raised modes on the game's own proc thread from its lamp-render,
+update and switch-dispatch lists. No game code is patched.
+
+| `start_on` word | Game hook list | Notes |
+|---|---|---|
+| `ball_start` | `HookBallStart_` | every ball, every player |
+| `first_ball` | `HookFirstBall_` | each player's first ball |
+| `last_ball` | `HookLastBall_` | the game runs it just before the player's last ball; the runtime also takes the game's balls-left count reaching 0 at ball start (either one, once a ball) |
+| `valid_playfield` | `HookValidPlayfield_` | the ball's first playfield switch |
+| `ball_saved` | `HookBallSave_` | the game's ball save |
+| `extra_ball` | `HookExtraBallAwarded_` | run from `ExtraBall::award()` |
+| `multiball_end` | `HookMultiballEnd_` | the game runs this list every time its ball count settles, one ball or several; the runtime takes it as a multiball's end only after a multiball (more than one ball for half a second) |
+
+`start_score` reads `score_get_player_score(game_flow_get_player_up())` as the
+game scores (`HookScore_`); `start_after` watches the game's mode objects (the ones
+`game_modes` yields to) for one that stops running; combos are counted in the
+shot wrappers.
+
+`jjpport.py` reports per title which hook lists it has (`hooks`, `start_rules` in
+its port report), and `mkjjpmodes.py check` refuses a `start_on` word a title's
+report says it lacks. Every title that runs modes has all twelve lists the rules
+use: Guns N' Roses (and CHAKA's GnR LE), Elton John, Godfather, Pirates, Wonka,
+Dialed In, The Hobbit and Toy Story, read off each title's own game program. The
+runtime loads with every import bound (`LD_BIND_NOW`) on the Guns N' Roses,
+Dialed In, Hobbit and Toy Story roots; Elton John, Godfather and Pirates use the
+same glibc 2.34 the build checks against.
+
+**Emulator, Wonka 03.03** (hidden, muted, `C:\tmp\PAD-1354\proof.sh`,
+`proof2.sh`, `proof5.sh`): 13 of our nodes went onto the game's lists. The game's
+first ball raised and started `start_on = ball_start` (on the proc thread, once
+the ball was in play); five 1,000,000 shots in it took the score past 4,000,000
+and raised `start_score = 4,000,000`, which waited for the running mode and
+started when it ended; ramps hit centre, left, centre started
+`start_combo = switch_ramp_left_made switch_ramp_center_made` (the wrong order did
+not); the game's Oompa hurry-up, started and then ended through its own `Mode::end` (a test-only switch, `JJP_MODS_TEST_END_SWITCH`; it did not time out inside 90 s on the rig), started `start_after = oompa_hurryup`; on
+ball 2 `start_once = game` refused the ball-start mode; on the last ball
+`start_on = last_ball` started (balls left 2, 1, 0). `first_ball` and
+`valid_playfield` were logged as the game ran them; `multiball_end` came at every
+drain with one ball and was turned down. `ball_saved` and `extra_ball` were not
+seen live: the hidden rig cannot drain a ball inside its save window or earn an
+extra ball. They are the same mechanism, one list each, and the port reports
+show both lists on every title.
+
 **Harry Potter and Sonic are built without the engine's exports**: their
 binaries export only C library and Allegro names. The runtime finds everything
 by name, and their code is ciphertext until the title's own key decrypts it,
 so nothing can be mapped without that key. Custom modes on them need their keys.
+Avatar is built the same way.
+
+**Wizard of Oz 08.02 is an older engine**: it exports 12,260 names, 120 shot
+switches, 149 lamps and 633 sounds, but has no `Mode` class at all, so the
+runtime has nothing to derive a mode from. Custom modes there need their own
+port of the runtime to that engine.
 
 ### Balls and coils on every title (PAD-1353)
 

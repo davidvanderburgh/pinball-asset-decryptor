@@ -10,6 +10,6 @@ complete_points = 5000000
 sound_start = se_SFX_JobMode_RampRule_ModeStart
 sound_shot = se_Fanfare_TurfwarMultiball_Jackpot
 sound_end = se_job_total
-lamps = lp_map_1
+lamps = lp_upper_target_1
 lamp_color = ff2000
 lamp_blink = 4

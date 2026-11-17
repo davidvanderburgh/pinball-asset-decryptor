@@ -30,3 +30,5 @@ installer/docker/root/** text eol=lf
 # PAD-1289: the Spike 3 proof rig's title files are sourced by bash and its mode files read on the rig: LF
 tools/spike3_emu/proofs/**/*.env text eol=lf
 tools/spike3_emu/proofs/**/*.cfg text eol=lf
+# JJP mode files and port reports go onto a Linux machine as they are (PAD-1350)
+tools/jjp_emu/modes/** text eol=lf

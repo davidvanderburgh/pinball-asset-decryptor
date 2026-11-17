@@ -44,6 +44,7 @@ from ..modes_check import GameCheckMixin
 from ..modes_sheet import RulesSheetMixin     # PAD-664
 from ..modes_how import HowItWorksMixin       # PAD-1064
 from ..modes_tryit import TryItMixin
+from ..modes_jjp import JjpModesMixin         # PAD-1350: the tab on a JJP game
 from .base import TabService, rpc
 
 SAVE_DELAY_MS = 500
@@ -202,8 +203,8 @@ def fix_chip(problems):
     return dict(PAGES)[pages[0]] + (" •" if len(pages) == 1 else " +%d •" % (len(pages) - 1))
 
 
-class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin, RulesSheetMixin,
-               HowItWorksMixin, TabService):
+class ModesTab(JjpModesMixin, TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, StockRewriteMixin,
+               RulesSheetMixin, HowItWorksMixin, TabService):
     ns = "modes"
     key = "Modes"
     label = "Modes"
@@ -543,6 +544,10 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
             self.ctx.loop.post(fn, *args)
 
     def _on_project_changed(self):
+        if self._jjp_on():
+            if getattr(self, "_visible", False):
+                self._post(self.jjp_refresh)        # the sound folder may follow the project
+            return
         if not getattr(self, "_visible", False) or not self._preview_on():
             return
         self._post(self._refresh_all)
@@ -554,7 +559,16 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         self.refresh_stock_rewrite()           # item 161: the rewrite rows
 
     # -- hooks ------------------------------------------------------------
+    def rail_needs(self):
+        # PAD-1350: a JJP title's modes need no project (they are the person's own folder)
+        return "none" if self._jjp_on() else None
+
     def on_manufacturer(self, mfr):
+        if self._jjp_on():
+            if getattr(self, "_visible", False):
+                self.jjp_refresh()
+            return
+        self.set(jjp={"on": False})
         self._hook_vars()
         if getattr(self, "_visible", False):
             self._refresh_all()
@@ -565,6 +579,9 @@ class ModesTab(TitleReadMixin, TryItMixin, GameCheckMixin, StockRemapMixin, Stoc
         (another tab or the person may have changed the modes folder); the open mode is
         reopened only when the project changed or it is gone, or the card the modes are for
         changed (PAD-434: a card saved into the same folder)."""
+        if self._jjp_on():
+            self.jjp_refresh()
+            return
         self._hook_vars()
         if self.project() != (self.get("project") or "") or (
                 self._slug is not None and not os.path.isfile(

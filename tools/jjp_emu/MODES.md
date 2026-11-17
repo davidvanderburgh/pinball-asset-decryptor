@@ -16,6 +16,25 @@ No game code is patched. How and why it works: `docs/plans/jjp_custom_modes.md`.
 | Change the game's OWN modes | `<name>.stock` files in the same folder (PAD-1351, below) |
 | A running game's mode globals and shot names | `jjpstock.py live` -> `modes/ports/<title>.live.json` |
 | Starter `.stock` file per title | `modes/stock_examples/<title>/` |
+| Make, check and build them in the app | the **Modes** tab on a JJP game (`webui/modes_jjp.py`, PAD-1350) |
+
+## In the app (PAD-1350)
+
+On a Jersey Jack game the app's **Modes** tab is this SDK's editor. It lists every
+title whose port report is in `modes/ports/`, the ones that can run modes first
+(the others greyed, with why). Picking one opens the person's own mode folder for
+it, kept in the app's settings folder (`jjp_modes/<title>/`) and seeded from the
+title's starter folder the first time. Each mode is a form over the keys below:
+every switch, lamp, lamp group, sound and font is picked from the port report's
+lists, so a mode cannot name something the game lacks; an empty key shows what it
+inherits (title.cfg, else the runtime default). Every edit is saved to the `.mode`
+file at once and checked with `check_modes` against the port report. **Hear
+sounds from** points at the title's extract folder: a game's `se_X` is the
+extract's `X.wav` (2,690 of Wonka's 2,723 match). **Build** runs `mkjjpmodes.py
+build` as root in the app's Linux on the stock ISO it finds beside the Select card
+pick (or `D:\Pinball\images\JJP`), with its scratch in
+`/var/tmp/pad_jjpmodes_work`; Cancel stops it inside Linux, where it unmounts and
+deletes its scratch.
 
 ## A mode folder
 
@@ -230,7 +249,10 @@ through a `ui.dat` the game verifies; the hot fix needs none of that.)
 **An install ISO.** `mkjjpmodes.py build --iso <stock>.iso --modes <folder>
 --out <new>.iso` (as root in WSL) writes the stock ISO again with the modes in
 its root pieces. Install it the way the stock ISO is installed (dongle in, and
-like any full install it resets scores and settings).
+like any full install it resets scores and settings). Left without `--so`,
+the build compiles the runtime from `jjpmodes.c` against the glibc in that ISO's
+own root (`buildmods.sh` with `JJP_MODS_LIBDIR`; gcc in the WSL distro), so
+nothing prebuilt can go stale (PAD-1350); `--so` takes one built already.
 
 **Proof, Wonka 03.03 in the emulator (hidden, muted, Wonka's own key), 2026-11-17.**
 *ISO:* `build` on the stock Wonka ISO (51 s, 3.2 GB, e2fsck clean); the rig
@@ -262,7 +284,8 @@ can never reboot WSL. A proof restarts the game where the machine would reboot.
 `jjpport.py` reports, per title, whether its engine has every piece the
 runtime needs (`can_run_modes`). `modes/ports/` holds the report for every JJP
 image in the library and `modes/examples/` a starter folder for each title that
-can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
+can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`, and
+2026-11-16 on the five added since (PAD-1350):
 
 | Image | Engine exported | Runs modes | Library loads |
 |---|---|---|---|
@@ -272,7 +295,12 @@ can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
 | Godfather 02.03 | 21,498 | yes | yes |
 | Wonka 03.03 | 18,717 | yes, emulator-proven | yes |
 | Pirates of the Caribbean 01.01 | 18,693 | yes | yes |
+| Dialed In! 02.02 | 17,044 | yes | yes |
+| The Hobbit 04.02 | 14,855 | yes | yes |
+| Toy Story 4 02.04 | 21,996 | yes | yes |
+| The Wizard of Oz 08.02 | 12,260 (older engine, no Mode class) | **no** | yes |
 | Harry Potter 01.26 | 233 (no engine) | **no** | yes |
+| Avatar 01.03 | 245 (no engine) | **no** | yes |
 | Sonic 00.925, 00.926 | 246 (no engine) | **no** | yes |
 
 "Runs modes" for a title other than GnR means its binary exports every engine
@@ -308,7 +336,8 @@ is what shows the SDK is generic, so these four are taken as runs-modes without 
 separate live run each; any one can be run the same way with its own key.
 
 "Library loads" means the one `jjpmodes.so` loads with every import bound
-(`LD_BIND_NOW`) on that image's own glibc - 2.34 on all nine.
+(`LD_BIND_NOW`) on that image's own glibc, checked in a chroot of its root (2.34 on the first
+nine; the five added 2026-11-16 load the same way).
 
 ### Our modes run alone (PAD-1348)
 

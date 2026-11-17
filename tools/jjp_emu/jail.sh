@@ -17,6 +17,22 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 mountpoint -q "$JJP_ROOT" || { echo "jail.sh: $JJP_ROOT is not mounted; run mount.sh first" >&2; exit 3; }
 
 mkdir -p "$JJP_JAIL"
+# A jail left over another image's root is never reused (PAD-1350: two tickets'
+# runs crossed while one ISO was still restoring; mount.sh switched the image, but
+# the jail kept the other image's root as its lower, and the run booted the wrong
+# game with no error).  Rebuilt when the rig is idle; refused while a game runs in
+# it, which is somebody else's run.
+if mountpoint -q "$JJP_JAIL"; then
+    LOWER=$(findmnt -n -o OPTIONS "$JJP_JAIL" | tr ',' '\n' | sed -n 's/^lowerdir=//p')
+    if [ -n "$LOWER" ] && [ "$LOWER" != "$JJP_ROOT" ]; then
+        if pgrep -x game >/dev/null; then
+            echo "jail.sh: the jail is over $LOWER (another image) and a game runs in it; stop that run first" >&2
+            exit 4
+        fi
+        echo "jail.sh: the jail was over $LOWER, not $JJP_ROOT; rebuilding it"
+        bash "$HERE/unjail.sh" >/dev/null 2>&1
+    fi
+fi
 mountpoint -q "$JJP_OVL" || { mkdir -p "$JJP_OVL"; mount -t tmpfs -o "size=$JJP_OVL_SIZE" tmpfs "$JJP_OVL"; }
 mkdir -p "$JJP_OVL/up" "$JJP_OVL/work"
 mountpoint -q "$JJP_JAIL" || mount -t overlay overlay \

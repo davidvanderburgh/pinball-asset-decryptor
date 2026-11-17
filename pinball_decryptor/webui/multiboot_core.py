@@ -1462,12 +1462,27 @@ def under_library(path, resolve=True):
     return False
 
 
-def default_output_path(primary, platform="stern"):
+def default_output_path(primary, platform="stern", project=""):
     """``<dir of primary>/multi/<primary basename>.multi.raw`` - and when the
     primary lives IN the library (David's stock cards do), the first folder
     above it that is not: ``D:/Pinball/images/Stern/spike2/x.raw`` ->
     ``D:/Pinball/multi/x.multi.raw``.  A default the tool would refuse is
-    no default.  A JJP install ISO ends ``.multi.iso`` the same way."""
+    no default.  A JJP install ISO ends ``.multi.iso`` the same way.
+
+    WITH A PROJECT OPEN the card is the PROJECT'S (PAD-1385):
+    ``<project>/multi/<project name>.multi.raw``.  Keyed on the primary, two
+    projects starting from the same stock card (a two-image Godzilla and a
+    three-image one) both defaulted to ``D:/Pinball/multi/godzilla_pro-...
+    .multi.raw`` and each build overwrote the other's card.  A BOF, Spooky or
+    DP output keeps the name its machine's updater needs (``output_name``);
+    only its folder moves into the project."""
+    be = backend_for(platform)
+    folder = os.path.normpath(project) if project else ""
+    pname = os.path.basename(folder.rstrip("/\\")) if folder else ""
+    if pname:
+        name = be.output_name(primary) if be.key in ("bof", "spooky", "dp") \
+            else be.output_name(pname + ".raw")
+        return os.path.join(os.path.abspath(folder), "multi", name)
     d = os.path.dirname(os.path.abspath(primary))
     while under_library(d):
         parent = os.path.dirname(d)
@@ -7335,6 +7350,9 @@ class MultibootPanel:
         self._drain_job = None
         self._loading = False           # editor <- row, not row <- editor
         self._out_auto_value = ""       # the last output path WE filled in
+        #: The open PROJECT's folder ("" for none), which the default card
+        #: path is named for (PAD-1385); the tab sets it to the app's.
+        self._project_fn = lambda: ""
         #: The last plan's report, which is what the size strip under the
         #: images table draws (see :meth:`_build_size`).  None means nobody
         #: has measured THIS list, and the strip says so rather than leaving
@@ -9641,7 +9659,12 @@ class MultibootPanel:
             return
         if not self._rows:
             return
-        new = default_output_path(self._rows[0].path, self._backend.key)
+        try:
+            project = self._project_fn() or ""
+        except Exception:                               # noqa: BLE001
+            project = ""
+        new = default_output_path(self._rows[0].path, self._backend.key,
+                                  project=project)
         self._out_auto_value = new
         self._out_var.set(new)
 

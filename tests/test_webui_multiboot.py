@@ -1824,3 +1824,35 @@ def test_every_step_of_a_run_is_routed_when_it_starts(tmp_path, monkeypatch):
         assert done == [(0, None)]
         assert [a[:3] for a in started] == [["wsl.exe", "-d", "PAD-Runtime"]] * 2
         assert len(asked) == 2
+
+
+def test_a_new_cards_default_path_is_the_open_projects(tmp_path):
+    """PAD-1385: inside a project the first image no longer names the card -
+    the project does, so two projects from one stock card never collide."""
+    from pinball_decryptor.core import project_file
+    proj = tmp_path / "Godzilla Heisei multi"
+    proj.mkdir()
+    project_file._write_maybe_hidden(project_file.anchor_path(str(proj)),
+                                     {"manufacturer": "stern"})
+    card = _raw(tmp_path, "godzilla_pro-1_16_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.window.write_assets_var.set, str(proj))
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        _add(w, card)
+        assert os.path.normpath(_panel(w)._out_var.get()) == os.path.normpath(
+            str(proj / "multi" / "Godzilla Heisei multi.multi.raw"))
+
+
+def test_a_plain_folder_keeps_the_card_beside_the_image(tmp_path):
+    """Not a project (no anchor): the default stays beside the first image."""
+    plain = tmp_path / "just a folder"
+    plain.mkdir()
+    card = _raw(tmp_path, "godzilla_pro-1_16_0.raw")
+    with web_app(tmp_path, mfr="stern") as w:
+        w.run(w.window.write_assets_var.set, str(plain))
+        w.call("ui.select_tab", "multiboot")
+        w.drain()
+        _add(w, card)
+        assert os.path.normpath(_panel(w)._out_var.get()) == os.path.normpath(
+            str(tmp_path / "multi" / "godzilla_pro-1_16_0.multi.raw"))

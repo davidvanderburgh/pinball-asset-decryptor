@@ -151,6 +151,7 @@ class MultibootTab(TabService):
             raise RuntimeError("its module did not load: %s"
                                % _PANEL_IMPORT_ERROR)
         panel = mbp.WebMultibootPanel(self)
+        panel._project_fn = self._project_for_card
         try:
             for key, attr in self._BOUND:
                 mbp.mirror(getattr(panel, attr), self.store, self.window,
@@ -324,6 +325,16 @@ class MultibootTab(TabService):
         started = bool(panel.load_card(path))
         self._done()
         return started
+
+    def _project_for_card(self):
+        """The open PROJECT's folder, which a new card's default path is
+        named for (PAD-1385), or "" when the folder is not a project."""
+        try:
+            folder = self.app._project_folder() or ""
+            from ...core import project_file
+            return folder if project_file.has_anchor(folder) else ""
+        except Exception:                               # noqa: BLE001
+            return ""
 
     def _project_key(self):
         try:

@@ -34,6 +34,31 @@ pkill -f 'jjpvol\.py' 2>/dev/null
 #    the null device, so the game plays into nothing, and the pulse cookie is
 #    not handed in.  The rest of this script is skipped - there is no path to
 #    prove.
+if [ "${PAD_AUDIO:-0}" = "0" ] && [ -n "${JJP_AUDIO_CAPTURE:-}" ]; then
+    # PAD-1352: still MUTED (the slave is the null device), but ALSA's file
+    # plugin writes what the game plays to JJP_AUDIO_CAPTURE (a path inside the
+    # jail, e.g. /jjpe/temp/pad_audio.wav) - the proof that a sound played,
+    # read from the file, never heard.  The null device is unpaced, so a plain
+    # file grows hundreds of MB a minute: make the path a FIFO read by
+    # jjpaudiocap.py, which paces the game to the wall clock and logs the
+    # level of chosen tones every 100 ms.
+    cat > "$JJP_JAIL/etc/asound.conf" <<ASOUND
+# Written by tools/jjp_emu/audio.sh with PAD_AUDIO=0 and JJP_AUDIO_CAPTURE - MUTED,
+# what the game plays is written to $JJP_AUDIO_CAPTURE.
+pcm.!default {
+    type file
+    slave.pcm "null"
+    file "$JJP_AUDIO_CAPTURE"
+    format "wav"
+}
+ctl.!default {
+    type null
+}
+ASOUND
+    rm -f "$JJP_JAIL$JJPEDIR/$(jjp_title)/allegro5.cfg" "$JJP_JAIL/root/.config/pulse/cookie"
+    echo "audio: muted, captured to $JJP_AUDIO_CAPTURE (in the jail)"
+    exit 0
+fi
 if [ "${PAD_AUDIO:-0}" = "0" ]; then
     cat > "$JJP_JAIL/etc/asound.conf" <<'ASOUND'
 # Written by tools/jjp_emu/audio.sh with PAD_AUDIO=0 - the game is MUTED:

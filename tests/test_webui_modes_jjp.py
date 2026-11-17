@@ -428,6 +428,31 @@ def test_a_live_report_is_not_a_title():
     assert len(labels) == len(set(labels))
 
 
+def test_a_modes_own_media_files_are_offered_and_check(tmp_path, preview_on):
+    """PAD-1352: files of the person's own in the mode folder are what the media keys pick from;
+    a sound key offers them beside the game's own sounds."""
+    with web_app(tmp_path, mfr="jjp") as w:
+        j = _open_wonka(w)
+        for fn in ("start.wav", "logo.png", "clip.webm", "notes.txt"):
+            open(os.path.join(j["folder"], fn), "wb").close()
+        w.call("modes.jjp_pick_title", "Wonka-v03.03")
+        j = _jjp(w)
+        names = j["names"]
+        assert names["sound_or_file"][0] == "start.wav" and "se_Fanfare_Jackpot" in names["sound_or_file"]
+        assert (names["sound_file"], names["picture_file"], names["video_file"]) == (["start.wav"], ["logo.png"], ["clip.webm"])
+        f = j["fields"]
+        assert f["sound_start"]["kind"] == "sound_or_file" and f["picture"]["kind"] == "picture_file"
+        assert f["video_loop"]["kind"] == "choice" and f["video_loop"]["choices"] == ["yes", "no"]
+        assert any(g["title"] == "Picture and video" for g in j["groups"])
+        w.call("modes.jjp_set", "sound_start", "start.wav")
+        w.call("modes.jjp_set", "picture", "logo.png")
+        w.call("modes.jjp_set", "video", "clip.webm")
+        w.call("modes.jjp_set", "video_at", "25 4 50 58")
+        assert _jjp(w)["check"]["ok"], _jjp(w)["check"]
+        w.call("modes.jjp_set", "video", "gone.webm")
+        assert any("no gone.webm in the mode folder" in p for p in _jjp(w)["check"]["problems"])
+
+
 def test_balls_and_coils_from_the_form(tmp_path, preview_on):
     """PAD-1353: the Balls and Coils groups write the runtime's keys, and a hold needs the title's coil_holds."""
     with web_app(tmp_path, mfr="jjp") as w:

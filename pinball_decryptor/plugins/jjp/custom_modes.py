@@ -58,7 +58,9 @@ FORM_GROUPS = (
     # PAD-1354: what else starts it, from the game's own events
     ("Starts", ("start_on", "start_after", "start_score", "start_combo", "combo_seconds",
                 "start_count_reset", "start_once")),
-    ("Sounds", ("sound_start", "sound_shot", "sound_complete", "sound_end")),
+    ("Sounds", ("sound_start", "sound_shot", "sound_complete", "sound_end", "sound_channel", "sound_like",
+                "music", "music_like")),
+    ("Picture and video", ("picture", "picture_at", "video", "video_at", "video_loop")),
     ("Lamps", ("lamps", "lamp_color", "lamp_blink")),
     ("Screen", ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
                 "panel_color", "panel")),
@@ -70,8 +72,10 @@ DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
     "lamp_color": "ffffff", "lamp_blink": "4", "title_color": "ffffff", "value_color": "ffdc00",
     "timer_color": "ffffff", "panel_color": "000000b0", "panel": "middle", "game_modes": "hold",
+    "hold_multiballs": "yes", "sound_channel": "fanfare", "picture_at": "0 0 100 100",
+    "video_at": "0 0 100 100", "video_loop": "yes",
     "coil_hold_on": "shots", "coil_holds": "off",
-    "hold_multiballs": "yes", "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
+    "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -83,6 +87,10 @@ LABELS = {
     "font_title": "Title font", "font_value": "Total font", "font_timer": "Timer font",
     "title_color": "Title color", "value_color": "Total color", "timer_color": "Timer color",
     "panel_color": "Panel color", "panel": "Panel place",
+    "sound_channel": "Channel for our sound files", "sound_like": "Our sounds set like",
+    "music": "Music (a file of ours)", "music_like": "Our music set like",
+    "picture": "Picture (a file of ours)", "picture_at": "Picture box (x y w h, % of screen)",
+    "video": "Video (a file of ours)", "video_at": "Video box (x y w h, % of screen)", "video_loop": "Video loops",
     "game": "Game", "ingame_state": "Ball-in-play state", "background_modes": "Always-on game modes",
     "multiball": "Multiball (balls in play, ball save s)", "multiball_on": "Multiball balls come on",
     "add_ball": "Add a ball on (switches, times)", "ball_save": "Ball save (s)",
@@ -354,8 +362,22 @@ def key_kind(key):
     return m.KEYS.get(key) or m.TITLE_KEYS.get(key)
 
 
-def names_for(port, kind):
-    """The names a picker offers for a key of *kind* (mkjjpmodes.KEYS' kinds)."""
+def media_files(folder, kind):
+    """The files of *kind* ('sound_file', 'picture_file', 'video_file') in a mode folder
+    (PAD-1352: a mode's own media sits beside its .mode files)."""
+    if not folder or not os.path.isdir(folder):
+        return []
+    return sorted(f for f in os.listdir(folder)
+                  if os.path.isfile(os.path.join(folder, f)) and mk().media_kind(f) == kind)
+
+
+def names_for(port, kind, folder=None):
+    """The names a picker offers for a key of *kind* (mkjjpmodes.KEYS' kinds); file kinds list
+    the mode folder's own files, and a sound key offers those as well as the game's sounds."""
+    if kind in ("sound_file", "picture_file", "video_file"):
+        return media_files(folder, kind)
+    if kind == "sound_or_file":
+        return media_files(folder, "sound_file") + list(port.get("sounds") or ())
     if kind == "switches":
         return list(port.get("switches") or ())
     if kind == "lamps":

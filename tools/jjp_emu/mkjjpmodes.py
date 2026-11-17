@@ -7,7 +7,8 @@ machine nothing preloads anything, so this writes an install ISO whose root
 carries the SDK and one guarded line in scripts/rungame.sh that loads it:
 
   /jjpe/gen1/padmodes/jjpmodes.so      the runtime (built by buildmods.sh)
-  /jjpe/gen1/padmodes/modes/           title.cfg + *.mode, as given
+  /jjpe/gen1/padmodes/modes/           title.cfg + *.mode + the modes' own sound,
+                                       picture and video files, as given
   /jjpe/gen1/padmodes/build.json       what was written, with sha256s
   /jjpe/gen1/scripts/padmodes.sh       exports LD_PRELOAD + JJP_MODS_DIR
   /jjpe/gen1/scripts/rungame.sh        + MODES_HOOK_LINES after runonce.sh
@@ -248,15 +249,14 @@ def stick(a):
             write(rel, data, binary=True)
             sums.append((hashlib.sha256(data).hexdigest(), rel))
         put(so, "padmodes/jjpmodes.so")
-        for fn in sorted(os.listdir(a.modes)):
-            p = os.path.join(a.modes, fn)
-            if os.path.isfile(p) and (fn.endswith(".mode") or fn == "title.cfg"):
-                put(p, "padmodes/modes/" + fn)
+        for fn, p in folder_files(a.modes):       # .mode, .stock, title.cfg and the modes' own media
+            put(p, "padmodes/modes/" + fn)
         manifest = collections.OrderedDict([
             ("tool", TOOL), ("version", VERSION), ("written", written), ("via", "usb hot fix"),
             ("game", game),
             ("modes", [collections.OrderedDict((k, m_.get(k, "")) for k in ("file", "name", "start", "seconds", "points"))
                        for m_ in modes]),
+            ("media", [fn for fn, _p in folder_files(a.modes) if media_kind(fn)]),
             ("so_sha256", sums[0][0]),
         ])
         bj = (json.dumps(manifest, indent=1) + "\n").encode()
@@ -285,13 +285,17 @@ def stick(a):
 KEYS = collections.OrderedDict([
     ("name", "text"), ("title", "text"), ("start", "switches"), ("start_count", "int"),
     ("shots", "switches"), ("points", "int"), ("seconds", "int"), ("complete", "int"),
-    ("complete_points", "int"), ("sound_start", "sound"), ("sound_shot", "sound"),
-    ("sound_end", "sound"), ("sound_complete", "sound"), ("lamps", "lamps"), ("lamp_color", "rgb"),
+    ("complete_points", "int"), ("sound_start", "sound_or_file"), ("sound_shot", "sound_or_file"),
+    ("sound_end", "sound_or_file"), ("sound_complete", "sound_or_file"),
+    ("sound_channel", ("fanfare", "fx", "speech", "music")), ("sound_like", "sound"), ("music_like", "sound"),
+    ("music", "sound_file"), ("picture", "picture_file"), ("picture_at", "box"),
+    ("video", "video_file"), ("video_at", "box"), ("video_loop", ("yes", "no")),
+    ("lamps", "lamps"), ("lamp_color", "rgb"),
     ("lamp_blink", "int"), ("font_title", "font"), ("font_value", "font"), ("font_timer", "font"),
     ("title_color", "rgba"), ("value_color", "rgba"), ("timer_color", "rgba"), ("panel_color", "rgba"),
     ("game_modes", ("hold", "pause", "end", "ignore")),
     ("hold_multiballs", ("yes", "no")), ("allow_game_modes", "text"),
-    ("panel", ("middle", "bottom", "top")),
+    ("panel", ("middle", "bottom", "top", "none")),
     # PAD-1353: balls and coils
     ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
     ("coil_start", "coil_pulse"), ("coil_shot", "coil_pulse"), ("coil_complete", "coil_pulse"),
@@ -330,7 +334,28 @@ STOCK_KEYS = collections.OrderedDict([
 ])
 MAX_MODES, MAX_LIST, MAX_SHOT_SWITCHES, MAX_STOCK = 24, 24, 96, 32
 MODE_FILES = (".mode", ".stock")
+#: a mode's own files (PAD-1352): what the runtime's Allegro / FFmpeg read, by extension
+MEDIA_EXTS = {
+    "sound_file": ("wav", "ogg", "flac", "opus"),
+    "picture_file": ("png", "jpg", "jpeg", "bmp", "tga"),
+    "video_file": ("webm", "mkv", "mp4"),
+}
 _INT = re.compile(r"^-?[0-9][0-9,_]*$")
+_BOX = re.compile(r"^\s*-?[0-9.]+%?([ ,\t]+-?[0-9.]+%?){3}\s*$")
+
+
+def media_kind(fn):
+    """'sound_file' / 'picture_file' / 'video_file' for a file name by its extension, or None."""
+    ext = fn.rsplit(".", 1)[-1].lower() if "." in fn else ""
+    for kind, exts in MEDIA_EXTS.items():
+        if ext in exts:
+            return kind
+    return None
+
+
+def is_sound_file(v):
+    """A sound_* value naming a file of the mode's own (as jjpmodes.c's is_media_file reads it)."""
+    return media_kind(v) == "sound_file"
 _HEX = re.compile(r"^#?[0-9A-Fa-f]+$")
 _DEC = re.compile(r"^[0-9]+(\.[0-9]+)?$")
 
@@ -411,6 +436,18 @@ def check_value(kind, v, port=None):
         return None if v in kind else "must be one of %s" % ", ".join(kind)
     if kind == "int":
         return None if _INT.match(v) else "must be a whole number"
+    if kind == "sound_or_file":
+        if is_sound_file(v):
+            return None
+        kind = "sound"
+    if kind in MEDIA_EXTS:
+        ok = media_kind(v) == kind and "/" not in v and "\\" not in v
+        return None if ok else "must be a file in the mode folder ending .%s" % ", .".join(MEDIA_EXTS[kind])
+    if kind == "box":
+        if not _BOX.match(v):
+            return "must be x y w h, percent of the screen"
+        w, h = [float(t.rstrip("%")) for t in re.split(r"[ ,\t]+", v.strip())][2:]
+        return None if w > 0 and h > 0 else "width and height must be above 0"
     if kind == "decimal":
         return None if _DEC.match(v) else "must be a number such as 2 or 1.5"
     if kind == "shotadds":
@@ -523,6 +560,11 @@ def check_modes(mode_dir, port=None):
             if kind in ("switches", "lamps") and len(_names(v)) > MAX_LIST:
                 problems.append("%s:%d: %s lists %d; the runtime takes %d" % (fn, n, k, len(_names(v)), MAX_LIST))
             m[k] = v
+        for k in ("sound_start", "sound_shot", "sound_end", "sound_complete", "music", "picture", "video"):
+            v = m.get(k, "")
+            if v and (k in ("music", "picture", "video") or is_sound_file(v)) and media_kind(v) \
+                    and "/" not in v and not os.path.isfile(os.path.join(mode_dir, v)):
+                problems.append("%s: %s = %s, but there is no %s in the mode folder" % (fn, k, v, v))
         if not any(m.get(k) for k in START_RULES):
             problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo):"
                             " the mode would never start" % fn)
@@ -611,6 +653,17 @@ def strip_modes_hook(text):
 
 
 # ============================================================================= build
+def folder_files(mode_dir):
+    """The files a mode folder carries to the machine: title.cfg, every .mode and .stock, and every
+    sound, picture and video file (a mode's own media, PAD-1352)."""
+    out = []
+    for fn in sorted(os.listdir(mode_dir)):
+        p = os.path.join(mode_dir, fn)
+        if os.path.isfile(p) and (fn.endswith(MODE_FILES) or fn == "title.cfg" or media_kind(fn)):
+            out.append((fn, p))
+    return out
+
+
 def sha256_file(p):
     h = hashlib.sha256()
     with open(p, "rb") as f:
@@ -665,10 +718,8 @@ def stage_modes(mj, raw, so_path, mode_dir, manifest):
             so_path = build_runtime(mnt + ROOT_LIBDIR, os.path.join(os.path.dirname(raw), "jjpmodes.so"))
         manifest["so_sha256"] = sha256_file(so_path)
         put(so_path, PADMODES_DIR + "/jjpmodes.so", 0o755)
-        for fn in sorted(os.listdir(mode_dir)):
-            p = os.path.join(mode_dir, fn)
-            if os.path.isfile(p) and (fn.endswith(MODE_FILES) or fn == "title.cfg"):
-                put(p, PADMODES_DIR + "/modes/" + fn, 0o644)
+        for fn, p in folder_files(mode_dir):
+            put(p, PADMODES_DIR + "/modes/" + fn, 0o644)
         put(PADMODES_SH.encode(), MODES_HOOK, 0o755)
         with open(rg, "r", encoding="utf-8", errors="surrogateescape") as f:
             text = f.read()
@@ -764,6 +815,7 @@ def build(a):
                            for m_ in modes if not m_.get("stock")]),
                 ("stock", [collections.OrderedDict((k, m_.get(k, "")) for k in ("file",) + tuple(STOCK_KEYS))
                            for m_ in modes if m_.get("stock")]),
+                ("media", [fn for fn, _p in folder_files(a.modes) if media_kind(fn)]),
                 # so_sha256: stage_modes records it - with no --so the runtime is built there,
                 # against the root's own glibc (PAD-1350)
             ])
@@ -774,10 +826,8 @@ def build(a):
             if os.path.isdir(iso_dir):
                 shutil.rmtree(iso_dir)
             os.makedirs(os.path.join(iso_dir, "modes"))
-            for fn in os.listdir(a.modes):
-                p = os.path.join(a.modes, fn)
-                if os.path.isfile(p) and (fn.endswith(MODE_FILES) or fn == "title.cfg"):
-                    shutil.copyfile(p, os.path.join(iso_dir, "modes", fn))
+            for fn, p in folder_files(a.modes):
+                shutil.copyfile(p, os.path.join(iso_dir, "modes", fn))
             manifest["staged"] = dict(staged)
             with open(os.path.join(iso_dir, "build.json"), "w") as f:
                 f.write(json.dumps(manifest, indent=1) + "\n")

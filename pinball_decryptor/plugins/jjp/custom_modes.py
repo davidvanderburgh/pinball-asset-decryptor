@@ -266,11 +266,13 @@ def mode_files(label):
 
 
 def list_modes(label):
-    """[{file, name, start}] in the runtime's load order (file name)."""
+    """[{file, name, start, starts}] in the runtime's load order (file name); *starts* says
+    everything that starts it, its switches and its start rules (PAD-1377)."""
     out = []
     for fn in mode_files(label):
         v = read_cfg(os.path.join(title_dir(label), fn))
-        out.append({"file": fn, "name": v.get("name") or fn[:-5], "start": v.get("start", "")})
+        out.append({"file": fn, "name": v.get("name") or fn[:-5], "start": v.get("start", ""),
+                    "starts": mk().start_text(v)})
     return out
 
 

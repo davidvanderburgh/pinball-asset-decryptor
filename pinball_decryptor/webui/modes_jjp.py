@@ -7,7 +7,8 @@ the tab is this instead (``JjpModesMixin``, the ``jjp`` key of the ``modes`` sta
 
 * a title list - every title's port report (plugins/jjp/custom_modes.titles), the nine that
   can run modes first, the ones that cannot greyed with why;
-* the title's modes, each a form: what starts it (the game's switches), the scoring shots,
+* the title's modes, each a form: what starts it (the game's switches, its events, a game
+  mode ending, a score, a combo), the scoring shots,
   points, timer, completion, the game's sounds (heard from an extract folder), its lamps and
   lamp groups, the game's fonts and colours for the panel - every name picked from the port
   report, so nothing can be misspelt;

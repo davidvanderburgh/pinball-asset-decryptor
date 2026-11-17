@@ -227,7 +227,7 @@ function ModeList({ j }) {
     <div class="hd"><span class="h2">Your modes</span><span class="muted small">${modes.length} of ${j.max}</span></div>
     <div class="bd">
       ${modes.map((m) => html`<div class=${cx("jjpm-mode", m.file === j.open && "on")} key=${m.file} onClick=${() => call("modes.jjp_open", m.file)}>
-        <div class="grow"><div>${m.name}</div><div class="small muted mono">${m.start || "no start switch"}</div></div></div>`)}
+        <div class="grow"><div>${m.name}</div><div class="small muted mono">${m.starts || m.start || "nothing starts it yet"}</div></div></div>`)}
       ${!modes.length ? html`<div class="small muted">No modes yet.</div>` : null}
       <div class="row wrap" style="gap:6px;margin-top:10px">
         <${Button} size="sm" kind="primary" icon="plus" disabled=${full} title=${full ? "A game takes 24 custom modes" : "A new mode, from this game's starter picks"} onClick=${() => call("modes.jjp_new", "New Mode")}>New mode<//>
@@ -370,7 +370,7 @@ export function JjpModes({ s }) {
                                     disabled: !t.can_run, group: t.can_run ? "Can run custom modes" : "Can't run custom modes" }));
   return html`<div class="page modes-page jjpm-page">
     <div class="pagehead"><div class="grow"><h1 class="h1">Modes</h1>
-      <p>Custom modes that run inside a Jersey Jack game: started by its switches, timed by its mode timer, scored by its scoring, lit with its lamps and drawn in its fonts. The game's own modes go on as they were.</p></div>
+      <p>Custom modes that run inside a Jersey Jack game: started by its switches or its own events, timed by its mode timer, scored by its scoring, lit with its lamps and drawn in its fonts. The game's own modes go on as they were.</p></div>
       <div class="actions"><${Select} value=${j.label} options=${opts} width=${360} onChange=${(v) => call("modes.jjp_pick_title", v)} title="The game" /></div>
     </div>
     ${!titles.length ? html`<${Empty} icon="modes" title="No games">No port reports were found in tools/jjp_emu/modes/ports.<//>` : null}

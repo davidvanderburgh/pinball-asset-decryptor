@@ -142,10 +142,30 @@ static inline void *vslot(void *obj, int off) { return *(void **)(*(char **)obj 
 #define POLICY_END 1
 #define POLICY_IGNORE 2
 #define POLICY_HOLD 3     /* PAD-1348, the default: the game's starts are refused while ours runs */
+#define MAX_GAME_MODES 256
+
+/* PAD-1354: start rules from the game's own hook lists.  Each start_on word is
+ * one Hook<...>::list the game runs at that moment; our node on it raises the
+ * start (see "start rules" below). */
+static const struct { const char *word, *hook; } EVENTS[] = {
+    { "ball_start", "HookBallStart_" }, { "first_ball", "HookFirstBall_" }, { "last_ball", "HookLastBall_" },
+    { "valid_playfield", "HookValidPlayfield_" }, { "ball_saved", "HookBallSave_" },
+    { "extra_ball", "HookExtraBallAwarded_" }, { "multiball_end", "HookMultiballEnd_" },
+};
+#define NEVENTS ((int)(sizeof EVENTS / sizeof *EVENTS))
+#define ONCE_NO 0
+#define ONCE_BALL 1
+#define ONCE_GAME 2
 
 typedef struct {
     char file[64], name[48], title[64];
     int nstart, start_sw[MAX_LIST], start_count;
+    unsigned start_on;                    /* bit i = EVENTS[i] (PAD-1354) */
+    char after[512];                      /* start_after: " name name " game mode globals / classes, or any */
+    unsigned char after_sel[MAX_GAME_MODES];
+    long long start_score;                /* the player up's score reaching it starts the mode */
+    int ncombo, combo_sw[MAX_LIST], combo_ms;
+    int count_reset_ball, start_once;     /* start_count_reset = ball; start_once = ONCE_* */
     int nshot, shot_sw[MAX_LIST];
     long long points, complete_points;
     int seconds, complete;
@@ -164,6 +184,11 @@ typedef struct {
     const char *volatile want_end;     /* an end asked for outside a proc, done in the mode's own tick */
     long long total;
     int running_seen;
+    int combo_pos; long combo_t;          /* combo: how far along, and when the last step was */
+    const char *pending;                  /* a start raised by a rule, waiting for a free moment in this ball */
+    long pending_log;
+    unsigned score_done;                  /* start_score: bit p = player p already started it this game */
+    int runs_ball, runs_game;
 } pm_t;
 
 static pm_t pms[MAX_MODES];
@@ -317,6 +342,28 @@ static void apply_kv(pm_t *m, const char *k, char *v)
             if (L + strlen(t) + 2 < room) snprintf(o + L, room - L, "%s ", t);
         }
     }
+    else if (!strcmp(k, "start_on")) {
+        m->start_on = 0;
+        for (char *t = strtok(buf, " ,\t"); t; t = strtok(NULL, " ,\t")) {
+            int e = 0;
+            while (e < NEVENTS && strcmp(EVENTS[e].word, t)) e++;
+            if (e < NEVENTS) m->start_on |= 1u << e;
+            else lg("%s: start_on %s is not a start event (ignored)", m->file, t);
+        }
+    }
+    else if (!strcmp(k, "start_after")) {
+        char *o = m->after; size_t room = sizeof m->after; o[0] = ' '; o[1] = 0;
+        for (char *t = strtok(buf, " ,\t"); t; t = strtok(NULL, " ,\t")) {
+            size_t L = strlen(o);
+            if (L + strlen(t) + 2 < room) snprintf(o + L, room - L, "%s ", t);
+        }
+    }
+    else if (!strcmp(k, "start_score")) m->start_score = num(v);
+    else if (!strcmp(k, "start_combo")) m->ncombo = parse_switches(buf, m->combo_sw);
+    else if (!strcmp(k, "combo_seconds")) m->combo_ms = (int)(num(v) * 1000);
+    else if (!strcmp(k, "start_count_reset")) m->count_reset_ball = !strcmp(v, "ball");
+    else if (!strcmp(k, "start_once"))
+        m->start_once = !strcmp(v, "ball") ? ONCE_BALL : !strcmp(v, "game") ? ONCE_GAME : ONCE_NO;
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : 0;
     else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
     else if (!strcmp(k, "game")) snprintf(game_name, sizeof game_name, "%s", v);
@@ -337,6 +384,7 @@ static void defaults(pm_t *m)
     m->title_rgba = 0xffffffff; m->value_rgba = 0xffdc00ff; m->timer_rgba = 0xffffffff;
     m->panel_rgba = 0x000000b0;
     m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;
+    m->combo_ms = 5000;
 }
 
 /* ---- .stock files: the game's own modes, changed (PAD-1351; see below) ----- */
@@ -469,14 +517,17 @@ static void load_modes(void)
         snprintf(path, sizeof path, "%s/%s", moddir, names[i]);
         load_file(m, path);
         if (!*m->name) { snprintf(m->name, sizeof m->name, "%.*s", (int)strlen(names[i]) - 5, names[i]); }
-        if (!*m->title) snprintf(m->title, sizeof m->title, "%s", m->name);
+        if (!*m->title) memcpy(m->title, m->name, sizeof m->name);   /* name[48] fits title[64] */
         if (!m->nshot) { m->nshot = m->nstart; memcpy(m->shot_sw, m->start_sw, sizeof m->shot_sw); }
         for (int s = 0; s < 4; s++) {
             void **slot = s == 0 ? &m->snd_start : s == 1 ? &m->snd_shot : s == 2 ? &m->snd_end : &m->snd_complete;
             *slot = sym(m->snd_names[s]);
             if (*m->snd_names[s] && !*slot) lg("%s: no sound called %s in this game", m->file, m->snd_names[s]);
         }
-        if (!m->nstart) { lg("%s: no start shot found; mode skipped", m->file); continue; }
+        if (!m->nstart && !m->start_on && !m->after[1] && m->start_score <= 0 && m->ncombo < 2) {
+            lg("%s: no start rule (start, start_on, start_after, start_score or start_combo); mode skipped", m->file);
+            continue;
+        }
         if (m->seconds < 1) m->seconds = 1;
         lg("mode %d \"%s\" (%s): %d start shot(s) x%d, %d scoring, %lld a shot, %d s, complete %d (+%lld), "
            "%d lamp(s), game modes=%s%s%s%s",
@@ -487,13 +538,20 @@ static void load_modes(void)
            m->game_modes == POLICY_HOLD ? (m->hold_multiballs ? " (multiballs too)" : " (not multiballs)") : "",
            m->game_modes == POLICY_HOLD && m->allow[1] ? ", allowed:" : "",
            m->game_modes == POLICY_HOLD && m->allow[1] ? m->allow : "");
+        if (m->start_on || m->after[1] || m->start_score > 0 || m->ncombo >= 2) {
+            char ev[256]; size_t o = 0; ev[0] = 0;
+            for (int e = 0; e < NEVENTS; e++)
+                if (m->start_on & (1u << e)) o += snprintf(ev + o, sizeof ev - o, " %s", EVENTS[e].word);
+            lg("  \"%s\" starts also on:%s%s%s%s%s%s", m->name, ev, m->after[1] ? " after" : "",
+               m->after[1] ? m->after : "", m->start_score > 0 ? " score" : "",
+               m->ncombo >= 2 ? " combo" : "", m->start_once ? (m->start_once == ONCE_BALL ? " (once a ball)" : " (once a game)") : "");
+        }
         npm++;
     }
     for (int i = 0; i < nn; i++) free(names[i]);
 }
 
 /* ---- the game's own modes (for yielding) ----------------------------------- */
-#define MAX_GAME_MODES 256
 static void *gmodes[MAX_GAME_MODES];
 static const char *gmode_sym[MAX_GAME_MODES];
 static unsigned char gmode_bg[MAX_GAME_MODES];
@@ -1057,6 +1115,7 @@ static void start_mode(pm_t *m, int idx)
 {
     if (!build_mode(m, idx)) return;
     m->hits = 0; m->total = 0; m->paused = 0; m->ended_logged = 0; m->running_seen = 1;
+    m->pending = NULL; m->combo_pos = 0; m->runs_ball++; m->runs_game++;
     ((vbool_t)vslot(m->mode, VT_START))(m->mode);
     ((vint_t)vslot(m->mode, VT_SET_TIME))(m->mode, m->seconds);
     /* The seconds field: 0x48 on GnR.  Check it, and find it if a title moved it. */
@@ -1495,20 +1554,283 @@ static void stock_frame(void)
 /* ---- game state ------------------------------------------------------------ */
 static int in_game(void) { return state_get && state_get() == ingame_state; }
 
-static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+/* Recursive: the game's score hook fires inside our own scoring (on_switch holds mu). */
+static pthread_mutex_t mu = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 static int in_list(const int *l, int n, int v) { for (int i = 0; i < n; i++) if (l[i] == v) return 1; return 0; }
 
 /* Test hook for the emulator, where no ball can reach a game mode's start:
  * JJP_MODS_TEST_GAMEMODE=<Mode global> JJP_MODS_TEST_SWITCH=<switch> starts
  * that game mode (its own Mode::start) when that switch is hit, so a proof run
  * can show a custom mode yielding to it.  Unset on a machine. */
-static void *test_gm; static int test_sw = -1;
+static void *test_gm; static int test_sw = -1, test_end_sw = -1;   /* JJP_MODS_TEST_END_SWITCH ends it (PAD-1354) */
 static void test_hook(int si)
 {
+    if (si == test_end_sw && test_gm && (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff)) {
+        lg("TEST: ending game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
+        ((vfn0_t)vslot(test_gm, VT_END))(test_gm);
+        return;
+    }
     if (si != test_sw || !test_gm) return;
     if (((vbool_t)vslot(test_gm, VT_IS_RUNNING))(test_gm) & 0xff) return;
     lg("TEST: starting game mode %s", getenv("JJP_MODS_TEST_GAMEMODE"));
     ((vbool_t)vslot(test_gm, VT_START))(test_gm);
+}
+
+/* ---- start rules (PAD-1354) ------------------------------------------------
+ * Besides its start switches a mode can start on a game event (start_on), when
+ * one of the game's modes ends (start_after), when the player up's score
+ * reaches a value (start_score), or on a combo of switches in order
+ * (start_combo).  The events are the game's own hook lists: each
+ * Hook<HookX_, Arg>::list global is a FastLinkedList, head {first, magic 0x45},
+ * node {int prio, desc *, name, next at +0x18}, desc {fn, name}.  The game
+ * walks it (node->desc->fn(arg), stopping at a return > 0) wherever that event
+ * happens.  We add one node of ours at the tail of each list a rule needs (an
+ * aligned pointer store; the game's own nodes run first), and our fn returns 0.
+ *
+ * A rule never starts a mode inside the hook: the ball-start hooks run before
+ * the ball is in play.  It raises the start (start_count counts it), and the
+ * start is done on the game's proc thread at the first moment this ball when
+ * no mode of ours runs and nothing the mode yields to does: our nodes on the
+ * game's lamp-render, update and switch-dispatch hooks are those moments.  A
+ * raised start not done by the ball's end is dropped. */
+typedef struct { void *fn; const char *name; } hdesc_t;
+typedef struct hnode { int prio, pad; hdesc_t *desc; const char *name; struct hnode *next; char room[64]; } hnode_t;
+#define MAX_HOOKS 16
+static hnode_t hnodes[MAX_HOOKS];
+static hdesc_t hdescs[MAX_HOOKS];
+static int nhooks;
+static unsigned events_hooked;          /* bit i = EVENTS[i] has our node */
+static unsigned want_events;            /* bit i = a loaded mode uses EVENTS[i] */
+static long long (*score_get)(int);     /* score_get_player_score(1..4) */
+static int (*player_up)(void);          /* game_flow_get_player_up(): 1..4 */
+static unsigned char gm_was[MAX_GAME_MODES];
+static const char *tick_via;
+static int rules_on;                    /* a loaded mode has a rule needing the hooks */
+
+static char hook_want[80]; static uintptr_t hook_found;
+static void cb_hook(const char *name, uintptr_t a, size_t sz)
+{
+    size_t L = strlen(hook_want), n = strlen(name);
+    if (!hook_found && sz == 16 && !strncmp(name, hook_want, L) && n > 6 && !strcmp(name + n - 6, "4listE")) hook_found = a;
+}
+/* Hook<HookX_, ...>::list by its hook name: the mangled name is
+ * _ZN4HookI<len>HookX_<arg>E4listE, the arg varying per hook. */
+static void **hook_list(const char *hook)
+{
+    snprintf(hook_want, sizeof hook_want, "_ZN4HookI%zu%s", strlen(hook), hook);
+    hook_found = 0;
+    walk_dynsym(cb_hook);
+    return (void **)hook_found;
+}
+static int hook_add(const char *hook, void *fn, const char *name)
+{
+    void **list = hook_list(hook);
+    if (!list) { lg("hooks: this game has no %s list", hook); return 0; }
+    int magic = *(int *)((char *)list + 8);
+    if (magic != 0x45) { lg("hooks: %s list not set up (magic %#x); not used", hook, magic); return 0; }
+    if (nhooks >= MAX_HOOKS) { lg("hooks: too many"); return 0; }
+    hdesc_t *d = &hdescs[nhooks]; hnode_t *n = &hnodes[nhooks]; nhooks++;
+    d->fn = fn; d->name = name;
+    n->prio = 0x7ffffff0; n->desc = d; n->name = name;
+    hnode_t **pp = (hnode_t **)list; int before = 0;
+    while (*pp && (*pp)->prio <= n->prio) { pp = &(*pp)->next; before++; }
+    n->next = *pp;
+    __atomic_store_n(pp, n, __ATOMIC_SEQ_CST);
+    lg("hooks: %s on %s (after the game's %d)", name, hook, before);
+    return 1;
+}
+
+static int game_busy_for(pm_t *m) { return m->game_modes != POLICY_IGNORE && game_busy() != NULL; }
+
+/* A rule raised a start: count it, and leave it for the tick to start. */
+static void raise_start(pm_t *m, const char *why)
+{
+    if ((m->start_once == ONCE_BALL && m->runs_ball) || (m->start_once == ONCE_GAME && m->runs_game)) {
+        lg("\"%s\" %s: already ran this %s (start_once)", m->name, why, m->start_once == ONCE_BALL ? "ball" : "game");
+        return;
+    }
+    if (running(m) || m->pending) return;
+    if (++m->count < m->start_count) { lg("\"%s\" %s: %d of %d", m->name, why, m->count, m->start_count); return; }
+    m->count = 0;
+    m->pending = why; m->pending_log = 0;
+    lg("\"%s\" start raised: %s", m->name, why);
+}
+
+static int ticking;
+static int multiball_seen;      /* a multiball ran since the last multiball_end (set in per_frame) */
+static void starts_tick(const char *via, int force)
+{
+    static long last;
+    if (!installed || !rules_on || ticking || (am_proc && !am_proc())) return;
+    long t = now_ms();
+    if (!force && t - last < 20) return;
+    last = t;
+    pthread_mutex_lock(&mu);
+    ticking = 1;
+    if (!tick_via) { tick_via = via; lg("start rules: ticking on the game's proc thread (first via %s)", via); }
+    int ig = in_game();
+    /* a game mode that ended */
+    for (int i = 0; i < ngm; i++) {
+        if (is_ours(gmodes[i])) continue;
+        int r = gm_running(i);
+        if (gm_was[i] && !r && ig)
+            for (int k = 0; k < npm; k++)
+                if (pms[k].after_sel[i]) {
+                    static char why[MAX_MODES][128];
+                    snprintf(why[k], sizeof why[k], "after %s ended", gmode_sym[i]);
+                    raise_start(&pms[k], why[k]);
+                }
+        gm_was[i] = (unsigned char)r;
+    }
+    /* the player up's score */
+    if (ig && score_get && player_up) {
+        int p = player_up();
+        if (p >= 1 && p <= 8) {
+            long long sc = score_get(p);
+            for (int k = 0; k < npm; k++) {
+                pm_t *m = &pms[k];
+                if (m->start_score > 0 && !(m->score_done & (1u << p)) && sc >= m->start_score) {
+                    m->score_done |= 1u << p;
+                    static char why[MAX_MODES][96];
+                    snprintf(why[k], sizeof why[k], "player %d score %lld reached %lld", p, sc, m->start_score);
+                    raise_start(m, why[k]);
+                }
+            }
+        }
+    }
+    /* do one raised start, if the moment is free */
+    if (ig && !any_ours_running())
+        for (int k = 0; k < npm; k++) {
+            pm_t *m = &pms[k];
+            if (!m->pending) continue;
+            if (game_busy_for(m)) {
+                if (t - m->pending_log > 5000) {
+                    lg("\"%s\" start (%s) waiting for %s", m->name, m->pending, game_busy());
+                    m->pending_log = t;
+                }
+                continue;
+            }
+            lg("\"%s\" starting: %s", m->name, m->pending);
+            start_mode(m, k);
+            break;
+        }
+    ticking = 0;
+    pthread_mutex_unlock(&mu);
+}
+
+static int last_ball_done = -1;  /* the ball last_ball was raised for (player * 1000 + balls completed) */
+static int (*done_balls)(int);   /* score_get_balls_completed(player) */
+static void on_event(int e)
+{
+    if (!installed) return;
+    if (!strcmp(EVENTS[e].word, "last_ball")) {
+        int p = player_up ? player_up() : 0, key = p * 1000 + (done_balls && p > 0 ? done_balls(p) : 0);
+        if (key == last_ball_done) return;      /* the game's hook and its count both said it */
+        last_ball_done = key;
+    }
+    pthread_mutex_lock(&mu);
+    {   /* which ball of which player: the evidence for first/last ball */
+        static int (*left)(void); static int r2;
+        if (!r2) { r2 = 1; left = (int (*)(void))sym("_Z34game_flow_get_balls_left_player_upv"); }
+        int p = player_up ? player_up() : 0;
+        if (p > 0 && done_balls) lg("event %s (player %d, %d ball(s) completed, %d left)", EVENTS[e].word, p,
+                                    done_balls(p), left ? left() : -1);
+        else lg("event %s", EVENTS[e].word);
+    }
+    /* The game runs its multiball-end hook whenever the ball count settles
+     * (MultiballDevice::system_stabilize_proc), one ball or not: it is a
+     * multiball's end only after a multiball (Wonka 03.03, PAD-1354). */
+    if (!strcmp(EVENTS[e].word, "multiball_end")) {
+        if (!multiball_seen) { lg("  (no multiball ran: not a multiball end)"); pthread_mutex_unlock(&mu); return; }
+        multiball_seen = 0;
+    }
+    for (int k = 0; k < npm; k++)
+        if (pms[k].start_on & (1u << e)) raise_start(&pms[k], EVENTS[e].word);
+    pthread_mutex_unlock(&mu);
+    starts_tick(EVENTS[e].hook, 1);
+}
+#define EV(i) static int ev##i(void *a) { (void)a; on_event(i); return 0; }
+EV(0) EV(1) EV(2) EV(3) EV(4) EV(5) EV(6)
+static int (*const ev_fns[])(void *) = { ev0, ev1, ev2, ev3, ev4, ev5, ev6 };
+_Static_assert(sizeof ev_fns / sizeof *ev_fns == NEVENTS, "one fn per start event");
+
+static int hk_game_start(void *a)
+{
+    (void)a;
+    if (!installed) return 0;
+    pthread_mutex_lock(&mu);
+    for (int k = 0; k < npm; k++) {
+        pm_t *m = &pms[k];
+        m->count = 0; m->score_done = 0; m->runs_game = 0; m->runs_ball = 0; m->pending = NULL; m->combo_pos = 0;
+    }
+    last_ball_done = -1;
+    lg("game start: start counts, score marks and runs reset");
+    pthread_mutex_unlock(&mu);
+    return 0;
+}
+static int hk_ball_start(void *a)
+{
+    (void)a;
+    if (!installed) return 0;
+    pthread_mutex_lock(&mu);
+    for (int k = 0; k < npm; k++) {
+        pm_t *m = &pms[k];
+        m->runs_ball = 0; m->combo_pos = 0;
+        if (m->count_reset_ball && m->count) { lg("\"%s\": start count %d reset (new ball)", m->name, m->count); m->count = 0; }
+    }
+    pthread_mutex_unlock(&mu);
+    /* last_ball: the game runs HookLastBall_ just before the last ball (Wonka
+     * 03.03: a list with no node of the game's own); its own count backs that up
+     * on a title that does not, the player up's last ball starting with no balls
+     * left (2, 1, 0 on a 3-ball game).  Either raises it once a ball. */
+    static int (*left)(void); static int r;
+    if (!r) { r = 1; left = (int (*)(void))sym("_Z34game_flow_get_balls_left_player_upv"); }
+    if (left && left() == 0 && (want_events & (1u << 2))) on_event(2);
+    return 0;
+}
+static int hk_score(void *a) { (void)a; starts_tick("HookScore_", 0); return 0; }
+static int hk_tick_lamp(void *a) { (void)a; starts_tick("HookLampRender_", 0); return 0; }
+static int hk_tick_update(void *a) { (void)a; starts_tick("HookUpdate_", 0); return 0; }
+static int hk_tick_sw(void *a) { (void)a; starts_tick("HookSwitchDispatchStart_", 0); return 0; }
+
+static void install_rules(void)
+{
+    for (int k = 0; k < npm; k++) {
+        pm_t *m = &pms[k];
+        if (m->start_on || m->after[1] || m->start_score > 0 || m->start_once || m->count_reset_ball || m->ncombo >= 2)
+            rules_on = 1;
+        if (!m->after[1]) continue;
+        int any = strstr(m->after, " any ") != NULL, hit = 0;
+        for (int i = 0; i < ngm; i++) {
+            char k1[160], k2[160];
+            snprintf(k1, sizeof k1, " %s ", gmode_sym[i]);
+            snprintf(k2, sizeof k2, " %s ", class_name(*(uintptr_t *)gmodes[i]));
+            if ((any && !gmode_bg[i]) || strstr(m->after, k1) || strstr(m->after, k2)) { m->after_sel[i] = 1; hit++; }
+        }
+        lg("\"%s\": start_after%smatches %d game mode(s)", m->name, m->after, hit);
+    }
+    if (!rules_on) { lg("start rules: switches only; no game hooks used"); return; }
+    score_get = (long long (*)(int))sym("_Z22score_get_player_scorei");
+    player_up = (int (*)(void))sym("_Z23game_flow_get_player_upv");
+    done_balls = (int (*)(int))sym("_Z25score_get_balls_completedi");
+    unsigned want = 0; int score = 0;
+    for (int k = 0; k < npm; k++) { want |= pms[k].start_on; if (pms[k].start_score > 0) score = 1; }
+    want_events = want;
+    hook_add("HookGameStart_", (void *)hk_game_start, "pad game start");
+    hook_add("HookBallStart_", (void *)hk_ball_start, "pad ball start");
+    for (int e = 0; e < NEVENTS; e++)
+        if (want & (1u << e)) {
+            if (hook_add(EVENTS[e].hook, (void *)ev_fns[e], EVENTS[e].word)) events_hooked |= 1u << e;
+            else lg("start rules: start_on %s cannot work on this title", EVENTS[e].word);
+        }
+    int ticks = hook_add("HookLampRender_", (void *)hk_tick_lamp, "pad tick")
+              + hook_add("HookUpdate_", (void *)hk_tick_update, "pad tick")
+              + hook_add("HookSwitchDispatchStart_", (void *)hk_tick_sw, "pad tick");
+    if (score) {
+        if (!score_get || !player_up) lg("start rules: start_score cannot work (no score_get_player_score/game_flow_get_player_up)");
+        else hook_add("HookScore_", (void *)hk_score, "pad score");
+    }
+    lg("start rules: %d hook(s) in, %d tick hook(s)%s", nhooks, ticks, ticks ? "" : " - FAIL: no moment to start a raised mode");
 }
 
 static void on_switch(int si)
@@ -1539,9 +1861,25 @@ static void on_switch(int si)
         pthread_mutex_unlock(&mu);
         return;
     }
+    /* combos: the switches in order, each within combo_seconds of the one before */
+    long t = now_ms();
+    for (int i = 0; i < npm; i++) {
+        pm_t *m = &pms[i];
+        if (m->ncombo < 2 || !in_list(m->combo_sw, m->ncombo, si)) continue;
+        if (m->combo_pos > 0 && t - m->combo_t > m->combo_ms) m->combo_pos = 0;
+        if (m->combo_sw[m->combo_pos] == si) m->combo_pos++;
+        else m->combo_pos = m->combo_sw[0] == si ? 1 : 0;
+        m->combo_t = t;
+        if (m->combo_pos >= m->ncombo) {
+            m->combo_pos = 0;
+            lg("\"%s\" combo made (%d switches)", m->name, m->ncombo);
+            raise_start(m, "combo");
+        } else if (m->combo_pos > 1) lg("\"%s\" combo %d of %d", m->name, m->combo_pos, m->ncombo);
+    }
     for (int i = 0; i < npm; i++) {
         pm_t *m = &pms[i];
         if (!in_list(m->start_sw, m->nstart, si)) continue;
+        if ((m->start_once == ONCE_BALL && m->runs_ball) || (m->start_once == ONCE_GAME && m->runs_game)) continue;
         const char *busy = m->game_modes == POLICY_IGNORE ? NULL : game_busy();
         if (busy) { lg("\"%s\" start shot %s: yielded to %s", m->name, wsw[si].name, busy); continue; }
         if (++m->count < m->start_count) {
@@ -1553,6 +1891,7 @@ static void on_switch(int si)
         break;
     }
     pthread_mutex_unlock(&mu);
+    starts_tick("switch", 1);      /* a combo may just have raised a start */
 }
 
 /* One wrapper per wrapped switch: the dispatch is called with the proc's arg
@@ -1622,7 +1961,11 @@ static void per_frame(void)
         if (!background_explicit) bg_snapshot_at = now_ms() + 2000;
     }
     if (!ig && was_ingame) {
-        for (int i = 0; i < npm; i++) end_mode(&pms[i], "ball end");
+        for (int i = 0; i < npm; i++) {
+            end_mode(&pms[i], "ball end");
+            if (pms[i].pending) { lg("\"%s\" start (%s) dropped: the ball ended first", pms[i].name, pms[i].pending); pms[i].pending = NULL; }
+        }
+        multiball_seen = 0;
         lg("ball over");
     }
     was_ingame = ig;
@@ -1642,6 +1985,7 @@ static void per_frame(void)
         int bip = balls_in_play ? balls_in_play() : -1;
         if (bip != last_bip) { lg("balls in play: %d", bip); last_bip = bip; }
         if (bip > 1 && !multiball_since) multiball_since = now_ms();
+        if (multiball_since && now_ms() - multiball_since >= 500) multiball_seen = 1;
         else if (bip <= 1) multiball_since = 0;
     }
     for (int i = 0; i < npm; i++) {
@@ -1792,9 +2136,11 @@ static void *installer(void *arg)
     if (!resolve_vtable() || !mode_ctor || !state_get) { lg("FAIL: this game's engine lacks what a mode needs"); return NULL; }
     find_game_modes();
     install_hold();
+    install_rules();
     if (getenv("JJP_MODS_TEST_GAMEMODE") && getenv("JJP_MODS_TEST_SWITCH")) {
         test_gm = sym(getenv("JJP_MODS_TEST_GAMEMODE"));
         test_sw = sw_index(getenv("JJP_MODS_TEST_SWITCH"));
+        if (getenv("JJP_MODS_TEST_END_SWITCH")) test_end_sw = sw_index(getenv("JJP_MODS_TEST_END_SWITCH"));
         lg("TEST hook: %s starts game mode %s (%p)", getenv("JJP_MODS_TEST_SWITCH"), getenv("JJP_MODS_TEST_GAMEMODE"), test_gm);
     }
     int hooked = 0;
@@ -1837,6 +2183,20 @@ static void selftest(void)
     load_modes();
     for (int i = 0; i < nwsw; i++)
         if (!wsw[i].obj) bad++;
+    unsigned want = 0; int score = 0, ticked = 0;
+    for (int i = 0; i < npm; i++) {
+        want |= pms[i].start_on;
+        if (pms[i].start_score > 0) score = 1;
+        if (pms[i].start_on || pms[i].after[1] || pms[i].start_score > 0 || pms[i].ncombo >= 2) ticked = 1;
+    }
+    for (int e = 0; e < NEVENTS; e++)
+        if ((want & (1u << e)) && !hook_list(EVENTS[e].hook)) { lg("SELFTEST start_on %s: no %s list", EVENTS[e].word, EVENTS[e].hook); bad++; }
+    if (ticked && !hook_list("HookLampRender_") && !hook_list("HookUpdate_") && !hook_list("HookSwitchDispatchStart_")) {
+        lg("SELFTEST no tick hook list: a raised start could never be done"); bad++;
+    }
+    if (score && (!sym("_Z22score_get_player_scorei") || !sym("_Z23game_flow_get_player_upv"))) {
+        lg("SELFTEST start_score: no score_get_player_score / game_flow_get_player_up"); bad++;
+    }
     for (int i = 0; i < npm; i++) {
         pm_t *m = &pms[i];
         for (int s2 = 0; s2 < 4; s2++)

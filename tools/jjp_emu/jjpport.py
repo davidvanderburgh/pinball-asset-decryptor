@@ -69,6 +69,49 @@ SLOTS = [
     ("total_choreo", "_ZN4Mode25hook_do_mode_total_choreoEv", 0, "start_choreo"),
 ]
 _BARE_SWITCH = re.compile(r"^d?switch_\d+$")
+#: PAD-1354 start rules: the game's Hook<...>::list globals the runtime puts a node on
+#: (start_on events, the per-ball / per-game resets, the score check and the moments a
+#: raised start is done in), and what each is for
+RULE_HOOKS = collections.OrderedDict([
+    ("HookBallStart_", "start_on ball_start; start_once / start_count_reset per ball"),
+    ("HookFirstBall_", "start_on first_ball"), ("HookLastBall_", "start_on last_ball"),
+    ("HookValidPlayfield_", "start_on valid_playfield"), ("HookBallSave_", "start_on ball_saved"),
+    ("HookExtraBallAwarded_", "start_on extra_ball"), ("HookMultiballEnd_", "start_on multiball_end"),
+    ("HookGameStart_", "start counts, score marks and start_once reset per game"),
+    ("HookScore_", "start_score checked as the game scores"),
+    ("HookLampRender_", "tick: a raised start is done here"), ("HookUpdate_", "tick"),
+    ("HookSwitchDispatchStart_", "tick"),
+])
+TICK_HOOKS = ("HookLampRender_", "HookUpdate_", "HookSwitchDispatchStart_")
+
+
+def rule_hooks(e):
+    """{hook: present} for RULE_HOOKS, found as jjpmodes.c hook_list finds them: a 16-byte
+    _ZN4HookI<len><hook>...E4listE object."""
+    out = collections.OrderedDict((h, False) for h in RULE_HOOKS)
+    for n, (a, s) in e.syms.items():
+        if not n.startswith("_ZN4HookI") or not n.endswith("4listE") or s != 16:
+            continue
+        m = re.match(r"_ZN4HookI(\d+)", n)
+        if m:
+            k = int(m.group(1))
+            h = n[m.end():m.end() + k]
+            if h in out:
+                out[h] = True
+    return out
+
+
+def start_rules(e, hooks):
+    score = "_Z22score_get_player_scorei" in e.syms and "_Z23game_flow_get_player_upv" in e.syms
+    tick = any(hooks.get(h) for h in TICK_HOOKS)
+    return collections.OrderedDict([
+        ("can_start_on_rules", tick),
+        ("start_on", [w for w, h in (("ball_start", "HookBallStart_"), ("first_ball", "HookFirstBall_"),
+                                     ("last_ball", "HookLastBall_"), ("valid_playfield", "HookValidPlayfield_"),
+                                     ("ball_saved", "HookBallSave_"), ("extra_ball", "HookExtraBallAwarded_"),
+                                     ("multiball_end", "HookMultiballEnd_")) if tick and hooks.get(h)]),
+        ("start_after", tick), ("start_combo", True), ("start_score", tick and score),
+    ])
 
 
 def mode_vtable(e):
@@ -300,6 +343,7 @@ def port(elf_path, gamename=None, live=None):
         if required and not ok:
             missing_required.append(name)
     vt = mode_vtable(e) if "_ZTV4Mode" in e.syms else {}
+    hooks = rule_hooks(e)
     bad_slots = [k for k, v in vt.items() if v is None and k != "total_choreo"]
     # a Switch is a 104-byte global on GnR; take the size most of the numbered ones have
     sw_sizes = collections.Counter(s for n, (a, s) in e.syms.items() if re.match(r"^switch_\d+$", n))
@@ -343,6 +387,8 @@ def port(elf_path, gamename=None, live=None):
         ("missing_required", missing_required),
         ("mode_vtable", vt),
         ("hold", hold(e) if "_ZTV4Mode" in e.syms else {"can_hold": False}),
+        ("hooks", hooks),
+        ("start_rules", start_rules(e, hooks)),
         ("stock", stock(e, live)),
         ("sdk", sdk),
         ("switch_object_bytes", sw_size),
@@ -431,6 +477,9 @@ def main(argv=None):
         ("; missing " + " ".join(p["missing_required"])) if p["missing_required"] else ""))
     print("  vtable %s" % " ".join("%s=%s" % (k, hex(v) if v is not None else "-") for k, v in p["mode_vtable"].items()))
     print("  defaults %s" % json.dumps(p["defaults"]))
+    sr = p["start_rules"]
+    print("  start rules: %s; start_on %s%s" % ("yes" if sr["can_start_on_rules"] else "switches and combos only",
+                                             " ".join(sr["start_on"]) or "-", "; start_score" if sr["start_score"] else ""))
     st = p["stock"]
     if st.get("classes"):
         cl = st["classes"]

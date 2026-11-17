@@ -31,7 +31,7 @@ nothing that isn't an exported function or a plain data pointer.
 | Points | `Mode::score_and_total` (+0x88) | Scores and totals like any game mode |
 | Sound | 2,342 `se_*` `SoundEffect` globals; `play` is virtual on GnR (`GnrSoundEffect`) | Find `play` in the object's vtable and call it |
 | Screen | Allegro 5 is a shared library the game imports | Interpose `al_flip_display` and draw on the backbuffer before the real flip |
-| Events | ~80 `Hook<HookX_, Arg>::list` globals (ball start, switch dispatch, score, render, keyboard, state change...). Each is a `FastLinkedList`: head `{first, magic 0x45}`, node `{prio, &desc, name, next}`, desc `{fn, name}` | Not used yet; this is how the SDK will take game events |
+| Events | ~80 `Hook<HookX_, Arg>::list` globals (ball start, switch dispatch, score, render, keyboard, state change...). Each is a `FastLinkedList`: head `{first, magic 0x45}`, node `{prio, &desc, name, next}`, desc `{fn, name}`; next is at +0x18, nodes sort by prio (the game's at 1, 1000, 2000), and the game walks a list as `node->desc->fn(arg)`, stopping at a return > 0 | Start rules (PAD-1354): one node of ours at the tail of each list a rule needs, returning 0. See "Start rules" below |
 
 `ModeManager::manager_list` is empty on GnR: modes are **named globals**
 (`slash_solo`, `song_mode`, 22 `SongMode_*` songs, `tour_mode1..3`,
@@ -184,6 +184,30 @@ What the engine showed (Wonka 03.03, read through `/proc/<pid>/mem` of a running
 * The shot table is ciphertext in the file and lives in an `rwxp` mapping of the game
   (the Envelope's), so it is found at run time by the handler pointers, never
   statically.
+
+## Start rules (PAD-1354)
+
+A mode can start on a game event (`start_on`: ball start, first / last ball, valid
+playfield, ball saved, extra ball, multiball end), when a game mode ends
+(`start_after`), at a score (`start_score`) or on a combo (`start_combo`), with
+`start_once` and `start_count_reset` to limit it. The events come from the game's
+own `Hook<...>::list` globals: one node of ours at the tail of each list, our fn
+returning 0. A rule only raises the start; it is done on the game's proc thread
+(our nodes on `HookLampRender_`, `HookUpdate_`, `HookSwitchDispatchStart_`) once
+the ball is in play and nothing the mode yields to runs. Learned on Wonka 03.03:
+
+* The lists are walked as `node->desc->fn(arg)`, next at +0x18, sorted by prio
+  (the game's own at 1, 1000, 2000); a return > 0 stops the walk.
+* `HookMultiballEnd_` runs every time the ball count settles
+  (`MultiballDevice::system_stabilize_proc`), one ball or not, so the runtime takes
+  it as a multiball's end only after a multiball.
+* `HookFirstBall_` is each player's first ball. `HookLastBall_` carries no game
+  callback on Wonka but the game does run it before the last ball; the balls-left
+  count (`game_flow_get_balls_left_player_up`, 2, 1, 0) backs it up.
+* The score hook fires inside our own scoring, so the runtime's lock is recursive.
+
+Proof and per-title table: `tools/jjp_emu/MODES.md`, "Start rules from the game's
+hook lists".
 
 ## Files (PAD-1335 proof, superseded by the SDK above)
 

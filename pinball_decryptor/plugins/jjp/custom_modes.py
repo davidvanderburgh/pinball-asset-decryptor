@@ -55,6 +55,9 @@ MAX_MODES = 24
 FORM_GROUPS = (
     ("Mode", ("name", "title", "start", "start_count", "shots", "points", "seconds", "complete",
               "complete_points", "game_modes", "hold_multiballs", "allow_game_modes")),
+    # PAD-1354: what else starts it, from the game's own events
+    ("Starts", ("start_on", "start_after", "start_score", "start_combo", "combo_seconds",
+                "start_count_reset", "start_once")),
     ("Sounds", ("sound_start", "sound_shot", "sound_complete", "sound_end")),
     ("Lamps", ("lamps", "lamp_color", "lamp_blink")),
     ("Screen", ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
@@ -65,7 +68,7 @@ DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
     "lamp_color": "ffffff", "lamp_blink": "4", "title_color": "ffffff", "value_color": "ffdc00",
     "timer_color": "ffffff", "panel_color": "000000b0", "panel": "middle", "game_modes": "hold",
-    "hold_multiballs": "yes",
+    "hold_multiballs": "yes", "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -78,6 +81,10 @@ LABELS = {
     "title_color": "Title colour", "value_color": "Total colour", "timer_color": "Timer colour",
     "panel_color": "Panel colour", "panel": "Panel place",
     "game": "Game", "ingame_state": "Ball-in-play state", "background_modes": "Always-on game modes",
+    "start_on": "Starts on a game event", "start_after": "Starts after a game mode ends",
+    "start_score": "Starts at a score", "start_combo": "Starts on a combo (in order)",
+    "combo_seconds": "Combo seconds between shots", "start_count_reset": "Start count resets every",
+    "start_once": "Starts at most once a",
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
@@ -349,6 +356,13 @@ def names_for(port, kind):
         return list(port.get("sounds") or ())
     if kind == "font":
         return list(port.get("fonts") or ())
+    if kind == "events":            # start_on: the events this title's hook lists offer
+        sr = port.get("start_rules") or {}
+        return list(sr.get("start_on") or ()) if sr else list(mk().START_EVENTS)
+    if kind == "after":             # start_after: the game's mode globals and classes, or any
+        st = port.get("stock") or {}
+        return ["any"] + sorted(st.get("objects") or ()) + sorted(
+            set(st.get("classes") or ()) | set(port.get("mode_classes") or ()))
     return []
 
 

@@ -113,6 +113,8 @@ function Row({ k, prefix = "", meta, value, j, have }) {
   let input;
   if (m.kind === "switches") input = html`<${NamePick} k=${key} value=${value} names=${names.switches} multi title="The game's switches" />`;
   else if (m.kind === "lamps") input = html`<${NamePick} k=${key} value=${value} names=${names.lamps} multi title="The game's lamps (lp_) and lamp groups (ls_)" />`;
+  else if (m.kind === "events") input = html`<${NamePick} k=${key} value=${value} names=${names.events || []} multi title="The game's own events (its hook lists)" />`;
+  else if (m.kind === "after") input = html`<${NamePick} k=${key} value=${value} names=${names.after || []} multi title="The game's own modes (a global or a class), or any" />`;
   else if (m.kind === "sound") input = html`<${NamePick} k=${key} value=${value} names=${names.sound} sound have=${have} title="The game's sounds" inherit=${inherit} />`;
   else if (m.kind === "font") input = html`<${NamePick} k=${key} value=${value} names=${names.font} title="The game's fonts" inherit=${inherit} />`;
   else if (m.kind === "rgb" || m.kind === "rgba") input = html`<${Colour} k=${key} value=${value} alpha=${m.kind === "rgba"} dflt=${inherit || m.default} />`;

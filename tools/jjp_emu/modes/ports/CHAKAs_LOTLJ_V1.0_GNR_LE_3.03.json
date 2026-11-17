@@ -16,6 +16,35 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hooks": {
+  "HookBallStart_": true,
+  "HookFirstBall_": true,
+  "HookLastBall_": true,
+  "HookValidPlayfield_": true,
+  "HookBallSave_": true,
+  "HookExtraBallAwarded_": true,
+  "HookMultiballEnd_": true,
+  "HookGameStart_": true,
+  "HookScore_": true,
+  "HookLampRender_": true,
+  "HookUpdate_": true,
+  "HookSwitchDispatchStart_": true
+ },
+ "start_rules": {
+  "can_start_on_rules": true,
+  "start_on": [
+   "ball_start",
+   "first_ball",
+   "last_ball",
+   "valid_playfield",
+   "ball_saved",
+   "extra_ball",
+   "multiball_end"
+  ],
+  "start_after": true,
+  "start_combo": true,
+  "start_score": true
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

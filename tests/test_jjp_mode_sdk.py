@@ -2,6 +2,7 @@
 rungame.sh hook in mkjjpmodes.py, the runtime's keys staying in step with the
 checker's, and jjpport.py's Mode vtable resolution (folded virtuals)."""
 import importlib.util
+import json
 import os
 import re
 import struct
@@ -104,10 +105,97 @@ def test_check_passes_a_good_folder_and_names_every_problem(tmp_path):
     assert "unknown key wobble" in text
 
 
-def test_check_wants_a_start_switch(tmp_path):
+def test_check_wants_a_start_rule(tmp_path):
     mm = _load("mkjjpmodes")
     _, problems = mm.check_modes(_folder(tmp_path, {"a.mode": "name = A\n"}))
-    assert problems == ["a.mode: no start = <switch> (the mode would never start)"]
+    assert problems == ["a.mode: no start rule (start, start_on, start_after, start_score or start_combo):"
+                        " the mode would never start"]
+
+
+def test_start_rules_alone_start_a_mode(tmp_path):
+    """PAD-1354: a mode may start on a game event, a game mode ending, a score or a combo
+    instead of a start switch."""
+    mm = _load("mkjjpmodes")
+    port = dict(PORT, hooks={h: True for h in mm.START_EVENTS.values()})
+    d = _folder(tmp_path, {
+        "1.mode": "start_on = ball_start multiball_end\nshots = switch_target_jam\nstart_once = ball\n",
+        "2.mode": "start_after = any\nshots = switch_target_jam\nstart_count = 2\nstart_count_reset = ball\n",
+        "3.mode": "start_score = 50,000,000\nshots = switch_target_jam\n",
+        "4.mode": "start_combo = switch_target_jam switch_orbit_left_hi\ncombo_seconds = 4\n",
+    })
+    _, problems = mm.check_modes(d, port)
+    assert problems == []
+
+
+def test_start_rule_problems_are_named(tmp_path):
+    mm = _load("mkjjpmodes")
+    port = dict(PORT, hooks=dict({h: True for h in mm.START_EVENTS.values()}, HookLastBall_=False))
+    d = _folder(tmp_path, {
+        "1.mode": "start_on = ball_start tilt\n",
+        "2.mode": "start_on = last_ball\n",
+        "3.mode": "start_combo = switch_target_jam\n",
+        "4.mode": "start_score = 0\n",
+        "5.mode": "start = switch_target_jam\nstart_once = always\nstart_count_reset = never\n",
+    })
+    text = "\n".join(mm.check_modes(d, port)[1])
+    assert "1.mode:1: start_on tilt: not a start event" in text
+    assert "2.mode:1: start_on last_ball: Guns N' Roses has no HookLastBall_ hook" in text
+    assert "3.mode: start_combo needs two switches or more" in text
+    assert "4.mode: start_score must be above 0" in text
+    assert "start_once must be one of no, ball, game" in text
+    assert "start_count_reset must be one of game, ball" in text
+
+
+def test_runtime_start_events_match_the_checker_and_the_port_report():
+    """The start_on words and their hook lists are one table in jjpmodes.c (EVENTS),
+    mkjjpmodes.py (START_EVENTS) and jjpport.py (RULE_HOOKS)."""
+    mm, jp = _load("mkjjpmodes"), _load("jjpport")
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    body = src[src.index("EVENTS[] = {"):src.index("#define NEVENTS")]
+    runtime = re.findall(r'\{ "([a-z_]+)", "(Hook[A-Za-z]+_)" \}', body)
+    assert runtime == list(mm.START_EVENTS.items())
+    assert set(h for _, h in runtime) <= set(jp.RULE_HOOKS)
+    for h in ("HookGameStart_", "HookBallStart_", "HookScore_") + jp.TICK_HOOKS:
+        assert 'hook_add("%s"' % h in src
+
+
+def test_port_finds_hook_lists_by_their_mangled_names():
+    """jjpport.rule_hooks reads Hook<HookX_, Arg>::list globals the way jjpmodes.c
+    hook_list finds them: _ZN4HookI<len><name>...E4listE, 16 bytes."""
+    jp = _load("jjpport")
+
+    class E:
+        syms = {"_ZN4HookI14HookBallStart_vE4listE": (0x10, 16),
+                "_ZN4HookI10HookScore_P17hook_score_data_tE4listE": (0x20, 16),
+                "_ZN4HookI14HookBallStart_vE11master_linkE": (0x30, 24),
+                "_ZN4HookI15HookLampRender_vE4listE": (0x40, 8),
+                "_Z22score_get_player_scorei": (0x50, 55), "_Z23game_flow_get_player_upv": (0x60, 59)}
+    h = jp.rule_hooks(E())
+    assert h["HookBallStart_"] and h["HookScore_"] and not h["HookLampRender_"] and not h["HookLastBall_"]
+    sr = jp.start_rules(E(), h)
+    assert sr["can_start_on_rules"] is False and sr["start_on"] == [] and sr["start_combo"] is True
+    h["HookUpdate_"] = True
+    sr = jp.start_rules(E(), h)
+    assert sr["can_start_on_rules"] and sr["start_on"] == ["ball_start"] and sr["start_score"]
+
+
+def test_every_title_that_runs_modes_offers_the_start_rules():
+    """The shipped port reports: every title that can run modes has every hook list
+    (read off each title's own game binary, PAD-1354)."""
+    jp = _load("jjpport")
+    ports = os.path.join(RIG, "modes", "ports")
+    seen = 0
+    for fn in sorted(os.listdir(ports)):
+        if not fn.endswith(".json") or fn.endswith(".live.json"):     # live mode maps (jjpstock.py)
+            continue
+        with open(os.path.join(ports, fn)) as f:
+            p = json.load(f)
+        if not p["can_run_modes"]:
+            continue
+        seen += 1
+        assert p["start_rules"]["can_start_on_rules"], fn
+        assert all(p["hooks"][h] for h in jp.RULE_HOOKS), fn
+    assert seen >= 6
 
 
 def test_every_key_the_runtime_reads_is_a_key_the_checker_knows():

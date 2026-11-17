@@ -1064,7 +1064,8 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, ResetMixin, TeamMixin
         try:
             from ..help_content import GENERAL_CONTENT, sections_for
             from ..tips_render import render, slug
-            sections = [(tr(t), render(b, tr=tr), slug(t)) for t, b in sections_for(key)]
+            sections = [(tr(t), render(b, tr=tr), slug(t))
+                        for t, b in sections_for(key, getattr(self.window, "current_mfr", None))]
             general = [(tr(t), render(b, tr=tr), slug(t)) for t, b in GENERAL_CONTENT]
         except Exception:                               # noqa: BLE001
             log.exception("tips content")

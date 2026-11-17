@@ -189,3 +189,19 @@ def test_hard_linked_source_is_read_and_builds_without_ssh(card, tmp_path):
     assert S.inspect_image(str(out))['enabled']
     with pytest.raises(ExtrasError, match='hard-linked'):
         S.guard_flash(str(project), str(card))
+
+
+def test_card_text_files_get_lf_on_any_host(tmp_path, monkeypatch):
+    # PR #38 review: a Windows checkout gave the start script CRLF and a
+    # text-mode write gave authorized_keys CRLF; the card's sh cannot run
+    # "#!/bin/sh\r" and keys read back never matched, so Flash refused.
+    res = tmp_path / 'res'; res.mkdir()
+    (res / 'sshd').write_bytes(b'#!/bin/sh\r\nset -e\r\n')
+    monkeypatch.setattr(S, 'RESOURCES', res)
+    l = S.layout('stern-spike2')
+    keys = key() + '\n'
+    assert S.payload_bytes('sshd', {}, l) == b'#!/bin/sh\nset -e\n'
+    got = S.payload_bytes('authorized_keys', {'public_keys': keys.replace('\n', '\r\n')}, l)
+    assert b'\r' not in got and got == keys.encode()
+    shipped = (Path(S.__file__).parents[1] / 'resources' / 'ssh' / 'sshd').read_bytes()
+    assert shipped.startswith(b'#!/bin/sh\n'), 'checkout gave the start script CRLF: see .gitattributes'

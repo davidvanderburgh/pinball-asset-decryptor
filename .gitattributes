@@ -32,3 +32,9 @@ tools/spike3_emu/proofs/**/*.env text eol=lf
 tools/spike3_emu/proofs/**/*.cfg text eol=lf
 # JJP mode files and port reports go onto a Linux machine as they are (PAD-1350)
 tools/jjp_emu/modes/** text eol=lf
+
+# PR #38: the card start script runs under the card's /bin/sh (a CR after
+# #!/bin/sh stops it), and the ARM payloads are pinned by SHA-256.
+pinball_decryptor/resources/ssh/sshd text eol=lf
+pinball_decryptor/resources/ssh/armv7/** binary
+pinball_decryptor/resources/ssh/aarch64/** binary

@@ -291,6 +291,25 @@ def _verify_tree(reader, config, payload, platform='stern-spike2'):
 
 
 
+def payload_bytes(name, config, l):
+    """The exact bytes one card file gets.
+
+    Text goes on the card with LF line ends whatever the host: a Windows
+    checkout (core.autocrlf) gives the start script CRLF, and text-mode
+    writes there turn every key line's end into CRLF.  The card's /bin/sh
+    cannot run "#!/bin/sh\\r", and keys read back with CR never match the
+    project's, so Flash refused the image it had just built (PR #38 review).
+    """
+    if name == 'authorized_keys':
+        return config['public_keys'].replace('\r\n', '\n').encode('utf-8')
+    if name == 'sshd':
+        return (RESOURCES / 'sshd').read_bytes().replace(b'\r\n', b'\n')
+    data = (RESOURCES / l['arch'] / name).read_bytes()
+    if hashlib.sha256(data).hexdigest() != l['hashes'][name]:
+        raise ExtrasError('The bundled SSH payload is missing or has an unexpected hash.')
+    return data
+
+
 def prepare_rootfs(part, work, config, platform='stern-spike2', cancel=None):
     """Modify/check only a scratch plaintext ext filesystem; never a card."""
     part, work = Path(part), Path(work)
@@ -322,15 +341,7 @@ def prepare_rootfs(part, work, config, platform='stern-spike2', cancel=None):
         if config['enabled']:
             for name, dest_path in files.items():
                 staged = work / name
-                if name == 'authorized_keys':
-                    staged.write_text(config['public_keys'], encoding='utf-8')
-                elif name == 'sshd':
-                    shutil.copyfile(RESOURCES / 'sshd', staged)
-                else:
-                    data = (RESOURCES / l['arch'] / name).read_bytes()
-                    if hashlib.sha256(data).hexdigest() != l['hashes'][name]:
-                        raise ExtrasError('The bundled SSH payload is missing or has an unexpected hash.')
-                    staged.write_bytes(data)
+                staged.write_bytes(payload_bytes(name, config, l))
                 payload[name] = staged
                 if _node(r, dest_path) is not None:
                     commands.append(f'rm {dest_path}')

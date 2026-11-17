@@ -1,0 +1,15 @@
+# A first custom mode for ToyStory-v02.04.  Every key: tools/jjp_emu/MODES.md
+name = PAD Mode
+title = PAD MODE
+start = switch_jet_target
+shots = switch_jet_target switch_left_ramp_diverted_made switch_right_ramp_made
+points = 1000000
+seconds = 20
+complete = 5
+complete_points = 5000000
+sound_start = se_Fanfare_WheelAward_Gabby_Start
+sound_shot = se_Fanfare_TAC_Jackpot
+sound_end = se_SFX_Carnival_Darts_BalloonPop1_Cheer
+lamps = lp_jet_top
+lamp_color = ff2000
+lamp_blink = 4

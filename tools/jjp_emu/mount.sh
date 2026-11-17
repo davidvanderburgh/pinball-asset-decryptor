@@ -55,6 +55,27 @@ mkdir -p "$BASE"
 # (core/space_keeper.py, PAD-613) removes an image unused for 30 days.
 touch "$BASE/.used"
 
+# A cache is the restore of one ISO FILE.  An ISO written again under the same
+# name - the Modes tab's Build writes <title>.modes.iso over the last one - is
+# newer than its restore, and booting the old restore would run the old modes
+# with no error (PAD-1350).  Such a cache is dropped and restored again; never
+# while a game runs (it may be on it).
+if [ -s "$BASE/sda3.raw" ] && [ "$ISO" -nt "$BASE/sda3.raw" ]; then
+    if pgrep -x game >/dev/null; then
+        echo "mount.sh: $ISO was written after its cached restore, and a game is running; stop it first" >&2
+        exit 6
+    fi
+    echo "the ISO is newer than its cached restore: restoring it again"
+    if [ "$(cat "$JJP_CURRENT" 2>/dev/null)" = "$BASE" ]; then
+        bash "$HERE/stop.sh" >/dev/null 2>&1
+        bash "$HERE/unjail.sh" >/dev/null 2>&1
+    fi
+    for m in "$BASE/root" "$BASE/rootb" "$BASE/boot" "$BASE/perm" "$BASE/iso"; do
+        mountpoint -q "$m" && umount -l "$m" 2>/dev/null
+    done
+    rm -f "$BASE"/sda*.raw
+fi
+
 # ROOT ONLY (2026-09-15).  The JJP menu program links against a handful of the
 # root's libraries and needs nothing else of the image, and it used to get them
 # by calling this script whole: a loaded 13 GB multi-boot ISO restored sda3,

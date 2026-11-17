@@ -1,0 +1,12 @@
+# A first custom mode for DialedIn-v02.02.  Every key: tools/jjp_emu/MODES.md
+name = PAD Mode
+title = PAD MODE
+start = switch_target_away
+shots = switch_target_away switch_ramp_left_made_far switch_ramp_left_made_near
+points = 1000000
+seconds = 20
+complete = 5
+complete_points = 5000000
+sound_start = se_Fanfare_hack_OnslaughtStart
+sound_shot = se_Fanfare_Arm_SuperJackpot
+sound_end = se_VO_MANDI2_Tremendous

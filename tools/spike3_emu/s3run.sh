@@ -679,6 +679,13 @@ if [ -n "$MENU_SRC" ]; then
     [ -f "$R/games/pad/images.conf" ] || menu_first     # no menu run to wait for
     echo "[s3run] holding BACK 5 s in the game asks for a restart (connectivity/dump/padmenu.restart)"
 fi
+# PAD-1360: PAD_S3_GDB=<guest path> starts the GAME (not the env in front of it) under
+# qemu's gdb stub on a unix socket there; it waits for a debugger before its first
+# instruction. Attach from the host through the game's own root:
+#   gdb-multiarch -ex "target remote /proc/<qemu pid>/root<guest path>"
+# (the overlay's upper dir holds a different inode: connecting there is refused).
+[ -n "${PAD_S3_GDB:-}" ] && PRELOAD="${PRELOAD:-env} QEMU_GDB=$PAD_S3_GDB" \
+    && echo "[s3run] the game waits for gdb on $PAD_S3_GDB (in its root)"
 QEMU_INTERP=""
 PQ="${PAD_S3_QEMU:-$(dirname "$B")/qemu-aarch64}"
 if [ "$DEVMODE" != kernel ] && [ -z "${PAD_S3_QEMU:-}" ]; then

@@ -435,19 +435,24 @@ class NewRecord:
         return struct.pack("<II", self.flags_lo, self.param)
 
 
-def free_key(records, flags_lo, param, taken=()):
+def free_key(records, flags_lo, param, taken=(), like=None, keep=0x3):
     """``(flags_lo, param)`` for a new record shaped like the record keyed
     *flags_lo* / *param* (a carrier's): the same flags word (its channel bit
     and the rest), and the param nearest *param* that no record of the
     container (*records*) nor one already handed out (*taken*, pairs) has
     with it.  Only the param bits some record already varies change, never
     bits 0-1 (Star Wars ELG 1.10: the 0x100000 steps and the top bits), so
-    the key reads like the card's own."""
+    the key reads like the card's own.
+
+    PAD-1358: *like* (records) reads the varying bits off other records than
+    *records* (a music bank of one song varies none: every bank's), and
+    *keep* the bits never changed (a bank's number is in its params' low 12
+    bits, Fallout LE 0.82: ``0x82600008`` in image-sc02.bin)."""
     used = {(r.flags_lo, r.param) for r in records} | {tuple(t) for t in taken}
     var = 0
-    for r in records:
+    for r in (records if like is None else like):
         var |= r.param ^ param
-    var &= ~0x3
+    var &= ~keep
     bits = [b for b in range(32) if var >> b & 1][:16]
     best = None
     for m in range(1, 1 << len(bits)):

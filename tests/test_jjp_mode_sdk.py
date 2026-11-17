@@ -156,6 +156,47 @@ def test_vtable_resolution_tells_folded_virtuals_apart():
                   "score": 0x88, "tick": 0xa8, "start_choreo": 0xb0, "total_choreo": 0xb8}
 
 
+def test_a_lamp_group_is_a_lamp_name_too(tmp_path):
+    # PAD-1350: `lamps` takes lp_* lamps or ls_* lamp groups (MODES.md); the checker knew only lamps
+    mm = _load("mkjjpmodes")
+    port = dict(PORT, lamp_groups=["ls_all"])
+    folder = _folder(tmp_path, {"1.mode": "start = switch_target_jam\nlamps = lp_target_jam ls_all\n"})
+    assert mm.check_modes(folder, port)[1] == []
+    (tmp_path / "1.mode").write_text("start = switch_target_jam\nlamps = ls_nope\n")
+    assert "lamps not in" in "\n".join(mm.check_modes(folder, port)[1])
+
+
+def test_every_title_that_can_run_modes_has_a_starter_that_checks_clean():
+    import json
+    mm = _load("mkjjpmodes")
+    ports = os.path.join(RIG, "modes", "ports")
+    can = []
+    for fn in sorted(os.listdir(ports)):
+        if fn.endswith(".live.json"):                   # a running game's read (PAD-1351), not a title
+            continue
+        p = json.load(open(os.path.join(ports, fn), encoding="utf-8"))
+        if not p["can_run_modes"]:
+            continue
+        label = fn[:-5]
+        can.append(label)
+        modes, problems = mm.check_modes(os.path.join(RIG, "modes", "examples", label), p)
+        assert modes and problems == [], (label, problems)
+        # the vtable slots the runtime uses, resolved the same on every title
+        assert {k: p["mode_vtable"][k] for k in ("start", "end", "score", "tick")} == \
+            {"start": 16, "end": 32, "score": 136, "tick": 168}, label
+    assert len(can) == 9, can
+
+
+def test_build_needs_no_prebuilt_runtime():
+    # PAD-1350: left out, --so means "build it against the ISO's own glibc"
+    mm = _load("mkjjpmodes")
+    src = open(os.path.join(RIG, "mkjjpmodes.py"), encoding="utf-8").read()
+    build_parser = src[src.index('sub.add_parser("build"'):src.index('sub.add_parser("inspect"')]
+    assert 'add_argument("--so", help=' in build_parser and "default=SO_DEFAULT" not in build_parser
+    assert "build_runtime(mnt + ROOT_LIBDIR" in src and mm.ROOT_LIBDIR == "/lib/x86_64-linux-gnu"
+    assert "OBJ=\"${OUT%.so}.o\"" in open(os.path.join(RIG, "buildmods.sh"), encoding="utf-8").read()
+
+
 class _MemElf:
     """A sparse address space for jjpport.hold: typeinfos and vtables at chosen addresses."""
 
@@ -302,6 +343,45 @@ def test_audio_capture_measures_a_tone():
     mono = cap.decode(fh.read(), 1, 2, 16)
     assert abs(cap.goertzel(mono, rate, 880) - 12000 / 32768) < 0.02
     assert cap.goertzel(mono, rate, 330) < 0.02
+
+
+def test_starter_lamp_is_the_one_at_the_start_shot():
+    """PAD-1364: the starter's lamp shares the start switch's words, not just its last one
+    (Hobbit's 'made' found nothing, Godfather's '1' found the map, Toy Story's 'target' a
+    target across the playfield)."""
+    jp = _load("jjpport")
+    assert jp._lamp_for("ramp_left_made", ["lp_gi_jets_high", "lp_gi_ramp_left_low", "lp_orc"]) == "lp_gi_ramp_left_low"
+    assert jp._lamp_for("u_target_1", ["lp_map_1", "lp_u_flasher_2", "lp_upper_target_2",
+                                       "lp_gi_upper_target_1", "lp_upper_target_1"]) == "lp_upper_target_1"
+    assert jp._lamp_for("jet_target", ["lp_target_left", "lp_jet_bot"]) == "lp_jet_bot"
+    assert jp._lamp_for("target_tv", ["lp_gi_tv", "lp_target_jam"]) == "lp_gi_tv"
+    assert jp._lamp_for("target_left", ["lp_inlane_left", "lp_song_target_left"]) == "lp_song_target_left"
+    assert jp._lamp_for("target_away", ["lp_gi_jets", "lp_target_left_x"]) == ""   # only 'target': no lamp
+    assert jp._lamp_for("target_away", ["lp_gi_skyline_1"]) == ""
+
+
+def test_every_committed_port_has_its_starter_and_it_checks():
+    """Every title in modes/ports that can run modes has a starter folder in modes/examples
+    that passes check --port against it; a title that cannot has none (PAD-1337, PAD-1364)."""
+    import glob
+    import json
+    mm = _load("mkjjpmodes")
+    ports = sorted(p for p in glob.glob(os.path.join(RIG, "modes", "ports", "*.json"))
+                   if not p.endswith(".live.json"))      # jjpstock.py live captures, not reports
+    if not ports:
+        pytest.skip("no port reports")
+    names = {os.path.basename(p)[:-5] for p in ports}
+    assert {"DialedIn-v02.02", "Hobbit-v04.02", "ToyStory-v02.04", "WizardOfOz-v08.02", "Avatar-v01.03"} <= names
+    for p in ports:
+        t = os.path.basename(p)[:-5]
+        port = json.load(open(p, encoding="utf-8"))
+        ex = os.path.join(RIG, "modes", "examples", t)
+        if not port["can_run_modes"]:
+            assert not os.path.isdir(ex), t
+            continue
+        assert port["missing_required"] == [], t
+        _, problems = mm.check_modes(ex, port)
+        assert problems == [], (t, problems)
 
 
 # ------------------------------------------------------------------ USB mode stick (PAD-1349)

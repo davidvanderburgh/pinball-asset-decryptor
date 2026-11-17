@@ -16,6 +16,28 @@ No game code is patched. How and why it works: `docs/plans/jjp_custom_modes.md`.
 | Change the game's OWN modes | `<name>.stock` files in the same folder (PAD-1351, below) |
 | A running game's mode globals and shot names | `jjpstock.py live` -> `modes/ports/<title>.live.json` |
 | Starter `.stock` file per title | `modes/stock_examples/<title>/` |
+| Make, check and build them in the app | the **Modes** tab on a JJP game (`webui/modes_jjp.py`, PAD-1350) |
+
+## In the app (PAD-1350)
+
+On a Jersey Jack game the app's **Modes** tab is this SDK's editor. It lists every
+title whose port report is in `modes/ports/`, the ones that can run modes first
+(the others greyed, with why). Picking one opens the person's own mode folder for
+it, kept in the app's settings folder (`jjp_modes/<title>/`) and seeded from the
+title's starter folder the first time. Each mode is a form over the keys below:
+every switch, lamp, lamp group, sound and font is picked from the port report's
+lists, so a mode cannot name something the game lacks; an empty key shows what it
+inherits (title.cfg, else the runtime default). Every edit is saved to the `.mode`
+file at once and checked with `check_modes` against the port report. **Hear
+sounds from** points at the title's extract folder: a game's `se_X` is the
+extract's `X.wav` (2,690 of Wonka's 2,723 match). A mode's own sound, music,
+picture and video files go in that folder (**Open the mode folder**); the sound
+keys then offer them beside the game's sounds, and the **Picture and video** group
+and the music key pick from them (PAD-1352). **Build** runs `mkjjpmodes.py
+build` as root in the app's Linux on the stock ISO it finds beside the Select card
+pick (or `D:\Pinball\images\JJP`), with its scratch in
+`/var/tmp/pad_jjpmodes_work`; Cancel stops it inside Linux, where it unmounts and
+deletes its scratch.
 
 ## A mode folder
 
@@ -296,7 +318,10 @@ through a `ui.dat` the game verifies; the hot fix needs none of that.)
 **An install ISO.** `mkjjpmodes.py build --iso <stock>.iso --modes <folder>
 --out <new>.iso` (as root in WSL) writes the stock ISO again with the modes in
 its root pieces. Install it the way the stock ISO is installed (dongle in, and
-like any full install it resets scores and settings).
+like any full install it resets scores and settings). Left without `--so`,
+the build compiles the runtime from `jjpmodes.c` against the glibc in that ISO's
+own root (`buildmods.sh` with `JJP_MODS_LIBDIR`; gcc in the WSL distro), so
+nothing prebuilt can go stale (PAD-1350); `--so` takes one built already.
 
 **Proof, Wonka 03.03 in the emulator (hidden, muted, Wonka's own key), 2026-11-17.**
 *ISO:* `build` on the stock Wonka ISO (51 s, 3.2 GB, e2fsck clean); the rig
@@ -328,7 +353,8 @@ can never reboot WSL. A proof restarts the game where the machine would reboot.
 `jjpport.py` reports, per title, whether its engine has every piece the
 runtime needs (`can_run_modes`). `modes/ports/` holds the report for every JJP
 image in the library and `modes/examples/` a starter folder for each title that
-can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
+can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`, and
+2026-11-16 on the five added since (PAD-1350, PAD-1364):
 
 | Image | Engine exported | Runs modes | Library loads |
 |---|---|---|---|
@@ -338,7 +364,12 @@ can run modes. Checked 2026-11-15 on every image in `D:\Pinball\images\JJP`:
 | Godfather 02.03 | 21,498 | yes | yes |
 | Wonka 03.03 | 18,717 | yes, emulator-proven | yes |
 | Pirates of the Caribbean 01.01 | 18,693 | yes | yes |
+| Dialed In! 02.02 | 17,044 | yes | yes |
+| The Hobbit 04.02 | 14,855 | yes | yes |
+| Toy Story 4 02.04 | 21,996 | yes | yes |
+| The Wizard of Oz 08.02 | 12,260 (older engine, no Mode class) | **no** | yes |
 | Harry Potter 01.26 | 233 (no engine) | **no** | yes |
+| Avatar 01.03 | 245 (no engine) | **no** | yes |
 | Sonic 00.925, 00.926 | 246 (no engine) | **no** | yes |
 
 "Runs modes" for a title other than GnR means its binary exports every engine
@@ -373,8 +404,18 @@ booting the one unchanged runtime - GnR and Wonka, built from different games -
 is what shows the SDK is generic, so these four are taken as runs-modes without a
 separate live run each; any one can be run the same way with its own key.
 
+**Dialed In!, The Hobbit and Toy Story 4** (PAD-1350, PAD-1364) are mapped from Wonka the same way:
+their Mode vtable slots, hold slots and 104-byte `Switch` match Wonka's, every required
+SDK piece is exported, and their starter folders pass `check --port`. Dialed In has
+84 named shot switches, 216 lamps, 1,286 sounds and 17 Mode classes; The Hobbit
+104, 131, 1,501 and 33; Toy Story 82, 670, 2,231 and 21. Dialed In has no lamp
+named for a target, so its starter lights none (add `lamps =` by hand).
+A starter's lamp is the one whose name shares the most words with the start
+switch (`switch_u_target_1` lights `lp_upper_target_1`), which since PAD-1364 also
+moved Elton John's, Godfather's and Pirates' starter lamps onto their start shots.
+
 "Library loads" means the one `jjpmodes.so` loads with every import bound
-(`LD_BIND_NOW`) on that image's own glibc - 2.34 on all nine.
+(`LD_BIND_NOW`) on that image's own glibc, checked in a chroot of its root - 2.34 on all fourteen.
 
 ### Our modes run alone (PAD-1348)
 
@@ -411,3 +452,9 @@ build, covered by Guns N' Roses.
 binaries export only C library and Allegro names. The runtime finds everything
 by name, and their code is ciphertext until the title's own key decrypts it,
 so nothing can be mapped without that key. Custom modes on them need their keys.
+Avatar is built the same way.
+
+**Wizard of Oz 08.02 is an older engine**: it exports 12,260 names, 120 shot
+switches, 149 lamps and 633 sounds, but has no `Mode` class at all, so the
+runtime has nothing to derive a mode from. Custom modes there need their own
+port of the runtime to that engine.

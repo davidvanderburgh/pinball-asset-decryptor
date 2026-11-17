@@ -133,3 +133,8 @@ handicaps) USE it. When they do:
 - The visible row: on 2026-11-16 the rig (load under 1) reached Adjustments > Machine Settings >
   Attract Mode without a hang, but no setting page opens on SELECT, on the stock ELG card too
   (control run): an emulator gap, not the grow. The row is checked from the program instead.
+  PAD-1360 found it: the rig's autoguide took every settings page for Guided Setup and pressed BACK
+  ~2 s after it opened. Fixed (it knows Guided Setup by its title now): on the rig the setting pages
+  open, stay, and a value set there is saved, so a grown row can be shown and set in the emulator.
+  Shown on PAD-1325's editions card: the Edition row on Attract Mode, set to 2 in the menu, saved,
+  and the next boot chose edition 2 (DARK SIDE).

@@ -467,3 +467,43 @@ cablamp 543,544,545  145 CABINET R-OUT 141  # lamp 183, I/O group 1 index 421, a
 cablamp 546,547,548  104 CABINET R-OUT 142  # lamp 184, I/O group 1 index 424, at 296,552, blade R out
 cablamp 549,550,551  62  CABINET R-OUT 143  # lamp 185, I/O group 1 index 427, at 296,571, blade R out
 cablamp 552,553,554  20  CABINET R-OUT 144  # lamp 186, I/O group 1 index 430, at 296,590, blade R out
+# ---- PAD-1369: the game's challenge games, read off this program's own code (Star Wars ELG's PAD-1330 sites
+# paired across and checked by shape) ----
+# The balls-per-game getter (setting 80 / the player's game mode's own / Insider Connected's) is built into its
+# callers, as on ELG: the balls of a player and of the current player are whole functions; the ball-number set
+# (two ways), the last-ball test and the ball's end read it into a register and compare - set to 1 there in a
+# mode's challenge game. The take-an-extra-ball test is the ball's end's first call after its bus question; the
+# end of the ball (end(w0, w1): status bits 0x202, devices off) and the launch button's handler (flags 13 / 12,
+# fire 8) as ELG's
+site challenge_balls      0x007a24a0 0xf0014ee1 0xf9462021
+site challenge_balls_2    0x007a2560 0xd100c3ff 0xf0014ee1
+site challenge_balls_at_0 0x007a2688 0x6b1302bf 0x54000308
+site challenge_balls_at_1 0x007a26dc 0x6b1302bf 0xf0014ee0
+site challenge_balls_at_2 0x007a2770 0x6b13029f 0x52800000
+site challenge_balls_at_3 0x007a292c 0x912f02c0 0x39400401
+site challenge_extra_ball 0x006fab80 0x90015d82 0x397a8041
+site challenge_end_ball   0x006d48c0 0xb0015562 0xf941c042
+site ball_launch          0x006cef90 0xa9be53f3 0xb0015eb3
+value challenge_on_flag   17   # FG_PLAYER_CHALLENGE_MODE_ACTIVE, read off the program's FG_ names
+value challenge_balls_at_0_reg 19
+value challenge_balls_at_1_reg 19
+value challenge_balls_at_2_reg 19
+value challenge_balls_at_3_reg 20
+value ball_launch_flag       12   # FG_MBDEV_AUTO_PLUNGER_BALL_IN_DEVICE
+value ball_launch_wait_flag  13   # FG_MBDEV_AUTO_PLUNGER_PLAYER_CONTROL
+value challenge_menu_slot      -1   # a plain challenge: nothing of the game's to stop
+# The start menu lists game-mode indices (Prolonged Competition's frame point, PAD-1327). One MODE CHALLENGE
+# entry, Standard's index again, lettered CHALLENGE and the mode's name: its flippers step through the modes'
+# own, the game plays a plain game and the ball's start makes it the mode's one-ball challenge game
+site challenge_menu_frame 0x004cc050 0xb875d818 0x6b18039f
+value challenge_menu_frame_moved       1
+value challenge_menu_frame_list_at     216
+value challenge_menu_frame_count_at    136
+value challenge_menu_frame_last_at     140
+value challenge_menu_frame_cap         12
+value challenge_menu_frame_cursor_reg  21
+value challenge_menu_frame_entry        1   # STANDARD
+value challenge_menu_frame_caption_msg  1911   # STANDARD, lettered CHALLENGE while the cursor is on ours
+value challenge_menu_frame_name_msg     1912   # NORMAL PLAY, lettered the mode's name
+value challenge_menu_caption   1915   # CHALLENGE
+value challenge_menu_sets_on   1    # the pick is a challenge game of the mode's (no flag of the game's)

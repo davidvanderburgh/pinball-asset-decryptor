@@ -396,7 +396,7 @@ def test_walking_dead_remastered_takes_star_wars_elgs_route(tmp_path):
     v = port["value"]
     assert (v["challenge_menu_list_at"], v["challenge_menu_count_reg"], v["challenge_menu_cap"],
             v["challenge_menu_entry"], v["challenge_menu_pick_reg"]) == (296, 22, 8, 16, 0)
-    assert "challenge_on_flag" not in v
+    assert v["challenge_on_flag"] == 18           # PAD-1369: its challenges too (FG_PLAYER_CHALLENGE_MODE_ACTIVE)
 
 
 #: the Spike 3 titles Prolonged Competition goes on (Transformers LE has no port yet)

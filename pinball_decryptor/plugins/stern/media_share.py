@@ -561,10 +561,11 @@ def put_clips(project, variants, keep_own=False):
 
 # ---- back out of a card -------------------------------------------------------------------------
 def _card_idx(project):
-    """``{record idx: slot rel}`` of the project's sounds (the first file of each record)."""
+    """``{record idx: slot rel}`` of the project's sounds (the first file of each record); PAD-1378:
+    a music bank's song under its :func:`.sound_modes.bank_slot_key`, as a Spike 2 card records it."""
     out = {}
     for rel in _rels(project, "audio"):
-        i = SMo.slot_idx(rel)
+        i = SMo.slot_key(rel)
         if i is not None and rel.lower().endswith(".wav"):
             out.setdefault(i, rel)
     return out

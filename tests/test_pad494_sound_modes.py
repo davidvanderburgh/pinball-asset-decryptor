@@ -69,8 +69,9 @@ def test_only_the_titles_it_was_proven_on_are_offered(monkeypatch):
     other = MP.profile("godzilla_pro_1_15")
     assert SMo.title_refusal(other) == SMo.NOT_PROVEN % other.label
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: le)
-    why, slots = SMo.offer("proj", [BOC, "music_cat01_0003.wav"])
-    assert why == "" and slots == {BOC: "", "music_cat01_0003.wav": SMo.NOT_SOUND}
+    why, slots = SMo.offer("proj", [BOC, "music_cat01_0003.wav", "jingle.wav"])
+    # (PAD-1378: a song of the game's own sound banks takes them too)
+    assert why == "" and slots == {BOC: "", "music_cat01_0003.wav": "", "jingle.wav": SMo.NOT_SOUND}
     monkeypatch.setenv(SMo.GATE_ENV, "0")
     assert SMo.offer("proj", [BOC])[0].startswith("%s=0" % SMo.GATE_ENV)
 

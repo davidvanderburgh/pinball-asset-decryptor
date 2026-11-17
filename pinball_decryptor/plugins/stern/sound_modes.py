@@ -229,9 +229,15 @@ NOT_PROVEN = ("Music modes are not offered on %s. They work on the latest versio
 #: PAD-724: the latest builds whose program cannot grow (:data:`.menu_settings.NO_ROOM`)
 NO_ROOM = ("Music modes are not offered on %s: its game program has no room to grow, so its "
            "operator menu cannot take MUSIC MODE.")
+#: PAD-1378: why a song of the game's own sound banks takes no file on a build with no room for a
+#: bank of this app's beside them (:data:`BANK_SONG_NO_ROOM`)
+NO_BANK_ROOM = ("On %s, a song of the game's music banks cannot have a file for another mode: the "
+                "game's sound bank and its biggest music bank fill the machine's memory, so there is "
+                "no room for the bank its files would play from.")
 NOT_PROVEN_TURNS = ("Sounds in turn are not offered on %s. They work on the latest version of each "
                     "Stern Spike 2 game: update the machine's code to use them.")
-NOT_SOUND = "Only a sound the game keeps in its sound bank (an idx file) can have a file for another mode."
+NOT_SOUND = ("Only one of the game's own sounds (an idx file, or a song of its music banks: "
+             "music_catNN_NNNN) can have a file for another mode.")
 NOT_SOUND_TURN = "Only a sound the game keeps in its sound bank (an idx file) can play files in turn."
 #: PAD-641: why the flipper buttons cannot play sounds in attract on a build
 NO_TITLE_ATTRACT = ("The app cannot tell which game this project is for, so it cannot give its flipper "
@@ -829,13 +835,37 @@ def bank_slot(rel):
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
+def bank_slot_key(bank, record):
+    """PAD-1378: the slot number a Spike 2 Write gives a music bank's song (record *record* of
+    ``image-scNN.bin``, NN *bank*), which has no idx: below zero, so it is never an idx."""
+    return -(((int(bank) << 16) | int(record)) + 1)
+
+
+def slot_key(rel):
+    """The slot number of *rel*: its idx (``idx2095`` -> 2095), or PAD-1378 a music bank's song's
+    :func:`bank_slot_key`; None for neither."""
+    i = slot_idx(rel)
+    if i is not None:
+        return i
+    b = bank_slot(rel)
+    return bank_slot_key(*b) if b is not None else None
+
+
+#: PAD-1378: the newest builds whose ``image.bin`` and biggest music bank of their own fill the
+#: machine's :data:`.spike2.soundbank.MAPPED_MAX` (read off the library's cards: Dungeons & Dragons
+#: 1.10's 2,142,352,388 + 39,598,976; the next closest, Rush 1.19, leaves 126 MB): a mode file for
+#: one of their bank songs has no bank of this app's to go into, and no other road
+BANK_SONG_NO_ROOM = frozenset({"dungeons_and_dragons_le-1.10", "dungeons_and_dragons_pro-1.10"})
+
+
 def slot_ok(rel, prof):
     """Whether slot *rel* can have files for other music modes on title *prof*: a sound of the game's
-    sound bank (an idx file), or on a Spike 3 card also a music bank's song (PAD-1358: its files go
-    into its own bank, :mod:`.spike3_music`)."""
+    sound bank (an idx file), or a music bank's song (PAD-1358 on a Spike 3 card: its files go into
+    its own bank, :mod:`.spike3_music`; PAD-1378 on a Spike 2 card: into a sound bank of this app's,
+    played by the game's bank sound ids, :mod:`.bank_songs`)."""
     if slot_idx(rel) is not None:
         return True
-    return bank_slot(rel) is not None and getattr(prof, "arch", "arm") == "a64"
+    return bank_slot(rel) is not None
 
 
 # ---- which titles -------------------------------------------------------------------------------
@@ -1140,7 +1170,15 @@ def offer(project, rels, probe=True):
     why = title_refusal(prof)
     if why:
         return why, {}
-    return "", {rel: ("" if slot_ok(rel, prof) else NOT_SOUND) for rel in rels}
+    full = (getattr(prof, "arch", "arm") != "a64" and title_key(prof) in BANK_SONG_NO_ROOM)
+
+    def why_not(rel):
+        if not slot_ok(rel, prof):
+            return NOT_SOUND
+        if full and slot_idx(rel) is None:                  # PAD-1378: a bank song with no room
+            return NO_BANK_ROOM % prof.label
+        return ""
+    return "", {rel: why_not(rel) for rel in rels}
 
 
 # ---- the files ----------------------------------------------------------------------------------

@@ -36,14 +36,15 @@ def test_a_bank_song_is_no_idx_sound():
     assert SMo.slot_idx("audio/music_cat02_0000.wav") is None
 
 
-def test_a_bank_song_takes_mode_files_on_spike3_only():
+def test_a_bank_song_takes_mode_files_on_spike3_and_spike2():
+    # (PAD-1378: on Spike 2 too, through a sound bank of the app's)
     assert SMo.slot_ok("audio/music_cat02_0000.wav", _Prof("a64"))
-    assert not SMo.slot_ok("audio/music_cat02_0000.wav", _Prof("arm"))
+    assert SMo.slot_ok("audio/music_cat02_0000.wav", _Prof("arm"))
     assert SMo.slot_ok("audio/idx0011.wav", _Prof("arm"))
     assert not SMo.slot_ok("audio/foo.wav", _Prof("a64"))
 
 
-def test_the_audio_tab_offers_a_spike3_bank_song_and_refuses_it_on_spike2(monkeypatch):
+def test_the_audio_tab_offers_a_bank_song_on_spike3_and_spike2(monkeypatch):
     rels = ["audio/music_cat02_0000.wav", "audio/idx0011.wav", "audio/foo.wav"]
     monkeypatch.setattr(SMo, "title_refusal", lambda prof, turns=False: "")
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: _Prof("a64"))
@@ -51,7 +52,7 @@ def test_the_audio_tab_offers_a_spike3_bank_song_and_refuses_it_on_spike2(monkey
     assert why == "" and slots == {rels[0]: "", rels[1]: "", rels[2]: SMo.NOT_SOUND}
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: _Prof("arm"))
     _why, slots = SMo.offer("p", rels)
-    assert slots[rels[0]] == SMo.NOT_SOUND and slots[rels[1]] == ""
+    assert slots[rels[0]] == "" and slots[rels[1]] == ""
 
 
 # ---- the key ---------------------------------------------------------------------------------------------------

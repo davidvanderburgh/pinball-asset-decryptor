@@ -25,6 +25,12 @@ HOST_Update dispatch), the same footing as Spike 2's netbridge.py:
             complete reply, 0x04 for a timeout (the rest left 0x55, as the
             board's buffer is). reply_len 0 = a write, no answer.
   0x10..1f  forwarded to the power distribution board (not answered yet)
+  0x29      WS2812_SetNumLEDs: the bridge's own LED strip outputs, channel 0..3
+            in byte 0, then a u16 LED count (3 bytes) or four u16 part
+            lengths (9 bytes). Not answered.
+  0x2f      WS2812_NodeSetLED: a STRIP BOARD'S LAMP FRAME, [channel] [n]
+            [n bytes: cmd body, the node-bus lamp grammar] [pad]. Not
+            answered. See ws2812_frame (PAD-1370).
 
 THE NODE BOARDS behind 0x41 are the title's own: s3nodes.py reads its node
 directory and board catalog out of the game program, and each declared node
@@ -97,6 +103,64 @@ def fw_version(elf_path):
     except (OSError, ValueError):
         pass
     return FW_VERSION
+
+
+# THE CABINET'S LIGHT STRIPS ARE THE NETBRIDGE'S (PAD-1370). A Spike 3 title's
+# directory names ws2812node boards for the cabinet strips (node 2), the
+# speaker rings (node 7) and the topper (node 14), but the game sends those
+# boards only their bring-up on the node bus (f2 reads, a 72 mask, the ff
+# poll): every lamp frame for them goes to the netbridge's own WS2812 outputs
+# as host cmd 0x2f, which the board's firmware (netbridge.elf
+# WS2812_NodeSetLED, HOST_Update's jump table) takes as [channel] [n] [the
+# node frame's cmd + body, no checksum] [pad] and plays on that channel's
+# strip. The channel is the cabinet connector, the same on every title's
+# setup (cmd 0x29, read off every Spike 3 run's bridge.log): channel 0 = 120
+# LEDs, the speaker rings' 120 channels; channel 2 = 432 (Fallout: parts
+# 144+144+72+72), the cabinet strips' 432; channel 1, set up only where the
+# topper hangs off the bridge (Fallout: 4 x 144), indices 0..275 = the
+# topper's 276. Decoded with the node-bus grammar every one of a Fallout
+# run's 43,674 frames fits, each index inside its board's device table.
+# PAD_S3_WS2812_NODES="0=7,1=14,2=2" overrides the channel -> node map.
+WS2812_NODES = {0: 7, 1: 14, 2: 2}
+
+
+def ws2812_nodes(spec=None):
+    """{channel: node}, WS2812_NODES unless *spec* ("ch=node,...") says otherwise."""
+    if spec is None:
+        spec = os.environ.get("PAD_S3_WS2812_NODES", "")
+    out = dict(WS2812_NODES)
+    for part in spec.replace(" ", ",").split(","):
+        ch, _, node = part.partition("=")
+        if ch.strip().isdigit() and node.strip().isdigit():
+            out[int(ch)] = int(node)
+    return out
+
+
+def ws2812_frame(p, nodes=None):
+    """(node, plain) for a host cmd 0x2f payload - plain the node frame as
+    s3leds.PadLed.frame takes it, `cmd body ck` (ck a dummy: the bridge's
+    frame carries none and the decoder only skips it) - or None for a
+    channel no board sits on or a short payload."""
+    if len(p) < 3:
+        return None
+    n = p[1]
+    if n < 1 or len(p) < n + 2:
+        return None
+    node = (WS2812_NODES if nodes is None else nodes).get(p[0])
+    if node is None:
+        return None
+    return node, bytes(p[2:2 + n]) + b"\x00"
+
+
+def ws2812_setup(p):
+    """What a host cmd 0x29 payload sets up, as a log line, or None."""
+    if len(p) == 3:
+        return "WS2812 channel %d: %d LEDs" % (p[0], p[1] | p[2] << 8)
+    if len(p) == 9:
+        parts = struct.unpack("<4H", bytes(p[1:9]))
+        return "WS2812 channel %d: parts %s (%d LEDs)" % (
+            p[0], "+".join(str(x) for x in parts if x), sum(parts))
+    return None
 
 
 def frame(cmd, ident, payload=b""):
@@ -687,6 +751,7 @@ def main():
         br.rules = s3rules.Rules(br.sw, log, fire=leds.fire if leds else None)
     except Exception as e:                                 # noqa: BLE001
         log.write("# [rule] no rule model (%s): ruled coils never fire\n" % e)
+    ws_nodes, ws_said = ws2812_nodes(), set()
     while True:
         r, _, _ = select.select([master], [], [], 0.05 if (br.balls or br.steppers or br.rules) else 0.5)
         if br.balls:
@@ -711,6 +776,19 @@ def main():
             reply = br.handle(cmd, ident, p) if ok else None
             if leds and ok and cmd == 0x41 and len(p) >= 3 and p[0] & 0x40:
                 leds.frame(p[0] & 0x3F, unmask(p[0], p[2:2 + p[1]]))
+            if ok and cmd == 0x2F and leds:
+                wf = ws2812_frame(p, ws_nodes)
+                if wf:
+                    leds.frame(*wf)
+                    if wf[0] not in ws_said:
+                        ws_said.add(wf[0])
+                        log.write("%9.3f # [ws2812] channel %d lamp frames -> node %d's lamps\n" % (
+                            time.time() - t0, p[0], wf[0]))
+            if ok and cmd == 0x29:
+                line = ws2812_setup(p)
+                if line and line not in ws_said:
+                    ws_said.add(line)
+                    log.write("%9.3f # [ws2812] %s\n" % (time.time() - t0, line))
             if reply:
                 os.write(master, reply)
             key = (cmd, p[:3] if cmd == 0x41 else p)

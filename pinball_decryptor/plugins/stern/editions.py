@@ -115,7 +115,7 @@ def in_program(elf_bytes):
     on a menu page, else ``None``. Never raises. PAD-1325: a 64-bit (Spike 3) program too, its
     page the one :func:`.menu_settings.wide_category` names."""
     from .adjustments import AdjustmentTable, menu_label
-    ad, caption, _row, category = _MS.SETTINGS[_MS.EDITION]
+    ad, caption, _row, _category = _MS.SETTINGS[_MS.EDITION]
     try:
         t = AdjustmentTable(bytes(elf_bytes), wide_ok=True)
         i = t.by_name.get(ad)
@@ -126,9 +126,9 @@ def in_program(elf_bytes):
         cat = _MS.menu_table(t)
         if cat is None:
             return None
-        if t.wide:
-            category = _MS.wide_category(t, _MS.EDITION)
-        if not cat.has(category, i):
+        # PAD-1394: on whichever page lists it - since PAD-1382 round 5 our rows go on the Custom Code page (15), not
+        # Attract Mode, and a Multi-boot card refused every image the app wrote with EDITION ("has no EDITION")
+        if not cat.lists(i):
             return None
         if (e["min"], e["step"]) != (1, 1) or not 2 <= e["max"] <= MAX_EDITIONS:
             return None

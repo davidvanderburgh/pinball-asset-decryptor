@@ -148,6 +148,57 @@ def _new_rows(table, settings):
     return out
 
 
+def _records_without(records, rows):
+    """PAD-1394: *records* (``(category, kind, id)``) less the adjustment ones *rows* (``{(category, id)}``) names."""
+    rows = set(rows)
+    return tuple(r for r in records if not (r[1] == KIND_ADJUSTMENT and (r[0], r[2]) in rows))
+
+
+def _shrunk_in_place(table, va, records, keep):
+    """PAD-1394: ``{file offset: bytes}`` writing the records *keep* over *records* at *va*, the rest zeroed."""
+    new = b"".join(struct.pack("<3I", *r) for r in keep)
+    return {table._off(va): new + b"\x00" * (len(records) * REC - len(new))}
+
+
+def listed_rows(cat):
+    """PAD-1394: the ``(category, id)`` of each adjustment row the menu *cat* lists (a Standard Adjustments list's
+    category is None: it has no pages)."""
+    if isinstance(cat, StandardList):
+        return [(None, i) for i in cat.ids]
+    return [(c, i) for c, k, i in cat.records if k == KIND_ADJUSTMENT]
+
+
+def stale_rows(table, cat, settings=()):
+    """PAD-1394: the rows of ours the menu *cat* lists that *settings* (this Write's :class:`MenuSetting` s) no longer
+    want: each row whose adjustment an earlier Write captioned for a setting of ours (no game's own menu row carries one
+    of those captions: the 60 Spike 2 cards of the library, read), unless one of *settings* is on that row - on that
+    page, where the menu has pages (a setting moved to another page leaves its old record behind too).
+    ``[(category, id)]``."""
+    ours = {v[1] for v in SETTINGS.values()}
+    keep_ids = {s.id for s in settings}
+    keep = {(s.category, s.id) for s in settings}
+    out = []
+    for c, i in listed_rows(cat):
+        if (c, i) in out or not (i in keep_ids or menu_label(table, i) in ours):
+            continue
+        if (i not in keep_ids) if c is None else ((c, i) not in keep):
+            out.append((c, i))
+    return out
+
+
+def retire(table, settings=()):
+    """PAD-1394: ``({file offset: bytes}, [caption])``: the same-size writes that take the rows of ours *settings* no
+    longer want off the program's menu (:func:`stale_rows`), and those rows' captions; ``({}, [])`` when there are
+    none. A Write that wants no setting of ours at all calls it with none."""
+    cat = menu_table(table)
+    if cat is None:
+        return {}, []
+    rows = stale_rows(table, cat, settings)
+    if not rows:
+        return {}, []
+    return cat.shrink_writes(table, rows), [menu_label(table, i) for _c, i in rows]
+
+
 class MenuSettingError(ValueError):
     """The program cannot take the setting; the message says why, in the user's words."""
 
@@ -197,6 +248,18 @@ class CategoryTable:
     def records_with(self, *settings):
         return len(self.records) + len(_new_rows(self, settings))
 
+    def without(self, rows):
+        """PAD-1394: this table less the adjustment records *rows* (``{(category, id)}``)."""
+        return dataclasses.replace(self, records=_records_without(self.records, rows))
+
+    def shrink_writes(self, table, rows):
+        """PAD-1394: ``{file offset: bytes}`` that take *rows* off the menu in place: the shorter table over the old one
+        (its tail zeroed) and the copy's sizes made the shorter one's."""
+        keep = _records_without(self.records, rows)
+        out = _shrunk_in_place(table, self.va, self.records, keep)
+        out.update(self.writes_for(table, self.va, len(keep)))
+        return out
+
     def writes(self, table, new_va, *settings):
         return self.writes_for(table, new_va, self.records_with(*settings))
 
@@ -243,6 +306,18 @@ class StandardList:
         out = struct.pack("<%dH" % (len(ids) + 1), *(ids + [0]))
         return out + b"\x00" * (-len(out) % 4)
 
+    def without(self, rows):
+        """PAD-1394: this list less the ids of *rows* (``{(category, id)}``; the list has no pages)."""
+        drop = {i for _c, i in rows}
+        return dataclasses.replace(self, ids=tuple(i for i in self.ids if i not in drop))
+
+    def shrink_writes(self, table, rows):
+        """PAD-1394: the shorter list over the old one, NUL-ended, its tail zeroed (the page reads to the NUL)."""
+        keep = self.without(rows).ids
+        old = 2 * (len(self.ids) + 1)
+        new = struct.pack("<%dH" % (len(keep) + 1), *(list(keep) + [0]))
+        return {table._off(self.va): new + b"\x00" * (old - len(new))}
+
     def writes(self, table, new_va, *settings):
         data = table.data
         w0, w1 = struct.unpack_from("<2I", data, self.getter_off)
@@ -261,6 +336,9 @@ class WideCategoryTable:
     :meth:`writes` is not used for this kind."""
     va: int
     records: tuple
+    #: PAD-1394: how many records the program's copy says (its size constants) once :meth:`without` made *records*
+    #: fewer; 0 = ``len(records)``
+    code_records: int = 0
 
     def has(self, category, ident):
         return any(c == category and k == KIND_ADJUSTMENT and i == ident for c, k, i in self.records)
@@ -270,6 +348,23 @@ class WideCategoryTable:
 
     def where(self, category):
         return "Adjustments"
+
+    def without(self, rows):
+        """PAD-1394: this table less the adjustment records *rows*; the copy's size constants still read the old count."""
+        return dataclasses.replace(self, records=_records_without(self.records, rows),
+                                   code_records=self.code_records or len(self.records))
+
+    def shrink_writes(self, table, rows):
+        """PAD-1394: the shorter table over the old one, its tail zeroed, and the copy's sizes made the shorter one's
+        (the stack buffer it copies into stays as large as it was)."""
+        keep = _records_without(self.records, rows)
+        sites = wide_copy_sites(table, self)
+        out = _shrunk_in_place(table, self.va, self.records, keep)
+        size = len(keep) * REC
+        for kind, o in sites["size_offs"]:
+            w = struct.unpack_from("<I", table.data, o)[0]
+            out[o] = struct.pack("<I", _w_set_movz(w, size) if kind == "movz" else _w_set_imm12(w, size))
+        return out
 
     def blob(self, *settings):
         recs = list(self.records) + [(c, KIND_ADJUSTMENT, i) for c, i in _new_rows(self, settings)]
@@ -635,7 +730,7 @@ def wide_copy_sites(table, cat):
     pattern (so it is left alone rather than mis-patched). PAD-1321."""
     import numpy as np
     data = table.data
-    va, size = cat.va, len(cat.records) * REC
+    va, size = cat.va, (getattr(cat, "code_records", 0) or len(cat.records)) * REC
     # the single adrp/add pair that forms the table address, and the segment it is in
     pairs, seg_of = [], {}
     for po, pv, fsz in table._loads:
@@ -1208,6 +1303,26 @@ def own_page(table):
 
 
 def plan_many(table, wanted, share=True):
+    """:func:`_plan_many`, and PAD-1394: the rows an earlier Write gave settings of ours that this one no longer wants
+    (:func:`stale_rows`: EDITION or HANDICAP turned off, settings moved onto the shared rows or onto another page) are
+    taken off the menu - left out of the table to grow when one grows, else by same-size writes in *writes*. The same
+    ``(settings, writes, cat, refused)``."""
+    settings, writes, cat, refused = _plan_many(table, wanted, share)
+    if not settings:
+        return settings, writes, cat, refused
+    try:
+        current = menu_table(table)
+        rows = stale_rows(table, current, settings) if current is not None else []
+        if rows and cat is not None:
+            cat = cat.without(rows)
+        elif rows:
+            writes = {**writes, **current.shrink_writes(table, rows)}
+    except MenuSettingError:                # a copy that cannot be re-sized keeps its rows, as before
+        pass
+    return settings, writes, cat, refused
+
+
+def _plan_many(table, wanted, share=True):
     """Several settings of ours at once, each on a row of its own (:func:`_plan_rows`) - or, PAD-1382, when the game
     has too few spare rows for them, all but EDITION on the two shared rows (:func:`plan_shared`), when it can give
     those. *share* False never shares. The same ``(settings, writes, cat, refused)``.

@@ -112,7 +112,9 @@ def test_edition_goes_onto_a_card_that_already_has_music_mode(card, tmp_path):
     (tmp_path / "b").mkdir()
     first, _ = _built(raw, tmp_path / "a", [(MS.MUSIC_MODE, 3, MODES)])
     assert Ed.in_program(first) is None
-    second, (edition,) = _built(first, tmp_path / "b", [(MS.EDITION, 3, EDITIONS + ["Heisei"])])
+    # PAD-1394: the Write wants MUSIC MODE again (a project with music modes does); one that did not would take it off
+    second, (_music, edition) = _built(first, tmp_path / "b", [(MS.MUSIC_MODE, 3, MODES),
+                                                               (MS.EDITION, 3, EDITIONS + ["Heisei"])])
     t = AdjustmentTable(second)
     assert menu_label(t, 31) == "MUSIC MODE"
     assert len(MS.category_table(t).records) == 109

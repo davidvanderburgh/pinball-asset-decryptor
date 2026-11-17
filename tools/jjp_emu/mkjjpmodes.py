@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -172,10 +173,12 @@ STICK_README = """PAD custom modes stick: %(what)s
 Written %(written)s by mkjjpmodes.py %(version)s.
 
 1. Copy the folder "hotfix" (and this file) to the top of a USB stick (FAT32).
-2. Machine on, coin door open: open the service menu and go to the Update USB
-   screen (Update Game > USB), stick in.
-3. On that screen press Plus, Minus, Plus, Minus. It asks
-   "Press ENTER to apply HOTFIX". Press ENTER, then ENTER again.
+2. Machine on, coin door open: open the service menu and go to its USB update
+   screen (Software Update > USB Update), stick in. It says "No update data
+   was found"; that is expected.
+3. Hold the LEFT FLIPPER button and, still holding it, press
+   Plus, Minus, Plus, Minus. It asks "Press ENTER to apply HOTFIX".
+   Press ENTER, then ENTER again.
 4. The game reboots. Take the stick out. What happened is written to
    %(log)s on the stick (and /jjpe/temp/%(log)s on the machine).
 
@@ -198,9 +201,14 @@ def stick(a):
     if action == "install":
         if not a.modes:
             raise Refused("install needs --modes")
-        so = os.path.abspath(a.so)
+        so = a.so
+        if not so and a.iso:
+            so = runtime(argparse.Namespace(iso=a.iso, out=os.path.join(tempfile.mkdtemp(prefix="padmodes_rt_"), "jjpmodes.so"),
+                                            workdir=None, cache_dir=None), quiet=True)
+        so = os.path.abspath(so or SO_DEFAULT)
         if not os.path.isfile(so):
-            raise Refused("%s does not exist - build it with buildmods.sh" % so)
+            raise Refused("%s does not exist - build it with buildmods.sh, or give --iso (the stock ISO) "
+                          "and it is built against the game's own glibc" % so)
         with open(so, "rb") as f:
             if f.read(4) != b"\x7fELF":
                 raise Refused("%s is not an ELF library" % so)
@@ -730,6 +738,25 @@ def stage_modes(mj, raw, so_path, mode_dir, manifest):
     return staged
 
 
+class _UnpackMeter:
+    """PAD-1375: the first use of an ISO restores its game partition (2.5 GB compressed, about
+    20 minutes reading from a Windows drive); a line every 2% so the app's status line moves."""
+
+    def __init__(self, mj, info, iso):
+        self.total = max(1, info.piece_bytes(mj.ROOT_PART))
+        self.name = os.path.basename(iso)
+        self.t0, self.last = time.time(), -1
+
+    def sample(self, fed):
+        pct = int(100 * fed / self.total)
+        if pct // 2 != self.last // 2 and pct < 100:
+            self.last = pct
+            el = time.time() - self.t0
+            left = el * (100 - pct) / pct if pct else 0
+            print("unpacking %s's game partition (once per ISO): %d%%%s" % (
+                self.name, pct, ", about %d min left" % max(1, round(left / 60)) if pct >= 4 else ""), flush=True)
+
+
 def _stop_on_sigterm():
     """A SIGTERM (the app's Cancel) raises Refused, so the with-blocks unmount and the
     finally deletes the scratch, instead of dying with the ISO and the root still mounted."""
@@ -776,7 +803,7 @@ def build(a):
         with mj.IsoMount(iso, os.path.join(work, "iso")) as m:
             info = mj.iso_info(iso, m)
             info.check_stock_shape("the ISO")
-            cache = mj.cached_root_raw(iso, a.cache_dir, m, info, None)
+            cache = mj.cached_root_raw(iso, a.cache_dir, m, info, _UnpackMeter(mj, info, iso))
             work_raw = os.path.join(work, "sda3.raw")
             mj.say("copying the cached root %s -> %s" % (cache, work_raw))
             mj.sparse_copy(cache, work_raw)
@@ -817,6 +844,40 @@ def build(a):
     finally:
         if not a.keep_work and os.path.isdir(work):
             shutil.rmtree(work, ignore_errors=True)
+
+
+def runtime(a, quiet=False):
+    """PAD-1375: jjpmodes.so built against the glibc in a stock ISO's own root, the same build
+    ``build`` runs, without writing an ISO: what a stick installs.  The root comes from the
+    rig-shaped root cache (restored once per ISO) and is mounted read-only.  -> the .so path."""
+    import mkjjpmulti as mj
+    mj.require_root("runtime")
+    _stop_on_sigterm()
+    mj.need_tools("partclone.restore", "gunzip", "losetup", "mount", "umount", "gcc", "objdump", "nm")
+    iso = os.path.abspath(a.iso)
+    if not os.path.isfile(iso):
+        raise Refused("%s does not exist" % iso)
+    out = os.path.abspath(a.out)
+    work = os.path.abspath(a.workdir or "/var/tmp/pad_jjpmodes_runtime")
+    os.makedirs(work, exist_ok=True)
+    built = os.path.join(work, "jjpmodes.so")
+    with mj.IsoMount(iso, os.path.join(work, "iso")) as m:
+        info = mj.iso_info(iso, m)
+        info.check_stock_shape("the ISO")
+        raw = mj.cached_root_raw(iso, a.cache_dir, m, info, _UnpackMeter(mj, info, iso))
+    with mj.LoopRW(raw, readonly=True) as mnt:
+        if not os.path.isfile(mnt + RUNGAME):
+            raise Refused("%s: no %s in its root - not a JJP game image" % (iso, RUNGAME))
+        build_runtime(mnt + ROOT_LIBDIR, built)
+    with open(built, "rb") as f:
+        data = f.read()
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out + ".part", "wb") as f:
+        f.write(data)
+    os.replace(out + ".part", out)
+    if not quiet:
+        print("runtime %s: %d bytes, sha256 %s" % (out, len(data), hashlib.sha256(data).hexdigest()))
+    return out
 
 
 def inspect(a):
@@ -870,11 +931,18 @@ def main(argv=None):
     s.add_argument("--out", required=True, help="the stick (or a folder to copy to one)")
     s.add_argument("--action", choices=STICK_ACTIONS, default="install")
     s.add_argument("--modes", help="the mode folder (install)")
-    s.add_argument("--so", default=SO_DEFAULT, help="the runtime (default %s, buildmods.sh's)" % SO_DEFAULT)
+    s.add_argument("--so", help="the runtime (left out: built from --iso, else buildmods.sh's %s)" % SO_DEFAULT)
+    s.add_argument("--iso", help="the stock install ISO: the runtime is built against its glibc (root, WSL)")
     s.add_argument("--port")
     s.add_argument("--game", help="the game directory it runs on (default: title.cfg's 'game')")
     s.add_argument("--any-game", action="store_true", help="no title check (off/on/remove)")
     s.add_argument("--force", action="store_true")
+    s = sub.add_parser("runtime", help="build the mode runtime against a stock ISO's own glibc (root, WSL): "
+                                       "what a stick installs")
+    s.add_argument("--iso", required=True)
+    s.add_argument("--out", required=True, help="where the jjpmodes.so goes")
+    s.add_argument("--workdir")
+    s.add_argument("--cache-dir")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "check":
@@ -893,6 +961,9 @@ def main(argv=None):
             return build(a)
         if a.cmd == "stick":
             return stick(a)
+        if a.cmd == "runtime":
+            runtime(a)
+            return 0
         return inspect(a)
     except Refused as e:
         print("refused: %s" % e, file=sys.stderr)

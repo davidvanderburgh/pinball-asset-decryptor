@@ -4291,6 +4291,18 @@ JJP_MODES_HELP = [
         "Build button waits until the check finds nothing.",
     ]),
     ("Putting it on the machine", [
+        "**Write to USB stick** is the everyday way: it writes a hotfix folder to a "
+        "FAT32 USB stick, and the game's own USB update screen installs your modes "
+        "from it with no reinstall; scores, audits and settings are kept. At the "
+        "machine: service menu, Software Update > USB Update, stick in; hold the left "
+        "flipper button and press Plus, Minus, Plus, Minus; ENTER, ENTER; the game "
+        "reboots with the modes. The card shows these steps. The same card writes a "
+        "stick that turns the modes off, back on, or takes them out.",
+        "The first stick for a game builds the mode runtime from its stock install "
+        "ISO (pick it under Build) in the app's Linux as administrator: seconds, or "
+        "about 20 minutes the first time that ISO's game partition is unpacked. "
+        "After that every stick for that ISO is written in seconds.",
+        "A stick that already carries another hot fix is never written over.",
         "**Build** writes the game's stock install ISO again with your modes in it "
         "(it runs in the app's Linux as administrator, a few minutes). Install that "
         "ISO the way the stock one installs. To turn the modes off on the machine "

@@ -637,3 +637,41 @@ def test_stick_runme_installs_turns_off_on_and_removes_like_the_python_hook(tmp_
     assert run("--action", "remove", "--game", "GunsNRoses") == 0
     assert (j / "scripts" / "rungame.sh").read_text() == RUNGAME
     assert not (j / "padmodes").exists() and not (j / "scripts" / "padmodes.sh").exists()
+
+def test_stick_runtime_comes_from_the_stock_iso(tmp_path):
+    # PAD-1375: the app's Write to USB stick has no prebuilt runtime; `runtime` builds it against
+    # the stock ISO's glibc (root mounted read-only) and `stick --iso` does the same in one go
+    mm = _load("mkjjpmodes")
+    src = open(os.path.join(RIG, "mkjjpmodes.py"), encoding="utf-8").read()
+    assert "mj.LoopRW(raw, readonly=True)" in src and "build_runtime(mnt + ROOT_LIBDIR, built)" in src
+    multi = open(os.path.join(RIG, "mkjjpmulti.py"), encoding="utf-8").read()
+    assert '"ro,noload" if self.readonly' in multi and '["--read-only"] if self.readonly' in multi
+    with pytest.raises(SystemExit):
+        mm.main(["runtime", "--iso", "x.iso"])          # --out is required
+    # the stick's README walks the hot fix the way it works: the left flipper held
+    assert "Hold the LEFT FLIPPER" in mm.STICK_README
+    mods, so = _stick_inputs(tmp_path)
+    out = tmp_path / "usb"
+    assert mm.main(["stick", "--out", str(out), "--modes", mods, "--so", so]) == 0
+    assert "Hold the LEFT FLIPPER" in (out / "PADMODES_README.txt").read_text()
+
+
+def test_the_first_unpack_of_an_iso_says_how_far_it_is(capsys):
+    # PAD-1375: restoring an ISO's game partition takes ~20 minutes from a Windows drive; the
+    # app's status line is the tool's last line, so the restore prints its progress
+    mm = _load("mkjjpmodes")
+
+    class MJ:
+        ROOT_PART = "sda3"
+
+    class Info:
+        def piece_bytes(self, part):
+            return 1000 if part == "sda3" else 0
+
+    m = mm._UnpackMeter(MJ, Info(), "/mnt/d/x/Wonka-v03.03.iso")
+    for fed in range(0, 1001, 5):
+        m.sample(fed)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "unpacking Wonka-v03.03.iso's game partition (once per ISO): 0%"
+    assert len(lines) == 50 and lines[-1].startswith("unpacking Wonka-v03.03.iso's game partition (once per ISO): 98%")
+    assert "min left" in lines[-1]

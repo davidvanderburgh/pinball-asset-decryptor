@@ -2,7 +2,8 @@
 // one folder of key = value files the runtime reads inside the retail game; this page edits them
 // as forms, every name (switches, lamps, lamp groups, sounds, fonts) picked from the title's port
 // report, runs the build's own check after each edit, and builds the stock install ISO again
-// with the modes in it.
+// with the modes in it - or writes a USB stick the game's own Update USB hot fix installs them
+// from, no reinstall (PAD-1375).
 //
 // Python (webui/modes_jjp.py) owns every decision; this page renders modes.jjp and edits through
 // call("modes.jjp_set", key, value).
@@ -166,7 +167,7 @@ function TitleSettings({ j, have }) {
   const t = j.title_cfg || {};
   return html`<section class="card jjpm-title-card">
     <div class="hd" style="cursor:pointer" onClick=${() => setOpen(!open)}><span class="h2">${open ? "▾" : "▸"} Every mode of this game</span>
-      <span class="muted small">defaults a mode's own settings override: fonts, colours, the panel${t.game ? ` - loads only into ${t.game}` : ""}</span></div>
+      <span class="muted small">defaults a mode's own settings override: fonts, colors, the panel${t.game ? ` - loads only into ${t.game}` : ""}</span></div>
     ${open ? html`<div class="bd">${(j.title_keys || []).map((k) => html`<${Row} key=${k} k=${k} prefix="title:" meta=${(j.fields || {})[k]} value=${t[k]} j=${j} have=${have} />`)}</div>` : null}
   </section>`;
 }
@@ -203,7 +204,7 @@ function BuildCard({ j }) {
       <div class="jjpm-row"><span class="jjpm-lbl">New ISO</span><div class="jjpm-in"><${PathField} ns="modes" k="jjp_out" value=${b.out}
         onBrowse=${() => call("modes.jjp_out_browse")} onCommit=${(v) => call("modes.jjp_set_out", v)} disabled=${b.running} /></div></div>
       <div class="row" style="gap:8px;margin-top:8px">
-        <${Button} kind="primary" icon="disk" busy=${b.running} disabled=${b.running || !c.ok || !b.iso}
+        <${Button} kind="primary" icon="disk" busy=${b.running} disabled=${b.busy || !c.ok || !b.iso}
           title=${!c.ok ? "Fix what the check found first" : "Runs in the app's Linux as administrator: it opens the ISO's game partition"}
           onClick=${() => call("modes.jjp_build")}>${b.running ? "Building…" : "Build"}<//>
         ${b.running ? html`<${Button} kind="ghost" onClick=${() => call("modes.jjp_build_cancel")}>Cancel<//>` : null}
@@ -212,6 +213,59 @@ function BuildCard({ j }) {
       </div>
       ${lines.length && (b.running || (b.done && !b.ok)) ? html`<pre class="jjpm-log">${lines.join("\n")}</pre>` : null}
       <div class="small muted" style="margin-top:6px">On the machine, a file named <span class="mono">/jjpe/perm/padmodes.off</span> turns the modes off without reinstalling.</div>
+    </div>
+  </section>`;
+}
+
+const STICK_TIP = {
+  install: "Copies these modes and the mode runtime to the stick, for the game's Update USB hot fix to install",
+  off: "A stick that turns the custom modes off (they stay installed)",
+  on: "A stick that turns the custom modes back on",
+  remove: "A stick that takes the custom modes out and puts the game's start script back as shipped",
+};
+
+function StickCard({ j }) {
+  const k = j.stick || {};
+  const c = j.check || {};
+  const lines = k.lines || [];
+  const install = k.action === "install";
+  const fsBad = k.fs && !/^FAT/i.test(k.fs);
+  const why = !k.path ? "Put in a USB stick, or pick a folder to copy to one"
+    : k.owner === "other" ? "This stick already has another hot fix on it"
+    : install && !c.ok ? "Fix what the check found first"
+    : install && !k.iso ? "Pick the stock ISO under Build first: the mode runtime is built against its system"
+    : "";
+  const busy = k.busy;
+  const note = install && k.iso && !k.runtime_ready
+    ? "The first stick for this ISO builds the mode runtime in the app's Linux as administrator: seconds, or about 20 minutes if this ISO's game partition has not been unpacked before (once per ISO)."
+    : "";
+  return html`<section class="card jjpm-stick">
+    <div class="hd"><span class="h2">Write to USB stick</span><span class="muted small">no reinstall: the game's own Update USB hot fix installs the modes, scores and settings kept</span></div>
+    <div class="bd">
+      <div class="jjpm-row"><span class="jjpm-lbl">USB stick</span><div class="jjpm-in"><${PathField} ns="modes" k="jjp_stick" value=${k.path}
+        history=${k.drives || []} placeholder="Put in a USB stick (FAT32)" browseLabel="Pick…"
+        onBrowse=${() => call("modes.jjp_stick_browse")} onCommit=${(v) => call("modes.jjp_set_stick", v)} disabled=${busy} /></div></div>
+      <div class="jjpm-row"><span class="jjpm-lbl">The stick</span><div class="jjpm-in row" style="gap:8px">
+        <${Select} value=${k.action} options=${k.actions || []} width=${240} disabled=${busy}
+          title=${STICK_TIP[k.action] || ""} onChange=${(v) => call("modes.jjp_stick_action", v)} />
+        <${Button} kind="ghost" size="sm" icon="refresh" disabled=${busy} title="Look for USB sticks again"
+          onClick=${() => call("modes.jjp_stick_refresh")}>Find sticks<//>
+      </div></div>
+      ${fsBad ? html`<${Note} kind="warn">This stick is ${k.fs}. The machine reads FAT32 sticks: format it FAT32 first.<//>` : null}
+      ${k.owner === "other" ? html`<${Note} kind="warn">This stick already has a hotfix folder that is not a modes stick. Use another stick, or delete that folder first.<//>` : null}
+      <div class="row" style="gap:8px;margin-top:8px">
+        <${Button} kind="primary" icon="download" busy=${k.running} disabled=${busy || !!why}
+          title=${why || (k.owner === "pad" ? "Replaces the modes stick already on it" : "Writes a hotfix folder to the top of the stick")}
+          onClick=${() => call("modes.jjp_write_stick")}>${k.running ? "Writing…" : "Write to USB stick"}<//>
+        ${k.running && !k.runtime_ready ? html`<${Button} kind="ghost" onClick=${() => call("modes.jjp_stick_cancel")}>Cancel<//>` : null}
+        ${k.done && k.ok ? html`<${Button} kind="ghost" onClick=${() => call("modes.jjp_reveal_stick")}>Show it<//>` : null}
+        <span class=${cx("small", k.done ? (k.ok ? "ok-ink" : "warn-ink") : "muted")}>${k.msg || note}</span>
+      </div>
+      ${lines.length && (k.running || (k.done && !k.ok)) ? html`<pre class="jjpm-log">${lines.join("\n")}</pre>` : null}
+      <div class=${cx("jjpm-steps", k.done && k.ok && "jjpm-steps-now")}>
+        <div class="small jjpm-steps-hd">At the machine</div>
+        <ol>${(k.steps || []).map((st) => html`<li>${st}</li>`)}</ol>
+      </div>
     </div>
   </section>`;
 }
@@ -237,6 +291,7 @@ export function JjpModes({ s }) {
           <${Editor} j=${j} have=${have} />
           <${TitleSettings} j=${j} have=${have} />
           <${CheckCard} j=${j} />
+          <${StickCard} j=${j} />
           <${BuildCard} j=${j} />
         </div>
       </div>` : null}

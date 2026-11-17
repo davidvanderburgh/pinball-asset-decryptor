@@ -33,6 +33,13 @@ SETTINGS = (
     ("brightness", "Picture settings", "Brightness, Contrast and Saturation (Write tab)."),
 )
 
+#: PAD-1393 round 2: what an unticked row of :data:`.service_menu.OFF_KEYS` means for the card
+OFF_NOTES = {
+    "music_mode": "Off the card: every sound plays its own music. Tick to add its row.",
+    "edition": "Off the card: the card cannot be picked by edition. Tick to add its row.",
+    "image_set": "Off the card: the screens show the scenes as the project has them. Tick to add its row.",
+}
+
 
 def project_menu(project):
     """``(why, menu)`` for *project*: :func:`.service_menu.pages` of its card's game program, or the reason none."""
@@ -95,26 +102,26 @@ class ServiceMenuTab(TabService):
         from ...plugins.stern import coop_play as CP, handicap as HC, picture_settings as PS
         from ...plugins.stern import service_menu as SM
         out = []
-        try:                                            # PAD-1393: MUSIC MODE and EDITION are on when a Write wants them
-            asked = {w[0] for w in SM.wanted(project)}
+        try:                                            # PAD-1393: the settings the project has, ticked or not
+            has = {w[0] for w in SM.wanted(project, honour_off=False)}
         except Exception:                               # noqa: BLE001 - shown as off then
-            asked = set()
+            has = set()
+        off = SM.off_keys(project)
         for key, name, where in SETTINGS:
             if key == "brightness" and not PS.OFFERED:
                 continue
             row = {"key": key, "name": name, "where": where, "can": False, "on": False, "note": ""}
-            if key in ("music_mode", "edition"):
-                row.update(on=key in asked)
+            if key in SM.OFF_KEYS:                      # PAD-1393 round 2: ticked/unticked here, once the project has it
+                can = key in has
+                row.update(can=can, on=can and key not in off,
+                           note=OFF_NOTES[key] if can and key in off else "")
             elif key == "coop_play":
                 on = CP.load(project)
                 row.update(can=on, on=CP.menu_asked(project),
-                           note="" if on else "Turn co-op play on first, for its row.")
+                           note="" if on else "Tick Co-op play on the Modes tab first, for its row.")
             elif key == "handicap":
                 on = HC.load(project)
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")
-            elif key == "image_set":                    # PAD-1390: on while the project has image sets
-                from ...plugins.stern import scene_variants as SV
-                row.update(on=bool(SV.load(project)))
             out.append(row)
         mine = SM.load(project)
         rank = {k: n for n, k in enumerate(mine["order"])}
@@ -145,6 +152,7 @@ class ServiceMenuTab(TabService):
     @rpc
     def set_row(self, key, on):
         """Switch one of our rows on or off, through the action its own tab uses."""
+        from ...plugins.stern import service_menu as SM
         modes = self._modes()
         if modes is None:
             return False
@@ -152,6 +160,20 @@ class ServiceMenuTab(TabService):
             ok = modes.set_coop_menu(bool(on))
         elif key == "handicap":
             ok = modes.set_handicap(bool(on))
+        elif key in SM.OFF_KEYS:                        # PAD-1393 round 2: the row on or off the card, the setting kept
+            project = self._project()
+            if not project:
+                return False
+            data = SM.load(project)
+            off = set(data["off"])
+            if on:
+                off.discard(key)
+            else:
+                off.add(key)
+            data["off"] = sorted(off)
+            name = dict((k, n) for k, n, _w in SETTINGS)[key]
+            self._save(project, data, "%s %s" % (name, "on the card" if on else "left off the card"))
+            return True
         else:
             return False
         self.publish()

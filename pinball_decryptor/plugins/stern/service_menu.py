@@ -35,9 +35,10 @@ class _Log:
         pass
 
 
-def wanted(project):
+def wanted(project, honour_off=True):
     """``[(key, values, names, options)]`` the project's settings ask a Write for, in the engine's order (music,
-    edition, pictures, co-op, handicap, image set), each from the engine's own menu job."""
+    edition, pictures, co-op, handicap, image set), each from the engine's own menu job. PAD-1393 round 2: the ones
+    unticked on the Service menu tab (:func:`off_keys`) are left out, unless *honour_off* is false."""
     from . import engine as E
     from . import coop_play as CP, editions as Ed, handicap as HC, picture_settings as PS, sound_modes as SMo
     log = _Log()
@@ -64,19 +65,32 @@ def wanted(project):
     sets = SV.load(project)                             # PAD-1390: IMAGE SET, when the project has image sets
     if sets:
         jobs.append(E._ImageSetMenu(sets["names"], log))
+    if honour_off:
+        off = off_keys(project)
+        jobs = [j for j in jobs if j.KEY not in off]
     return [j.wanted() for j in arrange(project, jobs, log)]
 
 
 # ---- the owner's order of the app's rows (PAD-1382 round 3) ---------------------------------------------------------
 # Round 5 (David): "we should just be checking off items that exist (making a new one here doesn't make sense...)":
 # the rows are the app's own settings, switched on their tabs or on the Service menu tab; the owner orders them.
-#: the sidecar key: {"order": [setting keys]}
+#: the sidecar key: {"order": [setting keys], "off": [setting keys]}
 STAGED_KEY = "service_menu"
+#: PAD-1393 round 2 (DragonRR: "Image set ... I cannot uncheck it"): the settings whose row the Service menu tab can
+#: leave off the card although the project has them; the Write then leaves the setting off the card, as when the game
+#: has no spare row for it (music modes: every sound plays its own; editions: none to pick; image sets: the scenes as
+#: the project has them). Co-op Play and Handicap have switches of their own.
+OFF_KEYS = ("music_mode", "edition", "image_set")
+
+
+def off_keys(project):
+    """The settings the owner unticked on the Service menu tab (:data:`OFF_KEYS`), a set."""
+    return set(load(project)["off"])
 
 
 def load(project):
-    """``{"order": [...]}`` from the project's sidecar (empty when none)."""
-    out = {"order": []}
+    """``{"order": [...], "off": [...]}`` from the project's sidecar (empty when none)."""
+    out = {"order": [], "off": []}
     if not project:
         return out
     from ...core import staged_changes
@@ -86,6 +100,8 @@ def load(project):
         return out
     if isinstance(raw, dict) and isinstance(raw.get("order"), list):
         out["order"] = [k for k in raw["order"] if isinstance(k, str)]
+    if isinstance(raw, dict) and isinstance(raw.get("off"), list):
+        out["off"] = [k for k in raw["off"] if k in OFF_KEYS]
     return out
 
 
@@ -93,8 +109,9 @@ def save(project, data):
     from ...core import staged_changes
     side = staged_changes.load(project)
     order = list(data.get("order") or [])
-    if order:
-        side[STAGED_KEY] = {"order": order}
+    off = [k for k in OFF_KEYS if k in (data.get("off") or ())]
+    if order or off:
+        side[STAGED_KEY] = {k: v for k, v in (("order", order), ("off", off)) if v}
     else:
         side.pop(STAGED_KEY, None)
     staged_changes.save(project, side)

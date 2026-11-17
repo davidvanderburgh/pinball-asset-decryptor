@@ -117,7 +117,7 @@ function Rows({ s, menu }) {
       const why = refused[x.key];
       return html`<div class="sm-our" key=${x.key}>
         <div class="sm-our-hd">
-          ${/* PAD-1393: every row has its box - ticked when the card gets it, greyed when its own tab switches it */
+          ${/* PAD-1393: every row has its box - ticked when the card gets it, greyed when the project has no such setting yet */
             html`<${Check} checked=${x.on} label=${x.name} disabled=${!x.can}
                 onChange=${(v) => call("svcmenu.set_row", x.key, v)} />`}
           <span class="sp"></span>

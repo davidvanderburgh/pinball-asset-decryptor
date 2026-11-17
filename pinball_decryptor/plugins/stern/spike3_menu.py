@@ -84,8 +84,10 @@ def rows_wanted(project):
     own copy of the program (``game.pad``, which the modes' hook runs in the card's program's place)
     with these beside MUSIC MODE, so the program the machine runs carries EDITION either way."""
     from . import editions as Ed
+    from . import service_menu as SvM
     names = Ed.load(project)
-    rows = [] if not Ed.count(names) or Ed.project_refusal(project) else [(MS.EDITION, len(names), names)]
+    rows = ([] if not Ed.count(names) or Ed.project_refusal(project) or "edition" in SvM.off_keys(project)
+            else [(MS.EDITION, len(names), names)])          # PAD-1393 round 2: EDITION unticked on the tab
     if coop_row_asked(project):                         # PAD-1326: the CO-OP PLAY and HANDICAP rows too
         rows.append(_coop_row())
     if hand_row_asked(project):

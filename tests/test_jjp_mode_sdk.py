@@ -215,3 +215,90 @@ def test_runtime_policies_match_the_checker():
     body = src[src.index('!strcmp(k, "game_modes")'):src.index('!strcmp(k, "hold_multiballs")')]
     assert set(re.findall(r'!strcmp\(v, "([a-z]+)"\)', body)) | {"hold"} == set(dict(mm.KEYS)["game_modes"])
     assert "m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;" in src
+
+
+# ---- a mode's own sounds, music, picture and video (PAD-1352) -------------------------
+MEDIA_MODE = """start = switch_target_jam
+sound_start = start.wav
+sound_shot = se_cheer
+music = loop.ogg
+picture = logo.png
+picture_at = 2 4 30 18
+video = clip.webm
+video_at = 25% 4% 50% 58%
+video_loop = no
+sound_channel = fx
+panel = none
+"""
+
+
+def test_media_mode_passes_and_its_files_travel(tmp_path):
+    mm = _load("mkjjpmodes")
+    d = _folder(tmp_path, {"a.mode": MEDIA_MODE, "start.wav": "x", "loop.ogg": "x", "logo.png": "x",
+                           "clip.webm": "x", "notes.txt": "x"})
+    _, problems = mm.check_modes(d, PORT)
+    assert problems == []
+    assert [fn for fn, _p in mm.folder_files(d)] == ["a.mode", "clip.webm", "logo.png", "loop.ogg", "start.wav"]
+
+
+def test_media_problems_are_named(tmp_path):
+    mm = _load("mkjjpmodes")
+    d = _folder(tmp_path, {"a.mode": "start = switch_target_jam\nsound_start = gone.wav\nmusic = song.mp3\n"
+                                      "picture = sub/a.png\npicture_at = 1 2 3\nvideo_at = 0 0 50 0\n"
+                                      "video = clip.avi\nsound_channel = loud\nsound_shot = se_nothere\n"})
+    _, problems = mm.check_modes(d, PORT)
+    text = "\n".join(problems)
+    assert "sound_start = gone.wav, but there is no gone.wav in the mode folder" in text
+    assert "music must be a file in the mode folder ending .wav, .ogg, .flac, .opus" in text
+    assert "picture must be a file in the mode folder ending .png" in text
+    assert "picture_at must be x y w h, percent of the screen" in text
+    assert "video_at width and height must be above 0" in text
+    assert "video must be a file in the mode folder ending .webm, .mkv, .mp4" in text
+    assert "sound_channel must be one of fanfare, fx, speech, music" in text
+    assert "sound_shot not in Guns N' Roses: se_nothere" in text      # a game sound name is still checked
+
+
+def test_runtime_reads_the_same_media_files_and_choices_as_the_checker():
+    mm = _load("mkjjpmodes")
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    exts = re.search(r"SOUND_EXTS\[\] = \{([^}]*)\}", src).group(1)
+    assert set(re.findall(r'"([a-z0-9]+)"', exts)) == set(mm.MEDIA_EXTS["sound_file"])
+    kinds = src[src.index("static int sound_kind_of("):src.index("static int sw_index(")]
+    assert set(re.findall(r'!strcmp\(v, "([a-z]+)"\)', kinds)) - {"effects"} == set(dict(mm.KEYS)["sound_channel"])
+    panel = src[src.index('!strcmp(k, "panel")'):src.index('!strcmp(k, "ingame_state")')]
+    assert set(re.findall(r'!strcmp\(v, "([a-z]+)"\)', panel)) | {"middle"} == set(dict(mm.KEYS)["panel"])
+
+
+class _MediaElf:
+    def __init__(self, syms, libs):
+        self.syms = {n: (0x1000 + i, 264 if n.startswith("se_") else 8) for i, n in enumerate(syms)}
+        self.data = b"\0".join(l.encode() for l in libs) + b"\0" * 64
+
+
+def test_port_media_verdict():
+    jp = _load("jjpport")
+    every = [n for _w, n in jp.MEDIA_SYMBOLS] + ["se_cheer"]
+    libs = ["liballegro_audio.so.5.2", "liballegro_acodec.so.5.2", "liballegro_image.so.5.2",
+            "libavformat.so.58", "libavcodec.so.58", "libavutil.so.56"]
+    m = jp.media(_MediaElf(every, libs))
+    assert m["can_play_own_media"] and m["sound_object_bytes"] == 264
+    m = jp.media(_MediaElf([n for n in every if "UpdateBGMusic" not in n], libs[:3]))
+    assert not m["can_play_own_media"]
+    assert m["ok"] == {"sounds": True, "music": False, "picture": True, "video": False}
+
+
+def test_audio_capture_measures_a_tone():
+    cap = _load("jjpaudiocap")
+    import io
+    import math as _m
+    rate = 8000
+    frames = [int(12000 * _m.sin(2 * _m.pi * 880 * i / rate)) for i in range(800)]
+    pcm = b"".join(struct.pack("<hh", f, f) for f in frames)
+    fmt = struct.pack("<HHIIHH", 1, 2, rate, rate * 4, 4, 16)
+    wav = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVE" + b"fmt " + struct.pack("<I", 16) + fmt \
+        + b"data" + struct.pack("<I", len(pcm)) + pcm
+    fh = io.BytesIO(wav)
+    assert cap.parse_header(fh) == (1, 2, rate, 16)
+    mono = cap.decode(fh.read(), 1, 2, 16)
+    assert abs(cap.goertzel(mono, rate, 880) - 12000 / 32768) < 0.02
+    assert cap.goertzel(mono, rate, 330) < 0.02

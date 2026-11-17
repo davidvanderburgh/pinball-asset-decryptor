@@ -55,14 +55,22 @@ lamp_blink = 4
 | `seconds` | 20 | the game's own mode timer |
 | `complete` | 0 | scoring shots that complete the mode (0 = it runs to time) |
 | `complete_points` | 0 | added on completion |
-| `sound_start`, `sound_shot`, `sound_complete`, `sound_end` | none | the game's `se_*` sounds |
+| `sound_start`, `sound_shot`, `sound_complete`, `sound_end` | none | the game's `se_*` sounds, or a sound file of the mode's own in the folder (`.wav`, `.ogg`, `.flac`, `.opus`) |
+| `sound_channel` | fanfare | the game channel the mode's own sound files play on: `fanfare`, `fx`, `speech` or `music` (its volume and ducking) |
+| `sound_like`, `music_like` | none | a game `se_*` whose settings (channel, gain, play mode) the mode's own sounds or music take, instead of the channel's first |
+| `music` | none | a music file of the mode's own (`.ogg`, `.wav`...): the game's music while the mode runs, the game's own music back after |
+| `picture` | none | a picture of the mode's own (`.png`, `.jpg`), drawn while the mode runs |
+| `picture_at` | 0 0 100 100 | where: `x y w h` in percent of the screen; the picture keeps its shape, centred in that box |
+| `video` | none | a video of the mode's own (`.webm` VP8/VP9, the game's own clip format; `.mkv`, `.mp4` H.264 also play), silent, drawn under the picture |
+| `video_at` | 0 0 100 100 | where, as `picture_at` |
+| `video_loop` | yes | `no` plays it once and keeps its last frame |
 | `lamps` | none | `lp_*` lamps (or `ls_*` lamp groups) the mode lights |
 | `lamp_color` | ffffff | rrggbb |
 | `lamp_blink` | 4 | flashes a second; 0 = solid |
 | `font_title`, `font_value`, `font_timer` | none (built-in font) | the game's `font_*` fonts for the title, the mode total and the seconds left |
 | `title_color`, `value_color`, `timer_color` | ffffff, ffdc00, ffffff | rrggbb or rrggbbaa |
 | `panel_color` | 000000b0 | the panel behind the text, rrggbbaa |
-| `panel` | middle | `middle`, `bottom` or `top` (the game's score panel is at the bottom on most titles) |
+| `panel` | middle | `middle`, `bottom` or `top` (the game's score panel is at the bottom on most titles), or `none` (no text panel: the mode's picture or video says it) |
 | `game_modes` | hold | `hold` (PAD-1348): while this mode runs, a start of the game's that goes through its class's start or restart (on Wonka 03.03: the multiballs, proven with the Gobstopper multiball) is refused and the game carries on as if it was not asked. Some game modes start another way (Wonka's Oompa hurry-up, Wonka Wash Frenzy) and are not held: this mode pauses for them, as `pause` does, and resumes after. Or the older choices for when a game mode or multiball runs: `pause` (timer held, shots not scored, panel hidden, lamps handed back), `end`, or `ignore` (none of these refuse the game's starts) |
 | `hold_multiballs` | yes | with `hold`: `no` lets the game's multiballs start (and pause this mode) |
 | `allow_game_modes` | none | with `hold`: the game's mode globals or classes (e.g. `mtv_mode`, `OompaHurryUp`) that may still start |
@@ -74,6 +82,46 @@ lamp_blink = 4
 | `game` | the title's GAMENAME (e.g. `GunsNRoses`). The modes load only into that game: a mode ISO made from a multi-boot ISO hooks root A, which also starts image 1's game |
 | `ingame_state` | the `jjpe_state_get()` value meaning "a ball is in play" (5 on Guns N' Roses). Without it the runtime learns it on the first ball: the state that holds for a second while the game's own ball-in-play flag is set (logged) |
 | `background_modes` | game modes that are always on and must not make a custom mode yield. Without it, the game modes already running two seconds into a ball count as always-on |
+
+## A mode's own sounds, music, picture and video (PAD-1352)
+
+The files sit in the mode folder beside the `.mode` files and travel with them
+(`mkjjpmodes.py build` copies every sound, picture and video file in it; `check`
+says when one a mode names is missing).
+
+```
+# 3_candy_rush.mode
+start = switch_target_tv
+sound_start = rush_start.wav       # our own, on the game's fanfare channel
+sound_shot = se_Fanfare_Jackpot    # the game's own still work
+music = rush_loop.ogg
+picture = rush_logo.png
+picture_at = 2 4 30 18
+video = rush.webm
+video_at = 25 4 50 58
+panel = bottom
+```
+
+* **Sounds play through the game's own sound engine.** A sound file becomes a
+  `SoundEffect` of the game's own (a copy of one of its sounds on that channel,
+  holding our sample), played by the game's own `play`, so the game's volume
+  settings, channel levels and ducking treat it like the game's sounds.
+* **Music takes over the game's music the game's way.** The runtime adds one
+  rule at the head of the game's music list (`Update<UpdateBGMusic_>`): while the
+  mode runs it names the mode's music, so the game stops its own and plays ours
+  on the music channel; when the mode ends, pauses for a game mode, or the ball
+  drains, the rule steps aside and the game's own music comes back. Music
+  loops. The whole file is held in memory, so keep it a loop of a minute or two.
+* **Pictures and video** are drawn under the mode's text panel, video first.
+  Video is decoded by the game's own FFmpeg; it pauses with the mode. Keep it
+  the screen's size or smaller (1360x768 on Wonka): decoding a bigger one costs
+  the game frames.
+* Formats: what the game's own libraries read - sounds `.wav` `.ogg` `.flac`
+  `.opus`, pictures `.png` `.jpg` `.bmp` `.tga`, video `.webm` (VP8/VP9),
+  `.mkv`, `.mp4` (H.264). Video has no sound: give the mode a `sound_start` or
+  `music` for that.
+* Every JJP title that runs modes has these pieces (`media` in its port
+  report: `can_play_own_media`).
 
 ## How a mode behaves
 

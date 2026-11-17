@@ -37,6 +37,53 @@
    "29LightsConcertBoosterMultiball"
   ]
  },
+ "media": {
+  "can_play_own_media": true,
+  "ok": {
+   "sounds": true,
+   "music": true,
+   "picture": true,
+   "video": true
+  },
+  "pieces": {
+   "sounds": {
+    "_ZN11SoundEffect23create_sample_instancesEPKc": true,
+    "_ZN11SoundEffect7do_playEb": true,
+    "_ZN11SoundEffect9is_loadedEv": true,
+    "_ZN11SoundEffect10is_playingEv": true,
+    "_ZN11SoundEffect17play_audio_streamEv": true,
+    "liballegro_audio.so": true,
+    "liballegro_acodec.so": true
+   },
+   "music": {
+    "_ZN6UpdateI14UpdateBGMusic_PPFvvEE4listE": true,
+    "_Z12update_musicv": true,
+    "_Z13music_requestPFvvE": true
+   },
+   "picture": {
+    "liballegro_image.so": true
+   },
+   "video": {
+    "libavformat.so": true,
+    "libavcodec.so": true,
+    "libavutil.so": true
+   }
+  },
+  "sound_object_bytes": 264,
+  "libraries": [
+   "liballegro.so.5.2",
+   "liballegro_acodec.so.5.2",
+   "liballegro_audio.so.5.2",
+   "liballegro_font.so.5.2",
+   "liballegro_image.so.5.2",
+   "liballegro_memfile.so.5.2",
+   "liballegro_primitives.so.5.2",
+   "liballegro_ttf.so.5.2",
+   "libavcodec.so.58",
+   "libavformat.so.58",
+   "libavutil.so.56"
+  ]
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

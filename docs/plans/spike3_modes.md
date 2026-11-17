@@ -1160,3 +1160,18 @@ proven. Next to try: why the manager's show blocks from an item page and not fro
 backtrace of the dispatch thread under qemu-user's gdbstub), and whether the game's own clip pages end as early in
 this emulator (frame dumps across entries 11 / 24).
 Tests: tests/test_pad1328_spike3_attract.py.
+
+## Expression light shows on Spike 3 (PAD-1328: what the next round builds)
+
+The census (2026-11-16, `s3port.lamp_devices` on each program): six titles have cabinet lights under Spike 3's own
+names, which `lampmap.cabinet_role` (Spike 2's `EXPRESSIVE LIGHTING L n` / `SPEAKER n`) does not match yet:
+`SPEAKER L 1-R` / `-G` / `-B` .. and `SPEAKER R ..` (one lamp per colour channel, a ring each side), `CABINET L-IN
+UPPER` / `L-IN LOWER` / `R-IN ..` / `L-OUT` / `R-OUT` (the side strips) on Fallout, Pokemon, Transformers and WDR,
+`EXPRESSION LIGHTING L` / `R` on Star Wars 2025 LE; Star Wars ELG has none. What is there already: the 64-bit lamp
+layer and the per-light setter's light table (16-byte records {u16 list, kind}, `s3port.light_lists`), the lamp
+lines' light ids by device name (`light_engine`), `cab_voice_count` reads the channel's voice pointers pointer-sized
+(`PM_PTR`). To build: (1) the names in `cabinet_role` and `cablamp` lines drafted off the 64-bit device and light
+tables (each pixel's three channel lamps folded into one `R,G,B` line); (2) the voice's played-sample offset measured
+on 64-bit (`value sound_voice_played`, 12 on Spike 2); (3) `spike3_modes` carrying `cabshow.cfg` with the song's
+sound ids read off the 64-bit program, and the engine's family line for it dropped; (4) a rig proof read off the node
+bus (`PAD_NB_TRACE`: the speaker panel sends no lamp frames in attract on any title, docs/plans/spike3_emulation.md).

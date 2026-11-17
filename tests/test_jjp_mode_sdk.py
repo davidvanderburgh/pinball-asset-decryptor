@@ -258,6 +258,45 @@ def test_runtime_policies_match_the_checker():
     assert "m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;" in src
 
 
+def test_starter_lamp_is_the_one_at_the_start_shot():
+    """PAD-1364: the starter's lamp shares the start switch's words, not just its last one
+    (Hobbit's 'made' found nothing, Godfather's '1' found the map, Toy Story's 'target' a
+    target across the playfield)."""
+    jp = _load("jjpport")
+    assert jp._lamp_for("ramp_left_made", ["lp_gi_jets_high", "lp_gi_ramp_left_low", "lp_orc"]) == "lp_gi_ramp_left_low"
+    assert jp._lamp_for("u_target_1", ["lp_map_1", "lp_u_flasher_2", "lp_upper_target_2",
+                                       "lp_gi_upper_target_1", "lp_upper_target_1"]) == "lp_upper_target_1"
+    assert jp._lamp_for("jet_target", ["lp_target_left", "lp_jet_bot"]) == "lp_jet_bot"
+    assert jp._lamp_for("target_tv", ["lp_gi_tv", "lp_target_jam"]) == "lp_gi_tv"
+    assert jp._lamp_for("target_left", ["lp_inlane_left", "lp_song_target_left"]) == "lp_song_target_left"
+    assert jp._lamp_for("target_away", ["lp_gi_jets", "lp_target_left_x"]) == ""   # only 'target': no lamp
+    assert jp._lamp_for("target_away", ["lp_gi_skyline_1"]) == ""
+
+
+def test_every_committed_port_has_its_starter_and_it_checks():
+    """Every title in modes/ports that can run modes has a starter folder in modes/examples
+    that passes check --port against it; a title that cannot has none (PAD-1337, PAD-1364)."""
+    import glob
+    import json
+    mm = _load("mkjjpmodes")
+    ports = sorted(p for p in glob.glob(os.path.join(RIG, "modes", "ports", "*.json"))
+                   if not p.endswith(".live.json"))      # jjpstock.py live captures, not reports
+    if not ports:
+        pytest.skip("no port reports")
+    names = {os.path.basename(p)[:-5] for p in ports}
+    assert {"DialedIn-v02.02", "Hobbit-v04.02", "ToyStory-v02.04", "WizardOfOz-v08.02", "Avatar-v01.03"} <= names
+    for p in ports:
+        t = os.path.basename(p)[:-5]
+        port = json.load(open(p, encoding="utf-8"))
+        ex = os.path.join(RIG, "modes", "examples", t)
+        if not port["can_run_modes"]:
+            assert not os.path.isdir(ex), t
+            continue
+        assert port["missing_required"] == [], t
+        _, problems = mm.check_modes(ex, port)
+        assert problems == [], (t, problems)
+
+
 # ------------------------------------------------------------------ USB mode stick (PAD-1349)
 def _stick_inputs(tmp_path):
     mods = tmp_path / "mods"

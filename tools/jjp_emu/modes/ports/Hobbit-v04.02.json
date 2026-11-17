@@ -16,6 +16,210 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 33,
+  "multiball_classes": [
+   "13MultiballRule",
+   "14BeastMultiball",
+   "14SmaugMultiball",
+   "17BookModeMultiball",
+   "19HobbitMultiballRule",
+   "20ArkIntoFireMultiball",
+   "22ArkFiveArmiesMultiball",
+   "24ArkBarrelEscapeMultiball"
+  ]
+ },
+ "stock": {
+  "can_change": true,
+  "slots": {
+   "run_proc": 144,
+   "set_time": 40,
+   "score": 136,
+   "is_running": 72,
+   "is_running_or_grace": 80,
+   "is_running_or_grace_grace": 88
+  },
+  "shot_id": {
+   "read": true,
+   "set_by": "shot_set_proc_shot_id"
+  },
+  "shot_handlers": 31,
+  "classes": {
+   "BMAmbush": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMAzog": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMBait": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMBolg": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMContract": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMDolGuldur": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMDoorstep": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMDuel": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMErebor": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMEscape": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMEvil": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMFireWater": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMFlashback": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMFliesSpiders": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMGandalf": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMGathering": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMGiants": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMInterrogation": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMJailbreak": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMKili": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMLodgings": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMMirkwood": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMMoonRunes": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMMutton": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMOrcs": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMParty": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMRadagast": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMResurgence": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMRiddles": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMRing": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BMThief": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "BookMode": {
+    "timer": "Mode::set_time",
+    "points": "own score_and_total",
+    "shots": true
+   },
+   "Mode": {
+    "timer": "Mode::set_time",
+    "points": "Mode::score_and_total",
+    "shots": false
+   }
+  },
+  "live": ""
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,
@@ -59,7 +263,7 @@
  "defaults": {
   "start": "switch_ramp_left_made",
   "shots": "switch_ramp_left_made switch_ramp_right_made",
-  "lamps": "",
+  "lamps": "lp_gi_ramp_left_low",
   "font_title": "font_final_title",
   "font_value": "font_mode_total",
   "font_timer": "font_ff_timer",

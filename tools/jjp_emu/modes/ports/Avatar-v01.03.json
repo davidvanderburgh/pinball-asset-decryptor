@@ -19,6 +19,12 @@
   "_ZN11SoundEffect4playEv"
  ],
  "mode_vtable": {},
+ "hold": {
+  "can_hold": false
+ },
+ "stock": {
+  "can_change": false
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": false,

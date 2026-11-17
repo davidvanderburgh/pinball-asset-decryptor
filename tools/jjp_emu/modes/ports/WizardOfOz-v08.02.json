@@ -17,6 +17,12 @@
   "_ZN4Mode25hook_do_mode_start_choreoEv"
  ],
  "mode_vtable": {},
+ "hold": {
+  "can_hold": false
+ },
+ "stock": {
+  "can_change": false
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": false,

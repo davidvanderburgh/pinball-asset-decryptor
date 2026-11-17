@@ -252,3 +252,58 @@ def test_a_random_card_on_top_sends_each_game_once_and_sits_first(monkeypatch, t
     games = [words[i + 1] for i, w in enumerate(words) if w in ("--primary", "--extra")]
     assert games == [multiboot_core.wsl(p) for p in paths]
     assert words[words.index("--group-over") + 1] == "0-3|RANDOM|"
+
+
+# ------------------------------------------------------------------ PAD-1386: a swapped image
+def test_a_swapped_image_on_an_updatable_card_is_not_sent_to_a_fresh_build():
+    """The line under the path said 'only a fresh card can carry that' for every image-list
+    change - over the very card the dialog offers to update in place.  On a card with a
+    record it names the update and says only the files that differ are written."""
+    card = "D:/Pinball/multi/godzilla.multi.raw"
+    old = multiboot_core.edit_status_text(card, [], ["an image was replaced"])
+    assert "only a fresh card" in old
+    new = multiboot_core.edit_status_text(card, ["title"], ["an image was replaced"], updatable=True)
+    assert new.startswith("The image list changed (an image was replaced)")
+    assert multiboot_core.APPLY_TICK in new and "godzilla.multi.raw" in new
+    assert "fresh card" not in new and "files that differ" in new
+    assert "1 menu change rides along: title." in new
+    kind, text, tone, _r = multiboot_core.card_path_state(
+        card, {"kind": "file"}, (), card, [], ["an image was replaced"], updatable=True)
+    assert kind == "loaded" and tone == "fg" and "files that differ" in text
+    kind, text, tone, _r = multiboot_core.card_path_state(
+        card, {"kind": "file"}, (), card, [], ["an image was replaced"])
+    assert tone == "error" and "only a fresh card" in text
+
+
+def _tab(**kw):
+    import types
+    t = types.SimpleNamespace(_backend=types.SimpleNamespace(key="stern"), _loaded_card="c.raw",
+                              _card_device=None, _loaded_trees={"free": 1}, _update_info=None,
+                              _busy=False, errors=[], updated=[])
+    t.__dict__.update(kw)
+    t._error = t.errors.append
+    t._on_loaded_path = lambda: True
+    t.form = lambda: "FORM"
+    t._loaded_diff = lambda form: ([], ["an image was replaced"])
+    t.update_card = lambda after=None: t.updated.append(after) or True
+    t._updatable_in_place = lambda: multiboot_core.MultibootPanel._updatable_in_place(t)
+    return t
+
+
+def test_updatable_in_place_is_a_stern_file_card_with_a_record_the_tool_did_not_refuse():
+    upd = multiboot_core.MultibootPanel._updatable_in_place
+    assert upd(_tab())
+    assert not upd(_tab(_loaded_trees=None))                    # built before the record
+    assert not upd(_tab(_card_device="PhysicalDrive3"))  # read off the reader
+    assert not upd(_tab(_update_info={"refused": "no room"}))
+    assert not upd(_tab(_loaded_card=""))
+    assert not upd(_tab(_backend=__import__("types").SimpleNamespace(key="jjp")))
+
+
+def test_apply_hands_a_swapped_image_to_the_in_place_update():
+    t = _tab()
+    assert multiboot_core.MultibootPanel.apply_to_card(t, after="AFTER") is True
+    assert t.updated == ["AFTER"] and t.errors == []
+    t = _tab(_loaded_trees=None)
+    assert multiboot_core.MultibootPanel.apply_to_card(t) is False
+    assert t.updated == [] and "build a fresh card" in t.errors[0]

@@ -5124,14 +5124,30 @@ def media_specs_changed(before, after):
     return any(f in MEDIA_FIELDS for f in _menu_fields(before, after))
 
 
-def edit_status_text(card, menu, rebuild):
+def edit_status_text(card, menu, rebuild, updatable=False):
     """The tab's one line about a loaded card: what updating it would write,
     or why only a fresh card can.
+
+    *updatable* is whether the card can take an image-list change IN PLACE
+    (a Stern card carrying the record ``update`` diffs against, read off a
+    file rather than the reader).  Such a card does not need a fresh build
+    for a replaced, added, removed or reordered image: the update writes only
+    the files that differ (PAD-1386), and saying 'only a fresh card can'
+    over it sent people - and a ticket - to rebuild every image for nothing.
 
     ONE BRANCH of :func:`card_path_state` rather than a second opinion: the
     row's verb and the sentence under it are derived from the same call, so
     they cannot come to disagree about which card is being edited."""
     name = os.path.basename(card) or card
+    if rebuild and updatable:
+        msg = ("The image list changed (%s) - %s writes only what changed "
+               "into %s: the files that differ, not every image again."
+               % ("; ".join(rebuild), APPLY_TICK, name))
+        if menu:
+            msg += "  %d menu change%s ride%s along: %s." % (
+                len(menu), "" if len(menu) == 1 else "s",
+                "s" if len(menu) == 1 else "", ", ".join(menu))
+        return msg
     if rebuild:
         msg = ("The image list changed (%s) - only a fresh card can carry "
                "that; %s rewrites the menu of %s and nothing else."
@@ -5461,7 +5477,7 @@ def status_checks(rows, path_state, loaded_card, menu=(), rebuild=(),
 
 
 def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
-                    rebuild=(), platform="stern"):
+                    rebuild=(), platform="stern", updatable=False):
     """What the card path is pointing at, in one sentence:
     ``(kind, sentence, tone, can_read)`` - ``can_read`` being whether there
     is a card at this path that reading would make sense of.  It used to
@@ -5530,8 +5546,9 @@ def card_path_state(field, facts, rows=(), loaded_card="", menu=(),
     # of leaving both writing buttons refusing (see :func:`probe_card_path`).
     if loaded_card and (_plain(loaded_card) == here
                         or (facts or {}).get("loaded")):
-        return ("loaded", edit_status_text(loaded_card, menu, rebuild),
-                "error" if rebuild else "fg", True)
+        return ("loaded", edit_status_text(loaded_card, menu, rebuild,
+                                           updatable),
+                "error" if (rebuild and not updatable) else "fg", True)
 
     kind = (facts or {}).get("kind") or "unknown"
     if kind == "badname":
@@ -7851,6 +7868,28 @@ class MultibootPanel:
         """``stern`` or ``jjp`` - which builder, which words, which medium."""
         return self._backend.key
 
+    def _upk(self):
+        """``updatable=True`` for :func:`card_path_state` when the loaded card
+        can take an image-list change in place - and NOTHING otherwise, for
+        the same reason as :meth:`_pk`: the tests stub these functions with
+        their old signatures."""
+        return {"updatable": True} if self._updatable_in_place() else {}
+
+    def _updatable_in_place(self):
+        """Whether the loaded card takes a replaced, added, removed or
+        reordered image by the in-place update rather than a fresh build:
+        a Stern card read off a FILE (the reader's copy holds only its menu
+        here) that carries the record the update diffs against, and that
+        the tool has not already refused.  The same test the write dialog's
+        'Update the loaded card in place' makes (:meth:`_write_plan`)."""
+        if self._backend.key != "stern" or not self._loaded_card:
+            return False
+        if getattr(self, "_card_device", None) \
+                or getattr(self, "_loaded_trees", None) is None:
+            return False
+        upd = getattr(self, "_update_info", None)
+        return not (upd or {}).get("refused")
+
     def _pk(self):
         """The ``platform=`` keyword for the module functions - and NOTHING
         on the Stern platform, so every call the Stern tests stub with the
@@ -8657,7 +8696,7 @@ class MultibootPanel:
             menu, rebuild = self._loaded_diff()
         facts = self._facts_now(field)
         state = card_path_state(field, facts, self._rows, self._loaded_card,
-                                menu, rebuild, **self._pk())
+                                menu, rebuild, **self._pk(), **self._upk())
         built = None
         if self._built is not None and _plain(self._built[0]) == _plain(field):
             built = diff_forms(self._built[1], self.form())
@@ -11684,6 +11723,11 @@ class MultibootPanel:
             return False
         form = self.form()
         menu, rebuild = self._loaded_diff(form)
+        if rebuild and self._updatable_in_place():
+            # A REPLACED IMAGE IS NOT A FRESH CARD (PAD-1386): this card
+            # carries the record the in-place update diffs against, so the
+            # list change goes in as the files that differ, with the menu.
+            return self.update_card(after=after)
         if rebuild:
             self._error(
                 "The image list changed (%s). Updating in place only "
@@ -11889,7 +11933,7 @@ class MultibootPanel:
             menu, rebuild = self._loaded_diff()
         kind, _text, _tone, can_read = card_path_state(
             field, self._facts_now(field), self._rows, self._loaded_card,
-            menu, rebuild, **self._pk())
+            menu, rebuild, **self._pk(), **self._upk())
         # (The 'unticking the bypass cannot un-patch a card' note is gone
         # with the bypass tick itself - the bypass is always on now, so it
         # can never be untied.  The Apply-vs-Build decision that used to
@@ -11962,7 +12006,7 @@ class MultibootPanel:
         upd = self._update_info if (editing and not self._card_device) else None
         refused = (upd or {}).get("refused") if upd else None
         stale = [i for i, (n, nbytes, action) in ((upd or {}).get("files") or {}).items()
-                 if not refused and (nbytes > 0 or action in ("new", "remove", "rename", "sync"))]
+                 if not refused and (nbytes > 0 or action in ("new", "remove", "rename", "sync", "replace"))]
         updatable = editing and self._loaded_trees is not None
         if editing and updatable and refused:
             # THE TOOL WOULD NOT UPDATE THIS CARD IN PLACE, and said why: a

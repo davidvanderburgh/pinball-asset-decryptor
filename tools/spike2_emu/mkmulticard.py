@@ -5958,6 +5958,43 @@ def _update_locked(a, ts, card, dry):
             actions = [swap.get(id(a_), a_) for a_ in actions
                        if a_.action != "remove" or a_.old_index in still_removed]
             by_index = {a_.index: a_ for a_ in actions if a_.action != "remove"}
+    # AN IMAGE SWAPPED FOR ANOTHER IN THE SAME SLOT IS THAT SLOT'S TREE, CHANGED (PAD-1386).
+    # Read as new, the slot's old tree was removed and the new one written whole - every
+    # file copied again, though a new build of the same game (a project's edited image, a
+    # newer code version) shares nearly all of them, and a parts card's partition had no
+    # room for both trees at once.  A new image no path, stamp or tree claimed takes the
+    # removed tree at its own position: the diff then writes only the files that differ
+    # and removes the ones the new image lacks, exactly as for a source edited in place.
+    # Done AFTER the same-tree matching above, so an image that merely moved (another path,
+    # another slot) is still kept or renamed rather than diffed against its neighbour.
+    replaced = set()
+    if any(a_.action == "remove" for a_ in actions):
+        pair, taken = {}, set()
+        for act in [a_ for a_ in actions if a_.action == "new" and a_.index != 0]:
+            rem = next((r for r in actions if r.action == "remove" and r.old_index == act.index
+                        and id(r) not in taken), None)
+            im = rec.image(act.index) if rem is not None else None
+            if im is None:
+                continue
+            taken.add(id(rem))
+            kept = ts.TreeAction(act.index, act.device, im.sub, act.new_sub,
+                                 "keep" if im.sub == act.new_sub else "rename", im.index)
+            t_, st_, uuid_, _old = new_trees[act.index]
+            new_trees[act.index] = (t_, st_, uuid_, im)
+            if im.bypass:
+                # the card holds the bypass's game and .sidx: a new image that is the card's
+                # own content (recovered off it) writes nothing for them
+                on_card = tree_as_on_card(im)
+                if not ts.diff_tree(on_card, t_):
+                    rematched[act.index] = on_card
+            replaced.add(act.index)
+            say("image %d: %s replaces %s - only the files that differ are written"
+                % (act.index, os.path.basename(sources[act.index]),
+                   os.path.basename((im.stamp or {}).get("path", "")) or "the image built there"))
+            pair[id(act)] = kept
+        if pair:
+            actions = [pair.get(id(a_), a_) for a_ in actions if id(a_) not in taken]
+            by_index = {a_.index: a_ for a_ in actions if a_.action != "remove"}
     for act in actions:
         if act.action == "remove":
             im = rec.image(act.old_index)
@@ -6082,6 +6119,8 @@ def _update_locked(a, ts, card, dry):
         n = len([c for c in ch if c.op != "attr_dir"]) + len(pend)
         touched[i] = [c.rel for c in ch if c.op == "write"]
         action = act.action if act.action != "keep" else ("sync" if ch else ("bypass" if pend else "keep"))
+        if i in replaced and action in ("keep", "sync", "rename"):
+            action = "replace"
         u["files"].append((i, act.device, n, adds, action, os.path.basename(path)))
     removed_bytes = 0
     for act in actions:
@@ -9181,6 +9220,51 @@ def selftest(d, selector_file=None):
     ok &= verify_card(out3, plan3, sel, mode="full")
     print("== update: a parts card refuses a list change")
     ok &= main(["update", "--card", out3, "--primary", v0, "--extra", v2, "--extra", V[1], "--dry-run"]) == 2
+
+    def swap_one(card, primary, extras, slot, title, flags, tag):
+        """PAD-1386: image *slot* swapped for a copy at another path holding one more file
+        -> a 'replace' row writing that one file, not the image again; the card verifies
+        against the new list; then swapped back, which writes nothing and removes it."""
+        good = True
+
+        def check(cond, detail):
+            if not cond:
+                print("swap %s FAILED: %s" % (tag, detail))
+            return bool(cond)
+        src = extras[slot - 1]
+        dst = os.path.join(d, "swap_%s_%d.img" % (tag, slot))
+        shutil.copyfile(src, dst)
+        _t, sts, _cnt = Geometry.from_file(dst).part(3)
+        payload = os.path.join(d, "swap_%s.bin" % tag)
+        with open(payload, "wb") as f:
+            f.write(b"S" * 50000)
+        debugfs_write_script(fs_ref(dst, sts * SECTOR), ["write %s /%s/swapped.bin" % (dq(payload), title),
+                                                         "set_inode_field /%s/swapped.bin mode 0100644" % title])
+        new = list(extras)
+        new[slot - 1] = dst
+        for want_size, lst in ((50000, new), (0, list(extras))):
+            args = ["update", "--card", card, "--primary", primary]
+            for x in lst:
+                args += ["--extra", x]
+            args += ["--selector-dir", sel] + flags
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(args + ["--dry-run"])
+            dry = buf.getvalue()
+            rows = [ln.split() for ln in dry.splitlines() if ln.startswith("update-files ")]
+            row = [r for r in rows if r[1] == str(slot)]
+            good &= check(rc == 0 and len(row) == 1 and row[0][5] == "replace" and row[0][3] == "1", rows)
+            good &= check(bool(row) and int(row[0][4]) == want_size, rows)
+            good &= check(("update-size %d" % want_size) in dry, dry)
+            good &= check(not any(r[5] in ("new", "remove") for r in rows), rows)
+            good &= main(args) == 0
+            good &= verify_card(card, verify_plan(card, [primary] + lst), sel, mode="full")
+            good &= ts.stamps_equal(read_trees(card).images[slot].stamp, ts.source_stamp(lst[slot - 1]))
+        print("== update (%s): image %d swapped for another file and back - one file each way: %s"
+              % (tag, slot, "PASS" if good else "FAIL"))
+        return good
+
+    ok &= swap_one(out3, v0, [v2], 1, "turtles_pro", [], "parts")
     print("== update: a primary that is another build is refused by the gate")
     other = os.path.join(d, "other.img")
     shutil.copyfile(v0, other)
@@ -9266,6 +9350,7 @@ def selftest(d, selector_file=None):
     finally:
         losetup_detach(loop)
         os.rmdir(foreign)
+    ok &= swap_one(out2, A, [C, B], 2, "B_title", ["--allow-version-mismatch"], "multi")
     print("SELFTEST part 5 (update)", "PASS" if ok else "FAIL")
 
     # ------------------------------------------------- part 6: the store layout (item 95), root only
@@ -9403,6 +9488,7 @@ def selftest(d, selector_file=None):
     ok &= debugfs_cat(ref3, "/A_title/newa.bin") == b"C" * 40000
     ok &= i0["A_title/newa.bin"] == i1["C_title/only.bin"] and i0["A_title/newa.bin"][1] == 3
     ok &= verify_card(out6, verify_plan(out6, [A, C, B]), sel, mode="full")
+    ok &= swap_one(out6, A, [C, B], 2, "B_title", ["--allow-version-mismatch"], "store")
     print("== a raw bypass of a store card is refused")
     ok &= main(["bypass", "--card", out6, "--dry-run"]) == 2
     print("SELFTEST part 6 (store)", "PASS" if ok else "FAIL")

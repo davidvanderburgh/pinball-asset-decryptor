@@ -49,6 +49,49 @@ _CREATE_FLAGS = (
 # the pipeline forever.
 _EXTRACT_TIMEOUT_S = 600
 
+# Windows' own codes for "the antivirus will not let this program run":
+# ERROR_VIRUS_INFECTED and ERROR_VIRUS_DELETED.
+_AV_WINERRORS = (225, 226)
+
+# The last reason a DCS tool could not run (missing, or blocked by the
+# antivirus), so a caller that only saw "not a DCS ROM" can say why.
+_tool_problem: Optional[str] = None
+
+
+def missing_tool_message(tool: str) -> str:
+    """Why *tool* ("DCSExplorer" / "DCSEncoder") is not there, in words a
+    user can act on (PAD-1391).  Antivirus programs flag these unsigned,
+    rarely seen tools (Norton: "Trojan.Gen.MBT") and quarantine them;
+    PAD's copies are the upstream v1.1 release byte for byte."""
+    if sys.platform == "win32":
+        return (f"{tool}.exe is missing from PAD's folder. Antivirus "
+                f"programs sometimes remove it by mistake: it is the "
+                f"open-source DCS sound tool by mjrgh "
+                f"(github.com/mjrgh/DCSExplorer), shipped unchanged. "
+                f"Restore it from your antivirus quarantine, or reinstall "
+                f"PAD.")
+    return (f"{tool} is not installed (PAD bundles it only on Windows); "
+            f"put it on PATH.")
+
+
+def launch_error_message(tool: str, exc: BaseException) -> str:
+    """Why *tool* failed to start, for the log (PAD-1391)."""
+    if isinstance(exc, FileNotFoundError):
+        return missing_tool_message(tool)
+    if getattr(exc, "winerror", None) in _AV_WINERRORS:
+        return (f"your antivirus blocked {tool}.exe from running. It is "
+                f"the open-source DCS sound tool by mjrgh "
+                f"(github.com/mjrgh/DCSExplorer), shipped unchanged.")
+    return f"{tool} failed to launch: {exc}"
+
+
+def tool_problem() -> Optional[str]:
+    """The reason DCS audio cannot be decoded here, or None if
+    DCSExplorer is present and last started fine."""
+    if find_dcs_explorer() is None:
+        return missing_tool_message("DCSExplorer")
+    return _tool_problem
+
 
 @dataclass
 class DcsTrack:
@@ -153,6 +196,7 @@ def is_dcs_rom(zip_path: str) -> bool:
 
 
 def _probe_is_dcs(zip_path: str) -> bool:
+    global _tool_problem
     exe = find_dcs_explorer()
     if exe is None or not os.path.isfile(zip_path):
         return False
@@ -161,8 +205,12 @@ def _probe_is_dcs(zip_path: str) -> bool:
             [exe, "--info", zip_path],
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
             timeout=60, creationflags=_CREATE_FLAGS)
-    except (subprocess.TimeoutExpired, OSError):
+    except subprocess.TimeoutExpired:
         return False
+    except OSError as e:
+        _tool_problem = launch_error_message("DCSExplorer", e)
+        return False
+    _tool_problem = None
     out = (proc.stdout or "") + "\n" + (proc.stderr or "")
     if "could be identified as ROM U2" in out:
         return False
@@ -218,7 +266,8 @@ def extract_dcs(rom_zip_path: str, output_dir: str,
     if exe is None:
         return DcsResult(
             is_dcs=False,
-            message="DCSExplorer not available — skipping DCS audio.")
+            message=("DCS audio skipped: "
+                     + missing_tool_message("DCSExplorer")))
 
     created_dir = not os.path.isdir(output_dir)
     os.makedirs(output_dir, exist_ok=True)
@@ -252,7 +301,8 @@ def extract_dcs(rom_zip_path: str, output_dir: str,
     except OSError as e:
         _cleanup_empty()
         return DcsResult(
-            is_dcs=False, message=f"DCSExplorer failed to launch: {e}")
+            is_dcs=False, message=("DCS audio skipped: "
+                                   + launch_error_message("DCSExplorer", e)))
 
     out = (proc.stdout or "") + "\n" + (proc.stderr or "")
 

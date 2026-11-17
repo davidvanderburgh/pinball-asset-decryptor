@@ -27,6 +27,30 @@ S=$RIG
 # never put under games/, a working copy, a network share. Same bind mount, one
 # fewer step. Both take a title that is not in the rootfs and put it there for
 # the length of the run without copying it.
+# ★ PAD-1279: A PAD TEST CARD'S MENU IS THE CARD'S OWN, AS IT IS. There are no
+# games trees to resolve and none to boot: the selector reads testcard=on and
+# stays in its TEST CARD menu, showing the files under test_dir=/games/testcard -
+# which is this run's title bind (cardmount.sh answers <p3>/testcard as the title
+# of a test card, watch.sh exports PAD_TESTCARD=1). So the card's images.conf goes
+# over verbatim but for media= and font= (paths on the card's rootfs, handed over
+# with --media exactly as for any card), with its media, and SEL_DIRS names the
+# one bind that is already in place. Called from the selector block below.
+sel_testcard() {
+    python3 "$S/parts.py" --rootfs-file /usr/local/codeselect/images.conf "$PAD_CARD" 2>/dev/null \
+        | tr -d '\r' | grep -vE '^[[:space:]]*(media|font)[[:space:]]*=' > "$R/dump/codeselect.conf"
+    : > "$R/dump/codeselect.cardidx"
+    rm -rf "$R/dump/media" 2>/dev/null
+    python3 "$S/parts.py" --rootfs-dir /usr/local/codeselect/media "$R/dump" "$PAD_CARD" >/dev/null 2>&1
+    if [ "$(id -u)" = 0 ] && [ -d "$R/dump/media" ]; then
+        local o
+        o=$(stat -c %U "$PAD_HOME" 2>/dev/null)
+        [ -n "$o" ] && [ "$o" != root ] && chown -R "$o" "$R/dump/media" 2>/dev/null
+    fi
+    SEL_N=1
+    SEL_DIRS="testcard"$'\t'"$CARD_SRC"$'\n'
+    echo "[select] a PAD test card: its own menu, $(grep -cE '^[[:space:]]*test_(image|video|scene|sound)[[:space:]]*=' "$R/dump/codeselect.conf") file(s) of its own in /games/testcard, $( [ -d "$R/dump/media" ] && ls "$R/dump/media" | wc -l || echo 0) media file(s)"
+}
+
 CARD_SRC=""
 if [ -n "${PAD_CARD:-}" ]; then
     CARD_SRC=$(bash "$S/cardmount.sh" "$PAD_CARD" | tail -1)
@@ -123,6 +147,13 @@ if [ -n "${PAD_CARD:-}" ]; then
         }
         [ -x "$PAD_SELECT_BIN" ] \
             || sel_giveup "the boot selector is not built ($PAD_SELECT_BIN is missing)"
+        # PAD-1279: a test card's menu is the card's own (sel_testcard, above);
+        # SEL_GIVEUP=1 then only skips the multi-boot steps - SEL_DIRS stays set,
+        # so the selector below still runs.
+        if [ -z "$SEL_GIVEUP" ] && [ "${PAD_TESTCARD:-}" = 1 ]; then
+            sel_testcard
+            SEL_GIVEUP=1
+        fi
         if [ -z "$SEL_GIVEUP" ]; then
             SEL_LIST=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null)
             [ -n "$SEL_LIST" ] \
@@ -854,6 +885,12 @@ if [ -n "$SEL_DIRS" ]; then
             echo "[select]   the primary." >&2
             exit "$SEL_RC" ;;
     esac
+    # PAD-1279: a test card has no game to fall back to; its menu ending (it
+    # only does by a fault) is the end of the run.
+    if [ "${PAD_TESTCARD:-}" = 1 ]; then
+        echo "[select] the test card menu ended (exit $SEL_RC); a test card boots no game" >&2
+        exit "$SEL_RC"
+    fi
     SEL_CHOICE=$(head -1 "$R$PAD_SELECT_CHOICE" 2>/dev/null | tr -dc '0-9')
     SEL_DIR=""; SEL_IDX=""; SEL_PRIMARY_DIR=""; n=0
     while IFS=$'\t' read -r idx d; do

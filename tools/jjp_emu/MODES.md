@@ -71,7 +71,7 @@ lamp_blink = 4
 | `add_ball` | none | `<switches> [times]`: each hit while the mode runs asks the game for one more ball, up to `times` (1-6, 1 when absent) a run, with the multiball's ball save (2 s, the game's own, when shorter). Works in a mode without a `multiball` line too |
 | `ball_save` | none | `<s>` (1-120): when the mode starts, a ball that drains in that time is served back. Ends with the mode, unless the game raised the save past ours (then the game's runs on) |
 | `coil_start`, `coil_shot`, `coil_complete` | none | `<coil> [ms]`: pulse that coil when the mode starts, on each scoring shot, on completion. `ms` can only shorten the coil's own pulse (the time the game built it with) |
-| `coil_hold` | none | `<coil> <ms> [power]`: hold a magnet, diverter, post, gate, shaker or light on for 100-5000 ms: a full-on kick (the coil's own pulse, at most 50 ms), then on `power` of every 32 steps (1-16, 8 when absent). Off at its time, at the mode's end or pause, at the ball's end. Needs `coil_holds = on` in title.cfg |
+| `coil_hold` | none | `<coil> <ms> [power]`: hold a magnet, diverter, post, gate, shaker or light on for 100-5000 ms, on `power` of every 32 steps (1-16, 8 when absent). Off at its time, at the mode's end or pause, at the ball's end. Needs `coil_holds = on` in title.cfg |
 | `coil_hold_on` | shots | `shots` (each scoring shot), `start`, or switch(es) of its own |
 
 ### title.cfg only
@@ -96,12 +96,13 @@ title that can run modes (`can_balls` and `can_coils` in its port report):
   mode's `multiball`, `ball_save` and `add_ball` are the same calls. A multiball
   of the mode's own does not make it pause (the game's multiballs still do).
 * **Coils.** A coil is a named `coil_*` global in the engine's `coil_table`. A
-  pulse is `Coil::coil_pulse`; a hold is `Coil::coil_duty` (a kick, then a
-  32-step on/off pattern the game's realtime loop plays) and `Coil::coil_off`.
-  The engine plays a hold **for ever**: nothing in it ends one. So the runtime
-  ends every hold itself, from a watchdog thread of its own that checks every
-  5 ms and does not depend on the mode ticking (the game stops a mode's run proc
-  at the ball's end).
+  pulse is `Coil::coil_pulse`; a hold is `Coil::coil_duty(ms, pattern, 32)`:
+  the game's realtime loop plays the 32-step on/off pattern for that long and
+  then turns the coil off itself, so the engine bounds every hold even if the
+  runtime stopped (measured on Wonka 03.03). The runtime ends a hold sooner
+  when it should, and at its time at the latest, from a watchdog thread of its
+  own that checks every 5 ms and does not depend on the mode ticking (the game
+  stops a mode's run proc at the ball's end); `Coil::coil_off` turns it off.
 
 The limits are in the runtime; no mode file can raise them (the guardrails of
 Spike 2's PAD-381):
@@ -111,7 +112,7 @@ Spike 2's PAD-381):
 | Coils a mode may never fire | the game's own ball handling, flippers and power, by name: `flipper`, `trough`, `autolaunch`, `auto_launch`, `autoplunge`, `plunger`, `sling`, `jet`, `bumper`, `stepper`, `relay`, `power`, `ticket`, `null`, `motor` (the shaker motor excepted), and whatever coil the game's `hook_trough_coil`, `hook_autoplunger_coil` or `hook_trough_jam_coil` names |
 | Coils a mode may hold | names with `magnet`, `divert`, `post`, `gate`, `shaker`, `flash`, `lamp`, `light` or `led`; every other allowed coil is pulse only |
 | A pulse | never longer than the coil's own pulse (1000 ms at most); 250 ms between two pulses of one coil; 20 a minute per coil |
-| A hold | 100-5000 ms; a kick of at most 50 ms, then at most 16 of 32 steps on; 3 s off between holds of one coil; 6 a minute per coil |
+| A hold | 100-5000 ms, timed by the engine itself; at most 16 of 32 steps on; 3 s off between holds of one coil; 6 a minute per coil |
 | Off | at its time, the mode's end or pause, the ball's end (tilt included), from the watchdog |
 | The game always wins | a coil the game is driving is not fired or held (`the game is driving it`); a hold the game takes over is left to the game, with no off sent over it |
 | No ball in play | nothing is fired or held |
@@ -233,3 +234,45 @@ build, covered by Guns N' Roses.
 binaries export only C library and Allegro names. The runtime finds everything
 by name, and their code is ciphertext until the title's own key decrypts it,
 so nothing can be mapped without that key. Custom modes on them need their keys.
+
+### Balls and coils on every title (PAD-1353)
+
+**Emulator, Wonka 03.03** (hidden, muted, the rig's ball feeder run headless so served
+balls reach the playfield; `C:\tmp\PAD-1353\proof.sh`), 2026-11-17:
+
+* `multiball = 3 8`: `3 ball(s) in play asked for (1 in play)`, the trough kicked two
+  balls and the game counted 3 in play. `add_ball` took it to 4; the second hit was
+  refused (`already 1 this run`). A drain inside the ball save was served straight back
+  (the trough kicked within 0.6 s, the count stayed at 4). After the save, drains to one
+  ball ended the mode (`ENDED by one ball left`), the game playing on. The mode did not
+  pause for its own multiball.
+* `ball_save = 15`: on at the start; the mode completed 1 s later and the save ended with
+  it (`ball save ended with the mode`).
+* Pulses: the knocker fired at the start and on each shot at its own 32 ms (`500` asked:
+  `the game's own pulse is the most`). `coil_flipper_power_left` and
+  `coil_motor_gobstopper` were refused and never driven (the sampler of the board's OUT
+  frames saw nothing on them).
+* Holds: `coil_magnet_left_lane 1500 8` drove 1520 ms at 25 % on (sampled) and went off at
+  its time; a shot inside it was refused (`it is held already`), one 1 s after it
+  (`3 s off between holds`). `coil_magnet_1 3000 4` (12-14 % on, sampled) went off when its
+  mode completed at 1180 ms; `coil_magnet_2 5000` went off at the ball's end at 1614 ms.
+
+**Every other title, statically** (2026-11-17): each title's port report has the ball
+saver and Coil API (`can_balls`, `can_coils`), its starter folder (now with a
+`2_multiball.mode`) passes `mkjjpmodes.py check --port`, and the library loads with every
+import bound (`LD_BIND_NOW`) on the title's own root where it is cached:
+
+| Image | Named coils | A mode may pulse | ...and hold | Library loads |
+|---|---|---|---|---|
+| Guns N' Roses 03.03 | 33 | 15 | 10 | yes |
+| CHAKA's LOTLJ GnR LE 3.03 | 33 | 15 | 10 | yes |
+| Elton John 02.03 | 42 | 23 | 6 | yes |
+| Godfather 02.03 | 45 | 24 | 7 | glibc 2.34, as the build checks |
+| Wonka 03.03 | 46 | 24 | 14 | yes, emulator-proven |
+| Pirates of the Caribbean 01.01 | 50 | 28 | 13 | glibc 2.34, as the build checks |
+| Dialed In 02.02 | 38 | 20 | 10 | yes |
+| The Hobbit 04.02 | 68 | 43 | 13 | yes |
+| Toy Story 02.04 | 43 | 22 | 8 | yes |
+
+Coil holds stay off on every title until its `title.cfg` says `coil_holds = on`: the
+emulator proves what the game was asked to drive, not what a real coil does with it.

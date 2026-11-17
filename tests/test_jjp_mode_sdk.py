@@ -302,6 +302,6 @@ def test_runtime_hard_limits_are_the_documented_ones():
     lim = dict(re.findall(r"#define (COIL_[A-Z_]+) +(\d+)\b", src))
     assert lim == {"COIL_PULSE_GAP_MS": "250", "COIL_PULSES_A_MIN": "20", "COIL_PULSE_MAX_MS": "1000",
                    "COIL_HOLD_MIN_MS": "100", "COIL_HOLD_MAX_MS": "5000", "COIL_HOLD_COOL_MS": "3000",
-                   "COIL_HOLDS_A_MIN": "6", "COIL_HOLD_POWER_MAX": "16", "COIL_KICK_MAX_MS": "50"}
-    for phrase in ("250 ms", "20 a minute", "100-5000 ms", "3 s off", "6 a minute", "16 of 32", "50 ms"):
+                   "COIL_HOLDS_A_MIN": "6", "COIL_HOLD_POWER_MAX": "16"}
+    for phrase in ("250 ms", "20 a minute", "100-5000 ms", "3 s off", "6 a minute", "16 of 32"):
         assert phrase in doc, phrase

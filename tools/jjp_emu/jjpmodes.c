@@ -176,7 +176,8 @@ typedef struct {
     long long total;
     int running_seen;
     int mb_served, mb_seen2, adds, saver_ours;
-    long mb_served_at, one_ball_since, saver_until;
+    long mb_served_at, one_ball_since;
+    int saver_cs;              /* the saver's time left (1/100 s) just after our last request */
 } pm_t;
 
 static pm_t pms[MAX_MODES];
@@ -263,10 +264,11 @@ static int lamp_like(void *o);
 /* ---- coils (PAD-1353): which a mode may touch, decided here, never by the file ----
  * A JJP coil is a named `Coil` global (coil_magnet_1, coil_vuk_tv...) in the
  * engine's coil_table: +0x08 its label, +0x10 the pulse ms the game built it
- * with, +0x28 what it is doing (0 off, 3 a pulse, 4 a kick then a duty-cycled
- * hold, 2 the hold), +0x3c the hold's 32-step on/off pattern.  coil_realtime
- * plays a hold FOREVER: nothing in the engine ends one, so every hold of ours
- * is ended by us (the watchdog below), never left to the game.  The lists are
+ * with, +0x28 what it is doing (0 off, 3 a pulse, 4 a duty-cycled hold for
+ * +0x30 ms, 2 a duty-cycled hold with no end), +0x3c the hold's 32-step on/off
+ * pattern.  A hold of ours is always the timed kind (state 4), so the engine
+ * ends it by itself; the watchdog below ends it sooner when it should, and at
+ * its time at the latest.  The lists are
  * by name, as JJP names its coils on every title, and jjpport.py carries the
  * same lists (tests hold the two together). */
 static const char *const COIL_NEVER[] = {      /* the game's own ball handling and flippers */
@@ -284,7 +286,6 @@ static const char *const COIL_HOLDABLE[] = {   /* built to stay on: magnets, div
 #define COIL_HOLD_COOL_MS   3000    /* off at least this long between holds */
 #define COIL_HOLDS_A_MIN    6
 #define COIL_HOLD_POWER_MAX 16      /* of 32: at most half on */
-#define COIL_KICK_MAX_MS    50      /* the full-on start of a hold */
 #define COIL_OBJ_STATE 0x28
 #define COIL_OBJ_PATTERN 0x3c
 #define MAX_COILS 32
@@ -964,20 +965,23 @@ static int in_game(void);
 
 static int ball_api(void) { return mb_request && mb_add && balls_in_play; }
 
-static void saver_note(pm_t *m, int secs)
+/* Right after a request of ours: the saver's own clock, which only counts down
+ * (in the game's time, not the wall's: the hidden rig runs slow) unless someone
+ * asks again.  A request that did not raise it (the game's ran longer) is not ours. */
+static void saver_note(pm_t *m, int before)
 {
-    long until = now_ms() + secs * 1000L;
-    m->saver_ours = 1;
-    if (until > m->saver_until) m->saver_until = until;
+    int t = saver_time && saver_running && saver_running() ? saver_time() : 0;
+    if (t > before) { m->saver_ours = 1; m->saver_cs = t; }
 }
+static int saver_now(void) { return saver_time && saver_running && saver_running() ? saver_time() : 0; }
 
 static void serve_multiball(pm_t *m, const char *why)
 {
     if (!ball_api()) { lg("\"%s\": MULTIBALL refused: this game exports no ball saver to ask", m->name); return; }
-    int bip = balls_in_play(), known = balls_known ? balls_known() : -1;
+    int bip = balls_in_play(), known = balls_known ? balls_known() : -1, before = saver_now();
     mb_request(m->mb_balls, m->mb_save * 100);
     m->mb_served = 1; m->mb_served_at = now_ms(); m->one_ball_since = 0;
-    saver_note(m, m->mb_save);
+    saver_note(m, before);
     lg("\"%s\" MULTIBALL on %s: %d ball(s) in play asked for (%d in play, %d accounted for), ball save %d s",
        m->name, why, m->mb_balls, bip, known, m->mb_save);
 }
@@ -987,35 +991,34 @@ static void add_a_ball(pm_t *m, const char *sw)
     if (!ball_api()) { lg("\"%s\": ADD A BALL refused: this game exports no ball saver to ask", m->name); return; }
     if (m->adds >= m->add_max) { lg("\"%s\" add a ball on %s: already %d this run", m->name, sw, m->adds); return; }
     int save = m->mb_save > 2 ? m->mb_save : 2;      /* the game's own add-a-ball saves for 2 s */
-    int bip = balls_in_play();
+    int bip = balls_in_play(), before = saver_now();
     mb_add(1, save * 100);
     m->adds++;
-    saver_note(m, save);
+    saver_note(m, before);
     lg("\"%s\" ADD A BALL on %s (%d of %d): %d in play, ball save %d s", m->name, sw, m->adds, m->add_max, bip, save);
 }
 
 static void ball_save_start(pm_t *m)
 {
     if (!ball_api()) { lg("\"%s\": BALL SAVE refused: this game exports no ball saver to ask", m->name); return; }
-    int bip = balls_in_play();
+    int bip = balls_in_play(), before = saver_now();
     mb_request(bip > 0 ? bip : 1, m->ball_save * 100);
-    saver_note(m, m->ball_save);
+    saver_note(m, before);
     lg("\"%s\" BALL SAVE %d s (%d in play)", m->name, m->ball_save, bip);
 }
 
 /* At the mode's end: a ball save of ours still running stops with it.  The
- * engine has one saver for everyone, so one the game raised past ours (its
- * time left is more than ours would be) is left to run. */
+ * engine has one saver for everyone, so one raised since our last request
+ * (its time left is more than it was then) is the game's, and left to run. */
 static void saver_release(pm_t *m, const char *why)
 {
     if (!m->saver_ours) return;
     m->saver_ours = 0;
     if (!saver_running || !mb_kill_saver || !saver_running()) return;
-    long left = m->saver_until - now_ms();
-    int t = saver_time ? saver_time() : 0;
-    if (t * 10L > left + 2500) {    /* the engine adds 2 s of grace to a save over 1.99 s */
-        lg("\"%s\": the ball save running now is the game's own (%d.%02d s left, ours %ld ms): left to run",
-           m->name, t / 100, t % 100, left > 0 ? left : 0);
+    int t = saver_now();
+    if (t > m->saver_cs) {
+        lg("\"%s\": the ball save was raised since ours (%d.%02d s left, %d.%02d after ours): the game's, left to run",
+           m->name, t / 100, t % 100, m->saver_cs / 100, m->saver_cs % 100);
         return;
     }
     mb_kill_saver();
@@ -1111,7 +1114,9 @@ static void coil_let_go(wc_t *c, const char *why)
     int st = coil_state(c);
     unsigned pat = *(volatile unsigned *)((char *)c->obj + COIL_OBJ_PATTERN);
     long held = now_ms() - c->held_at;
-    if ((st != 4 && st != 2) || pat != c->pattern)
+    if (st == 0 && now_ms() >= c->until - 60)
+        lg("%s: hold ended at its time, %ld ms (the engine's own off)", c->name, held);
+    else if ((st != 4 && st != 2) || pat != c->pattern)
         lg("%s: the game drove it during our hold (state %d after %ld ms): left to the game, no off", c->name, st, held);
     else {
         c_off(c->obj);
@@ -1139,12 +1144,15 @@ static void coil_hold(pm_t *m, const char *why)
     if (no) { lg("\"%s\" %s: %s NOT held (%s)", m->name, why, c->name, no); pthread_mutex_unlock(&coil_mu); return; }
     int ms = m->coil_hold_ms < COIL_HOLD_MIN_MS ? COIL_HOLD_MIN_MS : m->coil_hold_ms > COIL_HOLD_MAX_MS ? COIL_HOLD_MAX_MS : m->coil_hold_ms;
     int pw = m->coil_hold_power < 1 ? 1 : m->coil_hold_power > COIL_HOLD_POWER_MAX ? COIL_HOLD_POWER_MAX : m->coil_hold_power;
-    int kick = c->cap_ms < COIL_KICK_MAX_MS ? c->cap_ms : COIL_KICK_MAX_MS;
     unsigned pat = c_pattern(pw);
-    c_duty(c->obj, (unsigned)kick, pat, 32);
+    /* Coil::coil_duty(ms, pattern, steps): the realtime loop plays the pattern
+     * for ms and then turns the coil off itself (state 4, counting +0x30 down;
+     * Wonka 03.03, emulator-measured).  So the engine bounds the hold too, even
+     * if this library stopped; the watchdog ends it earlier when it should. */
+    c_duty(c->obj, (unsigned)ms, pat, 32);
     c->pattern = *(volatile unsigned *)((char *)c->obj + COIL_OBJ_PATTERN);
     c->owner = m; c->held_at = t; c->until = t + ms; c->holding = 1; c->hwin_n++;
-    lg("\"%s\" %s: HOLD %s %d ms (%d ms kick, then %d/32 on, pattern %08x)", m->name, why, c->name, ms, kick, pw, pat);
+    lg("\"%s\" %s: HOLD %s %d ms at %d/32 on (pattern %08x)", m->name, why, c->name, ms, pw, pat);
     pthread_mutex_unlock(&coil_mu);
 }
 
@@ -1172,7 +1180,7 @@ static void *coil_watch(void *arg)
             int st = coil_state(c);
             unsigned pat = *(volatile unsigned *)((char *)c->obj + COIL_OBJ_PATTERN);
             const char *why = (st != 4 && st != 2) || pat != c->pattern ? "the game"
-                            : t >= c->until ? "its time" : !in_game() ? "ball end"
+                            : t >= c->until + 20 ? "its time" : !in_game() ? "ball end"
                             : !m || !running(m) || m->want_end ? "mode end" : m->paused ? "the mode paused" : NULL;
             if (why) coil_let_go(c, why);
         }
@@ -1290,7 +1298,7 @@ static void start_mode(pm_t *m, int idx)
 {
     if (!build_mode(m, idx)) return;
     m->hits = 0; m->total = 0; m->paused = 0; m->ended_logged = 0; m->running_seen = 1;
-    m->mb_served = m->mb_seen2 = m->adds = m->saver_ours = 0; m->mb_served_at = m->one_ball_since = m->saver_until = 0;
+    m->mb_served = m->mb_seen2 = m->adds = m->saver_ours = m->saver_cs = 0; m->mb_served_at = m->one_ball_since = 0;
     ((vbool_t)vslot(m->mode, VT_START))(m->mode);
     ((vint_t)vslot(m->mode, VT_SET_TIME))(m->mode, m->seconds);
     /* The seconds field: 0x48 on GnR.  Check it, and find it if a title moved it. */

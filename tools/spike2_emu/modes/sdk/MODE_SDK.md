@@ -3333,6 +3333,12 @@ shot a port leaves unnamed (`Shot 0x..`) never matches.
      the runtime uses only when it points at the manager of `award_screen_arg`'s table.
    - **Shots, callouts and struct offsets** are copied, and the draft marks them unverified.
      For another title, shots, callouts, examples and the title values are left out instead.
+   - **Events** (`event <name> <bus id>`) are copied where the new build's event bus ends at the
+     reference's id. Where it ends elsewhere (King Kong LE 1.00 added one at 0xb6: 208 ids, the
+     references 207), each is copied at the new build's own id, read off the **event map**
+     (`ports/recipes/eventbus-<bus bound>.busmap.gz`: a ladder for every handler on one reference
+     build's bus; `port_tool.py busmap <program>` rebuilds it), and left out where the map cannot
+     tell (PAD-1389).
    - An entry it cannot place is left as a comment saying why, and the runtime treats that
      capability as absent. Under it are **candidates**: the calls the reference function
      makes that the new game also has, or for a scene the first id after the same

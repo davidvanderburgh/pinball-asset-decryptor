@@ -45,8 +45,13 @@ import numpy as np
 #: read off an older build that reads the player up inline (data mode_player_at), PAD-714
 #: 9: the attract mode's page table (PAD-782, portattract.py)
 #: 10: the cabinet's expression lights (`cablamp` lines, PAD-1040) off the target's own tables
-REVISION = 10
+#: 11: a build whose event bus has more or fewer ids than the reference's keeps the reference's events, each at
+#: this build's own id read off the event map (PAD-1389: King Kong LE 1.00 added one, so its port lost game_start
+#: and ball_start, and with them the Score feed)
+REVISION = 11
 RECIPE_FORMAT = 1
+#: PAD-1389: the event map's format (:func:`compile_busmap`)
+BUSMAP_FORMAT = 1
 
 CORE_SITES = ("tick", "shot_dispatch", "ball_end", "score_add")
 CORE_DATA = ("cur_player", "scores")
@@ -993,6 +998,175 @@ def subscriptions(elf):
     return elf._subs
 
 
+# ---- the event map (PAD-1389) ------------------------------------------------------------------
+# A build may number its events differently from the reference's: King Kong LE 1.00 added one id at 0xb6, so every
+# id from there up moved by one while those below stayed. The ids carry no names in the program, but the handlers
+# subscribed to them are mostly the framework's own functions, which a ladder finds in any build. The event map is
+# one reference build's handlers (ladders only, never its code), compiled at the desk (``port_tool.py busmap``) and
+# shipped as ``ports/recipes/eventbus-<bus bound>.busmap.gz``; a target's own subscriptions then tell where each
+# reference id went.
+
+#: the fewest ids the target must agree on before an event map is trusted
+BUSMAP_MIN_IDS = 12
+
+
+def compile_busmap(ref_elf):
+    """The event map of one reference program: a ladder for every handler subscribed to its event bus."""
+    ref = ref_elf if isinstance(ref_elf, Elf) else Elf(ref_elf)
+    c = _Compiler(ref)
+    subs = subscriptions(ref)
+    handlers, seen = [], set()
+    for ident in sorted(subs):
+        for h in subs[ident]:
+            if h in seen or not is_hooked_ok(ref, h):
+                continue
+            seen.add(h)
+            handlers.append([ident, h, c.ladder(ref.idx(h))])
+    bound = bus_bound(ref)
+    return {"format": BUSMAP_FORMAT, "elf_sha1": ref.sha1, "bus_bound": bound, "generation": generation(bound),
+            "chains": c.chains, "ladders": c.ladders, "handlers": handlers}
+
+
+def load_busmap(path):
+    """An event map (:func:`compile_busmap`) saved with :func:`save_recipe`."""
+    with gzip.open(path, "rb") as f:
+        r = json.loads(f.read().decode("utf-8"))
+    if r.get("format") != BUSMAP_FORMAT:
+        raise PortgenError("%s is an event map of another format" % path)
+    for c in r["chains"]:
+        c[3] = {int(k): v for k, v in c[3].items()}
+    return r
+
+
+def busmap_path(bound, recipes_dir=None):
+    """Where the event map of builds whose bus ends at ``bound`` ships."""
+    import os
+    if recipes_dir is None:
+        from .mode_runtime import sdk_dir
+        recipes_dir = os.path.join(sdk_dir(), "ports", "recipes")
+    return os.path.join(recipes_dir, "eventbus-%d.busmap.gz" % bound)
+
+
+_BUSMAPS = {}
+
+
+def busmap_for(bound):
+    """The shipped event map for reference ids numbered up to ``bound``, or None."""
+    if bound not in _BUSMAPS:
+        try:
+            _BUSMAPS[bound] = load_busmap(busmap_path(bound))
+        except (OSError, ValueError, KeyError, PortgenError):
+            _BUSMAPS[bound] = None
+    return _BUSMAPS[bound]
+
+
+def fit_bus_offsets(votes, rbound, tbound):
+    """``{reference id: target id}`` for the ids whose place in the target is certain, from ``votes`` ({reference id:
+    Counter(target id)}: where its handlers are subscribed in the target).
+
+    The target's bus is the reference's with ``tbound - rbound`` ids added (or taken out), so a reference id's move
+    (target id - reference id) never goes back: from 0 up to the difference (or down to it). The moves are fitted to
+    the votes (the fewest votes left out; a handler the ladder put on another function is a stray vote); an id is
+    mapped only where the nearest agreeing ids below and above it moved by the same amount, so an id between the
+    last unmoved one and the first moved one (where the new one went in) is left out. ``{}`` when fewer than
+    :data:`BUSMAP_MIN_IDS` ids agree."""
+    if not rbound or not tbound:
+        return {}
+    delta = tbound - rbound
+    step = 1 if delta >= 0 else -1
+    moves = list(range(0, delta + step, step))          # in the order the fit may take them
+    ids = sorted(i for i in votes if votes[i])
+    if not ids:
+        return {}
+    cost = [[0] * len(moves) for _ in ids]                # cost[k][m]: the fewest votes left out with ids[k] at moves[m]
+    back = [[0] * len(moves) for _ in ids]
+    for k, i in enumerate(ids):
+        tot = sum(votes[i].values())
+        best, arg = None, 0
+        for m, mv in enumerate(moves):
+            if k == 0:
+                best, arg = 0, m
+            elif best is None or cost[k - 1][m] < best:
+                best, arg = cost[k - 1][m], m
+            cost[k][m] = best + tot - votes[i].get(i + mv, 0)
+            back[k][m] = arg
+    m = min(range(len(moves)), key=lambda x: (cost[-1][x], x))
+    fit = {}
+    for k in range(len(ids) - 1, -1, -1):
+        fit[ids[k]] = moves[m]
+        m = back[k][m]
+    agree = [i for i in ids if votes[i].get(i + fit[i], 0) * 2 > sum(votes[i].values())]
+    if len(agree) < BUSMAP_MIN_IDS:
+        return {}
+    out, k = {}, -1
+    for i in range(rbound + 1):
+        while k + 1 < len(agree) and agree[k + 1] <= i:
+            k += 1
+        below = fit[agree[k]] if k >= 0 else 0
+        if k >= 0 and agree[k] == i:
+            above = below
+        else:
+            above = fit[agree[k + 1]] if k + 1 < len(agree) else delta
+        if below == above and 0 <= i + below <= tbound:
+            out[i] = i + below
+    return out
+
+
+def bus_id_map(tgt, busmap):
+    """``{reference id: this build's id}`` (:func:`fit_bus_offsets`) for the event map ``busmap``, cached on ``tgt``
+    (an :class:`Elf`). ``{}`` when the map is missing or too few of its handlers line up here."""
+    if not busmap:
+        return {}
+    cache = tgt.__dict__.setdefault("_bus_id_maps", {})
+    key = busmap.get("elf_sha1")
+    if key in cache:
+        return cache[key]
+    tb = bus_bound(tgt)
+    out = {}
+    if tb:
+        where = defaultdict(set)
+        for ident, hs in subscriptions(tgt).items():
+            for h in hs:
+                where[h].add(ident)
+        T = Target(tgt, busmap)
+        votes = defaultdict(Counter)
+        for ident, _h, lid in busmap["handlers"]:
+            ti, _how = T.locate(lid)
+            if ti is None:
+                continue
+            for j in where.get(tgt.va(ti), ()):
+                votes[ident][j] += 1
+        out = fit_bus_offsets(votes, busmap["bus_bound"], tb)
+    cache[key] = out
+    return out
+
+
+def event_id_here(tgt, ident, rbound):
+    """``(this build's id, how)`` for the reference's bus id ``ident`` (its bus ends at ``rbound``): the same id where
+    the buses match (how ``""``), else the id the event map places it at; ``(None, why)`` when it cannot be told."""
+    tb = bus_bound(tgt)
+    if not tb or not rbound:
+        return None, "this build's event bus could not be read"
+    if tb == rbound:
+        if 0 <= ident <= tb:
+            return ident, ""
+        return None, "the id is outside this build's event bus (0..%d)" % tb
+    differ = ("this build's event bus numbers its events differently (its ids end at %d, the reference's at %d)"
+              % (tb, rbound))
+    bm = busmap_for(rbound)
+    if bm is None:
+        return None, differ + " and no event map reads them across"
+    m = bus_id_map(tgt, bm)
+    if not m:
+        return None, differ + " and too few of the event map's handlers line up here"
+    if ident not in m:
+        return None, differ + " and the event map cannot tell where 0x%x went" % ident
+    if m[ident] == ident:
+        return ident, "the same id here: %s, and the event map's handlers place 0x%x unmoved" % (differ, ident)
+    return m[ident], ("0x%x here for the reference's 0x%x: %s, and the event map's handlers place it there"
+                      % (m[ident], ident, differ))
+
+
 def generation(bound):
     """"A" (the older framework, bus bound under 200) or "B"; "" when unknown."""
     if not bound:
@@ -1245,13 +1419,14 @@ class Target:
 
     def via_bus(self, rec, rbound):
         """The end of ball as an event-bus handler: one of the reference's handlers of its
-        end-of-ball event, located here and subscribed to the same event here. Only where the
-        bus numbers its events as the reference's does."""
+        end-of-ball event, located here and subscribed to the same event here (PAD-1389: at this
+        build's own id for it where its bus numbers its events differently, the event map)."""
         ident, handlers = rec
         tgt = self.elf
-        tb = bus_bound(tgt)
-        if not tb or tb != rbound:
-            return None, "this build's event bus numbers its events differently"
+        here, why = event_id_here(tgt, ident, rbound)
+        if here is None:
+            return None, why
+        ident = here
         mine = set(subscriptions(tgt).get(ident, []))
         found = {}
         for h, lid in handlers:
@@ -1363,6 +1538,38 @@ class Draft:
     @property
     def text(self):
         return "\n".join(self.lines) + "\n"
+
+
+def _draft_event(rest, parts, tgt, recipe, placed, out, report):
+    """One `event` entry of the reference's port into the draft ``out``. Item 147: bus ids are dispatched by shared
+    framework code, but what each id MEANS is measured per build (event_probe.c); a copy is a lead until a mark proves
+    it. PAD-1389: on a bus with more or fewer ids it is kept at this build's own id (:func:`event_id_here`), and left
+    out (with why) where that cannot be told or is past the ids the mode runtime watches."""
+    words = rest.split("#", 1)[0].split()
+    why, how, line = None, "", rest
+    if len(words) >= 3 and words[1] == "site":
+        if ("site", words[2]) not in placed:
+            why = "its site %s was not placed" % words[2]
+    elif len(words) >= 2:
+        try:
+            ident = int(words[1], 0)
+        except ValueError:
+            ident = -1
+        here, how = event_id_here(tgt, ident, recipe.get("bus_bound", 0))
+        if here is None:
+            why, how = how, ""
+        elif here >= BUS_IDS:
+            why, how = ("0x%x here, past the ids the mode runtime watches (0..%d)" % (here, BUS_IDS - 1)), ""
+        elif here != ident:
+            line = re.sub(r"^(\s*\S+\s+)\S+", lambda m: m.group(1) + "0x%x" % here, rest, count=1)
+    if why:
+        out.append("# event %s   <- left out: %s" % (rest, why))
+        report["event left out"] += 1
+        return
+    out.append("#   event %s: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)%s"
+               % (parts[0] if parts else "?", ("; " + how) if how else ""))
+    out.append("event %s" % line)
+    report["event copied"] += 1
 
 
 def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=None, target_name=None,
@@ -1541,34 +1748,7 @@ def apply_recipe(recipe, port_text, target, game=None, version=None, port_name=N
                                "reference - prove it holds this role" % (cand, anchor))
                 report["scene missing"] += 1
         elif key == "event":
-            # item 147: bus ids are dispatched by shared framework code, but what each id MEANS
-            # is measured per build (event_probe.c); a copy is a lead until a mark proves it
-            words = rest.split("#", 1)[0].split()
-            why = None
-            if len(words) >= 3 and words[1] == "site":
-                if ("site", words[2]) not in placed:
-                    why = "its site %s was not placed" % words[2]
-            elif len(words) >= 2:
-                if tbound is None:
-                    tbound = bus_bound(tgt)
-                rbound = recipe.get("bus_bound", 0)
-                try:
-                    ident = int(words[1], 0)
-                except ValueError:
-                    ident = -1
-                if not tbound or tbound != rbound:
-                    why = ("this build's event bus numbers its events differently (its ids end at %d, "
-                           "the reference's at %d)" % (tbound, rbound))
-                elif not 0 <= ident <= tbound:
-                    why = "the id is outside this build's event bus (0..%d)" % tbound
-            if why:
-                out.append("# event %s   <- left out: %s" % (rest, why))
-                report["event left out"] += 1
-                continue
-            out.append("#   event %s: COPIED, unverified - prove it with event_probe.c (MODE_SDK.md, Events)"
-                       % (parts[0] if parts else "?"))
-            out.append("event %s" % rest)
-            report["event copied"] += 1
+            _draft_event(rest, parts, tgt, recipe, placed, out, report)
         elif key == "lamp":
             out.append(lamp_draft(rest, tgt, title_of(target_game) != title_of(ref_game), report, lamp_cache))
         elif key == "cablamp":

@@ -48,14 +48,21 @@ def layout(platform='stern-spike2'):
                     arch='aarch64', hashes=AARCH64_HASHES)
     raise ExtrasError('SSH has not been qualified for this card platform.')
 
-def ensure_not_incomplete(path):
+def ensure_not_incomplete(path, links_ok=True):
+    """Refuse an image a failed SSH preparation left behind.
+
+    *links_ok* False also refuses a hard-linked image, whose pending marker
+    could sit beside another of its names: only where SSH is in play.  A card
+    read as a source, or built/emulated without SSH, may be hard-linked (a
+    library sharing one file between two folders) and is never written here.
+    """
     if not path:
         return
     real = os.path.realpath(path)
     if (str(path).endswith('.ssh-incomplete') or real.endswith('.ssh-incomplete')
             or pending_marker(path).exists() or os.path.exists(str(path) + '.ssh-pending')):
         raise ExtrasError('This image has incomplete SSH preparation; rebuild it from the original before use.')
-    if os.path.isfile(real) and os.stat(real).st_nlink != 1:
+    if not links_ok and os.path.isfile(real) and os.stat(real).st_nlink != 1:
         raise ExtrasError('Incomplete SSH preparation status cannot be verified for a hard-linked image; use a separate image copy.')
 
 
@@ -63,13 +70,14 @@ def pending_marker(path):
     return Path(os.path.realpath(path) + '.ssh-pending')
 
 
-def _regular(path, allow_pending=False):
+def _regular(path, allow_pending=False, writable=False):
     if not path or is_device_path(str(path)) or not os.path.isfile(path):
         raise ExtrasError('SSH Extras requires a regular card image file, not a device.')
     if not allow_pending:
         ensure_not_incomplete(path)
-    if os.stat(path).st_nlink != 1:
-        raise ExtrasError('Hard-linked card images cannot be used for SSH preparation or verification.')
+    if writable and os.stat(path).st_nlink != 1:
+        # writing one name of a hard link would change the other as well
+        raise ExtrasError('Hard-linked card images cannot be used for SSH preparation.')
 
 
 def validate_output(original, output):
@@ -220,6 +228,7 @@ def guard_flash(project, image):
     config = validate_request(image, project)
     if config is None:
         return
+    ensure_not_incomplete(image, links_ok=False)
     state = inspect_image(image)
     if (state['enabled'] != config['enabled'] or
             (config['enabled'] and state['public_keys'] != config['public_keys'])):
@@ -357,7 +366,7 @@ def apply_to_build(original, output, config, log=None, cancel=None, key_source=N
     config = dict(config)
     if config['enabled']:
         config['public_keys'] = card_extras.validate_keys(config.get('public_keys', ''))
-    _regular(original); _regular(output, allow_pending=True)
+    _regular(original); _regular(output, allow_pending=True, writable=True)
     if os.path.samefile(original, output):
         raise ExtrasError('SSH preparation must not write the original image.')
     source = inspect_image(original, key_source=key_source)

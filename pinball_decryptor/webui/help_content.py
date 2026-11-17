@@ -1980,6 +1980,25 @@ HELP_CONTENT = {
          "color's shades live, with the test card on the screen. Once it looks "
          "right, put the same numbers in the Color profile tab."),
     ],
+    "Extras": [
+        ("SSH server", [
+            "Tick **Enable SSH server** and paste one or more public keys, one per line, "
+            "to log in to the card as root on port 22. Password login is turned off; "
+            "only those keys get in.",
+            "It works on Stern Spike 2 and Spike 3 cards. A Spike 3 card has to be "
+            "unlocked with your own key on the Extract tab first.",
+        ]),
+        ("When it is applied", [
+            "The setting is saved with the project and shows in Write's Modified Files. "
+            "**Build** puts it on the card image, even when nothing else changed.",
+            {"note": "Direct-SD/SSD writes cannot change the card's system files: build "
+                     "the image, then flash it.", "kind": "warn"},
+            "Untick it to take SSH back off a card that already had it. **Reset…** "
+            "with Extras puts the setting back to the source card's.",
+        ]),
+        ("Mod packs", "SSH settings and keys stay in this project: they never go into "
+                      "a mod pack you export."),
+    ],
     "Mod Pack": [
         ("What it's for", [
             "A mod pack is a small zip of only your changed files, to share. It works "

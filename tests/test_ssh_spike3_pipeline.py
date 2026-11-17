@@ -5,6 +5,14 @@ from pinball_decryptor.plugins.stern import spike3_write as W, spike3
 from tests.test_card_extras import key
 
 
+def _symlink(link, target):
+    try:
+        link.symlink_to(target)
+    except OSError:
+        # Windows refuses symlinks without Developer Mode or elevation.
+        pytest.skip('this system cannot create symlinks')
+
+
 def setup(tmp_path, monkeypatch):
     source=tmp_path/'source.raw';source.write_bytes(b'original')
     out=tmp_path/'built.raw';project=tmp_path/'project';project.mkdir()
@@ -42,6 +50,6 @@ def test_spike3_failure_is_quarantined(tmp_path,monkeypatch):
 
 def test_spike3_preflight_rejects_alias_before_copy(tmp_path,monkeypatch):
     p,out,events=setup(tmp_path,monkeypatch)
-    out.symlink_to(p.original_path)
+    _symlink(out, p.original_path)
     p.run()
     assert 'engine' not in events and events[-1][0] is False

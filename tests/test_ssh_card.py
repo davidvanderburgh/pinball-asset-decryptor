@@ -10,6 +10,14 @@ from pinball_decryptor.core import ssh_card as S
 from pinball_decryptor.core.card_extras import ExtrasError
 from tests.test_card_extras import key
 
+
+def _symlink(link, target):
+    try:
+        link.symlink_to(target)
+    except OSError:
+        # Windows refuses symlinks without Developer Mode or elevation.
+        pytest.skip('this system cannot create symlinks')
+
 TOOLS = '/opt/homebrew/opt/e2fsprogs/sbin'
 
 
@@ -139,7 +147,7 @@ def test_incomplete_image_cannot_be_flashed_without_project_options(card, tmp_pa
 
 def test_symlink_cannot_hide_incomplete_image(card, tmp_path):
     Path(str(card) + '.ssh-pending').write_text('pending')
-    alias = tmp_path / 'alias.raw'; alias.symlink_to(card)
+    alias = tmp_path / 'alias.raw'; _symlink(alias, card)
     with pytest.raises(ExtrasError, match='incomplete'):
         S.guard_flash('', str(alias))
     with pytest.raises(ExtrasError, match='incomplete'):
@@ -148,7 +156,7 @@ def test_symlink_cannot_hide_incomplete_image(card, tmp_path):
 
 def test_output_links_are_refused_before_any_write(card, tmp_path):
     target = tmp_path / 'target.raw'; shutil.copyfile(card, target)
-    alias = tmp_path / 'alias.raw'; alias.symlink_to(target)
+    alias = tmp_path / 'alias.raw'; _symlink(alias, target)
     with pytest.raises(ExtrasError):
         S.validate_output(str(card), str(alias))
 
@@ -156,5 +164,28 @@ def test_output_links_are_refused_before_any_write(card, tmp_path):
 def test_hardlink_cannot_hide_pending_image(card, tmp_path):
     Path(str(card) + '.ssh-pending').write_text('pending')
     alias = tmp_path / 'hard-alias.raw'; os.link(card, alias)
+    from pinball_decryptor.core import card_extras
+    project = tmp_path / 'project'; project.mkdir()
+    card_extras.save(str(project), True, key())
     with pytest.raises(ExtrasError):
-        S.guard_flash('', str(alias))
+        S.guard_flash(str(project), str(alias))
+
+
+def test_hard_linked_source_is_read_and_builds_without_ssh(card, tmp_path):
+    # PR #38 review: a card library often shares one file between two
+    # folders. Reading it, or building/emulating with no SSH set, must not be
+    # refused: every Stern build and Emulate run passes these guards.
+    from pinball_decryptor.core import card_extras
+    other = tmp_path / 'library-name.raw'; os.link(card, other)
+    plain = tmp_path / 'plain'; plain.mkdir()
+    assert S.validate_request(str(card), str(plain)) is None
+    S.guard_flash(str(plain), str(card))
+    assert S.inspect_image(str(card))['supported']
+    project = tmp_path / 'project'; project.mkdir()
+    card_extras.save(str(project), True, key())
+    assert S.validate_request(str(card), str(project))['enabled']
+    out = tmp_path / 'out.raw'; shutil.copyfile(card, out)
+    S.apply_to_build(str(card), str(out), card_extras.configuration(str(project)))
+    assert S.inspect_image(str(out))['enabled']
+    with pytest.raises(ExtrasError, match='hard-linked'):
+        S.guard_flash(str(project), str(card))

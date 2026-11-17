@@ -15546,6 +15546,25 @@ static void challenge_frame_press(unsigned prev, unsigned cur, unsigned n, int *
     else if (prev == (cur + 1) % n) *left = 1;
 }
 
+/* PAD-1369: a `moved` site's frame, from the state alone (tests lift it verbatim): the cursor `was` and is now
+ * (`cursor`, the game's press already applied), `count` entries, ours at `at`, the cursor on it last frame (`on`), `n`
+ * modes of ours, *sub the one shown. A press away from our entry while there is a mode left to step to steps instead,
+ * the cursor put back; arriving, the first mode shows from before our entry, the last from after it (a left press).
+ * Returns the cursor this frame draws. */
+static unsigned challenge_frame_moved(unsigned was, unsigned cursor, unsigned count, unsigned at, int on, int n, int *sub)
+{
+    int left, right;
+    unsigned eat;
+    challenge_frame_press(was, cursor, count, &left, &right);
+    if (on && was == at && (left || right)) {
+        *sub = challenge_frame_step(n, *sub, left, right, &eat);
+        if (eat) cursor = at;
+    } else if (!on && cursor == at) {
+        *sub = challenge_frame_arrive(n, !left);
+    }
+    return cursor;
+}
+
 /* PAD-1369: the menu's list and count at the frame site: in the frame (`.._list_at` / `.._count_at`) or in registers
  * (`.._list_reg` / `.._count_reg`, hook_full's numbers), as Prolonged Competition's comp_menu_frame reads them */
 static int challenge_frame_list(pm_reg *r, unsigned **list, unsigned **count)
@@ -15587,7 +15606,7 @@ static void challenge_menu_frame(pm_reg *r)
         ? (unsigned *)(unsigned long)(data("game_play_modes") + (unsigned)pm_port_value("game_play_mode_at", 8)) : 0;
     static unsigned ours_at;                 /* the list position of our entry */
     static int said_n, room_said;
-    int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub, left, right;
+    int own[N_OWN_CHALLENGE], n = 0, k, on, prev_sub = frame_sub;
     unsigned cursor, eat;
     if (creg > FULL_REG_LAST || breg > FULL_REG_LAST || !challenge_frame_list(r, &list, &count)) return;
     if (slot >= 0) {
@@ -15620,13 +15639,7 @@ static void challenge_menu_frame(pm_reg *r)
         /* PAD-1369: the press already moved the cursor. A press away from our entry while a mode is left to step to
          * puts the cursor back (the entry steps to the next or previous mode instead); arriving, the first mode shows
          * from before it, the last from after it */
-        challenge_frame_press(frame_cursor_was, cursor, *count, &left, &right);
-        if (frame_on && frame_cursor_was == ours_at && (left || right)) {
-            frame_sub = challenge_frame_step(n, frame_sub, left, right, &eat);
-            if (eat) cursor = ours_at;
-        } else if (!frame_on && cursor == ours_at) {
-            frame_sub = challenge_frame_arrive(n, !left);
-        }
+        cursor = challenge_frame_moved(frame_cursor_was, cursor, *count, ours_at, frame_on, n, &frame_sub);
         r[creg] = cursor;
         frame_cursor_was = cursor;
         on = cursor == ours_at;

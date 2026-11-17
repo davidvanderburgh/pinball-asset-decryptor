@@ -1009,6 +1009,7 @@ CHALLENGE_MENU_PROVEN = {
     "star_wars_le-1.30": 2,           # PAD-619 2026-10-20 rig batch_r23 (once the rig's switch list was the game's own numbering, mktables 70 of 103 ids moved): the compare-chain menu, PAD CHALLENGE after the game's 2, picked as Standard: START (challenge pick), one ball, HIGH SCORE initials (in_game last 1 -> 0, no second ball)
     "star_wars_elg-1.10": 2,          # PAD-619 2026-10-20 rig batch_r27: PAD CHALLENGE after the game's 2, picked: START (challenge pick), an extra ball earned in it refused (challenge_extra_ball), the balls getter said 1, GAME OVER after the one ball
     "star_wars_elg-1.10/spike3": 2,   # PAD-1330 2026-11-16 (Spike 3 rig slot 230, hidden, muted, the set spike3_modes.plan built from the library card): PAD CHALLENGE after the game's STANDARD and DJ MIXER (kinds 0 6 256), picked: START (challenge pick) as the ball started, the ball launched for the player 2 s in, the mode's clock ended the ball (0x322180 from the game's bus call), the dead ball drained: the balls read said 1, the extra-ball test refused, GAME OVER, the game's own "Player 1 - Enter Initials / PAD CHALLENGE", the champion shown in attract. Control (the port's balls sites taken out): the same game served BALL 2
+    "walking_dead_remastered_le-0.92/spike3": 2,   # PAD-1369 2026-11-17 (Spike 3 rig, hidden, muted, the set spike3_modes.plan built from the library card): PAD CHALLENGE after the game's STANDARD and DJ MIXER (kinds 0 2 256), picked: START (challenge pick) as the ball started, launched for the player, the drain ended the ball with the mode, the extra-ball test refused, the balls read said 1, GAME OVER, PAD CHALLENGE's own high score filed
     "stranger_things-1.13": 6,        # PAD-619 2026-10-19 rig sweep: PAD CHALLENGE after the game's 6, picked: START (challenge pick) at the ball's start (its handler hands it over), one ball, GAME OVER
     "stranger_things_le-1.12": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.12 card
     "stranger_things_le-1.13": 6,     # PAD-619 2026-10-19 rig sweep: the same on the stock LE 1.13 card
@@ -1028,6 +1029,11 @@ CHALLENGE_NEW = 16                   #: ModeSpec.challenge for a challenge of th
 #: one-ball challenge game
 CHALLENGE_MENU_FRAME_PROVEN = {
     "godzilla_le-1.16": "PAD-686, 2026-10-22: one MODE CHALLENGE entry stepped through 13 modes; JET JAGUAR, KING KONG and OXYGEN DESTROYER picked, each started as the ball did (one ball)",
+    "fallout_le-0.82/spike3": "PAD-1369, 2026-11-17 (Spike 3 rig, hidden, muted, the set spike3_modes.plan built from the library card): MODE CHALLENGE appended as entry 9 of 9 (Standard's index again, lettered CHALLENGE / PAD CHALLENGE), picked; START (challenge pick) as the ball started, its ball launched for the player, its clock ended the ball (0x935490), the extra-ball test refused, one ball (the game's Standard plays 4), GAME OVER, PAD CHALLENGE's own high score filed",
+    "pokemon_le-0.82/spike3": "PAD-1369, 2026-11-17 (Spike 3 rig, hidden, muted, the set spike3_modes.plan built from the library card): MODE CHALLENGE appended as entry 3 of 3, picked; START (challenge pick) as the ball started, launched for the player, the drain ended the ball with the mode, the extra-ball test refused, one ball, GAME OVER, PAD CHALLENGE's own high score filed",
+    "star_wars_2025_le-0.96/spike3": "PAD-1369, 2026-11-17 (Spike 3 rig, hidden, muted, the set spike3_modes.plan built from the library card): MODE CHALLENGE appended as entry 8 of 8, picked; START (challenge pick) as the ball started, launched for the player, its clock ended the ball (0x378a30), the extra-ball test refused, one ball, GAME OVER, PAD CHALLENGE's own high score filed",
+    "star_wars_2025_pro-0.84/spike3": "PAD-1369, 2026-11-17 (Spike 3 rig, hidden, muted, the set spike3_modes.plan built from the library card): MODE CHALLENGE appended as entry 3 of 3 (one step left from STANDARD), picked; START (challenge pick) as the ball started, launched for the player, its clock ended the ball (0x33ea50), the extra-ball test refused, one ball, GAME OVER, PAD CHALLENGE's own high score filed",
+    "transformers_mtmte_le-0.96/spike3": "PAD-1369, 2026-11-17 (Spike 3 rig, hidden, muted, the set spike3_modes.plan built from the library card): MODE CHALLENGE appended as entry 6 of 6, picked; START (challenge pick) as the ball started, launched for the player, a scoring shot awarded, the drain ended the ball with the mode, the extra-ball test refused, one ball, GAME OVER, PAD CHALLENGE's own high score filed",
 }
 #: the runtime's room for challenges of the modes' own (N_OWN_CHALLENGE): one MODE CHALLENGE entry holds them all
 CHALLENGE_FRAME_ROOM = 16
@@ -1052,7 +1058,14 @@ def _challenge_ready(port):
     _sites, data, values = CHALLENGE_NEEDS
     if not port or not (all(port["data"].get(n) for n in data) and all(n in port["value"] for n in values)):
         return False
-    return bool(_challenges(port)) or {"challenge_menu", "challenge_menu_pick"} <= set(port["site"])
+    return bool(_challenges(port)) or {"challenge_menu", "challenge_menu_pick"} <= set(port["site"])         or _plain_index_menu(port)
+
+
+def _plain_index_menu(port):
+    """PAD-1369: a start menu of game-mode indices with no challenge of the game's (the Spike 3 index menus): its one
+    MODE CHALLENGE entry is Standard's index again, lettered CHALLENGE and the mode's name."""
+    v = port["value"] if port else {}
+    return bool(port) and "challenge_menu_frame" in port["site"] and v.get("challenge_menu_slot") == -1         and bool(v.get("challenge_menu_sets_on")) and bool(v.get("challenge_menu_frame_name_msg"))
 
 
 def _challenge_cannot(key, label, port=None):
@@ -3489,7 +3502,7 @@ def known_game_dir(game):
     from .games import GAME_DB
     if any(game == k or game.startswith(k + "_") for k in GAME_DB):
         return True
-    dirs = [PORTS_DIR]
+    dirs = [PORTS_DIR, os.path.join(PORTS_DIR, "spike3")]     # PAD-1369: a Spike 3-only title (Fallout LE, ...) too
     try:
         from . import mode_runtime
         dirs += list(mode_runtime.port_dirs())

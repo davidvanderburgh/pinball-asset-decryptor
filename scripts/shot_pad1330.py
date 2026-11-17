@@ -17,7 +17,9 @@ sys.path.insert(0, HERE)
 import webui_shot  # noqa: E402
 
 SHOTS = [tuple(x.split("=", 1)) for x in os.environ.get("PAD1330_SHOTS", "Starts=modes_challenge").split(";")]
-CARD = r"D:\Pinball\images\Stern\spike3\star_wars_elg-1_10_0_spike3.Release.64G.sdcard-secure.raw"
+#: PAD-1369: PAD1330_CARD / PAD1330_VER shoot another Spike 3 card (its library file, its version)
+CARD = os.environ.get("PAD1330_CARD",
+                      r"D:\Pinball\images\Stern\spike3\star_wars_elg-1_10_0_spike3.Release.64G.sdcard-secure.raw")
 LAUNCHER = r'''
 import sys
 sys.path.insert(0, %r)
@@ -37,7 +39,7 @@ def main():
     os.makedirs(project)
     with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
         json.dump({"input_path": CARD, "input_name": os.path.basename(CARD),
-                   "card_version": "1.10.0"}, f)
+                   "card_version": os.environ.get("PAD1330_VER", "1.10.0")}, f)
     sys.path.insert(0, repo)
     from pinball_decryptor.plugins.stern import mode_project as MP
     slug, _ = MP.new_mode(project, "TRENCH RUN")
@@ -54,7 +56,8 @@ def main():
     import site
     proc, url = webui_shot.start_server(
         settings, scratch, app_cmd=[sys.executable, launcher],
-        extra_env={"PYTHONPATH": site.getusersitepackages()})
+        extra_env=dict({"PYTHONPATH": site.getusersitepackages()},     # PAD-1369: the card's key, for its read
+                       **{k: os.environ[k] for k in ("PAD_SPIKE3_KEYFILE",) if os.environ.get(k)}))
     try:
         webui_shot.api(url, "ui.pick_manufacturer", "stern")
         from playwright.sync_api import sync_playwright
@@ -69,6 +72,14 @@ def main():
             time.sleep(2)
             webui_shot.api(url, "ui.select_tab", "modes")
             time.sleep(6)
+            # PAD-1369: a card the app has not read before is named once the tab has read it (PAD1330_LABEL)
+            want, t0 = os.environ.get("PAD1330_LABEL", ""), time.time()
+            while want and want not in page.inner_text("body") and time.time() - t0 < 180:
+                time.sleep(2)
+            if want:
+                print("card named after %.0f s: %s" % (time.time() - t0, want in page.inner_text("body")), flush=True)
+                webui_shot.api(url, "ui.select_tab", "modes")
+                time.sleep(3)
             webui_shot.api(url, "modes.select", slug, "form")
             time.sleep(3)
             # the Mode page is the editor's first, shown when the mode is picked

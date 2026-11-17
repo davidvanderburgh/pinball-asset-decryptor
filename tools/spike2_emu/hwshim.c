@@ -9433,6 +9433,9 @@ struct nb_motor {
     /* PAD-1339: the position switches an end-stop motor passes on the way */
     signed char path_from, path_to;     /* input bits the move runs between; -1 none */
     signed char sweep_on;               /* the in-between input made right now; -1 none */
+    /* PAD-1383: the move's own travel time and the inputs it runs between */
+    unsigned long travel;               /* ms this move takes (due - start)  */
+    signed char mv_from, mv_to;         /* input bits it left / goes to; -1 unknown */
 };
 static struct nb_motor nb_motors[64][NB_MOTORS];
 
@@ -9443,15 +9446,86 @@ static int motor_place_bit(const struct nb_motor *m, int place)
     return place < 2 ? m->stop[place] : place - 2;
 }
 
+static long motor_ms_env(void)
+{
+    static long v = -2;
+    if (v == -2) {
+        const char *e = getenv("PAD_MOTOR_MS");
+        v = (e && *e) ? atoi(e) : -1;
+        if (v < -1) v = 0;
+    }
+    return v;
+}
+
 static unsigned long motor_ms(void)
 {
-    static long v = -1;
-    if (v < 0) {
-        const char *e = getenv("PAD_MOTOR_MS");
-        v = (e && *e) ? atoi(e) : 600;
-        if (v < 0) v = 0;
+    long v = motor_ms_env();
+    return v < 0 ? 600 : (unsigned long)v;
+}
+
+/* ---- PAD-1383: A MOVE TAKES THE TIME ITS SPEED SAYS ----------------------
+ *
+ * A cmd 55 to an end-stop motor carries the speed and the time the game gives
+ * the move. Read off jaws_le 1.02 (PAD_NB_TRACE=1, rig 2, 2026-11-17) and its
+ * builder (0x4c984):
+ *
+ *   55 mm | 40|in 00 | speed | LE16 limit (10 ms) | dir (2 up, 6 down)
+ *   self-test to POSITION 7: 55 00 60 00 0f d0 07 02  speed 15, 20 s
+ *   to POSITION 4:           55 00 63 00 53 8f 02 06  speed 83, 6.55 s
+ *
+ * The limit is the game's own 3000 + (1 - speed/118) x 12000 ms (speed held
+ * to 10..128), a fault past it. batman 1.14's turntable and crane send the
+ * same layout at speed 128 (limits 5 s and 2 s). Every move used to arrive in
+ * PAD_MOTOR_MS (600) whatever its speed, so the harpoon fin - the one SLOW
+ * move, speed 20, to POSITION 7 (0x1d1ad4) - crossed the track in 0.6 s and
+ * was gone before the post let the ball go (Mike St P, PAD-1383); on the real
+ * machine there is time for a second shot.
+ *
+ * So the full stop-to-stop run takes MOTOR_SPEED_K (120000) / speed ms (the drive
+ * speed is the car's speed), never more than 85% of the game's limit, and a
+ * shorter move its share of it: SLOW 6 s across the track, the self-test 8 s,
+ * NORMAL (83) 1.4 s, batman's speed 128 0.9 s. cmd 53/54 and a 55 with no
+ * speed keep PAD_MOTOR_MS (john_wick_le's car is re-sent after ~0.9 s), and a
+ * PAD_MOTOR_MS set in the environment still times every move. */
+static unsigned long motor_travel(const struct nb_motor *m, const unsigned char *p,
+                                  int n, int from_bit, int to_bit)
+{
+    const unsigned long MOTOR_SPEED_K = 120000;   /* ms x speed, stop to stop */
+    unsigned long full, limit, span, dist;
+    unsigned speed;
+    if (motor_ms_env() >= 0 || p[2] != 0x55 || n < 10 || !p[6]) return motor_ms();
+    speed = p[6] > 128 ? 128 : p[6];
+    full = MOTOR_SPEED_K / speed;
+    limit = 10UL * (p[7] | (p[8] << 8));
+    if (limit && full > limit * 85 / 100) full = limit * 85 / 100;
+    if (from_bit >= 0 && to_bit >= 0 && m->stop[0] >= 0 && m->stop[1] >= 0) {
+        span = (unsigned long)(m->stop[0] > m->stop[1] ? m->stop[0] - m->stop[1] : m->stop[1] - m->stop[0]);
+        dist = (unsigned long)(from_bit > to_bit ? from_bit - to_bit : to_bit - from_bit);
+        if (span && dist <= span) full = full * dist / span;
     }
-    return (unsigned long)v;
+    return full < 50 ? 50 : full;
+}
+
+/* PAD-1383: the input bit an end-stop motor is at or nearest now, -1 unknown -
+ * so a move sent while another is under way starts from where the car is. */
+static int motor_bit_now(const struct nb_motor *m)
+{
+    long a = m->mv_from, b = m->mv_to, t, e;
+    if (m->going < 0) return m->at >= 0 ? motor_place_bit(m, m->at) : -1;
+    if (a < 0 || b < 0) return -1;
+    t = (long)(m->due - m->start);
+    e = (long)(pad_ms() - m->start);
+    if (t <= 0 || e >= t) return (int)b;
+    return (int)(a + ((b - a) * e * 2 + (b > a ? t : -t)) / (2 * t));
+}
+
+/* The place (0, 1 = the stops, 2 + bit between) an input bit is. */
+static int motor_bit_place(const struct nb_motor *m, int bit)
+{
+    if (bit < 0) return -1;
+    if (bit == m->stop[0]) return 0;
+    if (bit == m->stop[1]) return 1;
+    return 2 + bit;
 }
 
 /* The switch id behind (node, input bit), from the game's own table - the
@@ -9735,7 +9809,7 @@ static void disc_reply(unsigned nid, const unsigned char *req, unsigned char *p)
 static void motor_sweep(unsigned nid, unsigned k, struct nb_motor *m)
 {
     int a = m->path_from, b = m->path_to, step, n, want = -1;
-    unsigned long t = motor_ms(), e;
+    unsigned long t = m->due - m->start, e;          /* PAD-1383: this move's time */
     (void)k;
     if (a >= 0 && b >= 0 && a != b && m->going >= 0 && t) {
         step = b > a ? 1 : -1;
@@ -9861,6 +9935,7 @@ static void motor_note(const unsigned char *p, int n)
         m->at = -1;
         m->going = -1;
         m->path_from = m->path_to = m->sweep_on = -1;            /* PAD-1339 */
+        m->mv_from = m->mv_to = -1;                              /* PAD-1383 */
         m->enc = n >= 9 && ((p[7] & 0x40) || (p[8] & 0x40));   /* PAD-249 */
         nb_motor_cfg[nid] = 1;
         if (m->enc)
@@ -9928,6 +10003,7 @@ static void motor_note(const unsigned char *p, int n)
          * positions #2..#5 (inputs 9..12, between 13 and 8). Ignored, the
          * game sent both in attract and neither ever arrived. */
         int end;
+        char spd[16];
         if (p[2] == 0x55) {
             if (!(p[4] & 0x40)) return;
             m->run55 = 1;               /* PAD-971: it reports its status */
@@ -9938,22 +10014,34 @@ static void motor_note(const unsigned char *p, int n)
             end = p[2] == 0x53 ? 0 : 1;
         }
         if (m->going == end || (m->going < 0 && m->at == end)) return;
-        /* PAD-1339: from a known place it passes the switches between */
-        motor_path(nid, k, m, m->going < 0 ? m->at : -1, end);
-        if (m->going < 0 && m->at >= 0)               /* it leaves where it is */
-            motor_switch(nid, motor_place_bit(m, m->at), 0);
+        {
+            /* PAD-1383: from where the car is now - a place, or part way
+             * along the move under way - at the speed this move names */
+            int from_bit = motor_bit_now(m), to_bit = motor_place_bit(m, end);
+            int from = m->going < 0 ? m->at : motor_bit_place(m, from_bit);
+            /* PAD-1339: from a known place it passes the switches between */
+            motor_path(nid, k, m, from, end);
+            if (m->going < 0 && m->at >= 0)           /* it leaves where it is */
+                motor_switch(nid, motor_place_bit(m, m->at), 0);
+            m->travel = motor_travel(m, p, n, from_bit, to_bit);
+            m->mv_from = (signed char)from_bit;
+            m->mv_to = (signed char)to_bit;
+        }
+        spd[0] = 0;
         m->at = -1;
         m->going = (signed char)end;
         m->start = pad_ms();
-        m->due = m->start + motor_ms();
+        m->due = m->start + m->travel;
+        if (p[2] == 0x55 && n >= 10)
+            snprintf(spd, sizeof spd, ", speed %u", p[6]);
         if (end < 2)
             snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u sent to end "
-                     "%d (cmd %02x), arrives in %lu ms\n", pad_ms(), nid, k,
-                     end, p[2], motor_ms());
+                     "%d (cmd %02x%s), arrives in %lu ms\n", pad_ms(), nid, k,
+                     end, p[2], spd, m->travel);
         else
             snprintf(b, sizeof b, "[motor] %lu ms node %u motor %u sent to "
-                     "input %d (cmd %02x), arrives in %lu ms\n", pad_ms(), nid,
-                     k, end - 2, p[2], motor_ms());
+                     "input %d (cmd %02x%s), arrives in %lu ms\n", pad_ms(), nid,
+                     k, end - 2, p[2], spd, m->travel);
         motor_say(b);
     }
 }

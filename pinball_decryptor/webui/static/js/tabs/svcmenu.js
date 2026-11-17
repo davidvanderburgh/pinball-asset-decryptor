@@ -3,7 +3,7 @@
 // in our app". The pages come from webui/tabs/svcmenu.py (plugins/stern/service_menu.py, planned exactly as a Write
 // plans); here they are drawn the way the machine draws them (Godzilla 1.16, emulator), a row is picked as the
 // operator picks one, and stepping MORE SETTINGS turns the row under it into the setting picked, as on the machine.
-import { html, useState, useEffect, PageHead, Card, Button, Check, Note, Empty, Seg, Spinner, call, cx } from "../core/ui.js";
+import { html, useState, useEffect, PageHead, Card, Button, Check, Field, Note, Empty, Seg, Spinner, call, cx, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -76,6 +76,33 @@ function Stepper({ row, picks, setPicks }) {
   </div>`;
 }
 
+// round 3 (David): "things like reordering existing settings? adding removing custom ones. we don't want to break any
+// built-in ones though so keep it simple" - the order is the owner's (it sets the rows' order on a page and their
+// numbers on More Settings); a setting of their own is a name and its values, read by the card's own code
+function AddSetting({ said }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [vals, setVals] = useState("Off, On");
+  const [def, setDef] = useState("1");
+  if (!open) return html`<div class="row"><${Button} size="sm" icon="plus" onClick=${() => setOpen(true)}
+      title="A row of your own: a name and its values. The card's own code reads what the operator set.">Add a setting…<//></div>`;
+  const add = async () => {
+    const why = await call("svcmenu.add_custom", name, vals, Number(def) || 1);
+    if (!why) { setOpen(false); setName(""); }
+  };
+  return html`<div class="sm-add">
+    <label class="lbl">Name, as the menu shows it</label>
+    <${Field} value=${name} placeholder="Dark Screens" maxLength=${20} onChange=${setName} />
+    <label class="lbl">Its values, in order, with commas</label>
+    <${Field} value=${vals} placeholder="Off, On" onChange=${setVals} />
+    <label class="lbl">The value it starts at (its number)</label>
+    <${Field} value=${def} width=${70} type="number" min=${1} max=${8} onChange=${setDef} />
+    ${said ? html`<span class="small err-ink">${said}</span>` : null}
+    <div class="row"><${Button} size="sm" kind="primary" onClick=${add}>Add<//>
+      <${Button} size="sm" onClick=${() => setOpen(false)}>Cancel<//></div>
+  </div>`;
+}
+
 function Rows({ s, menu }) {
   const where = {};
   for (const p of (menu && menu.pages) || []) {
@@ -85,20 +112,52 @@ function Rows({ s, menu }) {
     }
   }
   const refused = (menu && menu.refused) || {};
-  return html`<${Card} title="The app's rows" cls="sm-ours">
-    ${(s.settings || []).map((x) => {
+  const list = s.settings || [];
+  return html`<${Card} title="The app's rows" sub="in your order" cls="sm-ours">
+    ${list.map((x, i) => {
       const placed = where[x.key];
       const why = refused[x.key];
       return html`<div class="sm-our" key=${x.key}>
-        ${x.can || x.on ? html`<${Check} checked=${x.on} label=${x.name} disabled=${!x.can}
-            onChange=${(v) => call("svcmenu.set_row", x.key, v)} />`
-          : html`<span class="sm-our-name">${x.name}</span>`}
-        <span class="small muted">${placed ? `On ${placed}.` : why ? `Not on the card: ${why}.` : x.note || x.where}</span>
+        <div class="sm-our-hd">
+          ${x.custom ? html`<span class="sm-our-name">${x.name} <span class="small muted">(yours)</span></span>`
+            : x.can || x.on ? html`<${Check} checked=${x.on} label=${x.name} disabled=${!x.can}
+                onChange=${(v) => call("svcmenu.set_row", x.key, v)} />`
+            : html`<span class="sm-our-name">${x.name}</span>`}
+          <span class="sp"></span>
+          <${Button} size="sm" icon="up" disabled=${i === 0} title="Earlier on the page and on More Settings"
+            onClick=${() => call("svcmenu.move", x.key, -1)} />
+          <${Button} size="sm" icon="down" disabled=${i === list.length - 1} title="Later on the page and on More Settings"
+            onClick=${() => call("svcmenu.move", x.key, 1)} />
+          ${x.custom ? html`<${Button} size="sm" icon="trash" title="Remove this setting of yours"
+            onClick=${() => call("svcmenu.remove_custom", x.key)} />` : null}
+        </div>
+        ${x.custom ? html`<span class="small">${x.values.map((v, k) => `${k + 1} ${v}`).join(", ")}; starts at ${x.default}.</span>` : null}
+        <span class="small muted">${placed ? `On ${placed}. ` : why ? `Not on the card: ${why}. ` : ""}${x.custom ? x.where : placed ? "" : x.note || x.where}</span>
       </div>`;
     })}
+    <${AddSetting} said=${s.custom_said} />
     ${menu ? html`<p class="small muted sm-count">This game has ${menu.spare} spare row${menu.spare === 1 ? "" : "s"} for
       the app's settings${menu.shared ? "; there are more settings than that, so they share two: More Settings picks one and the row under it shows it. The card keeps each one's value." : "."}</p>` : null}
   <//>`;
+}
+
+// round 3 (David): "make it like the multi-boot menu too where it renders the REAL thing ... if it's not performant,
+// then add a check-box to toggle it and leave it off by default" - the game itself in the emulator, minutes a read
+function Real({ s, page, pi, sel }) {
+  return html`<div class="sm-real">
+    <${Check} checked=${s.real_on} label="Show the real menu from the emulator" title=${s.real_note}
+      onChange=${(v) => { call("svcmenu.set_real", v); if (v && page) call("svcmenu.render", pi, sel); }} />
+    ${s.real_on ? html`<div class="sm-real-bd">
+      <div class="row"><${Button} size="sm" icon="refresh" disabled=${s.real_busy || !page}
+          onClick=${() => call("svcmenu.render", pi, sel)}>Read the real menu<//>
+        <span class="small muted">${s.real_note}</span></div>
+      ${s.real_busy ? html`<div class="sm-wait"><${Spinner} /> Booting the game in the emulator (hidden) and walking its menu…</div>`
+        : s.real_why ? html`<${Note} kind="warn">${s.real_why}<//>`
+        : s.real_png ? html`<figure class="sm-real-fig"><img src=${mediaUrl(s.real_png)} alt=${"The game's own " + (s.real_for || "menu")} />
+            <figcaption class="small muted">The game itself, in the emulator: ${s.real_for}</figcaption></figure>`
+        : null}
+    </div>` : null}
+  </div>`;
 }
 
 export default function ServiceMenuTab() {
@@ -133,7 +192,8 @@ export default function ServiceMenuTab() {
               onChange=${(v) => setPi(Number(v))} />` : null}
           ${page ? html`<div class="small muted sm-path">${page.path}</div>
               <${Screen} page=${page} sel=${sel} setSel=${setSel} picks=${picks} />
-              <${Stepper} row=${rows[sel]} picks=${picks} setPicks=${setPicks} />`
+              <${Stepper} row=${rows[sel]} picks=${picks} setPicks=${setPicks} />
+              <${Real} s=${s} page=${page} pi=${pi} sel=${sel} />`
             : html`<${Empty} icon="list" title="No rows of the app's yet">Nothing on this project adds a row to the
                 service menu. Switch one on below, or on its own tab, and it shows here where the Write puts it.<//>`}
         </div>

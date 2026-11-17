@@ -9705,9 +9705,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
         # PAD-1033: HANDICAP, the row that switches the players' handicaps (the last spare setting it takes)
         hand_menu = _HandicapMenu(log) if _hand_on else None
-        menu_job = (_MenuJobs(music_menu, edition_menu, *picture_menus, coop_menu, hand_menu)
-                    if music_menu is not None or edition_menu is not None
-                    or picture_menus or coop_menu is not None or hand_menu is not None else None)
+        # PAD-1382: the owner's own settings (Service menu tab) beside them, all in the owner's order
+        from . import service_menu as _SvM
+        _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu], log)
+        menu_job = _MenuJobs(*_menu_list) if _menu_list else None
         picture_cfg = ""
         settings_cfg = ""
         coop_setting = 0
@@ -12077,12 +12078,15 @@ def _shared_settings_cfg(menu_job, work, log):
         return ""
     from . import menu_settings as _MSet
     shared = [j for j in menu_job.jobs if j.ok and _MSet.is_shared(j.setting)]
-    if not shared:
+    custom = [j for j in menu_job.jobs if j.ok and j.KEY.startswith(_MSet.CUSTOM_PREFIX)]
+    if not shared and not custom:
         return ""
     os.makedirs(_lp(work), exist_ok=True)
     path = os.path.join(work, _MSet.SHARED_CFG)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
         f.write(menu_job.shared_text)
+    if not shared:
+        return path
     log("More settings: the game has too few spare settings for each of ours to have a row, so %s share two: MORE "
         "SETTINGS picks one and the row under it shows its value (%s). The card keeps each one's value."
         % (", ".join(_MSet.SETTINGS[j.KEY][1] for j in shared),

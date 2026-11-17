@@ -318,6 +318,9 @@ void pm_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));  /* /du
 unsigned long pm_ms(void);            /* milliseconds since boot */
 int pm_trigger(const char *name);     /* 1, once, when the file /dump/<name> appears */
 long pm_read_file(const char *path, char *buf, unsigned long cap);  /* bytes read, or -1 */
+/* PAD-1382: a service-menu setting of the owner's own (the app's Service menu tab names its key, "custom_<name>"):
+ * its value as the operator set it, 1..n, or 0 when the card has none by that name */
+unsigned pm_setting(const char *key);
 int pm_trigger_text(const char *name, char *out, unsigned cap);  /* ...and its first line */
 void pm_commas(char *out, unsigned cap, uint64_t value);          /* 1234567 -> "1,234,567" */
 int pm_snprintf(char *out, unsigned long cap, const char *fmt, ...)

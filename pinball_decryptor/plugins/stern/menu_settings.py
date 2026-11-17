@@ -112,6 +112,9 @@ SHARED_BASE = 0xFADE0000
 SHARED_CFG = "settings.cfg"
 #: the start of the reason a setting gets when every spare row is taken
 NO_SPARE = "the game has no spare setting left for"
+#: PAD-1382 round 3: a setting of the owner's own (the Service menu tab, service_menu.CustomMenu); settings.cfg names
+#: where each one's value is (a row's, or a shared word) for the card's own code (pm_setting)
+CUSTOM_PREFIX = "custom_"
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
 #: how many values a setting of ours may offer (the picture settings' 9 are their own)
@@ -1228,22 +1231,26 @@ def shared_cfg_text(settings):
     by_key = {st.key: st for st in settings}
     pick, value = by_key.get(MORE_SELECT), by_key.get(MORE_VALUE)
     opts = sorted((st for st in settings if is_shared(st)), key=lambda st: st.shared[0])
-    if pick is None or value is None or not opts:
+    custom = [st for st in settings if st.key.startswith(CUSTOM_PREFIX)]
+    if (pick is None or value is None or not opts) and not custom:
         return ""
 
     def clean(t):
         return " ".join(str(t).replace("\t", " ").split())
 
-    desc, help_va, help_room, row_va, row_room, o_def, o_min, o_max, o_kind = value.shared
-    lines = ["# PAD-1382: settings of ours sharing MORE SETTINGS and the row under it",
-             "select\t0x%08x\t%d" % (pick.live, len(opts)),
-             "value\t0x%08x\t0x%08x\t0x%08x\t%d\t0x%08x\t%d" % (value.live, desc, help_va, help_room, row_va,
-                                                                 row_room),
-             "fields\t%d\t%d\t%d\t%d" % (o_def, o_min, o_max, o_kind)]
-    for st in opts:
-        lines.append("option\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s" % (
-            st.shared[0], st.key, st.low, st.values - 1 + st.low, st.default, st.kind, clean(st.caption) or "Setting",
-            clean(st.help)))
+    lines = ["# PAD-1382: settings of ours sharing MORE SETTINGS and the row under it, and the owner's own"]
+    if pick is not None and value is not None and opts:
+        desc, help_va, help_room, row_va, row_room, o_def, o_min, o_max, o_kind = value.shared
+        lines += ["select\t0x%08x\t%d" % (pick.live, len(opts)),
+                  "value\t0x%08x\t0x%08x\t0x%08x\t%d\t0x%08x\t%d" % (value.live, desc, help_va, help_room,
+                                                                      row_va, row_room),
+                  "fields\t%d\t%d\t%d\t%d" % (o_def, o_min, o_max, o_kind)]
+        for st in opts:
+            lines.append("option\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s" % (
+                st.shared[0], st.key, st.low, st.values - 1 + st.low, st.default, st.kind,
+                clean(st.caption) or "Setting", clean(st.help)))
+    for st in custom:                     # the owner's own: where its value is, for pm_setting
+        lines.append("custom\t%s\t0x%08x" % (st.key, st.live))
     return "\n".join(lines) + "\n"
 
 

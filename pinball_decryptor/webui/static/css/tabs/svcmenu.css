@@ -41,3 +41,10 @@ html.bp-1100 .sm-layout { grid-template-columns: 1fr; }
 .sm-our { display: flex; flex-direction: column; gap: 2px; }
 .sm-our-name { font-weight: 600; }
 .sm-count { margin: 4px 0 0; border-top: 1px solid var(--line); padding-top: 8px; }
+.sm-our-hd { display: flex; align-items: center; gap: 4px; }
+.sm-our-hd .sp { flex: 1; }
+.sm-add { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
+.sm-real { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.sm-real-bd { display: flex; flex-direction: column; gap: 8px; }
+.sm-real-fig { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.sm-real-fig img { width: 100%; max-width: 1100px; border-radius: 6px; border: 1px solid #000; }

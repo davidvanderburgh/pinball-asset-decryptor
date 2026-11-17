@@ -51,3 +51,32 @@ Override sets built by `engine.write_overrides` from main and from this branch (
   features read the shared values), and the page shows More Settings 4 / Co-op Play 1.
 
 Tests: `tests/test_pad1382_more_settings.py`.
+
+## Round 2: the Service menu tab
+
+David: "how does the user edit the service menu? ... a visual render of the service menu in our app". Make >
+**Service menu** (Stern Spike 2; `webui/tabs/svcmenu.py`, `static/js/tabs/svcmenu.js`, `plugins/stern/service_menu.py`)
+plans the project's rows exactly as a Write does (`service_menu.wanted` = the engine's own menu jobs, through
+`arrange`, then `plan_many`) and draws each page that carries one as the machine draws it: the page's system rows in
+the category table's order, ours, then the game's feature rows (ids 160+ whose descriptor's u16 at +0x26 names the
+page). Matched row for row against Godzilla LE 1.16's Attract Mode in the emulator; the game hides 70TH BOOT SCREEN at
+run time on LE, which the reproduction still lists. Values are shown where the display kind says how (low 16 bits: 1
+Off/On, 9 Yes/No, 2 a number); the game words the rest itself (its value-word tables are reached through code, not
+mapped yet) and those are left blank.
+
+## Round 3: order, settings of one's own, the real menu
+
+- **Order**: sidecar `service_menu.order`; `service_menu.arrange` sorts the build's menu jobs by it (then the engine's
+  order). It sets the rows' order on a page (the category table is appended in that order) and the numbers on MORE
+  SETTINGS. Values in `pad_settings.state` are by key, so a reorder loses none.
+- **Settings of one's own**: sidecar `service_menu.custom` `[{key, name, values, default}]`, key `custom_<name>`;
+  `service_menu.CustomMenu` is a menu job like the engine's, registering its captions in `menu_settings.SETTINGS`
+  (Attract Mode). Planned like the built-ins (a spare row, else shared). `settings.cfg` gets `custom <key> <address>`
+  (a row's .nonvol word or a shared one) and the runtime's `pm_setting(key)` (pad_mode.h) reads it - the card's own
+  code is the generic reader. A setting that makes the GAME behave differently needs that behaviour built (a ticket),
+  as image sets will.
+- **The real menu** (off until ticked): `EmulateTab.menu_shot` prepares the same override set a Start prepares (and
+  reuses it), then `tools/spike2_emu/menushot.sh` boots hidden and muted, walks `service_menu.walk(rank, row)` and
+  glshots the frame. Walk, measured on Godzilla LE 1.16: 25, 25, Adjustments (5th), Machine Settings (3rd), then the
+  page by its place among categories 8-17 that have rows, in number order (Attract Mode 16 = 8th), then the row.
+  Refused while the Emulate tab has a run up; a Start waits while a read holds the rig.

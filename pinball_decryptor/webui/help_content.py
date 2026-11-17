@@ -1546,6 +1546,24 @@ HELP_CONTENT = {
             "untick to leave it off), and the menu redraws. Music Mode is set on the Audio tab, Edition on the Write "
             "tab. Values are the operator's: they are set at the machine, and **+** and **-** here only show what "
             "each one looks like. Nothing changes on the card until you Write it.",
+            "The arrows beside each row put the rows in **your order**: it is their order on the page, and their "
+            "numbers on More Settings when they share. Each one's value is kept by name, so reordering never loses "
+            "one.",
+        ]),
+        ("Settings of your own", [
+            "**Add a setting…** puts a row of your own on the card: a name (up to 20 letters) and 2 to 8 values. It "
+            "takes a spare row like the app's own, or shares More Settings when there are none left. **Remove** "
+            "takes it off again; the app's own rows are never removed here.",
+            "A row on its own changes nothing: something on the card has to read it. Your own code on the card reads "
+            "it with `pm_setting(\"custom_<name>\")` - the name the list shows - as 1 to the number of values. Making "
+            "the game itself behave differently by a setting needs that behaviour built into the app.",
+        ]),
+        ("The real menu", [
+            "**Show the real menu from the emulator** boots the game in the emulator - hidden and muted, with this "
+            "project's edits, as the Emulate tab runs it - walks its service menu to the page and row picked above, "
+            "and shows the picture the game itself draws. It takes a minute or more (longer the first time a card is "
+            "used) and needs the emulator stopped, so it is off until ticked. **Read the real menu** reads it again "
+            "after a change.",
         ]),
     ],
     "Play Options": [

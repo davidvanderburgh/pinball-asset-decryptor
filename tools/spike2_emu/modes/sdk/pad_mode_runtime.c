@@ -26968,9 +26968,12 @@ static void pic_arm(void)
  * even multiple versions" of a screen, picked in the service menu and kept over a power cycle. The Scenes tab gives a
  * scene variants of its own (a copy of the scene with its own pictures and colours), the build puts each one on the
  * card as a file beside the scene's own (`scene.radium` -> the variant's file), the operator menu gets IMAGE SET, and
- * this swaps the FILE: the game opens every scene.radium with fopen64 (tools/spike2_emu/hwshim.c: "Radium's FileStream
- * uses the large-file variant"), so the game program's fopen64 import slot is re-pointed and a listed scene's path is
- * opened as the variant's file while the set says that variant. Nothing of the scene's id, its library or the
+ * this swaps the FILE: every scene.radium is opened with fopen64 (tools/spike2_emu/hwshim.c: "Radium's FileStream
+ * uses the large-file variant") - by libstdc++'s std::ifstream, through ITS OWN import of fopen64, not the game
+ * program's (re-pointing the program's slot alone was tried in the rig: armed, and no scene ever came through it). So
+ * the object exports fopen64 itself, the one symbol it does, the way hwshim.c interposes it: preloaded, it is what
+ * every library of the game binds fopen64 to; it calls on to the next one (dlsym RTLD_NEXT) and, once armed, opens a
+ * listed scene's path as the variant's file while the set says that variant. Nothing of the scene's id, its library or the
  * resource manager changes: the game reads the variant exactly where it would have read its own scene.
  *
  * WHEN. Most of the screens worth a variant are in auto_loaded/ (the Battle Select screen, cac32730), read once at
@@ -26982,7 +26985,8 @@ static void pic_arm(void)
  * scenes.cfg (/usr/local/padmode/scenes.cfg on a card, /dump/scenes.cfg in the rig), one TAB-separated line each:
  *
  *     only                                      the card carries no modes: arm this and nothing else
- *     got <TAB> <symbol> <TAB> <addr>            fopen64 or eglSwapBuffers: an import slot of the game program
+ *     got <TAB> <symbol> <TAB> <addr>            eglSwapBuffers: an import slot of the game program (a fopen64
+ *                                               line is read and not needed: fopen64 is interposed, above)
  *     setting <TAB> <live> <TAB> <n>             IMAGE SET's value (1..n) in the game's memory (0: none, the state's)
  *     scene <TAB> <path tail> <TAB> <set> <TAB> <file>
  *                                               a scene file whose path ENDS with <path tail> is opened as <file>
@@ -27009,6 +27013,7 @@ static struct { const char *tail; const char *file; unsigned set, tail_len, said
 static int scnv_n, scnv_only, scnv_bad;
 static unsigned scnv_live, scnv_sets, scnv_force, scnv_ran, scnv_boot;
 static void *(*scnv_real_fopen64)(const char *, const char *);
+static int scnv_on, scnv_seen;
 static unsigned (*scnv_real_swap)(void *, void *);
 
 static unsigned scnv_strlen(const char *s)
@@ -27153,7 +27158,7 @@ static unsigned scnv_value(void)
 }
 
 /* the game's fopen64: a listed scene's file is opened as its variant's while the set says so */
-static void *scnv_fopen64(const char *path, const char *mode)
+__attribute__((unused)) static void *scnv_fopen64(const char *path, const char *mode)
 {
     int i;
     unsigned set = scnv_boot;
@@ -27175,8 +27180,27 @@ static void *scnv_fopen64(const char *path, const char *mode)
                     path);
             break;
         }
+    if (path && scnv_seen < 3) {              /* the first scenes the game opens, for a path that never matches */
+        unsigned n = scnv_strlen(path);
+        if (n > 7 && scnv_tail_is(path, "scene.radium", 12)) say("image sets: the game opens %s", path), scnv_seen++;
+    }
     return scnv_real_fopen64(path, mode);
 }
+
+#if !PM_A64
+/* the one symbol this object exports (everything else is hidden, build_mode.sh): libstdc++'s std::ifstream and the game
+ * program bind their fopen64 to it. A plain call on to the next fopen64 until scnv_arm has armed the image sets - and
+ * in any process of the preload that is not the game, where it never is. */
+__attribute__((visibility("default"))) void *fopen64(const char *path, const char *mode);
+__attribute__((visibility("default"))) void *fopen64(const char *path, const char *mode)
+{
+    if (!scnv_real_fopen64) {
+        scnv_real_fopen64 = (void *(*)(const char *, const char *))dlsym((void *)-1L /* RTLD_NEXT */, "fopen64");
+        if (!scnv_real_fopen64) return 0;
+    }
+    return scnv_on ? scnv_fopen64(path, mode) : scnv_real_fopen64(path, mode);
+}
+#endif
 
 /* once a frame: the set as the game holds it, kept for the next start when it changes */
 static unsigned scnv_swap(void *dpy, void *surf)
@@ -27207,39 +27231,35 @@ static void scnv_arm(void)
             scnv_live);
         scnv_live = 0;
     }
-    for (k = 0; k < SCNV_GOTS; k++) {
-        if (!scnv_got[k] || !maps_has(scnv_got[k], 4, MAP_R | MAP_GAME)) {
-            say("image sets: off - scenes.cfg names no import slot of the game's program for %s", SCNV_SYMS[k]);
-            return;
-        }
-        v = *(volatile const unsigned *)(unsigned long)scnv_got[k];
-        if (!v || !maps_has(v & ~1u, 4, MAP_R | MAP_X)) {
-            say("image sets: off - %s's slot 0x%08x holds 0x%08x, not a function", SCNV_SYMS[k], scnv_got[k], v);
-            return;
-        }
+    /* eglSwapBuffers: the game program's import slot, re-pointed to note the setting once a frame. What is called on:
+     * a slot already bound (to the library, or to the picture settings' hook, armed before this) is kept; a slot still
+     * holding the program's own lazy-binding stub cannot be called from C, so the function is looked up in libEGL */
+    k = SCNV_SWAP;
+    if (!scnv_got[k] || !maps_has(scnv_got[k], 4, MAP_R | MAP_GAME)) {
+        say("image sets: off - scenes.cfg names no import slot of the game's program for %s", SCNV_SYMS[k]);
+        return;
     }
-    /* what is called on: a slot already bound (to the library, or to another hook of ours - the picture settings
-     * re-point eglSwapBuffers before this) is kept; a slot still holding the program's own lazy-binding stub cannot
-     * be called from C, so the function is looked up as the dynamic linker would bind it (the rig's shim first) */
-    for (k = 0; k < SCNV_GOTS; k++) {
-        void *fn_;
-        v = *(volatile const unsigned *)(unsigned long)scnv_got[k];
-        if (!maps_has(v & ~1u, 4, MAP_R | MAP_X | MAP_GAME))
-            fn_ = (void *)(unsigned long)v;
-        else if (k == SCNV_SWAP) {
-            void *egl = dlopen("libEGL.so.1", PIC_RTLD_NOW | PIC_RTLD_NOLOAD);
-            fn_ = egl ? dlsym(egl, SCNV_SYMS[k]) : 0;
-        } else
-            fn_ = dlsym((void *)0 /* RTLD_DEFAULT */, SCNV_SYMS[k]);
-        if (!fn_) { say("image sets: off - no %s to call on", SCNV_SYMS[k]); return; }
-        if (k == SCNV_FOPEN64) scnv_real_fopen64 = (void *(*)(const char *, const char *))fn_;
-        else scnv_real_swap = (unsigned (*)(void *, void *))fn_;
+    v = *(volatile const unsigned *)(unsigned long)scnv_got[k];
+    if (!v || !maps_has(v & ~1u, 4, MAP_R | MAP_X)) {
+        say("image sets: off - %s's slot 0x%08x holds 0x%08x, not a function", SCNV_SYMS[k], scnv_got[k], v);
+        return;
     }
+    if (!maps_has(v & ~1u, 4, MAP_R | MAP_X | MAP_GAME))
+        scnv_real_swap = (unsigned (*)(void *, void *))(unsigned long)v;
+    else {
+        void *egl = dlopen("libEGL.so.1", PIC_RTLD_NOW | PIC_RTLD_NOLOAD);
+        scnv_real_swap = egl ? (unsigned (*)(void *, void *))dlsym(egl, SCNV_SYMS[k]) : 0;
+    }
+    if (!scnv_real_swap) { say("image sets: off - no %s to call on", SCNV_SYMS[k]); return; }
+    /* fopen64: this object's own export (above) */
+    if (!scnv_real_fopen64)
+        scnv_real_fopen64 = (void *(*)(const char *, const char *))dlsym((void *)-1L /* RTLD_NEXT */, "fopen64");
+    if (!scnv_real_fopen64) { say("image sets: off - no fopen64 after this object's own"); return; }
     scnv_boot = scnv_force ? scnv_force : scnv_state_read();
     if (scnv_boot > scnv_sets) scnv_boot = 1;
     scnv_ran = scnv_boot;
-    *(volatile unsigned *)(unsigned long)scnv_got[SCNV_FOPEN64] = (unsigned)(unsigned long)scnv_fopen64;
     *(volatile unsigned *)(unsigned long)scnv_got[SCNV_SWAP] = (unsigned)(unsigned long)scnv_swap;
+    scnv_on = 1;
     say("image sets: armed - %u set(s), %d scene file(s), IMAGE SET at 0x%08x; this start shows set %u%s",
         scnv_sets, scnv_n, scnv_live, scnv_boot, scnv_force ? " (FORCED by the file)" : "");
 }

@@ -28,9 +28,14 @@
  *   screen   drawn on the backbuffer before the real al_flip_display, with
  *            the GAME's own fonts (JJPEFont globals, font_*) through the
  *            game's own font_plot_outline_shadow - the look of its own modes.
+ *   hold     (PAD-1348, the default) while a custom mode runs, the game's
+ *            mode and multiball starts are refused: the start and restart
+ *            slots of every Mode / MultiballRule class (found by the game's
+ *            typeinfo) point at a gate (see "run alone" below).
  *   yield    a custom mode never starts while a game mode or a multiball
  *            runs, and pauses (timer held, shots ignored, screen hidden) when
- *            one starts under it - unless its file says otherwise.  The game's
+ *            one starts under it (a mode the game starts past the gate, or
+ *            with game_modes = pause) - unless its file says otherwise.  The game's
  *            modes are found by scanning the game's own symbols for objects
  *            whose vtable carries Mode::is_running; modes already running at
  *            ball start (a title's always-on modes) do not count.

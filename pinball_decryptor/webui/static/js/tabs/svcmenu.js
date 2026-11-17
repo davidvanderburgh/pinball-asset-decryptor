@@ -3,7 +3,7 @@
 // in our app". The pages come from webui/tabs/svcmenu.py (plugins/stern/service_menu.py, planned exactly as a Write
 // plans); here they are drawn the way the machine draws them (Godzilla 1.16, emulator), a row is picked as the
 // operator picks one, and stepping MORE SETTINGS turns the row under it into the setting picked, as on the machine.
-import { html, useState, useEffect, PageHead, Card, Button, Check, Field, Note, Empty, Seg, Spinner, call, cx, mediaUrl } from "../core/ui.js";
+import { html, useState, useEffect, PageHead, Card, Button, Check, Note, Empty, Seg, Spinner, call, cx, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
 
 export const css = true;
@@ -98,33 +98,9 @@ function Stepper({ row, picks, setPicks }) {
   </div>`;
 }
 
-// round 3 (David): "things like reordering existing settings? adding removing custom ones. we don't want to break any
-// built-in ones though so keep it simple" - the order is the owner's (it sets the rows' order on a page and their
-// numbers on More Settings); a setting of their own is a name and its values, read by the card's own code
-function AddSetting({ said }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [vals, setVals] = useState("Off, On");
-  const [def, setDef] = useState("1");
-  if (!open) return html`<div class="row"><${Button} size="sm" icon="plus" onClick=${() => setOpen(true)}
-      title="A row of your own: a name and its values. The card's own code reads what the operator set.">Add a setting…<//></div>`;
-  const add = async () => {
-    const why = await call("svcmenu.add_custom", name, vals, Number(def) || 1);
-    if (!why) { setOpen(false); setName(""); }
-  };
-  return html`<div class="sm-add">
-    <label class="lbl">Name, as the menu shows it</label>
-    <${Field} value=${name} placeholder="Dark Screens" maxLength=${20} onChange=${setName} />
-    <label class="lbl">Its values, in order, with commas</label>
-    <${Field} value=${vals} placeholder="Off, On" onChange=${setVals} />
-    <label class="lbl">The value it starts at (its number)</label>
-    <${Field} value=${def} width=${70} type="number" min=${1} max=${8} onChange=${setDef} />
-    ${said ? html`<span class="small err-ink">${said}</span>` : null}
-    <div class="row"><${Button} size="sm" kind="primary" onClick=${add}>Add<//>
-      <${Button} size="sm" onClick=${() => setOpen(false)}>Cancel<//></div>
-  </div>`;
-}
-
+// round 5 (David): "we should just be checking off items that exist ... with a 'custom code' tab, we shouldn't have the
+// option to add these custom settings to those other ones" - the app's settings, ticked here or on their tabs, in the
+// owner's order (their order on the page and their numbers on More Settings)
 function Rows({ s, menu }) {
   const where = {};
   for (const p of (menu && menu.pages) || []) {
@@ -135,14 +111,13 @@ function Rows({ s, menu }) {
   }
   const refused = (menu && menu.refused) || {};
   const list = s.settings || [];
-  return html`<${Card} title="The app's rows" sub="in your order" cls="sm-ours">
+  return html`<${Card} title="The app's settings" sub="tick to put on the card" cls="sm-ours">
     ${list.map((x, i) => {
       const placed = where[x.key];
       const why = refused[x.key];
       return html`<div class="sm-our" key=${x.key}>
         <div class="sm-our-hd">
-          ${x.custom ? html`<span class="sm-our-name">${x.name} <span class="small muted">(yours)</span></span>`
-            : x.can || x.on ? html`<${Check} checked=${x.on} label=${x.name} disabled=${!x.can}
+          ${x.can || x.on ? html`<${Check} checked=${x.on} label=${x.name} disabled=${!x.can}
                 onChange=${(v) => call("svcmenu.set_row", x.key, v)} />`
             : html`<span class="sm-our-name">${x.name}</span>`}
           <span class="sp"></span>
@@ -150,14 +125,10 @@ function Rows({ s, menu }) {
             onClick=${() => call("svcmenu.move", x.key, -1)} />
           <${Button} size="sm" icon="down" disabled=${i === list.length - 1} title="Later on the page and on More Settings"
             onClick=${() => call("svcmenu.move", x.key, 1)} />
-          ${x.custom ? html`<${Button} size="sm" icon="trash" title="Remove this setting of yours"
-            onClick=${() => call("svcmenu.remove_custom", x.key)} />` : null}
         </div>
-        ${x.custom ? html`<span class="small">${x.values.map((v, k) => `${k + 1} ${v}`).join(", ")}; starts at ${x.default}.</span>` : null}
-        <span class="small muted">${placed ? `On ${placed}. ` : why ? `Not on the card: ${why}. ` : ""}${x.custom ? x.where : placed ? "" : x.note || x.where}</span>
+        <span class="small muted">${placed ? `On ${placed}.` : why ? `Not on the card: ${why}.` : x.note || x.where}</span>
       </div>`;
     })}
-    <${AddSetting} said=${s.custom_said} />
     ${menu ? html`<p class="small muted sm-count">This game has ${menu.spare} spare row${menu.spare === 1 ? "" : "s"} for
       the app's settings${menu.shared ? "; there are more settings than that, so they share two: More Settings picks one and the row under it shows it. The card keeps each one's value." : "."}</p>` : null}
   <//>`;
@@ -182,29 +153,60 @@ function Real({ s, page, pi, sel }) {
   </div>`;
 }
 
+// round 5 (David): "better highlight the 'custom code' tab and how the user gets there": the way there at the machine,
+// and the Machine Settings list drawn with the page lit, as the operator steps to it
+function WayThere({ menu, page }) {
+  const own = menu.own;
+  const dmd = page && page.style === "dmd";
+  const steps = dmd ? ["Service menu", "Adjustments", "Standard Adjustments", "the last rows"]
+    : ["Service menu", "Adjustments", "Machine Settings", own || (page && page.name) || "…"];
+  const list = menu.machine_list || [];
+  return html`<div class="sm-way">
+    <div class="sm-way-steps" aria-label="The way there at the machine">
+      ${steps.map((t, i) => html`<span key=${i} class=${cx("sm-way-step", i === steps.length - 1 && "last")}>${t}</span>
+        ${i < steps.length - 1 ? html`<span class="sm-way-sep">›</span>` : null}`)}
+    </div>
+    <p class="small muted sm-way-note">${dmd
+      ? "This game has the older dot-matrix menu, with no pages to add: the app's rows are the last ones of Standard Adjustments (press minus on the first row to go round to them)."
+      : own ? `Open the coin door, press SELECT for the service menu, then Adjustments, Machine Settings and ${own}: the app's own page, with every setting the app adds.`
+      : "The app's rows are on the page below."}</p>
+    ${!dmd && own && list.length ? html`<div class="sm-screen sm-list-screen" aria-label="Machine Settings">
+        <div class="sm-title">Machine Settings</div>
+        <div class="sm-rows sm-list-rows">${list.map((n) => html`<div key=${n} class=${cx("sm-row", n === own && "on ours")}>
+          <span class="sm-cap">${n}</span></div>`)}</div>
+      </div>` : null}
+  </div>`;
+}
+
+function PageView({ page, picks, setPicks, sel, setSel, readOnly }) {
+  const rows = shownRows(page, picks);
+  return html`${page.style === "dmd" ? html`<${DmdScreen} page=${page} sel=${sel} setSel=${setSel} picks=${picks} />`
+      : html`<${Screen} page=${page} sel=${sel} setSel=${setSel} picks=${picks} />`}
+    ${readOnly ? null : html`<${Stepper} row=${rows[sel]} picks=${picks} setPicks=${setPicks} />`}`;
+}
+
 export default function ServiceMenuTab() {
   const s = useNs("svcmenu");
   const menu = s.menu;
   const pages = (menu && menu.pages) || [];
-  const [pi, setPi] = useState(0);
+  // the app's page (Custom Code, or the page holding its rows) first; the game's others read-only, secondary
+  const oi = pages.findIndex((p) => p.ours);
+  const ours = oi >= 0 ? pages[oi] : null;
+  const others = pages.filter((p, i) => i !== oi);
   const [sel, setSel] = useState(0);
   const [picks, setPicks] = useState({});
-  const page = pages[Math.min(pi, pages.length - 1)];
-  // round 4: every Machine Settings page is listed; open on the first that holds a row of the app's, else Attract Mode
+  const [qi, setQi] = useState(0);
+  const [qsel, setQsel] = useState(0);
+  const other = others[Math.min(qi, others.length - 1)];
   useEffect(() => {
-    if (!pages.length) return;
-    let want = pages.findIndex((p) => p.ours);
-    if (want < 0) want = pages.findIndex((p) => p.category === 16);
-    setPi(want < 0 ? 0 : want);
-  }, [menu]);
-  useEffect(() => {
-    if (!page) return;
-    const first = page.rows.findIndex((r) => r.ours);
+    if (!ours) return;
+    const first = ours.rows.findIndex((r) => r.ours);
     setSel(first < 0 ? 0 : first);
-  }, [pi, menu]);
-  const rows = page ? shownRows(page, picks) : [];
+  }, [menu]);
+  useEffect(() => { setQsel(0); }, [qi, menu]);
+  const rows = ours ? shownRows(ours, picks) : [];
   const onKey = (e) => {
-    if (!page) return;
+    if (!ours || (e.target.closest && e.target.closest(".sm-others"))) return;
     if (e.key === "ArrowDown") { setSel(Math.min(rows.length - 1, sel + 1)); e.preventDefault(); }
     if (e.key === "ArrowUp") { setSel(Math.max(0, sel - 1)); e.preventDefault(); }
   };
@@ -217,16 +219,21 @@ export default function ServiceMenuTab() {
       : s.why ? html`<${Note} kind="warn">${s.why}<//>`
       : html`<div class="sm-layout">
         <div class="sm-main">
-          ${pages.length > 1 ? html`<${Seg} value=${pi} options=${pages.map((p, i) => ({ value: i, label: p.name }))}
-              onChange=${(v) => setPi(Number(v))} />` : null}
-          ${page ? html`<div class="small muted sm-path">${page.path}${menu.source ? html` · read from <span class="mono">${menu.source}</span>` : null}
-              ${menu.wide ? " · Spike 3: the page's system rows and the app's (the game's own rows for this game are not listed yet)" : null}</div>
-              ${page.style === "dmd" ? html`<${DmdScreen} page=${page} sel=${sel} setSel=${setSel} picks=${picks} />`
-                : html`<${Screen} page=${page} sel=${sel} setSel=${setSel} picks=${picks} />`}
-              <${Stepper} row=${rows[sel]} picks=${picks} setPicks=${setPicks} />
-              <${Real} s=${s} page=${page} pi=${pi} sel=${sel} />`
-            : html`<${Empty} icon="list" title="No rows of the app's yet">Nothing on this project adds a row to the
-                service menu. Switch one on below, or on its own tab, and it shows here where the Write puts it.<//>`}
+          <${Card} cls="sm-hero" title=${ours ? (menu.own || ours.name) : "The app's page"}
+              sub=${menu.source ? html`read from <span class="mono">${menu.source}</span>` : null}>
+            ${ours ? html`<${WayThere} menu=${menu} page=${ours} />
+                <${PageView} page=${ours} picks=${picks} setPicks=${setPicks} sel=${sel} setSel=${setSel} />
+                <${Real} s=${s} page=${ours} pi=${oi} sel=${sel} />`
+              : html`<${Empty} icon="list" title="No settings of the app's yet">Tick a setting on the right (or switch it
+                  on its own tab) and it shows here, on the page the Write gives the app's settings.<//>`}
+            ${menu.wide ? html`<p class="small muted">Spike 3: the page's system rows and the app's are shown (the game's own rows for this game are not listed yet).</p>` : null}
+          <//>
+          ${others.length ? html`<details class="sm-others">
+            <summary>The game's other pages <span class="muted small">(read-only: nothing on them is changed)</span></summary>
+            <${Seg} value=${qi} options=${others.map((p, i) => ({ value: i, label: p.name }))} onChange=${(v) => setQi(Number(v))} />
+            <div class="small muted sm-path">${other.path}</div>
+            <${PageView} page=${other} picks=${{}} setPicks=${() => {}} sel=${qsel} setSel=${setQsel} readOnly=${true} />
+          </details>` : null}
         </div>
         <${Rows} s=${s} menu=${menu} />
       </div>`}

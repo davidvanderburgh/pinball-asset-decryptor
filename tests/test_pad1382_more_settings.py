@@ -58,7 +58,7 @@ def test_five_settings_on_three_spare_rows_share_two(card):
     by = {s.key: s for s in settings}
     pick, value = by[MS.MORE_SELECT], by[MS.MORE_VALUE]
     assert pick.id != value.id and {pick.id, value.id} <= {31, 33, 35}
-    assert pick.values == 5 and pick.category == value.category == 16
+    assert pick.values == 5 and pick.category == value.category == MS.OWN_CATEGORY    # round 5: Custom Code
     keys = ["brightness", "contrast", "saturation", "coop_play", "handicap"]
     for k, key in enumerate(keys, 1):
         s = by[key]

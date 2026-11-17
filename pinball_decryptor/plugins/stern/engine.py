@@ -8461,11 +8461,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
     # PAD-1033: a handicap for each player - handicap.cfg beside the runtime (the modes' delivery)
     hand_prof = _handicap_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _hand_on = hand_prof is not None
-    # PAD-1382: the owner's own service-menu settings (Service menu tab): rows of the game program, and the runtime
-    # with settings.cfg when they share MORE SETTINGS or the card's own code reads them
-    own_prof = None if _is_spike3(disk_f) else _own_settings_for_build(assets_dir, dest_is_device, log,
-                                                                        **_mode_gate_kw)
-    _own_on = own_prof is not None
     # PAD-1040: the cabinet's expression light shows - cabshow.cfg beside the runtime (the modes' delivery)
     cabs_prof, cabs_shows = _cabs_for_build(assets_dir, dest_is_device, log, **_mode_gate_kw)
     _cabs_on = cabs_prof is not None
@@ -8509,7 +8504,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         editions, picture_prof = [], None
         attract_prof = coop_prof = idle_prof = hand_prof = comp_prof = None
         _attract_on = _coop_on = _idle_on = _hand_on = _comp_on = False
-        own_prof, _own_on = None, False                 # PAD-1382: Spike 2 only for now
         cabs_prof, cabs_shows, _cabs_on = None, [], False
         feed_prof, feed_url, _feed_on = None, "", False
         stime_lines, stime_prof, _stime_on = [], None, False
@@ -8523,7 +8517,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             and not variant_slots and not sound_modes and not editions
             and picture_prof is None and not _attract_on and not _coop_on and not _idle_on
             and not _hand_on and not _cabs_on and not _comp_on and not _feed_on and not _rec_on
-            and not _own_on
             and not stock_mode_edits and shader_prof is None
             and not own_clips and not score_edits):
         raise NothingToWrite(
@@ -10050,7 +10043,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             try:
                 _mprof = _build_mode_profile(mode_list, code_list, assets_dir, (
                     variant_prof, sound_modes_prof, picture_prof, attract_prof, coop_prof, idle_prof,
-                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof, own_prof))
+                    hand_prof, cabs_prof, comp_prof, stime_prof, feed_prof, rec_prof))
                 # PAD-1040: each show's song, as the sound ids that start it on this card
                 _cabs_sids = (_cab_sids_for_build(disk_f, parts, grow_work, log, gr_path, img_path, cabs_shows)
                               if _cabs_on else {})
@@ -10129,7 +10122,6 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                     screen_times=stime_lines, screen_prof=stime_prof,  # PAD-1115
                     score_feed=feed_url, score_feed_prof=feed_prof,   # PAD-1204
                     records=rec_list, records_prof=rec_prof,          # PAD-1280
-                    settings=settings_cfg, settings_prof=own_prof,    # PAD-1382
                     find_scene=lambda _clip: _AIS.element_scene(reader, _mprof.game_dir, _clip),
                     # PAD-723: a random clip in another of the title's bank scenes
                     read_card=lambda _rel: (lambda _n: bytes(reader.read_file_bytes(_n))
@@ -12045,40 +12037,6 @@ class _CoopMenu(_MusicModeMenu):
                  "this card." % self.why, "warning")
 
 
-def _own_settings_for_build(assets_dir, dest_is_device, log, ext4_available=None):
-    """PAD-1382: the title of the card the owner's own service-menu settings go on (the Service menu tab's "Add a
-    setting"), or ``None`` when the project has none or they are left out (one warning says why): the picture
-    settings' gate - an image file, a host that can add files to it, a title the runtime has a port for."""
-    from . import mode_write as _MW
-    from . import mode_project as _MP
-    from . import service_menu as _SvM
-    mine = _SvM.load(assets_dir)["custom"]
-    if not mine:
-        return None
-    if dest_is_device:
-        why = ("a direct-SD write cannot add files to the card or grow its game program; build "
-               "an image file to carry them")
-    else:
-        why = _MW.host_refusal()
-        if not why:
-            if ext4_available is None:
-                from ...core import ext4_grow
-                ext4_available = ext4_grow.available
-            ok, e4 = ext4_available()
-            if not ok:
-                why = "this system cannot write new files into the card image (%s)" % e4
-    prof = None
-    if not why:
-        _card, prof = _MP.project_profile(assets_dir, probe=True)
-        if prof is None:
-            why = "the app has no runtime for this card's game and version yet"
-    if why:
-        log("Your settings: %s are left out of this build: %s." % (", ".join(c["name"].upper() for c in mine),
-                                                                   why.rstrip(".")), "warning")
-        return None
-    return prof
-
-
 def _picture_for_build(assets_dir, dest_is_device, log, ext4_available=None):
     """PAD-537: the title of the card the picture settings go on, or ``None`` when the
     project does not ask for them or they are left out (one warning says why). The music
@@ -12121,15 +12079,12 @@ def _shared_settings_cfg(menu_job, work, log):
         return ""
     from . import menu_settings as _MSet
     shared = [j for j in menu_job.jobs if j.ok and _MSet.is_shared(j.setting)]
-    custom = [j for j in menu_job.jobs if j.ok and j.KEY.startswith(_MSet.CUSTOM_PREFIX)]
-    if not shared and not custom:
+    if not shared:
         return ""
     os.makedirs(_lp(work), exist_ok=True)
     path = os.path.join(work, _MSet.SHARED_CFG)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
         f.write(menu_job.shared_text)
-    if not shared:
-        return path
     log("More settings: the game has too few spare settings for each of ours to have a row, so %s share two: MORE "
         "SETTINGS picks one and the row under it shows its value (%s). The card keeps each one's value."
         % (", ".join(_MSet.SETTINGS[j.KEY][1] for j in shared),

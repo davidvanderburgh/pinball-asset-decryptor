@@ -43,7 +43,6 @@ html.bp-1100 .sm-layout { grid-template-columns: 1fr; }
 .sm-count { margin: 4px 0 0; border-top: 1px solid var(--line); padding-top: 8px; }
 .sm-our-hd { display: flex; align-items: center; gap: 4px; }
 .sm-our-hd .sp { flex: 1; }
-.sm-add { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--line); padding-top: 8px; }
 .sm-real { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
 .sm-real-bd { display: flex; flex-direction: column; gap: 8px; }
 .sm-real-fig { margin: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -64,3 +63,19 @@ html.bp-1100 .sm-dmd-wrap { grid-template-columns: 1fr; }
 .sm-dmd-row .sp { flex: 1; }
 .sm-dmd-row.on { background: var(--accent-soft); }
 .sm-dmd-row.ours::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 3px; background: var(--accent); }
+/* round 5: the app's own page first - the way there at the machine, the Machine Settings list with it lit - and the
+   game's other pages, read-only, below */
+.sm-hero .bd { display: flex; flex-direction: column; gap: 10px; }
+.sm-way { display: flex; flex-direction: column; gap: 6px; }
+.sm-way-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 600; }
+.sm-way-step { padding: 3px 9px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--panel-2); }
+.sm-way-step.last { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+.sm-way-sep { color: var(--ink-3); }
+.sm-way-note { margin: 0; }
+.sm-list-screen { max-width: 520px; }
+.sm-list-rows { padding: 0 2.4cqw 2cqw; }
+.sm-list-rows .sm-row { font-size: 3.7cqw; cursor: default; }
+.sm-list-screen .sm-title { font-size: 6cqw; padding: 1.6cqw 0 1cqw; }
+.sm-others { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.sm-others summary { cursor: pointer; font-weight: 600; color: var(--ink-2); }
+.sm-others > * + * { margin-top: 8px; }

@@ -836,8 +836,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          attract=False, attract_prof=None, find_scene=None, coop=False, coop_prof=None, coop_setting=0, idle=False,
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
          cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
-         score_feed_prof=None, records=None, records_prof=None, code_ok=True, arch="arm", settings="",
-         settings_prof=None):
+         score_feed_prof=None, records=None, records_prof=None, code_ok=True, arch="arm"):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -916,9 +915,6 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
             result.picture_file = picture or ""
         if result is None and picture:
             result = picture_plan(project, game_elf, picture_prof or variants_prof, picture)
-        if result is None and settings:              # PAD-1382: the service menu's shared rows / the owner's own
-            result = settings_plan(project, game_elf, settings_prof or picture_prof or variants_prof
-                                   or sound_modes_prof)
         if attract:                                  # PAD-782: the attract items, alone or with the above
             if result is None:
                 result = attract_plan(project, game_elf,
@@ -1905,18 +1901,6 @@ def picture_plan(project, game_elf, prof, cfg):
     result = ModePlan(project=project, profile=prof, port=port, build=None)
     result.picture_file = cfg
     return result
-
-
-def settings_plan(project, game_elf, prof):
-    """PAD-1382: a plan carrying only the runtime and the title's port on p2, for ``settings.cfg`` (the shared MORE
-    SETTINGS rows, the owner's own settings): the engine puts the file on the plan."""
-    if prof is None:
-        raise ModeWriteError("the app has no runtime for this card's game and version yet")
-    try:
-        port = find_port(prof, game_elf)
-    except ModeWriteError:
-        raise ModeWriteError("this card's game program is not the %s the app's runtime knows" % prof.label) from None
-    return ModePlan(project=project, profile=prof, port=port, build=None)
 
 
 # ---- PAD-446: clips that play one of several at random -----------------------------------------

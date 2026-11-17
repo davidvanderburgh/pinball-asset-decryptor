@@ -112,9 +112,14 @@ SHARED_BASE = 0xFADE0000
 SHARED_CFG = "settings.cfg"
 #: the start of the reason a setting gets when every spare row is taken
 NO_SPARE = "the game has no spare setting left for"
-#: PAD-1382 round 3: a setting of the owner's own (the Service menu tab, service_menu.CustomMenu); settings.cfg names
-#: where each one's value is (a row's, or a shared word) for the card's own code (pm_setting)
-CUSTOM_PREFIX = "custom_"
+#: PAD-1382 round 5 (David: "it's really weird to shove in these settings into the 'attract mode' tab. can't we add our
+#: own 'custom code' tab with our own settings there?"): every row of ours goes on a Machine Settings page of its own. The
+#: menu lists the categories 8-17 that have rows, and on every one of the 38 newest builds with category pages, category
+#: 15 (Wireless Audio Devices) has none - so the page is never shown. Our rows take it, and its name is rewritten in place.
+OWN_CATEGORY = 15
+OWN_PAGE = "Custom Code"
+#: and the Machine Settings list's help line for it
+OWN_HELP = "Settings added by this card's custom code."
 #: the firmware's own word for an adjustment nothing reads any more
 DEPRECATED = "DEPRECATED"
 #: how many values a setting of ours may offer (the picture settings' 9 are their own)
@@ -281,7 +286,7 @@ WIDE_GROW_REFUSAL = "this Spike 3 game's operator-menu copy could not be read to
 
 
 #: the category names (the menu's 37-line text table) of the pages our settings go on
-CATEGORY_NAMES = {11: "LCD/Lamp", 13: "Audio Content", 16: "Attract Mode"}
+CATEGORY_NAMES = {11: "LCD/Lamp", 13: "Audio Content", 15: OWN_PAGE, 16: "Attract Mode"}
 
 #: PAD-724: ``<game>-<version>`` of the builds where MUSIC MODE and EDITION were SEEN working: the
 #: latest build of every Stern Spike 2 game in the image library, each swept in the emulator (a set
@@ -1007,7 +1012,8 @@ def _help_text(names, values, help_text, room):
     return help_line(list(names)[:values] + ["Mode %d" % (k + 1) for k in range(len(names), values)], room)
 
 
-def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff=False, from_zero=False):
+def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff=False, from_zero=False,
+         category=None):
     """``(MenuSetting, {file offset: bytes}, CategoryTable or None)``: the same-size writes that
     make setting *key* (values 1..*values*, its help naming *names*), and the category table to
     give one more record (:func:`table_writes`) - ``None`` when a previous Write already did. Raises
@@ -1021,7 +1027,8 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     from . import menu_visibility as MV
     if key not in SETTINGS:
         raise MenuSettingError("no such setting: %s" % key)
-    fixed, caption, row_caption, category = SETTINGS[key]
+    fixed, caption, row_caption, own_category = SETTINGS[key]
+    category = own_category if category is None else int(category)     # PAD-1382: the page of our own
     if getattr(table, "wide", False):
         category = wide_category(table, key)        # PAD-1324: the page by its name on Spike 3
     ad = ad or fixed
@@ -1107,11 +1114,114 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     return setting, writes, (None if cat.has(category, i) else cat)
 
 
+def category_name_line(table, category):
+    """PAD-1382: the file offset of *category*'s line in the game's table of page names (five language pointers and a
+    zero; category c c lines above the line that names INVALID, category 0), or None (Spike 2's 44-byte programs)."""
+    raw = table.data
+    if getattr(table, "wide", False) or table.elem != 44:
+        return None
+    found = getattr(table, "_pad_invalid_line", False)
+    if found is False:
+        found = None
+        k = raw.find(b"INVALID\x00")              # the linker shares tails: it may end a longer string
+        while k >= 0 and found is None:
+            va = table._va(k)
+            r = raw.find(struct.pack("<I", va)) if va else -1
+            while r >= 0:
+                if r % 4 == 0 and r + 24 <= len(raw):
+                    w = struct.unpack_from("<6I", raw, r)
+                    if w[5] == 0 and all(table._off(x) is not None for x in w[:5]):
+                        found = r
+                        break
+                r = raw.find(struct.pack("<I", va), r + 1)
+            k = raw.find(b"INVALID\x00", k + 1)
+        try:
+            table._pad_invalid_line = found
+        except AttributeError:
+            pass
+    if found is None or found - category * 24 < 0:
+        return None
+    return found - category * 24
+
+
+def _category_rows(table, cat, category):
+    """The ids the menu lists on *category*'s page: its records, and the feature rows whose descriptor names it."""
+    ids = [i for c, k, i in cat.records if c == category and k == KIND_ADJUSTMENT]
+    listed = {i for _c, k, i in cat.records if k == KIND_ADJUSTMENT}
+    if table.elem == 44:
+        for i in range(160, table.count):
+            if i not in listed and struct.unpack_from("<H", table.data, table._off(table.table_va + i * table.elem)
+                                                     + 0x26)[0] == category:
+                ids.append(i)
+    return ids
+
+
+def own_page(table):
+    """PAD-1382: ``{file offset: bytes}`` that name :data:`OWN_CATEGORY`'s page :data:`OWN_PAGE` in the game's own table
+    of page names, or raise :class:`MenuSettingError` when this program cannot have a page of our own (its rows go on the
+    pages each setting names, as before): a category table (not the older Standard Adjustments list, nor a 64-bit
+    program), nothing but ours on that page, and each of its name strings the line's alone, with room."""
+    if getattr(table, "wide", False):
+        raise MenuSettingError("a 64-bit game's menu pages are not renamed yet")
+    cat = menu_table(table)
+    if not isinstance(cat, CategoryTable):
+        raise MenuSettingError("the game's menu has no pages of categories")
+    ours = {v[1] for v in SETTINGS.values()}
+    for i in _category_rows(table, cat, OWN_CATEGORY):
+        if menu_label(table, i) not in ours:
+            raise MenuSettingError("the game lists its own %s on that page" % menu_label(table, i))
+    line = category_name_line(table, OWN_CATEGORY)
+    if line is None:
+        raise MenuSettingError("the game's table of page names could not be read")
+    ptrs = struct.unpack_from("<5I", table.data, line)
+    writes = {}
+    for va in set(ptrs):
+        o = table._off(va)
+        if o is None:
+            raise MenuSettingError("the page's name is not in the program")
+        end = table.data.find(b"\x00", o)
+        old = table.data[o:end]
+        refs = table.data.count(struct.pack("<I", va))
+        if refs != ptrs.count(va):
+            raise MenuSettingError("the page's name \"%s\" is used elsewhere too" % old.decode("latin1"))
+        if len(old) < len(OWN_PAGE):
+            raise MenuSettingError("the page's name has no room for \"%s\"" % OWN_PAGE)
+        writes[o] = OWN_PAGE.encode("ascii") + b"\x00" * (len(old) - len(OWN_PAGE))
+    # the Machine Settings list's help for the page ("Wireless audio devices, such as headphones, can be connected to
+    # this game." on Godzilla LE 1.16 in the emulator): the menu entry that names the page's name line has it two
+    # words after, a string of its own - rewritten in place when it is the entry's alone and has room
+    line_va = table._va(line)
+    r = table.data.find(struct.pack("<I", line_va)) if line_va else -1
+    while 0 <= r <= len(table.data) - 12:
+        help_va = struct.unpack_from("<I", table.data, r + 8)[0]
+        o = table._off(help_va) if r % 4 == 0 else None
+        if o is not None and table.data.count(struct.pack("<I", help_va)) == 1:
+            end = table.data.find(b"\x00", o)
+            if len(OWN_HELP) <= end - o:
+                writes[o] = OWN_HELP.encode("ascii") + b"\x00" * (end - o - len(OWN_HELP))
+            break
+        r = table.data.find(struct.pack("<I", line_va), r + 1)
+    return writes
+
+
 def plan_many(table, wanted, share=True):
     """Several settings of ours at once, each on a row of its own (:func:`_plan_rows`) - or, PAD-1382, when the game
     has too few spare rows for them, all but EDITION on the two shared rows (:func:`plan_shared`), when it can give
-    those. *share* False never shares. The same ``(settings, writes, cat, refused)``."""
+    those. *share* False never shares. The same ``(settings, writes, cat, refused)``.
+
+    PAD-1382 round 5: when the program can have a page of our own (:func:`own_page`), every row goes on it, the page's
+    name written with the rows."""
+    page = {}
+    if wanted:
+        try:
+            page = own_page(table)
+        except MenuSettingError:
+            page = {}
+    if page:
+        wanted = [(w[0], w[1], w[2], dict(w[3] if len(w) > 3 else {}, category=OWN_CATEGORY)) for w in wanted]
     settings, writes, cat, refused = _plan_rows(table, wanted)
+    if page and settings:
+        writes = {**writes, **page}
     if not share or getattr(table, "wide", False):
         return settings, writes, cat, refused
     rows = [tuple(w) + ({},) if len(w) == 3 else tuple(w) for w in wanted]
@@ -1121,7 +1231,10 @@ def plan_many(table, wanted, share=True):
             or len([r for r in rows if r[0] not in NOT_SHARED]) < 2):
         return settings, writes, cat, refused
     try:
-        return plan_shared(table, rows)
+        settings, writes, cat, refused = plan_shared(table, rows)
+        if page and settings:
+            writes = {**writes, **page}
+        return settings, writes, cat, refused
     except MenuSettingError as e:
         for key in refused:
             refused[key] = "%s; nor can the settings share two rows: %s" % (str(refused[key]).rstrip("."), e)
@@ -1234,8 +1347,9 @@ def plan_shared(table, rows):
         raise MenuSettingError("more than %d settings of ours cannot share them" % MAX_VALUES)
     first = share[0]
     picks = [SETTINGS[k][2] for k, *_ in share]
+    on = {"category": first[3]["category"]} if "category" in first[3] else {}      # the page of our own
     settings, writes, cat, own_refused = _plan_rows(
-        table, own + [(MORE_SELECT, len(share), picks, {}), (MORE_VALUE, first[1], first[2], dict(first[3]))])
+        table, own + [(MORE_SELECT, len(share), picks, on), (MORE_VALUE, first[1], first[2], dict(first[3]))])
     refused.update({k: v for k, v in own_refused.items() if k not in (MORE_SELECT, MORE_VALUE)})
     by_key = {st.key: st for st in settings}
     pick, value = by_key.get(MORE_SELECT), by_key.get(MORE_VALUE)
@@ -1261,26 +1375,22 @@ def shared_cfg_text(settings):
     by_key = {st.key: st for st in settings}
     pick, value = by_key.get(MORE_SELECT), by_key.get(MORE_VALUE)
     opts = sorted((st for st in settings if is_shared(st)), key=lambda st: st.shared[0])
-    custom = [st for st in settings if st.key.startswith(CUSTOM_PREFIX)]
-    if (pick is None or value is None or not opts) and not custom:
+    if pick is None or value is None or not opts:
         return ""
 
     def clean(t):
         return " ".join(str(t).replace("\t", " ").split())
 
-    lines = ["# PAD-1382: settings of ours sharing MORE SETTINGS and the row under it, and the owner's own"]
-    if pick is not None and value is not None and opts:
-        desc, help_va, help_room, row_va, row_room, o_def, o_min, o_max, o_kind = value.shared
-        lines += ["select\t0x%08x\t%d" % (pick.live, len(opts)),
-                  "value\t0x%08x\t0x%08x\t0x%08x\t%d\t0x%08x\t%d" % (value.live, desc, help_va, help_room,
-                                                                      row_va, row_room),
-                  "fields\t%d\t%d\t%d\t%d" % (o_def, o_min, o_max, o_kind)]
-        for st in opts:
-            lines.append("option\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s" % (
-                st.shared[0], st.key, st.low, st.values - 1 + st.low, st.default, st.kind,
-                clean(st.caption) or "Setting", clean(st.help)))
-    for st in custom:                     # the owner's own: where its value is, for pm_setting
-        lines.append("custom\t%s\t0x%08x" % (st.key, st.live))
+    lines = ["# PAD-1382: settings of ours sharing MORE SETTINGS and the row under it"]
+    desc, help_va, help_room, row_va, row_room, o_def, o_min, o_max, o_kind = value.shared
+    lines += ["select\t0x%08x\t%d" % (pick.live, len(opts)),
+              "value\t0x%08x\t0x%08x\t0x%08x\t%d\t0x%08x\t%d" % (value.live, desc, help_va, help_room, row_va,
+                                                                  row_room),
+              "fields\t%d\t%d\t%d\t%d" % (o_def, o_min, o_max, o_kind)]
+    for st in opts:
+        lines.append("option\t%d\t%s\t%d\t%d\t%d\t%d\t%s\t%s" % (
+            st.shared[0], st.key, st.low, st.values - 1 + st.low, st.default, st.kind,
+            clean(st.caption) or "Setting", clean(st.help)))
     return "\n".join(lines) + "\n"
 
 

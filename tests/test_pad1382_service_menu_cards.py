@@ -39,10 +39,10 @@ def test_the_page_names_are_the_games_own():
 def test_every_machine_settings_page_shows_with_or_without_rows_of_ours():
     menu = SM.pages(_program(LE116), [])
     assert [(p["name"], p["rank"]) for p in menu["pages"]] == [(n, k) for k, n in enumerate(MACHINE)]
-    assert not any(p["ours"] for p in menu["pages"])
+    assert not any(p["ours"] for p in menu["pages"])           # no row of ours: no page of our own either
     menu = SM.pages(_program(LE116), FIT)
-    assert [p["name"] for p in menu["pages"] if p["ours"]] == ["Attract Mode"]
-    assert menu["pages"][7]["path"] == "Adjustments > Machine Settings > Attract Mode"
+    assert [p["name"] for p in menu["pages"] if p["ours"]] == ["Custom Code"]
+    assert menu["pages"][7]["path"] == "Adjustments > Machine Settings > Custom Code"
 
 
 # ---- the older dot-matrix menu --------------------------------------------------------------------------------------
@@ -135,11 +135,10 @@ def test_the_projects_own_build_output_is_a_candidate(tmp_path, monkeypatch):
     assert [os.path.basename(c) for c in SM.card_candidates(p)] == ["gone.raw", "v38.raw"]
 
 
-# ---- the Write counts the owner's own settings ----------------------------------------------------------------------
-def test_ones_own_settings_are_a_reason_to_write():
-    src = open(os.path.join(os.path.dirname(SM.__file__), "engine.py"), encoding="utf-8").read()
-    assert "and not _own_on" in src and "def _own_settings_for_build" in src
-    assert "or _rec_on or settings_cfg):" in src
-    from pinball_decryptor.plugins.stern import mode_write as MW
-    with pytest.raises(MW.ModeWriteError):
-        MW.settings_plan("p", b"", None)
+def test_the_older_menu_and_spike3_keep_the_pages_they_had():
+    """No page can be added to the dot-matrix Standard Adjustments, nor (yet) to a 64-bit program."""
+    t = AdjustmentTable(_elf(AERO))
+    with pytest.raises(MS.MenuSettingError):
+        MS.own_page(t)
+    settings, _w, _c, refused = MS.plan_many(t, FIT)
+    assert refused == {} and all(s.category != MS.OWN_CATEGORY for s in settings)

@@ -26993,8 +26993,6 @@ static void pic_arm(void)
  *   value   <its value row's record> <descriptor> <help string> <help room> <row caption string> <caption room>
  *   fields  <default> <min> <max> <kind>        descriptor offsets (kind -1: the descriptors have none)
  *   option  <k> <key> <min> <max> <default> <kind> <row caption> <help line>      k = 1..n, as the menu numbers them
- *   custom  <key> <address>                     round 3: a setting of the owner's own (the Service menu tab) and where
- *                                               its value is - a row's .nonvol word, or a shared one; pm_setting(key)
  * Spike 2 only (the app never shares rows on a 64-bit program). */
 #define MSET_BASE  0xfade0000u
 #define MSET_N     8
@@ -27003,9 +27001,6 @@ static void pic_arm(void)
 static const char *const MSET_FILES[] = { "/usr/local/padmode/settings.cfg", "/dump/settings.cfg" };
 static const char MSET_STATE[] = "/dump/pad_settings.state";
 static struct mset_opt { int min, max, def, kind; char key[40], cap[48], help[176]; } mset_opt[MSET_N + 1];
-#define MSET_CUSTOM 8
-static struct { char key[40]; pm_addr at; } mset_cust[MSET_CUSTOM];   /* round 3: the owner's own settings */
-static unsigned mset_ncust;
 static volatile unsigned mset_word[MSET_N + 1];           /* what each shared setting's reader reads ([0] always 0) */
 static unsigned mset_n;                                   /* options 1..mset_n; 0: settings.cfg carries none */
 static pm_addr mset_sel, mset_val, mset_desc, mset_help, mset_row;
@@ -27074,14 +27069,6 @@ static void mset_line(char *s)
     if (n == 5 && str_eq(f[0], "fields")) {
         for (k = 0; k < 4 && ok; k++) mset_off[k] = (int)mset_num(f[k + 1], &ok);
         if (!ok || mset_off[0] < 0 || mset_off[1] < 0 || mset_off[2] < 0) { mset_off[0] = -1; mset_bad++; }
-        return;
-    }
-    if (n == 3 && str_eq(f[0], "custom")) {
-        if (mset_ncust >= MSET_CUSTOM) { mset_bad++; return; }
-        mset_copy(mset_cust[mset_ncust].key, sizeof mset_cust[0].key, f[1]);
-        mset_cust[mset_ncust].at = (pm_addr)mset_num(f[2], &ok);
-        if (ok && mset_cust[mset_ncust].key[0] && mset_cust[mset_ncust].at) mset_ncust++;
-        else mset_bad++;
         return;
     }
     if (n == 9 && str_eq(f[0], "option")) {
@@ -27191,21 +27178,6 @@ static pm_addr setting_addr(pm_addr a)
     return (pm_addr)(unsigned long)&mset_word[0];
 }
 
-/* round 3: a setting of the owner's own, by its key (settings.cfg's `custom` lines; the Service menu tab names the key):
- * its value as the operator set it (1..n), or 0 when the card has no setting by that name */
-unsigned pm_setting(const char *key)
-{
-    unsigned k;
-    pm_addr a;
-    if (!key) return 0;
-    mset_load();
-    for (k = 0; k < mset_ncust && !str_eq(mset_cust[k].key, key); k++) {}
-    if (k == mset_ncust) return 0;
-    a = setting_addr(mset_cust[k].at);
-    if (!a || !maps_has((unsigned long)a, 4, MAP_R)) return 0;
-    return *(volatile const unsigned *)(unsigned long)a;
-}
-
 /* a value into a record of the game's store: the word, and its check byte (the inverse of the word's byte sum) */
 static void mset_put(pm_addr rec, unsigned v)
 {
@@ -27303,7 +27275,6 @@ static void mset_arm(void)
     unsigned long span;
     unsigned k;
     mset_load();
-    if (mset_ncust) say("more settings: %u setting(s) of the owner's own, read by pm_setting", mset_ncust);
     if (!mset_n) return;
 #if PM_A64
     say("more settings: off - the shared rows are Spike 2's only");

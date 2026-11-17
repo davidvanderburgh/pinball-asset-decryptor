@@ -106,3 +106,24 @@ such file or directory ...). we need to make this work for all game images".
   settings page).
 - **Write**: settings of one's own alone are a reason to Write (`_own_settings_for_build`, the picture settings' gate),
   and a card whose only runtime need is `settings.cfg` gets the runtime by `mode_write.settings_plan`.
+
+## Round 5: a page of our own, only the app's settings
+
+David: "it's really weird to shove in these settings into the 'attract mode' tab. can't we add our own 'custom code'
+tab ... we should just be checking off items that exist (making a new one here doesn't make sense ...) ... better
+highlight the 'custom code' tab and how the user gets there. the other tabs can be read-only and shown secondarily".
+
+- **Custom Code page** (`menu_settings.own_page`, OWN_CATEGORY 15): Machine Settings lists the categories 8-17 that have
+  rows; on all 38 newest builds with category pages, 15 (Wireless Audio Devices) has none, so it is never shown. Every row
+  of ours goes there (`plan_many` gives each a `category`), its name line's string rewritten in place to "Custom Code"
+  and the Machine Settings list's help for it (the menu entry naming that line, its help two words after) to "Settings
+  added by this card's custom code.". Refused (rows stay where each setting names) when the page holds anything of the
+  game's, a string is shared or has no room. Emulator-proven on Godzilla LE 1.16 and Jaws LE 1.02: the page shows
+  between Audio Configuration and Attract Mode with our rows. The dot-matrix Standard list games have no pages to add:
+  ours stay the last rows of Standard Adjustments, which the tab says.
+- **No settings of one's own**: CustomMenu, the sidecar's `custom`, `settings.cfg`'s `custom` lines, the runtime's
+  `pm_setting`, the Write gate and `settings_plan` are gone; the sidecar keeps only `order`.
+- **The tab**: the app's page first (the way there as steps, the Machine Settings list with Custom Code lit, the page,
+  the real menu); the app's settings ticked and ordered on the right; the game's other pages below, read-only.
+- Values still live in `/dump/pad_settings.state` on the card (David: "we can build our own non-volatile storage on the
+  sd card, right?" - yes, since round 1): the game's menu rows are the only limit, and two hold any number.

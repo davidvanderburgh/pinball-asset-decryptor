@@ -57,9 +57,6 @@ def project_menu(project):
         menu = SM.pages(elf, rows)
     except Exception as e:                              # noqa: BLE001 - said on the page
         return "This game's service menu could not be read (%s)." % e, None
-    if wide:
-        for c in SM.load(project)["custom"]:
-            menu["refused"][c["key"]] = "settings of your own are on Spike 2 cards only for now"
     menu["source"] = source
     return "", menu
 
@@ -79,7 +76,7 @@ class ServiceMenuTab(TabService):
         self._visible = False
         self._read_id = 0
         self._shots = {}                # (project, category, row) -> png: the real menu read this session
-        self.set(intro=INTRO, project="", reading=False, why="", menu=None, settings=[], custom_said="",
+        self.set(intro=INTRO, project="", reading=False, why="", menu=None, settings=[],
                  real_on=False, real_busy=False, real_png="", real_why="", real_for="",
                  real_note=REAL_NOTE,
                  none_why="Open or extract a Stern Spike 2 card project first (Extract tab): the menu is its game's.")
@@ -92,14 +89,14 @@ class ServiceMenuTab(TabService):
         return modes.project() if modes is not None else ""
 
     def _settings(self, project):
-        """The app's rows and the owner's own, in the owner's order (:func:`.service_menu.arrange`'s)."""
+        """The app's settings that can have a row, in the owner's order (:func:`.service_menu.arrange`'s)."""
         from ...plugins.stern import coop_play as CP, handicap as HC, picture_settings as PS
         from ...plugins.stern import service_menu as SM
         out = []
         for key, name, where in SETTINGS:
             if key == "brightness" and not PS.OFFERED:
                 continue
-            row = {"key": key, "name": name, "where": where, "can": False, "on": False, "note": "", "custom": False}
+            row = {"key": key, "name": name, "where": where, "can": False, "on": False, "note": ""}
             if key == "coop_play":
                 on = CP.load(project)
                 row.update(can=on, on=CP.menu_asked(project),
@@ -108,10 +105,6 @@ class ServiceMenuTab(TabService):
                 row.update(can=True, on=HC.load(project))
             out.append(row)
         mine = SM.load(project)
-        for c in mine["custom"]:
-            out.append({"key": c["key"], "name": c["name"], "custom": True, "values": c["values"],
-                        "default": c["default"], "can": False, "on": True,
-                        "where": "Your card's own code reads it as pm_setting(\"%s\")." % c["key"]})
         rank = {k: n for n, k in enumerate(mine["order"])}
         return [r for _n, r in sorted(enumerate(out), key=lambda x: (rank.get(x[1]["key"], len(rank)), x[0]))]
 
@@ -152,7 +145,7 @@ class ServiceMenuTab(TabService):
         self.publish()
         return ok
 
-    # -- the owner's order and settings of their own (round 3) -------------------------------------------------------
+    # -- the owner's order of the app's rows (round 3) ----------------------------------------------------------------
     def _save(self, project, data, what):
         from ...core import history_log
         from ...plugins.stern import service_menu as SM
@@ -180,41 +173,6 @@ class ServiceMenuTab(TabService):
         data = SM.load(project)
         data["order"] = keys
         self._save(project, data, "order of the rows")
-        return True
-
-    @rpc
-    def add_custom(self, name, values, default=1):
-        """Add (or, by the same name, change) a setting of the owner's own; ``""`` or what is wrong with it."""
-        from ...plugins.stern import service_menu as SM
-        project = self._project()
-        if not project:
-            return "Open a project first."
-        try:
-            c = SM.custom_clean(name, values, default)
-        except ValueError as e:
-            self.set(custom_said=str(e))
-            return str(e)
-        data = SM.load(project)
-        others = [x for x in data["custom"] if x["key"] != c["key"]]
-        if len(others) >= SM.CUSTOM_MAX:
-            why = "A card has at most %d settings of your own." % SM.CUSTOM_MAX
-            self.set(custom_said=why)
-            return why
-        data["custom"] = others + [c]
-        self._save(project, data, "your setting %s" % c["name"])
-        self.set(custom_said="")
-        return ""
-
-    @rpc
-    def remove_custom(self, key):
-        from ...plugins.stern import service_menu as SM
-        project = self._project()
-        if not project:
-            return False
-        data = SM.load(project)
-        data["custom"] = [x for x in data["custom"] if x["key"] != key]
-        data["order"] = [k for k in data["order"] if k != key]
-        self._save(project, data, "your setting removed")
         return True
 
     # -- the real menu, from the emulator (round 3; off unless ticked) ----------------------------------------------

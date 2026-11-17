@@ -15,7 +15,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = r"D:\Pinball\images\Stern\spike2"
 GZ = os.path.join(LIB, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
-AERO = os.path.join(LIB, "aerosmith_le-1_16_0.Release.8G.sdcard.raw")
+AERO = os.path.join(LIB, "foo_fighters_le-1_04_0.Release.16G.sdcard.raw")   # a dot-matrix menu game with handicaps
 
 
 def make_project(root, case):
@@ -23,18 +23,14 @@ def make_project(root, case):
     os.makedirs(project, exist_ok=True)
     card = os.path.join(root, "moved away", "Godzilla Premium 1.16 Heisei Custom.raw") if case == "gone" else AERO
     with open(os.path.join(project, ".extract_source.json"), "w", encoding="utf-8") as f:
-        json.dump({"input_path": card, "input_name": os.path.basename(card), "card_version": "1.16.0",
-                   "stock": {"sidx": ("godzilla_le-1_16_0.sidx" if case == "gone" else "aerosmith_le-1_16_0.sidx"),
+        json.dump({"input_path": card, "input_name": os.path.basename(card), "card_version": "1.16.0" if case == "gone" else "1.04.0",
+                   "stock": {"sidx": ("godzilla_le-1_16_0.sidx" if case == "gone" else "foo_fighters_le-1_04_0.sidx"),
                              "status": "unknown", "label": "", "text": ""}}, f)
     side = {"coop_play": {"on": True, "menu": True}, "handicap": {"on": True}}
     if case == "gone":
         side["service_menu"] = {"custom": [{"name": "Dark Screens", "values": ["Off", "On"], "default": 1}]}
     else:
-        side = {"service_menu": {"custom": [{"name": "Dark Screens", "values": ["Off", "On"]},
-                                            {"name": "Attract Music", "values": ["Quiet", "Normal", "Loud"],
-                                             "default": 2},
-                                            {"name": "Big Ball", "values": ["No", "Yes"]},
-                                            {"name": "Speed", "values": ["Slow", "Fast"], "default": 2}]}}
+        side = {"handicap": {"on": True}}
     with open(os.path.join(project, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump(side, f)
     return project
@@ -74,9 +70,9 @@ def main():
             print("why:", s.get("why"), "source:", (s.get("menu") or {}).get("source"))
             time.sleep(2)
             if case == "aero" and kind == "after":
-                rows = page.locator(".sm-dmd-row")
+                rows = page.locator(".sm-hero .sm-dmd-row.ours")
                 if rows.count():
-                    rows.nth(rows.count() - 2).click()       # MORE SETTINGS
+                    rows.first.click()
                     time.sleep(0.5)
             page.screenshot(path=os.path.join(out_dir, "%s_service_menu_%s.png" % (kind, case)))
             browser.close()

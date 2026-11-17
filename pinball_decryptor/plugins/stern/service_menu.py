@@ -17,7 +17,6 @@ game can also hide a row of its own at run time (Godzilla LE does not show 70TH 
 from __future__ import annotations
 
 import os
-import re
 import struct
 
 from . import menu_settings as MS
@@ -64,21 +63,16 @@ def wanted(project):
     return [j.wanted() for j in arrange(project, jobs, log)]
 
 
-# ---- the owner's order and settings of their own (PAD-1382 round 3) ------------------------------------------------
-#: the sidecar key: {"order": [setting keys], "custom": [{"key", "name", "values": [names], "default": 1..n}]}
+# ---- the owner's order of the app's rows (PAD-1382 round 3) ---------------------------------------------------------
+# Round 5 (David): "we should just be checking off items that exist (making a new one here doesn't make sense...)":
+# the rows are the app's own settings, switched on their tabs or on the Service menu tab; the owner orders them.
+#: the sidecar key: {"order": [setting keys]}
 STAGED_KEY = "service_menu"
-CUSTOM_PREFIX = MS.CUSTOM_PREFIX
-#: a custom setting's name: what the row caption shows (the descriptor's caption, which the board keys the stored
-#: value by, is its upper case); the shortest room a spare row's caption has on the latest builds is 21
-NAME_MAX = 20
-VALUE_MAX = 14
-CUSTOM_MAX = 8
-_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 \-]*$")
 
 
 def load(project):
-    """``{"order": [...], "custom": [...]}`` from the project's sidecar (cleaned; empty when none)."""
-    out = {"order": [], "custom": []}
+    """``{"order": [...]}`` from the project's sidecar (empty when none)."""
+    out = {"order": []}
     if not project:
         return out
     from ...core import staged_changes
@@ -86,100 +80,27 @@ def load(project):
         raw = staged_changes.load(project).get(STAGED_KEY)
     except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
         return out
-    if not isinstance(raw, dict):
-        return out
-    order = raw.get("order")
-    if isinstance(order, list):
-        out["order"] = [k for k in order if isinstance(k, str)]
-    seen = set()
-    for c in raw.get("custom") or []:
-        try:
-            c = custom_clean(c.get("name"), c.get("values"), c.get("default", 1))
-        except (AttributeError, ValueError):
-            continue
-        if c["key"] not in seen and len(out["custom"]) < CUSTOM_MAX:
-            seen.add(c["key"])
-            out["custom"].append(c)
+    if isinstance(raw, dict) and isinstance(raw.get("order"), list):
+        out["order"] = [k for k in raw["order"] if isinstance(k, str)]
     return out
 
 
 def save(project, data):
     from ...core import staged_changes
     side = staged_changes.load(project)
-    keep = {"order": list(data.get("order") or []), "custom": list(data.get("custom") or [])}
-    if keep["order"] or keep["custom"]:
-        side[STAGED_KEY] = keep
+    order = list(data.get("order") or [])
+    if order:
+        side[STAGED_KEY] = {"order": order}
     else:
         side.pop(STAGED_KEY, None)
     staged_changes.save(project, side)
 
 
-def custom_key(name):
-    return CUSTOM_PREFIX + re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_")
-
-
-def custom_clean(name, values, default=1):
-    """A custom setting as kept, or ValueError saying what is wrong (in the user's words)."""
-    name = " ".join(str(name or "").split())
-    if not name or len(name) > NAME_MAX or not _NAME_RE.match(name):
-        raise ValueError("A setting's name is 1 to %d letters, digits, spaces or dashes." % NAME_MAX)
-    if name.upper() in {v[1] for k, v in MS.SETTINGS.items() if not k.startswith(CUSTOM_PREFIX)}:
-        raise ValueError("%s is one of the app's own settings." % name)
-    if isinstance(values, str):
-        values = values.split(",")
-    values = [" ".join(str(v).split())[:VALUE_MAX] for v in (values or [])]
-    values = [v for v in values if v]
-    if not 2 <= len(values) <= MS.MAX_VALUES:
-        raise ValueError("A setting has 2 to %d values." % MS.MAX_VALUES)
-    try:
-        default = int(default)
-    except (TypeError, ValueError):
-        default = 1
-    if not 1 <= default <= len(values):
-        default = 1
-    return {"key": custom_key(name), "name": name, "values": values, "default": default}
-
-
-def register(custom):
-    """Make *custom* a setting :mod:`.menu_settings` can place (its captions; Attract Mode, as CO-OP PLAY's)."""
-    MS.SETTINGS[custom["key"]] = (None, custom["name"].upper(), custom["name"], 16)
-
-
-class CustomMenu:
-    """A setting of the owner's own as one of the game program's edits, as the engine's menu jobs are (its value is
-    read by the card's own code: ``pm_setting("<key>")``, pad_mode.h)."""
-
-    def __init__(self, custom, log):
-        self.custom, self.log, self.KEY = custom, log, custom["key"]
-        self.ok, self.why, self.setting = False, "", None
-        register(custom)
-
-    def wanted(self):
-        c = self.custom
-        return self.KEY, len(c["values"]), list(c["values"]), {"default": c["default"]}
-
-    def done(self):
-        self.ok = True
-        self.log("Your settings: %s is in the operator menu (%s), values %s; the card's own code reads it as "
-                 "pm_setting(\"%s\")." % (self.custom["name"].upper(), self.setting.where,
-                                         ", ".join("%d %s" % (i + 1, v) for i, v in enumerate(self.custom["values"])),
-                                         self.KEY), "info")
-
-    def fail(self, why):
-        if self.why or self.ok:
-            return
-        self.why = str(why).rstrip(".") or "unknown"
-        self.log("Your settings: %s could not be added to the operator menu (%s)." % (self.custom["name"].upper(),
-                                                                                        self.why), "warning")
-
-
-def arrange(project, jobs, log):
-    """The build's menu jobs (None left out) with the owner's settings added, in the owner's order: keys they
-    ordered first, as ordered, then the rest as the engine has them (Spike 2)."""
+def arrange(project, jobs, log=None):
+    """The build's menu jobs (None left out) in the owner's order: keys they ordered first, as ordered, then the rest as
+    the engine has them (Spike 2)."""
     jobs = [j for j in jobs if j is not None]
-    mine = load(project)
-    jobs += [CustomMenu(c, log) for c in mine["custom"]]
-    order = mine["order"]
+    order = load(project)["order"]
     rank = {k: n for n, k in enumerate(order)}
     return [j for _n, j in sorted(enumerate(jobs), key=lambda x: (rank.get(x[1].KEY, len(order)), x[0]))]
 
@@ -269,6 +190,12 @@ def pages(raw, rows):
     # round 4: every Machine Settings page, in the menu's order, whether or not one of ours is on it (the menu as it
     # is, to see before adding to it), and any other page that carries one of ours after them
     machine = _machine_pages(t, table)
+    # round 5: a page of our own (menu_settings.own_page) is listed in its place among them, by its new name
+    machine = sorted(set(machine) | {s.category for s in own if s.category in MACHINE_PAGES})
+    if any(s.category == MS.OWN_CATEGORY for s in own) and not wide:
+        names[MS.OWN_CATEGORY] = MS.OWN_PAGE
+    out["own"] = MS.OWN_PAGE if any(s.category == MS.OWN_CATEGORY for s in own) else ""
+    out["machine_list"] = [names.get(c, "Page %d" % c) for c in machine]
     cats = machine + sorted({s.category for s in own} - set(machine))
     for category in cats:
         page = []
@@ -346,23 +273,10 @@ def category_names(t):
     9 Device Enables, 11 LCD/Lamp, 13 Audio Content, 16 Attract Mode, as its menu shows them. ``{}`` when not found."""
     raw = t.data
     out = {}
-    if t.elem != 44:
+    zero = MS.category_name_line(t, 0)
+    if zero is None:
         return out
-    j = -1
-    k = raw.find(b"INVALID\x00")                  # the linker shares tails: it may end a longer string
-    while k >= 0 and j < 0:
-        va = t._va(k)
-        r = raw.find(struct.pack("<I", va)) if va else -1
-        while r >= 0:
-            if r % 4 == 0 and r + 24 <= len(raw):
-                w = struct.unpack_from("<6I", raw, r)
-                if w[5] == 0 and all(t._off(x) is not None for x in w[:5]):
-                    j = r
-                    break
-            r = raw.find(struct.pack("<I", va), r + 1)
-        k = raw.find(b"INVALID\x00", k + 1)
-    if j < 0:
-        return out
+    j = zero
     for c in range(1, 37):
         o = j - c * 24
         if o < 0:

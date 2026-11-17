@@ -240,7 +240,6 @@ project open and nothing ticked. The log says what was found:
 | paint an insert by its place | `pm_lamp_xy(i, &x, &y)`, `pm_lamp_paint(i, rgb)` | light shows (`intricate_kit.h`'s `kit_show`) |
 | test from the emulator | `pm_trigger("my_mode.start")`, `pm_trigger_text(name, buf, cap)` | once when `/dump/<name>` appears; the file is deleted |
 | read a file | `pm_read_file(path, buf, cap)` | whole file, up to `cap` bytes |
-| read your own service-menu setting | `pm_setting("custom_<name>")` | its value 1..n as the operator set it; 0 when the card has none (add it on the Service menu tab, PAD-1382) |
 | log | `pm_log("...")` | goes to `/dump/mode.log`, prefixed with your mode's name |
 | wait for the game's own battle or multiball | `pm_stock_mode_running(PM_STOCK_BATTLE \| PM_STOCK_MULTIBALL)` | the kind found (`pm_stock_mode_what` names it), 0 none, -1 this port cannot tell; see "The game's own modes" |
 | react to what the game does | `.event = fn(unsigned id)` and `pm_event("ball_start")` | see "Events" below |

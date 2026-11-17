@@ -11,6 +11,7 @@ import time
 import pytest
 
 from tests.webui_harness import web_app
+from pinball_decryptor.plugins.jjp import custom_modes as CM
 
 #: every title whose port report can run modes (MODES.md "Titles")
 RUNNABLE = {"GunsNRoses-v03.03", "CHAKAs_LOTLJ_V1.0_GNR_LE_3.03", "EltonJohn-v02.03", "Godfather-v02.03",
@@ -475,3 +476,24 @@ def test_balls_and_coils_from_the_form(tmp_path, preview_on):
             assert line in lines
         w.call("modes.jjp_set", "coil_shot", "coil_flipper_power_left")
         assert any("coil_flipper_power_left" in p for p in _jjp(w)["check"]["problems"])
+
+
+def test_coil_pickers_offer_the_ports_coils(tmp_path, preview_on):
+    """PAD-1376: the Coils pickers list the title's port-report coils a mode may pulse, and hold."""
+    with web_app(tmp_path, mfr="jjp") as w:
+        j = _open_wonka(w)
+        port = CM.load_port("Wonka-v03.03")
+        coils = {c["symbol"]: c for c in port["coils"]}
+        pulse, hold = j["names"]["coil_pulse"], j["names"]["coil_hold"]
+        assert pulse == [s for s, c in coils.items() if c["pulse"]] and len(pulse) == 24
+        assert hold == [s for s, c in coils.items() if c["hold"]] and len(hold) == 14
+        assert "coil_knocker" in pulse and "coil_knocker" not in hold
+        assert "coil_magnet_left_lane" in hold
+        assert "coil_autolaunch" not in pulse and "coil_flipper_power_left" not in pulse
+        for k, kind in (("multiball", "multiball"), ("ball_save", "ball_save"), ("add_ball", "add_ball"),
+                        ("coil_start", "coil_pulse"), ("coil_hold", "coil_hold"), ("coil_hold_on", "hold_on")):
+            assert j["fields"][k]["kind"] == kind      # the page gives each its own inputs by these
+    for label in CM.titles():
+        if label["can_run"]:
+            p = CM.load_port(label["label"]) or {}
+            assert CM.names_for(p, "coil_pulse"), label["label"]     # every runnable title has coils to pick

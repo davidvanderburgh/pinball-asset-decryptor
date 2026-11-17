@@ -68,15 +68,16 @@ function Picker({ names, value, multi, sound, have, onPick, onClose }) {
   </div>`;
 }
 
-function NamePick({ k, value, names, multi, sound, have, title, inherit }) {
+function NamePick({ k, value, names, multi, sound, have, title, inherit, onSet }) {
   const [open, setOpen] = useState(false);
+  const put = onSet || ((v) => set(k, v));          // a part of a longer key hands its value up (PAD-1376)
   const list = multi ? words(value) : (value ? [value] : []);
   const pick = (n) => {
-    if (!multi) { set(k, n); setOpen(false); return; }
+    if (!multi) { put(n); setOpen(false); return; }
     const cur = words(value);
-    set(k, (cur.includes(n) ? cur.filter((x) => x !== n) : cur.concat([n])).join(" "));
+    put((cur.includes(n) ? cur.filter((x) => x !== n) : cur.concat([n])).join(" "));
   };
-  const drop = (n) => set(k, multi ? words(value).filter((x) => x !== n).join(" ") : "");
+  const drop = (n) => put(multi ? words(value).filter((x) => x !== n).join(" ") : "");
   return html`<div class="jjpm-pick" data-key=${k}>
     ${list.length ? list.map((n) => html`<span class="jjpm-name" key=${n}><span class="mono">${n}</span>
         ${sound ? html`<${Hear} name=${n} have=${have} />` : null}
@@ -104,6 +105,96 @@ function Colour({ k, value, alpha, dflt }) {
   </div>`;
 }
 
+// ------------------------------------------------------------------ balls and coils (PAD-1376)
+// The runtime's keys of several words (MODES.md "Mode keys"), each word its own input: the coils
+// picked from the title's port report (only those a mode may pulse, or hold), numbers in their
+// ranges. Any part changed writes the whole line back; no first part (balls, coil, switch) clears it.
+const isNum = (w) => /^\d+$/.test(w);
+const line = (...parts) => parts.filter((p) => p !== "" && p != null).join(" ");
+
+function Num({ value, placeholder, min, max, unit, width = 90, onSet, title }) {
+  return html`<span class="jjpm-num" ...${title ? tip(title) : {}}><${Field} sm type="number" inputCls="num" width=${width}
+    value=${value || ""} min=${min} max=${max} placeholder=${placeholder || ""} onChange=${() => {}}
+    onCommit=${(v) => onSet(String(v || "").trim())} />${unit ? html`<span class="small muted">${unit}</span>` : null}</span>`;
+}
+
+function BallCoil({ k, kind, value, j }) {
+  const names = j.names || {};
+  const w = words(value);
+  const put = (v) => set(k, v);
+  if (kind === "multiball") {                      // <balls 2-6> [ball save s 0-120]
+    const [balls = "", save = ""] = w;
+    return html`<div class="row nw jjpm-parts">
+      <${Select} sm value=${balls} onChange=${(v) => put(v ? line(v, save) : "")}
+        options=${[{ value: "", label: "none" }].concat([2, 3, 4, 5, 6].map((n) => ({ value: String(n), label: `${n} balls in play` })))} />
+      ${balls ? html`<span class="small muted">ball save</span>
+        <${Num} value=${save} placeholder="10" min="0" max="120" unit="s" title="Drained balls are served back for this long (10 s when empty)"
+          onSet=${(v) => put(line(balls, v))} />` : null}
+    </div>`;
+  }
+  if (kind === "ball_save") {
+    return html`<div class="row nw jjpm-parts"><${Num} value=${value} placeholder="none" min="1" max="120" unit="s"
+      title="A ball that drains in this time after the start is served back (1-120 s)" onSet=${put} /></div>`;
+  }
+  if (kind === "add_ball") {                       // <switches> [times 1-6]
+    const times = w.length > 1 && isNum(w[w.length - 1]) ? w[w.length - 1] : "";
+    const sw = (times ? w.slice(0, -1) : w).join(" ");
+    return html`<div class="row wrap jjpm-parts">
+      <${NamePick} k=${k} value=${sw} names=${names.switches} multi title="The game's switches"
+        onSet=${(v) => put(v ? line(v, times) : "")} />
+      ${sw ? html`<span class="small muted">up to</span><${Num} value=${times} placeholder="1" min="1" max="6" width=${70} unit="times a run"
+        onSet=${(v) => put(line(sw, v))} />` : null}
+    </div>`;
+  }
+  if (kind === "coil_pulse") {                     // <coil> [ms]
+    const [coil = "", ms = ""] = w;
+    return html`<div class="row wrap jjpm-parts">
+      <${NamePick} k=${k} value=${coil} names=${names.coil_pulse || []} title="The game's coils a mode may fire"
+        onSet=${(v) => put(v ? line(v, ms) : "")} />
+      ${coil ? html`<${Num} value=${ms} placeholder="own pulse" min="1" max="1000" width=${110} unit="ms"
+        title="Shorter than the coil's own pulse only; empty is its own" onSet=${(v) => put(line(coil, v))} />` : null}
+    </div>`;
+  }
+  if (kind === "coil_hold") {                      // <coil> <ms 100-5000> [power 1-16 of 32]
+    const [coil = "", ms = "", power = ""] = w;
+    const off = (j.title_cfg || {}).coil_holds !== "on";
+    return html`<div class="jjpm-parts">
+      <div class="row wrap" style="gap:8px">
+        <${NamePick} k=${k} value=${coil} names=${names.coil_hold || []}
+          title="The game's coils built to stay on: magnets, diverters, posts, gates, the shaker, lights"
+          onSet=${(v) => put(v ? line(v, ms || "1000", power) : "")} />
+        ${coil ? html`<span class="small muted">for</span>
+          <${Num} value=${ms} min="100" max="5000" width=${90} unit="ms" title="100-5000 ms"
+            onSet=${(v) => put(line(coil, v || "1000", power))} />
+          <span class="small muted">at</span>
+          <${Select} sm value=${power} onChange=${(v) => put(line(coil, ms || "1000", v))}
+            options=${[{ value: "", label: "8 of 32 (default)" }].concat(Array.from({ length: 16 }, (_, i) => ({ value: String(i + 1), label: `${i + 1} of 32` })))} />
+          <span class="small muted">power</span>` : null}
+      </div>
+      ${coil && off ? html`<div class="small warn-ink">Off on this game until Every mode of this game sets Coil holds on this title to on (after watching it on the machine).</div>` : null}
+    </div>`;
+  }
+  if (kind === "hold_on") return html`<${HoldOn} k=${k} value=${value} names=${names} />`;
+  return null;
+}
+// coil_hold_on: shots | start | switches; "switches of its own" stays picked while none is chosen yet
+function HoldOn({ k, value, names }) {
+  const [pickSw, setPickSw] = useState(false);
+  const how = !value ? (pickSw ? "switches" : "") : (value === "shots" || value === "start" ? value : "switches");
+  const choose = (v) => {
+    setPickSw(v === "switches");
+    if (v !== "switches") set(k, v);
+    else if (how !== "switches") set(k, "");
+  };
+  return html`<div class="row wrap jjpm-parts">
+    <${Select} sm value=${how} onChange=${choose}
+      options=${[{ value: "", label: "(default: each scoring shot)" }, { value: "shots", label: "each scoring shot" },
+                 { value: "start", label: "the mode's start" }, { value: "switches", label: "switches of its own" }]} />
+    ${how === "switches" ? html`<${NamePick} k=${k} value=${value} names=${names.switches} multi title="The game's switches" />` : null}
+  </div>`;
+}
+const BALL_COIL = new Set(["multiball", "ball_save", "add_ball", "coil_pulse", "coil_hold", "hold_on"]);
+
 // one key of a mode (or of title.cfg: prefix "title:")
 function Row({ k, prefix = "", meta, value, j, have }) {
   // an empty key of a mode takes Every mode of this game's value, else the runtime's default
@@ -112,7 +203,8 @@ function Row({ k, prefix = "", meta, value, j, have }) {
   const key = prefix + k;
   const names = j.names || {};
   let input;
-  if (m.kind === "switches") input = html`<${NamePick} k=${key} value=${value} names=${names.switches} multi title="The game's switches" />`;
+  if (BALL_COIL.has(m.kind)) input = html`<${BallCoil} k=${key} kind=${m.kind} value=${value} j=${j} />`;
+  else if (m.kind === "switches") input = html`<${NamePick} k=${key} value=${value} names=${names.switches} multi title="The game's switches" />`;
   else if (m.kind === "lamps") input = html`<${NamePick} k=${key} value=${value} names=${names.lamps} multi title="The game's lamps (lp_) and lamp groups (ls_)" />`;
   else if (m.kind === "events") input = html`<${NamePick} k=${key} value=${value} names=${names.events || []} multi title="The game's own events (its hook lists)" />`;
   else if (m.kind === "after") input = html`<${NamePick} k=${key} value=${value} names=${names.after || []} multi title="The game's own modes (a global or a class), or any" />`;

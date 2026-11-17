@@ -92,11 +92,11 @@ LABELS = {
     "picture": "Picture (a file of ours)", "picture_at": "Picture box (x y w h, % of screen)",
     "video": "Video (a file of ours)", "video_at": "Video box (x y w h, % of screen)", "video_loop": "Video loops",
     "game": "Game", "ingame_state": "Ball-in-play state", "background_modes": "Always-on game modes",
-    "multiball": "Multiball (balls in play, ball save s)", "multiball_on": "Multiball balls come on",
-    "add_ball": "Add a ball on (switches, times)", "ball_save": "Ball save (s)",
-    "coil_start": "Coil at the start (coil, ms)", "coil_shot": "Coil on each shot (coil, ms)",
-    "coil_complete": "Coil on completion (coil, ms)", "coil_hold": "Hold a coil (coil, ms, power of 32)",
-    "coil_hold_on": "Hold it on (shots, start or switches)", "coil_holds": "Coil holds on this title",
+    "multiball": "Multiball", "multiball_on": "Multiball balls come on",
+    "add_ball": "Add a ball on", "ball_save": "Ball save",
+    "coil_start": "Coil at the start", "coil_shot": "Coil on each shot",
+    "coil_complete": "Coil on completion", "coil_hold": "Hold a coil",
+    "coil_hold_on": "Hold it on", "coil_holds": "Coil holds on this title",
     "start_on": "Starts on a game event", "start_after": "Starts after a game mode ends",
     "start_score": "Starts at a score", "start_combo": "Starts on a combo (in order)",
     "combo_seconds": "Combo seconds between shots", "start_count_reset": "Start count resets every",
@@ -389,6 +389,9 @@ def names_for(port, kind, folder=None):
     if kind == "events":            # start_on: the events this title's hook lists offer
         sr = port.get("start_rules") or {}
         return list(sr.get("start_on") or ()) if sr else list(mk().START_EVENTS)
+    if kind in ("coil_pulse", "coil_hold"):     # PAD-1376: the port's coils a mode may pulse / hold
+        want = "pulse" if kind == "coil_pulse" else "hold"
+        return [c["symbol"] for c in port.get("coils") or () if c.get(want)]
     if kind == "after":             # start_after: the game's mode globals and classes, or any
         st = port.get("stock") or {}
         return ["any"] + sorted(st.get("objects") or ()) + sorted(

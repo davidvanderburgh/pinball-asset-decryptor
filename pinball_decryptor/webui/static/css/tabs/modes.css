@@ -760,3 +760,6 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .jjpm-steps-hd { color: var(--ink-2); font-weight: 600; margin-bottom: 4px; }
 .jjpm-steps ol { margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.5; }
 .jjpm-steps-now { outline: 1px solid var(--ok, #3a8); }
+/* PAD-1376: balls and coils keys, a word per input */
+.jjpm-parts { gap: 8px; align-items: center; }
+.jjpm-num { display: inline-flex; align-items: center; gap: 6px; }

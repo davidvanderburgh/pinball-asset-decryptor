@@ -99,7 +99,7 @@ def test_check_passes_a_good_folder_and_names_every_problem(tmp_path):
     assert "2_bad.mode:1: start not in Guns N' Roses: switch_typo" in text
     assert "seconds must be a whole number" in text
     assert "lamp_color must be rrggbb hex" in text
-    assert "game_modes must be one of pause, end, ignore" in text
+    assert "game_modes must be one of hold, pause, end, ignore" in text
     assert "ingame_state belongs in title.cfg" in text
     assert "unknown key wobble" in text
 
@@ -154,3 +154,64 @@ def test_vtable_resolution_tells_folded_virtuals_apart():
     vt = jp.mode_vtable(_StubElf())
     assert vt == {"start": 0x10, "end": 0x20, "set_time": 0x28, "is_running": 0x48, "timer_paused": 0x38,
                   "score": 0x88, "tick": 0xa8, "start_choreo": 0xb0, "total_choreo": 0xb8}
+
+
+class _MemElf:
+    """A sparse address space for jjpport.hold: typeinfos and vtables at chosen addresses."""
+
+    def __init__(self):
+        self.syms, self.mem = {}, {}
+
+    def put(self, name, a, words):
+        self.syms[name] = (a, 8 * len(words))
+        for i, w in enumerate(words):
+            self.mem[a + 8 * i] = struct.pack("<Q", w)
+
+    def addr(self, n):
+        return self.syms[n][0]
+
+    def read(self, a, n):
+        out = b""
+        while len(out) < n:
+            base = a + len(out) - (a + len(out)) % 8
+            out += self.mem.get(base, b"\0" * 8)[(a + len(out)) - base:]
+        return out[:n]
+
+
+def test_hold_finds_mode_and_multiball_classes_up_the_typeinfo_chain():
+    """PAD-1348: the classes game_modes = hold gates, found the way jjpmodes.c finds them in
+    the game: single-inheritance bases at +16, multiple-inheritance {base, offset} from +24."""
+    jp = _load("jjpport")
+    e = _MemElf()
+    SI, VMI = 0x7000, 0x7100            # libstdc++'s typeinfo vtables (outside the game)
+    e.put("_ZTI4Mode", 0x1000, [SI - 0, 0x9000])
+    e.put("_ZTI13MultiballRule", 0x1100, [SI, 0x9010])
+    e.put("_ZTI5Other", 0x1200, [SI, 0x9020])
+    e.put("_ZTI9AwardMode", 0x1300, [SI, 0x9030, 0x1000])                  # : Mode
+    e.put("_ZTI8HurryUp", 0x1400, [SI, 0x9040, 0x1300])                    # : AwardMode : Mode
+    e.put("_ZTI7LockMB", 0x1500, [VMI, 0x9050, (2 << 32), 0x1200, 0, 0x1100, 0x802])  # : Other, MultiballRule
+    e.put("_ZTI6Plain", 0x1600, [SI, 0x9060, 0x1200])                      # : Other
+    fn = {"_ZN4Mode5startEv": 0x5010, "_ZN4Mode7restartEv": 0x5018,
+          "_ZN13MultiballRule5startEv": 0x5110, "_ZN13MultiballRule7restartEv": 0x5118}
+    for n, a in fn.items():
+        e.syms[n] = (a, 8)
+    e.put("_ZTV4Mode", 0x2000, [0, 0x1000, 0x5000, 0x5008, 0x5010, 0x5018])
+    e.put("_ZTV13MultiballRule", 0x2100, [0, 0x1100] + [0x6100 + 8 * i for i in range(17)] + [0x5110, 0x5118])
+    for i, (cls, ti) in enumerate([("9AwardMode", 0x1300), ("8HurryUp", 0x1400), ("7LockMB", 0x1500),
+                                   ("6Plain", 0x1600)]):
+        e.put("_ZTV" + cls, 0x3000 + 0x100 * i, [0, ti, 1, 2, 3, 4])
+    h = jp.hold(e)
+    assert h["can_hold"] is True
+    assert h["slots"] == {"mode_start": 0x10, "mode_restart": 0x18,
+                          "multiball_start": 0x88, "multiball_restart": 0x90}
+    assert h["mode_classes"] == 3          # Mode itself, AwardMode, HurryUp
+    assert h["multiball_classes"] == ["13MultiballRule", "7LockMB"]
+
+
+def test_runtime_policies_match_the_checker():
+    """game_modes values jjpmodes.c reads are the ones mkjjpmodes.py accepts (hold is the default)."""
+    mm = _load("mkjjpmodes")
+    src = open(os.path.join(RIG, "jjpmodes.c"), encoding="utf-8").read()
+    body = src[src.index('!strcmp(k, "game_modes")'):src.index('!strcmp(k, "hold_multiballs")')]
+    assert set(re.findall(r'!strcmp\(v, "([a-z]+)"\)', body)) | {"hold"} == set(dict(mm.KEYS)["game_modes"])
+    assert "m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;" in src

@@ -28,9 +28,14 @@
  *   screen   drawn on the backbuffer before the real al_flip_display, with
  *            the GAME's own fonts (JJPEFont globals, font_*) through the
  *            game's own font_plot_outline_shadow - the look of its own modes.
+ *   hold     (PAD-1348, the default) while a custom mode runs, the game's
+ *            mode and multiball starts are refused: the start and restart
+ *            slots of every Mode / MultiballRule class (found by the game's
+ *            typeinfo) point at a gate (see "run alone" below).
  *   yield    a custom mode never starts while a game mode or a multiball
  *            runs, and pauses (timer held, shots ignored, screen hidden) when
- *            one starts under it - unless its file says otherwise.  The game's
+ *            one starts under it (a mode the game starts past the gate, or
+ *            with game_modes = pause) - unless its file says otherwise.  The game's
  *            modes are found by scanning the game's own symbols for objects
  *            whose vtable carries Mode::is_running; modes already running at
  *            ball start (a title's always-on modes) do not count.
@@ -52,6 +57,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -135,6 +141,7 @@ static inline void *vslot(void *obj, int off) { return *(void **)(*(char **)obj 
 #define POLICY_PAUSE 0
 #define POLICY_END 1
 #define POLICY_IGNORE 2
+#define POLICY_HOLD 3     /* PAD-1348, the default: the game's starts are refused while ours runs */
 
 typedef struct {
     char file[64], name[48], title[64];
@@ -149,6 +156,8 @@ typedef struct {
     void *font_title, *font_value, *font_timer;
     unsigned title_rgba, value_rgba, timer_rgba, panel_rgba;
     int game_modes, panel;     /* panel: 0 middle, 1 bottom, 2 top */
+    int hold_multiballs;       /* with game_modes = hold: refuse the game's multiball starts too (default yes) */
+    char allow[1024];          /* allow_game_modes: " name name " the game may still start while ours holds */
     /* runtime */
     void *mode;
     int count, hits, secs, paused, ended_logged;
@@ -276,7 +285,17 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     else if (!strcmp(k, "timer_color")) m->timer_rgba = parse_rgba(v, m->timer_rgba);
     else if (!strcmp(k, "panel_color")) m->panel_rgba = parse_rgba(v, m->panel_rgba);
     else if (!strcmp(k, "game_modes"))
-        m->game_modes = !strcmp(v, "end") ? POLICY_END : !strcmp(v, "ignore") ? POLICY_IGNORE : POLICY_PAUSE;
+        m->game_modes = !strcmp(v, "end") ? POLICY_END : !strcmp(v, "ignore") ? POLICY_IGNORE
+                      : !strcmp(v, "pause") ? POLICY_PAUSE : POLICY_HOLD;
+    else if (!strcmp(k, "hold_multiballs"))
+        m->hold_multiballs = !(!strcmp(v, "no") || !strcmp(v, "0") || !strcmp(v, "off") || !strcmp(v, "false"));
+    else if (!strcmp(k, "allow_game_modes")) {
+        char *o = m->allow; size_t room = sizeof m->allow; o[0] = ' '; o[1] = 0;
+        for (char *t = strtok(buf, " ,	"); t; t = strtok(NULL, " ,	")) {
+            size_t L = strlen(o);
+            if (L + strlen(t) + 2 < room) snprintf(o + L, room - L, "%s ", t);
+        }
+    }
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : 0;
     else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
     else if (!strcmp(k, "game")) snprintf(game_name, sizeof game_name, "%s", v);
@@ -313,6 +332,7 @@ static void defaults(pm_t *m)
     m->lamp_rgb = 0xffffff; m->lamp_blink = 4;
     m->title_rgba = 0xffffffff; m->value_rgba = 0xffdc00ff; m->timer_rgba = 0xffffffff;
     m->panel_rgba = 0x000000b0;
+    m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;
 }
 
 static int cmp_names(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
@@ -360,10 +380,14 @@ static void load_modes(void)
         if (!m->nstart) { lg("%s: no start shot found; mode skipped", m->file); continue; }
         if (m->seconds < 1) m->seconds = 1;
         lg("mode %d \"%s\" (%s): %d start shot(s) x%d, %d scoring, %lld a shot, %d s, complete %d (+%lld), "
-           "%d lamp(s), game modes=%s",
+           "%d lamp(s), game modes=%s%s%s%s",
            npm, m->name, m->file, m->nstart, m->start_count, m->nshot, m->points, m->seconds, m->complete,
            m->complete_points, m->nlamp,
-           m->game_modes == POLICY_END ? "end" : m->game_modes == POLICY_IGNORE ? "ignore" : "pause");
+           m->game_modes == POLICY_END ? "end" : m->game_modes == POLICY_IGNORE ? "ignore"
+           : m->game_modes == POLICY_PAUSE ? "pause" : "hold",
+           m->game_modes == POLICY_HOLD ? (m->hold_multiballs ? " (multiballs too)" : " (not multiballs)") : "",
+           m->game_modes == POLICY_HOLD && m->allow[1] ? ", allowed:" : "",
+           m->game_modes == POLICY_HOLD && m->allow[1] ? m->allow : "");
         npm++;
     }
     for (int i = 0; i < nn; i++) free(names[i]);
@@ -461,6 +485,236 @@ static void log_running_set(void)
         if (!is_ours(gmodes[i]) && gm_running(i))
             o += snprintf(now + o, sizeof now - o, "%s%s%s", o ? " " : "", gmode_sym[i], gmode_bg[i] ? "(bg)" : "");
     if (strcmp(now, last)) { lg("game modes running: [%s]", now); snprintf(last, sizeof last, "%s", now); }
+}
+
+/* ---- run alone: the game's starts held off while ours runs (PAD-1348) ------
+ * The repo's rule for custom modes (Spike 2, PAD-363): while one of ours runs,
+ * no game mode, award mode or multiball starts.  On JJP every one of those is
+ * an object of a class derived from the engine's Mode (modes, award modes,
+ * hurry-ups) or MultiballRule (multiballs), and each class's start is a
+ * virtual: the slot Mode::start / MultiballRule::start fills in that base's
+ * vtable.  The classes are found by the game's own exported typeinfo (each
+ * vtable's word 1, walked up its base chain), never by name, so a title's
+ * own classes come with it.  Each class's start slot is pointed at gate_start
+ * (data only: the vtables are relocated read-only data, made writable for the
+ * one store); the gate refuses the start (returns false, which the game's
+ * callers read as "did not start") while a mode of ours holds, and otherwise
+ * calls the class's own start as before.  A start the gate never sees (a call
+ * the compiler made direct) still meets the old safety net: ours pauses for
+ * it, as with game_modes = pause, and the log says it got through. */
+#define MAX_HELD_VTS 1024
+typedef struct { uintptr_t vt; uintptr_t orig, orig_re; unsigned char mb; unsigned refused; long last_log; } hvt_t;
+static hvt_t hvts[MAX_HELD_VTS];
+static int nhvt, hvt_modes, hvt_mbs;
+static uintptr_t ti_mode, ti_mbr, si_ti_vt, vmi_ti_vt;
+static int mb_start_slot = -1;           /* byte offset of MultiballRule::start from the vptr */
+static int mode_re_slot = -1, mb_re_slot = -1;   /* ...and of each base's restart: a mode can come back through it */
+static uintptr_t mode_start_fn;          /* Mode::start: our own modes' vtable keeps it */
+static int hold_wanted;                  /* a loaded mode says game_modes = hold */
+static volatile int installed;
+static int running(pm_t *m);
+
+static int derives(uintptr_t ti, uintptr_t base, int depth)
+{
+    if (!ti || depth > 12) return 0;
+    if (ti == base) return 1;
+    uintptr_t tv = *(uintptr_t *)ti;
+    if (si_ti_vt && tv == si_ti_vt) return derives(*(uintptr_t *)(ti + 16), base, depth + 1);
+    if (vmi_ti_vt && tv == vmi_ti_vt) {
+        unsigned n = *(unsigned *)(ti + 20);
+        if (n > 16) return 0;
+        for (unsigned i = 0; i < n; i++)
+            if (derives(*(uintptr_t *)(ti + 24 + 16 * i), base, depth + 1)) return 1;
+    }
+    return 0;
+}
+
+/* A class's name off its typeinfo: "14MikeTeaveeMode" -> "MikeTeaveeMode". */
+static const char *class_name(uintptr_t vt)
+{
+    uintptr_t ti = ((uintptr_t *)vt)[-1];
+    const char *n = ti ? *(const char **)(ti + 8) : NULL;
+    if (!n) return "?";
+    if (*n == '*') n++;
+    while (*n >= '0' && *n <= '9') n++;
+    return n;
+}
+
+/* The mode's own global's name ("mtv_mode"), or its class's. */
+static const char *object_name(void *o)
+{
+    Dl_info di;
+    if (dladdr(o, &di) && di.dli_sname && di.dli_saddr == o) return di.dli_sname;
+    return class_name(*(uintptr_t *)o);
+}
+
+static int byte_off_in(const char *vtname, const char *fn)
+{
+    uintptr_t *v = sym(vtname); uintptr_t a = (uintptr_t)sym(fn);
+    if (!v || !a) return -1;
+    for (int i = 2; i < MODE_VT_SLOTS; i++) if (v[i] == a) return (i - 2) * 8;
+    return -1;
+}
+
+static int page_prot(uintptr_t a)
+{
+    FILE *f = fopen("/proc/self/maps", "r");
+    int prot = PROT_READ;
+    if (!f) return prot;
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        /* "lo-hi rwxp ..." (no sscanf: glibc 2.38 headers bind it to a symbol the image lacks) */
+        char *dash = strchr(line, '-'), *sp = dash ? strchr(dash, ' ') : NULL;
+        if (!sp) continue;
+        unsigned long lo = hexnum(line), hi = hexnum(dash + 1);
+        const char *p = sp + 1;
+        if (a >= lo && a < hi) {
+            prot = (p[0] == 'r' ? PROT_READ : 0) | (p[1] == 'w' ? PROT_WRITE : 0) | (p[2] == 'x' ? PROT_EXEC : 0);
+            break;
+        }
+    }
+    fclose(f);
+    return prot;
+}
+
+static int store_slot(uintptr_t *slot, uintptr_t val)
+{
+    uintptr_t page = (uintptr_t)slot & ~(uintptr_t)4095;
+    int prot = page_prot((uintptr_t)slot);
+    if (!(prot & PROT_WRITE) && mprotect((void *)page, 4096, prot | PROT_WRITE)) return 0;
+    __atomic_store_n(slot, val, __ATOMIC_SEQ_CST);
+    if (!(prot & PROT_WRITE)) mprotect((void *)page, 4096, prot);
+    return 1;
+}
+
+static int game_mode_bg(void *o)
+{
+    for (int i = 0; i < ngm; i++) if (gmodes[i] == o) return gmode_bg[i];
+    return 0;
+}
+
+/* The mode of ours that holds the game off right now, or NULL: running, not
+ * paused for something that got through, not on its way out. */
+static pm_t *holder(int mb)
+{
+    for (int i = 0; i < npm; i++) {
+        pm_t *m = &pms[i];
+        if (m->game_modes != POLICY_HOLD || !m->mode || m->paused || m->want_end) continue;
+        if (mb && !m->hold_multiballs) continue;
+        if (running(m)) return m;
+    }
+    return NULL;
+}
+
+static int allowed(pm_t *m, void *o, uintptr_t vt)
+{
+    if (!m->allow[1]) return 0;
+    char k[160];
+    snprintf(k, sizeof k, " %s ", object_name(o));
+    if (strstr(m->allow, k)) return 1;
+    snprintf(k, sizeof k, " %s ", class_name(vt));
+    return strstr(m->allow, k) != NULL;
+}
+
+static hvt_t *hvt_of(uintptr_t vt)
+{
+    for (int i = 0; i < nhvt; i++) if (hvts[i].vt == vt) return &hvts[i];
+    return NULL;
+}
+
+/* 1 = refuse this start/restart now (and log it, once a second per class). */
+static int refuse(void *self, hvt_t *h, const char *what)
+{
+    if (!installed || is_ours(self) || game_mode_bg(self)) return 0;
+    pm_t *m = holder(h->mb);
+    if (!m || allowed(m, self, h->vt)) return 0;
+    h->refused++;
+    long t = now_ms();
+    if (t - h->last_log >= 1000) {     /* a rule may ask on every switch */
+        h->last_log = t;
+        lg("HELD OFF the game's %s %s (%s) %s: \"%s\" is running (%u refused)", h->mb ? "multiball" : "mode",
+           object_name(self), class_name(h->vt), what, m->name, h->refused);
+    }
+    return 1;
+}
+
+static void passed(void *self, hvt_t *h, const char *what, int r)
+{
+    if (installed && !is_ours(self) && !game_mode_bg(self))
+        lg("game %s %s (%s) %s: %s", h->mb ? "multiball" : "mode", object_name(self), class_name(h->vt), what,
+           r ? "went ahead" : "declined by the game");
+}
+
+static int gate_start(void *self)
+{
+    hvt_t *h = hvt_of(*(uintptr_t *)self);
+    if (!h) {
+        lg("WARN start gate called for an unknown class %s; starting it as a Mode", class_name(*(uintptr_t *)self));
+        return mode_start_fn ? ((int (*)(void *))mode_start_fn)(self) & 0xff : 0;
+    }
+    if (refuse(self, h, "start")) return 0;
+    int r = ((int (*)(void *))h->orig)(self) & 0xff;
+    passed(self, h, "start", r);
+    return r;
+}
+
+static int gate_restart(void *self)
+{
+    hvt_t *h = hvt_of(*(uintptr_t *)self);
+    if (!h || !h->orig_re) { lg("WARN restart gate: unknown class %s; not restarted", class_name(*(uintptr_t *)self)); return 0; }
+    if (refuse(self, h, "restart")) return 0;
+    int r = ((int (*)(void *))h->orig_re)(self) & 0xff;
+    passed(self, h, "restart", r);
+    return r;
+}
+
+static void cb_hold_vts(const char *name, uintptr_t a, size_t sz)
+{
+    if (strncmp(name, "_ZTV", 4) || sz < 32 || nhvt >= MAX_HELD_VTS) return;
+    uintptr_t *v = (uintptr_t *)a;
+    int mb = 0, off, re;
+    if (ti_mode && derives(v[1], ti_mode, 0)) { off = VT_START; re = mode_re_slot; }
+    else if (ti_mbr && mb_start_slot >= 0 && derives(v[1], ti_mbr, 0)) { off = mb_start_slot; re = mb_re_slot; mb = 1; }
+    else return;
+    if (off < 0 || (size_t)(16 + off + 8) > sz) return;
+    uintptr_t *slot = (uintptr_t *)(a + 16 + off);
+    if (!*slot || *slot == (uintptr_t)gate_start) return;
+    hvt_t *h = &hvts[nhvt];
+    h->vt = a + 16; h->orig = *slot; h->mb = (unsigned char)mb;
+    if (!store_slot(slot, (uintptr_t)gate_start)) { lg("hold: could not write %s's start slot", name); return; }
+    if (re >= 0 && (size_t)(16 + re + 8) <= sz) {
+        uintptr_t *rs = (uintptr_t *)(a + 16 + re);
+        if (*rs && *rs != (uintptr_t)gate_restart) {
+            h->orig_re = *rs;
+            if (!store_slot(rs, (uintptr_t)gate_restart)) h->orig_re = 0;
+        }
+    }
+    nhvt++;
+    if (mb) hvt_mbs++; else hvt_modes++;
+}
+
+static void install_hold(void)
+{
+    for (int i = 0; i < npm; i++) if (pms[i].game_modes == POLICY_HOLD) hold_wanted = 1;
+    if (!hold_wanted) { lg("hold: no mode holds the game off (game_modes pause/end/ignore); the game's starts untouched"); return; }
+    ti_mode = (uintptr_t)sym("_ZTI4Mode");
+    ti_mbr = (uintptr_t)sym("_ZTI13MultiballRule");
+    uintptr_t si = (uintptr_t)sym("_ZTVN10__cxxabiv120__si_class_type_infoE");
+    uintptr_t vmi = (uintptr_t)sym("_ZTVN10__cxxabiv121__vmi_class_type_infoE");
+    si_ti_vt = si ? si + 16 : 0; vmi_ti_vt = vmi ? vmi + 16 : 0;
+    mode_start_fn = (uintptr_t)sym("_ZN4Mode5startEv");
+    mb_start_slot = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule5startEv");
+    mode_re_slot = byte_off_in("_ZTV4Mode", "_ZN4Mode7restartEv");
+    mb_re_slot = byte_off_in("_ZTV13MultiballRule", "_ZN13MultiballRule7restartEv");
+    if (!ti_mode || !si_ti_vt || VT_START < 0 || !mode_start_fn) {
+        lg("hold: FAIL - typeinfo for Mode %p, si typeinfo %p, start slot %#x: the game's starts cannot be held; "
+           "a hold mode pauses for them instead", (void *)ti_mode, (void *)si_ti_vt, VT_START);
+        return;
+    }
+    walk_dynsym(cb_hold_vts);
+    lg("hold: start gate on %d Mode class(es) (start %#x, restart %#x) and %d MultiballRule class(es) "
+       "(start %#x, restart %#x%s)", hvt_modes, VT_START, mode_re_slot, hvt_mbs, mb_start_slot, mb_re_slot,
+       ti_mbr ? "" : ", no MultiballRule on this title");
 }
 
 /* ---- sound ----------------------------------------------------------------- */
@@ -648,6 +902,8 @@ static int build_mode(pm_t *m, int idx)
         if (VT_TOTAL_CHOREO >= 0) slots[VT_TOTAL_CHOREO / 8] = (uintptr_t)pad_total_choreo;
         slots[VT_TICK / 8] = (uintptr_t)pad_tick_work;
         slots[VT_TIMER_PAUSED / 8] = (uintptr_t)pad_is_timer_paused;
+        if (mode_start_fn) slots[VT_START / 8] = mode_start_fn;   /* _ZTV4Mode's own slots are gated (PAD-1348) */
+        if (mode_re_slot >= 0 && sym("_ZN4Mode7restartEv")) slots[mode_re_slot / 8] = (uintptr_t)sym("_ZN4Mode7restartEv");
     }
     if (*(uintptr_t **)m->mode != mode_vt + 2)
         lg("WARN ctor vptr %p != Mode vtable %p", *(void **)m->mode, (void *)(mode_vt + 2));
@@ -695,8 +951,6 @@ static void end_mode(pm_t *m, const char *why)
 static int in_game(void) { return state_get && state_get() == ingame_state; }
 
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
-static volatile int installed;
-
 static int in_list(const int *l, int n, int v) { for (int i = 0; i < n; i++) if (l[i] == v) return 1; return 0; }
 
 /* Test hook for the emulator, where no ball can reach a game mode's start:
@@ -854,7 +1108,11 @@ static void per_frame(void)
             else if (busy && m->game_modes == POLICY_END) end_mode(m, busy);
             else {
                 int p2 = busy != NULL;
-                if (p2 != m->paused) { m->paused = p2; lg("\"%s\" %s%s", m->name, p2 ? "PAUSED for " : "RESUMED", p2 ? busy : ""); }
+                if (p2 != m->paused) {
+                    m->paused = p2;
+                    lg("\"%s\" %s%s%s", m->name, p2 ? "PAUSED for " : "RESUMED", p2 ? busy : "",
+                       p2 && m->game_modes == POLICY_HOLD ? " (it started past the hold)" : "");
+                }
             }
         }
         if (r && m->paused) lamps_release(m);          /* the game mode has the lamps */
@@ -986,6 +1244,7 @@ static void *installer(void *arg)
     ball_flag = (int (*)(void))sym("_Z26game_flow_get_ball_in_playv");
     if (!resolve_vtable() || !mode_ctor || !state_get) { lg("FAIL: this game's engine lacks what a mode needs"); return NULL; }
     find_game_modes();
+    install_hold();
     if (getenv("JJP_MODS_TEST_GAMEMODE") && getenv("JJP_MODS_TEST_SWITCH")) {
         test_gm = sym(getenv("JJP_MODS_TEST_GAMEMODE"));
         test_sw = sw_index(getenv("JJP_MODS_TEST_SWITCH"));

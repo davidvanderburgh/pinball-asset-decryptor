@@ -104,6 +104,71 @@ def mode_vtable(e):
     return out
 
 
+def _slot_of(e, vtname, fn):
+    """Byte offset from the vptr of `fn` in vtable `vtname`, or None (jjpmodes.c byte_off_in)."""
+    if vtname not in e.syms or fn not in e.syms:
+        return None
+    a, sz = e.syms[vtname]
+    words = struct.unpack("<%dQ" % (sz // 8), e.read(a, sz - sz % 8))
+    want = e.addr(fn)
+    for i, w in enumerate(words[2:]):
+        if w == want:
+            return i * 8
+    return None
+
+
+def hold(e):
+    """PAD-1348 game_modes = hold, on the file: the classes whose start/restart slots the
+    runtime gates, found as jjpmodes.c finds them in the game - each vtable's typeinfo
+    (word 1), walked up its base chain to Mode or MultiballRule.  A single-inheritance
+    typeinfo holds its base at +16; a multiple-inheritance one a count at +20 and
+    {base, offset} pairs from +24."""
+    tis = {a: n for n, (a, s) in e.syms.items() if n.startswith("_ZTI")}
+
+    def word(a):
+        return struct.unpack("<Q", e.read(a, 8))[0]
+
+    def bases(ti):
+        b = word(ti + 16)
+        if b in tis:
+            return [b]
+        n = struct.unpack("<I", e.read(ti + 20, 4))[0]
+        if 1 <= n <= 16:
+            return [p for p in (word(ti + 24 + 16 * i) for i in range(n)) if p in tis]
+        return []
+
+    def derives(ti, base, depth=0):
+        if ti == base:
+            return True
+        return depth < 12 and any(derives(b, base, depth + 1) for b in bases(ti))
+
+    ti_mode = e.addr("_ZTI4Mode") if "_ZTI4Mode" in e.syms else None
+    ti_mb = e.addr("_ZTI13MultiballRule") if "_ZTI13MultiballRule" in e.syms else None
+    modes, mbs = [], []
+    for n, (a, s) in e.syms.items():
+        if not n.startswith("_ZTV") or s < 32:
+            continue
+        ti = word(a + 8)
+        if ti not in tis:
+            continue
+        if ti_mode and derives(ti, ti_mode):
+            modes.append(n[4:])
+        elif ti_mb and derives(ti, ti_mb):
+            mbs.append(n[4:])
+    slots = collections.OrderedDict([
+        ("mode_start", _slot_of(e, "_ZTV4Mode", "_ZN4Mode5startEv")),
+        ("mode_restart", _slot_of(e, "_ZTV4Mode", "_ZN4Mode7restartEv")),
+        ("multiball_start", _slot_of(e, "_ZTV13MultiballRule", "_ZN13MultiballRule5startEv")),
+        ("multiball_restart", _slot_of(e, "_ZTV13MultiballRule", "_ZN13MultiballRule7restartEv")),
+    ])
+    return collections.OrderedDict([
+        ("can_hold", bool(ti_mode) and slots["mode_start"] is not None),
+        ("slots", slots),
+        ("mode_classes", len(modes)),
+        ("multiball_classes", sorted(mbs)),
+    ])
+
+
 def object_names(e, prefix, exclude=None, sizes=None):
     out = []
     for n, (a, s) in e.syms.items():
@@ -173,6 +238,7 @@ def port(elf_path, gamename=None):
         ("can_run_modes", not missing_required and not bad_slots),
         ("missing_required", missing_required),
         ("mode_vtable", vt),
+        ("hold", hold(e) if "_ZTV4Mode" in e.syms else {"can_hold": False}),
         ("sdk", sdk),
         ("switch_object_bytes", sw_size),
         ("lamp_object_bytes", lamp_size),

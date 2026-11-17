@@ -16,6 +16,26 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 16,
+  "multiball_classes": [
+   "10CompoundMB",
+   "13MultiballRule",
+   "14FiveFamiliesMB",
+   "21JobAwardMultiballRule",
+   "22GodfatherMultiballRule",
+   "7Baptism",
+   "8SicilyMB",
+   "9TurfWarMB"
+  ]
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

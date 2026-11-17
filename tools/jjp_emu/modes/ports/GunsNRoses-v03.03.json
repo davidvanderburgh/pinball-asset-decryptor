@@ -16,6 +16,27 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 33,
+  "multiball_classes": [
+   "13ComaMultiball",
+   "13MultiballRule",
+   "13SongMultiball",
+   "13TourMultiball",
+   "23ConcertBoosterMultiball",
+   "26AmpConcertBoosterMultiball",
+   "27PyroConcertBoosterMultiball",
+   "28CrowdConcertBoosterMultiball",
+   "29LightsConcertBoosterMultiball"
+  ]
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,
@@ -32,8 +53,8 @@
   },
   "game": {
    "_Z14jjpe_state_getv": true,
-   "_Z26game_flow_get_ball_in_playv": true,
-   "_Z23game_flow_get_player_upv": true
+   "_Z16proc_am_i_a_procv": true,
+   "_Z26game_flow_get_ball_in_playv": true
   },
   "yield": {
    "_Z28mb_get_logical_balls_in_playv": true,

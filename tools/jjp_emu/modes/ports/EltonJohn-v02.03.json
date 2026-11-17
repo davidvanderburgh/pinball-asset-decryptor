@@ -16,6 +16,27 @@
   "start_choreo": 176,
   "total_choreo": 184
  },
+ "hold": {
+  "can_hold": true,
+  "slots": {
+   "mode_start": 16,
+   "mode_restart": 24,
+   "multiball_start": 136,
+   "multiball_restart": 144
+  },
+  "mode_classes": 31,
+  "multiball_classes": [
+   "13MultiballRule",
+   "14PianoMultiball",
+   "15PianoMultiball1",
+   "15PianoMultiball2",
+   "15PianoMultiball3",
+   "15PianoMultiball4",
+   "18RocketmanMultiball",
+   "22CrocodileRockMultiball",
+   "8EncoreMB"
+  ]
+ },
  "sdk": {
   "mode": {
    "_ZN4ModeC1EPKciP11ModeManagerP4LampjjjP5AuditS7_": true,

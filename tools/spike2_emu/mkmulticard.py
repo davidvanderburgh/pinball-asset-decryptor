@@ -3500,6 +3500,46 @@ def _existing_mode_sets(p2_image):
     return out
 
 
+def mode_sets_moved(card, mode_sets):
+    """The images (1..N) whose custom modes on the card are not the ones their source carries
+    now (PAD-1386) - an image swapped for another build, or a source whose modes were edited,
+    keeps the OLD image's modes until the menu is injected again, and an update decides that
+    inject from the image list and the menu text alone.  Compared by name and bytes against
+    MODES_DIR/img<N> on the card's p2; an unreadable card counts every image as moved (an
+    inject too many costs seconds, a missed one runs the wrong modes)."""
+    if not mode_sets:
+        return []
+    try:
+        ref = select_ref(card)
+    except Exception:                                    # noqa: BLE001 - see above
+        return [i for i in range(1, len(mode_sets))]
+    return mode_sets_moved_on(ref, mode_sets)
+
+
+def mode_sets_moved_on(ref, mode_sets):
+    """:func:`mode_sets_moved` on a p2 already found (a debugfs reference)."""
+    try:
+        have = _existing_mode_sets(ref) or {}
+    except Exception:                                    # noqa: BLE001
+        return [i for i in range(1, len(mode_sets or []))]
+    moved = []
+    for i, ms in enumerate(mode_sets):
+        if i == 0:
+            continue
+        want = {n: v[0] for n, v in (ms or {}).items()} if carries_modes(ms) else {}
+        sub = "img%d" % i
+        names = sorted(have.get(sub) or [])
+        if names != sorted(want):
+            moved.append(i)
+            continue
+        try:
+            if any(debugfs_cat(ref, "%s/%s/%s" % (MODES_DIR, sub, n)) != want[n] for n in names):
+                moved.append(i)
+        except Exception:                                # noqa: BLE001
+            moved.append(i)
+    return moved
+
+
 def inject_mode_sets(p2_image, mode_sets, stage_dir):
     """Write images 1..N's own mode sets into p2 (MODES_DIR), and - when any extra image carries
     modes - make sure the rootfs can preload them: PADMODE_DIR exists (the bind's mountpoint)
@@ -6169,7 +6209,14 @@ def _update_locked(a, ts, card, dry):
     list_changed = any(a_.action != "keep" for a_ in actions)
     media = plan_media(a.media_dir, len(newplan.trees)) if a.media_dir else None
     newconf = conf_for_plan(newplan, a, existing=conf_now, media=media, colours=plan_colours(versions))
-    u["inject"] = bool(list_changed or a.media_dir or newconf.strip() != render_images_conf_text(conf_now).strip())
+    # ...and when an image's custom modes are not the ones on the card: a swapped image (or a
+    # source whose modes changed) would otherwise boot the old image's modes (PAD-1386)
+    modes_moved = mode_sets_moved(card, mode_sets) if (mode_sets is not None and not list_changed) else []
+    if modes_moved:
+        say("custom modes changed for image%s %s: the menu is injected again to carry them"
+            % ("s" if len(modes_moved) > 1 else "", ", ".join(str(i) for i in modes_moved)))
+    u["inject"] = bool(list_changed or modes_moved or a.media_dir
+                       or newconf.strip() != render_images_conf_text(conf_now).strip())
     if a.expect_bytes is not None and u["size"] > a.expect_bytes * (1 + UPDATE_SLACK) + UPDATE_SLACK_BYTES:
         u["notes"].append("the update would write %s, more than the %s expected: a source changed since it was measured"
                           % (_gb(u["size"]), _gb(a.expect_bytes)))
@@ -9858,6 +9905,13 @@ def selftest_modes(d, sel):
     # what inspect reports per image off the built p2
     ok &= card_mode_summary(p2, 1) == "1 mode file, 0 code modes", card_mode_summary(p2, 1)
     ok &= card_mode_summary(p2, 0) is None and card_mode_summary(p2, 2) is None
+    print("== PAD-1386: an update knows when an image's modes are not the card's")
+    ok &= mode_sets_moved_on(p2, sets) == []
+    other = [dict(x) for x in sets]
+    other[1]["mode.so"] = (so + b"v38", other[1]["mode.so"][1])
+    ok &= mode_sets_moved_on(p2, other) == [1]
+    ok &= mode_sets_moved_on(p2, [{}, {}]) == [1]
+    ok &= mode_sets_moved_on(p2, [sets[0], sets[1], {}]) == []
     print("== inject again, the same sets: idempotent")
     stage2 = os.path.join(d, "stage two")
     os.makedirs(stage2, exist_ok=True)
@@ -9874,6 +9928,7 @@ def selftest_modes(d, sel):
     os.makedirs(stage4, exist_ok=True)
     inject_into_p2(p2, sel, conf, stage4, mode_sets=[{}, {}])
     ok &= not debugfs_exists(p2, MODES_DIR)
+    ok &= mode_sets_moved_on(p2, [{}, {}]) == [] and mode_sets_moved_on(p2, sets) == [1]
     ok &= debugfs_exists(p2, SELECT_DIR + "/images.conf") and e2fsck(p2)[0] == 0
     print("SELFTEST part 9 (modes)", "PASS" if ok else "FAIL")
     ok &= selftest_menu_back(d, sel, A, B, sets, conf)

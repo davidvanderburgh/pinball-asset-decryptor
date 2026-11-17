@@ -34,6 +34,7 @@ changed what it stands in for), the second have nowhere to land.
 
 import json
 import os
+import re
 
 from . import audio_compare, staged_changes, staged_originals, text_manifest
 from .checksums import read_baseline_any
@@ -62,12 +63,21 @@ def _by_md5(files):
     return out
 
 
-def _pair(old, new, key_old=None, key_new=None):
+def _pair(old, new, key_old=None, key_new=None, names_first=False):
     """Pair two ``{rel: md5}`` maps of one kind.  Returns ``_empty()``-shaped
     lists of rels: *added* (new side), *changed* (``(old_rel, new_rel)``),
     *removed* (old side), and a count of new files whose bytes are already in
-    the old version.  *key_old* / *key_new* map a rel to a second identity
-    (an on-card path) tried before the file name."""
+    the old version.
+
+    Files with the same bytes pair first.  The rest pair by a second identity
+    (*key_old* / *key_new*: an on-card path), by the same file name, and by
+    the same name in another container (a clip re-encoded from .mp4 to .mov
+    keeps its name, not its extension), each pass over every file before the
+    next and each old file used once.  *names_first* puts the name passes
+    before the key: a video's card path is its POSITION in its scene's asset
+    list, which shifts when the factory inserts a clip (King Kong LE 0.93.0
+    -> 1.00.0 moved Kong_BallSave from asset 23 to 39), while the clip's name
+    is the scene's own."""
     out = _empty()
     old_md5 = _by_md5(old)
     new_md5 = set(new.values())
@@ -86,21 +96,35 @@ def _pair(old, new, key_old=None, key_new=None):
             k = key_old(rel)
             if k:
                 by_key.setdefault(k, rel)
-    # the same name in another container (a clip re-encoded from .mp4 to
-    # .mov keeps its name, not its extension)
     by_stem = {}
-    for r in old:
+    for r in sorted(old):
         by_stem.setdefault(os.path.splitext(r)[0].lower(), r)
-    for rel in rest:
+
+    def by_card(rel):
         k = key_new(rel) if key_new is not None else None
-        twin = by_key.get(k) if k else None
-        if twin is None and rel in old:
-            twin = rel
-        if twin is None:
-            twin = by_stem.get(os.path.splitext(rel)[0].lower())
-        if twin is not None and old[twin] not in new_md5:
-            out["changed"].append((twin, rel))
-            used.add(twin)
+        return by_key.get(k) if k else None
+
+    def by_name(rel):
+        return rel if rel in old else None
+
+    def by_other_container(rel):
+        return by_stem.get(os.path.splitext(rel)[0].lower())
+
+    passes = ((by_name, by_other_container, by_card) if names_first
+              else (by_card, by_name, by_other_container))
+    twins = {}
+    for find in passes:
+        for rel in rest:
+            if rel in twins:
+                continue
+            twin = find(rel)
+            if (twin is not None and twin not in used
+                    and old[twin] not in new_md5):
+                twins[rel] = twin
+                used.add(twin)
+    for rel in rest:
+        if rel in twins:
+            out["changed"].append((twins[rel], rel))
         else:
             out["added"].append(rel)
     out["removed"] = sorted(r for r in old
@@ -131,6 +155,27 @@ def _image_keys(old_dir, new_dir):
             back.setdefault(t, src)
     first = {src: (tgts[0] if tgts else None) for src, tgts in remap.items()}
     return first.get, (lambda rel: rel if rel in back else None)
+
+
+def _same_pixels(old_dir, new_dir, d, replaced):
+    """Move the picture pairs whose PIXELS are the same out of *changed*:
+    a font's glyph slices come out byte-different when only the atlas they
+    were cut from moved (a quarter of King Kong LE 1.00.0's "changed"
+    pictures).  A replaced picture is read from its stock snapshot."""
+    from .mod_transfer import _pixels_identical
+    keep = []
+    for o, n in d["changed"]:
+        src = (staged_originals.snapshot_path(old_dir, o) if o in replaced
+               else None) or os.path.join(old_dir, o)
+        try:
+            same = _pixels_identical(src, os.path.join(new_dir, n))
+        except Exception:                               # noqa: BLE001
+            same = False
+        if same:
+            d["same"] += 1
+        else:
+            keep.append((o, n))
+    d["changed"] = keep
 
 
 def _replaced(folder):
@@ -191,6 +236,24 @@ def _sounds(old_dir, new_dir, replaced):
     return out
 
 
+_WORD = re.compile(r"[A-Za-z]{3}")
+
+
+def _readable(words):
+    """Is *words* a line a player could read on screen?  The Text tab's
+    game-program rows are every string the scan found in the program, most
+    of them a few bytes of code that happen to be printable (">w", "0U") or
+    the operating system's own messages ("DHCP is %s\\n"): none is worth a
+    replacement, and King Kong LE's 1.00.0 has thousands."""
+    w = (words or "").strip()
+    if len(w) < 3 or not _WORD.search(w):
+        return False
+    if "%" in w or "\\" in w or any(c in w for c in "{}<>|_=;"):
+        return False
+    letters = sum(c.isalpha() or c == " " for c in w)
+    return letters >= 0.75 * len(w)
+
+
 def _text(old_dir, new_dir):
     """New and dropped on-screen strings, by their words."""
     def words(folder):
@@ -199,7 +262,7 @@ def _text(old_dir, new_dir):
         except Exception:                               # noqa: BLE001
             rows = []
         return {r["original"].strip() for r in rows
-                if r.get("original", "").strip()}
+                if not r.get("unused") and _readable(r.get("original", ""))}
     a, b = words(old_dir), words(new_dir)
     out = _empty()
     out["added"] = sorted(b - a)
@@ -209,12 +272,20 @@ def _text(old_dir, new_dir):
 
 
 def card_version(folder):
-    """The version an extract records it came from, or ``""``."""
+    """The version an extract came from (its own record, else what the
+    Mod Pack tab's version chips read), or ``""``."""
     try:
         with open(os.path.join(folder, ".extract_source.json"),
                   encoding="utf-8") as f:
-            return (json.load(f) or {}).get("card_version") or ""
+            v = (json.load(f) or {}).get("card_version") or ""
     except (OSError, ValueError):
+        v = ""
+    if v:
+        return v
+    try:
+        from .extract_source import version_for_dir
+        return version_for_dir(folder)[0] or ""
+    except Exception:                                   # noqa: BLE001
         return ""
 
 
@@ -240,10 +311,11 @@ def compare(old_dir, new_dir):
     vk_old, vk_new = _video_keys(old_dir), _video_keys(new_dir)
     kinds["video"] = _pair(split.get(("old", "video"), {}),
                            split.get(("new", "video"), {}),
-                           vk_old.get, vk_new.get)
+                           vk_old.get, vk_new.get, names_first=True)
     ik_old, ik_new = _image_keys(old_dir, new_dir)
     kinds["image"] = _pair(split.get(("old", "image"), {}),
                            split.get(("new", "image"), {}), ik_old, ik_new)
+    _same_pixels(old_dir, new_dir, kinds["image"], replaced)
     kinds["sound"] = _sounds(old_dir, new_dir, replaced)
     kinds["text"] = _text(old_dir, new_dir)
     yours = {"changed": [], "removed": []}

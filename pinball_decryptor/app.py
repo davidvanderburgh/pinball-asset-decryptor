@@ -4423,6 +4423,13 @@ class App:
             log_cb("Comparing %s with this project's version..."
                    % os.path.basename(job["raw"]), "info")
             news = version_news.compare(project, job["workspace"])
+            if not news.get("new_version") and hasattr(self._current_mfr,
+                                                       "card_version"):
+                try:   # an extract with no record of its card: ask the card
+                    news["new_version"] = self._current_mfr.card_version(
+                        job["raw"])[0] or ""
+                except Exception:                   # noqa: BLE001
+                    pass
             for level, line in version_news.summary_lines(news):
                 log_cb(line, level)
             page = version_news.for_page(news)

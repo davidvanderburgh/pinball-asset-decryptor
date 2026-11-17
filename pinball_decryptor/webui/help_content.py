@@ -4245,10 +4245,69 @@ def _play_options_intro():
             "are what keep a card's scores on the machine."]
 
 
-def sections_for(tab_name):
+def _jjp_modes_games():
+    """The JJP titles that can run custom modes, read off their port reports now."""
+    from ..plugins.jjp import custom_modes as CM
+    names = [t["name"] for t in CM.titles() if t["can_run"]]
+    return ("Every game whose code the app has read and found able to run them: "
+            + ", ".join(names) + ". The others are listed greyed, with why.") if names else ""
+
+
+#: PAD-1350: the Modes tab on a Jersey Jack game (webui/modes_jjp.py) - a different editor
+#: from Stern's mode maker, so its own tips
+JJP_MODES_HELP = [
+    ("What it's for", [
+        "Make modes of your own for a Jersey Jack game. A mode runs inside the "
+        "game's own code: a switch of the game's starts it, the game's mode timer "
+        "times it, its shots score through the game's scoring, it lights the game's "
+        "lamps and draws its panel in the game's fonts. The game's own modes go on as "
+        "they were. While yours runs it holds off the game's own mode and multiball "
+        "starts, and pauses for the few it cannot hold; **When a game mode runs** can "
+        "make it pause, end or carry on instead.",
+    ]),
+    ("Which games", lambda: _jjp_modes_games()),
+    ("Making a mode", [
+        "Pick the game at the top right. Your modes are on the left; **New mode** "
+        "starts one from picks that suit the game. Every switch, lamp, lamp group, "
+        "sound and font is picked from the game's own list, so nothing can be "
+        "misspelt. A game takes 24 modes.\n\n"
+        "- **Started by**: the switch (or switches) that start it; **Hits to start** "
+        "how many hits that takes.\n"
+        "- **Scoring shots**, **Points a shot**, **Seconds**, **Shots to complete** and "
+        "**Completion bonus**: how it plays.\n"
+        "- **Sounds**, **Lamps** and **Screen**: what it plays, lights and shows. "
+        "Leave one empty for the game's default.\n\n"
+        "**Every mode of this game** holds defaults for all of them (the fonts, the "
+        "colours, where the panel sits).",
+    ]),
+    ("Hearing the sounds", [
+        "Extract the game once (the Extract tab) and point **Hear sounds from** at "
+        "that folder: every sound the game's list names and the folder holds gets a "
+        "**Hear** button, in the list and beside the picked one.",
+    ]),
+    ("The check", [
+        "Every change is checked the way the build checks it: a name the game does "
+        "not have, a number that is not one, a mode with nothing to start it. The "
+        "Build button waits until the check finds nothing.",
+    ]),
+    ("Putting it on the machine", [
+        "**Build** writes the game's stock install ISO again with your modes in it "
+        "(it runs in the app's Linux as administrator, a few minutes). Install that "
+        "ISO the way the stock one installs. To turn the modes off on the machine "
+        "without reinstalling, create the file /jjpe/perm/padmodes.off; delete it to "
+        "turn them back on.",
+    ]),
+]
+
+
+def sections_for(tab_name, mfr=None):
     """The (title, body) sections the "?" window shows for *tab_name*: the
     tab's own, plus those of every preview feature switched on in this run
-    (:data:`PREVIEW_HELP`).  Never raises."""
+    (:data:`PREVIEW_HELP`).  The Modes tab on a JJP game (*mfr* with
+    ``jjp_modes``) is the JJP editor, with tips of its own.  Never raises."""
+    caps = getattr(mfr, "capabilities", None)
+    if tab_name == "Modes" and getattr(caps, "jjp_modes", False) and not getattr(caps, "modes", False):
+        return _render_sections(JJP_MODES_HELP)
     out = list(HELP_CONTENT.get(tab_name) or [])
     try:
         from ..core import preview
@@ -4257,6 +4316,10 @@ def sections_for(tab_name):
                 out += list(tabs.get(tab_name) or [])
     except Exception:                                   # noqa: BLE001
         pass
+    return _render_sections(out)
+
+
+def _render_sections(out):
     # a body that is a function is read now, at render time (a tip that lists
     # what the app has at the moment); one that fails is left out, not a crash
     sections = []

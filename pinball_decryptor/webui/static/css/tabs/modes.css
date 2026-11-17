@@ -726,3 +726,32 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .modes-hand-grid { display: grid; gap: 4px 6px; align-items: center; max-height: min(52vh, 480px); overflow: auto; margin-top: 8px; }
 .modes-hand-grid .modes-hand-lv { text-align: center; position: sticky; top: 0; background: var(--panel); }
 .modes-hand-custom { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
+
+/* PAD-1350: the tab on a Jersey Jack game (modes_jjp.js) */
+.jjpm-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+.jjpm-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.jjpm-mode { padding: 7px 9px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+.jjpm-mode:hover { background: var(--bg-2); }
+.jjpm-mode.on { background: var(--accent-soft); border-color: var(--accent-line); }
+.jjpm-group { margin-bottom: 14px; }
+.jjpm-gt { font-weight: 600; margin: 4px 0 6px; color: var(--ink-2); text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+.jjpm-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px; align-items: center; padding: 4px 0; }
+.jjpm-lbl { color: var(--ink-2); font-size: 13px; }
+.jjpm-in { min-width: 0; }
+.jjpm-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.jjpm-name { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--line-2); font-size: 12px; max-width: 100%; }
+.jjpm-name .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jjpm-x { background: none; border: 0; color: var(--ink-3); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 4px; }
+.jjpm-x:hover { color: var(--err); }
+.jjpm-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding-top: 8vh; }
+.jjpm-picker { width: min(640px, 92vw); max-height: 76vh; display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.jjpm-list { overflow: auto; min-height: 120px; border: 1px solid var(--line-2); border-radius: 6px; }
+.jjpm-item { display: flex; align-items: center; gap: 8px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
+.jjpm-item:hover { background: var(--bg-2); }
+.jjpm-item.on { background: var(--accent-soft); }
+.jjpm-tick { color: var(--accent); font-weight: 700; }
+.jjpm-sounds { display: grid; grid-template-columns: 130px minmax(0, 520px) auto; gap: 10px; align-items: center; margin-bottom: 12px; }
+.jjpm-check.ok .hd .muted { color: var(--ok); }
+.jjpm-check.bad .hd .muted { color: var(--warn); }
+.jjpm-probs { margin: 0; padding-left: 18px; }
+.jjpm-log { max-height: 220px; overflow: auto; font-size: 11px; background: var(--bg-2); padding: 8px; border-radius: 6px; margin: 8px 0 0; white-space: pre-wrap; }

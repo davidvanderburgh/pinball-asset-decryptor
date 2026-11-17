@@ -80,3 +80,12 @@
 - [x] Investigate Pulp Fiction and other available cards; qualify only if their image preparation, boot integration, authentication, disable, preservation, and game tests all pass. Record unsupported candidates and reasons.
 - [x] Add qualified platform ids to the registry, package the resources on macOS/Linux/Windows, and run all feature tests plus relevant existing regressions.
 - [x] Perform fresh whole-branch review, resolve actionable issues with regression tests, and verify clean diff/test evidence. Commit the reviewable feature branch; do not push or merge.
+
+### Task 6: Spike 3 qualification (explicitly requested 2026-11-17)
+
+- [x] Build hash-pinned AArch64 key-only Dropbear/SFTP payload from the same sources.
+- [x] Add regression tests and a Spike 3 adapter: decrypt only the copied rootfs using the user's existing key source, modify/check plaintext, re-encrypt under the unchanged volume key/header, verify read-back. Preserve every byte outside the rootfs data segment.
+- [x] Integrate the Spike3WritePipeline, including SSH-only builds, preflight, pending/recovery markers and failure quarantine; make Extras available for qualified Spike 3 cards only.
+- [x] Test actual written Fallout rootfs with boot-hook startup, all accepted client key families, unknown/password rejection, SFTP, persistent host identity, key rotation and disabling. Never substitute authorized keys after injection.
+- [x] Run the resulting card through the existing Spike 3 game emulator; record startup evidence and the limits of guest-userspace emulation.
+- [x] Enable only after qualification; run Spike 2/new regression checks and independent review. Commit on the existing branch and rebuild Local Build. No cabinet writes or changes to existing emulator containers.

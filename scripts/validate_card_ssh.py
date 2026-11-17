@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Qualify the Spike 2 SSH adapter on a real source image, without a cabinet.
+"""Qualify a Stern SSH adapter on a real source image, without a cabinet.
 
 Run from the checkout with its Python dependencies installed::
 
@@ -61,8 +61,9 @@ def main():
     if not source.is_file() or not 1024 <= args.port <= 65535:
         ap.error('Provide a source file and a nonprivileged TCP port')
     info = ssh_card.inspect_image(str(source))
-    if info.get('platform') != 'stern-spike2':
-        ap.error(info.get('reason') or 'Not a recognized Spike 2 image')
+    platform = info.get('platform')
+    if platform not in ('stern-spike2', 'stern-spike3'):
+        ap.error(info.get('reason') or 'Not a recognized supported Stern image')
     if shutil.disk_usage(work.parent).free < source.stat().st_size + (2 << 30):
         ap.error('Not enough space for an output image and filesystem scratch files')
     work.mkdir(mode=0o700)
@@ -82,20 +83,35 @@ def main():
         if bits: argv += ['-b',bits]
         run(argv)
     keys = ''.join((work/(n+'.pub')).read_text() for n in names)
-    (work/'boot.sh').write_text(BOOT)
+    boot_script = BOOT
+    if platform == 'stern-spike3':
+        boot_script = boot_script.replace('qemu-arm-static', 'qemu-aarch64-static')
+        boot_script = boot_script.replace('[ -L /guest/etc/rc5.d/S30sshd ]', '[ -f /guest/etc/init.d/S60padsshd ]')
+        boot_script = boot_script.replace('/etc/rc5.d/S30sshd', '/etc/init.d/S60padsshd')
+        boot_script = boot_script.replace('if [ -f /guest/etc/init.d/S60padsshd ]; then',
+            'chroot /guest /usr/bin/qemu-aarch64-static /bin/mkdir -p /var/run\nif [ -f /guest/etc/init.d/S60padsshd ]; then')
+    (work/'boot.sh').write_text(boot_script)
     # Qualification is deliberately allowed only in this test process; this
     # does not change the production allowlist or bypass image identification.
-    ssh_card.QUALIFIED_PLATFORMS = {'stern-spike2'}
+    ssh_card.QUALIFIED_PLATFORMS = {'stern-spike2', platform}
     def build(enabled, text):
         card_extras.save(str(project), enabled, text)
         done = []
         with (work/'pipeline.log').open('a') as log:
-            p = SternWritePipeline(str(source), str(project), str(output),
+            pipeline = SternWritePipeline
+            if platform == 'stern-spike3':
+                from pinball_decryptor.plugins.stern.spike3_write import Spike3WritePipeline
+                pipeline = Spike3WritePipeline
+            p = pipeline(str(source), str(project), str(output),
                 lambda msg,level='info': print(level,msg,file=log,flush=True),
                 lambda *a: None, lambda *a: None, lambda ok,msg: done.append((ok,msg)), update=False)
             p.run()
         if not done or not done[-1][0]:
             raise RuntimeError('Pipeline failed; see pipeline.log: ' + str(done))
+        if platform == 'stern-spike3':
+            from pinball_decryptor.core import ssh_spike3
+            ssh_spike3.export_rootfs(str(output), work/'rootfs.img')
+            return
         _,_,offset,size = ssh_card.inspect_image(str(output))['partition']
         with output.open('rb') as src, (work/'rootfs.img').open('wb') as dst:
             src.seek(offset)
@@ -142,7 +158,7 @@ def main():
              'root@127.0.0.1'],input=f'put {work}/upload.bin /tmp/pad-ssh.bin\nget /tmp/pad-ssh.bin {work}/download.bin\n')
         assert (work/'download.bin').read_bytes()==content
         passed('SFTP upload/download is byte-identical')
-        p=ssh(command='/etc/init.d/sshd restart');assert p.returncode==0,p.stderr
+        p=ssh(command=ssh_card.layout(platform)['hook']+' restart');assert p.returncode==0,p.stderr
         ready();assert identity()==first_identity
         passed('Service restart preserves persistent host identity')
         stop();build(True,(work/'ed25519-b.pub').read_text());boot();ready('ed25519-b')
@@ -163,17 +179,22 @@ def main():
         stop();build(True,keys)
         # Check source preservation and every output byte outside the system
         # partition in bounded chunks; include MBR, games, scores and logs.
-        _,_,start,size=ssh_card.inspect_image(str(output))['partition']
+        current=ssh_card.inspect_image(str(output))
+        _,_,start,size=current['partition']
+        if platform == 'stern-spike3':
+            start += current['segment_offset']
+            size = current['plaintext_size']
         with source.open('rb') as a, output.open('rb') as b:
             for lo,hi in [(0,start),(start+size,source.stat().st_size)]:
                 a.seek(lo);b.seek(lo);left=hi-lo
                 while left:
                     n=min(left,1<<20);assert a.read(n)==b.read(n),'Non-system bytes changed';left-=n
-        passed('All bytes outside system partition match source')
-        record={'source':str(source),'output':str(output),'platform':'stern-spike2',
+        passed('All bytes outside rootfs data segment match source' if platform == 'stern-spike3'
+               else 'All bytes outside system partition match source')
+        record={'source':str(source),'output':str(output),'platform':platform,
                 'source_sha256':ssh_card._hash_file(source),'output_sha256':ssh_card._hash_file(output),
                 'rootfs_sha256':ssh_card._hash_file(work/'rootfs.img'),
-                'container_image':args.container_image,'payload_sha256':ssh_card.HASHES,
+                'container_image':args.container_image,'payload_sha256':ssh_card.layout(platform)['hashes'],
                 'checks':results,'scope':'Guest rootfs/QEMU service emulation, not a complete kernel boot'}
         (work/'results.json').write_text(json.dumps(record,indent=2)+'\n')
         print('Results: '+str(work/'results.json'),flush=True)

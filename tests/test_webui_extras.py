@@ -16,8 +16,10 @@ def ready(w, tmp_path, monkeypatch):
     return project, svc
 
 
-def test_sidebar_and_project_persistence(tmp_path, monkeypatch):
+@pytest.mark.parametrize('era', ['spike2', 'spike3'])
+def test_sidebar_and_project_persistence(tmp_path, monkeypatch, era):
     with web_app(tmp_path, mfr='stern') as w:
+        w.window.current_mfr._era = era
         project, svc = ready(w, tmp_path, monkeypatch)
         rail = w.state('shell')['tabs']
         entry = next(t for t in rail if t['ns'] == 'extras')

@@ -6,7 +6,7 @@
 |---|---|---|
 | Stern Spike 2, recognized SysV/ext rootfs | Available | Real King Kong LE 0.97.0 image; full pipeline, guest SSH lifecycle and game startup checks passed below. |
 | Stern Spike 1 | Unavailable | Distinct ABI/rootfs/boot integration; no passing test of this adapter. |
-| Stern Spike 3 | Unavailable | Encrypted platform and different boot integration; no passing test of this adapter. |
+| Stern Spike 3, recognized encrypted Buildroot rootfs | Available | Real Fallout LE 0.81.0 image; [SSH lifecycle, encrypted-image preservation and game attract checks passed](2026-11-17-extras-ssh-spike3.md). |
 | CGC Pulp Fiction | Unavailable | Investigated related Dropbear work. Its game OS is inside `emmc.img` inside the installer, with a competing stock OpenSSH Upstart job. This Spike 2 adapter cannot safely apply there; no PAD adapter qualified. |
 | Other CGC, JJP, Spooky, Barrels of Fun, Dutch Pinball, American Pinball, Pinball Brothers | Unavailable | No platform-specific PAD injector and passing emulator qualification. |
 

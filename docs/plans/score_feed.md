@@ -55,3 +55,27 @@ lines). Emulator: Jaws Premium/LE 1.02 (kit `C:\tmp\PAD-1344\rig`).
 - "I'd like to see the sample API contract for the scores API": the Score feed card's **What your server receives**
   shows the request as sent to the typed address, the body laid out, every field with its type, and the answer the
   machine expects (`score_feed.contract()`; a test checks its keys against the runtime's `feed_json`).
+
+## Every Spike 2 build (PAD-1389)
+
+David: "I don't see it in the play options tab anymore for King Kong at least. we need to add it to all spike 2 games."
+Every shipped port already carries what the feed needs (`score_feed.port_ok`: 76 of 78 profiles). The two that did
+not were ports the app DERIVED for builds it ships none for: King Kong LE 1.00 (the newest, from Stern after 0.97)
+and 0.93. King Kong LE 1.00's event bus has one more id (it ends at 208; every newest shipped reference's at 207):
+from 0xb6 up every id moved by one, and the deriver dropped every numbered event of a reference whose bus differs,
+`game_start` and `ball_start` with them. No `game_start`, no Score feed (and no Prolonged Competition, which starts on
+the ball's start).
+
+The fix is in the deriver, not the feed: `portgen` (REVISION 11) keeps a reference's events on a bus that differs, each
+at the target's own id, read off the **event map** (`ports/recipes/eventbus-207.busmap.gz`, built by `port_tool.py
+busmap <program>` from Godzilla LE 1.16): a ladder for each of the 141 handlers on that build's bus. The target's own
+subscriptions say which id each located handler sits on; `fit_bus_offsets` fits the ids' moves (never going back:
+ids are added or taken out, not shuffled) to those votes, so a stray ladder hit costs one vote, and an id is mapped
+only where the agreeing ids below and above moved alike (KK 1.00: 0xad-0xb5, around the new id, are left out; tilt
+0xc6 -> 0xc7, tilt_warning 0xc8 -> 0xc9). The end of ball's bus fallback (`via_bus`) reads its id the same way. The
+derived port's key carries the map's SHA-1, so a new map re-derives.
+
+Proof: emulator, the stock King Kong LE 1.00 card with the runtime, the re-derived port and `scorefeed.cfg`
+(`C:\tmp\PAD-1389\feedjob.sh`, a stand-in server on 127.0.0.1): armed "bus 0x4d game, 0x25 ball", a game played
+to its end (slingshots and an inlane hit, the saver waited out, three drains), "game 1 over (play stopped with no new
+ball) - 1 player(s): 383880", posted (HTTP 200) and received. Tests: `tests/test_pad1389_event_map.py`.

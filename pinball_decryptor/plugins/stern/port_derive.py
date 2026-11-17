@@ -1121,6 +1121,13 @@ def _ensure(elf, tgt, game, version, say, check, cancel, workers, t0):
     usable = [r for r in refs if gen and r.generation == gen]
     key = dict(elf_sha1=tgt.sha1, revision=portgen.REVISION,
                refs={r.name: [r.entries_sha1, r.recipe_sha1] for r in usable})
+    bmaps = {}                          # PAD-1389: the event maps a draft may read ids through
+    for b in sorted({r.recipe.get("bus_bound", 0) for r in usable} - {0}):
+        p = portgen.busmap_path(b, recipes_dir())
+        if os.path.isfile(p):
+            bmaps[str(b)] = _stat_cached(p, _sha1_file)
+    if bmaps:
+        key["busmaps"] = bmaps
     port_path, side_path, draft_path = _paths(game, version)
     try:
         with open(side_path, "r", encoding="utf-8") as f:

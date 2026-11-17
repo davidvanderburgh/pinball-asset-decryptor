@@ -6,6 +6,10 @@
     port_tool.py recipe <reference game ELF> <reference port> [-o <recipe>]
                  the reference half of every draft, kept so a draft needs only the target
                  (default -o: ports/recipes/<port>.recipe.gz beside the port)
+    port_tool.py busmap <reference game ELF> [-o <event map>]
+                 PAD-1389: the event map - a ladder for every handler on the build's event
+                 bus - that keeps a reference's events on a build whose bus numbers them
+                 differently (default -o: ports/recipes/eventbus-<bus bound>.busmap.gz)
 
 A port tells the mode runtime where a game's functions and globals are in ONE build
 (MODE_SDK.md, "Ports"). This drafts one for a new build from a proven one, and says,
@@ -82,9 +86,26 @@ def recipe_main(argv):
     return 0
 
 
+def busmap_main(argv):
+    ap = argparse.ArgumentParser(prog="port_tool.py busmap",
+                                 description="the event map of one reference build (PAD-1389)")
+    ap.add_argument("ref_elf")
+    ap.add_argument("-o", "--out")
+    args = ap.parse_args(argv)
+    r = _lib.compile_busmap(_elf(args.ref_elf))
+    out = args.out or _lib.busmap_path(r["bus_bound"], os.path.join(os.path.dirname(os.path.abspath(__file__)), "ports", "recipes"))
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    _lib.save_recipe(r, out)
+    print("wrote %s (%d handlers; bus bound %d, generation %s)"
+          % (out, len(r["handlers"]), r["bus_bound"], r["generation"] or "?"))
+    return 0
+
+
 def main(argv):
     if argv[:1] == ["recipe"]:
         return recipe_main(argv[1:])
+    if argv[:1] == ["busmap"]:
+        return busmap_main(argv[1:])
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("ref_elf")
     ap.add_argument("ref_port")

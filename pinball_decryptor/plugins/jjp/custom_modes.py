@@ -59,13 +59,15 @@ FORM_GROUPS = (
     ("Lamps", ("lamps", "lamp_color", "lamp_blink")),
     ("Screen", ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
                 "panel_color", "panel")),
+    ("Balls", ("multiball", "multiball_on", "add_ball", "ball_save")),                       # PAD-1353
+    ("Coils", ("coil_start", "coil_shot", "coil_complete", "coil_hold", "coil_hold_on")),     # PAD-1353
 )
 #: the runtime's defaults (MODES.md "Mode keys"): what an empty key means
 DEFAULTS = {
     "start_count": "1", "points": "1000000", "seconds": "20", "complete": "0", "complete_points": "0",
     "lamp_color": "ffffff", "lamp_blink": "4", "title_color": "ffffff", "value_color": "ffdc00",
     "timer_color": "ffffff", "panel_color": "000000b0", "panel": "middle", "game_modes": "hold",
-    "hold_multiballs": "yes",
+    "hold_multiballs": "yes", "coil_hold_on": "shots", "coil_holds": "off",
 }
 LABELS = {
     "name": "Name", "title": "Title on the screen", "start": "Started by", "start_count": "Hits to start",
@@ -78,10 +80,15 @@ LABELS = {
     "title_color": "Title colour", "value_color": "Total colour", "timer_color": "Timer colour",
     "panel_color": "Panel colour", "panel": "Panel place",
     "game": "Game", "ingame_state": "Ball-in-play state", "background_modes": "Always-on game modes",
+    "multiball": "Multiball (balls in play, ball save s)", "multiball_on": "Multiball balls come on",
+    "add_ball": "Add a ball on (switches, times)", "ball_save": "Ball save (s)",
+    "coil_start": "Coil at the start (coil, ms)", "coil_shot": "Coil on each shot (coil, ms)",
+    "coil_complete": "Coil on completion (coil, ms)", "coil_hold": "Hold a coil (coil, ms, power of 32)",
+    "coil_hold_on": "Hold it on (shots, start or switches)", "coil_holds": "Coil holds on this title",
 }
 #: title.cfg keys the title settings show (game is fixed by the port report)
 TITLE_FORM = ("font_title", "font_value", "font_timer", "title_color", "value_color", "timer_color",
-              "panel_color", "panel", "game_modes", "hold_multiballs", "ingame_state")
+              "panel_color", "panel", "game_modes", "hold_multiballs", "ingame_state", "coil_holds")
 
 
 # ============================================================================ where things are

@@ -1,0 +1,15 @@
+# A first custom mode for Hobbit-v04.02.  Every key: tools/jjp_emu/MODES.md
+name = PAD Mode
+title = PAD MODE
+start = switch_ramp_left_made
+shots = switch_ramp_left_made switch_ramp_right_made
+points = 1000000
+seconds = 20
+complete = 5
+complete_points = 5000000
+sound_start = se_Fanfare_TABA_start
+sound_shot = se_Fanfare_SuperSpinnerJackpot
+sound_end = se_VO_H3_LTPCrowd_Cheers
+lamps = lp_gi_ramp_left_high
+lamp_color = ff2000
+lamp_blink = 4

@@ -156,6 +156,47 @@ def test_vtable_resolution_tells_folded_virtuals_apart():
                   "score": 0x88, "tick": 0xa8, "start_choreo": 0xb0, "total_choreo": 0xb8}
 
 
+def test_a_lamp_group_is_a_lamp_name_too(tmp_path):
+    # PAD-1350: `lamps` takes lp_* lamps or ls_* lamp groups (MODES.md); the checker knew only lamps
+    mm = _load("mkjjpmodes")
+    port = dict(PORT, lamp_groups=["ls_all"])
+    folder = _folder(tmp_path, {"1.mode": "start = switch_target_jam\nlamps = lp_target_jam ls_all\n"})
+    assert mm.check_modes(folder, port)[1] == []
+    (tmp_path / "1.mode").write_text("start = switch_target_jam\nlamps = ls_nope\n")
+    assert "lamps not in" in "\n".join(mm.check_modes(folder, port)[1])
+
+
+def test_every_title_that_can_run_modes_has_a_starter_that_checks_clean():
+    import json
+    mm = _load("mkjjpmodes")
+    ports = os.path.join(RIG, "modes", "ports")
+    can = []
+    for fn in sorted(os.listdir(ports)):
+        if fn.endswith(".live.json"):                   # a running game's read (PAD-1351), not a title
+            continue
+        p = json.load(open(os.path.join(ports, fn), encoding="utf-8"))
+        if not p["can_run_modes"]:
+            continue
+        label = fn[:-5]
+        can.append(label)
+        modes, problems = mm.check_modes(os.path.join(RIG, "modes", "examples", label), p)
+        assert modes and problems == [], (label, problems)
+        # the vtable slots the runtime uses, resolved the same on every title
+        assert {k: p["mode_vtable"][k] for k in ("start", "end", "score", "tick")} == \
+            {"start": 16, "end": 32, "score": 136, "tick": 168}, label
+    assert len(can) == 9, can
+
+
+def test_build_needs_no_prebuilt_runtime():
+    # PAD-1350: left out, --so means "build it against the ISO's own glibc"
+    mm = _load("mkjjpmodes")
+    src = open(os.path.join(RIG, "mkjjpmodes.py"), encoding="utf-8").read()
+    build_parser = src[src.index('sub.add_parser("build"'):src.index('sub.add_parser("inspect"')]
+    assert 'add_argument("--so", help=' in build_parser and "default=SO_DEFAULT" not in build_parser
+    assert "build_runtime(mnt + ROOT_LIBDIR" in src and mm.ROOT_LIBDIR == "/lib/x86_64-linux-gnu"
+    assert "OBJ=\"${OUT%.so}.o\"" in open(os.path.join(RIG, "buildmods.sh"), encoding="utf-8").read()
+
+
 class _MemElf:
     """A sparse address space for jjpport.hold: typeinfos and vtables at chosen addresses."""
 
@@ -215,3 +256,80 @@ def test_runtime_policies_match_the_checker():
     body = src[src.index('!strcmp(k, "game_modes")'):src.index('!strcmp(k, "hold_multiballs")')]
     assert set(re.findall(r'!strcmp\(v, "([a-z]+)"\)', body)) | {"hold"} == set(dict(mm.KEYS)["game_modes"])
     assert "m->game_modes = POLICY_HOLD; m->hold_multiballs = 1;" in src
+
+
+# ------------------------------------------------------------------ USB mode stick (PAD-1349)
+def _stick_inputs(tmp_path):
+    mods = tmp_path / "mods"
+    mods.mkdir()
+    (mods / "title.cfg").write_text("game = GunsNRoses\n")
+    (mods / "1_jam.mode").write_text("name = Jam Session\nstart = switch_target_jam\n")
+    so = tmp_path / "jjpmodes.so"
+    so.write_bytes(b"\x7fELF" + b"\0" * 60)
+    return str(mods), str(so)
+
+
+def test_stick_writes_runme_payload_and_sums(tmp_path):
+    import hashlib
+    mm = _load("mkjjpmodes")
+    mods, so = _stick_inputs(tmp_path)
+    out = tmp_path / "usb"
+    assert mm.main(["stick", "--out", str(out), "--modes", mods, "--so", so]) == 0
+    hot = out / "hotfix"
+    runme = (hot / "runme.sh").read_bytes()
+    assert b"\r" not in runme and b"@" not in runme.replace(b"@WRITTEN", b"")   # LF, every placeholder filled
+    text = runme.decode()
+    assert "ACTION=install" in text and "GAME=GunsNRoses" in text and "Jam Session" in text
+    assert "'[ -r $JJPEDIR/scripts/padmodes.sh ] && . $JJPEDIR/scripts/padmodes.sh'" in text   # single-quoted
+    sums = (hot / "padmodes.sha256").read_text().splitlines()
+    assert len(sums) == 4                                      # so, title.cfg, the mode, build.json
+    for ln in sums:
+        h, rel = ln.split("  ", 1)
+        assert hashlib.sha256((hot / rel).read_bytes()).hexdigest() == h
+    assert (hot / "padmodes.sh").read_text() == mm.PADMODES_SH
+    assert "Plus, Minus, Plus, Minus" in (out / "PADMODES_README.txt").read_text()
+
+
+def test_stick_refuses_without_a_game_or_over_an_old_stick(tmp_path):
+    mm = _load("mkjjpmodes")
+    mods, so = _stick_inputs(tmp_path)
+    out = str(tmp_path / "usb")
+    assert mm.main(["stick", "--out", out, "--action", "off"]) == 2          # which game?
+    assert mm.main(["stick", "--out", out, "--action", "off", "--game", "Wonka"]) == 0
+    assert mm.main(["stick", "--out", out, "--action", "on", "--game", "Wonka"]) == 2   # exists
+    assert mm.main(["stick", "--out", out, "--action", "on", "--game", "Wonka", "--force"]) == 0
+    assert mm.main(["stick", "--out", out, "--action", "on", "--game", "W;rm"]) == 2
+
+
+@pytest.mark.skipif(os.name == "nt" or not __import__("shutil").which("dash")
+                    or not __import__("shutil").which("sha256sum"), reason="needs dash + sha256sum")
+def test_stick_runme_installs_turns_off_on_and_removes_like_the_python_hook(tmp_path):
+    import subprocess
+    mm = _load("mkjjpmodes")
+    mods, so = _stick_inputs(tmp_path)
+    j = tmp_path / "J"
+    (j / "scripts").mkdir(parents=True)
+    (j / "GunsNRoses").mkdir()
+    (j / "GunsNRoses" / "game").write_text("")
+    (j / "scripts" / "rungame.sh").write_text(RUNGAME)
+    off = tmp_path / "perm" / "padmodes.off"
+    env = dict(os.environ, JJPEDIR=str(j), PAD_STICK_OFF=str(off), PAD_STICK_LOG=str(tmp_path / "log"))
+
+    def run(*args):
+        out = tmp_path / "usb"
+        assert mm.main(["stick", "--out", str(out), "--force"] + list(args)) == 0
+        return subprocess.run(["dash", str(out / "hotfix" / "runme.sh")], env=env).returncode
+
+    off.parent.mkdir()
+    off.write_text("")
+    assert run("--modes", mods, "--so", so) == 0
+    assert (j / "scripts" / "rungame.sh").read_text() == mm.hook_rungame_modes(RUNGAME)
+    assert (j / "padmodes" / "modes" / "1_jam.mode").exists() and not off.exists()
+    assert run("--modes", mods, "--so", so) == 0                # again: hooked once
+    assert (j / "scripts" / "rungame.sh").read_text() == mm.hook_rungame_modes(RUNGAME)
+    assert run("--action", "off", "--game", "GunsNRoses") == 0 and off.exists()
+    assert run("--action", "on", "--game", "GunsNRoses") == 0 and not off.exists()
+    assert run("--action", "off", "--game", "Wonka") == 1 and not off.exists()   # another title: nothing
+    assert run("--action", "remove", "--game", "GunsNRoses") == 0
+    assert (j / "scripts" / "rungame.sh").read_text() == RUNGAME
+    assert not (j / "padmodes").exists() and not (j / "scripts" / "padmodes.sh").exists()

@@ -480,6 +480,23 @@ def images_conf_count(text):
     return n
 
 
+def images_conf_testcard(text):
+    """Is this images.conf a PAD TEST CARD's (PAD-1279)? mkmulticard.py writes
+    `testcard=on` for one, and conf.c reads the key the same way as every other:
+    trimmed, comments dropped, split at the first '='. A test card names ONE
+    image (the stock tree it was made from, which it never boots) and the
+    selector stays in its TEST CARD menu until power-off, so the image count
+    alone would call it "no menu"."""
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        key, sep, val = s.partition("=")
+        if sep and key.strip() == "testcard":
+            return val.strip().lower() in ("on", "1", "yes", "true")
+    return False
+
+
 def multiboot(path):
     """Does this card boot into a MENU? ``(state, why, images)`` where state
     is 'yes', 'no' or 'unknown' - the one definition, asked by the rig
@@ -523,7 +540,11 @@ def multiboot(path):
         return ("no", "no %s in the rootfs" % SELECTOR_BIN, 0)
     if "codeselect" not in names:
         return ("no", "no %s in the rootfs" % SELECTOR_BIN, 0)
-    n = images_conf_count(_cat(path, off, SELECTOR_CONF))
+    conf = _cat(path, off, SELECTOR_CONF)
+    n = images_conf_count(conf)
+    if images_conf_testcard(conf):
+        # PAD-1279: the menu IS the card - it boots no game at all
+        return ("yes", "a PAD test card: the selector's TEST CARD menu, no game", n)
     if n >= 2:
         return ("yes", "selector installed, %d images in images.conf" % n, n)
     if n == 0:
@@ -634,7 +655,7 @@ def _ordinal(n):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("image")
-    for flag in ("rootfs", "games", "fat", "list-games", "multiboot", "spike3"):
+    for flag in ("rootfs", "games", "fat", "list-games", "multiboot", "spike3", "testcard"):
         ap.add_argument("--" + flag, action="store_true")
     ap.add_argument("--part", type=int, metavar="N",
                     help="byte offset of partition N (kernel numbering)")
@@ -654,6 +675,19 @@ def main():
         state, why, _n = multiboot(a.image)
         print("multiboot: %s - %s" % (state, why))
         return {"yes": 0, "no": 1}.get(state, 2)
+
+    # ★ PAD-1279 - "IS THIS A PAD TEST CARD": the selector installed and its
+    # images.conf says testcard=on. One line; exit 0 = yes, 1 = no / cannot tell.
+    if a.testcard:
+        yes = False
+        try:
+            found = identify(a.image) if os.path.exists(a.image) else {}
+        except (SystemExit, OSError):
+            found = {}
+        if "rootfs" in found:
+            yes = images_conf_testcard(_cat(a.image, found["rootfs"], SELECTOR_CONF))
+        print("testcard: %s" % ("yes" if yes else "no"))
+        return 0 if yes else 1
 
     # ★ "IS THIS A SPIKE 3 CARD" - asked above the existence check for the same
     # reason as --multiboot: a missing file is an answer (no, exit 1), not a

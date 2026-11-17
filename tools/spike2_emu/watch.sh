@@ -230,6 +230,19 @@ pad_ensure_bridge || exit 1
 # shrug. Exported, because run_game.sh has the same gates.
 pad_select_wanted "${PAD_CARD:-}" && PAD_SELECT=1 || PAD_SELECT=0
 export PAD_SELECT PAD_SELECT_AUTO
+# ★ PAD-1279: A PAD TEST CARD IS ITS MENU. It carries no game: its selector
+# stays in the TEST CARD menu until power-off, and the files it shows sit on
+# its games partition under testcard/. cardmount.sh binds that as the title,
+# run_game.sh hands the selector the card's own images.conf as it is, and the
+# run lasts as long as the menu does. PAD_SELECT=0 cannot skip it: there is
+# nothing else on the card to boot.
+PAD_TESTCARD=0
+if [ -n "${PAD_CARD:-}" ] && python3 "$RIG/parts.py" --testcard "$PAD_CARD" >/dev/null 2>&1; then
+    PAD_TESTCARD=1
+    PAD_SELECT=1
+    echo "[watch] a PAD test card: its TEST CARD menu in the game window, no game (close the window to end)"
+fi
+export PAD_TESTCARD PAD_SELECT
 SEL_WHY=${PAD_SELECT_WHY:-}   # `set -u` is on; the function always sets it
 # WHAT IT DECIDED AND WHY, in one line, because "the menu did not come up" and
 # "the menu came up and I did not want it" are both answered here. The words
@@ -468,12 +481,12 @@ if [ -n "${PAD_CARD:-}" ]; then
     # go through pad_select_off: a menu that cannot be mounted is no menu,
     # never a run that will not start. A `break` and not an exit, because the
     # partitions already mounted are this run's to tear down.
-    if [ "${PAD_SELECT:-}" = 1 ]; then
+    if [ "${PAD_SELECT:-}" = 1 ] && [ "$PAD_TESTCARD" != 1 ]; then
         SEL_PARTS=$(python3 "$S/parts.py" --list-games "$PAD_CARD" 2>/dev/null | awk '{print $1}')
         [ -n "$SEL_PARTS" ] \
             || pad_select_off "no games partition on $PAD_CARD" || exit 1
     fi
-    if [ "${PAD_SELECT:-}" = 1 ]; then
+    if [ "${PAD_SELECT:-}" = 1 ] && [ "$PAD_TESTCARD" != 1 ]; then
         _first=1
         for _p in $SEL_PARTS; do
             if [ -n "$_first" ]; then _first=""; continue; fi
@@ -492,7 +505,7 @@ if [ -n "${PAD_CARD:-}" ]; then
         done
         unset _first _p _out _path
     fi
-    if [ "${PAD_SELECT:-}" = 1 ]; then
+    if [ "${PAD_SELECT:-}" = 1 ] && [ "$PAD_TESTCARD" != 1 ]; then
         echo "[watch] boot selector: games partitions on this card:" \
              "$(printf 'p%s ' $SEL_PARTS)"
     fi

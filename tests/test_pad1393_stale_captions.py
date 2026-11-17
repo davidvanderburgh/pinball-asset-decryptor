@@ -228,6 +228,8 @@ def test_an_unticked_music_mode_leaves_the_music_modes_and_keeps_the_other_sound
     from pinball_decryptor.core import staged_changes as SC
     from pinball_decryptor.plugins.stern import engine as E, service_menu as SM, sound_modes as SMo
     from pinball_decryptor.plugins.stern import mode_project as MP
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    monkeypatch.setattr(MW, "host_refusal", lambda: "")
     monkeypatch.setattr(SMo, "project_title", lambda project, probe=False: MP.profile("james_bond_pro_1_06"))
     p = str(tmp_path)
     SC.save(p, {"sound_modes": {"names": ["Standard", "Orchestral"],

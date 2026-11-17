@@ -607,7 +607,11 @@ class JjpModesMixin:
             except OSError:
                 rt = ""
         # a stick's file system matters; a folder to copy to one (on C:, say) is not a stick
-        on_stick = bool(path) and os.path.splitdrive(os.path.abspath(path))[0].upper() in             [os.path.splitdrive(d)[0].upper() for d in drives]
+        target = os.path.normcase(os.path.abspath(path)) if path else ""
+        roots = [os.path.normcase(os.path.abspath(d)) for d in drives]
+        on_stick = bool(target) and any(
+            target == root or target.startswith(root.rstrip(os.sep) + os.sep)
+            for root in roots)
         s.update({"path": path, "drives": drives, "fs": CM.stick_filesystem(path) if on_stick else "",
                   "action": action if action in dict(CM.STICK_ACTIONS) else "install",
                   "actions": [{"value": k, "label": v} for k, v in CM.STICK_ACTIONS],

@@ -18,7 +18,7 @@ def _symlink(link, target):
         # Windows refuses symlinks without Developer Mode or elevation.
         pytest.skip('this system cannot create symlinks')
 
-TOOLS = '/opt/homebrew/opt/e2fsprogs/sbin'
+TOOLS = os.environ.get('PAD_E2FSPROGS_DIR', '/opt/homebrew/opt/e2fsprogs/sbin')
 
 
 @pytest.fixture

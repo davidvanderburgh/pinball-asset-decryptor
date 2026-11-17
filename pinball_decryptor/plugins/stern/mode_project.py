@@ -2886,7 +2886,26 @@ SPARE_IO_PROVEN = frozenset({
     # closing came as the mode's shot in a game and the spare output 1:1 went out on the bus; the game never drove it
     "aerosmith_le-1.15", "avengers_infinity_le-1.09", "batman-1.13", "guardians_le-1.14", "iron_maiden_le-1.16",
     "mando_le-1.44", "rush_le-1.18", "stranger_things_le-1.12", "sword_of_rage_le-1.18", "turtles_pro-1.58",
+    # PAD-1329, Spike 3 (64-bit: the switch struct's entries and node blocks of their own, the fire and OFF read off each
+    # program; tools/spike3_emu/proofs PROOF=spare, spare_sweep_mode.c, rig slot 97, hidden, muted, 2026-11-16):
+    "star_wars_elg-1.10/spike3",   # the struct checked out (69 switches), spare input 8:37 closed on the board came as
+                                   # the mode's shot twice; no spare output: the game uses all nine of its one driver board's
+    "fallout_le-0.82/spike3",      # struct 110 switches; input 8:15 -> shot twice; 9:1 on the bus as n9 40 01 c8 03 (200,
+                                   # 30 ms), a held 200/30 + 60/3000 command (.. 3c 2c 01), its OFF 1 s in (n9 4d 01);
+                                   # board 0's records (no node of the bus) refused: the fire answered 0
+    # the same run on rig slots 97-99: each struct checked out, its spare input closed twice came as the mode's shot
+    # twice, and the first spare output of every driver board went out as the pulse, the held command and its OFF;
+    # the game sent none of them anything
+    "pokemon_le-0.82/spike3",          # 98 switches; 8:13; outputs 1:1 9:1 10:0 13:1
+    "star_wars_2025_le-0.96/spike3",   # 87 switches; 9:15; outputs 1:1 8:6 9:0 13:0
+    "star_wars_2025_pro-0.84/spike3",  # 84 switches; 9:13; outputs 1:1 8:6 9:5
+    "transformers_mtmte_le-0.96/spike3",   # 96 switches; 9:14; outputs 1:1 9:0 13:1
+    "walking_dead_remastered_le-0.92/spike3",   # 90 switches; 8:12; output 1:1
 })
+
+#: PAD-1329: proven builds with no spare driver output at all (every output of every driver board is the game's), so a
+#: mode is never offered one: Star Wars ELG's Spike 3 program has one driver board (node 8) and uses outputs 0-8
+SPARE_NO_OUTPUTS = frozenset({"star_wars_elg-1.10/spike3"})
 
 
 def _spare(port, key):
@@ -2896,9 +2915,10 @@ def _spare(port, key):
     if not port or key not in SPARE_IO_PROVEN:
         return ()
     out = ()
-    if port["data"].get("sw_struct") or (port["data"].get("sw_listen") and port["data"].get("sw_boards")):
-        out += ("in",)                                   # the newer framework's struct, or the older one's listeners
-    if "coil_frame" in port["site"] and (
+    if (port["data"].get("sw_struct") and (not key.endswith("/spike3") or port["data"].get("sw_blocks"))) or (
+            port["data"].get("sw_listen") and port["data"].get("sw_boards")):
+        out += ("in",)                       # the struct (Spike 3's node blocks too, PAD-1329), or the older listeners
+    if key not in SPARE_NO_OUTPUTS and "coil_frame" in port["site"] and (
             ("coil_off" in port["site"] and all(port["data"].get(n) for n in ("coil_table", "coil_count")))
             or ("coil_used" in port["site"] and not port["data"].get("coil_table"))):   # the older framework
         out += ("out",)

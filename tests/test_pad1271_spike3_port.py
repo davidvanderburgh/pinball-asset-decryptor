@@ -187,6 +187,7 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                           "challenge_menu", "challenge_menu_pick",                  # PAD-1327
                           "challenge_scores", "game_scores", "challenge_score_entry", "challenge_scores_gate",
                           "challenge_pages_0", "challenge_pages_1", "audit_add",  # PAD-1327: records
+                          "coil_frame", "coil_off",                                 # PAD-1329: spare outputs
                           } | SOUND_SITES | LIGHT_SITES | SCENE_SITES | PLAY_SITES
     for t in sites.values():
         t = t[:t.index("#")] if "#" in t else t                 # a show's line ends in a note (PAD-1283)
@@ -204,7 +205,8 @@ def test_elg_spike3_port_carries_the_core_and_only_proven_entries():
                     "resource_manager": "0x00712bf8", "typeinfo_resource": "0x0068b850",  # the scene lookup's: PAD-1284
                     "typeinfo_scene_player": "0x0068fb48", **PLAY_DATA,
                     "coop_player": "0x006b1a1a", "coop_players": "0x00792200",      # PAD-1326: co-op play
-                    "message_table": "0x006c96e8"}
+                    "message_table": "0x006c96e8",
+                    "sw_struct": "0x007477e0", "sw_blocks": "0x00747a78"}              # PAD-1329: spare inputs
     values = {t[1]: t[2] for t in _lines("value") if not t[1].startswith(("sound_", "countdown_"))
               and t[1] not in LIGHT_VALUES and not t[1].startswith("show_secs_") and t[1] not in SCENE_VALUES
               and t[1] not in PLAY_VALUES and not t[1].startswith(("switch_", "challenge_"))}   # PAD-1322 / 1327

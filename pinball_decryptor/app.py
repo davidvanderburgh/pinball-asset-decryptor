@@ -69,6 +69,8 @@ PROJECT_FIELDS = (
     ("modpack_dst", "transfer_dst_var", "path", ""),
     ("modpack_oldstock", "transfer_oldstock_var", "path", ""),
     ("modpack_newimg", "transfer_newimg_var", "path", ""),
+    ("modpack_port_imgs", "port_imgs_var", "path", ""),
+    ("modpack_port_out", "port_out_var", "path", ""),
 )
 
 #: Fields anchors have carried since they first existed: a project file
@@ -496,6 +498,7 @@ class App:
             on_import=self._start_import,
             on_transfer_mods=self._start_transfer_mods,
             on_port_mods=self._start_port_mods,
+            on_whats_new=self._start_whats_new,
             on_theme_change=self._on_theme_change,
             initial_theme=saved_theme,
             on_check_updates=self._check_for_update_now,
@@ -4267,21 +4270,10 @@ class App:
                     "the wrong folder the port will build unmodified "
                     "cards.\n\nContinue with this folder?\n\n%s" % project):
                 return
-        raws = filedialog.askopenfilenames(
-            title="Stock card image(s) to port onto — pick one or several",
-            filetypes=[("Card images", "*.raw *.img *.bin"),
-                       ("All files", "*.*")])
-        if not raws:
+        got = self._port_targets()
+        if not got:
             return
-        raws = [os.path.normpath(r) for r in raws]
-        out_dir = filedialog.askdirectory(
-            title="Folder for the built card image(s) — the per-card "
-                  "extracts land here too",
-            initialdir=((self.window.write_output_var.get() or "").strip()
-                        or os.path.dirname(raws[0])))
-        if not out_dir:
-            return
-        out_dir = os.path.normpath(out_dir)
+        raws, out_dir = got
         from .core import mod_port
         jobs = mod_port.plan_ports(project, raws, out_dir)
         lines = []
@@ -4306,6 +4298,7 @@ class App:
         self._save_settings()
         self._active_mode = "write"
         self._port_active = True
+        self._port_words = ("Port", "Ported")
         self._cancel_requested = False
         self._chain_flash_after_build = None
         self._staging_failures = []
@@ -4314,18 +4307,89 @@ class App:
         threading.Thread(target=self._run_port_chain, args=(project, jobs),
                          daemon=True).start()
 
-    def _run_port_chain(self, project, jobs):
-        """Worker-thread body of the one-click port: bind the app's extract /
-        transfer / stage / write services and hand the sequencing to
-        :func:`core.mod_port.run_ports`.  Every sub-pipeline is installed as
-        ``self.pipeline`` while it runs, so the ordinary Stop button cancels
-        the live step and the chain stops at the next boundary."""
-        from .core import mod_port, mod_transfer
+    def _port_targets(self):
+        """``(raws, out_dir)`` for the one-click port and What's new (PAD-1388):
+        the Mod Pack form's "New card image(s)" and "Build into" fields, and
+        the pickers only for what they leave empty.  ``None`` when cancelled
+        or a picked image is missing."""
+        w = self.window
+        imgs_var = getattr(w, "port_imgs_var", None)
+        out_var = getattr(w, "port_out_var", None)
+        typed = ((imgs_var.get() if imgs_var is not None else "") or "")
+        raws = [os.path.normpath(r.strip()) for r in typed.split(";")
+                if r.strip()]
+        if not raws:
+            raws = filedialog.askopenfilenames(
+                title="New card image(s) to port onto — pick one or several",
+                filetypes=[("Card images", "*.raw *.img *.bin"),
+                           ("All files", "*.*")])
+            if not raws:
+                return None
+            raws = [os.path.normpath(r) for r in raws]
+            if imgs_var is not None:
+                imgs_var.set("; ".join(raws))
+        gone = [r for r in raws if not os.path.isfile(r)]
+        if gone:
+            messagebox.showwarning(
+                "Card image not found",
+                "This card image isn't there:\n%s" % "\n".join(gone))
+            return None
+        out_dir = ((out_var.get() if out_var is not None else "") or "").strip()
+        if not out_dir:
+            out_dir = filedialog.askdirectory(
+                title="Folder for the built card image(s) — each card's "
+                      "extract lands here too",
+                initialdir=((self.window.write_output_var.get() or "").strip()
+                            or os.path.dirname(raws[0])))
+            if not out_dir:
+                return None
+            if out_var is not None:
+                out_var.set(os.path.normpath(out_dir))
+        return raws, os.path.normpath(out_dir)
 
+    def _start_whats_new(self):
+        """What's new in this version? (PAD-1388): extract each new card into
+        the folder the port itself uses (so a port after it reuses that
+        extract) and list what the new version adds, changes and drops
+        against this project's version, plus whether this project's modes
+        can run on it.  Nothing is transferred or built."""
+        if not getattr(self._current_mfr.capabilities, "mod_transfer", False):
+            return
+        project = (self.window.write_assets_var.get() or "").strip()
+        if not project or not os.path.isdir(project):
+            messagebox.showwarning(
+                "No project folder",
+                "Open the project that holds your mods first (the Extract "
+                "tab's project folder): the new version is compared with the "
+                "version it was extracted from.")
+            return
+        got = self._port_targets()
+        if not got:
+            return
+        raws, out_dir = got
+        from .core import mod_port
+        jobs = mod_port.plan_ports(os.path.normpath(project), raws, out_dir)
+        self._save_settings()
+        self._active_mode = "write"
+        self._port_active = True
+        self._port_words = ("What's new", "Checked")
+        self._cancel_requested = False
+        self._chain_flash_after_build = None
+        self._staging_failures = []
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+        threading.Thread(target=self._run_whats_new,
+                         args=(os.path.normpath(project), jobs),
+                         daemon=True).start()
+
+    def _port_sub_runner(self):
+        """``(log_cb, progress_cb, extract, run_sub)`` for a port worker:
+        *extract(raw, ws)* runs the plugin's full extract as ``self.pipeline``
+        (so Stop cancels it) and raises when it fails; *run_sub* runs any
+        sub-pipeline the same way."""
         log_cb = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
         progress_cb = (lambda c, t, d="":
                        self.msg_queue.put(ProgressMsg(c, t, d)))
-        phase_cb = lambda i: None
         box = {}
 
         def step_done(success, summary):
@@ -4342,12 +4406,111 @@ class App:
         def extract(raw, ws):
             os.makedirs(ws, exist_ok=True)
             p = self._current_mfr.make_extract_pipeline(
-                raw, ws, log_cb, phase_cb, progress_cb, step_done)
+                raw, ws, log_cb, lambda i: None, progress_cb, step_done)
             if hasattr(p, "set_log_line_cb"):
                 p.set_log_line_cb(self._post_log_line)
             run_sub(p)
 
+        run_sub.step_done = step_done
+        return log_cb, progress_cb, extract, run_sub
+
+    def _report_news(self, project, job, log_cb, progress_cb=None):
+        """Compare *job*'s new extract with *project*, log it, write the full
+        list beside the builds and show it on the Mod Pack tab.  Never
+        raises: the port goes on without it."""
+        from .core import version_news
+        try:
+            log_cb("Comparing %s with this project's version..."
+                   % os.path.basename(job["raw"]), "info")
+            news = version_news.compare(project, job["workspace"])
+            for level, line in version_news.summary_lines(news):
+                log_cb(line, level)
+            page = version_news.for_page(news)
+            stem = os.path.splitext(os.path.basename(job["raw"]))[0]
+            report = os.path.join(os.path.dirname(job["workspace"]),
+                                  stem + version_news.REPORT_SUFFIX)
+            try:
+                version_news.write_report(news, report)
+                log_cb("The full list: %s" % report, "info")
+                page["report"] = report
+            except OSError as e:
+                log_cb("Couldn't write the list (%s)." % e, "warning")
+            page["card"] = os.path.basename(job["raw"])
+            modes = getattr(self._current_mfr, "mode_news", None)
+            if modes is not None:
+                try:
+                    page["modes"] = modes(
+                        job["raw"], project,
+                        progress=(lambda f, s="": progress_cb(
+                            int(f * 100), 100, s or "Modes"))
+                        if progress_cb else None,
+                        cancel=lambda: self._cancel_requested) or ""
+                except Exception as e:              # noqa: BLE001
+                    page["modes"] = ""
+                    log_cb("Couldn't check modes on this card: %s" % e,
+                           "warning")
+                if page["modes"]:
+                    log_cb("Modes: " + page["modes"], "info")
+            show = getattr(self.window, "_show_news", None)
+            if show is not None:
+                self.msg_queue.put(UiCallMsg(lambda: show(page)))
+            return news
+        except Exception as e:                      # noqa: BLE001
+            log.exception("what's new failed")
+            log_cb("Couldn't compare the versions: %s" % e, "warning")
+            return None
+
+    def _run_whats_new(self, project, jobs):
+        """Worker body of :meth:`_start_whats_new`."""
+        from .core import mod_port, version_news
+        log_cb, progress_cb, extract, _run_sub = self._port_sub_runner()
+        heads = []
+        clear = getattr(self.window, "_show_news", None)
+        if clear is not None:
+            self.msg_queue.put(UiCallMsg(lambda: clear(None)))
+        for i, job in enumerate(jobs):
+            if self._cancel_requested:
+                break
+            name = os.path.basename(job["raw"])
+            log_cb("=== What's new %d of %d: %s ===" % (i + 1, len(jobs), name),
+                   "info")
+            try:
+                if mod_port.has_baseline(job["workspace"]):
+                    log_cb("Reusing the finished extract at %s."
+                           % job["workspace"], "info")
+                else:
+                    log_cb("Extracting %s first (once: Port + build reuses "
+                           "it)." % name, "info")
+                    extract(job["raw"], job["workspace"])
+            except Exception as e:                  # noqa: BLE001
+                if self._cancel_requested:
+                    break
+                heads.append("%s: couldn't extract it - %s" % (name, e))
+                continue
+            news = self._report_news(project, job, log_cb, progress_cb)
+            heads.append("%s: %s" % (name, version_news.headline(news))
+                         if news else "%s: couldn't compare" % name)
+        ok = len(heads) == len(jobs) and not any(
+            "couldn't" in h for h in heads)
+        self.msg_queue.put(DoneMsg(ok, "\n".join(heads) or "Canceled"))
+
+    def _run_port_chain(self, project, jobs):
+        """Worker-thread body of the one-click port: bind the app's extract /
+        transfer / stage / write services and hand the sequencing to
+        :func:`core.mod_port.run_ports`.  Every sub-pipeline is installed as
+        ``self.pipeline`` while it runs, so the ordinary Stop button cancels
+        the live step and the chain stops at the next boundary."""
+        from .core import mod_port, mod_transfer
+
+        log_cb, progress_cb, extract, run_sub = self._port_sub_runner()
+        step_done = run_sub.step_done
+        phase_cb = lambda i: None
+        by_ws = {job["workspace"]: job for job in jobs}
+
         def transfer(ws):
+            # What the new version adds, before the mods go onto it (PAD-1388)
+            if ws in by_ws:
+                self._report_news(project, by_ws[ws], log_cb, progress_cb)
             plan = mod_transfer.plan_transfer(project, ws, log_cb=log_cb)
             for level, line in mod_transfer.plan_detail_lines(plan):
                 log_cb(line, level)
@@ -5223,14 +5386,19 @@ class App:
                 self._cancel_requested = False
                 self.window.set_status("Canceled")
                 self.window.append_log(summary, "info")
-            elif success:
-                self.window.set_status("Ported")
-                self.window.append_log(summary, "success")
-                messagebox.showinfo("Port Complete", summary)
             else:
-                self.window.set_status("Port finished with problems")
-                self.window.append_log(summary, "error")
-                messagebox.showwarning("Port finished with problems", summary)
+                verb, done = getattr(self, "_port_words", ("Port", "Ported"))
+                if success:
+                    self.window.set_status(done)
+                    self.window.append_log(summary, "success")
+                    messagebox.showinfo(
+                        "Port Complete" if verb == "Port"
+                        else "%s: done" % verb, summary)
+                else:
+                    self.window.set_status("%s finished with problems" % verb)
+                    self.window.append_log(summary, "error")
+                    messagebox.showwarning("%s finished with problems" % verb,
+                                           summary)
             return
 
         # Revert runs reuse the write run-state but have their own messaging +

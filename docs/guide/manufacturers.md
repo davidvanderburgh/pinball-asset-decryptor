@@ -321,7 +321,8 @@ decode and re-encode them bit-exact.
 - **Rebuilds are quick:** a second build onto the same image updates it in
   place, and unchanged sounds come from a cache.
 - **Port + build** puts your mods onto other stock cards (a new version,
-  the other model) and builds each, in one click.
+  the other model) and builds each, in one click. **What's new in this
+  version?** lists what a new card adds before you build.
 
 ### Reading cards
 

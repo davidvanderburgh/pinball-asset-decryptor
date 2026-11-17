@@ -12980,5 +12980,16 @@
 "Under {} GB plus your videos, built in seconds. Write it to an SD card like any card image.": "Unter {} GB plus Ihre Videos, in Sekunden erstellt. Wie jedes Kartenabbild auf eine SD-Karte schreiben.",
 "What it did": "Was es getan hat",
 "items. A file you add goes as it is; one ticked in a tab carries its color profile.": "Einträge. Eine hinzugefügte Datei kommt unverändert darauf; eine in einem Tab angekreuzte trägt ihr Farbprofil.",
-"no card image picked yet": "noch kein Kartenabbild gewählt"
+"no card image picked yet": "noch kein Kartenabbild gewählt",
+"On Mod Pack, pick the new stock card image: a new version, or the other model. No need to extract it first.": "Wählen Sie auf Mod Pack das neue Original-Kartenabbild: eine neue Version oder das andere Modell. Sie müssen es nicht zuerst extrahieren.",
+"Press What's new in this version? to see what it adds that you may want to replace, then Port + build.": "Drücken Sie „Was ist neu in dieser Version?“, um zu sehen, was sie Neues bringt, das Sie vielleicht ersetzen möchten, dann „Portieren + Erstellen“.",
+"New game version, or the other model (Pro ↔ Premium): pick the new card image and build": "Neue Spielversion oder das andere Modell (Pro ↔ Premium): neues Kartenabbild wählen und erstellen",
+"No extracting by hand: each card is extracted for you (once, and reused), checked for what it adds, and built with your mods.": "Kein Extrahieren von Hand: Jede Karte wird für Sie extrahiert (einmal, und wiederverwendet), auf Neues geprüft und mit Ihren Mods erstellt.",
+"Your project (has your mods):": "Ihr Projekt (mit Ihren Mods):",
+"New card image(s) (.raw):": "Neue(s) Kartenabbild(er) (.raw):",
+"Build into folder:": "Erstellen in Ordner:",
+"the new stock card image, straight from the manufacturer": "das neue Original-Kartenabbild, direkt vom Hersteller",
+"defaults to the new card's folder": "standardmäßig der Ordner der neuen Karte",
+"What's new in this version?": "Was ist neu in dieser Version?",
+"Open the full list": "Vollständige Liste öffnen"
 }

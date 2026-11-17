@@ -12980,5 +12980,16 @@
 "Under {} GB plus your videos, built in seconds. Write it to an SD card like any card image.": "Moins de {} Go plus vos vidéos, créée en quelques secondes. Écrivez-la sur une carte SD comme toute image.",
 "What it did": "Ce qui a été fait",
 "items. A file you add goes as it is; one ticked in a tab carries its color profile.": "éléments. Un fichier ajouté va tel quel ; un élément coché dans un onglet garde son profil de couleur.",
-"no card image picked yet": "aucune image choisie pour l'instant"
+"no card image picked yet": "aucune image choisie pour l'instant",
+"On Mod Pack, pick the new stock card image: a new version, or the other model. No need to extract it first.": "Dans Mod Pack, choisissez la nouvelle image de carte d'origine : une nouvelle version ou l'autre modèle. Inutile de l'extraire d'abord.",
+"Press What's new in this version? to see what it adds that you may want to replace, then Port + build.": "Appuyez sur « Quoi de neuf dans cette version ? » pour voir ce qu'elle ajoute et que vous voudrez peut-être remplacer, puis sur « Porter + générer ».",
+"New game version, or the other model (Pro ↔ Premium): pick the new card image and build": "Nouvelle version du jeu ou l'autre modèle (Pro ↔ Premium) : choisissez la nouvelle image de carte et construisez",
+"No extracting by hand: each card is extracted for you (once, and reused), checked for what it adds, and built with your mods.": "Pas d'extraction à la main : chaque carte est extraite pour vous (une fois, puis réutilisée), vérifiée pour ce qu'elle ajoute, et construite avec vos mods.",
+"Your project (has your mods):": "Votre projet (avec vos mods) :",
+"New card image(s) (.raw):": "Nouvelle(s) image(s) de carte (.raw) :",
+"Build into folder:": "Construire dans le dossier :",
+"the new stock card image, straight from the manufacturer": "la nouvelle image de carte d'origine, telle que fournie par le fabricant",
+"defaults to the new card's folder": "par défaut, le dossier de la nouvelle carte",
+"What's new in this version?": "Quoi de neuf dans cette version ?",
+"Open the full list": "Ouvrir la liste complète"
 }

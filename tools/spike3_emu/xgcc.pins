@@ -9,6 +9,12 @@
 # (spike3 rootfs, measured). Only what a -nostdlib shared object needs: no sanitizers, no
 # libgomp/libatomic/libgcc_s (a mode or shim never links them).
 #
+# The last five are host libraries the kit's programs load (PAD-1345): binutils 2.42's
+# libsframe.so.1, gold's libjansson.so.4 and cc1's libisl.so.23, libmpc.so.3 and libmpfr.so.6.
+# The runtime has them, but a newer Linux need not: Ubuntu 26.04 (GitHub's ubuntu-latest from
+# 2026-11) has no libsframe.so.1 at all, so `as` refused to start and no code mode built there.
+# They unpack into root/usr/lib/x86_64-linux-gnu, the folder the wrappers point the loader at.
+#
 # Changing a line changes the kit's stamp, so every machine unpacks the new set once.
 snapshot https://snapshot.ubuntu.com/ubuntu/20260801T000000Z
 6bb25a05c50681e240b453f6572d8066f2358dee984d0ff1dbcd08852642adf2 3710688 pool/main/b/binutils/binutils-aarch64-linux-gnu_2.42-4ubuntu2.10_amd64.deb
@@ -19,3 +25,8 @@ eda9d79e18170fd46ee0ed62aa391f52bfe8c1a336d53162f2e1c0a675af548f 2616044 pool/ma
 04c6956de42669a53e620ad04a32475ea0bd4325808c227bf5ba52498f0d3f90 1628660 pool/main/c/cross-toolchain-base/libc6-dev-arm64-cross_2.39-0ubuntu8cross1_all.deb
 76547cb8a4d7f057e23dcade45a17fc0f3d5c2fa0d3ff125bca56f7c4ecd7a07 1197434 pool/main/c/cross-toolchain-base/libc6-arm64-cross_2.39-0ubuntu8cross1_all.deb
 6a5a00b8ba8de66862e05493def87a5cbbb23b949601e45a5e3cbde56505cb6b 1374680 pool/main/c/cross-toolchain-base/linux-libc-dev-arm64-cross_6.8.0-25.25cross1_all.deb
+72093fb456864db55f1352bfa5e952a94f7abaff64e71dff1fbf001db1984564 15724 pool/main/b/binutils/libsframe1_2.42-4ubuntu2.10_amd64.deb
+0cf79113f5d193ce9af2be2ff4b2c3b30dd4e55a0b6c47f7d28f6c849ff3aa60 32830 pool/main/j/jansson/libjansson4_2.14-2build2_amd64.deb
+4e040926e50fb961fae9bf95660189d468336a4a17bc321872c434fc8f777e7f 679812 pool/main/i/isl/libisl23_0.26-3build1.1_amd64.deb
+cebe6098bb3d66fdacac9dc6fe406a651216d9c00f27c3f9c159d15d96cdf864 54636 pool/main/m/mpclib3/libmpc3_1.3.1-1build1.1_amd64.deb
+aebc1c8b69a1f98bb43dfc268daecd181116dbf40b13ee4e822eb4bdd52b493a 353020 pool/main/m/mpfr4/libmpfr6_4.2.1-1build1.1_amd64.deb

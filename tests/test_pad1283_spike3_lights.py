@@ -191,5 +191,5 @@ def test_the_spike3_build_offers_inserts_and_the_games_shows():
     row = [r for r in H.modes_games_rows() if r[0] == "Star Wars ELG 1.10 (Spike 3)"]
     assert row == [("Star Wars ELG 1.10 (Spike 3)", "\u2713", "\u2713", "\u2713", "shots",    # PAD-1284: screens;
                     # PAD-1285: the right gate; it waits for the game's modes. PAD-1286: Ball save, the game's mode
-                    # places, its modes completed
-                    "mechanisms, light shows, game mode places, starts on game modes completed")]
+                    # places, its modes completed. PAD-1330: challenges
+                    "mechanisms, light shows, challenges, game mode places, starts on game modes completed")]

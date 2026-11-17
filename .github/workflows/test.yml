@@ -54,8 +54,10 @@ jobs:
     # A wedged or looping test should fail the job, not hang for the
     # 6-hour default and hold up a release.  Healthy runs take about 10
     # minutes on Linux and 11-15 on macOS, whose slower runners passed the
-    # old 15-minute cap at 98% with nothing failing (PAD-550).
-    timeout-minutes: 30
+    # old 15-minute cap at 98% with nothing failing (PAD-550).  By
+    # 2026-11 the macOS test step alone took 18-25 minutes, and a slow
+    # runner passed the 30-minute cap at 98% the same way (PAD-1368).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

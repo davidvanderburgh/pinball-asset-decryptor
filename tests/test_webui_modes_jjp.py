@@ -277,7 +277,7 @@ def test_stern_keeps_its_own_tab(tmp_path, preview_on):
 def test_every_mode_key_is_on_the_form_once():
     from pinball_decryptor.plugins.jjp import custom_modes as CM
     keys = [k for _g, ks in CM.FORM_GROUPS for k in ks]
-    assert sorted(keys) == sorted(CM.mk().KEYS)
+    assert sorted(keys + list(CM.NOT_ON_FORM)) == sorted(CM.mk().KEYS)
     assert set(CM.TITLE_FORM) <= set(CM.mk().KEYS) | set(CM.mk().TITLE_KEYS)
     assert all(k in CM.LABELS for k in keys + list(CM.TITLE_FORM))
 

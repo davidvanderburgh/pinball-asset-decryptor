@@ -144,7 +144,36 @@ const TIP = {
 // ------------------------------------------------------------------ the blocks there are
 const num = (v) => ({ k: "num", v });
 
+// ------------------------------------------------------------------ PAD-1384: a Jersey Jack game's palette
+// A JJP mode made of blocks (plugins/jjp/block_modes.py) has the form's settings beside it, so its program is only
+// its rules: When a switch is hit (while it runs, or before, to start it), a scoring shot, every N seconds, N
+// seconds left; and blocks that score, keep the clock, play the game's sounds, light its lamps, fire its coils and
+// write the panel's title. ch.kit === "jjp" picks these everywhere below.
+const isJjp = (ch) => (ch || {}).kit === "jjp";
+const JJP_WHEN = [["running", "while it runs"], ["idle", "while it is not running"]];
+const JJP_RESETS = [["mode", "each time it starts"], ["kept", "kept between runs"]];
+const JJP_VALUE_WORDS = { hits: "hits of a switch since it started", scored: "scoring shots made" };
+const valueWord = (ch, k) => (isJjp(ch) && JJP_VALUE_WORDS[k]) || VALUE_WORDS[k] || k;
+function jjpHats(ch) {
+  const sw = (ch.shots || [])[0] || "";
+  return [{ kind: "mode_start" }, { kind: "mode_end" }, { kind: "shot", shot: sw, when: "running" },
+    { kind: "shot", shot: sw, when: "idle" }, { kind: "any_shot" }, { kind: "every", seconds: 5 }, { kind: "seconds_left", seconds: 10 }];
+}
+function jjpStmts(ch, vars) {
+  const v = (vars[0] || {}).name || "";
+  return [
+    ["Mode", [{ op: "start_mode" }, { op: "end_mode" }, { op: "add_time", seconds: num(5) }, { op: "set_time", seconds: num(10) },
+      { op: "set_time", seconds: num(15), at_least: true }, { op: "multiball", balls: 2, save: 10 }, { op: "ball_save", seconds: 15 }]],
+    ["Score and variables", [{ op: "score", points: num(1000000) }, { op: "set", var: v, value: num(0) }, { op: "change", var: v, by: num(1) }]],
+    ["Control", [{ op: "if", cond: null, then: [], else: null }, { op: "if", cond: null, then: [], else: [] }]],
+    ["The game's sounds, lamps and coils", [{ op: "jjp_sound", sound: (ch.sounds || [])[0] || "" },
+      { op: "jjp_lamp", lamp: (ch.lamps || [])[0] || "", color: "#ffd000", blink: 4 }, { op: "jjp_lamp_off", lamp: (ch.lamps || [])[0] || "" },
+      { op: "jjp_coil", coil: (ch.coils || [])[0] || "", ms: 0 }, { op: "jjp_title", text: "JACKPOT", value: null }, { op: "log", text: "" }]],
+  ];
+}
+
 export function hatTemplates(ch, timers) {
+  if (isJjp(ch)) return jjpHats(ch);
   const shot = (ch.shots || [])[0] || "";
   const ev = ((ch.events || [])[0] || {}).name || "";
   return [
@@ -189,6 +218,7 @@ function litShot(ch) {
 }
 
 export function stmtTemplates(ch, vars, prog = {}) {
+  if (isJjp(ch)) return jjpStmts(ch, vars);
   const shot = (ch.shots || [])[0] || "";
   const v = (vars[0] || {}).name || "";
   const t = ((prog.timers || [])[0] || {}).name || "";
@@ -226,6 +256,8 @@ export function stmtTemplates(ch, vars, prog = {}) {
 }
 
 function valueTemplates(ch, vars, timers, prog = {}) {
+  if (isJjp(ch)) return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" },
+    { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "op", op: "+", a: null, b: null }];
   return [num(1000), { k: "var", name: (vars[0] || {}).name || "" }, { k: "hits", shot: (ch.shots || [])[0] || "" }, { k: "mode_hits", shot: (ch.shots || [])[0] || "" },
     { k: "scored" }, { k: "total" }, { k: "secs_left" }, { k: "timer_left", timer: ((timers || [])[0] || {}).name || "" },
     { k: "combo_chain" }, { k: "combo_steps", combo: comboNames(prog)[0] || "" },          // PAD-708
@@ -240,7 +272,8 @@ function comboNames(prog) {
     .map((h) => h.name.trim()))];
 }
 
-const condTemplates = () => [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and", a: null, b: null },
+const condTemplates = (ch) => isJjp(ch) ? [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and", a: null, b: null },
+  { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }] : [{ k: "cmp", op: ">=", a: null, b: null }, { k: "and", a: null, b: null },
   { k: "or", a: null, b: null }, { k: "not", a: null }, { k: "running" }, { k: "can_start" }, { k: "lit" }, { k: "stock" },
   { k: "shields_away" }];
 
@@ -255,7 +288,8 @@ export const STMT_CLASS = { start_mode: "mode", light_mode: "mode", unlight_mode
   set: "var", change: "var", if: "flow", callout: "show", words: "show", light_shot: "show", lights_off: "show", gi: "show", show: "show", game_show: "show", log: "show",
   clip: "own", sound: "own", music: "own", timer_start: "timer", timer_stop: "timer", hud_text: "hud", hud_counter: "hud",
   hud_gauge: "hud", hud_award: "hud", hud_progress: "hud", roster_progress: "hud", hold: "mech", scoop_hold: "mech", let_go: "mech", shield: "mech", building: "mech",
-  shake: "mech", shake_game: "mech", spare_drive: "mech" };
+  shake: "mech", shake_game: "mech", spare_drive: "mech",
+  jjp_sound: "show", jjp_lamp: "show", jjp_lamp_off: "show", jjp_coil: "mech", jjp_title: "show" };
 const WHICH = [["title", "title"], ["line", "instruction line"]];
 const COUNTERS = [[1, "counter 1"], [2, "counter 2"], [3, "counter 3"]];
 const GAUGES = [["diamond", "diamonds"], ["segment", "a bar of segments"], ["spike", "spikes"],
@@ -341,14 +375,14 @@ function X({ onClick, title = "Take this block out" }) {
 // own block, which can hold slots of its own.
 function slotMenu(e, kind, ed, path) {
   const items = kind === "bool"
-    ? condTemplates().map((t) => ({ label: COND_WORDS[t.k], onClick: () => ed.set(path, t) }))
-    : valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog).map((t) => ({ label: VALUE_WORDS[t.k], onClick: () => ed.set(path, t) }));
+    ? condTemplates(ed.ch).map((t) => ({ label: COND_WORDS[t.k], onClick: () => ed.set(path, t) }))
+    : valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog).map((t) => ({ label: valueWord(ed.ch, t.k), onClick: () => ed.set(path, t) }));
   openMenu(e.currentTarget, items);
 }
 
 function Slot({ kind, value, path, ed, optional, empty }) {
   const [over, setOver] = useState(false);
-  const fits = () => dragging && dragging.tpl && (kind === "bool" ? dragging.tpl.k && condTemplates().some((t) => t.k === dragging.tpl.k)
+  const fits = () => dragging && dragging.tpl && (kind === "bool" ? dragging.tpl.k && condTemplates(ed.ch).some((t) => t.k === dragging.tpl.k)
     : dragging.tpl.k && valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog).some((t) => t.k === dragging.tpl.k));
   const drop = {
     onDragOver: (e) => { if (fits()) { e.preventDefault(); e.stopPropagation(); setOver(true); } },
@@ -372,14 +406,15 @@ function Val({ e, path, ed }) {
     case "num": return html`<${Num} value=${e.v} onChange=${(v) => set("v", v)} width=${96} />`;
     case "var": return html`<${Pick} value=${e.name} options=${ed.vars.map((v) => v.name)} missing="(no such variable)"
       onChange=${(v) => set("name", v)} />`;
-    case "hits": return html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
+    case "hits": return isJjp(ed.ch) ? html`<span class="bk-w" ...${tip("How many times the switch was hit since the mode started")}>hits since it started of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`
+      : html`<span class="bk-w" ...${tip(TIP.hits)}>hits of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
     case "mode_hits": return html`<span class="bk-w" ...${tip(TIP.modeHits)}>hits since it started of</span><${ShotPick} value=${e.shot} ed=${ed} onChange=${(v) => set("shot", v)} />`;
     case "timer_left": return html`<span class="bk-w" ...${tip(TIP.timerLeft)}>ms left on</span><${TimerPick} value=${e.timer} ed=${ed} onChange=${(v) => set("timer", v)} />`;
     case "combo_steps": return html`<span class="bk-w" ...${tip(TIP.comboSteps)}>shots made of</span><${Pick} value=${e.combo} options=${comboNames(ed.prog)} missing="(no combo has that name)" onChange=${(v) => set("combo", v)} />`;
     case "op": return html`<span class="bk-w">(</span><${Slot} kind="num" value=${e.a} path=${[...path, "a"]} ed=${ed} />
       <${Pick} value=${e.op} options=${OPS} width=${54} onChange=${(v) => set("op", v)} />
       <${Slot} kind="num" value=${e.b} path=${[...path, "b"]} ed=${ed} /><span class="bk-w">)</span>`;
-    default: return html`<span class="bk-w" ...${tip(TIP[e.k] || "")}>${VALUE_WORDS[e.k] || e.k}</span>`;
+    default: return html`<span class="bk-w" ...${tip(TIP[e.k] || "")}>${valueWord(ed.ch, e.k)}</span>`;
   }
 }
 
@@ -398,6 +433,10 @@ function Cond({ e, path, ed }) {
 // ------------------------------------------------------------------ statements
 function StmtBody({ b, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
+  if (isJjp(ed.ch)) {
+    const jj = jjpStmtBody(b, path, ed, set);
+    if (jj) return jj;
+  }
   switch (b.op) {
     case "start_mode": return html`<span class="bk-w">Start the mode</span>`;
     case "end_mode": {   // PAD-706: the battle it took the place of, won; PAD-710: the game's mode, completed
@@ -701,6 +740,11 @@ function ComboSteps({ h, path, ed }) {
 export function HatBody({ h, path, ed }) {
   const set = (k, v) => ed.set([...path, k], v);
   const when = html`<${Pick} value=${h.when || "any"} options=${WHEN} onChange=${(v) => set("when", v)} />`;
+  if (isJjp(ed.ch)) {
+    if (h.kind === "shot") return html`<span class="bk-w b">When</span><${ShotPick} value=${h.shot} ed=${ed} onChange=${(v) => set("shot", v)} /><span class="bk-w b">is hit</span>
+      <${Pick} value=${h.when === "idle" ? "idle" : "running"} options=${JJP_WHEN} onChange=${(v) => set("when", v)} />`;
+    if (h.kind === "any_shot") return html`<span class="bk-w b" ...${tip("After the form scored one of its scoring shots (its Settings)")}>When a scoring shot is made</span>`;
+  }
   switch (h.kind) {
     case "mode_start": return html`<span class="bk-w b">When the mode starts</span>`;
     case "mode_end": return html`<span class="bk-w b">When the mode ends</span>`;
@@ -756,6 +800,25 @@ export function HatBody({ h, path, ed }) {
   }
 }
 
+// PAD-1384: the JJP blocks, each picking the game's own names
+function jjpStmtBody(b, path, ed, set) {
+  const ch = ed.ch;
+  switch (b.op) {
+    case "start_mode": return html`<span class="bk-w" ...${tip("From a When … is hit while it is not running script: it starts at the next free moment, as a start rule does")}>Start the mode</span>`;
+    case "jjp_sound": return html`<span class="bk-w">Play the game's sound</span><${Pick} value=${b.sound} options=${ch.sounds || []} width=${300} missing="(not on this game)" onChange=${(v) => set("sound", v)} />`;
+    case "jjp_lamp": return html`<span class="bk-w">Light</span><${Pick} value=${b.lamp} options=${ch.lamps || []} width=${220} missing="(not on this game)" onChange=${(v) => set("lamp", v)} />
+      <input type="color" class="bk-color" value=${b.color || "#ffd000"} onInput=${(e) => set("color", e.target.value)} ...${tip("Its color")} />
+      <${Pick} value=${String(b.blink ?? 0)} options=${[["0", "solid"], ["1", "flashing once a second"], ["2", "flashing twice a second"], ["4", "flashing 4 times a second"], ["8", "flashing fast"]]}
+        onChange=${(v) => set("blink", Number(v))} />`;
+    case "jjp_lamp_off": return html`<span class="bk-w">Give</span><${Pick} value=${b.lamp} options=${ch.lamps || []} width=${220} missing="(not on this game)" onChange=${(v) => set("lamp", v)} /><span class="bk-w">back to the game</span>`;
+    case "jjp_coil": return html`<span class="bk-w">Fire</span><${Pick} value=${b.coil} options=${ch.coils || []} width=${220} missing="(not one a mode may fire)" onChange=${(v) => set("coil", v)} />
+      <span class="bk-w">for</span><${Num} value=${b.ms} width=${48} title="ms (0: the coil's own pulse)" onChange=${(v) => set("ms", v)} /><span class="bk-w">ms</span>`;
+    case "jjp_title": return html`<span class="bk-w">Title the panel</span><${Text} value=${b.text} max=${40} onChange=${(v) => set("text", v)} placeholder="JACKPOT" />
+      <span class="bk-w">and</span><${Slot} kind="num" value=${b.value} path=${[...path, "value"]} ed=${ed} optional empty="(no number)" />`;
+    default: return null;
+  }
+}
+
 export function Script({ s, si, n, ed }) {
   return html`<div class="bk-script">
     <div class="bk bk-hat"><div class="bk-line">
@@ -780,6 +843,12 @@ export function hatLabel(h) {
     spare_switch: "When a spare switch closes",
     combo: (h.shots || []).every((x) => x === "lit") ? "When a lit shot follows a lit shot" : "When a shot follows a shot (a combo)" }[h.kind] || h.kind;
 }
+// the palette's words for a JJP hat (PAD-1384)
+function jjpHatLabel(h) {
+  if (h.kind === "shot") return h.when === "idle" ? "When a switch is hit (before it runs)" : "When a switch is hit";
+  if (h.kind === "any_shot") return "When a scoring shot is made";
+  return hatLabel(h);
+}
 
 export function stmtLabel(b) {
   return { start_mode: "Start the mode", light_mode: "Light the mode at a shot", unlight_mode: "Put out the light", end_mode: "End the mode", add_time: "Add seconds", set_time: b.at_least ? "Keep time on the clock" : "Set the clock", multiball: "Multiball", ball_save: "Ball save", drain_to_one: "Take the extra balls away",
@@ -792,6 +861,7 @@ export function stmtLabel(b) {
     hold: "Hold a mechanism", scoop_hold: "Hold a ball in the scoop", let_go: "Let go", shield: "Turn the shield targets", building: "Move the building to",
     shake: "Shake the cabinet for", shake_game: "Shake it the game's way", game_wizard: "The game's mini-wizard",
     spare_drive: "Drive a spare output",
+    jjp_sound: "Play a game sound", jjp_lamp: "Light a lamp", jjp_lamp_off: "Hand back a lamp", jjp_coil: "Fire a coil", jjp_title: "Title the panel",
     if: b.else ? "If … else" : "If" }[b.op] || b.op;
 }
 
@@ -822,7 +892,7 @@ function whyOff(t, ch) {
   return "";
 }
 
-function Palette({ ed }) {
+export function Palette({ ed }) {
   const piece = (cls, label, tpl, onPress, title, off) => html`<button type="button" class=${cx("bk-pal", cls)} draggable=${off ? "false" : "true"}
     aria-disabled=${off ? "true" : undefined}
     onDragStart=${(e) => { if (off) { e.preventDefault(); return; } dragging = { tpl: clone(tpl) }; e.dataTransfer.effectAllowed = "copy"; e.dataTransfer.setData("text/plain", "block"); }}
@@ -831,13 +901,13 @@ function Palette({ ed }) {
   const vals = valueTemplates(ed.ch, ed.vars, ed.timers, ed.prog);
   return html`<div class="bk-palette" aria-label="Blocks">
     <div class="bk-pal-h">When</div>
-    ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
+    ${hatTemplates(ed.ch, ed.timers).map((h) => piece("bk-hat", isJjp(ed.ch) ? jjpHatLabel(h) : hatLabel(h), { hat: h }, () => ed.addScript(clone(h)), "Press to start a new script with this"))}
     ${stmtTemplates(ed.ch, ed.vars, ed.prog).filter(([_g, items]) => items.length).map(([group, items]) => html`<div class="bk-pal-h">${group}</div>
       ${items.map((t) => piece("bk-" + (STMT_CLASS[t.op] || "show"), stmtLabel(t), t, () => ed.addToTarget(clone(t)), null, whyOff(t, ed.ch)))}`)}
     <div class="bk-pal-h">Values</div>
-    ${vals.map((t) => piece("bk-num", VALUE_WORDS[t.k], t, null, TIP[t.k] && (t.k === "combo_chain" || t.k === "women_mult") ? TIP[t.k] : "Drag into a value slot (the round holes)"))}
+    ${vals.map((t) => piece("bk-num", valueWord(ed.ch, t.k), t, null, TIP[t.k] && (t.k === "combo_chain" || t.k === "women_mult") ? TIP[t.k] : "Drag into a value slot (the round holes)"))}
     <div class="bk-pal-h">Conditions</div>
-    ${condTemplates().map((t) => piece("bk-bool", COND_WORDS[t.k], t, null, "Drag into an If's condition slot"))}
+    ${condTemplates(ed.ch).map((t) => piece("bk-bool", COND_WORDS[t.k], t, null, "Drag into an If's condition slot"))}
   </div>`;
 }
 
@@ -926,22 +996,23 @@ function BarFill({ prog, ed }) {
 }
 
 // ------------------------------------------------------------------ the whole editor
-function Variables({ prog, ed }) {
+export function Variables({ prog, ed }) {
   const vars = prog.vars || [];
+  const jjp = isJjp(ed.ch);
   const add = () => {
     let n = 1;
     while (vars.some((v) => (v.name || "").toLowerCase() === ("count " + n))) n++;
-    ed.edit((d) => { d.vars = [...(d.vars || []), { name: "count " + n, reset: "ball" }]; });
+    ed.edit((d) => { d.vars = [...(d.vars || []), { name: "count " + n, reset: jjp ? "mode" : "ball" }]; });
   };
   return html`<div class="bk-vars">
     <span class="lbl" ...${tip(TIP.vars)}>Variables</span>
     ${vars.map((v, i) => html`<span class="bk-varbox" key=${i}>
       <${Field} sm width=${110} value=${v.name} maxLength=${24} onChange=${(t) => ed.renameVar(i, t)} title="Its name" />
       <span class="small muted">reset</span>
-      <${Select} sm value=${v.reset || "ball"} options=${(v.shared ? SHARED_RESETS : RESETS).map(([value, label]) => ({ value, label }))}
+      <${Select} sm value=${v.reset || (jjp ? "mode" : "ball")} options=${(jjp ? JJP_RESETS : v.shared ? SHARED_RESETS : RESETS).map(([value, label]) => ({ value, label }))}
         onChange=${(r) => ed.set(["vars", i, "reset"], r)} />
-      <${Check} checked=${!!v.shared} label="shared" title=${TIP.shared}
-        onChange=${(on) => ed.edit((d) => { d.vars[i].shared = on; if (on && d.vars[i].reset === "mode") d.vars[i].reset = "game"; })} />
+      ${jjp ? null : html`<${Check} checked=${!!v.shared} label="shared" title=${TIP.shared}
+        onChange=${(on) => ed.edit((d) => { d.vars[i].shared = on; if (on && d.vars[i].reset === "mode") d.vars[i].reset = "game"; })} />`}
       <${X} title="Take this variable out" onClick=${() => ed.edit((d) => { d.vars.splice(i, 1); })} />
     </span>`)}
     <${Button} size="sm" kind="ghost" icon="plus" onClick=${add}>Variable<//>
@@ -1090,7 +1161,7 @@ export function useModeProgram(c) {
     setSaving(true);
     const slug = slugRef.current;
     timer.current = setTimeout(() => {
-      Promise.resolve(call("modes.blocks_save", slug, next)).finally(() => setSaving(false));
+      Promise.resolve(call(c.save_rpc || "modes.blocks_save", slug, next)).finally(() => setSaving(false));   // PAD-1384
     }, SAVE_MS);
   };
   const show = (next) => { progRef.current = next; setProg(next); save(next); };
@@ -1136,11 +1207,11 @@ export function useModeProgram(c) {
 }
 
 // Undo, Redo and the saved line: one for the mode, above whichever view is open.
-export function ProgramBar({ pg }) {
+export function ProgramBar({ pg, saved = "Saved · Try it builds it in" }) {
   return html`<div class="bk-progbar row">
     <${Button} size="sm" kind="ghost" icon="undo" disabled=${!pg.canUndo} title=${TIP.undo} onClick=${() => pg.undo()}>Undo<//>
     <${Button} size="sm" kind="ghost" icon="redo" disabled=${!pg.canRedo} title=${TIP.redo} onClick=${() => pg.undo(true)}>Redo<//>
-    <span class="small muted">${pg.saving ? "Saving…" : "Saved · Try it builds it in"}</span>
+    <span class="small muted">${pg.saving ? "Saving…" : saved}</span>
   </div>`;
 }
 

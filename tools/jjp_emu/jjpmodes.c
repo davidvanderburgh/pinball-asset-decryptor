@@ -65,7 +65,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#define SDK_VERSION "2"
+#define SDK_VERSION "3"
+#include "modes/sdk/jjp_mode.h"     /* PAD-1384: a mode's own C++ (code = <name>) */
 
 /* ---- log ------------------------------------------------------------------ */
 static FILE *logf_;
@@ -239,10 +240,20 @@ typedef struct {
     unsigned pid;                         /* its proc id */
     volatile int p_on, p_seen;            /* running; the proc has run once */
     long p_at;                            /* ms clock it was created */
+    /* its own C++ (PAD-1384): code = <name> -> <name>.so in the mode folder */
+    char code[64];
+    const struct jm_mode *cm;
+    int ncl; struct { void *o; unsigned rgb; int blink; } cl[MAX_LIST];   /* lamps its code lit */
+    char ctitle[64];                      /* jm_title: the panel's title this run */
+    long started_at, code_tick_at;
+    const char *end_why;                  /* why it is ending (for the code's end()) */
+    unsigned short sw_hits[MAX_SW];       /* each switch's hits this run */
 } pm_t;
 
 static pm_t pms[MAX_MODES];
 static int npm;
+static void code_started(pm_t *m), code_tick(pm_t *m), code_over(pm_t *m, const char *why);   /* PAD-1384 */
+static int load_code(pm_t *m);
 
 typedef struct { char name[96]; void *obj; void *orig; } wsw_t;
 static wsw_t wsw[MAX_SW];
@@ -577,6 +588,7 @@ static void apply_kv(pm_t *m, const char *k, char *v)
     else if (!strcmp(k, "start_once"))
         m->start_once = !strcmp(v, "ball") ? ONCE_BALL : !strcmp(v, "game") ? ONCE_GAME : ONCE_NO;
     else if (!strcmp(k, "panel")) m->panel = !strcmp(v, "bottom") ? 1 : !strcmp(v, "top") ? 2 : !strcmp(v, "none") ? 3 : 0;
+    else if (!strcmp(k, "code")) snprintf(m->code, sizeof m->code, "%s", v);
     else if (!strcmp(k, "ingame_state")) { ingame_state = (int)num(v); ingame_explicit = 1; }
     else if (!strcmp(k, "game")) snprintf(game_name, sizeof game_name, "%s", v);
     else if (!strcmp(k, "background_modes")) {
@@ -742,8 +754,9 @@ static void load_modes(void)
             *slot = sym(m->snd_names[s]);
             if (*m->snd_names[s] && !*slot) lg("%s: no sound called %s in this game", m->file, m->snd_names[s]);
         }
-        if (!m->nstart && !m->start_on && !m->after[1] && m->start_score <= 0 && m->ncombo < 2) {
-            lg("%s: no start rule (start, start_on, start_after, start_score or start_combo); mode skipped", m->file);
+        if (*m->code && !load_code(m)) { lg("%s: mode skipped (its code)", m->file); continue; }
+        if (!m->nstart && !m->start_on && !m->after[1] && m->start_score <= 0 && m->ncombo < 2 && !(m->cm && m->cm->idle)) {
+            lg("%s: no start rule (start, start_on, start_after, start_score, start_combo or its code's idle); mode skipped", m->file);
             continue;
         }
         /* seconds = 0 on a multiball: no clock, one ball left ends it (Spike 2's item 167) */
@@ -1924,12 +1937,20 @@ static void lamps_show(pm_t *m, int on)
         if (on) lamp_put(m->lamp[l], r, g, b);
         else lamp_put(m->lamp[l], 0, 0, 0);
     }
+    for (int l = 0; l < m->ncl; l++) {     /* the lamps its code lit (PAD-1384), each at its own rate */
+        unsigned c = m->cl[l].rgb;
+        long half = m->cl[l].blink > 0 ? 500L / m->cl[l].blink : 0;
+        int lit = !m->paused && (half == 0 || ((now_ms() / (half ? half : 1)) & 1) == 0);
+        lamp_put(m->cl[l].o, lit ? (c >> 16) & 0xff : 0, lit ? (c >> 8) & 0xff : 0, lit ? c & 0xff : 0);
+    }
 }
 
 static void lamps_release(pm_t *m)
 {
     if (!our_lb) return;
     for (int l = 0; l < m->nlamp; l++) lamp_give_back(m->lamp[l]);
+    for (int l = 0; l < m->ncl; l++) lamp_give_back(m->cl[l].o);
+    m->ncl = 0;
     lb_activate(0);
 }
 
@@ -2198,6 +2219,7 @@ static void mode_tick(pm_t *m)
         long half = m->lamp_blink > 0 ? 500L / m->lamp_blink : 0;
         lamps_show(m, half == 0 || ((now_ms() / (half ? half : 1)) & 1) == 0);
     }
+    code_tick(m);
     if (m->music && update_music_fn) {    /* our music on while the mode has the floor, the game's otherwise */
         int idx = (int)(m - pms);
         int want = music_wanted(m), have = music_claimed == idx + 1;
@@ -2401,6 +2423,7 @@ static void start_mode(pm_t *m, int idx)
     if (m->hold_on == 1) coil_hold(m, "start");
     if (*m->vid_file && !m->vid) m->vid = video_start(m);
     if (m->music) music_reconsider("mode started");
+    code_started(m);
 }
 
 /* Mode::end runs on the game's proc thread like all the game's own mode
@@ -2410,6 +2433,7 @@ static int (*am_proc)(void);
 static void end_mode(pm_t *m, const char *why)
 {
     if (!running(m)) return;
+    if (!m->end_why) m->end_why = why;
     if (engine_proc) {          /* our run proc ends itself within a tick (8 ms) */
         if (!m->want_end) { m->want_end = why; m->paused = 0; lg("\"%s\" ending (%s)", m->name, why); }
         return;
@@ -3075,7 +3099,8 @@ static void install_rules(void)
 {
     for (int k = 0; k < npm; k++) {
         pm_t *m = &pms[k];
-        if (m->start_on || m->after[1] || m->start_score > 0 || m->start_once || m->count_reset_ball || m->ncombo >= 2)
+        if (m->start_on || m->after[1] || m->start_score > 0 || m->start_once || m->count_reset_ball || m->ncombo >= 2
+            || (m->cm && m->cm->idle))
             rules_on = 1;
         if (!m->after[1]) continue;
         int any = strstr(m->after, " any ") != NULL, hit = 0;
@@ -3111,6 +3136,200 @@ static void install_rules(void)
     lg("start rules: %d hook(s) in, %d tick hook(s)%s", nhooks, ticks, ticks ? "" : " - FAIL: no moment to start a raised mode");
 }
 
+/* ---- a mode's own C++ (PAD-1384) -----------------------------------------------
+ * `code = <name>` in a .mode file: <name>.so in the mode folder (built from
+ * <name>.cpp by modes/sdk/build_code.sh, or written from blocks by the app),
+ * loaded here with dlopen.  Its jm_mode_def points at the callbacks of
+ * modes/sdk/jjp_mode.h; its jm_* calls land below, on the mode whose callback
+ * is running (code_cur), all on the game's proc thread like the rest of a mode.
+ * The .so links no library: its few libc calls and our jm_* resolve against
+ * the game's process, so it loads whatever glibc the image has. */
+static pm_t *code_cur;
+#define JMAPI __attribute__((visibility("default")))
+
+/* The game's names its code uses: its switches must be wrapped and its coils
+ * resolved at install, like the ones a .mode file names, so they are read off
+ * the library's own string literals (a C++ "switch_x" is one in .rodata). */
+static void code_names(pm_t *m, const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    static char buf[1 << 20];
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    int nsw = 0, nco = 0;
+    for (size_t i = 0; i + 6 < n; i++) {
+        if (i && buf[i - 1]) continue;                      /* a string's start: after a NUL */
+        int is_sw = !strncmp(buf + i, "switch_", 7), is_co = !strncmp(buf + i, "coil_", 5);
+        if (!is_sw && !is_co) continue;
+        size_t L = 0;
+        while (i + L < n && ((buf[i + L] >= 'a' && buf[i + L] <= 'z') || (buf[i + L] >= 'A' && buf[i + L] <= 'Z')
+                             || (buf[i + L] >= '0' && buf[i + L] <= '9') || buf[i + L] == '_')) L++;
+        if (buf[i + L] || L < 8 || L >= 95) continue;        /* the whole string is one name */
+        if (!sym(buf + i)) { lg("%s: its code names %s, which this game does not have", m->file, buf + i); continue; }
+        if (is_sw) { if (sw_index(buf + i) >= 0) nsw++; }
+        else if (coil_index(buf + i) >= 0) nco++;
+    }
+    if (nsw || nco) lg("%s: its code uses %d switch(es) and %d coil(s) of the game's", m->file, nsw, nco);
+}
+
+static int load_code(pm_t *m)
+{
+    char path[700];
+    snprintf(path, sizeof path, "%s/%s.so", moddir, m->code);
+    void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!h) { lg("%s: FAIL - its code %s.so did not load: %s", m->file, m->code, dlerror()); return 0; }
+    const struct jm_mode **def = (const struct jm_mode **)dlsym(h, "jm_mode_def");
+    if (!def || !*def) { lg("%s: FAIL - %s.so has no JM_REGISTER (jm_mode_def)", m->file, m->code); return 0; }
+    if ((*def)->api != JM_API) { lg("%s: FAIL - %s.so is for mode API %d, this runtime is %d", m->file, m->code, (*def)->api, JM_API); return 0; }
+    m->cm = *def;
+    code_names(m, path);
+    lg("%s: its code %s.so:%s%s%s%s%s%s", m->file, m->code, m->cm->start ? " start" : "", m->cm->shot ? " shot" : "",
+       m->cm->scored ? " scored" : "", m->cm->tick ? " tick" : "", m->cm->end ? " end" : "", m->cm->idle ? " idle" : "");
+    return 1;
+}
+
+/* a callback of its code, with the jm_* calls pointed at it */
+#define CODE_CALL(m, cb, ...) do { pm_t *was_ = code_cur; code_cur = (m); (m)->cm->cb(__VA_ARGS__); code_cur = was_; } while (0)
+
+static void code_started(pm_t *m)
+{
+    m->ncl = 0; m->ctitle[0] = 0; m->started_at = m->code_tick_at = now_ms(); m->end_why = NULL;
+    memset(m->sw_hits, 0, sizeof m->sw_hits);
+    if (m->cm && m->cm->start) CODE_CALL(m, start);
+}
+static void code_tick(pm_t *m)
+{
+    if (!m->cm || !m->cm->tick || m->paused || m->want_end) return;
+    long t = now_ms();
+    if (t - m->code_tick_at < 100) return;
+    m->code_tick_at = t;
+    CODE_CALL(m, tick);
+}
+static void code_over(pm_t *m, const char *why)
+{
+    if (m->cm && m->cm->end) CODE_CALL(m, end, why);
+}
+
+static pm_t *jm(const char *fn)
+{
+    if (!code_cur) lg("%s called outside a mode's callback: ignored", fn);
+    return code_cur;
+}
+JMAPI void jm_log(const char *fmt, ...)
+{
+    char b[400]; va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
+    lg("\"%s\" code: %s", code_cur ? code_cur->name : "?", b);
+}
+JMAPI void jm_score(long long pts)
+{
+    pm_t *m = jm("jm_score");
+    if (!m || !running(m) || pts <= 0) return;
+    mode_score(m, pts);
+    m->total += pts;
+    lg("\"%s\" code scored %lld (mode total %lld)", m->name, pts, m->total);
+}
+JMAPI long long jm_total(void) { pm_t *m = jm("jm_total"); return m ? m->total : 0; }
+JMAPI int jm_hits(void) { pm_t *m = jm("jm_hits"); return m ? m->hits : 0; }
+JMAPI int jm_switch_hits(const char *sw)
+{
+    pm_t *m = jm("jm_switch_hits");
+    int si = m && sw ? sw_index(sw) : -1;
+    return si >= 0 ? m->sw_hits[si] : 0;
+}
+JMAPI int jm_seconds_left(void) { pm_t *m = jm("jm_seconds_left"); return m ? m->secs : 0; }
+JMAPI void jm_set_seconds(int s)
+{
+    pm_t *m = jm("jm_set_seconds");
+    if (!m || !running(m)) return;
+    if (s < 1) s = 1;
+    if (!engine_proc) ((vint_t)vslot(m->mode, VT_SET_TIME))(m->mode, s);
+    m->secs = s;
+    lg("\"%s\" code: the clock to %d s", m->name, s);
+}
+JMAPI void jm_add_seconds(int s) { pm_t *m = jm("jm_add_seconds"); if (m) jm_set_seconds(m->secs + s); }
+JMAPI long jm_ms(void) { pm_t *m = jm("jm_ms"); return m && m->started_at ? now_ms() - m->started_at : 0; }
+JMAPI int jm_running(void) { pm_t *m = jm("jm_running"); return m ? running(m) : 0; }
+JMAPI void jm_end(void)
+{
+    pm_t *m = jm("jm_end");
+    if (m && running(m)) end_mode(m, "its code");
+}
+JMAPI void jm_start(void)
+{
+    pm_t *m = jm("jm_start");
+    if (!m || running(m) || m->pending) return;
+    if ((m->start_once == ONCE_BALL && m->runs_ball) || (m->start_once == ONCE_GAME && m->runs_game)) {
+        lg("\"%s\" code start: already ran this %s (start_once)", m->name, m->start_once == ONCE_BALL ? "ball" : "game");
+        return;
+    }
+    m->pending = "its code"; m->pending_log = 0;
+    lg("\"%s\" start raised: its code", m->name);
+}
+JMAPI void jm_title(const char *text)
+{
+    pm_t *m = jm("jm_title");
+    if (m) snprintf(m->ctitle, sizeof m->ctitle, "%s", text ? text : "");
+}
+JMAPI int jm_sound(const char *name)
+{
+    pm_t *m = jm("jm_sound");
+    if (!m) return 0;
+    void *se = sym(name);
+    if (!se) { lg("\"%s\" code: no sound called %s in this game", m->name, name ? name : "(null)"); return 0; }
+    play(se);
+    return 1;
+}
+JMAPI int jm_lamp(const char *name, unsigned rgb, int blink)
+{
+    pm_t *m = jm("jm_lamp");
+    if (!m) return 0;
+    void *o = sym(name);
+    if (!o || !lamp_like(o)) { lg("\"%s\" code: no lamp called %s in this game", m->name, name ? name : "(null)"); return 0; }
+    int i = 0;
+    while (i < m->ncl && m->cl[i].o != o) i++;
+    if (i == m->ncl) { if (m->ncl >= MAX_LIST) { lg("\"%s\" code: more than %d lamps lit", m->name, MAX_LIST); return 0; } m->ncl++; }
+    m->cl[i].o = o; m->cl[i].rgb = rgb & 0xffffff; m->cl[i].blink = blink < 0 ? 0 : blink;
+    return 1;
+}
+JMAPI void jm_lamp_off(const char *name)
+{
+    pm_t *m = jm("jm_lamp_off");
+    void *o = m ? sym(name) : NULL;
+    for (int i = 0; o && i < m->ncl; i++)
+        if (m->cl[i].o == o) {
+            if (our_lb) lamp_give_back(o);
+            m->cl[i] = m->cl[--m->ncl];
+            return;
+        }
+}
+JMAPI int jm_coil(const char *name, int ms)
+{
+    pm_t *m = jm("jm_coil");
+    if (!m) return 0;
+    int ci = coil_index(name);
+    if (ci < 0) { lg("\"%s\" code: %s is not a coil a mode may fire on this game", m->name, name ? name : "(null)"); return 0; }
+    coil_fire(m, ci, ms, "its code");
+    return 1;
+}
+JMAPI int jm_multiball(int balls, int save)
+{
+    pm_t *m = jm("jm_multiball");
+    if (!m || !running(m) || balls < 2 || balls > 6) return 0;
+    m->mb_balls = balls; m->mb_save = save < 0 ? 0 : save > 120 ? 120 : save;
+    serve_multiball(m, "its code");
+    return 1;
+}
+JMAPI int jm_ball_save(int s)
+{
+    pm_t *m = jm("jm_ball_save");
+    if (!m || !running(m) || s < 1) return 0;
+    m->ball_save = s > 120 ? 120 : s;
+    ball_save_start(m);
+    return 1;
+}
+
 static void on_switch(int si)
 {
     if (!installed || !in_game()) return;
@@ -3126,11 +3345,23 @@ static void on_switch(int si)
             if (m->nmb_on && !m->mb_served && in_list(m->mb_on_sw, m->nmb_on, si)) serve_multiball(m, wsw[si].name);
             if (m->hold_on == 2 && in_list(m->hold_sw, m->nhold_sw, si)) coil_hold(m, wsw[si].name);
         }
-        if (!m->paused && !m->want_end && in_list(m->shot_sw, m->nshot, si)) {
+        int taken = 0;
+        if (!m->paused && !m->want_end) {     /* its code first (PAD-1384): it may take the hit */
+            if (m->sw_hits[si] < 65535) m->sw_hits[si]++;
+            if (m->cm && m->cm->shot) {
+                pm_t *was = code_cur; code_cur = m;
+                taken = m->cm->shot(wsw[si].name) == JM_TAKEN;
+                code_cur = was;
+                if (taken) lg("\"%s\" %s: taken by its code", m->name, wsw[si].name);
+            }
+        }
+        if (!taken && !m->paused && !m->want_end && in_list(m->shot_sw, m->nshot, si)) {
             mode_score(m, m->points);
             m->total += m->points; m->hits++;
             lg("\"%s\" shot %s: +%lld (hits %d, mode total %lld)", m->name, wsw[si].name, m->points, m->hits, m->total);
-            if (m->complete > 0 && m->hits >= m->complete) {
+            if (m->cm && m->cm->scored) CODE_CALL(m, scored, wsw[si].name);
+            if (m->want_end) { /* its code ended it */ }
+            else if (m->complete > 0 && m->hits >= m->complete) {
                 if (m->complete_points) {
                     mode_score(m, m->complete_points);
                     m->total += m->complete_points;
@@ -3149,6 +3380,9 @@ static void on_switch(int si)
         pthread_mutex_unlock(&mu);
         return;
     }
+    /* its code's idle() (PAD-1384): every switch while no mode of ours runs */
+    for (int i = 0; i < npm; i++)
+        if (pms[i].cm && pms[i].cm->idle) CODE_CALL(&pms[i], idle, wsw[si].name);
     /* combos: the switches in order, each within combo_seconds of the one before */
     long t = now_ms();
     for (int i = 0; i < npm; i++) {
@@ -3199,6 +3433,7 @@ static void mode_over(pm_t *m)
 {
     if (!m->running_seen || running(m)) return;
     m->running_seen = 0; m->paused = 0; m->p_on = 0;
+    code_over(m, m->end_why ? m->end_why : in_game() ? "time" : "ball end");
     lamps_release(m);
     if (m->vid) { video_stop(m->vid); m->vid = NULL; }
     coil_release_mode(m, "mode end");
@@ -3386,13 +3621,14 @@ static void draw_screen(pm_t *m)
     void *fv = m->font_value && jfont ? jfont(m->font_value) : NULL;
     void *fm = m->font_timer && jfont ? jfont(m->font_timer) : NULL;
     float cx = W / 2;
-    if (plot_os && ft) plot_os(ft, col(m->title_rgba), black, 2, black, 3, cx, y0 + H * 0.01f, 1, m->title);
+    const char *title = *m->ctitle ? m->ctitle : m->title;     /* its code's jm_title (PAD-1384) */
+    if (plot_os && ft) plot_os(ft, col(m->title_rgba), black, 2, black, 3, cx, y0 + H * 0.01f, 1, title);
     if (plot_os && fv) plot_os(fv, col(m->value_rgba), black, 2, black, 3, cx, y0 + H * 0.10f, 1, total);
     if (plot_os && fm) plot_os(fm, col(m->timer_rgba), black, 2, black, 3, x1 - W * 0.05f, y0 + H * 0.06f, 1, secs);
     if (!ft || !fv || !fm || !plot_os) {     /* the built-in font for whatever has no game font */
         if (!bfont && builtin_font) bfont = builtin_font();
         if (bfont && scale_xf && trans_xf) {
-            const char *s[3] = { ft ? NULL : m->title, fv ? NULL : total, fm ? NULL : secs };
+            const char *s[3] = { ft ? NULL : title, fv ? NULL : total, fm ? NULL : secs };
             float xs[3] = { cx, cx, x1 - W * 0.05f }, ys[3] = { y0 + H * 0.02f, y0 + H * 0.12f, y0 + H * 0.07f };
             unsigned cs[3] = { m->title_rgba, m->value_rgba, m->timer_rgba };
             for (int i = 0; i < 3; i++) if (s[i]) {

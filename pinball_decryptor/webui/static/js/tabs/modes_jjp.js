@@ -5,14 +5,28 @@
 // with the modes in it - or writes a USB stick the game's own Update USB hot fix installs them
 // from, no reinstall (PAD-1375).
 //
+// PAD-1384: three ways to make a mode, as on Stern (modes_new.js): Blocks (the Stern Blocks editor with
+// this game's palette: plugins/jjp/block_modes.py writes the C++), C++ against the JJP mode SDK's
+// jjp_mode.h, or the form. A blocks or C++ mode has the form too, as its Settings page: start, scoring
+// shots, seconds, sounds, lamps and the panel; its code adds rules of its own. Its C++ is built in the
+// app's Linux after each change, and the Check card says how that went. The page scrolls as one.
+//
 // Python (webui/modes_jjp.py) owns every decision; this page renders modes.jjp and edits through
 // call("modes.jjp_set", key, value).
 
-import { html, useEffect, useRef, useState, Button, Field, PathField, Select, Chip, Note, Empty, cx, tip,
+import { html, useEffect, useRef, useState, Button, Field, PathField, Select, Chip, Note, Empty, Modal, Icon, cx, tip,
          call, mediaUrl } from "../core/ui.js";
+import { KindTiles, EnterKey, NameField } from "./modes_new.js";
+import { useModeProgram, useEd, Palette, Variables, Script, ProgramBar } from "./modes_blocks.js";
+import { CEditor, CodeView } from "./modes_script.js";
 
 const set = (k, v) => call("modes.jjp_set", k, v);
 const words = (v) => String(v || "").split(/[\s,]+/).filter(Boolean);
+function useStored(key, init) {          // modes.js's: the page picked last, kept across visits
+  const [v, setV] = useState(() => { try { return localStorage.getItem(key) || init; } catch (e) { return init; } });
+  const put = (x) => { setV(x); try { localStorage.setItem(key, x); } catch (e) { /* private window */ } };
+  return [v, put];
+}
 
 // ------------------------------------------------------------------ hearing a game sound
 let playing = null;
@@ -220,17 +234,89 @@ function Row({ k, prefix = "", meta, value, j, have }) {
   return html`<div class="jjpm-row" data-key=${k}><span class="jjpm-lbl">${m.label || k}</span><div class="jjpm-in">${input}</div></div>`;
 }
 
-function ModeList({ j }) {
+// ------------------------------------------------------------------ the three ways (PAD-1384)
+export const JJP_KINDS = [
+  { key: "blocks", icon: "blocks", title: "Blocks", badge: "Recommended", badgeKind: "ok",
+    pitch: "Snap rules together on this game's switches, lamps and sounds: when a switch is hit, score it; if a count gets high enough, end it.",
+    level: 2, levelWords: "No coding",
+    can: ["Rules of your own: variables, If … else, every N seconds",
+          "The game's sounds, lamps and coils, and the panel's title",
+          "Its own start: a switch hit before it runs",
+          "Every setting of the form as well"],
+    cant: ["Calls the blocks don't have (Edit as C++ carries on in C++)"],
+    workIn: "The app turns the blocks into C++ for you." },
+  { key: "cpp", icon: "edit", title: "C++", badge: "Best with an AI agent", badgeKind: "info",
+    pitch: "Write the mode's rules in C++ against the JJP mode API (jjp_mode.h), or have an AI agent write them.",
+    level: 3, levelWords: "A programmer, or an AI agent",
+    can: ["Everything the mode API can do",
+          "Shots it takes over, growing bonuses, hurry-ups, its own start",
+          "Classes, templates and lambdas (no standard library)",
+          "Every setting of the form as well"],
+    cant: ["The app's editors: it is C++, edited as text"],
+    workIn: "Starts from the API's template." },
+  { key: "form", icon: "list", title: "Form", badge: "Playground", badgeKind: "",
+    pitch: "The bare minimum: fill in the boxes for a mode to play with.",
+    level: 1, levelWords: "Anyone",
+    can: ["What starts it, its scoring shots, points and time",
+          "Its panel, sounds, lamps, picture, video, balls and coils"],
+    cant: ["Rules of your own: no variables, no If"],
+    workIn: "Boxes to fill in; nothing to learn." },
+];
+const KIND_PILL = { blocks: ["Blocks", "Made of blocks", "bk-pill"], cpp: ["C++", "Its own C++", ""] };
+
+function NewJjpMode({ j, onClose }) {
+  const [kind, setKind] = useState("");
+  const [name, setName] = useState("");
+  const k = JJP_KINDS.find((x) => x.key === kind);
+  const named = !!name.trim();
+  const make = () => { if (!k || !named) return; call("modes.jjp_new", name.trim(), kind); onClose(); };
+  const full = (j.modes || []).length >= (j.max || 24);
+  const offOf = () => (full ? "A game takes 24 custom modes: delete one first." : "");
+  const how = {
+    blocks: ["It starts as a small working mode: the form's start and scoring shots, and a bonus that grows with each shot.",
+             "Drag blocks from the left into its rules: when something happens, do this.",
+             "Its Settings page is the form: start, scoring shots, seconds, sounds, lamps, the panel."],
+    cpp: ["It starts as a copy of the API's template: a bonus on each scoring shot and more time at the fifth.",
+          "Edit it here; Save builds it in the app's Linux and Check says if it built.",
+          "Its Settings page is the form: start, scoring shots, seconds, sounds, lamps, the panel."],
+    form: ["It starts from this game's starter picks.", "Fill in the boxes: every name is picked from the game's own."],
+  }[kind] || [];
+  const footer = !k ? html`<span class="grow"></span><${Button} onClick=${onClose}>Cancel<//>`
+    : html`<${Button} kind="ghost" icon="left" onClick=${() => setKind("")}>Back<//><span class="grow"></span>
+        <${Button} onClick=${onClose}>Cancel<//>
+        <${Button} kind="primary" icon=${k.icon} disabled=${!named} onClick=${make}>Make it<//>`;
+  return html`<${Modal} title=${k ? "New mode: " + k.title : "New mode"} icon=${k ? k.icon : "plus"} xwide=${!k} wide=${!!k}
+      cls="nmw jjpm-new" onClose=${onClose} footer=${footer}>
+    ${!k ? html`<div class="nmw-intro">
+        <div class="nmw-lead">How do you want to build it?</div>
+        <div class="small muted wrap">Each way makes a mode that plays inside ${(j.title || {}).name || "the game"}, with the game's own scoring, timer, sounds, lamps and fonts. A game can mix them.</div>
+      </div>
+      <${KindTiles} s=${j} kinds=${JJP_KINDS} offOf=${offOf} onPick=${setKind} />`
+    : html`<div class="nmw-crumb"><span class=${cx("nmw-tile-ic", "nmw-" + (kind === "cpp" ? "c" : kind))}><${Icon} name=${k.icon} /></span>
+        <span class="nmw-pitch">${k.pitch}</span></div>
+      <div class="nmw-step">
+        <${NameField} id="jjpm-new-name" name=${name} setName=${setName} />
+        <div class="nmw-how">${how.map((t, i) => html`<div class="nmw-how-row" key=${i}><span class="nmw-num">${i + 1}</span><span>${t}</span></div>`)}</div>
+        ${kind === "cpp" ? html`<button type="button" class="modes-doc-link small" ...${tip(j.api || "")} onClick=${() => call("modes.jjp_open_api")}>
+          <${Icon} name="file" /> Open jjp_mode.h, the C++ API</button>` : null}
+      </div>
+      <${EnterKey} onEnter=${make} />`}
+  <//>`;
+}
+
+function ModeList({ j, onNew }) {
   const modes = j.modes || [];
   const full = modes.length >= (j.max || 24);
   return html`<section class="card jjpm-list-card">
     <div class="hd"><span class="h2">Your modes</span><span class="muted small">${modes.length} of ${j.max}</span></div>
     <div class="bd">
       ${modes.map((m) => html`<div class=${cx("jjpm-mode", m.file === j.open && "on")} key=${m.file} onClick=${() => call("modes.jjp_open", m.file)}>
-        <div class="grow"><div>${m.name}</div><div class="small muted mono">${m.starts || m.start || "nothing starts it yet"}</div></div></div>`)}
+        <div class="grow"><div class="row nw" style="gap:6px"><span class="grow ellip">${m.name}</span>${KIND_PILL[m.kind]
+          ? html`<span class=${cx("pill", KIND_PILL[m.kind][2])} title=${KIND_PILL[m.kind][1]}>${KIND_PILL[m.kind][0]}</span>` : null}</div>
+          <div class="small muted mono">${m.starts || m.start || "nothing starts it yet"}</div></div></div>`)}
       ${!modes.length ? html`<div class="small muted">No modes yet.</div>` : null}
       <div class="row wrap" style="gap:6px;margin-top:10px">
-        <${Button} size="sm" kind="primary" icon="plus" disabled=${full} title=${full ? "A game takes 24 custom modes" : "A new mode, from this game's starter picks"} onClick=${() => call("modes.jjp_new", "New Mode")}>New mode<//>
+        <${Button} size="sm" kind="primary" icon="plus" disabled=${full} title=${full ? "A game takes 24 custom modes" : "Make a new mode: from blocks, in C++, or with the form"} onClick=${onNew}>New mode<//>
         <${Button} size="sm" disabled=${!j.open || full} onClick=${() => call("modes.jjp_duplicate")}>Duplicate<//>
         <${Button} size="sm" kind="ghost" disabled=${!j.open} onClick=${() => call("modes.jjp_delete")}>Delete<//>
       </div>
@@ -239,19 +325,81 @@ function ModeList({ j }) {
   </section>`;
 }
 
-function Editor({ j, have }) {
+function FormGroups({ j, have }) {
   const f = j.form || {};
   const meta = j.fields || {};
+  return (j.groups || []).map((g) => html`<div class="jjpm-group" key=${g.title}>
+    <div class="jjpm-gt">${g.title}</div>
+    ${g.keys.map((k) => html`<${Row} key=${k} k=${k} meta=${meta[k]} value=${f[k]} j=${j} have=${have} />`)}
+  </div>`);
+}
+
+// PAD-1384: the pages of a blocks or C++ mode; a form mode is its Settings alone
+const PAGES = {
+  blocks: [["blocks", "Blocks", "Its rules as snapped blocks"], ["settings", "Settings", "The form: start, scoring shots, seconds, sounds, lamps, the panel"],
+           ["cpp", "C++ it makes", "What the blocks make: built and loaded by the game"]],
+  cpp: [["cpp", "C++", "Its rules, in C++ against jjp_mode.h"], ["settings", "Settings", "The form: start, scoring shots, seconds, sounds, lamps, the panel"]],
+};
+
+function Editor({ j, have }) {
+  const f = j.form || {};
+  const pages = PAGES[j.kind] || null;
+  const [stored, setPage] = useStored("pad.modes.jjppage", "");
   if (!j.open) return html`<section class="card jjpm-editor"><${Empty} icon="modes" title="No mode open">Make one with New mode.<//></section>`;
+  const page = pages && pages.some(([k]) => k === stored) ? stored : pages ? pages[0][0] : "settings";
   return html`<section class="card jjpm-editor">
-    <div class="hd"><span class="h2">${f.name || j.open}</span><span class="muted small mono">${j.open}</span></div>
+    <div class="hd"><span class="h2">${f.name || j.open}</span>${KIND_PILL[j.kind]
+      ? html`<span class=${cx("pill", KIND_PILL[j.kind][2])} title=${KIND_PILL[j.kind][1]}>${KIND_PILL[j.kind][0]}</span>` : null}
+      <span class="muted small mono">${j.open}${f.code ? " + " + f.code + (j.kind === "blocks" ? ".blocks.json" : ".cpp") : ""}</span>
+      ${j.kind !== "form" ? html`<span class="sp"></span><${Button} size="xs" kind="ghost" icon="file" title=${j.api || ""}
+        onClick=${() => call("modes.jjp_open_api")}>C++ API<//>` : null}</div>
+    ${pages ? html`<div class="jjpm-pages row"><div class="pages" role="tablist">
+        ${pages.map(([k, l, t]) => html`<button type="button" role="tab" key=${k} aria-selected=${page === k} class=${page === k ? "on" : ""}
+          title=${t} onClick=${() => setPage(k)}>${l}</button>`)}</div></div>` : null}
     <div class="bd">
-      ${(j.groups || []).map((g) => html`<div class="jjpm-group" key=${g.title}>
-        <div class="jjpm-gt">${g.title}</div>
-        ${g.keys.map((k) => html`<${Row} key=${k} k=${k} meta=${meta[k]} value=${f[k]} j=${j} have=${have} />`)}
-      </div>`)}
+      ${page === "settings" ? html`<${FormGroups} j=${j} have=${have} />`
+        : j.kind === "blocks" && page === "blocks" ? html`<${JjpBlocks} j=${j} key=${j.open} />`
+        : j.kind === "blocks" ? html`<${BlocksCpp} j=${j} />`
+        : html`<${CEditor} c=${{ slug: j.open }} key=${j.open} textRpc="modes.jjp_code_text" saveRpc="modes.jjp_code_save"
+            file=${(f.code || "mode") + ".cpp"} />`}
     </div>
   </section>`;
+}
+
+// The Blocks page: the Stern editor's palette, variables and scripts, with this game's names
+function JjpBlocks({ j }) {
+  const b = j.blocks || {};
+  const pg = useModeProgram({ slug: j.open, blocks: b, save_rpc: "modes.jjp_blocks_save" });
+  const ed = useEd(pg, b.choices || {});
+  const scripts = pg.prog.scripts || [];
+  const wsDrop = {
+    onDragOver: (e) => { if (e.dataTransfer && e.dataTransfer.types.includes("text/plain")) e.preventDefault(); },
+  };
+  return html`<div class="stack jjpm-blocks">
+    <${ProgramBar} pg=${pg} saved="Saved · built in the app's Linux, then checked" />
+    <div class="bk-editor">
+      <${Palette} ed=${ed} />
+      <div class="bk-ws" ...${wsDrop} onClick=${() => ed.setTarget(null)}>
+        <${Variables} prog=${pg.prog} ed=${ed} />
+        ${(b.problems || []).map((t) => html`<${Note} kind="warn" key=${t}>${t}<//>`)}
+        <div class="bk-scripts">
+          ${scripts.map((sc, si) => html`<${Script} key=${si} s=${sc} si=${si} n=${scripts.length} ed=${ed} />`)}
+          <div class="bk-newscript small muted">${scripts.length ? "Press a When block on the left for another script." : "Start with a When block from the left: press it."}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function BlocksCpp({ j }) {
+  const b = j.blocks || {};
+  return html`<div class="stack" style="gap:10px">
+    <div class="row wrap">
+      <span class="small muted grow">What the game loads: the tab writes it again from the blocks at every change (${b.code || "its"}.cpp), and builds it.</span>
+      <${Button} size="sm" icon="edit" title="Turn this mode into C++ for good, to carry on where the blocks stop" onClick=${() => call("modes.jjp_blocks_to_cpp")}>Edit as C++ (one way)…<//>
+    </div>
+    <${CodeView} text=${b.cpp || ""} lang="c" />
+  </div>`;
 }
 
 function TitleSettings({ j, have }) {
@@ -267,10 +415,17 @@ function TitleSettings({ j, have }) {
 function CheckCard({ j }) {
   const c = j.check || {};
   const probs = c.problems || [];
+  const code = j.code || {};                     // PAD-1384: the modes' C++, built in the app's Linux
+  const codeLines = code.lines || [];
   return html`<section class=${cx("card jjpm-check", c.ok ? "ok" : "bad")}>
     <div class="hd"><span class="h2">Check</span><span class="muted small">${c.ok ? `${c.n} mode${c.n === 1 ? "" : "s"}, no problems` : `${probs.length} problem${probs.length === 1 ? "" : "s"}`}${c.when ? " - " + c.when : ""}</span>
       <span class="sp"></span><${Button} size="sm" onClick=${() => call("modes.jjp_check")}>Check again<//></div>
-    ${probs.length ? html`<div class="bd"><ul class="jjpm-probs">${probs.map((p) => html`<li class="mono small">${p}</li>`)}</ul></div>` : null}
+    ${probs.length || code.running || (code.msg && !code.ok) ? html`<div class="bd">
+      ${code.running ? html`<div class="small muted">Building the C++ in the app's Linux…</div>` : null}
+      ${!code.running && code.msg && !code.ok ? html`<div class="small warn-ink">${code.msg}</div>
+        ${codeLines.length ? html`<pre class="jjpm-log">${codeLines.join("\n")}</pre>` : null}` : null}
+      ${probs.length ? html`<ul class="jjpm-probs">${probs.map((p) => html`<li class="mono small">${p}</li>`)}</ul>` : null}
+    </div>` : null}
   </section>`;
 }
 
@@ -364,6 +519,7 @@ function StickCard({ j }) {
 
 export function JjpModes({ s }) {
   const j = s.jjp || {};
+  const [newMode, setNewMode] = useState(false);
   const titles = j.titles || [];
   const have = new Set(((j.sounds || {}).have) || []);
   const opts = titles.map((t) => ({ value: t.label, label: t.name + (t.can_run ? "" : " - can't run modes"),
@@ -378,7 +534,7 @@ export function JjpModes({ s }) {
     ${j.can_run ? html`
       <${SoundsRow} j=${j} />
       <div class="jjpm-body">
-        <${ModeList} j=${j} />
+        <${ModeList} j=${j} onNew=${() => setNewMode(true)} />
         <div class="jjpm-main">
           <${Editor} j=${j} have=${have} />
           <${TitleSettings} j=${j} have=${have} />
@@ -387,5 +543,6 @@ export function JjpModes({ s }) {
           <${BuildCard} j=${j} />
         </div>
       </div>` : null}
+    ${newMode ? html`<${NewJjpMode} j=${j} onClose=${() => setNewMode(false)} />` : null}
   </div>`;
 }

@@ -727,7 +727,10 @@ html.bp-1100 .modes-coop-ch-row .modes-coop-ch-does { display: none; }
 .modes-hand-grid .modes-hand-lv { text-align: center; position: sticky; top: 0; background: var(--panel); }
 .modes-hand-custom { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
 
-/* PAD-1350: the tab on a Jersey Jack game (modes_jjp.js) */
+/* PAD-1350: the tab on a Jersey Jack game (modes_jjp.js). PAD-1384: it shares .modes-page,
+   whose overflow is hidden because the Stern page scrolls inside its own panels; this page is
+   one long column of cards, so the page itself scrolls */
+.modes-page.jjpm-page { overflow: auto; }
 .jjpm-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
 .jjpm-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .jjpm-mode { padding: 7px 9px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }

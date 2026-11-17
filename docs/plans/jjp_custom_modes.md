@@ -100,6 +100,41 @@ What was learned on the way, all on GnR 3.03:
   stayed a zombie holding its memory (20 held 16 GB, WSL in full swap).
   `killgame.sh` now says so; only `wsl --shutdown` frees it.
 
+## In the app (PAD-1350)
+
+Status 2026-11-16: **a mode made only in the app runs on the Wonka emulator
+from an ISO the app built.** On a JJP game the Modes tab is the SDK's editor
+(`webui/modes_jjp.py`, `plugins/jjp/custom_modes.py`, `tabs/modes_jjp.js`;
+how to use it: `tools/jjp_emu/MODES.md` "In the app"). It lists the nine titles
+whose port reports can run modes; Dialed In 02.02, Hobbit 04.02 and Toy Story
+02.04 got their reports and starter folders here (same Mode vtable slots as
+Wonka, starters pass `check --port`, the runtime loads with every import bound
+in a chroot of each image's root), and Wizard of Oz 08.02 and Avatar 01.03 got
+reports saying they cannot.
+
+The proof, 2026-11-16, Wonka 03.03 with Wonka's own key:
+
+* In the real page (Edge, clicked): the starter deleted, **New mode**, then
+  "Golden Ticket" set field by field through the pickers - start
+  `switch_target_gobstopper` x2, shots gobstopper target / left loop / spinner,
+  750,000 a shot, 25 s, complete 4 (+3,000,000), four of the game's Golden
+  Ticket sounds, `lp_gobstopper` + `ls_golden_tickets` in ffd700 at 2 a second,
+  gold title, panel at the bottom. The check: no problems.
+* The page's **Build**: `Wonka-v03.03.modes.iso`, 3.2 GB in 268 s, the
+  runtime compiled during the build against the ISO's own glibc.
+* That ISO on the rig with nothing preloaded by the rig: its own `rungame.sh`
+  hook loaded the runtime ("PAD custom modes: 1 mode(s) loaded"); the first
+  gobstopper hit counted "1 of 2", the second STARTED it for 25 s; the panel
+  drew GOLDEN TICKET in gold at the bottom with the total and the timer; four
+  shots COMPLETED it, mode total 6,000,000 (4 x 750,000 + 3,000,000).
+
+Fixed on the way: the build's scratch went beside the output on a Windows
+drive (a 16 GB sparse root through WSL's file bridge) - it is in
+`/var/tmp/pad_jjpmodes_work` now; `jail.sh` reused a mounted jail whose lower
+was another image's root (two tickets' runs crossed and the rig booted plain
+Wonka with no error) - it rebuilds it when idle and refuses while a game runs;
+the checker refused lamp groups in `lamps`, which the runtime takes.
+
 ## Files (PAD-1335 proof, superseded by the SDK above)
 
 - `tools/jjp_emu/jjpmodelist.py`: the live mode roster.

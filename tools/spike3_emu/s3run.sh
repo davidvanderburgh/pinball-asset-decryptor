@@ -687,6 +687,17 @@ elif [ -x "$PQ" ]; then
     cp "$PQ" "$R/.pad-qemu" && chmod +x "$R/.pad-qemu" && QEMU_INTERP="/.pad-qemu"
     echo "[s3run] game runs under the I2C-patched qemu ($PQ)"
 fi
+# PAD-1371: PAD_S3_GDB=PORT - the game's own qemu (only it: never the system qemu its children run under) waits
+# for gdb on PORT inside the run's private network: `nsenter -t <qemu pid> -n gdb-multiarch -ex 'target remote
+# 127.0.0.1:PORT'`. Needs the patched qemu: set PAD_S3_QEMU (~/.pad-s3/qemu-aarch64) as well.
+if [ -n "${PAD_S3_GDB:-}" ]; then
+    if [ -n "$QEMU_INTERP" ]; then
+        QEMU_INTERP="$QEMU_INTERP -g $PAD_S3_GDB"
+        echo "[s3run] the game waits for gdb on port $PAD_S3_GDB (in the run's network)"
+    else
+        echo "[s3run] PAD_S3_GDB is ignored: the game runs under binfmt's qemu, not the patched one"
+    fi
+fi
 echo "[s3run] exec $PROG $* (${SECS}s cap)"
 [ "$STRACE" = 1 ] && export QEMU_STRACE=1
 export HOME=/root PATH=/usr/sbin:/usr/bin:/sbin:/bin

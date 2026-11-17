@@ -65,23 +65,30 @@ def test_show_pair_on_the_titles_whose_pages_have_it():
         assert AI.port_table(MP.profiles()[TABLES[game][0]])["show"]
 
 
-def test_spike3_items_are_gated_until_a_route_is_proven():
+def test_spike3_items_go_on_where_the_bank_scene_can_be_shown():
+    # PAD-1371: Star Wars ELG 1.10's items are on the glass (its page shows the bank's scene, as the game's own clip
+    # pages do); the titles whose ports carry no clip route yet are refused for that, not for the glass
     prof = MP.profiles()["star_wars_elg_1_10_spike3"]
     assert prof.arch == "a64"
-    assert AI.title_refusal(prof) == AI.NO_GLASS % prof.label
-    # the 24-byte table is not what refuses Pokemon: it has no clip route
-    pk = MP.profiles()["pokemon_le_0_82_spike3"]
-    assert AI.title_refusal(pk) == AI.NO_CLIPS % pk.label
+    assert AI.title_refusal(prof) == ""
+    for key in ("walking_dead_remastered_le_0_92_spike3", "star_wars_2025_le_0_96_spike3",
+                "star_wars_2025_pro_0_84_spike3", "pokemon_le_0_82_spike3"):
+        other = MP.profiles()[key]
+        assert AI.title_refusal(other) == AI.NO_CLIPS % other.label, key
 
 
-def test_spike3_modes_leaves_them_out_quietly(tmp_path, monkeypatch):
+def test_spike3_modes_carries_them_on_elg(tmp_path, monkeypatch):
     from pinball_decryptor.plugins.stern import spike3_modes as S3M, clip_variants as CV
     from pinball_decryptor.plugins.stern import mode_write as MW
     png = tmp_path / "p.png"
     png.write_bytes(b"x")
     AI.save(str(tmp_path), AI.clean({"items": [{"kind": "photo", "file": str(png), "seconds": 5, "entry": 10}]}))
-    monkeypatch.setattr(CV, "project_title", lambda p, probe=False: MP.profiles()["star_wars_elg_1_10_spike3"])
     monkeypatch.setattr(MW, "host_refusal", lambda: "")
+    elg = MP.profiles()["star_wars_elg_1_10_spike3"]
+    monkeypatch.setattr(CV, "project_title", lambda p, probe=False: elg)
+    assert S3M.attract_wanted(str(tmp_path), real_card=False) is elg
+    wdr = MP.profiles()["walking_dead_remastered_le_0_92_spike3"]
+    monkeypatch.setattr(CV, "project_title", lambda p, probe=False: wdr)
     assert S3M.attract_wanted(str(tmp_path), real_card=False) is None
     assert "attract items" not in S3M.FAMILY_LEFT_OUT          # the engine's own sentence says why
 
@@ -91,8 +98,26 @@ def test_runtime_reads_the_table_pointer_sized():
     body = src[src.index("static void attract_arm(void)"):src.index("/* ---- round 2: the game's own start menu")]
     assert "pm_addr *slot, page;" in body and "*(volatile pm_addr *)slot" in body
     assert "size != 24" in body and "at + sizeof(pm_addr) > size" in body
-    assert re.search(r"#if PM_A64\s+/\* PAD-1328", body)
-    assert "typedef pm_reg (*ait_page_fn)(pm_reg, pm_reg, pm_reg, pm_reg);" in src
+    # PAD-1371: off on Spike 3 only without a way to show the bank's scene from a page
+    assert re.search(r"#if PM_A64\s+/\* PAD-1328 / PAD-1371", body)
+    assert "if (!ait_video && !ait_show) {" in body
+    assert "cannot show an item yet" not in src
+
+
+def test_runtime_keeps_game_addresses_whole():
+    # PAD-1371: the scene show's address in a 32-bit `unsigned` sent a Spike 3 item's page to 0x00000000eac5baa0
+    # (Star Wars ELG's 0x7bb2eac5baa0 cut short); no site or global a Spike 3 port carries is held in an `unsigned`
+    import glob
+    src = open(RUNTIME, encoding="utf-8").read()
+    assert "static pm_addr ait_show_fn;" in src
+    names = set()
+    for path in glob.glob(os.path.join(os.path.dirname(RUNTIME), "ports", "spike3", "*.port")):
+        for line in open(path, encoding="utf-8"):
+            f = line.split()
+            if len(f) >= 2 and f[0] in ("site", "data"):
+                names.add(f[1])
+    held = re.findall(r"\bunsigned\s+(?:\w+\s*=\s*[^;]*?,\s*)?\w+\s*=\s*(?:fn|data)\(\"(\w+)\"\)\s*[,;]", src)
+    assert held and not sorted(set(held) & names)
 
 
 @pytest.mark.parametrize("game", sorted(TABLES) + sorted(NO_TABLE))

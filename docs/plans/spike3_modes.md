@@ -1273,3 +1273,9 @@ Next: what the game reads in those answers (the `ff` status and the `f2` reads; 
 card) so the rig's strip boards take lamp frames; then the proof on padled's node 2 / 7 hi plane, the song timing
 (`value sound_voice_played`: the show did not lock to the voice at 12, it ran on its own clock), the app's Spike 3
 side (spike3_modes carrying cabshow.cfg and the Expression lights tab's layout from the port), and the family line.
+
+**PAD-1370: the strips were never the node bus's.** The game sends nodes 2 / 7 (and Fallout's topper, 14) only their
+bring-up there; every lamp frame for them goes to the netbridge's own WS2812 outputs as host cmd `2f` ([channel] [n]
+[the node frame's cmd + body]), channel 0 = node 7, 1 = node 14, 2 = node 2 (docs/plans/spike3_emulation.md, "The
+cabinet strips are the netbridge's"). s3bridge now feeds them to padled, so the rig's strips light. Left for the
+shows: the song timing, the app's Spike 3 side and the family line above.

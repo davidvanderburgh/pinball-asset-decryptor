@@ -51,7 +51,6 @@ def test_spike2_proofs_still_do_not_carry_over():
     """PAD-1277's rule stands: a table holding the Spike 2 build does not offer the Spike 3 one."""
     mp, pr = _profile()
     assert "star_wars_elg-1.10/spike3" not in mp.SPARE_IO_PROVEN
-    assert "star_wars_elg-1.10/spike3" not in mp.CHALLENGE_MENU_PROVEN
     assert pr.spare == ()
 
 

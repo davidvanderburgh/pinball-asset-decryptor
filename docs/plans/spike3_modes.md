@@ -297,6 +297,47 @@ the 32-bit stock scanner; a Spike 3 record counts in the whole game or in a mode
 a record's champion on the list-page and scene titles' attract screens (a different design: a row or a scene of our
 own).
 
+## A mode's own challenge on the start menu, on Spike 3 (PAD-1330)
+
+PAD-619's "a challenge of its own" (a mode listed on CHOOSE YOUR MODE OF PLAY, picked, plays a one-ball challenge game) on
+Star Wars ELG 1.10's Spike 3 card. ELG is a plain-challenge title (its own challenges come only from Insider Connected),
+so `challenge_menu_slot -1`: nothing of the game's to stop, the ball's start hands the game to the mode.
+
+What its Spike 3 program does, read off its own code (`star_wars_elg.game`, objdump):
+- **the menu's kinds** at the pick 0x159c38: 1 sets flag 17 (COMPETITION), **2 clears 17, sets 18, clears 19-20** (the
+  plain challenge game: `value challenge_menu_kind 2`), 3 sets 17 and 18, 4 sets 19; past 4 as Standard. CHALLENGE is
+  message 1921 as on Spike 2; FG_PLAYER_CHALLENGE_MODE_ACTIVE is 18 (the FG_ names), the plunger flags 12 / 13.
+- **the balls per game**: Spike 2's getter (0x345428: setting 80, the player's game mode's own at +62 of its record,
+  Insider Connected's through 0x338fa0) is built into each of its callers. The balls of a player 0x4177c0 and of the
+  current player 0x417880 are whole functions (`site challenge_balls` / `challenge_balls_2`, vetoed to 1 as on Spike
+  2); the ball-number set 0x417950 (two ways), the last-ball test 0x417a40 and the ball's end 0x417b50 read it into a
+  register and compare - `site challenge_balls_at_<k>` at the compare (or where both ways join: 0x417c4c, w20) with
+  `value challenge_balls_at_<k>_reg` (hook_full's numbering), which the runtime sets to 1 in a mode's challenge game.
+- **the extra-ball test** 0x304ba0 (the count byte, decremented) - Spike 2's shape; **the end of the ball** 0x322180
+  (end(w0, w1): status bits 0x202, devices off, PAD-630's); **the launch button's handler** 0x31b9b0 (Spike 2's
+  0x103b88 with its device read built in; 0x31b400 nearby fires only on flag 13 and clears 12 / 13 otherwise - not it).
+
+Runtime: `challenge_menu_built` / `_picked` share Prolonged Competition's 64-bit menu code (menu_count_of, the name a
+pm_addr, the kind from `challenge_menu_pick_reg`); `balls_at` / `balls_at_arm` (four hook_full loggers); the
+`challenge_plain_<k>` wrappers pass whole registers. A second hook on the same 64-bit site stacks (moved_word re-aims
+the first one's `b`), so the menu and pick sites carry both the challenges' and Prolonged Competition's hooks.
+
+Proof (2026-11-16, Spike 3 rig slot 230, hidden and MUTED, the set `spike3_modes.plan` built from the library card with
+one mode, PAD CHALLENGE, `challenge new`; C:/tmp/PAD-1330 plan_chg.py, job.sh, play*.sh): `challenge menu: 3 entries
+(1 of the modes' own) - kinds 0 6 256`, the right flipper to it (`PAD CHALLENGE on the menu - picked`), Start: `challenge
+16 (PAD CHALLENGE) picked on the start menu: its mode starts as the ball starts`, `challenge ball: launched for the
+player (its start clip over, 2014 ms after its mode began)` (the bridge: auto plunger), at its clock's end `the ball
+ends now ... (0x...2180)` from the game's bus call; the dead ball drained: `an extra ball earned in it is not played`,
+`one ball (the balls-per-game getter says 1)`, `PAD CHALLENGE's own high score ... for the game's end`, GAME OVER (no
+ball served), the game's own "Player 1 - Enter Initials / PAD CHALLENGE" screen, `new high score 10011010` and the
+attract mode's champion page showing it. Control: the same game with the port's balls sites taken out served BALL 2
+after the drain. Rig notes: hitting DEATH STAR TARGET in a proof starts the game's own Death Star multiball (three balls:
+the challenge ball then needs three drains); a drain while the mode runs is served back by the game until the mode's end
+ends the ball (four drains in 28 s on a 40 s mode); the first-boot setup screen comes and goes - open the menu and
+retry; finish the initials with END (left flipper from A) or the next Start presses add players.
+Tests: tests/test_pad1330_spike3_challenges.py (the menu and the balls compare lifted and run at Spike 3's word size;
+the real program with PAD_S3_PROGRAMS).
+
 ## The Modes tab and Try it
 
 - The tab's card read (`title_reader`) opens a Spike 3 card's games partition with the user's
@@ -771,8 +812,7 @@ above through s3proof.sh:
 
 **Not offered on the Spike 3 card yet, and why:** spare switch inputs and driver outputs (PAD-826: the switch service
 block, the node-bus fire wrapper and coil_off read at 32-bit offsets; `sw_struct`, `coil_frame`, `coil_off` NOT PLACED)
-and the game's challenges (PAD-619/663: the challenge menu, its pick and the score pages are NOT PLACED - mid-function
-sites with no 64-bit counterpart yet); see the ticket's report for where they go next. The game's "time is up" line
+(the game's challenges were here too, until PAD-1330, below); see the ticket's report for where they go next. The game's "time is up" line
 (TIME_UP_NONE) is not claimed for the Spike 3 build: the option is greyed there anyway (its port has no time-up call),
 and the Spike 3 sound bank is a differently encoded image.bin (the same size, 99.6% of its bytes differ), so PAD-479's
 transcription does not carry over by itself. Music modes, editions, menu settings: Spike 2's delivery only (above);

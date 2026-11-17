@@ -260,10 +260,10 @@ def test_the_runtime_reads_a_compare_chain_pick_through_its_entry_and_knows_ours
     src = (SDK / "pad_mode_runtime.c").read_text(encoding="utf-8")
     own = src[src.index("static int own_entry_at("):]
     own = own[:own.index("\n}\n")]
-    assert "name == (unsigned)(unsigned long)own_challenge[k].name" in src
+    assert "name == (pm_addr)(unsigned long)own_challenge[k].name" in src            # PAD-1330: a whole pointer
     pick = src[src.index("static void challenge_menu_picked(pm_reg *r)"):]
     pick = pick[:pick.index("\n}\n")]
-    assert 'pm_port_value("challenge_menu_pick_back", 0)' in pick and "ent[0] = (unsigned)pm_port_value(" in pick
+    assert 'pm_port_value("challenge_menu_pick_back", 0)' in pick and "*(unsigned *)(e8 + MENU_KIND_AT) = (unsigned)pm_port_value(" in pick
     start = src[src.index("static void challenge_ball_start(void)"):]
     assert 'pm_port_value("challenge_menu_sets_on", 0)) on = 1;' in start[:start.index("\n}\n")]
 
@@ -278,7 +278,10 @@ def test_elvira_keeps_its_menu_count_in_a_register_and_the_frame_hook_saves_ever
     assert "0xe92d5fffu" in full and "0xe8bd5fffu" in full                  # push / pop {r0-r12, lr}
     built = src[src.index("static void challenge_menu_built(pm_reg *r)"):]
     built = built[:built.index("\n}\n")]
-    assert "r + (creg >= 0 ? 14 : 6)" in built and "&r[creg]" in built
+    assert "menu_count_of(r, &fsp)" in built                                 # PAD-1330: shared with Prolonged Competition
+    count = src[src.index("static unsigned *menu_count_of(pm_reg *r, unsigned char **fsp)\n{"):]
+    count = count[:count.index("\n}\n")]
+    assert "creg >= 0 ? FULL_SP(r) : HOOK_SP(r)" in count and "&r[creg]" in count
 
 
 def test_a_mode_picked_as_the_challenge_does_not_give_way_to_the_games_modes():
@@ -315,7 +318,7 @@ def test_tmnt_menu_has_its_fields_moved_and_the_runtime_follows_them(key):
     built = src[src.index("static void challenge_menu_built(pm_reg *r)"):]
     built = built[:built.index("\n}\n")]
     assert "list[es * i + k2] = list[es * tmpl + k2]" in built              # ours start as a copy of the game's entry
-    assert "*(unsigned *)(list + es * i + nat) = (unsigned)(unsigned long)own_challenge[k].name" in built
+    assert "*(pm_addr *)(list + es * i + nat) = (pm_addr)(unsigned long)own_challenge[k].name" in built
 
 
 @pytest.mark.parametrize("key", ("foo_fighters_le-1.04", "foo_fighters_pro-1.04"))
